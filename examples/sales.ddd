@@ -1,0 +1,85 @@
+// Sales bounded context — exercises every grammar construct.
+context Sales {
+
+  enum OrderStatus { Draft, Confirmed, Shipped, Cancelled }
+
+  valueobject Money {
+    amount: decimal
+    currency: string
+    invariant amount >= 0
+    invariant currency.length == 3
+  }
+
+  event OrderConfirmed {
+    order: Id<Order>,
+    at: datetime
+  }
+
+  event LineAdded {
+    order: Id<Order>,
+    productId: Id<Product>,
+    quantity: int
+  }
+
+  aggregate Customer {
+    name: string
+    email: string
+    invariant email.length > 0
+  }
+
+  aggregate Product {
+    sku: string
+    price: Money
+  }
+
+  aggregate Order {
+    customerId: Id<Customer>
+    status: OrderStatus
+    placedAt: datetime
+    contains lines: OrderLine[]
+
+    derived total: Money =
+      Money(lines.sum(l => l.subtotal.amount), "USD")
+
+    invariant lines.count > 0 when status == Confirmed
+
+    function isMutable(): bool = status == Draft
+
+    private operation requireMutable() {
+      precondition isMutable()
+    }
+
+    operation addLine(productId: Id<Product>, qty: int, price: Money) {
+      precondition isMutable()
+      precondition qty > 0
+      lines += new OrderLine {
+        productId: productId, quantity: qty, unitPrice: price
+      }
+      emit LineAdded { order: id, productId: productId, quantity: qty }
+    }
+
+    operation confirm() {
+      precondition isMutable()
+      precondition lines.count > 0
+      status := Confirmed
+      emit OrderConfirmed { order: id, at: now() }
+    }
+
+    entity OrderLine {
+      productId: Id<Product>
+      quantity: int
+      unitPrice: Money
+
+      function subtotalAmount(): decimal = unitPrice.amount * quantity
+
+      derived subtotal: Money =
+        Money(subtotalAmount(), unitPrice.currency)
+
+      invariant quantity > 0
+    }
+  }
+
+  repository Orders for Order {
+    find byCustomer(customerId: Id<Customer>): Order[]
+  }
+}

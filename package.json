@@ -1,0 +1,39 @@
+{
+  "name": "loc-ddd-dsl",
+  "version": "0.1.0",
+  "description": "Langium-based DDD DSL with TypeScript (Hono + Drizzle) and .NET (ASP.NET Core + EF Core) code generators",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "ddd": "./bin/cli.js"
+  },
+  "main": "./out/language/main.js",
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "watch": "tsc -b tsconfig.json --watch",
+    "langium:generate": "langium generate",
+    "langium:watch": "langium generate --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepare": "npm run langium:generate && npm run build",
+    "cli": "node bin/cli.js"
+  },
+  "dependencies": {
+    "chalk": "~5.3.0",
+    "chevrotain": "~11.0.3",
+    "commander": "~12.1.0",
+    "handlebars": "~4.7.8",
+    "langium": "~3.3.0",
+    "vscode-languageserver": "~9.0.1",
+    "vscode-languageserver-textdocument": "~1.0.12",
+    "vscode-uri": "~3.0.8"
+  },
+  "devDependencies": {
+    "@types/node": "~22.10.0",
+    "langium-cli": "~3.3.0",
+    "typescript": "~5.7.0",
+    "vitest": "~2.1.0"
+  }
+}

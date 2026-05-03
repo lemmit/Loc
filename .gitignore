@@ -1,0 +1,10 @@
+node_modules/
+out/
+*.log
+*.tsbuildinfo
+.DS_Store
+.vscode/
+.idea/
+syntaxes/
+src/language/generated/
+test-output/

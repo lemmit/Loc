@@ -1,0 +1,14 @@
+{
+  "projectName": "Ddd",
+  "languages": [
+    {
+      "id": "ddd",
+      "grammar": "src/language/ddd.langium",
+      "fileExtensions": [".ddd"],
+      "textMate": {
+        "out": "syntaxes/ddd.tmLanguage.json"
+      }
+    }
+  ],
+  "out": "src/language/generated"
+}
