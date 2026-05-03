@@ -30,6 +30,8 @@ import {
   isEntityPart,
   isEnumDecl,
   isEventDecl,
+  isExpectStmt,
+  isExpectThrowsStmt,
   isFunctionDecl,
   isIdRef,
   isIdType,
@@ -51,6 +53,7 @@ import {
   isRepository,
   isStringLit,
   isTernaryExpr,
+  isTestBlock,
   isThisRef,
   isUnaryExpr,
   isValueObject,
@@ -77,6 +80,8 @@ import type {
   PathIR,
   RepositoryIR,
   StmtIR,
+  TestIR,
+  TestStmtIR,
   TypeIR,
   ValueObjectIR,
 } from "./loom-ir.js";
@@ -191,6 +196,10 @@ function lowerAggregate(agg: Aggregate, env: Env): AggregateIR {
   const operations = (agg.members.filter(isOperation) as Operation[]).map((op) =>
     lowerOperation(op, inner),
   );
+  const tests: TestIR[] = [];
+  for (const m of agg.members) {
+    if (isTestBlock(m)) tests.push(lowerTest(m, inner));
+  }
   return {
     name: agg.name,
     idValueType,
@@ -201,7 +210,36 @@ function lowerAggregate(agg: Aggregate, env: Env): AggregateIR {
     functions,
     operations,
     parts,
+    tests,
   };
+}
+
+function lowerTest(
+  block: import("../language/generated/ast.js").TestBlock,
+  env: Env,
+): TestIR {
+  let inner = env;
+  const statements: TestStmtIR[] = [];
+  for (const s of block.body) {
+    if (isExpectStmt(s)) {
+      statements.push({
+        kind: "expect",
+        expr: lowerExpr(s.expr, inner),
+        source: cstText(s.expr),
+      });
+    } else if (isExpectThrowsStmt(s)) {
+      statements.push({
+        kind: "expect-throws",
+        expr: lowerExpr(s.expr, inner),
+        source: cstText(s.expr),
+      });
+    } else {
+      const r = lowerStatement(s as never, inner);
+      statements.push(r.stmt);
+      inner = r.envAfter;
+    }
+  }
+  return { name: block.name, statements };
 }
 
 function lowerEntityPart(
@@ -227,11 +265,22 @@ function lowerRepository(repo: Repository): RepositoryIR {
   return {
     name: repo.name,
     aggregateName: repo.aggregate?.ref?.name ?? "Unknown",
-    finds: repo.finds.map((f) => ({
-      name: f.name,
-      params: f.params.map((p) => ({ name: p.name, type: lowerType(p.type) })),
-      returnType: lowerType(f.returnType),
-    })),
+    finds: repo.finds.map((f) => {
+      const aggRoot = repo.aggregate?.ref;
+      // Build env: each find param + the aggregate's properties as
+      // `this`-rooted refs so the filter can reference them by name.
+      let env = newEnv(repo.$container as BoundedContext);
+      if (aggRoot) env = inAggregate(env, aggRoot);
+      for (const p of f.params) {
+        env = withLocal(env, p.name, "param", lowerType(p.type));
+      }
+      return {
+        name: f.name,
+        params: f.params.map((p) => ({ name: p.name, type: lowerType(p.type) })),
+        returnType: lowerType(f.returnType),
+        filter: f.filter ? lowerExpr(f.filter, env) : undefined,
+      };
+    }),
   };
 }
 
@@ -861,8 +910,8 @@ function ancestorAggregate(node: AstNode): Aggregate | undefined {
   return undefined;
 }
 
-function cstText(expr: Expression | undefined): string {
-  if (!expr) return "";
-  const cst = (expr as { $cstNode?: { text?: string } }).$cstNode;
+function cstText(node: AstNode | undefined): string {
+  if (!node) return "";
+  const cst = (node as { $cstNode?: { text?: string } }).$cstNode;
   return cst?.text ?? "<expr>";
 }

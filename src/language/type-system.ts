@@ -270,8 +270,22 @@ function arithmeticResult(a: DddType, b: DddType): DddType {
 function typeOfMemberAccess(expr: import("./generated/ast.js").MemberAccess, env: Env): DddType {
   const recvType = typeOf(expr.receiver, env);
   const memberName = expr.member;
-  // Collection ops on arrays
+  // Collection ops on arrays — type-check lambda args with the element
+  // type bound to the lambda parameter, so `transactions.all(t => …)`
+  // sees `t: AccountTransaction`.
   if (recvType.kind === "array") {
+    if (expr.call) {
+      for (const arg of expr.args) {
+        if (isLambda(arg)) {
+          const lambdaEnv: Env = makeEnv(
+            env,
+            new Map([[arg.param, { type: recvType.element, origin: arg }]]),
+          );
+          const _bodyType = typeOf(arg.body, lambdaEnv);
+          void _bodyType;
+        }
+      }
+    }
     return collectionOpType(recvType, memberName, expr, env);
   }
   // Member access on entities/value objects/aggregates
@@ -330,15 +344,25 @@ const COLLECTION_OPS = new Set([
 function collectionOpType(
   recv: { kind: "array"; element: DddType },
   name: string,
-  _expr: import("./generated/ast.js").MemberAccess,
-  _env: Env,
+  expr: import("./generated/ast.js").MemberAccess,
+  env: Env,
 ): DddType {
   switch (name) {
     case "count":
       return T.prim("int");
-    case "sum":
-      // sum returns the lambda's body type; if no lambda, unknown
-      return T.prim("decimal");
+    case "sum": {
+      // sum returns the lambda's body type when one is given;
+      // otherwise the element type itself.
+      const lambdaArg = expr.args[0];
+      if (lambdaArg && isLambda(lambdaArg)) {
+        const lambdaEnv = makeEnv(
+          env,
+          new Map([[lambdaArg.param, { type: recv.element, origin: lambdaArg }]]),
+        );
+        return typeOf(lambdaArg.body, lambdaEnv);
+      }
+      return recv.element;
+    }
     case "all":
     case "any":
       return T.prim("bool");

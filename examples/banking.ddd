@@ -1,0 +1,96 @@
+// Banking bounded context — exercises optional fields, multiple
+// aggregates with cross-references, and a richer `where` filter.
+context Banking {
+
+  enum AccountStatus { Open, Frozen, Closed }
+
+  valueobject Money {
+    amount: decimal
+    currency: string
+    invariant amount >= 0
+    invariant currency.length == 3
+  }
+
+  event AccountOpened {
+    account: Id<Account>,
+    holder: Id<Customer>,
+    at: datetime
+  }
+
+  event AccountFrozen { account: Id<Account>, reason: string, at: datetime }
+
+  event MoneyDeposited { account: Id<Account>, amount: Money, at: datetime }
+  event MoneyWithdrawn { account: Id<Account>, amount: Money, at: datetime }
+
+  aggregate Customer {
+    name: string
+    email: string
+    invariant name.length > 0
+    invariant email.length > 0
+  }
+
+  aggregate Account {
+    holder: Id<Customer>
+    status: AccountStatus
+    balance: Money
+    openedAt: datetime
+    closedAt: datetime?
+    contains transactions: AccountTransaction[]
+
+    function isMutable(): bool = status == Open
+
+    derived transactionCount: int = transactions.count
+
+    invariant balance.amount >= 0
+    invariant transactions.all(t => t.amount.amount > 0)
+
+    operation deposit(amount: Money) {
+      precondition isMutable()
+      precondition amount.amount > 0
+      balance := Money(balance.amount + amount.amount, balance.currency)
+      transactions += new AccountTransaction {
+        amount: amount,
+        kind: "Deposit",
+        at: now()
+      }
+      emit MoneyDeposited { account: id, amount: amount, at: now() }
+    }
+
+    operation withdraw(amount: Money) {
+      precondition isMutable()
+      precondition amount.amount > 0
+      precondition balance.amount >= amount.amount
+      balance := Money(balance.amount - amount.amount, balance.currency)
+      transactions += new AccountTransaction {
+        amount: amount,
+        kind: "Withdrawal",
+        at: now()
+      }
+      emit MoneyWithdrawn { account: id, amount: amount, at: now() }
+    }
+
+    operation freeze(reason: string) {
+      precondition status == Open
+      status := Frozen
+      emit AccountFrozen { account: id, reason: reason, at: now() }
+    }
+
+    entity AccountTransaction {
+      amount: Money
+      kind: string
+      at: datetime
+      invariant amount.amount > 0
+      invariant kind.length > 0
+    }
+  }
+
+  repository Customers for Customer {
+    find byEmail(email: string): Customer? where this.email == email
+  }
+
+  repository Accounts for Account {
+    find byHolder(holder: Id<Customer>): Account[] where this.holder == holder
+    find openByHolder(holder: Id<Customer>): Account[]
+      where this.holder == holder && this.status == Open
+  }
+}

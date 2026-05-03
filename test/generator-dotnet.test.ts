@@ -25,18 +25,18 @@ describe(".NET generator", () => {
     const files = generateDotnet(model);
     const keys = [...files.keys()];
     expect(keys).toContain("Domain/Ids/OrderId.cs");
-    expect(keys).toContain("Domain/Order/Order.cs");
-    expect(keys).toContain("Domain/Order/OrderLine.cs");
-    expect(keys).toContain("Domain/Order/IOrderRepository.cs");
+    expect(keys).toContain("Domain/Orders/Order.cs");
+    expect(keys).toContain("Domain/Orders/OrderLine.cs");
+    expect(keys).toContain("Domain/Orders/IOrderRepository.cs");
     expect(keys).toContain("Domain/ValueObjects/Money.cs");
     expect(keys).toContain("Domain/Enums/OrderStatus.cs");
     expect(keys).toContain("Domain/Events/OrderConfirmed.cs");
     expect(keys).toContain("Infrastructure/Persistence/AppDbContext.cs");
     expect(keys).toContain("Infrastructure/Persistence/Configurations/OrderConfiguration.cs");
     expect(keys).toContain("Infrastructure/Repositories/OrderRepository.cs");
-    expect(keys).toContain("Application/Order/Commands/ConfirmCommand.cs");
-    expect(keys).toContain("Application/Order/Commands/ConfirmHandler.cs");
-    expect(keys).toContain("Application/Order/Queries/GetOrderByIdQuery.cs");
+    expect(keys).toContain("Application/Orders/Commands/ConfirmCommand.cs");
+    expect(keys).toContain("Application/Orders/Commands/ConfirmHandler.cs");
+    expect(keys).toContain("Application/Orders/Queries/GetOrderByIdQuery.cs");
     expect(keys).toContain("Api/OrdersController.cs");
     expect(keys).toContain("Program.cs");
     expect(keys).toContain("Sales.csproj");
@@ -45,7 +45,7 @@ describe(".NET generator", () => {
   it("renders Order with idiomatic C#", async () => {
     const model = await buildModel("examples/sales.ddd");
     const files = generateDotnet(model);
-    const order = files.get("Domain/Order/Order.cs")!;
+    const order = files.get("Domain/Orders/Order.cs")!;
     expect(order).toMatch(/public sealed class Order/);
     expect(order).toMatch(/public OrderId Id { get; private set; }/);
     expect(order).toMatch(/public void Confirm\(\)/);
@@ -54,14 +54,31 @@ describe(".NET generator", () => {
     expect(order).toMatch(/_domainEvents\.Add\(new OrderConfirmed/);
   });
 
+  it("emits xUnit test class when `test` blocks are declared", async () => {
+    const model = await buildModel("examples/sales.ddd");
+    const files = generateDotnet(model);
+    const tests = files.get("Tests/Orders/OrderTests.cs")!;
+    expect(tests).toMatch(/using Xunit;/);
+    expect(tests).toMatch(/\[Fact\(DisplayName = "money literal builds"\)\]/);
+    expect(tests).toMatch(/Assert\.Throws<DomainException>/);
+  });
+
+  it("translates `where` filter to a LINQ predicate", async () => {
+    const model = await buildModel("examples/sales.ddd");
+    const files = generateDotnet(model);
+    const repo = files.get("Infrastructure/Repositories/OrderRepository.cs")!;
+    expect(repo).toMatch(/ActiveForCustomer/);
+    expect(repo).toMatch(/x\.CustomerId == forCustomer && x\.Status == OrderStatus\.Draft/);
+  });
+
   it("emits CQRS command for each public operation", async () => {
     const model = await buildModel("examples/sales.ddd");
     const files = generateDotnet(model);
-    const cmd = files.get("Application/Order/Commands/AddLineCommand.cs")!;
+    const cmd = files.get("Application/Orders/Commands/AddLineCommand.cs")!;
     expect(cmd).toMatch(/public sealed record AddLineCommand/);
-    expect(cmd).toMatch(/IRequest/);
-    const handler = files.get("Application/Order/Commands/AddLineHandler.cs")!;
-    expect(handler).toMatch(/IRequestHandler<AddLineCommand>/);
+    expect(cmd).toMatch(/ICommand/);
+    const handler = files.get("Application/Orders/Commands/AddLineHandler.cs")!;
+    expect(handler).toMatch(/ICommandHandler<AddLineCommand,\s*Unit>/);
     expect(handler).toMatch(/_repo\.GetByIdAsync/);
     expect(handler).toMatch(/aggregate\.AddLine\(/);
     expect(handler).toMatch(/_repo\.SaveAsync/);

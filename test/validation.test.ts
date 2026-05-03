@@ -87,6 +87,21 @@ describe("validation", () => {
     expect(errors.some((e) => /Done/.test(e) || /string/.test(e))).toBe(true);
   });
 
+  it("rejects assignment to a derived property", async () => {
+    const { errors } = await parse(`
+      context T {
+        aggregate A {
+          x: int
+          derived doubled: int = x * 2
+          operation tweak() {
+            doubled := 0
+          }
+        }
+      }
+    `);
+    expect(errors.some((e) => /derived/i.test(e))).toBe(true);
+  });
+
   it("accepts a well-typed aggregate", async () => {
     const { errors } = await parse(`
       context T {

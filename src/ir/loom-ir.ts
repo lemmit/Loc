@@ -108,7 +108,18 @@ export interface AggregateIR {
   functions: FunctionIR[];
   operations: OperationIR[];
   parts: EntityPartIR[];
+  tests: TestIR[];
 }
+
+export interface TestIR {
+  name: string;
+  statements: TestStmtIR[];
+}
+
+export type TestStmtIR =
+  | StmtIR
+  | { kind: "expect"; expr: ExprIR; source: string }
+  | { kind: "expect-throws"; expr: ExprIR; source: string };
 
 export interface EnumIR {
   name: string;
@@ -132,6 +143,8 @@ export interface FindIR {
   name: string;
   params: ParamIR[];
   returnType: TypeIR;
+  /** Optional `where ...` filter expression in IR form. */
+  filter?: ExprIR;
 }
 
 export interface RepositoryIR {

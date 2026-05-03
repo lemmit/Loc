@@ -77,9 +77,25 @@ context Sales {
 
       invariant quantity > 0
     }
+
+    test "money literal builds" {
+      let m = Money(10.5, "USD")
+      expect m.amount == 10.5
+      expect m.currency == "USD"
+    }
+
+    test "negative money rejected" {
+      expectThrows Money(-1.0, "USD")
+    }
   }
 
   repository Orders for Order {
+    // Convention: when no `where` is given, parameters are matched to
+    // aggregate properties of the same name (here `customerId`).
     find byCustomer(customerId: Id<Customer>): Order[]
+    // Explicit predicate over the aggregate root — `this` refers to the
+    // root, parameters are bare identifiers.
+    find activeForCustomer(forCustomer: Id<Customer>): Order[]
+      where this.customerId == forCustomer && this.status == Draft
   }
 }

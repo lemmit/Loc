@@ -228,3 +228,108 @@ generated output is the real test.
   inline string literals are fine for one-shots.
 - Compiling generated .NET in CI without dotnet SDK — gracefully skip with
   a clear log message; don't fake-pass the test.
+
+---
+
+## 9. Second-iteration findings (after the first end-to-end pass)
+
+### Handlebars HTML escaping bites the .NET backend hardest
+Generic types like `List<T>` and `Task<T>` get HTML-encoded into
+`List&lt;T&gt;` if helpers return raw strings.  **Wrap every helper that
+emits source-shaped strings in `new hb.SafeString(...)`**, especially
+type renderers.  TypeScript dodges this because TS types rarely use
+angle brackets, but C# uses them everywhere.
+
+### Namespace-vs-class collisions
+A namespace like `Sales.Domain.Order` next to a class `Order` in the
+same scope confuses C# resolution at use sites.  Rename per-aggregate
+namespaces to the **plural** form (`Sales.Domain.Orders`) to avoid the
+clash without changing the grammar.
+
+### Positional records skip invariant enforcement
+`record Money(decimal Amount, string Currency)` doesn't run a body block
+on `new Money(...)` — only on `new Money()`.  Use **explicit
+constructors with init-only properties** for value objects so invariants
+fire on every construction.
+
+### Mediator (not MediatR) for new .NET projects
+MediatR went paid in late 2024.  Use
+[Mediator](https://github.com/martinothamar/Mediator) (MIT,
+source-generated): same `IRequest<T>` + handlers, plus semantic
+`ICommand` / `IQuery` aliases.  Note the handler signature returns
+`ValueTask<T>` and void commands return `ValueTask<Unit>` (return
+`Unit.Value` from the body).
+
+### Request / Response DTOs at the controller boundary
+Controllers shouldn't bind to internal Command records — that leaks
+`Id<X>` record-structs and value-object types into the wire format and
+forces consumers to know domain shape.  Generate **flat primitive DTOs**
+(`CreateOrderRequest`, `OrderResponse`) and have controllers map them
+to commands and queries before dispatching via Mediator.  Query
+handlers then project domain → Response inline.
+
+### Repository correctness has two layers
+- **TS / Drizzle** is hand-rolled: project domain → row, diff-sync
+  contained children (insert/update/delete by id), wrap in transaction,
+  dispatch drained events.  Templates can't express this cleanly — emit
+  it as code-built strings instead.
+- **.NET / EF Core** rides on the change tracker: `GetByIdAsync` returns
+  the *tracked* aggregate (with `OwnsMany` auto-included), `SaveAsync`
+  attaches detached aggregates and lets EF observe mutations on tracked
+  ones.  Far less generation needed.
+
+### Drizzle value-object inlining
+Express a `unitPrice: Money` field as `unit_price_amount` and
+`unit_price_currency` columns.  Schema-time code expansion + matching
+projections in the repository make this transparent to the rest of the
+generator.
+
+### Code-built vs. template
+**Templates win for class shape, code wins for projection logic.**  The
+TS repository's `findById` / `save` / find-query bodies have too much
+per-aggregate variance to express in Handlebars.  Build them in plain
+TypeScript and let templates handle the surrounding structural file.
+
+### Find-query DSL: keep it expressive
+Adding a single `where Expression` clause to `find` declarations lets
+users write real predicates (`where this.customerId == forCustomer &&
+this.status == Open`) that lower cleanly to LINQ in .NET.  Drizzle
+doesn't support arbitrary lambda predicates compiled to SQL — emit a
+TODO comment with the rendered TS expression so the user can hand-port
+to Drizzle operators.
+
+### Validator type system needs aggregate properties in scope
+For invariants like `transactions.all(t => t.amount.amount > 0)` to
+type-check, the validator's `Env` must populate the aggregate's
+properties / derived / contains as locally-resolvable bindings.
+Without that, name resolution returns `unknown` for every property
+access, and the type checker can't catch real mistakes.
+
+### Lambda type inference is contextual
+Lambda parameter types only need to be known when the lambda is the
+argument to a collection op.  Wire receiver-element type into the
+lambda's local env at type-check time (not in the IR per se), and the
+body validates correctly.
+
+### Test DSL: `expectThrows <expression>`, not `<statement>`
+Statements like `:=`, `+=`, `emit` only make sense inside an aggregate
+operation, not in free-standing tests.  Use `expectThrows <expression>`
+so users naturally write `expectThrows Money(-1, "USD")` and the
+expression renderer (`new Money(-1, "USD")`) just works.
+
+### Templates split → small, single-purpose modules
+Once the scope crossed ~500 lines per template-file, lookups and edits
+got painful.  Splitting into per-construct modules
+(`templates/ids.tpl.ts`, `templates/value-objects.tpl.ts`, …) and
+re-exporting from a thin barrel made the layout explorable again
+without touching call sites.  Same Handlebars instance lives in a
+shared `hb.ts` so helpers register exactly once.
+
+### CLI watch mode: trivial and worth it
+`fs.watch` + 100ms debounce + re-run the generator.  Roughly 20 lines
+of code, immediate quality-of-life win during development.
+
+### Always type-check the generated output
+Every change to the generators should run `tsc --noEmit` against a
+freshly-emitted project.  A single wrong helper or missing import is
+invisible until you compile what you produced.

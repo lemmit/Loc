@@ -88,16 +88,37 @@ generate
   .command("ts <file>")
   .description("Generate TypeScript (Hono + Drizzle)")
   .requiredOption("-o, --out <dir>", "output directory")
-  .action(async (file: string, options: { out: string }) => {
+  .option("-w, --watch", "re-run on changes to <file>")
+  .action(async (file: string, options: { out: string; watch?: boolean }) => {
     await runGenerate("ts", file, options.out);
+    if (options.watch) await watchAndRegenerate("ts", file, options.out);
   });
 generate
   .command("dotnet <file>")
-  .description("Generate .NET (ASP.NET Core + EF Core + MediatR)")
+  .description("Generate .NET (ASP.NET Core + EF Core + Mediator)")
   .requiredOption("-o, --out <dir>", "output directory")
-  .action(async (file: string, options: { out: string }) => {
+  .option("-w, --watch", "re-run on changes to <file>")
+  .action(async (file: string, options: { out: string; watch?: boolean }) => {
     await runGenerate("dotnet", file, options.out);
+    if (options.watch) await watchAndRegenerate("dotnet", file, options.out);
   });
+
+async function watchAndRegenerate(target: "ts" | "dotnet", file: string, outDir: string) {
+  console.log(`Watching ${file} for changes…`);
+  let timer: NodeJS.Timeout | null = null;
+  fs.watch(file, () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(async () => {
+      try {
+        await runGenerate(target, file, outDir);
+      } catch (err) {
+        console.error(err);
+      }
+    }, 100);
+  });
+  // Keep the process alive
+  await new Promise(() => {});
+}
 
 program.parseAsync(process.argv).catch((err) => {
   console.error(err);

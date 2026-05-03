@@ -55,4 +55,13 @@ describe("typescript generator", () => {
     const order = files.get("domain/order.ts")!;
     expect(order).toMatch(/OrderLine\._create\(\{ id: Ids\.newOrderLineId\(\), parentId: this\._id/);
   });
+
+  it("emits a vitest test file when `test` blocks are declared", async () => {
+    const model = await buildModel("examples/sales.ddd");
+    const files = generateTypeScript(model);
+    const tests = files.get("domain/order.test.ts")!;
+    expect(tests).toMatch(/import { describe, it, expect } from "vitest"/);
+    expect(tests).toMatch(/it\("money literal builds"/);
+    expect(tests).toMatch(/expect\(\(\) => \{ new Money\(-1\.0, "USD"\); \}\)\.toThrow\(\)/);
+  });
 });

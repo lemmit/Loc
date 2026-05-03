@@ -40,7 +40,21 @@ IdKind returns string:
     'guid' | 'int' | 'long' | 'string';
 
 AggregateMember:
-    Containment | DerivedProp | Invariant | FunctionDecl | Operation | EntityPart | Property;
+    Containment | DerivedProp | Invariant | FunctionDecl | Operation | EntityPart | TestBlock | Property;
+
+TestBlock:
+    'test' name=STRING '{'
+        body+=TestStatement*
+    '}';
+
+TestStatement:
+    ExpectThrowsStmt | ExpectStmt | PreconditionStmt | LetStmt | EmitStmt | AssignOrCallStmt;
+
+ExpectStmt:
+    'expect' expr=Expression;
+
+ExpectThrowsStmt:
+    'expectThrows' expr=Expression;
 
 EntityPart:
     'entity' name=ID '{'
@@ -61,7 +75,8 @@ Repository:
     '}';
 
 FindDecl:
-    'find' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' ':' returnType=TypeRef;
+    'find' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' ':' returnType=TypeRef
+        ('where' filter=Expression)?;
 
 // ---------------------------------------------------------------------------
 // Members

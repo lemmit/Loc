@@ -217,6 +217,16 @@ export class DddValidator {
       return;
     }
     const targetType = this.lvalueType(stmt.target, agg, env, accept);
+    // Reject assignment to a derived property — derived members are
+    // computed from other state and writing to them would silently no-op.
+    if (this.lvalueIsDerived(stmt.target, agg)) {
+      accept(
+        "error",
+        `Cannot assign to derived property '${pathString(stmt.target)}'.`,
+        { node: stmt, property: "target" },
+      );
+      return;
+    }
     if (stmt.op === ":=") {
       const valueType = typeOf(stmt.value, env);
       if (
@@ -347,19 +357,87 @@ export class DddValidator {
 
   private envForAggregate(agg: Aggregate, fn?: FunctionDecl): Env {
     const bindings = new Map<string, { type: DddType; origin: AstNode }>();
+    // Aggregate properties / derived / contains are in scope as bare
+    // identifiers — same as if we accessed them via `this`.
+    for (const m of agg.members) {
+      if (isProperty(m)) bindings.set(m.name, { type: resolveTypeRef(m.type), origin: m });
+      else if (isDerivedProp(m)) bindings.set(m.name, { type: resolveTypeRef(m.type), origin: m });
+      else if (isContainment(m)) {
+        const part = m.partType?.ref;
+        if (part) {
+          const t: DddType = { kind: "entity", ref: part };
+          bindings.set(m.name, { type: m.collection ? T.array(t) : t, origin: m });
+        }
+      }
+    }
     if (fn) for (const p of fn.params) bindings.set(p.name, { type: paramType(p), origin: p });
     return makeEnv(undefined, bindings, { aggregate: agg });
   }
 
   private envForPart(agg: Aggregate, part: EntityPart, fn?: FunctionDecl): Env {
     const bindings = new Map<string, { type: DddType; origin: AstNode }>();
+    for (const m of part.members) {
+      if (isProperty(m)) bindings.set(m.name, { type: resolveTypeRef(m.type), origin: m });
+      else if (isDerivedProp(m)) bindings.set(m.name, { type: resolveTypeRef(m.type), origin: m });
+      else if (isContainment(m)) {
+        const partType = m.partType?.ref;
+        if (partType) {
+          const t: DddType = { kind: "entity", ref: partType };
+          bindings.set(m.name, { type: m.collection ? T.array(t) : t, origin: m });
+        }
+      }
+    }
     if (fn) for (const p of fn.params) bindings.set(p.name, { type: paramType(p), origin: p });
     return makeEnv(undefined, bindings, { aggregate: agg, part });
   }
 
   private envForValueObject(vo: ValueObject): Env {
-    return makeEnv(undefined, new Map(), { valueObject: vo });
+    const bindings = new Map<string, { type: DddType; origin: AstNode }>();
+    for (const m of vo.members) {
+      if (isProperty(m)) bindings.set(m.name, { type: resolveTypeRef(m.type), origin: m });
+      else if (isDerivedProp(m)) bindings.set(m.name, { type: resolveTypeRef(m.type), origin: m });
+    }
+    return makeEnv(undefined, bindings, { valueObject: vo });
   }
+
+  /**
+   * True if the lvalue's *final* segment names a derived member of the
+   * type reachable via the path so far.  Derived members are computed
+   * from state and cannot be assigned to.
+   */
+  private lvalueIsDerived(
+    lv: import("./generated/ast.js").LValue,
+    agg: Aggregate,
+  ): boolean {
+    if (lv.tail.length === 0) {
+      // Direct head reference — check root members
+      for (const m of agg.members) {
+        if (isDerivedProp(m) && m.name === lv.head) return true;
+      }
+      return false;
+    }
+    // Walk the path, last segment matters
+    let cur: DddType = lookupRootMember(agg, lv.head);
+    for (let i = 0; i < lv.tail.length - 1; i++) {
+      cur = stepInto(cur, lv.tail[i]!);
+    }
+    const lastSegment = lv.tail[lv.tail.length - 1]!;
+    if (cur.kind === "entity" || cur.kind === "aggregate") {
+      for (const m of cur.ref.members) {
+        if (isDerivedProp(m) && m.name === lastSegment) return true;
+      }
+    }
+    if (cur.kind === "valueobject") {
+      for (const m of cur.ref.members) {
+        if (isDerivedProp(m) && m.name === lastSegment) return true;
+      }
+    }
+    return false;
+  }
+}
+
+function pathString(lv: import("./generated/ast.js").LValue): string {
+  return [lv.head, ...lv.tail].join(".");
 }
 
 function lookupRootMember(agg: Aggregate, name: string): DddType {
