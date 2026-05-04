@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import ignore from "ignore";
 import { NodeFileSystem } from "langium/node";
 import { URI } from "langium";
 import * as fs from "node:fs";
@@ -56,21 +57,68 @@ async function runParse(file: string) {
   console.log(`OK: ${file}`);
 }
 
-async function runGenerate(target: "ts" | "dotnet", file: string, outDir: string) {
+/**
+ * Loads the project's `.loomignore` (gitignore-syntax) from the output
+ * directory, if present, and returns a matcher.  Patterns are matched
+ * against forward-slash-normalised paths relative to the output dir.
+ */
+function loadLoomIgnore(outDir: string): ignore.Ignore {
+  const ig = ignore();
+  const file = path.join(outDir, ".loomignore");
+  if (fs.existsSync(file)) {
+    ig.add(fs.readFileSync(file, "utf8"));
+  }
+  return ig;
+}
+
+interface RunOptions {
+  dryRun?: boolean;
+}
+
+async function runGenerate(
+  target: "ts" | "dotnet",
+  file: string,
+  outDir: string,
+  options: RunOptions = {},
+): Promise<void> {
   const result = await parseFile(file);
   if (result.errorCount > 0) {
     printDiagnostics(result);
     process.exit(1);
   }
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+
   const files =
     target === "ts" ? generateTypeScript(result.model) : generateDotnet(result.model);
-  for (const [relPath, content] of files) {
+
+  const ig = loadLoomIgnore(outDir);
+  let written = 0;
+  let skipped = 0;
+  const sortedPaths = [...files.keys()].sort();
+  for (const relPath of sortedPaths) {
+    const content = files.get(relPath)!;
+    const normalised = relPath.split(path.sep).join("/");
+    const ignored = ig.ignores(normalised);
+    if (options.dryRun) {
+      const sizeKb = (Buffer.byteLength(content, "utf8") / 1024).toFixed(1);
+      const status = ignored ? "  skip (.loomignore)" : "  write              ";
+      console.log(`${status}  ${relPath}  (${sizeKb} KB)`);
+      if (ignored) skipped++;
+      else written++;
+      continue;
+    }
+    if (ignored) {
+      skipped++;
+      continue;
+    }
     const full = path.join(outDir, relPath);
     fs.mkdirSync(path.dirname(full), { recursive: true });
     fs.writeFileSync(full, content, "utf8");
+    written++;
   }
-  console.log(`Generated ${files.size} file(s) in ${outDir}`);
+  const verb = options.dryRun ? "Would write" : "Wrote";
+  const skipMsg = skipped > 0 ? `, skipped ${skipped} via .loomignore` : "";
+  console.log(`${verb} ${written} file(s) in ${outDir}${skipMsg}`);
 }
 
 const program = new Command();
@@ -89,19 +137,25 @@ generate
   .description("Generate TypeScript (Hono + Drizzle)")
   .requiredOption("-o, --out <dir>", "output directory")
   .option("-w, --watch", "re-run on changes to <file>")
-  .action(async (file: string, options: { out: string; watch?: boolean }) => {
-    await runGenerate("ts", file, options.out);
-    if (options.watch) await watchAndRegenerate("ts", file, options.out);
-  });
+  .option("--dry-run", "list paths that would be written / skipped, write nothing")
+  .action(
+    async (file: string, options: { out: string; watch?: boolean; dryRun?: boolean }) => {
+      await runGenerate("ts", file, options.out, { dryRun: options.dryRun });
+      if (options.watch) await watchAndRegenerate("ts", file, options.out);
+    },
+  );
 generate
   .command("dotnet <file>")
   .description("Generate .NET (ASP.NET Core + EF Core + Mediator)")
   .requiredOption("-o, --out <dir>", "output directory")
   .option("-w, --watch", "re-run on changes to <file>")
-  .action(async (file: string, options: { out: string; watch?: boolean }) => {
-    await runGenerate("dotnet", file, options.out);
-    if (options.watch) await watchAndRegenerate("dotnet", file, options.out);
-  });
+  .option("--dry-run", "list paths that would be written / skipped, write nothing")
+  .action(
+    async (file: string, options: { out: string; watch?: boolean; dryRun?: boolean }) => {
+      await runGenerate("dotnet", file, options.out, { dryRun: options.dryRun });
+      if (options.watch) await watchAndRegenerate("dotnet", file, options.out);
+    },
+  );
 
 async function watchAndRegenerate(target: "ts" | "dotnet", file: string, outDir: string) {
   console.log(`Watching ${file} for changes…`);
