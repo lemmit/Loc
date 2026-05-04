@@ -1,7 +1,46 @@
 grammar Ddd
 
 entry Model:
-    contexts+=BoundedContext*;
+    members+=ModelMember*;
+
+ModelMember:
+    System | BoundedContext;
+
+// ---------------------------------------------------------------------------
+// System / Module / Deployable — the deployment shape.
+//
+// A `system` is the top-level grouping for a deployment plan.  Inside it,
+// `module`s collect related bounded contexts; `deployable`s pick a
+// platform and a subset of modules to ship as a runnable artefact.
+// Bare `context` declarations at the top of the file are still valid
+// (legacy single-deployable mode) and are treated as living in an
+// implicit anonymous system.
+// ---------------------------------------------------------------------------
+
+System:
+    'system' name=ID '{'
+        members+=SystemMember*
+    '}';
+
+SystemMember:
+    Module | Deployable | BoundedContext;
+
+Module:
+    'module' name=ID '{'
+        contexts+=BoundedContext*
+    '}';
+
+Deployable:
+    'deployable' name=ID '{'
+        ('platform' ':' platform=Platform)
+        (',')?
+        ('modules' ':' modules+=[Module:ID] (',' modules+=[Module:ID])*)?
+        (',')?
+        ('port' ':' port=INT)?
+    '}';
+
+Platform returns string:
+    'dotnet' | 'hono';
 
 // ---------------------------------------------------------------------------
 // Top-level

@@ -34,8 +34,9 @@ npm run build
 
 ```bash
 ddd parse <file.ddd>                       # parse + validate, exit non-zero on errors
-ddd generate ts <file.ddd> -o <outdir>     # emit TS project (Hono + Drizzle)
-ddd generate dotnet <file.ddd> -o <outdir> # emit .NET project (ASP.NET + EF + Mediator)
+ddd generate ts <file.ddd> -o <outdir>     # emit a single TS project (Hono + Drizzle)
+ddd generate dotnet <file.ddd> -o <outdir> # emit a single .NET project (ASP.NET + EF + Mediator)
+ddd generate system <file.ddd> -o <outdir> # emit every deployable + docker-compose.yml
 ```
 
 ## A taste of the language

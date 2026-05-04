@@ -8,6 +8,7 @@ import { createDddServices } from "../language/ddd-module.js";
 import type { Model } from "../language/generated/ast.js";
 import { generateTypeScript } from "../generator/typescript/index.js";
 import { generateDotnet } from "../generator/dotnet/index.js";
+import { generateSystems } from "../system/index.js";
 
 interface ParseResult {
   model: Model;
@@ -75,8 +76,10 @@ interface RunOptions {
   dryRun?: boolean;
 }
 
+type GenerateTarget = "ts" | "dotnet" | "system";
+
 async function runGenerate(
-  target: "ts" | "dotnet",
+  target: GenerateTarget,
   file: string,
   outDir: string,
   options: RunOptions = {},
@@ -88,8 +91,20 @@ async function runGenerate(
   }
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
 
-  const files =
-    target === "ts" ? generateTypeScript(result.model) : generateDotnet(result.model);
+  let files: Map<string, string>;
+  if (target === "system") {
+    files = generateSystems(result.model).files;
+    if (files.size === 0) {
+      console.error(
+        `No \`system\` block declared in ${file}.  Use \`generate ts\` or \`generate dotnet\` for legacy single-deployable sources.`,
+      );
+      process.exit(1);
+    }
+  } else if (target === "ts") {
+    files = generateTypeScript(result.model);
+  } else {
+    files = generateDotnet(result.model);
+  }
 
   const ig = loadLoomIgnore(outDir);
   let written = 0;
@@ -156,8 +171,22 @@ generate
       if (options.watch) await watchAndRegenerate("dotnet", file, options.out);
     },
   );
+generate
+  .command("system <file>")
+  .description(
+    "Generate every deployable in the file's `system` blocks plus a docker-compose.yml at the output root.",
+  )
+  .requiredOption("-o, --out <dir>", "output directory")
+  .option("-w, --watch", "re-run on changes to <file>")
+  .option("--dry-run", "list paths that would be written / skipped, write nothing")
+  .action(
+    async (file: string, options: { out: string; watch?: boolean; dryRun?: boolean }) => {
+      await runGenerate("system", file, options.out, { dryRun: options.dryRun });
+      if (options.watch) await watchAndRegenerate("system", file, options.out);
+    },
+  );
 
-async function watchAndRegenerate(target: "ts" | "dotnet", file: string, outDir: string) {
+async function watchAndRegenerate(target: GenerateTarget, file: string, outDir: string) {
   console.log(`Watching ${file} for changes…`);
   let timer: NodeJS.Timeout | null = null;
   fs.watch(file, () => {

@@ -46,11 +46,28 @@ import {
 export class DddValidator {
   // Entry: full model walk
   check(model: import("./generated/ast.js").Model, accept: ValidationAcceptor): void {
-    for (const ctx of model.contexts) {
-      for (const member of ctx.members) {
-        if (isAggregate(member)) this.checkAggregate(member, accept);
-        else if (isValueObject(member)) this.checkValueObject(member, accept);
+    for (const m of model.members) {
+      if (m.$type === "BoundedContext") {
+        this.checkContext(m, accept);
+      } else if (m.$type === "System") {
+        for (const sm of m.members) {
+          if (sm.$type === "Module") {
+            for (const ctx of sm.contexts) this.checkContext(ctx, accept);
+          } else if (sm.$type === "BoundedContext") {
+            this.checkContext(sm, accept);
+          }
+        }
       }
+    }
+  }
+
+  private checkContext(
+    ctx: import("./generated/ast.js").BoundedContext,
+    accept: ValidationAcceptor,
+  ): void {
+    for (const member of ctx.members) {
+      if (isAggregate(member)) this.checkAggregate(member, accept);
+      else if (isValueObject(member)) this.checkValueObject(member, accept);
     }
   }
 

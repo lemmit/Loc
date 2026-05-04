@@ -22,12 +22,30 @@ the migration story see [`tools.md`](tools.md).
         ▼      Lowering: name resolution, type inference, semantic shaping
    Loom IR            (platform-neutral, fully resolved)
         │
-        ▼      Per-backend orchestrator
-   Per-backend file map (path → contents)
+        ▼      Per-backend orchestrator (legacy)
+        │      OR system orchestrator (multi-deployable)
+   Per-backend / per-deployable file map (path → contents)
         │
         ▼      .loomignore filter + writes
-   Generated project on disk
+   Generated project(s) on disk
 ```
+
+For sources that declare a `system { … module … deployable … }`, the
+**system orchestrator** (`src/system/index.ts`) calls each backend's
+`generate*ForContexts` entry point once per deployable, scoping the
+output to the deployable's module subset, and writes everything to a
+flat tree:
+
+```
+<outdir>/
+   <deployable-1>/      # full per-deployable project
+   <deployable-2>/
+   docker-compose.yml   # at the system root
+```
+
+Legacy bare `context` sources still use the per-backend `generate*`
+entry points and produce a single project — no system orchestrator
+involvement.
 
 Each stage owns a clearly-bounded transformation.  Type information
 flows downstream: by the time the IR reaches a backend, every name
@@ -91,7 +109,8 @@ src/
         tests.tpl.ts
       templates.ts       # barrel re-export
       index.ts           # orchestrator
-  cli/main.ts            # ddd parse / ddd generate
+  cli/main.ts            # ddd parse / ddd generate {ts|dotnet|system}
+  system/index.ts        # multi-deployable orchestrator + docker-compose
   util/naming.ts         # pascal / camel / snake / plural
 test/                    # vitest suites
 examples/                # sample .ddd inputs

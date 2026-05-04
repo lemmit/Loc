@@ -28,6 +28,8 @@ builder.Services.AddControllers(opts =>
 });
 
 var app = builder.Build();
+// Liveness probe — used by docker-compose / kubernetes / smoke tests.
+app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapControllers();
 app.Run();
 `,

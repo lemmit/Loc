@@ -163,7 +163,43 @@ export interface BoundedContextIR {
 }
 
 export interface LoomModel {
+  /**
+   * Explicit `system` declarations.  Each one is a complete deployment
+   * plan with modules + deployables.
+   */
+  systems: SystemIR[];
+  /**
+   * Bounded contexts declared at the top level of the source file
+   * (legacy single-deployable mode).  Empty when the source uses the
+   * `system` vocabulary.  When non-empty, the CLI treats these as an
+   * implicit anonymous system with one deployable of the platform
+   * picked by the user.
+   */
   contexts: BoundedContextIR[];
+}
+
+/** A deployment plan: modules grouping bounded contexts, plus the
+ * deployable artefacts that ship subsets of those modules. */
+export interface SystemIR {
+  name: string;
+  modules: ModuleIR[];
+  deployables: DeployableIR[];
+}
+
+export interface ModuleIR {
+  name: string;
+  contexts: BoundedContextIR[];
+}
+
+export type Platform = "dotnet" | "hono";
+
+export interface DeployableIR {
+  name: string;
+  platform: Platform;
+  /** Names of modules included in this deployable. */
+  moduleNames: string[];
+  /** HTTP port the deployable's web server listens on. */
+  port: number;
 }
 
 // ---------------------------------------------------------------------------

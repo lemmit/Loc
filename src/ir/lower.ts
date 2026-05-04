@@ -22,9 +22,11 @@ import {
   isAssignOrCallStmt,
   isBinaryExpr,
   isBoolLit,
+  isBoundedContext,
   isCallExpr,
   isContainment,
   isDecLit,
+  isDeployable,
   isDerivedProp,
   isEmitStmt,
   isEntityPart,
@@ -40,6 +42,7 @@ import {
   isLambda,
   isLetStmt,
   isMemberAccess,
+  isModule,
   isNameRef,
   isNamedType,
   isNewExpr,
@@ -52,6 +55,7 @@ import {
   isProperty,
   isRepository,
   isStringLit,
+  isSystem,
   isTernaryExpr,
   isTestBlock,
   isThisRef,
@@ -65,6 +69,7 @@ import type {
   AggregateIR,
   BoundedContextIR,
   ContainmentIR,
+  DeployableIR,
   DerivedIR,
   EntityPartIR,
   EnumIR,
@@ -75,11 +80,14 @@ import type {
   IdValueType,
   InvariantIR,
   LoomModel,
+  ModuleIR,
   OperationIR,
   ParamIR,
   PathIR,
+  Platform,
   RepositoryIR,
   StmtIR,
+  SystemIR,
   TestIR,
   TestStmtIR,
   TypeIR,
@@ -128,9 +136,53 @@ function inValueObject(env: Env, vo: ValueObject): Env {
 // ---------------------------------------------------------------------------
 
 export function lowerModel(model: Model): LoomModel {
+  const systems: SystemIR[] = [];
+  const looseContexts: BoundedContextIR[] = [];
+  for (const m of model.members) {
+    if (isSystem(m)) systems.push(lowerSystem(m));
+    else if (isBoundedContext(m)) looseContexts.push(lowerContext(m));
+  }
+  return { systems, contexts: looseContexts };
+}
+
+function lowerSystem(sys: import("../language/generated/ast.js").System): SystemIR {
+  const modules: ModuleIR[] = [];
+  const deployables: DeployableIR[] = [];
+  // Bare `context` declarations directly under a `system` block live in
+  // an implicit anonymous module so we can index them like any other.
+  const looseContexts: BoundedContextIR[] = [];
+  for (const m of sys.members) {
+    if (isModule(m)) {
+      modules.push({
+        name: m.name,
+        contexts: m.contexts.map(lowerContext),
+      });
+    } else if (isBoundedContext(m)) {
+      looseContexts.push(lowerContext(m));
+    } else if (isDeployable(m)) {
+      deployables.push(lowerDeployable(m));
+    }
+  }
+  if (looseContexts.length > 0) {
+    modules.push({ name: "_default", contexts: looseContexts });
+  }
+  return { name: sys.name, modules, deployables };
+}
+
+function lowerDeployable(
+  d: import("../language/generated/ast.js").Deployable,
+): DeployableIR {
   return {
-    contexts: model.contexts.map(lowerContext),
+    name: d.name,
+    platform: (d.platform ?? "hono") as Platform,
+    moduleNames: d.modules.map((ref) => ref.ref?.name ?? "").filter(Boolean),
+    port: d.port ?? defaultPort(d.platform as Platform | undefined),
   };
+}
+
+function defaultPort(platform: Platform | undefined): number {
+  if (platform === "dotnet") return 8080;
+  return 3000;
 }
 
 function lowerContext(ctx: BoundedContext): BoundedContextIR {

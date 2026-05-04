@@ -35,13 +35,48 @@ int  long  decimal  string  bool  datetime  guid
 
 ## Top-level declarations
 
-A file is one or more bounded contexts:
+A file is one or more **bounded contexts** (legacy, single-deployable
+mode) or one or more **systems** (deployment-plan mode):
 
-```
+```ddd
+// Legacy: bare context — generates a single project of the platform
+// chosen at the CLI (`generate ts` / `generate dotnet`).
 context Sales {
     // declarations...
 }
+
+// System: groups modules and deployables.  `generate system` emits
+// every deployable as its own project plus a docker-compose.yml.
+system Acme {
+    module Catalog { context Products { … } }
+    module Sales   { context Orders   { … } }
+    deployable api { platform: dotnet, modules: Catalog, Sales, port: 8080 }
+    deployable web { platform: hono,   modules: Catalog,         port: 3000 }
+}
 ```
+
+The two forms can coexist in one file but typically you'd use one or
+the other.
+
+### Inside a `system`
+
+| Form | Purpose |
+| --- | --- |
+| `module Name { … }` | Groups one or more bounded contexts under a name.  A module is a logical unit; it doesn't directly produce code. |
+| `deployable name { platform: dotnet|hono, modules: A, B, port: N }` | A concrete artefact: one project, one HTTP server, one DbContext, listening on `port`.  Selects which modules to ship. |
+| `context Name { … }` | Allowed directly inside a system; treated as if it were in an implicit `_default` module. |
+
+A module may appear in any number of deployables — its code is inlined
+into each.  For v1 there is no shared-library / npm-workspace shape;
+duplication is the trade-off for simplicity.
+
+Cross-module type references (`Id<X>`, value-object usage, enum values)
+work freely as long as both types are reachable from the same
+deployable's module set.  The Langium scope provider exports all
+named declarations — aggregates, entity parts, value objects, enums —
+across module boundaries within the same source file.
+
+### Inside a context
 
 Inside a context, the following kinds of declarations may appear, in any
 order:

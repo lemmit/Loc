@@ -23,10 +23,25 @@ export class AggregateNotFoundError extends Error {
 }
 `;
 
+/**
+ * Legacy entry: lowers the whole model and emits one project from all
+ * top-level bounded contexts.  Used by `ddd generate ts <file> -o <dir>`.
+ */
 export function generateTypeScript(model: Model): Map<string, string> {
-  const out = new Map<string, string>();
   const loom = lowerModel(model);
-  for (const ctx of loom.contexts) {
+  return generateTypeScriptForContexts(loom.contexts);
+}
+
+/**
+ * System-mode entry: emits one project from a pre-filtered list of
+ * contexts.  Used by the deployable orchestrator to scope the output
+ * to a single deployable's modules.
+ */
+export function generateTypeScriptForContexts(
+  contexts: BoundedContextIR[],
+): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const ctx of contexts) {
     emitContext(ctx, out);
   }
   out.set("package.json", PROJECT_PACKAGE_JSON);

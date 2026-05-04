@@ -51,13 +51,73 @@ import {
 //   Program.cs, <ns>.csproj        — hosting entry + project file
 // ---------------------------------------------------------------------------
 
+/**
+ * Legacy entry: lowers the whole model and emits one project from each
+ * top-level bounded context (used by `ddd generate dotnet <file>`).
+ */
 export function generateDotnet(model: Model): Map<string, string> {
-  const out = new Map<string, string>();
   const loom = lowerModel(model);
-  for (const ctx of loom.contexts) {
-    emitContext(ctx, ctx.name, out);
+  return generateDotnetForContexts(loom.contexts);
+}
+
+/**
+ * System-mode entry: emits a single .NET project from a pre-filtered
+ * list of contexts under the chosen namespace.  When emitting for a
+ * deployable, the namespace is the deployable name.  When called with
+ * a single context, the namespace is that context's name (legacy).
+ */
+export function generateDotnetForContexts(
+  contexts: BoundedContextIR[],
+  namespace?: string,
+): Map<string, string> {
+  const out = new Map<string, string>();
+  if (namespace !== undefined) {
+    // Single project containing all the given contexts under one namespace.
+    emitProjectFromContexts(contexts, namespace, out);
+  } else {
+    for (const ctx of contexts) {
+      emitContext(ctx, ctx.name, out);
+    }
   }
   return out;
+}
+
+function emitProjectFromContexts(
+  contexts: BoundedContextIR[],
+  ns: string,
+  out: Map<string, string>,
+): void {
+  // Common files written once per project, regardless of how many
+  // contexts contribute their domain code.
+  emitCommon(ns, out);
+  emitDispatcher(ns, out);
+  out.set("Domain/Events/IDomainEvent.cs", renderIDomainEvent(ns));
+  // Each context contributes its enums / VOs / events / aggregates.
+  for (const ctx of contexts) {
+    emitIds(ctx, ns, out);
+    emitEnums(ctx, ns, out);
+    emitValueObjects(ctx, ns, out);
+    for (const ev of ctx.events) {
+      out.set(`Domain/Events/${ev.name}.cs`, renderEvent(ev, ns));
+    }
+    for (const agg of ctx.aggregates) {
+      emitAggregate(agg, ctx, ns, out);
+    }
+  }
+  // DbContext + project shell are emitted once, with all aggregates
+  // collected from the union of contexts.
+  const merged: BoundedContextIR = {
+    name: ns,
+    enums: contexts.flatMap((c) => c.enums),
+    valueObjects: contexts.flatMap((c) => c.valueObjects),
+    events: contexts.flatMap((c) => c.events),
+    aggregates: contexts.flatMap((c) => c.aggregates),
+    repositories: contexts.flatMap((c) => c.repositories),
+  };
+  out.set("Infrastructure/Persistence/AppDbContext.cs", renderDbContext(merged, ns));
+  out.set("Api/DomainExceptionFilter.cs", renderExceptionFilter(ns));
+  emitProject(merged, ns, out);
+  emitTestProject(merged, ns, out);
 }
 
 function emitContext(

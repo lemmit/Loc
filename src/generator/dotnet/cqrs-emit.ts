@@ -224,7 +224,7 @@ function emitOperationCommandsAndHandlers(
         commandName: `${pascal(op.name)}Command`,
         body:
           `        var aggregate = await _repo.GetByIdAsync(cmd.Id, ct)\n` +
-          `            ?? throw new ${ns}.Domain.Common.AggregateNotFoundException($"${agg.name} {cmd.Id} not found");\n` +
+          `            ?? throw new AggregateNotFoundException($"${agg.name} {cmd.Id} not found");\n` +
           `        aggregate.${pascal(op.name)}(${callArgs});\n` +
           `        await _repo.SaveAsync(aggregate, ct);\n` +
           `        return Unit.Value;\n`,
@@ -374,7 +374,7 @@ function emitController(
       finds: (repo?.finds ?? []).map((find) => ({
         name: find.name,
         queryRouteParams: find.params
-          .map((p) => `[FromQuery] ${csIdValueClrType("guid")} ${p.name}`)
+          .map((p) => `[FromQuery] ${wireType(p.type, ctx, "request")} ${p.name}`)
           .join(", "),
         queryConstructorArgs: find.params
           .map((p) => wireToCommandArgument(p.name, p.type, ctx))

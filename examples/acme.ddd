@@ -1,0 +1,92 @@
+// Acme system — exercises system / module / deployable.
+//
+// Two modules group bounded contexts; two deployables ship subsets of
+// them on different platforms.  `ddd generate system` emits each
+// deployable as its own project alongside a docker-compose.yml that
+// wires them together with a shared postgres.
+
+system Acme {
+
+    module Catalog {
+        context Products {
+
+            valueobject Money {
+                amount: decimal
+                currency: string
+                invariant amount >= 0
+                invariant currency.length == 3
+            }
+
+            aggregate Product {
+                sku: string
+                price: Money
+                invariant sku.length > 0
+            }
+
+            repository Products for Product {
+                find bySku(sku: string): Product? where this.sku == sku
+            }
+        }
+    }
+
+    module Sales {
+        context Orders {
+
+            enum OrderStatus { Draft, Confirmed, Shipped, Cancelled }
+
+            event OrderConfirmed { order: Id<Order>, at: datetime }
+
+            aggregate Order {
+                customerId: string
+                status: OrderStatus
+                placedAt: datetime
+                contains lines: OrderLine[]
+
+                invariant lines.count > 0 when status == Confirmed
+
+                function isMutable(): bool = status == Draft
+
+                operation addLine(productId: Id<Product>, qty: int) {
+                    precondition isMutable()
+                    precondition qty > 0
+                    lines += new OrderLine {
+                        productId: productId, quantity: qty
+                    }
+                }
+
+                operation confirm() {
+                    precondition isMutable()
+                    precondition lines.count > 0
+                    status := Confirmed
+                    emit OrderConfirmed { order: id, at: now() }
+                }
+
+                entity OrderLine {
+                    productId: Id<Product>
+                    quantity: int
+                    invariant quantity > 0
+                }
+            }
+
+            repository Orders for Order {
+                find byCustomer(customerId: string): Order[]
+                    where this.customerId == customerId
+            }
+        }
+    }
+
+    // Public API on .NET — hosts both bounded contexts behind one EF
+    // DbContext, exposes the full HTTP surface for the platform.
+    deployable api {
+        platform: dotnet
+        modules: Catalog, Sales
+        port: 8080
+    }
+
+    // Lightweight read-API on Hono — same Catalog data, no Sales code.
+    deployable catalogWeb {
+        platform: hono
+        modules: Catalog
+        port: 3000
+    }
+}

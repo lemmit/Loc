@@ -15,9 +15,26 @@ The `ddd` binary lives at `bin/cli.js` and exposes three sub-commands:
 
 ```bash
 ddd parse <file.ddd>                              # parse + validate
-ddd generate ts <file.ddd> -o <outdir>            # emit TypeScript project
-ddd generate dotnet <file.ddd> -o <outdir>        # emit .NET project
+ddd generate ts <file.ddd> -o <outdir>            # emit a single TypeScript project
+ddd generate dotnet <file.ddd> -o <outdir>        # emit a single .NET project
+ddd generate system <file.ddd> -o <outdir>        # emit every deployable + docker-compose.yml
 ```
+
+`generate ts` / `generate dotnet` work on **legacy** sources (bare
+`context` declarations) and produce a single project for the chosen
+platform.  `generate system` works on sources that declare one or more
+`system { … }` blocks and produces a multi-project tree:
+
+```
+<outdir>/
+    <deployable-1>/        # full per-deployable project
+    <deployable-2>/
+    docker-compose.yml     # at the system root
+```
+
+Each deployable's folder name is a lowercase slug derived from the
+deployable's name (e.g. `catalogWeb` → `catalog_web`); inside the
+project the .NET namespace and `.csproj` keep the capitalised form.
 
 ### Common options
 
@@ -233,10 +250,34 @@ Build stage uses `mcr.microsoft.com/dotnet/sdk:8.0`, runtime uses
 ### Customising
 
 Both Dockerfiles are intentionally minimal — they assume a single-
-service deployment.  For health checks, multi-arch builds, sidecar
-containers, BuildKit secrets, or alternate base images, pin the
-`Dockerfile` in `.loomignore` and edit freely.
+service deployment.  For health checks beyond `/health`, multi-arch
+builds, sidecar containers, BuildKit secrets, or alternate base
+images, pin the `Dockerfile` in `.loomignore` and edit freely.
 
-Loom does **not** generate `docker-compose.yml`, `k8s` manifests, CI
-pipelines, or other deployment scaffolding.  Those are project-init
-concerns, not derived from the `.ddd` source.
+### `/health`
+
+Every generated deployable mounts a `/health` endpoint that returns
+`{"status":"ok"}` (port 3000 on Hono, 8080 on .NET).  It's used by
+the compose healthchecks below and is the natural target for any
+external smoke test.
+
+### `docker-compose.yml` (system mode)
+
+`ddd generate system` emits a `docker-compose.yml` at the output
+root that wires every deployable to a postgres service, with a
+healthcheck on `/health` per deployable:
+
+```bash
+cd ./out                # the generator's output dir
+docker compose build    # builds each deployable's Dockerfile
+docker compose up -d    # starts postgres + every deployable
+curl http://localhost:8080/health   # → {"status":"ok"} once api is healthy
+docker compose down
+```
+
+The compose file is a generated artefact — pin it via `.loomignore`
+if you customise it, since regenerating would otherwise overwrite
+your changes.
+
+Loom does **not** generate k8s manifests or CI pipelines — those are
+project-init concerns, not derived from the `.ddd` source.

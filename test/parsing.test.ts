@@ -27,8 +27,12 @@ describe("parsing & validation of examples", () => {
   it("parses sales.ddd without errors", async () => {
     const { model, errors } = await parseExample("examples/sales.ddd");
     expect(errors).toEqual([]);
-    expect(model.contexts).toHaveLength(1);
-    const sales = model.contexts[0]!;
+    const contexts = model.members.filter(
+      (m): m is import("../src/language/generated/ast.js").BoundedContext =>
+        m.$type === "BoundedContext",
+    );
+    expect(contexts).toHaveLength(1);
+    const sales = contexts[0]!;
     expect(sales.name).toBe("Sales");
     const orderAgg = sales.members.find((m) => m.name === "Order");
     expect(orderAgg?.$type).toBe("Aggregate");

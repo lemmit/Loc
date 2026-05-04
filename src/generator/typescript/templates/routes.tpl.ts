@@ -85,6 +85,8 @@ export function createApp(
   events: DomainEventDispatcher = NoopDomainEventDispatcher,
 ): Hono {
   const app = new Hono();
+  // Liveness probe — used by docker-compose / kubernetes / smoke tests.
+  app.get("/health", (c) => c.json({ status: "ok" }));
 {{#each aggregates}}  app.route("/{{snake (plural name)}}", {{camel name}}Routes(new {{name}}Repository(db, events)));
 {{/each}}  return app;
 }

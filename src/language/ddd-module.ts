@@ -9,7 +9,7 @@ import {
 } from "langium/lsp";
 import { DddGeneratedModule, DddGeneratedSharedModule } from "./generated/module.js";
 import { DddValidator, registerValidationChecks } from "./ddd-validator.js";
-import { DddScopeProvider } from "./ddd-scope.js";
+import { DddScopeComputation, DddScopeProvider } from "./ddd-scope.js";
 
 export type DddAddedServices = {
   validation: {
@@ -25,6 +25,7 @@ export const DddModule: Module<DddServices, PartialLangiumServices & DddAddedSer
   },
   references: {
     ScopeProvider: (services: LangiumServices) => new DddScopeProvider(services),
+    ScopeComputation: (services: LangiumServices) => new DddScopeComputation(services),
   },
 };
 
