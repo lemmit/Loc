@@ -160,6 +160,11 @@ const DOCKERFILE_TPL = hb.compile(
 
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
+# Optional proxy CAs — drop *.crt files into ./certs/ to make the
+# build trust them.  The directory always exists (with a .gitkeep),
+# so this COPY is a no-op when no CAs are configured.
+COPY certs/ /usr/local/share/ca-certificates/
+RUN update-ca-certificates 2>&1 | tail -1 || true
 COPY {{ns}}.csproj ./
 RUN dotnet restore {{ns}}.csproj
 COPY . .

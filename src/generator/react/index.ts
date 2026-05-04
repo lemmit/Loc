@@ -11,6 +11,7 @@ import {
   buildListPage,
   buildNewPage,
 } from "./pages-builder.js";
+import { buildPageObjectModule } from "./page-objects-builder.js";
 
 // ---------------------------------------------------------------------------
 // React + React Query + Zod + Mantine generator.
@@ -55,7 +56,16 @@ export function generateReactForContexts(
       `src/pages/${snake(plural(agg.name))}/detail.tsx`,
       buildDetailPage(agg, ctx),
     );
+    out.set(
+      `e2e/pages/${camel(agg.name)}.ts`,
+      buildPageObjectModule(agg, ctx),
+    );
   }
+
+  out.set("e2e/smoke.spec.ts", smokeSpec(aggregates.map((a) => a.agg)));
+  out.set("e2e/playwright.config.ts", PLAYWRIGHT_CONFIG_TS);
+  out.set("e2e/package.json", E2E_PACKAGE_JSON);
+  out.set("e2e/tsconfig.json", E2E_TSCONFIG_JSON);
 
   out.set("src/api/client.ts", CLIENT_TS);
   out.set("src/api/config.ts", configTs(apiBaseUrl));
@@ -70,6 +80,7 @@ export function generateReactForContexts(
   out.set("index.html", INDEX_HTML);
   out.set("Dockerfile", DOCKERFILE_REACT);
   out.set(".dockerignore", DOCKERIGNORE_REACT);
+  out.set("certs/.gitkeep", "");
 
   return out;
 }
@@ -318,6 +329,92 @@ ${routes.join("\n")}
 `;
 }
 
+function smokeSpec(aggregates: AggregateIR[]): string {
+  // Auto-generated minimal Playwright smoke: every aggregate's list
+  // page loads.  Users add per-aggregate scenarios using the page
+  // objects under e2e/pages/.
+  const imports = aggregates
+    .map(
+      (a) =>
+        `import { ${upper(a.name)}ListPage } from "./pages/${camel(a.name)}.js";`,
+    )
+    .join("\n");
+  const cases = aggregates
+    .map(
+      (a) =>
+        `test("${snake(plural(a.name))} list loads", async ({ page }) => {\n  const p = await new ${upper(a.name)}ListPage(page).goto();\n  await expect(p.page).toHaveURL(/${snake(plural(a.name))}$/);\n});`,
+    )
+    .join("\n\n");
+  return `// Auto-generated smoke spec.
+import { test, expect } from "@playwright/test";
+${imports}
+
+${cases}
+`;
+}
+
+const PLAYWRIGHT_CONFIG_TS = `// Auto-generated.
+import { defineConfig, devices } from "@playwright/test";
+
+// Tests target a running web_app — typically the docker-compose
+// service on port 3001.  Override via E2E_BASE_URL.
+export default defineConfig({
+  testDir: ".",
+  testMatch: /.*\\.spec\\.ts$/,
+  fullyParallel: true,
+  reporter: [["list"]],
+  use: {
+    baseURL: process.env.E2E_BASE_URL ?? "http://localhost:3001",
+    trace: "on-first-retry",
+  },
+  projects: [
+    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+  ],
+});
+`;
+
+// The Playwright suite has its own package.json so the runtime image
+// builds fast (no @playwright/test in the production install).  Run
+// it from inside ./e2e with `npm install && npx playwright test`.
+const E2E_PACKAGE_JSON =
+  JSON.stringify(
+    {
+      name: "loom-react-app-e2e",
+      version: "0.0.0",
+      type: "module",
+      private: true,
+      scripts: {
+        test: "playwright test",
+        "test:install": "playwright install --with-deps chromium",
+      },
+      devDependencies: {
+        "@playwright/test": "^1.49.0",
+        "@types/node": "^22.0.0",
+        typescript: "^5.7.0",
+      },
+    },
+    null,
+    2,
+  ) + "\n";
+
+const E2E_TSCONFIG_JSON =
+  JSON.stringify(
+    {
+      compilerOptions: {
+        target: "ES2022",
+        module: "ESNext",
+        moduleResolution: "Bundler",
+        strict: true,
+        esModuleInterop: true,
+        skipLibCheck: true,
+        types: ["node"],
+      },
+      include: ["**/*.ts", "../src/api/**/*.ts"],
+    },
+    null,
+    2,
+  ) + "\n";
+
 function homeTsx(aggregates: AggregateIR[]): string {
   return `// Auto-generated.
 import { Stack, Title, Text, Anchor, Card } from "@mantine/core";
@@ -350,6 +447,12 @@ const DOCKERFILE_REACT = `# syntax=docker/dockerfile:1
 
 FROM node:22-alpine AS build
 WORKDIR /app
+# Optional proxy CAs — drop *.crt files into ./certs/ to make npm
+# trust them.  The directory always exists (with a .gitkeep), so
+# this COPY is a no-op when no CAs are configured.
+COPY certs/ /usr/local/share/ca-certificates/
+RUN cat /usr/local/share/ca-certificates/*.crt 2>/dev/null >> /etc/ssl/cert.pem || true
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/cert.pem NPM_CONFIG_CAFILE=/etc/ssl/cert.pem
 COPY package.json package-lock.json* ./
 RUN npm ci || npm install
 COPY . .
@@ -369,6 +472,9 @@ CMD ["npx", "vite", "preview", "--host", "0.0.0.0", "--port", "3000"]
 const DOCKERIGNORE_REACT = `# Auto-generated.
 node_modules
 dist
+e2e
+playwright-report
+test-results
 .git
 .env
 .env.*

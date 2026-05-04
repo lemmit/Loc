@@ -202,12 +202,14 @@ async function pollHealthy(url: string, timeoutMs: number): Promise<void> {
 /**
  * In sandboxed environments where the docker daemon's outbound HTTPS
  * is intercepted by a TLS-rewriting proxy, the build step needs the
- * proxy CA installed inside the build context.  We do this by
- * inserting a few lines into each generated Dockerfile *only* if
- * `LOOM_E2E_CA_DIR` points at a directory containing `*.crt` files.
+ * proxy CA installed inside the build context.  Each generated
+ * Dockerfile already declares `COPY certs/ /usr/local/share/...` and
+ * the generator emits an empty `<deployable>/certs/.gitkeep`, so we
+ * just drop the proxy's `*.crt` files into every deployable's
+ * `certs/` directory.  No regex rewriting, no per-platform hacks —
+ * an empty `certs/` is a no-op at build time.
  *
- * In any other environment this function is a no-op and the
- * generated Dockerfile is built unchanged.
+ * Driven by `LOOM_E2E_CA_DIR=<path-with-*.crt>`.  Unset = no-op.
  */
 function injectProxyCAsIfPresent(outDir: string): void {
   const caDir = process.env.LOOM_E2E_CA_DIR;
@@ -223,23 +225,10 @@ function injectProxyCAsIfPresent(outDir: string): void {
     .map((d) => d.name);
 
   for (const sub of subdirs) {
-    const dockerfile = path.join(outDir, sub, "Dockerfile");
-    if (!fs.existsSync(dockerfile)) continue;
+    const certsDir = path.join(outDir, sub, "certs");
+    if (!fs.existsSync(certsDir)) continue; // not a generated deployable
     for (const crt of crts) {
-      fs.copyFileSync(path.join(caDir, crt), path.join(outDir, sub, crt));
+      fs.copyFileSync(path.join(caDir, crt), path.join(certsDir, crt));
     }
-    let content = fs.readFileSync(dockerfile, "utf8");
-    if (content.includes("dotnet/sdk")) {
-      content = content.replace(
-        /(FROM mcr\.microsoft\.com\/dotnet\/sdk[^\n]+\nWORKDIR \/src\n)/,
-        `$1COPY *.crt /usr/local/share/ca-certificates/\nRUN update-ca-certificates 2>&1 | tail -1\n`,
-      );
-    } else if (content.includes("node:22-alpine")) {
-      content = content.replace(
-        /(FROM node:22-alpine[^\n]+\nWORKDIR \/app\n)/,
-        `$1COPY *.crt /usr/local/share/ca-certificates/\nRUN cat /usr/local/share/ca-certificates/*.crt >> /etc/ssl/cert.pem\nENV NODE_EXTRA_CA_CERTS=/etc/ssl/cert.pem\nENV NPM_CONFIG_CAFILE=/etc/ssl/cert.pem\n`,
-      );
-    }
-    fs.writeFileSync(dockerfile, content);
   }
 }

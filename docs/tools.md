@@ -385,6 +385,98 @@ error from mutations surface via `@mantine/notifications`.
 The generated app is a regular Vite project — `npm install && npm
 run build && npm run preview` builds and serves a production bundle.
 
+### Playwright UI tests (page objects per aggregate)
+
+Every React deployable ships a Playwright suite under `<deployable>/e2e/`:
+
+```
+<deployable>/
+├── src/                            # the app
+└── e2e/
+    ├── package.json                # @playwright/test (kept out of the runtime image)
+    ├── playwright.config.ts        # baseURL = http://localhost:<port>, override via E2E_BASE_URL
+    ├── smoke.spec.ts               # auto-generated: every list page loads
+    └── pages/
+        ├── order.ts                # OrderListPage / OrderNewPage / OrderDetailPage
+        └── product.ts
+```
+
+Page-object classes are derived directly from the IR.  Per aggregate:
+
+- `<Agg>ListPage` — `goto()`, `create()`, `row(id)`, `open(id)`
+- `<Agg>NewPage` — `goto()`, `fill(input: Partial<Create<Agg>Request>)`, `submit() → <Agg>DetailPage`
+- `<Agg>DetailPage` — `goto()`, `field(name)`, `<part>Count()`, plus one method per public DSL operation typed against `<Op>Request`
+
+A user-written test reads top-down:
+
+```ts
+import { OrderListPage } from "./pages/order.js";
+import { ProductListPage } from "./pages/product.js";
+
+test("create order, add line, confirm", async ({ page }) => {
+  const prod = await new ProductListPage(page).goto()
+    .then((p) => p.create())
+    .then((p) => p.fill({ sku: "W-1", price: { amount: 5, currency: "USD" } }))
+    .then((p) => p.submit());
+
+  const ord = await new OrderListPage(page).goto()
+    .then((p) => p.create())
+    .then((p) => p.fill({ customerId: "cust", status: "Draft", placedAt: "2024-01-01T00:00" }))
+    .then((p) => p.submit());
+
+  await ord.addLine({ productId: prod.id, qty: 3 });
+  await ord.confirm();
+  await ord.goto();
+  expect(await ord.field("status")).toBe("Confirmed");
+});
+```
+
+The selectors come from stable `data-testid` attributes the React generator
+sprinkles on every interactive element:
+
+| Element                      | testid pattern                                  |
+| ---------------------------- | ----------------------------------------------- |
+| List page root               | `<plural>-list`                                 |
+| List "Create" button         | `<plural>-list-create`                          |
+| List row                     | `<plural>-row-<id>`                             |
+| List row link to detail      | `<plural>-row-<id>-link`                        |
+| List cell                    | `<plural>-row-<id>-<field>`                     |
+| New page root                | `<plural>-new`                                  |
+| New form input               | `<plural>-new-input-<field>` (nested for VOs)   |
+| New "Create" submit          | `<plural>-new-submit`                           |
+| Detail page root             | `<plural>-detail`                               |
+| Detail field display         | `<plural>-detail-<field>`                       |
+| Operation button             | `<plural>-op-<opName>`                          |
+| Operation modal form         | `<plural>-op-<opName>-form`                     |
+| Operation modal input        | `<plural>-op-<opName>-input-<field>`            |
+| Operation modal submit       | `<plural>-op-<opName>-submit`                   |
+| Contained-part subtable      | `<plural>-detail-<containment>`                 |
+| Contained-part row           | `<plural>-detail-<containment>-row-<id>`        |
+
+To run against the live compose stack:
+
+```bash
+docker compose up -d
+cd <deployable>/e2e
+npm install
+npx playwright install --with-deps chromium
+npx playwright test
+```
+
+### Proxy CAs (sandboxed builds)
+
+Each generated deployable contains an empty `certs/` directory (with a
+`.gitkeep` placeholder).  Drop your proxy's `*.crt` files into
+`<deployable>/certs/` before `docker compose build` and the build
+trusts them — the Dockerfile already declares the necessary `COPY` and
+`update-ca-certificates`/`NODE_EXTRA_CA_CERTS` lines.  An empty
+`certs/` is a no-op, so this costs nothing in environments that don't
+need it.
+
+The opt-in `LOOM_E2E_CA_DIR` environment variable (used by
+`test/e2e.test.ts`) just copies the host's CAs into each deployable's
+`certs/` for you; no Dockerfile rewriting.
+
 ### Cross-platform OpenAPI parity check
 
 When the same module is hosted on more than one deployable across

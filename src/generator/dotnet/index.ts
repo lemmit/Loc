@@ -265,6 +265,7 @@ function emitProject(
   out.set(`${ns}.csproj`, renderCsproj(ns));
   out.set("Dockerfile", renderDockerfile(ns));
   out.set(".dockerignore", renderDockerignore());
+  out.set("certs/.gitkeep", "");
 }
 
 function emitTestProject(

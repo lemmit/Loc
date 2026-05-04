@@ -2,6 +2,7 @@
   "name": "loc-ddd-dsl",
   "version": "0.1.0",
   "description": "Langium-based DDD DSL with TypeScript (Hono + Drizzle) and .NET (ASP.NET Core + EF Core) code generators",
+  "license": "FSL-1.1-Apache-2.0",
   "type": "module",
   "engines": {
     "node": ">=18"

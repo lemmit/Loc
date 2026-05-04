@@ -118,6 +118,72 @@ describe("react generator", () => {
     expect(config).toMatch(/http:\/\/localhost:8080/);
   });
 
+  it("sprinkles stable data-testid attributes on every interactive element", async () => {
+    const model = await buildModel("examples/acme.ddd");
+    const { files } = generateSystems(model);
+    const list = files.get("web_app/src/pages/orders/list.tsx")!;
+    const newPage = files.get("web_app/src/pages/orders/new.tsx")!;
+    const detail = files.get("web_app/src/pages/orders/detail.tsx")!;
+    expect(list).toMatch(/data-testid="orders-list-create"/);
+    expect(list).toMatch(/data-testid=\{`orders-row-\$\{row\.id\}`\}/);
+    expect(newPage).toMatch(/data-testid="orders-new-input-customerId"/);
+    expect(newPage).toMatch(/data-testid="orders-new-submit"/);
+    expect(detail).toMatch(/data-testid="orders-detail-status"/);
+    expect(detail).toMatch(/data-testid="orders-op-confirm"/);
+    expect(detail).toMatch(/data-testid="orders-op-confirm-submit"/);
+    expect(detail).toMatch(/data-testid="orders-op-addLine-input-productId"/);
+  });
+
+  it("emits Playwright page-object classes per aggregate under e2e/pages/", async () => {
+    const model = await buildModel("examples/acme.ddd");
+    const { files } = generateSystems(model);
+    const orderPo = files.get("web_app/e2e/pages/order.ts")!;
+    expect(orderPo).toMatch(/from "@playwright\/test"/);
+    expect(orderPo).toMatch(/export class OrderListPage/);
+    expect(orderPo).toMatch(/export class OrderNewPage/);
+    expect(orderPo).toMatch(/export class OrderDetailPage/);
+    // Typed input contract.
+    expect(orderPo).toMatch(/Partial<CreateOrderRequest>/);
+    expect(orderPo).toMatch(/AddLineRequest/);
+    // One method per public op.
+    expect(orderPo).toMatch(/async addLine\(input: AddLineRequest\)/);
+    expect(orderPo).toMatch(/async confirm\(\): Promise<this>/);
+    // Master-detail helper for the contained collection.
+    expect(orderPo).toMatch(/async linesCount\(\): Promise<number>/);
+    // Field reader is typed off the response shape.
+    expect(orderPo).toMatch(/field<K extends keyof OrderResponse>/);
+  });
+
+  it("emits playwright.config.ts and a smoke spec under e2e/", async () => {
+    const model = await buildModel("examples/acme.ddd");
+    const { files } = generateSystems(model);
+    const config = files.get("web_app/e2e/playwright.config.ts")!;
+    expect(config).toMatch(/E2E_BASE_URL/);
+    expect(config).toMatch(/http:\/\/localhost:3001/);
+    const smoke = files.get("web_app/e2e/smoke.spec.ts")!;
+    expect(smoke).toMatch(/orders list loads/);
+    expect(smoke).toMatch(/products list loads/);
+    // e2e package.json is independent so the runtime image stays slim.
+    const e2ePkg = JSON.parse(files.get("web_app/e2e/package.json")!);
+    expect(e2ePkg.devDependencies["@playwright/test"]).toBeTruthy();
+    const webPkg = JSON.parse(files.get("web_app/package.json")!);
+    expect(webPkg.devDependencies["@playwright/test"]).toBeUndefined();
+  });
+
+  it("emits a certs/ directory + Dockerfile that copies it (proxy-CA escape hatch)", async () => {
+    const model = await buildModel("examples/acme.ddd");
+    const { files } = generateSystems(model);
+    expect(files.has("web_app/certs/.gitkeep")).toBe(true);
+    expect(files.has("api/certs/.gitkeep")).toBe(true);
+    expect(files.has("catalog_web/certs/.gitkeep")).toBe(true);
+    const reactDocker = files.get("web_app/Dockerfile")!;
+    expect(reactDocker).toMatch(/COPY certs\//);
+    const dotnetDocker = files.get("api/Dockerfile")!;
+    expect(dotnetDocker).toMatch(/COPY certs\//);
+    const honoDocker = files.get("catalog_web/Dockerfile")!;
+    expect(honoDocker).toMatch(/COPY certs\//);
+  });
+
   it("docker-compose service has VITE_API_BASE_URL and no DB connection", async () => {
     const model = await buildModel("examples/acme.ddd");
     const { files } = generateSystems(model);

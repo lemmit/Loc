@@ -50,6 +50,7 @@ export function generateTypeScriptForContexts(
   out.set("drizzle.config.ts", DRIZZLE_CONFIG);
   out.set("Dockerfile", DOCKERFILE_TS);
   out.set(".dockerignore", DOCKERIGNORE_TS);
+  out.set("certs/.gitkeep", "");
   return out;
 }
 
@@ -167,6 +168,12 @@ const DOCKERFILE_TS = `# syntax=docker/dockerfile:1
 
 FROM node:22-alpine AS build
 WORKDIR /app
+# Optional proxy CAs — drop *.crt files into ./certs/ to make npm
+# trust them.  The directory always exists (with a .gitkeep), so
+# this COPY is a no-op when no CAs are configured.
+COPY certs/ /usr/local/share/ca-certificates/
+RUN cat /usr/local/share/ca-certificates/*.crt 2>/dev/null >> /etc/ssl/cert.pem || true
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/cert.pem NPM_CONFIG_CAFILE=/etc/ssl/cert.pem
 COPY package.json package-lock.json* ./
 RUN npm ci || npm install
 COPY . .

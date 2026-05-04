@@ -40,6 +40,11 @@ export function wireType(
   void ctx;
   switch (t.kind) {
     case "primitive":
+      // Datetime crosses the wire as an ISO string on both backends so
+      // the cross-platform JSON contract stays symmetric and clients
+      // don't have to care which platform served the response.  The
+      // command-argument helpers below parse / format around this.
+      if (t.name === "datetime") return "string";
       return renderCsType(t);
     case "id":
       return csIdValueClrType("guid");
@@ -64,6 +69,12 @@ export function wireToCommandArgument(
 ): string {
   switch (t.kind) {
     case "primitive":
+      if (t.name === "datetime") {
+        // Wire is a string; coerce to UTC DateTime regardless of whether
+        // the caller sent a Z-suffixed value (most clients) or a naive
+        // datetime-local string (browser <input type="datetime-local">).
+        return `System.DateTime.Parse(${expr}, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal)`;
+      }
       return expr;
     case "id":
       return `new ${t.targetName}Id(${expr})`;
@@ -96,6 +107,11 @@ export function projectToResponse(
 ): string {
   switch (t.kind) {
     case "primitive":
+      if (t.name === "datetime") {
+        // Round-trip ISO 8601 with Z suffix — matches the Hono wire so
+        // clients see one shape regardless of which backend served them.
+        return `${domainExpr}.ToUniversalTime().ToString("o")`;
+      }
       return domainExpr;
     case "id":
       return `${domainExpr}.Value`;

@@ -263,10 +263,11 @@ function emitResponseSchema(
 // ---------------------------------------------------------------------------
 
 function zodForRequest(t: TypeIR): string {
-  // Mantine inputs hand back native JS types (Date, number, boolean),
-  // so the request schema accepts those directly.  JSON.stringify
-  // serializes Date → ISO string and number → number, matching the
-  // backend's request decoders.
+  // Form inputs hand back native JS types where Mantine has a typed
+  // primitive (number, boolean), and ISO strings for datetime — we
+  // use a plain <input type="datetime-local"> so values are easy to
+  // fill from Playwright tests.  JSON.stringify passes numbers and
+  // strings through untouched.
   switch (t.kind) {
     case "primitive":
       switch (t.name) {
@@ -281,7 +282,7 @@ function zodForRequest(t: TypeIR): string {
         case "bool":
           return "z.boolean()";
         case "datetime":
-          return "z.date()";
+          return "z.string()";
       }
     /* eslint-disable-next-line no-fallthrough */
     case "id":
