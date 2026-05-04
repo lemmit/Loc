@@ -38,7 +38,25 @@ export function buildRepositoryFile(
   lines.push(
     `import type { NodePgDatabase } from "drizzle-orm/node-postgres";`,
   );
-  lines.push(`import { eq, and, inArray } from "drizzle-orm";`);
+  // Walk every find's filter to figure out which Drizzle operators
+  // we'll need.  Default operators (eq / and / inArray) are always
+  // pulled in; the lowering may add ne / gt / gte / lt / lte / or /
+  // not depending on the expression shape.
+  const drizzleOps = new Set<string>(["eq", "and", "inArray"]);
+  if (repo) {
+    for (const find of repo.finds) {
+      if (!find.filter) continue;
+      const lowered = lowerToDrizzle(
+        find.filter,
+        camel(plural(agg.name)),
+        ctx,
+      );
+      if (lowered) for (const op of lowered.ops) drizzleOps.add(op);
+    }
+  }
+  lines.push(
+    `import { ${[...drizzleOps].sort().join(", ")} } from "drizzle-orm";`,
+  );
   lines.push(`import * as schema from "../schema.js";`);
   // Imports for domain types
   const partNames = agg.parts.map((p) => p.name);
@@ -470,14 +488,20 @@ function findQueryMethod(
     .join(", ");
   let whereClause: string;
   if (find.filter) {
-    // Drizzle doesn't support arbitrary lambda filters compiled to SQL;
-    // for the v1 backend we drop a TS predicate inline and document the
-    // limitation in the generated comment.  The user can hand-edit to
-    // express the same intent with Drizzle operators.
-    whereClause =
-      `.where(/* TODO: translate where-clause to Drizzle operators: ${escapeForComment(
+    // Try lowering the IR expression to Drizzle operators.  Falls
+    // back to a TODO comment (no SQL filter applied) only when the
+    // expression contains shapes Drizzle can't represent — users hit
+    // this for things like `lines.count > 0` where the predicate
+    // depends on aggregated child rows.  Common shapes (binary
+    // comparisons, &&/||, !) lower cleanly.
+    const lowered = lowerToDrizzle(find.filter, tableName, ctx);
+    if (lowered) {
+      whereClause = `.where(${lowered.expr})`;
+    } else {
+      whereClause = `.where(/* TODO: translate where-clause to Drizzle operators: ${escapeForComment(
         renderTsExprAsString(find.filter),
       )} */ undefined as never)`;
+    }
   } else {
     const conditions: string[] = [];
     for (const p of find.params) {
@@ -646,4 +670,136 @@ function collectEnums(agg: AggregateIR, ctx: BoundedContextIR): string[] {
   for (const f of agg.fields) visit(f.type);
   for (const part of agg.parts) for (const f of part.fields) visit(f.type);
   return ctx.enums.filter((e) => used.has(e.name)).map((e) => e.name);
+}
+
+// ---------------------------------------------------------------------------
+// IR expression → Drizzle expression
+//
+// Lowers the common subset of `where`-clause expressions to Drizzle
+// operators (eq / ne / gt / gte / lt / lte / and / or / not), keyed
+// off `schema.<table>.<column>` references.  Returns null when the
+// expression contains shapes Drizzle can't represent in plain SQL
+// (collection ops, lambdas, member access into parts, etc.); the
+// caller then falls back to a TODO comment.
+// ---------------------------------------------------------------------------
+
+const COMPARE_OP_TO_DRIZZLE: Record<string, string> = {
+  "==": "eq",
+  "!=": "ne",
+  "<": "lt",
+  "<=": "lte",
+  ">": "gt",
+  ">=": "gte",
+};
+
+interface DrizzleLowering {
+  /** The TypeScript source for the whole expression. */
+  expr: string;
+  /** Operators referenced; caller adds them to the file's import line. */
+  ops: Set<string>;
+}
+
+function lowerToDrizzle(
+  expr: import("../../ir/loom-ir.js").ExprIR,
+  tableName: string,
+  ctx: BoundedContextIR,
+): DrizzleLowering | null {
+  const ops = new Set<string>();
+  const text = lowerExpr(expr);
+  if (text === null) return null;
+  return { expr: text, ops };
+
+  function lowerExpr(e: import("../../ir/loom-ir.js").ExprIR): string | null {
+    if (e.kind === "paren") return lowerExpr(e.inner);
+    if (e.kind === "binary") {
+      if (e.op === "&&" || e.op === "||") {
+        const l = lowerExpr(e.left);
+        const r = lowerExpr(e.right);
+        if (l === null || r === null) return null;
+        const fn = e.op === "&&" ? "and" : "or";
+        ops.add(fn);
+        return `${fn}(${l}, ${r})`;
+      }
+      const drizzleFn = COMPARE_OP_TO_DRIZZLE[e.op];
+      if (!drizzleFn) return null;
+      const colExpr =
+        renderColumnRef(e.left) ?? renderColumnRef(e.right);
+      const valueExpr =
+        renderColumnRef(e.left) === null
+          ? renderValue(e.left)
+          : renderValue(e.right);
+      if (colExpr === null || valueExpr === null) return null;
+      ops.add(drizzleFn);
+      return `${drizzleFn}(${colExpr}, ${valueExpr})`;
+    }
+    if (e.kind === "unary" && e.op === "!") {
+      const inner = lowerExpr(e.operand);
+      if (inner === null) return null;
+      ops.add("not");
+      return `not(${inner})`;
+    }
+    return null;
+  }
+
+  function renderColumnRef(e: import("../../ir/loom-ir.js").ExprIR): string | null {
+    if (e.kind === "paren") return renderColumnRef(e.inner);
+    // `this.field` — direct column access.  In the IR this is a
+    // `member` over the `this` literal.
+    if (e.kind === "member" && e.receiver.kind === "this") {
+      return `schema.${tableName}.${e.member}`;
+    }
+    // `this.field.subField` (value-object member access).  Schema
+    // flattens VO fields into `<field>_<subField>` columns.
+    if (
+      e.kind === "member" &&
+      e.receiver.kind === "member" &&
+      e.receiver.receiver.kind === "this"
+    ) {
+      return `schema.${tableName}.${e.receiver.member}_${e.member}`;
+    }
+    // Bare-identifier reference to a `this` property (the validator
+    // resolves these to `this-prop`).
+    if (e.kind === "ref" && e.refKind === "this-prop") {
+      return `schema.${tableName}.${e.name}`;
+    }
+    return null;
+  }
+
+  function renderValue(e: import("../../ir/loom-ir.js").ExprIR): string | null {
+    if (e.kind === "paren") return renderValue(e.inner);
+    if (e.kind === "literal") {
+      switch (e.lit) {
+        case "string":
+          return JSON.stringify(e.value);
+        case "int":
+        case "decimal":
+          return e.value;
+        case "bool":
+          return e.value;
+        case "null":
+          return "null";
+        default:
+          return null;
+      }
+    }
+    if (e.kind === "ref") {
+      // Param / let / lambda: bare identifier.  `as never` keeps
+      // Drizzle's column-vs-value inference happy when the param's
+      // branded type doesn't match the column's row-shape directly.
+      if (
+        e.refKind === "param" ||
+        e.refKind === "let" ||
+        e.refKind === "lambda"
+      ) {
+        return `${e.name} as never`;
+      }
+      // Enum value: render as the literal string.  EF / Drizzle store
+      // enums as text columns matching `OrderStatus.Draft` → "Draft".
+      if (e.refKind === "enum-value") {
+        return JSON.stringify(e.name);
+      }
+    }
+    void ctx;
+    return null;
+  }
 }

@@ -140,14 +140,67 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
     },
     120_000,
   );
+
+  it(
+    "cross-check: response component schemas have the same field set across backends",
+    async () => {
+      // Both backends serialize the Product wire-shape: ProductResponse
+      // (id, sku, price.amount, price.currency).  If the generators
+      // drift on field names or shapes, this diff fires.
+      const dotnetSpec = await fetchSpec(
+        "http://localhost:8081/swagger/v1/swagger.json",
+      );
+      const honoSpec = await fetchSpec("http://localhost:3000/openapi.json");
+
+      // Schemas worth comparing — both backends declare these.
+      const sharedSchemas = ["ProductResponse"];
+
+      for (const name of sharedSchemas) {
+        const d = fieldSet(dotnetSpec, name);
+        const h = fieldSet(honoSpec, name);
+        const onlyD = [...d].filter((f) => !h.has(f)).sort();
+        const onlyH = [...h].filter((f) => !d.has(f)).sort();
+        if (onlyD.length > 0 || onlyH.length > 0) {
+          console.error(`Shape diff for ${name}:`);
+          console.error("  only on .NET :", onlyD);
+          console.error("  only on Hono :", onlyH);
+        }
+        expect(onlyD, `${name} fields only on .NET`).toEqual([]);
+        expect(onlyH, `${name} fields only on Hono`).toEqual([]);
+        expect(d.size, `${name} field set should be non-empty`).toBeGreaterThan(0);
+      }
+    },
+    120_000,
+  );
 });
 
 interface OpenApiPathItem {
   [method: string]: unknown;
 }
 
+interface OpenApiSchema {
+  type?: string;
+  properties?: Record<string, unknown>;
+  items?: OpenApiSchema;
+  $ref?: string;
+}
+
 interface OpenApiSpec {
   paths?: Record<string, OpenApiPathItem>;
+  components?: { schemas?: Record<string, OpenApiSchema> };
+}
+
+/**
+ * Field-name set for a named component schema.  Used by the cross-
+ * platform shape diff: both backends produce `<Agg>Response`, so we
+ * line up `properties`'s keys.  Doesn't recurse into nested schemas
+ * (`price` shows up once; the cross-check on its sub-fields runs as
+ * a separate pass when needed).
+ */
+function fieldSet(spec: OpenApiSpec, schemaName: string): Set<string> {
+  const schema = spec.components?.schemas?.[schemaName];
+  if (!schema || !schema.properties) return new Set();
+  return new Set(Object.keys(schema.properties));
 }
 
 async function fetchSpec(url: string): Promise<OpenApiSpec> {

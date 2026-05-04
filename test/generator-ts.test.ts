@@ -109,4 +109,21 @@ describe("typescript generator", () => {
     expect(repo).toMatch(/toWire\(root: Order\): unknown/);
     expect(repo).toMatch(/async all\(\): Promise<Order\[\]>/);
   });
+
+  it("lowers `where` filter expressions to Drizzle operators (not a TODO comment)", async () => {
+    const model = await buildModel("examples/sales.ddd");
+    const files = generateTypeScript(model);
+    const repo = files.get("db/repositories/order-repository.ts")!;
+    // sales.ddd's `activeForCustomer` declares
+    //   where this.customerId == forCustomer && this.status == Draft
+    // Both branches lower cleanly; the `&&` becomes `and(...)`.
+    expect(repo).toMatch(
+      /\.where\(and\(eq\(schema\.orders\.customerId, forCustomer as never\), eq\(schema\.orders\.status, "Draft"\)\)\)/,
+    );
+    // No TODO fallback for this find.
+    expect(repo).not.toMatch(/TODO: translate where-clause[\s\S]*activeForCustomer/);
+    // The import line picks up `and` (in addition to the always-present
+    // `eq` / `inArray`).
+    expect(repo).toMatch(/import \{[^}]*\band\b[^}]*\} from "drizzle-orm"/);
+  });
 });
