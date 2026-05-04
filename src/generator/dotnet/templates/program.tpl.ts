@@ -27,14 +27,26 @@ builder.Services.AddControllers(opts =>
     opts.Filters.Add<DomainExceptionFilter>();
 });
 
+// OpenAPI spec generation — Swashbuckle reflects over controllers and
+// emits the spec at /swagger/v1/swagger.json.  The cross-platform
+// contract check diffs this against the Hono-emitted /openapi.json.
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new() { Title = "{{ns}}", Version = "v1" });
+});
+
 var app = builder.Build();
 // Liveness probe — used by docker-compose / kubernetes / smoke tests.
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+app.UseSwagger();
 app.MapControllers();
 
-// Dev-friendly schema bootstrap: create the database from the model
-// if it doesn't already exist.  For production deployments, replace
-// this with 'dotnet ef database update' and remove the line.
+// Dev-friendly schema bootstrap: create the schema from the model on
+// first boot.  System-mode compose isolates each deployable to its own
+// database (see db-init/), so EnsureCreated runs cleanly without
+// racing peers.  For production, replace this with
+// 'dotnet ef database update' and remove the block.
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -76,6 +88,8 @@ const CSPROJ_TPL = hb.compile(
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Mediator.Abstractions" Version="2.1.7" />
+    <!-- OpenAPI spec emitted at /swagger/v1/swagger.json -->
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.9.0" />
   </ItemGroup>
 </Project>
 `,

@@ -156,6 +156,13 @@ function emitIds(ctx: BoundedContextIR, ns: string, out: Map<string, string>): v
 }
 
 function emitEnums(ctx: BoundedContextIR, ns: string, out: Map<string, string>): void {
+  // Always emit a marker so `using <ns>.Domain.Enums;` resolves even
+  // when the project has no enums in scope (deployables that include
+  // only modules without enums would otherwise fail to compile).
+  out.set(
+    "Domain/Enums/_namespace.cs",
+    `// Auto-generated namespace marker.\nnamespace ${ns}.Domain.Enums;\n`,
+  );
   for (const e of ctx.enums) {
     out.set(`Domain/Enums/${e.name}.cs`, renderEnum(e, ns));
   }
@@ -166,6 +173,10 @@ function emitValueObjects(
   ns: string,
   out: Map<string, string>,
 ): void {
+  out.set(
+    "Domain/ValueObjects/_namespace.cs",
+    `// Auto-generated namespace marker.\nnamespace ${ns}.Domain.ValueObjects;\n`,
+  );
   for (const vo of ctx.valueObjects) {
     out.set(`Domain/ValueObjects/${vo.name}.cs`, renderValueObject(vo, ns));
   }

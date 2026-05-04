@@ -78,6 +78,16 @@ describe(".NET generator", () => {
     expect(dockerignore).toMatch(/\*\*\/bin/);
   });
 
+  it("wires Swashbuckle so /swagger/v1/swagger.json is exposed", async () => {
+    const model = await buildModel("examples/sales.ddd");
+    const files = generateDotnet(model);
+    const csproj = files.get("Sales.csproj")!;
+    expect(csproj).toMatch(/<PackageReference Include="Swashbuckle\.AspNetCore"/);
+    const program = files.get("Program.cs")!;
+    expect(program).toMatch(/AddSwaggerGen/);
+    expect(program).toMatch(/UseSwagger/);
+  });
+
   it("translates `where` filter to a LINQ predicate", async () => {
     const model = await buildModel("examples/sales.ddd");
     const files = generateDotnet(model);

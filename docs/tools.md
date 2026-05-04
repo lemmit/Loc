@@ -279,6 +279,33 @@ The compose file is a generated artefact — pin it via `.loomignore`
 if you customise it, since regenerating would otherwise overwrite
 your changes.
 
+#### Per-deployable databases
+
+Each deployable owns its own postgres database, isolated from peers
+sharing the same `db` service.  This is necessary because EF Core's
+`EnsureCreated` is all-or-nothing per database: with two .NET
+deployables on a shared DB, whichever boots first creates only its
+own subset of tables, and the second deployable sees existing tables
+and creates nothing — silently leaving its own tables missing.
+
+`ddd generate system` emits `db-init/00-create-databases.sql` with
+one `CREATE DATABASE <slug>;` per deployable.  Postgres mounts the
+directory as `/docker-entrypoint-initdb.d/`, which runs once on the
+first boot of an empty `pgdata` volume.  Each deployable's
+connection string is then scoped to its own database
+(`Database=api`, `Database=catalog_api`, etc.).
+
+To start fresh after schema changes that EF Core's `EnsureCreated`
+won't pick up (it only creates; it never alters), drop the volume:
+
+```bash
+docker compose down -v && docker compose up -d
+```
+
+For production, use the per-backend migration tools instead of the
+init script + `EnsureCreated` combo (see *Migrations workflow*
+above).
+
 Loom does **not** generate k8s manifests or CI pipelines — those are
 project-init concerns, not derived from the `.ddd` source.
 
@@ -330,3 +357,35 @@ npm install && npm test
 Endpoints default to `http://localhost:<port>` for each deployable.
 Override per environment via `E2E_<DEPLOYABLE>_BASE` (e.g.
 `E2E_API_BASE=https://staging.example.com`).
+
+### Cross-platform OpenAPI parity check
+
+When the same module is hosted on more than one deployable across
+different platforms (e.g. `Catalog` served by both a .NET and a Hono
+deployable), the e2e additionally diffs the two OpenAPI specs to
+catch generator drift.  Both backends self-describe via their
+framework-native OpenAPI emitter:
+
+| Platform | Library              | Endpoint                        |
+| -------- | -------------------- | ------------------------------- |
+| .NET     | Swashbuckle.AspNetCore | `/swagger/v1/swagger.json`    |
+| Hono     | `@hono/zod-openapi`    | `/openapi.json`               |
+
+The check fetches both, builds a `Set<"METHOD path">` from each, and
+asserts equality (after normalising path templates so `{id}` and
+`:id` collapse).  Infrastructure routes (`/health`, `/openapi.json`,
+`/swagger/...`) are excluded from the diff so the comparison stays
+focused on aggregate routes.
+
+Why framework-native rather than emitting OpenAPI from the IR:
+
+- Drift you *want* to catch (typo in a controller, wrong status
+  code, schema mismatch) only shows up if the spec is derived from
+  what the framework actually serves.  An IR-based spec would agree
+  with itself even when the running code disagrees.
+- Both libraries are well-supported in their ecosystems, so the
+  generator's output looks like normal hand-written code rather than
+  carrying a bespoke OpenAPI emitter.
+
+If the diff fails, the test logs the offending operations so you
+can see exactly which routes drifted on which platform.

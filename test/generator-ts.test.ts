@@ -75,4 +75,20 @@ describe("typescript generator", () => {
     const dockerignore = files.get(".dockerignore")!;
     expect(dockerignore).toMatch(/node_modules/);
   });
+
+  it("Hono routes use @hono/zod-openapi and expose /openapi.json", async () => {
+    const model = await buildModel("examples/sales.ddd");
+    const files = generateTypeScript(model);
+    const orderRoutes = files.get("http/order.routes.ts")!;
+    expect(orderRoutes).toMatch(/from "@hono\/zod-openapi"/);
+    expect(orderRoutes).toMatch(/createRoute\(\{/);
+    expect(orderRoutes).toMatch(/operationId: "createOrder"/);
+    expect(orderRoutes).toMatch(/operationId: "getOrderById"/);
+    expect(orderRoutes).toMatch(/operationId: "addLineOrder"/);
+    const httpIndex = files.get("http/index.ts")!;
+    expect(httpIndex).toMatch(/app\.doc\("\/openapi\.json"/);
+    expect(httpIndex).toMatch(/openapi: "3\.1\.0"/);
+    const pkg = JSON.parse(files.get("package.json")!);
+    expect(pkg.dependencies["@hono/zod-openapi"]).toBeTruthy();
+  });
 });

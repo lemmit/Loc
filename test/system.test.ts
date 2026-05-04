@@ -82,6 +82,25 @@ describe("system / module / deployable", () => {
     expect(compose).toMatch(/wget -qO- http:\/\/localhost:3000\/health/);
   });
 
+  it("isolates each deployable to its own postgres database", async () => {
+    const model = await buildModel("examples/acme.ddd");
+    const { files } = generateSystems(model);
+    // Init script runs once on first boot of an empty pgdata volume.
+    const init = files.get("db-init/00-create-databases.sql")!;
+    expect(init).toMatch(/CREATE DATABASE api;/);
+    expect(init).toMatch(/CREATE DATABASE catalog_api;/);
+    expect(init).toMatch(/CREATE DATABASE catalog_web;/);
+    const compose = files.get("docker-compose.yml")!;
+    // Postgres mounts the init script.
+    expect(compose).toMatch(
+      /\.\/db-init:\/docker-entrypoint-initdb\.d:ro/,
+    );
+    // Each deployable's connection string targets its own database.
+    expect(compose).toMatch(/Database=api;/);
+    expect(compose).toMatch(/Database=catalog_api;/);
+    expect(compose).toMatch(/postgres:postgres@db:5432\/catalog_web/);
+  });
+
   it("emits a /health endpoint on each deployable", async () => {
     const model = await buildModel("examples/acme.ddd");
     const { files } = generateSystems(model);

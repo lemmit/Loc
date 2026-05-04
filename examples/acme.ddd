@@ -90,6 +90,15 @@ system Acme {
         port: 3000
     }
 
+    // Same Catalog surface on .NET — exists so the OpenAPI cross-check
+    // can diff `catalogApi` (.NET) against `catalogWeb` (Hono) and
+    // surface any drift between the platforms' route emission.
+    deployable catalogApi {
+        platform: dotnet
+        modules: Catalog
+        port: 8081
+    }
+
     // ------------------------------------------------------------------
     // End-to-end tests — exercise the deployable through HTTP.  The
     // `api` magic identifier resolves to the named deployable's HTTP

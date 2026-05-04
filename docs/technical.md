@@ -332,11 +332,24 @@ The vitest suite in `test/` covers:
 - Generator emission and structure (file set + key matchers).
 - CLI behaviour (`.loomignore`, `--dry-run`, project-shell file
   absence).
+- System mode: per-deployable file routing, docker-compose wiring,
+  per-deployable database isolation, and the cross-platform OpenAPI
+  parity diff (when the same module is hosted on both backends).
 
 Generated projects' own type-checking and unit tests serve as the
 integration layer: a `.ddd` with `test` blocks produces a vitest
 suite that exercises the value-object invariants and operation
 preconditions.
+
+The opt-in `LOOM_E2E=1` suite (`test/e2e.test.ts`) goes one layer
+further: it boots the generated docker-compose stack, polls
+`/health` per deployable, runs the generated DSL e2e suite against
+the live system, and — when the same module is hosted on both
+platforms — diffs the .NET (Swashbuckle) and Hono
+(`@hono/zod-openapi`) OpenAPI specs for `(method, path)` parity.
+Framework-native OpenAPI emission is the deliberate choice: an
+IR-derived spec would always agree with itself even when the
+running code disagrees.
 
 ---
 

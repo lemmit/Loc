@@ -65,6 +65,7 @@ function emitSystem(
   }
 
   out.set("docker-compose.yml", renderDockerCompose(sys));
+  out.set("db-init/00-create-databases.sql", renderDbInit(sys));
 
   // E2E test scaffolding — emitted only when the system declares
   // `test e2e` blocks.  Lives at the system root so it can run against
@@ -175,6 +176,13 @@ function renderDockerCompose(sys: SystemIR): string {
   lines.push("      POSTGRES_PASSWORD: postgres");
   lines.push("    volumes:");
   lines.push("      - pgdata:/var/lib/postgresql/data");
+  // Per-deployable databases keep each service's schema isolated.
+  // EF Core's EnsureCreated is all-or-nothing per database, so two
+  // .NET deployables sharing a DB race: the first to start creates
+  // its tables, the second sees existing tables and creates nothing.
+  // The init script runs once on first boot of an empty pgdata
+  // volume; on a fresh `up`, every deployable owns its own DB.
+  lines.push("      - ./db-init:/docker-entrypoint-initdb.d:ro");
   lines.push("    healthcheck:");
   lines.push('      test: ["CMD", "pg_isready", "-U", "postgres"]');
   lines.push("      interval: 5s");
@@ -190,10 +198,22 @@ function renderDockerCompose(sys: SystemIR): string {
   return lines.join("\n") + "\n";
 }
 
+/** Postgres `docker-entrypoint-initdb.d` script: one DATABASE per
+ * deployable.  Postgres only runs the init dir on the first boot of
+ * an empty data volume; this is exactly what we want for dev compose. */
+function renderDbInit(sys: SystemIR): string {
+  const lines: string[] = ["-- Auto-generated."];
+  for (const d of sys.deployables) {
+    const slug = serviceSlug(d.name);
+    lines.push(`CREATE DATABASE ${slug};`);
+  }
+  return lines.join("\n") + "\n";
+}
+
 function renderDeployableService(d: DeployableIR): string[] {
   const slug = serviceSlug(d.name);
   const internal = d.platform === "dotnet" ? 8080 : 3000;
-  const env = envForPlatform(d.platform);
+  const env = envForPlatform(d.platform, slug);
   const lines: string[] = [];
   lines.push(`${slug}:`);
   lines.push(`  build: ./${slug}`);
@@ -214,16 +234,19 @@ function renderDeployableService(d: DeployableIR): string[] {
   return lines;
 }
 
-function envForPlatform(platform: Platform): Array<[string, string]> {
+function envForPlatform(
+  platform: Platform,
+  database: string,
+): Array<[string, string]> {
   if (platform === "dotnet") {
     return [
       [
         "ConnectionStrings__Default",
-        "Host=db;Port=5432;Database=postgres;Username=postgres;Password=postgres",
+        `Host=db;Port=5432;Database=${database};Username=postgres;Password=postgres`,
       ],
     ];
   }
   return [
-    ["DATABASE_URL", "postgres://postgres:postgres@db:5432/postgres"],
+    ["DATABASE_URL", `postgres://postgres:postgres@db:5432/${database}`],
   ];
 }

@@ -76,10 +76,13 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
         timeout: 120_000,
       });
 
-      // Both deployables should respond ok within 60s.  Hono boots in
-      // sub-second; .NET ASP.NET Core takes a few seconds.
+      // Hono boots in sub-second; .NET ASP.NET Core takes a few
+      // seconds (cold restore + EnsureCreated).  When two .NET
+      // services share one postgres they race for connections, so
+      // we give each a generous window.
       await pollHealthy("http://localhost:3000/health", 60_000);
-      await pollHealthy("http://localhost:8080/health", 60_000);
+      await pollHealthy("http://localhost:8080/health", 120_000);
+      await pollHealthy("http://localhost:8081/health", 120_000);
     },
     900_000,
   );
@@ -106,7 +109,77 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
     },
     600_000,
   );
+
+  it(
+    "cross-check: .NET (Swashbuckle) and Hono (zod-openapi) emit the same set of (method, path) for the same modules",
+    async () => {
+      // Both deployables host the Catalog module — Swashbuckle on
+      // .NET (8081) and @hono/zod-openapi on Hono (3000).  If the
+      // generators drift, the (method, path) sets will diverge.
+      const dotnetSpec = await fetchSpec(
+        "http://localhost:8081/swagger/v1/swagger.json",
+      );
+      const honoSpec = await fetchSpec("http://localhost:3000/openapi.json");
+
+      const dotnetOps = collectOps(dotnetSpec);
+      const honoOps = collectOps(honoSpec);
+
+      const onlyDotnet = [...dotnetOps].filter((o) => !honoOps.has(o)).sort();
+      const onlyHono = [...honoOps].filter((o) => !dotnetOps.has(o)).sort();
+
+      if (onlyDotnet.length > 0 || onlyHono.length > 0) {
+        console.error("Cross-check diff:");
+        console.error("  only on .NET :", onlyDotnet);
+        console.error("  only on Hono :", onlyHono);
+      }
+      expect(onlyDotnet, "operations only on .NET").toEqual([]);
+      expect(onlyHono, "operations only on Hono").toEqual([]);
+      // Sanity: each spec should have at least one operation.
+      expect(dotnetOps.size).toBeGreaterThan(0);
+      expect(honoOps.size).toBeGreaterThan(0);
+    },
+    120_000,
+  );
 });
+
+interface OpenApiPathItem {
+  [method: string]: unknown;
+}
+
+interface OpenApiSpec {
+  paths?: Record<string, OpenApiPathItem>;
+}
+
+async function fetchSpec(url: string): Promise<OpenApiSpec> {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`GET ${url} → ${r.status}`);
+  return (await r.json()) as OpenApiSpec;
+}
+
+/** Build a `Set<"METHOD path">` from an OpenAPI spec's `paths`. */
+function collectOps(spec: OpenApiSpec): Set<string> {
+  const out = new Set<string>();
+  for (const [p, item] of Object.entries(spec.paths ?? {})) {
+    // Infrastructure endpoints aren't part of the public contract;
+    // skip them so the diff focuses on aggregate routes.
+    if (p === "/health" || p === "/openapi.json" || p.startsWith("/swagger")) {
+      continue;
+    }
+    for (const m of Object.keys(item)) {
+      const method = m.toUpperCase();
+      if (["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"].includes(method)) {
+        out.add(`${method} ${normalisePath(p)}`);
+      }
+    }
+  }
+  return out;
+}
+
+/** Normalise OpenAPI path templates so `{id}` and `:id` collapse into a
+ * single representation across the two emitters. */
+function normalisePath(p: string): string {
+  return p.replace(/\{[^}]+\}/g, "{id}").replace(/\/+$/, "") || "/";
+}
 
 async function pollHealthy(url: string, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;

@@ -8,11 +8,11 @@ import {
   renderEvents,
   renderHttpIndex,
   renderIds,
-  renderRoutes,
   renderSchema,
   renderTestsFile,
 } from "./templates.js";
 import { buildRepositoryFile } from "./repository-builder.js";
+import { buildRoutesFile } from "./routes-builder.js";
 
 const ERRORS_TS = `// Auto-generated.
 export class DomainError extends Error {
@@ -65,7 +65,7 @@ function emitContext(ctx: BoundedContextIR, out: Map<string, string>): void {
       `db/repositories/${camel(agg.name)}-repository.ts`,
       buildRepositoryFile(agg, repo, ctx),
     );
-    out.set(`http/${camel(agg.name)}.routes.ts`, renderRoutes(agg, repo));
+    out.set(`http/${camel(agg.name)}.routes.ts`, buildRoutesFile(agg, repo, ctx));
     const testsFile = renderTestsFile(agg, ctx);
     if (testsFile) {
       out.set(`domain/${camel(agg.name)}.test.ts`, testsFile);
@@ -97,6 +97,7 @@ const PROJECT_PACKAGE_JSON = JSON.stringify(
     dependencies: {
       hono: "^4.6.0",
       "@hono/node-server": "^1.13.0",
+      "@hono/zod-openapi": "^0.18.0",
       zod: "^3.23.0",
       "drizzle-orm": "^0.36.0",
       pg: "^8.13.0",
