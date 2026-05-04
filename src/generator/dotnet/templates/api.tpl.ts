@@ -57,7 +57,7 @@ public sealed class {{plural (pascal aggregate.name)}}Controller : ControllerBas
         return NoContent();
     }
 
-{{/each}}{{#each finds}}    [HttpGet("{{snake name}}")]
+{{/each}}{{#each finds}}    [HttpGet{{#unless isRoot}}("{{snake name}}"){{/unless}}]
     public async Task<ActionResult<System.Collections.Generic.IReadOnlyList<{{../aggregate.name}}Response>>> {{pascal name}}({{{ queryRouteParams }}})
     {
         var result = await _mediator.Send(new {{pascal name}}Query({{{ queryConstructorArgs }}}));
@@ -106,6 +106,7 @@ export function renderController(
     publicOps: Array<{ name: string; cmdArgs: string[] }>;
     finds: Array<{
       name: string;
+      isRoot: boolean;
       queryRouteParams: string;
       queryConstructorArgs: string;
     }>;

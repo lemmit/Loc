@@ -14,6 +14,7 @@ import {
 import {
   generateTypeScriptForContexts,
 } from "../generator/typescript/index.js";
+import { generateReactForContexts } from "../generator/react/index.js";
 import { renderE2EFile } from "./e2e-render.js";
 
 // ---------------------------------------------------------------------------
@@ -141,11 +142,12 @@ function emitDeployable(
   const files =
     d.platform === "dotnet"
       ? generateDotnetForContexts(contexts, namespace)
-      : generateTypeScriptForContexts(contexts);
+      : d.platform === "hono"
+        ? generateTypeScriptForContexts(contexts)
+        : generateReactForContexts(contexts, sys, d);
   for (const [relPath, content] of files) {
     out.set(`${sub}/${relPath}`, content);
   }
-  void sys;
 }
 
 function capitalize(s: string): string {
@@ -190,7 +192,7 @@ function renderDockerCompose(sys: SystemIR): string {
   lines.push("      retries: 10");
   lines.push("");
   for (const d of sys.deployables) {
-    lines.push(...renderDeployableService(d).map((l) => `  ${l}`));
+    lines.push(...renderDeployableService(d, sys).map((l) => `  ${l}`));
     lines.push("");
   }
   lines.push("volumes:");
@@ -204,29 +206,35 @@ function renderDockerCompose(sys: SystemIR): string {
 function renderDbInit(sys: SystemIR): string {
   const lines: string[] = ["-- Auto-generated."];
   for (const d of sys.deployables) {
+    if (!deployableNeedsDb(d)) continue;
     const slug = serviceSlug(d.name);
     lines.push(`CREATE DATABASE ${slug};`);
   }
   return lines.join("\n") + "\n";
 }
 
-function renderDeployableService(d: DeployableIR): string[] {
+function renderDeployableService(d: DeployableIR, sys: SystemIR): string[] {
   const slug = serviceSlug(d.name);
   const internal = d.platform === "dotnet" ? 8080 : 3000;
-  const env = envForPlatform(d.platform, slug);
+  const env = envForPlatform(d, sys, slug);
   const lines: string[] = [];
   lines.push(`${slug}:`);
   lines.push(`  build: ./${slug}`);
-  lines.push(`  depends_on:`);
-  lines.push(`    db:`);
-  lines.push(`      condition: service_healthy`);
+  if (d.platform !== "react") {
+    lines.push(`  depends_on:`);
+    lines.push(`    db:`);
+    lines.push(`      condition: service_healthy`);
+  }
   lines.push(`  environment:`);
   for (const [k, v] of env) lines.push(`    ${k}: ${JSON.stringify(v)}`);
   lines.push(`  ports:`);
   lines.push(`    - "${d.port}:${internal}"`);
+  // React healthcheck: any 200 from `/` is enough; the SPA shell loads
+  // even before a backend is up.
+  const healthPath = d.platform === "react" ? "/" : "/health";
   lines.push(`  healthcheck:`);
   lines.push(
-    `    test: ["CMD-SHELL", "wget -qO- http://localhost:${internal}/health || exit 1"]`,
+    `    test: ["CMD-SHELL", "wget -qO- http://localhost:${internal}${healthPath} || exit 1"]`,
   );
   lines.push(`    interval: 5s`);
   lines.push(`    timeout: 3s`);
@@ -235,10 +243,11 @@ function renderDeployableService(d: DeployableIR): string[] {
 }
 
 function envForPlatform(
-  platform: Platform,
+  d: DeployableIR,
+  sys: SystemIR,
   database: string,
 ): Array<[string, string]> {
-  if (platform === "dotnet") {
+  if (d.platform === "dotnet") {
     return [
       [
         "ConnectionStrings__Default",
@@ -246,7 +255,22 @@ function envForPlatform(
       ],
     ];
   }
+  if (d.platform === "react") {
+    const target = sys.deployables.find((t) => t.name === d.targetName);
+    return [
+      [
+        "VITE_API_BASE_URL",
+        `http://localhost:${target?.port ?? 8080}`,
+      ],
+    ];
+  }
   return [
     ["DATABASE_URL", `postgres://postgres:postgres@db:5432/${database}`],
   ];
+}
+
+// Avoid emitting a postgres database for frontend deployables that
+// don't connect to one.
+function deployableNeedsDb(d: DeployableIR): boolean {
+  return d.platform !== "react";
 }

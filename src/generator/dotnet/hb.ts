@@ -30,6 +30,17 @@ hb.registerHelper("csStmts", (s: StmtIR[]) => new hb.SafeString(renderCsStatemen
 hb.registerHelper("csParams", (params: ParamIR[]) =>
   new hb.SafeString(params.map((p) => `${renderCsType(p.type)} ${p.name}`).join(", ")),
 );
+// Same as csParams, but always followed by `CancellationToken ct = default`.
+// Drops the separator when there are no domain params, so the auto-included
+// zero-arg `all` find compiles cleanly.
+hb.registerHelper("csParamsAndCt", (params: ParamIR[]) => {
+  const head = params.map((p) => `${renderCsType(p.type)} ${p.name}`).join(", ");
+  return new hb.SafeString(
+    head.length > 0
+      ? `${head}, System.Threading.CancellationToken ct = default`
+      : `System.Threading.CancellationToken ct = default`,
+  );
+});
 hb.registerHelper("escapeStr", (s: string) => new hb.SafeString(JSON.stringify(s)));
 hb.registerHelper("requiredFields", (fields: FieldIR[]) =>
   fields.filter((f) => !f.optional),

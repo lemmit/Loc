@@ -373,6 +373,7 @@ function emitController(
         })),
       finds: (repo?.finds ?? []).map((find) => ({
         name: find.name,
+        isRoot: find.name === "all",
         queryRouteParams: find.params
           .map((p) => `[FromQuery] ${wireType(p.type, ctx, "request")} ${p.name}`)
           .join(", "),

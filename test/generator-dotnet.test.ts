@@ -88,6 +88,25 @@ describe(".NET generator", () => {
     expect(program).toMatch(/UseSwagger/);
   });
 
+  it("enables CORS + camelCase JSON in Program.cs", async () => {
+    const model = await buildModel("examples/sales.ddd");
+    const files = generateDotnet(model);
+    const program = files.get("Program.cs")!;
+    expect(program).toMatch(/AddCors/);
+    expect(program).toMatch(/UseCors\(\)/);
+    expect(program).toMatch(/JsonNamingPolicy\.CamelCase/);
+  });
+
+  it("auto-includes a GET /<plural> find via the `all` repository method", async () => {
+    const model = await buildModel("examples/sales.ddd");
+    const files = generateDotnet(model);
+    const controller = files.get("Api/OrdersController.cs")!;
+    // [HttpGet] (root) — followed by an All(...) action.
+    expect(controller).toMatch(/\[HttpGet\][\s\S]*?All\(/);
+    const repoIface = files.get("Domain/Orders/IOrderRepository.cs")!;
+    expect(repoIface).toMatch(/List<Order>[\s\S]*?All\(/);
+  });
+
   it("translates `where` filter to a LINQ predicate", async () => {
     const model = await buildModel("examples/sales.ddd");
     const files = generateDotnet(model);

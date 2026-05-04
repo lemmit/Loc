@@ -117,4 +117,40 @@ describe("validation", () => {
     `);
     expect(errors).toEqual([]);
   });
+
+  it("rejects a react deployable without 'targets:'", async () => {
+    const { errors } = await parse(`
+      system S {
+        module M { context T { aggregate A { x: int } } }
+        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable web { platform: react, port: 3001 }
+      }
+    `);
+    expect(errors.some((e) => /targets/i.test(e))).toBe(true);
+  });
+
+  it("rejects 'targets:' on a non-react deployable", async () => {
+    const { errors } = await parse(`
+      system S {
+        module M { context T { aggregate A { x: int } } }
+        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable other { platform: hono, modules: M, targets: api, port: 3010 }
+      }
+    `);
+    expect(errors.some((e) => /targets/i.test(e))).toBe(true);
+  });
+
+  it("rejects a react deployable targeting another react deployable", async () => {
+    const { errors } = await parse(`
+      system S {
+        module M { context T { aggregate A { x: int } } }
+        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable webA { platform: react, targets: api, port: 3001 }
+        deployable webB { platform: react, targets: webA, port: 3002 }
+      }
+    `);
+    expect(errors.some((e) => /frontend/i.test(e) && /target/i.test(e))).toBe(
+      true,
+    );
+  });
 });

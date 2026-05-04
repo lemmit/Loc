@@ -63,7 +63,8 @@ the other.
 | Form | Purpose |
 | --- | --- |
 | `module Name { … }` | Groups one or more bounded contexts under a name.  A module is a logical unit; it doesn't directly produce code. |
-| `deployable name { platform: dotnet|hono, modules: A, B, port: N }` | A concrete artefact: one project, one HTTP server, one DbContext, listening on `port`.  Selects which modules to ship. |
+| `deployable name { platform: dotnet\|hono, modules: A, B, port: N }` | A concrete artefact: one project, one HTTP server, one DbContext, listening on `port`.  Selects which modules to ship. |
+| `deployable name { platform: react, targets: <other-deployable>, port: N }` | A frontend deployable: a Vite-built React + RQ + Zod + Mantine SPA whose API base URL is wired to `targets`'s port.  Modules are inherited from the target. |
 | `context Name { … }` | Allowed directly inside a system; treated as if it were in an implicit `_default` module. |
 | `test e2e "name" against <deployable> { … }` | End-to-end test that runs against the named deployable's HTTP API; lowers to a vitest file at the system output root. |
 
@@ -330,6 +331,9 @@ The validator runs after parsing and reports errors for:
 - Unknown / out-of-scope `Id<X>` targets.
 - `contains` referencing a part that belongs to a different aggregate.
 - Operations or `test` blocks declared outside an aggregate root.
+- A `platform: react` deployable without a `targets:` field, or
+  pointing `targets:` at another `react` deployable.
+- A non-react deployable using `targets:` (only valid on frontends).
 
 Warnings (non-fatal):
 

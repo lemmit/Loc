@@ -199,15 +199,20 @@ export interface ModuleIR {
   contexts: BoundedContextIR[];
 }
 
-export type Platform = "dotnet" | "hono";
+export type Platform = "dotnet" | "hono" | "react";
 
 export interface DeployableIR {
   name: string;
   platform: Platform;
-  /** Names of modules included in this deployable. */
+  /** Names of modules included in this deployable.  For react frontends,
+   * inherited from the targeted backend deployable. */
   moduleNames: string[];
   /** HTTP port the deployable's web server listens on. */
   port: number;
+  /** Backend deployable this frontend talks to.  Set only when
+   * platform === "react"; the frontend's API base URL is derived from
+   * the target's port. */
+  targetName?: string;
 }
 
 // ---------------------------------------------------------------------------

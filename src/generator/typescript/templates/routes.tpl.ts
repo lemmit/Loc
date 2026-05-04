@@ -9,6 +9,7 @@ import { hb } from "../hb.js";
 const HTTP_INDEX_TPL = hb.compile(
   `// Auto-generated.
 import { OpenAPIHono } from "@hono/zod-openapi";
+import { cors } from "hono/cors";
 {{#each aggregates}}
 import { {{camel name}}Routes } from "./{{camel name}}.routes.js";
 import { {{name}}Repository } from "../db/repositories/{{camel name}}-repository.js";
@@ -22,6 +23,10 @@ export function createApp(
   events: DomainEventDispatcher = NoopDomainEventDispatcher,
 ): OpenAPIHono {
   const app = new OpenAPIHono();
+  // Permissive CORS so a generated React frontend on a different port
+  // can reach the API in dev compose.  Pin http/index.ts in
+  // .loomignore + tighten in production.
+  app.use("*", cors());
   // Liveness probe — used by docker-compose / kubernetes / smoke tests.
   app.get("/health", (c) => c.json({ status: "ok" }));
 {{#each aggregates}}  app.route("/{{snake (plural name)}}", {{camel name}}Routes(new {{name}}Repository(db, events)));

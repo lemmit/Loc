@@ -43,15 +43,14 @@ Module:
 
 Deployable:
     'deployable' name=ID '{'
-        ('platform' ':' platform=Platform)
-        (',')?
-        ('modules' ':' modules+=[Module:ID] (',' modules+=[Module:ID])*)?
-        (',')?
-        ('port' ':' port=INT)?
+        ('platform' ':' platform=Platform ','?)
+        ('modules' ':' modules+=[Module:ID] (',' modules+=[Module:ID])* ','?)?
+        ('targets' ':' targets=[Deployable:ID] ','?)?
+        ('port' ':' port=INT ','?)?
     '}';
 
 Platform returns string:
-    'dotnet' | 'hono';
+    'dotnet' | 'hono' | 'react';
 
 // ---------------------------------------------------------------------------
 // Top-level

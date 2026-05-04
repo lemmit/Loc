@@ -14,7 +14,7 @@ public interface I{{name}}Repository
 {
     System.Threading.Tasks.Task<{{name}}?> GetByIdAsync({{name}}Id id, System.Threading.CancellationToken ct = default);
     System.Threading.Tasks.Task SaveAsync({{name}} aggregate, System.Threading.CancellationToken ct = default);
-{{#each finds}}    System.Threading.Tasks.Task<{{csType returnType}}> {{pascal name}}({{csParams params}}, System.Threading.CancellationToken ct = default);
+{{#each finds}}    System.Threading.Tasks.Task<{{csType returnType}}> {{pascal name}}({{csParamsAndCt params}});
 {{/each}}
 }
 `,
@@ -73,7 +73,7 @@ public sealed class {{name}}Repository : I{{name}}Repository
         }
     }
 {{#each finds}}
-    public async Task<{{csType returnType}}> {{pascal name}}({{csParams params}}, CancellationToken ct = default)
+    public async Task<{{csType returnType}}> {{pascal name}}({{csParamsAndCt params}})
     {
         return await _db.{{plural (pascal ../name)}}{{{ filterClause }}}{{{ projectionClause }}};
     }

@@ -88,7 +88,25 @@ describe("typescript generator", () => {
     const httpIndex = files.get("http/index.ts")!;
     expect(httpIndex).toMatch(/app\.doc\("\/openapi\.json"/);
     expect(httpIndex).toMatch(/openapi: "3\.1\.0"/);
+    expect(httpIndex).toMatch(/from "hono\/cors"/);
     const pkg = JSON.parse(files.get("package.json")!);
     expect(pkg.dependencies["@hono/zod-openapi"]).toBeTruthy();
+  });
+
+  it("emits a full wire-shape OrderResponse + findAll route + repo serializer", async () => {
+    const model = await buildModel("examples/sales.ddd");
+    const files = generateTypeScript(model);
+    const orderRoutes = files.get("http/order.routes.ts")!;
+    // Response carries every aggregate field + parts + derived.
+    expect(orderRoutes).toMatch(/OrderResponse = z\.object/);
+    expect(orderRoutes).toMatch(/customerId:/);
+    expect(orderRoutes).toMatch(/lines: z\.array\(OrderLineResponse\)/);
+    expect(orderRoutes).toMatch(/total: MoneySchema/);
+    // GET /  (the auto-included `all` find).
+    expect(orderRoutes).toMatch(/path: "\/",[\s\S]+?operationId: "allOrder"/);
+    // Repository emits a serializer used by route handlers.
+    const repo = files.get("db/repositories/order-repository.ts")!;
+    expect(repo).toMatch(/toWire\(root: Order\): unknown/);
+    expect(repo).toMatch(/async all\(\): Promise<Order\[\]>/);
   });
 });

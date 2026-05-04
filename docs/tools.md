@@ -358,6 +358,33 @@ Endpoints default to `http://localhost:<port>` for each deployable.
 Override per environment via `E2E_<DEPLOYABLE>_BASE` (e.g.
 `E2E_API_BASE=https://staging.example.com`).
 
+### React frontend deployable
+
+A `platform: react` deployable produces a Vite-built SPA with React,
+React Query, Zod, and Mantine.  It points at another deployable
+(`targets: <name>`); the API base URL is baked from the target's
+port at generation time.  Modules are inherited from the target so
+the frontend's pages match the backend's surface exactly.
+
+Per aggregate the generator emits three pages:
+
+| Route                  | What it does                                                                                  |
+| ---------------------- | --------------------------------------------------------------------------------------------- |
+| `/<plural>`            | Mantine `<Table>` of every record from `useAll<Agg>()`; row links to detail; create button.   |
+| `/<plural>/:id`        | Card with primitive / VO fields, sub-tables for contained parts, one button per public op.    |
+| `/<plural>/new`        | Mantine `useForm` over `Create<Agg>Request`, validated by Zod; submit calls `useCreate<Agg>`. |
+
+Public operations on the detail page open a Mantine modal with a
+form for the operation's params; on submit, the matching mutation
+hook fires and React Query invalidates the affected queries so the
+page reflects the new state.
+
+Forms use `@mantine/form` + `mantine-form-zod-resolver`; success and
+error from mutations surface via `@mantine/notifications`.
+
+The generated app is a regular Vite project — `npm install && npm
+run build && npm run preview` builds and serves a production bundle.
+
 ### Cross-platform OpenAPI parity check
 
 When the same module is hosted on more than one deployable across

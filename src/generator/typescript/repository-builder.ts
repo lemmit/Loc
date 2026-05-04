@@ -101,9 +101,100 @@ export function buildRepositoryFile(
     }
   }
 
+  // toWire — domain instance → wire DTO (plain object).  Used by the
+  // Hono routes layer to serialize responses; the shape mirrors the
+  // .NET <Agg>Response record so the cross-check sees identical specs.
+  lines.push(...toWireMethod(agg, ctx));
+  lines.push("");
+
   lines.push(`}`);
   lines.push("");
   return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// toWire — domain → wire DTO serializer (matches the routes-builder's
+// `<Agg>Response` zod schema; see routes-builder.ts).
+// ---------------------------------------------------------------------------
+
+function toWireMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
+  const lines: string[] = [];
+  lines.push(`  toWire(root: ${agg.name}): unknown {`);
+  lines.push(`    return ${wireProjectionEntity(agg, "root", ctx)};`);
+  lines.push(`  }`);
+  return lines;
+}
+
+function wireProjectionEntity(
+  ent: AggregateIR | EntityPartIR,
+  varExpr: string,
+  ctx: BoundedContextIR,
+): string {
+  const parts: string[] = [];
+  parts.push(`id: ${varExpr}.id as string`);
+  for (const f of ent.fields) {
+    parts.push(`${f.name}: ${wireProjectionValue(`${varExpr}.${f.name}`, f.type, ctx, f.optional)}`);
+  }
+  for (const c of ent.contains) {
+    const part = ctx.aggregates
+      .flatMap((a) => a.parts)
+      .find((p) => p.name === c.partName);
+    if (!part) continue;
+    if (c.collection) {
+      parts.push(
+        `${c.name}: ${varExpr}.${c.name}.map((__e: ${part.name}) => (${wireProjectionEntity(part, "__e", ctx)}))`,
+      );
+    } else {
+      parts.push(`${c.name}: ${wireProjectionEntity(part, `${varExpr}.${c.name}`, ctx)}`);
+    }
+  }
+  // Derived values — call the getter-style accessor on the domain class.
+  const derived = "derived" in ent ? ent.derived : [];
+  for (const d of derived ?? []) {
+    parts.push(`${d.name}: ${wireProjectionValue(`${varExpr}.${d.name}`, d.type, ctx, false)}`);
+  }
+  return `{ ${parts.join(", ")} }`;
+}
+
+function wireProjectionValue(
+  expr: string,
+  t: TypeIR,
+  ctx: BoundedContextIR,
+  optional: boolean,
+): string {
+  if (t.kind === "optional") {
+    return `(${expr} == null ? null : ${wireProjectionValue(expr, t.inner, ctx, true)})`;
+  }
+  if (t.kind === "primitive") {
+    if (t.name === "datetime")
+      return optional
+        ? `(${expr} == null ? null : (${expr} as Date).toISOString())`
+        : `(${expr} as Date).toISOString()`;
+    // decimal: JSON number — .NET serializes decimal the same way, so
+    // both backends round-trip identically.
+    return expr;
+  }
+  if (t.kind === "id") return `${expr} as string`;
+  if (t.kind === "enum") return `${expr} as string`;
+  if (t.kind === "valueobject") {
+    const vo = ctx.valueObjects.find((v) => v.name === t.name);
+    if (!vo) return expr;
+    const fields = vo.fields
+      .map(
+        (vf) =>
+          `${vf.name}: ${wireProjectionValue(`${expr}.${vf.name}`, vf.type, ctx, false)}`,
+      )
+      .join(", ");
+    if (optional) {
+      return `(${expr} == null ? null : { ${fields} })`;
+    }
+    return `{ ${fields} }`;
+  }
+  if (t.kind === "array") {
+    return `${expr}.map((__a: never) => (${wireProjectionValue("__a", t.element, ctx, false)}))`;
+  }
+  if (t.kind === "entity") return expr;
+  return expr;
 }
 
 // ---------------------------------------------------------------------------

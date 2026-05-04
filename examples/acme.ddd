@@ -99,6 +99,15 @@ system Acme {
         port: 8081
     }
 
+    // React + React Query + Zod + Mantine frontend.  Inherits its
+    // module set from the `api` backend, so pages cover Catalog +
+    // Sales aggregates against the same wire shape.
+    deployable webApp {
+        platform: react
+        targets: api
+        port: 3001
+    }
+
     // ------------------------------------------------------------------
     // End-to-end tests — exercise the deployable through HTTP.  The
     // `api` magic identifier resolves to the named deployable's HTTP

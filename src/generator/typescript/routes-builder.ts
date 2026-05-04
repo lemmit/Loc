@@ -2,6 +2,9 @@ import type {
   AggregateIR,
   BoundedContextIR,
   EnumIR,
+  EntityPartIR,
+  FindIR,
+  FieldIR,
   OperationIR,
   RepositoryIR,
   TypeIR,
@@ -12,15 +15,15 @@ import { camel, plural, snake } from "../../util/naming.js";
 // ---------------------------------------------------------------------------
 // Hono routes file with OpenAPI annotations.
 //
-// Replaces the legacy hand-rolled `app.post(path, async (c) => …)` style
-// with `@hono/zod-openapi`'s `OpenAPIHono` + `createRoute({ method, path,
-// request, responses })`.  Side-effect: every route's request body is
-// typed by zod and validated automatically; `c.req.valid("json")`
-// returns the parsed shape with no `as never` cast needed.
+// Uses `@hono/zod-openapi`'s `OpenAPIHono` + `createRoute({...})` so every
+// route is fully typed and self-describes via /openapi.json.  The response
+// shape is the full wire DTO — root id + every field + nested DTOs for
+// contained parts and value objects + derived values — so a frontend can
+// render real data, not just the row's primary key.
 //
-// The /openapi.json endpoint is exposed by `createApp` (in
-// http/index.ts), composing all aggregate sub-routers under
-// `app.doc(...)`.
+// The wire shape is symmetric with the .NET path: same field set, same
+// nesting, same casing.  The cross-check e2e test diffs the two specs to
+// catch drift.
 // ---------------------------------------------------------------------------
 
 export function buildRoutesFile(
@@ -41,9 +44,9 @@ export function buildRoutesFile(
   );
   lines.push("");
 
-  // Schemas — value objects, enums, then per-operation request /
-  // response shapes.  Named via `.openapi("Foo")` so they appear in the
-  // spec's `components.schemas` section (referenced rather than inlined).
+  // Schemas — value objects, enums, then per-DTO request / response
+  // shapes.  Named via `.openapi("Foo")` so they appear in the spec's
+  // `components.schemas` section (referenced rather than inlined).
   const usedVOs = collectUsedValueObjects(agg, repo, ctx);
   const usedEnums = collectUsedEnums(agg, repo, ctx);
 
@@ -60,7 +63,7 @@ export function buildRoutesFile(
   }
   lines.push("");
 
-  // Per-operation request schemas.
+  // Request schemas — Create, per-public-operation, per-find query.
   const requiredFields = agg.fields.filter((f) => !f.optional);
   lines.push(`const Create${agg.name}Request = z.object({`);
   for (const f of requiredFields) {
@@ -89,12 +92,14 @@ export function buildRoutesFile(
     }
   }
 
-  // Read-side response.  For v1 we expose `{ id }` only — full
-  // projection is the next slice; the cross-check will surface this
-  // as a known shape difference vs .NET.
-  lines.push(
-    `const ${agg.name}Response = z.object({ id: z.string() }).openapi("${agg.name}Response");`,
-  );
+  // Response DTOs — parts first (inner), value-object response variants
+  // (already declared above as <Vo>Schema; re-used), then the aggregate
+  // root.  Forward references aren't possible in zod, so the order
+  // matters: parts referenced from the root must be declared first.
+  for (const part of agg.parts) {
+    lines.push(...emitResponseDtoSchema(part, ctx, /*isAgg*/ false));
+  }
+  lines.push(...emitResponseDtoSchema(agg, ctx, /*isAgg*/ true));
   lines.push(
     `const ${agg.name}ListResponse = z.array(${agg.name}Response).openapi("${agg.name}ListResponse");`,
   );
@@ -161,7 +166,7 @@ export function buildRoutesFile(
   lines.push(
     `      if (!found) return c.json({ error: "not_found" }, 404);`,
   );
-  lines.push(`      return c.json({ id: found.id as string }, 200);`);
+  lines.push(`      return c.json(repo.toWire(found) as never, 200);`);
   lines.push(`    },`);
   lines.push(`  );`);
   lines.push("");
@@ -172,7 +177,7 @@ export function buildRoutesFile(
     lines.push("");
   }
 
-  // Find queries.
+  // Find queries (including the auto-included `all`).
   if (repo) {
     for (const find of repo.finds) {
       lines.push(...emitFindRoute(agg, find).map((l) => `  ${l}`));
@@ -228,22 +233,22 @@ function emitOperationRoute(agg: AggregateIR, op: OperationIR): string[] {
   return out;
 }
 
-function emitFindRoute(
-  agg: AggregateIR,
-  find: import("../../ir/loom-ir.js").FindIR,
-): string[] {
+function emitFindRoute(agg: AggregateIR, find: FindIR): string[] {
   const aggSlug = snake(plural(agg.name));
   const findSnake = snake(find.name);
   const isList = find.returnType.kind === "array";
   const responseSchema = isList ? `${agg.name}ListResponse` : `${agg.name}Response`;
+  const path = find.name === "all" ? "/" : `/${findSnake}`;
   const out: string[] = [];
   out.push(`app.openapi(`);
   out.push(`  createRoute({`);
   out.push(`    method: "get",`);
-  out.push(`    path: "/${findSnake}",`);
+  out.push(`    path: "${path}",`);
   out.push(`    tags: ["${aggSlug}"],`);
-  out.push(`    operationId: "${camel(find.name)}",`);
-  out.push(`    request: { query: ${cap(find.name)}Query },`);
+  out.push(`    operationId: "${camel(find.name)}${agg.name}",`);
+  if (find.params.length > 0) {
+    out.push(`    request: { query: ${cap(find.name)}Query },`);
+  }
   out.push(`    responses: {`);
   out.push(
     `      200: { description: "OK", content: { "application/json": { schema: ${responseSchema} } } },`,
@@ -251,13 +256,63 @@ function emitFindRoute(
   out.push(`    },`);
   out.push(`  }),`);
   out.push(`  async (c) => {`);
-  out.push(`    const params = c.req.valid("query");`);
+  if (find.params.length > 0) {
+    out.push(`    const params = c.req.valid("query");`);
+  }
   const argList = find.params.map((p) => `params.${p.name} as never`).join(", ");
   out.push(`    const result = await repo.${find.name}(${argList});`);
-  out.push(`    return c.json(result as never, 200);`);
+  if (isList) {
+    out.push(
+      `    return c.json(result.map((r) => repo.toWire(r)) as never, 200);`,
+    );
+  } else if (find.returnType.kind === "optional") {
+    out.push(
+      `    return c.json((result == null ? null : repo.toWire(result)) as never, 200);`,
+    );
+  } else {
+    out.push(`    return c.json(repo.toWire(result) as never, 200);`);
+  }
   out.push(`  },`);
   out.push(`);`);
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Response DTO schema emission — full wire shape, derived from the IR.
+// ---------------------------------------------------------------------------
+
+function emitResponseDtoSchema(
+  ent: AggregateIR | EntityPartIR,
+  ctx: BoundedContextIR,
+  isAgg: boolean,
+): string[] {
+  const lines: string[] = [];
+  const name = `${ent.name}Response`;
+  lines.push(`const ${name} = z.object({`);
+  lines.push(`  id: z.string(),`);
+  for (const f of ent.fields) {
+    lines.push(`  ${f.name}: ${zodForResponse(f.type, f.optional)},`);
+  }
+  for (const c of ent.contains) {
+    const elem = `${c.partName}Response`;
+    lines.push(
+      c.collection
+        ? `  ${c.name}: z.array(${elem}),`
+        : `  ${c.name}: ${elem},`,
+    );
+  }
+  // Derived values are part of the wire (computed server-side).
+  if (isAgg) {
+    for (const d of (ent as AggregateIR).derived ?? []) {
+      lines.push(`  ${d.name}: ${zodForResponse(d.type, false)},`);
+    }
+  } else {
+    for (const d of (ent as EntityPartIR).derived ?? []) {
+      lines.push(`  ${d.name}: ${zodForResponse(d.type, false)},`);
+    }
+  }
+  lines.push(`}).openapi("${name}");`);
+  return lines;
 }
 
 // ---------------------------------------------------------------------------
@@ -297,6 +352,49 @@ function zodFor(t: TypeIR): string {
   }
 }
 
+/**
+ * Response-side zod for a `TypeIR`.  Decimals are exposed as strings on
+ * the wire (JSON loses precision); datetimes as ISO strings; ids as
+ * plain strings.  Every other shape mirrors the request side.
+ */
+function zodForResponse(t: TypeIR, optional: boolean): string {
+  const z = zodForResponseInner(t);
+  return optional ? `${z}.nullish()` : z;
+}
+
+function zodForResponseInner(t: TypeIR): string {
+  switch (t.kind) {
+    case "primitive":
+      switch (t.name) {
+        case "int":
+        case "long":
+          return "z.number().int()";
+        case "decimal":
+          return "z.number()";
+        case "string":
+        case "guid":
+          return "z.string()";
+        case "bool":
+          return "z.boolean()";
+        case "datetime":
+          return "z.string()";
+      }
+    /* eslint-disable-next-line no-fallthrough */
+    case "id":
+      return "z.string()";
+    case "enum":
+      return `${t.name}Schema`;
+    case "valueobject":
+      return `${t.name}Schema`;
+    case "entity":
+      return `${t.name}Response`;
+    case "array":
+      return `z.array(${zodForResponseInner(t.element)})`;
+    case "optional":
+      return `${zodForResponseInner(t.inner)}.nullish()`;
+  }
+}
+
 function collectUsedValueObjects(
   agg: AggregateIR,
   repo: RepositoryIR | undefined,
@@ -309,8 +407,13 @@ function collectUsedValueObjects(
     if (t.kind === "optional") visit(t.inner);
   };
   for (const f of agg.fields) visit(f.type);
+  for (const d of agg.derived) visit(d.type);
   for (const op of agg.operations) for (const p of op.params) visit(p.type);
   for (const f of repo?.finds ?? []) for (const p of f.params) visit(p.type);
+  for (const part of agg.parts) {
+    for (const f of part.fields) visit(f.type);
+    for (const d of part.derived) visit(d.type);
+  }
   return ctx.valueObjects.filter((v) => used.has(v.name));
 }
 
@@ -326,11 +429,19 @@ function collectUsedEnums(
     if (t.kind === "optional") visit(t.inner);
   };
   for (const f of agg.fields) visit(f.type);
+  for (const d of agg.derived) visit(d.type);
   for (const op of agg.operations) for (const p of op.params) visit(p.type);
   for (const f of repo?.finds ?? []) for (const p of f.params) visit(p.type);
+  for (const part of agg.parts) {
+    for (const f of part.fields) visit(f.type);
+    for (const d of part.derived) visit(d.type);
+  }
   return ctx.enums.filter((e) => used.has(e.name));
 }
 
 function cap(s: string): string {
   return s[0]!.toUpperCase() + s.slice(1);
 }
+
+// Suppress unused-import warnings for FieldIR (kept for clarity).
+void (null as unknown as FieldIR);

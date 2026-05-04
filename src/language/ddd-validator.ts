@@ -50,13 +50,61 @@ export class DddValidator {
       if (m.$type === "BoundedContext") {
         this.checkContext(m, accept);
       } else if (m.$type === "System") {
+        const deployables = m.members.filter((sm) => sm.$type === "Deployable");
         for (const sm of m.members) {
           if (sm.$type === "Module") {
             for (const ctx of sm.contexts) this.checkContext(ctx, accept);
           } else if (sm.$type === "BoundedContext") {
             this.checkContext(sm, accept);
+          } else if (sm.$type === "Deployable") {
+            this.checkDeployable(
+              sm as import("./generated/ast.js").Deployable,
+              deployables as import("./generated/ast.js").Deployable[],
+              accept,
+            );
           }
         }
+      }
+    }
+  }
+
+  private checkDeployable(
+    d: import("./generated/ast.js").Deployable,
+    siblings: import("./generated/ast.js").Deployable[],
+    accept: ValidationAcceptor,
+  ): void {
+    if (d.platform === "react") {
+      const target = d.targets?.ref;
+      if (!target) {
+        accept(
+          "error",
+          `Frontend deployable '${d.name}' must declare 'targets: <backend-deployable>'.`,
+          { node: d, property: "name" },
+        );
+        return;
+      }
+      if (target.platform === "react") {
+        accept(
+          "error",
+          `Frontend deployable '${d.name}' cannot target another frontend ('${target.name}'). Pick a 'dotnet' or 'hono' deployable.`,
+          { node: d, property: "targets" },
+        );
+      }
+      if (d.modules.length > 0) {
+        accept(
+          "warning",
+          `Frontend deployable '${d.name}' inherits modules from its target '${target.name}'; the explicit 'modules:' list is ignored.`,
+          { node: d, property: "modules" },
+        );
+      }
+      void siblings;
+    } else {
+      if (d.targets) {
+        accept(
+          "error",
+          `'targets:' is only valid on a 'platform: react' deployable.`,
+          { node: d, property: "targets" },
+        );
       }
     }
   }

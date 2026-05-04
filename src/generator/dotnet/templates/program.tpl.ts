@@ -25,6 +25,23 @@ builder.Services.AddSingleton<IDomainEventDispatcher, NoopDomainEventDispatcher>
 builder.Services.AddControllers(opts =>
 {
     opts.Filters.Add<DomainExceptionFilter>();
+}).AddJsonOptions(opts =>
+{
+    // camelCase property names match the Hono backend's wire shape;
+    // the cross-platform OpenAPI cross-check would diff otherwise.
+    opts.JsonSerializerOptions.PropertyNamingPolicy =
+        System.Text.Json.JsonNamingPolicy.CamelCase;
+    opts.JsonSerializerOptions.DictionaryKeyPolicy =
+        System.Text.Json.JsonNamingPolicy.CamelCase;
+});
+
+// Permissive CORS so a generated React frontend on a different port
+// can reach the API in dev compose.  Pin Program.cs in .loomignore +
+// tighten in production.
+builder.Services.AddCors(opts =>
+{
+    opts.AddDefaultPolicy(p =>
+        p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());
 });
 
 // OpenAPI spec generation — Swashbuckle reflects over controllers and
@@ -39,6 +56,7 @@ builder.Services.AddSwaggerGen(c =>
 var app = builder.Build();
 // Liveness probe — used by docker-compose / kubernetes / smoke tests.
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+app.UseCors();
 app.UseSwagger();
 app.MapControllers();
 
