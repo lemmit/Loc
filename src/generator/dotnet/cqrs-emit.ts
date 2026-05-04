@@ -315,21 +315,25 @@ function buildFindHandlerBody(
   agg: AggregateIR,
   ctx: BoundedContextIR,
 ): string {
-  const callArgs = find.params.map((p) => `q.${pascal(p.name)}`).join(", ");
+  const argList = find.params.map((p) => `q.${pascal(p.name)}`).join(", ");
+  // The repository signature ends with `CancellationToken ct`; drop the
+  // separator when there are no domain params, so the auto-included
+  // zero-arg `all` find compiles cleanly.
+  const callArgs = argList.length > 0 ? `${argList}, ct` : `ct`;
   if (find.returnType.kind === "array") {
     return (
-      `        var domain = await _repo.${pascal(find.name)}(${callArgs}, ct);\n` +
+      `        var domain = await _repo.${pascal(find.name)}(${callArgs});\n` +
       `        return domain.Select(d => ${projectEntityExpr("d", agg, ctx)}).ToList();\n`
     );
   }
   if (find.returnType.kind === "optional") {
     return (
-      `        var domain = await _repo.${pascal(find.name)}(${callArgs}, ct);\n` +
+      `        var domain = await _repo.${pascal(find.name)}(${callArgs});\n` +
       `        return domain is null ? null : ${projectEntityExpr("domain", agg, ctx)};\n`
     );
   }
   return (
-    `        var domain = await _repo.${pascal(find.name)}(${callArgs}, ct);\n` +
+    `        var domain = await _repo.${pascal(find.name)}(${callArgs});\n` +
     `        return ${projectEntityExpr("domain", agg, ctx)};\n`
   );
 }
