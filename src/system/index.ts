@@ -12,6 +12,7 @@ import type {
 import { platformFor } from "../platform/registry.js";
 import { renderE2EFile } from "./e2e-render.js";
 import { renderUIE2EFile } from "./ui-e2e-render.js";
+import { renderWireSpec } from "./wire-spec.js";
 
 // ---------------------------------------------------------------------------
 // System-mode generation.
@@ -66,6 +67,9 @@ function emitSystem(
 
   out.set("docker-compose.yml", renderDockerCompose(sys));
   out.set("db-init/00-create-databases.sql", renderDbInit(sys));
+  // Wire-spec artifact — diffable record of every aggregate / part /
+  // value object's canonical wire shape.  See `wire-spec.ts`.
+  out.set(".loom/wire-spec.json", renderWireSpec(sys));
 
   // E2E test scaffolding — emitted only when the system declares
   // `test e2e` blocks.  Lives at the system root so it can run against

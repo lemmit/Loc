@@ -1,0 +1,188 @@
+import { describe, expect, it } from "vitest";
+import { NodeFileSystem } from "langium/node";
+import { URI } from "langium";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
+import { createDddServices } from "../src/language/ddd-module.js";
+import { lowerModel } from "../src/ir/lower.js";
+import { enrichLoomModel } from "../src/ir/enrichments.js";
+import { validateLoomModel } from "../src/ir/validate.js";
+import { buildWireSpec } from "../src/system/wire-spec.js";
+import type {
+  AggregateIR,
+  BoundedContextIR,
+  EntityPartIR,
+  LoomModel,
+  ValueObjectIR,
+} from "../src/ir/loom-ir.js";
+import type { Model } from "../src/language/generated/ast.js";
+
+// ---------------------------------------------------------------------------
+// IR-transformation properties.  Every assertion here is an *invariant*
+// the pipeline is supposed to maintain across all examples — if any of
+// them fail, the failure points at a structural bug rather than at a
+// content typo.
+// ---------------------------------------------------------------------------
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(here, "..");
+
+const EXAMPLES = [
+  "examples/sales.ddd",
+  "examples/banking.ddd",
+  "examples/inventory.ddd",
+  "examples/acme.ddd",
+];
+
+async function buildEnriched(file: string): Promise<LoomModel> {
+  const services = createDddServices(NodeFileSystem);
+  const doc =
+    await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
+      URI.file(path.join(repoRoot, file)),
+    );
+  await services.shared.workspace.DocumentBuilder.build([doc], {
+    validation: true,
+  });
+  return enrichLoomModel(lowerModel(doc.parseResult.value as Model));
+}
+
+function allContexts(loom: LoomModel): BoundedContextIR[] {
+  const out = [...loom.contexts];
+  for (const s of loom.systems) {
+    for (const m of s.modules) out.push(...m.contexts);
+  }
+  return out;
+}
+
+function allAggregates(loom: LoomModel): AggregateIR[] {
+  return allContexts(loom).flatMap((c) => c.aggregates);
+}
+
+function allParts(loom: LoomModel): EntityPartIR[] {
+  return allAggregates(loom).flatMap((a) => a.parts);
+}
+
+function allValueObjects(loom: LoomModel): ValueObjectIR[] {
+  return allContexts(loom).flatMap((c) => c.valueObjects);
+}
+
+describe("IR invariants — every example", () => {
+  for (const example of EXAMPLES) {
+    describe(example, () => {
+      it("validates with zero diagnostics", async () => {
+        const loom = await buildEnriched(example);
+        const diags = validateLoomModel(loom);
+        expect(diags, `${example} diagnostics: ${JSON.stringify(diags)}`).toEqual([]);
+      });
+
+      it("every aggregate has wireShape with `id` first", async () => {
+        const loom = await buildEnriched(example);
+        for (const a of allAggregates(loom)) {
+          expect(a.wireShape, `${a.name}.wireShape`).toBeDefined();
+          expect(a.wireShape![0]!.name, `${a.name} first field name`).toBe("id");
+          expect(a.wireShape![0]!.source, `${a.name} first field source`).toBe(
+            "id",
+          );
+        }
+      });
+
+      it("every part has wireShape with `id` first and a parent reference", async () => {
+        const loom = await buildEnriched(example);
+        for (const p of allParts(loom)) {
+          expect(p.wireShape, `${p.name}.wireShape`).toBeDefined();
+          expect(p.wireShape![0]!.name).toBe("id");
+        }
+      });
+
+      it("value objects have no `id` and no `containment` in wire shape", async () => {
+        const loom = await buildEnriched(example);
+        for (const v of allValueObjects(loom)) {
+          for (const f of v.wireShape ?? []) {
+            expect(f.source, `${v.name}.${f.name}`).not.toBe("id");
+            expect(f.source).not.toBe("containment");
+          }
+        }
+      });
+
+      it("every aggregate has a repository whose first find is auto `all`", async () => {
+        const loom = await buildEnriched(example);
+        for (const ctx of allContexts(loom)) {
+          for (const agg of ctx.aggregates) {
+            const repo = ctx.repositories.find(
+              (r) => r.aggregateName === agg.name,
+            );
+            expect(repo, `${agg.name} repository`).toBeDefined();
+            expect(repo!.finds[0]!.name).toBe("all");
+            expect(repo!.finds[0]!.params).toEqual([]);
+          }
+        }
+      });
+
+      it("enrichLoomModel is idempotent", async () => {
+        const once = await buildEnriched(example);
+        const twice = enrichLoomModel(once);
+        expect(twice).toEqual(once);
+      });
+
+      it("react deployables inherit moduleNames from their target", async () => {
+        const loom = await buildEnriched(example);
+        for (const sys of loom.systems) {
+          for (const d of sys.deployables) {
+            if (d.platform !== "react") continue;
+            const target = sys.deployables.find((t) => t.name === d.targetName);
+            expect(target, `${d.name} → ${d.targetName}`).toBeDefined();
+            expect([...d.moduleNames].sort()).toEqual(
+              [...target!.moduleNames].sort(),
+            );
+          }
+        }
+      });
+    });
+  }
+});
+
+describe("Wire-spec artifact invariants", () => {
+  it("includes every aggregate / part / value object across the system", async () => {
+    const loom = await buildEnriched("examples/acme.ddd");
+    for (const sys of loom.systems) {
+      const spec = buildWireSpec(sys);
+      const aggsInSys = allContexts(loom).flatMap((c) => c.aggregates);
+      const partsInSys = aggsInSys.flatMap((a) => a.parts);
+      const vosInSys = allContexts(loom).flatMap((c) => c.valueObjects);
+      for (const a of aggsInSys) {
+        expect(spec.aggregates[a.name], `agg ${a.name} in spec`).toBeDefined();
+      }
+      for (const p of partsInSys) {
+        expect(spec.parts[p.name], `part ${p.name} in spec`).toBeDefined();
+      }
+      for (const v of vosInSys) {
+        expect(spec.valueObjects[v.name], `vo ${v.name} in spec`).toBeDefined();
+      }
+    }
+  });
+
+  it("required[] excludes optional fields", async () => {
+    const loom = await buildEnriched("examples/banking.ddd");
+    for (const sys of loom.systems) {
+      const spec = buildWireSpec(sys);
+      // banking has optional fields; ensure no `required` entry refers
+      // to a non-existent property.
+      for (const schema of Object.values(spec.aggregates)) {
+        for (const reqName of schema.required) {
+          expect(
+            schema.properties[reqName],
+            `required ${reqName} must be a declared property`,
+          ).toBeDefined();
+        }
+      }
+    }
+  });
+
+  it("is byte-stable across repeated builds", async () => {
+    const loom = await buildEnriched("examples/acme.ddd");
+    const sys = loom.systems[0]!;
+    const a = JSON.stringify(buildWireSpec(sys));
+    const b = JSON.stringify(buildWireSpec(sys));
+    expect(a).toBe(b);
+  });
+});

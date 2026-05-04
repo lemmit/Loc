@@ -1,0 +1,105 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`wire-spec.json > emits the expected document shape for examples/acme.ddd 1`] = `
+{
+  "aggregates": {
+    "Order": {
+      "additionalProperties": false,
+      "properties": {
+        "customerId": {
+          "type": "string",
+        },
+        "id": {
+          "format": "uuid",
+          "type": "string",
+        },
+        "lines": {
+          "items": {
+            "$ref": "#/parts/OrderLine",
+          },
+          "type": "array",
+        },
+        "placedAt": {
+          "format": "date-time",
+          "type": "string",
+        },
+        "status": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+        "customerId",
+        "status",
+        "placedAt",
+        "lines",
+      ],
+      "type": "object",
+    },
+    "Product": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "type": "string",
+        },
+        "price": {
+          "$ref": "#/valueObjects/Money",
+        },
+        "sku": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+        "sku",
+        "price",
+      ],
+      "type": "object",
+    },
+  },
+  "parts": {
+    "OrderLine": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "type": "string",
+        },
+        "productId": {
+          "format": "uuid",
+          "type": "string",
+        },
+        "quantity": {
+          "type": "integer",
+        },
+      },
+      "required": [
+        "id",
+        "productId",
+        "quantity",
+      ],
+      "type": "object",
+    },
+  },
+  "system": "Acme",
+  "valueObjects": {
+    "Money": {
+      "additionalProperties": false,
+      "properties": {
+        "amount": {
+          "type": "number",
+        },
+        "currency": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "amount",
+        "currency",
+      ],
+      "type": "object",
+    },
+  },
+}
+`;
