@@ -41,8 +41,129 @@ export function validateLoomModel(loom: LoomModel): LoomDiagnostic[] {
   const diags: LoomDiagnostic[] = [];
   for (const sys of loom.systems) {
     validateSystem(sys, diags);
+    for (const m of sys.modules) {
+      for (const c of m.contexts) validateQueryableWheres(c, diags);
+    }
   }
+  for (const c of loom.contexts) validateQueryableWheres(c, diags);
   return diags;
+}
+
+// ---------------------------------------------------------------------------
+// QueryExpr enforcement.  Every repository `find` declared with a
+// `where ...` clause must restrict that clause to the queryable
+// expression sublanguage — comparisons, `&&`, `||`, `!`, parenthesised
+// groups, and references to the aggregate root's columns / find
+// parameters.  Anything richer (collection ops, lambdas, member
+// access into parts, value-object constructors, calls) cannot lower
+// to SQL, so the Drizzle backend would have had to skip it.  We
+// reject these at the IR layer instead, with a message pointing the
+// user at the supported subset.
+// ---------------------------------------------------------------------------
+
+function validateQueryableWheres(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+): void {
+  for (const repo of ctx.repositories) {
+    for (const find of repo.finds) {
+      if (!find.filter) continue;
+      const offending = firstNonQueryableNode(find.filter);
+      if (offending) {
+        diags.push({
+          severity: "error",
+          message:
+            `repository '${repo.name}' find '${find.name}': ` +
+            `where-clause is not queryable (${offending}). ` +
+            `Allowed: comparisons, &&/||/!, parens, ` +
+            `'this.<column>' / 'this.<vo>.<sub>' refs, parameter refs, literals.`,
+          source: `${ctx.name}/${repo.name}.${find.name}`,
+        });
+      }
+    }
+  }
+}
+
+/** Returns null if the expression is fully queryable; otherwise a
+ * short label describing the first non-queryable node encountered.
+ * The label is human-readable (`"collection op .where"`,
+ * `"lambda"`, `"call to function 'X'"`) so the diagnostic message
+ * can be specific. */
+function firstNonQueryableNode(e: ExprIR): string | null {
+  switch (e.kind) {
+    case "literal":
+    case "this":
+    case "id":
+      return null;
+    case "ref":
+      // Refs the lowering produces that translate cleanly to SQL —
+      // `param`/`let`/`lambda` are bare identifiers, `this-prop`
+      // becomes `tableName.col`, `enum-value` becomes a literal
+      // string, `this-vo-prop` is a column flattened by Drizzle
+      // (handled via member access).
+      if (
+        e.refKind === "param" ||
+        e.refKind === "let" ||
+        e.refKind === "lambda" ||
+        e.refKind === "this-prop" ||
+        e.refKind === "enum-value" ||
+        e.refKind === "this-vo-prop"
+      )
+        return null;
+      return `ref to '${e.name}' (${e.refKind})`;
+    case "paren":
+      return firstNonQueryableNode(e.inner);
+    case "unary":
+      if (e.op === "!") return firstNonQueryableNode(e.operand);
+      return `unary '${e.op}'`;
+    case "binary":
+      switch (e.op) {
+        case "==":
+        case "!=":
+        case "<":
+        case "<=":
+        case ">":
+        case ">=":
+        case "&&":
+        case "||":
+          return (
+            firstNonQueryableNode(e.left) ?? firstNonQueryableNode(e.right)
+          );
+        default:
+          return `arithmetic '${e.op}'`;
+      }
+    case "member":
+      // Reject any member access whose receiver evaluates to a
+      // collection — `.count`, `.first`, `.length`, etc. are
+      // projections that need a SQL subquery to express, which
+      // the queryable sublanguage doesn't support.
+      if (e.receiverType.kind === "array") {
+        return `collection projection '.${e.member}' on a list`;
+      }
+      // Allowed column-access shapes:
+      //   - `this.col`         — direct column
+      //   - `this.vo.sub`      — value-object's flattened column
+      if (e.receiver.kind === "this") return null;
+      if (
+        e.receiver.kind === "member" &&
+        e.receiver.receiver.kind === "this" &&
+        e.receiver.memberType.kind === "valueobject"
+      )
+        return null;
+      return "member access not rooted at 'this' or beyond a flattened value object";
+    case "method-call":
+      return `collection op '.${e.member}'`;
+    case "lambda":
+      return "lambda";
+    case "call":
+      return `call to '${e.name}' (${e.callKind})`;
+    case "new":
+      return `'new ${e.partName}' construction`;
+    case "object":
+      return "object literal";
+    case "ternary":
+      return "ternary";
+  }
 }
 
 function validateSystem(sys: SystemIR, diags: LoomDiagnostic[]): void {

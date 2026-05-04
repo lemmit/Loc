@@ -504,20 +504,19 @@ function findQueryMethod(
     .join(", ");
   let whereClause: string;
   if (find.filter) {
-    // Try lowering the IR expression to Drizzle operators.  Falls
-    // back to a TODO comment (no SQL filter applied) only when the
-    // expression contains shapes Drizzle can't represent — users hit
-    // this for things like `lines.count > 0` where the predicate
-    // depends on aggregated child rows.  Common shapes (binary
-    // comparisons, &&/||, !) lower cleanly.
+    // The IR validator (Layer ②) rejects any `where` clause that
+    // can't lower to Drizzle's queryable subset, so by the time we
+    // get here lowering always succeeds.  See validateLoomModel +
+    // firstNonQueryableNode in src/ir/validate.ts.
     const lowered = lowerToDrizzle(find.filter, tableName, ctx);
-    if (lowered) {
-      whereClause = `.where(${lowered.expr})`;
-    } else {
-      whereClause = `.where(/* TODO: translate where-clause to Drizzle operators: ${escapeForComment(
-        renderTsExprAsString(find.filter),
-      )} */ undefined as never)`;
+    if (!lowered) {
+      throw new Error(
+        `internal: where-clause for find '${find.name}' on '${agg.name}' ` +
+          "could not lower to Drizzle, but the validator should have caught this. " +
+          "Please file a bug.",
+      );
     }
+    whereClause = `.where(${lowered.expr})`;
   } else {
     const conditions: string[] = [];
     for (const p of find.params) {
@@ -630,14 +629,6 @@ function hydrateRootForFindExpr(
     }
   }
   return `${agg.name}._create({ ${fields.join(", ")} })`;
-}
-
-function renderTsExprAsString(e: import("../../ir/loom-ir.js").ExprIR): string {
-  return renderTsExpr(e);
-}
-
-function escapeForComment(s: string): string {
-  return s.replace(/\*\//g, "* /");
 }
 
 function tsTypeForReturn(t: TypeIR): string {
