@@ -37,6 +37,8 @@ using Microsoft.EntityFrameworkCore;
 using {{ns}}.Domain.{{plural name}};
 using {{ns}}.Domain.Common;
 using {{ns}}.Domain.Ids;
+using {{ns}}.Domain.ValueObjects;
+using {{ns}}.Domain.Enums;
 using {{ns}}.Infrastructure.Persistence;
 
 namespace {{ns}}.Infrastructure.Repositories;

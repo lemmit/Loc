@@ -193,3 +193,50 @@ Out of scope for Loom.  When you need to write a data migration
 (populate a column, transform values, etc.), write it in whichever
 backend's native form — Drizzle SQL or an EF `Migration.Up` body.
 Loom doesn't try to translate between them.
+
+---
+
+## Docker
+
+Both backends ship with a multi-stage `Dockerfile` and a
+`.dockerignore`.  Build and run with the standard commands; verified
+end-to-end against `docker build` and `docker run`.
+
+### TypeScript
+
+```bash
+cd ./out                                # the generator's output dir
+docker build -t my-sales:latest .
+docker run --rm -p 3000:3000 \
+    -e DATABASE_URL="postgres://user:pw@host:5432/db" \
+    my-sales:latest
+```
+
+The image uses `node:22-alpine` for both build and runtime stages.
+Build runs `npm install` + `npm run build`; runtime starts
+`node out/index.js` on port 3000.
+
+### .NET
+
+```bash
+cd ./out
+docker build -t my-sales:latest .
+docker run --rm -p 8080:8080 \
+    -e ConnectionStrings__Default="Host=db;Port=5432;Database=postgres;Username=postgres;Password=postgres" \
+    my-sales:latest
+```
+
+Build stage uses `mcr.microsoft.com/dotnet/sdk:8.0`, runtime uses
+`mcr.microsoft.com/dotnet/aspnet:8.0`.  ASP.NET Core listens on port
+8080 (`ASPNETCORE_URLS=http://+:8080`).
+
+### Customising
+
+Both Dockerfiles are intentionally minimal — they assume a single-
+service deployment.  For health checks, multi-arch builds, sidecar
+containers, BuildKit secrets, or alternate base images, pin the
+`Dockerfile` in `.loomignore` and edit freely.
+
+Loom does **not** generate `docker-compose.yml`, `k8s` manifests, CI
+pipelines, or other deployment scaffolding.  Those are project-init
+concerns, not derived from the `.ddd` source.

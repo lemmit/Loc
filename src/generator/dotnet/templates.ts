@@ -20,5 +20,11 @@ export {
 } from "./templates/cqrs.tpl.js";
 export { renderRequestDtos, renderResponseDtos } from "./templates/dto.tpl.js";
 export { renderController, renderExceptionFilter } from "./templates/api.tpl.js";
-export { renderProgram, renderCsproj } from "./templates/program.tpl.js";
+export {
+  renderCsproj,
+  renderDockerfile,
+  renderDockerignore,
+  renderProgram,
+  renderTestCsproj,
+} from "./templates/program.tpl.js";
 export { renderTestsFile } from "./templates/tests.tpl.js";

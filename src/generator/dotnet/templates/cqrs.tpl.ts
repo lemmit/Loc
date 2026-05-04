@@ -20,6 +20,9 @@ using System.Threading.Tasks;
 using Mediator;
 using {{ns}}.Domain.{{plural aggName}};
 using {{ns}}.Domain.Common;
+using {{ns}}.Domain.Ids;
+using {{ns}}.Domain.ValueObjects;
+using {{ns}}.Domain.Enums;
 
 namespace {{ns}}.Application.{{plural aggName}}.Commands;
 
@@ -54,7 +57,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using Mediator;
 using {{ns}}.Domain.{{plural aggName}};
+using {{ns}}.Domain.Ids;
 using {{ns}}.Domain.ValueObjects;
+using {{ns}}.Domain.Enums;
 using {{ns}}.Application.{{plural aggName}}.Responses;
 
 namespace {{ns}}.Application.{{plural aggName}}.Queries;

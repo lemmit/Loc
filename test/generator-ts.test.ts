@@ -64,4 +64,15 @@ describe("typescript generator", () => {
     expect(tests).toMatch(/it\("money literal builds"/);
     expect(tests).toMatch(/expect\(\(\) => \{ new Money\(-1\.0, "USD"\); \}\)\.toThrow\(\)/);
   });
+
+  it("emits Dockerfile + .dockerignore", async () => {
+    const model = await buildModel("examples/sales.ddd");
+    const files = generateTypeScript(model);
+    const dockerfile = files.get("Dockerfile")!;
+    expect(dockerfile).toMatch(/FROM node:22-alpine AS build/);
+    expect(dockerfile).toMatch(/FROM node:22-alpine AS runtime/);
+    expect(dockerfile).toMatch(/CMD \["node", "out\/index\.js"\]/);
+    const dockerignore = files.get(".dockerignore")!;
+    expect(dockerignore).toMatch(/node_modules/);
+  });
 });

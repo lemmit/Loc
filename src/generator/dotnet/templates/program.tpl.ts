@@ -43,6 +43,11 @@ const CSPROJ_TPL = hb.compile(
     <RootNamespace>{{ns}}</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <!-- Test files live in the sibling Tests/{{ns}}.Tests project -->
+    <Compile Remove="Tests/**" />
+    <None Remove="Tests/**" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.10" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.10">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
@@ -64,10 +69,82 @@ const CSPROJ_TPL = hb.compile(
 `,
 );
 
+// Separate xUnit test project — emitted only when at least one
+// aggregate declares a `test` block.  Project-references the main
+// production project so test code can see Domain / Application types.
+const TEST_CSPROJ_TPL = hb.compile(
+  `<!-- Auto-generated. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <RootNamespace>{{ns}}.Tests</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../{{ns}}.csproj" />
+  </ItemGroup>
+</Project>
+`,
+);
+
 export function renderProgram(ctx: BoundedContextIR, ns: string): string {
   return PROGRAM_TPL({ ns, aggregates: ctx.aggregates });
 }
 
 export function renderCsproj(ns: string): string {
   return CSPROJ_TPL({ ns });
+}
+
+export function renderTestCsproj(ns: string): string {
+  return TEST_CSPROJ_TPL({ ns });
+}
+
+const DOCKERFILE_TPL = hb.compile(
+  `# syntax=docker/dockerfile:1
+# Auto-generated.
+
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+COPY {{ns}}.csproj ./
+RUN dotnet restore {{ns}}.csproj
+COPY . .
+RUN dotnet publish {{ns}}.csproj -c Release -o /app/publish --no-restore /p:UseAppHost=false
+
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+WORKDIR /app
+ENV ASPNETCORE_URLS=http://+:8080
+EXPOSE 8080
+COPY --from=build /app/publish ./
+ENTRYPOINT ["dotnet", "{{ns}}.dll"]
+`,
+);
+
+const DOCKERIGNORE_TPL = `# Auto-generated.
+**/bin
+**/obj
+**/out
+.git
+.vs
+.vscode
+*.user
+*.log
+`;
+
+export function renderDockerfile(ns: string): string {
+  return DOCKERFILE_TPL({ ns });
+}
+
+export function renderDockerignore(): string {
+  return DOCKERIGNORE_TPL;
 }

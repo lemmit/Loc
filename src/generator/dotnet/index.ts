@@ -9,6 +9,8 @@ import {
   renderConfiguration,
   renderCsproj,
   renderDbContext,
+  renderDockerfile,
+  renderDockerignore,
   renderEntity,
   renderEnum,
   renderEvent,
@@ -19,6 +21,7 @@ import {
   renderProgram,
   renderRepositoryImpl,
   renderRepositoryInterface,
+  renderTestCsproj,
   renderTestsFile,
   renderValueObject,
 } from "./templates.js";
@@ -73,6 +76,7 @@ function emitContext(
   }
   emitInfrastructure(ctx, ns, out);
   emitProject(ctx, ns, out);
+  emitTestProject(ctx, ns, out);
 }
 
 // ---------------------------------------------------------------------------
@@ -164,7 +168,7 @@ function emitAggregate(
   emitCqrs(agg, repo, ctx, ns, out);
   const testsFile = renderTestsFile(agg, ctx, ns);
   if (testsFile) {
-    out.set(`Tests/${aggFolder}/${agg.name}Tests.cs`, testsFile);
+    out.set(`Tests/${ns}.Tests/${aggFolder}/${agg.name}Tests.cs`, testsFile);
   }
 }
 
@@ -188,6 +192,20 @@ function emitProject(
 ): void {
   out.set("Program.cs", renderProgram(ctx, ns));
   out.set(`${ns}.csproj`, renderCsproj(ns));
+  out.set("Dockerfile", renderDockerfile(ns));
+  out.set(".dockerignore", renderDockerignore());
+}
+
+function emitTestProject(
+  ctx: BoundedContextIR,
+  ns: string,
+  out: Map<string, string>,
+): void {
+  // Only emit a test csproj when at least one aggregate declares a `test`
+  // block — otherwise the project would have nothing to compile.
+  const anyTests = ctx.aggregates.some((a) => a.tests.length > 0);
+  if (!anyTests) return;
+  out.set(`Tests/${ns}.Tests/${ns}.Tests.csproj`, renderTestCsproj(ns));
 }
 
 function findRepoFor(

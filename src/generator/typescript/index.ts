@@ -33,6 +33,8 @@ export function generateTypeScript(model: Model): Map<string, string> {
   out.set("tsconfig.json", PROJECT_TSCONFIG_JSON);
   out.set("index.ts", PROJECT_INDEX_TS);
   out.set("drizzle.config.ts", DRIZZLE_CONFIG);
+  out.set("Dockerfile", DOCKERFILE_TS);
+  out.set(".dockerignore", DOCKERIGNORE_TS);
   return out;
 }
 
@@ -140,4 +142,35 @@ const db = drizzle(pool, { schema });
 const app = createApp(db);
 serve({ fetch: app.fetch, port: Number(process.env.PORT ?? 3000) });
 console.log("listening on", process.env.PORT ?? 3000);
+`;
+
+// Multi-stage Dockerfile: build stage installs all deps and compiles
+// TypeScript; runtime stage uses a smaller production-only image.
+const DOCKERFILE_TS = `# syntax=docker/dockerfile:1
+# Auto-generated.
+
+FROM node:22-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json* ./
+RUN npm ci || npm install
+COPY . .
+RUN npm run build
+
+FROM node:22-alpine AS runtime
+WORKDIR /app
+ENV NODE_ENV=production PORT=3000
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/out ./out
+COPY --from=build /app/package.json ./package.json
+EXPOSE 3000
+CMD ["node", "out/index.js"]
+`;
+
+const DOCKERIGNORE_TS = `# Auto-generated.
+node_modules
+out
+.git
+.env
+.env.*
+*.log
 `;

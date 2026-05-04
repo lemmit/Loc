@@ -54,13 +54,28 @@ describe(".NET generator", () => {
     expect(order).toMatch(/_domainEvents\.Add\(new OrderConfirmed/);
   });
 
-  it("emits xUnit test class when `test` blocks are declared", async () => {
+  it("emits xUnit test class + test project when `test` blocks are declared", async () => {
     const model = await buildModel("examples/sales.ddd");
     const files = generateDotnet(model);
-    const tests = files.get("Tests/Orders/OrderTests.cs")!;
+    const tests = files.get("Tests/Sales.Tests/Orders/OrderTests.cs")!;
     expect(tests).toMatch(/using Xunit;/);
     expect(tests).toMatch(/\[Fact\(DisplayName = "money literal builds"\)\]/);
     expect(tests).toMatch(/Assert\.Throws<DomainException>/);
+    const testCsproj = files.get("Tests/Sales.Tests/Sales.Tests.csproj")!;
+    expect(testCsproj).toMatch(/Microsoft\.NET\.Test\.Sdk/);
+    expect(testCsproj).toMatch(/<PackageReference Include="xunit"/);
+    expect(testCsproj).toMatch(/<ProjectReference Include="\.\.\/\.\.\/Sales\.csproj" \/>/);
+  });
+
+  it("emits Dockerfile + .dockerignore", async () => {
+    const model = await buildModel("examples/sales.ddd");
+    const files = generateDotnet(model);
+    const dockerfile = files.get("Dockerfile")!;
+    expect(dockerfile).toMatch(/FROM mcr\.microsoft\.com\/dotnet\/sdk:8\.0 AS build/);
+    expect(dockerfile).toMatch(/FROM mcr\.microsoft\.com\/dotnet\/aspnet:8\.0 AS runtime/);
+    expect(dockerfile).toMatch(/ENTRYPOINT \["dotnet", "Sales\.dll"\]/);
+    const dockerignore = files.get(".dockerignore")!;
+    expect(dockerignore).toMatch(/\*\*\/bin/);
   });
 
   it("translates `where` filter to a LINQ predicate", async () => {
