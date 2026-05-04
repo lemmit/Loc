@@ -1,81 +1,124 @@
 import type { AggregateIR, RepositoryIR } from "../../../ir/loom-ir.js";
-import { hb } from "../hb.js";
+import { pascal, plural, snake } from "../../../util/naming.js";
+import { lines } from "../../../util/code-builder.js";
 
-// Controllers: the boundary between HTTP and the application layer.
-// Requests / Responses are wire-shaped DTOs (primitives only) — controllers
-// map them to typed commands / queries before dispatching via Mediator.
-// This keeps the API contract decoupled from internal domain types.
-const CONTROLLER_TPL = hb.compile(
-  `// Auto-generated.
-using System;
-using System.Linq;
-using System.Threading.Tasks;
-using Mediator;
-using Microsoft.AspNetCore.Mvc;
-using {{ns}}.Application.{{plural aggregate.name}}.Commands;
-using {{ns}}.Application.{{plural aggregate.name}}.Queries;
-using {{ns}}.Application.{{plural aggregate.name}}.Requests;
-using {{ns}}.Application.{{plural aggregate.name}}.Responses;
-using {{ns}}.Domain.Ids;
-using {{ns}}.Domain.ValueObjects;
-using {{ns}}.Domain.Enums;
+// ASP.NET Core controller emission.  One controller per aggregate root,
+// dispatching every endpoint through Mediator (`ISender`).  The
+// controller never sees the domain class — only the request/response
+// DTOs and the matching command/query records.
 
-namespace {{ns}}.Api;
-
-[ApiController]
-[Route("{{snake (plural aggregate.name)}}")]
-public sealed class {{plural (pascal aggregate.name)}}Controller : ControllerBase
-{
-    private readonly IMediator _mediator;
-    public {{plural (pascal aggregate.name)}}Controller(IMediator mediator) => _mediator = mediator;
-
-    [HttpPost]
-    public async Task<ActionResult<Create{{aggregate.name}}Response>> Create([FromBody] Create{{aggregate.name}}Request request)
-    {
-        var cmd = new Create{{aggregate.name}}Command(
-{{#each createCmdArgs}}            {{{ this }}}{{#unless @last}},{{/unless}}
-{{/each}}        );
-        var id = await _mediator.Send(cmd);
-        return CreatedAtAction(nameof(GetById), new { id = id.Value }, new Create{{aggregate.name}}Response(id.Value));
-    }
-
-    [HttpGet("{id}")]
-    public async Task<ActionResult<{{aggregate.name}}Response>> GetById([FromRoute] {{idClrType}} id)
-    {
-        var response = await _mediator.Send(new Get{{aggregate.name}}ByIdQuery(new {{aggregate.name}}Id(id)));
-        return response is null ? NotFound() : Ok(response);
-    }
-
-{{#each publicOps}}    [HttpPost("{id}/{{snake name}}")]
-    public async Task<IActionResult> {{pascal name}}([FromRoute] {{../idClrType}} id, [FromBody] {{pascal name}}Request request)
-    {
-        var cmd = new {{pascal name}}Command(
-            new {{../aggregate.name}}Id(id){{#if cmdArgs.length}},{{/if}}
-{{#each cmdArgs}}            {{{ this }}}{{#unless @last}},{{/unless}}
-{{/each}}        );
-        await _mediator.Send(cmd);
-        return NoContent();
-    }
-
-{{/each}}{{#each finds}}    [HttpGet{{#unless isRoot}}("{{snake name}}"){{/unless}}]
-    public async Task<ActionResult<System.Collections.Generic.IReadOnlyList<{{../aggregate.name}}Response>>> {{pascal name}}({{{ queryRouteParams }}})
-    {
-        var result = await _mediator.Send(new {{pascal name}}Query({{{ queryConstructorArgs }}}));
-        return Ok(result);
-    }
-
-{{/each}}
+interface ControllerShape {
+  idClrType: string;
+  createCmdArgs: string[];
+  publicOps: Array<{ name: string; cmdArgs: string[] }>;
+  finds: Array<{
+    name: string;
+    isRoot: boolean;
+    queryRouteParams: string;
+    queryConstructorArgs: string;
+  }>;
 }
-`,
-);
 
-const FILTER_TPL = hb.compile(
-  `// Auto-generated.
+export function renderController(
+  agg: AggregateIR,
+  _repo: RepositoryIR | undefined,
+  ns: string,
+  shape: ControllerShape,
+): string {
+  const className = `${plural(pascal(agg.name))}Controller`;
+  const route = snake(plural(agg.name));
+
+  const createBody = renderCmdConstructorBody(shape.createCmdArgs, "            ");
+
+  const opBlocks = shape.publicOps.flatMap((op) => {
+    const cmdArgs = [`new ${agg.name}Id(id)`, ...op.cmdArgs];
+    const cmdBody = renderCmdConstructorBody(cmdArgs, "            ");
+    return [
+      `    [HttpPost("{id}/${snake(op.name)}")]`,
+      `    public async Task<IActionResult> ${pascal(op.name)}([FromRoute] ${shape.idClrType} id, [FromBody] ${pascal(op.name)}Request request)`,
+      "    {",
+      `        var cmd = new ${pascal(op.name)}Command(`,
+      ...cmdBody,
+      "        );",
+      "        await _mediator.Send(cmd);",
+      "        return NoContent();",
+      "    }",
+      "",
+    ];
+  });
+
+  const findBlocks = shape.finds.flatMap((f) => [
+    `    [HttpGet${f.isRoot ? "" : `("${snake(f.name)}")`}]`,
+    `    public async Task<ActionResult<System.Collections.Generic.IReadOnlyList<${agg.name}Response>>> ${pascal(f.name)}(${f.queryRouteParams})`,
+    "    {",
+    `        var result = await _mediator.Send(new ${pascal(f.name)}Query(${f.queryConstructorArgs}));`,
+    "        return Ok(result);",
+    "    }",
+    "",
+  ]);
+
+  return (
+    lines(
+      "// Auto-generated.",
+      "using System;",
+      "using System.Linq;",
+      "using System.Threading.Tasks;",
+      "using Mediator;",
+      "using Microsoft.AspNetCore.Mvc;",
+      `using ${ns}.Application.${plural(agg.name)}.Commands;`,
+      `using ${ns}.Application.${plural(agg.name)}.Queries;`,
+      `using ${ns}.Application.${plural(agg.name)}.Requests;`,
+      `using ${ns}.Application.${plural(agg.name)}.Responses;`,
+      `using ${ns}.Domain.Ids;`,
+      `using ${ns}.Domain.ValueObjects;`,
+      `using ${ns}.Domain.Enums;`,
+      "",
+      `namespace ${ns}.Api;`,
+      "",
+      "[ApiController]",
+      `[Route("${route}")]`,
+      `public sealed class ${className} : ControllerBase`,
+      "{",
+      "    private readonly IMediator _mediator;",
+      `    public ${className}(IMediator mediator) => _mediator = mediator;`,
+      "",
+      "    [HttpPost]",
+      `    public async Task<ActionResult<Create${agg.name}Response>> Create([FromBody] Create${agg.name}Request request)`,
+      "    {",
+      `        var cmd = new Create${agg.name}Command(`,
+      ...createBody,
+      "        );",
+      "        var id = await _mediator.Send(cmd);",
+      `        return CreatedAtAction(nameof(GetById), new { id = id.Value }, new Create${agg.name}Response(id.Value));`,
+      "    }",
+      "",
+      "    [HttpGet(\"{id}\")]",
+      `    public async Task<ActionResult<${agg.name}Response>> GetById([FromRoute] ${shape.idClrType} id)`,
+      "    {",
+      `        var response = await _mediator.Send(new Get${agg.name}ByIdQuery(new ${agg.name}Id(id)));`,
+      "        return response is null ? NotFound() : Ok(response);",
+      "    }",
+      "",
+      ...opBlocks,
+      ...findBlocks,
+      "}",
+    ) + "\n"
+  );
+}
+
+function renderCmdConstructorBody(args: string[], indent: string): string[] {
+  return args.map(
+    (a, i) => `${indent}${a}${i < args.length - 1 ? "," : ""}`,
+  );
+}
+
+export function renderExceptionFilter(ns: string): string {
+  return `// Auto-generated.
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
-using {{ns}}.Domain.Common;
+using ${ns}.Domain.Common;
 
-namespace {{ns}}.Api;
+namespace ${ns}.Api;
 
 public sealed class DomainExceptionFilter : IExceptionFilter
 {
@@ -93,35 +136,5 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         }
     }
 }
-`,
-);
-
-export function renderController(
-  agg: AggregateIR,
-  _repo: RepositoryIR | undefined,
-  ns: string,
-  shape: {
-    idClrType: string;
-    createCmdArgs: string[];
-    publicOps: Array<{ name: string; cmdArgs: string[] }>;
-    finds: Array<{
-      name: string;
-      isRoot: boolean;
-      queryRouteParams: string;
-      queryConstructorArgs: string;
-    }>;
-  },
-): string {
-  return CONTROLLER_TPL({
-    aggregate: agg,
-    idClrType: shape.idClrType,
-    createCmdArgs: shape.createCmdArgs,
-    publicOps: shape.publicOps,
-    finds: shape.finds,
-    ns,
-  });
-}
-
-export function renderExceptionFilter(ns: string): string {
-  return FILTER_TPL({ ns });
+`;
 }

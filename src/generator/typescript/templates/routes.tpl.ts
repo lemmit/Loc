@@ -1,48 +1,52 @@
 import type { BoundedContextIR } from "../../../ir/loom-ir.js";
-import { hb } from "../hb.js";
+import { camel, plural, snake } from "../../../util/naming.js";
+import { lines } from "../../../util/code-builder.js";
 
 // The per-aggregate routes file is built procedurally in
 // `routes-builder.ts` because the OpenAPI annotations push it past
 // what's pleasant to read in a template.  This file owns just the
 // `createApp` composition entry, which mounts each aggregate's
 // sub-router and exposes `/openapi.json`.
-const HTTP_INDEX_TPL = hb.compile(
-  `// Auto-generated.
-import { OpenAPIHono } from "@hono/zod-openapi";
-import { cors } from "hono/cors";
-{{#each aggregates}}
-import { {{camel name}}Routes } from "./{{camel name}}.routes.js";
-import { {{name}}Repository } from "../db/repositories/{{camel name}}-repository.js";
-{{/each}}
-import type { NodePgDatabase } from "drizzle-orm/node-postgres";
-import type * as schema from "../db/schema.js";
-import { type DomainEventDispatcher, NoopDomainEventDispatcher } from "../domain/events.js";
-
-export function createApp(
-  db: NodePgDatabase<typeof schema>,
-  events: DomainEventDispatcher = NoopDomainEventDispatcher,
-): OpenAPIHono {
-  const app = new OpenAPIHono();
-  // Permissive CORS so a generated React frontend on a different port
-  // can reach the API in dev compose.  Pin http/index.ts in
-  // .loomignore + tighten in production.
-  app.use("*", cors());
-  // Liveness probe — used by docker-compose / kubernetes / smoke tests.
-  app.get("/health", (c) => c.json({ status: "ok" }));
-{{#each aggregates}}  app.route("/{{snake (plural name)}}", {{camel name}}Routes(new {{name}}Repository(db, events)));
-{{/each}}
-  // OpenAPI 3.1 spec assembled from every sub-router's createRoute()
-  // calls.  Diffed against the .NET-emitted /swagger/v1/swagger.json by
-  // the cross-platform contract check.
-  app.doc("/openapi.json", {
-    openapi: "3.1.0",
-    info: { title: "Generated API", version: "1.0.0" },
-  });
-  return app;
-}
-`,
-);
-
 export function renderHttpIndex(ctx: BoundedContextIR): string {
-  return HTTP_INDEX_TPL({ aggregates: ctx.aggregates });
+  const aggregateImports = ctx.aggregates.flatMap((a) => [
+    `import { ${camel(a.name)}Routes } from "./${camel(a.name)}.routes.js";`,
+    `import { ${a.name}Repository } from "../db/repositories/${camel(a.name)}-repository.js";`,
+  ]);
+  const aggregateRoutes = ctx.aggregates.map(
+    (a) =>
+      `  app.route("/${snake(plural(a.name))}", ${camel(a.name)}Routes(new ${a.name}Repository(db, events)));`,
+  );
+  return (
+    lines(
+      "// Auto-generated.",
+      'import { OpenAPIHono } from "@hono/zod-openapi";',
+      'import { cors } from "hono/cors";',
+      ...aggregateImports,
+      'import type { NodePgDatabase } from "drizzle-orm/node-postgres";',
+      'import type * as schema from "../db/schema.js";',
+      'import { type DomainEventDispatcher, NoopDomainEventDispatcher } from "../domain/events.js";',
+      "",
+      "export function createApp(",
+      "  db: NodePgDatabase<typeof schema>,",
+      "  events: DomainEventDispatcher = NoopDomainEventDispatcher,",
+      "): OpenAPIHono {",
+      "  const app = new OpenAPIHono();",
+      "  // Permissive CORS so a generated React frontend on a different port",
+      "  // can reach the API in dev compose.  Pin http/index.ts in",
+      "  // .loomignore + tighten in production.",
+      '  app.use("*", cors());',
+      "  // Liveness probe — used by docker-compose / kubernetes / smoke tests.",
+      '  app.get("/health", (c) => c.json({ status: "ok" }));',
+      ...aggregateRoutes,
+      "  // OpenAPI 3.1 spec assembled from every sub-router's createRoute()",
+      "  // calls.  Diffed against the .NET-emitted /swagger/v1/swagger.json by",
+      "  // the cross-platform contract check.",
+      '  app.doc("/openapi.json", {',
+      '    openapi: "3.1.0",',
+      '    info: { title: "Generated API", version: "1.0.0" },',
+      "  });",
+      "  return app;",
+      "}",
+    ) + "\n"
+  );
 }

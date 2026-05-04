@@ -1,12 +1,16 @@
-import { hb } from "../hb.js";
+// ---------------------------------------------------------------------------
+// Common types shared across the .NET emission: domain exception base
+// classes + the IDomainEventDispatcher boundary.  Trivial substitution
+// templates — pure string concatenation.
+// ---------------------------------------------------------------------------
 
-const COMMON_TPL = hb.compile(
-  `// Auto-generated.
+export function renderCommon(ns: string): string {
+  return `// Auto-generated.
 using System.Threading;
 using System.Threading.Tasks;
-using {{ns}}.Domain.Events;
+using ${ns}.Domain.Events;
 
-namespace {{ns}}.Domain.Common;
+namespace ${ns}.Domain.Common;
 
 public sealed class DomainException : System.Exception
 {
@@ -27,17 +31,17 @@ public interface IDomainEventDispatcher
 {
     Task DispatchAsync(IDomainEvent ev, CancellationToken ct = default);
 }
-`,
-);
+`;
+}
 
-const NOOP_DISPATCHER_TPL = hb.compile(
-  `// Auto-generated.
+export function renderNoopDispatcher(ns: string): string {
+  return `// Auto-generated.
 using System.Threading;
 using System.Threading.Tasks;
-using {{ns}}.Domain.Common;
-using {{ns}}.Domain.Events;
+using ${ns}.Domain.Common;
+using ${ns}.Domain.Events;
 
-namespace {{ns}}.Infrastructure.Events;
+namespace ${ns}.Infrastructure.Events;
 
 /// <summary>Default implementation that drops domain events.</summary>
 public sealed class NoopDomainEventDispatcher : IDomainEventDispatcher
@@ -45,13 +49,5 @@ public sealed class NoopDomainEventDispatcher : IDomainEventDispatcher
     public Task DispatchAsync(IDomainEvent ev, CancellationToken ct = default)
         => Task.CompletedTask;
 }
-`,
-);
-
-export function renderCommon(ns: string): string {
-  return COMMON_TPL({ ns });
-}
-
-export function renderNoopDispatcher(ns: string): string {
-  return NOOP_DISPATCHER_TPL({ ns });
+`;
 }

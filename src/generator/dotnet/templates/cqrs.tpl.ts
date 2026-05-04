@@ -1,80 +1,7 @@
-import { hb } from "../hb.js";
+import { plural } from "../../../util/naming.js";
 
-const COMMAND_TPL = hb.compile(
-  `// Auto-generated.
-using Mediator;
-using {{ns}}.Domain.Ids;
-using {{ns}}.Domain.ValueObjects;
-using {{ns}}.Domain.Enums;
-
-namespace {{ns}}.Application.{{plural aggName}}.Commands;
-
-public sealed record {{commandName}}({{commandParams}}) : ICommand{{#if returnType}}<{{returnType}}>{{/if}};
-`,
-);
-
-const COMMAND_HANDLER_TPL = hb.compile(
-  `// Auto-generated.
-using System.Threading;
-using System.Threading.Tasks;
-using Mediator;
-using {{ns}}.Domain.{{plural aggName}};
-using {{ns}}.Domain.Common;
-using {{ns}}.Domain.Ids;
-using {{ns}}.Domain.ValueObjects;
-using {{ns}}.Domain.Enums;
-
-namespace {{ns}}.Application.{{plural aggName}}.Commands;
-
-public sealed class {{handlerName}} : ICommandHandler<{{commandName}}{{#if returnType}}, {{returnType}}{{else}}, Unit{{/if}}>
-{
-    private readonly I{{aggName}}Repository _repo;
-    public {{handlerName}}(I{{aggName}}Repository repo) => _repo = repo;
-
-    public async ValueTask<{{#if returnType}}{{returnType}}{{else}}Unit{{/if}}> Handle({{commandName}} cmd, CancellationToken ct)
-    {
-{{{body}}}    }
-}
-`,
-);
-
-const QUERY_TPL = hb.compile(
-  `// Auto-generated.
-using Mediator;
-using {{ns}}.Domain.Ids;
-using {{ns}}.Application.{{plural aggName}}.Responses;
-
-namespace {{ns}}.Application.{{plural aggName}}.Queries;
-
-public sealed record {{queryName}}({{queryParams}}) : IQuery<{{{ returnType }}}>;
-`,
-);
-
-const QUERY_HANDLER_TPL = hb.compile(
-  `// Auto-generated.
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
-using Mediator;
-using {{ns}}.Domain.{{plural aggName}};
-using {{ns}}.Domain.Ids;
-using {{ns}}.Domain.ValueObjects;
-using {{ns}}.Domain.Enums;
-using {{ns}}.Application.{{plural aggName}}.Responses;
-
-namespace {{ns}}.Application.{{plural aggName}}.Queries;
-
-public sealed class {{handlerName}} : IQueryHandler<{{queryName}}, {{{ returnType }}}>
-{
-    private readonly I{{aggName}}Repository _repo;
-    public {{handlerName}}(I{{aggName}}Repository repo) => _repo = repo;
-
-    public async ValueTask<{{{ returnType }}}> Handle({{queryName}} q, CancellationToken ct)
-    {
-{{{body}}}    }
-}
-`,
-);
+// Mediator command/query records + their handler scaffolds.  Body is
+// pre-rendered upstream — we just splice it into the handler.
 
 export function renderCommand(args: {
   ns: string;
@@ -83,7 +10,17 @@ export function renderCommand(args: {
   commandParams: string;
   returnType?: string;
 }): string {
-  return COMMAND_TPL(args);
+  const sig = args.returnType ? `ICommand<${args.returnType}>` : "ICommand";
+  return `// Auto-generated.
+using Mediator;
+using ${args.ns}.Domain.Ids;
+using ${args.ns}.Domain.ValueObjects;
+using ${args.ns}.Domain.Enums;
+
+namespace ${args.ns}.Application.${plural(args.aggName)}.Commands;
+
+public sealed record ${args.commandName}(${args.commandParams}) : ${sig};
+`;
 }
 
 export function renderCommandHandler(args: {
@@ -94,7 +31,29 @@ export function renderCommandHandler(args: {
   returnType?: string;
   body: string;
 }): string {
-  return COMMAND_HANDLER_TPL(args);
+  const ret = args.returnType ?? "Unit";
+  return `// Auto-generated.
+using System.Threading;
+using System.Threading.Tasks;
+using Mediator;
+using ${args.ns}.Domain.${plural(args.aggName)};
+using ${args.ns}.Domain.Common;
+using ${args.ns}.Domain.Ids;
+using ${args.ns}.Domain.ValueObjects;
+using ${args.ns}.Domain.Enums;
+
+namespace ${args.ns}.Application.${plural(args.aggName)}.Commands;
+
+public sealed class ${args.handlerName} : ICommandHandler<${args.commandName}, ${ret}>
+{
+    private readonly I${args.aggName}Repository _repo;
+    public ${args.handlerName}(I${args.aggName}Repository repo) => _repo = repo;
+
+    public async ValueTask<${ret}> Handle(${args.commandName} cmd, CancellationToken ct)
+    {
+${args.body}    }
+}
+`;
 }
 
 export function renderQuery(args: {
@@ -104,7 +63,15 @@ export function renderQuery(args: {
   queryParams: string;
   returnType: string;
 }): string {
-  return QUERY_TPL(args);
+  return `// Auto-generated.
+using Mediator;
+using ${args.ns}.Domain.Ids;
+using ${args.ns}.Application.${plural(args.aggName)}.Responses;
+
+namespace ${args.ns}.Application.${plural(args.aggName)}.Queries;
+
+public sealed record ${args.queryName}(${args.queryParams}) : IQuery<${args.returnType}>;
+`;
 }
 
 export function renderQueryHandler(args: {
@@ -115,5 +82,27 @@ export function renderQueryHandler(args: {
   returnType: string;
   body: string;
 }): string {
-  return QUERY_HANDLER_TPL(args);
+  return `// Auto-generated.
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Mediator;
+using ${args.ns}.Domain.${plural(args.aggName)};
+using ${args.ns}.Domain.Ids;
+using ${args.ns}.Domain.ValueObjects;
+using ${args.ns}.Domain.Enums;
+using ${args.ns}.Application.${plural(args.aggName)}.Responses;
+
+namespace ${args.ns}.Application.${plural(args.aggName)}.Queries;
+
+public sealed class ${args.handlerName} : IQueryHandler<${args.queryName}, ${args.returnType}>
+{
+    private readonly I${args.aggName}Repository _repo;
+    public ${args.handlerName}(I${args.aggName}Repository repo) => _repo = repo;
+
+    public async ValueTask<${args.returnType}> Handle(${args.queryName} q, CancellationToken ct)
+    {
+${args.body}    }
+}
+`;
 }

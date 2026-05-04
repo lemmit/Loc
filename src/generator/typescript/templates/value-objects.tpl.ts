@@ -1,35 +1,76 @@
-import type { BoundedContextIR } from "../../../ir/loom-ir.js";
-import { hb } from "../hb.js";
+import type {
+  BoundedContextIR,
+  EnumIR,
+  ValueObjectIR,
+} from "../../../ir/loom-ir.js";
+import { lines } from "../../../util/code-builder.js";
+import { renderTsExpr, renderTsType } from "../render-expr.js";
+import { camel } from "../../../util/naming.js";
 
-const ENUM_VO_TPL = hb.compile(
-  `// Auto-generated.
-
-{{#each enums}}
-export const {{name}} = {
-{{#each values}}  {{this}}: "{{this}}"{{#unless @last}},{{/unless}}
-{{/each}}
-} as const;
-export type {{name}} = {{#each values}}"{{this}}"{{#unless @last}} | {{/unless}}{{/each}};
-
-{{/each}}
-{{#each valueObjects}}
-export class {{name}} {
-  constructor(
-{{#each fields}}    public readonly {{name}}: {{tsType type}}{{#unless @last}},{{/unless}}
-{{/each}}  ) {
-{{#each invariants}}    {{#if guard}}if (({{tsExpr guard}}) && !({{tsExpr expr}})){{else}}if (!({{tsExpr expr}})){{/if}} throw new Error({{escapeStr (concat "Invariant violated: " source)}});
-{{/each}}  }
-
-{{#each derived}}  get {{name}}(): {{tsType type}} { return {{tsExpr expr}}; }
-{{/each}}
-{{#each functions}}  private {{camel name}}({{#each params}}{{name}}: {{tsType type}}{{#unless @last}}, {{/unless}}{{/each}}): {{tsType returnType}} { return {{tsExpr body}}; }
-{{/each}}
-}
-
-{{/each}}
-`,
-);
+// ---------------------------------------------------------------------------
+// Enums + value objects emitted into one file.  Enums become
+// `as const` objects + a literal-union type; value objects become
+// classes with constructor-based invariant checks, getter-style
+// `derived`, and private helpers per `function`.
+// ---------------------------------------------------------------------------
 
 export function renderEnumsAndValueObjects(ctx: BoundedContextIR): string {
-  return ENUM_VO_TPL({ enums: ctx.enums, valueObjects: ctx.valueObjects });
+  return (
+    lines(
+      "// Auto-generated.",
+      "",
+      ...ctx.enums.flatMap(renderEnum),
+      ...ctx.valueObjects.flatMap(renderValueObject),
+    ) + "\n"
+  );
+}
+
+function renderEnum(e: EnumIR): string[] {
+  const valueLines = e.values.map(
+    (v, i) => `  ${v}: "${v}"${i < e.values.length - 1 ? "," : ""}`,
+  );
+  const unionLiteral = e.values.map((v) => `"${v}"`).join(" | ");
+  return [
+    `export const ${e.name} = {`,
+    ...valueLines,
+    "} as const;",
+    `export type ${e.name} = ${unionLiteral};`,
+    "",
+  ];
+}
+
+function renderValueObject(v: ValueObjectIR): string[] {
+  const ctorParams = v.fields.map(
+    (f, i) =>
+      `    public readonly ${f.name}: ${renderTsType(f.type)}${i < v.fields.length - 1 ? "," : ""}`,
+  );
+  const invariants = v.invariants.map((inv) => {
+    const check = inv.guard
+      ? `if ((${renderTsExpr(inv.guard)}) && !(${renderTsExpr(inv.expr)}))`
+      : `if (!(${renderTsExpr(inv.expr)}))`;
+    return `    ${check} throw new Error(${JSON.stringify(`Invariant violated: ${inv.source}`)});`;
+  });
+  const derived = v.derived.map(
+    (d) =>
+      `  get ${d.name}(): ${renderTsType(d.type)} { return ${renderTsExpr(d.expr)}; }`,
+  );
+  const fns = v.functions.map((fn) => {
+    const params = fn.params
+      .map((p) => `${p.name}: ${renderTsType(p.type)}`)
+      .join(", ");
+    return `  private ${camel(fn.name)}(${params}): ${renderTsType(fn.returnType)} { return ${renderTsExpr(fn.body)}; }`;
+  });
+  return [
+    `export class ${v.name} {`,
+    "  constructor(",
+    ...ctorParams,
+    "  ) {",
+    ...invariants,
+    "  }",
+    "",
+    ...derived,
+    ...fns,
+    "}",
+    "",
+  ];
 }

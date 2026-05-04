@@ -1,24 +1,28 @@
 import type { BoundedContextIR } from "../../../ir/loom-ir.js";
-import { hb } from "../hb.js";
+import { lines } from "../../../util/code-builder.js";
 
-const IDS_TPL = hb.compile(
-  `// Auto-generated.
-import { randomUUID } from "node:crypto";
-
-{{#each entries}}
-export type {{this.name}}Id = string & { readonly __brand: "{{this.name}}Id" };
-export const {{this.name}}Id = (value: string): {{this.name}}Id => value as {{this.name}}Id;
-export const new{{this.name}}Id = (): {{this.name}}Id => randomUUID() as {{this.name}}Id;
-
-{{/each}}
-`,
-);
+// ---------------------------------------------------------------------------
+// Branded `XId` types — one per aggregate and per part.  Branding gives us
+// nominal safety on what would otherwise be a bare `string` UUID.
+// ---------------------------------------------------------------------------
 
 export function renderIds(ctx: BoundedContextIR): string {
-  const entries: { name: string }[] = [];
+  const names: string[] = [];
   for (const a of ctx.aggregates) {
-    entries.push({ name: a.name });
-    for (const p of a.parts) entries.push({ name: p.name });
+    names.push(a.name);
+    for (const p of a.parts) names.push(p.name);
   }
-  return IDS_TPL({ entries });
+  return (
+    lines(
+      "// Auto-generated.",
+      'import { randomUUID } from "node:crypto";',
+      "",
+      ...names.flatMap((name) => [
+        `export type ${name}Id = string & { readonly __brand: "${name}Id" };`,
+        `export const ${name}Id = (value: string): ${name}Id => value as ${name}Id;`,
+        `export const new${name}Id = (): ${name}Id => randomUUID() as ${name}Id;`,
+        "",
+      ]),
+    ) + "\n"
+  );
 }

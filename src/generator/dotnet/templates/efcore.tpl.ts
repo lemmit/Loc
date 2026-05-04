@@ -1,81 +1,124 @@
 import type {
   AggregateIR,
   BoundedContextIR,
+  ContainmentIR,
+  FieldIR,
 } from "../../../ir/loom-ir.js";
-import { hb } from "../hb.js";
+import { pascal, plural, snake } from "../../../util/naming.js";
+import { lines } from "../../../util/code-builder.js";
 
-const DBCONTEXT_TPL = hb.compile(
-  `// Auto-generated.
-using Microsoft.EntityFrameworkCore;
-{{#each aggregates}}using {{../ns}}.Domain.{{plural name}};
-{{/each}}
-namespace {{ns}}.Infrastructure.Persistence;
-
-public sealed class AppDbContext : DbContext
-{
-    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
-
-{{#each aggregates}}    public DbSet<{{name}}> {{plural (pascal name)}} => Set<{{name}}>();
-{{/each}}
-    protected override void OnModelCreating(ModelBuilder modelBuilder)
-    {
-{{#each aggregates}}        modelBuilder.ApplyConfiguration(new Configurations.{{name}}Configuration());
-{{/each}}    }
-}
-`,
-);
-
-const CONFIG_TPL = hb.compile(
-  `// Auto-generated.
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using {{ns}}.Domain.{{plural aggregate.name}};
-using {{ns}}.Domain.Ids;
-using {{ns}}.Domain.ValueObjects;
-using {{ns}}.Domain.Enums;
-
-namespace {{ns}}.Infrastructure.Persistence.Configurations;
-
-public sealed class {{aggregate.name}}Configuration : IEntityTypeConfiguration<{{aggregate.name}}>
-{
-    public void Configure(EntityTypeBuilder<{{aggregate.name}}> b)
-    {
-        b.ToTable("{{snake (plural aggregate.name)}}");
-        b.HasKey(x => x.Id);
-        b.Property(x => x.Id).HasConversion(v => v.Value, v => new {{aggregate.name}}Id(v));
-{{#each aggregate.fields}}{{#if (isIdField this)}}        b.Property(x => x.{{pascal name}}).HasConversion(v => v.Value, v => new {{type.targetName}}Id(v));
-{{else if (isEnumField this)}}        b.Property(x => x.{{pascal name}}).HasConversion<string>();
-{{else if (ownedRef this)}}        b.OwnsOne<{{type.name}}>(x => x.{{pascal name}});
-{{/if}}{{/each}}{{#each containments}}{{#if collection}}        // Ignore the public read-accessor and tell EF to map the
-        // private backing field instead.
-        b.Ignore(x => x.{{pascal name}});
-        b.OwnsMany<{{partName}}>("_{{name}}", o => {
-            o.ToTable("{{snake (plural partName)}}");
-            o.WithOwner().HasForeignKey("ParentId");
-            o.HasKey(x => x.Id);
-            o.Property(x => x.Id).HasConversion(v => v.Value, v => new {{partName}}Id(v));
-{{#each partFields}}{{#if (isIdField this)}}            o.Property(x => x.{{pascal name}}).HasConversion(v => v.Value, v => new {{type.targetName}}Id(v));
-{{else if (isEnumField this)}}            o.Property(x => x.{{pascal name}}).HasConversion<string>();
-{{else if (ownedRef this)}}            o.OwnsOne<{{type.name}}>(x => x.{{pascal name}});
-{{/if}}{{/each}}        });
-{{else}}        b.OwnsOne<{{partName}}>(x => x.{{pascal name}});
-{{/if}}{{/each}}        b.Ignore(x => x.DomainEvents);
-    }
-}
-`,
-);
+// AppDbContext + per-aggregate IEntityTypeConfiguration<T>.  The
+// configuration walks each aggregate's fields/contains and emits the
+// matching `HasConversion` / `OwnsOne` / `OwnsMany` calls.
 
 export function renderDbContext(ctx: BoundedContextIR, ns: string): string {
-  return DBCONTEXT_TPL({ aggregates: ctx.aggregates, ns });
+  const aggUsings = ctx.aggregates.map(
+    (a) => `using ${ns}.Domain.${plural(a.name)};`,
+  );
+  const dbSets = ctx.aggregates.map(
+    (a) => `    public DbSet<${a.name}> ${plural(pascal(a.name))} => Set<${a.name}>();`,
+  );
+  const applyConfigs = ctx.aggregates.map(
+    (a) =>
+      `        modelBuilder.ApplyConfiguration(new Configurations.${a.name}Configuration());`,
+  );
+  return (
+    lines(
+      "// Auto-generated.",
+      "using Microsoft.EntityFrameworkCore;",
+      ...aggUsings,
+      `namespace ${ns}.Infrastructure.Persistence;`,
+      "",
+      "public sealed class AppDbContext : DbContext",
+      "{",
+      "    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }",
+      "",
+      ...dbSets,
+      "    protected override void OnModelCreating(ModelBuilder modelBuilder)",
+      "    {",
+      ...applyConfigs,
+      "    }",
+      "}",
+    ) + "\n"
+  );
 }
 
 export function renderConfiguration(agg: AggregateIR, ns: string): string {
-  // Pre-resolve `partFields` per containment so the template can emit
-  // the right HasConversion / OwnsOne calls inside each `OwnsMany`
-  // block without doing AST lookups itself.
-  const containments = agg.contains.map((c) => {
-    const part = agg.parts.find((p) => p.name === c.partName);
-    return { ...c, partFields: part?.fields ?? [] };
-  });
-  return CONFIG_TPL({ aggregate: agg, containments, ns });
+  const fieldConfigs = agg.fields.flatMap((f) => fieldConfigLines(f, "        ", "b"));
+  const containmentLines = agg.contains.flatMap((c) =>
+    containmentConfigLines(c, agg),
+  );
+  return (
+    lines(
+      "// Auto-generated.",
+      "using Microsoft.EntityFrameworkCore;",
+      "using Microsoft.EntityFrameworkCore.Metadata.Builders;",
+      `using ${ns}.Domain.${plural(agg.name)};`,
+      `using ${ns}.Domain.Ids;`,
+      `using ${ns}.Domain.ValueObjects;`,
+      `using ${ns}.Domain.Enums;`,
+      "",
+      `namespace ${ns}.Infrastructure.Persistence.Configurations;`,
+      "",
+      `public sealed class ${agg.name}Configuration : IEntityTypeConfiguration<${agg.name}>`,
+      "{",
+      `    public void Configure(EntityTypeBuilder<${agg.name}> b)`,
+      "    {",
+      `        b.ToTable("${snake(plural(agg.name))}");`,
+      "        b.HasKey(x => x.Id);",
+      `        b.Property(x => x.Id).HasConversion(v => v.Value, v => new ${agg.name}Id(v));`,
+      ...fieldConfigs,
+      ...containmentLines,
+      "        b.Ignore(x => x.DomainEvents);",
+      "    }",
+      "}",
+    ) + "\n"
+  );
+}
+
+function fieldConfigLines(
+  f: FieldIR,
+  indent: string,
+  builder: string,
+): string[] {
+  if (f.type.kind === "id") {
+    return [
+      `${indent}${builder}.Property(x => x.${pascal(f.name)}).HasConversion(v => v.Value, v => new ${f.type.targetName}Id(v));`,
+    ];
+  }
+  if (f.type.kind === "enum") {
+    return [
+      `${indent}${builder}.Property(x => x.${pascal(f.name)}).HasConversion<string>();`,
+    ];
+  }
+  if (f.type.kind === "valueobject") {
+    return [`${indent}${builder}.OwnsOne<${f.type.name}>(x => x.${pascal(f.name)});`];
+  }
+  return [];
+}
+
+function containmentConfigLines(
+  c: ContainmentIR,
+  agg: AggregateIR,
+): string[] {
+  if (!c.collection) {
+    return [`        b.OwnsOne<${c.partName}>(x => x.${pascal(c.name)});`];
+  }
+  const part = agg.parts.find((p) => p.name === c.partName);
+  const partFields = part?.fields ?? [];
+  const partFieldLines = partFields.flatMap((f) =>
+    fieldConfigLines(f, "            ", "o"),
+  );
+  return [
+    "        // Ignore the public read-accessor and tell EF to map the",
+    "        // private backing field instead.",
+    `        b.Ignore(x => x.${pascal(c.name)});`,
+    `        b.OwnsMany<${c.partName}>("_${c.name}", o => {`,
+    `            o.ToTable("${snake(plural(c.partName))}");`,
+    '            o.WithOwner().HasForeignKey("ParentId");',
+    "            o.HasKey(x => x.Id);",
+    `            o.Property(x => x.Id).HasConversion(v => v.Value, v => new ${c.partName}Id(v));`,
+    ...partFieldLines,
+    "        });",
+  ];
 }

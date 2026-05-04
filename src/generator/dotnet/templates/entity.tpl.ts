@@ -2,94 +2,22 @@ import type {
   AggregateIR,
   EntityPartIR,
 } from "../../../ir/loom-ir.js";
-import { csNewIdValue } from "../render-expr.js";
-import { hb } from "../hb.js";
+import { pascal, plural } from "../../../util/naming.js";
+import { lines } from "../../../util/code-builder.js";
+import {
+  csNewIdValue,
+  renderCsExpr,
+  renderCsType,
+} from "../render-expr.js";
+import { renderCsStatements } from "../render-stmt.js";
 
-const ENTITY_TPL = hb.compile(
-  `// Auto-generated.
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using {{ns}}.Domain.Ids;
-using {{ns}}.Domain.Events;
-using {{ns}}.Domain.ValueObjects;
-using {{ns}}.Domain.Enums;
-using {{ns}}.Domain.Common;
-
-namespace {{ns}}.Domain.{{plural aggName}};
-
-public sealed class {{name}}
-{
-    public {{name}}Id Id { get; private set; }
-{{#unless isRoot}}    public {{rootName}}Id ParentId { get; private set; }
-{{/unless}}
-{{#each fields}}    public {{csType type}} {{pascal name}} { get; private set; }{{#if optional}} = default;{{else}} = default!;{{/if}}
-{{/each}}{{#each contains}}{{#if collection}}    private readonly List<{{partName}}> _{{name}} = new();
-    public IReadOnlyList<{{partName}}> {{pascal name}} => _{{name}}.AsReadOnly();
-{{else}}    public {{partName}} {{pascal name}} { get; private set; } = default!;
-{{/if}}{{/each}}
-{{#if isRoot}}    private readonly List<IDomainEvent> _domainEvents = new();
-    public IReadOnlyList<IDomainEvent> DomainEvents => _domainEvents.AsReadOnly();
-{{/if}}
-    private {{name}}()
-    {
-        Id = default!;
-{{#unless isRoot}}        ParentId = default!;
-{{/unless}}{{#each fields}}        {{pascal name}} = default!;
-{{/each}}    }
-
-{{#each derived}}    public {{csType type}} {{pascal name}} => {{csExpr expr}};
-{{/each}}
-{{#each functions}}    private {{csType returnType}} {{pascal name}}({{csParams params}}) => {{csExpr body}};
-{{/each}}
-{{#if isRoot}}{{#each operations}}    {{#if (isPublic visibility)}}public{{else}}private{{/if}} void {{pascal name}}({{csParams params}})
-    {
-{{csStmts statements}}
-        AssertInvariants();
-    }
-
-{{/each}}{{/if}}
-{{#if isRoot}}    public IReadOnlyList<IDomainEvent> PullEvents()
-    {
-        var copy = _domainEvents.ToArray();
-        _domainEvents.Clear();
-        return copy;
-    }
-
-{{/if}}    private void AssertInvariants()
-    {
-{{#each invariants}}        {{#if guard}}if (({{csExpr guard}}) && !({{csExpr expr}})){{else}}if (!({{csExpr expr}})){{/if}} throw new DomainException({{escapeStr (concat "Invariant violated: " source)}});
-{{/each}}    }
-
-    public sealed class State
-    {
-        public {{name}}Id Id { get; init; } = default!;
-{{#unless isRoot}}        public {{rootName}}Id ParentId { get; init; } = default!;
-{{/unless}}{{#each fields}}        public {{csType type}} {{pascal name}} { get; init; } = default!;
-{{/each}}    }
-
-    public static {{name}} _Create(State s)
-    {
-        var e = new {{name}}();
-        e.Id = s.Id;
-{{#unless isRoot}}        e.ParentId = s.ParentId;
-{{/unless}}{{#each fields}}        e.{{pascal name}} = s.{{pascal name}};
-{{/each}}        e.AssertInvariants();
-        return e;
-    }
-{{#if isRoot}}
-    public static {{name}} Create({{#each (requiredFields fields)}}{{csType type}} {{name}}{{#unless @last}}, {{/unless}}{{/each}})
-    {
-        var e = new {{name}}();
-        e.Id = new {{name}}Id({{newIdExpr}});
-{{#each (requiredFields fields)}}        e.{{pascal name}} = {{name}};
-{{/each}}        e.AssertInvariants();
-        return e;
-    }
-{{/if}}
-}
-`,
-);
+// ---------------------------------------------------------------------------
+// Aggregate root + entity-part class emission for .NET.  The shape is a
+// sealed class with private setters everywhere, an explicit
+// parameterless ctor for EF Core, an explicit `_Create(State)` factory
+// used by repository hydration, and (for the root) a public `Create`
+// factory + `PullEvents()` drainage hook.
+// ---------------------------------------------------------------------------
 
 export function renderEntity(
   entity: AggregateIR | EntityPartIR,
@@ -98,18 +26,181 @@ export function renderEntity(
   rootName: string,
 ): string {
   const isAgg = "operations" in entity;
-  return ENTITY_TPL({
-    name: entity.name,
-    aggName: rootName,
-    rootName,
-    isRoot,
-    fields: entity.fields,
-    contains: entity.contains,
-    derived: entity.derived,
-    invariants: entity.invariants,
-    functions: entity.functions,
-    operations: isAgg ? (entity as AggregateIR).operations : [],
-    newIdExpr: csNewIdValue(isAgg ? (entity as AggregateIR).idValueType : "guid"),
-    ns,
+  const idValueType = isAgg ? (entity as AggregateIR).idValueType : "guid";
+  const operations = isAgg ? (entity as AggregateIR).operations : [];
+  const requiredFields = entity.fields.filter((f) => !f.optional);
+
+  const propLines: string[] = [];
+  propLines.push(`    public ${entity.name}Id Id { get; private set; }`);
+  if (!isRoot) {
+    propLines.push(`    public ${rootName}Id ParentId { get; private set; }`);
+  }
+  for (const f of entity.fields) {
+    const def = f.optional ? " = default;" : " = default!;";
+    propLines.push(
+      `    public ${renderCsType(f.type)} ${pascal(f.name)} { get; private set; }${def}`,
+    );
+  }
+  for (const c of entity.contains) {
+    if (c.collection) {
+      propLines.push(
+        `    private readonly List<${c.partName}> _${c.name} = new();`,
+      );
+      propLines.push(
+        `    public IReadOnlyList<${c.partName}> ${pascal(c.name)} => _${c.name}.AsReadOnly();`,
+      );
+    } else {
+      propLines.push(
+        `    public ${c.partName} ${pascal(c.name)} { get; private set; } = default!;`,
+      );
+    }
+  }
+
+  const eventBlock = isRoot
+    ? [
+        "",
+        `    private readonly List<IDomainEvent> _domainEvents = new();`,
+        `    public IReadOnlyList<IDomainEvent> DomainEvents => _domainEvents.AsReadOnly();`,
+      ]
+    : [];
+
+  const ctorLines: string[] = [];
+  ctorLines.push(`    private ${entity.name}()`);
+  ctorLines.push("    {");
+  ctorLines.push("        Id = default!;");
+  if (!isRoot) ctorLines.push("        ParentId = default!;");
+  for (const f of entity.fields) {
+    ctorLines.push(`        ${pascal(f.name)} = default!;`);
+  }
+  ctorLines.push("    }");
+
+  const derivedLines = entity.derived.map(
+    (d) =>
+      `    public ${renderCsType(d.type)} ${pascal(d.name)} => ${renderCsExpr(d.expr)};`,
+  );
+  const fnLines = entity.functions.map((fn) => {
+    const params = fn.params
+      .map((p) => `${renderCsType(p.type)} ${p.name}`)
+      .join(", ");
+    return `    private ${renderCsType(fn.returnType)} ${pascal(fn.name)}(${params}) => ${renderCsExpr(fn.body)};`;
   });
+
+  const opLines: string[] = [];
+  for (const op of operations) {
+    const visibility = op.visibility === "public" ? "public" : "private";
+    const params = op.params
+      .map((p) => `${renderCsType(p.type)} ${p.name}`)
+      .join(", ");
+    opLines.push(`    ${visibility} void ${pascal(op.name)}(${params})`);
+    opLines.push("    {");
+    const body = renderCsStatements(op.statements);
+    if (body.length > 0) opLines.push(body);
+    opLines.push("        AssertInvariants();");
+    opLines.push("    }");
+    opLines.push("");
+  }
+
+  const pullEventsLines = isRoot
+    ? [
+        "    public IReadOnlyList<IDomainEvent> PullEvents()",
+        "    {",
+        "        var copy = _domainEvents.ToArray();",
+        "        _domainEvents.Clear();",
+        "        return copy;",
+        "    }",
+        "",
+      ]
+    : [];
+
+  const invariantLines = entity.invariants.map((inv) => {
+    const check = inv.guard
+      ? `if ((${renderCsExpr(inv.guard)}) && !(${renderCsExpr(inv.expr)}))`
+      : `if (!(${renderCsExpr(inv.expr)}))`;
+    return `        ${check} throw new DomainException(${JSON.stringify(`Invariant violated: ${inv.source}`)});`;
+  });
+
+  const stateLines: string[] = [];
+  stateLines.push("    public sealed class State");
+  stateLines.push("    {");
+  stateLines.push(`        public ${entity.name}Id Id { get; init; } = default!;`);
+  if (!isRoot) {
+    stateLines.push(`        public ${rootName}Id ParentId { get; init; } = default!;`);
+  }
+  for (const f of entity.fields) {
+    stateLines.push(
+      `        public ${renderCsType(f.type)} ${pascal(f.name)} { get; init; } = default!;`,
+    );
+  }
+  stateLines.push("    }");
+
+  const createInternalLines: string[] = [];
+  createInternalLines.push(`    public static ${entity.name} _Create(State s)`);
+  createInternalLines.push("    {");
+  createInternalLines.push(`        var e = new ${entity.name}();`);
+  createInternalLines.push("        e.Id = s.Id;");
+  if (!isRoot) createInternalLines.push("        e.ParentId = s.ParentId;");
+  for (const f of entity.fields) {
+    createInternalLines.push(
+      `        e.${pascal(f.name)} = s.${pascal(f.name)};`,
+    );
+  }
+  createInternalLines.push("        e.AssertInvariants();");
+  createInternalLines.push("        return e;");
+  createInternalLines.push("    }");
+
+  const createPublicLines = isRoot
+    ? [
+        `    public static ${entity.name} Create(${requiredFields
+          .map((f) => `${renderCsType(f.type)} ${f.name}`)
+          .join(", ")})`,
+        "    {",
+        `        var e = new ${entity.name}();`,
+        `        e.Id = new ${entity.name}Id(${csNewIdValue(idValueType)});`,
+        ...requiredFields.map(
+          (f) => `        e.${pascal(f.name)} = ${f.name};`,
+        ),
+        "        e.AssertInvariants();",
+        "        return e;",
+        "    }",
+      ]
+    : [];
+
+  return (
+    lines(
+      "// Auto-generated.",
+      "using System;",
+      "using System.Collections.Generic;",
+      "using System.Linq;",
+      `using ${ns}.Domain.Ids;`,
+      `using ${ns}.Domain.Events;`,
+      `using ${ns}.Domain.ValueObjects;`,
+      `using ${ns}.Domain.Enums;`,
+      `using ${ns}.Domain.Common;`,
+      "",
+      `namespace ${ns}.Domain.${plural(rootName)};`,
+      "",
+      `public sealed class ${entity.name}`,
+      "{",
+      ...propLines,
+      ...eventBlock,
+      ...(isRoot ? [] : [""]),
+      ...ctorLines,
+      "",
+      ...derivedLines,
+      ...fnLines,
+      ...opLines,
+      "",
+      ...pullEventsLines,
+      "    private void AssertInvariants()",
+      "    {",
+      ...invariantLines,
+      "    }",
+      "",
+      ...stateLines,
+      "",
+      ...createInternalLines,
+      ...createPublicLines,
+      "}",
+    ) + "\n"
+  );
 }

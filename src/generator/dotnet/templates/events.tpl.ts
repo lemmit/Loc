@@ -1,28 +1,28 @@
 import type { EventIR } from "../../../ir/loom-ir.js";
-import { hb } from "../hb.js";
+import { pascal } from "../../../util/naming.js";
+import { renderCsType } from "../render-expr.js";
 
-const EVENT_TPL = hb.compile(
-  `// Auto-generated.
-using {{ns}}.Domain.Ids;
-
-namespace {{ns}}.Domain.Events;
-
-public sealed record {{name}}({{#each fields}}{{csType type}} {{pascal name}}{{#unless @last}}, {{/unless}}{{/each}}) : IDomainEvent;
-`,
-);
-
-const IDOMAINEVENT_TPL = hb.compile(
-  `// Auto-generated.
-namespace {{ns}}.Domain.Events;
-
-public interface IDomainEvent { }
-`,
-);
+// One sealed record per event, plus the empty IDomainEvent marker
+// interface.  Field list maps to record-positional parameters in
+// PascalCase.
 
 export function renderEvent(e: EventIR, ns: string): string {
-  return EVENT_TPL({ ...e, ns });
+  const params = e.fields
+    .map((f) => `${renderCsType(f.type)} ${pascal(f.name)}`)
+    .join(", ");
+  return `// Auto-generated.
+using ${ns}.Domain.Ids;
+
+namespace ${ns}.Domain.Events;
+
+public sealed record ${e.name}(${params}) : IDomainEvent;
+`;
 }
 
 export function renderIDomainEvent(ns: string): string {
-  return IDOMAINEVENT_TPL({ ns });
+  return `// Auto-generated.
+namespace ${ns}.Domain.Events;
+
+public interface IDomainEvent { }
+`;
 }

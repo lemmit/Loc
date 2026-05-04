@@ -1,43 +1,15 @@
-import type { BoundedContextIR, TypeIR } from "../../../ir/loom-ir.js";
-import { hb } from "../hb.js";
+import type {
+  BoundedContextIR,
+  EventIR,
+  TypeIR,
+} from "../../../ir/loom-ir.js";
+import { lines } from "../../../util/code-builder.js";
+import { renderTsType } from "../render-expr.js";
 
-const EVENTS_TPL = hb.compile(
-  `// Auto-generated.
-import type * as Ids from "./ids.js";
-{{#if voImports.length}}import type { {{#each voImports}}{{this}}{{#unless @last}}, {{/unless}}{{/each}} } from "./value-objects.js";
-{{/if}}{{#if enumImports.length}}import type { {{#each enumImports}}{{this}}{{#unless @last}}, {{/unless}}{{/each}} } from "./value-objects.js";
-{{/if}}
-{{#each events}}
-export interface {{name}} {
-  readonly type: "{{name}}";
-{{#each fields}}  readonly {{name}}: {{tsType type}};
-{{/each}}
-}
-
-{{/each}}
-{{#if events.length}}
-export type DomainEvent = {{#each events}}{{name}}{{#unless @last}} | {{/unless}}{{/each}};
-{{else}}
-export type DomainEvent = never;
-{{/if}}
-
-/**
- * Pluggable boundary for domain events drained from aggregates by the
- * repository.  The default no-op implementation lives in this file; replace
- * it with an outbox writer / message-bus publisher to wire events into
- * your infrastructure.
- */
-export interface DomainEventDispatcher {
-  dispatch(event: DomainEvent): Promise<void>;
-}
-
-export const NoopDomainEventDispatcher: DomainEventDispatcher = {
-  async dispatch(_event: DomainEvent): Promise<void> {
-    /* no-op */
-  },
-};
-`,
-);
+// ---------------------------------------------------------------------------
+// `events.ts` — one interface per event (with a tagged `type` literal),
+// plus a `DomainEvent` discriminated union and a no-op dispatcher.
+// ---------------------------------------------------------------------------
 
 export function renderEvents(ctx: BoundedContextIR): string {
   const voImports = new Set<string>();
@@ -49,9 +21,50 @@ export function renderEvents(ctx: BoundedContextIR): string {
     if (t.kind === "optional") visit(t.inner);
   };
   for (const ev of ctx.events) for (const f of ev.fields) visit(f.type);
-  return EVENTS_TPL({
-    events: ctx.events,
-    voImports: [...voImports],
-    enumImports: [...enumImports],
-  });
+
+  const voList = [...voImports];
+  const enumList = [...enumImports];
+
+  return (
+    lines(
+      "// Auto-generated.",
+      'import type * as Ids from "./ids.js";',
+      voList.length > 0
+        ? `import type { ${voList.join(", ")} } from "./value-objects.js";`
+        : null,
+      enumList.length > 0
+        ? `import type { ${enumList.join(", ")} } from "./value-objects.js";`
+        : null,
+      ...ctx.events.flatMap(renderEvent),
+      ctx.events.length > 0
+        ? `export type DomainEvent = ${ctx.events.map((e) => e.name).join(" | ")};`
+        : "export type DomainEvent = never;",
+      "",
+      "/**",
+      " * Pluggable boundary for domain events drained from aggregates by the",
+      " * repository.  The default no-op implementation lives in this file; replace",
+      " * it with an outbox writer / message-bus publisher to wire events into",
+      " * your infrastructure.",
+      " */",
+      "export interface DomainEventDispatcher {",
+      "  dispatch(event: DomainEvent): Promise<void>;",
+      "}",
+      "",
+      "export const NoopDomainEventDispatcher: DomainEventDispatcher = {",
+      "  async dispatch(_event: DomainEvent): Promise<void> {",
+      "    /* no-op */",
+      "  },",
+      "};",
+    ) + "\n"
+  );
+}
+
+function renderEvent(ev: EventIR): string[] {
+  return [
+    `export interface ${ev.name} {`,
+    `  readonly type: "${ev.name}";`,
+    ...ev.fields.map((f) => `  readonly ${f.name}: ${renderTsType(f.type)};`),
+    "}",
+    "",
+  ];
 }

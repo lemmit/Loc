@@ -1,39 +1,16 @@
-import { hb } from "../hb.js";
+import { plural } from "../../../util/naming.js";
 
-// Request DTO record — primitive wire types only.
-const REQUEST_DTO_TPL = hb.compile(
-  `// Auto-generated.
-using System;
-using System.Collections.Generic;
-
-namespace {{ns}}.Application.{{plural aggName}}.Requests;
-
-{{#each records}}public sealed record {{name}}({{{ params }}});
-
-{{/each}}`,
-);
-
-// Response DTO record — primitive wire types, may include nested response
-// records for parts and value objects.  Used as both the query return type
-// and the controller's response body.
-const RESPONSE_DTO_TPL = hb.compile(
-  `// Auto-generated.
-using System;
-using System.Collections.Generic;
-
-namespace {{ns}}.Application.{{plural aggName}}.Responses;
-
-{{#each records}}public sealed record {{name}}({{{ params }}});
-
-{{/each}}`,
-);
+// Request + response DTO records.  Both are flat record-types in the
+// `Application.<Aggregates>.Requests` / `.Responses` namespaces.
+// Params are rendered upstream — we just splice them into the record
+// header.
 
 export function renderRequestDtos(args: {
   ns: string;
   aggName: string;
   records: Array<{ name: string; params: string }>;
 }): string {
-  return REQUEST_DTO_TPL(args);
+  return renderDtoFile(args, "Requests");
 }
 
 export function renderResponseDtos(args: {
@@ -41,5 +18,25 @@ export function renderResponseDtos(args: {
   aggName: string;
   records: Array<{ name: string; params: string }>;
 }): string {
-  return RESPONSE_DTO_TPL(args);
+  return renderDtoFile(args, "Responses");
+}
+
+function renderDtoFile(
+  args: {
+    ns: string;
+    aggName: string;
+    records: Array<{ name: string; params: string }>;
+  },
+  group: "Requests" | "Responses",
+): string {
+  const recs = args.records
+    .map((r) => `public sealed record ${r.name}(${r.params});\n\n`)
+    .join("");
+  return `// Auto-generated.
+using System;
+using System.Collections.Generic;
+
+namespace ${args.ns}.Application.${plural(args.aggName)}.${group};
+
+${recs}`;
 }

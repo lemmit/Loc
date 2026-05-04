@@ -4,24 +4,12 @@ import type {
   TypeIR,
 } from "../../../ir/loom-ir.js";
 import { camel, plural, snake } from "../../../util/naming.js";
-import { hb } from "../hb.js";
+import { lines as joinLines } from "../../../util/code-builder.js";
 
-// Schema is *mostly* procedural — column emission has too much per-field
-// branching to express cleanly in Handlebars.  We keep a thin shell template
-// for the file header / enum block, then splice in the procedurally-built
-// table strings.
-const SCHEMA_TPL = hb.compile(
-  `// Auto-generated.
-import { pgTable, text, integer, bigint, numeric, boolean, timestamp, pgEnum, uuid } from "drizzle-orm/pg-core";
-
-{{#each enums}}
-export const {{camel name}}Enum = pgEnum("{{snake name}}", [{{#each values}}"{{this}}"{{#unless @last}}, {{/unless}}{{/each}}]);
-{{/each}}
-
-{{{tables}}}
-`,
-);
-
+// All-procedural Drizzle schema emission.  Column generation has too
+// much per-field branching to express cleanly in any template engine,
+// so the entire file is built with the `lines` helper + small per-table
+// builders.
 export function renderSchema(ctx: BoundedContextIR): string {
   const tables: string[] = [];
   for (const agg of ctx.aggregates) {
@@ -30,7 +18,20 @@ export function renderSchema(ctx: BoundedContextIR): string {
       tables.push(emitTable(part.name, part.fields, agg.name, ctx));
     }
   }
-  return SCHEMA_TPL({ enums: ctx.enums, tables: tables.join("\n\n") });
+  const enumLines = ctx.enums.map(
+    (e) =>
+      `export const ${camel(e.name)}Enum = pgEnum("${snake(e.name)}", [${e.values.map((v) => `"${v}"`).join(", ")}]);`,
+  );
+  return (
+    joinLines(
+      "// Auto-generated.",
+      'import { pgTable, text, integer, bigint, numeric, boolean, timestamp, pgEnum, uuid } from "drizzle-orm/pg-core";',
+      "",
+      ...enumLines,
+      "",
+      tables.join("\n\n"),
+    ) + "\n"
+  );
 }
 
 function emitTable(

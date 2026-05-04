@@ -1,13 +1,23 @@
 import type { BoundedContextIR } from "../../../ir/loom-ir.js";
-import { hb } from "../hb.js";
+import { plural } from "../../../util/naming.js";
 
-const PROGRAM_TPL = hb.compile(
-  `// Auto-generated.
+// Program.cs hosting + DI registration, plus the project + Dockerfile +
+// .dockerignore boilerplate.  Pure substitution templates — no
+// iteration tricks.
+
+export function renderProgram(ctx: BoundedContextIR, ns: string): string {
+  const repoRegistrations = ctx.aggregates
+    .map(
+      (a) =>
+        `builder.Services.AddScoped<${ns}.Domain.${plural(a.name)}.I${a.name}Repository, ${ns}.Infrastructure.Repositories.${a.name}Repository>();`,
+    )
+    .join("\n");
+  return `// Auto-generated.
 using Microsoft.EntityFrameworkCore;
-using {{ns}}.Api;
-using {{ns}}.Domain.Common;
-using {{ns}}.Infrastructure.Persistence;
-using {{ns}}.Infrastructure.Events;
+using ${ns}.Api;
+using ${ns}.Domain.Common;
+using ${ns}.Infrastructure.Persistence;
+using ${ns}.Infrastructure.Events;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -20,8 +30,7 @@ builder.Services.AddMediator(opts => opts.ServiceLifetime = ServiceLifetime.Scop
 // Domain event dispatch — default no-op; replace in tests / production.
 builder.Services.AddSingleton<IDomainEventDispatcher, NoopDomainEventDispatcher>();
 
-{{#each aggregates}}builder.Services.AddScoped<{{../ns}}.Domain.{{plural name}}.I{{name}}Repository, {{../ns}}.Infrastructure.Repositories.{{name}}Repository>();
-{{/each}}
+${repoRegistrations}
 builder.Services.AddControllers(opts =>
 {
     opts.Filters.Add<DomainExceptionFilter>();
@@ -50,7 +59,7 @@ builder.Services.AddCors(opts =>
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
-    c.SwaggerDoc("v1", new() { Title = "{{ns}}", Version = "v1" });
+    c.SwaggerDoc("v1", new() { Title = "${ns}", Version = "v1" });
 });
 
 var app = builder.Build();
@@ -72,20 +81,20 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.Run();
-`,
-);
+`;
+}
 
-const CSPROJ_TPL = hb.compile(
-  `<!-- Auto-generated. -->
+export function renderCsproj(ns: string): string {
+  return `<!-- Auto-generated. -->
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <RootNamespace>{{ns}}</RootNamespace>
+    <RootNamespace>${ns}</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <!-- Test files live in the sibling Tests/{{ns}}.Tests project -->
+    <!-- Test files live in the sibling Tests/${ns}.Tests project -->
     <Compile Remove="Tests/**" />
     <None Remove="Tests/**" />
   </ItemGroup>
@@ -110,14 +119,11 @@ const CSPROJ_TPL = hb.compile(
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.9.0" />
   </ItemGroup>
 </Project>
-`,
-);
+`;
+}
 
-// Separate xUnit test project — emitted only when at least one
-// aggregate declares a `test` block.  Project-references the main
-// production project so test code can see Domain / Application types.
-const TEST_CSPROJ_TPL = hb.compile(
-  `<!-- Auto-generated. -->
+export function renderTestCsproj(ns: string): string {
+  return `<!-- Auto-generated. -->
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
@@ -125,7 +131,7 @@ const TEST_CSPROJ_TPL = hb.compile(
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
-    <RootNamespace>{{ns}}.Tests</RootNamespace>
+    <RootNamespace>${ns}.Tests</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
@@ -136,26 +142,14 @@ const TEST_CSPROJ_TPL = hb.compile(
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="../../{{ns}}.csproj" />
+    <ProjectReference Include="../../${ns}.csproj" />
   </ItemGroup>
 </Project>
-`,
-);
-
-export function renderProgram(ctx: BoundedContextIR, ns: string): string {
-  return PROGRAM_TPL({ ns, aggregates: ctx.aggregates });
+`;
 }
 
-export function renderCsproj(ns: string): string {
-  return CSPROJ_TPL({ ns });
-}
-
-export function renderTestCsproj(ns: string): string {
-  return TEST_CSPROJ_TPL({ ns });
-}
-
-const DOCKERFILE_TPL = hb.compile(
-  `# syntax=docker/dockerfile:1
+export function renderDockerfile(ns: string): string {
+  return `# syntax=docker/dockerfile:1
 # Auto-generated.
 
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
@@ -165,21 +159,22 @@ WORKDIR /src
 # so this COPY is a no-op when no CAs are configured.
 COPY certs/ /usr/local/share/ca-certificates/
 RUN update-ca-certificates 2>&1 | tail -1 || true
-COPY {{ns}}.csproj ./
-RUN dotnet restore {{ns}}.csproj
+COPY ${ns}.csproj ./
+RUN dotnet restore ${ns}.csproj
 COPY . .
-RUN dotnet publish {{ns}}.csproj -c Release -o /app/publish --no-restore /p:UseAppHost=false
+RUN dotnet publish ${ns}.csproj -c Release -o /app/publish --no-restore /p:UseAppHost=false
 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 WORKDIR /app
 ENV ASPNETCORE_URLS=http://+:8080
 EXPOSE 8080
 COPY --from=build /app/publish ./
-ENTRYPOINT ["dotnet", "{{ns}}.dll"]
-`,
-);
+ENTRYPOINT ["dotnet", "${ns}.dll"]
+`;
+}
 
-const DOCKERIGNORE_TPL = `# Auto-generated.
+export function renderDockerignore(): string {
+  return `# Auto-generated.
 **/bin
 **/obj
 **/out
@@ -189,11 +184,4 @@ const DOCKERIGNORE_TPL = `# Auto-generated.
 *.user
 *.log
 `;
-
-export function renderDockerfile(ns: string): string {
-  return DOCKERFILE_TPL({ ns });
-}
-
-export function renderDockerignore(): string {
-  return DOCKERIGNORE_TPL;
 }

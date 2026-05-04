@@ -15,7 +15,7 @@
 //                  per-platform shaping  (typescript-ir, dotnet-ir)
 //                                │
 //                                ▼
-//                  Handlebars templates  ──▶  source files
+//                  procedural builders  ──▶  source files
 //
 // All implicit DDD plumbing — entity ids, parent FKs, name resolution of
 // expression references, enum-value qualification, value-object constructor
