@@ -9,13 +9,7 @@ import type {
   Platform,
   SystemIR,
 } from "../ir/loom-ir.js";
-import {
-  generateDotnetForContexts,
-} from "../generator/dotnet/index.js";
-import {
-  generateTypeScriptForContexts,
-} from "../generator/typescript/index.js";
-import { generateReactForContexts } from "../generator/react/index.js";
+import { platformFor } from "../platform/registry.js";
 import { renderE2EFile } from "./e2e-render.js";
 import { renderUIE2EFile } from "./ui-e2e-render.js";
 
@@ -151,25 +145,18 @@ function emitDeployable(
   contexts: BoundedContextIR[],
   out: Map<string, string>,
 ): void {
-  // Folder + compose service name use a lowercase slug (Docker requires
-  // lowercase image names; compose derives images from `<project>-<service>`).
-  // The .NET namespace and CSPROJ name use the capitalised form so code
-  // looks idiomatic.
+  // Per-deployable folder uses a lowercase slug (Docker requires
+  // lowercase image names; compose derives images from
+  // `<project>-<service>`).  The platform's `emitProject` decides
+  // any internal-namespace casing (.NET capitalises for csproj,
+  // Hono uses lowercase imports, React uses kebab-/camel- as JSX
+  // dictates).
   const sub = serviceSlug(d.name);
-  const namespace = capitalize(d.name);
-  const files =
-    d.platform === "dotnet"
-      ? generateDotnetForContexts(contexts, namespace)
-      : d.platform === "hono"
-        ? generateTypeScriptForContexts(contexts)
-        : generateReactForContexts(contexts, sys, d);
+  const platform = platformFor(d.platform);
+  const files = platform.emitProject({ contexts, deployable: d, sys });
   for (const [relPath, content] of files) {
     out.set(`${sub}/${relPath}`, content);
   }
-}
-
-function capitalize(s: string): string {
-  return s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
 }
 
 /** A docker-compose-safe slug: lowercase, no characters outside the
@@ -219,12 +206,13 @@ function renderDockerCompose(sys: SystemIR): string {
 }
 
 /** Postgres `docker-entrypoint-initdb.d` script: one DATABASE per
- * deployable.  Postgres only runs the init dir on the first boot of
- * an empty data volume; this is exactly what we want for dev compose. */
+ * deployable that needs one.  Postgres only runs the init dir on
+ * the first boot of an empty data volume; this is exactly what we
+ * want for dev compose. */
 function renderDbInit(sys: SystemIR): string {
   const lines: string[] = ["-- Auto-generated."];
   for (const d of sys.deployables) {
-    if (!deployableNeedsDb(d)) continue;
+    if (!platformFor(d.platform).needsDb) continue;
     const slug = serviceSlug(d.name);
     lines.push(`CREATE DATABASE ${slug};`);
   }
@@ -233,62 +221,26 @@ function renderDbInit(sys: SystemIR): string {
 
 function renderDeployableService(d: DeployableIR, sys: SystemIR): string[] {
   const slug = serviceSlug(d.name);
-  const internal = d.platform === "dotnet" ? 8080 : 3000;
-  const env = envForPlatform(d, sys, slug);
+  const platform = platformFor(d.platform);
+  const shape = platform.composeService({ deployable: d, sys, slug });
   const lines: string[] = [];
   lines.push(`${slug}:`);
   lines.push(`  build: ./${slug}`);
-  if (d.platform !== "react") {
+  if (shape.dependsOnDb) {
     lines.push(`  depends_on:`);
     lines.push(`    db:`);
     lines.push(`      condition: service_healthy`);
   }
   lines.push(`  environment:`);
-  for (const [k, v] of env) lines.push(`    ${k}: ${JSON.stringify(v)}`);
+  for (const [k, v] of shape.env) lines.push(`    ${k}: ${JSON.stringify(v)}`);
   lines.push(`  ports:`);
-  lines.push(`    - "${d.port}:${internal}"`);
-  // React healthcheck: any 200 from `/` is enough; the SPA shell loads
-  // even before a backend is up.
-  const healthPath = d.platform === "react" ? "/" : "/health";
+  lines.push(`    - "${d.port}:${shape.internalPort}"`);
   lines.push(`  healthcheck:`);
   lines.push(
-    `    test: ["CMD-SHELL", "wget -qO- http://localhost:${internal}${healthPath} || exit 1"]`,
+    `    test: ["CMD-SHELL", "wget -qO- http://localhost:${shape.internalPort}${shape.healthPath} || exit 1"]`,
   );
   lines.push(`    interval: 5s`);
   lines.push(`    timeout: 3s`);
   lines.push(`    retries: 10`);
   return lines;
-}
-
-function envForPlatform(
-  d: DeployableIR,
-  sys: SystemIR,
-  database: string,
-): Array<[string, string]> {
-  if (d.platform === "dotnet") {
-    return [
-      [
-        "ConnectionStrings__Default",
-        `Host=db;Port=5432;Database=${database};Username=postgres;Password=postgres`,
-      ],
-    ];
-  }
-  if (d.platform === "react") {
-    const target = sys.deployables.find((t) => t.name === d.targetName);
-    return [
-      [
-        "VITE_API_BASE_URL",
-        `http://localhost:${target?.port ?? 8080}`,
-      ],
-    ];
-  }
-  return [
-    ["DATABASE_URL", `postgres://postgres:postgres@db:5432/${database}`],
-  ];
-}
-
-// Avoid emitting a postgres database for frontend deployables that
-// don't connect to one.
-function deployableNeedsDb(d: DeployableIR): boolean {
-  return d.platform !== "react";
 }
