@@ -169,12 +169,23 @@ examples/          # sample .ddd sources
 test/              # parsing, validation, and generator tests
 ```
 
+## Documentation
+
+- [`docs/language.md`](docs/language.md) — formal language reference
+  (declarations, types, expressions, statements, validation rules).
+- [`docs/tools.md`](docs/tools.md) — CLI usage, `.loomignore` escape
+  hatch, watch mode, migration workflow with native tools.
+- [`docs/technical.md`](docs/technical.md) — architecture: AST → IR →
+  templates, design rationale, how to extend the language or add a
+  backend.
+
 ## Status
 
-13 vitest tests cover parsing, validation, and both generators.  Generated
-TypeScript type-checks under strict `tsc`.  Generated .NET requires the
-.NET SDK to build (`dotnet build`), and the .csproj wires Mediator
-source-generation, EF Core, and design-time tooling for migrations.
+19 vitest tests cover parsing, validation, both generators, and the
+CLI (`.loomignore`, `--dry-run`).  Generated TypeScript type-checks
+under strict `tsc`; the generated vitest suite passes.  Generated
+.NET requires the .NET SDK to build; the `.csproj` wires Mediator
+source-generation, EF Core, design-time migrations, and xUnit hooks.
 
-See `experience_gathered.md` for a candid retrospective and the full
-plan in `/root/.claude/plans/create-a-new-langium-tingly-perlis.md`.
+See `experience_gathered.md` for a running retrospective of the
+project — gotchas, design trade-offs, and refactor notes.
