@@ -27,7 +27,7 @@ function renderCsStatement(s: StmtIR): string {
       return `${INDENT}_domainEvents.Add(new ${s.eventName}(${args}));`;
     }
     case "call": {
-      const args = s.args.map(renderCsExpr).join(", ");
+      const args = s.args.map((a) => renderCsExpr(a)).join(", ");
       return `${INDENT}this.${pascal(s.name)}(${args});`;
     }
   }

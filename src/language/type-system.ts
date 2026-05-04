@@ -494,3 +494,69 @@ export function collectLetBindings(stmts: import("./generated/ast.js").Statement
   }
   return m;
 }
+
+// ---------------------------------------------------------------------------
+// AST-walk helpers used by the validator and other consumers.  Imports
+// for Aggregate / FunctionDecl / Operation already exist at the top of
+// this file.
+// ---------------------------------------------------------------------------
+
+/** Resolve a bare identifier as an aggregate root member (or `id`). */
+export function lookupRootMember(agg: Aggregate, name: string): DddType {
+  if (name === "id") return { kind: "id", target: agg };
+  for (const m of agg.members) {
+    if (isProperty(m) && m.name === name) return resolveTypeRef(m.type);
+    if (isContainment(m) && m.name === name) {
+      const part = m.partType?.ref;
+      if (!part) return T.unknown;
+      const t: DddType = { kind: "entity", ref: part };
+      return m.collection ? T.array(t) : t;
+    }
+    if (isDerivedProp(m) && m.name === name) return resolveTypeRef(m.type);
+  }
+  return T.unknown;
+}
+
+/** Walk a single dotted path step on a typed receiver. */
+export function stepInto(t: DddType, name: string): DddType {
+  if (t.kind === "entity" || t.kind === "aggregate") {
+    if (name === "id") return { kind: "id", target: t.ref };
+    for (const m of t.ref.members) {
+      if (isProperty(m) && m.name === name) return resolveTypeRef(m.type);
+      if (isContainment(m) && m.name === name) {
+        const part = m.partType?.ref;
+        if (!part) return T.unknown;
+        const inner: DddType = { kind: "entity", ref: part };
+        return m.collection ? T.array(inner) : inner;
+      }
+      if (isDerivedProp(m) && m.name === name) return resolveTypeRef(m.type);
+    }
+  }
+  if (t.kind === "valueobject") {
+    for (const m of t.ref.members) {
+      if (isProperty(m) && m.name === name) return resolveTypeRef(m.type);
+      if (isDerivedProp(m) && m.name === name) return resolveTypeRef(m.type);
+    }
+  }
+  return T.unknown;
+}
+
+export function findFunction(
+  agg: Aggregate,
+  name: string,
+): FunctionDecl | undefined {
+  for (const m of agg.members) {
+    if (isFunctionDecl(m) && m.name === name) return m;
+  }
+  return undefined;
+}
+
+export function findOperation(
+  agg: Aggregate,
+  name: string,
+): Operation | undefined {
+  for (const m of agg.members) {
+    if (isOperation(m) && m.name === name) return m;
+  }
+  return undefined;
+}

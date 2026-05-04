@@ -28,13 +28,16 @@ import {
   type ValueObject,
 } from "./generated/ast.js";
 import {
+  findFunction,
+  findOperation,
   isAssignable,
+  lookupRootMember,
   makeEnv,
   paramType,
   resolveTypeRef,
+  stepInto,
   T,
   typeOf,
-  typesEqual,
   typeToString,
   type DddType,
   type Env,
@@ -438,58 +441,6 @@ export class DddValidator {
 
 function pathString(lv: import("./generated/ast.js").LValue): string {
   return [lv.head, ...lv.tail].join(".");
-}
-
-function lookupRootMember(agg: Aggregate, name: string): DddType {
-  if (name === "id") return { kind: "id", target: agg };
-  for (const m of agg.members) {
-    if (isProperty(m) && m.name === name) return resolveTypeRef(m.type);
-    if (isContainment(m) && m.name === name) {
-      const part = m.partType?.ref;
-      if (!part) return T.unknown;
-      const t: DddType = { kind: "entity", ref: part };
-      return m.collection ? T.array(t) : t;
-    }
-    if (isDerivedProp(m) && m.name === name) return resolveTypeRef(m.type);
-  }
-  return T.unknown;
-}
-
-function stepInto(t: DddType, name: string): DddType {
-  if (t.kind === "entity" || t.kind === "aggregate") {
-    if (name === "id") return { kind: "id", target: t.ref };
-    for (const m of t.ref.members) {
-      if (isProperty(m) && m.name === name) return resolveTypeRef(m.type);
-      if (isContainment(m) && m.name === name) {
-        const part = m.partType?.ref;
-        if (!part) return T.unknown;
-        const inner: DddType = { kind: "entity", ref: part };
-        return m.collection ? T.array(inner) : inner;
-      }
-      if (isDerivedProp(m) && m.name === name) return resolveTypeRef(m.type);
-    }
-  }
-  if (t.kind === "valueobject") {
-    for (const m of t.ref.members) {
-      if (isProperty(m) && m.name === name) return resolveTypeRef(m.type);
-      if (isDerivedProp(m) && m.name === name) return resolveTypeRef(m.type);
-    }
-  }
-  return T.unknown;
-}
-
-function findFunction(agg: Aggregate, name: string): FunctionDecl | undefined {
-  for (const m of agg.members) {
-    if (isFunctionDecl(m) && m.name === name) return m;
-  }
-  return undefined;
-}
-
-function findOperation(agg: Aggregate, name: string): Operation | undefined {
-  for (const m of agg.members) {
-    if (isOperation(m) && m.name === name) return m;
-  }
-  return undefined;
 }
 
 export function registerValidationChecks(services: DddServices): void {
