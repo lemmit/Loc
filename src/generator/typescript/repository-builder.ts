@@ -10,6 +10,10 @@ import type {
 import { camel, plural } from "../../util/naming.js";
 import { renderTsExpr } from "./render-expr.js";
 import { valueObjectColumnNames } from "./templates.js";
+import {
+  wireFieldsForAggregate,
+  wireFieldsForPart,
+} from "../wire-shape.js";
 
 // ---------------------------------------------------------------------------
 // Generates the TypeScript repository file for an aggregate.
@@ -148,28 +152,46 @@ function wireProjectionEntity(
   varExpr: string,
   ctx: BoundedContextIR,
 ): string {
+  // Single canonical walk — see src/generator/wire-shape.ts.  This
+  // serializer feeds repo.toWire(); its output's keys must line up
+  // with the route's response Zod schema and the .NET DTO.
+  const isAgg = !("parentName" in ent);
+  const fields = isAgg
+    ? wireFieldsForAggregate(ent, ctx)
+    : wireFieldsForPart(ent as EntityPartIR, ctx);
   const parts: string[] = [];
-  parts.push(`id: ${varExpr}.id as string`);
-  for (const f of ent.fields) {
-    parts.push(`${f.name}: ${wireProjectionValue(`${varExpr}.${f.name}`, f.type, ctx, f.optional)}`);
-  }
-  for (const c of ent.contains) {
-    const part = ctx.aggregates
-      .flatMap((a) => a.parts)
-      .find((p) => p.name === c.partName);
-    if (!part) continue;
-    if (c.collection) {
-      parts.push(
-        `${c.name}: ${varExpr}.${c.name}.map((__e: ${part.name}) => (${wireProjectionEntity(part, "__e", ctx)}))`,
-      );
-    } else {
-      parts.push(`${c.name}: ${wireProjectionEntity(part, `${varExpr}.${c.name}`, ctx)}`);
+  for (const wf of fields) {
+    if (wf.source === "id") {
+      parts.push(`id: ${varExpr}.id as string`);
+      continue;
     }
-  }
-  // Derived values — call the getter-style accessor on the domain class.
-  const derived = "derived" in ent ? ent.derived : [];
-  for (const d of derived ?? []) {
-    parts.push(`${d.name}: ${wireProjectionValue(`${varExpr}.${d.name}`, d.type, ctx, false)}`);
+    if (wf.source === "containment") {
+      const partName =
+        wf.type.kind === "array" && wf.type.element.kind === "entity"
+          ? wf.type.element.name
+          : wf.type.kind === "entity"
+            ? wf.type.name
+            : "";
+      const partIR = ctx.aggregates
+        .flatMap((a) => a.parts)
+        .find((p) => p.name === partName);
+      if (!partIR) continue;
+      if (wf.type.kind === "array") {
+        parts.push(
+          `${wf.name}: ${varExpr}.${wf.name}.map((__e: ${partIR.name}) => (${wireProjectionEntity(partIR, "__e", ctx)}))`,
+        );
+      } else {
+        parts.push(
+          `${wf.name}: ${wireProjectionEntity(partIR, `${varExpr}.${wf.name}`, ctx)}`,
+        );
+      }
+      continue;
+    }
+    // property or derived — both reach the value via the same getter
+    // on the domain class.
+    parts.push(
+      `${wf.name}: ${wireProjectionValue(`${varExpr}.${wf.name}`, wf.type, ctx, wf.optional)}`,
+    );
   }
   return `{ ${parts.join(", ")} }`;
 }

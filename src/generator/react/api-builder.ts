@@ -8,6 +8,10 @@ import type {
   ValueObjectIR,
 } from "../../ir/loom-ir.js";
 import { plural, snake } from "../../util/naming.js";
+import {
+  wireFieldsForAggregate,
+  wireFieldsForPart,
+} from "../wire-shape.js";
 
 // ---------------------------------------------------------------------------
 // Per-aggregate API module: Zod schemas + React Query hooks.
@@ -232,28 +236,21 @@ function emitResponseSchema(
   const lines: string[] = [];
   const name = `${ent.name}Response`;
   lines.push(`export const ${name} = z.object({`);
-  lines.push(`  id: z.string(),`);
-  for (const f of ent.fields) {
-    lines.push(`  ${f.name}: ${zodForResponse(f.type, f.optional)},`);
-  }
-  for (const c of ent.contains) {
-    const elem = `${c.partName}Response`;
-    lines.push(
-      c.collection ? `  ${c.name}: z.array(${elem}),` : `  ${c.name}: ${elem},`,
-    );
-  }
-  if (isAgg) {
-    for (const d of (ent as AggregateIR).derived ?? []) {
-      lines.push(`  ${d.name}: ${zodForResponse(d.type, false)},`);
-    }
-  } else {
-    for (const d of (ent as EntityPartIR).derived ?? []) {
-      lines.push(`  ${d.name}: ${zodForResponse(d.type, false)},`);
+  // Single canonical walk — see src/generator/wire-shape.ts.  The
+  // backends use the same walk, so the React Zod schemas line up
+  // field-for-field with what the wire actually carries.
+  const fields = isAgg
+    ? wireFieldsForAggregate(ent as AggregateIR, ctx)
+    : wireFieldsForPart(ent as EntityPartIR, ctx);
+  for (const wf of fields) {
+    if (wf.source === "id") {
+      lines.push(`  ${wf.name}: z.string(),`);
+    } else {
+      lines.push(`  ${wf.name}: ${zodForResponse(wf.type, wf.optional)},`);
     }
   }
   lines.push(`});`);
   lines.push(`export type ${name} = z.infer<typeof ${name}>;`);
-  void ctx;
   return lines;
 }
 

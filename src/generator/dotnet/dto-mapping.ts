@@ -8,6 +8,10 @@ import type {
 } from "../../ir/loom-ir.js";
 import { pascal } from "../../util/naming.js";
 import { renderCsType } from "./render-expr.js";
+import {
+  wireFieldsForAggregate,
+  wireFieldsForPart,
+} from "../wire-shape.js";
 
 // ---------------------------------------------------------------------------
 // Wire-shape DTO mapping helpers.
@@ -150,75 +154,81 @@ export function projectEntityExpr(
   entity: AggregateIR | EntityPartIR,
   ctx: BoundedContextIR,
 ): string {
-  const parts = [`${domainExpr}.Id.Value`];
-  for (const f of entity.fields) {
-    parts.push(projectToResponse(`${domainExpr}.${pascal(f.name)}`, f.type, ctx));
-  }
-  for (const c of entity.contains) {
-    const part = ctx.aggregates
-      .flatMap((a) => a.parts)
-      .find((p) => p.name === c.partName);
-    if (!part) continue;
-    if (c.collection) {
-      parts.push(
-        `${domainExpr}.${pascal(c.name)}.Select(__e => ${projectEntityExpr("__e", part, ctx)}).ToList()`,
+  // Single canonical walk — see src/generator/wire-shape.ts.  Each
+  // wire field maps to one positional argument on
+  // `new <Ent>Response(...)`, in the same order both response Zod
+  // schemas (Hono / React) emit.
+  const fields = isPart(entity)
+    ? wireFieldsForPart(entity, ctx)
+    : wireFieldsForAggregate(entity, ctx);
+  const args: string[] = [];
+  for (const wf of fields) {
+    if (wf.source === "id") {
+      args.push(`${domainExpr}.Id.Value`);
+    } else if (wf.source === "containment") {
+      const part = ctx.aggregates
+        .flatMap((a) => a.parts)
+        .find((p) => p.name === containmentPartName(wf.type));
+      if (!part) continue;
+      const accessor = `${domainExpr}.${pascal(wf.name)}`;
+      args.push(
+        wf.type.kind === "array"
+          ? `${accessor}.Select(__e => ${projectEntityExpr("__e", part, ctx)}).ToList()`
+          : projectEntityExpr(accessor, part, ctx),
       );
     } else {
-      parts.push(projectEntityExpr(`${domainExpr}.${pascal(c.name)}`, part, ctx));
+      args.push(
+        projectToResponse(`${domainExpr}.${pascal(wf.name)}`, wf.type, ctx),
+      );
     }
   }
-  for (const d of entity.derived) {
-    parts.push(projectToResponse(`${domainExpr}.${pascal(d.name)}`, d.type, ctx));
-  }
-  return `new ${entity.name}Response(${parts.join(", ")})`;
+  return `new ${entity.name}Response(${args.join(", ")})`;
 }
 
 export function aggregateResponseParams(
   agg: AggregateIR,
   ctx: BoundedContextIR,
 ): string {
-  const parts: string[] = [];
-  parts.push(`${csIdValueClrType(agg.idValueType)} Id`);
-  for (const f of agg.fields) {
-    parts.push(`${wireType(f.type, ctx, "response")} ${pascal(f.name)}`);
-  }
-  for (const c of agg.contains) {
-    parts.push(
-      `${
-        c.collection
-          ? `System.Collections.Generic.IReadOnlyList<${c.partName}Response>`
-          : `${c.partName}Response`
-      } ${pascal(c.name)}`,
-    );
-  }
-  for (const d of agg.derived) {
-    parts.push(`${wireType(d.type, ctx, "response")} ${pascal(d.name)}`);
-  }
-  return parts.join(", ");
+  return responseRecordParams(agg, ctx);
 }
 
 export function entityResponseParams(
   part: EntityPartIR,
   ctx: BoundedContextIR,
 ): string {
+  return responseRecordParams(part, ctx);
+}
+
+function responseRecordParams(
+  ent: AggregateIR | EntityPartIR,
+  ctx: BoundedContextIR,
+): string {
+  const fields = isPart(ent)
+    ? wireFieldsForPart(ent, ctx)
+    : wireFieldsForAggregate(ent, ctx);
+  const idValueType = isPart(ent) ? ent.parentIdValueType : ent.idValueType;
   const parts: string[] = [];
-  parts.push(`${csIdValueClrType(part.parentIdValueType)} Id`);
-  for (const f of part.fields) {
-    parts.push(`${wireType(f.type, ctx, "response")} ${pascal(f.name)}`);
-  }
-  for (const c of part.contains) {
-    parts.push(
-      `${
-        c.collection
-          ? `System.Collections.Generic.IReadOnlyList<${c.partName}Response>`
-          : `${c.partName}Response`
-      } ${pascal(c.name)}`,
-    );
-  }
-  for (const d of part.derived) {
-    parts.push(`${wireType(d.type, ctx, "response")} ${pascal(d.name)}`);
+  for (const wf of fields) {
+    if (wf.source === "id") {
+      parts.push(`${csIdValueClrType(idValueType)} Id`);
+    } else {
+      parts.push(`${wireType(wf.type, ctx, "response")} ${pascal(wf.name)}`);
+    }
   }
   return parts.join(", ");
+}
+
+function isPart(
+  ent: AggregateIR | EntityPartIR,
+): ent is EntityPartIR {
+  // EntityPartIR carries `parentName`; AggregateIR doesn't.
+  return "parentName" in ent;
+}
+
+function containmentPartName(t: TypeIR): string | undefined {
+  if (t.kind === "entity") return t.name;
+  if (t.kind === "array" && t.element.kind === "entity") return t.element.name;
+  return undefined;
 }
 
 /** Set of value objects reachable from an aggregate's surface. */
