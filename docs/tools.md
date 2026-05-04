@@ -281,3 +281,34 @@ your changes.
 
 Loom does **not** generate k8s manifests or CI pipelines — those are
 project-init concerns, not derived from the `.ddd` source.
+
+---
+
+## End-to-end test
+
+Loom ships an opt-in vitest e2e (`test/e2e.test.ts`) that exercises
+the whole pipeline against a real Docker daemon:
+
+1. Generates the `examples/acme.ddd` system to a temp directory.
+2. Runs `docker compose build` on the resulting tree.
+3. Runs `docker compose up -d` (postgres + both deployables).
+4. Polls `/health` on every deployable's port until each returns
+   `{"status":"ok"}`.
+5. `docker compose down -v` + cleans the temp directory.
+
+Roughly 90 seconds end-to-end with cached base images.  Stays out of
+the default `npm test` so the unit / generator suite remains fast:
+
+```bash
+npm test         # unit + parser + generator + CLI tests, ~5s
+npm run test:e2e # the full Docker smoke, ~90s
+```
+
+The e2e is gated on `LOOM_E2E=1` *and* `docker ps` succeeding, so it
+silently skips on any machine without Docker access.
+
+In sandboxed environments where the docker daemon's outbound HTTPS
+goes through a TLS-rewriting proxy, set `LOOM_E2E_CA_DIR` to the
+directory holding the proxy's `*.crt` files; the test will splice
+them into each generated Dockerfile before building.  In a normal
+environment this variable is unnecessary.
