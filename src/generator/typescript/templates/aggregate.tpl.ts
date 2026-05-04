@@ -8,9 +8,9 @@ export class {{name}} {
 {{#unless isRoot}}  private _parentId: Ids.{{rootName}}Id;
 {{/unless}}{{#if isRoot}}  private _events: Events.DomainEvent[] = [];
 {{/if}}{{#each fields}}  private _{{name}}: {{tsType type}};
-{{/each}}{{#each contains}}  private _{{name}}: {{partName}}{{#if collection}}[]{{/if}};
+{{/each}}{{#each contains}}  private _{{name}}: {{partName}}{{#if collection}}[]{{else}} | null{{/if}};
 {{/each}}
-  private constructor(state: { id: Ids.{{name}}Id{{#unless isRoot}}; parentId: Ids.{{rootName}}Id{{/unless}}{{#each fields}}; {{name}}: {{tsType type}}{{/each}}{{#each contains}}; {{name}}: {{partName}}{{#if collection}}[]{{/if}}{{/each}} }) {
+  private constructor(state: { id: Ids.{{name}}Id{{#unless isRoot}}; parentId: Ids.{{rootName}}Id{{/unless}}{{#each fields}}; {{name}}: {{tsType type}}{{/each}}{{#each contains}}; {{name}}: {{partName}}{{#if collection}}[]{{else}} | null{{/if}}{{/each}} }) {
     this._id = state.id;
 {{#unless isRoot}}    this._parentId = state.parentId;
 {{/unless}}{{#each fields}}    this._{{name}} = state.{{name}};
@@ -21,7 +21,7 @@ export class {{name}} {
   get id(): Ids.{{name}}Id { return this._id; }
 {{#unless isRoot}}  get parentId(): Ids.{{rootName}}Id { return this._parentId; }
 {{/unless}}{{#each fields}}  get {{name}}(): {{tsType type}} { return this._{{name}}; }
-{{/each}}{{#each contains}}  get {{name}}(): readonly {{partName}}{{#if collection}}[]{{/if}} { return this._{{name}}; }
+{{/each}}{{#each contains}}  get {{name}}(): {{#if collection}}readonly {{partName}}[]{{else}}{{partName}} | null{{/if}} { return this._{{name}}; }
 {{/each}}{{#each derived}}  get {{name}}(): {{tsType type}} { return {{tsExpr expr}}; }
 {{/each}}
 {{#each functions}}  private {{camel name}}({{#each params}}{{name}}: {{tsType type}}{{#unless @last}}, {{/unless}}{{/each}}): {{tsType returnType}} { return {{tsExpr body}}; }
@@ -42,7 +42,7 @@ export class {{name}} {
 {{#each invariants}}    {{#if guard}}if (({{tsExpr guard}}) && !({{tsExpr expr}})){{else}}if (!({{tsExpr expr}})){{/if}} throw new DomainError({{escapeStr (concat "Invariant violated: " source)}});
 {{/each}}  }
 
-  static _create(state: { id: Ids.{{name}}Id{{#unless isRoot}}; parentId: Ids.{{rootName}}Id{{/unless}}{{#each fields}}; {{name}}: {{tsType type}}{{/each}}{{#each contains}}; {{name}}: {{partName}}{{#if collection}}[]{{/if}}{{/each}} }): {{name}} {
+  static _create(state: { id: Ids.{{name}}Id{{#unless isRoot}}; parentId: Ids.{{rootName}}Id{{/unless}}{{#each fields}}; {{name}}: {{tsType type}}{{/each}}{{#each contains}}; {{name}}: {{partName}}{{#if collection}}[]{{else}} | null{{/if}}{{/each}} }): {{name}} {
     return new {{name}}(state);
   }
 {{#if isRoot}}
@@ -50,7 +50,7 @@ export class {{name}} {
     return new {{name}}({
       id: Ids.new{{name}}Id(),
 {{#each fields}}      {{name}}: {{#if optional}}null{{else}}input.{{name}}{{/if}},
-{{/each}}{{#each contains}}      {{name}}: {{#if collection}}[]{{else}}null as never{{/if}},
+{{/each}}{{#each contains}}      {{name}}: {{#if collection}}[]{{else}}null{{/if}},
 {{/each}}    });
   }
 {{/if}}

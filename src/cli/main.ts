@@ -9,6 +9,9 @@ import type { Model } from "../language/generated/ast.js";
 import { generateTypeScript } from "../generator/typescript/index.js";
 import { generateDotnet } from "../generator/dotnet/index.js";
 import { generateSystems } from "../system/index.js";
+import { lowerModel } from "../ir/lower.js";
+import { enrichLoomModel } from "../ir/enrichments.js";
+import { validateLoomModel } from "../ir/validate.js";
 
 interface ParseResult {
   model: Model;
@@ -87,6 +90,22 @@ async function runGenerate(
   const result = await parseFile(file);
   if (result.errorCount > 0) {
     printDiagnostics(result);
+    process.exit(1);
+  }
+  // Loom-IR-level validation: catches `api.<unknown>.<verb>` and
+  // `ui.<unknown>.<verb>` references in `test e2e` bodies before
+  // generators are called.  Everything caught here used to throw
+  // mid-generation with a slightly less helpful trace.
+  const loom = enrichLoomModel(lowerModel(result.model));
+  const loomDiags = validateLoomModel(loom);
+  const loomErrors = loomDiags.filter((d) => d.severity === "error");
+  if (loomErrors.length > 0) {
+    for (const d of loomDiags) {
+      console.error(`${d.source} ${d.severity}: ${d.message}`);
+    }
+    console.error(
+      `${loomErrors.length} error(s), ${loomDiags.length - loomErrors.length} warning(s).`,
+    );
     process.exit(1);
   }
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });

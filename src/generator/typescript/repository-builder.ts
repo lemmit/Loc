@@ -265,7 +265,7 @@ function findByIdMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
         `      const ${c.name}Rows = await tx.select().from(schema.${childTable}).where(eq(schema.${childTable}.parentId, id)).limit(1);`,
       );
       lines.push(
-        `      const ${c.name} = ${c.name}Rows.length > 0 ? ${hydrateEntityExpr(part, `${c.name}Rows[0]!`, agg, ctx)} : null as never;`,
+        `      const ${c.name} = ${c.name}Rows.length > 0 ? ${hydrateEntityExpr(part, `${c.name}Rows[0]!`, agg, ctx)} : null;`,
       );
     }
   }
@@ -623,7 +623,10 @@ function hydrateRootForFindExpr(
     if (c.name === containmentName && c.collection) {
       fields.push(`${c.name}: ${c.name}ByParent.get(${rowVar}.id) ?? []`);
     } else {
-      fields.push(`${c.name}: [] as never`);
+      // Containments not eagerly loaded for this find — collection
+      // is empty, single is null.  Both naturally typed thanks to
+      // the aggregate's state type accepting `<Part> | null`.
+      fields.push(`${c.name}: ${c.collection ? "[]" : "null"}`);
     }
   }
   return `${agg.name}._create({ ${fields.join(", ")} })`;
