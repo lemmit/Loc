@@ -312,3 +312,21 @@ goes through a TLS-rewriting proxy, set `LOOM_E2E_CA_DIR` to the
 directory holding the proxy's `*.crt` files; the test will splice
 them into each generated Dockerfile before building.  In a normal
 environment this variable is unnecessary.
+
+### Generated DSL-level e2e suite
+
+When the source declares `test e2e` blocks (see
+[`language.md`](language.md)), `ddd generate system` emits a
+ready-to-run vitest project at `<outdir>/e2e/`.  The Loom e2e itself
+runs that suite against the live compose stack as a follow-on step,
+proving the DSL → fetch lowering reaches the live API:
+
+```bash
+# After `docker compose up -d` from the system root:
+cd ./out/e2e
+npm install && npm test
+```
+
+Endpoints default to `http://localhost:<port>` for each deployable.
+Override per environment via `E2E_<DEPLOYABLE>_BASE` (e.g.
+`E2E_API_BASE=https://staging.example.com`).

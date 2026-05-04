@@ -44,6 +44,10 @@ export function renderCsExpr(e: ExprIR, ctx: CsRenderContext = DEFAULT): string 
       return `${e.param} => ${renderCsExpr(e.body, ctx)}`;
     case "new":
       return renderNew(e, ctx);
+    case "object":
+      // Bare object literals only appear in e2e contexts; in operation
+      // bodies this branch is unreachable (the validator rejects them).
+      return `new { ${e.fields.map((f) => `${pascal(f.name)} = ${renderCsExpr(f.value, ctx)}`).join(", ")} }`;
     case "paren":
       return `(${renderCsExpr(e.inner, ctx)})`;
     case "unary":

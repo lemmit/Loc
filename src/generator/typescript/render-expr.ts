@@ -30,6 +30,8 @@ export function renderTsExpr(e: ExprIR): string {
       return `(${e.param}) => ${renderTsExpr(e.body)}`;
     case "new":
       return renderNew(e);
+    case "object":
+      return `({ ${e.fields.map((f) => `${f.name}: ${renderTsExpr(f.value)}`).join(", ")} })`;
     case "paren":
       return `(${renderTsExpr(e.inner)})`;
     case "unary":

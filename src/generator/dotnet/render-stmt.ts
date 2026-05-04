@@ -30,6 +30,8 @@ function renderCsStatement(s: StmtIR): string {
       const args = s.args.map((a) => renderCsExpr(a)).join(", ");
       return `${INDENT}this.${pascal(s.name)}(${args});`;
     }
+    case "expression":
+      return `${INDENT}${renderCsExpr(s.expr)};`;
   }
 }
 

@@ -65,6 +65,7 @@ the other.
 | `module Name { … }` | Groups one or more bounded contexts under a name.  A module is a logical unit; it doesn't directly produce code. |
 | `deployable name { platform: dotnet|hono, modules: A, B, port: N }` | A concrete artefact: one project, one HTTP server, one DbContext, listening on `port`.  Selects which modules to ship. |
 | `context Name { … }` | Allowed directly inside a system; treated as if it were in an implicit `_default` module. |
+| `test e2e "name" against <deployable> { … }` | End-to-end test that runs against the named deployable's HTTP API; lowers to a vitest file at the system output root. |
 
 A module may appear in any number of deployables — its code is inlined
 into each.  For v1 there is no shared-library / npm-workspace shape;
@@ -249,6 +250,45 @@ Test blocks emit one file per aggregate:
 - .NET: `Tests/<Plural>/<Aggregate>Tests.cs` (xUnit).
 
 ---
+
+## End-to-end tests against a deployable
+
+Inside a `system`, declare `test e2e` blocks that exercise a running
+deployable through HTTP:
+
+```ddd
+test e2e "create then confirm an order" against api {
+    let prod = api.products.create({ sku: "WIDGET-1", price: { amount: 5.0, currency: "USD" } })
+    let ord = api.orders.create({ customerId: "cust-001", status: "Draft", placedAt: "2024-01-01T00:00:00Z" })
+    api.orders.addLine(ord, { productId: prod.id, qty: 3 })
+    api.orders.confirm(ord)
+    let read = api.orders.getById(ord)
+    expect read.status == "Confirmed"
+    expect read.lines.length == 1
+}
+```
+
+The magic identifier `api` resolves to the named deployable's HTTP
+surface.  Member-access chains describe the call shape:
+
+| Form | Lowers to |
+| --- | --- |
+| `api.<aggregate>.create({ … })` | `POST /<plural>` with the body. |
+| `api.<aggregate>.getById(idExpr)` | `GET /<plural>/{id}`. |
+| `api.<aggregate>.<operation>(idExpr, body?)` | `POST /<plural>/{id}/<op_snake>` with the body (or `{}` if absent). |
+| `api.<aggregate>.<find>(args)` | `GET /<plural>/<find_snake>?…` with args as query string. |
+
+When an argument is a previously bound `let` name (typically the result
+of a `create` call), `.id` is appended automatically — `api.x.getById(p)`
+becomes `GET /x/{p.id}`.
+
+Bare object literals `{ a: 1, b: "x" }` are allowed inside test bodies
+(elsewhere in the DSL only `new <PartName> { … }` is permitted).  They
+serialize to JSON as the request body.
+
+The generated vitest file lives at `<system>/e2e/<SystemName>.e2e.test.ts`
+in the output directory.  Endpoints default to the docker-compose ports;
+override per environment via `E2E_<DEPLOYABLE>_BASE` env vars.
 
 ## Repositories
 

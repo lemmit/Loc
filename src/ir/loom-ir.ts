@@ -184,6 +184,14 @@ export interface SystemIR {
   name: string;
   modules: ModuleIR[];
   deployables: DeployableIR[];
+  e2eTests: TestE2EIR[];
+}
+
+/** End-to-end test that targets a running deployable. */
+export interface TestE2EIR {
+  name: string;
+  deployableName: string;
+  statements: TestStmtIR[];
 }
 
 export interface ModuleIR {
@@ -222,7 +230,13 @@ export type StmtIR =
       target: "function" | "private-operation";
       name: string;
       args: ExprIR[];
-    };
+    }
+  /**
+   * Bare expression-statement.  Used when a chained call like
+   * `a.b.c(args)` appears as an operation- or test-body statement.
+   * Renderers emit `<expr>;` (TS / e2e) or `<expr>;` (C#).
+   */
+  | { kind: "expression"; expr: ExprIR };
 
 /**
  * A path used as the LHS of an assignment / collection mutation.  All
@@ -309,6 +323,10 @@ export type ExprIR =
   | {
       kind: "new";
       partName: string;
+      fields: { name: string; value: ExprIR }[];
+    }
+  | {
+      kind: "object";
       fields: { name: string; value: ExprIR }[];
     }
   | { kind: "paren"; inner: ExprIR }

@@ -31,6 +31,16 @@ var app = builder.Build();
 // Liveness probe — used by docker-compose / kubernetes / smoke tests.
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapControllers();
+
+// Dev-friendly schema bootstrap: create the database from the model
+// if it doesn't already exist.  For production deployments, replace
+// this with 'dotnet ef database update' and remove the line.
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    db.Database.EnsureCreated();
+}
+
 app.Run();
 `,
 );

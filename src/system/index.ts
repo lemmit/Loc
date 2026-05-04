@@ -14,6 +14,7 @@ import {
 import {
   generateTypeScriptForContexts,
 } from "../generator/typescript/index.js";
+import { renderE2EFile } from "./e2e-render.js";
 
 // ---------------------------------------------------------------------------
 // System-mode generation.
@@ -64,7 +65,52 @@ function emitSystem(
   }
 
   out.set("docker-compose.yml", renderDockerCompose(sys));
+
+  // E2E test scaffolding — emitted only when the system declares
+  // `test e2e` blocks.  Lives at the system root so it can run against
+  // the whole compose stack with one `vitest run e2e/`.
+  const e2eFile = renderE2EFile(sys, modulesByName);
+  if (e2eFile) {
+    out.set(`e2e/${sys.name}.e2e.test.ts`, e2eFile);
+    out.set("e2e/package.json", E2E_PACKAGE_JSON);
+    out.set("e2e/tsconfig.json", E2E_TSCONFIG_JSON);
+  }
 }
+
+const E2E_PACKAGE_JSON =
+  JSON.stringify(
+    {
+      name: "loom-e2e",
+      version: "0.0.0",
+      type: "module",
+      private: true,
+      scripts: { test: "vitest run" },
+      devDependencies: {
+        typescript: "^5.7.0",
+        vitest: "^2.1.0",
+      },
+    },
+    null,
+    2,
+  ) + "\n";
+
+const E2E_TSCONFIG_JSON =
+  JSON.stringify(
+    {
+      compilerOptions: {
+        target: "ES2022",
+        module: "ES2022",
+        moduleResolution: "Bundler",
+        strict: true,
+        esModuleInterop: true,
+        skipLibCheck: true,
+        types: ["node", "vitest/globals"],
+      },
+      include: ["**/*.ts"],
+    },
+    null,
+    2,
+  ) + "\n";
 
 function collectContextsFor(
   d: DeployableIR,

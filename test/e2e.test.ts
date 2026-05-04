@@ -83,6 +83,29 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
     },
     900_000,
   );
+
+  it(
+    "generated DSL-level e2e suite runs against the live system",
+    async () => {
+      const e2eDir = path.join(outDir, "e2e");
+      if (!fs.existsSync(e2eDir)) {
+        // System has no `test e2e` blocks — nothing to verify.
+        return;
+      }
+      // Install vitest in the e2e folder, run the generated suite.
+      execSync(`npm install --silent --no-audit --no-fund`, {
+        cwd: e2eDir,
+        stdio: "inherit",
+        timeout: 180_000,
+      });
+      execSync(`npx vitest run`, {
+        cwd: e2eDir,
+        stdio: "inherit",
+        timeout: 120_000,
+      });
+    },
+    600_000,
+  );
 });
 
 async function pollHealthy(url: string, timeoutMs: number): Promise<void> {

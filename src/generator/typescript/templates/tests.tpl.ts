@@ -79,5 +79,8 @@ function renderTestStmt(s: TestStmtIR): string {
   if (s.kind === "call") {
     return `  // call: ${s.name}(...)`;
   }
+  if (s.kind === "expression") {
+    return `  ${renderTsExpr(s.expr)};`;
+  }
   return "";
 }

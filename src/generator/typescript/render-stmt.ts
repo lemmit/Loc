@@ -30,6 +30,8 @@ function renderTsStatement(s: StmtIR): string {
       const args = s.args.map(renderTsExpr).join(", ");
       return `${INDENT}this.${camelize(s.name)}(${args});`;
     }
+    case "expression":
+      return `${INDENT}${renderTsExpr(s.expr)};`;
   }
 }
 

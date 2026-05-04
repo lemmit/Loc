@@ -48,6 +48,7 @@ import {
   isNewExpr,
   isNowExpr,
   isNullLit,
+  isObjectLit,
   isOperation,
   isParenExpr,
   isPreconditionStmt,
@@ -58,6 +59,7 @@ import {
   isSystem,
   isTernaryExpr,
   isTestBlock,
+  isTestE2E,
   isThisRef,
   isUnaryExpr,
   isValueObject,
@@ -148,6 +150,7 @@ export function lowerModel(model: Model): LoomModel {
 function lowerSystem(sys: import("../language/generated/ast.js").System): SystemIR {
   const modules: ModuleIR[] = [];
   const deployables: DeployableIR[] = [];
+  const e2eBlocks: import("../language/generated/ast.js").TestE2E[] = [];
   // Bare `context` declarations directly under a `system` block live in
   // an implicit anonymous module so we can index them like any other.
   const looseContexts: BoundedContextIR[] = [];
@@ -161,12 +164,57 @@ function lowerSystem(sys: import("../language/generated/ast.js").System): System
       looseContexts.push(lowerContext(m));
     } else if (isDeployable(m)) {
       deployables.push(lowerDeployable(m));
+    } else if (isTestE2E(m)) {
+      e2eBlocks.push(m);
     }
   }
   if (looseContexts.length > 0) {
     modules.push({ name: "_default", contexts: looseContexts });
   }
-  return { name: sys.name, modules, deployables };
+  // E2E test bodies reference the magic `api.<aggregate>.<method>(…)`
+  // chain; resolution happens at render time against the target
+  // deployable's IR.  The lowering env is minimal — bare-name lookups
+  // would mostly be `unknown` anyway because e2e tests don't sit
+  // inside a bounded context.
+  const e2eEnv: Env = {
+    ctx: undefined as never,
+    locals: new Map(),
+  };
+  const e2eTests = e2eBlocks.map((b) => lowerE2E(b, e2eEnv));
+  return { name: sys.name, modules, deployables, e2eTests };
+}
+
+function lowerE2E(
+  block: import("../language/generated/ast.js").TestE2E,
+  env: Env,
+): import("./loom-ir.js").TestE2EIR {
+  const inner = block.body;
+  let curEnv = env;
+  const statements: TestStmtIR[] = [];
+  for (const s of inner) {
+    if (isExpectStmt(s)) {
+      statements.push({
+        kind: "expect",
+        expr: lowerExpr(s.expr, curEnv),
+        source: cstText(s.expr),
+      });
+    } else if (isExpectThrowsStmt(s)) {
+      statements.push({
+        kind: "expect-throws",
+        expr: lowerExpr(s.expr, curEnv),
+        source: cstText(s.expr),
+      });
+    } else {
+      const r = lowerStatement(s as never, curEnv);
+      statements.push(r.stmt);
+      curEnv = r.envAfter;
+    }
+  }
+  return {
+    name: block.name,
+    deployableName: block.deployable?.ref?.name ?? "",
+    statements,
+  };
 }
 
 function lowerDeployable(
@@ -491,9 +539,9 @@ function lowerStatement(stmt: Statement, env: Env): { stmt: StmtIR; envAfter: En
   if (isAssignOrCallStmt(stmt)) {
     const lv = stmt.target;
     if (!stmt.op) {
+      // `name(args)` — local function or private operation.
       if (lv.call && lv.tail.length === 0) {
         const fn = findFunctionInEnv(env, lv.head);
-        void fn; // op resolution happens in resolveCallKind for IR consumers
         const args = (lv.args ?? []).map((a) => lowerExpr(a, env));
         const target: "function" | "private-operation" = fn
           ? "function"
@@ -502,6 +550,32 @@ function lowerStatement(stmt: Statement, env: Env): { stmt: StmtIR; envAfter: En
           stmt: { kind: "call", target, name: lv.head, args },
           envAfter: env,
         };
+      }
+      // `a.b.c(args)` — chained call (e.g. `api.orders.addLine(...)`
+      // in an e2e body).  Synthesise a method-call expression and
+      // wrap as an expression-statement.
+      if (lv.call && lv.tail.length > 0) {
+        let recv: ExprIR = { kind: "ref", name: lv.head, refKind: "unknown" };
+        for (let i = 0; i < lv.tail.length - 1; i++) {
+          recv = {
+            kind: "member",
+            receiver: recv,
+            member: lv.tail[i]!,
+            receiverType: { kind: "primitive", name: "string" },
+            memberType: { kind: "primitive", name: "string" },
+          };
+        }
+        const lastMember = lv.tail[lv.tail.length - 1]!;
+        const args = (lv.args ?? []).map((a) => lowerExpr(a, env));
+        const expr: ExprIR = {
+          kind: "method-call",
+          receiver: recv,
+          member: lastMember,
+          args,
+          receiverType: { kind: "primitive", name: "string" },
+          isCollectionOp: false,
+        };
+        return { stmt: { kind: "expression", expr }, envAfter: env };
       }
       return {
         stmt: { kind: "call", target: "function", name: lv.head, args: [] },
@@ -591,6 +665,15 @@ function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
       kind: "lambda",
       param: expr.param,
       body: lowerExpr(expr.body, inner),
+    };
+  }
+  if (isObjectLit(expr)) {
+    return {
+      kind: "object",
+      fields: expr.fields.map((f) => ({
+        name: f.name,
+        value: lowerExpr(f.value, env),
+      })),
     };
   }
   if (isNewExpr(expr)) {
@@ -687,18 +770,22 @@ function resolveNameRef(name: string, env: Env): ExprIR {
       }
     }
   }
-  // Enum value lookup
-  for (const m of env.ctx.members) {
-    if (isEnumDecl(m)) {
-      for (const v of m.values) {
-        if (v.name === name) {
-          return {
-            kind: "ref",
-            name,
-            refKind: "enum-value",
-            enumName: m.name,
-            type: { kind: "enum", name: m.name },
-          };
+  // Enum value lookup — only when an enclosing context exists.  E2E
+  // test bodies have no `ctx`; bare names there are treated as
+  // unresolved refs and rendered verbatim by the e2e renderer.
+  if (env.ctx) {
+    for (const m of env.ctx.members) {
+      if (isEnumDecl(m)) {
+        for (const v of m.values) {
+          if (v.name === name) {
+            return {
+              kind: "ref",
+              name,
+              refKind: "enum-value",
+              enumName: m.name,
+              type: { kind: "enum", name: m.name },
+            };
+          }
         }
       }
     }
@@ -722,9 +809,11 @@ function resolveCallKind(name: string, env: Env): "function" | "value-object-cto
       }
     }
   }
-  // Value-object constructor
-  for (const m of env.ctx.members) {
-    if (isValueObject(m) && m.name === name) return "value-object-ctor";
+  // Value-object constructor (only when a context is in scope).
+  if (env.ctx) {
+    for (const m of env.ctx.members) {
+      if (isValueObject(m) && m.name === name) return "value-object-ctor";
+    }
   }
   return "free";
 }
@@ -877,6 +966,7 @@ function memberOnValueObject(vo: ValueObject, name: string): TypeIR {
 }
 
 function findEntityByName(env: Env, name: string): Aggregate | EntityPart | undefined {
+  if (!env.ctx) return undefined;
   for (const m of env.ctx.members) {
     if (isAggregate(m)) {
       if (m.name === name) return m;
@@ -889,6 +979,7 @@ function findEntityByName(env: Env, name: string): Aggregate | EntityPart | unde
 }
 
 function findValueObjectByName(env: Env, name: string): ValueObject | undefined {
+  if (!env.ctx) return undefined;
   for (const m of env.ctx.members) {
     if (isValueObject(m) && m.name === name) return m;
   }

@@ -23,7 +23,18 @@ System:
     '}';
 
 SystemMember:
-    Module | Deployable | BoundedContext;
+    Module | Deployable | BoundedContext | TestE2E;
+
+// E2E test against a running deployable.  The body reuses the per-
+// aggregate TestStatement vocabulary (let / expect / expectThrows /
+// bare-call), but expressions can additionally reference the magic
+// `api` identifier rooted at the named deployable's HTTP surface
+// (e.g., `api.orders.create({...})`).  Renders to a vitest test file
+// at the system output root.
+TestE2E:
+    'test' 'e2e' name=STRING 'against' deployable=[Deployable:ID] '{'
+        body+=TestStatement*
+    '}';
 
 Module:
     'module' name=ID '{'
@@ -237,10 +248,16 @@ UnaryExpr infers Expression:
 
 PostfixExpr infers Expression:
     PrimaryExpr (
-        {infer MemberAccess.receiver=current} '.' member=ID
+        {infer MemberAccess.receiver=current} '.' member=MemberName
           ( call?='(' (args+=Expression (',' args+=Expression)*)? ')' )?
       | {infer CallExpr.callee=current} '(' (args+=Expression (',' args+=Expression)*)? ')'
     )*;
+
+// Accept `id` and `this` (otherwise reserved as primary-expression
+// keywords) as ordinary member names — `prod.id`, `agg.this` (rare but
+// allowed) parse without surprises.
+MemberName returns string:
+    ID | 'id';
 
 Lambda:
     param=ID '=>' body=Expression;
@@ -248,6 +265,7 @@ Lambda:
 PrimaryExpr infers Expression:
       Lambda
     | NewExpr
+    | ObjectLit
     | ParenExpr
     | LiteralExpr
     | NowExpr
@@ -259,6 +277,14 @@ NewExpr:
     'new' partType=[EntityPart:ID] '{'
         (fields+=ObjectFieldInit (',' fields+=ObjectFieldInit)* ','?)?
     '}';
+
+// Bare object literal — used inside e2e test bodies to build request
+// payloads (`api.orders.create({ customerId: "..." })`).  Distinct
+// from `new PartName {…}`: no aggregate / part type binding, no
+// invariant checks; it is a structural literal that the e2e renderer
+// hands straight to JSON.stringify.
+ObjectLit:
+    '{' (fields+=ObjectFieldInit (',' fields+=ObjectFieldInit)* ','?)? '}';
 
 ObjectFieldInit:
     name=ID ':' value=Expression;
