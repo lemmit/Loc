@@ -111,6 +111,58 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
   );
 
   it(
+    "generated Playwright UI suite runs against the live web_app",
+    async () => {
+      // Find any react deployable that ships a Playwright e2e suite.
+      // The smoke spec is always present; a UI spec is only there
+      // when the system declared `test e2e ... against <react>` blocks.
+      const reactDirs = fs
+        .readdirSync(outDir, { withFileTypes: true })
+        .filter((d) => d.isDirectory())
+        .map((d) => path.join(outDir, d.name))
+        .filter((p) => fs.existsSync(path.join(p, "e2e", "playwright.config.ts")));
+      if (reactDirs.length === 0) {
+        // No react deployable in this system.
+        return;
+      }
+      for (const dir of reactDirs) {
+        const e2eDir = path.join(dir, "e2e");
+        // The frontend's e2e/ has its own package.json with
+        // @playwright/test as a dev dep — keeping it out of the
+        // runtime image.  Install it here.
+        execSync(`npm install --silent --no-audit --no-fund`, {
+          cwd: e2eDir,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        // Browser binaries — `playwright install --with-deps` would
+        // also pull system packages, but the proxy CA setup in this
+        // sandbox already covers them.  PLAYWRIGHT_BROWSERS_PATH
+        // points at a per-host shared cache so repeat runs skip the
+        // 100 MB download.
+        const env = {
+          ...process.env,
+          PLAYWRIGHT_BROWSERS_PATH:
+            process.env.PLAYWRIGHT_BROWSERS_PATH ?? "/opt/pw-browsers",
+        };
+        execSync(`npx playwright install chromium`, {
+          cwd: e2eDir,
+          stdio: "inherit",
+          env,
+          timeout: 300_000,
+        });
+        execSync(`npx playwright test`, {
+          cwd: e2eDir,
+          stdio: "inherit",
+          env,
+          timeout: 300_000,
+        });
+      }
+    },
+    900_000,
+  );
+
+  it(
     "cross-check: .NET (Swashbuckle) and Hono (zod-openapi) emit the same set of (method, path) for the same modules",
     async () => {
       // Both deployables host the Catalog module — Swashbuckle on
