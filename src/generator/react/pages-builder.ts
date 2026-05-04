@@ -5,7 +5,6 @@ import type {
   FieldIR,
   ParamIR,
   TypeIR,
-  ValueObjectIR,
 } from "../../ir/loom-ir.js";
 import { camel, plural, snake } from "../../util/naming.js";
 
@@ -78,10 +77,12 @@ export function buildNewPage(agg: AggregateIR, ctx: BoundedContextIR): string {
   const formFields = fields
     .map((f) => formInput(f.name, f.type, ctx, `${slug}-new-input-${f.name}`))
     .join("\n        ");
+  const mantineImports = ["Stack", "Title", "Button", "Group"]
+    .concat([...componentsForFields(fields, ctx)].sort())
+    .join(", ");
   return `// Auto-generated.
 import { useNavigate } from "react-router-dom";
-import { Stack, Title, Button, Group, TextInput, NumberInput, Switch, Select, Fieldset } from "@mantine/core";
-import { DateTimePicker } from "@mantine/dates";
+import { ${mantineImports} } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useForm } from "@mantine/form";
 import { zodResolver } from "mantine-form-zod-resolver";
@@ -149,10 +150,21 @@ export function buildDetailPage(agg: AggregateIR, ctx: BoundedContextIR): string
     .map((op) => renderOperationButton(slug, op))
     .join("\n          ");
 
+  // Detail-page components: card / table / badge / anchor for display
+  // + the input set used by every operation modal.
+  const displayComponents = ["Stack", "Title", "Card", "Group", "Button", "Text", "Loader", "Alert", "Anchor"];
+  if (agg.fields.some((f) => unwrapOpt(f.type).kind === "enum")) displayComponents.push("Badge");
+  if (agg.contains.length > 0) displayComponents.push("Table", "Badge");
+  // Operation forms reuse the formInput vocabulary.
+  const opFormComponents = componentsForFields(
+    ops.flatMap((o) => o.params.map((p) => ({ type: p.type }))),
+    ctx,
+  );
+  const mantineImports = [...new Set([...displayComponents, ...opFormComponents])].sort().join(", ");
+
   return `// Auto-generated.
-import { useParams, useNavigate, Link } from "react-router-dom";
-import { Stack, Title, Card, Group, Button, Text, Loader, Alert, Anchor, Badge, Table, Fieldset, TextInput, NumberInput, Switch, Select } from "@mantine/core";
-import { DateTimePicker } from "@mantine/dates";
+import { useParams, Link } from "react-router-dom";
+import { ${mantineImports} } from "@mantine/core";
 import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import { useForm } from "@mantine/form";
@@ -161,7 +173,6 @@ import { use${agg.name}ById${ops.length > 0 ? `, ${opHookImports}` : ""}${reqImp
 
 export default function ${cap}Detail(): JSX.Element {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
   const q = use${agg.name}ById(id);
 ${ops.map((op) => `  const ${camel(op.name)} = use${upper(op.name)}${agg.name}(id ?? "");`).join("\n")}
   if (q.isLoading) return <Loader />;
@@ -330,6 +341,48 @@ function ${cap}Form({ mut, onClose }: { mut: ReturnType<typeof use${cap}${agg.na
 // Form-input helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Walk each field type and return the set of Mantine components the
+ * form will need.  Drives a precise import line so generated pages
+ * don't pull in unused components.  Always includes `TextInput`
+ * because the fallback path uses it.
+ */
+function componentsForFields(
+  fields: { type: TypeIR }[],
+  ctx: BoundedContextIR,
+): Set<string> {
+  const out = new Set<string>(["TextInput"]);
+  const visit = (t: TypeIR) => {
+    const inner = unwrapOpt(t);
+    if (inner.kind === "primitive") {
+      if (
+        inner.name === "int" ||
+        inner.name === "long" ||
+        inner.name === "decimal"
+      ) {
+        out.add("NumberInput");
+      }
+      if (inner.name === "bool") out.add("Switch");
+      // datetime uses TextInput (already in set) with type="datetime-local"
+      return;
+    }
+    if (inner.kind === "id") return; // TextInput
+    if (inner.kind === "enum") {
+      out.add("Select");
+      return;
+    }
+    if (inner.kind === "valueobject") {
+      out.add("Fieldset");
+      const vo = ctx.valueObjects.find((v) => v.name === inner.name);
+      if (vo) for (const f of vo.fields) visit(f.type);
+      return;
+    }
+    if (inner.kind === "array") visit(inner.element);
+  };
+  for (const f of fields) visit(f.type);
+  return out;
+}
+
 function formInput(
   name: string,
   t: TypeIR,
@@ -474,6 +527,3 @@ function displayCellExpr(slug: string, f: FieldIR): string {
 function upper(s: string): string {
   return s[0]!.toUpperCase() + s.slice(1);
 }
-
-// Suppress unused-import warnings.
-void (null as unknown as ValueObjectIR);

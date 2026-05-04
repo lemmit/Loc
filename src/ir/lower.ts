@@ -1,8 +1,10 @@
 import type { AstNode } from "langium";
 import type {
   Aggregate,
+  AggregateMember,
   BoundedContext,
   EntityPart,
+  EntityPartMember,
   EnumDecl,
   EventDecl,
   Expression,
@@ -104,7 +106,9 @@ import { lit } from "./loom-ir.js";
 // ---------------------------------------------------------------------------
 
 interface Env {
-  ctx: BoundedContext;
+  /** The enclosing bounded context.  Undefined for `test e2e` blocks
+   * that live at the system level, outside any context. */
+  ctx?: BoundedContext;
   aggregate?: Aggregate;
   part?: EntityPart;
   valueObject?: ValueObject;
@@ -186,10 +190,7 @@ function lowerSystem(sys: import("../language/generated/ast.js").System): System
   // deployable's IR.  The lowering env is minimal — bare-name lookups
   // would mostly be `unknown` anyway because e2e tests don't sit
   // inside a bounded context.
-  const e2eEnv: Env = {
-    ctx: undefined as never,
-    locals: new Map(),
-  };
+  const e2eEnv: Env = { locals: new Map() };
   const e2eTests = e2eBlocks.map((b) => lowerE2E(b, e2eEnv));
   return { name: sys.name, modules, deployables, e2eTests };
 }
@@ -215,7 +216,9 @@ function lowerE2E(
         source: cstText(s.expr),
       });
     } else {
-      const r = lowerStatement(s as never, curEnv);
+      // `expect` / `expectThrows` are filtered above; the remaining
+      // shapes are exactly `Statement`.
+      const r = lowerStatement(s as Statement, curEnv);
       statements.push(r.stmt);
       curEnv = r.envAfter;
     }
@@ -364,7 +367,7 @@ function lowerTest(
         source: cstText(s.expr),
       });
     } else {
-      const r = lowerStatement(s as never, inner);
+      const r = lowerStatement(s as Statement, inner);
       statements.push(r.stmt);
       inner = r.envAfter;
     }
@@ -778,21 +781,19 @@ function resolveNameRef(name: string, env: Env): ExprIR {
           type: lowerType(m.type),
         };
       }
-      if (isContainment(m as never) && (m as { name: string }).name === name) {
-        const c = m as import("../language/generated/ast.js").Containment;
-        const partName = c.partType?.ref?.name ?? "Unknown";
-        const t: TypeIR = c.collection
+      if (isContainment(m) && m.name === name) {
+        const partName = m.partType?.ref?.name ?? "Unknown";
+        const t: TypeIR = m.collection
           ? { kind: "array", element: { kind: "entity", name: partName } }
           : { kind: "entity", name: partName };
         return { kind: "ref", name, refKind: "this-prop", type: t };
       }
-      if (isDerivedProp(m as never) && (m as { name: string }).name === name) {
-        const d = m as import("../language/generated/ast.js").DerivedProp;
+      if (isDerivedProp(m) && m.name === name) {
         return {
           kind: "ref",
           name,
           refKind: "this-derived",
-          type: lowerType(d.type),
+          type: lowerType(m.type),
         };
       }
       if (isFunctionDecl(m) && m.name === name) {
@@ -834,8 +835,11 @@ function resolveCallKind(name: string, env: Env): "function" | "value-object-cto
     if (!o) continue;
     for (const m of o.members) {
       if (isFunctionDecl(m) && m.name === name) return "function";
-      if ((isAggregate(o) || isEntityPart(o)) && isOperation(m as never) && (m as Operation).name === name) {
-        return "private-operation";
+      // Operations only appear inside aggregates / entity parts, not
+      // value objects.  The `o` guard narrows `m`'s union accordingly.
+      if (isAggregate(o) || isEntityPart(o)) {
+        const opM = m as AggregateMember | EntityPartMember;
+        if (isOperation(opM) && opM.name === name) return "private-operation";
       }
     }
   }
@@ -921,9 +925,12 @@ function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
 function widenNumeric(a: TypeIR, b: TypeIR): TypeIR {
   if (a.kind === "primitive" && b.kind === "primitive") {
     const order = ["int", "long", "decimal"] as const;
-    const ai = order.indexOf(a.name as never);
-    const bi = order.indexOf(b.name as never);
-    if (ai >= 0 && bi >= 0) return { kind: "primitive", name: order[Math.max(ai, bi)]! };
+    type NumericName = (typeof order)[number];
+    const ai = (order as readonly string[]).indexOf(a.name);
+    const bi = (order as readonly string[]).indexOf(b.name);
+    if (ai >= 0 && bi >= 0) {
+      return { kind: "primitive", name: order[Math.max(ai, bi)] as NumericName };
+    }
   }
   return a;
 }
@@ -971,15 +978,14 @@ function memberOnEntity(target: Aggregate | EntityPart, name: string): TypeIR {
   }
   for (const m of target.members) {
     if (isProperty(m) && m.name === name) return lowerType(m.type);
-    if (isContainment(m as never) && (m as { name: string }).name === name) {
-      const c = m as import("../language/generated/ast.js").Containment;
-      const partName = c.partType?.ref?.name ?? "Unknown";
-      return c.collection
+    if (isContainment(m) && m.name === name) {
+      const partName = m.partType?.ref?.name ?? "Unknown";
+      return m.collection
         ? { kind: "array", element: { kind: "entity", name: partName } }
         : { kind: "entity", name: partName };
     }
-    if (isDerivedProp(m as never) && (m as { name: string }).name === name) {
-      return lowerType((m as import("../language/generated/ast.js").DerivedProp).type);
+    if (isDerivedProp(m) && m.name === name) {
+      return lowerType(m.type);
     }
   }
   return { kind: "primitive", name: "string" };
@@ -988,8 +994,8 @@ function memberOnEntity(target: Aggregate | EntityPart, name: string): TypeIR {
 function memberOnValueObject(vo: ValueObject, name: string): TypeIR {
   for (const m of vo.members) {
     if (isProperty(m) && m.name === name) return lowerType(m.type);
-    if (isDerivedProp(m as never) && (m as { name: string }).name === name) {
-      return lowerType((m as import("../language/generated/ast.js").DerivedProp).type);
+    if (isDerivedProp(m) && m.name === name) {
+      return lowerType(m.type);
     }
   }
   return { kind: "primitive", name: "string" };
@@ -1034,7 +1040,7 @@ function findFunctionInEnv(env: Env, name: string): FunctionDecl | undefined {
 function findOperationInEnv(env: Env, name: string): Operation | undefined {
   if (!env.aggregate) return undefined;
   for (const m of env.aggregate.members) {
-    if (isOperation(m as never) && (m as Operation).name === name) return m as Operation;
+    if (isOperation(m) && m.name === name) return m;
   }
   return undefined;
 }

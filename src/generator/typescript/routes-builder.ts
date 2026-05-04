@@ -4,7 +4,6 @@ import type {
   EnumIR,
   EntityPartIR,
   FindIR,
-  FieldIR,
   OperationIR,
   RepositoryIR,
   TypeIR,
@@ -42,13 +41,22 @@ export function buildRoutesFile(
   lines.push(
     `import { DomainError, AggregateNotFoundError } from "../domain/errors.js";`,
   );
-  lines.push("");
 
   // Schemas — value objects, enums, then per-DTO request / response
   // shapes.  Named via `.openapi("Foo")` so they appear in the spec's
   // `components.schemas` section (referenced rather than inlined).
   const usedVOs = collectUsedValueObjects(agg, repo, ctx);
   const usedEnums = collectUsedEnums(agg, repo, ctx);
+  // Value objects are constructed inside route handlers
+  // (`new Money(...)` from the validated body), so the runtime classes
+  // must be in scope.  Enums travel as strings on the wire — no
+  // import needed.
+  if (usedVOs.length > 0) {
+    lines.push(
+      `import { ${usedVOs.map((v) => v.name).join(", ")} } from "../domain/value-objects.js";`,
+    );
+  }
+  lines.push("");
 
   for (const e of usedEnums) {
     const values = e.values.map((v) => `"${v}"`).join(", ");
@@ -136,7 +144,13 @@ export function buildRoutesFile(
   lines.push(`    }),`);
   lines.push(`    async (c) => {`);
   lines.push(`      const body = c.req.valid("json");`);
-  lines.push(`      const created = ${agg.name}.create(body as never);`);
+  // Wrap each wire-shape field into the typed factory argument (brand
+  // ids, instantiate value objects).  Avoids `as never` and lets
+  // strict tsc catch shape drift between Zod and the domain class.
+  const createArgs = requiredFields
+    .map((f) => `${f.name}: ${wireToDomainExpr(`body.${f.name}`, f.type, ctx)}`)
+    .join(", ");
+  lines.push(`      const created = ${agg.name}.create({ ${createArgs} });`);
   lines.push(`      await repo.save(created);`);
   lines.push(`      return c.json({ id: created.id as string }, 201);`);
   lines.push(`    },`);
@@ -166,21 +180,23 @@ export function buildRoutesFile(
   lines.push(
     `      if (!found) return c.json({ error: "not_found" }, 404);`,
   );
-  lines.push(`      return c.json(repo.toWire(found) as never, 200);`);
+  lines.push(
+    `      return c.json(repo.toWire(found) as z.infer<typeof ${agg.name}Response>, 200);`,
+  );
   lines.push(`    },`);
   lines.push(`  );`);
   lines.push("");
 
   // Operations.
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
-    lines.push(...emitOperationRoute(agg, op).map((l) => `  ${l}`));
+    lines.push(...emitOperationRoute(agg, op, ctx).map((l) => `  ${l}`));
     lines.push("");
   }
 
   // Find queries (including the auto-included `all`).
   if (repo) {
     for (const find of repo.finds) {
-      lines.push(...emitFindRoute(agg, find).map((l) => `  ${l}`));
+      lines.push(...emitFindRoute(agg, find, ctx).map((l) => `  ${l}`));
       lines.push("");
     }
   }
@@ -200,7 +216,11 @@ export function buildRoutesFile(
   return lines.join("\n") + "\n";
 }
 
-function emitOperationRoute(agg: AggregateIR, op: OperationIR): string[] {
+function emitOperationRoute(
+  agg: AggregateIR,
+  op: OperationIR,
+  ctx: BoundedContextIR,
+): string[] {
   const aggSlug = snake(plural(agg.name));
   const opSnake = snake(op.name);
   const out: string[] = [];
@@ -224,7 +244,9 @@ function emitOperationRoute(agg: AggregateIR, op: OperationIR): string[] {
   out.push(`    const { id } = c.req.valid("param");`);
   out.push(`    const body = c.req.valid("json");`);
   out.push(`    const aggregate = await repo.getById(Ids.${agg.name}Id(id));`);
-  const callArgs = op.params.map((p) => `body.${p.name} as never`).join(", ");
+  const callArgs = op.params
+    .map((p) => wireToDomainExpr(`body.${p.name}`, p.type, ctx))
+    .join(", ");
   out.push(`    aggregate.${camel(op.name)}(${callArgs});`);
   out.push(`    await repo.save(aggregate);`);
   out.push(`    return c.body(null, 204);`);
@@ -233,7 +255,11 @@ function emitOperationRoute(agg: AggregateIR, op: OperationIR): string[] {
   return out;
 }
 
-function emitFindRoute(agg: AggregateIR, find: FindIR): string[] {
+function emitFindRoute(
+  agg: AggregateIR,
+  find: FindIR,
+  ctx: BoundedContextIR,
+): string[] {
   const aggSlug = snake(plural(agg.name));
   const findSnake = snake(find.name);
   const isList = find.returnType.kind === "array";
@@ -253,24 +279,34 @@ function emitFindRoute(agg: AggregateIR, find: FindIR): string[] {
   out.push(
     `      200: { description: "OK", content: { "application/json": { schema: ${responseSchema} } } },`,
   );
+  if (find.returnType.kind === "optional") {
+    out.push(
+      `      404: { description: "Not found", content: { "application/json": { schema: ErrorResponse } } },`,
+    );
+  }
   out.push(`    },`);
   out.push(`  }),`);
   out.push(`  async (c) => {`);
   if (find.params.length > 0) {
     out.push(`    const params = c.req.valid("query");`);
   }
-  const argList = find.params.map((p) => `params.${p.name} as never`).join(", ");
+  const argList = find.params
+    .map((p) => wireToDomainExpr(`params.${p.name}`, p.type, ctx))
+    .join(", ");
   out.push(`    const result = await repo.${find.name}(${argList});`);
   if (isList) {
     out.push(
-      `    return c.json(result.map((r) => repo.toWire(r)) as never, 200);`,
+      `    return c.json(result.map((r) => repo.toWire(r)) as z.infer<typeof ${agg.name}Response>[], 200);`,
     );
   } else if (find.returnType.kind === "optional") {
+    out.push(`    if (result == null) return c.json({ error: "not_found" }, 404);`);
     out.push(
-      `    return c.json((result == null ? null : repo.toWire(result)) as never, 200);`,
+      `    return c.json(repo.toWire(result) as z.infer<typeof ${agg.name}Response>, 200);`,
     );
   } else {
-    out.push(`    return c.json(repo.toWire(result) as never, 200);`);
+    out.push(
+      `    return c.json(repo.toWire(result) as z.infer<typeof ${agg.name}Response>, 200);`,
+    );
   }
   out.push(`  },`);
   out.push(`);`);
@@ -443,5 +479,41 @@ function cap(s: string): string {
   return s[0]!.toUpperCase() + s.slice(1);
 }
 
-// Suppress unused-import warnings for FieldIR (kept for clarity).
-void (null as unknown as FieldIR);
+// ---------------------------------------------------------------------------
+// wire → domain conversion
+//
+// Wraps each Zod-validated wire value into the typed argument the
+// domain factory / operation expects: brand `Id<X>` strings via
+// `Ids.<X>Id(...)`, instantiate value objects via `new <Vo>(...)`,
+// recurse into arrays / optionals.  Mirrors the .NET path's
+// `wireToCommandArgument` (see dotnet/dto-mapping.ts) so request
+// handling stays symmetric across backends.
+// ---------------------------------------------------------------------------
+
+function wireToDomainExpr(expr: string, t: TypeIR, ctx?: BoundedContextIR): string {
+  switch (t.kind) {
+    case "primitive":
+      return expr;
+    case "id":
+      return `Ids.${t.targetName}Id(${expr})`;
+    case "enum":
+      return expr;
+    case "valueobject": {
+      // VO ctor args follow the DSL's field declaration order.  Walk
+      // ctx.valueObjects to find the field list; bare-name fallback
+      // covers the (rare) case where ctx isn't threaded.
+      const vo = ctx?.valueObjects.find((v) => v.name === t.name);
+      if (!vo) return `new ${t.name}(${expr})`;
+      const args = vo.fields
+        .map((f) => wireToDomainExpr(`${expr}.${f.name}`, f.type, ctx))
+        .join(", ");
+      return `new ${t.name}(${args})`;
+    }
+    case "entity":
+      return expr;
+    case "array":
+      return `${expr}.map((__e) => ${wireToDomainExpr("__e", t.element, ctx)})`;
+    case "optional":
+      return `(${expr} == null ? null : ${wireToDomainExpr(expr, t.inner, ctx)})`;
+  }
+}

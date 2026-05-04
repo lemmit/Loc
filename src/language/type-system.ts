@@ -259,8 +259,8 @@ export function typeOf(expr: Expression | undefined, env: Env): DddType {
 function arithmeticResult(a: DddType, b: DddType): DddType {
   if (a.kind === "primitive" && b.kind === "primitive") {
     const order = ["int", "long", "decimal"] as const;
-    const ai = order.indexOf(a.name as never);
-    const bi = order.indexOf(b.name as never);
+    const ai = (order as readonly string[]).indexOf(a.name);
+    const bi = (order as readonly string[]).indexOf(b.name);
     if (ai >= 0 && bi >= 0) return T.prim(order[Math.max(ai, bi)]!);
     if (a.name === "string" && b.name === "string") return T.prim("string");
   }
@@ -417,12 +417,18 @@ function lookupValueObjectByName(
   name: string,
   env: Env,
 ): ValueObject | undefined {
-  // Walk up to bounded context and search value objects
+  // Walk up to bounded context and search value objects.  The
+  // generated AST types make `members` an opaque list with mixed
+  // member shapes, so we go through `unknown` to apply the structural
+  // narrowing the cast below cements.
   let cur: AstNode | undefined = (env.aggregate ?? env.part ?? env.valueObject) as AstNode | undefined;
   while (cur && cur.$type !== "BoundedContext") cur = cur.$container;
   if (!cur) return undefined;
-  for (const m of (cur as unknown as { members: Array<{ $type: string; name: string }> }).members) {
-    if (m.$type === "ValueObject" && m.name === name) return m as never as ValueObject;
+  const ctxMembers = (cur as unknown as { members: AstNode[] }).members;
+  for (const m of ctxMembers) {
+    if (m.$type === "ValueObject" && (m as ValueObject).name === name) {
+      return m as ValueObject;
+    }
   }
   return undefined;
 }

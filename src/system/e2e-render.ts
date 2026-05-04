@@ -206,7 +206,14 @@ function matchApiCall(e: ExprIR): ApiCallShape | null {
 function renderApiCall(call: ApiCallShape, ctx: RenderCtx): string {
   const agg = findAggregateBySlug(call.aggregateSlug, ctx.contexts);
   if (!agg) {
-    return `(/* TODO: unknown aggregate '${call.aggregateSlug}' on this deployable */ null as any)`;
+    const known = ctx.contexts
+      .flatMap((c) => c.aggregates.map((a) => snake(plural(a.name))))
+      .sort()
+      .join(", ");
+    throw new Error(
+      `e2e: unknown aggregate 'api.${call.aggregateSlug}' on this deployable. ` +
+        `Available aggregates: ${known || "(none)"}.`,
+    );
   }
   const slug = snake(plural(agg.name));
   const args = call.args;
@@ -216,7 +223,11 @@ function renderApiCall(call: ApiCallShape, ctx: RenderCtx): string {
     return `await __post(\`\${base}/${slug}\`, ${body})`;
   }
   if (call.method === "getById") {
-    if (args.length < 1) return "(/* getById requires an id */ null as any)";
+    if (args.length < 1) {
+      throw new Error(
+        `e2e: api.${call.aggregateSlug}.getById(id) requires an id argument`,
+      );
+    }
     const idExpr = renderIdArg(args[0], ctx);
     return `await __get(\`\${base}/${slug}/\${${idExpr}}\`)`;
   }
@@ -228,7 +239,19 @@ function renderApiCall(call: ApiCallShape, ctx: RenderCtx): string {
   const find = findRepoQuery(call.method, agg, ctx);
   if (find) return renderFindCall(find, slug, args, ctx);
 
-  return `(/* TODO: unknown method '${call.method}' on api.${call.aggregateSlug} */ null as any)`;
+  const ops = agg.operations
+    .filter((o) => o.visibility === "public")
+    .map((o) => o.name);
+  const finds = (
+    ctx.contexts
+      .flatMap((c) => c.repositories)
+      .find((r) => r.aggregateName === agg.name)?.finds ?? []
+  ).map((f) => f.name);
+  const known = ["create", "getById", ...ops, ...finds].join(", ");
+  throw new Error(
+    `e2e: unknown method 'api.${call.aggregateSlug}.${call.method}'. ` +
+      `Available: ${known}.`,
+  );
 }
 
 function renderOperationCall(
@@ -237,7 +260,11 @@ function renderOperationCall(
   args: ExprIR[],
   ctx: RenderCtx,
 ): string {
-  if (args.length < 1) return "(/* operation call requires an id */ null as any)";
+  if (args.length < 1) {
+    throw new Error(
+      `e2e: api.${slug}.${op.name}(id, body?) requires an id argument`,
+    );
+  }
   const idExpr = renderIdArg(args[0], ctx);
   const body = args.length >= 2 ? renderE2EExpr(args[1], ctx) : "{}";
   const opSnake = snake(op.name);

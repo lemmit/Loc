@@ -3,12 +3,11 @@ import type {
   BoundedContextIR,
   EntityPartIR,
   EnumIR,
-  FindIR,
   RepositoryIR,
   TypeIR,
   ValueObjectIR,
 } from "../../ir/loom-ir.js";
-import { camel, plural, snake } from "../../util/naming.js";
+import { plural, snake } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Per-aggregate API module: Zod schemas + React Query hooks.
@@ -385,7 +384,3 @@ function collectEnums(
 function cap(s: string): string {
   return s[0]!.toUpperCase() + s.slice(1);
 }
-
-// Suppress unused-import warnings for FindIR / camel.
-void (null as unknown as FindIR);
-void camel;

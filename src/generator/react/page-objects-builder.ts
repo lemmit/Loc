@@ -1,11 +1,7 @@
 import type {
   AggregateIR,
   BoundedContextIR,
-  EntityPartIR,
-  FieldIR,
-  ParamIR,
   TypeIR,
-  ValueObjectIR,
 } from "../../ir/loom-ir.js";
 import { camel, plural, snake } from "../../util/naming.js";
 
@@ -314,10 +310,3 @@ function unwrapOpt(t: TypeIR): TypeIR {
 function upper(s: string): string {
   return s[0]!.toUpperCase() + s.slice(1);
 }
-
-// Suppress unused-import warnings — kept for consistency with the rest
-// of the React generator and so this module is self-contained.
-void (null as unknown as ParamIR);
-void (null as unknown as FieldIR);
-void (null as unknown as ValueObjectIR);
-void (null as unknown as EntityPartIR);

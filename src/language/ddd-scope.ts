@@ -96,7 +96,6 @@ export class DddScopeComputation extends DefaultScopeComputation {
 }
 
 export function enclosingAggregate(node: AstNode | undefined): Aggregate | undefined {
-  for (const a of AstUtils.streamAllContents({ $type: "", ...node } as never)) void a; // touch import
   let cur: AstNode | undefined = node;
   while (cur) {
     if (isAggregate(cur)) return cur;
