@@ -191,13 +191,23 @@ function lowerSystem(sys: import("../language/generated/ast.js").System): System
   // would mostly be `unknown` anyway because e2e tests don't sit
   // inside a bounded context.
   const e2eEnv: Env = { locals: new Map() };
-  const e2eTests = e2eBlocks.map((b) => lowerE2E(b, e2eEnv));
+  // Test kind comes from the target deployable's platform: react →
+  // UI test (Playwright spec via page objects), anything else →
+  // api test (vitest+fetch).  This avoids reserving a `'ui'` keyword
+  // that would shadow the body's `ui.X.Y(...)` identifiers.
+  const e2eTests = e2eBlocks.map((b) => {
+    const targetName = b.deployable?.ref?.name ?? "";
+    const target = deployables.find((d) => d.name === targetName);
+    const kind: "api" | "ui" = target?.platform === "react" ? "ui" : "api";
+    return lowerE2E(b, e2eEnv, kind);
+  });
   return { name: sys.name, modules, deployables, e2eTests };
 }
 
 function lowerE2E(
   block: import("../language/generated/ast.js").TestE2E,
   env: Env,
+  kind: "api" | "ui",
 ): import("./loom-ir.js").TestE2EIR {
   const inner = block.body;
   let curEnv = env;
@@ -225,6 +235,7 @@ function lowerE2E(
   }
   return {
     name: block.name,
+    kind,
     deployableName: block.deployable?.ref?.name ?? "",
     statements,
   };

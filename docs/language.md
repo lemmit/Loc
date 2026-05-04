@@ -307,6 +307,42 @@ The generated vitest file lives at `<system>/e2e/<SystemName>.e2e.test.ts`
 in the output directory.  Endpoints default to the docker-compose ports;
 override per environment via `E2E_<DEPLOYABLE>_BASE` env vars.
 
+### UI e2e tests against a react deployable
+
+The same `test e2e` syntax targets a frontend deployable as long as
+the body uses the `ui` identifier instead of `api`:
+
+```ddd
+test e2e "create then confirm an order via UI" against webApp {
+    let prod = ui.products.create({ sku: "WIDGET-1", price: { amount: 5.0, currency: "USD" } })
+    let ord = ui.orders.create({ customerId: "cust-001", status: "Draft", placedAt: "2024-01-01T00:00" })
+    ui.orders.addLine(ord, { productId: prod.id, qty: 3 })
+    ui.orders.confirm(ord)
+    let read = ui.orders.getById(ord)
+    expect read.status == "Confirmed"
+    expect read.lines.length == 1
+}
+```
+
+The test kind is implied by the target deployable's platform —
+`react` deployables get a Playwright spec routed through the auto-
+generated page objects (`<react-deployable>/e2e/pages/<aggregate>.ts`);
+backend deployables get the vitest+fetch path described above.
+
+The DSL surface is identical to api e2e (`ui.<aggregate>.<verb>(...)`);
+only the lowering differs:
+
+| Form | Lowers to |
+| --- | --- |
+| `ui.<aggregate>.create({ … })` | `<Agg>ListPage.goto() → create() → fill({…}) → submit()`; returns `{ id }` like the api version. |
+| `ui.<aggregate>.getById(idExpr)` | `<Agg>DetailPage.goto(idExpr.id)` plus eager `field("…")` reads of every primitive / enum / VO field, plus `<containment>.length` accessors per contained collection.  The result behaves like the api JSON: `read.status` is a string, `read.lines.length` is a number. |
+| `ui.<aggregate>.<operation>(idExpr, body?)` | `<Agg>DetailPage.goto(idExpr.id) → <opName>(body ?? {})` — opens the operation modal, fills it, submits. |
+
+The generated Playwright spec lives at
+`<react-deployable>/e2e/<SystemName>.ui.spec.ts`.  Run via the existing
+Playwright config in that directory (`npx playwright test` from
+`<react-deployable>/e2e/`).
+
 ## Repositories
 
 ```ddd

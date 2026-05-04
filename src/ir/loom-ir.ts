@@ -190,6 +190,10 @@ export interface SystemIR {
 /** End-to-end test that targets a running deployable. */
 export interface TestE2EIR {
   name: string;
+  /** "api" — typed-fetch HTTP test (default).  "ui" — Playwright
+   * test driven through the auto-generated page objects in the
+   * target react deployable's `e2e/pages/`. */
+  kind: "api" | "ui";
   deployableName: string;
   statements: TestStmtIR[];
 }

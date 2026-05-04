@@ -34,7 +34,8 @@ workflow see [`tools.md`](tools.md).
 | Auto `findById` / `getById` | Yes — load root + parts in a transaction; `getById` throws on missing | Yes — `GetByIdAsync` returns `Order?`, `getById` is implicit via the controller raising 404 | `use<Agg>ById(id)` hook, used by the detail page |
 | Auto `find all` | Yes — `GET /<plural>`, loads with master-detail | Yes — `GET /<plural>` via `GetAllQuery` + handler | `useAll<Agg>()` hook, used by the list page |
 | `test "name" { … }` | Vitest at `domain/<aggregate>.test.ts` | xUnit at `Tests/<Plural>/<Aggregate>Tests.cs` | (n/a — backend-only) |
-| `test e2e "name" against <deployable> { … }` | Vitest at `<system>/e2e/<System>.e2e.test.ts` (typed fetch against the live HTTP) | (same file; targets the named .NET deployable) | (deferred — see Playwright UI suite below for the equivalent against the React app) |
+| `test e2e "name" against <backend> { … }` | Vitest at `<system>/e2e/<System>.e2e.test.ts` (typed fetch against the live HTTP) | (same file; targets the named .NET deployable) | (n/a — see UI variant below) |
+| `test e2e "name" against <react-deployable> { … }` | (n/a — UI tests live in the react deployable) | (n/a) | Playwright spec at `<react-deployable>/e2e/<System>.ui.spec.ts`, routes through the auto-generated page objects |
 
 ---
 

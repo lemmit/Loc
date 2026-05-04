@@ -43,7 +43,10 @@ export function renderE2EFile(
   sys: SystemIR,
   modulesByName: Map<string, ModuleIR>,
 ): string | null {
-  if (sys.e2eTests.length === 0) return null;
+  // UI tests go to a separate Playwright spec via the
+  // ui-e2e-render path; the vitest api file only carries api tests.
+  const apiTests = sys.e2eTests.filter((t) => t.kind === "api");
+  if (apiTests.length === 0) return null;
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import { describe, it, expect } from "vitest";`);
@@ -63,7 +66,7 @@ export function renderE2EFile(
   lines.push(E2E_HELPERS.trim());
   lines.push("");
   lines.push(`describe(${JSON.stringify(`${sys.name} e2e`)}, () => {`);
-  for (const t of sys.e2eTests) {
+  for (const t of apiTests) {
     const d = sys.deployables.find((x) => x.name === t.deployableName);
     if (!d) continue;
     const contexts = collectContextsFor(d, modulesByName);

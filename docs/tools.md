@@ -402,10 +402,16 @@ Every React deployable ships a Playwright suite under `<deployable>/e2e/`:
     ├── package.json                # @playwright/test (kept out of the runtime image)
     ├── playwright.config.ts        # baseURL = http://localhost:<port>, override via E2E_BASE_URL
     ├── smoke.spec.ts               # auto-generated: every list page loads
+    ├── <System>.ui.spec.ts         # auto-generated from `test e2e "..." against <react-deployable>` blocks (when present)
     └── pages/
         ├── order.ts                # OrderListPage / OrderNewPage / OrderDetailPage
         └── product.ts
 ```
+
+The DSL `test e2e "..." against <react-deployable> { … }` form lowers
+to a Playwright spec (`<System>.ui.spec.ts`) routing every
+`ui.<aggregate>.<verb>(...)` call through the page objects above —
+see [`language.md`](language.md#ui-e2e-tests-against-a-react-deployable).
 
 Page-object classes are derived directly from the IR.  Per aggregate:
 

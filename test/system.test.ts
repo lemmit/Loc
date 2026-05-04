@@ -141,4 +141,49 @@ describe("system / module / deployable", () => {
       /__getQuery\(`\$\{base\}\/orders\/by_customer`,/,
     );
   });
+
+  it("lowers `test e2e ... against <react>` to a Playwright spec via page objects", async () => {
+    const model = await buildModel("examples/acme.ddd");
+    const { files } = generateSystems(model);
+    // UI specs land inside the targeted react deployable's e2e/
+    // folder, next to the auto-generated page objects.
+    const ui = files.get("web_app/e2e/Acme.ui.spec.ts")!;
+    expect(ui).toMatch(/from "@playwright\/test"/);
+    expect(ui).toMatch(
+      /from "\.\/pages\/product\.js"/,
+    );
+    expect(ui).toMatch(
+      /from "\.\/pages\/order\.js"/,
+    );
+    // `ui.products.create({...})` lowers via ProductListPage.
+    expect(ui).toMatch(/new ProductListPage\(page\)\.goto\(\)/);
+    // `ui.orders.addLine(ord, {...})` opens the detail page and
+    // calls the typed addLine method.
+    expect(ui).toMatch(
+      /new OrderDetailPage\(page, ord\.id\)\.goto\(\).+addLine/,
+    );
+    // `ui.orders.confirm(ord)` (no body) calls confirm().
+    expect(ui).toMatch(
+      /new OrderDetailPage\(page, ord\.id\)\.goto\(\).+confirm/,
+    );
+    // getById eagerly reads each primitive field via field("...").
+    expect(ui).toMatch(/await __detail\.field\("status"\)/);
+    expect(ui).toMatch(/await __detail\.linesCount\(\)/);
+
+    // The vitest api file does NOT include the UI test (it routes
+    // through ui-e2e-render instead).
+    const api = files.get("e2e/Acme.e2e.test.ts")!;
+    expect(api).not.toMatch(/create then confirm an order via UI/);
+  });
+
+  it("UI tests live in the targeted react deployable's e2e folder", async () => {
+    // Negative: react deployables that aren't targeted by any UI
+    // test shouldn't get a spec file.
+    const model = await buildModel("examples/acme.ddd");
+    const { files } = generateSystems(model);
+    expect(files.has("web_app/e2e/Acme.ui.spec.ts")).toBe(true);
+    // Backends never get UI specs.
+    expect(files.has("api/e2e/Acme.ui.spec.ts")).toBe(false);
+    expect(files.has("catalog_api/e2e/Acme.ui.spec.ts")).toBe(false);
+  });
 });

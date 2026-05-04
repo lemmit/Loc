@@ -16,6 +16,7 @@ import {
 } from "../generator/typescript/index.js";
 import { generateReactForContexts } from "../generator/react/index.js";
 import { renderE2EFile } from "./e2e-render.js";
+import { renderUIE2EFile } from "./ui-e2e-render.js";
 
 // ---------------------------------------------------------------------------
 // System-mode generation.
@@ -76,6 +77,19 @@ function emitSystem(
     out.set(`e2e/${sys.name}.e2e.test.ts`, e2eFile);
     out.set("e2e/package.json", E2E_PACKAGE_JSON);
     out.set("e2e/tsconfig.json", E2E_TSCONFIG_JSON);
+  }
+
+  // UI e2e specs — one per react deployable that has any `test e2e
+  // ui ... against <this-react-deployable>` blocks.  Emitted into the
+  // react deployable's existing `e2e/` directory next to the
+  // auto-generated page objects + smoke spec.
+  for (const d of sys.deployables) {
+    if (d.platform !== "react") continue;
+    const uiSpec = renderUIE2EFile(sys, modulesByName, d);
+    if (uiSpec) {
+      const slug = serviceSlug(d.name);
+      out.set(`${slug}/e2e/${sys.name}.ui.spec.ts`, uiSpec);
+    }
   }
 }
 

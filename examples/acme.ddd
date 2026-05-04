@@ -136,4 +136,23 @@ system Acme {
         let list = api.orders.byCustomer({ customerId: "cust-002" })
         expect list.length >= 1
     }
+
+    // ------------------------------------------------------------------
+    // UI e2e — the test kind is implied by the target deployable's
+    // platform.  When the target is a `react` deployable the body's
+    // `ui.<aggregate>.<verb>(...)` calls route through the
+    // auto-generated page objects in <react-deployable>/e2e/pages/
+    // and the test lowers to a Playwright spec at
+    // web_app/e2e/Acme.ui.spec.ts.
+    // ------------------------------------------------------------------
+
+    test e2e "create then confirm an order via UI" against webApp {
+        let prod = ui.products.create({ sku: "WIDGET-UI-1", price: { amount: 5.0, currency: "USD" } })
+        let ord = ui.orders.create({ customerId: "cust-ui", status: "Draft", placedAt: "2024-01-01T00:00" })
+        ui.orders.addLine(ord, { productId: prod.id, qty: 3 })
+        ui.orders.confirm(ord)
+        let read = ui.orders.getById(ord)
+        expect read.status == "Confirmed"
+        expect read.lines.length == 1
+    }
 }
