@@ -116,16 +116,9 @@ function lowerSystem(sys: import("../language/generated/ast.js").System): System
   if (looseContexts.length > 0) {
     modules.push({ name: "_default", contexts: looseContexts });
   }
-  // React frontends inherit their module set from their `targets:`
-  // backend so every place that walks `moduleNames` (file routing in
-  // system/index.ts; the api-builder) sees the same surface the
-  // backend exposes.
-  for (const d of deployables) {
-    if (d.platform === "react" && d.targetName) {
-      const target = deployables.find((t) => t.name === d.targetName);
-      if (target) d.moduleNames = [...target.moduleNames];
-    }
-  }
+  // React deployable's `moduleNames` inheritance from `targets:` is
+  // an enrichment, not a structural lowering — see
+  // `src/ir/enrichments.ts`.
   // E2E test bodies reference the magic `api.<aggregate>.<method>(…)`
   // chain; resolution happens at render time against the target
   // deployable's IR.  The lowering env is minimal — bare-name lookups
@@ -202,6 +195,10 @@ function defaultPort(platform: Platform | undefined): number {
 }
 
 function lowerContext(ctx: BoundedContext): BoundedContextIR {
+  // Lowering produces a faithful AST projection only.  Auto-included
+  // `findAll`, react `moduleNames` inheritance, and wire-shape
+  // derivation all live in `enrichLoomModel` (src/ir/enrichments.ts)
+  // which runs after lowering.
   const env = newEnv(ctx);
   const enums: EnumIR[] = [];
   const valueObjects: ValueObjectIR[] = [];
@@ -214,23 +211,6 @@ function lowerContext(ctx: BoundedContext): BoundedContextIR {
     else if (isEventDecl(m)) events.push(lowerEvent(m));
     else if (isAggregate(m)) aggregates.push(lowerAggregate(m, env));
     else if (isRepository(m)) repositories.push(lowerRepository(m));
-  }
-  // Every aggregate gets a repository with a `findAll(): T[]` query
-  // implicitly available, mirroring how `findById` is implicit.  If the
-  // user already declared one of that name, theirs wins.
-  for (const agg of aggregates) {
-    let repo = repositories.find((r) => r.aggregateName === agg.name);
-    if (!repo) {
-      repo = { name: `${agg.name}s`, aggregateName: agg.name, finds: [] };
-      repositories.push(repo);
-    }
-    if (!repo.finds.some((f) => f.name === "all")) {
-      repo.finds.unshift({
-        name: "all",
-        params: [],
-        returnType: { kind: "array", element: { kind: "entity", name: agg.name } },
-      });
-    }
   }
   return {
     name: ctx.name,

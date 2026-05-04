@@ -1,5 +1,6 @@
 import type { Model } from "../../language/generated/ast.js";
 import { lowerModel } from "../../ir/lower.js";
+import { enrichLoomModel } from "../../ir/enrichments.js";
 import type { BoundedContextIR, RepositoryIR } from "../../ir/loom-ir.js";
 import { camel } from "../../util/naming.js";
 import {
@@ -28,7 +29,11 @@ export class AggregateNotFoundError extends Error {
  * top-level bounded contexts.  Used by `ddd generate ts <file> -o <dir>`.
  */
 export function generateTypeScript(model: Model): Map<string, string> {
-  const loom = lowerModel(model);
+  // Lowering produces a faithful AST projection; enrichment populates
+  // wireShape, the implicit `findAll` find, and react `moduleNames`
+  // inheritance.  Every backend consumes the enriched IR, never the
+  // raw lowered output.
+  const loom = enrichLoomModel(lowerModel(model));
   return generateTypeScriptForContexts(loom.contexts);
 }
 

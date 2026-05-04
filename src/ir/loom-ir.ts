@@ -96,6 +96,30 @@ export interface EntityPartIR {
   derived: DerivedIR[];
   invariants: InvariantIR[];
   functions: FunctionIR[];
+  /** Canonical JSON-on-the-wire field list.  Populated by
+   * `enrichLoomModel` after lowering; lowering itself leaves it
+   * undefined so an unenriched IR is a type error to consume.
+   * See `src/ir/enrichments.ts`. */
+  wireShape?: WireField[];
+}
+
+/** One field in an aggregate / part / value object's canonical
+ * wire shape.  See `src/ir/enrichments.ts`. */
+export type WireFieldSource = "id" | "property" | "containment" | "derived";
+
+export interface WireField {
+  /** JSON key on the wire.  Stays as the user wrote it in the
+   * `.ddd` source — backends that prefer PascalCase / camelCase
+   * decide their own casing rule. */
+  name: string;
+  /** Domain-typed value the wire field carries.  For containment
+   * collections, this is `array { element: entity { name } }`; for
+   * single containments it's `entity { name }`. */
+  type: TypeIR;
+  /** True iff the source field was declared `T?`. */
+  optional: boolean;
+  /** Where the wire field came from in the IR. */
+  source: WireFieldSource;
 }
 
 export interface AggregateIR {
@@ -109,6 +133,9 @@ export interface AggregateIR {
   operations: OperationIR[];
   parts: EntityPartIR[];
   tests: TestIR[];
+  /** Canonical JSON-on-the-wire field list.  Populated by
+   * `enrichLoomModel`. */
+  wireShape?: WireField[];
 }
 
 export interface TestIR {
@@ -132,6 +159,9 @@ export interface ValueObjectIR {
   derived: DerivedIR[];
   invariants: InvariantIR[];
   functions: FunctionIR[];
+  /** Canonical wire-shape — no id, no containment, just declared
+   * fields + derived. */
+  wireShape?: WireField[];
 }
 
 export interface EventIR {

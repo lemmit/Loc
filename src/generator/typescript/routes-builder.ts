@@ -9,10 +9,6 @@ import type {
   TypeIR,
   ValueObjectIR,
 } from "../../ir/loom-ir.js";
-import {
-  wireFieldsForAggregate,
-  wireFieldsForPart,
-} from "../wire-shape.js";
 import { camel, plural, snake } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
@@ -329,12 +325,12 @@ function emitResponseDtoSchema(
   const lines: string[] = [];
   const name = `${ent.name}Response`;
   lines.push(`const ${name} = z.object({`);
-  // Single canonical walk — see src/generator/wire-shape.ts.  Order
-  // and field-set match every other emitter (.NET DTO, React Zod,
-  // Hono toWire serializer).
-  const fields = isAgg
-    ? wireFieldsForAggregate(ent as AggregateIR, ctx)
-    : wireFieldsForPart(ent as EntityPartIR, ctx);
+  // Single canonical walk — populated by `enrichLoomModel` (see
+  // src/ir/enrichments.ts).  Order and field-set match every other
+  // emitter (.NET DTO, React Zod, Hono toWire serializer).
+  const fields = ent.wireShape!;
+  void ctx;
+  void isAgg;
   for (const wf of fields) {
     if (wf.source === "id") {
       lines.push(`  ${wf.name}: z.string(),`);

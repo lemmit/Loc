@@ -1,5 +1,6 @@
 import type { Model } from "../../language/generated/ast.js";
 import { lowerModel } from "../../ir/lower.js";
+import { enrichLoomModel } from "../../ir/enrichments.js";
 import type { BoundedContextIR, RepositoryIR } from "../../ir/loom-ir.js";
 import { plural } from "../../util/naming.js";
 import { emitCqrs } from "./cqrs-emit.js";
@@ -56,7 +57,9 @@ import {
  * top-level bounded context (used by `ddd generate dotnet <file>`).
  */
 export function generateDotnet(model: Model): Map<string, string> {
-  const loom = lowerModel(model);
+  // See generator/typescript/index.ts:generateTypeScript for the
+  // lowering + enrichment two-step.
+  const loom = enrichLoomModel(lowerModel(model));
   return generateDotnetForContexts(loom.contexts);
 }
 

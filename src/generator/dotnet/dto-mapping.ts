@@ -8,10 +8,6 @@ import type {
 } from "../../ir/loom-ir.js";
 import { pascal } from "../../util/naming.js";
 import { renderCsType } from "./render-expr.js";
-import {
-  wireFieldsForAggregate,
-  wireFieldsForPart,
-} from "../wire-shape.js";
 
 // ---------------------------------------------------------------------------
 // Wire-shape DTO mapping helpers.
@@ -157,10 +153,9 @@ export function projectEntityExpr(
   // Single canonical walk — see src/generator/wire-shape.ts.  Each
   // wire field maps to one positional argument on
   // `new <Ent>Response(...)`, in the same order both response Zod
-  // schemas (Hono / React) emit.
-  const fields = isPart(entity)
-    ? wireFieldsForPart(entity, ctx)
-    : wireFieldsForAggregate(entity, ctx);
+  // schemas (Hono / React) emit.  Populated by `enrichLoomModel`
+  // (see src/ir/enrichments.ts).
+  const fields = entity.wireShape!;
   const args: string[] = [];
   for (const wf of fields) {
     if (wf.source === "id") {
@@ -203,9 +198,7 @@ function responseRecordParams(
   ent: AggregateIR | EntityPartIR,
   ctx: BoundedContextIR,
 ): string {
-  const fields = isPart(ent)
-    ? wireFieldsForPart(ent, ctx)
-    : wireFieldsForAggregate(ent, ctx);
+  const fields = ent.wireShape!;
   const idValueType = isPart(ent) ? ent.parentIdValueType : ent.idValueType;
   const parts: string[] = [];
   for (const wf of fields) {

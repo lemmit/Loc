@@ -10,10 +10,6 @@ import type {
 import { camel, plural } from "../../util/naming.js";
 import { renderTsExpr } from "./render-expr.js";
 import { valueObjectColumnNames } from "./templates.js";
-import {
-  wireFieldsForAggregate,
-  wireFieldsForPart,
-} from "../wire-shape.js";
 
 // ---------------------------------------------------------------------------
 // Generates the TypeScript repository file for an aggregate.
@@ -154,11 +150,9 @@ function wireProjectionEntity(
 ): string {
   // Single canonical walk — see src/generator/wire-shape.ts.  This
   // serializer feeds repo.toWire(); its output's keys must line up
-  // with the route's response Zod schema and the .NET DTO.
-  const isAgg = !("parentName" in ent);
-  const fields = isAgg
-    ? wireFieldsForAggregate(ent, ctx)
-    : wireFieldsForPart(ent as EntityPartIR, ctx);
+  // with the route's response Zod schema and the .NET DTO.  Single
+  // canonical walk populated by `enrichLoomModel`.
+  const fields = ent.wireShape!;
   const parts: string[] = [];
   for (const wf of fields) {
     if (wf.source === "id") {

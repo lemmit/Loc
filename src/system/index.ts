@@ -1,5 +1,6 @@
 import type { Model } from "../language/generated/ast.js";
 import { lowerModel } from "../ir/lower.js";
+import { enrichLoomModel } from "../ir/enrichments.js";
 import type {
   BoundedContextIR,
   DeployableIR,
@@ -43,7 +44,10 @@ export interface SystemEmission {
 }
 
 export function generateSystems(model: Model): SystemEmission {
-  const loom = lowerModel(model);
+  // Lowering produces a faithful AST projection; enrichment populates
+  // wireShape, the implicit `findAll` find, and react `moduleNames`
+  // inheritance.  See src/ir/enrichments.ts.
+  const loom = enrichLoomModel(lowerModel(model));
   const out = new Map<string, string>();
   for (const sys of loom.systems) {
     emitSystem(sys, loom, out);

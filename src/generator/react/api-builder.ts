@@ -8,10 +8,6 @@ import type {
   ValueObjectIR,
 } from "../../ir/loom-ir.js";
 import { plural, snake } from "../../util/naming.js";
-import {
-  wireFieldsForAggregate,
-  wireFieldsForPart,
-} from "../wire-shape.js";
 
 // ---------------------------------------------------------------------------
 // Per-aggregate API module: Zod schemas + React Query hooks.
@@ -236,12 +232,13 @@ function emitResponseSchema(
   const lines: string[] = [];
   const name = `${ent.name}Response`;
   lines.push(`export const ${name} = z.object({`);
-  // Single canonical walk — see src/generator/wire-shape.ts.  The
-  // backends use the same walk, so the React Zod schemas line up
-  // field-for-field with what the wire actually carries.
-  const fields = isAgg
-    ? wireFieldsForAggregate(ent as AggregateIR, ctx)
-    : wireFieldsForPart(ent as EntityPartIR, ctx);
+  // Single canonical walk — populated by `enrichLoomModel` (see
+  // src/ir/enrichments.ts).  Backends + frontend all read the same
+  // field list, so Zod schemas line up field-for-field with what
+  // the wire actually carries.
+  const fields = ent.wireShape!;
+  void ctx;
+  void isAgg;
   for (const wf of fields) {
     if (wf.source === "id") {
       lines.push(`  ${wf.name}: z.string(),`);
