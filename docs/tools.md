@@ -1,11 +1,17 @@
 # Loom — Tools & Workflow
 
 This document covers the CLI, the `.loomignore` escape hatch, watch
-mode, and how migrations interact with the native database tooling
-(Drizzle Kit and EF Core migrations).
+mode, the dev/test loop with Docker, the Playwright UI suite, the
+cross-platform OpenAPI parity check, and how migrations interact with
+the native database tooling (Drizzle Kit and EF Core migrations).
 
-For language syntax see [`language.md`](language.md); for architecture
-see [`technical.md`](technical.md).
+- For language syntax see [`language.md`](language.md).
+- For per-platform feature reference (what each backend emits, file
+  by file) see [`generators.md`](generators.md).
+- For architecture (AST → IR → templates) see
+  [`technical.md`](technical.md).
+- For licensing see [the LICENSE file](../LICENSE) — Loom is
+  source-available under FSL-1.1 with an Apache-2.0 future license.
 
 ---
 

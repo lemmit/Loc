@@ -333,3 +333,87 @@ of code, immediate quality-of-life win during development.
 Every change to the generators should run `tsc --noEmit` against a
 freshly-emitted project.  A single wrong helper or missing import is
 invisible until you compile what you produced.
+
+---
+
+## 10. Third-iteration findings (system mode + React + Playwright)
+
+### Per-deployable databases — the EnsureCreated trap
+Two .NET deployables sharing one Postgres database silently break.
+EF Core's `EnsureCreated` is all-or-nothing per database: whichever
+backend boots first creates only its tables; the second sees existing
+tables and skips ALL creation, leaving its own tables missing.  Fix
+is per-deployable databases via a `db-init/00-create-databases.sql`
+init script.  Generic lesson: any "create-if-not-exists" tool that
+checks at the database level instead of the table level needs DB
+isolation when multiple consumers share infrastructure.
+
+### Wire-shape symmetry pays off only if you enforce it
+Both backends had full DTOs in their respective Request/Response
+records, but Hono's response handlers used to just return `{ id }`,
+not the full projection.  The OpenAPI cross-check passed because it
+only diffed `(method, path)` — the divergent shapes were invisible.
+Lesson: a contract test is only as useful as the dimensions it
+covers.  Now every per-aggregate response goes through a shared wire-
+shape derivation (TS via `repository.toWire`, .NET via
+`<Agg>Mapper.ToDto`), and content-shape parity is in scope for the
+diff.
+
+### The framework-native OpenAPI choice
+Both backends emit OpenAPI via their own framework's introspection
+(Swashbuckle on .NET, `@hono/zod-openapi` on Hono) rather than from
+the IR.  This means the spec describes what's actually served — a
+typo in a controller, a status code drift, a schema rename surfaces
+in the diff.  An IR-derived spec would always agree with itself even
+when the running code disagreed.
+
+### Datetime on the wire — pick one shape and own it
+Naive ISO strings (`"2024-01-01T00:00"`) sent to .NET parse as
+`DateTimeKind.Unspecified`, and Npgsql refuses to write them to
+`timestamp with time zone`.  Three sane options: always send Z-
+suffixed UTC; receive as `string` and parse with `AssumeUniversal |
+AdjustToUniversal`; or use `DateTimeOffset` everywhere.  We picked
+the second — wire is `string` on both backends (matches Hono
+naturally) and handlers normalize to UTC on the way in.  Responses
+emit ISO via `ToUniversalTime().ToString("o")`.  Generic lesson:
+when two backends serve the same shape, harmonize the wire even if
+it costs a parse on the receiving side — the alternative is silent
+divergence.
+
+### Mantine Form + Mantine Select: spread doesn't work
+`<Select {...form.getInputProps("status")} />` looks idiomatic but
+silently breaks: `getInputProps` returns an event-based `onChange`
+(`(e) => …`), Mantine `<Select>` calls `onChange(value, option)`,
+and the form never sees the change.  Solution: explicit binding
+(`value={form.values.status} onChange={(v) => form.setFieldValue(...)}`).
+Also `allowDeselect={false}` so the page-object's "click selected
+option" doesn't toggle the value back to null.
+
+### Page-object idiom: typed input + chained returns
+Auto-generated page objects work best when:
+1. `fill(input: Partial<<Op>Request>)` accepts the same shape the
+   API hooks consume — same Zod schema, same TS type.
+2. Methods return `this` (or the next page) so tests chain top-down.
+3. Selectors come from data-testids the generator sprinkles, NOT
+   text matchers — text changes break tests; testids are stable.
+4. The `submit()` method waits for the next page's testid to appear
+   rather than `waitForURL(/regex/)` — the URL pattern often matches
+   the source page too (e.g., `/orders/new` matches
+   `/orders/[^/]+`).
+
+### Don't switch to native HTML to make tests easier
+First instinct when Mantine `<Select>` was hard to drive from
+Playwright: swap to `<NativeSelect>` (which Playwright's
+`selectOption()` handles trivially).  Right answer per the user:
+make the page object handle the idiomatic component instead.  The
+generator's job is to emit Mantine; the page-object's job is to
+know how to drive Mantine.
+
+### Elegant escape hatches over regex Dockerfile-rewriting
+First version of the proxy-CA injection ran a regex over each
+Dockerfile after generation, splicing in `COPY *.crt /usr/local/...`
+lines.  Second version puts `COPY certs/` + `update-ca-certificates`
+into the generated Dockerfile unconditionally and emits an empty
+`certs/.gitkeep` per deployable.  Sandboxed envs drop their CAs
+into `certs/`; unsandboxed envs ignore the empty dir.  Generic
+lesson: generation-time invariants beat post-generation rewrites.

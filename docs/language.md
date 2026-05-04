@@ -78,6 +78,22 @@ deployable's module set.  The Langium scope provider exports all
 named declarations — aggregates, entity parts, value objects, enums —
 across module boundaries within the same source file.
 
+#### Deployable platforms
+
+| `platform:` | Stack |
+| --- | --- |
+| `dotnet` | ASP.NET Core + EF Core + Mediator (martinothamar) + Swashbuckle.  Default port 8080. |
+| `hono`   | Hono + Drizzle ORM + Zod with `@hono/zod-openapi`.  Default port 3000. |
+| `react`  | Vite + React Router + React Query + Zod + Mantine + Playwright page objects.  Default port 3001. |
+
+Backend deployables (`dotnet`, `hono`) declare `modules:`; the
+generator scopes the project to those modules' contexts.  React
+deployables declare `targets: <other-deployable>` instead — the
+frontend's API base URL is wired to the target's port and its module
+set is inherited from the target so pages exactly cover the API
+surface.  See [`generators.md`](generators.md) for what each
+platform emits per aggregate.
+
 ### Inside a context
 
 Inside a context, the following kinds of declarations may appear, in any
@@ -316,7 +332,11 @@ plus a Mediator query in the .NET backend.
   pass through EF Core to SQL.
 
 `findById` and `getById` are auto-generated for every aggregate
-(no need to declare them in the repository).
+(no need to declare them in the repository).  An auto-included
+`find all(): T[]` is also added to every aggregate's repository, so
+both backends always expose `GET /<plural>` and the React frontend
+always has a list page to render.  Declaring your own `find all(...)`
+in the DSL overrides the implicit one.
 
 ---
 

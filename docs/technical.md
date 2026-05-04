@@ -73,25 +73,26 @@ src/
     lower.ts             # AST → IR
   generator/
     typescript/
-      hb.ts              # shared Handlebars instance + helpers
-      render-expr.ts     # ExprIR → TS source
-      render-stmt.ts     # StmtIR → TS source
-      repository-builder.ts  # code-built repository module
+      hb.ts                  # shared Handlebars instance + helpers
+      render-expr.ts         # ExprIR → TS source
+      render-stmt.ts         # StmtIR → TS source
+      repository-builder.ts  # code-built repository module incl. toWire serializer
+      routes-builder.ts      # OpenAPIHono routes + full wire-shape Zod schemas
       templates/
         ids.tpl.ts
         value-objects.tpl.ts
         events.tpl.ts
         aggregate.tpl.ts
-        routes.tpl.ts
-        schema.tpl.ts
+        routes.tpl.ts        # http/index.ts (CORS, sub-router composition, /openapi.json)
+        schema.tpl.ts        # Drizzle pgTable / pgEnum
         tests.tpl.ts
-      templates.ts       # barrel re-export
-      index.ts           # orchestrator
+      templates.ts           # barrel re-export
+      index.ts               # orchestrator
     dotnet/
       hb.ts              # shared Handlebars instance + helpers
       render-expr.ts     # ExprIR → C# source (with `thisName` context)
       render-stmt.ts     # StmtIR → C# source
-      dto-mapping.ts     # wire ↔ domain mapping
+      dto-mapping.ts     # wire ↔ domain conversion: wireType, projectToResponse, wireToCommandArgument
       cqrs-emit.ts       # per-aggregate Commands / Queries / Handlers / DTOs
       find-emit.ts       # repository find-method bodies
       templates/
@@ -105,13 +106,22 @@ src/
         cqrs.tpl.ts
         dto.tpl.ts
         api.tpl.ts
-        program.tpl.ts
+        program.tpl.ts   # hosting entry: CORS, camelCase JSON, EnsureCreated, Swashbuckle
         tests.tpl.ts
-      templates.ts       # barrel re-export
-      index.ts           # orchestrator
-  cli/main.ts            # ddd parse / ddd generate {ts|dotnet|system}
-  system/index.ts        # multi-deployable orchestrator + docker-compose
-  util/naming.ts         # pascal / camel / snake / plural
+      templates.ts
+      index.ts
+    react/
+      hb.ts                  # (placeholder for future template helpers)
+      api-builder.ts         # per-aggregate Zod schemas + React Query hooks
+      pages-builder.ts       # per-aggregate List / New / Detail pages + data-testid sprinkling
+      page-objects-builder.ts # per-aggregate Playwright page objects
+      index.ts               # orchestrator + project shell (Vite, package.json, Dockerfile)
+  cli/main.ts                # ddd parse / ddd generate {ts|dotnet|system}
+  system/
+    index.ts                 # multi-deployable orchestrator: per-deployable file routing,
+                             # docker-compose.yml, db-init/, env-per-platform
+    e2e-render.ts            # `test e2e` block lowering to a vitest+fetch spec file
+  util/naming.ts             # pascal / camel / snake / plural
 test/                    # vitest suites
 examples/                # sample .ddd inputs
 docs/                    # this directory
@@ -247,6 +257,77 @@ Two heuristics:
 The .NET backend is mostly templates because EF Core's tracker handles
 the diff-sync at runtime, so the repository file is much smaller.
 
+The React backend has no templates at all — every file is built
+procedurally because the JSX is rich enough that templating produces
+unreadable output.  Three builders own the per-aggregate emission:
+
+- `api-builder.ts` — Zod schemas + React Query hooks (one module per
+  aggregate; same wire shape the backends serve).
+- `pages-builder.ts` — List / New / Detail pages.  Sprinkles
+  `data-testid` on every interactive element so page objects key off
+  stable selectors.  Operations on the detail page open a Mantine
+  modal whose form is bound to the matching `<Op>Request` schema.
+- `page-objects-builder.ts` — Playwright page-object class per page,
+  emitted into `<deployable>/e2e/pages/<aggregate>.ts`.  Methods
+  reflect the IR: `fill(input: Partial<Create<Agg>Request>)`, one
+  method per public operation typed against `<Op>Request`,
+  `<containment>Count()` per master-detail collection, and a
+  `field<K extends keyof <Agg>Response>(name: K)` reader.
+
+### Wire-shape: cross-platform symmetry
+
+Backends and frontend agree on the JSON shape for each aggregate, so
+the cross-platform OpenAPI cross-check stays meaningful and the React
+generator's response Zod schemas mirror what every backend serves.
+The shape is built around four invariants:
+
+- Identity is `id: string` (the underlying Guid/int/long/string is
+  always rendered as a string on the wire, so brands round-trip
+  through forms).
+- Every non-derived field appears.  Derived values appear too —
+  computed server-side, returned alongside.
+- `contains` parts render as nested objects (or arrays of objects),
+  not flattened columns.  Master-detail data drops directly into
+  `<Table>` rows.
+- Value objects render as nested objects (`{ amount, currency }`).
+  Decimal values cross the wire as JSON numbers; datetimes as ISO
+  strings.
+
+The Hono path projects through `repository.toWire(root)` (emitted by
+`repository-builder.ts`); the .NET path projects through
+`<Agg>Mapper.ToDto(...)` (emitted by `cqrs-emit.ts` via
+`dto-mapping.ts`).  Both produce identical JSON for identical state.
+
+### Auto-included `findAll`
+
+Lowering injects an `all(): T[]` find into every aggregate's
+repository (creating one if no `repository` block is declared).
+Backends emit `GET /<plural>` for it; the React frontend uses it for
+the list page.  User-declared `find all(...)` overrides the implicit
+one.
+
+### CORS + camelCase JSON (for cross-platform cohesion)
+
+The .NET `Program.cs` template configures
+`JsonSerializerOptions.PropertyNamingPolicy = CamelCase` so its wire
+matches Hono's natural casing.  Both backends enable permissive CORS
+(`AllowAnyOrigin / AllowAnyHeader / AllowAnyMethod` in .NET,
+`app.use("*", cors())` in Hono) so a generated React frontend on a
+different port reaches them in dev compose without preflight pain.
+Production hardening is a `.loomignore` override on `Program.cs` /
+`http/index.ts`.
+
+### Proxy-CA escape hatch (`certs/`)
+
+Each generated deployable contains a `certs/.gitkeep` placeholder, and
+each Dockerfile unconditionally `COPY certs/`s into
+`/usr/local/share/ca-certificates/` and either runs
+`update-ca-certificates` (.NET) or sets
+`NODE_EXTRA_CA_CERTS / NPM_CONFIG_CAFILE` (Node).  Drop your proxy's
+`*.crt` files into `<deployable>/certs/` before
+`docker compose build` — empty `certs/` is a no-op, so unsandboxed
+environments aren't affected.
+
 ### Handlebars gotchas worth knowing
 
 - `}}}` is parsed as triple-stash close.  `{{/each}}` followed
@@ -305,20 +386,42 @@ Rough recipe:
 
 ## Adding a new backend
 
-Follow the shape of `generator/typescript/`:
+Two precedents in tree:
 
-1. Create `generator/<backend>/hb.ts` with a fresh Handlebars instance
-   and the same helper set.
-2. Implement `render-expr.ts` (`renderXxxExpr(e: ExprIR): string`) and
-   `render-stmt.ts` (`renderXxxStatements(stmts: StmtIR[]): string`),
-   honouring the IR's `refKind` / `callKind` / `isCollectionOp` tags.
-3. Add `templates/*.tpl.ts` files for each generated construct.
-4. Write the `index.ts` orchestrator.
-5. Wire the new backend into `cli/main.ts` (`generate <backend>` sub-
-   command).
+- `generator/typescript/` — Hono backend.  Templates for the regular
+  per-aggregate shapes; procedural builders for `routes-builder.ts`
+  (where OpenAPI annotations make templates noisy) and
+  `repository-builder.ts` (where `findById` / `save` / `toWire` vary
+  too much per aggregate to template cleanly).
+- `generator/dotnet/` — .NET backend.  Mostly templates because EF's
+  change-tracker absorbs the per-aggregate variance.
+- `generator/react/` — React frontend.  All procedural — the JSX +
+  TSX grammar is rich enough that templates produce unreadable
+  output.
 
-Most of the work is the renderers and templates — the IR already
-carries everything needed.
+The shape:
+
+1. Create `generator/<backend>/index.ts` with a
+   `generate<Backend>ForContexts(contexts, ...) → Map<path, content>`
+   entry.
+2. Add procedural builders or `templates/*.tpl.ts` files for each
+   generated construct.  Templating-vs-builder decision: regular
+   structure → template; per-aggregate variation → builder.
+3. If the backend executes domain logic, implement `render-expr.ts`
+   (`renderXxxExpr(e: ExprIR): string`) and `render-stmt.ts`
+   (`renderXxxStatements(stmts: StmtIR[]): string`), honouring
+   `refKind` / `callKind` / `isCollectionOp` tags.  React skips
+   these — the frontend doesn't run domain logic, only consumes the
+   wire shape.
+4. Wire the new backend into `cli/main.ts` (`generate <backend>`
+   sub-command) and into `system/index.ts`'s deployable switch.
+5. If the platform needs a new value in `Platform`, also extend
+   `language/ddd.langium`'s `Platform` rule, `ir/loom-ir.ts`'s
+   `Platform` type, and `language/ddd-validator.ts`'s
+   `checkDeployable` — see the `'react'` addition for the pattern.
+
+Most of the work is the builders / templates — the IR already
+carries everything needed for code generation.
 
 ---
 
