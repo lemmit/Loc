@@ -148,7 +148,8 @@ function wireProjectionEntity(
   varExpr: string,
   ctx: BoundedContextIR,
 ): string {
-  // Single canonical walk — see src/generator/wire-shape.ts.  This
+  // Single canonical walk — see `agg.wireShape` (populated by
+  // src/ir/enrichments.ts).  This
   // serializer feeds repo.toWire(); its output's keys must line up
   // with the route's response Zod schema and the .NET DTO.  Single
   // canonical walk populated by `enrichLoomModel`.

@@ -1,7 +1,8 @@
 # Loom — Experience Gathered
 
 Lessons captured while bootstrapping the Loom DDD DSL (Langium → Loom IR →
-Handlebars → TypeScript / .NET). Written for whoever picks this up next.
+procedural builders → TypeScript / .NET). Written for whoever picks this
+up next.
 
 ---
 
@@ -417,3 +418,129 @@ into the generated Dockerfile unconditionally and emits an empty
 `certs/.gitkeep` per deployable.  Sandboxed envs drop their CAs
 into `certs/`; unsandboxed envs ignore the empty dir.  Generic
 lesson: generation-time invariants beat post-generation rewrites.
+
+---
+
+## 13. v2 architecture lessons
+
+The v2 refactor (six landed phases) took roughly the structure
+v1 *should* have started from.  Honest retrospective on what
+stuck, what we'd do differently next time, and what we
+deliberately left undone.
+
+### What stuck
+
+**Read-only IR + a separate enrichment pass (Phase 1).**  The
+single biggest leverage move.  v1 had two hidden side-effects in
+`lower.ts` (auto-`findAll` injection, react `moduleNames` copy)
+that downstream code learned to expect by reading the test
+suite, not the lowering signature.  Pulling them into a pure
+`enrichLoomModel(loom)` made the IR contract honest: lowering
+gives you a faithful AST projection; enrichment computes
+derivations; consumers consume.  Every later phase rested on
+this.
+
+**Wire-shape as a first-class IR field.**  v1 had a shared
+`wireFieldsForAggregate(agg, ctx)` walk called by four backends.
+Adding a fifth meant remembering to call it.  Promoting it to
+`agg.wireShape` populated by the enrichment pass made the field
+*type-required* downstream — forgetting it is a TypeScript
+error, not a silent drift.  Same trick works for any cross-
+cutting derivation that more than one backend needs.
+
+**Public surface contract for backends, internals stay
+idiomatic (Phase 3).**  The original Phase 3 plan called for a
+unified `Platform` interface with `emitDomain`/`emitWire`/etc.
+The user vetoed: idiomatic emission is the *whole point*.  Hono
+emits builders.  .NET emits CQRS handlers + EF configurations.
+React emits procedural JSX.  These shapes drift in step with
+their target ecosystems on purpose.  The right abstraction was
+*not* internal homogenisation — it was a tiny `PlatformSurface`
+contract (`emitProject`, `composeService`, `needsDb`,
+`defaultPort`) that the system orchestrator dispatches over.
+General lesson: when planning a refactor, ask "is this drift
+accidental or principled?" before flattening it.
+
+**Procedural emission everywhere (Phase 4).**  Dropping
+Handlebars was less about runtime cost and more about *typed
+data flow*.  Every `{{var}}` in a template was implicitly an
+`any` cast — type-correct only by convention.  Procedural
+builders mean the type checker validates the data contract
+between the IR and the rendered string.  ~1700 lines of
+templates → procedural code; output byte-identical across all
+examples; zero type errors masked by template substitution.
+
+**JSON wire-spec artifact (Phase 5).**  `<outdir>/.loom/wire-
+spec.json` turned out to be the diff-friendly artifact users
+actually want.  `git diff` between regens shows wire-contract
+changes at a glance — no need to boot backends, run a contract
+check, or eyeball generated code.
+
+**IR-level validation before generation (Phases 2 + 6).**
+v1 surfaced `api.unknownX.create()` as a thrown Error from the
+e2e renderer at generate-time, and TODO comments in generated
+SQL when a `where` clause couldn't lower.  Both pulled forward
+to `validateLoomModel`: now you get a structured diagnostic
+with `severity`, `message`, and `source` *before* generation
+runs.  General pattern: anything that can be a parse-time error
+should be a parse-time error; anything that can be an IR-level
+diagnostic should be an IR-level diagnostic; only true bugs
+should ever throw.
+
+### What we'd do differently next time
+
+**Start with snapshot tests, not string-match unit tests.**
+Phase 4's template migration would have been *much* easier if
+every backend had a snapshot test from day one.  String-match
+asserts pass on coincidence; snapshot tests pass on identity.
+Migrating ~1700 lines of templates to procedural builders meant
+chasing dozens of subtle whitespace differences against `diff
+-r` against a captured baseline.  A snapshot suite would have
+turned that into `npm run test:update-snapshots` + review.
+
+**Don't mix grammar split + IR validation in one phase.**  The
+original Phase 6 plan had us splitting `Expression` into
+`QueryExpr` + `DomainExpr` in the grammar.  We landed only the
+IR-validator half: same end-result for users (early diagnostic
+on non-queryable `where` clauses, no TODO comments in generated
+code), without the breaking grammar change or the parser
+regeneration churn.  When validation can do the job, prefer
+validation over grammar.  Grammar changes are a tax on every
+existing `.ddd` source; validation changes are localised.
+
+**Plan refactors phase-by-phase with verification gates from
+the start.**  Each of the six phases was independently shippable
+with `npm test` + `LOOM_TS_BUILD=1` + `LOOM_E2E=1` all green.
+That discipline meant a mistake in any phase only invalidated
+*that* phase, not later work.  Worth the up-front cost of
+defining the gates before starting.
+
+**Capture a baseline before every refactor.**  `git stash &&
+node bin/cli.js generate <…> -o /tmp/baseline-$phase && git
+stash pop` was the most useful single command of the refactor.
+Pre-migration baselines + `diff -r` after each change is the
+fastest possible signal that a change is observably equivalent
+or not.
+
+### What we left for v3
+
+- **Subquery support in `where` clauses.**  v2 rejects
+  `where this.lines.count > 0` with a clear error.  v3 could
+  lift the restriction by emitting `EXISTS (SELECT ... FROM
+  child WHERE parent_id = …)` from the Drizzle backend.  Not
+  a small change — needs the IR walker, the validator, and the
+  Drizzle lowerer all to agree on which queryable shapes are
+  legal.
+- **More platforms.**  The `PlatformSurface` contract makes
+  Spring Boot / FastAPI / Angular tractable, but each is its
+  own real project.  Out of scope for v2.
+- **Auth / authz, rate limiting, tracing.**  These belong in
+  `.loomignore`-pinned customisations, not in the core
+  generator.  The generator's job is to scaffold; per-app
+  cross-cutting concerns are the consumer's job.
+- **Snapshot tests across the full output tree.**  We landed a
+  snapshot test for the wire-spec artifact only (Phase 5
+  closed the highest-leverage piece).  A future pass could add
+  full-output snapshots for sales / banking / inventory / acme
+  × every platform, replacing most of the current string-match
+  generator tests.

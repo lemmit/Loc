@@ -150,11 +150,11 @@ export function projectEntityExpr(
   entity: AggregateIR | EntityPartIR,
   ctx: BoundedContextIR,
 ): string {
-  // Single canonical walk — see src/generator/wire-shape.ts.  Each
-  // wire field maps to one positional argument on
-  // `new <Ent>Response(...)`, in the same order both response Zod
-  // schemas (Hono / React) emit.  Populated by `enrichLoomModel`
-  // (see src/ir/enrichments.ts).
+  // Single canonical walk — `entity.wireShape` is populated by
+  // `enrichLoomModel` (src/ir/enrichments.ts).  Each wire field
+  // maps to one positional argument on `new <Ent>Response(...)`,
+  // in the same order both response Zod schemas (Hono / React)
+  // emit.
   const fields = entity.wireShape!;
   const args: string[] = [];
   for (const wf of fields) {

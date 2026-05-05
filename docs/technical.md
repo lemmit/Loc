@@ -327,44 +327,64 @@ mutator without re-walking the env.
 
 ---
 
-## Layer ④ — Wire-shape derivation (shared)
+## Layer ④ — IR enrichment (wire-shape, auto-finds, react inheritance)
 
-**File**: `src/generator/wire-shape.ts`.
+**File**: `src/ir/enrichments.ts`.
 
-**Inputs**: an `AggregateIR` / `EntityPartIR` / `ValueObjectIR` plus
-its enclosing `BoundedContextIR`.
+After lowering returns a faithful AST projection, `enrichLoomModel(loom)`
+runs a single pure pass that populates everything cross-cutting
+the IR consumers need.  Three derivations, in order:
 
-**Outputs**: `WireField[]` — the canonical, ordered list of fields
-that appear on the network for that entity:
+1. **Wire-shape on every aggregate / part / value object.**  The
+   canonical, ordered list of fields that appear on the wire for
+   that entity, attached as `agg.wireShape` / `part.wireShape` /
+   `vo.wireShape`:
 
-```ts
-interface WireField {
-  name: string;                      // JSON key
-  type: TypeIR;                      // domain-typed value
-  optional: boolean;
-  source: "id" | "property" | "containment" | "derived";
-}
-```
+   ```ts
+   interface WireField {
+     name: string;                      // JSON key
+     type: TypeIR;                      // domain-typed value
+     optional: boolean;
+     source: "id" | "property" | "containment" | "derived";
+   }
+   ```
 
-**Order is the contract**: `id` first, then declared properties in
-declaration order, then containments (collections rendered as
-`array<entity>`, singles as `entity`), then derived values.  Every
-backend's response-DTO emitter walks the same list, so:
+   **Order is the contract**: `id` first, then declared properties
+   in declaration order, then containments (collections rendered as
+   `array<entity>`, singles as `entity`), then derived values.  Every
+   backend's response-DTO emitter reads `agg.wireShape` directly:
 
-- Hono `routes-builder` → `<Agg>Response = z.object({ ... })` zod schema
-- Hono `repository-builder` → `repo.toWire(root)` JS object literal
-- .NET `dto-mapping` → `<Agg>Response(...)` C# record + projection
-  expression
-- React `api-builder` → matching response Zod schema
+   - Hono `routes-builder` → `<Agg>Response = z.object({ ... })` zod schema
+   - Hono `repository-builder` → `repo.toWire(root)` JS object literal
+   - .NET `dto-mapping` → `<Agg>Response(...)` C# record + projection
+   - React `api-builder` → matching response Zod schema
 
-If they all agree on the WireField list (because they all call the
-same function), drift between backends becomes structurally
-impossible.
+   They all consume the same field list, so drift between backends
+   is structurally impossible.
+
+2. **Auto-`findAll` on every aggregate's repository.**  Backends
+   can rely on every aggregate having an `all()` find without
+   defensive checks.
+
+3. **React deployable `moduleNames` ← target deployable's
+   modules.**  A `react` deployable doesn't list modules; it
+   inherits its target backend's module set, propagated here so
+   downstream layers see the resolved set.
+
+**Idempotent** — `enrich(enrich(m))` deep-equals `enrich(m)`.
 
 **Non-responsibilities**
-- No language-specific rendering — each generator turns `WireField`
-  into Zod / C# / TS source on its own.
+- No mutation of the input — returns a new model.  The pre-
+  enrichment IR is read-only.
+- No language-specific rendering — each generator turns
+  `WireField` / `findAll` / `moduleNames` into source on its own.
 - No knowledge of which platform consumes the shape.
+
+A separate JSON Schema artifact, `<outdir>/.loom/wire-spec.json`,
+is built from `wireShape` by `src/system/wire-spec.ts` and emitted
+alongside every system.  Diffable, language-agnostic, useful for
+spotting wire-contract changes between regens without booting any
+backend.
 
 ---
 
@@ -375,32 +395,28 @@ Each platform has the same module shape (in `src/generator/<platform>/`):
 | File | Role |
 | --- | --- |
 | `index.ts` | Orchestrator — `generate<Platform>ForContexts(contexts, ...) → Map<path, content>`. |
-| `templates/*.tpl.ts` | Handlebars templates for regular-shaped emissions (id classes, value-object classes, common errors, etc.). |
-| `*-builder.ts` | Procedural builders for content with too much per-aggregate variation to template cleanly (Hono routes, Hono repositories, React pages, React page-objects). |
+| `templates/*.tpl.ts` | Procedural emitters (`render<Thing>(...)`) for regular-shaped fragments — id classes, value-object classes, events, common errors, etc.  Despite the `.tpl.ts` filename retained from the v1 layout, every one of these files is now a plain TypeScript function building strings via `lines(...)` from `src/util/code-builder.ts`. |
+| `*-builder.ts` | Procedural builders for content with too much per-aggregate variation to keep small (Hono routes, Hono repositories, React pages, React page-objects). |
 | `render-expr.ts` / `render-stmt.ts` | Recursive `ExprIR → string` / `StmtIR → string` renderers (only on platforms that execute domain logic — TS and .NET, not React). |
-| `hb.ts` | Per-platform Handlebars instance with helpers (`pascal`, `camel`, `snake`, `plural`, `csType`, `tsType`, `csParams`, etc.). |
 
-### Templates vs procedural builders — when to use which
+### All-procedural emission
 
-Two heuristics, applied per file:
+The Loom v2 refactor dropped Handlebars in Phase 4.  Every file is
+now built procedurally on top of two primitives in
+`src/util/code-builder.ts`:
 
-- **Regular structure** (class shape, namespace, member layout):
-  use a Handlebars template.  Easy to read, easy to extend, the
-  templating language naturally expresses iteration over fields /
-  ops / parts.
-- **Per-aggregate logic varies heavily**: emit as procedural
-  builder.  Examples: Hono's `findById` (load root, load every
-  child collection, hydrate parts, instantiate root), Hono's
-  `save` (upsert root, diff-sync contained collections, dispatch
-  events), the React detail page (per-aggregate field display +
-  per-op modal forms).
+- `lines(...parts)` — joins strings / arrays / `null` / `undefined`
+  / `false` with `\n`, dropping nullish entries.  Used everywhere
+  whitespace-controlled emission would have lived in a template.
+- `Block` — a small indenting line buffer.  Available for blocks
+  with non-trivial nesting; current callers all use `lines`.
 
-The .NET backend is mostly templates because EF Core's tracker
-handles the diff-sync at runtime, so the repository is much
-smaller than Hono's.
-
-The React backend is **all procedural** — JSX is rich enough that
-Handlebars produces unreadable output.
+The platform separation that used to be templated (`templates/*.tpl.ts`
++ `hb.ts`) is now: each `templates/*.tpl.ts` file is a plain
+TypeScript module exporting `render<Thing>(args)` functions.  No
+runtime parsing, no SafeString escaping, no helper registration —
+the type checker validates every data flow from the IR to the
+rendered string.
 
 ### Hono backend (`src/generator/typescript/`)
 
@@ -752,30 +768,36 @@ Rough recipe:
 
 Three precedents in tree:
 
-- `generator/typescript/` — Hono.  Templates for regular shapes;
-  procedural builders where per-aggregate variation is high.
-- `generator/dotnet/` — .NET.  Mostly templates because EF
-  absorbs the per-aggregate diff at runtime.
-- `generator/react/` — React frontend.  All procedural — the JSX
-  grammar is rich enough that templates produce unreadable output.
+- `generator/typescript/` — Hono.  Procedural emitters for fixed
+  shapes (`templates/*.tpl.ts`); larger procedural builders
+  (`*-builder.ts`) where per-aggregate variation is high.
+- `generator/dotnet/` — .NET.  Same split as Hono; EF Core absorbs
+  the per-aggregate diff at runtime so the repository builder is
+  smaller than its Hono counterpart.
+- `generator/react/` — React frontend.  All `*-builder.ts` — JSX
+  is procedural across the board.
 
 The shape:
 
-1. Create `generator/<backend>/index.ts` exporting
-   `generate<Backend>ForContexts(contexts, ...) → Map<path, content>`.
-2. For domain-logic-running backends, implement `render-expr.ts`
+1. Implement the platform's `PlatformSurface` (`src/platform/surface.ts`)
+   in `src/platform/<backend>.ts` exposing `emitProject(...)`,
+   `composeService(...)`, `needsDb`, `defaultPort`.  Internally,
+   that adapter usually wraps a `generate<Backend>ForContexts(contexts, ...) → Map<path, content>`
+   in `generator/<backend>/index.ts`.
+2. Register the new platform in `src/platform/registry.ts`.
+3. For domain-logic-running backends, implement `render-expr.ts`
    (`renderXxxExpr(e: ExprIR): string`) and `render-stmt.ts`
    (`renderXxxStatements(stmts: StmtIR[]): string`), honouring
    `refKind` / `callKind` / `isCollectionOp` tags.  React skips
    these — the frontend doesn't run domain logic.
-3. Add procedural builders or `templates/*.tpl.ts` files for each
-   generated construct.  Templating-vs-builder decision: regular
-   structure → template; per-aggregate variation → builder.
-4. If the backend serves a wire shape, derive its DTOs from
-   `wireFieldsForAggregate` / `wireFieldsForPart` in
-   `src/generator/wire-shape.ts` so it stays in sync with peers.
-5. Wire the new backend into `cli/main.ts` (`generate <backend>`
-   sub-command) and `system/index.ts`'s deployable switch.
+4. Add procedural emitters in `templates/*.tpl.ts` and/or larger
+   `*-builder.ts` files using `src/util/code-builder.ts`'s `lines`
+   helper.  Rule of thumb: small, regularly-shaped emissions go in
+   `templates/`; per-aggregate complexity goes in builders.
+5. If the backend serves a wire shape, read `agg.wireShape` /
+   `part.wireShape` / `vo.wireShape` directly from the IR — they
+   are populated by `enrichLoomModel` in `src/ir/enrichments.ts`,
+   not recomputed per backend.
 6. If the platform needs a new value in `Platform`, also extend
    `language/ddd.langium`'s `Platform` rule, `ir/loom-ir.ts`'s
    `Platform` type, and `language/ddd-validator.ts`'s
@@ -821,6 +843,7 @@ disagreed.
 ## Lessons captured
 
 The `experience_gathered.md` at the repo root accumulates lessons
-from each iteration — Langium gotchas, Handlebars escaping, IR
-design trade-offs, refactor notes, the Mantine + Playwright
-findings.  Worth a read before making non-trivial changes.
+from each iteration — Langium gotchas, IR design trade-offs,
+refactor notes (including the v2 architecture lessons), the
+Mantine + Playwright findings.  Worth a read before making
+non-trivial changes.
