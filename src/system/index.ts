@@ -239,6 +239,12 @@ function renderDeployableService(d: DeployableIR, sys: SystemIR): string[] {
   for (const [k, v] of shape.env) lines.push(`    ${k}: ${JSON.stringify(v)}`);
   lines.push(`  ports:`);
   lines.push(`    - "${d.port}:${shape.internalPort}"`);
+  // The healthcheck command runs *inside* the container, so it
+  // targets `internalPort` (where the service listens), not `d.port`
+  // (the external host mapping).  The two often differ — e.g. when a
+  // second .NET deployable picks an alternate host port to avoid
+  // colliding with the first.  Without this comment a reader scanning
+  // `8081:8080` then `localhost:8080` does a double-take.
   lines.push(`  healthcheck:`);
   lines.push(
     `    test: ["CMD-SHELL", "wget -qO- http://localhost:${shape.internalPort}${shape.healthPath} || exit 1"]`,
