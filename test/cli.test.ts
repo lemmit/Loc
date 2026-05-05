@@ -44,7 +44,7 @@ describe("CLI", () => {
     );
     const result = runCli(["generate", "ts", example, "-o", tmp]);
     expect(result.status).toBe(0);
-    expect(result.stdout).toMatch(/skipped 2 via \.loomignore/);
+    expect(result.stdout).toMatch(/skipped \(\.loomignore\): 2/);
     expect(fs.existsSync(path.join(tmp, "package.json"))).toBe(false);
     expect(fs.existsSync(path.join(tmp, "index.ts"))).toBe(false);
     // `http/index.ts` survives because `.loomignore` anchored `/index.ts`.
@@ -59,6 +59,51 @@ describe("CLI", () => {
     expect(fs.existsSync(path.join(tmp, "README.md"))).toBe(false);
     expect(fs.existsSync(path.join(tmp, ".env.example"))).toBe(false);
     expect(fs.existsSync(path.join(tmp, ".gitignore"))).toBe(false);
+    fs.rmSync(tmp, { recursive: true });
+  });
+
+  it("incremental: second run writes 0 files and reports unchanged count", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "loom-inc-"));
+    const first = runCli(["generate", "ts", example, "-o", tmp]);
+    expect(first.status).toBe(0);
+    expect(first.stdout).toMatch(/Wrote 23 file\(s\)/);
+    // Capture mtimes after the first run so we can verify the second
+    // run doesn't re-touch anything.
+    const sample = path.join(tmp, "domain", "order.ts");
+    const mtimeBefore = fs.statSync(sample).mtimeMs;
+
+    const second = runCli(["generate", "ts", example, "-o", tmp]);
+    expect(second.status).toBe(0);
+    expect(second.stdout).toMatch(/Wrote 0 file\(s\) in [^,]+, unchanged: 23/);
+    const mtimeAfter = fs.statSync(sample).mtimeMs;
+    expect(mtimeAfter).toBe(mtimeBefore);
+    fs.rmSync(tmp, { recursive: true });
+  });
+
+  it("incremental: only touches files whose content actually changed", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "loom-inc2-"));
+    runCli(["generate", "ts", example, "-o", tmp]);
+    const idsPath = path.join(tmp, "domain", "ids.ts");
+    const orderPath = path.join(tmp, "domain", "order.ts");
+    const idsMtimeBefore = fs.statSync(idsPath).mtimeMs;
+    const orderMtimeBefore = fs.statSync(orderPath).mtimeMs;
+
+    // Mutate ids.ts on disk so the next regen *will* rewrite it (its
+    // content no longer matches the generator's output).  order.ts
+    // is untouched and should still be skipped.
+    fs.writeFileSync(idsPath, "// stomped\n", "utf8");
+
+    // Sleep briefly so any rewrite is observable in mtime resolution.
+    const start = Date.now();
+    while (Date.now() - start < 20) {
+      // tight wait — fs mtime resolution on most platforms is ~1ms
+    }
+
+    const result = runCli(["generate", "ts", example, "-o", tmp]);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toMatch(/Wrote 1 file\(s\) in [^,]+, unchanged: 22/);
+    expect(fs.statSync(idsPath).mtimeMs).toBeGreaterThan(idsMtimeBefore);
+    expect(fs.statSync(orderPath).mtimeMs).toBe(orderMtimeBefore);
     fs.rmSync(tmp, { recursive: true });
   });
 });

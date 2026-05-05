@@ -77,6 +77,22 @@ function loadLoomIgnore(outDir: string): ignore.Ignore {
 
 interface RunOptions {
   dryRun?: boolean;
+  /** When true, errors are reported but `runGenerate` returns instead
+   * of calling `process.exit`.  Used by watch mode so a typo in the
+   * `.ddd` source doesn't tear down the watcher. */
+  continueOnError?: boolean;
+}
+
+interface RunResult {
+  /** True iff the run produced an error (parse, IR validation, or
+   * thrown during generation).  In one-shot mode the CLI translates
+   * this to a non-zero exit; in watch mode it keeps watching. */
+  hadError: boolean;
+  /** File counts for the "Wrote N…" summary.  Undefined when the run
+   * errored out before reaching the write loop. */
+  written?: number;
+  unchanged?: number;
+  skippedByIgnore?: number;
 }
 
 type GenerateTarget = "ts" | "dotnet" | "system";
@@ -86,11 +102,12 @@ async function runGenerate(
   file: string,
   outDir: string,
   options: RunOptions = {},
-): Promise<void> {
+): Promise<RunResult> {
   const result = await parseFile(file);
   if (result.errorCount > 0) {
     printDiagnostics(result);
-    process.exit(1);
+    if (!options.continueOnError) process.exit(1);
+    return { hadError: true };
   }
   // Loom-IR-level validation: catches `api.<unknown>.<verb>` and
   // `ui.<unknown>.<verb>` references in `test e2e` bodies before
@@ -106,7 +123,8 @@ async function runGenerate(
     console.error(
       `${loomErrors.length} error(s), ${loomDiags.length - loomErrors.length} warning(s).`,
     );
-    process.exit(1);
+    if (!options.continueOnError) process.exit(1);
+    return { hadError: true };
   }
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
 
@@ -117,7 +135,8 @@ async function runGenerate(
       console.error(
         `No \`system\` block declared in ${file}.  Use \`generate ts\` or \`generate dotnet\` for legacy single-deployable sources.`,
       );
-      process.exit(1);
+      if (!options.continueOnError) process.exit(1);
+      return { hadError: true };
     }
   } else if (target === "ts") {
     files = generateTypeScript(result.model);
@@ -127,7 +146,8 @@ async function runGenerate(
 
   const ig = loadLoomIgnore(outDir);
   let written = 0;
-  let skipped = 0;
+  let unchanged = 0;
+  let skippedByIgnore = 0;
   const sortedPaths = [...files.keys()].sort();
   for (const relPath of sortedPaths) {
     const content = files.get(relPath)!;
@@ -137,22 +157,46 @@ async function runGenerate(
       const sizeKb = (Buffer.byteLength(content, "utf8") / 1024).toFixed(1);
       const status = ignored ? "  skip (.loomignore)" : "  write              ";
       console.log(`${status}  ${relPath}  (${sizeKb} KB)`);
-      if (ignored) skipped++;
+      if (ignored) skippedByIgnore++;
       else written++;
       continue;
     }
     if (ignored) {
-      skipped++;
+      skippedByIgnore++;
       continue;
     }
     const full = path.join(outDir, relPath);
+    // Incremental write: only touch files whose content actually
+    // changed.  Downstream watchers (Vite, `dotnet watch`) react to
+    // mtimes, so skipping unchanged writes turns a regen of an N-file
+    // project where the user touched one aggregate into a precise
+    // reload signal instead of a full project bounce.
+    if (fileContentMatches(full, content)) {
+      unchanged++;
+      continue;
+    }
     fs.mkdirSync(path.dirname(full), { recursive: true });
     fs.writeFileSync(full, content, "utf8");
     written++;
   }
   const verb = options.dryRun ? "Would write" : "Wrote";
-  const skipMsg = skipped > 0 ? `, skipped ${skipped} via .loomignore` : "";
-  console.log(`${verb} ${written} file(s) in ${outDir}${skipMsg}`);
+  const parts: string[] = [`${verb} ${written} file(s) in ${outDir}`];
+  if (unchanged > 0) parts.push(`unchanged: ${unchanged}`);
+  if (skippedByIgnore > 0) parts.push(`skipped (.loomignore): ${skippedByIgnore}`);
+  console.log(parts.join(", "));
+  return { hadError: false, written, unchanged, skippedByIgnore };
+}
+
+/** True iff the file at `absPath` exists and its bytes match `content`
+ * exactly.  Used to skip writes that would produce identical output. */
+function fileContentMatches(absPath: string, content: string): boolean {
+  if (!fs.existsSync(absPath)) return false;
+  try {
+    const existing = fs.readFileSync(absPath, "utf8");
+    return existing === content;
+  } catch {
+    return false;
+  }
 }
 
 const program = new Command();
@@ -208,15 +252,35 @@ generate
 async function watchAndRegenerate(target: GenerateTarget, file: string, outDir: string) {
   console.log(`Watching ${file} for changes…`);
   let timer: NodeJS.Timeout | null = null;
+  let inFlight = false;
+  let pending = false;
+  const regen = async () => {
+    if (inFlight) {
+      // Coalesce: a save while a regen is running schedules at most
+      // one follow-up.  Avoids unbounded queueing if the user
+      // mashes Cmd+S during a slow regen.
+      pending = true;
+      return;
+    }
+    inFlight = true;
+    try {
+      await runGenerate(target, file, outDir, { continueOnError: true });
+    } catch (err) {
+      // Defensive — runGenerate is supposed to capture its own
+      // errors when continueOnError is set, but a renderer throwing
+      // shouldn't kill the watch loop.
+      console.error(err);
+    } finally {
+      inFlight = false;
+      if (pending) {
+        pending = false;
+        await regen();
+      }
+    }
+  };
   fs.watch(file, () => {
     if (timer) clearTimeout(timer);
-    timer = setTimeout(async () => {
-      try {
-        await runGenerate(target, file, outDir);
-      } catch (err) {
-        console.error(err);
-      }
-    }, 100);
+    timer = setTimeout(regen, 100);
   });
   // Keep the process alive
   await new Promise(() => {});
