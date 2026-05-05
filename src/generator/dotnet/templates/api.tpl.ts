@@ -16,6 +16,12 @@ interface ControllerShape {
     isRoot: boolean;
     queryRouteParams: string;
     queryConstructorArgs: string;
+    /** Cardinality of the response, derived from the IR find's
+     * `returnType`.  Drives the controller's `Task<ActionResult<...>>`
+     * type + the body's `Ok(result)` / `result is null ? NotFound()`
+     * shape.  Must agree with the matching Hono Zod schema for the
+     * cross-platform contract check to pass. */
+    returnShape: "list" | "optional" | "single";
   }>;
 }
 
@@ -47,15 +53,29 @@ export function renderController(
     ];
   });
 
-  const findBlocks = shape.finds.flatMap((f) => [
-    `    [HttpGet${f.isRoot ? "" : `("${snake(f.name)}")`}]`,
-    `    public async Task<ActionResult<System.Collections.Generic.IReadOnlyList<${agg.name}Response>>> ${pascal(f.name)}(${f.queryRouteParams})`,
-    "    {",
-    `        var result = await _mediator.Send(new ${pascal(f.name)}Query(${f.queryConstructorArgs}));`,
-    "        return Ok(result);",
-    "    }",
-    "",
-  ]);
+  const findBlocks = shape.finds.flatMap((f) => {
+    const responseType =
+      f.returnShape === "list"
+        ? `System.Collections.Generic.IReadOnlyList<${agg.name}Response>`
+        : f.returnShape === "optional"
+          ? `${agg.name}Response?`
+          : `${agg.name}Response`;
+    // Optional finds map a null result to 404 — same convention as
+    // GetById.  List + single return Ok(result) directly.
+    const returnLine =
+      f.returnShape === "optional"
+        ? "        return result is null ? NotFound() : Ok(result);"
+        : "        return Ok(result);";
+    return [
+      `    [HttpGet${f.isRoot ? "" : `("${snake(f.name)}")`}]`,
+      `    public async Task<ActionResult<${responseType}>> ${pascal(f.name)}(${f.queryRouteParams})`,
+      "    {",
+      `        var result = await _mediator.Send(new ${pascal(f.name)}Query(${f.queryConstructorArgs}));`,
+      returnLine,
+      "    }",
+      "",
+    ];
+  });
 
   return (
     lines(

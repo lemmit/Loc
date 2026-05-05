@@ -384,6 +384,11 @@ function emitController(
         queryConstructorArgs: find.params
           .map((p) => wireToCommandArgument(p.name, p.type, ctx))
           .join(", "),
+        returnShape: (find.returnType.kind === "array"
+          ? "list"
+          : find.returnType.kind === "optional"
+            ? "optional"
+            : "single") as "list" | "optional" | "single",
       })),
     }),
   );

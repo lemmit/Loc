@@ -224,6 +224,39 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
     },
     120_000,
   );
+
+  it(
+    "cross-check: response cardinality (array vs single vs nullable) matches per shared route",
+    async () => {
+      // Catches the kind of drift where both backends declare the same
+      // `GET /products/by_sku` route but disagree on whether the
+      // response is `ProductResponse` or `ProductResponse[]`.
+      // Originally found by the audit: .NET emitted
+      // `IReadOnlyList<ProductResponse>` for finds that returned
+      // `Product?`.  Fixed in api.tpl.ts; this test guards the fix.
+      const dotnetSpec = await fetchSpec(
+        "http://localhost:8081/swagger/v1/swagger.json",
+      );
+      const honoSpec = await fetchSpec("http://localhost:3000/openapi.json");
+
+      const dotnetShapes = collectResponseShapes(dotnetSpec);
+      const honoShapes = collectResponseShapes(honoSpec);
+
+      const mismatches: string[] = [];
+      for (const op of dotnetShapes.keys()) {
+        if (!honoShapes.has(op)) continue;
+        const d = dotnetShapes.get(op)!;
+        const h = honoShapes.get(op)!;
+        if (d !== h) mismatches.push(`${op}: .NET=${d}, Hono=${h}`);
+      }
+      if (mismatches.length > 0) {
+        console.error("Response-cardinality drift:");
+        for (const m of mismatches) console.error("  " + m);
+      }
+      expect(mismatches, "response cardinality must match per route").toEqual([]);
+    },
+    120_000,
+  );
 });
 
 interface OpenApiPathItem {
@@ -278,6 +311,86 @@ function collectOps(spec: OpenApiSpec): Set<string> {
     }
   }
   return out;
+}
+
+/** Build `Map<"METHOD path", "array" | "object" | "nullable">` from an
+ * OpenAPI spec — the cardinality of each operation's 2xx response
+ * body.  Used by the cross-platform cardinality check to surface
+ * shape drift the field-set diff misses.
+ *
+ * `array`    — response wraps the schema in `type: array`.
+ * `nullable` — response is the schema with `nullable: true` (Swashbuckle)
+ *              or a `oneOf`/`anyOf` union with `null` (zod-openapi).
+ * `object`   — single, required-present.
+ *
+ * Default for the unknown shape is `object` so a missing 200 response
+ * doesn't false-positive. */
+function collectResponseShapes(
+  spec: OpenApiSpec,
+): Map<string, "array" | "object" | "nullable"> {
+  const out = new Map<string, "array" | "object" | "nullable">();
+  for (const [p, item] of Object.entries(spec.paths ?? {})) {
+    if (p === "/health" || p === "/openapi.json" || p.startsWith("/swagger")) {
+      continue;
+    }
+    for (const [m, raw] of Object.entries(item)) {
+      const method = m.toUpperCase();
+      if (
+        !["GET", "POST", "PUT", "PATCH", "DELETE"].includes(method)
+      ) {
+        continue;
+      }
+      const op = raw as {
+        responses?: Record<string, { content?: Record<string, { schema?: ResponseSchema }> }>;
+      };
+      const ok = op.responses?.["200"] ?? op.responses?.["201"];
+      const schema = ok?.content?.["application/json"]?.schema;
+      out.set(`${method} ${normalisePath(p)}`, classifyShape(schema, spec));
+    }
+  }
+  return out;
+}
+
+type ResponseSchema = OpenApiSchema & {
+  nullable?: boolean;
+  oneOf?: unknown[];
+  anyOf?: unknown[];
+  $ref?: string;
+};
+
+/** Classify a response schema as `array` / `nullable` / `object`,
+ * dereferencing `$ref` to a top-level component if present.  Hono's
+ * `@hono/zod-openapi` emits the list-of-X type as a named component
+ * (`ProductListResponse`); without dereferencing the spec looks like
+ * `{ $ref: "#/components/schemas/ProductListResponse" }` which would
+ * misclassify as `object`. */
+function classifyShape(
+  schema: ResponseSchema | undefined,
+  spec: OpenApiSpec,
+): "array" | "object" | "nullable" {
+  if (!schema) return "object";
+  // Resolve a single-step $ref.  Components don't transitively ref
+  // each other in the generated specs (verified per backend), so one
+  // hop suffices.
+  let resolved: ResponseSchema = schema;
+  if (schema.$ref) {
+    const m = schema.$ref.match(/^#\/components\/schemas\/(.+)$/);
+    if (m) {
+      const target = spec.components?.schemas?.[m[1]!];
+      if (target) resolved = target as ResponseSchema;
+    }
+  }
+  if (resolved.type === "array") return "array";
+  if (
+    resolved.nullable === true ||
+    (resolved.oneOf?.some((x) => (x as { type?: string }).type === "null") ??
+      false) ||
+    (resolved.anyOf?.some((x) => (x as { type?: string }).type === "null") ??
+      false)
+  ) {
+    return "nullable";
+  }
+  return "object";
 }
 
 /** Normalise OpenAPI path templates so `{id}` and `:id` collapse into a
