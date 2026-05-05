@@ -160,4 +160,20 @@ describe("typescript generator", () => {
     expect(repo).toMatch(/const shippingByParent = new Map<string, Address>\(\);/);
     expect(repo).toMatch(/shipping: shippingByParent\.get\(root\.id\) \?\? null/);
   });
+
+  it("Drizzle schema emits indexes for find-referenced columns + part FKs", async () => {
+    // sales.ddd's Order.byCustomer + activeForCustomer drive
+    // `customerId` and `status` indexes on the orders table; the
+    // OrderLine part gets a parentId index so findById's eager-load
+    // join doesn't sequential-scan.
+    const model = await buildModel("examples/sales.ddd");
+    const files = generateTypeScript(model);
+    const schema = files.get("db/schema.ts")!;
+    expect(schema).toMatch(/import \{[^}]*\bindex\b[^}]*\} from "drizzle-orm\/pg-core"/);
+    expect(schema).toMatch(/orderCustomerIdIdx: index\("orders_customer_id_idx"\)\.on\(table\.customerId\)/);
+    expect(schema).toMatch(/orderStatusIdx: index\("orders_status_idx"\)\.on\(table\.status\)/);
+    expect(schema).toMatch(
+      /orderLineParentIdIdx: index\("order_lines_parent_id_idx"\)\.on\(table\.parentId\)/,
+    );
+  });
 });

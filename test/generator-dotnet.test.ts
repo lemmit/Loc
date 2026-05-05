@@ -127,4 +127,24 @@ describe(".NET generator", () => {
     expect(handler).toMatch(/aggregate\.AddLine\(/);
     expect(handler).toMatch(/_repo\.SaveAsync/);
   });
+
+  it("EF configuration emits HasIndex for find-referenced columns", async () => {
+    const model = await buildModel("examples/sales.ddd");
+    const files = generateDotnet(model);
+    const cfg = files.get("Infrastructure/Persistence/Configurations/OrderConfiguration.cs")!;
+    expect(cfg).toMatch(/b\.HasIndex\(x => x\.CustomerId\)/);
+    expect(cfg).toMatch(/b\.HasIndex\(x => x\.Status\)/);
+  });
+
+  it("DomainExceptionFilter catches unhandled exceptions as sanitized 500", async () => {
+    const model = await buildModel("examples/sales.ddd");
+    const files = generateDotnet(model);
+    const filter = files.get("Api/DomainExceptionFilter.cs")!;
+    expect(filter).toMatch(/ILogger<DomainExceptionFilter>/);
+    expect(filter).toMatch(/StatusCode = 500/);
+    expect(filter).toMatch(/error = "internal"/);
+    // Domain-specific paths still mapped.
+    expect(filter).toMatch(/BadRequestObjectResult/);
+    expect(filter).toMatch(/NotFoundObjectResult/);
+  });
 });

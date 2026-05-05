@@ -237,7 +237,7 @@ function emitAggregate(
   );
   out.set(
     `Infrastructure/Persistence/Configurations/${agg.name}Configuration.cs`,
-    renderConfiguration(agg, ns),
+    renderConfiguration(agg, ns, ctx),
   );
   emitCqrs(agg, repo, ctx, ns, out);
   const testsFile = renderTestsFile(agg, ctx, ns);

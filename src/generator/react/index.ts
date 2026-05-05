@@ -309,8 +309,61 @@ function appTsx(aggregates: AggregateIR[]): string {
   }
   return `// Auto-generated.
 import { Routes, Route, Link } from "react-router-dom";
-import { AppShell, Group, Title, Anchor } from "@mantine/core";
+import { AppShell, Group, Title, Anchor, Alert, Button, Stack } from "@mantine/core";
+import React from "react";
 ${imports.join("\n")}
+
+// App-level error boundary catches render-time crashes from any
+// page component.  Without it, an unhandled exception inside
+// e.g. a detail page would blank the entire shell and leave the
+// user with no path back.  Reset on click navigates back to the
+// home route, matching the expectation that "the dashboard
+// keeps working when one page is broken".
+class AppErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { error: Error | null }
+> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  override componentDidCatch(error: Error, info: React.ErrorInfo) {
+    // eslint-disable-next-line no-console
+    console.error("App error boundary caught:", error, info.componentStack);
+  }
+  override render() {
+    if (this.state.error) {
+      return (
+        <Stack data-testid="app-error" p="md">
+          <Alert color="red" title="Something went wrong">
+            {this.state.error.message}
+          </Alert>
+          <Group>
+            <Button
+              variant="default"
+              onClick={() => {
+                this.setState({ error: null });
+                window.location.assign("/");
+              }}
+            >
+              Back to home
+            </Button>
+          </Group>
+        </Stack>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function NotFound(): JSX.Element {
+  return (
+    <Stack data-testid="not-found" p="md">
+      <Title order={2}>Not found</Title>
+      <Anchor component={Link} to="/">← Back to home</Anchor>
+    </Stack>
+  );
+}
 
 export default function App(): JSX.Element {
   return (
@@ -329,9 +382,12 @@ ${aggregates
         </Group>
       </AppShell.Header>
       <AppShell.Main>
-        <Routes>
+        <AppErrorBoundary>
+          <Routes>
 ${routes.join("\n")}
-        </Routes>
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </AppErrorBoundary>
       </AppShell.Main>
     </AppShell>
   );

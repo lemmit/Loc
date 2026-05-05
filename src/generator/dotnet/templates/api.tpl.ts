@@ -136,24 +136,48 @@ export function renderExceptionFilter(ns: string): string {
   return `// Auto-generated.
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.Extensions.Logging;
 using ${ns}.Domain.Common;
 
 namespace ${ns}.Api;
 
+/// <summary>
+/// Maps domain-layer exceptions to structured HTTP responses.
+/// Domain exceptions get a 400 / 404 with the original message;
+/// any unhandled exception falls through to a generic 500 with a
+/// safe message (the original is logged but not returned, so
+/// internal details don't leak to API consumers).  Mirrors the
+/// Hono \`app.onError\` shape so the cross-platform contract
+/// stays in lockstep.
+/// </summary>
 public sealed class DomainExceptionFilter : IExceptionFilter
 {
+    private readonly ILogger<DomainExceptionFilter> _log;
+    public DomainExceptionFilter(ILogger<DomainExceptionFilter> log) => _log = log;
+
     public void OnException(ExceptionContext context)
     {
         if (context.Exception is DomainException de)
         {
             context.Result = new BadRequestObjectResult(new { error = de.Message });
             context.ExceptionHandled = true;
+            return;
         }
-        else if (context.Exception is AggregateNotFoundException nf)
+        if (context.Exception is AggregateNotFoundException nf)
         {
             context.Result = new NotFoundObjectResult(new { error = nf.Message });
             context.ExceptionHandled = true;
+            return;
         }
+        // Generic 500.  Log the full exception server-side; return a
+        // sanitized payload to the client.
+        _log.LogError(context.Exception, "Unhandled exception in {Action}",
+            context.ActionDescriptor.DisplayName);
+        context.Result = new ObjectResult(new { error = "internal" })
+        {
+            StatusCode = 500,
+        };
+        context.ExceptionHandled = true;
     }
 }
 `;

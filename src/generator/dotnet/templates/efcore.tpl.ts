@@ -2,6 +2,7 @@ import type {
   AggregateIR,
   BoundedContextIR,
   ContainmentIR,
+  ExprIR,
   FieldIR,
 } from "../../../ir/loom-ir.js";
 import { pascal, plural, snake } from "../../../util/naming.js";
@@ -43,10 +44,22 @@ export function renderDbContext(ctx: BoundedContextIR, ns: string): string {
   );
 }
 
-export function renderConfiguration(agg: AggregateIR, ns: string): string {
+export function renderConfiguration(
+  agg: AggregateIR,
+  ns: string,
+  ctx: BoundedContextIR,
+): string {
   const fieldConfigs = agg.fields.flatMap((f) => fieldConfigLines(f, "        ", "b"));
   const containmentLines = agg.contains.flatMap((c) =>
     containmentConfigLines(c, agg),
+  );
+  // Emit HasIndex for every aggregate-root column referenced by a
+  // repository find — same set the Drizzle schema indexes.  Without
+  // these, `find byEmail` / `byCustomer` etc. run sequential scans
+  // once the table grows past a few hundred rows.
+  const indexed = indexedColumnsFor(agg, ctx);
+  const indexLines = [...indexed].map(
+    (col) => `        b.HasIndex(x => x.${pascalCol(col, agg)});`,
   );
   return (
     lines(
@@ -69,11 +82,71 @@ export function renderConfiguration(agg: AggregateIR, ns: string): string {
       `        b.Property(x => x.Id).HasConversion(v => v.Value, v => new ${agg.name}Id(v));`,
       ...fieldConfigs,
       ...containmentLines,
+      ...indexLines,
       "        b.Ignore(x => x.DomainEvents);",
       "    }",
       "}",
     ) + "\n"
   );
+}
+
+/** Aggregate-root columns referenced by any of this aggregate's
+ * repository finds — either explicitly via `where this.<col>` or
+ * implicitly via convention-based parameter-name matching. */
+function indexedColumnsFor(
+  agg: AggregateIR,
+  ctx: BoundedContextIR,
+): Set<string> {
+  const out = new Set<string>();
+  const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
+  if (!repo) return out;
+  for (const find of repo.finds) {
+    if (find.filter) {
+      collectColumnRefs(find.filter, out);
+    } else {
+      for (const p of find.params) {
+        const matched = agg.fields.find(
+          (f) => f.name === p.name || `${f.name.replace(/Id$/, "")}Id` === p.name,
+        );
+        if (matched) out.add(matched.name);
+      }
+    }
+  }
+  return out;
+}
+
+function collectColumnRefs(e: ExprIR, out: Set<string>): void {
+  switch (e.kind) {
+    case "binary":
+      collectColumnRefs(e.left, out);
+      collectColumnRefs(e.right, out);
+      return;
+    case "paren":
+      collectColumnRefs(e.inner, out);
+      return;
+    case "unary":
+      collectColumnRefs(e.operand, out);
+      return;
+    case "ref":
+      if (e.refKind === "this-prop" || e.refKind === "this-vo-prop") {
+        out.add(e.name);
+      }
+      return;
+    case "member":
+      if (e.receiver.kind === "this") {
+        out.add(e.member);
+      }
+      return;
+    default:
+      return;
+  }
+}
+
+/** EF Core's HasIndex takes a property selector — column names map
+ * to PascalCase property names (matching the `pascal(...)` casing
+ * applied when the property is emitted on the entity class). */
+function pascalCol(name: string, _agg: AggregateIR): string {
+  return name.length === 0 ? name : name[0]!.toUpperCase() + name.slice(1);
 }
 
 function fieldConfigLines(

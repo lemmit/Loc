@@ -1,6 +1,9 @@
 import type {
+  AggregateIR,
   BoundedContextIR,
+  ExprIR,
   FieldIR,
+  FindIR,
   TypeIR,
 } from "../../../ir/loom-ir.js";
 import { camel, plural, snake } from "../../../util/naming.js";
@@ -10,12 +13,20 @@ import { lines as joinLines } from "../../../util/code-builder.js";
 // much per-field branching to express cleanly in any template engine,
 // so the entire file is built with the `lines` helper + small per-table
 // builders.
+//
+// Indexes: parts always get an index on their parentId column (joined
+// on every aggregate load); aggregate roots get an index on every
+// column referenced by a repository find — either by an explicit
+// `where this.<col>` clause or by a convention-based parameter
+// match.  Without these, common reads degrade to sequential scans
+// once the table has more than a few hundred rows.
 export function renderSchema(ctx: BoundedContextIR): string {
   const tables: string[] = [];
   for (const agg of ctx.aggregates) {
-    tables.push(emitTable(agg.name, agg.fields, undefined, ctx));
+    const indexed = indexedColumnsFor(agg, ctx);
+    tables.push(emitTable(agg.name, agg.fields, undefined, ctx, indexed));
     for (const part of agg.parts) {
-      tables.push(emitTable(part.name, part.fields, agg.name, ctx));
+      tables.push(emitTable(part.name, part.fields, agg.name, ctx, new Set()));
     }
   }
   const enumLines = ctx.enums.map(
@@ -25,7 +36,7 @@ export function renderSchema(ctx: BoundedContextIR): string {
   return (
     joinLines(
       "// Auto-generated.",
-      'import { pgTable, text, integer, bigint, numeric, boolean, timestamp, pgEnum, uuid } from "drizzle-orm/pg-core";',
+      'import { pgTable, text, integer, bigint, numeric, boolean, timestamp, pgEnum, uuid, index } from "drizzle-orm/pg-core";',
       "",
       ...enumLines,
       "",
@@ -34,11 +45,74 @@ export function renderSchema(ctx: BoundedContextIR): string {
   );
 }
 
+/** Field names on the aggregate root that should be indexed so the
+ * generated finds don't run sequential scans.  Walks every find: if
+ * it has an explicit `where` clause, indexes the column refs;
+ * otherwise indexes the column matching each parameter by name
+ * (mirrors the convention in `repository-builder.ts:findQueryMethod`). */
+function indexedColumnsFor(
+  agg: AggregateIR,
+  ctx: BoundedContextIR,
+): Set<string> {
+  const out = new Set<string>();
+  const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
+  if (!repo) return out;
+  for (const find of repo.finds) {
+    if (find.filter) {
+      collectColumnRefs(find.filter, out);
+    } else {
+      for (const p of find.params) {
+        const matched = agg.fields.find(
+          (f) => f.name === p.name || `${f.name.replace(/Id$/, "")}Id` === p.name,
+        );
+        if (matched) out.add(matched.name);
+      }
+    }
+  }
+  return out;
+}
+
+/** Walks a queryable `where` IR expression and adds every `this.<col>`
+ * (and `this.<vo>.<sub>` flattened-VO column) it references. */
+function collectColumnRefs(e: ExprIR, out: Set<string>): void {
+  switch (e.kind) {
+    case "binary":
+      collectColumnRefs(e.left, out);
+      collectColumnRefs(e.right, out);
+      return;
+    case "paren":
+      collectColumnRefs(e.inner, out);
+      return;
+    case "unary":
+      collectColumnRefs(e.operand, out);
+      return;
+    case "ref":
+      if (e.refKind === "this-prop" || e.refKind === "this-vo-prop") {
+        out.add(e.name);
+      }
+      return;
+    case "member":
+      if (e.receiver.kind === "this") {
+        out.add(e.member);
+      } else if (
+        e.receiver.kind === "member" &&
+        e.receiver.receiver.kind === "this"
+      ) {
+        // `this.vo.sub` — Drizzle column is `<vo>_<sub>`.
+        out.add(`${e.receiver.member}_${e.member}`);
+      }
+      return;
+    default:
+      return;
+  }
+}
+
 function emitTable(
   name: string,
   fields: FieldIR[],
   parentName: string | undefined,
   ctx: BoundedContextIR,
+  indexedColumns: Set<string>,
 ): string {
   const tableName = snake(plural(name));
   const lines: string[] = [];
@@ -50,8 +124,33 @@ function emitTable(
   for (const f of fields) {
     lines.push(...drizzleColumnLines(f, ctx).map((s) => `  ${s}`));
   }
-  lines.push(`});`);
+  // Index callback — Drizzle's pgTable accepts a second arg
+  // `(table) => ({ idxName: index(...).on(table.col) })`.  We emit
+  // an entry for parts' `parentId` (joined every read) plus every
+  // root column referenced by a find.
+  const indexEntries: string[] = [];
+  if (parentName) {
+    indexEntries.push(
+      `    ${camel(name)}ParentIdIdx: index("${tableName}_parent_id_idx").on(table.parentId),`,
+    );
+  }
+  for (const col of indexedColumns) {
+    indexEntries.push(
+      `    ${camel(name)}${pascalize(col)}Idx: index("${tableName}_${snake(col)}_idx").on(table.${col}),`,
+    );
+  }
+  if (indexEntries.length === 0) {
+    lines.push(`});`);
+  } else {
+    lines.push(`}, (table) => ({`);
+    lines.push(...indexEntries);
+    lines.push(`}));`);
+  }
   return lines.join("\n");
+}
+
+function pascalize(s: string): string {
+  return s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
 }
 
 function drizzleColumnLines(f: FieldIR, ctx: BoundedContextIR): string[] {

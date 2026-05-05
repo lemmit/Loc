@@ -261,4 +261,17 @@ describe("react generator", () => {
     const dbInit = files.get("db-init/00-create-databases.sql")!;
     expect(dbInit).not.toMatch(/CREATE DATABASE web_app/);
   });
+
+  it("App.tsx wraps Routes in an error boundary and registers a 404 catch-all", async () => {
+    const model = await buildModel("examples/acme.ddd");
+    const { files } = generateSystems(model);
+    const app = files.get("web_app/src/App.tsx")!;
+    // Class component error boundary at the App level.
+    expect(app).toMatch(/class AppErrorBoundary extends React\.Component/);
+    expect(app).toMatch(/static getDerivedStateFromError/);
+    expect(app).toMatch(/<AppErrorBoundary>/);
+    // 404 catch-all route after every aggregate route.
+    expect(app).toMatch(/function NotFound\(\): JSX\.Element/);
+    expect(app).toMatch(/<Route path="\*" element={<NotFound \/>} \/>/);
+  });
 });
