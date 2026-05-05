@@ -13,6 +13,7 @@ import {
   isPrimitiveLike,
   needsController,
   unwrapOpt,
+  usesDateTimePicker,
 } from "./form-helpers.js";
 
 // ---------------------------------------------------------------------------
@@ -93,9 +94,12 @@ export function buildNewPage(agg: AggregateIR, ctx: BoundedContextIR): string {
   const destructuredHookFields = needsController(fields, ctx)
     ? "{ register, handleSubmit, control, formState: { errors } }"
     : "{ register, handleSubmit, formState: { errors } }";
+  const dateImport = usesDateTimePicker(fields, ctx)
+    ? `\nimport { DateTimePicker } from "@mantine/dates";`
+    : "";
   return `// Auto-generated.
 import { useNavigate } from "react-router-dom";
-import { ${mantineImports} } from "@mantine/core";
+import { ${mantineImports} } from "@mantine/core";${dateImport}
 import { notifications } from "@mantine/notifications";
 import { ${useFormImports} } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -183,10 +187,16 @@ export function buildDetailPage(agg: AggregateIR, ctx: BoundedContextIR): string
     )
       ? "useForm, Controller"
       : "useForm";
+  const detailDateImport = usesDateTimePicker(
+    ops.flatMap((o) => o.params.map((p) => ({ type: p.type }))),
+    ctx,
+  )
+    ? `\nimport { DateTimePicker } from "@mantine/dates";`
+    : "";
 
   return `// Auto-generated.
 import { useParams, Link } from "react-router-dom";
-import { ${mantineImports} } from "@mantine/core";
+import { ${mantineImports} } from "@mantine/core";${detailDateImport}
 import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import { ${detailUseFormImports} } from "react-hook-form";

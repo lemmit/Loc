@@ -66,6 +66,7 @@ export function generateReactForContexts(
   out.set("e2e/playwright.config.ts", PLAYWRIGHT_CONFIG_TS);
   out.set("e2e/package.json", E2E_PACKAGE_JSON);
   out.set("e2e/tsconfig.json", E2E_TSCONFIG_JSON);
+  out.set("e2e/pages/_helpers.ts", PAGE_OBJECT_HELPERS_TS);
 
   out.set("src/api/client.ts", CLIENT_TS);
   out.set("src/api/config.ts", configTs(apiBaseUrl));
@@ -195,6 +196,26 @@ const INDEX_HTML = `<!doctype html>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
+`;
+
+// Shared helpers for the auto-generated Playwright page objects.
+// Currently exports `formatPickerValue` for driving Mantine's
+// `<DateTimePicker>` (configured with `valueFormat="YYYY-MM-DD HH:mm:ss"`)
+// from a test-author-supplied ISO 8601 string.
+const PAGE_OBJECT_HELPERS_TS = `// Auto-generated.  Do not edit by hand.
+
+/**
+ * Convert an ISO 8601 datetime string to the display format used by
+ * Mantine's \`<DateTimePicker valueFormat="YYYY-MM-DD HH:mm:ss">\` —
+ * the page-object datetime fillBlock writes this into the picker's
+ * input.  Uses UTC components so test inputs (always ISO with Z)
+ * round-trip without local-tz drift.
+ */
+export function formatPickerValue(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return \`\${d.getUTCFullYear()}-\${pad(d.getUTCMonth() + 1)}-\${pad(d.getUTCDate())} \${pad(d.getUTCHours())}:\${pad(d.getUTCMinutes())}:\${pad(d.getUTCSeconds())}\`;
+}
 `;
 
 const MAIN_TSX = `// Auto-generated.

@@ -45,8 +45,9 @@ export function componentsForFields(
         out.add("NumberInput");
       }
       if (inner.name === "bool") out.add("Switch");
-      // datetime uses TextInput (already in set) with type="datetime-local"
-      // until Phase 2 swaps in DateTimePicker.
+      // datetime → Mantine `<DateTimePicker>`, imported separately
+      // from `@mantine/dates`.  Tracked via `usesDateTimePicker`
+      // below so the page builder emits the right import line.
       return;
     }
     if (inner.kind === "id") return; // TextInput
@@ -79,10 +80,30 @@ export function needsController(
         inner.name === "int" ||
         inner.name === "long" ||
         inner.name === "decimal" ||
-        inner.name === "bool"
+        inner.name === "bool" ||
+        inner.name === "datetime"
       );
     }
     if (inner.kind === "enum") return true;
+    if (inner.kind === "valueobject") {
+      const vo = ctx.valueObjects.find((v) => v.name === inner.name);
+      return !!vo && vo.fields.some((f) => probe(f.type));
+    }
+    if (inner.kind === "array") return probe(inner.element);
+    return false;
+  };
+  return fields.some((f) => probe(f.type));
+}
+
+/** Whether the given field set uses datetime — drives the
+ * `import { DateTimePicker } from "@mantine/dates"` line. */
+export function usesDateTimePicker(
+  fields: { type: TypeIR }[],
+  ctx: BoundedContextIR,
+): boolean {
+  const probe = (t: TypeIR): boolean => {
+    const inner = unwrapOpt(t);
+    if (inner.kind === "primitive") return inner.name === "datetime";
     if (inner.kind === "valueobject") {
       const vo = ctx.valueObjects.find((v) => v.name === inner.name);
       return !!vo && vo.fields.some((f) => probe(f.type));
@@ -141,10 +162,25 @@ export function formInput(
         />`;
     }
     if (inner.name === "datetime") {
-      // Native datetime-local — Mantine's DateTimePicker isn't a plain
-      // input and resists Playwright's `.fill()`.  Phase 2 will swap to
-      // DateTimePicker via Controller; for now keep the native input.
-      return `<TextInput label="${path}" {...register("${path}")} ${tid} type="datetime-local" error={${errExpr}} />`;
+      // Mantine `<DateTimePicker>` via Controller.  The form's
+      // declared type is `string` (the wire shape — ISO 8601 UTC); the
+      // Controller bridges Mantine's `Date | null` callback to the
+      // string-typed field by serializing on `onChange` and
+      // deserializing on `value`.  No FormState/Request schema split
+      // needed.
+      //
+      // `valueFormat` is pinned so the Playwright page object knows
+      // the exact display text to type.  `withSeconds` retains second
+      // precision; `clearable={false}` keeps required-field semantics
+      // simple (the test author can pass `null` if a field is
+      // optional, otherwise a value is always present).
+      return `<Controller
+          control={control}
+          name="${path}"
+          render={({ field, fieldState }) => (
+            <DateTimePicker label="${path}" ${tid} valueFormat="YYYY-MM-DD HH:mm:ss" withSeconds clearable={false} value={field.value ? new Date(field.value as string) : null} onChange={(d) => field.onChange(d ? (d as Date).toISOString() : "")} error={fieldState.error?.message} />
+          )}
+        />`;
     }
     return `<TextInput label="${path}" {...register("${path}")} ${tid} error={${errExpr}} />`;
   }

@@ -104,6 +104,36 @@ describe("react generator", () => {
     expect(newOrder).not.toMatch(/as never/);
   });
 
+  it("Phase 2: datetime fields use DateTimePicker via Controller", async () => {
+    const model = await buildModel("examples/acme.ddd");
+    const { files } = generateSystems(model);
+    const newOrder = files.get("web_app/src/pages/orders/new.tsx")!;
+    // Mantine DateTimePicker, not native datetime-local.
+    expect(newOrder).toMatch(/import \{ DateTimePicker \} from "@mantine\/dates"/);
+    expect(newOrder).toMatch(/<DateTimePicker label="placedAt"/);
+    expect(newOrder).toMatch(/valueFormat="YYYY-MM-DD HH:mm:ss"/);
+    expect(newOrder).toMatch(/withSeconds/);
+    expect(newOrder).not.toMatch(/type="datetime-local"/);
+    // Date↔ISO bridging at the Controller boundary.
+    expect(newOrder).toMatch(/new Date\(field\.value as string\)/);
+    expect(newOrder).toMatch(/\(d as Date\)\.toISOString\(\)/);
+  });
+
+  it("Phase 2: page object drives DateTimePicker with formatPickerValue", async () => {
+    const model = await buildModel("examples/acme.ddd");
+    const { files } = generateSystems(model);
+    const orderPo = files.get("web_app/e2e/pages/order.ts")!;
+    expect(orderPo).toMatch(/formatPickerValue/);
+    expect(orderPo).toMatch(/from "\.\/_helpers\.js"/);
+    // Old slice(0,16) workaround is gone.
+    expect(orderPo).not.toMatch(/\.slice\(0, 16\)/);
+    // Helpers file is emitted.
+    expect(files.get("web_app/e2e/pages/_helpers.ts")).toBeTruthy();
+    expect(files.get("web_app/e2e/pages/_helpers.ts")!).toMatch(
+      /export function formatPickerValue/,
+    );
+  });
+
   it("detail page shows fields + nested parts (master-detail) + operation buttons", async () => {
     const model = await buildModel("examples/acme.ddd");
     const { files } = generateSystems(model);
