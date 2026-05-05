@@ -8,6 +8,7 @@ import type {
   SystemIR,
   TestE2EIR,
   TestStmtIR,
+  TypeIR,
 } from "./loom-ir.js";
 import { camel, plural, snake } from "../util/naming.js";
 
@@ -42,11 +43,218 @@ export function validateLoomModel(loom: LoomModel): LoomDiagnostic[] {
   for (const sys of loom.systems) {
     validateSystem(sys, diags);
     for (const m of sys.modules) {
-      for (const c of m.contexts) validateQueryableWheres(c, diags);
+      for (const c of m.contexts) {
+        validateQueryableWheres(c, diags);
+        validateFindNameCollisions(c, diags);
+      }
+    }
+    validateReactIdReferences(sys, diags);
+  }
+  for (const c of loom.contexts) {
+    validateQueryableWheres(c, diags);
+    validateFindNameCollisions(c, diags);
+  }
+  return diags;
+}
+
+// ---------------------------------------------------------------------------
+// Find-name collision check.  The TS repository emits two methods every
+// repo gets for free: `save(aggregate)` and `findById(id)`.  A
+// user-declared `find save(...)` or `find findById(...)` produces two
+// methods of the same name in the same class — TS's "duplicate
+// function implementation" (TS2393) breaks compilation.  The auto-
+// included `all` find is enrichment-guarded (`enrichLoomModel` skips
+// auto-injection if a user-declared `all` exists) so it doesn't
+// collide; `findById` is a reserved keyword in the grammar so the
+// parser already rejects it; that leaves `save` as the practical
+// failure mode.  We reject any of these names early, with a clear
+// message, instead of letting tsc report a confusing duplicate-impl
+// error against the generated output.
+// ---------------------------------------------------------------------------
+
+const RESERVED_FIND_NAMES = new Set(["save", "findById"]);
+
+function validateFindNameCollisions(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+): void {
+  for (const repo of ctx.repositories) {
+    const seen = new Set<string>();
+    for (const find of repo.finds) {
+      if (RESERVED_FIND_NAMES.has(find.name)) {
+        diags.push({
+          severity: "error",
+          message:
+            `repository '${repo.name}' find '${find.name}': name collides with the auto-emitted repository method '${find.name}(...)'. ` +
+            `Choose a different find name (e.g. 'persist', 'fetchById').`,
+          source: `${ctx.name}/${repo.name}.${find.name}`,
+        });
+      }
+      if (seen.has(find.name)) {
+        diags.push({
+          severity: "error",
+          message:
+            `repository '${repo.name}' declares find '${find.name}' more than once.`,
+          source: `${ctx.name}/${repo.name}.${find.name}`,
+        });
+      }
+      seen.add(find.name);
     }
   }
-  for (const c of loom.contexts) validateQueryableWheres(c, diags);
-  return diags;
+}
+
+// ---------------------------------------------------------------------------
+// `Id<X>` validation for React deployables.
+//
+// The React form generator renders an `Id<X>` form field as a `<Select>`
+// populated by `useAll<X>()` with the target aggregate's `display`-marked
+// field as the option label.  Two preconditions must hold for the form
+// to be usable:
+//
+//   1. The target aggregate has a `display` field (otherwise no option
+//      label can be derived; the generator falls back to a `<TextInput>`
+//      with a placeholder explaining the gap, but the user only sees
+//      that at render time).
+//   2. The target aggregate is mounted by this deployable's targeted
+//      backend (otherwise `useAll<X>()` is not importable and the API
+//      can't fetch the list).
+//
+// We check both up-front per react deployable.  Backends-only
+// deployables don't trigger these checks — `Id<X>` on the wire is
+// just a string/uuid and doesn't depend on a display label.
+// ---------------------------------------------------------------------------
+
+function validateReactIdReferences(
+  sys: SystemIR,
+  diags: LoomDiagnostic[],
+): void {
+  // Build an aggregate registry across the whole system so we can
+  // look up display fields regardless of which module declares the
+  // target aggregate.
+  const allAggregates = new Map<string, AggregateIR>();
+  for (const m of sys.modules) {
+    for (const c of m.contexts) {
+      for (const a of c.aggregates) allAggregates.set(a.name, a);
+    }
+  }
+
+  for (const d of sys.deployables) {
+    if (d.platform !== "react") continue;
+    // Aggregates mounted by this deployable's `moduleNames` set —
+    // the React generator only emits `useAll<X>()` imports for
+    // these; anything outside is unreachable.
+    const mounted = new Set<string>();
+    for (const moduleName of d.moduleNames) {
+      const mod = sys.modules.find((m) => m.name === moduleName);
+      if (!mod) continue;
+      for (const c of mod.contexts) for (const a of c.aggregates) mounted.add(a.name);
+    }
+
+    // Walk every operation param + every aggregate field that lowers to
+    // an `Id<X>` and check both invariants against the system-wide
+    // registry + this deployable's mounted set.
+    for (const aggName of mounted) {
+      const agg = allAggregates.get(aggName);
+      if (!agg) continue;
+      // Aggregate root fields.
+      for (const f of agg.fields) {
+        checkIdReference(
+          f.type,
+          `${aggName}.${f.name}`,
+          d.name,
+          allAggregates,
+          mounted,
+          diags,
+        );
+      }
+      // Operation parameters.
+      for (const op of agg.operations) {
+        for (const p of op.params) {
+          checkIdReference(
+            p.type,
+            `${aggName}.${op.name}(${p.name})`,
+            d.name,
+            allAggregates,
+            mounted,
+            diags,
+          );
+        }
+      }
+      // Part fields too — entity-parts on the wire surface as nested
+      // shapes, but their `Id<X>` properties show up as foreign
+      // references in the part's row.  Forms for parts go through
+      // the same Select picker pattern.
+      for (const part of agg.parts) {
+        for (const f of part.fields) {
+          checkIdReference(
+            f.type,
+            `${aggName}.${part.name}.${f.name}`,
+            d.name,
+            allAggregates,
+            mounted,
+            diags,
+          );
+        }
+      }
+    }
+  }
+}
+
+function checkIdReference(
+  t: TypeIR,
+  source: string,
+  deployableName: string,
+  allAggregates: Map<string, AggregateIR>,
+  mounted: Set<string>,
+  diags: LoomDiagnostic[],
+): void {
+  const inner = unwrap(t);
+  if (inner.kind !== "id") {
+    if (inner.kind === "array") {
+      checkIdReference(inner.element, source, deployableName, allAggregates, mounted, diags);
+    }
+    return;
+  }
+  const target = inner.targetName;
+  // 1. Target aggregate must exist somewhere in the system.
+  const agg = allAggregates.get(target);
+  if (!agg) {
+    diags.push({
+      severity: "error",
+      message:
+        `react deployable '${deployableName}': '${source}' references Id<${target}>, but no aggregate '${target}' is declared in the system.`,
+      source: `${deployableName}/${source}`,
+    });
+    return;
+  }
+  // 2. Target aggregate must be mounted by this deployable's modules
+  //    so `useAll<Target>()` is importable + the backend can serve
+  //    the list.
+  if (!mounted.has(target)) {
+    diags.push({
+      severity: "error",
+      message:
+        `react deployable '${deployableName}': '${source}' references Id<${target}>, but '${target}' is not mounted on this deployable's modules.  ` +
+        `Mount the module containing '${target}' on the deployable's targeted backend, or remove the reference.`,
+      source: `${deployableName}/${source}`,
+    });
+    return;
+  }
+  // 3. Target aggregate must declare a `display` field (so the
+  //    Select picker has a sensible option label).
+  if (!agg.fields.some((f) => f.display)) {
+    diags.push({
+      severity: "error",
+      message:
+        `react deployable '${deployableName}': '${source}' references Id<${target}>, but '${target}' has no 'display' field.  ` +
+        `Add 'string display' to one of '${target}''s string fields (e.g. 'name: string display') so the form's <Select> picker can label options.`,
+      source: `${deployableName}/${source}`,
+    });
+  }
+}
+
+function unwrap(t: TypeIR): TypeIR {
+  return t.kind === "optional" ? t.inner : t;
 }
 
 // ---------------------------------------------------------------------------

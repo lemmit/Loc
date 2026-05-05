@@ -329,4 +329,91 @@ describe("Loom IR validation (post-lowering)", async () => {
     const diags = validateLoomModel(loom).filter((d) => d.severity === "error");
     expect(diags).toEqual([]);
   });
+
+  it("rejects find name 'save' (collides with auto-emitted save method)", async () => {
+    const loom = await loomFrom(`
+      context T {
+        aggregate Order { sku: string display }
+        repository Orders for Order {
+          find save(s: string): Order[] where this.sku == s
+        }
+      }
+    `);
+    const diags = validateLoomModel(loom);
+    expect(
+      diags.some(
+        (d) =>
+          d.severity === "error" &&
+          /find 'save': name collides with the auto-emitted/.test(d.message),
+      ),
+      JSON.stringify(diags),
+    ).toBe(true);
+  });
+
+  it("rejects Id<X> referencing a non-mounted aggregate (react deployable)", async () => {
+    const loom = await loomFrom(`
+      system S {
+        module Customers { context C { aggregate Customer { name: string display } } }
+        module Sales {
+          context T {
+            aggregate Order {
+              customerId: Id<Customer>
+            }
+          }
+        }
+        deployable api { platform: hono, modules: Sales, port: 3000 }
+        deployable web { platform: react, targets: api, port: 3001 }
+      }
+    `);
+    const diags = validateLoomModel(loom);
+    expect(
+      diags.some(
+        (d) =>
+          d.severity === "error" &&
+          /references Id<Customer>, but 'Customer' is not mounted/.test(d.message),
+      ),
+      JSON.stringify(diags),
+    ).toBe(true);
+  });
+
+  it("rejects Id<X> targeting an aggregate without a 'display' field (react deployable)", async () => {
+    const loom = await loomFrom(`
+      system S {
+        module M {
+          context T {
+            aggregate Customer { email: string }
+            aggregate Order { customerId: Id<Customer> }
+          }
+        }
+        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable web { platform: react, targets: api, port: 3001 }
+      }
+    `);
+    const diags = validateLoomModel(loom);
+    expect(
+      diags.some(
+        (d) =>
+          d.severity === "error" &&
+          /references Id<Customer>, but 'Customer' has no 'display' field/.test(d.message),
+      ),
+      JSON.stringify(diags),
+    ).toBe(true);
+  });
+
+  it("accepts Id<X> when the target is mounted AND has a display field", async () => {
+    const loom = await loomFrom(`
+      system S {
+        module M {
+          context T {
+            aggregate Customer { name: string display }
+            aggregate Order { customerId: Id<Customer> }
+          }
+        }
+        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable web { platform: react, targets: api, port: 3001 }
+      }
+    `);
+    const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
+    expect(errors, JSON.stringify(errors)).toEqual([]);
+  });
 });
