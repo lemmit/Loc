@@ -13,6 +13,7 @@ import { DddValidator, registerValidationChecks } from "./ddd-validator.js";
 import { DddScopeComputation, DddScopeProvider } from "./ddd-scope.js";
 import { DddHoverProvider } from "./lsp/ddd-hover.js";
 import { DddNodeKindProvider } from "./lsp/ddd-node-kind.js";
+import { DddDefinitionProvider } from "./lsp/ddd-definition.js";
 
 export type DddAddedServices = {
   validation: {
@@ -32,6 +33,7 @@ export const DddModule: Module<DddServices, PartialLangiumServices & DddAddedSer
   },
   lsp: {
     HoverProvider: (services: LangiumServices) => new DddHoverProvider(services),
+    DefinitionProvider: (services: LangiumServices) => new DddDefinitionProvider(services),
   },
 };
 
