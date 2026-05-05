@@ -202,7 +202,7 @@ the language at increasing complexity:
 | [`sales.ddd`](examples/sales.ddd) | Single-context DDD basics — `Order` aggregate with `OrderLine` parts, `Money` value object, `OrderStatus` enum, `OrderConfirmed` event, repository with `byCustomer` find, test blocks. |
 | [`banking.ddd`](examples/banking.ddd) | Optional fields, multiple aggregates with cross-references via `Id<X>`, richer `where`-filter on a repository find. |
 | [`inventory.ddd`](examples/inventory.ddd) | Nested parts, explicit `ids guid` override on an aggregate. |
-| [`acme.ddd`](examples/acme.ddd) | Full system mode — modules, four deployables (.NET API, Hono catalog, .NET catalog, React frontend), cross-platform OpenAPI parity, DSL-level e2e tests. |
+| [`acme.ddd`](examples/acme.ddd) | Full system mode — modules, four deployables (.NET API, Hono catalog, .NET catalog, React frontend), cross-platform OpenAPI parity, DSL-level e2e tests.  See the [annotated walkthrough](examples/acme.md) for a five-minute tour. |
 
 ## Project layout
 
