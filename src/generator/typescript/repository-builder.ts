@@ -525,8 +525,16 @@ function findQueryMethod(
         (f) => f.name === p.name || `${f.name.replace(/Id$/, "")}Id` === p.name,
       );
       if (matched) {
+        // Drizzle's `eq<T>(left, right)` infers `T` from the column's
+        // TS type (plain `string` for `text(...)` columns).  Branded
+        // id params (`Ids.CustomerId = string & {…}`) are structurally
+        // assignable to `string`, so no cast is needed.  An older
+        // version of this code wrote `${p.name} as never` defensively;
+        // the cast hid type safety (a column rename desyncing from a
+        // find name produced bad runtime SQL with no compile error)
+        // and is gone now.
         conditions.push(
-          `eq(schema.${tableName}.${matched.name}, ${p.name} as never)`,
+          `eq(schema.${tableName}.${matched.name}, ${p.name})`,
         );
       }
     }
@@ -794,15 +802,20 @@ function lowerToDrizzle(
       }
     }
     if (e.kind === "ref") {
-      // Param / let / lambda: bare identifier.  `as never` keeps
-      // Drizzle's column-vs-value inference happy when the param's
-      // branded type doesn't match the column's row-shape directly.
+      // Param / let / lambda: bare identifier.  Drizzle's `eq<T>` infers
+      // `T` from the column on the left side; branded id types are
+      // structurally assignable to the column's plain string/number
+      // type, so a bare reference type-checks cleanly.  An older
+      // version cast `${e.name} as never` defensively — that hid a
+      // class of type errors (a where-clause referencing a renamed
+      // column or a parameter with the wrong type compiled silently),
+      // so the cast is gone.
       if (
         e.refKind === "param" ||
         e.refKind === "let" ||
         e.refKind === "lambda"
       ) {
-        return `${e.name} as never`;
+        return e.name;
       }
       // Enum value: render as the literal string.  EF / Drizzle store
       // enums as text columns matching `OrderStatus.Draft` → "Draft".

@@ -118,8 +118,10 @@ describe("typescript generator", () => {
     //   where this.customerId == forCustomer && this.status == Draft
     // Both branches lower cleanly; the `&&` becomes `and(...)`.
     expect(repo).toMatch(
-      /\.where\(and\(eq\(schema\.orders\.customerId, forCustomer as never\), eq\(schema\.orders\.status, "Draft"\)\)\)/,
+      /\.where\(and\(eq\(schema\.orders\.customerId, forCustomer\), eq\(schema\.orders\.status, "Draft"\)\)\)/,
     );
+    // Slice B: `as never` casts are gone from generated finds.
+    expect(repo).not.toMatch(/as never/);
     // No TODO fallback for this find.
     expect(repo).not.toMatch(/TODO: translate where-clause[\s\S]*activeForCustomer/);
     // The import line picks up `and` (in addition to the always-present
