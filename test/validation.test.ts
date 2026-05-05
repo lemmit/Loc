@@ -350,6 +350,52 @@ describe("Loom IR validation (post-lowering)", async () => {
     ).toBe(true);
   });
 
+  it("rejects mutating statements inside aggregate-level test blocks", async () => {
+    // Aggregate `test "..." { ... }` blocks have no `this` aggregate
+    // bound — `assign` / `add` / `remove` / `emit` / `precondition`
+    // and private-operation `call` are all structurally nonsensical.
+    // Earlier the generator emitted `// TODO: ...` comments into
+    // generated test files; now the validator rejects them instead.
+    const loom = await loomFrom(`
+      context T {
+        aggregate Order {
+          status: int
+          test "bad mutation" {
+            status := 1
+          }
+        }
+      }
+    `);
+    const diags = validateLoomModel(loom);
+    expect(
+      diags.some(
+        (d) =>
+          d.severity === "error" &&
+          /test 'bad mutation': 'status := \.\.\.' mutates state\./.test(
+            d.message,
+          ),
+      ),
+      JSON.stringify(diags),
+    ).toBe(true);
+  });
+
+  it("accepts well-formed aggregate-level test blocks (let + expect only)", async () => {
+    const loom = await loomFrom(`
+      context T {
+        valueobject Money { amount: decimal, currency: string }
+        aggregate Order {
+          sku: string display
+          test "money builds" {
+            let m = Money(1.0, "USD")
+            expect m.amount == 1.0
+          }
+        }
+      }
+    `);
+    const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
+    expect(errors, JSON.stringify(errors)).toEqual([]);
+  });
+
   it("rejects find name 'saveAsync' (.NET-specific reserved name)", async () => {
     // Reserved-name set is the union of every platform's
     // `reservedRepositoryFindNames` — `saveAsync` collides on .NET

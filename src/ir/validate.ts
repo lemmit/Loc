@@ -10,6 +10,7 @@ import type {
   TestStmtIR,
   TypeIR,
 } from "./loom-ir.js";
+import { allContexts } from "./loom-ir.js";
 import { allPlatforms } from "../platform/registry.js";
 import { camel, plural, snake } from "../util/naming.js";
 
@@ -43,17 +44,14 @@ export function validateLoomModel(loom: LoomModel): LoomDiagnostic[] {
   const diags: LoomDiagnostic[] = [];
   for (const sys of loom.systems) {
     validateSystem(sys, diags);
-    for (const m of sys.modules) {
-      for (const c of m.contexts) {
-        validateQueryableWheres(c, diags);
-        validateFindNameCollisions(c, diags);
-      }
-    }
     validateReactIdReferences(sys, diags);
   }
-  for (const c of loom.contexts) {
+  // Per-context checks apply uniformly whether the context is
+  // bundled in a system's modules or sits at the top level.
+  for (const c of allContexts(loom)) {
     validateQueryableWheres(c, diags);
     validateFindNameCollisions(c, diags);
+    validateAggregateTestBodies(c, diags);
   }
   return diags;
 }
@@ -112,6 +110,70 @@ function validateFindNameCollisions(
       }
       seen.add(find.name);
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Aggregate-level `test "..." { ... }` body checks.
+//
+// Test blocks at the aggregate level have no `this` aggregate
+// instance bound — they're meant for value-object invariant tests
+// and pure-function exercises.  Three statement kinds are
+// accepted: `let`, `expect`, `expect-throws`, plus bare
+// expressions.  Anything that mutates aggregate state
+// (`assign` / `add` / `remove` / `emit`) or that depends on the
+// aggregate's runtime invariants (`precondition`) is structurally
+// nonsensical here, and earlier versions of the generator
+// silently rendered them as `// TODO: ...` comments — leaking the
+// fallback into user-facing generated code.  Now caught at parse
+// time with a structured diagnostic.
+//
+// `call` is allowed when the callee is a pure `function` (the
+// usual helper-call case); rejected when it's a `private-operation`
+// or unresolved `free` call (those need an aggregate instance).
+// ---------------------------------------------------------------------------
+
+function validateAggregateTestBodies(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+): void {
+  for (const agg of ctx.aggregates) {
+    for (const test of agg.tests) {
+      for (const stmt of test.statements) {
+        const reason = invalidTestStmt(stmt);
+        if (!reason) continue;
+        diags.push({
+          severity: "error",
+          message:
+            `aggregate '${agg.name}' test '${test.name}': ${reason} ` +
+            `Aggregate-level tests are bound to a value-object / pure-function context — they don't have a 'this' aggregate to mutate.  ` +
+            `Move the operation invocation inside an aggregate operation or rewrite the test to assert via 'expect' / 'expect-throws'.`,
+          source: `${ctx.name}/${agg.name}.test:${test.name}`,
+        });
+      }
+    }
+  }
+}
+
+function invalidTestStmt(s: TestStmtIR): string | null {
+  switch (s.kind) {
+    case "assign":
+      return `'${s.target.segments.join(".")} := ...' mutates state.`;
+    case "add":
+      return `'${s.target.segments.join(".")} += ...' mutates a contained collection.`;
+    case "remove":
+      return `'${s.target.segments.join(".")} -= ...' mutates a contained collection.`;
+    case "emit":
+      return `'emit ${s.eventName}' fires a domain event from an aggregate's mutator.`;
+    case "precondition":
+      return `'precondition' guards an operation; aggregate-level tests don't run in an op body.`;
+    case "call":
+      if (s.target === "private-operation") {
+        return `call to private operation '${s.name}'.`;
+      }
+      return null; // pure function call is fine
+    default:
+      return null;
   }
 }
 

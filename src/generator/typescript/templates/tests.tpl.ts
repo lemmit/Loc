@@ -55,6 +55,13 @@ function renderTest(t: TestIR): string[] {
 }
 
 function renderTestStmt(s: TestStmtIR): string {
+  // The IR validator (`validateAggregateTestBodies` in
+  // src/ir/validate.ts) rejects mutating statements (`assign` /
+  // `add` / `remove` / `emit` / `precondition`) and `call` to a
+  // private operation — those need an aggregate instance which a
+  // bare test block doesn't have.  By the time we reach the
+  // generator, only `expect` / `expect-throws` / `let` / `expression`
+  // and `call` to a pure function survive.
   if (s.kind === "expect") {
     return `  expect(${renderTsExpr(s.expr)}).toBe(true);`;
   }
@@ -64,23 +71,20 @@ function renderTestStmt(s: TestStmtIR): string {
   if (s.kind === "let") {
     return `  const ${s.name} = ${renderTsExpr(s.expr)};`;
   }
-  if (s.kind === "precondition") {
-    return `  expect(${renderTsExpr(s.expr)}).toBe(true);`;
-  }
-  if (s.kind === "emit") {
-    // Emit is a no-op inside a test — events would need an aggregate.
-    return ``;
-  }
-  if (s.kind === "assign" || s.kind === "add" || s.kind === "remove") {
-    // Bare assignments aren't valid in a test — they'd need an aggregate
-    // instance.  Render as a comment so the user can fix.
-    return `  // TODO: '${s.kind}' inside test — wrap with an aggregate operation`;
-  }
   if (s.kind === "call") {
-    return `  // call: ${s.name}(...)`;
+    // Only pure-function calls reach here (validator-rejected
+    // private-operation calls).  Render as a real expression-stmt
+    // call so the function fires.
+    const args = s.args.map(renderTsExpr).join(", ");
+    return `  ${s.name}(${args});`;
   }
   if (s.kind === "expression") {
     return `  ${renderTsExpr(s.expr)};`;
   }
-  return "";
+  // Other StmtIR kinds (assign / add / remove / emit / precondition)
+  // are guaranteed by the validator never to land here.  If they do,
+  // it's an internal bug — fail loudly so the issue surfaces in CI.
+  throw new Error(
+    `internal: aggregate test body contains '${s.kind}' which the IR validator should have rejected`,
+  );
 }

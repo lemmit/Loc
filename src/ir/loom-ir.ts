@@ -383,3 +383,27 @@ export const lit = (
   kind: LiteralKind,
   value: string,
 ): ExprIR => ({ kind: "literal", lit: kind, value });
+
+// ---------------------------------------------------------------------------
+// Workspace traversal helpers — dedupe the systems-vs-contexts dual
+// iteration that every consumer (validator, system orchestrator,
+// wire-spec emitter) had to spell out.  A `LoomModel` carries
+// bounded contexts in two places: under each system's modules, and
+// at the top level (legacy single-deployable mode).  These helpers
+// flatten both into a single iterator.
+// ---------------------------------------------------------------------------
+
+/** Every bounded context in the model — system-bundled + top-level. */
+export function allContexts(loom: LoomModel): BoundedContextIR[] {
+  const out: BoundedContextIR[] = [];
+  for (const sys of loom.systems) {
+    for (const m of sys.modules) out.push(...m.contexts);
+  }
+  out.push(...loom.contexts);
+  return out;
+}
+
+/** Every aggregate in the model, regardless of which context owns it. */
+export function allAggregates(loom: LoomModel): AggregateIR[] {
+  return allContexts(loom).flatMap((c) => c.aggregates);
+}

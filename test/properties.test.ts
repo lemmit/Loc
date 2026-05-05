@@ -15,6 +15,7 @@ import type {
   LoomModel,
   ValueObjectIR,
 } from "../src/ir/loom-ir.js";
+import { allAggregates, allContexts } from "../src/ir/loom-ir.js";
 import type { Model } from "../src/language/generated/ast.js";
 
 // ---------------------------------------------------------------------------
@@ -44,18 +45,6 @@ async function buildEnriched(file: string): Promise<LoomModel> {
     validation: true,
   });
   return enrichLoomModel(lowerModel(doc.parseResult.value as Model));
-}
-
-function allContexts(loom: LoomModel): BoundedContextIR[] {
-  const out = [...loom.contexts];
-  for (const s of loom.systems) {
-    for (const m of s.modules) out.push(...m.contexts);
-  }
-  return out;
-}
-
-function allAggregates(loom: LoomModel): AggregateIR[] {
-  return allContexts(loom).flatMap((c) => c.aggregates);
 }
 
 function allParts(loom: LoomModel): EntityPartIR[] {

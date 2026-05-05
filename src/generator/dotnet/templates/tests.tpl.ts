@@ -70,6 +70,9 @@ function renderTest(t: TestIR): string[] {
 }
 
 function renderTestStmt(s: TestStmtIR): string {
+  // See `validateAggregateTestBodies` in src/ir/validate.ts — by the
+  // time we reach the generator, only `expect` / `expect-throws` /
+  // `let` / `expression` / pure-function `call` survive.
   if (s.kind === "expect") {
     return `    Assert.True(${renderCsExpr(s.expr)});`;
   }
@@ -79,20 +82,14 @@ function renderTestStmt(s: TestStmtIR): string {
   if (s.kind === "let") {
     return `    var ${s.name} = ${renderCsExpr(s.expr)};`;
   }
-  if (s.kind === "precondition") {
-    return `    Assert.True(${renderCsExpr(s.expr)});`;
-  }
-  if (s.kind === "emit") {
-    return ``;
-  }
-  if (s.kind === "assign" || s.kind === "add" || s.kind === "remove") {
-    return `    // TODO: '${s.kind}' inside test — wrap with an aggregate operation`;
-  }
   if (s.kind === "call") {
-    return `    // call: ${s.name}(...)`;
+    const args = s.args.map((a) => renderCsExpr(a)).join(", ");
+    return `    ${pascal(s.name)}(${args});`;
   }
   if (s.kind === "expression") {
     return `    ${renderCsExpr(s.expr)};`;
   }
-  return "";
+  throw new Error(
+    `internal: aggregate test body contains '${s.kind}' which the IR validator should have rejected`,
+  );
 }
