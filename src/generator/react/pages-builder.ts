@@ -11,6 +11,7 @@ import {
   formInput,
   initialValuesTs,
   isPrimitiveLike,
+  needsController,
   unwrapOpt,
 } from "./form-helpers.js";
 
@@ -86,26 +87,32 @@ export function buildNewPage(agg: AggregateIR, ctx: BoundedContextIR): string {
   const mantineImports = ["Stack", "Title", "Button", "Group"]
     .concat([...componentsForFields(fields, ctx)].sort())
     .join(", ");
+  const useFormImports = needsController(fields, ctx)
+    ? "useForm, Controller"
+    : "useForm";
+  const destructuredHookFields = needsController(fields, ctx)
+    ? "{ register, handleSubmit, control, formState: { errors } }"
+    : "{ register, handleSubmit, formState: { errors } }";
   return `// Auto-generated.
 import { useNavigate } from "react-router-dom";
 import { ${mantineImports} } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { useForm } from "@mantine/form";
-import { zodResolver } from "mantine-form-zod-resolver";
+import { ${useFormImports} } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { Create${agg.name}Request, useCreate${agg.name} } from "../../api/${camel(agg.name)}.js";
 
 export default function ${cap}New(): JSX.Element {
   const navigate = useNavigate();
   const create = useCreate${agg.name}();
-  const form = useForm<Create${agg.name}Request>({
-    initialValues: ${initialValuesTs(fields, ctx)},
-    validate: zodResolver(Create${agg.name}Request),
+  const ${destructuredHookFields} = useForm<Create${agg.name}Request>({
+    resolver: zodResolver(Create${agg.name}Request),
+    defaultValues: ${initialValuesTs(fields, ctx)},
   });
   return (
     <Stack maw={600} data-testid="${slug}-new">
       <Title order={2}>New ${agg.name.toLowerCase()}</Title>
       <form
-        onSubmit={form.onSubmit(async (vals) => {
+        onSubmit={handleSubmit(async (vals) => {
           try {
             const out = await create.mutateAsync(vals);
             notifications.show({ color: "green", message: "${agg.name} created" });
@@ -168,13 +175,22 @@ export function buildDetailPage(agg: AggregateIR, ctx: BoundedContextIR): string
   );
   const mantineImports = [...new Set([...displayComponents, ...opFormComponents])].sort().join(", ");
 
+  const detailUseFormImports =
+    ops.length > 0 &&
+    needsController(
+      ops.flatMap((o) => o.params.map((p) => ({ type: p.type }))),
+      ctx,
+    )
+      ? "useForm, Controller"
+      : "useForm";
+
   return `// Auto-generated.
 import { useParams, Link } from "react-router-dom";
 import { ${mantineImports} } from "@mantine/core";
 import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
-import { useForm } from "@mantine/form";
-import { zodResolver } from "mantine-form-zod-resolver";
+import { ${detailUseFormImports} } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { use${agg.name}ById${ops.length > 0 ? `, ${opHookImports}` : ""}${reqImports.length > 0 ? `, ${reqImports}` : ""} } from "../../api/${camel(agg.name)}.js";
 
 export default function ${cap}Detail(): JSX.Element {
@@ -299,13 +315,19 @@ function renderOperationModalFn(
   ctx: BoundedContextIR,
 ): string {
   const cap = upper(op.name);
-  const formFields = op.params.length > 0
-    ? op.params
-        .map((p) =>
-          formInput(p.name, p.type, ctx, `${slug}-op-${op.name}-input-${p.name}`),
-        )
-        .join("\n        ")
-    : `<Text>This operation has no parameters.</Text>`;
+  const opFields = op.params.map((p) => ({ type: p.type }));
+  const useController = needsController(opFields, ctx);
+  const destructured = useController
+    ? "{ register, handleSubmit, control, formState: { errors } }"
+    : "{ register, handleSubmit, formState: { errors } }";
+  const formFields =
+    op.params.length > 0
+      ? op.params
+          .map((p) =>
+            formInput(p.name, p.type, ctx, `${slug}-op-${op.name}-input-${p.name}`),
+          )
+          .join("\n        ")
+      : `<Text>This operation has no parameters.</Text>`;
   return `function open${cap}Modal(mut: ReturnType<typeof use${cap}${agg.name}>): void {
   modals.open({
     title: "${op.name}",
@@ -314,14 +336,14 @@ function renderOperationModalFn(
 }
 
 function ${cap}Form({ mut, onClose }: { mut: ReturnType<typeof use${cap}${agg.name}>; onClose: () => void }): JSX.Element {
-  const form = useForm<${cap}Request>({
-    initialValues: ${initialValuesTs(op.params.map((p) => ({ name: p.name, type: p.type, optional: false })), ctx)},
-    validate: zodResolver(${cap}Request),
+  const ${destructured} = useForm<${cap}Request>({
+    resolver: zodResolver(${cap}Request),
+    defaultValues: ${initialValuesTs(op.params.map((p) => ({ name: p.name, type: p.type, optional: false })), ctx)},
   });
   return (
     <form
       data-testid="${slug}-op-${op.name}-form"
-      onSubmit={form.onSubmit(async (vals) => {
+      onSubmit={handleSubmit(async (vals) => {
         try {
           await mut.mutateAsync(vals);
           notifications.show({ color: "green", message: "${op.name} succeeded" });

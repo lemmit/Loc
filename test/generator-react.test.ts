@@ -45,7 +45,9 @@ describe("react generator", () => {
     expect(pkg.dependencies["@tanstack/react-query"]).toBeTruthy();
     expect(pkg.dependencies["@mantine/core"]).toBeTruthy();
     expect(pkg.dependencies["zod"]).toBeTruthy();
-    expect(pkg.dependencies["mantine-form-zod-resolver"]).toBeTruthy();
+    expect(pkg.dependencies["react-hook-form"]).toBeTruthy();
+    expect(pkg.dependencies["@hookform/resolvers"]).toBeTruthy();
+    expect(pkg.dependencies["@mantine/form"]).toBeFalsy();
   });
 
   it("inherits the target's modules, so pages cover both Catalog and Sales", async () => {
@@ -87,15 +89,19 @@ describe("react generator", () => {
     expect(orderApi).toMatch(/OrderListResponse = z\.array\(OrderResponse\)/);
   });
 
-  it("Mantine forms wire to mutations and surface notifications", async () => {
+  it("react-hook-form wires to mutations and surfaces notifications", async () => {
     const model = await buildModel("examples/acme.ddd");
     const { files } = generateSystems(model);
     const newOrder = files.get("web_app/src/pages/orders/new.tsx")!;
-    expect(newOrder).toMatch(/from "@mantine\/form"/);
-    expect(newOrder).toMatch(/from "mantine-form-zod-resolver"/);
+    expect(newOrder).toMatch(/from "react-hook-form"/);
+    expect(newOrder).toMatch(/from "@hookform\/resolvers\/zod"/);
     expect(newOrder).toMatch(/zodResolver\(CreateOrderRequest\)/);
     expect(newOrder).toMatch(/notifications\.show/);
     expect(newOrder).toMatch(/useCreateOrder/);
+    // Phase 1: no @mantine/form / mantine-form-zod-resolver, no `as never` cast.
+    expect(newOrder).not.toMatch(/@mantine\/form/);
+    expect(newOrder).not.toMatch(/mantine-form-zod-resolver/);
+    expect(newOrder).not.toMatch(/as never/);
   });
 
   it("detail page shows fields + nested parts (master-detail) + operation buttons", async () => {
