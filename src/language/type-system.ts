@@ -1,4 +1,5 @@
 import type { AstNode } from "langium";
+import { AstUtils } from "langium";
 import type {
   Aggregate,
   BaseType,
@@ -9,6 +10,7 @@ import type {
   Lambda,
   Operation,
   Parameter,
+  Statement,
   TypeRef,
   ValueObject,
 } from "./generated/ast.js";
@@ -563,6 +565,153 @@ export function findOperation(
 ): Operation | undefined {
   for (const m of agg.members) {
     if (isOperation(m) && m.name === name) return m;
+  }
+  return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// envForNode — builds a `typeOf`-ready Env for any node in the AST.
+//
+// Walks up to the closest scope-bearing container (operation, function,
+// invariant, derived prop, value object, part, aggregate) and assembles
+// bindings + scope context.  The validator constructs equivalent envs
+// inline; LSP services (hover, completion) need the same data without
+// having to recreate the walk per provider.
+//
+// Bindings come from (in increasing precedence):
+//   1. Aggregate / part / value-object members (as bare names).
+//   2. Function or operation parameters.
+//   3. `let` bindings from preceding statements in the enclosing block.
+//
+// `let` bindings are typed `T.unknown` for simplicity — the validator
+// already does this; the precise type would require running `typeOf`
+// at the bind site, which is awkward in a one-pass env builder.
+// ---------------------------------------------------------------------------
+
+export function envForNode(node: AstNode): Env {
+  const agg = AstUtils.getContainerOfType(node, isAggregate);
+  const part = AstUtils.getContainerOfType(node, isEntityPart);
+  const vo = AstUtils.getContainerOfType(node, isValueObject);
+  const fn = AstUtils.getContainerOfType(node, isFunctionDecl);
+  const op = AstUtils.getContainerOfType(node, isOperation);
+
+  const bindings = new Map<string, { type: DddType; origin: AstNode }>();
+
+  // 1. Member bindings — innermost wins, so build outer→inner.
+  if (agg && !part) addEntityMembers(agg.members, bindings);
+  if (part) addEntityMembers(part.members, bindings);
+  if (vo) {
+    for (const m of vo.members) {
+      if (isProperty(m)) bindings.set(m.name, { type: resolveTypeRef(m.type), origin: m });
+      else if (isDerivedProp(m)) bindings.set(m.name, { type: resolveTypeRef(m.type), origin: m });
+    }
+  }
+
+  // 2. Function / operation parameter bindings.
+  const params = fn?.params ?? op?.params ?? [];
+  for (const p of params) bindings.set(p.name, { type: paramType(p), origin: p });
+
+  // 3. let-bindings from preceding statements in the enclosing operation.
+  if (op) {
+    for (const [name, b] of collectLetBindings(op.body)) bindings.set(name, b);
+  }
+
+  return makeEnv(undefined, bindings, {
+    aggregate: agg ?? undefined,
+    part: part ?? undefined,
+    valueObject: vo ?? undefined,
+  });
+}
+
+function addEntityMembers(
+  members: ReadonlyArray<AstNode>,
+  bindings: Map<string, { type: DddType; origin: AstNode }>,
+): void {
+  for (const m of members) {
+    if (isProperty(m)) bindings.set(m.name, { type: resolveTypeRef(m.type), origin: m });
+    else if (isDerivedProp(m)) bindings.set(m.name, { type: resolveTypeRef(m.type), origin: m });
+    else if (isContainment(m)) {
+      const partRef = m.partType?.ref;
+      if (partRef) {
+        const t: DddType = { kind: "entity", ref: partRef };
+        bindings.set(m.name, { type: m.collection ? T.array(t) : t, origin: m });
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// iterateEntityMembers — yields each member of an aggregate / part /
+// value-object once, with its display kind + type, in declaration order.
+// Used by hover (one-line summary) and completion (member-access arm).
+// ---------------------------------------------------------------------------
+
+export interface EntityMemberInfo {
+  name: string;
+  kind: "property" | "containment" | "derived" | "function" | "operation";
+  type: DddType;
+  node: AstNode;
+}
+
+export function iterateEntityMembers(
+  target: Aggregate | EntityPart | ValueObject,
+): EntityMemberInfo[] {
+  const out: EntityMemberInfo[] = [];
+  for (const m of target.members) {
+    if (isProperty(m)) {
+      out.push({ name: m.name, kind: "property", type: resolveTypeRef(m.type), node: m });
+    } else if (isDerivedProp(m)) {
+      out.push({ name: m.name, kind: "derived", type: resolveTypeRef(m.type), node: m });
+    } else if (isContainment(m)) {
+      const partRef = m.partType?.ref;
+      if (partRef) {
+        const inner: DddType = { kind: "entity", ref: partRef };
+        out.push({
+          name: m.name,
+          kind: "containment",
+          type: m.collection ? T.array(inner) : inner,
+          node: m,
+        });
+      }
+    } else if (isFunctionDecl(m)) {
+      out.push({
+        name: m.name,
+        kind: "function",
+        type: resolveTypeRef(m.returnType),
+        node: m,
+      });
+    } else if (isOperation(m)) {
+      // Operations don't have a return type in the type system (they
+      // mutate state and return void); record `unknown` so callers
+      // that key off `kind` can still display a label.
+      out.push({ name: m.name, kind: "operation", type: T.unknown, node: m });
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// stepIntoNode — like `stepInto` but returns the matching member's AST
+// node, not its type.  Used by the LSP definition provider for member
+// access (`order.lines` → the `Containment` declaration).
+// ---------------------------------------------------------------------------
+
+export function stepIntoNode(t: DddType, name: string): AstNode | undefined {
+  if (t.kind === "entity" || t.kind === "aggregate") {
+    for (const m of t.ref.members) {
+      if (isProperty(m) && m.name === name) return m;
+      if (isContainment(m) && m.name === name) return m;
+      if (isDerivedProp(m) && m.name === name) return m;
+      if (isFunctionDecl(m) && m.name === name) return m;
+      if (isOperation(m) && m.name === name) return m;
+    }
+  }
+  if (t.kind === "valueobject") {
+    for (const m of t.ref.members) {
+      if (isProperty(m) && m.name === name) return m;
+      if (isDerivedProp(m) && m.name === name) return m;
+      if (isFunctionDecl(m) && m.name === name) return m;
+    }
   }
   return undefined;
 }
