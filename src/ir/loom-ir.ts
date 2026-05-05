@@ -53,6 +53,11 @@ export interface FieldIR {
   name: string;
   type: TypeIR;
   optional: boolean;
+  /** True iff the source declared this property with the `display`
+   * modifier.  At most one such field per aggregate (enforced by the
+   * validator).  Used by the React generator to pick the option label
+   * for `Id<X>` Selects pointing at this aggregate. */
+  display?: boolean;
 }
 
 export interface ContainmentIR {

@@ -12,6 +12,7 @@ import {
   isLetStmt,
   isOperation,
   isPreconditionStmt,
+  isPrimitiveType,
   isProperty,
   isValueObject,
   type Aggregate,
@@ -24,6 +25,7 @@ import {
   type FunctionDecl,
   type Invariant,
   type Operation,
+  type Property,
   type Statement,
   type ValueObject,
 } from "./generated/ast.js";
@@ -122,6 +124,7 @@ export class DddValidator {
   private checkAggregate(agg: Aggregate, accept: ValidationAcceptor) {
     // Ensure unique part names within the aggregate
     const partNames = new Set<string>();
+    let displayField: Property | undefined;
     for (const m of agg.members) {
       if (isEntityPart(m)) {
         if (partNames.has(m.name)) {
@@ -138,6 +141,28 @@ export class DddValidator {
       if (isDerivedProp(m)) this.checkDerived(m, this.envForAggregate(agg), accept);
       if (isFunctionDecl(m)) this.checkFunction(m, agg, undefined, accept);
       if (isOperation(m)) this.checkOperation(m, agg, accept);
+      if (isProperty(m) && m.display) {
+        // At most one display field per aggregate.  Type must be `string`
+        // (the React generator uses it as a Mantine <Select> option label).
+        if (displayField) {
+          accept(
+            "error",
+            `Aggregate '${agg.name}' declares multiple 'display' fields ('${displayField.name}' and '${m.name}'); at most one is allowed.`,
+            { node: m, property: "display" },
+          );
+        }
+        displayField = m;
+        const typeText = m.type?.base;
+        const isString =
+          typeText && isPrimitiveType(typeText) && typeText.name === "string";
+        if (!isString) {
+          accept(
+            "error",
+            `Display field '${m.name}' on aggregate '${agg.name}' must have type 'string'.`,
+            { node: m, property: "display" },
+          );
+        }
+      }
     }
   }
 

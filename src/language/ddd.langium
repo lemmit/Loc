@@ -132,7 +132,7 @@ FindDecl:
 // ---------------------------------------------------------------------------
 
 Property:
-    name=ID ':' type=TypeRef;
+    name=ID ':' type=TypeRef (display?='display')?;
 
 Containment:
     'contains' name=ID ':' partType=[EntityPart:ID] (collection?='[]')?;

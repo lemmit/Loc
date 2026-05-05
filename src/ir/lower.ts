@@ -358,6 +358,7 @@ function lowerField(p: Property): FieldIR {
     name: p.name,
     type: lowerType(p.type),
     optional: !!p.type?.optional,
+    display: !!p.display,
   };
 }
 

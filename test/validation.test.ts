@@ -118,6 +118,41 @@ describe("validation", () => {
     expect(errors).toEqual([]);
   });
 
+  it("accepts a single string `display` field on an aggregate", async () => {
+    const { errors } = await parse(`
+      context T {
+        aggregate Product {
+          sku: string display
+          desc: string
+        }
+      }
+    `);
+    expect(errors).toEqual([]);
+  });
+
+  it("rejects multiple `display` fields on an aggregate", async () => {
+    const { errors } = await parse(`
+      context T {
+        aggregate Product {
+          sku: string display
+          name: string display
+        }
+      }
+    `);
+    expect(errors.some((e) => /multiple 'display' fields/i.test(e))).toBe(true);
+  });
+
+  it("rejects `display` on a non-string field", async () => {
+    const { errors } = await parse(`
+      context T {
+        aggregate Product {
+          qty: int display
+        }
+      }
+    `);
+    expect(errors.some((e) => /must have type 'string'/i.test(e))).toBe(true);
+  });
+
   it("rejects a react deployable without 'targets:'", async () => {
     const { errors } = await parse(`
       system S {
