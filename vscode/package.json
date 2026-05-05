@@ -1,0 +1,61 @@
+{
+  "name": "loom-ddd",
+  "displayName": "Loom DDD",
+  "description": "Language support for Loom DDD `.ddd` files — hover, go-to-definition, completion, syntax highlighting, and a generate command.",
+  "version": "0.1.0",
+  "publisher": "loom",
+  "license": "FSL-1.1-Apache-2.0",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:ddd"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "ddd",
+        "aliases": [
+          "Loom DDD",
+          "ddd"
+        ],
+        "extensions": [
+          ".ddd"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "ddd",
+        "scopeName": "source.ddd",
+        "path": "./syntaxes/ddd.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "loom.generate",
+        "title": "Loom: Generate from current file",
+        "category": "Loom"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "tsc -p . && node scripts/copy-server.mjs",
+    "vscode:prepublish": "npm run build",
+    "package": "vsce package --skip-license"
+  },
+  "dependencies": {
+    "vscode-languageclient": "~9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "~22.10.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.2.0",
+    "typescript": "~5.7.0"
+  }
+}

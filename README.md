@@ -217,11 +217,32 @@ src/
   system/                # Multi-deployable orchestrator + docker-compose + e2e render
   cli/                   # ddd parse / ddd generate {ts|dotnet|system}
   util/                  # naming helpers (pascal / camel / snake / plural)
-test/                    # vitest suites (49+ tests) + opt-in docker-compose e2e
+test/                    # vitest suites (130+ tests) + opt-in docker-compose e2e
 examples/                # sample .ddd sources (sales, inventory, acme)
 docs/                    # full reference documentation
 bin/cli.js               # bin shim
+vscode/                  # VS Code extension (LSP client + grammar + commands)
 ```
+
+## VS Code extension
+
+A sibling [`vscode/`](vscode/) package ships a minimal VS Code
+extension that bundles the Loom language server.  Install it locally
+from a built `.vsix`:
+
+```sh
+cd vscode
+npm install
+npm run build
+npm run package      # produces loom-ddd-0.1.0.vsix
+code --install-extension loom-ddd-0.1.0.vsix
+```
+
+What you get: syntax highlighting, hover with inferred types,
+go-to-definition (including member access), type-driven completion,
+workspace symbols (Cmd+T), and a "Loom: Generate from current file"
+command palette entry.  See [`vscode/README.md`](vscode/README.md)
+for details.
 
 ## Documentation
 

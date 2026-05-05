@@ -8,3 +8,8 @@ out/
 syntaxes/
 src/language/generated/
 test-output/
+vscode/node_modules/
+vscode/out/
+vscode/server/
+vscode/syntaxes/
+vscode/*.vsix
