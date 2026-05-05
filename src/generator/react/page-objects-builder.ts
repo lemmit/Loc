@@ -296,7 +296,20 @@ function fillBlock(
       lines.push(`  await this.page.getByTestId("${testId}").fill(${accessor}!);`);
     }
   } else if (inner.kind === "id") {
-    lines.push(`  await this.page.getByTestId("${testId}").fill(${accessor}!);`);
+    // Phase 3: `Id<X>` renders as a Mantine `<Select>` populated by
+    // `useAll<X>()`.  Each option carries a `data-testid` of the form
+    // `<input-tid>-option-<id>`, set by the form's `renderOption`.
+    // Click the input to open the listbox, wait for the options to
+    // mount, then click the option whose testid matches the id we
+    // were given.
+    lines.push(`  {`);
+    lines.push(`    await this.page.getByTestId("${testId}").click();`);
+    lines.push(
+      `    const __opt = this.page.getByTestId(\`${testId}-option-\${${accessor}!}\`);`,
+    );
+    lines.push(`    await __opt.waitFor({ state: "visible" });`);
+    lines.push(`    await __opt.click();`);
+    lines.push(`  }`);
   } else if (inner.kind === "enum") {
     // Mantine <Select> opens a portal-mounted listbox on click.  Open
     // it, wait for the listbox role to attach, then click the option

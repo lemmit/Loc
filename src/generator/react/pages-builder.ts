@@ -9,6 +9,8 @@ import { camel, plural, snake } from "../../util/naming.js";
 import {
   componentsForFields,
   formInput,
+  idTargetHookVar,
+  idTargetsInFields,
   initialValuesTs,
   isPrimitiveLike,
   needsController,
@@ -78,13 +80,28 @@ export default function ${cap}List(): JSX.Element {
 `;
 }
 
-export function buildNewPage(agg: AggregateIR, ctx: BoundedContextIR): string {
+export function buildNewPage(
+  agg: AggregateIR,
+  ctx: BoundedContextIR,
+  aggregatesByName: Map<string, AggregateIR>,
+): string {
   const slug = snake(plural(agg.name));
   const cap = upper(agg.name);
   const fields = agg.fields.filter((f) => !f.optional);
   const formFields = fields
-    .map((f) => formInput(f.name, f.type, ctx, `${slug}-new-input-${f.name}`))
+    .map((f) =>
+      formInput(f.name, f.type, ctx, `${slug}-new-input-${f.name}`, aggregatesByName),
+    )
     .join("\n        ");
+  // Phase 3: aggregates referenced by `Id<X>` fields need a
+  // `useAll<X>()` query at the top of the form component.
+  const idTargets = idTargetsInFields(fields, ctx, aggregatesByName);
+  const idHookImports = idTargets
+    .map((t) => `import { useAll${plural(t.name)} } from "../../api/${camel(t.name)}.js";`)
+    .join("\n");
+  const idHookCalls = idTargets
+    .map((t) => `  const ${idTargetHookVar(t)} = useAll${plural(t.name)}();`)
+    .join("\n");
   const mantineImports = ["Stack", "Title", "Button", "Group"]
     .concat([...componentsForFields(fields, ctx)].sort())
     .join(", ");
@@ -103,12 +120,12 @@ import { ${mantineImports} } from "@mantine/core";${dateImport}
 import { notifications } from "@mantine/notifications";
 import { ${useFormImports} } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Create${agg.name}Request, useCreate${agg.name} } from "../../api/${camel(agg.name)}.js";
+import { Create${agg.name}Request, useCreate${agg.name} } from "../../api/${camel(agg.name)}.js";${idHookImports ? "\n" + idHookImports : ""}
 
 export default function ${cap}New(): JSX.Element {
   const navigate = useNavigate();
   const create = useCreate${agg.name}();
-  const ${destructuredHookFields} = useForm<Create${agg.name}Request>({
+${idHookCalls ? idHookCalls + "\n" : ""}  const ${destructuredHookFields} = useForm<Create${agg.name}Request>({
     resolver: zodResolver(Create${agg.name}Request),
     defaultValues: ${initialValuesTs(fields, ctx)},
   });
@@ -139,7 +156,11 @@ export default function ${cap}New(): JSX.Element {
 `;
 }
 
-export function buildDetailPage(agg: AggregateIR, ctx: BoundedContextIR): string {
+export function buildDetailPage(
+  agg: AggregateIR,
+  ctx: BoundedContextIR,
+  aggregatesByName: Map<string, AggregateIR>,
+): string {
   const slug = snake(plural(agg.name));
   const cap = upper(agg.name);
   const ops = agg.operations.filter((o) => o.visibility === "public");
@@ -193,6 +214,19 @@ export function buildDetailPage(agg: AggregateIR, ctx: BoundedContextIR): string
   )
     ? `\nimport { DateTimePicker } from "@mantine/dates";`
     : "";
+  // Phase 3: aggregates referenced by `Id<X>` op params need a
+  // `useAll<X>()` query in their respective op modal forms.  Here at
+  // the detail level we just emit the import — the hook calls
+  // themselves go inside each modal's form component (different
+  // components, different RHF instances).
+  const detailIdTargets = idTargetsInFields(
+    ops.flatMap((o) => o.params.map((p) => ({ type: p.type }))),
+    ctx,
+    aggregatesByName,
+  );
+  const detailIdHookImports = detailIdTargets
+    .map((t) => `import { useAll${plural(t.name)} } from "../../api/${camel(t.name)}.js";`)
+    .join("\n");
 
   return `// Auto-generated.
 import { useParams, Link } from "react-router-dom";
@@ -201,7 +235,7 @@ import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import { ${detailUseFormImports} } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { use${agg.name}ById${ops.length > 0 ? `, ${opHookImports}` : ""}${reqImports.length > 0 ? `, ${reqImports}` : ""} } from "../../api/${camel(agg.name)}.js";
+import { use${agg.name}ById${ops.length > 0 ? `, ${opHookImports}` : ""}${reqImports.length > 0 ? `, ${reqImports}` : ""} } from "../../api/${camel(agg.name)}.js";${detailIdHookImports ? "\n" + detailIdHookImports : ""}
 
 export default function ${cap}Detail(): JSX.Element {
   const { id } = useParams<{ id: string }>();
@@ -235,7 +269,7 @@ ${ops.map((op) => `  const ${camel(op.name)} = use${upper(op.name)}${agg.name}(i
   );
 }
 
-${ops.map((op) => renderOperationModalFn(slug, agg, op, ctx)).join("\n\n")}
+${ops.map((op) => renderOperationModalFn(slug, agg, op, ctx, aggregatesByName)).join("\n\n")}
 `;
 }
 
@@ -323,6 +357,7 @@ function renderOperationModalFn(
   agg: AggregateIR,
   op: { name: string; params: ParamIR[] },
   ctx: BoundedContextIR,
+  aggregatesByName: Map<string, AggregateIR>,
 ): string {
   const cap = upper(op.name);
   const opFields = op.params.map((p) => ({ type: p.type }));
@@ -334,10 +369,23 @@ function renderOperationModalFn(
     op.params.length > 0
       ? op.params
           .map((p) =>
-            formInput(p.name, p.type, ctx, `${slug}-op-${op.name}-input-${p.name}`),
+            formInput(
+              p.name,
+              p.type,
+              ctx,
+              `${slug}-op-${op.name}-input-${p.name}`,
+              aggregatesByName,
+            ),
           )
           .join("\n        ")
       : `<Text>This operation has no parameters.</Text>`;
+  // Phase 3: every `Id<X>` param drives a `useAll<X>()` hook call at
+  // the form-component scope.  formInput emits the JSX referencing
+  // these variables.
+  const opIdTargets = idTargetsInFields(opFields, ctx, aggregatesByName);
+  const opIdHookCalls = opIdTargets
+    .map((t) => `  const ${idTargetHookVar(t)} = useAll${plural(t.name)}();`)
+    .join("\n");
   return `function open${cap}Modal(mut: ReturnType<typeof use${cap}${agg.name}>): void {
   modals.open({
     title: "${op.name}",
@@ -346,7 +394,7 @@ function renderOperationModalFn(
 }
 
 function ${cap}Form({ mut, onClose }: { mut: ReturnType<typeof use${cap}${agg.name}>; onClose: () => void }): JSX.Element {
-  const ${destructured} = useForm<${cap}Request>({
+${opIdHookCalls ? opIdHookCalls + "\n" : ""}  const ${destructured} = useForm<${cap}Request>({
     resolver: zodResolver(${cap}Request),
     defaultValues: ${initialValuesTs(op.params.map((p) => ({ name: p.name, type: p.type, optional: false })), ctx)},
   });

@@ -134,6 +134,40 @@ describe("react generator", () => {
     );
   });
 
+  it("Phase 3: Id<X> op-param renders Select populated by useAll<X>()", async () => {
+    const model = await buildModel("examples/acme.ddd");
+    const { files } = generateSystems(model);
+    const detail = files.get("web_app/src/pages/orders/detail.tsx")!;
+    // Cross-aggregate hook import.
+    expect(detail).toMatch(
+      /import \{ useAllProducts \} from "\.\.\/\.\.\/api\/product\.js"/,
+    );
+    // Hook called inside the operation form component.
+    expect(detail).toMatch(/const __products = useAllProducts\(\);/);
+    // Select bound by Controller, populated from the hook's data,
+    // labelled by the target's display field (`sku`).
+    expect(detail).toMatch(/<Select label="productId"/);
+    expect(detail).toMatch(/__products\.data \?\? \[\]/);
+    expect(detail).toMatch(/label: __o\.sku/);
+    // renderOption emits a per-option testid for Playwright drivers.
+    expect(detail).toMatch(/data-testid=\{`orders-op-addLine-input-productId-option-\$\{option\.value\}`\}/);
+    // Old plain-TextInput placeholder is gone.
+    expect(detail).not.toMatch(/placeholder="<id>"/);
+  });
+
+  it("Phase 3: page object clicks the testid'd option for Id<X> params", async () => {
+    const model = await buildModel("examples/acme.ddd");
+    const { files } = generateSystems(model);
+    const orderPo = files.get("web_app/e2e/pages/order.ts")!;
+    expect(orderPo).toMatch(
+      /getByTestId\(`orders-op-addLine-input-productId-option-\$\{input\.productId!\}`\)/,
+    );
+    // Old `.fill()` against the input is gone for Id<X> fields.
+    expect(orderPo).not.toMatch(
+      /getByTestId\("orders-op-addLine-input-productId"\)\.fill/,
+    );
+  });
+
   it("detail page shows fields + nested parts (master-detail) + operation buttons", async () => {
     const model = await buildModel("examples/acme.ddd");
     const { files } = generateSystems(model);

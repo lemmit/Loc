@@ -47,14 +47,24 @@ export function generateReactForContexts(
     for (const agg of ctx.aggregates) aggregates.push({ agg, ctx });
   }
 
+  // Workspace-wide aggregate registry — used by `Id<X>` form-input
+  // emission to resolve the target's display field across bounded
+  // contexts.  Built once and threaded through every per-aggregate
+  // builder to avoid recomputing per-call.
+  const aggregatesByName = new Map<string, AggregateIR>();
+  for (const { agg } of aggregates) aggregatesByName.set(agg.name, agg);
+
   for (const { agg, ctx } of aggregates) {
     const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
     out.set(`src/api/${camel(agg.name)}.ts`, buildApiModule(agg, repo, ctx));
     out.set(`src/pages/${snake(plural(agg.name))}/list.tsx`, buildListPage(agg));
-    out.set(`src/pages/${snake(plural(agg.name))}/new.tsx`, buildNewPage(agg, ctx));
+    out.set(
+      `src/pages/${snake(plural(agg.name))}/new.tsx`,
+      buildNewPage(agg, ctx, aggregatesByName),
+    );
     out.set(
       `src/pages/${snake(plural(agg.name))}/detail.tsx`,
-      buildDetailPage(agg, ctx),
+      buildDetailPage(agg, ctx, aggregatesByName),
     );
     out.set(
       `e2e/pages/${camel(agg.name)}.ts`,
