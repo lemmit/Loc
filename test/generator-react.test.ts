@@ -104,34 +104,25 @@ describe("react generator", () => {
     expect(newOrder).not.toMatch(/as never/);
   });
 
-  it("Phase 2: datetime fields use DateTimePicker via Controller", async () => {
+  it("Phase 2: datetime fields use native input with second precision", async () => {
+    // Phase 2 originally swapped to Mantine's <DateTimePicker> via
+    // Controller, but Mantine's picker renders as a button (not a
+    // typeable input) and resists Playwright's `.fill()` even with
+    // valueFormat pinned.  Walked back to native datetime-local; we
+    // keep seconds (slice 0..19, not 0..16) and document the
+    // UTC-implicit timezone assumption.
     const model = await buildModel("examples/acme.ddd");
     const { files } = generateSystems(model);
     const newOrder = files.get("web_app/src/pages/orders/new.tsx")!;
-    // Mantine DateTimePicker, not native datetime-local.
-    expect(newOrder).toMatch(/import \{ DateTimePicker \} from "@mantine\/dates"/);
-    expect(newOrder).toMatch(/<DateTimePicker label="placedAt"/);
-    expect(newOrder).toMatch(/valueFormat="YYYY-MM-DD HH:mm:ss"/);
-    expect(newOrder).toMatch(/withSeconds/);
-    expect(newOrder).not.toMatch(/type="datetime-local"/);
-    // Date↔ISO bridging at the Controller boundary.
-    expect(newOrder).toMatch(/new Date\(field\.value as string\)/);
-    expect(newOrder).toMatch(/\(d as Date\)\.toISOString\(\)/);
-  });
-
-  it("Phase 2: page object drives DateTimePicker with formatPickerValue", async () => {
-    const model = await buildModel("examples/acme.ddd");
-    const { files } = generateSystems(model);
+    expect(newOrder).toMatch(/<TextInput label="placedAt"[^>]*type="datetime-local"/);
+    expect(newOrder).not.toMatch(/DateTimePicker/);
+    expect(newOrder).not.toMatch(/@mantine\/dates/);
     const orderPo = files.get("web_app/e2e/pages/order.ts")!;
-    expect(orderPo).toMatch(/formatPickerValue/);
-    expect(orderPo).toMatch(/from "\.\/_helpers\.js"/);
-    // Old slice(0,16) workaround is gone.
+    // Page object preserves seconds.  No helpers file required.
+    expect(orderPo).toMatch(/\.slice\(0, 19\)/);
     expect(orderPo).not.toMatch(/\.slice\(0, 16\)/);
-    // Helpers file is emitted.
-    expect(files.get("web_app/e2e/pages/_helpers.ts")).toBeTruthy();
-    expect(files.get("web_app/e2e/pages/_helpers.ts")!).toMatch(
-      /export function formatPickerValue/,
-    );
+    expect(orderPo).not.toMatch(/formatPickerValue/);
+    expect(files.get("web_app/e2e/pages/_helpers.ts")).toBeFalsy();
   });
 
   it("Phase 3: Id<X> op-param renders Select populated by useAll<X>()", async () => {

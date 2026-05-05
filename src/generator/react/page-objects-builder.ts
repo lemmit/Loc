@@ -4,7 +4,7 @@ import type {
   TypeIR,
 } from "../../ir/loom-ir.js";
 import { camel, plural, snake } from "../../util/naming.js";
-import { unwrapOpt, usesDateTimePicker } from "./form-helpers.js";
+import { unwrapOpt } from "./form-helpers.js";
 
 // ---------------------------------------------------------------------------
 // Page-object builder — emits Playwright page-object classes per
@@ -40,15 +40,6 @@ export function buildPageObjectModule(
   lines.push(
     `import type { ${reqTypes.join(", ")} } from "../../src/api/${camel(agg.name)}.js";`,
   );
-  // Datetime page-object driving uses the shared `_helpers.ts` to
-  // format ISO test inputs into the picker's display format.
-  const allFormFields = [
-    ...required.map((f) => ({ type: f.type })),
-    ...ops.flatMap((o) => o.params.map((p) => ({ type: p.type }))),
-  ];
-  if (usesDateTimePicker(allFormFields, ctx)) {
-    lines.push(`import { formatPickerValue } from "./_helpers.js";`);
-  }
   lines.push("");
 
   // ---------------------------------------------------------------------
@@ -271,19 +262,15 @@ function fillBlock(
       lines.push(`    await this.page.getByTestId("${testId}").click();`);
       lines.push(`  }`);
     } else if (inner.name === "datetime") {
-      // Mantine `<DateTimePicker>` with `valueFormat="YYYY-MM-DD HH:mm:ss"`.
-      // The visible input is editable when focused — click to open the
-      // popover, fill with the formatted display string, press Escape
-      // to commit + close the popover.  Tests pass an ISO string; we
-      // format to the picker's display format here (see _helpers.ts).
-      lines.push(`  {`);
+      // Native `<input type="datetime-local">` accepts
+      // `YYYY-MM-DDTHH:mm:ss` (with optional sub-second precision).
+      // Tests pass an ISO string with `Z`; we slice to 19 chars to
+      // strip the timezone marker — the backend treats unmarked
+      // datetime values as UTC, so the round-trip is correct as long
+      // as the test source uses `Z` consistently.
       lines.push(
-        `    const __input = this.page.getByTestId("${testId}").locator("input");`,
+        `  await this.page.getByTestId("${testId}").fill(${accessor}!.slice(0, 19));`,
       );
-      lines.push(`    await __input.click();`);
-      lines.push(`    await __input.fill(formatPickerValue(${accessor}!));`);
-      lines.push(`    await __input.press("Escape");`);
-      lines.push(`  }`);
     } else if (
       inner.name === "int" ||
       inner.name === "long" ||

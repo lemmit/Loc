@@ -15,7 +15,6 @@ import {
   isPrimitiveLike,
   needsController,
   unwrapOpt,
-  usesDateTimePicker,
 } from "./form-helpers.js";
 
 // ---------------------------------------------------------------------------
@@ -111,12 +110,9 @@ export function buildNewPage(
   const destructuredHookFields = needsController(fields, ctx)
     ? "{ register, handleSubmit, control, formState: { errors } }"
     : "{ register, handleSubmit, formState: { errors } }";
-  const dateImport = usesDateTimePicker(fields, ctx)
-    ? `\nimport { DateTimePicker } from "@mantine/dates";`
-    : "";
   return `// Auto-generated.
 import { useNavigate } from "react-router-dom";
-import { ${mantineImports} } from "@mantine/core";${dateImport}
+import { ${mantineImports} } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { ${useFormImports} } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -208,12 +204,6 @@ export function buildDetailPage(
     )
       ? "useForm, Controller"
       : "useForm";
-  const detailDateImport = usesDateTimePicker(
-    ops.flatMap((o) => o.params.map((p) => ({ type: p.type }))),
-    ctx,
-  )
-    ? `\nimport { DateTimePicker } from "@mantine/dates";`
-    : "";
   // Phase 3: aggregates referenced by `Id<X>` op params need a
   // `useAll<X>()` query in their respective op modal forms.  Here at
   // the detail level we just emit the import — the hook calls
@@ -230,7 +220,7 @@ export function buildDetailPage(
 
   return `// Auto-generated.
 import { useParams, Link } from "react-router-dom";
-import { ${mantineImports} } from "@mantine/core";${detailDateImport}
+import { ${mantineImports} } from "@mantine/core";
 import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import { ${detailUseFormImports} } from "react-hook-form";
