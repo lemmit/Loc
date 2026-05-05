@@ -6,6 +6,9 @@ const reactPlatform: PlatformSurface = {
   defaultPort: 3001,
   // Frontends are SPAs hitting a peer backend; they own no DB.
   needsDb: false,
+  // React generator only emits API hooks — no per-aggregate
+  // repository class.  No find-name collisions are possible.
+  reservedRepositoryFindNames: new Set(),
   emitProject({ contexts, sys, deployable }): Map<string, string> {
     return generateReactForContexts(contexts, sys, deployable);
   },

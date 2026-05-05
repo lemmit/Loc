@@ -41,6 +41,29 @@ export function enrichLoomModel(loom: LoomModel): LoomModel {
   };
 }
 
+/** Read the populated wire shape for an aggregate / part / value-object.
+ *
+ * Every backend's response-DTO emitter walks this list to stay in
+ * sync with peers — `wireShape` is populated by `enrichLoomModel`
+ * during the enrichment pass.  Callers used to write
+ * `entity.wireShape!` with a non-null assertion at the consumer
+ * site, scattering the same precondition across four files.  This
+ * helper centralises the assumption + throws a structured error if
+ * an unenriched IR ever reaches a downstream layer (which would
+ * indicate a missed `enrichLoomModel(lowerModel(model))` call). */
+export function wireShapeFor(
+  entity: AggregateIR | EntityPartIR | ValueObjectIR,
+): WireField[] {
+  if (!entity.wireShape) {
+    throw new Error(
+      `internal: wireShape not populated on '${entity.name}' — ` +
+        "downstream layers must consume an IR that has been " +
+        "enriched via `enrichLoomModel(lowerModel(model))`.",
+    );
+  }
+  return entity.wireShape;
+}
+
 function enrichSystem(sys: SystemIR): SystemIR {
   // First enrich each module's contexts (auto-findAll, wire-shape).
   const modules = sys.modules.map((m) => ({

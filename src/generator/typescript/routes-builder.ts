@@ -9,6 +9,7 @@ import type {
   TypeIR,
   ValueObjectIR,
 } from "../../ir/loom-ir.js";
+import { wireShapeFor } from "../../ir/enrichments.js";
 import { camel, plural, snake } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
@@ -328,7 +329,7 @@ function emitResponseDtoSchema(
   // Single canonical walk — populated by `enrichLoomModel` (see
   // src/ir/enrichments.ts).  Order and field-set match every other
   // emitter (.NET DTO, React Zod, Hono toWire serializer).
-  const fields = ent.wireShape!;
+  const fields = wireShapeFor(ent);
   void ctx;
   void isAgg;
   for (const wf of fields) {

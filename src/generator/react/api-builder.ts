@@ -7,6 +7,7 @@ import type {
   TypeIR,
   ValueObjectIR,
 } from "../../ir/loom-ir.js";
+import { wireShapeFor } from "../../ir/enrichments.js";
 import { plural, snake } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
@@ -236,7 +237,7 @@ function emitResponseSchema(
   // src/ir/enrichments.ts).  Backends + frontend all read the same
   // field list, so Zod schemas line up field-for-field with what
   // the wire actually carries.
-  const fields = ent.wireShape!;
+  const fields = wireShapeFor(ent);
   void ctx;
   void isAgg;
   for (const wf of fields) {

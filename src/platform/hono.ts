@@ -5,6 +5,12 @@ const honoPlatform: PlatformSurface = {
   name: "hono",
   defaultPort: 3000,
   needsDb: true,
+  // Hono repository auto-emits these per aggregate — see
+  // src/generator/typescript/repository-builder.ts (`async save`,
+  // `async findById`, `async getById`).  A user-declared find with
+  // one of these names would compile-error with TS2393 "Duplicate
+  // function implementation".
+  reservedRepositoryFindNames: new Set(["save", "findById", "getById"]),
   emitProject({ contexts }): Map<string, string> {
     return generateTypeScriptForContexts(contexts);
   },

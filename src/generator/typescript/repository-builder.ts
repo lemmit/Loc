@@ -7,6 +7,7 @@ import type {
   RepositoryIR,
   TypeIR,
 } from "../../ir/loom-ir.js";
+import { wireShapeFor } from "../../ir/enrichments.js";
 import { camel, plural } from "../../util/naming.js";
 import { renderTsExpr } from "./render-expr.js";
 import { valueObjectColumnNames } from "./templates.js";
@@ -153,7 +154,7 @@ function wireProjectionEntity(
   // serializer feeds repo.toWire(); its output's keys must line up
   // with the route's response Zod schema and the .NET DTO.  Single
   // canonical walk populated by `enrichLoomModel`.
-  const fields = ent.wireShape!;
+  const fields = wireShapeFor(ent);
   const parts: string[] = [];
   for (const wf of fields) {
     if (wf.source === "id") {
@@ -631,33 +632,7 @@ function findQueryMethod(
   return lines;
 }
 
-function hydrateRootForFindExpr(
-  agg: AggregateIR,
-  rowVar: string,
-  ctx: BoundedContextIR,
-  containmentName: string,
-): string {
-  // Variant of hydrateRootExpr where the child collection comes from the
-  // pre-loaded map.
-  const fields: string[] = [];
-  fields.push(`id: Ids.${agg.name}Id(${rowVar}.id)`);
-  for (const f of agg.fields) {
-    fields.push(`${f.name}: ${hydrateFieldExpr(f, rowVar, ctx)}`);
-  }
-  for (const c of agg.contains) {
-    if (c.name === containmentName && c.collection) {
-      fields.push(`${c.name}: ${c.name}ByParent.get(${rowVar}.id) ?? []`);
-    } else {
-      // Containments not eagerly loaded for this find — collection
-      // is empty, single is null.  Both naturally typed thanks to
-      // the aggregate's state type accepting `<Part> | null`.
-      fields.push(`${c.name}: ${c.collection ? "[]" : "null"}`);
-    }
-  }
-  return `${agg.name}._create({ ${fields.join(", ")} })`;
-}
-
-/** Variant of `hydrateRootForFindExpr` where ALL containments
+/** Variant of `hydrateRootExpr` where ALL containments
  * (collections + singulars) are pre-loaded into per-parent maps.
  * Used by the array-returning find path to fully hydrate every root
  * in one batched read.  Singular containments default to `null` if

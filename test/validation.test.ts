@@ -350,6 +350,31 @@ describe("Loom IR validation (post-lowering)", async () => {
     ).toBe(true);
   });
 
+  it("rejects find name 'saveAsync' (.NET-specific reserved name)", async () => {
+    // Reserved-name set is the union of every platform's
+    // `reservedRepositoryFindNames` — `saveAsync` collides on .NET
+    // (Pascal-cased to `SaveAsync()`) but not on Hono.  We catch it
+    // either way so a context generated for both platforms stays
+    // valid on both.
+    const loom = await loomFrom(`
+      context T {
+        aggregate Order { sku: string display }
+        repository Orders for Order {
+          find saveAsync(s: string): Order[] where this.sku == s
+        }
+      }
+    `);
+    const diags = validateLoomModel(loom);
+    expect(
+      diags.some(
+        (d) =>
+          d.severity === "error" &&
+          /find 'saveAsync': name collides with the auto-emitted/.test(d.message),
+      ),
+      JSON.stringify(diags),
+    ).toBe(true);
+  });
+
   it("rejects Id<X> referencing a non-mounted aggregate (react deployable)", async () => {
     const loom = await loomFrom(`
       system S {

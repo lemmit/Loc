@@ -6,6 +6,7 @@ import type {
   TypeIR,
   ValueObjectIR,
 } from "../../ir/loom-ir.js";
+import { wireShapeFor } from "../../ir/enrichments.js";
 import { pascal } from "../../util/naming.js";
 import { renderCsType } from "./render-expr.js";
 
@@ -155,7 +156,7 @@ export function projectEntityExpr(
   // maps to one positional argument on `new <Ent>Response(...)`,
   // in the same order both response Zod schemas (Hono / React)
   // emit.
-  const fields = entity.wireShape!;
+  const fields = wireShapeFor(entity);
   const args: string[] = [];
   for (const wf of fields) {
     if (wf.source === "id") {
@@ -198,7 +199,7 @@ function responseRecordParams(
   ent: AggregateIR | EntityPartIR,
   ctx: BoundedContextIR,
 ): string {
-  const fields = ent.wireShape!;
+  const fields = wireShapeFor(ent);
   const idValueType = isPart(ent) ? ent.parentIdValueType : ent.idValueType;
   const parts: string[] = [];
   for (const wf of fields) {

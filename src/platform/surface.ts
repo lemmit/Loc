@@ -43,6 +43,15 @@ export interface PlatformSurface {
   /** Whether deployables on this platform get a postgres database
    * created by the db-init script. */
   readonly needsDb: boolean;
+  /** Repository method names this platform auto-emits for every
+   * aggregate.  A user-declared find with one of these names would
+   * collide with the auto-emitted method (TS: duplicate function
+   * implementation; .NET: same).  Used by the IR validator to
+   * surface the collision as a parse-time diagnostic instead of a
+   * downstream tsc/csc error.  Names are case-sensitive and use
+   * the DSL's casing (lowerCamelCase) — the validator compares
+   * against `find.name` directly. */
+  readonly reservedRepositoryFindNames: ReadonlySet<string>;
   /** All files for one deployable's project, paths relative to the
    * deployable's folder under `<outdir>/`. */
   emitProject(args: {

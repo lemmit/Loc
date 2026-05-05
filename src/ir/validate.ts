@@ -10,6 +10,7 @@ import type {
   TestStmtIR,
   TypeIR,
 } from "./loom-ir.js";
+import { allPlatforms } from "../platform/registry.js";
 import { camel, plural, snake } from "../util/naming.js";
 
 // ---------------------------------------------------------------------------
@@ -72,16 +73,27 @@ export function validateLoomModel(loom: LoomModel): LoomDiagnostic[] {
 // error against the generated output.
 // ---------------------------------------------------------------------------
 
-const RESERVED_FIND_NAMES = new Set(["save", "findById"]);
+/** Union of every registered platform's `reservedRepositoryFindNames`.
+ * The validator treats a DSL find name as reserved if ANY platform's
+ * generator would emit a colliding repository method, so a context
+ * generated for both Hono and .NET stays valid on both. */
+function unionReservedFindNames(): Set<string> {
+  const out = new Set<string>();
+  for (const p of allPlatforms()) {
+    for (const n of p.reservedRepositoryFindNames) out.add(n);
+  }
+  return out;
+}
 
 function validateFindNameCollisions(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
 ): void {
+  const reserved = unionReservedFindNames();
   for (const repo of ctx.repositories) {
     const seen = new Set<string>();
     for (const find of repo.finds) {
-      if (RESERVED_FIND_NAMES.has(find.name)) {
+      if (reserved.has(find.name)) {
         diags.push({
           severity: "error",
           message:
