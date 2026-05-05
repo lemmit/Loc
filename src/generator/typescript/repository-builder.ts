@@ -552,38 +552,55 @@ function findQueryMethod(
       `    const rootRows = await this.db.select().from(schema.${tableName})${whereClause};`,
     );
     lines.push(`    if (rootRows.length === 0) return [];`);
-    // Load children for all matching roots
-    for (const c of agg.contains) {
-      if (!c.collection) continue;
-      const part = agg.parts.find((p) => p.name === c.partName);
-      if (!part) continue;
-      const childTable = camel(plural(part.name));
-      lines.push(
-        `    const __ids = rootRows.map((r) => r.id);`,
-      );
-      lines.push(
-        `    const ${c.name}Rows = await this.db.select().from(schema.${childTable}).where(inArray(schema.${childTable}.parentId, __ids));`,
-      );
-      lines.push(
-        `    const ${c.name}ByParent = new Map<string, ${part.name}[]>();`,
-      );
-      lines.push(`    for (const r of ${c.name}Rows) {`);
-      lines.push(
-        `      const list = ${c.name}ByParent.get(r.parentId) ?? [];`,
-      );
-      lines.push(
-        `      list.push(${hydrateEntityExpr(part, "r", agg, ctx)});`,
-      );
-      lines.push(`      ${c.name}ByParent.set(r.parentId, list);`);
-      lines.push(`    }`);
-      lines.push(
-        `    return rootRows.map((root) => ${hydrateRootForFindExpr(agg, "root", ctx, c.name)});`,
-      );
-      return lines.concat(`  }`);
+    // Bulk-load every containment (collections + singulars).  Earlier
+    // versions of this code only handled a SINGLE collection
+    // containment per find — anything else was silently dropped, so a
+    // `find ...(): Order[]` against an aggregate with `contains
+    // shipping: Address` (singular) emitted code referencing an
+    // undefined `shipping` variable.  Now we load each containment
+    // into a per-parent Map and use a hydrate helper that reads from
+    // those maps.
+    const eagerContains = agg.contains
+      .map((c) => ({ c, part: agg.parts.find((p) => p.name === c.partName) }))
+      .filter((x): x is { c: typeof x.c; part: EntityPartIR } => !!x.part);
+    if (eagerContains.length > 0) {
+      lines.push(`    const __ids = rootRows.map((r) => r.id);`);
+      for (const { c, part } of eagerContains) {
+        const childTable = camel(plural(part.name));
+        lines.push(
+          `    const ${c.name}Rows = await this.db.select().from(schema.${childTable}).where(inArray(schema.${childTable}.parentId, __ids));`,
+        );
+        if (c.collection) {
+          lines.push(
+            `    const ${c.name}ByParent = new Map<string, ${part.name}[]>();`,
+          );
+          lines.push(`    for (const r of ${c.name}Rows) {`);
+          lines.push(
+            `      const list = ${c.name}ByParent.get(r.parentId) ?? [];`,
+          );
+          lines.push(
+            `      list.push(${hydrateEntityExpr(part, "r", agg, ctx)});`,
+          );
+          lines.push(`      ${c.name}ByParent.set(r.parentId, list);`);
+          lines.push(`    }`);
+        } else {
+          // Singular containment: at most one row per parent (DB
+          // doesn't enforce that, but the aggregate boundary does).
+          // First-row-wins on duplicates.
+          lines.push(
+            `    const ${c.name}ByParent = new Map<string, ${part.name}>();`,
+          );
+          lines.push(`    for (const r of ${c.name}Rows) {`);
+          lines.push(`      if (${c.name}ByParent.has(r.parentId)) continue;`);
+          lines.push(
+            `      ${c.name}ByParent.set(r.parentId, ${hydrateEntityExpr(part, "r", agg, ctx)});`,
+          );
+          lines.push(`    }`);
+        }
+      }
     }
-    // No collection containment
     lines.push(
-      `    return rootRows.map((root) => ${hydrateRootExpr(agg, "root", ctx)});`,
+      `    return rootRows.map((root) => ${hydrateRootForFindAllExpr(agg, "root", ctx)});`,
     );
     lines.push(`  }`);
     return lines;
@@ -635,6 +652,31 @@ function hydrateRootForFindExpr(
       // is empty, single is null.  Both naturally typed thanks to
       // the aggregate's state type accepting `<Part> | null`.
       fields.push(`${c.name}: ${c.collection ? "[]" : "null"}`);
+    }
+  }
+  return `${agg.name}._create({ ${fields.join(", ")} })`;
+}
+
+/** Variant of `hydrateRootForFindExpr` where ALL containments
+ * (collections + singulars) are pre-loaded into per-parent maps.
+ * Used by the array-returning find path to fully hydrate every root
+ * in one batched read.  Singular containments default to `null` if
+ * the parent had no row in the bulk join. */
+function hydrateRootForFindAllExpr(
+  agg: AggregateIR,
+  rowVar: string,
+  ctx: BoundedContextIR,
+): string {
+  const fields: string[] = [];
+  fields.push(`id: Ids.${agg.name}Id(${rowVar}.id)`);
+  for (const f of agg.fields) {
+    fields.push(`${f.name}: ${hydrateFieldExpr(f, rowVar, ctx)}`);
+  }
+  for (const c of agg.contains) {
+    if (c.collection) {
+      fields.push(`${c.name}: ${c.name}ByParent.get(${rowVar}.id) ?? []`);
+    } else {
+      fields.push(`${c.name}: ${c.name}ByParent.get(${rowVar}.id) ?? null`);
     }
   }
   return `${agg.name}._create({ ${fields.join(", ")} })`;

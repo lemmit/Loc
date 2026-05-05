@@ -400,6 +400,46 @@ describe("Loom IR validation (post-lowering)", async () => {
     ).toBe(true);
   });
 
+  it("rejects where-clause referencing an unknown aggregate field", async () => {
+    const loom = await loomFrom(`
+      context T {
+        aggregate Task { name: string display }
+        repository Tasks for Task {
+          find byUnknown(p: string): Task[] where this.unknownField == p
+        }
+      }
+    `);
+    const diags = validateLoomModel(loom);
+    expect(
+      diags.some(
+        (d) =>
+          d.severity === "error" &&
+          /references unknown field 'this\.unknownField'/.test(d.message),
+      ),
+      JSON.stringify(diags),
+    ).toBe(true);
+  });
+
+  it("rejects where-clause comparing two columns (no value side)", async () => {
+    const loom = await loomFrom(`
+      context T {
+        aggregate Task { name: string display, alt: string }
+        repository Tasks for Task {
+          find both(): Task[] where this.name == this.alt
+        }
+      }
+    `);
+    const diags = validateLoomModel(loom);
+    expect(
+      diags.some(
+        (d) =>
+          d.severity === "error" &&
+          /comparison between two columns \('this\.name' vs 'this\.alt'\)/.test(d.message),
+      ),
+      JSON.stringify(diags),
+    ).toBe(true);
+  });
+
   it("accepts Id<X> when the target is mounted AND has a display field", async () => {
     const loom = await loomFrom(`
       system S {

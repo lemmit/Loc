@@ -128,4 +128,36 @@ describe("typescript generator", () => {
     // `eq` / `inArray`).
     expect(repo).toMatch(/import \{[^}]*\band\b[^}]*\} from "drizzle-orm"/);
   });
+
+  it("`all()` hydrates singular containments (not just collections)", async () => {
+    // Regression for an earlier bug: the bulk-find path only loaded
+    // ONE collection containment per find and silently dropped
+    // singular containments.  The generated `all()` referenced an
+    // undefined variable for `contains shipping: Address` — `npx tsc`
+    // caught it as a no-undef use, but more importantly the
+    // generated runtime code couldn't compile.
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(`
+      context T {
+        aggregate Order {
+          sku: string display
+          contains shipping: Address
+          entity Address { street: string }
+        }
+      }
+    `, { validation: true });
+    const files = generateTypeScript(doc.parseResult.value as Model);
+    const repo = files.get("db/repositories/order-repository.ts")!;
+    // The `all()` method now eagerly loads `shipping` via inArray +
+    // builds a per-parent map keyed by parentId; hydrate looks up
+    // the singular row with `?? null`.
+    expect(repo).toMatch(/async all\(\): Promise<Order\[\]>/);
+    expect(repo).toMatch(
+      /const shippingRows = await this\.db\.select\(\)\.from\(schema\.addresses\)\.where\(inArray\(schema\.addresses\.parentId, __ids\)\)/,
+    );
+    expect(repo).toMatch(/const shippingByParent = new Map<string, Address>\(\);/);
+    expect(repo).toMatch(/shipping: shippingByParent\.get\(root\.id\) \?\? null/);
+  });
 });

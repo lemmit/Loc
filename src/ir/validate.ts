@@ -274,6 +274,7 @@ function validateQueryableWheres(
   diags: LoomDiagnostic[],
 ): void {
   for (const repo of ctx.repositories) {
+    const agg = ctx.aggregates.find((a) => a.name === repo.aggregateName);
     for (const find of repo.finds) {
       if (!find.filter) continue;
       const offending = firstNonQueryableNode(find.filter);
@@ -287,9 +288,158 @@ function validateQueryableWheres(
             `'this.<column>' / 'this.<vo>.<sub>' refs, parameter refs, literals.`,
           source: `${ctx.name}/${repo.name}.${find.name}`,
         });
+        continue;
+      }
+      // Beyond grammar-level queryability: each `this.<X>` reference
+      // must resolve to a real aggregate field.  Without this check
+      // the generator emits SQL against a non-existent column and
+      // the runtime fails (or silently returns nothing).
+      if (agg) {
+        const unknown = firstUnknownColumnRef(find.filter, agg, ctx);
+        if (unknown) {
+          diags.push({
+            severity: "error",
+            message:
+              `repository '${repo.name}' find '${find.name}': ` +
+              `where-clause references unknown field ${unknown} on aggregate '${agg.name}'.`,
+            source: `${ctx.name}/${repo.name}.${find.name}`,
+          });
+        }
+      }
+      // And: every binary comparison must compare ONE column against
+      // ONE value (parameter, literal, enum-value).  Drizzle's
+      // `eq(col, val)` doesn't model column-vs-column comparisons —
+      // they'd need raw SQL.  Our generator errors out at lowering
+      // when both sides are columns; rejecting at validation surfaces
+      // the issue earlier and with a clearer message.
+      const bothCols = firstColumnVsColumn(find.filter);
+      if (bothCols) {
+        diags.push({
+          severity: "error",
+          message:
+            `repository '${repo.name}' find '${find.name}': ` +
+            `comparison between two columns (${bothCols}) is not queryable. ` +
+            `Drizzle's eq()/ne()/lt()/etc. require one column and one value (parameter, literal, or enum value).`,
+          source: `${ctx.name}/${repo.name}.${find.name}`,
+        });
       }
     }
   }
+}
+
+/** Walk an already-queryable expression and return the first
+ * `this.<X>` member access whose `<X>` doesn't correspond to a real
+ * aggregate field.  Returns null if every column reference resolves
+ * cleanly. */
+function firstUnknownColumnRef(
+  e: ExprIR,
+  agg: AggregateIR,
+  ctx: BoundedContextIR,
+): string | null {
+  switch (e.kind) {
+    case "literal":
+    case "this":
+    case "id":
+    case "ref":
+      return null;
+    case "paren":
+      return firstUnknownColumnRef(e.inner, agg, ctx);
+    case "unary":
+      return firstUnknownColumnRef(e.operand, agg, ctx);
+    case "binary":
+      return (
+        firstUnknownColumnRef(e.left, agg, ctx) ??
+        firstUnknownColumnRef(e.right, agg, ctx)
+      );
+    case "member": {
+      // `this.X` — direct column.  Verify X is on the aggregate.
+      if (e.receiver.kind === "this") {
+        const fld = agg.fields.find((f) => f.name === e.member);
+        if (fld) return null;
+        const derived = agg.derived.find((d) => d.name === e.member);
+        if (derived) {
+          // Derived isn't a stored column — emitting SQL against it
+          // would also fail.  Reject with a more specific message.
+          return `'this.${e.member}' (derived properties are computed, not stored as columns)`;
+        }
+        const containment = agg.contains.find((c) => c.name === e.member);
+        if (containment) {
+          return `'this.${e.member}' (containments aren't queryable directly — see docs/language.md)`;
+        }
+        return `'this.${e.member}'`;
+      }
+      // `this.vo.sub` — value-object flattened column.  Verify vo
+      // is a VO-typed field AND sub is a field on the VO.
+      if (
+        e.receiver.kind === "member" &&
+        e.receiver.receiver.kind === "this" &&
+        e.receiver.memberType.kind === "valueobject"
+      ) {
+        const voField = agg.fields.find(
+          (f) =>
+            f.name === (e.receiver as { member: string }).member,
+        );
+        if (!voField) {
+          return `'this.${(e.receiver as { member: string }).member}'`;
+        }
+        const voName =
+          e.receiver.memberType.kind === "valueobject"
+            ? e.receiver.memberType.name
+            : "";
+        const vo = ctx.valueObjects.find((v) => v.name === voName);
+        if (vo && vo.fields.some((f) => f.name === e.member)) return null;
+        return `'this.${(e.receiver as { member: string }).member}.${e.member}'`;
+      }
+      return null;
+    }
+    default:
+      return null;
+  }
+}
+
+/** Returns a description of the first binary comparison whose two
+ * sides are BOTH column references, or null if none exists. */
+function firstColumnVsColumn(e: ExprIR): string | null {
+  if (e.kind === "binary") {
+    if (
+      ["==", "!=", "<", "<=", ">", ">="].includes(e.op) &&
+      isColumnRef(e.left) &&
+      isColumnRef(e.right)
+    ) {
+      return `${describeColumnRef(e.left)} vs ${describeColumnRef(e.right)}`;
+    }
+    return firstColumnVsColumn(e.left) ?? firstColumnVsColumn(e.right);
+  }
+  if (e.kind === "paren") return firstColumnVsColumn(e.inner);
+  if (e.kind === "unary") return firstColumnVsColumn(e.operand);
+  return null;
+}
+
+function isColumnRef(e: ExprIR): boolean {
+  if (e.kind === "paren") return isColumnRef(e.inner);
+  if (e.kind === "ref" && e.refKind === "this-prop") return true;
+  if (e.kind === "member" && e.receiver.kind === "this") return true;
+  if (
+    e.kind === "member" &&
+    e.receiver.kind === "member" &&
+    e.receiver.receiver.kind === "this"
+  )
+    return true;
+  return false;
+}
+
+function describeColumnRef(e: ExprIR): string {
+  if (e.kind === "paren") return describeColumnRef(e.inner);
+  if (e.kind === "ref" && e.refKind === "this-prop") return `'this.${e.name}'`;
+  if (e.kind === "member" && e.receiver.kind === "this")
+    return `'this.${e.member}'`;
+  if (
+    e.kind === "member" &&
+    e.receiver.kind === "member" &&
+    e.receiver.receiver.kind === "this"
+  )
+    return `'this.${e.receiver.member}.${e.member}'`;
+  return "<column>";
 }
 
 /** Returns null if the expression is fully queryable; otherwise a
