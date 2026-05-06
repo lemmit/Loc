@@ -90,6 +90,14 @@ export interface OperationIR {
   visibility: "public" | "private";
   params: ParamIR[];
   statements: StmtIR[];
+  /** When true, the body contains preconditions only — the
+   * generator emits a wrapper that loads the aggregate, runs the
+   * preconditions, dispatches to a user-supplied handler
+   * (registered via DI on .NET, via a typed registry on TS),
+   * persists, and drains pending events.  The aggregate class
+   * itself does NOT get a method body for an extern operation;
+   * the user owns the business decision. */
+  extern: boolean;
 }
 
 export interface EntityPartIR {

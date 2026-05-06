@@ -52,6 +52,7 @@ export function validateLoomModel(loom: LoomModel): LoomDiagnostic[] {
     validateQueryableWheres(c, diags);
     validateFindNameCollisions(c, diags);
     validateAggregateTestBodies(c, diags);
+    validateExternOperations(c, diags);
   }
   return diags;
 }
@@ -174,6 +175,59 @@ function invalidTestStmt(s: TestStmtIR): string | null {
       return null; // pure function call is fine
     default:
       return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// `extern` operation validation.
+//
+// An `operation X(...) extern { precondition ... }` declares that
+// the body of X is supplied by user code outside the generated
+// tree.  The DSL keeps its grip on:
+//   - the operation's parameter list (becomes the request DTO),
+//   - the precondition gates (run BEFORE the user's handler fires),
+//   - persistence + event drainage (run AFTER the user's handler
+//     returns).
+//
+// The user owns: state mutation, event emission, and integration
+// with services Loom doesn't model.
+//
+// Validator rules:
+//   1. extern operations must be public.  A private extern is
+//      meaningless — there's no caller inside the aggregate.
+//   2. extern bodies must contain ONLY precondition statements.
+//      Anything else (assignments, emits, calls, lets) belongs in
+//      the user's handler.  Reject up-front so the contract is
+//      legible.
+// ---------------------------------------------------------------------------
+
+function validateExternOperations(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+): void {
+  for (const agg of ctx.aggregates) {
+    for (const op of agg.operations) {
+      if (!op.extern) continue;
+      if (op.visibility === "private") {
+        diags.push({
+          severity: "error",
+          message:
+            `aggregate '${agg.name}' operation '${op.name}': 'extern' isn't valid on a private operation. ` +
+            `Private operations are callable only from inside the aggregate, so there's nowhere for an external handler to plug in. Make the operation public, or drop 'extern'.`,
+          source: `${ctx.name}/${agg.name}.${op.name}`,
+        });
+      }
+      for (const stmt of op.statements) {
+        if (stmt.kind === "precondition") continue;
+        diags.push({
+          severity: "error",
+          message:
+            `aggregate '${agg.name}' operation '${op.name}': 'extern' bodies may only contain 'precondition' statements (found '${stmt.kind}'). ` +
+            `The user-supplied handler owns mutation, emit, and any other logic — leave the .ddd body to the gates that run before it.`,
+          source: `${ctx.name}/${agg.name}.${op.name}`,
+        });
+      }
+    }
   }
 }
 

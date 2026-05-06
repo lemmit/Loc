@@ -429,5 +429,6 @@ function lowerOperation(op: Operation, env: Env): OperationIR {
     visibility: op.private ? "private" : "public",
     params,
     statements: stmts,
+    extern: !!op.extern,
   };
 }

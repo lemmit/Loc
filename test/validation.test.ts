@@ -396,6 +396,66 @@ describe("Loom IR validation (post-lowering)", async () => {
     expect(errors, JSON.stringify(errors)).toEqual([]);
   });
 
+  it("accepts a well-formed extern operation (precondition-only body)", async () => {
+    const loom = await loomFrom(`
+      context T {
+        aggregate Order {
+          sku: string display
+          operation confirm() extern {
+            precondition sku.length > 0
+          }
+        }
+      }
+    `);
+    const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
+    expect(errors, JSON.stringify(errors)).toEqual([]);
+  });
+
+  it("rejects 'private operation X() extern' (no caller for the handler)", async () => {
+    const loom = await loomFrom(`
+      context T {
+        aggregate Order {
+          sku: string display
+          private operation foo() extern { precondition sku.length > 0 }
+        }
+      }
+    `);
+    const diags = validateLoomModel(loom);
+    expect(
+      diags.some(
+        (d) =>
+          d.severity === "error" &&
+          /'extern' isn't valid on a private operation/.test(d.message),
+      ),
+      JSON.stringify(diags),
+    ).toBe(true);
+  });
+
+  it("rejects mutating statements in an extern operation body", async () => {
+    const loom = await loomFrom(`
+      context T {
+        aggregate Order {
+          sku: string display
+          operation foo() extern {
+            precondition sku.length > 0
+            sku := "X"
+          }
+        }
+      }
+    `);
+    const diags = validateLoomModel(loom);
+    expect(
+      diags.some(
+        (d) =>
+          d.severity === "error" &&
+          /'extern' bodies may only contain 'precondition' statements \(found 'assign'\)/.test(
+            d.message,
+          ),
+      ),
+      JSON.stringify(diags),
+    ).toBe(true);
+  });
+
   it("rejects find name 'saveAsync' (.NET-specific reserved name)", async () => {
     // Reserved-name set is the union of every platform's
     // `reservedRepositoryFindNames` — `saveAsync` collides on .NET
