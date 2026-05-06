@@ -136,20 +136,35 @@ How it lowers:
   request errors loudly (which is the right answer; a
   dangling foreign reference is a data-integrity problem).
 
-### Limits in v1
+### Multi-hop snowflakes
 
-- **Single-hop only**.  `customerId.name` works; chained follows
-  like `customerId.regionId.name` are not yet rewritten — they
-  parse and type-check, but emit naively (fail at runtime).
-  Multi-hop snowflakes can be expressed today by chaining views
-  (one per hop).
+Chains work too: `customerId.regionId.name` follows
+`Id<Customer>` then `Id<Region>` to project `Region.name`.  At
+emission time:
+
+- Auxiliaries arrive in dependency order (shortest path first).
+- Customer is bulk-loaded from `rows.map(r => r.customerId)`.
+- Region is then bulk-loaded from
+  `[...customerById.values()].map(c => c.regionId)` (Hono) /
+  `customerById.Values.Select(c => c.RegionId).ToList()` (.NET).
+- Projection chains the lookups:
+  `regionByCustomerId.get(customerById.get(r.customerId)!.regionId)!.name`.
+
+Each unique path produces one map; shared prefixes share their
+loads (so `customerName = customerId.name` and
+`regionName = customerId.regionId.name` in the same view share
+the Customer load).
+
+### Remaining limits
+
 - **Non-nullable Id only**.  `Id<X>?` follows aren't supported;
-  emit hardcodes a non-null assertion.
+  emit hardcodes a non-null assertion that throws at runtime if a
+  reference dangles.
 - **No 1:N joins**.  Cardinality stays 1:1 per follow — each
   source row produces exactly one output row.
 - **No `join … on …` syntax**.  If you need a join key that
   isn't an `Id<X>`, you're stuck with two views or a
-  hand-written endpoint until slice 4.
+  hand-written endpoint until slice 5.
 
 ## What's NOT yet supported
 

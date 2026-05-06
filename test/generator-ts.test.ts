@@ -519,6 +519,48 @@ describe("typescript generator", () => {
     expect(wf).toMatch(/await __handler\(order, \{ amount: amount \}\);/);
   });
 
+  it("multi-hop Id<X>.Id<Y>.field follow loads aggregates in dependency order", async () => {
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(`
+      context Sales {
+        enum OrderStatus { Draft, Confirmed }
+        aggregate Region { name: string display, countryCode: string }
+        aggregate Customer { name: string display, regionId: Id<Region> }
+        aggregate Order { customerId: Id<Customer>, status: OrderStatus }
+        repository Regions for Region { }
+        repository Customers for Customer { }
+        repository Orders for Order { }
+        view OrdersWithRegion {
+          orderId: Id<Order>
+          regionName: string
+          countryCode: string
+          from Order where status == Confirmed
+          bind orderId = id,
+               regionName = customerId.regionId.name,
+               countryCode = customerId.regionId.countryCode
+        }
+      }
+    `, { validation: true });
+    const wf = generateTypeScript(doc.parseResult.value as Model).get(
+      "http/views.ts",
+    )!;
+
+    // Both auxiliaries loaded; Customer first, then Region keyed by
+    // customer.regionId values.
+    expect(wf).toMatch(
+      /const customerById = new Map\(\(await customerRepo\.findManyByIds\(rows\.map\(\(r\) => r\.customerId\)\)\)/,
+    );
+    expect(wf).toMatch(
+      /const regionByCustomerId = new Map\(\(await regionRepo\.findManyByIds\(\[\.\.\.customerById\.values\(\)\]\.map\(\(__a\) => __a\.regionId\)\)\)/,
+    );
+    // Chained projection.
+    expect(wf).toMatch(
+      /regionName: regionByCustomerId\.get\(customerById\.get\(r\.customerId as string\)!\.regionId as string\)!\.name/,
+    );
+  });
+
   it("emits explicit isolationLevel for transactional(level) workflows", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);

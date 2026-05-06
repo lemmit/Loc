@@ -114,18 +114,21 @@ function renderHandler(
   // handler entry, and rewrites `Id<X>` follow refs in the
   // projection.
   const auxiliaries = view.output?.auxiliaries ?? [];
-  const auxMaps = new Map(
-    auxiliaries.map(
-      (aux) => [aux.sourceField, `${camel(aux.aggName)}ById`] as const,
-    ),
-  );
-  // Repo fields + ctor injection.
+  // Path → mapVar+aggName lookup, populated as we walk the
+  // dependency-ordered auxiliaries.  Single-hop entries seed it;
+  // multi-hop entries reference earlier prefix entries.
+  const pathToMap = new Map<string, { mapVar: string; aggName: string }>();
+  // Repo fields + ctor injection — deduped per aggregate (the same
+  // aggregate may appear on multiple paths).
   const fields: string[] = [
     `    private readonly I${agg.name}Repository _repo;`,
   ];
   const ctorParams: string[] = [`I${agg.name}Repository repo`];
   const ctorAssigns: string[] = [`_repo = repo`];
+  const seenAggs = new Set<string>();
   for (const aux of auxiliaries) {
+    if (seenAggs.has(aux.aggName)) continue;
+    seenAggs.add(aux.aggName);
     const fieldName = `_${camel(aux.aggName)}Repo`;
     fields.push(`    private readonly I${aux.aggName}Repository ${fieldName};`);
     ctorParams.push(`I${aux.aggName}Repository ${fieldName.replace(/^_/, "")}`);
@@ -135,17 +138,19 @@ function renderHandler(
     ctorParams.length === 1
       ? `    public ${handlerName}(${ctorParams[0]}) => _repo = repo;`
       : `    public ${handlerName}(${ctorParams.join(", ")})\n    {\n        ${ctorAssigns.join("; ")};\n    }`;
-  // Bulk-load lines — one per auxiliary.
+  // Bulk-load lines — one per auxiliary path, in dependency order.
   const auxLines: string[] = [];
   for (const aux of auxiliaries) {
     const repoField = `_${camel(aux.aggName)}Repo`;
-    const mapVar = auxMaps.get(aux.sourceField)!;
+    const mapVar = aux.mapVar;
+    const idsExpr = csIdsSourceForAux(aux, pathToMap);
     auxLines.push(
-      `        var ${mapVar} = (await ${repoField}.FindManyByIdsAsync(domain.Select(d => d.${pascal(aux.sourceField)}).ToList(), ct)).ToDictionary(__a => __a.Id);`,
+      `        var ${mapVar} = (await ${repoField}.FindManyByIdsAsync(${idsExpr}, ct)).ToDictionary(__a => __a.Id);`,
     );
+    pathToMap.set(aux.path.join("."), { mapVar, aggName: aux.aggName });
   }
   const projection = view.output
-    ? projectFullForm(view, ctx, auxMaps)
+    ? projectFullForm(view, ctx, pathToMap)
     : projectEntityExpr("d", agg, ctx);
   // Imports.  Shorthand needs the aggregate's Responses namespace;
   // full form needs only the local Views namespace (its row record
@@ -183,47 +188,88 @@ ${auxLines.join("\n")}${auxLines.length > 0 ? "\n" : ""}        return domain.Se
 `;
 }
 
-/** Render a full-form view's per-row projection.  Each bind
- *  renders rooted at `d` (the row variable), with `Id<X>` follow
- *  refs rewritten to dictionary lookups when the view declared
- *  any auxiliaries.  Then the rendered expression runs through
- *  `projectToResponse` for wire-shape conversion (Id → Guid via
- *  `.Value`, enum → string via `.ToString()`, etc.). */
 function projectFullForm(
   view: ViewIR,
   ctx: BoundedContextIR,
-  auxMaps: Map<string, string>,
+  pathToMap: Map<string, { mapVar: string; aggName: string }>,
 ): string {
   const args = view.output!.fields.map((f) => {
     const bind = view.output!.binds.find((b) => b.name === f.name)!;
-    const rendered = renderBindWithFollowsCs(bind.expr, "d", auxMaps);
+    const rendered = renderBindWithFollowsCs(bind.expr, "d", pathToMap);
     return projectToResponse(rendered, f.type, ctx);
   });
   return `new ${pascal(view.name)}Row(${args.join(", ")})`;
 }
 
-/** C# analogue of the Hono renderBindWithFollows.  Single-hop
- *  `Id<X>` follow rewrites: a `member` access whose receiver is a
- *  `ref` of `kind: "id"` becomes `<auxMap>[<thisName>.<sourceField>].<member>`.
- *  All other expression shapes delegate to the standard renderCsExpr
- *  with the same `thisName`. */
+/** Render a bind expression with chained `Id<X>` follow rewriting
+ *  for .NET.  At each `member` whose receiverType is `Id<X>`, the
+ *  access becomes `<map>[<receiverRendered>].<Member>`; receiver
+ *  recursively follows the same walk for multi-hop chains.  Other
+ *  shapes delegate to renderCsExpr with the same thisName. */
 function renderBindWithFollowsCs(
   expr: ExprIR,
   thisName: string,
-  auxMaps: Map<string, string>,
+  pathToMap: Map<string, { mapVar: string; aggName: string }>,
 ): string {
-  if (
-    expr.kind === "member" &&
-    expr.receiver.kind === "ref" &&
-    expr.receiver.type?.kind === "id"
-  ) {
-    const sourceField = expr.receiver.name;
-    const mapVar = auxMaps.get(sourceField);
-    if (mapVar) {
-      return `${mapVar}[${thisName}.${pascal(sourceField)}].${pascal(expr.member)}`;
+  if (expr.kind === "member" && expr.receiverType.kind === "id") {
+    const path = idFollowPathCs(expr.receiver);
+    if (path) {
+      const map = pathToMap.get(path.join("."));
+      if (map) {
+        const inner = renderIdReceiverCs(expr.receiver, thisName, pathToMap);
+        return `${map.mapVar}[${inner}].${pascal(expr.member)}`;
+      }
     }
   }
   return renderCsExpr(expr, { thisName });
+}
+
+function renderIdReceiverCs(
+  expr: ExprIR,
+  thisName: string,
+  pathToMap: Map<string, { mapVar: string; aggName: string }>,
+): string {
+  if (expr.kind === "ref") {
+    return `${thisName}.${pascal(expr.name)}`;
+  }
+  if (expr.kind === "member" && expr.receiverType.kind === "id") {
+    const path = idFollowPathCs(expr.receiver);
+    if (path) {
+      const map = pathToMap.get(path.join("."));
+      if (map) {
+        const inner = renderIdReceiverCs(expr.receiver, thisName, pathToMap);
+        return `${map.mapVar}[${inner}].${pascal(expr.member)}`;
+      }
+    }
+  }
+  return renderCsExpr(expr, { thisName });
+}
+
+function idFollowPathCs(e: ExprIR): string[] | undefined {
+  if (e.kind === "ref" && e.type?.kind === "id") return [e.name];
+  if (e.kind === "member" && e.receiverType.kind === "id") {
+    const inner = idFollowPathCs(e.receiver);
+    if (!inner) return undefined;
+    return [...inner, e.member];
+  }
+  return undefined;
+}
+
+/** Pick the C# id-source expression for an auxiliary's bulk load.
+ *  Length-1 paths source from `domain` (the source aggregate
+ *  results); length-2+ paths source from the prior map's values. */
+function csIdsSourceForAux(
+  aux: { path: string[]; aggName: string; mapVar: string },
+  pathToMap: Map<string, { mapVar: string; aggName: string }>,
+): string {
+  if (aux.path.length === 1) {
+    return `domain.Select(d => d.${pascal(aux.path[0]!)}).ToList()`;
+  }
+  const prevPath = aux.path.slice(0, -1).join(".");
+  const prev = pathToMap.get(prevPath);
+  if (!prev) return `new System.Collections.Generic.List<object>()`;
+  const finalField = aux.path[aux.path.length - 1]!;
+  return `${prev.mapVar}.Values.Select(__a => __a.${pascal(finalField)}).ToList()`;
 }
 
 function renderController(ctx: BoundedContextIR, ns: string): string {

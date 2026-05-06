@@ -553,6 +553,49 @@ describe(".NET generator", () => {
     );
   });
 
+  it("multi-hop Id<X>.Id<Y>.field follow loads aggregates in dependency order", async () => {
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(`
+      context Sales {
+        enum OrderStatus { Draft, Confirmed }
+        aggregate Region { name: string display, countryCode: string }
+        aggregate Customer { name: string display, regionId: Id<Region> }
+        aggregate Order { customerId: Id<Customer>, status: OrderStatus }
+        repository Regions for Region { }
+        repository Customers for Customer { }
+        repository Orders for Order { }
+        view OrdersWithRegion {
+          orderId: Id<Order>
+          regionName: string
+          from Order where status == Confirmed
+          bind orderId = id,
+               regionName = customerId.regionId.name
+        }
+      }
+    `, { validation: true });
+    const handler = generateDotnet(doc.parseResult.value as Model).get(
+      "Application/Views/OrdersWithRegionHandler.cs",
+    )!;
+
+    // Both repos injected.
+    expect(handler).toMatch(/private readonly ICustomerRepository _customerRepo;/);
+    expect(handler).toMatch(/private readonly IRegionRepository _regionRepo;/);
+    // Customer loaded first (depends on rows); Region loaded after,
+    // sourced from Customer values.
+    expect(handler).toMatch(
+      /var customerById = \(await _customerRepo\.FindManyByIdsAsync\(domain\.Select\(d => d\.CustomerId\)\.ToList\(\), ct\)\)\.ToDictionary\(__a => __a\.Id\);/,
+    );
+    expect(handler).toMatch(
+      /var regionByCustomerId = \(await _regionRepo\.FindManyByIdsAsync\(customerById\.Values\.Select\(__a => __a\.RegionId\)\.ToList\(\), ct\)\)\.ToDictionary\(__a => __a\.Id\);/,
+    );
+    // Projection walks the chain.
+    expect(handler).toMatch(
+      /regionByCustomerId\[customerById\[d\.CustomerId\]\.RegionId\]\.Name/,
+    );
+  });
+
   it("emits explicit IsolationLevel for transactional(level) workflows", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);

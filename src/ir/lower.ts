@@ -396,18 +396,25 @@ function lowerView(view: View, env: Env): ViewIR {
       expr: lowerExpr(b.expr, inner),
       type: inferExprType(b.expr, inner),
     }));
-    // Walk every bind expression for `Id<X>` follow patterns —
-    // member access whose receiver type is `kind: "id"`.  Each
-    // unique (sourceField, targetAgg) pair becomes an auxiliary
-    // bulk-load at view emission time.
-    const auxByKey = new Map<string, { sourceField: string; aggName: string }>();
+    // Walk every bind expression for `Id<X>` follow patterns;
+    // each unique path becomes one bulk-load + map at emission
+    // time.  Order by path length (shortest first) so each
+    // hop's prerequisites are guaranteed to load before it.
+    const auxByKey = new Map<string, { path: string[]; aggName: string }>();
     for (const b of binds) {
       collectIdFollows(b.expr, auxByKey);
     }
+    const ordered = [...auxByKey.values()].sort(
+      (a, b) => a.path.length - b.path.length,
+    );
+    const auxiliaries = ordered.map((a) => ({
+      ...a,
+      mapVar: mapVarForPath(a.path, a.aggName),
+    }));
     output = {
       fields: view.fields.map((p) => lowerField(p)),
       binds,
-      auxiliaries: [...auxByKey.values()],
+      auxiliaries,
     };
   }
   return {
@@ -419,27 +426,28 @@ function lowerView(view: View, env: Env): ViewIR {
 }
 
 /** Walk a bind expression's IR tree and capture every `Id<X>`
- *  follow as an auxiliary entry: a member-access node whose
- *  receiver is a `ref` of type `kind: "id"`.  Single-hop only —
- *  multi-hop snowflakes (`customerId.regionId.name`) are caught
- *  here too because each `member` node along the path emits its
- *  own follow, but the v1 emitter only handles the single-hop
- *  case (validator can tighten this later). */
+ *  follow as an auxiliary path entry.  Single-hop
+ *  (`customerId.name`) yields path `["customerId"]` with target
+ *  Customer; two-hop (`customerId.regionId.name`) yields paths
+ *  `["customerId"]` (Customer) AND `["customerId", "regionId"]`
+ *  (Region) — the longer path's prerequisites get loaded first
+ *  thanks to dependency ordering at emission time. */
 function collectIdFollows(
   expr: ExprIR,
-  out: Map<string, { sourceField: string; aggName: string }>,
+  out: Map<string, { path: string[]; aggName: string }>,
 ): void {
-  if (expr.kind === "member") {
-    const recv = expr.receiver;
-    if (recv.kind === "ref" && recv.type?.kind === "id") {
-      const key = `${recv.name}@${recv.type.targetName}`;
+  if (expr.kind === "member" && expr.receiverType.kind === "id") {
+    const path = idFollowPath(expr.receiver);
+    if (path) {
+      const key = path.join(".");
       if (!out.has(key)) {
-        out.set(key, {
-          sourceField: recv.name,
-          aggName: recv.type.targetName,
-        });
+        out.set(key, { path, aggName: expr.receiverType.targetName });
       }
     }
+    collectIdFollows(expr.receiver, out);
+    return;
+  }
+  if (expr.kind === "member") {
     collectIdFollows(expr.receiver, out);
     return;
   }
@@ -474,6 +482,39 @@ function collectIdFollows(
       for (const f of expr.fields) collectIdFollows(f.value, out);
       return;
   }
+}
+
+/** Map-variable name for an auxiliary at a given path.  Single-hop
+ *  paths get a clean `<agg>ById`; multi-hop paths suffix the
+ *  intermediate Pascal'd field names so two paths that happen to
+ *  reach the same target aggregate via different intermediates
+ *  get distinct map vars. */
+function mapVarForPath(path: string[], aggName: string): string {
+  const baseName = aggName.charAt(0).toLowerCase() + aggName.slice(1);
+  if (path.length === 1) return `${baseName}ById`;
+  // Multi-hop: e.g. ["customerId", "regionId"] → "regionByCustomerId"
+  const prefix = path
+    .slice(0, -1)
+    .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+    .join("");
+  return `${baseName}By${prefix}`;
+}
+
+/** Extract the chain of source-field names from an Id-typed
+ *  expression that's rooted in a `ref` and built up through
+ *  `member` accesses on Id-typed receivers.  Returns undefined for
+ *  any expression that doesn't fit this shape (calls, lambdas,
+ *  member access through non-Id receivers, etc.). */
+function idFollowPath(e: ExprIR): string[] | undefined {
+  if (e.kind === "ref" && e.type?.kind === "id") {
+    return [e.name];
+  }
+  if (e.kind === "member" && e.receiverType.kind === "id") {
+    const inner = idFollowPath(e.receiver);
+    if (!inner) return undefined;
+    return [...inner, e.member];
+  }
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------

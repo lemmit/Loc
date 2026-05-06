@@ -156,27 +156,29 @@ function emitViewRoute(
   out.push(`    const repo = new ${view.aggregateName}Repository(db, events);`);
   out.push(`    const rows = await repo.${camel(view.name)}();`);
   if (view.output) {
-    // Slice 3: bulk-load every foreign aggregate referenced by the
-    // bind expressions via `Id<X>` follow.  Each auxiliary becomes
-    // a `<Aux>ById` Map keyed by the aggregate's id; the bind
-    // renderer rewrites `r.customerId.name` → `customerById.get(
-    // r.customerId)!.name`.
-    const auxMaps = new Map<string, string>(); // sourceField -> mapVar
+    // Bulk-load every foreign aggregate referenced by `Id<X>`
+    // follows in the bind expressions.  Auxiliaries arrive in
+    // dependency order (shortest path first); each one's id source
+    // is either the source rows (length-1 paths) or the map of a
+    // shorter prefix path (length-2+).  Lookup chain in the
+    // projection mirrors the same path.
+    const pathToMap = new Map<string, { mapVar: string; aggName: string }>();
     for (const aux of view.output.auxiliaries) {
       const repoVar = `${camel(aux.aggName)}Repo`;
-      const mapVar = `${camel(aux.aggName)}ById`;
+      const mapVar = aux.mapVar;
       out.push(
         `    const ${repoVar} = new ${aux.aggName}Repository(db, events);`,
       );
+      const idsSource = idsSourceForAux(aux, pathToMap);
       out.push(
-        `    const ${mapVar} = new Map((await ${repoVar}.findManyByIds(rows.map((r) => r.${aux.sourceField}))).map((__a) => [__a.id as string, __a]));`,
+        `    const ${mapVar} = new Map((await ${repoVar}.findManyByIds(${idsSource})).map((__a) => [__a.id as string, __a]));`,
       );
-      auxMaps.set(aux.sourceField, mapVar);
+      pathToMap.set(aux.path.join("."), { mapVar, aggName: aux.aggName });
     }
     const projectedFields = view.output.binds
       .map(
         (b) =>
-          `      ${b.name}: ${renderBindWithFollows(b.expr, "r", auxMaps)}`,
+          `      ${b.name}: ${renderBindWithFollows(b.expr, "r", pathToMap)}`,
       )
       .join(",\n");
     out.push(`    const projected = rows.map((r) => ({\n${projectedFields},\n    }));`);
@@ -193,29 +195,84 @@ function emitViewRoute(
   return out;
 }
 
-/** Render a view bind expression with `Id<X>` follow rewriting.
- *  Single-hop only: a `member` access whose receiver is a `ref` of
- *  type `kind: "id"` becomes `<auxMap>.get(<thisName>.<sourceField>)!.<member>`.
- *  All other expression shapes delegate to the standard
- *  `renderTsExpr(expr, { thisName })` so the full expression
- *  language stays available for non-follow projections. */
+/** Pick the id-source expression for an auxiliary's bulk load.
+ *  Length-1 paths source from the row var (`rows.map(r => r.<f>)`);
+ *  length-2+ paths source from the prior map (the auxiliary whose
+ *  path is the current path's prefix). */
+function idsSourceForAux(
+  aux: { path: string[]; aggName: string; mapVar: string },
+  pathToMap: Map<string, { mapVar: string; aggName: string }>,
+): string {
+  if (aux.path.length === 1) {
+    return `rows.map((r) => r.${aux.path[0]!})`;
+  }
+  const prevPath = aux.path.slice(0, -1).join(".");
+  const prev = pathToMap.get(prevPath);
+  if (!prev) return `[]`;
+  const finalField = aux.path[aux.path.length - 1]!;
+  return `[...${prev.mapVar}.values()].map((__a) => __a.${finalField})`;
+}
+
+/** Render a view bind expression with chained `Id<X>` follow
+ *  rewriting.  At each `member` whose receiverType is `Id<X>`,
+ *  the access becomes `<map>.get(<receiverRendered> as string)!.<member>`
+ *  where `<receiverRendered>` is recursively the same walker.
+ *  Falls back to standard `renderTsExpr` for non-follow shapes. */
 function renderBindWithFollows(
   expr: ExprIR,
   thisName: string,
-  auxMaps: Map<string, string>,
+  pathToMap: Map<string, { mapVar: string; aggName: string }>,
 ): string {
-  if (
-    expr.kind === "member" &&
-    expr.receiver.kind === "ref" &&
-    expr.receiver.type?.kind === "id"
-  ) {
-    const sourceField = expr.receiver.name;
-    const mapVar = auxMaps.get(sourceField);
-    if (mapVar) {
-      return `${mapVar}.get(${thisName}.${sourceField} as string)!.${expr.member}`;
+  if (expr.kind === "member" && expr.receiverType.kind === "id") {
+    const path = idFollowPath(expr.receiver);
+    if (path) {
+      const key = path.join(".");
+      const map = pathToMap.get(key);
+      if (map) {
+        const receiverRendered = renderIdReceiver(expr.receiver, thisName, pathToMap);
+        return `${map.mapVar}.get(${receiverRendered} as string)!.${expr.member}`;
+      }
     }
   }
   return renderTsExpr(expr, { thisName });
+}
+
+/** Render an Id-typed expression rooted in a `ref` (single hop) or
+ *  a chain of Id-typed member accesses (multi-hop).  For multi-hop,
+ *  each intermediate hop uses its corresponding map's `.get(...)!`. */
+function renderIdReceiver(
+  expr: ExprIR,
+  thisName: string,
+  pathToMap: Map<string, { mapVar: string; aggName: string }>,
+): string {
+  if (expr.kind === "ref") {
+    return `${thisName}.${expr.name}`;
+  }
+  if (expr.kind === "member" && expr.receiverType.kind === "id") {
+    const path = idFollowPath(expr.receiver);
+    if (path) {
+      const key = path.join(".");
+      const map = pathToMap.get(key);
+      if (map) {
+        const inner = renderIdReceiver(expr.receiver, thisName, pathToMap);
+        return `${map.mapVar}.get(${inner} as string)!.${expr.member}`;
+      }
+    }
+  }
+  return renderTsExpr(expr, { thisName });
+}
+
+/** Local copy of the lowering's `idFollowPath` for emission-time
+ *  path checks.  Single source of truth would be nice; for now
+ *  this stays small and self-contained. */
+function idFollowPath(e: ExprIR): string[] | undefined {
+  if (e.kind === "ref" && e.type?.kind === "id") return [e.name];
+  if (e.kind === "member" && e.receiverType.kind === "id") {
+    const inner = idFollowPath(e.receiver);
+    if (!inner) return undefined;
+    return [...inner, e.member];
+  }
+  return undefined;
 }
 
 /** Zod schema for a view-output field's TS type.  Decimals stay as

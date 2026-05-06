@@ -592,6 +592,13 @@ function memberType(t: TypeIR, name: string, env: Env): TypeIR {
     const vo = findValueObjectByName(env, t.name);
     if (vo) return memberOnValueObject(vo, name);
   }
+  if (t.kind === "id") {
+    // `Id<X>.member` — follow the typed reference into X's schema.
+    // Mirrors the same case in `stepInto`; both `inferExprType` and
+    // `lowerExpr` need it for view bind expressions to multi-hop.
+    const target = findEntityByName(env, t.targetName);
+    if (target) return memberOnEntity(target, name);
+  }
   if (t.kind === "primitive" && t.name === "string" && name === "length") {
     return { kind: "primitive", name: "int" };
   }
