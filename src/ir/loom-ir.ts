@@ -203,7 +203,61 @@ export interface BoundedContextIR {
   events: EventIR[];
   aggregates: AggregateIR[];
   repositories: RepositoryIR[];
+  workflows: WorkflowIR[];
 }
+
+/** Context-level orchestration that loads + creates aggregates,
+ *  invokes their public operations, and emits orchestration-level
+ *  events.  Default save semantics: each aggregate's save commits
+ *  independently.  `transactional: true` wraps everything in one DB
+ *  transaction. */
+export interface WorkflowIR {
+  name: string;
+  params: ParamIR[];
+  transactional: boolean;
+  statements: WorkflowStmtIR[];
+  /** Computed at lowering: which let-bindings need a save call at
+   *  workflow exit, in declaration order.  `Agg.create(...)` always
+   *  saves; `Repo.getById(...)`/find saves only if a later op-call
+   *  targets the binding. */
+  savesAtExit: { name: string; aggName: string; repoName: string }[];
+}
+
+export type WorkflowStmtIR =
+  | { kind: "precondition"; expr: ExprIR; source: string }
+  | {
+      kind: "emit";
+      eventName: string;
+      fields: { name: string; value: ExprIR }[];
+    }
+  | {
+      kind: "factory-let";
+      name: string;
+      aggName: string;
+      fields: { name: string; value: ExprIR }[];
+    }
+  | {
+      kind: "repo-let";
+      name: string;
+      repoName: string;
+      aggName: string;
+      method: string;
+      args: ExprIR[];
+      returnType: TypeIR;
+    }
+  | {
+      kind: "expr-let";
+      name: string;
+      type: TypeIR;
+      expr: ExprIR;
+    }
+  | {
+      kind: "op-call";
+      target: string;
+      aggName: string;
+      op: string;
+      args: ExprIR[];
+    };
 
 export interface LoomModel {
   /**

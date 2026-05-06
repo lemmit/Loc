@@ -4,6 +4,7 @@ import type {
   EntityPart,
   EnumDecl,
   EventDecl,
+  Expression,
   FunctionDecl,
   Model,
   Operation,
@@ -11,13 +12,16 @@ import type {
   Repository,
   Statement,
   ValueObject,
+  Workflow,
 } from "../language/generated/ast.js";
 import {
   isAggregate,
+  isAssignOrCallStmt,
   isBoundedContext,
   isContainment,
   isDeployable,
   isDerivedProp,
+  isEmitStmt,
   isEntityPart,
   isEnumDecl,
   isEventDecl,
@@ -25,14 +29,20 @@ import {
   isExpectThrowsStmt,
   isFunctionDecl,
   isInvariant,
+  isLetStmt,
+  isMemberAccess,
   isModule,
+  isNameRef,
+  isObjectLit,
   isOperation,
+  isPreconditionStmt,
   isProperty,
   isRepository,
   isSystem,
   isTestBlock,
   isTestE2E,
   isValueObject,
+  isWorkflow,
 } from "../language/generated/ast.js";
 import type {
   AggregateIR,
@@ -43,6 +53,7 @@ import type {
   EntityPartIR,
   EnumIR,
   EventIR,
+  ExprIR,
   FieldIR,
   FunctionIR,
   IdValueType,
@@ -57,13 +68,17 @@ import type {
   SystemIR,
   TestIR,
   TestStmtIR,
+  TypeIR,
   ValueObjectIR,
+  WorkflowIR,
+  WorkflowStmtIR,
 } from "./loom-ir.js";
 import {
   cstText,
   inAggregate,
   inPart,
   inValueObject,
+  inferExprType,
   lowerExpr,
   lowerStatement,
   lowerType,
@@ -205,12 +220,14 @@ function lowerContext(ctx: BoundedContext): BoundedContextIR {
   const events: EventIR[] = [];
   const aggregates: AggregateIR[] = [];
   const repositories: RepositoryIR[] = [];
+  const workflows: WorkflowIR[] = [];
   for (const m of ctx.members) {
     if (isEnumDecl(m)) enums.push(lowerEnum(m));
     else if (isValueObject(m)) valueObjects.push(lowerValueObject(m, env));
     else if (isEventDecl(m)) events.push(lowerEvent(m));
     else if (isAggregate(m)) aggregates.push(lowerAggregate(m, env));
     else if (isRepository(m)) repositories.push(lowerRepository(m));
+    else if (isWorkflow(m)) workflows.push(lowerWorkflow(m, env, ctx));
   }
   return {
     name: ctx.name,
@@ -219,6 +236,7 @@ function lowerContext(ctx: BoundedContext): BoundedContextIR {
     events,
     aggregates,
     repositories,
+    workflows,
   };
 }
 
@@ -430,5 +448,296 @@ function lowerOperation(op: Operation, env: Env): OperationIR {
     params,
     statements: stmts,
     extern: !!op.extern,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Workflow lowering
+//
+// Body statements are parsed using the operation-body Statement rules
+// (precondition, let, emit, AssignOrCallStmt) but the workflow surface
+// is a strict subset:
+//   - LetStmt RHS may be `Agg.create({...})` (factory-let),
+//     `Repo.method(args)` (repo-let), or any other Expression
+//     (expr-let).
+//   - AssignOrCallStmt is allowed only in its bare-call form
+//     `name.op(args)` — mutation forms (`:=`, `+=`, `-=`) belong to
+//     aggregate operations and surface as validator errors.
+//   - precondition / emit lower identically to operation bodies.
+//
+// `savesAtExit` is computed after the walk: every factory-let always
+// saves; a repo-let saves only when a later `op-call` targets it.
+// ---------------------------------------------------------------------------
+
+function lowerWorkflow(
+  wf: Workflow,
+  env: Env,
+  ctx: BoundedContext,
+): WorkflowIR {
+  let inner = env;
+  const params: ParamIR[] = [];
+  for (const p of wf.params) {
+    const t = lowerType(p.type);
+    params.push({ name: p.name, type: t });
+    inner = withLocal(inner, p.name, "param", t);
+  }
+  const aggsByName = new Map<string, Aggregate>();
+  const reposByName = new Map<string, Repository>();
+  const repoForAgg = new Map<string, string>(); // aggName -> repoName
+  for (const m of ctx.members) {
+    if (isAggregate(m)) aggsByName.set(m.name, m);
+    else if (isRepository(m)) {
+      reposByName.set(m.name, m);
+      const target = m.aggregate?.ref;
+      if (target?.name) repoForAgg.set(target.name, m.name);
+    }
+  }
+  const letAggs = new Map<string, { aggName: string; repoName: string }>();
+  const statements: WorkflowStmtIR[] = [];
+  for (const s of wf.body) {
+    const lowered = lowerWorkflowStatement(
+      s,
+      inner,
+      aggsByName,
+      reposByName,
+      repoForAgg,
+    );
+    statements.push(lowered.stmt);
+    inner = lowered.envAfter;
+    if (lowered.binding) letAggs.set(lowered.binding.name, lowered.binding);
+  }
+  // savesAtExit: factory-lets always; repo-lets only when targeted
+  // by a later op-call (validator already restricts which statement
+  // shapes can mutate).
+  const opCallTargets = new Set<string>();
+  for (const st of statements) {
+    if (st.kind === "op-call") opCallTargets.add(st.target);
+  }
+  const savesAtExit: WorkflowIR["savesAtExit"] = [];
+  for (const st of statements) {
+    if (st.kind === "factory-let") {
+      const repoName = repoForAgg.get(st.aggName) ?? plural(st.aggName);
+      savesAtExit.push({ name: st.name, aggName: st.aggName, repoName });
+    } else if (st.kind === "repo-let" && opCallTargets.has(st.name)) {
+      savesAtExit.push({
+        name: st.name,
+        aggName: st.aggName,
+        repoName: st.repoName,
+      });
+    }
+  }
+  return {
+    name: wf.name,
+    params,
+    transactional: !!wf.transactional,
+    statements,
+    savesAtExit,
+  };
+}
+
+function plural(s: string): string {
+  if (s.endsWith("y") && !/[aeiou]y$/.test(s)) return s.slice(0, -1) + "ies";
+  if (/(s|x|z|ch|sh)$/.test(s)) return s + "es";
+  return s + "s";
+}
+
+interface LoweredWorkflowStmt {
+  stmt: WorkflowStmtIR;
+  envAfter: Env;
+  binding?: { name: string; aggName: string; repoName: string };
+}
+
+function lowerWorkflowStatement(
+  stmt: Statement,
+  env: Env,
+  aggsByName: Map<string, Aggregate>,
+  reposByName: Map<string, Repository>,
+  repoForAgg: Map<string, string>,
+): LoweredWorkflowStmt {
+  if (isPreconditionStmt(stmt)) {
+    return {
+      stmt: {
+        kind: "precondition",
+        expr: lowerExpr(stmt.expr, env),
+        source: cstText(stmt.expr),
+      },
+      envAfter: env,
+    };
+  }
+  if (isEmitStmt(stmt)) {
+    return {
+      stmt: {
+        kind: "emit",
+        eventName: stmt.event?.ref?.name ?? "Unknown",
+        fields: stmt.fields.map((f) => ({
+          name: f.name,
+          value: lowerExpr(f.value, env),
+        })),
+      },
+      envAfter: env,
+    };
+  }
+  if (isLetStmt(stmt)) {
+    const expr = stmt.expr;
+    // factory-let: `Agg.create({fields})`
+    const factory = matchFactoryCall(expr, aggsByName);
+    if (factory) {
+      const repoName =
+        repoForAgg.get(factory.aggName) ?? plural(factory.aggName);
+      const fields = factory.fields.map((f) => ({
+        name: f.name,
+        value: lowerExpr(f.value, env),
+      }));
+      const aggType: TypeIR = { kind: "entity", name: factory.aggName };
+      return {
+        stmt: {
+          kind: "factory-let",
+          name: stmt.name,
+          aggName: factory.aggName,
+          fields,
+        },
+        envAfter: withLocal(env, stmt.name, "let", aggType),
+        binding: { name: stmt.name, aggName: factory.aggName, repoName },
+      };
+    }
+    // repo-let: `Repo.method(args)`
+    const repoCall = matchRepoCall(expr, reposByName);
+    if (repoCall) {
+      const args = repoCall.args.map((a) => lowerExpr(a, env));
+      // Resolve the find's declared return type (or for getById:
+      // single non-null aggregate of the repo's target).
+      const repo = repoCall.repo;
+      const aggName = repo.aggregate?.ref?.name ?? "Unknown";
+      let returnType: TypeIR = { kind: "entity", name: aggName };
+      if (repoCall.method !== "getById") {
+        const find = repo.finds.find((f) => f.name === repoCall.method);
+        if (find) returnType = lowerType(find.returnType);
+      }
+      // The let binding's local type is the unwrapped aggregate
+      // (validator rejects array/optional repo-lets).  Use the
+      // declared return type so the validator can flag misuse.
+      const localType: TypeIR =
+        returnType.kind === "entity" ? returnType : returnType;
+      return {
+        stmt: {
+          kind: "repo-let",
+          name: stmt.name,
+          repoName: repo.name,
+          aggName,
+          method: repoCall.method,
+          args,
+          returnType,
+        },
+        envAfter: withLocal(env, stmt.name, "let", localType),
+        binding: { name: stmt.name, aggName, repoName: repo.name },
+      };
+    }
+    // expr-let: scalar / generic expression
+    const exprIR = lowerExpr(stmt.expr, env);
+    const t = inferExprType(stmt.expr, env);
+    return {
+      stmt: { kind: "expr-let", name: stmt.name, type: t, expr: exprIR },
+      envAfter: withLocal(env, stmt.name, "let", t),
+    };
+  }
+  if (isAssignOrCallStmt(stmt)) {
+    const lv = stmt.target;
+    if (!stmt.op && lv.call && lv.tail.length === 1) {
+      // `name.op(args)` — op-call on a let binding.
+      const aggName = aggNameForLocal(env, lv.head);
+      const args = (lv.args ?? []).map((a) => lowerExpr(a, env));
+      return {
+        stmt: {
+          kind: "op-call",
+          target: lv.head,
+          aggName: aggName ?? "Unknown",
+          op: lv.tail[0]!,
+          args,
+        },
+        envAfter: env,
+      };
+    }
+    // Anything else (mutation forms, bare calls, deep paths) becomes
+    // an expr-let with no name — represented as an expr-let with a
+    // synthetic placeholder so the validator can flag it.
+    const placeholder: ExprIR = {
+      kind: "ref",
+      name: lv.head,
+      refKind: "unknown",
+    };
+    return {
+      stmt: {
+        kind: "expr-let",
+        name: "__bad__",
+        type: { kind: "primitive", name: "string" },
+        expr: placeholder,
+      },
+      envAfter: env,
+    };
+  }
+  // Fallback — shouldn't hit, but stay safe.
+  return {
+    stmt: {
+      kind: "expr-let",
+      name: "__bad__",
+      type: { kind: "primitive", name: "string" },
+      expr: { kind: "ref", name: "unknown", refKind: "unknown" },
+    },
+    envAfter: env,
+  };
+}
+
+/** Look up the let-binding's bound aggregate name from its local
+ *  type.  Returns undefined when the binding doesn't resolve to an
+ *  entity. */
+function aggNameForLocal(env: Env, name: string): string | undefined {
+  const local = env.locals.get(name);
+  if (!local) return undefined;
+  if (local.type.kind === "entity") return local.type.name;
+  return undefined;
+}
+
+interface FactoryMatch {
+  aggName: string;
+  fields: { name: string; value: Expression }[];
+}
+
+function matchFactoryCall(
+  expr: Expression | undefined,
+  aggsByName: Map<string, Aggregate>,
+): FactoryMatch | undefined {
+  if (!expr || !isMemberAccess(expr) || !expr.call) return undefined;
+  if (expr.member !== "create") return undefined;
+  const recv = expr.receiver;
+  if (!isNameRef(recv)) return undefined;
+  if (!aggsByName.has(recv.name)) return undefined;
+  if (expr.args.length !== 1) return undefined;
+  const arg = expr.args[0];
+  if (!arg || !isObjectLit(arg)) return undefined;
+  return {
+    aggName: recv.name,
+    fields: arg.fields.map((f) => ({ name: f.name, value: f.value })),
+  };
+}
+
+interface RepoMatch {
+  repo: Repository;
+  method: string;
+  args: Expression[];
+}
+
+function matchRepoCall(
+  expr: Expression | undefined,
+  reposByName: Map<string, Repository>,
+): RepoMatch | undefined {
+  if (!expr || !isMemberAccess(expr) || !expr.call) return undefined;
+  const recv = expr.receiver;
+  if (!isNameRef(recv)) return undefined;
+  const repo = reposByName.get(recv.name);
+  if (!repo) return undefined;
+  return {
+    repo,
+    method: expr.member,
+    args: expr.args ?? [],
   };
 }

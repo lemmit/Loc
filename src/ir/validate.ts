@@ -53,6 +53,7 @@ export function validateLoomModel(loom: LoomModel): LoomDiagnostic[] {
     validateFindNameCollisions(c, diags);
     validateAggregateTestBodies(c, diags);
     validateExternOperations(c, diags);
+    validateWorkflows(c, diags);
   }
   return diags;
 }
@@ -816,4 +817,263 @@ function findAggregateBySlug(
     }
   }
   return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Workflow validation.
+//
+// A `workflow` is a context-level orchestration of aggregate operations.
+// The grammar reuses operation-body Statement rules; this validator
+// constrains the surface to what workflow lowering supports:
+//
+//   - factory-let (`let x = Agg.create({...})`)
+//   - repo-let (`let x = Repo.method(args)`) returning a single
+//     non-nullable aggregate
+//   - op-call (`name.op(args)` on a let binding)
+//   - precondition / emit
+//
+// Mutation forms (`:=`, `+=`, `-=`), bare-call statements, deep paths,
+// nullable / array repo returns, and op-calls on non-aggregate
+// bindings all surface as errors here.
+// ---------------------------------------------------------------------------
+
+function validateWorkflows(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+): void {
+  // Reserved-name guard: workflows share the context namespace with
+  // aggregates, value objects, enums, events, repositories.
+  const namesUsed = new Map<string, string>();
+  for (const a of ctx.aggregates) namesUsed.set(a.name, "aggregate");
+  for (const v of ctx.valueObjects) namesUsed.set(v.name, "value object");
+  for (const e of ctx.enums) namesUsed.set(e.name, "enum");
+  for (const ev of ctx.events) namesUsed.set(ev.name, "event");
+  for (const r of ctx.repositories) namesUsed.set(r.name, "repository");
+  const seenWorkflowNames = new Set<string>();
+  for (const wf of ctx.workflows) {
+    if (seenWorkflowNames.has(wf.name)) {
+      diags.push({
+        severity: "error",
+        message: `context '${ctx.name}': workflow '${wf.name}' is declared more than once.`,
+        source: `${ctx.name}/${wf.name}`,
+      });
+    } else {
+      seenWorkflowNames.add(wf.name);
+    }
+    const clash = namesUsed.get(wf.name);
+    if (clash) {
+      diags.push({
+        severity: "error",
+        message: `context '${ctx.name}': workflow '${wf.name}' collides with the ${clash} of the same name.`,
+        source: `${ctx.name}/${wf.name}`,
+      });
+    }
+    validateWorkflowBody(ctx, wf, diags);
+  }
+}
+
+function validateWorkflowBody(
+  ctx: BoundedContextIR,
+  wf: { name: string; statements: import("./loom-ir.js").WorkflowStmtIR[]; transactional: boolean; params: import("./loom-ir.js").ParamIR[] },
+  diags: LoomDiagnostic[],
+): void {
+  const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
+  const reposByName = new Map(
+    ctx.repositories.map((r) => [r.name, r] as const),
+  );
+  const eventsByName = new Map(ctx.events.map((e) => [e.name, e] as const));
+  const bindingAgg = new Map<string, string>(); // bindingName -> aggName
+  let mutated = false;
+
+  for (const st of wf.statements) {
+    switch (st.kind) {
+      case "precondition":
+        // Type-check happens at lowering via `inferExprType`; we'd
+        // need the AST node to re-check here.  Trust the lowered IR
+        // and emit a warning if the expression looks degenerate
+        // (kind === "ref" with refKind "unknown").
+        if (
+          st.expr.kind === "ref" &&
+          st.expr.refKind === "unknown"
+        ) {
+          diags.push({
+            severity: "error",
+            message: `workflow '${wf.name}': precondition references unknown name '${st.expr.name}'.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+        }
+        break;
+      case "emit": {
+        const ev = eventsByName.get(st.eventName);
+        if (!ev) {
+          diags.push({
+            severity: "error",
+            message: `workflow '${wf.name}': emit refers to unknown event '${st.eventName}'.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+          break;
+        }
+        const declared = new Set(ev.fields.map((f) => f.name));
+        const provided = new Set(st.fields.map((f) => f.name));
+        for (const f of declared) {
+          if (!provided.has(f)) {
+            diags.push({
+              severity: "error",
+              message: `workflow '${wf.name}': emit '${ev.name}' is missing field '${f}'.`,
+              source: `${ctx.name}/${wf.name}`,
+            });
+          }
+        }
+        for (const f of provided) {
+          if (!declared.has(f)) {
+            diags.push({
+              severity: "error",
+              message: `workflow '${wf.name}': emit '${ev.name}' has unknown field '${f}'.`,
+              source: `${ctx.name}/${wf.name}`,
+            });
+          }
+        }
+        mutated = true;
+        break;
+      }
+      case "factory-let": {
+        const agg = aggsByName.get(st.aggName);
+        if (!agg) {
+          diags.push({
+            severity: "error",
+            message: `workflow '${wf.name}': '${st.aggName}.create(...)' references unknown aggregate '${st.aggName}'.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+          break;
+        }
+        const required = agg.fields.filter((f) => !f.optional).map((f) => f.name);
+        const provided = new Set(st.fields.map((f) => f.name));
+        for (const r of required) {
+          if (!provided.has(r)) {
+            diags.push({
+              severity: "error",
+              message: `workflow '${wf.name}': '${st.aggName}.create(...)' is missing required field '${r}'.`,
+              source: `${ctx.name}/${wf.name}`,
+            });
+          }
+        }
+        const allowed = new Set(agg.fields.map((f) => f.name));
+        for (const p of provided) {
+          if (!allowed.has(p)) {
+            diags.push({
+              severity: "error",
+              message: `workflow '${wf.name}': '${st.aggName}.create(...)' has unknown field '${p}'.`,
+              source: `${ctx.name}/${wf.name}`,
+            });
+          }
+        }
+        bindingAgg.set(st.name, st.aggName);
+        mutated = true;
+        break;
+      }
+      case "repo-let": {
+        const repo = reposByName.get(st.repoName);
+        if (!repo) {
+          diags.push({
+            severity: "error",
+            message: `workflow '${wf.name}': '${st.repoName}.${st.method}(...)' references unknown repository '${st.repoName}'.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+          break;
+        }
+        if (
+          st.method !== "getById" &&
+          !repo.finds.some((f) => f.name === st.method)
+        ) {
+          diags.push({
+            severity: "error",
+            message: `workflow '${wf.name}': repository '${st.repoName}' has no method '${st.method}'.  Available: getById, ${repo.finds.map((f) => f.name).join(", ") || "(no declared finds)"}.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+          break;
+        }
+        // Reject array / nullable returns — workflow body has no
+        // iteration / null-handling vocab in v1.  getById is always
+        // a single non-nullable aggregate (the impl throws on miss).
+        if (st.method !== "getById") {
+          if (st.returnType.kind === "array") {
+            diags.push({
+              severity: "error",
+              message: `workflow '${wf.name}': '${st.repoName}.${st.method}(...)' returns an array; v1 supports only single non-nullable aggregates.  Split iteration into a follow-up workflow or use getById.`,
+              source: `${ctx.name}/${wf.name}`,
+            });
+            break;
+          }
+          if (st.returnType.kind === "optional") {
+            diags.push({
+              severity: "error",
+              message: `workflow '${wf.name}': '${st.repoName}.${st.method}(...)' returns a nullable; v1 supports only single non-nullable aggregates.  Use getById (throws → 404) instead.`,
+              source: `${ctx.name}/${wf.name}`,
+            });
+            break;
+          }
+        }
+        bindingAgg.set(st.name, st.aggName);
+        break;
+      }
+      case "op-call": {
+        const aggName = bindingAgg.get(st.target);
+        if (!aggName) {
+          diags.push({
+            severity: "error",
+            message: `workflow '${wf.name}': '${st.target}.${st.op}(...)' references unknown let-binding '${st.target}', or '${st.target}' isn't bound to an aggregate.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+          break;
+        }
+        const agg = aggsByName.get(aggName);
+        if (!agg) break;
+        const op = agg.operations.find((o) => o.name === st.op);
+        if (!op) {
+          diags.push({
+            severity: "error",
+            message: `workflow '${wf.name}': aggregate '${aggName}' has no operation '${st.op}'.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+          break;
+        }
+        if (op.visibility === "private") {
+          diags.push({
+            severity: "error",
+            message: `workflow '${wf.name}': '${aggName}.${op.name}' is private.  Workflows can only call public operations.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+          break;
+        }
+        if (op.extern) {
+          diags.push({
+            severity: "error",
+            message: `workflow '${wf.name}': '${aggName}.${op.name}' is an extern operation.  Extern ops are reachable only via their HTTP route + user handler, not from another orchestration layer.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+          break;
+        }
+        mutated = true;
+        break;
+      }
+      case "expr-let": {
+        if (st.name === "__bad__") {
+          diags.push({
+            severity: "error",
+            message: `workflow '${wf.name}': statement isn't a recognised workflow form.  Allowed: precondition, let (factory / repo / scalar), name.op(args), emit.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+        }
+        break;
+      }
+    }
+  }
+
+  if (wf.transactional && !mutated) {
+    diags.push({
+      severity: "warning",
+      message: `workflow '${wf.name}': declared 'transactional' but does not mutate any aggregate or emit any event — the keyword has no effect.`,
+      source: `${ctx.name}/${wf.name}`,
+    });
+  }
 }

@@ -587,4 +587,236 @@ describe("Loom IR validation (post-lowering)", async () => {
     const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
     expect(errors, JSON.stringify(errors)).toEqual([]);
   });
+
+  // -----------------------------------------------------------------------
+  // Workflow validation
+  // -----------------------------------------------------------------------
+
+  it("accepts a well-formed workflow (factory + getById + op-call + emit)", async () => {
+    const loom = await loomFrom(`
+      context T {
+        enum OrderStatus { Draft, Confirmed }
+        aggregate Customer {
+          name: string display
+          creditLimit: decimal
+          operation deductCredit(amount: decimal) {
+            precondition amount > 0
+            creditLimit := creditLimit - amount
+          }
+        }
+        aggregate Order {
+          customerId: Id<Customer>
+          status: OrderStatus
+          placedAt: datetime
+        }
+        repository Customers for Customer { }
+        repository Orders for Order { }
+        event OrderPlaced { order: Id<Order>, at: datetime }
+        workflow placeOrder(customerId: Id<Customer>, amount: decimal, placedAt: datetime) {
+          precondition amount > 0
+          let customer = Customers.getById(customerId)
+          customer.deductCredit(amount)
+          let order = Order.create({
+            customerId: customerId,
+            status: Draft,
+            placedAt: placedAt
+          })
+          emit OrderPlaced { order: order.id, at: placedAt }
+        }
+      }
+    `);
+    const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
+    expect(errors, JSON.stringify(errors)).toEqual([]);
+  });
+
+  it("accepts a transactional workflow", async () => {
+    const loom = await loomFrom(`
+      context T {
+        aggregate Customer {
+          name: string display
+          creditLimit: decimal
+          operation addCredit(amount: decimal) {
+            precondition amount > 0
+            creditLimit := creditLimit + amount
+          }
+        }
+        repository Customers for Customer { }
+        workflow topUp(customerId: Id<Customer>, amount: decimal) transactional {
+          precondition amount > 0
+          let c = Customers.getById(customerId)
+          c.addCredit(amount)
+        }
+      }
+    `);
+    const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
+    expect(errors, JSON.stringify(errors)).toEqual([]);
+  });
+
+  it("rejects calling a private op from a workflow", async () => {
+    const loom = await loomFrom(`
+      context T {
+        aggregate Customer {
+          name: string display
+          private operation secret() { }
+        }
+        repository Customers for Customer { }
+        workflow w(customerId: Id<Customer>) {
+          let c = Customers.getById(id)
+          c.secret()
+        }
+      }
+    `);
+    const diags = validateLoomModel(loom);
+    expect(
+      diags.some(
+        (d) =>
+          d.severity === "error" &&
+          /'Customer\.secret' is private/.test(d.message),
+      ),
+      JSON.stringify(diags),
+    ).toBe(true);
+  });
+
+  it("rejects calling an extern op from a workflow", async () => {
+    const loom = await loomFrom(`
+      context T {
+        aggregate Customer {
+          name: string display
+          operation confirm() extern { precondition name.length > 0 }
+        }
+        repository Customers for Customer { }
+        workflow w(customerId: Id<Customer>) {
+          let c = Customers.getById(id)
+          c.confirm()
+        }
+      }
+    `);
+    const diags = validateLoomModel(loom);
+    expect(
+      diags.some(
+        (d) =>
+          d.severity === "error" &&
+          /'Customer\.confirm' is an extern operation/.test(d.message),
+      ),
+      JSON.stringify(diags),
+    ).toBe(true);
+  });
+
+  it("rejects unknown repo method from a workflow", async () => {
+    const loom = await loomFrom(`
+      context T {
+        aggregate Customer { name: string display }
+        repository Customers for Customer { }
+        workflow w(customerId: Id<Customer>) {
+          let c = Customers.byMagic(id)
+        }
+      }
+    `);
+    const diags = validateLoomModel(loom);
+    expect(
+      diags.some(
+        (d) =>
+          d.severity === "error" &&
+          /repository 'Customers' has no method 'byMagic'/.test(d.message),
+      ),
+      JSON.stringify(diags),
+    ).toBe(true);
+  });
+
+  it("rejects Agg.create({...}) with missing required fields", async () => {
+    const loom = await loomFrom(`
+      context T {
+        aggregate Customer {
+          name: string display
+          email: string
+        }
+        repository Customers for Customer { }
+        workflow makeOne(name: string) {
+          let c = Customer.create({ name: name })
+        }
+      }
+    `);
+    const diags = validateLoomModel(loom);
+    expect(
+      diags.some(
+        (d) =>
+          d.severity === "error" &&
+          /missing required field 'email'/.test(d.message),
+      ),
+      JSON.stringify(diags),
+    ).toBe(true);
+  });
+
+  it("rejects a repo find returning an array (no iteration vocab in v1)", async () => {
+    const loom = await loomFrom(`
+      context T {
+        aggregate Customer {
+          name: string display
+          tier: string
+        }
+        repository Customers for Customer {
+          find byTier(tier: string): Customer[] where this.tier == tier
+        }
+        workflow w(tier: string) {
+          let cs = Customers.byTier(tier)
+        }
+      }
+    `);
+    const diags = validateLoomModel(loom);
+    expect(
+      diags.some(
+        (d) =>
+          d.severity === "error" &&
+          /returns an array; v1 supports only single non-nullable aggregates/.test(
+            d.message,
+          ),
+      ),
+      JSON.stringify(diags),
+    ).toBe(true);
+  });
+
+  it("rejects emit with unknown event from a workflow", async () => {
+    const loom = await loomFrom(`
+      context T {
+        aggregate Customer { name: string display }
+        repository Customers for Customer { }
+        workflow w(customerId: Id<Customer>) {
+          emit Nope { x: id }
+        }
+      }
+    `);
+    const diags = validateLoomModel(loom);
+    expect(
+      diags.some(
+        (d) =>
+          d.severity === "error" &&
+          /emit refers to unknown event/.test(d.message),
+      ),
+      JSON.stringify(diags),
+    ).toBe(true);
+  });
+
+  it("rejects mutation forms (`:=`) inside a workflow body", async () => {
+    const loom = await loomFrom(`
+      context T {
+        aggregate Customer {
+          name: string display
+        }
+        repository Customers for Customer { }
+        workflow w(customerId: Id<Customer>) {
+          let c = Customers.getById(id)
+          c.name := "X"
+        }
+      }
+    `);
+    const diags = validateLoomModel(loom);
+    expect(
+      diags.some(
+        (d) =>
+          d.severity === "error" &&
+          /isn't a recognised workflow form/.test(d.message),
+      ),
+      JSON.stringify(diags),
+    ).toBe(true);
+  });
 });

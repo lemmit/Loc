@@ -116,6 +116,7 @@ function emitProjectFromContexts(
     events: contexts.flatMap((c) => c.events),
     aggregates: contexts.flatMap((c) => c.aggregates),
     repositories: contexts.flatMap((c) => c.repositories),
+    workflows: contexts.flatMap((c) => c.workflows),
   };
   out.set("Infrastructure/Persistence/AppDbContext.cs", renderDbContext(merged, ns));
   out.set("Api/DomainExceptionFilter.cs", renderExceptionFilter(ns));

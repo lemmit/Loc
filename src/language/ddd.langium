@@ -62,7 +62,7 @@ BoundedContext:
     '}';
 
 ContextMember:
-    EnumDecl | ValueObject | Aggregate | EventDecl | Repository;
+    EnumDecl | ValueObject | Aggregate | EventDecl | Repository | Workflow;
 
 EnumDecl:
     'enum' name=ID '{'
@@ -126,6 +126,17 @@ Repository:
 FindDecl:
     'find' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' ':' returnType=TypeRef
         ('where' filter=Expression)?;
+
+// Workflow — context-level orchestration of multiple aggregates.  The
+// body reuses operation-body Statement rules (precondition, let, emit,
+// call) but the validator restricts mutation forms (`:=`, `+=`, `-=`)
+// to operation bodies only.  See docs/workflow.md for semantics.
+Workflow:
+    'workflow' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')'
+        (transactional?='transactional')?
+    '{'
+        body+=Statement*
+    '}';
 
 // ---------------------------------------------------------------------------
 // Members
