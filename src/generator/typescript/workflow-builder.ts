@@ -68,6 +68,21 @@ export function buildWorkflowsFile(
       `import { ${aggName}Repository } from "../db/repositories/${camel(aggName)}-repository.js";`,
     );
   }
+  // Per-aggregate extern handler registry import — only when at least
+  // one workflow op-call targets an extern op on this aggregate.
+  const externAggs = new Set<string>();
+  for (const wf of ctx.workflows) {
+    for (const st of wf.statements) {
+      if (st.kind !== "op-call") continue;
+      const op = lookupOp(ctx, st.aggName, st.op);
+      if (op?.extern) externAggs.add(st.aggName);
+    }
+  }
+  for (const aggName of externAggs) {
+    lines.push(
+      `import { externHandlers as ${camel(aggName)}ExternHandlers } from "../domain/${camel(aggName)}-extern.js";`,
+    );
+  }
   // Value object + enum imports.  Enums are runtime-imported so
   // expressions like `OrderStatus.Draft` inside factory-let payloads
   // resolve; VOs need their constructor in scope for VO literals.
@@ -176,7 +191,7 @@ function emitWorkflowRoute(
       out.push(`      const ${camel(r.repoName)} = new ${r.aggName}Repository(tx, events);`);
     }
     for (const st of wf.statements) {
-      out.push(...renderStmt(st, paramExprs, "      "));
+      out.push(...renderStmt(st, paramExprs, "      ", ctx));
     }
     for (const save of wf.savesAtExit) {
       out.push(`      await ${camel(save.repoName)}.save(${save.name});`);
@@ -187,7 +202,7 @@ function emitWorkflowRoute(
       out.push(`    const ${camel(r.repoName)} = new ${r.aggName}Repository(db, events);`);
     }
     for (const st of wf.statements) {
-      out.push(...renderStmt(st, paramExprs, "    "));
+      out.push(...renderStmt(st, paramExprs, "    ", ctx));
     }
     for (const save of wf.savesAtExit) {
       out.push(`    await ${camel(save.repoName)}.save(${save.name});`);
@@ -206,6 +221,7 @@ function renderStmt(
   st: WorkflowStmtIR,
   paramExprs: Map<string, string>,
   indent: string,
+  ctx: BoundedContextIR,
 ): string[] {
   const renderArg = (e: ExprIR): string => renderExprWithParams(e, paramExprs);
   switch (st.kind) {
@@ -234,12 +250,43 @@ function renderStmt(
     }
     case "op-call": {
       const args = st.args.map(renderArg).join(", ");
+      const op = lookupOp(ctx, st.aggName, st.op);
+      if (op?.extern) {
+        // Lifted in v14: workflows can call parameterless extern ops
+        // by inlining the same dance the auto Hono route emits.
+        // Validator rejects parameterized externs from workflows.
+        const handlerKey = `${camel(st.op)}${st.aggName}`;
+        const checkName = `check${cap(st.op)}`;
+        const externAlias = `${camel(st.aggName)}ExternHandlers`;
+        return [
+          `${indent}${st.target}.${checkName}(${args});`,
+          `${indent}{`,
+          `${indent}  const __handler = ${externAlias}.${handlerKey};`,
+          `${indent}  if (!__handler) throw new Error("Missing extern handler for ${handlerKey}.  Register one before app.listen().");`,
+          `${indent}  await __handler(${st.target}, {} as Record<string, never>);`,
+          `${indent}}`,
+          `${indent}${st.target}.assertInvariants();`,
+        ];
+      }
       return [`${indent}${st.target}.${camel(st.op)}(${args});`];
     }
     case "expr-let":
       return [`${indent}const ${st.name} = ${renderArg(st.expr)};`];
   }
 }
+
+function lookupOp(
+  ctx: BoundedContextIR,
+  aggName: string,
+  opName: string,
+): import("../../ir/loom-ir.js").OperationIR | undefined {
+  return ctx.aggregates
+    .find((a) => a.name === aggName)
+    ?.operations.find((o) => o.name === opName);
+}
+
+const cap = (s: string): string =>
+  s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
 
 function renderExprWithParams(
   e: ExprIR,

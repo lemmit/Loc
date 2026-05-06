@@ -131,3 +131,29 @@ the choice, not for relaxing the rules.
 For purely internal mutations (toggle a flag, append an item) plain
 `operation` is simpler and faster: no DI surface, no extra interface,
 no separate user file to maintain.
+
+## Calling an extern from a workflow
+
+A workflow can invoke a parameterless extern op as if it were any
+other public operation:
+
+```ddd
+workflow placeAndConfirm(orderId: Id<Order>) {
+  let order = Orders.getById(orderId)
+  order.confirm()   // confirm() is extern — workflow runs the dance
+}
+```
+
+The generators emit the same lifecycle the auto HTTP route does:
+load → `Check<Op>` preconditions → `IXAggHandler.HandleAsync(...)` /
+`externHandlers.<op><Agg>(...)` user dispatch → `AssertInvariants`
+→ workflow's normal save-at-exit.  The user handler interface gets
+DI-injected on .NET (one extra ctor parameter per distinct extern
+called) or imported from the per-aggregate `<agg>-extern.js`
+registry on Hono.
+
+**Limit (v1)**: only **parameterless** externs can be called from
+a workflow.  Parameterized externs need a domain→wire conversion at
+the request-construction boundary that the existing emission paths
+don't yet share; the validator surfaces a clear error pointing at
+the limitation.

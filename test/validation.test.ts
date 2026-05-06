@@ -771,7 +771,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     ).toBe(true);
   });
 
-  it("rejects calling an extern op from a workflow", async () => {
+  it("accepts a parameterless extern op-call from a workflow", async () => {
     const loom = await loomFrom(`
       context T {
         aggregate Customer {
@@ -780,8 +780,27 @@ describe("Loom IR validation (post-lowering)", async () => {
         }
         repository Customers for Customer { }
         workflow w(customerId: Id<Customer>) {
-          let c = Customers.getById(id)
+          let c = Customers.getById(customerId)
           c.confirm()
+        }
+      }
+    `);
+    const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
+    expect(errors, JSON.stringify(errors)).toEqual([]);
+  });
+
+  it("rejects calling a parameterized extern op from a workflow (not yet supported)", async () => {
+    const loom = await loomFrom(`
+      context T {
+        aggregate Customer {
+          name: string display
+          creditLimit: decimal
+          operation deduct(amount: decimal) extern { precondition amount > 0 }
+        }
+        repository Customers for Customer { }
+        workflow w(customerId: Id<Customer>, amount: decimal) {
+          let c = Customers.getById(customerId)
+          c.deduct(amount)
         }
       }
     `);
@@ -790,7 +809,9 @@ describe("Loom IR validation (post-lowering)", async () => {
       diags.some(
         (d) =>
           d.severity === "error" &&
-          /'Customer\.confirm' is an extern operation/.test(d.message),
+          /extern operation with parameters; calling parameterized externs from workflows is not yet supported/.test(
+            d.message,
+          ),
       ),
       JSON.stringify(diags),
     ).toBe(true);

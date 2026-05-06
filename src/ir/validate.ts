@@ -1052,10 +1052,14 @@ function validateWorkflowBody(
           });
           break;
         }
-        if (op.extern) {
+        if (op.extern && op.params.length > 0) {
+          // Parameterless externs from workflows are supported.
+          // Parameterized externs require domain→wire conversion at
+          // the request-construction boundary, which the existing
+          // emission paths don't yet share — defer to a follow-up.
           diags.push({
             severity: "error",
-            message: `workflow '${wf.name}': '${aggName}.${op.name}' is an extern operation.  Extern ops are reachable only via their HTTP route + user handler, not from another orchestration layer.`,
+            message: `workflow '${wf.name}': '${aggName}.${op.name}' is an extern operation with parameters; calling parameterized externs from workflows is not yet supported (parameterless externs work).  Either drop the parameters from the extern op, or invoke it via its HTTP route instead.`,
             source: `${ctx.name}/${wf.name}`,
           });
           break;

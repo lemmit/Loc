@@ -456,6 +456,42 @@ describe("typescript generator", () => {
     );
   });
 
+  it("workflow op-call to a parameterless extern emits the dispatch dance", async () => {
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(`
+      context Sales {
+        enum OrderStatus { Draft, Confirmed }
+        aggregate Order {
+          customerId: string
+          status: OrderStatus
+          function isMutable(): bool = status == Draft
+          operation confirm() extern { precondition isMutable() }
+        }
+        repository Orders for Order { }
+        workflow placeAndConfirm(orderId: Id<Order>) {
+          let order = Orders.getById(orderId)
+          order.confirm()
+        }
+      }
+    `, { validation: true });
+    const files = generateTypeScript(doc.parseResult.value as Model);
+    const wf = files.get("http/workflows.ts")!;
+
+    // Per-aggregate extern registry is imported with an alias.
+    expect(wf).toMatch(
+      /import \{ externHandlers as orderExternHandlers \} from "..\/domain\/order-extern\.js"/,
+    );
+    // Body: order.checkConfirm → handler lookup + invocation → assertInvariants.
+    expect(wf).toMatch(/order\.checkConfirm\(\);/);
+    expect(wf).toMatch(/const __handler = orderExternHandlers\.confirmOrder;/);
+    expect(wf).toMatch(/await __handler\(order, \{\} as Record<string, never>\);/);
+    expect(wf).toMatch(/order\.assertInvariants\(\);/);
+    // Save still happens at workflow exit.
+    expect(wf).toMatch(/await orders\.save\(order\);/);
+  });
+
   it("emits explicit isolationLevel for transactional(level) workflows", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);

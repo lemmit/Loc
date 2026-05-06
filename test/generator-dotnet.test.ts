@@ -451,6 +451,47 @@ describe(".NET generator", () => {
     );
   });
 
+  it("workflow op-call to a parameterless extern emits the dispatch dance", async () => {
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(`
+      context Sales {
+        enum OrderStatus { Draft, Confirmed }
+        aggregate Order {
+          customerId: string
+          status: OrderStatus
+          function isMutable(): bool = status == Draft
+          operation confirm() extern { precondition isMutable() }
+        }
+        repository Orders for Order { }
+        workflow placeAndConfirm(orderId: Id<Order>) {
+          let order = Orders.getById(orderId)
+          order.confirm()
+        }
+      }
+    `, { validation: true });
+    const files = generateDotnet(doc.parseResult.value as Model);
+    const handler = files.get(
+      "Application/Workflows/PlaceAndConfirmHandler.cs",
+    )!;
+
+    // IConfirmOrderHandler is injected.
+    expect(handler).toMatch(/private readonly IConfirmOrderHandler _confirmOrderHandler;/);
+    // Usings cover the handler interface + request namespaces.
+    expect(handler).toMatch(/using Sales\.Application\.Orders\.Handlers;/);
+    expect(handler).toMatch(/using Sales\.Application\.Orders\.Requests;/);
+    // Body: CheckConfirm → new ConfirmRequest → user.HandleAsync → AssertInvariants.
+    expect(handler).toMatch(/order\.CheckConfirm\(\);/);
+    expect(handler).toMatch(/var __confirmRequest = new ConfirmRequest\(\);/);
+    expect(handler).toMatch(
+      /await _confirmOrderHandler\.HandleAsync\(order, __confirmRequest, ct\);/,
+    );
+    expect(handler).toMatch(/order\.AssertInvariants\(\);/);
+    // Save still happens at workflow exit.
+    expect(handler).toMatch(/await _orders\.SaveAsync\(order, ct\);/);
+  });
+
   it("emits explicit IsolationLevel for transactional(level) workflows", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);

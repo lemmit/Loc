@@ -66,6 +66,10 @@ interface WorkflowUsage {
   repos: Map<string, string>;
   /** True when at least one `emit` statement appears. */
   hasEmit: boolean;
+  /** Extern op-calls that need an `IXAggHandler` injected.  Keyed
+   *  by `<aggName>.<opName>` so duplicate calls share one
+   *  injection. */
+  externs: Map<string, { aggName: string; opName: string }>;
 }
 
 function analyseWorkflow(
@@ -73,29 +77,26 @@ function analyseWorkflow(
   aggsByName: Map<string, AggregateIR>,
 ): WorkflowUsage {
   const repos = new Map<string, string>();
+  const externs = new Map<string, { aggName: string; opName: string }>();
   let hasEmit = false;
-  // Walk savesAtExit first — it captures every aggregate the workflow
-  // touches via factory-let or repo-let + op-call.
   for (const save of wf.savesAtExit) {
     repos.set(save.repoName, save.aggName);
   }
-  // repo-lets that don't end up saving (read-only loads) still need
-  // the repo for the load itself.
   for (const st of wf.statements) {
     if (st.kind === "repo-let") {
       repos.set(st.repoName, st.aggName);
-    } else if (st.kind === "factory-let") {
-      // The plural-of-aggregate convention picks the repo name when the
-      // savesAtExit fallback fired; ensure consistency here too.
-      const agg = aggsByName.get(st.aggName);
-      if (agg) {
-        // savesAtExit already has it; idempotent.
-      }
     } else if (st.kind === "emit") {
       hasEmit = true;
+    } else if (st.kind === "op-call") {
+      const agg = aggsByName.get(st.aggName);
+      const op = agg?.operations.find((o) => o.name === st.op);
+      if (op?.extern) {
+        const key = `${st.aggName}.${st.op}`;
+        externs.set(key, { aggName: st.aggName, opName: st.op });
+      }
     }
   }
-  return { repos, hasEmit };
+  return { repos, hasEmit, externs };
 }
 
 // ---------------------------------------------------------------------------
@@ -174,6 +175,16 @@ function renderHandler(
     ctorParamPairs.push(`${ns}.Infrastructure.Persistence.AppDbContext db`);
     ctorAssigns.push("_db = db");
   }
+  // Extern op-call DI: each unique extern target needs its
+  // user-supplied IXAggHandler injected.  Field name follows the
+  // op+agg convention (`_confirmOrderHandler`).
+  for (const ext of usage.externs.values()) {
+    const ifaceName = `I${pascal(ext.opName)}${ext.aggName}Handler`;
+    const fieldName = `_${ext.opName}${ext.aggName}Handler`;
+    fields.push(`    private readonly ${ifaceName} ${fieldName};`);
+    ctorParamPairs.push(`${ifaceName} ${fieldName.replace(/^_/, "")}`);
+    ctorAssigns.push(`${fieldName} = ${fieldName.replace(/^_/, "")}`);
+  }
 
   // Statement rendering.
   const stmtLines: string[] = [];
@@ -190,7 +201,7 @@ function renderHandler(
   };
 
   for (const st of wf.statements) {
-    stmtLines.push(...renderStatement(st, renderArg));
+    stmtLines.push(...renderStatement(st, renderArg, ctx, usage));
   }
   // Saves.
   for (const save of wf.savesAtExit) {
@@ -230,6 +241,26 @@ function renderHandler(
     ? `    public ${handlerName}() { }`
     : `    public ${handlerName}(${ctorParamPairs.join(", ")})\n    {\n        ${ctorAssigns.join("; ")};\n    }`;
 
+  // Per-aggregate namespace imports.  Repos/aggregate types live
+  // in `Domain.<Plural>`; extern handler interfaces + their request
+  // DTOs live in `Application.<Plural>.{Handlers,Requests}`.
+  const aggsTouched = new Set<string>([
+    ...usage.repos.values(),
+    ...[...usage.externs.values()].map((e) => e.aggName),
+  ]);
+  const aggUsings = [
+    ...new Set(
+      [...aggsTouched].map((agg) => `using ${ns}.Domain.${pascalPlural(agg)};`),
+    ),
+  ];
+  const externUsings = [
+    ...new Set(
+      [...usage.externs.values()].flatMap((e) => [
+        `using ${ns}.Application.${pascalPlural(e.aggName)}.Handlers;`,
+        `using ${ns}.Application.${pascalPlural(e.aggName)}.Requests;`,
+      ]),
+    ),
+  ];
   return `// Auto-generated.
 using System.Threading;
 using System.Threading.Tasks;
@@ -239,7 +270,7 @@ using ${ns}.Domain.Events;
 using ${ns}.Domain.Ids;
 using ${ns}.Domain.ValueObjects;
 using ${ns}.Domain.Enums;
-${[...new Set([...usage.repos.values()].map((agg) => `using ${ns}.Domain.${pascalPlural(agg)};`))].join("\n")}
+${aggUsings.join("\n")}${externUsings.length > 0 ? "\n" + externUsings.join("\n") : ""}
 
 namespace ${ns}.Application.Workflows;
 
@@ -278,7 +309,10 @@ function pascalPlural(s: string): string {
 function renderStatement(
   st: WorkflowStmtIR,
   renderArg: (e: import("../../ir/loom-ir.js").ExprIR) => string,
+  ctx: BoundedContextIR,
+  usage: WorkflowUsage,
 ): string[] {
+  void usage;
   switch (st.kind) {
     case "precondition": {
       const expr = renderArg(st.expr);
@@ -309,6 +343,19 @@ function renderStatement(
     }
     case "op-call": {
       const argList = st.args.map(renderArg).join(", ");
+      const op = ctx.aggregates
+        .find((a) => a.name === st.aggName)
+        ?.operations.find((o) => o.name === st.op);
+      if (op?.extern) {
+        const reqName = `${pascal(st.op)}Request`;
+        const handlerField = `_${st.op}${st.aggName}Handler`;
+        return [
+          `${INDENT}${st.target}.Check${pascal(st.op)}(${argList});`,
+          `${INDENT}var __${st.op}Request = new ${reqName}();`,
+          `${INDENT}await ${handlerField}.HandleAsync(${st.target}, __${st.op}Request, ct);`,
+          `${INDENT}${st.target}.AssertInvariants();`,
+        ];
+      }
       return [`${INDENT}${st.target}.${pascal(st.op)}(${argList});`];
     }
     case "expr-let": {
