@@ -789,7 +789,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     expect(errors, JSON.stringify(errors)).toEqual([]);
   });
 
-  it("rejects calling a parameterized extern op from a workflow (not yet supported)", async () => {
+  it("accepts a parameterized extern op-call from a workflow (v13.2 lift)", async () => {
     const loom = await loomFrom(`
       context T {
         aggregate Customer {
@@ -804,17 +804,8 @@ describe("Loom IR validation (post-lowering)", async () => {
         }
       }
     `);
-    const diags = validateLoomModel(loom);
-    expect(
-      diags.some(
-        (d) =>
-          d.severity === "error" &&
-          /extern operation with parameters; calling parameterized externs from workflows is not yet supported/.test(
-            d.message,
-          ),
-      ),
-      JSON.stringify(diags),
-    ).toBe(true);
+    const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
+    expect(errors, JSON.stringify(errors)).toEqual([]);
   });
 
   it("rejects unknown repo method from a workflow", async () => {

@@ -492,6 +492,67 @@ describe(".NET generator", () => {
     expect(handler).toMatch(/await _orders\.SaveAsync\(order, ct\);/);
   });
 
+  it("auto Mediator handler for parameterized extern wraps domain args via domainToRequestExpr", async () => {
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(`
+      context Sales {
+        valueobject Money {
+          amount: decimal
+          currency: string
+          invariant amount >= 0
+        }
+        aggregate Order {
+          customerId: string
+          status: string
+          function isMutable(): bool = status == "Draft"
+          operation addLine(productId: Id<Order>, qty: int, price: Money) extern {
+            precondition isMutable()
+            precondition qty > 0
+          }
+        }
+        repository Orders for Order { }
+      }
+    `, { validation: true });
+    const files = generateDotnet(doc.parseResult.value as Model);
+    const handler = files.get("Application/Orders/Commands/AddLineHandler.cs")!;
+    expect(handler).toMatch(
+      /var request = new AddLineRequest\(cmd\.ProductId\.Value, cmd\.Qty, new MoneyRequest\(cmd\.Price\.Amount, cmd\.Price\.Currency\)\);/,
+    );
+  });
+
+  it("workflow op-call to parameterized extern emits the dispatch dance with domain→wire conversion", async () => {
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(`
+      context Sales {
+        aggregate Order {
+          customerId: string
+          status: string
+          function isMutable(): bool = status == "Draft"
+          operation deduct(amount: decimal) extern {
+            precondition isMutable()
+            precondition amount > 0
+          }
+        }
+        repository Orders for Order { }
+        workflow chargeOrder(orderId: Id<Order>, amount: decimal) {
+          let order = Orders.getById(orderId)
+          order.deduct(amount)
+        }
+      }
+    `, { validation: true });
+    const files = generateDotnet(doc.parseResult.value as Model);
+    const handler = files.get("Application/Workflows/ChargeOrderHandler.cs")!;
+    expect(handler).toMatch(/order\.CheckDeduct\(cmd\.Amount\);/);
+    expect(handler).toMatch(/var __deductRequest = new DeductRequest\(cmd\.Amount\);/);
+    expect(handler).toMatch(
+      /await _deductOrderHandler\.HandleAsync\(order, __deductRequest, ct\);/,
+    );
+  });
+
   it("emits explicit IsolationLevel for transactional(level) workflows", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);

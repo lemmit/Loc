@@ -69,10 +69,10 @@ context Sales {
 
 Mutation forms (`:=`, `+=`, `-=`) belong to aggregate operation bodies
 and are rejected inside a workflow.  Workflows can't call private
-operations, can call **parameterless** `extern` operations (see
-docs/extern.md — the workflow handler injects the user's
-`IXAggHandler` and runs the same dispatch dance the auto HTTP
-route does), and can't `findById` (use
+operations, can call `extern` operations (parameterless or
+parameterized — see docs/extern.md; the workflow handler
+injects the user's `IXAggHandler` and runs the same dispatch
+dance the auto HTTP route does), and can't `findById` (use
 `getById` for must-exist loads).
 
 ## Save + event drain semantics

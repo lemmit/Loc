@@ -5,7 +5,12 @@ import type {
   WorkflowStmtIR,
 } from "../../ir/loom-ir.js";
 import { pascal, snake } from "../../util/naming.js";
-import { csIdValueClrType, wireToCommandArgument, wireType } from "./dto-mapping.js";
+import {
+  csIdValueClrType,
+  domainToRequestExpr,
+  wireToCommandArgument,
+  wireType,
+} from "./dto-mapping.js";
 import { renderCsExpr, renderCsType } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -349,9 +354,19 @@ function renderStatement(
       if (op?.extern) {
         const reqName = `${pascal(st.op)}Request`;
         const handlerField = `_${st.op}${st.aggName}Handler`;
+        // Construct the wire-typed request from the workflow's
+        // domain-typed args.  Each arg renders via the regular
+        // expression renderer (with cmd-param substitution), then
+        // wraps in `domainToRequestExpr` so Id<X>.Value, enum
+        // .ToString(), VO → <VO>Request etc. all line up.
+        const requestArgs = op.params
+          .map((p, i) =>
+            domainToRequestExpr(renderArg(st.args[i]!), p.type, ctx),
+          )
+          .join(", ");
         return [
           `${INDENT}${st.target}.Check${pascal(st.op)}(${argList});`,
-          `${INDENT}var __${st.op}Request = new ${reqName}();`,
+          `${INDENT}var __${st.op}Request = new ${reqName}(${requestArgs});`,
           `${INDENT}await ${handlerField}.HandleAsync(${st.target}, __${st.op}Request, ct);`,
           `${INDENT}${st.target}.AssertInvariants();`,
         ];

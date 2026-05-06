@@ -152,8 +152,11 @@ DI-injected on .NET (one extra ctor parameter per distinct extern
 called) or imported from the per-aggregate `<agg>-extern.js`
 registry on Hono.
 
-**Limit (v1)**: only **parameterless** externs can be called from
-a workflow.  Parameterized externs need a domain→wire conversion at
-the request-construction boundary that the existing emission paths
-don't yet share; the validator surfaces a clear error pointing at
-the limitation.
+Parameterized externs work too — the workflow's domain args are
+converted to wire shape at the request-construction boundary
+(`projectToResponse`-style on .NET via `domainToRequestExpr`,
+direct property pickoff on Hono into a typed object literal).
+That same conversion fixes a latent bug in the auto Mediator
+handler for parameterized externs (commit history: domain types
+were passed to a wire-typed request constructor; `domainToRequestExpr`
+now wraps each arg).

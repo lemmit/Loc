@@ -9,6 +9,7 @@ import { pascal, plural } from "../../util/naming.js";
 import {
   aggregateResponseParams,
   csIdValueClrType,
+  domainToRequestExpr,
   entityResponseParams,
   projectEntityExpr,
   valueObjectsUsedBy,
@@ -55,7 +56,7 @@ export function emitCqrs(
   emitResponseDtos(agg, ctx, ns, aggFolder, out);
   emitRequestDtos(agg, ctx, ns, aggFolder, out);
   emitCreateCommandAndHandler(agg, requiredFields, ns, aggFolder, out);
-  emitOperationCommandsAndHandlers(agg, ns, aggFolder, out);
+  emitOperationCommandsAndHandlers(agg, ctx, ns, aggFolder, out);
   emitGetByIdQueryAndHandler(agg, ctx, ns, aggFolder, out);
   emitFindQueriesAndHandlers(agg, repo, ctx, ns, aggFolder, out);
   emitController(agg, repo, ctx, requiredFields, ns, out);
@@ -190,6 +191,7 @@ function emitCreateCommandAndHandler(
 
 function emitOperationCommandsAndHandlers(
   agg: AggregateIR,
+  ctx: BoundedContextIR,
   ns: string,
   aggFolder: string,
   out: Map<string, string>,
@@ -214,8 +216,16 @@ function emitOperationCommandsAndHandlers(
       // auto Mediator handler, then dispatch through it.
       const ifaceName = `I${pascal(op.name)}${agg.name}Handler`;
       const reqName = `${pascal(op.name)}Request`;
+      // Request record is wire-typed (Id<X> → Guid, enum → string,
+      // datetime → string, value-object → <VO>Request) but `cmd.X`
+      // is domain-typed.  Convert each param via
+      // `domainToRequestExpr` so the constructor types line up.
+      // Without this, a parameterized extern auto handler fails to
+      // compile (Cannot convert from <Domain> to <Wire>).
       const reqArgs = op.params
-        .map((p) => `cmd.${pascal(p.name)}`)
+        .map((p) =>
+          domainToRequestExpr(`cmd.${pascal(p.name)}`, p.type, ctx),
+        )
         .join(", ");
       out.set(
         `Application/${aggFolder}/Handlers/${ifaceName}.cs`,

@@ -492,6 +492,33 @@ describe("typescript generator", () => {
     expect(wf).toMatch(/await orders\.save\(order\);/);
   });
 
+  it("workflow op-call to parameterized extern emits the dispatch dance with object-literal request", async () => {
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(`
+      context Sales {
+        aggregate Order {
+          customerId: string
+          status: string
+          function isMutable(): bool = status == "Draft"
+          operation deduct(amount: decimal) extern {
+            precondition isMutable()
+            precondition amount > 0
+          }
+        }
+        repository Orders for Order { }
+        workflow chargeOrder(orderId: Id<Order>, amount: decimal) {
+          let order = Orders.getById(orderId)
+          order.deduct(amount)
+        }
+      }
+    `, { validation: true });
+    const wf = generateTypeScript(doc.parseResult.value as Model).get("http/workflows.ts")!;
+    expect(wf).toMatch(/order\.checkDeduct\(amount\);/);
+    expect(wf).toMatch(/await __handler\(order, \{ amount: amount \}\);/);
+  });
+
   it("emits explicit isolationLevel for transactional(level) workflows", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);

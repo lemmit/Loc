@@ -146,6 +146,47 @@ export function projectToResponse(
   }
 }
 
+/** Convert a domain-typed expression to its wire-shape Request
+ *  form.  Symmetric with `projectToResponse` (Id → `.Value`,
+ *  enum → `.ToString()`, datetime → ISO string), but value-object
+ *  fields wrap in `<VO>Request` rather than `<VO>Response` because
+ *  they nest into request DTOs.  Used by extern dispatch (auto
+ *  Mediator handler + workflow op-call) to construct an
+ *  `<Op>Request` from the surrounding domain values. */
+export function domainToRequestExpr(
+  domainExpr: string,
+  t: TypeIR,
+  ctx: BoundedContextIR,
+): string {
+  switch (t.kind) {
+    case "primitive":
+      if (t.name === "datetime") {
+        return `${domainExpr}.ToUniversalTime().ToString("o")`;
+      }
+      return domainExpr;
+    case "id":
+      return `${domainExpr}.Value`;
+    case "enum":
+      return `${domainExpr}.ToString()`;
+    case "valueobject": {
+      const vo = ctx.valueObjects.find((v) => v.name === t.name);
+      if (!vo) return domainExpr;
+      const args = vo.fields
+        .map((f) =>
+          domainToRequestExpr(`${domainExpr}.${pascal(f.name)}`, f.type, ctx),
+        )
+        .join(", ");
+      return `new ${t.name}Request(${args})`;
+    }
+    case "entity":
+      return domainExpr;
+    case "array":
+      return `${domainExpr}.Select(__e => ${domainToRequestExpr("__e", t.element, ctx)}).ToList()`;
+    case "optional":
+      return `(${domainExpr} is null ? null : ${domainToRequestExpr(domainExpr, t.inner, ctx)})`;
+  }
+}
+
 export function projectEntityExpr(
   domainExpr: string,
   entity: AggregateIR | EntityPartIR,

@@ -252,18 +252,25 @@ function renderStmt(
       const args = st.args.map(renderArg).join(", ");
       const op = lookupOp(ctx, st.aggName, st.op);
       if (op?.extern) {
-        // Lifted in v14: workflows can call parameterless extern ops
-        // by inlining the same dance the auto Hono route emits.
-        // Validator rejects parameterized externs from workflows.
+        // Workflows can call extern ops — emit the same dance the
+        // auto Hono route does, but with the request constructed
+        // from the workflow's domain args (parameterless externs
+        // get a `Record<string, never>`; parameterized externs get
+        // a per-param object literal that matches the user
+        // handler's typed request shape).
         const handlerKey = `${camel(st.op)}${st.aggName}`;
         const checkName = `check${cap(st.op)}`;
         const externAlias = `${camel(st.aggName)}ExternHandlers`;
+        const reqLiteral =
+          op.params.length === 0
+            ? `{} as Record<string, never>`
+            : `{ ${op.params.map((p, i) => `${p.name}: ${renderArg(st.args[i]!)}`).join(", ")} }`;
         return [
           `${indent}${st.target}.${checkName}(${args});`,
           `${indent}{`,
           `${indent}  const __handler = ${externAlias}.${handlerKey};`,
           `${indent}  if (!__handler) throw new Error("Missing extern handler for ${handlerKey}.  Register one before app.listen().");`,
-          `${indent}  await __handler(${st.target}, {} as Record<string, never>);`,
+          `${indent}  await __handler(${st.target}, ${reqLiteral});`,
           `${indent}}`,
           `${indent}${st.target}.assertInvariants();`,
         ];
