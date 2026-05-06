@@ -113,4 +113,11 @@ context Sales {
       placedAt: placedAt
     })
   }
+
+  // Saved query — strongly-typed, parameterless, filter-only.
+  // Lowers to a per-aggregate repository method on both backends
+  // and a `GET /views/active_orders` route.  Filter follows the
+  // queryable subset (no collection lambdas, no chained traversal).
+  // See docs/views.md for the full surface.
+  view ActiveOrders = Order where status == Confirmed
 }

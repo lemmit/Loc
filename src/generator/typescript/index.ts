@@ -16,6 +16,7 @@ import { buildRepositoryFile } from "./repository-builder.js";
 import { buildRoutesFile } from "./routes-builder.js";
 import { buildExternHandlersFile } from "./extern-builder.js";
 import { buildWorkflowsFile } from "./workflow-builder.js";
+import { buildViewsRoutesFile } from "./view-routes-builder.js";
 
 const ERRORS_TS = `// Auto-generated.
 export class DomainError extends Error {
@@ -89,6 +90,10 @@ function emitContext(ctx: BoundedContextIR, out: Map<string, string>): void {
   if (ctx.workflows.length > 0) {
     const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
     out.set("http/workflows.ts", buildWorkflowsFile(ctx, aggsByName));
+  }
+  if (ctx.views.length > 0) {
+    const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
+    out.set("http/views.ts", buildViewsRoutesFile(ctx, aggsByName));
   }
   out.set("http/index.ts", renderHttpIndex(ctx));
 }

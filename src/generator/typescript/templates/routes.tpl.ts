@@ -33,6 +33,13 @@ export function renderHttpIndex(ctx: BoundedContextIR): string {
   const workflowMount = hasWorkflows
     ? `  app.route("/workflows", workflowsRoutes(db, events));`
     : null;
+  const hasViews = ctx.views.length > 0;
+  const viewImport = hasViews
+    ? `import { viewsRoutes } from "./views.js";`
+    : null;
+  const viewMount = hasViews
+    ? `  app.route("/views", viewsRoutes(db, events));`
+    : null;
   return (
     lines(
       "// Auto-generated.",
@@ -41,6 +48,7 @@ export function renderHttpIndex(ctx: BoundedContextIR): string {
       ...aggregateImports,
       ...externImports,
       workflowImport,
+      viewImport,
       'import type { NodePgDatabase } from "drizzle-orm/node-postgres";',
       'import type * as schema from "../db/schema.js";',
       'import { type DomainEventDispatcher, NoopDomainEventDispatcher } from "../domain/events.js";',
@@ -62,6 +70,7 @@ export function renderHttpIndex(ctx: BoundedContextIR): string {
       '  app.get("/health", (c) => c.json({ status: "ok" }));',
       ...aggregateRoutes,
       workflowMount,
+      viewMount,
       "  // OpenAPI 3.1 spec assembled from every sub-router's createRoute()",
       "  // calls.  Diffed against the .NET-emitted /swagger/v1/swagger.json by",
       "  // the cross-platform contract check.",

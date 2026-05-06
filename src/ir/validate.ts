@@ -54,6 +54,7 @@ export function validateLoomModel(loom: LoomModel): LoomDiagnostic[] {
     validateAggregateTestBodies(c, diags);
     validateExternOperations(c, diags);
     validateWorkflows(c, diags);
+    validateViews(c, diags);
   }
   return diags;
 }
@@ -1093,5 +1094,105 @@ function validateWorkflowBody(
       message: `workflow '${wf.name}': isolation level '${wf.isolation}' requires the 'transactional' keyword.`,
       source: `${ctx.name}/${wf.name}`,
     });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// View validation.
+//
+// A `view <Name> = <Source> where <Filter>` is a saved, strongly-typed
+// query.  This validator enforces:
+//
+//   1. The view name is unique within the context (no clash with
+//      aggregates / value objects / enums / events / repositories /
+//      workflows or other views).
+//   2. The source aggregate exists in the same context.  (The Langium
+//      cross-ref already gates this; the IR check guards against
+//      downstream IR construction bugs.)
+//   3. The where-clause is queryable (same restrictions as repository
+//      find filters): no collection ops, no lambdas, no chained
+//      traversal beyond `field` / `field.subfield`.  Reuses
+//      `firstNonQueryableNode`.
+//   4. Every column reference in the filter resolves to a real field
+//      on the source aggregate.  Reuses `firstUnknownColumnRef`.
+//   5. No comparison sets one column against another (Drizzle's
+//      operators model column-vs-value, not column-vs-column).
+//      Reuses `firstColumnVsColumn`.
+//
+// All four reuses come from the v6/v8 work — views inherit the
+// existing query semantics rather than introducing new ones.
+// ---------------------------------------------------------------------------
+
+function validateViews(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+): void {
+  // Same name-set the workflow validator builds.
+  const namesUsed = new Map<string, string>();
+  for (const a of ctx.aggregates) namesUsed.set(a.name, "aggregate");
+  for (const v of ctx.valueObjects) namesUsed.set(v.name, "value object");
+  for (const e of ctx.enums) namesUsed.set(e.name, "enum");
+  for (const ev of ctx.events) namesUsed.set(ev.name, "event");
+  for (const r of ctx.repositories) namesUsed.set(r.name, "repository");
+  for (const wf of ctx.workflows) namesUsed.set(wf.name, "workflow");
+  const seen = new Set<string>();
+  for (const view of ctx.views) {
+    if (seen.has(view.name)) {
+      diags.push({
+        severity: "error",
+        message: `context '${ctx.name}': view '${view.name}' is declared more than once.`,
+        source: `${ctx.name}/${view.name}`,
+      });
+    } else {
+      seen.add(view.name);
+    }
+    const clash = namesUsed.get(view.name);
+    if (clash) {
+      diags.push({
+        severity: "error",
+        message: `context '${ctx.name}': view '${view.name}' collides with the ${clash} of the same name.`,
+        source: `${ctx.name}/${view.name}`,
+      });
+    }
+    const agg = ctx.aggregates.find((a) => a.name === view.aggregateName);
+    if (!agg) {
+      diags.push({
+        severity: "error",
+        message: `view '${view.name}': source '${view.aggregateName}' is not an aggregate in context '${ctx.name}'.`,
+        source: `${ctx.name}/${view.name}`,
+      });
+      continue;
+    }
+    const offending = firstNonQueryableNode(view.filter);
+    if (offending) {
+      diags.push({
+        severity: "error",
+        message:
+          `view '${view.name}': where-clause is not queryable (${offending}). ` +
+          `Allowed: comparisons, &&/||/!, parens, ` +
+          `'this.<column>' / 'this.<vo>.<sub>' refs, parameter refs, literals.`,
+        source: `${ctx.name}/${view.name}`,
+      });
+      continue;
+    }
+    const unknown = firstUnknownColumnRef(view.filter, agg, ctx);
+    if (unknown) {
+      diags.push({
+        severity: "error",
+        message:
+          `view '${view.name}': where-clause references unknown field ${unknown} on aggregate '${agg.name}'.`,
+        source: `${ctx.name}/${view.name}`,
+      });
+    }
+    const bothCols = firstColumnVsColumn(view.filter);
+    if (bothCols) {
+      diags.push({
+        severity: "error",
+        message:
+          `view '${view.name}': comparison between two columns (${bothCols}) is not queryable. ` +
+          `Drizzle's eq()/ne()/lt()/etc. require one column and one value (parameter, literal, or enum value).`,
+        source: `${ctx.name}/${view.name}`,
+      });
+    }
   }
 }

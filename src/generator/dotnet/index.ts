@@ -5,6 +5,7 @@ import type { BoundedContextIR, RepositoryIR } from "../../ir/loom-ir.js";
 import { plural } from "../../util/naming.js";
 import { emitCqrs } from "./cqrs-emit.js";
 import { emitWorkflows } from "./workflow-emit.js";
+import { emitViews } from "./view-emit.js";
 import { buildFindBodies } from "./find-emit.js";
 import {
   renderCommon,
@@ -108,6 +109,7 @@ function emitProjectFromContexts(
       emitAggregate(agg, ctx, ns, out);
     }
     emitWorkflows(ctx, ns, out);
+    emitViews(ctx, ns, out);
   }
   // DbContext + project shell are emitted once, with all aggregates
   // collected from the union of contexts.
@@ -119,6 +121,7 @@ function emitProjectFromContexts(
     aggregates: contexts.flatMap((c) => c.aggregates),
     repositories: contexts.flatMap((c) => c.repositories),
     workflows: contexts.flatMap((c) => c.workflows),
+    views: contexts.flatMap((c) => c.views),
   };
   out.set("Infrastructure/Persistence/AppDbContext.cs", renderDbContext(merged, ns));
   out.set("Api/DomainExceptionFilter.cs", renderExceptionFilter(ns));
@@ -141,6 +144,7 @@ function emitContext(
     emitAggregate(agg, ctx, ns, out);
   }
   emitWorkflows(ctx, ns, out);
+  emitViews(ctx, ns, out);
   emitInfrastructure(ctx, ns, out);
   emitProject(ctx, ns, out);
   emitTestProject(ctx, ns, out);
@@ -231,13 +235,18 @@ function emitAggregate(
     );
   }
   out.set(`Domain/${aggFolder}/${agg.name}.cs`, renderEntity(agg, true, ns, agg.name));
+  // Views whose source is this aggregate become parameterless,
+  // filtered, list-returning finds on the repository.  Synthesised
+  // here so all the existing find emission paths (interface,
+  // implementation, EF Core configuration) pick them up uniformly.
+  const repoWithViews = mergeViewsAsFinds(agg, repo, ctx);
   out.set(
     `Domain/${aggFolder}/I${agg.name}Repository.cs`,
-    renderRepositoryInterface(agg, repo, ns),
+    renderRepositoryInterface(agg, repoWithViews, ns),
   );
   out.set(
     `Infrastructure/Repositories/${agg.name}Repository.cs`,
-    renderRepositoryImpl(agg, repo, ns, buildFindBodies(agg, repo)),
+    renderRepositoryImpl(agg, repoWithViews, ns, buildFindBodies(agg, repoWithViews)),
   );
   out.set(
     `Infrastructure/Persistence/Configurations/${agg.name}Configuration.cs`,
@@ -295,4 +304,35 @@ function findRepoFor(
   name: string,
 ): RepositoryIR | undefined {
   return ctx.repositories.find((r) => r.aggregateName === name);
+}
+
+/** Synthesise a repository that includes the user-declared finds
+ *  PLUS one parameterless filtered find per matching view.  Lets
+ *  every downstream emitter (interface, implementation, find-emit,
+ *  CQRS) treat views uniformly with declared finds. */
+function mergeViewsAsFinds(
+  agg: import("../../ir/loom-ir.js").AggregateIR,
+  repo: RepositoryIR | undefined,
+  ctx: BoundedContextIR,
+): RepositoryIR | undefined {
+  const matching = ctx.views.filter((v) => v.aggregateName === agg.name);
+  if (matching.length === 0) return repo;
+  const arrayReturn: import("../../ir/loom-ir.js").TypeIR = {
+    kind: "array",
+    element: { kind: "entity", name: agg.name },
+  };
+  const synthesised = matching.map((v) => ({
+    name: v.name,
+    params: [],
+    returnType: arrayReturn,
+    filter: v.filter,
+  }));
+  if (!repo) {
+    return {
+      name: `${agg.name}Repository`,
+      aggregateName: agg.name,
+      finds: synthesised,
+    };
+  }
+  return { ...repo, finds: [...repo.finds, ...synthesised] };
 }

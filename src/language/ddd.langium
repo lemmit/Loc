@@ -62,7 +62,7 @@ BoundedContext:
     '}';
 
 ContextMember:
-    EnumDecl | ValueObject | Aggregate | EventDecl | Repository | Workflow;
+    EnumDecl | ValueObject | Aggregate | EventDecl | Repository | Workflow | View;
 
 EnumDecl:
     'enum' name=ID '{'
@@ -143,6 +143,13 @@ Workflow:
 // (Postgres = read committed; SQL Server = read committed).
 IsolationLevel returns string:
     'readUncommitted' | 'readCommitted' | 'repeatableRead' | 'serializable';
+
+// View — a saved, strongly-typed query over one source aggregate.
+// Slice 1: parameterless, filter-only; result type is the source
+// aggregate's wire shape.  See docs/views.md for the trajectory.
+View:
+    'view' name=ID '=' source=[Aggregate:ID]
+        'where' filter=Expression;
 
 // ---------------------------------------------------------------------------
 // Members

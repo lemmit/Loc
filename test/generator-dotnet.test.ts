@@ -312,6 +312,52 @@ describe(".NET generator", () => {
     expect(commitIdx).toBeGreaterThan(trySaveIdx);
   });
 
+  it("emits a Mediator query/handler + ViewsController + repo method per view", async () => {
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(`
+      context Sales {
+        enum OrderStatus { Draft, Confirmed }
+        aggregate Order {
+          customerId: string
+          status: OrderStatus
+        }
+        repository Orders for Order { }
+        view ActiveOrders = Order where status == Confirmed
+      }
+    `, { validation: true });
+    const files = generateDotnet(doc.parseResult.value as Model);
+
+    // 1. Query record (parameterless, returns IReadOnlyList<OrderResponse>).
+    const query = files.get("Application/Views/ActiveOrdersQuery.cs")!;
+    expect(query).toMatch(
+      /public sealed record ActiveOrdersQuery\(\) : IQuery<System\.Collections\.Generic\.IReadOnlyList<OrderResponse>>/,
+    );
+
+    // 2. Handler injects IOrderRepository, calls _repo.ActiveOrders(ct),
+    //    projects each domain row to OrderResponse via the canonical
+    //    projection helper.
+    const handler = files.get("Application/Views/ActiveOrdersHandler.cs")!;
+    expect(handler).toMatch(/private readonly IOrderRepository _repo;/);
+    expect(handler).toMatch(/await _repo\.ActiveOrders\(ct\);/);
+    expect(handler).toMatch(/domain\.Select\(d => new OrderResponse\(/);
+
+    // 3. The .NET repository interface + impl gained the view method
+    //    (via the mergeViewsAsFinds synthesis).
+    const iface = files.get("Domain/Orders/IOrderRepository.cs")!;
+    expect(iface).toMatch(/Task<List<Order>> ActiveOrders\(/);
+    const impl = files.get("Infrastructure/Repositories/OrderRepository.cs")!;
+    expect(impl).toMatch(/public async Task<List<Order>> ActiveOrders\(/);
+    expect(impl).toMatch(/_db\.Orders\.Where\(x => x\.Status == OrderStatus\.Confirmed\)\.ToListAsync\(ct\)/);
+
+    // 4. Controller exposes GET /views/active_orders.
+    const ctrl = files.get("Api/SalesViewsController.cs")!;
+    expect(ctrl).toMatch(/\[Route\("views"\)\]/);
+    expect(ctrl).toMatch(/\[HttpGet\("active_orders"\)\]/);
+    expect(ctrl).toMatch(/await _mediator\.Send\(new ActiveOrdersQuery\(\)\)/);
+  });
+
   it("emits explicit IsolationLevel for transactional(level) workflows", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);

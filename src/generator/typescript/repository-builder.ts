@@ -120,6 +120,21 @@ export function buildRepositoryFile(
     }
   }
 
+  // Views — context-level saved queries whose source is this
+  // aggregate.  Each lowers to a parameterless find emitted the
+  // same way as a repository find, so the validator's queryable
+  // checks + the existing bulk hydration all work for free.
+  for (const view of ctx.views.filter((v) => v.aggregateName === agg.name)) {
+    const synthesised: FindIR = {
+      name: camel(view.name),
+      params: [],
+      returnType: { kind: "array", element: { kind: "entity", name: agg.name } },
+      filter: view.filter,
+    };
+    lines.push(...findQueryMethod(agg, synthesised, ctx));
+    lines.push("");
+  }
+
   // toWire — domain instance → wire DTO (plain object).  Used by the
   // Hono routes layer to serialize responses; the shape mirrors the
   // .NET <Agg>Response record so the cross-check sees identical specs.

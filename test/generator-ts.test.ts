@@ -313,6 +313,53 @@ describe("typescript generator", () => {
     expect(saveIdx).toBeLessThan(txClose);
   });
 
+  it("emits a Hono /views router + per-view repository method", async () => {
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(`
+      context Sales {
+        enum OrderStatus { Draft, Confirmed }
+        aggregate Order {
+          customerId: string
+          status: OrderStatus
+        }
+        repository Orders for Order { }
+        view ActiveOrders = Order where status == Confirmed
+      }
+    `, { validation: true });
+    const files = generateTypeScript(doc.parseResult.value as Model);
+
+    // 1. http/views.ts mounts the route; reuses the aggregate's
+    //    list response schema for OpenAPI symmetry.
+    const views = files.get("http/views.ts")!;
+    expect(views).toMatch(
+      /import \{ OrderResponse, OrderListResponse \} from "\.\/order\.routes\.js"/,
+    );
+    expect(views).toMatch(/path: "\/active_orders"/);
+    expect(views).toMatch(/operationId: "activeOrdersView"/);
+    expect(views).toMatch(/schema: OrderListResponse/);
+    expect(views).toMatch(/await repo\.activeOrders\(\)/);
+    expect(views).toMatch(/rows\.map\(\(r\) => repo\.toWire\(r\)\)/);
+
+    // 2. http/index.ts mounts /views.
+    const httpIndex = files.get("http/index.ts")!;
+    expect(httpIndex).toMatch(/import \{ viewsRoutes \} from "\.\/views\.js"/);
+    expect(httpIndex).toMatch(/app\.route\("\/views", viewsRoutes\(db, events\)\)/);
+
+    // 3. The repository file gained an activeOrders() method whose
+    //    Drizzle query embeds the lowered predicate.
+    const repo = files.get("db/repositories/order-repository.ts")!;
+    expect(repo).toMatch(/async activeOrders\(\): Promise<Order\[\]>/);
+    expect(repo).toMatch(/eq\(schema\.orders\.status, "Confirmed"\)/);
+
+    // 4. The aggregate routes file's response schema is exported so
+    //    the views router can import it without duplicating shapes.
+    const aggRoutes = files.get("http/order.routes.ts")!;
+    expect(aggRoutes).toMatch(/export const OrderResponse = z\.object/);
+    expect(aggRoutes).toMatch(/export const OrderListResponse =/);
+  });
+
   it("emits explicit isolationLevel for transactional(level) workflows", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);

@@ -204,6 +204,24 @@ export interface BoundedContextIR {
   aggregates: AggregateIR[];
   repositories: RepositoryIR[];
   workflows: WorkflowIR[];
+  views: ViewIR[];
+}
+
+/** A saved, strongly-typed query over one source aggregate.  Slice
+ *  1: parameterless, filter-only; result is the source aggregate's
+ *  enriched wire shape (an array thereof).  Future slices add
+ *  declared output shapes and joined sources.  Compiles to a
+ *  per-view method on the source aggregate's repository plus a
+ *  `GET /views/<snake_name>` route on each backend. */
+export interface ViewIR {
+  name: string;
+  /** Source aggregate.  Must live in the same context as the
+   *  view declaration. */
+  aggregateName: string;
+  /** Queryable predicate.  Always populated — the grammar
+   *  requires `where`.  Subject to the same restrictions as
+   *  repository find filters. */
+  filter: ExprIR;
 }
 
 /** SQL-92 isolation levels — optional on `transactional` workflows.

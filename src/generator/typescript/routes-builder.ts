@@ -114,12 +114,15 @@ export function buildRoutesFile(
   // (already declared above as <Vo>Schema; re-used), then the aggregate
   // root.  Forward references aren't possible in zod, so the order
   // matters: parts referenced from the root must be declared first.
+  // Aggregate-level + part-level response schemas are exported so
+  // the per-context views router (`http/views.ts`) can reuse them
+  // verbatim without duplicating field-by-field declarations.
   for (const part of agg.parts) {
     lines.push(...emitResponseDtoSchema(part, ctx, /*isAgg*/ false));
   }
   lines.push(...emitResponseDtoSchema(agg, ctx, /*isAgg*/ true));
   lines.push(
-    `const ${agg.name}ListResponse = z.array(${agg.name}Response).openapi("${agg.name}ListResponse");`,
+    `export const ${agg.name}ListResponse = z.array(${agg.name}Response).openapi("${agg.name}ListResponse");`,
   );
   lines.push(`const ErrorResponse = z.object({ error: z.string() }).openapi("ErrorResponse");`);
   lines.push("");
@@ -349,7 +352,7 @@ function emitResponseDtoSchema(
 ): string[] {
   const lines: string[] = [];
   const name = `${ent.name}Response`;
-  lines.push(`const ${name} = z.object({`);
+  lines.push(`export const ${name} = z.object({`);
   // Single canonical walk — populated by `enrichLoomModel` (see
   // src/ir/enrichments.ts).  Order and field-set match every other
   // emitter (.NET DTO, React Zod, Hono toWire serializer).

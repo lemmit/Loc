@@ -12,6 +12,7 @@ import type {
   Repository,
   Statement,
   ValueObject,
+  View,
   Workflow,
 } from "../language/generated/ast.js";
 import {
@@ -42,6 +43,7 @@ import {
   isTestBlock,
   isTestE2E,
   isValueObject,
+  isView,
   isWorkflow,
 } from "../language/generated/ast.js";
 import type {
@@ -70,6 +72,7 @@ import type {
   TestStmtIR,
   TypeIR,
   ValueObjectIR,
+  ViewIR,
   WorkflowIR,
   WorkflowStmtIR,
 } from "./loom-ir.js";
@@ -221,6 +224,7 @@ function lowerContext(ctx: BoundedContext): BoundedContextIR {
   const aggregates: AggregateIR[] = [];
   const repositories: RepositoryIR[] = [];
   const workflows: WorkflowIR[] = [];
+  const views: ViewIR[] = [];
   for (const m of ctx.members) {
     if (isEnumDecl(m)) enums.push(lowerEnum(m));
     else if (isValueObject(m)) valueObjects.push(lowerValueObject(m, env));
@@ -228,6 +232,7 @@ function lowerContext(ctx: BoundedContext): BoundedContextIR {
     else if (isAggregate(m)) aggregates.push(lowerAggregate(m, env));
     else if (isRepository(m)) repositories.push(lowerRepository(m));
     else if (isWorkflow(m)) workflows.push(lowerWorkflow(m, env, ctx));
+    else if (isView(m)) views.push(lowerView(m, env));
   }
   return {
     name: ctx.name,
@@ -237,6 +242,7 @@ function lowerContext(ctx: BoundedContext): BoundedContextIR {
     aggregates,
     repositories,
     workflows,
+    views,
   };
 }
 
@@ -364,6 +370,21 @@ function lowerRepository(repo: Repository): RepositoryIR {
         filter: f.filter ? lowerExpr(f.filter, env) : undefined,
       };
     }),
+  };
+}
+
+function lowerView(view: View, env: Env): ViewIR {
+  // Filter expressions resolve against the source aggregate's
+  // schema — same env shape repository find filters use.  Bare
+  // names (`status`, `lines.count`) lower to this-rooted property
+  // refs of the source aggregate.
+  const source = view.source?.ref;
+  let inner = env;
+  if (source) inner = inAggregate(env, source);
+  return {
+    name: view.name,
+    aggregateName: source?.name ?? "Unknown",
+    filter: lowerExpr(view.filter, inner),
   };
 }
 
