@@ -140,6 +140,7 @@ Inside an aggregate or an `entity` part:
 | `function name(params): TypeRef = Expression` | Pure helper; callable from any expression in the same aggregate. |
 | `operation name(params) { … }` | Public mutating method (root only). |
 | `private operation name(params) { … }` | Mutating method, only callable from within the same aggregate root. |
+| `operation name(params) extern { precondition … }` | Public op whose business decision lives in user code; body must contain only `precondition` statements. See `extern.md`. |
 | `entity Name { … }` | Nested part declaration (inside an aggregate). |
 | `test "name" { … }` | Test block; lowers to vitest / xUnit (root only). |
 

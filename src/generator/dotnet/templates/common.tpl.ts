@@ -6,6 +6,7 @@
 
 export function renderCommon(ns: string): string {
   return `// Auto-generated.
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using ${ns}.Domain.Events;
@@ -20,6 +21,18 @@ public sealed class DomainException : System.Exception
 public sealed class AggregateNotFoundException : System.Exception
 {
     public AggregateNotFoundException(string message) : base(message) { }
+}
+
+/// <summary>
+/// Marker for user-supplied extern operation handlers.  The Scrutor
+/// scan in <see cref="Program"/> picks up every class decorated with
+/// this attribute and registers it under its implemented IXAggHandler
+/// interface.  See <c>Application/&lt;Aggregate&gt;/Handlers/IXAggHandler.cs</c>
+/// for the per-operation interfaces the user must implement.
+/// </summary>
+[AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
+public sealed class ExternHandlerAttribute : Attribute
+{
 }
 
 /// <summary>

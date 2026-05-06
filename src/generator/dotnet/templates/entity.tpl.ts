@@ -17,6 +17,16 @@ import { renderCsStatements } from "../render-stmt.js";
 // parameterless ctor for EF Core, an explicit `_Create(State)` factory
 // used by repository hydration, and (for the root) a public `Create`
 // factory + `PullEvents()` drainage hook.
+//
+// Extern operations widen the surface: when an aggregate declares
+// `operation X(...) extern { precondition ... }`, the generated request
+// handler delegates the business decision to a user-supplied
+// `IXFooHandler`.  That handler needs to mutate state and raise events,
+// so for aggregates with at least one extern op we widen field setters
+// from `private set` to `internal set` and expose
+// `internal void RaiseEvent(IDomainEvent)` + `internal void AssertInvariants()`.
+// Internal access keeps mutation co-located with the generated
+// project's assembly (handlers ship in the same csproj).
 // ---------------------------------------------------------------------------
 
 export function renderEntity(
@@ -29,16 +39,18 @@ export function renderEntity(
   const idValueType = isAgg ? (entity as AggregateIR).idValueType : "guid";
   const operations = isAgg ? (entity as AggregateIR).operations : [];
   const requiredFields = entity.fields.filter((f) => !f.optional);
+  const hasExtern = operations.some((o) => o.extern);
+  const setterVisibility = hasExtern ? "internal" : "private";
 
   const propLines: string[] = [];
-  propLines.push(`    public ${entity.name}Id Id { get; private set; }`);
+  propLines.push(`    public ${entity.name}Id Id { get; ${setterVisibility} set; }`);
   if (!isRoot) {
-    propLines.push(`    public ${rootName}Id ParentId { get; private set; }`);
+    propLines.push(`    public ${rootName}Id ParentId { get; ${setterVisibility} set; }`);
   }
   for (const f of entity.fields) {
     const def = f.optional ? " = default;" : " = default!;";
     propLines.push(
-      `    public ${renderCsType(f.type)} ${pascal(f.name)} { get; private set; }${def}`,
+      `    public ${renderCsType(f.type)} ${pascal(f.name)} { get; ${setterVisibility} set; }${def}`,
     );
   }
   for (const c of entity.contains) {
@@ -87,10 +99,24 @@ export function renderEntity(
 
   const opLines: string[] = [];
   for (const op of operations) {
-    const visibility = op.visibility === "public" ? "public" : "private";
     const params = op.params
       .map((p) => `${renderCsType(p.type)} ${p.name}`)
       .join(", ");
+    if (op.extern) {
+      // Extern op: emit a `Check<Pascal>` that runs preconditions only.
+      // The auto-generated Mediator handler calls this, then dispatches
+      // to the user-supplied handler, then runs AssertInvariants.  No
+      // `<Pascal>` method exists on the aggregate; the user owns the
+      // business decision.
+      opLines.push(`    public void Check${pascal(op.name)}(${params})`);
+      opLines.push("    {");
+      const body = renderCsStatements(op.statements);
+      if (body.length > 0) opLines.push(body);
+      opLines.push("    }");
+      opLines.push("");
+      continue;
+    }
+    const visibility = op.visibility === "public" ? "public" : "private";
     opLines.push(`    ${visibility} void ${pascal(op.name)}(${params})`);
     opLines.push("    {");
     const body = renderCsStatements(op.statements);
@@ -98,6 +124,19 @@ export function renderEntity(
     opLines.push("        AssertInvariants();");
     opLines.push("    }");
     opLines.push("");
+  }
+
+  // For aggregates with at least one extern op, expose RaiseEvent +
+  // AssertInvariants as `internal` so the user's
+  // `[ExternHandler]`-decorated class can mutate state, raise
+  // events, and trigger invariant checks from the same assembly.
+  const externHookLines: string[] = [];
+  if (isRoot && hasExtern) {
+    externHookLines.push(
+      "    /// <summary>Raise a domain event from a [ExternHandler] class.</summary>",
+      "    internal void RaiseEvent(IDomainEvent ev) => _domainEvents.Add(ev);",
+      "",
+    );
   }
 
   const pullEventsLines = isRoot
@@ -189,9 +228,10 @@ export function renderEntity(
       ...derivedLines,
       ...fnLines,
       ...opLines,
+      ...externHookLines,
       "",
       ...pullEventsLines,
-      "    private void AssertInvariants()",
+      `    ${hasExtern ? "internal" : "private"} void AssertInvariants()`,
       "    {",
       ...invariantLines,
       "    }",

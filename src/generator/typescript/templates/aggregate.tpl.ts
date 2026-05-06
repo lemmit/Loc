@@ -97,6 +97,12 @@ function renderEntity(e: EntityShape): string {
     `${c.partName}${c.collection ? "[]" : " | null"}`;
   const containsGetterType = (c: ContainmentIR): string =>
     c.collection ? `readonly ${c.partName}[]` : `${c.partName} | null`;
+  // When at least one operation is `extern`, the user's registered
+  // handler needs to mutate properties and raise events.  For TS we
+  // expose public setters per property + `raiseEvent` + a public
+  // `assertInvariants()` (the auto route handler runs it after the
+  // user's handler returns).
+  const hasExtern = e.operations.some((o) => o.extern);
 
   // Constructor parameter list — `id`, then optional `parentId`, then
   // every field, then every containment.  Used in three places: the
@@ -168,12 +174,46 @@ function renderEntity(e: EntityShape): string {
     return `  private ${camel(fn.name)}(${params}): ${renderTsType(fn.returnType)} { return ${renderTsExpr(fn.body)}; }`;
   });
 
+  // For extern: setters per declared property, plus `raiseEvent` on the
+  // root.  Containment collections stay private (mutation goes through
+  // the existing `add`/`remove` operation paths).
+  const externMutators: string[] = [];
+  if (hasExtern) {
+    for (const f of e.fields) {
+      externMutators.push(
+        `  set ${f.name}(v: ${renderTsType(f.type)}) { this._${f.name} = v; }`,
+      );
+    }
+    if (e.isRoot) {
+      externMutators.push(
+        "  raiseEvent(ev: Events.DomainEvent): void { this._events.push(ev); }",
+      );
+      externMutators.push(
+        "  assertInvariants(): void { this._assertInvariants(); }",
+      );
+    }
+  }
+
   const ops: string[] = [];
   for (const op of e.operations) {
     const visibility = op.visibility === "public" ? "public" : "private";
     const params = op.params
       .map((p) => `${p.name}: ${renderTsType(p.type)}`)
       .join(", ");
+    if (op.extern) {
+      // Extern: emit `check<Pascal>(...)` running preconditions only.
+      // The auto Hono route calls this, then dispatches to the
+      // user-registered handler, then `assertInvariants()`.  No
+      // user-named method exists on the aggregate; the user owns the
+      // business decision.
+      const checkName = `check${op.name[0]!.toUpperCase()}${op.name.slice(1)}`;
+      ops.push(`  ${checkName}(${params}): void {`);
+      const body = renderTsStatements(op.statements);
+      if (body.length > 0) ops.push(body);
+      ops.push("  }");
+      ops.push("");
+      continue;
+    }
     ops.push(`  ${visibility} ${camel(op.name)}(${params}): void {`);
     const body = renderTsStatements(op.statements);
     if (body.length > 0) ops.push(body);
@@ -227,6 +267,7 @@ function renderEntity(e: EntityShape): string {
     "  }",
     "",
     ...getters,
+    ...externMutators,
     ...fns,
     ...ops,
     ...pullEvents,

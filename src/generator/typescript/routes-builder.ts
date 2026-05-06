@@ -42,6 +42,15 @@ export function buildRoutesFile(
   lines.push(
     `import { DomainError, AggregateNotFoundError } from "../domain/errors.js";`,
   );
+  // Extern handler registry — the per-aggregate file is always emitted
+  // when the aggregate has at least one extern op, never imported when
+  // it has none.  Type-only import keeps the route file fine when
+  // there are no extern ops; the runtime ref is gated below.
+  if (agg.operations.some((o) => o.extern)) {
+    lines.push(
+      `import { externHandlers } from "../domain/${camel(agg.name)}-extern.js";`,
+    );
+  }
 
   // Schemas — value objects, enums, then per-DTO request / response
   // shapes.  Named via `.openapi("Foo")` so they appear in the spec's
@@ -248,7 +257,22 @@ function emitOperationRoute(
   const callArgs = op.params
     .map((p) => wireToDomainExpr(`body.${p.name}`, p.type, ctx))
     .join(", ");
-  out.push(`    aggregate.${camel(op.name)}(${callArgs});`);
+  if (op.extern) {
+    // Extern: run preconditions on the aggregate, dispatch to the
+    // user-registered handler, then run invariants and save.
+    const handlerKey = `${camel(op.name)}${agg.name}`;
+    out.push(`    aggregate.check${cap(op.name)}(${callArgs});`);
+    out.push(
+      `    const handler = externHandlers.${handlerKey};`,
+    );
+    out.push(
+      `    if (!handler) throw new Error("Missing extern handler for ${handlerKey}. Register one via register${cap(op.name)}${agg.name}Handler(...) before app.listen().");`,
+    );
+    out.push(`    await handler(aggregate, body);`);
+    out.push(`    aggregate.assertInvariants();`);
+  } else {
+    out.push(`    aggregate.${camel(op.name)}(${callArgs});`);
+  }
   out.push(`    await repo.save(aggregate);`);
   out.push(`    return c.body(null, 204);`);
   out.push(`  },`);

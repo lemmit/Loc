@@ -136,6 +136,71 @@ describe(".NET generator", () => {
     expect(cfg).toMatch(/b\.HasIndex\(x => x\.Status\)/);
   });
 
+  it("emits an IXAggHandler interface + Scrutor scan for extern operations", async () => {
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(`
+      context Sales {
+        enum OrderStatus { Draft, Confirmed }
+        aggregate Order {
+          customerId: string
+          status: OrderStatus
+          function isMutable(): bool = status == Draft
+          operation confirm() extern {
+            precondition isMutable()
+          }
+        }
+        repository Orders for Order { }
+      }
+    `, { validation: true });
+    const files = generateDotnet(doc.parseResult.value as Model);
+
+    // 1. The user-implementable handler interface lives under
+    //    Application/<Aggregate>/Handlers/.
+    const iface = files.get("Application/Orders/Handlers/IConfirmOrderHandler.cs")!;
+    expect(iface).toMatch(
+      /Task HandleAsync\(Order aggregate, ConfirmRequest request, CancellationToken ct\)/,
+    );
+
+    // 2. The auto Mediator handler injects the user interface and
+    //    delegates: load → CheckX → user.HandleAsync → invariants → save.
+    const handler = files.get("Application/Orders/Commands/ConfirmHandler.cs")!;
+    expect(handler).toMatch(/private readonly IConfirmOrderHandler _user;/);
+    expect(handler).toMatch(/aggregate\.CheckConfirm\(\);/);
+    expect(handler).toMatch(/await _user\.HandleAsync\(aggregate, request, ct\);/);
+    expect(handler).toMatch(/aggregate\.AssertInvariants\(\);/);
+    // No direct call to a non-existent `aggregate.Confirm()` method.
+    expect(handler).not.toMatch(/aggregate\.Confirm\(/);
+
+    // 3. The aggregate exposes RaiseEvent + AssertInvariants as internal
+    //    and widens setters to `internal set` so [ExternHandler] classes
+    //    in the same assembly can mutate state.
+    const order = files.get("Domain/Orders/Order.cs")!;
+    expect(order).toMatch(/internal void RaiseEvent\(IDomainEvent ev\) =>/);
+    expect(order).toMatch(/internal void AssertInvariants\(\)/);
+    expect(order).toMatch(/public OrderStatus Status \{ get; internal set; \}/);
+    expect(order).toMatch(/public void CheckConfirm\(\)/);
+    expect(order).not.toMatch(/public void Confirm\(\)/);
+
+    // 4. Common code declares the [ExternHandler] attribute (no Loom
+    //    name leaks into the user-facing surface).
+    const common = files.get("Domain/Common/DomainException.cs")!;
+    expect(common).toMatch(/public sealed class ExternHandlerAttribute : Attribute/);
+    expect(common).not.toMatch(/Loom/);
+
+    // 5. Program.cs registers Scrutor + verifies the handler is wired.
+    const program = files.get("Program.cs")!;
+    expect(program).toMatch(/builder\.Services\.Scan\(s => s/);
+    expect(program).toMatch(/WithAttribute<ExternHandlerAttribute>/);
+    expect(program).toMatch(/IConfirmOrderHandler.*is null/s);
+    expect(program).toMatch(/Missing \[ExternHandler\] for/);
+
+    // 6. csproj brings in Scrutor.
+    const csproj = files.get("Sales.csproj")!;
+    expect(csproj).toMatch(/<PackageReference Include="Scrutor"/);
+  });
+
   it("DomainExceptionFilter catches unhandled exceptions as sanitized 500", async () => {
     const model = await buildModel("examples/sales.ddd");
     const files = generateDotnet(model);

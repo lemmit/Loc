@@ -14,6 +14,7 @@ import {
 } from "./templates.js";
 import { buildRepositoryFile } from "./repository-builder.js";
 import { buildRoutesFile } from "./routes-builder.js";
+import { buildExternHandlersFile } from "./extern-builder.js";
 
 const ERRORS_TS = `// Auto-generated.
 export class DomainError extends Error {
@@ -72,6 +73,12 @@ function emitContext(ctx: BoundedContextIR, out: Map<string, string>): void {
       buildRepositoryFile(agg, repo, ctx),
     );
     out.set(`http/${camel(agg.name)}.routes.ts`, buildRoutesFile(agg, repo, ctx));
+    if (agg.operations.some((o) => o.extern)) {
+      out.set(
+        `domain/${camel(agg.name)}-extern.ts`,
+        buildExternHandlersFile(agg, ctx),
+      );
+    }
     const testsFile = renderTestsFile(agg, ctx);
     if (testsFile) {
       out.set(`domain/${camel(agg.name)}.test.ts`, testsFile);

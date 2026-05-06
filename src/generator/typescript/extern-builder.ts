@@ -1,0 +1,167 @@
+import type {
+  AggregateIR,
+  BoundedContextIR,
+  TypeIR,
+} from "../../ir/loom-ir.js";
+import { camel } from "../../util/naming.js";
+
+// ---------------------------------------------------------------------------
+// Per-aggregate extern handler registry.
+//
+// For every aggregate that declares at least one `operation X(...) extern`
+// we emit `domain/<aggName>-extern.ts`, which exposes:
+//
+//   - a typed `externHandlers` registry holding one slot per extern op,
+//   - a `register<Op><Agg>Handler(fn)` helper per op,
+//   - a `verify<Agg>ExternHandlersRegistered()` startup gate that throws
+//     if any slot is still null.
+//
+// The user calls `register*Handler(...)` from their own code (typically
+// during app bootstrap, before `app.listen()`).  The auto Hono route
+// looks up the handler from `externHandlers` and dispatches.
+// ---------------------------------------------------------------------------
+
+const cap = (s: string): string =>
+  s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
+
+export function buildExternHandlersFile(
+  agg: AggregateIR,
+  ctx: BoundedContextIR,
+): string {
+  const externOps = agg.operations.filter((o) => o.extern);
+  if (externOps.length === 0) return "";
+  const usedVOs = collectVOs(externOps, ctx);
+
+  const lines: string[] = [];
+  lines.push("// Auto-generated.  Do not edit by hand.");
+  lines.push(`import type { ${agg.name} } from "./${camel(agg.name)}.js";`);
+  if (usedVOs.length > 0) {
+    lines.push(
+      `import type { ${usedVOs.join(", ")} } from "./value-objects.js";`,
+    );
+  }
+  lines.push("");
+
+  // Per-op request type matching the wire body shape.  The runtime
+  // body comes off `c.req.valid("json")` already coerced by the route's
+  // Zod schema (decimals → number, datetimes → Date, ids → string).
+  for (const op of externOps) {
+    if (op.params.length === 0) {
+      lines.push(
+        `export type ${cap(op.name)}${agg.name}Request = Record<string, never>;`,
+      );
+      continue;
+    }
+    lines.push(`export interface ${cap(op.name)}${agg.name}Request {`);
+    for (const p of op.params) {
+      lines.push(`  ${p.name}: ${wireTsType(p.type)};`);
+    }
+    lines.push("}");
+  }
+  lines.push("");
+
+  for (const op of externOps) {
+    lines.push(
+      `export type ${cap(op.name)}${agg.name}Handler = (aggregate: ${agg.name}, request: ${cap(op.name)}${agg.name}Request) => Promise<void>;`,
+    );
+  }
+  lines.push("");
+
+  lines.push("interface ExternHandlerRegistry {");
+  for (const op of externOps) {
+    lines.push(
+      `  ${camel(op.name)}${agg.name}: ${cap(op.name)}${agg.name}Handler | null;`,
+    );
+  }
+  lines.push("}");
+  lines.push("");
+
+  lines.push("export const externHandlers: ExternHandlerRegistry = {");
+  for (const op of externOps) {
+    lines.push(`  ${camel(op.name)}${agg.name}: null,`);
+  }
+  lines.push("};");
+  lines.push("");
+
+  for (const op of externOps) {
+    lines.push(
+      `export function register${cap(op.name)}${agg.name}Handler(fn: ${cap(op.name)}${agg.name}Handler): void {`,
+    );
+    lines.push(`  externHandlers.${camel(op.name)}${agg.name} = fn;`);
+    lines.push("}");
+  }
+  lines.push("");
+
+  lines.push(
+    `export function verify${agg.name}ExternHandlersRegistered(): void {`,
+  );
+  for (const op of externOps) {
+    lines.push(`  if (externHandlers.${camel(op.name)}${agg.name} === null) {`);
+    lines.push(
+      `    throw new Error("Missing extern handler for '${op.name}' on aggregate '${agg.name}'. Call register${cap(op.name)}${agg.name}Handler(...) before app.listen().");`,
+    );
+    lines.push("  }");
+  }
+  lines.push("}");
+
+  return lines.join("\n") + "\n";
+}
+
+/** Names of aggregates with at least one extern op. */
+export function aggregatesWithExtern(ctx: BoundedContextIR): AggregateIR[] {
+  return ctx.aggregates.filter((a) => a.operations.some((o) => o.extern));
+}
+
+// Wire-side TS type for an extern operation parameter.  Mirrors how the
+// route's Zod schema parses each kind: `Id<X>` and `string`/`guid` come
+// off the wire as `string`; `int`/`long`/`decimal` as `number`;
+// `datetime` as `Date` (Zod `z.coerce.date()`); enums as their union;
+// value objects as the runtime class instance type.
+function wireTsType(t: TypeIR): string {
+  switch (t.kind) {
+    case "primitive":
+      switch (t.name) {
+        case "int":
+        case "long":
+        case "decimal":
+          return "number";
+        case "string":
+        case "guid":
+          return "string";
+        case "bool":
+          return "boolean";
+        case "datetime":
+          return "Date";
+      }
+    /* eslint-disable-next-line no-fallthrough */
+    case "id":
+      return "string";
+    case "enum":
+      return t.name;
+    case "valueobject":
+      return t.name;
+    case "entity":
+      return "unknown";
+    case "array":
+      return `${wireTsType(t.element)}[]`;
+    case "optional":
+      return `${wireTsType(t.inner)} | null`;
+  }
+}
+
+function collectVOs(
+  ops: AggregateIR["operations"],
+  ctx: BoundedContextIR,
+): string[] {
+  const names = new Set<string>();
+  const knownVO = new Set(ctx.valueObjects.map((v) => v.name));
+  const knownEnum = new Set(ctx.enums.map((e) => e.name));
+  const visit = (t: TypeIR): void => {
+    if (t.kind === "valueobject" && knownVO.has(t.name)) names.add(t.name);
+    else if (t.kind === "enum" && knownEnum.has(t.name)) names.add(t.name);
+    else if (t.kind === "array") visit(t.element);
+    else if (t.kind === "optional") visit(t.inner);
+  };
+  for (const op of ops) for (const p of op.params) visit(p.type);
+  return Array.from(names);
+}

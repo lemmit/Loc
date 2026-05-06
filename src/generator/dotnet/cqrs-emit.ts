@@ -5,7 +5,7 @@ import type {
   RepositoryIR,
   TypeIR,
 } from "../../ir/loom-ir.js";
-import { pascal } from "../../util/naming.js";
+import { pascal, plural } from "../../util/naming.js";
 import {
   aggregateResponseParams,
   csIdValueClrType,
@@ -41,12 +41,6 @@ import {
 //   - The aggregate's Web API controller (Request → Command, Response
 //     pass-through)
 // ---------------------------------------------------------------------------
-
-const plural = (s: string): string => {
-  if (s.endsWith("y") && !/[aeiou]y$/.test(s)) return s.slice(0, -1) + "ies";
-  if (/(s|x|z|ch|sh)$/.test(s)) return s + "es";
-  return s + "s";
-};
 
 export function emitCqrs(
   agg: AggregateIR,
@@ -215,6 +209,45 @@ function emitOperationCommandsAndHandlers(
       }),
     );
     const callArgs = op.params.map((p) => `cmd.${pascal(p.name)}`).join(", ");
+    if (op.extern) {
+      // Emit the user-implementable handler interface alongside the
+      // auto Mediator handler, then dispatch through it.
+      const ifaceName = `I${pascal(op.name)}${agg.name}Handler`;
+      const reqName = `${pascal(op.name)}Request`;
+      const reqArgs = op.params
+        .map((p) => `cmd.${pascal(p.name)}`)
+        .join(", ");
+      out.set(
+        `Application/${aggFolder}/Handlers/${ifaceName}.cs`,
+        renderExternHandlerInterface({
+          ns,
+          aggName: agg.name,
+          ifaceName,
+          requestName: reqName,
+        }),
+      );
+      out.set(
+        `Application/${aggFolder}/Commands/${pascal(op.name)}Handler.cs`,
+        renderCommandHandler({
+          ns,
+          aggName: agg.name,
+          handlerName: `${pascal(op.name)}Handler`,
+          commandName: `${pascal(op.name)}Command`,
+          extraDeps: [{ type: ifaceName, field: "_user" }],
+          extraUsings: [`${ns}.Application.${plural(agg.name)}.Handlers`],
+          body:
+            `        var aggregate = await _repo.GetByIdAsync(cmd.Id, ct)\n` +
+            `            ?? throw new AggregateNotFoundException($"${agg.name} {cmd.Id} not found");\n` +
+            `        aggregate.Check${pascal(op.name)}(${callArgs});\n` +
+            `        var request = new ${reqName}(${reqArgs});\n` +
+            `        await _user.HandleAsync(aggregate, request, ct);\n` +
+            `        aggregate.AssertInvariants();\n` +
+            `        await _repo.SaveAsync(aggregate, ct);\n` +
+            `        return Unit.Value;\n`,
+        }),
+      );
+      continue;
+    }
     out.set(
       `Application/${aggFolder}/Commands/${pascal(op.name)}Handler.cs`,
       renderCommandHandler({
@@ -231,6 +264,39 @@ function emitOperationCommandsAndHandlers(
       }),
     );
   }
+}
+
+/**
+ * `IXAggHandler` — the interface a user implements (decorated with
+ * `[ExternHandler]`) to own the business decision for an extern
+ * operation.  The auto-generated Mediator handler runs preconditions
+ * and invariants around the user's call.
+ */
+function renderExternHandlerInterface(args: {
+  ns: string;
+  aggName: string;
+  ifaceName: string;
+  requestName: string;
+}): string {
+  return `// Auto-generated.
+using System.Threading;
+using System.Threading.Tasks;
+using ${args.ns}.Domain.${plural(args.aggName)};
+using ${args.ns}.Application.${plural(args.aggName)}.Requests;
+
+namespace ${args.ns}.Application.${plural(args.aggName)}.Handlers;
+
+/// <summary>
+/// User-supplied business decision for an extern operation.  Implement
+/// in the same project, decorate with <c>[ExternHandler]</c>, and
+/// the framework will load the aggregate, run preconditions, invoke
+/// HandleAsync, run invariants, and save in one transaction.
+/// </summary>
+public interface ${args.ifaceName}
+{
+    Task HandleAsync(${args.aggName} aggregate, ${args.requestName} request, CancellationToken ct);
+}
+`;
 }
 
 // ---------------------------------------------------------------------------

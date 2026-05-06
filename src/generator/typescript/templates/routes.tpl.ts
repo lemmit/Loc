@@ -16,12 +16,23 @@ export function renderHttpIndex(ctx: BoundedContextIR): string {
     (a) =>
       `  app.route("/${snake(plural(a.name))}", ${camel(a.name)}Routes(new ${a.name}Repository(db, events)));`,
   );
+  const externAggs = ctx.aggregates.filter((a) =>
+    a.operations.some((o) => o.extern),
+  );
+  const externImports = externAggs.map(
+    (a) =>
+      `import { verify${a.name}ExternHandlersRegistered } from "../domain/${camel(a.name)}-extern.js";`,
+  );
+  const externVerifyBody = externAggs.map(
+    (a) => `  verify${a.name}ExternHandlersRegistered();`,
+  );
   return (
     lines(
       "// Auto-generated.",
       'import { OpenAPIHono } from "@hono/zod-openapi";',
       'import { cors } from "hono/cors";',
       ...aggregateImports,
+      ...externImports,
       'import type { NodePgDatabase } from "drizzle-orm/node-postgres";',
       'import type * as schema from "../db/schema.js";',
       'import { type DomainEventDispatcher, NoopDomainEventDispatcher } from "../domain/events.js";',
@@ -30,6 +41,10 @@ export function renderHttpIndex(ctx: BoundedContextIR): string {
       "  db: NodePgDatabase<typeof schema>,",
       "  events: DomainEventDispatcher = NoopDomainEventDispatcher,",
       "): OpenAPIHono {",
+      externAggs.length > 0
+        ? "  // Verify every extern operation has a registered handler.  Fails\n  // fast at startup so a missing user implementation surfaces here\n  // instead of as a 500 on the first request."
+        : null,
+      ...externVerifyBody,
       "  const app = new OpenAPIHono();",
       "  // Permissive CORS so a generated React frontend on a different port",
       "  // can reach the API in dev compose.  Pin http/index.ts in",

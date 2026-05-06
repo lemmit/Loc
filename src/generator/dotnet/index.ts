@@ -264,8 +264,11 @@ function emitProject(
   ns: string,
   out: Map<string, string>,
 ): void {
+  const hasExtern = ctx.aggregates.some((a) =>
+    a.operations.some((o) => o.extern),
+  );
   out.set("Program.cs", renderProgram(ctx, ns));
-  out.set(`${ns}.csproj`, renderCsproj(ns));
+  out.set(`${ns}.csproj`, renderCsproj(ns, hasExtern));
   out.set("Dockerfile", renderDockerfile(ns));
   out.set(".dockerignore", renderDockerignore());
   out.set("certs/.gitkeep", "");

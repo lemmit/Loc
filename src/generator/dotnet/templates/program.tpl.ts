@@ -1,5 +1,5 @@
 import type { BoundedContextIR } from "../../../ir/loom-ir.js";
-import { plural } from "../../../util/naming.js";
+import { pascal, plural } from "../../../util/naming.js";
 
 // Program.cs hosting + DI registration, plus the project + Dockerfile +
 // .dockerignore boilerplate.  Pure substitution templates — no
@@ -12,6 +12,52 @@ export function renderProgram(ctx: BoundedContextIR, ns: string): string {
         `builder.Services.AddScoped<${ns}.Domain.${plural(a.name)}.I${a.name}Repository, ${ns}.Infrastructure.Repositories.${a.name}Repository>();`,
     )
     .join("\n");
+
+  // Per-aggregate list of (op-name, IXAggHandler) pairs for extern
+  // operations.  Drives both the Scrutor registration helper text
+  // (purely informational) and the startup verification check that
+  // every IXAggHandler resolved from DI.
+  const externHandlers = ctx.aggregates.flatMap((a) =>
+    a.operations
+      .filter((o) => o.extern)
+      .map((o) => ({
+        ifaceFqn: `${ns}.Application.${plural(a.name)}.Handlers.I${pascal(o.name)}${a.name}Handler`,
+        opName: o.name,
+        aggName: a.name,
+      })),
+  );
+  // Only emit the Scrutor scan when at least one aggregate declares
+  // an extern op — otherwise the project pulls in a Scrutor reference
+  // for nothing.
+  const externScan = externHandlers.length === 0
+    ? ""
+    : `// Extern operation handlers — user implements [ExternHandler]-decorated
+// classes for each I<Op><Agg>Handler interface in
+// Application/<Aggregate>/Handlers/.  Scrutor picks them up by attribute.
+builder.Services.Scan(s => s
+    .FromAssemblyOf<Program>()
+    .AddClasses(c => c.WithAttribute<ExternHandlerAttribute>())
+    .AsImplementedInterfaces()
+    .WithScopedLifetime());`;
+  const externVerify = externHandlers.length === 0
+    ? ""
+    : `
+// Verify every extern operation has a registered [ExternHandler].
+// Fails fast at startup so a missing user implementation surfaces here
+// instead of as a 500 on the first request.
+using (var scope = app.Services.CreateScope())
+{
+${externHandlers
+  .map(
+    (h) =>
+      `    if (scope.ServiceProvider.GetService<${h.ifaceFqn}>() is null)\n` +
+      `        throw new System.InvalidOperationException(\n` +
+      `            "Missing [ExternHandler] for ${h.ifaceFqn} (operation '${h.opName}' on aggregate '${h.aggName}'). " +\n` +
+      `            "Add a class decorated with [ExternHandler] that implements this interface.");`,
+  )
+  .join("\n")}
+}
+`;
   return `// Auto-generated.
 using Microsoft.EntityFrameworkCore;
 using ${ns}.Api;
@@ -31,6 +77,9 @@ builder.Services.AddMediator(opts => opts.ServiceLifetime = ServiceLifetime.Scop
 builder.Services.AddSingleton<IDomainEventDispatcher, NoopDomainEventDispatcher>();
 
 ${repoRegistrations}
+
+${externScan}
+
 builder.Services.AddControllers(opts =>
 {
     opts.Filters.Add<DomainExceptionFilter>();
@@ -79,12 +128,17 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.EnsureCreated();
 }
-
+${externVerify}
 app.Run();
 `;
 }
 
-export function renderCsproj(ns: string): string {
+export function renderCsproj(ns: string, hasExtern: boolean = false): string {
+  // Scrutor only ships when the project actually scans for
+  // [ExternHandler]-decorated classes.
+  const scrutorRef = hasExtern
+    ? `\n    <!-- Scrutor — assembly scan for [ExternHandler]-decorated classes -->\n    <PackageReference Include="Scrutor" Version="5.0.2" />`
+    : "";
   return `<!-- Auto-generated. -->
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup>
@@ -116,7 +170,7 @@ export function renderCsproj(ns: string): string {
     </PackageReference>
     <PackageReference Include="Mediator.Abstractions" Version="2.1.7" />
     <!-- OpenAPI spec emitted at /swagger/v1/swagger.json -->
-    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.9.0" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.9.0" />${scrutorRef}
   </ItemGroup>
 </Project>
 `;

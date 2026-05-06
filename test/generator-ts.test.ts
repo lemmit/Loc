@@ -161,6 +161,59 @@ describe("typescript generator", () => {
     expect(repo).toMatch(/shipping: shippingByParent\.get\(root\.id\) \?\? null/);
   });
 
+  it("emits a typed extern handler registry + verify gate for extern operations", async () => {
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(`
+      context Sales {
+        enum OrderStatus { Draft, Confirmed }
+        aggregate Order {
+          customerId: string
+          status: OrderStatus
+          function isMutable(): bool = status == Draft
+          operation confirm() extern {
+            precondition isMutable()
+          }
+        }
+        repository Orders for Order { }
+      }
+    `, { validation: true });
+    const files = generateTypeScript(doc.parseResult.value as Model);
+
+    // 1. Per-aggregate extern handler module.
+    const extern = files.get("domain/order-extern.ts")!;
+    expect(extern).toMatch(/export type ConfirmOrderRequest = Record<string, never>/);
+    expect(extern).toMatch(
+      /export type ConfirmOrderHandler = \(aggregate: Order, request: ConfirmOrderRequest\) => Promise<void>/,
+    );
+    expect(extern).toMatch(/externHandlers\.confirmOrder = fn/);
+    expect(extern).toMatch(/verifyOrderExternHandlersRegistered/);
+    expect(extern).toMatch(/Missing extern handler for 'confirm' on aggregate 'Order'/);
+
+    // 2. Aggregate exposes setters + raiseEvent + assertInvariants.
+    const order = files.get("domain/order.ts")!;
+    expect(order).toMatch(/set status\(v: OrderStatus\)/);
+    expect(order).toMatch(/raiseEvent\(ev: Events\.DomainEvent\)/);
+    expect(order).toMatch(/assertInvariants\(\): void/);
+    // 3. The user-named method is replaced by `checkConfirm` (preconditions only).
+    expect(order).toMatch(/checkConfirm\(\): void/);
+    expect(order).not.toMatch(/public confirm\(\)/);
+
+    // 4. Route dispatches through the registry, not a domain method.
+    const routes = files.get("http/order.routes.ts")!;
+    expect(routes).toMatch(/from "..\/domain\/order-extern\.js"/);
+    expect(routes).toMatch(/aggregate\.checkConfirm\(\)/);
+    expect(routes).toMatch(/externHandlers\.confirmOrder/);
+    expect(routes).toMatch(/await handler\(aggregate, body\)/);
+    expect(routes).toMatch(/aggregate\.assertInvariants\(\)/);
+    expect(routes).not.toMatch(/aggregate\.confirm\(\)/);
+
+    // 5. http/index.ts wires the verify gate at startup.
+    const httpIndex = files.get("http/index.ts")!;
+    expect(httpIndex).toMatch(/verifyOrderExternHandlersRegistered/);
+  });
+
   it("Drizzle schema emits indexes for find-referenced columns + part FKs", async () => {
     // sales.ddd's Order.byCustomer + activeForCustomer drive
     // `customerId` and `status` indexes on the orders table; the
