@@ -4,6 +4,7 @@ import { enrichLoomModel } from "../../ir/enrichments.js";
 import type { BoundedContextIR, RepositoryIR } from "../../ir/loom-ir.js";
 import { plural } from "../../util/naming.js";
 import { emitCqrs } from "./cqrs-emit.js";
+import { emitWorkflows } from "./workflow-emit.js";
 import { buildFindBodies } from "./find-emit.js";
 import {
   renderCommon,
@@ -106,6 +107,7 @@ function emitProjectFromContexts(
     for (const agg of ctx.aggregates) {
       emitAggregate(agg, ctx, ns, out);
     }
+    emitWorkflows(ctx, ns, out);
   }
   // DbContext + project shell are emitted once, with all aggregates
   // collected from the union of contexts.
@@ -138,6 +140,7 @@ function emitContext(
   for (const agg of ctx.aggregates) {
     emitAggregate(agg, ctx, ns, out);
   }
+  emitWorkflows(ctx, ns, out);
   emitInfrastructure(ctx, ns, out);
   emitProject(ctx, ns, out);
   emitTestProject(ctx, ns, out);

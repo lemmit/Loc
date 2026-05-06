@@ -201,6 +201,117 @@ describe(".NET generator", () => {
     expect(csproj).toMatch(/<PackageReference Include="Scrutor"/);
   });
 
+  it("emits a Mediator handler + controller for non-transactional workflow", async () => {
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(`
+      context Sales {
+        enum OrderStatus { Draft, Confirmed }
+        aggregate Customer {
+          name: string display
+          creditLimit: decimal
+          operation deductCredit(amount: decimal) {
+            precondition amount > 0
+            creditLimit := creditLimit - amount
+          }
+        }
+        aggregate Order {
+          customerId: Id<Customer>
+          status: OrderStatus
+          placedAt: datetime
+        }
+        repository Customers for Customer { }
+        repository Orders for Order { }
+        event OrderPlaced { order: Id<Order>, at: datetime }
+        workflow placeOrder(customerId: Id<Customer>, amount: decimal, placedAt: datetime) {
+          precondition amount > 0
+          let customer = Customers.getById(customerId)
+          customer.deductCredit(amount)
+          let order = Order.create({
+            customerId: customerId,
+            status: Draft,
+            placedAt: placedAt
+          })
+          emit OrderPlaced { order: order.id, at: placedAt }
+        }
+      }
+    `, { validation: true });
+    const files = generateDotnet(doc.parseResult.value as Model);
+
+    // Request DTO uses wire types (Guid for Id<X>, string for datetime).
+    const req = files.get("Application/Workflows/PlaceOrderRequest.cs")!;
+    expect(req).toMatch(/public sealed record PlaceOrderRequest\(Guid CustomerId, decimal Amount, string PlacedAt\)/);
+
+    // Command uses domain types (CustomerId, DateTime).
+    const cmd = files.get("Application/Workflows/PlaceOrderCommand.cs")!;
+    expect(cmd).toMatch(/public sealed record PlaceOrderCommand\(CustomerId CustomerId, decimal Amount, DateTime PlacedAt\)/);
+
+    // Handler injects both repositories + event dispatcher; statement
+    // ordering preserved; saves at exit; event drain after saves.
+    const handler = files.get("Application/Workflows/PlaceOrderHandler.cs")!;
+    expect(handler).toMatch(/private readonly ICustomerRepository _customers;/);
+    expect(handler).toMatch(/private readonly IOrderRepository _orders;/);
+    expect(handler).toMatch(/private readonly IDomainEventDispatcher _events;/);
+    expect(handler).toMatch(/if \(!\(cmd\.Amount > 0\)\) throw new DomainException/);
+    expect(handler).toMatch(/var customer = await _customers\.GetByIdAsync\(cmd\.CustomerId, ct\);/);
+    expect(handler).toMatch(/customer\.DeductCredit\(cmd\.Amount\);/);
+    expect(handler).toMatch(/var order = Order\.Create\(CustomerId: cmd\.CustomerId, Status: OrderStatus\.Draft/);
+    expect(handler).toMatch(/_workflowEvents\.Add\(new OrderPlaced\(/);
+    // Saves ordered: customer first (declared first), then order.
+    const saveCustIdx = handler.indexOf("await _customers.SaveAsync(customer");
+    const saveOrderIdx = handler.indexOf("await _orders.SaveAsync(order");
+    expect(saveCustIdx).toBeGreaterThan(0);
+    expect(saveOrderIdx).toBeGreaterThan(saveCustIdx);
+    // Event drain after saves.
+    const drainIdx = handler.indexOf("foreach (var ev in _workflowEvents)");
+    expect(drainIdx).toBeGreaterThan(saveOrderIdx);
+    // Non-transactional: no BeginTransactionAsync.
+    expect(handler).not.toMatch(/BeginTransactionAsync/);
+
+    // Controller exposes POST /workflows/place_order.
+    const ctrl = files.get("Api/SalesWorkflowsController.cs")!;
+    expect(ctrl).toMatch(/\[Route\("workflows"\)\]/);
+    expect(ctrl).toMatch(/\[HttpPost\("place_order"\)\]/);
+    expect(ctrl).toMatch(/public async Task<IActionResult> PlaceOrder\(\[FromBody\] PlaceOrderRequest request\)/);
+    expect(ctrl).toMatch(/new PlaceOrderCommand\(\s*new CustomerId\(request\.CustomerId\)/);
+  });
+
+  it("emits a transactional workflow with BeginTransactionAsync + Commit + Rollback", async () => {
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(`
+      context T {
+        aggregate Customer {
+          name: string display
+          creditLimit: decimal
+          operation addCredit(amount: decimal) {
+            precondition amount > 0
+            creditLimit := creditLimit + amount
+          }
+        }
+        repository Customers for Customer { }
+        workflow topUp(customerId: Id<Customer>, amount: decimal) transactional {
+          precondition amount > 0
+          let c = Customers.getById(customerId)
+          c.addCredit(amount)
+        }
+      }
+    `, { validation: true });
+    const files = generateDotnet(doc.parseResult.value as Model);
+    const handler = files.get("Application/Workflows/TopUpHandler.cs")!;
+    expect(handler).toMatch(/private readonly T\.Infrastructure\.Persistence\.AppDbContext _db;/);
+    expect(handler).toMatch(/await using var tx = await _db\.Database\.BeginTransactionAsync\(ct\);/);
+    expect(handler).toMatch(/await tx\.CommitAsync\(ct\);/);
+    expect(handler).toMatch(/await tx\.RollbackAsync\(ct\);/);
+    // Save inside the try block, before commit.
+    const trySaveIdx = handler.indexOf("await _customers.SaveAsync(c, ct);");
+    const commitIdx = handler.indexOf("await tx.CommitAsync(ct);");
+    expect(trySaveIdx).toBeGreaterThan(0);
+    expect(commitIdx).toBeGreaterThan(trySaveIdx);
+  });
+
   it("DomainExceptionFilter catches unhandled exceptions as sanitized 500", async () => {
     const model = await buildModel("examples/sales.ddd");
     const files = generateDotnet(model);
