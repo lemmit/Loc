@@ -401,6 +401,56 @@ describe(".NET generator", () => {
     );
   });
 
+  it("rewrites Id<X> follow refs to FindManyByIdsAsync + dictionary lookups (slice 3)", async () => {
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(`
+      context Sales {
+        enum OrderStatus { Draft, Confirmed }
+        aggregate Customer { name: string display, email: string }
+        aggregate Order {
+          customerId: Id<Customer>
+          status: OrderStatus
+        }
+        repository Customers for Customer { }
+        repository Orders for Order { }
+        view CustomerOrders {
+          orderId: Id<Order>
+          customerName: string
+          customerEmail: string
+          status: OrderStatus
+          from Order where status == Confirmed
+          bind orderId = id, customerName = customerId.name, customerEmail = customerId.email, status = status
+        }
+      }
+    `, { validation: true });
+    const files = generateDotnet(doc.parseResult.value as Model);
+
+    // Handler injects both repos.
+    const handler = files.get("Application/Views/CustomerOrdersHandler.cs")!;
+    expect(handler).toMatch(/private readonly IOrderRepository _repo;/);
+    expect(handler).toMatch(/private readonly ICustomerRepository _customerRepo;/);
+    // Bulk load + ToDictionary keyed by Id.
+    expect(handler).toMatch(
+      /var customerById = \(await _customerRepo\.FindManyByIdsAsync\(domain\.Select\(d => d\.CustomerId\)\.ToList\(\), ct\)\)\.ToDictionary\(__a => __a\.Id\)/,
+    );
+    // Projection rewrites the Id-follow refs to dictionary lookups.
+    expect(handler).toMatch(
+      /new CustomerOrdersRow\(d\.Id\.Value, customerById\[d\.CustomerId\]\.Name, customerById\[d\.CustomerId\]\.Email, d\.Status\.ToString\(\)\)/,
+    );
+
+    // Repo interface + impl gained FindManyByIdsAsync.
+    const iface = files.get("Domain/Customers/ICustomerRepository.cs")!;
+    expect(iface).toMatch(
+      /Task<System\.Collections\.Generic\.IReadOnlyList<Customer>> FindManyByIdsAsync/,
+    );
+    const impl = files.get("Infrastructure/Repositories/CustomerRepository.cs")!;
+    expect(impl).toMatch(
+      /_db\.Customers\.Where\(x => ids\.Contains\(x\.Id\)\)\.ToListAsync\(ct\)/,
+    );
+  });
+
   it("emits explicit IsolationLevel for transactional(level) workflows", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);

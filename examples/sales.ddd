@@ -136,4 +136,23 @@ context Sales {
          status = status,
          lineCount = lines.count
   }
+
+  // Snowflake-style view: bind expressions follow `Id<X>` typed
+  // refs into other aggregates.  `customerId.name` and
+  // `customerId.email` resolve via the type system (Customer is
+  // the target of `customerId: Id<Customer>`); the route handler
+  // bulk-loads matching Customers via `findManyByIds` and
+  // dictionary-rewrites the projection.  Slice 3.
+  view CustomerOrders {
+    orderId: Id<Order>
+    customerName: string
+    customerEmail: string
+    status: OrderStatus
+
+    from Order where status == Confirmed
+    bind orderId = id,
+         customerName = customerId.name,
+         customerEmail = customerId.email,
+         status = status
+  }
 }

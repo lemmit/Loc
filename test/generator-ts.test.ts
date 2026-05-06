@@ -406,6 +406,56 @@ describe("typescript generator", () => {
     );
   });
 
+  it("rewrites Id<X> follow refs to bulk-load + map lookups (slice 3)", async () => {
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(`
+      context Sales {
+        enum OrderStatus { Draft, Confirmed }
+        aggregate Customer { name: string display, email: string }
+        aggregate Order {
+          customerId: Id<Customer>
+          status: OrderStatus
+        }
+        repository Customers for Customer { }
+        repository Orders for Order { }
+        view CustomerOrders {
+          orderId: Id<Order>
+          customerName: string
+          customerEmail: string
+          status: OrderStatus
+          from Order where status == Confirmed
+          bind orderId = id, customerName = customerId.name, customerEmail = customerId.email, status = status
+        }
+      }
+    `, { validation: true });
+    const files = generateTypeScript(doc.parseResult.value as Model);
+    const views = files.get("http/views.ts")!;
+
+    // Foreign aggregate's repo is imported and instantiated.
+    expect(views).toMatch(
+      /import \{ CustomerRepository \} from "..\/db\/repositories\/customer-repository\.js"/,
+    );
+    expect(views).toMatch(/const customerRepo = new CustomerRepository\(db, events\)/);
+    // Bulk load + map by id.
+    expect(views).toMatch(
+      /const customerById = new Map\(\(await customerRepo\.findManyByIds\(rows\.map\(\(r\) => r\.customerId\)\)\)\.map\(\(__a\) => \[__a\.id as string, __a\]\)\)/,
+    );
+    // Projection rewrites the Id-follow refs.
+    expect(views).toMatch(/customerName: customerById\.get\(r\.customerId as string\)!\.name/);
+    expect(views).toMatch(/customerEmail: customerById\.get\(r\.customerId as string\)!\.email/);
+
+    // Repo gained findManyByIds.
+    const customerRepo = files.get("db/repositories/customer-repository.ts")!;
+    expect(customerRepo).toMatch(
+      /async findManyByIds\(ids: Ids\.CustomerId\[\]\): Promise<Customer\[\]>/,
+    );
+    expect(customerRepo).toMatch(
+      /\.where\(inArray\(schema\.customers\.id, ids\)\)/,
+    );
+  });
+
   it("emits explicit isolationLevel for transactional(level) workflows", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);

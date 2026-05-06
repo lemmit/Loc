@@ -711,6 +711,16 @@ function stepInto(t: TypeIR, name: string, env: Env): TypeIR {
     const vo = findValueObjectByName(env, t.name);
     if (vo) return memberOnValueObject(vo, name);
   }
+  if (t.kind === "id") {
+    // `customerId.name` where `customerId: Id<Customer>` — follow the
+    // typed reference into the target aggregate's schema.  Used by
+    // view bind expressions to project across `Id<X>` references
+    // without an explicit join clause.  Single-hop only; the
+    // resulting member type comes from the target aggregate's
+    // declared shape (property / containment / derived).
+    const target = findEntityByName(env, t.targetName);
+    if (target) return memberOnEntity(target, name);
+  }
   return { kind: "primitive", name: "string" };
 }
 

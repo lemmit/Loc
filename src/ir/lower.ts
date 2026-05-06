@@ -389,22 +389,91 @@ function lowerView(view: View, env: Env): ViewIR {
   // `output: undefined` so emitters fall back to the aggregate's
   // wire shape.
   const hasOutput = view.fields.length > 0;
-  const output = hasOutput
-    ? {
-        fields: view.fields.map((p) => lowerField(p)),
-        binds: view.binds.map((b) => ({
-          name: b.name,
-          expr: lowerExpr(b.expr, inner),
-          type: inferExprType(b.expr, inner),
-        })),
-      }
-    : undefined;
+  let output: ViewIR["output"] | undefined;
+  if (hasOutput) {
+    const binds = view.binds.map((b) => ({
+      name: b.name,
+      expr: lowerExpr(b.expr, inner),
+      type: inferExprType(b.expr, inner),
+    }));
+    // Walk every bind expression for `Id<X>` follow patterns —
+    // member access whose receiver type is `kind: "id"`.  Each
+    // unique (sourceField, targetAgg) pair becomes an auxiliary
+    // bulk-load at view emission time.
+    const auxByKey = new Map<string, { sourceField: string; aggName: string }>();
+    for (const b of binds) {
+      collectIdFollows(b.expr, auxByKey);
+    }
+    output = {
+      fields: view.fields.map((p) => lowerField(p)),
+      binds,
+      auxiliaries: [...auxByKey.values()],
+    };
+  }
   return {
     name: view.name,
     aggregateName: source?.name ?? "Unknown",
     filter,
     output,
   };
+}
+
+/** Walk a bind expression's IR tree and capture every `Id<X>`
+ *  follow as an auxiliary entry: a member-access node whose
+ *  receiver is a `ref` of type `kind: "id"`.  Single-hop only —
+ *  multi-hop snowflakes (`customerId.regionId.name`) are caught
+ *  here too because each `member` node along the path emits its
+ *  own follow, but the v1 emitter only handles the single-hop
+ *  case (validator can tighten this later). */
+function collectIdFollows(
+  expr: ExprIR,
+  out: Map<string, { sourceField: string; aggName: string }>,
+): void {
+  if (expr.kind === "member") {
+    const recv = expr.receiver;
+    if (recv.kind === "ref" && recv.type?.kind === "id") {
+      const key = `${recv.name}@${recv.type.targetName}`;
+      if (!out.has(key)) {
+        out.set(key, {
+          sourceField: recv.name,
+          aggName: recv.type.targetName,
+        });
+      }
+    }
+    collectIdFollows(expr.receiver, out);
+    return;
+  }
+  switch (expr.kind) {
+    case "method-call":
+      collectIdFollows(expr.receiver, out);
+      for (const a of expr.args) collectIdFollows(a, out);
+      return;
+    case "call":
+      for (const a of expr.args) collectIdFollows(a, out);
+      return;
+    case "lambda":
+      collectIdFollows(expr.body, out);
+      return;
+    case "binary":
+      collectIdFollows(expr.left, out);
+      collectIdFollows(expr.right, out);
+      return;
+    case "unary":
+      collectIdFollows(expr.operand, out);
+      return;
+    case "ternary":
+      collectIdFollows(expr.cond, out);
+      collectIdFollows(expr.then, out);
+      collectIdFollows(expr.otherwise, out);
+      return;
+    case "paren":
+      collectIdFollows(expr.inner, out);
+      return;
+    case "new":
+    case "object":
+      for (const f of expr.fields) collectIdFollows(f.value, out);
+      return;
+  }
 }
 
 // ---------------------------------------------------------------------------

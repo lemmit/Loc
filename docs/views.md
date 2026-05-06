@@ -90,15 +90,75 @@ shorthand form is a strict subset of the full form's surface.
   the declared fields, exposed as a Zod schema on Hono and a C#
   record on .NET.
 
+## Joined views (snowflake style)
+
+Slice 3 lets bind expressions **follow** `Id<X>` references into
+other aggregates without an explicit join clause.  The type
+system already knows that `customerId: Id<Customer>` points at
+`Customer`, so `customerId.name` resolves to a typed access on
+that aggregate's `name` field.
+
+```ddd
+view CustomerOrders {
+  orderId: Id<Order>
+  customerName: string
+  customerEmail: string
+  status: OrderStatus
+
+  from Order where status == Confirmed
+  bind orderId = id,
+       customerName = customerId.name,
+       customerEmail = customerId.email,
+       status = status
+}
+```
+
+How it lowers:
+
+- The validator + lowering walk every bind expression for
+  `member` accesses whose receiver is `Id<X>` typed.  Each unique
+  `(sourceField, targetAgg)` pair is collected into the view's
+  `auxiliaries`.
+- Each aggregate's repository gains a canonical `findManyByIds`
+  method (TS) / `FindManyByIdsAsync` (.NET) that bulk-loads roots
+  matching a list of ids.  This avoids N+1: the view route fires
+  one extra query per auxiliary aggregate, regardless of how many
+  rows came back from the source.
+- The route / handler runs the source view query, then for each
+  auxiliary calls `findManyByIds` with the deduped list of source-
+  field values, building a `Map<id, Aggregate>` (TS) /
+  `Dictionary<TId, T>` (.NET).
+- During projection, each `r.customerId.name` rewrites to
+  `customerById.get(r.customerId)!.name` (TS) /
+  `customerById[d.CustomerId].Name` (.NET).  The non-null
+  assertion is correct because the source's `Id<X>` reference
+  is non-nullable — if no Customer exists for that id, the
+  request errors loudly (which is the right answer; a
+  dangling foreign reference is a data-integrity problem).
+
+### Limits in v1
+
+- **Single-hop only**.  `customerId.name` works; chained follows
+  like `customerId.regionId.name` are not yet rewritten — they
+  parse and type-check, but emit naively (fail at runtime).
+  Multi-hop snowflakes can be expressed today by chaining views
+  (one per hop).
+- **Non-nullable Id only**.  `Id<X>?` follows aren't supported;
+  emit hardcodes a non-null assertion.
+- **No 1:N joins**.  Cardinality stays 1:1 per follow — each
+  source row produces exactly one output row.
+- **No `join … on …` syntax**.  If you need a join key that
+  isn't an `Id<X>`, you're stuck with two views or a
+  hand-written endpoint until slice 4.
+
 ## What's NOT yet supported
 
-- Joined sources (slice 3 — "snowflake" denormalisation across
-  aggregates, e.g. follow `customerId: Id<Customer>` to project
-  `customer.name`).
 - Per-view parameters — today the repository's parameterised
   `find` already covers this case; views earn parameters when
   they need to join.
 - Pagination / sorting / limit clauses.
+- Multi-hop snowflakes (chain `Id<X>.<Id<Y>>.field`).
+- Aggregations (`count`, `sum`, `avg` over groups).
 
 ## What it generates
 

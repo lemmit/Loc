@@ -235,6 +235,14 @@ export interface ViewIR {
   output?: {
     fields: FieldIR[];
     binds: { name: string; expr: ExprIR; type: TypeIR }[];
+    /** Foreign aggregates referenced by bind expressions via
+     *  `Id<X>` follow (e.g. `bind customerName = customerId.name`
+     *  follows an `Id<Customer>` typed property).  Each entry says
+     *  "the source aggregate's `sourceField` is an `Id<aggName>`;
+     *  bulk-load matching `aggName` rows at view-time and use them
+     *  for projection".  Single-hop only — slice 3 v1.  Empty when
+     *  the view has no follows. */
+    auxiliaries: { sourceField: string; aggName: string }[];
   };
 }
 

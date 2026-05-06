@@ -111,6 +111,12 @@ export function buildRepositoryFile(
   lines.push(`  }`);
   lines.push("");
 
+  // findManyByIds — bulk loader used by views that follow `Id<X>`
+  // references in bind expressions (slice 3).  Same hydration path
+  // as the array-return finds; filter is a single `inArray`.
+  lines.push(...findManyByIdsMethod(agg, ctx));
+  lines.push("");
+
   // save
   lines.push(...saveMethod(agg, ctx));
   lines.push("");
@@ -254,6 +260,65 @@ function wireProjectionValue(
 // ---------------------------------------------------------------------------
 // findById — load root, load each part collection, hydrate
 // ---------------------------------------------------------------------------
+
+function findManyByIdsMethod(
+  agg: AggregateIR,
+  ctx: BoundedContextIR,
+): string[] {
+  const lines: string[] = [];
+  const tableName = camel(plural(agg.name));
+  lines.push(
+    `  async findManyByIds(ids: Ids.${agg.name}Id[]): Promise<${agg.name}[]> {`,
+  );
+  lines.push(`    if (ids.length === 0) return [];`);
+  lines.push(
+    `    const rootRows = await this.db.select().from(schema.${tableName}).where(inArray(schema.${tableName}.id, ids));`,
+  );
+  lines.push(`    if (rootRows.length === 0) return [];`);
+  // Bulk-load every containment (collections + singulars) into per-
+  // parent maps; mirrors the array-return path of findQueryMethod.
+  const eagerContains = agg.contains
+    .map((c) => ({ c, part: agg.parts.find((p) => p.name === c.partName) }))
+    .filter((x): x is { c: typeof x.c; part: EntityPartIR } => !!x.part);
+  if (eagerContains.length > 0) {
+    lines.push(`    const __ids = rootRows.map((r) => r.id);`);
+    for (const { c, part } of eagerContains) {
+      const childTable = camel(plural(part.name));
+      lines.push(
+        `    const ${c.name}Rows = await this.db.select().from(schema.${childTable}).where(inArray(schema.${childTable}.parentId, __ids));`,
+      );
+      if (c.collection) {
+        lines.push(
+          `    const ${c.name}ByParent = new Map<string, ${part.name}[]>();`,
+        );
+        lines.push(`    for (const r of ${c.name}Rows) {`);
+        lines.push(
+          `      const list = ${c.name}ByParent.get(r.parentId) ?? [];`,
+        );
+        lines.push(
+          `      list.push(${hydrateEntityExpr(part, "r", agg, ctx)});`,
+        );
+        lines.push(`      ${c.name}ByParent.set(r.parentId, list);`);
+        lines.push(`    }`);
+      } else {
+        lines.push(
+          `    const ${c.name}ByParent = new Map<string, ${part.name}>();`,
+        );
+        lines.push(`    for (const r of ${c.name}Rows) {`);
+        lines.push(`      if (${c.name}ByParent.has(r.parentId)) continue;`);
+        lines.push(
+          `      ${c.name}ByParent.set(r.parentId, ${hydrateEntityExpr(part, "r", agg, ctx)});`,
+        );
+        lines.push(`    }`);
+      }
+    }
+  }
+  lines.push(
+    `    return rootRows.map((root) => ${hydrateRootForFindAllExpr(agg, "root", ctx)});`,
+  );
+  lines.push(`  }`);
+  return lines;
+}
 
 function findByIdMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
   const lines: string[] = [];
