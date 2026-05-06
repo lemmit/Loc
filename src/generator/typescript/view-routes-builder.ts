@@ -1,23 +1,31 @@
 import type {
   AggregateIR,
   BoundedContextIR,
+  TypeIR,
   ViewIR,
 } from "../../ir/loom-ir.js";
 import { camel, plural, snake } from "../../util/naming.js";
+import { renderTsExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
 // Hono view routes emission.
 //
 // For each `view` declared in the context, emit a `GET /<snake>`
 // route whose body delegates to the source aggregate's repository
-// (extended in `repository-builder.ts` with one parameterless
-// method per matching view) and projects results to the
-// aggregate's existing wire shape via `repo.toWire`.
+// and projects results to either:
+//
+//   - the aggregate's existing wire shape via `repo.toWire`
+//     (shorthand form `view X = Y where ...`), or
+//   - a custom record shape declared in the view's full-form body
+//     `view X { fields ... bind ... }`.
 //
 // One file per context — `http/views.ts` — mounted under `/views`
 // in `http/index.ts`.  Matches the workflow / aggregate route
 // pattern: typed Zod schemas, OpenAPI annotations, on-error filter.
 // ---------------------------------------------------------------------------
+
+const cap = (s: string): string =>
+  s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
 
 export function buildViewsRoutesFile(
   ctx: BoundedContextIR,
@@ -39,20 +47,43 @@ export function buildViewsRoutesFile(
   // share an aggregate).
   const aggsTouched = new Set<string>();
   for (const v of ctx.views) aggsTouched.add(v.aggregateName);
+  // Shorthand views need the aggregate's exported response schemas;
+  // full-form views may also need them (e.g. when they reuse value-
+  // object shapes).  Always import both for the touched aggregates.
   for (const aggName of aggsTouched) {
     lines.push(
       `import { ${aggName}Repository } from "../db/repositories/${camel(aggName)}-repository.js";`,
     );
-    // Reuse the aggregate routes file's exported response schemas
-    // — single source of truth, so the OpenAPI spec for
-    // /views/<...> matches the aggregate's GET endpoints exactly.
-    // `<Agg>Response` is the per-row shape; `<Agg>ListResponse`
-    // is `z.array(<Agg>Response)` for the route's response.
     lines.push(
       `import { ${aggName}Response, ${aggName}ListResponse } from "./${camel(aggName)}.routes.js";`,
     );
   }
+  // Value object + enum imports — full-form views may bind to enum
+  // values (`status`) or value-object fields.
+  const vos = ctx.valueObjects.map((v) => v.name);
+  const enums = ctx.enums.map((e) => e.name);
+  if (vos.length + enums.length > 0) {
+    lines.push(
+      `import { ${[...vos, ...enums].join(", ")} } from "../domain/value-objects.js";`,
+    );
+  }
   lines.push("");
+
+  // Per-full-form-view response Zod schema.  Shorthand views reuse
+  // the aggregate's `<Agg>ListResponse` import.
+  const enumValues = new Map(ctx.enums.map((e) => [e.name, e.values] as const));
+  for (const view of ctx.views) {
+    if (!view.output) continue;
+    lines.push(`const ${cap(view.name)}Row = z.object({`);
+    for (const f of view.output.fields) {
+      lines.push(`  ${f.name}: ${zodForRow(f.type, enumValues)},`);
+    }
+    lines.push(`}).openapi("${cap(view.name)}Row");`);
+    lines.push(
+      `const ${cap(view.name)}Response = z.array(${cap(view.name)}Row).openapi("${cap(view.name)}Response");`,
+    );
+  }
+  if (ctx.views.some((v) => v.output)) lines.push("");
 
   lines.push(
     `export function viewsRoutes(`,
@@ -93,6 +124,9 @@ function emitViewRoute(
   void aggsByName;
   const out: string[] = [];
   const aggSlug = snake(plural(view.aggregateName));
+  const responseSchema = view.output
+    ? `${cap(view.name)}Response`
+    : `${view.aggregateName}ListResponse`;
   out.push(`app.openapi(`);
   out.push(`  createRoute({`);
   out.push(`    method: "get",`);
@@ -100,28 +134,71 @@ function emitViewRoute(
   out.push(`    tags: ["views", "${aggSlug}"],`);
   out.push(`    operationId: "${camel(view.name)}View",`);
   out.push(`    responses: {`);
-  // Response is `<Agg>ListResponse` — typed array of the source
-  // aggregate's wire shape, imported verbatim from the aggregate's
-  // routes file.  Slice 1 keeps the response shape unchanged;
-  // later slices may declare custom shapes.
   out.push(
-    `      200: { description: "OK", content: { "application/json": { schema: ${view.aggregateName}ListResponse } } },`,
+    `      200: { description: "OK", content: { "application/json": { schema: ${responseSchema} } } },`,
   );
   out.push(`    },`);
   out.push(`  }),`);
   out.push(`  async (httpCtx) => {`);
   out.push(`    const repo = new ${view.aggregateName}Repository(db, events);`);
   out.push(`    const rows = await repo.${camel(view.name)}();`);
-  // The cast at the wire boundary mirrors the per-aggregate find
-  // route: `repo.toWire` returns the canonical wire shape but its
-  // declared TS return type is `unknown` (it walks runtime
-  // `wireShape` metadata), so a `z.infer<typeof X>` assertion
-  // tells the route's typed Hono response handler the exact shape
-  // we know we produced.
-  out.push(
-    `    return httpCtx.json(rows.map((r) => repo.toWire(r)) as z.infer<typeof ${view.aggregateName}Response>[], 200);`,
-  );
+  if (view.output) {
+    // Custom shape: project each hydrated row through the bind
+    // expressions.  `renderTsExpr(expr, { thisName: "r" })` rewrites
+    // every `this`-rooted ref to use the row variable's public
+    // getters.
+    const projectedFields = view.output.binds
+      .map((b) => `      ${b.name}: ${renderTsExpr(b.expr, { thisName: "r" })}`)
+      .join(",\n");
+    out.push(`    const projected = rows.map((r) => ({\n${projectedFields},\n    }));`);
+    out.push(
+      `    return httpCtx.json(projected as z.infer<typeof ${cap(view.name)}Response>, 200);`,
+    );
+  } else {
+    out.push(
+      `    return httpCtx.json(rows.map((r) => repo.toWire(r)) as z.infer<typeof ${view.aggregateName}Response>[], 200);`,
+    );
+  }
   out.push(`  },`);
   out.push(`);`);
   return out;
+}
+
+/** Zod schema for a view-output field's TS type.  Decimals stay as
+ *  `z.number()`, ids emit as `z.string()`, enum values are emitted
+ *  inline as a string-literal union pulled from `enumValues`. */
+function zodForRow(t: TypeIR, enumValues: Map<string, string[]>): string {
+  switch (t.kind) {
+    case "primitive":
+      switch (t.name) {
+        case "int":
+        case "long":
+          return "z.number().int()";
+        case "decimal":
+          return "z.number()";
+        case "string":
+        case "guid":
+          return "z.string()";
+        case "bool":
+          return "z.boolean()";
+        case "datetime":
+          return "z.string()";
+      }
+    /* eslint-disable-next-line no-fallthrough */
+    case "id":
+      return "z.string()";
+    case "enum": {
+      const values = enumValues.get(t.name) ?? [];
+      const lits = values.map((v) => `"${v}"`).join(", ");
+      return values.length > 0 ? `z.enum([${lits}])` : "z.string()";
+    }
+    case "valueobject":
+      return "z.unknown()";
+    case "entity":
+      return "z.unknown()";
+    case "array":
+      return `z.array(${zodForRow(t.element, enumValues)})`;
+    case "optional":
+      return `${zodForRow(t.inner, enumValues)}.nullish()`;
+  }
 }

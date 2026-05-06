@@ -1163,36 +1163,70 @@ function validateViews(
       });
       continue;
     }
-    const offending = firstNonQueryableNode(view.filter);
-    if (offending) {
-      diags.push({
-        severity: "error",
-        message:
-          `view '${view.name}': where-clause is not queryable (${offending}). ` +
-          `Allowed: comparisons, &&/||/!, parens, ` +
-          `'this.<column>' / 'this.<vo>.<sub>' refs, parameter refs, literals.`,
-        source: `${ctx.name}/${view.name}`,
-      });
-      continue;
+    if (view.filter) {
+      const offending = firstNonQueryableNode(view.filter);
+      if (offending) {
+        diags.push({
+          severity: "error",
+          message:
+            `view '${view.name}': where-clause is not queryable (${offending}). ` +
+            `Allowed: comparisons, &&/||/!, parens, ` +
+            `'this.<column>' / 'this.<vo>.<sub>' refs, parameter refs, literals.`,
+          source: `${ctx.name}/${view.name}`,
+        });
+        continue;
+      }
+      const unknown = firstUnknownColumnRef(view.filter, agg, ctx);
+      if (unknown) {
+        diags.push({
+          severity: "error",
+          message:
+            `view '${view.name}': where-clause references unknown field ${unknown} on aggregate '${agg.name}'.`,
+          source: `${ctx.name}/${view.name}`,
+        });
+      }
+      const bothCols = firstColumnVsColumn(view.filter);
+      if (bothCols) {
+        diags.push({
+          severity: "error",
+          message:
+            `view '${view.name}': comparison between two columns (${bothCols}) is not queryable. ` +
+            `Drizzle's eq()/ne()/lt()/etc. require one column and one value (parameter, literal, or enum value).`,
+          source: `${ctx.name}/${view.name}`,
+        });
+      }
     }
-    const unknown = firstUnknownColumnRef(view.filter, agg, ctx);
-    if (unknown) {
-      diags.push({
-        severity: "error",
-        message:
-          `view '${view.name}': where-clause references unknown field ${unknown} on aggregate '${agg.name}'.`,
-        source: `${ctx.name}/${view.name}`,
-      });
-    }
-    const bothCols = firstColumnVsColumn(view.filter);
-    if (bothCols) {
-      diags.push({
-        severity: "error",
-        message:
-          `view '${view.name}': comparison between two columns (${bothCols}) is not queryable. ` +
-          `Drizzle's eq()/ne()/lt()/etc. require one column and one value (parameter, literal, or enum value).`,
-        source: `${ctx.name}/${view.name}`,
-      });
+    // Full-form view: bind exhaustiveness + per-bind name validity.
+    if (view.output) {
+      const fieldNames = new Set(view.output.fields.map((f) => f.name));
+      const boundNames = new Set(view.output.binds.map((b) => b.name));
+      for (const f of view.output.fields) {
+        if (!boundNames.has(f.name)) {
+          diags.push({
+            severity: "error",
+            message: `view '${view.name}': field '${f.name}' has no bind expression.  Add 'bind ${f.name} = ...' to the body.`,
+            source: `${ctx.name}/${view.name}`,
+          });
+        }
+      }
+      const seenBinds = new Set<string>();
+      for (const b of view.output.binds) {
+        if (!fieldNames.has(b.name)) {
+          diags.push({
+            severity: "error",
+            message: `view '${view.name}': bind '${b.name}' has no matching declared field.  Either declare 'name: Type' at the top of the view or remove the bind.`,
+            source: `${ctx.name}/${view.name}`,
+          });
+        }
+        if (seenBinds.has(b.name)) {
+          diags.push({
+            severity: "error",
+            message: `view '${view.name}': field '${b.name}' is bound more than once.`,
+            source: `${ctx.name}/${view.name}`,
+          });
+        }
+        seenBinds.add(b.name);
+      }
     }
   }
 }

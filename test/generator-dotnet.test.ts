@@ -358,6 +358,49 @@ describe(".NET generator", () => {
     expect(ctrl).toMatch(/await _mediator\.Send\(new ActiveOrdersQuery\(\)\)/);
   });
 
+  it("emits a custom-shape view with per-row projection (full form)", async () => {
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(`
+      context Sales {
+        enum OrderStatus { Draft, Confirmed }
+        aggregate Order {
+          customerId: string
+          status: OrderStatus
+          contains lines: OrderLine[]
+          entity OrderLine { quantity: int, invariant quantity > 0 }
+        }
+        repository Orders for Order { }
+        view OrderSummary {
+          orderId: Id<Order>
+          status: OrderStatus
+          lineCount: int
+          from Order where status == Confirmed
+          bind orderId = id, status = status, lineCount = lines.count
+        }
+      }
+    `, { validation: true });
+    const files = generateDotnet(doc.parseResult.value as Model);
+
+    // Wire-typed Row record (Id<Order> → Guid, enum → string, int → int).
+    const row = files.get("Application/Views/OrderSummaryRow.cs")!;
+    expect(row).toMatch(
+      /public sealed record OrderSummaryRow\(Guid OrderId, string Status, int LineCount\);/,
+    );
+
+    // Query returns IReadOnlyList<OrderSummaryRow>, not <Agg>Response.
+    const query = files.get("Application/Views/OrderSummaryQuery.cs")!;
+    expect(query).toMatch(/IQuery<System\.Collections\.Generic\.IReadOnlyList<OrderSummaryRow>>/);
+
+    // Handler projects through projectToResponse (Id.Value, enum.ToString,
+    // collection .Count via the bind renderer).
+    const handler = files.get("Application/Views/OrderSummaryHandler.cs")!;
+    expect(handler).toMatch(
+      /domain\.Select\(d => new OrderSummaryRow\(d\.Id\.Value, d\.Status\.ToString\(\), d\.Lines\.Count\)\)\.ToList\(\)/,
+    );
+  });
+
   it("emits explicit IsolationLevel for transactional(level) workflows", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);

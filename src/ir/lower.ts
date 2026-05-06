@@ -374,17 +374,36 @@ function lowerRepository(repo: Repository): RepositoryIR {
 }
 
 function lowerView(view: View, env: Env): ViewIR {
-  // Filter expressions resolve against the source aggregate's
-  // schema — same env shape repository find filters use.  Bare
-  // names (`status`, `lines.count`) lower to this-rooted property
-  // refs of the source aggregate.
+  // Filter + bind expressions resolve against the source
+  // aggregate's schema — same env shape repository find filters
+  // use.  Bare names (`status`, `lines.count`, `total`) lower to
+  // this-rooted property / containment / derived refs.
   const source = view.source?.ref;
   let inner = env;
   if (source) inner = inAggregate(env, source);
+  const filter = view.filter ? lowerExpr(view.filter, inner) : undefined;
+  // Full-form views declare an output record.  Each `fields+=Property`
+  // gives us a typed field; each `binds+=BindEntry` gives us the
+  // expression that produces its value at projection time.  The
+  // shorthand form leaves `fields` empty and we surface
+  // `output: undefined` so emitters fall back to the aggregate's
+  // wire shape.
+  const hasOutput = view.fields.length > 0;
+  const output = hasOutput
+    ? {
+        fields: view.fields.map((p) => lowerField(p)),
+        binds: view.binds.map((b) => ({
+          name: b.name,
+          expr: lowerExpr(b.expr, inner),
+          type: inferExprType(b.expr, inner),
+        })),
+      }
+    : undefined;
   return {
     name: view.name,
     aggregateName: source?.name ?? "Unknown",
-    filter: lowerExpr(view.filter, inner),
+    filter,
+    output,
   };
 }
 

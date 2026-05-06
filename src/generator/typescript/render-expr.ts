@@ -8,38 +8,56 @@ import { camel } from "../../util/naming.js";
 // tag, every member access has a receiver type, every collection op is
 // flagged as such.  No further AST or scoping work is needed; this layer
 // only deals with TypeScript-specific syntax.
+//
+// Render context lets callers swap the implicit `this` for an external
+// row variable (e.g. `r` for view bind projections).  When the context's
+// `thisName` is something other than `"this"`, this-rooted refs render
+// as `${thisName}.<getter>` (public getters, no underscore) — the only
+// access available outside the aggregate class.  When `thisName` is
+// `"this"` (the default — operation / function / invariant bodies), refs
+// use the existing `this._field` private-field path.
 // ---------------------------------------------------------------------------
 
-export function renderTsExpr(e: ExprIR): string {
+export interface TsRenderContext {
+  /** Rendered name for the implicit receiver (`this` by default). */
+  thisName: string;
+}
+
+const DEFAULT: TsRenderContext = { thisName: "this" };
+
+export function renderTsExpr(e: ExprIR, ctx: TsRenderContext = DEFAULT): string {
   switch (e.kind) {
     case "literal":
       return renderLiteral(e.lit, e.value);
     case "this":
-      return "this";
+      return ctx.thisName;
     case "id":
-      return "this._id";
+      return ctx.thisName === "this" ? "this._id" : `${ctx.thisName}.id`;
     case "ref":
-      return renderRef(e);
+      return renderRef(e, ctx);
     case "member":
-      return renderMember(e);
+      return renderMember(e, ctx);
     case "method-call":
-      return renderMethodCall(e);
+      return renderMethodCall(e, ctx);
     case "call":
-      return renderCall(e);
+      return renderCall(e, ctx);
     case "lambda":
-      return `(${e.param}) => ${renderTsExpr(e.body)}`;
+      // Lambdas always introduce their own parameter; the body is
+      // rendered with the outer `this` still pointing at the same
+      // receiver (lambdas in DSL are pure expressions).
+      return `(${e.param}) => ${renderTsExpr(e.body, ctx)}`;
     case "new":
-      return renderNew(e);
+      return renderNew(e, ctx);
     case "object":
-      return `({ ${e.fields.map((f) => `${f.name}: ${renderTsExpr(f.value)}`).join(", ")} })`;
+      return `({ ${e.fields.map((f) => `${f.name}: ${renderTsExpr(f.value, ctx)}`).join(", ")} })`;
     case "paren":
-      return `(${renderTsExpr(e.inner)})`;
+      return `(${renderTsExpr(e.inner, ctx)})`;
     case "unary":
-      return `${e.op}${renderTsExpr(e.operand)}`;
+      return `${e.op}${renderTsExpr(e.operand, ctx)}`;
     case "binary":
-      return renderBinary(e.op, e.left, e.right);
+      return renderBinary(e.op, e.left, e.right, ctx);
     case "ternary":
-      return `${renderTsExpr(e.cond)} ? ${renderTsExpr(e.then)} : ${renderTsExpr(e.otherwise)}`;
+      return `${renderTsExpr(e.cond, ctx)} ? ${renderTsExpr(e.then, ctx)} : ${renderTsExpr(e.otherwise, ctx)}`;
   }
 }
 
@@ -51,20 +69,26 @@ function renderLiteral(lit: ExprIR & { kind: "literal" }["lit" extends never ? n
   return value;
 }
 
-function renderRef(e: Extract<ExprIR, { kind: "ref" }>): string {
+function renderRef(e: Extract<ExprIR, { kind: "ref" }>, ctx: TsRenderContext): string {
+  const fromOutside = ctx.thisName !== "this";
   switch (e.refKind) {
     case "param":
     case "let":
     case "lambda":
       return e.name;
     case "this-prop":
-      return `this._${e.name}`;
+      // Inside the aggregate class: read the private backing field.
+      // Outside (view bind projections, e.g. row `r`): use the public
+      // getter, which is just the bare name on the runtime instance.
+      return fromOutside ? `${ctx.thisName}.${e.name}` : `this._${e.name}`;
     case "this-vo-prop":
-      return `this.${e.name}`;
+      return fromOutside ? `${ctx.thisName}.${e.name}` : `this.${e.name}`;
     case "this-derived":
-      return `this.${e.name}`;
+      return fromOutside ? `${ctx.thisName}.${e.name}` : `this.${e.name}`;
     case "helper-fn":
-      return `this.${camel(e.name)}`;
+      return fromOutside
+        ? `${ctx.thisName}.${camel(e.name)}`
+        : `this.${camel(e.name)}`;
     case "enum-value":
       return `${e.enumName}.${e.name}`;
     default:
@@ -72,17 +96,17 @@ function renderRef(e: Extract<ExprIR, { kind: "ref" }>): string {
   }
 }
 
-function renderMember(e: Extract<ExprIR, { kind: "member" }>): string {
-  const recv = renderTsExpr(e.receiver);
+function renderMember(e: Extract<ExprIR, { kind: "member" }>, ctx: TsRenderContext): string {
+  const recv = renderTsExpr(e.receiver, ctx);
   // String length stays as `.length`; arrays expose collection ops without
   // parentheses too — `lines.count` should compile to `.length`.
   if (e.receiverType.kind === "array" && e.member === "count") return `${recv}.length`;
   return `${recv}.${e.member}`;
 }
 
-function renderMethodCall(e: Extract<ExprIR, { kind: "method-call" }>): string {
-  const recv = renderTsExpr(e.receiver);
-  const args = e.args.map(renderTsExpr);
+function renderMethodCall(e: Extract<ExprIR, { kind: "method-call" }>, ctx: TsRenderContext): string {
+  const recv = renderTsExpr(e.receiver, ctx);
+  const args = e.args.map((a) => renderTsExpr(a, ctx));
   if (e.isCollectionOp) {
     return renderCollectionOp(`(${recv})`, e.member, args);
   }
@@ -113,33 +137,37 @@ function renderCollectionOp(recv: string, name: string, args: string[]): string 
   }
 }
 
-function renderCall(e: Extract<ExprIR, { kind: "call" }>): string {
-  const args = e.args.map(renderTsExpr).join(", ");
+function renderCall(e: Extract<ExprIR, { kind: "call" }>, ctx: TsRenderContext): string {
+  const args = e.args.map((a) => renderTsExpr(a, ctx)).join(", ");
+  const fromOutside = ctx.thisName !== "this";
   switch (e.callKind) {
     case "value-object-ctor":
       return `new ${e.name}(${args})`;
     case "function":
     case "private-operation":
-      return `this.${camel(e.name)}(${args})`;
+      return fromOutside
+        ? `${ctx.thisName}.${camel(e.name)}(${args})`
+        : `this.${camel(e.name)}(${args})`;
     case "free":
       return `${e.name}(${args})`;
   }
 }
 
-function renderNew(e: Extract<ExprIR, { kind: "new" }>): string {
+function renderNew(e: Extract<ExprIR, { kind: "new" }>, ctx: TsRenderContext): string {
+  const parentRef = ctx.thisName === "this" ? "this._id" : `${ctx.thisName}.id`;
   const inits = [
     `id: Ids.new${e.partName}Id()`,
-    `parentId: this._id`,
-    ...e.fields.map((f) => `${f.name}: ${renderTsExpr(f.value)}`),
+    `parentId: ${parentRef}`,
+    ...e.fields.map((f) => `${f.name}: ${renderTsExpr(f.value, ctx)}`),
   ];
   return `${e.partName}._create({ ${inits.join(", ")} })`;
 }
 
-function renderBinary(op: BinOp, left: ExprIR, right: ExprIR): string {
+function renderBinary(op: BinOp, left: ExprIR, right: ExprIR, ctx: TsRenderContext): string {
   // Equality comparisons in TS: prefer === / !==
   const opPrint =
     op === "==" ? "===" : op === "!=" ? "!==" : op;
-  return `${renderTsExpr(left)} ${opPrint} ${renderTsExpr(right)}`;
+  return `${renderTsExpr(left, ctx)} ${opPrint} ${renderTsExpr(right, ctx)}`;
 }
 
 // ---------------------------------------------------------------------------

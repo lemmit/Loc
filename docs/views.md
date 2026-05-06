@@ -1,8 +1,12 @@
 # Views
 
 A `view` is a saved, strongly-typed query at the bounded-context
-level.  Slice 1: parameterless, filter-only, single-source; result
-shape is the source aggregate's existing wire shape.
+level.  Two forms share the same head:
+
+- **Shorthand** (slice 1) — parameterless, filter-only; result is
+  the source aggregate's existing wire shape.
+- **Full form** (slice 2) — declared output shape with `bind`
+  expressions that project from the hydrated source aggregate.
 
 ```ddd
 context Sales {
@@ -12,22 +16,38 @@ context Sales {
     customerId: Id<Customer>
     status: OrderStatus
     placedAt: datetime
+    contains lines: OrderLine[]
+    entity OrderLine { quantity: int, invariant quantity > 0 }
   }
   repository Orders for Order { }
 
+  // Shorthand: result shape == Order's wire shape.
   view ActiveOrders = Order where status == Confirmed
-  view PendingShipping = Order where status == Confirmed
+
+  // Full form: declared output record, bind-projected per row.
+  view OrderSummary {
+    orderId: Id<Order>
+    status: OrderStatus
+    lineCount: int
+
+    from Order where status != Cancelled
+    bind orderId = id,
+         status = status,
+         lineCount = lines.count
+  }
 }
 ```
 
 ## Type rules
 
-A view declaration `view <Name> = <Aggregate> where <Filter>` is
-strongly typed end-to-end:
+A view is strongly typed end-to-end.  The rules are layered: the
+shorthand form is a strict subset of the full form's surface.
+
+### Both forms
 
 - **Source** must be an aggregate declared in the same context.
-- **Filter** is type-checked against the source aggregate's schema
-  exactly like a repository `find` filter:
+- **Filter** (when present) is type-checked against the source
+  aggregate's schema exactly like a repository `find` filter:
   - bare names resolve to the aggregate's properties / containments /
     derived members
   - the whole expression must type to `bool`
@@ -37,22 +57,47 @@ strongly typed end-to-end:
   - every column reference must resolve to a real field
   - no comparison may set one column against another (Drizzle's
     `eq()` and friends model column-vs-value)
-- **Result type** is `<Aggregate>[]` — exactly the aggregate's
-  enriched wire shape, the same DTO that aggregate find routes
-  return.
 - **Name** must be unique within the context against aggregates,
   events, value objects, enums, repositories, workflows, and
   per-platform reserved names.
 
-## What's NOT in this slice
+### Shorthand form
+
+- `view <Name> = <Aggregate> where <Filter>` — `where` is required.
+- **Result type** is `<Aggregate>[]` — exactly the aggregate's
+  enriched wire shape, the same DTO that aggregate find routes
+  return.
+
+### Full form
+
+- `view <Name> { <Property>* from <Aggregate> [where <Filter>]
+  bind <field>=<expr>, ... }` — `where` is optional.
+- **Output shape** is the declared `<Property>*` field set.  Each
+  field's type follows the standard Loom type grammar
+  (`Id<X>` / primitives / enums / value-objects / arrays / `T?`).
+- **Bind exhaustiveness** — every declared field must have exactly
+  one matching `bind <name> = <expr>`; stray binds (no matching
+  field) are rejected; duplicate binds on the same field are
+  rejected.
+- **Bind expressions** run on the **hydrated source aggregate**,
+  not in SQL.  They can use the full domain expression language —
+  property refs, derived members, collection ops (`lines.count`,
+  `lines.sum(l => l.subtotal.amount)`), arithmetic, ternaries.
+- **Bind type-check** — each bind expression's inferred type must
+  be assignable to its declared field type.  (Slice 2 ships the
+  shape-checking; tighter assignability arrives with slice 3.)
+- **Result type** is `<View>Row[]` — a fresh record record matching
+  the declared fields, exposed as a Zod schema on Hono and a C#
+  record on .NET.
+
+## What's NOT yet supported
 
 - Joined sources (slice 3 — "snowflake" denormalisation across
-  aggregates).
-- Custom output record shapes (slice 2 — `view X { fields { ... }
-  bind ... }`).
-- Per-view parameters — today the repository's parameterised `find`
-  already covers this case; views earn parameters when they need
-  to join.
+  aggregates, e.g. follow `customerId: Id<Customer>` to project
+  `customer.name`).
+- Per-view parameters — today the repository's parameterised
+  `find` already covers this case; views earn parameters when
+  they need to join.
 - Pagination / sorting / limit clauses.
 
 ## What it generates
@@ -73,15 +118,28 @@ async activeOrders(): Promise<Order[]> {
 A new `http/views.ts` file is emitted, mounted under `/views` in
 `http/index.ts`:
 
-```
-GET /views/active_orders → 200 OrderListResponse
-```
+- **Shorthand**: response schema is the aggregate's
+  `<Agg>ListResponse` (imported from `<agg>.routes.ts` — exported
+  for this purpose so the OpenAPI specs are bit-identical).
+- **Full form**: a `<View>Row` Zod object + `<View>Response`
+  array alias are emitted at the top of the file.  The route
+  handler projects each hydrated row through the bind expressions:
 
-The response schema is imported verbatim from the aggregate's
-existing `<Agg>.routes.ts` file (the `<Agg>Response` /
-`<Agg>ListResponse` schemas are exported for this), so the OpenAPI
-spec for `/views/<name>` matches the spec for the aggregate's
-canonical GET endpoints exactly.
+  ```ts
+  async (httpCtx) => {
+    const repo = new OrderRepository(db, events);
+    const rows = await repo.orderSummary();
+    const projected = rows.map((r) => ({
+      orderId: r.id,
+      status: r.status,
+      lineCount: r.lines.length,
+    }));
+    return httpCtx.json(
+      projected as z.infer<typeof OrderSummaryResponse>,
+      200,
+    );
+  }
+  ```
 
 ### .NET (ASP.NET Core + Mediator + EF)
 
@@ -98,12 +156,12 @@ public async Task<List<Order>> ActiveOrders(CancellationToken ct = default) {
 }
 ```
 
-A new Mediator query + handler pair is emitted under
-`Application/Views/`:
+A Mediator query + handler pair is emitted under
+`Application/Views/`.  Shorthand views project to the aggregate's
+canonical `<Agg>Response`:
 
 ```csharp
 public sealed record ActiveOrdersQuery() : IQuery<IReadOnlyList<OrderResponse>>;
-
 public sealed class ActiveOrdersHandler : IQueryHandler<ActiveOrdersQuery, IReadOnlyList<OrderResponse>>
 {
     private readonly IOrderRepository _repo;
@@ -113,6 +171,29 @@ public sealed class ActiveOrdersHandler : IQueryHandler<ActiveOrdersQuery, IRead
     {
         var domain = await _repo.ActiveOrders(ct);
         return domain.Select(d => new OrderResponse(...)).ToList();
+    }
+}
+```
+
+Full-form views emit a fresh `<View>Row` record (wire-typed: `Id<X>
+→ Guid`, `enum → string`, `datetime → string`) and project per
+row using the C# expression renderer with `thisName: "d"`, then
+the canonical `projectToResponse` wire helper:
+
+```csharp
+public sealed record OrderSummaryRow(Guid OrderId, string Status, int LineCount);
+
+public sealed class OrderSummaryHandler : IQueryHandler<OrderSummaryQuery, IReadOnlyList<OrderSummaryRow>>
+{
+    private readonly IOrderRepository _repo;
+    public OrderSummaryHandler(IOrderRepository repo) => _repo = repo;
+
+    public async ValueTask<IReadOnlyList<OrderSummaryRow>> Handle(OrderSummaryQuery q, CancellationToken ct)
+    {
+        var domain = await _repo.OrderSummary(ct);
+        return domain
+            .Select(d => new OrderSummaryRow(d.Id.Value, d.Status.ToString(), d.Lines.Count))
+            .ToList();
     }
 }
 ```

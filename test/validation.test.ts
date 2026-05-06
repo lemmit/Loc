@@ -588,6 +588,100 @@ describe("Loom IR validation (post-lowering)", async () => {
     expect(errors, JSON.stringify(errors)).toEqual([]);
   });
 
+  it("accepts a well-formed full-form view (fields + bind)", async () => {
+    const loom = await loomFrom(`
+      context T {
+        enum OrderStatus { Draft, Confirmed }
+        aggregate Order {
+          customerId: string
+          status: OrderStatus
+          contains lines: OrderLine[]
+          entity OrderLine { quantity: int, invariant quantity > 0 }
+        }
+        repository Orders for Order { }
+        view OrderSummary {
+          orderId: Id<Order>
+          status: OrderStatus
+          lineCount: int
+          from Order where status == Confirmed
+          bind orderId = id, status = status, lineCount = lines.count
+        }
+      }
+    `);
+    const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
+    expect(errors, JSON.stringify(errors)).toEqual([]);
+  });
+
+  it("rejects a full-form view with a field missing its bind", async () => {
+    const loom = await loomFrom(`
+      context T {
+        aggregate Order { status: string }
+        repository Orders for Order { }
+        view X {
+          a: string
+          b: string
+          from Order
+          bind a = status
+        }
+      }
+    `);
+    const diags = validateLoomModel(loom);
+    expect(
+      diags.some(
+        (d) =>
+          d.severity === "error" &&
+          /field 'b' has no bind expression/.test(d.message),
+      ),
+      JSON.stringify(diags),
+    ).toBe(true);
+  });
+
+  it("rejects a full-form view with a stray bind (no matching field)", async () => {
+    const loom = await loomFrom(`
+      context T {
+        aggregate Order { status: string }
+        repository Orders for Order { }
+        view X {
+          a: string
+          from Order
+          bind a = status, ghost = status
+        }
+      }
+    `);
+    const diags = validateLoomModel(loom);
+    expect(
+      diags.some(
+        (d) =>
+          d.severity === "error" &&
+          /bind 'ghost' has no matching declared field/.test(d.message),
+      ),
+      JSON.stringify(diags),
+    ).toBe(true);
+  });
+
+  it("rejects duplicate binds on the same field", async () => {
+    const loom = await loomFrom(`
+      context T {
+        aggregate Order { status: string }
+        repository Orders for Order { }
+        view X {
+          a: string
+          from Order
+          bind a = status, a = status
+        }
+      }
+    `);
+    const diags = validateLoomModel(loom);
+    expect(
+      diags.some(
+        (d) =>
+          d.severity === "error" &&
+          /field 'a' is bound more than once/.test(d.message),
+      ),
+      JSON.stringify(diags),
+    ).toBe(true);
+  });
+
   // -----------------------------------------------------------------------
   // Workflow validation
   // -----------------------------------------------------------------------

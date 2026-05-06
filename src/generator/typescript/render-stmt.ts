@@ -27,7 +27,7 @@ function renderTsStatement(s: StmtIR): string {
       return `${INDENT}this._events.push({ type: ${JSON.stringify(s.eventName)}, ${fields} });`;
     }
     case "call": {
-      const args = s.args.map(renderTsExpr).join(", ");
+      const args = s.args.map((a) => renderTsExpr(a)).join(", ");
       return `${INDENT}this.${camelize(s.name)}(${args});`;
     }
     case "expression":

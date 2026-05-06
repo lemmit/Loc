@@ -75,7 +75,7 @@ function renderTestStmt(s: TestStmtIR): string {
     // Only pure-function calls reach here (validator-rejected
     // private-operation calls).  Render as a real expression-stmt
     // call so the function fires.
-    const args = s.args.map(renderTsExpr).join(", ");
+    const args = s.args.map((a) => renderTsExpr(a)).join(", ");
     return `  ${s.name}(${args});`;
   }
   if (s.kind === "expression") {

@@ -120,4 +120,20 @@ context Sales {
   // queryable subset (no collection lambdas, no chained traversal).
   // See docs/views.md for the full surface.
   view ActiveOrders = Order where status == Confirmed
+
+  // Full-form view: declared output shape + bind expressions.
+  // Slice 2 — the row type is a fresh record (`OrderSummaryRow`
+  // on .NET, `OrderSummaryRow` Zod object on Hono); each bind
+  // expression projects from the hydrated source aggregate after
+  // the where-clause SQL filter runs.
+  view OrderSummary {
+    orderId: Id<Order>
+    status: OrderStatus
+    lineCount: int
+
+    from Order where status != Cancelled
+    bind orderId = id,
+         status = status,
+         lineCount = lines.count
+  }
 }

@@ -145,11 +145,37 @@ IsolationLevel returns string:
     'readUncommitted' | 'readCommitted' | 'repeatableRead' | 'serializable';
 
 // View — a saved, strongly-typed query over one source aggregate.
-// Slice 1: parameterless, filter-only; result type is the source
-// aggregate's wire shape.  See docs/views.md for the trajectory.
+// Two forms share the same head:
+//
+//   Shorthand (slice 1):
+//     view ActiveOrders = Order where status == Confirmed
+//     Result shape = source aggregate's existing wire shape.
+//
+//   Full form (slice 2):
+//     view OrderSummary {
+//       orderId: Id<Order>
+//       lineCount: int
+//       from Order where status != Cancelled
+//       bind orderId = id, lineCount = lines.count
+//     }
+//     Output shape declared as fields, each backed by a typed
+//     bind expression evaluated against the source aggregate.
+//
+// See docs/views.md for the full surface.
 View:
-    'view' name=ID '=' source=[Aggregate:ID]
-        'where' filter=Expression;
+    'view' name=ID
+    (
+        '=' source=[Aggregate:ID] 'where' filter=Expression
+      | '{'
+            fields+=Property*
+            'from' source=[Aggregate:ID]
+            ('where' filter=Expression)?
+            'bind' binds+=BindEntry (',' binds+=BindEntry)* ','?
+        '}'
+    );
+
+BindEntry:
+    name=ID '=' expr=Expression;
 
 // ---------------------------------------------------------------------------
 // Members

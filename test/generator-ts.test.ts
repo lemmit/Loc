@@ -360,6 +360,52 @@ describe("typescript generator", () => {
     expect(aggRoutes).toMatch(/export const OrderListResponse =/);
   });
 
+  it("emits a custom-shape view with per-row projection (full form)", async () => {
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(`
+      context Sales {
+        enum OrderStatus { Draft, Confirmed }
+        aggregate Order {
+          customerId: string
+          status: OrderStatus
+          contains lines: OrderLine[]
+          entity OrderLine { quantity: int, invariant quantity > 0 }
+        }
+        repository Orders for Order { }
+        view OrderSummary {
+          orderId: Id<Order>
+          status: OrderStatus
+          lineCount: int
+          from Order where status == Confirmed
+          bind orderId = id, status = status, lineCount = lines.count
+        }
+      }
+    `, { validation: true });
+    const files = generateTypeScript(doc.parseResult.value as Model);
+    const views = files.get("http/views.ts")!;
+
+    // Custom Zod schema declared at top of the file.
+    expect(views).toMatch(
+      /const OrderSummaryRow = z\.object\(\{[\s\S]+?orderId: z\.string\(\),[\s\S]+?status: z\.enum\(\["Draft", "Confirmed"\]\),[\s\S]+?lineCount: z\.number\(\)\.int\(\),[\s\S]+?\}\)/,
+    );
+    expect(views).toMatch(
+      /const OrderSummaryResponse = z\.array\(OrderSummaryRow\)/,
+    );
+
+    // Route uses the custom response schema.
+    expect(views).toMatch(/schema: OrderSummaryResponse/);
+
+    // Body projects through bind expressions rooted at row var `r`.
+    expect(views).toMatch(/orderId: r\.id/);
+    expect(views).toMatch(/status: r\.status/);
+    expect(views).toMatch(/lineCount: r\.lines\.length/);
+    expect(views).toMatch(
+      /projected as z\.infer<typeof OrderSummaryResponse>/,
+    );
+  });
+
   it("emits explicit isolationLevel for transactional(level) workflows", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);

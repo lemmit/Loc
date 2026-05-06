@@ -207,21 +207,35 @@ export interface BoundedContextIR {
   views: ViewIR[];
 }
 
-/** A saved, strongly-typed query over one source aggregate.  Slice
- *  1: parameterless, filter-only; result is the source aggregate's
- *  enriched wire shape (an array thereof).  Future slices add
- *  declared output shapes and joined sources.  Compiles to a
- *  per-view method on the source aggregate's repository plus a
- *  `GET /views/<snake_name>` route on each backend. */
+/** A saved, strongly-typed query over one source aggregate.  Two
+ *  forms share one IR shape:
+ *
+ *   - **Shorthand** (`view X = Y where ...`): `output` is undefined;
+ *     result is the source aggregate's enriched wire shape (an
+ *     array thereof).
+ *   - **Full form** (`view X { fields ... from Y where? ... bind ... }`):
+ *     `output` is populated with the declared field set and a
+ *     bind expression per field.  The view's response shape is a
+ *     fresh record matching `output.fields`; the bind expressions
+ *     project from the hydrated source aggregate to the row.
+ *
+ *  Compiles to a per-view method on the source aggregate's
+ *  repository plus a `GET /views/<snake_name>` route on each
+ *  backend.  Joined sources / per-view parameters come in slice 3. */
 export interface ViewIR {
   name: string;
   /** Source aggregate.  Must live in the same context as the
    *  view declaration. */
   aggregateName: string;
-  /** Queryable predicate.  Always populated — the grammar
-   *  requires `where`.  Subject to the same restrictions as
-   *  repository find filters. */
-  filter: ExprIR;
+  /** Queryable predicate.  Required by the shorthand grammar;
+   *  optional in the full form.  Subject to the same restrictions
+   *  as repository find filters. */
+  filter?: ExprIR;
+  /** Custom output shape.  Undefined for the shorthand form. */
+  output?: {
+    fields: FieldIR[];
+    binds: { name: string; expr: ExprIR; type: TypeIR }[];
+  };
 }
 
 /** SQL-92 isolation levels — optional on `transactional` workflows.

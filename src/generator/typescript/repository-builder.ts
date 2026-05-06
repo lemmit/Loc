@@ -44,16 +44,19 @@ export function buildRepositoryFile(
   // pulled in; the lowering may add ne / gt / gte / lt / lte / or /
   // not depending on the expression shape.
   const drizzleOps = new Set<string>(["eq", "and", "inArray"]);
-  if (repo) {
-    for (const find of repo.finds) {
-      if (!find.filter) continue;
-      const lowered = lowerToDrizzle(
-        find.filter,
-        camel(plural(agg.name)),
-        ctx,
-      );
-      if (lowered) for (const op of lowered.ops) drizzleOps.add(op);
-    }
+  // Walk find filters AND any matching view filters — both lower to
+  // Drizzle predicates on the same table and share the same operator
+  // import surface.
+  const viewFilters = ctx.views
+    .filter((v) => v.aggregateName === agg.name && v.filter)
+    .map((v) => v.filter!);
+  const allFilters = [
+    ...(repo?.finds ?? []).map((f) => f.filter).filter((x): x is import("../../ir/loom-ir.js").ExprIR => !!x),
+    ...viewFilters,
+  ];
+  for (const f of allFilters) {
+    const lowered = lowerToDrizzle(f, camel(plural(agg.name)), ctx);
+    if (lowered) for (const op of lowered.ops) drizzleOps.add(op);
   }
   lines.push(
     `import { ${[...drizzleOps].sort().join(", ")} } from "drizzle-orm";`,
