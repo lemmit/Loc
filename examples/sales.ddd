@@ -89,6 +89,8 @@ context Sales {
     }
   }
 
+  repository Customers for Customer { }
+
   repository Orders for Order {
     // Convention: when no `where` is given, parameters are matched to
     // aggregate properties of the same name (here `customerId`).
@@ -97,5 +99,18 @@ context Sales {
     // root, parameters are bare identifiers.
     find activeForCustomer(forCustomer: Id<Customer>): Order[]
       where this.customerId == forCustomer && this.status == Draft
+  }
+
+  // Context-level orchestration: validate the customer exists, build a
+  // fresh draft order from the request, persist it.  Non-transactional
+  // — the customer load is read-only, the order save is independent.
+  // See docs/workflow.md for the full surface.
+  workflow placeOrder(customerId: Id<Customer>, placedAt: datetime) {
+    let customer = Customers.getById(customerId)
+    let order = Order.create({
+      customerId: customerId,
+      status: Draft,
+      placedAt: placedAt
+    })
   }
 }

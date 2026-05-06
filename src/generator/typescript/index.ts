@@ -15,6 +15,7 @@ import {
 import { buildRepositoryFile } from "./repository-builder.js";
 import { buildRoutesFile } from "./routes-builder.js";
 import { buildExternHandlersFile } from "./extern-builder.js";
+import { buildWorkflowsFile } from "./workflow-builder.js";
 
 const ERRORS_TS = `// Auto-generated.
 export class DomainError extends Error {
@@ -85,6 +86,10 @@ function emitContext(ctx: BoundedContextIR, out: Map<string, string>): void {
     }
   }
   out.set("db/schema.ts", renderSchema(ctx));
+  if (ctx.workflows.length > 0) {
+    const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
+    out.set("http/workflows.ts", buildWorkflowsFile(ctx, aggsByName));
+  }
   out.set("http/index.ts", renderHttpIndex(ctx));
 }
 

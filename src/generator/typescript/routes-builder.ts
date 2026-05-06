@@ -371,7 +371,7 @@ function emitResponseDtoSchema(
 // zod helpers
 // ---------------------------------------------------------------------------
 
-function zodFor(t: TypeIR): string {
+export function zodFor(t: TypeIR): string {
   switch (t.kind) {
     case "primitive":
       switch (t.name) {
@@ -506,7 +506,7 @@ function cap(s: string): string {
 // handling stays symmetric across backends.
 // ---------------------------------------------------------------------------
 
-function wireToDomainExpr(expr: string, t: TypeIR, ctx?: BoundedContextIR): string {
+export function wireToDomainExpr(expr: string, t: TypeIR, ctx?: BoundedContextIR): string {
   switch (t.kind) {
     case "primitive":
       return expr;

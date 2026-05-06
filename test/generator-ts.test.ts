@@ -214,6 +214,105 @@ describe("typescript generator", () => {
     expect(httpIndex).toMatch(/verifyOrderExternHandlersRegistered/);
   });
 
+  it("emits Hono workflow routes for non-transactional workflow", async () => {
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(`
+      context Sales {
+        enum OrderStatus { Draft, Confirmed }
+        aggregate Customer {
+          name: string display
+          creditLimit: decimal
+          operation deductCredit(amount: decimal) {
+            precondition amount > 0
+            creditLimit := creditLimit - amount
+          }
+        }
+        aggregate Order {
+          customerId: Id<Customer>
+          status: OrderStatus
+          placedAt: datetime
+        }
+        repository Customers for Customer { }
+        repository Orders for Order { }
+        event OrderPlaced { order: Id<Order>, at: datetime }
+        workflow placeOrder(customerId: Id<Customer>, amount: decimal, placedAt: datetime) {
+          precondition amount > 0
+          let customer = Customers.getById(customerId)
+          customer.deductCredit(amount)
+          let order = Order.create({
+            customerId: customerId,
+            status: Draft,
+            placedAt: placedAt
+          })
+          emit OrderPlaced { order: order.id, at: placedAt }
+        }
+      }
+    `, { validation: true });
+    const files = generateTypeScript(doc.parseResult.value as Model);
+    const wf = files.get("http/workflows.ts")!;
+
+    // Imports + Zod schema for params.
+    expect(wf).toMatch(/import \{ Customer \} from "..\/domain\/customer\.js"/);
+    expect(wf).toMatch(/import \{ CustomerRepository \} from "..\/db\/repositories\/customer-repository\.js"/);
+    expect(wf).toMatch(/PlaceOrderRequest = z\.object\(\{[\s\S]+?customerId: z\.string\(\)/);
+
+    // Body wires repos on `db`, runs precondition, calls op, factory,
+    // emit, then saves both, then dispatches events.
+    expect(wf).toMatch(/const customers = new CustomerRepository\(db, events\);/);
+    expect(wf).toMatch(/const orders = new OrderRepository\(db, events\);/);
+    expect(wf).toMatch(/if \(!\(amount > 0\)\) throw new DomainError/);
+    expect(wf).toMatch(/const customer = await customers\.getById\(customerId\);/);
+    expect(wf).toMatch(/customer\.deductCredit\(amount\);/);
+    expect(wf).toMatch(/const order = Order\.create\(\{ customerId: customerId, status: OrderStatus\.Draft, placedAt: placedAt \}\);/);
+    expect(wf).toMatch(/workflowEvents\.push\(\{ type: "OrderPlaced", order: order\.id, at: placedAt \}\);/);
+    expect(wf).toMatch(/await customers\.save\(customer\);/);
+    expect(wf).toMatch(/await orders\.save\(order\);/);
+    expect(wf).toMatch(/for \(const ev of workflowEvents\) await events\.dispatch\(ev\);/);
+    // Non-transactional: no db.transaction wrapper.
+    expect(wf).not.toMatch(/db\.transaction\(/);
+
+    // http/index.ts mounts /workflows.
+    const httpIndex = files.get("http/index.ts")!;
+    expect(httpIndex).toMatch(/import \{ workflowsRoutes \} from "\.\/workflows\.js";/);
+    expect(httpIndex).toMatch(/app\.route\("\/workflows", workflowsRoutes\(db, events\)\);/);
+  });
+
+  it("emits a transactional workflow wrapped in db.transaction", async () => {
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(`
+      context T {
+        aggregate Customer {
+          name: string display
+          creditLimit: decimal
+          operation addCredit(amount: decimal) {
+            precondition amount > 0
+            creditLimit := creditLimit + amount
+          }
+        }
+        repository Customers for Customer { }
+        workflow topUp(customerId: Id<Customer>, amount: decimal) transactional {
+          precondition amount > 0
+          let target = Customers.getById(customerId)
+          target.addCredit(amount)
+        }
+      }
+    `, { validation: true });
+    const files = generateTypeScript(doc.parseResult.value as Model);
+    const wf = files.get("http/workflows.ts")!;
+    expect(wf).toMatch(/await db\.transaction\(async \(tx\) => \{/);
+    expect(wf).toMatch(/const customers = new CustomerRepository\(tx, events\);/);
+    // Save inside the tx callback.
+    const txOpen = wf.indexOf("db.transaction(async");
+    const saveIdx = wf.indexOf("await customers.save(target);");
+    const txClose = wf.indexOf("});", txOpen);
+    expect(saveIdx).toBeGreaterThan(txOpen);
+    expect(saveIdx).toBeLessThan(txClose);
+  });
+
   it("Drizzle schema emits indexes for find-referenced columns + part FKs", async () => {
     // sales.ddd's Order.byCustomer + activeForCustomer drive
     // `customerId` and `status` indexes on the orders table; the

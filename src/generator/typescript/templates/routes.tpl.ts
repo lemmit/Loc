@@ -26,6 +26,13 @@ export function renderHttpIndex(ctx: BoundedContextIR): string {
   const externVerifyBody = externAggs.map(
     (a) => `  verify${a.name}ExternHandlersRegistered();`,
   );
+  const hasWorkflows = ctx.workflows.length > 0;
+  const workflowImport = hasWorkflows
+    ? `import { workflowsRoutes } from "./workflows.js";`
+    : null;
+  const workflowMount = hasWorkflows
+    ? `  app.route("/workflows", workflowsRoutes(db, events));`
+    : null;
   return (
     lines(
       "// Auto-generated.",
@@ -33,6 +40,7 @@ export function renderHttpIndex(ctx: BoundedContextIR): string {
       'import { cors } from "hono/cors";',
       ...aggregateImports,
       ...externImports,
+      workflowImport,
       'import type { NodePgDatabase } from "drizzle-orm/node-postgres";',
       'import type * as schema from "../db/schema.js";',
       'import { type DomainEventDispatcher, NoopDomainEventDispatcher } from "../domain/events.js";',
@@ -53,6 +61,7 @@ export function renderHttpIndex(ctx: BoundedContextIR): string {
       "  // Liveness probe — used by docker-compose / kubernetes / smoke tests.",
       '  app.get("/health", (c) => c.json({ status: "ok" }));',
       ...aggregateRoutes,
+      workflowMount,
       "  // OpenAPI 3.1 spec assembled from every sub-router's createRoute()",
       "  // calls.  Diffed against the .NET-emitted /swagger/v1/swagger.json by",
       "  // the cross-platform contract check.",
