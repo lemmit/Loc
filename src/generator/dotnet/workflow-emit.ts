@@ -200,8 +200,11 @@ function renderHandler(
 
   let body: string;
   if (wf.transactional) {
+    const beginCall = wf.isolation
+      ? `_db.Database.BeginTransactionAsync(System.Data.IsolationLevel.${csIsolationLevel(wf.isolation)}, ct)`
+      : `_db.Database.BeginTransactionAsync(ct)`;
     body =
-      `        await using var tx = await _db.Database.BeginTransactionAsync(ct);\n` +
+      `        await using var tx = await ${beginCall};\n` +
       `        try\n` +
       `        {\n` +
       stmtLines.map((l) => "    " + l).join("\n") +
@@ -250,6 +253,20 @@ ${ctor}
 ${body}    }
 }
 `;
+}
+
+/** Maps DSL isolation levels to System.Data.IsolationLevel members. */
+function csIsolationLevel(level: import("../../ir/loom-ir.js").IsolationLevel): string {
+  switch (level) {
+    case "readUncommitted":
+      return "ReadUncommitted";
+    case "readCommitted":
+      return "ReadCommitted";
+    case "repeatableRead":
+      return "RepeatableRead";
+    case "serializable":
+      return "Serializable";
+  }
 }
 
 function pascalPlural(s: string): string {

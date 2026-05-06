@@ -101,6 +101,31 @@ when the workflow's aggregates share a database AND you want
 all-or-nothing semantics — at the cost of locking and the
 distribution barrier the keyword represents.
 
+### Isolation levels
+
+`transactional` accepts an optional SQL-92 isolation level:
+
+```ddd
+workflow transferCredit(...) transactional(serializable) { ... }
+```
+
+| DSL token | Postgres meaning | When to reach for it |
+| --- | --- | --- |
+| (omitted, bare `transactional`) | connection default (Postgres = `read committed`) | Default; fine for most use cases. |
+| `readCommitted` | Same as omitted, but explicit. | Document the choice in source. |
+| `repeatableRead` | Snapshot taken at first read; subsequent reads see the same snapshot. | Avoid non-repeatable reads when the workflow loads the same row twice. |
+| `serializable` | True serializable; commits may fail with `40001` and need retry. | Multi-aggregate balance / invariant updates where read-write skew would corrupt state. |
+| `readUncommitted` | Postgres treats as `read committed` (no dirty reads); SQL Server allows dirty reads. | Rare; usually a foot-gun. |
+
+Generators emit explicit settings only when the keyword is
+supplied:
+
+- **.NET**: `await _db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct)` (etc.).
+- **Hono**: `await db.transaction(async (tx) => { ... }, { isolationLevel: "serializable" })` (etc.).
+
+Bare `transactional` emits the no-arg form on both backends so the
+connection-default behaviour is preserved.
+
 ## Generated code
 
 ### .NET (ASP.NET Core + Mediator)

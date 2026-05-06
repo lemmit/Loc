@@ -874,7 +874,13 @@ function validateWorkflows(
 
 function validateWorkflowBody(
   ctx: BoundedContextIR,
-  wf: { name: string; statements: import("./loom-ir.js").WorkflowStmtIR[]; transactional: boolean; params: import("./loom-ir.js").ParamIR[] },
+  wf: {
+    name: string;
+    statements: import("./loom-ir.js").WorkflowStmtIR[];
+    transactional: boolean;
+    isolation?: import("./loom-ir.js").IsolationLevel;
+    params: import("./loom-ir.js").ParamIR[];
+  },
   diags: LoomDiagnostic[],
 ): void {
   const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
@@ -1073,6 +1079,18 @@ function validateWorkflowBody(
     diags.push({
       severity: "warning",
       message: `workflow '${wf.name}': declared 'transactional' but does not mutate any aggregate or emit any event — the keyword has no effect.`,
+      source: `${ctx.name}/${wf.name}`,
+    });
+  }
+
+  // Defence-in-depth: the grammar already gates the isolation level
+  // behind the `transactional` keyword, but if a future grammar
+  // change drops the gating we'd silently accept a meaningless
+  // setting.  Surface it as an error here too.
+  if (wf.isolation && !wf.transactional) {
+    diags.push({
+      severity: "error",
+      message: `workflow '${wf.name}': isolation level '${wf.isolation}' requires the 'transactional' keyword.`,
       source: `${ctx.name}/${wf.name}`,
     });
   }

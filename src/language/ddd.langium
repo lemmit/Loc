@@ -133,10 +133,16 @@ FindDecl:
 // to operation bodies only.  See docs/workflow.md for semantics.
 Workflow:
     'workflow' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')'
-        (transactional?='transactional')?
+        (transactional?='transactional' ('(' isolation=IsolationLevel ')')?)?
     '{'
         body+=Statement*
     '}';
+
+// SQL-92 isolation levels.  Optional on `transactional`; default
+// (when omitted) uses the database connection's configured level
+// (Postgres = read committed; SQL Server = read committed).
+IsolationLevel returns string:
+    'readUncommitted' | 'readCommitted' | 'repeatableRead' | 'serializable';
 
 // ---------------------------------------------------------------------------
 // Members

@@ -206,6 +206,15 @@ export interface BoundedContextIR {
   workflows: WorkflowIR[];
 }
 
+/** SQL-92 isolation levels — optional on `transactional` workflows.
+ *  When omitted, the connection's default level applies (Postgres
+ *  defaults to `readCommitted`). */
+export type IsolationLevel =
+  | "readUncommitted"
+  | "readCommitted"
+  | "repeatableRead"
+  | "serializable";
+
 /** Context-level orchestration that loads + creates aggregates,
  *  invokes their public operations, and emits orchestration-level
  *  events.  Default save semantics: each aggregate's save commits
@@ -215,6 +224,11 @@ export interface WorkflowIR {
   name: string;
   params: ParamIR[];
   transactional: boolean;
+  /** Set only when the source declared `transactional(<level>)`.
+   *  Bare `transactional` leaves this undefined and the backend
+   *  emits a transaction without an explicit level (connection
+   *  default applies). */
+  isolation?: IsolationLevel;
   statements: WorkflowStmtIR[];
   /** Computed at lowering: which let-bindings need a save call at
    *  workflow exit, in declaration order.  `Agg.create(...)` always

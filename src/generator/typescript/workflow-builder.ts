@@ -168,7 +168,10 @@ function emitWorkflowRoute(
     out.push(`    const workflowEvents: Events.DomainEvent[] = [];`);
   }
   if (wf.transactional) {
-    out.push(`    await db.transaction(async (tx) => {`);
+    const txOpts = wf.isolation
+      ? `, { isolationLevel: "${pgIsolationLevel(wf.isolation)}" }`
+      : ``;
+    out.push(`    await db.transaction(async (tx) => {${""}`);
     for (const r of reposNeeded) {
       out.push(`      const ${camel(r.repoName)} = new ${r.aggName}Repository(tx, events);`);
     }
@@ -178,7 +181,7 @@ function emitWorkflowRoute(
     for (const save of wf.savesAtExit) {
       out.push(`      await ${camel(save.repoName)}.save(${save.name});`);
     }
-    out.push(`    });`);
+    out.push(`    }${txOpts});`);
   } else {
     for (const r of reposNeeded) {
       out.push(`    const ${camel(r.repoName)} = new ${r.aggName}Repository(db, events);`);
@@ -263,6 +266,23 @@ function collectReposForWorkflow(wf: WorkflowIR): {
     repoName,
     aggName,
   }));
+}
+
+/** Drizzle-postgres `isolationLevel` enum values are space-cased
+ *  lowercase strings.  Map DSL camelCase tokens onto them. */
+function pgIsolationLevel(
+  level: import("../../ir/loom-ir.js").IsolationLevel,
+): string {
+  switch (level) {
+    case "readUncommitted":
+      return "read uncommitted";
+    case "readCommitted":
+      return "read committed";
+    case "repeatableRead":
+      return "repeatable read";
+    case "serializable":
+      return "serializable";
+  }
 }
 
 function capitalize(s: string): string {

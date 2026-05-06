@@ -312,6 +312,62 @@ describe(".NET generator", () => {
     expect(commitIdx).toBeGreaterThan(trySaveIdx);
   });
 
+  it("emits explicit IsolationLevel for transactional(level) workflows", async () => {
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(`
+      context T {
+        aggregate Customer {
+          name: string display
+          creditLimit: decimal
+          operation addCredit(amount: decimal) {
+            precondition amount > 0
+            creditLimit := creditLimit + amount
+          }
+        }
+        repository Customers for Customer { }
+        workflow ser(customerId: Id<Customer>, amount: decimal) transactional(serializable) {
+          let c = Customers.getById(customerId)
+          c.addCredit(amount)
+        }
+        workflow rr(customerId: Id<Customer>, amount: decimal) transactional(repeatableRead) {
+          let c = Customers.getById(customerId)
+          c.addCredit(amount)
+        }
+        workflow ru(customerId: Id<Customer>, amount: decimal) transactional(readUncommitted) {
+          let c = Customers.getById(customerId)
+          c.addCredit(amount)
+        }
+        workflow rc(customerId: Id<Customer>, amount: decimal) transactional(readCommitted) {
+          let c = Customers.getById(customerId)
+          c.addCredit(amount)
+        }
+        workflow plain(customerId: Id<Customer>, amount: decimal) transactional {
+          let c = Customers.getById(customerId)
+          c.addCredit(amount)
+        }
+      }
+    `, { validation: true });
+    const files = generateDotnet(doc.parseResult.value as Model);
+    expect(files.get("Application/Workflows/SerHandler.cs")!).toMatch(
+      /BeginTransactionAsync\(System\.Data\.IsolationLevel\.Serializable, ct\)/,
+    );
+    expect(files.get("Application/Workflows/RrHandler.cs")!).toMatch(
+      /BeginTransactionAsync\(System\.Data\.IsolationLevel\.RepeatableRead, ct\)/,
+    );
+    expect(files.get("Application/Workflows/RuHandler.cs")!).toMatch(
+      /BeginTransactionAsync\(System\.Data\.IsolationLevel\.ReadUncommitted, ct\)/,
+    );
+    expect(files.get("Application/Workflows/RcHandler.cs")!).toMatch(
+      /BeginTransactionAsync\(System\.Data\.IsolationLevel\.ReadCommitted, ct\)/,
+    );
+    // Bare `transactional` doesn't pass an explicit level.
+    const plain = files.get("Application/Workflows/PlainHandler.cs")!;
+    expect(plain).toMatch(/BeginTransactionAsync\(ct\)/);
+    expect(plain).not.toMatch(/IsolationLevel/);
+  });
+
   it("DomainExceptionFilter catches unhandled exceptions as sanitized 500", async () => {
     const model = await buildModel("examples/sales.ddd");
     const files = generateDotnet(model);

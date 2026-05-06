@@ -796,6 +796,32 @@ describe("Loom IR validation (post-lowering)", async () => {
     ).toBe(true);
   });
 
+  it("accepts every isolation level on a transactional workflow", async () => {
+    for (const level of ["readUncommitted", "readCommitted", "repeatableRead", "serializable"]) {
+      const loom = await loomFrom(`
+        context T {
+          aggregate Customer {
+            name: string display
+            creditLimit: decimal
+            operation addCredit(amount: decimal) {
+              precondition amount > 0
+              creditLimit := creditLimit + amount
+            }
+          }
+          repository Customers for Customer { }
+          workflow w(customerId: Id<Customer>, amount: decimal) transactional(${level}) {
+            let c = Customers.getById(customerId)
+            c.addCredit(amount)
+          }
+        }
+      `);
+      const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
+      expect(errors, `level=${level}: ${JSON.stringify(errors)}`).toEqual([]);
+      // IR carries the level verbatim.
+      expect(loom.contexts[0]!.workflows[0]!.isolation).toBe(level);
+    }
+  });
+
   it("rejects mutation forms (`:=`) inside a workflow body", async () => {
     const loom = await loomFrom(`
       context T {

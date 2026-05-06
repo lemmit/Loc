@@ -530,6 +530,12 @@ function lowerWorkflow(
     name: wf.name,
     params,
     transactional: !!wf.transactional,
+    isolation: wf.isolation as
+      | "readUncommitted"
+      | "readCommitted"
+      | "repeatableRead"
+      | "serializable"
+      | undefined,
     statements,
     savesAtExit,
   };

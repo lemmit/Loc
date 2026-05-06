@@ -313,6 +313,56 @@ describe("typescript generator", () => {
     expect(saveIdx).toBeLessThan(txClose);
   });
 
+  it("emits explicit isolationLevel for transactional(level) workflows", async () => {
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(`
+      context T {
+        aggregate Customer {
+          name: string display
+          creditLimit: decimal
+          operation addCredit(amount: decimal) {
+            precondition amount > 0
+            creditLimit := creditLimit + amount
+          }
+        }
+        repository Customers for Customer { }
+        workflow ser(customerId: Id<Customer>, amount: decimal) transactional(serializable) {
+          let c = Customers.getById(customerId)
+          c.addCredit(amount)
+        }
+        workflow rr(customerId: Id<Customer>, amount: decimal) transactional(repeatableRead) {
+          let c = Customers.getById(customerId)
+          c.addCredit(amount)
+        }
+        workflow ru(customerId: Id<Customer>, amount: decimal) transactional(readUncommitted) {
+          let c = Customers.getById(customerId)
+          c.addCredit(amount)
+        }
+        workflow rc(customerId: Id<Customer>, amount: decimal) transactional(readCommitted) {
+          let c = Customers.getById(customerId)
+          c.addCredit(amount)
+        }
+        workflow plain(customerId: Id<Customer>, amount: decimal) transactional {
+          let c = Customers.getById(customerId)
+          c.addCredit(amount)
+        }
+      }
+    `, { validation: true });
+    const wf = generateTypeScript(doc.parseResult.value as Model).get("http/workflows.ts")!;
+    expect(wf).toMatch(/\}, \{ isolationLevel: "serializable" \}\);/);
+    expect(wf).toMatch(/\}, \{ isolationLevel: "repeatable read" \}\);/);
+    expect(wf).toMatch(/\}, \{ isolationLevel: "read uncommitted" \}\);/);
+    expect(wf).toMatch(/\}, \{ isolationLevel: "read committed" \}\);/);
+    // Bare `transactional` doesn't emit an isolationLevel — exactly
+    // four occurrences across the file (one per leveled workflow).
+    expect(wf.match(/isolationLevel/g)?.length).toBe(4);
+    // The `plain` route still has the transaction wrapper, just without the option.
+    expect(wf).toMatch(/operationId: "plainWorkflow"/);
+    expect(wf).toMatch(/await db\.transaction\(async \(tx\) =>/);
+  });
+
   it("Drizzle schema emits indexes for find-referenced columns + part FKs", async () => {
     // sales.ddd's Order.byCustomer + activeForCustomer drive
     // `customerId` and `status` indexes on the orders table; the
