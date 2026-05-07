@@ -7,6 +7,17 @@
 
 system Acme {
 
+    // System-wide visual identity — design tokens consumed by every
+    // React deployable in this system (slice 19).  Tokens are
+    // semantic so the same source applies whether the React
+    // generator targets Mantine (today) or shadcn/ui (future).
+    theme {
+        primary: "#3b82f6"
+        neutral: "#64748b"
+        radius: "md"
+        fontFamily: "Inter, system-ui, sans-serif"
+    }
+
     module Catalog {
         context Products {
 

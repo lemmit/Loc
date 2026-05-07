@@ -44,6 +44,7 @@ import {
   isSystem,
   isTestBlock,
   isTestE2E,
+  isThemeBlock,
   isUserBlock,
   isValueObject,
   isView,
@@ -126,6 +127,7 @@ function lowerSystem(sys: import("../language/generated/ast.js").System): System
   // grammar rule (`UserField`) so the canonical JWT claim name `id`
   // (otherwise reserved for aggregate identity) is admissible.
   let user: UserIR | undefined;
+  let theme: import("./loom-ir.js").ThemeIR | undefined;
   for (const m of sys.members) {
     if (isUserBlock(m)) {
       user = {
@@ -135,6 +137,12 @@ function lowerSystem(sys: import("../language/generated/ast.js").System): System
           optional: !!f.type?.optional,
         })),
       };
+    } else if (isThemeBlock(m)) {
+      // Theme props are name/value pairs; we lower into a typed
+      // partial.  Validation (known names, hex colours, radius
+      // enum, no duplicates) lives in validate.ts so the IR
+      // doesn't have to carry a "rejected props" channel.
+      theme = lowerTheme(m);
     }
   }
   const modules: ModuleIR[] = [];
@@ -201,7 +209,41 @@ function lowerSystem(sys: import("../language/generated/ast.js").System): System
     const kind: "api" | "ui" = target?.platform === "react" ? "ui" : "api";
     return lowerE2E(b, e2eEnv, kind);
   });
-  return { name: sys.name, modules, deployables, e2eTests, user };
+  return { name: sys.name, modules, deployables, e2eTests, user, theme };
+}
+
+function lowerTheme(
+  block: import("../language/generated/ast.js").ThemeBlock,
+): import("./loom-ir.js").ThemeIR {
+  const out: import("./loom-ir.js").ThemeIR = {};
+  for (const p of block.props) {
+    const value = p.value;
+    switch (p.name) {
+      case "primary":
+        out.primary = value;
+        break;
+      case "neutral":
+        out.neutral = value;
+        break;
+      case "radius":
+        if (
+          value === "none" ||
+          value === "sm" ||
+          value === "md" ||
+          value === "lg" ||
+          value === "xl"
+        ) {
+          out.radius = value;
+        }
+        break;
+      case "fontFamily":
+        out.fontFamily = value;
+        break;
+      // Unknown property names land in the validator's reject path;
+      // we silently drop them here so the IR shape stays clean.
+    }
+  }
+  return out;
 }
 
 function lowerE2E(

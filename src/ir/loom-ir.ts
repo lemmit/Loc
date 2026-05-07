@@ -347,6 +347,36 @@ export interface SystemIR {
    *  JWT tokens into; `currentUser` references in expression bodies
    *  resolve members against this shape. */
   user?: UserIR;
+  /** Optional system-wide visual-identity tokens.  Populated when the
+   *  source declares a `theme { ... }` block at system scope.  Each
+   *  React deployable consumes the same ThemeIR; the platform's
+   *  emitter translates the framework-agnostic tokens into Mantine /
+   *  shadcn / etc. theming knobs. */
+  theme?: ThemeIR;
+}
+
+/** System-level `theme { ... }` block.  Tokens are semantic so the
+ *  same source applies to whatever target the React generator
+ *  picks (Mantine today; shadcn/ui or others tomorrow).  All
+ *  fields optional — a `theme {}` block is allowed but produces
+ *  the platform's defaults.  Color values are validated to be
+ *  CSS hex strings (#RGB / #RRGGBB / #RRGGBBAA); radius is one
+ *  of the five named scale steps. */
+export interface ThemeIR {
+  /** Brand color — e.g. "#3b82f6".  Mantine emitter generates a
+   *  10-shade ramp from this hex and registers it as the project's
+   *  `primaryColor`. */
+  primary?: string;
+  /** Neutral / gray palette source.  Mantine emitter sets
+   *  `colors.gray` to a 10-shade ramp from this hex, which Mantine
+   *  uses for muted text, borders, dimmed backgrounds, etc. */
+  neutral?: string;
+  /** Border-radius scale step.  One of the five named values. */
+  radius?: "none" | "sm" | "md" | "lg" | "xl";
+  /** Body / control font stack.  Passed through verbatim — caller
+   *  is responsible for ensuring the named fonts are available
+   *  (web font import, system fallback chain). */
+  fontFamily?: string;
 }
 
 /** System-level `user { ... }` block.  Each field carries an

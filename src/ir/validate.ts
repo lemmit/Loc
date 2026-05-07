@@ -47,6 +47,11 @@ export function validateLoomModel(loom: LoomModel): LoomDiagnostic[] {
     validateReactIdReferences(sys, diags);
     validateAuth(sys, diags);
     validatePermissions(sys, diags);
+    // Theme validation lives in the Langium-side validator
+    // (`ddd-validator.ts:checkTheme`) where the raw AST is in
+    // scope — unknown property names, duplicates, and the radius
+    // enum are easier to catch there since lowering loses that
+    // information by design.
   }
   // Per-context checks apply uniformly whether the context is
   // bundled in a system's modules or sits at the top level.

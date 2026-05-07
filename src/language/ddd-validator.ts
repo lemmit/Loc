@@ -54,6 +54,19 @@ export class DddValidator {
         this.checkContext(m, accept);
       } else if (m.$type === "System") {
         const deployables = m.members.filter((sm) => sm.$type === "Deployable");
+        const themeBlocks = m.members.filter(
+          (sm) => sm.$type === "ThemeBlock",
+        ) as import("./generated/ast.js").ThemeBlock[];
+        if (themeBlocks.length > 1) {
+          for (const tb of themeBlocks.slice(1)) {
+            accept(
+              "error",
+              `system '${m.name}' declares more than one 'theme { ... }' block; keep just the first.`,
+              { node: tb },
+            );
+          }
+        }
+        for (const tb of themeBlocks) this.checkTheme(tb, accept);
         for (const sm of m.members) {
           if (sm.$type === "Module") {
             for (const ctx of sm.contexts) this.checkContext(ctx, accept);
@@ -68,6 +81,68 @@ export class DddValidator {
           }
         }
       }
+    }
+  }
+
+  private checkTheme(
+    block: import("./generated/ast.js").ThemeBlock,
+    accept: ValidationAcceptor,
+  ): void {
+    const knownNames = new Set([
+      "primary",
+      "neutral",
+      "radius",
+      "fontFamily",
+    ]);
+    const knownRadius = new Set(["none", "sm", "md", "lg", "xl"]);
+    // Hex colors: #RGB, #RRGGBB, or #RRGGBBAA.  Everything else
+    // ("blue" / "rgb(...)" / "var(--brand)") routes through a future
+    // slice if a user asks; rejecting here keeps the surface tight
+    // and the Mantine shade-ramp generator simple.
+    const hexColor = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+    const seen = new Set<string>();
+    for (const p of block.props) {
+      // (1) Unknown property name.
+      if (!knownNames.has(p.name)) {
+        accept(
+          "error",
+          `unknown theme property '${p.name}'. Known properties: ${[...knownNames].join(", ")}.`,
+          { node: p, property: "name" },
+        );
+        continue;
+      }
+      // (2) Duplicate property name.
+      if (seen.has(p.name)) {
+        accept(
+          "error",
+          `theme property '${p.name}' declared more than once.`,
+          { node: p, property: "name" },
+        );
+        continue;
+      }
+      seen.add(p.name);
+      // (3) Per-property value validation.
+      if (p.name === "primary" || p.name === "neutral") {
+        if (!hexColor.test(p.value)) {
+          accept(
+            "error",
+            `theme '${p.name}' must be a CSS hex color (#RGB, #RRGGBB, or #RRGGBBAA); got '${p.value}'.`,
+            { node: p, property: "value" },
+          );
+        }
+      } else if (p.name === "radius") {
+        if (!knownRadius.has(p.value)) {
+          accept(
+            "error",
+            `theme 'radius' must be one of ${[...knownRadius].join(" | ")}; got '${p.value}'.`,
+            { node: p, property: "value" },
+          );
+        }
+      }
+      // fontFamily is a free-form string — pass-through to the
+      // Mantine theme.  No validation beyond "non-empty"; a typo'd
+      // family name silently falls through to the OS fallback at
+      // runtime, which is acceptable.
     }
   }
 

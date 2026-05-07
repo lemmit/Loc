@@ -29,6 +29,7 @@ import {
   buildViewTablePage,
   hasAnyView,
 } from "./view-builder.js";
+import { buildMantineTheme, hasThemeTokens } from "./theme-builder.js";
 import type { ViewIR } from "../../ir/loom-ir.js";
 
 // ---------------------------------------------------------------------------
@@ -143,7 +144,16 @@ export function generateReactForContexts(
 
   out.set("src/api/client.ts", CLIENT_TS);
   out.set("src/api/config.ts", configTs(apiBaseUrl));
-  out.set("src/main.tsx", MAIN_TSX);
+  // Theme — optional design-token block at system scope.  When
+  // present, emit `src/theme.ts` with a Mantine theme config and
+  // wire `<MantineProvider theme={theme}>` in main.tsx.  Without
+  // it, the app boots with Mantine's defaults (no extra file, no
+  // theme prop).
+  const themePresent = hasThemeTokens(sys.theme);
+  if (themePresent && sys.theme) {
+    out.set("src/theme.ts", buildMantineTheme(sys.theme));
+  }
+  out.set("src/main.tsx", mainTsx({ themePresent }));
   out.set(
     "src/App.tsx",
     appTsx(
@@ -285,7 +295,14 @@ const INDEX_HTML = `<!doctype html>
 </html>
 `;
 
-const MAIN_TSX = `// Auto-generated.
+function mainTsx(args: { themePresent: boolean }): string {
+  const themeImport = args.themePresent
+    ? `\nimport { theme } from "./theme.js";`
+    : "";
+  const providerOpen = args.themePresent
+    ? "<MantineProvider theme={theme}>"
+    : "<MantineProvider>";
+  return `// Auto-generated.
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
@@ -296,7 +313,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@mantine/core/styles.css";
 import "@mantine/notifications/styles.css";
 import "@mantine/dates/styles.css";
-import App from "./App.js";
+import App from "./App.js";${themeImport}
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 5_000, retry: 1 } },
@@ -305,7 +322,7 @@ const queryClient = new QueryClient({
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <MantineProvider>
+      ${providerOpen}
         <ModalsProvider>
           <Notifications position="top-right" />
           <BrowserRouter>
@@ -317,6 +334,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
   </React.StrictMode>,
 );
 `;
+}
 
 function configTs(apiBaseUrl: string): string {
   return `// Auto-generated.

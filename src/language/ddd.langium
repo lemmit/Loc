@@ -23,7 +23,22 @@ System:
     '}';
 
 SystemMember:
-    Module | Deployable | BoundedContext | TestE2E | UserBlock;
+    Module | Deployable | BoundedContext | TestE2E | UserBlock | ThemeBlock;
+
+// System-level visual identity — design tokens consumed by every
+// React deployable in this system.  Tokens are intentionally
+// framework-agnostic ("primary"/"neutral"/"radius"/"fontFamily")
+// so the Mantine emitter today and a future shadcn/ui emitter
+// translate the same source declaration.  The validator enforces
+// known property names, valid hex colours, the radius enum, and
+// no duplicates.  At most one `theme { ... }` per system.
+ThemeBlock:
+    'theme' '{'
+        props+=ThemeProp*
+    '}';
+
+ThemeProp:
+    name=ID ':' value=STRING;
 
 // System-level user shape — declares the strongly-typed claim record
 // that backends decode JWT tokens into.  At most one per system

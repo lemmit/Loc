@@ -275,6 +275,151 @@ describe("react generator", () => {
     expect(app).toMatch(/<Route path="\*" element={<NotFound \/>} \/>/);
   });
 
+  describe("slice 19 — design tokens (theme block → Mantine theme)", () => {
+    it("emits src/theme.ts with shade ramps + wires MantineProvider when theme is declared", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const theme = files.get("web_app/src/theme.ts")!;
+      // 10-shade arrays for each declared color, anchored at index 6.
+      expect(theme).toMatch(/const brand: MantineColorsTuple = \[/);
+      expect(theme).toMatch(/const neutral: MantineColorsTuple = \[/);
+      // The user's primary "#3b82f6" lands at index 6 (the shade
+      // Mantine uses for filled primary buttons).  The shade
+      // generator is deterministic — pin the exact match.
+      expect(theme).toMatch(/"#3b82f6",\s*\n\s*"#0a56d3",/);
+      // createTheme config registers the brand + gray, sets
+      // primaryColor + defaultRadius + fontFamily.
+      expect(theme).toMatch(/primaryColor: "brand"/);
+      expect(theme).toMatch(/colors: \{\s*brand,\s*gray: neutral,?\s*\}/);
+      expect(theme).toMatch(/defaultRadius: "md"/);
+      expect(theme).toMatch(/fontFamily: "Inter, system-ui, sans-serif"/);
+      expect(theme).toMatch(/headings: \{ fontFamily: "Inter, system-ui, sans-serif" \}/);
+
+      // main.tsx imports the theme + passes it to MantineProvider.
+      const main = files.get("web_app/src/main.tsx")!;
+      expect(main).toMatch(/import \{ theme \} from "\.\/theme\.js"/);
+      expect(main).toMatch(/<MantineProvider theme=\{theme\}>/);
+    });
+
+    it("does NOT emit theme.ts and uses bare MantineProvider when no theme block is declared", async () => {
+      const { parseHelper } = await import("langium/test");
+      const services = createDddServices(NodeFileSystem);
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(`
+        system Untheme {
+          module M {
+            context C {
+              aggregate A { name: string display }
+              repository As for A { }
+            }
+          }
+          deployable api { platform: dotnet, modules: M, port: 8080 }
+          deployable web { platform: react, targets: api, port: 3001 }
+        }
+      `, { validation: true });
+      const model = doc.parseResult.value as Model;
+      const { files } = generateSystems(model);
+      // No theme.ts emitted.
+      expect(files.has("web/src/theme.ts")).toBe(false);
+      // main.tsx uses the bare provider (no theme prop, no import).
+      const main = files.get("web/src/main.tsx")!;
+      expect(main).not.toMatch(/from "\.\/theme\.js"/);
+      expect(main).toMatch(/<MantineProvider>/);
+    });
+
+    it("validator rejects unknown theme property names", async () => {
+      const services = createDddServices(NodeFileSystem);
+      const { parseHelper } = await import("langium/test");
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(`
+        system Bad {
+          theme {
+            primary: "#ff0000"
+            wholeKitchenSink: "#00ff00"
+          }
+        }
+      `, { validation: true });
+      const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
+      expect(
+        errors.some((e) =>
+          /unknown theme property 'wholeKitchenSink'/.test(e.message),
+        ),
+      ).toBe(true);
+    });
+
+    it("validator rejects duplicate theme property names", async () => {
+      const services = createDddServices(NodeFileSystem);
+      const { parseHelper } = await import("langium/test");
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(`
+        system Bad {
+          theme {
+            primary: "#ff0000"
+            primary: "#00ff00"
+          }
+        }
+      `, { validation: true });
+      const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
+      expect(
+        errors.some((e) => /declared more than once/.test(e.message)),
+      ).toBe(true);
+    });
+
+    it("validator rejects non-hex color values", async () => {
+      const services = createDddServices(NodeFileSystem);
+      const { parseHelper } = await import("langium/test");
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(`
+        system Bad {
+          theme {
+            primary: "blue"
+          }
+        }
+      `, { validation: true });
+      const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
+      expect(
+        errors.some((e) =>
+          /must be a CSS hex color/.test(e.message),
+        ),
+      ).toBe(true);
+    });
+
+    it("validator rejects radius values outside the enum", async () => {
+      const services = createDddServices(NodeFileSystem);
+      const { parseHelper } = await import("langium/test");
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(`
+        system Bad {
+          theme {
+            radius: "huge"
+          }
+        }
+      `, { validation: true });
+      const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
+      expect(
+        errors.some((e) =>
+          /must be one of none \| sm \| md \| lg \| xl/.test(e.message),
+        ),
+      ).toBe(true);
+    });
+
+    it("validator rejects more than one theme block per system", async () => {
+      const services = createDddServices(NodeFileSystem);
+      const { parseHelper } = await import("langium/test");
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(`
+        system Bad {
+          theme { primary: "#ff0000" }
+          theme { primary: "#00ff00" }
+        }
+      `, { validation: true });
+      const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
+      expect(
+        errors.some((e) => /more than one 'theme \{ \.\.\. \}' block/.test(e.message)),
+      ).toBe(true);
+    });
+  });
+
   describe("slice 18.A — workflow form pages", () => {
     it("emits an api/workflows.ts module with one Zod schema + mutation hook per workflow", async () => {
       const model = await buildModel("examples/acme.ddd");
