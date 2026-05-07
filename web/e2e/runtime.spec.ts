@@ -77,6 +77,19 @@ test("editor → generate → bundle → boot → dispatch", async ({ page }) =>
     expect(parsed[0].price.currency).toBe("USD");
   });
 
+  await test.step("Preview loads the React app and round-trips a fetch", async () => {
+    // The Preview tab is only meaningful when the source has a
+    // React deployable.  The default Sales System example does;
+    // assertions guard against running on a single-context source.
+    await page.getByTestId("right-pane-tabs").locator("text=Preview").click();
+    const iframe = page.frameLocator('[data-testid="preview-iframe"]');
+    // Mantine renders into the iframe — wait for any visible heading
+    // or the home-page link list the React generator emits.
+    await expect(iframe.getByText(/Products|Orders|Home/i).first()).toBeVisible({
+      timeout: 60_000,
+    });
+  });
+
   // Final guard: surface any uncaught console errors that escaped
   // (Monaco workers, PGlite WASM loader, etc.).  Allow esm.sh
   // transient 503s the bundler retries through, and PGlite's

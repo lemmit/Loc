@@ -207,17 +207,21 @@ export function resolveRelative(importer: string, spec: string): string {
   return base.join("/");
 }
 
-// The generator emits TS files but writes import specifiers with
-// .js extensions (Node16 module style).  Our virtual map keys are
-// .ts, so we try both when resolving.
+// The generator emits TS / TSX files but writes import specifiers
+// with .js extensions (Node16 module style).  Our virtual map keys
+// are .ts / .tsx, so we try both when resolving.
 export function resolveInFs(fs: Map<string, string>, candidate: string): string | undefined {
   if (fs.has(candidate)) return candidate;
   if (candidate.endsWith(".js")) {
     const ts = candidate.slice(0, -3) + ".ts";
     if (fs.has(ts)) return ts;
+    const tsx = candidate.slice(0, -3) + ".tsx";
+    if (fs.has(tsx)) return tsx;
   }
   if (fs.has(candidate + ".ts")) return candidate + ".ts";
+  if (fs.has(candidate + ".tsx")) return candidate + ".tsx";
   if (fs.has(candidate + "/index.ts")) return candidate + "/index.ts";
+  if (fs.has(candidate + "/index.tsx")) return candidate + "/index.tsx";
   return undefined;
 }
 
@@ -330,14 +334,22 @@ export function makeLoomPlugin(ctx: VirtualFsContext): Plugin {
       });
 
       build.onLoad({ filter: /.*/, namespace: HTTP_NAMESPACE }, async (args) => {
+        // CSS responses (Mantine stylesheets fetched via esm.sh)
+        // need the CSS loader so esbuild treats the import as a
+        // side-effecting stylesheet and pipes it into the .css
+        // output file.  Detect via the URL — esm.sh serves CSS
+        // under /<pkg>/<file>.css with text/css content-type, but
+        // checking the path is cheaper than a HEAD round-trip.
+        const isCss = /\.css(\?|$)/.test(args.path);
+        const loader: "js" | "css" = isCss ? "css" : "js";
         const cached = ctx.fetchCache.get(args.path);
-        if (cached !== undefined) return { contents: cached, loader: "js" };
+        if (cached !== undefined) return { contents: cached, loader };
         ctx.fetchedUrls.add(args.path);
         return httpGate(async () => {
           // Re-check cache inside the gate — a previous request for
           // the same URL may have completed while we were queued.
           const inner = ctx.fetchCache.get(args.path);
-          if (inner !== undefined) return { contents: inner, loader: "js" };
+          if (inner !== undefined) return { contents: inner, loader };
           // esm.sh still occasionally 503s even with concurrency
           // limited; retry transient 5xx and network errors with
           // exponential backoff.
@@ -349,7 +361,7 @@ export function makeLoomPlugin(ctx: VirtualFsContext): Plugin {
               if (res.ok) {
                 const text = await res.text();
                 ctx.fetchCache.set(args.path, text);
-                return { contents: text, loader: "js" };
+                return { contents: text, loader };
               }
               lastErr = `Fetch failed (${res.status})`;
               // 4xx is terminal; only retry 5xx + 408/429.

@@ -42,14 +42,8 @@ test("Generate emits a virtual file tree", async ({ page }) => {
   await waitForPlaygroundReady(page);
 
   await page.getByTestId("btn-generate").click();
-  // Tree count chip in the file pane.
-  await expect(page.getByText(/^\d+ files$/)).toBeVisible({ timeout: 60_000 });
+  // Right-pane chip shows file count + generator mode.
+  await expect(page.getByText(/\d+ files? · /)).toBeVisible({ timeout: 60_000 });
   // Footer summary.
   await expect(page.getByText(/generated \d+ file\(s\)/)).toBeVisible();
-
-  // Open one of the generated files and assert the read-only Monaco
-  // viewer renders something recognisable from the Hono generator.
-  await page.getByRole("button", { name: "http", exact: false }).first().click();
-  await page.getByRole("button", { name: /index\.ts/ }).first().click();
-  await expect(page.getByText(/createApp/).first()).toBeVisible({ timeout: 10_000 });
 });

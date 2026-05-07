@@ -4,14 +4,18 @@ import type { VirtualFile } from "../build/protocol.js";
 // playground: it takes the generator's virtual file map, runs
 // esbuild-wasm with our virtual-fs / alias / http resolvers, and
 // returns a single self-contained ESM module string ready for the
-// runtime worker to dynamic-import.
+// runtime worker (hono kind) or the iframe host (react kind) to
+// dynamic-import.
+
+export type BundleKind = "hono" | "react";
 
 export interface BundleRequest {
+  kind: BundleKind;
   /** Files emitted by the generator (Map<path, content> flattened). */
   files: VirtualFile[];
-  /** Path of the file that re-exports `createApp` — relative to the
-   *  generator's virtual root, e.g. "http/index.ts" for legacy
-   *  output, or "<slug>/http/index.ts" for a system deployable. */
+  /** Path of the deployable's entry file — for hono this is
+   *  `http/index.ts` or `<slug>/http/index.ts`; for react it's
+   *  `<slug>/src/main.tsx`. */
   entryPath: string;
 }
 
@@ -25,9 +29,13 @@ export interface BundleDiagnostic {
 
 export interface BundleOk {
   ok: true;
+  kind: BundleKind;
   /** Self-contained ESM module source. */
   code: string;
-  /** Bytes written. */
+  /** Combined CSS produced by esbuild's CSS bundling — only set
+   *  for the react kind, which imports Mantine stylesheets. */
+  css?: string;
+  /** Bytes written (JS only). */
   size: number;
   /** Wall-clock time the worker spent in `build()`. */
   durationMs: number;
