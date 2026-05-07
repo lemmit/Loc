@@ -132,6 +132,9 @@ function renderCollectionOp(recv: string, name: string, args: string[]): string 
       return `${recv}.every(${args[0] ?? "() => true"})`;
     case "any":
       return `${recv}.some(${args[0] ?? "() => true"})`;
+    case "contains":
+      // Array membership — maps to JS's `.includes(value)`.
+      return `${recv}.includes(${args[0] ?? "undefined"})`;
     case "where":
       return `${recv}.filter(${args[0] ?? "() => true"})`;
     case "first":

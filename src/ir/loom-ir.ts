@@ -370,6 +370,25 @@ export interface TestE2EIR {
 export interface ModuleIR {
   name: string;
   contexts: BoundedContextIR[];
+  /** Permission catalogue declared via per-module `permissions { ... }`
+   *  blocks.  Empty when the module declares none.  Each entry's
+   *  `runtimeString` is the value backends compare against
+   *  `currentUser.permissions[]` claims; the source-side identifier
+   *  (`name`) is what `permissions.<name>` references resolve to in
+   *  expression bodies. */
+  permissions: PermissionDeclIR[];
+}
+
+/** One permission declared in a module's `permissions { }` block. */
+export interface PermissionDeclIR {
+  /** Source-side identifier used as `permissions.<name>` in
+   *  expression bodies. */
+  name: string;
+  /** Runtime string emitted when a `permissions.<name>` reference
+   *  lowers to a literal — `<lowercased-module>.<name>`.  Stable
+   *  across regens so claim payloads can be expressed in plain
+   *  strings on the wire. */
+  runtimeString: string;
 }
 
 export type Platform = "dotnet" | "hono" | "react";

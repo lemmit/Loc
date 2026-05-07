@@ -1074,7 +1074,10 @@ describe("Loom IR validation (post-lowering)", async () => {
         }
         module M {
           context T {
-            aggregate Order { customerId: string, status: string }
+            aggregate Order {
+              customerId: string
+              status: string
+            }
             repository Orders for Order { }
           }
         }
@@ -1228,6 +1231,147 @@ describe("Loom IR validation (post-lowering)", async () => {
         (d) =>
           d.severity === "error" &&
           /currentUser is only available in per-request handlers/.test(
+            d.message,
+          ),
+      ),
+      JSON.stringify(diags),
+    ).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // Slice 1B — per-module `permissions { ... }`
+  // -------------------------------------------------------------------------
+
+  it("lowers permissions.X to its '<module>.<name>' runtime string", async () => {
+    const loom = await loomFrom(`
+      system Acme {
+        user {
+          id: string
+          permissions: string[]
+        }
+        module Sales {
+          permissions { ordersConfirm, ordersCancel }
+          context Orders {
+            aggregate Order {
+              status: string
+              operation cancel() {
+                precondition currentUser.permissions.contains(permissions.ordersCancel)
+                status := "cancelled"
+              }
+            }
+            repository Orders for Order { }
+          }
+        }
+      }
+    `);
+    const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
+    expect(errors, JSON.stringify(errors)).toEqual([]);
+    // Walk the operation IR and assert the permissions ref turned
+    // into the runtime-string literal.  This is the contract every
+    // backend renders against.
+    const op = loom.systems[0]!.modules[0]!.contexts[0]!.aggregates[0]!
+      .operations[0]!;
+    const pre = op.statements.find((s) => s.kind === "precondition");
+    const json = JSON.stringify(pre);
+    expect(json).toContain('"value":"sales.ordersCancel"');
+    // The module's permissions catalogue is exposed on the IR.
+    const mod = loom.systems[0]!.modules[0]!;
+    expect(mod.permissions.map((p) => p.runtimeString)).toEqual([
+      "sales.ordersConfirm",
+      "sales.ordersCancel",
+    ]);
+  });
+
+  it("rejects permissions.<unknown> with a friendly diagnostic", async () => {
+    const loom = await loomFrom(`
+      system Acme {
+        user {
+          id: string
+          permissions: string[]
+        }
+        module Sales {
+          permissions { ordersConfirm }
+          context Orders {
+            aggregate Order {
+              status: string
+              operation cancel() {
+                precondition currentUser.permissions.contains(permissions.ordersDelete)
+                status := "cancelled"
+              }
+            }
+            repository Orders for Order { }
+          }
+        }
+      }
+    `);
+    const diags = validateLoomModel(loom);
+    expect(
+      diags.some(
+        (d) =>
+          d.severity === "error" &&
+          /permissions\.ordersDelete: no permission named 'ordersDelete'/.test(
+            d.message,
+          ),
+      ),
+      JSON.stringify(diags),
+    ).toBe(true);
+  });
+
+  it("rejects duplicate permission names within a module", async () => {
+    const loom = await loomFrom(`
+      system Acme {
+        module Sales {
+          permissions {
+            ordersConfirm,
+            ordersConfirm
+          }
+          context T {
+            aggregate Order { x: int }
+            repository Orders for Order { }
+          }
+        }
+      }
+    `);
+    const diags = validateLoomModel(loom);
+    expect(
+      diags.some(
+        (d) =>
+          d.severity === "error" &&
+          /permission 'ordersConfirm' is declared more than once/.test(
+            d.message,
+          ),
+      ),
+      JSON.stringify(diags),
+    ).toBe(true);
+  });
+
+  it("rejects permissions.X from a context whose module has no permissions block", async () => {
+    const loom = await loomFrom(`
+      system Acme {
+        user {
+          id: string
+          permissions: string[]
+        }
+        module Sales {
+          context Orders {
+            aggregate Order {
+              status: string
+              operation cancel() {
+                precondition currentUser.permissions.contains(permissions.anything)
+                status := "cancelled"
+              }
+            }
+            repository Orders for Order { }
+          }
+        }
+      }
+    `);
+    const diags = validateLoomModel(loom);
+    expect(
+      diags.some(
+        (d) =>
+          d.severity === "error" &&
+          /permissions\.anything: no permission named 'anything'/.test(
             d.message,
           ),
       ),

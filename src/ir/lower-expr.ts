@@ -54,6 +54,7 @@ import type {
   ExprIR,
   IdValueType,
   PathIR,
+  PermissionDeclIR,
   StmtIR,
   TypeIR,
   UserIR,
@@ -94,10 +95,22 @@ export interface Env {
    *  resolve the magic `currentUser` identifier.  Undefined for
    *  systems / loose contexts that don't declare a user block. */
   user?: UserIR;
+  /** Module-scoped permission catalogue — populated when the
+   *  enclosing context lives inside a module that declares one or
+   *  more `permissions { ... }` blocks.  Drives resolution of the
+   *  magic `permissions.<name>` identifier in expression bodies.
+   *  Loose contexts (no enclosing module) leave it undefined; the
+   *  validator surfaces a friendly diagnostic for any
+   *  `permissions.X` reference there. */
+  modulePermissions?: PermissionDeclIR[];
 }
 
-export function newEnv(ctx: BoundedContext, user?: UserIR): Env {
-  return { ctx, locals: new Map(), user };
+export function newEnv(
+  ctx: BoundedContext,
+  user?: UserIR,
+  modulePermissions?: PermissionDeclIR[],
+): Env {
+  return { ctx, locals: new Map(), user, modulePermissions };
 }
 
 export function withLocal(
@@ -347,6 +360,30 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
     };
   }
   if (isMemberAccess(expr)) {
+    // `permissions.<name>` magic identifier.  Resolves only when the
+    // enclosing context belongs to a module that declared a
+    // permissions catalogue; the lookup happens at lowering time so
+    // the IR carries the runtime string directly (a plain string
+    // literal) — no new ref kind, no per-platform render branch.
+    // Non-call form only — `permissions.foo()` makes no sense and
+    // falls through to the generic method-call path which will
+    // surface as an unknown-method diagnostic.
+    if (
+      !expr.call &&
+      isNameRef(expr.receiver) &&
+      expr.receiver.name === "permissions" &&
+      env.modulePermissions
+    ) {
+      const decl = env.modulePermissions.find((d) => d.name === expr.member);
+      if (decl) {
+        return lit("string", decl.runtimeString);
+      }
+      // Unknown permission name — leave the receiver unresolved so
+      // the validator surfaces a clear "unknown permission" error;
+      // we still produce a typed expression so downstream rendering
+      // doesn't choke.
+      return lit("string", `__unknown_permission__:${expr.member}`);
+    }
     const recv = lowerExpr(expr.receiver, env);
     const recvType = inferExprType(expr.receiver, env);
     if (expr.call) {
@@ -556,6 +593,16 @@ export function inferExprType(
     return { kind: "entity", name: expr.partType?.ref?.name ?? "Unknown" };
   }
   if (isMemberAccess(expr)) {
+    // `permissions.<name>` always types as `string` (matches the
+    // lowering, which rewrites the access to a string literal).
+    if (
+      !expr.call &&
+      isNameRef(expr.receiver) &&
+      expr.receiver.name === "permissions" &&
+      env.modulePermissions
+    ) {
+      return { kind: "primitive", name: "string" };
+    }
     const recvType = inferExprType(expr.receiver, env);
     return memberType(recvType, expr.member, env);
   }
@@ -613,6 +660,7 @@ function memberType(t: TypeIR, name: string, env: Env): TypeIR {
         return { kind: "primitive", name: "decimal" };
       case "all":
       case "any":
+      case "contains":
         return { kind: "primitive", name: "bool" };
       case "where":
         return t;

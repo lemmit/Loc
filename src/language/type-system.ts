@@ -341,6 +341,7 @@ const COLLECTION_OPS = new Set([
   "where",
   "first",
   "firstOrNull",
+  "contains",
 ]);
 
 function collectionOpType(
@@ -367,6 +368,7 @@ function collectionOpType(
     }
     case "all":
     case "any":
+    case "contains":
       return T.prim("bool");
     case "where":
       return T.array(recv.element);

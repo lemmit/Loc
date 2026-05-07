@@ -46,6 +46,7 @@ export function validateLoomModel(loom: LoomModel): LoomDiagnostic[] {
     validateSystem(sys, diags);
     validateReactIdReferences(sys, diags);
     validateAuth(sys, diags);
+    validatePermissions(sys, diags);
   }
   // Per-context checks apply uniformly whether the context is
   // bundled in a system's modules or sits at the top level.
@@ -57,6 +58,7 @@ export function validateLoomModel(loom: LoomModel): LoomDiagnostic[] {
     validateWorkflows(c, diags);
     validateViews(c, diags);
     validateCurrentUserScope(c, diags);
+    validatePermissionRefs(c, diags);
   }
   return diags;
 }
@@ -1332,5 +1334,172 @@ function validateCurrentUserScope(
   }
   for (const view of ctx.views) {
     flag(`view[${view.name}].filter`, view.filter);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Permissions validation (slice 1B).
+//
+// Two passes:
+//
+//   1. Per-module: each `permissions { }` block declares typed
+//      identifiers; names must be unique within the module.
+//
+//   2. Per-context: every expression in operation / workflow / view /
+//      derived / invariant / find / function / test bodies is walked
+//      for the `__unknown_permission__:<name>` sentinel produced by
+//      lowering when `permissions.X` references an undeclared name
+//      (or is referenced from a context whose module has no
+//      permissions catalogue).  The sentinel keeps lowering's output
+//      well-typed; this validator translates it into a friendly
+//      diagnostic.
+// ---------------------------------------------------------------------------
+
+const UNKNOWN_PERMISSION_SENTINEL = "__unknown_permission__:";
+
+function validatePermissions(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  for (const mod of sys.modules) {
+    if (mod.permissions.length === 0) continue;
+    const seen = new Set<string>();
+    for (const p of mod.permissions) {
+      if (seen.has(p.name)) {
+        diags.push({
+          severity: "error",
+          message: `module '${mod.name}': permission '${p.name}' is declared more than once.`,
+          source: `${sys.name}/${mod.name}/permissions.${p.name}`,
+        });
+      }
+      seen.add(p.name);
+    }
+  }
+}
+
+function validatePermissionRefs(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+): void {
+  const flag = (location: string, expr: ExprIR | undefined): void => {
+    if (!expr) return;
+    walkExpr(expr, (e) => {
+      if (
+        e.kind === "literal" &&
+        e.lit === "string" &&
+        e.value.startsWith(UNKNOWN_PERMISSION_SENTINEL)
+      ) {
+        const name = e.value.slice(UNKNOWN_PERMISSION_SENTINEL.length);
+        diags.push({
+          severity: "error",
+          message:
+            `permissions.${name}: no permission named '${name}' is declared in this module's 'permissions { ... }' block. ` +
+            `Either add the declaration or fix the reference.`,
+          source: `${ctx.name}/${location}`,
+        });
+      }
+    });
+  };
+  for (const agg of ctx.aggregates) {
+    for (const inv of agg.invariants) {
+      flag(`${agg.name}.invariant`, inv.expr);
+      flag(`${agg.name}.invariant`, inv.guard);
+    }
+    for (const d of agg.derived) flag(`${agg.name}.derived[${d.name}]`, d.expr);
+    for (const fn of agg.functions) flag(`${agg.name}.function[${fn.name}]`, fn.body);
+    for (const op of agg.operations) {
+      for (const s of op.statements) {
+        flagStmt(`${agg.name}.operation[${op.name}]`, s, flag);
+      }
+    }
+    for (const t of agg.tests) {
+      for (const s of t.statements) {
+        flagStmt(`${agg.name}.test[${t.name}]`, s, flag);
+      }
+    }
+    for (const part of agg.parts) {
+      for (const inv of part.invariants) {
+        flag(`${part.name}.invariant`, inv.expr);
+        flag(`${part.name}.invariant`, inv.guard);
+      }
+      for (const d of part.derived) flag(`${part.name}.derived[${d.name}]`, d.expr);
+      for (const fn of part.functions) flag(`${part.name}.function[${fn.name}]`, fn.body);
+    }
+  }
+  for (const vo of ctx.valueObjects) {
+    for (const inv of vo.invariants) {
+      flag(`${vo.name}.invariant`, inv.expr);
+      flag(`${vo.name}.invariant`, inv.guard);
+    }
+    for (const d of vo.derived) flag(`${vo.name}.derived[${d.name}]`, d.expr);
+    for (const fn of vo.functions) flag(`${vo.name}.function[${fn.name}]`, fn.body);
+  }
+  for (const repo of ctx.repositories) {
+    for (const f of repo.finds) {
+      flag(`repository[${repo.name}].find[${f.name}]`, f.filter);
+    }
+  }
+  for (const view of ctx.views) {
+    flag(`view[${view.name}].filter`, view.filter);
+    for (const b of view.output?.binds ?? []) {
+      flag(`view[${view.name}].bind[${b.name}]`, b.expr);
+    }
+  }
+  for (const wf of ctx.workflows) {
+    for (const s of wf.statements) {
+      switch (s.kind) {
+        case "precondition":
+          flag(`workflow[${wf.name}]`, s.expr);
+          break;
+        case "emit":
+          for (const f of s.fields) flag(`workflow[${wf.name}]`, f.value);
+          break;
+        case "factory-let":
+          for (const f of s.fields) flag(`workflow[${wf.name}]`, f.value);
+          break;
+        case "repo-let":
+          for (const a of s.args) flag(`workflow[${wf.name}]`, a);
+          break;
+        case "expr-let":
+          flag(`workflow[${wf.name}]`, s.expr);
+          break;
+        case "op-call":
+          for (const a of s.args) flag(`workflow[${wf.name}]`, a);
+          break;
+      }
+    }
+  }
+}
+
+/** Flag every expression nested inside a regular operation / test
+ *  statement.  Mirrors the StmtIR union; new statement kinds need a
+ *  branch here (TS exhaustiveness check guards against drift). */
+function flagStmt(
+  prefix: string,
+  s: import("./loom-ir.js").TestStmtIR,
+  flag: (location: string, expr: ExprIR | undefined) => void,
+): void {
+  switch (s.kind) {
+    case "precondition":
+      flag(prefix, s.expr);
+      break;
+    case "let":
+      flag(prefix, s.expr);
+      break;
+    case "assign":
+    case "add":
+    case "remove":
+      flag(prefix, s.value);
+      break;
+    case "emit":
+      for (const f of s.fields) flag(prefix, f.value);
+      break;
+    case "call":
+      for (const a of s.args) flag(prefix, a);
+      break;
+    case "expression":
+      flag(prefix, s.expr);
+      break;
+    case "expect":
+    case "expect-throws":
+      flag(prefix, s.expr);
+      break;
   }
 }

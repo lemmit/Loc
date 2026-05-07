@@ -176,4 +176,49 @@ describe("parsing & validation of examples", () => {
     );
     expect(api?.auth).toBe("required");
   });
+
+  it("parses per-module `permissions { ... }` blocks", async () => {
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(
+      `
+      system Acme {
+        module Sales {
+          permissions {
+            ordersConfirm,
+            ordersCancel,
+            ordersRead
+          }
+          context Orders {
+            aggregate Order {
+              customerId: string
+              status: string
+            }
+            repository Orders for Order { }
+          }
+        }
+      }
+      `,
+      { validation: true },
+    );
+    expect(
+      (doc.diagnostics ?? [])
+        .filter((d) => d.severity === 1)
+        .map((d) => d.message),
+    ).toEqual([]);
+    const sys = (doc.parseResult.value as Model).members[0] as
+      | import("../src/language/generated/ast.js").System
+      | undefined;
+    const sales = sys!.members.find(
+      (m): m is import("../src/language/generated/ast.js").Module =>
+        m.$type === "Module" && m.name === "Sales",
+    );
+    expect(sales!.permissions).toHaveLength(1);
+    expect(sales!.permissions[0]!.decls.map((d) => d.name)).toEqual([
+      "ordersConfirm",
+      "ordersCancel",
+      "ordersRead",
+    ]);
+  });
 });

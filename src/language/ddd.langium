@@ -44,7 +44,7 @@ UserField:
     name=UserFieldName ':' type=TypeRef;
 
 UserFieldName returns string:
-    ID | 'id';
+    ID | 'id' | 'permissions';
 
 // E2E test against a running deployable.  The body reuses the per-
 // aggregate TestStatement vocabulary (let / expect / expectThrows /
@@ -59,8 +59,23 @@ TestE2E:
 
 Module:
     'module' name=ID '{'
-        contexts+=BoundedContext*
+        (contexts+=BoundedContext | permissions+=PermissionsBlock)*
     '}';
+
+// Per-module permission catalogue.  Each declaration becomes a typed
+// identifier (`permissions.<name>`) usable in operation / workflow /
+// view-bind expressions; lowering rewrites the reference to its
+// runtime string `<lowercase-module>.<name>` so handlers can compare
+// against `currentUser.permissions: string[]` claims without
+// hand-spelling the strings.  Multiple `permissions { ... }` blocks
+// in one module merge their declarations.
+PermissionsBlock:
+    'permissions' '{'
+        (decls+=PermissionDecl (',' decls+=PermissionDecl)* ','?)?
+    '}';
+
+PermissionDecl:
+    name=ID;
 
 Deployable:
     'deployable' name=ID '{'
@@ -331,11 +346,13 @@ PostfixExpr infers Expression:
       | {infer CallExpr.callee=current} '(' (args+=Expression (',' args+=Expression)*)? ')'
     )*;
 
-// Accept `id` and `this` (otherwise reserved as primary-expression
-// keywords) as ordinary member names — `prod.id`, `agg.this` (rare but
-// allowed) parse without surprises.
+// Accept reserved keywords (`id`, `permissions`, `contains`) as
+// ordinary member names so `prod.id`, `currentUser.permissions`,
+// `someArray.contains(x)` parse cleanly.  The magic-identifier
+// resolution / collection-op dispatch lives in the lowering
+// (lower-expr.ts + type-system.ts) rather than the grammar.
 MemberName returns string:
-    ID | 'id';
+    ID | 'id' | 'permissions' | 'contains';
 
 Lambda:
     param=ID '=>' body=Expression;
@@ -386,8 +403,15 @@ ThisRef:
 IdRef:
     {infer IdRef} 'id';
 
+// `name` accepts `permissions` as a soft keyword so an expression
+// can use it as the receiver of a member access (`permissions.foo`).
+// The `permissions { ... }` block keeps the keyword form because the
+// surrounding `module { ... }` context disambiguates.
 NameRef:
-    name=ID;
+    name=NameRefIdent;
+
+NameRefIdent returns string:
+    ID | 'permissions';
 
 // ---------------------------------------------------------------------------
 // Terminals

@@ -36,6 +36,7 @@ import {
   isNameRef,
   isObjectLit,
   isOperation,
+  isPermissionsBlock,
   isPreconditionStmt,
   isProperty,
   isRepository,
@@ -65,6 +66,7 @@ import type {
   ModuleIR,
   OperationIR,
   ParamIR,
+  PermissionDeclIR,
   Platform,
   RepositoryIR,
   StmtIR,
@@ -142,11 +144,29 @@ function lowerSystem(sys: import("../language/generated/ast.js").System): System
   const looseContexts: BoundedContextIR[] = [];
   for (const m of sys.members) {
     if (isModule(m)) {
+      // Module-scoped permissions catalogue.  Multiple
+      // `permissions { ... }` blocks merge their declarations;
+      // the runtime string is computed once here so emitters and
+      // resolvers don't have to spell the convention separately.
+      const permissions: PermissionDeclIR[] = [];
+      for (const blk of m.permissions ?? []) {
+        if (!isPermissionsBlock(blk)) continue;
+        for (const d of blk.decls) {
+          permissions.push({
+            name: d.name,
+            runtimeString: `${m.name.toLowerCase()}.${d.name}`,
+          });
+        }
+      }
       modules.push({
         name: m.name,
-        contexts: m.contexts.map((c) => lowerContext(c, user)),
+        contexts: m.contexts.map((c) => lowerContext(c, user, permissions)),
+        permissions,
       });
     } else if (isBoundedContext(m)) {
+      // Loose contexts under a system don't sit inside a module,
+      // so `permissions.X` references inside them stay unresolved
+      // (the validator will surface a friendly diagnostic).
       looseContexts.push(lowerContext(m, user));
     } else if (isDeployable(m)) {
       deployables.push(lowerDeployable(m));
@@ -155,7 +175,7 @@ function lowerSystem(sys: import("../language/generated/ast.js").System): System
     }
   }
   if (looseContexts.length > 0) {
-    modules.push({ name: "_default", contexts: looseContexts });
+    modules.push({ name: "_default", contexts: looseContexts, permissions: [] });
   }
   // React deployable's `moduleNames` inheritance from `targets:` is
   // an enrichment, not a structural lowering — see
@@ -243,14 +263,21 @@ function defaultPort(platform: Platform | undefined): number {
   return 3000;
 }
 
-function lowerContext(ctx: BoundedContext, user?: UserIR): BoundedContextIR {
+function lowerContext(
+  ctx: BoundedContext,
+  user?: UserIR,
+  modulePermissions?: PermissionDeclIR[],
+): BoundedContextIR {
   // Lowering produces a faithful AST projection only.  Auto-included
   // `findAll`, react `moduleNames` inheritance, and wire-shape
   // derivation all live in `enrichLoomModel` (src/ir/enrichments.ts)
   // which runs after lowering.  `user` (when set) threads the
   // system's user-claim shape into every expression context so the
   // `currentUser` magic identifier resolves to a typed shape.
-  const env = newEnv(ctx, user);
+  // `modulePermissions` (when set) does the same for the
+  // `permissions.<name>` magic-identifier resolution; loose contexts
+  // not bundled in a module pass undefined.
+  const env = newEnv(ctx, user, modulePermissions);
   const enums: EnumIR[] = [];
   const valueObjects: ValueObjectIR[] = [];
   const events: EventIR[] = [];
@@ -263,7 +290,7 @@ function lowerContext(ctx: BoundedContext, user?: UserIR): BoundedContextIR {
     else if (isValueObject(m)) valueObjects.push(lowerValueObject(m, env));
     else if (isEventDecl(m)) events.push(lowerEvent(m));
     else if (isAggregate(m)) aggregates.push(lowerAggregate(m, env));
-    else if (isRepository(m)) repositories.push(lowerRepository(m, user));
+    else if (isRepository(m)) repositories.push(lowerRepository(m, user, modulePermissions));
     else if (isWorkflow(m)) workflows.push(lowerWorkflow(m, env, ctx));
     else if (isView(m)) views.push(lowerView(m, env));
   }
@@ -383,7 +410,11 @@ function lowerEntityPart(
   };
 }
 
-function lowerRepository(repo: Repository, user?: UserIR): RepositoryIR {
+function lowerRepository(
+  repo: Repository,
+  user?: UserIR,
+  modulePermissions?: PermissionDeclIR[],
+): RepositoryIR {
   return {
     name: repo.name,
     aggregateName: repo.aggregate?.ref?.name ?? "Unknown",
@@ -395,7 +426,11 @@ function lowerRepository(repo: Repository, user?: UserIR): RepositoryIR {
       // the validator (`validateAuth`) then rejects any current-user
       // reference inside a where filter, since slice 1A doesn't
       // support row-level filtering by user (slice 1C).
-      let env = newEnv(repo.$container as BoundedContext, user);
+      let env = newEnv(
+        repo.$container as BoundedContext,
+        user,
+        modulePermissions,
+      );
       if (aggRoot) env = inAggregate(env, aggRoot);
       for (const p of f.params) {
         env = withLocal(env, p.name, "param", lowerType(p.type));

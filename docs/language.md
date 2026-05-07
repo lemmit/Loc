@@ -79,6 +79,12 @@ deployable's module set.  The Langium scope provider exports all
 named declarations — aggregates, entity parts, value objects, enums —
 across module boundaries within the same source file.
 
+A module body may also include one or more
+`permissions { ... }` blocks declaring typed permission identifiers
+used in operation / workflow expression bodies.  The
+`permissions.<name>` magic identifier lowers to the runtime string
+`<lowercase-module>.<name>`; see [`auth.md`](auth.md).
+
 #### Deployable platforms
 
 | `platform:` | Stack |
@@ -221,6 +227,7 @@ When the receiver type is `T[]`:
 | `xs.where(x => expr)` | `T[]` | Filter. |
 | `xs.first` | `T` | First element (assumes non-empty). |
 | `xs.firstOrNull` | `T?` | First or `null`. |
+| `xs.contains(x)` | `bool` | Membership.  Renders to `Array.includes` (TS) / `Enumerable.Contains` (.NET). |
 
 ### Numeric widening
 

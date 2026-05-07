@@ -1,14 +1,21 @@
-# Auth + `currentUser` (slice 1A)
+# Auth, `currentUser`, and permissions
 
 Loom systems can declare a strongly-typed JWT claim shape at system
 scope and opt deployables in to JWT-decode middleware per request.
-Slice 1A ships the **plumbing**: the user shape, the `currentUser`
-magic identifier, the verifier hook, and the middleware mount.
+Modules can declare a typed permission catalogue used to gate
+command entry from inside operation / workflow bodies.
+
+Shipped over two slices:
+
+- **Slice 1A** — `user { ... }` + `currentUser` magic identifier +
+  per-deployable `auth: required` middleware + verifier hook.
+- **Slice 1B** — per-module `permissions { ... }` block +
+  `permissions.<name>` magic identifier resolving to a stable
+  `<module>.<name>` runtime string + the `.contains(x)` collection
+  op for ergonomic claim membership checks.
 
 What's intentionally **not** here yet:
 
-- Per-module `permissions { ... }` and typed `permissions.X` refs
-  (slice 1B).
 - `currentUser` inside `where` clauses on repository finds / view
   filters (slice 1C; the validator currently rejects this with a
   pointer to the slice).
@@ -22,11 +29,18 @@ system Acme {
   user {
     id: string
     role: string
+    permissions: string[]          // populated by the verifier hook from JWT claims
     customerId: Id<Customer>?
     tenantId: string
   }
 
   module Sales {
+    permissions {
+      ordersConfirm,
+      ordersCancel,
+      ordersRead
+    }
+
     context Orders {
       enum OrderStatus { Draft, Confirmed, Cancelled }
 
@@ -37,9 +51,14 @@ system Acme {
         // currentUser is in scope inside operation bodies.  The
         // precondition runs per request; failure throws
         // DomainException → 400 from the framework filter.
+        // permissions.ordersCancel lowers to the literal
+        // "sales.ordersCancel" so the runtime check reduces to
+        // a plain string-array .includes(...) on the verified
+        // claim payload.
         operation cancel() {
           precondition currentUser.role == "manager"
-                    || currentUser.customerId == this.customerId
+                    || (currentUser.customerId == this.customerId
+                        && currentUser.permissions.contains(permissions.ordersCancel))
           status := Cancelled
         }
       }
@@ -58,6 +77,37 @@ system Acme {
   }
 }
 ```
+
+### Permissions surface
+
+`permissions { ... }` lives at module scope; each declared name
+becomes a typed identifier (`permissions.<name>`) usable in any
+expression body that resolves through the enclosing module.  The
+identifier lowers to a plain string literal of the form
+`<lowercase-module>.<name>` — `permissions.ordersCancel` inside
+`module Sales` becomes `"sales.ordersCancel"` everywhere it
+appears.  Backends never see a separate `Permission` type; the
+runtime is `string[].includes(string)` either side of the wire.
+
+Multiple `permissions { ... }` blocks in the same module merge
+their declarations.  Cross-module references aren't supported in
+slice 1B — referencing a permission declared in another module
+shows up as the same "no permission named 'X'" diagnostic as a
+typo.
+
+### `.contains(x)` on arrays
+
+Slice 1B introduces `.contains(x)` as a collection op (joining
+`count`, `sum`, `all`, `any`, `where`, `first`, `firstOrNull`):
+
+| Backend | Renders to |
+| --- | --- |
+| TypeScript | `array.includes(value)` |
+| C# / .NET | `array.Contains(value)` (LINQ) |
+
+It's available on any array — not just `currentUser.permissions`
+— so the same vocabulary covers any membership check the domain
+needs.
 
 `currentUser` is in scope wherever an expression evaluates **per
 request**:
@@ -172,6 +222,8 @@ to widen or tighten the list.
 | `auth: required` on a deployable but no `user { ... }` block | Validation error: "deployable 'X' has 'auth: required' but system 'Y' declares no 'user { ... }' block." |
 | Two user fields with the same name | Validation error: "user block declares field 'X' more than once." |
 | `currentUser` in an invariant / derived / function / find filter | Validation error: "currentUser is only available in per-request handlers." |
+| Two permissions with the same name in one module | Validation error: "module 'M': permission 'X' is declared more than once." |
+| `permissions.X` referencing an undeclared name (or used outside any module) | Validation error: "permissions.X: no permission named 'X' is declared in this module's 'permissions { ... }' block." |
 
 Missing `IUserVerifier` registration surfaces at runtime startup,
 not during generation — the project compiles, but boots with a

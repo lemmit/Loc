@@ -131,6 +131,10 @@ function renderCollectionOp(recv: string, name: string, args: string[]): string 
       return `${recv}.All(${args[0] ?? "_ => true"})`;
     case "any":
       return `${recv}.Any(${args[0] ?? "_ => true"})`;
+    case "contains":
+      // Membership: maps to LINQ's `Contains(value)` overload.  The
+      // single arg is the candidate value (rendered already).
+      return `${recv}.Contains(${args[0] ?? "default!"})`;
     case "where":
       return `${recv}.Where(${args[0] ?? "_ => true"}).ToList()`;
     case "first":
