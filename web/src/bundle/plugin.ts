@@ -16,6 +16,13 @@ const HTTP_NAMESPACE = "http-url";
 // near `makeLoomPlugin` for why this is necessary.
 const RRD_SHIM_NAMESPACE = "virtual-rrd-shim";
 const RRD_REAL_SPECIFIER = "loom:rrd-real";
+// Virtual module standing in for `react-dom/client`.  esm.sh's
+// repackaging just forwards to react-dom's createRoot accessor,
+// which trips React's "you should import from react-dom/client"
+// dev warning.  Our shim sets the internal usingClientEntryPoint
+// flag the way react-dom/client.js does in the real package, so
+// the warning stays quiet.
+const RDC_SHIM_NAMESPACE = "virtual-rdc-shim";
 
 // esm.sh ESM service.  We pin to a major channel and let it serve
 // the latest patch — the generated backend doesn't pin versions
@@ -371,6 +378,49 @@ export function makeLoomPlugin(ctx: VirtualFsContext, opts?: PluginOptions): Plu
           contents: [
             `export * from "${RRD_REAL_SPECIFIER}";`,
             `export { HashRouter as BrowserRouter } from "${RRD_REAL_SPECIFIER}";`,
+            "",
+          ].join("\n"),
+          loader: "js",
+        }));
+
+        // `react-dom/client` shim — same trick.  esm.sh's
+        // react-dom/client just forwards `react-dom`'s createRoot
+        // accessor without setting the internal `usingClientEntryPoint`
+        // flag, so React logs a deprecation warning ("you should
+        // import createRoot from react-dom/client").  We re-implement
+        // the wrapper exactly like the real react-dom/client.js does:
+        // toggle the secret-internals flag around each call so the
+        // warning's runtime check sees `usingClientEntryPoint=true`.
+        build.onResolve({ filter: /^react-dom\/client$/ }, (args) => {
+          if (args.namespace === HTTP_NAMESPACE) return undefined;
+          return {
+            path: "loom-rdc-shim",
+            namespace: RDC_SHIM_NAMESPACE,
+          };
+        });
+        build.onLoad({ filter: /.*/, namespace: RDC_SHIM_NAMESPACE }, () => ({
+          contents: [
+            `import * as ReactDOM from "react-dom";`,
+            "",
+            "const internals =",
+            "  ReactDOM.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED;",
+            "",
+            "export function createRoot(container, options) {",
+            "  if (internals) internals.usingClientEntryPoint = true;",
+            "  try { return ReactDOM.createRoot(container, options); }",
+            "  finally { if (internals) internals.usingClientEntryPoint = false; }",
+            "}",
+            "",
+            "export function hydrateRoot(container, initialChildren, options) {",
+            "  if (internals) internals.usingClientEntryPoint = true;",
+            "  try { return ReactDOM.hydrateRoot(container, initialChildren, options); }",
+            "  finally { if (internals) internals.usingClientEntryPoint = false; }",
+            "}",
+            "",
+            "// `import ReactDOM from \"react-dom/client\"` (default-import",
+            "// form, what the generator emits in main.tsx) needs a default",
+            "// export shaped like a namespace.",
+            "export default { createRoot, hydrateRoot };",
             "",
           ].join("\n"),
           loader: "js",
