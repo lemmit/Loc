@@ -30,16 +30,16 @@ const REACT_FALLBACK_VERSION = "18.3.1";
 function importMap(versions: Record<string, string>): Record<string, string> {
   const reactVer = versions["react"] ?? REACT_FALLBACK_VERSION;
   const reactDomVer = versions["react-dom"] ?? reactVer;
-  // Importmap rules per spec: keys ending in "/" must map to URL
-  // values ending in "/".  esm.sh URLs with `?query` parameters
-  // can't satisfy that, so we list each required sub-path
-  // explicitly (jsx-runtime, jsx-dev-runtime, react-dom/client).
+  // Only `react` and `react-dom` are externalised — everything
+  // else (`react/jsx-runtime`, `react-dom/client`, …) is bundled
+  // inline by esbuild and reaches React/React-DOM through these
+  // two entries.  Keeping the importmap minimal also keeps the
+  // esm.sh "external" set narrow, which is what dedupes Mantine
+  // and friends to a single shard (see plugin.ts comment on
+  // REACT_RUNTIME_EXTERNALS).
   return {
     "react": `https://esm.sh/react@${reactVer}?dev=false`,
     "react-dom": `https://esm.sh/react-dom@${reactDomVer}?dev=false&deps=react@${reactVer}`,
-    "react-dom/client": `https://esm.sh/react-dom@${reactDomVer}/client?dev=false&deps=react@${reactVer}`,
-    "react/jsx-runtime": `https://esm.sh/react@${reactVer}/jsx-runtime?dev=false`,
-    "react/jsx-dev-runtime": `https://esm.sh/react@${reactVer}/jsx-dev-runtime?dev=false`,
   };
 }
 
