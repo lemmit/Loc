@@ -1,0 +1,749 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Loom — a DSL that weaves Domain-Driven systems</title>
+  <meta name="description" content="Loom is a Langium-based DSL for Domain-Driven Design. Write aggregates, value objects, invariants, and operations in .ddd; generate a runnable TypeScript + .NET + React system, wired together as one docker compose stack." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0b0d12;
+      --bg-elev: #11141b;
+      --bg-card: #141822;
+      --line: #1f2533;
+      --line-strong: #2a3142;
+      --fg: #e7ecf3;
+      --fg-dim: #a4adbf;
+      --fg-mute: #6b7388;
+      --accent: #b58cff;
+      --accent-2: #6fd1ff;
+      --accent-3: #ffb98a;
+      --warn: #ffd166;
+      --good: #7ee787;
+      --code-bg: #0d1019;
+      --radius: 14px;
+      --radius-sm: 8px;
+      --shadow: 0 30px 60px -30px rgba(0,0,0,0.6);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+
+    a { color: var(--accent-2); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    code, pre, .mono {
+      font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-feature-settings: "liga" 0, "calt" 0;
+    }
+
+    .container {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* ---------- Header ---------- */
+    header.site {
+      position: sticky; top: 0; z-index: 50;
+      backdrop-filter: blur(10px);
+      background: rgba(11,13,18,0.7);
+      border-bottom: 1px solid var(--line);
+    }
+    .nav {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 0;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+    .brand .logo { width: 28px; height: 28px; }
+    .brand-name { letter-spacing: -0.01em; font-size: 18px; }
+    .nav-links { display: flex; gap: 22px; align-items: center; }
+    .nav-links a { color: var(--fg-dim); font-size: 14px; }
+    .nav-links a:hover { color: var(--fg); text-decoration: none; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 10px 16px; border-radius: 999px;
+      font-size: 14px; font-weight: 500;
+      border: 1px solid var(--line-strong);
+      color: var(--fg);
+      background: var(--bg-elev);
+      transition: transform .15s ease, background .15s ease, border-color .15s ease;
+    }
+    .btn:hover { text-decoration: none; transform: translateY(-1px); border-color: var(--accent); }
+    .btn.primary {
+      background: linear-gradient(135deg, #8b5cf6 0%, #6fd1ff 100%);
+      color: #0b0d12;
+      border-color: transparent;
+      font-weight: 600;
+    }
+    .btn.primary:hover { filter: brightness(1.05); }
+
+    /* ---------- Hero ---------- */
+    .hero {
+      position: relative;
+      padding: 96px 0 72px;
+      overflow: hidden;
+    }
+    .hero::before {
+      content: "";
+      position: absolute; inset: -40% -10% auto -10%;
+      height: 720px;
+      background:
+        radial-gradient(40% 50% at 30% 20%, rgba(139,92,246,0.25), transparent 60%),
+        radial-gradient(40% 50% at 80% 30%, rgba(111,209,255,0.18), transparent 60%),
+        radial-gradient(35% 50% at 60% 70%, rgba(255,185,138,0.12), transparent 60%);
+      pointer-events: none;
+      z-index: 0;
+      filter: blur(20px);
+    }
+    .hero-grid {
+      position: relative; z-index: 1;
+      display: grid;
+      grid-template-columns: 1.1fr 1fr;
+      gap: 56px;
+      align-items: center;
+    }
+    @media (max-width: 920px) { .hero-grid { grid-template-columns: 1fr; gap: 32px; } }
+
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 12px; border-radius: 999px;
+      background: rgba(181,140,255,0.10);
+      border: 1px solid rgba(181,140,255,0.25);
+      color: var(--accent);
+      font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+    }
+    .eyebrow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+
+    h1.hero-title {
+      margin: 18px 0 16px;
+      font-size: clamp(40px, 5.4vw, 64px);
+      line-height: 1.04;
+      letter-spacing: -0.02em;
+      font-weight: 700;
+    }
+    h1.hero-title .grad {
+      background: linear-gradient(120deg, #b58cff 0%, #6fd1ff 50%, #ffb98a 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+    .hero-sub {
+      font-size: 18px;
+      color: var(--fg-dim);
+      max-width: 580px;
+      margin: 0 0 28px;
+    }
+    .hero-cta { display: flex; gap: 12px; flex-wrap: wrap; }
+    .hero-meta {
+      margin-top: 28px;
+      display: flex; gap: 18px; flex-wrap: wrap;
+      color: var(--fg-mute); font-size: 13px;
+    }
+    .hero-meta span { display: inline-flex; align-items: center; gap: 6px; }
+    .hero-meta .pip { width: 6px; height: 6px; border-radius: 50%; background: var(--good); }
+
+    /* code card */
+    .code-card {
+      background: var(--code-bg);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .code-card .titlebar {
+      display: flex; align-items: center; gap: 8px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
+    }
+    .titlebar .traffic { display: inline-flex; gap: 6px; }
+    .titlebar .traffic span { width: 11px; height: 11px; border-radius: 50%; background: #2a3142; }
+    .titlebar .traffic span:nth-child(1){ background:#ff5f56; }
+    .titlebar .traffic span:nth-child(2){ background:#ffbd2e; }
+    .titlebar .traffic span:nth-child(3){ background:#27c93f; }
+    .titlebar .file { color: var(--fg-mute); font-size: 12px; margin-left: 6px; }
+    pre.code {
+      margin: 0;
+      padding: 18px 18px 22px;
+      overflow-x: auto;
+      font-size: 13px;
+      line-height: 1.6;
+      color: #d9e1ec;
+    }
+    .tok-k { color: #b58cff; }     /* keyword */
+    .tok-t { color: #6fd1ff; }     /* type */
+    .tok-s { color: #ffb98a; }     /* string */
+    .tok-n { color: #f3a6c8; }     /* number */
+    .tok-c { color: #6b7388; font-style: italic; } /* comment */
+    .tok-i { color: #e7ecf3; }     /* identifier */
+    .tok-p { color: #7ee787; }     /* punct/op */
+
+    /* ---------- Sections ---------- */
+    section { padding: 80px 0; position: relative; }
+    section + section { border-top: 1px solid var(--line); }
+    .section-head { max-width: 720px; margin-bottom: 40px; }
+    .kicker {
+      color: var(--accent-2);
+      font-weight: 600; font-size: 12px; letter-spacing: 0.12em;
+      text-transform: uppercase; margin-bottom: 8px;
+    }
+    h2 {
+      font-size: clamp(28px, 3.2vw, 40px);
+      letter-spacing: -0.015em;
+      margin: 0 0 12px;
+      line-height: 1.15;
+    }
+    .section-head p { color: var(--fg-dim); font-size: 17px; margin: 0; }
+
+    /* ---------- Pipeline ---------- */
+    .pipeline {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 14px;
+      align-items: stretch;
+    }
+    @media (max-width: 920px) { .pipeline { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 560px) { .pipeline { grid-template-columns: 1fr; } }
+    .stage {
+      background: var(--bg-card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 18px;
+      position: relative;
+    }
+    .stage .num {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px; color: var(--accent);
+      margin-bottom: 6px;
+    }
+    .stage h4 { margin: 0 0 6px; font-size: 16px; }
+    .stage p { margin: 0; color: var(--fg-dim); font-size: 13.5px; }
+
+    /* ---------- Three platforms ---------- */
+    .platforms {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 18px;
+    }
+    @media (max-width: 860px) { .platforms { grid-template-columns: 1fr; } }
+    .plat {
+      background: var(--bg-card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 22px;
+      transition: transform .2s ease, border-color .2s ease;
+    }
+    .plat:hover { transform: translateY(-3px); border-color: var(--line-strong); }
+    .plat .badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 4px 10px; border-radius: 999px;
+      background: rgba(255,255,255,0.04);
+      color: var(--fg-dim); font-size: 12px;
+      border: 1px solid var(--line);
+      margin-bottom: 14px;
+    }
+    .plat h3 { margin: 0 0 8px; font-size: 18px; }
+    .plat p { margin: 0 0 14px; color: var(--fg-dim); font-size: 14px; }
+    .plat ul { margin: 0; padding-left: 18px; color: var(--fg-dim); font-size: 13.5px; }
+    .plat ul li { margin: 4px 0; }
+    .plat .accent-ts { color: #6fd1ff; }
+    .plat .accent-net { color: #b58cff; }
+    .plat .accent-react { color: #ffb98a; }
+
+    /* ---------- Features grid ---------- */
+    .features {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 18px;
+    }
+    @media (max-width: 860px) { .features { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 560px) { .features { grid-template-columns: 1fr; } }
+    .feat {
+      background: var(--bg-card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 20px;
+    }
+    .feat .icon {
+      width: 32px; height: 32px; border-radius: 8px;
+      background: linear-gradient(135deg, rgba(181,140,255,.25), rgba(111,209,255,.25));
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 12px;
+      color: var(--accent);
+    }
+    .feat h4 { margin: 0 0 6px; font-size: 16px; }
+    .feat p { margin: 0; color: var(--fg-dim); font-size: 14px; }
+
+    /* ---------- Vision / two-col ---------- */
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 32px;
+      align-items: start;
+    }
+    @media (max-width: 860px) { .two-col { grid-template-columns: 1fr; } }
+    .vision-card {
+      background: var(--bg-card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 22px;
+    }
+    .vision-card h4 { margin: 0 0 8px; font-size: 16px; color: var(--accent-2); }
+    .vision-card p { margin: 0; color: var(--fg-dim); font-size: 14.5px; }
+
+    /* ---------- CLI ---------- */
+    .cli-grid {
+      display: grid; grid-template-columns: 1.05fr 1fr; gap: 22px;
+    }
+    @media (max-width: 860px) { .cli-grid { grid-template-columns: 1fr; } }
+    .term {
+      background: var(--code-bg);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .term .titlebar { padding: 10px 14px; }
+    .term-body { padding: 16px 18px 22px; font-size: 13px; line-height: 1.7; }
+    .term-body .prompt { color: var(--accent); }
+    .term-body .out { color: var(--fg-dim); }
+    .term-body .ok { color: var(--good); }
+    .term-body .warn { color: var(--warn); }
+
+    .cmds { display: grid; gap: 10px; }
+    .cmds .row {
+      display: grid; grid-template-columns: 220px 1fr; gap: 14px;
+      align-items: baseline;
+      padding: 12px 14px;
+      background: var(--bg-card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+    }
+    .cmds .row code { color: var(--accent-2); font-size: 13px; }
+    .cmds .row span { color: var(--fg-dim); font-size: 13.5px; }
+    @media (max-width: 560px) { .cmds .row { grid-template-columns: 1fr; gap: 4px; } }
+
+    /* ---------- CTA ---------- */
+    .cta {
+      text-align: center;
+      padding: 100px 24px;
+      border-top: 1px solid var(--line);
+      background:
+        radial-gradient(50% 60% at 50% 0%, rgba(139,92,246,0.12), transparent 70%),
+        radial-gradient(40% 60% at 50% 100%, rgba(111,209,255,0.08), transparent 70%);
+    }
+    .cta h2 { margin-bottom: 12px; }
+    .cta p { max-width: 600px; margin: 0 auto 28px; color: var(--fg-dim); font-size: 17px; }
+    .cta .hero-cta { justify-content: center; }
+
+    /* ---------- Footer ---------- */
+    footer.site {
+      border-top: 1px solid var(--line);
+      padding: 32px 0;
+      color: var(--fg-mute);
+      font-size: 13px;
+    }
+    footer.site .row {
+      display: flex; justify-content: space-between; align-items: center; gap: 16px;
+      flex-wrap: wrap;
+    }
+    footer.site .links { display: flex; gap: 18px; }
+    footer.site .links a { color: var(--fg-dim); }
+
+    /* small helpers */
+    .mono-chip {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 6px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--line);
+      color: var(--fg-dim);
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ============ Header ============ -->
+  <header class="site">
+    <div class="container nav">
+      <a class="brand" href="#">
+        <svg class="logo" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <defs>
+            <linearGradient id="lg" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stop-color="#b58cff"/>
+              <stop offset="1" stop-color="#6fd1ff"/>
+            </linearGradient>
+          </defs>
+          <rect x="2" y="2" width="28" height="28" rx="7" stroke="url(#lg)" stroke-width="2"/>
+          <path d="M7 10 L25 22 M7 16 L25 16 M7 22 L25 10" stroke="url(#lg)" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span class="brand-name">Loom</span>
+      </a>
+      <nav class="nav-links" aria-label="Primary">
+        <a href="#vision">Vision</a>
+        <a href="#pipeline">Pipeline</a>
+        <a href="#platforms">Platforms</a>
+        <a href="#cli">CLI</a>
+        <a class="btn" href="https://github.com/lemmit/loc" target="_blank" rel="noopener">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.1.79-.25.79-.56v-2.05c-3.2.7-3.87-1.37-3.87-1.37-.52-1.32-1.27-1.67-1.27-1.67-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.02 1.75 2.69 1.24 3.35.95.1-.74.4-1.24.72-1.52-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.18-3.09-.12-.29-.51-1.46.11-3.04 0 0 .96-.31 3.15 1.18a10.96 10.96 0 0 1 5.74 0c2.18-1.49 3.14-1.18 3.14-1.18.63 1.58.24 2.75.12 3.04.74.8 1.18 1.83 1.18 3.09 0 4.42-2.69 5.39-5.25 5.68.41.36.78 1.06.78 2.13v3.16c0 .31.21.67.8.56C20.21 21.39 23.5 17.08 23.5 12 23.5 5.65 18.35.5 12 .5z"/></svg>
+          GitHub
+        </a>
+      </nav>
+    </div>
+  </header>
+
+  <!-- ============ Hero ============ -->
+  <section class="hero">
+    <div class="container hero-grid">
+      <div>
+        <span class="eyebrow"><span class="dot"></span> Langium-based DSL · Source-available</span>
+        <h1 class="hero-title">
+          Weave a domain model.<br/>
+          <span class="grad">Generate the whole system.</span>
+        </h1>
+        <p class="hero-sub">
+          Loom is a high-descriptive DSL for Domain-Driven Design.
+          Write aggregates, value objects, invariants, and operations in
+          <code class="mono-chip">.ddd</code> &mdash; and mechanically generate
+          a runnable TypeScript&nbsp;+&nbsp;.NET&nbsp;+&nbsp;React system,
+          wired together as one <code class="mono-chip">docker compose</code> stack.
+        </p>
+        <div class="hero-cta">
+          <a class="btn primary" href="#cli">
+            Get started
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </a>
+          <a class="btn" href="https://github.com/lemmit/loc" target="_blank" rel="noopener">View on GitHub</a>
+          <a class="btn" href="language.md">Language reference</a>
+        </div>
+        <div class="hero-meta">
+          <span><span class="pip"></span> Type-safe end-to-end</span>
+          <span><span class="pip"></span> DDD-faithful by construction</span>
+          <span><span class="pip"></span> 49 unit tests · opt-in e2e</span>
+        </div>
+      </div>
+
+      <div class="code-card" aria-label="Loom DSL example">
+        <div class="titlebar">
+          <span class="traffic"><span></span><span></span><span></span></span>
+          <span class="file mono">orders.ddd</span>
+        </div>
+<pre class="code"><span class="tok-k">aggregate</span> <span class="tok-t">Order</span> {
+  <span class="tok-i">customerId</span>: <span class="tok-t">string</span>
+  <span class="tok-i">status</span>: <span class="tok-t">OrderStatus</span>
+  <span class="tok-i">placedAt</span>: <span class="tok-t">datetime</span>
+  <span class="tok-k">contains</span> <span class="tok-i">lines</span>: <span class="tok-t">OrderLine</span>[]
+
+  <span class="tok-k">derived</span> <span class="tok-i">total</span>: <span class="tok-t">Money</span> =
+    <span class="tok-t">Money</span>(<span class="tok-i">lines</span>.<span class="tok-i">sum</span>(<span class="tok-i">l</span> =&gt; <span class="tok-i">l</span>.<span class="tok-i">subtotal</span>.<span class="tok-i">amount</span>), <span class="tok-s">"USD"</span>)
+
+  <span class="tok-k">invariant</span> <span class="tok-i">lines</span>.<span class="tok-i">count</span> &gt; <span class="tok-n">0</span> <span class="tok-k">when</span> <span class="tok-i">status</span> == <span class="tok-t">Confirmed</span>
+
+  <span class="tok-k">operation</span> <span class="tok-i">confirm</span>() {
+    <span class="tok-k">precondition</span> <span class="tok-i">isMutable</span>()
+    <span class="tok-k">precondition</span> <span class="tok-i">lines</span>.<span class="tok-i">count</span> &gt; <span class="tok-n">0</span>
+    <span class="tok-i">status</span> := <span class="tok-t">Confirmed</span>
+    <span class="tok-k">emit</span> <span class="tok-t">OrderConfirmed</span> { <span class="tok-i">order</span>: <span class="tok-i">id</span>, <span class="tok-i">at</span>: <span class="tok-i">now</span>() }
+  }
+}
+
+<span class="tok-c">// Three deployables, one stack:</span>
+<span class="tok-k">deployable</span> <span class="tok-i">api</span>     { <span class="tok-i">platform</span>: <span class="tok-t">dotnet</span>, <span class="tok-i">modules</span>: <span class="tok-t">Sales</span>, <span class="tok-i">port</span>: <span class="tok-n">8080</span> }
+<span class="tok-k">deployable</span> <span class="tok-i">webApp</span>  { <span class="tok-i">platform</span>: <span class="tok-t">react</span>,  <span class="tok-i">targets</span>: <span class="tok-i">api</span>,    <span class="tok-i">port</span>: <span class="tok-n">3001</span> }
+</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ Vision ============ -->
+  <section id="vision">
+    <div class="container">
+      <div class="section-head">
+        <div class="kicker">The vision</div>
+        <h2>The model is the system.</h2>
+        <p>
+          Most DDD codebases are aspirational: a tactical pattern in the docs, a CRUD service in the repo.
+          Loom closes that gap. The <code class="mono-chip">.ddd</code> source is the single source of truth &mdash;
+          every line of running code, in every deployable, is derived from it. Refactor the model, regenerate the system.
+        </p>
+      </div>
+
+      <div class="two-col">
+        <div class="vision-card">
+          <h4>Domain-first, not framework-first</h4>
+          <p>
+            You write <strong>aggregates, invariants, operations, events, repositories</strong> &mdash; concepts from
+            <em>Domain-Driven Design</em>, not from a web framework. The framework choice is a deployable
+            attribute, not a design constraint.
+          </p>
+        </div>
+        <div class="vision-card">
+          <h4>Mechanical, not magical</h4>
+          <p>
+            Lowering goes through a fully-resolved IR, then per-platform Handlebars templates plus procedural builders.
+            Generated output is idiomatic enough to read, debug, and grep &mdash; not framework lock-in.
+          </p>
+        </div>
+        <div class="vision-card">
+          <h4>One model, multiple platforms</h4>
+          <p>
+            The same aggregate compiles to ASP.NET&nbsp;+&nbsp;EF&nbsp;+&nbsp;Mediator and Hono&nbsp;+&nbsp;Drizzle&nbsp;+&nbsp;Zod.
+            A built-in cross-platform OpenAPI parity check guarantees both backends present an identical wire shape.
+          </p>
+        </div>
+        <div class="vision-card">
+          <h4>The whole stack, including the UI</h4>
+          <p>
+            Per aggregate the generator emits list, detail, and create pages with React Query hooks, Zod parsing,
+            Mantine forms, and Playwright page-objects keyed off stable <code class="mono-chip">data-testid</code>s.
+            UI tests are written top-down, not selector-by-selector.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ Pipeline ============ -->
+  <section id="pipeline">
+    <div class="container">
+      <div class="section-head">
+        <div class="kicker">How it works</div>
+        <h2>From <code class="mono">.ddd</code> source to a running stack.</h2>
+        <p>
+          The pipeline is fully type-safe end-to-end. Validation runs before any generator emits;
+          a <code class="mono-chip">--dry-run</code> mode prints the full write plan without touching disk.
+        </p>
+      </div>
+
+      <div class="pipeline">
+        <div class="stage">
+          <div class="num">01</div>
+          <h4>Source</h4>
+          <p><code class="mono">.ddd</code> file authored against the Loom grammar.</p>
+        </div>
+        <div class="stage">
+          <div class="num">02</div>
+          <h4>AST</h4>
+          <p>Langium parser &amp; validator. Errors abort generation.</p>
+        </div>
+        <div class="stage">
+          <div class="num">03</div>
+          <h4>IR</h4>
+          <p>Name resolution, type inference, semantic shaping &mdash; platform-neutral.</p>
+        </div>
+        <div class="stage">
+          <div class="num">04</div>
+          <h4>Templates</h4>
+          <p>Per-platform Handlebars + procedural builders for TypeScript, .NET, React.</p>
+        </div>
+        <div class="stage">
+          <div class="num">05</div>
+          <h4>System</h4>
+          <p>Multi-project tree with <code class="mono">docker-compose.yml</code> + healthchecks + e2e.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ Platforms ============ -->
+  <section id="platforms">
+    <div class="container">
+      <div class="section-head">
+        <div class="kicker">Three platforms, one model</div>
+        <h2>Idiomatic output. Identical wire shapes.</h2>
+        <p>
+          Every backend produces the same aggregate root, repository, routes, and DTOs &mdash;
+          but in the language and framework conventions you'd write by hand.
+        </p>
+      </div>
+
+      <div class="platforms">
+        <div class="plat">
+          <span class="badge"><span class="accent-ts">●</span> TypeScript backend</span>
+          <h3>Hono · Drizzle · Zod</h3>
+          <p>HTTP via Hono with full type-validated routes, Drizzle ORM with master-detail load/save, and OpenAPI through <code class="mono-chip">@hono/zod-openapi</code>.</p>
+          <ul>
+            <li>Aggregate roots with private state &amp; factories</li>
+            <li>Repositories with user-declared finds</li>
+            <li>Domain events dispatched on save</li>
+          </ul>
+        </div>
+        <div class="plat">
+          <span class="badge"><span class="accent-net">●</span> .NET backend</span>
+          <h3>ASP.NET Core · EF Core · Mediator</h3>
+          <p>Controllers wired through <code class="mono-chip">martinothamar/Mediator</code>, EF Core for persistence, Swashbuckle for OpenAPI &mdash; all scaffolded from your aggregates.</p>
+          <ul>
+            <li>Entity-part classes with invariant checks</li>
+            <li>Derived properties &amp; domain events</li>
+            <li>Cross-platform OpenAPI parity-checked</li>
+          </ul>
+        </div>
+        <div class="plat">
+          <span class="badge"><span class="accent-react">●</span> React frontend</span>
+          <h3>Vite · React Query · Mantine · Playwright</h3>
+          <p>Per-aggregate list / detail / create pages, typed RQ hooks parsing responses with Zod, and Playwright page-objects keyed off stable test ids.</p>
+          <ul>
+            <li>Master-detail when aggregates contain parts</li>
+            <li>Modal-form button per public operation</li>
+            <li>Generated UI e2e tests pass against the live stack</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ What you get ============ -->
+  <section id="features">
+    <div class="container">
+      <div class="section-head">
+        <div class="kicker">What you get</div>
+        <h2>One <code class="mono">generate</code>. A full deployable stack.</h2>
+        <p>
+          From a single source, <code class="mono-chip">ddd generate system</code> emits a runnable
+          multi-deployable system with database init, healthchecks, OpenAPI specs, and end-to-end tests.
+        </p>
+      </div>
+
+      <div class="features">
+        <div class="feat">
+          <div class="icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 12l9 4 9-4M3 17l9 4 9-4"/></svg>
+          </div>
+          <h4>Aggregate roots, faithfully</h4>
+          <p>Private state, factories, invariant checks, derived properties, and emitted domain events &mdash; in every backend.</p>
+        </div>
+        <div class="feat">
+          <div class="icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+          </div>
+          <h4>Repositories with finds</h4>
+          <p><code class="mono">find-by-id</code>, <code class="mono">save</code>, <code class="mono">find-all</code>, plus user-declared finds &mdash; with full master-detail load and event dispatch.</p>
+        </div>
+        <div class="feat">
+          <div class="icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </div>
+          <h4>HTTP routes &amp; DTOs</h4>
+          <p>Wire-shape DTOs identical across backends so the OpenAPI cross-check passes byte-for-byte.</p>
+        </div>
+        <div class="feat">
+          <div class="icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          </div>
+          <h4>List / detail / create UI</h4>
+          <p>Mantine tables and modal forms, React Query hooks, Zod-validated request bodies &mdash; per aggregate, automatically.</p>
+        </div>
+        <div class="feat">
+          <div class="icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>
+          </div>
+          <h4>Playwright page-objects</h4>
+          <p>One class per page, keyed off stable <code class="mono-chip">data-testid</code> attributes. Write top-down UI tests without crafting selectors.</p>
+        </div>
+        <div class="feat">
+          <div class="icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12l3-3 3 3M21 12l-3 3-3-3"/><path d="M6 9V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v4M6 15v4a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-4"/></svg>
+          </div>
+          <h4>Wired stack out of the box</h4>
+          <p><code class="mono-chip">docker-compose.yml</code> with Postgres, every deployable, healthchecks, and a <code class="mono-chip">db-init</code> SQL bootstrap &mdash; <code class="mono">docker compose up -d</code> and you're running.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ CLI ============ -->
+  <section id="cli">
+    <div class="container">
+      <div class="section-head">
+        <div class="kicker">CLI</div>
+        <h2>Three commands. One model. Whatever shape you need.</h2>
+        <p>
+          Generate a single deployable for a focused service, or the full system for an integrated stack.
+          Watch mode re-runs on save; <code class="mono-chip">--dry-run</code> prints the plan with <code class="mono">write</code> / <code class="mono">skip</code> annotations.
+        </p>
+      </div>
+
+      <div class="cli-grid">
+        <div class="term" role="region" aria-label="Terminal">
+          <div class="titlebar">
+            <span class="traffic"><span></span><span></span><span></span></span>
+            <span class="file mono">~/acme</span>
+          </div>
+          <div class="term-body mono">
+            <div><span class="prompt">$</span> ddd generate system acme.ddd -o ./out</div>
+            <div class="out">  parse acme.ddd ............................. <span class="ok">ok</span></div>
+            <div class="out">  validate ................................... <span class="ok">ok</span> <span style="color:#6b7388">(0 errors, 0 warnings)</span></div>
+            <div class="out">  emit api/         (.NET · Sales, Catalog) .. <span class="ok">write 84</span></div>
+            <div class="out">  emit catalog_web/ (Hono · Catalog) ......... <span class="ok">write 41</span></div>
+            <div class="out">  emit web_app/     (React · targets api) .... <span class="ok">write 67</span></div>
+            <div class="out">  emit e2e/         (DSL e2e) ................ <span class="ok">write  9</span></div>
+            <div class="out">  emit docker-compose.yml + db-init/ ......... <span class="ok">write  2</span></div>
+            <div class="out">  cross-platform OpenAPI parity .............. <span class="ok">match</span></div>
+            <br/>
+            <div><span class="prompt">$</span> docker compose -f out/docker-compose.yml up -d</div>
+            <div class="out"> ✔ postgres        healthy</div>
+            <div class="out"> ✔ api             healthy <span style="color:#6b7388">(:8080)</span></div>
+            <div class="out"> ✔ catalog_web     healthy <span style="color:#6b7388">(:3000)</span></div>
+            <div class="out"> ✔ web_app         healthy <span style="color:#6b7388">(:3001)</span></div>
+          </div>
+        </div>
+
+        <div class="cmds">
+          <div class="row"><code>ddd parse</code><span>Parse + validate. Exits non-zero on errors.</span></div>
+          <div class="row"><code>ddd generate ts</code><span>Emit a single Hono + Drizzle project.</span></div>
+          <div class="row"><code>ddd generate dotnet</code><span>Emit a single ASP.NET + EF + Mediator project.</span></div>
+          <div class="row"><code>ddd generate system</code><span>Emit every deployable + <code>docker-compose.yml</code>.</span></div>
+          <div class="row"><code>-w, --watch</code><span>Re-run on every save of the <code>.ddd</code> source.</span></div>
+          <div class="row"><code>--dry-run</code><span>Print the plan; touch nothing.</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ CTA ============ -->
+  <section class="cta">
+    <div class="container">
+      <h2>Ready to weave?</h2>
+      <p>
+        Loom is source-available under the FSL-1.1-Apache-2.0 license &mdash;
+        free for any non-competing use, with an Apache 2.0 future license two years after publication.
+      </p>
+      <div class="hero-cta">
+        <a class="btn primary" href="https://github.com/lemmit/loc" target="_blank" rel="noopener">
+          Clone on GitHub
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </a>
+        <a class="btn" href="language.md">Read the language reference</a>
+        <a class="btn" href="generators.md">Per-platform feature matrix</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ Footer ============ -->
+  <footer class="site">
+    <div class="container row">
+      <div>© Loom contributors · FSL-1.1-Apache-2.0</div>
+      <div class="links">
+        <a href="language.md">Language</a>
+        <a href="generators.md">Generators</a>
+        <a href="technical.md">Architecture</a>
+        <a href="tools.md">Tools</a>
+        <a href="https://github.com/lemmit/loc" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </div>
+  </footer>
+
+</body>
+</html>
