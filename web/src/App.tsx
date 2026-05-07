@@ -4,11 +4,14 @@ import {
   Badge,
   Box,
   Button,
+  Code,
   Group,
   ScrollArea,
   Select,
   Stack,
   Text,
+  Textarea,
+  TextInput,
   Title,
 } from "@mantine/core";
 import { LoomEditor } from "./editor/LoomEditor";
@@ -18,6 +21,8 @@ import { LoomBuildClient } from "./build/client";
 import type { GenerateResult, VirtualFile } from "./build/protocol";
 import { LoomBundleClient } from "./bundle/client";
 import type { BundleResult } from "./bundle/protocol";
+import { LoomRuntimeClient } from "./runtime/client";
+import type { DispatchResult } from "./runtime/protocol";
 import { FileTree } from "./preview/FileTree";
 import { FileViewer } from "./preview/FileViewer";
 import { buildTree } from "./preview/file-tree";
@@ -98,22 +103,36 @@ export default function App(): JSX.Element {
   const sourceRef = useRef<string>(initialSource);
   const buildClientRef = useRef<LoomBuildClient | null>(null);
   const bundleClientRef = useRef<LoomBundleClient | null>(null);
+  const runtimeClientRef = useRef<LoomRuntimeClient | null>(null);
   const [generating, setGenerating] = useState(false);
   const [bundling, setBundling] = useState(false);
+  const [booting, setBooting] = useState(false);
   const [result, setResult] = useState<GenerateResult | null>(null);
   const [bundleResult, setBundleResult] = useState<BundleResult | null>(null);
+  const [bootError, setBootError] = useState<string | null>(null);
+  const [bootedDDL, setBootedDDL] = useState<string | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  // Request composer state.
+  const [reqMethod, setReqMethod] = useState<string>("GET");
+  const [reqPath, setReqPath] = useState<string>("/products");
+  const [reqBody, setReqBody] = useState<string>("");
+  const [dispatching, setDispatching] = useState(false);
+  const [dispatchResult, setDispatchResult] = useState<DispatchResult | null>(null);
 
   useEffect(() => {
     const build = new LoomBuildClient();
     const bundleClient = new LoomBundleClient();
+    const runtimeClient = new LoomRuntimeClient();
     buildClientRef.current = build;
     bundleClientRef.current = bundleClient;
+    runtimeClientRef.current = runtimeClient;
     return () => {
       buildClientRef.current = null;
       bundleClientRef.current = null;
+      runtimeClientRef.current = null;
       build.dispose();
       bundleClient.dispose();
+      runtimeClient.dispose();
     };
   }, []);
 
@@ -124,7 +143,11 @@ export default function App(): JSX.Element {
     sourceRef.current = initialSource;
     setResult(null);
     setBundleResult(null);
+    setBootedDDL(null);
+    setBootError(null);
+    setDispatchResult(null);
     setSelectedPath(null);
+    runtimeClientRef.current?.reset();
   }, [initialSource]);
 
   const errorCount = diagnostics.filter((d) => d.severity === "error").length;
@@ -169,11 +192,68 @@ export default function App(): JSX.Element {
       return;
     }
     setBundling(true);
+    setBootedDDL(null);
+    setBootError(null);
+    setDispatchResult(null);
     try {
       const res = await client.bundle({ files: result.files, entryPath: entry });
       setBundleResult(res);
     } finally {
       setBundling(false);
+    }
+  }
+
+  async function runBoot(): Promise<void> {
+    const runtime = runtimeClientRef.current;
+    if (!runtime || !bundleResult?.ok) return;
+    setBooting(true);
+    setBootError(null);
+    setBootedDDL(null);
+    setDispatchResult(null);
+    try {
+      const res = await runtime.boot(bundleResult.code);
+      if (res.ok) {
+        setBootedDDL(res.ddl);
+      } else {
+        setBootError(res.message);
+      }
+    } catch (err) {
+      setBootError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBooting(false);
+    }
+  }
+
+  async function runDispatch(): Promise<void> {
+    const runtime = runtimeClientRef.current;
+    if (!runtime || !bootedDDL) return;
+    setDispatching(true);
+    try {
+      const url = reqPath.startsWith("http")
+        ? reqPath
+        : `http://localhost${reqPath.startsWith("/") ? "" : "/"}${reqPath}`;
+      const headers: Record<string, string> = {};
+      const body =
+        reqMethod === "GET" || reqMethod === "DELETE" || reqMethod === "HEAD"
+          ? null
+          : reqBody;
+      if (body !== null && body.length > 0) {
+        headers["content-type"] = "application/json";
+      }
+      const res = await runtime.dispatch({
+        url,
+        method: reqMethod,
+        headers,
+        body,
+      });
+      setDispatchResult(res);
+    } catch (err) {
+      setDispatchResult({
+        ok: false,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setDispatching(false);
     }
   }
 
@@ -311,26 +391,135 @@ export default function App(): JSX.Element {
         </Box>
         <Box
           style={{
-            height: 180,
+            height: 220,
             borderTop: "1px solid var(--mantine-color-dark-4)",
             background: "var(--mantine-color-dark-7)",
             overflow: "hidden",
+            display: "flex",
           }}
         >
-          <Group px="sm" py={4} bg="dark.6" gap="xs">
-            <Text size="xs" fw={600} tt="uppercase" c="dimmed">
-              Problems
-            </Text>
-          </Group>
-          <ScrollArea h={140}>
-            <DiagnosticsPanel items={diagnostics} />
-          </ScrollArea>
+          {/* Problems — half-width.  */}
+          <Box style={{ flex: 1, minWidth: 0, borderRight: "1px solid var(--mantine-color-dark-4)", display: "flex", flexDirection: "column" }}>
+            <Group px="sm" py={4} bg="dark.6" gap="xs">
+              <Text size="xs" fw={600} tt="uppercase" c="dimmed">
+                Problems
+              </Text>
+            </Group>
+            <ScrollArea style={{ flex: 1, minHeight: 0 }}>
+              <DiagnosticsPanel items={diagnostics} />
+            </ScrollArea>
+          </Box>
+          {/* Backend panel — half-width.  Shows a Boot button until
+              the bundle is up; afterwards reveals a request composer
+              that fires Requests through `app.fetch`. */}
+          <Box style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+            <Group px="sm" py={4} bg="dark.6" justify="space-between" gap="xs">
+              <Text size="xs" fw={600} tt="uppercase" c="dimmed">
+                Backend
+              </Text>
+              <Group gap="xs">
+                {bootedDDL ? (
+                  <Badge size="xs" color="green" variant="light">booted</Badge>
+                ) : (
+                  <Badge size="xs" color="gray" variant="light">offline</Badge>
+                )}
+                <Button
+                  size="xs"
+                  onClick={runBoot}
+                  loading={booting}
+                  disabled={!bundleResult?.ok}
+                  variant="default"
+                >
+                  {bootedDDL ? "Reboot" : "Boot"}
+                </Button>
+              </Group>
+            </Group>
+            <Box style={{ flex: 1, minHeight: 0, overflow: "auto" }} p="xs">
+              {bootError && (
+                <Code block c="red" mb="xs" style={{ whiteSpace: "pre-wrap", fontSize: 11 }}>
+                  {bootError}
+                </Code>
+              )}
+              {bootedDDL ? (
+                <Stack gap={6}>
+                  <Group gap={6} wrap="nowrap">
+                    <Select
+                      size="xs"
+                      value={reqMethod}
+                      onChange={(v) => v && setReqMethod(v)}
+                      data={["GET", "POST", "PUT", "DELETE", "PATCH"]}
+                      allowDeselect={false}
+                      w={90}
+                    />
+                    <TextInput
+                      size="xs"
+                      value={reqPath}
+                      onChange={(e) => setReqPath(e.currentTarget.value)}
+                      placeholder="/products"
+                      style={{ flex: 1 }}
+                    />
+                    <Button
+                      size="xs"
+                      onClick={runDispatch}
+                      loading={dispatching}
+                      disabled={!bootedDDL}
+                    >
+                      Send
+                    </Button>
+                  </Group>
+                  {(reqMethod === "POST" || reqMethod === "PUT" || reqMethod === "PATCH") && (
+                    <Textarea
+                      size="xs"
+                      value={reqBody}
+                      onChange={(e) => setReqBody(e.currentTarget.value)}
+                      placeholder='{"sku": "W-1", "price": {"amount": 5, "currency": "USD"}}'
+                      autosize
+                      minRows={2}
+                      maxRows={4}
+                      styles={{ input: { fontFamily: "var(--mantine-font-family-monospace)", fontSize: 11 } }}
+                    />
+                  )}
+                  {dispatchResult && (
+                    dispatchResult.ok ? (
+                      <Box>
+                        <Group gap={6} mb={4}>
+                          <Badge
+                            size="xs"
+                            color={dispatchResult.response.status < 400 ? "green" : "red"}
+                            variant="filled"
+                          >
+                            {dispatchResult.response.status} {dispatchResult.response.statusText}
+                          </Badge>
+                          <Text size="xs" c="dimmed">
+                            {dispatchResult.durationMs} ms
+                          </Text>
+                        </Group>
+                        <Code block style={{ whiteSpace: "pre-wrap", fontSize: 11, maxHeight: 100, overflow: "auto" }}>
+                          {dispatchResult.response.body || "(empty body)"}
+                        </Code>
+                      </Box>
+                    ) : (
+                      <Code block c="red" style={{ whiteSpace: "pre-wrap", fontSize: 11 }}>
+                        {dispatchResult.message}
+                      </Code>
+                    )
+                  )}
+                </Stack>
+              ) : (
+                <Text size="xs" c="dimmed">
+                  {bundleResult?.ok
+                    ? "Click Boot to spin up PGlite + the generated Hono app."
+                    : "Generate and Bundle first to enable the backend."}
+                </Text>
+              )}
+            </Box>
+          </Box>
         </Box>
       </AppShell.Main>
       <AppShell.Footer>
         <Group h="100%" px="md" gap="md" justify="space-between">
           <Text size="xs" c="dimmed">
-            Phase 3a — editor + LSP + generator + bundler
+            Phase 3b — editor + LSP + generator + bundler + runtime
           </Text>
           <Group gap="md">
             <Text size="xs" c="dimmed">

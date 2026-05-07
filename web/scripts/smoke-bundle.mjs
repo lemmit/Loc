@@ -14,7 +14,13 @@ import { createDddServices } from "../../out/language/ddd-module.js";
 import { lowerModel } from "../../out/ir/lower.js";
 import { enrichLoomModel } from "../../out/ir/enrichments.js";
 import { generateTypeScript } from "../../out/generator/typescript/index.js";
-import { harvestVersions, makeLoomPlugin, resolveInFs } from "../src/bundle/plugin.ts";
+import {
+  harvestVersions,
+  makeEntryStdin,
+  makeLoomPlugin,
+  resolveInFs,
+  schemaPathFor,
+} from "../src/bundle/plugin.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const sourcePath = path.resolve(here, "../../examples/sales.ddd");
@@ -51,13 +57,19 @@ const ctx = {
 };
 console.log(`# harvested ${ctx.versions.size} pinned versions: ${[...ctx.versions.entries()].map(([k, v]) => `${k}@${v}`).join(", ")}`);
 
+const schemaPath = schemaPathFor(entry);
+if (!resolveInFs(fs, schemaPath)) {
+  console.error(`schema not present: ${schemaPath}`);
+  process.exit(1);
+}
+
 console.log("# bundling…");
 const start = Date.now();
 let out;
 try {
   out = await esbuild.build({
     stdin: {
-      contents: `export { createApp } from "./${entry}";\n`,
+      contents: makeEntryStdin(entry, schemaPath),
       resolveDir: "/",
       sourcefile: "__entry__.ts",
       loader: "ts",
@@ -69,6 +81,7 @@ try {
     logLevel: "silent",
     write: false,
     sourcemap: false,
+    loader: { ".wasm": "binary" },
     plugins: [makeLoomPlugin(ctx)],
   });
 } catch (err) {
@@ -84,17 +97,21 @@ const code = out.outputFiles[0].text;
 console.log(`# OK: bundled ${(code.length / 1024).toFixed(1)} KB in ${durationMs} ms`);
 console.log(`# fetched ${ctx.fetchedUrls.size} external module(s)`);
 console.log(`# warnings: ${out.warnings.length}, errors: ${out.errors.length}`);
+for (const w of out.warnings) {
+  console.log(`  warn: ${w.location?.file ?? "?"}:${w.location?.line ?? "?"}: ${w.text}`);
+}
 
-// Sanity: the bundle should mention `createApp` and not `node-postgres`
-// (proving the shim re-route worked).
-if (!code.includes("createApp")) {
-  console.error("BUG: bundle does not export createApp");
+// Sanity: the bundle should expose all the runtime-needed exports.
+const expected = ["createApp", "schema", "drizzle", "PGlite", "is", "Table", "getTableConfig"];
+const missing = expected.filter((name) => !code.includes(name));
+if (missing.length > 0) {
+  console.error(`BUG: bundle missing expected names: ${missing.join(", ")}`);
   process.exit(1);
 }
 if (code.includes("node-postgres")) {
   console.error("WARN: bundle still references 'node-postgres' (shim may not be applied)");
 }
-console.log("# bundle entry exports OK; node-postgres references absent");
+console.log(`# bundle exports OK (${expected.length} runtime symbols); node-postgres absent`);
 
 // Brief peek at fetched URLs to confirm we hit pglite / hono / zod.
 const sample = [...ctx.fetchedUrls].sort().slice(0, 12);

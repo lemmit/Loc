@@ -12,8 +12,10 @@ import type {
 import type { VirtualFile } from "../build/protocol.js";
 import {
   harvestVersions,
+  makeEntryStdin,
   makeLoomPlugin,
   resolveInFs,
+  schemaPathFor,
   type VirtualFsContext,
 } from "./plugin.js";
 
@@ -72,15 +74,26 @@ async function handleBundle(req: {
     versions: harvestVersions(fs),
   };
 
+  const schemaPath = schemaPathFor(entryInFs);
+  const schemaInFs = resolveInFs(fs, schemaPath);
+  if (!schemaInFs) {
+    return {
+      ok: false,
+      diagnostics: [
+        {
+          severity: "error",
+          message: `Schema "${schemaPath}" not in virtual fs alongside entry "${entryInFs}".`,
+        },
+      ],
+    };
+  }
+
   const start = performance.now();
   let result: esbuild.BuildResult;
   try {
     result = await esbuild.build({
       stdin: {
-        // Re-export the entry's createApp so the runtime worker has
-        // a single-import surface regardless of which deployable was
-        // selected.
-        contents: `export { createApp } from "./${entryInFs}";\n`,
+        contents: makeEntryStdin(entryInFs, schemaInFs),
         resolveDir: "/",
         sourcefile: "__entry__.ts",
         loader: "ts",
@@ -92,6 +105,10 @@ async function handleBundle(req: {
       logLevel: "silent",
       write: false,
       sourcemap: false,
+      // PGlite ships its WASM as a binary import — let esbuild
+      // inline it as base64 + a Uint8Array so the bundle stays a
+      // single self-contained ESM module.
+      loader: { ".wasm": "binary" },
       plugins: [makeLoomPlugin(ctx)],
     });
   } catch (err) {

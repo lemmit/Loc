@@ -18,6 +18,25 @@ const HTTP_NAMESPACE = "http-url";
 // the CLI workflow does.
 export const ESM_HOST = "https://esm.sh";
 
+// Versions for packages NOT in the generator's package.json but
+// still pulled in by the runtime layer.  Pinning here keeps the
+// bundle and the runtime worker's WASM URLs aligned — the worker
+// fetches PGlite's WASM/data artifacts at this same version (see
+// runtime/runtime.worker.ts).
+export const RUNTIME_VERSIONS: Record<string, string> = {
+  "@electric-sql/pglite": "0.4.5",
+};
+
+// PGlite ships three artifacts the runtime needs in addition to
+// its JS: pglite.wasm, initdb.wasm, and pglite.data (the seed
+// Postgres data dir).  esm.sh serves only JS+WASM, not raw .data
+// files, so the runtime worker fetches these from jsdelivr's
+// CDN — same package on disk, just a different mirror.
+export function pgliteAssetUrl(file: "pglite.wasm" | "initdb.wasm" | "pglite.data"): string {
+  const version = RUNTIME_VERSIONS["@electric-sql/pglite"];
+  return `https://cdn.jsdelivr.net/npm/@electric-sql/pglite@${version}/dist/${file}`;
+}
+
 export interface VirtualFsContext {
   files: Map<string, string>;
   fetchedUrls: Set<string>;
@@ -34,6 +53,36 @@ export interface VirtualFsContext {
 // package.json per deployable folder (`<slug>/package.json`),
 // legacy mode emits a single root package.json — both shapes
 // resolve the same way: we take whichever is shallowest.
+// The bundle entry stdin.  We re-export everything the runtime
+// worker needs from a single bundle, so there's exactly one drizzle
+// instance in play (a separate `import "drizzle-orm/pglite"` in the
+// runtime would create a parallel instance and break `is(x, Table)`
+// checks against tables built by the bundled generated code).
+//
+// `entryPath` and `schemaPath` are forward-slash paths relative to
+// the virtual fs root (e.g. "http/index.ts", "db/schema.ts" for
+// legacy mode; "<slug>/http/index.ts" / "<slug>/db/schema.ts" for
+// system mode).
+export function makeEntryStdin(entryPath: string, schemaPath: string): string {
+  return [
+    `export { createApp } from "./${entryPath}";`,
+    `export * as schema from "./${schemaPath}";`,
+    `export { drizzle } from "drizzle-orm/pglite";`,
+    `export { PGlite } from "@electric-sql/pglite";`,
+    `export { is, Table } from "drizzle-orm";`,
+    `export { getTableConfig } from "drizzle-orm/pg-core";`,
+    "",
+  ].join("\n");
+}
+
+// Given the deployable's HTTP entry path, derive its sibling
+// schema.ts path.  Replaces the last two segments
+// (`http/index.ts`) with `db/schema.ts`.
+export function schemaPathFor(entryPath: string): string {
+  const segs = entryPath.split("/");
+  return [...segs.slice(0, -2), "db", "schema.ts"].join("/");
+}
+
 export function harvestVersions(files: Map<string, string>): Map<string, string> {
   const out = new Map<string, string>();
   let bestPath: string | null = null;
@@ -61,12 +110,13 @@ export function harvestVersions(files: Map<string, string>): Map<string, string>
 // Apply the harvested version to a bare-spec esm.sh URL.  Inputs
 // are bare specifiers like `drizzle-orm`, `drizzle-orm/pg-core`,
 // `@hono/zod-openapi`, `hono/cors`.  Pins to the package head;
-// sub-paths inherit that version.
+// sub-paths inherit that version.  Falls back to RUNTIME_VERSIONS
+// for packages we add at the runtime layer.
 export function pinnedEsmShUrl(spec: string, versions: Map<string, string>): string {
   const head = spec.startsWith("@")
     ? spec.split("/").slice(0, 2).join("/")
     : spec.split("/")[0];
-  const range = versions.get(head);
+  const range = versions.get(head) ?? RUNTIME_VERSIONS[head];
   if (!range) return `${ESM_HOST}/${spec}`;
   // esm.sh accepts npm semver ranges directly: e.g. "^0.36.0".  The
   // service resolves it server-side to a specific version.
