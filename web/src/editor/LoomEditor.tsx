@@ -6,7 +6,7 @@ import {
   loomLanguageConfig,
   loomLanguageId,
 } from "./loom-monarch";
-import { LoomLspClient } from "../lsp/client";
+import type { LoomLspClient } from "../lsp/client";
 import type { Diagnostic, Range } from "../lsp/protocol";
 
 installMonacoEnvironment();
@@ -50,6 +50,12 @@ function diagnosticsToMarkers(items: Diagnostic[]): monaco.editor.IMarkerData[] 
 
 export interface LoomEditorProps {
   initialValue: string;
+  /** LSP client owned by the parent.  Lifted out of this component
+   *  so the underlying Langium worker survives example switches —
+   *  the editor remounts (via `key={exampleId}` in App) but the
+   *  worker stays alive, which costs ~5–10 MB per saved instance
+   *  and a few hundred ms of Langium init each. */
+  client: LoomLspClient;
   onChange?: (value: string) => void;
   onDiagnosticsChange?: (items: Diagnostic[]) => void;
 }
@@ -58,6 +64,8 @@ export function LoomEditor(props: LoomEditorProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null);
   // Stable refs so the effect that wires Monaco only runs once.
   const initialValueRef = useRef(props.initialValue);
+  const clientRef = useRef(props.client);
+  clientRef.current = props.client;
   const onChangeRef = useRef(props.onChange);
   const onDiagnosticsRef = useRef(props.onDiagnosticsChange);
   onChangeRef.current = props.onChange;
@@ -67,7 +75,7 @@ export function LoomEditor(props: LoomEditorProps): JSX.Element {
     if (!containerRef.current) return;
     registerLoomLanguage();
 
-    const client = new LoomLspClient();
+    const client = clientRef.current;
     let version = 0;
 
     const editor = monaco.editor.create(containerRef.current, {
@@ -83,7 +91,8 @@ export function LoomEditor(props: LoomEditorProps): JSX.Element {
     const model = editor.getModel();
     if (!model) {
       editor.dispose();
-      client.dispose();
+      // Don't dispose the client here — the parent owns its
+      // lifetime now.  Just bail out of wiring this mount.
       return;
     }
 
@@ -172,7 +181,7 @@ export function LoomEditor(props: LoomEditorProps): JSX.Element {
       definitionProvider.dispose();
       offDiagnostics();
       editor.dispose();
-      client.dispose();
+      // Client lifetime is parent-owned; do not dispose here.
     };
   }, []);
 

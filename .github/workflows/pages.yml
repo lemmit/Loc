@@ -55,6 +55,14 @@ jobs:
         working-directory: web
         run: npm ci
 
+      - name: Typecheck playground
+        working-directory: web
+        run: npm run typecheck
+
+      - name: Smoke playground (Node-side end-to-end)
+        working-directory: web
+        run: npm run e2e:smoke
+
       - name: Build playground
         working-directory: web
         run: npm run build

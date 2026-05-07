@@ -83,10 +83,37 @@ export function pgliteImportMetaUrl(): string {
 // worker the polyfill doesn't set `versions.node`, so the detection
 // already returns false; flattening it explicitly is cheap and makes
 // the bundle behave identically across hosts (incl. our Node smoke).
+//
+// Both substitutions below are textual, hand-tuned to the exact
+// shape of the current PGlite + esbuild output.  When that shape
+// drifts (PGlite version bump, esbuild minifier change), the
+// regex/replace silently no-ops and the bundle ships with the
+// detection still in — leading to a cryptic Node-API runtime error.
+// Validate that each substitution actually hit at least once and
+// throw a clear error otherwise.  Catches the failure at bundle
+// time, not after Boot.
 const PGLITE_NODE_DETECTION =
   /typeof A7 == "object" && typeof A7\.versions == "object" && typeof A7\.versions\.node == "string"/g;
 
 export function postProcessBundle(code: string): string {
+  const nodeMatches = (code.match(PGLITE_NODE_DETECTION) ?? []).length;
+  const importMetaMatches = (code.match(/import\.meta\.url/g) ?? []).length;
+
+  if (nodeMatches === 0) {
+    throw new Error(
+      "postProcessBundle: PGlite Node-detection regex didn't match any site — " +
+        "Emscripten output likely changed.  Inspect the bundle's `typeof process.versions.node` " +
+        "neighbourhood and update PGLITE_NODE_DETECTION in web/src/bundle/plugin.ts.",
+    );
+  }
+  if (importMetaMatches === 0) {
+    throw new Error(
+      "postProcessBundle: no `import.meta.url` references in the bundle — " +
+        "PGlite's URL-relative asset loading may have moved to a different mechanism.  " +
+        "Re-verify the WASM/data injection path in runtime/runtime.worker.ts.",
+    );
+  }
+
   let out = code;
   out = out.replace(PGLITE_NODE_DETECTION, "false");
   out = out.replaceAll("import.meta.url", JSON.stringify(pgliteImportMetaUrl()));
