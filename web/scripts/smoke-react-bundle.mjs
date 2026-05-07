@@ -75,7 +75,7 @@ try {
     // write:false the path is purely virtual.
     outdir: "/__loom_bundle__",
     loader: { ".wasm": "binary", ".css": "css" },
-    plugins: [makeLoomPlugin(ctx)],
+    plugins: [makeLoomPlugin(ctx, { externalReactRuntime: true })],
   });
 } catch (err) {
   console.error("bundle failed:");
@@ -137,21 +137,25 @@ if (css) {
   console.error("WARN: no CSS bundle emitted");
 }
 
-// Final integrity: try to dynamic-import the bundle in Node.  The
-// React mount-on-load won't work in Node (no DOM), but the parse +
-// import side-effects run during module evaluation should not throw
-// before reaching `ReactDOM.createRoot`.  We catch the expected
-// "document is not defined" error to confirm we got that far.
-console.log("# import probe (expect 'document is not defined' near mount)…");
+// Final integrity: try to dynamic-import the bundle in Node.  React
+// runtime modules (react / react-dom / jsx-runtime) are externalised
+// in the bundle for the iframe's importmap to resolve at load time.
+// In Node we don't have an importmap, so the import fails fast with
+// a missing-package error pointing at one of the externalised
+// specifiers — that's the expected stop and proves the externalisation
+// took effect (without it the import would proceed past React import
+// and fail elsewhere).
+console.log("# import probe (expect missing react/react-dom in Node)…");
 const tmpFile = path.join(os.tmpdir(), `loom-react-bundle-${process.pid}.mjs`);
 writeFileSync(tmpFile, js.text);
 try {
   await import(pathToFileURL(tmpFile).href);
-  console.log("# bundle imported (no DOM call reached?)");
+  console.error("BUG: bundle imported in Node — react externals did not take effect.");
+  process.exit(1);
 } catch (err) {
   const msg = err instanceof Error ? err.message : String(err);
-  if (/document is not defined|document\.getElementById/.test(msg)) {
-    console.log(`# OK — bundle ran up to React mount: "${msg}"`);
+  if (/Cannot find package 'react/.test(msg) || /Cannot find package "react/.test(msg)) {
+    console.log(`# OK — bundle externalised react: "${msg}"`);
   } else {
     console.error(`# bundle import failed unexpectedly: ${msg}`);
     process.exit(1);

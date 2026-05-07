@@ -444,6 +444,7 @@ export default function App(): JSX.Element {
                   <Preview
                     js={reactBundle.code}
                     css={reactBundle.css}
+                    versions={reactBundle.versions}
                     runtime={runtimeClientRef.current}
                   />
                 ) : (

@@ -92,6 +92,45 @@ export interface VirtualFsContext {
   versions: Map<string, string>;
 }
 
+// Specifiers we hand off to an importmap in the iframe instead of
+// inlining their code into the bundle.  This is critical for React
+// kind bundles: without externalisation, esbuild fetches `react`
+// once for our user code and again for `react/jsx-runtime` (or for
+// transitive deps' bundled-in `react`), and the resulting two React
+// instances produce "Cannot read properties of null (reading
+// 'useRef')" at runtime.  With externalisation + importmap, every
+// `import "react"` in the final output resolves to the same esm.sh
+// URL, so all components share one React instance.
+export const REACT_RUNTIME_EXTERNALS = [
+  "react",
+  "react-dom",
+  "react-dom/client",
+  "react/jsx-runtime",
+  "react/jsx-dev-runtime",
+];
+
+const REACT_EXTERNAL_SET = new Set(REACT_RUNTIME_EXTERNALS);
+
+// Query string we tack on every esm.sh package URL when bundling
+// for React.  esm.sh propagates this through transitive shard URLs
+// (encoded as the `X-...` path segment), so packages that import
+// `react` internally — Mantine, react-router-dom, etc. — also keep
+// `react` as a bare external in their bundled output.  Single React
+// instance in the importmap == single React instance at runtime.
+//
+// Slashes inside list items have to be URL-encoded — esm.sh's
+// query parser treats `react/jsx-runtime` as starting a new path
+// segment otherwise and 404s the request.
+const ESM_REACT_EXTERNAL_QS = `external=${REACT_RUNTIME_EXTERNALS.map(encodeURIComponent).join(",")}`;
+
+export interface PluginOptions {
+  /** When true, mark React runtime modules external (for the
+   *  iframe importmap to satisfy at load time) and append
+   *  `?external=react,...` to esm.sh package URLs so transitive
+   *  deps share the same React instance. */
+  externalReactRuntime?: boolean;
+}
+
 // Pull the `dependencies` map out of the first top-level
 // package.json in the virtual fs.  System-mode emits one
 // package.json per deployable folder (`<slug>/package.json`),
@@ -156,16 +195,25 @@ export function harvestVersions(files: Map<string, string>): Map<string, string>
 // `@hono/zod-openapi`, `hono/cors`.  Pins to the package head;
 // sub-paths inherit that version.  Falls back to RUNTIME_VERSIONS
 // for packages we add at the runtime layer.
-export function pinnedEsmShUrl(spec: string, versions: Map<string, string>): string {
+export function pinnedEsmShUrl(
+  spec: string,
+  versions: Map<string, string>,
+  opts?: PluginOptions,
+): string {
   const head = spec.startsWith("@")
     ? spec.split("/").slice(0, 2).join("/")
     : spec.split("/")[0];
   const range = versions.get(head) ?? RUNTIME_VERSIONS[head];
-  if (!range) return `${ESM_HOST}/${spec}`;
   // esm.sh accepts npm semver ranges directly: e.g. "^0.36.0".  The
   // service resolves it server-side to a specific version.
   const tail = spec.slice(head.length); // "" or "/pg-core"
-  return `${ESM_HOST}/${head}@${range}${tail}`;
+  const base = range
+    ? `${ESM_HOST}/${head}@${range}${tail}`
+    : `${ESM_HOST}/${spec}`;
+  if (opts?.externalReactRuntime) {
+    return `${base}?${ESM_REACT_EXTERNAL_QS}`;
+  }
+  return base;
 }
 
 // Tiny semaphore — esbuild parallelises onLoad callbacks, but
@@ -227,8 +275,9 @@ export function resolveInFs(fs: Map<string, string>, candidate: string): string 
 
 const SHIMS_BY_SPEC = new Map(VIRTUAL_SHIMS.map((s) => [s.specifier, s]));
 
-export function makeLoomPlugin(ctx: VirtualFsContext): Plugin {
+export function makeLoomPlugin(ctx: VirtualFsContext, opts?: PluginOptions): Plugin {
   const httpGate = makeSemaphore(6);
+  const externalReactRuntime = !!opts?.externalReactRuntime;
   return {
     name: "loom-bundler",
     setup(build: PluginBuild) {
@@ -239,6 +288,21 @@ export function makeLoomPlugin(ctx: VirtualFsContext): Plugin {
         path: args.path,
         namespace: ENTRY_NAMESPACE,
       }));
+
+      // React runtime externals always win — kept as bare imports
+      // in the output so the iframe importmap can satisfy them.
+      // Must fire before any other resolver, including the shim
+      // table and the http resolver, so it catches both top-level
+      // user imports AND `import "react"` inside esm.sh-fetched
+      // transitive deps.
+      if (externalReactRuntime) {
+        build.onResolve({ filter: /.*/ }, (args) => {
+          if (REACT_EXTERNAL_SET.has(args.path)) {
+            return { path: args.path, external: true };
+          }
+          return undefined;
+        });
+      }
 
       // Aliased shims always win — checked before the bare-import
       // fall-through below.
@@ -289,7 +353,7 @@ export function makeLoomPlugin(ctx: VirtualFsContext): Plugin {
           };
         }
         return {
-          path: pinnedEsmShUrl(args.path, ctx.versions),
+          path: pinnedEsmShUrl(args.path, ctx.versions, opts),
           namespace: HTTP_NAMESPACE,
         };
       });

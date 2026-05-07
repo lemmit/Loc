@@ -8,6 +8,10 @@ interface PreviewProps {
   js: string;
   /** Combined CSS extracted from the bundle (Mantine + any user CSS). */
   css?: string;
+  /** Pkg → semver map harvested from the generator's package.json.
+   *  Drives the iframe's importmap so React/React-DOM resolve to
+   *  the same esm.sh URL the bundle was compiled against. */
+  versions?: Record<string, string>;
   /** Live runtime worker — every fetch the iframe makes against
    *  `http://localhost:*` is forwarded here. */
   runtime: LoomRuntimeClient;
@@ -39,11 +43,15 @@ interface FetchErrorMsg {
   message: string;
 }
 
-export function Preview({ js, css, runtime }: PreviewProps): JSX.Element {
+export function Preview({ js, css, versions, runtime }: PreviewProps): JSX.Element {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
-  // Build the document once per JS/CSS pair.  Switching examples or
-  // re-bundling produces a new srcdoc → iframe re-renders cleanly.
-  const html = useMemo(() => makePreviewHtml({ js, css }), [js, css]);
+  // Build the document once per JS/CSS/versions tuple.  Switching
+  // examples or re-bundling produces a new srcdoc → iframe re-renders
+  // cleanly.
+  const html = useMemo(
+    () => makePreviewHtml({ js, css, versions }),
+    [js, css, versions],
+  );
 
   useEffect(() => {
     const handler = async (ev: MessageEvent) => {
