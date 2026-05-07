@@ -274,4 +274,102 @@ describe("react generator", () => {
     expect(app).toMatch(/function NotFound\(\): JSX\.Element/);
     expect(app).toMatch(/<Route path="\*" element={<NotFound \/>} \/>/);
   });
+
+  describe("slice 18.A — workflow form pages", () => {
+    it("emits an api/workflows.ts module with one Zod schema + mutation hook per workflow", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const api = files.get("web_app/src/api/workflows.ts")!;
+      // Per-workflow request schema + inferred type.
+      expect(api).toMatch(/export const PlaceOrderRequest = z\.object\(\{/);
+      expect(api).toMatch(/customerId: z\.string\(\)/);
+      expect(api).toMatch(/productId: z\.string\(\)/);
+      expect(api).toMatch(/quantity: z\.number\(\)\.int\(\)/);
+      expect(api).toMatch(
+        /export type PlaceOrderRequest = z\.infer<typeof PlaceOrderRequest>/,
+      );
+      // Mutation hook posts to the backend's /workflows/<slug> route.
+      expect(api).toMatch(/export function usePlaceOrderWorkflow\(\)/);
+      expect(api).toMatch(/api\.post\(`\/workflows\/place_order`, input\)/);
+    });
+
+    it("emits a workflows index page listing every workflow", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const idx = files.get("web_app/src/pages/workflows/index.tsx")!;
+      // One card per workflow, with a Run link.
+      expect(idx).toMatch(/data-testid="workflow-card-place_order"/);
+      // Humanised title.
+      expect(idx).toMatch(/<Title order=\{4\}>Place Order<\/Title>/);
+      // Parameter signature surfaces in a dimmed text row.  The
+      // type label is emitted as a string literal so JSX doesn't
+      // parse `Id<Product>` as an opening element.
+      expect(idx).toMatch(
+        /workflow-place_order-param-customerId.*<strong>customerId<\/strong>: \{"string"\}/,
+      );
+      expect(idx).toMatch(
+        /workflow-place_order-param-productId.*<strong>productId<\/strong>: \{"Id<Product>"\}/,
+      );
+      // "Run" button links to the per-workflow page.
+      expect(idx).toMatch(/to="\/workflows\/place_order"/);
+    });
+
+    it("emits a per-workflow form page with typed inputs reusing the v4 form helpers", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const page = files.get("web_app/src/pages/workflows/place_order.tsx")!;
+      // RHF + zodResolver wiring matches the aggregate-operation pattern.
+      expect(page).toMatch(/import \{ useForm, Controller \} from "react-hook-form"/);
+      expect(page).toMatch(/zodResolver\(PlaceOrderRequest\)/);
+      expect(page).toMatch(/usePlaceOrderWorkflow/);
+      // String param → TextInput; Id<X> → Select with target's display field;
+      // int → NumberInput with allowDecimal={false}.
+      expect(page).toMatch(/<TextInput label="customerId"/);
+      expect(page).toMatch(
+        /<Select label="productId"[\s\S]+?__products\.data/,
+      );
+      expect(page).toMatch(/<NumberInput label="quantity"[\s\S]+?allowDecimal=\{false\}/);
+      // useAllProducts pulled in for the Id<Product> Select.
+      expect(page).toMatch(
+        /import \{ useAllProducts \} from "\.\.\/\.\.\/api\/product\.js"/,
+      );
+      // Submit button + success/error toast.
+      expect(page).toMatch(/data-testid="workflow-place_order-submit"/);
+      expect(page).toMatch(/notifications\.show\(\{ color: "green", message: "Place Order completed" \}\)/);
+      // After success navigate back to the index.
+      expect(page).toMatch(/navigate\("\/workflows"\)/);
+    });
+
+    it("App.tsx registers /workflows + /workflows/<slug> routes and sidebar entry", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const app = files.get("web_app/src/App.tsx")!;
+      // Index + per-workflow imports.
+      expect(app).toMatch(
+        /import WorkflowsIndex from "\.\/pages\/workflows\/index\.js"/,
+      );
+      expect(app).toMatch(
+        /import PlaceOrderWorkflowPage from "\.\/pages\/workflows\/place_order\.js"/,
+      );
+      // Routes — index + per-workflow.
+      expect(app).toMatch(
+        /<Route path="\/workflows" element=\{<WorkflowsIndex \/>\} \/>/,
+      );
+      expect(app).toMatch(
+        /<Route path="\/workflows\/place_order" element=\{<PlaceOrderWorkflowPage \/>\} \/>/,
+      );
+      // Sidebar entry.
+      expect(app).toMatch(
+        /<Anchor component=\{Link\} to="\/workflows" data-testid="nav-workflows">Workflows<\/Anchor>/,
+      );
+    });
+
+    it("home page links to /workflows when at least one workflow exists", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const home = files.get("web_app/src/pages/home.tsx")!;
+      expect(home).toMatch(/<Title order=\{3\}>Workflows<\/Title>/);
+      expect(home).toMatch(/data-testid="home-workflows-link"/);
+    });
+  });
 });

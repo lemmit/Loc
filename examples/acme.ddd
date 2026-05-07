@@ -72,6 +72,22 @@ system Acme {
                 find byCustomer(customerId: string): Order[]
                     where this.customerId == customerId
             }
+
+            // Workflow surfacing — exercises the React generator's
+            // workflow UI (slice 18.A) end-to-end: a draft order +
+            // initial line in one orchestration.  The frontend
+            // emits a /workflows/place_order page from this; the
+            // backend (api / catalogApi) emits the matching
+            // POST /workflows/place_order route.
+            workflow placeOrder(customerId: string, productId: Id<Product>, quantity: int) {
+                precondition quantity > 0
+                let order = Order.create({
+                    customerId: customerId,
+                    status: Draft,
+                    placedAt: now()
+                })
+                order.addLine(productId, quantity)
+            }
         }
     }
 

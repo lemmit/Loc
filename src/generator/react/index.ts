@@ -3,6 +3,7 @@ import type {
   BoundedContextIR,
   DeployableIR,
   SystemIR,
+  WorkflowIR,
 } from "../../ir/loom-ir.js";
 import { camel, snake, plural } from "../../util/naming.js";
 import { buildApiModule } from "./api-builder.js";
@@ -12,6 +13,13 @@ import {
   buildNewPage,
 } from "./pages-builder.js";
 import { buildPageObjectModule } from "./page-objects-builder.js";
+import {
+  allWorkflows,
+  buildWorkflowFormPage,
+  buildWorkflowsApiModule,
+  buildWorkflowsIndexPage,
+  hasAnyWorkflow,
+} from "./workflow-builder.js";
 
 // ---------------------------------------------------------------------------
 // React + React Query + Zod + Mantine generator.
@@ -72,6 +80,21 @@ export function generateReactForContexts(
     );
   }
 
+  // Workflow UI — surfaces every backend workflow as a generated form
+  // page so users can invoke them from the browser instead of curl /
+  // Postman.  Reuses the per-aggregate form-helpers for typed inputs.
+  const workflows = allWorkflows(contexts);
+  if (hasAnyWorkflow(contexts)) {
+    out.set("src/api/workflows.ts", buildWorkflowsApiModule(contexts));
+    out.set("src/pages/workflows/index.tsx", buildWorkflowsIndexPage(contexts));
+    for (const { wf, ctx } of workflows) {
+      out.set(
+        `src/pages/workflows/${snake(wf.name)}.tsx`,
+        buildWorkflowFormPage(wf, ctx, aggregatesByName),
+      );
+    }
+  }
+
   out.set("e2e/smoke.spec.ts", smokeSpec(aggregates.map((a) => a.agg)));
   out.set("e2e/playwright.config.ts", PLAYWRIGHT_CONFIG_TS);
   out.set("e2e/package.json", E2E_PACKAGE_JSON);
@@ -80,8 +103,8 @@ export function generateReactForContexts(
   out.set("src/api/client.ts", CLIENT_TS);
   out.set("src/api/config.ts", configTs(apiBaseUrl));
   out.set("src/main.tsx", MAIN_TSX);
-  out.set("src/App.tsx", appTsx(aggregates.map((a) => a.agg)));
-  out.set("src/pages/home.tsx", homeTsx(aggregates.map((a) => a.agg)));
+  out.set("src/App.tsx", appTsx(aggregates.map((a) => a.agg), workflows.map((w) => w.wf)));
+  out.set("src/pages/home.tsx", homeTsx(aggregates.map((a) => a.agg), workflows.map((w) => w.wf)));
 
   out.set("package.json", PACKAGE_JSON);
   out.set("tsconfig.json", TSCONFIG_JSON);
@@ -287,7 +310,7 @@ export const api = {
 };
 `;
 
-function appTsx(aggregates: AggregateIR[]): string {
+function appTsx(aggregates: AggregateIR[], workflows: WorkflowIR[]): string {
   const imports: string[] = [];
   const routes: string[] = [`        <Route path="/" element={<Home />} />`];
   imports.push(`import Home from "./pages/home.js";`);
@@ -306,6 +329,23 @@ function appTsx(aggregates: AggregateIR[]): string {
     routes.push(
       `        <Route path="/${slug}/:id" element={<${cap}Detail />} />`,
     );
+  }
+  // Workflow routes — index + one per workflow.  Naming convention
+  // pairs the workflow file at pages/workflows/<slug>.tsx; component
+  // export is `<Cap>WorkflowPage`.
+  if (workflows.length > 0) {
+    imports.push(`import WorkflowsIndex from "./pages/workflows/index.js";`);
+    routes.push(
+      `        <Route path="/workflows" element={<WorkflowsIndex />} />`,
+    );
+    for (const wf of workflows) {
+      const slug = snake(wf.name);
+      const cap = `${upper(wf.name)}WorkflowPage`;
+      imports.push(`import ${cap} from "./pages/workflows/${slug}.js";`);
+      routes.push(
+        `        <Route path="/workflows/${slug}" element={<${cap} />} />`,
+      );
+    }
   }
   return `// Auto-generated.
 import { Routes, Route, Link } from "react-router-dom";
@@ -377,7 +417,11 @@ ${aggregates
     (a) =>
       `            <Anchor component={Link} to="/${snake(plural(a.name))}">${plural(a.name)}</Anchor>`,
   )
-  .join("\n")}
+  .join("\n")}${
+    workflows.length > 0
+      ? `\n            <Anchor component={Link} to="/workflows" data-testid="nav-workflows">Workflows</Anchor>`
+      : ""
+  }
           </Group>
         </Group>
       </AppShell.Header>
@@ -481,7 +525,22 @@ const E2E_TSCONFIG_JSON =
     2,
   ) + "\n";
 
-function homeTsx(aggregates: AggregateIR[]): string {
+function homeTsx(aggregates: AggregateIR[], workflows: WorkflowIR[]): string {
+  const aggCards = aggregates
+    .map(
+      (a) => `      <Card withBorder>
+        <Anchor component={Link} to="/${snake(plural(a.name))}">${plural(a.name)}</Anchor>
+      </Card>`,
+    )
+    .join("\n");
+  const workflowsBlock =
+    workflows.length > 0
+      ? `      <Title order={3}>Workflows</Title>
+      <Text c="dimmed">System-level orchestrations.</Text>
+      <Card withBorder>
+        <Anchor component={Link} to="/workflows" data-testid="home-workflows-link">Browse workflows</Anchor>
+      </Card>`
+      : "";
   return `// Auto-generated.
 import { Stack, Title, Text, Anchor, Card } from "@mantine/core";
 import { Link } from "react-router-dom";
@@ -491,13 +550,7 @@ export default function Home(): JSX.Element {
     <Stack>
       <Title order={2}>Welcome</Title>
       <Text c="dimmed">Pick an aggregate to manage:</Text>
-${aggregates
-  .map(
-    (a) => `      <Card withBorder>
-        <Anchor component={Link} to="/${snake(plural(a.name))}">${plural(a.name)}</Anchor>
-      </Card>`,
-  )
-  .join("\n")}
+${aggCards}${workflowsBlock ? "\n" + workflowsBlock : ""}
     </Stack>
   );
 }
