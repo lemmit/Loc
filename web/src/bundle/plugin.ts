@@ -270,25 +270,48 @@ export function harvestVersions(
 // `@hono/zod-openapi`, `hono/cors`.  Pins to the package head;
 // sub-paths inherit that version.  Falls back to RUNTIME_VERSIONS
 // for packages we add at the runtime layer.
+//
+// `unpinned` controls behaviour when neither `versions` nor
+// RUNTIME_VERSIONS knows about the package head.
+//   - `"strict"` (top-level user imports): throw a loud,
+//     actionable error.  This is the case the post-mortem flagged
+//     — silent fallthrough to esm.sh "latest" gave us the Mantine
+//     v9 leak under React 18.
+//   - `"lenient"` (transitive bare imports inside esm.sh-fetched
+//     responses): fall back to the unversioned URL.  esm.sh's own
+//     transitive resolution still pins via its `?deps=...`
+//     propagation, and we have no clean way to enumerate every
+//     possible bare import esm.sh might emit (clsx, get-nonce,
+//     tabbable, etc. — they're peer deps of our pinned packages
+//     and aren't in the user's package.json).
 export function pinnedEsmShUrl(
   spec: string,
   versions: Map<string, string>,
   opts?: PluginOptions,
+  unpinned: "strict" | "lenient" = "strict",
 ): string {
   const head = spec.startsWith("@")
     ? spec.split("/").slice(0, 2).join("/")
     : spec.split("/")[0];
   const range = versions.get(head) ?? RUNTIME_VERSIONS[head];
-  // esm.sh accepts npm semver ranges directly: e.g. "^0.36.0".  The
-  // service resolves it server-side to a specific version.
   const tail = spec.slice(head.length); // "" or "/pg-core"
-  const base = range
-    ? `${ESM_HOST}/${head}@${range}${tail}`
-    : `${ESM_HOST}/${spec}`;
-  if (opts?.externalReactRuntime) {
-    return `${base}?${ESM_REACT_EXTERNAL_QS}`;
+  const externalsQs = opts?.externalReactRuntime
+    ? `?${ESM_REACT_EXTERNAL_QS}`
+    : "";
+
+  if (range) {
+    return `${ESM_HOST}/${head}@${range}${tail}${externalsQs}`;
   }
-  return base;
+  if (unpinned === "strict") {
+    throw new Error(
+      `pinnedEsmShUrl: top-level import of "${spec}" — package "${head}" is not declared in the ` +
+        `entry's nearest package.json (and isn't in RUNTIME_VERSIONS either).  esm.sh would resolve ` +
+        `to "latest", which has bitten us before (Mantine v9 leaked into a React 18 build).  ` +
+        `Add "${head}": "<semver>" to the relevant package.json, or to RUNTIME_VERSIONS in ` +
+        `web/src/bundle/plugin.ts if it's a runtime-layer dep.`,
+    );
+  }
+  return `${ESM_HOST}/${spec}${externalsQs}`;
 }
 
 // Tiny semaphore — esbuild parallelises onLoad callbacks, but
@@ -527,10 +550,13 @@ export function makeLoomPlugin(ctx: VirtualFsContext, opts?: PluginOptions): Plu
           return { path: `${ESM_HOST}${args.path}`, namespace: HTTP_NAMESPACE };
         }
         if (!args.path.startsWith(".")) {
-          // Bare specifier — route through the same package-pinning
-          // logic as top-level user imports.
+          // Bare specifier inside an esm.sh-fetched response
+          // (peer-dep imports like `clsx`, `get-nonce`, etc.).  Use
+          // lenient mode: these aren't in the user's package.json
+          // and esm.sh's own resolution still pins versions via
+          // its `?deps=...` propagation.
           return {
-            path: pinnedEsmShUrl(args.path, ctx.versions, opts),
+            path: pinnedEsmShUrl(args.path, ctx.versions, opts, "lenient"),
             namespace: HTTP_NAMESPACE,
           };
         }
