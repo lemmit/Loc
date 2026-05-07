@@ -31,7 +31,7 @@ system SalesSystem {
       }
 
       aggregate Order {
-        customerId: string
+        customerId: Id<Customer>
         status: OrderStatus
         placedAt: datetime
         contains lines: OrderLine[]
@@ -63,6 +63,28 @@ system SalesSystem {
       repository Customers for Customer { }
       repository Products for Product { }
       repository Orders for Order { }
+
+      // Workflow: orchestrates placement of a single-line order in
+      // one transaction.  Loads the customer + product (must exist
+      // → 404 on miss), creates the order, adds the line, confirms.
+      // Invoke via POST /workflows/place_order with body
+      //   { customerId, productId, qty }
+      workflow placeOrder(
+        customerId: Id<Customer>,
+        productId: Id<Product>,
+        qty: int
+      ) transactional {
+        precondition qty > 0
+        let customer = Customers.getById(customerId)
+        let product = Products.getById(productId)
+        let order = Order.create({
+          customerId: customer.id,
+          status: Draft,
+          placedAt: now()
+        })
+        order.addLine(productId, qty)
+        order.confirm()
+      }
     }
   }
 

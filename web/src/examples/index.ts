@@ -30,20 +30,21 @@ export const examples: LoomExample[] = [
     label: "Sales System (Hono + React)",
     source: salesSystemSource,
     blurb:
-      "Aggregates / value-objects / events / operations + system block with full Preview.",
+      "Aggregates, value-objects, events, operations, transactional `placeOrder` workflow.",
   },
   {
     id: "banking-system",
     label: "Banking System (Hono + React)",
     source: bankingSystemSource,
     blurb:
-      "Optional fields, cross-aggregate Id<X> refs, richer where-filters; full Preview.",
+      "Optional fields, Id<X> refs, where-filters, transactional `transferFunds` workflow.",
   },
   {
     id: "inventory-system",
     label: "Inventory System (Hono + React)",
     source: inventorySystemSource,
-    blurb: "Nested parts and explicit guid ids; full Preview.",
+    blurb:
+      "Nested parts, guid ids, non-transactional `recordReservation` workflow.",
   },
   {
     id: "sales",
