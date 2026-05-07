@@ -110,6 +110,58 @@ describe("typescript generator", () => {
     });
   });
 
+  describe("slice 16.C — request observability", () => {
+    it("emits obs/request-id.ts with the correlation-id middleware", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model);
+      const reqId = files.get("obs/request-id.ts")!;
+      // Mints a fresh UUID when no inbound header is set.
+      expect(reqId).toMatch(/randomUUID\(\)/);
+      // Honours an inbound X-Request-Id header.
+      expect(reqId).toMatch(/REQUEST_ID_HEADER = "X-Request-Id"/);
+      expect(reqId).toMatch(/c\.req\.header\(REQUEST_ID_HEADER\)/);
+      // Echoes the value back on the response.
+      expect(reqId).toMatch(/c\.header\(REQUEST_ID_HEADER, requestId\)/);
+      // Stashes the id on the Hono context for downstream onError.
+      expect(reqId).toMatch(/c\.set\("requestId", requestId\)/);
+      // Structured request_start + request_end JSON log lines.
+      expect(reqId).toMatch(/event: "request_start"/);
+      expect(reqId).toMatch(/event: "request_end"/);
+      expect(reqId).toMatch(/duration_ms:/);
+    });
+
+    it("http/index.ts mounts requestIdMiddleware before cors and any business route", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model);
+      const httpIndex = files.get("http/index.ts")!;
+      expect(httpIndex).toMatch(/import \{ requestIdMiddleware \} from "\.\.\/obs\/request-id\.js"/);
+      expect(httpIndex).toMatch(/app\.use\("\*", requestIdMiddleware\)/);
+      // Order: requestIdMiddleware mounts BEFORE cors so every
+      // downstream handler + onError sees the id.
+      const reqIdIdx = httpIndex.indexOf("requestIdMiddleware");
+      const corsIdx = httpIndex.indexOf("cors()");
+      expect(reqIdIdx).toBeGreaterThan(-1);
+      expect(corsIdx).toBeGreaterThan(-1);
+      expect(reqIdIdx).toBeLessThan(corsIdx);
+    });
+
+    it("per-aggregate app.onError threads trace_id into every error envelope", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model);
+      const routes = files.get("http/order.routes.ts")!;
+      // trace_id pulled off the context via a typed cast (the
+      // sub-router's OpenAPIHono is constructed without a typed
+      // Variables block; the cast bridges to the parent app's
+      // requestIdMiddleware without leaking `any`).
+      expect(routes).toMatch(/\.get\("requestId"\) \?\? ""/);
+      // Every status arm carries trace_id.
+      expect(routes).toMatch(/error: err\.message, trace_id \}, 403/);
+      expect(routes).toMatch(/error: err\.message, trace_id \}, 400/);
+      expect(routes).toMatch(/error: err\.message, trace_id \}, 404/);
+      expect(routes).toMatch(/error: "internal", trace_id \}, 500/);
+    });
+  });
+
   it("Hono routes use @hono/zod-openapi and expose /openapi.json", async () => {
     const model = await buildModel("examples/sales.ddd");
     const files = generateTypeScript(model);
@@ -299,7 +351,9 @@ describe("typescript generator", () => {
       // onError checks ExternHandlerError before the generic 500.
       expect(routes).toMatch(/if \(err instanceof ExternHandlerError\)/);
       // Generic 500 fallback survives unchanged for unknown errors.
-      expect(routes).toMatch(/return c\.json\(\{ error: "internal" \}, 500\)/);
+      // Slice 16.C threads trace_id alongside the existing error
+      // field, so the envelope shape is `{ error, trace_id }`.
+      expect(routes).toMatch(/return c\.json\(\{ error: "internal", trace_id \}, 500\)/);
     });
 
     it("does NOT register a defaultHook on OpenAPIHono (Zod's 400 stays the contract)", async () => {
@@ -1004,8 +1058,10 @@ describe("typescript generator", () => {
     it("http/<aggregate>.routes.ts maps ForbiddenError to 403 in app.onError", async () => {
       const files = await emitForAuthSystem(SRC_REQUIRES);
       const route = files.get("http/order.routes.ts")!;
+      // Slice 16.C threads trace_id alongside the existing error
+      // field, so the envelope shape is `{ error, trace_id }`.
       expect(route).toMatch(
-        /if \(err instanceof ForbiddenError\) return c\.json\(\{ error: err\.message \}, 403\);/,
+        /if \(err instanceof ForbiddenError\) return c\.json\(\{ error: err\.message, trace_id \}, 403\);/,
       );
     });
   });

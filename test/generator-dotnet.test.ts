@@ -135,6 +135,41 @@ describe(".NET generator", () => {
     });
   });
 
+  describe("slice 16.C — request observability", () => {
+    it("Program.cs configures structured JSON logging + HTTP request logging", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      const program = files.get("Program.cs")!;
+      // JSON formatter for every log line.
+      expect(program).toMatch(/AddJsonConsole/);
+      // Per-request HTTP log: method/path/status/duration.
+      expect(program).toMatch(/AddHttpLogging/);
+      expect(program).toMatch(/app\.UseHttpLogging\(\)/);
+      // Specific fields opted in.
+      expect(program).toMatch(/RequestMethod/);
+      expect(program).toMatch(/RequestPath/);
+      expect(program).toMatch(/ResponseStatusCode/);
+      expect(program).toMatch(/Duration/);
+    });
+
+    it("DomainExceptionFilter threads Activity.TraceId into every error envelope", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      const filter = files.get("Api/DomainExceptionFilter.cs")!;
+      // trace_id pulled off the ambient Activity (set by ASP.NET on
+      // every request).  Empty string when no Activity is active.
+      expect(filter).toMatch(
+        /var trace_id = System\.Diagnostics\.Activity\.Current\?\.TraceId\.ToString\(\) \?\? "";/,
+      );
+      // Every arm of the filter includes trace_id in its envelope.
+      expect(filter).toMatch(/error = fe\.Message, trace_id/);
+      expect(filter).toMatch(/error = de\.Message, trace_id/);
+      expect(filter).toMatch(/error = nf\.Message, trace_id/);
+      expect(filter).toMatch(/error = xh\.Message, trace_id/);
+      expect(filter).toMatch(/error = "internal", trace_id/);
+    });
+  });
+
   it("auto-includes a GET /<plural> find via the `all` repository method", async () => {
     const model = await buildModel("examples/sales.ddd");
     const files = generateDotnet(model);

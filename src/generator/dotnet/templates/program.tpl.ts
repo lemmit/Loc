@@ -119,6 +119,33 @@ var builder = WebApplication.CreateBuilder(args);
     }
 }
 
+// Structured JSON logs.  Pairs with UseHttpLogging below to emit
+// one line per inbound request with method/path/status, and pulls
+// Activity.Current?.TraceId into every log scope so handler logs
+// inherit the correlation id automatically.
+builder.Logging.ClearProviders();
+builder.Logging.AddJsonConsole(opts =>
+{
+    opts.IncludeScopes = true;
+    opts.JsonWriterOptions = new System.Text.Json.JsonWriterOptions
+    {
+        Indented = false,
+    };
+});
+
+// Per-request HTTP log.  ASP.NET Core's built-in middleware records
+// method/path on entry and status/duration on exit.  Combined with
+// the JSON formatter above, every request shows up as a structured
+// log line with the framework's TraceId field for correlation.
+builder.Services.AddHttpLogging(opts =>
+{
+    opts.LoggingFields =
+        Microsoft.AspNetCore.HttpLogging.HttpLoggingFields.RequestMethod |
+        Microsoft.AspNetCore.HttpLogging.HttpLoggingFields.RequestPath |
+        Microsoft.AspNetCore.HttpLogging.HttpLoggingFields.ResponseStatusCode |
+        Microsoft.AspNetCore.HttpLogging.HttpLoggingFields.Duration;
+});
+
 builder.Services.AddDbContext<AppDbContext>(opts =>
     opts.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
 
@@ -192,6 +219,10 @@ app.MapGet("/ready", async (AppDbContext db, CancellationToken ct) =>
             statusCode: 503);
     }
 });
+// HTTP logging middleware — pairs with AddHttpLogging above.
+// Mounted before the auth + business pipelines so every request is
+// logged regardless of whether it reached a controller.
+app.UseHttpLogging();
 app.UseCors();
 app.UseSwagger();
 ${authMount}app.MapControllers();

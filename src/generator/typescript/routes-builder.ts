@@ -221,18 +221,33 @@ export function buildRoutesFile(
   // Domain-error handler.  Order matters — ForbiddenError checked
   // before DomainError so 403 wins over 400 when a `requires`
   // clause throws; ExternHandlerError checked before the generic
-  // 500 fallback so its descriptive envelope wins.
+  // 500 fallback so its descriptive envelope wins.  trace_id
+  // mirrors the request id stamped on the response by the request
+  // middleware so an operator can join the response back to the
+  // structured log line.
   lines.push(`  app.onError((err, c) => {`);
-  lines.push(`    if (err instanceof ForbiddenError) return c.json({ error: err.message }, 403);`);
-  lines.push(`    if (err instanceof DomainError) return c.json({ error: err.message }, 400);`);
+  // The requestIdMiddleware mounts on the parent app (http/index.ts)
+  // and stashes the id on the request scope.  This sub-router's
+  // OpenAPIHono is constructed without a typed Variables block so
+  // strict tsc can't see the key directly; the cast bridges the
+  // gap without leaking `any` into the user's surface.
   lines.push(
-    `    if (err instanceof AggregateNotFoundError) return c.json({ error: err.message }, 404);`,
+    `    const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";`,
   );
   lines.push(
-    `    if (err instanceof ExternHandlerError) { console.error(err); return c.json({ error: err.message }, 500); }`,
+    `    if (err instanceof ForbiddenError) return c.json({ error: err.message, trace_id }, 403);`,
+  );
+  lines.push(
+    `    if (err instanceof DomainError) return c.json({ error: err.message, trace_id }, 400);`,
+  );
+  lines.push(
+    `    if (err instanceof AggregateNotFoundError) return c.json({ error: err.message, trace_id }, 404);`,
+  );
+  lines.push(
+    `    if (err instanceof ExternHandlerError) { console.error(err); return c.json({ error: err.message, trace_id }, 500); }`,
   );
   lines.push(`    console.error(err);`);
-  lines.push(`    return c.json({ error: "internal" }, 500);`);
+  lines.push(`    return c.json({ error: "internal", trace_id }, 500);`);
   lines.push(`  });`);
   lines.push("");
   lines.push(`  return app;`);

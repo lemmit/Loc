@@ -124,19 +124,22 @@ export function buildWorkflowsFile(
 
   lines.push(`  app.onError((err, c) => {`);
   lines.push(
-    `    if (err instanceof ForbiddenError) return c.json({ error: err.message }, 403);`,
+    `    const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";`,
   );
   lines.push(
-    `    if (err instanceof DomainError) return c.json({ error: err.message }, 400);`,
+    `    if (err instanceof ForbiddenError) return c.json({ error: err.message, trace_id }, 403);`,
   );
   lines.push(
-    `    if (err instanceof AggregateNotFoundError) return c.json({ error: err.message }, 404);`,
+    `    if (err instanceof DomainError) return c.json({ error: err.message, trace_id }, 400);`,
   );
   lines.push(
-    `    if (err instanceof ExternHandlerError) { console.error(err); return c.json({ error: err.message }, 500); }`,
+    `    if (err instanceof AggregateNotFoundError) return c.json({ error: err.message, trace_id }, 404);`,
+  );
+  lines.push(
+    `    if (err instanceof ExternHandlerError) { console.error(err); return c.json({ error: err.message, trace_id }, 500); }`,
   );
   lines.push(`    console.error(err);`);
-  lines.push(`    return c.json({ error: "internal" }, 500);`);
+  lines.push(`    return c.json({ error: "internal", trace_id }, 500);`);
   lines.push(`  });`);
   lines.push("");
   lines.push(`  return app;`);

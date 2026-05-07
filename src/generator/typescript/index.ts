@@ -23,6 +23,7 @@ import { buildRoutesFile } from "./routes-builder.js";
 import { buildExternHandlersFile } from "./extern-builder.js";
 import { buildWorkflowsFile } from "./workflow-builder.js";
 import { buildViewsRoutesFile } from "./view-routes-builder.js";
+import { emitObservabilityFiles } from "./observability-builder.js";
 
 const ERRORS_TS = `// Auto-generated.
 export class DomainError extends Error {
@@ -100,6 +101,7 @@ export function generateTypeScriptForContexts(
   if (authRequired && system?.sys) {
     emitAuthFiles(system.sys, out);
   }
+  emitObservabilityFiles(out);
   out.set("package.json", PROJECT_PACKAGE_JSON);
   out.set("tsconfig.json", PROJECT_TSCONFIG_JSON);
   out.set("index.ts", PROJECT_INDEX_TS);
