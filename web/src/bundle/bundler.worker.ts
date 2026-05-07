@@ -15,6 +15,7 @@ import {
   makeEntryStdin,
   makeLoomPlugin,
   resolveInFs,
+  postProcessBundle,
   schemaPathFor,
   type VirtualFsContext,
 } from "./plugin.js";
@@ -143,10 +144,17 @@ async function handleBundle(req: {
       ],
     };
   }
+  // Post-process: rewrite `import.meta.url` to a real jsdelivr URL
+  // (so PGlite's `new URL("./pglite.wasm", import.meta.url)` calls
+  // succeed when the bundle is loaded from a blob: URL) and force
+  // PGlite's browser code path.  See `postProcessBundle` for the
+  // full reasoning.
+  const code = postProcessBundle(out.text);
+
   return {
     ok: true,
-    code: out.text,
-    size: out.contents.byteLength,
+    code,
+    size: code.length,
     durationMs,
     fetchedUrls: [...ctx.fetchedUrls].sort(),
     diagnostics: [
