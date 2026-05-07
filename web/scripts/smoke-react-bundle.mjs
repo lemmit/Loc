@@ -47,9 +47,9 @@ const ctx = {
   files: fs,
   fetchedUrls: new Set(),
   fetchCache: new Map(),
-  versions: harvestVersions(fs),
+  versions: harvestVersions(fs, reactEntry),
 };
-console.log(`# pinned ${ctx.versions.size} package versions`);
+console.log(`# pinned ${ctx.versions.size} package versions: ${[...ctx.versions.entries()].slice(0, 10).map(([k, v]) => `${k}@${v}`).join(", ")}`);
 
 console.log("# 2/3 bundling react frontend…");
 const start = Date.now();

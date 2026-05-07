@@ -70,7 +70,10 @@ async function handleBundle(req: BundleRequest): Promise<BundleResult> {
     files: fs,
     fetchedUrls: new Set(),
     fetchCache: new Map(),
-    versions: harvestVersions(fs),
+    // Pick the package.json closest to the entry so we get the
+    // backend's Hono/Drizzle pins for kind=hono and the
+    // frontend's React/Mantine pins for kind=react.
+    versions: harvestVersions(fs, entryInFs),
   };
 
   // Hono kind: stdin re-exports the runtime surface (createApp,

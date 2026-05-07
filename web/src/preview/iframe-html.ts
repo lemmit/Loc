@@ -30,15 +30,13 @@ const REACT_FALLBACK_VERSION = "18.3.1";
 function importMap(versions: Record<string, string>): Record<string, string> {
   const reactVer = versions["react"] ?? REACT_FALLBACK_VERSION;
   const reactDomVer = versions["react-dom"] ?? reactVer;
-  // `?dev=false` selects esm.sh's production build (smaller, no
-  // dev warnings); `?deps=react@<ver>` keeps every transitive
-  // resolution on the same React.  Trailing-slash entries let
-  // sub-paths like `react-dom/client` resolve identically.
+  // Importmap rules per spec: keys ending in "/" must map to URL
+  // values ending in "/".  esm.sh URLs with `?query` parameters
+  // can't satisfy that, so we list each required sub-path
+  // explicitly (jsx-runtime, jsx-dev-runtime, react-dom/client).
   return {
     "react": `https://esm.sh/react@${reactVer}?dev=false`,
-    "react/": `https://esm.sh/react@${reactVer}/`,
     "react-dom": `https://esm.sh/react-dom@${reactDomVer}?dev=false&deps=react@${reactVer}`,
-    "react-dom/": `https://esm.sh/react-dom@${reactDomVer}/?deps=react@${reactVer}`,
     "react-dom/client": `https://esm.sh/react-dom@${reactDomVer}/client?dev=false&deps=react@${reactVer}`,
     "react/jsx-runtime": `https://esm.sh/react@${reactVer}/jsx-runtime?dev=false`,
     "react/jsx-dev-runtime": `https://esm.sh/react@${reactVer}/jsx-dev-runtime?dev=false`,

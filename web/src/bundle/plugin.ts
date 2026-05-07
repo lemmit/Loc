@@ -131,11 +131,16 @@ export interface PluginOptions {
   externalReactRuntime?: boolean;
 }
 
-// Pull the `dependencies` map out of the first top-level
-// package.json in the virtual fs.  System-mode emits one
-// package.json per deployable folder (`<slug>/package.json`),
-// legacy mode emits a single root package.json — both shapes
-// resolve the same way: we take whichever is shallowest.
+// Pull the `dependencies` map out of the package.json that's
+// closest to the bundle entry.  System-mode emits one
+// package.json per deployable folder (`<slug>/package.json`) —
+// the Hono backend's package.json has Hono+Drizzle deps, the
+// React frontend's has Mantine+React+react-router-dom etc.
+// Picking the wrong one means we miss version pins and esm.sh
+// happily serves "latest" — which for Mantine v9.x targets React
+// 19 and breaks under React 18.x.  Caller threads the entry
+// path so we can walk upward; legacy mode falls back to the
+// shallowest package.json in the tree.
 // The bundle entry stdin.  We re-export everything the runtime
 // worker needs from a single bundle, so there's exactly one drizzle
 // instance in play (a separate `import "drizzle-orm/pglite"` in the
@@ -166,18 +171,40 @@ export function schemaPathFor(entryPath: string): string {
   return [...segs.slice(0, -2), "db", "schema.ts"].join("/");
 }
 
-export function harvestVersions(files: Map<string, string>): Map<string, string> {
+export function harvestVersions(
+  files: Map<string, string>,
+  /** Entry path inside the virtual fs (e.g. "web_app/src/main.tsx").
+   *  Used to pick the nearest package.json by walking upward.
+   *  Falls back to the shallowest package.json when omitted or
+   *  when no ancestor package.json exists. */
+  entryPath?: string,
+): Map<string, string> {
   const out = new Map<string, string>();
-  let bestPath: string | null = null;
-  for (const path of files.keys()) {
-    if (!path.endsWith("package.json")) continue;
-    if (bestPath === null || path.split("/").length < bestPath.split("/").length) {
-      bestPath = path;
+  const allPkgPaths = [...files.keys()].filter((p) => p.endsWith("package.json"));
+  if (allPkgPaths.length === 0) return out;
+
+  let chosen: string | null = null;
+  if (entryPath) {
+    // Walk up from the entry directory.  For "web_app/src/main.tsx"
+    // we try "web_app/src/package.json", then "web_app/package.json",
+    // then "package.json" — first match wins.
+    const segs = entryPath.split("/");
+    for (let i = segs.length - 1; i >= 0; i--) {
+      const candidate = [...segs.slice(0, i), "package.json"].join("/");
+      if (files.has(candidate)) {
+        chosen = candidate;
+        break;
+      }
     }
   }
-  if (!bestPath) return out;
+  if (!chosen) {
+    chosen = allPkgPaths.reduce((a, b) =>
+      a.split("/").length <= b.split("/").length ? a : b,
+    );
+  }
+
   try {
-    const pkg = JSON.parse(files.get(bestPath)!) as {
+    const pkg = JSON.parse(files.get(chosen)!) as {
       dependencies?: Record<string, string>;
       devDependencies?: Record<string, string>;
     };
