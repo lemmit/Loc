@@ -119,4 +119,61 @@ describe("parsing & validation of examples", () => {
     const wfs = ctx!.members.filter((m) => m.$type === "Workflow");
     expect(wfs).toHaveLength(2);
   });
+
+  it("parses a system with `user { ... }` and `auth: required`", async () => {
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(
+      `
+      system Acme {
+        user {
+          id: string
+          role: string
+          tenantId: string
+        }
+
+        module Sales {
+          context Orders {
+            aggregate Order {
+              customerId: string
+              status: string
+            }
+            repository Orders for Order { }
+          }
+        }
+
+        deployable api {
+          platform: dotnet
+          modules: Sales
+          port: 8080
+          auth: required
+        }
+      }
+      `,
+      { validation: true },
+    );
+    expect(
+      (doc.diagnostics ?? [])
+        .filter((d) => d.severity === 1)
+        .map((d) => d.message),
+    ).toEqual([]);
+    const sys = (doc.parseResult.value as Model).members[0] as
+      | import("../src/language/generated/ast.js").System
+      | undefined;
+    const userBlock = sys!.members.find((m) => m.$type === "UserBlock") as
+      | import("../src/language/generated/ast.js").UserBlock
+      | undefined;
+    expect(userBlock).toBeDefined();
+    expect(userBlock!.fields.map((f) => f.name)).toEqual([
+      "id",
+      "role",
+      "tenantId",
+    ]);
+    const api = sys!.members.find(
+      (m): m is import("../src/language/generated/ast.js").Deployable =>
+        m.$type === "Deployable" && m.name === "api",
+    );
+    expect(api?.auth).toBe("required");
+  });
 });

@@ -45,6 +45,7 @@ export function validateLoomModel(loom: LoomModel): LoomDiagnostic[] {
   for (const sys of loom.systems) {
     validateSystem(sys, diags);
     validateReactIdReferences(sys, diags);
+    validateAuth(sys, diags);
   }
   // Per-context checks apply uniformly whether the context is
   // bundled in a system's modules or sits at the top level.
@@ -55,6 +56,7 @@ export function validateLoomModel(loom: LoomModel): LoomDiagnostic[] {
     validateExternOperations(c, diags);
     validateWorkflows(c, diags);
     validateViews(c, diags);
+    validateCurrentUserScope(c, diags);
   }
   return diags;
 }
@@ -1225,5 +1227,110 @@ function validateViews(
         seenBinds.add(b.name);
       }
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Auth validation (slice 1A).
+//
+// Two responsibilities:
+//
+//   1. System-wide shape: a deployable opting in via `auth: required`
+//      needs the system to declare a `user { ... }` block (otherwise
+//      there's no shape for the verifier hook to decode tokens into).
+//      Duplicate user-field names rejected here too, defensively —
+//      the parser doesn't structurally enforce uniqueness.
+//
+//   2. `currentUser` scope: the magic identifier resolves to a typed
+//      ref via `lower-expr.ts:resolveNameRef` whenever the system
+//      declares a user block.  Slice 1A lets bodies USE
+//      `currentUser` in operations / workflows / view binds /
+//      aggregate test bodies; everywhere else (invariants, derived
+//      properties, function bodies, view filters, repository find
+//      filters) the reference is rejected with a friendly message
+//      pointing at the slice scope.  Where-clause integration is
+//      slice 1C; gated entry checks are slice 2.
+// ---------------------------------------------------------------------------
+
+function validateAuth(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  // (1) Duplicate user-field names — Property doesn't structurally
+  // enforce uniqueness, so a hand-rolled `user { id: string, id: int }`
+  // would silently lower to two fields with the same name.
+  if (sys.user) {
+    const seen = new Set<string>();
+    for (const f of sys.user.fields) {
+      if (seen.has(f.name)) {
+        diags.push({
+          severity: "error",
+          message: `system '${sys.name}': user block declares field '${f.name}' more than once.`,
+          source: `${sys.name}/user`,
+        });
+      }
+      seen.add(f.name);
+    }
+  }
+  // (2) `auth: required` deployables MUST have a user block.  Without
+  // one, the verifier hook has no shape to populate, and `currentUser`
+  // references in any body would resolve to an unknown ref.
+  for (const d of sys.deployables) {
+    if (d.auth?.required && !sys.user) {
+      diags.push({
+        severity: "error",
+        message:
+          `deployable '${d.name}' has 'auth: required' but system '${sys.name}' declares no 'user { ... }' block. ` +
+          `Add a system-level user block describing the JWT claim shape (e.g. 'user { id: string, role: string }').`,
+        source: `${sys.name}/${d.name}`,
+      });
+    }
+  }
+}
+
+/** Walk every expression inside an entity's invariants, derived
+ *  properties, function bodies, view filters, and repository find
+ *  filters; flag any `current-user` ref found there.  Uses the
+ *  existing `walkExpr` helper. */
+function validateCurrentUserScope(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+): void {
+  const flag = (location: string, expr: ExprIR | undefined): void => {
+    if (!expr) return;
+    walkExpr(expr, (e) => {
+      if (e.kind === "ref" && e.refKind === "current-user") {
+        diags.push({
+          severity: "error",
+          message:
+            `currentUser is only available in per-request handlers (operations, workflows, view bind expressions). ` +
+            `Found in ${location}; remove the reference or move the logic into an operation that runs per request.`,
+          source: `${ctx.name}/${location}`,
+        });
+      }
+    });
+  };
+  for (const agg of ctx.aggregates) {
+    for (const inv of agg.invariants) flag(`${agg.name}.invariant`, inv.expr);
+    for (const inv of agg.invariants) flag(`${agg.name}.invariant`, inv.guard);
+    for (const d of agg.derived) flag(`${agg.name}.derived[${d.name}]`, d.expr);
+    for (const fn of agg.functions) flag(`${agg.name}.function[${fn.name}]`, fn.body);
+    for (const part of agg.parts) {
+      for (const inv of part.invariants) flag(`${part.name}.invariant`, inv.expr);
+      for (const inv of part.invariants) flag(`${part.name}.invariant`, inv.guard);
+      for (const d of part.derived) flag(`${part.name}.derived[${d.name}]`, d.expr);
+      for (const fn of part.functions) flag(`${part.name}.function[${fn.name}]`, fn.body);
+    }
+  }
+  for (const vo of ctx.valueObjects) {
+    for (const inv of vo.invariants) flag(`${vo.name}.invariant`, inv.expr);
+    for (const inv of vo.invariants) flag(`${vo.name}.invariant`, inv.guard);
+    for (const d of vo.derived) flag(`${vo.name}.derived[${d.name}]`, d.expr);
+    for (const fn of vo.functions) flag(`${vo.name}.function[${fn.name}]`, fn.body);
+  }
+  for (const repo of ctx.repositories) {
+    for (const f of repo.finds) {
+      flag(`repository[${repo.name}].find[${f.name}]`, f.filter);
+    }
+  }
+  for (const view of ctx.views) {
+    flag(`view[${view.name}].filter`, view.filter);
   }
 }

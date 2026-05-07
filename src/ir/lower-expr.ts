@@ -56,8 +56,15 @@ import type {
   PathIR,
   StmtIR,
   TypeIR,
+  UserIR,
 } from "./loom-ir.js";
 import { lit } from "./loom-ir.js";
+
+/** Synthetic entity name used to type the `currentUser` magic
+ *  identifier.  Member access on the user shape resolves through
+ *  `env.user.fields` rather than the bounded-context namespace, so
+ *  the name doesn't collide with any user-declared aggregate / part. */
+export const USER_SHAPE_NAME = "__User__";
 
 // ---------------------------------------------------------------------------
 // Lowering env + the IR-producing layer for expressions, statements, and
@@ -81,10 +88,16 @@ export interface Env {
   part?: EntityPart;
   valueObject?: ValueObject;
   locals: Map<string, { kind: "param" | "let" | "lambda"; type: TypeIR }>;
+  /** System-wide user-claim shape — the lowered `user { ... }` block.
+   *  Threaded down by the lowering structure layer so every
+   *  expression context (operation / workflow / view / test) can
+   *  resolve the magic `currentUser` identifier.  Undefined for
+   *  systems / loose contexts that don't declare a user block. */
+  user?: UserIR;
 }
 
-export function newEnv(ctx: BoundedContext): Env {
-  return { ctx, locals: new Map() };
+export function newEnv(ctx: BoundedContext, user?: UserIR): Env {
+  return { ctx, locals: new Map(), user };
 }
 
 export function withLocal(
@@ -377,6 +390,19 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
 }
 
 function resolveNameRef(name: string, env: Env): ExprIR {
+  // `currentUser` magic identifier — resolves to a synthetic entity
+  // shape backed by the system's `user { ... }` block.  Always wins
+  // over locals so a let-binding can't shadow it.  When no user block
+  // is declared the name falls through to ordinary local / property
+  // / enum lookup so source files without auth still parse normally.
+  if (name === "currentUser" && env.user) {
+    return {
+      kind: "ref",
+      name: "currentUser",
+      refKind: "current-user",
+      type: { kind: "entity", name: USER_SHAPE_NAME },
+    };
+  }
   const local = env.locals.get(name);
   if (local) {
     const refKind = local.kind;
@@ -565,6 +591,20 @@ function widenNumeric(a: TypeIR, b: TypeIR): TypeIR {
 }
 
 function memberType(t: TypeIR, name: string, env: Env): TypeIR {
+  // `currentUser.<field>` — synthetic entity backed by the system's
+  // user block.  Walked via env.user.fields rather than the
+  // bounded-context registry.  Unknown members fall through to the
+  // string fallback; the validator will surface the broken reference
+  // with a friendlier message.
+  if (
+    t.kind === "entity" &&
+    t.name === USER_SHAPE_NAME &&
+    env.user
+  ) {
+    const f = env.user.fields.find((f) => f.name === name);
+    if (f) return f.optional ? { kind: "optional", inner: f.type } : f.type;
+    return { kind: "primitive", name: "string" };
+  }
   if (t.kind === "array") {
     switch (name) {
       case "count":
@@ -710,6 +750,20 @@ function pathType(path: PathIR, env: Env): TypeIR {
 }
 
 function stepInto(t: TypeIR, name: string, env: Env): TypeIR {
+  // Same user-shape special case as `memberType` — keeps assignment-
+  // path typing (used by the validator's containing-aggregate walks)
+  // consistent with the read side.  In practice paths never actually
+  // step into currentUser because it's read-only, but the symmetric
+  // case keeps the two functions in sync.
+  if (
+    t.kind === "entity" &&
+    t.name === USER_SHAPE_NAME &&
+    env.user
+  ) {
+    const f = env.user.fields.find((f) => f.name === name);
+    if (f) return f.optional ? { kind: "optional", inner: f.type } : f.type;
+    return { kind: "primitive", name: "string" };
+  }
   if (t.kind === "entity") {
     const target = findEntityByName(env, t.name);
     if (target) return memberOnEntity(target, name);

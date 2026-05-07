@@ -9,6 +9,7 @@ import type {
   TypeIR,
   ValueObjectIR,
 } from "../../ir/loom-ir.js";
+import { operationUsesCurrentUser } from "../../ir/loom-ir.js";
 import { wireShapeFor } from "../../ir/enrichments.js";
 import { camel, plural, snake } from "../../util/naming.js";
 
@@ -256,10 +257,23 @@ function emitOperationRoute(
   out.push(`  async (c) => {`);
   out.push(`    const { id } = c.req.valid("param");`);
   out.push(`    const body = c.req.valid("json");`);
+  // When the operation body references `currentUser`, the aggregate
+  // method's signature picks up a trailing `currentUser: User`
+  // parameter (see operationUsesCurrentUser).  The route reads the
+  // user from the request scope where the auth middleware stashed it
+  // earlier in the pipeline; without `auth: required` on the
+  // deployable, the validator already prevents currentUser from
+  // appearing in operation bodies, so this branch is dead.
+  const usesUser = operationUsesCurrentUser(op);
+  if (usesUser) {
+    out.push(
+      `    const currentUser = c.get("currentUser") as import("../auth/user-types.js").User;`,
+    );
+  }
   out.push(`    const aggregate = await repo.getById(Ids.${agg.name}Id(id));`);
-  const callArgs = op.params
-    .map((p) => wireToDomainExpr(`body.${p.name}`, p.type, ctx))
-    .join(", ");
+  const baseCallArgs = op.params
+    .map((p) => wireToDomainExpr(`body.${p.name}`, p.type, ctx));
+  const callArgs = (usesUser ? [...baseCallArgs, "currentUser"] : baseCallArgs).join(", ");
   if (op.extern) {
     // Extern: run preconditions on the aggregate, dispatch to the
     // user-registered handler, then run invariants and save.

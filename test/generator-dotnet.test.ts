@@ -663,4 +663,128 @@ describe(".NET generator", () => {
     expect(filter).toMatch(/BadRequestObjectResult/);
     expect(filter).toMatch(/NotFoundObjectResult/);
   });
+
+  // -------------------------------------------------------------------------
+  // Slice 1A — auth scaffolding
+  // -------------------------------------------------------------------------
+
+  describe("auth scaffolding (slice 1A)", () => {
+    async function emitForAuthSystem(src: string): Promise<Map<string, string>> {
+      const { parseHelper } = await import("langium/test");
+      const services = createDddServices(NodeFileSystem);
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(src, { validation: true });
+      const { lowerModel } = await import("../src/ir/lower.js");
+      const { enrichLoomModel } = await import("../src/ir/enrichments.js");
+      const { generateDotnetForContexts } = await import(
+        "../src/generator/dotnet/index.js"
+      );
+      const loom = enrichLoomModel(lowerModel(doc.parseResult.value as Model));
+      const sys = loom.systems[0]!;
+      const dep = sys.deployables.find((d) => d.platform === "dotnet")!;
+      const contexts = sys.modules.flatMap((m) => m.contexts);
+      const ns = dep.name[0]!.toUpperCase() + dep.name.slice(1);
+      return generateDotnetForContexts(contexts, ns, {
+        deployable: dep,
+        sys,
+      });
+    }
+
+    const SRC_AUTH_REQUIRED = `
+      system Acme {
+        user {
+          id: string
+          role: string
+        }
+        module Sales {
+          context Orders {
+            aggregate Order {
+              customerId: string
+              status: string
+              operation cancel() {
+                precondition currentUser.role == "manager"
+                status := "cancelled"
+              }
+            }
+            repository Orders for Order { }
+          }
+        }
+        deployable api {
+          platform: dotnet
+          modules: Sales
+          port: 8080
+          auth: required
+        }
+      }
+    `;
+
+    const SRC_NO_AUTH = `
+      system Acme {
+        user { id: string }
+        module Sales {
+          context Orders {
+            aggregate Order { customerId: string }
+            repository Orders for Order { }
+          }
+        }
+        deployable api {
+          platform: dotnet
+          modules: Sales
+          port: 8080
+        }
+      }
+    `;
+
+    it("emits Auth/* files when deployable opts in via `auth: required`", async () => {
+      const files = await emitForAuthSystem(SRC_AUTH_REQUIRED);
+      const keys = [...files.keys()];
+      expect(keys).toContain("Auth/User.cs");
+      expect(keys).toContain("Auth/IUserVerifier.cs");
+      expect(keys).toContain("Auth/ICurrentUserAccessor.cs");
+      expect(keys).toContain("Auth/HttpContextCurrentUserAccessor.cs");
+      expect(keys).toContain("Auth/UserMiddleware.cs");
+    });
+
+    it("does NOT emit Auth/* files when the deployable has no `auth: required`", async () => {
+      const files = await emitForAuthSystem(SRC_NO_AUTH);
+      const keys = [...files.keys()];
+      expect(keys).not.toContain("Auth/User.cs");
+      expect(keys).not.toContain("Auth/UserMiddleware.cs");
+    });
+
+    it("Program.cs mounts UseMiddleware<UserMiddleware> between UseSwagger and MapControllers", async () => {
+      const files = await emitForAuthSystem(SRC_AUTH_REQUIRED);
+      const program = files.get("Program.cs")!;
+      expect(program).toMatch(/app\.UseMiddleware<UserMiddleware>\(\);/);
+      const sw = program.indexOf("UseSwagger()");
+      const mw = program.indexOf("UseMiddleware<UserMiddleware>");
+      const mc = program.indexOf("MapControllers()");
+      expect(sw).toBeGreaterThan(0);
+      expect(mw).toBeGreaterThan(sw);
+      expect(mc).toBeGreaterThan(mw);
+    });
+
+    it("UserMiddleware bypasses /health, /openapi.json, /swagger", async () => {
+      const files = await emitForAuthSystem(SRC_AUTH_REQUIRED);
+      const mw = files.get("Auth/UserMiddleware.cs")!;
+      expect(mw).toMatch(/"\/health"/);
+      expect(mw).toMatch(/"\/openapi\.json"/);
+      expect(mw).toMatch(/"\/swagger"/);
+    });
+
+    it("aggregate operation referencing currentUser gains a User parameter and the handler injects ICurrentUserAccessor", async () => {
+      const files = await emitForAuthSystem(SRC_AUTH_REQUIRED);
+      const order = files.get("Domain/Orders/Order.cs")!;
+      // Operation method takes the User param.
+      expect(order).toMatch(/public void Cancel\(User currentUser\)/);
+      // Body references currentUser.Role pascal-cased.
+      expect(order).toMatch(/currentUser\.Role/);
+      // Handler injects accessor and passes _currentUser.User.
+      const handler = files.get(
+        "Application/Orders/Commands/CancelHandler.cs",
+      )!;
+      expect(handler).toMatch(/ICurrentUserAccessor _currentUser/);
+      expect(handler).toMatch(/aggregate\.Cancel\(_currentUser\.User\)/);
+    });
+  });
 });

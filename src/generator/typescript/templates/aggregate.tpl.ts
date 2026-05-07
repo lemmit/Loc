@@ -9,6 +9,7 @@ import type {
   InvariantIR,
   OperationIR,
 } from "../../../ir/loom-ir.js";
+import { operationUsesCurrentUser } from "../../../ir/loom-ir.js";
 import { camel } from "../../../util/naming.js";
 import { lines } from "../../../util/code-builder.js";
 import { renderTsExpr, renderTsType } from "../render-expr.js";
@@ -43,6 +44,12 @@ export function renderAggregate(
   const enumAliases = ctx.enums.map((e) => e.name);
   const partsRendered = agg.parts.map((p) => renderEntity(partShape(p, agg)));
   const rootRendered = renderEntity(rootShape(agg));
+  // When any aggregate op references `currentUser` we pull the User
+  // type from the auth/ package so the operation's `currentUser:
+  // User` parameter typechecks.  Files emitted under deployables
+  // without `auth: required` don't import this — and operations
+  // can't reference currentUser there because the validator gates it.
+  const usesUser = agg.operations.some(operationUsesCurrentUser);
 
   return (
     lines(
@@ -56,6 +63,7 @@ export function renderAggregate(
         : null,
       'import type * as Events from "./events.js";',
       'import { DomainError } from "./errors.js";',
+      usesUser ? 'import type { User } from "../auth/user-types.js";' : null,
       "",
       partsRendered.length > 0
         ? partsRendered.map((p) => p + "\n").join("\n")
@@ -195,11 +203,19 @@ function renderEntity(e: EntityShape): string {
   }
 
   const ops: string[] = [];
+  // True when ANY op references currentUser — drives whether the
+  // file imports the User type from auth/.  Per-op signatures still
+  // get the parameter conditionally so a non-auth op stays
+  // un-burdened with a User param.
+  const anyOpUsesCurrentUser = e.operations.some(operationUsesCurrentUser);
   for (const op of e.operations) {
     const visibility = op.visibility === "public" ? "public" : "private";
-    const params = op.params
+    const usesUser = operationUsesCurrentUser(op);
+    const baseParams = op.params
       .map((p) => `${p.name}: ${renderTsType(p.type)}`)
       .join(", ");
+    const userParam = usesUser ? "currentUser: User" : "";
+    const params = [baseParams, userParam].filter(Boolean).join(", ");
     if (op.extern) {
       // Extern: emit `check<Pascal>(...)` running preconditions only.
       // The auto Hono route calls this, then dispatches to the

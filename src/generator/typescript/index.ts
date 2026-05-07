@@ -1,7 +1,12 @@
 import type { Model } from "../../language/generated/ast.js";
 import { lowerModel } from "../../ir/lower.js";
 import { enrichLoomModel } from "../../ir/enrichments.js";
-import type { BoundedContextIR, RepositoryIR } from "../../ir/loom-ir.js";
+import type {
+  BoundedContextIR,
+  DeployableIR,
+  RepositoryIR,
+  SystemIR,
+} from "../../ir/loom-ir.js";
 import { camel } from "../../util/naming.js";
 import {
   renderAggregate,
@@ -12,6 +17,7 @@ import {
   renderSchema,
   renderTestsFile,
 } from "./templates.js";
+import { emitAuthFiles } from "./auth-emit.js";
 import { buildRepositoryFile } from "./repository-builder.js";
 import { buildRoutesFile } from "./routes-builder.js";
 import { buildExternHandlersFile } from "./extern-builder.js";
@@ -44,13 +50,27 @@ export function generateTypeScript(model: Model): Map<string, string> {
  * System-mode entry: emits one project from a pre-filtered list of
  * contexts.  Used by the deployable orchestrator to scope the output
  * to a single deployable's modules.
+ *
+ * `system` (when present) carries the system-wide user-claim shape +
+ * the deployable's auth setting.  When the deployable opts in via
+ * `auth: required` AND the system declares a user block, the
+ * generator emits the auth/* package + mounts the middleware in
+ * http/index.ts.  Loose top-level contexts (no enclosing system)
+ * skip the auth path entirely.
  */
 export function generateTypeScriptForContexts(
   contexts: BoundedContextIR[],
+  system?: { deployable: DeployableIR; sys: SystemIR },
 ): Map<string, string> {
   const out = new Map<string, string>();
+  const authRequired = !!(
+    system?.deployable.auth?.required && system.sys.user
+  );
   for (const ctx of contexts) {
-    emitContext(ctx, out);
+    emitContext(ctx, out, { authRequired });
+  }
+  if (authRequired && system?.sys) {
+    emitAuthFiles(system.sys, out);
   }
   out.set("package.json", PROJECT_PACKAGE_JSON);
   out.set("tsconfig.json", PROJECT_TSCONFIG_JSON);
@@ -62,7 +82,11 @@ export function generateTypeScriptForContexts(
   return out;
 }
 
-function emitContext(ctx: BoundedContextIR, out: Map<string, string>): void {
+function emitContext(
+  ctx: BoundedContextIR,
+  out: Map<string, string>,
+  options?: { authRequired?: boolean },
+): void {
   out.set("domain/ids.ts", renderIds(ctx));
   out.set("domain/value-objects.ts", renderEnumsAndValueObjects(ctx));
   out.set("domain/events.ts", renderEvents(ctx));
@@ -95,7 +119,10 @@ function emitContext(ctx: BoundedContextIR, out: Map<string, string>): void {
     const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
     out.set("http/views.ts", buildViewsRoutesFile(ctx, aggsByName));
   }
-  out.set("http/index.ts", renderHttpIndex(ctx));
+  out.set(
+    "http/index.ts",
+    renderHttpIndex(ctx, { authRequired: !!options?.authRequired }),
+  );
 }
 
 function findRepoFor(ctx: BoundedContextIR, name: string): RepositoryIR | undefined {

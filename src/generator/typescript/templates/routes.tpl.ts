@@ -7,7 +7,11 @@ import { lines } from "../../../util/code-builder.js";
 // what's pleasant to read in a template.  This file owns just the
 // `createApp` composition entry, which mounts each aggregate's
 // sub-router and exposes `/openapi.json`.
-export function renderHttpIndex(ctx: BoundedContextIR): string {
+export function renderHttpIndex(
+  ctx: BoundedContextIR,
+  options?: { authRequired?: boolean },
+): string {
+  const authRequired = !!options?.authRequired;
   const aggregateImports = ctx.aggregates.flatMap((a) => [
     `import { ${camel(a.name)}Routes } from "./${camel(a.name)}.routes.js";`,
     `import { ${a.name}Repository } from "../db/repositories/${camel(a.name)}-repository.js";`,
@@ -40,11 +44,23 @@ export function renderHttpIndex(ctx: BoundedContextIR): string {
   const viewMount = hasViews
     ? `  app.route("/views", viewsRoutes(db, events));`
     : null;
+  // Auth wiring — when the deployable opts in via `auth: required`,
+  // we import the middleware + verifier registry, assert at startup
+  // that the user supplied a verifier, and mount the middleware
+  // after CORS but before any business route.
+  const authImport = authRequired
+    ? `import { authMiddleware } from "../auth/middleware.js";\nimport { assertUserVerifierRegistered } from "../auth/verifier.js";`
+    : null;
+  const authVerifyAssert = authRequired
+    ? "  assertUserVerifierRegistered();"
+    : null;
+  const authMount = authRequired ? '  app.use("*", authMiddleware);' : null;
   return (
     lines(
       "// Auto-generated.",
       'import { OpenAPIHono } from "@hono/zod-openapi";',
       'import { cors } from "hono/cors";',
+      authImport,
       ...aggregateImports,
       ...externImports,
       workflowImport,
@@ -61,11 +77,13 @@ export function renderHttpIndex(ctx: BoundedContextIR): string {
         ? "  // Verify every extern operation has a registered handler.  Fails\n  // fast at startup so a missing user implementation surfaces here\n  // instead of as a 500 on the first request."
         : null,
       ...externVerifyBody,
+      authVerifyAssert,
       "  const app = new OpenAPIHono();",
       "  // Permissive CORS so a generated React frontend on a different port",
       "  // can reach the API in dev compose.  Pin http/index.ts in",
       "  // .loomignore + tighten in production.",
       '  app.use("*", cors());',
+      authMount,
       "  // Liveness probe — used by docker-compose / kubernetes / smoke tests.",
       '  app.get("/health", (c) => c.json({ status: "ok" }));',
       ...aggregateRoutes,

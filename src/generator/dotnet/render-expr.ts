@@ -81,6 +81,13 @@ function renderRef(e: Extract<ExprIR, { kind: "ref" }>, ctx: CsRenderContext): s
       return `${ctx.thisName}.${pascal(e.name)}`;
     case "enum-value":
       return `${e.enumName}.${e.name}`;
+    case "current-user":
+      // Magic identifier for the system's `user { ... }` shape.  The
+      // emitter for each per-request context (operation, workflow,
+      // view bind) materialises a local / parameter named
+      // `currentUser` typed as `User`; this rendering keeps member
+      // access (`currentUser.role`) idiomatic on both backends.
+      return "currentUser";
     default:
       return e.name;
   }

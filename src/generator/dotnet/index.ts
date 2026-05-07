@@ -1,8 +1,14 @@
 import type { Model } from "../../language/generated/ast.js";
 import { lowerModel } from "../../ir/lower.js";
 import { enrichLoomModel } from "../../ir/enrichments.js";
-import type { BoundedContextIR, RepositoryIR } from "../../ir/loom-ir.js";
+import type {
+  BoundedContextIR,
+  DeployableIR,
+  RepositoryIR,
+  SystemIR,
+} from "../../ir/loom-ir.js";
 import { plural } from "../../util/naming.js";
+import { emitAuthFiles } from "./auth-emit.js";
 import { emitCqrs } from "./cqrs-emit.js";
 import { emitWorkflows } from "./workflow-emit.js";
 import { emitViews } from "./view-emit.js";
@@ -70,15 +76,21 @@ export function generateDotnet(model: Model): Map<string, string> {
  * list of contexts under the chosen namespace.  When emitting for a
  * deployable, the namespace is the deployable name.  When called with
  * a single context, the namespace is that context's name (legacy).
+ *
+ * `system` (when present) carries the system-wide user-claim shape +
+ * the deployable's auth setting — the entry threads them into the
+ * Auth/* file emitter and the Program.cs middleware mount.  Loose
+ * top-level contexts (no enclosing system) skip that path entirely.
  */
 export function generateDotnetForContexts(
   contexts: BoundedContextIR[],
   namespace?: string,
+  system?: { deployable: DeployableIR; sys: SystemIR },
 ): Map<string, string> {
   const out = new Map<string, string>();
   if (namespace !== undefined) {
     // Single project containing all the given contexts under one namespace.
-    emitProjectFromContexts(contexts, namespace, out);
+    emitProjectFromContexts(contexts, namespace, out, system);
   } else {
     for (const ctx of contexts) {
       emitContext(ctx, ctx.name, out);
@@ -91,6 +103,7 @@ function emitProjectFromContexts(
   contexts: BoundedContextIR[],
   ns: string,
   out: Map<string, string>,
+  system?: { deployable: DeployableIR; sys: SystemIR },
 ): void {
   // Common files written once per project, regardless of how many
   // contexts contribute their domain code.
@@ -125,7 +138,17 @@ function emitProjectFromContexts(
   };
   out.set("Infrastructure/Persistence/AppDbContext.cs", renderDbContext(merged, ns));
   out.set("Api/DomainExceptionFilter.cs", renderExceptionFilter(ns));
-  emitProject(merged, ns, out);
+  // Slice 1A auth files — emitted only when the deployable opts in
+  // via `auth: required` AND the system declares a user block (the
+  // validator already rejects the half-state).  When emitted, the
+  // Program.cs adopts the middleware mount + DI registrations.
+  const authRequired = !!(
+    system?.deployable.auth?.required && system.sys.user
+  );
+  if (authRequired && system?.sys) {
+    emitAuthFiles(system.sys, ns, out);
+  }
+  emitProject(merged, ns, out, { authRequired });
   emitTestProject(merged, ns, out);
 }
 
@@ -276,11 +299,15 @@ function emitProject(
   ctx: BoundedContextIR,
   ns: string,
   out: Map<string, string>,
+  options?: { authRequired?: boolean },
 ): void {
   const hasExtern = ctx.aggregates.some((a) =>
     a.operations.some((o) => o.extern),
   );
-  out.set("Program.cs", renderProgram(ctx, ns));
+  out.set(
+    "Program.cs",
+    renderProgram(ctx, ns, { authRequired: !!options?.authRequired }),
+  );
   out.set(`${ns}.csproj`, renderCsproj(ns, hasExtern));
   out.set("Dockerfile", renderDockerfile(ns));
   out.set(".dockerignore", renderDockerignore());

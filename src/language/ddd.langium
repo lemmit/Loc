@@ -23,7 +23,28 @@ System:
     '}';
 
 SystemMember:
-    Module | Deployable | BoundedContext | TestE2E;
+    Module | Deployable | BoundedContext | TestE2E | UserBlock;
+
+// System-level user shape — declares the strongly-typed claim record
+// that backends decode JWT tokens into.  At most one per system
+// (validator enforces).  Fields use the standard `name: TypeRef`
+// vocabulary.  Backends with `auth: required` deployables emit a User
+// type + verifier hook + middleware; the `currentUser` magic
+// identifier in expression bodies is typed against this shape.
+//
+// We use `UserField` rather than `Property` so the canonical JWT
+// claim name `id` (which is otherwise a reserved keyword for the
+// implicit aggregate identity) is admissible here.
+UserBlock:
+    'user' '{'
+        fields+=UserField*
+    '}';
+
+UserField:
+    name=UserFieldName ':' type=TypeRef;
+
+UserFieldName returns string:
+    ID | 'id';
 
 // E2E test against a running deployable.  The body reuses the per-
 // aggregate TestStatement vocabulary (let / expect / expectThrows /
@@ -47,10 +68,18 @@ Deployable:
         ('modules' ':' modules+=[Module:ID] (',' modules+=[Module:ID])* ','?)?
         ('targets' ':' targets=[Deployable:ID] ','?)?
         ('port' ':' port=INT ','?)?
+        ('auth' ':' auth=AuthMode ','?)?
     '}';
 
 Platform returns string:
     'dotnet' | 'hono' | 'react';
+
+// Per-deployable auth opt-in.  `required` enables JWT-decode middleware
+// and the user-supplied verifier hook.  Absence keeps the deployable
+// open (existing behaviour).  Future modes (`optional`, `forbidden`)
+// can extend the union without touching consumers.
+AuthMode returns string:
+    'required';
 
 // ---------------------------------------------------------------------------
 // Top-level

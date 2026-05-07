@@ -1060,4 +1060,178 @@ describe("Loom IR validation (post-lowering)", async () => {
       JSON.stringify(diags),
     ).toBe(true);
   });
+
+  // ---------------------------------------------------------------------------
+  // Slice 1A — auth + currentUser plumbing
+  // ---------------------------------------------------------------------------
+
+  it("accepts an auth-required deployable when the system has a user block", async () => {
+    const loom = await loomFrom(`
+      system Acme {
+        user {
+          id: string
+          role: string
+        }
+        module M {
+          context T {
+            aggregate Order { customerId: string, status: string }
+            repository Orders for Order { }
+          }
+        }
+        deployable api { platform: dotnet, modules: M, port: 8080, auth: required }
+      }
+    `);
+    const errors = validateLoomModel(loom).filter(
+      (d) => d.severity === "error",
+    );
+    expect(errors).toEqual([]);
+  });
+
+  it("rejects auth: required when the system has no user block", async () => {
+    const loom = await loomFrom(`
+      system Acme {
+        module M { context T { aggregate Order { x: int } repository Orders for Order { } } }
+        deployable api { platform: dotnet, modules: M, port: 8080, auth: required }
+      }
+    `);
+    const diags = validateLoomModel(loom);
+    expect(
+      diags.some(
+        (d) =>
+          d.severity === "error" &&
+          /'auth: required' but system 'Acme' declares no 'user/.test(d.message),
+      ),
+      JSON.stringify(diags),
+    ).toBe(true);
+  });
+
+  it("rejects duplicate user-block field names", async () => {
+    // Property declarations under `user { ... }` are whitespace-
+    // separated, not comma-separated — the grammar uses `fields+=Property*`.
+    const loom = await loomFrom(`
+      system Acme {
+        user {
+          id: string
+          id: int
+        }
+        module M { context T { aggregate Order { x: int } repository Orders for Order { } } }
+      }
+    `);
+    const diags = validateLoomModel(loom);
+    expect(
+      diags.some(
+        (d) =>
+          d.severity === "error" &&
+          /user block declares field 'id' more than once/.test(d.message),
+      ),
+      JSON.stringify(diags),
+    ).toBe(true);
+  });
+
+  it("rejects currentUser inside an aggregate invariant", async () => {
+    const loom = await loomFrom(`
+      system Acme {
+        user { id: string, role: string }
+        module M {
+          context T {
+            aggregate Order {
+              status: string
+              invariant currentUser.role == "admin"
+            }
+            repository Orders for Order { }
+          }
+        }
+      }
+    `);
+    const diags = validateLoomModel(loom);
+    expect(
+      diags.some(
+        (d) =>
+          d.severity === "error" &&
+          /currentUser is only available in per-request handlers/.test(
+            d.message,
+          ),
+      ),
+      JSON.stringify(diags),
+    ).toBe(true);
+  });
+
+  it("rejects currentUser inside a derived property", async () => {
+    const loom = await loomFrom(`
+      system Acme {
+        user { id: string }
+        module M {
+          context T {
+            aggregate Order {
+              x: string
+              derived label: string = currentUser.id
+            }
+            repository Orders for Order { }
+          }
+        }
+      }
+    `);
+    const diags = validateLoomModel(loom);
+    expect(
+      diags.some(
+        (d) =>
+          d.severity === "error" &&
+          /currentUser is only available in per-request handlers/.test(
+            d.message,
+          ),
+      ),
+      JSON.stringify(diags),
+    ).toBe(true);
+  });
+
+  it("accepts currentUser inside an operation body's precondition", async () => {
+    const loom = await loomFrom(`
+      system Acme {
+        user { id: string, role: string }
+        module M {
+          context T {
+            aggregate Order {
+              status: string
+              operation cancel() {
+                precondition currentUser.role == "manager"
+                status := "cancelled"
+              }
+            }
+            repository Orders for Order { }
+          }
+        }
+      }
+    `);
+    const errors = validateLoomModel(loom).filter(
+      (d) => d.severity === "error",
+    );
+    expect(errors, JSON.stringify(errors)).toEqual([]);
+  });
+
+  it("rejects currentUser inside a repository find filter (slice 1A scope)", async () => {
+    const loom = await loomFrom(`
+      system Acme {
+        user { id: string }
+        module M {
+          context T {
+            aggregate Order { customerId: string }
+            repository Orders for Order {
+              find mine(): Order[] where customerId == currentUser.id
+            }
+          }
+        }
+      }
+    `);
+    const diags = validateLoomModel(loom);
+    expect(
+      diags.some(
+        (d) =>
+          d.severity === "error" &&
+          /currentUser is only available in per-request handlers/.test(
+            d.message,
+          ),
+      ),
+      JSON.stringify(diags),
+    ).toBe(true);
+  });
 });

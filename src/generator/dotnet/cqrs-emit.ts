@@ -5,6 +5,7 @@ import type {
   RepositoryIR,
   TypeIR,
 } from "../../ir/loom-ir.js";
+import { operationUsesCurrentUser } from "../../ir/loom-ir.js";
 import { pascal, plural } from "../../util/naming.js";
 import {
   aggregateResponseParams,
@@ -210,7 +211,20 @@ function emitOperationCommandsAndHandlers(
         commandParams: params,
       }),
     );
-    const callArgs = op.params.map((p) => `cmd.${pascal(p.name)}`).join(", ");
+    // When the op body references `currentUser`, the aggregate
+    // method's signature picks up a trailing `User currentUser`
+    // parameter; the handler injects ICurrentUserAccessor and passes
+    // its `User` into the call.  Any non-auth-aware op stays
+    // untouched — no DI changes, no handler-ctor surface widening.
+    const usesUser = operationUsesCurrentUser(op);
+    const baseCallArgs = op.params.map((p) => `cmd.${pascal(p.name)}`);
+    const callArgs = (
+      usesUser ? [...baseCallArgs, "_currentUser.User"] : baseCallArgs
+    ).join(", ");
+    const userExtraDeps = usesUser
+      ? [{ type: "ICurrentUserAccessor", field: "_currentUser" }]
+      : [];
+    const userExtraUsings = usesUser ? [`${ns}.Auth`] : [];
     if (op.extern) {
       // Emit the user-implementable handler interface alongside the
       // auto Mediator handler, then dispatch through it.
@@ -243,8 +257,14 @@ function emitOperationCommandsAndHandlers(
           aggName: agg.name,
           handlerName: `${pascal(op.name)}Handler`,
           commandName: `${pascal(op.name)}Command`,
-          extraDeps: [{ type: ifaceName, field: "_user" }],
-          extraUsings: [`${ns}.Application.${plural(agg.name)}.Handlers`],
+          extraDeps: [
+            { type: ifaceName, field: "_user" },
+            ...userExtraDeps,
+          ],
+          extraUsings: [
+            `${ns}.Application.${plural(agg.name)}.Handlers`,
+            ...userExtraUsings,
+          ],
           body:
             `        var aggregate = await _repo.GetByIdAsync(cmd.Id, ct)\n` +
             `            ?? throw new AggregateNotFoundException($"${agg.name} {cmd.Id} not found");\n` +
@@ -265,6 +285,8 @@ function emitOperationCommandsAndHandlers(
         aggName: agg.name,
         handlerName: `${pascal(op.name)}Handler`,
         commandName: `${pascal(op.name)}Command`,
+        extraDeps: userExtraDeps,
+        extraUsings: userExtraUsings,
         body:
           `        var aggregate = await _repo.GetByIdAsync(cmd.Id, ct)\n` +
           `            ?? throw new AggregateNotFoundException($"${agg.name} {cmd.Id} not found");\n` +

@@ -63,10 +63,11 @@ the other.
 | Form | Purpose |
 | --- | --- |
 | `module Name { … }` | Groups one or more bounded contexts under a name.  A module is a logical unit; it doesn't directly produce code. |
-| `deployable name { platform: dotnet\|hono, modules: A, B, port: N }` | A concrete artefact: one project, one HTTP server, one DbContext, listening on `port`.  Selects which modules to ship. |
+| `deployable name { platform: dotnet\|hono, modules: A, B, port: N, auth: required? }` | A concrete artefact: one project, one HTTP server, one DbContext, listening on `port`.  Selects which modules to ship.  Optional `auth: required` enables JWT-decode middleware on this deployable; see [`auth.md`](auth.md). |
 | `deployable name { platform: react, targets: <other-deployable>, port: N }` | A frontend deployable: a Vite-built React + RQ + Zod + Mantine SPA whose API base URL is wired to `targets`'s port.  Modules are inherited from the target. |
 | `context Name { … }` | Allowed directly inside a system; treated as if it were in an implicit `_default` module. |
 | `test e2e "name" against <deployable> { … }` | End-to-end test that runs against the named deployable's HTTP API; lowers to a vitest file at the system output root. |
+| `user { id: string, role: string, … }` | System-wide JWT-claim shape decoded by the verifier hook.  At most one per system; required when any deployable opts in via `auth: required`.  The `currentUser` magic identifier in operation / workflow / view-bind expressions is typed against this shape.  See [`auth.md`](auth.md). |
 
 A module may appear in any number of deployables — its code is inlined
 into each.  For v1 there is no shared-library / npm-workspace shape;

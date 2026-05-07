@@ -5,7 +5,12 @@ import { pascal, plural } from "../../../util/naming.js";
 // .dockerignore boilerplate.  Pure substitution templates — no
 // iteration tricks.
 
-export function renderProgram(ctx: BoundedContextIR, ns: string): string {
+export function renderProgram(
+  ctx: BoundedContextIR,
+  ns: string,
+  options?: { authRequired?: boolean },
+): string {
+  const authRequired = !!options?.authRequired;
   const repoRegistrations = ctx.aggregates
     .map(
       (a) =>
@@ -58,12 +63,45 @@ ${externHandlers
   .join("\n")}
 }
 `;
+  // Auth middleware mount — pinned BETWEEN UseSwagger and MapControllers
+  // so that JWT verification happens after the framework's static-asset
+  // pipeline (which serves /swagger UI) but before any business route
+  // executes.  Bypass list lives in UserMiddleware.cs.
+  const authUsing = authRequired ? `\nusing ${ns}.Auth;` : "";
+  const authDi = authRequired
+    ? `
+// Auth — JWT decode middleware + scoped accessor.  Register your
+// IUserVerifier implementation here (or anywhere in DI); the verifier
+// translates inbound tokens into the strongly-typed User claim record.
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICurrentUserAccessor, HttpContextCurrentUserAccessor>();
+`
+    : "";
+  const authVerify = authRequired
+    ? `
+// Verify the user supplied an IUserVerifier.  Without it every request
+// would fail at the middleware, surfacing as a confusing 500; failing
+// fast at startup makes the missing registration obvious.
+using (var scope = app.Services.CreateScope())
+{
+    if (scope.ServiceProvider.GetService<IUserVerifier>() is null)
+        throw new System.InvalidOperationException(
+            "Missing IUserVerifier registration. Register an implementation that " +
+            "decodes inbound JWTs into the generated User record (e.g. " +
+            "builder.Services.AddScoped<IUserVerifier, MyJwtVerifier>()).");
+}
+`
+    : "";
+  const authMount = authRequired
+    ? `app.UseMiddleware<UserMiddleware>();
+`
+    : "";
   return `// Auto-generated.
 using Microsoft.EntityFrameworkCore;
 using ${ns}.Api;
 using ${ns}.Domain.Common;
 using ${ns}.Infrastructure.Persistence;
-using ${ns}.Infrastructure.Events;
+using ${ns}.Infrastructure.Events;${authUsing}
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -77,7 +115,7 @@ builder.Services.AddMediator(opts => opts.ServiceLifetime = ServiceLifetime.Scop
 builder.Services.AddSingleton<IDomainEventDispatcher, NoopDomainEventDispatcher>();
 
 ${repoRegistrations}
-
+${authDi}
 ${externScan}
 
 builder.Services.AddControllers(opts =>
@@ -116,7 +154,7 @@ var app = builder.Build();
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.UseCors();
 app.UseSwagger();
-app.MapControllers();
+${authMount}app.MapControllers();
 
 // Dev-friendly schema bootstrap: create the schema from the model on
 // first boot.  System-mode compose isolates each deployable to its own
@@ -128,7 +166,7 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.EnsureCreated();
 }
-${externVerify}
+${authVerify}${externVerify}
 app.Run();
 `;
 }

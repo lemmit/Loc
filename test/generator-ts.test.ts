@@ -626,4 +626,116 @@ describe("typescript generator", () => {
       /orderLineParentIdIdx: index\("order_lines_parent_id_idx"\)\.on\(table\.parentId\)/,
     );
   });
+
+  // -------------------------------------------------------------------------
+  // Slice 1A — auth scaffolding
+  // -------------------------------------------------------------------------
+
+  describe("auth scaffolding (slice 1A)", () => {
+    async function emitForAuthSystem(src: string): Promise<Map<string, string>> {
+      const { parseHelper } = await import("langium/test");
+      const services = createDddServices(NodeFileSystem);
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(src, { validation: true });
+      const { lowerModel } = await import("../src/ir/lower.js");
+      const { enrichLoomModel } = await import("../src/ir/enrichments.js");
+      const { generateTypeScriptForContexts } = await import(
+        "../src/generator/typescript/index.js"
+      );
+      const loom = enrichLoomModel(lowerModel(doc.parseResult.value as Model));
+      const sys = loom.systems[0]!;
+      const dep = sys.deployables.find((d) => d.platform === "hono")!;
+      const contexts = sys.modules.flatMap((m) => m.contexts);
+      return generateTypeScriptForContexts(contexts, { deployable: dep, sys });
+    }
+
+    const SRC_AUTH_REQUIRED = `
+      system Acme {
+        user {
+          id: string
+          role: string
+        }
+        module Sales {
+          context Orders {
+            aggregate Order {
+              customerId: string
+              status: string
+              operation cancel() {
+                precondition currentUser.role == "manager"
+                status := "cancelled"
+              }
+            }
+            repository Orders for Order { }
+          }
+        }
+        deployable api {
+          platform: hono
+          modules: Sales
+          port: 3000
+          auth: required
+        }
+      }
+    `;
+
+    const SRC_NO_AUTH = `
+      system Acme {
+        user { id: string }
+        module Sales {
+          context Orders {
+            aggregate Order { customerId: string }
+            repository Orders for Order { }
+          }
+        }
+        deployable api {
+          platform: hono
+          modules: Sales
+          port: 3000
+        }
+      }
+    `;
+
+    it("emits auth/* files when deployable opts in via `auth: required`", async () => {
+      const files = await emitForAuthSystem(SRC_AUTH_REQUIRED);
+      const keys = [...files.keys()];
+      expect(keys).toContain("auth/user-types.ts");
+      expect(keys).toContain("auth/verifier.ts");
+      expect(keys).toContain("auth/middleware.ts");
+    });
+
+    it("does NOT emit auth/* files when the deployable has no `auth: required`", async () => {
+      const files = await emitForAuthSystem(SRC_NO_AUTH);
+      const keys = [...files.keys()];
+      expect(keys).not.toContain("auth/user-types.ts");
+      expect(keys).not.toContain("auth/middleware.ts");
+    });
+
+    it("http/index.ts mounts authMiddleware after cors() and asserts verifier registration", async () => {
+      const files = await emitForAuthSystem(SRC_AUTH_REQUIRED);
+      const httpIndex = files.get("http/index.ts")!;
+      expect(httpIndex).toMatch(/app\.use\("\*", authMiddleware\);/);
+      expect(httpIndex).toMatch(/assertUserVerifierRegistered\(\);/);
+      const cors = httpIndex.indexOf('app.use("*", cors())');
+      const auth = httpIndex.indexOf('app.use("*", authMiddleware)');
+      expect(cors).toBeGreaterThan(0);
+      expect(auth).toBeGreaterThan(cors);
+    });
+
+    it("middleware bypasses /health, /openapi.json, /swagger", async () => {
+      const files = await emitForAuthSystem(SRC_AUTH_REQUIRED);
+      const mw = files.get("auth/middleware.ts")!;
+      expect(mw).toMatch(/"\/health"/);
+      expect(mw).toMatch(/"\/openapi\.json"/);
+      expect(mw).toMatch(/"\/swagger"/);
+    });
+
+    it("aggregate operation referencing currentUser gains a User parameter and the route threads currentUser into the call", async () => {
+      const files = await emitForAuthSystem(SRC_AUTH_REQUIRED);
+      const order = files.get("domain/order.ts")!;
+      expect(order).toMatch(/cancel\([^)]*currentUser: User[^)]*\)/);
+      expect(order).toMatch(/currentUser\.role/);
+      const route = files.get("http/order.routes.ts")!;
+      expect(route).toMatch(/c\.get\("currentUser"\)/);
+      expect(route).toMatch(/aggregate\.cancel\(currentUser\)/);
+    });
+  });
 });

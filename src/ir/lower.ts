@@ -42,6 +42,7 @@ import {
   isSystem,
   isTestBlock,
   isTestE2E,
+  isUserBlock,
   isValueObject,
   isView,
   isWorkflow,
@@ -71,6 +72,7 @@ import type {
   TestIR,
   TestStmtIR,
   TypeIR,
+  UserIR,
   ValueObjectIR,
   ViewIR,
   WorkflowIR,
@@ -105,12 +107,33 @@ export function lowerModel(model: Model): LoomModel {
   const looseContexts: BoundedContextIR[] = [];
   for (const m of model.members) {
     if (isSystem(m)) systems.push(lowerSystem(m));
+    // Top-level loose contexts (legacy single-deployable mode) have
+    // no enclosing system, so no user block ever applies — the env's
+    // `currentUser` resolution falls through to ordinary lookup.
     else if (isBoundedContext(m)) looseContexts.push(lowerContext(m));
   }
   return { systems, contexts: looseContexts };
 }
 
 function lowerSystem(sys: import("../language/generated/ast.js").System): SystemIR {
+  // Pre-pass over members: pull the user block out first so every
+  // context lowering downstream sees the same shape.  At most one
+  // block per system (validator enforces; we take the last one if
+  // the parser somehow accepts more).  User fields use a separate
+  // grammar rule (`UserField`) so the canonical JWT claim name `id`
+  // (otherwise reserved for aggregate identity) is admissible.
+  let user: UserIR | undefined;
+  for (const m of sys.members) {
+    if (isUserBlock(m)) {
+      user = {
+        fields: m.fields.map((f): FieldIR => ({
+          name: f.name,
+          type: lowerType(f.type),
+          optional: !!f.type?.optional,
+        })),
+      };
+    }
+  }
   const modules: ModuleIR[] = [];
   const deployables: DeployableIR[] = [];
   const e2eBlocks: import("../language/generated/ast.js").TestE2E[] = [];
@@ -121,10 +144,10 @@ function lowerSystem(sys: import("../language/generated/ast.js").System): System
     if (isModule(m)) {
       modules.push({
         name: m.name,
-        contexts: m.contexts.map(lowerContext),
+        contexts: m.contexts.map((c) => lowerContext(c, user)),
       });
     } else if (isBoundedContext(m)) {
-      looseContexts.push(lowerContext(m));
+      looseContexts.push(lowerContext(m, user));
     } else if (isDeployable(m)) {
       deployables.push(lowerDeployable(m));
     } else if (isTestE2E(m)) {
@@ -141,8 +164,12 @@ function lowerSystem(sys: import("../language/generated/ast.js").System): System
   // chain; resolution happens at render time against the target
   // deployable's IR.  The lowering env is minimal — bare-name lookups
   // would mostly be `unknown` anyway because e2e tests don't sit
-  // inside a bounded context.
-  const e2eEnv: Env = { locals: new Map() };
+  // inside a bounded context.  The `user` field carries the system's
+  // user block down so that e2e bodies could reference `currentUser`
+  // if we extend slice 1A in the future; the slice 1A validator
+  // doesn't surface diagnostics from e2e because tests aren't user
+  // input received by the system at runtime.
+  const e2eEnv: Env = { locals: new Map(), user };
   // Test kind comes from the target deployable's platform: react →
   // UI test (Playwright spec via page objects), anything else →
   // api test (vitest+fetch).  This avoids reserving a `'ui'` keyword
@@ -153,7 +180,7 @@ function lowerSystem(sys: import("../language/generated/ast.js").System): System
     const kind: "api" | "ui" = target?.platform === "react" ? "ui" : "api";
     return lowerE2E(b, e2eEnv, kind);
   });
-  return { name: sys.name, modules, deployables, e2eTests };
+  return { name: sys.name, modules, deployables, e2eTests, user };
 }
 
 function lowerE2E(
@@ -197,12 +224,16 @@ function lowerDeployable(
   d: import("../language/generated/ast.js").Deployable,
 ): DeployableIR {
   const platform = (d.platform ?? "hono") as Platform;
+  // `auth: required` is the only AuthMode in slice 1A.  Future modes
+  // (`optional` / `forbidden`) would extend this branch.
+  const auth = d.auth === "required" ? { required: true } : undefined;
   return {
     name: d.name,
     platform,
     moduleNames: d.modules.map((ref) => ref.ref?.name ?? "").filter(Boolean),
     port: d.port ?? defaultPort(platform),
     targetName: d.targets?.ref?.name,
+    auth,
   };
 }
 
@@ -212,12 +243,14 @@ function defaultPort(platform: Platform | undefined): number {
   return 3000;
 }
 
-function lowerContext(ctx: BoundedContext): BoundedContextIR {
+function lowerContext(ctx: BoundedContext, user?: UserIR): BoundedContextIR {
   // Lowering produces a faithful AST projection only.  Auto-included
   // `findAll`, react `moduleNames` inheritance, and wire-shape
   // derivation all live in `enrichLoomModel` (src/ir/enrichments.ts)
-  // which runs after lowering.
-  const env = newEnv(ctx);
+  // which runs after lowering.  `user` (when set) threads the
+  // system's user-claim shape into every expression context so the
+  // `currentUser` magic identifier resolves to a typed shape.
+  const env = newEnv(ctx, user);
   const enums: EnumIR[] = [];
   const valueObjects: ValueObjectIR[] = [];
   const events: EventIR[] = [];
@@ -230,7 +263,7 @@ function lowerContext(ctx: BoundedContext): BoundedContextIR {
     else if (isValueObject(m)) valueObjects.push(lowerValueObject(m, env));
     else if (isEventDecl(m)) events.push(lowerEvent(m));
     else if (isAggregate(m)) aggregates.push(lowerAggregate(m, env));
-    else if (isRepository(m)) repositories.push(lowerRepository(m));
+    else if (isRepository(m)) repositories.push(lowerRepository(m, user));
     else if (isWorkflow(m)) workflows.push(lowerWorkflow(m, env, ctx));
     else if (isView(m)) views.push(lowerView(m, env));
   }
@@ -350,7 +383,7 @@ function lowerEntityPart(
   };
 }
 
-function lowerRepository(repo: Repository): RepositoryIR {
+function lowerRepository(repo: Repository, user?: UserIR): RepositoryIR {
   return {
     name: repo.name,
     aggregateName: repo.aggregate?.ref?.name ?? "Unknown",
@@ -358,7 +391,11 @@ function lowerRepository(repo: Repository): RepositoryIR {
       const aggRoot = repo.aggregate?.ref;
       // Build env: each find param + the aggregate's properties as
       // `this`-rooted refs so the filter can reference them by name.
-      let env = newEnv(repo.$container as BoundedContext);
+      // `user` is threaded so `currentUser` resolves to a typed ref —
+      // the validator (`validateAuth`) then rejects any current-user
+      // reference inside a where filter, since slice 1A doesn't
+      // support row-level filtering by user (slice 1C).
+      let env = newEnv(repo.$container as BoundedContext, user);
       if (aggRoot) env = inAggregate(env, aggRoot);
       for (const p of f.params) {
         env = withLocal(env, p.name, "param", lowerType(p.type));

@@ -11,8 +11,8 @@ const honoPlatform: PlatformSurface = {
   // one of these names would compile-error with TS2393 "Duplicate
   // function implementation".
   reservedRepositoryFindNames: new Set(["save", "findById", "getById"]),
-  emitProject({ contexts }): Map<string, string> {
-    return generateTypeScriptForContexts(contexts);
+  emitProject({ contexts, deployable, sys }): Map<string, string> {
+    return generateTypeScriptForContexts(contexts, { deployable, sys });
   },
   composeService({ slug }): ComposeServiceShape {
     return {

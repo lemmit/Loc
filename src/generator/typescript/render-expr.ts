@@ -91,6 +91,12 @@ function renderRef(e: Extract<ExprIR, { kind: "ref" }>, ctx: TsRenderContext): s
         : `this.${camel(e.name)}`;
     case "enum-value":
       return `${e.enumName}.${e.name}`;
+    case "current-user":
+      // Magic identifier for the system's user-claim shape — matches
+      // the parameter / local that each per-request emitter
+      // materialises (operation methods get a `currentUser: User`
+      // param, workflow + view-route handlers introduce a local).
+      return "currentUser";
     default:
       return e.name;
   }

@@ -339,6 +339,21 @@ export interface SystemIR {
   modules: ModuleIR[];
   deployables: DeployableIR[];
   e2eTests: TestE2EIR[];
+  /** Optional system-wide user-claim shape.  Populated when the source
+   *  declares a `user { ... }` block at system scope.  Required when
+   *  any deployable has `auth: { required: true }` (validator
+   *  enforces).  The fields are the typed claims that backends decode
+   *  JWT tokens into; `currentUser` references in expression bodies
+   *  resolve members against this shape. */
+  user?: UserIR;
+}
+
+/** System-level `user { ... }` block.  Each field carries an
+ *  ordinary TypeIR — primitives, `Id<X>`, enums, value-objects,
+ *  optional `T?` — and contributes to the emitted User type plus
+ *  the `currentUser` magic identifier's member-access surface. */
+export interface UserIR {
+  fields: FieldIR[];
 }
 
 /** End-to-end test that targets a running deployable. */
@@ -371,6 +386,12 @@ export interface DeployableIR {
    * platform === "react"; the frontend's API base URL is derived from
    * the target's port. */
   targetName?: string;
+  /** Per-deployable auth opt-in.  Populated when the source declares
+   *  `auth: required` on the deployable.  Backends with
+   *  `auth.required === true` emit JWT-decode middleware + a verifier
+   *  hook the user implements; deployables without this stay open
+   *  (existing behaviour). */
+  auth?: { required: boolean };
 }
 
 // ---------------------------------------------------------------------------
@@ -427,6 +448,7 @@ export type RefKind =
   | "this-derived"
   | "helper-fn"
   | "enum-value"
+  | "current-user"        // magic identifier — system's `user` block shape
   | "unknown";
 
 export type CallKind =
@@ -525,4 +547,76 @@ export function allContexts(loom: LoomModel): BoundedContextIR[] {
 /** Every aggregate in the model, regardless of which context owns it. */
 export function allAggregates(loom: LoomModel): AggregateIR[] {
   return allContexts(loom).flatMap((c) => c.aggregates);
+}
+
+// ---------------------------------------------------------------------------
+// `currentUser` reference detection.
+//
+// Every per-platform emitter needs to know "does this operation /
+// workflow / view body actually reference the `currentUser` magic
+// identifier?" so it can:
+//   - thread a `User` parameter into the generated method signature,
+//   - inject the request-scoped user accessor into the Mediator
+//     handler / Hono route,
+//   - decide whether to import the auth types at all.
+// One IR-level helper avoids duplicating the walker on each backend.
+// ---------------------------------------------------------------------------
+
+/** True when the expression tree contains at least one `current-user`
+ *  ref (either bare `currentUser` or a member-access rooted in it). */
+export function exprUsesCurrentUser(e: ExprIR | undefined): boolean {
+  if (!e) return false;
+  if (e.kind === "ref" && e.refKind === "current-user") return true;
+  switch (e.kind) {
+    case "method-call":
+      if (exprUsesCurrentUser(e.receiver)) return true;
+      return e.args.some(exprUsesCurrentUser);
+    case "member":
+      return exprUsesCurrentUser(e.receiver);
+    case "binary":
+      return exprUsesCurrentUser(e.left) || exprUsesCurrentUser(e.right);
+    case "ternary":
+      return (
+        exprUsesCurrentUser(e.cond) ||
+        exprUsesCurrentUser(e.then) ||
+        exprUsesCurrentUser(e.otherwise)
+      );
+    case "unary":
+      return exprUsesCurrentUser(e.operand);
+    case "paren":
+      return exprUsesCurrentUser(e.inner);
+    case "call":
+      return e.args.some(exprUsesCurrentUser);
+    case "lambda":
+      return exprUsesCurrentUser(e.body);
+    case "new":
+    case "object":
+      return e.fields.some((f) => exprUsesCurrentUser(f.value));
+  }
+  return false;
+}
+
+/** True when the operation's body — preconditions, assignments,
+ *  emits, calls — references `currentUser` anywhere. */
+export function operationUsesCurrentUser(op: OperationIR): boolean {
+  return op.statements.some(stmtUsesCurrentUser);
+}
+
+function stmtUsesCurrentUser(s: StmtIR): boolean {
+  switch (s.kind) {
+    case "precondition":
+      return exprUsesCurrentUser(s.expr);
+    case "let":
+      return exprUsesCurrentUser(s.expr);
+    case "assign":
+    case "add":
+    case "remove":
+      return exprUsesCurrentUser(s.value);
+    case "emit":
+      return s.fields.some((f) => exprUsesCurrentUser(f.value));
+    case "call":
+      return s.args.some(exprUsesCurrentUser);
+    case "expression":
+      return exprUsesCurrentUser(s.expr);
+  }
 }

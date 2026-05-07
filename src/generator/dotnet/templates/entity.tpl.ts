@@ -2,6 +2,7 @@ import type {
   AggregateIR,
   EntityPartIR,
 } from "../../../ir/loom-ir.js";
+import { operationUsesCurrentUser } from "../../../ir/loom-ir.js";
 import { pascal, plural } from "../../../util/naming.js";
 import { lines } from "../../../util/code-builder.js";
 import {
@@ -98,10 +99,18 @@ export function renderEntity(
   });
 
   const opLines: string[] = [];
+  // Whether any operation references `currentUser`.  When true, we
+  // pull in the Auth namespace alongside the existing usings so the
+  // `User` type resolves; per-op signatures append a `User currentUser`
+  // parameter (and the Mediator handler passes _currentUser.User).
+  const anyOpUsesCurrentUser = operations.some(operationUsesCurrentUser);
   for (const op of operations) {
-    const params = op.params
+    const usesUser = operationUsesCurrentUser(op);
+    const userParam = usesUser ? "User currentUser" : "";
+    const baseParams = op.params
       .map((p) => `${renderCsType(p.type)} ${p.name}`)
       .join(", ");
+    const params = [baseParams, userParam].filter(Boolean).join(", ");
     if (op.extern) {
       // Extern op: emit a `Check<Pascal>` that runs preconditions only.
       // The auto-generated Mediator handler calls this, then dispatches
@@ -215,6 +224,7 @@ export function renderEntity(
       `using ${ns}.Domain.ValueObjects;`,
       `using ${ns}.Domain.Enums;`,
       `using ${ns}.Domain.Common;`,
+      anyOpUsesCurrentUser ? `using ${ns}.Auth;` : null,
       "",
       `namespace ${ns}.Domain.${plural(rootName)};`,
       "",

@@ -12,9 +12,9 @@ const dotnetPlatform: PlatformSurface = {
   // it DOES on Hono — the validator takes the union across all
   // platforms (see `validateLoomModel`).
   reservedRepositoryFindNames: new Set(["saveAsync", "getByIdAsync"]),
-  emitProject({ contexts, deployable }): Map<string, string> {
+  emitProject({ contexts, deployable, sys }): Map<string, string> {
     const namespace = deployable.name[0]!.toUpperCase() + deployable.name.slice(1);
-    return generateDotnetForContexts(contexts, namespace);
+    return generateDotnetForContexts(contexts, namespace, { deployable, sys });
   },
   composeService({ slug }): ComposeServiceShape {
     return {
