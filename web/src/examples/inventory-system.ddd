@@ -5,6 +5,12 @@
 
 system InventorySystem {
 
+  // Warehouse-y amber for the demo — physical-goods vibe.
+  theme {
+    primary: "#f59e0b"
+    radius: "lg"
+  }
+
   module Inventory {
     context Inventory {
 

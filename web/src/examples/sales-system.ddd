@@ -4,6 +4,18 @@
 
 system SalesSystem {
 
+  // Visual identity for the React frontend — design tokens land
+  // in `src/theme.ts` as a Mantine `createTheme(...)` config.
+  // The four tokens are framework-agnostic ("primary"/"neutral"/
+  // "radius"/"fontFamily") so the same source applies whether the
+  // generator targets Mantine (today) or shadcn/ui (future).
+  theme {
+    primary: "#0ea5e9"
+    neutral: "#64748b"
+    radius: "md"
+    fontFamily: "Inter, system-ui, sans-serif"
+  }
+
   module Sales {
     context Sales {
 

@@ -5,6 +5,14 @@
 
 system BankingSystem {
 
+  // Banking-y green for the demo — financial software vibe.
+  theme {
+    primary: "#059669"
+    neutral: "#52525b"
+    radius: "sm"
+    fontFamily: "system-ui, -apple-system, sans-serif"
+  }
+
   module Banking {
     context Banking {
 
