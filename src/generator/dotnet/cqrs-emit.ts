@@ -5,7 +5,10 @@ import type {
   RepositoryIR,
   TypeIR,
 } from "../../ir/loom-ir.js";
-import { operationUsesCurrentUser } from "../../ir/loom-ir.js";
+import {
+  findUsesCurrentUser,
+  operationUsesCurrentUser,
+} from "../../ir/loom-ir.js";
 import { pascal, plural } from "../../util/naming.js";
 import {
   aggregateResponseParams,
@@ -382,6 +385,7 @@ function emitFindQueriesAndHandlers(
   if (!repo) return;
   for (const find of repo.finds) {
     const queryReturn = renderResponseReturnType(find.returnType, agg);
+    const usesUser = findUsesCurrentUser(find);
     out.set(
       `Application/${aggFolder}/Queries/${pascal(find.name)}Query.cs`,
       renderQuery({
@@ -402,7 +406,11 @@ function emitFindQueriesAndHandlers(
         handlerName: `${pascal(find.name)}Handler`,
         queryName: `${pascal(find.name)}Query`,
         returnType: queryReturn,
-        body: buildFindHandlerBody(find, agg, ctx),
+        body: buildFindHandlerBody(find, agg, ctx, usesUser),
+        extraDeps: usesUser
+          ? [{ type: "ICurrentUserAccessor", field: "_currentUser" }]
+          : [],
+        extraUsings: usesUser ? [`${ns}.Auth`] : [],
       }),
     );
   }
@@ -412,11 +420,14 @@ function buildFindHandlerBody(
   find: FindIR,
   agg: AggregateIR,
   ctx: BoundedContextIR,
+  usesUser: boolean = false,
 ): string {
-  const argList = find.params.map((p) => `q.${pascal(p.name)}`).join(", ");
+  const baseArgs = find.params.map((p) => `q.${pascal(p.name)}`);
+  const allArgs = usesUser ? [...baseArgs, "_currentUser.User"] : baseArgs;
   // The repository signature ends with `CancellationToken ct`; drop the
   // separator when there are no domain params, so the auto-included
   // zero-arg `all` find compiles cleanly.
+  const argList = allArgs.join(", ");
   const callArgs = argList.length > 0 ? `${argList}, ct` : `ct`;
   if (find.returnType.kind === "array") {
     return (

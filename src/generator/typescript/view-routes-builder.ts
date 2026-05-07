@@ -5,6 +5,7 @@ import type {
   TypeIR,
   ViewIR,
 } from "../../ir/loom-ir.js";
+import { viewUsesCurrentUser } from "../../ir/loom-ir.js";
 import { camel, plural, snake } from "../../util/naming.js";
 import { renderTsExpr } from "./render-expr.js";
 
@@ -140,6 +141,11 @@ function emitViewRoute(
   const responseSchema = view.output
     ? `${cap(view.name)}Response`
     : `${view.aggregateName}ListResponse`;
+  // Slice 1C: views whose filter / binds reference currentUser
+  // thread the request's user through to the repository's
+  // synthesised find method.  The auth middleware stashed it on the
+  // Hono context earlier in the pipeline.
+  const usesUser = viewUsesCurrentUser(view);
   out.push(`app.openapi(`);
   out.push(`  createRoute({`);
   out.push(`    method: "get",`);
@@ -153,8 +159,14 @@ function emitViewRoute(
   out.push(`    },`);
   out.push(`  }),`);
   out.push(`  async (httpCtx) => {`);
+  if (usesUser) {
+    out.push(
+      `    const currentUser = httpCtx.get("currentUser") as import("../auth/user-types.js").User;`,
+    );
+  }
   out.push(`    const repo = new ${view.aggregateName}Repository(db, events);`);
-  out.push(`    const rows = await repo.${camel(view.name)}();`);
+  const repoCallArgs = usesUser ? "currentUser" : "";
+  out.push(`    const rows = await repo.${camel(view.name)}(${repoCallArgs});`);
   if (view.output) {
     // Bulk-load every foreign aggregate referenced by `Id<X>`
     // follows in the bind expressions.  Auxiliaries arrive in

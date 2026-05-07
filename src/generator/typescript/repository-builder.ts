@@ -7,6 +7,10 @@ import type {
   RepositoryIR,
   TypeIR,
 } from "../../ir/loom-ir.js";
+import {
+  findUsesCurrentUser,
+  viewUsesCurrentUser,
+} from "../../ir/loom-ir.js";
 import { wireShapeFor } from "../../ir/enrichments.js";
 import { camel, plural } from "../../util/naming.js";
 import { renderTsExpr } from "./render-expr.js";
@@ -62,6 +66,19 @@ export function buildRepositoryFile(
     `import { ${[...drizzleOps].sort().join(", ")} } from "drizzle-orm";`,
   );
   lines.push(`import * as schema from "../schema.js";`);
+  // Slice 1C: if any find or matching view filter references
+  // currentUser, the per-method signature gains a `currentUser: User`
+  // parameter that the closure-captured Drizzle predicate reads.
+  // Pull the User type in as a type-only import so the file
+  // compiles even when the verifier hook isn't wired yet.
+  const repoUsesUser =
+    (repo?.finds ?? []).some(findUsesCurrentUser) ||
+    ctx.views
+      .filter((v) => v.aggregateName === agg.name)
+      .some(viewUsesCurrentUser);
+  if (repoUsesUser) {
+    lines.push(`import type { User } from "../../auth/user-types.js";`);
+  }
   // Imports for domain types
   const partNames = agg.parts.map((p) => p.name);
   const domainImports = [agg.name, ...partNames].join(", ");
@@ -584,9 +601,18 @@ function findQueryMethod(
 ): string[] {
   const lines: string[] = [];
   const tableName = camel(plural(agg.name));
-  const params = find.params
-    .map((p) => `${p.name}: ${tsTypeForReturn(p.type)}`)
-    .join(", ");
+  // Slice 1C: when the find's `where` references currentUser, the
+  // method gains a trailing `currentUser: User` parameter that the
+  // closure-captured Drizzle predicate reads from.  Hono routes /
+  // workflow handlers thread the user from `c.get("currentUser")`
+  // into the call.
+  const usesUser = findUsesCurrentUser(find);
+  const baseParams = find.params.map(
+    (p) => `${p.name}: ${tsTypeForReturn(p.type)}`,
+  );
+  const params = (
+    usesUser ? [...baseParams, "currentUser: User"] : baseParams
+  ).join(", ");
   let whereClause: string;
   if (find.filter) {
     // The IR validator (Layer ②) rejects any `where` clause that
@@ -922,6 +948,18 @@ function lowerToDrizzle(
       if (e.refKind === "enum-value") {
         return JSON.stringify(e.name);
       }
+    }
+    // `currentUser.<field>` — slice 1C row-level filter.  The repo
+    // method receives a `currentUser: User` parameter; the renderer
+    // emits a plain JS member access against it.  Drizzle infers
+    // the column-side branded type and the User field's plain type
+    // is structurally assignable.
+    if (
+      e.kind === "member" &&
+      e.receiver.kind === "ref" &&
+      e.receiver.refKind === "current-user"
+    ) {
+      return `currentUser.${e.member}`;
     }
     void ctx;
     return null;

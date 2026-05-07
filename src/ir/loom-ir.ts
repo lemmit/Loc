@@ -621,6 +621,24 @@ export function operationUsesCurrentUser(op: OperationIR): boolean {
   return op.statements.some(stmtUsesCurrentUser);
 }
 
+/** True when the find's `where` filter references `currentUser`.
+ *  Slice 1C: such finds gain a `currentUser: User` parameter on the
+ *  generated repository method, threaded through CQRS handler /
+ *  Hono route call sites. */
+export function findUsesCurrentUser(find: FindIR): boolean {
+  return exprUsesCurrentUser(find.filter);
+}
+
+/** True when the view's where filter or any bind expression
+ *  references `currentUser`. */
+export function viewUsesCurrentUser(view: ViewIR): boolean {
+  if (exprUsesCurrentUser(view.filter)) return true;
+  for (const b of view.output?.binds ?? []) {
+    if (exprUsesCurrentUser(b.expr)) return true;
+  }
+  return false;
+}
+
 function stmtUsesCurrentUser(s: StmtIR): boolean {
   switch (s.kind) {
     case "precondition":

@@ -737,5 +737,59 @@ describe("typescript generator", () => {
       expect(route).toMatch(/c\.get\("currentUser"\)/);
       expect(route).toMatch(/aggregate\.cancel\(currentUser\)/);
     });
+
+    // -----------------------------------------------------------------------
+    // Slice 1C — currentUser inside find / view filters
+    // -----------------------------------------------------------------------
+
+    const SRC_FILTER_AUTH = `
+      system Acme {
+        user {
+          id: string
+          customerId: string
+        }
+        module Sales {
+          context Orders {
+            aggregate Order {
+              customerId: string
+              status: string
+            }
+            repository Orders for Order {
+              find mine(): Order[] where customerId == currentUser.customerId
+            }
+            view MyOrders = Order where customerId == currentUser.customerId
+          }
+        }
+        deployable api {
+          platform: hono
+          modules: Sales
+          port: 3000
+          auth: required
+        }
+      }
+    `;
+
+    it("repository find with currentUser filter gains a User parameter and imports the type", async () => {
+      const files = await emitForAuthSystem(SRC_FILTER_AUTH);
+      const repo = files.get("db/repositories/order-repository.ts")!;
+      expect(repo).toMatch(
+        /import type \{ User \} from "\.\.\/\.\.\/auth\/user-types\.js";/,
+      );
+      expect(repo).toMatch(/async mine\([^)]*currentUser: User[^)]*\)/);
+    });
+
+    it("find route reads c.get(\"currentUser\") and threads it into the repo call", async () => {
+      const files = await emitForAuthSystem(SRC_FILTER_AUTH);
+      const route = files.get("http/order.routes.ts")!;
+      expect(route).toMatch(/c\.get\("currentUser"\)/);
+      expect(route).toMatch(/repo\.mine\(currentUser\)/);
+    });
+
+    it("view route reads c.get(\"currentUser\") and threads it into the repo call", async () => {
+      const files = await emitForAuthSystem(SRC_FILTER_AUTH);
+      const views = files.get("http/views.ts")!;
+      expect(views).toMatch(/httpCtx\.get\("currentUser"\)/);
+      expect(views).toMatch(/repo\.myOrders\(currentUser\)/);
+    });
   });
 });

@@ -3,9 +3,11 @@
 Loom systems can declare a strongly-typed JWT claim shape at system
 scope and opt deployables in to JWT-decode middleware per request.
 Modules can declare a typed permission catalogue used to gate
-command entry from inside operation / workflow bodies.
+command entry from inside operation / workflow bodies.  Repository
+finds and view filters can reference `currentUser` to scope query
+results to the requester.
 
-Shipped over two slices:
+Shipped over three slices:
 
 - **Slice 1A** — `user { ... }` + `currentUser` magic identifier +
   per-deployable `auth: required` middleware + verifier hook.
@@ -13,14 +15,17 @@ Shipped over two slices:
   `permissions.<name>` magic identifier resolving to a stable
   `<module>.<name>` runtime string + the `.contains(x)` collection
   op for ergonomic claim membership checks.
+- **Slice 1C** — `currentUser` admissible inside repository find /
+  view `where` filters; the renderer threads the resolved user
+  through as a closure-captured parameter on the generated method.
 
 What's intentionally **not** here yet:
 
-- `currentUser` inside `where` clauses on repository finds / view
-  filters (slice 1C; the validator currently rejects this with a
-  pointer to the slice).
 - `requires <expr>` clauses that gate command entry against
   currentUser claims (slice 2).
+- Workflow bodies calling currentUser-bound finds — the validator
+  currently rejects this with a pointer at `getById` or moving the
+  call out to the route layer.
 
 ## Surface
 
@@ -109,6 +114,37 @@ It's available on any array — not just `currentUser.permissions`
 — so the same vocabulary covers any membership check the domain
 needs.
 
+### Row-level visibility (slice 1C)
+
+`currentUser` is admissible inside repository find and view
+`where` clauses; the renderer threads the resolved User through
+the generated method as a closure-captured parameter:
+
+```ddd
+repository Orders for Order {
+  find mine(): Order[] where customerId == currentUser.customerId
+}
+
+view MyOrders = Order where customerId == currentUser.customerId
+```
+
+What gets emitted:
+
+| Backend | Repo method signature | Caller threads user via |
+| --- | --- | --- |
+| .NET   | `Task<...> Mine(User currentUser, CancellationToken ct)` | Mediator handler injects `ICurrentUserAccessor`, calls `_repo.Mine(_currentUser.User, ct)` |
+| Hono   | `async mine(currentUser: User): Promise<Order[]>` | Route reads `c.get("currentUser")` and passes it in |
+
+The Drizzle / EF predicate translates `currentUser.customerId`
+into a closure-captured value — Drizzle parametrises it into the
+SQL bind, EF lifts it via Linq-to-Entities — so no string
+interpolation hits the SQL surface.
+
+Slice 1C does **not** yet support workflow bodies calling such
+finds; the validator points users at `getById` (with an explicit
+id parameter) or asks them to call the user-aware find from the
+route layer.
+
 `currentUser` is in scope wherever an expression evaluates **per
 request**:
 
@@ -118,11 +154,11 @@ request**:
 | Workflow body | ✅ |
 | Aggregate-level `test` body | ✅ |
 | View `bind` expressions (full-form views) | ✅ |
+| Repository `find` `where` clause | ✅ (slice 1C) |
+| View shorthand / full-form `where` clause | ✅ (slice 1C) |
 | Aggregate / part / value-object invariant | ❌ |
 | Derived property | ❌ |
 | `function` body | ❌ |
-| Repository `find` `where` clause | ❌ (slice 1C) |
-| View shorthand / full-form `where` clause | ❌ (slice 1C) |
 
 The validator surfaces a friendly diagnostic for any disallowed use.
 
@@ -221,9 +257,10 @@ to widen or tighten the list.
 | --- | --- |
 | `auth: required` on a deployable but no `user { ... }` block | Validation error: "deployable 'X' has 'auth: required' but system 'Y' declares no 'user { ... }' block." |
 | Two user fields with the same name | Validation error: "user block declares field 'X' more than once." |
-| `currentUser` in an invariant / derived / function / find filter | Validation error: "currentUser is only available in per-request handlers." |
+| `currentUser` in an invariant / derived / function body | Validation error: "currentUser is only available in per-request handlers." |
 | Two permissions with the same name in one module | Validation error: "module 'M': permission 'X' is declared more than once." |
 | `permissions.X` referencing an undeclared name (or used outside any module) | Validation error: "permissions.X: no permission named 'X' is declared in this module's 'permissions { ... }' block." |
+| Workflow body calls a currentUser-bound repository find | Validation error: "references a currentUser-bound find, which workflows don't yet pass the user into."  Use `getById` or move the call to the route layer. |
 
 Missing `IUserVerifier` registration surfaces at runtime startup,
 not during generation — the project compiles, but boots with a

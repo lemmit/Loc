@@ -9,7 +9,10 @@ import type {
   TypeIR,
   ValueObjectIR,
 } from "../../ir/loom-ir.js";
-import { operationUsesCurrentUser } from "../../ir/loom-ir.js";
+import {
+  findUsesCurrentUser,
+  operationUsesCurrentUser,
+} from "../../ir/loom-ir.js";
 import { wireShapeFor } from "../../ir/enrichments.js";
 import { camel, plural, snake } from "../../util/naming.js";
 
@@ -332,9 +335,20 @@ function emitFindRoute(
   if (find.params.length > 0) {
     out.push(`    const params = c.req.valid("query");`);
   }
-  const argList = find.params
-    .map((p) => wireToDomainExpr(`params.${p.name}`, p.type, ctx))
-    .join(", ");
+  // Slice 1C: when the find's where clause references currentUser,
+  // the repository method gains a trailing `currentUser: User`
+  // parameter.  Read it from the request scope where the auth
+  // middleware stashed it earlier in the pipeline.
+  const usesUser = findUsesCurrentUser(find);
+  if (usesUser) {
+    out.push(
+      `    const currentUser = c.get("currentUser") as import("../auth/user-types.js").User;`,
+    );
+  }
+  const baseArgs = find.params.map((p) =>
+    wireToDomainExpr(`params.${p.name}`, p.type, ctx),
+  );
+  const argList = (usesUser ? [...baseArgs, "currentUser"] : baseArgs).join(", ");
   out.push(`    const result = await repo.${find.name}(${argList});`);
   if (isList) {
     out.push(

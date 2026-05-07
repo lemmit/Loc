@@ -10,7 +10,7 @@ import type {
   TestStmtIR,
   TypeIR,
 } from "./loom-ir.js";
-import { allContexts } from "./loom-ir.js";
+import { allContexts, findUsesCurrentUser } from "./loom-ir.js";
 import { allPlatforms } from "../platform/registry.js";
 import { camel, plural, snake } from "../util/naming.js";
 
@@ -592,14 +592,19 @@ function firstNonQueryableNode(e: ExprIR): string | null {
       // `param`/`let`/`lambda` are bare identifiers, `this-prop`
       // becomes `tableName.col`, `enum-value` becomes a literal
       // string, `this-vo-prop` is a column flattened by Drizzle
-      // (handled via member access).
+      // (handled via member access).  `current-user` is a
+      // closure-captured value (slice 1C); the renderer threads a
+      // `currentUser` parameter through the repo method and the
+      // ref / its member accesses become plain JS / C# value
+      // references.
       if (
         e.refKind === "param" ||
         e.refKind === "let" ||
         e.refKind === "lambda" ||
         e.refKind === "this-prop" ||
         e.refKind === "enum-value" ||
-        e.refKind === "this-vo-prop"
+        e.refKind === "this-vo-prop" ||
+        e.refKind === "current-user"
       )
         return null;
       return `ref to '${e.name}' (${e.refKind})`;
@@ -632,14 +637,23 @@ function firstNonQueryableNode(e: ExprIR): string | null {
       if (e.receiverType.kind === "array") {
         return `collection projection '.${e.member}' on a list`;
       }
-      // Allowed column-access shapes:
-      //   - `this.col`         — direct column
-      //   - `this.vo.sub`      — value-object's flattened column
+      // Allowed member-access shapes:
+      //   - `this.col`               — direct column
+      //   - `this.vo.sub`            — value-object's flattened column
+      //   - `currentUser.<field>`    — slice 1C row-level filter; the
+      //                                renderer threads a `currentUser`
+      //                                parameter so the access becomes
+      //                                a plain JS / C# value reference.
       if (e.receiver.kind === "this") return null;
       if (
         e.receiver.kind === "member" &&
         e.receiver.receiver.kind === "this" &&
         e.receiver.memberType.kind === "valueobject"
+      )
+        return null;
+      if (
+        e.receiver.kind === "ref" &&
+        e.receiver.refKind === "current-user"
       )
         return null;
       return "member access not rooted at 'this' or beyond a flattened value object";
@@ -1003,6 +1017,23 @@ function validateWorkflowBody(
           });
           break;
         }
+        // Slice 1C: a workflow can't yet call a find whose where
+        // clause references currentUser — the workflow handler
+        // doesn't inject ICurrentUserAccessor, and threading the
+        // user through saves + ops is its own follow-up.  Surface a
+        // friendly error pointing at the alternative (load by id).
+        const calledFind = repo.finds.find((f) => f.name === st.method);
+        if (calledFind && findUsesCurrentUser(calledFind)) {
+          diags.push({
+            severity: "error",
+            message:
+              `workflow '${wf.name}': '${st.repoName}.${st.method}(...)' references a currentUser-bound find, ` +
+              `which workflows don't yet pass the user into.  Use 'getById' with an explicit id parameter, ` +
+              `or call the user-aware find from the route layer instead.`,
+            source: `${ctx.name}/${wf.name}`,
+          });
+          break;
+        }
         // Reject array / nullable returns — workflow body has no
         // iteration / null-handling vocab in v1.  getById is always
         // a single non-nullable aggregate (the impl throws on miss).
@@ -1302,8 +1333,8 @@ function validateCurrentUserScope(
         diags.push({
           severity: "error",
           message:
-            `currentUser is only available in per-request handlers (operations, workflows, view bind expressions). ` +
-            `Found in ${location}; remove the reference or move the logic into an operation that runs per request.`,
+            `currentUser is only available in per-request handlers (operations, workflows, view bind expressions, repository find / view where filters). ` +
+            `Found in ${location}; remove the reference or move the logic into a per-request body.`,
           source: `${ctx.name}/${location}`,
         });
       }
@@ -1327,14 +1358,10 @@ function validateCurrentUserScope(
     for (const d of vo.derived) flag(`${vo.name}.derived[${d.name}]`, d.expr);
     for (const fn of vo.functions) flag(`${vo.name}.function[${fn.name}]`, fn.body);
   }
-  for (const repo of ctx.repositories) {
-    for (const f of repo.finds) {
-      flag(`repository[${repo.name}].find[${f.name}]`, f.filter);
-    }
-  }
-  for (const view of ctx.views) {
-    flag(`view[${view.name}].filter`, view.filter);
-  }
+  // Repository find filters and view filters DO get to use currentUser
+  // (slice 1C — row-level visibility); the renderer threads the user
+  // through as a closure-captured parameter.  Workflow / operation /
+  // test / view-bind bodies were never in this rejection set.
 }
 
 // ---------------------------------------------------------------------------

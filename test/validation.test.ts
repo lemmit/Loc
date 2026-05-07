@@ -1211,7 +1211,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     expect(errors, JSON.stringify(errors)).toEqual([]);
   });
 
-  it("rejects currentUser inside a repository find filter (slice 1A scope)", async () => {
+  it("accepts currentUser inside a repository find filter (slice 1C)", async () => {
     const loom = await loomFrom(`
       system Acme {
         user { id: string }
@@ -1225,14 +1225,62 @@ describe("Loom IR validation (post-lowering)", async () => {
         }
       }
     `);
+    const errors = validateLoomModel(loom).filter(
+      (d) => d.severity === "error",
+    );
+    expect(errors, JSON.stringify(errors)).toEqual([]);
+  });
+
+  it("accepts currentUser inside a view where filter (slice 1C)", async () => {
+    const loom = await loomFrom(`
+      system Acme {
+        user { id: string, customerId: string }
+        module M {
+          context T {
+            aggregate Order { customerId: string, status: string }
+            repository Orders for Order { }
+            view MyOrders = Order where customerId == currentUser.customerId
+          }
+        }
+      }
+    `);
+    const errors = validateLoomModel(loom).filter(
+      (d) => d.severity === "error",
+    );
+    expect(errors, JSON.stringify(errors)).toEqual([]);
+  });
+
+  it("rejects workflow calls to a currentUser-bound find (slice 1C deferred)", async () => {
+    const loom = await loomFrom(`
+      system Acme {
+        user { id: string, customerId: string }
+        module M {
+          context T {
+            aggregate Customer {
+              name: string display
+              creditLimit: decimal
+              operation addCredit(amount: decimal) {
+                precondition amount > 0
+                creditLimit := creditLimit + amount
+              }
+            }
+            repository Customers for Customer {
+              find me(): Customer where id == currentUser.id
+            }
+            workflow doIt() {
+              let c = Customers.me()
+              c.addCredit(1.0)
+            }
+          }
+        }
+      }
+    `);
     const diags = validateLoomModel(loom);
     expect(
       diags.some(
         (d) =>
           d.severity === "error" &&
-          /currentUser is only available in per-request handlers/.test(
-            d.message,
-          ),
+          /references a currentUser-bound find/.test(d.message),
       ),
       JSON.stringify(diags),
     ).toBe(true);

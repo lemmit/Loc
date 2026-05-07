@@ -4,6 +4,7 @@ import type {
   ExprIR,
   ViewIR,
 } from "../../ir/loom-ir.js";
+import { viewUsesCurrentUser } from "../../ir/loom-ir.js";
 import { camel, pascal, plural, snake } from "../../util/naming.js";
 import { projectEntityExpr, projectToResponse, wireType } from "./dto-mapping.js";
 import { renderCsExpr } from "./render-expr.js";
@@ -114,6 +115,10 @@ function renderHandler(
   // handler entry, and rewrites `Id<X>` follow refs in the
   // projection.
   const auxiliaries = view.output?.auxiliaries ?? [];
+  // Slice 1C: when the view's filter / binds reference currentUser,
+  // the handler injects ICurrentUserAccessor and threads
+  // `_currentUser.User` into the repository call.
+  const usesUser = viewUsesCurrentUser(view);
   // Path → mapVar+aggName lookup, populated as we walk the
   // dependency-ordered auxiliaries.  Single-hop entries seed it;
   // multi-hop entries reference earlier prefix entries.
@@ -125,6 +130,11 @@ function renderHandler(
   ];
   const ctorParams: string[] = [`I${agg.name}Repository repo`];
   const ctorAssigns: string[] = [`_repo = repo`];
+  if (usesUser) {
+    fields.push(`    private readonly ICurrentUserAccessor _currentUser;`);
+    ctorParams.push(`ICurrentUserAccessor currentUser`);
+    ctorAssigns.push(`_currentUser = currentUser`);
+  }
   const seenAggs = new Set<string>();
   for (const aux of auxiliaries) {
     if (seenAggs.has(aux.aggName)) continue;
@@ -137,7 +147,10 @@ function renderHandler(
   const ctor =
     ctorParams.length === 1
       ? `    public ${handlerName}(${ctorParams[0]}) => _repo = repo;`
-      : `    public ${handlerName}(${ctorParams.join(", ")})\n    {\n        ${ctorAssigns.join("; ")};\n    }`;
+      : `    public ${handlerName}(${ctorParams.join(", ")})\n    {\n        ${ctorAssigns.join(";\n        ")};\n    }`;
+  // Repository call args — drop the `, ct` separator when there are
+  // no domain params, mirroring the find handler convention.
+  const repoCallArgs = usesUser ? "_currentUser.User, ct" : "ct";
   // Bulk-load lines — one per auxiliary path, in dependency order.
   const auxLines: string[] = [];
   for (const aux of auxiliaries) {
@@ -162,6 +175,7 @@ function renderHandler(
   const auxUsings = [
     ...new Set(auxiliaries.map((a) => `using ${ns}.Domain.${plural(a.aggName)};`)),
   ].join("\n");
+  const authUsing = usesUser ? `using ${ns}.Auth;\n` : "";
   return `// Auto-generated.
 using System.Linq;
 using System.Threading;
@@ -171,7 +185,7 @@ using ${ns}.Domain.${plural(agg.name)};
 using ${ns}.Domain.Ids;
 using ${ns}.Domain.ValueObjects;
 using ${ns}.Domain.Enums;
-${auxUsings ? auxUsings + "\n" : ""}${usingResponse}
+${auxUsings ? auxUsings + "\n" : ""}${authUsing}${usingResponse}
 namespace ${ns}.Application.Views;
 
 public sealed class ${handlerName} : IQueryHandler<${queryName}, System.Collections.Generic.IReadOnlyList<${responseRecord}>>
@@ -181,7 +195,7 @@ ${ctor}
 
     public async ValueTask<System.Collections.Generic.IReadOnlyList<${responseRecord}>> Handle(${queryName} q, CancellationToken ct)
     {
-        var domain = await _repo.${pascal(view.name)}(ct);
+        var domain = await _repo.${pascal(view.name)}(${repoCallArgs});
 ${auxLines.join("\n")}${auxLines.length > 0 ? "\n" : ""}        return domain.Select(d => ${projection}).ToList();
     }
 }

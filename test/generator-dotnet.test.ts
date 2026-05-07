@@ -786,5 +786,67 @@ describe(".NET generator", () => {
       expect(handler).toMatch(/ICurrentUserAccessor _currentUser/);
       expect(handler).toMatch(/aggregate\.Cancel\(_currentUser\.User\)/);
     });
+
+    // -----------------------------------------------------------------------
+    // Slice 1C — currentUser inside find / view filters
+    // -----------------------------------------------------------------------
+
+    const SRC_FILTER_AUTH = `
+      system Acme {
+        user {
+          id: string
+          customerId: string
+        }
+        module Sales {
+          context Orders {
+            aggregate Order {
+              customerId: string
+              status: string
+            }
+            repository Orders for Order {
+              find mine(): Order[] where customerId == currentUser.customerId
+            }
+            view MyOrders = Order where customerId == currentUser.customerId
+          }
+        }
+        deployable api {
+          platform: dotnet
+          modules: Sales
+          port: 8080
+          auth: required
+        }
+      }
+    `;
+
+    it("repository find filter on currentUser threads User through interface + impl", async () => {
+      const files = await emitForAuthSystem(SRC_FILTER_AUTH);
+      const iface = files.get("Domain/Orders/IOrderRepository.cs")!;
+      const impl = files.get("Infrastructure/Repositories/OrderRepository.cs")!;
+      // Both the interface and impl gain a User-typed parameter on the find.
+      expect(iface).toMatch(/Mine\(User currentUser/);
+      expect(impl).toMatch(/Mine\(User currentUser/);
+      // The Auth namespace is pulled in.
+      expect(iface).toMatch(/using Api\.Auth;/);
+      expect(impl).toMatch(/using Api\.Auth;/);
+      // The LINQ predicate closes over currentUser by referencing
+      // its Pascal-cased CustomerId property.
+      expect(impl).toMatch(/x\.CustomerId == currentUser\.CustomerId/);
+    });
+
+    it("find query handler injects ICurrentUserAccessor and passes _currentUser.User", async () => {
+      const files = await emitForAuthSystem(SRC_FILTER_AUTH);
+      const handler = files.get("Application/Orders/Queries/MineHandler.cs")!;
+      expect(handler).toMatch(/ICurrentUserAccessor _currentUser/);
+      expect(handler).toMatch(
+        /_repo\.Mine\(_currentUser\.User, ct\)/,
+      );
+    });
+
+    it("view handler injects ICurrentUserAccessor when the view filter uses currentUser", async () => {
+      const files = await emitForAuthSystem(SRC_FILTER_AUTH);
+      const handler = files.get("Application/Views/MyOrdersHandler.cs")!;
+      expect(handler).toMatch(/ICurrentUserAccessor _currentUser/);
+      expect(handler).toMatch(/_repo\.MyOrders\(_currentUser\.User, ct\)/);
+    });
   });
 });

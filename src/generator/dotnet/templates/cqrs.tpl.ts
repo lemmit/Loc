@@ -103,7 +103,29 @@ export function renderQueryHandler(args: {
   queryName: string;
   returnType: string;
   body: string;
+  /** Additional constructor-injected dependencies — used by slice
+   *  1C to inject `ICurrentUserAccessor` for finds/views whose
+   *  filter references currentUser. */
+  extraDeps?: { type: string; field: string }[];
+  /** Extra `using` namespaces to add to the file's import list. */
+  extraUsings?: string[];
 }): string {
+  const deps = args.extraDeps ?? [];
+  const allFields = [
+    `    private readonly I${args.aggName}Repository _repo;`,
+    ...deps.map((d) => `    private readonly ${d.type} ${d.field};`),
+  ];
+  const ctorParams = [
+    `I${args.aggName}Repository repo`,
+    ...deps.map((d) => `${d.type} ${d.field.replace(/^_/, "")}`),
+  ].join(", ");
+  const ctorBody = [
+    "_repo = repo",
+    ...deps.map((d) => `${d.field} = ${d.field.replace(/^_/, "")}`),
+  ].join("; ");
+  const extraUsings = (args.extraUsings ?? [])
+    .map((u) => `using ${u};`)
+    .join("\n");
   return `// Auto-generated.
 using System.Linq;
 using System.Threading;
@@ -114,13 +136,16 @@ using ${args.ns}.Domain.Ids;
 using ${args.ns}.Domain.ValueObjects;
 using ${args.ns}.Domain.Enums;
 using ${args.ns}.Application.${plural(args.aggName)}.Responses;
-
+${extraUsings ? extraUsings + "\n" : ""}
 namespace ${args.ns}.Application.${plural(args.aggName)}.Queries;
 
 public sealed class ${args.handlerName} : IQueryHandler<${args.queryName}, ${args.returnType}>
 {
-    private readonly I${args.aggName}Repository _repo;
-    public ${args.handlerName}(I${args.aggName}Repository repo) => _repo = repo;
+${allFields.join("\n")}
+    public ${args.handlerName}(${ctorParams})
+    {
+        ${ctorBody};
+    }
 
     public async ValueTask<${args.returnType}> Handle(${args.queryName} q, CancellationToken ct)
     {

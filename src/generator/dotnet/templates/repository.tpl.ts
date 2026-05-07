@@ -3,13 +3,17 @@ import type {
   ParamIR,
   RepositoryIR,
 } from "../../../ir/loom-ir.js";
+import { findUsesCurrentUser } from "../../../ir/loom-ir.js";
 import { pascal, plural } from "../../../util/naming.js";
 import { lines } from "../../../util/code-builder.js";
 import { renderCsType } from "../render-expr.js";
 
 // Repository interface (Domain layer) + EF-backed implementation
 // (Infrastructure layer).  Both surfaces own a `GetByIdAsync` /
-// `SaveAsync` plus one method per DSL `find`.
+// `SaveAsync` plus one method per DSL `find`.  Slice 1C: a find
+// whose `where` references `currentUser` gets a trailing
+// `User currentUser` parameter that the closure-captured filter
+// expression reads from.
 
 export function renderRepositoryInterface(
   agg: AggregateIR,
@@ -17,14 +21,16 @@ export function renderRepositoryInterface(
   ns: string,
 ): string {
   const finds = repo?.finds ?? [];
-  const findLines = finds.map(
-    (f) =>
-      `    System.Threading.Tasks.Task<${renderCsType(f.returnType)}> ${pascal(f.name)}(${renderParamsWithCt(f.params)});`,
-  );
+  const anyFindUsesUser = finds.some(findUsesCurrentUser);
+  const findLines = finds.map((f) => {
+    const usesUser = findUsesCurrentUser(f);
+    return `    System.Threading.Tasks.Task<${renderCsType(f.returnType)}> ${pascal(f.name)}(${renderParamsWithCt(f.params, usesUser)});`;
+  });
   return (
     lines(
       "// Auto-generated.",
       `using ${ns}.Domain.Ids;`,
+      anyFindUsesUser ? `using ${ns}.Auth;` : null,
       "",
       `namespace ${ns}.Domain.${plural(agg.name)};`,
       "",
@@ -50,13 +56,15 @@ export function renderRepositoryImpl(
   }>,
 ): string {
   const finds = repo?.finds ?? [];
+  const anyFindUsesUser = finds.some(findUsesCurrentUser);
   const setName = plural(pascal(agg.name));
   const findMethodLines = finds.flatMap((f) => {
     const body = findBodies.find((b) => b.name === f.name);
     const filter = body?.filterClause ?? "";
     const projection = body?.projectionClause ?? ".ToListAsync(ct)";
+    const usesUser = findUsesCurrentUser(f);
     return [
-      `    public async Task<${renderCsType(f.returnType)}> ${pascal(f.name)}(${renderParamsWithCt(f.params)})`,
+      `    public async Task<${renderCsType(f.returnType)}> ${pascal(f.name)}(${renderParamsWithCt(f.params, usesUser)})`,
       "    {",
       `        return await _db.${setName}${filter}${projection};`,
       "    }",
@@ -75,6 +83,7 @@ export function renderRepositoryImpl(
       `using ${ns}.Domain.ValueObjects;`,
       `using ${ns}.Domain.Enums;`,
       `using ${ns}.Infrastructure.Persistence;`,
+      anyFindUsesUser ? `using ${ns}.Auth;` : null,
       "",
       `namespace ${ns}.Infrastructure.Repositories;`,
       "",
@@ -119,9 +128,12 @@ export function renderRepositoryImpl(
   );
 }
 
-function renderParamsWithCt(params: ParamIR[]): string {
-  const head = params
-    .map((p) => `${renderCsType(p.type)} ${p.name}`)
+function renderParamsWithCt(params: ParamIR[], usesUser: boolean = false): string {
+  const head = [
+    ...params.map((p) => `${renderCsType(p.type)} ${p.name}`),
+    usesUser ? "User currentUser" : null,
+  ]
+    .filter(Boolean)
     .join(", ");
   return head.length > 0
     ? `${head}, System.Threading.CancellationToken ct = default`
