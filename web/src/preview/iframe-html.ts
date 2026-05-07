@@ -9,6 +9,50 @@
 //
 // We keep the shim small and inline-injected so it sits before
 // the bundle's first import — no race, no SW lifecycle.
+//
+// React runtime modules (`react`, `react-dom`, `react/jsx-runtime`,
+// …) are externalised at bundle time and provided via a dynamic
+// `<script type="importmap">` here, so every component shares the
+// same React instance.  Without that, the bundle ends up with
+// multiple React copies and `useRef` returns null at runtime.
+
+interface MakePreviewArgs {
+  js: string;
+  css?: string;
+  /** Versions harvested from the generator's package.json.
+   *  Lookups for `react` / `react-dom` decide what the importmap
+   *  pins; if unset, falls back to a known-good 18.x. */
+  versions?: Record<string, string>;
+}
+
+const REACT_FALLBACK_VERSION = "18.3.1";
+
+function importMap(versions: Record<string, string>): Record<string, string> {
+  const reactVer = versions["react"] ?? REACT_FALLBACK_VERSION;
+  const reactDomVer = versions["react-dom"] ?? reactVer;
+  // `?dev=false` selects esm.sh's production build (smaller, no
+  // dev warnings); `?deps=react@<ver>` keeps every transitive
+  // resolution on the same React.  Trailing-slash entries let
+  // sub-paths like `react-dom/client` resolve identically.
+  return {
+    "react": `https://esm.sh/react@${reactVer}?dev=false`,
+    "react/": `https://esm.sh/react@${reactVer}/`,
+    "react-dom": `https://esm.sh/react-dom@${reactDomVer}?dev=false&deps=react@${reactVer}`,
+    "react-dom/": `https://esm.sh/react-dom@${reactDomVer}/?deps=react@${reactVer}`,
+    "react-dom/client": `https://esm.sh/react-dom@${reactDomVer}/client?dev=false&deps=react@${reactVer}`,
+    "react/jsx-runtime": `https://esm.sh/react@${reactVer}/jsx-runtime?dev=false`,
+    "react/jsx-dev-runtime": `https://esm.sh/react@${reactVer}/jsx-dev-runtime?dev=false`,
+  };
+}
+
+const ROUTING_FIX_SRC = `
+// Best-effort: reset the iframe's URL to "/" so React Router's
+// BrowserRouter sees a path it can match.  srcdoc iframes start
+// at "about:srcdoc" with pathname "srcdoc", which doesn't match
+// any route the generator emits.  Wrapped in try/catch because
+// some browsers refuse history mutations from opaque origins.
+try { history.replaceState({}, "", "/"); } catch (_) {}
+`;
 
 const FETCH_SHIM_SRC = `
 (function () {
@@ -95,13 +139,19 @@ function styleTagFor(css?: string): string {
   return `<style>\n${css}\n</style>`;
 }
 
-export function makePreviewHtml(args: { js: string; css?: string }): string {
+export function makePreviewHtml(args: MakePreviewArgs): string {
+  const map = importMap(args.versions ?? {});
+  const importMapJson = JSON.stringify({ imports: map }, null, 2);
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Loom Preview</title>
+<base href="/">
+<script type="importmap">
+${ESCAPE_END_SCRIPT(importMapJson)}
+</script>
 ${styleTagFor(args.css)}
 <style>
   html, body { margin: 0; padding: 0; height: 100%; }
@@ -110,6 +160,7 @@ ${styleTagFor(args.css)}
 </head>
 <body>
 <div id="root"></div>
+<script>${ESCAPE_END_SCRIPT(ROUTING_FIX_SRC)}</script>
 <script>${ESCAPE_END_SCRIPT(FETCH_SHIM_SRC)}</script>
 <script type="module">${ESCAPE_END_SCRIPT(args.js)}</script>
 </body>

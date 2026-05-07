@@ -102,6 +102,8 @@ async function handleBundle(req: BundleRequest): Promise<BundleResult> {
     stdinLoader = "tsx";
   }
 
+  const externalReactRuntime = req.kind === "react";
+
   const start = performance.now();
   let result: esbuild.BuildResult;
   try {
@@ -132,7 +134,7 @@ async function handleBundle(req: BundleRequest): Promise<BundleResult> {
       //   import as a side-effecting CSS file and emits a separate
       //   .css output we then ship to the iframe via a <style> tag.
       loader: { ".wasm": "binary", ".css": "css" },
-      plugins: [makeLoomPlugin(ctx)],
+      plugins: [makeLoomPlugin(ctx, { externalReactRuntime })],
     });
   } catch (err) {
     const failure = err as esbuild.BuildFailure;
@@ -174,6 +176,14 @@ async function handleBundle(req: BundleRequest): Promise<BundleResult> {
   const code = req.kind === "hono" ? postProcessBundle(jsOut.text) : jsOut.text;
   const css = cssOut?.text;
 
+  // Forward the harvested package.json versions on react bundles
+  // so the iframe importmap can pin React/React-DOM to the same
+  // esm.sh version the bundle's external imports point at.
+  const versions =
+    req.kind === "react"
+      ? Object.fromEntries(ctx.versions)
+      : undefined;
+
   return {
     ok: true,
     kind: req.kind,
@@ -182,6 +192,7 @@ async function handleBundle(req: BundleRequest): Promise<BundleResult> {
     size: code.length,
     durationMs,
     fetchedUrls: [...ctx.fetchedUrls].sort(),
+    versions,
     diagnostics: [
       ...result.errors.map((m) => toDiagnostic("error", m)),
       ...result.warnings.map((m) => toDiagnostic("warning", m)),

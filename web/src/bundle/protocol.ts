@@ -41,6 +41,10 @@ export interface BundleOk {
   durationMs: number;
   /** Distinct external URLs the http resolver fetched (for stats). */
   fetchedUrls: string[];
+  /** Pkg → semver range harvested from the generator's package.json.
+   *  Forwarded to the iframe importmap so React/React-DOM resolve to
+   *  the same esm.sh URL the bundle was compiled against. */
+  versions?: Record<string, string>;
   diagnostics: BundleDiagnostic[];
 }
 
