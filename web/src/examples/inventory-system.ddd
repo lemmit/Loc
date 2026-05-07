@@ -1,0 +1,52 @@
+// Inventory context wrapped in a system for the playground's
+// Preview pane.  Body matches `inventory.ddd`; the system block
+// adds a hono + react deployable pair so the generator emits a
+// frontend the iframe can mount.
+
+system InventorySystem {
+
+  module Inventory {
+    context Inventory {
+
+      enum ReservationStatus { Held, Released, Consumed }
+
+      valueobject Quantity {
+        value: int
+        invariant value >= 0
+      }
+
+      event ItemReserved {
+        warehouse: Id<Warehouse>,
+        sku: string,
+        qty: int
+      }
+
+      aggregate Warehouse ids guid {
+        code: string display
+        contains stocks: Stock[]
+
+        function totalUnits(): int = stocks.sum(s => s.onHand.value)
+
+        operation reserve(sku: string, qty: int) {
+          precondition qty > 0
+          emit ItemReserved { warehouse: id, sku: sku, qty: qty }
+        }
+
+        entity Stock {
+          sku: string
+          onHand: Quantity
+          reserved: Quantity
+          derived available: Quantity = Quantity(onHand.value - reserved.value)
+          invariant onHand.value >= reserved.value
+        }
+      }
+
+      repository Warehouses for Warehouse {
+        find byCode(code: string): Warehouse? where this.code == code
+      }
+    }
+  }
+
+  deployable api { platform: hono, modules: Inventory, port: 3000 }
+  deployable webApp { platform: react, targets: api, port: 3001 }
+}
