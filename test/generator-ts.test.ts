@@ -76,6 +76,40 @@ describe("typescript generator", () => {
     expect(dockerignore).toMatch(/node_modules/);
   });
 
+  describe("slice 16.A — container basics", () => {
+    it("http/index.ts mounts /ready that pings the DB and returns 503 on failure", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model);
+      const httpIndex = files.get("http/index.ts")!;
+      expect(httpIndex).toMatch(/app\.get\("\/ready"/);
+      // Drizzle ping via sql`select 1` — cheap, dialect-agnostic.
+      expect(httpIndex).toMatch(/db\.execute\(sql`select 1`\)/);
+      expect(httpIndex).toMatch(/from "drizzle-orm"/);
+      // 503 envelope with one-line cause.
+      expect(httpIndex).toMatch(/status: "not_ready"/);
+      expect(httpIndex).toMatch(/, 503\)/);
+    });
+
+    it("root index.ts captures the server and listens for SIGTERM/SIGINT", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model);
+      const idx = files.get("index.ts")!;
+      expect(idx).toMatch(/const server = serve\(/);
+      expect(idx).toMatch(/process\.on\("SIGTERM"/);
+      expect(idx).toMatch(/process\.on\("SIGINT"/);
+      expect(idx).toMatch(/server\.close/);
+      expect(idx).toMatch(/pool\.end\(\)/);
+    });
+
+    it("root index.ts fails fast on missing DATABASE_URL", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model);
+      const idx = files.get("index.ts")!;
+      expect(idx).toMatch(/if \(!process\.env\.DATABASE_URL\)/);
+      expect(idx).toMatch(/DATABASE_URL is required/);
+    });
+  });
+
   it("Hono routes use @hono/zod-openapi and expose /openapi.json", async () => {
     const model = await buildModel("examples/sales.ddd");
     const files = generateTypeScript(model);

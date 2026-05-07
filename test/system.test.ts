@@ -78,8 +78,11 @@ describe("system / module / deployable", () => {
     expect(compose).toMatch(/catalog_web:\s*\n\s*build: \.\/catalog_web/);
     expect(compose).toMatch(/8080:8080/);
     expect(compose).toMatch(/3000:3000/);
-    expect(compose).toMatch(/wget -qO- http:\/\/localhost:8080\/health/);
-    expect(compose).toMatch(/wget -qO- http:\/\/localhost:3000\/health/);
+    // Backend deployables hit /ready (DB-aware) so the service is
+    // only `healthy` once the schema bootstrap can reach the DB —
+    // dependents + smoke tests don't race the bootstrap.
+    expect(compose).toMatch(/wget -qO- http:\/\/localhost:8080\/ready/);
+    expect(compose).toMatch(/wget -qO- http:\/\/localhost:3000\/ready/);
   });
 
   it("isolates each deployable to its own postgres database", async () => {
@@ -108,6 +111,67 @@ describe("system / module / deployable", () => {
     expect(honoIndex).toMatch(/app\.get\("\/health"/);
     const dotnetProgram = files.get("api/Program.cs")!;
     expect(dotnetProgram).toMatch(/app\.MapGet\("\/health"/);
+  });
+
+  describe("slice 16.A — container basics (/ready, SIGTERM, fail-fast)", () => {
+    it("Hono backend gets a /ready route that pings the DB", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const honoIndex = files.get("catalog_web/http/index.ts")!;
+      expect(honoIndex).toMatch(/app\.get\("\/ready"/);
+      // Drizzle DB ping using sql`select 1`.
+      expect(honoIndex).toMatch(/db\.execute\(sql`select 1`\)/);
+      // 503 on failure with a one-line cause.
+      expect(honoIndex).toMatch(/status: "not_ready"/);
+      expect(honoIndex).toMatch(/, 503\)/);
+    });
+
+    it(".NET backend gets a /ready route that pings the DB", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const program = files.get("api/Program.cs")!;
+      expect(program).toMatch(/app\.MapGet\("\/ready"/);
+      expect(program).toMatch(/db\.Database\.CanConnectAsync/);
+      expect(program).toMatch(/statusCode: 503/);
+    });
+
+    it("Hono root index.ts captures the server handle and listens for SIGTERM/SIGINT", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const idx = files.get("catalog_web/index.ts")!;
+      // Captured `const server = serve(...)` so shutdown can close it.
+      expect(idx).toMatch(/const server = serve\(/);
+      // Both signals registered.
+      expect(idx).toMatch(/process\.on\("SIGTERM"/);
+      expect(idx).toMatch(/process\.on\("SIGINT"/);
+      // Shutdown closes server + ends the pg pool.
+      expect(idx).toMatch(/server\.close/);
+      expect(idx).toMatch(/pool\.end\(\)/);
+    });
+
+    it("Hono root index.ts fails fast on missing DATABASE_URL", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const idx = files.get("catalog_web/index.ts")!;
+      expect(idx).toMatch(/if \(!process\.env\.DATABASE_URL\)/);
+      expect(idx).toMatch(/DATABASE_URL is required/);
+    });
+
+    it(".NET Program.cs fails fast on missing connection string", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const program = files.get("api/Program.cs")!;
+      expect(program).toMatch(/Missing connection string 'Default'/);
+      expect(program).toMatch(/ConnectionStrings__Default/);
+    });
+
+    it(".NET Program.cs registers an ApplicationStopping log breadcrumb", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const program = files.get("api/Program.cs")!;
+      expect(program).toMatch(/ApplicationStopping\.Register/);
+      expect(program).toMatch(/Shutting down/);
+    });
   });
 
   it("rejects `generate system` on a file with no system blocks", async () => {

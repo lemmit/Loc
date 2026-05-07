@@ -97,6 +97,44 @@ describe(".NET generator", () => {
     expect(program).toMatch(/JsonNamingPolicy\.CamelCase/);
   });
 
+  describe("slice 16.A — container basics", () => {
+    it("Program.cs fails fast on missing connection string", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      const program = files.get("Program.cs")!;
+      // Connection-string assertion runs BEFORE AddDbContext so a
+      // missing value throws at builder time, not on the first
+      // request.
+      const assertIdx = program.indexOf("Missing connection string 'Default'");
+      const dbIdx = program.indexOf("AddDbContext<AppDbContext>");
+      expect(assertIdx).toBeGreaterThan(-1);
+      expect(dbIdx).toBeGreaterThan(-1);
+      expect(assertIdx).toBeLessThan(dbIdx);
+      expect(program).toMatch(/ConnectionStrings__Default/);
+    });
+
+    it("Program.cs maps GET /ready that pings the DB and returns 503 on miss", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      const program = files.get("Program.cs")!;
+      expect(program).toMatch(/app\.MapGet\("\/ready"/);
+      // Ping uses CanConnectAsync (cheap, no schema lookup).
+      expect(program).toMatch(/db\.Database\.CanConnectAsync\(ct\)/);
+      // 503 with a structured body on failure.
+      expect(program).toMatch(/status = "not_ready"/);
+      expect(program).toMatch(/statusCode: 503/);
+    });
+
+    it("Program.cs registers ApplicationStopping for graceful shutdown logging", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      const program = files.get("Program.cs")!;
+      expect(program).toMatch(/IHostApplicationLifetime/);
+      expect(program).toMatch(/ApplicationStopping\.Register/);
+      expect(program).toMatch(/Shutting down/);
+    });
+  });
+
   it("auto-includes a GET /<plural> find via the `all` repository method", async () => {
     const model = await buildModel("examples/sales.ddd");
     const files = generateDotnet(model);

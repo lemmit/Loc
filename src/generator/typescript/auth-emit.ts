@@ -108,7 +108,7 @@ import { createMiddleware } from "hono/factory";
 import type { User } from "./user-types.js";
 import { verifyUserOrThrow } from "./verifier.js";
 
-const BYPASS_PREFIXES = ["/health", "/openapi.json", "/swagger"] as const;
+const BYPASS_PREFIXES = ["/health", "/ready", "/openapi.json", "/swagger"] as const;
 
 /** Hono middleware that decodes the request's JWT into a User and
  *  stashes it on the request scope under the key "currentUser".
