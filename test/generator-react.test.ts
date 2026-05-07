@@ -372,4 +372,105 @@ describe("react generator", () => {
       expect(home).toMatch(/data-testid="home-workflows-link"/);
     });
   });
+
+  describe("slice 18.B — view list pages", () => {
+    it("emits an api/views.ts module with a query hook per view", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const api = files.get("web_app/src/api/views.ts")!;
+      // Shorthand view reuses the source aggregate's list response.
+      expect(api).toMatch(
+        /export const ActiveOrdersResponse = OrderListResponse;/,
+      );
+      expect(api).toMatch(/export function useActiveOrdersView\(\)/);
+      expect(api).toMatch(/api\.get\(`\/views\/active_orders`\)/);
+      // Full-form view emits its own row + array schemas.
+      expect(api).toMatch(/export const OrderSummaryRow = z\.object\(\{/);
+      expect(api).toMatch(/orderId: z\.string\(\)/);
+      expect(api).toMatch(/status: OrderStatusSchema/);
+      expect(api).toMatch(/lineCount: z\.number\(\)\.int\(\)/);
+      expect(api).toMatch(
+        /export const OrderSummaryResponse = z\.array\(OrderSummaryRow\);/,
+      );
+      expect(api).toMatch(/export function useOrderSummaryView\(\)/);
+    });
+
+    it("emits a views index page listing every view", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const idx = files.get("web_app/src/pages/views/index.tsx")!;
+      expect(idx).toMatch(/data-testid="view-card-active_orders"/);
+      expect(idx).toMatch(/data-testid="view-card-order_summary"/);
+      expect(idx).toMatch(/<Title order=\{4\}>Active Orders<\/Title>/);
+      expect(idx).toMatch(/<Title order=\{4\}>Order Summary<\/Title>/);
+      // Shorthand view shows the source aggregate; full-form view
+      // shows "Custom shape: <field names>".
+      expect(idx).toMatch(/Source: Order/);
+      expect(idx).toMatch(/Custom shape: orderId, status, lineCount/);
+    });
+
+    it("emits a per-view table page that calls the query hook", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const page = files.get("web_app/src/pages/views/order_summary.tsx")!;
+      expect(page).toMatch(/import \{ useOrderSummaryView \} from "\.\.\/\.\.\/api\/views\.js"/);
+      expect(page).toMatch(/const q = useOrderSummaryView\(\)/);
+      // Table headers from the view's declared fields.
+      expect(page).toMatch(/<Table\.Th>orderId<\/Table\.Th>/);
+      expect(page).toMatch(/<Table\.Th>status<\/Table\.Th>/);
+      expect(page).toMatch(/<Table\.Th>lineCount<\/Table\.Th>/);
+      // Id<Order> cell auto-links to /orders/<id> (Order has UI in
+      // this deployable's modules).
+      expect(page).toMatch(
+        /<Anchor component=\{Link\} to=\{`\/orders\/\$\{row\.orderId\}`\}/,
+      );
+      // Empty + error states present.
+      expect(page).toMatch(/q\.data && q\.data\.length === 0 && <Text c="dimmed">No rows\.<\/Text>/);
+      expect(page).toMatch(/q\.isError && <Alert color="red">/);
+    });
+
+    it("shorthand view's table page uses the source aggregate's wire columns", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const page = files.get("web_app/src/pages/views/active_orders.tsx")!;
+      // ActiveOrders is shorthand `view ActiveOrders = Order where ...`
+      // — table columns mirror Order's primitive/id/enum fields.
+      expect(page).toMatch(/<Table\.Th>id<\/Table\.Th>/);
+      expect(page).toMatch(/<Table\.Th>customerId<\/Table\.Th>/);
+      expect(page).toMatch(/<Table\.Th>status<\/Table\.Th>/);
+      expect(page).toMatch(/<Table\.Th>placedAt<\/Table\.Th>/);
+    });
+
+    it("App.tsx registers /views + /views/<slug> routes and sidebar entry", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const app = files.get("web_app/src/App.tsx")!;
+      expect(app).toMatch(
+        /import ViewsIndex from "\.\/pages\/views\/index\.js"/,
+      );
+      expect(app).toMatch(
+        /import ActiveOrdersViewPage from "\.\/pages\/views\/active_orders\.js"/,
+      );
+      expect(app).toMatch(
+        /import OrderSummaryViewPage from "\.\/pages\/views\/order_summary\.js"/,
+      );
+      expect(app).toMatch(
+        /<Route path="\/views" element=\{<ViewsIndex \/>\} \/>/,
+      );
+      expect(app).toMatch(
+        /<Route path="\/views\/active_orders" element=\{<ActiveOrdersViewPage \/>\} \/>/,
+      );
+      expect(app).toMatch(
+        /<Anchor component=\{Link\} to="\/views" data-testid="nav-views">Views<\/Anchor>/,
+      );
+    });
+
+    it("home page links to /views when at least one view exists", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const home = files.get("web_app/src/pages/home.tsx")!;
+      expect(home).toMatch(/<Title order=\{3\}>Views<\/Title>/);
+      expect(home).toMatch(/data-testid="home-views-link"/);
+    });
+  });
 });

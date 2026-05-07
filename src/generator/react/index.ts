@@ -20,6 +20,14 @@ import {
   buildWorkflowsIndexPage,
   hasAnyWorkflow,
 } from "./workflow-builder.js";
+import {
+  allViews,
+  buildViewsApiModule,
+  buildViewsIndexPage,
+  buildViewTablePage,
+  hasAnyView,
+} from "./view-builder.js";
+import type { ViewIR } from "../../ir/loom-ir.js";
 
 // ---------------------------------------------------------------------------
 // React + React Query + Zod + Mantine generator.
@@ -95,6 +103,23 @@ export function generateReactForContexts(
     }
   }
 
+  // View UI — surfaces every backend view as a generated table page.
+  // Shorthand views reuse the source aggregate's wire schema; full-form
+  // views get their own per-view row schema.  Cross-aggregate Id<X>
+  // cells link to the matching detail page when that aggregate is in
+  // this deployable's modules.
+  const views = allViews(contexts);
+  if (hasAnyView(contexts)) {
+    out.set("src/api/views.ts", buildViewsApiModule(contexts));
+    out.set("src/pages/views/index.tsx", buildViewsIndexPage(contexts));
+    for (const { view, ctx } of views) {
+      out.set(
+        `src/pages/views/${snake(view.name)}.tsx`,
+        buildViewTablePage(view, ctx, aggregatesByName),
+      );
+    }
+  }
+
   out.set("e2e/smoke.spec.ts", smokeSpec(aggregates.map((a) => a.agg)));
   out.set("e2e/playwright.config.ts", PLAYWRIGHT_CONFIG_TS);
   out.set("e2e/package.json", E2E_PACKAGE_JSON);
@@ -103,8 +128,22 @@ export function generateReactForContexts(
   out.set("src/api/client.ts", CLIENT_TS);
   out.set("src/api/config.ts", configTs(apiBaseUrl));
   out.set("src/main.tsx", MAIN_TSX);
-  out.set("src/App.tsx", appTsx(aggregates.map((a) => a.agg), workflows.map((w) => w.wf)));
-  out.set("src/pages/home.tsx", homeTsx(aggregates.map((a) => a.agg), workflows.map((w) => w.wf)));
+  out.set(
+    "src/App.tsx",
+    appTsx(
+      aggregates.map((a) => a.agg),
+      workflows.map((w) => w.wf),
+      views.map((v) => v.view),
+    ),
+  );
+  out.set(
+    "src/pages/home.tsx",
+    homeTsx(
+      aggregates.map((a) => a.agg),
+      workflows.map((w) => w.wf),
+      views.map((v) => v.view),
+    ),
+  );
 
   out.set("package.json", PACKAGE_JSON);
   out.set("tsconfig.json", TSCONFIG_JSON);
@@ -310,7 +349,11 @@ export const api = {
 };
 `;
 
-function appTsx(aggregates: AggregateIR[], workflows: WorkflowIR[]): string {
+function appTsx(
+  aggregates: AggregateIR[],
+  workflows: WorkflowIR[],
+  views: ViewIR[],
+): string {
   const imports: string[] = [];
   const routes: string[] = [`        <Route path="/" element={<Home />} />`];
   imports.push(`import Home from "./pages/home.js";`);
@@ -344,6 +387,21 @@ function appTsx(aggregates: AggregateIR[], workflows: WorkflowIR[]): string {
       imports.push(`import ${cap} from "./pages/workflows/${slug}.js";`);
       routes.push(
         `        <Route path="/workflows/${slug}" element={<${cap} />} />`,
+      );
+    }
+  }
+  // View routes — index + one per view.
+  if (views.length > 0) {
+    imports.push(`import ViewsIndex from "./pages/views/index.js";`);
+    routes.push(
+      `        <Route path="/views" element={<ViewsIndex />} />`,
+    );
+    for (const view of views) {
+      const slug = snake(view.name);
+      const cap = `${upper(view.name)}ViewPage`;
+      imports.push(`import ${cap} from "./pages/views/${slug}.js";`);
+      routes.push(
+        `        <Route path="/views/${slug}" element={<${cap} />} />`,
       );
     }
   }
@@ -420,6 +478,10 @@ ${aggregates
   .join("\n")}${
     workflows.length > 0
       ? `\n            <Anchor component={Link} to="/workflows" data-testid="nav-workflows">Workflows</Anchor>`
+      : ""
+  }${
+    views.length > 0
+      ? `\n            <Anchor component={Link} to="/views" data-testid="nav-views">Views</Anchor>`
       : ""
   }
           </Group>
@@ -525,7 +587,11 @@ const E2E_TSCONFIG_JSON =
     2,
   ) + "\n";
 
-function homeTsx(aggregates: AggregateIR[], workflows: WorkflowIR[]): string {
+function homeTsx(
+  aggregates: AggregateIR[],
+  workflows: WorkflowIR[],
+  views: ViewIR[],
+): string {
   const aggCards = aggregates
     .map(
       (a) => `      <Card withBorder>
@@ -541,6 +607,15 @@ function homeTsx(aggregates: AggregateIR[], workflows: WorkflowIR[]): string {
         <Anchor component={Link} to="/workflows" data-testid="home-workflows-link">Browse workflows</Anchor>
       </Card>`
       : "";
+  const viewsBlock =
+    views.length > 0
+      ? `      <Title order={3}>Views</Title>
+      <Text c="dimmed">Saved queries.</Text>
+      <Card withBorder>
+        <Anchor component={Link} to="/views" data-testid="home-views-link">Browse views</Anchor>
+      </Card>`
+      : "";
+  const extras = [workflowsBlock, viewsBlock].filter(Boolean).join("\n");
   return `// Auto-generated.
 import { Stack, Title, Text, Anchor, Card } from "@mantine/core";
 import { Link } from "react-router-dom";
@@ -550,7 +625,7 @@ export default function Home(): JSX.Element {
     <Stack>
       <Title order={2}>Welcome</Title>
       <Text c="dimmed">Pick an aggregate to manage:</Text>
-${aggCards}${workflowsBlock ? "\n" + workflowsBlock : ""}
+${aggCards}${extras ? "\n" + extras : ""}
     </Stack>
   );
 }

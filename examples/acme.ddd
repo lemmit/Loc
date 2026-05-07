@@ -88,6 +88,22 @@ system Acme {
                 })
                 order.addLine(productId, quantity)
             }
+
+            // View surfacing — exercises the React generator's view
+            // UI (slice 18.B).  Two shapes: shorthand reuses Order's
+            // wire response; full-form declares a custom row.
+            view ActiveOrders = Order where status == Confirmed
+
+            view OrderSummary {
+                orderId: Id<Order>
+                status: OrderStatus
+                lineCount: int
+
+                from Order where status != Cancelled
+                bind orderId = id,
+                     status = status,
+                     lineCount = lines.count
+            }
         }
     }
 
