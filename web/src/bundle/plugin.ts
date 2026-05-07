@@ -37,6 +37,50 @@ export function pgliteAssetUrl(file: "pglite.wasm" | "initdb.wasm" | "pglite.dat
   return `https://cdn.jsdelivr.net/npm/@electric-sql/pglite@${version}/dist/${file}`;
 }
 
+// PGlite computes asset URLs as `new URL("./pglite.wasm", import.meta.url)`
+// and friends.  When the runtime worker loads our bundle from a
+// `blob:` URL, `import.meta.url` resolves to that blob URL — and
+// the URL constructor throws "Invalid URL" because blob: URLs
+// can't serve as a base for relative resolution.  PGlite also
+// computes one of those URLs unconditionally, before checking the
+// asset-injection options, so the throw can't be avoided just by
+// passing pre-compiled modules.
+//
+// Fix: post-process the bundle output to replace every
+// `import.meta.url` with a real http URL pointing at PGlite's
+// dist directory on jsdelivr.  Three things now align:
+//   1. Relative resolution succeeds (jsdelivr is a normal http URL).
+//   2. The resulting URLs (`./pglite.wasm`, `./initdb.wasm`,
+//      `./pglite.data` against that base) point at real files,
+//      so even if the asset-injection short-circuits don't fire,
+//      PGlite's fallback fetch finds something.
+//   3. The runtime worker's pre-fetched assets continue to
+//      short-circuit those fetches, so we still avoid one round-trip.
+//
+// All `import.meta.url` references in the bundle are inside
+// PGlite — the Loom-generated code, hono, drizzle, and zod don't
+// use it — so the blanket replace is safe.
+export function pgliteImportMetaUrl(): string {
+  const version = RUNTIME_VERSIONS["@electric-sql/pglite"];
+  return `https://cdn.jsdelivr.net/npm/@electric-sql/pglite@${version}/dist/index.mjs`;
+}
+
+// Force PGlite's browser code path.  Three Emscripten init sites
+// contain the same Node-vs-browser detection (`typeof A7.versions.node
+// == "string"` on PGlite's process polyfill).  In a real browser
+// worker the polyfill doesn't set `versions.node`, so the detection
+// already returns false; flattening it explicitly is cheap and makes
+// the bundle behave identically across hosts (incl. our Node smoke).
+const PGLITE_NODE_DETECTION =
+  /typeof A7 == "object" && typeof A7\.versions == "object" && typeof A7\.versions\.node == "string"/g;
+
+export function postProcessBundle(code: string): string {
+  let out = code;
+  out = out.replace(PGLITE_NODE_DETECTION, "false");
+  out = out.replaceAll("import.meta.url", JSON.stringify(pgliteImportMetaUrl()));
+  return out;
+}
+
 export interface VirtualFsContext {
   files: Map<string, string>;
   fetchedUrls: Set<string>;

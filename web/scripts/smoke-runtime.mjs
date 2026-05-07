@@ -20,6 +20,8 @@ import {
   harvestVersions,
   makeEntryStdin,
   makeLoomPlugin,
+  pgliteAssetUrl,
+  postProcessBundle,
   resolveInFs,
   schemaPathFor,
 } from "../src/bundle/plugin.ts";
@@ -79,22 +81,12 @@ console.log(
   `# bundled ${(code.length / 1024).toFixed(0)} KB in ${bundleMs} ms (${ctx.fetchedUrls.size} esm.sh modules)`,
 );
 
-console.log("# 3/5 patching + writing bundle + importing…");
-const { pgliteAssetUrl } = await import("../src/bundle/plugin.ts");
-// Force PGlite's browser code path so it doesn't reach for
-// node:fs/promises.readFile or createRequire.  PGlite has the same
-// detection inlined into multiple Emscripten init functions, so we
-// blanket-replace every occurrence.  Browser-side this branch falls
-// through naturally because there's no Node `process`; Node-side we
-// have to flip every detection point.
-const detection = /typeof A7 == "object" && typeof A7\.versions == "object" && typeof A7\.versions\.node == "string"/g;
-const matches = code.match(detection);
-if (!matches || matches.length === 0) {
-  console.error("FAIL: PGlite Node-detection pattern not found; bundle shape changed.");
-  process.exit(1);
-}
-const patched = code.replace(detection, "false");
-console.log(`# patched ${matches.length} Node-detection sites`);
+console.log("# 3/5 post-processing + writing bundle + importing…");
+// `postProcessBundle` mirrors what bundler.worker.ts ships in
+// production: forces PGlite's browser code path and rewrites
+// `import.meta.url` to a real jsdelivr URL so PGlite's relative
+// asset URL constructions don't blow up under blob: bases.
+const patched = postProcessBundle(code);
 const tmpFile = path.join(os.tmpdir(), `loom-bundle-${process.pid}.mjs`);
 writeFileSync(tmpFile, patched);
 const mod = await import(pathToFileURL(tmpFile).href);

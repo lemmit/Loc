@@ -286,6 +286,7 @@ export default function App(): JSX.Element {
               loading={generating}
               disabled={errorCount > 0}
               variant="filled"
+              data-testid="btn-generate"
             >
               Generate
             </Button>
@@ -295,6 +296,7 @@ export default function App(): JSX.Element {
               loading={bundling}
               disabled={!result?.ok || result.files.length === 0}
               variant="default"
+              data-testid="btn-bundle"
             >
               Bundle
             </Button>
@@ -419,9 +421,9 @@ export default function App(): JSX.Element {
               </Text>
               <Group gap="xs">
                 {bootedDDL ? (
-                  <Badge size="xs" color="green" variant="light">booted</Badge>
+                  <Badge size="xs" color="green" variant="light" data-testid="backend-status">booted</Badge>
                 ) : (
-                  <Badge size="xs" color="gray" variant="light">offline</Badge>
+                  <Badge size="xs" color="gray" variant="light" data-testid="backend-status">offline</Badge>
                 )}
                 <Button
                   size="xs"
@@ -429,6 +431,7 @@ export default function App(): JSX.Element {
                   loading={booting}
                   disabled={!bundleResult?.ok}
                   variant="default"
+                  data-testid="btn-boot"
                 >
                   {bootedDDL ? "Reboot" : "Boot"}
                 </Button>
@@ -450,6 +453,7 @@ export default function App(): JSX.Element {
                       data={["GET", "POST", "PUT", "DELETE", "PATCH"]}
                       allowDeselect={false}
                       w={90}
+                      data-testid="req-method"
                     />
                     <TextInput
                       size="xs"
@@ -457,12 +461,14 @@ export default function App(): JSX.Element {
                       onChange={(e) => setReqPath(e.currentTarget.value)}
                       placeholder="/products"
                       style={{ flex: 1 }}
+                      data-testid="req-path"
                     />
                     <Button
                       size="xs"
                       onClick={runDispatch}
                       loading={dispatching}
                       disabled={!bootedDDL}
+                      data-testid="btn-send"
                     >
                       Send
                     </Button>
@@ -477,16 +483,18 @@ export default function App(): JSX.Element {
                       minRows={2}
                       maxRows={4}
                       styles={{ input: { fontFamily: "var(--mantine-font-family-monospace)", fontSize: 11 } }}
+                      data-testid="req-body"
                     />
                   )}
                   {dispatchResult && (
                     dispatchResult.ok ? (
-                      <Box>
+                      <Box data-testid="resp-ok">
                         <Group gap={6} mb={4}>
                           <Badge
                             size="xs"
                             color={dispatchResult.response.status < 400 ? "green" : "red"}
                             variant="filled"
+                            data-testid="resp-status"
                           >
                             {dispatchResult.response.status} {dispatchResult.response.statusText}
                           </Badge>
@@ -494,12 +502,12 @@ export default function App(): JSX.Element {
                             {dispatchResult.durationMs} ms
                           </Text>
                         </Group>
-                        <Code block style={{ whiteSpace: "pre-wrap", fontSize: 11, maxHeight: 100, overflow: "auto" }}>
+                        <Code block style={{ whiteSpace: "pre-wrap", fontSize: 11, maxHeight: 100, overflow: "auto" }} data-testid="resp-body">
                           {dispatchResult.response.body || "(empty body)"}
                         </Code>
                       </Box>
                     ) : (
-                      <Code block c="red" style={{ whiteSpace: "pre-wrap", fontSize: 11 }}>
+                      <Code block c="red" style={{ whiteSpace: "pre-wrap", fontSize: 11 }} data-testid="resp-err">
                         {dispatchResult.message}
                       </Code>
                     )
