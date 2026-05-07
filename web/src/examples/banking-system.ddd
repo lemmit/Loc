@@ -99,6 +99,24 @@ system BankingSystem {
         find openByHolder(holder: Id<Customer>): Account[]
           where this.holder == holder && this.status == Open
       }
+
+      // Workflow: atomically move funds between two accounts.
+      // `transactional` keeps the withdraw + deposit in one DB
+      // transaction — if either side fails an invariant the whole
+      // thing rolls back.  Both accounts must already exist.
+      // Invoke via POST /workflows/transfer_funds with body
+      //   { fromAccount, toAccount, amount: { amount, currency } }
+      workflow transferFunds(
+        fromAccount: Id<Account>,
+        toAccount: Id<Account>,
+        amount: Money
+      ) transactional {
+        precondition amount.amount > 0
+        let src = Accounts.getById(fromAccount)
+        let dst = Accounts.getById(toAccount)
+        src.withdraw(amount)
+        dst.deposit(amount)
+      }
     }
   }
 
