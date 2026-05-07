@@ -289,7 +289,10 @@ function fieldDisplayLine(
   if (t.kind === "enum") {
     // tt="unset" disables Mantine's default uppercasing so the rendered
     // text matches the enum value verbatim — predictable for tests.
-    return `<Text><strong>${f.name}:</strong> <Badge tt="unset" data-testid="${tid}">{data.${f.name}}</Badge></Text>`;
+    // component="span" keeps Badge inline so it nests legally inside
+    // <Text> (which Mantine renders as <p> by default; <div> inside
+    // <p> trips React's validateDOMNesting warning).
+    return `<Text><strong>${f.name}:</strong> <Badge tt="unset" component="span" data-testid="${tid}">{data.${f.name}}</Badge></Text>`;
   }
   return `<Text><strong>${f.name}:</strong> <span data-testid="${tid}">{String(data.${f.name})}</span></Text>`;
 }
