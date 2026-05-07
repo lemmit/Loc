@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import {
   AppShell,
   Badge,
@@ -22,9 +22,7 @@ import { examples, defaultExample, type LoomExample } from "./examples";
 import { LoomBuildClient } from "./build/client";
 import type { GenerateResult, VirtualFile } from "./build/protocol";
 import { LoomBundleClient } from "./bundle/client";
-import type { BundleResult } from "./bundle/protocol";
 import { LoomRuntimeClient } from "./runtime/client";
-import type { DispatchResult } from "./runtime/protocol";
 import { FileTree } from "./preview/FileTree";
 import { FileViewer } from "./preview/FileViewer";
 import { Preview } from "./preview/Preview";
@@ -34,6 +32,17 @@ import {
   readHashSource,
   writeHashSource,
 } from "./util/share";
+import {
+  initialPipelineState,
+  pipelineReducer,
+} from "./pipeline/reducer";
+import {
+  bootError as selBootError,
+  bootedDDL as selBootedDDL,
+  generateOk as selGenerateOk,
+  honoBundleOk as selHonoBundleOk,
+  reactBundleOk as selReactBundleOk,
+} from "./pipeline/state";
 
 // Find the right entry paths in a generated tree.  Legacy
 // single-context mode dumps everything at the root.  System mode
@@ -136,7 +145,22 @@ export default function App(): JSX.Element {
       defaultExample.source,
     [exampleId, examplesList],
   );
+
+  // Pipeline state machine — generate → bundle → boot → dispatch.
+  // Replaces 11 disjoint useStates plus their manual invalidation
+  // cascades; see web/src/pipeline/state.ts for the model.
+  const [pipeline, dispatch] = useReducer(pipelineReducer, initialPipelineState);
+
+  // Pure-UI state that doesn't belong to the pipeline.
   const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [rightPane, setRightPane] = useState<"files" | "preview">("files");
+  const [reqMethod, setReqMethod] = useState<string>("GET");
+  const [reqPath, setReqPath] = useState<string>("/products");
+  const [reqBody, setReqBody] = useState<string>("");
+  const [copied, setCopied] = useState(false);
+
+  // Worker clients — lifetime-scoped to the App.
   const sourceRef = useRef<string>(initialSource);
   const buildClientRef = useRef<LoomBuildClient | null>(null);
   const bundleClientRef = useRef<LoomBundleClient | null>(null);
@@ -149,22 +173,6 @@ export default function App(): JSX.Element {
   if (lspClientRef.current === null) {
     lspClientRef.current = new LoomLspClient();
   }
-  const [generating, setGenerating] = useState(false);
-  const [bundling, setBundling] = useState(false);
-  const [booting, setBooting] = useState(false);
-  const [result, setResult] = useState<GenerateResult | null>(null);
-  const [bundleResult, setBundleResult] = useState<BundleResult | null>(null);
-  const [reactBundle, setReactBundle] = useState<BundleResult | null>(null);
-  const [bootError, setBootError] = useState<string | null>(null);
-  const [bootedDDL, setBootedDDL] = useState<string | null>(null);
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [rightPane, setRightPane] = useState<"files" | "preview">("files");
-  // Request composer state.
-  const [reqMethod, setReqMethod] = useState<string>("GET");
-  const [reqPath, setReqPath] = useState<string>("/products");
-  const [reqBody, setReqBody] = useState<string>("");
-  const [dispatching, setDispatching] = useState(false);
-  const [dispatchResult, setDispatchResult] = useState<DispatchResult | null>(null);
 
   useEffect(() => {
     const build = new LoomBuildClient();
@@ -187,34 +195,20 @@ export default function App(): JSX.Element {
     };
   }, []);
 
-  // Reset preview state when the user picks a different example —
-  // the previously generated tree no longer corresponds to the
-  // source in the editor.  Also clear the diagnostics list: stale
-  // errors from the previous source linger in the Problems panel
-  // until the LSP worker re-pushes from the new buffer, which
-  // shows wrong red badges in the header for a beat after every
-  // example switch.  And mirror the source into the URL hash so
-  // the page is always shareable as-is.
+  // Reset the whole pipeline + UI state when the user picks a
+  // different example.  The reducer's RESET kills generate/bundle/
+  // boot/dispatch in one shot — no scattered setters to forget.
   useEffect(() => {
     sourceRef.current = initialSource;
     writeHashSource(initialSource);
-    setResult(null);
-    setBundleResult(null);
-    setReactBundle(null);
-    setBootedDDL(null);
-    setBootError(null);
-    setDispatchResult(null);
+    dispatch({ type: "RESET" });
+    setDiagnostics([]);
     setSelectedPath(null);
     setRightPane("files");
-    setDiagnostics([]);
     runtimeClientRef.current?.reset();
   }, [initialSource]);
 
-  // Debounced URL-hash mirror for live edits — the editor's
-  // `onChange` writes to `sourceRef`, here we coalesce keystroke
-  // bursts (300 ms idle) and push the encoded source into the URL.
-  // Stays inside `replaceState` so we don't add a history entry
-  // per keystroke.
+  // Debounced URL-hash mirror for live edits.
   const hashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scheduleHashSync = (text: string): void => {
     if (hashTimerRef.current) clearTimeout(hashTimerRef.current);
@@ -222,15 +216,12 @@ export default function App(): JSX.Element {
       writeHashSource(text);
     }, 300);
   };
-  // Cancel any pending hash write on unmount so we don't push to
-  // an already-disposed window.
   useEffect(() => {
     return () => {
       if (hashTimerRef.current) clearTimeout(hashTimerRef.current);
     };
   }, []);
 
-  const [copied, setCopied] = useState(false);
   async function copyShareLink(): Promise<void> {
     try {
       const url = buildShareUrl(sourceRef.current);
@@ -238,105 +229,111 @@ export default function App(): JSX.Element {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      // Clipboard permission denied or context insecure; fall back
-      // to a no-op — the address bar already has the live URL.
+      // Clipboard permission denied or context insecure — the
+      // address bar already has the live URL.
     }
   }
 
   const errorCount = diagnostics.filter((d) => d.severity === "error").length;
   const warningCount = diagnostics.filter((d) => d.severity === "warning").length;
 
+  // Pipeline selectors — read paths in one place, compose JSX cheaply.
+  const generateResult = pipeline.generate.kind === "result"
+    ? pipeline.generate.result
+    : null;
+  const generateSuccess = selGenerateOk(pipeline);
+  const honoBundleResult = pipeline.bundle.kind === "result"
+    ? pipeline.bundle.hono
+    : null;
+  const honoBundle = selHonoBundleOk(pipeline);
+  const reactBundle = selReactBundleOk(pipeline);
+  const ddl = selBootedDDL(pipeline);
+  const bootErrorMessage = selBootError(pipeline);
+  const dispatchSlot = pipeline.dispatch.kind === "result"
+    ? pipeline.dispatch.result
+    : null;
+
   async function runGenerate(): Promise<void> {
     const client = buildClientRef.current;
     if (!client) return;
-    setGenerating(true);
-    try {
-      const res = await client.generate(sourceRef.current);
-      setResult(res);
-      // A new generation invalidates any prior bundle.
-      setBundleResult(null);
-      if (res.ok && res.files.length > 0) {
-        // Default to the first file — typically a top-level
-        // package.json or domain/<aggregate>.ts.  Lets the user
-        // immediately see something instead of an empty viewer.
-        setSelectedPath((prev) => prev ?? res.files[0].path);
-      } else {
-        setSelectedPath(null);
-      }
-    } finally {
-      setGenerating(false);
+    dispatch({ type: "GENERATE_START" });
+    const result = await client.generate(sourceRef.current);
+    dispatch({ type: "GENERATE_DONE", result });
+    if (result.ok && result.files.length > 0) {
+      // Default to the first file — typically a top-level
+      // package.json or domain/<aggregate>.ts.  Lets the user
+      // immediately see something instead of an empty viewer.
+      setSelectedPath((prev) => prev ?? result.files[0].path);
+    } else {
+      setSelectedPath(null);
     }
   }
 
   async function runBundle(): Promise<void> {
     const client = bundleClientRef.current;
-    if (!client || !result?.ok) return;
-    const entries = findEntries(result.files);
+    if (!client || !generateSuccess) return;
+    const entries = findEntries(generateSuccess.files);
     if (!entries.hono) {
-      setBundleResult({
-        ok: false,
-        diagnostics: [
-          {
-            severity: "error",
-            message: "No hono deployable found in generated output (looked for http/index.ts).",
-          },
-        ],
+      // No hono entry → synthesise a fail result the UI can render.
+      dispatch({
+        type: "BUNDLE_DONE",
+        hono: {
+          ok: false,
+          diagnostics: [
+            {
+              severity: "error",
+              message:
+                "No hono deployable found in generated output (looked for http/index.ts).",
+            },
+          ],
+        },
+        react: null,
       });
       return;
     }
-    setBundling(true);
-    setBootedDDL(null);
-    setBootError(null);
-    setDispatchResult(null);
-    setReactBundle(null);
-    try {
-      const honoRes = await client.bundle({
-        kind: "hono",
-        files: result.files,
-        entryPath: entries.hono,
+    dispatch({ type: "BUNDLE_START" });
+    const honoRes = await client.bundle({
+      kind: "hono",
+      files: generateSuccess.files,
+      entryPath: entries.hono,
+    });
+    let reactRes: typeof honoRes | null = null;
+    // System mode emits a React deployable too — bundle it so the
+    // Preview pane can boot the generated SPA against the same
+    // PGlite-backed Hono backend.
+    if (honoRes.ok && entries.react) {
+      reactRes = await client.bundle({
+        kind: "react",
+        files: generateSuccess.files,
+        entryPath: entries.react,
       });
-      setBundleResult(honoRes);
-      // System mode emits a React deployable too — bundle it so the
-      // Preview pane can boot the generated SPA against the same
-      // PGlite-backed Hono backend.
-      if (honoRes.ok && entries.react) {
-        const reactRes = await client.bundle({
-          kind: "react",
-          files: result.files,
-          entryPath: entries.react,
-        });
-        setReactBundle(reactRes);
-      }
-    } finally {
-      setBundling(false);
     }
+    dispatch({ type: "BUNDLE_DONE", hono: honoRes, react: reactRes });
   }
 
   async function runBoot(): Promise<void> {
     const runtime = runtimeClientRef.current;
-    if (!runtime || !bundleResult?.ok) return;
-    setBooting(true);
-    setBootError(null);
-    setBootedDDL(null);
-    setDispatchResult(null);
+    if (!runtime || !honoBundle) return;
+    dispatch({ type: "BOOT_START" });
     try {
-      const res = await runtime.boot(bundleResult.code);
+      const res = await runtime.boot(honoBundle.code);
       if (res.ok) {
-        setBootedDDL(res.ddl);
+        dispatch({ type: "BOOT_OK", ddl: res.ddl });
       } else {
-        setBootError(res.message);
+        dispatch({ type: "BOOT_FAIL", message: res.message });
       }
     } catch (err) {
-      setBootError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBooting(false);
+      dispatch({
+        type: "BOOT_FAIL",
+        message: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
   async function runDispatch(): Promise<void> {
     const runtime = runtimeClientRef.current;
-    if (!runtime || !bootedDDL) return;
-    setDispatching(true);
+    if (!runtime || ddl === null) return;
+    dispatch({ type: "DISPATCH_START" });
     try {
       const url = reqPath.startsWith("http")
         ? reqPath
@@ -349,24 +346,25 @@ export default function App(): JSX.Element {
       if (body !== null && body.length > 0) {
         headers["content-type"] = "application/json";
       }
-      const res = await runtime.dispatch({
+      const result = await runtime.dispatch({
         url,
         method: reqMethod,
         headers,
         body,
       });
-      setDispatchResult(res);
+      dispatch({ type: "DISPATCH_DONE", result });
     } catch (err) {
-      setDispatchResult({
-        ok: false,
-        message: err instanceof Error ? err.message : String(err),
+      dispatch({
+        type: "DISPATCH_DONE",
+        result: {
+          ok: false,
+          message: err instanceof Error ? err.message : String(err),
+        },
       });
-    } finally {
-      setDispatching(false);
     }
   }
 
-  const files: VirtualFile[] = result?.ok ? result.files : [];
+  const files: VirtualFile[] = generateSuccess?.files ?? [];
   const tree = useMemo(() => buildTree(files), [files]);
   const selectedFile = useMemo(
     () => files.find((f) => f.path === selectedPath) ?? null,
@@ -401,7 +399,7 @@ export default function App(): JSX.Element {
             <Button
               size="xs"
               onClick={runGenerate}
-              loading={generating}
+              loading={pipeline.generating}
               disabled={errorCount > 0}
               variant="filled"
               data-testid="btn-generate"
@@ -411,8 +409,8 @@ export default function App(): JSX.Element {
             <Button
               size="xs"
               onClick={runBundle}
-              loading={bundling}
-              disabled={!result?.ok || result.files.length === 0}
+              loading={pipeline.bundling}
+              disabled={!generateSuccess || generateSuccess.files.length === 0}
               variant="default"
               data-testid="btn-bundle"
             >
@@ -461,13 +459,13 @@ export default function App(): JSX.Element {
               />
               {rightPane === "files" ? (
                 <Text size="xs" c="dimmed">
-                  {files.length} file{files.length === 1 ? "" : "s"} · {modeLabel(result)}
+                  {files.length} file{files.length === 1 ? "" : "s"} · {modeLabel(generateResult)}
                 </Text>
               ) : (
-                <Text size="xs" c={reactBundle?.ok && bootedDDL ? "green" : "dimmed"}>
-                  {reactBundle?.ok && bootedDDL
+                <Text size="xs" c={reactBundle && ddl ? "green" : "dimmed"}>
+                  {reactBundle && ddl
                     ? "live"
-                    : reactBundle?.ok
+                    : reactBundle
                       ? "needs Boot"
                       : "needs Bundle"}
                 </Text>
@@ -500,14 +498,14 @@ export default function App(): JSX.Element {
                     ) : (
                       <Box p="md">
                         <Text size="sm" c="dimmed">
-                          {result?.ok === false
+                          {generateResult?.ok === false
                             ? "Generation failed — see Problems."
                             : "Click Generate to emit a project from the source."}
                         </Text>
                       </Box>
                     )}
                   </Box>
-                  {bundleResult && !bundleResult.ok && (
+                  {honoBundleResult && !honoBundleResult.ok && (
                     <Box
                       p="xs"
                       style={{
@@ -521,7 +519,7 @@ export default function App(): JSX.Element {
                         Bundle errors
                       </Text>
                       <Stack gap={2}>
-                        {bundleResult.diagnostics.map((d, i) => (
+                        {honoBundleResult.diagnostics.map((d, i) => (
                           <Text key={i} size="xs" ff="monospace" style={{ whiteSpace: "pre-wrap" }}>
                             {d.file ? `${d.file}:${d.line ?? "?"}: ` : ""}
                             {d.message}
@@ -534,7 +532,7 @@ export default function App(): JSX.Element {
               </Box>
             ) : (
               <Box style={{ flex: 1, minHeight: 0 }}>
-                {reactBundle?.ok && bootedDDL && runtimeClientRef.current ? (
+                {reactBundle && ddl && runtimeClientRef.current ? (
                   <Preview
                     js={reactBundle.code}
                     css={reactBundle.css}
@@ -544,13 +542,13 @@ export default function App(): JSX.Element {
                 ) : (
                   <Box p="md">
                     <Text size="sm" c="dimmed">
-                      {!result?.ok
+                      {!generateSuccess
                         ? "Generate a system-mode source first (the Sales System example has both Hono + React deployables)."
-                        : !reactBundle?.ok
-                          ? reactBundle && !reactBundle.ok
+                        : !reactBundle
+                          ? honoBundleResult && !honoBundleResult.ok
                             ? "Bundling the React app failed — switch to Files for details."
                             : "Click Bundle to compile the React frontend (~10 s on first run)."
-                          : !bootedDDL
+                          : !ddl
                             ? "Boot the backend first — the React app calls into PGlite via the runtime worker."
                             : "Loading…"}
                     </Text>
@@ -589,7 +587,7 @@ export default function App(): JSX.Element {
                 Backend
               </Text>
               <Group gap="xs">
-                {bootedDDL ? (
+                {ddl ? (
                   <Badge size="xs" color="green" variant="light" data-testid="backend-status">booted</Badge>
                 ) : (
                   <Badge size="xs" color="gray" variant="light" data-testid="backend-status">offline</Badge>
@@ -597,22 +595,22 @@ export default function App(): JSX.Element {
                 <Button
                   size="xs"
                   onClick={runBoot}
-                  loading={booting}
-                  disabled={!bundleResult?.ok}
+                  loading={pipeline.booting}
+                  disabled={!honoBundle}
                   variant="default"
                   data-testid="btn-boot"
                 >
-                  {bootedDDL ? "Reboot" : "Boot"}
+                  {ddl ? "Reboot" : "Boot"}
                 </Button>
               </Group>
             </Group>
             <Box style={{ flex: 1, minHeight: 0, overflow: "auto" }} p="xs">
-              {bootError && (
+              {bootErrorMessage && (
                 <Code block c="red" mb="xs" style={{ whiteSpace: "pre-wrap", fontSize: 11 }}>
-                  {bootError}
+                  {bootErrorMessage}
                 </Code>
               )}
-              {bootedDDL ? (
+              {ddl ? (
                 <Stack gap={6}>
                   <Group gap={6} wrap="nowrap">
                     <Select
@@ -635,8 +633,8 @@ export default function App(): JSX.Element {
                     <Button
                       size="xs"
                       onClick={runDispatch}
-                      loading={dispatching}
-                      disabled={!bootedDDL}
+                      loading={pipeline.dispatching}
+                      disabled={ddl === null}
                       data-testid="btn-send"
                     >
                       Send
@@ -655,36 +653,36 @@ export default function App(): JSX.Element {
                       data-testid="req-body"
                     />
                   )}
-                  {dispatchResult && (
-                    dispatchResult.ok ? (
+                  {dispatchSlot && (
+                    dispatchSlot.ok ? (
                       <Box data-testid="resp-ok">
                         <Group gap={6} mb={4}>
                           <Badge
                             size="xs"
-                            color={dispatchResult.response.status < 400 ? "green" : "red"}
+                            color={dispatchSlot.response.status < 400 ? "green" : "red"}
                             variant="filled"
                             data-testid="resp-status"
                           >
-                            {dispatchResult.response.status} {dispatchResult.response.statusText}
+                            {dispatchSlot.response.status} {dispatchSlot.response.statusText}
                           </Badge>
                           <Text size="xs" c="dimmed">
-                            {dispatchResult.durationMs} ms
+                            {dispatchSlot.durationMs} ms
                           </Text>
                         </Group>
                         <Code block style={{ whiteSpace: "pre-wrap", fontSize: 11, maxHeight: 100, overflow: "auto" }} data-testid="resp-body">
-                          {dispatchResult.response.body || "(empty body)"}
+                          {dispatchSlot.response.body || "(empty body)"}
                         </Code>
                       </Box>
                     ) : (
                       <Code block c="red" style={{ whiteSpace: "pre-wrap", fontSize: 11 }} data-testid="resp-err">
-                        {dispatchResult.message}
+                        {dispatchSlot.message}
                       </Code>
                     )
                   )}
                 </Stack>
               ) : (
                 <Text size="xs" c="dimmed">
-                  {bundleResult?.ok
+                  {honoBundle
                     ? "Click Boot to spin up PGlite + the generated Hono app."
                     : "Generate and Bundle first to enable the backend."}
                 </Text>
@@ -696,22 +694,22 @@ export default function App(): JSX.Element {
       <AppShell.Footer>
         <Group h="100%" px="md" gap="md" justify="space-between">
           <Text size="xs" c="dimmed">
-            Phase 3b — editor + LSP + generator + bundler + runtime
+            Loom Playground — editor + LSP + generator + bundler + runtime
           </Text>
           <Group gap="md">
             <Text size="xs" c="dimmed">
-              {result?.ok === false
-                ? `generate: ${result.diagnostics.filter((d) => d.severity === "error").length} error(s)`
-                : result?.ok
-                  ? `generated ${result.files.length} file(s) (${modeLabel(result)})`
+              {generateResult?.ok === false
+                ? `generate: ${generateResult.diagnostics.filter((d) => d.severity === "error").length} error(s)`
+                : generateResult?.ok
+                  ? `generated ${generateResult.files.length} file(s) (${modeLabel(generateResult)})`
                   : "no generation yet"}
             </Text>
             <Text size="xs" c="dimmed">
-              {bundleResult === null
+              {honoBundleResult === null
                 ? "no bundle yet"
-                : bundleResult.ok
-                  ? `bundled ${formatBytes(bundleResult.size)} in ${bundleResult.durationMs} ms (${bundleResult.fetchedUrls.length} deps fetched)`
-                  : `bundle: ${bundleResult.diagnostics.filter((d) => d.severity === "error").length} error(s)`}
+                : honoBundleResult.ok
+                  ? `bundled ${formatBytes(honoBundleResult.size)} in ${honoBundleResult.durationMs} ms (${honoBundleResult.fetchedUrls.length} deps fetched)`
+                  : `bundle: ${honoBundleResult.diagnostics.filter((d) => d.severity === "error").length} error(s)`}
             </Text>
           </Group>
         </Group>
