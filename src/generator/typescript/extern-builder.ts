@@ -40,6 +40,11 @@ export function buildExternHandlersFile(
       `import type { ${usedVOs.join(", ")} } from "./value-objects.js";`,
     );
   }
+  // Re-export so user-supplied handler code can throw the same
+  // typed error the framework wrap would synthesise — useful for
+  // user code that wants to attribute a downstream failure to a
+  // specific extern without losing the framework envelope.
+  lines.push(`export { ExternHandlerError } from "./errors.js";`);
   lines.push("");
 
   // Per-op request type matching the wire body shape.  The runtime

@@ -36,6 +36,30 @@ public sealed class ForbiddenException : System.Exception
 }
 
 /// <summary>
+/// Wraps an exception thrown by a user-supplied <c>[ExternHandler]</c>
+/// implementation.  The auto-generated extern command handler catches
+/// any non-domain exception coming out of <c>HandleAsync</c> and
+/// rethrows as this type so the <see cref="DomainExceptionFilter"/> can
+/// emit a 500 envelope that names the offending op + aggregate
+/// instead of the bare <c>{ "error": "internal" }</c> operators see
+/// otherwise.  Domain-layer exceptions (DomainException,
+/// ForbiddenException, AggregateNotFoundException) raised by the
+/// user handler are NOT wrapped — they bubble through and the
+/// filter maps them to their usual status codes.
+/// </summary>
+public sealed class ExternHandlerException : System.Exception
+{
+    public string OpName { get; }
+    public string AggName { get; }
+    public ExternHandlerException(string opName, string aggName, System.Exception inner)
+        : base($"Extern handler '{opName}' on '{aggName}' threw: {inner.Message}", inner)
+    {
+        OpName = opName;
+        AggName = aggName;
+    }
+}
+
+/// <summary>
 /// Marker for user-supplied extern operation handlers.  The Scrutor
 /// scan in <see cref="Program"/> picks up every class decorated with
 /// this attribute and registers it under its implemented IXAggHandler

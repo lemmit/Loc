@@ -248,6 +248,135 @@ describe("typescript generator", () => {
     expect(httpIndex).toMatch(/verifyOrderExternHandlersRegistered/);
   });
 
+  describe("slice 16.B — extern handler exception envelope", () => {
+    it("domain/errors.ts exports ExternHandlerError", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model);
+      const errors = files.get("domain/errors.ts")!;
+      expect(errors).toMatch(/export class ExternHandlerError extends Error/);
+      // Carries op + agg names + the inner cause.
+      expect(errors).toMatch(/readonly opName: string;/);
+      expect(errors).toMatch(/readonly aggName: string;/);
+      expect(errors).toMatch(/readonly cause: unknown;/);
+      // Message embeds op + agg + inner.
+      expect(errors).toMatch(/Extern handler '\$\{opName\}' on '\$\{aggName\}' threw/);
+    });
+
+    it("per-aggregate routes wrap the user handler call and onError maps ExternHandlerError to 500", async () => {
+      const { parseHelper } = await import("langium/test");
+      const services = createDddServices(NodeFileSystem);
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(`
+        context Sales {
+          enum OrderStatus { Draft, Confirmed }
+          aggregate Order {
+            customerId: string
+            status: OrderStatus
+            function isMutable(): bool = status == Draft
+            operation confirm() extern {
+              precondition isMutable()
+            }
+          }
+          repository Orders for Order { }
+        }
+      `, { validation: true });
+      const files = generateTypeScript(doc.parseResult.value as Model);
+      const routes = files.get("http/order.routes.ts")!;
+      // Imports the new error type.
+      expect(routes).toMatch(
+        /import \{ DomainError, AggregateNotFoundError, ForbiddenError, ExternHandlerError \} from "\.\.\/domain\/errors\.js"/,
+      );
+      // Wraps the handler call in try/catch.
+      expect(routes).toMatch(/try \{\s+await handler\(aggregate, body\);/);
+      // Domain-layer errors re-throw unchanged.
+      expect(routes).toMatch(/if \(err instanceof DomainError\) throw err;/);
+      expect(routes).toMatch(/if \(err instanceof ForbiddenError\) throw err;/);
+      expect(routes).toMatch(/if \(err instanceof AggregateNotFoundError\) throw err;/);
+      // Anything else wraps as ExternHandlerError with op + agg names.
+      expect(routes).toMatch(
+        /throw new ExternHandlerError\("confirm", "Order", err\);/,
+      );
+      // onError checks ExternHandlerError before the generic 500.
+      expect(routes).toMatch(/if \(err instanceof ExternHandlerError\)/);
+      // Generic 500 fallback survives unchanged for unknown errors.
+      expect(routes).toMatch(/return c\.json\(\{ error: "internal" \}, 500\)/);
+    });
+
+    it("does NOT register a defaultHook on OpenAPIHono (Zod's 400 stays the contract)", async () => {
+      // The framework's default 400 envelope for Zod-OpenAPI schema
+      // failures is the published contract for request-validation
+      // errors.  Forking it would break every OpenAPI-generated
+      // client.  Pin the absence.
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model);
+      const httpIndex = files.get("http/index.ts")!;
+      const orderRoutes = files.get("http/order.routes.ts")!;
+      expect(httpIndex).not.toMatch(/defaultHook/);
+      expect(orderRoutes).not.toMatch(/defaultHook/);
+    });
+
+    it("workflow extern op-call wraps the user handler the same way", async () => {
+      const { parseHelper } = await import("langium/test");
+      const services = createDddServices(NodeFileSystem);
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(`
+        context Sales {
+          enum OrderStatus { Draft, Confirmed }
+          aggregate Order {
+            customerId: string
+            status: OrderStatus
+            function isMutable(): bool = status == Draft
+            operation confirm() extern { precondition isMutable() }
+          }
+          repository Orders for Order { }
+          workflow confirmOne(orderId: Id<Order>) {
+            let order = Orders.getById(orderId)
+            order.confirm()
+          }
+        }
+      `, { validation: true });
+      const files = generateTypeScript(doc.parseResult.value as Model);
+      const wf = files.get("http/workflows.ts")!;
+      // Same import line as the per-aggregate router.
+      expect(wf).toMatch(
+        /import \{ DomainError, AggregateNotFoundError, ForbiddenError, ExternHandlerError \} from "\.\.\/domain\/errors\.js"/,
+      );
+      // Try/catch around the workflow's handler invocation.
+      expect(wf).toMatch(/try \{\s+await __handler\(order/);
+      expect(wf).toMatch(
+        /throw new ExternHandlerError\("confirm", "Order", err\);/,
+      );
+      // onError chain knows about ExternHandlerError.
+      expect(wf).toMatch(/if \(err instanceof ExternHandlerError\)/);
+    });
+
+    it("per-aggregate extern registry re-exports ExternHandlerError", async () => {
+      const { parseHelper } = await import("langium/test");
+      const services = createDddServices(NodeFileSystem);
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(`
+        context Sales {
+          enum OrderStatus { Draft, Confirmed }
+          aggregate Order {
+            customerId: string
+            status: OrderStatus
+            function isMutable(): bool = status == Draft
+            operation confirm() extern { precondition isMutable() }
+          }
+          repository Orders for Order { }
+        }
+      `, { validation: true });
+      const files = generateTypeScript(doc.parseResult.value as Model);
+      const extern = files.get("domain/order-extern.ts")!;
+      // User handler code can import ExternHandlerError straight
+      // from the per-aggregate file rather than reaching for
+      // domain/errors.js itself.
+      expect(extern).toMatch(
+        /export \{ ExternHandlerError \} from "\.\/errors\.js"/,
+      );
+    });
+  });
+
   it("emits Hono workflow routes for non-transactional workflow", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);

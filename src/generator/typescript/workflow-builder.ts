@@ -43,7 +43,7 @@ export function buildWorkflowsFile(
   lines.push(`import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";`);
   lines.push(`import * as Ids from "../domain/ids.js";`);
   lines.push(
-    `import { DomainError, AggregateNotFoundError, ForbiddenError } from "../domain/errors.js";`,
+    `import { DomainError, AggregateNotFoundError, ForbiddenError, ExternHandlerError } from "../domain/errors.js";`,
   );
   lines.push(
     `import { type DomainEventDispatcher } from "../domain/events.js";`,
@@ -131,6 +131,9 @@ export function buildWorkflowsFile(
   );
   lines.push(
     `    if (err instanceof AggregateNotFoundError) return c.json({ error: err.message }, 404);`,
+  );
+  lines.push(
+    `    if (err instanceof ExternHandlerError) { console.error(err); return c.json({ error: err.message }, 500); }`,
   );
   lines.push(`    console.error(err);`);
   lines.push(`    return c.json({ error: "internal" }, 500);`);
@@ -264,7 +267,10 @@ function renderStmt(
         // from the workflow's domain args (parameterless externs
         // get a `Record<string, never>`; parameterized externs get
         // a per-param object literal that matches the user
-        // handler's typed request shape).
+        // handler's typed request shape).  The handler call is
+        // wrapped so any non-domain throw becomes an
+        // ExternHandlerError; domain errors raised by the user
+        // handler bubble unchanged.
         const handlerKey = `${camel(st.op)}${st.aggName}`;
         const checkName = `check${cap(st.op)}`;
         const externAlias = `${camel(st.aggName)}ExternHandlers`;
@@ -277,7 +283,14 @@ function renderStmt(
           `${indent}{`,
           `${indent}  const __handler = ${externAlias}.${handlerKey};`,
           `${indent}  if (!__handler) throw new Error("Missing extern handler for ${handlerKey}.  Register one before app.listen().");`,
-          `${indent}  await __handler(${st.target}, ${reqLiteral});`,
+          `${indent}  try {`,
+          `${indent}    await __handler(${st.target}, ${reqLiteral});`,
+          `${indent}  } catch (err) {`,
+          `${indent}    if (err instanceof DomainError) throw err;`,
+          `${indent}    if (err instanceof ForbiddenError) throw err;`,
+          `${indent}    if (err instanceof AggregateNotFoundError) throw err;`,
+          `${indent}    throw new ExternHandlerError("${st.op}", "${st.aggName}", err);`,
+          `${indent}  }`,
           `${indent}}`,
           `${indent}${st.target}.assertInvariants();`,
         ];

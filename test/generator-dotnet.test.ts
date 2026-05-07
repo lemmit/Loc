@@ -239,6 +239,84 @@ describe(".NET generator", () => {
     expect(csproj).toMatch(/<PackageReference Include="Scrutor"/);
   });
 
+  describe("slice 16.B — extern handler exception envelope", () => {
+    it("Domain.Common declares ExternHandlerException with op + agg fields", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      const common = files.get("Domain/Common/DomainException.cs")!;
+      expect(common).toMatch(/public sealed class ExternHandlerException : System\.Exception/);
+      expect(common).toMatch(/public string OpName \{ get; \}/);
+      expect(common).toMatch(/public string AggName \{ get; \}/);
+      // Message embeds both names + the inner exception's message.
+      expect(common).toMatch(/Extern handler '\{opName\}' on '\{aggName\}' threw: \{inner\.Message\}/);
+    });
+
+    it("DomainExceptionFilter maps ExternHandlerException to a 500 with the descriptive envelope", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      const filter = files.get("Api/DomainExceptionFilter.cs")!;
+      // ExternHandlerException arm exists and lands on 500.
+      expect(filter).toMatch(/context\.Exception is ExternHandlerException xh/);
+      expect(filter).toMatch(/error = xh\.Message/);
+      expect(filter).toMatch(/StatusCode = 500/);
+      // Logs the inner cause server-side with the structured fields.
+      expect(filter).toMatch(/_log\.LogError\(xh, "Extern handler \{Op\} on \{Agg\} threw"/);
+    });
+
+    it("does NOT touch ValidationProblemDetails (RFC 7807 stays the contract)", async () => {
+      // The framework's default 400 envelope for model-binding /
+      // data-annotation failures is the published API contract for
+      // request-validation errors.  Forking it would break every
+      // OpenAPI-generated client.  Pin the absence of any override.
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      const program = files.get("Program.cs")!;
+      expect(program).not.toMatch(/InvalidModelStateResponseFactory/);
+      expect(program).not.toMatch(/ConfigureApiBehaviorOptions/);
+      // No custom ValidationFilter file emitted alongside the
+      // domain filter.
+      expect(files.has("Api/ValidationFilter.cs")).toBe(false);
+    });
+
+    it("extern command handler wraps user.HandleAsync in try/catch that rethrows ExternHandlerException", async () => {
+      const { parseHelper } = await import("langium/test");
+      const services = createDddServices(NodeFileSystem);
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(`
+        context Sales {
+          enum OrderStatus { Draft, Confirmed }
+          aggregate Order {
+            customerId: string
+            status: OrderStatus
+            function isMutable(): bool = status == Draft
+            operation confirm() extern {
+              precondition isMutable()
+            }
+          }
+          repository Orders for Order { }
+        }
+      `, { validation: true });
+      const files = generateDotnet(doc.parseResult.value as Model);
+      const handler = files.get("Application/Orders/Commands/ConfirmHandler.cs")!;
+      // Try/catch wraps the user call.
+      expect(handler).toMatch(/try\s*\{\s*await _user\.HandleAsync/);
+      // Domain-layer exceptions re-throw unchanged so 400 / 403 /
+      // 404 still apply when the user handler raises one
+      // deliberately.
+      expect(handler).toMatch(/catch \(DomainException\) \{ throw; \}/);
+      expect(handler).toMatch(/catch \(ForbiddenException\) \{ throw; \}/);
+      expect(handler).toMatch(/catch \(AggregateNotFoundException\) \{ throw; \}/);
+      // Cancellation also re-throws so request cancellation isn't
+      // misattributed as a handler failure.
+      expect(handler).toMatch(/catch \(System\.OperationCanceledException\) \{ throw; \}/);
+      // Any other exception wraps as ExternHandlerException with
+      // the op + agg names baked in.
+      expect(handler).toMatch(
+        /throw new ExternHandlerException\("confirm", "Order", ex\);/,
+      );
+    });
+  });
+
   it("emits a Mediator handler + controller for non-transactional workflow", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);

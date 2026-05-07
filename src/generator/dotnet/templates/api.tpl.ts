@@ -178,6 +178,23 @@ public sealed class DomainExceptionFilter : IExceptionFilter
             context.ExceptionHandled = true;
             return;
         }
+        if (context.Exception is ExternHandlerException xh)
+        {
+            // 500 — the user handler threw, which is an internal
+            // failure from the framework's POV — but the envelope
+            // names the offending op + aggregate so operators don't
+            // have to grep logs to find the cause.  The original
+            // exception (xh.InnerException) is logged in full
+            // server-side.
+            _log.LogError(xh, "Extern handler {Op} on {Agg} threw",
+                xh.OpName, xh.AggName);
+            context.Result = new ObjectResult(new { error = xh.Message })
+            {
+                StatusCode = 500,
+            };
+            context.ExceptionHandled = true;
+            return;
+        }
         // Generic 500.  Log the full exception server-side; return a
         // sanitized payload to the client.
         _log.LogError(context.Exception, "Unhandled exception in {Action}",
