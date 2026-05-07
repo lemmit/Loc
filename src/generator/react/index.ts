@@ -407,9 +407,6 @@ function appTsx(
       `        <Route path="/${slug}/:id" element={<${cap}Detail />} />`,
     );
   }
-  // Workflow routes — index + one per workflow.  Naming convention
-  // pairs the workflow file at pages/workflows/<slug>.tsx; component
-  // export is `<Cap>WorkflowPage`.
   if (workflows.length > 0) {
     imports.push(`import WorkflowsIndex from "./pages/workflows/index.js";`);
     routes.push(
@@ -424,7 +421,6 @@ function appTsx(
       );
     }
   }
-  // View routes — index + one per view.
   if (views.length > 0) {
     imports.push(`import ViewsIndex from "./pages/views/index.js";`);
     routes.push(
@@ -439,9 +435,45 @@ function appTsx(
       );
     }
   }
+
+  // Sidebar nav — one section per construct kind.  Sections only
+  // render when at least one entry exists; aggregates always do
+  // (deployable would be empty otherwise).
+  const aggregateNavLinks = aggregates
+    .map((a) => {
+      const slug = snake(plural(a.name));
+      return `          <NavLink component={Link} to="/${slug}" label="${plural(a.name)}" active={isActive("/${slug}")} data-testid="nav-${slug}" />`;
+    })
+    .join("\n");
+  const workflowsSection =
+    workflows.length === 0
+      ? ""
+      : `\n          <Divider my="xs" label="Workflows" labelPosition="left" />\n` +
+        `          <NavLink component={Link} to="/workflows" label="All workflows" active={isActive("/workflows", { exact: true })} data-testid="nav-workflows" />\n` +
+        workflows
+          .map((wf) => {
+            const slug = snake(wf.name);
+            const human = humanise(wf.name);
+            return `          <NavLink component={Link} to="/workflows/${slug}" label="${human}" active={isActive("/workflows/${slug}")} data-testid="nav-workflow-${slug}" />`;
+          })
+          .join("\n");
+  const viewsSection =
+    views.length === 0
+      ? ""
+      : `\n          <Divider my="xs" label="Views" labelPosition="left" />\n` +
+        `          <NavLink component={Link} to="/views" label="All views" active={isActive("/views", { exact: true })} data-testid="nav-views" />\n` +
+        views
+          .map((v) => {
+            const slug = snake(v.name);
+            const human = humanise(v.name);
+            return `          <NavLink component={Link} to="/views/${slug}" label="${human}" active={isActive("/views/${slug}")} data-testid="nav-view-${slug}" />`;
+          })
+          .join("\n");
+
   return `// Auto-generated.
-import { Routes, Route, Link } from "react-router-dom";
-import { AppShell, Group, Title, Anchor, Alert, Button, Stack } from "@mantine/core";
+import { Routes, Route, Link, useLocation } from "react-router-dom";
+import { AppShell, Burger, Divider, Group, Title, NavLink, Anchor, Alert, Button, Stack } from "@mantine/core";
+import { useDisclosure } from "@mantine/hooks";
 import React from "react";
 ${imports.join("\n")}
 
@@ -497,30 +529,48 @@ function NotFound(): JSX.Element {
   );
 }
 
+// Active-route helper — drives NavLink's \`active\` prop.  Defaults
+// to a prefix match so /orders/<id> + /orders/new + /orders all
+// keep the "Orders" link highlighted; the \`exact\` opt-in narrows
+// to literal equality (used by /workflows + /views index links so
+// they don't shadow their per-item children).
+function useIsActive() {
+  const location = useLocation();
+  return (path: string, opts?: { exact?: boolean }) => {
+    if (opts?.exact) return location.pathname === path;
+    return (
+      location.pathname === path || location.pathname.startsWith(path + "/")
+    );
+  };
+}
+
 export default function App(): JSX.Element {
+  const isActive = useIsActive();
+  const [opened, { toggle }] = useDisclosure();
   return (
-    <AppShell header={{ height: 56 }} padding="md">
+    <AppShell
+      header={{ height: 56 }}
+      navbar={{ width: 240, breakpoint: "sm", collapsed: { mobile: !opened } }}
+      padding="md"
+    >
       <AppShell.Header>
-        <Group h="100%" px="md" justify="space-between">
+        <Group h="100%" px="md">
+          <Burger
+            opened={opened}
+            onClick={toggle}
+            hiddenFrom="sm"
+            size="sm"
+            data-testid="nav-burger"
+          />
           <Title order={4}>Loom</Title>
-          <Group>
-${aggregates
-  .map(
-    (a) =>
-      `            <Anchor component={Link} to="/${snake(plural(a.name))}">${plural(a.name)}</Anchor>`,
-  )
-  .join("\n")}${
-    workflows.length > 0
-      ? `\n            <Anchor component={Link} to="/workflows" data-testid="nav-workflows">Workflows</Anchor>`
-      : ""
-  }${
-    views.length > 0
-      ? `\n            <Anchor component={Link} to="/views" data-testid="nav-views">Views</Anchor>`
-      : ""
-  }
-          </Group>
         </Group>
       </AppShell.Header>
+      <AppShell.Navbar p="md">
+        <Stack gap={4} data-testid="nav-sidebar">
+          <Divider my="xs" label="Aggregates" labelPosition="left" />
+${aggregateNavLinks}${workflowsSection}${viewsSection}
+        </Stack>
+      </AppShell.Navbar>
       <AppShell.Main>
         <AppErrorBoundary>
           <Routes>
@@ -533,6 +583,15 @@ ${routes.join("\n")}
   );
 }
 `;
+}
+
+/** Humanise a camelCase / PascalCase identifier into space-separated
+ *  Title Case — "placeOrder" → "Place Order", "ActiveOrders" →
+ *  "Active Orders".  Used for sidebar / page titles where the
+ *  generated identifier would otherwise leak. */
+function humanise(name: string): string {
+  const spaced = name.replace(/([a-z0-9])([A-Z])/g, "$1 $2");
+  return spaced[0]!.toUpperCase() + spaced.slice(1);
 }
 
 function smokeSpec(aggregates: AggregateIR[]): string {
@@ -626,40 +685,58 @@ function homeTsx(
   workflows: WorkflowIR[],
   views: ViewIR[],
 ): string {
-  const aggCards = aggregates
-    .map(
-      (a) => `      <Card withBorder>
-        <Anchor component={Link} to="/${snake(plural(a.name))}">${plural(a.name)}</Anchor>
-      </Card>`,
-    )
+  // The sidebar already lists every aggregate / workflow / view, so
+  // the home page doesn't have to re-do navigation.  Instead it acts
+  // as a simple landing card that summarises what's in the system —
+  // counts per construct kind plus a hint to use the sidebar.
+  const aggCardLink = aggregates[0]
+    ? `      <Anchor component={Link} to="/${snake(plural(aggregates[0].name))}" data-testid="home-aggregates-link">Browse the sidebar →</Anchor>`
+    : "";
+  const workflowsCard =
+    workflows.length === 0
+      ? ""
+      : `        <Card withBorder>
+          <Stack gap={4}>
+            <Text fw={600}>${workflows.length} workflow${workflows.length === 1 ? "" : "s"}</Text>
+            <Text size="sm" c="dimmed">System-level orchestrations you can run from a form.</Text>
+            <Anchor component={Link} to="/workflows" data-testid="home-workflows-link" size="sm">Open workflows →</Anchor>
+          </Stack>
+        </Card>`;
+  const viewsCard =
+    views.length === 0
+      ? ""
+      : `        <Card withBorder>
+          <Stack gap={4}>
+            <Text fw={600}>${views.length} view${views.length === 1 ? "" : "s"}</Text>
+            <Text size="sm" c="dimmed">Saved queries — open one to inspect rows.</Text>
+            <Anchor component={Link} to="/views" data-testid="home-views-link" size="sm">Open views →</Anchor>
+          </Stack>
+        </Card>`;
+  const aggregatesCard = `        <Card withBorder>
+          <Stack gap={4}>
+            <Text fw={600}>${aggregates.length} aggregate${aggregates.length === 1 ? "" : "s"}</Text>
+            <Text size="sm" c="dimmed">Manage records of each kind from the sidebar.</Text>
+${aggCardLink}
+          </Stack>
+        </Card>`;
+  const cards = [aggregatesCard, workflowsCard, viewsCard]
+    .filter(Boolean)
     .join("\n");
-  const workflowsBlock =
-    workflows.length > 0
-      ? `      <Title order={3}>Workflows</Title>
-      <Text c="dimmed">System-level orchestrations.</Text>
-      <Card withBorder>
-        <Anchor component={Link} to="/workflows" data-testid="home-workflows-link">Browse workflows</Anchor>
-      </Card>`
-      : "";
-  const viewsBlock =
-    views.length > 0
-      ? `      <Title order={3}>Views</Title>
-      <Text c="dimmed">Saved queries.</Text>
-      <Card withBorder>
-        <Anchor component={Link} to="/views" data-testid="home-views-link">Browse views</Anchor>
-      </Card>`
-      : "";
-  const extras = [workflowsBlock, viewsBlock].filter(Boolean).join("\n");
   return `// Auto-generated.
-import { Stack, Title, Text, Anchor, Card } from "@mantine/core";
+import { Stack, Title, Text, Anchor, Card, SimpleGrid } from "@mantine/core";
 import { Link } from "react-router-dom";
 
 export default function Home(): JSX.Element {
   return (
-    <Stack>
+    <Stack data-testid="home" gap="md">
       <Title order={2}>Welcome</Title>
-      <Text c="dimmed">Pick an aggregate to manage:</Text>
-${aggCards}${extras ? "\n" + extras : ""}
+      <Text c="dimmed">
+        Use the sidebar to navigate.  Aggregates, workflows, and views are
+        grouped by section.
+      </Text>
+      <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="md">
+${cards}
+      </SimpleGrid>
     </Stack>
   );
 }

@@ -43,7 +43,7 @@ export function buildListPage(agg: AggregateIR): string {
   }
   return `// Auto-generated.
 import { Link, useNavigate } from "react-router-dom";
-import { Stack, Title, Group, Button, Table, Loader, Alert, Anchor, Badge } from "@mantine/core";
+import { Stack, Title, Group, Button, Table, Loader, Alert, Anchor, Badge, Center, Text } from "@mantine/core";
 import { useAll${plural(agg.name)} } from "../../api/${camel(agg.name)}.js";
 
 export default function ${cap}List(): JSX.Element {
@@ -57,8 +57,18 @@ export default function ${cap}List(): JSX.Element {
       </Group>
       {q.isLoading && <Loader />}
       {q.isError && <Alert color="red">{(q.error as Error).message}</Alert>}
-      {q.data && (
-        <Table striped withTableBorder>
+      {q.data && q.data.length === 0 && (
+        <Center mih={200} data-testid="${slug}-list-empty">
+          <Stack gap="xs" align="center">
+            <Text c="dimmed">No ${plural(agg.name).toLowerCase()} yet.</Text>
+            <Button variant="light" onClick={() => navigate("/${slug}/new")}>
+              Create your first ${agg.name.toLowerCase()}
+            </Button>
+          </Stack>
+        </Center>
+      )}
+      {q.data && q.data.length > 0 && (
+        <Table striped withTableBorder highlightOnHover>
           <Table.Thead>
             <Table.Tr>
               ${cols.join("\n              ")}
@@ -184,9 +194,20 @@ export function buildDetailPage(
     .map((op) => renderOperationButton(slug, op))
     .join("\n          ");
 
-  // Detail-page components: card / table / badge / anchor for display
-  // + the input set used by every operation modal.
-  const displayComponents = ["Stack", "Title", "Card", "Group", "Button", "Text", "Loader", "Alert", "Anchor"];
+  // Detail-page components: card / table / breadcrumbs / badge for
+  // display + the input set used by every operation modal.
+  const displayComponents = [
+    "Stack",
+    "Title",
+    "Card",
+    "Group",
+    "Button",
+    "Text",
+    "Loader",
+    "Alert",
+    "Anchor",
+    "Breadcrumbs",
+  ];
   if (agg.fields.some((f) => unwrapOpt(f.type).kind === "enum")) displayComponents.push("Badge");
   if (agg.contains.length > 0) displayComponents.push("Table", "Badge");
   // Operation forms reuse the formInput vocabulary.
@@ -237,10 +258,12 @@ ${ops.map((op) => `  const ${camel(op.name)} = use${upper(op.name)}${agg.name}(i
   const data = q.data;
   return (
     <Stack data-testid="${slug}-detail">
-      <Group justify="space-between">
-        <Title order={2}>${agg.name} {data.id.slice(0, 8)}…</Title>
-        <Anchor component={Link} to="/${slug}">← back</Anchor>
-      </Group>
+      <Breadcrumbs data-testid="${slug}-detail-breadcrumbs">
+        <Anchor component={Link} to="/">Home</Anchor>
+        <Anchor component={Link} to="/${slug}">${plural(agg.name)}</Anchor>
+        <Text>{data.id.slice(0, 8)}…</Text>
+      </Breadcrumbs>
+      <Title order={2}>${agg.name} {data.id.slice(0, 8)}…</Title>
       <Card withBorder>
         <Stack gap="xs">
         ${fieldDisplay}

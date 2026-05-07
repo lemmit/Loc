@@ -262,6 +262,118 @@ describe("react generator", () => {
     expect(dbInit).not.toMatch(/CREATE DATABASE web_app/);
   });
 
+  describe("slice 20 — AppShell.Navbar + NavLink sidebar redesign", () => {
+    it("App.tsx mounts AppShell.Navbar with Burger toggle + grouped NavLinks", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const app = files.get("web_app/src/App.tsx")!;
+      // AppShell carries a navbar config.
+      expect(app).toMatch(
+        /navbar=\{\{ width: 240, breakpoint: "sm", collapsed: \{ mobile: !opened \} \}\}/,
+      );
+      // Burger toggle in header.
+      expect(app).toMatch(/<Burger\s+opened=\{opened\}/);
+      expect(app).toMatch(/data-testid="nav-burger"/);
+      // Sidebar Stack uses Mantine NavLinks (not bare Anchors).
+      expect(app).toMatch(/<AppShell\.Navbar p="md">/);
+      expect(app).toMatch(/data-testid="nav-sidebar"/);
+      expect(app).toMatch(/from "@mantine\/core"[\s\S]*?NavLink/);
+    });
+
+    it("sidebar groups Aggregates / Workflows / Views with Dividers + active highlighting", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const app = files.get("web_app/src/App.tsx")!;
+      // Section headers (Mantine Divider with label).
+      expect(app).toMatch(
+        /<Divider my="xs" label="Aggregates" labelPosition="left" \/>/,
+      );
+      expect(app).toMatch(
+        /<Divider my="xs" label="Workflows" labelPosition="left" \/>/,
+      );
+      expect(app).toMatch(
+        /<Divider my="xs" label="Views" labelPosition="left" \/>/,
+      );
+      // Per-aggregate NavLink with active prop wired through useLocation.
+      expect(app).toMatch(
+        /<NavLink component=\{Link\} to="\/orders" label="Orders" active=\{isActive\("\/orders"\)\}/,
+      );
+      // Index-page NavLinks use exact-match so /workflows doesn't
+      // shadow /workflows/<slug>.
+      expect(app).toMatch(
+        /to="\/workflows" label="All workflows" active=\{isActive\("\/workflows", \{ exact: true \}\)\}/,
+      );
+      // useLocation + useDisclosure wired up.
+      expect(app).toMatch(/import \{ useDisclosure \} from "@mantine\/hooks"/);
+      expect(app).toMatch(/useLocation/);
+    });
+
+    it("sidebar omits a section when the deployable has no entries of that kind", async () => {
+      const { parseHelper } = await import("langium/test");
+      const services = createDddServices(NodeFileSystem);
+      const helper = parseHelper(services.Ddd);
+      // Single aggregate, no workflows, no views.
+      const doc = await helper(`
+        system Plain {
+          module M {
+            context C {
+              aggregate Thing { name: string display }
+              repository Things for Thing { }
+            }
+          }
+          deployable api { platform: hono, modules: M, port: 3000 }
+          deployable web { platform: react, targets: api, port: 3001 }
+        }
+      `, { validation: true });
+      const { files } = generateSystems(doc.parseResult.value as Model);
+      const app = files.get("web/src/App.tsx")!;
+      expect(app).toMatch(/<Divider my="xs" label="Aggregates"/);
+      // No workflows / views section emitted.
+      expect(app).not.toMatch(/label="Workflows"/);
+      expect(app).not.toMatch(/label="Views"/);
+      expect(app).not.toMatch(/data-testid="nav-workflows"/);
+      expect(app).not.toMatch(/data-testid="nav-views"/);
+    });
+
+    it("detail page uses Breadcrumbs (Home / <Plural> / id) instead of a bare back-anchor", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const detail = files.get("web_app/src/pages/orders/detail.tsx")!;
+      expect(detail).toMatch(/<Breadcrumbs data-testid="orders-detail-breadcrumbs">/);
+      expect(detail).toMatch(/<Anchor component=\{Link\} to="\/">Home<\/Anchor>/);
+      expect(detail).toMatch(/<Anchor component=\{Link\} to="\/orders">Orders<\/Anchor>/);
+      // The old "← back" anchor is gone — Breadcrumbs replaces it.
+      expect(detail).not.toMatch(/← back/);
+    });
+
+    it("list page renders an explicit empty state instead of a zero-row table", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const list = files.get("web_app/src/pages/orders/list.tsx")!;
+      // Empty-state branch with a primary call-to-action.
+      expect(list).toMatch(/data-testid="orders-list-empty"/);
+      expect(list).toMatch(/q\.data && q\.data\.length === 0/);
+      expect(list).toMatch(/Create your first order/);
+      // Table only renders when there ARE rows; row hover is on.
+      expect(list).toMatch(/q\.data && q\.data\.length > 0/);
+      expect(list).toMatch(/highlightOnHover/);
+    });
+
+    it("home page lands as a summary, not a duplicate of the sidebar", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const home = files.get("web_app/src/pages/home.tsx")!;
+      // SimpleGrid of construct-kind summary cards.
+      expect(home).toMatch(/<SimpleGrid cols=\{\{ base: 1, sm: 2, md: 3 \}\}/);
+      // Counts mention the right cardinalities (acme has 2 aggregates,
+      // 1 workflow, 2 views).
+      expect(home).toMatch(/2 aggregates/);
+      expect(home).toMatch(/1 workflow[^s]/);
+      expect(home).toMatch(/2 views/);
+      expect(home).toMatch(/data-testid="home"/);
+    });
+  });
+
   it("App.tsx wraps Routes in an error boundary and registers a 404 catch-all", async () => {
     const model = await buildModel("examples/acme.ddd");
     const { files } = generateSystems(model);
@@ -503,17 +615,24 @@ describe("react generator", () => {
       expect(app).toMatch(
         /<Route path="\/workflows\/place_order" element=\{<PlaceOrderWorkflowPage \/>\} \/>/,
       );
-      // Sidebar entry.
+      // Sidebar entry — "All workflows" parent NavLink + one
+      // NavLink per workflow (slice 20 navbar redesign).
       expect(app).toMatch(
-        /<Anchor component=\{Link\} to="\/workflows" data-testid="nav-workflows">Workflows<\/Anchor>/,
+        /<NavLink component=\{Link\} to="\/workflows" label="All workflows"[\s\S]*?data-testid="nav-workflows"/,
+      );
+      expect(app).toMatch(
+        /<NavLink component=\{Link\} to="\/workflows\/place_order" label="Place Order"[\s\S]*?data-testid="nav-workflow-place_order"/,
       );
     });
 
-    it("home page links to /workflows when at least one workflow exists", async () => {
+    it("home page summarises workflows when at least one exists", async () => {
       const model = await buildModel("examples/acme.ddd");
       const { files } = generateSystems(model);
       const home = files.get("web_app/src/pages/home.tsx")!;
-      expect(home).toMatch(/<Title order=\{3\}>Workflows<\/Title>/);
+      // Slice 20 simplified the home page: a card per construct
+      // kind with a count + "Open <kind>" link, instead of a full
+      // navigation re-listing.
+      expect(home).toMatch(/1 workflow[^s]/);
       expect(home).toMatch(/data-testid="home-workflows-link"/);
     });
   });
@@ -606,15 +725,18 @@ describe("react generator", () => {
         /<Route path="\/views\/active_orders" element=\{<ActiveOrdersViewPage \/>\} \/>/,
       );
       expect(app).toMatch(
-        /<Anchor component=\{Link\} to="\/views" data-testid="nav-views">Views<\/Anchor>/,
+        /<NavLink component=\{Link\} to="\/views" label="All views"[\s\S]*?data-testid="nav-views"/,
+      );
+      expect(app).toMatch(
+        /<NavLink component=\{Link\} to="\/views\/active_orders" label="Active Orders"[\s\S]*?data-testid="nav-view-active_orders"/,
       );
     });
 
-    it("home page links to /views when at least one view exists", async () => {
+    it("home page summarises views when at least one exists", async () => {
       const model = await buildModel("examples/acme.ddd");
       const { files } = generateSystems(model);
       const home = files.get("web_app/src/pages/home.tsx")!;
-      expect(home).toMatch(/<Title order=\{3\}>Views<\/Title>/);
+      expect(home).toMatch(/2 views/);
       expect(home).toMatch(/data-testid="home-views-link"/);
     });
   });
