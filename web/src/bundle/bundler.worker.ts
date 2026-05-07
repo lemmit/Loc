@@ -33,6 +33,23 @@ async function ensureInit(): Promise<void> {
   return initPromise;
 }
 
+// Persistent fetch cache, scoped to the worker's lifetime.
+//
+// The interactive playground hits the bundler many times in a
+// session (every Generate → Bundle click; auto-bundle on edit
+// once that lands).  Each Bundle pulls ~140 esm.sh modules; if the
+// cache were per-call, we'd re-fetch all of them on every click.
+// Keying on the full URL is safe — different version pins produce
+// different URLs, so a source edit that bumps a dep hits a fresh
+// cache entry.  Old entries linger but aren't expensive: at ~10 KB
+// average, the upper bound is single-digit MB even for a session
+// that touches every example.
+//
+// `fetchedUrls` stays per-bundle (drives the "X deps fetched"
+// counter in the footer); a warm bundle reports 0 fetched, which
+// is exactly the signal we want.
+const persistentFetchCache = new Map<string, string>();
+
 function buildVirtualFs(files: VirtualFile[]): Map<string, string> {
   const map = new Map<string, string>();
   for (const f of files) map.set(f.path, f.content);
@@ -69,7 +86,9 @@ async function handleBundle(req: BundleRequest): Promise<BundleResult> {
   const ctx: VirtualFsContext = {
     files: fs,
     fetchedUrls: new Set(),
-    fetchCache: new Map(),
+    // Module-level cache so repeated Bundle clicks don't re-fetch
+    // the ~140 esm.sh modules each call needs.
+    fetchCache: persistentFetchCache,
     // Pick the package.json closest to the entry so we get the
     // backend's Hono/Drizzle pins for kind=hono and the
     // frontend's React/Mantine pins for kind=react.

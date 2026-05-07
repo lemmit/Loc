@@ -5,15 +5,28 @@ import { type Page, expect } from "@playwright/test";
 // CI / sandbox environments allow Node-side network but block
 // browser-context cross-origin fetches; instead of failing those
 // runs, we skip the network steps cleanly.
+//
+// The previous probe used `mode: "no-cors"` and checked `r != null`
+// — that returns an opaque Response for *any* server reply (including
+// 503), so the probe came back true even when esm.sh was rejecting
+// requests.  Use a real CORS GET against a tiny known-good URL and
+// check `res.ok`; esm.sh sets `access-control-allow-origin: *` on
+// every response, so CORS works.  AbortController caps the wait
+// when DNS/network is hard-down so the probe doesn't hang the whole
+// test against a 60 s default timeout.
 export async function browserCanReachEsmSh(page: Page): Promise<boolean> {
-  // Only meaningful once we've navigated somewhere with a real
-  // origin — about:blank can't issue cross-origin fetches.
   return page.evaluate(async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5_000);
     try {
-      const r = await fetch("https://esm.sh/", { method: "HEAD", mode: "no-cors" });
-      return r != null;
+      const res = await fetch("https://esm.sh/react@18.3.1?dev=false", {
+        signal: controller.signal,
+      });
+      return res.ok;
     } catch {
       return false;
+    } finally {
+      clearTimeout(timer);
     }
   });
 }

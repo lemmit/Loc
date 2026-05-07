@@ -25,14 +25,26 @@ test("playground loads with Monaco editor and Langium LSP", async ({ page }) => 
     .count();
   expect(lineCount, "rendered editor line count").toBeGreaterThan(0);
 
-  // Console hygiene: the Monaco no-op-worker fix should silence the
-  // "toUrl" cascade we hit before.  Allow benign warnings like
-  // PGlite's eval-with-bundler chatter and Vite HMR pings.
+  // Console hygiene.  We allow exactly three known-noise patterns,
+  // each anchored / specific enough that a real error containing
+  // similar text won't be silently swallowed:
+  //
+  //   - Chrome's passive-listener advisory (`Added non-passive…`).
+  //   - esbuild's bundling-with-direct-eval warning, raised by
+  //     PGlite's WASM loader.  Always starts with "Using direct
+  //     eval".
+  //   - Vite dev-mode HMR module-load failures during a route
+  //     change — distinctive enough on its own.
+  //
+  // Anchored to the start of the message so a real error that
+  // *contains* "Using direct eval" mid-stack doesn't hide.
+  const KNOWN_NOISE = [
+    /^Added non-passive event listener/i,
+    /^Using direct eval/i,
+    /^Failed to fetch dynamically imported module/i,
+  ];
   const fatal = consoleErrors.filter(
-    (m) =>
-      !/passive event listener/i.test(m) &&
-      !/Using direct eval/i.test(m) &&
-      !/Failed to fetch dynamically imported module/i.test(m),
+    (m) => !KNOWN_NOISE.some((re) => re.test(m)),
   );
   expect(fatal, "browser console errors during page load").toEqual([]);
 });
