@@ -69,23 +69,40 @@ interface RuntimeState {
   app: { fetch: (req: Request) => Promise<Response> };
   pglite: { close?: () => Promise<void> };
   ddl: string;
+  /** Blob URL the bundle was loaded from.  Tracked here so we can
+   *  revoke on reset and on the next boot — without this, every
+   *  successful Boot leaks one URL for the worker's lifetime. */
+  bundleUrl: string;
 }
 
 let state: RuntimeState | null = null;
 
+// Default cap on a single dispatch.  A generated op with an
+// infinite loop or a runaway query would otherwise hang the worker
+// forever — every subsequent dispatch queues behind it and the
+// UI looks frozen with no recovery path.
+const DEFAULT_DISPATCH_TIMEOUT_MS = 30_000;
+
+async function tearDownState(): Promise<void> {
+  if (!state) return;
+  try {
+    await state.pglite.close?.();
+  } catch {
+    // best-effort
+  }
+  try {
+    URL.revokeObjectURL(state.bundleUrl);
+  } catch {
+    // best-effort
+  }
+  state = null;
+}
+
 async function boot(bundleCode: string): Promise<BootResult> {
   const start = performance.now();
-  // Tear down a previous boot if present.  PGlite exposes `close`;
-  // we'd ignore failures because the new boot will replace state
-  // wholesale anyway.
-  if (state) {
-    try {
-      await state.pglite.close?.();
-    } catch {
-      // best-effort
-    }
-    state = null;
-  }
+  // Tear down a previous boot if present (close PGlite + revoke its
+  // bundle URL).
+  await tearDownState();
 
   const blob = new Blob([bundleCode], { type: "application/javascript" });
   const url = URL.createObjectURL(blob);
@@ -100,8 +117,8 @@ async function boot(bundleCode: string): Promise<BootResult> {
     };
   }
   // Keep the blob URL alive for the lifetime of the module — some
-  // browsers re-fetch sub-resources lazily.  Bundle is self-contained
-  // for our case but the cost of leaving the URL is negligible.
+  // browsers re-fetch sub-resources lazily.  Stored on `state` so
+  // tearDownState can revoke it on reset / next boot.
 
   let pglite;
   try {
@@ -148,7 +165,7 @@ async function boot(bundleCode: string): Promise<BootResult> {
     };
   }
 
-  state = { app, pglite, ddl };
+  state = { app, pglite, ddl, bundleUrl: url };
   return { ok: true, ddl, durationMs: Math.round(performance.now() - start) };
 }
 
@@ -163,7 +180,24 @@ async function dispatch(req: SerializedRequest): Promise<DispatchResult> {
       headers: req.headers,
       body: req.body ?? undefined,
     });
-    const response = await state.app.fetch(request);
+    // Race the dispatch against a timeout so a hung handler
+    // (infinite loop, deadlock in user logic, network in the
+    // generated app waiting forever) doesn't wedge the worker.
+    // The user can interrupt by reset; without the race, every
+    // subsequent dispatch queues behind the hung one and the UI
+    // never recovers.
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const timeoutPromise = new Promise<Response>((_resolve, reject) => {
+      timeoutId = setTimeout(() => {
+        reject(new Error(`dispatch timed out after ${DEFAULT_DISPATCH_TIMEOUT_MS} ms`));
+      }, DEFAULT_DISPATCH_TIMEOUT_MS);
+    });
+    let response: Response;
+    try {
+      response = await Promise.race([state.app.fetch(request), timeoutPromise]);
+    } finally {
+      if (timeoutId !== null) clearTimeout(timeoutId);
+    }
     const headers: Record<string, string> = {};
     response.headers.forEach((v, k) => {
       headers[k] = v;
@@ -185,14 +219,7 @@ async function dispatch(req: SerializedRequest): Promise<DispatchResult> {
 }
 
 async function reset(): Promise<{ ok: true }> {
-  if (state) {
-    try {
-      await state.pglite.close?.();
-    } catch {
-      // best-effort
-    }
-    state = null;
-  }
+  await tearDownState();
   return { ok: true };
 }
 

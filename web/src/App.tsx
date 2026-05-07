@@ -16,6 +16,7 @@ import {
   Title,
 } from "@mantine/core";
 import { LoomEditor } from "./editor/LoomEditor";
+import { LoomLspClient } from "./lsp/client";
 import type { Diagnostic } from "./lsp/protocol";
 import { examples, defaultExample } from "./examples";
 import { LoomBuildClient } from "./build/client";
@@ -112,6 +113,14 @@ export default function App(): JSX.Element {
   const buildClientRef = useRef<LoomBuildClient | null>(null);
   const bundleClientRef = useRef<LoomBundleClient | null>(null);
   const runtimeClientRef = useRef<LoomRuntimeClient | null>(null);
+  // LSP client lives at the App level — `<LoomEditor>` is keyed by
+  // exampleId and remounts on every example switch, but the LSP
+  // worker (Langium services) is heavy and slow to init.  Keeping
+  // the client here avoids re-spawning the worker on each switch.
+  const lspClientRef = useRef<LoomLspClient | null>(null);
+  if (lspClientRef.current === null) {
+    lspClientRef.current = new LoomLspClient();
+  }
   const [generating, setGenerating] = useState(false);
   const [bundling, setBundling] = useState(false);
   const [booting, setBooting] = useState(false);
@@ -143,12 +152,20 @@ export default function App(): JSX.Element {
       build.dispose();
       bundleClient.dispose();
       runtimeClient.dispose();
+      // LSP client created lazily above survives across this
+      // effect's lifetime — dispose it here too.
+      lspClientRef.current?.dispose();
+      lspClientRef.current = null;
     };
   }, []);
 
   // Reset preview state when the user picks a different example —
   // the previously generated tree no longer corresponds to the
-  // source in the editor.
+  // source in the editor.  Also clear the diagnostics list: stale
+  // errors from the previous source linger in the Problems panel
+  // until the LSP worker re-pushes from the new buffer, which
+  // shows wrong red badges in the header for a beat after every
+  // example switch.
   useEffect(() => {
     sourceRef.current = initialSource;
     setResult(null);
@@ -159,6 +176,7 @@ export default function App(): JSX.Element {
     setDispatchResult(null);
     setSelectedPath(null);
     setRightPane("files");
+    setDiagnostics([]);
     runtimeClientRef.current?.reset();
   }, [initialSource]);
 
@@ -341,14 +359,17 @@ export default function App(): JSX.Element {
         <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
           {/* Editor pane */}
           <Box style={{ flex: 1, minWidth: 0, borderRight: "1px solid var(--mantine-color-dark-4)" }}>
-            <LoomEditor
-              key={exampleId}
-              initialValue={initialSource}
-              onChange={(text) => {
-                sourceRef.current = text;
-              }}
-              onDiagnosticsChange={setDiagnostics}
-            />
+            {lspClientRef.current && (
+              <LoomEditor
+                key={exampleId}
+                client={lspClientRef.current}
+                initialValue={initialSource}
+                onChange={(text) => {
+                  sourceRef.current = text;
+                }}
+                onDiagnosticsChange={setDiagnostics}
+              />
+            )}
           </Box>
           {/* Right pane — toggle between Files (tree + viewer) and
               Preview (iframe of the generated React app, fetches
