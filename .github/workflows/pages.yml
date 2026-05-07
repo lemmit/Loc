@@ -1,10 +1,15 @@
-name: Deploy landing page to GitHub Pages
+name: Deploy landing page + playground to GitHub Pages
 
 on:
   push:
     branches: [main]
     paths:
       - 'docs/**'
+      - 'web/**'
+      - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'langium-config.json'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -25,11 +30,40 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: npm install --no-save marked@^14
-      - run: node docs/build.mjs
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+
+      # Root install runs the `prepare` lifecycle, which calls
+      # `langium:generate` to produce src/language/generated/.  The
+      # web/ project imports that path via the toolchain re-exports,
+      # so it must exist before the playground build runs.
+      - name: Install Loom toolchain (root)
+        run: npm ci
+
+      - name: Render landing page + docs
+        run: |
+          npm install --no-save marked@^14
+          node docs/build.mjs
+
+      - name: Install playground deps
+        working-directory: web
+        run: npm ci
+
+      - name: Build playground
+        working-directory: web
+        run: npm run build
+
+      - name: Stage playground under _site/playground
+        run: |
+          mkdir -p docs/_site/playground
+          cp -r web/dist/. docs/_site/playground/
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

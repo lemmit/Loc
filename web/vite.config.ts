@@ -8,6 +8,11 @@ import { fileURLToPath, URL } from "node:url";
 // `src/language/main.ts`, neither of which we import).  Vite's bundler
 // handles the `.js`-extension import specifiers used throughout `src/`.
 export default defineConfig({
+  // Relative base so the build is portable across deploy paths.
+  // The CI workflow drops the build under `docs/_site/playground/`
+  // on GitHub Pages; relative URLs let the same artifact run from
+  // a sub-path or the root of any host.
+  base: "./",
   plugins: [react()],
   resolve: {
     alias: {
