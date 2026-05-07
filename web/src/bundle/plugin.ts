@@ -93,21 +93,30 @@ export interface VirtualFsContext {
 }
 
 // Specifiers we hand off to an importmap in the iframe instead of
-// inlining their code into the bundle.  This is critical for React
-// kind bundles: without externalisation, esbuild fetches `react`
-// once for our user code and again for `react/jsx-runtime` (or for
-// transitive deps' bundled-in `react`), and the resulting two React
-// instances produce "Cannot read properties of null (reading
-// 'useRef')" at runtime.  With externalisation + importmap, every
-// `import "react"` in the final output resolves to the same esm.sh
-// URL, so all components share one React instance.
-export const REACT_RUNTIME_EXTERNALS = [
-  "react",
-  "react-dom",
-  "react-dom/client",
-  "react/jsx-runtime",
-  "react/jsx-dev-runtime",
-];
+// inlining their code into the bundle.
+//
+// Critical observation: esm.sh canonicalises each package's
+// "external" set down to only the specifiers that package actually
+// uses, encoding the set in an `X-...` path segment.  So
+// `?external=react,react-dom` and `?external=react,react-dom,react-dom/client`
+// produce DIFFERENT URLs for `@mantine/core` only if Mantine
+// actually uses `react-dom/client` directly.  It doesn't —
+// Mantine uses just `react,react-dom`.
+//
+// If we externalise more than that at the top level, our import
+// goes to one shard while transitive Mantine imports (from
+// `@mantine/notifications`, `@mantine/modals`, …) propagate the
+// shorter set and end up at a different shard.  Two shards = two
+// `@mantine/core` modules in the bundle = two MantineProvider
+// contexts = the runtime "MantineProvider was not found" crash.
+//
+// Fix: keep the external list to the minimum the bundle's user
+// code needs to share an instance.  `react` and `react-dom` are
+// shared by everyone; `react/jsx-runtime`, `react/jsx-dev-runtime`,
+// and `react-dom/client` get bundled inline by esbuild, but their
+// own `import "react"` / `import "react-dom"` calls remain
+// external — so there's still one React/React-DOM at runtime.
+export const REACT_RUNTIME_EXTERNALS = ["react", "react-dom"];
 
 const REACT_EXTERNAL_SET = new Set(REACT_RUNTIME_EXTERNALS);
 
@@ -385,17 +394,31 @@ export function makeLoomPlugin(ctx: VirtualFsContext, opts?: PluginOptions): Plu
         };
       });
 
-      // Imports from inside an http-namespace file.  Could be a
-      // relative path ("./foo.js") or another bare specifier.  esm.sh
-      // returns ESM with absolute URLs for transitive deps in most
-      // cases, but its bundle responses occasionally use relative
-      // paths — handle both.
+      // Imports from inside an http-namespace file.  Three flavours:
+      //   - absolute URL (`https://…`) — keep as-is.
+      //   - host-absolute (`/foo`) — resolve against esm.sh.
+      //   - bare specifier (`react/jsx-runtime`, `clsx`) — esm.sh's
+      //     responses sometimes leave bare imports for externalised
+      //     deps and for sub-paths esm.sh chose not to inline.  Pin
+      //     these through the same `pinnedEsmShUrl` machinery so they
+      //     come back as bare-package URLs (not paths relative to
+      //     the importer URL, which 404s).
+      //   - everything else is treated as a relative URL against the
+      //     importer.
       build.onResolve({ filter: /.*/, namespace: HTTP_NAMESPACE }, (args) => {
         if (/^https?:\/\//.test(args.path)) {
           return { path: args.path, namespace: HTTP_NAMESPACE };
         }
         if (args.path.startsWith("/")) {
           return { path: `${ESM_HOST}${args.path}`, namespace: HTTP_NAMESPACE };
+        }
+        if (!args.path.startsWith(".")) {
+          // Bare specifier — route through the same package-pinning
+          // logic as top-level user imports.
+          return {
+            path: pinnedEsmShUrl(args.path, ctx.versions, opts),
+            namespace: HTTP_NAMESPACE,
+          };
         }
         const resolved = new URL(args.path, args.importer).toString();
         return { path: resolved, namespace: HTTP_NAMESPACE };
