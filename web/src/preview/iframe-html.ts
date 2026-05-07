@@ -43,6 +43,44 @@ function importMap(versions: Record<string, string>): Record<string, string> {
   };
 }
 
+// Patch the global URL constructor so that base URLs the WHATWG
+// parser rejects as relative-resolution bases — about:srcdoc,
+// blob: URLs, data: URLs, etc. — get substituted with a valid
+// http base.  React Router (and other libs) build URLs as
+// `new URL(path, window.location.href)` for href encoding;
+// inside a srcdoc iframe `location.href` is "about:srcdoc",
+// which throws.  We can't redefine `window.location` (its
+// properties are non-configurable in modern browsers), but
+// patching `URL` is enough — every consumer that treats the
+// result as a (pathname, search, hash) triple keeps working,
+// since substituting the base only changes `origin` (which
+// callers like react-router don't read here).
+const URL_FIX_SRC = `
+(function () {
+  var Original = globalThis.URL;
+  var FALLBACK = "https://loom-preview.invalid/";
+  function isUsableBase(b) {
+    if (b == null) return true;
+    if (typeof b !== "string") return true;
+    return /^https?:\\/\\//.test(b) || /^ftp:\\/\\//.test(b);
+  }
+  function Patched(url, base) {
+    if (arguments.length >= 2 && !isUsableBase(base)) base = FALLBACK;
+    if (new.target == null) return new Original(url, base);
+    return Reflect.construct(Original, [url, base], new.target);
+  }
+  Patched.prototype = Original.prototype;
+  for (var k of Object.getOwnPropertyNames(Original)) {
+    if (k === "length" || k === "name" || k === "prototype") continue;
+    try {
+      var v = Original[k];
+      Patched[k] = typeof v === "function" ? v.bind(Original) : v;
+    } catch (_) {}
+  }
+  globalThis.URL = Patched;
+})();
+`;
+
 const ROUTING_FIX_SRC = `
 // Best-effort: reset the iframe's URL to "/" so React Router's
 // BrowserRouter sees a path it can match.  srcdoc iframes start
@@ -158,6 +196,7 @@ ${styleTagFor(args.css)}
 </head>
 <body>
 <div id="root"></div>
+<script>${ESCAPE_END_SCRIPT(URL_FIX_SRC)}</script>
 <script>${ESCAPE_END_SCRIPT(ROUTING_FIX_SRC)}</script>
 <script>${ESCAPE_END_SCRIPT(FETCH_SHIM_SRC)}</script>
 <script type="module">${ESCAPE_END_SCRIPT(args.js)}</script>
