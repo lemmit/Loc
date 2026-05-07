@@ -2,6 +2,7 @@
 // Adding more examples is just another `?raw` import + an entry in
 // the array below.
 import salesSource from "./sales.ddd?raw";
+import salesSystemSource from "./sales-system.ddd?raw";
 
 export interface LoomExample {
   id: string;
@@ -10,6 +11,7 @@ export interface LoomExample {
 }
 
 export const examples: LoomExample[] = [
+  { id: "sales-system", label: "Sales System (Hono + React)", source: salesSystemSource },
   { id: "sales", label: "Sales (single context)", source: salesSource },
 ];
 

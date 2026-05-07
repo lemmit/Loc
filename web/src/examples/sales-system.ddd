@@ -1,0 +1,84 @@
+// Same Sales context as `sales.ddd`, wrapped in a system that
+// declares a Hono backend and a React frontend so the playground
+// can preview both halves of the stack together.
+
+system SalesSystem {
+
+  module Sales {
+    context Sales {
+
+      enum OrderStatus { Draft, Confirmed, Shipped, Cancelled }
+
+      valueobject Money {
+        amount: decimal
+        currency: string
+        invariant amount >= 0
+        invariant currency.length == 3
+      }
+
+      event OrderConfirmed { order: Id<Order>, at: datetime }
+
+      aggregate Customer {
+        name: string display
+        email: string
+        invariant email.length > 0
+      }
+
+      aggregate Product {
+        sku: string display
+        price: Money
+        invariant sku.length > 0
+      }
+
+      aggregate Order {
+        customerId: string
+        status: OrderStatus
+        placedAt: datetime
+        contains lines: OrderLine[]
+
+        invariant lines.count > 0 when status == Confirmed
+
+        function isMutable(): bool = status == Draft
+
+        operation addLine(productId: Id<Product>, qty: int) {
+          precondition isMutable()
+          precondition qty > 0
+          lines += new OrderLine { productId: productId, quantity: qty }
+        }
+
+        operation confirm() {
+          precondition isMutable()
+          precondition lines.count > 0
+          status := Confirmed
+          emit OrderConfirmed { order: id, at: now() }
+        }
+
+        entity OrderLine {
+          productId: Id<Product>
+          quantity: int
+          invariant quantity > 0
+        }
+      }
+
+      repository Customers for Customer { }
+      repository Products for Product { }
+      repository Orders for Order { }
+    }
+  }
+
+  // Hono backend — runs in the playground's runtime worker
+  // (PGlite under the hood).
+  deployable api {
+    platform: hono
+    modules: Sales
+    port: 3000
+  }
+
+  // React frontend — runs in an iframe, calls back into the
+  // runtime worker via the playground's postMessage shim.
+  deployable webApp {
+    platform: react
+    targets: api
+    port: 3001
+  }
+}

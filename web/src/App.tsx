@@ -7,6 +7,7 @@ import {
   Code,
   Group,
   ScrollArea,
+  SegmentedControl,
   Select,
   Stack,
   Text,
@@ -25,17 +26,24 @@ import { LoomRuntimeClient } from "./runtime/client";
 import type { DispatchResult } from "./runtime/protocol";
 import { FileTree } from "./preview/FileTree";
 import { FileViewer } from "./preview/FileViewer";
+import { Preview } from "./preview/Preview";
 import { buildTree } from "./preview/file-tree";
 
-// Find the right entry path for the Hono backend in a generated
-// tree.  Legacy single-context mode dumps everything at the root,
-// so `http/index.ts` lives there directly.  System mode wraps each
-// deployable in a slug folder; we pick the first hono deployable
-// (Phase 3a — multi-deployable selection comes in 3b).
-function findHonoEntry(files: VirtualFile[]): string | null {
-  if (files.some((f) => f.path === "http/index.ts")) return "http/index.ts";
-  const m = files.find((f) => /^[^/]+\/http\/index\.ts$/.test(f.path));
-  return m?.path ?? null;
+// Find the right entry paths in a generated tree.  Legacy
+// single-context mode dumps everything at the root.  System mode
+// wraps each deployable in a slug folder.
+function findEntries(files: VirtualFile[]): { hono: string | null; react: string | null } {
+  if (files.some((f) => f.path === "http/index.ts")) {
+    // Legacy: only Hono, no React frontend.
+    return { hono: "http/index.ts", react: null };
+  }
+  let hono: string | null = null;
+  let react: string | null = null;
+  for (const f of files) {
+    if (!hono && /^[^/]+\/http\/index\.ts$/.test(f.path)) hono = f.path;
+    if (!react && /^[^/]+\/src\/main\.tsx$/.test(f.path)) react = f.path;
+  }
+  return { hono, react };
 }
 
 function formatBytes(n: number): string {
@@ -109,9 +117,11 @@ export default function App(): JSX.Element {
   const [booting, setBooting] = useState(false);
   const [result, setResult] = useState<GenerateResult | null>(null);
   const [bundleResult, setBundleResult] = useState<BundleResult | null>(null);
+  const [reactBundle, setReactBundle] = useState<BundleResult | null>(null);
   const [bootError, setBootError] = useState<string | null>(null);
   const [bootedDDL, setBootedDDL] = useState<string | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [rightPane, setRightPane] = useState<"files" | "preview">("files");
   // Request composer state.
   const [reqMethod, setReqMethod] = useState<string>("GET");
   const [reqPath, setReqPath] = useState<string>("/products");
@@ -143,10 +153,12 @@ export default function App(): JSX.Element {
     sourceRef.current = initialSource;
     setResult(null);
     setBundleResult(null);
+    setReactBundle(null);
     setBootedDDL(null);
     setBootError(null);
     setDispatchResult(null);
     setSelectedPath(null);
+    setRightPane("files");
     runtimeClientRef.current?.reset();
   }, [initialSource]);
 
@@ -178,8 +190,8 @@ export default function App(): JSX.Element {
   async function runBundle(): Promise<void> {
     const client = bundleClientRef.current;
     if (!client || !result?.ok) return;
-    const entry = findHonoEntry(result.files);
-    if (!entry) {
+    const entries = findEntries(result.files);
+    if (!entries.hono) {
       setBundleResult({
         ok: false,
         diagnostics: [
@@ -195,9 +207,25 @@ export default function App(): JSX.Element {
     setBootedDDL(null);
     setBootError(null);
     setDispatchResult(null);
+    setReactBundle(null);
     try {
-      const res = await client.bundle({ files: result.files, entryPath: entry });
-      setBundleResult(res);
+      const honoRes = await client.bundle({
+        kind: "hono",
+        files: result.files,
+        entryPath: entries.hono,
+      });
+      setBundleResult(honoRes);
+      // System mode emits a React deployable too — bundle it so the
+      // Preview pane can boot the generated SPA against the same
+      // PGlite-backed Hono backend.
+      if (honoRes.ok && entries.react) {
+        const reactRes = await client.bundle({
+          kind: "react",
+          files: result.files,
+          entryPath: entries.react,
+        });
+        setReactBundle(reactRes);
+      }
     } finally {
       setBundling(false);
     }
@@ -322,71 +350,117 @@ export default function App(): JSX.Element {
               onDiagnosticsChange={setDiagnostics}
             />
           </Box>
-          {/* Preview pane: file tree + viewer */}
-          <Box style={{ width: 240, minWidth: 240, borderRight: "1px solid var(--mantine-color-dark-4)", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+          {/* Right pane — toggle between Files (tree + viewer) and
+              Preview (iframe of the generated React app, fetches
+              routed back to the runtime worker). */}
+          <Box style={{ flex: 1.5, minWidth: 0, display: "flex", flexDirection: "column" }}>
             <Group px="sm" py={4} bg="dark.6" justify="space-between" gap="xs">
-              <Text size="xs" fw={600} tt="uppercase" c="dimmed">
-                Generated
-              </Text>
-              <Text size="xs" c="dimmed">
-                {files.length} file{files.length === 1 ? "" : "s"}
-              </Text>
-            </Group>
-            <ScrollArea style={{ flex: 1, minHeight: 0 }}>
-              <FileTree
-                root={tree}
-                selectedPath={selectedPath}
-                onSelect={setSelectedPath}
+              <SegmentedControl
+                size="xs"
+                value={rightPane}
+                onChange={(v) => setRightPane(v as "files" | "preview")}
+                data={[
+                  { label: "Files", value: "files" },
+                  { label: "Preview", value: "preview" },
+                ]}
+                data-testid="right-pane-tabs"
               />
-            </ScrollArea>
-          </Box>
-          <Box style={{ flex: 1.2, minWidth: 0, display: "flex", flexDirection: "column" }}>
-            <Group px="sm" py={4} bg="dark.6" justify="space-between" gap="xs">
-              <Text size="xs" ff="monospace" c={selectedFile ? undefined : "dimmed"}>
-                {selectedFile?.path ?? "no file selected"}
-              </Text>
-              <Text size="xs" c="dimmed">
-                {modeLabel(result)}
-              </Text>
-            </Group>
-            <Box style={{ flex: 1, minHeight: 0 }}>
-              {selectedFile ? (
-                <FileViewer
-                  key={selectedFile.path}
-                  path={selectedFile.path}
-                  content={selectedFile.content}
-                />
-              ) : (
-                <Box p="md">
-                  <Text size="sm" c="dimmed">
-                    {result?.ok === false
-                      ? "Generation failed — see Problems."
-                      : "Click Generate to emit a project from the source."}
-                  </Text>
-                </Box>
-              )}
-            </Box>
-            {bundleResult && !bundleResult.ok && (
-              <Box
-                p="xs"
-                style={{
-                  borderTop: "1px solid var(--mantine-color-dark-4)",
-                  background: "var(--mantine-color-dark-7)",
-                  maxHeight: 160,
-                  overflow: "auto",
-                }}
-              >
-                <Text size="xs" fw={600} tt="uppercase" c="red" mb={4}>
-                  Bundle errors
+              {rightPane === "files" ? (
+                <Text size="xs" c="dimmed">
+                  {files.length} file{files.length === 1 ? "" : "s"} · {modeLabel(result)}
                 </Text>
-                <Stack gap={2}>
-                  {bundleResult.diagnostics.map((d, i) => (
-                    <Text key={i} size="xs" ff="monospace" style={{ whiteSpace: "pre-wrap" }}>
-                      {d.file ? `${d.file}:${d.line ?? "?"}: ` : ""}
-                      {d.message}
+              ) : (
+                <Text size="xs" c={reactBundle?.ok && bootedDDL ? "green" : "dimmed"}>
+                  {reactBundle?.ok && bootedDDL
+                    ? "live"
+                    : reactBundle?.ok
+                      ? "needs Boot"
+                      : "needs Bundle"}
+                </Text>
+              )}
+            </Group>
+            {rightPane === "files" ? (
+              <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
+                <Box style={{ width: 240, minWidth: 240, borderRight: "1px solid var(--mantine-color-dark-4)", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                  <ScrollArea style={{ flex: 1, minHeight: 0 }}>
+                    <FileTree
+                      root={tree}
+                      selectedPath={selectedPath}
+                      onSelect={setSelectedPath}
+                    />
+                  </ScrollArea>
+                </Box>
+                <Box style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+                  <Group px="sm" py={4} bg="dark.7" gap="xs">
+                    <Text size="xs" ff="monospace" c={selectedFile ? undefined : "dimmed"}>
+                      {selectedFile?.path ?? "no file selected"}
                     </Text>
-                  ))}
-                </Stack>
+                  </Group>
+                  <Box style={{ flex: 1, minHeight: 0 }}>
+                    {selectedFile ? (
+                      <FileViewer
+                        key={selectedFile.path}
+                        path={selectedFile.path}
+                        content={selectedFile.content}
+                      />
+                    ) : (
+                      <Box p="md">
+                        <Text size="sm" c="dimmed">
+                          {result?.ok === false
+                            ? "Generation failed — see Problems."
+                            : "Click Generate to emit a project from the source."}
+                        </Text>
+                      </Box>
+                    )}
+                  </Box>
+                  {bundleResult && !bundleResult.ok && (
+                    <Box
+                      p="xs"
+                      style={{
+                        borderTop: "1px solid var(--mantine-color-dark-4)",
+                        background: "var(--mantine-color-dark-7)",
+                        maxHeight: 160,
+                        overflow: "auto",
+                      }}
+                    >
+                      <Text size="xs" fw={600} tt="uppercase" c="red" mb={4}>
+                        Bundle errors
+                      </Text>
+                      <Stack gap={2}>
+                        {bundleResult.diagnostics.map((d, i) => (
+                          <Text key={i} size="xs" ff="monospace" style={{ whiteSpace: "pre-wrap" }}>
+                            {d.file ? `${d.file}:${d.line ?? "?"}: ` : ""}
+                            {d.message}
+                          </Text>
+                        ))}
+                      </Stack>
+                    </Box>
+                  )}
+                </Box>
+              </Box>
+            ) : (
+              <Box style={{ flex: 1, minHeight: 0 }}>
+                {reactBundle?.ok && bootedDDL && runtimeClientRef.current ? (
+                  <Preview
+                    js={reactBundle.code}
+                    css={reactBundle.css}
+                    runtime={runtimeClientRef.current}
+                  />
+                ) : (
+                  <Box p="md">
+                    <Text size="sm" c="dimmed">
+                      {!result?.ok
+                        ? "Generate a system-mode source first (the Sales System example has both Hono + React deployables)."
+                        : !reactBundle?.ok
+                          ? reactBundle && !reactBundle.ok
+                            ? "Bundling the React app failed — switch to Files for details."
+                            : "Click Bundle to compile the React frontend (~10 s on first run)."
+                          : !bootedDDL
+                            ? "Boot the backend first — the React app calls into PGlite via the runtime worker."
+                            : "Loading…"}
+                    </Text>
+                  </Box>
+                )}
               </Box>
             )}
           </Box>

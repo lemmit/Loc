@@ -5,6 +5,7 @@ import * as esbuild from "esbuild-wasm";
 import wasmURL from "esbuild-wasm/esbuild.wasm?url";
 import type {
   BundleDiagnostic,
+  BundleRequest,
   BundleResult,
   BundleRpcRequest,
   BundleRpcResponse,
@@ -48,10 +49,7 @@ function toDiagnostic(severity: "error" | "warning", m: esbuild.Message): Bundle
   };
 }
 
-async function handleBundle(req: {
-  files: VirtualFile[];
-  entryPath: string;
-}): Promise<BundleResult> {
+async function handleBundle(req: BundleRequest): Promise<BundleResult> {
   await ensureInit();
 
   const fs = buildVirtualFs(req.files);
@@ -75,18 +73,33 @@ async function handleBundle(req: {
     versions: harvestVersions(fs),
   };
 
-  const schemaPath = schemaPathFor(entryInFs);
-  const schemaInFs = resolveInFs(fs, schemaPath);
-  if (!schemaInFs) {
-    return {
-      ok: false,
-      diagnostics: [
-        {
-          severity: "error",
-          message: `Schema "${schemaPath}" not in virtual fs alongside entry "${entryInFs}".`,
-        },
-      ],
-    };
+  // Hono kind: stdin re-exports the runtime surface (createApp,
+  // schema, drizzle, PGlite, …) so the runtime worker imports a
+  // single self-contained ESM module.
+  // React kind: stdin is a side-effecting `import` of the
+  // generator's main.tsx, which mounts the React tree on
+  // document.getElementById("root") at evaluation time.
+  let stdinContents: string;
+  let stdinLoader: "ts" | "tsx";
+  if (req.kind === "hono") {
+    const schemaPath = schemaPathFor(entryInFs);
+    const schemaInFs = resolveInFs(fs, schemaPath);
+    if (!schemaInFs) {
+      return {
+        ok: false,
+        diagnostics: [
+          {
+            severity: "error",
+            message: `Schema "${schemaPath}" not in virtual fs alongside entry "${entryInFs}".`,
+          },
+        ],
+      };
+    }
+    stdinContents = makeEntryStdin(entryInFs, schemaInFs);
+    stdinLoader = "ts";
+  } else {
+    stdinContents = `import "./${entryInFs}";\n`;
+    stdinLoader = "tsx";
   }
 
   const start = performance.now();
@@ -94,10 +107,10 @@ async function handleBundle(req: {
   try {
     result = await esbuild.build({
       stdin: {
-        contents: makeEntryStdin(entryInFs, schemaInFs),
+        contents: stdinContents,
         resolveDir: "/",
-        sourcefile: "__entry__.ts",
-        loader: "ts",
+        sourcefile: req.kind === "react" ? "__entry__.tsx" : "__entry__.ts",
+        loader: stdinLoader,
       },
       bundle: true,
       format: "esm",
@@ -106,10 +119,19 @@ async function handleBundle(req: {
       logLevel: "silent",
       write: false,
       sourcemap: false,
-      // PGlite ships its WASM as a binary import — let esbuild
-      // inline it as base64 + a Uint8Array so the bundle stays a
-      // single self-contained ESM module.
-      loader: { ".wasm": "binary" },
+      jsx: "automatic",
+      // outdir is required when bundling JS that imports CSS so
+      // esbuild can name the CSS companion; with write:false the
+      // path is purely virtual — we read both outputs from
+      // result.outputFiles.
+      outdir: "/__loom_bundle__",
+      // - .wasm "binary": PGlite ships WASM as a binary-import; we
+      //   inline as a Uint8Array so the bundle stays self-contained.
+      // - .css "css": React-platform code does
+      //   `import "@mantine/core/styles.css"`.  esbuild handles the
+      //   import as a side-effecting CSS file and emits a separate
+      //   .css output we then ship to the iframe via a <style> tag.
+      loader: { ".wasm": "binary", ".css": "css" },
       plugins: [makeLoomPlugin(ctx)],
     });
   } catch (err) {
@@ -135,25 +157,28 @@ async function handleBundle(req: {
   }
   const durationMs = Math.round(performance.now() - start);
 
-  const out = result.outputFiles?.[0];
-  if (!out) {
+  const jsOut = result.outputFiles?.find((f) => f.path.endsWith(".js"));
+  const cssOut = result.outputFiles?.find((f) => f.path.endsWith(".css"));
+  if (!jsOut) {
     return {
       ok: false,
       diagnostics: [
-        { severity: "error", message: "esbuild produced no output files" },
+        { severity: "error", message: "esbuild produced no JS output file" },
       ],
     };
   }
-  // Post-process: rewrite `import.meta.url` to a real jsdelivr URL
-  // (so PGlite's `new URL("./pglite.wasm", import.meta.url)` calls
-  // succeed when the bundle is loaded from a blob: URL) and force
-  // PGlite's browser code path.  See `postProcessBundle` for the
-  // full reasoning.
-  const code = postProcessBundle(out.text);
+
+  // Post-process is hono-specific: the rewrites only matter for
+  // PGlite's URL-construction sites.  React bundles get the raw
+  // esbuild output.
+  const code = req.kind === "hono" ? postProcessBundle(jsOut.text) : jsOut.text;
+  const css = cssOut?.text;
 
   return {
     ok: true,
+    kind: req.kind,
     code,
+    css,
     size: code.length,
     durationMs,
     fetchedUrls: [...ctx.fetchedUrls].sort(),
