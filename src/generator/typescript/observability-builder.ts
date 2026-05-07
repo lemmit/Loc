@@ -56,7 +56,6 @@ export const requestIdMiddleware = createMiddleware<{
   const inbound = c.req.header(REQUEST_ID_HEADER);
   const requestId = inbound && inbound.length > 0 ? inbound : randomUUID();
   c.set("requestId", requestId);
-  c.header(REQUEST_ID_HEADER, requestId);
 
   const url = new URL(c.req.url);
   const startLog: RequestStartLog = {
@@ -73,6 +72,19 @@ export const requestIdMiddleware = createMiddleware<{
   try {
     await next();
   } finally {
+    // Set the X-Request-Id header on the (now-finalised) response.
+    // Calling \`c.header(...)\` BEFORE next() queues the header and
+    // sends Hono down a Response-construction path that breaks on
+    // null-body statuses (204 / 304) in browser-bundled fetch
+    // runtimes ("Response with null body status cannot have body").
+    // Mutating c.res.headers directly after the handler returned
+    // sidesteps the rebuild — the Headers object is mutable on a
+    // Response that hasn't been consumed yet.
+    try {
+      c.res.headers.set(REQUEST_ID_HEADER, requestId);
+    } catch {
+      /* best-effort: headers are read-only on some runtimes */
+    }
     const endLog: RequestEndLog = {
       ts: new Date().toISOString(),
       level: "info",

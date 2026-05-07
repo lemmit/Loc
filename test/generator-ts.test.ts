@@ -120,8 +120,10 @@ describe("typescript generator", () => {
       // Honours an inbound X-Request-Id header.
       expect(reqId).toMatch(/REQUEST_ID_HEADER = "X-Request-Id"/);
       expect(reqId).toMatch(/c\.req\.header\(REQUEST_ID_HEADER\)/);
-      // Echoes the value back on the response.
-      expect(reqId).toMatch(/c\.header\(REQUEST_ID_HEADER, requestId\)/);
+      // Echoes the value back on the response.  Set AFTER next()
+      // via direct headers mutation to avoid Hono's null-body
+      // (204/304) Response-construction trap.
+      expect(reqId).toMatch(/c\.res\.headers\.set\(REQUEST_ID_HEADER, requestId\)/);
       // Stashes the id on the Hono context for downstream onError.
       expect(reqId).toMatch(/c\.set\("requestId", requestId\)/);
       // Structured request_start + request_end JSON log lines.
