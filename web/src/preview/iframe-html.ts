@@ -103,7 +103,13 @@ const FETCH_SHIM_SRC = `
     if (!slot) return;
     pending.delete(d.id);
     if (d.ok) {
-      slot.resolve(new Response(d.body, {
+      // Web Fetch forbids passing a body to null-body statuses
+      // (204 / 205 / 304).  The runtime worker serialises the
+      // upstream Response via .text() which yields "" for empty
+      // bodies — passing "" to "new Response('', {status: 204})"
+      // throws.  Coerce to null here so the constructor accepts.
+      const isNullBody = d.status === 204 || d.status === 205 || d.status === 304;
+      slot.resolve(new Response(isNullBody ? null : d.body, {
         status: d.status,
         statusText: d.statusText,
         headers: d.headers,
