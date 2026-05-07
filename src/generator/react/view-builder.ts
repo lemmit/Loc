@@ -382,6 +382,101 @@ function collectColumns(
 }
 
 // ---------------------------------------------------------------------------
+// Playwright page object — slice 18.C.  One class per view at
+// `e2e/pages/views/<slug>.ts`:
+//
+//   class <Cap>ViewPage {
+//     async goto(): Promise<this>      // navigate, wait for table
+//     async rows(): Promise<RowShape[]>  // read every cell back into a typed
+//                                          object — drives the table by reading
+//                                          `view-<slug>-row-<idx>-<col>` testids
+//   }
+//
+// `RowShape` is the same `<View>Row` type emitted by the api module
+// (full-form view) or `<Aggregate>Response` (shorthand view).  All
+// values come back as strings (cell .innerText()) — callers `Number()`
+// or compare textually as the test asks.
+// ---------------------------------------------------------------------------
+
+export function buildViewPageObject(
+  view: ViewIR,
+  ctx: BoundedContextIR,
+): string {
+  const slug = snake(view.name);
+  const className = `${cap(view.name)}ViewPage`;
+  const cols = collectColumnNames(view, ctx);
+  // RowShape: declared as a local interface so the page object stays
+  // self-contained — referencing the api/views.ts type would tangle
+  // the e2e tsconfig with the Vite project's react-jsx setting.
+  const rowFields = cols.map((c) => `  ${c}: string;`).join("\n");
+  const lines: string[] = [];
+  lines.push("// Auto-generated.  Do not edit by hand.");
+  lines.push(`import type { Page } from "@playwright/test";`);
+  lines.push("");
+  lines.push(`export interface ${cap(view.name)}RowText {`);
+  lines.push(rowFields);
+  lines.push(`}`);
+  lines.push("");
+  lines.push(`export class ${className} {`);
+  lines.push(`  static readonly url = "/views/${slug}";`);
+  lines.push(`  constructor(public readonly page: Page) {}`);
+  lines.push("");
+  lines.push(`  async goto(): Promise<this> {`);
+  lines.push(`    await this.page.goto(${className}.url);`);
+  lines.push(`    await this.page.getByTestId("view-${slug}").waitFor();`);
+  lines.push(`    return this;`);
+  lines.push(`  }`);
+  lines.push("");
+  lines.push(`  async rows(): Promise<${cap(view.name)}RowText[]> {`);
+  lines.push(`    // Walk row indices until the row testid stops matching.`);
+  lines.push(`    // The empty-state branch in the React table renders no`);
+  lines.push(`    // rows at all, so the loop terminates immediately.`);
+  lines.push(`    const out: ${cap(view.name)}RowText[] = [];`);
+  lines.push(`    for (let i = 0; i < 1000; i++) {`);
+  lines.push(
+    `      const row = this.page.getByTestId(\`view-${slug}-row-\${i}\`);`,
+  );
+  lines.push(`      if ((await row.count()) === 0) break;`);
+  for (const c of cols) {
+    lines.push(
+      `      const ${camel("c_" + c)} = await this.page.getByTestId(\`view-${slug}-row-\${i}-${c}\`).innerText();`,
+    );
+  }
+  const rowLiteral = cols
+    .map((c) => `${c}: ${camel("c_" + c)}`)
+    .join(", ");
+  lines.push(`      out.push({ ${rowLiteral} });`);
+  lines.push(`    }`);
+  lines.push(`    return out;`);
+  lines.push(`  }`);
+  lines.push("");
+  lines.push(`  /** Count of currently-rendered rows. */`);
+  lines.push(`  async count(): Promise<number> {`);
+  lines.push(`    return (await this.rows()).length;`);
+  lines.push(`  }`);
+  lines.push(`}`);
+  return lines.join("\n") + "\n";
+}
+
+function collectColumnNames(view: ViewIR, ctx: BoundedContextIR): string[] {
+  if (view.output) return view.output.fields.map((f) => f.name);
+  const agg = ctx.aggregates.find((a) => a.name === view.aggregateName);
+  if (!agg) return ["id"];
+  const cols = ["id"];
+  for (const f of agg.fields) {
+    const inner = unwrapOpt(f.type);
+    if (
+      inner.kind === "primitive" ||
+      inner.kind === "enum" ||
+      inner.kind === "id"
+    ) {
+      cols.push(f.name);
+    }
+  }
+  return cols;
+}
+
+// ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
 

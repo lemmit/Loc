@@ -12,6 +12,7 @@ import {
   initialValuesTs,
   needsController,
 } from "./form-helpers.js";
+import { fillBlock } from "./page-objects-builder.js";
 
 // ---------------------------------------------------------------------------
 // Workflow UI emission for the React generator.
@@ -369,6 +370,84 @@ ${idHookCalls ? idHookCalls + "\n" : ""}  const ${destructured} = useForm<${cap(
   );
 }
 `;
+}
+
+// ---------------------------------------------------------------------------
+// Playwright page object — slice 18.C.  Emitted into
+// `e2e/pages/workflows/<slug>.ts`.  One class per workflow:
+//
+//   class <Cap>WorkflowPage {
+//     async goto(): Promise<this>          // navigate, wait for form
+//     async fill(input): Promise<this>     // typed input from <Wf>Request
+//     async submit(): Promise<void>        // click submit, wait toast
+//     async run(input): Promise<void>      // goto + fill + submit
+//   }
+//
+// Drives the DOM via the testid prefix used by the form page
+// (`workflow-<slug>-input-<param>` etc.).  Reuses the existing
+// fillBlock helper from page-objects-builder so each parameter type
+// (Id<X> select, datetime, primitives, enum, value-object) follows
+// the same Playwright interaction convention as the aggregate
+// operation modals.
+// ---------------------------------------------------------------------------
+
+export function buildWorkflowPageObject(
+  wf: WorkflowIR,
+  ctx: BoundedContextIR,
+): string {
+  const slug = snake(wf.name);
+  const className = `${cap(wf.name)}WorkflowPage`;
+  const requestType = `${cap(wf.name)}Request`;
+  const lines: string[] = [];
+  lines.push("// Auto-generated.  Do not edit by hand.");
+  lines.push(`import type { Page } from "@playwright/test";`);
+  lines.push(
+    `import type { ${requestType} } from "../../../src/api/workflows.js";`,
+  );
+  lines.push("");
+  lines.push(`export class ${className} {`);
+  lines.push(`  static readonly url = "/workflows/${slug}";`);
+  lines.push(`  constructor(public readonly page: Page) {}`);
+  lines.push("");
+  lines.push(`  async goto(): Promise<this> {`);
+  lines.push(`    await this.page.goto(${className}.url);`);
+  lines.push(`    await this.page.getByTestId("workflow-${slug}").waitFor();`);
+  lines.push(`    return this;`);
+  lines.push(`  }`);
+  lines.push("");
+  lines.push(`  async fill(input: Partial<${requestType}>): Promise<this> {`);
+  for (const p of wf.params) {
+    const fillLines = fillBlock(
+      "input",
+      p.name,
+      p.type,
+      ctx,
+      `workflow-${slug}-input-${p.name}`,
+    );
+    for (const l of fillLines) lines.push(`    ${l}`);
+  }
+  lines.push(`    return this;`);
+  lines.push(`  }`);
+  lines.push("");
+  lines.push(`  async submit(): Promise<void> {`);
+  lines.push(
+    `    await this.page.getByTestId("workflow-${slug}-submit").click();`,
+  );
+  // Wait for navigation back to /workflows (the form's onSuccess
+  // navigates) instead of relying on a transient toast.  More
+  // reliable across Playwright/animation timing.
+  lines.push(`    await this.page.waitForURL(/\\/workflows$/);`);
+  lines.push(`  }`);
+  lines.push("");
+  lines.push(
+    `  async run(input: ${requestType}): Promise<void> {`,
+  );
+  lines.push(`    await this.goto();`);
+  lines.push(`    await this.fill(input);`);
+  lines.push(`    await this.submit();`);
+  lines.push(`  }`);
+  lines.push(`}`);
+  return lines.join("\n") + "\n";
 }
 
 // ---------------------------------------------------------------------------

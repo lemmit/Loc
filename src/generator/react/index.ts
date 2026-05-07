@@ -16,12 +16,14 @@ import { buildPageObjectModule } from "./page-objects-builder.js";
 import {
   allWorkflows,
   buildWorkflowFormPage,
+  buildWorkflowPageObject,
   buildWorkflowsApiModule,
   buildWorkflowsIndexPage,
   hasAnyWorkflow,
 } from "./workflow-builder.js";
 import {
   allViews,
+  buildViewPageObject,
   buildViewsApiModule,
   buildViewsIndexPage,
   buildViewTablePage,
@@ -100,6 +102,14 @@ export function generateReactForContexts(
         `src/pages/workflows/${snake(wf.name)}.tsx`,
         buildWorkflowFormPage(wf, ctx, aggregatesByName),
       );
+      // Slice 18.C — Playwright page object so DSL `ui.workflows.X(...)`
+      // calls have a typed driver to lower against.  Lives under
+      // `e2e/pages/workflows/<slug>.ts`, mirroring the per-aggregate
+      // page object layout.
+      out.set(
+        `e2e/pages/workflows/${snake(wf.name)}.ts`,
+        buildWorkflowPageObject(wf, ctx),
+      );
     }
   }
 
@@ -116,6 +126,12 @@ export function generateReactForContexts(
       out.set(
         `src/pages/views/${snake(view.name)}.tsx`,
         buildViewTablePage(view, ctx, aggregatesByName),
+      );
+      // Slice 18.C — Playwright page object so DSL `ui.views.X()`
+      // calls can read the rendered table back as typed objects.
+      out.set(
+        `e2e/pages/views/${snake(view.name)}.ts`,
+        buildViewPageObject(view, ctx),
       );
     }
   }

@@ -772,6 +772,51 @@ function checkMagicCall(
   if (r.receiver.kind !== "ref" || r.receiver.name !== magicId) return;
   const aggregateSlug = r.member;
   const method = e.member;
+  // Reserved slugs route to system-level orchestration (workflows)
+  // or saved queries (views).  `<magicId>.workflows.<name>(...)`
+  // resolves to a workflow; `<magicId>.views.<name>(...)` to a view.
+  // Only `ui` invocations of these are wired up to the React UI
+  // generator today (slice 18.C); the same reserved slugs validate
+  // against `api` for symmetry — backend-side dispatchers can pick
+  // them up later.
+  if (aggregateSlug === "workflows") {
+    const wf = contexts.flatMap((c) => c.workflows).find(
+      (w) => camel(w.name) === method || snake(w.name) === method,
+    );
+    if (!wf) {
+      const known = contexts
+        .flatMap((c) => c.workflows.map((w) => camel(w.name)))
+        .sort()
+        .join(", ");
+      diags.push({
+        severity: "error",
+        message:
+          `e2e: unknown workflow '${magicId}.workflows.${method}' on this deployable. ` +
+          `Available workflows: ${known || "(none)"}.`,
+        source,
+      });
+    }
+    return;
+  }
+  if (aggregateSlug === "views") {
+    const view = contexts.flatMap((c) => c.views).find(
+      (v) => camel(v.name) === method || snake(v.name) === method,
+    );
+    if (!view) {
+      const known = contexts
+        .flatMap((c) => c.views.map((v) => camel(v.name)))
+        .sort()
+        .join(", ");
+      diags.push({
+        severity: "error",
+        message:
+          `e2e: unknown view '${magicId}.views.${method}' on this deployable. ` +
+          `Available views: ${known || "(none)"}.`,
+        source,
+      });
+    }
+    return;
+  }
   const agg = findAggregateBySlug(aggregateSlug, contexts);
   if (!agg) {
     const known = contexts

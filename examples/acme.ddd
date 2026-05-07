@@ -187,4 +187,17 @@ system Acme {
         expect read.status == "Confirmed"
         expect read.lines.length == 1
     }
+
+    // Slice 18.C — `ui.workflows.<name>(...)` lowers via the
+    // generated workflow page object; `ui.views.<name>()` reads the
+    // rendered table back as typed strings.
+    test e2e "place an order via the workflow UI" against webApp {
+        let prod = ui.products.create({ sku: "WIDGET-UI-2", price: { amount: 7.5, currency: "USD" } })
+        ui.workflows.placeOrder({ customerId: "cust-wf", productId: prod.id, quantity: 2 })
+    }
+
+    test e2e "active orders view renders the rendered rows" against webApp {
+        let rows = ui.views.activeOrders()
+        expect rows.length >= 0
+    }
 }

@@ -473,4 +473,137 @@ describe("react generator", () => {
       expect(home).toMatch(/data-testid="home-views-link"/);
     });
   });
+
+  describe("slice 18.C — DSL e2e for ui.workflows.* + ui.views.*", () => {
+    it("emits a Playwright page object per workflow", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const po = files.get("web_app/e2e/pages/workflows/place_order.ts")!;
+      expect(po).toMatch(/export class PlaceOrderWorkflowPage/);
+      // Typed `fill` accepting Partial<PlaceOrderRequest>.
+      expect(po).toMatch(
+        /async fill\(input: Partial<PlaceOrderRequest>\): Promise<this>/,
+      );
+      // Drives inputs via the same testid prefix the form page uses.
+      expect(po).toMatch(/workflow-place_order-input-customerId/);
+      expect(po).toMatch(/workflow-place_order-input-productId/);
+      expect(po).toMatch(/workflow-place_order-input-quantity/);
+      // Submit waits for navigation back to /workflows.
+      expect(po).toMatch(/this\.page\.waitForURL\(\/\\\/workflows\$\/\)/);
+      // Convenience `run` wraps goto + fill + submit.
+      expect(po).toMatch(/async run\(input: PlaceOrderRequest\): Promise<void>/);
+    });
+
+    it("emits a Playwright page object per view", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const po = files.get("web_app/e2e/pages/views/order_summary.ts")!;
+      expect(po).toMatch(/export class OrderSummaryViewPage/);
+      // Row shape interface declared locally — keeps the page object
+      // self-contained.
+      expect(po).toMatch(/export interface OrderSummaryRowText \{/);
+      expect(po).toMatch(/orderId: string;/);
+      expect(po).toMatch(/lineCount: string;/);
+      // rows() walks indexed testids until break.
+      expect(po).toMatch(
+        /async rows\(\): Promise<OrderSummaryRowText\[\]>/,
+      );
+      expect(po).toMatch(/view-order_summary-row-\$\{i\}-orderId/);
+    });
+
+    it("UI spec lowers ui.workflows.<name>(...) to the generated page object's run()", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const ui = files.get("web_app/e2e/Acme.ui.spec.ts")!;
+      // Page-object import.
+      expect(ui).toMatch(
+        /import \{ PlaceOrderWorkflowPage \} from "\.\/pages\/workflows\/place_order\.js"/,
+      );
+      // The workflow call lowers to `await new <Cap>WorkflowPage(page).run({...})`.
+      expect(ui).toMatch(
+        /await new PlaceOrderWorkflowPage\(page\)\.run\(/,
+      );
+    });
+
+    it("UI spec lowers ui.views.<name>() to the generated page object's rows()", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const ui = files.get("web_app/e2e/Acme.ui.spec.ts")!;
+      expect(ui).toMatch(
+        /import \{ ActiveOrdersViewPage \} from "\.\/pages\/views\/active_orders\.js"/,
+      );
+      // The view call lowers to a goto + rows() pair, wrapped so the
+      // let-binding resolves to the array (not a Promise).
+      expect(ui).toMatch(
+        /new ActiveOrdersViewPage\(page\)\.goto\(\)/,
+      );
+      expect(ui).toMatch(/await __view\.rows\(\)/);
+    });
+
+    it("validator rejects ui.workflows.<unknown>", async () => {
+      const { parseHelper } = await import("langium/test");
+      const { lowerModel } = await import("../src/ir/lower.js");
+      const { enrichLoomModel } = await import("../src/ir/enrichments.js");
+      const { validateLoomModel } = await import("../src/ir/validate.js");
+      const services = createDddServices(NodeFileSystem);
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(`
+        system Demo {
+          module M {
+            context C {
+              aggregate A { name: string display }
+              repository As for A { }
+            }
+          }
+          deployable api { platform: dotnet, modules: M, port: 8080 }
+          deployable web { platform: react, targets: api, port: 3001 }
+          test e2e "bad" against web {
+            ui.workflows.doesNotExist({})
+          }
+        }
+      `, { validation: true });
+      const loom = enrichLoomModel(lowerModel(doc.parseResult.value as Model));
+      const diags = validateLoomModel(loom);
+      expect(
+        diags.some(
+          (d) =>
+            d.severity === "error" &&
+            /unknown workflow 'ui\.workflows\.doesNotExist'/.test(d.message),
+        ),
+      ).toBe(true);
+    });
+
+    it("validator rejects ui.views.<unknown>", async () => {
+      const { parseHelper } = await import("langium/test");
+      const { lowerModel } = await import("../src/ir/lower.js");
+      const { enrichLoomModel } = await import("../src/ir/enrichments.js");
+      const { validateLoomModel } = await import("../src/ir/validate.js");
+      const services = createDddServices(NodeFileSystem);
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(`
+        system Demo {
+          module M {
+            context C {
+              aggregate A { name: string display }
+              repository As for A { }
+            }
+          }
+          deployable api { platform: dotnet, modules: M, port: 8080 }
+          deployable web { platform: react, targets: api, port: 3001 }
+          test e2e "bad" against web {
+            let r = ui.views.doesNotExist()
+          }
+        }
+      `, { validation: true });
+      const loom = enrichLoomModel(lowerModel(doc.parseResult.value as Model));
+      const diags = validateLoomModel(loom);
+      expect(
+        diags.some(
+          (d) =>
+            d.severity === "error" &&
+            /unknown view 'ui\.views\.doesNotExist'/.test(d.message),
+        ),
+      ).toBe(true);
+    });
+  });
 });
