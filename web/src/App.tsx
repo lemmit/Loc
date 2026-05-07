@@ -16,9 +16,28 @@ import type { Diagnostic } from "./lsp/protocol";
 import { examples, defaultExample } from "./examples";
 import { LoomBuildClient } from "./build/client";
 import type { GenerateResult, VirtualFile } from "./build/protocol";
+import { LoomBundleClient } from "./bundle/client";
+import type { BundleResult } from "./bundle/protocol";
 import { FileTree } from "./preview/FileTree";
 import { FileViewer } from "./preview/FileViewer";
 import { buildTree } from "./preview/file-tree";
+
+// Find the right entry path for the Hono backend in a generated
+// tree.  Legacy single-context mode dumps everything at the root,
+// so `http/index.ts` lives there directly.  System mode wraps each
+// deployable in a slug folder; we pick the first hono deployable
+// (Phase 3a — multi-deployable selection comes in 3b).
+function findHonoEntry(files: VirtualFile[]): string | null {
+  if (files.some((f) => f.path === "http/index.ts")) return "http/index.ts";
+  const m = files.find((f) => /^[^/]+\/http\/index\.ts$/.test(f.path));
+  return m?.path ?? null;
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+}
 
 interface DiagnosticsPanelProps {
   items: Diagnostic[];
@@ -78,16 +97,23 @@ export default function App(): JSX.Element {
   const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
   const sourceRef = useRef<string>(initialSource);
   const buildClientRef = useRef<LoomBuildClient | null>(null);
+  const bundleClientRef = useRef<LoomBundleClient | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [bundling, setBundling] = useState(false);
   const [result, setResult] = useState<GenerateResult | null>(null);
+  const [bundleResult, setBundleResult] = useState<BundleResult | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
 
   useEffect(() => {
-    const client = new LoomBuildClient();
-    buildClientRef.current = client;
+    const build = new LoomBuildClient();
+    const bundleClient = new LoomBundleClient();
+    buildClientRef.current = build;
+    bundleClientRef.current = bundleClient;
     return () => {
       buildClientRef.current = null;
-      client.dispose();
+      bundleClientRef.current = null;
+      build.dispose();
+      bundleClient.dispose();
     };
   }, []);
 
@@ -97,6 +123,7 @@ export default function App(): JSX.Element {
   useEffect(() => {
     sourceRef.current = initialSource;
     setResult(null);
+    setBundleResult(null);
     setSelectedPath(null);
   }, [initialSource]);
 
@@ -110,6 +137,8 @@ export default function App(): JSX.Element {
     try {
       const res = await client.generate(sourceRef.current);
       setResult(res);
+      // A new generation invalidates any prior bundle.
+      setBundleResult(null);
       if (res.ok && res.files.length > 0) {
         // Default to the first file — typically a top-level
         // package.json or domain/<aggregate>.ts.  Lets the user
@@ -120,6 +149,31 @@ export default function App(): JSX.Element {
       }
     } finally {
       setGenerating(false);
+    }
+  }
+
+  async function runBundle(): Promise<void> {
+    const client = bundleClientRef.current;
+    if (!client || !result?.ok) return;
+    const entry = findHonoEntry(result.files);
+    if (!entry) {
+      setBundleResult({
+        ok: false,
+        diagnostics: [
+          {
+            severity: "error",
+            message: "No hono deployable found in generated output (looked for http/index.ts).",
+          },
+        ],
+      });
+      return;
+    }
+    setBundling(true);
+    try {
+      const res = await client.bundle({ files: result.files, entryPath: entry });
+      setBundleResult(res);
+    } finally {
+      setBundling(false);
     }
   }
 
@@ -154,6 +208,15 @@ export default function App(): JSX.Element {
               variant="filled"
             >
               Generate
+            </Button>
+            <Button
+              size="xs"
+              onClick={runBundle}
+              loading={bundling}
+              disabled={!result?.ok || result.files.length === 0}
+              variant="default"
+            >
+              Bundle
             </Button>
             <Badge color="red" variant={errorCount > 0 ? "filled" : "light"} size="sm">
               {errorCount} error{errorCount === 1 ? "" : "s"}
@@ -221,6 +284,29 @@ export default function App(): JSX.Element {
                 </Box>
               )}
             </Box>
+            {bundleResult && !bundleResult.ok && (
+              <Box
+                p="xs"
+                style={{
+                  borderTop: "1px solid var(--mantine-color-dark-4)",
+                  background: "var(--mantine-color-dark-7)",
+                  maxHeight: 160,
+                  overflow: "auto",
+                }}
+              >
+                <Text size="xs" fw={600} tt="uppercase" c="red" mb={4}>
+                  Bundle errors
+                </Text>
+                <Stack gap={2}>
+                  {bundleResult.diagnostics.map((d, i) => (
+                    <Text key={i} size="xs" ff="monospace" style={{ whiteSpace: "pre-wrap" }}>
+                      {d.file ? `${d.file}:${d.line ?? "?"}: ` : ""}
+                      {d.message}
+                    </Text>
+                  ))}
+                </Stack>
+              </Box>
+            )}
           </Box>
         </Box>
         <Box
@@ -244,15 +330,24 @@ export default function App(): JSX.Element {
       <AppShell.Footer>
         <Group h="100%" px="md" gap="md" justify="space-between">
           <Text size="xs" c="dimmed">
-            Phase 2 — editor + LSP + generator
+            Phase 3a — editor + LSP + generator + bundler
           </Text>
-          <Text size="xs" c="dimmed">
-            {result?.ok === false
-              ? `generate: ${result.diagnostics.filter((d) => d.severity === "error").length} error(s)`
-              : result?.ok
-                ? `generated ${result.files.length} file(s) (${modeLabel(result)})`
-                : "ready"}
-          </Text>
+          <Group gap="md">
+            <Text size="xs" c="dimmed">
+              {result?.ok === false
+                ? `generate: ${result.diagnostics.filter((d) => d.severity === "error").length} error(s)`
+                : result?.ok
+                  ? `generated ${result.files.length} file(s) (${modeLabel(result)})`
+                  : "no generation yet"}
+            </Text>
+            <Text size="xs" c="dimmed">
+              {bundleResult === null
+                ? "no bundle yet"
+                : bundleResult.ok
+                  ? `bundled ${formatBytes(bundleResult.size)} in ${bundleResult.durationMs} ms (${bundleResult.fetchedUrls.length} deps fetched)`
+                  : `bundle: ${bundleResult.diagnostics.filter((d) => d.severity === "error").length} error(s)`}
+            </Text>
+          </Group>
         </Group>
       </AppShell.Footer>
     </AppShell>
