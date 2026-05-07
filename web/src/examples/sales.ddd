@@ -1,0 +1,158 @@
+// Sales bounded context — exercises every grammar construct.
+context Sales {
+
+  enum OrderStatus { Draft, Confirmed, Shipped, Cancelled }
+
+  valueobject Money {
+    amount: decimal
+    currency: string
+    invariant amount >= 0
+    invariant currency.length == 3
+  }
+
+  event OrderConfirmed {
+    order: Id<Order>,
+    at: datetime
+  }
+
+  event LineAdded {
+    order: Id<Order>,
+    productId: Id<Product>,
+    quantity: int
+  }
+
+  aggregate Customer {
+    name: string
+    email: string
+    invariant email.length > 0
+  }
+
+  aggregate Product {
+    sku: string
+    price: Money
+  }
+
+  aggregate Order {
+    customerId: Id<Customer>
+    status: OrderStatus
+    placedAt: datetime
+    contains lines: OrderLine[]
+
+    derived total: Money =
+      Money(lines.sum(l => l.subtotal.amount), "USD")
+
+    invariant lines.count > 0 when status == Confirmed
+
+    function isMutable(): bool = status == Draft
+
+    private operation requireMutable() {
+      precondition isMutable()
+    }
+
+    operation addLine(productId: Id<Product>, qty: int, price: Money) {
+      precondition isMutable()
+      precondition qty > 0
+      lines += new OrderLine {
+        productId: productId, quantity: qty, unitPrice: price
+      }
+      emit LineAdded { order: id, productId: productId, quantity: qty }
+    }
+
+    operation confirm() {
+      precondition isMutable()
+      precondition lines.count > 0
+      status := Confirmed
+      emit OrderConfirmed { order: id, at: now() }
+    }
+
+    entity OrderLine {
+      productId: Id<Product>
+      quantity: int
+      unitPrice: Money
+
+      function subtotalAmount(): decimal = unitPrice.amount * quantity
+
+      derived subtotal: Money =
+        Money(subtotalAmount(), unitPrice.currency)
+
+      invariant quantity > 0
+    }
+
+    test "money literal builds" {
+      let m = Money(10.5, "USD")
+      expect m.amount == 10.5
+      expect m.currency == "USD"
+    }
+
+    test "negative money rejected" {
+      expectThrows Money(-1.0, "USD")
+    }
+  }
+
+  repository Customers for Customer { }
+
+  repository Orders for Order {
+    // Convention: when no `where` is given, parameters are matched to
+    // aggregate properties of the same name (here `customerId`).
+    find byCustomer(customerId: Id<Customer>): Order[]
+    // Explicit predicate over the aggregate root — `this` refers to the
+    // root, parameters are bare identifiers.
+    find activeForCustomer(forCustomer: Id<Customer>): Order[]
+      where this.customerId == forCustomer && this.status == Draft
+  }
+
+  // Context-level orchestration: validate the customer exists, build a
+  // fresh draft order from the request, persist it.  Non-transactional
+  // — the customer load is read-only, the order save is independent.
+  // See docs/workflow.md for the full surface.
+  workflow placeOrder(customerId: Id<Customer>, placedAt: datetime) {
+    let customer = Customers.getById(customerId)
+    let order = Order.create({
+      customerId: customerId,
+      status: Draft,
+      placedAt: placedAt
+    })
+  }
+
+  // Saved query — strongly-typed, parameterless, filter-only.
+  // Lowers to a per-aggregate repository method on both backends
+  // and a `GET /views/active_orders` route.  Filter follows the
+  // queryable subset (no collection lambdas, no chained traversal).
+  // See docs/views.md for the full surface.
+  view ActiveOrders = Order where status == Confirmed
+
+  // Full-form view: declared output shape + bind expressions.
+  // Slice 2 — the row type is a fresh record (`OrderSummaryRow`
+  // on .NET, `OrderSummaryRow` Zod object on Hono); each bind
+  // expression projects from the hydrated source aggregate after
+  // the where-clause SQL filter runs.
+  view OrderSummary {
+    orderId: Id<Order>
+    status: OrderStatus
+    lineCount: int
+
+    from Order where status != Cancelled
+    bind orderId = id,
+         status = status,
+         lineCount = lines.count
+  }
+
+  // Snowflake-style view: bind expressions follow `Id<X>` typed
+  // refs into other aggregates.  `customerId.name` and
+  // `customerId.email` resolve via the type system (Customer is
+  // the target of `customerId: Id<Customer>`); the route handler
+  // bulk-loads matching Customers via `findManyByIds` and
+  // dictionary-rewrites the projection.  Slice 3.
+  view CustomerOrders {
+    orderId: Id<Order>
+    customerName: string
+    customerEmail: string
+    status: OrderStatus
+
+    from Order where status == Confirmed
+    bind orderId = id,
+         customerName = customerId.name,
+         customerEmail = customerId.email,
+         status = status
+  }
+}
