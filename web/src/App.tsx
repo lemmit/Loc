@@ -304,7 +304,7 @@ export default function App(): JSX.Element {
               onChange={(v) => v && setExampleId(v)}
               data={examples.map((e) => ({ value: e.id, label: e.label }))}
               allowDeselect={false}
-              w={240}
+              w={300}
             />
           </Group>
           <Group gap="xs">

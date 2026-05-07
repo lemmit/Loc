@@ -1,0 +1,158 @@
+// Acme system — exercises system / module / deployable.
+//
+// Two modules group bounded contexts; two deployables ship subsets of
+// them on different platforms.  `ddd generate system` emits each
+// deployable as its own project alongside a docker-compose.yml that
+// wires them together with a shared postgres.
+
+system Acme {
+
+    module Catalog {
+        context Products {
+
+            valueobject Money {
+                amount: decimal
+                currency: string
+                invariant amount >= 0
+                invariant currency.length == 3
+            }
+
+            aggregate Product {
+                sku: string display
+                price: Money
+                invariant sku.length > 0
+            }
+
+            repository Products for Product {
+                find bySku(sku: string): Product? where this.sku == sku
+            }
+        }
+    }
+
+    module Sales {
+        context Orders {
+
+            enum OrderStatus { Draft, Confirmed, Shipped, Cancelled }
+
+            event OrderConfirmed { order: Id<Order>, at: datetime }
+
+            aggregate Order {
+                customerId: string
+                status: OrderStatus
+                placedAt: datetime
+                contains lines: OrderLine[]
+
+                invariant lines.count > 0 when status == Confirmed
+
+                function isMutable(): bool = status == Draft
+
+                operation addLine(productId: Id<Product>, qty: int) {
+                    precondition isMutable()
+                    precondition qty > 0
+                    lines += new OrderLine {
+                        productId: productId, quantity: qty
+                    }
+                }
+
+                operation confirm() {
+                    precondition isMutable()
+                    precondition lines.count > 0
+                    status := Confirmed
+                    emit OrderConfirmed { order: id, at: now() }
+                }
+
+                entity OrderLine {
+                    productId: Id<Product>
+                    quantity: int
+                    invariant quantity > 0
+                }
+            }
+
+            repository Orders for Order {
+                find byCustomer(customerId: string): Order[]
+                    where this.customerId == customerId
+            }
+        }
+    }
+
+    // Public API on .NET — hosts both bounded contexts behind one EF
+    // DbContext, exposes the full HTTP surface for the platform.
+    deployable api {
+        platform: dotnet
+        modules: Catalog, Sales
+        port: 8080
+    }
+
+    // Lightweight read-API on Hono — same Catalog data, no Sales code.
+    deployable catalogWeb {
+        platform: hono
+        modules: Catalog
+        port: 3000
+    }
+
+    // Same Catalog surface on .NET — exists so the OpenAPI cross-check
+    // can diff `catalogApi` (.NET) against `catalogWeb` (Hono) and
+    // surface any drift between the platforms' route emission.
+    deployable catalogApi {
+        platform: dotnet
+        modules: Catalog
+        port: 8081
+    }
+
+    // React + React Query + Zod + Mantine frontend.  Inherits its
+    // module set from the `api` backend, so pages cover Catalog +
+    // Sales aggregates against the same wire shape.
+    deployable webApp {
+        platform: react
+        targets: api
+        port: 3001
+    }
+
+    // ------------------------------------------------------------------
+    // End-to-end tests — exercise the deployable through HTTP.  The
+    // `api` magic identifier resolves to the named deployable's HTTP
+    // surface; method calls on `api.<aggregate>.<verb>(…)` lower to
+    // typed fetch + JSON.
+    // ------------------------------------------------------------------
+
+    test e2e "create a product, look it up by id" against api {
+        let p = api.products.create({ sku: "WIDGET-1", price: { amount: 9.99, currency: "USD" } })
+        let read = api.products.getById(p)
+        expect read.sku == "WIDGET-1"
+    }
+
+    test e2e "create then confirm an order with one line" against api {
+        let prod = api.products.create({ sku: "WIDGET-2", price: { amount: 5.00, currency: "USD" } })
+        let ord = api.orders.create({ customerId: "cust-001", status: "Draft", placedAt: "2024-01-01T00:00:00Z" })
+        api.orders.addLine(ord, { productId: prod.id, qty: 3 })
+        api.orders.confirm(ord)
+        let read = api.orders.getById(ord)
+        expect read.status == "Confirmed"
+        expect read.lines.length == 1
+    }
+
+    test e2e "by_customer query returns matching orders" against api {
+        let ord = api.orders.create({ customerId: "cust-002", status: "Draft", placedAt: "2024-01-02T00:00:00Z" })
+        let list = api.orders.byCustomer({ customerId: "cust-002" })
+        expect list.length >= 1
+    }
+
+    // ------------------------------------------------------------------
+    // UI e2e — the test kind is implied by the target deployable's
+    // platform.  When the target is a `react` deployable the body's
+    // `ui.<aggregate>.<verb>(...)` calls route through the
+    // auto-generated page objects in <react-deployable>/e2e/pages/
+    // and the test lowers to a Playwright spec at
+    // web_app/e2e/Acme.ui.spec.ts.
+    // ------------------------------------------------------------------
+
+    test e2e "create then confirm an order via UI" against webApp {
+        let prod = ui.products.create({ sku: "WIDGET-UI-1", price: { amount: 5.0, currency: "USD" } })
+        let ord = ui.orders.create({ customerId: "cust-ui", status: "Draft", placedAt: "2024-01-01T00:00" })
+        ui.orders.addLine(ord, { productId: prod.id, qty: 3 })
+        ui.orders.confirm(ord)
+        let read = ui.orders.getById(ord)
+        expect read.status == "Confirmed"
+        expect read.lines.length == 1
+    }
+}
