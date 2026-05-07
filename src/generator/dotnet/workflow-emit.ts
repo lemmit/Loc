@@ -325,6 +325,12 @@ function renderStatement(
         `${INDENT}if (!(${expr})) throw new DomainException(${JSON.stringify(`Precondition failed: ${st.source}`)});`,
       ];
     }
+    case "requires": {
+      const expr = renderArg(st.expr);
+      return [
+        `${INDENT}if (!(${expr})) throw new ForbiddenException(${JSON.stringify(`Forbidden: ${st.source}`)});`,
+      ];
+    }
     case "emit": {
       const args = st.fields
         .map((f) => `${pascal(f.name)}: ${renderArg(f.value)}`)

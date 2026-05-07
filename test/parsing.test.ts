@@ -177,6 +177,40 @@ describe("parsing & validation of examples", () => {
     expect(api?.auth).toBe("required");
   });
 
+  it("parses `requires` statements inside operation bodies", async () => {
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(
+      `
+      system Acme {
+        user {
+          id: string
+          role: string
+        }
+        module Sales {
+          context Orders {
+            aggregate Order {
+              status: string
+              operation cancel() {
+                requires currentUser.role == "manager"
+                status := "cancelled"
+              }
+            }
+            repository Orders for Order { }
+          }
+        }
+      }
+      `,
+      { validation: true },
+    );
+    expect(
+      (doc.diagnostics ?? [])
+        .filter((d) => d.severity === 1)
+        .map((d) => d.message),
+    ).toEqual([]);
+  });
+
   it("parses per-module `permissions { ... }` blocks", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);

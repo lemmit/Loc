@@ -11,6 +11,10 @@ function renderTsStatement(s: StmtIR): string {
   switch (s.kind) {
     case "precondition":
       return `${INDENT}if (!(${renderTsExpr(s.expr)})) throw new DomainError(${JSON.stringify(`Precondition failed: ${s.source}`)});`;
+    case "requires":
+      // Authorization gate — surfaces as 403 via the route-level
+      // ForbiddenError catch in the per-aggregate routes file.
+      return `${INDENT}if (!(${renderTsExpr(s.expr)})) throw new ForbiddenError(${JSON.stringify(`Forbidden: ${s.source}`)});`;
     case "let":
       return `${INDENT}const ${s.name} = ${renderTsExpr(s.expr)};`;
     case "assign":

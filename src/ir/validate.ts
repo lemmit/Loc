@@ -174,6 +174,8 @@ function invalidTestStmt(s: TestStmtIR): string | null {
       return `'emit ${s.eventName}' fires a domain event from an aggregate's mutator.`;
     case "precondition":
       return `'precondition' guards an operation; aggregate-level tests don't run in an op body.`;
+    case "requires":
+      return `'requires' is an authorization gate for per-request handlers; aggregate-level tests don't sit in a per-request scope.`;
     case "call":
       if (s.target === "private-operation") {
         return `call to private operation '${s.name}'.`;
@@ -913,6 +915,7 @@ function validateWorkflowBody(
   for (const st of wf.statements) {
     switch (st.kind) {
       case "precondition":
+      case "requires":
         // Type-check happens at lowering via `inferExprType`; we'd
         // need the AST node to re-check here.  Trust the lowered IR
         // and emit a warning if the expression looks degenerate
@@ -923,7 +926,7 @@ function validateWorkflowBody(
         ) {
           diags.push({
             severity: "error",
-            message: `workflow '${wf.name}': precondition references unknown name '${st.expr.name}'.`,
+            message: `workflow '${wf.name}': ${st.kind} references unknown name '${st.expr.name}'.`,
             source: `${ctx.name}/${wf.name}`,
           });
         }
@@ -1473,6 +1476,7 @@ function validatePermissionRefs(
     for (const s of wf.statements) {
       switch (s.kind) {
         case "precondition":
+        case "requires":
           flag(`workflow[${wf.name}]`, s.expr);
           break;
         case "emit":
@@ -1505,6 +1509,7 @@ function flagStmt(
 ): void {
   switch (s.kind) {
     case "precondition":
+    case "requires":
       flag(prefix, s.expr);
       break;
     case "let":

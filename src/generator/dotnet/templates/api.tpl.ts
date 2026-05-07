@@ -157,6 +157,15 @@ public sealed class DomainExceptionFilter : IExceptionFilter
 
     public void OnException(ExceptionContext context)
     {
+        if (context.Exception is ForbiddenException fe)
+        {
+            context.Result = new ObjectResult(new { error = fe.Message })
+            {
+                StatusCode = 403,
+            };
+            context.ExceptionHandled = true;
+            return;
+        }
         if (context.Exception is DomainException de)
         {
             context.Result = new BadRequestObjectResult(new { error = de.Message });

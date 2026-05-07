@@ -44,7 +44,7 @@ export function buildRoutesFile(
   );
   lines.push(`import * as Ids from "../domain/ids.js";`);
   lines.push(
-    `import { DomainError, AggregateNotFoundError } from "../domain/errors.js";`,
+    `import { DomainError, AggregateNotFoundError, ForbiddenError } from "../domain/errors.js";`,
   );
   // Extern handler registry — the per-aggregate file is always emitted
   // when the aggregate has at least one extern op, never imported when
@@ -218,8 +218,11 @@ export function buildRoutesFile(
     }
   }
 
-  // Domain-error handler.
+  // Domain-error handler.  Order matters — ForbiddenError checked
+  // before DomainError so 403 wins over 400 when a `requires`
+  // clause throws.
   lines.push(`  app.onError((err, c) => {`);
+  lines.push(`    if (err instanceof ForbiddenError) return c.json({ error: err.message }, 403);`);
   lines.push(`    if (err instanceof DomainError) return c.json({ error: err.message }, 400);`);
   lines.push(
     `    if (err instanceof AggregateNotFoundError) return c.json({ error: err.message }, 404);`,

@@ -12,6 +12,7 @@ import {
   isLetStmt,
   isOperation,
   isPreconditionStmt,
+  isRequiresStmt,
   isPrimitiveType,
   isProperty,
   isValueObject,
@@ -275,6 +276,17 @@ export class DddValidator {
         accept(
           "error",
           `'precondition' must be of type 'bool', got '${typeToString(t)}'.`,
+          { node: stmt, property: "expr" },
+        );
+      }
+      return env;
+    }
+    if (isRequiresStmt(stmt)) {
+      const t = typeOf(stmt.expr, env);
+      if (t.kind !== "primitive" || t.name !== "bool") {
+        accept(
+          "error",
+          `'requires' must be of type 'bool', got '${typeToString(t)}'.`,
           { node: stmt, property: "expr" },
         );
       }

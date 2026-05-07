@@ -282,6 +282,7 @@ export interface WorkflowIR {
 
 export type WorkflowStmtIR =
   | { kind: "precondition"; expr: ExprIR; source: string }
+  | { kind: "requires"; expr: ExprIR; source: string }
   | {
       kind: "emit";
       eventName: string;
@@ -419,6 +420,7 @@ export interface DeployableIR {
 
 export type StmtIR =
   | { kind: "precondition"; expr: ExprIR; source: string }
+  | { kind: "requires"; expr: ExprIR; source: string }
   | { kind: "let"; name: string; expr: ExprIR; type: TypeIR }
   | { kind: "assign"; target: PathIR; value: ExprIR; targetType: TypeIR }
   | { kind: "add"; target: PathIR; value: ExprIR; elementType: TypeIR }
@@ -642,6 +644,7 @@ export function viewUsesCurrentUser(view: ViewIR): boolean {
 function stmtUsesCurrentUser(s: StmtIR): boolean {
   switch (s.kind) {
     case "precondition":
+    case "requires":
       return exprUsesCurrentUser(s.expr);
     case "let":
       return exprUsesCurrentUser(s.expr);

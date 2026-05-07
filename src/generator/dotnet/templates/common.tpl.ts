@@ -24,6 +24,18 @@ public sealed class AggregateNotFoundException : System.Exception
 }
 
 /// <summary>
+/// Authorization failure — raised by <c>requires</c> expressions in
+/// operation / workflow bodies when the resolved currentUser
+/// doesn't satisfy the gate.  The DomainExceptionFilter maps this
+/// to HTTP 403 (Forbidden), distinct from DomainException's 400
+/// (Bad Request).
+/// </summary>
+public sealed class ForbiddenException : System.Exception
+{
+    public ForbiddenException(string message) : base(message) { }
+}
+
+/// <summary>
 /// Marker for user-supplied extern operation handlers.  The Scrutor
 /// scan in <see cref="Program"/> picks up every class decorated with
 /// this attribute and registers it under its implemented IXAggHandler

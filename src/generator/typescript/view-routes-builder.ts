@@ -38,7 +38,7 @@ export function buildViewsRoutesFile(
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";`);
   lines.push(
-    `import { DomainError, AggregateNotFoundError } from "../domain/errors.js";`,
+    `import { DomainError, AggregateNotFoundError, ForbiddenError } from "../domain/errors.js";`,
   );
   lines.push(
     `import { type DomainEventDispatcher } from "../domain/events.js";`,
@@ -114,6 +114,9 @@ export function buildViewsRoutesFile(
   }
 
   lines.push(`  app.onError((err, c) => {`);
+  lines.push(
+    `    if (err instanceof ForbiddenError) return c.json({ error: err.message }, 403);`,
+  );
   lines.push(
     `    if (err instanceof DomainError) return c.json({ error: err.message }, 400);`,
   );

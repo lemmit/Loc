@@ -1062,6 +1062,51 @@ describe("Loom IR validation (post-lowering)", async () => {
   });
 
   // ---------------------------------------------------------------------------
+  // Slice 2 — `requires` clauses
+  // ---------------------------------------------------------------------------
+
+  it("rejects a non-bool `requires` expression", async () => {
+    const { errors } = await parse(`
+      context T {
+        aggregate Order {
+          status: string
+          operation cancel() {
+            requires "not-a-bool"
+            status := "cancelled"
+          }
+        }
+        repository Orders for Order { }
+      }
+    `);
+    expect(errors.some((e) => /'requires' must be of type 'bool'/.test(e))).toBe(true);
+  });
+
+  it("accepts `requires` alongside `precondition` in operation bodies", async () => {
+    const { errors } = await parse(`
+      system Acme {
+        user {
+          id: string
+          role: string
+        }
+        module Sales {
+          context Orders {
+            aggregate Order {
+              status: string
+              operation cancel() {
+                requires currentUser.role == "manager"
+                precondition status != "cancelled"
+                status := "cancelled"
+              }
+            }
+            repository Orders for Order { }
+          }
+        }
+      }
+    `);
+    expect(errors).toEqual([]);
+  });
+
+  // ---------------------------------------------------------------------------
   // Slice 1A — auth + currentUser plumbing
   // ---------------------------------------------------------------------------
 

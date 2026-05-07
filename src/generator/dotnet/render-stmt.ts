@@ -12,6 +12,10 @@ function renderCsStatement(s: StmtIR): string {
   switch (s.kind) {
     case "precondition":
       return `${INDENT}if (!(${renderCsExpr(s.expr)})) throw new DomainException(${JSON.stringify(`Precondition failed: ${s.source}`)});`;
+    case "requires":
+      // Authorization gate — surfaces as 403 (handled by
+      // DomainExceptionFilter mapping ForbiddenException → 403).
+      return `${INDENT}if (!(${renderCsExpr(s.expr)})) throw new ForbiddenException(${JSON.stringify(`Forbidden: ${s.source}`)});`;
     case "let":
       return `${INDENT}var ${s.name} = ${renderCsExpr(s.expr)};`;
     case "assign":

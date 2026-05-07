@@ -41,6 +41,7 @@ import {
   isOperation,
   isParenExpr,
   isPreconditionStmt,
+  isRequiresStmt,
   isPrimitiveType,
   isProperty,
   isStringLit,
@@ -189,6 +190,19 @@ export function lowerStatement(
     return {
       stmt: {
         kind: "precondition",
+        expr: lowerExpr(stmt.expr, env),
+        source: cstText(stmt.expr),
+      },
+      envAfter: env,
+    };
+  }
+  if (isRequiresStmt(stmt)) {
+    // `requires` lowers like `precondition` but with a different
+    // statement kind so the renderer can throw a 403-mapping
+    // exception instead of the 400-mapping DomainException.
+    return {
+      stmt: {
+        kind: "requires",
         expr: lowerExpr(stmt.expr, env),
         source: cstText(stmt.expr),
       },

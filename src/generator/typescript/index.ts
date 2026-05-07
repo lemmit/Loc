@@ -31,6 +31,13 @@ export class DomainError extends Error {
 export class AggregateNotFoundError extends Error {
   constructor(message: string) { super(message); this.name = "AggregateNotFoundError"; }
 }
+/** Authorization failure — raised by \`requires\` expressions in
+ *  operation / workflow bodies when the resolved currentUser
+ *  doesn't satisfy the gate.  The per-route catch maps this to
+ *  HTTP 403 (Forbidden). */
+export class ForbiddenError extends Error {
+  constructor(message: string) { super(message); this.name = "ForbiddenError"; }
+}
 `;
 
 /**

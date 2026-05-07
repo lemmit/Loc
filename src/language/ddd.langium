@@ -275,12 +275,23 @@ type NamedDecl = Aggregate | EntityPart | EnumDecl | ValueObject;
 
 Statement:
     PreconditionStmt
+  | RequiresStmt
   | LetStmt
   | EmitStmt
   | AssignOrCallStmt;
 
 PreconditionStmt:
     'precondition' expr=Expression;
+
+// Authorization gate.  Semantically `requires` reads as "this caller
+// is allowed to invoke this op / workflow" — a declarative
+// authorization check that maps to HTTP 403, distinct from
+// `precondition` (a domain validity check that maps to 400).  The
+// expression types to bool exactly like `precondition`; failure
+// short-circuits the body and surfaces as ForbiddenException (.NET)
+// / ForbiddenError (TS).  See docs/auth.md.
+RequiresStmt:
+    'requires' expr=Expression;
 
 LetStmt:
     'let' name=ID '=' expr=Expression;

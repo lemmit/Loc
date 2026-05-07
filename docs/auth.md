@@ -7,7 +7,7 @@ command entry from inside operation / workflow bodies.  Repository
 finds and view filters can reference `currentUser` to scope query
 results to the requester.
 
-Shipped over three slices:
+Shipped over four slices:
 
 - **Slice 1A** — `user { ... }` + `currentUser` magic identifier +
   per-deployable `auth: required` middleware + verifier hook.
@@ -18,11 +18,15 @@ Shipped over three slices:
 - **Slice 1C** — `currentUser` admissible inside repository find /
   view `where` filters; the renderer threads the resolved user
   through as a closure-captured parameter on the generated method.
+- **Slice 2**  — `requires <expr>` statement: a declarative
+  authorization gate that maps to HTTP 403, distinct from
+  `precondition` (which maps to 400).
 
 What's intentionally **not** here yet:
 
-- `requires <expr>` clauses that gate command entry against
-  currentUser claims (slice 2).
+- Default-deny enforcement on `auth: required` deployables (every
+  operation/find/view must declare `requires anonymous` or a real
+  gate to be reachable).
 - Workflow bodies calling currentUser-bound finds — the validator
   currently rejects this with a pointer at `getById` or moving the
   call out to the route layer.
@@ -144,6 +148,39 @@ Slice 1C does **not** yet support workflow bodies calling such
 finds; the validator points users at `getById` (with an explicit
 id parameter) or asks them to call the user-aware find from the
 route layer.
+
+### `requires` clauses (slice 2)
+
+`requires <expr>` is a declarative authorization gate at the top
+of an operation or workflow body.  Failure surfaces as HTTP 403,
+distinct from `precondition`'s 400 — the two are deliberately
+separate so domain validity (state) and authorization (caller)
+don't share an error class:
+
+```ddd
+operation cancel() {
+  requires currentUser.role == "manager"
+        || currentUser.permissions.contains(permissions.ordersCancel)
+  precondition status != "cancelled"
+  status := Cancelled
+}
+```
+
+| Statement | Maps to | Failure means |
+| --- | --- | --- |
+| `precondition` | HTTP 400 (`DomainException` / `DomainError`) | The request is malformed or the aggregate state is invalid for this op. |
+| `requires`     | HTTP 403 (`ForbiddenException` / `ForbiddenError`) | The caller isn't authorized to invoke this op. |
+
+Both type-check to `bool` and may reference `currentUser`,
+`permissions.<name>`, parameters, `this.<field>`, and any
+declared `function`.  `requires` is admissible in workflow
+bodies too; the workflow handler / route handler maps it to 403
+the same way as the operation route does.
+
+Slice 2 does **not** add default-deny enforcement: a deployable
+on `auth: required` still serves any operation that doesn't
+declare a `requires` gate.  Closing that hole is a follow-up
+slice.
 
 `currentUser` is in scope wherever an expression evaluates **per
 request**:

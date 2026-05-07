@@ -848,5 +848,59 @@ describe(".NET generator", () => {
       expect(handler).toMatch(/ICurrentUserAccessor _currentUser/);
       expect(handler).toMatch(/_repo\.MyOrders\(_currentUser\.User, ct\)/);
     });
+
+    // -----------------------------------------------------------------------
+    // Slice 2 — `requires` clauses
+    // -----------------------------------------------------------------------
+
+    const SRC_REQUIRES = `
+      system Acme {
+        user {
+          id: string
+          role: string
+        }
+        module Sales {
+          context Orders {
+            aggregate Order {
+              status: string
+              operation cancel() {
+                requires currentUser.role == "manager"
+                status := "cancelled"
+              }
+            }
+            repository Orders for Order { }
+          }
+        }
+        deployable api {
+          platform: dotnet
+          modules: Sales
+          port: 8080
+          auth: required
+        }
+      }
+    `;
+
+    it("`requires` lowers to a ForbiddenException throw inside the operation method", async () => {
+      const files = await emitForAuthSystem(SRC_REQUIRES);
+      const order = files.get("Domain/Orders/Order.cs")!;
+      expect(order).toMatch(/throw new ForbiddenException\(/);
+      // The `precondition` 400-mapping path stays distinct.
+      expect(order).not.toMatch(
+        /throw new DomainException\([^)]*Forbidden/,
+      );
+    });
+
+    it("DomainExceptionFilter maps ForbiddenException to 403", async () => {
+      const files = await emitForAuthSystem(SRC_REQUIRES);
+      const filter = files.get("Api/DomainExceptionFilter.cs")!;
+      expect(filter).toMatch(/is ForbiddenException/);
+      expect(filter).toMatch(/StatusCode = 403/);
+    });
+
+    it("Domain.Common emits ForbiddenException", async () => {
+      const files = await emitForAuthSystem(SRC_REQUIRES);
+      const common = files.get("Domain/Common/DomainException.cs")!;
+      expect(common).toMatch(/public sealed class ForbiddenException/);
+    });
   });
 });

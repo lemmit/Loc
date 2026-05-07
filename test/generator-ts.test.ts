@@ -791,5 +791,59 @@ describe("typescript generator", () => {
       expect(views).toMatch(/httpCtx\.get\("currentUser"\)/);
       expect(views).toMatch(/repo\.myOrders\(currentUser\)/);
     });
+
+    // -----------------------------------------------------------------------
+    // Slice 2 — `requires` clauses
+    // -----------------------------------------------------------------------
+
+    const SRC_REQUIRES = `
+      system Acme {
+        user {
+          id: string
+          role: string
+        }
+        module Sales {
+          context Orders {
+            aggregate Order {
+              status: string
+              operation cancel() {
+                requires currentUser.role == "manager"
+                status := "cancelled"
+              }
+            }
+            repository Orders for Order { }
+          }
+        }
+        deployable api {
+          platform: hono
+          modules: Sales
+          port: 3000
+          auth: required
+        }
+      }
+    `;
+
+    it("`requires` lowers to a ForbiddenError throw inside the aggregate method", async () => {
+      const files = await emitForAuthSystem(SRC_REQUIRES);
+      const order = files.get("domain/order.ts")!;
+      expect(order).toMatch(/throw new ForbiddenError\(/);
+      expect(order).toMatch(
+        /import \{ DomainError, ForbiddenError \} from "\.\/errors\.js";/,
+      );
+    });
+
+    it("errors.ts exports ForbiddenError", async () => {
+      const files = await emitForAuthSystem(SRC_REQUIRES);
+      const errors = files.get("domain/errors.ts")!;
+      expect(errors).toMatch(/export class ForbiddenError extends Error/);
+    });
+
+    it("http/<aggregate>.routes.ts maps ForbiddenError to 403 in app.onError", async () => {
+      const files = await emitForAuthSystem(SRC_REQUIRES);
+      const route = files.get("http/order.routes.ts")!;
+      expect(route).toMatch(
+        /if \(err instanceof ForbiddenError\) return c\.json\(\{ error: err\.message \}, 403\);/,
+      );
+    });
   });
 });

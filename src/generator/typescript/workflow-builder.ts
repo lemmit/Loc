@@ -43,7 +43,7 @@ export function buildWorkflowsFile(
   lines.push(`import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";`);
   lines.push(`import * as Ids from "../domain/ids.js";`);
   lines.push(
-    `import { DomainError, AggregateNotFoundError } from "../domain/errors.js";`,
+    `import { DomainError, AggregateNotFoundError, ForbiddenError } from "../domain/errors.js";`,
   );
   lines.push(
     `import { type DomainEventDispatcher } from "../domain/events.js";`,
@@ -123,6 +123,9 @@ export function buildWorkflowsFile(
   }
 
   lines.push(`  app.onError((err, c) => {`);
+  lines.push(
+    `    if (err instanceof ForbiddenError) return c.json({ error: err.message }, 403);`,
+  );
   lines.push(
     `    if (err instanceof DomainError) return c.json({ error: err.message }, 400);`,
   );
@@ -228,6 +231,10 @@ function renderStmt(
     case "precondition":
       return [
         `${indent}if (!(${renderArg(st.expr)})) throw new DomainError(${JSON.stringify(`Precondition failed: ${st.source}`)});`,
+      ];
+    case "requires":
+      return [
+        `${indent}if (!(${renderArg(st.expr)})) throw new ForbiddenError(${JSON.stringify(`Forbidden: ${st.source}`)});`,
       ];
     case "emit": {
       const fieldList = [

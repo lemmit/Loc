@@ -38,6 +38,7 @@ import {
   isOperation,
   isPermissionsBlock,
   isPreconditionStmt,
+  isRequiresStmt,
   isProperty,
   isRepository,
   isSystem,
@@ -786,6 +787,16 @@ function lowerWorkflowStatement(
     return {
       stmt: {
         kind: "precondition",
+        expr: lowerExpr(stmt.expr, env),
+        source: cstText(stmt.expr),
+      },
+      envAfter: env,
+    };
+  }
+  if (isRequiresStmt(stmt)) {
+    return {
+      stmt: {
+        kind: "requires",
         expr: lowerExpr(stmt.expr, env),
         source: cstText(stmt.expr),
       },

@@ -62,7 +62,7 @@ export function renderAggregate(
         ? `import { ${enumAliases.join(", ")} } from "./value-objects.js";`
         : null,
       'import type * as Events from "./events.js";',
-      'import { DomainError } from "./errors.js";',
+      'import { DomainError, ForbiddenError } from "./errors.js";',
       usesUser ? 'import type { User } from "../auth/user-types.js";' : null,
       "",
       partsRendered.length > 0
