@@ -18,7 +18,7 @@ import {
 import { LoomEditor } from "./editor/LoomEditor";
 import { LoomLspClient } from "./lsp/client";
 import type { Diagnostic } from "./lsp/protocol";
-import { examples, defaultExample } from "./examples";
+import { examples, defaultExample, type LoomExample } from "./examples";
 import { LoomBuildClient } from "./build/client";
 import type { GenerateResult, VirtualFile } from "./build/protocol";
 import { LoomBundleClient } from "./bundle/client";
@@ -29,6 +29,11 @@ import { FileTree } from "./preview/FileTree";
 import { FileViewer } from "./preview/FileViewer";
 import { Preview } from "./preview/Preview";
 import { buildTree } from "./preview/file-tree";
+import {
+  buildShareUrl,
+  readHashSource,
+  writeHashSource,
+} from "./util/share";
 
 // Find the right entry paths in a generated tree.  Legacy
 // single-context mode dumps everything at the root.  System mode
@@ -103,10 +108,33 @@ function modeLabel(result: GenerateResult | null): string {
 }
 
 export default function App(): JSX.Element {
-  const [exampleId, setExampleId] = useState(defaultExample.id);
+  // Read once on mount.  If the URL hash has a `s=` payload we
+  // synthesise a "Shared link" entry at the top of the dropdown
+  // pointing at that source — picking any other entry afterwards
+  // overwrites the editor and the URL hash.
+  const hashSourceOnMount = useMemo(() => readHashSource(), []);
+  const examplesList = useMemo<LoomExample[]>(() => {
+    if (hashSourceOnMount === null) return examples;
+    return [
+      {
+        id: "shared",
+        label: "Shared link (from URL)",
+        source: hashSourceOnMount,
+        blurb:
+          "Loaded from the URL hash — your edits update the URL so it stays shareable.",
+      },
+      ...examples,
+    ];
+  }, [hashSourceOnMount]);
+
+  const [exampleId, setExampleId] = useState(() =>
+    hashSourceOnMount !== null ? "shared" : defaultExample.id,
+  );
   const initialSource = useMemo(
-    () => examples.find((e) => e.id === exampleId)?.source ?? defaultExample.source,
-    [exampleId],
+    () =>
+      examplesList.find((e) => e.id === exampleId)?.source ??
+      defaultExample.source,
+    [exampleId, examplesList],
   );
   const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
   const sourceRef = useRef<string>(initialSource);
@@ -165,9 +193,11 @@ export default function App(): JSX.Element {
   // errors from the previous source linger in the Problems panel
   // until the LSP worker re-pushes from the new buffer, which
   // shows wrong red badges in the header for a beat after every
-  // example switch.
+  // example switch.  And mirror the source into the URL hash so
+  // the page is always shareable as-is.
   useEffect(() => {
     sourceRef.current = initialSource;
+    writeHashSource(initialSource);
     setResult(null);
     setBundleResult(null);
     setReactBundle(null);
@@ -179,6 +209,39 @@ export default function App(): JSX.Element {
     setDiagnostics([]);
     runtimeClientRef.current?.reset();
   }, [initialSource]);
+
+  // Debounced URL-hash mirror for live edits — the editor's
+  // `onChange` writes to `sourceRef`, here we coalesce keystroke
+  // bursts (300 ms idle) and push the encoded source into the URL.
+  // Stays inside `replaceState` so we don't add a history entry
+  // per keystroke.
+  const hashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleHashSync = (text: string): void => {
+    if (hashTimerRef.current) clearTimeout(hashTimerRef.current);
+    hashTimerRef.current = setTimeout(() => {
+      writeHashSource(text);
+    }, 300);
+  };
+  // Cancel any pending hash write on unmount so we don't push to
+  // an already-disposed window.
+  useEffect(() => {
+    return () => {
+      if (hashTimerRef.current) clearTimeout(hashTimerRef.current);
+    };
+  }, []);
+
+  const [copied, setCopied] = useState(false);
+  async function copyShareLink(): Promise<void> {
+    try {
+      const url = buildShareUrl(sourceRef.current);
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard permission denied or context insecure; fall back
+      // to a no-op — the address bar already has the live URL.
+    }
+  }
 
   const errorCount = diagnostics.filter((d) => d.severity === "error").length;
   const warningCount = diagnostics.filter((d) => d.severity === "warning").length;
@@ -320,10 +383,19 @@ export default function App(): JSX.Element {
               size="xs"
               value={exampleId}
               onChange={(v) => v && setExampleId(v)}
-              data={examples.map((e) => ({ value: e.id, label: e.label }))}
+              data={examplesList.map((e) => ({ value: e.id, label: e.label }))}
               allowDeselect={false}
               w={300}
             />
+            <Button
+              size="xs"
+              variant="default"
+              onClick={copyShareLink}
+              data-testid="btn-share"
+              title="Copy a link that loads the current source — works for any other user / browser."
+            >
+              {copied ? "✓ Copied" : "Share link"}
+            </Button>
           </Group>
           <Group gap="xs">
             <Button
@@ -366,6 +438,7 @@ export default function App(): JSX.Element {
                 initialValue={initialSource}
                 onChange={(text) => {
                   sourceRef.current = text;
+                  scheduleHashSync(text);
                 }}
                 onDiagnosticsChange={setDiagnostics}
               />
