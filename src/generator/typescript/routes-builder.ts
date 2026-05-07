@@ -44,7 +44,7 @@ export function buildRoutesFile(
   );
   lines.push(`import * as Ids from "../domain/ids.js";`);
   lines.push(
-    `import { DomainError, AggregateNotFoundError, ForbiddenError } from "../domain/errors.js";`,
+    `import { DomainError, AggregateNotFoundError, ForbiddenError, ExternHandlerError } from "../domain/errors.js";`,
   );
   // Extern handler registry — the per-aggregate file is always emitted
   // when the aggregate has at least one extern op, never imported when
@@ -220,15 +220,34 @@ export function buildRoutesFile(
 
   // Domain-error handler.  Order matters — ForbiddenError checked
   // before DomainError so 403 wins over 400 when a `requires`
-  // clause throws.
+  // clause throws; ExternHandlerError checked before the generic
+  // 500 fallback so its descriptive envelope wins.  trace_id
+  // mirrors the request id stamped on the response by the request
+  // middleware so an operator can join the response back to the
+  // structured log line.
   lines.push(`  app.onError((err, c) => {`);
-  lines.push(`    if (err instanceof ForbiddenError) return c.json({ error: err.message }, 403);`);
-  lines.push(`    if (err instanceof DomainError) return c.json({ error: err.message }, 400);`);
+  // The requestIdMiddleware mounts on the parent app (http/index.ts)
+  // and stashes the id on the request scope.  This sub-router's
+  // OpenAPIHono is constructed without a typed Variables block so
+  // strict tsc can't see the key directly; the cast bridges the
+  // gap without leaking `any` into the user's surface.
   lines.push(
-    `    if (err instanceof AggregateNotFoundError) return c.json({ error: err.message }, 404);`,
+    `    const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";`,
+  );
+  lines.push(
+    `    if (err instanceof ForbiddenError) return c.json({ error: err.message, trace_id }, 403);`,
+  );
+  lines.push(
+    `    if (err instanceof DomainError) return c.json({ error: err.message, trace_id }, 400);`,
+  );
+  lines.push(
+    `    if (err instanceof AggregateNotFoundError) return c.json({ error: err.message, trace_id }, 404);`,
+  );
+  lines.push(
+    `    if (err instanceof ExternHandlerError) { console.error(err); return c.json({ error: err.message, trace_id }, 500); }`,
   );
   lines.push(`    console.error(err);`);
-  lines.push(`    return c.json({ error: "internal" }, 500);`);
+  lines.push(`    return c.json({ error: "internal", trace_id }, 500);`);
   lines.push(`  });`);
   lines.push("");
   lines.push(`  return app;`);
@@ -282,7 +301,13 @@ function emitOperationRoute(
   const callArgs = (usesUser ? [...baseCallArgs, "currentUser"] : baseCallArgs).join(", ");
   if (op.extern) {
     // Extern: run preconditions on the aggregate, dispatch to the
-    // user-registered handler, then run invariants and save.
+    // user-registered handler, then run invariants and save.  The
+    // handler call is wrapped so any non-domain throw becomes an
+    // ExternHandlerError naming the op + aggregate (see
+    // app.onError below for the 500 mapping).  Domain-layer errors
+    // (DomainError, ForbiddenError, AggregateNotFoundError) re-throw
+    // unchanged so 400 / 403 / 404 still apply when a user handler
+    // raises one deliberately.
     const handlerKey = `${camel(op.name)}${agg.name}`;
     out.push(`    aggregate.check${cap(op.name)}(${callArgs});`);
     out.push(
@@ -291,7 +316,16 @@ function emitOperationRoute(
     out.push(
       `    if (!handler) throw new Error("Missing extern handler for ${handlerKey}. Register one via register${cap(op.name)}${agg.name}Handler(...) before app.listen().");`,
     );
-    out.push(`    await handler(aggregate, body);`);
+    out.push(`    try {`);
+    out.push(`      await handler(aggregate, body);`);
+    out.push(`    } catch (err) {`);
+    out.push(`      if (err instanceof DomainError) throw err;`);
+    out.push(`      if (err instanceof ForbiddenError) throw err;`);
+    out.push(`      if (err instanceof AggregateNotFoundError) throw err;`);
+    out.push(
+      `      throw new ExternHandlerError("${op.name}", "${agg.name}", err);`,
+    );
+    out.push(`    }`);
     out.push(`    aggregate.assertInvariants();`);
   } else {
     out.push(`    aggregate.${camel(op.name)}(${callArgs});`);

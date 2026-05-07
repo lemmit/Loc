@@ -97,6 +97,79 @@ describe(".NET generator", () => {
     expect(program).toMatch(/JsonNamingPolicy\.CamelCase/);
   });
 
+  describe("slice 16.A — container basics", () => {
+    it("Program.cs fails fast on missing connection string", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      const program = files.get("Program.cs")!;
+      // Connection-string assertion runs BEFORE AddDbContext so a
+      // missing value throws at builder time, not on the first
+      // request.
+      const assertIdx = program.indexOf("Missing connection string 'Default'");
+      const dbIdx = program.indexOf("AddDbContext<AppDbContext>");
+      expect(assertIdx).toBeGreaterThan(-1);
+      expect(dbIdx).toBeGreaterThan(-1);
+      expect(assertIdx).toBeLessThan(dbIdx);
+      expect(program).toMatch(/ConnectionStrings__Default/);
+    });
+
+    it("Program.cs maps GET /ready that pings the DB and returns 503 on miss", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      const program = files.get("Program.cs")!;
+      expect(program).toMatch(/app\.MapGet\("\/ready"/);
+      // Ping uses CanConnectAsync (cheap, no schema lookup).
+      expect(program).toMatch(/db\.Database\.CanConnectAsync\(ct\)/);
+      // 503 with a structured body on failure.
+      expect(program).toMatch(/status = "not_ready"/);
+      expect(program).toMatch(/statusCode: 503/);
+    });
+
+    it("Program.cs registers ApplicationStopping for graceful shutdown logging", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      const program = files.get("Program.cs")!;
+      expect(program).toMatch(/IHostApplicationLifetime/);
+      expect(program).toMatch(/ApplicationStopping\.Register/);
+      expect(program).toMatch(/Shutting down/);
+    });
+  });
+
+  describe("slice 16.C — request observability", () => {
+    it("Program.cs configures structured JSON logging + HTTP request logging", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      const program = files.get("Program.cs")!;
+      // JSON formatter for every log line.
+      expect(program).toMatch(/AddJsonConsole/);
+      // Per-request HTTP log: method/path/status/duration.
+      expect(program).toMatch(/AddHttpLogging/);
+      expect(program).toMatch(/app\.UseHttpLogging\(\)/);
+      // Specific fields opted in.
+      expect(program).toMatch(/RequestMethod/);
+      expect(program).toMatch(/RequestPath/);
+      expect(program).toMatch(/ResponseStatusCode/);
+      expect(program).toMatch(/Duration/);
+    });
+
+    it("DomainExceptionFilter threads Activity.TraceId into every error envelope", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      const filter = files.get("Api/DomainExceptionFilter.cs")!;
+      // trace_id pulled off the ambient Activity (set by ASP.NET on
+      // every request).  Empty string when no Activity is active.
+      expect(filter).toMatch(
+        /var trace_id = System\.Diagnostics\.Activity\.Current\?\.TraceId\.ToString\(\) \?\? "";/,
+      );
+      // Every arm of the filter includes trace_id in its envelope.
+      expect(filter).toMatch(/error = fe\.Message, trace_id/);
+      expect(filter).toMatch(/error = de\.Message, trace_id/);
+      expect(filter).toMatch(/error = nf\.Message, trace_id/);
+      expect(filter).toMatch(/error = xh\.Message, trace_id/);
+      expect(filter).toMatch(/error = "internal", trace_id/);
+    });
+  });
+
   it("auto-includes a GET /<plural> find via the `all` repository method", async () => {
     const model = await buildModel("examples/sales.ddd");
     const files = generateDotnet(model);
@@ -199,6 +272,84 @@ describe(".NET generator", () => {
     // 6. csproj brings in Scrutor.
     const csproj = files.get("Sales.csproj")!;
     expect(csproj).toMatch(/<PackageReference Include="Scrutor"/);
+  });
+
+  describe("slice 16.B — extern handler exception envelope", () => {
+    it("Domain.Common declares ExternHandlerException with op + agg fields", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      const common = files.get("Domain/Common/DomainException.cs")!;
+      expect(common).toMatch(/public sealed class ExternHandlerException : System\.Exception/);
+      expect(common).toMatch(/public string OpName \{ get; \}/);
+      expect(common).toMatch(/public string AggName \{ get; \}/);
+      // Message embeds both names + the inner exception's message.
+      expect(common).toMatch(/Extern handler '\{opName\}' on '\{aggName\}' threw: \{inner\.Message\}/);
+    });
+
+    it("DomainExceptionFilter maps ExternHandlerException to a 500 with the descriptive envelope", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      const filter = files.get("Api/DomainExceptionFilter.cs")!;
+      // ExternHandlerException arm exists and lands on 500.
+      expect(filter).toMatch(/context\.Exception is ExternHandlerException xh/);
+      expect(filter).toMatch(/error = xh\.Message/);
+      expect(filter).toMatch(/StatusCode = 500/);
+      // Logs the inner cause server-side with the structured fields.
+      expect(filter).toMatch(/_log\.LogError\(xh, "Extern handler \{Op\} on \{Agg\} threw"/);
+    });
+
+    it("does NOT touch ValidationProblemDetails (RFC 7807 stays the contract)", async () => {
+      // The framework's default 400 envelope for model-binding /
+      // data-annotation failures is the published API contract for
+      // request-validation errors.  Forking it would break every
+      // OpenAPI-generated client.  Pin the absence of any override.
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      const program = files.get("Program.cs")!;
+      expect(program).not.toMatch(/InvalidModelStateResponseFactory/);
+      expect(program).not.toMatch(/ConfigureApiBehaviorOptions/);
+      // No custom ValidationFilter file emitted alongside the
+      // domain filter.
+      expect(files.has("Api/ValidationFilter.cs")).toBe(false);
+    });
+
+    it("extern command handler wraps user.HandleAsync in try/catch that rethrows ExternHandlerException", async () => {
+      const { parseHelper } = await import("langium/test");
+      const services = createDddServices(NodeFileSystem);
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(`
+        context Sales {
+          enum OrderStatus { Draft, Confirmed }
+          aggregate Order {
+            customerId: string
+            status: OrderStatus
+            function isMutable(): bool = status == Draft
+            operation confirm() extern {
+              precondition isMutable()
+            }
+          }
+          repository Orders for Order { }
+        }
+      `, { validation: true });
+      const files = generateDotnet(doc.parseResult.value as Model);
+      const handler = files.get("Application/Orders/Commands/ConfirmHandler.cs")!;
+      // Try/catch wraps the user call.
+      expect(handler).toMatch(/try\s*\{\s*await _user\.HandleAsync/);
+      // Domain-layer exceptions re-throw unchanged so 400 / 403 /
+      // 404 still apply when the user handler raises one
+      // deliberately.
+      expect(handler).toMatch(/catch \(DomainException\) \{ throw; \}/);
+      expect(handler).toMatch(/catch \(ForbiddenException\) \{ throw; \}/);
+      expect(handler).toMatch(/catch \(AggregateNotFoundException\) \{ throw; \}/);
+      // Cancellation also re-throws so request cancellation isn't
+      // misattributed as a handler failure.
+      expect(handler).toMatch(/catch \(System\.OperationCanceledException\) \{ throw; \}/);
+      // Any other exception wraps as ExternHandlerException with
+      // the op + agg names baked in.
+      expect(handler).toMatch(
+        /throw new ExternHandlerException\("confirm", "Order", ex\);/,
+      );
+    });
   });
 
   it("emits a Mediator handler + controller for non-transactional workflow", async () => {

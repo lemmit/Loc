@@ -268,12 +268,29 @@ function emitOperationCommandsAndHandlers(
             `${ns}.Application.${plural(agg.name)}.Handlers`,
             ...userExtraUsings,
           ],
+          // Wrap the user's HandleAsync in try/catch so any
+          // non-domain exception rethrows as ExternHandlerException
+          // (mapped by DomainExceptionFilter to a descriptive 500).
+          // Domain exceptions raised by the user handler bubble
+          // unchanged so DomainException → 400, ForbiddenException →
+          // 403, AggregateNotFoundException → 404 still apply.
           body:
             `        var aggregate = await _repo.GetByIdAsync(cmd.Id, ct)\n` +
             `            ?? throw new AggregateNotFoundException($"${agg.name} {cmd.Id} not found");\n` +
             `        aggregate.Check${pascal(op.name)}(${callArgs});\n` +
             `        var request = new ${reqName}(${reqArgs});\n` +
-            `        await _user.HandleAsync(aggregate, request, ct);\n` +
+            `        try\n` +
+            `        {\n` +
+            `            await _user.HandleAsync(aggregate, request, ct);\n` +
+            `        }\n` +
+            `        catch (DomainException) { throw; }\n` +
+            `        catch (ForbiddenException) { throw; }\n` +
+            `        catch (AggregateNotFoundException) { throw; }\n` +
+            `        catch (System.OperationCanceledException) { throw; }\n` +
+            `        catch (System.Exception ex)\n` +
+            `        {\n` +
+            `            throw new ExternHandlerException("${op.name}", "${agg.name}", ex);\n` +
+            `        }\n` +
             `        aggregate.AssertInvariants();\n` +
             `        await _repo.SaveAsync(aggregate, ct);\n` +
             `        return Unit.Value;\n`,

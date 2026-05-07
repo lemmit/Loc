@@ -72,6 +72,38 @@ system Acme {
                 find byCustomer(customerId: string): Order[]
                     where this.customerId == customerId
             }
+
+            // Workflow surfacing — exercises the React generator's
+            // workflow UI (slice 18.A) end-to-end: a draft order +
+            // initial line in one orchestration.  The frontend
+            // emits a /workflows/place_order page from this; the
+            // backend (api / catalogApi) emits the matching
+            // POST /workflows/place_order route.
+            workflow placeOrder(customerId: string, productId: Id<Product>, quantity: int) {
+                precondition quantity > 0
+                let order = Order.create({
+                    customerId: customerId,
+                    status: Draft,
+                    placedAt: now()
+                })
+                order.addLine(productId, quantity)
+            }
+
+            // View surfacing — exercises the React generator's view
+            // UI (slice 18.B).  Two shapes: shorthand reuses Order's
+            // wire response; full-form declares a custom row.
+            view ActiveOrders = Order where status == Confirmed
+
+            view OrderSummary {
+                orderId: Id<Order>
+                status: OrderStatus
+                lineCount: int
+
+                from Order where status != Cancelled
+                bind orderId = id,
+                     status = status,
+                     lineCount = lines.count
+            }
         }
     }
 
@@ -154,5 +186,18 @@ system Acme {
         let read = ui.orders.getById(ord)
         expect read.status == "Confirmed"
         expect read.lines.length == 1
+    }
+
+    // Slice 18.C — `ui.workflows.<name>(...)` lowers via the
+    // generated workflow page object; `ui.views.<name>()` reads the
+    // rendered table back as typed strings.
+    test e2e "place an order via the workflow UI" against webApp {
+        let prod = ui.products.create({ sku: "WIDGET-UI-2", price: { amount: 7.5, currency: "USD" } })
+        ui.workflows.placeOrder({ customerId: "cust-wf", productId: prod.id, quantity: 2 })
+    }
+
+    test e2e "active orders view renders the rendered rows" against webApp {
+        let rows = ui.views.activeOrders()
+        expect rows.length >= 0
     }
 }

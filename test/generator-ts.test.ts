@@ -76,6 +76,92 @@ describe("typescript generator", () => {
     expect(dockerignore).toMatch(/node_modules/);
   });
 
+  describe("slice 16.A — container basics", () => {
+    it("http/index.ts mounts /ready that pings the DB and returns 503 on failure", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model);
+      const httpIndex = files.get("http/index.ts")!;
+      expect(httpIndex).toMatch(/app\.get\("\/ready"/);
+      // Drizzle ping via sql`select 1` — cheap, dialect-agnostic.
+      expect(httpIndex).toMatch(/db\.execute\(sql`select 1`\)/);
+      expect(httpIndex).toMatch(/from "drizzle-orm"/);
+      // 503 envelope with one-line cause.
+      expect(httpIndex).toMatch(/status: "not_ready"/);
+      expect(httpIndex).toMatch(/, 503\)/);
+    });
+
+    it("root index.ts captures the server and listens for SIGTERM/SIGINT", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model);
+      const idx = files.get("index.ts")!;
+      expect(idx).toMatch(/const server = serve\(/);
+      expect(idx).toMatch(/process\.on\("SIGTERM"/);
+      expect(idx).toMatch(/process\.on\("SIGINT"/);
+      expect(idx).toMatch(/server\.close/);
+      expect(idx).toMatch(/pool\.end\(\)/);
+    });
+
+    it("root index.ts fails fast on missing DATABASE_URL", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model);
+      const idx = files.get("index.ts")!;
+      expect(idx).toMatch(/if \(!process\.env\.DATABASE_URL\)/);
+      expect(idx).toMatch(/DATABASE_URL is required/);
+    });
+  });
+
+  describe("slice 16.C — request observability", () => {
+    it("emits obs/request-id.ts with the correlation-id middleware", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model);
+      const reqId = files.get("obs/request-id.ts")!;
+      // Mints a fresh UUID when no inbound header is set.
+      expect(reqId).toMatch(/randomUUID\(\)/);
+      // Honours an inbound X-Request-Id header.
+      expect(reqId).toMatch(/REQUEST_ID_HEADER = "X-Request-Id"/);
+      expect(reqId).toMatch(/c\.req\.header\(REQUEST_ID_HEADER\)/);
+      // Echoes the value back on the response.
+      expect(reqId).toMatch(/c\.header\(REQUEST_ID_HEADER, requestId\)/);
+      // Stashes the id on the Hono context for downstream onError.
+      expect(reqId).toMatch(/c\.set\("requestId", requestId\)/);
+      // Structured request_start + request_end JSON log lines.
+      expect(reqId).toMatch(/event: "request_start"/);
+      expect(reqId).toMatch(/event: "request_end"/);
+      expect(reqId).toMatch(/duration_ms:/);
+    });
+
+    it("http/index.ts mounts requestIdMiddleware before cors and any business route", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model);
+      const httpIndex = files.get("http/index.ts")!;
+      expect(httpIndex).toMatch(/import \{ requestIdMiddleware \} from "\.\.\/obs\/request-id\.js"/);
+      expect(httpIndex).toMatch(/app\.use\("\*", requestIdMiddleware\)/);
+      // Order: requestIdMiddleware mounts BEFORE cors so every
+      // downstream handler + onError sees the id.
+      const reqIdIdx = httpIndex.indexOf("requestIdMiddleware");
+      const corsIdx = httpIndex.indexOf("cors()");
+      expect(reqIdIdx).toBeGreaterThan(-1);
+      expect(corsIdx).toBeGreaterThan(-1);
+      expect(reqIdIdx).toBeLessThan(corsIdx);
+    });
+
+    it("per-aggregate app.onError threads trace_id into every error envelope", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model);
+      const routes = files.get("http/order.routes.ts")!;
+      // trace_id pulled off the context via a typed cast (the
+      // sub-router's OpenAPIHono is constructed without a typed
+      // Variables block; the cast bridges to the parent app's
+      // requestIdMiddleware without leaking `any`).
+      expect(routes).toMatch(/\.get\("requestId"\) \?\? ""/);
+      // Every status arm carries trace_id.
+      expect(routes).toMatch(/error: err\.message, trace_id \}, 403/);
+      expect(routes).toMatch(/error: err\.message, trace_id \}, 400/);
+      expect(routes).toMatch(/error: err\.message, trace_id \}, 404/);
+      expect(routes).toMatch(/error: "internal", trace_id \}, 500/);
+    });
+  });
+
   it("Hono routes use @hono/zod-openapi and expose /openapi.json", async () => {
     const model = await buildModel("examples/sales.ddd");
     const files = generateTypeScript(model);
@@ -212,6 +298,137 @@ describe("typescript generator", () => {
     // 5. http/index.ts wires the verify gate at startup.
     const httpIndex = files.get("http/index.ts")!;
     expect(httpIndex).toMatch(/verifyOrderExternHandlersRegistered/);
+  });
+
+  describe("slice 16.B — extern handler exception envelope", () => {
+    it("domain/errors.ts exports ExternHandlerError", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model);
+      const errors = files.get("domain/errors.ts")!;
+      expect(errors).toMatch(/export class ExternHandlerError extends Error/);
+      // Carries op + agg names + the inner cause.
+      expect(errors).toMatch(/readonly opName: string;/);
+      expect(errors).toMatch(/readonly aggName: string;/);
+      expect(errors).toMatch(/readonly cause: unknown;/);
+      // Message embeds op + agg + inner.
+      expect(errors).toMatch(/Extern handler '\$\{opName\}' on '\$\{aggName\}' threw/);
+    });
+
+    it("per-aggregate routes wrap the user handler call and onError maps ExternHandlerError to 500", async () => {
+      const { parseHelper } = await import("langium/test");
+      const services = createDddServices(NodeFileSystem);
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(`
+        context Sales {
+          enum OrderStatus { Draft, Confirmed }
+          aggregate Order {
+            customerId: string
+            status: OrderStatus
+            function isMutable(): bool = status == Draft
+            operation confirm() extern {
+              precondition isMutable()
+            }
+          }
+          repository Orders for Order { }
+        }
+      `, { validation: true });
+      const files = generateTypeScript(doc.parseResult.value as Model);
+      const routes = files.get("http/order.routes.ts")!;
+      // Imports the new error type.
+      expect(routes).toMatch(
+        /import \{ DomainError, AggregateNotFoundError, ForbiddenError, ExternHandlerError \} from "\.\.\/domain\/errors\.js"/,
+      );
+      // Wraps the handler call in try/catch.
+      expect(routes).toMatch(/try \{\s+await handler\(aggregate, body\);/);
+      // Domain-layer errors re-throw unchanged.
+      expect(routes).toMatch(/if \(err instanceof DomainError\) throw err;/);
+      expect(routes).toMatch(/if \(err instanceof ForbiddenError\) throw err;/);
+      expect(routes).toMatch(/if \(err instanceof AggregateNotFoundError\) throw err;/);
+      // Anything else wraps as ExternHandlerError with op + agg names.
+      expect(routes).toMatch(
+        /throw new ExternHandlerError\("confirm", "Order", err\);/,
+      );
+      // onError checks ExternHandlerError before the generic 500.
+      expect(routes).toMatch(/if \(err instanceof ExternHandlerError\)/);
+      // Generic 500 fallback survives unchanged for unknown errors.
+      // Slice 16.C threads trace_id alongside the existing error
+      // field, so the envelope shape is `{ error, trace_id }`.
+      expect(routes).toMatch(/return c\.json\(\{ error: "internal", trace_id \}, 500\)/);
+    });
+
+    it("does NOT register a defaultHook on OpenAPIHono (Zod's 400 stays the contract)", async () => {
+      // The framework's default 400 envelope for Zod-OpenAPI schema
+      // failures is the published contract for request-validation
+      // errors.  Forking it would break every OpenAPI-generated
+      // client.  Pin the absence.
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model);
+      const httpIndex = files.get("http/index.ts")!;
+      const orderRoutes = files.get("http/order.routes.ts")!;
+      expect(httpIndex).not.toMatch(/defaultHook/);
+      expect(orderRoutes).not.toMatch(/defaultHook/);
+    });
+
+    it("workflow extern op-call wraps the user handler the same way", async () => {
+      const { parseHelper } = await import("langium/test");
+      const services = createDddServices(NodeFileSystem);
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(`
+        context Sales {
+          enum OrderStatus { Draft, Confirmed }
+          aggregate Order {
+            customerId: string
+            status: OrderStatus
+            function isMutable(): bool = status == Draft
+            operation confirm() extern { precondition isMutable() }
+          }
+          repository Orders for Order { }
+          workflow confirmOne(orderId: Id<Order>) {
+            let order = Orders.getById(orderId)
+            order.confirm()
+          }
+        }
+      `, { validation: true });
+      const files = generateTypeScript(doc.parseResult.value as Model);
+      const wf = files.get("http/workflows.ts")!;
+      // Same import line as the per-aggregate router.
+      expect(wf).toMatch(
+        /import \{ DomainError, AggregateNotFoundError, ForbiddenError, ExternHandlerError \} from "\.\.\/domain\/errors\.js"/,
+      );
+      // Try/catch around the workflow's handler invocation.
+      expect(wf).toMatch(/try \{\s+await __handler\(order/);
+      expect(wf).toMatch(
+        /throw new ExternHandlerError\("confirm", "Order", err\);/,
+      );
+      // onError chain knows about ExternHandlerError.
+      expect(wf).toMatch(/if \(err instanceof ExternHandlerError\)/);
+    });
+
+    it("per-aggregate extern registry re-exports ExternHandlerError", async () => {
+      const { parseHelper } = await import("langium/test");
+      const services = createDddServices(NodeFileSystem);
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(`
+        context Sales {
+          enum OrderStatus { Draft, Confirmed }
+          aggregate Order {
+            customerId: string
+            status: OrderStatus
+            function isMutable(): bool = status == Draft
+            operation confirm() extern { precondition isMutable() }
+          }
+          repository Orders for Order { }
+        }
+      `, { validation: true });
+      const files = generateTypeScript(doc.parseResult.value as Model);
+      const extern = files.get("domain/order-extern.ts")!;
+      // User handler code can import ExternHandlerError straight
+      // from the per-aggregate file rather than reaching for
+      // domain/errors.js itself.
+      expect(extern).toMatch(
+        /export \{ ExternHandlerError \} from "\.\/errors\.js"/,
+      );
+    });
   });
 
   it("emits Hono workflow routes for non-transactional workflow", async () => {
@@ -841,8 +1058,10 @@ describe("typescript generator", () => {
     it("http/<aggregate>.routes.ts maps ForbiddenError to 403 in app.onError", async () => {
       const files = await emitForAuthSystem(SRC_REQUIRES);
       const route = files.get("http/order.routes.ts")!;
+      // Slice 16.C threads trace_id alongside the existing error
+      // field, so the envelope shape is `{ error, trace_id }`.
       expect(route).toMatch(
-        /if \(err instanceof ForbiddenError\) return c\.json\(\{ error: err\.message \}, 403\);/,
+        /if \(err instanceof ForbiddenError\) return c\.json\(\{ error: err\.message, trace_id \}, 403\);/,
       );
     });
   });

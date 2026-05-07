@@ -157,9 +157,17 @@ public sealed class DomainExceptionFilter : IExceptionFilter
 
     public void OnException(ExceptionContext context)
     {
+        // Correlation id — ASP.NET Core sets Activity.Current
+        // automatically on every request via the
+        // HostingApplicationDiagnostics.  Surfacing the trace id on
+        // the response lets an operator join the response back to
+        // the structured log line without scraping headers.  Empty
+        // string when no Activity is active (e.g. middleware errors
+        // before the pipeline starts).
+        var trace_id = System.Diagnostics.Activity.Current?.TraceId.ToString() ?? "";
         if (context.Exception is ForbiddenException fe)
         {
-            context.Result = new ObjectResult(new { error = fe.Message })
+            context.Result = new ObjectResult(new { error = fe.Message, trace_id })
             {
                 StatusCode = 403,
             };
@@ -168,13 +176,30 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         }
         if (context.Exception is DomainException de)
         {
-            context.Result = new BadRequestObjectResult(new { error = de.Message });
+            context.Result = new BadRequestObjectResult(new { error = de.Message, trace_id });
             context.ExceptionHandled = true;
             return;
         }
         if (context.Exception is AggregateNotFoundException nf)
         {
-            context.Result = new NotFoundObjectResult(new { error = nf.Message });
+            context.Result = new NotFoundObjectResult(new { error = nf.Message, trace_id });
+            context.ExceptionHandled = true;
+            return;
+        }
+        if (context.Exception is ExternHandlerException xh)
+        {
+            // 500 — the user handler threw, which is an internal
+            // failure from the framework's POV — but the envelope
+            // names the offending op + aggregate so operators don't
+            // have to grep logs to find the cause.  The original
+            // exception (xh.InnerException) is logged in full
+            // server-side.
+            _log.LogError(xh, "Extern handler {Op} on {Agg} threw",
+                xh.OpName, xh.AggName);
+            context.Result = new ObjectResult(new { error = xh.Message, trace_id })
+            {
+                StatusCode = 500,
+            };
             context.ExceptionHandled = true;
             return;
         }
@@ -182,7 +207,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         // sanitized payload to the client.
         _log.LogError(context.Exception, "Unhandled exception in {Action}",
             context.ActionDescriptor.DisplayName);
-        context.Result = new ObjectResult(new { error = "internal" })
+        context.Result = new ObjectResult(new { error = "internal", trace_id })
         {
             StatusCode = 500,
         };

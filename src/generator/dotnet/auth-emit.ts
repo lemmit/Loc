@@ -150,6 +150,7 @@ public sealed class UserMiddleware
     private static readonly string[] BypassPrefixes = new[]
     {
         "/health",
+        "/ready",
         "/openapi.json",
         "/swagger",
     };

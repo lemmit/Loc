@@ -105,6 +105,47 @@ using ${ns}.Infrastructure.Events;${authUsing}
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Fail fast on a missing connection string.  Without this an unset
+// ConnectionStrings__Default surfaces as a confusing
+// "Cannot open connection" mid-request; we'd rather die at boot
+// with a clear pointer to the env var.
+{
+    var connectionString = builder.Configuration.GetConnectionString("Default");
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        throw new System.InvalidOperationException(
+            "Missing connection string 'Default'. Set ConnectionStrings__Default " +
+            "in the environment or appsettings.Development.json.");
+    }
+}
+
+// Structured JSON logs.  Pairs with UseHttpLogging below to emit
+// one line per inbound request with method/path/status, and pulls
+// Activity.Current?.TraceId into every log scope so handler logs
+// inherit the correlation id automatically.
+builder.Logging.ClearProviders();
+builder.Logging.AddJsonConsole(opts =>
+{
+    opts.IncludeScopes = true;
+    opts.JsonWriterOptions = new System.Text.Json.JsonWriterOptions
+    {
+        Indented = false,
+    };
+});
+
+// Per-request HTTP log.  ASP.NET Core's built-in middleware records
+// method/path on entry and status/duration on exit.  Combined with
+// the JSON formatter above, every request shows up as a structured
+// log line with the framework's TraceId field for correlation.
+builder.Services.AddHttpLogging(opts =>
+{
+    opts.LoggingFields =
+        Microsoft.AspNetCore.HttpLogging.HttpLoggingFields.RequestMethod |
+        Microsoft.AspNetCore.HttpLogging.HttpLoggingFields.RequestPath |
+        Microsoft.AspNetCore.HttpLogging.HttpLoggingFields.ResponseStatusCode |
+        Microsoft.AspNetCore.HttpLogging.HttpLoggingFields.Duration;
+});
+
 builder.Services.AddDbContext<AppDbContext>(opts =>
     opts.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
 
@@ -150,8 +191,38 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 var app = builder.Build();
-// Liveness probe — used by docker-compose / kubernetes / smoke tests.
+// Liveness probe — cheap, no I/O.  K8s livenessProbe / docker-compose
+// healthcheck use this to decide "is the process alive?".  A DB blip
+// must NOT mark the pod not-alive (that restarts the container and
+// amplifies the outage), which is why DB-touching checks live on
+// /ready instead.
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+// Readiness probe — pings the DB.  K8s readinessProbe uses this to
+// decide "should I send traffic to this pod?".  Returns 503 with a
+// one-line cause when the DB is unreachable so operators see the
+// reason in the probe log instead of having to exec into the pod.
+app.MapGet("/ready", async (AppDbContext db, CancellationToken ct) =>
+{
+    try
+    {
+        var ok = await db.Database.CanConnectAsync(ct);
+        return ok
+            ? Results.Ok(new { status = "ready" })
+            : Results.Json(
+                new { status = "not_ready", error = "database unreachable" },
+                statusCode: 503);
+    }
+    catch (System.Exception ex)
+    {
+        return Results.Json(
+            new { status = "not_ready", error = ex.Message },
+            statusCode: 503);
+    }
+});
+// HTTP logging middleware — pairs with AddHttpLogging above.
+// Mounted before the auth + business pipelines so every request is
+// logged regardless of whether it reached a controller.
+app.UseHttpLogging();
 app.UseCors();
 app.UseSwagger();
 ${authMount}app.MapControllers();
@@ -167,6 +238,18 @@ using (var scope = app.Services.CreateScope())
     db.Database.EnsureCreated();
 }
 ${authVerify}${externVerify}
+// Graceful shutdown — log the intent so operators see "shutting down"
+// in container logs instead of an abrupt SIGKILL trace.  ASP.NET
+// Core's host already drains in-flight requests + disposes scoped
+// services (including AppDbContext) automatically; this hook is just
+// the visible breadcrumb.
+{
+    var lifetime = app.Services.GetRequiredService<Microsoft.Extensions.Hosting.IHostApplicationLifetime>();
+    var logger = app.Services.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>()
+        .CreateLogger("Shutdown");
+    lifetime.ApplicationStopping.Register(() =>
+        logger.LogInformation("Shutting down — draining in-flight requests."));
+}
 app.Run();
 `;
 }

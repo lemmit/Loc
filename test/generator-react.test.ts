@@ -274,4 +274,336 @@ describe("react generator", () => {
     expect(app).toMatch(/function NotFound\(\): JSX\.Element/);
     expect(app).toMatch(/<Route path="\*" element={<NotFound \/>} \/>/);
   });
+
+  describe("slice 18.A — workflow form pages", () => {
+    it("emits an api/workflows.ts module with one Zod schema + mutation hook per workflow", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const api = files.get("web_app/src/api/workflows.ts")!;
+      // Per-workflow request schema + inferred type.
+      expect(api).toMatch(/export const PlaceOrderRequest = z\.object\(\{/);
+      expect(api).toMatch(/customerId: z\.string\(\)/);
+      expect(api).toMatch(/productId: z\.string\(\)/);
+      expect(api).toMatch(/quantity: z\.number\(\)\.int\(\)/);
+      expect(api).toMatch(
+        /export type PlaceOrderRequest = z\.infer<typeof PlaceOrderRequest>/,
+      );
+      // Mutation hook posts to the backend's /workflows/<slug> route.
+      expect(api).toMatch(/export function usePlaceOrderWorkflow\(\)/);
+      expect(api).toMatch(/api\.post\(`\/workflows\/place_order`, input\)/);
+    });
+
+    it("emits a workflows index page listing every workflow", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const idx = files.get("web_app/src/pages/workflows/index.tsx")!;
+      // One card per workflow, with a Run link.
+      expect(idx).toMatch(/data-testid="workflow-card-place_order"/);
+      // Humanised title.
+      expect(idx).toMatch(/<Title order=\{4\}>Place Order<\/Title>/);
+      // Parameter signature surfaces in a dimmed text row.  The
+      // type label is emitted as a string literal so JSX doesn't
+      // parse `Id<Product>` as an opening element.
+      expect(idx).toMatch(
+        /workflow-place_order-param-customerId.*<strong>customerId<\/strong>: \{"string"\}/,
+      );
+      expect(idx).toMatch(
+        /workflow-place_order-param-productId.*<strong>productId<\/strong>: \{"Id<Product>"\}/,
+      );
+      // "Run" button links to the per-workflow page.
+      expect(idx).toMatch(/to="\/workflows\/place_order"/);
+    });
+
+    it("emits a per-workflow form page with typed inputs reusing the v4 form helpers", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const page = files.get("web_app/src/pages/workflows/place_order.tsx")!;
+      // RHF + zodResolver wiring matches the aggregate-operation pattern.
+      expect(page).toMatch(/import \{ useForm, Controller \} from "react-hook-form"/);
+      expect(page).toMatch(/zodResolver\(PlaceOrderRequest\)/);
+      expect(page).toMatch(/usePlaceOrderWorkflow/);
+      // String param → TextInput; Id<X> → Select with target's display field;
+      // int → NumberInput with allowDecimal={false}.
+      expect(page).toMatch(/<TextInput label="customerId"/);
+      expect(page).toMatch(
+        /<Select label="productId"[\s\S]+?__products\.data/,
+      );
+      expect(page).toMatch(/<NumberInput label="quantity"[\s\S]+?allowDecimal=\{false\}/);
+      // useAllProducts pulled in for the Id<Product> Select.
+      expect(page).toMatch(
+        /import \{ useAllProducts \} from "\.\.\/\.\.\/api\/product\.js"/,
+      );
+      // Submit button + success/error toast.
+      expect(page).toMatch(/data-testid="workflow-place_order-submit"/);
+      expect(page).toMatch(/notifications\.show\(\{ color: "green", message: "Place Order completed" \}\)/);
+      // After success navigate back to the index.
+      expect(page).toMatch(/navigate\("\/workflows"\)/);
+    });
+
+    it("App.tsx registers /workflows + /workflows/<slug> routes and sidebar entry", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const app = files.get("web_app/src/App.tsx")!;
+      // Index + per-workflow imports.
+      expect(app).toMatch(
+        /import WorkflowsIndex from "\.\/pages\/workflows\/index\.js"/,
+      );
+      expect(app).toMatch(
+        /import PlaceOrderWorkflowPage from "\.\/pages\/workflows\/place_order\.js"/,
+      );
+      // Routes — index + per-workflow.
+      expect(app).toMatch(
+        /<Route path="\/workflows" element=\{<WorkflowsIndex \/>\} \/>/,
+      );
+      expect(app).toMatch(
+        /<Route path="\/workflows\/place_order" element=\{<PlaceOrderWorkflowPage \/>\} \/>/,
+      );
+      // Sidebar entry.
+      expect(app).toMatch(
+        /<Anchor component=\{Link\} to="\/workflows" data-testid="nav-workflows">Workflows<\/Anchor>/,
+      );
+    });
+
+    it("home page links to /workflows when at least one workflow exists", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const home = files.get("web_app/src/pages/home.tsx")!;
+      expect(home).toMatch(/<Title order=\{3\}>Workflows<\/Title>/);
+      expect(home).toMatch(/data-testid="home-workflows-link"/);
+    });
+  });
+
+  describe("slice 18.B — view list pages", () => {
+    it("emits an api/views.ts module with a query hook per view", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const api = files.get("web_app/src/api/views.ts")!;
+      // Shorthand view reuses the source aggregate's list response.
+      expect(api).toMatch(
+        /export const ActiveOrdersResponse = OrderListResponse;/,
+      );
+      expect(api).toMatch(/export function useActiveOrdersView\(\)/);
+      expect(api).toMatch(/api\.get\(`\/views\/active_orders`\)/);
+      // Full-form view emits its own row + array schemas.
+      expect(api).toMatch(/export const OrderSummaryRow = z\.object\(\{/);
+      expect(api).toMatch(/orderId: z\.string\(\)/);
+      expect(api).toMatch(/status: OrderStatusSchema/);
+      expect(api).toMatch(/lineCount: z\.number\(\)\.int\(\)/);
+      expect(api).toMatch(
+        /export const OrderSummaryResponse = z\.array\(OrderSummaryRow\);/,
+      );
+      expect(api).toMatch(/export function useOrderSummaryView\(\)/);
+    });
+
+    it("emits a views index page listing every view", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const idx = files.get("web_app/src/pages/views/index.tsx")!;
+      expect(idx).toMatch(/data-testid="view-card-active_orders"/);
+      expect(idx).toMatch(/data-testid="view-card-order_summary"/);
+      expect(idx).toMatch(/<Title order=\{4\}>Active Orders<\/Title>/);
+      expect(idx).toMatch(/<Title order=\{4\}>Order Summary<\/Title>/);
+      // Shorthand view shows the source aggregate; full-form view
+      // shows "Custom shape: <field names>".
+      expect(idx).toMatch(/Source: Order/);
+      expect(idx).toMatch(/Custom shape: orderId, status, lineCount/);
+    });
+
+    it("emits a per-view table page that calls the query hook", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const page = files.get("web_app/src/pages/views/order_summary.tsx")!;
+      expect(page).toMatch(/import \{ useOrderSummaryView \} from "\.\.\/\.\.\/api\/views\.js"/);
+      expect(page).toMatch(/const q = useOrderSummaryView\(\)/);
+      // Table headers from the view's declared fields.
+      expect(page).toMatch(/<Table\.Th>orderId<\/Table\.Th>/);
+      expect(page).toMatch(/<Table\.Th>status<\/Table\.Th>/);
+      expect(page).toMatch(/<Table\.Th>lineCount<\/Table\.Th>/);
+      // Id<Order> cell auto-links to /orders/<id> (Order has UI in
+      // this deployable's modules).
+      expect(page).toMatch(
+        /<Anchor component=\{Link\} to=\{`\/orders\/\$\{row\.orderId\}`\}/,
+      );
+      // Empty + error states present.
+      expect(page).toMatch(/q\.data && q\.data\.length === 0 && <Text c="dimmed">No rows\.<\/Text>/);
+      expect(page).toMatch(/q\.isError && <Alert color="red">/);
+    });
+
+    it("shorthand view's table page uses the source aggregate's wire columns", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const page = files.get("web_app/src/pages/views/active_orders.tsx")!;
+      // ActiveOrders is shorthand `view ActiveOrders = Order where ...`
+      // — table columns mirror Order's primitive/id/enum fields.
+      expect(page).toMatch(/<Table\.Th>id<\/Table\.Th>/);
+      expect(page).toMatch(/<Table\.Th>customerId<\/Table\.Th>/);
+      expect(page).toMatch(/<Table\.Th>status<\/Table\.Th>/);
+      expect(page).toMatch(/<Table\.Th>placedAt<\/Table\.Th>/);
+    });
+
+    it("App.tsx registers /views + /views/<slug> routes and sidebar entry", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const app = files.get("web_app/src/App.tsx")!;
+      expect(app).toMatch(
+        /import ViewsIndex from "\.\/pages\/views\/index\.js"/,
+      );
+      expect(app).toMatch(
+        /import ActiveOrdersViewPage from "\.\/pages\/views\/active_orders\.js"/,
+      );
+      expect(app).toMatch(
+        /import OrderSummaryViewPage from "\.\/pages\/views\/order_summary\.js"/,
+      );
+      expect(app).toMatch(
+        /<Route path="\/views" element=\{<ViewsIndex \/>\} \/>/,
+      );
+      expect(app).toMatch(
+        /<Route path="\/views\/active_orders" element=\{<ActiveOrdersViewPage \/>\} \/>/,
+      );
+      expect(app).toMatch(
+        /<Anchor component=\{Link\} to="\/views" data-testid="nav-views">Views<\/Anchor>/,
+      );
+    });
+
+    it("home page links to /views when at least one view exists", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const home = files.get("web_app/src/pages/home.tsx")!;
+      expect(home).toMatch(/<Title order=\{3\}>Views<\/Title>/);
+      expect(home).toMatch(/data-testid="home-views-link"/);
+    });
+  });
+
+  describe("slice 18.C — DSL e2e for ui.workflows.* + ui.views.*", () => {
+    it("emits a Playwright page object per workflow", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const po = files.get("web_app/e2e/pages/workflows/place_order.ts")!;
+      expect(po).toMatch(/export class PlaceOrderWorkflowPage/);
+      // Typed `fill` accepting Partial<PlaceOrderRequest>.
+      expect(po).toMatch(
+        /async fill\(input: Partial<PlaceOrderRequest>\): Promise<this>/,
+      );
+      // Drives inputs via the same testid prefix the form page uses.
+      expect(po).toMatch(/workflow-place_order-input-customerId/);
+      expect(po).toMatch(/workflow-place_order-input-productId/);
+      expect(po).toMatch(/workflow-place_order-input-quantity/);
+      // Submit waits for navigation back to /workflows.
+      expect(po).toMatch(/this\.page\.waitForURL\(\/\\\/workflows\$\/\)/);
+      // Convenience `run` wraps goto + fill + submit.
+      expect(po).toMatch(/async run\(input: PlaceOrderRequest\): Promise<void>/);
+    });
+
+    it("emits a Playwright page object per view", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const po = files.get("web_app/e2e/pages/views/order_summary.ts")!;
+      expect(po).toMatch(/export class OrderSummaryViewPage/);
+      // Row shape interface declared locally — keeps the page object
+      // self-contained.
+      expect(po).toMatch(/export interface OrderSummaryRowText \{/);
+      expect(po).toMatch(/orderId: string;/);
+      expect(po).toMatch(/lineCount: string;/);
+      // rows() walks indexed testids until break.
+      expect(po).toMatch(
+        /async rows\(\): Promise<OrderSummaryRowText\[\]>/,
+      );
+      expect(po).toMatch(/view-order_summary-row-\$\{i\}-orderId/);
+    });
+
+    it("UI spec lowers ui.workflows.<name>(...) to the generated page object's run()", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const ui = files.get("web_app/e2e/Acme.ui.spec.ts")!;
+      // Page-object import.
+      expect(ui).toMatch(
+        /import \{ PlaceOrderWorkflowPage \} from "\.\/pages\/workflows\/place_order\.js"/,
+      );
+      // The workflow call lowers to `await new <Cap>WorkflowPage(page).run({...})`.
+      expect(ui).toMatch(
+        /await new PlaceOrderWorkflowPage\(page\)\.run\(/,
+      );
+    });
+
+    it("UI spec lowers ui.views.<name>() to the generated page object's rows()", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const ui = files.get("web_app/e2e/Acme.ui.spec.ts")!;
+      expect(ui).toMatch(
+        /import \{ ActiveOrdersViewPage \} from "\.\/pages\/views\/active_orders\.js"/,
+      );
+      // The view call lowers to a goto + rows() pair, wrapped so the
+      // let-binding resolves to the array (not a Promise).
+      expect(ui).toMatch(
+        /new ActiveOrdersViewPage\(page\)\.goto\(\)/,
+      );
+      expect(ui).toMatch(/await __view\.rows\(\)/);
+    });
+
+    it("validator rejects ui.workflows.<unknown>", async () => {
+      const { parseHelper } = await import("langium/test");
+      const { lowerModel } = await import("../src/ir/lower.js");
+      const { enrichLoomModel } = await import("../src/ir/enrichments.js");
+      const { validateLoomModel } = await import("../src/ir/validate.js");
+      const services = createDddServices(NodeFileSystem);
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(`
+        system Demo {
+          module M {
+            context C {
+              aggregate A { name: string display }
+              repository As for A { }
+            }
+          }
+          deployable api { platform: dotnet, modules: M, port: 8080 }
+          deployable web { platform: react, targets: api, port: 3001 }
+          test e2e "bad" against web {
+            ui.workflows.doesNotExist({})
+          }
+        }
+      `, { validation: true });
+      const loom = enrichLoomModel(lowerModel(doc.parseResult.value as Model));
+      const diags = validateLoomModel(loom);
+      expect(
+        diags.some(
+          (d) =>
+            d.severity === "error" &&
+            /unknown workflow 'ui\.workflows\.doesNotExist'/.test(d.message),
+        ),
+      ).toBe(true);
+    });
+
+    it("validator rejects ui.views.<unknown>", async () => {
+      const { parseHelper } = await import("langium/test");
+      const { lowerModel } = await import("../src/ir/lower.js");
+      const { enrichLoomModel } = await import("../src/ir/enrichments.js");
+      const { validateLoomModel } = await import("../src/ir/validate.js");
+      const services = createDddServices(NodeFileSystem);
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(`
+        system Demo {
+          module M {
+            context C {
+              aggregate A { name: string display }
+              repository As for A { }
+            }
+          }
+          deployable api { platform: dotnet, modules: M, port: 8080 }
+          deployable web { platform: react, targets: api, port: 3001 }
+          test e2e "bad" against web {
+            let r = ui.views.doesNotExist()
+          }
+        }
+      `, { validation: true });
+      const loom = enrichLoomModel(lowerModel(doc.parseResult.value as Model));
+      const diags = validateLoomModel(loom);
+      expect(
+        diags.some(
+          (d) =>
+            d.severity === "error" &&
+            /unknown view 'ui\.views\.doesNotExist'/.test(d.message),
+        ),
+      ).toBe(true);
+    });
+  });
 });

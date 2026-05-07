@@ -23,6 +23,7 @@ import { buildRoutesFile } from "./routes-builder.js";
 import { buildExternHandlersFile } from "./extern-builder.js";
 import { buildWorkflowsFile } from "./workflow-builder.js";
 import { buildViewsRoutesFile } from "./view-routes-builder.js";
+import { emitObservabilityFiles } from "./observability-builder.js";
 
 const ERRORS_TS = `// Auto-generated.
 export class DomainError extends Error {
@@ -37,6 +38,27 @@ export class AggregateNotFoundError extends Error {
  *  HTTP 403 (Forbidden). */
 export class ForbiddenError extends Error {
   constructor(message: string) { super(message); this.name = "ForbiddenError"; }
+}
+/** Wraps an exception thrown by a user-supplied extern handler.  The
+ *  per-router \`app.onError\` maps this to a 500 envelope that names
+ *  the offending op + aggregate, instead of the bare
+ *  \`{ "error": "internal" }\` operators see when the same throw
+ *  bubbles unwrapped.  Domain-layer errors raised by the user
+ *  handler (DomainError, ForbiddenError, AggregateNotFoundError)
+ *  are NOT wrapped — they bubble through and the router maps them
+ *  to their usual status codes. */
+export class ExternHandlerError extends Error {
+  readonly opName: string;
+  readonly aggName: string;
+  readonly cause: unknown;
+  constructor(opName: string, aggName: string, cause: unknown) {
+    const inner = cause instanceof Error ? cause.message : String(cause);
+    super(\`Extern handler '\${opName}' on '\${aggName}' threw: \${inner}\`);
+    this.name = "ExternHandlerError";
+    this.opName = opName;
+    this.aggName = aggName;
+    this.cause = cause;
+  }
 }
 `;
 
@@ -79,6 +101,7 @@ export function generateTypeScriptForContexts(
   if (authRequired && system?.sys) {
     emitAuthFiles(system.sys, out);
   }
+  emitObservabilityFiles(out);
   out.set("package.json", PROJECT_PACKAGE_JSON);
   out.set("tsconfig.json", PROJECT_TSCONFIG_JSON);
   out.set("index.ts", PROJECT_INDEX_TS);
@@ -210,11 +233,34 @@ import { serve } from "@hono/node-server";
 import * as schema from "./db/schema.js";
 import { createApp } from "./http/index.js";
 
+// Fail fast on a missing DATABASE_URL.  Without this an unset value
+// surfaces as a confusing pg connection refusal mid-request; we'd
+// rather die at boot with a clear pointer to the env var.
+if (!process.env.DATABASE_URL) {
+  throw new Error(
+    "DATABASE_URL is required.  Set it in the environment " +
+      "(e.g. postgres://user:pass@host:5432/db).",
+  );
+}
+
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 const db = drizzle(pool, { schema });
 const app = createApp(db);
-serve({ fetch: app.fetch, port: Number(process.env.PORT ?? 3000) });
+const server = serve({ fetch: app.fetch, port: Number(process.env.PORT ?? 3000) });
 console.log("listening on", process.env.PORT ?? 3000);
+
+// Graceful shutdown — close the HTTP server (stops accepting,
+// drains in-flight), then close the pg pool.  Without this SIGTERM
+// drops in-flight work and leaves pg connections lingering.  Both
+// SIGTERM (orchestrator) and SIGINT (Ctrl-C) are handled.
+async function shutdown(signal: string): Promise<void> {
+  console.log(\`shutting down (\${signal}) — draining in-flight requests\`);
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  await pool.end();
+  process.exit(0);
+}
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));
 `;
 
 // Multi-stage Dockerfile: build stage installs all deps and compiles

@@ -25,7 +25,11 @@ const dotnetPlatform: PlatformSurface = {
         ],
       ],
       dependsOnDb: true,
-      healthPath: "/health",
+      // Compose healthcheck → /ready (DB-aware).  Sets the service
+      // `healthy` only once the app can reach its DB, so dependent
+      // services / smoke tests don't race the schema bootstrap.
+      // /health stays for cheap liveness probing (k8s livenessProbe).
+      healthPath: "/ready",
       internalPort: 8080,
     };
   },
