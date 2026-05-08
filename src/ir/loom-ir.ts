@@ -76,6 +76,14 @@ export interface InvariantIR {
   expr: ExprIR;
   guard?: ExprIR;
   source: string;
+  /** When `"server-only"`, the invariant skips wire-boundary
+   *  validators (frontend Zod, Hono routes, FluentValidation) even
+   *  when its expression would translate cleanly.  Domain-layer
+   *  enforcement via `AssertInvariants()` always runs.  Set by
+   *  the `@server-only` annotation in the DSL (slice 21.C).
+   *  Absent in slice 21.A — the field exists so 21.B / 21.C don't
+   *  break the type. */
+  scope?: "server-only";
 }
 
 export interface FunctionIR {

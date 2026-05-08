@@ -873,4 +873,75 @@ describe("react generator", () => {
       ).toBe(true);
     });
   });
+
+  // -------------------------------------------------------------------
+  // Slice 21.A — wire-boundary validation on the React side.
+  // -------------------------------------------------------------------
+  describe("invariants on the wire (slice 21.A — React Zod refines)", () => {
+    it("absorbs single-field VO invariants into idiomatic native chains on <VO>Schema", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const productApi = files.get("web_app/src/api/product.ts")!;
+      // acme Money: invariant amount >= 0 + invariant currency.length == 3
+      expect(productApi).toMatch(/amount: z\.number\(\)\.min\(0\)/);
+      expect(productApi).toMatch(/currency: z\.string\(\)\.length\(3\)/);
+      // No leftover refine on MoneySchema.
+      const moneyBlock = productApi.match(
+        /export const MoneySchema = z\.object\(\{[\s\S]*?\}\)([^;]*);/,
+      )!;
+      expect(moneyBlock[1]).toBe("");
+    });
+
+    it("absorbs single-field aggregate invariants into native chains on Create<Agg>Request", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const productApi = files.get("web_app/src/api/product.ts")!;
+      // acme Product has `invariant sku.length > 0` — recognised as min(1).
+      expect(productApi).toMatch(
+        /CreateProductRequest = z\.object\(\{[\s\S]*sku: z\.string\(\)\.min\(1\)/,
+      );
+      const createBlock = productApi.match(
+        /export const CreateProductRequest = z\.object\(\{[\s\S]*?\}\)([^;]*);/,
+      )!;
+      // Single-field rule absorbed into chain → no .refine().
+      expect(createBlock[1]).toBe("");
+    });
+
+    it("absorbs single-field op-precondition into native chain on <Op>Request", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const orderApi = files.get("web_app/src/api/order.ts")!;
+      // acme Order.addLine: precondition qty > 0 (int qty).
+      expect(orderApi).toMatch(
+        /AddLineRequest = z\.object\(\{[\s\S]*qty: z\.number\(\)\.int\(\)\.min\(1\)/,
+      );
+    });
+
+    it("excludes invariants referencing aggregate state (containment / helper-fn / state) from wire schemas", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const orderApi = files.get("web_app/src/api/order.ts")!;
+      // CreateOrderRequest carries customerId + status + placedAt.
+      // Order.invariants reference `lines.count` (containment, not in body).
+      // The classifier correctly skips it; schema has no .refine().
+      const createBlock = orderApi.match(
+        /export const CreateOrderRequest = z\.object\(\{[\s\S]*?\}\)([^;]*);/,
+      )!;
+      expect(createBlock[1]).toBe("");
+      // ConfirmRequest is empty: `isMutable()` + `lines.count > 0`
+      // are both non-translatable → no params, no refines.
+      expect(orderApi).toMatch(
+        /export const ConfirmRequest = z\.object\(\{\s*\}\);/,
+      );
+    });
+
+    it("RHF still binds zodResolver to the refined CreateProductRequest schema", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const newProduct = files.get("web_app/src/pages/products/new.tsx")!;
+      // Existing slice 17 contract — refines compose into the same
+      // schema name, so the form keeps working.
+      expect(newProduct).toMatch(/zodResolver\(CreateProductRequest\)/);
+    });
+  });
 });

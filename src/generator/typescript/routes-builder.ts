@@ -4,6 +4,7 @@ import type {
   EnumIR,
   EntityPartIR,
   FindIR,
+  InvariantIR,
   OperationIR,
   RepositoryIR,
   TypeIR,
@@ -14,6 +15,15 @@ import {
   operationUsesCurrentUser,
 } from "../../ir/loom-ir.js";
 import { wireShapeFor } from "../../ir/enrichments.js";
+import {
+  type ClassifyContext,
+  type SingleFieldPattern,
+} from "../../ir/invariant-classify.js";
+import {
+  chainSingleFieldNative,
+  refineClauseFor,
+  takeSingleFieldChain,
+} from "./zod-refine.js";
 import { camel, plural, snake } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
@@ -77,30 +87,42 @@ export function buildRoutesFile(
     lines.push(`const ${e.name}Schema = z.enum([${values}]).openapi("${e.name}");`);
   }
   for (const vo of usedVOs) {
-    lines.push(`const ${vo.name}Schema = z.object({`);
-    for (const f of vo.fields) {
-      lines.push(`  ${f.name}: ${zodFor(f.type)},`);
-    }
-    lines.push(`}).openapi("${vo.name}");`);
+    lines.push(
+      ...emitWireSchema(
+        `const ${vo.name}Schema`,
+        `${vo.name}`,
+        vo.fields.map((f) => ({ name: f.name, base: zodFor(f.type) })),
+        vo.invariants,
+        new Set(vo.fields.map((f) => f.name)),
+      ),
+    );
   }
   lines.push("");
 
   // Request schemas — Create, per-public-operation, per-find query.
   const requiredFields = agg.fields.filter((f) => !f.optional);
-  lines.push(`const Create${agg.name}Request = z.object({`);
-  for (const f of requiredFields) {
-    lines.push(`  ${f.name}: ${zodFor(f.type)},`);
-  }
-  lines.push(`}).openapi("Create${agg.name}Request");`);
+  lines.push(
+    ...emitWireSchema(
+      `const Create${agg.name}Request`,
+      `Create${agg.name}Request`,
+      requiredFields.map((f) => ({ name: f.name, base: zodFor(f.type) })),
+      agg.invariants,
+      new Set(agg.fields.map((f) => f.name)),
+    ),
+  );
   lines.push(`const Create${agg.name}Response = z.object({ id: z.string() }).openapi("Create${agg.name}Response");`);
   lines.push("");
 
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
-    lines.push(`const ${cap(op.name)}Request = z.object({`);
-    for (const p of op.params) {
-      lines.push(`  ${p.name}: ${zodFor(p.type)},`);
-    }
-    lines.push(`}).openapi("${cap(op.name)}Request");`);
+    lines.push(
+      ...emitWireSchema(
+        `const ${cap(op.name)}Request`,
+        `${cap(op.name)}Request`,
+        op.params.map((p) => ({ name: p.name, base: zodFor(p.type) })),
+        preconditionsAsInvariants(op),
+        new Set(op.params.map((p) => p.name)),
+      ),
+    );
   }
   lines.push("");
 
@@ -561,6 +583,68 @@ function collectUsedEnums(
 
 function cap(s: string): string {
   return s[0]!.toUpperCase() + s.slice(1);
+}
+
+// ---------------------------------------------------------------------------
+// `z.object({...}).openapi("Name").refine(...)` emitter.
+//
+// Same two-phase classification as the React side (api-builder.ts):
+// recognised single-field shapes are absorbed into the inner field's
+// zod chain (`z.string().min(N)`, …) so the published JSON-Schema
+// body stays correct; cross-field / non-recognised invariants emit
+// `.refine((data) => ..., { path, message })` chains AFTER the
+// `.openapi("Name")` call so the schema's openapi metadata stays
+// pinned to the same component name.
+// ---------------------------------------------------------------------------
+function emitWireSchema(
+  declPrefix: string, // e.g. `const Create<Agg>Request` or `const <VO>Schema`
+  openapiName: string, // component name passed to `.openapi(...)`
+  fields: { name: string; base: string }[],
+  invariants: InvariantIR[],
+  available: ReadonlySet<string>,
+): string[] {
+  const ctx: ClassifyContext = { available };
+  const chainByField = new Map<string, SingleFieldPattern[]>();
+  const remaining: InvariantIR[] = [];
+  for (const inv of invariants) {
+    const taken = takeSingleFieldChain(inv, ctx);
+    if (taken) {
+      const list = chainByField.get(taken.field) ?? [];
+      list.push(taken.pattern);
+      chainByField.set(taken.field, list);
+    } else {
+      remaining.push(inv);
+    }
+  }
+  const refines = remaining
+    .map((inv) => refineClauseFor(inv, ctx))
+    .filter((s): s is string => s !== null);
+
+  const out: string[] = [];
+  out.push(`${declPrefix} = z.object({`);
+  for (const f of fields) {
+    let schema = f.base;
+    const patterns = chainByField.get(f.name);
+    if (patterns) {
+      for (const p of patterns) schema = chainSingleFieldNative(schema, p);
+    }
+    out.push(`  ${f.name}: ${schema},`);
+  }
+  out.push(`}).openapi("${openapiName}")${refines.join("")};`);
+  return out;
+}
+
+/** Lift each `precondition` statement on an operation to an
+ *  `InvariantIR` so the same classification + refine pipeline
+ *  handles wire-translatable preconditions for `<Op>Request`. */
+function preconditionsAsInvariants(op: OperationIR): InvariantIR[] {
+  const out: InvariantIR[] = [];
+  for (const s of op.statements) {
+    if (s.kind === "precondition") {
+      out.push({ expr: s.expr, source: s.source });
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------

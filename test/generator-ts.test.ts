@@ -1067,4 +1067,100 @@ describe("typescript generator", () => {
       );
     });
   });
+
+  // -------------------------------------------------------------------
+  // Slice 21.A — wire-boundary validation on Hono routes.
+  // -------------------------------------------------------------------
+  describe("invariants on the wire (slice 21.A — Hono Zod refines)", () => {
+    it("absorbs single-field invariants on a value-object schema into idiomatic native chains", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model);
+      // sales.ddd Money: `invariant amount >= 0` + `invariant currency.length == 3`.
+      const orderRoutes = files.get("http/order.routes.ts")!;
+      expect(orderRoutes).toMatch(/amount: z\.coerce\.number\(\)\.min\(0\)/);
+      expect(orderRoutes).toMatch(/currency: z\.string\(\)\.length\(3\)/);
+      // No leftover `.refine(` for the single-field shapes.
+      const moneyBlock = orderRoutes.match(
+        /const MoneySchema = z\.object\(\{[\s\S]*?\}\)\.openapi\("Money"\)([^;]*);/,
+      )!;
+      expect(moneyBlock[1]).toBe("");
+    });
+
+    it("absorbs single-field op-precondition into idiomatic chain on <Op>Request", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model);
+      // sales.ddd Order.addLine: `precondition qty > 0` (with int qty).
+      const orderRoutes = files.get("http/order.routes.ts")!;
+      // `qty > 0` → recognised as min(1) on the int field.
+      expect(orderRoutes).toMatch(
+        /AddLineRequest = z\.object\(\{[\s\S]*qty: z\.coerce\.number\(\)\.int\(\)\.min\(1\)/,
+      );
+    });
+
+    it("excludes invariants referencing aggregate state from Create<Agg>Request", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model);
+      const orderRoutes = files.get("http/order.routes.ts")!;
+      // sales.ddd Order has `invariant lines.count > 0 when status == Confirmed`.
+      // `lines` is a containment, not in the create-request body — the
+      // classifier filters this out, so CreateOrderRequest carries NO
+      // refine clause for it.
+      const createBlock = orderRoutes.match(
+        /const CreateOrderRequest = z\.object\(\{[\s\S]*?\}\)\.openapi\("CreateOrderRequest"\)([^;]*);/,
+      )!;
+      expect(createBlock[1]).toBe("");
+      // And the schema still has the basic field set.
+      expect(orderRoutes).toMatch(
+        /CreateOrderRequest = z\.object\(\{[\s\S]*customerId:[\s\S]*status:[\s\S]*placedAt:/,
+      );
+    });
+
+    it("excludes preconditions referencing helper-fns / aggregate state from <Op>Request", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model);
+      const orderRoutes = files.get("http/order.routes.ts")!;
+      // Order.addLine has `precondition isMutable()` — references
+      // `this.status` via a helper-fn.  Must NOT appear as a refine
+      // on AddLineRequest (and the refine can't read `this`).
+      const addLineBlock = orderRoutes.match(
+        /const AddLineRequest = z\.object\(\{[\s\S]*?\}\)\.openapi\("AddLineRequest"\)([^;]*);/,
+      )!;
+      // Only the `qty > 0` precondition is wire-translatable, and it
+      // was absorbed into the int chain — so no `.refine(` here.
+      expect(addLineBlock[1]).toBe("");
+      // Confirm has no params and `isMutable()`/`lines.count > 0`
+      // preconditions — both server-only — so the schema is empty +
+      // unrefined.
+      expect(orderRoutes).toMatch(
+        /const ConfirmRequest = z\.object\(\{\s*\}\)\.openapi\("ConfirmRequest"\);/,
+      );
+    });
+
+    it("emits cross-field invariants as `.refine()` with field-path attribution", async () => {
+      // Use an in-memory model with a synthetic cross-field invariant
+      // since sales.ddd's only cross-field rule is non-translatable.
+      const { parseHelper } = await import("langium/test");
+      const services = createDddServices(NodeFileSystem);
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(
+        `
+          context Shop {
+            aggregate Reservation {
+              fromTime: int
+              toTime:   int
+              invariant fromTime < toTime
+            }
+            repository Reservations for Reservation { }
+          }
+        `,
+        { validation: true },
+      );
+      const files = generateTypeScript(doc.parseResult.value as Model);
+      const routes = files.get("http/reservation.routes.ts")!;
+      // `fromTime < toTime` is cross-field — falls through to .refine.
+      expect(routes).toMatch(
+        /CreateReservationRequest = z\.object\(\{[\s\S]*?\}\)\.openapi\("CreateReservationRequest"\)\.refine\(\(data\) => data\.fromTime < data\.toTime, \{ path: \["fromTime"\], message: "Invariant violated: [^"]*" \}\)/,
+      );
+    });
+  });
 });

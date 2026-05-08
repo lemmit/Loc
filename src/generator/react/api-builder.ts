@@ -3,11 +3,22 @@ import type {
   BoundedContextIR,
   EntityPartIR,
   EnumIR,
+  InvariantIR,
+  OperationIR,
   RepositoryIR,
   TypeIR,
   ValueObjectIR,
 } from "../../ir/loom-ir.js";
 import { wireShapeFor } from "../../ir/enrichments.js";
+import {
+  type ClassifyContext,
+  type SingleFieldPattern,
+} from "../../ir/invariant-classify.js";
+import {
+  chainSingleFieldNative,
+  refineClauseFor,
+  takeSingleFieldChain,
+} from "../typescript/zod-refine.js";
 import { plural, snake } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
@@ -43,22 +54,29 @@ export function buildApiModule(
 
   // Request schemas.
   const requiredFields = agg.fields.filter((f) => !f.optional);
-  lines.push(`export const Create${agg.name}Request = z.object({`);
-  for (const f of requiredFields) {
-    lines.push(`  ${f.name}: ${zodForRequest(f.type)},`);
-  }
-  lines.push(`});`);
+  lines.push(
+    ...emitObjectWithRefines(
+      `Create${agg.name}Request`,
+      requiredFields.map((f) => ({ name: f.name, base: zodForRequest(f.type) })),
+      agg.invariants,
+      new Set(agg.fields.map((f) => f.name)),
+    ),
+  );
   lines.push(
     `export type Create${agg.name}Request = z.infer<typeof Create${agg.name}Request>;`,
   );
   lines.push("");
 
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
-    lines.push(`export const ${cap(op.name)}Request = z.object({`);
-    for (const p of op.params) {
-      lines.push(`  ${p.name}: ${zodForRequest(p.type)},`);
-    }
-    lines.push(`});`);
+    const opInvariants = preconditionsAsInvariants(op);
+    lines.push(
+      ...emitObjectWithRefines(
+        `${cap(op.name)}Request`,
+        op.params.map((p) => ({ name: p.name, base: zodForRequest(p.type) })),
+        opInvariants,
+        new Set(op.params.map((p) => p.name)),
+      ),
+    );
     lines.push(
       `export type ${cap(op.name)}Request = z.infer<typeof ${cap(op.name)}Request>;`,
     );
@@ -216,14 +234,81 @@ function emitEnumSchema(e: EnumIR): string[] {
 }
 
 function emitValueObjectSchema(vo: ValueObjectIR): string[] {
-  const lines: string[] = [];
-  lines.push(`export const ${vo.name}Schema = z.object({`);
-  for (const f of vo.fields) {
-    lines.push(`  ${f.name}: ${zodForResponseInner(f.type)},`);
-  }
-  lines.push(`});`);
-  return lines;
+  return emitObjectWithRefines(
+    `${vo.name}Schema`,
+    vo.fields.map((f) => ({ name: f.name, base: zodForResponseInner(f.type) })),
+    vo.invariants,
+    new Set(vo.fields.map((f) => f.name)),
+  );
 }
+
+// ---------------------------------------------------------------------------
+// `z.object({ ... }).refine(...)` emitter shared by request / VO schemas.
+//
+// Splits invariants into two buckets:
+//   1. recognised single-field shapes — absorbed into the inner field's
+//      zod chain (`z.number().min(N)`, `z.string().length(N)`, etc.) so
+//      the published JSON-Schema body shape stays correct.
+//   2. everything else — emitted as `.refine((data) => ..., { path,
+//      message })` chains on the object schema; RHF reads `path` to
+//      surface the error inline next to the right input.
+//
+// Used by all three wire-validator emission sites (Create<Agg>Request,
+// <Op>Request, <VO>Schema).  Response schemas don't get refines:
+// responses come from a server that already enforced invariants.
+// ---------------------------------------------------------------------------
+function emitObjectWithRefines(
+  exportName: string,
+  fields: { name: string; base: string }[],
+  invariants: InvariantIR[],
+  available: ReadonlySet<string>,
+): string[] {
+  const ctx: ClassifyContext = { available };
+  const chainByField = new Map<string, SingleFieldPattern[]>();
+  const remaining: InvariantIR[] = [];
+  for (const inv of invariants) {
+    const taken = takeSingleFieldChain(inv, ctx);
+    if (taken) {
+      const list = chainByField.get(taken.field) ?? [];
+      list.push(taken.pattern);
+      chainByField.set(taken.field, list);
+    } else {
+      remaining.push(inv);
+    }
+  }
+  const refines = remaining
+    .map((inv) => refineClauseFor(inv, ctx))
+    .filter((s): s is string => s !== null);
+
+  const out: string[] = [];
+  out.push(`export const ${exportName} = z.object({`);
+  for (const f of fields) {
+    let schema = f.base;
+    const patterns = chainByField.get(f.name);
+    if (patterns) {
+      for (const p of patterns) schema = chainSingleFieldNative(schema, p);
+    }
+    out.push(`  ${f.name}: ${schema},`);
+  }
+  out.push(`})${refines.join("")};`);
+  return out;
+}
+
+/** Operation preconditions are the wire-translatable rules for an
+ *  `<Op>Request`.  Lift each `precondition <expr>` statement to an
+ *  `InvariantIR` so the same classification + refine pipeline
+ *  handles it.  Other statement kinds (assigns / emits / etc.) don't
+ *  contribute to wire validation. */
+function preconditionsAsInvariants(op: OperationIR): InvariantIR[] {
+  const out: InvariantIR[] = [];
+  for (const s of op.statements) {
+    if (s.kind === "precondition") {
+      out.push({ expr: s.expr, source: s.source });
+    }
+  }
+  return out;
+}
+
 
 function emitResponseSchema(
   ent: AggregateIR | EntityPartIR,
