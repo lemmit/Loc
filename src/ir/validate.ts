@@ -676,6 +676,13 @@ function firstNonQueryableNode(e: ExprIR): string | null {
       return "object literal";
     case "ternary":
       return "ternary";
+    case "match":
+      // `match { ... }` is a value-producing expression but contains
+      // arbitrary arm conditions / values; it doesn't translate to a
+      // single SQL fragment.  Same posture as ternary in v22 — reject
+      // from the queryable sublanguage; full match semantics live in
+      // the application layer / generator.
+      return "match expression";
   }
 }
 

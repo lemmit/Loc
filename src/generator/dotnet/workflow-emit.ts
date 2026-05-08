@@ -411,7 +411,14 @@ function renderExprWithCmdParams(
     if (e.kind === "call") {
       return { ...e, args: e.args.map(rewrite) };
     }
-    if (e.kind === "lambda") return { ...e, body: rewrite(e.body) };
+    if (e.kind === "lambda") {
+      // Slice 2: lambda body is optional (block-body lambdas land for
+      // page event handlers).  .NET workflow lowering doesn't see
+      // block bodies — those are React-emitter territory — but stay
+      // total: pass through unchanged when block is set.
+      if (e.body) return { ...e, body: rewrite(e.body) };
+      return e;
+    }
     if (e.kind === "binary") {
       return { ...e, left: rewrite(e.left), right: rewrite(e.right) };
     }

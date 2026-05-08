@@ -45,7 +45,13 @@ export function renderTsExpr(e: ExprIR, ctx: TsRenderContext = DEFAULT): string 
       // Lambdas always introduce their own parameter; the body is
       // rendered with the outer `this` still pointing at the same
       // receiver (lambdas in DSL are pure expressions).
-      return `(${e.param}) => ${renderTsExpr(e.body, ctx)}`;
+      //
+      // Slice 2: lambda body is now optional (block-body lambdas land
+      // for page event handlers).  TS render contexts shouldn't see
+      // block bodies — those are React-emitter territory — but stay
+      // total to keep the build happy.
+      if (e.body) return `(${e.param}) => ${renderTsExpr(e.body, ctx)}`;
+      return `(${e.param}) => { /* block-body lambda — page metamodel territory, not TS-renderable */ }`;
     case "new":
       return renderNew(e, ctx);
     case "object":
@@ -58,6 +64,19 @@ export function renderTsExpr(e: ExprIR, ctx: TsRenderContext = DEFAULT): string 
       return renderBinary(e.op, e.left, e.right, ctx);
     case "ternary":
       return `${renderTsExpr(e.cond, ctx)} ? ${renderTsExpr(e.then, ctx)} : ${renderTsExpr(e.otherwise, ctx)}`;
+    case "match": {
+      // Slice 2: lower a match expression to a chained ternary so it
+      // can appear inside `derived` bodies, view binds, and other
+      // TS-rendered expression positions.  Right-fold: each arm
+      // wraps the previous tail.
+      const arms = [...e.arms].reverse();
+      const tail = e.otherwise ? renderTsExpr(e.otherwise, ctx) : "undefined";
+      let out = tail;
+      for (const arm of arms) {
+        out = `(${renderTsExpr(arm.cond, ctx)} ? ${renderTsExpr(arm.value, ctx)} : ${out})`;
+      }
+      return out;
+    }
   }
 }
 

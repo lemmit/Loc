@@ -213,13 +213,19 @@ function renderFluentPredicate(e: ExprIR): string {
     case "ternary":
       return `${renderFluentPredicate(e.cond)} ? ${renderFluentPredicate(e.then)} : ${renderFluentPredicate(e.otherwise)}`;
     case "lambda":
-      return `${e.param} => ${renderFluentPredicate(e.body)}`;
+      // Slice 2: lambda body is now optional.  Wire-boundary refines
+      // never see block-body lambdas (`classifyForWire` only admits
+      // single-expression predicates), so falling back to the
+      // unrenderable placeholder is correct.
+      if (e.body) return `${e.param} => ${renderFluentPredicate(e.body)}`;
+      return `false /* UNRENDERABLE:lambda-block */`;
     case "object":
       return `new { ${e.fields.map((f) => `${pascal(f.name)} = ${renderFluentPredicate(f.value)}`).join(", ")} }`;
     case "this":
     case "id":
     case "call":
     case "new":
+    case "match":
       // `classifyForWire` excludes these — reaching the renderer is a
       // bug upstream.  Emit a syntactically-valid placeholder so a
       // failing build is louder than a silently-wrong rule.

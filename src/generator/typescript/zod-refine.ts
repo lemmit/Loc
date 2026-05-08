@@ -121,13 +121,19 @@ function renderRefineExpr(e: ExprIR): string {
     case "ternary":
       return `${renderRefineExpr(e.cond)} ? ${renderRefineExpr(e.then)} : ${renderRefineExpr(e.otherwise)}`;
     case "lambda":
-      return `(${e.param}) => ${renderRefineExpr(e.body)}`;
+      // Slice 2: lambda body is now optional.  Wire-boundary refines
+      // never see block-body lambdas (`classifyForWire` only admits
+      // single-expression predicates), so falling back to the
+      // unrenderable placeholder is correct.
+      if (e.body) return `(${e.param}) => ${renderRefineExpr(e.body)}`;
+      return `(/*UNRENDERABLE:lambda-block*/ false)`;
     case "object":
       return `({ ${e.fields.map((f) => `${f.name}: ${renderRefineExpr(f.value)}`).join(", ")} })`;
     case "this":
     case "id":
     case "call":
     case "new":
+    case "match":
       // `classifyForWire` excludes these; reaching the renderer
       // means a bug upstream — emit a placeholder so a failing
       // build is louder than a silently-wrong refine.

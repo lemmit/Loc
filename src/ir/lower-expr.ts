@@ -31,6 +31,7 @@ import {
   isIntLit,
   isLambda,
   isLetStmt,
+  isMatchExpr,
   isMemberAccess,
   isNameRef,
   isNamedType,
@@ -348,10 +349,46 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
   }
   if (isLambda(expr)) {
     const inner = withLocal(env, expr.param, "lambda", { kind: "primitive", name: "string" });
+    // Slice 2: lambdas can carry either a single expression body
+    // (`x => expr`, the only v22 form) OR a brace-block of statements
+    // (`x => { stmt; stmt; … }`, new for page event handlers).  The
+    // grammar rule sets `body` xor `stmts`; we mirror that in the IR.
+    if (expr.body) {
+      return {
+        kind: "lambda",
+        param: expr.param,
+        body: lowerExpr(expr.body, inner),
+      };
+    }
+    // Block bodies thread the lambda-local env through each statement
+    // so a `let` in stmt N is visible in stmt N+1.  Statements inside
+    // a lambda block stay typed against the existing `Statement` /
+    // `StmtIR` rule — no new statement kinds needed.
+    const block: StmtIR[] = [];
+    let scopeEnv = inner;
+    for (const s of expr.stmts ?? []) {
+      const lowered = lowerStatement(s, scopeEnv);
+      block.push(lowered.stmt);
+      scopeEnv = lowered.envAfter;
+    }
     return {
       kind: "lambda",
       param: expr.param,
-      body: lowerExpr(expr.body, inner),
+      block,
+    };
+  }
+  if (isMatchExpr(expr)) {
+    // Predicate-arms expression — Slice 2 lowering is mechanical:
+    // each arm becomes a `{ cond, value }` pair, the optional
+    // `else => expr` becomes the `otherwise` slot.  Type unification
+    // across arms / soundness checks land in Slice 3 (validator).
+    return {
+      kind: "match",
+      arms: expr.arms.map((arm) => ({
+        cond: lowerExpr(arm.cond, env),
+        value: lowerExpr(arm.value, env),
+      })),
+      otherwise: expr.elseExpr ? lowerExpr(expr.elseExpr, env) : undefined,
     };
   }
   if (isObjectLit(expr)) {
@@ -602,6 +639,18 @@ export function inferExprType(
     return widenNumeric(left, right);
   }
   if (isTernaryExpr(expr)) return inferExprType(expr.thenExpr, env);
+  if (isMatchExpr(expr)) {
+    // Match expressions return one arm's value (or the `else`).
+    // Same posture as ternary — inspect the first arm's value type;
+    // soundness across arms is a Slice 3 validator concern (warn /
+    // error if arms disagree).
+    if (expr.arms.length > 0) return inferExprType(expr.arms[0]!.value, env);
+    if (expr.elseExpr) return inferExprType(expr.elseExpr, env);
+    // Empty match — degenerate, falls back to a string-typed
+    // placeholder (same default ternary uses).  Validator reports
+    // this as malformed.
+    return { kind: "primitive", name: "string" };
+  }
   if (isLambda(expr)) return { kind: "primitive", name: "string" };
   if (isNewExpr(expr)) {
     return { kind: "entity", name: expr.partType?.ref?.name ?? "Unknown" };

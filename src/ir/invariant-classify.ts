@@ -121,6 +121,12 @@ function exprIsTranslatable(
     case "lambda": {
       const inner = new Set(scope);
       inner.add(e.param);
+      // Slice 2: lambda body is now optional (block-body lambdas land
+      // for page event handlers).  Block bodies are always
+      // server-side (mutate state, navigate, call mutations) — never
+      // wire-translatable.  Single-expression lambdas keep their
+      // existing translatability rule.
+      if (!e.body) return false;
       return exprIsTranslatable(e.body, ctx, inner);
     }
     case "new":
@@ -140,6 +146,19 @@ function exprIsTranslatable(
         exprIsTranslatable(e.cond, ctx, scope) &&
         exprIsTranslatable(e.then, ctx, scope) &&
         exprIsTranslatable(e.otherwise, ctx, scope)
+      );
+    case "match":
+      // A match expression is wire-translatable iff every arm
+      // condition + value plus the `else` branch is.  Same posture
+      // as ternary — all sub-expressions must be translatable.
+      return (
+        e.arms.every(
+          (arm) =>
+            exprIsTranslatable(arm.cond, ctx, scope) &&
+            exprIsTranslatable(arm.value, ctx, scope),
+        ) &&
+        (e.otherwise === undefined ||
+          exprIsTranslatable(e.otherwise, ctx, scope))
       );
   }
 }
@@ -376,13 +395,27 @@ function firstFieldRef(e: ExprIR): string | null {
         null,
       );
     case "lambda":
-      return firstFieldRef(e.body);
+      // Slice 2: lambda body is now optional.  Block-body lambdas
+      // appear only in event handlers (page metamodel), never in
+      // wire-validating predicate bodies — fall through to null.
+      if (e.body) return firstFieldRef(e.body);
+      return null;
     case "new":
     case "object":
       return e.fields.reduce<string | null>(
         (acc, f) => acc ?? firstFieldRef(f.value),
         null,
       );
+    case "match":
+      // First arm (cond, then value), then the `else` branch — same
+      // left-to-right walk semantics as `ternary`.
+      for (const arm of e.arms) {
+        const fromCond = firstFieldRef(arm.cond);
+        if (fromCond) return fromCond;
+        const fromValue = firstFieldRef(arm.value);
+        if (fromValue) return fromValue;
+      }
+      return e.otherwise ? firstFieldRef(e.otherwise) : null;
     case "literal":
     case "this":
     case "id":
