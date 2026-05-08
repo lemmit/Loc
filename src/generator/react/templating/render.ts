@@ -64,6 +64,21 @@ export function renderListPage(
   return pack.render("page-list", { ...vm, columns });
 }
 
+/** Render a project-shell file through the loaded pack — used for
+ *  package.json, vite.config.ts, tsconfig.json, index.html,
+ *  Dockerfile, .dockerignore, src/api/client.ts and
+ *  src/api/config.ts.  All but `api-config` take an empty VM at
+ *  Phase 1.7; `api-config` takes `{ apiBaseUrl }`.  Phase 2 may
+ *  diverge per pack (shadcn → tailwind config in vite, Tailwind
+ *  deps in package.json, etc.). */
+export function renderShellFile(
+  name: string,
+  vm: unknown,
+  pack: LoadedPack,
+): string {
+  return pack.render(name, vm);
+}
+
 /** Render the theme.ts file through the loaded pack.  Returns the
  *  TS source (Mantine: createTheme config; shadcn: provisionally the
  *  same Mantine-shape file until Phase 2 brings the full shell). */
