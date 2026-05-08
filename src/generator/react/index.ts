@@ -202,6 +202,25 @@ export function generateReactForContexts(
   out.set(".dockerignore", renderShellFile("dockerignore", {}, pack));
   out.set("certs/.gitkeep", "");
 
+  // Pack-specific extras — emitted only when the pack registers
+  // the matching template name in its manifest.  Mantine pack
+  // doesn't ship Tailwind / globals.css / cn() utility, so it
+  // skips these files.  shadcn pack (Phase 2.1) ships all four
+  // so the generated project boots with Tailwind + the cn() helper
+  // ready for the components/ui/* files Phase 2.2 will add.
+  if (pack.templates.has("tailwind-config")) {
+    out.set("tailwind.config.ts", renderShellFile("tailwind-config", {}, pack));
+  }
+  if (pack.templates.has("postcss-config")) {
+    out.set("postcss.config.js", renderShellFile("postcss-config", {}, pack));
+  }
+  if (pack.templates.has("globals-css")) {
+    out.set("src/globals.css", renderShellFile("globals-css", {}, pack));
+  }
+  if (pack.templates.has("lib-utils")) {
+    out.set("src/lib/utils.ts", renderShellFile("lib-utils", {}, pack));
+  }
+
   return out;
 }
 
