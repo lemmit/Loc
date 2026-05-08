@@ -252,12 +252,16 @@ ${paramsBlock}
     .join("\n");
   return `// Auto-generated.
 import { Link } from "react-router-dom";
-import { Stack, Title, Text, Card, Group, Button, SimpleGrid } from "@mantine/core";
+import { Anchor, Breadcrumbs, Stack, Title, Text, Card, Group, Button, SimpleGrid } from "@mantine/core";
 import { IconBolt } from "@tabler/icons-react";
 
 export default function WorkflowsIndex() {
   return (
     <Stack data-testid="workflows-index" gap="md">
+      <Breadcrumbs data-testid="workflows-index-breadcrumbs">
+        <Anchor component={Link} to="/">Home</Anchor>
+        <Text>Workflows</Text>
+      </Breadcrumbs>
       <Stack gap={2}>
         <Title order={2}>Workflows</Title>
         <Text c="dimmed">System-level orchestrations.  Pick one to run.</Text>

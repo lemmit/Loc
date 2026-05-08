@@ -258,6 +258,37 @@ describe("react generator", () => {
     expect(productNew).toMatch(/<Stack gap="sm">/);
   });
 
+  it("every index-level page (aggregate list, workflows index, views index) shows a Home / <Section> breadcrumb", async () => {
+    const model = await buildModel("examples/acme.ddd");
+    const { files } = generateSystems(model);
+
+    // Aggregate list — Home / <Plural>.  Last segment is plain Text
+    // (current page), the rest are Anchor links so users can click
+    // back up.  The chip carries a stable testid so e2e drivers can
+    // assert presence.
+    const customersList = files.get("web_app/src/pages/customers/list.tsx")!;
+    expect(customersList).toMatch(
+      /<Breadcrumbs data-testid="customers-list-breadcrumbs">[\s\S]*?<Anchor component=\{Link\} to="\/">Home<\/Anchor>[\s\S]*?<Text>Customers<\/Text>[\s\S]*?<\/Breadcrumbs>/,
+    );
+
+    const ordersList = files.get("web_app/src/pages/orders/list.tsx")!;
+    expect(ordersList).toMatch(
+      /<Breadcrumbs data-testid="orders-list-breadcrumbs">[\s\S]*?<Text>Orders<\/Text>/,
+    );
+
+    // Workflows index — Home / Workflows.
+    const workflowsIndex = files.get("web_app/src/pages/workflows/index.tsx")!;
+    expect(workflowsIndex).toMatch(
+      /<Breadcrumbs data-testid="workflows-index-breadcrumbs">[\s\S]*?<Anchor component=\{Link\} to="\/">Home<\/Anchor>[\s\S]*?<Text>Workflows<\/Text>/,
+    );
+
+    // Views index — Home / Views.
+    const viewsIndex = files.get("web_app/src/pages/views/index.tsx")!;
+    expect(viewsIndex).toMatch(
+      /<Breadcrumbs data-testid="views-index-breadcrumbs">[\s\S]*?<Text>Views<\/Text>/,
+    );
+  });
+
   it("polishes pages with formatters, skeleton loaders, op-button icons, and *Id heuristic links", async () => {
     const model = await buildModel("examples/acme.ddd");
     const { files } = generateSystems(model);

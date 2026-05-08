@@ -245,12 +245,16 @@ ${shapeLine}
     .join("\n");
   return `// Auto-generated.
 import { Link } from "react-router-dom";
-import { Stack, Title, Text, Card, Group, Button, SimpleGrid } from "@mantine/core";
+import { Anchor, Breadcrumbs, Stack, Title, Text, Card, Group, Button, SimpleGrid } from "@mantine/core";
 import { IconLayoutList } from "@tabler/icons-react";
 
 export default function ViewsIndex() {
   return (
     <Stack data-testid="views-index" gap="md">
+      <Breadcrumbs data-testid="views-index-breadcrumbs">
+        <Anchor component={Link} to="/">Home</Anchor>
+        <Text>Views</Text>
+      </Breadcrumbs>
       <Stack gap={2}>
         <Title order={2}>Views</Title>
         <Text c="dimmed">Saved queries.  Pick one to inspect.</Text>
