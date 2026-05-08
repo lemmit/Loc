@@ -198,6 +198,9 @@ export default function App(): JSX.Element {
   // Reset the whole pipeline + UI state when the user picks a
   // different example.  The reducer's RESET kills generate/bundle/
   // boot/dispatch in one shot — no scattered setters to forget.
+  // Also kicks the auto-Generate timer so picking an example does
+  // a "type one char to trigger" without the typing — the user
+  // sees fresh files in the tree ~800 ms later automatically.
   useEffect(() => {
     sourceRef.current = initialSource;
     writeHashSource(initialSource);
@@ -206,6 +209,10 @@ export default function App(): JSX.Element {
     setSelectedPath(null);
     setRightPane("files");
     runtimeClientRef.current?.reset();
+    scheduleAutoGenerate();
+    // scheduleAutoGenerate is stable (refs only); excluding from deps
+    // avoids re-firing the effect when the ref churns.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSource]);
 
   // Debounced URL-hash mirror for live edits.
@@ -216,9 +223,37 @@ export default function App(): JSX.Element {
       writeHashSource(text);
     }, 300);
   };
+
+  // Auto-Generate: fire `runGenerate()` after the source has been
+  // idle for 800 ms.  Skips when the LSP says the source has parse
+  // errors (no point asking the build worker to fail on the same
+  // text) and when a generation is already in flight (the next
+  // edit will retry).  Manual Bundle / Boot stay explicit because
+  // they touch the network and PGlite state respectively — auto-
+  // bundling would re-fire ~140 esm.sh fetches per keystroke run
+  // even with the warm cache; auto-booting would wipe the user's
+  // PGlite data on every edit.
+  //
+  // Refs (errorCount / generating / source) are read at fire-time,
+  // not capture-time, so the timer always reflects the latest
+  // editor state when the 800 ms idle elapses.
+  const autoGenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const errorCountRef = useRef(0);
+  const generatingRef = useRef(false);
+  generatingRef.current = pipeline.generating;
+  const runGenerateRef = useRef<() => Promise<void> | void>(() => {});
+  const scheduleAutoGenerate = (): void => {
+    if (autoGenTimerRef.current) clearTimeout(autoGenTimerRef.current);
+    autoGenTimerRef.current = setTimeout(() => {
+      if (errorCountRef.current === 0 && !generatingRef.current) {
+        void runGenerateRef.current();
+      }
+    }, 800);
+  };
   useEffect(() => {
     return () => {
       if (hashTimerRef.current) clearTimeout(hashTimerRef.current);
+      if (autoGenTimerRef.current) clearTimeout(autoGenTimerRef.current);
     };
   }, []);
 
@@ -236,6 +271,9 @@ export default function App(): JSX.Element {
 
   const errorCount = diagnostics.filter((d) => d.severity === "error").length;
   const warningCount = diagnostics.filter((d) => d.severity === "warning").length;
+  // Mirror into the ref so the auto-Generate timer can read fresh
+  // values without forcing a rebind on every render.
+  errorCountRef.current = errorCount;
 
   // Pipeline selectors — read paths in one place, compose JSX cheaply.
   const generateResult = pipeline.generate.kind === "result"
@@ -268,6 +306,11 @@ export default function App(): JSX.Element {
       setSelectedPath(null);
     }
   }
+  // Stash the latest closure for the auto-Generate timer — the
+  // timer is created in a ref-scoped helper, so it can't capture
+  // `runGenerate` directly.  Updating the ref every render is fine
+  // (cheap, and timer only fires once).
+  runGenerateRef.current = runGenerate;
 
   async function runBundle(): Promise<void> {
     const client = bundleClientRef.current;
@@ -437,6 +480,7 @@ export default function App(): JSX.Element {
                 onChange={(text) => {
                   sourceRef.current = text;
                   scheduleHashSync(text);
+                  scheduleAutoGenerate();
                 }}
                 onDiagnosticsChange={setDiagnostics}
               />
