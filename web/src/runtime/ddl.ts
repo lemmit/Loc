@@ -144,10 +144,17 @@ export function synthDDL(
   const lines: string[] = [];
 
   // Enums first — column declarations in CREATE TABLE may reference
-  // their type names.
+  // their type names.  Postgres lacks `CREATE TYPE IF NOT EXISTS`
+  // so we wrap each in a DO block that catches the duplicate-object
+  // error.  Idempotent on re-run, which lets the runtime worker
+  // re-apply this DDL against a persistent OPFS PGlite without
+  // dropping data first.
   for (const e of enums) {
     const values = e.enumValues.map(quoteSqlString).join(", ");
-    lines.push(`CREATE TYPE ${quoteIdent(e.enumName)} AS ENUM (${values});`);
+    lines.push(
+      `DO $$ BEGIN CREATE TYPE ${quoteIdent(e.enumName)} AS ENUM (${values}); ` +
+        `EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+    );
   }
 
   for (const t of tables) {
@@ -159,13 +166,19 @@ export function synthDDL(
       if (c.primary) parts.push("PRIMARY KEY");
       colDefs.push(`  ${parts.join(" ")}`);
     }
-    lines.push(`CREATE TABLE ${quoteIdent(cfg.name)} (\n${colDefs.join(",\n")}\n);`);
+    // `IF NOT EXISTS` makes table creation idempotent.  Note: this
+    // doesn't migrate existing tables — if the source schema
+    // changes, the user has to "Reset DB" to drop + re-create.
+    lines.push(
+      `CREATE TABLE IF NOT EXISTS ${quoteIdent(cfg.name)} (\n${colDefs.join(",\n")}\n);`,
+    );
     for (const ix of cfg.indexes) {
       const cols = ix.config.columns
         .map((c) => quoteIdent(c.name ?? c.fieldName ?? "?"))
         .join(", ");
       lines.push(
-        `CREATE INDEX ${quoteIdent(ix.config.name)} ON ${quoteIdent(cfg.name)} (${cols});`,
+        `CREATE INDEX IF NOT EXISTS ${quoteIdent(ix.config.name)} ` +
+          `ON ${quoteIdent(cfg.name)} (${cols});`,
       );
     }
   }

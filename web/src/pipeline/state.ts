@@ -49,7 +49,7 @@ export type BundleSlot =
 
 export type BootSlot =
   | { kind: "none" }
-  | { kind: "ok"; ddl: string }
+  | { kind: "ok"; ddl: string; persistent: boolean }
   | { kind: "fail"; message: string };
 
 export type DispatchSlot =
@@ -102,11 +102,15 @@ export type PipelineAction =
   | { type: "BUNDLE_DONE"; hono: BundleResult; react: BundleResult | null }
   // Boot
   | { type: "BOOT_START" }
-  | { type: "BOOT_OK"; ddl: string }
+  | { type: "BOOT_OK"; ddl: string; persistent: boolean }
   | { type: "BOOT_FAIL"; message: string }
   // Dispatch (a single HTTP call from the request composer)
   | { type: "DISPATCH_START" }
-  | { type: "DISPATCH_DONE"; result: DispatchResult };
+  | { type: "DISPATCH_DONE"; result: DispatchResult }
+  // "Reset DB" — clears stale dispatch result without touching the
+  // boot/bundle/generate slots, since the booted PGlite is still
+  // valid (just emptied of rows).
+  | { type: "DISPATCH_CLEAR" };
 
 // ---------------------------------------------------------------------
 // Convenience selectors.  Keeps JSX terse + makes the read paths
@@ -131,6 +135,10 @@ export function reactBundleOk(s: PipelineState): BundleOk | null {
 
 export function bootedDDL(s: PipelineState): string | null {
   return s.boot.kind === "ok" ? s.boot.ddl : null;
+}
+
+export function bootPersistent(s: PipelineState): boolean {
+  return s.boot.kind === "ok" && s.boot.persistent;
 }
 
 export function bootError(s: PipelineState): string | null {

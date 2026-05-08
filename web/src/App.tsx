@@ -32,12 +32,14 @@ import {
   readHashSource,
   writeHashSource,
 } from "./util/share";
+import { fnv1a32 } from "./util/hash";
 import {
   initialPipelineState,
   pipelineReducer,
 } from "./pipeline/reducer";
 import {
   bootError as selBootError,
+  bootPersistent as selBootPersistent,
   bootedDDL as selBootedDDL,
   generateOk as selGenerateOk,
   honoBundleOk as selHonoBundleOk,
@@ -286,6 +288,7 @@ export default function App(): JSX.Element {
   const honoBundle = selHonoBundleOk(pipeline);
   const reactBundle = selReactBundleOk(pipeline);
   const ddl = selBootedDDL(pipeline);
+  const persistent = selBootPersistent(pipeline);
   const bootErrorMessage = selBootError(pipeline);
   const dispatchSlot = pipeline.dispatch.kind === "result"
     ? pipeline.dispatch.result
@@ -359,9 +362,23 @@ export default function App(): JSX.Element {
     if (!runtime || !honoBundle) return;
     dispatch({ type: "BOOT_START" });
     try {
-      const res = await runtime.boot(honoBundle.code);
+      // Source-keyed OPFS path: each unique `.ddd` gets its own
+      // PGlite data island that survives page reloads.  FNV-1a 32
+      // gives an 8-char hex ID; collisions are tolerated because
+      // synthDDL emits idempotent CREATE-IF-NOT-EXISTS statements
+      // (a hash collision just means two sources share a DB).
+      const sourceHash = fnv1a32(sourceRef.current);
+      const dataDir = `opfs-ahp://loom-${sourceHash}`;
+      const res = await runtime.boot({
+        bundleCode: honoBundle.code,
+        dataDir,
+      });
       if (res.ok) {
-        dispatch({ type: "BOOT_OK", ddl: res.ddl });
+        dispatch({
+          type: "BOOT_OK",
+          ddl: res.ddl,
+          persistent: res.persistent,
+        });
       } else {
         dispatch({ type: "BOOT_FAIL", message: res.message });
       }
@@ -371,6 +388,17 @@ export default function App(): JSX.Element {
         message: err instanceof Error ? err.message : String(err),
       });
     }
+  }
+
+  async function runWipe(): Promise<void> {
+    const runtime = runtimeClientRef.current;
+    if (!runtime || ddl === null) return;
+    // Wipe is in-place: the booted PGlite stays attached and the
+    // Hono app keeps working — only the rows go.  Clear any stale
+    // dispatch result so the UI doesn't keep showing a list/get
+    // response from before the wipe.
+    await runtime.wipe();
+    dispatch({ type: "DISPATCH_CLEAR" });
   }
 
   async function runDispatch(): Promise<void> {
@@ -635,6 +663,32 @@ export default function App(): JSX.Element {
                   <Badge size="xs" color="green" variant="light" data-testid="backend-status">booted</Badge>
                 ) : (
                   <Badge size="xs" color="gray" variant="light" data-testid="backend-status">offline</Badge>
+                )}
+                {ddl && (
+                  <Badge
+                    size="xs"
+                    color={persistent ? "blue" : "gray"}
+                    variant="light"
+                    title={
+                      persistent
+                        ? "Rows survive page reload — PGlite is OPFS-backed, keyed by source hash."
+                        : "Browser refused OPFS storage — rows live in memory and are wiped on reload."
+                    }
+                    data-testid="persistence-status"
+                  >
+                    {persistent ? "persisted" : "in-memory"}
+                  </Badge>
+                )}
+                {ddl && (
+                  <Button
+                    size="xs"
+                    variant="default"
+                    onClick={runWipe}
+                    title="Drop every row in the booted PGlite and re-apply the schema."
+                    data-testid="btn-wipe"
+                  >
+                    Reset DB
+                  </Button>
                 )}
                 <Button
                   size="xs"

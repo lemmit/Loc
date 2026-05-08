@@ -79,7 +79,7 @@ export function pipelineReducer(
       return {
         ...state,
         booting: false,
-        boot: { kind: "ok", ddl: action.ddl },
+        boot: { kind: "ok", ddl: action.ddl, persistent: action.persistent },
       };
     case "BOOT_FAIL":
       return {
@@ -97,6 +97,8 @@ export function pipelineReducer(
         dispatching: false,
         dispatch: { kind: "result", result: action.result },
       };
+    case "DISPATCH_CLEAR":
+      return { ...state, dispatch: NONE_DISPATCH };
   }
 }
 

@@ -25,7 +25,14 @@ interface BundleModule {
   createApp: (db: unknown) => { fetch: (req: Request) => Promise<Response> };
   schema: Record<string, unknown>;
   drizzle: (pglite: unknown, opts: { schema: Record<string, unknown> }) => unknown;
-  PGlite: new (options?: unknown) => { exec: (sql: string) => Promise<unknown>; close?: () => Promise<void> };
+  // `new PGlite()`, `new PGlite(options)`, or `new PGlite(dataDir, options)`.
+  // PGlite picks the right overload based on whether the first arg is
+  // a string.  `dataDir` of `":memory:"` (or omitted) is in-memory;
+  // `"opfs-ahp://<name>"` enables OPFS persistence.
+  PGlite: new (
+    dataDirOrOptions?: string | unknown,
+    options?: unknown,
+  ) => { exec: (sql: string) => Promise<unknown>; close?: () => Promise<void> };
   is: (value: unknown, type: unknown) => boolean;
   Table: unknown;
   getTableConfig: (t: unknown) => never;
@@ -67,12 +74,19 @@ async function loadPgliteAssets(): Promise<{
 
 interface RuntimeState {
   app: { fetch: (req: Request) => Promise<Response> };
-  pglite: { close?: () => Promise<void> };
+  pglite: { close?: () => Promise<void>; exec: (sql: string) => Promise<unknown> };
   ddl: string;
   /** Blob URL the bundle was loaded from.  Tracked here so we can
    *  revoke on reset and on the next boot — without this, every
    *  successful Boot leaks one URL for the worker's lifetime. */
   bundleUrl: string;
+  /** Cached `mod.PGlite` ctor for `wipe()` to reuse.  We could
+   *  instead `mod.drizzle(state.pglite, ...)` to rebuild the app,
+   *  but DROP+CREATE inside the existing PGlite is simpler. */
+  PGlite: BundleModule["PGlite"];
+  drizzle: BundleModule["drizzle"];
+  schema: BundleModule["schema"];
+  createApp: BundleModule["createApp"];
 }
 
 let state: RuntimeState | null = null;
@@ -98,7 +112,7 @@ async function tearDownState(): Promise<void> {
   state = null;
 }
 
-async function boot(bundleCode: string): Promise<BootResult> {
+async function boot(bundleCode: string, dataDir?: string): Promise<BootResult> {
   const start = performance.now();
   // Tear down a previous boot if present (close PGlite + revoke its
   // bundle URL).
@@ -120,10 +134,29 @@ async function boot(bundleCode: string): Promise<BootResult> {
   // browsers re-fetch sub-resources lazily.  Stored on `state` so
   // tearDownState can revoke it on reset / next boot.
 
+  // Try the requested persistent backend first; fall back to
+  // in-memory if the browser refuses (Safari < 17, restrictive
+  // iframe sandboxing, etc.).  `persistent` flag flows back to the
+  // UI so the badge can say "in-memory" instead of misleadingly
+  // claiming "persisted" when storage is actually ephemeral.
   let pglite;
+  let persistent = false;
   try {
     const assets = await loadPgliteAssets();
-    pglite = new mod.PGlite(assets);
+    if (dataDir && dataDir !== ":memory:") {
+      try {
+        pglite = new mod.PGlite(dataDir, assets);
+        persistent = true;
+      } catch (err) {
+        console.warn(
+          `[runtime] persistent dataDir "${dataDir}" rejected, falling back to :memory:`,
+          err,
+        );
+        pglite = new mod.PGlite(assets);
+      }
+    } else {
+      pglite = new mod.PGlite(assets);
+    }
   } catch (err) {
     return {
       ok: false,
@@ -165,8 +198,22 @@ async function boot(bundleCode: string): Promise<BootResult> {
     };
   }
 
-  state = { app, pglite, ddl, bundleUrl: url };
-  return { ok: true, ddl, durationMs: Math.round(performance.now() - start) };
+  state = {
+    app,
+    pglite,
+    ddl,
+    bundleUrl: url,
+    PGlite: mod.PGlite,
+    drizzle: mod.drizzle,
+    schema: mod.schema,
+    createApp: mod.createApp,
+  };
+  return {
+    ok: true,
+    ddl,
+    durationMs: Math.round(performance.now() - start),
+    persistent,
+  };
 }
 
 async function dispatch(req: SerializedRequest): Promise<DispatchResult> {
@@ -223,19 +270,53 @@ async function reset(): Promise<{ ok: true }> {
   return { ok: true };
 }
 
+// Drop every user object inside the currently-booted PGlite, then
+// re-apply DDL from the cached schema metadata.  Works the same
+// for in-memory and OPFS-backed PGlite — for OPFS the underlying
+// data island is preserved (so the next reload reattaches a clean
+// schema), but the rows are gone.  No-op when not booted.
+async function wipe(): Promise<{ ok: boolean; message?: string }> {
+  if (!state) {
+    return { ok: false, message: "Runtime not booted — nothing to wipe." };
+  }
+  try {
+    // `DROP SCHEMA public CASCADE; CREATE SCHEMA public;` is the
+    // shortest path to "remove every user object and start fresh".
+    // Postgres-flavoured PGlite supports it.  We then re-run the
+    // saved DDL to recreate the tables in the same shape.
+    await state.pglite.exec(
+      "DROP SCHEMA public CASCADE; CREATE SCHEMA public;",
+    );
+    if (state.ddl.trim().length > 0) {
+      await state.pglite.exec(state.ddl);
+    }
+    // The drizzle db + Hono app are still bound to the same
+    // PGlite instance, so they keep working without a rebuild.
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      message: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 self.onmessage = async (ev: MessageEvent<RuntimeRpcRequest>) => {
   const req = ev.data;
   const response: RuntimeRpcResponse = { id: req.id };
   try {
     switch (req.method) {
       case "boot":
-        response.result = await boot(req.params.bundleCode);
+        response.result = await boot(req.params.bundleCode, req.params.dataDir);
         break;
       case "dispatch":
         response.result = await dispatch(req.params);
         break;
       case "reset":
         response.result = await reset();
+        break;
+      case "wipe":
+        response.result = await wipe();
         break;
       default:
         response.error = {
