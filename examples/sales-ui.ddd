@@ -1,216 +1,164 @@
 // Sales — UI metamodel example.
 //
-// This file is a *prototype* of the page-language proposed in
-// docs/page-metamodel.md.  It does NOT parse with the current Langium
-// grammar; it is a target syntax intended to drive the discussion.
+// Prototype syntax for the page metamodel proposed in
+// docs/page-metamodel.md.  Reads alongside examples/sales.ddd (the
+// domain it sits on) and examples/acme.ddd (the system + deployable
+// shell it would slot into).
 //
-// Read it alongside examples/sales.ddd (the domain model it sits on
-// top of) and examples/acme.ddd (the system + deployable shell).
+// Six new keywords used: ui, page, component, scaffold, state, menu.
+// Builtin components used (closed v0 stdlib): List, Detail, Form,
+// MasterDetail, Dashboard, Wizard, Stage, Stack, Grid, Card, Stat,
+// Heading, Badge, Toolbar, Action.
 //
-// Three claims this file tries to demonstrate:
-//
-//   1. The default behaviour ("auto-CRUD per module") is one line:
-//      `scaffold modules: Sales`.  The current React generator's
-//      output is recovered by desugaring that macro.
-//
-//   2. Custom pages, master-detail, on-page event flows, and mixed
-//      data sources (repository finds + views + workflows + external
-//      APIs) are first-class — no escape into TS.
-//
-//   3. Every name is typed end-to-end via the existing Loom IR.
-//      No new type system; the page IR borrows TypeRef, Expression,
-//      and Statement from the domain DSL.
+// This file does NOT parse with the current Langium grammar; it is
+// the target syntax driving the discussion.
 
-ui SalesAdmin for webApp {
+ui SalesAdmin {
 
-  // ── 1. Default scaffolding ───────────────────────────────────────
-  // Same shapes the current generator emits: list / new / detail per
-  // aggregate, table per view, form per workflow.  Lowers to a set of
-  // synthesised `page` declarations.  Anything explicitly declared
-  // below replaces the matching scaffolded page.
-  scaffold modules: Sales, Catalog
+  // ── 1. Mixed-granularity scaffolding ────────────────────────────
+  // Catalog: take everything (whole module).
+  // Sales: cherry-pick — Customer + Product auto, Order custom below.
+  scaffold modules: Catalog
+  scaffold aggregates: Customer, Product
+  scaffold views:      ActiveOrders, OrderSummary, CustomerOrders
 
 
-  // ── 2. Reusable component ────────────────────────────────────────
-  // Components are typed, parameterised, and may declare their own
-  // local state and event flows.  They compose via `show`.
+  // ── 2. Reusable component ───────────────────────────────────────
+  // Component = typed function from params (+ optional state) to a
+  // body.  No route, no menu — pure region tree.
   component OrderPanel(order: Order) {
-    show Stack(gap: 16) {
-      show Heading("Order " + order.id, level: 2)
-      show Badge(order.status)
-
-      show Table(order.lines) {
-        column product:  l => l.productId
-        column qty:      l => l.quantity
-        column price:    l => l.unitPrice
-        column subtotal: l => l.subtotal
-      }
-
-      show Toolbar {
-        show Button("Confirm") {
-          enabled: order.isMutable() && order.lines.count > 0
-          on click: flow {
-            call confirm({ id: order.id })
-            toast.success("Order confirmed")
-            navigate to OrderConsole(customerId: order.customerId)
-          }
-        }
-        show Button("Cancel", variant: "danger") {
-          enabled: order.isMutable()
-          on click: flow {
-            call cancel({ id: order.id })
-            navigate to OrderConsole(customerId: order.customerId)
-          }
-        }
-      }
-    }
+    body: Stack([
+      Heading("Order " + order.id, level: 2),
+      Badge(order.status),
+      Table(order.lines, columns: [productId, quantity, unitPrice, subtotal]),
+      Toolbar([
+        Action(confirm, then: navigate(OrderConsole, { customerId: order.customerId })),
+        Action(cancel,  then: toast("Cancelled"))
+      ])
+    ])
   }
 
 
-  // ── 3. Reusable flow ─────────────────────────────────────────────
-  // Flows reuse the existing Statement vocabulary (precondition, let,
-  // call, emit, :=) plus three new actions: navigate, toast, state-
-  // assignment.  This flow is callable from any `on click: <flow>`.
-  flow placeAndOpen(customerId: Id<Customer>) {
-    requires currentUser.permissions.contains(sales.placeOrder)
-    let order = call placeOrder({
-      customerId: customerId,
-      placedAt: now()
-    })
-    toast.success("Order placed")
-    navigate to OrderConsole(customerId: customerId)
-  }
-
-
-  // ── 4. A custom page that *replaces* the auto-scaffolded detail ──
-  // Mixes a repo find, a view (snowflake), and a mutation handle
-  // into a master-detail layout with state-driven selection and a
-  // page-level toggle for filtering.
+  // ── 3. Custom master-detail page ────────────────────────────────
+  // Replaces the auto-scaffolded OrderDetail (override-by-name —
+  // OrderDetail isn't scaffolded here because Order isn't in our
+  // aggregate scaffold list, but the same mechanism would apply if
+  // it were).  Uses the MasterDetail builtin component, which
+  // packages list + selection state + detail panel.
   page OrderConsole(customerId: Id<Customer>) {
-    route: "/customers/:customerId/orders"
-    title: "Orders for {{customer.name}}"
-    requires currentUser.permissions.contains(sales.viewOrders)
+    route:    "/customers/:customerId/orders"
+    title:    "Orders for " + customer.name
+    requires  currentUser.permissions.contains(sales.viewOrders)
 
-    // Typed, declarative data sources — every name carries a static type.
-    data customer = Customers.byId(customerId)               // : Customer
-    data orders   = Orders.byCustomer(customerId)            // : Order[]
-    data summary  = view OrderSummary                        // : OrderSummaryRow[]
-    data confirm  = mutation Order.confirm                   // : (in: ConfirmInput) => Promise<Order>
-    data cancel   = mutation Order.cancel                    // : (in: CancelInput)  => Promise<Order>
-
-    // URL-synced and ephemeral state.
-    @url state showDraftsOnly: bool = false
     state selectedId: Id<Order>?
 
-    // Layout & content.
-    layout MasterDetail(masterWidth: 360) {
-      master {
-        show Toolbar {
-          show Heading(customer.name, level: 1)
-          show Toggle(showDraftsOnly) { label: "Drafts only" }
-        }
-        show List(
-          orders,
-          filter: o => !showDraftsOnly || o.status == Draft
-        ) {
-          item: o => Card {
-            title:    "Order " + o.id,
-            subtitle: o.placedAt,
-            badge:    o.status
-          }
-          empty: "No orders for this customer."
-          on select: o => selectedId := o.id
-        }
-      }
-      detail when selectedId != null {
-        show OrderPanel(orders[selectedId])
-      }
-    }
+    body: MasterDetail(
+      of:      Order,
+      scope:   Orders.byCustomer(customerId),
+      actions: [confirm, cancel],
+      detail:  order => OrderPanel(order)        // pass our custom panel as the detail renderer
+    )
 
-    // Page-level event flows.
-    on orders.error:   e => toast.error("Failed to load orders: " + e.message)
-    on customer.error: _ => navigate to CustomerNotFound
+    menu { section: "Sales", label: "Order console" }
   }
 
 
-  // ── 5. A dashboard page — pure read, mixes views + external API ──
+  // ── 4. Plain list + detail for Order ────────────────────────────
+  // We didn't scaffold Order; declare its remaining pages explicitly.
+  page OrderList {
+    route: "/orders"
+    body:  List(of: Order)
+    menu   { section: "Sales", label: "All orders" }
+  }
+
+  page OrderDetail(id: Id<Order>) {
+    route: "/orders/:id"
+    body:  Detail(of: Order, by: id)
+    menu   { hidden: true }                      // not in sidebar; reached via row-click
+  }
+
+
+  // ── 5. Workflow-driven wizard page ──────────────────────────────
+  // Wizard is a stdlib component, not a keyword.  `builds:` declares
+  // the typed accumulating draft; each Stage validates a slice; the
+  // final stage `submits:` the workflow.
+  page PlaceOrderWizard {
+    route:    "/orders/new"
+    title:    "New order"
+    requires  currentUser.permissions.contains(sales.placeOrder)
+
+    body: Wizard(
+      builds: PlaceOrderRequest,
+      stages: [
+        Stage("Customer", fields: [customerId]),
+        Stage("Items",    fields: [items], guard: draft.customerId != null),
+        Stage("Review",   summary: draft, submits: placeOrder,
+                          then: navigate(OrderConsole, { customerId: draft.customerId }))
+      ]
+    )
+
+    menu { section: "Sales", label: "New order" }
+  }
+
+
+  // ── 6. Dashboard page — composite read-only ─────────────────────
+  // Mixes views and an external typed API.  Dashboard takes an items
+  // array of cards/stats/tables; layout is grid by default.
   page SalesDashboard {
     route: "/dashboard"
     title: "Sales dashboard"
 
-    data confirmed   = view ActiveOrders                      // existing shorthand view
-    data byCustomer  = view CustomerOrders                    // existing snowflake view
-    data fxRate      = api ExchangeRates.usd(currency: "EUR") // external typed API
+    body: Dashboard(items: [
+      Card("Confirmed orders", Stat(view ActiveOrders, format: "count")),
+      Card("EUR/USD",          Stat(api ExchangeRates.usd("EUR"), decimals: 4)),
+      Card("Customer breakdown", Table(view CustomerOrders), span: 2)
+    ])
 
-    layout Grid(cols: 2) {
-      show Card {
-        title: "Confirmed orders"
-        show Stat(confirmed.length, suffix: " open")
-      }
-      show Card {
-        title: "EUR/USD"
-        show Stat(fxRate.rate, decimals: 4)
-      }
-      show Card(span: 2) {
-        title: "Customer breakdown"
-        show Table(byCustomer) {
-          column customer: r => r.customerName
-          column email:    r => r.customerEmail
-          column status:   r => r.status
-        }
-      }
-    }
+    menu { section: "Reports", label: "Dashboard", order: 0 }
   }
 
 
-  // ── 6. A workflow-driven wizard page ─────────────────────────────
-  // Demonstrates a custom page bound to a workflow as its primary
-  // mutation, with explicit form fields and a flow for the submit
-  // event.  Replaces the auto-scaffolded /workflows/place-order page.
-  page PlaceOrderWizard {
-    route: "/orders/new"
-    title: "New order"
-    requires currentUser.permissions.contains(sales.placeOrder)
-
-    data customers = Customers.all()           // for the customer picker
-    data place     = workflow placeOrder       // : (in: PlaceOrderInput) => Promise<void>
-
-    state customerId: Id<Customer>?
-    state placedAt: datetime = now()
-
-    show Form {
-      show Field(customerId) { label: "Customer", source: customers }
-      show Field(placedAt)   { label: "Placed at" }
-
-      show Button("Place order", variant: "primary") {
-        enabled: customerId != null
-        on click: flow {
-          precondition customerId != null
-          call place({ customerId: customerId, placedAt: placedAt })
-          toast.success("Order placed")
-          navigate to OrderConsole(customerId: customerId)
-        }
-      }
+  // ── 7. Explicit menu — overrides the default scaffold grouping ──
+  // Without this block, the sidebar would be derived from each page's
+  // `menu { section, label, order }` metadata, grouped by section.
+  // This block lets us reorder, regroup, and add external links.
+  menu {
+    section "Sales" {
+      link SalesDashboard,
+      link OrderList,
+      link OrderConsole,
+      link PlaceOrderWizard
+    }
+    section "Lookup" {
+      link CustomerList,                         // scaffolded, found by name
+      link ProductList                           // scaffolded, found by name
+    }
+    section "Reports" {
+      link ActiveOrdersView,                     // scaffolded view page
+      link OrderSummaryView,                     // scaffolded view page
+      link CustomerOrdersView                    // scaffolded view page
+    }
+    section "External" {
+      link "Loom docs" -> "https://docs.acme.com",
+      link "Status"    -> "https://status.acme.com"
     }
   }
 }
 
 
-// ── 7. What `scaffold modules: Sales` desugars into ────────────────
+// ── 8. What `scaffold modules: Catalog` desugars into ─────────────
 //
-// (Conceptually — produced by lowering, not written by the user.)
-// Showing here only to make the desugaring tangible.
+// (Conceptually — produced by lowering, not written by the user.
+// Catalog assumed here to contain a single Product aggregate; if it
+// also held workflows or views, those would scaffold too.)
 //
-//   page CustomerList   { route: "/customers",          ... }
-//   page CustomerNew    { route: "/customers/new",      ... }
-//   page CustomerDetail(id: Id<Customer>) { route: "/customers/:id", ... }
-//   page ProductList    { route: "/products",           ... }
-//   page ProductNew     { route: "/products/new",       ... }
-//   page ProductDetail(id: Id<Product>)   { route: "/products/:id",  ... }
-//   page OrderList      { route: "/orders",             ... }
-//   page OrderNew       { route: "/orders/new",         ... }   // replaced by PlaceOrderWizard
-//   page OrderDetail(id: Id<Order>)       { route: "/orders/:id",    ... } // replaced by OrderConsole
-//   page ActiveOrdersView      { route: "/views/active-orders",      ... }
-//   page OrderSummaryView      { route: "/views/order-summary",      ... }
-//   page CustomerOrdersView    { route: "/views/customer-orders",    ... }
-//   page PlaceOrderWorkflow    { route: "/workflows/place-order",    ... } // replaced by PlaceOrderWizard
+//   page CatalogProductList   { route: "/catalog/products",        body: List(of: Product) }
+//   page CatalogProductNew    { route: "/catalog/products/new",    body: Form(creates: Product) }
+//   page CatalogProductDetail(id: Id<Product>) {
+//                               route: "/catalog/products/:id",    body: Detail(of: Product, by: id) }
+//
+// Each gets default menu metadata: section "Aggregates", label
+// "Products", which the explicit `menu { … }` block above ignores
+// (no `link` references them) — so they exist as routes but don't
+// appear in the sidebar.  Same mechanism as `menu { hidden: true }`,
+// applied via omission rather than declaration.

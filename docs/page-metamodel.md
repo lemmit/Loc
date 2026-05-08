@@ -1,394 +1,518 @@
-# Page metamodel — RFC
+# Page metamodel — RFC v0
 
-> **Status:** prototype / discussion. The current `react` generator is a one-shot
-> module-to-CRUD scaffolder. This document proposes a **page metamodel** that
-> makes pages, data sources, state, and on-page event flows first-class language
-> constructs, with the existing CRUD generation re-expressed as a `scaffold`
-> macro that desugars into the same metamodel.
+> **Status:** prototype / discussion. Supersedes the v22 React generator's
+> hardcoded module-to-CRUD scaffolder with a small declarative metamodel:
+> pages, components, scaffolding, state, menus. Six keywords total.
 
 ---
 
-## 1. The problem with today's React generator
+## 1. Vision
 
-`src/generator/react/` (3.7K LOC) is a procedural emitter that walks the IR and
-prints TSX. It's a **single hardcoded layout per construct kind**:
+Today's React generator is a procedural emitter that prints TSX from the
+domain IR. There is no source representation of "a page", so any UI choice
+that diverges from the implicit list/new/detail-per-aggregate shape requires
+forking the generator in TypeScript. This RFC promotes the page to a
+first-class language construct, with the existing CRUD behaviour recovered as
+a `scaffold` macro that desugars into the same metamodel.
 
-- `aggregate` → list / new / detail (+ master-detail for `contains`, modals
-  for operations)
-- `workflow` → form page
-- `view` → table page
+Design posture, in three rules:
 
-The result is good for the 80% CRUD case, but the *source of truth* for the UI
-lives only in the generator's string builders. That has four costs:
-
-1. **No textual representation of "a page".** You can't read, refer to, test, or
-   override a page in the DSL — only by editing TypeScript in the generator.
-2. **No event flows.** The implicit flow is "submit → mutate → invalidate →
-   navigate". There's no syntax for "submit → if status == Draft → call
-   `confirm` → toast → navigate", or "filter changes → debounce → refetch".
-3. **No composition.** Master-detail across two aggregates, a dashboard, a
-   wizard, a settings page that mixes a view and a workflow — none of these
-   have a representation. They have to be hand-written outside the generator.
-4. **Three concept-specific page generators already exist** (aggregate, view,
-   workflow). That's the metamodel knocking on the door.
-
-The user's framing: today's behaviour should be a **special case** —
-*the unrolling* of a per-module scaffold macro — not the only way to express
-a frontend.
+1. **Closed and minimal.** Six new keywords, no macro system, no record
+   algebra. Same posture Loom takes for its domain language.
+2. **Reuse the existing IR for typing.** Data sources resolve to repository
+   finds, views, operations, workflows, external APIs — every name is typed
+   via the existing signature, no parallel type system.
+3. **Declarative over procedural.** Each line is a fact; structure is
+   carried by component invocations (typed function calls), not by nested
+   visual trees.
 
 ---
 
-## 2. What no-code metamodels converge on
+## 2. Six new keywords
 
-Surveying **Retool, Appsmith, Budibase, ToolJet, OutSystems, Mendix, Bubble,
-PowerApps, Sanity Studio, Refine.dev, IFML/WebRatio**, the metamodel lands on
-six concepts:
+| Keyword | Role |
+|---|---|
+| `ui` | Top-level block declaring pages, components, scaffolds, menus. A `SystemMember`, peer to `module`, `deployable`, `theme`, `user`. |
+| `page` | Declares a route + body. Body is a component invocation. |
+| `component` | Declares a parameterized region tree — a typed function from params (and optional local state) to a body expression. |
+| `scaffold` | The one fixed multi-page rewrite from a domain selector (modules / contexts / aggregates / workflows / views) to a set of pages. |
+| `state` | Declares a reactive local variable inside a `page` or `component`. Different semantics from `let` (reactive, mutable). |
+| `menu` | Optional `ui`-level block declaring the sidebar's structure. If omitted, sidebar is derived from page menu metadata. |
 
-| # | Concept | What it is | Already in Loom? |
-|---|---------|------------|------------------|
-| 1 | **Page / Screen** | Routable unit with parameters & layout | ✗ implicit |
-| 2 | **DataSource / Query** | Typed, named, parameterized read or write | ✓ as repo finds, views, ops, workflows |
-| 3 | **State** | Local reactive variables (selection, filter, modal-open) | ✗ |
-| 4 | **Component / Block** | Visual primitive bound to data + state | ✗ implicit |
-| 5 | **Action / Flow** | Event-handler graph: `let`, `call`, `assign`, `navigate`, `emit` | ✓ statement vocabulary covers most |
-| 6 | **Layout** | Composition: stack, grid, tabs, master-detail, drawer | ✗ |
+`section` and `link` inside `menu`, and `from`/`bind`/etc. patterns reused
+from existing constructs, are **soft keywords** (only reserved within their
+parent block) — same posture as `from` inside `view`.
 
-Loom already has 4 of 6. The new constructs are **page**, **component**,
-**state**, and **layout** — and they all reuse the existing types, expressions,
-and statements.
-
-Two specific influences are worth naming:
-
-- **Refine.dev** — `<Refine resource="orders">` auto-derives list/show/edit
-  routes; you override per-route. Same shape we want: zero-cost CRUD plus an
-  escape hatch.
-- **IFML / WebRatio** — formal metamodel of *view containers*, *view components*
-  with typed input/output ports, and *navigation flows* connecting events to
-  actions. The typed-port idea is the reason "data flows are typed" can be
-  enforced statically rather than at run time.
+Keywords reused from the existing grammar: `requires` (auth gate, same as
+operations), `let` (still inside flows / event handlers), all expression
+operators.
 
 ---
 
-## 3. Proposed metamodel
+## 3. Where `ui` lives
 
-A new top-level construct `ui` lives alongside `system`, peer to `module` and
-`deployable`. It owns pages, components, layouts, and reusable flows, and it
-binds to one (optionally many) `react` deployable.
+A `ui` block is declared at system scope and referenced by deployables:
 
 ```ddd
-ui SalesAdmin for webApp {
-  scaffold modules: Sales, Catalog       // = today's behaviour, as one line
+system Acme {
+  module Sales { context Sales { ... } }
 
-  // Override or add custom pages — both forms coexist
-  page OrderConsole(customerId: Id<Customer>) {
-    route: "/customers/:customerId/orders"
-    title: "Orders for {{customer.name}}"
-    requires currentUser.permissions.contains(sales.viewOrders)
+  theme { primary: "#3b82f6", neutral: "#9ca3af" }
+  user  { id: string, permissions: string[] }
 
-    data customer = Customers.byId(customerId)
-    data orders   = Orders.byCustomer(customerId)
-    data confirm  = mutation Order.confirm
-    data summary  = view OrderSummary
+  ui SalesAdmin {
+    scaffold modules: Sales
+    page OrderConsole(customerId: Id<Customer>) { ... }
+    menu { ... }
+  }
 
-    state selectedId: Id<Order>?
-    state showDraftsOnly: bool = false
+  deployable api    { platform: dotnet, modules: Sales, port: 8080 }
+  deployable webApp { platform: react,  targets: api, ui: SalesAdmin, port: 3001 }
+}
+```
 
-    layout MasterDetail(masterWidth: 360) {
-      master {
-        show Toolbar {
-          show Toggle(showDraftsOnly) { label: "Drafts only" }
-        }
-        show List(orders, filter: o => !showDraftsOnly || o.status == Draft) {
-          item: o => Card {
-            title: "Order " + o.id,
-            subtitle: o.placedAt,
-            badge: o.status
-          }
-          on select: o => selectedId := o.id
-        }
-      }
-      detail when selectedId != null {
-        show OrderPanel(orders[selectedId])
-      }
+The deployable references the ui via `ui: SalesAdmin`, mirroring how it
+already references modules. One ui can be served by multiple deployables
+(e.g. customer portal and admin tool sharing a domain but differing in UI).
+
+**Validator obligations**
+
+- `deployable.ui` must reference an existing `ui` block.
+- Only `react` deployables may set `ui:`.
+- Every `scaffold` selector and every page-data binding inside the `ui` must
+  resolve to a module reachable through the deployable's `targets` chain.
+
+---
+
+## 4. `page`
+
+A page is a route + parameters + optional state + a body. The body is a
+component invocation expression.
+
+```ddd
+page OrderList {
+  route: "/orders"
+  body:  List(of: Order)
+}
+
+page OrderDetail(id: Id<Order>) {
+  route: "/orders/:id"
+  body:  Detail(of: Order, by: id)
+}
+
+page OrderConsole(customerId: Id<Customer>) {
+  route:    "/customers/:customerId/orders"
+  title:    "Orders for " + customer.name
+  requires  currentUser.permissions.contains(sales.viewOrders)
+
+  state selectedId: Id<Order>?
+
+  body: MasterDetail(
+    of:      Order,
+    scope:   Orders.byCustomer(customerId),
+    actions: [confirm, cancel]
+  )
+}
+```
+
+Page properties:
+
+| Property | Meaning |
+|---|---|
+| `route:` | Path-with-`:params`. Path params bind to the page's typed parameters. |
+| `title:` | String expression, may interpolate page data (`"{{customer.name}}"`). |
+| `requires` | Auth predicate — same syntax as on operations. |
+| `state` | Zero-or-more reactive local declarations. |
+| `body:` | Single expression evaluating to a component invocation (which may compose others). |
+| `menu { … }` | Optional per-page metadata: `section`, `label`, `order`, `hidden`. |
+
+Path parameters are typed `TypeRef` — same as everywhere else. Their type
+drives the URL deserialization (`Id<Order>` parses an `id` segment, etc.).
+
+---
+
+## 5. `component`
+
+Components are typed functions from parameters (and optional local state)
+to a body expression. They never declare a route. They may invoke other
+components.
+
+```ddd
+component OrderPanel(order: Order) {
+  body: Stack([
+    Heading("Order " + order.id, level: 2),
+    Badge(order.status),
+    Table(order.lines, columns: [productId, quantity, unitPrice, subtotal]),
+    Toolbar([
+      Action(confirm, then: navigate(OrderList)),
+      Action(cancel,  then: toast("Cancelled"))
+    ])
+  ])
+}
+```
+
+A component's signature is type-checked at every call site. The compiler
+enforces, for each builtin component, the relationships its parameters
+imply — `MasterDetail(of: Order, scope: …)` requires `scope` to produce
+`Order[]`; `Detail(of: Order, by: x)` requires `x: Id<Order>`; `actions:`
+items must be operations on the `of:` aggregate; `Form(creates: Order)`
+binds the form fields to `wireShape(Order.create)` and refuses any other
+field reference.
+
+User-defined components are pure functions over their parameters and local
+state — they cannot synthesise pages, routes, or menu entries. That keeps
+the route map of the app exactly the set of `page` declarations in source.
+
+---
+
+## 6. Builtin component library (closed v0)
+
+The standard library is a small, closed set. Everything else is composed
+from it or is a user component built on top.
+
+**Pages-as-bodies (the v0 page kinds, as functions):**
+
+| Component | Purpose |
+|---|---|
+| `List(of: T, source?)` | Table over `T[]`; row click navigates to `T`'s detail page. |
+| `Detail(of: T, by: Id<T>)` | Single-record view; renders fields, embeds `contains`, exposes operations as actions. |
+| `Form(creates: T \| runs: workflow, then?)` | Input form bound to a typed request; submit calls the mutation/workflow. |
+| `MasterDetail(of: T, scope: query<T>, actions?)` | Split-pane: list with row-select state + detail panel for the selection. |
+| `Dashboard(items: [Card \| Stat \| Table \| Count, …])` | Composite read-only page; grid layout. |
+| `Wizard(builds: T, stages: Stage[])` | Multi-stage form accumulating a typed draft. (See §10.) |
+
+**Composition primitives:** `Stack`, `Grid`, `Tabs`, `Card`, `Toolbar`,
+`Heading`, `Text`, `Badge`.
+
+**Bindable inputs:** `Field`, `Toggle`, `Select`, `Fieldset` (for nested
+value objects). All RHF-Controller-wired today; no change.
+
+**Action primitives:** `Action(operation, then?)`, `Button(label, on?)`.
+
+The set is closed in v0 — extending it requires a stdlib change, not a
+language change. Users freely define their own `component`s, which compose
+the builtins.
+
+---
+
+## 7. `scaffold` — the one macro
+
+`scaffold` is the only multi-page rewrite. It's not a user-extensible macro
+system — it's a single fixed pre-codegen pass that synthesises explicit
+`page` declarations from a domain selector.
+
+### Granularity hierarchy
+
+```
+scaffold modules:    A, B, …    →  ∪  scaffold contexts:   <each context in each module>
+scaffold contexts:   X, Y, …    →  ∪ {
+                                       scaffold aggregates: <each aggregate in X>,
+                                       scaffold workflows:  <each workflow in X>,
+                                       scaffold views:      <each view in X>
+                                     }
+scaffold aggregates: Order, …   →  page <Order>List + <Order>New + <Order>Detail
+scaffold workflows:  placeOrder, …  →  page PlaceOrderWorkflow  (+ shared WorkflowsIndex)
+scaffold views:      ActiveOrders, …  →  page ActiveOrdersView  (+ shared ViewsIndex)
+```
+
+Every form ultimately bottoms out in explicit `page` declarations. Each
+level is mechanical expansion of the level below — same single rewrite
+pass, applied recursively.
+
+### Stacking and partial scaffolds
+
+Multiple `scaffold` directives stack. There is no `except` clause; you list
+what you want, not what you don't.
+
+```ddd
+ui SalesAdmin {
+  scaffold modules: Catalog                          // bulk
+  scaffold aggregates: Customer, Product             // a la carte
+  scaffold workflows:  placeOrder
+  page OrderList    { ... }                          // custom Order pages
+  page OrderDetail  { ... }
+}
+```
+
+### Override-by-name
+
+Three layered scales of override, all using the same mechanism — explicit
+`page <Name>` replaces the scaffolded page with the matching name.
+
+| Granularity | Override |
+|---|---|
+| Whole context | Don't `scaffold context X` — list its aggregates instead, omit some |
+| Whole aggregate | Don't `scaffold aggregates: X` — write its pages explicitly |
+| Single page | `scaffold` it but declare a `page <Name>` with the matching generated name |
+
+### Validator obligations (additions)
+
+- Each `scaffold <kind>: <name>` resolves to an existing declaration of
+  that kind in a module reachable through the deployable's `targets`.
+- Stacked `scaffold` directives may not double-scaffold the same construct
+  (validator rejects `scaffold modules: Sales` + `scaffold aggregates:
+  Customer` if Customer is in Sales).
+- Two distinct `scaffold` directives may not produce pages with the same
+  generated name; explicit `page <Name>` may override exactly one source.
+
+---
+
+## 8. `menu` — layered defaults + explicit composition
+
+Pages carry `menu { … }` metadata; sidebar is derived. An optional
+`ui`-level `menu` block overrides this for full control.
+
+### Page-local default
+
+```ddd
+page OrderList {
+  route: "/orders"
+  menu  { section: "Sales", label: "Orders" }      // optional; default derived from page kind
+  body:  List(of: Order)
+}
+```
+
+### Explicit `ui`-level menu
+
+```ddd
+ui SalesAdmin {
+  scaffold modules: Sales
+
+  menu {
+    section "Sales"   { link OrderList, link OrderConsole, link OrderNew }
+    section "Lookup"  { link CustomerList, link ProductList }
+    section "Reports" { link ActiveOrdersView, link OrderSummaryView }
+    section "External" {
+      link "Docs" -> "https://docs.acme.com"
     }
-
-    on orders.error: e => toast.error(e.message)
   }
 }
 ```
 
-### 3.1 `page`
+### Lowering
 
 ```
-page <Name> [(<params>)] {
-    route: <string>                 // path-with-:params
-    title: <string>?                // optional, accepts "{{expr}}"
-    requires <expr>?                // auth gate, same syntax as operations
-
-    (data | state)*                 // declarations
-    (layout | show)*                // visual content
-    (on <event>: <flow>)*           // top-level page events
-}
+1. Run scaffold → pages, each with default `menu { section: <derived>, label: <derived> }`
+   (defaults: aggregates → "Aggregates", workflows → "Workflows", views → "Views")
+2. Apply explicit `page X` overrides (by name)
+3. If `ui` has a `menu { … }` block:
+       sidebar = that block, resolved against the page registry
+   else:
+       sidebar = pages grouped by `menu.section`, sorted by `menu.label`
 ```
 
-Page parameters are typed and bound from the route + query string. The
-generator already derives a Zod schema for them (current grammar's `Property`).
+`scaffold` doesn't *return* anything — it contributes pages-with-menu-metadata
+to a shared registry. The `menu` block (when present) is the explicit
+composition operator over that registry.
 
-### 3.2 `data` — typed data sources
+Per-link auth comes free: a `link OrderList` inherits the underlying page's
+`requires` clause, so menu links hide automatically when the user lacks
+permission.
 
-```
-data <name> = <DataSourceExpr>
-```
+---
 
-`DataSourceExpr` resolves to one of the **already-typed** Loom artifacts:
+## 9. `state` and events
 
-| Form | Resolves to | Generated as |
-|---|---|---|
-| `Repo.findName(args)` | `T[]` or `T` | `useQuery` |
-| `Repo.byId(id)` | `T` | `useQuery` |
-| `view <ViewName> [where <filter>]` | row-shape `[]` | `useQuery` |
-| `mutation <Aggregate>.<op>` | `(input: OpInput) => Promise<T>` | `useMutation` |
-| `workflow <wfName>` | `(input: WfInput) => Promise<void>` | `useMutation` |
-| `api <ExternalDS>.<call>(args)` | typed from external schema | `useQuery`/`useMutation` |
-
-The typing reuses the existing IR — there is no parallel page-type system.
-`orders.error`, `orders.loading`, `orders.data` are members of the data-source
-handle, surfaced statically via the React Query state shape.
-
-### 3.3 `state` — local reactive variables
-
-```
-state <name>: <TypeRef> [= <expr>]
-```
-
-Same `TypeRef` as everywhere else in the language. State is reactive (writes
-re-render), URL-syncable (`@url state filter: string = ""`), and addressable
-from flows (`selectedId := order.id`).
-
-### 3.4 `show` — components
-
-```
-show <Component>([positional, ...] [, named: value, ...]) [{
-    <prop>: <expr>
-    on <event>: <flow>
-    <child show>*
-}]
-```
-
-Built-in components form a small, intentional set: **Stack, Grid, Tabs, Card,
-Heading, Text, Table, List, Form, Field, Button, Badge, Toggle, Select, Drawer,
-Modal, Toolbar, Breadcrumb**. Each has typed props (e.g. `Table` takes
-`rows: T[]` and infers columns from `T`). Anything outside the set is a
-user-defined `component`.
-
-### 3.5 `component` — reusable parameterized blocks
-
-```
-component OrderPanel(order: Order) {
-    show Stack {
-        show Heading("Order " + order.id)
-        show Table(order.lines) {
-            column unitPrice: line => line.unitPrice
-            column qty:       line => line.quantity
-            column subtotal:  line => line.subtotal
-        }
-        show Button("Confirm") {
-            enabled: order.isMutable()
-            on click: flow {
-                call confirm({ id: order.id })
-                toast.success("Order confirmed")
-                navigate to OrderConsole(customerId: order.customerId)
-            }
-        }
-    }
-}
-```
-
-`component` is to a page what `function` is to an operation: a typed,
-parameterized, reusable unit. They compose via `show`.
-
-### 3.6 `flow` — on-page event flows
-
-Flows are statement bodies. They reuse Loom's existing statement grammar
-(`precondition`, `requires`, `let`, `emit`, `:= / += / -=` , bare calls) and
-add three actions:
-
-| New action | Meaning |
-|---|---|
-| `navigate to <Page>([args])` | Client-side route change with typed params |
-| `toast.success(<expr>)` / `toast.error(<expr>)` | UX side-effect |
-| `<state> := <expr>` | Already legal syntax; here it targets `state`, not aggregate fields |
-
-A flow can be inline at an event site, or named at the top of a `ui` block:
+State is reactive and local to the enclosing `page` or `component`:
 
 ```ddd
-flow placeAndOpen(customerId: Id<Customer>) {
-    let order = call placeOrder({ customerId, placedAt: now() })
-    navigate to OrderConsole(customerId: customerId)
-}
+state selectedId: Id<Order>?
+state showDrafts: bool = false
 ```
 
-Because flows reuse Loom statements, every flow is type-checkable against the
-data-source signatures, and `requires`/`precondition` give you button-disable
-semantics for free (the lowering can render `enabled` from the same predicate).
+Same `TypeRef` vocabulary as everywhere else. Initial value is optional
+(types default to `null`/zero of the type); writes re-render dependents.
 
-### 3.7 `layout` — composition primitives
+URL synchronisation is deferred to a later revision — for v0 every
+`state` declaration is in-memory only.
 
-```
-layout MasterDetail(masterWidth: int = 320) { master { ... } detail when <expr> { ... } }
-layout Tabs                                  { tab "Lines" { ... } tab "Audit" { ... } }
-layout Grid(cols: int)                       { ... }
-layout Stack(gap: int = 16)                  { ... }
-```
-
-Layouts are containers; `show` is the leaf. A layout can be referenced as if it
-were a component, which means the user can wrap a custom layout into a reusable
-named component just like any other.
-
----
-
-## 4. Auto-CRUD as desugaring (the "unrolling")
-
-The current generator behaviour is recovered as a macro:
+**Events** are component parameters typed as lambdas. Loom already has
+single-expression lambdas (`x => expr`); the most common event shapes are
+single calls or single navigations:
 
 ```ddd
-ui SalesAdmin for webApp {
-    scaffold modules: Sales
-}
+List(
+  of: Order,
+  source: Orders.all(),
+  onRowSelect: row => navigate(OrderDetail, { id: row.id })
+)
+
+Action(confirm, then: navigate(OrderList))
 ```
 
-…lowers, before code generation, to a set of explicit page declarations
-synthesised from the IR — one per `aggregate` (list/new/detail), one per `view`,
-one per `workflow`, plus the home and navigation. That synthesised AST is what
-the page-emitter sees; the existing `react/` builders move from "walk the
-domain IR" to "walk the page IR." The output is bit-identical to today's, but
-the source of truth is now a metamodel artifact you can inspect, override, or
-replace piece by piece.
+For multi-step actions, use a component that bundles the steps (e.g.,
+`Action(operation, then: <expr>)` covers "run op then do one more thing"),
+or write a custom component with local state. **No `flow` keyword in v0** —
+the surface is small enough that named flows aren't needed; if real cases
+force multi-step flows, the keyword can be added later without breaking
+existing programs.
 
-**Partial overrides** become trivial:
+`navigate(<Page>, { params })` and `toast(<msg>)` are builtin calls, not
+new statement forms. The compiler type-checks `<Page>` against the page
+registry and `{ params }` against that page's typed parameters.
+
+---
+
+## 10. Wizard — a component, not a keyword
+
+A wizard is structurally distinct from a single-region page (multiple
+sub-states, accumulating typed draft, sequential validation), but the
+distinction is captured in its component signature, not in the grammar:
 
 ```ddd
-ui SalesAdmin for webApp {
-    scaffold modules: Sales
-
-    // Replace just one scaffolded page; rest is auto
-    page OrderDetail(id: Id<Order>) {
-        // …custom layout that mixes in OrderSummary view + audit log…
-    }
+page PlaceOrder {
+  route: "/orders/new"
+  body:  Wizard(
+    builds: PlaceOrderRequest,                                   // accumulating typed draft
+    stages: [
+      Stage("Customer", fields: [customerId]),
+      Stage("Items",    fields: [items], guard: draft.customerId != null),
+      Stage("Review",   summary: draft, submits: placeOrder)
+    ]
+  )
 }
 ```
 
-Resolution: scaffold runs first; explicit `page <Name>` with a matching name
-**replaces** the scaffolded one. Same idea as Mendix's "override page from
-template" or Refine's per-resource action override.
+The compiler type-checks: every `Stage.fields[i]` is a member of `builds`;
+`submits:` is a workflow whose input matches `builds`; `guard`'s expression
+types to `bool` against the partial draft. "Current stage" and "partial
+draft" are local state inside the `Wizard` component implementation —
+exactly what local component state is for.
+
+**Why not a keyword?** Adding `wizard` and `stage` as top-level forms saves
+a few characters of syntax (block-per-stage instead of array-of-records)
+but signals that any "structurally rich" UI archetype deserves its own
+grammar — `dataGrid`, `mapView`, `kanban`, `chartDashboard`. Wizard-as-
+component holds that line.
 
 ---
 
-## 5. Why this fits Loom specifically
+## 11. Migration
 
-1. **Types reused, not parallel.** `data o = Orders.byId(id)` types
-   `o: Order` via the existing repository signature; `mutation Order.confirm`
-   types as `(input: ConfirmInput) => Promise<Order>` from the existing
-   operation signature.
-2. **Statements reused.** Flows are Loom statements with three additions.
-   Lowering already knows `let`, `precondition`, calls, `:=`, `emit`.
-3. **Expressions reused.** Conditional render (`when`), data bindings, list
-   filters — all use the existing `Expression` rule (`TernaryExpr`, lambdas,
-   member access, etc.).
-4. **Backends already produce the right shapes.** Repo finds, views, operation
-   and workflow input shapes are already wired to typed HTTP routes with Zod
-   schemas. The page generator consumes those — no new wire layer.
-5. **Theme, sidebar, page objects survive.** Scaffolded and explicit pages both
-   register their route/title/testids; the existing AppShell + Playwright
-   emitters loop over the unified page list.
-6. **Aligns with extern API plans.** `data fx = api ExchangeRates.usd(now())`
-   slots external typed datasources into the same vocabulary as internal ones —
-   no second concept.
-7. **Validation has an obvious home.** The Loom validator already cross-checks
-   types in operation bodies; flows are operation bodies in disguise.
-
----
-
-## 6. What the page IR looks like
-
-```ts
-type Page = {
-    name: string
-    params: Param[]              // typed route/query params
-    route: string
-    title?: Expression
-    requires?: Expression
-    data: DataDecl[]             // typed reactive sources
-    state: StateDecl[]
-    children: ShowOrLayout[]     // visual tree
-    pageEvents: EventBinding[]   // on <event>: <flow>
-}
-
-type DataDecl = {
-    name: string
-    source:
-      | { kind: "repoFind",   repository, find,   args: Expression[] }
-      | { kind: "repoById",   repository,         id:   Expression }
-      | { kind: "view",       view,               filter?: Expression }
-      | { kind: "mutation",   aggregate, operation }
-      | { kind: "workflow",   workflow }
-      | { kind: "externalApi", source, call,      args: Expression[] }
-    inferredType: Type           // from the resolved target's signature
-}
-
-type ShowOrLayout =
-  | { kind: "show",    component, args: Arg[], props: Prop[], events: EventBinding[], children: ShowOrLayout[] }
-  | { kind: "layout",  layout, args: Arg[], slots: { name: string, when?: Expression, children: ShowOrLayout[] }[] }
-```
-
-Lowering steps (mirrors today's generator pipeline):
-
-1. **Parse** `ui` blocks → CST
-2. **Expand `scaffold`** → synthetic `Page[]` derived from the domain IR
-3. **Resolve & type-check** data sources, state references, navigation targets,
-   flow statements (reuses existing type system)
-4. **Validate** (every `data` resolved, every `navigate to` page exists with
-   matching params, no state cycles, every `requires` types to `bool`, …)
-5. **Emit** TSX from the page IR — replaces today's procedural builders
-
----
-
-## 7. Migration
-
-- Existing `.ddd` files keep working — no `ui` block means an implicit
-  `ui Default for <reactDeployable> { scaffold modules: <all> }`.
+- Existing `.ddd` files keep working — a deployable with `platform: react`
+  but no `ui:` is treated as if a synthesised `ui Default { scaffold modules:
+  <all in targets chain> }` were declared and referenced.
 - The current `pages-builder.ts`, `view-builder.ts`, `workflow-builder.ts`
   become **scaffold expanders** that produce page-IR nodes instead of TSX
   strings.
-- A single new emitter (call it `pages-emitter.ts`) consumes the page IR.
-- Page-objects-builder stays — it's already driven by route + testid metadata,
-  which is exactly what the page IR carries.
+- A single new emitter (`pages-emitter.ts`) consumes the page IR.
+- `page-objects-builder.ts` stays — it's already driven by route + testid
+  metadata, which is exactly what the page IR carries.
+- `theme-builder.ts` stays unchanged; theme is a `system` concern.
 
 ---
 
-## 8. Open questions
+## 12. Open questions / non-goals
 
-- **Cross-page selection / global state.** Is there a `ui`-level `state` peer
-  to page state, or do we make users hoist via URL? Lean: URL-only for the
-  prototype; revisit when a real use case appears.
-- **Imperative escapes.** `code "tsx" { ... }` block to drop down? Risky —
-  invites "the generator is just printf templates again." Defer.
-- **Which built-ins are in scope.** The list in §3.4 is a starting set;
-  finalising it is a real exercise. Use the current generator's actually-emitted
-  Mantine components as the v0 set.
-- **Theming per-page vs system-wide.** Today `theme { ... }` is system-wide.
-  Per-page overrides are a future extension; not in v0.
+- **Per-page theming.** Today `theme { … }` is system-wide. Per-page
+  overrides not in v0.
 - **Internationalisation.** Strings in `title:`, button labels, etc. likely
-  want a `t("...")` form. Out of scope for the prototype; design so the
-  expression slot can hold it later.
+  want a `t("…")` form. Not in v0; design so the expression slot can hold
+  it later.
+- **URL-synced state.** Deferred. v0 state is in-memory only.
+- **Multi-step flows as a named construct.** Not in v0; `Action(op, then)`
+  + custom components cover the realistic cases. Add `flow` later only if
+  forced.
+- **User-extensible component library.** v0 stdlib is closed; users compose
+  via `component` declarations on top of builtins. A future revision could
+  open the stdlib.
+- **App-shell beyond menu.** Header (logo / user / search), footer,
+  breadcrumb stay hardcoded in v0. Add `header { … }` / `footer { … }`
+  later only if real cases force them.
 
 ---
 
-## 9. See also
+## 13. Grammar sketch (appendix)
 
-- [`examples/sales-ui.ddd`](../examples/sales-ui.ddd) — concrete DSL example
-  that exercises every construct in this proposal, including a `scaffold` line
-  alongside three explicit overrides.
-- `experience_gathered.md` slice 10 — page-object lessons that the new
+Productions added to `src/language/ddd.langium`. Reuses existing `TypeRef`,
+`Expression`, `Parameter`. Soft keywords noted where applicable.
+
+```langium
+// Add to SystemMember alternatives:
+SystemMember:
+    Module | Deployable | BoundedContext | TestE2E | UserBlock | ThemeBlock | Ui;
+
+// Add to Deployable property block:
+Deployable:
+    'deployable' name=ID '{'
+        ...                                    // existing properties
+        ('ui' ':' ui=[Ui:ID] ','?)?            // new: react-only
+    '}';
+
+Ui:
+    'ui' name=ID '{'
+        members+=UiMember*
+    '}';
+
+UiMember:
+    Page | Component | Scaffold | MenuBlock;
+
+Page:
+    'page' name=ID ('(' (params+=Parameter (',' params+=Parameter)*)? ')')? '{'
+        props+=PageProp*
+    '}';
+
+PageProp:
+      'route'    ':' route=STRING
+    | 'title'    ':' title=Expression
+    | 'requires'      auth=Expression
+    | StateDecl
+    | 'body'     ':' body=Expression           // expression must resolve to a Component invocation
+    | PageMenuMeta;
+
+PageMenuMeta:
+    'menu' '{' (entries+=MenuMetaEntry (',' entries+=MenuMetaEntry)* ','?)? '}';
+
+MenuMetaEntry:
+    name=('section' | 'label' | 'order' | 'hidden') ':' value=Expression;
+
+Component:
+    'component' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' '{'
+        decls+=ComponentDecl*
+        'body' ':' body=Expression
+    '}';
+
+ComponentDecl:
+    StateDecl;
+
+StateDecl:
+    'state' name=ID ':' type=TypeRef ('=' init=Expression)?;
+
+Scaffold:
+    'scaffold' selector=ScaffoldSelector ':' targets+=ID (',' targets+=ID)* ','?;
+
+ScaffoldSelector returns string:
+    'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views';
+
+MenuBlock:
+    'menu' '{'
+        sections+=MenuSection*
+    '}';
+
+MenuSection:
+    'section' name=STRING '{'
+        (links+=MenuLink (',' links+=MenuLink)* ','?)?
+    '}';
+
+MenuLink:
+      'link' page=[Page:ID] ('{' (props+=MenuLinkProp (',' props+=MenuLinkProp)* ','?)? '}')?
+    | 'link' label=STRING '->' url=STRING;
+
+MenuLinkProp:
+    name=('label' | 'order') ':' value=Expression;
+```
+
+`navigate(<Page>, { params })` and `toast(<msg>)` reuse the existing
+`CallExpr` rule — they are looked up in the page-language standard
+library at lowering time and lowered to typed React Router calls / Mantine
+notifications.
+
+---
+
+## 14. See also
+
+- [`examples/sales-ui.ddd`](../examples/sales-ui.ddd) — concrete example
+  exercising every construct in this proposal.
+- `experience_gathered.md` slice 10 — page-object lessons the new
   metamodel must continue to honour (1:1 page ↔ route, chainable methods,
   testid-driven, no abstraction over Mantine quirks).
