@@ -49,7 +49,7 @@ export function buildListPage(
   }
   return `// Auto-generated.
 import { Link, useNavigate } from "react-router-dom";
-import { Stack, Title, Group, Button, Table, Skeleton, Alert, Anchor, Badge, Center, Text, Paper } from "@mantine/core";
+import { Stack, Title, Group, Button, Table, Skeleton, Alert, Anchor, Badge, Breadcrumbs, Center, Text, Paper } from "@mantine/core";
 import { IconPlus, IconAlertCircle } from "@tabler/icons-react";
 import { useAll${plural(agg.name)} } from "../../api/${camel(agg.name)}";
 import { IdValue, DateTimeValue, BoolValue, NumberValue, EmptyValue } from "../../lib/format";
@@ -60,6 +60,10 @@ export default function ${cap}List() {
   const count = q.data?.length ?? 0;
   return (
     <Stack data-testid="${slug}-list" gap="md">
+      <Breadcrumbs data-testid="${slug}-list-breadcrumbs">
+        <Anchor component={Link} to="/">Home</Anchor>
+        <Text>${humanPlural}</Text>
+      </Breadcrumbs>
       <Group justify="space-between" align="flex-end">
         <Stack gap={2}>
           <Title order={2}>${humanPlural}</Title>
