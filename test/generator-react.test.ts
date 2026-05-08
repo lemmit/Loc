@@ -365,9 +365,9 @@ describe("react generator", () => {
       const home = files.get("web_app/src/pages/home.tsx")!;
       // SimpleGrid of construct-kind summary cards.
       expect(home).toMatch(/<SimpleGrid cols=\{\{ base: 1, sm: 2, md: 3 \}\}/);
-      // Counts mention the right cardinalities (acme has 2 aggregates,
-      // 1 workflow, 2 views).
-      expect(home).toMatch(/2 aggregates/);
+      // Counts mention the right cardinalities (acme has 3 aggregates
+      // — Product + Order + Customer — plus 1 workflow and 2 views).
+      expect(home).toMatch(/3 aggregates/);
       expect(home).toMatch(/1 workflow[^s]/);
       expect(home).toMatch(/2 views/);
       expect(home).toMatch(/data-testid="home"/);
