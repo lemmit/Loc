@@ -73,6 +73,86 @@ export interface ThemeVM {
   fontFamilyMonospace: string;
 }
 
+/** A single import statement to emit at the top of a generated
+ *  module.  `specifier` is the imported symbol exactly as written
+ *  on the import line — for default imports this is just the local
+ *  name (`OrderList`); for named imports it can include braces. */
+export interface ImportVM {
+  /** Name binding as it appears between `import` and `from`, e.g.
+   *  "OrderList" or "{ Routes, Route }". */
+  specifier: string;
+  /** Module path including any `.tsx` / `.ts` discriminator the
+   *  target tsconfig requires.  React frontend uses Bundler
+   *  resolution so extension-less is correct. */
+  from: string;
+}
+
+/** A single React Router route the App.tsx Routes block emits. */
+export interface RouteVM {
+  /** URL pattern, e.g. "/orders/:id". */
+  path: string;
+  /** JSX expression for the `element` prop, verbatim — e.g.
+   *  "<OrderDetail />". */
+  elementJsx: string;
+}
+
+/** A single sidebar nav entry. */
+export interface NavEntryVM {
+  /** React-Router target path. */
+  to: string;
+  /** Visible link text. */
+  label: string;
+  /** Stable testid for Playwright drivers. */
+  testId: string;
+  /** Argument list (verbatim) to splice into `isActive(...)` —
+   *  e.g. `"/orders"` or `"/workflows", { exact: true }`.  The
+   *  exact form is used for index pages whose slug prefix would
+   *  otherwise match every per-item child route. */
+  activeArgs: string;
+}
+
+/** A grouped sidebar section.  Renders as a Divider with the
+ *  section label followed by `entries`.  Sections with zero
+ *  entries are omitted from the VM (preparer skips them) so
+ *  templates don't need empty-guards. */
+export interface NavSectionVM {
+  label: string;
+  entries: NavEntryVM[];
+}
+
+/** Top-level view-model for the App.tsx shell. */
+export interface AppShellVM {
+  /** Humanised system name for the header brand mark. */
+  systemNameHuman: string;
+  /** Page-component imports the routes refer to. */
+  imports: ImportVM[];
+  /** Every route the Router renders, in source order. */
+  routes: RouteVM[];
+  /** One section per construct kind that has at least one entry. */
+  navSections: NavSectionVM[];
+}
+
+/** Trivial VM for main.tsx — no decisions, but routed through the
+ *  pack so a future shadcn pack can swap the provider chain
+ *  (MantineProvider + ModalsProvider → shadcn's Toaster + Sonner). */
+export interface MainVM {
+  // No fields today; reserved for shape stability.
+}
+
+/** Top-level view-model for the home page (landing). */
+export interface HomeVM {
+  /** Humanised system name for the eyebrow label. */
+  systemNameHuman: string;
+  aggregateCount: number;
+  workflowCount: number;
+  viewCount: number;
+  /** Slug of the first aggregate, used as the target of the "Browse
+   *  the sidebar →" link.  Undefined when the deployable has no
+   *  aggregates (in practice empty deployables don't generate
+   *  React projects, but the field is optional for safety). */
+  firstAggregateSlug?: string;
+}
+
 /** Top-level view-model for an aggregate list page. */
 export interface ListPageVM {
   /** PascalCase aggregate name — drives the React component export

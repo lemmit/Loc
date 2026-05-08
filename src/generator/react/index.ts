@@ -3,7 +3,6 @@ import type {
   BoundedContextIR,
   DeployableIR,
   SystemIR,
-  WorkflowIR,
 } from "../../ir/loom-ir.js";
 import { camel, snake, plural } from "../../util/naming.js";
 import { buildApiModule } from "./api-builder.js";
@@ -27,9 +26,13 @@ import {
 } from "./view-builder.js";
 import { FORMAT_HELPERS_TSX } from "./format-helpers.js";
 import { loadPack, resolvePackDir } from "./templating/loader.js";
-import { renderListPage, renderTheme } from "./templating/render.js";
-import type { ViewIR } from "../../ir/loom-ir.js";
-import { humanize } from "../../util/naming.js";
+import {
+  renderAppShell,
+  renderHome,
+  renderListPage,
+  renderMain,
+  renderTheme,
+} from "./templating/render.js";
 
 // ---------------------------------------------------------------------------
 // React + React Query + Zod + Mantine generator.
@@ -163,23 +166,25 @@ export function generateReactForContexts(
   // pack's "theme" template; the generated file always exists and
   // main.tsx always wires `<MantineProvider theme={theme}>`.
   out.set("src/theme.ts", renderTheme(sys.theme, pack));
-  out.set("src/main.tsx", mainTsx());
+  out.set("src/main.tsx", renderMain(pack));
   out.set(
     "src/App.tsx",
-    appTsx(
+    renderAppShell(
       aggregates.map((a) => a.agg),
       workflows.map((w) => w.wf),
       views.map((v) => v.view),
       sys.name,
+      pack,
     ),
   );
   out.set(
     "src/pages/home.tsx",
-    homeTsx(
+    renderHome(
       aggregates.map((a) => a.agg),
       workflows.map((w) => w.wf),
       views.map((v) => v.view),
       sys.name,
+      pack,
     ),
   );
 
@@ -308,54 +313,6 @@ const INDEX_HTML = `<!doctype html>
 </html>
 `;
 
-function mainTsx(): string {
-  const themeImport = `\nimport { theme } from "./theme";`;
-  const providerOpen = "<MantineProvider theme={theme} defaultColorScheme=\"light\">";
-  return `// Auto-generated.
-import React from "react";
-import ReactDOM from "react-dom/client";
-import { BrowserRouter } from "react-router-dom";
-import { MantineProvider } from "@mantine/core";
-import { Notifications } from "@mantine/notifications";
-import { ModalsProvider } from "@mantine/modals";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import "@mantine/core/styles.css";
-import "@mantine/notifications/styles.css";
-import "@mantine/dates/styles.css";
-import App from "./App";${themeImport}
-
-const queryClient = new QueryClient({
-  defaultOptions: { queries: { staleTime: 5_000, retry: 1 } },
-});
-
-// Optional basename hook the host page can set before the bundle
-// runs.  When present (e.g. the Loom playground iframe served at
-// \`<deploy>/__loom_sandbox__/\` injects \`window.__LOOM_BASENAME__\`
-// = \`/<deploy>/__loom_sandbox__\`), routes resolve relative to it
-// so links like \`/customers\` push state inside the iframe scope.
-// Plain deploys leave it undefined and the router defaults to \`/\`.
-const basename =
-  (typeof window !== "undefined"
-    ? (window as { __LOOM_BASENAME__?: string }).__LOOM_BASENAME__
-    : undefined) ?? undefined;
-
-ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      ${providerOpen}
-        <ModalsProvider>
-          <Notifications position="top-right" />
-          <BrowserRouter basename={basename}>
-            <App />
-          </BrowserRouter>
-        </ModalsProvider>
-      </MantineProvider>
-    </QueryClientProvider>
-  </React.StrictMode>,
-);
-`;
-}
-
 function configTs(apiBaseUrl: string): string {
   return `// Auto-generated.
 // Browser hits localhost:<api_port> directly; baked at generation time
@@ -413,216 +370,6 @@ export const api = {
     rawFetch(path, { method: "POST", body: JSON.stringify(body ?? {}) }),
 };
 `;
-
-function appTsx(
-  aggregates: AggregateIR[],
-  workflows: WorkflowIR[],
-  views: ViewIR[],
-  systemName: string,
-): string {
-  const imports: string[] = [];
-  const routes: string[] = [`        <Route path="/" element={<Home />} />`];
-  imports.push(`import Home from "./pages/home";`);
-  for (const agg of aggregates) {
-    const slug = snake(plural(agg.name));
-    const cap = upper(agg.name);
-    imports.push(`import ${cap}List from "./pages/${slug}/list";`);
-    imports.push(`import ${cap}New from "./pages/${slug}/new";`);
-    imports.push(`import ${cap}Detail from "./pages/${slug}/detail";`);
-    routes.push(
-      `        <Route path="/${slug}" element={<${cap}List />} />`,
-    );
-    routes.push(
-      `        <Route path="/${slug}/new" element={<${cap}New />} />`,
-    );
-    routes.push(
-      `        <Route path="/${slug}/:id" element={<${cap}Detail />} />`,
-    );
-  }
-  if (workflows.length > 0) {
-    imports.push(`import WorkflowsIndex from "./pages/workflows/index";`);
-    routes.push(
-      `        <Route path="/workflows" element={<WorkflowsIndex />} />`,
-    );
-    for (const wf of workflows) {
-      const slug = snake(wf.name);
-      const cap = `${upper(wf.name)}WorkflowPage`;
-      imports.push(`import ${cap} from "./pages/workflows/${slug}";`);
-      routes.push(
-        `        <Route path="/workflows/${slug}" element={<${cap} />} />`,
-      );
-    }
-  }
-  if (views.length > 0) {
-    imports.push(`import ViewsIndex from "./pages/views/index";`);
-    routes.push(
-      `        <Route path="/views" element={<ViewsIndex />} />`,
-    );
-    for (const view of views) {
-      const slug = snake(view.name);
-      const cap = `${upper(view.name)}ViewPage`;
-      imports.push(`import ${cap} from "./pages/views/${slug}";`);
-      routes.push(
-        `        <Route path="/views/${slug}" element={<${cap} />} />`,
-      );
-    }
-  }
-
-  // Sidebar nav — one section per construct kind.  Sections only
-  // render when at least one entry exists; aggregates always do
-  // (deployable would be empty otherwise).
-  const aggregateNavLinks = aggregates
-    .map((a) => {
-      const slug = snake(plural(a.name));
-      return `          <NavLink component={Link} to="/${slug}" label="${humanize(plural(a.name))}" active={isActive("/${slug}")} data-testid="nav-${slug}" />`;
-    })
-    .join("\n");
-  const workflowsSection =
-    workflows.length === 0
-      ? ""
-      : `\n          <Divider my="xs" label="Workflows" labelPosition="left" />\n` +
-        `          <NavLink component={Link} to="/workflows" label="All workflows" active={isActive("/workflows", { exact: true })} data-testid="nav-workflows" />\n` +
-        workflows
-          .map((wf) => {
-            const slug = snake(wf.name);
-            const human = humanize(wf.name);
-            return `          <NavLink component={Link} to="/workflows/${slug}" label="${human}" active={isActive("/workflows/${slug}")} data-testid="nav-workflow-${slug}" />`;
-          })
-          .join("\n");
-  const viewsSection =
-    views.length === 0
-      ? ""
-      : `\n          <Divider my="xs" label="Views" labelPosition="left" />\n` +
-        `          <NavLink component={Link} to="/views" label="All views" active={isActive("/views", { exact: true })} data-testid="nav-views" />\n` +
-        views
-          .map((v) => {
-            const slug = snake(v.name);
-            const human = humanize(v.name);
-            return `          <NavLink component={Link} to="/views/${slug}" label="${human}" active={isActive("/views/${slug}")} data-testid="nav-view-${slug}" />`;
-          })
-          .join("\n");
-
-  return `// Auto-generated.
-import { Routes, Route, Link, useLocation } from "react-router-dom";
-import { AppShell, Burger, Divider, Group, Title, NavLink, Anchor, Alert, Button, Stack } from "@mantine/core";
-import { useDisclosure } from "@mantine/hooks";
-import React from "react";
-${imports.join("\n")}
-
-// App-level error boundary catches render-time crashes from any
-// page component.  Without it, an unhandled exception inside
-// e.g. a detail page would blank the entire shell and leave the
-// user with no path back.  Reset on click navigates back to the
-// home route, matching the expectation that "the dashboard
-// keeps working when one page is broken".
-class AppErrorBoundary extends React.Component<
-  { children: React.ReactNode },
-  { error: Error | null }
-> {
-  state = { error: null as Error | null };
-  static getDerivedStateFromError(error: Error) {
-    return { error };
-  }
-  override componentDidCatch(error: Error, info: React.ErrorInfo) {
-    // eslint-disable-next-line no-console
-    console.error("App error boundary caught:", error, info.componentStack);
-  }
-  override render() {
-    if (this.state.error) {
-      return (
-        <Stack data-testid="app-error" p="md">
-          <Alert color="red" title="Something went wrong">
-            {this.state.error.message}
-          </Alert>
-          <Group>
-            <Button
-              variant="default"
-              onClick={() => {
-                this.setState({ error: null });
-                window.location.assign("/");
-              }}
-            >
-              Back to home
-            </Button>
-          </Group>
-        </Stack>
-      );
-    }
-    return this.props.children;
-  }
-}
-
-function NotFound() {
-  return (
-    <Stack data-testid="not-found" p="md">
-      <Title order={2}>Not found</Title>
-      <Anchor component={Link} to="/">← Back to home</Anchor>
-    </Stack>
-  );
-}
-
-// Active-route helper — drives NavLink's \`active\` prop.  Defaults
-// to a prefix match so /orders/<id> + /orders/new + /orders all
-// keep the "Orders" link highlighted; the \`exact\` opt-in narrows
-// to literal equality (used by /workflows + /views index links so
-// they don't shadow their per-item children).
-function useIsActive() {
-  const location = useLocation();
-  return (path: string, opts?: { exact?: boolean }) => {
-    if (opts?.exact) return location.pathname === path;
-    return (
-      location.pathname === path || location.pathname.startsWith(path + "/")
-    );
-  };
-}
-
-export default function App() {
-  const isActive = useIsActive();
-  const [opened, { toggle }] = useDisclosure();
-  return (
-    <AppShell
-      header={{ height: 56 }}
-      navbar={{ width: 240, breakpoint: "sm", collapsed: { mobile: !opened } }}
-      padding="md"
-    >
-      <AppShell.Header>
-        <Group h="100%" px="md" justify="space-between">
-          <Group gap="sm">
-            <Burger
-              opened={opened}
-              onClick={toggle}
-              hiddenFrom="sm"
-              size="sm"
-              data-testid="nav-burger"
-            />
-            <Anchor component={Link} to="/" underline="never" c="inherit">
-              <Group gap={8} align="center">
-                <div style={{ width: 28, height: 28, borderRadius: 6, background: "var(--mantine-color-brand-6)" }} aria-hidden="true" />
-                <Title order={4} style={{ letterSpacing: "-0.01em" }}>${humanize(systemName)}</Title>
-              </Group>
-            </Anchor>
-          </Group>
-        </Group>
-      </AppShell.Header>
-      <AppShell.Navbar p="md">
-        <Stack gap={4} data-testid="nav-sidebar">
-          <Divider my="xs" label="Aggregates" labelPosition="left" />
-${aggregateNavLinks}${workflowsSection}${viewsSection}
-        </Stack>
-      </AppShell.Navbar>
-      <AppShell.Main>
-        <AppErrorBoundary>
-          <Routes>
-${routes.join("\n")}
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </AppErrorBoundary>
-      </AppShell.Main>
-    </AppShell>
-  );
-}
-`;
-}
 
 function smokeSpec(aggregates: AggregateIR[]): string {
   // Auto-generated minimal Playwright smoke: every aggregate's list
@@ -709,72 +456,6 @@ const E2E_TSCONFIG_JSON =
     null,
     2,
   ) + "\n";
-
-function homeTsx(
-  aggregates: AggregateIR[],
-  workflows: WorkflowIR[],
-  views: ViewIR[],
-  systemName: string,
-): string {
-  // The sidebar already lists every aggregate / workflow / view, so
-  // the home page doesn't have to re-do navigation.  Instead it acts
-  // as a simple landing card that summarises what's in the system —
-  // counts per construct kind plus a hint to use the sidebar.
-  const aggCardLink = aggregates[0]
-    ? `      <Anchor component={Link} to="/${snake(plural(aggregates[0].name))}" data-testid="home-aggregates-link">Browse the sidebar →</Anchor>`
-    : "";
-  const workflowsCard =
-    workflows.length === 0
-      ? ""
-      : `        <Card withBorder>
-          <Stack gap={4}>
-            <Text fw={600}>${workflows.length} workflow${workflows.length === 1 ? "" : "s"}</Text>
-            <Text size="sm" c="dimmed">System-level orchestrations you can run from a form.</Text>
-            <Anchor component={Link} to="/workflows" data-testid="home-workflows-link" size="sm">Open workflows →</Anchor>
-          </Stack>
-        </Card>`;
-  const viewsCard =
-    views.length === 0
-      ? ""
-      : `        <Card withBorder>
-          <Stack gap={4}>
-            <Text fw={600}>${views.length} view${views.length === 1 ? "" : "s"}</Text>
-            <Text size="sm" c="dimmed">Saved queries — open one to inspect rows.</Text>
-            <Anchor component={Link} to="/views" data-testid="home-views-link" size="sm">Open views →</Anchor>
-          </Stack>
-        </Card>`;
-  const aggregatesCard = `        <Card withBorder>
-          <Stack gap={4}>
-            <Text fw={600}>${aggregates.length} aggregate${aggregates.length === 1 ? "" : "s"}</Text>
-            <Text size="sm" c="dimmed">Manage records of each kind from the sidebar.</Text>
-${aggCardLink}
-          </Stack>
-        </Card>`;
-  const cards = [aggregatesCard, workflowsCard, viewsCard]
-    .filter(Boolean)
-    .join("\n");
-  return `// Auto-generated.
-import { Stack, Title, Text, Anchor, Card, SimpleGrid } from "@mantine/core";
-import { Link } from "react-router-dom";
-
-export default function Home() {
-  return (
-    <Stack data-testid="home" gap="md">
-      <Stack gap={2}>
-        <Text size="sm" c="dimmed" tt="uppercase" fw={600}>${humanize(systemName)}</Text>
-        <Title order={2}>Welcome</Title>
-        <Text c="dimmed">
-          Pick a section from the sidebar to start, or jump straight in below.
-        </Text>
-      </Stack>
-      <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="md">
-${cards}
-      </SimpleGrid>
-    </Stack>
-  );
-}
-`;
-}
 
 function upper(s: string): string {
   return s[0]!.toUpperCase() + s.slice(1);

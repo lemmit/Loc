@@ -77,6 +77,33 @@ describe("react generator template-pack output (snapshots)", () => {
     );
   });
 
+  it("Mantine pack — App.tsx snapshot", async () => {
+    const files = await generateFromSource(SOURCE);
+    const app = files.get("web_mantine/src/App.tsx");
+    expect(app).toBeDefined();
+    await expect(app).toMatchFileSnapshot(
+      path.join(repoRoot, "test/__snapshots__/pack-mantine-app.tsx"),
+    );
+  });
+
+  it("Mantine pack — main.tsx snapshot", async () => {
+    const files = await generateFromSource(SOURCE);
+    const main = files.get("web_mantine/src/main.tsx");
+    expect(main).toBeDefined();
+    await expect(main).toMatchFileSnapshot(
+      path.join(repoRoot, "test/__snapshots__/pack-mantine-main.tsx"),
+    );
+  });
+
+  it("Mantine pack — home.tsx snapshot", async () => {
+    const files = await generateFromSource(SOURCE);
+    const home = files.get("web_mantine/src/pages/home.tsx");
+    expect(home).toBeDefined();
+    await expect(home).toMatchFileSnapshot(
+      path.join(repoRoot, "test/__snapshots__/pack-mantine-home.tsx"),
+    );
+  });
+
   it("Mantine pack — list page snapshot", async () => {
     const files = await generateFromSource(SOURCE);
     const list = files.get("web_mantine/src/pages/customers/list.tsx");
