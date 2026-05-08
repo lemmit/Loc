@@ -210,7 +210,7 @@ export default defineConfig({
 const PROJECT_TSCONFIG_JSON = JSON.stringify(
   {
     compilerOptions: {
-      target: "ES2022",
+      target: "ES2023",
       module: "NodeNext",
       moduleResolution: "NodeNext",
       strict: true,
