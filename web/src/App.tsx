@@ -10,6 +10,7 @@ import {
   SegmentedControl,
   Select,
   Stack,
+  Switch,
   Text,
   Textarea,
   TextInput,
@@ -162,6 +163,15 @@ export default function App(): JSX.Element {
   const [reqPath, setReqPath] = useState<string>("/products");
   const [reqBody, setReqBody] = useState<string>("");
   const [copied, setCopied] = useState(false);
+  // "Live mode" — when on, a successful Generate auto-bundles and
+  // a successful Bundle auto-boots, so editing the source rolls
+  // straight through to a live preview without clicks.  Off by
+  // default because Bundle hits the network (esm.sh) and Boot
+  // touches PGlite state — users shouldn't get those side effects
+  // unless they opt in.
+  const [liveMode, setLiveMode] = useState(false);
+  const liveModeRef = useRef(liveMode);
+  liveModeRef.current = liveMode;
 
   // Worker clients — lifetime-scoped to the App.
   const sourceRef = useRef<string>(initialSource);
@@ -310,6 +320,11 @@ export default function App(): JSX.Element {
     } else {
       setSelectedPath(null);
     }
+    // Live-mode cascade: roll into Bundle automatically when
+    // Generate succeeded.  Manual mode stops here.
+    if (liveModeRef.current && result.ok && result.files.length > 0) {
+      void runBundleRef.current();
+    }
   }
   // Stash the latest closure for the auto-Generate timer — the
   // timer is created in a ref-scoped helper, so it can't capture
@@ -357,7 +372,16 @@ export default function App(): JSX.Element {
       });
     }
     dispatch({ type: "BUNDLE_DONE", hono: honoRes, react: reactRes });
+    // Live-mode cascade: roll into Boot when the hono bundle
+    // succeeded.  Boot uses the migrate-or-apply path, so for
+    // unchanged schemas this is fast and preserves data; for
+    // schema changes it drops the public schema and re-applies.
+    if (liveModeRef.current && honoRes.ok) {
+      void runBootRef.current();
+    }
   }
+  const runBundleRef = useRef<() => Promise<void> | void>(() => {});
+  runBundleRef.current = runBundle;
 
   async function runBoot(): Promise<void> {
     const runtime = runtimeClientRef.current;
@@ -392,6 +416,10 @@ export default function App(): JSX.Element {
       });
     }
   }
+  // No further cascade — Boot is the last stage.  Dispatch (the
+  // request composer) is user-driven by design.
+  const runBootRef = useRef<() => Promise<void> | void>(() => {});
+  runBootRef.current = runBoot;
 
   async function runWipe(): Promise<void> {
     const runtime = runtimeClientRef.current;
@@ -496,6 +524,14 @@ export default function App(): JSX.Element {
             <Badge color="yellow" variant={warningCount > 0 ? "filled" : "light"} size="sm">
               {warningCount} warning{warningCount === 1 ? "" : "s"}
             </Badge>
+            <Switch
+              size="xs"
+              checked={liveMode}
+              onChange={(e) => setLiveMode(e.currentTarget.checked)}
+              label="Live"
+              data-testid="live-mode"
+              title="When on, edits cascade Generate → Bundle → Boot automatically."
+            />
           </Group>
         </Group>
       </AppShell.Header>
