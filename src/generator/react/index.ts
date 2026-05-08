@@ -6,7 +6,6 @@ import type {
 } from "../../ir/loom-ir.js";
 import { camel, snake, plural } from "../../util/naming.js";
 import { buildApiModule } from "./api-builder.js";
-import { buildNewPage } from "./pages-builder.js";
 import { buildPageObjectModule } from "./page-objects-builder.js";
 import {
   allWorkflows,
@@ -32,6 +31,7 @@ import {
   renderHome,
   renderListPage,
   renderMain,
+  renderNewPage,
   renderTheme,
 } from "./templating/render.js";
 
@@ -94,7 +94,7 @@ export function generateReactForContexts(
     );
     out.set(
       `src/pages/${snake(plural(agg.name))}/new.tsx`,
-      buildNewPage(agg, ctx, aggregatesByName),
+      renderNewPage(agg, ctx, aggregatesByName, pack),
     );
     out.set(
       `src/pages/${snake(plural(agg.name))}/detail.tsx`,
