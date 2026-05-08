@@ -11,7 +11,6 @@ import type {
   ValueObjectIR,
   WireField,
 } from "./loom-ir.js";
-import { expandScaffolds } from "./scaffold-expand.js";
 
 // ---------------------------------------------------------------------------
 // Loom IR enrichments — pure derivations layered on top of the IR
@@ -75,19 +74,18 @@ function enrichSystem(sys: SystemIR): SystemIR {
   // Done after module enrichment so frontends see the same enriched
   // contexts every other consumer sees.
   const deployables = enrichDeployables(sys.deployables);
-  // Slice 4 — expand each `ui` block's scaffold directives against
-  // the post-enrichment domain IR.  The expander preserves explicit
-  // pages (lowering populated `ui.pages` with them) and appends
-  // scaffold-synthesised pages for any directive whose generated
-  // page name doesn't collide with an explicit one.  Override-by-
-  // name is the same mechanism: an explicit `page <Name>` displaces
-  // the matching scaffold output without ceremony.
+  // Pass 1 (Slice 10) — scaffold expansion now runs at the AST
+  // level via `src/language/ddd-scaffold-ast-expander.ts` (a
+  // `DocumentState.IndexedContent` hook on the shared
+  // DocumentBuilder).  By the time lowering runs, every page is
+  // already an explicit AST node, so `ui.pages` carries the full
+  // canonical set straight from `lowerUi` — no IR-level pass
+  // needed.  The IR-level expander remains as a no-op shim for
+  // any caller that constructs a `LoomModel` outside the standard
+  // `parseHelper` / `DocumentBuilder` pipeline (it just returns
+  // the existing pages unchanged).
   const enrichedSys: SystemIR = { ...sys, modules, deployables };
-  const uis = sys.uis.map((ui) => {
-    const { pages } = expandScaffolds(ui, enrichedSys);
-    return { ...ui, pages };
-  });
-  return { ...enrichedSys, uis };
+  return { ...enrichedSys };
 }
 
 function enrichContext(ctx: BoundedContextIR): BoundedContextIR {

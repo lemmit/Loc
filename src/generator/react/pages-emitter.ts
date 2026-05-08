@@ -170,8 +170,20 @@ function emitScaffoldPage(
       return out;
     }
     case "workflow-form": {
-      const ctxIR = ctx.contextsByName.get(origin.contextName);
-      const wf = ctxIR?.workflows.find((w) => w.name === origin.workflowName);
+      // Slice 10 — `contextName` may be empty when the page was
+      // synthesised by the AST expander; fall back to searching.
+      let ctxIR = ctx.contextsByName.get(origin.contextName);
+      let wf = ctxIR?.workflows.find((w) => w.name === origin.workflowName);
+      if (!wf) {
+        for (const c of ctx.contextsByName.values()) {
+          const found = c.workflows.find((w) => w.name === origin.workflowName);
+          if (found) {
+            ctxIR = c;
+            wf = found;
+            break;
+          }
+        }
+      }
       if (!wf || !ctxIR) return out;
       out.set(
         `src/pages/workflows/${snake(wf.name)}.tsx`,
@@ -180,8 +192,18 @@ function emitScaffoldPage(
       return out;
     }
     case "view-list": {
-      const ctxIR = ctx.contextsByName.get(origin.contextName);
-      const view = ctxIR?.views.find((v) => v.name === origin.viewName);
+      let ctxIR = ctx.contextsByName.get(origin.contextName);
+      let view = ctxIR?.views.find((v) => v.name === origin.viewName);
+      if (!view) {
+        for (const c of ctx.contextsByName.values()) {
+          const found = c.views.find((v) => v.name === origin.viewName);
+          if (found) {
+            ctxIR = c;
+            view = found;
+            break;
+          }
+        }
+      }
       if (!view || !ctxIR) return out;
       out.set(
         `src/pages/views/${snake(view.name)}.tsx`,
@@ -228,9 +250,21 @@ function lookupAggregate(
   origin: ScaffoldOriginIR & { kind: `aggregate-${string}` },
   ctx: PageEmitContext,
 ): { agg: AggregateIR; ctxIR: BoundedContextIR } {
-  const ctxIR = ctx.contextsByName.get(origin.contextName)!;
   const agg = ctx.aggregatesByName.get(origin.aggregateName)!;
-  return { agg, ctxIR };
+  // Slice 10 — `contextName` is `""` for pages synthesised by the
+  // AST-to-AST expander (it doesn't track per-aggregate context
+  // ownership).  Fall back to searching `contextsByName` for the
+  // first context that contains this aggregate.
+  let ctxIR = ctx.contextsByName.get(origin.contextName);
+  if (!ctxIR) {
+    for (const c of ctx.contextsByName.values()) {
+      if (c.aggregates.some((a) => a.name === origin.aggregateName)) {
+        ctxIR = c;
+        break;
+      }
+    }
+  }
+  return { agg, ctxIR: ctxIR! };
 }
 
 // Re-export for callers that want to type-check `homeRenderer`'s
@@ -290,7 +324,16 @@ export function emitPageObjectsForUi(
         if (seenAggregates.has(origin.aggregateName)) break;
         seenAggregates.add(origin.aggregateName);
         const agg = ctx.aggregatesByName.get(origin.aggregateName);
-        const ctxIR = ctx.contextsByName.get(origin.contextName);
+        let ctxIR = ctx.contextsByName.get(origin.contextName);
+        if (!ctxIR && agg) {
+          // Slice 10 fallback: AST expander leaves `contextName: ""`.
+          for (const c of ctx.contextsByName.values()) {
+            if (c.aggregates.some((a) => a.name === agg.name)) {
+              ctxIR = c;
+              break;
+            }
+          }
+        }
         if (!agg || !ctxIR) break;
         out.set(
           `e2e/pages/${camel(agg.name)}.ts`,
@@ -301,8 +344,14 @@ export function emitPageObjectsForUi(
       case "workflow-form": {
         if (seenWorkflows.has(origin.workflowName)) break;
         seenWorkflows.add(origin.workflowName);
-        const ctxIR = ctx.contextsByName.get(origin.contextName);
-        const wf = ctxIR?.workflows.find((w) => w.name === origin.workflowName);
+        let ctxIR = ctx.contextsByName.get(origin.contextName);
+        let wf = ctxIR?.workflows.find((w) => w.name === origin.workflowName);
+        if (!wf) {
+          for (const c of ctx.contextsByName.values()) {
+            const found = c.workflows.find((w) => w.name === origin.workflowName);
+            if (found) { ctxIR = c; wf = found; break; }
+          }
+        }
         if (!ctxIR || !wf) break;
         out.set(
           `e2e/pages/workflows/${snake(wf.name)}.ts`,
@@ -313,8 +362,14 @@ export function emitPageObjectsForUi(
       case "view-list": {
         if (seenViews.has(origin.viewName)) break;
         seenViews.add(origin.viewName);
-        const ctxIR = ctx.contextsByName.get(origin.contextName);
-        const view = ctxIR?.views.find((v) => v.name === origin.viewName);
+        let ctxIR = ctx.contextsByName.get(origin.contextName);
+        let view = ctxIR?.views.find((v) => v.name === origin.viewName);
+        if (!view) {
+          for (const c of ctx.contextsByName.values()) {
+            const found = c.views.find((v) => v.name === origin.viewName);
+            if (found) { ctxIR = c; view = found; break; }
+          }
+        }
         if (!ctxIR || !view) break;
         out.set(
           `e2e/pages/views/${snake(view.name)}.ts`,

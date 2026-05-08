@@ -77,6 +77,7 @@ import type {
   Platform,
   RepositoryIR,
   ScaffoldIR,
+  ScaffoldOriginIR,
   ScaffoldSelector,
   StateFieldIR,
   StmtIR,
@@ -426,6 +427,13 @@ function lowerPage(p: import("../language/generated/ast.js").Page): PageIR {
       };
     }
   }
+  // Slice 10 — Pass-1 AST-to-AST scaffold expansion populates
+  // synthesised pages with body expressions like
+  // `List(of: Order)` / `Form(creates: T)` / etc.  We infer the
+  // page's `scaffoldOrigin` discriminator and `source` from the
+  // body shape so the React emitter dispatches identically
+  // whether the page came from source or from the AST expander.
+  const inferred = inferScaffoldOrigin(p, body);
   return {
     name: p.name,
     params,
@@ -435,8 +443,87 @@ function lowerPage(p: import("../language/generated/ast.js").Page): PageIR {
     state,
     body,
     menuMeta,
-    source: "explicit",
+    source: inferred ? "scaffold" : "explicit",
+    scaffoldOrigin: inferred,
   };
+}
+
+/** Inspect a synthesised page's body to recover the
+ *  `scaffoldOrigin` discriminator the legacy IR-level expander
+ *  used to set.  When the body matches the synthesiser's
+ *  characteristic shape (`List(of: <Agg>)`, `Form(creates: <Agg>)`,
+ *  `Detail(of: <Agg>, by: id)`, `Form(runs: <wf>)`, `List(of: view
+ *  <View>)`, the standalone Home / WorkflowsIndex / ViewsIndex
+ *  sentinels), returns the matching origin.  Otherwise returns
+ *  `undefined` — the page is treated as user-explicit. */
+function inferScaffoldOrigin(
+  page: import("../language/generated/ast.js").Page,
+  body: ExprIR | undefined,
+): ScaffoldOriginIR | undefined {
+  if (!body || body.kind !== "call") return undefined;
+  const callName = body.name;
+  const argNames = body.argNames ?? [];
+  const argRef = (i: number): string | undefined => {
+    const arg = body.args[i];
+    if (!arg) return undefined;
+    if (arg.kind === "ref") return arg.name;
+    if (arg.kind === "literal" && arg.lit === "string") return arg.value;
+    return undefined;
+  };
+  // Sentinel page names — Home / WorkflowsIndex / ViewsIndex
+  // synthesised by the AST expander.  Match on the body call's
+  // function name (which the synthesiser sets to the same string
+  // by convention).
+  if (callName === "Home") return { kind: "home" };
+  if (callName === "WorkflowsIndex") return { kind: "workflows-index" };
+  if (callName === "ViewsIndex") return { kind: "views-index" };
+  // Aggregate-list / new / detail are distinguished by the body's
+  // call name (`List` / `Form` with `creates:` / `Detail`).  The
+  // first named arg's value names the aggregate; the page name
+  // suffix (`List` / `New` / `Detail`) lets us double-check kind.
+  if (callName === "List" && argNames[0] === "of") {
+    const aggName = argRef(0);
+    if (!aggName) return undefined;
+    if (aggName.startsWith("view ")) {
+      // `List(of: view <ViewName>)` — view-list page.
+      return { kind: "view-list", viewName: aggName.slice(5), contextName: "" };
+    }
+    return {
+      kind: "aggregate-list",
+      aggregateName: aggName,
+      contextName: "",
+    };
+  }
+  if (callName === "Form" && argNames[0] === "creates") {
+    const aggName = argRef(0);
+    if (!aggName) return undefined;
+    return {
+      kind: "aggregate-new",
+      aggregateName: aggName,
+      contextName: "",
+    };
+  }
+  if (callName === "Detail" && argNames[0] === "of") {
+    const aggName = argRef(0);
+    if (!aggName) return undefined;
+    return {
+      kind: "aggregate-detail",
+      aggregateName: aggName,
+      contextName: "",
+    };
+  }
+  if (callName === "Form" && argNames[0] === "runs") {
+    const wfName = argRef(0);
+    if (!wfName) return undefined;
+    return {
+      kind: "workflow-form",
+      workflowName: wfName,
+      contextName: "",
+    };
+  }
+  // Doesn't match any synthesiser shape — page is user-explicit.
+  void page;
+  return undefined;
 }
 
 function lowerComponent(
@@ -485,15 +572,31 @@ function lowerMenuBlock(
     sections: m.sections.map((sec) => ({
       label: sec.label,
       links: sec.links.map((l): MenuLinkIR => {
-        // Slice 6: page links use a bare name (not a cross-
-        // reference) because scaffold-synthesised pages don't
-        // exist at AST link time.  The IR-level menu emitter and
-        // validator resolve the name against `ui.pages` post-
-        // expansion.
-        if (l.pageName) {
+        // Slice 10: page links use a real Langium cross-reference.
+        // Scaffold-synthesised pages are first-class AST nodes by
+        // link time, so `[Page:LooseName]` resolves through the
+        // standard linker.  We carry the resolved page's name into
+        // the IR for the menu emitter (which iterates `ui.pages` by
+        // name).  Unresolved refs surface as Langium linker errors,
+        // not silent shim misses.
+        const pageRef = l.page?.ref;
+        if (pageRef) {
           return {
             kind: "page",
-            pageName: l.pageName,
+            pageName: pageRef.name,
+            props: (l.props ?? []).map((p) => ({
+              name: p.name,
+              value: lowerExpr(p.value, env),
+            })),
+          };
+        }
+        if (l.page?.$refText) {
+          // Reference exists but didn't resolve — preserve the text
+          // for diagnostics.  The validator / Langium linker has
+          // already reported the unresolved reference.
+          return {
+            kind: "page",
+            pageName: l.page.$refText,
             props: (l.props ?? []).map((p) => ({
               name: p.name,
               value: lowerExpr(p.value, env),

@@ -997,26 +997,17 @@ export class DddValidator {
     );
     for (const section of block.sections) {
       for (const link of section.links) {
-        // Slice 6: page links carry a bare name (not a cross-
-        // reference) because scaffold-synthesised pages don't
-        // exist at AST link time.  We resolve against the ui's
-        // explicit pages here; scaffold-synthesised page names
-        // are validated post-IR by `validateLoomModel`.
-        const targetName = link.pageName;
-        if (targetName && !pagesInThisUi.has(targetName)) {
-          // Could still be a scaffold-synthesised name — defer
-          // the strict check to the IR-level validator which sees
-          // the post-expansion page set.  We only flag here if
-          // the ui has no scaffold directives at all (so a name
-          // that isn't an explicit page can't possibly resolve).
-          if (ui.members.every((m) => m.$type !== "Scaffold")) {
-            accept(
-              "error",
-              `'link ${targetName}' references no page in ui '${ui.name}'.  Pages declared in other ui blocks aren't visible from this menu.`,
-              { node: link, property: "pageName" },
-            );
-          }
-        }
+        // Slice 10: page links use a Langium cross-reference now
+        // that scaffold expansion runs at the AST level.  The
+        // linker reports unresolved refs natively
+        // ("Could not resolve reference to Page named 'X'") — no
+        // custom validator message needed.  `pagesInThisUi` is no
+        // longer consulted here because cross-references are
+        // already scoped to the surrounding ui by the default
+        // scope provider.
+        void pagesInThisUi;
+        const targetName = link.page?.ref?.name ?? link.page?.$refText;
+        void targetName;
         // MenuLinkProp key names — only `label` / `order` recognised.
         const allowedLinkKeys = new Set(["label", "order"]);
         for (const prop of link.props ?? []) {
