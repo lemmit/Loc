@@ -55,6 +55,11 @@ export class DddValidator {
     // preconditions, derived bodies, function bodies, and guards
     // alike — anywhere the operator can appear.
     this.checkMatchesCalls(model, accept);
+    // Slice 3 — match expressions: warn on a missing `else` arm.
+    // Type-checking arm conditions is best-effort here (the lowering's
+    // type system is the source of truth); structural checks run
+    // unconditionally.
+    this.checkMatchExpressions(model, accept);
     for (const m of model.members) {
       if (m.$type === "BoundedContext") {
         this.checkContext(m, accept);
@@ -73,6 +78,29 @@ export class DddValidator {
           }
         }
         for (const tb of themeBlocks) this.checkTheme(tb, accept);
+        // Slice 3 — page metamodel.  Collect ui blocks first so per-
+        // ui checks can see siblings (name uniqueness across uis), and
+        // so per-deployable checks can cross-reference the system's
+        // ui inventory.
+        const uis = m.members.filter(
+          (sm) => sm.$type === "Ui",
+        ) as import("./generated/ast.js").Ui[];
+        const uiNamesSeen = new Map<string, import("./generated/ast.js").Ui>();
+        for (const ui of uis) {
+          const prior = uiNamesSeen.get(ui.name);
+          if (prior) {
+            // Rule 1: UI name uniqueness within a system.  Flag the
+            // duplicates (not the first declaration).
+            accept(
+              "error",
+              `Duplicate ui block '${ui.name}'; ui names must be unique within a system.`,
+              { node: ui, property: "name" },
+            );
+          } else {
+            uiNamesSeen.set(ui.name, ui);
+          }
+        }
+
         for (const sm of m.members) {
           if (sm.$type === "Module") {
             for (const ctx of sm.contexts) this.checkContext(ctx, accept);
@@ -82,6 +110,12 @@ export class DddValidator {
             this.checkDeployable(
               sm as import("./generated/ast.js").Deployable,
               deployables as import("./generated/ast.js").Deployable[],
+              accept,
+            );
+          } else if (sm.$type === "Ui") {
+            this.checkUi(
+              sm as import("./generated/ast.js").Ui,
+              m as import("./generated/ast.js").System,
               accept,
             );
           }
@@ -157,7 +191,43 @@ export class DddValidator {
     siblings: import("./generated/ast.js").Deployable[],
     accept: ValidationAcceptor,
   ): void {
-    if (d.platform === "react") {
+    // Slice 3 — page-metamodel UI binding rules (3, 4).
+    // Rule 3: only `react` and `static` platforms admit `ui:`.
+    // Rule 4: every `static` deployable must declare `ui:` (otherwise
+    //         it has nothing to serve).
+    const hasUiBinding = !!(d.uiSugar || d.uiBlock);
+    if (hasUiBinding && d.platform !== "react" && d.platform !== "static") {
+      accept(
+        "error",
+        `'ui:' binding is only valid on 'platform: react' or 'platform: static' deployables (got '${d.platform}').`,
+        {
+          node: d,
+          property: d.uiSugar ? "uiSugar" : "uiBlock",
+        },
+      );
+    }
+    if (d.platform === "static" && !hasUiBinding) {
+      accept(
+        "error",
+        `Static deployable '${d.name}' must declare a 'ui:' binding — there is nothing to serve without one.`,
+        { node: d, property: "name" },
+      );
+    }
+    // Rule 13: framework only `react` in v0.  The grammar enum
+    // restricts to `'react'` so this is structurally enforced; an
+    // explicit check here documents the intent and keeps a stable
+    // diagnostic message when more frameworks land.
+    const framework = d.uiBlock?.framework;
+    if (framework && framework !== "react" && d.uiBlock) {
+      accept(
+        "error",
+        `Framework '${framework}' is not yet supported (v0 ships only 'react'). Drop the framework override or pick 'react'.`,
+        { node: d.uiBlock, property: "framework" },
+      );
+    }
+
+    // Existing rules — react/static both behave like frontends.
+    if (d.platform === "react" || d.platform === "static") {
       const target = d.targets?.ref;
       if (!target) {
         accept(
@@ -167,7 +237,7 @@ export class DddValidator {
         );
         return;
       }
-      if (target.platform === "react") {
+      if (target.platform === "react" || target.platform === "static") {
         accept(
           "error",
           `Frontend deployable '${d.name}' cannot target another frontend ('${target.name}'). Pick a 'dotnet' or 'hono' deployable.`,
@@ -186,7 +256,7 @@ export class DddValidator {
       if (d.targets) {
         accept(
           "error",
-          `'targets:' is only valid on a 'platform: react' deployable.`,
+          `'targets:' is only valid on a 'platform: react' or 'platform: static' deployable.`,
           { node: d, property: "targets" },
         );
       }
@@ -282,6 +352,39 @@ export class DddValidator {
         `Cannot 'contain' part '${part.name}' — it belongs to aggregate '${owner?.name ?? "?"}'. Use Id<${part.name}> for cross-aggregate links.`,
         { node: c, property: "partType" },
       );
+    }
+  }
+
+  private checkMatchExpressions(
+    model: import("./generated/ast.js").Model,
+    accept: ValidationAcceptor,
+  ): void {
+    for (const node of AstUtils.streamAllContents(model)) {
+      if (node.$type !== "MatchExpr") continue;
+      const m = node as import("./generated/ast.js").MatchExpr;
+      // Empty match (no arms, no else) is structurally meaningless —
+      // grammar permits it, validator rejects.
+      if (m.arms.length === 0 && !m.elseExpr) {
+        accept(
+          "error",
+          `Empty 'match { }' — must declare at least one arm or an 'else' branch.`,
+          { node: m },
+        );
+        continue;
+      }
+      // Warn on non-exhaustive matches (no `else`).  An expression
+      // without `else` returns undefined when no arm matches, which
+      // is rarely intentional — for state-machine page bodies it
+      // means "render nothing" which is usually a bug.  Promoted
+      // from error to warning to keep the surface friendly while
+      // the user iterates.
+      if (!m.elseExpr) {
+        accept(
+          "warning",
+          `'match' expression has no 'else' arm — when no arm matches, the expression is undefined.  Add 'else => …' for exhaustive coverage.`,
+          { node: m },
+        );
+      }
     }
   }
 
@@ -692,6 +795,267 @@ export class DddValidator {
       }
     }
     return false;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Page metamodel — Slice 3 validator obligations.
+  //
+  // Per the plan at /root/.claude/plans/yes-make-full-plan-tingly-sunbeam.md.
+  // Walks each `ui` SystemMember and emits diagnostics for malformed
+  // pages, scaffold directives, menus, and the references between
+  // them.  Cross-cutting rules (uniqueness across uis, deployable.ui
+  // → ui resolution) are handled in `check()` and `checkDeployable()`
+  // respectively.
+  //
+  // These checks are intentionally syntactic / cross-reference; deeper
+  // type analysis on body expressions and component-stdlib parameter
+  // shape lives in Slice 5 (page emitter + closed-stdlib spec table).
+  // ---------------------------------------------------------------------------
+
+  private checkUi(
+    ui: import("./generated/ast.js").Ui,
+    sys: import("./generated/ast.js").System,
+    accept: ValidationAcceptor,
+  ): void {
+    // Page name uniqueness within the ui (Rule 7).  Override-by-name
+    // is the SAME mechanism — the explicit page must displace exactly
+    // one scaffolded page; multiple explicit pages with the same name
+    // are still an error.
+    const pageNamesSeen = new Map<
+      string,
+      import("./generated/ast.js").Page
+    >();
+    for (const m of ui.members) {
+      if (m.$type !== "Page") continue;
+      const prior = pageNamesSeen.get(m.name);
+      if (prior) {
+        accept(
+          "error",
+          `Duplicate page '${m.name}' in ui '${ui.name}'.  Pages within a ui must have unique names; an explicit override-by-name displaces a single scaffolded page, not another explicit one.`,
+          { node: m, property: "name" },
+        );
+      } else {
+        pageNamesSeen.set(m.name, m);
+      }
+    }
+
+    // At most one ui-level menu block (Rule 8 part).
+    const menuBlocks = ui.members.filter((m) => m.$type === "MenuBlock");
+    if (menuBlocks.length > 1) {
+      for (const extra of menuBlocks.slice(1)) {
+        accept(
+          "error",
+          `ui '${ui.name}' declares more than one 'menu { ... }' block; keep just the first.`,
+          { node: extra },
+        );
+      }
+    }
+
+    // Per-member walks.
+    for (const m of ui.members) {
+      if (m.$type === "Scaffold") this.checkScaffold(m, sys, accept);
+      else if (m.$type === "Page") this.checkPage(m, ui, accept);
+      else if (m.$type === "MenuBlock") this.checkMenuBlock(m, ui, accept);
+    }
+  }
+
+  private checkScaffold(
+    s: import("./generated/ast.js").Scaffold,
+    sys: import("./generated/ast.js").System,
+    accept: ValidationAcceptor,
+  ): void {
+    // Rule 5 — selector targets must resolve to declarations of the
+    // matching kind anywhere in the system.  The deployable-targets-
+    // chain reachability check is left to Slice 4's expander where
+    // we already need to walk reachability for page generation.
+
+    // Build per-kind name sets from the system's domain IR.
+    const moduleNames = new Set<string>();
+    const contextNames = new Set<string>();
+    const aggregateNames = new Set<string>();
+    const workflowNames = new Set<string>();
+    const viewNames = new Set<string>();
+    for (const sm of sys.members) {
+      if (sm.$type === "Module") {
+        moduleNames.add(sm.name);
+        for (const ctx of sm.contexts) {
+          contextNames.add(ctx.name);
+          for (const cm of ctx.members) {
+            if (cm.$type === "Aggregate") aggregateNames.add(cm.name);
+            else if (cm.$type === "Workflow") workflowNames.add(cm.name);
+            else if (cm.$type === "View") viewNames.add(cm.name);
+          }
+        }
+      } else if (sm.$type === "BoundedContext") {
+        contextNames.add(sm.name);
+        for (const cm of sm.members) {
+          if (cm.$type === "Aggregate") aggregateNames.add(cm.name);
+          else if (cm.$type === "Workflow") workflowNames.add(cm.name);
+          else if (cm.$type === "View") viewNames.add(cm.name);
+        }
+      }
+    }
+
+    const expected =
+      s.selector === "modules"
+        ? moduleNames
+        : s.selector === "contexts"
+        ? contextNames
+        : s.selector === "aggregates"
+        ? aggregateNames
+        : s.selector === "workflows"
+        ? workflowNames
+        : viewNames;
+
+    const seenWithinDirective = new Set<string>();
+    for (const t of s.targets) {
+      if (!expected.has(t)) {
+        accept(
+          "error",
+          `'scaffold ${s.selector}: ${t}' — no ${singular(s.selector)} '${t}' is declared in this system.`,
+          { node: s, property: "targets" },
+        );
+      }
+      // Rule 6 (light) — same name listed twice in one directive.
+      // Cross-directive double-scaffolding (same module, different
+      // granularity) is detected by Slice 4's expander when it
+      // collapses scaffold output to a page-name map.
+      if (seenWithinDirective.has(t)) {
+        accept(
+          "error",
+          `'scaffold ${s.selector}: ...' lists '${t}' more than once.`,
+          { node: s, property: "targets" },
+        );
+      }
+      seenWithinDirective.add(t);
+    }
+  }
+
+  private checkPage(
+    p: import("./generated/ast.js").Page,
+    ui: import("./generated/ast.js").Ui,
+    accept: ValidationAcceptor,
+  ): void {
+    void ui;
+    // Property uniqueness (Rule 9 part) — at most one each of route,
+    // title, requires, body, menu metadata.  Multiple `state {}`
+    // blocks merge (per spec §6 — same posture as `permissions`).
+    const seen = new Map<string, number>();
+    for (const prop of p.props) {
+      const key = prop.$type;
+      if (key === "StateBlock") continue; // multiple allowed
+      seen.set(key, (seen.get(key) ?? 0) + 1);
+    }
+    for (const [key, count] of seen) {
+      if (count > 1) {
+        accept(
+          "error",
+          `Page '${p.name}' declares more than one '${pagePropDisplayName(key)}' property; keep just the first.`,
+          { node: p, property: "name" },
+        );
+      }
+    }
+
+    // PageMenuMeta key names — only `section` / `label` / `order` /
+    // `hidden` are recognised (parser accepts any LooseName via the
+    // soft-keyword rule).
+    const allowedMenuMetaKeys = new Set([
+      "section",
+      "label",
+      "order",
+      "hidden",
+    ]);
+    for (const prop of p.props) {
+      if (prop.$type !== "PageMenuMeta") continue;
+      for (const entry of prop.entries) {
+        if (!allowedMenuMetaKeys.has(entry.name)) {
+          accept(
+            "error",
+            `Unknown menu metadata key '${entry.name}' on page '${p.name}'.  Recognised keys: ${[
+              ...allowedMenuMetaKeys,
+            ].join(", ")}.`,
+            { node: entry, property: "name" },
+          );
+        }
+      }
+    }
+  }
+
+  private checkMenuBlock(
+    block: import("./generated/ast.js").MenuBlock,
+    ui: import("./generated/ast.js").Ui,
+    accept: ValidationAcceptor,
+  ): void {
+    // Rule 8 — every page-link in a menu block must reference a page
+    // in the SAME ui.  The grammar's `[Page:ID]` cross-reference
+    // resolves globally; we additionally check the resolved page's
+    // container.
+    const pagesInThisUi = new Set(
+      ui.members
+        .filter((m) => m.$type === "Page")
+        .map((m) => (m as import("./generated/ast.js").Page).name),
+    );
+    for (const section of block.sections) {
+      for (const link of section.links) {
+        const target = link.page?.ref;
+        if (target && !pagesInThisUi.has(target.name)) {
+          accept(
+            "error",
+            `'link ${target.name}' resolves to a page declared outside ui '${ui.name}'.  Menu links must reference pages in the same ui.`,
+            { node: link, property: "page" },
+          );
+        }
+        // MenuLinkProp key names — only `label` / `order` recognised.
+        const allowedLinkKeys = new Set(["label", "order"]);
+        for (const prop of link.props ?? []) {
+          if (!allowedLinkKeys.has(prop.name)) {
+            accept(
+              "error",
+              `Unknown menu link property '${prop.name}'.  Recognised: ${[
+                ...allowedLinkKeys,
+              ].join(", ")}.`,
+              { node: prop, property: "name" },
+            );
+          }
+        }
+      }
+    }
+  }
+}
+
+// Map of PageProp $type names back to the source-side property name
+// for diagnostics.  Used by `checkPage`'s duplicate-property message.
+function pagePropDisplayName(typeName: string): string {
+  switch (typeName) {
+    case "RouteProp":
+      return "route";
+    case "TitleProp":
+      return "title";
+    case "RequiresProp":
+      return "requires";
+    case "BodyProp":
+      return "body";
+    case "PageMenuMeta":
+      return "menu";
+    default:
+      return typeName;
+  }
+}
+
+function singular(selector: string): string {
+  switch (selector) {
+    case "modules":
+      return "module";
+    case "contexts":
+      return "context";
+    case "aggregates":
+      return "aggregate";
+    case "workflows":
+      return "workflow";
+    case "views":
+      return "view";
+    default:
+      return selector;
   }
 }
 
