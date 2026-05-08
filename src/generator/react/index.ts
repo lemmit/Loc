@@ -7,11 +7,7 @@ import type {
 } from "../../ir/loom-ir.js";
 import { camel, snake, plural } from "../../util/naming.js";
 import { buildApiModule } from "./api-builder.js";
-import {
-  buildDetailPage,
-  buildListPage,
-  buildNewPage,
-} from "./pages-builder.js";
+import { buildDetailPage, buildNewPage } from "./pages-builder.js";
 import { buildPageObjectModule } from "./page-objects-builder.js";
 import {
   allWorkflows,
@@ -31,6 +27,8 @@ import {
 } from "./view-builder.js";
 import { buildMantineTheme } from "./theme-builder.js";
 import { FORMAT_HELPERS_TSX } from "./format-helpers.js";
+import { loadPack, resolvePackDir } from "./templating/loader.js";
+import { renderListPage } from "./templating/render.js";
 import type { ViewIR } from "../../ir/loom-ir.js";
 import { humanize } from "../../util/naming.js";
 
@@ -75,12 +73,21 @@ export function generateReactForContexts(
   const aggregatesByName = new Map<string, AggregateIR>();
   for (const { agg } of aggregates) aggregatesByName.set(agg.name, agg);
 
+  // Phase 0: route list-page emission through the new template-pack
+  // layer.  Loads the pack named by `deployable.design` (defaulted
+  // to "mantine" by the lowerer for react deployables); other page
+  // kinds still use the legacy TS builders for now.  Subsequent
+  // phases port each remaining page kind, deleting its TS builder
+  // as it lands.
+  const design = deployable.design ?? "mantine";
+  const pack = loadPack(resolvePackDir(design));
+
   for (const { agg, ctx } of aggregates) {
     const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
     out.set(`src/api/${camel(agg.name)}.ts`, buildApiModule(agg, repo, ctx));
     out.set(
       `src/pages/${snake(plural(agg.name))}/list.tsx`,
-      buildListPage(agg, aggregatesByName),
+      renderListPage(agg, aggregatesByName, pack),
     );
     out.set(
       `src/pages/${snake(plural(agg.name))}/new.tsx`,

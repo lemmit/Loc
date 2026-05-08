@@ -1,0 +1,65 @@
+// Auto-generated.
+// shadcn pack — Phase 0 spike: native HTML5 + Tailwind utility classes
+// (no shadcn UI library files yet — those land in Phase 2 with the
+// full project shell).  Demonstrates that the same view-model
+// produces a structurally-distinct output through a different pack.
+import { Link, useNavigate } from "react-router-dom";
+import { {{hookName}} } from "{{{hookImportPath}}}";
+
+export default function {{aggregateName}}List() {
+  const navigate = useNavigate();
+  const q = {{hookName}}();
+  const count = q.data?.length ?? 0;
+  return (
+    <div data-testid="{{slug}}-list" className="flex flex-col gap-4">
+      <nav data-testid="{{slug}}-list-breadcrumbs" className="flex items-center gap-2 text-sm text-muted-foreground">
+        {{#each breadcrumbs}}{{#if to}}<Link to="{{{to}}}" className="hover:text-foreground">{{label}}</Link>{{else}}<span>{{label}}</span>{{/if}}{{#unless @last}} <span>/</span> {{/unless}}{{/each}}
+      </nav>
+      <div className="flex items-end justify-between">
+        <div className="flex flex-col gap-0.5">
+          <h2 className="text-2xl font-semibold tracking-tight">{{humanPlural}}</h2>
+          <p className="text-sm text-muted-foreground">{q.isLoading ? "Loading…" : count === 1 ? "1 record" : count + " records"}</p>
+        </div>
+        <button onClick={() => navigate("/{{slug}}/new")} data-testid="{{slug}}-list-create" className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90">+ New {{humanSingularLower}}</button>
+      </div>
+      {q.isLoading && (
+        <div className="rounded-md border bg-card p-4">
+          <div className="flex flex-col gap-2">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="h-7 rounded-sm bg-muted animate-pulse" />
+            ))}
+          </div>
+        </div>
+      )}
+      {q.isError && <div role="alert" className="rounded-md border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive"><strong>Couldn't load {{humanPluralLower}}: </strong>{(q.error as Error).message}</div>}
+      {q.data && q.data.length === 0 && (
+        <div data-testid="{{slug}}-list-empty" className="rounded-md border bg-card p-12">
+          <div className="flex flex-col items-center gap-2">
+            <p className="text-sm text-muted-foreground">No {{humanPluralLower}} yet.</p>
+            <button onClick={() => navigate("/{{slug}}/new")} className="text-sm text-primary hover:underline">
+              Create your first {{humanSingularLower}}
+            </button>
+          </div>
+        </div>
+      )}
+      {q.data && q.data.length > 0 && (
+        <div className="rounded-md border bg-card overflow-hidden">
+          <table className="w-full caption-bottom text-sm">
+            <thead className="border-b bg-muted/50">
+              <tr>
+                {{#each columnHeaders}}<th className="h-10 px-4 text-left align-middle font-medium text-muted-foreground">{{this}}</th>{{/each}}
+              </tr>
+            </thead>
+            <tbody>
+              {q.data.map((row) => (
+                <tr key={row.id} data-testid={`{{slug}}-row-${row.id}`} className="border-b last:border-0 hover:bg-muted/50 cursor-pointer transition-colors" onClick={() => navigate(`/{{slug}}/${row.id}`)}>
+                  {{#each columns}}{{{cellHtml}}}{{/each}}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}

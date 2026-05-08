@@ -683,7 +683,7 @@ function iconForOp(opName: string): string | undefined {
  *  target's detail page without requiring the source DSL to upgrade
  *  to an explicit `Id<Customer>`.  Returns the aggregate match when
  *  one applies, otherwise undefined. */
-function stringIdHeuristic(
+export function stringIdHeuristic(
   fieldName: string,
   t: { kind: string; name?: string },
   aggregatesByName: Map<string, AggregateIR>,
