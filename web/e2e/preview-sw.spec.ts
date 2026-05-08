@@ -229,7 +229,13 @@ test("SW runtime bridge — fetch on `<sandbox>/runtime/*` round-trips through M
   expect(result.contentType).toContain("application/json");
   // The echo body proves the SW forwarded the right URL, method,
   // and body to the port.
-  expect(result.json.forwardedUrl).toContain("__loom_sandbox__/runtime/products");
+  // The forwarded URL must have the sandbox+runtime prefix
+  // stripped so the Hono app inside the runtime worker matches
+  // its own `/products` route (and not the full deploy path).
+  // Origin is preserved; pathname becomes route-relative.
+  const forwardedPath = new URL(result.json.forwardedUrl).pathname;
+  expect(forwardedPath, "forwarded URL pathname stripped to route").toBe("/products");
+  expect(result.json.forwardedUrl).not.toContain("__loom_sandbox__");
   expect(result.json.forwardedMethod).toBe("POST");
   expect(JSON.parse(result.json.forwardedBody)).toEqual({ sku: "TEST-1" });
 });
