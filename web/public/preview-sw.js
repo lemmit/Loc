@@ -108,20 +108,19 @@ async function handleSandboxRequest(request, url) {
     );
   }
 
-  // Index navigation.
-  if (subpath === "" || subpath === "index.html") {
-    return new Response(currentBundle.html, {
-      status: 200,
-      headers: {
-        "content-type": "text/html; charset=utf-8",
-        "cache-control": "no-store",
-      },
-    });
-  }
-
-  return new Response("Sandbox path not handled.\n", {
-    status: 404,
-    headers: { "content-type": "text/plain; charset=utf-8" },
+  // SPA fallback — every non-runtime path under the sandbox prefix
+  // serves the bundle's HTML.  The bundle's BrowserRouter (with
+  // basename pinned to the sandbox path) then matches the path
+  // against the user's routes.  This makes deep links and reloads
+  // mid-route work — e.g. user clicks "Customers", URL becomes
+  // `<sandbox>/customers`, reload returns the bundle, router
+  // matches "/customers".
+  return new Response(currentBundle.html, {
+    status: 200,
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+    },
   });
 }
 

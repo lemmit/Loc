@@ -319,13 +319,24 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 5_000, retry: 1 } },
 });
 
+// Optional basename hook the host page can set before the bundle
+// runs.  When present (e.g. the Loom playground iframe served at
+// \`<deploy>/__loom_sandbox__/\` injects \`window.__LOOM_BASENAME__\`
+// = \`/<deploy>/__loom_sandbox__\`), routes resolve relative to it
+// so links like \`/customers\` push state inside the iframe scope.
+// Plain deploys leave it undefined and the router defaults to \`/\`.
+const basename =
+  (typeof window !== "undefined"
+    ? (window as { __LOOM_BASENAME__?: string }).__LOOM_BASENAME__
+    : undefined) ?? undefined;
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       ${providerOpen}
         <ModalsProvider>
           <Notifications position="top-right" />
-          <BrowserRouter>
+          <BrowserRouter basename={basename}>
             <App />
           </BrowserRouter>
         </ModalsProvider>
