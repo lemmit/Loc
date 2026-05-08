@@ -151,11 +151,16 @@ describe("enrichLoomModel — auto-includes findAll", () => {
   });
 });
 
-describe("enrichLoomModel — react `targets:` module inheritance", () => {
-  it("react deployable's moduleNames matches its target's", async () => {
+describe("enrichLoomModel — frontend `targets:` module inheritance", () => {
+  it("frontend deployable's moduleNames matches its target's", async () => {
+    // Slice 8: `static` deployables share the legacy `react` module-
+    // inheritance behaviour.  Match either tag to keep this test
+    // resilient through the platform rename.
     const loom = await buildEnrichedModel("examples/acme.ddd");
     const sys = loom.systems[0]!;
-    const web = sys.deployables.find((d) => d.platform === "react");
+    const web = sys.deployables.find(
+      (d) => d.platform === "react" || d.platform === "static",
+    );
     expect(web).toBeDefined();
     const target = sys.deployables.find((d) => d.name === web!.targetName);
     expect(target).toBeDefined();

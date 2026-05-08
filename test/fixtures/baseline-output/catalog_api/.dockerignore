@@ -1,0 +1,9 @@
+# Auto-generated.
+**/bin
+**/obj
+**/out
+.git
+.vs
+.vscode
+*.user
+*.log

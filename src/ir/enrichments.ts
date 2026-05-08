@@ -11,6 +11,7 @@ import type {
   ValueObjectIR,
   WireField,
 } from "./loom-ir.js";
+import { expandScaffolds } from "./scaffold-expand.js";
 
 // ---------------------------------------------------------------------------
 // Loom IR enrichments — pure derivations layered on top of the IR
@@ -74,7 +75,19 @@ function enrichSystem(sys: SystemIR): SystemIR {
   // Done after module enrichment so frontends see the same enriched
   // contexts every other consumer sees.
   const deployables = enrichDeployables(sys.deployables);
-  return { ...sys, modules, deployables };
+  // Slice 4 — expand each `ui` block's scaffold directives against
+  // the post-enrichment domain IR.  The expander preserves explicit
+  // pages (lowering populated `ui.pages` with them) and appends
+  // scaffold-synthesised pages for any directive whose generated
+  // page name doesn't collide with an explicit one.  Override-by-
+  // name is the same mechanism: an explicit `page <Name>` displaces
+  // the matching scaffold output without ceremony.
+  const enrichedSys: SystemIR = { ...sys, modules, deployables };
+  const uis = sys.uis.map((ui) => {
+    const { pages } = expandScaffolds(ui, enrichedSys);
+    return { ...ui, pages };
+  });
+  return { ...enrichedSys, uis };
 }
 
 function enrichContext(ctx: BoundedContextIR): BoundedContextIR {
@@ -133,7 +146,13 @@ function ensureFindAll(
  * rejects that case). */
 function enrichDeployables(deployables: DeployableIR[]): DeployableIR[] {
   return deployables.map((d) => {
-    if (d.platform !== "react" || !d.targetName) return d;
+    // Slice 8: `static` deployables share the legacy `react` module-
+    // inheritance behaviour — they're frontend deployables that
+    // serve a built bundle and need to know about every context the
+    // target backend exposes (so the page-IR emitter has every
+    // aggregate's wire shape in scope).
+    const isFrontend = d.platform === "react" || d.platform === "static";
+    if (!isFrontend || !d.targetName) return d;
     const target = deployables.find((t) => t.name === d.targetName);
     if (!target) return d;
     return { ...d, moduleNames: [...target.moduleNames] };

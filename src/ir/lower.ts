@@ -53,6 +53,7 @@ import {
 import type {
   AggregateIR,
   BoundedContextIR,
+  ComponentIR,
   ContainmentIR,
   DeployableIR,
   DerivedIR,
@@ -65,17 +66,25 @@ import type {
   IdValueType,
   InvariantIR,
   LoomModel,
+  MenuBlockIR,
+  MenuLinkIR,
+  MenuMetaIR,
   ModuleIR,
   OperationIR,
+  PageIR,
   ParamIR,
   PermissionDeclIR,
   Platform,
   RepositoryIR,
+  ScaffoldIR,
+  ScaffoldSelector,
+  StateFieldIR,
   StmtIR,
   SystemIR,
   TestIR,
   TestStmtIR,
   TypeIR,
+  UiIR,
   UserIR,
   ValueObjectIR,
   ViewIR,
@@ -206,10 +215,26 @@ function lowerSystem(sys: import("../language/generated/ast.js").System): System
   const e2eTests = e2eBlocks.map((b) => {
     const targetName = b.deployable?.ref?.name ?? "";
     const target = deployables.find((d) => d.name === targetName);
-    const kind: "api" | "ui" = target?.platform === "react" ? "ui" : "api";
+    // Slice 8: `static` deployables also lower e2e tests as UI tests
+    // (Playwright spec via page objects) — same shape `react` has.
+    const targetPlatform = target?.platform;
+    const kind: "api" | "ui" =
+      targetPlatform === "react" || targetPlatform === "static" ? "ui" : "api";
     return lowerE2E(b, e2eEnv, kind);
   });
-  return { name: sys.name, modules, deployables, e2eTests, user, theme };
+  // Slice 2 — page metamodel.  `ui { ... }` blocks are SystemMembers;
+  // lower each into a UiIR and attach to the system.  Order
+  // preserves source order so Slice 4's scaffold expander emits
+  // pages in a stable sequence.  Lowering is shallow at this layer:
+  // pages, components, scaffolds, and the optional menu block are
+  // each turned into their literal IR shape (no scaffold expansion,
+  // no body type inference yet — those come in later slices).
+  const uis = sys.members
+    .filter(
+      (m): m is import("../language/generated/ast.js").Ui => m.$type === "Ui",
+    )
+    .map((u) => lowerUi(u));
+  return { name: sys.name, modules, deployables, e2eTests, user, theme, uis };
 }
 
 function lowerTheme(
@@ -294,8 +319,21 @@ function lowerDeployable(
   // — ignoring it on other platforms keeps the IR honest about which
   // deployables actually render UI.  The grammar accepts the keyword
   // anywhere but the generator stack only honours it under react.
+  // Slice 8: `static` deployables share the React design-pack
+  // semantics (the v0 static frontend IS a React bundle).
   const design =
-    platform === "react" ? (d.design ?? "mantine") : undefined;
+    platform === "react" || platform === "static"
+      ? (d.design ?? "mantine")
+      : undefined;
+  // Slice 2: page-metamodel UI binding.  The grammar accepts two
+  // surface forms — `ui: WebApp` (sugar) and `ui WebApp { framework: react }`
+  // (full block).  Both lower to the same `uiName` + optional
+  // `uiFramework` here.  Validator (Slice 3) enforces that the
+  // referenced ui exists, the platform supports a UI mount, and the
+  // framework value is one of the v0-allowed alternatives.
+  const uiName =
+    d.uiSugar?.ref?.ref?.name ?? d.uiBlock?.ref?.ref?.name ?? undefined;
+  const uiFramework = d.uiBlock?.framework ?? undefined;
   return {
     name: d.name,
     platform,
@@ -304,13 +342,173 @@ function lowerDeployable(
     targetName: d.targets?.ref?.name,
     auth,
     design,
+    uiName,
+    uiFramework,
   };
 }
 
 function defaultPort(platform: Platform | undefined): number {
   if (platform === "dotnet") return 8080;
   if (platform === "react") return 3001;
+  if (platform === "static") return 3001;
   return 3000;
+}
+
+// ---------------------------------------------------------------------------
+// Page metamodel — Slice 2 lowering.
+//
+// Each `ui { ... }` SystemMember lowers to a `UiIR` carrying its
+// pages, components, scaffold directives, and an optional menu block
+// in source order.  This layer is intentionally shallow:
+//   - Page bodies / component bodies / state init expressions lower
+//     through the existing expression engine (`lowerExpr`); type
+//     resolution falls out from the same `Env`.
+//   - Scaffold directives stay as literal `ScaffoldIR` carrying their
+//     selector + targets.  The expander (Slice 4) walks the system's
+//     domain IR to synthesise concrete pages from each directive.
+//   - Validator obligations (Slice 3) catch the rest: ui-name
+//     uniqueness, deployable-references-existing-ui, scaffold target
+//     resolution, etc.
+// ---------------------------------------------------------------------------
+
+function lowerUi(ui: import("../language/generated/ast.js").Ui): UiIR {
+  const pages: PageIR[] = [];
+  const components: ComponentIR[] = [];
+  const scaffolds: ScaffoldIR[] = [];
+  let menu: MenuBlockIR | undefined;
+  for (const m of ui.members) {
+    if (m.$type === "Page") pages.push(lowerPage(m));
+    else if (m.$type === "Component") components.push(lowerComponent(m));
+    else if (m.$type === "Scaffold") scaffolds.push(lowerScaffold(m));
+    else if (m.$type === "MenuBlock") {
+      // First menu block wins.  Validator (Slice 3) flags a duplicate
+      // `menu { ... }` block at ui scope as an error.
+      if (!menu) menu = lowerMenuBlock(m);
+    }
+  }
+  return { name: ui.name, pages, components, scaffolds, menu };
+}
+
+function lowerPage(p: import("../language/generated/ast.js").Page): PageIR {
+  const params = (p.params ?? []).map((param) => ({
+    name: param.name,
+    type: lowerType(param.type),
+  }));
+  // Walk the unordered prop list to extract route / title / requires /
+  // body / state / per-page menu meta.  Multiple state blocks merge
+  // (matches `permissions` block multiplicity).
+  let route: string | undefined;
+  let title: ExprIR | undefined;
+  let requires: ExprIR | undefined;
+  let body: ExprIR | undefined;
+  let menuMeta: MenuMetaIR | undefined;
+  const state: StateFieldIR[] = [];
+  // A neutral env is fine for Slice 2 — the page-IR expression nodes
+  // will get richer when the validator (Slice 3) and emitter (Slice 5)
+  // wire in the page-scoped scope.
+  const env: Env = { locals: new Map(), user: undefined };
+  for (const prop of p.props) {
+    if (prop.$type === "RouteProp") route = prop.value;
+    else if (prop.$type === "TitleProp") title = lowerExpr(prop.value, env);
+    else if (prop.$type === "RequiresProp")
+      requires = lowerExpr(prop.expr, env);
+    else if (prop.$type === "BodyProp") body = lowerExpr(prop.expr, env);
+    else if (prop.$type === "StateBlock") {
+      for (const f of prop.fields) state.push(lowerStateField(f, env));
+    } else if (prop.$type === "PageMenuMeta") {
+      // Last block wins — validator (Slice 3) flags repeated menu
+      // metadata blocks on a single page.
+      menuMeta = {
+        entries: prop.entries.map((e) => ({
+          name: e.name,
+          value: lowerExpr(e.value, env),
+        })),
+      };
+    }
+  }
+  return {
+    name: p.name,
+    params,
+    route,
+    title,
+    requires,
+    state,
+    body,
+    menuMeta,
+    source: "explicit",
+  };
+}
+
+function lowerComponent(
+  c: import("../language/generated/ast.js").Component,
+): ComponentIR {
+  const params = c.params.map((param) => ({
+    name: param.name,
+    type: lowerType(param.type),
+  }));
+  const env: Env = { locals: new Map(), user: undefined };
+  const state: StateFieldIR[] = [];
+  for (const decl of c.decls ?? []) {
+    if (decl.$type === "StateBlock") {
+      for (const f of decl.fields) state.push(lowerStateField(f, env));
+    }
+  }
+  const body = lowerExpr(c.body, env);
+  return { name: c.name, params, state, body };
+}
+
+function lowerStateField(
+  f: import("../language/generated/ast.js").StateField,
+  env: Env,
+): StateFieldIR {
+  return {
+    name: f.name,
+    type: lowerType(f.type),
+    init: f.init ? lowerExpr(f.init, env) : undefined,
+  };
+}
+
+function lowerScaffold(
+  s: import("../language/generated/ast.js").Scaffold,
+): ScaffoldIR {
+  return {
+    selector: s.selector as ScaffoldSelector,
+    targets: s.targets.map((t) => t).filter(Boolean),
+  };
+}
+
+function lowerMenuBlock(
+  m: import("../language/generated/ast.js").MenuBlock,
+): MenuBlockIR {
+  const env: Env = { locals: new Map(), user: undefined };
+  return {
+    sections: m.sections.map((sec) => ({
+      label: sec.label,
+      links: sec.links.map((l): MenuLinkIR => {
+        // Slice 6: page links use a bare name (not a cross-
+        // reference) because scaffold-synthesised pages don't
+        // exist at AST link time.  The IR-level menu emitter and
+        // validator resolve the name against `ui.pages` post-
+        // expansion.
+        if (l.pageName) {
+          return {
+            kind: "page",
+            pageName: l.pageName,
+            props: (l.props ?? []).map((p) => ({
+              name: p.name,
+              value: lowerExpr(p.value, env),
+            })),
+          };
+        }
+        // External link: `link "Docs" -> "https://..."`.
+        return {
+          kind: "external",
+          label: l.externalLabel ?? "",
+          url: l.externalUrl ?? "",
+        };
+      }),
+    })),
+  };
 }
 
 function lowerContext(
@@ -592,7 +790,23 @@ function collectIdFollows(
       for (const a of expr.args) collectIdFollows(a, out);
       return;
     case "lambda":
-      collectIdFollows(expr.body, out);
+      // Slice 2: lambda body is now optional — single-expression form
+      // sets `body`, block-body form sets `block`.  Block bodies don't
+      // contribute Id-follow paths in v0 (they only appear in event
+      // handlers, not in `bind`/`derived`/filter expressions where this
+      // walker runs); recurse into `body` only when present.
+      if (expr.body) collectIdFollows(expr.body, out);
+      return;
+    case "match":
+      // Slice 2: recurse through every arm condition + value plus the
+      // `else` branch.  Match expressions can appear inside view
+      // `bind` exprs and `derived` bodies; their Id-follow members
+      // must still surface for the bulk-load auxiliary planner.
+      for (const arm of expr.arms) {
+        collectIdFollows(arm.cond, out);
+        collectIdFollows(arm.value, out);
+      }
+      if (expr.otherwise) collectIdFollows(expr.otherwise, out);
       return;
     case "binary":
       collectIdFollows(expr.left, out);
@@ -1035,8 +1249,13 @@ function matchFactoryCall(
   if (!isNameRef(recv)) return undefined;
   if (!aggsByName.has(recv.name)) return undefined;
   if (expr.args.length !== 1) return undefined;
-  const arg = expr.args[0];
-  if (!arg || !isObjectLit(arg)) return undefined;
+  const argWrap = expr.args[0];
+  // Slice 1.5: factory calls take a single object literal positional
+  // arg.  Reject the named-arg form here; the caller falls through
+  // to a generic call lowering rather than the factory shape.
+  if (!argWrap || argWrap.name) return undefined;
+  const arg = argWrap.value;
+  if (!isObjectLit(arg)) return undefined;
   return {
     aggName: recv.name,
     fields: arg.fields.map((f) => ({ name: f.name, value: f.value })),
@@ -1058,9 +1277,10 @@ function matchRepoCall(
   if (!isNameRef(recv)) return undefined;
   const repo = reposByName.get(recv.name);
   if (!repo) return undefined;
+  // Slice 1.5: peel CallArg wrappers — repo finds are positional.
   return {
     repo,
     method: expr.member,
-    args: expr.args ?? [],
+    args: (expr.args ?? []).map((a) => a.value),
   };
 }

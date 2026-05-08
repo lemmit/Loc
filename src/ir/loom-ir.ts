@@ -361,6 +361,11 @@ export interface SystemIR {
    *  emitter translates the framework-agnostic tokens into Mantine /
    *  shadcn / etc. theming knobs. */
   theme?: ThemeIR;
+  /** UI declarations at system scope (Slice 2).  Each is referenced by
+   *  zero-or-more deployables via `DeployableIR.uiName`.  Empty when
+   *  the system declares no `ui { ... }` blocks.  Order preserves
+   *  source order (matters for stable scaffold expansion in Slice 4). */
+  uis: UiIR[];
 }
 
 /** System-level `theme { ... }` block.  Tokens are semantic so the
@@ -406,6 +411,152 @@ export interface TestE2EIR {
   statements: TestStmtIR[];
 }
 
+// ---------------------------------------------------------------------------
+// Page metamodel (Slice 2)
+//
+// Mirrors the grammar productions added in Slice 1.  Every IR node here
+// is a one-to-one lowering of a `Ui` / `Page` / `Component` / `Scaffold`
+// / `MenuBlock` AST.  Scaffolds are NOT expanded at this layer — they
+// stay as literal `ScaffoldIR` directives until the scaffold expander
+// runs (Slice 4).  Validator obligations land in Slice 3 and the page
+// emitter in Slice 5.
+//
+// Designed so a future LiveView / Blazor backend can consume the same
+// IR — mutations (`:=`), navigations, and component invocations are
+// platform-neutral here; their lowering into framework-specific code
+// is the per-target generator's concern.
+// ---------------------------------------------------------------------------
+
+/** A `ui` SystemMember: pages, components, scaffold directives, and
+ *  an optional sidebar menu block. */
+export interface UiIR {
+  name: string;
+  pages: PageIR[];
+  components: ComponentIR[];
+  scaffolds: ScaffoldIR[];
+  /** Optional ui-level menu block.  When undefined the sidebar is
+   *  derived from each page's `menuMeta` (see spec §11). */
+  menu?: MenuBlockIR;
+}
+
+/** A page declaration: route + parameters + reactive state + body. */
+export interface PageIR {
+  name: string;
+  params: ParamIR[];
+  /** Path-with-`:params` from `route: "..."`.  Always set for pages
+   *  written in source; pages synthesised by Slice 4's scaffold
+   *  expander populate this from the rewrite rule. */
+  route?: string;
+  /** Optional title expression.  May interpolate state / data refs. */
+  title?: ExprIR;
+  /** Auth gate, same syntax as on operations. */
+  requires?: ExprIR;
+  /** Reactive local fields.  Multiple `state { }` blocks merge here
+   *  (matches the `permissions` block multiplicity rule). */
+  state: StateFieldIR[];
+  /** Single body expression.  Conditional rendering uses `match` in
+   *  the expression engine, not a guarded-declaration form. */
+  body?: ExprIR;
+  /** Per-page menu metadata.  Read by the menu emitter (Slice 6) when
+   *  no explicit ui-level menu block is declared. */
+  menuMeta?: MenuMetaIR;
+  /** Provenance discriminator (Slice 4): `"explicit"` for pages
+   *  written in source; `"scaffold"` for pages synthesised by the
+   *  expander.  Slice 5's emitter uses this to fast-path the legacy
+   *  per-aggregate / per-workflow / per-view builders for the bulk-
+   *  scaffold case (byte-equivalence target). */
+  source: "explicit" | "scaffold";
+  /** Slice 4 only sets this for scaffold-synthesised pages.  Carries
+   *  the structural shape of the page so Slice 5's emitter can
+   *  dispatch without re-parsing the body expression.  Same source
+   *  context the legacy generator's per-aggregate / per-workflow /
+   *  per-view loop received. */
+  scaffoldOrigin?: ScaffoldOriginIR;
+}
+
+/** Provenance for a scaffold-synthesised page.  Each kind names the
+ *  domain-IR target plus the page archetype within that target's
+ *  generated set. */
+export type ScaffoldOriginIR =
+  | { kind: "aggregate-list"; aggregateName: string; contextName: string }
+  | { kind: "aggregate-new"; aggregateName: string; contextName: string }
+  | { kind: "aggregate-detail"; aggregateName: string; contextName: string }
+  | { kind: "workflow-form"; workflowName: string; contextName: string }
+  | { kind: "view-list"; viewName: string; contextName: string }
+  | { kind: "workflows-index" }
+  | { kind: "views-index" }
+  | { kind: "home" };
+
+/** A user-defined component: typed function from params (and optional
+ *  local state) to a body expression.  Components compose other
+ *  components but never produce pages or routes. */
+export interface ComponentIR {
+  name: string;
+  params: ParamIR[];
+  state: StateFieldIR[];
+  body: ExprIR;
+}
+
+/** One reactive local field, inside a `page` or `component`. */
+export interface StateFieldIR {
+  name: string;
+  type: TypeIR;
+  /** Optional initial value.  Undefined fields default to `null`
+   *  for optional types and the type's zero value otherwise (per
+   *  spec §6). */
+  init?: ExprIR;
+}
+
+/** A `scaffold <selector>: <targets>` directive — single fixed multi-
+ *  page rewrite over a domain selector.  Slice 4's expander turns this
+ *  into literal `PageIR` nodes; this IR carries only the source-level
+ *  intent. */
+export interface ScaffoldIR {
+  selector: ScaffoldSelector;
+  targets: string[];
+}
+
+export type ScaffoldSelector =
+  | "modules"
+  | "contexts"
+  | "aggregates"
+  | "workflows"
+  | "views";
+
+/** Per-page sidebar metadata.  Bare entries — validator (Slice 3)
+ *  enforces the allowed key names (`section` / `label` / `order` /
+ *  `hidden`).  Same shape as `ThemeIR`'s entries: bare key + typed
+ *  value, with the validator policing the surface. */
+export interface MenuMetaIR {
+  entries: { name: string; value: ExprIR }[];
+}
+
+/** A `menu { section "S" { link Page, link "L" -> "url" } }` block. */
+export interface MenuBlockIR {
+  sections: MenuSectionIR[];
+}
+
+export interface MenuSectionIR {
+  label: string;
+  links: MenuLinkIR[];
+}
+
+export type MenuLinkIR =
+  | {
+      kind: "page";
+      pageName: string;
+      /** Override props (`label`, `order`).  Validator checks the
+       *  allowed key names. */
+      props: { name: string; value: ExprIR }[];
+    }
+  | {
+      kind: "external";
+      label: string;
+      url: string;
+    };
+
+// ---------------------------------------------------------------------------
+
 export interface ModuleIR {
   name: string;
   contexts: BoundedContextIR[];
@@ -430,7 +581,11 @@ export interface PermissionDeclIR {
   runtimeString: string;
 }
 
-export type Platform = "dotnet" | "hono" | "react";
+// `static` is the page-metamodel's UI-only deployable kind: builds a
+// Vite bundle and serves it via a small static-asset host (nginx in
+// the v0 emitter).  Coexists with `react` until Slice 8 swaps them
+// out — keeps every existing test/example green during the rollout.
+export type Platform = "dotnet" | "hono" | "react" | "static";
 
 export interface DeployableIR {
   name: string;
@@ -460,6 +615,19 @@ export interface DeployableIR {
    *  hook the user implements; deployables without this stay open
    *  (existing behaviour). */
   auth?: { required: boolean };
+  /** Name of the `ui { ... }` SystemMember this deployable serves
+   *  (Slice 1 grammar; Slice 2 IR).  Set when the source declares
+   *  either `ui: <Name>` (sugar) or `ui <Name> { framework: ... }`
+   *  (full block).  Validator (Slice 3) ensures the referenced ui
+   *  exists, the deployable's platform supports a UI mount, and the
+   *  framework value is one of the v0-allowed alternatives.  Empty
+   *  string is never produced — undefined ⇒ no UI binding. */
+  uiName?: string;
+  /** Frontend rendering technology — `react` is the only v0 value
+   *  (default when `ui:` is set without an explicit `framework:`).
+   *  Future LiveView / Blazor backends extend this enum without
+   *  breaking the deployable IR. */
+  uiFramework?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -566,14 +734,33 @@ export type ExprIR =
       args: ExprIR[];
       receiverType: TypeIR;
       isCollectionOp: boolean;
+      /** Optional parallel array (Slice 1.5): `argNames[i]` is the
+       *  source-side `name:` prefix for `args[i]`, or `undefined` for
+       *  positional arguments.  Present iff at least one arg was
+       *  written with a name; absent for fully-positional calls (the
+       *  vast majority — keeps IR compact for v22-shaped code). */
+      argNames?: (string | undefined)[];
     }
   | {
       kind: "call";
       callKind: CallKind;
       name: string;
       args: ExprIR[];
+      /** Same shape as `method-call.argNames` — see above. */
+      argNames?: (string | undefined)[];
     }
-  | { kind: "lambda"; param: string; body: ExprIR }
+  | {
+      kind: "lambda";
+      param: string;
+      /** Single-expression form: `x => expr`.  Mutually exclusive with
+       *  `block`.  Existing v22 lambdas always populate this. */
+      body?: ExprIR;
+      /** Block-body form (Slice 1 grammar): `x => { stmt; stmt; … }`.
+       *  Reuses the existing `StmtIR` rule so `let`, `:=`, calls,
+       *  emits, etc. are admissible.  React emitter (Slice 5) lowers
+       *  state mutations against `state {}` fields to `setX(...)`. */
+      block?: StmtIR[];
+    }
   | {
       kind: "new";
       partName: string;
@@ -586,7 +773,21 @@ export type ExprIR =
   | { kind: "paren"; inner: ExprIR }
   | { kind: "unary"; op: "-" | "!"; operand: ExprIR }
   | { kind: "binary"; op: BinOp; left: ExprIR; right: ExprIR }
-  | { kind: "ternary"; cond: ExprIR; then: ExprIR; otherwise: ExprIR };
+  | { kind: "ternary"; cond: ExprIR; then: ExprIR; otherwise: ExprIR }
+  /**
+   * Predicate-arms expression (Slice 1 grammar) — first arm whose
+   * `cond` evaluates to `true` returns its `value`; if no arm
+   * matches, `otherwise` (when present) is the fallthrough.  Lives
+   * in the expression engine so it can appear anywhere an expression
+   * is allowed (page bodies, `derived` properties, view binds,
+   * filter lambdas, function bodies).  Validator (Slice 3) may warn
+   * on non-exhaustive matches that lack `otherwise`.
+   */
+  | {
+      kind: "match";
+      arms: { cond: ExprIR; value: ExprIR }[];
+      otherwise?: ExprIR;
+    };
 
 // Convenience constructors used by the lowering layer.
 export const lit = (

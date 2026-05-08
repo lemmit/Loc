@@ -155,7 +155,14 @@ function renderE2EExpr(e: ExprIR, ctx: RenderCtx): string {
     case "ternary":
       return `${renderE2EExpr(e.cond, ctx)} ? ${renderE2EExpr(e.then, ctx)} : ${renderE2EExpr(e.otherwise, ctx)}`;
     case "lambda":
-      return `(${e.param}) => ${renderE2EExpr(e.body, ctx)}`;
+      // Slice 2: lambda body is now optional (block-body lambdas were
+      // added for page event handlers).  E2E tests don't currently
+      // emit block-body lambdas — only the existing single-expression
+      // form — so assert and render.  If a future change introduces a
+      // block lambda in test bodies, this branch needs the `block`
+      // alternative.
+      if (e.body) return `(${e.param}) => ${renderE2EExpr(e.body, ctx)}`;
+      return `(${e.param}) => { /* block-body lambdas not supported in e2e tests */ }`;
     case "member":
       return `${renderE2EExpr(e.receiver, ctx)}.${e.member}`;
     case "method-call": {
@@ -169,6 +176,20 @@ function renderE2EExpr(e: ExprIR, ctx: RenderCtx): string {
       return `({ ${e.fields.map((f) => `${f.name}: ${renderE2EExpr(f.value, ctx)}`).join(", ")} })`;
     case "object":
       return `({ ${e.fields.map((f) => `${f.name}: ${renderE2EExpr(f.value, ctx)}`).join(", ")} })`;
+    case "match": {
+      // Slice 2: lower a match expression to a chained ternary.  E2E
+      // test bodies are unlikely to use match in v0, but the IR can
+      // carry it (e.g. a `derived` body referenced from a test
+      // assertion via `read.label`).  Falling back to a chain keeps
+      // the rendering total.
+      const arms = [...e.arms].reverse();
+      const tail = e.otherwise ? renderE2EExpr(e.otherwise, ctx) : "undefined";
+      let out = tail;
+      for (const arm of arms) {
+        out = `(${renderE2EExpr(arm.cond, ctx)} ? ${renderE2EExpr(arm.value, ctx)} : ${out})`;
+      }
+      return out;
+    }
   }
 }
 

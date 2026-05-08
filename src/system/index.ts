@@ -81,12 +81,13 @@ function emitSystem(
     out.set("e2e/tsconfig.json", E2E_TSCONFIG_JSON);
   }
 
-  // UI e2e specs — one per react deployable that has any `test e2e
-  // ui ... against <this-react-deployable>` blocks.  Emitted into the
-  // react deployable's existing `e2e/` directory next to the
-  // auto-generated page objects + smoke spec.
+  // UI e2e specs — one per frontend deployable (`react` legacy
+  // alias or `static` Slice-8 canonical) that has any `test e2e ui
+  // ... against <this-deployable>` blocks.  Emitted into the
+  // deployable's existing `e2e/` directory next to the auto-
+  // generated page objects + smoke spec.
   for (const d of sys.deployables) {
-    if (d.platform !== "react") continue;
+    if (d.platform !== "react" && d.platform !== "static") continue;
     const uiSpec = renderUIE2EFile(sys, modulesByName, d);
     if (uiSpec) {
       const slug = serviceSlug(d.name);

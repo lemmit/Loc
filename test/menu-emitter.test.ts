@@ -1,0 +1,211 @@
+// Slice 6 — menu emitter.
+//
+// Tests the explicit-menu-block path: when a `ui` declares
+// `menu { section "S" { link Page, link "L" -> "url" } }`, the
+// derived `NavSectionVM[]` must match the user's exact layout,
+// honouring per-link metadata and resolving page references against
+// `ui.pages`.  When no menu block is declared, the function returns
+// `undefined` and the caller keeps the legacy hardcoded sidebar
+// (byte-equivalence guarantee, exercised separately by
+// `test/page-emitter-equivalence.test.ts`).
+
+import { describe, expect, it } from "vitest";
+import { NodeFileSystem } from "langium/node";
+import { lowerModel } from "../src/ir/lower.js";
+import { enrichLoomModel } from "../src/ir/enrichments.js";
+import { deriveSidebarFromUi } from "../src/generator/react/menu-emitter.js";
+import { createDddServices } from "../src/language/ddd-module.js";
+import type { Model } from "../src/language/generated/ast.js";
+import type { LoomModel, UiIR } from "../src/ir/loom-ir.js";
+
+async function buildLoom(src: string): Promise<LoomModel> {
+  const { parseHelper } = await import("langium/test");
+  const services = createDddServices(NodeFileSystem);
+  const helper = parseHelper(services.Ddd);
+  const doc = await helper(src, { validation: false });
+  return enrichLoomModel(lowerModel(doc.parseResult.value as Model));
+}
+
+function uiOf(loom: LoomModel, name: string): UiIR {
+  const ui = loom.systems[0]!.uis.find((u) => u.name === name);
+  if (!ui) throw new Error(`ui '${name}' not found`);
+  return ui;
+}
+
+describe("menu emitter (Slice 6)", () => {
+  it("returns undefined when the ui has no explicit menu block", async () => {
+    const loom = await buildLoom(`
+      system S {
+        module M {
+          context C {
+            aggregate Order { x: int }
+            repository Orders for Order { }
+          }
+        }
+        ui WebApp { scaffold aggregates: Order }
+      }
+    `);
+    const sidebar = deriveSidebarFromUi(uiOf(loom, "WebApp"));
+    expect(sidebar).toBeUndefined();
+  });
+
+  it("walks an explicit ui.menu block into NavSectionVM[]", async () => {
+    const loom = await buildLoom(`
+      system S {
+        module M {
+          context C {
+            aggregate Order { x: int }
+            repository Orders for Order { }
+          }
+        }
+        ui WebApp {
+          scaffold aggregates: Order
+          menu {
+            section "Sales" {
+              link OrderList,
+              link OrderDetail
+            }
+            section "External" {
+              link "Docs" -> "https://example.com"
+            }
+          }
+        }
+      }
+    `);
+    const sidebar = deriveSidebarFromUi(uiOf(loom, "WebApp"));
+    expect(sidebar).toBeDefined();
+    expect(sidebar!.map((s) => s.label)).toEqual(["Sales", "External"]);
+    const sales = sidebar![0]!;
+    expect(sales.entries).toHaveLength(2);
+    expect(sales.entries[0]!.to).toBe("/orders");
+    expect(sales.entries[0]!.testId).toBe("nav-orders");
+    expect(sales.entries[0]!.activeArgs).toBe("\"/orders\"");
+    expect(sales.entries[1]!.to).toBe("/orders/:id");
+    // Aggregate-detail testid suffix matches the menu emitter's
+    // contract (`nav-<plural>-detail`).
+    expect(sales.entries[1]!.testId).toBe("nav-orders-detail");
+  });
+
+  it("honours per-link `label:` overrides", async () => {
+    const loom = await buildLoom(`
+      system S {
+        module M {
+          context C { aggregate Order { x: int } repository Orders for Order { } }
+        }
+        ui WebApp {
+          scaffold aggregates: Order
+          menu {
+            section "Sales" {
+              link OrderList { label: "All Orders" }
+            }
+          }
+        }
+      }
+    `);
+    const sidebar = deriveSidebarFromUi(uiOf(loom, "WebApp"))!;
+    expect(sidebar[0]!.entries[0]!.label).toBe("All Orders");
+  });
+
+  it("emits external links with sentinel `__external:<url>` to value", async () => {
+    const loom = await buildLoom(`
+      system S {
+        module M { context C { } }
+        ui WebApp {
+          menu {
+            section "External" {
+              link "Docs" -> "https://example.com"
+            }
+          }
+        }
+      }
+    `);
+    const sidebar = deriveSidebarFromUi(uiOf(loom, "WebApp"))!;
+    const link = sidebar[0]!.entries[0]!;
+    expect(link.to).toBe("__external:https://example.com");
+    expect(link.label).toBe("Docs");
+    expect(link.testId).toBe("nav-ext-docs");
+  });
+
+  it("derives correct testIds + activeArgs per scaffoldOrigin kind", async () => {
+    const loom = await buildLoom(`
+      system S {
+        module Sales {
+          context Orders {
+            aggregate Order { x: int }
+            repository Orders for Order { }
+            workflow placeOrder() { let o = Order.create({ }) }
+            view ActiveOrders = Order where x > 0
+          }
+        }
+        ui WebApp {
+          scaffold modules: Sales
+          menu {
+            section "Mixed" {
+              link OrderList,
+              link PlaceOrderWorkflow,
+              link ActiveOrdersView,
+              link WorkflowsIndex,
+              link ViewsIndex
+            }
+          }
+        }
+      }
+    `);
+    const entries = deriveSidebarFromUi(uiOf(loom, "WebApp"))![0]!.entries;
+    expect(entries.map((e) => e.testId)).toEqual([
+      "nav-orders",
+      "nav-workflow-place_order",
+      "nav-view-active_orders",
+      "nav-workflows",
+      "nav-views",
+    ]);
+    expect(entries.map((e) => e.activeArgs)).toEqual([
+      `"/orders"`,
+      `"/workflows/place_order"`,
+      `"/views/active_orders"`,
+      `"/workflows", { exact: true }`,
+      `"/views", { exact: true }`,
+    ]);
+  });
+
+  it("silently drops links to pages that aren't in the ui", async () => {
+    // Validator (Slice 3) already errors on this with "resolves to a
+    // page declared outside ui 'X'"; the menu emitter is defensive
+    // — it returns no entry rather than crashing if a stale/unknown
+    // ref makes it through.
+    const loom = await buildLoom(`
+      system S {
+        ui A { page Home { route: "/", body: f() } }
+        ui B {
+          menu { section "Main" { link Home } }
+        }
+      }
+    `);
+    const sidebar = deriveSidebarFromUi(uiOf(loom, "B"))!;
+    expect(sidebar[0]!.entries).toEqual([]);
+  });
+
+  it("byte-equivalence: when ui has no menu block, AppShell falls back to hardcoded grouping", async () => {
+    // This is the negative side of the byte-equivalence guarantee:
+    // for the bulk-scaffold default, `deriveSidebarFromUi` returns
+    // undefined, the AppShell preparer falls back to its hardcoded
+    // Aggregates / Workflows / Views grouping, and the sidebar
+    // matches main's pre-Slice-6 output.  The `test/page-emitter-
+    // equivalence.test.ts` file pins the actual file content match
+    // for `examples/acme.ddd`; this assertion just locks the menu
+    // emitter's contract so a future refactor can't accidentally
+    // make it return something non-undefined for the no-menu case.
+    const loom = await buildLoom(`
+      system S {
+        module M {
+          context C {
+            aggregate Order { x: int }
+            repository Orders for Order { }
+          }
+        }
+        ui WebApp { scaffold aggregates: Order }
+      }
+    `);
+    expect(deriveSidebarFromUi(uiOf(loom, "WebApp"))).toBeUndefined();
+  });
+});

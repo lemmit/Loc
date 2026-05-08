@@ -1,0 +1,7 @@
+# Auto-generated.
+node_modules
+out
+.git
+.env
+.env.*
+*.log

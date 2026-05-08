@@ -278,12 +278,19 @@ function typeOfMemberAccess(expr: import("./generated/ast.js").MemberAccess, env
   if (recvType.kind === "array") {
     if (expr.call) {
       for (const arg of expr.args) {
-        if (isLambda(arg)) {
+        // Slice 1.5: call args wrap an Expression in a `CallArg`
+        // node carrying an optional `name:` prefix.  Look at the
+        // wrapped value, not the wrapper itself, when checking for
+        // Lambda shape.
+        const argExpr = arg.value;
+        if (isLambda(argExpr) && argExpr.body) {
           const lambdaEnv: Env = makeEnv(
             env,
-            new Map([[arg.param, { type: recvType.element, origin: arg }]]),
+            new Map([
+              [argExpr.param, { type: recvType.element, origin: argExpr }],
+            ]),
           );
-          const _bodyType = typeOf(arg.body, lambdaEnv);
+          const _bodyType = typeOf(argExpr.body, lambdaEnv);
           void _bodyType;
         }
       }
@@ -360,12 +367,16 @@ function collectionOpType(
       return T.prim("int");
     case "sum": {
       // sum returns the lambda's body type when one is given;
-      // otherwise the element type itself.
-      const lambdaArg = expr.args[0];
-      if (lambdaArg && isLambda(lambdaArg)) {
+      // otherwise the element type itself.  Slice 1.5: args are
+      // CallArg wrappers — peek through `.value`.
+      const callArg = expr.args[0];
+      const lambdaArg = callArg?.value;
+      if (lambdaArg && isLambda(lambdaArg) && lambdaArg.body) {
         const lambdaEnv = makeEnv(
           env,
-          new Map([[lambdaArg.param, { type: recv.element, origin: lambdaArg }]]),
+          new Map([
+            [lambdaArg.param, { type: recv.element, origin: lambdaArg }],
+          ]),
         );
         return typeOf(lambdaArg.body, lambdaEnv);
       }

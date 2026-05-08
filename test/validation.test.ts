@@ -188,6 +188,360 @@ describe("validation", () => {
       true,
     );
   });
+
+  // ---------------------------------------------------------------------------
+  // Page metamodel — Slice 3 validator obligations.
+  // ---------------------------------------------------------------------------
+
+  describe("page metamodel (Slice 3)", () => {
+    it("rejects duplicate ui block names within a system", async () => {
+      const { errors } = await parse(`
+        system S {
+          ui WebApp { }
+          ui WebApp { }
+        }
+      `);
+      expect(errors.some((e) => /Duplicate ui block 'WebApp'/.test(e))).toBe(
+        true,
+      );
+    });
+
+    it("rejects 'ui:' on a 'platform: hono' deployable", async () => {
+      const { errors } = await parse(`
+        system S {
+          module M { context T { } }
+          ui WebApp { }
+          deployable api { platform: hono, modules: M, ui: WebApp, port: 3000 }
+        }
+      `);
+      expect(
+        errors.some((e) => /'ui:' binding is only valid/.test(e)),
+      ).toBe(true);
+    });
+
+    it("rejects 'ui:' on a 'platform: dotnet' deployable (v0)", async () => {
+      const { errors } = await parse(`
+        system S {
+          module M { context T { } }
+          ui WebApp { }
+          deployable api { platform: dotnet, modules: M, ui: WebApp, port: 8080 }
+        }
+      `);
+      expect(
+        errors.some((e) => /'ui:' binding is only valid/.test(e)),
+      ).toBe(true);
+    });
+
+    it("rejects a 'platform: static' deployable without a 'ui:' binding", async () => {
+      const { errors } = await parse(`
+        system S {
+          module M { context T { } }
+          deployable api { platform: hono, modules: M, port: 3000 }
+          deployable web { platform: static, targets: api, port: 3001 }
+        }
+      `);
+      expect(
+        errors.some(
+          (e) => /Static deployable 'web' must declare a 'ui:'/.test(e),
+        ),
+      ).toBe(true);
+    });
+
+    it("accepts a 'platform: static' deployable with a 'ui:' binding", async () => {
+      const { errors } = await parse(`
+        system S {
+          module M { context T { } }
+          ui WebApp { }
+          deployable api { platform: hono, modules: M, port: 3000 }
+          deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
+        }
+      `);
+      expect(errors).toEqual([]);
+    });
+
+    it("accepts a 'platform: react' deployable with a 'ui:' binding", async () => {
+      const { errors } = await parse(`
+        system S {
+          module M { context T { } }
+          ui WebApp { }
+          deployable api { platform: hono, modules: M, port: 3000 }
+          deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
+        }
+      `);
+      expect(errors).toEqual([]);
+    });
+
+    it("rejects an unknown framework value in the ui-block binding", async () => {
+      // The grammar's Framework enum currently only admits 'react',
+      // so this surfaces as a parse error.  Either way the diagnostic
+      // surface is the same — the user can't sneak in an unsupported
+      // framework today.
+      const { errors } = await parse(`
+        system S {
+          module M { context T { } }
+          ui WebApp { }
+          deployable api { platform: hono, modules: M, port: 3000 }
+          deployable web {
+            platform: static
+            targets: api
+            ui WebApp { framework: blazor-wasm }
+            port: 3001
+          }
+        }
+      `);
+      expect(errors.length).toBeGreaterThan(0);
+    });
+
+    it("rejects a scaffold target that is not a declared module", async () => {
+      const { errors } = await parse(`
+        system S {
+          module M { context T { } }
+          ui WebApp {
+            scaffold modules: NotAModule
+          }
+        }
+      `);
+      expect(
+        errors.some(
+          (e) => /no module 'NotAModule' is declared/.test(e),
+        ),
+      ).toBe(true);
+    });
+
+    it("rejects a scaffold target of the wrong kind (aggregate listed as module)", async () => {
+      const { errors } = await parse(`
+        system S {
+          module Sales {
+            context Orders {
+              aggregate Order { x: int }
+              repository Orders for Order { }
+            }
+          }
+          ui WebApp {
+            scaffold modules: Order
+          }
+        }
+      `);
+      expect(
+        errors.some((e) => /no module 'Order' is declared/.test(e)),
+      ).toBe(true);
+    });
+
+    it("rejects the same target listed twice within one scaffold directive", async () => {
+      const { errors } = await parse(`
+        system S {
+          module Sales { context Orders { aggregate Order { x: int } repository Orders for Order { } } }
+          ui WebApp {
+            scaffold aggregates: Order, Order
+          }
+        }
+      `);
+      expect(errors.some((e) => /lists 'Order' more than once/.test(e))).toBe(
+        true,
+      );
+    });
+
+    it("accepts well-formed scaffold directives (modules / aggregates / views)", async () => {
+      const { errors } = await parse(`
+        system S {
+          module Sales {
+            context Orders {
+              aggregate Order { status: string }
+              repository Orders for Order { }
+              view ActiveOrders = Order where status == "open"
+            }
+          }
+          ui WebApp {
+            scaffold modules: Sales
+            scaffold aggregates: Order
+            scaffold views: ActiveOrders
+          }
+        }
+      `);
+      // Match expressions in body/etc. emit warnings; we only check
+      // for the absence of errors here.
+      expect(errors).toEqual([]);
+    });
+
+    it("rejects two pages with the same name in the same ui", async () => {
+      const { errors } = await parse(`
+        system S {
+          ui WebApp {
+            page X { route: "/x", body: f() }
+            page X { route: "/y", body: g() }
+          }
+        }
+      `);
+      expect(
+        errors.some((e) => /Duplicate page 'X' in ui 'WebApp'/.test(e)),
+      ).toBe(true);
+    });
+
+    it("rejects more than one ui-level menu block per ui", async () => {
+      const { errors } = await parse(`
+        system S {
+          ui WebApp {
+            page X { route: "/x", body: f() }
+            menu { section "Main" { link X } }
+            menu { section "Other" { link X } }
+          }
+        }
+      `);
+      expect(
+        errors.some((e) => /more than one 'menu \{ \.\.\. \}' block/.test(e)),
+      ).toBe(true);
+    });
+
+    it("rejects more than one body / route / title / requires on a single page", async () => {
+      const { errors } = await parse(`
+        system S {
+          ui WebApp {
+            page X {
+              route: "/a"
+              route: "/b"
+              body: f()
+              body: g()
+            }
+          }
+        }
+      `);
+      expect(
+        errors.some(
+          (e) =>
+            /declares more than one 'route'/.test(e) ||
+            /declares more than one 'body'/.test(e),
+        ),
+      ).toBe(true);
+    });
+
+    it("rejects unknown menu metadata keys on a page", async () => {
+      const { errors } = await parse(`
+        system S {
+          ui WebApp {
+            page X {
+              route: "/x"
+              body: f()
+              menu { sectionx: "Sales" }
+            }
+          }
+        }
+      `);
+      expect(
+        errors.some((e) => /Unknown menu metadata key 'sectionx'/.test(e)),
+      ).toBe(true);
+    });
+
+    it("accepts the recognised menu metadata keys (section / label / order / hidden)", async () => {
+      const { errors } = await parse(`
+        system S {
+          ui WebApp {
+            page X {
+              route: "/x"
+              body: f()
+              menu { section: "Sales", label: "X", order: 1, hidden: false }
+            }
+          }
+        }
+      `);
+      // Body call is fine; match warnings don't apply here.
+      expect(errors).toEqual([]);
+    });
+
+    it("rejects a menu link to a page declared in a different ui", async () => {
+      // Slice 6: menu links carry a bare name (not a cross-
+      // reference), because scaffold-synthesised pages don't exist
+      // at AST link time.  The validator catches "links to a name
+      // that isn't a page in this ui AND there are no scaffold
+      // directives that could synthesise it" at the AST layer; the
+      // looser "ui has scaffolds, name doesn't match anything
+      // post-expansion" case is caught by the post-IR validator.
+      const { errors } = await parse(`
+        system S {
+          ui A {
+            page Home { route: "/", body: f() }
+          }
+          ui B {
+            menu {
+              section "Main" { link Home }
+            }
+          }
+        }
+      `);
+      expect(
+        errors.some((e) =>
+          /'link Home' references no page in ui 'B'/.test(e),
+        ),
+      ).toBe(true);
+    });
+
+    it("rejects unknown menu-link property names", async () => {
+      const { errors } = await parse(`
+        system S {
+          ui WebApp {
+            page Home { route: "/", body: f() }
+            menu {
+              section "Main" {
+                link Home { foo: "bar" }
+              }
+            }
+          }
+        }
+      `);
+      expect(
+        errors.some((e) => /Unknown menu link property 'foo'/.test(e)),
+      ).toBe(true);
+    });
+
+    it("rejects an empty 'match { }' expression", async () => {
+      const { errors } = await parse(`
+        system S {
+          ui WebApp {
+            page X { route: "/x", body: match { } }
+          }
+        }
+      `);
+      expect(errors.some((e) => /Empty 'match \{ \}'/.test(e))).toBe(true);
+    });
+
+    it("warns on a non-exhaustive 'match' (no else arm)", async () => {
+      const { errors, warnings } = await parse(`
+        system S {
+          ui WebApp {
+            page X {
+              route: "/x"
+              state { step: int = 0 }
+              body: match {
+                step == 0 => f()
+                step == 1 => g()
+              }
+            }
+          }
+        }
+      `);
+      expect(errors).toEqual([]);
+      expect(
+        warnings.some((w) => /no 'else' arm/.test(w)),
+      ).toBe(true);
+    });
+
+    it("accepts an exhaustive 'match' with else", async () => {
+      const { warnings } = await parse(`
+        system S {
+          ui WebApp {
+            page X {
+              route: "/x"
+              state { step: int = 0 }
+              body: match {
+                step == 0 => f()
+                else      => g()
+              }
+            }
+          }
+        }
+      `);
+      expect(warnings.some((w) => /no 'else' arm/.test(w))).toBe(false);
+    });
+  });
 });
 
 describe("Loom IR validation (post-lowering)", async () => {

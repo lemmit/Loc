@@ -23,7 +23,7 @@ System:
     '}';
 
 SystemMember:
-    Module | Deployable | BoundedContext | TestE2E | UserBlock | ThemeBlock;
+    Module | Deployable | BoundedContext | TestE2E | UserBlock | ThemeBlock | Ui;
 
 // System-level visual identity — design tokens consumed by every
 // React deployable in this system.  Tokens are intentionally
@@ -97,13 +97,35 @@ Deployable:
         ('platform' ':' platform=Platform ','?)
         ('modules' ':' modules+=[Module:ID] (',' modules+=[Module:ID])* ','?)?
         ('targets' ':' targets=[Deployable:ID] ','?)?
+        // UI binding — references a `ui { ... }` block at system scope.
+        // Two surface forms (sugar + full):
+        //   ui: WebApp                            // empty-block sugar; framework defaults
+        //   ui WebApp { framework: react }        // explicit framework override
+        // Both lower to the same `UiBinding` IR.  Validator (Slice 3) ensures
+        // the referenced ui exists, the deployable's platform supports a
+        // ui mount, and `framework` is one of the v0 allowed values.
+        (uiSugar=UiSugarBinding | uiBlock=UiBlockBinding)?
         ('port' ':' port=INT ','?)?
         ('auth' ':' auth=AuthMode ','?)?
         ('design' ':' design=DesignPack ','?)?
     '}';
 
+UiSugarBinding:
+    'ui' ':' ref=[Ui:ID] ','?;
+
+UiBlockBinding:
+    'ui' ref=[Ui:ID] '{'
+        ('framework' ':' framework=Framework ','?)?
+    '}';
+
+// React is the only framework wired up in v0.  Future values
+// (`blazor-wasm`, `blazor-server`, `liveview`, …) extend this enum
+// when their respective codegen backends land.
+Framework returns string:
+    'react';
+
 Platform returns string:
-    'dotnet' | 'hono' | 'react';
+    'dotnet' | 'hono' | 'react' | 'static';
 
 // React design-system pack selector — picks the template pack the
 // frontend generator renders pages against.  `mantine` (default) and
@@ -121,6 +143,139 @@ DesignPack returns string:
 // can extend the union without touching consumers.
 AuthMode returns string:
     'required';
+
+// ---------------------------------------------------------------------------
+// Page metamodel (Slice 1)
+//
+// `ui` is a SystemMember peer to `module` / `deployable` / `theme` /
+// `user`.  It owns pages, components, scaffold directives, and an
+// optional sidebar menu.  See docs/page-metamodel.md for the full
+// surface.  Six new declaration keywords are introduced:
+//   ui, page, component, scaffold, state, menu
+// Plus two expression-level reserved tokens (later in the grammar):
+//   match, else
+//
+// `section` and `link` inside `menu`, and `framework` inside the
+// deployable ui-block binding, are soft keywords scoped to their
+// parent block — they remain free as ordinary identifiers elsewhere.
+// ---------------------------------------------------------------------------
+
+Ui:
+    'ui' name=ID '{'
+        members+=UiMember*
+    '}';
+
+UiMember:
+    Page | Component | Scaffold | MenuBlock;
+
+// ---- page ---------------------------------------------------------------
+
+Page:
+    'page' name=ID ('(' (params+=Parameter (',' params+=Parameter)*)? ')')? '{'
+        props+=PageProp*
+    '}';
+
+PageProp:
+      RouteProp | TitleProp | RequiresProp | StateBlock | BodyProp | PageMenuMeta;
+
+RouteProp:
+    'route' ':' value=STRING;
+
+TitleProp:
+    'title' ':' value=Expression;
+
+RequiresProp:
+    'requires' expr=Expression;
+
+BodyProp:
+    'body' ':' expr=Expression;
+
+// Per-page sidebar metadata.  Read by the menu emitter (Slice 6) when
+// no explicit `ui`-level `menu { ... }` block is declared.  Recognised
+// keys are `section` (string), `label` (string), `order` (int),
+// `hidden` (bool).  We accept any `ID` here and let the validator
+// (Slice 3) enforce the allowed names — same pattern `ThemeProp`
+// uses (line 40).  Promoting these to grammar-level keywords would
+// pollute the lexer and break user fields named `order` / `label` /
+// `hidden` in domain aggregates (e.g. `event LineAdded { order: Id<Order> }`).
+PageMenuMeta:
+    'menu' '{'
+        (entries+=MenuMetaEntry (',' entries+=MenuMetaEntry)* ','?)?
+    '}';
+
+MenuMetaEntry:
+    name=LooseName ':' value=Expression;
+
+// ---- component ----------------------------------------------------------
+
+Component:
+    'component' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' '{'
+        decls+=ComponentDecl*
+        'body' ':' body=Expression
+    '}';
+
+ComponentDecl:
+    StateBlock;
+
+// ---- state --------------------------------------------------------------
+
+// Reactive local fields, inside a `page` or `component`.  Same
+// shape as `theme { … }` and `user { … }`.  Multiple blocks merge
+// at lowering time (matches `permissions`).  StateField extends
+// the property pattern with an optional initializer expression
+// (Loom's `Property` rule does not allow defaults; carrying the
+// init inline avoids touching aggregate/entity/VO/event field
+// parses).
+StateBlock:
+    'state' '{'
+        fields+=StateField*
+    '}';
+
+StateField:
+    name=ID ':' type=TypeRef ('=' init=Expression)?;
+
+// ---- scaffold -----------------------------------------------------------
+
+// Single fixed multi-page rewrite from a domain selector to pages.
+// Not user-extensible.  See spec §10 for the granularity hierarchy
+// (modules → contexts → aggregates ∪ workflows ∪ views).
+Scaffold:
+    'scaffold' selector=ScaffoldSelector ':' targets+=ID (',' targets+=ID)* ','?;
+
+ScaffoldSelector returns string:
+    'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views';
+
+// ---- menu ---------------------------------------------------------------
+
+// Optional `ui`-level sidebar block.  When present, it is the source
+// of truth for sidebar structure; when absent, sidebar is derived
+// from per-page `menu { … }` metadata (PageMenuMeta) grouped by
+// `section`.  See spec §11 for the lowering.
+MenuBlock:
+    'menu' '{'
+        sections+=MenuSection*
+    '}';
+
+MenuSection:
+    'section' label=STRING '{'
+        (links+=MenuLink (',' links+=MenuLink)* ','?)?
+    '}';
+
+// Page links use a bare ID (string-by-name) rather than a cross-
+// reference because most page targets are scaffold-synthesised
+// (Slice 4 expander) and don't exist at AST level — Langium's
+// linker wouldn't be able to resolve them.  The IR-level menu
+// emitter (Slice 6) resolves the name against `ui.pages` after
+// scaffold expansion; the validator (Slice 3) reports unknown
+// page names.
+MenuLink:
+      'link' pageName=LooseName ('{' (props+=MenuLinkProp (',' props+=MenuLinkProp)* ','?)? '}')?
+    | 'link' externalLabel=STRING '->' externalUrl=STRING;
+
+// Same approach as MenuMetaEntry — `LooseName` + validator-side
+// check of the allowed key names (`label`, `order`).
+MenuLinkProp:
+    name=LooseName ':' value=Expression;
 
 // ---------------------------------------------------------------------------
 // Top-level
@@ -278,7 +433,26 @@ Operation:
     '}';
 
 Parameter:
-    name=ID ':' type=TypeRef;
+    name=LooseName ':' type=TypeRef;
+
+// LooseName — admissible identifiers in name positions that need to
+// accept Loom keywords as ordinary names.  Used by `Parameter.name`
+// (so `id` works as a route-param name on pages — `page Detail(id:
+// Id<Order>)` — the IdRef magic-identifier doesn't shadow it),
+// `MenuMetaEntry.name` (so `section: "Sales"` admits the same
+// keyword `MenuSection` reserves), `MenuLinkProp.name` (likewise),
+// and `CallArg.name` (so `Form(state: foo)` is legal even though
+// `state` is reserved by `StateBlock`).  Adding a token here does
+// NOT make it parseable as a NameRef in expression position — that
+// remains `NameRefIdent`.  Validators (Slice 3) enforce semantic
+// constraints (e.g. only specific names are valid for menu metadata).
+LooseName returns string:
+    ID
+    | 'id' | 'permissions' | 'contains'
+    | 'ui' | 'page' | 'component' | 'scaffold' | 'state' | 'menu'
+    | 'section' | 'link' | 'route' | 'title' | 'body' | 'framework' | 'static'
+    | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
+    | 'design' | 'targets';
 
 // ---------------------------------------------------------------------------
 // Type references
@@ -346,16 +520,43 @@ AssignOrCallStmt:
       | op='-=' value=Expression
     )?;
 
+// LValue accepts the same soft-keyword set as MemberName / NameRefIdent
+// for both `head` and `tail` segments — so e2e test bodies like
+// `ui.workflows.placeOrder({...})` and `ui.views.activeOrders()` parse
+// cleanly when `ui` / `workflows` / `views` are reserved by the page-
+// metamodel grammar.
 LValue:
-    head=ID ('.' tail+=ID)*
+    head=LValueIdent ('.' tail+=LValueIdent)*
       (call?='(' (args+=Expression (',' args+=Expression)*)? ')')?;
+
+LValueIdent returns string:
+    ID | 'id' | 'permissions' | 'contains' | 'ui'
+       | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views';
 
 // ---------------------------------------------------------------------------
 // Expressions (precedence climbing, lowest to highest)
 // ---------------------------------------------------------------------------
 
 Expression:
-    TernaryExpr;
+    MatchExpr | TernaryExpr;
+
+// Predicate-arms expression — first arm whose `cond` evaluates to
+// `true` returns its value; optional `else` is the fallthrough.
+// Lives in the expression engine so it can appear anywhere an
+// expression is allowed (page bodies, derived properties, view
+// `bind` exprs, filter lambdas, function bodies, etc.).
+//
+// `match` only enters this rule when followed by `{` — bare
+// occurrences of `match` as an identifier remain free.  Validator
+// may warn on non-exhaustive matches that lack `else`.
+MatchExpr:
+    'match' '{'
+        (arms+=MatchArm (','? arms+=MatchArm)* ','?)?
+        ('else' '=>' elseExpr=Expression ','?)?
+    '}';
+
+MatchArm:
+    cond=Expression '=>' value=Expression;
 
 TernaryExpr infers Expression:
     OrExpr ({infer TernaryExpr.condition=current} '?' thenExpr=Expression ':' elseExpr=Expression)?;
@@ -385,20 +586,46 @@ UnaryExpr infers Expression:
 PostfixExpr infers Expression:
     PrimaryExpr (
         {infer MemberAccess.receiver=current} '.' member=MemberName
-          ( call?='(' (args+=Expression (',' args+=Expression)*)? ')' )?
-      | {infer CallExpr.callee=current} '(' (args+=Expression (',' args+=Expression)*)? ')'
+          ( call?='(' (args+=CallArg (',' args+=CallArg)*)? ')' )?
+      | {infer CallExpr.callee=current} '(' (args+=CallArg (',' args+=CallArg)*)? ')'
     )*;
 
-// Accept reserved keywords (`id`, `permissions`, `contains`) as
-// ordinary member names so `prod.id`, `currentUser.permissions`,
-// `someArray.contains(x)` parse cleanly.  The magic-identifier
+// Call arguments admit an optional `name:` prefix (Slice 1.5).
+// Positional usage (`Money(10.5, "USD")`) keeps working; named usage
+// (`List(of: Order, scope: Orders.byCustomer(customerId))`) lets
+// component invocations in the page metamodel surface the parameter
+// names rather than relying on positional discipline.  Lowering
+// threads the name into `CallExpr.argNames` / `MethodCall.argNames`
+// parallel to `args`; renderers that don't care can ignore them.
+//
+// The name uses `LooseName` so common page-metamodel parameter
+// keywords (`of`, `by`, `state`, `body`, …) are admissible — without
+// this, e.g. `Form(state: order)` would fail because `state` is a
+// hard keyword from `StateBlock`.
+CallArg:
+    (name=LooseName ':')? value=Expression;
+
+// Accept reserved keywords as ordinary member names so `prod.id`,
+// `currentUser.permissions`, `someArray.contains(x)`, and the e2e
+// surface (`ui.products.create(...)`, `ui.workflows.<name>(...)`,
+// `ui.views.<name>()`) all parse cleanly.  The magic-identifier
 // resolution / collection-op dispatch lives in the lowering
 // (lower-expr.ts + type-system.ts) rather than the grammar.
 MemberName returns string:
-    ID | 'id' | 'permissions' | 'contains';
+    ID | 'id' | 'permissions' | 'contains' | 'ui'
+       | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views';
 
+// Lambdas accept either a single expression body (the only form
+// in v22) or a brace-wrapped block of statements.  Block bodies
+// are required for multi-statement event handlers in pages — e.g.
+// `c => { draft.customerId := c.customerId; step := 1 }`.  The
+// block reuses the existing `Statement` rule so all of `let`,
+// `:=`, `+=`, `-=`, calls, and `emit` are admissible inside.
 Lambda:
-    param=ID '=>' body=Expression;
+    param=ID '=>' (
+        body=Expression
+      | '{' stmts+=Statement* '}'
+    );
 
 PrimaryExpr infers Expression:
       Lambda
@@ -454,7 +681,15 @@ NameRef:
     name=NameRefIdent;
 
 NameRefIdent returns string:
-    ID | 'permissions';
+    // `ui` is admissible as a NameRef so e2e test bodies can reference
+    // the magic `ui` identifier (`ui.products.create(...)`) rooted at
+    // a react/static deployable's page-object surface.  The `ui { ... }`
+    // SystemMember declaration keeps the keyword form because the
+    // surrounding `system { ... }` context disambiguates.
+    //
+    // `permissions` is admissible for the analogous reason —
+    // `currentUser.permissions.contains(x)` in expression bodies.
+    ID | 'permissions' | 'ui';
 
 // ---------------------------------------------------------------------------
 // Terminals

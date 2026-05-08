@@ -34,6 +34,8 @@ import {
   renderWorkflowForm,
   renderWorkflowsIndex,
 } from "./templating/render.js";
+import { emitPagesForUi, emitPageObjectsForUi } from "./pages-emitter.js";
+import { deriveSidebarFromUi } from "./menu-emitter.js";
 
 // ---------------------------------------------------------------------------
 // React + React Query + Zod + Mantine generator.
@@ -85,70 +87,139 @@ export function generateReactForContexts(
   const design = deployable.design ?? "mantine";
   const pack = loadPack(resolvePackDir(design));
 
+  // Slice 5 — page metamodel routing.  When the deployable declares
+  // a `ui:` binding, the React generator walks `ui.pages` (post-
+  // Slice-4 expansion) via `emitPagesForUi`, which dispatches per
+  // `scaffoldOrigin` to the SAME `renderXxx` functions invoked
+  // below for the legacy direct walk.  Byte-for-byte equivalent in
+  // the bulk-scaffold case (the acceptance gate of Slice 5).
+  //
+  // Without a `ui:` binding (legacy/back-compat), fall through to
+  // the per-aggregate / per-workflow / per-view loops directly.
+  // Slices 8/9 finalise the migration and delete the fallback.
+  const ui = deployable.uiName
+    ? sys.uis.find((u) => u.name === deployable.uiName)
+    : undefined;
+
+  // Per-aggregate api modules — always emitted; 1:1 with the
+  // aggregate inventory.  The Playwright page object emission moves
+  // into the `if (ui)` branch below (Slice 7) so page-IR-routed
+  // deployables walk the same source for both pages and page
+  // objects.
   for (const { agg, ctx } of aggregates) {
     const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
     out.set(`src/api/${camel(agg.name)}.ts`, buildApiModule(agg, repo, ctx));
-    out.set(
-      `src/pages/${snake(plural(agg.name))}/list.tsx`,
-      renderListPage(agg, aggregatesByName, pack),
-    );
-    out.set(
-      `src/pages/${snake(plural(agg.name))}/new.tsx`,
-      renderNewPage(agg, ctx, aggregatesByName, pack),
-    );
-    out.set(
-      `src/pages/${snake(plural(agg.name))}/detail.tsx`,
-      renderDetailPage(agg, ctx, aggregatesByName, pack),
-    );
-    out.set(
-      `e2e/pages/${camel(agg.name)}.ts`,
-      buildPageObjectModule(agg, ctx),
-    );
   }
 
-  // Workflow UI — surfaces every backend workflow as a generated form
-  // page so users can invoke them from the browser instead of curl /
-  // Postman.  Reuses the per-aggregate form-helpers for typed inputs.
   const workflows = allWorkflows(contexts);
-  if (hasAnyWorkflow(contexts)) {
-    out.set("src/api/workflows.ts", buildWorkflowsApiModule(contexts));
-    out.set("src/pages/workflows/index.tsx", renderWorkflowsIndex(contexts, pack));
-    for (const { wf, ctx } of workflows) {
+  const views = allViews(contexts);
+
+  if (ui) {
+    // Page-IR-driven emission.  All `src/pages/...` files go through
+    // the page emitter; the home page is rendered through main's
+    // template-pack `renderHome`, threaded as the home callback so
+    // the emitter stays page-IR-shaped without a hard dependency on
+    // the renderer module from this side.  Slice 7: Playwright page
+    // objects under `e2e/pages/` also walk `ui.pages` via
+    // `emitPageObjectsForUi` — same source of truth, byte-identical
+    // file set to the legacy aggregate / workflow / view loops.
+    const contextsByName = new Map<string, BoundedContextIR>();
+    for (const ctx of contexts) contextsByName.set(ctx.name, ctx);
+    const emitCtx = {
+      sys,
+      deployable,
+      aggregatesByName,
+      contextsByName,
+      pack,
+    };
+    const pages = emitPagesForUi(
+      ui,
+      emitCtx,
+      (aggs, wfs, vws, sysName) =>
+        renderHome(aggs, wfs, vws, sysName, pack),
+    );
+    pages.forEach((content, path) => out.set(path, content));
+    const pageObjects = emitPageObjectsForUi(ui, emitCtx);
+    pageObjects.forEach((content, path) => out.set(path, content));
+  } else {
+    // Legacy back-compat path for deployables without a `ui:`
+    // binding: per-aggregate pages + Playwright page objects walked
+    // from the aggregate inventory directly.
+    for (const { agg, ctx } of aggregates) {
       out.set(
-        `src/pages/workflows/${snake(wf.name)}.tsx`,
-        renderWorkflowForm(wf, ctx, aggregatesByName, pack),
+        `src/pages/${snake(plural(agg.name))}/list.tsx`,
+        renderListPage(agg, aggregatesByName, pack),
       );
-      // Slice 18.C — Playwright page object so DSL `ui.workflows.X(...)`
-      // calls have a typed driver to lower against.  Lives under
-      // `e2e/pages/workflows/<slug>.ts`, mirroring the per-aggregate
-      // page object layout.
       out.set(
-        `e2e/pages/workflows/${snake(wf.name)}.ts`,
-        buildWorkflowPageObject(wf, ctx),
+        `src/pages/${snake(plural(agg.name))}/new.tsx`,
+        renderNewPage(agg, ctx, aggregatesByName, pack),
+      );
+      out.set(
+        `src/pages/${snake(plural(agg.name))}/detail.tsx`,
+        renderDetailPage(agg, ctx, aggregatesByName, pack),
+      );
+      out.set(
+        `e2e/pages/${camel(agg.name)}.ts`,
+        buildPageObjectModule(agg, ctx),
       );
     }
   }
 
-  // View UI — surfaces every backend view as a generated table page.
-  // Shorthand views reuse the source aggregate's wire schema; full-form
-  // views get their own per-view row schema.  Cross-aggregate Id<X>
-  // cells link to the matching detail page when that aggregate is in
-  // this deployable's modules.
-  const views = allViews(contexts);
+  // Workflow UI — Playwright page objects + the shared workflows API
+  // module are 1:1 with the workflow inventory, not with a generated
+  // page; emit them regardless of the page-emission path.  The per-
+  // workflow form pages and the workflows index live in
+  // `emitPagesForUi` when `ui` is set; the legacy fallback below
+  // covers the no-ui branch.
+  if (hasAnyWorkflow(contexts)) {
+    out.set("src/api/workflows.ts", buildWorkflowsApiModule(contexts));
+    if (!ui) {
+      // Legacy back-compat path: pages + page objects walked from
+      // the workflow inventory directly.  When `ui` is set, both
+      // come from `emitPagesForUi` / `emitPageObjectsForUi` and
+      // route through page IR.
+      out.set(
+        "src/pages/workflows/index.tsx",
+        renderWorkflowsIndex(contexts, pack),
+      );
+      for (const { wf, ctx } of workflows) {
+        out.set(
+          `src/pages/workflows/${snake(wf.name)}.tsx`,
+          renderWorkflowForm(wf, ctx, aggregatesByName, pack),
+        );
+        out.set(
+          `e2e/pages/workflows/${snake(wf.name)}.ts`,
+          buildWorkflowPageObject(wf, ctx),
+        );
+      }
+    }
+  }
+
+  // View UI — same shape as workflows: per-view page object + the
+  // shared views API module always emitted; the per-view table
+  // pages and the views index go through `emitPagesForUi` when
+  // `ui` is set.
   if (hasAnyView(contexts)) {
     out.set("src/api/views.ts", buildViewsApiModule(contexts));
-    out.set("src/pages/views/index.tsx", renderViewsIndex(contexts, pack));
-    for (const { view, ctx } of views) {
+    if (!ui) {
+      // Legacy back-compat path: pages + page objects walked from
+      // the view inventory directly.  When `ui` is set, both come
+      // from `emitPagesForUi` / `emitPageObjectsForUi` and route
+      // through page IR.
       out.set(
-        `src/pages/views/${snake(view.name)}.tsx`,
-        renderViewTablePage(view, ctx, aggregatesByName, pack),
+        "src/pages/views/index.tsx",
+        renderViewsIndex(contexts, pack),
       );
-      // Slice 18.C — Playwright page object so DSL `ui.views.X()`
-      // calls can read the rendered table back as typed objects.
-      out.set(
-        `e2e/pages/views/${snake(view.name)}.ts`,
-        buildViewPageObject(view, ctx),
-      );
+      for (const { view, ctx } of views) {
+        out.set(
+          `src/pages/views/${snake(view.name)}.tsx`,
+          renderViewTablePage(view, ctx, aggregatesByName, pack),
+        );
+        out.set(
+          `e2e/pages/views/${snake(view.name)}.ts`,
+          buildViewPageObject(view, ctx),
+        );
+      }
     }
   }
 
@@ -171,6 +242,14 @@ export function generateReactForContexts(
   // main.tsx always wires `<MantineProvider theme={theme}>`.
   out.set("src/theme.ts", renderTheme(sys.theme, pack));
   out.set("src/main.tsx", renderMain(pack));
+  // Slice 6: when the ui block declares an explicit `menu { … }`,
+  // its derived sidebar overrides the hardcoded Aggregates /
+  // Workflows / Views grouping below.  When the ui has no menu
+  // block (or no ui binding at all), `sidebarOverride` is
+  // `undefined` and the AppShell preparer falls back to its legacy
+  // hardcoded shape — byte-identical to main's pre-Slice-6 output.
+  const sidebarOverride = ui ? deriveSidebarFromUi(ui) : undefined;
+
   out.set(
     "src/App.tsx",
     renderAppShell(
@@ -179,18 +258,27 @@ export function generateReactForContexts(
       views.map((v) => v.view),
       sys.name,
       pack,
+      sidebarOverride,
     ),
   );
-  out.set(
-    "src/pages/home.tsx",
-    renderHome(
-      aggregates.map((a) => a.agg),
-      workflows.map((w) => w.wf),
-      views.map((v) => v.view),
-      sys.name,
-      pack,
-    ),
-  );
+  // Home page goes through `emitPagesForUi` when a `ui:` binding is
+  // present (the Slice-4 expander synthesises a `Home` PageIR with
+  // `scaffoldOrigin.kind === "home"` whenever any aggregate /
+  // workflow / view is scaffolded).  Without a `ui:` binding we
+  // emit Home unconditionally — same shape every legacy react
+  // deployable produced.
+  if (!ui) {
+    out.set(
+      "src/pages/home.tsx",
+      renderHome(
+        aggregates.map((a) => a.agg),
+        workflows.map((w) => w.wf),
+        views.map((v) => v.view),
+        sys.name,
+        pack,
+      ),
+    );
+  }
 
   out.set("package.json", renderShellFile("package-json", {}, pack));
   out.set("tsconfig.json", renderShellFile("tsconfig", {}, pack));

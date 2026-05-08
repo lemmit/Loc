@@ -329,7 +329,12 @@ function renderUIExpr(e: ExprIR, ctx: RenderCtx): string {
     case "ternary":
       return `${renderUIExpr(e.cond, ctx)} ? ${renderUIExpr(e.then, ctx)} : ${renderUIExpr(e.otherwise, ctx)}`;
     case "lambda":
-      return `(${e.param}) => ${renderUIExpr(e.body, ctx)}`;
+      // Slice 2: lambda body is now optional (block-body lambdas were
+      // added for page event handlers).  UI E2E tests don't currently
+      // use block-body lambdas — fall back to a stub for the future
+      // case.
+      if (e.body) return `(${e.param}) => ${renderUIExpr(e.body, ctx)}`;
+      return `(${e.param}) => { /* block-body lambdas not supported in UI e2e tests */ }`;
     case "member":
       return `${renderUIExpr(e.receiver, ctx)}.${e.member}`;
     case "method-call": {
@@ -343,6 +348,19 @@ function renderUIExpr(e: ExprIR, ctx: RenderCtx): string {
       return `({ ${e.fields.map((f) => `${f.name}: ${renderUIExpr(f.value, ctx)}`).join(", ")} })`;
     case "object":
       return `({ ${e.fields.map((f) => `${f.name}: ${renderUIExpr(f.value, ctx)}`).join(", ")} })`;
+    case "match": {
+      // Slice 2: lower match to chained ternary.  Same approach as
+      // e2e-render.ts; UI tests are unlikely to evaluate match
+      // expressions in v0 but staying total avoids a ts-exhaustive
+      // gap.
+      const arms = [...e.arms].reverse();
+      const tail = e.otherwise ? renderUIExpr(e.otherwise, ctx) : "undefined";
+      let out = tail;
+      for (const arm of arms) {
+        out = `(${renderUIExpr(arm.cond, ctx)} ? ${renderUIExpr(arm.value, ctx)} : ${out})`;
+      }
+      return out;
+    }
   }
 }
 

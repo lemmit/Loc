@@ -1,0 +1,44 @@
+// Auto-generated.
+import * as Ids from "./ids";
+import { Money } from "./value-objects";
+import type * as Events from "./events";
+import { DomainError, ForbiddenError } from "./errors";
+
+
+export class Product {
+  private _id: Ids.ProductId;
+  private _events: Events.DomainEvent[] = [];
+  private _sku: string;
+  private _price: Money;
+  private constructor(state: { id: Ids.ProductId; sku: string; price: Money }) {
+    this._id = state.id;
+    this._sku = state.sku;
+    this._price = state.price;
+    this._assertInvariants();
+  }
+
+  get id(): Ids.ProductId { return this._id; }
+  get sku(): string { return this._sku; }
+  get price(): Money { return this._price; }
+  pullEvents(): Events.DomainEvent[] {
+    const out = this._events;
+    this._events = [];
+    return out;
+  }
+
+  private _assertInvariants(): void {
+    if (!(this._sku.length > 0)) throw new DomainError("Invariant violated: sku.length > 0");
+  }
+
+  static _create(state: { id: Ids.ProductId; sku: string; price: Money }): Product {
+    return new Product(state);
+  }
+  static create(input: { sku: string; price: Money }): Product {
+    return new Product({
+      id: Ids.newProductId(),
+      sku: input.sku,
+      price: input.price,
+    });
+  }
+}
+

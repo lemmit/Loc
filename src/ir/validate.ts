@@ -11,6 +11,7 @@ import type {
   TypeIR,
 } from "./loom-ir.js";
 import { allContexts, findUsesCurrentUser } from "./loom-ir.js";
+import { expandScaffolds } from "./scaffold-expand.js";
 import { allPlatforms } from "../platform/registry.js";
 import { camel, plural, snake } from "../util/naming.js";
 
@@ -47,6 +48,7 @@ export function validateLoomModel(loom: LoomModel): LoomDiagnostic[] {
     validateReactIdReferences(sys, diags);
     validateAuth(sys, diags);
     validatePermissions(sys, diags);
+    validateScaffoldDoubles(sys, diags);
     // Theme validation lives in the Langium-side validator
     // (`ddd-validator.ts:checkTheme`) where the raw AST is in
     // scope — unknown property names, duplicates, and the radius
@@ -676,6 +678,13 @@ function firstNonQueryableNode(e: ExprIR): string | null {
       return "object literal";
     case "ternary":
       return "ternary";
+    case "match":
+      // `match { ... }` is a value-producing expression but contains
+      // arbitrary arm conditions / values; it doesn't translate to a
+      // single SQL fragment.  Same posture as ternary in v22 — reject
+      // from the queryable sublanguage; full match semantics live in
+      // the application layer / generator.
+      return "match expression";
   }
 }
 
@@ -1436,6 +1445,33 @@ function validateCurrentUserScope(
 // ---------------------------------------------------------------------------
 
 const UNKNOWN_PERMISSION_SENTINEL = "__unknown_permission__:";
+
+// Slice 4 — cross-directive double-scaffold detection.  The Slice 3
+// validator catches "same target listed twice in one scaffold
+// directive"; this layer catches the trickier case where two
+// directives at different granularities produce the same generated
+// page name (e.g. `scaffold modules: Sales` + `scaffold aggregates:
+// Order` where Order is in Sales).  We delegate to the expander —
+// the same one `enrichLoomModel` already calls — so the rule is
+// definitionally consistent with what gets emitted.
+function validateScaffoldDoubles(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  for (const ui of sys.uis) {
+    const result = expandScaffolds(ui, sys);
+    for (const d of result.diagnostics) {
+      const sourceLabels = d.sources
+        .map((sc) => `${sc.selector}: ${sc.targets.join(", ")}`)
+        .join("  +  ");
+      diags.push({
+        severity: "error",
+        source: `${sys.name}/ui:${ui.name}`,
+        message:
+          `ui '${ui.name}': scaffold directives produce duplicate page '${d.pageName}' — ` +
+          `same generated name from multiple sources (${sourceLabels}). ` +
+          `Pick a single granularity, or write an explicit \`page ${d.pageName} { … }\` to make the override deliberate.`,
+      });
+    }
+  }
+}
 
 function validatePermissions(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const mod of sys.modules) {

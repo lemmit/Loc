@@ -1,0 +1,101 @@
+// Auto-generated.
+using System.Linq;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.Extensions.Logging;
+using CatalogApi.Domain.Common;
+
+namespace CatalogApi.Api;
+
+/// <summary>
+/// Maps domain-layer exceptions to structured HTTP responses.
+/// Domain exceptions get a 400 / 404 with the original message;
+/// any unhandled exception falls through to a generic 500 with a
+/// safe message (the original is logged but not returned, so
+/// internal details don't leak to API consumers).  Mirrors the
+/// Hono `app.onError` shape so the cross-platform contract
+/// stays in lockstep.
+/// </summary>
+public sealed class DomainExceptionFilter : IExceptionFilter
+{
+    private readonly ILogger<DomainExceptionFilter> _log;
+    public DomainExceptionFilter(ILogger<DomainExceptionFilter> log) => _log = log;
+
+    public void OnException(ExceptionContext context)
+    {
+        // Correlation id — ASP.NET Core sets Activity.Current
+        // automatically on every request via the
+        // HostingApplicationDiagnostics.  Surfacing the trace id on
+        // the response lets an operator join the response back to
+        // the structured log line without scraping headers.  Empty
+        // string when no Activity is active (e.g. middleware errors
+        // before the pipeline starts).
+        var trace_id = System.Diagnostics.Activity.Current?.TraceId.ToString() ?? "";
+        // Slice 21.B FluentValidation arm — runs FIRST because
+        // validation failures are the most common 400 cause.  The
+        // envelope extends the existing { error, trace_id } shape
+        // with a structured `failures` array carrying field +
+        // message per FluentValidation issue, so frontends can
+        // surface field-level errors next to the right input.
+        if (context.Exception is FluentValidation.ValidationException fv)
+        {
+            context.Result = new BadRequestObjectResult(new
+            {
+                error = "Validation failed",
+                trace_id,
+                failures = fv.Errors
+                    .Select(e => new { field = e.PropertyName, message = e.ErrorMessage })
+                    .ToArray(),
+            });
+            context.ExceptionHandled = true;
+            return;
+        }
+        if (context.Exception is ForbiddenException fe)
+        {
+            context.Result = new ObjectResult(new { error = fe.Message, trace_id })
+            {
+                StatusCode = 403,
+            };
+            context.ExceptionHandled = true;
+            return;
+        }
+        if (context.Exception is DomainException de)
+        {
+            context.Result = new BadRequestObjectResult(new { error = de.Message, trace_id });
+            context.ExceptionHandled = true;
+            return;
+        }
+        if (context.Exception is AggregateNotFoundException nf)
+        {
+            context.Result = new NotFoundObjectResult(new { error = nf.Message, trace_id });
+            context.ExceptionHandled = true;
+            return;
+        }
+        if (context.Exception is ExternHandlerException xh)
+        {
+            // 500 — the user handler threw, which is an internal
+            // failure from the framework's POV — but the envelope
+            // names the offending op + aggregate so operators don't
+            // have to grep logs to find the cause.  The original
+            // exception (xh.InnerException) is logged in full
+            // server-side.
+            _log.LogError(xh, "Extern handler {Op} on {Agg} threw",
+                xh.OpName, xh.AggName);
+            context.Result = new ObjectResult(new { error = xh.Message, trace_id })
+            {
+                StatusCode = 500,
+            };
+            context.ExceptionHandled = true;
+            return;
+        }
+        // Generic 500.  Log the full exception server-side; return a
+        // sanitized payload to the client.
+        _log.LogError(context.Exception, "Unhandled exception in {Action}",
+            context.ActionDescriptor.DisplayName);
+        context.Result = new ObjectResult(new { error = "internal", trace_id })
+        {
+            StatusCode = 500,
+        };
+        context.ExceptionHandled = true;
+    }
+}
