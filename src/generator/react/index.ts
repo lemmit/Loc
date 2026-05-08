@@ -31,6 +31,7 @@ import { loadPack, resolvePackDir } from "./templating/loader.js";
 import { renderListPage } from "./templating/render.js";
 import type { ViewIR } from "../../ir/loom-ir.js";
 import { humanize } from "../../util/naming.js";
+import { emitPagesForUi } from "./pages-emitter.js";
 
 // ---------------------------------------------------------------------------
 // React + React Query + Zod + Mantine generator.
@@ -82,39 +83,84 @@ export function generateReactForContexts(
   const design = deployable.design ?? "mantine";
   const pack = loadPack(resolvePackDir(design));
 
+  // Slice 5 — page metamodel routing.  When the deployable declares
+  // a `ui:` binding, the React generator walks `ui.pages` (post-
+  // Slice-4 expansion) via `emitPagesForUi`, which dispatches per
+  // `scaffoldOrigin` to the SAME builders below.  Byte-for-byte
+  // equivalent to the legacy direct-walk for the bulk-scaffold case
+  // (the sole acceptance gate of this slice).
+  //
+  // When no `ui:` is declared (legacy/back-compat path), fall
+  // through to the per-aggregate / per-workflow / per-view loops
+  // below.  Slices 8/9 finalise the migration and delete the
+  // fallback.
+  const ui = deployable.uiName
+    ? sys.uis.find((u) => u.name === deployable.uiName)
+    : undefined;
+
+  // Per-aggregate api modules + page objects — emitted regardless of
+  // page-emission path.  These are 1:1 with the aggregate, not with
+  // a generated page, so they live outside the page emitter.
   for (const { agg, ctx } of aggregates) {
     const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
     out.set(`src/api/${camel(agg.name)}.ts`, buildApiModule(agg, repo, ctx));
-    out.set(
-      `src/pages/${snake(plural(agg.name))}/list.tsx`,
-      renderListPage(agg, aggregatesByName, pack),
-    );
-    out.set(
-      `src/pages/${snake(plural(agg.name))}/new.tsx`,
-      buildNewPage(agg, ctx, aggregatesByName),
-    );
-    out.set(
-      `src/pages/${snake(plural(agg.name))}/detail.tsx`,
-      buildDetailPage(agg, ctx, aggregatesByName),
-    );
     out.set(
       `e2e/pages/${camel(agg.name)}.ts`,
       buildPageObjectModule(agg, ctx),
     );
   }
 
-  // Workflow UI — surfaces every backend workflow as a generated form
-  // page so users can invoke them from the browser instead of curl /
-  // Postman.  Reuses the per-aggregate form-helpers for typed inputs.
+  if (ui) {
+    // Page-IR-driven emission (Slice 5 path).
+    const contextsByName = new Map<string, BoundedContextIR>();
+    for (const ctx of contexts) contextsByName.set(ctx.name, ctx);
+    const pages = emitPagesForUi(
+      ui,
+      { sys, deployable, aggregatesByName, contextsByName, pack },
+      homeTsx,
+    );
+    pages.forEach((content, path) => out.set(path, content));
+  } else {
+    // Legacy per-aggregate page emission (back-compat for deployables
+    // without a `ui:` binding).
+    for (const { agg, ctx } of aggregates) {
+      out.set(
+        `src/pages/${snake(plural(agg.name))}/list.tsx`,
+        renderListPage(agg, aggregatesByName, pack),
+      );
+      out.set(
+        `src/pages/${snake(plural(agg.name))}/new.tsx`,
+        buildNewPage(agg, ctx, aggregatesByName),
+      );
+      out.set(
+        `src/pages/${snake(plural(agg.name))}/detail.tsx`,
+        buildDetailPage(agg, ctx, aggregatesByName),
+      );
+    }
+  }
+
+  // Workflow UI — Playwright page objects + the shared workflows
+  // API module are 1:1 with the workflow / context inventory, not
+  // with a generated page; emit them regardless of the page-emission
+  // path.  The per-workflow form pages and the workflows index live
+  // in `emitPagesForUi` when `ui` is set; the legacy fallback below
+  // covers the no-ui branch.
   const workflows = allWorkflows(contexts);
   if (hasAnyWorkflow(contexts)) {
     out.set("src/api/workflows.ts", buildWorkflowsApiModule(contexts));
-    out.set("src/pages/workflows/index.tsx", buildWorkflowsIndexPage(contexts));
-    for (const { wf, ctx } of workflows) {
+    if (!ui) {
       out.set(
-        `src/pages/workflows/${snake(wf.name)}.tsx`,
-        buildWorkflowFormPage(wf, ctx, aggregatesByName),
+        "src/pages/workflows/index.tsx",
+        buildWorkflowsIndexPage(contexts),
       );
+      for (const { wf, ctx } of workflows) {
+        out.set(
+          `src/pages/workflows/${snake(wf.name)}.tsx`,
+          buildWorkflowFormPage(wf, ctx, aggregatesByName),
+        );
+      }
+    }
+    for (const { wf, ctx } of workflows) {
       // Slice 18.C — Playwright page object so DSL `ui.workflows.X(...)`
       // calls have a typed driver to lower against.  Lives under
       // `e2e/pages/workflows/<slug>.ts`, mirroring the per-aggregate
@@ -126,20 +172,23 @@ export function generateReactForContexts(
     }
   }
 
-  // View UI — surfaces every backend view as a generated table page.
-  // Shorthand views reuse the source aggregate's wire schema; full-form
-  // views get their own per-view row schema.  Cross-aggregate Id<X>
-  // cells link to the matching detail page when that aggregate is in
-  // this deployable's modules.
+  // View UI — same shape as workflows: per-view page object + the
+  // shared views API module always emitted; the per-view table
+  // pages and the views index go through `emitPagesForUi` when
+  // `ui` is set.
   const views = allViews(contexts);
   if (hasAnyView(contexts)) {
     out.set("src/api/views.ts", buildViewsApiModule(contexts));
-    out.set("src/pages/views/index.tsx", buildViewsIndexPage(contexts));
+    if (!ui) {
+      out.set("src/pages/views/index.tsx", buildViewsIndexPage(contexts));
+      for (const { view, ctx } of views) {
+        out.set(
+          `src/pages/views/${snake(view.name)}.tsx`,
+          buildViewTablePage(view, ctx, aggregatesByName),
+        );
+      }
+    }
     for (const { view, ctx } of views) {
-      out.set(
-        `src/pages/views/${snake(view.name)}.tsx`,
-        buildViewTablePage(view, ctx, aggregatesByName),
-      );
       // Slice 18.C — Playwright page object so DSL `ui.views.X()`
       // calls can read the rendered table back as typed objects.
       out.set(
@@ -174,15 +223,23 @@ export function generateReactForContexts(
       sys.name,
     ),
   );
-  out.set(
-    "src/pages/home.tsx",
-    homeTsx(
-      aggregates.map((a) => a.agg),
-      workflows.map((w) => w.wf),
-      views.map((v) => v.view),
-      sys.name,
-    ),
-  );
+  // The Home page goes through `emitPagesForUi` when a `ui:` binding
+  // is present (the expander synthesises a `Home` PageIR with
+  // `scaffoldOrigin.kind === "home"` whenever any aggregate /
+  // workflow / view is scaffolded).  Without a `ui:` binding we
+  // emit Home unconditionally — same shape every legacy react
+  // deployable produced.
+  if (!ui) {
+    out.set(
+      "src/pages/home.tsx",
+      homeTsx(
+        aggregates.map((a) => a.agg),
+        workflows.map((w) => w.wf),
+        views.map((v) => v.view),
+        sys.name,
+      ),
+    );
+  }
 
   out.set("package.json", PACKAGE_JSON);
   out.set("tsconfig.json", TSCONFIG_JSON);
