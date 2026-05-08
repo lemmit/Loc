@@ -25,9 +25,17 @@ const cli = path.join(repoRoot, "bin", "cli.js");
 const ENABLED = process.env.LOOM_REACT_BUILD === "1";
 
 /** Each entry: ddd source + the snake-cased deployable subdir under
- *  the system's generation root that holds the React project. */
+ *  the system's generation root that holds the React project.  The
+ *  top-level `examples/acme.ddd` is the canonical case; the
+ *  `web/src/examples/*-system.ddd` set are the playground sources
+ *  the in-browser editor ships, exercising different domain shapes
+ *  (banking — money, inventory — nested aggregates, sales — multi-
+ *  context). */
 const cases: Array<{ ddd: string; reactDir: string }> = [
   { ddd: "examples/acme.ddd", reactDir: "web_app" },
+  { ddd: "web/src/examples/banking-system.ddd", reactDir: "web_app" },
+  { ddd: "web/src/examples/inventory-system.ddd", reactDir: "web_app" },
+  { ddd: "web/src/examples/sales-system.ddd", reactDir: "web_app" },
 ];
 
 describe.skipIf(!ENABLED)("generated React TSX compiles under strict tsc", () => {
