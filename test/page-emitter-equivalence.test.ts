@@ -88,6 +88,31 @@ describe("Slice 5 byte-equivalence — page emitter vs legacy direct walk", () =
     expect(mismatches, "files that drifted from the baseline fixture").toEqual([]);
   });
 
+  it("page objects emit through `emitPageObjectsForUi` when ui is set (Slice 7)", async () => {
+    // Defence-in-depth: if a refactor accidentally re-routes the
+    // page-object emission back through the legacy aggregate /
+    // workflow / view loops, the byte-equivalence test would still
+    // pass (same builder, same content, same paths).  This test
+    // confirms the path itself by checking that `e2e/pages/*.ts`
+    // files are emitted at all (they require both `ui.pages` to
+    // contain the right scaffoldOrigin entries AND the per-archetype
+    // dispatch in `emitPageObjectsForUi` to route them).
+    const model = await buildAcme();
+    const { files } = generateSystems(model);
+    expect([...files.keys()]).toContain("web_app/e2e/pages/order.ts");
+    expect([...files.keys()]).toContain("web_app/e2e/pages/customer.ts");
+    expect([...files.keys()]).toContain("web_app/e2e/pages/product.ts");
+    expect([...files.keys()]).toContain(
+      "web_app/e2e/pages/workflows/place_order.ts",
+    );
+    expect([...files.keys()]).toContain(
+      "web_app/e2e/pages/views/active_orders.ts",
+    );
+    expect([...files.keys()]).toContain(
+      "web_app/e2e/pages/views/order_summary.ts",
+    );
+  });
+
   it("the new page-IR path is the active one (acme's webApp has uiName populated)", async () => {
     // Defence-in-depth: if a refactor accidentally drops the `ui:`
     // binding from acme.ddd or the lowering, the previous tests

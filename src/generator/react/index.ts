@@ -35,7 +35,7 @@ import {
   renderWorkflowForm,
   renderWorkflowsIndex,
 } from "./templating/render.js";
-import { emitPagesForUi } from "./pages-emitter.js";
+import { emitPagesForUi, emitPageObjectsForUi } from "./pages-emitter.js";
 import { deriveSidebarFromUi } from "./menu-emitter.js";
 
 // ---------------------------------------------------------------------------
@@ -102,16 +102,14 @@ export function generateReactForContexts(
     ? sys.uis.find((u) => u.name === deployable.uiName)
     : undefined;
 
-  // Per-aggregate api modules + Playwright page objects — emitted
-  // regardless of page-emission path.  These are 1:1 with the
-  // aggregate inventory, not with a generated page.
+  // Per-aggregate api modules — always emitted; 1:1 with the
+  // aggregate inventory.  The Playwright page object emission moves
+  // into the `if (ui)` branch below (Slice 7) so page-IR-routed
+  // deployables walk the same source for both pages and page
+  // objects.
   for (const { agg, ctx } of aggregates) {
     const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
     out.set(`src/api/${camel(agg.name)}.ts`, buildApiModule(agg, repo, ctx));
-    out.set(
-      `e2e/pages/${camel(agg.name)}.ts`,
-      buildPageObjectModule(agg, ctx),
-    );
   }
 
   const workflows = allWorkflows(contexts);
@@ -122,20 +120,32 @@ export function generateReactForContexts(
     // the page emitter; the home page is rendered through main's
     // template-pack `renderHome`, threaded as the home callback so
     // the emitter stays page-IR-shaped without a hard dependency on
-    // the renderer module from this side.
+    // the renderer module from this side.  Slice 7: Playwright page
+    // objects under `e2e/pages/` also walk `ui.pages` via
+    // `emitPageObjectsForUi` — same source of truth, byte-identical
+    // file set to the legacy aggregate / workflow / view loops.
     const contextsByName = new Map<string, BoundedContextIR>();
     for (const ctx of contexts) contextsByName.set(ctx.name, ctx);
+    const emitCtx = {
+      sys,
+      deployable,
+      aggregatesByName,
+      contextsByName,
+      pack,
+    };
     const pages = emitPagesForUi(
       ui,
-      { sys, deployable, aggregatesByName, contextsByName, pack },
+      emitCtx,
       (aggs, wfs, vws, sysName) =>
         renderHome(aggs, wfs, vws, sysName, pack),
     );
     pages.forEach((content, path) => out.set(path, content));
+    const pageObjects = emitPageObjectsForUi(ui, emitCtx);
+    pageObjects.forEach((content, path) => out.set(path, content));
   } else {
-    // Legacy per-aggregate page emission for deployables without a
-    // `ui:` binding.  Same `renderXxx` calls main exercises in its
-    // direct-walk loop.
+    // Legacy back-compat path for deployables without a `ui:`
+    // binding: per-aggregate pages + Playwright page objects walked
+    // from the aggregate inventory directly.
     for (const { agg, ctx } of aggregates) {
       out.set(
         `src/pages/${snake(plural(agg.name))}/list.tsx`,
@@ -149,6 +159,10 @@ export function generateReactForContexts(
         `src/pages/${snake(plural(agg.name))}/detail.tsx`,
         renderDetailPage(agg, ctx, aggregatesByName, pack),
       );
+      out.set(
+        `e2e/pages/${camel(agg.name)}.ts`,
+        buildPageObjectModule(agg, ctx),
+      );
     }
   }
 
@@ -161,6 +175,10 @@ export function generateReactForContexts(
   if (hasAnyWorkflow(contexts)) {
     out.set("src/api/workflows.ts", buildWorkflowsApiModule(contexts));
     if (!ui) {
+      // Legacy back-compat path: pages + page objects walked from
+      // the workflow inventory directly.  When `ui` is set, both
+      // come from `emitPagesForUi` / `emitPageObjectsForUi` and
+      // route through page IR.
       out.set(
         "src/pages/workflows/index.tsx",
         renderWorkflowsIndex(contexts, pack),
@@ -170,15 +188,11 @@ export function generateReactForContexts(
           `src/pages/workflows/${snake(wf.name)}.tsx`,
           renderWorkflowForm(wf, ctx, aggregatesByName, pack),
         );
+        out.set(
+          `e2e/pages/workflows/${snake(wf.name)}.ts`,
+          buildWorkflowPageObject(wf, ctx),
+        );
       }
-    }
-    for (const { wf, ctx } of workflows) {
-      // Slice 18.C — Playwright page object so DSL `ui.workflows.X(...)`
-      // calls have a typed driver to lower against.
-      out.set(
-        `e2e/pages/workflows/${snake(wf.name)}.ts`,
-        buildWorkflowPageObject(wf, ctx),
-      );
     }
   }
 
@@ -189,6 +203,10 @@ export function generateReactForContexts(
   if (hasAnyView(contexts)) {
     out.set("src/api/views.ts", buildViewsApiModule(contexts));
     if (!ui) {
+      // Legacy back-compat path: pages + page objects walked from
+      // the view inventory directly.  When `ui` is set, both come
+      // from `emitPagesForUi` / `emitPageObjectsForUi` and route
+      // through page IR.
       out.set(
         "src/pages/views/index.tsx",
         renderViewsIndex(contexts, pack),
@@ -198,15 +216,11 @@ export function generateReactForContexts(
           `src/pages/views/${snake(view.name)}.tsx`,
           renderViewTablePage(view, ctx, aggregatesByName, pack),
         );
+        out.set(
+          `e2e/pages/views/${snake(view.name)}.ts`,
+          buildViewPageObject(view, ctx),
+        );
       }
-    }
-    for (const { view, ctx } of views) {
-      // Slice 18.C — Playwright page object so DSL `ui.views.X()`
-      // calls can read the rendered table back as typed objects.
-      out.set(
-        `e2e/pages/views/${snake(view.name)}.ts`,
-        buildViewPageObject(view, ctx),
-      );
     }
   }
 

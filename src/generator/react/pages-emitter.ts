@@ -53,6 +53,9 @@ import {
   renderWorkflowsIndex,
 } from "./templating/render.js";
 import type { LoadedPack } from "./templating/loader.js";
+import { buildPageObjectModule } from "./page-objects-builder.js";
+import { buildWorkflowPageObject } from "./workflow-builder.js";
+import { buildViewPageObject } from "./view-builder.js";
 
 /** Inputs the page emitter needs in addition to the page IR.  Kept as
  *  a struct so additions (theme overrides, design-pack picks, sidebar
@@ -243,3 +246,90 @@ export type HomeRenderer = (
 // still live in index.ts; re-exported here so the page-objects
 // builder can move in Slice 7 without re-importing naming utils.
 export { camel };
+
+// ---------------------------------------------------------------------------
+// Slice 7 — Playwright page-object emission walked from `ui.pages`.
+//
+// Each scaffold-synthesised page contributes to its archetype's
+// page-object file:
+//
+//   aggregate-list / aggregate-new / aggregate-detail
+//     → one shared `e2e/pages/<camel-agg>.ts` per aggregate
+//       (covers all three classes ListPage / NewPage / DetailPage)
+//   workflow-form
+//     → `e2e/pages/workflows/<snake-name>.ts` per workflow
+//   view-list
+//     → `e2e/pages/views/<snake-name>.ts` per view
+//
+// Output is byte-identical to the legacy aggregate-walked path for
+// the bulk-scaffold case — same file paths, same content (the
+// existing `buildPageObjectModule` / `buildWorkflowPageObject` /
+// `buildViewPageObject` builders are reused verbatim).  The reroute
+// is purely structural: page-IR drives iteration, builders unchanged.
+// ---------------------------------------------------------------------------
+
+export function emitPageObjectsForUi(
+  ui: UiIR,
+  ctx: PageEmitContext,
+): Map<string, string> {
+  const out = new Map<string, string>();
+  const seenAggregates = new Set<string>();
+  const seenWorkflows = new Set<string>();
+  const seenViews = new Set<string>();
+
+  for (const page of ui.pages) {
+    const origin = page.scaffoldOrigin;
+    if (!origin) continue; // Explicit pages don't yet emit page objects.
+    switch (origin.kind) {
+      case "aggregate-list":
+      case "aggregate-new":
+      case "aggregate-detail": {
+        // One file per aggregate, regardless of how many of its
+        // archetypes appear — the legacy `buildPageObjectModule`
+        // covers ListPage / NewPage / DetailPage classes in one go.
+        if (seenAggregates.has(origin.aggregateName)) break;
+        seenAggregates.add(origin.aggregateName);
+        const agg = ctx.aggregatesByName.get(origin.aggregateName);
+        const ctxIR = ctx.contextsByName.get(origin.contextName);
+        if (!agg || !ctxIR) break;
+        out.set(
+          `e2e/pages/${camel(agg.name)}.ts`,
+          buildPageObjectModule(agg, ctxIR),
+        );
+        break;
+      }
+      case "workflow-form": {
+        if (seenWorkflows.has(origin.workflowName)) break;
+        seenWorkflows.add(origin.workflowName);
+        const ctxIR = ctx.contextsByName.get(origin.contextName);
+        const wf = ctxIR?.workflows.find((w) => w.name === origin.workflowName);
+        if (!ctxIR || !wf) break;
+        out.set(
+          `e2e/pages/workflows/${snake(wf.name)}.ts`,
+          buildWorkflowPageObject(wf, ctxIR),
+        );
+        break;
+      }
+      case "view-list": {
+        if (seenViews.has(origin.viewName)) break;
+        seenViews.add(origin.viewName);
+        const ctxIR = ctx.contextsByName.get(origin.contextName);
+        const view = ctxIR?.views.find((v) => v.name === origin.viewName);
+        if (!ctxIR || !view) break;
+        out.set(
+          `e2e/pages/views/${snake(view.name)}.ts`,
+          buildViewPageObject(view, ctxIR),
+        );
+        break;
+      }
+      // Index pages and Home don't produce page objects (no
+      // testable form / table; the index pages are tested via
+      // their child links, the home page via its summary cards).
+      case "workflows-index":
+      case "views-index":
+      case "home":
+        break;
+    }
+  }
+  return out;
+}
