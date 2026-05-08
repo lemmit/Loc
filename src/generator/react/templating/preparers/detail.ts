@@ -27,11 +27,7 @@ import {
   needsController,
   unwrapOpt,
 } from "../../form-helpers.js";
-import {
-  iconForOp,
-  renderOperationModalFn,
-  stringIdHeuristic,
-} from "../../pages-builder.js";
+import { iconForOp, stringIdHeuristic } from "../../pages-builder.js";
 import type {
   CellVM,
   DetailPageVM,
@@ -136,11 +132,13 @@ export function prepareDetailPageVM(
   );
   const needsCtrl = needsController(opFields, ctx);
 
-  // Operation modal functions — pre-rendered via the legacy helper
-  // for now.  Phase 1.4 swaps in template-driven emission.
-  const operationsModalsTsx = ops.map((op) =>
-    renderOperationModalFn(slug, agg, op, ctx, aggregatesByName),
-  );
+  // Operation modal functions are rendered by the renderer (which
+  // calls renderOperationModal once per op via the pack's
+  // operation-modal template).  Phase 1.4 ports the modal forms
+  // out of the legacy renderOperationModalFn.  Preparer stops
+  // pre-rendering — keeping a thin contract: VMs carry data, the
+  // render orchestrator owns the per-pack composition.
+  const operationsModalsTsx: string[] = [];
 
   // Sanity helper: componentsForFields drives the Mantine import
   // line in the legacy builder.  In template-pack rendering the

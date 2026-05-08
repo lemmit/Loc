@@ -1,0 +1,7 @@
+<Controller
+          control={control}
+          name="{{path}}"
+          render={({ field, fieldState }) => (
+            <Select label="{{label}}" data-testid="{{testId}}" data={ {{{enumValuesJson}}} } allowDeselect={false} value={field.value as string} onChange={(v) => field.onChange(v)} error={fieldState.error?.message} />
+          )}
+        />

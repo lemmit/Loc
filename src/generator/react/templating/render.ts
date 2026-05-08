@@ -16,6 +16,7 @@
 import type {
   AggregateIR,
   BoundedContextIR,
+  OperationIR,
   ThemeIR,
   ViewIR,
   WorkflowIR,
@@ -23,10 +24,18 @@ import type {
 import type { LoadedPack } from "./loader.js";
 import { prepareAppShellVM } from "./preparers/app-shell.js";
 import { prepareDetailPageVM } from "./preparers/detail.js";
+import { prepareFormFieldVM } from "./preparers/form-fields.js";
 import { prepareHomeVM } from "./preparers/home.js";
 import { prepareListPageVM } from "./preparers/list.js";
+import { prepareNewPageVM } from "./preparers/new.js";
+import { prepareOperationModalVM } from "./preparers/operation-modal.js";
 import { prepareThemeVM } from "./preparers/theme.js";
-import type { CellVM, ListPageVM, PartTableVM } from "./view-models.js";
+import type {
+  CellVM,
+  FormFieldVM,
+  ListPageVM,
+  PartTableVM,
+} from "./view-models.js";
 
 /** A column slot enriched with its already-rendered cell HTML.  Page
  *  templates iterate `columns` and emit `{{{cellHtml}}}` for each. */
@@ -91,9 +100,9 @@ export function renderHome(
 }
 
 /** Render the aggregate detail page through the loaded pack.
- *  Field rows, part-table cells, and operation buttons all
- *  pre-render in TS so the page template stays flat (no
- *  `{{> partial-name (lookup ...) ...}}` indirection). */
+ *  Field rows, part-table cells, operation buttons, and the
+ *  per-operation modal forms all pre-render in TS so the page
+ *  template stays flat (no partial-pyramids). */
 export function renderDetailPage(
   agg: AggregateIR,
   ctx: BoundedContextIR,
@@ -113,11 +122,19 @@ export function renderDetailPage(
     ...btn,
     buttonHtml: pack.render("op-button", btn),
   }));
+  // Operation modals — render each public operation's modal-form
+  // pair through the pack and join into the operationsModalsTsx
+  // slot the page template emits at module scope.
+  const publicOps = agg.operations.filter((o) => o.visibility === "public");
+  const operationsModalsTsx = publicOps.map((op) =>
+    renderOperationModal(agg, op, ctx, aggregatesByName, pack),
+  );
   return pack.render("page-detail", {
     ...vm,
     fieldRows,
     parts,
     opButtons,
+    operationsModalsTsx,
   });
 }
 
@@ -127,6 +144,46 @@ function renderPartTable(part: PartTableVM, pack: LoadedPack): string {
     cellHtml: pack.render(cell.template, cell),
   }));
   return pack.render("part-table", { ...part, cells });
+}
+
+/** Render a single form field through the loaded pack.  Recursive
+ *  for value-object Fieldsets — children are pre-rendered via the
+ *  same path and joined into `innerHtml` before the parent template
+ *  fires.  Mirrors the legacy formInput's structural recursion. */
+export function renderFormField(vm: FormFieldVM, pack: LoadedPack): string {
+  if (vm.children && vm.children.length > 0) {
+    const innerHtml = vm.children
+      .map((child) => renderFormField(child, pack))
+      .join("\n          ");
+    return pack.render(vm.template, { ...vm, innerHtml });
+  }
+  return pack.render(vm.template, vm);
+}
+
+/** Render the aggregate `new` (create) page through the loaded pack. */
+export function renderNewPage(
+  agg: AggregateIR,
+  ctx: BoundedContextIR,
+  aggregatesByName: Map<string, AggregateIR>,
+  pack: LoadedPack,
+): string {
+  const vm = prepareNewPageVM(agg, ctx, aggregatesByName);
+  const fieldHtmls = vm.fields.map((f) => renderFormField(f, pack));
+  return pack.render("page-new", { ...vm, fieldHtmls });
+}
+
+/** Render an operation's modal-form pair — used by the detail-page
+ *  renderer to populate the `operationsModalsTsx` slot. */
+export function renderOperationModal(
+  agg: AggregateIR,
+  op: OperationIR,
+  ctx: BoundedContextIR,
+  aggregatesByName: Map<string, AggregateIR>,
+  pack: LoadedPack,
+): string {
+  const vm = prepareOperationModalVM(agg, op, ctx, aggregatesByName);
+  const fieldHtmls = vm.fields.map((f) => renderFormField(f, pack));
+  return pack.render("operation-modal", { ...vm, fieldHtmls });
 }
 
 function enrichColumns(vm: ListPageVM, pack: LoadedPack): RenderedColumn[] {

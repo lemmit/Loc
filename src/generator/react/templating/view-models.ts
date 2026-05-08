@@ -153,6 +153,104 @@ export interface HomeVM {
   firstAggregateSlug?: string;
 }
 
+/** A single form input.  Picked per field type by the preparer:
+ *  string → field-input-string, int/long → field-input-int, etc.
+ *  Value-objects compose recursively: the preparer returns the
+ *  Fieldset VM with `children: FormFieldVM[]`, the renderer walks
+ *  them in TS, pre-renders each child, then joins the HTML into
+ *  `innerHtml` before rendering the parent template.
+ *
+ *  Fields whose template doesn't need a particular optional
+ *  field leave it undefined; templates index-only into the keys
+ *  they care about. */
+export interface FormFieldVM {
+  /** Logical template name. */
+  template: string;
+  /** RHF dotted path (e.g. "customerId", "price.amount"). */
+  path: string;
+  /** Humanised label, derived from the leaf path segment so nested
+   *  value-object fields render as "Amount" not "price.amount". */
+  label: string;
+  /** Stable testid for Playwright drivers. */
+  testId: string;
+  /** RHF errors expression — `errors.customerId?.message` or
+   *  `errors.price?.amount?.message` (dotted path → optional-chained
+   *  access).  Templates splice via `error={{expr errorExpr}}`. */
+  errorExpr: string;
+  /** Local variable name for `useAllX().data` in id-select fields. */
+  hookVar?: string;
+  /** Target aggregate's display field name (becomes the option label). */
+  displayField?: string;
+  /** Pre-quoted JSON literal for the `placeholder` attribute on the
+   *  fallback id-text field (when target / display is missing). */
+  placeholderJson?: string;
+  /** Pre-quoted JSON array literal for the enum-select `data` prop. */
+  enumValuesJson?: string;
+  /** Recursive children for value-object Fieldsets.  Renderer walks
+   *  these, pre-renders each, joins into `innerHtml`. */
+  children?: FormFieldVM[];
+}
+
+/** Top-level VM for an aggregate's `new` page. */
+export interface NewPageVM {
+  aggregateName: string;
+  aggregateNameCamel: string;
+  slug: string;
+  humanAgg: string;
+  humanAggLower: string;
+  humanPlural: string;
+  /** Symbol names for the `@mantine/core` import line.  The Mantine
+   *  template splices via `{{join mantineImports ", "}}`; shadcn
+   *  pack ignores it (its own template has fixed imports). */
+  mantineImports: string[];
+  /** Pre-formatted import lines for cross-aggregate `useAllX()`
+   *  hooks the form's id-selects reference. */
+  idHookImportLines: string[];
+  /** Pre-formatted const declarations calling those hooks inside
+   *  the page function body. */
+  idHookCalls: string[];
+  /** "useForm" or "useForm, Controller" for the RHF import. */
+  useFormImports: string;
+  /** Destructured argument list for the useForm() return — either
+   *  with `control` (when any field needs Controller) or without. */
+  destructuredHookFields: string;
+  /** initialValuesTs() result — TS object literal for RHF defaults. */
+  defaultValuesTs: string;
+  /** One FormFieldVM per non-optional source field (preparer filters
+   *  optional fields out of the create form, matching legacy
+   *  buildNewPage behaviour).  Renderer pre-renders each into HTML
+   *  and slots them via {{{this}}} loops. */
+  fields: FormFieldVM[];
+}
+
+/** Top-level VM for one operation's modal-form pair (the
+ *  `function openXModal` + `function XForm` block emitted at
+ *  module scope after a detail page's default export).  Phase 1.4
+ *  ports this so the modal forms render through pack templates,
+ *  reusing the same field-input-* set as page-new. */
+export interface OperationModalVM {
+  aggregateName: string;
+  slug: string;
+  /** Raw camelCase op name. */
+  opName: string;
+  /** PascalCase variant for type / function identifiers. */
+  opPascal: string;
+  /** Humanised label for modal title + submit-button text. */
+  humanOp: string;
+  /** Whether this op has any parameters.  When false, the template
+   *  emits a "This operation has no parameters." placeholder. */
+  hasParams: boolean;
+  /** Pre-formatted const declarations for `useAllX()` hooks any
+   *  Id<X> param's select references. */
+  idHookCalls: string[];
+  /** Destructured argument list for useForm(). */
+  destructured: string;
+  /** initialValuesTs() result for the op's params. */
+  defaultValuesTs: string;
+  /** One FormFieldVM per param. */
+  fields: FormFieldVM[];
+}
+
 /** A single field-row inside a detail page's main info card.  Each
  *  row picks a `field-row-*` template per-pack (e.g. `field-row-id`,
  *  `field-row-datetime`, `field-row-valueobject`) and is rendered
@@ -259,11 +357,10 @@ export interface DetailPageVM {
   /** Whether any operation form needs RHF's Controller (for
    *  Select / Switch / NumberInput) or just register (TextInput). */
   needsController: boolean;
-  /** Per-op modal-form function blocks, pre-rendered as TSX strings.
-   *  Phase 1.3 keeps the legacy formInput-based emission via the
-   *  shared helper; Phase 1.4 ports these to template-driven
-   *  rendering.  Templates emit them verbatim at module scope after
-   *  the default export. */
+  /** Per-op modal-form function blocks, pre-rendered as TSX strings
+   *  by the renderer (which calls renderOperationModal once per op).
+   *  Templates emit them verbatim at module scope after the default
+   *  export. */
   operationsModalsTsx: string[];
   /** Per-op `useXOrder(id ?? "")` mutation-hook lines, formatted as
    *  TS const declarations.  Templates emit them inside the page

@@ -1,0 +1,7 @@
+<Controller
+          control={control}
+          name="{{path}}"
+          render={({ field, fieldState }) => (
+            <Switch label="{{label}}" data-testid="{{testId}}" checked={!!field.value} onChange={(e) => field.onChange(e.currentTarget.checked)} error={fieldState.error?.message} />
+          )}
+        />
