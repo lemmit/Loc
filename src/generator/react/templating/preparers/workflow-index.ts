@@ -23,14 +23,14 @@ export function prepareWorkflowsIndexVM(
   return {
     cards: all.map((wf) => {
       const slug = snake(wf.name);
-      const paramLines = wf.params.map(
-        (p) =>
-          `          <Text size="sm" c="dimmed" data-testid="workflow-${slug}-param-${p.name}"><strong>${humanize(p.name)}</strong>: {${JSON.stringify(typeLabel(p.type))}}</Text>`,
-      );
       return {
         slug,
         humanWorkflow: humanize(wf.name),
-        paramLines,
+        params: wf.params.map((p) => ({
+          name: p.name,
+          humanName: humanize(p.name),
+          typeLabelJson: JSON.stringify(typeLabel(p.type)),
+        })),
         hasParams: wf.params.length > 0,
       };
     }),

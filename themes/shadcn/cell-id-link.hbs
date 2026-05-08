@@ -1,1 +1,1 @@
-<td data-testid={{expr testIdExpr}}>{ {{{valueExpr}}} ? <Link to={{expr toExpr}} onClick={(e) => e.stopPropagation()} className="text-primary underline-offset-4 hover:underline font-mono text-sm">{String({{{valueExpr}}}).slice(0, 8) + "…"}</Link> : <span className="text-muted-foreground">—</span>}</td>
+<TableCell data-testid={{expr testIdExpr}}>{ {{{valueExpr}}} ? <Link to={{expr toExpr}} onClick={(e) => e.stopPropagation()} className="text-primary hover:underline"><IdValue id={{expr valueExpr}} /></Link> : <EmptyValue />}</TableCell>

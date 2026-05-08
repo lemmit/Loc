@@ -187,20 +187,17 @@ function fieldRowVM(
   if (t.kind === "valueobject") {
     const vo = ctx.valueObjects.find((v) => v.name === t.name);
     if (vo) {
-      // Pre-render the inner per-VO-field text rows in TS so the
-      // template stays flat.  Each line shows "<Label>: <value>".
-      const innerLines = vo.fields
-        .map(
-          (vf) =>
-            `<Text size="sm"><Text component="span" c="dimmed">${humanize(vf.name)}: </Text><span data-testid="${testId}-${vf.name}">{String(${valueExpr}.${vf.name})}</span></Text>`,
-        )
-        .join("\n          ");
+      const voFields = vo.fields.map((vf) => ({
+        humanLabel: humanize(vf.name),
+        testId: `${testId}-${vf.name}`,
+        valueExpr: `${valueExpr}.${vf.name}`,
+      }));
       return {
         template: "field-row-valueobject",
         label,
         testId,
         valueExpr,
-        innerHtml: innerLines,
+        voFields,
       };
     }
   }

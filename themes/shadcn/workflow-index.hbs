@@ -1,34 +1,38 @@
 // Auto-generated.
 import { Link } from "react-router-dom";
-import { Anchor, Breadcrumbs, Stack, Title, Text, Card, Group, Button, SimpleGrid } from "@mantine/core";
-import { IconBolt } from "@tabler/icons-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Zap } from "lucide-react";
 
 export default function WorkflowsIndex() {
   return (
-    <Stack data-testid="workflows-index" gap="md">
-      <Breadcrumbs data-testid="workflows-index-breadcrumbs">
-        <Anchor component={Link} to="/">Home</Anchor>
-        <Text>Workflows</Text>
-      </Breadcrumbs>
-      <Stack gap={2}>
-        <Title order={2}>Workflows</Title>
-        <Text c="dimmed">System-level orchestrations.  Pick one to run.</Text>
-      </Stack>
-      <SimpleGrid cols=\{{ base: 1, sm: 2 }} spacing="md">
-{{#each cards}}      <Card data-testid="workflow-card-{{slug}}">
-        <Stack gap="xs">
-          <Group justify="space-between" align="center">
-            <Group gap="xs" align="center">
-              <IconBolt size={18} stroke={2} color="var(--mantine-color-brand-6)" />
-              <Title order={4}>{{humanWorkflow}}</Title>
-            </Group>
-            <Button component={Link} to="/workflows/{{slug}}" data-testid="workflow-{{slug}}-run">Run →</Button>
-          </Group>
-{{#if hasParams}}{{#each paramLines}}{{{this}}}
-{{/each}}{{else}}          <Text size="sm" c="dimmed">No parameters.</Text>
-{{/if}}        </Stack>
-      </Card>
-{{/each}}      </SimpleGrid>
-    </Stack>
+    <div data-testid="workflows-index" className="flex flex-col gap-6">
+      <nav data-testid="workflows-index-breadcrumbs" className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Link to="/" className="hover:text-foreground">Home</Link>
+        <span>/</span>
+        <span>Workflows</span>
+      </nav>
+      <div className="flex flex-col gap-1">
+        <h2 className="text-2xl font-semibold tracking-tight">Workflows</h2>
+        <p className="text-muted-foreground">System-level orchestrations.  Pick one to run.</p>
+      </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+{{#each cards}}        <Card data-testid="workflow-card-{{slug}}">
+          <CardContent className="flex flex-col gap-2 p-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Zap className="h-4 w-4 text-primary" />
+                <h4 className="text-base font-semibold">{{humanWorkflow}}</h4>
+              </div>
+              <Button asChild variant="default" size="sm">
+                <Link to="/workflows/{{slug}}" data-testid="workflow-{{slug}}-run">Run →</Link>
+              </Button>
+            </div>
+{{#if hasParams}}{{#each params}}            <p className="text-sm text-muted-foreground" data-testid="workflow-{{../slug}}-param-{{name}}"><strong className="font-semibold text-foreground">{{humanName}}</strong>: {{expr typeLabelJson}}</p>
+{{/each}}{{else}}            <p className="text-sm text-muted-foreground">No parameters.</p>
+{{/if}}          </CardContent>
+        </Card>
+{{/each}}      </div>
+    </div>
   );
 }

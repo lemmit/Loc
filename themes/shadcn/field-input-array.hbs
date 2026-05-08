@@ -1,1 +1,12 @@
-<TextInput label="{{label}}" {...register("{{path}}")} data-testid="{{testId}}" placeholder="(arrays not yet supported in forms)" disabled error={{expr errorExpr}} />
+<FormField
+          control={form.control}
+          name="{{path}}"
+          render={({ field: _field }) => (
+            <FormItem>
+              <FormLabel>{{label}}</FormLabel>
+              <FormControl>
+                <Input data-testid="{{testId}}" placeholder="(arrays not yet supported in forms)" disabled />
+              </FormControl>
+            </FormItem>
+          )}
+        />

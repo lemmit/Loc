@@ -1,7 +1,24 @@
-<Controller
-          control={control}
+<FormField
+          control={form.control}
           name="{{path}}"
-          render={({ field, fieldState }) => (
-            <Select label="{{label}}" data-testid="{{testId}}" placeholder="Select…" searchable data={({{{hookVar}}}.data ?? []).map((__o) => ({ value: __o.id, label: __o.{{displayField}} }))} renderOption={({ option }) => <div data-testid={`{{testId}}-option-${option.value}`}>{option.label}</div>} allowDeselect={false} value={field.value as string} onChange={(v) => field.onChange(v ?? "")} error={fieldState.error?.message} />
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{{label}}</FormLabel>
+              <Select onValueChange={field.onChange} value={(field.value as string) ?? ""}>
+                <FormControl>
+                  <SelectTrigger data-testid="{{testId}}">
+                    <SelectValue placeholder="Select…" />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  {({{{hookVar}}}.data ?? []).map((__o) => (
+                    <SelectItem key={__o.id} value={__o.id} data-testid={`{{testId}}-option-${__o.id}`}>
+                      {__o.{{displayField}} }
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <FormMessage />
+            </FormItem>
           )}
         />

@@ -273,13 +273,25 @@ export interface WorkflowFormVM {
   fields: FormFieldVM[];
 }
 
+/** A single workflow parameter for the workflows index card. */
+export interface WorkflowCardParamVM {
+  /** Raw param name (camelCase) — used in testids. */
+  name: string;
+  /** Humanised label ("Customer Id"). */
+  humanName: string;
+  /** JSON-quoted type-label string ready to splice as a JS string
+   *  literal — e.g. `"string"` or `"Id<Product>"`.  Quoted so JSX
+   *  doesn't try to parse `<Product>` as an opening tag. */
+  typeLabelJson: string;
+}
+
 /** A single workflow listed on the workflows index page. */
 export interface WorkflowCardVM {
   slug: string;
   humanWorkflow: string;
-  /** Pre-formatted parameter signature lines.  Each line is a
-   *  rendered <Text> showing "<name>: <typeLabel>". */
-  paramLines: string[];
+  /** Structured per-param data.  Each pack's template iterates and
+   *  renders in its own idiom. */
+  params: WorkflowCardParamVM[];
   /** True when the workflow declares zero parameters — the
    *  template emits a "No parameters." note instead. */
   hasParams: boolean;
@@ -338,10 +350,12 @@ export interface FieldRowVM {
   toExpr?: string;
   /** Decimal precision for number rows. */
   decimals?: number;
-  /** For value-object rows: pre-rendered HTML for the nested
-   *  display, computed by the preparer in TS so the template
-   *  stays flat. */
-  innerHtml?: string;
+  /** For value-object field-row rendering: per-VO-field display
+   *  data ({ humanLabel, testId, valueExpr }) the template
+   *  iterates and renders in its pack's idiom (Mantine <Text> /
+   *  shadcn Tailwind div).  Replaces the older `innerHtml` slot
+   *  which baked Mantine JSX into the preparer. */
+  voFields?: { humanLabel: string; testId: string; valueExpr: string }[];
 }
 
 /** A nested-collection part-table inside a detail page.  E.g.

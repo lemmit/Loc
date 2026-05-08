@@ -214,7 +214,12 @@ describe("react generator template-pack output (snapshots)", () => {
     expect(mantine).toContain("<Table.Th>");
     expect(shadcn).not.toContain("@mantine/core");
     expect(shadcn).toContain('className="');
-    expect(shadcn).toContain("<table");
+    // shadcn pack uses the shadcn UI library's <Table> primitive
+    // (PascalCase, capital T) rather than raw <table>, so check
+    // the canonical import + element name.  Phase 2.2's shadcn
+    // pack ships components/ui/table.tsx with these exports.
+    expect(shadcn).toContain("@/components/ui/table");
+    expect(shadcn).toContain("<TableHead>");
   });
 });
 

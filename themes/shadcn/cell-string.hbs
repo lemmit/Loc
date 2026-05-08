@@ -1,1 +1,1 @@
-<td data-testid={{expr testIdExpr}}>{ {{{valueExpr}}} === null || {{{valueExpr}}} === undefined || {{{valueExpr}}} === "" ? <span className="text-muted-foreground">—</span> : String({{{valueExpr}}})}</td>
+<TableCell data-testid={{expr testIdExpr}}>{ {{{valueExpr}}} === null || {{{valueExpr}}} === undefined || {{{valueExpr}}} === "" ? <EmptyValue /> : String({{{valueExpr}}})}</TableCell>

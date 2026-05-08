@@ -120,6 +120,35 @@ function registerHelpersOnce(): void {
     const s = typeof sep === "string" ? sep : ", ";
     return new Handlebars.SafeString(arr.join(s));
   });
+  // Tabler → lucide icon-name remap.  iconForOp() in pages-builder
+  // returns tabler names (IconPlus, IconCheck, …) by historical
+  // accident — shadcn pack uses lucide-react which exports the
+  // same conceptual icons under shorter names (Plus, Check, …).
+  // Templates that target lucide use `{{lucide icon}}` to project
+  // the tabler name onto its lucide twin.  Anything not in the
+  // map falls through unchanged so unknown verbs still produce
+  // valid JSX (lucide will throw at import-resolve time, which is
+  // the right error to surface).
+  const tablerToLucide: Record<string, string> = {
+    IconPlus: "Plus",
+    IconTrash: "Trash2",
+    IconCheck: "Check",
+    IconX: "X",
+    IconTruckDelivery: "Truck",
+    IconCreditCard: "CreditCard",
+    IconPlayerPlay: "Play",
+    IconPlayerStop: "Square",
+    IconPencil: "Pencil",
+    IconLink: "Link",
+    IconAlertCircle: "AlertCircle",
+    IconAlertTriangle: "AlertTriangle",
+    IconBolt: "Zap",
+    IconLayoutList: "LayoutList",
+  };
+  Handlebars.registerHelper("lucide", (s: unknown) => {
+    const k = String(s);
+    return tablerToLucide[k] ?? k;
+  });
 }
 
 /** Resolve a pack identifier ("mantine" / "shadcn" / "./design/")

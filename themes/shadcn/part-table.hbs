@@ -1,26 +1,26 @@
 {{#if columnHeaders.length}}<Card>
-        <Stack gap="xs">
-          <Group justify="space-between" align="center">
-            <Title order={4}>{{humanName}}</Title>
-            <Text size="sm" c="dimmed">{ {{{arrayExpr}}}.length === 1 ? "1 item" : {{{arrayExpr}}}.length + " items"}</Text>
-          </Group>
-          <Table.ScrollContainer minWidth={400}>
-            <Table striped highlightOnHover data-testid="{{testId}}">
-              <Table.Thead>
-                <Table.Tr>
-                  {{#each columnHeaders}}<Table.Th>{{this}}</Table.Th>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base">{{humanName}}</CardTitle>
+            <span className="text-sm text-muted-foreground">{ {{{arrayExpr}}}.length === 1 ? "1 item" : {{{arrayExpr}}}.length + " items"}</span>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <Table data-testid="{{testId}}">
+            <TableHeader>
+              <TableRow>
+                {{#each columnHeaders}}<TableHead>{{this}}</TableHead>
+                {{/each}}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              { {{{arrayExpr}}}.map((row) => (
+                <TableRow key={row.id} data-testid={`{{testId}}-row-${row.id}`}>
+                  {{#each cells}}{{{cellHtml}}}
                   {{/each}}
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                { {{{arrayExpr}}}.map((row) => (
-                  <Table.Tr key={row.id} data-testid={`{{testId}}-row-${row.id}`}>
-                    {{#each cells}}{{{cellHtml}}}
-                    {{/each}}
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
-          </Table.ScrollContainer>
-        </Stack>
-      </Card>{{else}}<Card><Title order={4}>{{humanName}}</Title><Text size="sm" c="dimmed" mt="xs">{JSON.stringify({{{arrayExpr}}})}</Text></Card>{{/if}}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>{{else}}<Card><CardHeader><CardTitle className="text-base">{{humanName}}</CardTitle></CardHeader><CardContent><p className="text-sm text-muted-foreground">{JSON.stringify({{{arrayExpr}}})}</p></CardContent></Card>{{/if}}
