@@ -73,7 +73,7 @@ export function buildWorkflowsApiModule(
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import { z } from "zod";`);
   lines.push(`import { useMutation } from "@tanstack/react-query";`);
-  lines.push(`import { api } from "./client.js";`);
+  lines.push(`import { api } from "./client";`);
   // Per-workflow Zod schemas may reference enum / VO schemas declared
   // in per-aggregate api modules.  Workflows are cross-context, so we
   // can't pre-import every schema; we lean on `zodFor` to inline
@@ -83,7 +83,7 @@ export function buildWorkflowsApiModule(
   const voDeps = collectValueObjectDeps(workflows);
   for (const dep of [...enumDeps, ...voDeps]) {
     lines.push(
-      `import { ${dep.schemaName} } from "./${camel(dep.fromAggregate)}.js";`,
+      `import { ${dep.schemaName} } from "./${camel(dep.fromAggregate)}";`,
     );
   }
   lines.push("");
@@ -249,7 +249,7 @@ ${paramsBlock}
 import { Link } from "react-router-dom";
 import { Stack, Title, Text, Card, Group, Button } from "@mantine/core";
 
-export default function WorkflowsIndex(): JSX.Element {
+export default function WorkflowsIndex() {
   return (
     <Stack data-testid="workflows-index">
       <Title order={2}>Workflows</Title>
@@ -301,7 +301,7 @@ export function buildWorkflowFormPage(
   const idHookImports = idTargets
     .map(
       (t) =>
-        `import { useAll${pluralCap(t.name)} } from "../../api/${camel(t.name)}.js";`,
+        `import { useAll${pluralCap(t.name)} } from "../../api/${camel(t.name)}";`,
     )
     .join("\n");
   const idHookCalls = idTargets
@@ -331,11 +331,11 @@ import { ${mantineImports} } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { ${useFormImports} } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ${cap(wf.name)}Request, use${cap(wf.name)}Workflow } from "../../api/workflows.js";${
+import { ${cap(wf.name)}Request, use${cap(wf.name)}Workflow } from "../../api/workflows";${
     idHookImports ? "\n" + idHookImports : ""
   }
 
-export default function ${componentName}(): JSX.Element {
+export default function ${componentName}() {
   const navigate = useNavigate();
   const run = use${cap(wf.name)}Workflow();
 ${idHookCalls ? idHookCalls + "\n" : ""}  const ${destructured} = useForm<${cap(wf.name)}Request>({
@@ -402,7 +402,7 @@ export function buildWorkflowPageObject(
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import type { Page } from "@playwright/test";`);
   lines.push(
-    `import type { ${requestType} } from "../../../src/api/workflows.js";`,
+    `import type { ${requestType} } from "../../../src/api/workflows";`,
   );
   lines.push("");
   lines.push(`export class ${className} {`);

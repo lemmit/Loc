@@ -44,9 +44,9 @@ export function buildListPage(agg: AggregateIR): string {
   return `// Auto-generated.
 import { Link, useNavigate } from "react-router-dom";
 import { Stack, Title, Group, Button, Table, Loader, Alert, Anchor, Badge, Center, Text } from "@mantine/core";
-import { useAll${plural(agg.name)} } from "../../api/${camel(agg.name)}.js";
+import { useAll${plural(agg.name)} } from "../../api/${camel(agg.name)}";
 
-export default function ${cap}List(): JSX.Element {
+export default function ${cap}List() {
   const navigate = useNavigate();
   const q = useAll${plural(agg.name)}();
   return (
@@ -106,7 +106,7 @@ export function buildNewPage(
   // `useAll<X>()` query at the top of the form component.
   const idTargets = idTargetsInFields(fields, ctx, aggregatesByName);
   const idHookImports = idTargets
-    .map((t) => `import { useAll${plural(t.name)} } from "../../api/${camel(t.name)}.js";`)
+    .map((t) => `import { useAll${plural(t.name)} } from "../../api/${camel(t.name)}";`)
     .join("\n");
   const idHookCalls = idTargets
     .map((t) => `  const ${idTargetHookVar(t)} = useAll${plural(t.name)}();`)
@@ -126,9 +126,9 @@ import { ${mantineImports} } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { ${useFormImports} } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Create${agg.name}Request, useCreate${agg.name} } from "../../api/${camel(agg.name)}.js";${idHookImports ? "\n" + idHookImports : ""}
+import { Create${agg.name}Request, useCreate${agg.name} } from "../../api/${camel(agg.name)}";${idHookImports ? "\n" + idHookImports : ""}
 
-export default function ${cap}New(): JSX.Element {
+export default function ${cap}New() {
   const navigate = useNavigate();
   const create = useCreate${agg.name}();
 ${idHookCalls ? idHookCalls + "\n" : ""}  const ${destructuredHookFields} = useForm<Create${agg.name}Request>({
@@ -236,7 +236,7 @@ export function buildDetailPage(
     aggregatesByName,
   );
   const detailIdHookImports = detailIdTargets
-    .map((t) => `import { useAll${plural(t.name)} } from "../../api/${camel(t.name)}.js";`)
+    .map((t) => `import { useAll${plural(t.name)} } from "../../api/${camel(t.name)}";`)
     .join("\n");
 
   return `// Auto-generated.
@@ -246,9 +246,9 @@ import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import { ${detailUseFormImports} } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { use${agg.name}ById${ops.length > 0 ? `, ${opHookImports}` : ""}${reqImports.length > 0 ? `, ${reqImports}` : ""} } from "../../api/${camel(agg.name)}.js";${detailIdHookImports ? "\n" + detailIdHookImports : ""}
+import { use${agg.name}ById${ops.length > 0 ? `, ${opHookImports}` : ""}${reqImports.length > 0 ? `, ${reqImports}` : ""} } from "../../api/${camel(agg.name)}";${detailIdHookImports ? "\n" + detailIdHookImports : ""}
 
-export default function ${cap}Detail(): JSX.Element {
+export default function ${cap}Detail() {
   const { id } = useParams<{ id: string }>();
   const q = use${agg.name}ById(id);
 ${ops.map((op) => `  const ${camel(op.name)} = use${upper(op.name)}${agg.name}(id ?? "");`).join("\n")}
@@ -409,7 +409,7 @@ function renderOperationModalFn(
   });
 }
 
-function ${cap}Form({ mut, onClose }: { mut: ReturnType<typeof use${cap}${agg.name}>; onClose: () => void }): JSX.Element {
+function ${cap}Form({ mut, onClose }: { mut: ReturnType<typeof use${cap}${agg.name}>; onClose: () => void }) {
 ${opIdHookCalls ? opIdHookCalls + "\n" : ""}  const ${destructured} = useForm<${cap}Request>({
     resolver: zodResolver(${cap}Request),
     defaultValues: ${initialValuesTs(op.params.map((p) => ({ name: p.name, type: p.type, optional: false })), ctx)},

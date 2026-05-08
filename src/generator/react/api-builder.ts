@@ -41,7 +41,7 @@ export function buildApiModule(
   lines.push(
     `import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";`,
   );
-  lines.push(`import { api } from "./client.js";`);
+  lines.push(`import { api } from "./client";`);
   lines.push("");
 
   // Schemas — enums + value-objects + per-route DTOs.

@@ -38,7 +38,7 @@ export function buildPageObjectModule(
   for (const op of ops) reqTypes.push(`${upper(op.name)}Request`);
   reqTypes.push(`${agg.name}Response`);
   lines.push(
-    `import type { ${reqTypes.join(", ")} } from "../../src/api/${camel(agg.name)}.js";`,
+    `import type { ${reqTypes.join(", ")} } from "../../src/api/${camel(agg.name)}";`,
   );
   lines.push("");
 

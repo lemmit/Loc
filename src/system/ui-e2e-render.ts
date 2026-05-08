@@ -70,19 +70,19 @@ export function renderUIE2EFile(
   for (const a of aggregates) {
     const cap = upper(a.name);
     lines.push(
-      `import { ${cap}ListPage, ${cap}DetailPage } from "./pages/${camel(a.name)}.js";`,
+      `import { ${cap}ListPage, ${cap}DetailPage } from "./pages/${camel(a.name)}";`,
     );
   }
   for (const wf of workflows) {
     const cap = upper(wf.name);
     lines.push(
-      `import { ${cap}WorkflowPage } from "./pages/workflows/${snake(wf.name)}.js";`,
+      `import { ${cap}WorkflowPage } from "./pages/workflows/${snake(wf.name)}";`,
     );
   }
   for (const v of views) {
     const cap = upper(v.name);
     lines.push(
-      `import { ${cap}ViewPage } from "./pages/views/${snake(v.name)}.js";`,
+      `import { ${cap}ViewPage } from "./pages/views/${snake(v.name)}";`,
     );
   }
   lines.push("");

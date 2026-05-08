@@ -60,7 +60,7 @@ export function buildViewsApiModule(contexts: BoundedContextIR[]): string {
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import { z } from "zod";`);
   lines.push(`import { useQuery } from "@tanstack/react-query";`);
-  lines.push(`import { api } from "./client.js";`);
+  lines.push(`import { api } from "./client";`);
   // Shorthand views reference the source aggregate's response
   // schema from the per-aggregate api module; collect those imports
   // first.
@@ -70,7 +70,7 @@ export function buildViewsApiModule(contexts: BoundedContextIR[]): string {
   }
   for (const aggName of [...shorthandSources].sort()) {
     lines.push(
-      `import { ${aggName}Response, ${aggName}ListResponse } from "./${camel(aggName)}.js";`,
+      `import { ${aggName}Response, ${aggName}ListResponse } from "./${camel(aggName)}";`,
     );
   }
   // Full-form views need enum / VO schemas referenced in their
@@ -79,7 +79,7 @@ export function buildViewsApiModule(contexts: BoundedContextIR[]): string {
   const voDeps = collectVoDeps(views);
   for (const dep of [...enumDeps, ...voDeps]) {
     lines.push(
-      `import { ${dep.schemaName} } from "./${camel(dep.fromAggregate)}.js";`,
+      `import { ${dep.schemaName} } from "./${camel(dep.fromAggregate)}";`,
     );
   }
   lines.push("");
@@ -242,7 +242,7 @@ ${shapeLine}
 import { Link } from "react-router-dom";
 import { Stack, Title, Text, Card, Group, Button } from "@mantine/core";
 
-export default function ViewsIndex(): JSX.Element {
+export default function ViewsIndex() {
   return (
     <Stack data-testid="views-index">
       <Title order={2}>Views</Title>
@@ -290,9 +290,9 @@ export function buildViewTablePage(
   return `// Auto-generated.
 import { Link } from "react-router-dom";
 import { Stack, Title, Group, Anchor, Table, Loader, Alert, Text } from "@mantine/core";
-import { ${hookName} } from "../../api/views.js";
+import { ${hookName} } from "../../api/views";
 
-export default function ${componentName}(): JSX.Element {
+export default function ${componentName}() {
   const q = ${hookName}();
   return (
     <Stack data-testid="view-${slug}">

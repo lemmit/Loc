@@ -214,10 +214,10 @@ describe("system / module / deployable", () => {
     const ui = files.get("web_app/e2e/Acme.ui.spec.ts")!;
     expect(ui).toMatch(/from "@playwright\/test"/);
     expect(ui).toMatch(
-      /from "\.\/pages\/product\.js"/,
+      /from "\.\/pages\/product"/,
     );
     expect(ui).toMatch(
-      /from "\.\/pages\/order\.js"/,
+      /from "\.\/pages\/order"/,
     );
     // `ui.products.create({...})` lowers via ProductListPage.
     expect(ui).toMatch(/new ProductListPage\(page\)\.goto\(\)/);
