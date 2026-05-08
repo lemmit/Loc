@@ -26,7 +26,10 @@ import {
 // brittle text matching.
 // ---------------------------------------------------------------------------
 
-export function buildListPage(agg: AggregateIR): string {
+export function buildListPage(
+  agg: AggregateIR,
+  aggregatesByName: Map<string, AggregateIR>,
+): string {
   const slug = snake(plural(agg.name));
   const cap = upper(agg.name);
   const humanPlural = humanize(plural(agg.name));
@@ -42,13 +45,14 @@ export function buildListPage(agg: AggregateIR): string {
     `<Table.Td><Anchor component={Link} to={\`/${slug}/\${row.id}\`} data-testid={\`${slug}-row-\${row.id}-link\`}><IdValue id={row.id} /></Anchor></Table.Td>`,
   );
   for (const f of agg.fields) {
-    if (isPrimitiveLike(f.type)) cells.push(displayCellExpr(slug, f));
+    if (isPrimitiveLike(f.type)) cells.push(displayCellExpr(slug, f, aggregatesByName));
   }
   return `// Auto-generated.
 import { Link, useNavigate } from "react-router-dom";
-import { Stack, Title, Group, Button, Table, Loader, Alert, Anchor, Badge, Center, Text, Paper } from "@mantine/core";
+import { Stack, Title, Group, Button, Table, Skeleton, Alert, Anchor, Badge, Center, Text, Paper } from "@mantine/core";
+import { IconPlus } from "@tabler/icons-react";
 import { useAll${plural(agg.name)} } from "../../api/${camel(agg.name)}";
-import { IdValue, DateTimeValue, BoolValue, EmptyValue } from "../../lib/format";
+import { IdValue, DateTimeValue, BoolValue, NumberValue, EmptyValue } from "../../lib/format";
 
 export default function ${cap}List() {
   const navigate = useNavigate();
@@ -61,9 +65,17 @@ export default function ${cap}List() {
           <Title order={2}>${humanPlural}</Title>
           <Text size="sm" c="dimmed">{q.isLoading ? "Loading…" : count === 1 ? "1 record" : count + " records"}</Text>
         </Stack>
-        <Button onClick={() => navigate("/${slug}/new")} data-testid="${slug}-list-create">+ New ${humanSingular.toLowerCase()}</Button>
+        <Button leftSection={<IconPlus size={16} stroke={2} />} onClick={() => navigate("/${slug}/new")} data-testid="${slug}-list-create">New ${humanSingular.toLowerCase()}</Button>
       </Group>
-      {q.isLoading && <Loader />}
+      {q.isLoading && (
+        <Paper p="md">
+          <Stack gap="xs">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Skeleton key={i} height={28} radius="sm" />
+            ))}
+          </Stack>
+        </Paper>
+      )}
       {q.isError && <Alert color="red" variant="light" title="Couldn't load ${humanPlural.toLowerCase()}">{(q.error as Error).message}</Alert>}
       {q.data && q.data.length === 0 && (
         <Paper p="xl" data-testid="${slug}-list-empty">
@@ -207,13 +219,15 @@ export function buildDetailPage(
     .join(", ");
 
   const fieldDisplay = agg.fields
-    .map((f) => fieldDisplayLine(slug, f, ctx))
+    .map((f) => fieldDisplayLine(slug, f, ctx, aggregatesByName))
     .join("\n        ");
 
   const partsBlocks = agg.contains
     .map((c) => {
       const part = agg.parts.find((p) => p.name === c.partName);
-      return part ? renderPartTable(slug, part, c.name, c.collection) : "";
+      return part
+        ? renderPartTable(slug, part, c.name, c.collection, aggregatesByName)
+        : "";
     })
     .filter(Boolean)
     .join("\n        ");
@@ -221,6 +235,17 @@ export function buildDetailPage(
   const opButtons = ops
     .map((op, i) => renderOperationButton(slug, op, i))
     .join("\n          ");
+  const opIcons = [
+    ...new Set(
+      ops
+        .map((op) => iconForOp(op.name))
+        .filter((v): v is string => Boolean(v)),
+    ),
+  ].sort();
+  const tablerImport =
+    opIcons.length > 0
+      ? `\nimport { ${opIcons.join(", ")} } from "@tabler/icons-react";`
+      : "";
 
   // Detail-page components: card / table / breadcrumbs / badge for
   // display + the input set used by every operation modal.
@@ -231,7 +256,7 @@ export function buildDetailPage(
     "Group",
     "Button",
     "Text",
-    "Loader",
+    "Skeleton",
     "Alert",
     "Anchor",
     "Breadcrumbs",
@@ -279,13 +304,23 @@ import { notifications } from "@mantine/notifications";
 import { ${detailUseFormImports} } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { use${agg.name}ById${ops.length > 0 ? `, ${opHookImports}` : ""}${reqImports.length > 0 ? `, ${reqImports}` : ""} } from "../../api/${camel(agg.name)}";${detailIdHookImports ? "\n" + detailIdHookImports : ""}
-import { IdValue, DateTimeValue, BoolValue, EmptyValue, KeyValueRow } from "../../lib/format";
+import { IdValue, DateTimeValue, BoolValue, NumberValue, EmptyValue, KeyValueRow } from "../../lib/format";${tablerImport}
 
 export default function ${cap}Detail() {
   const { id } = useParams<{ id: string }>();
   const q = use${agg.name}ById(id);
 ${ops.map((op) => `  const ${camel(op.name)} = use${upper(op.name)}${agg.name}(id ?? "");`).join("\n")}
-  if (q.isLoading) return <Loader />;
+  if (q.isLoading) return (
+    <Stack data-testid="${slug}-detail-loading" gap="md">
+      <Skeleton height={20} width={240} />
+      <Skeleton height={32} width={320} />
+      <Card><Stack gap="md">
+        <Skeleton height={20} />
+        <Skeleton height={20} />
+        <Skeleton height={20} />
+      </Stack></Card>
+    </Stack>
+  );
   if (q.isError) return <Alert color="red" variant="light" title="Couldn't load ${humanAgg.toLowerCase()}">{(q.error as Error).message}</Alert>;
   if (!q.data) return <Alert color="yellow" variant="light" title="Not found">No ${humanAgg.toLowerCase()} matches that id.</Alert>;
   const data = q.data;
@@ -330,6 +365,7 @@ function fieldDisplayLine(
   slug: string,
   f: FieldIR,
   ctx: BoundedContextIR,
+  aggregatesByName: Map<string, AggregateIR>,
 ): string {
   const t = unwrapOpt(f.type);
   const tid = `${slug}-detail-${f.name}`;
@@ -356,6 +392,10 @@ function fieldDisplayLine(
     return `<KeyValueRow label="${label}"><Badge tt="unset" component="span" variant="light" data-testid="${tid}">{data.${f.name}}</Badge></KeyValueRow>`;
   }
   if (t.kind === "id") {
+    if (aggregatesByName.has(t.targetName)) {
+      const target = snake(plural(t.targetName));
+      return `<KeyValueRow label="${label}"><span data-testid="${tid}">{data.${f.name} ? <Anchor component={Link} to={\`/${target}/\${data.${f.name}}\`}><IdValue id={data.${f.name}} /></Anchor> : <EmptyValue />}</span></KeyValueRow>`;
+    }
     return `<KeyValueRow label="${label}"><span data-testid="${tid}"><IdValue id={data.${f.name}} /></span></KeyValueRow>`;
   }
   if (t.kind === "primitive" && t.name === "datetime") {
@@ -363,6 +403,17 @@ function fieldDisplayLine(
   }
   if (t.kind === "primitive" && t.name === "bool") {
     return `<KeyValueRow label="${label}"><span data-testid="${tid}"><BoolValue value={data.${f.name}} /></span></KeyValueRow>`;
+  }
+  if (t.kind === "primitive" && (t.name === "int" || t.name === "long")) {
+    return `<KeyValueRow label="${label}"><span data-testid="${tid}"><NumberValue value={data.${f.name}} /></span></KeyValueRow>`;
+  }
+  if (t.kind === "primitive" && t.name === "decimal") {
+    return `<KeyValueRow label="${label}"><span data-testid="${tid}"><NumberValue value={data.${f.name}} decimals={2} /></span></KeyValueRow>`;
+  }
+  const heur = stringIdHeuristic(f.name, t, aggregatesByName);
+  if (heur) {
+    const target = snake(plural(heur.targetName));
+    return `<KeyValueRow label="${label}"><span data-testid="${tid}">{data.${f.name} ? <Anchor component={Link} to={\`/${target}/\${data.${f.name}}\`}><IdValue id={data.${f.name}} /></Anchor> : <EmptyValue />}</span></KeyValueRow>`;
   }
   return `<KeyValueRow label="${label}"><span data-testid="${tid}">{data.${f.name} === null || data.${f.name} === undefined || data.${f.name} === "" ? <EmptyValue /> : String(data.${f.name})}</span></KeyValueRow>`;
 }
@@ -372,6 +423,7 @@ function renderPartTable(
   part: EntityPartIR,
   name: string,
   collection: boolean,
+  aggregatesByName: Map<string, AggregateIR>,
 ): string {
   const sectionTitle = humanize(name);
   if (!collection) {
@@ -383,26 +435,42 @@ function renderPartTable(
     .map((c) => `<Table.Th>${humanize(c)}</Table.Th>`)
     .join("\n                ");
   const cellExprs = (c: string): string => {
+    const tdid = `\`${slug}-detail-${name}-row-\${row.id}-${c}\``;
     if (c === "id") {
-      return `<Table.Td data-testid={\`${slug}-detail-${name}-row-\${row.id}-${c}\`}><IdValue id={row.${c}} /></Table.Td>`;
+      return `<Table.Td data-testid={${tdid}}><IdValue id={row.${c}} /></Table.Td>`;
     }
     const fld = partFields.find((f) => f.name === c);
     if (fld) {
       const t = unwrapOpt(fld.type);
       if (t.kind === "id") {
-        return `<Table.Td data-testid={\`${slug}-detail-${name}-row-\${row.id}-${c}\`}><IdValue id={row.${c}} /></Table.Td>`;
+        if (aggregatesByName.has(t.targetName)) {
+          const target = snake(plural(t.targetName));
+          return `<Table.Td data-testid={${tdid}}>{row.${c} ? <Anchor component={Link} to={\`/${target}/\${row.${c}}\`}><IdValue id={row.${c}} /></Anchor> : <EmptyValue />}</Table.Td>`;
+        }
+        return `<Table.Td data-testid={${tdid}}><IdValue id={row.${c}} /></Table.Td>`;
       }
       if (t.kind === "primitive" && t.name === "datetime") {
-        return `<Table.Td data-testid={\`${slug}-detail-${name}-row-\${row.id}-${c}\`}><DateTimeValue iso={row.${c}} /></Table.Td>`;
+        return `<Table.Td data-testid={${tdid}}><DateTimeValue iso={row.${c}} /></Table.Td>`;
       }
       if (t.kind === "primitive" && t.name === "bool") {
-        return `<Table.Td data-testid={\`${slug}-detail-${name}-row-\${row.id}-${c}\`}><BoolValue value={row.${c}} /></Table.Td>`;
+        return `<Table.Td data-testid={${tdid}}><BoolValue value={row.${c}} /></Table.Td>`;
+      }
+      if (t.kind === "primitive" && (t.name === "int" || t.name === "long")) {
+        return `<Table.Td data-testid={${tdid}} style={{ textAlign: "right" }}><NumberValue value={row.${c}} /></Table.Td>`;
+      }
+      if (t.kind === "primitive" && t.name === "decimal") {
+        return `<Table.Td data-testid={${tdid}} style={{ textAlign: "right" }}><NumberValue value={row.${c}} decimals={2} /></Table.Td>`;
       }
       if (t.kind === "enum") {
-        return `<Table.Td data-testid={\`${slug}-detail-${name}-row-\${row.id}-${c}\`}><Badge tt="unset" variant="light">{row.${c}}</Badge></Table.Td>`;
+        return `<Table.Td data-testid={${tdid}}><Badge tt="unset" variant="light">{row.${c}}</Badge></Table.Td>`;
+      }
+      const heur = stringIdHeuristic(c, t, aggregatesByName);
+      if (heur) {
+        const target = snake(plural(heur.targetName));
+        return `<Table.Td data-testid={${tdid}}>{row.${c} ? <Anchor component={Link} to={\`/${target}/\${row.${c}}\`}><IdValue id={row.${c}} /></Anchor> : <EmptyValue />}</Table.Td>`;
       }
     }
-    return `<Table.Td data-testid={\`${slug}-detail-${name}-row-\${row.id}-${c}\`}>{row.${c} === null || row.${c} === undefined || row.${c} === "" ? <EmptyValue /> : String(row.${c})}</Table.Td>`;
+    return `<Table.Td data-testid={${tdid}}>{row.${c} === null || row.${c} === undefined || row.${c} === "" ? <EmptyValue /> : String(row.${c})}</Table.Td>`;
   };
   const partSlug = snake(plural(part.name));
   return `<Card>
@@ -446,7 +514,9 @@ function renderOperationButton(
   // "next step" pops; subsequent ops use light variant so the
   // header doesn't turn into a wall of solid buttons.
   const variant = index === 0 ? "filled" : "light";
-  return `<Button variant="${variant}" onClick={() => open${upper(op.name)}Modal(${camel(op.name)})} data-testid="${slug}-op-${op.name}">${humanize(op.name)}</Button>`;
+  const icon = iconForOp(op.name);
+  const iconProp = icon ? ` leftSection={<${icon} size={16} stroke={2} />}` : "";
+  return `<Button variant="${variant}"${iconProp} onClick={() => open${upper(op.name)}Modal(${camel(op.name)})} data-testid="${slug}-op-${op.name}">${humanize(op.name)}</Button>`;
 }
 
 function renderOperationModalFn(
@@ -525,13 +595,21 @@ ${opIdHookCalls ? opIdHookCalls + "\n" : ""}  const ${destructured} = useForm<${
 // Misc
 // ---------------------------------------------------------------------------
 
-function displayCellExpr(slug: string, f: FieldIR): string {
+function displayCellExpr(
+  slug: string,
+  f: FieldIR,
+  aggregatesByName: Map<string, AggregateIR>,
+): string {
   const t = unwrapOpt(f.type);
   const tid = `\`${slug}-row-\${row.id}-${f.name}\``;
   if (t.kind === "enum") {
     return `<Table.Td data-testid={${tid}}><Badge tt="unset" variant="light">{row.${f.name}}</Badge></Table.Td>`;
   }
   if (t.kind === "id") {
+    const target = snake(plural(t.targetName));
+    if (aggregatesByName.has(t.targetName)) {
+      return `<Table.Td data-testid={${tid}}>{row.${f.name} ? <Anchor component={Link} to={\`/${target}/\${row.${f.name}}\`} onClick={(e) => e.stopPropagation()}><IdValue id={row.${f.name}} /></Anchor> : <EmptyValue />}</Table.Td>`;
+    }
     return `<Table.Td data-testid={${tid}}><IdValue id={row.${f.name}} /></Table.Td>`;
   }
   if (t.kind === "primitive" && t.name === "datetime") {
@@ -540,9 +618,64 @@ function displayCellExpr(slug: string, f: FieldIR): string {
   if (t.kind === "primitive" && t.name === "bool") {
     return `<Table.Td data-testid={${tid}}><BoolValue value={row.${f.name}} /></Table.Td>`;
   }
+  if (t.kind === "primitive" && (t.name === "int" || t.name === "long")) {
+    return `<Table.Td data-testid={${tid}} style={{ textAlign: "right" }}><NumberValue value={row.${f.name}} /></Table.Td>`;
+  }
+  if (t.kind === "primitive" && t.name === "decimal") {
+    return `<Table.Td data-testid={${tid}} style={{ textAlign: "right" }}><NumberValue value={row.${f.name}} decimals={2} /></Table.Td>`;
+  }
+  // Heuristic: a `string` field named `<Agg>Id` where `Agg` is a
+  // known aggregate gets the same link-to-detail treatment as an
+  // explicit `Id<Agg>` field.  Sales / banking examples often use
+  // raw strings for foreign keys; this avoids leaking unformatted
+  // UUIDs into the table without a DSL change.
+  const heur = stringIdHeuristic(f.name, t, aggregatesByName);
+  if (heur) {
+    const target = snake(plural(heur.targetName));
+    return `<Table.Td data-testid={${tid}}>{row.${f.name} ? <Anchor component={Link} to={\`/${target}/\${row.${f.name}}\`} onClick={(e) => e.stopPropagation()}><IdValue id={row.${f.name}} /></Anchor> : <EmptyValue />}</Table.Td>`;
+  }
   return `<Table.Td data-testid={${tid}}>{row.${f.name} === null || row.${f.name} === undefined || row.${f.name} === "" ? <EmptyValue /> : String(row.${f.name})}</Table.Td>`;
 }
 
 function upper(s: string): string {
   return s[0]!.toUpperCase() + s.slice(1);
+}
+
+/** Pick a tabler-icon component name for an operation based on its
+ *  verb prefix.  Returns `undefined` when nothing matches so the
+ *  button stays plain rather than getting a misleading icon.  Names
+ *  refer to `@tabler/icons-react` exports — when used, the page's
+ *  import line must include them. */
+function iconForOp(opName: string): string | undefined {
+  const lower = opName.toLowerCase();
+  if (/^(add|append|create|insert|new)/.test(lower)) return "IconPlus";
+  if (/^(remove|delete|drop|clear)/.test(lower)) return "IconTrash";
+  if (/^(confirm|approve|complete|finish|finalize|finalise|publish)/.test(lower)) return "IconCheck";
+  if (/^(cancel|abort|reject|deny)/.test(lower)) return "IconX";
+  if (/^(ship|deliver|dispatch|send)/.test(lower)) return "IconTruckDelivery";
+  if (/^(pay|charge|refund)/.test(lower)) return "IconCreditCard";
+  if (/^(start|begin|open)/.test(lower)) return "IconPlayerPlay";
+  if (/^(stop|close|end)/.test(lower)) return "IconPlayerStop";
+  if (/^(update|edit|change|modify|rename|set)/.test(lower)) return "IconPencil";
+  if (/^(assign|attach|link)/.test(lower)) return "IconLink";
+  return undefined;
+}
+
+/** When a `string` field is conventionally named `<Aggregate>Id`
+ *  (e.g. `customerId: string` referencing aggregate `Customer`),
+ *  treat it as a soft foreign key so the cell can link to the
+ *  target's detail page without requiring the source DSL to upgrade
+ *  to an explicit `Id<Customer>`.  Returns the aggregate match when
+ *  one applies, otherwise undefined. */
+function stringIdHeuristic(
+  fieldName: string,
+  t: { kind: string; name?: string },
+  aggregatesByName: Map<string, AggregateIR>,
+): { targetName: string } | undefined {
+  if (t.kind !== "primitive" || t.name !== "string") return undefined;
+  const m = /^([a-z][A-Za-z0-9]*)Id$/.exec(fieldName);
+  if (!m) return undefined;
+  const candidate = m[1]![0]!.toUpperCase() + m[1]!.slice(1);
+  if (aggregatesByName.has(candidate)) return { targetName: candidate };
+  return undefined;
 }

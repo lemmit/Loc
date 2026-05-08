@@ -232,7 +232,10 @@ export function buildViewsIndexPage(contexts: BoundedContextIR[]): string {
       return `      <Card data-testid="view-card-${slug}">
         <Stack gap="xs">
           <Group justify="space-between" align="center">
-            <Title order={4}>${human}</Title>
+            <Group gap="xs" align="center">
+              <IconLayoutList size={18} stroke={2} color="var(--mantine-color-brand-6)" />
+              <Title order={4}>${human}</Title>
+            </Group>
             <Button component={Link} to="/views/${slug}" data-testid="view-${slug}-open" variant="light">Open →</Button>
           </Group>
 ${shapeLine}
@@ -243,6 +246,7 @@ ${shapeLine}
   return `// Auto-generated.
 import { Link } from "react-router-dom";
 import { Stack, Title, Text, Card, Group, Button, SimpleGrid } from "@mantine/core";
+import { IconLayoutList } from "@tabler/icons-react";
 
 export default function ViewsIndex() {
   return (
@@ -290,14 +294,32 @@ export function buildViewTablePage(
         // Id<X> with a known target list page in this deployable.
         return `                    <Table.Td data-testid={\`${tid}\`}><Anchor component={Link} to={\`/${c.linkTargetSlug}/\${row.${path}}\`}><IdValue id={row.${path}} /></Anchor></Table.Td>`;
       }
+      if (c.kind === "datetime") {
+        return `                    <Table.Td data-testid={\`${tid}\`}><DateTimeValue iso={row.${path}} /></Table.Td>`;
+      }
+      if (c.kind === "bool") {
+        return `                    <Table.Td data-testid={\`${tid}\`}><BoolValue value={row.${path}} /></Table.Td>`;
+      }
+      if (c.kind === "int" || c.kind === "long") {
+        return `                    <Table.Td data-testid={\`${tid}\`} style={{ textAlign: "right" }}><NumberValue value={row.${path}} /></Table.Td>`;
+      }
+      if (c.kind === "decimal") {
+        return `                    <Table.Td data-testid={\`${tid}\`} style={{ textAlign: "right" }}><NumberValue value={row.${path}} decimals={2} /></Table.Td>`;
+      }
+      if (c.kind === "enum") {
+        return `                    <Table.Td data-testid={\`${tid}\`}><Badge tt="unset" variant="light">{row.${path}}</Badge></Table.Td>`;
+      }
+      if (c.kind === "id") {
+        return `                    <Table.Td data-testid={\`${tid}\`}><IdValue id={row.${path}} /></Table.Td>`;
+      }
       return `                    <Table.Td data-testid={\`${tid}\`}>{row.${path} === null || row.${path} === undefined || row.${path} === "" ? <EmptyValue /> : String(row.${path})}</Table.Td>`;
     })
     .join("\n");
   return `// Auto-generated.
 import { Link } from "react-router-dom";
-import { Stack, Title, Group, Anchor, Table, Loader, Alert, Text, Paper } from "@mantine/core";
+import { Stack, Title, Group, Anchor, Badge, Table, Alert, Text, Paper, Skeleton } from "@mantine/core";
 import { ${hookName} } from "../../api/views";
-import { IdValue, EmptyValue } from "../../lib/format";
+import { IdValue, DateTimeValue, BoolValue, NumberValue, EmptyValue } from "../../lib/format";
 
 export default function ${componentName}() {
   const q = ${hookName}();
@@ -312,7 +334,15 @@ export default function ${componentName}() {
         </Stack>
         <Anchor component={Link} to="/views">← back</Anchor>
       </Group>
-      {q.isLoading && <Loader />}
+      {q.isLoading && (
+        <Paper p="md">
+          <Stack gap="xs">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Skeleton key={i} height={28} radius="sm" />
+            ))}
+          </Stack>
+        </Paper>
+      )}
       {q.isError && <Alert color="red" variant="light">{(q.error as Error).message}</Alert>}
       {q.data && q.data.length === 0 && <Text c="dimmed">No rows.</Text>}
       {q.data && q.data.length > 0 && (
@@ -345,6 +375,11 @@ interface Column {
   name: string;
   /** Dotted accessor on `row` — `id`, `customerId`, `unitPrice.amount`. */
   accessPath: string;
+  /** Coarse cell-rendering kind — drives which formatter the table
+   *  cell uses (id / datetime / bool / int / long / decimal / enum
+   *  / string).  Mirrors TypeIR.kind for primitives and matches
+   *  "id" / "enum" / "string" for the type's display shape. */
+  kind: string;
   /** When the cell is an `Id<X>` referencing an aggregate that has
    *  UI in this deployable, the slug to link to. */
   linkTargetSlug?: string;
@@ -355,6 +390,11 @@ function collectColumns(
   ctx: BoundedContextIR,
   aggregatesByName: Map<string, AggregateIR>,
 ): Column[] {
+  const columnKind = (t: TypeIR): string => {
+    const inner = unwrapOpt(t);
+    if (inner.kind === "primitive") return inner.name;
+    return inner.kind;
+  };
   if (view.output) {
     // Custom shape — one column per declared row field, primitives only.
     // Value-object fields render via String() of the whole VO; richer
@@ -368,6 +408,7 @@ function collectColumns(
       return {
         name: f.name,
         accessPath: f.name,
+        kind: columnKind(f.type),
         linkTargetSlug,
       };
     });
@@ -375,8 +416,9 @@ function collectColumns(
   // Shorthand — reuses the source aggregate's wire shape.  Show the
   // id + every primitive / id / enum field at the root level.
   const agg = ctx.aggregates.find((a) => a.name === view.aggregateName);
-  if (!agg) return [{ name: "id", accessPath: "id" }];
-  const cols: Column[] = [{ name: "id", accessPath: "id" }];
+  if (!agg)
+    return [{ name: "id", accessPath: "id", kind: "string" }];
+  const cols: Column[] = [{ name: "id", accessPath: "id", kind: "string" }];
   for (const f of agg.fields) {
     const inner = unwrapOpt(f.type);
     if (
@@ -387,6 +429,7 @@ function collectColumns(
       cols.push({
         name: f.name,
         accessPath: f.name,
+        kind: columnKind(f.type),
         linkTargetSlug:
           inner.kind === "id" && aggregatesByName.has(inner.targetName)
             ? snake(plural(inner.targetName))

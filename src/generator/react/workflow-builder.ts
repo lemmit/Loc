@@ -239,7 +239,10 @@ export function buildWorkflowsIndexPage(contexts: BoundedContextIR[]): string {
       return `      <Card data-testid="workflow-card-${slug}">
         <Stack gap="xs">
           <Group justify="space-between" align="center">
-            <Title order={4}>${human}</Title>
+            <Group gap="xs" align="center">
+              <IconBolt size={18} stroke={2} color="var(--mantine-color-brand-6)" />
+              <Title order={4}>${human}</Title>
+            </Group>
             <Button component={Link} to="/workflows/${slug}" data-testid="workflow-${slug}-run">Run →</Button>
           </Group>
 ${paramsBlock}
@@ -250,6 +253,7 @@ ${paramsBlock}
   return `// Auto-generated.
 import { Link } from "react-router-dom";
 import { Stack, Title, Text, Card, Group, Button, SimpleGrid } from "@mantine/core";
+import { IconBolt } from "@tabler/icons-react";
 
 export default function WorkflowsIndex() {
   return (

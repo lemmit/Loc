@@ -78,7 +78,10 @@ export function generateReactForContexts(
   for (const { agg, ctx } of aggregates) {
     const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
     out.set(`src/api/${camel(agg.name)}.ts`, buildApiModule(agg, repo, ctx));
-    out.set(`src/pages/${snake(plural(agg.name))}/list.tsx`, buildListPage(agg));
+    out.set(
+      `src/pages/${snake(plural(agg.name))}/list.tsx`,
+      buildListPage(agg, aggregatesByName),
+    );
     out.set(
       `src/pages/${snake(plural(agg.name))}/new.tsx`,
       buildNewPage(agg, ctx, aggregatesByName),
@@ -212,6 +215,7 @@ const PACKAGE_JSON =
         "@mantine/notifications": "^7.13.0",
         "@mantine/dates": "^7.13.0",
         "@mantine/modals": "^7.13.0",
+        "@tabler/icons-react": "^3.20.0",
         "react-hook-form": "^7.53.0",
         "@hookform/resolvers": "^3.9.0",
         zod: "^3.23.0",

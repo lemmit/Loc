@@ -195,6 +195,76 @@ describe("react generator", () => {
     expect(detail).toMatch(/data-testid="orders-op-addLine-input-productId"/);
   });
 
+  it("polishes pages with formatters, skeleton loaders, op-button icons, and *Id heuristic links", async () => {
+    const model = await buildModel("examples/acme.ddd");
+    const { files } = generateSystems(model);
+    const list = files.get("web_app/src/pages/orders/list.tsx")!;
+    const detail = files.get("web_app/src/pages/orders/detail.tsx")!;
+
+    // Skeleton loading state replaces the bare <Loader />.
+    expect(list).toMatch(/<Skeleton key=\{i\}/);
+    expect(list).not.toMatch(/<Loader \/>/);
+    expect(detail).toMatch(/data-testid="orders-detail-loading"/);
+    expect(detail).toMatch(/<Skeleton/);
+
+    // List + detail import the format helpers.
+    expect(list).toMatch(/from "\.\.\/\.\.\/lib\/format"/);
+    expect(list).toMatch(/IdValue, DateTimeValue, BoolValue, NumberValue, EmptyValue/);
+    expect(detail).toMatch(/IdValue, DateTimeValue, BoolValue, NumberValue, EmptyValue, KeyValueRow/);
+
+    // datetime cell uses DateTimeValue rather than String(...).
+    expect(list).toMatch(/<DateTimeValue iso=\{row\.placedAt\}/);
+
+    // *Id heuristic: `customerId: string` links to /customers/<id>
+    // even though the DSL declares it as a plain string.
+    expect(list).toMatch(
+      /row\.customerId \? <Anchor component=\{Link\} to=\{`\/customers\/\$\{row\.customerId\}`\}/,
+    );
+    expect(detail).toMatch(
+      /data\.customerId \? <Anchor component=\{Link\} to=\{`\/customers\/\$\{data\.customerId\}`\}/,
+    );
+
+    // "+ New" button uses IconPlus rather than ASCII "+ ".
+    expect(list).toMatch(/from "@tabler\/icons-react"/);
+    expect(list).toMatch(/leftSection=\{<IconPlus size=\{16\}/);
+
+    // Op buttons get verb-prefix icons (Add → IconPlus, Confirm → IconCheck).
+    expect(detail).toMatch(/from "@tabler\/icons-react"/);
+    expect(detail).toMatch(
+      /<Button variant="filled" leftSection=\{<IconPlus size=\{16\}[\s\S]*?orders-op-addLine/,
+    );
+    expect(detail).toMatch(
+      /<Button variant="light" leftSection=\{<IconCheck size=\{16\}[\s\S]*?orders-op-confirm/,
+    );
+
+    // Detail field rows use KeyValueRow + DateTimeValue, no <strong>.
+    expect(detail).toMatch(/<KeyValueRow label="Placed At"><span data-testid="orders-detail-placedAt"><DateTimeValue iso=\{data\.placedAt\}/);
+    expect(detail).not.toMatch(/<strong>placedAt<\/strong>/);
+
+    // Generated app declares the icons dependency.
+    const pkg = files.get("web_app/package.json")!;
+    expect(pkg).toMatch(/"@tabler\/icons-react"/);
+
+    // Format helpers shipped at src/lib/format.tsx with NumberValue.
+    const fmt = files.get("web_app/src/lib/format.tsx")!;
+    expect(fmt).toMatch(/export function NumberValue/);
+    expect(fmt).toMatch(/Intl\.NumberFormat/);
+    expect(fmt).toMatch(/export function KeyValueRow/);
+    // No legacy JSX.Element annotations (matches v22 cleanup).
+    expect(fmt).not.toMatch(/: JSX\.Element/);
+  });
+
+  it("view tables format datetime / int / decimal cells through the format helpers", async () => {
+    const model = await buildModel("examples/acme.ddd");
+    const { files } = generateSystems(model);
+    const view = files.get("web_app/src/pages/views/active_orders.tsx")!;
+    // Shorthand view of Order — placedAt (datetime) → DateTimeValue.
+    expect(view).toMatch(/<DateTimeValue iso=\{row\.placedAt\}/);
+    // Skeleton loading state.
+    expect(view).toMatch(/<Skeleton/);
+    expect(view).not.toMatch(/<Loader \/>/);
+  });
+
   it("emits Playwright page-object classes per aggregate under e2e/pages/", async () => {
     const model = await buildModel("examples/acme.ddd");
     const { files } = generateSystems(model);

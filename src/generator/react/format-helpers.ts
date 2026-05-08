@@ -21,7 +21,7 @@ import type { ReactNode } from "react";
 /** Empty placeholder for null / undefined / "" values.  Rendered as
  *  a dimmed em-dash so empty cells read as "intentionally blank"
  *  rather than as a layout glitch. */
-export function EmptyValue(): JSX.Element {
+export function EmptyValue() {
   return <Text component="span" c="dimmed">—</Text>;
 }
 
@@ -33,7 +33,7 @@ export function isEmpty(v: unknown): boolean {
 /** Short id display: first 8 chars + ellipsis, with the full id
  *  surfaced in a tooltip.  Monospace so the prefix lines up across
  *  rows in tables. */
-export function IdValue({ id }: { id: string | null | undefined }): JSX.Element {
+export function IdValue({ id }: { id: string | null | undefined }) {
   if (isEmpty(id)) return <EmptyValue />;
   const s = String(id);
   return (
@@ -46,7 +46,7 @@ export function IdValue({ id }: { id: string | null | undefined }): JSX.Element 
 /** Locale-formatted datetime.  Accepts an ISO string or null.  The
  *  raw ISO is preserved in the tooltip for operators who need the
  *  exact wire value. */
-export function DateTimeValue({ iso }: { iso: string | null | undefined }): JSX.Element {
+export function DateTimeValue({ iso }: { iso: string | null | undefined }) {
   if (isEmpty(iso)) return <EmptyValue />;
   const s = String(iso);
   let pretty = s;
@@ -73,17 +73,32 @@ export function DateTimeValue({ iso }: { iso: string | null | undefined }): JSX.
 
 /** Boolean value as Yes / No, dimmed when false so true values are
  *  visually distinguishable at a glance. */
-export function BoolValue({ value }: { value: boolean | null | undefined }): JSX.Element {
+export function BoolValue({ value }: { value: boolean | null | undefined }) {
   if (isEmpty(value)) return <EmptyValue />;
   return value
     ? <Text component="span" fw={500}>Yes</Text>
     : <Text component="span" c="dimmed">No</Text>;
 }
 
+/** Locale-aware numeric value.  Used for int / long / decimal cells
+ *  so 1234567 renders as 1,234,567 (or 1 234 567 in fr-FR etc.).
+ *  Decimals keep up to two fractional digits unless the schema's
+ *  scale is greater. */
+export function NumberValue({ value, decimals = 0 }: { value: number | string | null | undefined; decimals?: number }) {
+  if (isEmpty(value)) return <EmptyValue />;
+  const n = typeof value === "number" ? value : Number(value);
+  if (Number.isNaN(n)) return <Text component="span">{String(value)}</Text>;
+  const fmt = new Intl.NumberFormat(undefined, {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: Math.max(decimals, 2),
+  });
+  return <Text component="span" style={{ fontVariantNumeric: "tabular-nums" }}>{fmt.format(n)}</Text>;
+}
+
 /** Generic value display with empty-state handling.  Used by
  *  generators when a field doesn't fit a more specific helper. */
-export function PlainValue({ value }: { value: unknown }): JSX.Element {
-  if (isEmpty(value)) return <EmptyValue />;
+export function PlainValue({ value }: { value: unknown }) {
+  if (isEmpty(value)) return <Text component="span" c="dimmed">—</Text>;
   return <Text component="span">{String(value)}</Text>;
 }
 
@@ -96,7 +111,7 @@ export function KeyValueRow({
 }: {
   label: string;
   children: ReactNode;
-}): JSX.Element {
+}) {
   return (
     <Group wrap="nowrap" align="flex-start" gap="md">
       <Text component="span" c="dimmed" fw={500} miw={140}>{label}</Text>
