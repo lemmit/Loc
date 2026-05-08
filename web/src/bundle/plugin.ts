@@ -11,11 +11,6 @@ import { VIRTUAL_SHIMS } from "./aliases.js";
 const ENTRY_NAMESPACE = "virtual-fs";
 const SHIM_NAMESPACE = "virtual-shim";
 const HTTP_NAMESPACE = "http-url";
-// Virtual module that re-exports react-router-dom but aliases
-// BrowserRouter → HashRouter.  See `BrowserRouter`-shim plumbing
-// near `makeLoomPlugin` for why this is necessary.
-const RRD_SHIM_NAMESPACE = "virtual-rrd-shim";
-const RRD_REAL_SPECIFIER = "loom:rrd-real";
 // Virtual module standing in for `react-dom/client`.  esm.sh's
 // repackaging just forwards to react-dom's createRoot accessor,
 // which trips React's "you should import from react-dom/client"
@@ -401,39 +396,7 @@ export function makeLoomPlugin(ctx: VirtualFsContext, opts?: PluginOptions): Plu
           return undefined;
         });
 
-        // BrowserRouter calls `history.pushState` against absolute
-        // paths, which from a srcdoc iframe makes the browser navigate
-        // to the parent's origin (the GitHub Pages 404 the user sees).
-        // HashRouter keeps state in `window.location.hash` so the
-        // iframe URL never changes.  We swap top-level user imports of
-        // `react-router-dom` to a virtual module that re-exports the
-        // package but aliases `BrowserRouter` to `HashRouter`; only
-        // user code is intercepted (transitive http-namespace imports
-        // pass through), so any libraries that *want* BrowserRouter
-        // for their own use still get the real one.
-        build.onResolve({ filter: /^react-router-dom$/ }, (args) => {
-          if (args.namespace === HTTP_NAMESPACE) return undefined;
-          return {
-            path: "loom-rrd-shim",
-            namespace: RRD_SHIM_NAMESPACE,
-          };
-        });
-        // The shim itself imports the real package via this synthetic
-        // specifier, which resolves through the http resolver below.
-        build.onResolve({ filter: new RegExp(`^${RRD_REAL_SPECIFIER}$`) }, () => ({
-          path: pinnedEsmShUrl("react-router-dom", ctx.versions, opts),
-          namespace: HTTP_NAMESPACE,
-        }));
-        build.onLoad({ filter: /.*/, namespace: RRD_SHIM_NAMESPACE }, () => ({
-          contents: [
-            `export * from "${RRD_REAL_SPECIFIER}";`,
-            `export { HashRouter as BrowserRouter } from "${RRD_REAL_SPECIFIER}";`,
-            "",
-          ].join("\n"),
-          loader: "js",
-        }));
-
-        // `react-dom/client` shim — same trick.  esm.sh's
+        // `react-dom/client` shim.  esm.sh's
         // react-dom/client just forwards `react-dom`'s createRoot
         // accessor without setting the internal `usingClientEntryPoint`
         // flag, so React logs a deprecation warning ("you should
