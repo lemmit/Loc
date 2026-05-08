@@ -131,7 +131,7 @@ describe("react generator", () => {
     const detail = files.get("web_app/src/pages/orders/detail.tsx")!;
     // Cross-aggregate hook import.
     expect(detail).toMatch(
-      /import \{ useAllProducts \} from "\.\.\/\.\.\/api\/product\.js"/,
+      /import \{ useAllProducts \} from "\.\.\/\.\.\/api\/product"/,
     );
     // Hook called inside the operation form component.
     expect(detail).toMatch(/const __products = useAllProducts\(\);/);
@@ -383,7 +383,7 @@ describe("react generator", () => {
     expect(app).toMatch(/static getDerivedStateFromError/);
     expect(app).toMatch(/<AppErrorBoundary>/);
     // 404 catch-all route after every aggregate route.
-    expect(app).toMatch(/function NotFound\(\): JSX\.Element/);
+    expect(app).toMatch(/function NotFound\(\) \{/);
     expect(app).toMatch(/<Route path="\*" element={<NotFound \/>} \/>/);
   });
 
@@ -409,7 +409,7 @@ describe("react generator", () => {
 
       // main.tsx imports the theme + passes it to MantineProvider.
       const main = files.get("web_app/src/main.tsx")!;
-      expect(main).toMatch(/import \{ theme \} from "\.\/theme\.js"/);
+      expect(main).toMatch(/import \{ theme \} from "\.\/theme"/);
       expect(main).toMatch(/<MantineProvider theme=\{theme\}>/);
     });
 
@@ -435,7 +435,7 @@ describe("react generator", () => {
       expect(files.has("web/src/theme.ts")).toBe(false);
       // main.tsx uses the bare provider (no theme prop, no import).
       const main = files.get("web/src/main.tsx")!;
-      expect(main).not.toMatch(/from "\.\/theme\.js"/);
+      expect(main).not.toMatch(/from "\.\/theme"/);
       expect(main).toMatch(/<MantineProvider>/);
     });
 
@@ -588,7 +588,7 @@ describe("react generator", () => {
       expect(page).toMatch(/<NumberInput label="quantity"[\s\S]+?allowDecimal=\{false\}/);
       // useAllProducts pulled in for the Id<Product> Select.
       expect(page).toMatch(
-        /import \{ useAllProducts \} from "\.\.\/\.\.\/api\/product\.js"/,
+        /import \{ useAllProducts \} from "\.\.\/\.\.\/api\/product"/,
       );
       // Submit button + success/error toast.
       expect(page).toMatch(/data-testid="workflow-place_order-submit"/);
@@ -603,10 +603,10 @@ describe("react generator", () => {
       const app = files.get("web_app/src/App.tsx")!;
       // Index + per-workflow imports.
       expect(app).toMatch(
-        /import WorkflowsIndex from "\.\/pages\/workflows\/index\.js"/,
+        /import WorkflowsIndex from "\.\/pages\/workflows\/index"/,
       );
       expect(app).toMatch(
-        /import PlaceOrderWorkflowPage from "\.\/pages\/workflows\/place_order\.js"/,
+        /import PlaceOrderWorkflowPage from "\.\/pages\/workflows\/place_order"/,
       );
       // Routes — index + per-workflow.
       expect(app).toMatch(
@@ -677,7 +677,7 @@ describe("react generator", () => {
       const model = await buildModel("examples/acme.ddd");
       const { files } = generateSystems(model);
       const page = files.get("web_app/src/pages/views/order_summary.tsx")!;
-      expect(page).toMatch(/import \{ useOrderSummaryView \} from "\.\.\/\.\.\/api\/views\.js"/);
+      expect(page).toMatch(/import \{ useOrderSummaryView \} from "\.\.\/\.\.\/api\/views"/);
       expect(page).toMatch(/const q = useOrderSummaryView\(\)/);
       // Table headers from the view's declared fields.
       expect(page).toMatch(/<Table\.Th>orderId<\/Table\.Th>/);
@@ -710,13 +710,13 @@ describe("react generator", () => {
       const { files } = generateSystems(model);
       const app = files.get("web_app/src/App.tsx")!;
       expect(app).toMatch(
-        /import ViewsIndex from "\.\/pages\/views\/index\.js"/,
+        /import ViewsIndex from "\.\/pages\/views\/index"/,
       );
       expect(app).toMatch(
-        /import ActiveOrdersViewPage from "\.\/pages\/views\/active_orders\.js"/,
+        /import ActiveOrdersViewPage from "\.\/pages\/views\/active_orders"/,
       );
       expect(app).toMatch(
-        /import OrderSummaryViewPage from "\.\/pages\/views\/order_summary\.js"/,
+        /import OrderSummaryViewPage from "\.\/pages\/views\/order_summary"/,
       );
       expect(app).toMatch(
         /<Route path="\/views" element=\{<ViewsIndex \/>\} \/>/,
@@ -784,7 +784,7 @@ describe("react generator", () => {
       const ui = files.get("web_app/e2e/Acme.ui.spec.ts")!;
       // Page-object import.
       expect(ui).toMatch(
-        /import \{ PlaceOrderWorkflowPage \} from "\.\/pages\/workflows\/place_order\.js"/,
+        /import \{ PlaceOrderWorkflowPage \} from "\.\/pages\/workflows\/place_order"/,
       );
       // The workflow call lowers to `await new <Cap>WorkflowPage(page).run({...})`.
       expect(ui).toMatch(
@@ -797,7 +797,7 @@ describe("react generator", () => {
       const { files } = generateSystems(model);
       const ui = files.get("web_app/e2e/Acme.ui.spec.ts")!;
       expect(ui).toMatch(
-        /import \{ ActiveOrdersViewPage \} from "\.\/pages\/views\/active_orders\.js"/,
+        /import \{ ActiveOrdersViewPage \} from "\.\/pages\/views\/active_orders"/,
       );
       // The view call lowers to a goto + rows() pair, wrapped so the
       // let-binding resolves to the array (not a Promise).

@@ -297,7 +297,7 @@ const INDEX_HTML = `<!doctype html>
 
 function mainTsx(args: { themePresent: boolean }): string {
   const themeImport = args.themePresent
-    ? `\nimport { theme } from "./theme.js";`
+    ? `\nimport { theme } from "./theme";`
     : "";
   const providerOpen = args.themePresent
     ? "<MantineProvider theme={theme}>"
@@ -313,7 +313,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@mantine/core/styles.css";
 import "@mantine/notifications/styles.css";
 import "@mantine/dates/styles.css";
-import App from "./App.js";${themeImport}
+import App from "./App";${themeImport}
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 5_000, retry: 1 } },
@@ -369,7 +369,7 @@ export const API_BASE_URL: string = fromWindow ?? fromEnv ?? "${apiBaseUrl}";
 }
 
 const CLIENT_TS = `// Auto-generated.
-import { API_BASE_URL } from "./config.js";
+import { API_BASE_URL } from "./config";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -412,13 +412,13 @@ function appTsx(
 ): string {
   const imports: string[] = [];
   const routes: string[] = [`        <Route path="/" element={<Home />} />`];
-  imports.push(`import Home from "./pages/home.js";`);
+  imports.push(`import Home from "./pages/home";`);
   for (const agg of aggregates) {
     const slug = snake(plural(agg.name));
     const cap = upper(agg.name);
-    imports.push(`import ${cap}List from "./pages/${slug}/list.js";`);
-    imports.push(`import ${cap}New from "./pages/${slug}/new.js";`);
-    imports.push(`import ${cap}Detail from "./pages/${slug}/detail.js";`);
+    imports.push(`import ${cap}List from "./pages/${slug}/list";`);
+    imports.push(`import ${cap}New from "./pages/${slug}/new";`);
+    imports.push(`import ${cap}Detail from "./pages/${slug}/detail";`);
     routes.push(
       `        <Route path="/${slug}" element={<${cap}List />} />`,
     );
@@ -430,28 +430,28 @@ function appTsx(
     );
   }
   if (workflows.length > 0) {
-    imports.push(`import WorkflowsIndex from "./pages/workflows/index.js";`);
+    imports.push(`import WorkflowsIndex from "./pages/workflows/index";`);
     routes.push(
       `        <Route path="/workflows" element={<WorkflowsIndex />} />`,
     );
     for (const wf of workflows) {
       const slug = snake(wf.name);
       const cap = `${upper(wf.name)}WorkflowPage`;
-      imports.push(`import ${cap} from "./pages/workflows/${slug}.js";`);
+      imports.push(`import ${cap} from "./pages/workflows/${slug}";`);
       routes.push(
         `        <Route path="/workflows/${slug}" element={<${cap} />} />`,
       );
     }
   }
   if (views.length > 0) {
-    imports.push(`import ViewsIndex from "./pages/views/index.js";`);
+    imports.push(`import ViewsIndex from "./pages/views/index";`);
     routes.push(
       `        <Route path="/views" element={<ViewsIndex />} />`,
     );
     for (const view of views) {
       const slug = snake(view.name);
       const cap = `${upper(view.name)}ViewPage`;
-      imports.push(`import ${cap} from "./pages/views/${slug}.js";`);
+      imports.push(`import ${cap} from "./pages/views/${slug}";`);
       routes.push(
         `        <Route path="/views/${slug}" element={<${cap} />} />`,
       );
@@ -542,7 +542,7 @@ class AppErrorBoundary extends React.Component<
   }
 }
 
-function NotFound(): JSX.Element {
+function NotFound() {
   return (
     <Stack data-testid="not-found" p="md">
       <Title order={2}>Not found</Title>
@@ -566,7 +566,7 @@ function useIsActive() {
   };
 }
 
-export default function App(): JSX.Element {
+export default function App() {
   const isActive = useIsActive();
   const [opened, { toggle }] = useDisclosure();
   return (
@@ -623,7 +623,7 @@ function smokeSpec(aggregates: AggregateIR[]): string {
   const imports = aggregates
     .map(
       (a) =>
-        `import { ${upper(a.name)}ListPage } from "./pages/${camel(a.name)}.js";`,
+        `import { ${upper(a.name)}ListPage } from "./pages/${camel(a.name)}";`,
     )
     .join("\n");
   const cases = aggregates
@@ -748,7 +748,7 @@ ${aggCardLink}
 import { Stack, Title, Text, Anchor, Card, SimpleGrid } from "@mantine/core";
 import { Link } from "react-router-dom";
 
-export default function Home(): JSX.Element {
+export default function Home() {
   return (
     <Stack data-testid="home" gap="md">
       <Title order={2}>Welcome</Title>
