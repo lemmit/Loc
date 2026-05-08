@@ -1,0 +1,35 @@
+// Auto-generated.
+export class DomainError extends Error {
+  constructor(message: string) { super(message); this.name = "DomainError"; }
+}
+export class AggregateNotFoundError extends Error {
+  constructor(message: string) { super(message); this.name = "AggregateNotFoundError"; }
+}
+/** Authorization failure — raised by `requires` expressions in
+ *  operation / workflow bodies when the resolved currentUser
+ *  doesn't satisfy the gate.  The per-route catch maps this to
+ *  HTTP 403 (Forbidden). */
+export class ForbiddenError extends Error {
+  constructor(message: string) { super(message); this.name = "ForbiddenError"; }
+}
+/** Wraps an exception thrown by a user-supplied extern handler.  The
+ *  per-router `app.onError` maps this to a 500 envelope that names
+ *  the offending op + aggregate, instead of the bare
+ *  `{ "error": "internal" }` operators see when the same throw
+ *  bubbles unwrapped.  Domain-layer errors raised by the user
+ *  handler (DomainError, ForbiddenError, AggregateNotFoundError)
+ *  are NOT wrapped — they bubble through and the router maps them
+ *  to their usual status codes. */
+export class ExternHandlerError extends Error {
+  readonly opName: string;
+  readonly aggName: string;
+  readonly cause: unknown;
+  constructor(opName: string, aggName: string, cause: unknown) {
+    const inner = cause instanceof Error ? cause.message : String(cause);
+    super(`Extern handler '${opName}' on '${aggName}' threw: ${inner}`);
+    this.name = "ExternHandlerError";
+    this.opName = opName;
+    this.aggName = aggName;
+    this.cause = cause;
+  }
+}

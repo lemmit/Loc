@@ -1,0 +1,126 @@
+{
+  "system": "Acme",
+  "aggregates": {
+    "Product": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "sku": {
+          "type": "string"
+        },
+        "price": {
+          "$ref": "#/valueObjects/Money"
+        }
+      },
+      "required": [
+        "id",
+        "sku",
+        "price"
+      ],
+      "additionalProperties": false
+    },
+    "Order": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "customerId": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "placedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "lines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/parts/OrderLine"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "customerId",
+        "status",
+        "placedAt",
+        "lines"
+      ],
+      "additionalProperties": false
+    },
+    "Customer": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "username": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "age": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "username",
+        "email",
+        "age"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "parts": {
+    "OrderLine": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "productId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "quantity": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "productId",
+        "quantity"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "valueObjects": {
+    "Money": {
+      "type": "object",
+      "properties": {
+        "amount": {
+          "type": "number"
+        },
+        "currency": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "amount",
+        "currency"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

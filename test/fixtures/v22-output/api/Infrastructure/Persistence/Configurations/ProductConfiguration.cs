@@ -1,0 +1,22 @@
+// Auto-generated.
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Api.Domain.Products;
+using Api.Domain.Ids;
+using Api.Domain.ValueObjects;
+using Api.Domain.Enums;
+
+namespace Api.Infrastructure.Persistence.Configurations;
+
+public sealed class ProductConfiguration : IEntityTypeConfiguration<Product>
+{
+    public void Configure(EntityTypeBuilder<Product> b)
+    {
+        b.ToTable("products");
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).HasConversion(v => v.Value, v => new ProductId(v));
+        b.OwnsOne<Money>(x => x.Price);
+        b.HasIndex(x => x.Sku);
+        b.Ignore(x => x.DomainEvents);
+    }
+}

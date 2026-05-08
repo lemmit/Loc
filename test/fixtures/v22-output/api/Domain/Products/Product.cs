@@ -1,0 +1,66 @@
+// Auto-generated.
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using Api.Domain.Ids;
+using Api.Domain.Events;
+using Api.Domain.ValueObjects;
+using Api.Domain.Enums;
+using Api.Domain.Common;
+
+namespace Api.Domain.Products;
+
+public sealed class Product
+{
+    public ProductId Id { get; private set; }
+    public string Sku { get; private set; } = default!;
+    public Money Price { get; private set; } = default!;
+
+    private readonly List<IDomainEvent> _domainEvents = new();
+    public IReadOnlyList<IDomainEvent> DomainEvents => _domainEvents.AsReadOnly();
+    private Product()
+    {
+        Id = default!;
+        Sku = default!;
+        Price = default!;
+    }
+
+
+    public IReadOnlyList<IDomainEvent> PullEvents()
+    {
+        var copy = _domainEvents.ToArray();
+        _domainEvents.Clear();
+        return copy;
+    }
+
+    private void AssertInvariants()
+    {
+        if (!(this.Sku.Length > 0)) throw new DomainException("Invariant violated: sku.length > 0");
+    }
+
+    public sealed class State
+    {
+        public ProductId Id { get; init; } = default!;
+        public string Sku { get; init; } = default!;
+        public Money Price { get; init; } = default!;
+    }
+
+    public static Product _Create(State s)
+    {
+        var e = new Product();
+        e.Id = s.Id;
+        e.Sku = s.Sku;
+        e.Price = s.Price;
+        e.AssertInvariants();
+        return e;
+    }
+    public static Product Create(string sku, Money price)
+    {
+        var e = new Product();
+        e.Id = new ProductId(Guid.NewGuid());
+        e.Sku = sku;
+        e.Price = price;
+        e.AssertInvariants();
+        return e;
+    }
+}

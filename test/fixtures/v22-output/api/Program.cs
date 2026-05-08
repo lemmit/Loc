@@ -1,0 +1,168 @@
+// Auto-generated.
+using Microsoft.EntityFrameworkCore;
+using Api.Api;
+using Api.Domain.Common;
+using Api.Infrastructure.Persistence;
+using Api.Infrastructure.Events;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Fail fast on a missing connection string.  Without this an unset
+// ConnectionStrings__Default surfaces as a confusing
+// "Cannot open connection" mid-request; we'd rather die at boot
+// with a clear pointer to the env var.
+{
+    var connectionString = builder.Configuration.GetConnectionString("Default");
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        throw new System.InvalidOperationException(
+            "Missing connection string 'Default'. Set ConnectionStrings__Default " +
+            "in the environment or appsettings.Development.json.");
+    }
+}
+
+// Structured JSON logs.  Pairs with UseHttpLogging below to emit
+// one line per inbound request with method/path/status, and pulls
+// Activity.Current?.TraceId into every log scope so handler logs
+// inherit the correlation id automatically.
+builder.Logging.ClearProviders();
+builder.Logging.AddJsonConsole(opts =>
+{
+    opts.IncludeScopes = true;
+    opts.JsonWriterOptions = new System.Text.Json.JsonWriterOptions
+    {
+        Indented = false,
+    };
+});
+
+// Per-request HTTP log.  ASP.NET Core's built-in middleware records
+// method/path on entry and status/duration on exit.  Combined with
+// the JSON formatter above, every request shows up as a structured
+// log line with the framework's TraceId field for correlation.
+builder.Services.AddHttpLogging(opts =>
+{
+    opts.LoggingFields =
+        Microsoft.AspNetCore.HttpLogging.HttpLoggingFields.RequestMethod |
+        Microsoft.AspNetCore.HttpLogging.HttpLoggingFields.RequestPath |
+        Microsoft.AspNetCore.HttpLogging.HttpLoggingFields.ResponseStatusCode |
+        Microsoft.AspNetCore.HttpLogging.HttpLoggingFields.Duration;
+});
+
+builder.Services.AddDbContext<AppDbContext>(opts =>
+    opts.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
+
+// Mediator (martinothamar/Mediator) — source-generated, free to use.
+builder.Services.AddMediator(opts => opts.ServiceLifetime = ServiceLifetime.Scoped);
+
+// FluentValidation — wire-boundary validators emitted per command in
+// Application/<Aggregate>/Commands/<Cmd>CommandValidator.cs.  The
+// pipeline behavior runs them before each handler; failures throw
+// FluentValidation.ValidationException, which DomainExceptionFilter
+// converts to a 400 with a structured `failures` array.  The
+// existing domain-layer AssertInvariants() stays as the floor.
+builder.Services.AddValidatorsFromAssembly(typeof(Program).Assembly);
+builder.Services.AddScoped(
+    typeof(Mediator.IPipelineBehavior<,>),
+    typeof(Api.Application.Common.ValidationBehavior<,>));
+
+// Domain event dispatch — default no-op; replace in tests / production.
+builder.Services.AddSingleton<IDomainEventDispatcher, NoopDomainEventDispatcher>();
+
+builder.Services.AddScoped<Api.Domain.Products.IProductRepository, Api.Infrastructure.Repositories.ProductRepository>();
+builder.Services.AddScoped<Api.Domain.Orders.IOrderRepository, Api.Infrastructure.Repositories.OrderRepository>();
+builder.Services.AddScoped<Api.Domain.Customers.ICustomerRepository, Api.Infrastructure.Repositories.CustomerRepository>();
+
+
+
+builder.Services.AddControllers(opts =>
+{
+    opts.Filters.Add<DomainExceptionFilter>();
+}).AddJsonOptions(opts =>
+{
+    // camelCase property names match the Hono backend's wire shape;
+    // the cross-platform OpenAPI cross-check would diff otherwise.
+    opts.JsonSerializerOptions.PropertyNamingPolicy =
+        System.Text.Json.JsonNamingPolicy.CamelCase;
+    opts.JsonSerializerOptions.DictionaryKeyPolicy =
+        System.Text.Json.JsonNamingPolicy.CamelCase;
+});
+
+// Permissive CORS so a generated React frontend on a different port
+// can reach the API in dev compose.  Pin Program.cs in .loomignore +
+// tighten in production.
+builder.Services.AddCors(opts =>
+{
+    opts.AddDefaultPolicy(p =>
+        p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());
+});
+
+// OpenAPI spec generation — Swashbuckle reflects over controllers and
+// emits the spec at /swagger/v1/swagger.json.  The cross-platform
+// contract check diffs this against the Hono-emitted /openapi.json.
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new() { Title = "Api", Version = "v1" });
+});
+
+var app = builder.Build();
+// Liveness probe — cheap, no I/O.  K8s livenessProbe / docker-compose
+// healthcheck use this to decide "is the process alive?".  A DB blip
+// must NOT mark the pod not-alive (that restarts the container and
+// amplifies the outage), which is why DB-touching checks live on
+// /ready instead.
+app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+// Readiness probe — pings the DB.  K8s readinessProbe uses this to
+// decide "should I send traffic to this pod?".  Returns 503 with a
+// one-line cause when the DB is unreachable so operators see the
+// reason in the probe log instead of having to exec into the pod.
+app.MapGet("/ready", async (AppDbContext db, CancellationToken ct) =>
+{
+    try
+    {
+        var ok = await db.Database.CanConnectAsync(ct);
+        return ok
+            ? Results.Ok(new { status = "ready" })
+            : Results.Json(
+                new { status = "not_ready", error = "database unreachable" },
+                statusCode: 503);
+    }
+    catch (System.Exception ex)
+    {
+        return Results.Json(
+            new { status = "not_ready", error = ex.Message },
+            statusCode: 503);
+    }
+});
+// HTTP logging middleware — pairs with AddHttpLogging above.
+// Mounted before the auth + business pipelines so every request is
+// logged regardless of whether it reached a controller.
+app.UseHttpLogging();
+app.UseCors();
+app.UseSwagger();
+app.MapControllers();
+
+// Dev-friendly schema bootstrap: create the schema from the model on
+// first boot.  System-mode compose isolates each deployable to its own
+// database (see db-init/), so EnsureCreated runs cleanly without
+// racing peers.  For production, replace this with
+// 'dotnet ef database update' and remove the block.
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    db.Database.EnsureCreated();
+}
+
+// Graceful shutdown — log the intent so operators see "shutting down"
+// in container logs instead of an abrupt SIGKILL trace.  ASP.NET
+// Core's host already drains in-flight requests + disposes scoped
+// services (including AppDbContext) automatically; this hook is just
+// the visible breadcrumb.
+{
+    var lifetime = app.Services.GetRequiredService<Microsoft.Extensions.Hosting.IHostApplicationLifetime>();
+    var logger = app.Services.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>()
+        .CreateLogger("Shutdown");
+    lifetime.ApplicationStopping.Register(() =>
+        logger.LogInformation("Shutting down — draining in-flight requests."));
+}
+app.Run();

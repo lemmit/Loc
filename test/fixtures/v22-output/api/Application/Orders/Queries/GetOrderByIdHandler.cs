@@ -1,0 +1,27 @@
+// Auto-generated.
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Mediator;
+using Api.Domain.Orders;
+using Api.Domain.Ids;
+using Api.Domain.ValueObjects;
+using Api.Domain.Enums;
+using Api.Application.Orders.Responses;
+
+namespace Api.Application.Orders.Queries;
+
+public sealed class GetOrderByIdHandler : IQueryHandler<GetOrderByIdQuery, OrderResponse?>
+{
+    private readonly IOrderRepository _repo;
+    public GetOrderByIdHandler(IOrderRepository repo)
+    {
+        _repo = repo;
+    }
+
+    public async ValueTask<OrderResponse?> Handle(GetOrderByIdQuery q, CancellationToken ct)
+    {
+        var found = await _repo.GetByIdAsync(q.Id, ct);
+        return found is null ? null : new OrderResponse(found.Id.Value, found.CustomerId, found.Status.ToString(), found.PlacedAt.ToUniversalTime().ToString("o"), found.Lines.Select(__e => new OrderLineResponse(__e.Id.Value, __e.ProductId.Value, __e.Quantity)).ToList());
+    }
+}
