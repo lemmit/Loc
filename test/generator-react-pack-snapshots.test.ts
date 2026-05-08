@@ -68,6 +68,15 @@ describe("react generator template-pack output (snapshots)", () => {
     }
   `;
 
+  it("Mantine pack — theme.ts snapshot", async () => {
+    const files = await generateFromSource(SOURCE);
+    const theme = files.get("web_mantine/src/theme.ts");
+    expect(theme).toBeDefined();
+    await expect(theme).toMatchFileSnapshot(
+      path.join(repoRoot, "test/__snapshots__/pack-mantine-theme.ts"),
+    );
+  });
+
   it("Mantine pack — list page snapshot", async () => {
     const files = await generateFromSource(SOURCE);
     const list = files.get("web_mantine/src/pages/customers/list.tsx");

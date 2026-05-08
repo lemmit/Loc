@@ -25,10 +25,9 @@ import {
   buildViewTablePage,
   hasAnyView,
 } from "./view-builder.js";
-import { buildMantineTheme } from "./theme-builder.js";
 import { FORMAT_HELPERS_TSX } from "./format-helpers.js";
 import { loadPack, resolvePackDir } from "./templating/loader.js";
-import { renderListPage } from "./templating/render.js";
+import { renderListPage, renderTheme } from "./templating/render.js";
 import type { ViewIR } from "../../ir/loom-ir.js";
 import { humanize } from "../../util/naming.js";
 
@@ -160,10 +159,10 @@ export function generateReactForContexts(
   // Theme — every generated app gets a tasteful baseline (indigo
   // primary, medium radius, Inter font) so the bare-Mantine
   // "construction site" look is gone by default.  System-level
-  // `theme { ... }` blocks override the baseline through
-  // `buildMantineTheme`; the generated file always exists and
+  // `theme { ... }` blocks override the baseline through the
+  // pack's "theme" template; the generated file always exists and
   // main.tsx always wires `<MantineProvider theme={theme}>`.
-  out.set("src/theme.ts", buildMantineTheme(sys.theme ?? {}));
+  out.set("src/theme.ts", renderTheme(sys.theme, pack));
   out.set("src/main.tsx", mainTsx());
   out.set(
     "src/App.tsx",
