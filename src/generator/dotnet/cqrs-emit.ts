@@ -30,6 +30,10 @@ import {
   renderRequestDtos,
   renderResponseDtos,
 } from "./templates.js";
+import {
+  renderCreateValidator,
+  renderOperationValidator,
+} from "./validator-emit.js";
 
 // ---------------------------------------------------------------------------
 // Per-aggregate CQRS file emission.
@@ -187,6 +191,16 @@ function emitCreateCommandAndHandler(
         `        return aggregate.Id;\n`,
     }),
   );
+  // FluentValidation rules — emitted only when at least one
+  // wire-translatable invariant exists for this command.  See
+  // `validator-emit.ts` for the classification + chain emission.
+  const validator = renderCreateValidator(agg, ns);
+  if (validator.content) {
+    out.set(
+      `Application/${aggFolder}/Commands/Create${agg.name}CommandValidator.cs`,
+      validator.content,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -214,6 +228,17 @@ function emitOperationCommandsAndHandlers(
         commandParams: params,
       }),
     );
+    // Per-op FluentValidation rules from wire-translatable
+    // preconditions.  Server-side `requires`, helper-fn calls,
+    // and aggregate-state references stay in the domain layer
+    // (the existing `Check<Op>` / `<Op>` body still asserts them).
+    const opValidator = renderOperationValidator(agg, op, ns);
+    if (opValidator.content) {
+      out.set(
+        `Application/${aggFolder}/Commands/${pascal(op.name)}CommandValidator.cs`,
+        opValidator.content,
+      );
+    }
     // When the op body references `currentUser`, the aggregate
     // method's signature picks up a trailing `User currentUser`
     // parameter; the handler injects ICurrentUserAccessor and passes

@@ -132,8 +132,12 @@ function renderCmdConstructorBody(args: string[], indent: string): string[] {
   );
 }
 
-export function renderExceptionFilter(ns: string): string {
-  return `// Auto-generated.
+export function renderExceptionFilter(
+  ns: string,
+  options?: { usesValidators?: boolean },
+): string {
+  const usesValidators = !!options?.usesValidators;
+  return `// Auto-generated.${usesValidators ? "\nusing System.Linq;" : ""}
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.Extensions.Logging;
@@ -164,7 +168,30 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         // the structured log line without scraping headers.  Empty
         // string when no Activity is active (e.g. middleware errors
         // before the pipeline starts).
-        var trace_id = System.Diagnostics.Activity.Current?.TraceId.ToString() ?? "";
+        var trace_id = System.Diagnostics.Activity.Current?.TraceId.ToString() ?? "";${
+          usesValidators
+            ? `
+        // Slice 21.B FluentValidation arm — runs FIRST because
+        // validation failures are the most common 400 cause.  The
+        // envelope extends the existing { error, trace_id } shape
+        // with a structured \`failures\` array carrying field +
+        // message per FluentValidation issue, so frontends can
+        // surface field-level errors next to the right input.
+        if (context.Exception is FluentValidation.ValidationException fv)
+        {
+            context.Result = new BadRequestObjectResult(new
+            {
+                error = "Validation failed",
+                trace_id,
+                failures = fv.Errors
+                    .Select(e => new { field = e.PropertyName, message = e.ErrorMessage })
+                    .ToArray(),
+            });
+            context.ExceptionHandled = true;
+            return;
+        }`
+            : ""
+        }
         if (context.Exception is ForbiddenException fe)
         {
             context.Result = new ObjectResult(new { error = fe.Message, trace_id })

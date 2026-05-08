@@ -14,6 +14,10 @@ import { emitWorkflows } from "./workflow-emit.js";
 import { emitViews } from "./view-emit.js";
 import { buildFindBodies } from "./find-emit.js";
 import {
+  hasAnyWireValidator,
+  renderValidationBehavior,
+} from "./validator-emit.js";
+import {
   renderCommon,
   renderConfiguration,
   renderCsproj,
@@ -137,7 +141,17 @@ function emitProjectFromContexts(
     views: contexts.flatMap((c) => c.views),
   };
   out.set("Infrastructure/Persistence/AppDbContext.cs", renderDbContext(merged, ns));
-  out.set("Api/DomainExceptionFilter.cs", renderExceptionFilter(ns));
+  // Slice 21.B FluentValidation pipeline — emit the generic
+  // ValidationBehavior + the csproj package ref + the
+  // Program.cs registrations only when at least one aggregate
+  // has wire-translatable invariants / preconditions.  Computed
+  // before the exception filter render so its FluentValidation
+  // arm is gated on the same flag.
+  const usesValidators = merged.aggregates.some(hasAnyWireValidator);
+  out.set(
+    "Api/DomainExceptionFilter.cs",
+    renderExceptionFilter(ns, { usesValidators }),
+  );
   // Slice 1A auth files — emitted only when the deployable opts in
   // via `auth: required` AND the system declares a user block (the
   // validator already rejects the half-state).  When emitted, the
@@ -148,7 +162,13 @@ function emitProjectFromContexts(
   if (authRequired && system?.sys) {
     emitAuthFiles(system.sys, ns, out);
   }
-  emitProject(merged, ns, out, { authRequired });
+  if (usesValidators) {
+    out.set(
+      "Application/Common/ValidationBehavior.cs",
+      renderValidationBehavior(ns),
+    );
+  }
+  emitProject(merged, ns, out, { authRequired, usesValidators });
   emitTestProject(merged, ns, out);
 }
 
@@ -168,8 +188,18 @@ function emitContext(
   }
   emitWorkflows(ctx, ns, out);
   emitViews(ctx, ns, out);
-  emitInfrastructure(ctx, ns, out);
-  emitProject(ctx, ns, out);
+  // Same FluentValidation gate as the system path — drives the
+  // pipeline behavior emit + csproj + Program.cs registration +
+  // the DomainExceptionFilter arm.
+  const usesValidators = ctx.aggregates.some(hasAnyWireValidator);
+  emitInfrastructure(ctx, ns, out, usesValidators);
+  if (usesValidators) {
+    out.set(
+      "Application/Common/ValidationBehavior.cs",
+      renderValidationBehavior(ns),
+    );
+  }
+  emitProject(ctx, ns, out, { usesValidators });
   emitTestProject(ctx, ns, out);
 }
 
@@ -290,25 +320,33 @@ function emitInfrastructure(
   ctx: BoundedContextIR,
   ns: string,
   out: Map<string, string>,
+  usesValidators: boolean,
 ): void {
   out.set("Infrastructure/Persistence/AppDbContext.cs", renderDbContext(ctx, ns));
-  out.set("Api/DomainExceptionFilter.cs", renderExceptionFilter(ns));
+  out.set(
+    "Api/DomainExceptionFilter.cs",
+    renderExceptionFilter(ns, { usesValidators }),
+  );
 }
 
 function emitProject(
   ctx: BoundedContextIR,
   ns: string,
   out: Map<string, string>,
-  options?: { authRequired?: boolean },
+  options?: { authRequired?: boolean; usesValidators?: boolean },
 ): void {
   const hasExtern = ctx.aggregates.some((a) =>
     a.operations.some((o) => o.extern),
   );
+  const usesValidators = !!options?.usesValidators;
   out.set(
     "Program.cs",
-    renderProgram(ctx, ns, { authRequired: !!options?.authRequired }),
+    renderProgram(ctx, ns, {
+      authRequired: !!options?.authRequired,
+      usesValidators,
+    }),
   );
-  out.set(`${ns}.csproj`, renderCsproj(ns, hasExtern));
+  out.set(`${ns}.csproj`, renderCsproj(ns, hasExtern, usesValidators));
   out.set("Dockerfile", renderDockerfile(ns));
   out.set(".dockerignore", renderDockerignore());
   out.set("certs/.gitkeep", "");

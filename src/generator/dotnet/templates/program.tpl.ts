@@ -8,9 +8,10 @@ import { pascal, plural } from "../../../util/naming.js";
 export function renderProgram(
   ctx: BoundedContextIR,
   ns: string,
-  options?: { authRequired?: boolean },
+  options?: { authRequired?: boolean; usesValidators?: boolean },
 ): string {
   const authRequired = !!options?.authRequired;
+  const usesValidators = !!options?.usesValidators;
   const repoRegistrations = ctx.aggregates
     .map(
       (a) =>
@@ -151,7 +152,22 @@ builder.Services.AddDbContext<AppDbContext>(opts =>
 
 // Mediator (martinothamar/Mediator) — source-generated, free to use.
 builder.Services.AddMediator(opts => opts.ServiceLifetime = ServiceLifetime.Scoped);
-
+${
+  usesValidators
+    ? `
+// FluentValidation — wire-boundary validators emitted per command in
+// Application/<Aggregate>/Commands/<Cmd>CommandValidator.cs.  The
+// pipeline behavior runs them before each handler; failures throw
+// FluentValidation.ValidationException, which DomainExceptionFilter
+// converts to a 400 with a structured \`failures\` array.  The
+// existing domain-layer AssertInvariants() stays as the floor.
+builder.Services.AddValidatorsFromAssembly(typeof(Program).Assembly);
+builder.Services.AddScoped(
+    typeof(Mediator.IPipelineBehavior<,>),
+    typeof(${ns}.Application.Common.ValidationBehavior<,>));
+`
+    : ""
+}
 // Domain event dispatch — default no-op; replace in tests / production.
 builder.Services.AddSingleton<IDomainEventDispatcher, NoopDomainEventDispatcher>();
 
@@ -254,11 +270,21 @@ app.Run();
 `;
 }
 
-export function renderCsproj(ns: string, hasExtern: boolean = false): string {
+export function renderCsproj(
+  ns: string,
+  hasExtern: boolean = false,
+  usesValidators: boolean = false,
+): string {
   // Scrutor only ships when the project actually scans for
   // [ExternHandler]-decorated classes.
   const scrutorRef = hasExtern
     ? `\n    <!-- Scrutor — assembly scan for [ExternHandler]-decorated classes -->\n    <PackageReference Include="Scrutor" Version="5.0.2" />`
+    : "";
+  // FluentValidation only ships when at least one wire-translatable
+  // invariant or precondition exists.  AspNetCore meta-package gives
+  // `AddValidatorsFromAssembly` + DI integration in one ref.
+  const validatorRef = usesValidators
+    ? `\n    <!-- FluentValidation — slice 21.B wire-boundary validators (Mediator pipeline) -->\n    <PackageReference Include="FluentValidation" Version="11.10.0" />\n    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="11.10.0" />`
     : "";
   return `<!-- Auto-generated. -->
 <Project Sdk="Microsoft.NET.Sdk.Web">
@@ -291,7 +317,7 @@ export function renderCsproj(ns: string, hasExtern: boolean = false): string {
     </PackageReference>
     <PackageReference Include="Mediator.Abstractions" Version="2.1.7" />
     <!-- OpenAPI spec emitted at /swagger/v1/swagger.json -->
-    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.9.0" />${scrutorRef}
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.9.0" />${scrutorRef}${validatorRef}
   </ItemGroup>
 </Project>
 `;

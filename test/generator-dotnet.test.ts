@@ -1054,4 +1054,175 @@ describe(".NET generator", () => {
       expect(common).toMatch(/public sealed class ForbiddenException/);
     });
   });
+
+  // -------------------------------------------------------------------
+  // Slice 21.B — wire-boundary validation on the .NET side.
+  // -------------------------------------------------------------------
+  describe("FluentValidation pipeline (slice 21.B)", () => {
+    it("emits an AbstractValidator per command with single-field invariants", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      // sales.ddd Customer: `invariant email.length > 0` →
+      // `RuleFor(x => x.Email).MinimumLength(1)`.
+      const customerCreate = files.get(
+        "Application/Customers/Commands/CreateCustomerCommandValidator.cs",
+      )!;
+      expect(customerCreate).toMatch(
+        /public sealed class CreateCustomerCommandValidator : AbstractValidator<CreateCustomerCommand>/,
+      );
+      expect(customerCreate).toMatch(/RuleFor\(x => x\.Email\)\.MinimumLength\(1\)/);
+      expect(customerCreate).toMatch(/using FluentValidation;/);
+    });
+
+    it("emits an AbstractValidator per public op with single-field preconditions", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      // sales.ddd Order.addLine: `precondition qty > 0` (int qty).
+      // The `isMutable()` precondition references a helper-fn — non-
+      // translatable, so it doesn't appear here.
+      const addLine = files.get(
+        "Application/Orders/Commands/AddLineCommandValidator.cs",
+      )!;
+      expect(addLine).toMatch(/RuleFor\(x => x\.Qty\)\.GreaterThanOrEqualTo\(1\)/);
+      // No rule for `isMutable()` — domain-only.
+      expect(addLine).not.toMatch(/IsMutable/);
+    });
+
+    it("does NOT emit a validator file when no rules apply", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      // Order.confirm() has only server-only preconditions
+      // (`isMutable()` + `lines.count > 0`) — no validator file.
+      expect(
+        files.has("Application/Orders/Commands/ConfirmCommandValidator.cs"),
+      ).toBe(false);
+    });
+
+    it("does NOT emit a validator for invariants referencing aggregate state", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      // Order has only the cross-aggregate-state invariant
+      // `lines.count > 0 when status == Confirmed` — non-
+      // translatable.  Product (in sales.ddd) has no invariants
+      // either.  CreateOrder has no validator file.
+      expect(
+        files.has("Application/Orders/Commands/CreateOrderCommandValidator.cs"),
+      ).toBe(false);
+    });
+
+    it("emits the generic ValidationBehavior pipeline class", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      const behavior = files.get("Application/Common/ValidationBehavior.cs")!;
+      expect(behavior).toMatch(
+        /public sealed class ValidationBehavior<TRequest, TResponse>\s*:\s*IPipelineBehavior<TRequest, TResponse>/,
+      );
+      expect(behavior).toMatch(/throw new ValidationException\(failures\)/);
+    });
+
+    it("Program.cs registers AddValidatorsFromAssembly + ValidationBehavior", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      const program = files.get("Program.cs")!;
+      expect(program).toMatch(
+        /builder\.Services\.AddValidatorsFromAssembly\(typeof\(Program\)\.Assembly\);/,
+      );
+      expect(program).toMatch(
+        /builder\.Services\.AddScoped\(\s*typeof\(Mediator\.IPipelineBehavior<,>\),\s*typeof\(\w+\.Application\.Common\.ValidationBehavior<,>\)\);/,
+      );
+    });
+
+    it("csproj pulls FluentValidation NuGet refs when validators exist", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      const csprojKey = [...files.keys()].find((k) => k.endsWith(".csproj"))!;
+      const csproj = files.get(csprojKey)!;
+      expect(csproj).toMatch(
+        /<PackageReference Include="FluentValidation" Version="11\.10\.0"/,
+      );
+      expect(csproj).toMatch(
+        /<PackageReference Include="FluentValidation\.DependencyInjectionExtensions"/,
+      );
+    });
+
+    it("DomainExceptionFilter has a FluentValidation.ValidationException arm", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      const filter = files.get("Api/DomainExceptionFilter.cs")!;
+      expect(filter).toMatch(/is FluentValidation\.ValidationException fv/);
+      // Envelope: extends the existing { error, trace_id } shape with a
+      // structured `failures` array.
+      expect(filter).toMatch(/error = "Validation failed"/);
+      expect(filter).toMatch(/failures = fv\.Errors/);
+      expect(filter).toMatch(
+        /new \{ field = e\.PropertyName, message = e\.ErrorMessage \}/,
+      );
+    });
+
+    it("skips the FluentValidation gate entirely when no aggregate has wire-translatable invariants", async () => {
+      const { parseHelper } = await import("langium/test");
+      const services = createDddServices(NodeFileSystem);
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(
+        `
+          context Plain {
+            aggregate Note {
+              title: string display
+              body:  string
+            }
+            repository Notes for Note { }
+          }
+        `,
+        { validation: true },
+      );
+      const files = generateDotnet(doc.parseResult.value as Model);
+      // No validator files.
+      expect(
+        [...files.keys()].some((k) => k.endsWith("CommandValidator.cs")),
+      ).toBe(false);
+      // No ValidationBehavior either.
+      expect(files.has("Application/Common/ValidationBehavior.cs")).toBe(false);
+      // csproj omits FluentValidation refs.
+      const csprojKey = [...files.keys()].find((k) => k.endsWith(".csproj"))!;
+      expect(files.get(csprojKey)!).not.toMatch(/FluentValidation/);
+      // Filter omits the FluentValidation arm.
+      expect(files.get("Api/DomainExceptionFilter.cs")!).not.toMatch(
+        /FluentValidation\.ValidationException/,
+      );
+      // Program.cs doesn't register the pipeline.
+      expect(files.get("Program.cs")!).not.toMatch(
+        /AddValidatorsFromAssembly/,
+      );
+    });
+
+    it("emits cross-field invariants as `RuleFor(x => x).Must(...)` with `.WithName`", async () => {
+      const { parseHelper } = await import("langium/test");
+      const services = createDddServices(NodeFileSystem);
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(
+        `
+          context Shop {
+            aggregate Reservation {
+              fromTime: int
+              toTime:   int
+              invariant fromTime < toTime
+            }
+            repository Reservations for Reservation { }
+          }
+        `,
+        { validation: true },
+      );
+      const files = generateDotnet(doc.parseResult.value as Model);
+      const v = files.get(
+        "Application/Reservations/Commands/CreateReservationCommandValidator.cs",
+      )!;
+      // Cross-field rule lowers to a Must predicate.
+      expect(v).toMatch(
+        /RuleFor\(x => x\)\.Must\(x => x\.FromTime < x\.ToTime\)/,
+      );
+      // Field-path attribution.
+      expect(v).toMatch(/\.WithName\("FromTime"\)/);
+      expect(v).toMatch(/\.WithMessage\("Invariant violated:[^"]+"\)/);
+    });
+  });
 });
