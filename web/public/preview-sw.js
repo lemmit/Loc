@@ -76,10 +76,6 @@ self.addEventListener("fetch", (event) => {
 });
 
 async function handleSandboxRequest(url) {
-  // Phase-1 placeholder.  Real handler (next PR) will:
-  //   - Serve `currentBundle.html` for the index navigation.
-  //   - Forward `runtime/...` paths to the parent client via
-  //     MessageChannel, then return the runtime worker's response.
   if (currentBundle == null) {
     return new Response(
       "Loom preview sandbox is not ready yet — bundle the source first.\n",
@@ -89,11 +85,25 @@ async function handleSandboxRequest(url) {
       },
     );
   }
-  return new Response(
-    "Sandbox handler not wired yet (scaffolding) — see preview-sw.js TODO.\n",
-    {
-      status: 501,
-      headers: { "content-type": "text/plain; charset=utf-8" },
-    },
-  );
+  const swDir = new URL(".", self.location.href).pathname;
+  const sandboxRoot = swDir + SANDBOX_PREFIX;
+  // Index navigation — sandbox root or `index.html`.  Anything else
+  // under the prefix is reserved for the future runtime bridge
+  // (`<sandbox>/runtime/...`); 404 it for now so a stray fetch is
+  // a clear miss rather than landing on the index.
+  if (url.pathname === sandboxRoot || url.pathname === sandboxRoot + "index.html") {
+    return new Response(currentBundle.html, {
+      status: 200,
+      headers: {
+        "content-type": "text/html; charset=utf-8",
+        // Bundles are live-pushed; never let the browser serve a
+        // stale one from disk cache.
+        "cache-control": "no-store",
+      },
+    });
+  }
+  return new Response("Sandbox path not handled yet.\n", {
+    status: 404,
+    headers: { "content-type": "text/plain; charset=utf-8" },
+  });
 }

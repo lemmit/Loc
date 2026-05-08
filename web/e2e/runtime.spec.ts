@@ -77,6 +77,31 @@ test("editor → generate → bundle → boot → dispatch", async ({ page }) =>
     expect(parsed[0].price.currency).toBe("USD");
   });
 
+  await test.step("Service Worker serves the latest bundle on sandbox URL", async () => {
+    // Switching to the Preview tab triggers the bundle push
+    // (Preview.tsx subscribes to navigator.serviceWorker.ready and
+    // posts the synthesized HTML to the SW).  Then a direct fetch
+    // to the sandbox URL — same-origin, in-scope — must return the
+    // pushed HTML rather than the 503 "bundle first" placeholder.
+    await page.getByTestId("right-pane-tabs").locator("text=Preview").click();
+    const result = await page.evaluate(async () => {
+      const url = new URL("__loom_sandbox__/", location.href).toString();
+      // Up to 10 s for the bundle push round-trip.
+      const start = Date.now();
+      while (Date.now() - start < 10_000) {
+        const res = await fetch(url, { cache: "no-store" });
+        const body = await res.text();
+        if (res.status === 200 && body.includes("<div id=\"root\">")) {
+          return { status: res.status, hasRoot: true };
+        }
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      return { status: -1, hasRoot: false };
+    });
+    expect(result.hasRoot, "sandbox URL serves bundled HTML").toBe(true);
+    expect(result.status).toBe(200);
+  });
+
   await test.step("Preview loads the React app and round-trips a fetch", async () => {
     // The Preview tab is only meaningful when the source has a
     // React deployable.  The default Sales System example does;
