@@ -95,7 +95,15 @@ async function handleSandboxRequest(request, url) {
   // because the user hasn't bundled (the runtime worker can be up
   // independently).
   if (subpath.startsWith(RUNTIME_SUBPATH)) {
-    return forwardRuntime(request);
+    // Strip the `<deploy>/<sandbox>/runtime` prefix so the
+    // forwarded URL's pathname matches what the bundled Hono app
+    // registered its routes under (e.g. `/customers`).  Hono
+    // matches on `new URL(request.url).pathname`; without this
+    // rewrite it would see the full deploy path and 404 every
+    // request.  Origin/search/hash are preserved.
+    const routeUrl = new URL(request.url);
+    routeUrl.pathname = "/" + subpath.slice(RUNTIME_SUBPATH.length);
+    return forwardRuntime(request, routeUrl.toString());
   }
 
   if (currentBundle == null) {
@@ -124,7 +132,7 @@ async function handleSandboxRequest(request, url) {
   });
 }
 
-async function forwardRuntime(request) {
+async function forwardRuntime(request, forwardUrl) {
   if (!runtimePort) {
     return new Response("Runtime not attached.\n", {
       status: 502,
@@ -173,7 +181,7 @@ async function forwardRuntime(request) {
     });
     runtimePort.postMessage({
       id,
-      url: request.url,
+      url: forwardUrl,
       method: request.method,
       headers,
       body,
