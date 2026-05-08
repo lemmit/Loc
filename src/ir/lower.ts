@@ -418,7 +418,17 @@ function lowerPage(p: import("../language/generated/ast.js").Page): PageIR {
       };
     }
   }
-  return { name: p.name, params, route, title, requires, state, body, menuMeta };
+  return {
+    name: p.name,
+    params,
+    route,
+    title,
+    requires,
+    state,
+    body,
+    menuMeta,
+    source: "explicit",
+  };
 }
 
 function lowerComponent(

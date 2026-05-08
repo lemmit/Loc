@@ -445,7 +445,7 @@ export interface PageIR {
   params: ParamIR[];
   /** Path-with-`:params` from `route: "..."`.  Always set for pages
    *  written in source; pages synthesised by Slice 4's scaffold
-   *  expander will populate this from the rewrite rule. */
+   *  expander populate this from the rewrite rule. */
   route?: string;
   /** Optional title expression.  May interpolate state / data refs. */
   title?: ExprIR;
@@ -460,7 +460,32 @@ export interface PageIR {
   /** Per-page menu metadata.  Read by the menu emitter (Slice 6) when
    *  no explicit ui-level menu block is declared. */
   menuMeta?: MenuMetaIR;
+  /** Provenance discriminator (Slice 4): `"explicit"` for pages
+   *  written in source; `"scaffold"` for pages synthesised by the
+   *  expander.  Slice 5's emitter uses this to fast-path the legacy
+   *  per-aggregate / per-workflow / per-view builders for the bulk-
+   *  scaffold case (byte-equivalence target). */
+  source: "explicit" | "scaffold";
+  /** Slice 4 only sets this for scaffold-synthesised pages.  Carries
+   *  the structural shape of the page so Slice 5's emitter can
+   *  dispatch without re-parsing the body expression.  Same source
+   *  context the legacy generator's per-aggregate / per-workflow /
+   *  per-view loop received. */
+  scaffoldOrigin?: ScaffoldOriginIR;
 }
+
+/** Provenance for a scaffold-synthesised page.  Each kind names the
+ *  domain-IR target plus the page archetype within that target's
+ *  generated set. */
+export type ScaffoldOriginIR =
+  | { kind: "aggregate-list"; aggregateName: string; contextName: string }
+  | { kind: "aggregate-new"; aggregateName: string; contextName: string }
+  | { kind: "aggregate-detail"; aggregateName: string; contextName: string }
+  | { kind: "workflow-form"; workflowName: string; contextName: string }
+  | { kind: "view-list"; viewName: string; contextName: string }
+  | { kind: "workflows-index" }
+  | { kind: "views-index" }
+  | { kind: "home" };
 
 /** A user-defined component: typed function from params (and optional
  *  local state) to a body expression.  Components compose other
