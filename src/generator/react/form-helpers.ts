@@ -3,7 +3,7 @@ import type {
   BoundedContextIR,
   TypeIR,
 } from "../../ir/loom-ir.js";
-import { camel, plural } from "../../util/naming.js";
+import { camel, humanize, plural } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // React form helpers — Mantine input rendering on top of `react-hook-form`,
@@ -168,6 +168,11 @@ export function formInput(
   const inner = unwrapOpt(t);
   const tid = `data-testid="${testId}"`;
   const errExpr = errorAccess(path);
+  // Label = humanized leaf segment of the dotted path so nested
+  // value-object fields render as "Amount" / "Currency" rather
+  // than "price.amount" / "price.currency".
+  const leaf = path.split(".").pop()!;
+  const label = humanize(leaf);
 
   if (inner.kind === "primitive") {
     if (inner.name === "int" || inner.name === "long") {
@@ -175,7 +180,7 @@ export function formInput(
           control={control}
           name="${path}"
           render={({ field, fieldState }) => (
-            <NumberInput label="${path}" ${tid} allowDecimal={false} value={field.value as number | "" | undefined} onChange={(v) => field.onChange(typeof v === "number" ? v : Number(v) || 0)} error={fieldState.error?.message} />
+            <NumberInput label="${label}" ${tid} allowDecimal={false} value={field.value as number | "" | undefined} onChange={(v) => field.onChange(typeof v === "number" ? v : Number(v) || 0)} error={fieldState.error?.message} />
           )}
         />`;
     }
@@ -184,7 +189,7 @@ export function formInput(
           control={control}
           name="${path}"
           render={({ field, fieldState }) => (
-            <NumberInput label="${path}" ${tid} decimalScale={2} fixedDecimalScale value={field.value as number | "" | undefined} onChange={(v) => field.onChange(typeof v === "number" ? v : Number(v) || 0)} error={fieldState.error?.message} />
+            <NumberInput label="${label}" ${tid} decimalScale={2} fixedDecimalScale value={field.value as number | "" | undefined} onChange={(v) => field.onChange(typeof v === "number" ? v : Number(v) || 0)} error={fieldState.error?.message} />
           )}
         />`;
     }
@@ -193,7 +198,7 @@ export function formInput(
           control={control}
           name="${path}"
           render={({ field, fieldState }) => (
-            <Switch label="${path}" ${tid} checked={!!field.value} onChange={(e) => field.onChange(e.currentTarget.checked)} error={fieldState.error?.message} />
+            <Switch label="${label}" ${tid} checked={!!field.value} onChange={(e) => field.onChange(e.currentTarget.checked)} error={fieldState.error?.message} />
           )}
         />`;
     }
@@ -212,9 +217,9 @@ export function formInput(
       // a Mantine-styled one.  When richer UX is needed, pin the
       // generated form via .loomignore and swap in Mantine's
       // DateTimePicker by hand.
-      return `<TextInput label="${path}" {...register("${path}")} ${tid} type="datetime-local" error={${errExpr}} />`;
+      return `<TextInput label="${label}" {...register("${path}")} ${tid} type="datetime-local" error={${errExpr}} />`;
     }
-    return `<TextInput label="${path}" {...register("${path}")} ${tid} error={${errExpr}} />`;
+    return `<TextInput label="${label}" {...register("${path}")} ${tid} error={${errExpr}} />`;
   }
 
   if (inner.kind === "id") {
@@ -236,14 +241,14 @@ export function formInput(
       const reason = !target
         ? `Id<${inner.targetName}>: target aggregate not found`
         : `Aggregate '${inner.targetName}' has no 'display' field — declare one (e.g. 'sku: string display') to enable a Select picker for Id<${inner.targetName}>.`;
-      return `<TextInput label="${path}" {...register("${path}")} ${tid} placeholder=${JSON.stringify(`<id> — ${reason}`)} error={${errExpr}} />`;
+      return `<TextInput label="${label}" {...register("${path}")} ${tid} placeholder=${JSON.stringify(`<id> — ${reason}`)} error={${errExpr}} />`;
     }
     const hookVar = idTargetHookVar(target);
     return `<Controller
           control={control}
           name="${path}"
           render={({ field, fieldState }) => (
-            <Select label="${path}" ${tid} data={(${hookVar}.data ?? []).map((__o) => ({ value: __o.id, label: __o.${display.name} }))} renderOption={({ option }) => <div data-testid={\`${testId}-option-\${option.value}\`}>{option.label}</div>} allowDeselect={false} value={field.value as string} onChange={(v) => field.onChange(v ?? "")} error={fieldState.error?.message} />
+            <Select label="${label}" ${tid} placeholder="Select…" searchable data={(${hookVar}.data ?? []).map((__o) => ({ value: __o.id, label: __o.${display.name} }))} renderOption={({ option }) => <div data-testid={\`${testId}-option-\${option.value}\`}>{option.label}</div>} allowDeselect={false} value={field.value as string} onChange={(v) => field.onChange(v ?? "")} error={fieldState.error?.message} />
           )}
         />`;
   }
@@ -256,11 +261,11 @@ export function formInput(
           control={control}
           name="${path}"
           render={({ field, fieldState }) => (
-            <Select label="${path}" ${tid} data={${data}} allowDeselect={false} value={field.value as string} onChange={(v) => field.onChange(v)} error={fieldState.error?.message} />
+            <Select label="${label}" ${tid} data={${data}} allowDeselect={false} value={field.value as string} onChange={(v) => field.onChange(v)} error={fieldState.error?.message} />
           )}
         />`;
     }
-    return `<TextInput label="${path}" {...register("${path}")} ${tid} error={${errExpr}} />`;
+    return `<TextInput label="${label}" {...register("${path}")} ${tid} error={${errExpr}} />`;
   }
 
   if (inner.kind === "valueobject") {
@@ -276,17 +281,22 @@ export function formInput(
             aggregatesByName,
           ),
         )
-        .join("\n          ");
-      return `<Fieldset legend="${path}" data-testid="${testId}">\n          ${sub}\n        </Fieldset>`;
+        .join("\n            ");
+      // variant="filled" + radius="md" reads as a grouped sub-form
+      // section instead of the bare browser-default fieldset.  The
+      // legend renders as a small heading so nested value-object
+      // forms (e.g. Money { amount, currency }) feel like one
+      // composite input rather than a stack of unrelated rows.
+      return `<Fieldset legend="${label}" variant="filled" radius="md" data-testid="${testId}">\n          <Stack gap="sm">\n            ${sub}\n          </Stack>\n        </Fieldset>`;
     }
-    return `<TextInput label="${path}" {...register("${path}")} ${tid} error={${errExpr}} />`;
+    return `<TextInput label="${label}" {...register("${path}")} ${tid} error={${errExpr}} />`;
   }
 
   if (inner.kind === "array") {
-    return `<TextInput label="${path}" {...register("${path}")} ${tid} placeholder="(arrays not yet supported in forms)" disabled error={${errExpr}} />`;
+    return `<TextInput label="${label}" {...register("${path}")} ${tid} placeholder="(arrays not yet supported in forms)" disabled error={${errExpr}} />`;
   }
 
-  return `<TextInput label="${path}" {...register("${path}")} ${tid} error={${errExpr}} />`;
+  return `<TextInput label="${label}" {...register("${path}")} ${tid} error={${errExpr}} />`;
 }
 
 /** RHF errors live at `errors.foo.bar.baz?.message` — translate a dot-

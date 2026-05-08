@@ -3,7 +3,7 @@ import type {
   BoundedContextIR,
   WorkflowIR,
 } from "../../ir/loom-ir.js";
-import { camel, plural, snake } from "../../util/naming.js";
+import { camel, humanize as humanizeUtil, plural, snake } from "../../util/naming.js";
 import {
   componentsForFields,
   formInput,
@@ -229,32 +229,42 @@ export function buildWorkflowsIndexPage(contexts: BoundedContextIR[]): string {
             // typeLabel may contain '<' / '>' (e.g. `Id<Product>`);
             // emit as a JS string literal so React renders it as
             // text rather than parsing it as a JSX element.
-            `        <Text size="sm" c="dimmed" data-testid="workflow-${slug}-param-${p.name}"><strong>${p.name}</strong>: {${JSON.stringify(typeLabel(p.type))}}</Text>`,
+            `          <Text size="sm" c="dimmed" data-testid="workflow-${slug}-param-${p.name}"><strong>${humanizeUtil(p.name)}</strong>: {${JSON.stringify(typeLabel(p.type))}}</Text>`,
         )
         .join("\n");
       const paramsBlock =
         wf.params.length > 0
           ? params
-          : `        <Text size="sm" c="dimmed">No parameters.</Text>`;
-      return `      <Card withBorder data-testid="workflow-card-${slug}">
-        <Group justify="space-between">
-          <Title order={4}>${human}</Title>
-          <Button component={Link} to="/workflows/${slug}" data-testid="workflow-${slug}-run">Run →</Button>
-        </Group>
+          : `          <Text size="sm" c="dimmed">No parameters.</Text>`;
+      return `      <Card data-testid="workflow-card-${slug}">
+        <Stack gap="xs">
+          <Group justify="space-between" align="center">
+            <Group gap="xs" align="center">
+              <IconBolt size={18} stroke={2} color="var(--mantine-color-brand-6)" />
+              <Title order={4}>${human}</Title>
+            </Group>
+            <Button component={Link} to="/workflows/${slug}" data-testid="workflow-${slug}-run">Run →</Button>
+          </Group>
 ${paramsBlock}
+        </Stack>
       </Card>`;
     })
     .join("\n");
   return `// Auto-generated.
 import { Link } from "react-router-dom";
-import { Stack, Title, Text, Card, Group, Button } from "@mantine/core";
+import { Stack, Title, Text, Card, Group, Button, SimpleGrid } from "@mantine/core";
+import { IconBolt } from "@tabler/icons-react";
 
 export default function WorkflowsIndex() {
   return (
-    <Stack data-testid="workflows-index">
-      <Title order={2}>Workflows</Title>
-      <Text c="dimmed">System-level orchestrations.  Pick one to run.</Text>
+    <Stack data-testid="workflows-index" gap="md">
+      <Stack gap={2}>
+        <Title order={2}>Workflows</Title>
+        <Text c="dimmed">System-level orchestrations.  Pick one to run.</Text>
+      </Stack>
+      <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
 ${cards}
+      </SimpleGrid>
     </Stack>
   );
 }
@@ -319,6 +329,8 @@ export function buildWorkflowFormPage(
     "Group",
     "Anchor",
     "Text",
+    "Card",
+    "Breadcrumbs",
     ...componentsForFields(fields, ctx),
   ]
     .filter((v, i, a) => a.indexOf(v) === i)
@@ -343,29 +355,37 @@ ${idHookCalls ? idHookCalls + "\n" : ""}  const ${destructured} = useForm<${cap(
     defaultValues: ${initialValuesTs(fields, ctx)},
   });
   return (
-    <Stack maw={600} data-testid="workflow-${slug}">
-      <Group justify="space-between">
+    <Stack maw={640} data-testid="workflow-${slug}" gap="md">
+      <Breadcrumbs>
+        <Anchor component={Link} to="/">Home</Anchor>
+        <Anchor component={Link} to="/workflows">Workflows</Anchor>
+        <Text>${human}</Text>
+      </Breadcrumbs>
+      <Stack gap={2}>
+        <Text size="sm" c="dimmed" tt="uppercase" fw={600}>Workflow</Text>
         <Title order={2}>${human}</Title>
-        <Anchor component={Link} to="/workflows">← back</Anchor>
-      </Group>
-      <form
-        onSubmit={handleSubmit(async (vals) => {
-          try {
-            await run.mutateAsync(vals);
-            notifications.show({ color: "green", message: "${human} completed" });
-            navigate("/workflows");
-          } catch (e) {
-            notifications.show({ color: "red", message: (e as Error).message });
-          }
-        })}
-      >
-        <Stack>
-        ${formFields}
-          <Group justify="flex-end">
-            <Button type="submit" loading={run.isPending} data-testid="workflow-${slug}-submit">Run</Button>
-          </Group>
-        </Stack>
-      </form>
+      </Stack>
+      <Card>
+        <form
+          onSubmit={handleSubmit(async (vals) => {
+            try {
+              await run.mutateAsync(vals);
+              notifications.show({ color: "green", message: "${human} completed" });
+              navigate("/workflows");
+            } catch (e) {
+              notifications.show({ color: "red", message: (e as Error).message });
+            }
+          })}
+        >
+          <Stack gap="md">
+          ${formFields}
+            <Group justify="flex-end" mt="sm">
+              <Button variant="default" onClick={() => navigate("/workflows")}>Cancel</Button>
+              <Button type="submit" loading={run.isPending} data-testid="workflow-${slug}-submit">Run</Button>
+            </Group>
+          </Stack>
+        </form>
+      </Card>
     </Stack>
   );
 }

@@ -23,6 +23,24 @@ export function plural(input: string): string {
   return input + "s";
 }
 
+/** Convert an identifier (camelCase, PascalCase, snake_case) into a
+ *  human-friendly Title Case label suitable for UI display.
+ *  Examples: "customerId" → "Customer Id"; "placedAt" → "Placed At";
+ *  "addLine" → "Add Line"; "order_total" → "Order Total".
+ *  Common acronyms are passed through capitalised, not split. */
+export function humanize(input: string): string {
+  if (!input) return input;
+  const words = input
+    .replace(/[_-]+/g, " ")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .trim()
+    .split(/\s+/);
+  return words
+    .map((w) => (w.length === 0 ? w : w[0]!.toUpperCase() + w.slice(1)))
+    .join(" ");
+}
+
 export function indent(text: string, level = 1, unit = "  "): string {
   const pad = unit.repeat(level);
   return text

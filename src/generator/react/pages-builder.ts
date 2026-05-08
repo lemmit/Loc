@@ -5,7 +5,7 @@ import type {
   FieldIR,
   ParamIR,
 } from "../../ir/loom-ir.js";
-import { camel, plural, snake } from "../../util/naming.js";
+import { camel, humanize, plural, snake } from "../../util/naming.js";
 import {
   componentsForFields,
   formInput,
@@ -26,62 +26,88 @@ import {
 // brittle text matching.
 // ---------------------------------------------------------------------------
 
-export function buildListPage(agg: AggregateIR): string {
+export function buildListPage(
+  agg: AggregateIR,
+  aggregatesByName: Map<string, AggregateIR>,
+): string {
   const slug = snake(plural(agg.name));
   const cap = upper(agg.name);
+  const humanPlural = humanize(plural(agg.name));
+  const humanSingular = humanize(agg.name);
   const cols: string[] = [];
-  cols.push(`<Table.Th>id</Table.Th>`);
+  cols.push(`<Table.Th>Id</Table.Th>`);
   for (const f of agg.fields) {
-    if (isPrimitiveLike(f.type)) cols.push(`<Table.Th>${f.name}</Table.Th>`);
+    if (isPrimitiveLike(f.type))
+      cols.push(`<Table.Th>${humanize(f.name)}</Table.Th>`);
   }
   const cells: string[] = [];
   cells.push(
-    `<Table.Td><Anchor component={Link} to={\`/${slug}/\${row.id}\`} data-testid={\`${slug}-row-\${row.id}-link\`}>{row.id.slice(0, 8)}…</Anchor></Table.Td>`,
+    `<Table.Td><Anchor component={Link} to={\`/${slug}/\${row.id}\`} data-testid={\`${slug}-row-\${row.id}-link\`}><IdValue id={row.id} /></Anchor></Table.Td>`,
   );
   for (const f of agg.fields) {
-    if (isPrimitiveLike(f.type)) cells.push(displayCellExpr(slug, f));
+    if (isPrimitiveLike(f.type)) cells.push(displayCellExpr(slug, f, aggregatesByName));
   }
   return `// Auto-generated.
 import { Link, useNavigate } from "react-router-dom";
-import { Stack, Title, Group, Button, Table, Loader, Alert, Anchor, Badge, Center, Text } from "@mantine/core";
+import { Stack, Title, Group, Button, Table, Skeleton, Alert, Anchor, Badge, Center, Text, Paper } from "@mantine/core";
+import { IconPlus, IconAlertCircle } from "@tabler/icons-react";
 import { useAll${plural(agg.name)} } from "../../api/${camel(agg.name)}";
+import { IdValue, DateTimeValue, BoolValue, NumberValue, EmptyValue } from "../../lib/format";
 
 export default function ${cap}List() {
   const navigate = useNavigate();
   const q = useAll${plural(agg.name)}();
+  const count = q.data?.length ?? 0;
   return (
-    <Stack data-testid="${slug}-list">
-      <Group justify="space-between">
-        <Title order={2}>${plural(agg.name)}</Title>
-        <Button onClick={() => navigate("/${slug}/new")} data-testid="${slug}-list-create">Create ${agg.name.toLowerCase()}</Button>
+    <Stack data-testid="${slug}-list" gap="md">
+      <Group justify="space-between" align="flex-end">
+        <Stack gap={2}>
+          <Title order={2}>${humanPlural}</Title>
+          <Text size="sm" c="dimmed">{q.isLoading ? "Loading…" : count === 1 ? "1 record" : count + " records"}</Text>
+        </Stack>
+        <Button leftSection={<IconPlus size={16} stroke={2} />} onClick={() => navigate("/${slug}/new")} data-testid="${slug}-list-create">New ${humanSingular.toLowerCase()}</Button>
       </Group>
-      {q.isLoading && <Loader />}
-      {q.isError && <Alert color="red">{(q.error as Error).message}</Alert>}
-      {q.data && q.data.length === 0 && (
-        <Center mih={200} data-testid="${slug}-list-empty">
-          <Stack gap="xs" align="center">
-            <Text c="dimmed">No ${plural(agg.name).toLowerCase()} yet.</Text>
-            <Button variant="light" onClick={() => navigate("/${slug}/new")}>
-              Create your first ${agg.name.toLowerCase()}
-            </Button>
+      {q.isLoading && (
+        <Paper p="md">
+          <Stack gap="xs">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Skeleton key={i} height={28} radius="sm" />
+            ))}
           </Stack>
-        </Center>
+        </Paper>
+      )}
+      {q.isError && <Alert color="red" variant="light" icon={<IconAlertCircle size={18} />} title="Couldn't load ${humanPlural.toLowerCase()}">{(q.error as Error).message}</Alert>}
+      {q.data && q.data.length === 0 && (
+        <Paper p="xl" data-testid="${slug}-list-empty">
+          <Center mih={160}>
+            <Stack gap="xs" align="center">
+              <Text c="dimmed">No ${humanPlural.toLowerCase()} yet.</Text>
+              <Button variant="light" onClick={() => navigate("/${slug}/new")}>
+                Create your first ${humanSingular.toLowerCase()}
+              </Button>
+            </Stack>
+          </Center>
+        </Paper>
       )}
       {q.data && q.data.length > 0 && (
-        <Table striped withTableBorder highlightOnHover>
-          <Table.Thead>
-            <Table.Tr>
-              ${cols.join("\n              ")}
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {q.data.map((row) => (
-              <Table.Tr key={row.id} data-testid={\`${slug}-row-\${row.id}\`}>
-                ${cells.join("\n                ")}
-              </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
+        <Paper p={0} style={{ overflow: "hidden" }}>
+          <Table.ScrollContainer minWidth={500}>
+            <Table striped highlightOnHover stickyHeader>
+              <Table.Thead>
+                <Table.Tr>
+                  ${cols.join("\n                  ")}
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {q.data.map((row) => (
+                  <Table.Tr key={row.id} data-testid={\`${slug}-row-\${row.id}\`} style={{ cursor: "pointer" }} onClick={() => navigate(\`/${slug}/\${row.id}\`)}>
+                    ${cells.join("\n                    ")}
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </Table.ScrollContainer>
+        </Paper>
       )}
     </Stack>
   );
@@ -111,8 +137,9 @@ export function buildNewPage(
   const idHookCalls = idTargets
     .map((t) => `  const ${idTargetHookVar(t)} = useAll${plural(t.name)}();`)
     .join("\n");
-  const mantineImports = ["Stack", "Title", "Button", "Group"]
+  const mantineImports = ["Stack", "Title", "Button", "Group", "Card", "Text", "Anchor", "Breadcrumbs"]
     .concat([...componentsForFields(fields, ctx)].sort())
+    .filter((v, i, a) => a.indexOf(v) === i)
     .join(", ");
   const useFormImports = needsController(fields, ctx)
     ? "useForm, Controller"
@@ -120,8 +147,11 @@ export function buildNewPage(
   const destructuredHookFields = needsController(fields, ctx)
     ? "{ register, handleSubmit, control, formState: { errors } }"
     : "{ register, handleSubmit, formState: { errors } }";
+  const humanAgg = humanize(agg.name);
+  const humanPlural = humanize(plural(agg.name));
   return `// Auto-generated.
-import { useNavigate } from "react-router-dom";
+// (new page: no aggregate data fetched yet, no display-field title.)
+import { Link, useNavigate } from "react-router-dom";
 import { ${mantineImports} } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { ${useFormImports} } from "react-hook-form";
@@ -136,26 +166,37 @@ ${idHookCalls ? idHookCalls + "\n" : ""}  const ${destructuredHookFields} = useF
     defaultValues: ${initialValuesTs(fields, ctx)},
   });
   return (
-    <Stack maw={600} data-testid="${slug}-new">
-      <Title order={2}>New ${agg.name.toLowerCase()}</Title>
-      <form
-        onSubmit={handleSubmit(async (vals) => {
-          try {
-            const out = await create.mutateAsync(vals);
-            notifications.show({ color: "green", message: "${agg.name} created" });
-            navigate(\`/${slug}/\${out.id}\`);
-          } catch (e) {
-            notifications.show({ color: "red", message: (e as Error).message });
-          }
-        })}
-      >
-        <Stack>
-        ${formFields}
-          <Group justify="flex-end">
-            <Button type="submit" loading={create.isPending} data-testid="${slug}-new-submit">Create</Button>
-          </Group>
-        </Stack>
-      </form>
+    <Stack maw={640} data-testid="${slug}-new" gap="md">
+      <Breadcrumbs>
+        <Anchor component={Link} to="/">Home</Anchor>
+        <Anchor component={Link} to="/${slug}">${humanPlural}</Anchor>
+        <Text>New</Text>
+      </Breadcrumbs>
+      <Stack gap={2}>
+        <Text size="sm" c="dimmed" tt="uppercase" fw={600}>New ${humanAgg.toLowerCase()}</Text>
+        <Title order={2}>Create ${humanAgg.toLowerCase()}</Title>
+      </Stack>
+      <Card>
+        <form
+          onSubmit={handleSubmit(async (vals) => {
+            try {
+              const out = await create.mutateAsync(vals);
+              notifications.show({ color: "green", message: "${humanAgg} created" });
+              navigate(\`/${slug}/\${out.id}\`);
+            } catch (e) {
+              notifications.show({ color: "red", message: (e as Error).message });
+            }
+          })}
+        >
+          <Stack gap="md">
+          ${formFields}
+            <Group justify="flex-end" mt="sm">
+              <Button variant="default" onClick={() => navigate("/${slug}")}>Cancel</Button>
+              <Button type="submit" loading={create.isPending} data-testid="${slug}-new-submit">Create</Button>
+            </Group>
+          </Stack>
+        </form>
+      </Card>
     </Stack>
   );
 }
@@ -179,20 +220,36 @@ export function buildDetailPage(
     .join(", ");
 
   const fieldDisplay = agg.fields
-    .map((f) => fieldDisplayLine(slug, f, ctx))
+    .map((f) => fieldDisplayLine(slug, f, ctx, aggregatesByName))
     .join("\n        ");
 
   const partsBlocks = agg.contains
     .map((c) => {
       const part = agg.parts.find((p) => p.name === c.partName);
-      return part ? renderPartTable(slug, part, c.name, c.collection) : "";
+      return part
+        ? renderPartTable(slug, part, c.name, c.collection, aggregatesByName)
+        : "";
     })
     .filter(Boolean)
     .join("\n        ");
 
   const opButtons = ops
-    .map((op) => renderOperationButton(slug, op))
+    .map((op, i) => renderOperationButton(slug, op, i))
     .join("\n          ");
+  const opIcons = [
+    ...new Set(
+      ops
+        .map((op) => iconForOp(op.name))
+        .filter((v): v is string => Boolean(v)),
+    ),
+  ].sort();
+  // Detail pages always pull in alert + not-found icons for the
+  // error / empty-state branches; op icons are added on top when
+  // the page surfaces operations.
+  const tablerIcons = ["IconAlertCircle", "IconAlertTriangle", ...opIcons]
+    .filter((v, i, a) => a.indexOf(v) === i)
+    .sort();
+  const tablerImport = `\nimport { ${tablerIcons.join(", ")} } from "@tabler/icons-react";`;
 
   // Detail-page components: card / table / breadcrumbs / badge for
   // display + the input set used by every operation modal.
@@ -203,7 +260,7 @@ export function buildDetailPage(
     "Group",
     "Button",
     "Text",
-    "Loader",
+    "Skeleton",
     "Alert",
     "Anchor",
     "Breadcrumbs",
@@ -239,6 +296,18 @@ export function buildDetailPage(
     .map((t) => `import { useAll${plural(t.name)} } from "../../api/${camel(t.name)}";`)
     .join("\n");
 
+  const humanAgg = humanize(agg.name);
+  const humanPlural = humanize(plural(agg.name));
+  // When the aggregate has a `display`-marked field (e.g. Product
+  // declares `sku: string display`), use its value as the detail
+  // page title so users see "weertsdfg" instead of "9593c1d6…".
+  // Falls back to a short id prefix when no display field exists,
+  // matching the prior behaviour for aggregates that don't have
+  // one (e.g. Order in the acme example).
+  const displayField = agg.fields.find((f) => f.display);
+  const titleExpr = displayField
+    ? `data.${displayField.name}`
+    : `data.id.slice(0, 8) + "…"`;
   return `// Auto-generated.
 import { useParams, Link } from "react-router-dom";
 import { ${mantineImports} } from "@mantine/core";
@@ -247,37 +316,51 @@ import { notifications } from "@mantine/notifications";
 import { ${detailUseFormImports} } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { use${agg.name}ById${ops.length > 0 ? `, ${opHookImports}` : ""}${reqImports.length > 0 ? `, ${reqImports}` : ""} } from "../../api/${camel(agg.name)}";${detailIdHookImports ? "\n" + detailIdHookImports : ""}
+import { IdValue, DateTimeValue, BoolValue, NumberValue, EmptyValue, KeyValueRow } from "../../lib/format";${tablerImport}
 
 export default function ${cap}Detail() {
   const { id } = useParams<{ id: string }>();
   const q = use${agg.name}ById(id);
 ${ops.map((op) => `  const ${camel(op.name)} = use${upper(op.name)}${agg.name}(id ?? "");`).join("\n")}
-  if (q.isLoading) return <Loader />;
-  if (q.isError) return <Alert color="red">{(q.error as Error).message}</Alert>;
-  if (!q.data) return <Text>Not found.</Text>;
+  if (q.isLoading) return (
+    <Stack data-testid="${slug}-detail-loading" gap="md">
+      <Skeleton height={20} width={240} />
+      <Skeleton height={32} width={320} />
+      <Card><Stack gap="md">
+        <Skeleton height={20} />
+        <Skeleton height={20} />
+        <Skeleton height={20} />
+      </Stack></Card>
+    </Stack>
+  );
+  if (q.isError) return <Alert color="red" variant="light" icon={<IconAlertCircle size={18} />} title="Couldn't load ${humanAgg.toLowerCase()}">{(q.error as Error).message}</Alert>;
+  if (!q.data) return <Alert color="yellow" variant="light" icon={<IconAlertTriangle size={18} />} title="Not found">No ${humanAgg.toLowerCase()} matches that id.</Alert>;
   const data = q.data;
   return (
-    <Stack data-testid="${slug}-detail">
+    <Stack data-testid="${slug}-detail" gap="md">
       <Breadcrumbs data-testid="${slug}-detail-breadcrumbs">
         <Anchor component={Link} to="/">Home</Anchor>
-        <Anchor component={Link} to="/${slug}">${plural(agg.name)}</Anchor>
-        <Text>{data.id.slice(0, 8)}…</Text>
+        <Anchor component={Link} to="/${slug}">${humanPlural}</Anchor>
+        <Text>{${titleExpr}}</Text>
       </Breadcrumbs>
-      <Title order={2}>${agg.name} {data.id.slice(0, 8)}…</Title>
-      <Card withBorder>
-        <Stack gap="xs">
+      <Group justify="space-between" align="flex-end">
+        <Stack gap={2}>
+          <Text size="sm" c="dimmed" tt="uppercase" fw={600}>${humanAgg}</Text>
+          <Group gap="sm" align="center">
+            <Title order={2} data-testid="${slug}-detail-title">{${titleExpr}}</Title>
+            <span data-testid="${slug}-detail-id"><IdValue id={data.id} /></span>
+          </Group>
+        </Stack>
+        ${ops.length > 0 ? `<Group gap="xs" data-testid="${slug}-detail-ops">
+          ${opButtons}
+        </Group>` : ""}
+      </Group>
+      <Card>
+        <Stack gap="md">
         ${fieldDisplay}
         </Stack>
       </Card>
       ${partsBlocks}
-      ${ops.length > 0
-        ? `<Card withBorder>
-        <Title order={4}>Operations</Title>
-        <Group>
-          ${opButtons}
-        </Group>
-      </Card>`
-        : ""}
     </Stack>
   );
 }
@@ -294,30 +377,57 @@ function fieldDisplayLine(
   slug: string,
   f: FieldIR,
   ctx: BoundedContextIR,
+  aggregatesByName: Map<string, AggregateIR>,
 ): string {
   const t = unwrapOpt(f.type);
   const tid = `${slug}-detail-${f.name}`;
+  const label = humanize(f.name);
   if (t.kind === "valueobject") {
     const vo = ctx.valueObjects.find((v) => v.name === t.name);
     if (vo) {
       const inner = vo.fields
         .map(
           (vf) =>
-            `${vf.name}: <span data-testid="${tid}-${vf.name}">{String(data.${f.name}.${vf.name})}</span>`,
+            `<Text size="sm"><Text component="span" c="dimmed">${humanize(vf.name)}: </Text><span data-testid="${tid}-${vf.name}">{String(data.${f.name}.${vf.name})}</span></Text>`,
         )
-        .join(", ");
-      return `<Text><strong>${f.name}:</strong> ${inner}</Text>`;
+        .join("\n          ");
+      return `<KeyValueRow label="${label}">
+          ${inner}
+        </KeyValueRow>`;
     }
   }
   if (t.kind === "enum") {
     // tt="unset" disables Mantine's default uppercasing so the rendered
     // text matches the enum value verbatim — predictable for tests.
     // component="span" keeps Badge inline so it nests legally inside
-    // <Text> (which Mantine renders as <p> by default; <div> inside
-    // <p> trips React's validateDOMNesting warning).
-    return `<Text><strong>${f.name}:</strong> <Badge tt="unset" component="span" data-testid="${tid}">{data.${f.name}}</Badge></Text>`;
+    // typography flow.
+    return `<KeyValueRow label="${label}"><Badge tt="unset" component="span" variant="light" data-testid="${tid}">{data.${f.name}}</Badge></KeyValueRow>`;
   }
-  return `<Text><strong>${f.name}:</strong> <span data-testid="${tid}">{String(data.${f.name})}</span></Text>`;
+  if (t.kind === "id") {
+    if (aggregatesByName.has(t.targetName)) {
+      const target = snake(plural(t.targetName));
+      return `<KeyValueRow label="${label}"><span data-testid="${tid}">{data.${f.name} ? <Anchor component={Link} to={\`/${target}/\${data.${f.name}}\`}><IdValue id={data.${f.name}} /></Anchor> : <EmptyValue />}</span></KeyValueRow>`;
+    }
+    return `<KeyValueRow label="${label}"><span data-testid="${tid}"><IdValue id={data.${f.name}} /></span></KeyValueRow>`;
+  }
+  if (t.kind === "primitive" && t.name === "datetime") {
+    return `<KeyValueRow label="${label}"><span data-testid="${tid}"><DateTimeValue iso={data.${f.name}} /></span></KeyValueRow>`;
+  }
+  if (t.kind === "primitive" && t.name === "bool") {
+    return `<KeyValueRow label="${label}"><span data-testid="${tid}"><BoolValue value={data.${f.name}} /></span></KeyValueRow>`;
+  }
+  if (t.kind === "primitive" && (t.name === "int" || t.name === "long")) {
+    return `<KeyValueRow label="${label}"><span data-testid="${tid}"><NumberValue value={data.${f.name}} /></span></KeyValueRow>`;
+  }
+  if (t.kind === "primitive" && t.name === "decimal") {
+    return `<KeyValueRow label="${label}"><span data-testid="${tid}"><NumberValue value={data.${f.name}} decimals={2} /></span></KeyValueRow>`;
+  }
+  const heur = stringIdHeuristic(f.name, t, aggregatesByName);
+  if (heur) {
+    const target = snake(plural(heur.targetName));
+    return `<KeyValueRow label="${label}"><span data-testid="${tid}">{data.${f.name} ? <Anchor component={Link} to={\`/${target}/\${data.${f.name}}\`}><IdValue id={data.${f.name}} /></Anchor> : <EmptyValue />}</span></KeyValueRow>`;
+  }
+  return `<KeyValueRow label="${label}"><span data-testid="${tid}">{data.${f.name} === null || data.${f.name} === undefined || data.${f.name} === "" ? <EmptyValue /> : String(data.${f.name})}</span></KeyValueRow>`;
 }
 
 function renderPartTable(
@@ -325,33 +435,79 @@ function renderPartTable(
   part: EntityPartIR,
   name: string,
   collection: boolean,
+  aggregatesByName: Map<string, AggregateIR>,
 ): string {
+  const sectionTitle = humanize(name);
   if (!collection) {
-    return `<Card withBorder><Title order={4}>${name}</Title><Text>{JSON.stringify(data.${name})}</Text></Card>`;
+    return `<Card><Title order={4}>${sectionTitle}</Title><Text size="sm" c="dimmed" mt="xs">{JSON.stringify(data.${name})}</Text></Card>`;
   }
-  const cols = ["id", ...part.fields.filter((f) => isPrimitiveLike(f.type)).map((f) => f.name)];
+  const partFields = part.fields.filter((f) => isPrimitiveLike(f.type));
+  const cols = ["id", ...partFields.map((f) => f.name)];
+  const colHeaders = cols
+    .map((c) => `<Table.Th>${humanize(c)}</Table.Th>`)
+    .join("\n                ");
+  const cellExprs = (c: string): string => {
+    const tdid = `\`${slug}-detail-${name}-row-\${row.id}-${c}\``;
+    if (c === "id") {
+      return `<Table.Td data-testid={${tdid}}><IdValue id={row.${c}} /></Table.Td>`;
+    }
+    const fld = partFields.find((f) => f.name === c);
+    if (fld) {
+      const t = unwrapOpt(fld.type);
+      if (t.kind === "id") {
+        if (aggregatesByName.has(t.targetName)) {
+          const target = snake(plural(t.targetName));
+          return `<Table.Td data-testid={${tdid}}>{row.${c} ? <Anchor component={Link} to={\`/${target}/\${row.${c}}\`}><IdValue id={row.${c}} /></Anchor> : <EmptyValue />}</Table.Td>`;
+        }
+        return `<Table.Td data-testid={${tdid}}><IdValue id={row.${c}} /></Table.Td>`;
+      }
+      if (t.kind === "primitive" && t.name === "datetime") {
+        return `<Table.Td data-testid={${tdid}}><DateTimeValue iso={row.${c}} /></Table.Td>`;
+      }
+      if (t.kind === "primitive" && t.name === "bool") {
+        return `<Table.Td data-testid={${tdid}}><BoolValue value={row.${c}} /></Table.Td>`;
+      }
+      if (t.kind === "primitive" && (t.name === "int" || t.name === "long")) {
+        return `<Table.Td data-testid={${tdid}} style={{ textAlign: "right" }}><NumberValue value={row.${c}} /></Table.Td>`;
+      }
+      if (t.kind === "primitive" && t.name === "decimal") {
+        return `<Table.Td data-testid={${tdid}} style={{ textAlign: "right" }}><NumberValue value={row.${c}} decimals={2} /></Table.Td>`;
+      }
+      if (t.kind === "enum") {
+        return `<Table.Td data-testid={${tdid}}><Badge tt="unset" variant="light">{row.${c}}</Badge></Table.Td>`;
+      }
+      const heur = stringIdHeuristic(c, t, aggregatesByName);
+      if (heur) {
+        const target = snake(plural(heur.targetName));
+        return `<Table.Td data-testid={${tdid}}>{row.${c} ? <Anchor component={Link} to={\`/${target}/\${row.${c}}\`}><IdValue id={row.${c}} /></Anchor> : <EmptyValue />}</Table.Td>`;
+      }
+    }
+    return `<Table.Td data-testid={${tdid}}>{row.${c} === null || row.${c} === undefined || row.${c} === "" ? <EmptyValue /> : String(row.${c})}</Table.Td>`;
+  };
   const partSlug = snake(plural(part.name));
-  return `<Card withBorder>
-        <Title order={4}>${name}</Title>
-        <Table striped withTableBorder data-testid="${slug}-detail-${name}">
-          <Table.Thead>
-            <Table.Tr>
-              ${cols.map((c) => `<Table.Th>${c}</Table.Th>`).join("\n              ")}
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {data.${name}.map((row) => (
-              <Table.Tr key={row.id} data-testid={\`${slug}-detail-${name}-row-\${row.id}\`}>
-                ${cols
-                  .map(
-                    (c) =>
-                      `<Table.Td data-testid={\`${slug}-detail-${name}-row-\${row.id}-${c}\`}>{String(row.${c} ?? "")}</Table.Td>`,
-                  )
-                  .join("\n                ")}
-              </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
+  return `<Card>
+        <Stack gap="xs">
+          <Group justify="space-between" align="center">
+            <Title order={4}>${sectionTitle}</Title>
+            <Text size="sm" c="dimmed">{data.${name}.length === 1 ? "1 item" : data.${name}.length + " items"}</Text>
+          </Group>
+          <Table.ScrollContainer minWidth={400}>
+            <Table striped highlightOnHover data-testid="${slug}-detail-${name}">
+              <Table.Thead>
+                <Table.Tr>
+                  ${colHeaders}
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {data.${name}.map((row) => (
+                  <Table.Tr key={row.id} data-testid={\`${slug}-detail-${name}-row-\${row.id}\`}>
+                    ${cols.map(cellExprs).join("\n                    ")}
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </Table.ScrollContainer>
+        </Stack>
       </Card>${voidPart(partSlug)}`;
 }
 
@@ -364,8 +520,15 @@ function voidPart(_s: string): string {
 function renderOperationButton(
   slug: string,
   op: { name: string; params: ParamIR[] },
+  index: number,
 ): string {
-  return `<Button onClick={() => open${upper(op.name)}Modal(${camel(op.name)})} data-testid="${slug}-op-${op.name}">${op.name}</Button>`;
+  // First op gets the filled (primary) variant so the most-likely
+  // "next step" pops; subsequent ops use light variant so the
+  // header doesn't turn into a wall of solid buttons.
+  const variant = index === 0 ? "filled" : "light";
+  const icon = iconForOp(op.name);
+  const iconProp = icon ? ` leftSection={<${icon} size={16} stroke={2} />}` : "";
+  return `<Button variant="${variant}"${iconProp} onClick={() => open${upper(op.name)}Modal(${camel(op.name)})} data-testid="${slug}-op-${op.name}">${humanize(op.name)}</Button>`;
 }
 
 function renderOperationModalFn(
@@ -402,9 +565,10 @@ function renderOperationModalFn(
   const opIdHookCalls = opIdTargets
     .map((t) => `  const ${idTargetHookVar(t)} = useAll${plural(t.name)}();`)
     .join("\n");
+  const humanOp = humanize(op.name);
   return `function open${cap}Modal(mut: ReturnType<typeof use${cap}${agg.name}>): void {
   modals.open({
-    title: "${op.name}",
+    title: "${humanOp}",
     children: <${cap}Form mut={mut} onClose={() => modals.closeAll()} />,
   });
 }
@@ -420,7 +584,7 @@ ${opIdHookCalls ? opIdHookCalls + "\n" : ""}  const ${destructured} = useForm<${
       onSubmit={handleSubmit(async (vals) => {
         try {
           await mut.mutateAsync(vals);
-          notifications.show({ color: "green", message: "${op.name} succeeded" });
+          notifications.show({ color: "green", message: "${humanOp} succeeded" });
           onClose();
         } catch (e) {
           notifications.show({ color: "red", message: (e as Error).message });
@@ -429,9 +593,9 @@ ${opIdHookCalls ? opIdHookCalls + "\n" : ""}  const ${destructured} = useForm<${
     >
       <Stack>
         ${formFields}
-        <Group justify="flex-end">
+        <Group justify="flex-end" mt="sm">
           <Button variant="default" onClick={onClose}>Cancel</Button>
-          <Button type="submit" loading={mut.isPending} data-testid="${slug}-op-${op.name}-submit">${op.name}</Button>
+          <Button type="submit" loading={mut.isPending} data-testid="${slug}-op-${op.name}-submit">${humanOp}</Button>
         </Group>
       </Stack>
     </form>
@@ -443,15 +607,87 @@ ${opIdHookCalls ? opIdHookCalls + "\n" : ""}  const ${destructured} = useForm<${
 // Misc
 // ---------------------------------------------------------------------------
 
-function displayCellExpr(slug: string, f: FieldIR): string {
+function displayCellExpr(
+  slug: string,
+  f: FieldIR,
+  aggregatesByName: Map<string, AggregateIR>,
+): string {
   const t = unwrapOpt(f.type);
   const tid = `\`${slug}-row-\${row.id}-${f.name}\``;
   if (t.kind === "enum") {
-    return `<Table.Td data-testid={${tid}}><Badge tt="unset">{row.${f.name}}</Badge></Table.Td>`;
+    return `<Table.Td data-testid={${tid}}><Badge tt="unset" variant="light">{row.${f.name}}</Badge></Table.Td>`;
   }
-  return `<Table.Td data-testid={${tid}}>{String(row.${f.name} ?? "")}</Table.Td>`;
+  if (t.kind === "id") {
+    const target = snake(plural(t.targetName));
+    if (aggregatesByName.has(t.targetName)) {
+      return `<Table.Td data-testid={${tid}}>{row.${f.name} ? <Anchor component={Link} to={\`/${target}/\${row.${f.name}}\`} onClick={(e) => e.stopPropagation()}><IdValue id={row.${f.name}} /></Anchor> : <EmptyValue />}</Table.Td>`;
+    }
+    return `<Table.Td data-testid={${tid}}><IdValue id={row.${f.name}} /></Table.Td>`;
+  }
+  if (t.kind === "primitive" && t.name === "datetime") {
+    return `<Table.Td data-testid={${tid}}><DateTimeValue iso={row.${f.name}} /></Table.Td>`;
+  }
+  if (t.kind === "primitive" && t.name === "bool") {
+    return `<Table.Td data-testid={${tid}}><BoolValue value={row.${f.name}} /></Table.Td>`;
+  }
+  if (t.kind === "primitive" && (t.name === "int" || t.name === "long")) {
+    return `<Table.Td data-testid={${tid}} style={{ textAlign: "right" }}><NumberValue value={row.${f.name}} /></Table.Td>`;
+  }
+  if (t.kind === "primitive" && t.name === "decimal") {
+    return `<Table.Td data-testid={${tid}} style={{ textAlign: "right" }}><NumberValue value={row.${f.name}} decimals={2} /></Table.Td>`;
+  }
+  // Heuristic: a `string` field named `<Agg>Id` where `Agg` is a
+  // known aggregate gets the same link-to-detail treatment as an
+  // explicit `Id<Agg>` field.  Sales / banking examples often use
+  // raw strings for foreign keys; this avoids leaking unformatted
+  // UUIDs into the table without a DSL change.
+  const heur = stringIdHeuristic(f.name, t, aggregatesByName);
+  if (heur) {
+    const target = snake(plural(heur.targetName));
+    return `<Table.Td data-testid={${tid}}>{row.${f.name} ? <Anchor component={Link} to={\`/${target}/\${row.${f.name}}\`} onClick={(e) => e.stopPropagation()}><IdValue id={row.${f.name}} /></Anchor> : <EmptyValue />}</Table.Td>`;
+  }
+  return `<Table.Td data-testid={${tid}}>{row.${f.name} === null || row.${f.name} === undefined || row.${f.name} === "" ? <EmptyValue /> : String(row.${f.name})}</Table.Td>`;
 }
 
 function upper(s: string): string {
   return s[0]!.toUpperCase() + s.slice(1);
+}
+
+/** Pick a tabler-icon component name for an operation based on its
+ *  verb prefix.  Returns `undefined` when nothing matches so the
+ *  button stays plain rather than getting a misleading icon.  Names
+ *  refer to `@tabler/icons-react` exports — when used, the page's
+ *  import line must include them. */
+function iconForOp(opName: string): string | undefined {
+  const lower = opName.toLowerCase();
+  if (/^(add|append|create|insert|new)/.test(lower)) return "IconPlus";
+  if (/^(remove|delete|drop|clear)/.test(lower)) return "IconTrash";
+  if (/^(confirm|approve|complete|finish|finalize|finalise|publish)/.test(lower)) return "IconCheck";
+  if (/^(cancel|abort|reject|deny)/.test(lower)) return "IconX";
+  if (/^(ship|deliver|dispatch|send)/.test(lower)) return "IconTruckDelivery";
+  if (/^(pay|charge|refund)/.test(lower)) return "IconCreditCard";
+  if (/^(start|begin|open)/.test(lower)) return "IconPlayerPlay";
+  if (/^(stop|close|end)/.test(lower)) return "IconPlayerStop";
+  if (/^(update|edit|change|modify|rename|set)/.test(lower)) return "IconPencil";
+  if (/^(assign|attach|link)/.test(lower)) return "IconLink";
+  return undefined;
+}
+
+/** When a `string` field is conventionally named `<Aggregate>Id`
+ *  (e.g. `customerId: string` referencing aggregate `Customer`),
+ *  treat it as a soft foreign key so the cell can link to the
+ *  target's detail page without requiring the source DSL to upgrade
+ *  to an explicit `Id<Customer>`.  Returns the aggregate match when
+ *  one applies, otherwise undefined. */
+function stringIdHeuristic(
+  fieldName: string,
+  t: { kind: string; name?: string },
+  aggregatesByName: Map<string, AggregateIR>,
+): { targetName: string } | undefined {
+  if (t.kind !== "primitive" || t.name !== "string") return undefined;
+  const m = /^([a-z][A-Za-z0-9]*)Id$/.exec(fieldName);
+  if (!m) return undefined;
+  const candidate = m[1]![0]!.toUpperCase() + m[1]!.slice(1);
+  if (aggregatesByName.has(candidate)) return { targetName: candidate };
+  return undefined;
 }
