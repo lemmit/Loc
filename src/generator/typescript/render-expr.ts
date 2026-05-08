@@ -116,6 +116,18 @@ function renderMethodCall(e: Extract<ExprIR, { kind: "method-call" }>, ctx: TsRe
   if (e.isCollectionOp) {
     return renderCollectionOp(`(${recv})`, e.member, args);
   }
+  // `string.matches(literal)` lowers as a method-call so the wire-
+  // boundary single-field detector can absorb it as a `regex` pattern.
+  // In domain code, render through the JS RegExp API rather than as a
+  // bare `.matches(...)` (no such method on String.prototype).
+  if (
+    e.member === "matches" &&
+    e.receiverType.kind === "primitive" &&
+    e.receiverType.name === "string" &&
+    args.length === 1
+  ) {
+    return `new RegExp(${args[0]}).test(${recv})`;
+  }
   return `${recv}.${e.member}(${args.join(", ")})`;
 }
 

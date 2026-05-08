@@ -242,6 +242,48 @@ describe("singleFieldShape", () => {
     expect(singleFieldShape(i)).toBeNull();
   });
 
+  it("recognises `f.matches(literal)` as the regex pattern (slice 21.C)", () => {
+    const i = inv({
+      kind: "method-call",
+      receiver: {
+        kind: "ref",
+        name: "email",
+        refKind: "this-prop",
+        type: StrT,
+      },
+      member: "matches",
+      args: [{ kind: "literal", lit: "string", value: "^[^@]+@.+$" }],
+      receiverType: StrT,
+      isCollectionOp: false,
+    });
+    expect(singleFieldShape(i)).toEqual({
+      field: "email",
+      pattern: { kind: "regex", pattern: "^[^@]+@.+$" },
+    });
+  });
+
+  it("returns null for `matches` with a non-string-literal arg", () => {
+    // Validator already rejects this at parse time, but the
+    // pattern recogniser should fall through cleanly so a
+    // misuse becomes a generic refine rather than a crash.
+    const i = inv({
+      kind: "method-call",
+      receiver: {
+        kind: "ref",
+        name: "email",
+        refKind: "this-prop",
+        type: StrT,
+      },
+      member: "matches",
+      args: [
+        { kind: "ref", name: "userPattern", refKind: "param", type: StrT },
+      ],
+      receiverType: StrT,
+      isCollectionOp: false,
+    });
+    expect(singleFieldShape(i)).toBeNull();
+  });
+
   it("returns null when the invariant is guarded", () => {
     const i: InvariantIR = {
       ...inv({

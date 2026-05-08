@@ -1195,6 +1195,82 @@ describe(".NET generator", () => {
       );
     });
 
+    it("absorbs `string.matches(literal)` as `RuleFor(x => x.F).Matches(...)` (slice 21.C)", async () => {
+      const { parseHelper } = await import("langium/test");
+      const services = createDddServices(NodeFileSystem);
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(
+        `
+          context Auth {
+            aggregate User {
+              email: string display
+              invariant email.matches("^[^@]+@.+$")
+            }
+            repository Users for User { }
+          }
+        `,
+        { validation: true },
+      );
+      const files = generateDotnet(doc.parseResult.value as Model);
+      const v = files.get(
+        "Application/Users/Commands/CreateUserCommandValidator.cs",
+      )!;
+      expect(v).toMatch(
+        /RuleFor\(x => x\.Email\)\.Matches\("\^\[\^@\]\+@\.\+\$"\)/,
+      );
+    });
+
+    it("renders `matches` in domain code as `Regex.IsMatch` (slice 21.C)", async () => {
+      const { parseHelper } = await import("langium/test");
+      const services = createDddServices(NodeFileSystem);
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(
+        `
+          context Auth {
+            aggregate User {
+              email: string display
+              invariant email.matches("^[^@]+@.+$")
+            }
+            repository Users for User { }
+          }
+        `,
+        { validation: true },
+      );
+      const files = generateDotnet(doc.parseResult.value as Model);
+      const userClass = files.get("Domain/Users/User.cs")!;
+      // The same predicate appears in AssertInvariants (the floor).
+      expect(userClass).toMatch(
+        /System\.Text\.RegularExpressions\.Regex\.IsMatch\(this\.Email, "\^\[\^@\]\+@\.\+\$"\)/,
+      );
+    });
+
+    it("`private invariant` is skipped from FluentValidation but stays in domain (slice 21.C)", async () => {
+      const { parseHelper } = await import("langium/test");
+      const services = createDddServices(NodeFileSystem);
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(
+        `
+          context Acct {
+            aggregate User {
+              username: string display
+              private invariant username.length >= 3
+            }
+            repository Users for User { }
+          }
+        `,
+        { validation: true },
+      );
+      const files = generateDotnet(doc.parseResult.value as Model);
+      // No validator file for CreateUserCommand — the only rule is
+      // server-only and the single-field gate filters it out.
+      expect(
+        files.has("Application/Users/Commands/CreateUserCommandValidator.cs"),
+      ).toBe(false);
+      // But the domain `AssertInvariants` still enforces it.
+      const userClass = files.get("Domain/Users/User.cs")!;
+      expect(userClass).toMatch(/this\.Username\.Length >= 3/);
+    });
+
     it("emits cross-field invariants as `RuleFor(x => x).Must(...)` with `.WithName`", async () => {
       const { parseHelper } = await import("langium/test");
       const services = createDddServices(NodeFileSystem);

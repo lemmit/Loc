@@ -154,7 +154,9 @@ export type SingleFieldPattern =
   | { kind: "between"; lo: number; hi: number } // f >= N && f <= M
   | { kind: "len-min"; n: number }          // f.length >= N
   | { kind: "len-max"; n: number }          // f.length <= N
-  | { kind: "len-eq"; n: number };          // f.length == N
+  | { kind: "len-eq"; n: number }           // f.length == N
+  | { kind: "len-range"; lo: number; hi: number } // f.length >= N && f.length <= M
+  | { kind: "regex"; pattern: string };     // f.matches("…")
 
 /** Detect the recognised "single-field" invariant shapes that map to
  *  idiomatic native chain calls (`z.number().min(N)`,
@@ -173,21 +175,35 @@ function matchSingleField(
 ): { field: string; pattern: SingleFieldPattern } | null {
   if (e.kind === "paren") return matchSingleField(e.inner);
 
-  // Compound: `f >= N && f <= M` → between(N, M)
+  // `<field>.matches("literal")` → regex pattern.
+  const regex = matchesCall(e);
+  if (regex) return regex;
+
+  // Compound on a single field — recognised pairs are absorbed
+  // into idiomatic native chains (between for numeric, two
+  // chained `min/max` calls for string length).  The classifier
+  // returns one of the recognised compound shapes; anything
+  // outside this set falls through to a generic refine.
   if (e.kind === "binary" && e.op === "&&") {
     const lo = matchSingleField(e.left);
     const hi = matchSingleField(e.right);
-    if (
-      lo &&
-      hi &&
-      lo.field === hi.field &&
-      lo.pattern.kind === "min" &&
-      hi.pattern.kind === "max"
-    ) {
-      return {
-        field: lo.field,
-        pattern: { kind: "between", lo: lo.pattern.n, hi: hi.pattern.n },
-      };
+    if (lo && hi && lo.field === hi.field) {
+      // Numeric `f >= N && f <= M`.
+      if (lo.pattern.kind === "min" && hi.pattern.kind === "max") {
+        return {
+          field: lo.field,
+          pattern: { kind: "between", lo: lo.pattern.n, hi: hi.pattern.n },
+        };
+      }
+      // String `f.length >= N && f.length <= M` — uses `len-range`
+      // to chain `.min(N).max(M)` on a `z.string()` base / `.Length(N, M)`
+      // on a FluentValidation rule.
+      if (lo.pattern.kind === "len-min" && hi.pattern.kind === "len-max") {
+        return {
+          field: lo.field,
+          pattern: { kind: "len-range", lo: lo.pattern.n, hi: hi.pattern.n },
+        };
+      }
     }
     return null;
   }
@@ -268,6 +284,29 @@ function lengthFieldRef(e: ExprIR): string | null {
     return recv.name;
   }
   return null;
+}
+
+/** Recognises `<field>.matches("literal")` as the `regex` single-field
+ *  pattern.  String-typed receiver only; argument must be a string
+ *  literal (the parser-time validator already enforces the latter
+ *  for the `matches` operator). */
+function matchesCall(
+  e: ExprIR,
+): { field: string; pattern: SingleFieldPattern } | null {
+  if (e.kind !== "method-call" || e.member !== "matches") return null;
+  if (e.args.length !== 1) return null;
+  const arg = e.args[0]!;
+  if (arg.kind !== "literal" || arg.lit !== "string") return null;
+  const recv = e.receiver;
+  if (recv.kind !== "ref") return null;
+  if (
+    recv.refKind !== "this-prop" &&
+    recv.refKind !== "this-vo-prop" &&
+    recv.refKind !== "param"
+  ) {
+    return null;
+  }
+  return { field: recv.name, pattern: { kind: "regex", pattern: arg.value } };
 }
 
 /** Returns the field name when `e` is a bare reference to a request-

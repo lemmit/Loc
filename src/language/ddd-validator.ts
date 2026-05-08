@@ -49,6 +49,12 @@ import {
 export class DddValidator {
   // Entry: full model walk
   check(model: import("./generated/ast.js").Model, accept: ValidationAcceptor): void {
+    // Slice 21.C — validate every `string.matches(regex)` call's
+    // argument is a string literal that compiles as a RegExp.
+    // Walks the entire AST so the rule applies in invariants,
+    // preconditions, derived bodies, function bodies, and guards
+    // alike — anywhere the operator can appear.
+    this.checkMatchesCalls(model, accept);
     for (const m of model.members) {
       if (m.$type === "BoundedContext") {
         this.checkContext(m, accept);
@@ -214,6 +220,7 @@ export class DddValidator {
       }
       if (isContainment(m)) this.checkContainment(m, agg, accept);
       if (isInvariant(m)) this.checkInvariant(m, this.envForAggregate(agg), accept);
+      if (isProperty(m) && m.check) this.checkPropertyCheck(m, this.envForAggregate(agg), accept);
       if (isDerivedProp(m)) this.checkDerived(m, this.envForAggregate(agg), accept);
       if (isFunctionDecl(m)) this.checkFunction(m, agg, undefined, accept);
       if (isOperation(m)) this.checkOperation(m, agg, accept);
@@ -246,6 +253,7 @@ export class DddValidator {
     for (const m of part.members) {
       if (isContainment(m)) this.checkContainment(m, agg, accept);
       if (isInvariant(m)) this.checkInvariant(m, this.envForPart(agg, part), accept);
+      if (isProperty(m) && m.check) this.checkPropertyCheck(m, this.envForPart(agg, part), accept);
       if (isDerivedProp(m)) this.checkDerived(m, this.envForPart(agg, part), accept);
       if (isFunctionDecl(m)) this.checkFunction(m, agg, part, accept);
     }
@@ -257,6 +265,7 @@ export class DddValidator {
         accept("error", `Value objects cannot contain entities.`, { node: m, property: "name" });
       }
       if (isInvariant(m)) this.checkInvariant(m, this.envForValueObject(vo), accept);
+      if (isProperty(m) && m.check) this.checkPropertyCheck(m, this.envForValueObject(vo), accept);
       if (isDerivedProp(m)) this.checkDerived(m, this.envForValueObject(vo), accept);
     }
   }
@@ -272,6 +281,63 @@ export class DddValidator {
         "error",
         `Cannot 'contain' part '${part.name}' — it belongs to aggregate '${owner?.name ?? "?"}'. Use Id<${part.name}> for cross-aggregate links.`,
         { node: c, property: "partType" },
+      );
+    }
+  }
+
+  private checkMatchesCalls(
+    model: import("./generated/ast.js").Model,
+    accept: ValidationAcceptor,
+  ): void {
+    for (const node of AstUtils.streamAllContents(model)) {
+      if (node.$type !== "MemberAccess") continue;
+      const ma = node as import("./generated/ast.js").MemberAccess;
+      if (ma.member !== "matches" || !ma.call) continue;
+      // `matches` always takes exactly one string-literal argument.
+      if (ma.args.length !== 1) {
+        accept(
+          "error",
+          `'matches' takes exactly one argument (a string-literal regex pattern).`,
+          { node: ma, property: "args" },
+        );
+        continue;
+      }
+      const arg = ma.args[0]!;
+      if (arg.$type !== "StringLit") {
+        accept(
+          "error",
+          `'matches' argument must be a string literal — patterns must be known at codegen time.`,
+          { node: ma, property: "args" },
+        );
+        continue;
+      }
+      const raw = (
+        arg as import("./generated/ast.js").StringLit
+      ).value as string;
+      // The grammar's STRING terminal carries the surrounding quotes.
+      const pattern = raw.startsWith('"') ? JSON.parse(raw) : raw;
+      try {
+        new RegExp(pattern);
+      } catch (err) {
+        accept(
+          "error",
+          `'matches' pattern is not a valid regular expression: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+          { node: ma, property: "args" },
+        );
+      }
+    }
+  }
+
+  private checkPropertyCheck(p: Property, env: Env, accept: ValidationAcceptor) {
+    if (!p.check) return;
+    const t = typeOf(p.check, env);
+    if (t.kind !== "primitive" || t.name !== "bool") {
+      accept(
+        "error",
+        `Property check on '${p.name}' must be of type 'bool', got '${typeToString(t)}'.`,
+        { node: p, property: "check" },
       );
     }
   }

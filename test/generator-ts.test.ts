@@ -1136,6 +1136,52 @@ describe("typescript generator", () => {
       );
     });
 
+    it("absorbs `string.matches(literal)` as `z.string().regex(/.../)` on Hono routes (slice 21.C)", async () => {
+      const { parseHelper } = await import("langium/test");
+      const services = createDddServices(NodeFileSystem);
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(
+        `
+          context Auth {
+            aggregate User {
+              email: string display
+              invariant email.matches("^[^@]+@.+$")
+            }
+            repository Users for User { }
+          }
+        `,
+        { validation: true },
+      );
+      const files = generateTypeScript(doc.parseResult.value as Model);
+      const routes = files.get("http/user.routes.ts")!;
+      expect(routes).toMatch(
+        /CreateUserRequest = z\.object\(\{[\s\S]*email: z\.string\(\)\.regex\(\/\^\[\^@\]\+@\.\+\$\/\)/,
+      );
+    });
+
+    it("renders `matches` in domain code as `new RegExp(...).test(...)` (slice 21.C)", async () => {
+      const { parseHelper } = await import("langium/test");
+      const services = createDddServices(NodeFileSystem);
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(
+        `
+          context Auth {
+            aggregate User {
+              email: string display
+              invariant email.matches("^[^@]+@.+$")
+            }
+            repository Users for User { }
+          }
+        `,
+        { validation: true },
+      );
+      const files = generateTypeScript(doc.parseResult.value as Model);
+      const userClass = files.get("domain/user.ts")!;
+      expect(userClass).toMatch(
+        /new RegExp\("\^\[\^@\]\+@\.\+\$"\)\.test\(this\._email\)/,
+      );
+    });
+
     it("emits cross-field invariants as `.refine()` with field-path attribution", async () => {
       // Use an in-memory model with a synthetic cross-field invariant
       // since sales.ddd's only cross-field rule is non-translatable.

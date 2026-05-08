@@ -241,7 +241,7 @@ BindEntry:
 // ---------------------------------------------------------------------------
 
 Property:
-    name=ID ':' type=TypeRef (display?='display')?;
+    name=ID ':' type=TypeRef (display?='display')? ('check' check=Expression)?;
 
 Containment:
     'contains' name=ID ':' partType=[EntityPart:ID] (collection?='[]')?;
@@ -249,8 +249,14 @@ Containment:
 DerivedProp:
     'derived' name=ID ':' type=TypeRef '=' expr=Expression;
 
+// Invariants default to "every layer the classifier can translate
+// the predicate to" (frontend Zod, Hono routes, FluentValidation).
+// `private invariant ...` opts out of the wire layers — the rule
+// only runs in the domain `AssertInvariants()` floor.  Useful for
+// rules the user doesn't want disclosed via OpenAPI (sensitive
+// uniqueness checks, internal-only consistency rules).
 Invariant:
-    'invariant' expr=Expression ('when' guard=Expression)?;
+    (serverOnly?='private')? 'invariant' expr=Expression ('when' guard=Expression)?;
 
 FunctionDecl:
     'function' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' ':' returnType=TypeRef '=' body=Expression;

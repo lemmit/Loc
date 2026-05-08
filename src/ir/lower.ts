@@ -355,13 +355,17 @@ function lowerEnum(e: EnumDecl): EnumIR {
 
 function lowerValueObject(vo: ValueObject, env: Env): ValueObjectIR {
   const inner = inValueObject(env, vo);
+  const props = vo.members.filter(isProperty) as Property[];
   return {
     name: vo.name,
-    fields: vo.members.filter(isProperty).map((p) => lowerField(p)),
+    fields: props.map((p) => lowerField(p)),
     derived: vo.members.filter(isDerivedProp).map((d) =>
       lowerDerived(d, inner),
     ),
-    invariants: vo.members.filter(isInvariant).map((i) => lowerInvariant(i, inner)),
+    invariants: [
+      ...vo.members.filter(isInvariant).map((i) => lowerInvariant(i, inner)),
+      ...lowerPropertyChecks(props, inner),
+    ],
     functions: vo.members.filter(isFunctionDecl).map((f) => lowerFunction(f, inner)),
   };
 }
@@ -383,7 +387,10 @@ function lowerAggregate(agg: Aggregate, env: Env): AggregateIR {
     if (isEntityPart(m)) parts.push(lowerEntityPart(m, agg, inner));
   }
   const derived = agg.members.filter(isDerivedProp).map((d) => lowerDerived(d, inner));
-  const invariants = agg.members.filter(isInvariant).map((i) => lowerInvariant(i, inner));
+  const invariants = [
+    ...agg.members.filter(isInvariant).map((i) => lowerInvariant(i, inner)),
+    ...lowerPropertyChecks(props, inner),
+  ];
   const functions = agg.members.filter(isFunctionDecl).map((f) => lowerFunction(f, inner));
   const operations = (agg.members.filter(isOperation) as Operation[]).map((op) =>
     lowerOperation(op, inner),
@@ -448,7 +455,10 @@ function lowerEntityPart(
     fields: props.map(lowerField),
     contains: part.members.filter(isContainment).map(lowerContainment),
     derived: part.members.filter(isDerivedProp).map((d) => lowerDerived(d, inner)),
-    invariants: part.members.filter(isInvariant).map((i) => lowerInvariant(i, inner)),
+    invariants: [
+      ...part.members.filter(isInvariant).map((i) => lowerInvariant(i, inner)),
+      ...lowerPropertyChecks(props, inner),
+    ],
     functions: part.members.filter(isFunctionDecl).map((f) => lowerFunction(f, inner)),
   };
 }
@@ -674,7 +684,30 @@ function lowerInvariant(
     expr: lowerExpr(i.expr, env),
     guard: i.guard ? lowerExpr(i.guard, env) : undefined,
     source: cstText(i.expr),
+    // Slice 21.C — `private invariant ...` opts out of the wire
+    // layers (frontend Zod, Hono routes, FluentValidation).  The
+    // domain-layer `AssertInvariants()` floor still enforces it.
+    scope: i.serverOnly ? "server-only" : undefined,
   };
+}
+
+/** Synthesise an InvariantIR from an inline `field: T check <expr>`
+ *  clause on a Property.  Slice 21.C sugar — the synthesised invariant
+ *  appears in the parent's `invariants` list so the existing wire-
+ *  validator + domain-floor pipelines pick it up uniformly. */
+function lowerPropertyChecks(
+  props: import("../language/generated/ast.js").Property[],
+  env: Env,
+): InvariantIR[] {
+  const out: InvariantIR[] = [];
+  for (const p of props) {
+    if (!p.check) continue;
+    out.push({
+      expr: lowerExpr(p.check, env),
+      source: `${p.name} check ${cstText(p.check)}`,
+    });
+  }
+  return out;
 }
 
 function lowerFunction(f: FunctionDecl, env: Env): FunctionIR {

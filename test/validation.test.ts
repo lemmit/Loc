@@ -1471,4 +1471,96 @@ describe("Loom IR validation (post-lowering)", async () => {
       JSON.stringify(diags),
     ).toBe(true);
   });
+
+  // -------------------------------------------------------------------
+  // Slice 21.C — DSL extensions: matches / check / private invariant.
+  // -------------------------------------------------------------------
+  describe("slice 21.C — DSL extensions", () => {
+    it("accepts a valid `string.matches(literal)` invariant", async () => {
+      const { errors } = await parse(`
+        context T {
+          aggregate A {
+            email: string
+            invariant email.matches("^[^@]+@.+$")
+          }
+          repository As for A { }
+        }
+      `);
+      expect(errors).toEqual([]);
+    });
+
+    it("rejects a `matches` argument that is not a string literal", async () => {
+      const { errors } = await parse(`
+        context T {
+          aggregate A {
+            email: string
+            pattern: string
+            invariant email.matches(pattern)
+          }
+          repository As for A { }
+        }
+      `);
+      expect(
+        errors.some((e) => /'matches' argument must be a string literal/.test(e)),
+      ).toBe(true);
+    });
+
+    it("rejects a `matches` pattern that doesn't compile as a regex", async () => {
+      const { errors } = await parse(`
+        context T {
+          aggregate A {
+            email: string
+            invariant email.matches("[invalid")
+          }
+          repository As for A { }
+        }
+      `);
+      expect(
+        errors.some((e) => /not a valid regular expression/.test(e)),
+      ).toBe(true);
+    });
+
+    it("accepts a property with a bool `check` clause", async () => {
+      const { errors } = await parse(`
+        context T {
+          aggregate A {
+            email: string display check email.length <= 120
+          }
+          repository As for A { }
+        }
+      `);
+      expect(errors).toEqual([]);
+    });
+
+    it("rejects a property `check` clause that doesn't type to bool", async () => {
+      const { errors } = await parse(`
+        context T {
+          aggregate A {
+            n: int check n + 1
+          }
+          repository As for A { }
+        }
+      `);
+      expect(
+        errors.some(
+          (e) =>
+            /Property check on 'n'/.test(e) &&
+            /bool/.test(e),
+        ),
+      ).toBe(true);
+    });
+
+    it("accepts `private invariant` (server-only opt-out)", async () => {
+      const { errors } = await parse(`
+        context T {
+          aggregate A {
+            email: string
+            private invariant email.matches("^[^@]+@.+$")
+          }
+          repository As for A { }
+        }
+      `);
+      expect(errors).toEqual([]);
+    });
+  });
 });

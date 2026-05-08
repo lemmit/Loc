@@ -172,6 +172,13 @@ function chainSingleFieldFluent(p: SingleFieldPattern): string {
       return `.MaximumLength(${p.n})`;
     case "len-eq":
       return `.Length(${p.n}, ${p.n})`;
+    case "len-range":
+      return `.Length(${p.lo}, ${p.hi})`;
+    case "regex":
+      // FluentValidation's `.Matches` accepts a string regex; we
+      // pass the literal verbatim (already validated as a valid
+      // .NET-compatible regex at parse time).
+      return `.Matches(${csStringLiteral(p.pattern)})`;
   }
 }
 
@@ -266,6 +273,17 @@ function renderMethodCall(
 ): string {
   const recv = renderFluentPredicate(e.receiver);
   const args = e.args.map(renderFluentPredicate);
+  // `string.matches(literal)` — when it falls through to a
+  // `.Must(x => ...)` predicate (e.g. inside a cross-field rule),
+  // render as the same Regex.IsMatch call the domain layer uses.
+  if (
+    e.member === "matches" &&
+    e.receiverType.kind === "primitive" &&
+    e.receiverType.name === "string" &&
+    args.length === 1
+  ) {
+    return `System.Text.RegularExpressions.Regex.IsMatch(${recv}, ${args[0]})`;
+  }
   if (e.isCollectionOp) {
     switch (e.member) {
       case "count":

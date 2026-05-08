@@ -118,6 +118,18 @@ function renderMethodCall(
   if (e.isCollectionOp) {
     return renderCollectionOp(`(${recv})`, e.member, args);
   }
+  // `string.matches(literal)` — domain rendering uses
+  // System.Text.RegularExpressions.Regex.IsMatch.  Wire-boundary
+  // FluentValidation rendering is handled separately via the
+  // `regex` SingleFieldPattern.
+  if (
+    e.member === "matches" &&
+    e.receiverType.kind === "primitive" &&
+    e.receiverType.name === "string" &&
+    args.length === 1
+  ) {
+    return `System.Text.RegularExpressions.Regex.IsMatch(${recv}, ${args[0]})`;
+  }
   return `${recv}.${pascal(e.member)}(${args.join(", ")})`;
 }
 

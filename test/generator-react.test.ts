@@ -944,4 +944,95 @@ describe("react generator", () => {
       expect(newProduct).toMatch(/zodResolver\(CreateProductRequest\)/);
     });
   });
+
+  // -------------------------------------------------------------------
+  // Slice 21.C — DSL extensions on the React side.
+  // -------------------------------------------------------------------
+  describe("DSL extensions (slice 21.C)", () => {
+    it("absorbs `string.matches(literal)` as `z.string().regex(/.../)`", async () => {
+      const { parseHelper } = await import("langium/test");
+      const services = createDddServices(NodeFileSystem);
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(
+        `
+          system Acme {
+            module M {
+              context Auth {
+                aggregate User {
+                  email: string display
+                  invariant email.matches("^[^@]+@.+$")
+                }
+                repository Users for User { }
+              }
+            }
+            deployable api { platform: dotnet, modules: M, port: 8080 }
+            deployable web { platform: react, targets: api, port: 3001 }
+          }
+        `,
+        { validation: true },
+      );
+      const { files } = generateSystems(doc.parseResult.value as Model);
+      const userApi = files.get("web/src/api/user.ts")!;
+      expect(userApi).toMatch(/email: z\.string\(\)\.regex\(\/\^\[\^@\]\+@\.\+\$\/\)/);
+    });
+
+    it("desugars `field: T check <expr>` to an invariant on the parent", async () => {
+      const { parseHelper } = await import("langium/test");
+      const services = createDddServices(NodeFileSystem);
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(
+        `
+          system Acme {
+            module M {
+              context Catalog {
+                aggregate Product {
+                  sku:  string display check sku.length >= 1 && sku.length <= 32
+                  name: string check name.length <= 120
+                }
+                repository Products for Product { }
+              }
+            }
+            deployable api { platform: dotnet, modules: M, port: 8080 }
+            deployable web { platform: react, targets: api, port: 3001 }
+          }
+        `,
+        { validation: true },
+      );
+      const { files } = generateSystems(doc.parseResult.value as Model);
+      const productApi = files.get("web/src/api/product.ts")!;
+      // Both checks are absorbed into idiomatic chains.
+      expect(productApi).toMatch(/sku: z\.string\(\)\.min\(1\)\.max\(32\)/);
+      expect(productApi).toMatch(/name: z\.string\(\)\.max\(120\)/);
+    });
+
+    it("`private invariant` is skipped from wire schemas (server-only)", async () => {
+      const { parseHelper } = await import("langium/test");
+      const services = createDddServices(NodeFileSystem);
+      const helper = parseHelper(services.Ddd);
+      const doc = await helper(
+        `
+          system Acme {
+            module M {
+              context Acct {
+                aggregate User {
+                  username: string display
+                  private invariant username.length >= 3
+                }
+                repository Users for User { }
+              }
+            }
+            deployable api { platform: dotnet, modules: M, port: 8080 }
+            deployable web { platform: react, targets: api, port: 3001 }
+          }
+        `,
+        { validation: true },
+      );
+      const { files } = generateSystems(doc.parseResult.value as Model);
+      const userApi = files.get("web/src/api/user.ts")!;
+      // The private invariant must NOT contribute a min(3) chain or a refine.
+      expect(userApi).toMatch(/CreateUserRequest = z\.object\(\{\s*username: z\.string\(\),\s*\}\);/);
+      expect(userApi).not.toMatch(/\.min\(3\)/);
+      expect(userApi).not.toMatch(/\.refine\(/);
+    });
+  });
 });

@@ -46,6 +46,14 @@ export function chainSingleFieldNative(
       return `${inner}.max(${pattern.n})`;
     case "len-eq":
       return `${inner}.length(${pattern.n})`;
+    case "len-range":
+      return `${inner}.min(${pattern.lo}).max(${pattern.hi})`;
+    case "regex":
+      // The pattern is a JavaScript-compatible regex source (validated
+      // at parse time via `new RegExp(...)`).  Render as a `/.../` literal
+      // by escaping forward slashes; everything else stays verbatim
+      // because the source string is already a JS regex source.
+      return `${inner}.regex(/${pattern.pattern.replace(/\//g, "\\/")}/)`;
   }
 }
 
@@ -175,10 +183,17 @@ function renderMethodCall(
   if (e.isCollectionOp) {
     return renderCollectionOp(`(${recv})`, e.member, args);
   }
-  // Plain method calls — `.matches(...)` etc.  21.C will introduce
-  // `matches` as a first-class operator; until then this branch
-  // covers user-declared helpers that won't actually translate
-  // (and `classifyForWire` filters those out before we get here).
+  // `string.matches(literal)` — when it falls through to a
+  // `.refine` predicate (e.g. cross-field), render as the same JS
+  // RegExp call the domain layer uses.
+  if (
+    e.member === "matches" &&
+    e.receiverType.kind === "primitive" &&
+    e.receiverType.name === "string" &&
+    args.length === 1
+  ) {
+    return `new RegExp(${args[0]}).test(${recv})`;
+  }
   return `${recv}.${e.member}(${args.join(", ")})`;
 }
 

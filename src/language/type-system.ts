@@ -299,6 +299,11 @@ function typeOfMemberAccess(expr: import("./generated/ast.js").MemberAccess, env
   }
   if (recvType.kind === "primitive" && recvType.name === "string") {
     if (memberName === "length") return T.prim("int");
+    // `string.matches(regex)` — slice 21.C operator.  Returns bool;
+    // argument is a string literal (the validator enforces that
+    // separately so a non-literal arg becomes a clear diagnostic
+    // rather than `unknown`).
+    if (memberName === "matches" && expr.call) return T.prim("bool");
   }
   return T.unknown;
 }
