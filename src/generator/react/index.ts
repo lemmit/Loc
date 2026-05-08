@@ -28,6 +28,7 @@ import {
   renderListPage,
   renderMain,
   renderNewPage,
+  renderShellFile,
   renderTheme,
   renderViewTablePage,
   renderViewsIndex,
@@ -157,8 +158,11 @@ export function generateReactForContexts(
   out.set("e2e/package.json", E2E_PACKAGE_JSON);
   out.set("e2e/tsconfig.json", E2E_TSCONFIG_JSON);
 
-  out.set("src/api/client.ts", CLIENT_TS);
-  out.set("src/api/config.ts", configTs(apiBaseUrl));
+  out.set("src/api/client.ts", renderShellFile("api-client", {}, pack));
+  out.set(
+    "src/api/config.ts",
+    renderShellFile("api-config", { apiBaseUrl }, pack),
+  );
   out.set("src/lib/format.tsx", FORMAT_HELPERS_TSX);
   // Theme — every generated app gets a tasteful baseline (indigo
   // primary, medium radius, Inter font) so the bare-Mantine
@@ -189,188 +193,17 @@ export function generateReactForContexts(
     ),
   );
 
-  out.set("package.json", PACKAGE_JSON);
-  out.set("tsconfig.json", TSCONFIG_JSON);
-  out.set("tsconfig.node.json", TSCONFIG_NODE_JSON);
-  out.set("vite.config.ts", VITE_CONFIG_TS);
-  out.set("index.html", INDEX_HTML);
-  out.set("Dockerfile", DOCKERFILE_REACT);
-  out.set(".dockerignore", DOCKERIGNORE_REACT);
+  out.set("package.json", renderShellFile("package-json", {}, pack));
+  out.set("tsconfig.json", renderShellFile("tsconfig", {}, pack));
+  out.set("tsconfig.node.json", renderShellFile("tsconfig-node", {}, pack));
+  out.set("vite.config.ts", renderShellFile("vite-config", {}, pack));
+  out.set("index.html", renderShellFile("index-html", {}, pack));
+  out.set("Dockerfile", renderShellFile("dockerfile", {}, pack));
+  out.set(".dockerignore", renderShellFile("dockerignore", {}, pack));
   out.set("certs/.gitkeep", "");
 
   return out;
 }
-
-// ---------------------------------------------------------------------------
-// Project-shell constants
-// ---------------------------------------------------------------------------
-
-const PACKAGE_JSON =
-  JSON.stringify(
-    {
-      name: "loom-react-app",
-      version: "0.0.0",
-      type: "module",
-      private: true,
-      scripts: {
-        dev: "vite",
-        build: "vite build",
-        preview: "vite preview --host 0.0.0.0 --port 3000",
-      },
-      dependencies: {
-        react: "^18.3.0",
-        "react-dom": "^18.3.0",
-        "react-router-dom": "^6.27.0",
-        "@tanstack/react-query": "^5.59.0",
-        "@mantine/core": "^7.13.0",
-        "@mantine/hooks": "^7.13.0",
-        "@mantine/notifications": "^7.13.0",
-        "@mantine/dates": "^7.13.0",
-        "@mantine/modals": "^7.13.0",
-        "@tabler/icons-react": "^3.20.0",
-        "react-hook-form": "^7.53.0",
-        "@hookform/resolvers": "^3.9.0",
-        zod: "^3.23.0",
-        dayjs: "^1.11.0",
-      },
-      devDependencies: {
-        "@types/react": "^18.3.0",
-        "@types/react-dom": "^18.3.0",
-        "@vitejs/plugin-react": "^4.3.0",
-        typescript: "^5.7.0",
-        vite: "^5.4.0",
-      },
-    },
-    null,
-    2,
-  ) + "\n";
-
-const TSCONFIG_JSON =
-  JSON.stringify(
-    {
-      compilerOptions: {
-        target: "ES2022",
-        useDefineForClassFields: true,
-        lib: ["ES2022", "DOM", "DOM.Iterable"],
-        module: "ESNext",
-        skipLibCheck: true,
-        moduleResolution: "Bundler",
-        allowImportingTsExtensions: false,
-        resolveJsonModule: true,
-        isolatedModules: true,
-        noEmit: true,
-        jsx: "react-jsx",
-        strict: true,
-        noUnusedLocals: false,
-        noUnusedParameters: false,
-        noFallthroughCasesInSwitch: true,
-      },
-      include: ["src"],
-      references: [{ path: "./tsconfig.node.json" }],
-    },
-    null,
-    2,
-  ) + "\n";
-
-const TSCONFIG_NODE_JSON =
-  JSON.stringify(
-    {
-      compilerOptions: {
-        composite: true,
-        skipLibCheck: true,
-        module: "ESNext",
-        moduleResolution: "Bundler",
-        allowSyntheticDefaultImports: true,
-        strict: true,
-      },
-      include: ["vite.config.ts"],
-    },
-    null,
-    2,
-  ) + "\n";
-
-const VITE_CONFIG_TS = `// Auto-generated.
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
-
-export default defineConfig({
-  plugins: [react()],
-  server: { port: 3000, host: true },
-  preview: { port: 3000, host: true },
-});
-`;
-
-const INDEX_HTML = `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Loom-generated app</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
-</html>
-`;
-
-function configTs(apiBaseUrl: string): string {
-  return `// Auto-generated.
-// Browser hits localhost:<api_port> directly; baked at generation time
-// from the target deployable's port.  Override at build time via
-// VITE_API_BASE_URL for non-docker-compose deployments.  Hosts that
-// embed the bundle behind a path (e.g. the Loom playground iframe at
-// \`<deploy>/__loom_sandbox__/\`) can also set
-// \`window.__LOOM_API_BASE__\` to an absolute path so fetches don't
-// depend on the bundle's current location.href — useful when the
-// bundle navigates client-side (BrowserRouter pushState) and the
-// iframe URL becomes a route path under which a relative \`runtime\`
-// would resolve elsewhere.
-const fromWindow =
-  typeof window !== "undefined"
-    ? (window as { __LOOM_API_BASE__?: string }).__LOOM_API_BASE__
-    : undefined;
-const fromEnv = (import.meta as { env?: { VITE_API_BASE_URL?: string } }).env?.VITE_API_BASE_URL;
-export const API_BASE_URL: string = fromWindow ?? fromEnv ?? "${apiBaseUrl}";
-`;
-}
-
-const CLIENT_TS = `// Auto-generated.
-import { API_BASE_URL } from "./config";
-
-export class ApiError extends Error {
-  constructor(public status: number, message: string) {
-    super(message);
-    this.name = "ApiError";
-  }
-}
-
-async function rawFetch(path: string, init?: RequestInit): Promise<unknown> {
-  const r = await fetch(\`\${API_BASE_URL}\${path}\`, {
-    ...init,
-    headers: {
-      "content-type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-  });
-  const text = await r.text();
-  const body: unknown = text ? JSON.parse(text) : null;
-  if (!r.ok) {
-    const message =
-      body && typeof body === "object" && "error" in body
-        ? String((body as { error: unknown }).error)
-        : r.statusText;
-    throw new ApiError(r.status, message);
-  }
-  return body;
-}
-
-export const api = {
-  get: (path: string) => rawFetch(path, { method: "GET" }),
-  post: (path: string, body: unknown) =>
-    rawFetch(path, { method: "POST", body: JSON.stringify(body ?? {}) }),
-};
-`;
 
 function smokeSpec(aggregates: AggregateIR[]): string {
   // Auto-generated minimal Playwright smoke: every aggregate's list
@@ -461,42 +294,3 @@ const E2E_TSCONFIG_JSON =
 function upper(s: string): string {
   return s[0]!.toUpperCase() + s.slice(1);
 }
-
-const DOCKERFILE_REACT = `# syntax=docker/dockerfile:1
-# Auto-generated.
-
-FROM node:24-alpine AS build
-WORKDIR /app
-# Optional proxy CAs — drop *.crt files into ./certs/ to make npm
-# trust them.  The directory always exists (with a .gitkeep), so
-# this COPY is a no-op when no CAs are configured.
-COPY certs/ /usr/local/share/ca-certificates/
-RUN cat /usr/local/share/ca-certificates/*.crt 2>/dev/null >> /etc/ssl/cert.pem || true
-ENV NODE_EXTRA_CA_CERTS=/etc/ssl/cert.pem NPM_CONFIG_CAFILE=/etc/ssl/cert.pem
-COPY package.json package-lock.json* ./
-RUN npm ci || npm install
-COPY . .
-RUN npm run build
-
-FROM node:24-alpine AS runtime
-WORKDIR /app
-ENV PORT=3000
-COPY --from=build /app/dist ./dist
-COPY --from=build /app/package.json ./package.json
-COPY --from=build /app/vite.config.ts ./vite.config.ts
-COPY --from=build /app/node_modules ./node_modules
-EXPOSE 3000
-CMD ["npx", "vite", "preview", "--host", "0.0.0.0", "--port", "3000"]
-`;
-
-const DOCKERIGNORE_REACT = `# Auto-generated.
-node_modules
-dist
-e2e
-playwright-report
-test-results
-.git
-.env
-.env.*
-*.log
-`;
