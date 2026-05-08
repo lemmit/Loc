@@ -51,10 +51,13 @@ self.addEventListener("message", (event) => {
   const data = event.data;
   if (!data || typeof data !== "object") return;
   if (data.type === "loom-sw/set-bundle") {
-    // Stash for future fetch-handler use.  Shape is intentionally
-    // permissive at this stage; once the migration lands the parent
-    // will send a typed { html, js, css } record.
     currentBundle = data.bundle;
+    // Ack via the optional MessagePort the caller provided.  The
+    // parent uses this to wait until `currentBundle` is in place
+    // before it navigates the iframe — otherwise a fetch event
+    // could race the message and serve the previous bundle.
+    const port = event.ports && event.ports[0];
+    if (port) port.postMessage({ ok: true });
   } else if (data.type === "loom-sw/ping") {
     // Round-trip probe used by sw-host to confirm the SW is alive.
     if (event.source && "postMessage" in event.source) {
