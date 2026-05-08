@@ -47,6 +47,32 @@ export interface BreadcrumbSegmentVM {
   to?: string;
 }
 
+/** Theme view-model — semantic design tokens, framework-neutral.
+ *  Each pack's `theme` template projects these tokens to its idiom:
+ *  Mantine emits a `createTheme(...)` config with the shade arrays
+ *  baked in; shadcn (Phase 2) will emit CSS variables on :root.
+ *  Defaults are applied by the preparer so every generated app
+ *  gets a coherent baseline even when the DSL declares no
+ *  `theme { ... }` block. */
+export interface ThemeVM {
+  /** 10-shade brand colour ramp.  Index 6 anchors the user's input
+   *  hex; the rest are interpolated against white (lighter half) and
+   *  black (darker half) using HSL lightness. */
+  brandShades: string[];
+  /** 10-shade neutral / surface colour ramp, same indexing scheme. */
+  neutralShades: string[];
+  /** Default border radius for primitives — "xs" / "sm" / "md" /
+   *  "lg" / "xl".  Mantine reads it directly; shadcn maps to
+   *  `--radius` CSS variable. */
+  radius: string;
+  /** Body / heading font-family value, verbatim — exactly as the
+   *  template should embed it inside the JSON-stringified config.
+   *  Includes the full fallback chain. */
+  fontFamily: string;
+  /** Monospace font-family for code / id displays. */
+  fontFamilyMonospace: string;
+}
+
 /** Top-level view-model for an aggregate list page. */
 export interface ListPageVM {
   /** PascalCase aggregate name — drives the React component export

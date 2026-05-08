@@ -2,6 +2,7 @@
   "name": "shadcn",
   "version": "0.1.0-spike",
   "emits": {
+    "theme": "theme.hbs",
     "page-list": "page-list.hbs",
     "cell-id": "cell-id.hbs",
     "cell-id-link": "cell-id-link.hbs",

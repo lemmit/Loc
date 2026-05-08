@@ -107,6 +107,12 @@ function registerHelpersOnce(): void {
   // get tight output.  SafeString skips HTML escape so JS operators
   // (`<`, `>`, `&&`, etc.) round-trip verbatim.
   Handlebars.registerHelper("expr", (s: unknown) => new Handlebars.SafeString(`{${String(s)}}`));
+  // JSON-stringify helper: emits a properly-quoted string literal
+  // for embedding in generated TS source.  Used for theme tokens
+  // (`fontFamily: {{json fontFamily}}` → `fontFamily: "Inter, …"`)
+  // where the inner string contains characters (`"`, `\`) that
+  // would otherwise need manual escaping.
+  Handlebars.registerHelper("json", (v: unknown) => new Handlebars.SafeString(JSON.stringify(v)));
 }
 
 /** Resolve a pack identifier ("mantine" / "shadcn" / "./design/")

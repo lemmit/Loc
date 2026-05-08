@@ -13,9 +13,10 @@
 // or `{{> (lookup ...) ...}}` indirection.
 // ---------------------------------------------------------------------------
 
-import type { AggregateIR } from "../../../ir/loom-ir.js";
+import type { AggregateIR, ThemeIR } from "../../../ir/loom-ir.js";
 import type { LoadedPack } from "./loader.js";
 import { prepareListPageVM } from "./preparers/list.js";
+import { prepareThemeVM } from "./preparers/theme.js";
 import type { CellVM, ListPageVM } from "./view-models.js";
 
 /** A column slot enriched with its already-rendered cell HTML.  Page
@@ -39,6 +40,14 @@ export function renderListPage(
   // Templates reference `vm.aggregateName`, `vm.slug`,
   // `vm.breadcrumbs`, `columns[i].header`, `columns[i].cellHtml`.
   return pack.render("page-list", { ...vm, columns });
+}
+
+/** Render the theme.ts file through the loaded pack.  Returns the
+ *  TS source (Mantine: createTheme config; shadcn: provisionally the
+ *  same Mantine-shape file until Phase 2 brings the full shell). */
+export function renderTheme(t: ThemeIR | undefined, pack: LoadedPack): string {
+  const vm = prepareThemeVM(t);
+  return pack.render("theme", vm);
 }
 
 function enrichColumns(vm: ListPageVM, pack: LoadedPack): RenderedColumn[] {
