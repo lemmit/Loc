@@ -43,17 +43,16 @@ import type {
   WorkflowIR,
 } from "../../ir/loom-ir.js";
 import { camel, plural, snake } from "../../util/naming.js";
-import { buildDetailPage, buildNewPage } from "./pages-builder.js";
-import { renderListPage } from "./templating/render.js";
+import {
+  renderDetailPage,
+  renderListPage,
+  renderNewPage,
+  renderViewTablePage,
+  renderViewsIndex,
+  renderWorkflowForm,
+  renderWorkflowsIndex,
+} from "./templating/render.js";
 import type { LoadedPack } from "./templating/loader.js";
-import {
-  buildWorkflowFormPage,
-  buildWorkflowsIndexPage,
-} from "./workflow-builder.js";
-import {
-  buildViewsIndexPage,
-  buildViewTablePage,
-} from "./view-builder.js";
 
 /** Inputs the page emitter needs in addition to the page IR.  Kept as
  *  a struct so additions (theme overrides, design-pack picks, sidebar
@@ -155,7 +154,7 @@ function emitScaffoldPage(
       const { agg, ctxIR } = lookupAggregate(origin, ctx);
       out.set(
         `src/pages/${snake(plural(agg.name))}/new.tsx`,
-        buildNewPage(agg, ctxIR, ctx.aggregatesByName),
+        renderNewPage(agg, ctxIR, ctx.aggregatesByName, ctx.pack),
       );
       return out;
     }
@@ -163,7 +162,7 @@ function emitScaffoldPage(
       const { agg, ctxIR } = lookupAggregate(origin, ctx);
       out.set(
         `src/pages/${snake(plural(agg.name))}/detail.tsx`,
-        buildDetailPage(agg, ctxIR, ctx.aggregatesByName),
+        renderDetailPage(agg, ctxIR, ctx.aggregatesByName, ctx.pack),
       );
       return out;
     }
@@ -173,7 +172,7 @@ function emitScaffoldPage(
       if (!wf || !ctxIR) return out;
       out.set(
         `src/pages/workflows/${snake(wf.name)}.tsx`,
-        buildWorkflowFormPage(wf, ctxIR, ctx.aggregatesByName),
+        renderWorkflowForm(wf, ctxIR, ctx.aggregatesByName, ctx.pack),
       );
       return out;
     }
@@ -183,7 +182,7 @@ function emitScaffoldPage(
       if (!view || !ctxIR) return out;
       out.set(
         `src/pages/views/${snake(view.name)}.tsx`,
-        buildViewTablePage(view, ctxIR, ctx.aggregatesByName),
+        renderViewTablePage(view, ctxIR, ctx.aggregatesByName, ctx.pack),
       );
       return out;
     }
@@ -195,13 +194,16 @@ function emitScaffoldPage(
       const contexts = [...ctx.contextsByName.values()];
       out.set(
         "src/pages/workflows/index.tsx",
-        buildWorkflowsIndexPage(contexts),
+        renderWorkflowsIndex(contexts, ctx.pack),
       );
       return out;
     }
     case "views-index": {
       const contexts = [...ctx.contextsByName.values()];
-      out.set("src/pages/views/index.tsx", buildViewsIndexPage(contexts));
+      out.set(
+        "src/pages/views/index.tsx",
+        renderViewsIndex(contexts, ctx.pack),
+      );
       return out;
     }
     case "home": {

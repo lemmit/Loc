@@ -1,6 +1,6 @@
 // Auto-generated.
 import { useParams, Link } from "react-router-dom";
-import { Alert, Anchor, Badge, Breadcrumbs, Button, Card, Group, NumberInput, Select, Skeleton, Stack, Table, Text, TextInput, Title } from "@mantine/core";
+import { Stack, Title, Card, Group, Button, Text, Skeleton, Alert, Anchor, Breadcrumbs, Badge, Table, TextInput, NumberInput, Select, Switch, Fieldset } from "@mantine/core";
 import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import { useForm, Controller } from "react-hook-form";
@@ -46,37 +46,45 @@ export default function OrderDetail() {
         </Stack>
         <Group gap="xs" data-testid="orders-detail-ops">
           <Button variant="filled" leftSection={<IconPlus size={16} stroke={2} />} onClick={() => openAddLineModal(addLine)} data-testid="orders-op-addLine">Add Line</Button>
-          <Button variant="light" leftSection={<IconCheck size={16} stroke={2} />} onClick={() => openConfirmModal(confirm)} data-testid="orders-op-confirm">Confirm</Button>
+
+<Button variant="light" leftSection={<IconCheck size={16} stroke={2} />} onClick={() => openConfirmModal(confirm)} data-testid="orders-op-confirm">Confirm</Button>
+
         </Group>
       </Group>
       <Card>
         <Stack gap="md">
-        <KeyValueRow label="Customer Id"><span data-testid="orders-detail-customerId">{data.customerId ? <Anchor component={Link} to={`/customers/${data.customerId}`}><IdValue id={data.customerId} /></Anchor> : <EmptyValue />}</span></KeyValueRow>
-        <KeyValueRow label="Status"><Badge tt="unset" component="span" variant="light" data-testid="orders-detail-status">{data.status}</Badge></KeyValueRow>
-        <KeyValueRow label="Placed At"><span data-testid="orders-detail-placedAt"><DateTimeValue iso={data.placedAt} /></span></KeyValueRow>
+        <KeyValueRow label="Customer Id"><span data-testid="orders-detail-customerId">{ data.customerId ? <Anchor component={Link} to={`/customers/${data.customerId}`}><IdValue id={data.customerId} /></Anchor> : <EmptyValue />}</span></KeyValueRow>
+
+<KeyValueRow label="Status"><Badge tt="unset" component="span" variant="light" data-testid="orders-detail-status">{data.status}</Badge></KeyValueRow>
+
+<KeyValueRow label="Placed At"><span data-testid="orders-detail-placedAt"><DateTimeValue iso={data.placedAt} /></span></KeyValueRow>
+
         </Stack>
       </Card>
       <Card>
         <Stack gap="xs">
           <Group justify="space-between" align="center">
             <Title order={4}>Lines</Title>
-            <Text size="sm" c="dimmed">{data.lines.length === 1 ? "1 item" : data.lines.length + " items"}</Text>
+            <Text size="sm" c="dimmed">{ data.lines.length === 1 ? "1 item" : data.lines.length + " items"}</Text>
           </Group>
           <Table.ScrollContainer minWidth={400}>
             <Table striped highlightOnHover data-testid="orders-detail-lines">
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th>Id</Table.Th>
-                <Table.Th>Product Id</Table.Th>
-                <Table.Th>Quantity</Table.Th>
+<Table.Th>Product Id</Table.Th>
+<Table.Th>Quantity</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {data.lines.map((row) => (
+                { data.lines.map((row) => (
                   <Table.Tr key={row.id} data-testid={`orders-detail-lines-row-${row.id}`}>
                     <Table.Td data-testid={`orders-detail-lines-row-${row.id}-id`}><IdValue id={row.id} /></Table.Td>
-                    <Table.Td data-testid={`orders-detail-lines-row-${row.id}-productId`}>{row.productId ? <Anchor component={Link} to={`/products/${row.productId}`}><IdValue id={row.productId} /></Anchor> : <EmptyValue />}</Table.Td>
-                    <Table.Td data-testid={`orders-detail-lines-row-${row.id}-quantity`} style={{ textAlign: "right" }}><NumberValue value={row.quantity} /></Table.Td>
+
+<Table.Td data-testid={`orders-detail-lines-row-${row.id}-productId`}>{ row.productId ? <Anchor component={Link} to={`/products/${row.productId}`} onClick={(e) => e.stopPropagation()}><IdValue id={row.productId} /></Anchor> : <EmptyValue />}</Table.Td>
+
+<Table.Td data-testid={`orders-detail-lines-row-${row.id}-quantity`} style={{ textAlign: "right" }}><NumberValue value={row.quantity} /></Table.Td>
+
                   </Table.Tr>
                 ))}
               </Table.Tbody>
@@ -84,6 +92,7 @@ export default function OrderDetail() {
           </Table.ScrollContainer>
         </Stack>
       </Card>
+
     </Stack>
   );
 }
@@ -122,6 +131,7 @@ function AddLineForm({ mut, onClose }: { mut: ReturnType<typeof useAddLineOrder>
             <Select label="Product Id" data-testid="orders-op-addLine-input-productId" placeholder="Select…" searchable data={(__products.data ?? []).map((__o) => ({ value: __o.id, label: __o.sku }))} renderOption={({ option }) => <div data-testid={`orders-op-addLine-input-productId-option-${option.value}`}>{option.label}</div>} allowDeselect={false} value={field.value as string} onChange={(v) => field.onChange(v ?? "")} error={fieldState.error?.message} />
           )}
         />
+
         <Controller
           control={control}
           name="qty"
@@ -129,6 +139,7 @@ function AddLineForm({ mut, onClose }: { mut: ReturnType<typeof useAddLineOrder>
             <NumberInput label="Qty" data-testid="orders-op-addLine-input-qty" allowDecimal={false} value={field.value as number | "" | undefined} onChange={(v) => field.onChange(typeof v === "number" ? v : Number(v) || 0)} error={fieldState.error?.message} />
           )}
         />
+
         <Group justify="flex-end" mt="sm">
           <Button variant="default" onClick={onClose}>Cancel</Button>
           <Button type="submit" loading={mut.isPending} data-testid="orders-op-addLine-submit">Add Line</Button>
@@ -137,6 +148,7 @@ function AddLineForm({ mut, onClose }: { mut: ReturnType<typeof useAddLineOrder>
     </form>
   );
 }
+
 
 function openConfirmModal(mut: ReturnType<typeof useConfirmOrder>): void {
   modals.open({
@@ -173,3 +185,5 @@ function ConfirmForm({ mut, onClose }: { mut: ReturnType<typeof useConfirmOrder>
     </form>
   );
 }
+
+

@@ -132,21 +132,21 @@ export default function App() {
       <AppShell.Main>
         <AppErrorBoundary>
           <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/products" element={<ProductList />} />
-        <Route path="/products/new" element={<ProductNew />} />
-        <Route path="/products/:id" element={<ProductDetail />} />
-        <Route path="/orders" element={<OrderList />} />
-        <Route path="/orders/new" element={<OrderNew />} />
-        <Route path="/orders/:id" element={<OrderDetail />} />
-        <Route path="/customers" element={<CustomerList />} />
-        <Route path="/customers/new" element={<CustomerNew />} />
-        <Route path="/customers/:id" element={<CustomerDetail />} />
-        <Route path="/workflows" element={<WorkflowsIndex />} />
-        <Route path="/workflows/place_order" element={<PlaceOrderWorkflowPage />} />
-        <Route path="/views" element={<ViewsIndex />} />
-        <Route path="/views/active_orders" element={<ActiveOrdersViewPage />} />
-        <Route path="/views/order_summary" element={<OrderSummaryViewPage />} />
+            <Route path="/" element={<Home />} />
+            <Route path="/products" element={<ProductList />} />
+            <Route path="/products/new" element={<ProductNew />} />
+            <Route path="/products/:id" element={<ProductDetail />} />
+            <Route path="/orders" element={<OrderList />} />
+            <Route path="/orders/new" element={<OrderNew />} />
+            <Route path="/orders/:id" element={<OrderDetail />} />
+            <Route path="/customers" element={<CustomerList />} />
+            <Route path="/customers/new" element={<CustomerNew />} />
+            <Route path="/customers/:id" element={<CustomerDetail />} />
+            <Route path="/workflows" element={<WorkflowsIndex />} />
+            <Route path="/workflows/place_order" element={<PlaceOrderWorkflowPage />} />
+            <Route path="/views" element={<ViewsIndex />} />
+            <Route path="/views/active_orders" element={<ActiveOrdersViewPage />} />
+            <Route path="/views/order_summary" element={<OrderSummaryViewPage />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AppErrorBoundary>

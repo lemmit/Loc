@@ -1,12 +1,11 @@
 // Auto-generated.
 // (new page: no aggregate data fetched yet, no display-field title.)
 import { Link, useNavigate } from "react-router-dom";
-import { Stack, Title, Button, Group, Card, Text, Anchor, Breadcrumbs, Fieldset, NumberInput, TextInput } from "@mantine/core";
+import { Anchor, Breadcrumbs, Button, Card, Fieldset, Group, NumberInput, Stack, Text, TextInput, Title } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CreateProductRequest, useCreateProduct } from "../../api/product";
-
 export default function ProductNew() {
   const navigate = useNavigate();
   const create = useCreateProduct();
@@ -39,7 +38,8 @@ export default function ProductNew() {
         >
           <Stack gap="md">
           <TextInput label="Sku" {...register("sku")} data-testid="products-new-input-sku" error={errors.sku?.message} />
-        <Fieldset legend="Price" variant="filled" radius="md" data-testid="products-new-input-price">
+
+<Fieldset legend="Price" variant="filled" radius="md" data-testid="products-new-input-price">
           <Stack gap="sm">
             <Controller
           control={control}
@@ -48,9 +48,12 @@ export default function ProductNew() {
             <NumberInput label="Amount" data-testid="products-new-input-price-amount" decimalScale={2} fixedDecimalScale value={field.value as number | "" | undefined} onChange={(v) => field.onChange(typeof v === "number" ? v : Number(v) || 0)} error={fieldState.error?.message} />
           )}
         />
-            <TextInput label="Currency" {...register("price.currency")} data-testid="products-new-input-price-currency" error={errors.price?.currency?.message} />
+
+          <TextInput label="Currency" {...register("price.currency")} data-testid="products-new-input-price-currency" error={errors.price?.currency?.message} />
+
           </Stack>
         </Fieldset>
+
             <Group justify="flex-end" mt="sm">
               <Button variant="default" onClick={() => navigate("/products")}>Cancel</Button>
               <Button type="submit" loading={create.isPending} data-testid="products-new-submit">Create</Button>

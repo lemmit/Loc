@@ -17,7 +17,7 @@ export default function Home() {
           <Stack gap={4}>
             <Text fw={600}>3 aggregates</Text>
             <Text size="sm" c="dimmed">Manage records of each kind from the sidebar.</Text>
-      <Anchor component={Link} to="/products" data-testid="home-aggregates-link">Browse the sidebar →</Anchor>
+            <Anchor component={Link} to="/products" data-testid="home-aggregates-link">Browse the sidebar →</Anchor>
           </Stack>
         </Card>
         <Card withBorder>

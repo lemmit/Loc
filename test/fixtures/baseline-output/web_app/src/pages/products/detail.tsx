@@ -1,6 +1,6 @@
 // Auto-generated.
 import { useParams, Link } from "react-router-dom";
-import { Alert, Anchor, Breadcrumbs, Button, Card, Group, Skeleton, Stack, Text, TextInput, Title } from "@mantine/core";
+import { Stack, Title, Card, Group, Button, Text, Skeleton, Alert, Anchor, Breadcrumbs, Badge, Table, TextInput, NumberInput, Select, Switch, Fieldset } from "@mantine/core";
 import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import { useForm } from "react-hook-form";
@@ -12,7 +12,6 @@ import { IconAlertCircle, IconAlertTriangle } from "@tabler/icons-react";
 export default function ProductDetail() {
   const { id } = useParams<{ id: string }>();
   const q = useProductById(id);
-
   if (q.isLoading) return (
     <Stack data-testid="products-detail-loading" gap="md">
       <Skeleton height={20} width={240} />
@@ -46,16 +45,16 @@ export default function ProductDetail() {
       </Group>
       <Card>
         <Stack gap="md">
-        <KeyValueRow label="Sku"><span data-testid="products-detail-sku">{data.sku === null || data.sku === undefined || data.sku === "" ? <EmptyValue /> : String(data.sku)}</span></KeyValueRow>
-        <KeyValueRow label="Price">
+        <KeyValueRow label="Sku"><span data-testid="products-detail-sku">{ data.sku === null || data.sku === undefined || data.sku === "" ? <EmptyValue /> : String(data.sku)}</span></KeyValueRow>
+
+<KeyValueRow label="Price">
           <Text size="sm"><Text component="span" c="dimmed">Amount: </Text><span data-testid="products-detail-price-amount">{String(data.price.amount)}</span></Text>
           <Text size="sm"><Text component="span" c="dimmed">Currency: </Text><span data-testid="products-detail-price-currency">{String(data.price.currency)}</span></Text>
         </KeyValueRow>
+
         </Stack>
       </Card>
-      
-    </Stack>
+          </Stack>
   );
 }
-
 

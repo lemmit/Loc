@@ -68,6 +68,100 @@ describe("react generator template-pack output (snapshots)", () => {
     }
   `;
 
+  it("Mantine pack — theme.ts snapshot", async () => {
+    const files = await generateFromSource(SOURCE);
+    const theme = files.get("web_mantine/src/theme.ts");
+    expect(theme).toBeDefined();
+    await expect(theme).toMatchFileSnapshot(
+      path.join(repoRoot, "test/__snapshots__/pack-mantine-theme.ts"),
+    );
+  });
+
+  it("Mantine pack — App.tsx snapshot", async () => {
+    const files = await generateFromSource(SOURCE);
+    const app = files.get("web_mantine/src/App.tsx");
+    expect(app).toBeDefined();
+    await expect(app).toMatchFileSnapshot(
+      path.join(repoRoot, "test/__snapshots__/pack-mantine-app.tsx"),
+    );
+  });
+
+  it("Mantine pack — main.tsx snapshot", async () => {
+    const files = await generateFromSource(SOURCE);
+    const main = files.get("web_mantine/src/main.tsx");
+    expect(main).toBeDefined();
+    await expect(main).toMatchFileSnapshot(
+      path.join(repoRoot, "test/__snapshots__/pack-mantine-main.tsx"),
+    );
+  });
+
+  it("Mantine pack — home.tsx snapshot", async () => {
+    const files = await generateFromSource(SOURCE);
+    const home = files.get("web_mantine/src/pages/home.tsx");
+    expect(home).toBeDefined();
+    await expect(home).toMatchFileSnapshot(
+      path.join(repoRoot, "test/__snapshots__/pack-mantine-home.tsx"),
+    );
+  });
+
+  // Workflow / view fixtures need a more elaborate SOURCE; rather
+  // than spelling them out here just snapshot acme.ddd's output.
+  // (acme has Order.placeOrder workflow + ActiveOrders / OrderSummary
+  // views.)
+  it("Mantine pack — workflow form snapshot (acme)", async () => {
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const acmeText = (await import("node:fs")).readFileSync(
+      path.join(repoRoot, "examples/acme.ddd"),
+      "utf-8",
+    );
+    const doc = await helper(acmeText, { validation: false });
+    const model = doc.parseResult.value as Model;
+    const files = generateSystems(model).files;
+    const page = files.get("web_app/src/pages/workflows/place_order.tsx");
+    expect(page).toBeDefined();
+    await expect(page).toMatchFileSnapshot(
+      path.join(repoRoot, "test/__snapshots__/pack-mantine-workflow-place-order.tsx"),
+    );
+  });
+
+  it("Mantine pack — view table snapshot (acme)", async () => {
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const acmeText = (await import("node:fs")).readFileSync(
+      path.join(repoRoot, "examples/acme.ddd"),
+      "utf-8",
+    );
+    const doc = await helper(acmeText, { validation: false });
+    const model = doc.parseResult.value as Model;
+    const files = generateSystems(model).files;
+    const page = files.get("web_app/src/pages/views/order_summary.tsx");
+    expect(page).toBeDefined();
+    await expect(page).toMatchFileSnapshot(
+      path.join(repoRoot, "test/__snapshots__/pack-mantine-view-order-summary.tsx"),
+    );
+  });
+
+  it("Mantine pack — new page snapshot", async () => {
+    const files = await generateFromSource(SOURCE);
+    const newPage = files.get("web_mantine/src/pages/customers/new.tsx");
+    expect(newPage).toBeDefined();
+    await expect(newPage).toMatchFileSnapshot(
+      path.join(repoRoot, "test/__snapshots__/pack-mantine-customer-new.tsx"),
+    );
+  });
+
+  it("Mantine pack — detail page snapshot", async () => {
+    const files = await generateFromSource(SOURCE);
+    const detail = files.get("web_mantine/src/pages/customers/detail.tsx");
+    expect(detail).toBeDefined();
+    await expect(detail).toMatchFileSnapshot(
+      path.join(repoRoot, "test/__snapshots__/pack-mantine-customer-detail.tsx"),
+    );
+  });
+
   it("Mantine pack — list page snapshot", async () => {
     const files = await generateFromSource(SOURCE);
     const list = files.get("web_mantine/src/pages/customers/list.tsx");

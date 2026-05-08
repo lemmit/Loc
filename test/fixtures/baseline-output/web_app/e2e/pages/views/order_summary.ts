@@ -18,9 +18,6 @@ export class OrderSummaryViewPage {
   }
 
   async rows(): Promise<OrderSummaryRowText[]> {
-    // Walk row indices until the row testid stops matching.
-    // The empty-state branch in the React table renders no
-    // rows at all, so the loop terminates immediately.
     const out: OrderSummaryRowText[] = [];
     for (let i = 0; i < 1000; i++) {
       const row = this.page.getByTestId(`view-order_summary-row-${i}`);
@@ -33,7 +30,6 @@ export class OrderSummaryViewPage {
     return out;
   }
 
-  /** Count of currently-rendered rows. */
   async count(): Promise<number> {
     return (await this.rows()).length;
   }

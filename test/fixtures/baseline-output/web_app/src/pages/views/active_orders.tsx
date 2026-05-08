@@ -36,18 +36,22 @@ export default function ActiveOrdersViewPage() {
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th>Id</Table.Th>
-                  <Table.Th>Customer Id</Table.Th>
-                  <Table.Th>Status</Table.Th>
-                  <Table.Th>Placed At</Table.Th>
+<Table.Th>Customer Id</Table.Th>
+<Table.Th>Status</Table.Th>
+<Table.Th>Placed At</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
                 {q.data.map((row, idx) => (
                   <Table.Tr key={idx} data-testid={`view-active_orders-row-${idx}`}>
-                    <Table.Td data-testid={`view-active_orders-row-${idx}-id`}>{row.id === null || row.id === undefined || row.id === "" ? <EmptyValue /> : String(row.id)}</Table.Td>
-                    <Table.Td data-testid={`view-active_orders-row-${idx}-customerId`}>{row.customerId === null || row.customerId === undefined || row.customerId === "" ? <EmptyValue /> : String(row.customerId)}</Table.Td>
-                    <Table.Td data-testid={`view-active_orders-row-${idx}-status`}><Badge tt="unset" variant="light">{row.status}</Badge></Table.Td>
-                    <Table.Td data-testid={`view-active_orders-row-${idx}-placedAt`}><DateTimeValue iso={row.placedAt} /></Table.Td>
+                    <Table.Td data-testid={`view-active_orders-row-${idx}-id`}>{ row.id === null || row.id === undefined || row.id === "" ? <EmptyValue /> : String(row.id)}</Table.Td>
+
+<Table.Td data-testid={`view-active_orders-row-${idx}-customerId`}>{ row.customerId === null || row.customerId === undefined || row.customerId === "" ? <EmptyValue /> : String(row.customerId)}</Table.Td>
+
+<Table.Td data-testid={`view-active_orders-row-${idx}-status`}><Badge tt="unset" variant="light">{row.status}</Badge></Table.Td>
+
+<Table.Td data-testid={`view-active_orders-row-${idx}-placedAt`}><DateTimeValue iso={row.placedAt} /></Table.Td>
+
                   </Table.Tr>
                 ))}
               </Table.Tbody>

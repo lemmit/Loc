@@ -19,9 +19,6 @@ export class ActiveOrdersViewPage {
   }
 
   async rows(): Promise<ActiveOrdersRowText[]> {
-    // Walk row indices until the row testid stops matching.
-    // The empty-state branch in the React table renders no
-    // rows at all, so the loop terminates immediately.
     const out: ActiveOrdersRowText[] = [];
     for (let i = 0; i < 1000; i++) {
       const row = this.page.getByTestId(`view-active_orders-row-${i}`);
@@ -35,7 +32,6 @@ export class ActiveOrdersViewPage {
     return out;
   }
 
-  /** Count of currently-rendered rows. */
   async count(): Promise<number> {
     return (await this.rows()).length;
   }
