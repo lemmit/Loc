@@ -59,3 +59,15 @@ test("Generate emits a virtual file tree", async ({ page }) => {
   // Footer summary.
   await expect(page.getByText(/generated \d+ file\(s\)/)).toBeVisible();
 });
+
+test("auto-Generate fires after page-load idle without clicking the button", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  // The auto-Generate timer (800 ms after page mount, longer if
+  // the LSP took a while to settle) should fire on its own.  No
+  // click on btn-generate; just wait for the file-count chip.
+  await expect(page.getByText(/\d+ files? · /)).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByText(/generated \d+ file\(s\)/)).toBeVisible();
+});
