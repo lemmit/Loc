@@ -63,14 +63,30 @@ export interface PreviewBundle {
 }
 
 /** Send the latest bundle to the SW so its sandbox routes can
- *  serve it.  No-op if the SW isn't activated yet. */
+ *  serve it.  Resolves once the SW has stored the bundle and
+ *  acked back through the MessageChannel — callers that navigate
+ *  the iframe should await this so the next sandbox fetch hits
+ *  the new bundle, not the previous one.  Safety-netted at 1 s
+ *  so a misbehaving SW can't deadlock the preview. */
 export function pushBundle(
   reg: ServiceWorkerRegistration,
   bundle: PreviewBundle,
-): void {
+): Promise<void> {
   const ctrl = reg.active ?? reg.waiting ?? reg.installing;
-  if (!ctrl) return;
-  ctrl.postMessage({ type: "loom-sw/set-bundle", bundle });
+  if (!ctrl) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const ch = new MessageChannel();
+    let settled = false;
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      ch.port1.close();
+      resolve();
+    };
+    ch.port1.onmessage = finish;
+    ctrl.postMessage({ type: "loom-sw/set-bundle", bundle }, [ch.port2]);
+    setTimeout(finish, 1_000);
+  });
 }
 
 /** Sandbox URL the iframe will load from once the migration lands.

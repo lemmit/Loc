@@ -1,14 +1,24 @@
 // Synthesise the iframe document for the React preview.
 //
-// The React bundle is loaded inside the iframe; it mounts on
-// `#root` at evaluation time.  All fetches the bundle issues
-// against any `http://localhost:*` host get intercepted by the
-// shim below and routed via `postMessage` to the parent window,
-// which forwards them to the runtime worker (where the Hono +
-// PGlite backend lives).  This avoids needing a Service Worker.
+// This output ships down two paths:
 //
-// We keep the shim small and inline-injected so it sits before
-// the bundle's first import — no race, no SW lifecycle.
+//   - SW path (default in production): the parent pushes the HTML
+//     to `preview-sw.js` and the iframe navigates to the sandbox
+//     URL.  Real-origin iframe — postMessage, history, and the
+//     URL parser all behave normally.
+//   - srcDoc fallback: used when SW isn't available (insecure
+//     contexts, browsers without SW support).  about:srcdoc has
+//     an opaque origin that breaks the WHATWG URL parser and the
+//     history API, so `URL_FIX_SRC` / `ROUTING_FIX_SRC` patch
+//     around those quirks.  On the SW path these execute but are
+//     harmless no-ops.
+//
+// Fetches the bundle issues against any `http://localhost:*` host
+// are caught by the inline fetch shim and routed via `postMessage`
+// to the parent window, which forwards them to the runtime worker
+// (where the Hono + PGlite backend lives).  A future PR will
+// replace this with a SW-bridged MessageChannel so the bundle can
+// use real relative URLs.
 //
 // React runtime modules (`react`, `react-dom`, `react/jsx-runtime`,
 // …) are externalised at bundle time and provided via a dynamic
