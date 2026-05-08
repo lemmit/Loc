@@ -772,7 +772,7 @@ function upper(s: string): string {
 const DOCKERFILE_REACT = `# syntax=docker/dockerfile:1
 # Auto-generated.
 
-FROM node:22-alpine AS build
+FROM node:24-alpine AS build
 WORKDIR /app
 # Optional proxy CAs — drop *.crt files into ./certs/ to make npm
 # trust them.  The directory always exists (with a .gitkeep), so
@@ -785,7 +785,7 @@ RUN npm ci || npm install
 COPY . .
 RUN npm run build
 
-FROM node:22-alpine AS runtime
+FROM node:24-alpine AS runtime
 WORKDIR /app
 ENV PORT=3000
 COPY --from=build /app/dist ./dist

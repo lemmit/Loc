@@ -211,8 +211,8 @@ const PROJECT_TSCONFIG_JSON = JSON.stringify(
   {
     compilerOptions: {
       target: "ES2022",
-      module: "Node16",
-      moduleResolution: "Node16",
+      module: "NodeNext",
+      moduleResolution: "NodeNext",
       strict: true,
       esModuleInterop: true,
       skipLibCheck: true,
@@ -268,7 +268,7 @@ process.on("SIGINT", () => void shutdown("SIGINT"));
 const DOCKERFILE_TS = `# syntax=docker/dockerfile:1
 # Auto-generated.
 
-FROM node:22-alpine AS build
+FROM node:24-alpine AS build
 WORKDIR /app
 # Optional proxy CAs — drop *.crt files into ./certs/ to make npm
 # trust them.  The directory always exists (with a .gitkeep), so
@@ -281,7 +281,7 @@ RUN npm ci || npm install
 COPY . .
 RUN npm run build
 
-FROM node:22-alpine AS runtime
+FROM node:24-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production PORT=3000
 COPY --from=build /app/node_modules ./node_modules

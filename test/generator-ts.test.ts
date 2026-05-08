@@ -69,8 +69,8 @@ describe("typescript generator", () => {
     const model = await buildModel("examples/sales.ddd");
     const files = generateTypeScript(model);
     const dockerfile = files.get("Dockerfile")!;
-    expect(dockerfile).toMatch(/FROM node:22-alpine AS build/);
-    expect(dockerfile).toMatch(/FROM node:22-alpine AS runtime/);
+    expect(dockerfile).toMatch(/FROM node:24-alpine AS build/);
+    expect(dockerfile).toMatch(/FROM node:24-alpine AS runtime/);
     expect(dockerfile).toMatch(/CMD \["node", "out\/index\.js"\]/);
     const dockerignore = files.get(".dockerignore")!;
     expect(dockerignore).toMatch(/node_modules/);
