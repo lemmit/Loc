@@ -146,7 +146,13 @@ function ensureFindAll(
  * rejects that case). */
 function enrichDeployables(deployables: DeployableIR[]): DeployableIR[] {
   return deployables.map((d) => {
-    if (d.platform !== "react" || !d.targetName) return d;
+    // Slice 8: `static` deployables share the legacy `react` module-
+    // inheritance behaviour — they're frontend deployables that
+    // serve a built bundle and need to know about every context the
+    // target backend exposes (so the page-IR emitter has every
+    // aggregate's wire shape in scope).
+    const isFrontend = d.platform === "react" || d.platform === "static";
+    if (!isFrontend || !d.targetName) return d;
     const target = deployables.find((t) => t.name === d.targetName);
     if (!target) return d;
     return { ...d, moduleNames: [...target.moduleNames] };

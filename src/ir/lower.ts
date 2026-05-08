@@ -215,7 +215,11 @@ function lowerSystem(sys: import("../language/generated/ast.js").System): System
   const e2eTests = e2eBlocks.map((b) => {
     const targetName = b.deployable?.ref?.name ?? "";
     const target = deployables.find((d) => d.name === targetName);
-    const kind: "api" | "ui" = target?.platform === "react" ? "ui" : "api";
+    // Slice 8: `static` deployables also lower e2e tests as UI tests
+    // (Playwright spec via page objects) — same shape `react` has.
+    const targetPlatform = target?.platform;
+    const kind: "api" | "ui" =
+      targetPlatform === "react" || targetPlatform === "static" ? "ui" : "api";
     return lowerE2E(b, e2eEnv, kind);
   });
   // Slice 2 — page metamodel.  `ui { ... }` blocks are SystemMembers;
@@ -315,8 +319,12 @@ function lowerDeployable(
   // — ignoring it on other platforms keeps the IR honest about which
   // deployables actually render UI.  The grammar accepts the keyword
   // anywhere but the generator stack only honours it under react.
+  // Slice 8: `static` deployables share the React design-pack
+  // semantics (the v0 static frontend IS a React bundle).
   const design =
-    platform === "react" ? (d.design ?? "mantine") : undefined;
+    platform === "react" || platform === "static"
+      ? (d.design ?? "mantine")
+      : undefined;
   // Slice 2: page-metamodel UI binding.  The grammar accepts two
   // surface forms — `ui: WebApp` (sugar) and `ui WebApp { framework: react }`
   // (full block).  Both lower to the same `uiName` + optional

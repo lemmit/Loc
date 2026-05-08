@@ -237,7 +237,7 @@ system Acme {
     // backend, so pages cover Catalog + Sales + CustomerMgmt
     // aggregates against the same wire shape.
     deployable webApp {
-        platform: react
+        platform: static
         targets: api
         ui: WebApp
         port: 3001
