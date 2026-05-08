@@ -252,6 +252,7 @@ for details.
 | [`docs/generators.md`](docs/generators.md) | Per-platform feature matrix — what each backend emits, file-by-file, with side-by-side comparisons. |
 | [`docs/technical.md`](docs/technical.md) | Architecture: AST → IR → templates, design rationale, how to extend the language or add a backend. |
 | [`docs/tools.md`](docs/tools.md) | CLI usage, `.loomignore`, watch mode, migration workflow, Docker, Playwright UI tests, OpenAPI cross-check, proxy CAs. |
+| [`docs/license-faq.md`](docs/license-faq.md) | Plain-English answers to "is this OK to use in production?" — generator vs. generated-code licensing, what counts as Competing Use, OSI considerations. |
 
 Plus [`experience_gathered.md`](experience_gathered.md) — running
 retrospective of design choices and gotchas; worth reading before
@@ -271,7 +272,19 @@ non-trivial changes.
 
 ## License
 
+The **generator** in this repository is licensed under
 [`FSL-1.1-Apache-2.0`](LICENSE) — Functional Source License 1.1 with
 an Apache 2.0 future license.  Source-available for any non-competing
 use today; converts to a true open-source license (Apache 2.0) two
 years after publication.
+
+The **code Loom generates** (everything `ddd generate` writes into
+`<outdir>/`) is licensed to you under the **MIT License** — the CLI
+emits a `LICENSE` file at the output-directory root that says so
+explicitly.  Production users can ship generated projects without
+inheriting any FSL terms.
+
+For the full posture — what counts as Competing Use, how runtime
+helpers are licensed when they ship inside generated projects, and
+what to tell legal/procurement — see
+[`docs/license-faq.md`](docs/license-faq.md).

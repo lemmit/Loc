@@ -53,6 +53,26 @@ describe("CLI", () => {
     fs.rmSync(tmp, { recursive: true });
   });
 
+  it("emits a MIT LICENSE at the output root declaring generated code is unencumbered", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "loom-license-"));
+    runCli(["generate", "ts", example, "-o", tmp]);
+    const license = fs.readFileSync(path.join(tmp, "LICENSE"), "utf8");
+    expect(license).toMatch(/MIT License/);
+    expect(license).toMatch(/scaffolded by Loom/);
+    expect(license).toMatch(/license-faq/);
+    fs.rmSync(tmp, { recursive: true });
+  });
+
+  it("`.loomignore` can pin LICENSE so the user keeps their own", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "loom-license-pin-"));
+    fs.writeFileSync(path.join(tmp, ".loomignore"), "/LICENSE\n", "utf8");
+    fs.writeFileSync(path.join(tmp, "LICENSE"), "Custom LICENSE\n", "utf8");
+    const result = runCli(["generate", "ts", example, "-o", tmp]);
+    expect(result.status).toBe(0);
+    expect(fs.readFileSync(path.join(tmp, "LICENSE"), "utf8")).toBe("Custom LICENSE\n");
+    fs.rmSync(tmp, { recursive: true });
+  });
+
   it("does not emit project-shell files (README, .env.example, .gitignore)", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "loom-shell-"));
     runCli(["generate", "ts", example, "-o", tmp]);
@@ -66,7 +86,7 @@ describe("CLI", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "loom-inc-"));
     const first = runCli(["generate", "ts", example, "-o", tmp]);
     expect(first.status).toBe(0);
-    expect(first.stdout).toMatch(/Wrote 26 file\(s\)/);
+    expect(first.stdout).toMatch(/Wrote 27 file\(s\)/);
     // Capture mtimes after the first run so we can verify the second
     // run doesn't re-touch anything.
     const sample = path.join(tmp, "domain", "order.ts");
@@ -74,7 +94,7 @@ describe("CLI", () => {
 
     const second = runCli(["generate", "ts", example, "-o", tmp]);
     expect(second.status).toBe(0);
-    expect(second.stdout).toMatch(/Wrote 0 file\(s\) in [^,]+, unchanged: 26/);
+    expect(second.stdout).toMatch(/Wrote 0 file\(s\) in [^,]+, unchanged: 27/);
     const mtimeAfter = fs.statSync(sample).mtimeMs;
     expect(mtimeAfter).toBe(mtimeBefore);
     fs.rmSync(tmp, { recursive: true });
@@ -101,7 +121,7 @@ describe("CLI", () => {
 
     const result = runCli(["generate", "ts", example, "-o", tmp]);
     expect(result.status).toBe(0);
-    expect(result.stdout).toMatch(/Wrote 1 file\(s\) in [^,]+, unchanged: 25/);
+    expect(result.stdout).toMatch(/Wrote 1 file\(s\) in [^,]+, unchanged: 26/);
     expect(fs.statSync(idsPath).mtimeMs).toBeGreaterThan(idsMtimeBefore);
     expect(fs.statSync(orderPath).mtimeMs).toBe(orderMtimeBefore);
     fs.rmSync(tmp, { recursive: true });
