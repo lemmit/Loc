@@ -45,10 +45,13 @@ interface FetchErrorMsg {
   message: string;
 }
 
-// SW availability is decided once at module load: secure context +
-// `serviceWorker` in `navigator`.  When false, the preview falls
-// back to the legacy srcDoc path so dev/test environments without
-// HTTPS or with SW disabled still work.
+// Preview requires Service Worker support to serve the iframe
+// from the sandbox URL.  Modern browsers all support SW over
+// secure contexts (HTTPS, localhost); the playground's only
+// hard requirement is therefore HTTPS or localhost.  When SW is
+// unavailable we render an explanatory error instead of a broken
+// iframe — the legacy srcdoc fallback was removed once the SW
+// path stabilised.
 const SW_AVAILABLE =
   typeof navigator !== "undefined" &&
   "serviceWorker" in navigator &&
@@ -80,8 +83,11 @@ export function Preview({ js, css, versions, runtime }: PreviewProps): JSX.Eleme
         if (cancelled) return;
         setPushedHash(fnv1a32(html));
       } catch {
-        // SW failed at runtime — leave `pushedHash` null and the
-        // srcDoc fallback below renders instead.
+        // SW push failed — `pushedHash` stays null and the iframe
+        // doesn't render.  This is the rare path: SW registered
+        // OK at App mount but its `active` worker dropped before
+        // the bundle push reached it.  The next bundle's effect
+        // will retry.
       }
     })();
     return () => {
@@ -136,17 +142,28 @@ export function Preview({ js, css, versions, runtime }: PreviewProps): JSX.Eleme
         </Text>
       </Box>
       <Box style={{ flex: 1, minHeight: 0, background: "white" }}>
-        {SW_AVAILABLE ? (
-          // SW path — real-origin iframe.  `key` remounts on each
-          // new bundle so the browser re-navigates rather than
-          // serving the same URL from its bfcache.  Render only
-          // after `pushedHash` is set; before that the SW would
-          // answer with its 503 "bundle first" placeholder, which
-          // would flash for the user and double-load on push.  No
-          // `sandbox` attribute: the SW response runs in our
-          // origin and we want it to share postMessage + history
-          // with the parent unencumbered (BrowserRouter's
-          // pushState in particular).
+        {!SW_AVAILABLE ? (
+          // No SW available — the preview iframe needs the SW to
+          // serve the bundle.  Surface a clear message instead of
+          // a broken iframe.  In practice this only happens on
+          // insecure-context dev setups (HTTP, file://) since all
+          // modern browsers ship SW over HTTPS / localhost.
+          <Box p="md">
+            <Text size="sm" c="dimmed">
+              Preview requires Service Worker support over a secure context
+              (HTTPS or localhost).
+            </Text>
+          </Box>
+        ) : (
+          // `key` remounts on each new bundle so the browser
+          // re-navigates rather than serving the same URL from
+          // bfcache.  Render only after `pushedHash` is set; before
+          // that the SW would answer with its 503 "bundle first"
+          // placeholder, which would flash for the user and
+          // double-load on push.  No `sandbox` attribute: the SW
+          // response runs in our origin and we want it to share
+          // postMessage + history with the parent unencumbered
+          // (BrowserRouter's pushState in particular).
           pushedHash !== null && (
             <iframe
               key={pushedHash}
@@ -157,19 +174,6 @@ export function Preview({ js, css, versions, runtime }: PreviewProps): JSX.Eleme
               data-testid="preview-iframe"
             />
           )
-        ) : (
-          // Legacy fallback — srcDoc with the URL/Routing/fetch
-          // shims baked in by `makePreviewHtml`.  Used only when
-          // SW isn't available (insecure context, file://, browser
-          // without SW support).
-          <iframe
-            ref={iframeRef}
-            srcDoc={html}
-            sandbox="allow-scripts allow-same-origin allow-forms"
-            style={{ width: "100%", height: "100%", border: "none" }}
-            title="Loom-generated app"
-            data-testid="preview-iframe"
-          />
         )}
       </Box>
     </Box>
