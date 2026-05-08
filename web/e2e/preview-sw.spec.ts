@@ -83,6 +83,68 @@ test("SW push + sandbox URL round-trip without bundling", async ({ page }) => {
   );
 });
 
+test("SW SPA fallback — deep paths under sandbox prefix serve the bundle HTML", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+
+  await page.evaluate(async () => {
+    const start = Date.now();
+    while (Date.now() - start < 10_000) {
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (reg && (reg.active || navigator.serviceWorker.controller)) return;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    throw new Error("SW did not activate within 10 s");
+  });
+
+  const SENTINEL = "loom-sw-spa-fallback-9d2a";
+  await page.evaluate(async (sentinel) => {
+    const reg = await navigator.serviceWorker.ready;
+    const ctrl = reg.active ?? reg.waiting ?? reg.installing;
+    if (!ctrl) throw new Error("no SW controller");
+    const html = `<!doctype html><html><body><div id="root">${sentinel}</div></body></html>`;
+    await new Promise<void>((resolve) => {
+      const ch = new MessageChannel();
+      ch.port1.onmessage = () => resolve();
+      ctrl.postMessage(
+        { type: "loom-sw/set-bundle", bundle: { html, js: "", css: "" } },
+        [ch.port2],
+      );
+    });
+  }, SENTINEL);
+
+  // Routes the BrowserRouter inside the bundle would land on —
+  // SPA fallback has to serve the same HTML so the router can
+  // do its thing client-side.  Critically `runtime/*` must NOT
+  // be SPA-handled (it's the runtime bridge).
+  for (const subpath of ["customers", "products/new", "deeply/nested/path"]) {
+    const result = await page.evaluate(
+      async ({ subpath, sentinel }) => {
+        const url = new URL(`__loom_sandbox__/${subpath}`, location.href).toString();
+        const res = await fetch(url, { cache: "no-store" });
+        const body = await res.text();
+        return {
+          status: res.status,
+          hasSentinel: body.includes(sentinel),
+          contentType: res.headers.get("content-type"),
+        };
+      },
+      { subpath, sentinel: SENTINEL },
+    );
+    expect(result.status, `SPA fallback for /${subpath}`).toBe(200);
+    expect(
+      result.contentType,
+      `SPA fallback for /${subpath} content-type`,
+    ).toContain("text/html");
+    expect(
+      result.hasSentinel,
+      `SPA fallback for /${subpath} returned the bundle HTML`,
+    ).toBe(true);
+  }
+});
+
 test("SW runtime bridge — fetch on `<sandbox>/runtime/*` round-trips through MessagePort", async ({
   page,
 }) => {

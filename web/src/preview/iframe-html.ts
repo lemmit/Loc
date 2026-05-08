@@ -25,6 +25,14 @@ interface MakePreviewArgs {
    *  Lookups for `react` / `react-dom` decide what the importmap
    *  pins; if unset, falls back to a known-good 18.x. */
   versions?: Record<string, string>;
+  /** Pathname the iframe is served from, no trailing slash —
+   *  e.g. `/loc/playground/__loom_sandbox__` on GH Pages.  The
+   *  generated `main.tsx` reads this as `window.__LOOM_BASENAME__`
+   *  and passes it to `<BrowserRouter basename>`, so route
+   *  resolution works under the iframe's deploy path.  When
+   *  unset, the bundle falls back to BrowserRouter's default
+   *  (root). */
+  sandboxBase?: string;
 }
 
 const REACT_FALLBACK_VERSION = "18.3.1";
@@ -62,6 +70,10 @@ export function makePreviewHtml(args: MakePreviewArgs): string {
   // A `<base href="/">` would have leaked the request out of the
   // SW scope on deploys with a non-root deploy base (e.g. GH
   // Pages at `/loc/playground/`).
+  const basenameScript =
+    args.sandboxBase != null
+      ? `<script>window.__LOOM_BASENAME__ = ${JSON.stringify(args.sandboxBase)};</script>`
+      : "";
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -79,6 +91,7 @@ ${styleTagFor(args.css)}
 </head>
 <body>
 <div id="root"></div>
+${basenameScript}
 <script type="module">${ESCAPE_END_SCRIPT(args.js)}</script>
 </body>
 </html>`;

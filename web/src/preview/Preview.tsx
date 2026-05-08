@@ -93,7 +93,18 @@ export function Preview({ js, css, versions, runtime }: PreviewProps): JSX.Eleme
     if (!SW_AVAILABLE) return;
     if (!runtimeAttached) return;
     let cancelled = false;
-    const html = makePreviewHtml({ js, css, versions });
+    // Compute the basename the bundle's BrowserRouter should use.
+    // The iframe loads at `<deploy>/__loom_sandbox__/`; routes
+    // emitted by the generator are rooted at `/` (e.g. `/customers`),
+    // so we tell react-router that the iframe URL pathname *is* the
+    // base.  The injected `window.__LOOM_BASENAME__` is read by the
+    // generated `main.tsx`.  Without this, BrowserRouter would
+    // try to match `/loc/playground/__loom_sandbox__/` against
+    // user routes (no match → "Not found"), and link clicks would
+    // pushState to `/customers`, leaking out of SW scope and
+    // breaking subsequent runtime fetches.
+    const sandboxBase = new URL(sandboxUrl()).pathname.replace(/\/$/, "");
+    const html = makePreviewHtml({ js, css, versions, sandboxBase });
     void (async () => {
       try {
         const reg = await navigator.serviceWorker.ready;
