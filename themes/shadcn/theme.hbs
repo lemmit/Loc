@@ -1,36 +1,23 @@
 // Auto-generated.  Do not edit by hand.
 //
-// PHASE 1.1 SPIKE — the shadcn pack ships a Mantine-flavoured
-// theme.ts here so partial-shadcn builds (where main.tsx still
-// imports from @mantine/core because the rest of the project shell
-// hasn't been ported yet) keep type-checking.  Phase 2 replaces
-// this template with a globals.css emission that writes CSS
-// variables on `:root` from the same ThemeVM.
-import { createTheme, type MantineColorsTuple } from "@mantine/core";
+// shadcn pack: theme tokens live in `src/globals.css` as CSS
+// variables on `:root` (the canonical shadcn pattern).  This file
+// is kept as a stub so the generator's orchestrator can keep its
+// pack-invariant emission contract without special-casing — a
+// future custom pack might still want a TS theme module here.
+//
+// The brand / neutral / radius / fontFamily tokens from the DSL
+// `theme {}` block are NOT yet projected into globals.css; that
+// will land in a follow-up.  For now the shadcn pack uses
+// shadcn's stock zinc-based palette regardless of theme tokens.
 
-const brand: MantineColorsTuple = [
-{{#each brandShades}}  "{{this}}",
-{{/each}}];
-
-const neutral: MantineColorsTuple = [
-{{#each neutralShades}}  "{{this}}",
-{{/each}}];
-
-export const theme = createTheme({
-  primaryColor: "brand",
-  primaryShade: { light: 6, dark: 5 },
-  colors: { brand, gray: neutral },
-  defaultRadius: {{json radius}},
+export const themeTokens = {
+  brandShades: [
+{{#each brandShades}}    "{{this}}",
+{{/each}}  ] as const,
+  neutralShades: [
+{{#each neutralShades}}    "{{this}}",
+{{/each}}  ] as const,
+  radius: {{json radius}},
   fontFamily: {{json fontFamily}},
-  fontFamilyMonospace: {{json fontFamilyMonospace}},
-  headings: {
-    fontFamily: {{json fontFamily}},
-    fontWeight: "600",
-    sizes: {
-      h1: { fontSize: "2rem", lineHeight: "1.25" },
-      h2: { fontSize: "1.5rem", lineHeight: "1.3" },
-      h3: { fontSize: "1.25rem", lineHeight: "1.35" },
-      h4: { fontSize: "1rem", lineHeight: "1.4" },
-    },
-  },
-});
+} as const;

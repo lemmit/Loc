@@ -1,24 +1,11 @@
 // Auto-generated.
-// PHASE 2.1 SPIKE — shadcn pack's main.tsx still wires Mantine
-// providers in addition to shadcn's globals.css + Sonner Toaster
-// because the page templates haven't been ported to canonical
-// shadcn yet (Phase 2.3).  Mantine providers stay until then so
-// the Mantine pages keep rendering; once Phase 2.3 lands and the
-// pages emit shadcn primitives, the @mantine/* imports drop.
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
-import { MantineProvider } from "@mantine/core";
-import { Notifications } from "@mantine/notifications";
-import { ModalsProvider } from "@mantine/modals";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "sonner";
-import "@mantine/core/styles.css";
-import "@mantine/notifications/styles.css";
-import "@mantine/dates/styles.css";
 import "./globals.css";
 import App from "./App";
-import { theme } from "./theme";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 5_000, retry: 1 } },
@@ -38,15 +25,10 @@ const basename =
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <MantineProvider theme={theme} defaultColorScheme="light">
-        <ModalsProvider>
-          <Notifications position="top-right" />
-          <Toaster position="top-right" richColors />
-          <BrowserRouter basename={basename}>
-            <App />
-          </BrowserRouter>
-        </ModalsProvider>
-      </MantineProvider>
+      <Toaster position="top-right" richColors />
+      <BrowserRouter basename={basename}>
+        <App />
+      </BrowserRouter>
     </QueryClientProvider>
   </React.StrictMode>,
 );

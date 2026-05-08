@@ -24,7 +24,7 @@ export default function WorkflowsIndex() {
             </Group>
             <Button component={Link} to="/workflows/{{slug}}" data-testid="workflow-{{slug}}-run">Run →</Button>
           </Group>
-{{#if hasParams}}{{#each paramLines}}{{{this}}}
+{{#if hasParams}}{{#each params}}          <Text size="sm" c="dimmed" data-testid="workflow-{{../slug}}-param-{{name}}"><strong>{{humanName}}</strong>: {{expr typeLabelJson}}</Text>
 {{/each}}{{else}}          <Text size="sm" c="dimmed">No parameters.</Text>
 {{/if}}        </Stack>
       </Card>

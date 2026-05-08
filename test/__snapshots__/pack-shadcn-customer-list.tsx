@@ -1,10 +1,14 @@
 // Auto-generated.
-// shadcn pack — Phase 0 spike: native HTML5 + Tailwind utility classes
-// (no shadcn UI library files yet — those land in Phase 2 with the
-// full project shell).  Demonstrates that the same view-model
-// produces a structurally-distinct output through a different pack.
 import { Link, useNavigate } from "react-router-dom";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { AlertCircle, Plus } from "lucide-react";
 import { useAllCustomers } from "../../api/customer";
+import { IdValue, DateTimeValue, BoolValue, NumberValue, EmptyValue } from "@/lib/format";
 
 export default function CustomerList() {
   const navigate = useNavigate();
@@ -20,51 +24,67 @@ export default function CustomerList() {
           <h2 className="text-2xl font-semibold tracking-tight">Customers</h2>
           <p className="text-sm text-muted-foreground">{q.isLoading ? "Loading…" : count === 1 ? "1 record" : count + " records"}</p>
         </div>
-        <button onClick={() => navigate("/customers/new")} data-testid="customers-list-create" className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90">+ New customer</button>
+        <Button onClick={() => navigate("/customers/new")} data-testid="customers-list-create"><Plus className="mr-2 h-4 w-4" />New customer</Button>
       </div>
       {q.isLoading && (
-        <div className="rounded-md border bg-card p-4">
+        <Card className="p-4">
           <div className="flex flex-col gap-2">
             {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="h-7 rounded-sm bg-muted animate-pulse" />
+              <Skeleton key={i} className="h-7" />
             ))}
           </div>
-        </div>
+        </Card>
       )}
-      {q.isError && <div role="alert" className="rounded-md border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive"><strong>Couldn't load customers: </strong>{(q.error as Error).message}</div>}
+      {q.isError && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Couldn't load customers</AlertTitle>
+          <AlertDescription>{(q.error as Error).message}</AlertDescription>
+        </Alert>
+      )}
       {q.data && q.data.length === 0 && (
-        <div data-testid="customers-list-empty" className="rounded-md border bg-card p-12">
+        <Card className="p-12" data-testid="customers-list-empty">
           <div className="flex flex-col items-center gap-2">
             <p className="text-sm text-muted-foreground">No customers yet.</p>
-            <button onClick={() => navigate("/customers/new")} className="text-sm text-primary hover:underline">
+            <Button variant="link" onClick={() => navigate("/customers/new")}>
               Create your first customer
-            </button>
+            </Button>
           </div>
-        </div>
+        </Card>
       )}
       {q.data && q.data.length > 0 && (
-        <div className="rounded-md border bg-card overflow-hidden">
-          <table className="w-full caption-bottom text-sm">
-            <thead className="border-b bg-muted/50">
-              <tr>
-                <th className="h-10 px-4 text-left align-middle font-medium text-muted-foreground">Id</th><th className="h-10 px-4 text-left align-middle font-medium text-muted-foreground">Username</th><th className="h-10 px-4 text-left align-middle font-medium text-muted-foreground">Email</th><th className="h-10 px-4 text-left align-middle font-medium text-muted-foreground">Age</th><th className="h-10 px-4 text-left align-middle font-medium text-muted-foreground">Balance</th><th className="h-10 px-4 text-left align-middle font-medium text-muted-foreground">Vip</th>
-              </tr>
-            </thead>
-            <tbody>
+        <Card>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Id</TableHead>
+<TableHead>Username</TableHead>
+<TableHead>Email</TableHead>
+<TableHead>Age</TableHead>
+<TableHead>Balance</TableHead>
+<TableHead>Vip</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {q.data.map((row) => (
-                <tr key={row.id} data-testid={`customers-row-${row.id}`} className="border-b last:border-0 hover:bg-muted/50 cursor-pointer transition-colors" onClick={() => navigate(`/customers/${row.id}`)}>
-                  <td><Link to={`/customers/${row.id}`} data-testid={`customers-row-${row.id}-link`} className="text-primary underline-offset-4 hover:underline font-mono text-sm">{String(row.id).slice(0, 8) + "…"}</Link></td>
-<td data-testid={`customers-row-${row.id}-username`}>{ row.username === null || row.username === undefined || row.username === "" ? <span className="text-muted-foreground">—</span> : String(row.username)}</td>
-<td data-testid={`customers-row-${row.id}-email`}>{ row.email === null || row.email === undefined || row.email === "" ? <span className="text-muted-foreground">—</span> : String(row.email)}</td>
-<td data-testid={`customers-row-${row.id}-age`} className="text-right tabular-nums">{ row.age === null || row.age === undefined ? <span className="text-muted-foreground">—</span> : new Intl.NumberFormat(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(Number(row.age))}</td>
-<td data-testid={`customers-row-${row.id}-balance`} className="text-right tabular-nums">{ row.balance === null || row.balance === undefined ? <span className="text-muted-foreground">—</span> : new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(row.balance))}</td>
-<td data-testid={`customers-row-${row.id}-vip`}>{ row.vip === null || row.vip === undefined ? <span className="text-muted-foreground">—</span> : (row.vip ? <span className="font-medium">Yes</span> : <span className="text-muted-foreground">No</span>)}</td>
+                <TableRow key={row.id} data-testid={`customers-row-${row.id}`} className="cursor-pointer" onClick={() => navigate(`/customers/${row.id}`)}>
+                  <TableCell><Link to={`/customers/${row.id}`} data-testid={`customers-row-${row.id}-link`} className="text-primary hover:underline"><IdValue id={row.id} /></Link></TableCell>
 
-                </tr>
+<TableCell data-testid={`customers-row-${row.id}-username`}>{ row.username === null || row.username === undefined || row.username === "" ? <EmptyValue /> : String(row.username)}</TableCell>
+
+<TableCell data-testid={`customers-row-${row.id}-email`}>{ row.email === null || row.email === undefined || row.email === "" ? <EmptyValue /> : String(row.email)}</TableCell>
+
+<TableCell data-testid={`customers-row-${row.id}-age`} className="text-right"><NumberValue value={row.age} /></TableCell>
+
+<TableCell data-testid={`customers-row-${row.id}-balance`} className="text-right"><NumberValue value={row.balance} decimals={2} /></TableCell>
+
+<TableCell data-testid={`customers-row-${row.id}-vip`}><BoolValue value={row.vip} /></TableCell>
+
+                </TableRow>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </TableBody>
+          </Table>
+        </Card>
       )}
     </div>
   );

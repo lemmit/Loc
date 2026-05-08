@@ -1,9 +1,14 @@
 // Auto-generated.
 import { Link, useNavigate } from "react-router-dom";
-import { {{join mantineImports ", "}} } from "@mantine/core";
-import { notifications } from "@mantine/notifications";
-import { {{useFormImports}} } from "react-hook-form";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { toast } from "sonner";
 import { {{workflowPascal}}Request, use{{workflowPascal}}Workflow } from "../../api/workflows";
 {{#each idHookImportLines}}{{{this}}}
 {{/each}}
@@ -11,43 +16,49 @@ export default function {{componentName}}() {
   const navigate = useNavigate();
   const run = use{{workflowPascal}}Workflow();
 {{#each idHookCalls}}{{{this}}}
-{{/each}}  const {{{destructured}}} = useForm<{{workflowPascal}}Request>({
+{{/each}}  const form = useForm<{{workflowPascal}}Request>({
     resolver: zodResolver({{workflowPascal}}Request),
     defaultValues: {{{defaultValuesTs}}},
   });
   return (
-    <Stack maw={640} data-testid="workflow-{{slug}}" gap="md">
-      <Breadcrumbs>
-        <Anchor component={Link} to="/">Home</Anchor>
-        <Anchor component={Link} to="/workflows">Workflows</Anchor>
-        <Text>{{humanWorkflow}}</Text>
-      </Breadcrumbs>
-      <Stack gap={2}>
-        <Text size="sm" c="dimmed" tt="uppercase" fw={600}>Workflow</Text>
-        <Title order={2}>{{humanWorkflow}}</Title>
-      </Stack>
+    <div data-testid="workflow-{{slug}}" className="flex max-w-2xl flex-col gap-4">
+      <nav className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Link to="/" className="hover:text-foreground">Home</Link>
+        <span>/</span>
+        <Link to="/workflows" className="hover:text-foreground">Workflows</Link>
+        <span>/</span>
+        <span>{{humanWorkflow}}</span>
+      </nav>
+      <div className="flex flex-col gap-1">
+        <p className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Workflow</p>
+        <h2 className="text-2xl font-semibold tracking-tight">{{humanWorkflow}}</h2>
+      </div>
       <Card>
-        <form
-          onSubmit={handleSubmit(async (vals) => {
-            try {
-              await run.mutateAsync(vals);
-              notifications.show({ color: "green", message: "{{humanWorkflow}} completed" });
-              navigate("/workflows");
-            } catch (e) {
-              notifications.show({ color: "red", message: (e as Error).message });
-            }
-          })}
-        >
-          <Stack gap="md">
-          {{#if hasParams}}{{#each fieldHtmls}}{{{this}}}
-          {{/each}}{{else}}<Text>This workflow has no parameters.</Text>
-          {{/if}}<Group justify="flex-end" mt="sm">
-            <Button variant="default" onClick={() => navigate("/workflows")}>Cancel</Button>
-            <Button type="submit" loading={run.isPending} data-testid="workflow-{{slug}}-submit">Run</Button>
-          </Group>
-          </Stack>
-        </form>
+        <CardContent className="p-6">
+          <Form {...form}>
+            <form
+              onSubmit={form.handleSubmit(async (vals) => {
+                try {
+                  await run.mutateAsync(vals);
+                  toast.success("{{humanWorkflow}} completed");
+                  navigate("/workflows");
+                } catch (e) {
+                  toast.error((e as Error).message);
+                }
+              })}
+            >
+              <div className="flex flex-col gap-4">
+              {{#if hasParams}}{{#each fieldHtmls}}{{{this}}}
+              {{/each}}{{else}}<p className="text-sm text-muted-foreground">This workflow has no parameters.</p>
+              {{/if}}<div className="flex justify-end gap-2 pt-2">
+                <Button type="button" variant="outline" onClick={() => navigate("/workflows")}>Cancel</Button>
+                <Button type="submit" disabled={run.isPending} data-testid="workflow-{{slug}}-submit">Run</Button>
+              </div>
+              </div>
+            </form>
+          </Form>
+        </CardContent>
       </Card>
-    </Stack>
+    </div>
   );
 }

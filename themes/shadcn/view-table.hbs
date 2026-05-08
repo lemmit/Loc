@@ -1,56 +1,64 @@
 // Auto-generated.
 import { Link } from "react-router-dom";
-import { Stack, Title, Group, Anchor, Badge, Table, Alert, Text, Paper, Skeleton } from "@mantine/core";
-import { IconAlertCircle } from "@tabler/icons-react";
+import { Card } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { AlertCircle } from "lucide-react";
 import { {{hookName}} } from "../../api/views";
-import { IdValue, DateTimeValue, BoolValue, NumberValue, EmptyValue } from "../../lib/format";
+import { IdValue, DateTimeValue, BoolValue, NumberValue, EmptyValue } from "@/lib/format";
 
 export default function {{componentName}}() {
   const q = {{hookName}}();
   const count = q.data?.length ?? 0;
   return (
-    <Stack data-testid="view-{{slug}}" gap="md">
-      <Group justify="space-between" align="flex-end">
-        <Stack gap={2}>
-          <Text size="sm" c="dimmed" tt="uppercase" fw={600}>View</Text>
-          <Title order={2}>{{humanView}}</Title>
-          <Text size="sm" c="dimmed">{q.isLoading ? "Loading…" : count === 1 ? "1 row" : count + " rows"}</Text>
-        </Stack>
-        <Anchor component={Link} to="/views">← back</Anchor>
-      </Group>
+    <div data-testid="view-{{slug}}" className="flex flex-col gap-4">
+      <div className="flex items-end justify-between">
+        <div className="flex flex-col gap-0.5">
+          <p className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">View</p>
+          <h2 className="text-2xl font-semibold tracking-tight">{{humanView}}</h2>
+          <p className="text-sm text-muted-foreground">{q.isLoading ? "Loading…" : count === 1 ? "1 row" : count + " rows"}</p>
+        </div>
+        <Link to="/views" className="text-sm text-primary hover:underline">← back</Link>
+      </div>
       {q.isLoading && (
-        <Paper p="md">
-          <Stack gap="xs">
+        <Card className="p-4">
+          <div className="flex flex-col gap-2">
             {Array.from({ length: 5 }).map((_, i) => (
-              <Skeleton key={i} height={28} radius="sm" />
+              <Skeleton key={i} className="h-7" />
             ))}
-          </Stack>
-        </Paper>
+          </div>
+        </Card>
       )}
-      {q.isError && <Alert color="red" variant="light" icon={<IconAlertCircle size={18} />} title="Couldn't load view">{(q.error as Error).message}</Alert>}
-      {q.data && q.data.length === 0 && <Text c="dimmed">No rows.</Text>}
+      {q.isError && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Couldn't load view</AlertTitle>
+          <AlertDescription>{(q.error as Error).message}</AlertDescription>
+        </Alert>
+      )}
+      {q.data && q.data.length === 0 && <p className="text-sm text-muted-foreground">No rows.</p>}
       {q.data && q.data.length > 0 && (
-        <Paper p={0} style=\{{ overflow: "hidden" }}>
-          <Table.ScrollContainer minWidth={500}>
-            <Table striped highlightOnHover stickyHeader>
-              <Table.Thead>
-                <Table.Tr>
-                  {{#each columnHeaders}}<Table.Th>{{this}}</Table.Th>
+        <Card>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                {{#each columnHeaders}}<TableHead>{{this}}</TableHead>
+                {{/each}}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {q.data.map((row, idx) => (
+                <TableRow key={idx} data-testid={`view-{{slug}}-row-${idx}`}>
+                  {{#each cells}}{{{cellHtml}}}
                   {{/each}}
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {q.data.map((row, idx) => (
-                  <Table.Tr key={idx} data-testid={`view-{{slug}}-row-${idx}`}>
-                    {{#each cells}}{{{cellHtml}}}
-                    {{/each}}
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
-          </Table.ScrollContainer>
-        </Paper>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Card>
       )}
-    </Stack>
+    </div>
   );
 }

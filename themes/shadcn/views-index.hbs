@@ -1,33 +1,37 @@
 // Auto-generated.
 import { Link } from "react-router-dom";
-import { Anchor, Breadcrumbs, Stack, Title, Text, Card, Group, Button, SimpleGrid } from "@mantine/core";
-import { IconLayoutList } from "@tabler/icons-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { LayoutList } from "lucide-react";
 
 export default function ViewsIndex() {
   return (
-    <Stack data-testid="views-index" gap="md">
-      <Breadcrumbs data-testid="views-index-breadcrumbs">
-        <Anchor component={Link} to="/">Home</Anchor>
-        <Text>Views</Text>
-      </Breadcrumbs>
-      <Stack gap={2}>
-        <Title order={2}>Views</Title>
-        <Text c="dimmed">Saved queries.  Pick one to inspect.</Text>
-      </Stack>
-      <SimpleGrid cols=\{{ base: 1, sm: 2 }} spacing="md">
-{{#each cards}}      <Card data-testid="view-card-{{slug}}">
-        <Stack gap="xs">
-          <Group justify="space-between" align="center">
-            <Group gap="xs" align="center">
-              <IconLayoutList size={18} stroke={2} color="var(--mantine-color-brand-6)" />
-              <Title order={4}>{{humanView}}</Title>
-            </Group>
-            <Button component={Link} to="/views/{{slug}}" data-testid="view-{{slug}}-open" variant="light">Open →</Button>
-          </Group>
-          <Text size="sm" c="dimmed">{{shapeLine}}</Text>
-        </Stack>
-      </Card>
-{{/each}}      </SimpleGrid>
-    </Stack>
+    <div data-testid="views-index" className="flex flex-col gap-6">
+      <nav data-testid="views-index-breadcrumbs" className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Link to="/" className="hover:text-foreground">Home</Link>
+        <span>/</span>
+        <span>Views</span>
+      </nav>
+      <div className="flex flex-col gap-1">
+        <h2 className="text-2xl font-semibold tracking-tight">Views</h2>
+        <p className="text-muted-foreground">Saved queries.  Pick one to inspect.</p>
+      </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+{{#each cards}}        <Card data-testid="view-card-{{slug}}">
+          <CardContent className="flex flex-col gap-2 p-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <LayoutList className="h-4 w-4 text-primary" />
+                <h4 className="text-base font-semibold">{{humanView}}</h4>
+              </div>
+              <Button asChild variant="secondary" size="sm">
+                <Link to="/views/{{slug}}" data-testid="view-{{slug}}-open">Open →</Link>
+              </Button>
+            </div>
+            <p className="text-sm text-muted-foreground">{{shapeLine}}</p>
+          </CardContent>
+        </Card>
+{{/each}}      </div>
+    </div>
   );
 }

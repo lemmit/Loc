@@ -1,8 +1,10 @@
 // Auto-generated.
 import { Routes, Route, Link, useLocation } from "react-router-dom";
-import { AppShell, Burger, Divider, Group, Title, NavLink, Anchor, Alert, Button, Stack } from "@mantine/core";
-import { useDisclosure } from "@mantine/hooks";
-import React from "react";
+import { Menu } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { cn } from "@/lib/utils";
+import React, { useState } from "react";
 {{#each imports}}import {{specifier}} from "{{from}}";
 {{/each}}
 
@@ -10,8 +12,7 @@ import React from "react";
 // page component.  Without it, an unhandled exception inside
 // e.g. a detail page would blank the entire shell and leave the
 // user with no path back.  Reset on click navigates back to the
-// home route, matching the expectation that "the dashboard
-// keeps working when one page is broken".
+// home route.
 class AppErrorBoundary extends React.Component<
   { children: React.ReactNode },
   { error: Error | null }
@@ -27,13 +28,14 @@ class AppErrorBoundary extends React.Component<
   override render() {
     if (this.state.error) {
       return (
-        <Stack data-testid="app-error" p="md">
-          <Alert color="red" title="Something went wrong">
-            {this.state.error.message}
+        <div data-testid="app-error" className="p-4 flex flex-col gap-4">
+          <Alert variant="destructive">
+            <AlertTitle>Something went wrong</AlertTitle>
+            <AlertDescription>{this.state.error.message}</AlertDescription>
           </Alert>
-          <Group>
+          <div>
             <Button
-              variant="default"
+              variant="outline"
               onClick={() => {
                 this.setState({ error: null });
                 window.location.assign("/");
@@ -41,8 +43,8 @@ class AppErrorBoundary extends React.Component<
             >
               Back to home
             </Button>
-          </Group>
-        </Stack>
+          </div>
+        </div>
       );
     }
     return this.props.children;
@@ -51,18 +53,17 @@ class AppErrorBoundary extends React.Component<
 
 function NotFound() {
   return (
-    <Stack data-testid="not-found" p="md">
-      <Title order={2}>Not found</Title>
-      <Anchor component={Link} to="/">← Back to home</Anchor>
-    </Stack>
+    <div data-testid="not-found" className="p-4 flex flex-col gap-4">
+      <h2 className="text-2xl font-semibold tracking-tight">Not found</h2>
+      <Link to="/" className="text-primary hover:underline">← Back to home</Link>
+    </div>
   );
 }
 
-// Active-route helper — drives NavLink's `active` prop.  Defaults
-// to a prefix match so /orders/<id> + /orders/new + /orders all
+// Active-route helper — drives sidebar NavLink active styling.
+// Defaults to a prefix match so /orders/<id> + /orders/new + /orders
 // keep the "Orders" link highlighted; the `exact` opt-in narrows
-// to literal equality (used by /workflows + /views index links so
-// they don't shadow their per-item children).
+// to literal equality (used by /workflows + /views index links).
 function useIsActive() {
   const location = useLocation();
   return (path: string, opts?: { exact?: boolean }) => {
@@ -73,48 +74,73 @@ function useIsActive() {
   };
 }
 
+interface NavLinkProps {
+  to: string;
+  label: string;
+  active: boolean;
+  testId: string;
+}
+
+function NavLink({ to, label, active, testId }: NavLinkProps) {
+  return (
+    <Link
+      to={to}
+      data-testid={testId}
+      className={cn(
+        "rounded-md px-3 py-2 text-sm font-medium transition-colors",
+        active
+          ? "bg-accent text-accent-foreground"
+          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+      )}
+    >
+      {label}
+    </Link>
+  );
+}
+
 export default function App() {
   const isActive = useIsActive();
-  const [opened, { toggle }] = useDisclosure();
+  const [opened, setOpened] = useState(false);
   return (
-    <AppShell
-      header=\{{ height: 56 }}
-      navbar=\{{ width: 240, breakpoint: "sm", collapsed: { mobile: !opened } }}
-      padding="md"
-    >
-      <AppShell.Header>
-        <Group h="100%" px="md" justify="space-between">
-          <Group gap="sm">
-            <Burger
-              opened={opened}
-              onClick={toggle}
-              hiddenFrom="sm"
-              size="sm"
-              data-testid="nav-burger"
-            />
-            <Anchor component={Link} to="/" underline="never" c="inherit">
-              <Group gap={8} align="center">
-                <div style=\{{ width: 28, height: 28, borderRadius: 6, background: "var(--mantine-color-brand-6)" }} aria-hidden="true" />
-                <Title order={4} style=\{{ letterSpacing: "-0.01em" }}>{{systemNameHuman}}</Title>
-              </Group>
-            </Anchor>
-          </Group>
-        </Group>
-      </AppShell.Header>
-      <AppShell.Navbar p="md">
-        <Stack gap={4} data-testid="nav-sidebar">
-{{#each navSections}}          <Divider my="xs" label="{{label}}" labelPosition="left" />
-{{#each entries}}          <NavLink component={Link} to="{{to}}" label="{{label}}" active={isActive({{{activeArgs}}})} data-testid="{{testId}}" />
-{{/each}}{{/each}}        </Stack>
-      </AppShell.Navbar>
-      <AppShell.Main>
-        <AppErrorBoundary>
-          <Routes>
-{{#each routes}}            <Route path="{{path}}" element={{expr elementJsx}} />
-{{/each}}            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </AppErrorBoundary>
-      </AppShell.Main>
-    </AppShell>
+    <div className="flex min-h-screen flex-col">
+      <header className="sticky top-0 z-40 flex h-14 items-center gap-4 border-b bg-background px-4 lg:px-6">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="sm:hidden"
+          onClick={() => setOpened(!opened)}
+          data-testid="nav-burger"
+          aria-label="Toggle navigation"
+        >
+          <Menu className="h-5 w-5" />
+        </Button>
+        <Link to="/" className="flex items-center gap-2">
+          <div className="h-7 w-7 rounded-md bg-primary" aria-hidden="true" />
+          <span className="text-lg font-semibold tracking-tight">{{systemNameHuman}}</span>
+        </Link>
+      </header>
+      <div className="flex flex-1">
+        <nav
+          data-testid="nav-sidebar"
+          className={cn(
+            "w-60 shrink-0 border-r bg-background p-4 sm:block",
+            opened ? "block" : "hidden",
+          )}
+        >
+          <div className="flex flex-col gap-1">
+{{#each navSections}}            <p className="mt-2 mb-1 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{{label}}</p>
+{{#each entries}}            <NavLink to="{{to}}" label="{{label}}" active={isActive({{{activeArgs}}})} testId="{{testId}}" />
+{{/each}}{{/each}}          </div>
+        </nav>
+        <main className="flex-1 p-4 lg:p-6">
+          <AppErrorBoundary>
+            <Routes>
+{{#each routes}}              <Route path="{{path}}" element={{expr elementJsx}} />
+{{/each}}              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </AppErrorBoundary>
+        </main>
+      </div>
+    </div>
   );
 }

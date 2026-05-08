@@ -1,1 +1,1 @@
-<td data-testid={{expr testIdExpr}} className="text-right tabular-nums">{ {{{valueExpr}}} === null || {{{valueExpr}}} === undefined ? <span className="text-muted-foreground">—</span> : new Intl.NumberFormat(undefined, { minimumFractionDigits: {{#if decimals}}{{decimals}}{{else}}0{{/if}}, maximumFractionDigits: {{#if decimals}}{{decimals}}{{else}}2{{/if}} }).format(Number({{{valueExpr}}}))}</td>
+<TableCell data-testid={{expr testIdExpr}} className="text-right"><NumberValue value={{expr valueExpr}}{{#if decimals}} decimals={{expr decimals}}{{/if}} /></TableCell>

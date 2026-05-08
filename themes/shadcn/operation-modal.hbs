@@ -1,37 +1,32 @@
-function open{{opPascal}}Modal(mut: ReturnType<typeof use{{opPascal}}{{aggregateName}}>): void {
-  modals.open({
-    title: "{{humanOp}}",
-    children: <{{opPascal}}Form mut={mut} onClose={() => modals.closeAll()} />,
-  });
-}
-
 function {{opPascal}}Form({ mut, onClose }: { mut: ReturnType<typeof use{{opPascal}}{{aggregateName}}>; onClose: () => void }) {
 {{#each idHookCalls}}{{{this}}}
-{{/each}}  const {{{destructured}}} = useForm<{{opPascal}}Request>({
+{{/each}}  const form = useForm<{{opPascal}}Request>({
     resolver: zodResolver({{opPascal}}Request),
     defaultValues: {{{defaultValuesTs}}},
   });
   return (
-    <form
-      data-testid="{{slug}}-op-{{opName}}-form"
-      onSubmit={handleSubmit(async (vals) => {
-        try {
-          await mut.mutateAsync(vals);
-          notifications.show({ color: "green", message: "{{humanOp}} succeeded" });
-          onClose();
-        } catch (e) {
-          notifications.show({ color: "red", message: (e as Error).message });
-        }
-      })}
-    >
-      <Stack>
+    <Form {...form}>
+      <form
+        data-testid="{{slug}}-op-{{opName}}-form"
+        onSubmit={form.handleSubmit(async (vals) => {
+          try {
+            await mut.mutateAsync(vals);
+            toast.success("{{humanOp}} succeeded");
+            onClose();
+          } catch (e) {
+            toast.error((e as Error).message);
+          }
+        })}
+      >
+        <div className="flex flex-col gap-4">
         {{#if hasParams}}{{#each fieldHtmls}}{{{this}}}
-        {{/each}}{{else}}<Text>This operation has no parameters.</Text>
-        {{/if}}<Group justify="flex-end" mt="sm">
-          <Button variant="default" onClick={onClose}>Cancel</Button>
-          <Button type="submit" loading={mut.isPending} data-testid="{{slug}}-op-{{opName}}-submit">{{humanOp}}</Button>
-        </Group>
-      </Stack>
-    </form>
+        {{/each}}{{else}}<p className="text-sm text-muted-foreground">This operation has no parameters.</p>
+        {{/if}}<div className="flex justify-end gap-2 pt-2">
+          <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+          <Button type="submit" disabled={mut.isPending} data-testid="{{slug}}-op-{{opName}}-submit">{{humanOp}}</Button>
+        </div>
+        </div>
+      </form>
+    </Form>
   );
 }
