@@ -84,6 +84,8 @@ deployables.
 
 **Validator obligations**
 
+- Every `react` deployable **must** declare `ui: <Name>`. No implicit
+  default; the absence is a hard error.
 - `deployable.ui` must reference an existing `ui` block.
 - Only `react` deployables may set `ui:`.
 - Every `scaffold` selector and every page-data binding inside the `ui` must
@@ -419,13 +421,33 @@ Both fall out of existing primitives. Type safety on the final
 
 ## 13. Migration
 
-- Existing `.ddd` files keep working — a `react` deployable with no `ui:`
-  is treated as if `ui Default { scaffold modules: <all in targets chain> }`
-  were declared and referenced.
-- Current `pages-builder.ts`, `view-builder.ts`, `workflow-builder.ts` become
-  scaffold expanders that produce page-IR nodes.
+**Explicit `ui` is required for every `react` deployable.** No implicit
+defaults — every existing `.ddd` file with a `platform: react` deployable
+gains an explicit `ui` block. The minimum is a one-liner that recovers
+today's behaviour verbatim:
+
+```ddd
+ui WebApp { scaffold modules: Catalog, Sales, CustomerMgmt }
+
+deployable webApp {
+    platform: react
+    targets:  api
+    ui:       WebApp
+    port:     3001
+}
+```
+
+The `examples/acme.ddd` `webApp` deployable is updated to this form.
+Validator rejects a `react` deployable without `ui:` (HTTP analogue: the
+deployable is missing its mount point).
+
+**Generator changes:**
+
+- Current `pages-builder.ts`, `view-builder.ts`, `workflow-builder.ts`
+  become scaffold expanders that produce page-IR nodes.
 - A single new emitter (`pages-emitter.ts`) consumes the page IR.
-- `page-objects-builder.ts` stays — already driven by route + testid metadata.
+- `page-objects-builder.ts` stays — already driven by route + testid
+  metadata.
 - `theme-builder.ts` stays — theme is a system concern.
 
 ---
