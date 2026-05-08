@@ -89,15 +89,28 @@ export function renderTheme(t: ThemeIR | undefined, pack: LoadedPack): string {
 
 /** Render the App.tsx shell through the loaded pack — sidebar
  *  navigation, header bar, error boundary, and the React Router
- *  routes. */
+ *  routes.
+ *
+ *  Slice 6: when the deployable's `ui:` block declares an explicit
+ *  `menu { … }`, the caller passes the derived `navSections` as
+ *  `sidebarOverride` and we use it verbatim; otherwise the legacy
+ *  hardcoded grouping (Aggregates / Workflows / Views) runs and the
+ *  output is byte-identical to main's pre-Slice-6 emission. */
 export function renderAppShell(
   aggregates: AggregateIR[],
   workflows: WorkflowIR[],
   views: ViewIR[],
   systemName: string,
   pack: LoadedPack,
+  sidebarOverride?: import("./view-models.js").NavSectionVM[],
 ): string {
-  const vm = prepareAppShellVM(aggregates, workflows, views, systemName);
+  const vm = prepareAppShellVM(
+    aggregates,
+    workflows,
+    views,
+    systemName,
+    sidebarOverride,
+  );
   return pack.render("app-shell", vm);
 }
 

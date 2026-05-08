@@ -477,10 +477,15 @@ function lowerMenuBlock(
     sections: m.sections.map((sec) => ({
       label: sec.label,
       links: sec.links.map((l): MenuLinkIR => {
-        if (l.page?.ref?.name) {
+        // Slice 6: page links use a bare name (not a cross-
+        // reference) because scaffold-synthesised pages don't
+        // exist at AST link time.  The IR-level menu emitter and
+        // validator resolve the name against `ui.pages` post-
+        // expansion.
+        if (l.pageName) {
           return {
             kind: "page",
-            pageName: l.page.ref.name,
+            pageName: l.pageName,
             props: (l.props ?? []).map((p) => ({
               name: p.name,
               value: lowerExpr(p.value, env),

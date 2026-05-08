@@ -997,13 +997,25 @@ export class DddValidator {
     );
     for (const section of block.sections) {
       for (const link of section.links) {
-        const target = link.page?.ref;
-        if (target && !pagesInThisUi.has(target.name)) {
-          accept(
-            "error",
-            `'link ${target.name}' resolves to a page declared outside ui '${ui.name}'.  Menu links must reference pages in the same ui.`,
-            { node: link, property: "page" },
-          );
+        // Slice 6: page links carry a bare name (not a cross-
+        // reference) because scaffold-synthesised pages don't
+        // exist at AST link time.  We resolve against the ui's
+        // explicit pages here; scaffold-synthesised page names
+        // are validated post-IR by `validateLoomModel`.
+        const targetName = link.pageName;
+        if (targetName && !pagesInThisUi.has(targetName)) {
+          // Could still be a scaffold-synthesised name — defer
+          // the strict check to the IR-level validator which sees
+          // the post-expansion page set.  We only flag here if
+          // the ui has no scaffold directives at all (so a name
+          // that isn't an explicit page can't possibly resolve).
+          if (ui.members.every((m) => m.$type !== "Scaffold")) {
+            accept(
+              "error",
+              `'link ${targetName}' references no page in ui '${ui.name}'.  Pages declared in other ui blocks aren't visible from this menu.`,
+              { node: link, property: "pageName" },
+            );
+          }
         }
         // MenuLinkProp key names — only `label` / `order` recognised.
         const allowedLinkKeys = new Set(["label", "order"]);

@@ -36,6 +36,7 @@ import {
   renderWorkflowsIndex,
 } from "./templating/render.js";
 import { emitPagesForUi } from "./pages-emitter.js";
+import { deriveSidebarFromUi } from "./menu-emitter.js";
 
 // ---------------------------------------------------------------------------
 // React + React Query + Zod + Mantine generator.
@@ -228,6 +229,14 @@ export function generateReactForContexts(
   // main.tsx always wires `<MantineProvider theme={theme}>`.
   out.set("src/theme.ts", renderTheme(sys.theme, pack));
   out.set("src/main.tsx", renderMain(pack));
+  // Slice 6: when the ui block declares an explicit `menu { … }`,
+  // its derived sidebar overrides the hardcoded Aggregates /
+  // Workflows / Views grouping below.  When the ui has no menu
+  // block (or no ui binding at all), `sidebarOverride` is
+  // `undefined` and the AppShell preparer falls back to its legacy
+  // hardcoded shape — byte-identical to main's pre-Slice-6 output.
+  const sidebarOverride = ui ? deriveSidebarFromUi(ui) : undefined;
+
   out.set(
     "src/App.tsx",
     renderAppShell(
@@ -236,6 +245,7 @@ export function generateReactForContexts(
       views.map((v) => v.view),
       sys.name,
       pack,
+      sidebarOverride,
     ),
   );
   // Home page goes through `emitPagesForUi` when a `ui:` binding is

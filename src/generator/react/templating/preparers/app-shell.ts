@@ -31,6 +31,12 @@ export function prepareAppShellVM(
   workflows: WorkflowIR[],
   views: ViewIR[],
   systemName: string,
+  /** Slice 6 — when the deployable's `ui:` block declares an explicit
+   *  `menu { … }`, the caller derives `navSections` from that block
+   *  (via `deriveSidebarFromUi`) and passes them here.  When
+   *  undefined the legacy hardcoded grouping (Aggregates / Workflows /
+   *  Views) is used — byte-equivalent to main's pre-Slice-6 output. */
+  sidebarOverride?: NavSectionVM[],
 ): AppShellVM {
   const imports: ImportVM[] = [];
   const routes: RouteVM[] = [];
@@ -139,6 +145,6 @@ export function prepareAppShellVM(
     systemNameHuman: humanize(systemName),
     imports,
     routes,
-    navSections,
+    navSections: sidebarOverride ?? navSections,
   };
 }

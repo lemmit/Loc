@@ -448,12 +448,13 @@ describe("validation", () => {
     });
 
     it("rejects a menu link to a page declared in a different ui", async () => {
-      // Langium's default scope provider already scopes `[Page:ID]`
-      // cross-references to the containing ui — a `link X` in ui B
-      // cannot resolve to a Page declared inside ui A.  The
-      // diagnostic surface is the linker's "Could not resolve …"
-      // message; our validator's same-ui check is a defence-in-depth
-      // belt for the case where someone broadens the scope provider.
+      // Slice 6: menu links carry a bare name (not a cross-
+      // reference), because scaffold-synthesised pages don't exist
+      // at AST link time.  The validator catches "links to a name
+      // that isn't a page in this ui AND there are no scaffold
+      // directives that could synthesise it" at the AST layer; the
+      // looser "ui has scaffolds, name doesn't match anything
+      // post-expansion" case is caught by the post-IR validator.
       const { errors } = await parse(`
         system S {
           ui A {
@@ -468,7 +469,7 @@ describe("validation", () => {
       `);
       expect(
         errors.some((e) =>
-          /Could not resolve reference to Page named 'Home'/.test(e),
+          /'link Home' references no page in ui 'B'/.test(e),
         ),
       ).toBe(true);
     });

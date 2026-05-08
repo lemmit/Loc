@@ -261,8 +261,15 @@ MenuSection:
         (links+=MenuLink (',' links+=MenuLink)* ','?)?
     '}';
 
+// Page links use a bare ID (string-by-name) rather than a cross-
+// reference because most page targets are scaffold-synthesised
+// (Slice 4 expander) and don't exist at AST level — Langium's
+// linker wouldn't be able to resolve them.  The IR-level menu
+// emitter (Slice 6) resolves the name against `ui.pages` after
+// scaffold expansion; the validator (Slice 3) reports unknown
+// page names.
 MenuLink:
-      'link' page=[Page:ID] ('{' (props+=MenuLinkProp (',' props+=MenuLinkProp)* ','?)? '}')?
+      'link' pageName=LooseName ('{' (props+=MenuLinkProp (',' props+=MenuLinkProp)* ','?)? '}')?
     | 'link' externalLabel=STRING '->' externalUrl=STRING;
 
 // Same approach as MenuMetaEntry — `LooseName` + validator-side
