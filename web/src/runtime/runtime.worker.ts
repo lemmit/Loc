@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 import { synthDDL } from "./ddl";
 import { pgliteAssetUrl } from "../bundle/plugin.js";
+import { fnv1a32 } from "../util/hash.js";
 import type {
   BootResult,
   DispatchResult,
@@ -32,10 +33,19 @@ interface BundleModule {
   PGlite: new (
     dataDirOrOptions?: string | unknown,
     options?: unknown,
-  ) => { exec: (sql: string) => Promise<unknown>; close?: () => Promise<void> };
+  ) => PgliteHandle;
   is: (value: unknown, type: unknown) => boolean;
   Table: unknown;
   getTableConfig: (t: unknown) => never;
+}
+
+interface PgliteHandle {
+  exec: (sql: string) => Promise<unknown>;
+  query: (
+    sql: string,
+    params?: unknown[],
+  ) => Promise<{ rows: Array<Record<string, unknown>> }>;
+  close?: () => Promise<void>;
 }
 
 let cachedPgliteWasm: WebAssembly.Module | null = null;
@@ -74,7 +84,7 @@ async function loadPgliteAssets(): Promise<{
 
 interface RuntimeState {
   app: { fetch: (req: Request) => Promise<Response> };
-  pglite: { close?: () => Promise<void>; exec: (sql: string) => Promise<unknown> };
+  pglite: PgliteHandle;
   ddl: string;
   /** Blob URL the bundle was loaded from.  Tracked here so we can
    *  revoke on reset and on the next boot — without this, every
@@ -178,8 +188,9 @@ async function boot(bundleCode: string, dataDir?: string): Promise<BootResult> {
     };
   }
 
+  let migrated = false;
   try {
-    if (ddl.trim().length > 0) await pglite.exec(ddl);
+    migrated = await migrateOrApplyDDL(pglite, ddl);
   } catch (err) {
     return {
       ok: false,
@@ -213,7 +224,73 @@ async function boot(bundleCode: string, dataDir?: string): Promise<BootResult> {
     ddl,
     durationMs: Math.round(performance.now() - start),
     persistent,
+    migrated,
   };
+}
+
+// Apply DDL idempotently on a possibly-pre-existing PGlite, with
+// schema-drift detection.
+//
+// We keep a tiny `__loom.schema_meta` bookkeeping table (one row,
+// `key='ddl_hash'`, `value=<fnv1a32 of the DDL string>`) in a
+// separate schema so it survives `DROP SCHEMA public CASCADE`.
+// On boot we compute the hash of the current DDL and compare:
+//
+//   - First boot (table missing or row absent): apply DDL,
+//     record hash.  Returns `migrated = false` (this isn't a
+//     migration, it's an initial setup).
+//   - Subsequent boot, hash matches: skip — the persistent
+//     PGlite already has the right schema, the user's rows are
+//     intact.  Returns `migrated = false`.
+//   - Subsequent boot, hash differs: drop public schema, re-apply
+//     new DDL, update hash.  Returns `migrated = true` so the
+//     UI can flash a "schema changed — DB reset" message.  This
+//     is necessary because IF-NOT-EXISTS DDL would otherwise
+//     leave stale tables that don't match the new generated
+//     repositories' expectations.
+async function migrateOrApplyDDL(
+  pglite: PgliteHandle,
+  ddl: string,
+): Promise<boolean> {
+  // Bootstrap the meta table.  Both statements are idempotent.
+  await pglite.exec(
+    "CREATE SCHEMA IF NOT EXISTS __loom; " +
+      "CREATE TABLE IF NOT EXISTS __loom.schema_meta (" +
+      "  key text PRIMARY KEY, " +
+      "  value text NOT NULL" +
+      ");",
+  );
+  const newHash = fnv1a32(ddl);
+  const result = await pglite.query(
+    "SELECT value FROM __loom.schema_meta WHERE key = $1",
+    ["ddl_hash"],
+  );
+  const oldHash =
+    result.rows.length > 0 ? String(result.rows[0]["value"]) : null;
+
+  if (oldHash === newHash) {
+    // Same schema — nothing to do.  Skips even the IF-NOT-EXISTS
+    // round-trip, saving a few milliseconds on each warm reload.
+    return false;
+  }
+
+  let migrated = false;
+  if (oldHash !== null) {
+    // Schema drifted: drop and recreate.  CASCADE is essential —
+    // foreign-keyed rows would otherwise block the drop.
+    await pglite.exec("DROP SCHEMA public CASCADE; CREATE SCHEMA public;");
+    migrated = true;
+  }
+  if (ddl.trim().length > 0) await pglite.exec(ddl);
+
+  // Record the new hash.  ON CONFLICT for the case where the row
+  // existed (drift) and INSERT for first boot.
+  await pglite.query(
+    "INSERT INTO __loom.schema_meta (key, value) VALUES ($1, $2) " +
+      "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+    ["ddl_hash", newHash],
+  );
+  return migrated;
 }
 
 async function dispatch(req: SerializedRequest): Promise<DispatchResult> {

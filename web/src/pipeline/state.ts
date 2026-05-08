@@ -49,7 +49,7 @@ export type BundleSlot =
 
 export type BootSlot =
   | { kind: "none" }
-  | { kind: "ok"; ddl: string; persistent: boolean }
+  | { kind: "ok"; ddl: string; persistent: boolean; migrated: boolean }
   | { kind: "fail"; message: string };
 
 export type DispatchSlot =
@@ -102,7 +102,7 @@ export type PipelineAction =
   | { type: "BUNDLE_DONE"; hono: BundleResult; react: BundleResult | null }
   // Boot
   | { type: "BOOT_START" }
-  | { type: "BOOT_OK"; ddl: string; persistent: boolean }
+  | { type: "BOOT_OK"; ddl: string; persistent: boolean; migrated: boolean }
   | { type: "BOOT_FAIL"; message: string }
   // Dispatch (a single HTTP call from the request composer)
   | { type: "DISPATCH_START" }
@@ -139,6 +139,10 @@ export function bootedDDL(s: PipelineState): string | null {
 
 export function bootPersistent(s: PipelineState): boolean {
   return s.boot.kind === "ok" && s.boot.persistent;
+}
+
+export function bootMigrated(s: PipelineState): boolean {
+  return s.boot.kind === "ok" && s.boot.migrated;
 }
 
 export function bootError(s: PipelineState): string | null {
