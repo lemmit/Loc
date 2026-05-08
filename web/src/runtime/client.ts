@@ -1,9 +1,11 @@
 import type {
+  BootRequest,
   BootResult,
   DispatchResult,
   RuntimeRpcRequest,
   RuntimeRpcResponse,
   SerializedRequest,
+  WipeResult,
 } from "./protocol.js";
 
 export class LoomRuntimeClient {
@@ -39,11 +41,8 @@ export class LoomRuntimeClient {
     });
   }
 
-  boot(bundleCode: string): Promise<BootResult> {
-    return this.send<BootResult>({
-      method: "boot",
-      params: { bundleCode },
-    });
+  boot(req: BootRequest): Promise<BootResult> {
+    return this.send<BootResult>({ method: "boot", params: req });
   }
 
   dispatch(req: SerializedRequest): Promise<DispatchResult> {
@@ -56,6 +55,16 @@ export class LoomRuntimeClient {
   reset(): Promise<{ ok: true }> {
     return this.send<{ ok: true }>({
       method: "reset",
+      params: {},
+    });
+  }
+
+  /** Drop every user object inside the booted PGlite and re-apply
+   *  DDL.  For OPFS-backed runs the underlying data island
+   *  survives — schema reattaches clean, but the rows are gone. */
+  wipe(): Promise<WipeResult> {
+    return this.send<WipeResult>({
+      method: "wipe",
       params: {},
     });
   }
