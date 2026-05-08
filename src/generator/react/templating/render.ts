@@ -13,8 +13,15 @@
 // or `{{> (lookup ...) ...}}` indirection.
 // ---------------------------------------------------------------------------
 
-import type { AggregateIR, ThemeIR } from "../../../ir/loom-ir.js";
+import type {
+  AggregateIR,
+  ThemeIR,
+  ViewIR,
+  WorkflowIR,
+} from "../../../ir/loom-ir.js";
 import type { LoadedPack } from "./loader.js";
+import { prepareAppShellVM } from "./preparers/app-shell.js";
+import { prepareHomeVM } from "./preparers/home.js";
 import { prepareListPageVM } from "./preparers/list.js";
 import { prepareThemeVM } from "./preparers/theme.js";
 import type { CellVM, ListPageVM } from "./view-models.js";
@@ -48,6 +55,37 @@ export function renderListPage(
 export function renderTheme(t: ThemeIR | undefined, pack: LoadedPack): string {
   const vm = prepareThemeVM(t);
   return pack.render("theme", vm);
+}
+
+/** Render the App.tsx shell through the loaded pack — sidebar
+ *  navigation, header bar, error boundary, and the React Router
+ *  routes. */
+export function renderAppShell(
+  aggregates: AggregateIR[],
+  workflows: WorkflowIR[],
+  views: ViewIR[],
+  systemName: string,
+  pack: LoadedPack,
+): string {
+  const vm = prepareAppShellVM(aggregates, workflows, views, systemName);
+  return pack.render("app-shell", vm);
+}
+
+/** Render main.tsx — the React entry point with provider chain. */
+export function renderMain(pack: LoadedPack): string {
+  return pack.render("main", {});
+}
+
+/** Render the home (landing) page — SimpleGrid of summary cards. */
+export function renderHome(
+  aggregates: AggregateIR[],
+  workflows: WorkflowIR[],
+  views: ViewIR[],
+  systemName: string,
+  pack: LoadedPack,
+): string {
+  const vm = prepareHomeVM(aggregates, workflows, views, systemName);
+  return pack.render("home", vm);
 }
 
 function enrichColumns(vm: ListPageVM, pack: LoadedPack): RenderedColumn[] {

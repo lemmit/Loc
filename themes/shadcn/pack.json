@@ -3,6 +3,9 @@
   "version": "0.1.0-spike",
   "emits": {
     "theme": "theme.hbs",
+    "main": "main.hbs",
+    "app-shell": "app-shell.hbs",
+    "home": "home.hbs",
     "page-list": "page-list.hbs",
     "cell-id": "cell-id.hbs",
     "cell-id-link": "cell-id-link.hbs",
