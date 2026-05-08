@@ -6,7 +6,7 @@ import type {
 } from "../../ir/loom-ir.js";
 import { camel, snake, plural } from "../../util/naming.js";
 import { buildApiModule } from "./api-builder.js";
-import { buildDetailPage, buildNewPage } from "./pages-builder.js";
+import { buildNewPage } from "./pages-builder.js";
 import { buildPageObjectModule } from "./page-objects-builder.js";
 import {
   allWorkflows,
@@ -28,6 +28,7 @@ import { FORMAT_HELPERS_TSX } from "./format-helpers.js";
 import { loadPack, resolvePackDir } from "./templating/loader.js";
 import {
   renderAppShell,
+  renderDetailPage,
   renderHome,
   renderListPage,
   renderMain,
@@ -97,7 +98,7 @@ export function generateReactForContexts(
     );
     out.set(
       `src/pages/${snake(plural(agg.name))}/detail.tsx`,
-      buildDetailPage(agg, ctx, aggregatesByName),
+      renderDetailPage(agg, ctx, aggregatesByName, pack),
     );
     out.set(
       `e2e/pages/${camel(agg.name)}.ts`,

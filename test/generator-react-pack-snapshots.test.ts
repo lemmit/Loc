@@ -104,6 +104,15 @@ describe("react generator template-pack output (snapshots)", () => {
     );
   });
 
+  it("Mantine pack — detail page snapshot", async () => {
+    const files = await generateFromSource(SOURCE);
+    const detail = files.get("web_mantine/src/pages/customers/detail.tsx");
+    expect(detail).toBeDefined();
+    await expect(detail).toMatchFileSnapshot(
+      path.join(repoRoot, "test/__snapshots__/pack-mantine-customer-detail.tsx"),
+    );
+  });
+
   it("Mantine pack — list page snapshot", async () => {
     const files = await generateFromSource(SOURCE);
     const list = files.get("web_mantine/src/pages/customers/list.tsx");

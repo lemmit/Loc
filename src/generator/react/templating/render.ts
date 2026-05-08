@@ -15,16 +15,18 @@
 
 import type {
   AggregateIR,
+  BoundedContextIR,
   ThemeIR,
   ViewIR,
   WorkflowIR,
 } from "../../../ir/loom-ir.js";
 import type { LoadedPack } from "./loader.js";
 import { prepareAppShellVM } from "./preparers/app-shell.js";
+import { prepareDetailPageVM } from "./preparers/detail.js";
 import { prepareHomeVM } from "./preparers/home.js";
 import { prepareListPageVM } from "./preparers/list.js";
 import { prepareThemeVM } from "./preparers/theme.js";
-import type { CellVM, ListPageVM } from "./view-models.js";
+import type { CellVM, ListPageVM, PartTableVM } from "./view-models.js";
 
 /** A column slot enriched with its already-rendered cell HTML.  Page
  *  templates iterate `columns` and emit `{{{cellHtml}}}` for each. */
@@ -86,6 +88,45 @@ export function renderHome(
 ): string {
   const vm = prepareHomeVM(aggregates, workflows, views, systemName);
   return pack.render("home", vm);
+}
+
+/** Render the aggregate detail page through the loaded pack.
+ *  Field rows, part-table cells, and operation buttons all
+ *  pre-render in TS so the page template stays flat (no
+ *  `{{> partial-name (lookup ...) ...}}` indirection). */
+export function renderDetailPage(
+  agg: AggregateIR,
+  ctx: BoundedContextIR,
+  aggregatesByName: Map<string, AggregateIR>,
+  pack: LoadedPack,
+): string {
+  const vm = prepareDetailPageVM(agg, ctx, aggregatesByName);
+  const fieldRows = vm.fieldRows.map((row) => ({
+    ...row,
+    rowHtml: pack.render(row.template, row),
+  }));
+  const parts = vm.parts.map((part) => ({
+    ...part,
+    partHtml: renderPartTable(part, pack),
+  }));
+  const opButtons = vm.opButtons.map((btn) => ({
+    ...btn,
+    buttonHtml: pack.render("op-button", btn),
+  }));
+  return pack.render("page-detail", {
+    ...vm,
+    fieldRows,
+    parts,
+    opButtons,
+  });
+}
+
+function renderPartTable(part: PartTableVM, pack: LoadedPack): string {
+  const cells = part.cells.map((cell) => ({
+    ...cell,
+    cellHtml: pack.render(cell.template, cell),
+  }));
+  return pack.render("part-table", { ...part, cells });
 }
 
 function enrichColumns(vm: ListPageVM, pack: LoadedPack): RenderedColumn[] {

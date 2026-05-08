@@ -113,6 +113,13 @@ function registerHelpersOnce(): void {
   // where the inner string contains characters (`"`, `\`) that
   // would otherwise need manual escaping.
   Handlebars.registerHelper("json", (v: unknown) => new Handlebars.SafeString(JSON.stringify(v)));
+  // Array-join helper: turns ["a","b","c"] + sep ", " into "a, b, c".
+  // Used for inline-import lists (`{{join tablerIcons ", "}}`).
+  Handlebars.registerHelper("join", function (this: unknown, arr: unknown, sep: unknown) {
+    if (!Array.isArray(arr)) return "";
+    const s = typeof sep === "string" ? sep : ", ";
+    return new Handlebars.SafeString(arr.join(s));
+  });
 }
 
 /** Resolve a pack identifier ("mantine" / "shadcn" / "./design/")
