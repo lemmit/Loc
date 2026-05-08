@@ -15,22 +15,32 @@ import type { ThemeIR } from "../../ir/loom-ir.js";
 // ThemeIR rather than exposing Mantine knobs at the DSL surface.
 // ---------------------------------------------------------------------------
 
-/** True when the theme block carries at least one configured token —
- *  drives whether the React generator emits `src/theme.ts` and the
- *  matching `<MantineProvider theme={theme}>` wiring in `main.tsx`. */
-export function hasThemeTokens(t: ThemeIR | undefined): boolean {
-  if (!t) return false;
-  return (
-    t.primary !== undefined ||
-    t.neutral !== undefined ||
-    t.radius !== undefined ||
-    t.fontFamily !== undefined
-  );
-}
+/** Default brand colour when the system declares no `theme.primary`.
+ *  Indigo — readable as a primary on white, distinct enough from
+ *  Mantine's stock blue that generated apps look intentionally
+ *  themed rather than untouched defaults. */
+const DEFAULT_PRIMARY_HEX = "#4f46e5";
+/** Default neutral.  Subtle warm-grey ramp keeps surfaces (cards,
+ *  table rows) from feeling laboratory-cold the way pure mantine
+ *  greys do. */
+const DEFAULT_NEUTRAL_HEX = "#64748b";
+/** Default body / heading family.  System-ui chain falls back
+ *  cleanly without bundling a webfont; Inter takes over when the
+ *  page already has it loaded. */
+const DEFAULT_FONT_FAMILY =
+  '"Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+const DEFAULT_RADIUS = "md";
 
 /** Generate `src/theme.ts` containing the Mantine `createTheme`
- *  config.  Requires `hasThemeTokens(t) === true`. */
+ *  config.  Always produces a usable theme — when the IR carries no
+ *  tokens, falls back to the polished defaults defined above so
+ *  every generated app boots with a coherent look. */
 export function buildMantineTheme(t: ThemeIR): string {
+  const primary = t.primary ?? DEFAULT_PRIMARY_HEX;
+  const neutral = t.neutral ?? DEFAULT_NEUTRAL_HEX;
+  const radius = t.radius ?? DEFAULT_RADIUS;
+  const fontFamily = t.fontFamily ?? DEFAULT_FONT_FAMILY;
+
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(
@@ -44,44 +54,45 @@ export function buildMantineTheme(t: ThemeIR): string {
   // black (darker half) using HSL lightness.  This is the same
   // approach mantinehub-style theme generators use; it produces
   // visually-coherent palettes for any reasonable input hex.
-  if (t.primary) {
-    lines.push(`const brand: MantineColorsTuple = [`);
-    for (const shade of generateShades(t.primary)) {
-      lines.push(`  "${shade}",`);
-    }
-    lines.push(`];`);
-    lines.push("");
-  }
-  if (t.neutral) {
-    lines.push(`const neutral: MantineColorsTuple = [`);
-    for (const shade of generateShades(t.neutral)) {
-      lines.push(`  "${shade}",`);
-    }
-    lines.push(`];`);
-    lines.push("");
-  }
+  lines.push(`const brand: MantineColorsTuple = [`);
+  for (const shade of generateShades(primary)) lines.push(`  "${shade}",`);
+  lines.push(`];`);
+  lines.push("");
+  lines.push(`const neutral: MantineColorsTuple = [`);
+  for (const shade of generateShades(neutral)) lines.push(`  "${shade}",`);
+  lines.push(`];`);
+  lines.push("");
 
   lines.push(`export const theme = createTheme({`);
-  if (t.primary) {
-    lines.push(`  primaryColor: "brand",`);
-    lines.push(`  colors: {`);
-    lines.push(`    brand,`);
-    if (t.neutral) lines.push(`    gray: neutral,`);
-    lines.push(`  },`);
-  } else if (t.neutral) {
-    lines.push(`  colors: { gray: neutral },`);
-  }
-  if (t.radius) {
-    lines.push(`  defaultRadius: ${JSON.stringify(t.radius)},`);
-  }
-  if (t.fontFamily) {
-    lines.push(`  fontFamily: ${JSON.stringify(t.fontFamily)},`);
-    // Headings inherit the body font by default; setting them
-    // explicitly so a user with a display family (Cinzel, Playfair,
-    // etc.) gets the same family applied to <Title>s without an
-    // extra theme knob in the DSL.
-    lines.push(`  headings: { fontFamily: ${JSON.stringify(t.fontFamily)} },`);
-  }
+  lines.push(`  primaryColor: "brand",`);
+  lines.push(`  primaryShade: { light: 6, dark: 5 },`);
+  lines.push(`  colors: { brand, gray: neutral },`);
+  lines.push(`  defaultRadius: ${JSON.stringify(radius)},`);
+  lines.push(`  fontFamily: ${JSON.stringify(fontFamily)},`);
+  lines.push(`  fontFamilyMonospace: ${JSON.stringify('ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace')},`);
+  lines.push(`  headings: {`);
+  lines.push(`    fontFamily: ${JSON.stringify(fontFamily)},`);
+  lines.push(`    fontWeight: "600",`);
+  lines.push(`    sizes: {`);
+  lines.push(`      h1: { fontSize: "2rem", lineHeight: "1.25" },`);
+  lines.push(`      h2: { fontSize: "1.5rem", lineHeight: "1.3" },`);
+  lines.push(`      h3: { fontSize: "1.25rem", lineHeight: "1.35" },`);
+  lines.push(`      h4: { fontSize: "1rem", lineHeight: "1.4" },`);
+  lines.push(`    },`);
+  lines.push(`  },`);
+  // Tighten Mantine component defaults so generated cards / inputs
+  // / buttons feel like a polished product instead of a wireframe.
+  lines.push(`  components: {`);
+  lines.push(`    Card: { defaultProps: { shadow: "xs", radius: "md", padding: "lg", withBorder: true } },`);
+  lines.push(`    Paper: { defaultProps: { shadow: "xs", radius: "md", withBorder: true } },`);
+  lines.push(`    Button: { defaultProps: { radius: "md" } },`);
+  lines.push(`    TextInput: { defaultProps: { radius: "md" } },`);
+  lines.push(`    NumberInput: { defaultProps: { radius: "md" } },`);
+  lines.push(`    Select: { defaultProps: { radius: "md" } },`);
+  lines.push(`    Switch: { defaultProps: { radius: "md" } },`);
+  lines.push(`    Table: { defaultProps: { verticalSpacing: "sm", horizontalSpacing: "md" } },`);
+  lines.push(`    Badge: { defaultProps: { radius: "sm" } },`);
+  lines.push(`  },`);
   lines.push(`});`);
 
   return lines.join("\n") + "\n";

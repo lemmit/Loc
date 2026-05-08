@@ -114,7 +114,7 @@ describe("react generator", () => {
     const model = await buildModel("examples/acme.ddd");
     const { files } = generateSystems(model);
     const newOrder = files.get("web_app/src/pages/orders/new.tsx")!;
-    expect(newOrder).toMatch(/<TextInput label="placedAt"[^>]*type="datetime-local"/);
+    expect(newOrder).toMatch(/<TextInput label="Placed At"[^>]*type="datetime-local"/);
     expect(newOrder).not.toMatch(/DateTimePicker/);
     expect(newOrder).not.toMatch(/@mantine\/dates/);
     const orderPo = files.get("web_app/e2e/pages/order.ts")!;
@@ -137,7 +137,7 @@ describe("react generator", () => {
     expect(detail).toMatch(/const __products = useAllProducts\(\);/);
     // Select bound by Controller, populated from the hook's data,
     // labelled by the target's display field (`sku`).
-    expect(detail).toMatch(/<Select label="productId"/);
+    expect(detail).toMatch(/<Select label="Product Id"/);
     expect(detail).toMatch(/__products\.data \?\? \[\]/);
     expect(detail).toMatch(/label: __o\.sku/);
     // renderOption emits a per-option testid for Playwright drivers.
@@ -405,15 +405,15 @@ describe("react generator", () => {
       expect(theme).toMatch(/colors: \{\s*brand,\s*gray: neutral,?\s*\}/);
       expect(theme).toMatch(/defaultRadius: "md"/);
       expect(theme).toMatch(/fontFamily: "Inter, system-ui, sans-serif"/);
-      expect(theme).toMatch(/headings: \{ fontFamily: "Inter, system-ui, sans-serif" \}/);
+      expect(theme).toMatch(/headings: \{[\s\S]*?fontFamily: "Inter, system-ui, sans-serif"/);
 
       // main.tsx imports the theme + passes it to MantineProvider.
       const main = files.get("web_app/src/main.tsx")!;
       expect(main).toMatch(/import \{ theme \} from "\.\/theme"/);
-      expect(main).toMatch(/<MantineProvider theme=\{theme\}>/);
+      expect(main).toMatch(/<MantineProvider theme=\{theme\}/);
     });
 
-    it("does NOT emit theme.ts and uses bare MantineProvider when no theme block is declared", async () => {
+    it("emits a default theme.ts even when the system declares no theme block", async () => {
       const { parseHelper } = await import("langium/test");
       const services = createDddServices(NodeFileSystem);
       const helper = parseHelper(services.Ddd);
@@ -431,12 +431,19 @@ describe("react generator", () => {
       `, { validation: true });
       const model = doc.parseResult.value as Model;
       const { files } = generateSystems(model);
-      // No theme.ts emitted.
-      expect(files.has("web/src/theme.ts")).toBe(false);
-      // main.tsx uses the bare provider (no theme prop, no import).
+      // Every generated React app ships with a baseline theme so it
+      // looks like a coherent product rather than untouched Mantine
+      // defaults.  When the DSL declares no `theme {}`, we fall back
+      // to a tasteful indigo / Inter / md-radius preset.
+      const theme = files.get("web/src/theme.ts")!;
+      expect(theme).toBeDefined();
+      expect(theme).toMatch(/primaryColor: "brand"/);
+      expect(theme).toMatch(/defaultRadius: "md"/);
+      expect(theme).toMatch(/Inter/);
+      // main.tsx always wires the theme — provider gets `theme={theme}`.
       const main = files.get("web/src/main.tsx")!;
-      expect(main).not.toMatch(/from "\.\/theme"/);
-      expect(main).toMatch(/<MantineProvider>/);
+      expect(main).toMatch(/from "\.\/theme"/);
+      expect(main).toMatch(/<MantineProvider theme=\{theme\}/);
     });
 
     it("validator rejects unknown theme property names", async () => {
@@ -562,10 +569,10 @@ describe("react generator", () => {
       // type label is emitted as a string literal so JSX doesn't
       // parse `Id<Product>` as an opening element.
       expect(idx).toMatch(
-        /workflow-place_order-param-customerId.*<strong>customerId<\/strong>: \{"string"\}/,
+        /workflow-place_order-param-customerId.*<strong>Customer Id<\/strong>: \{"string"\}/,
       );
       expect(idx).toMatch(
-        /workflow-place_order-param-productId.*<strong>productId<\/strong>: \{"Id<Product>"\}/,
+        /workflow-place_order-param-productId.*<strong>Product Id<\/strong>: \{"Id<Product>"\}/,
       );
       // "Run" button links to the per-workflow page.
       expect(idx).toMatch(/to="\/workflows\/place_order"/);
@@ -581,11 +588,11 @@ describe("react generator", () => {
       expect(page).toMatch(/usePlaceOrderWorkflow/);
       // String param → TextInput; Id<X> → Select with target's display field;
       // int → NumberInput with allowDecimal={false}.
-      expect(page).toMatch(/<TextInput label="customerId"/);
+      expect(page).toMatch(/<TextInput label="Customer Id"/);
       expect(page).toMatch(
-        /<Select label="productId"[\s\S]+?__products\.data/,
+        /<Select label="Product Id"[\s\S]+?__products\.data/,
       );
-      expect(page).toMatch(/<NumberInput label="quantity"[\s\S]+?allowDecimal=\{false\}/);
+      expect(page).toMatch(/<NumberInput label="Quantity"[\s\S]+?allowDecimal=\{false\}/);
       // useAllProducts pulled in for the Id<Product> Select.
       expect(page).toMatch(
         /import \{ useAllProducts \} from "\.\.\/\.\.\/api\/product"/,
@@ -680,9 +687,9 @@ describe("react generator", () => {
       expect(page).toMatch(/import \{ useOrderSummaryView \} from "\.\.\/\.\.\/api\/views"/);
       expect(page).toMatch(/const q = useOrderSummaryView\(\)/);
       // Table headers from the view's declared fields.
-      expect(page).toMatch(/<Table\.Th>orderId<\/Table\.Th>/);
-      expect(page).toMatch(/<Table\.Th>status<\/Table\.Th>/);
-      expect(page).toMatch(/<Table\.Th>lineCount<\/Table\.Th>/);
+      expect(page).toMatch(/<Table\.Th>Order Id<\/Table\.Th>/);
+      expect(page).toMatch(/<Table\.Th>Status<\/Table\.Th>/);
+      expect(page).toMatch(/<Table\.Th>Line Count<\/Table\.Th>/);
       // Id<Order> cell auto-links to /orders/<id> (Order has UI in
       // this deployable's modules).
       expect(page).toMatch(
@@ -690,7 +697,7 @@ describe("react generator", () => {
       );
       // Empty + error states present.
       expect(page).toMatch(/q\.data && q\.data\.length === 0 && <Text c="dimmed">No rows\.<\/Text>/);
-      expect(page).toMatch(/q\.isError && <Alert color="red">/);
+      expect(page).toMatch(/q\.isError && <Alert color="red"/);
     });
 
     it("shorthand view's table page uses the source aggregate's wire columns", async () => {
@@ -699,10 +706,10 @@ describe("react generator", () => {
       const page = files.get("web_app/src/pages/views/active_orders.tsx")!;
       // ActiveOrders is shorthand `view ActiveOrders = Order where ...`
       // — table columns mirror Order's primitive/id/enum fields.
-      expect(page).toMatch(/<Table\.Th>id<\/Table\.Th>/);
-      expect(page).toMatch(/<Table\.Th>customerId<\/Table\.Th>/);
-      expect(page).toMatch(/<Table\.Th>status<\/Table\.Th>/);
-      expect(page).toMatch(/<Table\.Th>placedAt<\/Table\.Th>/);
+      expect(page).toMatch(/<Table\.Th>Id<\/Table\.Th>/);
+      expect(page).toMatch(/<Table\.Th>Customer Id<\/Table\.Th>/);
+      expect(page).toMatch(/<Table\.Th>Status<\/Table\.Th>/);
+      expect(page).toMatch(/<Table\.Th>Placed At<\/Table\.Th>/);
     });
 
     it("App.tsx registers /views + /views/<slug> routes and sidebar entry", async () => {

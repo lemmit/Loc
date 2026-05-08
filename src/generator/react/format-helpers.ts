@@ -1,0 +1,107 @@
+// ---------------------------------------------------------------------------
+// Runtime formatting helpers emitted into every generated React app at
+// `src/lib/format.tsx`.  Generated pages import from here to render
+// values consistently across list / detail / view tables:
+//
+//   <IdValue id={...} />            short hash + tooltip with full id
+//   <DateTimeValue iso={...} />     locale string + relative-time tooltip
+//   <BoolValue value={...} />       Yes / No (dimmed when false)
+//   <EmptyValue />                  dimmed em-dash for null / undefined
+//   <KeyValueRow label value />     two-column row used in detail cards
+//
+// The file is a single TSX module, no runtime deps beyond Mantine.
+// Generators that produce JSX referencing these components are
+// responsible for emitting the matching import line.
+// ---------------------------------------------------------------------------
+
+export const FORMAT_HELPERS_TSX = `// Auto-generated.  Do not edit by hand.
+import { Text, Tooltip, Code, Group, Stack } from "@mantine/core";
+import type { ReactNode } from "react";
+
+/** Empty placeholder for null / undefined / "" values.  Rendered as
+ *  a dimmed em-dash so empty cells read as "intentionally blank"
+ *  rather than as a layout glitch. */
+export function EmptyValue(): JSX.Element {
+  return <Text component="span" c="dimmed">—</Text>;
+}
+
+/** True when the value should render as EmptyValue. */
+export function isEmpty(v: unknown): boolean {
+  return v === null || v === undefined || v === "";
+}
+
+/** Short id display: first 8 chars + ellipsis, with the full id
+ *  surfaced in a tooltip.  Monospace so the prefix lines up across
+ *  rows in tables. */
+export function IdValue({ id }: { id: string | null | undefined }): JSX.Element {
+  if (isEmpty(id)) return <EmptyValue />;
+  const s = String(id);
+  return (
+    <Tooltip label={s} withArrow openDelay={200} position="top-start">
+      <Code>{s.slice(0, 8)}…</Code>
+    </Tooltip>
+  );
+}
+
+/** Locale-formatted datetime.  Accepts an ISO string or null.  The
+ *  raw ISO is preserved in the tooltip for operators who need the
+ *  exact wire value. */
+export function DateTimeValue({ iso }: { iso: string | null | undefined }): JSX.Element {
+  if (isEmpty(iso)) return <EmptyValue />;
+  const s = String(iso);
+  let pretty = s;
+  try {
+    const d = new Date(s);
+    if (!Number.isNaN(d.getTime())) {
+      pretty = d.toLocaleString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    }
+  } catch {
+    // fall through with raw string
+  }
+  return (
+    <Tooltip label={s} withArrow openDelay={200} position="top-start">
+      <Text component="span">{pretty}</Text>
+    </Tooltip>
+  );
+}
+
+/** Boolean value as Yes / No, dimmed when false so true values are
+ *  visually distinguishable at a glance. */
+export function BoolValue({ value }: { value: boolean | null | undefined }): JSX.Element {
+  if (isEmpty(value)) return <EmptyValue />;
+  return value
+    ? <Text component="span" fw={500}>Yes</Text>
+    : <Text component="span" c="dimmed">No</Text>;
+}
+
+/** Generic value display with empty-state handling.  Used by
+ *  generators when a field doesn't fit a more specific helper. */
+export function PlainValue({ value }: { value: unknown }): JSX.Element {
+  if (isEmpty(value)) return <EmptyValue />;
+  return <Text component="span">{String(value)}</Text>;
+}
+
+/** Two-column key/value row for detail cards.  Label sits in a
+ *  fixed-width left column, value flows to the right.  Rendered as
+ *  a flex row so multi-line values wrap cleanly under the label. */
+export function KeyValueRow({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}): JSX.Element {
+  return (
+    <Group wrap="nowrap" align="flex-start" gap="md">
+      <Text component="span" c="dimmed" fw={500} miw={140}>{label}</Text>
+      <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>{children}</Stack>
+    </Group>
+  );
+}
+`;

@@ -4,7 +4,7 @@ import type {
   TypeIR,
   ViewIR,
 } from "../../ir/loom-ir.js";
-import { camel, plural, snake } from "../../util/naming.js";
+import { camel, humanize as humanizeUtil, plural, snake } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // View UI emission for the React generator.
@@ -227,27 +227,33 @@ export function buildViewsIndexPage(contexts: BoundedContextIR[]): string {
       const slug = snake(view.name);
       const human = humanise(view.name);
       const shapeLine = view.output
-        ? `        <Text size="sm" c="dimmed">Custom shape: ${view.output.fields.map((f) => f.name).join(", ")}</Text>`
-        : `        <Text size="sm" c="dimmed">Source: ${view.aggregateName}</Text>`;
-      return `      <Card withBorder data-testid="view-card-${slug}">
-        <Group justify="space-between">
-          <Title order={4}>${human}</Title>
-          <Button component={Link} to="/views/${slug}" data-testid="view-${slug}-open">Open →</Button>
-        </Group>
+        ? `          <Text size="sm" c="dimmed">Custom shape: ${view.output.fields.map((f) => f.name).join(", ")}</Text>`
+        : `          <Text size="sm" c="dimmed">Source: ${view.aggregateName}</Text>`;
+      return `      <Card data-testid="view-card-${slug}">
+        <Stack gap="xs">
+          <Group justify="space-between" align="center">
+            <Title order={4}>${human}</Title>
+            <Button component={Link} to="/views/${slug}" data-testid="view-${slug}-open" variant="light">Open →</Button>
+          </Group>
 ${shapeLine}
+        </Stack>
       </Card>`;
     })
     .join("\n");
   return `// Auto-generated.
 import { Link } from "react-router-dom";
-import { Stack, Title, Text, Card, Group, Button } from "@mantine/core";
+import { Stack, Title, Text, Card, Group, Button, SimpleGrid } from "@mantine/core";
 
 export default function ViewsIndex() {
   return (
-    <Stack data-testid="views-index">
-      <Title order={2}>Views</Title>
-      <Text c="dimmed">Saved queries.  Pick one to inspect.</Text>
+    <Stack data-testid="views-index" gap="md">
+      <Stack gap={2}>
+        <Title order={2}>Views</Title>
+        <Text c="dimmed">Saved queries.  Pick one to inspect.</Text>
+      </Stack>
+      <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
 ${cards}
+      </SimpleGrid>
     </Stack>
   );
 }
@@ -274,7 +280,7 @@ export function buildViewTablePage(
   // Determine column set + row type alias name for the table.
   const columns = collectColumns(view, ctx, aggregatesByName);
   const cols = columns
-    .map((c) => `              <Table.Th>${c.name}</Table.Th>`)
+    .map((c) => `                  <Table.Th>${humanizeUtil(c.name)}</Table.Th>`)
     .join("\n");
   const cells = columns
     .map((c) => {
@@ -282,42 +288,52 @@ export function buildViewTablePage(
       const tid = `view-${slug}-row-\${idx}-${c.name}`;
       if (c.linkTargetSlug) {
         // Id<X> with a known target list page in this deployable.
-        return `                <Table.Td data-testid={\`${tid}\`}><Anchor component={Link} to={\`/${c.linkTargetSlug}/\${row.${path}}\`}>{String(row.${path}).slice(0, 8)}…</Anchor></Table.Td>`;
+        return `                    <Table.Td data-testid={\`${tid}\`}><Anchor component={Link} to={\`/${c.linkTargetSlug}/\${row.${path}}\`}><IdValue id={row.${path}} /></Anchor></Table.Td>`;
       }
-      return `                <Table.Td data-testid={\`${tid}\`}>{String(row.${path} ?? "")}</Table.Td>`;
+      return `                    <Table.Td data-testid={\`${tid}\`}>{row.${path} === null || row.${path} === undefined || row.${path} === "" ? <EmptyValue /> : String(row.${path})}</Table.Td>`;
     })
     .join("\n");
   return `// Auto-generated.
 import { Link } from "react-router-dom";
-import { Stack, Title, Group, Anchor, Table, Loader, Alert, Text } from "@mantine/core";
+import { Stack, Title, Group, Anchor, Table, Loader, Alert, Text, Paper } from "@mantine/core";
 import { ${hookName} } from "../../api/views";
+import { IdValue, EmptyValue } from "../../lib/format";
 
 export default function ${componentName}() {
   const q = ${hookName}();
+  const count = q.data?.length ?? 0;
   return (
-    <Stack data-testid="view-${slug}">
-      <Group justify="space-between">
-        <Title order={2}>${human}</Title>
+    <Stack data-testid="view-${slug}" gap="md">
+      <Group justify="space-between" align="flex-end">
+        <Stack gap={2}>
+          <Text size="sm" c="dimmed" tt="uppercase" fw={600}>View</Text>
+          <Title order={2}>${human}</Title>
+          <Text size="sm" c="dimmed">{q.isLoading ? "Loading…" : count === 1 ? "1 row" : count + " rows"}</Text>
+        </Stack>
         <Anchor component={Link} to="/views">← back</Anchor>
       </Group>
       {q.isLoading && <Loader />}
-      {q.isError && <Alert color="red">{(q.error as Error).message}</Alert>}
+      {q.isError && <Alert color="red" variant="light">{(q.error as Error).message}</Alert>}
       {q.data && q.data.length === 0 && <Text c="dimmed">No rows.</Text>}
       {q.data && q.data.length > 0 && (
-        <Table striped withTableBorder>
-          <Table.Thead>
-            <Table.Tr>
+        <Paper p={0} style={{ overflow: "hidden" }}>
+          <Table.ScrollContainer minWidth={500}>
+            <Table striped highlightOnHover stickyHeader>
+              <Table.Thead>
+                <Table.Tr>
 ${cols}
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {q.data.map((row, idx) => (
-              <Table.Tr key={idx} data-testid={\`view-${slug}-row-\${idx}\`}>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {q.data.map((row, idx) => (
+                  <Table.Tr key={idx} data-testid={\`view-${slug}-row-\${idx}\`}>
 ${cells}
-              </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </Table.ScrollContainer>
+        </Paper>
       )}
     </Stack>
   );
