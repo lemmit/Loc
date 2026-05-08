@@ -3,6 +3,31 @@
 exports[`wire-spec.json > emits the expected document shape for examples/acme.ddd 1`] = `
 {
   "aggregates": {
+    "Customer": {
+      "additionalProperties": false,
+      "properties": {
+        "age": {
+          "type": "integer",
+        },
+        "email": {
+          "type": "string",
+        },
+        "id": {
+          "format": "uuid",
+          "type": "string",
+        },
+        "username": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "id",
+        "username",
+        "email",
+        "age",
+      ],
+      "type": "object",
+    },
     "Order": {
       "additionalProperties": false,
       "properties": {

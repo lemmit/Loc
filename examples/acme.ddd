@@ -118,27 +118,108 @@ system Acme {
         }
     }
 
-    // Public API on .NET — hosts both bounded contexts behind one EF
+    // ------------------------------------------------------------------
+    // CustomerMgmt — showcase for slice v21 wire-boundary validation.
+    //
+    // Every rule below flows through ONE classifier to FOUR enforcement
+    // layers:
+    //
+    //   1. Frontend Zod refines on the React form (per-field red text
+    //      before submit, no server round-trip).
+    //   2. Hono per-route Zod refines (catalogWeb deployable rejects
+    //      malformed bodies at the route boundary).
+    //   3. .NET FluentValidation rules on the Mediator command (api +
+    //      customerApi catch failures via the pipeline behavior;
+    //      DomainExceptionFilter converts to a structured 400 with
+    //      `{ error, trace_id, failures }`).
+    //   4. Domain `AssertInvariants()` — the floor.  Always runs
+    //      after every mutation, regardless of which wire layer
+    //      fired (defence in depth).
+    //
+    // The classifier decides per-rule which of the four layers it
+    // FITS — rules that reference `currentUser`, `now()`, or
+    // cross-aggregate state stay domain-only.  The user can also
+    // explicitly opt out of the wire layers via `private invariant`.
+    // ------------------------------------------------------------------
+    module CustomerMgmt {
+        context Customers {
+
+            aggregate Customer {
+
+                // Inline `check` per-property sugar — desugars to an
+                // invariant on the parent.  Single-field shapes get
+                // idiomatic native chains: this `length >= N && length
+                // <= M` becomes `z.string().min(3).max(32)` /
+                // `RuleFor(x => x.Username).Length(3, 32)`.
+                username: string display
+                  check username.length >= 3 && username.length <= 32
+
+                // `string.matches(literal)` — pattern is validated at
+                // codegen time.  Single-field detection produces
+                // `z.string().regex(/.../)` / `RuleFor(...).Matches("…")`;
+                // domain code uses `new RegExp(...).test(...)` /
+                // `Regex.IsMatch(...)`.
+                email: string
+                  check email.matches("^[^@]+@[^@]+\\.[^@]+$")
+                     && email.length <= 120
+
+                // Numeric range — recognised as a `between` shape;
+                // emits `z.number().int().min(18).max(150)` /
+                // `RuleFor(x => x.Age).InclusiveBetween(18, 150)`.
+                age: int check age >= 18 && age <= 150
+
+                // Cross-field rule still uses the regular `invariant`
+                // form.  Doesn't fit a single-field native chain so
+                // it lowers to a generic `.refine((data) => ...,
+                // { path })` on Zod and `RuleFor(x => x).Must(x =>
+                // ...).WithName("Username")` on FluentValidation.
+                // The path attribution puts the error inline next to
+                // the username input on the form.
+                invariant username != email
+
+                // `private invariant` — slice 21.C's escape hatch.
+                // The classifier short-circuits on the server-only
+                // scope, so this rule is SKIPPED from the Zod
+                // refines, the Hono per-route schema, AND the
+                // FluentValidation pipeline.  The domain
+                // `AssertInvariants()` floor still enforces it.
+                // Useful for sensitive checks the user doesn't want
+                // disclosed via OpenAPI (the literal pattern doesn't
+                // appear in the published spec).
+                private invariant username.matches("^[a-z][a-z0-9_]*$")
+            }
+
+            repository Customers for Customer {
+                find byEmail(email: string): Customer? where this.email == email
+            }
+        }
+    }
+
+
+
+    // Public API on .NET — hosts every bounded context behind one EF
     // DbContext, exposes the full HTTP surface for the platform.
     deployable api {
         platform: dotnet
-        modules: Catalog, Sales
+        modules: Catalog, Sales, CustomerMgmt
         port: 8080
     }
 
-    // Lightweight read-API on Hono — same Catalog data, no Sales code.
+    // Lightweight read-API on Hono — Catalog data + Customers (for
+    // the v21 wire-validation showcase across both backends).
     deployable catalogWeb {
         platform: hono
-        modules: Catalog
+        modules: Catalog, CustomerMgmt
         port: 3000
     }
 
-    // Same Catalog surface on .NET — exists so the OpenAPI cross-check
-    // can diff `catalogApi` (.NET) against `catalogWeb` (Hono) and
-    // surface any drift between the platforms' route emission.
+    // Same Catalog + Customers surface on .NET — exists so the
+    // OpenAPI cross-check can diff `catalogApi` (.NET) against
+    // `catalogWeb` (Hono) and surface any drift between the
+    // platforms' route emission.
     deployable catalogApi {
         platform: dotnet
-        modules: Catalog
+        modules: Catalog, CustomerMgmt
         port: 8081
     }
 

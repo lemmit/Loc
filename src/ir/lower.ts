@@ -704,7 +704,9 @@ function lowerPropertyChecks(
     if (!p.check) continue;
     out.push({
       expr: lowerExpr(p.check, env),
-      source: `${p.name} check ${cstText(p.check)}`,
+      // Normalise whitespace so multi-line `check` clauses don't
+      // carry indentation into error messages.
+      source: `${p.name} check ${cstText(p.check).replace(/\s+/g, " ").trim()}`,
     });
   }
   return out;
