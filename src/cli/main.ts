@@ -75,6 +75,52 @@ function loadLoomIgnore(outDir: string): ignore.Ignore {
   return ig;
 }
 
+/**
+ * MIT grant emitted at the root of every generated project.  Loom
+ * itself is FSL-1.1-Apache-2.0, but the *output* of `ddd generate` is
+ * licensed to the user under MIT so that production users can ship
+ * generated code without inheriting FSL terms.  The companion FAQ
+ * lives at `docs/license-faq.md` in the Loom repo.
+ *
+ * If the generator emits a LICENSE file as part of its own output
+ * (none do today), that emitted entry wins — we only inject this
+ * when no LICENSE is already in the file map.  Users who want to
+ * substitute their own LICENSE pin it via `.loomignore`.
+ */
+const GENERATED_OUTPUT_LICENSE = `MIT License
+
+Copyright (c) ${new Date().getFullYear()} the authors of this generated project.
+
+This project was scaffolded by Loom (https://github.com/lemmit/loc), a
+source-available DDD code generator licensed under FSL-1.1-Apache-2.0.
+The generator's license does NOT extend to this output: every file in
+this directory is licensed to you under the MIT License below.  Any
+runtime helper snippets that Loom embedded verbatim into this project
+are dual-licensed MIT OR Apache-2.0 in this context.  See
+https://github.com/lemmit/loc/blob/main/docs/license-faq.md for the
+full posture.
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+`;
+
 interface RunOptions {
   dryRun?: boolean;
   /** When true, errors are reported but `runGenerate` returns instead
@@ -142,6 +188,10 @@ async function runGenerate(
     files = generateTypeScript(result.model);
   } else {
     files = generateDotnet(result.model);
+  }
+
+  if (!files.has("LICENSE")) {
+    files.set("LICENSE", GENERATED_OUTPUT_LICENSE);
   }
 
   const ig = loadLoomIgnore(outDir);
