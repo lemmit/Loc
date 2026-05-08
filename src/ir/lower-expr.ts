@@ -438,7 +438,13 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
     const recv = lowerExpr(expr.receiver, env);
     const recvType = inferExprType(expr.receiver, env);
     if (expr.call) {
-      const args = expr.args.map((a) => lowerExpr(a, env));
+      // Slice 1.5: call args are `CallArg` nodes wrapping an
+      // Expression with an optional `name:` prefix.  Lower the value
+      // and capture the parallel name list; downstream consumers
+      // that don't care about names see the unchanged `args`
+      // shape.
+      const args = expr.args.map((a) => lowerExpr(a.value, env));
+      const argNames = expr.args.map((a) => a.name || undefined);
       const collectionOp = isCollectionOp(expr.member);
       return {
         kind: "method-call",
@@ -447,6 +453,7 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
         args,
         receiverType: recvType,
         isCollectionOp: collectionOp,
+        ...(argNames.some((n) => n !== undefined) ? { argNames } : {}),
       };
     }
     return {
@@ -459,16 +466,25 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
   }
   if (isCallExpr(expr)) {
     const callee = expr.callee;
+    const args = expr.args.map((a) => lowerExpr(a.value, env));
+    const argNames = expr.args.map((a) => a.name || undefined);
+    const named = argNames.some((n) => n !== undefined);
     if (isNameRef(callee)) {
-      const args = expr.args.map((a) => lowerExpr(a, env));
       const callKind = resolveCallKind(callee.name, env);
-      return { kind: "call", callKind, name: callee.name, args };
+      return {
+        kind: "call",
+        callKind,
+        name: callee.name,
+        args,
+        ...(named ? { argNames } : {}),
+      };
     }
     return {
       kind: "call",
       callKind: "free",
       name: "<expr>",
-      args: expr.args.map((a) => lowerExpr(a, env)),
+      args,
+      ...(named ? { argNames } : {}),
     };
   }
   if (isNameRef(expr)) {

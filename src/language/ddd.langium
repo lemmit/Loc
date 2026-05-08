@@ -204,7 +204,7 @@ PageMenuMeta:
     '}';
 
 MenuMetaEntry:
-    name=ID ':' value=Expression;
+    name=LooseName ':' value=Expression;
 
 // ---- component ----------------------------------------------------------
 
@@ -265,11 +265,10 @@ MenuLink:
       'link' page=[Page:ID] ('{' (props+=MenuLinkProp (',' props+=MenuLinkProp)* ','?)? '}')?
     | 'link' externalLabel=STRING '->' externalUrl=STRING;
 
-// Same approach as MenuMetaEntry — bare `ID` + validator-side check
-// of the allowed key names (`label`, `order`).  Avoids hard-
-// keywording `label` and `order` globally.
+// Same approach as MenuMetaEntry — `LooseName` + validator-side
+// check of the allowed key names (`label`, `order`).
 MenuLinkProp:
-    name=ID ':' value=Expression;
+    name=LooseName ':' value=Expression;
 
 // ---------------------------------------------------------------------------
 // Top-level
@@ -427,7 +426,26 @@ Operation:
     '}';
 
 Parameter:
-    name=ID ':' type=TypeRef;
+    name=LooseName ':' type=TypeRef;
+
+// LooseName — admissible identifiers in name positions that need to
+// accept Loom keywords as ordinary names.  Used by `Parameter.name`
+// (so `id` works as a route-param name on pages — `page Detail(id:
+// Id<Order>)` — the IdRef magic-identifier doesn't shadow it),
+// `MenuMetaEntry.name` (so `section: "Sales"` admits the same
+// keyword `MenuSection` reserves), `MenuLinkProp.name` (likewise),
+// and `CallArg.name` (so `Form(state: foo)` is legal even though
+// `state` is reserved by `StateBlock`).  Adding a token here does
+// NOT make it parseable as a NameRef in expression position — that
+// remains `NameRefIdent`.  Validators (Slice 3) enforce semantic
+// constraints (e.g. only specific names are valid for menu metadata).
+LooseName returns string:
+    ID
+    | 'id' | 'permissions' | 'contains'
+    | 'ui' | 'page' | 'component' | 'scaffold' | 'state' | 'menu'
+    | 'section' | 'link' | 'route' | 'title' | 'body' | 'framework' | 'static'
+    | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
+    | 'design' | 'targets';
 
 // ---------------------------------------------------------------------------
 // Type references
@@ -561,9 +579,24 @@ UnaryExpr infers Expression:
 PostfixExpr infers Expression:
     PrimaryExpr (
         {infer MemberAccess.receiver=current} '.' member=MemberName
-          ( call?='(' (args+=Expression (',' args+=Expression)*)? ')' )?
-      | {infer CallExpr.callee=current} '(' (args+=Expression (',' args+=Expression)*)? ')'
+          ( call?='(' (args+=CallArg (',' args+=CallArg)*)? ')' )?
+      | {infer CallExpr.callee=current} '(' (args+=CallArg (',' args+=CallArg)*)? ')'
     )*;
+
+// Call arguments admit an optional `name:` prefix (Slice 1.5).
+// Positional usage (`Money(10.5, "USD")`) keeps working; named usage
+// (`List(of: Order, scope: Orders.byCustomer(customerId))`) lets
+// component invocations in the page metamodel surface the parameter
+// names rather than relying on positional discipline.  Lowering
+// threads the name into `CallExpr.argNames` / `MethodCall.argNames`
+// parallel to `args`; renderers that don't care can ignore them.
+//
+// The name uses `LooseName` so common page-metamodel parameter
+// keywords (`of`, `by`, `state`, `body`, …) are admissible — without
+// this, e.g. `Form(state: order)` would fail because `state` is a
+// hard keyword from `StateBlock`.
+CallArg:
+    (name=LooseName ':')? value=Expression;
 
 // Accept reserved keywords as ordinary member names so `prod.id`,
 // `currentUser.permissions`, `someArray.contains(x)`, and the e2e

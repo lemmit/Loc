@@ -95,13 +95,9 @@ describe("page metamodel — IR shape (Slice 2)", () => {
   });
 
   it("lowers a `page` with route/title/requires/state/body/menu meta", async () => {
-    // Note on test surface: current Slice 1 grammar doesn't yet
-    // accept named-argument syntax inside CallExpr (`Foo(name: x)`),
-    // and `section` is a hard keyword from `MenuSection` so
-    // PageMenuMeta keys like `section: "..."` collide.  Both gaps
-    // are real and tracked for a follow-up grammar slice; for the
-    // IR-shape test we use surface the grammar accepts cleanly:
-    // positional call args + non-colliding metadata keys.
+    // Slice 1.5: CallExpr accepts named-arg syntax (`List(of: Order)`)
+    // and PageMenuMeta accepts soft-keyword keys (`section:`,
+    // `label:`) — both via the `LooseName` rule.
     const loom = await buildLoom(`
       system Acme {
         ui WebApp {
@@ -113,8 +109,8 @@ describe("page metamodel — IR shape (Slice 2)", () => {
               filter: string = ""
               selectedId: string
             }
-            body: List(Order)
-            menu { group: "Sales", caption: "Orders" }
+            body: List(of: Order)
+            menu { section: "Sales", label: "Orders" }
           }
         }
       }
@@ -128,22 +124,27 @@ describe("page metamodel — IR shape (Slice 2)", () => {
     expect(page.state[0]!.init?.kind).toBe("literal");
     expect(page.state[1]!.init).toBeUndefined();
     expect(page.body?.kind).toBe("call");
+    if (page.body?.kind === "call") {
+      expect(page.body.args).toHaveLength(1);
+      expect(page.body.argNames).toEqual(["of"]);
+    }
     expect(page.menuMeta?.entries.map((e) => e.name)).toEqual([
-      "group",
-      "caption",
+      "section",
+      "label",
     ]);
   });
 
-  it("lowers a page with parameters (typed)", async () => {
-    // `id` as a Parameter.name collides with the IdRef hard keyword;
-    // grammar fix is a separate concern — use `customerId` here.
+  it("lowers a page with parameters (typed) — including `id` as a param name", async () => {
+    // Slice 1.5: `Parameter.name` uses `LooseName`, so `id` no
+    // longer collides with the IdRef magic-identifier keyword and
+    // can be used as a route-param name.
     const loom = await buildLoom(`
       system Acme {
         module M { context C { aggregate Customer { name: string } repository Customers for Customer { } } }
         ui WebApp {
-          page CustomerDetail(customerId: Id<Customer>) {
+          page CustomerDetail(id: Id<Customer>) {
             route: "/customers/:id"
-            body: Detail(Customer)
+            body: Detail(of: Customer, by: id)
           }
         }
       }
@@ -152,12 +153,18 @@ describe("page metamodel — IR shape (Slice 2)", () => {
       (p): p is PageIR => p.name === "CustomerDetail",
     )!;
     expect(page.params).toHaveLength(1);
-    expect(page.params[0]!.name).toBe("customerId");
+    expect(page.params[0]!.name).toBe("id");
     expect(page.params[0]!.type).toEqual({
       kind: "id",
       targetName: "Customer",
       valueType: "guid",
     });
+    // Body's Detail(of: Customer, by: id) records both arg names.
+    expect(page.body?.kind).toBe("call");
+    if (page.body?.kind === "call") {
+      expect(page.body.args).toHaveLength(2);
+      expect(page.body.argNames).toEqual(["of", "by"]);
+    }
   });
 
   it("merges multiple `state {}` blocks in a single page", async () => {
@@ -178,14 +185,13 @@ describe("page metamodel — IR shape (Slice 2)", () => {
   });
 
   it("lowers a `component` declaration with params + body + state", async () => {
-    // Positional-arg calls only (see grammar-gap notes elsewhere).
     const loom = await buildLoom(`
       system Acme {
         module M { context C { aggregate Order { x: int } repository Orders for Order { } } }
         ui WebApp {
           component OrderPanel(order: Order) {
             state { tab: string = "summary" }
-            body: stack(order, tab)
+            body: Stack(items: [order, tab])
           }
         }
       }
@@ -237,9 +243,8 @@ describe("page metamodel — IR shape (Slice 2)", () => {
   });
 
   it("lowers `match { … }` to a kind:'match' ExprIR with arms + otherwise", async () => {
-    // Use simple positional-arg calls — named-arg syntax inside
-    // CallExpr triggers parser recovery that swallows subsequent
-    // arms (real grammar gap, tracked for a follow-up slice).
+    // Slice 1.5: named-arg call surface in arm values no longer
+    // breaks parsing.
     const loom = await buildLoom(`
       system Acme {
         ui WebApp {
@@ -247,9 +252,9 @@ describe("page metamodel — IR shape (Slice 2)", () => {
             route: "/x"
             state { step: int = 0 }
             body: match {
-              step == 0 => list(Order)
-              step == 1 => empty()
-              else      => heading("done")
+              step == 0 => List(of: Order)
+              step == 1 => Empty()
+              else      => Heading("done")
             }
           }
         }
@@ -386,6 +391,67 @@ describe("page metamodel — IR shape (Slice 2)", () => {
     const dep = firstSystem(loom).deployables.find((d) => d.name === "web")!;
     expect(dep.uiName).toBe("WebApp");
     expect(dep.uiFramework).toBe("react");
+  });
+
+  it("preserves positional vs named-arg distinction in CallExpr (Slice 1.5)", async () => {
+    // Mixed positional + named — argNames is populated only when at
+    // least one arg is named; a fully-positional call leaves
+    // argNames undefined for IR compactness.
+    const loom = await buildLoom(`
+      system Acme {
+        ui WebApp {
+          page A { route: "/a", body: f(1, 2, 3) }
+          page B { route: "/b", body: g(of: Order, scope: source) }
+          page C { route: "/c", body: h(1, name: "x") }
+        }
+      }
+    `);
+    const ui = uiByName(loom, "WebApp");
+    const aBody = ui.pages.find((p) => p.name === "A")!.body!;
+    const bBody = ui.pages.find((p) => p.name === "B")!.body!;
+    const cBody = ui.pages.find((p) => p.name === "C")!.body!;
+    if (aBody.kind !== "call" || bBody.kind !== "call" || cBody.kind !== "call")
+      throw new Error("expected call IR");
+    expect(aBody.argNames).toBeUndefined();
+    expect(bBody.argNames).toEqual(["of", "scope"]);
+    expect(cBody.argNames).toEqual([undefined, "name"]);
+  });
+
+  it("admits keyword-shaped argument names via `LooseName`", async () => {
+    // Without LooseName, `state:` and `body:` would fail because
+    // they are hard keywords from `StateBlock` / `BodyProp`.
+    const loom = await buildLoom(`
+      system Acme {
+        ui WebApp {
+          page X {
+            route: "/x"
+            body: Form(state: draft, body: editor)
+          }
+        }
+      }
+    `);
+    const page = uiByName(loom, "WebApp").pages[0]!;
+    if (page.body?.kind !== "call") throw new Error("expected call");
+    expect(page.body.argNames).toEqual(["state", "body"]);
+  });
+
+  it("admits soft-keyword names in MenuMetaEntry / MenuLinkProp", async () => {
+    const loom = await buildLoom(`
+      system Acme {
+        ui WebApp {
+          page Home { route: "/", body: Heading("hi") }
+          menu {
+            section "Main" {
+              link Home { label: "Start" }
+            }
+          }
+        }
+      }
+    `);
+    const ui = uiByName(loom, "WebApp");
+    const link = ui.menu!.sections[0]!.links[0];
+    if (link!.kind !== "page") throw new Error("expected page link");
+    expect(link!.props.map((p) => p.name)).toEqual(["label"]);
   });
 
   it("Platform enum accepts 'static' (Slice 1 grammar / Slice 2 IR)", async () => {

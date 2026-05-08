@@ -1226,8 +1226,13 @@ function matchFactoryCall(
   if (!isNameRef(recv)) return undefined;
   if (!aggsByName.has(recv.name)) return undefined;
   if (expr.args.length !== 1) return undefined;
-  const arg = expr.args[0];
-  if (!arg || !isObjectLit(arg)) return undefined;
+  const argWrap = expr.args[0];
+  // Slice 1.5: factory calls take a single object literal positional
+  // arg.  Reject the named-arg form here; the caller falls through
+  // to a generic call lowering rather than the factory shape.
+  if (!argWrap || argWrap.name) return undefined;
+  const arg = argWrap.value;
+  if (!isObjectLit(arg)) return undefined;
   return {
     aggName: recv.name,
     fields: arg.fields.map((f) => ({ name: f.name, value: f.value })),
@@ -1249,9 +1254,10 @@ function matchRepoCall(
   if (!isNameRef(recv)) return undefined;
   const repo = reposByName.get(recv.name);
   if (!repo) return undefined;
+  // Slice 1.5: peel CallArg wrappers — repo finds are positional.
   return {
     repo,
     method: expr.member,
-    args: expr.args ?? [],
+    args: (expr.args ?? []).map((a) => a.value),
   };
 }

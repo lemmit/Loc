@@ -302,7 +302,20 @@ export class DddValidator {
         );
         continue;
       }
-      const arg = ma.args[0]!;
+      // Slice 1.5: call args are CallArg wrappers carrying an
+      // optional `name:` prefix; reach for `.value` to inspect the
+      // expression itself.  `string.matches(<regex>)` is a single-
+      // positional-arg method-call, so `name` should be absent.
+      const argWrap = ma.args[0]!;
+      const arg = argWrap.value;
+      if (argWrap.name) {
+        accept(
+          "error",
+          `'matches' takes a single positional argument; named arguments are not supported.`,
+          { node: argWrap, property: "name" },
+        );
+        continue;
+      }
       if (arg.$type !== "StringLit") {
         accept(
           "error",

@@ -709,12 +709,20 @@ export type ExprIR =
       args: ExprIR[];
       receiverType: TypeIR;
       isCollectionOp: boolean;
+      /** Optional parallel array (Slice 1.5): `argNames[i]` is the
+       *  source-side `name:` prefix for `args[i]`, or `undefined` for
+       *  positional arguments.  Present iff at least one arg was
+       *  written with a name; absent for fully-positional calls (the
+       *  vast majority — keeps IR compact for v22-shaped code). */
+      argNames?: (string | undefined)[];
     }
   | {
       kind: "call";
       callKind: CallKind;
       name: string;
       args: ExprIR[];
+      /** Same shape as `method-call.argNames` — see above. */
+      argNames?: (string | undefined)[];
     }
   | {
       kind: "lambda";
