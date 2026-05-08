@@ -86,7 +86,7 @@ describe("CLI", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "loom-inc-"));
     const first = runCli(["generate", "ts", example, "-o", tmp]);
     expect(first.status).toBe(0);
-    expect(first.stdout).toMatch(/Wrote 27 file\(s\)/);
+    expect(first.stdout).toMatch(/Wrote 28 file\(s\)/);
     // Capture mtimes after the first run so we can verify the second
     // run doesn't re-touch anything.
     const sample = path.join(tmp, "domain", "order.ts");
@@ -94,7 +94,7 @@ describe("CLI", () => {
 
     const second = runCli(["generate", "ts", example, "-o", tmp]);
     expect(second.status).toBe(0);
-    expect(second.stdout).toMatch(/Wrote 0 file\(s\) in [^,]+, unchanged: 27/);
+    expect(second.stdout).toMatch(/Wrote 0 file\(s\) in [^,]+, unchanged: 28/);
     const mtimeAfter = fs.statSync(sample).mtimeMs;
     expect(mtimeAfter).toBe(mtimeBefore);
     fs.rmSync(tmp, { recursive: true });
@@ -121,7 +121,7 @@ describe("CLI", () => {
 
     const result = runCli(["generate", "ts", example, "-o", tmp]);
     expect(result.status).toBe(0);
-    expect(result.stdout).toMatch(/Wrote 1 file\(s\) in [^,]+, unchanged: 26/);
+    expect(result.stdout).toMatch(/Wrote 1 file\(s\) in [^,]+, unchanged: 27/);
     expect(fs.statSync(idsPath).mtimeMs).toBeGreaterThan(idsMtimeBefore);
     expect(fs.statSync(orderPath).mtimeMs).toBe(orderMtimeBefore);
     fs.rmSync(tmp, { recursive: true });

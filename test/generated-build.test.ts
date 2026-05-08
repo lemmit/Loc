@@ -6,9 +6,11 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // ---------------------------------------------------------------------------
-// Generator regression test: emit each example, install deps, and run
-// `tsc --noEmit` on the result.  Catches generator drift that breaks
-// generated TS without running the full docker e2e.
+// Generator regression test: emit each example, install deps, run
+// `tsc --noEmit` (type-check only — tsup handles emit), then run
+// `npm run build` to exercise the tsup bundle.  Catches generator
+// drift that breaks generated TS without running the full docker
+// e2e.
 //
 // Slow (~60s with cached node_modules) — opt-in via LOOM_TS_BUILD=1
 // so `npm test` stays fast.
@@ -20,39 +22,52 @@ const cli = path.join(repoRoot, "bin", "cli.js");
 
 const ENABLED = process.env.LOOM_TS_BUILD === "1";
 
-describe.skipIf(!ENABLED)("generated TS compiles under strict tsc", () => {
-  it.each([
-    "examples/sales.ddd",
-    "examples/banking.ddd",
-    "examples/inventory.ddd",
-  ])(
-    "%s — `ddd generate ts` output type-checks",
-    (example) => {
-      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-"));
-      try {
-        execSync(`node ${cli} generate ts ${example} -o ${outDir}`, {
-          stdio: "inherit",
-          cwd: repoRoot,
-        });
-        execSync(`npm install --silent --no-audit --no-fund`, {
-          cwd: outDir,
-          stdio: "inherit",
-          timeout: 180_000,
-        });
-        execSync(`npx tsc --noEmit`, {
-          cwd: outDir,
-          stdio: "inherit",
-          timeout: 60_000,
-        });
-        expect(true).toBe(true);
-      } finally {
+describe.skipIf(!ENABLED)(
+  "generated TS type-checks (tsc) AND bundles (tsup) under strict mode",
+  () => {
+    it.each([
+      "examples/sales.ddd",
+      "examples/banking.ddd",
+      "examples/inventory.ddd",
+    ])(
+      "%s — `ddd generate ts` output type-checks + tsup-bundles",
+      (example) => {
+        const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-"));
         try {
-          fs.rmSync(outDir, { recursive: true, force: true });
-        } catch {
-          /* ignore */
+          execSync(`node ${cli} generate ts ${example} -o ${outDir}`, {
+            stdio: "inherit",
+            cwd: repoRoot,
+          });
+          execSync(`npm install --silent --no-audit --no-fund`, {
+            cwd: outDir,
+            stdio: "inherit",
+            timeout: 180_000,
+          });
+          // Type-check (tsup is build-only with `dts: false`).
+          execSync(`npx tsc --noEmit`, {
+            cwd: outDir,
+            stdio: "inherit",
+            timeout: 60_000,
+          });
+          // Build the production bundle.
+          execSync(`npm run build`, {
+            cwd: outDir,
+            stdio: "inherit",
+            timeout: 60_000,
+          });
+          // Bundle exists where the Dockerfile expects it.
+          expect(fs.existsSync(path.join(outDir, "dist", "index.js"))).toBe(
+            true,
+          );
+        } finally {
+          try {
+            fs.rmSync(outDir, { recursive: true, force: true });
+          } catch {
+            /* ignore */
+          }
         }
-      }
-    },
-    300_000,
-  );
-});
+      },
+      300_000,
+    );
+  },
+);

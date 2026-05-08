@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Box, Text } from "@mantine/core";
+import { ActionIcon, Box, Group, Text, Tooltip } from "@mantine/core";
 import type { LoomRuntimeClient } from "../runtime/client";
 import { makePreviewHtml } from "./iframe-html";
 import { attachRuntimePort, pushBundle, sandboxUrl } from "./sw-host";
@@ -31,8 +31,95 @@ const SW_AVAILABLE =
   typeof window !== "undefined" &&
   window.isSecureContext === true;
 
+// Fullscreen target — wraps the iframe (not the header bar) so the
+// generated app fills the actual screen edge-to-edge when expanded.
+// Browser's Esc key exits fullscreen via the standard
+// `fullscreenchange` event; our state listener flips the button
+// affordance back to "expand" when that happens.
+function MaximizeIcon({ size = 14 }: { size?: number }): JSX.Element {
+  // Tabler IconArrowsMaximize, inlined so the playground doesn't
+  // pick up @tabler/icons-react for a single button.
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M16 4h4v4" />
+      <path d="M14 10l6 -6" />
+      <path d="M8 20h-4v-4" />
+      <path d="M4 20l6 -6" />
+      <path d="M16 20h4v-4" />
+      <path d="M14 14l6 6" />
+      <path d="M8 4h-4v4" />
+      <path d="M4 4l6 6" />
+    </svg>
+  );
+}
+
+function MinimizeIcon({ size = 14 }: { size?: number }): JSX.Element {
+  // Tabler IconArrowsMinimize.
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M5 9h4v-4" />
+      <path d="M3 3l6 6" />
+      <path d="M5 15h4v4" />
+      <path d="M3 21l6 -6" />
+      <path d="M19 9h-4v-4" />
+      <path d="M15 3l6 6" />
+      <path d="M19 15h-4v4" />
+      <path d="M15 21l6 -6" />
+    </svg>
+  );
+}
+
 export function Preview({ js, css, versions, runtime }: PreviewProps): JSX.Element {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const fullscreenTargetRef = useRef<HTMLDivElement | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Track fullscreen state so the toggle button reflects browser
+  // truth — including Esc-to-exit and any future per-iframe fs
+  // request from inside the bundle itself.
+  useEffect(() => {
+    const onChange = (): void => {
+      setIsFullscreen(document.fullscreenElement !== null);
+    };
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  const toggleFullscreen = async (): Promise<void> => {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else if (fullscreenTargetRef.current) {
+        await fullscreenTargetRef.current.requestFullscreen();
+      }
+    } catch {
+      // Fullscreen API rejects when permission is missing or the
+      // user gesture wasn't propagated.  Swallow — the button just
+      // becomes a no-op in those rare cases instead of throwing.
+    }
+  };
 
   // Wire the SW's runtime bridge to the in-process runtime worker.
   // The SW forwards `<sandbox>/runtime/*` fetches through the
@@ -126,11 +213,35 @@ export function Preview({ js, css, versions, runtime }: PreviewProps): JSX.Eleme
   return (
     <Box style={{ height: "100%", width: "100%", display: "flex", flexDirection: "column" }}>
       <Box px="sm" py={4} bg="dark.6" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
-        <Text size="xs" fw={600} tt="uppercase" c="dimmed">
-          Preview — generated React app, fetches routed to PGlite
-        </Text>
+        <Group justify="space-between" wrap="nowrap" gap="xs">
+          <Text size="xs" fw={600} tt="uppercase" c="dimmed">
+            Preview — generated React app, fetches routed to PGlite
+          </Text>
+          <Tooltip
+            label={isFullscreen ? "Exit full screen (Esc)" : "Open full screen"}
+            withArrow
+            position="left"
+            openDelay={300}
+          >
+            <ActionIcon
+              size="sm"
+              variant="subtle"
+              color="gray"
+              onClick={() => {
+                void toggleFullscreen();
+              }}
+              aria-label={isFullscreen ? "Exit full screen" : "Open full screen"}
+              data-testid="preview-fullscreen-toggle"
+            >
+              {isFullscreen ? <MinimizeIcon /> : <MaximizeIcon />}
+            </ActionIcon>
+          </Tooltip>
+        </Group>
       </Box>
-      <Box style={{ flex: 1, minHeight: 0, background: "white" }}>
+      <Box
+        ref={fullscreenTargetRef}
+        style={{ flex: 1, minHeight: 0, background: "white" }}
+      >
         {!SW_AVAILABLE ? (
           // No SW available — the preview iframe needs the SW to
           // serve the bundle and bridge runtime fetches.  Surface

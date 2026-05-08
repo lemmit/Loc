@@ -7,11 +7,7 @@ import type {
 } from "../../ir/loom-ir.js";
 import { camel, snake, plural } from "../../util/naming.js";
 import { buildApiModule } from "./api-builder.js";
-import {
-  buildDetailPage,
-  buildListPage,
-  buildNewPage,
-} from "./pages-builder.js";
+import { buildDetailPage, buildNewPage } from "./pages-builder.js";
 import { buildPageObjectModule } from "./page-objects-builder.js";
 import {
   allWorkflows,
@@ -29,8 +25,12 @@ import {
   buildViewTablePage,
   hasAnyView,
 } from "./view-builder.js";
-import { buildMantineTheme, hasThemeTokens } from "./theme-builder.js";
+import { buildMantineTheme } from "./theme-builder.js";
+import { FORMAT_HELPERS_TSX } from "./format-helpers.js";
+import { loadPack, resolvePackDir } from "./templating/loader.js";
+import { renderListPage } from "./templating/render.js";
 import type { ViewIR } from "../../ir/loom-ir.js";
+import { humanize } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // React + React Query + Zod + Mantine generator.
@@ -73,10 +73,22 @@ export function generateReactForContexts(
   const aggregatesByName = new Map<string, AggregateIR>();
   for (const { agg } of aggregates) aggregatesByName.set(agg.name, agg);
 
+  // Phase 0: route list-page emission through the new template-pack
+  // layer.  Loads the pack named by `deployable.design` (defaulted
+  // to "mantine" by the lowerer for react deployables); other page
+  // kinds still use the legacy TS builders for now.  Subsequent
+  // phases port each remaining page kind, deleting its TS builder
+  // as it lands.
+  const design = deployable.design ?? "mantine";
+  const pack = loadPack(resolvePackDir(design));
+
   for (const { agg, ctx } of aggregates) {
     const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
     out.set(`src/api/${camel(agg.name)}.ts`, buildApiModule(agg, repo, ctx));
-    out.set(`src/pages/${snake(plural(agg.name))}/list.tsx`, buildListPage(agg));
+    out.set(
+      `src/pages/${snake(plural(agg.name))}/list.tsx`,
+      renderListPage(agg, aggregatesByName, pack),
+    );
     out.set(
       `src/pages/${snake(plural(agg.name))}/new.tsx`,
       buildNewPage(agg, ctx, aggregatesByName),
@@ -144,22 +156,22 @@ export function generateReactForContexts(
 
   out.set("src/api/client.ts", CLIENT_TS);
   out.set("src/api/config.ts", configTs(apiBaseUrl));
-  // Theme — optional design-token block at system scope.  When
-  // present, emit `src/theme.ts` with a Mantine theme config and
-  // wire `<MantineProvider theme={theme}>` in main.tsx.  Without
-  // it, the app boots with Mantine's defaults (no extra file, no
-  // theme prop).
-  const themePresent = hasThemeTokens(sys.theme);
-  if (themePresent && sys.theme) {
-    out.set("src/theme.ts", buildMantineTheme(sys.theme));
-  }
-  out.set("src/main.tsx", mainTsx({ themePresent }));
+  out.set("src/lib/format.tsx", FORMAT_HELPERS_TSX);
+  // Theme — every generated app gets a tasteful baseline (indigo
+  // primary, medium radius, Inter font) so the bare-Mantine
+  // "construction site" look is gone by default.  System-level
+  // `theme { ... }` blocks override the baseline through
+  // `buildMantineTheme`; the generated file always exists and
+  // main.tsx always wires `<MantineProvider theme={theme}>`.
+  out.set("src/theme.ts", buildMantineTheme(sys.theme ?? {}));
+  out.set("src/main.tsx", mainTsx());
   out.set(
     "src/App.tsx",
     appTsx(
       aggregates.map((a) => a.agg),
       workflows.map((w) => w.wf),
       views.map((v) => v.view),
+      sys.name,
     ),
   );
   out.set(
@@ -168,6 +180,7 @@ export function generateReactForContexts(
       aggregates.map((a) => a.agg),
       workflows.map((w) => w.wf),
       views.map((v) => v.view),
+      sys.name,
     ),
   );
 
@@ -209,6 +222,7 @@ const PACKAGE_JSON =
         "@mantine/notifications": "^7.13.0",
         "@mantine/dates": "^7.13.0",
         "@mantine/modals": "^7.13.0",
+        "@tabler/icons-react": "^3.20.0",
         "react-hook-form": "^7.53.0",
         "@hookform/resolvers": "^3.9.0",
         zod: "^3.23.0",
@@ -295,13 +309,9 @@ const INDEX_HTML = `<!doctype html>
 </html>
 `;
 
-function mainTsx(args: { themePresent: boolean }): string {
-  const themeImport = args.themePresent
-    ? `\nimport { theme } from "./theme";`
-    : "";
-  const providerOpen = args.themePresent
-    ? "<MantineProvider theme={theme}>"
-    : "<MantineProvider>";
+function mainTsx(): string {
+  const themeImport = `\nimport { theme } from "./theme";`;
+  const providerOpen = "<MantineProvider theme={theme} defaultColorScheme=\"light\">";
   return `// Auto-generated.
 import React from "react";
 import ReactDOM from "react-dom/client";
@@ -409,6 +419,7 @@ function appTsx(
   aggregates: AggregateIR[],
   workflows: WorkflowIR[],
   views: ViewIR[],
+  systemName: string,
 ): string {
   const imports: string[] = [];
   const routes: string[] = [`        <Route path="/" element={<Home />} />`];
@@ -464,7 +475,7 @@ function appTsx(
   const aggregateNavLinks = aggregates
     .map((a) => {
       const slug = snake(plural(a.name));
-      return `          <NavLink component={Link} to="/${slug}" label="${plural(a.name)}" active={isActive("/${slug}")} data-testid="nav-${slug}" />`;
+      return `          <NavLink component={Link} to="/${slug}" label="${humanize(plural(a.name))}" active={isActive("/${slug}")} data-testid="nav-${slug}" />`;
     })
     .join("\n");
   const workflowsSection =
@@ -475,7 +486,7 @@ function appTsx(
         workflows
           .map((wf) => {
             const slug = snake(wf.name);
-            const human = humanise(wf.name);
+            const human = humanize(wf.name);
             return `          <NavLink component={Link} to="/workflows/${slug}" label="${human}" active={isActive("/workflows/${slug}")} data-testid="nav-workflow-${slug}" />`;
           })
           .join("\n");
@@ -487,7 +498,7 @@ function appTsx(
         views
           .map((v) => {
             const slug = snake(v.name);
-            const human = humanise(v.name);
+            const human = humanize(v.name);
             return `          <NavLink component={Link} to="/views/${slug}" label="${human}" active={isActive("/views/${slug}")} data-testid="nav-view-${slug}" />`;
           })
           .join("\n");
@@ -576,15 +587,22 @@ export default function App() {
       padding="md"
     >
       <AppShell.Header>
-        <Group h="100%" px="md">
-          <Burger
-            opened={opened}
-            onClick={toggle}
-            hiddenFrom="sm"
-            size="sm"
-            data-testid="nav-burger"
-          />
-          <Title order={4}>Loom</Title>
+        <Group h="100%" px="md" justify="space-between">
+          <Group gap="sm">
+            <Burger
+              opened={opened}
+              onClick={toggle}
+              hiddenFrom="sm"
+              size="sm"
+              data-testid="nav-burger"
+            />
+            <Anchor component={Link} to="/" underline="never" c="inherit">
+              <Group gap={8} align="center">
+                <div style={{ width: 28, height: 28, borderRadius: 6, background: "var(--mantine-color-brand-6)" }} aria-hidden="true" />
+                <Title order={4} style={{ letterSpacing: "-0.01em" }}>${humanize(systemName)}</Title>
+              </Group>
+            </Anchor>
+          </Group>
         </Group>
       </AppShell.Header>
       <AppShell.Navbar p="md">
@@ -605,15 +623,6 @@ ${routes.join("\n")}
   );
 }
 `;
-}
-
-/** Humanise a camelCase / PascalCase identifier into space-separated
- *  Title Case — "placeOrder" → "Place Order", "ActiveOrders" →
- *  "Active Orders".  Used for sidebar / page titles where the
- *  generated identifier would otherwise leak. */
-function humanise(name: string): string {
-  const spaced = name.replace(/([a-z0-9])([A-Z])/g, "$1 $2");
-  return spaced[0]!.toUpperCase() + spaced.slice(1);
 }
 
 function smokeSpec(aggregates: AggregateIR[]): string {
@@ -706,6 +715,7 @@ function homeTsx(
   aggregates: AggregateIR[],
   workflows: WorkflowIR[],
   views: ViewIR[],
+  systemName: string,
 ): string {
   // The sidebar already lists every aggregate / workflow / view, so
   // the home page doesn't have to re-do navigation.  Instead it acts
@@ -751,11 +761,13 @@ import { Link } from "react-router-dom";
 export default function Home() {
   return (
     <Stack data-testid="home" gap="md">
-      <Title order={2}>Welcome</Title>
-      <Text c="dimmed">
-        Use the sidebar to navigate.  Aggregates, workflows, and views are
-        grouped by section.
-      </Text>
+      <Stack gap={2}>
+        <Text size="sm" c="dimmed" tt="uppercase" fw={600}>${humanize(systemName)}</Text>
+        <Title order={2}>Welcome</Title>
+        <Text c="dimmed">
+          Pick a section from the sidebar to start, or jump straight in below.
+        </Text>
+      </Stack>
       <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="md">
 ${cards}
       </SimpleGrid>
@@ -772,7 +784,7 @@ function upper(s: string): string {
 const DOCKERFILE_REACT = `# syntax=docker/dockerfile:1
 # Auto-generated.
 
-FROM node:22-alpine AS build
+FROM node:24-alpine AS build
 WORKDIR /app
 # Optional proxy CAs — drop *.crt files into ./certs/ to make npm
 # trust them.  The directory always exists (with a .gitkeep), so
@@ -785,7 +797,7 @@ RUN npm ci || npm install
 COPY . .
 RUN npm run build
 
-FROM node:22-alpine AS runtime
+FROM node:24-alpine AS runtime
 WORKDIR /app
 ENV PORT=3000
 COPY --from=build /app/dist ./dist

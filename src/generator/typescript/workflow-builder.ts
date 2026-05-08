@@ -41,16 +41,16 @@ export function buildWorkflowsFile(
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";`);
-  lines.push(`import * as Ids from "../domain/ids.js";`);
+  lines.push(`import * as Ids from "../domain/ids";`);
   lines.push(
-    `import { DomainError, AggregateNotFoundError, ForbiddenError, ExternHandlerError } from "../domain/errors.js";`,
+    `import { DomainError, AggregateNotFoundError, ForbiddenError, ExternHandlerError } from "../domain/errors";`,
   );
   lines.push(
-    `import { type DomainEventDispatcher } from "../domain/events.js";`,
+    `import { type DomainEventDispatcher } from "../domain/events";`,
   );
-  lines.push(`import type * as Events from "../domain/events.js";`);
+  lines.push(`import type * as Events from "../domain/events";`);
   lines.push(`import type { NodePgDatabase } from "drizzle-orm/node-postgres";`);
-  lines.push(`import type * as schema from "../db/schema.js";`);
+  lines.push(`import type * as schema from "../db/schema";`);
   // Aggregate + repo imports — every aggregate the workflows touch.
   const aggsTouched = new Set<string>();
   for (const wf of ctx.workflows) {
@@ -62,10 +62,10 @@ export function buildWorkflowsFile(
   }
   for (const aggName of aggsTouched) {
     lines.push(
-      `import { ${aggName} } from "../domain/${camel(aggName)}.js";`,
+      `import { ${aggName} } from "../domain/${camel(aggName)}";`,
     );
     lines.push(
-      `import { ${aggName}Repository } from "../db/repositories/${camel(aggName)}-repository.js";`,
+      `import { ${aggName}Repository } from "../db/repositories/${camel(aggName)}-repository";`,
     );
   }
   // Per-aggregate extern handler registry import — only when at least
@@ -80,7 +80,7 @@ export function buildWorkflowsFile(
   }
   for (const aggName of externAggs) {
     lines.push(
-      `import { externHandlers as ${camel(aggName)}ExternHandlers } from "../domain/${camel(aggName)}-extern.js";`,
+      `import { externHandlers as ${camel(aggName)}ExternHandlers } from "../domain/${camel(aggName)}-extern";`,
     );
   }
   // Value object + enum imports.  Enums are runtime-imported so
@@ -91,7 +91,7 @@ export function buildWorkflowsFile(
   const valueObjectImport = [...usedVOs, ...usedEnums];
   if (valueObjectImport.length > 0) {
     lines.push(
-      `import { ${valueObjectImport.join(", ")} } from "../domain/value-objects.js";`,
+      `import { ${valueObjectImport.join(", ")} } from "../domain/value-objects";`,
     );
   }
   lines.push("");

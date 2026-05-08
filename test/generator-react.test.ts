@@ -114,7 +114,7 @@ describe("react generator", () => {
     const model = await buildModel("examples/acme.ddd");
     const { files } = generateSystems(model);
     const newOrder = files.get("web_app/src/pages/orders/new.tsx")!;
-    expect(newOrder).toMatch(/<TextInput label="placedAt"[^>]*type="datetime-local"/);
+    expect(newOrder).toMatch(/<TextInput label="Placed At"[^>]*type="datetime-local"/);
     expect(newOrder).not.toMatch(/DateTimePicker/);
     expect(newOrder).not.toMatch(/@mantine\/dates/);
     const orderPo = files.get("web_app/e2e/pages/order.ts")!;
@@ -137,7 +137,7 @@ describe("react generator", () => {
     expect(detail).toMatch(/const __products = useAllProducts\(\);/);
     // Select bound by Controller, populated from the hook's data,
     // labelled by the target's display field (`sku`).
-    expect(detail).toMatch(/<Select label="productId"/);
+    expect(detail).toMatch(/<Select label="Product Id"/);
     expect(detail).toMatch(/__products\.data \?\? \[\]/);
     expect(detail).toMatch(/label: __o\.sku/);
     // renderOption emits a per-option testid for Playwright drivers.
@@ -193,6 +193,170 @@ describe("react generator", () => {
     expect(detail).toMatch(/data-testid="orders-op-confirm"/);
     expect(detail).toMatch(/data-testid="orders-op-confirm-submit"/);
     expect(detail).toMatch(/data-testid="orders-op-addLine-input-productId"/);
+  });
+
+  it("detail page uses the display field as title when the aggregate declares one", async () => {
+    const model = await buildModel("examples/acme.ddd");
+    const { files } = generateSystems(model);
+    // Product declares `sku: string display` — title binds to data.sku
+    // so users see the SKU rather than the first 8 chars of the id.
+    const product = files.get("web_app/src/pages/products/detail.tsx")!;
+    expect(product).toMatch(
+      /<Title order=\{2\} data-testid="products-detail-title">\{data\.sku\}<\/Title>/,
+    );
+    // Breadcrumb's last segment should also reflect the display value.
+    expect(product).toMatch(/<Text>\{data\.sku\}<\/Text>/);
+    // Id surfaces beside the title via IdValue (tooltip with full id).
+    expect(product).toMatch(
+      /<span data-testid="products-detail-id"><IdValue id=\{data\.id\}/,
+    );
+    // Customer declares `username: string display`.
+    const customer = files.get("web_app/src/pages/customers/detail.tsx")!;
+    expect(customer).toMatch(
+      /<Title order=\{2\} data-testid="customers-detail-title">\{data\.username\}<\/Title>/,
+    );
+
+    // Order has no display field — title falls back to the id slice.
+    const order = files.get("web_app/src/pages/orders/detail.tsx")!;
+    expect(order).toMatch(
+      /<Title order=\{2\} data-testid="orders-detail-title">\{data\.id\.slice\(0, 8\) \+ "…"\}<\/Title>/,
+    );
+  });
+
+  it("error / not-found alerts wear icons across list, detail, and view pages", async () => {
+    const model = await buildModel("examples/acme.ddd");
+    const { files } = generateSystems(model);
+    const list = files.get("web_app/src/pages/orders/list.tsx")!;
+    const detail = files.get("web_app/src/pages/orders/detail.tsx")!;
+    const view = files.get("web_app/src/pages/views/active_orders.tsx")!;
+    expect(list).toMatch(/IconAlertCircle/);
+    expect(list).toMatch(
+      /<Alert color="red" variant="light" icon=\{<IconAlertCircle size=\{18\} \/>\} title="Couldn't load orders">/,
+    );
+    expect(detail).toMatch(/IconAlertCircle, IconAlertTriangle/);
+    expect(detail).toMatch(
+      /<Alert color="red" variant="light" icon=\{<IconAlertCircle size=\{18\} \/>\} title="Couldn't load order">/,
+    );
+    expect(detail).toMatch(
+      /<Alert color="yellow" variant="light" icon=\{<IconAlertTriangle size=\{18\} \/>\} title="Not found">/,
+    );
+    expect(view).toMatch(
+      /<Alert color="red" variant="light" icon=\{<IconAlertCircle size=\{18\} \/>\} title="Couldn't load view">/,
+    );
+  });
+
+  it("value-object fieldsets render as filled-variant grouped sub-forms", async () => {
+    const model = await buildModel("examples/acme.ddd");
+    const { files } = generateSystems(model);
+    // Product.unitPrice is a Money value object — `new` form wraps
+    // its inputs in a styled <Fieldset variant="filled" radius="md">.
+    const productNew = files.get("web_app/src/pages/products/new.tsx")!;
+    expect(productNew).toMatch(
+      /<Fieldset legend="Price" variant="filled" radius="md" data-testid="products-new-input-price">/,
+    );
+    // Children render inside a <Stack gap="sm">.
+    expect(productNew).toMatch(/<Stack gap="sm">/);
+  });
+
+  it("every index-level page (aggregate list, workflows index, views index) shows a Home / <Section> breadcrumb", async () => {
+    const model = await buildModel("examples/acme.ddd");
+    const { files } = generateSystems(model);
+
+    // Aggregate list — Home / <Plural>.  Last segment is plain Text
+    // (current page), the rest are Anchor links so users can click
+    // back up.  The chip carries a stable testid so e2e drivers can
+    // assert presence.
+    const customersList = files.get("web_app/src/pages/customers/list.tsx")!;
+    expect(customersList).toMatch(
+      /<Breadcrumbs data-testid="customers-list-breadcrumbs">[\s\S]*?<Anchor component=\{Link\} to="\/">Home<\/Anchor>[\s\S]*?<Text>Customers<\/Text>[\s\S]*?<\/Breadcrumbs>/,
+    );
+
+    const ordersList = files.get("web_app/src/pages/orders/list.tsx")!;
+    expect(ordersList).toMatch(
+      /<Breadcrumbs data-testid="orders-list-breadcrumbs">[\s\S]*?<Text>Orders<\/Text>/,
+    );
+
+    // Workflows index — Home / Workflows.
+    const workflowsIndex = files.get("web_app/src/pages/workflows/index.tsx")!;
+    expect(workflowsIndex).toMatch(
+      /<Breadcrumbs data-testid="workflows-index-breadcrumbs">[\s\S]*?<Anchor component=\{Link\} to="\/">Home<\/Anchor>[\s\S]*?<Text>Workflows<\/Text>/,
+    );
+
+    // Views index — Home / Views.
+    const viewsIndex = files.get("web_app/src/pages/views/index.tsx")!;
+    expect(viewsIndex).toMatch(
+      /<Breadcrumbs data-testid="views-index-breadcrumbs">[\s\S]*?<Text>Views<\/Text>/,
+    );
+  });
+
+  it("polishes pages with formatters, skeleton loaders, op-button icons, and *Id heuristic links", async () => {
+    const model = await buildModel("examples/acme.ddd");
+    const { files } = generateSystems(model);
+    const list = files.get("web_app/src/pages/orders/list.tsx")!;
+    const detail = files.get("web_app/src/pages/orders/detail.tsx")!;
+
+    // Skeleton loading state replaces the bare <Loader />.
+    expect(list).toMatch(/<Skeleton key=\{i\}/);
+    expect(list).not.toMatch(/<Loader \/>/);
+    expect(detail).toMatch(/data-testid="orders-detail-loading"/);
+    expect(detail).toMatch(/<Skeleton/);
+
+    // List + detail import the format helpers.
+    expect(list).toMatch(/from "\.\.\/\.\.\/lib\/format"/);
+    expect(list).toMatch(/IdValue, DateTimeValue, BoolValue, NumberValue, EmptyValue/);
+    expect(detail).toMatch(/IdValue, DateTimeValue, BoolValue, NumberValue, EmptyValue, KeyValueRow/);
+
+    // datetime cell uses DateTimeValue rather than String(...).
+    expect(list).toMatch(/<DateTimeValue iso=\{row\.placedAt\}/);
+
+    // *Id heuristic: `customerId: string` links to /customers/<id>
+    // even though the DSL declares it as a plain string.
+    expect(list).toMatch(
+      /row\.customerId \? <Anchor component=\{Link\} to=\{`\/customers\/\$\{row\.customerId\}`\}/,
+    );
+    expect(detail).toMatch(
+      /data\.customerId \? <Anchor component=\{Link\} to=\{`\/customers\/\$\{data\.customerId\}`\}/,
+    );
+
+    // "+ New" button uses IconPlus rather than ASCII "+ ".
+    expect(list).toMatch(/from "@tabler\/icons-react"/);
+    expect(list).toMatch(/leftSection=\{<IconPlus size=\{16\}/);
+
+    // Op buttons get verb-prefix icons (Add → IconPlus, Confirm → IconCheck).
+    expect(detail).toMatch(/from "@tabler\/icons-react"/);
+    expect(detail).toMatch(
+      /<Button variant="filled" leftSection=\{<IconPlus size=\{16\}[\s\S]*?orders-op-addLine/,
+    );
+    expect(detail).toMatch(
+      /<Button variant="light" leftSection=\{<IconCheck size=\{16\}[\s\S]*?orders-op-confirm/,
+    );
+
+    // Detail field rows use KeyValueRow + DateTimeValue, no <strong>.
+    expect(detail).toMatch(/<KeyValueRow label="Placed At"><span data-testid="orders-detail-placedAt"><DateTimeValue iso=\{data\.placedAt\}/);
+    expect(detail).not.toMatch(/<strong>placedAt<\/strong>/);
+
+    // Generated app declares the icons dependency.
+    const pkg = files.get("web_app/package.json")!;
+    expect(pkg).toMatch(/"@tabler\/icons-react"/);
+
+    // Format helpers shipped at src/lib/format.tsx with NumberValue.
+    const fmt = files.get("web_app/src/lib/format.tsx")!;
+    expect(fmt).toMatch(/export function NumberValue/);
+    expect(fmt).toMatch(/Intl\.NumberFormat/);
+    expect(fmt).toMatch(/export function KeyValueRow/);
+    // No legacy JSX.Element annotations (matches v22 cleanup).
+    expect(fmt).not.toMatch(/: JSX\.Element/);
+  });
+
+  it("view tables format datetime / int / decimal cells through the format helpers", async () => {
+    const model = await buildModel("examples/acme.ddd");
+    const { files } = generateSystems(model);
+    const view = files.get("web_app/src/pages/views/active_orders.tsx")!;
+    // Shorthand view of Order — placedAt (datetime) → DateTimeValue.
+    expect(view).toMatch(/<DateTimeValue iso=\{row\.placedAt\}/);
+    // Skeleton loading state.
+    expect(view).toMatch(/<Skeleton/);
+    expect(view).not.toMatch(/<Loader \/>/);
   });
 
   it("emits Playwright page-object classes per aggregate under e2e/pages/", async () => {
@@ -405,15 +569,15 @@ describe("react generator", () => {
       expect(theme).toMatch(/colors: \{\s*brand,\s*gray: neutral,?\s*\}/);
       expect(theme).toMatch(/defaultRadius: "md"/);
       expect(theme).toMatch(/fontFamily: "Inter, system-ui, sans-serif"/);
-      expect(theme).toMatch(/headings: \{ fontFamily: "Inter, system-ui, sans-serif" \}/);
+      expect(theme).toMatch(/headings: \{[\s\S]*?fontFamily: "Inter, system-ui, sans-serif"/);
 
       // main.tsx imports the theme + passes it to MantineProvider.
       const main = files.get("web_app/src/main.tsx")!;
       expect(main).toMatch(/import \{ theme \} from "\.\/theme"/);
-      expect(main).toMatch(/<MantineProvider theme=\{theme\}>/);
+      expect(main).toMatch(/<MantineProvider theme=\{theme\}/);
     });
 
-    it("does NOT emit theme.ts and uses bare MantineProvider when no theme block is declared", async () => {
+    it("emits a default theme.ts even when the system declares no theme block", async () => {
       const { parseHelper } = await import("langium/test");
       const services = createDddServices(NodeFileSystem);
       const helper = parseHelper(services.Ddd);
@@ -431,12 +595,19 @@ describe("react generator", () => {
       `, { validation: true });
       const model = doc.parseResult.value as Model;
       const { files } = generateSystems(model);
-      // No theme.ts emitted.
-      expect(files.has("web/src/theme.ts")).toBe(false);
-      // main.tsx uses the bare provider (no theme prop, no import).
+      // Every generated React app ships with a baseline theme so it
+      // looks like a coherent product rather than untouched Mantine
+      // defaults.  When the DSL declares no `theme {}`, we fall back
+      // to a tasteful indigo / Inter / md-radius preset.
+      const theme = files.get("web/src/theme.ts")!;
+      expect(theme).toBeDefined();
+      expect(theme).toMatch(/primaryColor: "brand"/);
+      expect(theme).toMatch(/defaultRadius: "md"/);
+      expect(theme).toMatch(/Inter/);
+      // main.tsx always wires the theme — provider gets `theme={theme}`.
       const main = files.get("web/src/main.tsx")!;
-      expect(main).not.toMatch(/from "\.\/theme"/);
-      expect(main).toMatch(/<MantineProvider>/);
+      expect(main).toMatch(/from "\.\/theme"/);
+      expect(main).toMatch(/<MantineProvider theme=\{theme\}/);
     });
 
     it("validator rejects unknown theme property names", async () => {
@@ -562,10 +733,10 @@ describe("react generator", () => {
       // type label is emitted as a string literal so JSX doesn't
       // parse `Id<Product>` as an opening element.
       expect(idx).toMatch(
-        /workflow-place_order-param-customerId.*<strong>customerId<\/strong>: \{"string"\}/,
+        /workflow-place_order-param-customerId.*<strong>Customer Id<\/strong>: \{"string"\}/,
       );
       expect(idx).toMatch(
-        /workflow-place_order-param-productId.*<strong>productId<\/strong>: \{"Id<Product>"\}/,
+        /workflow-place_order-param-productId.*<strong>Product Id<\/strong>: \{"Id<Product>"\}/,
       );
       // "Run" button links to the per-workflow page.
       expect(idx).toMatch(/to="\/workflows\/place_order"/);
@@ -581,11 +752,11 @@ describe("react generator", () => {
       expect(page).toMatch(/usePlaceOrderWorkflow/);
       // String param → TextInput; Id<X> → Select with target's display field;
       // int → NumberInput with allowDecimal={false}.
-      expect(page).toMatch(/<TextInput label="customerId"/);
+      expect(page).toMatch(/<TextInput label="Customer Id"/);
       expect(page).toMatch(
-        /<Select label="productId"[\s\S]+?__products\.data/,
+        /<Select label="Product Id"[\s\S]+?__products\.data/,
       );
-      expect(page).toMatch(/<NumberInput label="quantity"[\s\S]+?allowDecimal=\{false\}/);
+      expect(page).toMatch(/<NumberInput label="Quantity"[\s\S]+?allowDecimal=\{false\}/);
       // useAllProducts pulled in for the Id<Product> Select.
       expect(page).toMatch(
         /import \{ useAllProducts \} from "\.\.\/\.\.\/api\/product"/,
@@ -680,9 +851,9 @@ describe("react generator", () => {
       expect(page).toMatch(/import \{ useOrderSummaryView \} from "\.\.\/\.\.\/api\/views"/);
       expect(page).toMatch(/const q = useOrderSummaryView\(\)/);
       // Table headers from the view's declared fields.
-      expect(page).toMatch(/<Table\.Th>orderId<\/Table\.Th>/);
-      expect(page).toMatch(/<Table\.Th>status<\/Table\.Th>/);
-      expect(page).toMatch(/<Table\.Th>lineCount<\/Table\.Th>/);
+      expect(page).toMatch(/<Table\.Th>Order Id<\/Table\.Th>/);
+      expect(page).toMatch(/<Table\.Th>Status<\/Table\.Th>/);
+      expect(page).toMatch(/<Table\.Th>Line Count<\/Table\.Th>/);
       // Id<Order> cell auto-links to /orders/<id> (Order has UI in
       // this deployable's modules).
       expect(page).toMatch(
@@ -690,7 +861,7 @@ describe("react generator", () => {
       );
       // Empty + error states present.
       expect(page).toMatch(/q\.data && q\.data\.length === 0 && <Text c="dimmed">No rows\.<\/Text>/);
-      expect(page).toMatch(/q\.isError && <Alert color="red">/);
+      expect(page).toMatch(/q\.isError && <Alert color="red"/);
     });
 
     it("shorthand view's table page uses the source aggregate's wire columns", async () => {
@@ -699,10 +870,10 @@ describe("react generator", () => {
       const page = files.get("web_app/src/pages/views/active_orders.tsx")!;
       // ActiveOrders is shorthand `view ActiveOrders = Order where ...`
       // — table columns mirror Order's primitive/id/enum fields.
-      expect(page).toMatch(/<Table\.Th>id<\/Table\.Th>/);
-      expect(page).toMatch(/<Table\.Th>customerId<\/Table\.Th>/);
-      expect(page).toMatch(/<Table\.Th>status<\/Table\.Th>/);
-      expect(page).toMatch(/<Table\.Th>placedAt<\/Table\.Th>/);
+      expect(page).toMatch(/<Table\.Th>Id<\/Table\.Th>/);
+      expect(page).toMatch(/<Table\.Th>Customer Id<\/Table\.Th>/);
+      expect(page).toMatch(/<Table\.Th>Status<\/Table\.Th>/);
+      expect(page).toMatch(/<Table\.Th>Placed At<\/Table\.Th>/);
     });
 
     it("App.tsx registers /views + /views/<slug> routes and sidebar entry", async () => {

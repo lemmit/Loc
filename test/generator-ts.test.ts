@@ -69,9 +69,9 @@ describe("typescript generator", () => {
     const model = await buildModel("examples/sales.ddd");
     const files = generateTypeScript(model);
     const dockerfile = files.get("Dockerfile")!;
-    expect(dockerfile).toMatch(/FROM node:22-alpine AS build/);
-    expect(dockerfile).toMatch(/FROM node:22-alpine AS runtime/);
-    expect(dockerfile).toMatch(/CMD \["node", "out\/index\.js"\]/);
+    expect(dockerfile).toMatch(/FROM node:24-alpine AS build/);
+    expect(dockerfile).toMatch(/FROM node:24-alpine AS runtime/);
+    expect(dockerfile).toMatch(/CMD \["node", "dist\/index\.js"\]/);
     const dockerignore = files.get(".dockerignore")!;
     expect(dockerignore).toMatch(/node_modules/);
   });
@@ -136,7 +136,7 @@ describe("typescript generator", () => {
       const model = await buildModel("examples/sales.ddd");
       const files = generateTypeScript(model);
       const httpIndex = files.get("http/index.ts")!;
-      expect(httpIndex).toMatch(/import \{ requestIdMiddleware \} from "\.\.\/obs\/request-id\.js"/);
+      expect(httpIndex).toMatch(/import \{ requestIdMiddleware \} from "\.\.\/obs\/request-id"/);
       expect(httpIndex).toMatch(/app\.use\("\*", requestIdMiddleware\)/);
       // Order: requestIdMiddleware mounts BEFORE cors so every
       // downstream handler + onError sees the id.
@@ -290,7 +290,7 @@ describe("typescript generator", () => {
 
     // 4. Route dispatches through the registry, not a domain method.
     const routes = files.get("http/order.routes.ts")!;
-    expect(routes).toMatch(/from "..\/domain\/order-extern\.js"/);
+    expect(routes).toMatch(/from "..\/domain\/order-extern"/);
     expect(routes).toMatch(/aggregate\.checkConfirm\(\)/);
     expect(routes).toMatch(/externHandlers\.confirmOrder/);
     expect(routes).toMatch(/await handler\(aggregate, body\)/);
@@ -338,7 +338,7 @@ describe("typescript generator", () => {
       const routes = files.get("http/order.routes.ts")!;
       // Imports the new error type.
       expect(routes).toMatch(
-        /import \{ DomainError, AggregateNotFoundError, ForbiddenError, ExternHandlerError \} from "\.\.\/domain\/errors\.js"/,
+        /import \{ DomainError, AggregateNotFoundError, ForbiddenError, ExternHandlerError \} from "\.\.\/domain\/errors"/,
       );
       // Wraps the handler call in try/catch.
       expect(routes).toMatch(/try \{\s+await handler\(aggregate, body\);/);
@@ -395,7 +395,7 @@ describe("typescript generator", () => {
       const wf = files.get("http/workflows.ts")!;
       // Same import line as the per-aggregate router.
       expect(wf).toMatch(
-        /import \{ DomainError, AggregateNotFoundError, ForbiddenError, ExternHandlerError \} from "\.\.\/domain\/errors\.js"/,
+        /import \{ DomainError, AggregateNotFoundError, ForbiddenError, ExternHandlerError \} from "\.\.\/domain\/errors"/,
       );
       // Try/catch around the workflow's handler invocation.
       expect(wf).toMatch(/try \{\s+await __handler\(order/);
@@ -428,7 +428,7 @@ describe("typescript generator", () => {
       // from the per-aggregate file rather than reaching for
       // domain/errors.js itself.
       expect(extern).toMatch(
-        /export \{ ExternHandlerError \} from "\.\/errors\.js"/,
+        /export \{ ExternHandlerError \} from "\.\/errors"/,
       );
     });
   });
@@ -473,8 +473,8 @@ describe("typescript generator", () => {
     const wf = files.get("http/workflows.ts")!;
 
     // Imports + Zod schema for params.
-    expect(wf).toMatch(/import \{ Customer \} from "..\/domain\/customer\.js"/);
-    expect(wf).toMatch(/import \{ CustomerRepository \} from "..\/db\/repositories\/customer-repository\.js"/);
+    expect(wf).toMatch(/import \{ Customer \} from "..\/domain\/customer"/);
+    expect(wf).toMatch(/import \{ CustomerRepository \} from "..\/db\/repositories\/customer-repository"/);
     expect(wf).toMatch(/PlaceOrderRequest = z\.object\(\{[\s\S]+?customerId: z\.string\(\)/);
 
     // Body wires repos on `db`, runs precondition, calls op, factory,
@@ -494,7 +494,7 @@ describe("typescript generator", () => {
 
     // http/index.ts mounts /workflows.
     const httpIndex = files.get("http/index.ts")!;
-    expect(httpIndex).toMatch(/import \{ workflowsRoutes \} from "\.\/workflows\.js";/);
+    expect(httpIndex).toMatch(/import \{ workflowsRoutes \} from "\.\/workflows";/);
     expect(httpIndex).toMatch(/app\.route\("\/workflows", workflowsRoutes\(db, events\)\);/);
   });
 
@@ -553,7 +553,7 @@ describe("typescript generator", () => {
     //    list response schema for OpenAPI symmetry.
     const views = files.get("http/views.ts")!;
     expect(views).toMatch(
-      /import \{ OrderResponse, OrderListResponse \} from "\.\/order\.routes\.js"/,
+      /import \{ OrderResponse, OrderListResponse \} from "\.\/order\.routes"/,
     );
     expect(views).toMatch(/path: "\/active_orders"/);
     expect(views).toMatch(/operationId: "activeOrdersView"/);
@@ -563,7 +563,7 @@ describe("typescript generator", () => {
 
     // 2. http/index.ts mounts /views.
     const httpIndex = files.get("http/index.ts")!;
-    expect(httpIndex).toMatch(/import \{ viewsRoutes \} from "\.\/views\.js"/);
+    expect(httpIndex).toMatch(/import \{ viewsRoutes \} from "\.\/views"/);
     expect(httpIndex).toMatch(/app\.route\("\/views", viewsRoutes\(db, events\)\)/);
 
     // 3. The repository file gained an activeOrders() method whose
@@ -654,7 +654,7 @@ describe("typescript generator", () => {
 
     // Foreign aggregate's repo is imported and instantiated.
     expect(views).toMatch(
-      /import \{ CustomerRepository \} from "..\/db\/repositories\/customer-repository\.js"/,
+      /import \{ CustomerRepository \} from "..\/db\/repositories\/customer-repository"/,
     );
     expect(views).toMatch(/const customerRepo = new CustomerRepository\(db, events\)/);
     // Bulk load + map by id.
@@ -700,7 +700,7 @@ describe("typescript generator", () => {
 
     // Per-aggregate extern registry is imported with an alias.
     expect(wf).toMatch(
-      /import \{ externHandlers as orderExternHandlers \} from "..\/domain\/order-extern\.js"/,
+      /import \{ externHandlers as orderExternHandlers \} from "..\/domain\/order-extern"/,
     );
     // Body: order.checkConfirm → handler lookup + invocation → assertInvariants.
     expect(wf).toMatch(/order\.checkConfirm\(\);/);
@@ -992,7 +992,7 @@ describe("typescript generator", () => {
       const files = await emitForAuthSystem(SRC_FILTER_AUTH);
       const repo = files.get("db/repositories/order-repository.ts")!;
       expect(repo).toMatch(
-        /import type \{ User \} from "\.\.\/\.\.\/auth\/user-types\.js";/,
+        /import type \{ User \} from "\.\.\/\.\.\/auth\/user-types";/,
       );
       expect(repo).toMatch(/async mine\([^)]*currentUser: User[^)]*\)/);
     });
@@ -1047,7 +1047,7 @@ describe("typescript generator", () => {
       const order = files.get("domain/order.ts")!;
       expect(order).toMatch(/throw new ForbiddenError\(/);
       expect(order).toMatch(
-        /import \{ DomainError, ForbiddenError \} from "\.\/errors\.js";/,
+        /import \{ DomainError, ForbiddenError \} from "\.\/errors";/,
       );
     });
 

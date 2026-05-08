@@ -99,10 +99,21 @@ Deployable:
         ('targets' ':' targets=[Deployable:ID] ','?)?
         ('port' ':' port=INT ','?)?
         ('auth' ':' auth=AuthMode ','?)?
+        ('design' ':' design=DesignPack ','?)?
     '}';
 
 Platform returns string:
     'dotnet' | 'hono' | 'react';
+
+// React design-system pack selector — picks the template pack the
+// frontend generator renders pages against.  `mantine` (default) and
+// `shadcn` are built-in packs shipped with Loom.  STRING points at a
+// custom pack: a directory with `pack.json` resolved relative to the
+// .ddd file.  Only meaningful when `platform: react`; ignored for
+// other platforms.  Named `design` (not `ui`) to avoid colliding with
+// the test-DSL's `ui.workflows.X(...)` accessor.
+DesignPack returns string:
+    'mantine' | 'shadcn' | STRING;
 
 // Per-deployable auth opt-in.  `required` enables JWT-decode middleware
 // and the user-supplied verifier hook.  Absence keeps the deployable
