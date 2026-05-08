@@ -5,12 +5,12 @@
 // iframe — postMessage, history, and the URL parser all behave
 // normally with no shims required.
 //
-// Fetches the bundle issues against any `http://localhost:*` host
-// are caught by the inline fetch shim and routed via `postMessage`
-// to the parent window, which forwards them to the runtime worker
-// (where the Hono + PGlite backend lives).  A future PR will
-// replace this with a SW-bridged MessageChannel so the bundle can
-// use real relative URLs.
+// Fetches the bundle issues are relative URLs (the bundler's
+// `import.meta.env.VITE_API_BASE_URL` define swaps the
+// generator's `http://localhost:NNNN` baseline for `"runtime"`),
+// so requests resolve to `<base>/__loom_sandbox__/runtime/...` and
+// land in the SW.  The SW forwards them through a MessageChannel
+// to the parent's runtime worker and posts the response back.
 //
 // React runtime modules (`react`, `react-dom`, `react/jsx-runtime`,
 // …) are externalised at bundle time and provided via a dynamic
@@ -45,90 +45,6 @@ function importMap(versions: Record<string, string>): Record<string, string> {
   };
 }
 
-const FETCH_SHIM_SRC = `
-(function () {
-  const orig = globalThis.fetch.bind(globalThis);
-  let nextId = 0;
-  const pending = new Map();
-
-  globalThis.addEventListener("message", function (ev) {
-    const d = ev.data;
-    if (!d || d.type !== "loom-fetch-response") return;
-    const slot = pending.get(d.id);
-    if (!slot) return;
-    pending.delete(d.id);
-    if (d.ok) {
-      // Web Fetch forbids passing a body to null-body statuses
-      // (204 / 205 / 304).  The runtime worker serialises the
-      // upstream Response via .text() which yields "" for empty
-      // bodies — passing "" to "new Response('', {status: 204})"
-      // throws.  Coerce to null here so the constructor accepts.
-      const isNullBody = d.status === 204 || d.status === 205 || d.status === 304;
-      slot.resolve(new Response(isNullBody ? null : d.body, {
-        status: d.status,
-        statusText: d.statusText,
-        headers: d.headers,
-      }));
-    } else {
-      slot.reject(new Error(d.message));
-    }
-  });
-
-  function shouldIntercept(url) {
-    // Anything pointed at a localhost:<port> host — the React
-    // generator bakes that URL from the target deployable's port,
-    // and the runtime worker is ready to dispatch any path there.
-    return /^https?:\\/\\/localhost(?::\\d+)?\\//.test(url);
-  }
-
-  async function readBody(b) {
-    if (b == null) return null;
-    if (typeof b === "string") return b;
-    if (b instanceof URLSearchParams) return b.toString();
-    if (b instanceof FormData) {
-      const out = {};
-      b.forEach((v, k) => { out[k] = String(v); });
-      return JSON.stringify(out);
-    }
-    try {
-      return await new Response(b).text();
-    } catch (_) {
-      return null;
-    }
-  }
-
-  function headersToObject(h) {
-    if (!h) return {};
-    const out = {};
-    if (h instanceof Headers) { h.forEach((v, k) => { out[k] = v; }); return out; }
-    if (Array.isArray(h)) { for (const [k, v] of h) out[k] = v; return out; }
-    return Object.assign({}, h);
-  }
-
-  globalThis.fetch = async function (input, init) {
-    const url = typeof input === "string" ? input : input && input.url ? input.url : "";
-    if (!shouldIntercept(url)) return orig(input, init);
-
-    const method = (init && init.method) || (typeof input !== "string" && input.method) || "GET";
-    const headers = headersToObject(
-      (init && init.headers) || (typeof input !== "string" && input.headers) || null,
-    );
-    const body = await readBody(
-      (init && init.body) || (typeof input !== "string" && input.body) || null,
-    );
-
-    const id = ++nextId;
-    return new Promise(function (resolve, reject) {
-      pending.set(id, { resolve, reject });
-      parent.postMessage(
-        { type: "loom-fetch", id, url, method, headers, body },
-        "*",
-      );
-    });
-  };
-})();
-`;
-
 const ESCAPE_END_SCRIPT = (s: string): string => s.replace(/<\/script/gi, "<\\/script");
 
 function styleTagFor(css?: string): string {
@@ -139,13 +55,19 @@ function styleTagFor(css?: string): string {
 export function makePreviewHtml(args: MakePreviewArgs): string {
   const map = importMap(args.versions ?? {});
   const importMapJson = JSON.stringify({ imports: map }, null, 2);
+  // No `<base href>`: relative URLs resolve against the iframe's
+  // own document URL, which is `<base>/__loom_sandbox__/`.  This
+  // is exactly what we want — the bundler's `runtime` API base
+  // resolves to `<sandbox>/runtime/...`, which the SW intercepts.
+  // A `<base href="/">` would have leaked the request out of the
+  // SW scope on deploys with a non-root deploy base (e.g. GH
+  // Pages at `/loc/playground/`).
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Loom Preview</title>
-<base href="/">
 <script type="importmap">
 ${ESCAPE_END_SCRIPT(importMapJson)}
 </script>
@@ -157,7 +79,6 @@ ${styleTagFor(args.css)}
 </head>
 <body>
 <div id="root"></div>
-<script>${ESCAPE_END_SCRIPT(FETCH_SHIM_SRC)}</script>
 <script type="module">${ESCAPE_END_SCRIPT(args.js)}</script>
 </body>
 </html>`;

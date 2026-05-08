@@ -1,20 +1,15 @@
-// Service Worker host — registration + bundle push for the preview.
+// Service Worker host — registration, bundle push, and runtime
+// port attach for the preview.
 //
-// Status: SCAFFOLDING.  The playground's UI doesn't yet route any
-// preview content through the SW — Preview.tsx still uses the
-// srcdoc + URL-patch path documented in iframe-html.ts.  This
-// module exists so the next migration PR has a stable seam to
-// build against:
-//
-//   const reg = await registerPreviewSw();
-//   if (reg) await pushBundle(reg, { html, js, css });
-//   <iframe src={sandboxUrl()}></iframe>
-//
-// Today, only `registerPreviewSw()` is wired up — App.tsx calls it
-// once on mount so production deploys ship a registered (but unused)
-// SW.  This shakes out path / scope issues across local dev,
-// `vite preview`, and GH Pages before the migration depends on it
-// working.
+//   - `registerPreviewSw()` is called once on App mount.
+//   - `pushBundle(reg, bundle)` ships the latest bundled HTML to
+//     the SW so navigations to the sandbox URL get served the
+//     right document.
+//   - `attachRuntimePort(reg, dispatch)` wires the SW's runtime
+//     fetch bridge to the in-process `LoomRuntimeClient`.  The
+//     SW forwards `<sandbox>/runtime/*` fetches over the port;
+//     `dispatch` calls runtime.dispatch() and posts back the
+//     response.
 
 const SW_FILE = "preview-sw.js";
 export const SANDBOX_PREFIX = "__loom_sandbox__/";
@@ -89,8 +84,85 @@ export function pushBundle(
   });
 }
 
-/** Sandbox URL the iframe will load from once the migration lands.
- *  Resolved against the page so it includes the deploy base. */
+/** Sandbox URL the preview iframe loads from.  Resolved against
+ *  the page so it includes the deploy base. */
 export function sandboxUrl(): string {
   return new URL(SANDBOX_PREFIX, location.href).toString();
+}
+
+/** Forwarded request the SW posts when the preview iframe fetches
+ *  `<sandbox>/runtime/*`.  `dispatch` returns the eventual
+ *  response which the SW turns back into a `Response` for the
+ *  in-iframe `fetch()` caller. */
+export interface RuntimeRequest {
+  id: number;
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  body: string | null;
+}
+
+export type RuntimeReply =
+  | {
+      ok: true;
+      status: number;
+      statusText: string;
+      headers: Record<string, string>;
+      body: string;
+    }
+  | { ok: false; message: string };
+
+/** Wire the SW's runtime bridge to a dispatcher.  Resolves to a
+ *  disposer that detaches the port (closing it on the parent
+ *  side; the SW will see subsequent runtime requests fail with
+ *  502 until a new port attaches).
+ *
+ *  Returns `null` if the SW has no `active`/`waiting`/`installing`
+ *  worker — caller should retry after `serviceWorker.ready`.
+ *
+ *  Awaits the SW's `attached` ack so callers can sequence the
+ *  iframe render after the port is in place; otherwise the
+ *  bundle's first fetch could outrun the attach and 502. */
+export async function attachRuntimePort(
+  reg: ServiceWorkerRegistration,
+  dispatch: (req: RuntimeRequest) => Promise<RuntimeReply>,
+): Promise<(() => void) | null> {
+  const ctrl = reg.active ?? reg.waiting ?? reg.installing;
+  if (!ctrl) return null;
+  const ch = new MessageChannel();
+  ch.port1.onmessage = (ev): void => {
+    const data = ev.data as RuntimeRequest | { type: "attached" } | undefined;
+    if (!data) return;
+    if ("type" in data) return; // ack — handled below
+    void (async () => {
+      try {
+        const reply = await dispatch(data);
+        ch.port1.postMessage({ id: data.id, ...reply });
+      } catch (err) {
+        ch.port1.postMessage({
+          id: data.id,
+          ok: false,
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    })();
+  };
+  await new Promise<void>((resolve) => {
+    const safety = setTimeout(resolve, 1_000);
+    const prev = ch.port1.onmessage;
+    ch.port1.onmessage = (ev): void => {
+      const data = ev.data as { type?: string } | undefined;
+      if (data && data.type === "attached") {
+        clearTimeout(safety);
+        ch.port1.onmessage = prev;
+        resolve();
+        return;
+      }
+      // Forward any non-ack messages that arrive in this window
+      // (unlikely but safe) to the regular handler.
+      if (prev) prev.call(ch.port1, ev);
+    };
+    ctrl.postMessage({ type: "loom-sw/attach-runtime" }, [ch.port2]);
+  });
+  return () => ch.port1.close();
 }

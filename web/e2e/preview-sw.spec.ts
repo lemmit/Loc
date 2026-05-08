@@ -82,3 +82,92 @@ test("SW push + sandbox URL round-trip without bundling", async ({ page }) => {
     false,
   );
 });
+
+test("SW runtime bridge — fetch on `<sandbox>/runtime/*` round-trips through MessagePort", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+
+  // Same SW activation wait as above.
+  await page.evaluate(async () => {
+    const start = Date.now();
+    while (Date.now() - start < 10_000) {
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (reg && (reg.active || navigator.serviceWorker.controller)) return;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    throw new Error("SW did not activate within 10 s");
+  });
+
+  // Attach a synthetic runtime port that echoes requests as JSON
+  // — proving the SW forwards the right shape and that the parent's
+  // reply makes it back to the in-iframe `fetch()` caller.  No
+  // bundler / runtime worker involved.  Then issue an in-page
+  // fetch to a sandbox runtime path and validate the response.
+  const result = await page.evaluate(async () => {
+    const reg = await navigator.serviceWorker.ready;
+    const ctrl = reg.active ?? reg.waiting ?? reg.installing;
+    if (!ctrl) throw new Error("no SW controller");
+
+    // Wire the runtime port BEFORE the fetch, and wait for the
+    // SW's `attached` ack so the request can't outrun the attach.
+    const ch = new MessageChannel();
+    ch.port1.onmessage = (ev: MessageEvent) => {
+      const data = ev.data;
+      if (data && data.type === "attached") return;
+      // Echo: build a JSON body from the forwarded request and
+      // send back through the same port.
+      const reply = {
+        id: data.id,
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          forwardedUrl: data.url,
+          forwardedMethod: data.method,
+          forwardedBody: data.body,
+        }),
+      };
+      ch.port1.postMessage(reply);
+    };
+    await new Promise<void>((resolve) => {
+      const safety = setTimeout(resolve, 2_000);
+      const prev = ch.port1.onmessage;
+      ch.port1.onmessage = (ev: MessageEvent) => {
+        if (ev.data && ev.data.type === "attached") {
+          clearTimeout(safety);
+          ch.port1.onmessage = prev;
+          resolve();
+          return;
+        }
+        prev?.call(ch.port1, ev);
+      };
+      ctrl.postMessage({ type: "loom-sw/attach-runtime" }, [ch.port2]);
+    });
+
+    // POST to a sandbox runtime URL with a JSON body — should hit
+    // the SW, get forwarded over the port, and the echo response
+    // should round-trip.
+    const url = new URL("__loom_sandbox__/runtime/products", location.href).toString();
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sku: "TEST-1" }),
+    });
+    return {
+      status: res.status,
+      contentType: res.headers.get("content-type"),
+      json: await res.json(),
+    };
+  });
+
+  expect(result.status).toBe(200);
+  expect(result.contentType).toContain("application/json");
+  // The echo body proves the SW forwarded the right URL, method,
+  // and body to the port.
+  expect(result.json.forwardedUrl).toContain("__loom_sandbox__/runtime/products");
+  expect(result.json.forwardedMethod).toBe("POST");
+  expect(JSON.parse(result.json.forwardedBody)).toEqual({ sku: "TEST-1" });
+});

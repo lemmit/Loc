@@ -156,6 +156,21 @@ async function handleBundle(req: BundleRequest): Promise<BundleResult> {
       //   import as a side-effecting CSS file and emits a separate
       //   .css output we then ship to the iframe via a <style> tag.
       loader: { ".wasm": "binary", ".css": "css" },
+      // For React bundles, swap the generator's hard-coded
+      // `http://localhost:NNNN` API base out for a relative URL
+      // the preview Service Worker intercepts.  The generated
+      // `config.ts` reads `import.meta.env.VITE_API_BASE_URL`
+      // (with the localhost fallback); defining `import.meta.env`
+      // wholesale makes the optional-chaining `import.meta.env?.X`
+      // pattern resolve cleanly without needing esbuild to track
+      // a partial property path.  Relative `"runtime"` resolves
+      // against the iframe URL `<base>/__loom_sandbox__/` so
+      // requests land at `<sandbox>/runtime/<path>`, which the
+      // SW forwards to the in-process runtime worker.
+      define:
+        req.kind === "react"
+          ? { "import.meta.env": JSON.stringify({ VITE_API_BASE_URL: "runtime" }) }
+          : undefined,
       plugins: [makeLoomPlugin(ctx, { externalReactRuntime })],
     });
   } catch (err) {
