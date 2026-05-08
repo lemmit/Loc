@@ -65,7 +65,7 @@ export function buildRepositoryFile(
   lines.push(
     `import { ${[...drizzleOps].sort().join(", ")} } from "drizzle-orm";`,
   );
-  lines.push(`import * as schema from "../schema.js";`);
+  lines.push(`import * as schema from "../schema";`);
   // Slice 1C: if any find or matching view filter references
   // currentUser, the per-method signature gains a `currentUser: User`
   // parameter that the closure-captured Drizzle predicate reads.
@@ -77,28 +77,28 @@ export function buildRepositoryFile(
       .filter((v) => v.aggregateName === agg.name)
       .some(viewUsesCurrentUser);
   if (repoUsesUser) {
-    lines.push(`import type { User } from "../../auth/user-types.js";`);
+    lines.push(`import type { User } from "../../auth/user-types";`);
   }
   // Imports for domain types
   const partNames = agg.parts.map((p) => p.name);
   const domainImports = [agg.name, ...partNames].join(", ");
   lines.push(
-    `import { ${domainImports} } from "../../domain/${camel(agg.name)}.js";`,
+    `import { ${domainImports} } from "../../domain/${camel(agg.name)}";`,
   );
   const valueObjectsUsed = collectValueObjects(agg, ctx);
   const enumsUsed = collectEnums(agg, ctx);
   const voOrEnumImports = [...valueObjectsUsed, ...enumsUsed];
   if (voOrEnumImports.length > 0) {
     lines.push(
-      `import { ${voOrEnumImports.join(", ")} } from "../../domain/value-objects.js";`,
+      `import { ${voOrEnumImports.join(", ")} } from "../../domain/value-objects";`,
     );
   }
-  lines.push(`import * as Ids from "../../domain/ids.js";`);
+  lines.push(`import * as Ids from "../../domain/ids";`);
   lines.push(
-    `import { AggregateNotFoundError } from "../../domain/errors.js";`,
+    `import { AggregateNotFoundError } from "../../domain/errors";`,
   );
   lines.push(
-    `import type { DomainEventDispatcher } from "../../domain/events.js";`,
+    `import type { DomainEventDispatcher } from "../../domain/events";`,
   );
   lines.push("");
   lines.push(`type Db = NodePgDatabase<typeof schema>;`);

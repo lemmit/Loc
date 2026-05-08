@@ -13,8 +13,8 @@ export function renderHttpIndex(
 ): string {
   const authRequired = !!options?.authRequired;
   const aggregateImports = ctx.aggregates.flatMap((a) => [
-    `import { ${camel(a.name)}Routes } from "./${camel(a.name)}.routes.js";`,
-    `import { ${a.name}Repository } from "../db/repositories/${camel(a.name)}-repository.js";`,
+    `import { ${camel(a.name)}Routes } from "./${camel(a.name)}.routes";`,
+    `import { ${a.name}Repository } from "../db/repositories/${camel(a.name)}-repository";`,
   ]);
   const aggregateRoutes = ctx.aggregates.map(
     (a) =>
@@ -25,21 +25,21 @@ export function renderHttpIndex(
   );
   const externImports = externAggs.map(
     (a) =>
-      `import { verify${a.name}ExternHandlersRegistered } from "../domain/${camel(a.name)}-extern.js";`,
+      `import { verify${a.name}ExternHandlersRegistered } from "../domain/${camel(a.name)}-extern";`,
   );
   const externVerifyBody = externAggs.map(
     (a) => `  verify${a.name}ExternHandlersRegistered();`,
   );
   const hasWorkflows = ctx.workflows.length > 0;
   const workflowImport = hasWorkflows
-    ? `import { workflowsRoutes } from "./workflows.js";`
+    ? `import { workflowsRoutes } from "./workflows";`
     : null;
   const workflowMount = hasWorkflows
     ? `  app.route("/workflows", workflowsRoutes(db, events));`
     : null;
   const hasViews = ctx.views.length > 0;
   const viewImport = hasViews
-    ? `import { viewsRoutes } from "./views.js";`
+    ? `import { viewsRoutes } from "./views";`
     : null;
   const viewMount = hasViews
     ? `  app.route("/views", viewsRoutes(db, events));`
@@ -49,7 +49,7 @@ export function renderHttpIndex(
   // that the user supplied a verifier, and mount the middleware
   // after CORS but before any business route.
   const authImport = authRequired
-    ? `import { authMiddleware } from "../auth/middleware.js";\nimport { assertUserVerifierRegistered } from "../auth/verifier.js";`
+    ? `import { authMiddleware } from "../auth/middleware";\nimport { assertUserVerifierRegistered } from "../auth/verifier";`
     : null;
   const authVerifyAssert = authRequired
     ? "  assertUserVerifierRegistered();"
@@ -61,15 +61,15 @@ export function renderHttpIndex(
       'import { OpenAPIHono } from "@hono/zod-openapi";',
       'import { cors } from "hono/cors";',
       'import { sql } from "drizzle-orm";',
-      'import { requestIdMiddleware } from "../obs/request-id.js";',
+      'import { requestIdMiddleware } from "../obs/request-id";',
       authImport,
       ...aggregateImports,
       ...externImports,
       workflowImport,
       viewImport,
       'import type { NodePgDatabase } from "drizzle-orm/node-postgres";',
-      'import type * as schema from "../db/schema.js";',
-      'import { type DomainEventDispatcher, NoopDomainEventDispatcher } from "../domain/events.js";',
+      'import type * as schema from "../db/schema";',
+      'import { type DomainEventDispatcher, NoopDomainEventDispatcher } from "../domain/events";',
       "",
       "export function createApp(",
       "  db: NodePgDatabase<typeof schema>,",

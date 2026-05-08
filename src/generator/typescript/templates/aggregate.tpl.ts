@@ -54,16 +54,16 @@ export function renderAggregate(
   return (
     lines(
       "// Auto-generated.",
-      'import * as Ids from "./ids.js";',
+      'import * as Ids from "./ids";',
       valueObjectAliases.length > 0
-        ? `import { ${valueObjectAliases.join(", ")} } from "./value-objects.js";`
+        ? `import { ${valueObjectAliases.join(", ")} } from "./value-objects";`
         : null,
       enumAliases.length > 0
-        ? `import { ${enumAliases.join(", ")} } from "./value-objects.js";`
+        ? `import { ${enumAliases.join(", ")} } from "./value-objects";`
         : null,
-      'import type * as Events from "./events.js";',
-      'import { DomainError, ForbiddenError } from "./errors.js";',
-      usesUser ? 'import type { User } from "../auth/user-types.js";' : null,
+      'import type * as Events from "./events";',
+      'import { DomainError, ForbiddenError } from "./errors";',
+      usesUser ? 'import type { User } from "../auth/user-types";' : null,
       "",
       partsRendered.length > 0
         ? partsRendered.map((p) => p + "\n").join("\n")

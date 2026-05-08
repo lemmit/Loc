@@ -38,13 +38,13 @@ export function buildViewsRoutesFile(
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";`);
   lines.push(
-    `import { DomainError, AggregateNotFoundError, ForbiddenError, ExternHandlerError } from "../domain/errors.js";`,
+    `import { DomainError, AggregateNotFoundError, ForbiddenError, ExternHandlerError } from "../domain/errors";`,
   );
   lines.push(
-    `import { type DomainEventDispatcher } from "../domain/events.js";`,
+    `import { type DomainEventDispatcher } from "../domain/events";`,
   );
   lines.push(`import type { NodePgDatabase } from "drizzle-orm/node-postgres";`);
-  lines.push(`import type * as schema from "../db/schema.js";`);
+  lines.push(`import type * as schema from "../db/schema";`);
   // Source aggregates + repo imports per view, plus any foreign
   // aggregates referenced via `Id<X>` follow auxiliaries (slice 3).
   const aggsTouched = new Set<string>();
@@ -64,11 +64,11 @@ export function buildViewsRoutesFile(
   const sourceAggs = new Set(ctx.views.map((v) => v.aggregateName));
   for (const aggName of aggsTouched) {
     lines.push(
-      `import { ${aggName}Repository } from "../db/repositories/${camel(aggName)}-repository.js";`,
+      `import { ${aggName}Repository } from "../db/repositories/${camel(aggName)}-repository";`,
     );
     if (sourceAggs.has(aggName)) {
       lines.push(
-        `import { ${aggName}Response, ${aggName}ListResponse } from "./${camel(aggName)}.routes.js";`,
+        `import { ${aggName}Response, ${aggName}ListResponse } from "./${camel(aggName)}.routes";`,
       );
     }
   }
@@ -78,7 +78,7 @@ export function buildViewsRoutesFile(
   const enums = ctx.enums.map((e) => e.name);
   if (vos.length + enums.length > 0) {
     lines.push(
-      `import { ${[...vos, ...enums].join(", ")} } from "../domain/value-objects.js";`,
+      `import { ${[...vos, ...enums].join(", ")} } from "../domain/value-objects";`,
     );
   }
   lines.push("");
@@ -170,7 +170,7 @@ function emitViewRoute(
   out.push(`  async (httpCtx) => {`);
   if (usesUser) {
     out.push(
-      `    const currentUser = httpCtx.get("currentUser") as import("../auth/user-types.js").User;`,
+      `    const currentUser = httpCtx.get("currentUser") as import("../auth/user-types").User;`,
     );
   }
   out.push(`    const repo = new ${view.aggregateName}Repository(db, events);`);

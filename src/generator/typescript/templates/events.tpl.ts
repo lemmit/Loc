@@ -28,12 +28,12 @@ export function renderEvents(ctx: BoundedContextIR): string {
   return (
     lines(
       "// Auto-generated.",
-      'import type * as Ids from "./ids.js";',
+      'import type * as Ids from "./ids";',
       voList.length > 0
-        ? `import type { ${voList.join(", ")} } from "./value-objects.js";`
+        ? `import type { ${voList.join(", ")} } from "./value-objects";`
         : null,
       enumList.length > 0
-        ? `import type { ${enumList.join(", ")} } from "./value-objects.js";`
+        ? `import type { ${enumList.join(", ")} } from "./value-objects";`
         : null,
       ...ctx.events.flatMap(renderEvent),
       ctx.events.length > 0

@@ -57,7 +57,7 @@ function renderUserTypes(user: UserIR): string {
 
 function renderVerifier(): string {
   return `// Auto-generated.
-import type { User } from "./user-types.js";
+import type { User } from "./user-types";
 
 /** Verifier hook the user implements: decode the inbound request's
  *  JWT, return a populated User on success, return null (or throw)
@@ -105,8 +105,8 @@ export function assertUserVerifierRegistered(): void {
 function renderMiddleware(): string {
   return `// Auto-generated.
 import { createMiddleware } from "hono/factory";
-import type { User } from "./user-types.js";
-import { verifyUserOrThrow } from "./verifier.js";
+import type { User } from "./user-types";
+import { verifyUserOrThrow } from "./verifier";
 
 const BYPASS_PREFIXES = ["/health", "/ready", "/openapi.json", "/swagger"] as const;
 

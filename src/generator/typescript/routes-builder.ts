@@ -48,13 +48,13 @@ export function buildRoutesFile(
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";`);
-  lines.push(`import { ${agg.name} } from "../domain/${camel(agg.name)}.js";`);
+  lines.push(`import { ${agg.name} } from "../domain/${camel(agg.name)}";`);
   lines.push(
-    `import { ${agg.name}Repository } from "../db/repositories/${camel(agg.name)}-repository.js";`,
+    `import { ${agg.name}Repository } from "../db/repositories/${camel(agg.name)}-repository";`,
   );
-  lines.push(`import * as Ids from "../domain/ids.js";`);
+  lines.push(`import * as Ids from "../domain/ids";`);
   lines.push(
-    `import { DomainError, AggregateNotFoundError, ForbiddenError, ExternHandlerError } from "../domain/errors.js";`,
+    `import { DomainError, AggregateNotFoundError, ForbiddenError, ExternHandlerError } from "../domain/errors";`,
   );
   // Extern handler registry — the per-aggregate file is always emitted
   // when the aggregate has at least one extern op, never imported when
@@ -62,7 +62,7 @@ export function buildRoutesFile(
   // there are no extern ops; the runtime ref is gated below.
   if (agg.operations.some((o) => o.extern)) {
     lines.push(
-      `import { externHandlers } from "../domain/${camel(agg.name)}-extern.js";`,
+      `import { externHandlers } from "../domain/${camel(agg.name)}-extern";`,
     );
   }
 
@@ -77,7 +77,7 @@ export function buildRoutesFile(
   // import needed.
   if (usedVOs.length > 0) {
     lines.push(
-      `import { ${usedVOs.map((v) => v.name).join(", ")} } from "../domain/value-objects.js";`,
+      `import { ${usedVOs.map((v) => v.name).join(", ")} } from "../domain/value-objects";`,
     );
   }
   lines.push("");
@@ -314,7 +314,7 @@ function emitOperationRoute(
   const usesUser = operationUsesCurrentUser(op);
   if (usesUser) {
     out.push(
-      `    const currentUser = c.get("currentUser") as import("../auth/user-types.js").User;`,
+      `    const currentUser = c.get("currentUser") as import("../auth/user-types").User;`,
     );
   }
   out.push(`    const aggregate = await repo.getById(Ids.${agg.name}Id(id));`);
@@ -401,7 +401,7 @@ function emitFindRoute(
   const usesUser = findUsesCurrentUser(find);
   if (usesUser) {
     out.push(
-      `    const currentUser = c.get("currentUser") as import("../auth/user-types.js").User;`,
+      `    const currentUser = c.get("currentUser") as import("../auth/user-types").User;`,
     );
   }
   const baseArgs = find.params.map((p) =>

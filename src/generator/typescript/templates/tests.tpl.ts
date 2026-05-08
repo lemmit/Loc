@@ -23,16 +23,16 @@ export function renderTestsFile(
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import { describe, it, expect } from "vitest";`);
-  lines.push(`import { ${agg.name}${agg.parts.length > 0 ? ", " + agg.parts.map((p) => p.name).join(", ") : ""} } from "./${camel(agg.name)}.js";`);
+  lines.push(`import { ${agg.name}${agg.parts.length > 0 ? ", " + agg.parts.map((p) => p.name).join(", ") : ""} } from "./${camel(agg.name)}";`);
   const voNames = ctx.valueObjects.map((v) => v.name);
   if (voNames.length > 0) {
-    lines.push(`import { ${voNames.join(", ")} } from "./value-objects.js";`);
+    lines.push(`import { ${voNames.join(", ")} } from "./value-objects";`);
   }
   const enumNames = ctx.enums.map((e) => e.name);
   if (enumNames.length > 0) {
-    lines.push(`import { ${enumNames.join(", ")} } from "./value-objects.js";`);
+    lines.push(`import { ${enumNames.join(", ")} } from "./value-objects";`);
   }
-  lines.push(`import * as Ids from "./ids.js";`);
+  lines.push(`import * as Ids from "./ids";`);
   lines.push("");
   lines.push(`describe("${agg.name}", () => {`);
   for (const t of agg.tests) {

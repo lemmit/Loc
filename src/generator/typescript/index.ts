@@ -95,64 +95,89 @@ export function generateTypeScriptForContexts(
   const authRequired = !!(
     system?.deployable.auth?.required && system.sys.user
   );
-  for (const ctx of contexts) {
-    emitContext(ctx, out, { authRequired });
+
+  // Multi-context Hono deployables (e.g. acme's catalogWeb spanning
+  // Catalog + CustomerMgmt) need the shared domain files to UNION
+  // every context's content rather than overwrite per-context.  The
+  // .NET path already merges this way via a synthetic `merged`
+  // context; we mirror that here so `domain/ids.ts`,
+  // `domain/value-objects.ts`, `domain/events.ts`, `db/schema.ts`,
+  // `http/workflows.ts`, `http/views.ts`, and `http/index.ts` all
+  // reflect the FULL aggregate / VO / enum / event set.
+  const merged: BoundedContextIR = {
+    name: contexts[0]?.name ?? "merged",
+    enums: contexts.flatMap((c) => c.enums),
+    valueObjects: contexts.flatMap((c) => c.valueObjects),
+    events: contexts.flatMap((c) => c.events),
+    aggregates: contexts.flatMap((c) => c.aggregates),
+    repositories: contexts.flatMap((c) => c.repositories),
+    workflows: contexts.flatMap((c) => c.workflows),
+    views: contexts.flatMap((c) => c.views),
+  };
+
+  out.set("domain/ids.ts", renderIds(merged));
+  out.set("domain/value-objects.ts", renderEnumsAndValueObjects(merged));
+  out.set("domain/events.ts", renderEvents(merged));
+  out.set("domain/errors.ts", ERRORS_TS);
+  out.set("db/schema.ts", renderSchema(merged));
+  if (merged.workflows.length > 0) {
+    const aggsByName = new Map(
+      merged.aggregates.map((a) => [a.name, a] as const),
+    );
+    out.set("http/workflows.ts", buildWorkflowsFile(merged, aggsByName));
   }
+  if (merged.views.length > 0) {
+    const aggsByName = new Map(
+      merged.aggregates.map((a) => [a.name, a] as const),
+    );
+    out.set("http/views.ts", buildViewsRoutesFile(merged, aggsByName));
+  }
+  out.set(
+    "http/index.ts",
+    renderHttpIndex(merged, { authRequired }),
+  );
+
+  // Per-aggregate emission stays per-context — each aggregate file
+  // and its repository / routes are emitted in the context that
+  // owns the aggregate.
+  for (const ctx of contexts) {
+    for (const agg of ctx.aggregates) {
+      const repo = findRepoFor(ctx, agg.name);
+      out.set(`domain/${camel(agg.name)}.ts`, renderAggregate(agg, ctx));
+      out.set(
+        `db/repositories/${camel(agg.name)}-repository.ts`,
+        buildRepositoryFile(agg, repo, ctx),
+      );
+      out.set(
+        `http/${camel(agg.name)}.routes.ts`,
+        buildRoutesFile(agg, repo, ctx),
+      );
+      if (agg.operations.some((o) => o.extern)) {
+        out.set(
+          `domain/${camel(agg.name)}-extern.ts`,
+          buildExternHandlersFile(agg, ctx),
+        );
+      }
+      const testsFile = renderTestsFile(agg, ctx);
+      if (testsFile) {
+        out.set(`domain/${camel(agg.name)}.test.ts`, testsFile);
+      }
+    }
+  }
+
   if (authRequired && system?.sys) {
     emitAuthFiles(system.sys, out);
   }
   emitObservabilityFiles(out);
   out.set("package.json", PROJECT_PACKAGE_JSON);
   out.set("tsconfig.json", PROJECT_TSCONFIG_JSON);
+  out.set("tsup.config.ts", TSUP_CONFIG);
   out.set("index.ts", PROJECT_INDEX_TS);
   out.set("drizzle.config.ts", DRIZZLE_CONFIG);
   out.set("Dockerfile", DOCKERFILE_TS);
   out.set(".dockerignore", DOCKERIGNORE_TS);
   out.set("certs/.gitkeep", "");
   return out;
-}
-
-function emitContext(
-  ctx: BoundedContextIR,
-  out: Map<string, string>,
-  options?: { authRequired?: boolean },
-): void {
-  out.set("domain/ids.ts", renderIds(ctx));
-  out.set("domain/value-objects.ts", renderEnumsAndValueObjects(ctx));
-  out.set("domain/events.ts", renderEvents(ctx));
-  out.set("domain/errors.ts", ERRORS_TS);
-  for (const agg of ctx.aggregates) {
-    const repo = findRepoFor(ctx, agg.name);
-    out.set(`domain/${camel(agg.name)}.ts`, renderAggregate(agg, ctx));
-    out.set(
-      `db/repositories/${camel(agg.name)}-repository.ts`,
-      buildRepositoryFile(agg, repo, ctx),
-    );
-    out.set(`http/${camel(agg.name)}.routes.ts`, buildRoutesFile(agg, repo, ctx));
-    if (agg.operations.some((o) => o.extern)) {
-      out.set(
-        `domain/${camel(agg.name)}-extern.ts`,
-        buildExternHandlersFile(agg, ctx),
-      );
-    }
-    const testsFile = renderTestsFile(agg, ctx);
-    if (testsFile) {
-      out.set(`domain/${camel(agg.name)}.test.ts`, testsFile);
-    }
-  }
-  out.set("db/schema.ts", renderSchema(ctx));
-  if (ctx.workflows.length > 0) {
-    const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
-    out.set("http/workflows.ts", buildWorkflowsFile(ctx, aggsByName));
-  }
-  if (ctx.views.length > 0) {
-    const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
-    out.set("http/views.ts", buildViewsRoutesFile(ctx, aggsByName));
-  }
-  out.set(
-    "http/index.ts",
-    renderHttpIndex(ctx, { authRequired: !!options?.authRequired }),
-  );
 }
 
 function findRepoFor(ctx: BoundedContextIR, name: string): RepositoryIR | undefined {
@@ -167,7 +192,8 @@ const PROJECT_PACKAGE_JSON = JSON.stringify(
     private: true,
     scripts: {
       dev: "tsx index.ts",
-      build: "tsc",
+      build: "tsup",
+      typecheck: "tsc --noEmit",
       test: "vitest run",
       "db:generate": "drizzle-kit generate",
       "db:migrate": "drizzle-kit migrate",
@@ -185,6 +211,7 @@ const PROJECT_PACKAGE_JSON = JSON.stringify(
     devDependencies: {
       typescript: "^5.7.0",
       tsx: "^4.19.0",
+      tsup: "^8.3.0",
       vitest: "^2.1.0",
       "drizzle-kit": "^0.28.0",
       "@types/pg": "^8.11.0",
@@ -210,28 +237,55 @@ export default defineConfig({
 const PROJECT_TSCONFIG_JSON = JSON.stringify(
   {
     compilerOptions: {
-      target: "ES2023",
-      module: "NodeNext",
-      moduleResolution: "NodeNext",
+      // ES2022 is the highest target drizzle-kit's bundled
+      // @esbuild-kit/esm-loader accepts; tsup's own `target: "node24"`
+      // (in tsup.config.ts) is what governs the prod bundle.
+      target: "ES2022",
+      module: "ESNext",
+      moduleResolution: "Bundler",
       strict: true,
       esModuleInterop: true,
       skipLibCheck: true,
-      outDir: "out",
-      rootDir: ".",
+      // tsup handles emit (single bundled `dist/index.js`); tsc is
+      // type-check only via `npm run typecheck`.
+      noEmit: true,
+      // `Bundler` resolution lets relative imports omit the `.js`
+      // extension — esbuild (via tsup at build time, tsx at dev
+      // time, vite-node at test time) resolves them.
     },
     include: ["**/*.ts"],
-    exclude: ["node_modules", "out"],
+    exclude: ["node_modules", "dist"],
   },
   null,
   2,
 ) + "\n";
 
+const TSUP_CONFIG = `// Auto-generated.  tsup bundles index.ts → dist/index.js for
+// production.  Externals match runtime deps from package.json so
+// pg's native bindings + drizzle's heavy modules stay outside the
+// bundle (loaded from node_modules at runtime).
+import { defineConfig } from "tsup";
+
+export default defineConfig({
+  entry: ["index.ts"],
+  format: ["esm"],
+  target: "node24",
+  outDir: "dist",
+  sourcemap: true,
+  clean: true,
+  splitting: false,
+  // \`tsc --noEmit\` (npm run typecheck) is the type-check; tsup is
+  // build-only, no .d.ts emit needed.
+  dts: false,
+});
+`;
+
 const PROJECT_INDEX_TS = `// Auto-generated.
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import { serve } from "@hono/node-server";
-import * as schema from "./db/schema.js";
-import { createApp } from "./http/index.js";
+import * as schema from "./db/schema";
+import { createApp } from "./http/index";
 
 // Fail fast on a missing DATABASE_URL.  Without this an unset value
 // surfaces as a confusing pg connection refusal mid-request; we'd
@@ -285,10 +339,10 @@ FROM node:24-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production PORT=3000
 COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/out ./out
+COPY --from=build /app/dist ./dist
 COPY --from=build /app/package.json ./package.json
 EXPOSE 3000
-CMD ["node", "out/index.js"]
+CMD ["node", "dist/index.js"]
 `;
 
 const DOCKERIGNORE_TS = `# Auto-generated.
