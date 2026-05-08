@@ -195,6 +195,69 @@ describe("react generator", () => {
     expect(detail).toMatch(/data-testid="orders-op-addLine-input-productId"/);
   });
 
+  it("detail page uses the display field as title when the aggregate declares one", async () => {
+    const model = await buildModel("examples/acme.ddd");
+    const { files } = generateSystems(model);
+    // Product declares `sku: string display` — title binds to data.sku
+    // so users see the SKU rather than the first 8 chars of the id.
+    const product = files.get("web_app/src/pages/products/detail.tsx")!;
+    expect(product).toMatch(
+      /<Title order=\{2\} data-testid="products-detail-title">\{data\.sku\}<\/Title>/,
+    );
+    // Breadcrumb's last segment should also reflect the display value.
+    expect(product).toMatch(/<Text>\{data\.sku\}<\/Text>/);
+    // Id surfaces beside the title via IdValue (tooltip with full id).
+    expect(product).toMatch(
+      /<span data-testid="products-detail-id"><IdValue id=\{data\.id\}/,
+    );
+    // Customer declares `username: string display`.
+    const customer = files.get("web_app/src/pages/customers/detail.tsx")!;
+    expect(customer).toMatch(
+      /<Title order=\{2\} data-testid="customers-detail-title">\{data\.username\}<\/Title>/,
+    );
+
+    // Order has no display field — title falls back to the id slice.
+    const order = files.get("web_app/src/pages/orders/detail.tsx")!;
+    expect(order).toMatch(
+      /<Title order=\{2\} data-testid="orders-detail-title">\{data\.id\.slice\(0, 8\) \+ "…"\}<\/Title>/,
+    );
+  });
+
+  it("error / not-found alerts wear icons across list, detail, and view pages", async () => {
+    const model = await buildModel("examples/acme.ddd");
+    const { files } = generateSystems(model);
+    const list = files.get("web_app/src/pages/orders/list.tsx")!;
+    const detail = files.get("web_app/src/pages/orders/detail.tsx")!;
+    const view = files.get("web_app/src/pages/views/active_orders.tsx")!;
+    expect(list).toMatch(/IconAlertCircle/);
+    expect(list).toMatch(
+      /<Alert color="red" variant="light" icon=\{<IconAlertCircle size=\{18\} \/>\} title="Couldn't load orders">/,
+    );
+    expect(detail).toMatch(/IconAlertCircle, IconAlertTriangle/);
+    expect(detail).toMatch(
+      /<Alert color="red" variant="light" icon=\{<IconAlertCircle size=\{18\} \/>\} title="Couldn't load order">/,
+    );
+    expect(detail).toMatch(
+      /<Alert color="yellow" variant="light" icon=\{<IconAlertTriangle size=\{18\} \/>\} title="Not found">/,
+    );
+    expect(view).toMatch(
+      /<Alert color="red" variant="light" icon=\{<IconAlertCircle size=\{18\} \/>\} title="Couldn't load view">/,
+    );
+  });
+
+  it("value-object fieldsets render as filled-variant grouped sub-forms", async () => {
+    const model = await buildModel("examples/acme.ddd");
+    const { files } = generateSystems(model);
+    // Product.unitPrice is a Money value object — `new` form wraps
+    // its inputs in a styled <Fieldset variant="filled" radius="md">.
+    const productNew = files.get("web_app/src/pages/products/new.tsx")!;
+    expect(productNew).toMatch(
+      /<Fieldset legend="Price" variant="filled" radius="md" data-testid="products-new-input-price">/,
+    );
+    // Children render inside a <Stack gap="sm">.
+    expect(productNew).toMatch(/<Stack gap="sm">/);
+  });
+
   it("polishes pages with formatters, skeleton loaders, op-button icons, and *Id heuristic links", async () => {
     const model = await buildModel("examples/acme.ddd");
     const { files } = generateSystems(model);

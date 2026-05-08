@@ -50,7 +50,7 @@ export function buildListPage(
   return `// Auto-generated.
 import { Link, useNavigate } from "react-router-dom";
 import { Stack, Title, Group, Button, Table, Skeleton, Alert, Anchor, Badge, Center, Text, Paper } from "@mantine/core";
-import { IconPlus } from "@tabler/icons-react";
+import { IconPlus, IconAlertCircle } from "@tabler/icons-react";
 import { useAll${plural(agg.name)} } from "../../api/${camel(agg.name)}";
 import { IdValue, DateTimeValue, BoolValue, NumberValue, EmptyValue } from "../../lib/format";
 
@@ -76,7 +76,7 @@ export default function ${cap}List() {
           </Stack>
         </Paper>
       )}
-      {q.isError && <Alert color="red" variant="light" title="Couldn't load ${humanPlural.toLowerCase()}">{(q.error as Error).message}</Alert>}
+      {q.isError && <Alert color="red" variant="light" icon={<IconAlertCircle size={18} />} title="Couldn't load ${humanPlural.toLowerCase()}">{(q.error as Error).message}</Alert>}
       {q.data && q.data.length === 0 && (
         <Paper p="xl" data-testid="${slug}-list-empty">
           <Center mih={160}>
@@ -150,6 +150,7 @@ export function buildNewPage(
   const humanAgg = humanize(agg.name);
   const humanPlural = humanize(plural(agg.name));
   return `// Auto-generated.
+// (new page: no aggregate data fetched yet, no display-field title.)
 import { Link, useNavigate } from "react-router-dom";
 import { ${mantineImports} } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
@@ -242,10 +243,13 @@ export function buildDetailPage(
         .filter((v): v is string => Boolean(v)),
     ),
   ].sort();
-  const tablerImport =
-    opIcons.length > 0
-      ? `\nimport { ${opIcons.join(", ")} } from "@tabler/icons-react";`
-      : "";
+  // Detail pages always pull in alert + not-found icons for the
+  // error / empty-state branches; op icons are added on top when
+  // the page surfaces operations.
+  const tablerIcons = ["IconAlertCircle", "IconAlertTriangle", ...opIcons]
+    .filter((v, i, a) => a.indexOf(v) === i)
+    .sort();
+  const tablerImport = `\nimport { ${tablerIcons.join(", ")} } from "@tabler/icons-react";`;
 
   // Detail-page components: card / table / breadcrumbs / badge for
   // display + the input set used by every operation modal.
@@ -260,8 +264,6 @@ export function buildDetailPage(
     "Alert",
     "Anchor",
     "Breadcrumbs",
-    "Divider",
-    "Code",
   ];
   if (agg.fields.some((f) => unwrapOpt(f.type).kind === "enum")) displayComponents.push("Badge");
   if (agg.contains.length > 0) displayComponents.push("Table", "Badge");
@@ -296,6 +298,16 @@ export function buildDetailPage(
 
   const humanAgg = humanize(agg.name);
   const humanPlural = humanize(plural(agg.name));
+  // When the aggregate has a `display`-marked field (e.g. Product
+  // declares `sku: string display`), use its value as the detail
+  // page title so users see "weertsdfg" instead of "9593c1d6…".
+  // Falls back to a short id prefix when no display field exists,
+  // matching the prior behaviour for aggregates that don't have
+  // one (e.g. Order in the acme example).
+  const displayField = agg.fields.find((f) => f.display);
+  const titleExpr = displayField
+    ? `data.${displayField.name}`
+    : `data.id.slice(0, 8) + "…"`;
   return `// Auto-generated.
 import { useParams, Link } from "react-router-dom";
 import { ${mantineImports} } from "@mantine/core";
@@ -321,22 +333,22 @@ ${ops.map((op) => `  const ${camel(op.name)} = use${upper(op.name)}${agg.name}(i
       </Stack></Card>
     </Stack>
   );
-  if (q.isError) return <Alert color="red" variant="light" title="Couldn't load ${humanAgg.toLowerCase()}">{(q.error as Error).message}</Alert>;
-  if (!q.data) return <Alert color="yellow" variant="light" title="Not found">No ${humanAgg.toLowerCase()} matches that id.</Alert>;
+  if (q.isError) return <Alert color="red" variant="light" icon={<IconAlertCircle size={18} />} title="Couldn't load ${humanAgg.toLowerCase()}">{(q.error as Error).message}</Alert>;
+  if (!q.data) return <Alert color="yellow" variant="light" icon={<IconAlertTriangle size={18} />} title="Not found">No ${humanAgg.toLowerCase()} matches that id.</Alert>;
   const data = q.data;
   return (
     <Stack data-testid="${slug}-detail" gap="md">
       <Breadcrumbs data-testid="${slug}-detail-breadcrumbs">
         <Anchor component={Link} to="/">Home</Anchor>
         <Anchor component={Link} to="/${slug}">${humanPlural}</Anchor>
-        <Text>{data.id.slice(0, 8)}…</Text>
+        <Text>{${titleExpr}}</Text>
       </Breadcrumbs>
       <Group justify="space-between" align="flex-end">
         <Stack gap={2}>
           <Text size="sm" c="dimmed" tt="uppercase" fw={600}>${humanAgg}</Text>
           <Group gap="sm" align="center">
-            <Title order={2}>{data.id.slice(0, 8)}…</Title>
-            <Code>{data.id}</Code>
+            <Title order={2} data-testid="${slug}-detail-title">{${titleExpr}}</Title>
+            <span data-testid="${slug}-detail-id"><IdValue id={data.id} /></span>
           </Group>
         </Stack>
         ${ops.length > 0 ? `<Group gap="xs" data-testid="${slug}-detail-ops">

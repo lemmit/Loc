@@ -318,6 +318,7 @@ export function buildViewTablePage(
   return `// Auto-generated.
 import { Link } from "react-router-dom";
 import { Stack, Title, Group, Anchor, Badge, Table, Alert, Text, Paper, Skeleton } from "@mantine/core";
+import { IconAlertCircle } from "@tabler/icons-react";
 import { ${hookName} } from "../../api/views";
 import { IdValue, DateTimeValue, BoolValue, NumberValue, EmptyValue } from "../../lib/format";
 
@@ -343,7 +344,7 @@ export default function ${componentName}() {
           </Stack>
         </Paper>
       )}
-      {q.isError && <Alert color="red" variant="light">{(q.error as Error).message}</Alert>}
+      {q.isError && <Alert color="red" variant="light" icon={<IconAlertCircle size={18} />} title="Couldn't load view">{(q.error as Error).message}</Alert>}
       {q.data && q.data.length === 0 && <Text c="dimmed">No rows.</Text>}
       {q.data && q.data.length > 0 && (
         <Paper p={0} style={{ overflow: "hidden" }}>

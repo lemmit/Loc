@@ -281,8 +281,13 @@ export function formInput(
             aggregatesByName,
           ),
         )
-        .join("\n          ");
-      return `<Fieldset legend="${label}" data-testid="${testId}">\n          ${sub}\n        </Fieldset>`;
+        .join("\n            ");
+      // variant="filled" + radius="md" reads as a grouped sub-form
+      // section instead of the bare browser-default fieldset.  The
+      // legend renders as a small heading so nested value-object
+      // forms (e.g. Money { amount, currency }) feel like one
+      // composite input rather than a stack of unrelated rows.
+      return `<Fieldset legend="${label}" variant="filled" radius="md" data-testid="${testId}">\n          <Stack gap="sm">\n            ${sub}\n          </Stack>\n        </Fieldset>`;
     }
     return `<TextInput label="${label}" {...register("${path}")} ${tid} error={${errExpr}} />`;
   }
