@@ -79,7 +79,12 @@ export function pipelineReducer(
       return {
         ...state,
         booting: false,
-        boot: { kind: "ok", ddl: action.ddl, persistent: action.persistent },
+        boot: {
+          kind: "ok",
+          ddl: action.ddl,
+          persistent: action.persistent,
+          migrated: action.migrated,
+        },
       };
     case "BOOT_FAIL":
       return {

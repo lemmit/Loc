@@ -47,6 +47,13 @@ export interface BootOk {
    *  so the UI can show "in-memory" instead of misleadingly
    *  saying "persisted". */
   persistent: boolean;
+  /** True iff this boot detected schema drift in a pre-existing
+   *  persistent DB and dropped+recreated the public schema with
+   *  fresh DDL.  False on first boot (no prior schema to drift
+   *  from) and on no-change reboots.  UI surfaces it as a
+   *  transient "schema migrated — rows reset" notification so the
+   *  user understands why their data isn't there anymore. */
+  migrated: boolean;
 }
 
 export interface BootFail {

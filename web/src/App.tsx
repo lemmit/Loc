@@ -39,6 +39,7 @@ import {
 } from "./pipeline/reducer";
 import {
   bootError as selBootError,
+  bootMigrated as selBootMigrated,
   bootPersistent as selBootPersistent,
   bootedDDL as selBootedDDL,
   generateOk as selGenerateOk,
@@ -289,6 +290,7 @@ export default function App(): JSX.Element {
   const reactBundle = selReactBundleOk(pipeline);
   const ddl = selBootedDDL(pipeline);
   const persistent = selBootPersistent(pipeline);
+  const migrated = selBootMigrated(pipeline);
   const bootErrorMessage = selBootError(pipeline);
   const dispatchSlot = pipeline.dispatch.kind === "result"
     ? pipeline.dispatch.result
@@ -378,6 +380,7 @@ export default function App(): JSX.Element {
           type: "BOOT_OK",
           ddl: res.ddl,
           persistent: res.persistent,
+          migrated: res.migrated,
         });
       } else {
         dispatch({ type: "BOOT_FAIL", message: res.message });
@@ -677,6 +680,17 @@ export default function App(): JSX.Element {
                     data-testid="persistence-status"
                   >
                     {persistent ? "persisted" : "in-memory"}
+                  </Badge>
+                )}
+                {ddl && migrated && (
+                  <Badge
+                    size="xs"
+                    color="orange"
+                    variant="light"
+                    title="Schema changed since the previous boot — DROP SCHEMA + re-applied DDL.  Pre-existing rows were dropped."
+                    data-testid="migrated-status"
+                  >
+                    schema migrated
                   </Badge>
                 )}
                 {ddl && (
