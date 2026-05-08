@@ -30,6 +30,10 @@ import { prepareListPageVM } from "./preparers/list.js";
 import { prepareNewPageVM } from "./preparers/new.js";
 import { prepareOperationModalVM } from "./preparers/operation-modal.js";
 import { prepareThemeVM } from "./preparers/theme.js";
+import { prepareViewTablePageVM } from "./preparers/view-table.js";
+import { prepareViewsIndexVM } from "./preparers/views-index.js";
+import { prepareWorkflowFormVM } from "./preparers/workflow-form.js";
+import { prepareWorkflowsIndexVM } from "./preparers/workflow-index.js";
 import type {
   CellVM,
   FormFieldVM,
@@ -184,6 +188,54 @@ export function renderOperationModal(
   const vm = prepareOperationModalVM(agg, op, ctx, aggregatesByName);
   const fieldHtmls = vm.fields.map((f) => renderFormField(f, pack));
   return pack.render("operation-modal", { ...vm, fieldHtmls });
+}
+
+/** Render a per-workflow form page through the loaded pack. */
+export function renderWorkflowForm(
+  wf: WorkflowIR,
+  ctx: BoundedContextIR,
+  aggregatesByName: Map<string, AggregateIR>,
+  pack: LoadedPack,
+): string {
+  const vm = prepareWorkflowFormVM(wf, ctx, aggregatesByName);
+  const fieldHtmls = vm.fields.map((f) => renderFormField(f, pack));
+  return pack.render("workflow-form", { ...vm, fieldHtmls });
+}
+
+/** Render the workflows index page through the loaded pack. */
+export function renderWorkflowsIndex(
+  contexts: BoundedContextIR[],
+  pack: LoadedPack,
+): string {
+  const vm = prepareWorkflowsIndexVM(contexts);
+  return pack.render("workflow-index", vm);
+}
+
+/** Render the views index page through the loaded pack. */
+export function renderViewsIndex(
+  contexts: BoundedContextIR[],
+  pack: LoadedPack,
+): string {
+  const vm = prepareViewsIndexVM(contexts);
+  return pack.render("views-index", vm);
+}
+
+/** Render a per-view table page through the loaded pack.  Cells
+ *  reuse the page-list cell-* templates by binding their VMs to
+ *  view-scoped testid + access expressions (`row.<col>` and
+ *  `view-<slug>-row-${idx}-<col>`). */
+export function renderViewTablePage(
+  view: ViewIR,
+  ctx: BoundedContextIR,
+  aggregatesByName: Map<string, AggregateIR>,
+  pack: LoadedPack,
+): string {
+  const vm = prepareViewTablePageVM(view, ctx, aggregatesByName);
+  const cells = vm.cells.map((cell) => ({
+    ...cell,
+    cellHtml: pack.render(cell.template, cell),
+  }));
+  return pack.render("view-table", { ...vm, cells });
 }
 
 function enrichColumns(vm: ListPageVM, pack: LoadedPack): RenderedColumn[] {

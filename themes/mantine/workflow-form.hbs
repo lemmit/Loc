@@ -1,0 +1,53 @@
+// Auto-generated.
+import { Link, useNavigate } from "react-router-dom";
+import { {{join mantineImports ", "}} } from "@mantine/core";
+import { notifications } from "@mantine/notifications";
+import { {{useFormImports}} } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { {{workflowPascal}}Request, use{{workflowPascal}}Workflow } from "../../api/workflows";
+{{#each idHookImportLines}}{{{this}}}
+{{/each}}
+export default function {{componentName}}() {
+  const navigate = useNavigate();
+  const run = use{{workflowPascal}}Workflow();
+{{#each idHookCalls}}{{{this}}}
+{{/each}}  const {{{destructured}}} = useForm<{{workflowPascal}}Request>({
+    resolver: zodResolver({{workflowPascal}}Request),
+    defaultValues: {{{defaultValuesTs}}},
+  });
+  return (
+    <Stack maw={640} data-testid="workflow-{{slug}}" gap="md">
+      <Breadcrumbs>
+        <Anchor component={Link} to="/">Home</Anchor>
+        <Anchor component={Link} to="/workflows">Workflows</Anchor>
+        <Text>{{humanWorkflow}}</Text>
+      </Breadcrumbs>
+      <Stack gap={2}>
+        <Text size="sm" c="dimmed" tt="uppercase" fw={600}>Workflow</Text>
+        <Title order={2}>{{humanWorkflow}}</Title>
+      </Stack>
+      <Card>
+        <form
+          onSubmit={handleSubmit(async (vals) => {
+            try {
+              await run.mutateAsync(vals);
+              notifications.show({ color: "green", message: "{{humanWorkflow}} completed" });
+              navigate("/workflows");
+            } catch (e) {
+              notifications.show({ color: "red", message: (e as Error).message });
+            }
+          })}
+        >
+          <Stack gap="md">
+          {{#if hasParams}}{{#each fieldHtmls}}{{{this}}}
+          {{/each}}{{else}}<Text>This workflow has no parameters.</Text>
+          {{/if}}<Group justify="flex-end" mt="sm">
+            <Button variant="default" onClick={() => navigate("/workflows")}>Cancel</Button>
+            <Button type="submit" loading={run.isPending} data-testid="workflow-{{slug}}-submit">Run</Button>
+          </Group>
+          </Stack>
+        </form>
+      </Card>
+    </Stack>
+  );
+}

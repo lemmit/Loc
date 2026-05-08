@@ -104,6 +104,46 @@ describe("react generator template-pack output (snapshots)", () => {
     );
   });
 
+  // Workflow / view fixtures need a more elaborate SOURCE; rather
+  // than spelling them out here just snapshot acme.ddd's output.
+  // (acme has Order.placeOrder workflow + ActiveOrders / OrderSummary
+  // views.)
+  it("Mantine pack — workflow form snapshot (acme)", async () => {
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const acmeText = (await import("node:fs")).readFileSync(
+      path.join(repoRoot, "examples/acme.ddd"),
+      "utf-8",
+    );
+    const doc = await helper(acmeText, { validation: false });
+    const model = doc.parseResult.value as Model;
+    const files = generateSystems(model).files;
+    const page = files.get("web_app/src/pages/workflows/place_order.tsx");
+    expect(page).toBeDefined();
+    await expect(page).toMatchFileSnapshot(
+      path.join(repoRoot, "test/__snapshots__/pack-mantine-workflow-place-order.tsx"),
+    );
+  });
+
+  it("Mantine pack — view table snapshot (acme)", async () => {
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const acmeText = (await import("node:fs")).readFileSync(
+      path.join(repoRoot, "examples/acme.ddd"),
+      "utf-8",
+    );
+    const doc = await helper(acmeText, { validation: false });
+    const model = doc.parseResult.value as Model;
+    const files = generateSystems(model).files;
+    const page = files.get("web_app/src/pages/views/order_summary.tsx");
+    expect(page).toBeDefined();
+    await expect(page).toMatchFileSnapshot(
+      path.join(repoRoot, "test/__snapshots__/pack-mantine-view-order-summary.tsx"),
+    );
+  });
+
   it("Mantine pack — new page snapshot", async () => {
     const files = await generateFromSource(SOURCE);
     const newPage = files.get("web_mantine/src/pages/customers/new.tsx");
