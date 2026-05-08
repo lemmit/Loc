@@ -153,6 +153,124 @@ export interface HomeVM {
   firstAggregateSlug?: string;
 }
 
+/** A single field-row inside a detail page's main info card.  Each
+ *  row picks a `field-row-*` template per-pack (e.g. `field-row-id`,
+ *  `field-row-datetime`, `field-row-valueobject`) and is rendered
+ *  in TS by the preparer, then injected into the page VM as
+ *  `rowHtml`.  Same TS-side composition pattern as cells. */
+export interface FieldRowVM {
+  /** Logical template name to render for this row. */
+  template: string;
+  /** Humanised label that appears in the left column of the
+   *  KeyValueRow (or pack equivalent). */
+  label: string;
+  /** Stable per-field testid for Playwright drivers — pack-invariant
+   *  by construction so e2e tests survive pack swaps. */
+  testId: string;
+  /** JS expression evaluating to the field's raw value in the
+   *  surrounding scope (typically `data.<field>`). */
+  valueExpr: string;
+  /** Link target (template-string expression) for `field-row-id-link`
+   *  rows; undefined for non-link rows. */
+  toExpr?: string;
+  /** Decimal precision for number rows. */
+  decimals?: number;
+  /** For value-object rows: pre-rendered HTML for the nested
+   *  display, computed by the preparer in TS so the template
+   *  stays flat. */
+  innerHtml?: string;
+}
+
+/** A nested-collection part-table inside a detail page.  E.g.
+ *  Order.lines (`contains lines: OrderLine[]`) emits one PartTableVM.
+ *  Cells are reused from the page-list cell templates — same wire
+ *  shape, same testid pattern, just a different access expression
+ *  (`row.foo` is rooted in the part-row, while the page itself
+ *  iterates `data.<name>.map((row) => ...)`). */
+export interface PartTableVM {
+  /** Display name / containment slot ("lines"). */
+  name: string;
+  /** Humanised section title ("Lines", "Order Items"). */
+  humanName: string;
+  /** Pre-rendered column header labels. */
+  columnHeaders: string[];
+  /** One CellVM per column, with testIdExpr keyed off the part's
+   *  scoping (`<slug>-detail-<name>-row-${row.id}-<col>`). */
+  cells: CellVM[];
+  /** Stable testid for the wrapping element. */
+  testId: string;
+  /** JS expression for the array on `data` to map over (e.g.
+   *  `data.lines`). */
+  arrayExpr: string;
+}
+
+/** A single operation button rendered in the detail page header
+ *  group.  The first op gets variant=filled (primary), subsequent
+ *  ops get variant=light, so the most-likely "next step" pops
+ *  visually. */
+export interface OperationButtonVM {
+  /** Raw camelCase op name (e.g. "addLine") — used for testid + JS
+   *  identifier construction. */
+  name: string;
+  /** Humanised button label ("Add Line"). */
+  humanName: string;
+  /** "filled" for the leading op, "light" for the rest. */
+  variant: string;
+  /** Tabler icon component name (e.g. "IconPlus") or undefined. */
+  icon?: string;
+  /** Stable testid. */
+  testId: string;
+}
+
+/** Top-level view-model for the detail page. */
+export interface DetailPageVM {
+  /** PascalCase aggregate name — drives the React component export
+   *  name (`OrderDetail`). */
+  aggregateName: string;
+  /** camelCase aggregate name (`order`) for JS identifiers. */
+  aggregateNameCamel: string;
+  /** Snake-case plural slug ("orders") — drives testid prefixes
+   *  and link targets. */
+  slug: string;
+  /** Singular humanised label ("Order") for the type-eyebrow. */
+  humanAgg: string;
+  /** Lowercase singular ("order") for alert / not-found copy. */
+  humanAggLower: string;
+  /** Plural humanised ("Orders") for the breadcrumb. */
+  humanPlural: string;
+  /** JS expression for the page title — either `data.<displayField>`
+   *  when the aggregate declares one, or a short id slice. */
+  titleExpr: string;
+  /** Field rows in source order. */
+  fieldRows: FieldRowVM[];
+  /** Nested part-tables in source order. */
+  parts: PartTableVM[];
+  /** Operation buttons (empty when the aggregate has no public ops). */
+  opButtons: OperationButtonVM[];
+  /** Imports lines for `useXById`, `useOpY`, request-type symbols,
+   *  and any cross-aggregate `useAll<X>()` hooks the operation
+   *  modals reference.  Pre-formatted as full `import ... from "...";`
+   *  strings so the template just splices them in. */
+  apiImportLines: string[];
+  /** Tabler icon names to import — at minimum IconAlertCircle and
+   *  IconAlertTriangle for the error / not-found alerts; plus one
+   *  per operation button that has a verb-mapped icon. */
+  tablerIcons: string[];
+  /** Whether any operation form needs RHF's Controller (for
+   *  Select / Switch / NumberInput) or just register (TextInput). */
+  needsController: boolean;
+  /** Per-op modal-form function blocks, pre-rendered as TSX strings.
+   *  Phase 1.3 keeps the legacy formInput-based emission via the
+   *  shared helper; Phase 1.4 ports these to template-driven
+   *  rendering.  Templates emit them verbatim at module scope after
+   *  the default export. */
+  operationsModalsTsx: string[];
+  /** Per-op `useXOrder(id ?? "")` mutation-hook lines, formatted as
+   *  TS const declarations.  Templates emit them inside the page
+   *  function body. */
+  opHookCallLines: string[];
+}
+
 /** Top-level view-model for an aggregate list page. */
 export interface ListPageVM {
   /** PascalCase aggregate name — drives the React component export
