@@ -70,9 +70,24 @@ export function makePreviewHtml(args: MakePreviewArgs): string {
   // A `<base href="/">` would have leaked the request out of the
   // SW scope on deploys with a non-root deploy base (e.g. GH
   // Pages at `/loc/playground/`).
-  const basenameScript =
+  // Inject two globals the bundle reads:
+  //   - __LOOM_BASENAME__: feeds <BrowserRouter basename>, so route
+  //     resolution survives the iframe being mounted under a deploy
+  //     subpath (e.g. `/loc/playground/__loom_sandbox__`).
+  //   - __LOOM_API_BASE__: absolute path the generator's
+  //     `config.ts` uses for `API_BASE_URL`.  Must be absolute
+  //     (leading `/`) so fetches don't resolve against the iframe's
+  //     current URL — once the user navigates client-side
+  //     (e.g. to `<sandbox>/products/new`) a relative API base
+  //     would resolve to `<sandbox>/products/runtime/...`, which
+  //     hits the SW SPA fallback (HTML response) and breaks JSON
+  //     parsing in the bundle.
+  const hostScript =
     args.sandboxBase != null
-      ? `<script>window.__LOOM_BASENAME__ = ${JSON.stringify(args.sandboxBase)};</script>`
+      ? `<script>` +
+        `window.__LOOM_BASENAME__ = ${JSON.stringify(args.sandboxBase)};` +
+        `window.__LOOM_API_BASE__ = ${JSON.stringify(args.sandboxBase + "/runtime")};` +
+        `</script>`
       : "";
   return `<!doctype html>
 <html lang="en">
@@ -91,7 +106,7 @@ ${styleTagFor(args.css)}
 </head>
 <body>
 <div id="root"></div>
-${basenameScript}
+${hostScript}
 <script type="module">${ESCAPE_END_SCRIPT(args.js)}</script>
 </body>
 </html>`;
