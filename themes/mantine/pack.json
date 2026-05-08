@@ -4,6 +4,7 @@
   "emits": {
     "theme": "theme.hbs",
     "main": "main.hbs",
+    "format-helpers": "format-helpers.hbs",
     "app-shell": "app-shell.hbs",
     "home": "home.hbs",
     "page-list": "page-list.hbs",

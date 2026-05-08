@@ -19,7 +19,6 @@ import {
   buildViewsApiModule,
   hasAnyView,
 } from "./view-builder.js";
-import { FORMAT_HELPERS_TSX } from "./format-helpers.js";
 import { loadPack, resolvePackDir } from "./templating/loader.js";
 import {
   renderAppShell,
@@ -163,7 +162,7 @@ export function generateReactForContexts(
     "src/api/config.ts",
     renderShellFile("api-config", { apiBaseUrl }, pack),
   );
-  out.set("src/lib/format.tsx", FORMAT_HELPERS_TSX);
+  out.set("src/lib/format.tsx", renderShellFile("format-helpers", {}, pack));
   // Theme — every generated app gets a tasteful baseline (indigo
   // primary, medium radius, Inter font) so the bare-Mantine
   // "construction site" look is gone by default.  System-level
@@ -219,6 +218,20 @@ export function generateReactForContexts(
   }
   if (pack.templates.has("lib-utils")) {
     out.set("src/lib/utils.ts", renderShellFile("lib-utils", {}, pack));
+  }
+  // shadcn UI library — emit any `components-ui-*` template the
+  // pack ships as a `src/components/ui/<name>.tsx` file.  Mantine
+  // pack has zero of these; shadcn pack ships ~13 in Phase 2.2,
+  // covering the surfaces the page templates will use in Phase 2.3
+  // (Button, Card, Input, Label, Table, Form, Select, Switch,
+  // Badge, Alert, Skeleton, Dialog, Tooltip).
+  for (const templateName of pack.templates.keys()) {
+    const m = /^components-ui-(.+)$/.exec(templateName);
+    if (!m) continue;
+    out.set(
+      `src/components/ui/${m[1]}.tsx`,
+      renderShellFile(templateName, {}, pack),
+    );
   }
 
   return out;
