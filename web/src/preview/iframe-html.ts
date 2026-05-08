@@ -1,17 +1,9 @@
 // Synthesise the iframe document for the React preview.
 //
-// This output ships down two paths:
-//
-//   - SW path (default in production): the parent pushes the HTML
-//     to `preview-sw.js` and the iframe navigates to the sandbox
-//     URL.  Real-origin iframe — postMessage, history, and the
-//     URL parser all behave normally.
-//   - srcDoc fallback: used when SW isn't available (insecure
-//     contexts, browsers without SW support).  about:srcdoc has
-//     an opaque origin that breaks the WHATWG URL parser and the
-//     history API, so `URL_FIX_SRC` / `ROUTING_FIX_SRC` patch
-//     around those quirks.  On the SW path these execute but are
-//     harmless no-ops.
+// The output is pushed to `preview-sw.js`, which serves it when
+// the iframe navigates to `<base>/__loom_sandbox__/`.  Real-origin
+// iframe — postMessage, history, and the URL parser all behave
+// normally with no shims required.
 //
 // Fetches the bundle issues against any `http://localhost:*` host
 // are caught by the inline fetch shim and routed via `postMessage`
@@ -52,53 +44,6 @@ function importMap(versions: Record<string, string>): Record<string, string> {
     "react-dom": `https://esm.sh/react-dom@${reactDomVer}?dev=false&deps=react@${reactVer}`,
   };
 }
-
-// Patch the global URL constructor so that base URLs the WHATWG
-// parser rejects as relative-resolution bases — about:srcdoc,
-// blob: URLs, data: URLs, etc. — get substituted with a valid
-// http base.  React Router (and other libs) build URLs as
-// `new URL(path, window.location.href)` for href encoding;
-// inside a srcdoc iframe `location.href` is "about:srcdoc",
-// which throws.  We can't redefine `window.location` (its
-// properties are non-configurable in modern browsers), but
-// patching `URL` is enough — every consumer that treats the
-// result as a (pathname, search, hash) triple keeps working,
-// since substituting the base only changes `origin` (which
-// callers like react-router don't read here).
-const URL_FIX_SRC = `
-(function () {
-  var Original = globalThis.URL;
-  var FALLBACK = "https://loom-preview.invalid/";
-  function isUsableBase(b) {
-    if (b == null) return true;
-    if (typeof b !== "string") return true;
-    return /^https?:\\/\\//.test(b) || /^ftp:\\/\\//.test(b);
-  }
-  function Patched(url, base) {
-    if (arguments.length >= 2 && !isUsableBase(base)) base = FALLBACK;
-    if (new.target == null) return new Original(url, base);
-    return Reflect.construct(Original, [url, base], new.target);
-  }
-  Patched.prototype = Original.prototype;
-  for (var k of Object.getOwnPropertyNames(Original)) {
-    if (k === "length" || k === "name" || k === "prototype") continue;
-    try {
-      var v = Original[k];
-      Patched[k] = typeof v === "function" ? v.bind(Original) : v;
-    } catch (_) {}
-  }
-  globalThis.URL = Patched;
-})();
-`;
-
-const ROUTING_FIX_SRC = `
-// Best-effort: reset the iframe's URL to "/" so React Router's
-// BrowserRouter sees a path it can match.  srcdoc iframes start
-// at "about:srcdoc" with pathname "srcdoc", which doesn't match
-// any route the generator emits.  Wrapped in try/catch because
-// some browsers refuse history mutations from opaque origins.
-try { history.replaceState({}, "", "/"); } catch (_) {}
-`;
 
 const FETCH_SHIM_SRC = `
 (function () {
@@ -212,8 +157,6 @@ ${styleTagFor(args.css)}
 </head>
 <body>
 <div id="root"></div>
-<script>${ESCAPE_END_SCRIPT(URL_FIX_SRC)}</script>
-<script>${ESCAPE_END_SCRIPT(ROUTING_FIX_SRC)}</script>
 <script>${ESCAPE_END_SCRIPT(FETCH_SHIM_SRC)}</script>
 <script type="module">${ESCAPE_END_SCRIPT(args.js)}</script>
 </body>
