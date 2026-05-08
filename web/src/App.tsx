@@ -27,6 +27,7 @@ import { LoomRuntimeClient } from "./runtime/client";
 import { FileTree } from "./preview/FileTree";
 import { FileViewer } from "./preview/FileViewer";
 import { Preview } from "./preview/Preview";
+import { registerPreviewSw } from "./preview/sw-host";
 import { buildTree } from "./preview/file-tree";
 import {
   buildShareUrl,
@@ -194,6 +195,13 @@ export default function App(): JSX.Element {
     buildClientRef.current = build;
     bundleClientRef.current = bundleClient;
     runtimeClientRef.current = runtimeClient;
+    // Preview Service Worker — scaffolding registration.  The SW
+    // currently only claims clients and serves a placeholder; the
+    // legacy srcdoc preview is still the active path.  Registering
+    // here so production deploys exercise the path/scope plumbing
+    // before the migration depends on it.  Failures are logged and
+    // ignored — they don't break the playground.
+    void registerPreviewSw();
     return () => {
       buildClientRef.current = null;
       bundleClientRef.current = null;
