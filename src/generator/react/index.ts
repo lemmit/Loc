@@ -9,18 +9,14 @@ import { buildApiModule } from "./api-builder.js";
 import { buildPageObjectModule } from "./page-objects-builder.js";
 import {
   allWorkflows,
-  buildWorkflowFormPage,
   buildWorkflowPageObject,
   buildWorkflowsApiModule,
-  buildWorkflowsIndexPage,
   hasAnyWorkflow,
 } from "./workflow-builder.js";
 import {
   allViews,
   buildViewPageObject,
   buildViewsApiModule,
-  buildViewsIndexPage,
-  buildViewTablePage,
   hasAnyView,
 } from "./view-builder.js";
 import { FORMAT_HELPERS_TSX } from "./format-helpers.js";
@@ -33,6 +29,10 @@ import {
   renderMain,
   renderNewPage,
   renderTheme,
+  renderViewTablePage,
+  renderViewsIndex,
+  renderWorkflowForm,
+  renderWorkflowsIndex,
 } from "./templating/render.js";
 
 // ---------------------------------------------------------------------------
@@ -112,11 +112,11 @@ export function generateReactForContexts(
   const workflows = allWorkflows(contexts);
   if (hasAnyWorkflow(contexts)) {
     out.set("src/api/workflows.ts", buildWorkflowsApiModule(contexts));
-    out.set("src/pages/workflows/index.tsx", buildWorkflowsIndexPage(contexts));
+    out.set("src/pages/workflows/index.tsx", renderWorkflowsIndex(contexts, pack));
     for (const { wf, ctx } of workflows) {
       out.set(
         `src/pages/workflows/${snake(wf.name)}.tsx`,
-        buildWorkflowFormPage(wf, ctx, aggregatesByName),
+        renderWorkflowForm(wf, ctx, aggregatesByName, pack),
       );
       // Slice 18.C — Playwright page object so DSL `ui.workflows.X(...)`
       // calls have a typed driver to lower against.  Lives under
@@ -137,11 +137,11 @@ export function generateReactForContexts(
   const views = allViews(contexts);
   if (hasAnyView(contexts)) {
     out.set("src/api/views.ts", buildViewsApiModule(contexts));
-    out.set("src/pages/views/index.tsx", buildViewsIndexPage(contexts));
+    out.set("src/pages/views/index.tsx", renderViewsIndex(contexts, pack));
     for (const { view, ctx } of views) {
       out.set(
         `src/pages/views/${snake(view.name)}.tsx`,
-        buildViewTablePage(view, ctx, aggregatesByName),
+        renderViewTablePage(view, ctx, aggregatesByName, pack),
       );
       // Slice 18.C — Playwright page object so DSL `ui.views.X()`
       // calls can read the rendered table back as typed objects.

@@ -251,6 +251,71 @@ export interface OperationModalVM {
   fields: FormFieldVM[];
 }
 
+/** Top-level VM for a per-workflow form page. */
+export interface WorkflowFormVM {
+  /** PascalCase workflow name (drives `<Wf>Request` / `use<Wf>Workflow`). */
+  workflowPascal: string;
+  /** PascalCase workflow page-component name. */
+  componentName: string;
+  /** Snake-case slug (URL + testid). */
+  slug: string;
+  /** Humanised workflow label for the title / breadcrumbs / toast. */
+  humanWorkflow: string;
+  mantineImports: string[];
+  idHookImportLines: string[];
+  idHookCalls: string[];
+  useFormImports: string;
+  destructured: string;
+  defaultValuesTs: string;
+  /** Whether the workflow has any parameters; when false the
+   *  template emits a "This workflow has no parameters." line. */
+  hasParams: boolean;
+  fields: FormFieldVM[];
+}
+
+/** A single workflow listed on the workflows index page. */
+export interface WorkflowCardVM {
+  slug: string;
+  humanWorkflow: string;
+  /** Pre-formatted parameter signature lines.  Each line is a
+   *  rendered <Text> showing "<name>: <typeLabel>". */
+  paramLines: string[];
+  /** True when the workflow declares zero parameters — the
+   *  template emits a "No parameters." note instead. */
+  hasParams: boolean;
+}
+
+/** Workflows index page (the /workflows route). */
+export interface WorkflowsIndexVM {
+  cards: WorkflowCardVM[];
+}
+
+/** A single view listed on the views index page. */
+export interface ViewCardVM {
+  slug: string;
+  humanView: string;
+  /** Pre-formatted shape line — either "Source: <Aggregate>" for
+   *  shorthand views or "Custom shape: <field names>" for full-form. */
+  shapeLine: string;
+}
+
+/** Views index page (the /views route). */
+export interface ViewsIndexVM {
+  cards: ViewCardVM[];
+}
+
+/** Per-view table page.  Cells reuse the page-list cell-* templates
+ *  via TS-side composition (renderer pre-renders each, slots into
+ *  cellHtml).  Same architectural pattern as PartTableVM. */
+export interface ViewTablePageVM {
+  componentName: string;
+  hookName: string;
+  slug: string;
+  humanView: string;
+  columnHeaders: string[];
+  cells: CellVM[];
+}
+
 /** A single field-row inside a detail page's main info card.  Each
  *  row picks a `field-row-*` template per-pack (e.g. `field-row-id`,
  *  `field-row-datetime`, `field-row-valueobject`) and is rendered
