@@ -1,0 +1,15 @@
+{
+  "name": "shadcn",
+  "version": "0.1.0-spike",
+  "emits": {
+    "page-list": "page-list.hbs",
+    "cell-id": "cell-id.hbs",
+    "cell-id-link": "cell-id-link.hbs",
+    "cell-row-id-link": "cell-row-id-link.hbs",
+    "cell-datetime": "cell-datetime.hbs",
+    "cell-bool": "cell-bool.hbs",
+    "cell-number": "cell-number.hbs",
+    "cell-enum": "cell-enum.hbs",
+    "cell-string": "cell-string.hbs"
+  }
+}

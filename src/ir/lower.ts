@@ -290,6 +290,12 @@ function lowerDeployable(
   // `auth: required` is the only AuthMode in slice 1A.  Future modes
   // (`optional` / `forbidden`) would extend this branch.
   const auth = d.auth === "required" ? { required: true } : undefined;
+  // `design` defaults to "mantine" only when this is a react frontend
+  // — ignoring it on other platforms keeps the IR honest about which
+  // deployables actually render UI.  The grammar accepts the keyword
+  // anywhere but the generator stack only honours it under react.
+  const design =
+    platform === "react" ? (d.design ?? "mantine") : undefined;
   return {
     name: d.name,
     platform,
@@ -297,6 +303,7 @@ function lowerDeployable(
     port: d.port ?? defaultPort(platform),
     targetName: d.targets?.ref?.name,
     auth,
+    design,
   };
 }
 

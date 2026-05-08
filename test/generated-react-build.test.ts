@@ -30,21 +30,52 @@ const ENABLED = process.env.LOOM_REACT_BUILD === "1";
  *  `web/src/examples/*-system.ddd` set are the playground sources
  *  the in-browser editor ships, exercising different domain shapes
  *  (banking — money, inventory — nested aggregates, sales — multi-
- *  context). */
-const cases: Array<{ ddd: string; reactDir: string }> = [
+ *  context).  The shadcn entry is a Phase-0 spike: a derived copy of
+ *  acme with `design: shadcn` on the webApp deployable, materialised
+ *  at test-run time, so the new template-pack path is exercised on
+ *  the same wire shape as the Mantine canonical case.  Other pages
+ *  in that build still use the legacy Mantine builders (Phase 0 only
+ *  ports the list page); the partial-shadcn + Mantine-rest project
+ *  is expected to type-check because both paths share the runtime
+ *  helpers and api modules. */
+const cases: Array<{ ddd: string; reactDir: string; mutate?: (src: string) => string }> = [
   { ddd: "examples/acme.ddd", reactDir: "web_app" },
   { ddd: "web/src/examples/banking-system.ddd", reactDir: "web_app" },
   { ddd: "web/src/examples/inventory-system.ddd", reactDir: "web_app" },
   { ddd: "web/src/examples/sales-system.ddd", reactDir: "web_app" },
+  {
+    ddd: "examples/acme.ddd",
+    reactDir: "web_app",
+    mutate: (src) =>
+      // Inject `design: shadcn` into the webApp deployable so the
+      // shadcn pack renders the list page.  Other pages still come
+      // from the legacy Mantine builders — this is the Phase 0 spike,
+      // not feature-complete shadcn.
+      src.replace(
+        /(deployable webApp \{\s*platform: react\s*targets: api\s*port: 3001)\s*\}/,
+        "$1\n        design: shadcn\n    }",
+      ),
+  },
 ];
 
 describe.skipIf(!ENABLED)("generated React TSX compiles under strict tsc", () => {
   it.each(cases)(
     "$ddd → $reactDir compiles cleanly",
-    ({ ddd, reactDir }) => {
+    ({ ddd, reactDir, mutate }) => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-react-tsc-"));
       try {
-        execSync(`node ${cli} generate system ${ddd} -o ${outDir}`, {
+        // When a `mutate` is supplied, read the source, transform it,
+        // and write to a temp .ddd file the CLI consumes.  Used for
+        // Phase 0 design-pack spike where we vary an existing source
+        // without touching the canonical example file.
+        let dddPath = ddd;
+        if (mutate) {
+          const original = fs.readFileSync(path.join(repoRoot, ddd), "utf-8");
+          const mutated = mutate(original);
+          dddPath = path.join(outDir, "_mutated.ddd");
+          fs.writeFileSync(dddPath, mutated);
+        }
+        execSync(`node ${cli} generate system ${dddPath} -o ${outDir}`, {
           stdio: "inherit",
           cwd: repoRoot,
         });

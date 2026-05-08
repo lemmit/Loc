@@ -444,6 +444,16 @@ export interface DeployableIR {
    * platform === "react"; the frontend's API base URL is derived from
    * the target's port. */
   targetName?: string;
+  /** Design-system template pack the React frontend generator renders
+   *  pages against.  Built-ins: "mantine" (default) and "shadcn".  A
+   *  string starting with "./" or "/" is a custom pack path resolved
+   *  relative to the .ddd file (a directory containing pack.json).
+   *  Only meaningful when platform === "react"; ignored otherwise.
+   *  Named `design` rather than `ui` because the test DSL already
+   *  uses `ui.workflows.X(...)` as a member-access namespace; making
+   *  `ui` a keyword in the deployable block would shadow the test-DSL
+   *  accessor and break parsing of existing examples. */
+  design?: string;
   /** Per-deployable auth opt-in.  Populated when the source declares
    *  `auth: required` on the deployable.  Backends with
    *  `auth.required === true` emit JWT-decode middleware + a verifier
