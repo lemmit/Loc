@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { Box, Text } from "@mantine/core";
 import type { LoomRuntimeClient } from "../runtime/client";
 import { makePreviewHtml } from "./iframe-html";
+import { pushBundle } from "./sw-host";
 
 interface PreviewProps {
   /** React bundle JS — output of `bundle.worker.ts` for kind: "react". */
@@ -52,6 +53,31 @@ export function Preview({ js, css, versions, runtime }: PreviewProps): JSX.Eleme
     () => makePreviewHtml({ js, css, versions }),
     [js, css, versions],
   );
+
+  // Push the latest bundle to the preview Service Worker so it can
+  // serve the synthesized HTML when the iframe-rewire PR lands.
+  // No-op today against the user-facing preview (which still uses
+  // srcDoc), but lets you navigate directly to `<base>/__loom_sandbox__/`
+  // in a new tab to validate the SW serving path.  Bundle pushes are
+  // cheap (string postMessage) and the SW only stores the latest.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) {
+        return;
+      }
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        if (cancelled) return;
+        pushBundle(reg, { html, js, css });
+      } catch {
+        // Registration failed earlier in App.tsx; nothing to push.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [html, js, css]);
 
   useEffect(() => {
     const handler = async (ev: MessageEvent) => {
