@@ -768,6 +768,11 @@ export function renderCustomLayoutPage(
   body: ExprIR,
   params: ParamIR[] = [],
   state: StateFieldIR[] = [],
+  /** Slice 11.12 — page-level `title:` expression.  Renders into a
+   *  `useEffect` that sets `document.title` on mount and whenever
+   *  any referenced param/state changes (deps array auto-derived
+   *  from the title expression's refs). */
+  title: ExprIR | undefined = undefined,
 ): string {
   const paramNames = new Set(params.map((p) => p.name));
   const stateNames = new Set(state.map((s) => s.name));
@@ -776,6 +781,37 @@ export function renderCustomLayoutPage(
     paramNames,
     stateNames,
   );
+  // Slice 11.12 — render the title expression through emitExpr
+  // (sharing the body's tracking state so the shell destructures
+  // any param/state the title references).  Compute the deps
+  // array from the title's referenced names so the effect re-runs
+  // when those values change.
+  let titleEffect = "";
+  let usesEffect = false;
+  let usesStateForTitle = false;
+  if (title !== undefined) {
+    const titleCtx: WalkContext = {
+      imports,
+      paramNames,
+      usedParams,
+      usesNavigate,
+      stateNames,
+      usesState,
+    };
+    const titleExpr = emitExpr(title, titleCtx);
+    // emitExpr may have added to usedParams; reflect title's state
+    // usage separately so the shell knows whether to import useState.
+    usesStateForTitle = titleCtx.usesState && !usesState;
+    const refs = new Set<string>();
+    collectExprRefs(title, refs);
+    const deps = [...refs]
+      .filter((n) => paramNames.has(n) || stateNames.has(n))
+      .sort();
+    titleEffect = `  useEffect(() => { document.title = ${titleExpr}; }, [${deps.join(", ")}]);\n`;
+    usesEffect = true;
+  }
+  const effectiveUsesState = usesState || usesStateForTitle;
+
   const mantineImport =
     imports.size > 0
       ? `import { ${[...imports].sort().join(", ")} } from "@mantine/core";\n`
@@ -792,10 +828,14 @@ export function renderCustomLayoutPage(
   // Pages that DECLARE state but never reference it from the body
   // skip the import so unused-var warnings stay quiet (parallel to
   // how `usedParams` shapes the useParams destructure).
-  const reactImport = usesState
-    ? `import { useState } from "react";\n`
+  // Slice 11.12 — `useEffect` joins the same React import line.
+  const reactSpecifiers: string[] = [];
+  if (effectiveUsesState) reactSpecifiers.push("useState");
+  if (usesEffect) reactSpecifiers.push("useEffect");
+  const reactImport = reactSpecifiers.length > 0
+    ? `import { ${reactSpecifiers.join(", ")} } from "react";\n`
     : "";
-  const stateLines = usesState
+  const stateLines = effectiveUsesState
     ? state.map((f) => `  ${renderUseState(f)}\n`).join("")
     : "";
   const paramsType = hasParams
@@ -813,11 +853,34 @@ export function renderCustomLayoutPage(
   return `// Auto-generated.  Do not edit by hand.
 ${reactImport}${reactRouterImport}${mantineImport}
 export default function ${pageName}() {
-${paramsLine}${navigateLine}${stateLines}  return (
+${paramsLine}${navigateLine}${stateLines}${titleEffect}  return (
     ${indentJsx(tsx, "    ")}
   );
 }
 `;
+}
+
+/** Slice 11.12 — collect every name referenced in an expression
+ *  (via `ref` nodes), used to derive the deps array for the
+ *  title's `useEffect`.  Walks binary / unary / call subtrees. */
+function collectExprRefs(expr: ExprIR, out: Set<string>): void {
+  switch (expr.kind) {
+    case "ref":
+      out.add(expr.name);
+      return;
+    case "binary":
+      collectExprRefs(expr.left, out);
+      collectExprRefs(expr.right, out);
+      return;
+    case "unary":
+      collectExprRefs(expr.operand, out);
+      return;
+    case "call":
+      for (const a of expr.args) collectExprRefs(a, out);
+      return;
+    default:
+      return;
+  }
 }
 
 /** Slice 11.7 — render one `state {}` field as a React `useState`
