@@ -1,0 +1,235 @@
+// Slice 11.3 — recursive body walker for custom layouts.
+//
+// Pages whose body is composed of layout primitives (Stack /
+// Heading / Text / Button / Card) instead of scaffold archetypes
+// (List / Detail / Form) emit through the body walker.  Output
+// goes to `src/pages/<name-snake>.tsx` with App.tsx routing via
+// the existing `deriveExtraRoutesFromUi` pipeline.
+//
+// What this test pins:
+//   1. `body: Stack(Heading("X"), Text("Y"))` emits a TSX file
+//      with a Mantine `<Stack>` containing the children.
+//   2. Imports for the Mantine components used are emitted at
+//      the top of the page file.
+//   3. App.tsx imports + routes the custom-layout page.
+//   4. Nested composition works: Card("Title", Stack(Text("a"),
+//      Text("b"))) → nested JSX.
+//   5. Scaffold-archetype bodies (List/Detail/Form) STILL go
+//      through the scaffold dispatch path, not the walker.
+
+import { describe, expect, it } from "vitest";
+import { NodeFileSystem } from "langium/node";
+import { generateSystems } from "../src/system/index.js";
+import { createDddServices } from "../src/language/ddd-module.js";
+import type { Model } from "../src/language/generated/ast.js";
+
+async function buildAndGenerate(src: string): Promise<Map<string, string>> {
+  const services = createDddServices(NodeFileSystem);
+  const { parseHelper } = await import("langium/test");
+  const helper = parseHelper(services.Ddd);
+  const doc = await helper(src, { validation: true });
+  return generateSystems(doc.parseResult.value as Model).files;
+}
+
+describe("Slice 11.3 — recursive layout walker", () => {
+  it("emits Stack(Heading, Text) into a TSX file with Mantine imports", async () => {
+    const files = await buildAndGenerate(`
+      system S {
+        module M { context C { } }
+        ui WebApp {
+          page Welcome {
+            route: "/welcome"
+            body:  Stack(Heading("Welcome to Acme"), Text("Pick a destination."))
+          }
+        }
+        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable web {
+          platform: static
+          targets: api
+          ui: WebApp
+          port: 3001
+        }
+      }
+    `);
+    expect([...files.keys()]).toContain("web/src/pages/welcome.tsx");
+    const content = files.get("web/src/pages/welcome.tsx")!;
+    // Mantine imports for the components used.
+    expect(content).toMatch(
+      /import \{ Stack, Text, Title \} from "@mantine\/core";/,
+    );
+    // Function component named after the page.
+    expect(content).toMatch(/export default function Welcome\(\)/);
+    // JSX shape: Stack > Title order={2} + Text.
+    expect(content).toMatch(/<Stack>/);
+    expect(content).toMatch(/<Title order=\{2\}>Welcome to Acme<\/Title>/);
+    expect(content).toMatch(/<Text>Pick a destination\.<\/Text>/);
+    expect(content).toMatch(/<\/Stack>/);
+  });
+
+  it("App.tsx imports + routes the walker-rendered page", async () => {
+    const files = await buildAndGenerate(`
+      system S {
+        module M { context C { } }
+        ui WebApp {
+          page Welcome {
+            route: "/"
+            body:  Stack(Heading("Hello"))
+          }
+        }
+        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable web {
+          platform: static
+          targets: api
+          ui: WebApp
+          port: 3001
+        }
+      }
+    `);
+    const appTsx = files.get("web/src/App.tsx")!;
+    expect(appTsx).toMatch(/import Welcome from "\.\/pages\/welcome";/);
+    expect(appTsx).toMatch(/path="\/"\s+element=\{<Welcome \/>\}/);
+  });
+
+  it("supports `level:` named arg on Heading", async () => {
+    const files = await buildAndGenerate(`
+      system S {
+        module M { context C { } }
+        ui WebApp {
+          page Welcome {
+            route: "/welcome"
+            body:  Heading("Big", level: 1)
+          }
+        }
+        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable web {
+          platform: static
+          targets: api
+          ui: WebApp
+          port: 3001
+        }
+      }
+    `);
+    const content = files.get("web/src/pages/welcome.tsx")!;
+    expect(content).toMatch(/<Title order=\{1\}>Big<\/Title>/);
+  });
+
+  it("nested composition: Card(\"Stats\", Stack(Text(\"a\"), Text(\"b\")))", async () => {
+    const files = await buildAndGenerate(`
+      system S {
+        module M { context C { } }
+        ui WebApp {
+          page Dashboard {
+            route: "/dashboard"
+            body:  Card("Stats", Stack(Text("a"), Text("b")))
+          }
+        }
+        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable web {
+          platform: static
+          targets: api
+          ui: WebApp
+          port: 3001
+        }
+      }
+    `);
+    const content = files.get("web/src/pages/dashboard.tsx")!;
+    // Card imports Card + Title (for the title heading).
+    expect(content).toMatch(/Card/);
+    expect(content).toMatch(/Title/);
+    // Card structure with title + nested Stack.
+    expect(content).toMatch(/<Card withBorder padding="md">/);
+    expect(content).toMatch(/<Title order=\{3\}>Stats<\/Title>/);
+    expect(content).toMatch(/<Stack>/);
+    expect(content).toMatch(/<Text>a<\/Text>/);
+    expect(content).toMatch(/<Text>b<\/Text>/);
+  });
+
+  it("Button emits unwired in v0 (no onClick)", async () => {
+    const files = await buildAndGenerate(`
+      system S {
+        module M { context C { } }
+        ui WebApp {
+          page Welcome {
+            route: "/welcome"
+            body:  Button("Click me")
+          }
+        }
+        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable web {
+          platform: static
+          targets: api
+          ui: WebApp
+          port: 3001
+        }
+      }
+    `);
+    const content = files.get("web/src/pages/welcome.tsx")!;
+    expect(content).toMatch(/<Button>Click me<\/Button>/);
+    // No onClick wiring in v0.
+    expect(content).not.toMatch(/onClick=/);
+  });
+
+  it("scaffold-archetype bodies still dispatch through scaffold path (not the walker)", async () => {
+    const files = await buildAndGenerate(`
+      system S {
+        module M {
+          context C {
+            aggregate Order { x: int }
+            repository Orders for Order { }
+          }
+        }
+        ui WebApp {
+          page OrderList {
+            route: "/orders"
+            body:  List(of: Order)
+          }
+        }
+        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable web {
+          platform: static
+          targets: api
+          ui: WebApp
+          port: 3001
+        }
+      }
+    `);
+    // OrderList uses List(of: Order) — that's a scaffold
+    // archetype, not a layout primitive.  Goes to conventional
+    // path; walker doesn't fire.
+    expect([...files.keys()]).toContain("web/src/pages/orders/list.tsx");
+    expect(files.get("web/src/pages/order_list.tsx")).toBeUndefined();
+    // The conventional list page uses useAllOrders hook etc. —
+    // confirms the scaffold renderer fired, not the layout walker.
+    // The walker can't emit React Query hooks; if `useAll` is
+    // present, the scaffold path produced the file.
+    const content = files.get("web/src/pages/orders/list.tsx")!;
+    expect(content).toMatch(/useAll/);
+  });
+
+  it("unknown components leave a placeholder comment, no crash", async () => {
+    const files = await buildAndGenerate(`
+      system S {
+        module M { context C { } }
+        ui WebApp {
+          page Mixed {
+            route: "/mixed"
+            body:  Stack(Heading("Real"), SomeUnknownThing(foo: 42))
+          }
+        }
+        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable web {
+          platform: static
+          targets: api
+          ui: WebApp
+          port: 3001
+        }
+      }
+    `);
+    const content = files.get("web/src/pages/mixed.tsx")!;
+    expect(content).toMatch(/<Title order=\{2\}>Real<\/Title>/);
+    // Unknown component renders as a JSX comment placeholder, so
+    // the file still compiles even with an unrecognised primitive
+    // mid-tree.
+    expect(content).toMatch(/unknown layout component: SomeUnknownThing/);
+  });
+});

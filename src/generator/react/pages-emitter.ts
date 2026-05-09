@@ -56,6 +56,7 @@ import type { LoadedPack } from "./templating/loader.js";
 import { buildPageObjectModule } from "./page-objects-builder.js";
 import { buildWorkflowPageObject } from "./workflow-builder.js";
 import { buildViewPageObject } from "./view-builder.js";
+import { isWalkableLayoutBody, renderCustomLayoutPage } from "./body-walker.js";
 
 /** Inputs the page emitter needs in addition to the page IR.  Kept as
  *  a struct so additions (theme overrides, design-pack picks, sidebar
@@ -91,15 +92,26 @@ export function deriveExtraRoutesFromUi(
 ): import("./templating/preparers/app-shell.js").ExtraPageRoute[] {
   const out: import("./templating/preparers/app-shell.js").ExtraPageRoute[] = [];
   for (const page of ui.pages) {
-    const origin = page.scaffoldOrigin ?? inferBodyDispatch(page.body);
-    if (!origin) continue;
-    if (isConventionalOverride(page, origin)) continue;
     if (!page.route) continue;
-    out.push({
-      componentName: page.name,
-      importFrom: `./pages/${snake(page.name)}`,
-      route: page.route,
-    });
+    const origin = page.scaffoldOrigin ?? inferBodyDispatch(page.body);
+    if (origin) {
+      if (isConventionalOverride(page, origin)) continue;
+      out.push({
+        componentName: page.name,
+        importFrom: `./pages/${snake(page.name)}`,
+        route: page.route,
+      });
+      continue;
+    }
+    // Slice 11.3 — custom-layout pages (walker-rendered) also need
+    // an App.tsx import + Route.
+    if (isWalkableLayoutBody(page.body)) {
+      out.push({
+        componentName: page.name,
+        importFrom: `./pages/${snake(page.name)}`,
+        route: page.route,
+      });
+    }
   }
   return out;
 }
@@ -137,19 +149,32 @@ export function emitPagesForUi(
     // `scaffoldOrigin`; explicit pages with a recognisable body
     // (`body: List(of: Order)`, `body: Form(creates: T)`, etc.)
     // get one inferred from the body shape so the same renderer
-    // table fires.  Pages with a body the dispatcher doesn't
-    // recognise (custom layouts, unknown stdlib component names)
-    // are skipped silently for now — Slice 11.1 will route them
-    // through a deeper component-table walker.
-    const origin =
-      page.scaffoldOrigin ?? inferBodyDispatch(page.body);
-    if (!origin) continue;
-    emitScaffoldPage(page, origin, ctx, ui, {
-      aggregates: aggsForHome,
-      workflows: wfsForHome,
-      views: viewsForHome,
-      home: homeRenderer,
-    }).forEach((content, path) => out.set(path, content));
+    // table fires.
+    const origin = page.scaffoldOrigin ?? inferBodyDispatch(page.body);
+    if (origin) {
+      emitScaffoldPage(page, origin, ctx, ui, {
+        aggregates: aggsForHome,
+        workflows: wfsForHome,
+        views: viewsForHome,
+        home: homeRenderer,
+      }).forEach((content, path) => out.set(path, content));
+      continue;
+    }
+    // Slice 11.3 — bodies that aren't a scaffold archetype but
+    // ARE built from layout primitives (Stack / Heading / Text /
+    // Button / Card) route through the recursive walker.  Output
+    // goes to `src/pages/<name-snake>.tsx`; App.tsx routing comes
+    // through `deriveExtraRoutesFromUi` (Slice 11.1).
+    if (isWalkableLayoutBody(page.body)) {
+      out.set(
+        `src/pages/${snake(page.name)}.tsx`,
+        renderCustomLayoutPage(page.name, page.body!),
+      );
+      continue;
+    }
+    // Bodies the v0 dispatcher doesn't recognise are silently
+    // skipped (e.g. user-defined components composed of stdlib
+    // bits).  Future slice expands the walker's component table.
   }
   return out;
 }
