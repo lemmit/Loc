@@ -34,7 +34,11 @@ import {
   renderWorkflowForm,
   renderWorkflowsIndex,
 } from "./templating/render.js";
-import { emitPagesForUi, emitPageObjectsForUi } from "./pages-emitter.js";
+import {
+  emitPagesForUi,
+  emitPageObjectsForUi,
+  deriveExtraRoutesFromUi,
+} from "./pages-emitter.js";
 import { deriveSidebarFromUi } from "./menu-emitter.js";
 
 // ---------------------------------------------------------------------------
@@ -250,6 +254,14 @@ export function generateReactForContexts(
   // hardcoded shape — byte-identical to main's pre-Slice-6 output.
   const sidebarOverride = ui ? deriveSidebarFromUi(ui) : undefined;
 
+  // Slice 11.1 — explicit pages with non-conventional names need
+  // to register their import + route in App.tsx so React Router
+  // can mount them.  Pages that override a scaffolded shape at the
+  // conventional name keep the conventional path and are routed
+  // by the per-aggregate / -workflow / -view loop in
+  // `prepareAppShellVM`.
+  const extraRoutes = ui ? deriveExtraRoutesFromUi(ui) : undefined;
+
   out.set(
     "src/App.tsx",
     renderAppShell(
@@ -259,6 +271,7 @@ export function generateReactForContexts(
       sys.name,
       pack,
       sidebarOverride,
+      extraRoutes,
     ),
   );
   // Home page goes through `emitPagesForUi` when a `ui:` binding is

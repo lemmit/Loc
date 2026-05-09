@@ -103,6 +103,11 @@ export function renderAppShell(
   systemName: string,
   pack: LoadedPack,
   sidebarOverride?: import("./view-models.js").NavSectionVM[],
+  /** Slice 11.1 — extra Routes for explicit pages with non-
+   *  conventional names.  See
+   *  `src/generator/react/templating/preparers/app-shell.ts`
+   *  for the shape. */
+  extraRoutes?: import("./preparers/app-shell.js").ExtraPageRoute[],
 ): string {
   const vm = prepareAppShellVM(
     aggregates,
@@ -110,6 +115,7 @@ export function renderAppShell(
     views,
     systemName,
     sidebarOverride,
+    extraRoutes,
   );
   return pack.render("app-shell", vm);
 }
