@@ -477,15 +477,18 @@ function emitCard(
   depth: number,
 ): string {
   ctx.imports.add("Card");
-  // Card("title", content) — first positional title (string or
-  // ref); second positional is the body.  Mantine's Card uses
-  // Card.Section for the visual block separation.
+  // Card("title", content) — first positional title; second
+  // positional is the body.  Mantine's Card uses Card.Section for
+  // the visual block separation.
+  //
+  // Slice 11.10 — title detection: anything that's NOT a call
+  // expression is treated as the title (string literals, refs,
+  // binary ops, etc).  Calls are child components and skip the
+  // title slot — `Card(child)` renders a card with no heading.
   const positionals = positionalArgs(call);
   const titleArg = positionals[0];
   const titleIsTextLike =
-    titleArg !== undefined &&
-    (titleArg.kind === "literal" && titleArg.lit === "string"
-      || (titleArg.kind === "ref" && ctx.paramNames.has(titleArg.name)));
+    titleArg !== undefined && titleArg.kind !== "call";
   const contentExpr: ExprIR | undefined = titleIsTextLike
     ? positionals[1]
     : positionals[0];
@@ -619,7 +622,14 @@ function renderTextContent(
     // the gap visible).
     return `{/* ref: ${expr.name} */}`;
   }
-  return undefined;
+  // Slice 11.10 — anything else (binary op, unary, non-string
+  // literal): emit the JS-expression form wrapped as a JSX
+  // expression.  Powers patterns like `Heading("Welcome, " +
+  // name)`, `Text(count + 1)`, `Stat("Count", count * step)`.
+  // Calls fall through to undefined — those are child components,
+  // not text content, and should be walked through `walk` instead.
+  if (expr.kind === "call") return undefined;
+  return `{${emitExpr(expr, ctx)}}`;
 }
 
 /** Slice 11.4 helper — `firstPositionalContent` returns either a
