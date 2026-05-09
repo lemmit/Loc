@@ -58,7 +58,9 @@ export type MantineImport =
   | "Title"
   | "Text"
   | "Button"
-  | "Card";
+  | "Card"
+  | "Badge"
+  | "Divider";
 
 export interface WalkResult {
   tsx: string;
@@ -84,6 +86,9 @@ const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
   "Text",
   "Button",
   "Card",
+  "Stat",
+  "Badge",
+  "Divider",
 ]);
 
 export function isWalkableLayoutBody(body: ExprIR | undefined): boolean {
@@ -166,6 +171,12 @@ function emitComponent(
       return emitButton(call, ctx, depth);
     case "Card":
       return emitCard(call, ctx, depth);
+    case "Stat":
+      return emitStat(call, ctx, depth);
+    case "Badge":
+      return emitBadge(call, ctx, depth);
+    case "Divider":
+      return emitDivider(call, ctx, depth);
     default:
       return `{/* unknown layout component: ${call.name} */}`;
   }
@@ -295,6 +306,54 @@ function emitCard(
   return `<Card withBorder padding="md">\n${indent}${inner.join(`\n${indent}`)}\n${closeIndent}</Card>`;
 }
 
+function emitStat(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  // Stat(label, value) — small headline-stat card.  Mantine has no
+  // dedicated Stat component; the v0 emitter renders a Group of two
+  // stacked Texts (dimmed label + bold value).  Both slots accept
+  // string literals or route-param refs.
+  ctx.imports.add("Stack");
+  ctx.imports.add("Text");
+  const positionals = positionalArgs(call);
+  const labelArg = positionals[0];
+  const valueArg = positionals[1];
+  const label = labelArg ? renderTextContent(labelArg, ctx) ?? '""' : '""';
+  const value = valueArg ? renderTextContent(valueArg, ctx) ?? '""' : '""';
+  const indent = "  ".repeat(depth + 1);
+  const closeIndent = "  ".repeat(depth);
+  return `<Stack gap={2}>\n${indent}<Text size="sm" c="dimmed">${unwrapTextLiteral(label)}</Text>\n${indent}<Text fw={700} size="xl">${unwrapTextLiteral(value)}</Text>\n${closeIndent}</Stack>`;
+}
+
+function emitBadge(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  ctx.imports.add("Badge");
+  const label = firstPositionalContent(call, ctx) ?? '"Badge"';
+  void depth;
+  return `<Badge>${unwrapTextLiteral(label)}</Badge>`;
+}
+
+function emitDivider(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  ctx.imports.add("Divider");
+  void depth;
+  // Optional `label:` named arg — Mantine Divider accepts a string
+  // label rendered inline with the rule.
+  const label = stringNamed(call, "label");
+  if (label !== undefined) {
+    return `<Divider label=${JSON.stringify(label)} labelPosition="center" />`;
+  }
+  return `<Divider />`;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -370,6 +429,19 @@ function unwrapTextLiteral(s: string): string {
     return escapeJsxText(JSON.parse(s) as string);
   }
   return s;
+}
+
+function stringNamed(
+  call: ExprIR & { kind: "call" },
+  name: string,
+): string | undefined {
+  const argNames = call.argNames ?? [];
+  for (let i = 0; i < call.args.length; i++) {
+    if (argNames[i] !== name) continue;
+    const a = call.args[i]!;
+    if (a.kind === "literal" && a.lit === "string") return a.value;
+  }
+  return undefined;
 }
 
 function numericNamed(
