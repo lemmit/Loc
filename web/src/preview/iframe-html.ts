@@ -82,11 +82,23 @@ function needsTailwindCdn(css?: string): boolean {
 
 /** Tailwind Play CDN configuration — mirrors `themes/shadcn/tailwind-
  *  config.hbs` so the JIT compiler sees the same theme extension
- *  (CSS-variable colour palette, custom radius scale,
- *  tailwindcss-animate plugin substitute) the generated build would
- *  have used at compile time.  Inlined as a `<script>` rather than
- *  fetched so first paint doesn't need a second network round-trip
- *  for an external config module. */
+ *  (CSS-variable colour palette, custom radius scale) the generated
+ *  build would have used at compile time.  Inlined as a `<script>`
+ *  rather than fetched so first paint doesn't need a second network
+ *  round-trip for an external config module.
+ *
+ *  Drift guard: `test/iframe-tailwind-drift.test.ts` asserts the
+ *  `container`, `extend.colors`, and `extend.borderRadius` blocks
+ *  here match the shadcn pack's `tailwind-config.hbs` byte-for-byte
+ *  (after whitespace normalisation).  When updating one, update the
+ *  other and the test stays green; if they drift, the test names
+ *  the offending block.
+ *
+ *  Intentional divergence: the hbs ships `tailwindcss-animate` and
+ *  `keyframes`/`animation` blocks the Play CDN can't run (no plugin
+ *  loader available).  Animations on shadcn primitives that lean on
+ *  `tailwindcss-animate` (e.g. accordion) won't animate in the
+ *  preview but render fine in `npm run dev` of the generated app. */
 const TAILWIND_PLAY_CONFIG = `
 tailwind.config = {
   darkMode: ["class"],

@@ -14,7 +14,7 @@ const bundledTemplateLoader = fileURLToPath(
 const loomLoaderShim = (): Plugin => ({
   name: "loom-loader-shim",
   enforce: "pre",
-  async resolveId(source, importer) {
+  resolveId(source) {
     if (source.endsWith("/templating/loader-fs.js")) {
       return bundledTemplateLoader;
     }
