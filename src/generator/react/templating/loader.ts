@@ -141,7 +141,7 @@ export function compilePack(
   rootDir: string,
   manifest: PackManifest,
   sources: Record<string, string>,
-  pathFor: (fileName: string) => string = (f) => `${rootDir}/${f}`,
+  pathFor: (fileName: string) => string,
 ): LoadedPack {
   registerHelpersOnce();
   if (!manifest.emits || typeof manifest.emits !== "object") {
