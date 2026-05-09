@@ -174,11 +174,14 @@ export function emitPagesForUi(
         // Slice 11.7 — also pass the page's `state {}` fields so
         // the walker can resolve state refs and emit `useState`
         // declarations + `setX(…)` setter calls in onClick handlers.
+        // Slice 11.12 — also pass the page's optional `title:` expr
+        // so the walker shell can emit `useEffect(() => { document.title = ... })`.
         renderCustomLayoutPage(
           page.name,
           page.body!,
           page.params,
           page.state,
+          page.title,
         ),
       );
       continue;
