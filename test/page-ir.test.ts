@@ -71,27 +71,31 @@ describe("page metamodel — IR shape (Slice 2)", () => {
     expect(firstSystem(loom).uis.map((u) => u.name)).toEqual(["A", "B", "C"]);
   });
 
-  it("lowers `scaffold modules: …` as a literal directive — not expanded", async () => {
+  it("lowers `scaffold modules: …` as a literal directive (also kept on UiIR)", async () => {
+    // Slice 10 — scaffold expansion now happens at the AST layer.
+    // The lowering still records the original scaffold directives
+    // on `ui.scaffolds` for tooling that wants to inspect what the
+    // user wrote (debugging, codegen heuristics).  The synthesised
+    // pages also show up on `ui.pages` because the AST expander
+    // injected them as real `Page` AST nodes.
     const loom = await buildLoom(`
       system Acme {
+        module M { context A { aggregate Order { x: int } repository Orders for Order { } } }
         ui WebApp {
-          scaffold modules: M, N
-          scaffold aggregates: Order
-          scaffold workflows: placeOrder
-          scaffold views: ActiveOrders, OrderSummary
+          scaffold modules: M
         }
       }
     `);
     const ui = uiByName(loom, "WebApp");
     expect(ui.scaffolds).toEqual([
-      { selector: "modules", targets: ["M", "N"] },
-      { selector: "aggregates", targets: ["Order"] },
-      { selector: "workflows", targets: ["placeOrder"] },
-      { selector: "views", targets: ["ActiveOrders", "OrderSummary"] },
+      { selector: "modules", targets: ["M"] },
     ]);
-    // Slice 2: scaffold expansion is Slice 4's job — `pages` stays
-    // empty here even though scaffolds reference real domain.
-    expect(ui.pages).toEqual([]);
+    // Pages were synthesised at AST time — by the time lowering
+    // runs, they're already on the ui's members.
+    const pageNames = ui.pages.map((p) => p.name).sort();
+    expect(pageNames).toContain("OrderList");
+    expect(pageNames).toContain("OrderNew");
+    expect(pageNames).toContain("OrderDetail");
   });
 
   it("lowers a `page` with route/title/requires/state/body/menu meta", async () => {

@@ -448,13 +448,13 @@ describe("validation", () => {
     });
 
     it("rejects a menu link to a page declared in a different ui", async () => {
-      // Slice 6: menu links carry a bare name (not a cross-
-      // reference), because scaffold-synthesised pages don't exist
-      // at AST link time.  The validator catches "links to a name
-      // that isn't a page in this ui AND there are no scaffold
-      // directives that could synthesise it" at the AST layer; the
-      // looser "ui has scaffolds, name doesn't match anything
-      // post-expansion" case is caught by the post-IR validator.
+      // Slice 10 — page links are real Langium cross-references
+      // again now that scaffold expansion runs at the AST level
+      // and synthesised pages are first-class AST nodes.  Cross-
+      // ui resolution fails through Langium's standard linker
+      // ("Could not resolve reference to Page named 'X'") because
+      // the default scope provider scopes `[Page:LooseName]`
+      // resolution to the containing ui.
       const { errors } = await parse(`
         system S {
           ui A {
@@ -469,7 +469,7 @@ describe("validation", () => {
       `);
       expect(
         errors.some((e) =>
-          /'link Home' references no page in ui 'B'/.test(e),
+          /Could not resolve reference to Page named 'Home'/.test(e),
         ),
       ).toBe(true);
     });

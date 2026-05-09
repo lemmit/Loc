@@ -15,6 +15,7 @@ import { DddHoverProvider } from "./lsp/ddd-hover.js";
 import { DddNodeKindProvider } from "./lsp/ddd-node-kind.js";
 import { DddDefinitionProvider } from "./lsp/ddd-definition.js";
 import { DddCompletionProvider } from "./lsp/ddd-completion.js";
+import { registerScaffoldAstExpander } from "./ddd-scaffold-ast-expander.js";
 
 export type DddAddedServices = {
   validation: {
@@ -61,5 +62,11 @@ export function createDddServices(context: DefaultSharedModuleContext): {
   const Ddd = inject(createDefaultModule({ shared }), DddGeneratedModule, DddModule);
   shared.ServiceRegistry.register(Ddd);
   registerValidationChecks(Ddd);
+  // Spike: AST-to-AST scaffold expansion.  Registers a
+  // DocumentState.Parsed hook that synthesises Page AST nodes for
+  // every Scaffold directive — runs BEFORE the linker resolves
+  // cross-references, so a `[Page:ID]` ref to a scaffold-derived
+  // name resolves through Langium's standard machinery.
+  registerScaffoldAstExpander(shared);
   return { shared, Ddd };
 }

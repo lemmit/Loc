@@ -11,7 +11,6 @@ import type {
   TypeIR,
 } from "./loom-ir.js";
 import { allContexts, findUsesCurrentUser } from "./loom-ir.js";
-import { expandScaffolds } from "./scaffold-expand.js";
 import { allPlatforms } from "../platform/registry.js";
 import { camel, plural, snake } from "../util/naming.js";
 
@@ -48,7 +47,12 @@ export function validateLoomModel(loom: LoomModel): LoomDiagnostic[] {
     validateReactIdReferences(sys, diags);
     validateAuth(sys, diags);
     validatePermissions(sys, diags);
-    validateScaffoldDoubles(sys, diags);
+    // Slice 10 — scaffold expansion now runs at the AST level
+    // (`src/language/ddd-scaffold-ast-expander.ts`).  Duplicate-page
+    // detection happens through Langium's standard scope-walking
+    // (every synthesised page is a real AST node, so two scaffolds
+    // producing the same name surface as duplicate-symbol errors
+    // from the linker).  The IR-level shim is gone.
     // Theme validation lives in the Langium-side validator
     // (`ddd-validator.ts:checkTheme`) where the raw AST is in
     // scope — unknown property names, duplicates, and the radius
@@ -1446,32 +1450,14 @@ function validateCurrentUserScope(
 
 const UNKNOWN_PERMISSION_SENTINEL = "__unknown_permission__:";
 
-// Slice 4 — cross-directive double-scaffold detection.  The Slice 3
-// validator catches "same target listed twice in one scaffold
-// directive"; this layer catches the trickier case where two
-// directives at different granularities produce the same generated
-// page name (e.g. `scaffold modules: Sales` + `scaffold aggregates:
-// Order` where Order is in Sales).  We delegate to the expander —
-// the same one `enrichLoomModel` already calls — so the rule is
-// definitionally consistent with what gets emitted.
-function validateScaffoldDoubles(sys: SystemIR, diags: LoomDiagnostic[]): void {
-  for (const ui of sys.uis) {
-    const result = expandScaffolds(ui, sys);
-    for (const d of result.diagnostics) {
-      const sourceLabels = d.sources
-        .map((sc) => `${sc.selector}: ${sc.targets.join(", ")}`)
-        .join("  +  ");
-      diags.push({
-        severity: "error",
-        source: `${sys.name}/ui:${ui.name}`,
-        message:
-          `ui '${ui.name}': scaffold directives produce duplicate page '${d.pageName}' — ` +
-          `same generated name from multiple sources (${sourceLabels}). ` +
-          `Pick a single granularity, or write an explicit \`page ${d.pageName} { … }\` to make the override deliberate.`,
-      });
-    }
-  }
-}
+// Slice 10 — `validateScaffoldDoubles` deleted.  Cross-directive
+// double-scaffold detection now happens at the AST level: two
+// scaffold directives producing the same generated page name surface
+// either as a duplicate-symbol error from Langium's linker (when both
+// pages reach the AST) or as a no-op in the expander (the second
+// synthesis is suppressed by the per-ui name set).  Keeping the IR-
+// level fallback would either duplicate the error or produce a
+// confusing second diagnostic; better to let the AST layer own it.
 
 function validatePermissions(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const mod of sys.modules) {
