@@ -55,6 +55,15 @@ export interface PackManifest {
    *  for `components-ui-*` → `src/components/ui/{1}.tsx`; Mantine
    *  ships none. */
   shellGlobs?: Record<string, string>;
+  /** Optional lookup-table helpers.  Each entry registers a
+   *  Handlebars helper named after the key whose body is
+   *  `(input) => table[input] ?? input` — unknown keys fall
+   *  through verbatim so missing entries surface at TS-compile
+   *  time rather than being silently dropped.  shadcn ships
+   *  `lucide` (tabler-icon-name → lucide-icon-name remap); a
+   *  heroicons-flavoured pack would ship its own `heroicons`
+   *  helper here. */
+  helpers?: Record<string, Record<string, string>>;
 }
 
 /** Compiled, ready-to-render template plus the source path it came
@@ -116,35 +125,28 @@ export function registerHelpersOnce(): void {
     const s = typeof sep === "string" ? sep : ", ";
     return new Handlebars.SafeString(arr.join(s));
   });
-  // Tabler → lucide icon-name remap.  iconForOp() in pages-builder
-  // returns tabler names (IconPlus, IconCheck, …) by historical
-  // accident — shadcn pack uses lucide-react which exports the
-  // same conceptual icons under shorter names (Plus, Check, …).
-  // Templates that target lucide use `{{lucide icon}}` to project
-  // the tabler name onto its lucide twin.  Anything not in the
-  // map falls through unchanged so unknown verbs still produce
-  // valid JSX (lucide will throw at import-resolve time, which is
-  // the right error to surface).
-  const tablerToLucide: Record<string, string> = {
-    IconPlus: "Plus",
-    IconTrash: "Trash2",
-    IconCheck: "Check",
-    IconX: "X",
-    IconTruckDelivery: "Truck",
-    IconCreditCard: "CreditCard",
-    IconPlayerPlay: "Play",
-    IconPlayerStop: "Square",
-    IconPencil: "Pencil",
-    IconLink: "Link",
-    IconAlertCircle: "AlertCircle",
-    IconAlertTriangle: "AlertTriangle",
-    IconBolt: "Zap",
-    IconLayoutList: "LayoutList",
-  };
-  Handlebars.registerHelper("lucide", (s: unknown) => {
-    const k = String(s);
-    return tablerToLucide[k] ?? k;
-  });
+}
+
+/** Register pack-declared lookup-table helpers.  Each entry in the
+ *  manifest's `helpers` map is exposed as a Handlebars helper that
+ *  takes a key and returns `table[key] ?? key` — the unknown-key
+ *  fall-through preserves the verb so missing entries surface as
+ *  import-resolve errors at TS-compile time rather than being
+ *  silently dropped.
+ *
+ *  Helpers register globally on Handlebars (no per-pack scoping).
+ *  In practice each generation loads exactly one pack, so the
+ *  global registration is fine; if two packs declared the same
+ *  helper name with different tables, the most recently loaded
+ *  pack wins.  shadcn's `lucide` helper (tabler→lucide name
+ *  remap) is the only built-in user today. */
+function registerPackHelpers(manifest: PackManifest): void {
+  for (const [name, table] of Object.entries(manifest.helpers ?? {})) {
+    Handlebars.registerHelper(name, (key: unknown) => {
+      const k = String(key);
+      return table[k] ?? k;
+    });
+  }
 }
 
 /** Compile a pack from its manifest plus a `name → source` map of
@@ -161,6 +163,7 @@ export function compilePack(
   pathFor: (fileName: string) => string,
 ): LoadedPack {
   registerHelpersOnce();
+  registerPackHelpers(manifest);
   if (!manifest.emits || typeof manifest.emits !== "object") {
     throw new Error(
       `loader: pack at ${rootDir} has no \`emits\` map in pack.json.  Add { emits: { "page-list": "page-list.hbs", ... } }.`,

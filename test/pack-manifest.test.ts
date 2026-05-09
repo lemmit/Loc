@@ -70,6 +70,43 @@ describe("pack manifest: shellFiles + shellGlobs", () => {
   });
 });
 
+describe("pack manifest: helpers", () => {
+  it("registers lookup-table helpers declared in `helpers`", () => {
+    const dir = makePack(
+      {
+        name: "fixture-helpers",
+        version: "0.0.0",
+        emits: { greet: "greet.hbs" },
+        helpers: {
+          // Per-pack icon-rename example, mirroring shadcn's `lucide`.
+          rename: { Foo: "Bar", Baz: "Qux" },
+        },
+      },
+      { "greet.hbs": "{{rename name}}" },
+    );
+    const pack = loadPack(dir);
+    expect(pack.render("greet", { name: "Foo" })).toBe("Bar");
+    // Unknown keys fall through verbatim — matches the lucide helper's
+    // contract.  Templates rely on this so an unmapped icon name still
+    // produces a valid identifier (TS compile then catches the typo).
+    expect(pack.render("greet", { name: "Unknown" })).toBe("Unknown");
+  });
+
+  it("treats `helpers` as optional", () => {
+    const dir = makePack(
+      {
+        name: "fixture-no-helpers",
+        version: "0.0.0",
+        emits: { greet: "greet.hbs" },
+      },
+      { "greet.hbs": "hi {{name}}" },
+    );
+    const pack = loadPack(dir);
+    expect(pack.manifest.helpers).toBeUndefined();
+    expect(pack.render("greet", { name: "world" })).toBe("hi world");
+  });
+});
+
 describe("resolvePackDir", () => {
   it("resolves the built-in `mantine` and `shadcn` ids to the repo themes/", () => {
     const m = resolvePackDir("mantine");

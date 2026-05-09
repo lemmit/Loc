@@ -78,5 +78,23 @@
   },
   "shellGlobs": {
     "components-ui-*": "src/components/ui/{1}.tsx"
+  },
+  "helpers": {
+    "lucide": {
+      "IconPlus": "Plus",
+      "IconTrash": "Trash2",
+      "IconCheck": "Check",
+      "IconX": "X",
+      "IconTruckDelivery": "Truck",
+      "IconCreditCard": "CreditCard",
+      "IconPlayerPlay": "Play",
+      "IconPlayerStop": "Square",
+      "IconPencil": "Pencil",
+      "IconLink": "Link",
+      "IconAlertCircle": "AlertCircle",
+      "IconAlertTriangle": "AlertTriangle",
+      "IconBolt": "Zap",
+      "IconLayoutList": "LayoutList"
+    }
   }
 }
