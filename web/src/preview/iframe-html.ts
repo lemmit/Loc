@@ -57,8 +57,90 @@ const ESCAPE_END_SCRIPT = (s: string): string => s.replace(/<\/script/gi, "<\\/s
 
 function styleTagFor(css?: string): string {
   if (!css) return "";
+  // shadcn-generated globals.css starts with `@tailwind base; @tailwind
+  // components; @tailwind utilities;` — those are PostCSS directives that
+  // need a build step.  In the playground we don't have a Tailwind build
+  // pipeline (esbuild-wasm's CSS loader is plain text), so we detect the
+  // directives and route the CSS through Tailwind's Play CDN: a JIT
+  // compiler that processes `<style type="text/tailwindcss">` blocks at
+  // load time and watches the DOM for new classes.  Mantine's
+  // pre-compiled CSS goes through the regular `<style>` tag — no JIT
+  // needed.
+  if (/^\s*@tailwind\b/m.test(css)) {
+    return `<style type="text/tailwindcss">\n${css}\n</style>`;
+  }
   return `<style>\n${css}\n</style>`;
 }
+
+/** True when the bundled CSS contains `@tailwind` directives, which is
+ *  the playground's signal that the iframe needs the Tailwind Play CDN
+ *  + a matching tailwind.config (currently identifies the shadcn pack;
+ *  future packs that ship Tailwind would benefit from the same path). */
+function needsTailwindCdn(css?: string): boolean {
+  return !!css && /^\s*@tailwind\b/m.test(css);
+}
+
+/** Tailwind Play CDN configuration — mirrors `themes/shadcn/tailwind-
+ *  config.hbs` so the JIT compiler sees the same theme extension
+ *  (CSS-variable colour palette, custom radius scale,
+ *  tailwindcss-animate plugin substitute) the generated build would
+ *  have used at compile time.  Inlined as a `<script>` rather than
+ *  fetched so first paint doesn't need a second network round-trip
+ *  for an external config module. */
+const TAILWIND_PLAY_CONFIG = `
+tailwind.config = {
+  darkMode: ["class"],
+  theme: {
+    container: {
+      center: true,
+      padding: "2rem",
+      screens: { "2xl": "1400px" },
+    },
+    extend: {
+      colors: {
+        border: "hsl(var(--border))",
+        input: "hsl(var(--input))",
+        ring: "hsl(var(--ring))",
+        background: "hsl(var(--background))",
+        foreground: "hsl(var(--foreground))",
+        primary: {
+          DEFAULT: "hsl(var(--primary))",
+          foreground: "hsl(var(--primary-foreground))",
+        },
+        secondary: {
+          DEFAULT: "hsl(var(--secondary))",
+          foreground: "hsl(var(--secondary-foreground))",
+        },
+        destructive: {
+          DEFAULT: "hsl(var(--destructive))",
+          foreground: "hsl(var(--destructive-foreground))",
+        },
+        muted: {
+          DEFAULT: "hsl(var(--muted))",
+          foreground: "hsl(var(--muted-foreground))",
+        },
+        accent: {
+          DEFAULT: "hsl(var(--accent))",
+          foreground: "hsl(var(--accent-foreground))",
+        },
+        popover: {
+          DEFAULT: "hsl(var(--popover))",
+          foreground: "hsl(var(--popover-foreground))",
+        },
+        card: {
+          DEFAULT: "hsl(var(--card))",
+          foreground: "hsl(var(--card-foreground))",
+        },
+      },
+      borderRadius: {
+        lg: "var(--radius)",
+        md: "calc(var(--radius) - 2px)",
+        sm: "calc(var(--radius) - 4px)",
+      },
+    },
+  },
+};
+`.trim();
 
 export function makePreviewHtml(args: MakePreviewArgs): string {
   const map = importMap(args.versions ?? {});
@@ -89,6 +171,15 @@ export function makePreviewHtml(args: MakePreviewArgs): string {
         `window.__LOOM_API_BASE__ = ${JSON.stringify(args.sandboxBase + "/runtime")};` +
         `</script>`
       : "";
+  // Tailwind Play CDN + config — only when the bundle's CSS uses
+  // `@tailwind` directives.  The CDN script must run BEFORE the
+  // bundle so its DOM observer is registered; we put the config
+  // script first (the CDN reads `window.tailwind.config` on init)
+  // and the CDN script second.
+  const tailwindScripts = needsTailwindCdn(args.css)
+    ? `<script>${TAILWIND_PLAY_CONFIG}</script>\n` +
+      `<script src="https://cdn.tailwindcss.com"></script>`
+    : "";
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -98,6 +189,7 @@ export function makePreviewHtml(args: MakePreviewArgs): string {
 <script type="importmap">
 ${ESCAPE_END_SCRIPT(importMapJson)}
 </script>
+${tailwindScripts}
 ${styleTagFor(args.css)}
 <style>
   html, body { margin: 0; padding: 0; height: 100%; }
