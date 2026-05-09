@@ -107,13 +107,19 @@ export function emitPagesForUi(
   }
 
   for (const page of ui.pages) {
-    if (page.source !== "scaffold" || !page.scaffoldOrigin) {
-      // Slice 6 will own the explicit-page emission via the closed-
-      // stdlib component table.  For v0 the bulk-scaffold case has
-      // no explicit pages.
-      continue;
-    }
-    emitScaffoldPage(page, page.scaffoldOrigin, ctx, ui, {
+    // Slice 11 — every page (scaffold OR explicit) routes through
+    // the same dispatch.  Synthesised pages already carry a
+    // `scaffoldOrigin`; explicit pages with a recognisable body
+    // (`body: List(of: Order)`, `body: Form(creates: T)`, etc.)
+    // get one inferred from the body shape so the same renderer
+    // table fires.  Pages with a body the dispatcher doesn't
+    // recognise (custom layouts, unknown stdlib component names)
+    // are skipped silently for now — Slice 11.1 will route them
+    // through a deeper component-table walker.
+    const origin =
+      page.scaffoldOrigin ?? inferBodyDispatch(page.body);
+    if (!origin) continue;
+    emitScaffoldPage(page, origin, ctx, ui, {
       aggregates: aggsForHome,
       workflows: wfsForHome,
       views: viewsForHome,
@@ -121,6 +127,88 @@ export function emitPagesForUi(
     }).forEach((content, path) => out.set(path, content));
   }
   return out;
+}
+
+/** Recover a `ScaffoldOriginIR` from a page body's call shape.
+ *  Scaffold-synthesised pages set this directly during lowering
+ *  (`lowerPage` reads `body.kind === "call" && body.name === "List"`
+ *  and produces the matching origin); for explicit pages we run the
+ *  same inference at emit time so the dispatch table fires for both
+ *  paths uniformly.  Returns `undefined` for bodies the v0
+ *  dispatcher doesn't recognise — caller treats this as "skip
+ *  emission."  When/if explicit pages need a deeper walker (custom
+ *  layouts, nested components), this is the seam the v0.x slice
+ *  swaps out. */
+function inferBodyDispatch(
+  body: import("../../ir/loom-ir.js").ExprIR | undefined,
+): ScaffoldOriginIR | undefined {
+  if (!body || body.kind !== "call") return undefined;
+  const argNames = body.argNames ?? [];
+  const argRef = (i: number): string | undefined => {
+    const arg = body.args[i];
+    if (!arg) return undefined;
+    if (arg.kind === "ref") return arg.name;
+    if (arg.kind === "literal" && arg.lit === "string") return arg.value;
+    return undefined;
+  };
+  switch (body.name) {
+    case "List": {
+      if (argNames[0] !== "of") return undefined;
+      const target = argRef(0);
+      if (!target) return undefined;
+      if (target.startsWith("view ")) {
+        return {
+          kind: "view-list",
+          viewName: target.slice(5),
+          contextName: "",
+        };
+      }
+      return {
+        kind: "aggregate-list",
+        aggregateName: target,
+        contextName: "",
+      };
+    }
+    case "Form": {
+      if (argNames[0] === "creates") {
+        const target = argRef(0);
+        if (!target) return undefined;
+        return {
+          kind: "aggregate-new",
+          aggregateName: target,
+          contextName: "",
+        };
+      }
+      if (argNames[0] === "runs") {
+        const target = argRef(0);
+        if (!target) return undefined;
+        return {
+          kind: "workflow-form",
+          workflowName: target,
+          contextName: "",
+        };
+      }
+      return undefined;
+    }
+    case "Detail": {
+      if (argNames[0] !== "of") return undefined;
+      const target = argRef(0);
+      if (!target) return undefined;
+      return {
+        kind: "aggregate-detail",
+        aggregateName: target,
+        contextName: "",
+      };
+    }
+    case "Home":
+      return { kind: "home" };
+    case "WorkflowsIndex":
+      return { kind: "workflows-index" };
+    case "ViewsIndex":
+      return { kind: "views-index" };
+    default:
+      return undefined;
+  }
 }
 
 interface SharedRenderInputs {
@@ -312,8 +400,10 @@ export function emitPageObjectsForUi(
   const seenViews = new Set<string>();
 
   for (const page of ui.pages) {
-    const origin = page.scaffoldOrigin;
-    if (!origin) continue; // Explicit pages don't yet emit page objects.
+    // Slice 11 — explicit pages with recognisable bodies route
+    // through the same dispatch as scaffold-synthesised pages.
+    const origin = page.scaffoldOrigin ?? inferBodyDispatch(page.body);
+    if (!origin) continue;
     switch (origin.kind) {
       case "aggregate-list":
       case "aggregate-new":
