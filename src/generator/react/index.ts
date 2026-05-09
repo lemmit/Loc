@@ -19,7 +19,7 @@ import {
   buildViewsApiModule,
   hasAnyView,
 } from "./view-builder.js";
-import { loadPack, resolvePackDir } from "./templating/loader.js";
+import { loadPack, resolvePackDir } from "./templating/loader-fs.js";
 import {
   renderAppShell,
   renderDetailPage,
