@@ -64,6 +64,7 @@ export type MantineImport =
   | "Group"
   | "Grid"
   | "Tabs"
+  | "Center"
   | "Title"
   | "Text"
   | "Button"
@@ -100,6 +101,8 @@ const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
   "Group",
   "Grid",
   "Tabs",
+  "Toolbar",
+  "Empty",
   "Heading",
   "Text",
   "Button",
@@ -203,6 +206,10 @@ function emitComponent(
       return emitGrid(call, ctx, depth);
     case "Tabs":
       return emitTabs(call, ctx, depth);
+    case "Toolbar":
+      return emitToolbar(call, ctx, depth);
+    case "Empty":
+      return emitEmpty(call, ctx, depth);
     case "Heading":
       return emitHeading(call, ctx, depth);
     case "Text":
@@ -342,6 +349,38 @@ function slugify(s: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+function emitToolbar(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  // Toolbar(...children) — same children-as-positionals contract
+  // as Group, but with `justify="space-between"` to push left- and
+  // right-aligned children apart (canonical page-header layout).
+  ctx.imports.add("Group");
+  const children = positionalChildren(call, ctx, depth + 1);
+  if (children.length === 0) return `<Group justify="space-between" />`;
+  const indent = "  ".repeat(depth + 1);
+  const closeIndent = "  ".repeat(depth);
+  return `<Group justify="space-between">\n${indent}${children.join(`\n${indent}`)}\n${closeIndent}</Group>`;
+}
+
+function emitEmpty(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  // Empty("No results yet") — empty-state placeholder.  Mantine
+  // has no dedicated component; v0 composes a centered dimmed
+  // text block.  The first positional is the message; refs / ops
+  // welcome (routes through renderTextContent).
+  ctx.imports.add("Center");
+  ctx.imports.add("Text");
+  const msg = firstPositionalContent(call, ctx) ?? '"No results."';
+  void depth;
+  return `<Center mih={200}><Text c="dimmed">${unwrapTextLiteral(msg)}</Text></Center>`;
 }
 
 function emitHeading(
