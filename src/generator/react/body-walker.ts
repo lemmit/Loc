@@ -47,7 +47,13 @@
 //   - `isWalkableLayoutBody(body)` — predicate the page emitter
 //     uses to decide whether to dispatch to the walker.
 
-import type { ExprIR, ParamIR } from "../../ir/loom-ir.js";
+import type {
+  ExprIR,
+  ParamIR,
+  StateFieldIR,
+  StmtIR,
+  TypeIR,
+} from "../../ir/loom-ir.js";
 
 /** Mantine specifiers the walker accumulates as it descends through
  *  the body.  Caller renders these as a single
@@ -75,6 +81,12 @@ export interface WalkResult {
    *  The page-shell adds `import { useNavigate }` and a
    *  `const navigate = useNavigate();` line when set. */
   usesNavigate: boolean;
+  /** Slice 11.7 — true when any walked node emitted JSX that needs
+   *  a `useState` hook in scope (state-field refs in the body or
+   *  `setX(...)` calls in event handlers).  The shell emits a
+   *  `useState` import + per-field `const [x, setX] = useState(...)`
+   *  declarations when set. */
+  usesState: boolean;
 }
 
 /** Component names the walker recognises.  Used by the page
@@ -103,12 +115,19 @@ export function walkBodyToTsx(
    *  names emit as `{name}` JSX expressions (resolved by
    *  `useParams()` at render time). */
   paramNames: ReadonlySet<string> = new Set(),
+  /** Slice 11.7 — names of the page's `state {}` fields; refs in
+   *  body position emit as `{name}` JSX expressions (resolved by
+   *  `useState` in the shell), and `:=` assignments in event-
+   *  handler lambdas lower to the React `setX(...)` setter. */
+  stateNames: ReadonlySet<string> = new Set(),
 ): WalkResult {
   const ctx: WalkContext = {
     imports: new Set(),
     paramNames,
     usedParams: new Set(),
     usesNavigate: false,
+    stateNames,
+    usesState: false,
   };
   const tsx = walk(body, ctx, 0);
   return {
@@ -116,6 +135,7 @@ export function walkBodyToTsx(
     imports: ctx.imports,
     usedParams: ctx.usedParams,
     usesNavigate: ctx.usesNavigate,
+    usesState: ctx.usesState,
   };
 }
 
@@ -124,6 +144,8 @@ interface WalkContext {
   paramNames: ReadonlySet<string>;
   usedParams: Set<string>;
   usesNavigate: boolean;
+  stateNames: ReadonlySet<string>;
+  usesState: boolean;
 }
 
 function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
@@ -147,6 +169,12 @@ function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
       // build error stays visible.
       if (ctx.paramNames.has(expr.name)) {
         ctx.usedParams.add(expr.name);
+        return `{${expr.name}}`;
+      }
+      // Slice 11.7 — refs that match a state field name emit the
+      // same way; the shell brings them into scope via `useState`.
+      if (ctx.stateNames.has(expr.name)) {
+        ctx.usesState = true;
         return `{${expr.name}}`;
       }
       return `{/* ref: ${expr.name} */}`;
@@ -231,6 +259,16 @@ function emitButton(
   ctx.imports.add("Button");
   const label = firstPositionalContent(call, ctx) ?? '"Button"';
   void depth;
+  // Slice 11.7 — `onClick:` lambda named arg wires the button to
+  // a multi-statement event handler.  Lambda block-body lowers
+  // statement-by-statement: `:=` against a state field becomes
+  // `setX(...)`; bare expressions are emitted as-is.  Takes
+  // priority over `to:` if both are written (more general).
+  const onClick = lambdaArg(call, "onClick");
+  if (onClick && (onClick.block || onClick.body)) {
+    const handler = emitLambdaBody(onClick, ctx);
+    return `<Button onClick={${handler}}>${unwrapTextLiteral(label)}</Button>`;
+  }
   // Slice 11.5 — `to:` named arg wires the button to a React
   // Router navigate call.  Accepts either a string-literal path
   // (`to: "/orders"`) or a route-param ref (`to: id` → resolves
@@ -245,6 +283,101 @@ function emitButton(
   }
   // No action wiring — bare button.
   return `<Button>${unwrapTextLiteral(label)}</Button>`;
+}
+
+/** Slice 11.7 — extract a lambda-shaped named arg from a call.
+ *  Returns the lambda IR sub-node (its `param`/`body`/`block`
+ *  fields) so callers can emit the handler.  Returns undefined
+ *  when the named arg is missing or isn't a lambda. */
+function lambdaArg(
+  call: ExprIR & { kind: "call" },
+  name: string,
+): (ExprIR & { kind: "lambda" }) | undefined {
+  const argNames = call.argNames ?? [];
+  for (let i = 0; i < call.args.length; i++) {
+    if (argNames[i] !== name) continue;
+    const a = call.args[i]!;
+    if (a.kind === "lambda") return a;
+  }
+  return undefined;
+}
+
+/** Render a Lambda IR as a TS arrow function suitable for an event
+ *  handler position.  The lambda's source-side `param` name is
+ *  dropped — v0 walker output is event-data-agnostic and emitting
+ *  `() => …` keeps the generated code clean (no unused-var
+ *  warnings).  Block-body lambdas emit a brace-wrapped sequence of
+ *  statements; expression-body lambdas emit a single expression. */
+function emitLambdaBody(
+  lam: ExprIR & { kind: "lambda" },
+  ctx: WalkContext,
+): string {
+  if (lam.block && lam.block.length > 0) {
+    const stmts = lam.block.map((s) => emitStmt(s, ctx)).join(" ");
+    return `() => { ${stmts} }`;
+  }
+  if (lam.body) {
+    return `() => ${emitExpr(lam.body, ctx)}`;
+  }
+  return `() => {}`;
+}
+
+/** Render an `ExprIR` as a JS-expression string (NOT JSX).  Used
+ *  for the right-hand side of state assignments (`count := count +
+ *  1` → `count + 1`) and lambda expression bodies.  State + param
+ *  refs render as bare identifiers (they're in scope via
+ *  `useState` / `useParams` destructure). */
+function emitExpr(expr: ExprIR, ctx: WalkContext): string {
+  switch (expr.kind) {
+    case "literal":
+      if (expr.lit === "string") return JSON.stringify(expr.value);
+      if (expr.lit === "bool") return expr.value;
+      if (expr.lit === "null") return "null";
+      // int / decimal / now → emit as numeric literal verbatim.
+      return String(expr.value);
+    case "ref":
+      if (ctx.stateNames.has(expr.name)) {
+        ctx.usesState = true;
+        return expr.name;
+      }
+      if (ctx.paramNames.has(expr.name)) {
+        ctx.usedParams.add(expr.name);
+        return expr.name;
+      }
+      return `/* unresolved: ${expr.name} */ undefined`;
+    case "binary":
+      return `(${emitExpr(expr.left, ctx)} ${expr.op} ${emitExpr(expr.right, ctx)})`;
+    case "unary":
+      return `(${expr.op}${emitExpr(expr.operand, ctx)})`;
+    default:
+      return `/* unsupported expr: ${expr.kind} */ undefined`;
+  }
+}
+
+/** Render a `StmtIR` as a TS statement string (with a trailing
+ *  semicolon).  v0 supports the subset that matters for click
+ *  handlers: state mutation (`:=`), let-binding, and bare
+ *  expression statements.  Add/remove (collection mutations) and
+ *  emit/call statements fall through to a comment for now. */
+function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
+  switch (stmt.kind) {
+    case "assign": {
+      const seg = stmt.target.segments;
+      if (seg.length === 1 && ctx.stateNames.has(seg[0]!)) {
+        ctx.usesState = true;
+        const name = seg[0]!;
+        const setter = "set" + name[0]!.toUpperCase() + name.slice(1);
+        return `${setter}(${emitExpr(stmt.value, ctx)});`;
+      }
+      return `/* unsupported assign: ${seg.join(".")} */`;
+    }
+    case "let":
+      return `const ${stmt.name} = ${emitExpr(stmt.expr, ctx)};`;
+    case "expression":
+      return `${emitExpr(stmt.expr, ctx)};`;
+    default:
+      return `/* unsupported stmt: ${stmt.kind} */`;
+  }
 }
 
 /** Slice 11.5 — read a named arg as a navigation target.  String
@@ -411,6 +544,10 @@ function renderTextContent(
       ctx.usedParams.add(expr.name);
       return `{${expr.name}}`;
     }
+    if (ctx.stateNames.has(expr.name)) {
+      ctx.usesState = true;
+      return `{${expr.name}}`;
+    }
     // Slice 11.4 — unresolved ref in text position emits a JSX
     // comment so the user sees the unresolved name in the
     // generated file (the page still compiles; the comment makes
@@ -483,11 +620,14 @@ export function renderCustomLayoutPage(
   pageName: string,
   body: ExprIR,
   params: ParamIR[] = [],
+  state: StateFieldIR[] = [],
 ): string {
   const paramNames = new Set(params.map((p) => p.name));
-  const { tsx, imports, usedParams, usesNavigate } = walkBodyToTsx(
+  const stateNames = new Set(state.map((s) => s.name));
+  const { tsx, imports, usedParams, usesNavigate, usesState } = walkBodyToTsx(
     body,
     paramNames,
+    stateNames,
   );
   const mantineImport =
     imports.size > 0
@@ -499,6 +639,17 @@ export function renderCustomLayoutPage(
   if (usesNavigate) routerSpecifiers.push("useNavigate");
   const reactRouterImport = routerSpecifiers.length > 0
     ? `import { ${routerSpecifiers.join(", ")} } from "react-router-dom";\n`
+    : "";
+  // Slice 11.7 — emit the `useState` hook + per-field declaration
+  // when any state ref or `:=` mutation surfaced during the walk.
+  // Pages that DECLARE state but never reference it from the body
+  // skip the import so unused-var warnings stay quiet (parallel to
+  // how `usedParams` shapes the useParams destructure).
+  const reactImport = usesState
+    ? `import { useState } from "react";\n`
+    : "";
+  const stateLines = usesState
+    ? state.map((f) => `  ${renderUseState(f)}\n`).join("")
     : "";
   const paramsType = hasParams
     ? `<{ ${params.map((p) => `${p.name}: ${typeRefAsTsString(p)}`).join("; ")} }>`
@@ -513,13 +664,91 @@ export function renderCustomLayoutPage(
     ? `  const navigate = useNavigate();\n`
     : "";
   return `// Auto-generated.  Do not edit by hand.
-${reactRouterImport}${mantineImport}
+${reactImport}${reactRouterImport}${mantineImport}
 export default function ${pageName}() {
-${paramsLine}${navigateLine}  return (
+${paramsLine}${navigateLine}${stateLines}  return (
     ${indentJsx(tsx, "    ")}
   );
 }
 `;
+}
+
+/** Slice 11.7 — render one `state {}` field as a React `useState`
+ *  declaration: `const [name, setName] = useState<T>(init);`.  Init
+ *  comes from the field's optional `=` initializer; absent
+ *  initializers fall back to the type's zero value. */
+function renderUseState(field: StateFieldIR): string {
+  const setter = "set" + field.name[0]!.toUpperCase() + field.name.slice(1);
+  const tsType = stateTypeAsTsString(field.type);
+  const init = field.init !== undefined
+    ? renderInitExpr(field.init)
+    : zeroValueForType(field.type);
+  return `const [${field.name}, ${setter}] = useState<${tsType}>(${init});`;
+}
+
+/** Render a state-field initializer ExprIR as a JS expression
+ *  string.  Reuses the same shape `emitExpr` produces but runs
+ *  with an empty context — initializers can't reference state or
+ *  params (they evaluate at component-mount time). */
+function renderInitExpr(expr: ExprIR): string {
+  // Empty walker context — init expressions don't see state /
+  // params (they evaluate before the hooks run).
+  const dummy: WalkContext = {
+    imports: new Set(),
+    paramNames: new Set(),
+    usedParams: new Set(),
+    usesNavigate: false,
+    stateNames: new Set(),
+    usesState: false,
+  };
+  return emitExpr(expr, dummy);
+}
+
+/** Map a Loom `TypeIR` to the TS type used in `useState<T>(...)`.
+ *  v0 covers the primitives that show up in click-counter-shaped
+ *  toy pages; complex types fall back to `any`. */
+function stateTypeAsTsString(type: TypeIR): string {
+  if (type.kind === "primitive") {
+    switch (type.name) {
+      case "int":
+      case "long":
+      case "decimal":
+        return "number";
+      case "bool":
+        return "boolean";
+      case "string":
+      case "datetime":
+      case "guid":
+        return "string";
+    }
+  }
+  if (type.kind === "id" || type.kind === "enum") return "string";
+  if (type.kind === "optional") {
+    return `${stateTypeAsTsString(type.inner)} | undefined`;
+  }
+  return "any";
+}
+
+/** Default initial value for a state field that doesn't declare an
+ *  `=` initializer.  Mirrors the spec §6 zero-value table. */
+function zeroValueForType(type: TypeIR): string {
+  if (type.kind === "primitive") {
+    switch (type.name) {
+      case "int":
+      case "long":
+      case "decimal":
+        return "0";
+      case "bool":
+        return "false";
+      case "string":
+      case "datetime":
+      case "guid":
+        return '""';
+    }
+  }
+  if (type.kind === "id" || type.kind === "enum") return '""';
+  if (type.kind === "optional") return "undefined";
+  return "undefined";
 }
 
 /** Render a `ParamIR` (route param) as the TS type the
