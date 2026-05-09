@@ -68,6 +68,11 @@ export interface WalkResult {
    *  page-shell generator destructures only the used names from
    *  `useParams()` so unused declarations don't trigger TS warnings. */
   usedParams: Set<string>;
+  /** Slice 11.5 — true when any walked node emitted JSX that
+   *  references the `navigate` symbol (e.g. `Button("…", to: …)`).
+   *  The page-shell adds `import { useNavigate }` and a
+   *  `const navigate = useNavigate();` line when set. */
+  usesNavigate: boolean;
 }
 
 /** Component names the walker recognises.  Used by the page
@@ -98,15 +103,22 @@ export function walkBodyToTsx(
     imports: new Set(),
     paramNames,
     usedParams: new Set(),
+    usesNavigate: false,
   };
   const tsx = walk(body, ctx, 0);
-  return { tsx, imports: ctx.imports, usedParams: ctx.usedParams };
+  return {
+    tsx,
+    imports: ctx.imports,
+    usedParams: ctx.usedParams,
+    usesNavigate: ctx.usesNavigate,
+  };
 }
 
 interface WalkContext {
   imports: Set<MantineImport>;
   paramNames: ReadonlySet<string>;
   usedParams: Set<string>;
+  usesNavigate: boolean;
 }
 
 function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
@@ -208,9 +220,46 @@ function emitButton(
   ctx.imports.add("Button");
   const label = firstPositionalContent(call, ctx) ?? '"Button"';
   void depth;
-  // Slice 11.3 v0 — buttons emit unwired (no onClick).  Action
-  // threading lands with the state / event-handler IR slice.
+  // Slice 11.5 — `to:` named arg wires the button to a React
+  // Router navigate call.  Accepts either a string-literal path
+  // (`to: "/orders"`) or a route-param ref (`to: id` → resolves
+  // through useParams in the shell — the param name is added to
+  // usedParams for shell destructuring).  Anything else falls
+  // back to an unwired button + a placeholder comment so the
+  // gap is visible.
+  const to = stringOrRefArgValue(call, "to", ctx);
+  if (to) {
+    ctx.usesNavigate = true;
+    return `<Button onClick={() => navigate(${to})}>${unwrapTextLiteral(label)}</Button>`;
+  }
+  // No action wiring — bare button.
   return `<Button>${unwrapTextLiteral(label)}</Button>`;
+}
+
+/** Slice 11.5 — read a named arg as a navigation target.  String
+ *  literals come back JSON-quoted (`"\"/orders\""`); refs to a
+ *  route param come back as a JS template literal that interpolates
+ *  the param at render time (so `to: id` → `` `${id}` ``).  Returns
+ *  undefined when the arg isn't present or isn't a recognised
+ *  navigation source. */
+function stringOrRefArgValue(
+  call: ExprIR & { kind: "call" },
+  name: string,
+  ctx: WalkContext,
+): string | undefined {
+  const argNames = call.argNames ?? [];
+  for (let i = 0; i < call.args.length; i++) {
+    if (argNames[i] !== name) continue;
+    const a = call.args[i]!;
+    if (a.kind === "literal" && a.lit === "string") {
+      return JSON.stringify(a.value);
+    }
+    if (a.kind === "ref" && ctx.paramNames.has(a.name)) {
+      ctx.usedParams.add(a.name);
+      return `\`\${${a.name}}\``;
+    }
+  }
+  return undefined;
 }
 
 function emitCard(
@@ -364,28 +413,37 @@ export function renderCustomLayoutPage(
   params: ParamIR[] = [],
 ): string {
   const paramNames = new Set(params.map((p) => p.name));
-  const { tsx, imports, usedParams } = walkBodyToTsx(body, paramNames);
+  const { tsx, imports, usedParams, usesNavigate } = walkBodyToTsx(
+    body,
+    paramNames,
+  );
   const mantineImport =
     imports.size > 0
       ? `import { ${[...imports].sort().join(", ")} } from "@mantine/core";\n`
       : "";
   const hasParams = params.length > 0;
-  const reactRouterImport = hasParams
-    ? `import { useParams } from "react-router-dom";\n`
+  const routerSpecifiers: string[] = [];
+  if (hasParams) routerSpecifiers.push("useParams");
+  if (usesNavigate) routerSpecifiers.push("useNavigate");
+  const reactRouterImport = routerSpecifiers.length > 0
+    ? `import { ${routerSpecifiers.join(", ")} } from "react-router-dom";\n`
     : "";
   const paramsType = hasParams
     ? `<{ ${params.map((p) => `${p.name}: ${typeRefAsTsString(p)}`).join("; ")} }>`
     : "";
   const used = [...usedParams].sort();
-  const destructure = used.length > 0
+  const paramsLine = used.length > 0
     ? `  const { ${used.join(", ")} } = useParams${paramsType}();\n`
     : hasParams
       ? `  useParams${paramsType}();\n`
       : "";
+  const navigateLine = usesNavigate
+    ? `  const navigate = useNavigate();\n`
+    : "";
   return `// Auto-generated.  Do not edit by hand.
 ${reactRouterImport}${mantineImport}
 export default function ${pageName}() {
-${destructure}  return (
+${paramsLine}${navigateLine}  return (
     ${indentJsx(tsx, "    ")}
   );
 }
