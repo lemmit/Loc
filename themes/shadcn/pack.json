@@ -69,5 +69,14 @@
     "cell-number": "cell-number.hbs",
     "cell-enum": "cell-enum.hbs",
     "cell-string": "cell-string.hbs"
+  },
+  "shellFiles": {
+    "tailwind-config": "tailwind.config.ts",
+    "postcss-config": "postcss.config.js",
+    "globals-css": "src/globals.css",
+    "lib-utils": "src/lib/utils.ts"
+  },
+  "shellGlobs": {
+    "components-ui-*": "src/components/ui/{1}.tsx"
   }
 }
