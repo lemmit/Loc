@@ -63,6 +63,7 @@ export type MantineImport =
   | "Stack"
   | "Group"
   | "Grid"
+  | "Tabs"
   | "Title"
   | "Text"
   | "Button"
@@ -98,6 +99,7 @@ const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
   "Stack",
   "Group",
   "Grid",
+  "Tabs",
   "Heading",
   "Text",
   "Button",
@@ -199,6 +201,8 @@ function emitComponent(
       return emitGroup(call, ctx, depth);
     case "Grid":
       return emitGrid(call, ctx, depth);
+    case "Tabs":
+      return emitTabs(call, ctx, depth);
     case "Heading":
       return emitHeading(call, ctx, depth);
     case "Text":
@@ -270,6 +274,74 @@ function emitGrid(
     )
     .join(`\n${colIndent}`);
   return `<Grid>\n${colIndent}${wrapped}\n${closeIndent}</Grid>`;
+}
+
+function emitTabs(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  // Tabs(Tab("Overview", body), Tab("Settings", body))
+  //   → Mantine <Tabs defaultValue="overview">
+  //       <Tabs.List>
+  //         <Tabs.Tab value="overview">Overview</Tabs.Tab>
+  //         <Tabs.Tab value="settings">Settings</Tabs.Tab>
+  //       </Tabs.List>
+  //       <Tabs.Panel value="overview">{body}</Tabs.Panel>
+  //       <Tabs.Panel value="settings">{body}</Tabs.Panel>
+  //     </Tabs>
+  //
+  // Each positional child must be a `Tab(label, body)` call;
+  // anything else lands as a comment placeholder so the page
+  // still compiles.  Tab labels must be string literals in v0
+  // (the tab `value` attribute is a slug derived from the label
+  // — non-literal labels fall back to indexed slugs `tab-1`, …).
+  ctx.imports.add("Tabs");
+  const positionals = positionalArgs(call);
+  type TabEntry = { value: string; label: string; body: ExprIR | undefined };
+  const tabs: TabEntry[] = positionals.map((arg, i) => {
+    if (arg.kind !== "call" || arg.name !== "Tab") {
+      return { value: `tab-${i + 1}`, label: `Tab ${i + 1}`, body: undefined };
+    }
+    const tabPositionals = positionalArgs(arg);
+    const labelArg = tabPositionals[0];
+    const bodyArg = tabPositionals[1];
+    const labelStr =
+      labelArg && labelArg.kind === "literal" && labelArg.lit === "string"
+        ? labelArg.value
+        : `Tab ${i + 1}`;
+    return { value: slugify(labelStr) || `tab-${i + 1}`, label: labelStr, body: bodyArg };
+  });
+  if (tabs.length === 0) return `<Tabs defaultValue="" />`;
+  const indent = "  ".repeat(depth + 1);
+  const innerIndent = "  ".repeat(depth + 2);
+  const closeIndent = "  ".repeat(depth);
+  const tabHeaders = tabs
+    .map(
+      (t) =>
+        `<Tabs.Tab value=${JSON.stringify(t.value)}>${escapeJsxText(t.label)}</Tabs.Tab>`,
+    )
+    .join(`\n${innerIndent}`);
+  const panels = tabs
+    .map((t) => {
+      const inner = t.body
+        ? walk(t.body, ctx, depth + 2)
+        : `{/* missing tab body */}`;
+      return `<Tabs.Panel value=${JSON.stringify(t.value)}>\n${innerIndent}${inner}\n${indent}</Tabs.Panel>`;
+    })
+    .join(`\n${indent}`);
+  return `<Tabs defaultValue=${JSON.stringify(tabs[0]!.value)}>\n${indent}<Tabs.List>\n${innerIndent}${tabHeaders}\n${indent}</Tabs.List>\n${indent}${panels}\n${closeIndent}</Tabs>`;
+}
+
+/** Slice 11.11 — kebab-case-style slugifier for Tab.value
+ *  attributes.  Lowercases, strips non-alphanumerics down to
+ *  hyphens, collapses runs.  Maps `"User Settings"` → `"user-
+ *  settings"`. */
+function slugify(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 function emitHeading(
