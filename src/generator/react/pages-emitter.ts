@@ -168,7 +168,10 @@ export function emitPagesForUi(
     if (isWalkableLayoutBody(page.body)) {
       out.set(
         `src/pages/${snake(page.name)}.tsx`,
-        renderCustomLayoutPage(page.name, page.body!),
+        // Slice 11.4 — pass the page's typed route params so the
+        // walker can resolve refs to them and the page shell can
+        // emit `useParams<{...}>()`.
+        renderCustomLayoutPage(page.name, page.body!, page.params),
       );
       continue;
     }
