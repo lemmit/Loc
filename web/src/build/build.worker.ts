@@ -7,6 +7,9 @@ import { enrichLoomModel } from "../../../src/ir/enrichments.js";
 import { validateLoomModel } from "../../../src/ir/validate.js";
 import { generateSystems } from "../../../src/system/index.js";
 import { generateTypeScript } from "../../../src/generator/typescript/index.js";
+import { MemoryVfs } from "../vfs/memory-vfs.js";
+import { seedBuiltinPacks } from "./template-bundled.js";
+import { setWorkerVfs } from "./worker-vfs.js";
 import type {
   BuildDiagnostic,
   BuildRpcRequest,
@@ -16,6 +19,15 @@ import type {
 } from "./protocol.js";
 
 declare const self: DedicatedWorkerGlobalScope;
+
+// Worker-local VFS: seeded with the bundled built-in design packs at
+// startup so the generator's `loadPack` calls hit the in-memory store
+// rather than a no-longer-existent fs/glob seam.  Phase 2 will extend
+// the build worker's RPC with `vfs.write/delete/list` so user-supplied
+// packs and workspace files can stream in from the main thread.
+const workerVfs = new MemoryVfs();
+seedBuiltinPacks(workerVfs);
+setWorkerVfs(workerVfs);
 
 const DOC_URI = URI.parse("inmemory:///main.ddd");
 const services = createDddServices(EmptyFileSystem);
