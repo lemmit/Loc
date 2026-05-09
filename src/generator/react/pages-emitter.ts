@@ -171,7 +171,15 @@ export function emitPagesForUi(
         // Slice 11.4 — pass the page's typed route params so the
         // walker can resolve refs to them and the page shell can
         // emit `useParams<{...}>()`.
-        renderCustomLayoutPage(page.name, page.body!, page.params),
+        // Slice 11.7 — also pass the page's `state {}` fields so
+        // the walker can resolve state refs and emit `useState`
+        // declarations + `setX(…)` setter calls in onClick handlers.
+        renderCustomLayoutPage(
+          page.name,
+          page.body!,
+          page.params,
+          page.state,
+        ),
       );
       continue;
     }
