@@ -38,6 +38,23 @@ export interface PackManifest {
    *  "cell-id-link.hbs", ... }.  Names that the generator looks up
    *  but the manifest does not list yield a generation error. */
   emits: Record<string, string>;
+  /** Optional pack-specific project-shell files: logical template
+   *  name → output path inside the generated project.  Lets a pack
+   *  declare extra shell files (Tailwind config, globals.css, lib
+   *  utilities, etc.) without the generator hardcoding the mapping.
+   *  Each key must also appear in `emits`.  Renders with empty
+   *  context, like the rest of the project shell.  Built-in
+   *  Mantine pack ships none; shadcn ships
+   *  `tailwind-config`/`postcss-config`/`globals-css`/`lib-utils`. */
+  shellFiles?: Record<string, string>;
+  /** Optional glob-style shell-file mapping: template-name pattern
+   *  → output-path template, where each `*` in the pattern captures
+   *  one segment that `{1}`/`{2}`/... in the output template
+   *  reference.  Lets packs ship a variable-length library of
+   *  components without listing each by hand.  shadcn uses this
+   *  for `components-ui-*` → `src/components/ui/{1}.tsx`; Mantine
+   *  ships none. */
+  shellGlobs?: Record<string, string>;
 }
 
 /** Compiled, ready-to-render template plus the source path it came

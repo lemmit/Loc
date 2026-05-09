@@ -20,6 +20,7 @@ import {
   hasAnyView,
 } from "./view-builder.js";
 import { loadPack, resolvePackDir } from "./templating/loader-fs.js";
+import type { LoadedPack } from "./templating/loader.js";
 import {
   renderAppShell,
   renderDetailPage,
@@ -302,40 +303,60 @@ export function generateReactForContexts(
   out.set(".dockerignore", renderShellFile("dockerignore", {}, pack));
   out.set("certs/.gitkeep", "");
 
-  // Pack-specific extras — emitted only when the pack registers
-  // the matching template name in its manifest.  Mantine pack
-  // doesn't ship Tailwind / globals.css / cn() utility, so it
-  // skips these files.  shadcn pack (Phase 2.1) ships all four
-  // so the generated project boots with Tailwind + the cn() helper
-  // ready for the components/ui/* files Phase 2.2 will add.
-  if (pack.templates.has("tailwind-config")) {
-    out.set("tailwind.config.ts", renderShellFile("tailwind-config", {}, pack));
-  }
-  if (pack.templates.has("postcss-config")) {
-    out.set("postcss.config.js", renderShellFile("postcss-config", {}, pack));
-  }
-  if (pack.templates.has("globals-css")) {
-    out.set("src/globals.css", renderShellFile("globals-css", {}, pack));
-  }
-  if (pack.templates.has("lib-utils")) {
-    out.set("src/lib/utils.ts", renderShellFile("lib-utils", {}, pack));
-  }
-  // shadcn UI library — emit any `components-ui-*` template the
-  // pack ships as a `src/components/ui/<name>.tsx` file.  Mantine
-  // pack has zero of these; shadcn pack ships ~13 in Phase 2.2,
-  // covering the surfaces the page templates will use in Phase 2.3
-  // (Button, Card, Input, Label, Table, Form, Select, Switch,
-  // Badge, Alert, Skeleton, Dialog, Tooltip).
-  for (const templateName of pack.templates.keys()) {
-    const m = /^components-ui-(.+)$/.exec(templateName);
-    if (!m) continue;
-    out.set(
-      `src/components/ui/${m[1]}.tsx`,
-      renderShellFile(templateName, {}, pack),
-    );
-  }
+  // Pack-specific extras — declared by the pack itself in
+  // `pack.json`'s `shellFiles` and `shellGlobs` maps.  Mantine
+  // ships neither (its theming is JS-only via createTheme); shadcn
+  // ships `tailwind-config` / `postcss-config` / `globals-css` /
+  // `lib-utils` plus the `components-ui-*` glob for its source-
+  // imported component library.  Custom packs declare their own
+  // file mappings here without touching this file.
+  emitShellFiles(pack, out);
+  emitShellGlobs(pack, out);
 
   return out;
+}
+
+/** Emit each entry in the pack manifest's `shellFiles` map (logical
+ *  template name → output path).  Throws if a declared template name
+ *  isn't registered in `emits`, naming the offending key — this keeps
+ *  manifest typos loud rather than silently dropping shell files. */
+function emitShellFiles(pack: LoadedPack, out: Map<string, string>): void {
+  const entries = Object.entries(pack.manifest.shellFiles ?? {});
+  for (const [templateName, outputPath] of entries) {
+    if (!pack.templates.has(templateName)) {
+      throw new Error(
+        `pack ${pack.manifest.name}: shellFiles entry "${templateName}" → "${outputPath}" not present in emits map.`,
+      );
+    }
+    out.set(outputPath, renderShellFile(templateName, {}, pack));
+  }
+}
+
+/** Emit every template matching one of the pack manifest's
+ *  `shellGlobs` patterns.  Each pattern uses `*` as a single-segment
+ *  capture; the corresponding output-path template references the
+ *  captures as `{1}`, `{2}`, etc.  shadcn uses this for its
+ *  `components-ui-*` library: pattern `components-ui-*` →
+ *  `src/components/ui/{1}.tsx`. */
+function emitShellGlobs(pack: LoadedPack, out: Map<string, string>): void {
+  const entries = Object.entries(pack.manifest.shellGlobs ?? {});
+  for (const [pattern, outputTemplate] of entries) {
+    // Translate `components-ui-*` → /^components-ui-(.+)$/.  Escape
+    // every other regex meta-char so a future pattern like
+    // `cells.*-mobile` can't accidentally interpret `.` as the
+    // any-char metacharacter.
+    const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp("^" + escaped.replace(/\*/g, "(.+)") + "$");
+    for (const templateName of pack.templates.keys()) {
+      const m = re.exec(templateName);
+      if (!m) continue;
+      let outputPath = outputTemplate;
+      for (let i = 1; i < m.length; i++) {
+        outputPath = outputPath.replaceAll(`{${i}}`, m[i]);
+      }
+      out.set(outputPath, renderShellFile(templateName, {}, pack));
+    }
+  }
 }
 
 function smokeSpec(aggregates: AggregateIR[]): string {
