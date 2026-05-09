@@ -61,6 +61,8 @@ import type {
  *  top of the generated page file. */
 export type MantineImport =
   | "Stack"
+  | "Group"
+  | "Grid"
   | "Title"
   | "Text"
   | "Button"
@@ -94,6 +96,8 @@ export interface WalkResult {
  *  archetype nor a layout primitive — those pages stay silent. */
 const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
   "Stack",
+  "Group",
+  "Grid",
   "Heading",
   "Text",
   "Button",
@@ -191,6 +195,10 @@ function emitComponent(
   switch (call.name) {
     case "Stack":
       return emitStack(call, ctx, depth);
+    case "Group":
+      return emitGroup(call, ctx, depth);
+    case "Grid":
+      return emitGrid(call, ctx, depth);
     case "Heading":
       return emitHeading(call, ctx, depth);
     case "Text":
@@ -222,6 +230,46 @@ function emitStack(
   const indent = "  ".repeat(depth + 1);
   const closeIndent = "  ".repeat(depth);
   return `<Stack>\n${indent}${children.join(`\n${indent}`)}\n${closeIndent}</Stack>`;
+}
+
+function emitGroup(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  // Mirror of Stack but horizontal — Mantine's <Group> is the
+  // canonical row-flex container.  Same children-as-positionals
+  // contract.
+  ctx.imports.add("Group");
+  const children = positionalChildren(call, ctx, depth + 1);
+  if (children.length === 0) return `<Group />`;
+  const indent = "  ".repeat(depth + 1);
+  const closeIndent = "  ".repeat(depth);
+  return `<Group>\n${indent}${children.join(`\n${indent}`)}\n${closeIndent}</Group>`;
+}
+
+function emitGrid(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  // Mantine's Grid wants each child wrapped in a <Grid.Col>.  v0
+  // gives every column `span="auto"` so Mantine fills equally;
+  // future slice can read a `span:` named arg per child once we
+  // have a richer per-child config story.
+  ctx.imports.add("Grid");
+  const children = positionalChildren(call, ctx, depth + 2);
+  if (children.length === 0) return `<Grid />`;
+  const colIndent = "  ".repeat(depth + 1);
+  const childIndent = "  ".repeat(depth + 2);
+  const closeIndent = "  ".repeat(depth);
+  const wrapped = children
+    .map(
+      (c) =>
+        `<Grid.Col span="auto">\n${childIndent}${c}\n${colIndent}</Grid.Col>`,
+    )
+    .join(`\n${colIndent}`);
+  return `<Grid>\n${colIndent}${wrapped}\n${closeIndent}</Grid>`;
 }
 
 function emitHeading(
