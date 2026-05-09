@@ -2,21 +2,21 @@ import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath, URL } from "node:url";
 
-const bundledTemplateLoader = fileURLToPath(
-  new URL("./src/build/template-bundled.ts", import.meta.url),
+const browserPackLoader = fileURLToPath(
+  new URL("./src/build/loader-vfs.ts", import.meta.url),
 );
 
-// Vite plugin that swaps `templating/loader-fs.js` (Node fs-bound) for
-// the browser-friendly `template-bundled.ts` shim.  We use a custom
-// resolver instead of `resolve.alias` because Rollup's alias plugin
-// applies the regex via `id.replace`, which mangles the absolute id
-// path; resolving by suffix-match here keeps the swap surgical.
+// Vite plugin that swaps `templating/loader-fs.js` (Node fs-bound)
+// for the VFS-backed browser loader.  We use a custom resolver
+// instead of `resolve.alias` because Rollup's alias plugin applies
+// the regex via `id.replace`, which mangles the absolute id path;
+// resolving by suffix-match here keeps the swap surgical.
 const loomLoaderShim = (): Plugin => ({
   name: "loom-loader-shim",
   enforce: "pre",
   resolveId(source) {
     if (source.endsWith("/templating/loader-fs.js")) {
-      return bundledTemplateLoader;
+      return browserPackLoader;
     }
     return null;
   },
@@ -30,9 +30,11 @@ const loomLoaderShim = (): Plugin => ({
 //
 // One exception: the React generator's pack loader has a Node-bound
 // variant (`loader-fs.ts`) that pulls templates off disk via `node:fs`.
-// We swap it for a Vite-glob-backed equivalent under `src/build/` so
-// every theme's `.hbs` files inline into the worker bundle at build
-// time.  See `web/src/build/template-bundled.ts`.
+// We swap it for `loader-vfs.ts`, which reads pack templates from a
+// worker-local in-memory VFS.  The VFS is seeded at worker boot from
+// `template-bundled.ts` (the same Vite eager-glob that used to be the
+// loader, now demoted to seeder).  Phase 1 of the IDE refactor —
+// see `web/src/vfs/types.ts` for the design rationale.
 export default defineConfig({
   // Relative base so the build is portable across deploy paths.
   // The CI workflow drops the build under `docs/_site/playground/`
