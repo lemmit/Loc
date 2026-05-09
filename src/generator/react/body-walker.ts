@@ -404,9 +404,9 @@ function emitExpr(expr: ExprIR, ctx: WalkContext): string {
 
 /** Render a `StmtIR` as a TS statement string (with a trailing
  *  semicolon).  v0 supports the subset that matters for click
- *  handlers: state mutation (`:=`), let-binding, and bare
- *  expression statements.  Add/remove (collection mutations) and
- *  emit/call statements fall through to a comment for now. */
+ *  handlers: state mutation (`:=`, `+=`, `-=`), let-binding, and
+ *  bare expression statements.  emit / call statements fall
+ *  through to a comment for now. */
 function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
   switch (stmt.kind) {
     case "assign": {
@@ -418,6 +418,23 @@ function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
         return `${setter}(${emitExpr(stmt.value, ctx)});`;
       }
       return `/* unsupported assign: ${seg.join(".")} */`;
+    }
+    case "add":
+    case "remove": {
+      // Slice 11.9 — `count += 1` / `count -= 1` lower to
+      // `kind: "add"` / `kind: "remove"` in the IR (the same
+      // kinds collection-mutations use; for scalar state fields
+      // they're compound additions/subtractions).  Walker emits
+      // `setCount(count + 1)` / `setCount(count - 1)`.
+      const seg = stmt.target.segments;
+      if (seg.length === 1 && ctx.stateNames.has(seg[0]!)) {
+        ctx.usesState = true;
+        const name = seg[0]!;
+        const setter = "set" + name[0]!.toUpperCase() + name.slice(1);
+        const op = stmt.kind === "add" ? "+" : "-";
+        return `${setter}(${name} ${op} ${emitExpr(stmt.value, ctx)});`;
+      }
+      return `/* unsupported ${stmt.kind === "add" ? "+=" : "-="}: ${seg.join(".")} */`;
     }
     case "let":
       return `const ${stmt.name} = ${emitExpr(stmt.expr, ctx)};`;
