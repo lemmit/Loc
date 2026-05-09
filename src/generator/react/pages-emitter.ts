@@ -79,6 +79,31 @@ export interface PageEmitContext {
 /** Emit `src/pages/<route>.tsx` per page in `ui.pages`.  Returns just
  *  the page-file map; api modules / page objects / shell files stay
  *  in `index.ts`. */
+/** Slice 11.1 — collect the AppShell `extraRoutes` for non-
+ *  conventional explicit pages.  Each one declared in the source
+ *  with a body the dispatcher can recognise contributes one
+ *  Route + import; conventional overrides (page name matches the
+ *  scaffolded shape) are mounted at the conventional route by
+ *  the existing per-aggregate / -workflow / -view loops in
+ *  `prepareAppShellVM`. */
+export function deriveExtraRoutesFromUi(
+  ui: UiIR,
+): import("./templating/preparers/app-shell.js").ExtraPageRoute[] {
+  const out: import("./templating/preparers/app-shell.js").ExtraPageRoute[] = [];
+  for (const page of ui.pages) {
+    const origin = page.scaffoldOrigin ?? inferBodyDispatch(page.body);
+    if (!origin) continue;
+    if (isConventionalOverride(page, origin)) continue;
+    if (!page.route) continue;
+    out.push({
+      componentName: page.name,
+      importFrom: `./pages/${snake(page.name)}`,
+      route: page.route,
+    });
+  }
+  return out;
+}
+
 export function emitPagesForUi(
   ui: UiIR,
   ctx: PageEmitContext,
@@ -224,37 +249,44 @@ interface SharedRenderInputs {
 }
 
 function emitScaffoldPage(
-  _page: PageIR,
+  page: PageIR,
   origin: ScaffoldOriginIR,
   ctx: PageEmitContext,
   _ui: UiIR,
   shared: SharedRenderInputs,
 ): Map<string, string> {
   const out = new Map<string, string>();
+  // Slice 11.1 — file path for explicit pages with non-conventional
+  // names (e.g. `page OrderConsole { route: "/custom/orders", body:
+  // List(of: Order) }`) goes to `src/pages/<name-snake>.tsx` instead
+  // of the conventional `src/pages/<plural>/list.tsx`.  Override-by-
+  // name (page name == expected scaffolded name) keeps the
+  // conventional path so it cleanly replaces the synthesised file.
+  const conventional = isConventionalOverride(page, origin);
   switch (origin.kind) {
     case "aggregate-list": {
       const { agg, ctxIR } = lookupAggregate(origin, ctx);
       void ctxIR;
-      out.set(
-        `src/pages/${snake(plural(agg.name))}/list.tsx`,
-        renderListPage(agg, ctx.aggregatesByName, ctx.pack),
-      );
+      const path = conventional
+        ? `src/pages/${snake(plural(agg.name))}/list.tsx`
+        : `src/pages/${snake(page.name)}.tsx`;
+      out.set(path, renderListPage(agg, ctx.aggregatesByName, ctx.pack));
       return out;
     }
     case "aggregate-new": {
       const { agg, ctxIR } = lookupAggregate(origin, ctx);
-      out.set(
-        `src/pages/${snake(plural(agg.name))}/new.tsx`,
-        renderNewPage(agg, ctxIR, ctx.aggregatesByName, ctx.pack),
-      );
+      const path = conventional
+        ? `src/pages/${snake(plural(agg.name))}/new.tsx`
+        : `src/pages/${snake(page.name)}.tsx`;
+      out.set(path, renderNewPage(agg, ctxIR, ctx.aggregatesByName, ctx.pack));
       return out;
     }
     case "aggregate-detail": {
       const { agg, ctxIR } = lookupAggregate(origin, ctx);
-      out.set(
-        `src/pages/${snake(plural(agg.name))}/detail.tsx`,
-        renderDetailPage(agg, ctxIR, ctx.aggregatesByName, ctx.pack),
-      );
+      const path = conventional
+        ? `src/pages/${snake(plural(agg.name))}/detail.tsx`
+        : `src/pages/${snake(page.name)}.tsx`;
+      out.set(path, renderDetailPage(agg, ctxIR, ctx.aggregatesByName, ctx.pack));
       return out;
     }
     case "workflow-form": {
@@ -273,8 +305,11 @@ function emitScaffoldPage(
         }
       }
       if (!wf || !ctxIR) return out;
+      const wfPath = conventional
+        ? `src/pages/workflows/${snake(wf.name)}.tsx`
+        : `src/pages/${snake(page.name)}.tsx`;
       out.set(
-        `src/pages/workflows/${snake(wf.name)}.tsx`,
+        wfPath,
         renderWorkflowForm(wf, ctxIR, ctx.aggregatesByName, ctx.pack),
       );
       return out;
@@ -293,8 +328,11 @@ function emitScaffoldPage(
         }
       }
       if (!view || !ctxIR) return out;
+      const viewPath = conventional
+        ? `src/pages/views/${snake(view.name)}.tsx`
+        : `src/pages/${snake(page.name)}.tsx`;
       out.set(
-        `src/pages/views/${snake(view.name)}.tsx`,
+        viewPath,
         renderViewTablePage(view, ctxIR, ctx.aggregatesByName, ctx.pack),
       );
       return out;
@@ -331,6 +369,43 @@ function emitScaffoldPage(
       );
       return out;
     }
+  }
+}
+
+/** Return true when an explicit page is overriding a scaffold-
+ *  synthesised one of the same archetype — i.e. the page name
+ *  matches the conventional name the scaffold expander would
+ *  generate.  Conventional overrides emit at the conventional
+ *  file path (so they cleanly replace the synthesised file in
+ *  App.tsx imports); non-conventional explicit pages emit at
+ *  `src/pages/<name-snake>.tsx`. */
+function isConventionalOverride(
+  page: PageIR,
+  origin: ScaffoldOriginIR,
+): boolean {
+  switch (origin.kind) {
+    case "aggregate-list":
+      return page.name === `${origin.aggregateName}List`;
+    case "aggregate-new":
+      return page.name === `${origin.aggregateName}New`;
+    case "aggregate-detail":
+      return page.name === `${origin.aggregateName}Detail`;
+    case "workflow-form": {
+      const wfName = origin.workflowName;
+      const expected =
+        wfName.length === 0
+          ? "Workflow"
+          : `${wfName[0]!.toUpperCase()}${wfName.slice(1)}Workflow`;
+      return page.name === expected;
+    }
+    case "view-list":
+      return page.name === `${origin.viewName}View`;
+    case "home":
+      return page.name === "Home";
+    case "workflows-index":
+      return page.name === "WorkflowsIndex";
+    case "views-index":
+      return page.name === "ViewsIndex";
   }
 }
 

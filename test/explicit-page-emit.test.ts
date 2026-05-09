@@ -171,6 +171,12 @@ describe("Slice 11 — explicit-page emission via body-shape dispatch", () => {
   });
 
   it("dispatches Form(runs: <workflow>) → src/pages/workflows/<slug>.tsx", async () => {
+    // Slice 11.1: conventional-override naming.  The page's name
+    // (`PlaceOrderWorkflow`) matches the synthesiser's expected
+    // shape, so it emits at the conventional workflow path.  A
+    // page named differently (`PlaceOrderForm`) is a non-
+    // conventional explicit page and emits at
+    // `src/pages/<name-snake>.tsx` with App.tsx routing instead.
     const files = await buildAndGenerate(`
       system S {
         module M {
@@ -181,7 +187,7 @@ describe("Slice 11 — explicit-page emission via body-shape dispatch", () => {
           }
         }
         ui WebApp {
-          page PlaceOrderForm {
+          page PlaceOrderWorkflow {
             route: "/workflows/place_order"
             body:  Form(runs: placeOrder)
           }

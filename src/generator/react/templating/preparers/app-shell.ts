@@ -26,6 +26,20 @@ function pascal(s: string): string {
   return s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
 }
 
+/** Slice 11.1 — extra Routes / imports for explicit pages with
+ *  non-conventional routes.  Each entry is a flat record because
+ *  the AppShell preparer doesn't pull in the page-IR module. */
+export interface ExtraPageRoute {
+  /** Page name in PascalCase — used as the React-component import
+   *  specifier and as the JSX element name in the Route entry. */
+  componentName: string;
+  /** Module path relative to `src/`, no extension —
+   *  e.g. `"./pages/order_console"`. */
+  importFrom: string;
+  /** Route path verbatim — e.g. `"/customers/:customerId/orders"`. */
+  route: string;
+}
+
 export function prepareAppShellVM(
   aggregates: AggregateIR[],
   workflows: WorkflowIR[],
@@ -37,6 +51,13 @@ export function prepareAppShellVM(
    *  undefined the legacy hardcoded grouping (Aggregates / Workflows /
    *  Views) is used — byte-equivalent to main's pre-Slice-6 output. */
   sidebarOverride?: NavSectionVM[],
+  /** Slice 11.1 — explicit pages with non-conventional names emit
+   *  at `src/pages/<name-snake>.tsx`.  The caller hands their
+   *  import + route shape so App.tsx can import & route them
+   *  alongside the conventional aggregate/workflow/view set.
+   *  Routes are appended after the per-aggregate / -workflow /
+   *  -view block so React Router matches conventional first. */
+  extraRoutes?: ExtraPageRoute[],
 ): AppShellVM {
   const imports: ImportVM[] = [];
   const routes: RouteVM[] = [];
@@ -79,6 +100,23 @@ export function prepareAppShellVM(
       imports.push({ specifier: cap, from: `./pages/views/${slug}` });
       routes.push({ path: `/views/${slug}`, elementJsx: `<${cap} />` });
     }
+  }
+
+  // Slice 11.1 — explicit pages with non-conventional names.
+  // Mounted AFTER the conventional set so React Router matches
+  // the conventional routes first when a user-supplied custom
+  // route happens to start with `/orders` etc.  The preparer
+  // doesn't dedupe — caller is responsible for not handing the
+  // same component twice.
+  for (const extra of extraRoutes ?? []) {
+    imports.push({
+      specifier: extra.componentName,
+      from: extra.importFrom,
+    });
+    routes.push({
+      path: extra.route,
+      elementJsx: `<${extra.componentName} />`,
+    });
   }
 
   // Sidebar nav sections.  Each construct kind contributes at most
