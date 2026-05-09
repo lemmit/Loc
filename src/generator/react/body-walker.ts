@@ -47,7 +47,7 @@
 //   - `isWalkableLayoutBody(body)` — predicate the page emitter
 //     uses to decide whether to dispatch to the walker.
 
-import type { ExprIR } from "../../ir/loom-ir.js";
+import type { ExprIR, ParamIR } from "../../ir/loom-ir.js";
 
 /** Mantine specifiers the walker accumulates as it descends through
  *  the body.  Caller renders these as a single
@@ -63,6 +63,11 @@ export type MantineImport =
 export interface WalkResult {
   tsx: string;
   imports: Set<MantineImport>;
+  /** Slice 11.4 — names of route params the walker actually used
+   *  while emitting (e.g. `Heading(name)` referenced `name`).  The
+   *  page-shell generator destructures only the used names from
+   *  `useParams()` so unused declarations don't trigger TS warnings. */
+  usedParams: Set<string>;
 }
 
 /** Component names the walker recognises.  Used by the page
@@ -82,14 +87,26 @@ export function isWalkableLayoutBody(body: ExprIR | undefined): boolean {
   return STDLIB_LAYOUT_COMPONENTS.has(body.name);
 }
 
-export function walkBodyToTsx(body: ExprIR): WalkResult {
-  const ctx: WalkContext = { imports: new Set() };
+export function walkBodyToTsx(
+  body: ExprIR,
+  /** Slice 11.4 — names of the page's route params; refs to these
+   *  names emit as `{name}` JSX expressions (resolved by
+   *  `useParams()` at render time). */
+  paramNames: ReadonlySet<string> = new Set(),
+): WalkResult {
+  const ctx: WalkContext = {
+    imports: new Set(),
+    paramNames,
+    usedParams: new Set(),
+  };
   const tsx = walk(body, ctx, 0);
-  return { tsx, imports: ctx.imports };
+  return { tsx, imports: ctx.imports, usedParams: ctx.usedParams };
 }
 
 interface WalkContext {
   imports: Set<MantineImport>;
+  paramNames: ReadonlySet<string>;
+  usedParams: Set<string>;
 }
 
 function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
@@ -105,12 +122,16 @@ function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
       if (expr.lit === "null") return `{null}`;
       return `{${expr.value}}`;
     case "ref":
-      // Bare references (e.g. `customerId` in scope) emit as JS
-      // identifiers wrapped in JSX braces.  v0 doesn't yet thread
-      // page params + state into render scope; if a `ref` makes it
-      // here it usually means the user wrote a name that isn't a
-      // component but the parser accepted it.  Emit a placeholder
-      // comment so the build error surfaces clearly.
+      // Slice 11.4 — refs that match a route param name emit as
+      // JSX expressions (`{name}`).  React Router's `useParams()`
+      // brings these into scope at render time; the page-shell
+      // generator destructures the used names.  Refs that don't
+      // match a param emit as a placeholder JSX comment so the
+      // build error stays visible.
+      if (ctx.paramNames.has(expr.name)) {
+        ctx.usedParams.add(expr.name);
+        return `{${expr.name}}`;
+      }
       return `{/* ref: ${expr.name} */}`;
     default:
       return `{/* unsupported expr: ${expr.kind} */}`;
@@ -158,12 +179,14 @@ function emitHeading(
   depth: number,
 ): string {
   ctx.imports.add("Title");
-  // First positional is the heading text.  Optional `level:` named
-  // arg controls Mantine's <Title order={N}> (1..6, default 2).
-  const text = firstPositionalText(call) ?? "Heading";
+  // First positional is the heading text — accepts a string
+  // literal OR a ref (e.g. a route-param name).  Optional `level:`
+  // named arg controls Mantine's <Title order={N}> (1..6, default
+  // 2).
+  const text = firstPositionalContent(call, ctx) ?? '"Heading"';
   const level = numericNamed(call, "level") ?? 2;
   void depth;
-  return `<Title order={${level}}>${escapeJsxText(text)}</Title>`;
+  return `<Title order={${level}}>${unwrapTextLiteral(text)}</Title>`;
 }
 
 function emitText(
@@ -172,9 +195,9 @@ function emitText(
   depth: number,
 ): string {
   ctx.imports.add("Text");
-  const text = firstPositionalText(call) ?? "";
+  const text = firstPositionalContent(call, ctx) ?? '""';
   void depth;
-  return `<Text>${escapeJsxText(text)}</Text>`;
+  return `<Text>${unwrapTextLiteral(text)}</Text>`;
 }
 
 function emitButton(
@@ -183,11 +206,11 @@ function emitButton(
   depth: number,
 ): string {
   ctx.imports.add("Button");
-  const label = firstPositionalText(call) ?? "Button";
+  const label = firstPositionalContent(call, ctx) ?? '"Button"';
   void depth;
   // Slice 11.3 v0 — buttons emit unwired (no onClick).  Action
   // threading lands with the state / event-handler IR slice.
-  return `<Button>${escapeJsxText(label)}</Button>`;
+  return `<Button>${unwrapTextLiteral(label)}</Button>`;
 }
 
 function emitCard(
@@ -196,28 +219,25 @@ function emitCard(
   depth: number,
 ): string {
   ctx.imports.add("Card");
-  ctx.imports.add("Title");
-  // Card("title", content) — first positional title; second
-  // positional is the body.  Mantine's Card uses Card.Section for
-  // the visual block separation.
-  const title = firstPositionalText(call) ?? "";
+  // Card("title", content) — first positional title (string or
+  // ref); second positional is the body.  Mantine's Card uses
+  // Card.Section for the visual block separation.
   const positionals = positionalArgs(call);
-  // v0: the title is the first positional STRING.  If positional
-  // 0 is a string, positional 1 is the content; otherwise
-  // positional 0 IS the content (no title).
   const titleArg = positionals[0];
-  const titleIsString =
+  const titleIsTextLike =
     titleArg !== undefined &&
-    titleArg.kind === "literal" &&
-    titleArg.lit === "string";
-  const contentExpr: ExprIR | undefined = titleIsString
+    (titleArg.kind === "literal" && titleArg.lit === "string"
+      || (titleArg.kind === "ref" && ctx.paramNames.has(titleArg.name)));
+  const contentExpr: ExprIR | undefined = titleIsTextLike
     ? positionals[1]
     : positionals[0];
   const indent = "  ".repeat(depth + 1);
   const closeIndent = "  ".repeat(depth);
   const inner: string[] = [];
-  if (titleIsString) {
-    inner.push(`<Title order={3}>${escapeJsxText(title)}</Title>`);
+  if (titleIsTextLike && titleArg) {
+    ctx.imports.add("Title");
+    const titleStr = renderTextContent(titleArg, ctx) ?? '""';
+    inner.push(`<Title order={3}>${unwrapTextLiteral(titleStr)}</Title>`);
   }
   if (contentExpr) {
     inner.push(walk(contentExpr, ctx, depth + 1));
@@ -255,6 +275,54 @@ function firstPositionalText(call: ExprIR & { kind: "call" }): string | undefine
   return undefined;
 }
 
+/** Slice 11.4 — return the JSX-render shape of the first
+ *  positional arg as a TEXT-position content.  Quoted strings
+ *  come back as `"text"` (so callers wrap them in {} when needed
+ *  or strip the quotes for direct JSX text); refs come back as
+ *  `{name}` (already JSX-expression-wrapped).  Returns undefined
+ *  when the first positional isn't a recognisable text source. */
+function firstPositionalContent(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+): string | undefined {
+  const positionals = positionalArgs(call);
+  const first = positionals[0];
+  if (!first) return undefined;
+  return renderTextContent(first, ctx);
+}
+
+function renderTextContent(
+  expr: ExprIR,
+  ctx: WalkContext,
+): string | undefined {
+  if (expr.kind === "literal" && expr.lit === "string") {
+    return JSON.stringify(expr.value);
+  }
+  if (expr.kind === "ref") {
+    if (ctx.paramNames.has(expr.name)) {
+      ctx.usedParams.add(expr.name);
+      return `{${expr.name}}`;
+    }
+    // Slice 11.4 — unresolved ref in text position emits a JSX
+    // comment so the user sees the unresolved name in the
+    // generated file (the page still compiles; the comment makes
+    // the gap visible).
+    return `{/* ref: ${expr.name} */}`;
+  }
+  return undefined;
+}
+
+/** Slice 11.4 helper — `firstPositionalContent` returns either a
+ *  `"quoted string"` or a `{paramRef}` JSX expression.  Components
+ *  embedding the result in JSX text need quoted strings unwrapped
+ *  to bare text; JSX expressions stay verbatim. */
+function unwrapTextLiteral(s: string): string {
+  if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) {
+    return escapeJsxText(JSON.parse(s) as string);
+  }
+  return s;
+}
+
 function numericNamed(
   call: ExprIR & { kind: "call" },
   name: string,
@@ -279,24 +347,61 @@ function escapeJsxText(s: string): string {
 }
 
 /** Render the page-file shell around a walked body — imports +
- *  function component + return. */
+ *  function component + return.
+ *
+ *  Slice 11.4 — when the page has typed route params, the walker
+ *  is given their names.  If the body referenced any of them
+ *  (`Heading(name)`, `Text(customerId)`), the shell adds a
+ *  `useParams<{ name: string, customerId: string }>()` hook and
+ *  destructures the names so the JSX expressions resolve at
+ *  render time.  Unused params are NOT destructured (avoids TS
+ *  "declared but never read" warnings) — but the type parameter
+ *  always lists every declared param so the typed shape stays
+ *  intact regardless of usage. */
 export function renderCustomLayoutPage(
   pageName: string,
   body: ExprIR,
+  params: ParamIR[] = [],
 ): string {
-  const { tsx, imports } = walkBodyToTsx(body);
-  const importLine =
+  const paramNames = new Set(params.map((p) => p.name));
+  const { tsx, imports, usedParams } = walkBodyToTsx(body, paramNames);
+  const mantineImport =
     imports.size > 0
       ? `import { ${[...imports].sort().join(", ")} } from "@mantine/core";\n`
       : "";
+  const hasParams = params.length > 0;
+  const reactRouterImport = hasParams
+    ? `import { useParams } from "react-router-dom";\n`
+    : "";
+  const paramsType = hasParams
+    ? `<{ ${params.map((p) => `${p.name}: ${typeRefAsTsString(p)}`).join("; ")} }>`
+    : "";
+  const used = [...usedParams].sort();
+  const destructure = used.length > 0
+    ? `  const { ${used.join(", ")} } = useParams${paramsType}();\n`
+    : hasParams
+      ? `  useParams${paramsType}();\n`
+      : "";
   return `// Auto-generated.  Do not edit by hand.
-${importLine}
+${reactRouterImport}${mantineImport}
 export default function ${pageName}() {
-  return (
+${destructure}  return (
     ${indentJsx(tsx, "    ")}
   );
 }
 `;
+}
+
+/** Render a `ParamIR` (route param) as the TS type the
+ *  `useParams<{...}>()` generic should declare for it.  Slice 11.4
+ *  v0 — every route param is `string` at the React-Router level;
+ *  the original Loom type intent (e.g. `Id<Order>`) is preserved
+ *  in the IR but doesn't affect the typed-useParams shape today.
+ *  A future slice can layer `z.coerce` or similar at the page-
+ *  shell to convert to the declared types. */
+function typeRefAsTsString(p: ParamIR): string {
+  void p;
+  return "string";
 }
 
 /** Indent every line of a JSX fragment by a given prefix.  First
