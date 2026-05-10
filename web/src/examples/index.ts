@@ -8,6 +8,8 @@ import bankingSystemSource from "./banking-system.ddd?raw";
 import inventorySource from "./inventory.ddd?raw";
 import inventorySystemSource from "./inventory-system.ddd?raw";
 import acmeSource from "./acme.ddd?raw";
+import storybookMantineSource from "./storybook-mantine.ddd?raw";
+import storybookShadcnSource from "./storybook-shadcn.ddd?raw";
 
 export interface LoomExample {
   id: string;
@@ -25,6 +27,20 @@ export interface LoomExample {
 // generator-level showcase that doesn't preview cleanly (its React
 // frontend targets a .NET deployable we don't run in the browser).
 export const examples: LoomExample[] = [
+  {
+    id: "storybook-mantine",
+    label: "UI Storybook (Mantine)",
+    source: storybookMantineSource,
+    blurb:
+      "Catalogue: each aggregate demonstrates one UI primitive — cells, fields, value-objects, references, ops, workflows, views.",
+  },
+  {
+    id: "storybook-shadcn",
+    label: "UI Storybook (shadcn)",
+    source: storybookShadcnSource,
+    blurb:
+      "Same catalogue as the Mantine storybook, rendered through the shadcn/ui pack.",
+  },
   {
     id: "sales-system",
     label: "Sales System (Hono + React)",
