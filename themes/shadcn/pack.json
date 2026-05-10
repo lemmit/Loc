@@ -68,8 +68,12 @@
     "cell-bool": "cell-bool.hbs",
     "cell-number": "cell-number.hbs",
     "cell-enum": "cell-enum.hbs",
-    "cell-string": "cell-string.hbs"
+    "cell-string": "cell-string.hbs",
+    "primitive-heading": "primitive-heading.hbs",
+    "primitive-text": "primitive-text.hbs",
+    "primitive-divider": "primitive-divider.hbs"
   },
+  "imports": {},
   "shellFiles": {
     "tailwind-config": "tailwind.config.ts",
     "postcss-config": "postcss.config.js",

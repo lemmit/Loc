@@ -64,6 +64,31 @@ export interface PackManifest {
    *  heroicons-flavoured pack would ship its own `heroicons`
    *  helper here. */
   helpers?: Record<string, Record<string, string>>;
+  /** Optional per-template import declarations.  When the body-
+   *  walker dispatches a stdlib primitive (`primitive-stack`,
+   *  `primitive-heading`, …) through the pack, it pulls the
+   *  template's required imports from this map and merges them
+   *  into the page's import block.  Without this declaration,
+   *  packs would have to repeat themselves in TS code AND in
+   *  templates; with it, every import lives next to the JSX
+   *  that needs it.
+   *
+   *  Example (mantine):
+   *    "imports": {
+   *      "primitive-stack":   [{ "from": "@mantine/core", "named": ["Stack"] }],
+   *      "primitive-heading": [{ "from": "@mantine/core", "named": ["Title"] }]
+   *    }
+   *
+   *  Imports are deduped per page across primitives that share a
+   *  source module.  Default imports aren't supported in v0
+   *  because no built-in primitive needs them. */
+  imports?: Record<string, ImportSpec[]>;
+}
+
+/** A single named-import declaration: `import { ...named } from "<from>"`. */
+export interface ImportSpec {
+  from: string;
+  named: string[];
 }
 
 /** Compiled, ready-to-render template plus the source path it came

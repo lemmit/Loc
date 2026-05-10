@@ -47,6 +47,7 @@
 //   - `isWalkableLayoutBody(body)` — predicate the page emitter
 //     uses to decide whether to dispatch to the walker.
 
+import type { ImportSpec, LoadedPack } from "./templating/loader.js";
 import type {
   ExprIR,
   ParamIR,
@@ -55,35 +56,73 @@ import type {
   TypeIR,
 } from "../../ir/loom-ir.js";
 
-/** Mantine specifiers the walker accumulates as it descends through
- *  the body.  Caller renders these as a single
- *  `import { Stack, Title, … } from "@mantine/core"` line at the
- *  top of the generated page file. */
-export type MantineImport =
-  | "Stack"
-  | "Group"
-  | "Grid"
-  | "Container"
-  | "Tabs"
-  | "Center"
-  | "TextInput"
-  | "NumberInput"
-  | "PasswordInput"
-  | "Switch"
-  | "Loader"
-  | "Anchor"
-  | "Image"
-  | "Avatar"
-  | "Title"
-  | "Text"
-  | "Button"
-  | "Card"
-  | "Badge"
-  | "Divider";
+/** Per-source named-import map — `from` module → set of named
+ *  exports the page needs from it.  Replaces the old single-source
+ *  `Set<MantineImport>` so primitives ported through the pack
+ *  contract can declare their own imports (shadcn pulls
+ *  `@/components/ui/button`, lucide-react, etc., not just Mantine).
+ *
+ *  Existing emit functions that haven't yet been ported to the
+ *  pack contract use `addMantineImport` (below) which appends to
+ *  this map keyed by `"@mantine/core"`.  The page-shell consumer
+ *  iterates the map and emits one `import` line per source. */
+export type ImportMap = Map<string, Set<string>>;
+
+/** Append a named-import to the walker's per-source import map.
+ *  Idempotent — duplicate names dedupe inside the Set per source. */
+function addImport(ctx: WalkContext, from: string, ...names: string[]): void {
+  let s = ctx.imports.get(from);
+  if (!s) {
+    s = new Set();
+    ctx.imports.set(from, s);
+  }
+  for (const n of names) s.add(n);
+}
+
+/** Convenience for the (still many) emit functions that haven't been
+ *  ported to the pack contract yet — they all want named imports
+ *  from `@mantine/core`.  Keeps call sites compact and grep-able
+ *  while the migration finishes. */
+function addMantineImport(ctx: WalkContext, ...names: string[]): void {
+  addImport(ctx, "@mantine/core", ...names);
+}
+
+/** Render a primitive through the pack and merge its declared
+ *  imports into the context.  Each primitive's `imports` entry in
+ *  pack.json drives the `<from>` and `<named>` set added to the
+ *  page's import block.  When the pack manifest doesn't list a
+ *  primitive in `imports`, we render anyway and rely on the
+ *  template emitting whatever module-free JSX it wants
+ *  (e.g. shadcn's primitives that emit only `<div className=…>`
+ *  need no imports). */
+function renderPrimitive(
+  ctx: WalkContext,
+  name: string,
+  templateCtx: unknown,
+): string {
+  const specs: ImportSpec[] = ctx.pack.manifest.imports?.[name] ?? [];
+  for (const spec of specs) addImport(ctx, spec.from, ...spec.named);
+  return ctx.pack.render(name, templateCtx);
+}
+
+/** Render the page's import block from the per-source map.  One
+ *  `import { … } from "<from>";` line per source, alphabetically
+ *  sorted within each line and sources sorted by `from`.  Empty
+ *  map renders as an empty string so callers can splice the
+ *  result without a guard. */
+export function renderImportLines(imports: ImportMap): string {
+  if (imports.size === 0) return "";
+  const lines = [...imports.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([from, named]) =>
+      `import { ${[...named].sort().join(", ")} } from "${from}";\n`,
+    );
+  return lines.join("");
+}
 
 export interface WalkResult {
   tsx: string;
-  imports: Set<MantineImport>;
+  imports: ImportMap;
   /** Slice 11.4 — names of route params the walker actually used
    *  while emitting (e.g. `Heading(name)` referenced `name`).  The
    *  page-shell generator destructures only the used names from
@@ -171,6 +210,11 @@ export function isWalkableLayoutBody(
 
 export function walkBodyToTsx(
   body: ExprIR,
+  /** Loaded design pack — drives per-pack rendering for primitives
+   *  ported through the pack contract.  Emits not yet ported still
+   *  call `addMantineImport` directly; the pack reference is unused
+   *  by them and harmless to thread through. */
+  pack: LoadedPack,
   /** Slice 11.4 — names of the page's route params; refs to these
    *  names emit as `{name}` JSX expressions (resolved by
    *  `useParams()` at render time). */
@@ -189,7 +233,8 @@ export function walkBodyToTsx(
   userComponents: ReadonlyMap<string, readonly ParamIR[]> = new Map(),
 ): WalkResult {
   const ctx: WalkContext = {
-    imports: new Set(),
+    imports: new Map(),
+    pack,
     paramNames,
     usedParams: new Set(),
     usesNavigate: false,
@@ -214,7 +259,8 @@ export function walkBodyToTsx(
 }
 
 interface WalkContext {
-  imports: Set<MantineImport>;
+  imports: ImportMap;
+  pack: LoadedPack;
   paramNames: ReadonlySet<string>;
   usedParams: Set<string>;
   usesNavigate: boolean;
@@ -342,7 +388,7 @@ function emitStack(
   ctx: WalkContext,
   depth: number,
 ): string {
-  ctx.imports.add("Stack");
+  addMantineImport(ctx, "Stack");
   // Every positional arg is a child; ignore named args in v0.
   const children = positionalChildren(call, ctx, depth + 1);
   if (children.length === 0) return `<Stack />`;
@@ -359,7 +405,7 @@ function emitGroup(
   // Mirror of Stack but horizontal — Mantine's <Group> is the
   // canonical row-flex container.  Same children-as-positionals
   // contract.
-  ctx.imports.add("Group");
+  addMantineImport(ctx, "Group");
   const children = positionalChildren(call, ctx, depth + 1);
   if (children.length === 0) return `<Group />`;
   const indent = "  ".repeat(depth + 1);
@@ -376,7 +422,7 @@ function emitGrid(
   // gives every column `span="auto"` so Mantine fills equally;
   // future slice can read a `span:` named arg per child once we
   // have a richer per-child config story.
-  ctx.imports.add("Grid");
+  addMantineImport(ctx, "Grid");
   const children = positionalChildren(call, ctx, depth + 2);
   if (children.length === 0) return `<Grid />`;
   const colIndent = "  ".repeat(depth + 1);
@@ -399,7 +445,7 @@ function emitContainer(
   // Container(...children) — Mantine's max-width centred wrapper.
   // Optional `size:` named arg (Mantine size: "xs" | "sm" | "md" |
   // "lg" | "xl") controls the max-width.
-  ctx.imports.add("Container");
+  addMantineImport(ctx, "Container");
   const children = positionalChildren(call, ctx, depth + 1);
   const size = stringNamed(call, "size");
   const sizeAttr = size !== undefined ? ` size=${JSON.stringify(size)}` : "";
@@ -429,7 +475,7 @@ function emitTabs(
   // still compiles.  Tab labels must be string literals in v0
   // (the tab `value` attribute is a slug derived from the label
   // — non-literal labels fall back to indexed slugs `tab-1`, …).
-  ctx.imports.add("Tabs");
+  addMantineImport(ctx, "Tabs");
   const positionals = positionalArgs(call);
   type TabEntry = { value: string; label: string; body: ExprIR | undefined };
   const tabs: TabEntry[] = positionals.map((arg, i) => {
@@ -485,7 +531,7 @@ function emitToolbar(
   // Toolbar(...children) — same children-as-positionals contract
   // as Group, but with `justify="space-between"` to push left- and
   // right-aligned children apart (canonical page-header layout).
-  ctx.imports.add("Group");
+  addMantineImport(ctx, "Group");
   const children = positionalChildren(call, ctx, depth + 1);
   if (children.length === 0) return `<Group justify="space-between" />`;
   const indent = "  ".repeat(depth + 1);
@@ -502,8 +548,8 @@ function emitEmpty(
   // has no dedicated component; v0 composes a centered dimmed
   // text block.  The first positional is the message; refs / ops
   // welcome (routes through renderTextContent).
-  ctx.imports.add("Center");
-  ctx.imports.add("Text");
+  addMantineImport(ctx, "Center");
+  addMantineImport(ctx, "Text");
   const msg = firstPositionalContent(call, ctx) ?? '"No results."';
   void depth;
   return `<Center mih={200}><Text c="dimmed">${unwrapTextLiteral(msg)}</Text></Center>`;
@@ -519,7 +565,7 @@ function emitField(
   // → setX).  The first positional is the label (string lit / ref
   // / binary op); `bind:` is required for v0 — without it, the
   // input is uncontrolled and falls back to a label-only stub.
-  ctx.imports.add("TextInput");
+  addMantineImport(ctx, "TextInput");
   void depth;
   const label = firstPositionalContent(call, ctx) ?? '""';
   const bind = stateBindArg(call, "bind", ctx);
@@ -538,7 +584,7 @@ function emitToggle(
   // Toggle("Label", bind: <bool state field>) — Mantine Switch
   // bound to a bool state field.  Same shape as Field but
   // checked + e.currentTarget.checked.
-  ctx.imports.add("Switch");
+  addMantineImport(ctx, "Switch");
   void depth;
   const label = firstPositionalContent(call, ctx) ?? '""';
   const bind = stateBindArg(call, "bind", ctx);
@@ -559,7 +605,7 @@ function emitNumberField(
   // wrapped to coerce to a number with a 0 fallback so the binding
   // stays type-safe.  Without `bind:`, falls through to a label-
   // only stub.
-  ctx.imports.add("NumberInput");
+  addMantineImport(ctx, "NumberInput");
   void depth;
   const label = firstPositionalContent(call, ctx) ?? '""';
   const bind = stateBindArg(call, "bind", ctx);
@@ -578,7 +624,7 @@ function emitPasswordField(
   // PasswordField("Label", bind: <string state field>) — Mantine's
   // PasswordInput (toggleable visibility).  Same bind-shape as
   // Field; without bind: falls through to label-only stub.
-  ctx.imports.add("PasswordInput");
+  addMantineImport(ctx, "PasswordInput");
   void depth;
   const label = firstPositionalContent(call, ctx) ?? '""';
   const bind = stateBindArg(call, "bind", ctx);
@@ -599,7 +645,7 @@ function emitLoader(
   // size scale).
   void call;
   void depth;
-  ctx.imports.add("Loader");
+  addMantineImport(ctx, "Loader");
   const size = stringNamed(call, "size");
   if (size !== undefined) {
     return `<Loader size=${JSON.stringify(size)} />`;
@@ -616,7 +662,7 @@ function emitAnchor(
   // <Anchor> with `component={Link}` (React Router) gives styled
   // SPA navigation; without `to:`, falls through to a bare
   // <Anchor> (no href — visible no-op for the user).
-  ctx.imports.add("Anchor");
+  addMantineImport(ctx, "Anchor");
   void depth;
   const label = firstPositionalContent(call, ctx) ?? '"link"';
   const to = stringOrRefArgValue(call, "to", ctx);
@@ -636,7 +682,7 @@ function emitImage(
   // Both attrs accept string literals or refs; missing src falls
   // back to a comment placeholder (the `src` attr is omitted, so
   // Mantine renders its built-in fallback).
-  ctx.imports.add("Image");
+  addMantineImport(ctx, "Image");
   void depth;
   const src = stringOrRefArgValue(call, "src", ctx);
   const alt = stringOrRefArgValue(call, "alt", ctx);
@@ -653,7 +699,7 @@ function emitAvatar(
 ): string {
   // Avatar(src: "...", alt: "...") — Mantine <Avatar>.  Without
   // src, Mantine renders the user-icon fallback.
-  ctx.imports.add("Avatar");
+  addMantineImport(ctx, "Avatar");
   void depth;
   const src = stringOrRefArgValue(call, "src", ctx);
   const alt = stringOrRefArgValue(call, "alt", ctx);
@@ -697,15 +743,16 @@ function emitHeading(
   ctx: WalkContext,
   depth: number,
 ): string {
-  ctx.imports.add("Title");
   // First positional is the heading text — accepts a string
   // literal OR a ref (e.g. a route-param name).  Optional `level:`
-  // named arg controls Mantine's <Title order={N}> (1..6, default
-  // 2).
+  // named arg controls the heading rank (1..6, default 2).
   const text = firstPositionalContent(call, ctx) ?? '"Heading"';
   const level = numericNamed(call, "level") ?? 2;
   void depth;
-  return `<Title order={${level}}>${unwrapTextLiteral(text)}</Title>`;
+  return renderPrimitive(ctx, "primitive-heading", {
+    text: unwrapTextLiteral(text),
+    level,
+  });
 }
 
 function emitText(
@@ -713,10 +760,11 @@ function emitText(
   ctx: WalkContext,
   depth: number,
 ): string {
-  ctx.imports.add("Text");
   const text = firstPositionalContent(call, ctx) ?? '""';
   void depth;
-  return `<Text>${unwrapTextLiteral(text)}</Text>`;
+  return renderPrimitive(ctx, "primitive-text", {
+    text: unwrapTextLiteral(text),
+  });
 }
 
 function emitButton(
@@ -724,7 +772,7 @@ function emitButton(
   ctx: WalkContext,
   depth: number,
 ): string {
-  ctx.imports.add("Button");
+  addMantineImport(ctx, "Button");
   const label = firstPositionalContent(call, ctx) ?? '"Button"';
   void depth;
   // Slice 11.7 — `onClick:` lambda named arg wires the button to
@@ -927,7 +975,7 @@ function emitCard(
   ctx: WalkContext,
   depth: number,
 ): string {
-  ctx.imports.add("Card");
+  addMantineImport(ctx, "Card");
   // Card("title", content) — first positional title; second
   // positional is the body.  Mantine's Card uses Card.Section for
   // the visual block separation.
@@ -947,7 +995,7 @@ function emitCard(
   const closeIndent = "  ".repeat(depth);
   const inner: string[] = [];
   if (titleIsTextLike && titleArg) {
-    ctx.imports.add("Title");
+    addMantineImport(ctx, "Title");
     const titleStr = renderTextContent(titleArg, ctx) ?? '""';
     inner.push(`<Title order={3}>${unwrapTextLiteral(titleStr)}</Title>`);
   }
@@ -967,8 +1015,8 @@ function emitStat(
   // dedicated Stat component; the v0 emitter renders a Group of two
   // stacked Texts (dimmed label + bold value).  Both slots accept
   // string literals or route-param refs.
-  ctx.imports.add("Stack");
-  ctx.imports.add("Text");
+  addMantineImport(ctx, "Stack");
+  addMantineImport(ctx, "Text");
   const positionals = positionalArgs(call);
   const labelArg = positionals[0];
   const valueArg = positionals[1];
@@ -984,7 +1032,7 @@ function emitBadge(
   ctx: WalkContext,
   depth: number,
 ): string {
-  ctx.imports.add("Badge");
+  addMantineImport(ctx, "Badge");
   const label = firstPositionalContent(call, ctx) ?? '"Badge"';
   void depth;
   return `<Badge>${unwrapTextLiteral(label)}</Badge>`;
@@ -1011,15 +1059,14 @@ function emitDivider(
   ctx: WalkContext,
   depth: number,
 ): string {
-  ctx.imports.add("Divider");
   void depth;
-  // Optional `label:` named arg — Mantine Divider accepts a string
-  // label rendered inline with the rule.
+  // Optional `label:` named arg — packs that support a labelled
+  // divider can use the slot; packs that don't drop it.
   const label = stringNamed(call, "label");
-  if (label !== undefined) {
-    return `<Divider label=${JSON.stringify(label)} labelPosition="center" />`;
-  }
-  return `<Divider />`;
+  return renderPrimitive(ctx, "primitive-divider", {
+    label,
+    hasLabel: label !== undefined,
+  });
 }
 
 function emitUserComponent(
@@ -1238,6 +1285,7 @@ function escapeJsxText(s: string): string {
 export function renderCustomLayoutPage(
   pageName: string,
   body: ExprIR,
+  pack: LoadedPack,
   params: ParamIR[] = [],
   state: StateFieldIR[] = [],
   /** Slice 11.12 — page-level `title:` expression.  Renders into a
@@ -1260,7 +1308,7 @@ export function renderCustomLayoutPage(
     usesState,
     usesRouterLink,
     usedUserComponents,
-  } = walkBodyToTsx(body, paramNames, stateNames, userComponents);
+  } = walkBodyToTsx(body, pack, paramNames, stateNames, userComponents);
   // Slice 11.12 — render the title expression through emitExpr
   // (sharing the body's tracking state so the shell destructures
   // any param/state the title references).  Compute the deps
@@ -1272,6 +1320,7 @@ export function renderCustomLayoutPage(
   if (title !== undefined) {
     const titleCtx: WalkContext = {
       imports,
+      pack,
       paramNames,
       usedParams,
       usesNavigate,
@@ -1296,10 +1345,7 @@ export function renderCustomLayoutPage(
   }
   const effectiveUsesState = usesState || usesStateForTitle;
 
-  const mantineImport =
-    imports.size > 0
-      ? `import { ${[...imports].sort().join(", ")} } from "@mantine/core";\n`
-      : "";
+  const mantineImport = renderImportLines(imports);
   // Slice 11.18 — one default-import line per user component
   // referenced in the body, sorted alphabetically.
   const userComponentImports = [...usedUserComponents]
@@ -1327,7 +1373,7 @@ export function renderCustomLayoutPage(
     ? `import { ${reactSpecifiers.join(", ")} } from "react";\n`
     : "";
   const stateLines = effectiveUsesState
-    ? state.map((f) => `  ${renderUseState(f)}\n`).join("")
+    ? state.map((f) => `  ${renderUseState(f, pack)}\n`).join("")
     : "";
   const paramsType = hasParams
     ? `<{ ${params.map((p) => `${p.name}: ${typeRefAsTsString(p)}`).join("; ")} }>`
@@ -1363,6 +1409,7 @@ export function renderUserComponentFile(
   params: ParamIR[],
   state: StateFieldIR[],
   body: ExprIR,
+  pack: LoadedPack,
   userComponents: ReadonlyMap<string, readonly ParamIR[]>,
 ): string {
   const paramNames = new Set(params.map((p) => p.name));
@@ -1376,10 +1423,8 @@ export function renderUserComponentFile(
     usesNavigate,
     usedUserComponents,
     usesChildren,
-  } = walkBodyToTsx(body, paramNames, stateNames, userComponents);
-  const mantineImport = imports.size > 0
-    ? `import { ${[...imports].sort().join(", ")} } from "@mantine/core";\n`
-    : "";
+  } = walkBodyToTsx(body, pack, paramNames, stateNames, userComponents);
+  const mantineImport = renderImportLines(imports);
   // Components don't have routes — useNavigate/Link still legal in
   // a component subtree (e.g. Button(to:) inside).
   const routerSpecifiers: string[] = [];
@@ -1419,7 +1464,7 @@ export function renderUserComponentFile(
     ? `  const navigate = useNavigate();\n`
     : "";
   const stateLines = usesState
-    ? state.map((f) => `  ${renderUseState(f)}\n`).join("")
+    ? state.map((f) => `  ${renderUseState(f, pack)}\n`).join("")
     : "";
   // Suppress used-prop warnings — params declared but unused at
   // walker-emit time (e.g. typed pass-through to a child component
@@ -1463,11 +1508,11 @@ function collectExprRefs(expr: ExprIR, out: Set<string>): void {
  *  declaration: `const [name, setName] = useState<T>(init);`.  Init
  *  comes from the field's optional `=` initializer; absent
  *  initializers fall back to the type's zero value. */
-function renderUseState(field: StateFieldIR): string {
+function renderUseState(field: StateFieldIR, pack: LoadedPack): string {
   const setter = "set" + field.name[0]!.toUpperCase() + field.name.slice(1);
   const tsType = stateTypeAsTsString(field.type);
   const init = field.init !== undefined
-    ? renderInitExpr(field.init)
+    ? renderInitExpr(field.init, pack)
     : zeroValueForType(field.type);
   return `const [${field.name}, ${setter}] = useState<${tsType}>(${init});`;
 }
@@ -1476,11 +1521,12 @@ function renderUseState(field: StateFieldIR): string {
  *  string.  Reuses the same shape `emitExpr` produces but runs
  *  with an empty context — initializers can't reference state or
  *  params (they evaluate at component-mount time). */
-function renderInitExpr(expr: ExprIR): string {
+function renderInitExpr(expr: ExprIR, pack: LoadedPack): string {
   // Empty walker context — init expressions don't see state /
   // params (they evaluate before the hooks run).
   const dummy: WalkContext = {
-    imports: new Set(),
+    imports: new Map(),
+    pack,
     paramNames: new Set(),
     usedParams: new Set(),
     usesNavigate: false,
