@@ -10,6 +10,7 @@ import inventorySystemSource from "./inventory-system.ddd?raw";
 import acmeSource from "./acme.ddd?raw";
 import storybookMantineSource from "./storybook-mantine.ddd?raw";
 import storybookShadcnSource from "./storybook-shadcn.ddd?raw";
+import storybookComponentsSource from "./storybook-components.ddd?raw";
 
 export interface LoomExample {
   id: string;
@@ -28,15 +29,22 @@ export interface LoomExample {
 // frontend targets a .NET deployable we don't run in the browser).
 export const examples: LoomExample[] = [
   {
+    id: "storybook-components",
+    label: "UI Storybook (components page)",
+    source: storybookComponentsSource,
+    blurb:
+      "Single long page exercising every page-metamodel primitive — layout, display, input, action — no aggregates.",
+  },
+  {
     id: "storybook-mantine",
-    label: "UI Storybook (Mantine)",
+    label: "UI Storybook (Mantine, aggregate-CRUD)",
     source: storybookMantineSource,
     blurb:
       "Catalogue: each aggregate demonstrates one UI primitive — cells, fields, value-objects, references, ops, workflows, views.",
   },
   {
     id: "storybook-shadcn",
-    label: "UI Storybook (shadcn)",
+    label: "UI Storybook (shadcn, aggregate-CRUD)",
     source: storybookShadcnSource,
     blurb:
       "Same catalogue as the Mantine storybook, rendered through the shadcn/ui pack.",

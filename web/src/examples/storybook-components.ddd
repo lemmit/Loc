@@ -1,0 +1,167 @@
+// Loom UI Storybook (components page).
+//
+// A single long page that exercises every primitive in the page-
+// metamodel stdlib.  No aggregates, no domain — just layout,
+// display, input, and action components in isolation, generated
+// straight from a `ui` block.
+//
+// Pair with `storybook-mantine.ddd` / `storybook-shadcn.ddd` for
+// the aggregate-CRUD-flavoured catalogue (one story per generated
+// page rather than one page with all stories).
+//
+// Note on packs: the page-metamodel walker emits Mantine output
+// today regardless of the `design:` slot — shadcn output for `ui`-
+// declared pages is a follow-up that will plug into the existing
+// pack contract.  Aggregate-CRUD scaffolding (the sister storybook
+// files) is already pack-aware.
+
+system Storybook {
+
+  // Visual identity — projected by both packs to their idiom.
+  theme {
+    primary: "#0ea5e9"
+    neutral: "#64748b"
+    radius: "md"
+    fontFamily: "Inter, system-ui, sans-serif"
+  }
+
+  // Empty module — the page metamodel doesn't need domain content
+  // for a components-only storybook.  An empty context keeps the
+  // grammar happy and gives the api deployable something to target.
+  module Empty {
+    context Empty { }
+  }
+
+  ui ComponentCatalog {
+
+    // The whole storybook is one route serving one long page.
+    page Catalog {
+      route: "/"
+      title: "Loom UI Storybook"
+
+      // Reactive state that the input + action stories bind to.
+      state {
+        userName: string = "Ada"
+        notifications: bool = true
+        clickCount: int = 0
+      }
+
+      body: Stack(
+        // ── Header ────────────────────────────────────────────
+        Heading("Loom UI Storybook", level: 1),
+        Text("Every primitive in the page metamodel stdlib, on one page."),
+        Divider(),
+
+        // ── Layout ────────────────────────────────────────────
+        Heading("Layout", level: 2),
+
+        Card("Stack — vertical stacking", Stack(
+          Text("Item one"),
+          Text("Item two"),
+          Text("Item three")
+        )),
+
+        Card("Group — horizontal row", Group(
+          Badge("Alpha"),
+          Badge("Beta"),
+          Badge("Gamma")
+        )),
+
+        Card("Grid — multi-column", Grid(
+          Card("A", Text("Cell A body")),
+          Card("B", Text("Cell B body")),
+          Card("C", Text("Cell C body"))
+        )),
+
+        Card("Tabs", Tabs(
+          Tab("Overview",  Text("Overview tab body")),
+          Tab("Details",   Text("Details tab body")),
+          Tab("Settings",  Text("Settings tab body"))
+        )),
+
+        Card("Toolbar", Toolbar(
+          Button("Primary"),
+          Button("Secondary"),
+          Button("Tertiary")
+        )),
+
+        Divider(),
+
+        // ── Display ───────────────────────────────────────────
+        Heading("Display", level: 2),
+
+        Card("Headings ladder", Stack(
+          Heading("h2 example", level: 2),
+          Heading("h3 example", level: 3),
+          Heading("h4 example", level: 4)
+        )),
+
+        Card("Text",
+          Text("Plain body text — Lorem ipsum dolor sit amet, consectetur adipiscing elit.")
+        ),
+
+        Card("Stat — labelled metric", Group(
+          Stat("Active users", "1,247"),
+          Stat("Conversion",   "12.4%"),
+          Stat("Revenue",      "$48,210")
+        )),
+
+        Card("Badge — coloured pill", Group(
+          Badge("Active"),
+          Badge("Draft"),
+          Badge("Archived")
+        )),
+
+        Card("Empty state", Empty()),
+
+        Divider(),
+
+        // ── Inputs ────────────────────────────────────────────
+        Heading("Inputs", level: 2),
+
+        Card("Field — text bound to state", Stack(
+          Field("Your name", bind: userName),
+          Text("Hello, " + userName)
+        )),
+
+        Card("Toggle — bool bound to state",
+          Toggle("Notifications enabled", bind: notifications)
+        ),
+
+        Divider(),
+
+        // ── Actions ───────────────────────────────────────────
+        Heading("Actions", level: 2),
+
+        Card("Button — event handler", Stack(
+          Button("Increment", onClick: e => { clickCount := clickCount + 1 }),
+          Text("Clicks: " + clickCount)
+        ))
+      )
+    }
+
+    // Single-page storybook — one menu link.
+    menu {
+      section "Storybook" {
+        link Catalog
+      }
+    }
+  }
+
+  // Hono backend — empty but required so the playground's
+  // preview pipeline has something to bundle/boot.
+  deployable api {
+    platform: hono
+    modules: Empty
+    port: 3000
+  }
+
+  // React frontend — Mantine pack.
+  deployable webApp {
+    platform: react
+    targets: api
+    ui: ComponentCatalog
+    port: 3001
+    design: mantine
+  }
+}
