@@ -129,8 +129,14 @@ const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
 
 export function isWalkableLayoutBody(body: ExprIR | undefined): boolean {
   if (!body) return false;
-  if (body.kind !== "call") return false;
-  return STDLIB_LAYOUT_COMPONENTS.has(body.name);
+  if (body.kind === "call") return STDLIB_LAYOUT_COMPONENTS.has(body.name);
+  // Slice 11.17 — top-level conditional bodies dispatch through the
+  // walker as long as either branch is walkable.  Powers patterns
+  // like `body: loading ? Empty("…") : Stack(…)`.
+  if (body.kind === "ternary") {
+    return isWalkableLayoutBody(body.then) || isWalkableLayoutBody(body.otherwise);
+  }
+  return false;
 }
 
 export function walkBodyToTsx(
@@ -205,6 +211,17 @@ function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
         return `{${expr.name}}`;
       }
       return `{/* ref: ${expr.name} */}`;
+    case "ternary": {
+      // Slice 11.17 — conditional rendering.  `cond ? <A /> : <B />`
+      // works as a top-level body (depth 0 — JSX-element inside the
+      // function's `return ( … )` parens).  In nested child
+      // position, JSX requires brace-wrapping `{ cond ? … : … }`.
+      const cond = emitExpr(expr.cond, ctx);
+      const thenS = walk(expr.then, ctx, depth + 1);
+      const elseS = walk(expr.otherwise, ctx, depth + 1);
+      const inner = `${cond} ? (\n${"  ".repeat(depth + 1)}${thenS}\n${"  ".repeat(depth)}) : (\n${"  ".repeat(depth + 1)}${elseS}\n${"  ".repeat(depth)})`;
+      return depth === 0 ? inner : `{${inner}}`;
+    }
     default:
       return `{/* unsupported expr: ${expr.kind} */}`;
   }
