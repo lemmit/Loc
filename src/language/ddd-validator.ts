@@ -128,6 +128,31 @@ export class DddValidator {
           }
         }
 
+        // Slice 11.27 — Storage declaration checks.
+        //   - Names unique within the system.
+        //   - Type is one of the v0 enum values (parser ensures shape;
+        //     this is a structural sanity-check + future hook for
+        //     cross-platform constraints).
+        const storages = m.members.filter(
+          (sm) => sm.$type === "Storage",
+        ) as import("./generated/ast.js").Storage[];
+        const storageNamesSeen = new Map<
+          string,
+          import("./generated/ast.js").Storage
+        >();
+        for (const s of storages) {
+          const prior = storageNamesSeen.get(s.name);
+          if (prior) {
+            accept(
+              "error",
+              `Duplicate storage '${s.name}'; storage names must be unique within a system.`,
+              { node: s, property: "name" },
+            );
+          } else {
+            storageNamesSeen.set(s.name, s);
+          }
+        }
+
         for (const sm of m.members) {
           if (sm.$type === "Module") {
             for (const ctx of sm.contexts) this.checkContext(ctx, accept);
@@ -271,11 +296,11 @@ export class DddValidator {
           { node: d, property: "targets" },
         );
       }
-      if (d.modules.length > 0) {
+      if ((d.moduleBindings ?? []).length > 0) {
         accept(
           "warning",
           `Frontend deployable '${d.name}' inherits modules from its target '${target.name}'; the explicit 'modules:' list is ignored.`,
-          { node: d, property: "modules" },
+          { node: d, property: "moduleBindings" },
         );
       }
       void siblings;
@@ -292,6 +317,67 @@ export class DddValidator {
     // Slice 11.26 — explicit api composition checks.
     this.checkDeployableServes(d, accept);
     this.checkDeployableUiCompose(d, accept);
+    this.checkDeployableModuleStorages(d, accept);
+  }
+
+  /** Slice 11.27 — `modules: <M> { primary: <Storage>, ... }`
+   *  per-module storage map validations.
+   *    - Each storage ref must resolve.
+   *    - No duplicate role within one module's brace block.
+   *    - Brace blocks only valid on backend platforms (frontends
+   *      don't persist anything; the storage map there is a smell).
+   *    - Each module must have AT LEAST a `primary:` storage when
+   *      its aggregates persist.  v0 relaxation: only enforce
+   *      `primary:` when the brace block is non-empty (so existing
+   *      bare `modules: Sales` deployables keep working).  Bare
+   *      list still defaults to "no explicit storage; use generator
+   *      defaults". */
+  private checkDeployableModuleStorages(
+    d: import("./generated/ast.js").Deployable,
+    accept: ValidationAcceptor,
+  ): void {
+    const isBackend = d.platform !== "react" && d.platform !== "static";
+    for (const mb of d.moduleBindings ?? []) {
+      const block = mb.storages ?? [];
+      if (block.length === 0) continue; // bare-list form
+      if (!isBackend) {
+        accept(
+          "error",
+          `'modules: <M> { ... }' storage block is only valid on a backend deployable (got platform '${d.platform}').`,
+          { node: mb, property: "name" },
+        );
+        continue;
+      }
+      const seenRoles = new Set<string>();
+      let hasPrimary = false;
+      for (const sb of block) {
+        const role = sb.role;
+        if (seenRoles.has(role)) {
+          accept(
+            "error",
+            `Module '${mb.name?.$refText}' on deployable '${d.name}' binds role '${role}' more than once.`,
+            { node: sb, property: "role" },
+          );
+        } else {
+          seenRoles.add(role);
+        }
+        if (role === "primary") hasPrimary = true;
+        if (!sb.storage?.ref) {
+          accept(
+            "error",
+            `Module '${mb.name?.$refText}' on deployable '${d.name}' references undeclared storage '${sb.storage?.$refText ?? "<missing>"}' for role '${role}'.`,
+            { node: sb, property: "storage" },
+          );
+        }
+      }
+      if (!hasPrimary) {
+        accept(
+          "error",
+          `Module '${mb.name?.$refText}' on deployable '${d.name}' must include a 'primary: <storage>' binding (transactional persistence).`,
+          { node: mb, property: "name" },
+        );
+      }
+    }
   }
 
   /** Slice 11.26 — `serves:` validations.
