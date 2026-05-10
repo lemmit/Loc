@@ -22,6 +22,7 @@ import type { Diagnostic } from "./lsp/protocol";
 import { examples, defaultExample, type LoomExample } from "./examples";
 import { LoomBuildClient } from "./build/client";
 import type { GenerateResult, VirtualFile } from "./build/protocol";
+import { IdbVfs, requestPersistentStorage } from "./vfs/idb-vfs";
 import { LoomBundleClient } from "./bundle/client";
 import { LoomRuntimeClient } from "./runtime/client";
 import { FileTree } from "./preview/FileTree";
@@ -141,14 +142,63 @@ export default function App(): JSX.Element {
     ];
   }, [hashSourceOnMount]);
 
+  // Workspace persistence (IDB-backed VFS).  Boot order:
+  //   1. URL hash present  -> use it (sharing wins, explicit intent)
+  //   2. IDB has /workspace/main.ddd -> append a "Workspace
+  //      (autosaved)" example and auto-select it on first render
+  //      (user-picked example switches override)
+  //   3. Default example
+  // The VFS open is async; until it resolves we render with the
+  // synchronously-derived examplesList, then re-render with the
+  // augmented list once IDB hydrates.  The brief flicker on cold
+  // boot is preferable to a loading screen.
+  const workspaceVfsRef = useRef<IdbVfs | null>(null);
+  const [workspaceSource, setWorkspaceSource] = useState<string | null>(null);
+  const userPickedExampleRef = useRef(false);
+
+  const augmentedExamplesList = useMemo<LoomExample[]>(() => {
+    if (workspaceSource === null || hashSourceOnMount !== null) {
+      return examplesList;
+    }
+    return [
+      {
+        id: "workspace",
+        label: "Workspace (autosaved)",
+        source: workspaceSource,
+        blurb:
+          "Restored from this browser's autosave.  Edits flow back to local IndexedDB so reloads keep your work.",
+      },
+      ...examplesList,
+    ];
+  }, [examplesList, workspaceSource, hashSourceOnMount]);
+
   const [exampleId, setExampleId] = useState(() =>
     hashSourceOnMount !== null ? "shared" : defaultExample.id,
   );
+
+  // After IDB hydrates, switch to the autosaved workspace IF the
+  // user hasn't already picked something else.  Tracking via a ref
+  // (not derived from state) avoids re-firing the switch on every
+  // re-render after the initial discovery.
+  useEffect(() => {
+    if (
+      workspaceSource !== null &&
+      !userPickedExampleRef.current &&
+      exampleId === defaultExample.id
+    ) {
+      setExampleId("workspace");
+    }
+    // exampleId intentionally omitted: we only want this to fire
+    // when the persisted source first lands, not on every example
+    // switch the user makes after.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceSource]);
+
   const initialSource = useMemo(
     () =>
-      examplesList.find((e) => e.id === exampleId)?.source ??
+      augmentedExamplesList.find((e) => e.id === exampleId)?.source ??
       defaultExample.source,
-    [exampleId, examplesList],
+    [exampleId, augmentedExamplesList],
   );
 
   // Pipeline state machine — generate → bundle → boot → dispatch.
@@ -187,6 +237,34 @@ export default function App(): JSX.Element {
   if (lspClientRef.current === null) {
     lspClientRef.current = new LoomLspClient();
   }
+
+  // Open the IDB-backed workspace VFS once at mount.  Hydration
+  // populates `workspaceSource` which the augmentedExamplesList
+  // useMemo turns into a "Workspace (autosaved)" entry.  Failures
+  // are non-fatal: the VFS falls back to in-memory only and
+  // workspaceSource stays null, so the playground behaves like
+  // pre-Phase-3.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const vfs = await IdbVfs.open();
+        if (cancelled) return;
+        workspaceVfsRef.current = vfs;
+        // Best-effort persistence request — browsers may evict IDB
+        // under storage pressure otherwise.  Fire-and-forget; the
+        // grant prompt (if any) is the user's call.
+        void requestPersistentStorage();
+        const persisted = vfs.read("/workspace/main.ddd");
+        if (persisted) setWorkspaceSource(persisted);
+      } catch (err) {
+        console.warn("workspace VFS unavailable:", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const build = new LoomBuildClient();
@@ -500,8 +578,12 @@ export default function App(): JSX.Element {
             <Select
               size="xs"
               value={exampleId}
-              onChange={(v) => v && setExampleId(v)}
-              data={examplesList.map((e) => ({ value: e.id, label: e.label }))}
+              onChange={(v) => {
+                if (!v) return;
+                userPickedExampleRef.current = true;
+                setExampleId(v);
+              }}
+              data={augmentedExamplesList.map((e) => ({ value: e.id, label: e.label }))}
               allowDeselect={false}
               w={300}
             />
@@ -566,6 +648,17 @@ export default function App(): JSX.Element {
                   sourceRef.current = text;
                   scheduleHashSync(text);
                   scheduleAutoGenerate();
+                  // Mirror to the IDB-backed workspace VFS.  The
+                  // VFS debounces flushes internally (~250ms), so
+                  // bursty typing collapses into one IDB write per
+                  // natural pause.  Safe to call when the VFS is
+                  // still loading — the ref is null then and we
+                  // skip silently; persistence resumes on the
+                  // next keystroke after IDB resolves.
+                  workspaceVfsRef.current?.write(
+                    "/workspace/main.ddd",
+                    text,
+                  );
                 }}
                 onDiagnosticsChange={setDiagnostics}
               />
