@@ -23,7 +23,7 @@ System:
     '}';
 
 SystemMember:
-    Module | Deployable | BoundedContext | TestE2E | UserBlock | ThemeBlock | Ui;
+    Module | Deployable | BoundedContext | TestE2E | UserBlock | ThemeBlock | Ui | Api;
 
 // System-level visual identity — design tokens consumed by every
 // React deployable in this system.  Tokens are intentionally
@@ -68,7 +68,7 @@ UserFieldName returns string:
 // (e.g., `api.orders.create({...})`).  Renders to a vitest test file
 // at the system output root.
 TestE2E:
-    'test' 'e2e' name=STRING 'against' deployable=[Deployable:ID] '{'
+    'test' 'e2e' name=STRING 'against' deployable=[Deployable:LooseName] '{'
         body+=TestStatement*
     '}';
 
@@ -93,10 +93,10 @@ PermissionDecl:
     name=ID;
 
 Deployable:
-    'deployable' name=ID '{'
+    'deployable' name=LooseName '{'
         ('platform' ':' platform=Platform ','?)
         ('modules' ':' modules+=[Module:ID] (',' modules+=[Module:ID])* ','?)?
-        ('targets' ':' targets=[Deployable:ID] ','?)?
+        ('targets' ':' targets=[Deployable:LooseName] ','?)?
         // UI binding — references a `ui { ... }` block at system scope.
         // Two surface forms (sugar + full):
         //   ui: WebApp                            // empty-block sugar; framework defaults
@@ -166,7 +166,33 @@ Ui:
     '}';
 
 UiMember:
-    Page | Component | Scaffold | MenuBlock;
+    UiApiParam | Page | Component | Scaffold | MenuBlock;
+
+// ---- api declaration (system-level) ----------------------------
+//
+// First-class API contract derived from a module's domain (its
+// aggregates, repositories, workflows, views).  v0: full surface
+// auto-derived from `from <Module>`; future: customization
+// (hide, rename, expose subset, version).
+//
+//   api SalesApi from Sales
+//
+// Peer to module / ui / deployable.  Pure declarative — what's
+// available; consumers (ui, deployable) reference it by name.
+Api:
+    'api' name=ID 'from' source=[Module:ID];
+
+// ---- ui api parameter ------------------------------------------
+//
+// UI-scope api dependency declaration with a local handle.  The
+// local name (e.g. `Sales`) is what page bodies use to reference
+// operations: `Sales.Customer.all.data`, `Sales.Customer.create.mutate(...)`.
+// The deployable composition supplies the binding (which backend
+// deployable serves the api).
+//
+//   api Sales: SalesApi
+UiApiParam:
+    'api' name=ID ':' apiRef=[Api:ID];
 
 // ---- page ---------------------------------------------------------------
 
@@ -453,7 +479,7 @@ LooseName returns string:
     | 'section' | 'link' | 'route' | 'title' | 'body' | 'framework' | 'static'
     | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
     | 'design' | 'targets'
-    | 'bind';
+    | 'bind' | 'api';
 
 // ---------------------------------------------------------------------------
 // Type references
@@ -531,7 +557,7 @@ LValue:
       (call?='(' (args+=Expression (',' args+=Expression)*)? ')')?;
 
 LValueIdent returns string:
-    ID | 'id' | 'permissions' | 'contains' | 'ui'
+    ID | 'id' | 'permissions' | 'contains' | 'ui' | 'api'
        | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views';
 
 // ---------------------------------------------------------------------------
@@ -613,7 +639,7 @@ CallArg:
 // resolution / collection-op dispatch lives in the lowering
 // (lower-expr.ts + type-system.ts) rather than the grammar.
 MemberName returns string:
-    ID | 'id' | 'permissions' | 'contains' | 'ui'
+    ID | 'id' | 'permissions' | 'contains' | 'ui' | 'api'
        | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views';
 
 // Lambdas accept either a single expression body (the only form
@@ -690,7 +716,11 @@ NameRefIdent returns string:
     //
     // `permissions` is admissible for the analogous reason —
     // `currentUser.permissions.contains(x)` in expression bodies.
-    ID | 'permissions' | 'ui';
+    //
+    // `api` is admissible so e2e test bodies can use the existing
+    // `api.<aggregate>.<verb>(...)` magic-identifier form even
+    // though `api` is now a system-level keyword (Api declaration).
+    ID | 'permissions' | 'ui' | 'api';
 
 // ---------------------------------------------------------------------------
 // Terminals
