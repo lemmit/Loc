@@ -79,23 +79,19 @@ export class MemoryVfs implements Vfs {
   }
 
   list(prefix: VfsPath): ReadonlyArray<VfsPath> {
-    // Strip any trailing `/` so the comparison treats the prefix as
-    // a directory boundary; we then test `startsWith(prefix + "/")`
-    // for nested entries plus equality for the directory itself.
+    // Always interpret the prefix as a directory boundary —
+    // `list("/workspace")` and `list("/workspace/")` return the
+    // same set, both treating the prefix as the parent dir.
+    // Avoiding the literal-startsWith fallback keeps the semantics
+    // unambiguous: `list("/workspace/main")` cannot accidentally
+    // match `/workspace/main.ddd` AND `/workspace/maintenance.ddd`,
+    // which surprised exactly nobody when the early Phase 1 design
+    // tried it.  Callers wanting glob-style matches can filter the
+    // returned list themselves.
     const norm = normalize(prefix);
-    const wantsDir = prefix.endsWith("/") && norm !== "/";
     const out: VfsPath[] = [];
     for (const key of this.entries.keys()) {
-      if (norm === "/") {
-        out.push(key);
-      } else if (wantsDir) {
-        if (key === norm || key.startsWith(norm + "/")) out.push(key);
-      } else if (key === norm || key.startsWith(norm + "/") || key.startsWith(norm)) {
-        // Without a trailing `/` in the prefix, accept literal-prefix
-        // matches too — `list("/themes/man")` returns paths under
-        // `/themes/mantine/...` even though `/themes/man` is not a
-        // real directory boundary.  This matches the look-up
-        // semantics callers expect from glob-style prefixes.
+      if (norm === "/" || key === norm || key.startsWith(norm + "/")) {
         out.push(key);
       }
     }
