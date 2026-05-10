@@ -832,16 +832,35 @@ function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       return `${expr.name}(${args})`;
     }
     case "method-call": {
-      // Slice 11.23 — `Orders.create(draft)` etc.  Receiver is
-      // recursively emitted, then `.member(args)` appended.  Same
-      // caveat as plain `call`: the callee is emitted verbatim.
-      const receiver = emitExpr(expr.receiver, ctx);
-      const args = expr.args.map((a) => emitExpr(a, ctx)).join(", ");
-      return `${receiver}.${expr.member}(${args})`;
+      // v0 — method calls against external receivers (e.g.
+      // `Orders.create(draft)`, `lodash.compact(items)`) need a
+      // hooks-binding mechanism the walker doesn't yet provide.
+      // Emitting `<receiver>.<member>(<args>)` directly tends to
+      // produce runtime-broken code (`undefined.create(draft)`)
+      // when the receiver doesn't resolve, so v0 emits a visible
+      // placeholder.  The forthcoming `hooks {}` declaration
+      // (Slice 11.24+) will resolve aggregate / workflow / view
+      // method calls into auto-emitted React Query hook calls
+      // (`Orders.create.mutate(draft)`).
+      const argsRendered = expr.args.map((a) => emitExpr(a, ctx)).join(", ");
+      const receiverDesc = describeReceiver(expr.receiver);
+      return `/* TODO: method-call ${receiverDesc}.${expr.member}(${argsRendered}) — needs hooks {} binding (Slice 11.24+) */ undefined`;
     }
     default:
       return `/* unsupported expr: ${expr.kind} */ undefined`;
   }
+}
+
+/** Best-effort description of an unresolved method-call receiver
+ *  for the placeholder comment (so the user can see WHICH
+ *  call landed as the placeholder).  Avoids invoking emitExpr
+ *  on the receiver since that path emits a noisy
+ *  `unresolved` comment for free identifiers — bad inside the
+ *  outer placeholder. */
+function describeReceiver(expr: ExprIR): string {
+  if (expr.kind === "ref") return expr.name;
+  if (expr.kind === "method-call") return `${describeReceiver(expr.receiver)}.${expr.member}`;
+  return `<expr>`;
 }
 
 /** Render a `StmtIR` as a TS statement string (with a trailing
