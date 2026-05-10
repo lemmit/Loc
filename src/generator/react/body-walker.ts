@@ -67,6 +67,7 @@ export type MantineImport =
   | "Center"
   | "TextInput"
   | "Switch"
+  | "Anchor"
   | "Title"
   | "Text"
   | "Button"
@@ -93,6 +94,11 @@ export interface WalkResult {
    *  `useState` import + per-field `const [x, setX] = useState(...)`
    *  declarations when set. */
   usesState: boolean;
+  /** Slice 11.15 — true when any walked node emitted JSX that
+   *  references React Router's `Link` component (e.g.
+   *  `Anchor("…", to: …)` → `<Anchor component={Link}>`).  The
+   *  shell adds `Link` to the existing react-router-dom import. */
+  usesRouterLink: boolean;
 }
 
 /** Component names the walker recognises.  Used by the page
@@ -107,6 +113,7 @@ const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
   "Empty",
   "Field",
   "Toggle",
+  "Anchor",
   "Heading",
   "Text",
   "Button",
@@ -141,6 +148,7 @@ export function walkBodyToTsx(
     usesNavigate: false,
     stateNames,
     usesState: false,
+    usesRouterLink: false,
   };
   const tsx = walk(body, ctx, 0);
   return {
@@ -149,6 +157,7 @@ export function walkBodyToTsx(
     usedParams: ctx.usedParams,
     usesNavigate: ctx.usesNavigate,
     usesState: ctx.usesState,
+    usesRouterLink: ctx.usesRouterLink,
   };
 }
 
@@ -159,6 +168,7 @@ interface WalkContext {
   usesNavigate: boolean;
   stateNames: ReadonlySet<string>;
   usesState: boolean;
+  usesRouterLink: boolean;
 }
 
 function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
@@ -218,6 +228,8 @@ function emitComponent(
       return emitField(call, ctx, depth);
     case "Toggle":
       return emitToggle(call, ctx, depth);
+    case "Anchor":
+      return emitAnchor(call, ctx, depth);
     case "Heading":
       return emitHeading(call, ctx, depth);
     case "Text":
@@ -429,6 +441,26 @@ function emitToggle(
   }
   const setter = "set" + bind[0]!.toUpperCase() + bind.slice(1);
   return `<Switch label=${unwrapAsAttr(label)} checked={${bind}} onChange={(e) => ${setter}(e.currentTarget.checked)} />`;
+}
+
+function emitAnchor(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  // Anchor("label", to: "/path")        — text-style link.  Mantine's
+  // <Anchor> with `component={Link}` (React Router) gives styled
+  // SPA navigation; without `to:`, falls through to a bare
+  // <Anchor> (no href — visible no-op for the user).
+  ctx.imports.add("Anchor");
+  void depth;
+  const label = firstPositionalContent(call, ctx) ?? '"link"';
+  const to = stringOrRefArgValue(call, "to", ctx);
+  if (to) {
+    ctx.usesRouterLink = true;
+    return `<Anchor component={Link} to=${to}>${unwrapTextLiteral(label)}</Anchor>`;
+  }
+  return `<Anchor>${unwrapTextLiteral(label)}</Anchor>`;
 }
 
 /** Slice 11.14 — read a `bind:` named arg as a state-field name.
@@ -892,7 +924,7 @@ export function renderCustomLayoutPage(
 ): string {
   const paramNames = new Set(params.map((p) => p.name));
   const stateNames = new Set(state.map((s) => s.name));
-  const { tsx, imports, usedParams, usesNavigate, usesState } = walkBodyToTsx(
+  const { tsx, imports, usedParams, usesNavigate, usesState, usesRouterLink } = walkBodyToTsx(
     body,
     paramNames,
     stateNames,
@@ -913,6 +945,7 @@ export function renderCustomLayoutPage(
       usesNavigate,
       stateNames,
       usesState,
+      usesRouterLink: false,
     };
     const titleExpr = emitExpr(title, titleCtx);
     // emitExpr may have added to usedParams; reflect title's state
@@ -936,6 +969,7 @@ export function renderCustomLayoutPage(
   const routerSpecifiers: string[] = [];
   if (hasParams) routerSpecifiers.push("useParams");
   if (usesNavigate) routerSpecifiers.push("useNavigate");
+  if (usesRouterLink) routerSpecifiers.push("Link");
   const reactRouterImport = routerSpecifiers.length > 0
     ? `import { ${routerSpecifiers.join(", ")} } from "react-router-dom";\n`
     : "";
@@ -1026,6 +1060,7 @@ function renderInitExpr(expr: ExprIR): string {
     usesNavigate: false,
     stateNames: new Set(),
     usesState: false,
+    usesRouterLink: false,
   };
   return emitExpr(expr, dummy);
 }
