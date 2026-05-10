@@ -23,6 +23,8 @@ import { examples, defaultExample, type LoomExample } from "./examples";
 import { LoomBuildClient } from "./build/client";
 import type { GenerateResult, VirtualFile } from "./build/protocol";
 import { IdbVfs, requestPersistentStorage } from "./vfs/idb-vfs";
+import { PackPicker } from "./workspace/PackPicker";
+import { WorkspaceTree } from "./workspace/WorkspaceTree";
 import { LoomBundleClient } from "./bundle/client";
 import { LoomRuntimeClient } from "./runtime/client";
 import { FileTree } from "./preview/FileTree";
@@ -154,6 +156,8 @@ export default function App(): JSX.Element {
   // boot is preferable to a loading screen.
   const workspaceVfsRef = useRef<IdbVfs | null>(null);
   const [workspaceSource, setWorkspaceSource] = useState<string | null>(null);
+  const [vfsLoaded, setVfsLoaded] = useState(false);
+  const [buildClientReady, setBuildClientReady] = useState(false);
   const userPickedExampleRef = useRef(false);
 
   const augmentedExamplesList = useMemo<LoomExample[]>(() => {
@@ -257,8 +261,10 @@ export default function App(): JSX.Element {
         void requestPersistentStorage();
         const persisted = vfs.read("/workspace/main.ddd");
         if (persisted) setWorkspaceSource(persisted);
+        setVfsLoaded(true);
       } catch (err) {
         console.warn("workspace VFS unavailable:", err);
+        if (!cancelled) setVfsLoaded(true);
       }
     })();
     return () => {
@@ -273,6 +279,7 @@ export default function App(): JSX.Element {
     buildClientRef.current = build;
     bundleClientRef.current = bundleClient;
     runtimeClientRef.current = runtimeClient;
+    setBuildClientReady(true);
     // Preview Service Worker — scaffolding registration.  The SW
     // currently only claims clients and serves a placeholder; the
     // legacy srcdoc preview is still the active path.  Registering
@@ -284,6 +291,7 @@ export default function App(): JSX.Element {
       buildClientRef.current = null;
       bundleClientRef.current = null;
       runtimeClientRef.current = null;
+      setBuildClientReady(false);
       build.dispose();
       bundleClient.dispose();
       runtimeClient.dispose();
@@ -293,6 +301,26 @@ export default function App(): JSX.Element {
       lspClientRef.current = null;
     };
   }, []);
+
+  // Replay any persisted custom packs (`/workspace/design/<pack>/...`)
+  // into the build worker once both the IDB-backed workspace VFS
+  // and the build client are ready.  Without this, a user who
+  // imported a pack last session and reloaded would have the pack
+  // resident in IDB but invisible to the worker, so generation
+  // against `design: "./design/<pack>"` would fail.
+  useEffect(() => {
+    if (!vfsLoaded || !buildClientReady) return;
+    const vfs = workspaceVfsRef.current;
+    const client = buildClientRef.current;
+    if (!vfs || !client) return;
+    const designPaths = vfs.list("/workspace/design/");
+    if (designPaths.length === 0) return;
+    const entries = designPaths.flatMap((path) => {
+      const content = vfs.read(path);
+      return content != null ? [{ path, content }] : [];
+    });
+    void client.vfsWrite(entries);
+  }, [vfsLoaded, buildClientReady]);
 
   // Reset the whole pipeline + UI state when the user picks a
   // different example.  The reducer's RESET kills generate/bundle/
@@ -596,6 +624,26 @@ export default function App(): JSX.Element {
             >
               {copied ? "✓ Copied" : "Share link"}
             </Button>
+            <PackPicker
+              workspaceVfs={workspaceVfsRef.current}
+              buildClient={buildClientRef.current}
+              onImported={() => {
+                // A pre-existing `design: "./design/X"` in the
+                // editor needs a re-parse before generation will
+                // pick the new pack up.  Touching auto-generate
+                // re-fires the build worker against the latest
+                // source through the new VFS state.
+                scheduleAutoGenerate();
+              }}
+              onError={(err) => {
+                // eslint-disable-next-line no-console
+                console.warn("pack import:", err.message);
+              }}
+            />
+            <WorkspaceTree
+              workspaceVfs={workspaceVfsRef.current}
+              buildClient={buildClientRef.current}
+            />
           </Group>
           <Group gap="xs">
             <Button
