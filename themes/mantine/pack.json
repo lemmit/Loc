@@ -63,7 +63,11 @@
     "primitive-image": "primitive-image.hbs",
     "primitive-avatar": "primitive-avatar.hbs",
     "primitive-tabs": "primitive-tabs.hbs",
-    "primitive-table": "primitive-table.hbs"
+    "primitive-table": "primitive-table.hbs",
+    "primitive-money": "primitive-money.hbs",
+    "primitive-date-display": "primitive-date-display.hbs",
+    "primitive-enum-badge": "primitive-enum-badge.hbs",
+    "primitive-id-link": "primitive-id-link.hbs"
   },
   "imports": {
     "primitive-heading":        [{ "from": "@mantine/core", "named": ["Title"] }],
@@ -88,6 +92,10 @@
     "primitive-image":          [{ "from": "@mantine/core", "named": ["Image"] }],
     "primitive-avatar":         [{ "from": "@mantine/core", "named": ["Avatar"] }],
     "primitive-tabs":           [{ "from": "@mantine/core", "named": ["Tabs"] }],
-    "primitive-table":          [{ "from": "@mantine/core", "named": ["Table"] }]
+    "primitive-table":          [{ "from": "@mantine/core", "named": ["Table"] }],
+    "primitive-money":          [{ "from": "../lib/format", "named": ["MoneyValue"] }],
+    "primitive-date-display":   [{ "from": "../lib/format", "named": ["DateTimeValue"] }],
+    "primitive-enum-badge":     [{ "from": "@mantine/core", "named": ["Badge"] }],
+    "primitive-id-link":        [{ "from": "../lib/format", "named": ["IdValue"] }]
   }
 }

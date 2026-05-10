@@ -81,7 +81,11 @@
     "primitive-avatar": "primitive-avatar.hbs",
     "primitive-tabs": "primitive-tabs.hbs",
     "components-ui-tabs": "components-ui-tabs.hbs",
-    "primitive-table": "primitive-table.hbs"
+    "primitive-table": "primitive-table.hbs",
+    "primitive-money": "primitive-money.hbs",
+    "primitive-date-display": "primitive-date-display.hbs",
+    "primitive-enum-badge": "primitive-enum-badge.hbs",
+    "primitive-id-link": "primitive-id-link.hbs"
   },
   "imports": {
     "primitive-button":         [{ "from": "@/components/ui/button", "named": ["Button"] }],
@@ -105,7 +109,11 @@
     ],
     "primitive-loader": [{ "from": "lucide-react", "named": ["Loader2"] }],
     "primitive-tabs":   [{ "from": "@/components/ui/tabs", "named": ["Tabs", "TabsContent", "TabsList", "TabsTrigger"] }],
-    "primitive-table":  [{ "from": "@/components/ui/table", "named": ["Table", "TableBody", "TableCell", "TableHead", "TableHeader", "TableRow"] }]
+    "primitive-table":  [{ "from": "@/components/ui/table", "named": ["Table", "TableBody", "TableCell", "TableHead", "TableHeader", "TableRow"] }],
+    "primitive-money":  [{ "from": "../lib/format", "named": ["MoneyValue"] }],
+    "primitive-date-display":   [{ "from": "../lib/format", "named": ["DateTimeValue"] }],
+    "primitive-enum-badge":     [{ "from": "@/components/ui/badge", "named": ["Badge"] }],
+    "primitive-id-link": [{ "from": "../lib/format", "named": ["IdValue"] }]
   },
   "shellFiles": {
     "tailwind-config": "tailwind.config.ts",

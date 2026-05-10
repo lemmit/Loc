@@ -79,6 +79,23 @@ export function NumberValue({ value, decimals = 0 }: { value: number | string | 
   return <Text component="span" style={{ fontVariantNumeric: "tabular-nums" }}>{fmt.format(n)}</Text>;
 }
 
+/** Currency-formatted numeric value.  Defaults to USD with two
+ *  fractional digits; pass `currency` to switch (e.g. "EUR") and
+ *  `decimals` to override scale.  Empty values render as the
+ *  shared dimmed em-dash. */
+export function MoneyValue({ value, currency = "USD", decimals = 2 }: { value: number | string | null | undefined; currency?: string; decimals?: number }) {
+  if (isEmpty(value)) return <EmptyValue />;
+  const n = typeof value === "number" ? value : Number(value);
+  if (Number.isNaN(n)) return <Text component="span">{String(value)}</Text>;
+  const fmt = new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency,
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+  return <Text component="span" style={{ fontVariantNumeric: "tabular-nums" }}>{fmt.format(n)}</Text>;
+}
+
 /** Generic value display with empty-state handling.  Used by
  *  generators when a field doesn't fit a more specific helper. */
 export function PlainValue({ value }: { value: unknown }) {

@@ -213,6 +213,10 @@ const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
   "Badge",
   "Divider",
   "Table",
+  "Money",
+  "DateDisplay",
+  "EnumBadge",
+  "IdLink",
 ]);
 
 export function isWalkableLayoutBody(
@@ -407,6 +411,14 @@ function emitComponent(
       return emitTabs(call, ctx, depth);
     case "Table":
       return emitTable(call, ctx, depth);
+    case "Money":
+      return emitMoney(call, ctx, depth);
+    case "DateDisplay":
+      return emitDateDisplay(call, ctx, depth);
+    case "EnumBadge":
+      return emitEnumBadge(call, ctx, depth);
+    case "IdLink":
+      return emitIdLink(call, ctx, depth);
     case "Toolbar":
       return emitToolbar(call, ctx, depth);
     case "Empty":
@@ -744,6 +756,109 @@ function extendLambdaParams(
   const next = new Map(ctx.lambdaParams);
   next.set(srcName, jsName);
   return next;
+}
+
+/** Slice A3 — Money(value, currency?, decimals?, testid?).  Renders
+ *  through the pack's `MoneyValue` runtime helper (Intl.NumberFormat
+ *  with `style: "currency"`).  First positional or `value:` named
+ *  arg is the numeric value; `currency:` and `decimals:` are
+ *  optional named args. */
+function emitMoney(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  void depth;
+  const value =
+    namedArgValue(call, "value") ?? positionalArgs(call)[0];
+  const valueExpr = value ? emitExpr(value, ctx) : "0";
+  const currency = stringNamed(call, "currency");
+  const decimals = numericNamed(call, "decimals");
+  return renderPrimitive(ctx, "primitive-money", {
+    valueExpr,
+    hasCurrency: currency !== undefined,
+    currency: currency !== undefined ? JSON.stringify(currency) : "",
+    hasDecimals: decimals !== undefined,
+    decimals: decimals !== undefined ? String(decimals) : "",
+    testidAttr: testidAttr(call, ctx),
+  });
+}
+
+/** Slice A3 — DateDisplay(iso, testid?).  Renders through the
+ *  pack's `DateTimeValue` runtime helper (locale-formatted with
+ *  the raw ISO surfaced in a tooltip).  Accepts a string or null;
+ *  empty values render as the shared dimmed em-dash. */
+function emitDateDisplay(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  void depth;
+  const value =
+    namedArgValue(call, "value") ?? positionalArgs(call)[0];
+  const valueExpr = value ? emitExpr(value, ctx) : '""';
+  return renderPrimitive(ctx, "primitive-date-display", {
+    valueExpr,
+    testidAttr: testidAttr(call, ctx),
+  });
+}
+
+/** Slice A3 — EnumBadge(value, color?, testid?).  Renders the
+ *  per-pack Badge with an optional explicit colour.  Mantine
+ *  passes `color={…}`; shadcn maps `color` to the Badge `variant`
+ *  prop in the template (so the same DSL surface works on both
+ *  packs). */
+function emitEnumBadge(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  void depth;
+  const value =
+    namedArgValue(call, "value") ?? positionalArgs(call)[0];
+  const valueExpr = value ? emitExpr(value, ctx) : '""';
+  const color = stringNamed(call, "color");
+  return renderPrimitive(ctx, "primitive-enum-badge", {
+    valueExpr,
+    hasColor: color !== undefined,
+    color: color !== undefined ? JSON.stringify(color) : "",
+    testidAttr: testidAttr(call, ctx),
+  });
+}
+
+/** Slice A3 — IdLink(id, of: <Aggregate>, testid?).  v0 emits a
+ *  React-Router `<Link>` to the conventional `/<plural-snake>/{id}`
+ *  detail-page route, with the truncated id rendered via the pack's
+ *  `IdValue` helper as the link text.
+ *
+ *  The aggregate's `display`-marked field is NOT yet resolved here
+ *  (deferred to A4, where aggregate-IR plumbing arrives at the
+ *  walker for `Form(of: <Agg>)`).  Until then the link text is the
+ *  truncated id — visually equivalent to the existing `IdValue`
+ *  cell renderer in scaffold-emitted detail pages. */
+function emitIdLink(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  void depth;
+  const id =
+    namedArgValue(call, "id") ?? positionalArgs(call)[0];
+  const idExpr = id ? emitExpr(id, ctx) : '""';
+  const ofArg = namedArgValue(call, "of");
+  const aggName =
+    ofArg && ofArg.kind === "ref"
+      ? ofArg.name
+      : ofArg && ofArg.kind === "literal" && ofArg.lit === "string"
+        ? ofArg.value
+        : undefined;
+  const slug = aggName ? plural(snake(aggName)) : "items";
+  ctx.usesRouterLink = true;
+  return renderPrimitive(ctx, "primitive-id-link", {
+    idExpr,
+    pathPrefix: `/${slug}/`,
+    testidAttr: testidAttr(call, ctx),
+  });
 }
 
 function emitToolbar(
