@@ -24,12 +24,39 @@ interface PendingSlot {
   reject: (e: Error) => void;
 }
 
+export interface LoomBuildClientOptions {
+  /** Optional callback invoked at every worker spawn (initial mount
+   *  AND `respawn`).  Returns the workspace VFS entries the worker
+   *  should be re-seeded with — typically `/workspace/main.ddd`
+   *  plus any imported custom packs under `/workspace/design/...`.
+   *
+   *  Built-in pack templates live in the worker bundle and re-seed
+   *  themselves automatically (see `template-bundled.ts`); only
+   *  workspace state needs replaying.
+   *
+   *  Mobile Safari kills backgrounded workers aggressively; this
+   *  callback is what makes respawn correctness-preserving — the
+   *  fresh worker comes back operationally indistinguishable from
+   *  the one the browser killed. */
+  seedWorkspace?: () => VfsEntry[];
+}
+
 export class LoomBuildClient {
-  private worker: Worker;
+  private worker!: Worker;
   private nextId = 1;
   private pending = new Map<number, PendingSlot>();
+  private readonly seedWorkspace?: () => VfsEntry[];
+  private disposed = false;
 
-  constructor() {
+  constructor(opts: LoomBuildClientOptions = {}) {
+    this.seedWorkspace = opts.seedWorkspace;
+    this.spawn();
+  }
+
+  /** Create a fresh worker, wire its `onmessage`, and immediately
+   *  push the workspace seed (if any) so generation calls land on
+   *  a worker whose VFS already mirrors the main-thread workspace. */
+  private spawn(): void {
     this.worker = new Worker(new URL("./build.worker.ts", import.meta.url), {
       type: "module",
     });
@@ -42,6 +69,20 @@ export class LoomBuildClient {
       else if (msg.result) slot.resolve(msg.result);
       else slot.reject(new Error("Build worker returned an empty response"));
     };
+    if (this.seedWorkspace) {
+      const entries = this.seedWorkspace();
+      if (entries.length > 0) {
+        // Fire-and-forget: the seed is bookkeeping the user didn't
+        // request and doesn't need to await.  The worker queues
+        // it before any user RPC by virtue of message ordering.
+        const id = this.nextId++;
+        this.worker.postMessage({
+          id,
+          method: "vfs.write",
+          params: { entries },
+        } satisfies BuildRpcRequest);
+      }
+    }
   }
 
   /** Send an RPC and resolve when the worker ACKs.  All public
@@ -51,6 +92,9 @@ export class LoomBuildClient {
     method: BuildRpcRequest["method"],
     params: BuildRpcRequest["params"],
   ): Promise<AnyResult> {
+    if (this.disposed) {
+      return Promise.reject(new Error("LoomBuildClient: disposed"));
+    }
     const id = this.nextId++;
     return new Promise<AnyResult>((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
@@ -76,9 +120,7 @@ export class LoomBuildClient {
   }
 
   /** Push one or more files into the worker's VFS.  Returns the
-   *  sorted list of paths actually written (the worker echoes back
-   *  what it accepted, mirroring the `vfs.invalidated` push that
-   *  Phase 2.5 will add for cross-worker fan-out). */
+   *  sorted list of paths actually written. */
   vfsWrite(entries: VfsEntry[]): Promise<VfsWriteResult> {
     return this.call("vfs.write", { entries }) as Promise<VfsWriteResult>;
   }
@@ -90,21 +132,46 @@ export class LoomBuildClient {
   }
 
   /** List paths under a prefix — see `MemoryVfs.list` for prefix
-   *  semantics (trailing `/` enforces a directory boundary). */
+   *  semantics (directory-boundary match). */
   vfsList(prefix: string): Promise<VfsListResult> {
     return this.call("vfs.list", { prefix }) as Promise<VfsListResult>;
   }
 
-  /** Full snapshot of the worker's VFS.  Used by tests and by the
-   *  worker-rehydrate flow when a backgrounded worker is replaced
-   *  (mobile Safari kills workers aggressively; Phase 2.5 wires
-   *  rehydrate from the main-thread workspace VFS). */
+  /** Full snapshot of the worker's VFS. */
   vfsSnapshot(): Promise<VfsSnapshotResult> {
     return this.call("vfs.snapshot", {}) as Promise<VfsSnapshotResult>;
   }
 
+  /** Terminate the current worker and start a fresh one, replaying
+   *  workspace state via `seedWorkspace`.  Used after the browser
+   *  kills a backgrounded worker (mobile Safari) — without this,
+   *  the next `generateFromPath` would target an empty VFS and
+   *  throw "entryPath not found".
+   *
+   *  Pending RPCs are rejected: they targeted the dead worker and
+   *  there's no safe way to re-issue them blindly.  Callers that
+   *  care can retry after the rejection. */
+  respawn(): void {
+    if (this.disposed) return;
+    try {
+      this.worker.terminate();
+    } catch {
+      /* terminate on a dead worker can throw; we don't care */
+    }
+    for (const slot of this.pending.values()) {
+      slot.reject(new Error("Build worker respawned; retry the operation."));
+    }
+    this.pending.clear();
+    this.spawn();
+  }
+
   dispose(): void {
-    this.worker.terminate();
+    this.disposed = true;
+    try {
+      this.worker.terminate();
+    } catch {
+      /* ignore */
+    }
     for (const slot of this.pending.values()) {
       slot.reject(new Error("Build client disposed"));
     }
