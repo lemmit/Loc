@@ -235,8 +235,26 @@ export default function App(): JSX.Element {
     lspClientRef.current = new LoomLspClient();
   }
 
+  // Workspace-VFS getter exposed to the build client's seed
+  // callback.  Closures captured at LoomBuildClient construction
+  // would freeze on the boot-time `null`; reading through a ref
+  // each call lets the seed reflect whatever the workspace VFS
+  // looks like *now* — including any custom packs imported in
+  // this session.
+  const workspaceForSeedRef = useRef(workspace);
+  workspaceForSeedRef.current = workspace;
+
   useEffect(() => {
-    const build = new LoomBuildClient();
+    const build = new LoomBuildClient({
+      seedWorkspace: () => {
+        const vfs = workspaceForSeedRef.current.vfs;
+        if (!vfs) return [];
+        return vfs.list("/workspace/").flatMap((path) => {
+          const content = vfs.read(path);
+          return content != null ? [{ path, content }] : [];
+        });
+      },
+    });
     const bundleClient = new LoomBundleClient();
     const runtimeClient = new LoomRuntimeClient();
     buildClientRef.current = build;
@@ -263,6 +281,34 @@ export default function App(): JSX.Element {
       lspClientRef.current?.dispose();
       lspClientRef.current = null;
     };
+  }, []);
+
+  // Worker-rehydrate on tab background-kill.  Mobile Safari (and
+  // some desktop browsers under memory pressure) terminate
+  // backgrounded workers — without intervention, the next
+  // `generateFromPath` lands on a worker whose VFS is empty and
+  // throws "entryPath not found".  We respawn proactively when
+  // the page returns to visible after being hidden long enough
+  // that the kill is plausible; the LoomBuildClient's seedWorkspace
+  // callback re-replays workspace state into the fresh worker, so
+  // post-respawn behaviour is operationally indistinguishable
+  // from pre-kill.
+  useEffect(() => {
+    let hiddenAt: number | null = null;
+    const HIDDEN_RESPAWN_MS = 30_000;
+    const onVisibility = (): void => {
+      if (document.visibilityState === "hidden") {
+        hiddenAt = Date.now();
+      } else if (document.visibilityState === "visible" && hiddenAt != null) {
+        const elapsed = Date.now() - hiddenAt;
+        hiddenAt = null;
+        if (elapsed > HIDDEN_RESPAWN_MS) {
+          buildClientRef.current?.respawn();
+        }
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
   }, []);
 
   // Replay any persisted custom packs (`/workspace/design/<pack>/...`)
