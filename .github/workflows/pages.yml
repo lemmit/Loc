@@ -72,6 +72,31 @@ jobs:
           mkdir -p docs/_site/playground
           cp -r web/dist/. docs/_site/playground/
 
+      # Build the UI showcase: a Storybook-shaped catalogue showing
+      # the same DDL slices generated through both built-in design
+      # packs (mantine + shadcn) side-by-side.  Two stages:
+      #   1. `build-showcase.mjs` generates each (story × pack)
+      #      through the Loom toolchain + esbuild and writes static
+      #      iframes to docs/_site/showcase/iframes/.
+      #   2. The showcase Vite app builds to its own dist/, which
+      #      we copy alongside the iframes under docs/_site/showcase/.
+      # Both share the same /showcase/ URL prefix at deploy time so
+      # the runtime fetch of manifest.json resolves cleanly.
+      - name: Build showcase iframes
+        working-directory: web
+        run: node scripts/build-showcase.mjs
+
+      - name: Install showcase deps
+        working-directory: docs/showcase
+        run: npm ci
+
+      - name: Build showcase Vite app
+        working-directory: docs/showcase
+        run: npm run build
+
+      - name: Stage showcase Vite app under _site/showcase
+        run: cp -r docs/showcase/dist/. docs/_site/showcase/
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

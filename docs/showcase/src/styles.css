@@ -1,0 +1,177 @@
+/* Loom showcase — minimal CSS, no UI library.  Goal is a Storybook-
+   shaped layout: persistent sidebar of stories on the left, side-by-
+   side iframes filling the rest. */
+
+* { box-sizing: border-box; }
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  background: #f7f7f8;
+  color: #1a1a1a;
+}
+
+.status {
+  padding: 32px;
+  font-size: 14px;
+  color: #555;
+}
+.status.error { color: #b00020; }
+.status code { background: #eee; padding: 2px 6px; border-radius: 3px; }
+
+.layout {
+  display: flex;
+  height: 100vh;
+}
+
+.sidebar {
+  width: 280px;
+  flex-shrink: 0;
+  background: #fff;
+  border-right: 1px solid #e1e1e6;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.sidebar header {
+  padding: 16px;
+  border-bottom: 1px solid #e1e1e6;
+}
+.sidebar h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.sidebar .subtitle {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: #6a6a72;
+  line-height: 1.4;
+}
+
+.sidebar nav {
+  flex: 1;
+  padding: 8px 0;
+}
+
+.sidebar h2 {
+  margin: 16px 16px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #8a8a92;
+}
+.sidebar ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.sidebar li {
+  margin: 0;
+}
+.sidebar button {
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 6px 16px;
+  font-size: 13px;
+  color: #1a1a1a;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+}
+.sidebar button:hover {
+  background: #f4f4f6;
+}
+.sidebar button.active {
+  background: #eef2ff;
+  color: #3730a3;
+  border-left-color: #6366f1;
+  font-weight: 500;
+}
+
+.sidebar footer {
+  padding: 12px 16px;
+  border-top: 1px solid #e1e1e6;
+  font-size: 12px;
+}
+.sidebar footer a {
+  color: #4f46e5;
+  text-decoration: none;
+}
+.sidebar footer a:hover { text-decoration: underline; }
+
+.main {
+  flex: 1;
+  overflow: auto;
+  padding: 24px;
+}
+
+.story header {
+  margin-bottom: 16px;
+}
+.story h2 {
+  margin: 0 0 6px;
+  font-size: 18px;
+  font-weight: 600;
+}
+.story p {
+  margin: 0;
+  font-size: 13px;
+  color: #555;
+  line-height: 1.5;
+  max-width: 80ch;
+}
+
+.iframes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.iframe-wrap {
+  background: #fff;
+  border: 1px solid #e1e1e6;
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.iframe-wrap header {
+  padding: 6px 12px;
+  background: #fafafa;
+  border-bottom: 1px solid #e1e1e6;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+}
+.iframe-wrap .pack-name {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #6a6a72;
+}
+.iframe-wrap a {
+  color: #6a6a72;
+  text-decoration: none;
+  font-size: 14px;
+}
+.iframe-wrap a:hover { color: #1a1a1a; }
+
+.iframe-wrap iframe {
+  width: 100%;
+  height: 600px;
+  border: none;
+  background: #fff;
+}
+
+@media (max-width: 1100px) {
+  .iframes { grid-template-columns: 1fr; }
+}

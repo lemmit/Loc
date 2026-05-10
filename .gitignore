@@ -14,3 +14,4 @@ vscode/server/
 vscode/syntaxes/
 vscode/*.vsix
 docs/_site/
+docs/showcase/dist/
