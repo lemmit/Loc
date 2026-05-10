@@ -62,18 +62,29 @@ export default defineConfig({
         // genuinely changed.  Same logic for the Mantine UI kit
         // and React + React-DOM.
         //
+        // Patterns are anchored on `/node_modules/<pkg>/` so a
+        // sibling like `@floating-ui/react` (Mantine's positioning
+        // engine) doesn't land in the React chunk by accident.
+        // `@floating-ui` is co-located with Mantine since that's
+        // the only consumer; updates ship together.
+        //
         // Trade-off: more, smaller chunks add HTTP round-trips on
         // a cold first paint (HTTP/2 multiplexes them — the cost
         // is small).  We come out ahead on every subsequent
         // deploy because the vendor chunks stay cached.
         manualChunks(id) {
-          if (!id.includes("node_modules")) return undefined;
-          if (id.includes("monaco-editor")) return "monaco";
-          if (id.includes("@mantine/")) return "mantine";
+          if (!id.includes("/node_modules/")) return undefined;
+          if (id.includes("/node_modules/monaco-editor/")) return "monaco";
           if (
-            id.includes("/react/") ||
-            id.includes("/react-dom/") ||
-            id.includes("/scheduler/")
+            id.includes("/node_modules/@mantine/") ||
+            id.includes("/node_modules/@floating-ui/")
+          ) {
+            return "mantine";
+          }
+          if (
+            id.includes("/node_modules/react/") ||
+            id.includes("/node_modules/react-dom/") ||
+            id.includes("/node_modules/scheduler/")
           ) {
             return "react";
           }
