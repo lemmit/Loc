@@ -54,7 +54,9 @@ import type {
   StateFieldIR,
   StmtIR,
   TypeIR,
+  UiApiParamIR,
 } from "../../ir/loom-ir.js";
+import { camel, pascal, plural, snake } from "../../util/naming.js";
 
 /** Per-source named-import map — `from` module → set of named
  *  exports the page needs from it.  Replaces the old single-source
@@ -154,6 +156,33 @@ export interface WalkResult {
    *  set add a `children?: React.ReactNode` prop to their typed
    *  Props interface. */
   usesChildren: boolean;
+  /** Slice 11.24 — collected api-hook usages.  Each unique
+   *  `<paramName>.<aggregate>.<op>` reference in the body becomes
+   *  one entry — the shell emits a `const <varName> = use<Op>()`
+   *  declaration at page-top + an import.  Body refs are
+   *  rewritten to use the local var. */
+  usedApiHooks: Map<string, ApiHookUse>;
+}
+
+/** A single auto-injected React Query hook call.  Generated when
+ *  the walker detects `<param>.<aggregate>.<op>(args?)` in body
+ *  position; consumed by `renderCustomLayoutPage` / `renderUserComponentFile`
+ *  to emit the per-page hook plumbing. */
+export interface ApiHookUse {
+  /** Local variable name in the generated React file
+   *  (e.g. `customerAll`, `customerById`). */
+  varName: string;
+  /** React Query hook function name to import + call
+   *  (e.g. `useAllCustomers`, `useCustomerById`). */
+  hookName: string;
+  /** Module-relative import path (e.g. `../api/customer`). */
+  importFrom: string;
+  /** Pre-rendered args to pass to the hook call (only set for
+   *  parameterized queries like `byId(id)` — emitted at
+   *  hook-decl time at page-top).  Rendered eagerly via the main
+   *  WalkContext so any param/state refs in the args propagate
+   *  to `usedParams` / `usesState` for the shell. */
+  argsRendered: string[];
 }
 
 /** Component names the walker recognises.  Used by the page
@@ -231,7 +260,15 @@ export function walkBodyToTsx(
    *  "unknown component" placeholder.  Required for cross-component
    *  composition (one component invoking another). */
   userComponents: ReadonlyMap<string, readonly ParamIR[]> = new Map(),
+  /** Slice 11.24 — UI api parameters.  Each entry maps a local
+   *  handle (e.g. `Sales`) to an api name (e.g. `SalesApi`).
+   *  Body refs of the form `<paramName>.<aggregate>.<op>` get
+   *  detected by the walker, hoisted to a hook call at page top,
+   *  and rewritten to the local hook variable. */
+  apiParams: ReadonlyArray<UiApiParamIR> = [],
 ): WalkResult {
+  const apiParamNames = new Map<string, string>();
+  for (const p of apiParams) apiParamNames.set(p.name, p.apiName);
   const ctx: WalkContext = {
     imports: new Map(),
     pack,
@@ -244,6 +281,8 @@ export function walkBodyToTsx(
     userComponents,
     usedUserComponents: new Set(),
     usesChildren: false,
+    apiParamNames,
+    usedApiHooks: new Map(),
   };
   const tsx = walk(body, ctx, 0);
   return {
@@ -255,6 +294,7 @@ export function walkBodyToTsx(
     usesRouterLink: ctx.usesRouterLink,
     usedUserComponents: ctx.usedUserComponents,
     usesChildren: ctx.usesChildren,
+    usedApiHooks: ctx.usedApiHooks,
   };
 }
 
@@ -270,9 +310,19 @@ interface WalkContext {
   userComponents: ReadonlyMap<string, readonly ParamIR[]>;
   usedUserComponents: Set<string>;
   usesChildren: boolean;
+  apiParamNames: ReadonlyMap<string, string>;
+  usedApiHooks: Map<string, ApiHookUse>;
 }
 
 function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
+  // Slice 11.24 — api hook injection (JSX-child position).
+  // Detect `<param>.<aggregate>.<op>` rooted at a UiApiParam.
+  // In JSX-child position, the local hook var is brace-wrapped.
+  const hookUse = tryDetectApiHook(expr, ctx);
+  if (hookUse) {
+    registerApiHook(hookUse, ctx);
+    return `{${hookUse.varName}}`;
+  }
   switch (expr.kind) {
     case "call":
       return emitComponent(expr, ctx, depth);
@@ -859,6 +909,16 @@ function emitLambdaBody(
  *  refs render as bare identifiers (they're in scope via
  *  `useState` / `useParams` destructure). */
 function emitExpr(expr: ExprIR, ctx: WalkContext): string {
+  // Slice 11.24 — api hook injection.  Detect `<param>.<aggregate>.<op>`
+  // (with optional method-call args) rooted at a UiApiParam ref.
+  // When matched, register a hook usage on the context and return
+  // the local hook variable name; the shell emits the
+  // `const <var> = use<Op><Aggregate>(args)` declaration at page-top.
+  const hookUse = tryDetectApiHook(expr, ctx);
+  if (hookUse) {
+    registerApiHook(hookUse, ctx);
+    return hookUse.varName;
+  }
   switch (expr.kind) {
     case "literal":
       if (expr.lit === "string") return JSON.stringify(expr.value);
@@ -894,17 +954,147 @@ function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       const args = expr.args.map((a) => emitExpr(a, ctx)).join(", ");
       return `${expr.name}(${args})`;
     }
+    case "member": {
+      // Plain JS member access: `<recv>.<member>`.  Recursive
+      // emit on the receiver — if it was a hook-eligible chain
+      // (Slice 11.24), tryDetectApiHook at the top has already
+      // returned the hook var; we just append `.<member>`.
+      return `${emitExpr(expr.receiver, ctx)}.${expr.member}`;
+    }
     case "method-call": {
-      // Slice 11.23 — `Orders.create(draft)` etc.  Receiver is
-      // recursively emitted, then `.member(args)` appended.  Same
-      // caveat as plain `call`: the callee is emitted verbatim.
-      const receiver = emitExpr(expr.receiver, ctx);
-      const args = expr.args.map((a) => emitExpr(a, ctx)).join(", ");
-      return `${receiver}.${expr.member}(${args})`;
+      // Slice 11.24 — when the method-call's receiver is a hook
+      // (detected by tryDetectApiHook on the receiver), emit
+      // `<hookVar>.<method>(<args>)` (e.g.
+      // `customerCreate.mutate({...})`).  Otherwise the call
+      // is against an unresolved receiver — emit a visible TODO
+      // placeholder rather than runtime-broken code.
+      const recvHookUse = tryDetectApiHook(expr.receiver, ctx);
+      if (recvHookUse) {
+        registerApiHook(recvHookUse, ctx);
+        const args = expr.args.map((a) => emitExpr(a, ctx)).join(", ");
+        return `${recvHookUse.varName}.${expr.member}(${args})`;
+      }
+      const argsRendered = expr.args.map((a) => emitExpr(a, ctx)).join(", ");
+      const receiverDesc = describeReceiver(expr.receiver);
+      return `/* TODO: method-call ${receiverDesc}.${expr.member}(${argsRendered}) — needs hooks {} binding (Slice 11.24+) */ undefined`;
     }
     default:
       return `/* unsupported expr: ${expr.kind} */ undefined`;
   }
+}
+
+/** Best-effort description of an unresolved method-call receiver
+ *  for the placeholder comment (so the user can see WHICH
+ *  call landed as the placeholder).  Avoids invoking emitExpr
+ *  on the receiver since that path emits a noisy
+ *  `unresolved` comment for free identifiers — bad inside the
+ *  outer placeholder. */
+/** Slice 11.24 — detect `<param>.<aggregate>.<op>(args?)` rooted
+ *  at a UiApiParam ref.  Returns an ApiHookUse on match, or null
+ *  to fall through to generic expression handling.
+ *
+ *  Two patterns:
+ *    A. `<param>.<aggregate>.<op>` — non-parameterized hook
+ *       (e.g. `Sales.Customer.all`, `Sales.Customer.create`)
+ *    B. `<param>.<aggregate>.<op>(args)` — parameterized hook
+ *       (e.g. `Sales.Customer.byId(id)`)
+ *
+ *  Both emit one hook call at page-top.  Anything stacked on top
+ *  (`.data`, `.isLoading`, `.mutate(args)`, etc.) is plain JS
+ *  member access on the local hook variable — handled by the
+ *  default member-access / method-call paths after this helper
+ *  has rewritten the deepest 3-segment chain. */
+function tryDetectApiHook(expr: ExprIR, ctx: WalkContext): ApiHookUse | null {
+  // Pattern A: member(member(ref:apiParam, agg), op)
+  if (expr.kind === "member" && expr.receiver.kind === "member") {
+    const inner = expr.receiver;
+    if (inner.receiver.kind === "ref" && ctx.apiParamNames.has(inner.receiver.name)) {
+      return buildHookUse(inner.member, expr.member, [], ctx);
+    }
+  }
+  // Pattern B: method-call(member(ref:apiParam, agg), op, args)
+  if (expr.kind === "method-call" && expr.receiver.kind === "member") {
+    const inner = expr.receiver;
+    if (inner.receiver.kind === "ref" && ctx.apiParamNames.has(inner.receiver.name)) {
+      return buildHookUse(inner.member, expr.member, expr.args, ctx);
+    }
+  }
+  return null;
+}
+
+/** Build the ApiHookUse for a detected `<aggregate>.<op>(args?)`
+ *  reference.  Naming convention matches the existing scaffold
+ *  output (see `webApp/src/api/<aggregate>.ts`):
+ *    `<agg>.all`    → useAll<Plural>
+ *    `<agg>.byId`   → use<Single>ById  (parameterized)
+ *    `<agg>.create` → useCreate<Single>
+ *    `<agg>.update` → useUpdate<Single>
+ *    `<agg>.delete` → useDelete<Single>
+ *    `<agg>.<find>` → use<FindPascal><Single>  (custom finder)
+ *
+ *  The local var name is `<aggCamel><OpPascal>` — deterministic,
+ *  visible in the generated file, never invented by the user. */
+function buildHookUse(
+  aggregate: string,
+  op: string,
+  args: ExprIR[],
+  ctx: WalkContext,
+): ApiHookUse {
+  const aggSingle = pascal(aggregate);
+  const aggPlural = plural(aggSingle);
+  let hookName: string;
+  if (op === "all") hookName = `useAll${aggPlural}`;
+  else if (op === "byId") hookName = `use${aggSingle}ById`;
+  else if (op === "create") hookName = `useCreate${aggSingle}`;
+  else if (op === "update") hookName = `useUpdate${aggSingle}`;
+  else if (op === "delete") hookName = `useDelete${aggSingle}`;
+  else hookName = `use${pascal(op)}${aggSingle}`;
+  const varName = `${camel(aggSingle)}${pascal(op)}`;
+  const importFrom = `../api/${snake(aggSingle)}`;
+  // Render args via the main ctx so refs to params/state propagate
+  // (param refs add to `usedParams` → the shell destructures them
+  // from `useParams`; state refs are an error since the hook lives
+  // before useState in the function body).
+  const argsRendered = args.map((a) => emitExpr(a, ctx));
+  return { varName, hookName, importFrom, argsRendered };
+}
+
+/** Register a detected hook usage on the walker context.  De-dupes
+ *  by var name — if the same `<param>.<aggregate>.<op>` appears
+ *  twice in the body, only one declaration is emitted at page-top. */
+function registerApiHook(hook: ApiHookUse, ctx: WalkContext): void {
+  if (!ctx.usedApiHooks.has(hook.varName)) {
+    ctx.usedApiHooks.set(hook.varName, hook);
+  }
+}
+
+/** Group api-hook imports by source file so multiple ops on one
+ *  aggregate (e.g. `useAllCustomers` + `useCreateCustomer`) collapse
+ *  to a single import line — matches the existing scaffold output
+ *  shape (one api/<aggregate>.ts per aggregate, exporting all
+ *  hooks). */
+function renderApiHookImports(usedApiHooks: Map<string, ApiHookUse>): string {
+  const byPath = new Map<string, Set<string>>();
+  for (const h of usedApiHooks.values()) {
+    let names = byPath.get(h.importFrom);
+    if (!names) {
+      names = new Set();
+      byPath.set(h.importFrom, names);
+    }
+    names.add(h.hookName);
+  }
+  const lines: string[] = [];
+  for (const [path, names] of [...byPath.entries()].sort()) {
+    const sorted = [...names].sort();
+    lines.push(`import { ${sorted.join(", ")} } from "${path}";\n`);
+  }
+  return lines.join("");
+}
+
+function describeReceiver(expr: ExprIR): string {
+  if (expr.kind === "ref") return expr.name;
+  if (expr.kind === "method-call") return `${describeReceiver(expr.receiver)}.${expr.member}`;
+  return `<expr>`;
 }
 
 /** Render a `StmtIR` as a TS statement string (with a trailing
@@ -1311,6 +1501,10 @@ export function renderCustomLayoutPage(
    *  them in the body emit as `<Name prop={…} />` instead of
    *  unknown-component placeholders. */
   userComponents: ReadonlyMap<string, readonly ParamIR[]> = new Map(),
+  /** Slice 11.24 — UI api parameters.  Body refs of the form
+   *  `<paramName>.<aggregate>.<op>` become hook calls injected at
+   *  page-top by the walker. */
+  apiParams: ReadonlyArray<UiApiParamIR> = [],
 ): string {
   const paramNames = new Set(params.map((p) => p.name));
   const stateNames = new Set(state.map((s) => s.name));
@@ -1322,7 +1516,8 @@ export function renderCustomLayoutPage(
     usesState,
     usesRouterLink,
     usedUserComponents,
-  } = walkBodyToTsx(body, pack, paramNames, stateNames, userComponents);
+    usedApiHooks,
+  } = walkBodyToTsx(body, pack, paramNames, stateNames, userComponents, apiParams);
   // Slice 11.12 — render the title expression through emitExpr
   // (sharing the body's tracking state so the shell destructures
   // any param/state the title references).  Compute the deps
@@ -1344,6 +1539,8 @@ export function renderCustomLayoutPage(
       userComponents: new Map(),
       usedUserComponents: new Set(),
       usesChildren: false,
+      apiParamNames: new Map(),
+      usedApiHooks: new Map(),
     };
     const titleExpr = emitExpr(title, titleCtx);
     // emitExpr may have added to usedParams; reflect title's state
@@ -1365,6 +1562,16 @@ export function renderCustomLayoutPage(
   const userComponentImports = [...usedUserComponents]
     .sort()
     .map((name) => `import ${name} from "../components/${name}";\n`)
+    .join("");
+  // Slice 11.24 — api hook imports, grouped per `from` path so
+  // multiple ops on the same aggregate dedupe to one import line
+  // (matching the existing scaffold output's per-aggregate api file).
+  const apiHookImports = renderApiHookImports(usedApiHooks);
+  // Slice 11.24 — api hook declarations, emitted at page-top right
+  // before the JSX return.  Each unique `<param>.<aggregate>.<op>`
+  // becomes one `const <var> = use<Op><Aggregate>(args?);` line.
+  const apiHookDecls = [...usedApiHooks.values()]
+    .map((h) => `  const ${h.varName} = ${h.hookName}(${h.argsRendered.join(", ")});\n`)
     .join("");
   const hasParams = params.length > 0;
   const routerSpecifiers: string[] = [];
@@ -1402,9 +1609,9 @@ export function renderCustomLayoutPage(
     ? `  const navigate = useNavigate();\n`
     : "";
   return `// Auto-generated.  Do not edit by hand.
-${reactImport}${reactRouterImport}${mantineImport}${userComponentImports}
+${reactImport}${reactRouterImport}${mantineImport}${apiHookImports}${userComponentImports}
 export default function ${pageName}() {
-${paramsLine}${navigateLine}${stateLines}${titleEffect}  return (
+${paramsLine}${navigateLine}${stateLines}${apiHookDecls}${titleEffect}  return (
     ${indentJsx(tsx, "    ")}
   );
 }
@@ -1550,6 +1757,8 @@ function renderInitExpr(expr: ExprIR, pack: LoadedPack): string {
     userComponents: new Map(),
     usedUserComponents: new Set(),
     usesChildren: false,
+    apiParamNames: new Map(),
+    usedApiHooks: new Map(),
   };
   return emitExpr(expr, dummy);
 }

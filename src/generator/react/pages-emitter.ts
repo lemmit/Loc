@@ -198,6 +198,9 @@ export function emitPagesForUi(
         // declarations + `setX(…)` setter calls in onClick handlers.
         // Slice 11.12 — also pass the page's optional `title:` expr
         // so the walker shell can emit `useEffect(() => { document.title = ... })`.
+        // Slice 11.24 — also pass the UI's api parameters so the
+        // walker can inject React Query hooks for body refs of
+        // the form `<paramName>.<aggregate>.<op>`.
         renderCustomLayoutPage(
           page.name,
           page.body!,
@@ -206,6 +209,7 @@ export function emitPagesForUi(
           page.state,
           page.title,
           userComponents,
+          ui.apiParams,
         ),
       );
       continue;

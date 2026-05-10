@@ -52,6 +52,7 @@ import {
 } from "../language/generated/ast.js";
 import type {
   AggregateIR,
+  ApiIR,
   BoundedContextIR,
   ComponentIR,
   ContainmentIR,
@@ -235,7 +236,16 @@ function lowerSystem(sys: import("../language/generated/ast.js").System): System
       (m): m is import("../language/generated/ast.js").Ui => m.$type === "Ui",
     )
     .map((u) => lowerUi(u));
-  return { name: sys.name, modules, deployables, e2eTests, user, theme, uis };
+  // Api declarations — system-level peers to module / ui / deployable.
+  const apis = sys.members
+    .filter(
+      (m): m is import("../language/generated/ast.js").Api => m.$type === "Api",
+    )
+    .map((a): ApiIR => ({
+      name: a.name,
+      sourceModule: a.source?.$refText ?? "",
+    }));
+  return { name: sys.name, modules, deployables, e2eTests, user, theme, uis, apis };
 }
 
 function lowerTheme(
@@ -376,18 +386,25 @@ function lowerUi(ui: import("../language/generated/ast.js").Ui): UiIR {
   const pages: PageIR[] = [];
   const components: ComponentIR[] = [];
   const scaffolds: ScaffoldIR[] = [];
+  const apiParams: import("./loom-ir.js").UiApiParamIR[] = [];
   let menu: MenuBlockIR | undefined;
   for (const m of ui.members) {
     if (m.$type === "Page") pages.push(lowerPage(m));
     else if (m.$type === "Component") components.push(lowerComponent(m));
     else if (m.$type === "Scaffold") scaffolds.push(lowerScaffold(m));
+    else if (m.$type === "UiApiParam") {
+      apiParams.push({
+        name: m.name,
+        apiName: m.apiRef?.$refText ?? "",
+      });
+    }
     else if (m.$type === "MenuBlock") {
       // First menu block wins.  Validator (Slice 3) flags a duplicate
       // `menu { ... }` block at ui scope as an error.
       if (!menu) menu = lowerMenuBlock(m);
     }
   }
-  return { name: ui.name, pages, components, scaffolds, menu };
+  return { name: ui.name, pages, components, scaffolds, menu, apiParams };
 }
 
 function lowerPage(p: import("../language/generated/ast.js").Page): PageIR {
