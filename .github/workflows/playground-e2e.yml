@@ -1,0 +1,115 @@
+name: Playground e2e
+
+# Runs the Playwright specs against the production-built playground.
+# Each spec drives a real Chromium instance through the
+# editor → generate → bundle → boot → preview pipeline; together
+# they cover everything that's hard to assert at the unit-test level
+# (worker IO, service-worker handoff, iframe synthesis, IDB
+# persistence, custom-pack ingestion).
+#
+# The specs hit `esm.sh` and `jsdelivr` for the bundle/boot steps —
+# CI runners have internet access so the network-gated steps don't
+# self-skip the way they do in local sandboxes.
+#
+# Triggers: every PR to main + every direct push to main.  Branch-
+# protection (configured separately in repo settings) decides whether
+# this is a required check.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - 'src/**'
+      - 'themes/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'langium-config.json'
+      - '.github/workflows/playground-e2e.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - 'src/**'
+      - 'themes/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'langium-config.json'
+      - '.github/workflows/playground-e2e.yml'
+  workflow_dispatch:
+
+# Cancel in-flight runs of the same branch when a new commit lands.
+# Saves CI minutes on rebases and force-pushes; the latest commit is
+# what ultimately gets gated.
+concurrency:
+  group: playground-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    # Whole-job timeout: bundle (esm.sh fetches ~150 modules) + WASM
+    # download from jsdelivr + first PGlite boot can take 2-3 minutes
+    # cumulatively across the four specs; 15 leaves plenty of headroom
+    # without letting a hung run consume all the runner minutes.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+
+      # Root install runs the `prepare` lifecycle (langium:generate)
+      # which produces src/language/generated/ — the playground build
+      # imports that path via toolchain re-exports.
+      - name: Install Loom toolchain (root)
+        run: npm ci
+
+      - name: Install playground deps
+        working-directory: web
+        run: npm ci
+
+      # Cache the Playwright browser binaries (~100MB) keyed off the
+      # @playwright/test version; re-installs only when Playwright
+      # itself bumps.
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
+
+      - name: Install Playwright Chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+
+      # `--with-deps` only installs OS deps when binaries are
+      # downloaded; on a cache hit we still need them.  This step is
+      # cheap (~5s) when the deps are already present.
+      - name: Install Chromium OS deps (cache-hit path)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        working-directory: web
+        run: npx playwright install-deps chromium
+
+      - name: Run Playwright specs
+        working-directory: web
+        run: npm run e2e
+
+      # Upload the trace+video bundle Playwright produces on failure
+      # so we can inspect what the browser actually saw without
+      # re-running locally.
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            web/playwright-report/
+            web/test-results/
+          retention-days: 7
