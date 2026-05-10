@@ -164,14 +164,86 @@ async function handleGenerate(text: string): Promise<GenerateResult> {
   };
 }
 
+/** Resolve `generate`'s source: inline `text` (legacy) or VFS-read
+ *  via `entryPath` (Phase 2+).  Exactly one form must be set. */
+function resolveGenerateSource(params: { text?: string; entryPath?: string }): string {
+  const hasText = typeof params.text === "string";
+  const hasPath = typeof params.entryPath === "string";
+  if (hasText && hasPath) {
+    throw new Error(
+      "build.generate: pass either `text` or `entryPath`, not both.",
+    );
+  }
+  if (hasText) return params.text!;
+  if (hasPath) {
+    const src = workerVfs.read(params.entryPath!);
+    if (src == null) {
+      throw new Error(
+        `build.generate: entryPath "${params.entryPath}" not found in VFS.`,
+      );
+    }
+    return src;
+  }
+  throw new Error("build.generate: missing `text` or `entryPath`.");
+}
+
 self.onmessage = async (ev: MessageEvent<BuildRpcRequest>) => {
   const req = ev.data;
   const response: BuildRpcResponse = { id: req.id };
   try {
-    if (req.method === "generate") {
-      response.result = await handleGenerate(req.params.text);
-    } else {
-      response.error = { message: `Unknown method: ${(req as { method: string }).method}` };
+    switch (req.method) {
+      case "generate": {
+        const text = resolveGenerateSource(req.params);
+        response.result = await handleGenerate(text);
+        break;
+      }
+      case "vfs.write": {
+        // Hydrate batches the listener fan-out into a single
+        // notification, which is the right shape for a multi-file
+        // workspace push (e.g. dropping a custom pack folder in
+        // Phase 4).  Single-file writes go through the same path —
+        // hydrate's notification batch is a no-op when there's only
+        // one path.
+        workerVfs.hydrate(req.params.entries.map((e) => [e.path, e.content]));
+        response.result = {
+          ok: true,
+          paths: req.params.entries.map((e) => e.path).sort(),
+        };
+        break;
+      }
+      case "vfs.delete": {
+        const removed: string[] = [];
+        for (const path of req.params.paths) {
+          if (workerVfs.exists(path)) {
+            workerVfs.delete(path);
+            removed.push(path);
+          }
+        }
+        removed.sort();
+        response.result = { ok: true, paths: removed };
+        break;
+      }
+      case "vfs.list": {
+        response.result = {
+          ok: true,
+          paths: [...workerVfs.list(req.params.prefix)],
+        };
+        break;
+      }
+      case "vfs.snapshot": {
+        const snap = workerVfs.snapshot();
+        const entries = Array.from(snap.entries(), ([path, content]) => ({
+          path,
+          content,
+        }));
+        entries.sort((a, b) => a.path.localeCompare(b.path));
+        response.result = { ok: true, entries };
+        break;
+      }
+      default:
+        response.error = {
+          message: `Unknown method: ${(req as { method: string }).method}`,
+        };
     }
   } catch (err) {
     response.error = {

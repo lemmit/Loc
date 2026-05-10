@@ -318,7 +318,17 @@ export default function App(): JSX.Element {
     const client = buildClientRef.current;
     if (!client) return;
     dispatch({ type: "GENERATE_START" });
-    const result = await client.generate(sourceRef.current);
+    // Phase 2 of the IDE refactor: source flows through the build
+    // worker's VFS instead of being passed as an inline argument.
+    // Awaiting the write before calling generate guarantees the
+    // entry path is resident by the time the worker resolves it
+    // (writes and generates are serialised in the worker's message
+    // queue, but awaiting also lets a future progress UI surface
+    // the write step distinctly).
+    await client.vfsWrite([
+      { path: "/workspace/main.ddd", content: sourceRef.current },
+    ]);
+    const result = await client.generateFromPath("/workspace/main.ddd");
     dispatch({ type: "GENERATE_DONE", result });
     if (result.ok && result.files.length > 0) {
       // Default to the first file — typically a top-level
