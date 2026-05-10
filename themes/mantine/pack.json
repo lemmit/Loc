@@ -68,7 +68,8 @@
     "primitive-anchor": "primitive-anchor.hbs",
     "primitive-image": "primitive-image.hbs",
     "primitive-avatar": "primitive-avatar.hbs",
-    "primitive-tabs": "primitive-tabs.hbs"
+    "primitive-tabs": "primitive-tabs.hbs",
+    "primitive-table": "primitive-table.hbs"
   },
   "imports": {
     "primitive-heading":        [{ "from": "@mantine/core", "named": ["Title"] }],
@@ -92,6 +93,7 @@
     "primitive-anchor":         [{ "from": "@mantine/core", "named": ["Anchor"] }],
     "primitive-image":          [{ "from": "@mantine/core", "named": ["Image"] }],
     "primitive-avatar":         [{ "from": "@mantine/core", "named": ["Avatar"] }],
-    "primitive-tabs":           [{ "from": "@mantine/core", "named": ["Tabs"] }]
+    "primitive-tabs":           [{ "from": "@mantine/core", "named": ["Tabs"] }],
+    "primitive-table":          [{ "from": "@mantine/core", "named": ["Table"] }]
   }
 }

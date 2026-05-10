@@ -212,6 +212,7 @@ const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
   "Stat",
   "Badge",
   "Divider",
+  "Table",
 ]);
 
 export function isWalkableLayoutBody(
@@ -283,6 +284,7 @@ export function walkBodyToTsx(
     usesChildren: false,
     apiParamNames,
     usedApiHooks: new Map(),
+    lambdaParams: new Map(),
   };
   const tsx = walk(body, ctx, 0);
   return {
@@ -312,6 +314,11 @@ interface WalkContext {
   usesChildren: boolean;
   apiParamNames: ReadonlyMap<string, string>;
   usedApiHooks: Map<string, ApiHookUse>;
+  /** Slice A2 — lambda params bound in the current sub-walk
+   *  (source-side name → emitted JS name).  `Column("ID", o => o.id)`
+   *  walks the accessor body with `o → "row"`; refs to `o` resolve
+   *  to the JS identifier `row`.  Outer scope is unaffected. */
+  lambdaParams: ReadonlyMap<string, string>;
 }
 
 function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
@@ -335,6 +342,13 @@ function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
       if (expr.lit === "null") return `{null}`;
       return `{${expr.value}}`;
     case "ref":
+      // Slice A2 — refs to a lambda-bound param resolve to its
+      // emitted JS name (e.g. `o.id` inside `o => …` walks with
+      // `o → "row"`).  Brace-wrap as a JSX child.
+      {
+        const jsName = ctx.lambdaParams.get(expr.name);
+        if (jsName) return `{${jsName}}`;
+      }
       // Slice 11.4 — refs that match a route param name emit as
       // JSX expressions (`{name}`).  React Router's `useParams()`
       // brings these into scope at render time; the page-shell
@@ -363,6 +377,13 @@ function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
       const inner = `${cond} ? (\n${"  ".repeat(depth + 1)}${thenS}\n${"  ".repeat(depth)}) : (\n${"  ".repeat(depth + 1)}${elseS}\n${"  ".repeat(depth)})`;
       return depth === 0 ? inner : `{${inner}}`;
     }
+    case "member":
+      // Slice A2 — member access in JSX-child position (e.g. an
+      // accessor lambda body `o => o.id` walks `o.id` as the body
+      // of a `<Table.Td>` cell).  Emit as a brace-wrapped JS
+      // expression; `emitExpr` resolves the receiver (lambda
+      // param, hook, state) and concatenates the member name.
+      return `{${emitExpr(expr, ctx)}}`;
     default:
       return `{/* unsupported expr: ${expr.kind} */}`;
   }
@@ -384,6 +405,8 @@ function emitComponent(
       return emitContainer(call, ctx, depth);
     case "Tabs":
       return emitTabs(call, ctx, depth);
+    case "Table":
+      return emitTable(call, ctx, depth);
     case "Toolbar":
       return emitToolbar(call, ctx, depth);
     case "Empty":
@@ -569,6 +592,158 @@ function slugify(s: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+/** Slice A2 — Table primitive.
+ *
+ *  Surface:
+ *
+ *    Table(
+ *      rows: <expr>,                  // any data-source expression
+ *      Column("ID", o => o.id),       // positional Column(...) calls
+ *      Column("Status", o => Badge(o.status)),
+ *      onRowClick: o => /* … *\/,     // optional
+ *      testid: "orders-table"          // optional
+ *    )
+ *
+ *  Lowers to a packed-table TSX block with a header row + a body
+ *  produced by `<rowsExpr>.map((row) => …)`.  Column accessors are
+ *  lambdas; the lambda's source-side param name is rebound to the
+ *  emitted JS identifier `row` for the duration of the column body
+ *  walk (via WalkContext.lambdaParams).  Cell bodies that are
+ *  primitive calls (`Badge(…)`) emit as JSX; member-access bodies
+ *  (`o.id`) emit as `{row.id}`. */
+function emitTable(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  const rowsArg = namedArgValue(call, "rows");
+  const rowsExpr = rowsArg ? emitExpr(rowsArg, ctx) : "[]";
+  const onRowClick = lambdaArg(call, "onRowClick");
+
+  const positionals = positionalArgs(call);
+  const cols = positionals
+    .filter(
+      (a): a is ExprIR & { kind: "call" } =>
+        a.kind === "call" && a.name === "Column",
+    )
+    .map((c, i) => emitColumn(c, ctx, i, depth + 3));
+
+  const rowVar = "row";
+  let onRowClickJs: string | undefined;
+  if (onRowClick) {
+    const childCtx: WalkContext = {
+      ...ctx,
+      lambdaParams: extendLambdaParams(ctx, onRowClick.param, rowVar),
+    };
+    if (onRowClick.body) {
+      onRowClickJs = emitExpr(onRowClick.body, childCtx);
+    } else if (onRowClick.block && onRowClick.block.length > 0) {
+      const stmts = onRowClick.block
+        .map((s) => emitStmt(s, childCtx))
+        .join(" ");
+      onRowClickJs = `{ ${stmts} }`;
+    }
+  }
+
+  const indent = "  ".repeat(depth + 1);
+  const headIndent = "  ".repeat(depth + 2);
+  const bodyIndent = "  ".repeat(depth + 2);
+  const rowIndent = "  ".repeat(depth + 3);
+  const cellIndent = "  ".repeat(depth + 4);
+  const closeIndent = "  ".repeat(depth);
+  return renderPrimitive(ctx, "primitive-table", {
+    rowsExpr,
+    rowVar,
+    columns: cols,
+    hasColumns: cols.length > 0,
+    hasOnRowClick: onRowClickJs !== undefined,
+    onRowClick: onRowClickJs,
+    indent,
+    headIndent,
+    bodyIndent,
+    rowIndent,
+    cellIndent,
+    closeIndent,
+    testidAttr: testidAttr(call, ctx),
+  });
+}
+
+/** Slice A2 — emit one `Column("Header", <accessor>)` into a
+ *  template-friendly shape: a header string + a per-cell TSX
+ *  fragment.  Accessor lambda bodies that are primitive calls
+ *  walk through the regular emitter (yields JSX); expression
+ *  bodies (member access, refs) emit as `{<expr>}` brace-wrapped
+ *  JS expressions. */
+function emitColumn(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  index: number,
+  depth: number,
+): { header: string; cellJsx: string; key: string } {
+  const positionals = positionalArgs(call);
+  const headerArg = positionals[0];
+  const accessorArg = positionals[1];
+  const headerStr =
+    headerArg && headerArg.kind === "literal" && headerArg.lit === "string"
+      ? headerArg.value
+      : `Column ${index + 1}`;
+  const key = slugify(headerStr) || `col-${index + 1}`;
+
+  const rowVar = "row";
+  let cellJsx = "{/* missing accessor */}";
+  if (accessorArg && accessorArg.kind === "lambda") {
+    const childCtx: WalkContext = {
+      ...ctx,
+      lambdaParams: extendLambdaParams(ctx, accessorArg.param, rowVar),
+    };
+    const body = accessorArg.body;
+    if (body) {
+      if (body.kind === "call") {
+        cellJsx = walk(body, childCtx, depth);
+      } else if (body.kind === "literal" && body.lit === "string") {
+        cellJsx = escapeJsxText(body.value);
+      } else {
+        cellJsx = `{${emitExpr(body, childCtx)}}`;
+      }
+    }
+  }
+  return {
+    header: escapeJsxText(headerStr),
+    cellJsx,
+    key,
+  };
+}
+
+/** Slice A2 — return the value-expression of a named arg (e.g.
+ *  the `<expr>` in `rows: <expr>`).  Undefined when the named arg
+ *  is missing.  Distinct from `stringNamed` (string literals only)
+ *  and `numericNamed` (number literals only): this keeps any
+ *  expression IR for the caller to render as JS. */
+function namedArgValue(
+  call: ExprIR & { kind: "call" },
+  name: string,
+): ExprIR | undefined {
+  const argNames = call.argNames ?? [];
+  for (let i = 0; i < call.args.length; i++) {
+    if (argNames[i] === name) return call.args[i];
+  }
+  return undefined;
+}
+
+/** Slice A2 — extend the WalkContext.lambdaParams map with a new
+ *  binding without mutating the parent map.  Caller spreads the
+ *  rest of the context and overrides `lambdaParams` with the
+ *  result. */
+function extendLambdaParams(
+  ctx: WalkContext,
+  srcName: string,
+  jsName: string,
+): ReadonlyMap<string, string> {
+  const next = new Map(ctx.lambdaParams);
+  next.set(srcName, jsName);
+  return next;
 }
 
 function emitToolbar(
@@ -972,6 +1147,12 @@ function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // int / decimal / now → emit as numeric literal verbatim.
       return String(expr.value);
     case "ref":
+      // Slice A2 — lambda-bound param refs resolve to their
+      // emitted JS name (e.g. `o → "row"` for column accessors).
+      {
+        const jsName = ctx.lambdaParams.get(expr.name);
+        if (jsName) return jsName;
+      }
       if (ctx.stateNames.has(expr.name)) {
         ctx.usesState = true;
         return expr.name;
@@ -1626,6 +1807,7 @@ export function renderCustomLayoutPage(
       usesChildren: false,
       apiParamNames: new Map(),
       usedApiHooks: new Map(),
+      lambdaParams: new Map(),
     };
     const titleExpr = emitExpr(title, titleCtx);
     // emitExpr may have added to usedParams; reflect title's state
@@ -1844,6 +2026,7 @@ function renderInitExpr(expr: ExprIR, pack: LoadedPack): string {
     usesChildren: false,
     apiParamNames: new Map(),
     usedApiHooks: new Map(),
+    lambdaParams: new Map(),
   };
   return emitExpr(expr, dummy);
 }

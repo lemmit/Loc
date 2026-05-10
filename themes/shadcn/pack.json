@@ -86,7 +86,8 @@
     "primitive-image": "primitive-image.hbs",
     "primitive-avatar": "primitive-avatar.hbs",
     "primitive-tabs": "primitive-tabs.hbs",
-    "components-ui-tabs": "components-ui-tabs.hbs"
+    "components-ui-tabs": "components-ui-tabs.hbs",
+    "primitive-table": "primitive-table.hbs"
   },
   "imports": {
     "primitive-button":         [{ "from": "@/components/ui/button", "named": ["Button"] }],
@@ -109,7 +110,8 @@
       { "from": "@/components/ui/label", "named": ["Label"] }
     ],
     "primitive-loader": [{ "from": "lucide-react", "named": ["Loader2"] }],
-    "primitive-tabs":   [{ "from": "@/components/ui/tabs", "named": ["Tabs", "TabsContent", "TabsList", "TabsTrigger"] }]
+    "primitive-tabs":   [{ "from": "@/components/ui/tabs", "named": ["Tabs", "TabsContent", "TabsList", "TabsTrigger"] }],
+    "primitive-table":  [{ "from": "@/components/ui/table", "named": ["Table", "TableBody", "TableCell", "TableHead", "TableHeader", "TableRow"] }]
   },
   "shellFiles": {
     "tailwind-config": "tailwind.config.ts",
