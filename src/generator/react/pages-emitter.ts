@@ -36,6 +36,7 @@ import type {
   BoundedContextIR,
   DeployableIR,
   PageIR,
+  ParamIR,
   ScaffoldOriginIR,
   SystemIR,
   UiIR,
@@ -56,7 +57,11 @@ import type { LoadedPack } from "./templating/loader.js";
 import { buildPageObjectModule } from "./page-objects-builder.js";
 import { buildWorkflowPageObject } from "./workflow-builder.js";
 import { buildViewPageObject } from "./view-builder.js";
-import { isWalkableLayoutBody, renderCustomLayoutPage } from "./body-walker.js";
+import {
+  isWalkableLayoutBody,
+  renderCustomLayoutPage,
+  renderUserComponentFile,
+} from "./body-walker.js";
 
 /** Inputs the page emitter needs in addition to the page IR.  Kept as
  *  a struct so additions (theme overrides, design-pack picks, sidebar
@@ -91,6 +96,11 @@ export function deriveExtraRoutesFromUi(
   ui: UiIR,
 ): import("./templating/preparers/app-shell.js").ExtraPageRoute[] {
   const out: import("./templating/preparers/app-shell.js").ExtraPageRoute[] = [];
+  // Slice 11.18 — same name→params map the page emitter builds, so
+  // route derivation recognises pages whose body is a user-component
+  // invocation.
+  const userComponents = new Map<string, readonly ParamIR[]>();
+  for (const c of ui.components) userComponents.set(c.name, c.params);
   for (const page of ui.pages) {
     if (!page.route) continue;
     const origin = page.scaffoldOrigin ?? inferBodyDispatch(page.body);
@@ -105,7 +115,7 @@ export function deriveExtraRoutesFromUi(
     }
     // Slice 11.3 — custom-layout pages (walker-rendered) also need
     // an App.tsx import + Route.
-    if (isWalkableLayoutBody(page.body)) {
+    if (isWalkableLayoutBody(page.body, userComponents)) {
       out.push({
         componentName: page.name,
         importFrom: `./pages/${snake(page.name)}`,
@@ -127,6 +137,18 @@ export function emitPagesForUi(
   ) => string,
 ): Map<string, string> {
   const out = new Map<string, string>();
+
+  // Slice 11.18 — emit one `src/components/<Name>.tsx` per
+  // user-defined component, and build a name→params map the
+  // walker uses to resolve cross-component invocations.
+  const userComponents = new Map<string, readonly ParamIR[]>();
+  for (const c of ui.components) userComponents.set(c.name, c.params);
+  for (const c of ui.components) {
+    out.set(
+      `src/components/${c.name}.tsx`,
+      renderUserComponentFile(c.name, c.params, c.state, c.body, userComponents),
+    );
+  }
 
   // The shared Home page wants the aggregate / workflow / view IRs
   // currently in scope; collect them once from `ui.pages` so
@@ -165,7 +187,7 @@ export function emitPagesForUi(
     // Button / Card) route through the recursive walker.  Output
     // goes to `src/pages/<name-snake>.tsx`; App.tsx routing comes
     // through `deriveExtraRoutesFromUi` (Slice 11.1).
-    if (isWalkableLayoutBody(page.body)) {
+    if (isWalkableLayoutBody(page.body, userComponents)) {
       out.set(
         `src/pages/${snake(page.name)}.tsx`,
         // Slice 11.4 — pass the page's typed route params so the
@@ -182,6 +204,7 @@ export function emitPagesForUi(
           page.params,
           page.state,
           page.title,
+          userComponents,
         ),
       );
       continue;

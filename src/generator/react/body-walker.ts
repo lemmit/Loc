@@ -101,6 +101,11 @@ export interface WalkResult {
    *  `Anchor("…", to: …)` → `<Anchor component={Link}>`).  The
    *  shell adds `Link` to the existing react-router-dom import. */
   usesRouterLink: boolean;
+  /** Slice 11.18 — names of user-defined components the walker
+   *  invoked while emitting (e.g. `WelcomeBox("Alice")` →
+   *  `<WelcomeBox name="Alice" />`).  The shell emits per-name
+   *  imports from `@/components/<Name>`. */
+  usedUserComponents: Set<string>;
 }
 
 /** Component names the walker recognises.  Used by the page
@@ -127,14 +132,25 @@ const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
   "Divider",
 ]);
 
-export function isWalkableLayoutBody(body: ExprIR | undefined): boolean {
+export function isWalkableLayoutBody(
+  body: ExprIR | undefined,
+  userComponents: ReadonlyMap<string, readonly ParamIR[]> = new Map(),
+): boolean {
   if (!body) return false;
-  if (body.kind === "call") return STDLIB_LAYOUT_COMPONENTS.has(body.name);
+  if (body.kind === "call") {
+    if (STDLIB_LAYOUT_COMPONENTS.has(body.name)) return true;
+    // Slice 11.18 — calls to user-defined components are walker-
+    // eligible too (resolved via the supplied map).
+    return userComponents.has(body.name);
+  }
   // Slice 11.17 — top-level conditional bodies dispatch through the
   // walker as long as either branch is walkable.  Powers patterns
   // like `body: loading ? Empty("…") : Stack(…)`.
   if (body.kind === "ternary") {
-    return isWalkableLayoutBody(body.then) || isWalkableLayoutBody(body.otherwise);
+    return (
+      isWalkableLayoutBody(body.then, userComponents) ||
+      isWalkableLayoutBody(body.otherwise, userComponents)
+    );
   }
   return false;
 }
@@ -150,6 +166,13 @@ export function walkBodyToTsx(
    *  `useState` in the shell), and `:=` assignments in event-
    *  handler lambdas lower to the React `setX(...)` setter. */
   stateNames: ReadonlySet<string> = new Set(),
+  /** Slice 11.18 — user-defined components known to this UI.  When
+   *  the walker sees a `call` whose name matches a key here, it
+   *  emits `<Name prop1={arg1} … />` (mapping positional args to
+   *  the component's declared param names) instead of the
+   *  "unknown component" placeholder.  Required for cross-component
+   *  composition (one component invoking another). */
+  userComponents: ReadonlyMap<string, readonly ParamIR[]> = new Map(),
 ): WalkResult {
   const ctx: WalkContext = {
     imports: new Set(),
@@ -159,6 +182,8 @@ export function walkBodyToTsx(
     stateNames,
     usesState: false,
     usesRouterLink: false,
+    userComponents,
+    usedUserComponents: new Set(),
   };
   const tsx = walk(body, ctx, 0);
   return {
@@ -168,6 +193,7 @@ export function walkBodyToTsx(
     usesNavigate: ctx.usesNavigate,
     usesState: ctx.usesState,
     usesRouterLink: ctx.usesRouterLink,
+    usedUserComponents: ctx.usedUserComponents,
   };
 }
 
@@ -179,6 +205,8 @@ interface WalkContext {
   stateNames: ReadonlySet<string>;
   usesState: boolean;
   usesRouterLink: boolean;
+  userComponents: ReadonlyMap<string, readonly ParamIR[]>;
+  usedUserComponents: Set<string>;
 }
 
 function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
@@ -269,8 +297,16 @@ function emitComponent(
       return emitBadge(call, ctx, depth);
     case "Divider":
       return emitDivider(call, ctx, depth);
-    default:
+    default: {
+      // Slice 11.18 — names not in the stdlib dispatch table fall
+      // through to user-component invocation when they match a
+      // registered ComponentIR.  Otherwise the original
+      // "unknown component" placeholder fires.
+      if (ctx.userComponents.has(call.name)) {
+        return emitUserComponent(call, ctx, depth);
+      }
       return `{/* unknown layout component: ${call.name} */}`;
+    }
   }
 }
 
@@ -836,6 +872,44 @@ function emitDivider(
   return `<Divider />`;
 }
 
+function emitUserComponent(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  // Slice 11.18 — invoke a user-defined component as a JSX element.
+  // Positional args map to the component's declared param names by
+  // position; named args use their `name:` prefix verbatim.  String
+  // literals render as quoted attrs (`name="Alice"`); refs / binary
+  // ops / non-string literals emit through emitExpr inside `{...}`.
+  void depth;
+  const params = ctx.userComponents.get(call.name) ?? [];
+  ctx.usedUserComponents.add(call.name);
+  const argNames = call.argNames ?? [];
+  const attrs: string[] = [];
+  let positionalIndex = 0;
+  for (let i = 0; i < call.args.length; i++) {
+    const arg = call.args[i]!;
+    const name = argNames[i] ?? params[positionalIndex]?.name;
+    if (argNames[i] === undefined) positionalIndex += 1;
+    if (!name) continue; // extra positional past param list — drop quietly
+    attrs.push(`${name}=${attrValue(arg, ctx)}`);
+  }
+  return attrs.length > 0
+    ? `<${call.name} ${attrs.join(" ")} />`
+    : `<${call.name} />`;
+}
+
+/** Slice 11.18 — render an ExprIR as a JSX attribute value.
+ *  String literals → `"text"` (quoted attr); everything else →
+ *  `{<emitExpr>}` (brace-wrapped JS expression). */
+function attrValue(expr: ExprIR, ctx: WalkContext): string {
+  if (expr.kind === "literal" && expr.lit === "string") {
+    return JSON.stringify(expr.value);
+  }
+  return `{${emitExpr(expr, ctx)}}`;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -982,14 +1056,22 @@ export function renderCustomLayoutPage(
    *  any referenced param/state changes (deps array auto-derived
    *  from the title expression's refs). */
   title: ExprIR | undefined = undefined,
+  /** Slice 11.18 — user-defined components in scope, so calls to
+   *  them in the body emit as `<Name prop={…} />` instead of
+   *  unknown-component placeholders. */
+  userComponents: ReadonlyMap<string, readonly ParamIR[]> = new Map(),
 ): string {
   const paramNames = new Set(params.map((p) => p.name));
   const stateNames = new Set(state.map((s) => s.name));
-  const { tsx, imports, usedParams, usesNavigate, usesState, usesRouterLink } = walkBodyToTsx(
-    body,
-    paramNames,
-    stateNames,
-  );
+  const {
+    tsx,
+    imports,
+    usedParams,
+    usesNavigate,
+    usesState,
+    usesRouterLink,
+    usedUserComponents,
+  } = walkBodyToTsx(body, paramNames, stateNames, userComponents);
   // Slice 11.12 — render the title expression through emitExpr
   // (sharing the body's tracking state so the shell destructures
   // any param/state the title references).  Compute the deps
@@ -1007,6 +1089,8 @@ export function renderCustomLayoutPage(
       stateNames,
       usesState,
       usesRouterLink: false,
+      userComponents: new Map(),
+      usedUserComponents: new Set(),
     };
     const titleExpr = emitExpr(title, titleCtx);
     // emitExpr may have added to usedParams; reflect title's state
@@ -1026,6 +1110,12 @@ export function renderCustomLayoutPage(
     imports.size > 0
       ? `import { ${[...imports].sort().join(", ")} } from "@mantine/core";\n`
       : "";
+  // Slice 11.18 — one default-import line per user component
+  // referenced in the body, sorted alphabetically.
+  const userComponentImports = [...usedUserComponents]
+    .sort()
+    .map((name) => `import ${name} from "../components/${name}";\n`)
+    .join("");
   const hasParams = params.length > 0;
   const routerSpecifiers: string[] = [];
   if (hasParams) routerSpecifiers.push("useParams");
@@ -1062,9 +1152,83 @@ export function renderCustomLayoutPage(
     ? `  const navigate = useNavigate();\n`
     : "";
   return `// Auto-generated.  Do not edit by hand.
-${reactImport}${reactRouterImport}${mantineImport}
+${reactImport}${reactRouterImport}${mantineImport}${userComponentImports}
 export default function ${pageName}() {
 ${paramsLine}${navigateLine}${stateLines}${titleEffect}  return (
+    ${indentJsx(tsx, "    ")}
+  );
+}
+`;
+}
+
+/** Slice 11.18 — render one ComponentIR as a `.tsx` file: typed
+ *  Props interface, default-export function component, useState
+ *  declarations from the component's own state, body walked
+ *  through the same machinery as page bodies.  Components don't
+ *  have routes / titles, so the shell skips useParams /
+ *  useEffect; they CAN have state and CAN invoke other user
+ *  components. */
+export function renderUserComponentFile(
+  name: string,
+  params: ParamIR[],
+  state: StateFieldIR[],
+  body: ExprIR,
+  userComponents: ReadonlyMap<string, readonly ParamIR[]>,
+): string {
+  const paramNames = new Set(params.map((p) => p.name));
+  const stateNames = new Set(state.map((s) => s.name));
+  const {
+    tsx,
+    imports,
+    usedParams,
+    usesState,
+    usesRouterLink,
+    usesNavigate,
+    usedUserComponents,
+  } = walkBodyToTsx(body, paramNames, stateNames, userComponents);
+  const mantineImport = imports.size > 0
+    ? `import { ${[...imports].sort().join(", ")} } from "@mantine/core";\n`
+    : "";
+  // Components don't have routes — useNavigate/Link still legal in
+  // a component subtree (e.g. Button(to:) inside).
+  const routerSpecifiers: string[] = [];
+  if (usesNavigate) routerSpecifiers.push("useNavigate");
+  if (usesRouterLink) routerSpecifiers.push("Link");
+  const reactRouterImport = routerSpecifiers.length > 0
+    ? `import { ${routerSpecifiers.join(", ")} } from "react-router-dom";\n`
+    : "";
+  const reactImport = usesState
+    ? `import { useState } from "react";\n`
+    : "";
+  const userComponentImports = [...usedUserComponents]
+    .sort()
+    .map((n) => `import ${n} from "./${n}";\n`)
+    .join("");
+  // Props interface — every declared param becomes a typed field.
+  const propsBody = params.length > 0
+    ? params.map((p) => `  ${p.name}: ${typeRefAsTsString(p)};`).join("\n")
+    : "";
+  const propsType = params.length > 0
+    ? `\nexport interface ${name}Props {\n${propsBody}\n}\n`
+    : "";
+  const propDestructure = params.length > 0
+    ? `{ ${params.map((p) => p.name).join(", ")} }: ${name}Props`
+    : "";
+  const navigateLine = usesNavigate
+    ? `  const navigate = useNavigate();\n`
+    : "";
+  const stateLines = usesState
+    ? state.map((f) => `  ${renderUseState(f)}\n`).join("")
+    : "";
+  // Suppress used-prop warnings — params declared but unused at
+  // walker-emit time (e.g. typed pass-through to a child component
+  // not yet wired) shouldn't trigger TS lint noise.  We reference
+  // them with a `void` block when none made it into `tsx`.
+  void usedParams;
+  return `// Auto-generated.  Do not edit by hand.
+${reactImport}${reactRouterImport}${mantineImport}${userComponentImports}${propsType}
+export default function ${name}(${propDestructure}) {
+${navigateLine}${stateLines}  return (
     ${indentJsx(tsx, "    ")}
   );
 }
@@ -1122,6 +1286,8 @@ function renderInitExpr(expr: ExprIR): string {
     stateNames: new Set(),
     usesState: false,
     usesRouterLink: false,
+    userComponents: new Map(),
+    usedUserComponents: new Set(),
   };
   return emitExpr(expr, dummy);
 }
