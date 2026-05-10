@@ -63,10 +63,12 @@ export type MantineImport =
   | "Stack"
   | "Group"
   | "Grid"
+  | "Container"
   | "Tabs"
   | "Center"
   | "TextInput"
   | "NumberInput"
+  | "PasswordInput"
   | "Switch"
   | "Loader"
   | "Anchor"
@@ -122,11 +124,13 @@ const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
   "Stack",
   "Group",
   "Grid",
+  "Container",
   "Tabs",
   "Toolbar",
   "Empty",
   "Field",
   "NumberField",
+  "PasswordField",
   "Toggle",
   "Loader",
   "Anchor",
@@ -280,6 +284,8 @@ function emitComponent(
       return emitGroup(call, ctx, depth);
     case "Grid":
       return emitGrid(call, ctx, depth);
+    case "Container":
+      return emitContainer(call, ctx, depth);
     case "Tabs":
       return emitTabs(call, ctx, depth);
     case "Toolbar":
@@ -290,6 +296,8 @@ function emitComponent(
       return emitField(call, ctx, depth);
     case "NumberField":
       return emitNumberField(call, ctx, depth);
+    case "PasswordField":
+      return emitPasswordField(call, ctx, depth);
     case "Toggle":
       return emitToggle(call, ctx, depth);
     case "Loader":
@@ -381,6 +389,24 @@ function emitGrid(
     )
     .join(`\n${colIndent}`);
   return `<Grid>\n${colIndent}${wrapped}\n${closeIndent}</Grid>`;
+}
+
+function emitContainer(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  // Container(...children) — Mantine's max-width centred wrapper.
+  // Optional `size:` named arg (Mantine size: "xs" | "sm" | "md" |
+  // "lg" | "xl") controls the max-width.
+  ctx.imports.add("Container");
+  const children = positionalChildren(call, ctx, depth + 1);
+  const size = stringNamed(call, "size");
+  const sizeAttr = size !== undefined ? ` size=${JSON.stringify(size)}` : "";
+  if (children.length === 0) return `<Container${sizeAttr} />`;
+  const indent = "  ".repeat(depth + 1);
+  const closeIndent = "  ".repeat(depth);
+  return `<Container${sizeAttr}>\n${indent}${children.join(`\n${indent}`)}\n${closeIndent}</Container>`;
 }
 
 function emitTabs(
@@ -542,6 +568,25 @@ function emitNumberField(
   }
   const setter = "set" + bind[0]!.toUpperCase() + bind.slice(1);
   return `<NumberInput label=${unwrapAsAttr(label)} value={${bind}} onChange={(v) => ${setter}(typeof v === "number" ? v : 0)} />`;
+}
+
+function emitPasswordField(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  // PasswordField("Label", bind: <string state field>) — Mantine's
+  // PasswordInput (toggleable visibility).  Same bind-shape as
+  // Field; without bind: falls through to label-only stub.
+  ctx.imports.add("PasswordInput");
+  void depth;
+  const label = firstPositionalContent(call, ctx) ?? '""';
+  const bind = stateBindArg(call, "bind", ctx);
+  if (bind === undefined) {
+    return `<PasswordInput label=${unwrapAsAttr(label)} />`;
+  }
+  const setter = "set" + bind[0]!.toUpperCase() + bind.slice(1);
+  return `<PasswordInput label=${unwrapAsAttr(label)} value={${bind}} onChange={(e) => ${setter}(e.currentTarget.value)} />`;
 }
 
 function emitLoader(
