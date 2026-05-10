@@ -23,7 +23,7 @@ System:
     '}';
 
 SystemMember:
-    Module | Deployable | BoundedContext | TestE2E | UserBlock | ThemeBlock | Ui | Api;
+    Module | Deployable | BoundedContext | TestE2E | UserBlock | ThemeBlock | Ui | Api | Storage;
 
 // System-level visual identity — design tokens consumed by every
 // React deployable in this system.  Tokens are intentionally
@@ -38,7 +38,7 @@ ThemeBlock:
     '}';
 
 ThemeProp:
-    name=ID ':' value=STRING;
+    name=LooseName ':' value=STRING;
 
 // System-level user shape — declares the strongly-typed claim record
 // that backends decode JWT tokens into.  At most one per system
@@ -95,7 +95,12 @@ PermissionDecl:
 Deployable:
     'deployable' name=LooseName '{'
         ('platform' ':' platform=Platform ','?)
-        ('modules' ':' modules+=[Module:ID] (',' modules+=[Module:ID])* ','?)?
+        // Slice 11.27 — modules can carry per-module storage role
+        // bindings.  Two surface forms:
+        //   modules: Sales, Marketing                            // bare list (legacy)
+        //   modules: Sales { primary: pg, cache: redis },        // per-module storage map
+        //            Marketing { primary: pg }
+        ('modules' ':' moduleBindings+=ModuleBinding (',' moduleBindings+=ModuleBinding)* ','?)?
         ('targets' ':' targets=[Deployable:LooseName] ','?)?
         // Slice 11.26 — explicit api composition.  Backend deployables
         // declare which contracts they serve via `serves:`.  Frontend
@@ -130,6 +135,20 @@ UiComposeBinding:
 
 UiParamBinding:
     name=LooseName ':' source=[Deployable:LooseName];
+
+// Slice 11.27 — `modules:` entry on a backend deployable.  Bare
+// form (`Sales`) for backward compat; brace form (`Sales { primary:
+// pg, cache: redis }`) binds storage instances to the module's
+// roles.  Validator (Slice 11.27) enforces that role names are in
+// the v0 enum and storage refs resolve.
+ModuleBinding:
+    name=[Module:ID] ('{' (storages+=ModuleStorageBinding (',' storages+=ModuleStorageBinding)* ','?)? '}')?;
+
+ModuleStorageBinding:
+    role=ModuleStorageRole ':' storage=[Storage:LooseName];
+
+ModuleStorageRole returns string:
+    'primary' | 'cache' | 'search' | 'events' | 'bi';
 
 UiSugarBinding:
     'ui' ':' ref=[Ui:ID] ','?;
@@ -202,6 +221,34 @@ UiMember:
 // available; consumers (ui, deployable) reference it by name.
 Api:
     'api' name=ID 'from' source=[Module:ID];
+
+// ---- storage declaration (system-level) ------------------------
+//
+// First-class declaration of a storage instance — a typed slot
+// the deployable composition picks up via `modules: <M> { primary:
+// <Storage>, cache: <Storage>, ... }`.  Reusable across deployables
+// (one Postgres serves the api server + worker service).
+//
+//   storage primarySql   { type: postgres }
+//   storage hotCache     { type: redis }
+//   storage warehouse    { type: clickhouse }
+//
+// v0 type enum: postgres | mysql | sqlite | inMemory (transactional
+// stores); redis (cache); elastic | meilisearch (search); kafka
+// (events); clickhouse | bigquery (analytics).  Only postgres /
+// inMemory have generator-side support; the rest parse + validate
+// but emit nothing yet.
+Storage:
+    'storage' name=LooseName '{'
+        ('type' ':' type=StorageType ','?)
+    '}';
+
+StorageType returns string:
+      'postgres' | 'mysql' | 'sqlite' | 'inMemory'
+    | 'redis'
+    | 'elastic' | 'meilisearch'
+    | 'kafka'
+    | 'clickhouse' | 'bigquery';
 
 // ---- ui api parameter ------------------------------------------
 //
@@ -500,7 +547,8 @@ LooseName returns string:
     | 'section' | 'link' | 'route' | 'title' | 'body' | 'framework' | 'static'
     | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
     | 'design' | 'targets'
-    | 'bind' | 'api';
+    | 'bind' | 'api'
+    | 'primary' | 'cache' | 'search' | 'events' | 'bi';
 
 // ---------------------------------------------------------------------------
 // Type references

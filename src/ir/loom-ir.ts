@@ -373,7 +373,34 @@ export interface SystemIR {
    *  deployables `serves:` a named api; frontend deployables
    *  `consumes:` an api from a named target. */
   apis: ApiIR[];
+  /** Storage declarations at system scope.  Each is a typed slot
+   *  the deployable composition picks up via `modules: <M> {
+   *  primary: <Storage>, cache: <Storage>, ... }`.  Reusable across
+   *  deployables. */
+  storages: StorageIR[];
 }
+
+/** A single typed storage instance.  v0 type enum covers the
+ *  common roles seen in real deployments — postgres / mysql /
+ *  sqlite / inMemory for transactional, redis for cache, elastic
+ *  / meilisearch for search, kafka for events, clickhouse /
+ *  bigquery for analytics. */
+export interface StorageIR {
+  name: string;
+  type: StorageKind;
+}
+
+export type StorageKind =
+  | "postgres"
+  | "mysql"
+  | "sqlite"
+  | "inMemory"
+  | "redis"
+  | "elastic"
+  | "meilisearch"
+  | "kafka"
+  | "clickhouse"
+  | "bigquery";
 
 /** System-level `theme { ... }` block.  Tokens are semantic so the
  *  same source applies to whatever target the React generator
@@ -670,6 +697,12 @@ export interface DeployableIR {
    *  param's contract).  Empty for backend deployables and for
    *  frontends whose UI declares no api parameters. */
   uiBindings: UiParamBindingIR[];
+  /** Slice 11.27 — per-module storage bindings on a backend
+   *  deployable.  Each entry corresponds to one `modules:` entry
+   *  with an optional brace block (`Sales { primary: pg, cache:
+   *  redis }`).  Bare-list form (`modules: Sales, Marketing`)
+   *  produces entries with empty `storages` arrays. */
+  moduleBindings: ModuleBindingIR[];
 }
 
 /** A single UI-parameter binding on a frontend deployable.
@@ -681,6 +714,25 @@ export interface UiParamBindingIR {
   /** Name of the backend deployable that supplies the param's contract. */
   sourceDeployableName: string;
 }
+
+/** Slice 11.27 — per-module storage bindings on a backend
+ *  deployable.  Each entry binds a module's role-keyed storage
+ *  slot to a system-scope storage declaration. */
+export interface ModuleBindingIR {
+  /** Module the bindings apply to. */
+  moduleName: string;
+  /** Role → storage-name map (`primary`, `cache`, `search`,
+   *  `events`, `bi`).  Empty when the source declared the bare
+   *  `modules: Sales` form (no brace block). */
+  storages: { role: ModuleStorageRole; storageName: string }[];
+}
+
+export type ModuleStorageRole =
+  | "primary"
+  | "cache"
+  | "search"
+  | "events"
+  | "bi";
 
 // ---------------------------------------------------------------------------
 // Statements

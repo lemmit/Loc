@@ -245,7 +245,16 @@ function lowerSystem(sys: import("../language/generated/ast.js").System): System
       name: a.name,
       sourceModule: a.source?.$refText ?? "",
     }));
-  return { name: sys.name, modules, deployables, e2eTests, user, theme, uis, apis };
+  const storages = sys.members
+    .filter(
+      (m): m is import("../language/generated/ast.js").Storage =>
+        m.$type === "Storage",
+    )
+    .map((s): import("./loom-ir.js").StorageIR => ({
+      name: s.name,
+      type: s.type as import("./loom-ir.js").StorageKind,
+    }));
+  return { name: sys.name, modules, deployables, e2eTests, user, theme, uis, apis, storages };
 }
 
 function lowerTheme(
@@ -358,10 +367,20 @@ function lowerDeployable(
       sourceDeployableName: b.source?.ref?.name ?? "",
     }),
   );
+  // Slice 11.27 — per-module storage bindings.
+  const moduleBindings = (d.moduleBindings ?? []).map(
+    (b): import("./loom-ir.js").ModuleBindingIR => ({
+      moduleName: b.name?.ref?.name ?? "",
+      storages: (b.storages ?? []).map((sb) => ({
+        role: sb.role as import("./loom-ir.js").ModuleStorageRole,
+        storageName: sb.storage?.ref?.name ?? "",
+      })),
+    }),
+  );
   return {
     name: d.name,
     platform,
-    moduleNames: d.modules.map((ref) => ref.ref?.name ?? "").filter(Boolean),
+    moduleNames: moduleBindings.map((b) => b.moduleName).filter(Boolean),
     port: d.port ?? defaultPort(platform),
     targetName: d.targets?.ref?.name,
     auth,
@@ -370,6 +389,7 @@ function lowerDeployable(
     uiFramework,
     serves,
     uiBindings,
+    moduleBindings,
   };
 }
 
