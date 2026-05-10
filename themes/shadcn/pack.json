@@ -85,7 +85,10 @@
     "primitive-money": "primitive-money.hbs",
     "primitive-date-display": "primitive-date-display.hbs",
     "primitive-enum-badge": "primitive-enum-badge.hbs",
-    "primitive-id-link": "primitive-id-link.hbs"
+    "primitive-id-link": "primitive-id-link.hbs",
+    "primitive-form-of": "primitive-form-of.hbs",
+    "form-of-imports": "form-of-imports.hbs",
+    "form-of-decls": "form-of-decls.hbs"
   },
   "imports": {
     "primitive-button":         [{ "from": "@/components/ui/button", "named": ["Button"] }],

@@ -82,6 +82,21 @@ export interface PageEmitContext {
   pack: LoadedPack;
 }
 
+/** Slice A4 — derived map: aggregate name → owning bounded context.
+ *  Required by `Form(of: <Agg>)` and `IdLink(of: <Agg>)` so the
+ *  walker can resolve enum / value-object types declared alongside
+ *  the aggregate.  Built from `ctx.contextsByName` once per emit
+ *  so the walker doesn't repeatedly scan all contexts. */
+function buildBcByAggregate(
+  ctx: PageEmitContext,
+): Map<string, BoundedContextIR> {
+  const out = new Map<string, BoundedContextIR>();
+  for (const bc of ctx.contextsByName.values()) {
+    for (const agg of bc.aggregates) out.set(agg.name, bc);
+  }
+  return out;
+}
+
 /** Emit `src/pages/<route>.tsx` per page in `ui.pages`.  Returns just
  *  the page-file map; api modules / page objects / shell files stay
  *  in `index.ts`. */
@@ -210,6 +225,8 @@ export function emitPagesForUi(
           page.title,
           userComponents,
           ui.apiParams,
+          ctx.aggregatesByName,
+          buildBcByAggregate(ctx),
         ),
       );
       continue;
