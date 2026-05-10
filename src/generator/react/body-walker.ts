@@ -178,6 +178,14 @@ export interface WalkResult {
    *  imports, mutation hook, `defaultValues`, and the `onSubmit`
    *  handler that wraps the form's `<form onSubmit={…}>`. */
   formOf: FormOfState | null;
+  /** Slice A5 — every static `testid:` literal encountered while
+   *  walking the body, plus the synthesised testid bases the walker
+   *  generates on the user's behalf (e.g. `<form-namespace>-input-
+   *  <field>` for each `Form(of:)` field, `<form-namespace>-submit`
+   *  for the submit button).  The walker-side page-object emitter
+   *  reads this set to surface one typed `Locator` getter per
+   *  testid in the generated `e2e/pages/<page-snake>.ts` class. */
+  collectedTestids: Set<string>;
 }
 
 /** A single auto-injected React Query hook call.  Generated when
@@ -319,6 +327,7 @@ export function walkBodyToTsx(
     aggregatesByName,
     bcByAggregate,
     formOf: null,
+    collectedTestids: new Set(),
   };
   const tsx = walk(body, ctx, 0);
   return {
@@ -332,6 +341,7 @@ export function walkBodyToTsx(
     usesChildren: ctx.usesChildren,
     usedApiHooks: ctx.usedApiHooks,
     formOf: ctx.formOf,
+    collectedTestids: ctx.collectedTestids,
   };
 }
 
@@ -374,6 +384,9 @@ interface WalkContext {
    *  shell can emit `useForm` + create mutation + `handleSubmit`
    *  wiring at function top. */
   formOf: FormOfState | null;
+  /** Slice A5 — accumulator for static `testid:` strings the body
+   *  emits, used by the walker-side page-object builder. */
+  collectedTestids: Set<string>;
 }
 
 /** Slice A4 — RHF wiring requirements recorded by `emitFormOf`,
@@ -1055,6 +1068,14 @@ function emitFormOf(
     ),
   );
   const fieldHtmls = fieldVMs.map((vm) => renderFormField(vm, ctx.pack));
+  // Slice A5 — surface the synthesised testids (one per field +
+  // the submit button) so the walker page-object emitter exposes
+  // them as Locator getters.  Without this, an explicit page
+  // built around `Form(of:)` would only expose user-supplied
+  // testids, missing the form-internal ones that the per-field
+  // `field-input-*` templates emit by convention.
+  for (const vm of fieldVMs) ctx.collectedTestids.add(vm.testId);
+  ctx.collectedTestids.add(`${testidNamespace}-submit`);
   // onSubmit:  explicit lambda body OR null (shell uses scaffold
   // default).  The lambda's `vals` (form data) is in scope by
   // RHF convention; we rebind the source-side param name to
@@ -1819,7 +1840,12 @@ function stringOrRefArgValue(
  *  template's opening tag.  Returns `' data-testid="..."'` for
  *  string literals, `' data-testid={...}'` for refs/expressions, or
  *  `''` when no `testid:` was supplied.  Templates splice via
- *  `{{{testidAttr}}}` inside the root element. */
+ *  `{{{testidAttr}}}` inside the root element.
+ *
+ *  Slice A5 — string-literal testids also accumulate on
+ *  `ctx.collectedTestids` so the walker-side page-object emitter
+ *  can expose each one as a typed `Locator` getter in the
+ *  generated `e2e/pages/<page-snake>.ts` class. */
 function testidAttr(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,
@@ -1830,6 +1856,7 @@ function testidAttr(
     const a = call.args[i]!;
     // String literal → quoted attr (no braces).
     if (a.kind === "literal" && a.lit === "string") {
+      ctx.collectedTestids.add(a.value);
       return ` data-testid=${JSON.stringify(a.value)}`;
     }
     // Anything else → run through emitExpr; brace-wrap as a
@@ -2234,6 +2261,7 @@ export function renderCustomLayoutPage(
       aggregatesByName: new Map(),
       bcByAggregate: new Map(),
       formOf: null,
+      collectedTestids: new Set(),
     };
     const titleExpr = emitExpr(title, titleCtx);
     // emitExpr may have added to usedParams; reflect title's state
@@ -2509,6 +2537,7 @@ function renderInitExpr(expr: ExprIR, pack: LoadedPack): string {
     aggregatesByName: new Map(),
     bcByAggregate: new Map(),
     formOf: null,
+    collectedTestids: new Set(),
   };
   return emitExpr(expr, dummy);
 }

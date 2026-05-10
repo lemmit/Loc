@@ -61,7 +61,9 @@ import {
   isWalkableLayoutBody,
   renderCustomLayoutPage,
   renderUserComponentFile,
+  walkBodyToTsx,
 } from "./body-walker.js";
+import { buildWalkerPageObject } from "./walker-page-objects.js";
 
 /** Inputs the page emitter needs in addition to the page IR.  Kept as
  *  a struct so additions (theme overrides, design-pack picks, sidebar
@@ -635,5 +637,61 @@ export function emitPageObjectsForUi(
         break;
     }
   }
+  // Slice A5 — walker-emitted pages (those whose bodies are
+  // recognised by `isWalkableLayoutBody` but NOT by the scaffold
+  // dispatcher) get a parallel page-object emission: one class
+  // per page, exposing every static `testid:` literal the walker
+  // captured + form-synthesised testids.
+  //
+  // Path-collision contract: scaffold-archetype pages own
+  // `e2e/pages/<aggregate-camel>.ts`; walker pages emit at
+  // `e2e/pages/<page-snake>.ts`.  These namespaces don't collide
+  // by construction (camel vs snake, aggregate vs page name), but
+  // we still guard against an explicit page named identically to
+  // a scaffold-aggregate fragment by skipping any walker output
+  // whose path is already in `out`.
+  const userComponents = buildUserComponentsMap(ui);
+  const bcByAggregate = buildBcByAggregate(ctx);
+  for (const page of ui.pages) {
+    const origin = page.scaffoldOrigin ?? inferBodyDispatch(page.body);
+    if (origin) continue;
+    if (!isWalkableLayoutBody(page.body, userComponents)) continue;
+    if (!page.body) continue;
+    const paramNames = new Set(page.params.map((p) => p.name));
+    const stateNames = new Set(page.state.map((s) => s.name));
+    const { collectedTestids } = walkBodyToTsx(
+      page.body,
+      ctx.pack,
+      paramNames,
+      stateNames,
+      userComponents,
+      ui.apiParams,
+      ctx.aggregatesByName,
+      bcByAggregate,
+    );
+    const path = `e2e/pages/${snake(page.name)}.ts`;
+    if (out.has(path)) continue;
+    out.set(
+      path,
+      buildWalkerPageObject({
+        pageName: page.name,
+        params: page.params,
+        route: page.route ?? "",
+        testids: collectedTestids,
+      }),
+    );
+  }
   return out;
+}
+
+/** Slice A5 — UI's component-name → ParamIR map, mirroring how
+ *  `emitPagesForUi` builds it.  `isWalkableLayoutBody` calls this
+ *  to decide whether a body composed of user components is
+ *  walker-eligible. */
+function buildUserComponentsMap(
+  ui: UiIR,
+): Map<string, readonly ParamIR[]> {
+  const map = new Map<string, readonly ParamIR[]>();
+  for (const c of ui.components) map.set(c.name, c.params);
+  return map;
 }
