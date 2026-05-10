@@ -53,6 +53,7 @@
     "primitive-button": "primitive-button.hbs",
     "primitive-card": "primitive-card.hbs",
     "primitive-stat": "primitive-stat.hbs",
+    "primitive-badge": "primitive-badge.hbs",
     "primitive-field": "primitive-field.hbs",
     "primitive-toggle": "primitive-toggle.hbs",
     "primitive-number-field": "primitive-number-field.hbs",
