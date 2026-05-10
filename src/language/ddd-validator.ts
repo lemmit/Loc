@@ -222,14 +222,14 @@ export class DddValidator {
     // Rule 3: only `react` and `static` platforms admit `ui:`.
     // Rule 4: every `static` deployable must declare `ui:` (otherwise
     //         it has nothing to serve).
-    const hasUiBinding = !!(d.uiSugar || d.uiBlock);
+    const hasUiBinding = !!(d.uiSugar || d.uiCompose || d.uiBlock);
     if (hasUiBinding && d.platform !== "react" && d.platform !== "static") {
       accept(
         "error",
         `'ui:' binding is only valid on 'platform: react' or 'platform: static' deployables (got '${d.platform}').`,
         {
           node: d,
-          property: d.uiSugar ? "uiSugar" : "uiBlock",
+          property: d.uiSugar ? "uiSugar" : d.uiCompose ? "uiCompose" : "uiBlock",
         },
       );
     }
@@ -285,6 +285,163 @@ export class DddValidator {
           "error",
           `'targets:' is only valid on a 'platform: react' or 'platform: static' deployable.`,
           { node: d, property: "targets" },
+        );
+      }
+    }
+
+    // Slice 11.26 — explicit api composition checks.
+    this.checkDeployableServes(d, accept);
+    this.checkDeployableUiCompose(d, accept);
+  }
+
+  /** Slice 11.26 — `serves:` validations.
+   *    - Only valid on BACKEND platforms (dotnet, hono).
+   *    - Each api ref must resolve.
+   *    - No duplicate api names within one deployable's serves list. */
+  private checkDeployableServes(
+    d: import("./generated/ast.js").Deployable,
+    accept: ValidationAcceptor,
+  ): void {
+    if (!d.serves || d.serves.length === 0) return;
+    if (d.platform === "react" || d.platform === "static") {
+      accept(
+        "error",
+        `'serves:' is only valid on a backend deployable (dotnet, hono).  Got platform '${d.platform}'.`,
+        { node: d, property: "serves" },
+      );
+      return;
+    }
+    const seen = new Set<string>();
+    for (const ref of d.serves) {
+      const name = ref?.$refText ?? "";
+      if (!ref?.ref) {
+        accept(
+          "error",
+          `Deployable '${d.name}' serves undeclared api '${name}'.  Declare 'api ${name} from <Module>' at system scope.`,
+          { node: d, property: "serves" },
+        );
+        continue;
+      }
+      if (seen.has(name)) {
+        accept(
+          "error",
+          `Deployable '${d.name}' lists api '${name}' more than once in its 'serves:' list.`,
+          { node: d, property: "serves" },
+        );
+      } else {
+        seen.add(name);
+      }
+    }
+  }
+
+  /** Slice 11.26 — `ui: WebApp { Sales: salesApi, ... }` compose-block
+   *  validations.  This is the FRONTEND composition shape — each
+   *  binding maps a UI api parameter (declared as `api Sales: SalesApi`
+   *  in the ui block) to a backend deployable that supplies its
+   *  contract.
+   *    - Only valid on FRONTEND platforms (react, static).
+   *    - Each binding's `name` must match a UiApiParam in the ui.
+   *    - Each binding's `source` must resolve AND `serves:` the
+   *      param's declared api.
+   *    - No duplicate param bindings.
+   *    - Every UI api param must have a matching binding (no
+   *      param left unbound). */
+  private checkDeployableUiCompose(
+    d: import("./generated/ast.js").Deployable,
+    accept: ValidationAcceptor,
+  ): void {
+    const ui = d.uiSugar?.ref?.ref ?? d.uiCompose?.ref?.ref ?? d.uiBlock?.ref?.ref;
+    if (!ui) return;
+
+    // Collect declared UI api params (param name → required api name).
+    const requiredParams = new Map<string, string>();
+    for (const m of ui.members) {
+      if (m.$type !== "UiApiParam") continue;
+      const apiName = m.apiRef?.$refText ?? "";
+      if (apiName) requiredParams.set(m.name, apiName);
+    }
+
+    if (requiredParams.size === 0) {
+      // UI has no api params — extra ui-compose bindings are pointless.
+      const bindings = d.uiCompose?.bindings ?? [];
+      for (const b of bindings) {
+        accept(
+          "error",
+          `Deployable '${d.name}' binds parameter '${b.name}' on ui '${ui.name}' but the ui declares no 'api ${b.name}: <Api>' parameter.`,
+          { node: b, property: "name" },
+        );
+      }
+      return;
+    }
+
+    // UI has api params → must use the compose-block form.
+    if (!d.uiCompose) {
+      const paramList = [...requiredParams.entries()]
+        .map(([n, a]) => `${n}: <backend serving ${a}>`)
+        .join(", ");
+      accept(
+        "error",
+        `Deployable '${d.name}' deploys ui '${ui.name}' which declares api parameters; supply bindings via 'ui: ${ui.name} { ${paramList} }'.`,
+        { node: d, property: "name" },
+      );
+      return;
+    }
+
+    const bindings = d.uiCompose.bindings ?? [];
+    const seenNames = new Set<string>();
+    const boundNames = new Set<string>();
+    for (const b of bindings) {
+      const paramName = b.name;
+      const sourceName = b.source?.$refText ?? "";
+      if (seenNames.has(paramName)) {
+        accept(
+          "error",
+          `Deployable '${d.name}' binds ui parameter '${paramName}' more than once.`,
+          { node: b, property: "name" },
+        );
+        continue;
+      }
+      seenNames.add(paramName);
+
+      const requiredApi = requiredParams.get(paramName);
+      if (!requiredApi) {
+        accept(
+          "error",
+          `Deployable '${d.name}' binds parameter '${paramName}' on ui '${ui.name}' but the ui declares no 'api ${paramName}: <Api>' parameter.`,
+          { node: b, property: "name" },
+        );
+        continue;
+      }
+      boundNames.add(paramName);
+
+      if (!b.source?.ref) {
+        accept(
+          "error",
+          `Deployable '${d.name}' references undeclared source deployable '${sourceName}' in 'ui: ${ui.name} { ${paramName}: ${sourceName} }'.`,
+          { node: b, property: "source" },
+        );
+        continue;
+      }
+      const source = b.source.ref;
+      const sourceServes = (source.serves ?? []).some(
+        (r) => r?.$refText === requiredApi,
+      );
+      if (!sourceServes) {
+        accept(
+          "error",
+          `Deployable '${sourceName}' does not 'serves: ${requiredApi}' — required to fill ui parameter '${paramName}: ${requiredApi}' on '${ui.name}'.`,
+          { node: b, property: "source" },
+        );
+      }
+    }
+
+    // Every UI api param must be bound.
+    for (const [name, apiName] of requiredParams) {
+      if (!boundNames.has(name)) {
+        accept(
+          "error",
+          `Deployable '${d.name}' is missing a binding for ui parameter '${name}: ${apiName}' on ui '${ui.name}'.`,
+          { node: d, property: "name" },
         );
       }
     }
