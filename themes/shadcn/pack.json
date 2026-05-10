@@ -68,7 +68,53 @@
     "cell-bool": "cell-bool.hbs",
     "cell-number": "cell-number.hbs",
     "cell-enum": "cell-enum.hbs",
-    "cell-string": "cell-string.hbs"
+    "cell-string": "cell-string.hbs",
+    "primitive-heading": "primitive-heading.hbs",
+    "primitive-text": "primitive-text.hbs",
+    "primitive-divider": "primitive-divider.hbs",
+    "primitive-stack": "primitive-stack.hbs",
+    "primitive-group": "primitive-group.hbs",
+    "primitive-toolbar": "primitive-toolbar.hbs",
+    "primitive-grid": "primitive-grid.hbs",
+    "primitive-container": "primitive-container.hbs",
+    "primitive-empty": "primitive-empty.hbs",
+    "primitive-button": "primitive-button.hbs",
+    "primitive-card": "primitive-card.hbs",
+    "primitive-stat": "primitive-stat.hbs",
+    "primitive-badge": "primitive-badge.hbs",
+    "primitive-field": "primitive-field.hbs",
+    "primitive-toggle": "primitive-toggle.hbs",
+    "primitive-number-field": "primitive-number-field.hbs",
+    "primitive-password-field": "primitive-password-field.hbs",
+    "primitive-loader": "primitive-loader.hbs",
+    "primitive-anchor": "primitive-anchor.hbs",
+    "primitive-image": "primitive-image.hbs",
+    "primitive-avatar": "primitive-avatar.hbs",
+    "primitive-tabs": "primitive-tabs.hbs",
+    "components-ui-tabs": "components-ui-tabs.hbs"
+  },
+  "imports": {
+    "primitive-button":         [{ "from": "@/components/ui/button", "named": ["Button"] }],
+    "primitive-card":           [{ "from": "@/components/ui/card",   "named": ["Card", "CardContent", "CardHeader", "CardTitle"] }],
+    "primitive-badge":          [{ "from": "@/components/ui/badge",  "named": ["Badge"] }],
+    "primitive-field":          [
+      { "from": "@/components/ui/input", "named": ["Input"] },
+      { "from": "@/components/ui/label", "named": ["Label"] }
+    ],
+    "primitive-toggle":         [
+      { "from": "@/components/ui/switch", "named": ["Switch"] },
+      { "from": "@/components/ui/label",  "named": ["Label"] }
+    ],
+    "primitive-number-field":   [
+      { "from": "@/components/ui/input", "named": ["Input"] },
+      { "from": "@/components/ui/label", "named": ["Label"] }
+    ],
+    "primitive-password-field": [
+      { "from": "@/components/ui/input", "named": ["Input"] },
+      { "from": "@/components/ui/label", "named": ["Label"] }
+    ],
+    "primitive-loader": [{ "from": "lucide-react", "named": ["Loader2"] }],
+    "primitive-tabs":   [{ "from": "@/components/ui/tabs", "named": ["Tabs", "TabsContent", "TabsList", "TabsTrigger"] }]
   },
   "shellFiles": {
     "tailwind-config": "tailwind.config.ts",

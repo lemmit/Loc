@@ -146,7 +146,7 @@ export function emitPagesForUi(
   for (const c of ui.components) {
     out.set(
       `src/components/${c.name}.tsx`,
-      renderUserComponentFile(c.name, c.params, c.state, c.body, userComponents),
+      renderUserComponentFile(c.name, c.params, c.state, c.body, ctx.pack, userComponents),
     );
   }
 
@@ -204,6 +204,7 @@ export function emitPagesForUi(
         renderCustomLayoutPage(
           page.name,
           page.body!,
+          ctx.pack,
           page.params,
           page.state,
           page.title,

@@ -1,0 +1,8 @@
+{{#if hasTitle}}{{#if hasContent}}<Card withBorder padding="md">
+{{indent}}<Title order={3}>{{{titleText}}}</Title>
+{{indent}}{{{contentJsx}}}
+{{closeIndent}}</Card>{{else}}<Card withBorder padding="md">
+{{indent}}<Title order={3}>{{{titleText}}}</Title>
+{{closeIndent}}</Card>{{/if}}{{else}}{{#if hasContent}}<Card withBorder padding="md">
+{{indent}}{{{contentJsx}}}
+{{closeIndent}}</Card>{{else}}<Card />{{/if}}{{/if}}
