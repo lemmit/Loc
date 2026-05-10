@@ -65,6 +65,8 @@ export type MantineImport =
   | "Grid"
   | "Tabs"
   | "Center"
+  | "TextInput"
+  | "Switch"
   | "Title"
   | "Text"
   | "Button"
@@ -103,6 +105,8 @@ const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
   "Tabs",
   "Toolbar",
   "Empty",
+  "Field",
+  "Toggle",
   "Heading",
   "Text",
   "Button",
@@ -210,6 +214,10 @@ function emitComponent(
       return emitToolbar(call, ctx, depth);
     case "Empty":
       return emitEmpty(call, ctx, depth);
+    case "Field":
+      return emitField(call, ctx, depth);
+    case "Toggle":
+      return emitToggle(call, ctx, depth);
     case "Heading":
       return emitHeading(call, ctx, depth);
     case "Text":
@@ -381,6 +389,75 @@ function emitEmpty(
   const msg = firstPositionalContent(call, ctx) ?? '"No results."';
   void depth;
   return `<Center mih={200}><Text c="dimmed">${unwrapTextLiteral(msg)}</Text></Center>`;
+}
+
+function emitField(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  // Field("Label", bind: <state-field>) — Mantine TextInput
+  // bound to a state field via two-way binding (value + onChange
+  // → setX).  The first positional is the label (string lit / ref
+  // / binary op); `bind:` is required for v0 — without it, the
+  // input is uncontrolled and falls back to a label-only stub.
+  ctx.imports.add("TextInput");
+  void depth;
+  const label = firstPositionalContent(call, ctx) ?? '""';
+  const bind = stateBindArg(call, "bind", ctx);
+  if (bind === undefined) {
+    return `<TextInput label=${unwrapAsAttr(label)} />`;
+  }
+  const setter = "set" + bind[0]!.toUpperCase() + bind.slice(1);
+  return `<TextInput label=${unwrapAsAttr(label)} value={${bind}} onChange={(e) => ${setter}(e.currentTarget.value)} />`;
+}
+
+function emitToggle(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  // Toggle("Label", bind: <bool state field>) — Mantine Switch
+  // bound to a bool state field.  Same shape as Field but
+  // checked + e.currentTarget.checked.
+  ctx.imports.add("Switch");
+  void depth;
+  const label = firstPositionalContent(call, ctx) ?? '""';
+  const bind = stateBindArg(call, "bind", ctx);
+  if (bind === undefined) {
+    return `<Switch label=${unwrapAsAttr(label)} />`;
+  }
+  const setter = "set" + bind[0]!.toUpperCase() + bind.slice(1);
+  return `<Switch label=${unwrapAsAttr(label)} checked={${bind}} onChange={(e) => ${setter}(e.currentTarget.checked)} />`;
+}
+
+/** Slice 11.14 — read a `bind:` named arg as a state-field name.
+ *  Returns the field name when the arg is a `ref` to a known
+ *  state field (and marks `usesState` on the context); otherwise
+ *  undefined.  Drives controlled-input wiring in Field / Toggle. */
+function stateBindArg(
+  call: ExprIR & { kind: "call" },
+  name: string,
+  ctx: WalkContext,
+): string | undefined {
+  const argNames = call.argNames ?? [];
+  for (let i = 0; i < call.args.length; i++) {
+    if (argNames[i] !== name) continue;
+    const a = call.args[i]!;
+    if (a.kind === "ref" && ctx.stateNames.has(a.name)) {
+      ctx.usesState = true;
+      return a.name;
+    }
+  }
+  return undefined;
+}
+
+/** Slice 11.14 — render a renderTextContent() result as a JSX
+ *  attribute value.  Quoted strings stay quoted; JSX-expression
+ *  values (already brace-wrapped) stay brace-wrapped. */
+function unwrapAsAttr(s: string): string {
+  if (s.length >= 2 && s.startsWith("{") && s.endsWith("}")) return s;
+  return s; // already a quoted string literal — JSX accepts it
 }
 
 function emitHeading(
