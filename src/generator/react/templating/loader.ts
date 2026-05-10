@@ -211,6 +211,24 @@ export function compilePack(
       noEscape: false,
     });
     templates.set(logicalName, { fn, filePath: pathFor(fileName) });
+    // Register every template as a Handlebars partial under its
+    // logical name.  This lets higher-level templates compose
+    // primitives via `{{> primitive-button label=... }}` instead
+    // of duplicating the design-system-specific JSX in every
+    // place a button (or input, card, …) is needed.  Pack authors
+    // become the single source of truth for "how does my design
+    // system render X" — every other template invokes the
+    // primitive partial.
+    //
+    // Caveat: imports declared in `pack.json` for a primitive
+    // currently flow up only when the walker calls
+    // `renderPrimitive` directly (see `body-walker.ts`); a future
+    // step may extend the loader to track partial-use for
+    // automatic import propagation.  For now, full-file templates
+    // (page-list.hbs, page-detail.hbs, …) keep their explicit
+    // import header and we use partials only where the parent
+    // already imports the relevant components.
+    Handlebars.registerPartial(logicalName, source);
   }
   const render = (name: string, context: unknown): string => {
     const t = templates.get(name);
