@@ -447,6 +447,7 @@ function emitStack(
     childrenBlock: children.join(`\n${indent}`),
     indent,
     closeIndent,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -463,6 +464,7 @@ function emitGroup(
     childrenBlock: children.join(`\n${indent}`),
     indent,
     closeIndent,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -485,6 +487,7 @@ function emitGrid(
     colIndent,
     childIndent,
     closeIndent,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -508,6 +511,7 @@ function emitContainer(
     closeIndent,
     size,
     hasSize: size !== undefined,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -552,6 +556,7 @@ function emitTabs(
     indent: "  ".repeat(depth + 1),
     innerIndent: "  ".repeat(depth + 2),
     closeIndent: "  ".repeat(depth),
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -582,6 +587,7 @@ function emitToolbar(
     childrenBlock: children.join(`\n${indent}`),
     indent,
     closeIndent,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -598,6 +604,7 @@ function emitEmpty(
   void depth;
   return renderPrimitive(ctx, "primitive-empty", {
     text: unwrapTextLiteral(msg),
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -638,6 +645,7 @@ function emitField(
     bind,
     setter,
     hasBind: bind !== undefined,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -659,6 +667,7 @@ function emitToggle(
     bind,
     setter,
     hasBind: bind !== undefined,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -683,6 +692,7 @@ function emitNumberField(
     bind,
     setter,
     hasBind: bind !== undefined,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -705,6 +715,7 @@ function emitPasswordField(
     bind,
     setter,
     hasBind: bind !== undefined,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -719,6 +730,7 @@ function emitLoader(
   return renderPrimitive(ctx, "primitive-loader", {
     size,
     hasSize: size !== undefined,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -738,6 +750,7 @@ function emitAnchor(
     label: unwrapTextLiteral(label),
     to,
     hasTo: to !== undefined,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -756,6 +769,7 @@ function emitImage(
     alt,
     hasSrc: src !== undefined,
     hasAlt: alt !== undefined,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -774,6 +788,7 @@ function emitAvatar(
     alt,
     hasSrc: src !== undefined,
     hasAlt: alt !== undefined,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -820,6 +835,7 @@ function emitHeading(
   return renderPrimitive(ctx, "primitive-heading", {
     text: unwrapTextLiteral(text),
     level,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -832,6 +848,7 @@ function emitText(
   void depth;
   return renderPrimitive(ctx, "primitive-text", {
     text: unwrapTextLiteral(text),
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -873,6 +890,7 @@ function emitButton(
     hasDisabled: disabled !== undefined,
     loading,
     hasLoading: loading !== undefined,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -1211,6 +1229,33 @@ function stringOrRefArgValue(
   return undefined;
 }
 
+/** Slice A1 — read the `testid:` named arg from any primitive call
+ *  and produce a TSX attribute fragment ready to splice into the
+ *  template's opening tag.  Returns `' data-testid="..."'` for
+ *  string literals, `' data-testid={...}'` for refs/expressions, or
+ *  `''` when no `testid:` was supplied.  Templates splice via
+ *  `{{{testidAttr}}}` inside the root element. */
+function testidAttr(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+): string {
+  const argNames = call.argNames ?? [];
+  for (let i = 0; i < call.args.length; i++) {
+    if (argNames[i] !== "testid") continue;
+    const a = call.args[i]!;
+    // String literal → quoted attr (no braces).
+    if (a.kind === "literal" && a.lit === "string") {
+      return ` data-testid=${JSON.stringify(a.value)}`;
+    }
+    // Anything else → run through emitExpr; brace-wrap as a
+    // JSX expression.  Refs to params/state, binary ops, calls,
+    // etc. all compose.
+    const expr = emitExpr(a, ctx);
+    return ` data-testid={${expr}}`;
+  }
+  return "";
+}
+
 function emitCard(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,
@@ -1240,6 +1285,7 @@ function emitCard(
     contentJsx,
     indent,
     closeIndent,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -1263,6 +1309,7 @@ function emitStat(
     value: unwrapTextLiteral(value),
     indent,
     closeIndent,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -1275,6 +1322,7 @@ function emitBadge(
   void depth;
   return renderPrimitive(ctx, "primitive-badge", {
     label: unwrapTextLiteral(label),
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -1306,6 +1354,7 @@ function emitDivider(
   return renderPrimitive(ctx, "primitive-divider", {
     label,
     hasLabel: label !== undefined,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
