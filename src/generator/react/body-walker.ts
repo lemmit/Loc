@@ -68,6 +68,8 @@ export type MantineImport =
   | "TextInput"
   | "Switch"
   | "Anchor"
+  | "Image"
+  | "Avatar"
   | "Title"
   | "Text"
   | "Button"
@@ -114,6 +116,8 @@ const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
   "Field",
   "Toggle",
   "Anchor",
+  "Image",
+  "Avatar",
   "Heading",
   "Text",
   "Button",
@@ -230,6 +234,10 @@ function emitComponent(
       return emitToggle(call, ctx, depth);
     case "Anchor":
       return emitAnchor(call, ctx, depth);
+    case "Image":
+      return emitImage(call, ctx, depth);
+    case "Avatar":
+      return emitAvatar(call, ctx, depth);
     case "Heading":
       return emitHeading(call, ctx, depth);
     case "Text":
@@ -461,6 +469,42 @@ function emitAnchor(
     return `<Anchor component={Link} to=${to}>${unwrapTextLiteral(label)}</Anchor>`;
   }
   return `<Anchor>${unwrapTextLiteral(label)}</Anchor>`;
+}
+
+function emitImage(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  // Image(src: "...", alt: "...")  — Mantine <Image>.
+  // Both attrs accept string literals or refs; missing src falls
+  // back to a comment placeholder (the `src` attr is omitted, so
+  // Mantine renders its built-in fallback).
+  ctx.imports.add("Image");
+  void depth;
+  const src = stringOrRefArgValue(call, "src", ctx);
+  const alt = stringOrRefArgValue(call, "alt", ctx);
+  const attrs: string[] = [];
+  if (src) attrs.push(`src=${src}`);
+  if (alt) attrs.push(`alt=${alt}`);
+  return `<Image${attrs.length > 0 ? " " + attrs.join(" ") : ""} />`;
+}
+
+function emitAvatar(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  // Avatar(src: "...", alt: "...") — Mantine <Avatar>.  Without
+  // src, Mantine renders the user-icon fallback.
+  ctx.imports.add("Avatar");
+  void depth;
+  const src = stringOrRefArgValue(call, "src", ctx);
+  const alt = stringOrRefArgValue(call, "alt", ctx);
+  const attrs: string[] = [];
+  if (src) attrs.push(`src=${src}`);
+  if (alt) attrs.push(`alt=${alt}`);
+  return `<Avatar${attrs.length > 0 ? " " + attrs.join(" ") : ""} />`;
 }
 
 /** Slice 11.14 — read a `bind:` named arg as a state-field name.
