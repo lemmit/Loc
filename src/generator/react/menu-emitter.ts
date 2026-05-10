@@ -40,13 +40,67 @@ import { plural, snake } from "../../util/naming.js";
  *  caller keeps the legacy hardcoded grouping in that case
  *  (byte-equivalence guarantee for the bulk-scaffold case). */
 export function deriveSidebarFromUi(ui: UiIR): NavSectionVM[] | undefined {
-  if (!ui.menu) return undefined;
-  return ui.menu.sections.map((section): NavSectionVM => ({
-    label: section.label,
-    entries: section.links
-      .map((link) => navEntryForLink(link, ui))
-      .filter((e): e is NavEntryVM => e !== undefined),
-  }));
+  if (ui.menu) {
+    return ui.menu.sections.map((section): NavSectionVM => ({
+      label: section.label,
+      entries: section.links
+        .map((link) => navEntryForLink(link, ui))
+        .filter((e): e is NavEntryVM => e !== undefined),
+    }));
+  }
+  // Slice 11.21 — fallback driver: per-page `menuMeta` blocks on
+  // EXPLICIT pages.  When no `ui.menu` is declared, walker-rendered
+  // pages (and any other source-declared pages) with `menu {
+  // section: "X" }` metadata group by section into a sidebar.
+  //
+  // Restricted to `source === "explicit"` so scaffold-synthesised
+  // pages (which carry default menuMeta from the scaffold expander)
+  // don't pre-empt the legacy hardcoded grouping in app-shell.ts.
+  // The default path stays byte-equivalent for the bulk-scaffold
+  // case; explicit pages opt into this driver by declaring a
+  // `menu { … }` block.
+  const eligible = ui.pages.filter(
+    (p) =>
+      p.source === "explicit" &&
+      p.menuMeta &&
+      !readMenuMetaBool(p, "hidden"),
+  );
+  if (eligible.length === 0) return undefined;
+  // Group pages by section name (default "" if no section declared).
+  const bySection = new Map<string, PageIR[]>();
+  for (const p of eligible) {
+    const section = readMenuMetaString(p, "section") ?? "";
+    let arr = bySection.get(section);
+    if (!arr) {
+      arr = [];
+      bySection.set(section, arr);
+    }
+    arr.push(p);
+  }
+  // Per-section: order by `menuMeta.order` (numeric) when present,
+  // otherwise by page declaration order.
+  const sections: NavSectionVM[] = [];
+  for (const [sectionLabel, pages] of bySection) {
+    pages.sort((a, b) => {
+      const aOrder = readMenuMetaNumber(a, "order") ?? Infinity;
+      const bOrder = readMenuMetaNumber(b, "order") ?? Infinity;
+      return aOrder - bOrder;
+    });
+    sections.push({
+      label: sectionLabel,
+      entries: pages.map((p): NavEntryVM => {
+        const label = readMenuMetaString(p, "label") ?? p.name;
+        const tIdAndActive = testIdAndActive(p);
+        return {
+          to: p.route ?? "",
+          label,
+          testId: tIdAndActive.testId,
+          activeArgs: tIdAndActive.activeArgs,
+        };
+      }),
+    });
+  }
+  return sections;
 }
 
 function navEntryForLink(
@@ -151,6 +205,25 @@ function readMenuMetaString(page: PageIR, key: string): string | undefined {
   if (!entry) return undefined;
   if (entry.value.kind !== "literal" || entry.value.lit !== "string") return undefined;
   return entry.value.value;
+}
+
+function readMenuMetaNumber(page: PageIR, key: string): number | undefined {
+  const meta = page.menuMeta;
+  if (!meta) return undefined;
+  const entry = meta.entries.find((e) => e.name === key);
+  if (!entry) return undefined;
+  if (entry.value.kind !== "literal" || entry.value.lit !== "int") return undefined;
+  const n = Number(entry.value.value);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function readMenuMetaBool(page: PageIR, key: string): boolean | undefined {
+  const meta = page.menuMeta;
+  if (!meta) return undefined;
+  const entry = meta.entries.find((e) => e.name === key);
+  if (!entry) return undefined;
+  if (entry.value.kind !== "literal" || entry.value.lit !== "bool") return undefined;
+  return entry.value.value === "true";
 }
 
 function stringPropOf(
