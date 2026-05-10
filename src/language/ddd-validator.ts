@@ -101,6 +101,33 @@ export class DddValidator {
           }
         }
 
+        // Slice 11.25 — Api declaration checks.
+        //   - Names unique within the system (`api SalesApi from …` declared twice).
+        //   - Source module cross-ref must resolve.
+        const apis = m.members.filter(
+          (sm) => sm.$type === "Api",
+        ) as import("./generated/ast.js").Api[];
+        const apiNamesSeen = new Map<string, import("./generated/ast.js").Api>();
+        for (const api of apis) {
+          const prior = apiNamesSeen.get(api.name);
+          if (prior) {
+            accept(
+              "error",
+              `Duplicate api '${api.name}'; api names must be unique within a system.`,
+              { node: api, property: "name" },
+            );
+          } else {
+            apiNamesSeen.set(api.name, api);
+          }
+          if (!api.source?.ref) {
+            accept(
+              "error",
+              `api '${api.name}' references undeclared module '${api.source?.$refText ?? "<missing>"}'.  Declare a 'module ${api.source?.$refText ?? "<Name>"} { … }' at system scope first.`,
+              { node: api, property: "source" },
+            );
+          }
+        }
+
         for (const sm of m.members) {
           if (sm.$type === "Module") {
             for (const ctx of sm.contexts) this.checkContext(ctx, accept);
@@ -851,6 +878,36 @@ export class DddValidator {
       }
     }
 
+    // Slice 11.25 — UI api parameter checks.
+    //   - Param names unique within the ui (`api Sales: …` declared twice).
+    //   - apiRef cross-ref must resolve (handled by Langium linker; the
+    //     refRoot returns undefined when the target isn't found, so the
+    //     check below catches it explicitly with a clearer message).
+    const apiParamSeen = new Map<
+      string,
+      import("./generated/ast.js").UiApiParam
+    >();
+    for (const m of ui.members) {
+      if (m.$type !== "UiApiParam") continue;
+      const prior = apiParamSeen.get(m.name);
+      if (prior) {
+        accept(
+          "error",
+          `ui '${ui.name}' declares api parameter '${m.name}' more than once.`,
+          { node: m, property: "name" },
+        );
+      } else {
+        apiParamSeen.set(m.name, m);
+      }
+      if (!m.apiRef?.ref) {
+        accept(
+          "error",
+          `ui '${ui.name}' references undeclared api '${m.apiRef?.$refText ?? "<missing>"}'.  Declare it at system scope as 'api ${m.apiRef?.$refText ?? "<Name>"} from <Module>'.`,
+          { node: m, property: "apiRef" },
+        );
+      }
+    }
+
     // Per-member walks.
     for (const m of ui.members) {
       if (m.$type === "Scaffold") this.checkScaffold(m, sys, accept);
@@ -937,6 +994,9 @@ export class DddValidator {
     accept: ValidationAcceptor,
   ): void {
     void ui;
+    // Slice 11.25 — validate api body refs first so each chain ref
+    // gets a precise diagnostic with source-location ranges.
+    this.checkApiBodyRefs(p, ui, accept);
     // Property uniqueness (Rule 9 part) — at most one each of route,
     // title, requires, body, menu metadata.  Multiple `state {}`
     // blocks merge (per spec §6 — same posture as `permissions`).
@@ -1024,6 +1084,116 @@ export class DddValidator {
       }
     }
   }
+
+  /** Slice 11.25 — validate `<paramName>.<aggregate>.<op>` body
+   *  ref chains in a page.  Each chain must:
+   *    - root at a declared UiApiParam in the page's UI
+   *    - reference a real aggregate in the api's source module
+   *    - reference a real operation on that aggregate (CRUD or
+   *      repository find)
+   *  Diagnostics emit at the source-level node so the editor
+   *  underlines the exact wrong segment. */
+  private checkApiBodyRefs(
+    p: import("./generated/ast.js").Page,
+    ui: import("./generated/ast.js").Ui,
+    accept: ValidationAcceptor,
+  ): void {
+    // Build the param-name → resolved Api map for this UI.
+    const apiByParam = new Map<string, import("./generated/ast.js").Api>();
+    for (const m of ui.members) {
+      if (m.$type !== "UiApiParam") continue;
+      const apiNode = m.apiRef?.ref;
+      if (apiNode) apiByParam.set(m.name, apiNode);
+    }
+    if (apiByParam.size === 0) return; // no api params → nothing to validate
+
+    // Walk every Expression in the page (body, title, requires,
+    // state inits — anything that can mention a body-ref chain).
+    for (const node of AstUtils.streamAllContents(p)) {
+      if (node.$type !== "MemberAccess") continue;
+      const ma = node as import("./generated/ast.js").MemberAccess;
+      // We're looking for the OUTER `.<op>` of a 3-segment chain,
+      // whose receiver is itself `<paramName>.<aggregate>`.
+      // Skip non-three-segment chains (the deeper member or
+      // outer .data accessors aren't the ones being validated).
+      if (ma.receiver?.$type !== "MemberAccess") continue;
+      const inner = ma.receiver as import("./generated/ast.js").MemberAccess;
+      if (inner.receiver?.$type !== "NameRef") continue;
+      const root = inner.receiver as import("./generated/ast.js").NameRef;
+      const rootName = root.name as string;
+      if (!apiByParam.has(rootName)) continue; // not an api binding ref
+
+      const apiNode = apiByParam.get(rootName)!;
+      const moduleName = apiNode.source?.$refText ?? "";
+      const aggregateName = inner.member as string;
+      const op = ma.member as string;
+
+      // Find aggregate in the api's source module.
+      const moduleNode = apiNode.source?.ref;
+      const aggregate = moduleNode
+        ? findAggregateInModule(moduleNode, aggregateName)
+        : undefined;
+      if (!aggregate) {
+        accept(
+          "error",
+          `Aggregate '${aggregateName}' not found in api '${apiNode.name}' (module '${moduleName}').`,
+          { node: inner, property: "member" },
+        );
+        continue;
+      }
+
+      // Validate the operation.
+      if (!isValidApiOperation(aggregate, op)) {
+        const allowed = listValidApiOperations(aggregate);
+        accept(
+          "error",
+          `Operation '${op}' is not declared on aggregate '${aggregateName}'.  Available: ${allowed.join(", ")}.`,
+          { node: ma, property: "member" },
+        );
+      }
+    }
+  }
+}
+
+/** Find an Aggregate by name across the contexts of a Module. */
+function findAggregateInModule(
+  mod: import("./generated/ast.js").Module,
+  name: string,
+): import("./generated/ast.js").Aggregate | undefined {
+  for (const ctx of mod.contexts ?? []) {
+    for (const am of ctx.members ?? []) {
+      if (am.$type === "Aggregate" && am.name === name) return am;
+    }
+  }
+  return undefined;
+}
+
+/** Standard CRUD operation names that the api auto-derives for
+ *  every aggregate, plus the aggregate's repository finds.
+ *  Repositories live at the BoundedContext level (peer to
+ *  aggregates), declared as `repository <Name> for <Aggregate>`,
+ *  so we walk the aggregate's container context to find ones
+ *  pointing at this aggregate. */
+function listValidApiOperations(
+  agg: import("./generated/ast.js").Aggregate,
+): string[] {
+  const ops = new Set<string>(["all", "byId", "create", "update", "delete"]);
+  const ctx = agg.$container;
+  if (ctx?.$type === "BoundedContext") {
+    for (const m of ctx.members ?? []) {
+      if (m.$type !== "Repository") continue;
+      if (m.aggregate?.ref !== agg) continue;
+      for (const f of m.finds ?? []) ops.add(f.name);
+    }
+  }
+  return [...ops].sort();
+}
+
+function isValidApiOperation(
+  agg: import("./generated/ast.js").Aggregate,
+  op: string,
+): boolean {
+  return listValidApiOperations(agg).includes(op);
 }
 
 // Map of PageProp $type names back to the source-side property name
