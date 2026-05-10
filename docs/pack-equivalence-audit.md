@@ -65,13 +65,14 @@ visually compare.
 
 ### `themes/_shared/` (genuinely DS-agnostic)
 
+Project-scaffold files only — pure non-JSX glue that has nothing to do
+with the React design system in use.  Field-row helpers were previously
+in this directory; they were reverted to per-pack because each one is a
+single line and the architectural cost of sharing exceeded the
+duplication savings.
+
 | Template | Why shared |
 |---|---|
-| `field-row-bool.hbs` | `<KeyValueRow><BoolValue>` — runtime helpers only |
-| `field-row-datetime.hbs` | `<KeyValueRow><DateTimeValue>` — runtime helpers only |
-| `field-row-id.hbs` | `<KeyValueRow><IdValue>` — runtime helpers only |
-| `field-row-number.hbs` | `<KeyValueRow><NumberValue>` — runtime helpers only |
-| `field-row-string.hbs` | `<KeyValueRow><span>{...}</span>` — runtime helpers + plain HTML |
 | `api-client.hbs` | Pure TS fetch wrapper, no JSX |
 | `api-config.hbs` | Pure TS, exports `API_BASE_URL` |
 | `dockerfile.hbs` | Multi-stage Node image, no design system content |
