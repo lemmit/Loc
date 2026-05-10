@@ -1,0 +1,10 @@
+{{#if hasTabs}}<Tabs defaultValue={{json defaultValue}}>
+{{indent}}<TabsList>
+{{innerIndent}}{{#each tabs}}<TabsTrigger value={{json this.value}}>{{{this.label}}}</TabsTrigger>{{#unless @last}}
+{{../innerIndent}}{{/unless}}{{/each}}
+{{indent}}</TabsList>
+{{indent}}{{#each tabs}}<TabsContent value={{json this.value}}>
+{{../innerIndent}}{{{this.bodyJsx}}}
+{{../indent}}</TabsContent>{{#unless @last}}
+{{../indent}}{{/unless}}{{/each}}
+{{closeIndent}}</Tabs>{{else}}<Tabs defaultValue="" />{{/if}}

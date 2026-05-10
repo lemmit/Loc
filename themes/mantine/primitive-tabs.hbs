@@ -1,0 +1,10 @@
+{{#if hasTabs}}<Tabs defaultValue={{json defaultValue}}>
+{{indent}}<Tabs.List>
+{{innerIndent}}{{#each tabs}}<Tabs.Tab value={{json this.value}}>{{{this.label}}}</Tabs.Tab>{{#unless @last}}
+{{../innerIndent}}{{/unless}}{{/each}}
+{{indent}}</Tabs.List>
+{{indent}}{{#each tabs}}<Tabs.Panel value={{json this.value}}>
+{{../innerIndent}}{{{this.bodyJsx}}}
+{{../indent}}</Tabs.Panel>{{#unless @last}}
+{{../indent}}{{/unless}}{{/each}}
+{{closeIndent}}</Tabs>{{else}}<Tabs defaultValue="" />{{/if}}

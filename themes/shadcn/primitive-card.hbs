@@ -1,0 +1,8 @@
+{{#if hasTitle}}{{#if hasContent}}<Card>
+{{indent}}<CardHeader><CardTitle>{{{titleText}}}</CardTitle></CardHeader>
+{{indent}}<CardContent>{{{contentJsx}}}</CardContent>
+{{closeIndent}}</Card>{{else}}<Card>
+{{indent}}<CardHeader><CardTitle>{{{titleText}}}</CardTitle></CardHeader>
+{{closeIndent}}</Card>{{/if}}{{else}}{{#if hasContent}}<Card>
+{{indent}}<CardContent>{{{contentJsx}}}</CardContent>
+{{closeIndent}}</Card>{{else}}<Card />{{/if}}{{/if}}

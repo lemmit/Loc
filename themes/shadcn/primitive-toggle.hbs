@@ -1,0 +1,1 @@
+{{#if hasBind}}<div className="flex items-center gap-2"><Switch checked={{expr bind}} onCheckedChange={(v) => {{setter}}(v)} /><Label>{{{labelText}}}</Label></div>{{else}}<div className="flex items-center gap-2"><Switch /><Label>{{{labelText}}}</Label></div>{{/if}}
