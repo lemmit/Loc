@@ -343,8 +343,21 @@ function lowerDeployable(
   // referenced ui exists, the platform supports a UI mount, and the
   // framework value is one of the v0-allowed alternatives.
   const uiName =
-    d.uiSugar?.ref?.ref?.name ?? d.uiBlock?.ref?.ref?.name ?? undefined;
+    d.uiSugar?.ref?.ref?.name
+    ?? d.uiCompose?.ref?.ref?.name
+    ?? d.uiBlock?.ref?.ref?.name
+    ?? undefined;
   const uiFramework = d.uiBlock?.framework ?? undefined;
+  // Slice 11.26 — explicit api composition.
+  const serves = (d.serves ?? [])
+    .map((r) => r.ref?.name ?? "")
+    .filter(Boolean);
+  const uiBindings = (d.uiCompose?.bindings ?? []).map(
+    (b): import("./loom-ir.js").UiParamBindingIR => ({
+      paramName: b.name,
+      sourceDeployableName: b.source?.ref?.name ?? "",
+    }),
+  );
   return {
     name: d.name,
     platform,
@@ -355,6 +368,8 @@ function lowerDeployable(
     design,
     uiName,
     uiFramework,
+    serves,
+    uiBindings,
   };
 }
 

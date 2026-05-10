@@ -97,18 +97,39 @@ Deployable:
         ('platform' ':' platform=Platform ','?)
         ('modules' ':' modules+=[Module:ID] (',' modules+=[Module:ID])* ','?)?
         ('targets' ':' targets=[Deployable:LooseName] ','?)?
+        // Slice 11.26 — explicit api composition.  Backend deployables
+        // declare which contracts they serve via `serves:`.  Frontend
+        // composition is per-ui-parameter via the `ui: WebApp { … }`
+        // compose-block (see UiComposeBinding below): each UI api
+        // parameter is bound by name to the backend deployable that
+        // supplies it.
+        ('serves' ':' serves+=[Api:ID] (',' serves+=[Api:ID])* ','?)?
         // UI binding — references a `ui { ... }` block at system scope.
-        // Two surface forms (sugar + full):
-        //   ui: WebApp                            // empty-block sugar; framework defaults
-        //   ui WebApp { framework: react }        // explicit framework override
-        // Both lower to the same `UiBinding` IR.  Validator (Slice 3) ensures
-        // the referenced ui exists, the deployable's platform supports a
-        // ui mount, and `framework` is one of the v0 allowed values.
-        (uiSugar=UiSugarBinding | uiBlock=UiBlockBinding)?
+        // Three surface forms:
+        //   ui: WebApp                            // sugar — no params
+        //   ui: WebApp { Sales: salesApi, ... }   // compose-block — per-param backend bindings
+        //   ui WebApp { framework: react }        // legacy block form, framework override
+        // Validator (Slice 3 + 11.26) ensures the referenced ui exists,
+        // the deployable's platform supports a UI mount, the framework
+        // value is one of the v0 allowed values, and every UI api
+        // parameter has a binding when the UI declares any.
+        (uiSugar=UiSugarBinding | uiCompose=UiComposeBinding | uiBlock=UiBlockBinding)?
         ('port' ':' port=INT ','?)?
         ('auth' ':' auth=AuthMode ','?)?
         ('design' ':' design=DesignPack ','?)?
     '}';
+
+// Slice 11.26 — frontend composition.  `ui: WebApp { Sales: salesApi
+// }` binds each UI api parameter (the `Sales` declared as `api Sales:
+// SalesApi` in the ui block) to the backend deployable that supplies
+// that contract.  Validator enforces that `salesApi.serves: SalesApi`.
+UiComposeBinding:
+    'ui' ':' ref=[Ui:ID] '{'
+        (bindings+=UiParamBinding (',' bindings+=UiParamBinding)* ','?)?
+    '}';
+
+UiParamBinding:
+    name=LooseName ':' source=[Deployable:LooseName];
 
 UiSugarBinding:
     'ui' ':' ref=[Ui:ID] ','?;

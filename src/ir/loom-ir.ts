@@ -658,6 +658,28 @@ export interface DeployableIR {
    *  Future LiveView / Blazor backends extend this enum without
    *  breaking the deployable IR. */
   uiFramework?: string;
+  /** Slice 11.26 — apis this backend deployable serves.  Each
+   *  entry references an `Api` declared at system scope.  Empty
+   *  for frontend deployables and for backends that haven't yet
+   *  migrated to the explicit composition syntax. */
+  serves: string[];
+  /** Slice 11.26 — UI api parameter bindings for frontend
+   *  deployables.  Each entry binds a UI parameter (declared as
+   *  `api <Name>: <Api>` in the ui block) to the backend
+   *  deployable that supplies it (which must `serves:` the
+   *  param's contract).  Empty for backend deployables and for
+   *  frontends whose UI declares no api parameters. */
+  uiBindings: UiParamBindingIR[];
+}
+
+/** A single UI-parameter binding on a frontend deployable.
+ *  Maps the UI parameter's local name to the backend deployable
+ *  that fills it. */
+export interface UiParamBindingIR {
+  /** Local UI parameter name (matches `api <name>: <Api>` in the ui block). */
+  paramName: string;
+  /** Name of the backend deployable that supplies the param's contract. */
+  sourceDeployableName: string;
 }
 
 // ---------------------------------------------------------------------------
