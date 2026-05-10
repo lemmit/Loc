@@ -366,6 +366,13 @@ export interface SystemIR {
    *  the system declares no `ui { ... }` blocks.  Order preserves
    *  source order (matters for stable scaffold expansion in Slice 4). */
   uis: UiIR[];
+  /** API declarations at system scope.  Each is a contract derived
+   *  from a module's domain — its aggregates, repositories,
+   *  workflows, views become the api's exposed operations.  UIs
+   *  reference apis via their `api X: ApiName` parameters; backend
+   *  deployables `serves:` a named api; frontend deployables
+   *  `consumes:` an api from a named target. */
+  apis: ApiIR[];
 }
 
 /** System-level `theme { ... }` block.  Tokens are semantic so the
@@ -437,6 +444,29 @@ export interface UiIR {
   /** Optional ui-level menu block.  When undefined the sidebar is
    *  derived from each page's `menuMeta` (see spec §11). */
   menu?: MenuBlockIR;
+  /** UI api parameters.  Each entry maps a local handle name (used in
+   *  page bodies as `<handle>.<aggregate>.<op>`) to an api the system
+   *  declares.  Composition is supplied by the deployable that
+   *  deploys this UI. */
+  apiParams: UiApiParamIR[];
+}
+
+/** API declaration — first-class contract derived from a module's
+ *  domain.  Auto-derives the full surface (aggregate CRUD +
+ *  repository finds + workflows + views).  Future: customization
+ *  (hide, rename, expose subset, version). */
+export interface ApiIR {
+  name: string;
+  /** Source module the api derives its surface from. */
+  sourceModule: string;
+}
+
+/** UI api parameter — local handle + which api it expects. */
+export interface UiApiParamIR {
+  /** Local name used in page bodies (e.g. `Sales` in `Sales.Customer.all`). */
+  name: string;
+  /** Name of the system-scope `Api` this parameter expects. */
+  apiName: string;
 }
 
 /** A page declaration: route + parameters + reactive state + body. */
