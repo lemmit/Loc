@@ -812,11 +812,33 @@ function emitExpr(expr: ExprIR, ctx: WalkContext): string {
         ctx.usedParams.add(expr.name);
         return expr.name;
       }
+      // Slice 11.23 — refs to `let` bindings are in scope as JS
+      // const declarations earlier in the same lambda body.  The IR
+      // already tags these with `refKind: "let"`; emit the bare
+      // name so the generated code references the local.
+      if (expr.refKind === "let") return expr.name;
       return `/* unresolved: ${expr.name} */ undefined`;
     case "binary":
       return `(${emitExpr(expr.left, ctx)} ${expr.op} ${emitExpr(expr.right, ctx)})`;
     case "unary":
       return `(${expr.op}${emitExpr(expr.operand, ctx)})`;
+    case "call": {
+      // Slice 11.23 — bare function call as a JS expression.  The
+      // callee is emitted verbatim — the generated code expects the
+      // user to import / declare `<name>` somewhere in their app
+      // shell.  Powers patterns like `let n = inc(count)` and the
+      // statement form `Button("…", onClick: e => { saveOrder() })`.
+      const args = expr.args.map((a) => emitExpr(a, ctx)).join(", ");
+      return `${expr.name}(${args})`;
+    }
+    case "method-call": {
+      // Slice 11.23 — `Orders.create(draft)` etc.  Receiver is
+      // recursively emitted, then `.member(args)` appended.  Same
+      // caveat as plain `call`: the callee is emitted verbatim.
+      const receiver = emitExpr(expr.receiver, ctx);
+      const args = expr.args.map((a) => emitExpr(a, ctx)).join(", ");
+      return `${receiver}.${expr.member}(${args})`;
+    }
     default:
       return `/* unsupported expr: ${expr.kind} */ undefined`;
   }
@@ -860,6 +882,15 @@ function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
       return `const ${stmt.name} = ${emitExpr(stmt.expr, ctx)};`;
     case "expression":
       return `${emitExpr(stmt.expr, ctx)};`;
+    case "call": {
+      // Slice 11.23 — bare function-call statement (the
+      // statement-grammar `name(args)` form).  Walker emits as a
+      // plain `name(args);` line; the generated code expects the
+      // user to import / declare `<name>` somewhere in their app
+      // shell.
+      const args = stmt.args.map((a) => emitExpr(a, ctx)).join(", ");
+      return `${stmt.name}(${args});`;
+    }
     default:
       return `/* unsupported stmt: ${stmt.kind} */`;
   }
