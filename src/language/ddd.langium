@@ -452,7 +452,8 @@ LooseName returns string:
     | 'ui' | 'page' | 'component' | 'scaffold' | 'state' | 'menu'
     | 'section' | 'link' | 'route' | 'title' | 'body' | 'framework' | 'static'
     | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
-    | 'design' | 'targets';
+    | 'design' | 'targets'
+    | 'bind';
 
 // ---------------------------------------------------------------------------
 // Type references
