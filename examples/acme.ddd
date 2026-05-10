@@ -195,13 +195,38 @@ system Acme {
         }
     }
 
+    // ──────────────────────────────────────────────────────────────
+    // Layered architecture (slices 11.24–11.27).
+    //
+    // - `api X from M` declares a contract derived from a module.
+    // - `storage X { type: T }` declares a typed storage instance
+    //   reusable across deployables.
+    // - `ui WebApp { api X: Y }` declares the UI's api dependencies.
+    // - Deployables compose: backends `serves:` contracts + bind
+    //   modules to storages; frontends bind UI params to backends.
+    //
+    // The legacy `scaffold modules: Catalog, Sales, CustomerMgmt`
+    // below in `ui WebApp` keeps emitting via the archetype path —
+    // these declarations are the explicit-form scaffolding that
+    // future `page` declarations on the same UI can use directly
+    // (e.g. `body: Sales.Customer.all.data`).
+    // ──────────────────────────────────────────────────────────────
 
+    api CatalogApi      from Catalog
+    api SalesApi        from Sales
+    api CustomerMgmtApi from CustomerMgmt
+
+    storage primarySql { type: postgres }
 
     // Public API on .NET — hosts every bounded context behind one EF
     // DbContext, exposes the full HTTP surface for the platform.
     deployable api {
         platform: dotnet
-        modules: Catalog, Sales, CustomerMgmt
+        modules:
+            Catalog      { primary: primarySql },
+            Sales        { primary: primarySql },
+            CustomerMgmt { primary: primarySql }
+        serves: CatalogApi, SalesApi, CustomerMgmtApi
         port: 8080
     }
 
@@ -209,7 +234,10 @@ system Acme {
     // the v21 wire-validation showcase across both backends).
     deployable catalogWeb {
         platform: hono
-        modules: Catalog, CustomerMgmt
+        modules:
+            Catalog      { primary: primarySql },
+            CustomerMgmt { primary: primarySql }
+        serves: CatalogApi, CustomerMgmtApi
         port: 3000
     }
 
@@ -219,7 +247,10 @@ system Acme {
     // platforms' route emission.
     deployable catalogApi {
         platform: dotnet
-        modules: Catalog, CustomerMgmt
+        modules:
+            Catalog      { primary: primarySql },
+            CustomerMgmt { primary: primarySql }
+        serves: CatalogApi, CustomerMgmtApi
         port: 8081
     }
 
@@ -228,7 +259,16 @@ system Acme {
     // (master-detail, wizards, dashboards) are added as further `page`
     // declarations inside this block.  See examples/sales-ui.ddd for
     // the rich form.
+    //
+    // The `api X: Y` parameters declare the UI's api dependencies.
+    // Scaffold-synthesised pages (List/Detail/Form archetypes) emit
+    // through the legacy path and don't reference these params yet;
+    // future explicit `page` declarations on the same UI can use
+    // them directly (e.g. `body: Sales.Customer.all.data`).
     ui WebApp {
+        api Catalog:      CatalogApi
+        api Sales:        SalesApi
+        api CustomerMgmt: CustomerMgmtApi
         scaffold modules: Catalog, Sales, CustomerMgmt
     }
 
@@ -239,7 +279,7 @@ system Acme {
     deployable webApp {
         platform: static
         targets: api
-        ui: WebApp
+        ui: WebApp { Catalog: api, Sales: api, CustomerMgmt: api }
         port: 3001
     }
 
