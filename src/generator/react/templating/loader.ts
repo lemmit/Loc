@@ -186,6 +186,20 @@ export function compilePack(
   manifest: PackManifest,
   sources: Record<string, string>,
   pathFor: (fileName: string) => string,
+  /** Cross-pack templates that compose primitives via partials and
+   *  apply to every loaded pack — `themes/_shared/<name>.hbs` in the
+   *  Node loader, an `import.meta.glob` of the same in the browser
+   *  loader.  Registered as Handlebars partials BEFORE pack
+   *  templates so a pack can override a shared template by emitting
+   *  one with the same logical name.  Empty when no _shared/
+   *  directory exists; backward-compatible with packs that haven't
+   *  opted in.
+   *
+   *  Pack authors writing only primitives benefit: the shared
+   *  high-level templates (page-list, page-detail, op-button, …)
+   *  invoke `{{> primitive-button}}`/`{{> primitive-card}}` etc.
+   *  and pick up whatever the loaded pack provides. */
+  sharedSources: Record<string, string> = {},
 ): LoadedPack {
   registerHelpersOnce();
   registerPackHelpers(manifest);
@@ -194,6 +208,16 @@ export function compilePack(
       `loader: pack at ${rootDir} has no \`emits\` map in pack.json.  Add { emits: { "page-list": "page-list.hbs", ... } }.`,
     );
   }
+  // Register shared partials FIRST so a pack template with the same
+  // logical name overrides them on the next pass below.  Shared
+  // templates compose pack primitives via `{{> primitive-X}}` — the
+  // partial dispatch picks up whichever pack is currently loaded,
+  // so the same shared file produces Mantine output under one pack
+  // and shadcn output under another.
+  for (const [name, source] of Object.entries(sharedSources)) {
+    Handlebars.registerPartial(name, source);
+  }
+
   const templates = new Map<string, CompiledTemplate>();
   for (const [logicalName, fileName] of Object.entries(manifest.emits)) {
     const source = sources[logicalName];
@@ -230,11 +254,25 @@ export function compilePack(
     // already imports the relevant components.
     Handlebars.registerPartial(logicalName, source);
   }
+  // Shared templates the pack hasn't overridden also become
+  // renderable via `pack.render(name, ctx)` — orchestration code
+  // can pick a shared template (page-list, op-button, …) by name
+  // without checking which pack ships the override and which
+  // inherits the shared default.  Pack-specific templates above
+  // already won the templates.set race when names collide.
+  for (const [name, source] of Object.entries(sharedSources)) {
+    if (templates.has(name)) continue;
+    const fn = Handlebars.compile(source, {
+      strict: true,
+      noEscape: false,
+    });
+    templates.set(name, { fn, filePath: `<shared>/${name}.hbs` });
+  }
   const render = (name: string, context: unknown): string => {
     const t = templates.get(name);
     if (!t) {
       throw new Error(
-        `loader: pack ${manifest.name}: no template registered for "${name}".  Add it to pack.json's emits map and create the .hbs file.`,
+        `loader: pack ${manifest.name}: no template registered for "${name}".  Add it to pack.json's emits map (or place a shared override in themes/_shared/) and create the .hbs file.`,
       );
     }
     return t.fn(context);
