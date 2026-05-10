@@ -22,9 +22,9 @@ import type { Diagnostic } from "./lsp/protocol";
 import { examples, defaultExample, type LoomExample } from "./examples";
 import { LoomBuildClient } from "./build/client";
 import type { GenerateResult, VirtualFile } from "./build/protocol";
-import { IdbVfs, requestPersistentStorage } from "./vfs/idb-vfs";
 import { PackPicker } from "./workspace/PackPicker";
 import { WorkspaceTree } from "./workspace/WorkspaceTree";
+import { useWorkspace } from "./workspace/use-workspace";
 import { LoomBundleClient } from "./bundle/client";
 import { LoomRuntimeClient } from "./runtime/client";
 import { FileTree } from "./preview/FileTree";
@@ -144,37 +144,30 @@ export default function App(): JSX.Element {
     ];
   }, [hashSourceOnMount]);
 
-  // Workspace persistence (IDB-backed VFS).  Boot order:
-  //   1. URL hash present  -> use it (sharing wins, explicit intent)
-  //   2. IDB has /workspace/main.ddd -> append a "Workspace
-  //      (autosaved)" example and auto-select it on first render
-  //      (user-picked example switches override)
-  //   3. Default example
-  // The VFS open is async; until it resolves we render with the
-  // synchronously-derived examplesList, then re-render with the
-  // augmented list once IDB hydrates.  The brief flicker on cold
-  // boot is preferable to a loading screen.
-  const workspaceVfsRef = useRef<IdbVfs | null>(null);
-  const [workspaceSource, setWorkspaceSource] = useState<string | null>(null);
-  const [vfsLoaded, setVfsLoaded] = useState(false);
+  // Workspace persistence (IDB-backed VFS) — opening, hydration,
+  // and the persisted-source lookup all live in `useWorkspace`.
+  // Boot order spelt out in `WorkspaceState` JSDoc; the augmented
+  // examples list + auto-switch effect below realise the
+  // "Workspace (autosaved)" UX on top of it.
+  const workspace = useWorkspace();
   const [buildClientReady, setBuildClientReady] = useState(false);
   const userPickedExampleRef = useRef(false);
 
   const augmentedExamplesList = useMemo<LoomExample[]>(() => {
-    if (workspaceSource === null || hashSourceOnMount !== null) {
+    if (workspace.persistedSource === null || hashSourceOnMount !== null) {
       return examplesList;
     }
     return [
       {
         id: "workspace",
         label: "Workspace (autosaved)",
-        source: workspaceSource,
+        source: workspace.persistedSource,
         blurb:
           "Restored from this browser's autosave.  Edits flow back to local IndexedDB so reloads keep your work.",
       },
       ...examplesList,
     ];
-  }, [examplesList, workspaceSource, hashSourceOnMount]);
+  }, [examplesList, workspace.persistedSource, hashSourceOnMount]);
 
   const [exampleId, setExampleId] = useState(() =>
     hashSourceOnMount !== null ? "shared" : defaultExample.id,
@@ -186,7 +179,7 @@ export default function App(): JSX.Element {
   // re-render after the initial discovery.
   useEffect(() => {
     if (
-      workspaceSource !== null &&
+      workspace.persistedSource !== null &&
       !userPickedExampleRef.current &&
       exampleId === defaultExample.id
     ) {
@@ -196,7 +189,7 @@ export default function App(): JSX.Element {
     // when the persisted source first lands, not on every example
     // switch the user makes after.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceSource]);
+  }, [workspace.persistedSource]);
 
   const initialSource = useMemo(
     () =>
@@ -242,36 +235,6 @@ export default function App(): JSX.Element {
     lspClientRef.current = new LoomLspClient();
   }
 
-  // Open the IDB-backed workspace VFS once at mount.  Hydration
-  // populates `workspaceSource` which the augmentedExamplesList
-  // useMemo turns into a "Workspace (autosaved)" entry.  Failures
-  // are non-fatal: the VFS falls back to in-memory only and
-  // workspaceSource stays null, so the playground behaves like
-  // pre-Phase-3.
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const vfs = await IdbVfs.open();
-        if (cancelled) return;
-        workspaceVfsRef.current = vfs;
-        // Best-effort persistence request — browsers may evict IDB
-        // under storage pressure otherwise.  Fire-and-forget; the
-        // grant prompt (if any) is the user's call.
-        void requestPersistentStorage();
-        const persisted = vfs.read("/workspace/main.ddd");
-        if (persisted) setWorkspaceSource(persisted);
-        setVfsLoaded(true);
-      } catch (err) {
-        console.warn("workspace VFS unavailable:", err);
-        if (!cancelled) setVfsLoaded(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   useEffect(() => {
     const build = new LoomBuildClient();
     const bundleClient = new LoomBundleClient();
@@ -309,8 +272,8 @@ export default function App(): JSX.Element {
   // resident in IDB but invisible to the worker, so generation
   // against `design: "./design/<pack>"` would fail.
   useEffect(() => {
-    if (!vfsLoaded || !buildClientReady) return;
-    const vfs = workspaceVfsRef.current;
+    if (!workspace.loaded || !buildClientReady) return;
+    const vfs = workspace.vfs;
     const client = buildClientRef.current;
     if (!vfs || !client) return;
     const designPaths = vfs.list("/workspace/design/");
@@ -320,7 +283,7 @@ export default function App(): JSX.Element {
       return content != null ? [{ path, content }] : [];
     });
     void client.vfsWrite(entries);
-  }, [vfsLoaded, buildClientReady]);
+  }, [workspace.loaded, workspace.vfs, buildClientReady]);
 
   // Reset the whole pipeline + UI state when the user picks a
   // different example.  The reducer's RESET kills generate/bundle/
@@ -625,7 +588,7 @@ export default function App(): JSX.Element {
               {copied ? "✓ Copied" : "Share link"}
             </Button>
             <PackPicker
-              workspaceVfs={workspaceVfsRef.current}
+              workspaceVfs={workspace.vfs}
               buildClient={buildClientRef.current}
               onImported={() => {
                 // A pre-existing `design: "./design/X"` in the
@@ -641,7 +604,7 @@ export default function App(): JSX.Element {
               }}
             />
             <WorkspaceTree
-              workspaceVfs={workspaceVfsRef.current}
+              workspaceVfs={workspace.vfs}
               buildClient={buildClientRef.current}
             />
           </Group>
@@ -703,7 +666,7 @@ export default function App(): JSX.Element {
                   // still loading — the ref is null then and we
                   // skip silently; persistence resumes on the
                   // next keystroke after IDB resolves.
-                  workspaceVfsRef.current?.write(
+                  workspace.vfs?.write(
                     "/workspace/main.ddd",
                     text,
                   );
