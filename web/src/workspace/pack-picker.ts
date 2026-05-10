@@ -36,28 +36,32 @@ export function supportsDirectoryPicker(): boolean {
   return typeof window !== "undefined" && "showDirectoryPicker" in window;
 }
 
+/** Minimal structural shape of `FileSystemFileHandle` we depend on.
+ *  Lets the picker work without a hard dep on the (still-experimental)
+ *  full File System Access API typings.  Mirrors what Chrome ships
+ *  today; widely available since Chrome 86. */
+interface FSFileHandle {
+  kind: "file";
+  getFile(): Promise<File>;
+}
+
+interface FSDirHandle {
+  kind?: "directory";
+  name: string;
+  entries(): AsyncIterable<[string, FSFileHandle | FSDirHandle]>;
+}
+
 /** Pick a directory using the File System Access API.  Returns null
  *  when the user cancels (the API throws `AbortError` for cancel,
  *  which we catch and surface as null). */
 export async function pickPackViaFSAccess(): Promise<PickedPack | null> {
-  type DirHandle = {
-    name: string;
-    entries(): AsyncIterable<[string, FileHandleAny]>;
-  };
-  type FileHandle = {
-    kind: "file";
-    getFile(): Promise<File>;
-  };
-  type DirEntry = { kind: "directory" } & DirHandle;
-  type FileHandleAny = FileHandle | DirEntry;
-
   const w = window as unknown as {
-    showDirectoryPicker?: () => Promise<DirHandle>;
+    showDirectoryPicker?: () => Promise<FSDirHandle>;
   };
   if (!w.showDirectoryPicker) {
     throw new Error("showDirectoryPicker not available — use the fallback picker.");
   }
-  let root: DirHandle;
+  let root: FSDirHandle;
   try {
     root = await w.showDirectoryPicker();
   } catch (err) {
@@ -67,20 +71,20 @@ export async function pickPackViaFSAccess(): Promise<PickedPack | null> {
   const files: Array<[string, string]> = [];
   await walkFsAccess(root, "", files);
   return { name: root.name, files };
+}
 
-  async function walkFsAccess(
-    dir: DirHandle,
-    prefix: string,
-    out: Array<[string, string]>,
-  ): Promise<void> {
-    for await (const [name, handle] of dir.entries()) {
-      const rel = prefix ? `${prefix}/${name}` : name;
-      if (handle.kind === "file") {
-        const file = await handle.getFile();
-        out.push([rel, await file.text()]);
-      } else {
-        await walkFsAccess(handle, rel, out);
-      }
+async function walkFsAccess(
+  dir: FSDirHandle,
+  prefix: string,
+  out: Array<[string, string]>,
+): Promise<void> {
+  for await (const [name, handle] of dir.entries()) {
+    const rel = prefix ? `${prefix}/${name}` : name;
+    if (handle.kind === "file") {
+      const file = await (handle as FSFileHandle).getFile();
+      out.push([rel, await file.text()]);
+    } else {
+      await walkFsAccess(handle as FSDirHandle, rel, out);
     }
   }
 }

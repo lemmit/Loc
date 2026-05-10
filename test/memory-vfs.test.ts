@@ -63,18 +63,25 @@ describe("MemoryVfs: list", () => {
   vfs.write("/themes/shadcn/pack.json", "{}");
   vfs.write("/workspace/main.ddd", "system X {}");
 
-  it("lists entries under a directory prefix", () => {
+  it("lists entries under a directory prefix (trailing slash optional)", () => {
     expect(vfs.list("/themes/mantine/")).toEqual([
+      "/themes/mantine/pack.json",
+      "/themes/mantine/page-list.hbs",
+    ]);
+    expect(vfs.list("/themes/mantine")).toEqual([
       "/themes/mantine/pack.json",
       "/themes/mantine/page-list.hbs",
     ]);
   });
 
-  it("lists entries under a non-directory prefix (literal startsWith)", () => {
-    expect(vfs.list("/themes/man")).toEqual([
-      "/themes/mantine/pack.json",
-      "/themes/mantine/page-list.hbs",
-    ]);
+  it("does NOT do literal-startsWith — `/themes/man` is a prefix, not a directory", () => {
+    // Anti-regression: an earlier draft accepted `list("/themes/man")`
+    // as a glob-prefix match for `/themes/mantine/...`.  That made
+    // `list("/workspace/main")` return both `main.ddd` and
+    // `maintenance.ddd`, which is surprising.  The contract is now
+    // strictly directory-boundary; callers that want a glob filter
+    // do it themselves.
+    expect(vfs.list("/themes/man")).toEqual([]);
   });
 
   it("returns the whole VFS when prefix is `/`", () => {

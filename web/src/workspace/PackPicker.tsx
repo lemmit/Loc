@@ -12,7 +12,7 @@
 // against `design: "./design/<packname>"` works on the next run.
 // ---------------------------------------------------------------------------
 
-import { Button, Group } from "@mantine/core";
+import { Alert, Button, Group } from "@mantine/core";
 import { useRef, useState } from "react";
 import {
   packToVfsEntries,
@@ -50,6 +50,7 @@ export function PackPicker({
   onError,
 }: Props): JSX.Element {
   const [busy, setBusy] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const fallbackInputRef = useRef<HTMLInputElement | null>(null);
 
   async function importPack(pack: PickedPack): Promise<void> {
@@ -57,10 +58,15 @@ export function PackPicker({
     const entries = packToVfsEntries(pack);
     // Persist to workspace VFS first so a worker crash mid-flight
     // doesn't lose the import — the next reload re-replays it.
+    // Force-flush after the writes: import is a deliberate user
+    // action, not an auto-save burst, so the 250ms IDB debounce
+    // shouldn't gate persistence.  If the user immediately reloads
+    // after picking, the import is already on disk.
     if (workspaceVfs) {
       for (const { path, content } of entries) {
         workspaceVfs.write(path, content);
       }
+      await workspaceVfs.flush();
     }
     // Push to build worker so generation resolves the pack on the
     // very next run.  Awaiting the ACK preserves write-then-generate
@@ -74,6 +80,7 @@ export function PackPicker({
   async function handleClick(): Promise<void> {
     if (busy) return;
     setBusy(true);
+    setErrorMessage(null);
     try {
       if (supportsDirectoryPicker()) {
         const pack = await pickPackViaFSAccess();
@@ -84,7 +91,9 @@ export function PackPicker({
         fallbackInputRef.current?.click();
       }
     } catch (err) {
-      onError?.(err instanceof Error ? err : new Error(String(err)));
+      const e = err instanceof Error ? err : new Error(String(err));
+      setErrorMessage(e.message);
+      onError?.(e);
     } finally {
       setBusy(false);
     }
@@ -95,11 +104,14 @@ export function PackPicker({
   ): Promise<void> {
     if (busy) return;
     setBusy(true);
+    setErrorMessage(null);
     try {
       const pack = await pickPackFromFileList(ev.target.files);
       if (pack) await importPack(pack);
     } catch (err) {
-      onError?.(err instanceof Error ? err : new Error(String(err)));
+      const e = err instanceof Error ? err : new Error(String(err));
+      setErrorMessage(e.message);
+      onError?.(e);
     } finally {
       setBusy(false);
       // Reset so picking the same folder twice fires onChange.
@@ -118,6 +130,19 @@ export function PackPicker({
       >
         Import design pack
       </Button>
+      {errorMessage && (
+        <Alert
+          color="red"
+          variant="light"
+          py={4}
+          px="xs"
+          data-testid="pack-import-error"
+          withCloseButton
+          onClose={() => setErrorMessage(null)}
+        >
+          {errorMessage}
+        </Alert>
+      )}
       {/* Fallback hidden input — used on browsers without
           showDirectoryPicker.  Both `webkitdirectory` and
           `directory` attributes set so Safari/Firefox accept it. */}
