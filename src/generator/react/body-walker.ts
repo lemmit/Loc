@@ -66,7 +66,9 @@ export type MantineImport =
   | "Tabs"
   | "Center"
   | "TextInput"
+  | "NumberInput"
   | "Switch"
+  | "Loader"
   | "Anchor"
   | "Image"
   | "Avatar"
@@ -124,7 +126,9 @@ const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
   "Toolbar",
   "Empty",
   "Field",
+  "NumberField",
   "Toggle",
+  "Loader",
   "Anchor",
   "Image",
   "Avatar",
@@ -284,8 +288,12 @@ function emitComponent(
       return emitEmpty(call, ctx, depth);
     case "Field":
       return emitField(call, ctx, depth);
+    case "NumberField":
+      return emitNumberField(call, ctx, depth);
     case "Toggle":
       return emitToggle(call, ctx, depth);
+    case "Loader":
+      return emitLoader(call, ctx, depth);
     case "Anchor":
       return emitAnchor(call, ctx, depth);
     case "Image":
@@ -513,6 +521,45 @@ function emitToggle(
   }
   const setter = "set" + bind[0]!.toUpperCase() + bind.slice(1);
   return `<Switch label=${unwrapAsAttr(label)} checked={${bind}} onChange={(e) => ${setter}(e.currentTarget.checked)} />`;
+}
+
+function emitNumberField(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  // NumberField("Label", bind: <int|decimal state field>) — Mantine
+  // NumberInput.  onChange receives `string | number`; setter is
+  // wrapped to coerce to a number with a 0 fallback so the binding
+  // stays type-safe.  Without `bind:`, falls through to a label-
+  // only stub.
+  ctx.imports.add("NumberInput");
+  void depth;
+  const label = firstPositionalContent(call, ctx) ?? '""';
+  const bind = stateBindArg(call, "bind", ctx);
+  if (bind === undefined) {
+    return `<NumberInput label=${unwrapAsAttr(label)} />`;
+  }
+  const setter = "set" + bind[0]!.toUpperCase() + bind.slice(1);
+  return `<NumberInput label=${unwrapAsAttr(label)} value={${bind}} onChange={(v) => ${setter}(typeof v === "number" ? v : 0)} />`;
+}
+
+function emitLoader(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  // Loader() — Mantine spinner.  Accepts an optional `size:` named
+  // arg (string literal: "xs" / "sm" / "md" / "lg" / "xl" — Mantine
+  // size scale).
+  void call;
+  void depth;
+  ctx.imports.add("Loader");
+  const size = stringNamed(call, "size");
+  if (size !== undefined) {
+    return `<Loader size=${JSON.stringify(size)} />`;
+  }
+  return `<Loader />`;
 }
 
 function emitAnchor(
