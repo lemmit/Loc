@@ -106,6 +106,11 @@ export interface WalkResult {
    *  `<WelcomeBox name="Alice" />`).  The shell emits per-name
    *  imports from `@/components/<Name>`. */
   usedUserComponents: Set<string>;
+  /** Slice 11.19 — true when the walked tree referenced `Slot()`
+   *  (the children-prop placeholder).  Component shells with this
+   *  set add a `children?: React.ReactNode` prop to their typed
+   *  Props interface. */
+  usesChildren: boolean;
 }
 
 /** Component names the walker recognises.  Used by the page
@@ -123,6 +128,7 @@ const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
   "Anchor",
   "Image",
   "Avatar",
+  "Slot",
   "Heading",
   "Text",
   "Button",
@@ -184,6 +190,7 @@ export function walkBodyToTsx(
     usesRouterLink: false,
     userComponents,
     usedUserComponents: new Set(),
+    usesChildren: false,
   };
   const tsx = walk(body, ctx, 0);
   return {
@@ -194,6 +201,7 @@ export function walkBodyToTsx(
     usesState: ctx.usesState,
     usesRouterLink: ctx.usesRouterLink,
     usedUserComponents: ctx.usedUserComponents,
+    usesChildren: ctx.usesChildren,
   };
 }
 
@@ -207,6 +215,7 @@ interface WalkContext {
   usesRouterLink: boolean;
   userComponents: ReadonlyMap<string, readonly ParamIR[]>;
   usedUserComponents: Set<string>;
+  usesChildren: boolean;
 }
 
 function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
@@ -283,6 +292,8 @@ function emitComponent(
       return emitImage(call, ctx, depth);
     case "Avatar":
       return emitAvatar(call, ctx, depth);
+    case "Slot":
+      return emitSlot(call, ctx, depth);
     case "Heading":
       return emitHeading(call, ctx, depth);
     case "Text":
@@ -856,6 +867,22 @@ function emitBadge(
   return `<Badge>${unwrapTextLiteral(label)}</Badge>`;
 }
 
+function emitSlot(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  // Slice 11.19 — children-prop placeholder.  `Slot()` inside a
+  // component's body emits `{children}`, the React idiom for
+  // rendering whatever JSX the parent passed in.  Marks usesChildren
+  // on the context so the shell adds `children?: React.ReactNode`
+  // to the typed Props interface.
+  void call;
+  void depth;
+  ctx.usesChildren = true;
+  return `{children}`;
+}
+
 function emitDivider(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,
@@ -882,22 +909,61 @@ function emitUserComponent(
   // position; named args use their `name:` prefix verbatim.  String
   // literals render as quoted attrs (`name="Alice"`); refs / binary
   // ops / non-string literals emit through emitExpr inside `{...}`.
-  void depth;
+  //
+  // Slice 11.19 — positional args BEYOND the component's declared
+  // param count are JSX children — wrapped between the open and
+  // close tags so the component receives them via the `children`
+  // prop.  Named args still go to props regardless of position.
   const params = ctx.userComponents.get(call.name) ?? [];
   ctx.usedUserComponents.add(call.name);
   const argNames = call.argNames ?? [];
+  // Slice 11.19 — collect names already filled by named args so
+  // positional args don't clobber them when looking up the next
+  // free param slot.
+  const filledByName = new Set<string>();
+  for (let i = 0; i < argNames.length; i++) {
+    const n = argNames[i];
+    if (n !== undefined) filledByName.add(n);
+  }
   const attrs: string[] = [];
-  let positionalIndex = 0;
+  const childrenExprs: ExprIR[] = [];
+  let nextParamCursor = 0;
   for (let i = 0; i < call.args.length; i++) {
     const arg = call.args[i]!;
-    const name = argNames[i] ?? params[positionalIndex]?.name;
-    if (argNames[i] === undefined) positionalIndex += 1;
-    if (!name) continue; // extra positional past param list — drop quietly
-    attrs.push(`${name}=${attrValue(arg, ctx)}`);
+    if (argNames[i] !== undefined) {
+      attrs.push(`${argNames[i]}=${attrValue(arg, ctx)}`);
+      continue;
+    }
+    // Advance the cursor past any params that were already filled
+    // via a named arg.
+    while (
+      nextParamCursor < params.length &&
+      filledByName.has(params[nextParamCursor]!.name)
+    ) {
+      nextParamCursor += 1;
+    }
+    const param = params[nextParamCursor];
+    if (param) {
+      nextParamCursor += 1;
+      attrs.push(`${param.name}=${attrValue(arg, ctx)}`);
+    } else {
+      // No more declared params — extra positional arg becomes a
+      // JSX child.
+      childrenExprs.push(arg);
+    }
   }
-  return attrs.length > 0
-    ? `<${call.name} ${attrs.join(" ")} />`
-    : `<${call.name} />`;
+  const open = attrs.length > 0
+    ? `<${call.name} ${attrs.join(" ")}`
+    : `<${call.name}`;
+  if (childrenExprs.length === 0) {
+    return `${open} />`;
+  }
+  const indent = "  ".repeat(depth + 1);
+  const closeIndent = "  ".repeat(depth);
+  const childTsx = childrenExprs
+    .map((c) => walk(c, ctx, depth + 1))
+    .join(`\n${indent}`);
+  return `${open}>\n${indent}${childTsx}\n${closeIndent}</${call.name}>`;
 }
 
 /** Slice 11.18 — render an ExprIR as a JSX attribute value.
@@ -1091,6 +1157,7 @@ export function renderCustomLayoutPage(
       usesRouterLink: false,
       userComponents: new Map(),
       usedUserComponents: new Set(),
+      usesChildren: false,
     };
     const titleExpr = emitExpr(title, titleCtx);
     // emitExpr may have added to usedParams; reflect title's state
@@ -1185,6 +1252,7 @@ export function renderUserComponentFile(
     usesRouterLink,
     usesNavigate,
     usedUserComponents,
+    usesChildren,
   } = walkBodyToTsx(body, paramNames, stateNames, userComponents);
   const mantineImport = imports.size > 0
     ? `import { ${[...imports].sort().join(", ")} } from "@mantine/core";\n`
@@ -1200,19 +1268,29 @@ export function renderUserComponentFile(
   const reactImport = usesState
     ? `import { useState } from "react";\n`
     : "";
+  // Slice 11.19 — components that reference Slot() get a
+  // `children` prop on top of their declared params.  React's
+  // type is imported lazily.
+  const reactTypesImport = usesChildren
+    ? `import type { ReactNode } from "react";\n`
+    : "";
   const userComponentImports = [...usedUserComponents]
     .sort()
     .map((n) => `import ${n} from "./${n}";\n`)
     .join("");
-  // Props interface — every declared param becomes a typed field.
-  const propsBody = params.length > 0
-    ? params.map((p) => `  ${p.name}: ${typeRefAsTsString(p)};`).join("\n")
+  // Props interface — every declared param becomes a typed field;
+  // Slot()-using components also get a `children` field.
+  const propLines = params.map(
+    (p) => `  ${p.name}: ${typeRefAsTsString(p)};`,
+  );
+  if (usesChildren) propLines.push(`  children?: ReactNode;`);
+  const propsType = propLines.length > 0
+    ? `\nexport interface ${name}Props {\n${propLines.join("\n")}\n}\n`
     : "";
-  const propsType = params.length > 0
-    ? `\nexport interface ${name}Props {\n${propsBody}\n}\n`
-    : "";
-  const propDestructure = params.length > 0
-    ? `{ ${params.map((p) => p.name).join(", ")} }: ${name}Props`
+  const destructureNames = params.map((p) => p.name);
+  if (usesChildren) destructureNames.push("children");
+  const propDestructure = destructureNames.length > 0
+    ? `{ ${destructureNames.join(", ")} }: ${name}Props`
     : "";
   const navigateLine = usesNavigate
     ? `  const navigate = useNavigate();\n`
@@ -1226,7 +1304,7 @@ export function renderUserComponentFile(
   // them with a `void` block when none made it into `tsx`.
   void usedParams;
   return `// Auto-generated.  Do not edit by hand.
-${reactImport}${reactRouterImport}${mantineImport}${userComponentImports}${propsType}
+${reactImport}${reactTypesImport}${reactRouterImport}${mantineImport}${userComponentImports}${propsType}
 export default function ${name}(${propDestructure}) {
 ${navigateLine}${stateLines}  return (
     ${indentJsx(tsx, "    ")}
@@ -1288,6 +1366,7 @@ function renderInitExpr(expr: ExprIR): string {
     usesRouterLink: false,
     userComponents: new Map(),
     usedUserComponents: new Set(),
+    usesChildren: false,
   };
   return emitExpr(expr, dummy);
 }
