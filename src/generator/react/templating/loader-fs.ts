@@ -57,9 +57,30 @@ export function resolvePackDir(ui: string, referenceDir?: string): string {
   return path.resolve(referenceDir ?? process.cwd(), ui);
 }
 
+/** Read every `.hbs` file in `<themes-root>/_shared/` (if the
+ *  directory exists) and return them keyed by logical name (the
+ *  filename minus `.hbs`).  Shared templates are pack-agnostic:
+ *  they compose pack primitives via `{{> primitive-X}}` and apply
+ *  to whichever pack is loaded.  Returns `{}` when no `_shared/`
+ *  directory exists, keeping packs without it backward-compatible. */
+function readSharedSources(): Record<string, string> {
+  const sharedDir = path.join(builtinThemesDir(), "_shared");
+  if (!fs.existsSync(sharedDir) || !fs.statSync(sharedDir).isDirectory()) {
+    return {};
+  }
+  const out: Record<string, string> = {};
+  for (const file of fs.readdirSync(sharedDir)) {
+    if (!file.endsWith(".hbs")) continue;
+    const logicalName = file.slice(0, -".hbs".length);
+    out[logicalName] = fs.readFileSync(path.join(sharedDir, file), "utf-8");
+  }
+  return out;
+}
+
 /** Load a pack from disk.  Reads pack.json, resolves every template
  *  named in `emits`, compiles each with Handlebars, and returns a
- *  ready-to-use LoadedPack. */
+ *  ready-to-use LoadedPack.  Also pulls in `themes/_shared/*.hbs`
+ *  as shared partials available to every loaded pack. */
 export function loadPack(packDir: string): LoadedPack {
   const manifestPath = path.join(packDir, "pack.json");
   if (!fs.existsSync(manifestPath)) {
@@ -83,5 +104,12 @@ export function loadPack(packDir: string): LoadedPack {
     }
     sources[logicalName] = fs.readFileSync(filePath, "utf-8");
   }
-  return compilePack(packDir, manifest, sources, (f) => path.join(packDir, f));
+  const sharedSources = readSharedSources();
+  return compilePack(
+    packDir,
+    manifest,
+    sources,
+    (f) => path.join(packDir, f),
+    sharedSources,
+  );
 }

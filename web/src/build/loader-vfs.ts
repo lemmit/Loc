@@ -106,5 +106,24 @@ export function loadPack(packDir: VfsPath): LoadedPack {
     }
     sources[logicalName] = src;
   }
-  return compilePack(packDir, manifest, sources, (f) => joinPosix(packDir, f));
+  // Pull shared templates (themes/_shared/*.hbs in the on-disk
+  // layout; mirrored to /themes/_shared/ in the VFS by the seeder)
+  // and pass them to compilePack so they register as pack-agnostic
+  // partials.  Same opt-in shape as the Node loader: empty when
+  // no _shared/ directory has been seeded.
+  const sharedSources: Record<string, string> = {};
+  for (const path of vfs.list("/themes/_shared/")) {
+    if (!path.endsWith(".hbs")) continue;
+    const slash = path.lastIndexOf("/");
+    const logicalName = path.slice(slash + 1, -".hbs".length);
+    const src = vfs.read(path);
+    if (src != null) sharedSources[logicalName] = src;
+  }
+  return compilePack(
+    packDir,
+    manifest,
+    sources,
+    (f) => joinPosix(packDir, f),
+    sharedSources,
+  );
 }
