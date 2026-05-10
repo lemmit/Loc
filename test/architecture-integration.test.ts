@@ -61,9 +61,11 @@ system Acme {
       state { name: string = "" }
       body: Stack(
         Field("Name", bind: name),
-        Button("Save", onClick: e => {
-          Sales.Customer.create.mutate({ name: name })
-        })
+        Button("Save",
+          disabled: Sales.Customer.create.isPending,
+          onClick: e => {
+            Sales.Customer.create.mutate({ name: name })
+          })
       )
     }
 
@@ -135,8 +137,10 @@ describe("Architecture integration — full Acme example", () => {
       /import \{ useCreateCustomer \} from "\.\.\/api\/customer";/,
     );
     expect(newPage).toMatch(/const customerCreate = useCreateCustomer\(\);/);
-    // onClick wired to .mutate
-    expect(newPage).toMatch(/customerCreate\.mutate\(/);
+    // disabled wired to .isPending
+    expect(newPage).toMatch(/disabled=\{customerCreate\.isPending\}/);
+    // onClick wired to .mutate (object-literal arg passes through)
+    expect(newPage).toMatch(/customerCreate\.mutate\(\{ name: name \}\)/);
   });
 
   it("generates Lookup page with parameterized `useByEmailCustomer(email)`", async () => {

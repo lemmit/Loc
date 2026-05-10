@@ -1,1 +1,1 @@
-{{#if hasOnClick}}<Button onClick={{expr onClick}}>{{{label}}}</Button>{{else}}<Button>{{{label}}}</Button>{{/if}}
+<Button{{#if hasOnClick}} onClick={{expr onClick}}{{/if}}{{#if hasDisabled}} disabled={{expr disabled}}{{/if}}{{#if hasLoading}} loading={{expr loading}}{{/if}}>{{{label}}}</Button>

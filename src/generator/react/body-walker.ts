@@ -859,11 +859,38 @@ function emitButton(
       onClickHandler = `() => navigate(${to})`;
     }
   }
+  // Slice 11.29 — `disabled:` and `loading:` named args.  Both
+  // accept any expression (typically a hook accessor like
+  // `Sales.Customer.create.isPending` — emitExpr triggers hook
+  // injection so the local hook var is available at page-top).
+  const disabled = anyNamedArgExpr(call, "disabled", ctx);
+  const loading = anyNamedArgExpr(call, "loading", ctx);
   return renderPrimitive(ctx, "primitive-button", {
     label: unwrapTextLiteral(label),
     onClick: onClickHandler,
     hasOnClick: onClickHandler !== undefined,
+    disabled,
+    hasDisabled: disabled !== undefined,
+    loading,
+    hasLoading: loading !== undefined,
   });
+}
+
+/** Slice 11.29 — render any named arg's value through emitExpr.
+ *  Used for boolean prop pass-through (`disabled:`, `loading:`)
+ *  where the value is an arbitrary expression — refs, hook
+ *  accessors, binary ops are all admissible. */
+function anyNamedArgExpr(
+  call: ExprIR & { kind: "call" },
+  name: string,
+  ctx: WalkContext,
+): string | undefined {
+  const argNames = call.argNames ?? [];
+  for (let i = 0; i < call.args.length; i++) {
+    if (argNames[i] !== name) continue;
+    return emitExpr(call.args[i]!, ctx);
+  }
+  return undefined;
 }
 
 /** Slice 11.7 — extract a lambda-shaped named arg from a call.
@@ -960,6 +987,15 @@ function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // (Slice 11.24), tryDetectApiHook at the top has already
       // returned the hook var; we just append `.<member>`.
       return `${emitExpr(expr.receiver, ctx)}.${expr.member}`;
+    }
+    case "object": {
+      // Slice 11.29 — object literal: `{ name: name, age: 30 }`
+      // emits as plain JS `{ name: name, age: 30 }`.  Field values
+      // recurse through emitExpr (so refs/state/binary ops compose).
+      const fields = expr.fields
+        .map((f) => `${f.name}: ${emitExpr(f.value, ctx)}`)
+        .join(", ");
+      return `{ ${fields} }`;
     }
     case "method-call": {
       // Slice 11.24 — when the method-call's receiver is a hook
