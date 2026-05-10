@@ -51,6 +51,37 @@ export default defineConfig({
     port: 5173,
     host: "127.0.0.1",
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Vendor splitting: Monaco is the main chunk's heaviest
+        // dep (~600 KB gzip; 88% of pre-split index-*.js) and
+        // changes rarely.  Splitting it into its own chunk lets
+        // returning users skip the re-download on every app
+        // deploy — they only pay for whatever the app code
+        // genuinely changed.  Same logic for the Mantine UI kit
+        // and React + React-DOM.
+        //
+        // Trade-off: more, smaller chunks add HTTP round-trips on
+        // a cold first paint (HTTP/2 multiplexes them — the cost
+        // is small).  We come out ahead on every subsequent
+        // deploy because the vendor chunks stay cached.
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return undefined;
+          if (id.includes("monaco-editor")) return "monaco";
+          if (id.includes("@mantine/")) return "mantine";
+          if (
+            id.includes("/react/") ||
+            id.includes("/react-dom/") ||
+            id.includes("/scheduler/")
+          ) {
+            return "react";
+          }
+          return undefined;
+        },
+      },
+    },
+  },
   worker: {
     format: "es",
     // The build worker (`src/build/build.worker.ts`) imports the React
