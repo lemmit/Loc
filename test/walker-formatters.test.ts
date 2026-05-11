@@ -2,7 +2,7 @@
 //
 // Money / DateDisplay / EnumBadge / IdLink lower to per-pack
 // runtime helpers (`MoneyValue`, `DateTimeValue`, `Badge`, plus
-// `IdValue` + react-router `<Link>` for IdLink).  All four accept
+// `IdValue` + react-router `<RouterLink>` for IdLink).  All four accept
 // the standard `testid:` named arg and thread it to the rendered
 // root element.
 //
@@ -11,8 +11,8 @@
 //   2. DateDisplay(value)                  — emits <DateTimeValue …>
 //   3. EnumBadge(value, color?)            — emits <Badge …> with
 //      mantine `color={…}` / shadcn `variant={…}`
-//   4. IdLink(id, of: <Aggregate>)         — emits <Link to=…>
-//      <IdValue id=… /></Link> with the path derived from
+//   4. IdLink(id, of: <Aggregate>)         — emits <RouterLink to=…>
+//      <IdValue id=… /></RouterLink> with the path derived from
 //      pluralized + snake-cased aggregate name.
 
 import { describe, expect, it } from "vitest";
@@ -103,7 +103,7 @@ describe("Slice A3 — formatter primitives", () => {
     expect(tsx).toMatch(/<Badge[^>]*\bdata-testid="status"/);
   });
 
-  it("IdLink emits a <Link> to /<plural-snake>/{id} wrapping <IdValue>", async () => {
+  it("IdLink emits a <RouterLink> to /<plural-snake>/{id} wrapping <IdValue>", async () => {
     // We need the page to have a route param to feed the IdLink id.
     const files = await buildAndGenerate(`
       system S {
@@ -130,13 +130,13 @@ describe("Slice A3 — formatter primitives", () => {
     `);
     const tsx = files.get("web/src/pages/customer_link.tsx")!;
     expect(tsx).toBeDefined();
-    expect(tsx).toMatch(/<Link to=\{`\/customers\/\$\{ customerId \}`\}[^>]*>/);
+    expect(tsx).toMatch(/<RouterLink to=\{`\/customers\/\$\{ customerId \}`\}[^>]*>/);
     expect(tsx).toMatch(/<IdValue id=\{ customerId \} \/>/);
-    expect(tsx).toMatch(/import \{[^}]*\bLink\b[^}]*\} from "react-router-dom"/);
+    expect(tsx).toMatch(/import \{[^}]*\bLink as RouterLink\b[^}]*\} from "react-router-dom"/);
     expect(tsx).toMatch(/import \{[^}]*\bIdValue\b[^}]*\} from "\.\.\/lib\/format"/);
   });
 
-  it("IdLink testid lands on the root <Link>", async () => {
+  it("IdLink testid lands on the root <RouterLink>", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M {
@@ -162,6 +162,6 @@ describe("Slice A3 — formatter primitives", () => {
     `);
     const tsx = files.get("web/src/pages/customer_link.tsx")!;
     expect(tsx).toBeDefined();
-    expect(tsx).toMatch(/<Link [^>]*\bdata-testid="customer-link"/);
+    expect(tsx).toMatch(/<RouterLink [^>]*\bdata-testid="customer-link"/);
   });
 });

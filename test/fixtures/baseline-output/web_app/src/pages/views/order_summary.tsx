@@ -1,5 +1,5 @@
 // Auto-generated.  Do not edit by hand.
-import { Link } from "react-router-dom";
+import { Link as RouterLink } from "react-router-dom";
 import { IdValue } from "../../lib/format";
 import { Alert, Badge, Center, Paper, Skeleton, Stack, Table, Text, Title } from "@mantine/core";
 import { useOrderSummaryView } from "../../api/views";
@@ -36,7 +36,7 @@ export default function OrderSummaryView() {
               <Table.Tbody>
                 { orderSummaryView.data.map((row, idx) => (
                   <Table.Tr key={ idx }>
-                    <Table.Td><Link to={`/orders/${ row.orderId }`}><IdValue id={ row.orderId } /></Link></Table.Td>
+                    <Table.Td><RouterLink to={`/orders/${ row.orderId }`}><IdValue id={ row.orderId } /></RouterLink></Table.Td>
                     <Table.Td><Badge>{ row.status }</Badge></Table.Td>
                     <Table.Td><Text>{row.lineCount}</Text></Table.Td>
                   </Table.Tr>

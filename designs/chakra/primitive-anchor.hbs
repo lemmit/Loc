@@ -1,1 +1,1 @@
-{{#if hasTo}}<Link to={{{to}}} style=\{{ color: "var(--chakra-colors-blue-500)", textDecoration: "underline" }}{{{testidAttr}}}>{{{label}}}</Link>{{else}}<span{{{testidAttr}}}>{{{label}}}</span>{{/if}}
+{{#if hasTo}}<Link as={RouterLink} to={{{to}}}{{{testidAttr}}}>{{{label}}}</Link>{{else}}<Text as="span"{{{testidAttr}}}>{{{label}}}</Text>{{/if}}

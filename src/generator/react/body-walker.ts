@@ -196,8 +196,11 @@ export interface WalkResult {
   usesState: boolean;
   /** Slice 11.15 — true when any walked node emitted JSX that
    *  references React Router's `Link` component (e.g.
-   *  `Anchor("…", to: …)` → `<Anchor component={Link}>`).  The
-   *  shell adds `Link` to the existing react-router-dom import. */
+   *  `Anchor("…", to: …)` → `<Anchor component={RouterLink}>`).
+   *  The shell adds `Link as RouterLink` to the existing
+   *  react-router-dom import — the alias keeps the slot free for
+   *  design packs whose own primitive is named `Link` (MUI,
+   *  chakra) without an identifier collision. */
   usesRouterLink: boolean;
   /** Slice 11.18 — names of user-defined components the walker
    *  invoked while emitting (e.g. `WelcomeBox("Alice")` →
@@ -2951,7 +2954,7 @@ export function renderCustomLayoutPage(
   const routerSpecifiers: string[] = [];
   if (hasParams) routerSpecifiers.push("useParams");
   if (usesNavigate || form.usesNavigate) routerSpecifiers.push("useNavigate");
-  if (usesRouterLink) routerSpecifiers.push("Link");
+  if (usesRouterLink) routerSpecifiers.push("Link as RouterLink");
   const reactRouterImport = routerSpecifiers.length > 0
     ? `import { ${routerSpecifiers.join(", ")} } from "react-router-dom";\n`
     : "";
@@ -3109,7 +3112,7 @@ export function renderUserComponentFile(
   // a component subtree (e.g. Button(to:) inside).
   const routerSpecifiers: string[] = [];
   if (usesNavigate) routerSpecifiers.push("useNavigate");
-  if (usesRouterLink) routerSpecifiers.push("Link");
+  if (usesRouterLink) routerSpecifiers.push("Link as RouterLink");
   const reactRouterImport = routerSpecifiers.length > 0
     ? `import { ${routerSpecifiers.join(", ")} } from "react-router-dom";\n`
     : "";

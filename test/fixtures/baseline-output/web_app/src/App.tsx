@@ -1,5 +1,5 @@
 // Auto-generated.
-import { Routes, Route, Link, useLocation } from "react-router-dom";
+import { Routes, Route, Link as RouterLink, useLocation } from "react-router-dom";
 import { AppShell, Burger, Divider, Group, Title, NavLink, Anchor, Alert, Button, Stack } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import React from "react";
@@ -66,7 +66,7 @@ function NotFound() {
   return (
     <Stack data-testid="not-found" p="md">
       <Title order={2}>Not found</Title>
-      <Anchor component={Link} to="/">← Back to home</Anchor>
+      <Anchor component={RouterLink} to="/">← Back to home</Anchor>
     </Stack>
   );
 }
@@ -105,7 +105,7 @@ export default function App() {
               size="sm"
               data-testid="nav-burger"
             />
-            <Anchor component={Link} to="/" underline="never" c="inherit">
+            <Anchor component={RouterLink} to="/" underline="never" c="inherit">
               <Group gap={8} align="center">
                 <div style={{ width: 28, height: 28, borderRadius: 6, background: "var(--mantine-color-brand-6)" }} aria-hidden="true" />
                 <Title order={4} style={{ letterSpacing: "-0.01em" }}>Acme</Title>
@@ -117,16 +117,16 @@ export default function App() {
       <AppShell.Navbar p="md">
         <Stack gap={4} data-testid="nav-sidebar">
           <Divider my="xs" label="Aggregates" labelPosition="left" />
-          <NavLink component={Link} to="/products" label="Products" active={isActive("/products")} data-testid="nav-products" />
-          <NavLink component={Link} to="/orders" label="Orders" active={isActive("/orders")} data-testid="nav-orders" />
-          <NavLink component={Link} to="/customers" label="Customers" active={isActive("/customers")} data-testid="nav-customers" />
+          <NavLink component={RouterLink} to="/products" label="Products" active={isActive("/products")} data-testid="nav-products" />
+          <NavLink component={RouterLink} to="/orders" label="Orders" active={isActive("/orders")} data-testid="nav-orders" />
+          <NavLink component={RouterLink} to="/customers" label="Customers" active={isActive("/customers")} data-testid="nav-customers" />
           <Divider my="xs" label="Workflows" labelPosition="left" />
-          <NavLink component={Link} to="/workflows" label="All workflows" active={isActive("/workflows", { exact: true })} data-testid="nav-workflows" />
-          <NavLink component={Link} to="/workflows/place_order" label="Place Order" active={isActive("/workflows/place_order")} data-testid="nav-workflow-place_order" />
+          <NavLink component={RouterLink} to="/workflows" label="All workflows" active={isActive("/workflows", { exact: true })} data-testid="nav-workflows" />
+          <NavLink component={RouterLink} to="/workflows/place_order" label="Place Order" active={isActive("/workflows/place_order")} data-testid="nav-workflow-place_order" />
           <Divider my="xs" label="Views" labelPosition="left" />
-          <NavLink component={Link} to="/views" label="All views" active={isActive("/views", { exact: true })} data-testid="nav-views" />
-          <NavLink component={Link} to="/views/active_orders" label="Active Orders" active={isActive("/views/active_orders")} data-testid="nav-view-active_orders" />
-          <NavLink component={Link} to="/views/order_summary" label="Order Summary" active={isActive("/views/order_summary")} data-testid="nav-view-order_summary" />
+          <NavLink component={RouterLink} to="/views" label="All views" active={isActive("/views", { exact: true })} data-testid="nav-views" />
+          <NavLink component={RouterLink} to="/views/active_orders" label="Active Orders" active={isActive("/views/active_orders")} data-testid="nav-view-active_orders" />
+          <NavLink component={RouterLink} to="/views/order_summary" label="Order Summary" active={isActive("/views/order_summary")} data-testid="nav-view-order_summary" />
         </Stack>
       </AppShell.Navbar>
       <AppShell.Main>

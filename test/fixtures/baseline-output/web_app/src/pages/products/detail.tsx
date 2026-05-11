@@ -1,5 +1,5 @@
 // Auto-generated.  Do not edit by hand.
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link as RouterLink } from "react-router-dom";
 import { KeyValueRow } from "../../lib/format";
 import { Alert, Anchor, Breadcrumbs, Card, Skeleton, Stack, Text, Title } from "@mantine/core";
 import { useProductById } from "../../api/product";
@@ -10,8 +10,8 @@ export default function ProductDetail() {
   return (
     <Stack data-testid="products-detail">
       <Breadcrumbs>
-        <Anchor component={Link} to="/">Home</Anchor>
-        <Anchor component={Link} to="/products">Products</Anchor>
+        <Anchor component={RouterLink} to="/">Home</Anchor>
+        <Anchor component={RouterLink} to="/products">Products</Anchor>
         <Text>Detail</Text>
       </Breadcrumbs>
       <Title order={2}>Product detail</Title>

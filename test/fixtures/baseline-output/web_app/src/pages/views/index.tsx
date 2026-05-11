@@ -1,12 +1,12 @@
 // Auto-generated.  Do not edit by hand.
-import { Link } from "react-router-dom";
+import { Link as RouterLink } from "react-router-dom";
 import { Anchor, Breadcrumbs, Card, Stack, Text, Title } from "@mantine/core";
 
 export default function ViewsIndex() {
   return (
     <Stack data-testid="views-index">
       <Breadcrumbs>
-        <Anchor component={Link} to="/">Home</Anchor>
+        <Anchor component={RouterLink} to="/">Home</Anchor>
         <Text>Views</Text>
       </Breadcrumbs>
       <Title order={2}>Views</Title>
