@@ -6,28 +6,35 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // ---------------------------------------------------------------------------
-// Generator regression test for the React frontend: emit each example's
-// `generate system` output through both the Mantine and shadcn packs,
-// npm-install each project, and run `tsc --noEmit`.  Catches generator
-// drift that compiles the TS backend cleanly but breaks the generated
-// TSX (missing imports, wrong prop types, JSX namespace issues, …) —
-// the kind of thing that's invisible to the IR-level tests but blows
-// up at user time.
+// Generator regression test for the React frontend: for each example
+// .ddd × each design pack, run `generate system`, npm-install the
+// emitted project, and `tsc --noEmit` it.  Catches generator drift
+// that compiles the TS backend cleanly but breaks the generated TSX
+// (missing imports, wrong prop types, JSX namespace issues, …) —
+// the kind of thing that's invisible to the IR-level tests but
+// blows up at user time.
 //
-// Phase 2.4: matrix expanded to 4 examples × 2 packs = 8 cases.  The
-// shadcn variants are produced by injecting `design: shadcn` into the
-// react deployable at test-run time, so the canonical example sources
-// stay pack-neutral.
+// Matrix: 4 examples × 4 packs = 16 cases.  Non-mantine variants are
+// produced by injecting `design: <pack>` into the deployable at test-
+// run time, so the canonical example sources stay pack-neutral.
 //
-// Slow (~30s per case, ~4 minutes total) — opt-in via LOOM_REACT_BUILD=1
-// so `npm test` stays fast.
+// Run modes:
+//   1. Full sweep — `LOOM_REACT_BUILD=1 npx vitest run …` runs every
+//      case sequentially in one Node process (~5min).  Used by
+//      developers locally.
+//   2. Single shard — `LOOM_REACT_BUILD_CASE=<ddd>:<pack>` filters to
+//      exactly one case (implies the suite is enabled even without
+//      LOOM_REACT_BUILD=1).  Used by CI to parallelise across a
+//      GitHub Actions job matrix — every shard runs one case in its
+//      own runner, wall time drops from ~5min to ~30s per case.
 // ---------------------------------------------------------------------------
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");
 const cli = path.join(repoRoot, "bin", "cli.js");
 
-const ENABLED = process.env.LOOM_REACT_BUILD === "1";
+const SHARD = process.env.LOOM_REACT_BUILD_CASE;
+const ENABLED = process.env.LOOM_REACT_BUILD === "1" || SHARD !== undefined;
 
 const examples = [
   { ddd: "examples/acme.ddd", reactDir: "web_app" },
@@ -36,7 +43,7 @@ const examples = [
   { ddd: "web/src/examples/sales-system.ddd", reactDir: "web_app" },
 ] as const;
 
-/** Inject `design: shadcn` into the `deployable webApp { ... }` block
+/** Inject `design: <pack>` into the `deployable webApp { ... }` block
  *  of a `.ddd` source.  Handles both the multi-line acme syntax and
  *  the single-line playground syntax.  Idempotent and safe — if no
  *  webApp block matches, the input passes through unchanged. */
@@ -53,23 +60,36 @@ function injectDesign(src: string, design: string): string {
   return src.replace(singleLine, `$1, design: ${design}$2}`);
 }
 
+type Pack = "mantine" | "shadcn" | "mui" | "chakra";
+const PACKS: readonly Pack[] = ["mantine", "shadcn", "mui", "chakra"];
+
 interface Case {
   ddd: string;
   reactDir: string;
-  pack: "mantine" | "shadcn" | "mui" | "chakra";
+  pack: Pack;
 }
 
-/** Slice D1 — Mantine is the canonical pack post-archetype-deletion.
- *  Shadcn + MUI pack support for the walker-driven emission is a
- *  follow-up slice (the new walker shell hard-codes Mantine
- *  specifiers like `<Stack>` / `<Button>` / `<Group>`; per-pack
- *  Form + Alert variants need wiring through). */
-const cases: Case[] = examples.flatMap((e) => [
-  { ...e, pack: "mantine" as const },
-  { ...e, pack: "shadcn" as const },
-  { ...e, pack: "mui" as const },
-  { ...e, pack: "chakra" as const },
-]);
+const allCases: Case[] = examples.flatMap((e) =>
+  PACKS.map((pack) => ({ ...e, pack })),
+);
+
+/** Filter to the case named by `LOOM_REACT_BUILD_CASE=<ddd>:<pack>`,
+ *  or return every case when no filter is set.  Throws on a malformed
+ *  shard spec so the CI matrix surfaces typos loudly instead of
+ *  silently skipping a case. */
+function selectCases(): Case[] {
+  if (SHARD === undefined) return allCases;
+  const [ddd, pack] = SHARD.split(":");
+  const match = allCases.find((c) => c.ddd === ddd && c.pack === pack);
+  if (!match) {
+    throw new Error(
+      `LOOM_REACT_BUILD_CASE="${SHARD}" did not match any case.  Available: ${allCases.map((c) => `${c.ddd}:${c.pack}`).join(", ")}`,
+    );
+  }
+  return [match];
+}
+
+const cases = ENABLED ? selectCases() : [];
 
 describe.skipIf(!ENABLED)("generated React TSX compiles under strict tsc", () => {
   it.each(cases)(
