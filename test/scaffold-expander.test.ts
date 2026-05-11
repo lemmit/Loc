@@ -278,14 +278,16 @@ describe("Slice C1 — scaffold expander dispatch", () => {
     expect(ofArg.member).toBe("ActiveOrders");
   });
 
-  it("workflows-index / views-index / home all return null", () => {
+  it("workflows-index / views-index / home all expand to Stack(...) bodies", () => {
     expect(
-      expandScaffoldToExplicitBody({ kind: "workflows-index" }, ctx),
-    ).toBeNull();
+      expandScaffoldToExplicitBody({ kind: "workflows-index" }, ctx)?.kind,
+    ).toBe("call");
     expect(
-      expandScaffoldToExplicitBody({ kind: "views-index" }, ctx),
-    ).toBeNull();
-    expect(expandScaffoldToExplicitBody({ kind: "home" }, ctx)).toBeNull();
+      expandScaffoldToExplicitBody({ kind: "views-index" }, ctx)?.kind,
+    ).toBe("call");
+    expect(expandScaffoldToExplicitBody({ kind: "home" }, ctx)?.kind).toBe(
+      "call",
+    );
   });
 
   it("returns null when the aggregate isn't in the context map", () => {

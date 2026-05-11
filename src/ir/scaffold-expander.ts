@@ -114,13 +114,12 @@ export function expandScaffoldToExplicitBody(
       return expandWorkflowForm(origin.workflowName, ctx);
     case "view-list":
       return expandViewList(origin.viewName, ctx);
-    // Spillover — see header comment.  Returning null here keeps
-    // the page on the archetype path until a future slice provides
-    // the missing primitives.
     case "workflows-index":
+      return expandWorkflowsIndex(ctx);
     case "views-index":
+      return expandViewsIndex(ctx);
     case "home":
-      return null;
+      return expandHome(ctx);
   }
 }
 
@@ -504,6 +503,134 @@ function expandViewList(
     undefined,
     [["testid", lit(`view-${viewSlug}`)]],
   );
+}
+
+// ---------------------------------------------------------------------------
+// Home + index expansions
+// ---------------------------------------------------------------------------
+
+function expandHome(ctx: ScaffoldExpandContext): ExprIR {
+  // Walker stdlib doesn't ship `SimpleGrid` (Mantine-specific
+  // responsive grid) yet; use a plain Stack of summary cards.
+  // Counts come from the expander's reachable-context maps.
+  const aggCount = ctx.aggregatesByName.size;
+  const wfCount = ctx.workflowsByName.size;
+  const viewCount = ctx.viewsByName.size;
+  const cards: ExprIR[] = [];
+  if (aggCount > 0) {
+    cards.push(
+      call("Card", [
+        call("Heading", [lit(pluralize(aggCount, "aggregate", "aggregates"))], undefined, [["level", intLit(4)]]),
+        call("Text", [lit("Manage records of each kind from the sidebar.")]),
+      ]),
+    );
+  }
+  if (wfCount > 0) {
+    cards.push(
+      call("Card", [
+        call("Heading", [lit(pluralize(wfCount, "workflow", "workflows"))], undefined, [["level", intLit(4)]]),
+        call("Anchor", [lit("Open workflows →")], undefined, [["to", lit("/workflows")]]),
+      ]),
+    );
+  }
+  if (viewCount > 0) {
+    cards.push(
+      call("Card", [
+        call("Heading", [lit(pluralize(viewCount, "view", "views"))], undefined, [["level", intLit(4)]]),
+        call("Anchor", [lit("Open views →")], undefined, [["to", lit("/views")]]),
+      ]),
+    );
+  }
+  return call(
+    "Stack",
+    [
+      call("Heading", [lit("Welcome")], undefined, [["level", intLit(2)]]),
+      call("Text", [
+        lit("Pick a section from the sidebar to start, or jump straight in below."),
+      ]),
+      call("Stack", cards),
+    ],
+    undefined,
+    [["testid", lit("home")]],
+  );
+}
+
+function expandWorkflowsIndex(ctx: ScaffoldExpandContext): ExprIR {
+  const cards: ExprIR[] = [];
+  for (const wf of ctx.workflowsByName.values()) {
+    const slug = snake(wf.name);
+    cards.push(
+      call(
+        "Card",
+        [
+          call("Heading", [lit(humanize(wf.name))], undefined, [
+            ["level", intLit(4)],
+          ]),
+          call("Anchor", [lit("Run →")], undefined, [
+            ["to", lit(`/workflows/${slug}`)],
+            ["testid", lit(`workflow-${slug}-run`)],
+          ]),
+        ],
+        undefined,
+        [["testid", lit(`workflow-card-${slug}`)]],
+      ),
+    );
+  }
+  return call(
+    "Stack",
+    [
+      call("Breadcrumbs", [
+        call("Anchor", [lit("Home")], undefined, [["to", lit("/")]]),
+        call("Text", [lit("Workflows")]),
+      ]),
+      call("Heading", [lit("Workflows")], undefined, [["level", intLit(2)]]),
+      call("Text", [lit("System-level orchestrations.  Pick one to run.")]),
+      call("Stack", cards),
+    ],
+    undefined,
+    [["testid", lit("workflows-index")]],
+  );
+}
+
+function expandViewsIndex(ctx: ScaffoldExpandContext): ExprIR {
+  const cards: ExprIR[] = [];
+  for (const view of ctx.viewsByName.values()) {
+    const slug = snake(view.name);
+    cards.push(
+      call(
+        "Card",
+        [
+          call("Heading", [lit(humanize(view.name))], undefined, [
+            ["level", intLit(4)],
+          ]),
+          call("Anchor", [lit("Open →")], undefined, [
+            ["to", lit(`/views/${slug}`)],
+            ["testid", lit(`view-${slug}-open`)],
+          ]),
+        ],
+        undefined,
+        [["testid", lit(`view-card-${slug}`)]],
+      ),
+    );
+  }
+  return call(
+    "Stack",
+    [
+      call("Breadcrumbs", [
+        call("Anchor", [lit("Home")], undefined, [["to", lit("/")]]),
+        call("Text", [lit("Views")]),
+      ]),
+      call("Heading", [lit("Views")], undefined, [["level", intLit(2)]]),
+      call("Text", [lit("Saved queries.  Open one to inspect rows.")]),
+      call("Stack", cards),
+    ],
+    undefined,
+    [["testid", lit("views-index")]],
+  );
+}
+
+function pluralize(n: number, singular: string, plural: string): string {
+  return `${n} ${n === 1 ? singular : plural}`;
 }
 
 // ---------------------------------------------------------------------------
