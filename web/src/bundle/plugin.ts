@@ -124,6 +124,30 @@ export interface VirtualFsContext {
    *  the generator declared, so we get e.g. drizzle-orm@^0.36.0
    *  instead of esm.sh's "latest" (which breaks at 0.45.2). */
   versions: Map<string, string>;
+  /** TypeScript path-alias mappings (e.g. `@/*` → `<slug>/src/*`)
+   *  harvested from the entry's nearest `tsconfig.json`.  Empty
+   *  when no tsconfig is present.  Each alias key keeps the
+   *  trailing `*` if present so the resolver can substitute the
+   *  matched suffix; static aliases (no `*`) are stored verbatim. */
+  tsconfigPaths: TsconfigAliasEntry[];
+}
+
+/** One alias mapping derived from a tsconfig `compilerOptions.paths`
+ *  entry.  Patterns are anchored at the start of the import
+ *  specifier; `prefix` is what comes before the optional `*`, and
+ *  `targets` are the substitution candidates (also `prefix + *` form).
+ *  All paths are virtual-fs absolute (no leading `/`, forward slashes). */
+export interface TsconfigAliasEntry {
+  /** Text before the `*` in the pattern, or the whole pattern when
+   *  it's a static (non-wildcard) alias.  e.g. `@/` for `@/*`,
+   *  `@app/foo` for `@app/foo`. */
+  prefix: string;
+  /** True iff the original pattern had a `*` wildcard. */
+  wildcard: boolean;
+  /** Substitution candidates, each pre-resolved against the
+   *  tsconfig's base directory.  For wildcard aliases each target
+   *  keeps a trailing `*` placeholder. */
+  targets: string[];
 }
 
 // Specifiers we hand off to an importmap in the iframe instead of
@@ -258,6 +282,136 @@ export function harvestVersions(
     // Malformed package.json — fall back to unversioned esm.sh URLs.
   }
   return out;
+}
+
+// Read the entry's nearest `tsconfig.json` and extract any
+// `compilerOptions.paths` mappings as alias entries ready for the
+// resolver.  The shadcn pack (and any future pack that uses the
+// `@/*` convention) ships a tsconfig with `"@/*": ["./src/*"]`,
+// pointing imports like `@/components/ui/button` at the file
+// `<slug>/src/components/ui/button.tsx` in the virtual fs.  Without
+// reading this, the bundler treats `@/components` as a bare package
+// and tries to fetch it from esm.sh — which is what produced the
+// "package not declared" errors on the shadcn example.
+//
+// Walks upward from the entry's directory, picks the first
+// `tsconfig.json` it finds, and resolves every `paths` target
+// against the tsconfig's directory + optional `baseUrl`.  Strips
+// any leading `./` so the substituted paths match the keys we
+// store in the virtual fs (relative, forward-slash).
+//
+// Comments inside the tsconfig are silently tolerated: many starter
+// templates emit `// auto-generated`-style banners that JSON.parse
+// would otherwise choke on.
+export function harvestTsconfigPaths(
+  files: Map<string, string>,
+  entryPath: string,
+): TsconfigAliasEntry[] {
+  const segs = entryPath.split("/");
+  let chosen: string | null = null;
+  let chosenDir = "";
+  for (let i = segs.length - 1; i >= 0; i--) {
+    const candidate = [...segs.slice(0, i), "tsconfig.json"].join("/");
+    if (files.has(candidate)) {
+      chosen = candidate;
+      chosenDir = segs.slice(0, i).join("/");
+      break;
+    }
+  }
+  if (!chosen) return [];
+
+  const raw = files.get(chosen)!;
+  // Strip `// line` comments so JSON.parse accepts the VS-Code-
+  // flavoured tsconfigs many starter templates ship.  Block
+  // `/* ... */` comments are NOT stripped — doing so naïvely would
+  // misfire on `/*` substrings inside JSON strings (e.g. the
+  // `"@/*": ["./src/*"]` paths every shadcn-style project has).
+  // The `[^:]` lookbehind keeps `://` substrings (URLs) intact.
+  const stripped = raw.replace(/(^|[^:])\/\/.*$/gm, "$1");
+  let parsed: { compilerOptions?: { baseUrl?: string; paths?: Record<string, string[]> } };
+  try {
+    parsed = JSON.parse(stripped);
+  } catch {
+    return [];
+  }
+  const co = parsed.compilerOptions;
+  if (!co || !co.paths) return [];
+
+  // baseUrl resolves against the tsconfig's directory.  Most packs
+  // ship `"baseUrl": "."`; some omit it.  Either way we collapse to
+  // a virtual-fs-style forward-slash path with no leading `/`.
+  const baseUrl = (co.baseUrl ?? ".").replace(/^\.\/?/, "");
+  const baseDir = baseUrl
+    ? joinVfsPath(chosenDir, baseUrl)
+    : chosenDir;
+
+  const out: TsconfigAliasEntry[] = [];
+  for (const [pattern, rawTargets] of Object.entries(co.paths)) {
+    const wildcardIdx = pattern.indexOf("*");
+    const wildcard = wildcardIdx !== -1;
+    // Reject patterns with a `*` mid-string (`foo*bar`) — neither
+    // tsc nor any of our packs use them; matching them right would
+    // need a regex and adds risk we don't want here.
+    if (wildcard && wildcardIdx !== pattern.length - 1) continue;
+    const prefix = wildcard ? pattern.slice(0, -1) : pattern;
+    const targets: string[] = [];
+    for (const target of rawTargets) {
+      const trimmed = target.replace(/^\.\/?/, "");
+      const targetWildcardIdx = trimmed.indexOf("*");
+      // Skip targets whose wildcard placement disagrees with the
+      // pattern's — same defensive reasoning as above.
+      if (wildcard) {
+        if (targetWildcardIdx !== trimmed.length - 1) continue;
+        targets.push(joinVfsPath(baseDir, trimmed.slice(0, -1)) + "*");
+      } else {
+        if (targetWildcardIdx !== -1) continue;
+        targets.push(joinVfsPath(baseDir, trimmed));
+      }
+    }
+    if (targets.length > 0) out.push({ prefix, wildcard, targets });
+  }
+  // Longer prefixes match first — same tsc semantics, so a more
+  // specific alias (`@app/api/*`) wins over a catch-all (`@app/*`).
+  out.sort((a, b) => b.prefix.length - a.prefix.length);
+  return out;
+}
+
+function joinVfsPath(a: string, b: string): string {
+  if (!a) return b;
+  if (!b) return a;
+  return `${a}/${b}`;
+}
+
+/** Try every alias against `spec`; return the rewritten virtual-fs
+ *  path (the first target that successfully resolves into `files`),
+ *  or `null` when no alias matches or no target hits a file.  Walks
+ *  candidates in tsc's listed order — same as how `tsc` itself
+ *  resolves alias collisions. */
+export function applyTsconfigAlias(
+  spec: string,
+  aliases: TsconfigAliasEntry[],
+  files: Map<string, string>,
+): string | null {
+  for (const entry of aliases) {
+    if (entry.wildcard) {
+      if (!spec.startsWith(entry.prefix)) continue;
+      const tail = spec.slice(entry.prefix.length);
+      for (const target of entry.targets) {
+        const candidate = target.endsWith("*")
+          ? target.slice(0, -1) + tail
+          : target;
+        const resolved = resolveInFs(files, candidate);
+        if (resolved) return resolved;
+      }
+    } else {
+      if (spec !== entry.prefix) continue;
+      for (const target of entry.targets) {
+        const resolved = resolveInFs(files, target);
+        if (resolved) return resolved;
+      }
+    }
+  }
+  return null;
 }
 
 // Apply the harvested version to a bare-spec esm.sh URL.  Inputs
@@ -475,6 +629,23 @@ export function makeLoomPlugin(ctx: VirtualFsContext, opts?: PluginOptions): Plu
         return { path: inFs, namespace: ENTRY_NAMESPACE };
       });
 
+      // TypeScript `compilerOptions.paths` aliases (e.g. shadcn's
+      // `@/components/ui/button` → `<slug>/src/components/ui/button.tsx`).
+      // Has to win over the bare-specifier resolver below, otherwise
+      // `@/foo` gets shipped off to esm.sh as a "package not declared"
+      // failure.  Skipped when the entry has no tsconfig or the
+      // alias's targets don't resolve — those cases keep falling
+      // through to the bare-specifier handler (which is the right
+      // behaviour for unaliased imports like `@radix-ui/react-slot`).
+      if (ctx.tsconfigPaths.length > 0) {
+        build.onResolve({ filter: /^[^./]/ }, (args) => {
+          if (args.namespace === HTTP_NAMESPACE) return undefined;
+          const aliased = applyTsconfigAlias(args.path, ctx.tsconfigPaths, ctx.files);
+          if (!aliased) return undefined;
+          return { path: aliased, namespace: ENTRY_NAMESPACE };
+        });
+      }
+
       // Bare specifiers from user code → esm.sh, pinned to the
       // version range the generator declared in package.json.
       build.onResolve({ filter: /^[^./]/ }, (args) => {
@@ -532,13 +703,20 @@ export function makeLoomPlugin(ctx: VirtualFsContext, opts?: PluginOptions): Plu
         if (contents === undefined) {
           return { errors: [{ text: `Virtual fs missing "${args.path}"` }] };
         }
+        // `.css` files (e.g. the shadcn pack's globals.css) need the
+        // CSS loader so esbuild treats them as side-effecting
+        // stylesheets and pipes them into the bundle's .css output.
+        // Without this, the default `js` loader parses Tailwind
+        // `@tailwind base;` directives as decorators and crashes.
         const loader: Loader = args.path.endsWith(".tsx")
           ? "tsx"
           : args.path.endsWith(".ts")
             ? "ts"
             : args.path.endsWith(".json")
               ? "json"
-              : "js";
+              : args.path.endsWith(".css")
+                ? "css"
+                : "js";
         return { contents, loader };
       });
 
