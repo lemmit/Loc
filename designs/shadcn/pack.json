@@ -273,6 +273,46 @@
           "KeyValueRow"
         ]
       }
+    ],
+    "form-wrapper": [
+      { "from": "@/components/ui/button", "named": ["Button"] }
+    ],
+    "field-input-string": [
+      { "from": "@/components/ui/form",  "named": ["FormControl", "FormField", "FormItem", "FormLabel", "FormMessage"] },
+      { "from": "@/components/ui/input", "named": ["Input"] }
+    ],
+    "field-input-int": [
+      { "from": "@/components/ui/form",  "named": ["FormControl", "FormField", "FormItem", "FormLabel", "FormMessage"] },
+      { "from": "@/components/ui/input", "named": ["Input"] }
+    ],
+    "field-input-decimal": [
+      { "from": "@/components/ui/form",  "named": ["FormControl", "FormField", "FormItem", "FormLabel", "FormMessage"] },
+      { "from": "@/components/ui/input", "named": ["Input"] }
+    ],
+    "field-input-bool": [
+      { "from": "@/components/ui/form",   "named": ["FormControl", "FormField", "FormItem", "FormLabel"] },
+      { "from": "@/components/ui/switch", "named": ["Switch"] }
+    ],
+    "field-input-datetime": [
+      { "from": "@/components/ui/form",  "named": ["FormControl", "FormField", "FormItem", "FormLabel", "FormMessage"] },
+      { "from": "@/components/ui/input", "named": ["Input"] }
+    ],
+    "field-input-id-select": [
+      { "from": "@/components/ui/form",   "named": ["FormControl", "FormField", "FormItem", "FormLabel", "FormMessage"] },
+      { "from": "@/components/ui/select", "named": ["Select", "SelectContent", "SelectItem", "SelectTrigger", "SelectValue"] }
+    ],
+    "field-input-id-text": [
+      { "from": "@/components/ui/form",  "named": ["FormControl", "FormField", "FormItem", "FormLabel", "FormMessage"] },
+      { "from": "@/components/ui/input", "named": ["Input"] }
+    ],
+    "field-input-enum-select": [
+      { "from": "@/components/ui/form",   "named": ["FormControl", "FormField", "FormItem", "FormLabel", "FormMessage"] },
+      { "from": "@/components/ui/select", "named": ["Select", "SelectContent", "SelectItem", "SelectTrigger", "SelectValue"] }
+    ],
+    "field-input-valueobject": [],
+    "field-input-array": [
+      { "from": "@/components/ui/form",  "named": ["FormControl", "FormField", "FormItem", "FormLabel"] },
+      { "from": "@/components/ui/input", "named": ["Input"] }
     ]
   },
   "shellFiles": {

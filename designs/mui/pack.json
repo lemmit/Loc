@@ -146,6 +146,17 @@
     "primitive-breadcrumbs":    [{ "from": "@mui/material", "named": ["Breadcrumbs"] }],
     "primitive-paper":          [{ "from": "@mui/material", "named": ["Paper"] }],
     "primitive-skeleton":       [{ "from": "@mui/material", "named": ["Skeleton", "Stack"] }],
-    "primitive-alert":          [{ "from": "@mui/material", "named": ["Alert"] }]
+    "primitive-alert":          [{ "from": "@mui/material", "named": ["Alert"] }],
+    "form-wrapper":             [{ "from": "@mui/material", "named": ["Button", "Stack"] }],
+    "field-input-string":       [{ "from": "@mui/material", "named": ["TextField"] }],
+    "field-input-int":          [{ "from": "@mui/material", "named": ["TextField"] }],
+    "field-input-decimal":      [{ "from": "@mui/material", "named": ["TextField"] }],
+    "field-input-bool":         [{ "from": "@mui/material", "named": ["FormControlLabel", "Switch"] }],
+    "field-input-datetime":     [{ "from": "@mui/material", "named": ["TextField"] }],
+    "field-input-id-select":    [{ "from": "@mui/material", "named": ["FormControl", "FormHelperText", "InputLabel", "MenuItem", "Select"] }],
+    "field-input-id-text":      [{ "from": "@mui/material", "named": ["TextField"] }],
+    "field-input-enum-select":  [{ "from": "@mui/material", "named": ["FormControl", "FormHelperText", "InputLabel", "MenuItem", "Select"] }],
+    "field-input-valueobject":  [{ "from": "@mui/material", "named": ["Box", "Stack"] }],
+    "field-input-array":        [{ "from": "@mui/material", "named": ["TextField"] }]
   }
 }

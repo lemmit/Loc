@@ -130,6 +130,17 @@
     "primitive-breadcrumbs":    [{ "from": "@chakra-ui/react", "named": ["Breadcrumb", "BreadcrumbItem", "BreadcrumbLink"] }],
     "primitive-paper":          [{ "from": "@chakra-ui/react", "named": ["Box"] }],
     "primitive-skeleton":       [{ "from": "@chakra-ui/react", "named": ["Skeleton", "VStack"] }],
-    "primitive-alert":          [{ "from": "@chakra-ui/react", "named": ["Alert", "AlertIcon", "AlertDescription"] }]
+    "primitive-alert":          [{ "from": "@chakra-ui/react", "named": ["Alert", "AlertIcon", "AlertDescription"] }],
+    "form-wrapper":             [{ "from": "@chakra-ui/react", "named": ["Button", "HStack", "VStack"] }],
+    "field-input-string":       [{ "from": "@chakra-ui/react", "named": ["FormControl", "FormErrorMessage", "FormLabel", "Input"] }],
+    "field-input-int":          [{ "from": "@chakra-ui/react", "named": ["FormControl", "FormErrorMessage", "FormLabel", "NumberInput", "NumberInputField"] }],
+    "field-input-decimal":      [{ "from": "@chakra-ui/react", "named": ["FormControl", "FormErrorMessage", "FormLabel", "NumberInput", "NumberInputField"] }],
+    "field-input-bool":         [{ "from": "@chakra-ui/react", "named": ["FormControl", "FormLabel", "Switch"] }],
+    "field-input-datetime":     [{ "from": "@chakra-ui/react", "named": ["FormControl", "FormErrorMessage", "FormLabel", "Input"] }],
+    "field-input-id-select":    [{ "from": "@chakra-ui/react", "named": ["FormControl", "FormErrorMessage", "FormLabel", "Select"] }],
+    "field-input-id-text":      [{ "from": "@chakra-ui/react", "named": ["FormControl", "FormErrorMessage", "FormLabel", "Input"] }],
+    "field-input-enum-select":  [{ "from": "@chakra-ui/react", "named": ["FormControl", "FormErrorMessage", "FormLabel", "Select"] }],
+    "field-input-valueobject":  [{ "from": "@chakra-ui/react", "named": ["Box", "VStack"] }],
+    "field-input-array":        [{ "from": "@chakra-ui/react", "named": ["FormControl", "FormErrorMessage", "FormLabel", "Input"] }]
   }
 }

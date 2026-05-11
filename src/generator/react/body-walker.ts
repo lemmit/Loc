@@ -48,6 +48,7 @@
 //     uses to decide whether to dispatch to the walker.
 
 import type { ImportSpec, LoadedPack } from "./templating/loader.js";
+import type { FormFieldVM } from "./templating/view-models.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -73,13 +74,9 @@ import { renderFormField } from "./templating/render.js";
 
 /** Per-source named-import map — `from` module → set of named
  *  exports the page needs from it.  Replaces the old single-source
- *  `Set<MantineImport>` so primitives ported through the pack
- *  contract can declare their own imports (shadcn pulls
- *  `@/components/ui/button`, lucide-react, etc., not just Mantine).
- *
- *  Existing emit functions that haven't yet been ported to the
- *  pack contract use `addMantineImport` (below) which appends to
- *  this map keyed by `"@mantine/core"`.  The page-shell consumer
+ *  `Set<MantineImport>` so all primitives and form-field templates
+ *  declare their own imports through the pack contract
+ *  (`addImportsForTemplate` below).  The page-shell consumer
  *  iterates the map and emits one `import` line per source. */
 export type ImportMap = Map<string, Set<string>>;
 
@@ -94,12 +91,31 @@ function addImport(ctx: WalkContext, from: string, ...names: string[]): void {
   for (const n of names) s.add(n);
 }
 
-/** Convenience for the (still many) emit functions that haven't been
- *  ported to the pack contract yet — they all want named imports
- *  from `@mantine/core`.  Keeps call sites compact and grep-able
- *  while the migration finishes. */
-function addMantineImport(ctx: WalkContext, ...names: string[]): void {
-  addImport(ctx, "@mantine/core", ...names);
+/** Look up `templateName` in the pack manifest's `imports` map and
+ *  merge every declared `{ from, named }` spec into the walker's
+ *  per-source import map.  When the pack has no entry for the template
+ *  the call is a no-op — the template is expected to emit only
+ *  import-free JSX (e.g. plain `<div>` wrappers). */
+function addImportsForTemplate(
+  ctx: WalkContext,
+  pack: LoadedPack,
+  templateName: string,
+): void {
+  const specs: ImportSpec[] = pack.manifest.imports?.[templateName] ?? [];
+  for (const spec of specs) addImport(ctx, spec.from, ...spec.named);
+}
+
+/** Collect every unique `field-input-*` template name used by a list
+ *  of FormFieldVMs, recursing into value-object children so nested
+ *  Fieldset sub-fields also register their imports. */
+function collectFieldTemplates(vms: FormFieldVM[]): Set<string> {
+  const out = new Set<string>();
+  const visit = (vm: FormFieldVM) => {
+    out.add(vm.template);
+    if (vm.children) for (const child of vm.children) visit(child);
+  };
+  for (const vm of vms) visit(vm);
+  return out;
 }
 
 /** Render a primitive through the pack and merge its declared
@@ -301,9 +317,8 @@ export function isWalkableLayoutBody(
 export function walkBodyToTsx(
   body: ExprIR,
   /** Loaded design pack — drives per-pack rendering for primitives
-   *  ported through the pack contract.  Emits not yet ported still
-   *  call `addMantineImport` directly; the pack reference is unused
-   *  by them and harmless to thread through. */
+   *  and field-input templates; their import declarations come from
+   *  the pack manifest's `imports` map via `addImportsForTemplate`. */
   pack: LoadedPack,
   /** Slice 11.4 — names of the page's route params; refs to these
    *  names emit as `{name}` JSX expressions (resolved by
@@ -1240,7 +1255,6 @@ function emitFormOfAggregate(
   const useController = needsController(fields, bc);
   const defaultValuesTs = initialValuesTs(fields, bc);
   const fieldComponents = [...componentsForFields(fields, bc)];
-  addMantineImport(ctx, "Stack", "Button", "Group", ...fieldComponents);
   const testidArg = stringNamed(call, "testid");
   const testidNamespace = testidArg ?? `${snake(plural(agg.name))}-new`;
   const fieldVMs = fields.map((f) =>
@@ -1252,6 +1266,12 @@ function emitFormOfAggregate(
       aggregatesByNameMut,
     ),
   );
+  // Register imports for the form wrapper (layout, submit button, etc.)
+  // and for every field-input-* template used by this form's fields.
+  addImportsForTemplate(ctx, ctx.pack, "form-wrapper");
+  for (const tpl of collectFieldTemplates(fieldVMs)) {
+    addImportsForTemplate(ctx, ctx.pack, tpl);
+  }
   const fieldHtmls = fieldVMs.map((vm) => renderFormField(vm, ctx.pack));
   for (const vm of fieldVMs) ctx.collectedTestids.add(vm.testId);
   ctx.collectedTestids.add(`${testidNamespace}-submit`);
@@ -1357,7 +1377,6 @@ function emitFormRuns(
   const useController = needsController(fieldsForHelpers, bc);
   const defaultValuesTs = initialValuesTs(fieldsForHelpers, bc);
   const fieldComponents = [...componentsForFields(fieldsForHelpers, bc)];
-  addMantineImport(ctx, "Stack", "Button", "Group", ...fieldComponents);
   const testidArg = stringNamed(call, "testid");
   const testidNamespace = testidArg ?? `workflow-${snake(workflow.name)}`;
   const fieldVMs = fields.map((f) =>
@@ -1369,6 +1388,12 @@ function emitFormRuns(
       aggregatesByNameMut,
     ),
   );
+  // Register imports for the form wrapper (layout, submit button, etc.)
+  // and for every field-input-* template used by this form's fields.
+  addImportsForTemplate(ctx, ctx.pack, "form-wrapper");
+  for (const tpl of collectFieldTemplates(fieldVMs)) {
+    addImportsForTemplate(ctx, ctx.pack, tpl);
+  }
   const fieldHtmls = fieldVMs.map((vm) => renderFormField(vm, ctx.pack));
   for (const vm of fieldVMs) ctx.collectedTestids.add(vm.testId);
   ctx.collectedTestids.add(`${testidNamespace}-submit`);

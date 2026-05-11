@@ -342,6 +342,19 @@
           "KeyValueRow"
         ]
       }
-    ]
+    ],
+    "form-wrapper": [
+      { "from": "@mantine/core", "named": ["Button", "Group", "Stack"] }
+    ],
+    "field-input-string":       [{ "from": "@mantine/core", "named": ["TextInput"] }],
+    "field-input-int":          [{ "from": "@mantine/core", "named": ["NumberInput"] }],
+    "field-input-decimal":      [{ "from": "@mantine/core", "named": ["NumberInput"] }],
+    "field-input-bool":         [{ "from": "@mantine/core", "named": ["Switch"] }],
+    "field-input-datetime":     [{ "from": "@mantine/core", "named": ["TextInput"] }],
+    "field-input-id-select":    [{ "from": "@mantine/core", "named": ["Select"] }],
+    "field-input-id-text":      [{ "from": "@mantine/core", "named": ["TextInput"] }],
+    "field-input-enum-select":  [{ "from": "@mantine/core", "named": ["Select"] }],
+    "field-input-valueobject":  [{ "from": "@mantine/core", "named": ["Fieldset", "Stack"] }],
+    "field-input-array":        [{ "from": "@mantine/core", "named": ["TextInput"] }]
   }
 }
