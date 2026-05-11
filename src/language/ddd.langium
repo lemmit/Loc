@@ -171,15 +171,15 @@ Platform returns string:
     'dotnet' | 'hono' | 'react' | 'static' | 'phoenixLiveView';
 
 // Design-system pack selector — picks the template pack the UI
-// generator renders pages against.  `mantine` and `shadcn` are
-// React/TSX packs; `ashPhoenix` is the HEEx pack for the Phoenix
-// LiveView platform.  STRING points at a custom pack: a directory
-// with `pack.json` resolved relative to the .ddd file.  Only
-// meaningful when the deployable mounts a UI; ignored otherwise.
-// Named `design` (not `ui`) to avoid colliding with the test-DSL's
-// `ui.workflows.X(...)` accessor.
+// generator renders pages against.  `mantine` (default), `shadcn`,
+// and `mui` are React/TSX packs; `ashPhoenix` is the HEEx pack for
+// the Phoenix LiveView platform.  STRING points at a custom pack:
+// a directory with `pack.json` resolved relative to the .ddd file.
+// Only meaningful when the deployable mounts a UI; ignored
+// otherwise.  Named `design` (not `ui`) to avoid colliding with
+// the test-DSL's `ui.workflows.X(...)` accessor.
 DesignPack returns string:
-    'mantine' | 'shadcn' | 'ashPhoenix' | STRING;
+    'mantine' | 'shadcn' | 'mui' | 'ashPhoenix' | STRING;
 
 // Per-deployable auth opt-in.  `required` enables JWT-decode middleware
 // and the user-supplied verifier hook.  Absence keeps the deployable

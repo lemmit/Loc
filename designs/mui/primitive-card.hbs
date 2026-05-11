@@ -1,0 +1,14 @@
+{{#if hasTitle}}{{#if hasContent}}<Card{{{testidAttr}}}>
+{{indent}}<CardContent>
+{{indent}}<Typography variant="h6">{{{titleText}}}</Typography>
+{{indent}}{{{contentJsx}}}
+{{indent}}</CardContent>
+{{closeIndent}}</Card>{{else}}<Card{{{testidAttr}}}>
+{{indent}}<CardContent>
+{{indent}}<Typography variant="h6">{{{titleText}}}</Typography>
+{{indent}}</CardContent>
+{{closeIndent}}</Card>{{/if}}{{else}}{{#if hasContent}}<Card{{{testidAttr}}}>
+{{indent}}<CardContent>
+{{indent}}{{{contentJsx}}}
+{{indent}}</CardContent>
+{{closeIndent}}</Card>{{else}}<Card{{{testidAttr}}} />{{/if}}{{/if}}

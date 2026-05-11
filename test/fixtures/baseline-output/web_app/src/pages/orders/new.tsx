@@ -45,7 +45,7 @@ export default function OrderNew() {
             <TextInput label="Placed At" {...register("placedAt")} data-testid="orders-new-input-placedAt" type="datetime-local" error={errors.placedAt?.message} />
     
             <Group justify="flex-end" mt="sm">
-              <Button type="submit" loading={create.isPending} data-testid="orders-new-submit">Create</Button>
+              <Button type="submit" loading={ create.isPending } data-testid="orders-new-submit">Create</Button>
             </Group>
           </Stack>
         </form>

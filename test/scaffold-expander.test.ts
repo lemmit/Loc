@@ -194,41 +194,100 @@ describe("Slice C1 — scaffold expander dispatch", () => {
     expect(ofArg.name).toBe("Order");
   });
 
-  it("aggregate-detail returns null (deferred to A10+)", () => {
+  it("aggregate-detail expands to Stack(Breadcrumbs, Heading, QueryView(single: true))", () => {
     const origin: ScaffoldOriginIR = {
       kind: "aggregate-detail",
       aggregateName: "Order",
       contextName: "Orders",
     };
-    expect(expandScaffoldToExplicitBody(origin, ctx)).toBeNull();
+    const body = expandScaffoldToExplicitBody(origin, ctx);
+    expect(body).not.toBeNull();
+    expect((body as { name: string }).name).toBe("Stack");
+    // KeyValueRow per non-collection field; QueryView wraps the data.
+    expect(findCall(body!, "QueryView")).not.toBeNull();
+    expect(findCall(body!, "KeyValueRow")).not.toBeNull();
+    // The byId query becomes a method-call on the api param.
+    const qv = findCall(body!, "QueryView")!;
+    if (qv.kind !== "call") return;
+    const ofIdx = (qv.argNames ?? []).indexOf("of");
+    const ofArg = qv.args[ofIdx]!;
+    expect(ofArg.kind).toBe("method-call");
+    if (ofArg.kind !== "method-call") return;
+    expect(ofArg.member).toBe("byId");
+    // single: true marks the QueryView as single-record (vs collection).
+    const singleIdx = (qv.argNames ?? []).indexOf("single");
+    expect(singleIdx).toBeGreaterThanOrEqual(0);
   });
 
-  it("workflow-form returns null (deferred)", () => {
+  it("workflow-form expands to Stack(Breadcrumbs, Heading, Card(Form(runs:)))", () => {
+    // Augment the test ctx with a synthetic workflow.
+    const sysWithWf = makeSystem();
+    sysWithWf.modules[0]!.contexts[0]!.workflows.push({
+      name: "placeOrder",
+      params: [{ name: "qty", type: { kind: "primitive", name: "int" } }],
+      transactional: false,
+      statements: [],
+      savesAtExit: [],
+    } as never);
+    const ctxWithWf = buildExpandContext(sysWithWf, makeUi());
     const origin: ScaffoldOriginIR = {
       kind: "workflow-form",
       workflowName: "placeOrder",
       contextName: "Orders",
     };
-    expect(expandScaffoldToExplicitBody(origin, ctx)).toBeNull();
+    const body = expandScaffoldToExplicitBody(origin, ctxWithWf);
+    expect(body).not.toBeNull();
+    expect((body as { name: string }).name).toBe("Stack");
+    expect(findCall(body!, "Breadcrumbs")).not.toBeNull();
+    expect(findCall(body!, "Heading")).not.toBeNull();
+    expect(findCall(body!, "Card")).not.toBeNull();
+    const form = findCall(body!, "Form")!;
+    expect(form.kind).toBe("call");
+    if (form.kind !== "call") return;
+    const runsIdx = (form.argNames ?? []).indexOf("runs");
+    expect(runsIdx).toBeGreaterThanOrEqual(0);
+    expect((form.args[runsIdx] as { name: string }).name).toBe("placeOrder");
   });
 
-  it("view-list returns null (deferred)", () => {
+  it("view-list expands to Stack(Heading, QueryView(Views.<name>, …))", () => {
+    const sysWithView = makeSystem();
+    sysWithView.modules[0]!.contexts[0]!.views.push({
+      name: "ActiveOrders",
+      aggregateName: "Order",
+    } as never);
+    const ctxWithView = buildExpandContext(sysWithView, makeUi());
     const origin: ScaffoldOriginIR = {
       kind: "view-list",
       viewName: "ActiveOrders",
       contextName: "Orders",
     };
-    expect(expandScaffoldToExplicitBody(origin, ctx)).toBeNull();
+    const body = expandScaffoldToExplicitBody(origin, ctxWithView);
+    expect(body).not.toBeNull();
+    expect((body as { name: string }).name).toBe("Stack");
+    expect(findCall(body!, "Heading")).not.toBeNull();
+    expect(findCall(body!, "QueryView")).not.toBeNull();
+    expect(findCall(body!, "Table")).not.toBeNull();
+    // The QueryView's `of:` is a member access on `Views`.
+    const qv = findCall(body!, "QueryView")!;
+    if (qv.kind !== "call") return;
+    const ofIdx = (qv.argNames ?? []).indexOf("of");
+    const ofArg = qv.args[ofIdx]!;
+    expect(ofArg.kind).toBe("member");
+    if (ofArg.kind !== "member") return;
+    expect((ofArg.receiver as { name: string }).name).toBe("Views");
+    expect(ofArg.member).toBe("ActiveOrders");
   });
 
-  it("workflows-index / views-index / home all return null", () => {
+  it("workflows-index / views-index / home all expand to Stack(...) bodies", () => {
     expect(
-      expandScaffoldToExplicitBody({ kind: "workflows-index" }, ctx),
-    ).toBeNull();
+      expandScaffoldToExplicitBody({ kind: "workflows-index" }, ctx)?.kind,
+    ).toBe("call");
     expect(
-      expandScaffoldToExplicitBody({ kind: "views-index" }, ctx),
-    ).toBeNull();
-    expect(expandScaffoldToExplicitBody({ kind: "home" }, ctx)).toBeNull();
+      expandScaffoldToExplicitBody({ kind: "views-index" }, ctx)?.kind,
+    ).toBe("call");
+    expect(expandScaffoldToExplicitBody({ kind: "home" }, ctx)?.kind).toBe(
+      "call",
+    );
   });
 
   it("returns null when the aggregate isn't in the context map", () => {

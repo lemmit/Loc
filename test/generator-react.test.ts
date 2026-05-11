@@ -147,25 +147,25 @@ describe("react generator", () => {
     expect(files.get("web_app/e2e/pages/_helpers.ts")).toBeFalsy();
   });
 
-  it("Phase 3: Id<X> op-param renders Select populated by useAll<X>()", async () => {
-    const model = await buildModel("examples/acme.ddd");
-    const { files } = generateSystems(model);
-    const detail = files.get("web_app/src/pages/orders/detail.tsx")!;
-    // Cross-aggregate hook import.
-    expect(detail).toMatch(
-      /import \{ useAllProducts \} from "\.\.\/\.\.\/api\/product"/,
-    );
-    // Hook called inside the operation form component.
-    expect(detail).toMatch(/const __products = useAllProducts\(\);/);
-    // Select bound by Controller, populated from the hook's data,
-    // labelled by the target's display field (`sku`).
-    expect(detail).toMatch(/<Select label="Product Id"/);
-    expect(detail).toMatch(/__products\.data \?\? \[\]/);
-    expect(detail).toMatch(/label: __o\.sku/);
-    // renderOption emits a per-option testid for Playwright drivers.
-    expect(detail).toMatch(/data-testid=\{`orders-op-addLine-input-productId-option-\$\{option\.value\}`\}/);
-    // Old plain-TextInput placeholder is gone.
-    expect(detail).not.toMatch(/placeholder="<id>"/);
+  describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — Id<X> op-param select", () => {
+    const guard = withLegacyScaffold();
+    beforeEach(guard.before);
+    afterEach(guard.after);
+
+    it("Phase 3: Id<X> op-param renders Select populated by useAll<X>()", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const detail = files.get("web_app/src/pages/orders/detail.tsx")!;
+      expect(detail).toMatch(
+        /import \{ useAllProducts \} from "\.\.\/\.\.\/api\/product"/,
+      );
+      expect(detail).toMatch(/const __products = useAllProducts\(\);/);
+      expect(detail).toMatch(/<Select label="Product Id"/);
+      expect(detail).toMatch(/__products\.data \?\? \[\]/);
+      expect(detail).toMatch(/label: __o\.sku/);
+      expect(detail).toMatch(/data-testid=\{`orders-op-addLine-input-productId-option-\$\{option\.value\}`\}/);
+      expect(detail).not.toMatch(/placeholder="<id>"/);
+    });
   });
 
   it("Phase 3: page object clicks the testid'd option for Id<X> params", async () => {
@@ -181,16 +181,20 @@ describe("react generator", () => {
     );
   });
 
-  it("detail page shows fields + nested parts (master-detail) + operation buttons", async () => {
-    const model = await buildModel("examples/acme.ddd");
-    const { files } = generateSystems(model);
-    const detail = files.get("web_app/src/pages/orders/detail.tsx")!;
-    expect(detail).toMatch(/use OrderById/.source.replace(/\s/g, ""));
-    // Nested-part rendering (lines is a contained collection).
-    expect(detail).toMatch(/data\.lines\.map/);
-    // Operation buttons + their modal forms.
-    expect(detail).toMatch(/openAddLineModal/);
-    expect(detail).toMatch(/openConfirmModal/);
+  describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — master-detail", () => {
+    const guard = withLegacyScaffold();
+    beforeEach(guard.before);
+    afterEach(guard.after);
+
+    it("detail page shows fields + nested parts (master-detail) + operation buttons", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const detail = files.get("web_app/src/pages/orders/detail.tsx")!;
+      expect(detail).toMatch(/use OrderById/.source.replace(/\s/g, ""));
+      expect(detail).toMatch(/data\.lines\.map/);
+      expect(detail).toMatch(/openAddLineModal/);
+      expect(detail).toMatch(/openConfirmModal/);
+    });
   });
 
   it("API base URL is baked from the target deployable's port", async () => {
@@ -223,32 +227,31 @@ describe("react generator", () => {
     });
   });
 
-  it("detail page uses the display field as title when the aggregate declares one", async () => {
-    const model = await buildModel("examples/acme.ddd");
-    const { files } = generateSystems(model);
-    // Product declares `sku: string display` — title binds to data.sku
-    // so users see the SKU rather than the first 8 chars of the id.
-    const product = files.get("web_app/src/pages/products/detail.tsx")!;
-    expect(product).toMatch(
-      /<Title order=\{2\} data-testid="products-detail-title">\{data\.sku\}<\/Title>/,
-    );
-    // Breadcrumb's last segment should also reflect the display value.
-    expect(product).toMatch(/<Text>\{data\.sku\}<\/Text>/);
-    // Id surfaces beside the title via IdValue (tooltip with full id).
-    expect(product).toMatch(
-      /<span data-testid="products-detail-id"><IdValue id=\{data\.id\}/,
-    );
-    // Customer declares `username: string display`.
-    const customer = files.get("web_app/src/pages/customers/detail.tsx")!;
-    expect(customer).toMatch(
-      /<Title order=\{2\} data-testid="customers-detail-title">\{data\.username\}<\/Title>/,
-    );
+  describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — display-field title", () => {
+    const guard = withLegacyScaffold();
+    beforeEach(guard.before);
+    afterEach(guard.after);
 
-    // Order has no display field — title falls back to the id slice.
-    const order = files.get("web_app/src/pages/orders/detail.tsx")!;
-    expect(order).toMatch(
-      /<Title order=\{2\} data-testid="orders-detail-title">\{data\.id\.slice\(0, 8\) \+ "…"\}<\/Title>/,
-    );
+    it("detail page uses the display field as title when the aggregate declares one", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const product = files.get("web_app/src/pages/products/detail.tsx")!;
+      expect(product).toMatch(
+        /<Title order=\{2\} data-testid="products-detail-title">\{data\.sku\}<\/Title>/,
+      );
+      expect(product).toMatch(/<Text>\{data\.sku\}<\/Text>/);
+      expect(product).toMatch(
+        /<span data-testid="products-detail-id"><IdValue id=\{data\.id\}/,
+      );
+      const customer = files.get("web_app/src/pages/customers/detail.tsx")!;
+      expect(customer).toMatch(
+        /<Title order=\{2\} data-testid="customers-detail-title">\{data\.username\}<\/Title>/,
+      );
+      const order = files.get("web_app/src/pages/orders/detail.tsx")!;
+      expect(order).toMatch(
+        /<Title order=\{2\} data-testid="orders-detail-title">\{data\.id\.slice\(0, 8\) \+ "…"\}<\/Title>/,
+      );
+    });
   });
 
   describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — alerts", () => {
@@ -388,15 +391,19 @@ describe("react generator", () => {
     });
   });
 
-  it("view tables format datetime / int / decimal cells through the format helpers", async () => {
-    const model = await buildModel("examples/acme.ddd");
-    const { files } = generateSystems(model);
-    const view = files.get("web_app/src/pages/views/active_orders.tsx")!;
-    // Shorthand view of Order — placedAt (datetime) → DateTimeValue.
-    expect(view).toMatch(/<DateTimeValue iso=\{row\.placedAt\}/);
-    // Skeleton loading state.
-    expect(view).toMatch(/<Skeleton/);
-    expect(view).not.toMatch(/<Loader \/>/);
+  describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — view formatters", () => {
+    const guard = withLegacyScaffold();
+    beforeEach(guard.before);
+    afterEach(guard.after);
+
+    it("view tables format datetime / int / decimal cells through the format helpers", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const view = files.get("web_app/src/pages/views/active_orders.tsx")!;
+      expect(view).toMatch(/<DateTimeValue iso=\{row\.placedAt\}/);
+      expect(view).toMatch(/<Skeleton/);
+      expect(view).not.toMatch(/<Loader \/>/);
+    });
   });
 
   it("emits Playwright page-object classes per aggregate under e2e/pages/", async () => {
@@ -539,15 +546,20 @@ describe("react generator", () => {
       expect(app).not.toMatch(/data-testid="nav-views"/);
     });
 
-    it("detail page uses Breadcrumbs (Home / <Plural> / id) instead of a bare back-anchor", async () => {
-      const model = await buildModel("examples/acme.ddd");
-      const { files } = generateSystems(model);
-      const detail = files.get("web_app/src/pages/orders/detail.tsx")!;
-      expect(detail).toMatch(/<Breadcrumbs data-testid="orders-detail-breadcrumbs">/);
-      expect(detail).toMatch(/<Anchor component=\{Link\} to="\/">Home<\/Anchor>/);
-      expect(detail).toMatch(/<Anchor component=\{Link\} to="\/orders">Orders<\/Anchor>/);
-      // The old "← back" anchor is gone — Breadcrumbs replaces it.
-      expect(detail).not.toMatch(/← back/);
+    describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — detail breadcrumbs", () => {
+      const detailGuard = withLegacyScaffold();
+      beforeEach(detailGuard.before);
+      afterEach(detailGuard.after);
+
+      it("detail page uses Breadcrumbs (Home / <Plural> / id) instead of a bare back-anchor", async () => {
+        const model = await buildModel("examples/acme.ddd");
+        const { files } = generateSystems(model);
+        const detail = files.get("web_app/src/pages/orders/detail.tsx")!;
+        expect(detail).toMatch(/<Breadcrumbs data-testid="orders-detail-breadcrumbs">/);
+        expect(detail).toMatch(/<Anchor component=\{Link\} to="\/">Home<\/Anchor>/);
+        expect(detail).toMatch(/<Anchor component=\{Link\} to="\/orders">Orders<\/Anchor>/);
+        expect(detail).not.toMatch(/← back/);
+      });
     });
 
     describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0)", () => {
@@ -569,18 +581,21 @@ describe("react generator", () => {
       });
     });
 
-    it("home page lands as a summary, not a duplicate of the sidebar", async () => {
-      const model = await buildModel("examples/acme.ddd");
-      const { files } = generateSystems(model);
-      const home = files.get("web_app/src/pages/home.tsx")!;
-      // SimpleGrid of construct-kind summary cards.
-      expect(home).toMatch(/<SimpleGrid cols=\{\{ base: 1, sm: 2, md: 3 \}\}/);
-      // Counts mention the right cardinalities (acme has 3 aggregates
-      // — Product + Order + Customer — plus 1 workflow and 2 views).
-      expect(home).toMatch(/3 aggregates/);
-      expect(home).toMatch(/1 workflow[^s]/);
-      expect(home).toMatch(/2 views/);
-      expect(home).toMatch(/data-testid="home"/);
+    describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — home summary", () => {
+      const homeGuard = withLegacyScaffold();
+      beforeEach(homeGuard.before);
+      afterEach(homeGuard.after);
+
+      it("home page lands as a summary, not a duplicate of the sidebar", async () => {
+        const model = await buildModel("examples/acme.ddd");
+        const { files } = generateSystems(model);
+        const home = files.get("web_app/src/pages/home.tsx")!;
+        expect(home).toMatch(/<SimpleGrid cols=\{\{ base: 1, sm: 2, md: 3 \}\}/);
+        expect(home).toMatch(/3 aggregates/);
+        expect(home).toMatch(/1 workflow[^s]/);
+        expect(home).toMatch(/2 views/);
+        expect(home).toMatch(/data-testid="home"/);
+      });
     });
   });
 
@@ -767,25 +782,25 @@ describe("react generator", () => {
       expect(api).toMatch(/api\.post\(`\/workflows\/place_order`, input\)/);
     });
 
-    it("emits a workflows index page listing every workflow", async () => {
-      const model = await buildModel("examples/acme.ddd");
-      const { files } = generateSystems(model);
-      const idx = files.get("web_app/src/pages/workflows/index.tsx")!;
-      // One card per workflow, with a Run link.
-      expect(idx).toMatch(/data-testid="workflow-card-place_order"/);
-      // Humanised title.
-      expect(idx).toMatch(/<Title order=\{4\}>Place Order<\/Title>/);
-      // Parameter signature surfaces in a dimmed text row.  The
-      // type label is emitted as a string literal so JSX doesn't
-      // parse `Id<Product>` as an opening element.
-      expect(idx).toMatch(
-        /workflow-place_order-param-customerId.*<strong>Customer Id<\/strong>: \{"string"\}/,
-      );
-      expect(idx).toMatch(
-        /workflow-place_order-param-productId.*<strong>Product Id<\/strong>: \{"Id<Product>"\}/,
-      );
-      // "Run" button links to the per-workflow page.
-      expect(idx).toMatch(/to="\/workflows\/place_order"/);
+    describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — workflows index", () => {
+      const wfIdxGuard = withLegacyScaffold();
+      beforeEach(wfIdxGuard.before);
+      afterEach(wfIdxGuard.after);
+
+      it("emits a workflows index page listing every workflow", async () => {
+        const model = await buildModel("examples/acme.ddd");
+        const { files } = generateSystems(model);
+        const idx = files.get("web_app/src/pages/workflows/index.tsx")!;
+        expect(idx).toMatch(/data-testid="workflow-card-place_order"/);
+        expect(idx).toMatch(/<Title order=\{4\}>Place Order<\/Title>/);
+        expect(idx).toMatch(
+          /workflow-place_order-param-customerId.*<strong>Customer Id<\/strong>: \{"string"\}/,
+        );
+        expect(idx).toMatch(
+          /workflow-place_order-param-productId.*<strong>Product Id<\/strong>: \{"Id<Product>"\}/,
+        );
+        expect(idx).toMatch(/to="\/workflows\/place_order"/);
+      });
     });
 
     it("emits a per-workflow form page with typed inputs reusing the v4 form helpers", async () => {
@@ -842,15 +857,18 @@ describe("react generator", () => {
       );
     });
 
-    it("home page summarises workflows when at least one exists", async () => {
-      const model = await buildModel("examples/acme.ddd");
-      const { files } = generateSystems(model);
-      const home = files.get("web_app/src/pages/home.tsx")!;
-      // Slice 20 simplified the home page: a card per construct
-      // kind with a count + "Open <kind>" link, instead of a full
-      // navigation re-listing.
-      expect(home).toMatch(/1 workflow[^s]/);
-      expect(home).toMatch(/data-testid="home-workflows-link"/);
+    describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — home workflows summary", () => {
+      const homeWfGuard = withLegacyScaffold();
+      beforeEach(homeWfGuard.before);
+      afterEach(homeWfGuard.after);
+
+      it("home page summarises workflows when at least one exists", async () => {
+        const model = await buildModel("examples/acme.ddd");
+        const { files } = generateSystems(model);
+        const home = files.get("web_app/src/pages/home.tsx")!;
+        expect(home).toMatch(/1 workflow[^s]/);
+        expect(home).toMatch(/data-testid="home-workflows-link"/);
+      });
     });
   });
 
@@ -876,50 +894,54 @@ describe("react generator", () => {
       expect(api).toMatch(/export function useOrderSummaryView\(\)/);
     });
 
-    it("emits a views index page listing every view", async () => {
-      const model = await buildModel("examples/acme.ddd");
-      const { files } = generateSystems(model);
-      const idx = files.get("web_app/src/pages/views/index.tsx")!;
-      expect(idx).toMatch(/data-testid="view-card-active_orders"/);
-      expect(idx).toMatch(/data-testid="view-card-order_summary"/);
-      expect(idx).toMatch(/<Title order=\{4\}>Active Orders<\/Title>/);
-      expect(idx).toMatch(/<Title order=\{4\}>Order Summary<\/Title>/);
-      // Shorthand view shows the source aggregate; full-form view
-      // shows "Custom shape: <field names>".
-      expect(idx).toMatch(/Source: Order/);
-      expect(idx).toMatch(/Custom shape: orderId, status, lineCount/);
+    describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — views index", () => {
+      const viewIdxGuard = withLegacyScaffold();
+      beforeEach(viewIdxGuard.before);
+      afterEach(viewIdxGuard.after);
+
+      it("emits a views index page listing every view", async () => {
+        const model = await buildModel("examples/acme.ddd");
+        const { files } = generateSystems(model);
+        const idx = files.get("web_app/src/pages/views/index.tsx")!;
+        expect(idx).toMatch(/data-testid="view-card-active_orders"/);
+        expect(idx).toMatch(/data-testid="view-card-order_summary"/);
+        expect(idx).toMatch(/<Title order=\{4\}>Active Orders<\/Title>/);
+        expect(idx).toMatch(/<Title order=\{4\}>Order Summary<\/Title>/);
+        expect(idx).toMatch(/Source: Order/);
+        expect(idx).toMatch(/Custom shape: orderId, status, lineCount/);
+      });
     });
 
-    it("emits a per-view table page that calls the query hook", async () => {
-      const model = await buildModel("examples/acme.ddd");
-      const { files } = generateSystems(model);
-      const page = files.get("web_app/src/pages/views/order_summary.tsx")!;
-      expect(page).toMatch(/import \{ useOrderSummaryView \} from "\.\.\/\.\.\/api\/views"/);
-      expect(page).toMatch(/const q = useOrderSummaryView\(\)/);
-      // Table headers from the view's declared fields.
-      expect(page).toMatch(/<Table\.Th>Order Id<\/Table\.Th>/);
-      expect(page).toMatch(/<Table\.Th>Status<\/Table\.Th>/);
-      expect(page).toMatch(/<Table\.Th>Line Count<\/Table\.Th>/);
-      // Id<Order> cell auto-links to /orders/<id> (Order has UI in
-      // this deployable's modules).
-      expect(page).toMatch(
-        /<Anchor component=\{Link\} to=\{`\/orders\/\$\{row\.orderId\}`\}/,
-      );
-      // Empty + error states present.
-      expect(page).toMatch(/q\.data && q\.data\.length === 0 && <Text c="dimmed">No rows\.<\/Text>/);
-      expect(page).toMatch(/q\.isError && <Alert color="red"/);
-    });
+    describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0)", () => {
+      const viewGuard = withLegacyScaffold();
+      beforeEach(viewGuard.before);
+      afterEach(viewGuard.after);
 
-    it("shorthand view's table page uses the source aggregate's wire columns", async () => {
-      const model = await buildModel("examples/acme.ddd");
-      const { files } = generateSystems(model);
-      const page = files.get("web_app/src/pages/views/active_orders.tsx")!;
-      // ActiveOrders is shorthand `view ActiveOrders = Order where ...`
-      // — table columns mirror Order's primitive/id/enum fields.
-      expect(page).toMatch(/<Table\.Th>Id<\/Table\.Th>/);
-      expect(page).toMatch(/<Table\.Th>Customer Id<\/Table\.Th>/);
-      expect(page).toMatch(/<Table\.Th>Status<\/Table\.Th>/);
-      expect(page).toMatch(/<Table\.Th>Placed At<\/Table\.Th>/);
+      it("emits a per-view table page that calls the query hook", async () => {
+        const model = await buildModel("examples/acme.ddd");
+        const { files } = generateSystems(model);
+        const page = files.get("web_app/src/pages/views/order_summary.tsx")!;
+        expect(page).toMatch(/import \{ useOrderSummaryView \} from "\.\.\/\.\.\/api\/views"/);
+        expect(page).toMatch(/const q = useOrderSummaryView\(\)/);
+        expect(page).toMatch(/<Table\.Th>Order Id<\/Table\.Th>/);
+        expect(page).toMatch(/<Table\.Th>Status<\/Table\.Th>/);
+        expect(page).toMatch(/<Table\.Th>Line Count<\/Table\.Th>/);
+        expect(page).toMatch(
+          /<Anchor component=\{Link\} to=\{`\/orders\/\$\{row\.orderId\}`\}/,
+        );
+        expect(page).toMatch(/q\.data && q\.data\.length === 0 && <Text c="dimmed">No rows\.<\/Text>/);
+        expect(page).toMatch(/q\.isError && <Alert color="red"/);
+      });
+
+      it("shorthand view's table page uses the source aggregate's wire columns", async () => {
+        const model = await buildModel("examples/acme.ddd");
+        const { files } = generateSystems(model);
+        const page = files.get("web_app/src/pages/views/active_orders.tsx")!;
+        expect(page).toMatch(/<Table\.Th>Id<\/Table\.Th>/);
+        expect(page).toMatch(/<Table\.Th>Customer Id<\/Table\.Th>/);
+        expect(page).toMatch(/<Table\.Th>Status<\/Table\.Th>/);
+        expect(page).toMatch(/<Table\.Th>Placed At<\/Table\.Th>/);
+      });
     });
 
     it("App.tsx registers /views + /views/<slug> routes and sidebar entry", async () => {
@@ -949,12 +971,18 @@ describe("react generator", () => {
       );
     });
 
-    it("home page summarises views when at least one exists", async () => {
-      const model = await buildModel("examples/acme.ddd");
-      const { files } = generateSystems(model);
-      const home = files.get("web_app/src/pages/home.tsx")!;
-      expect(home).toMatch(/2 views/);
-      expect(home).toMatch(/data-testid="home-views-link"/);
+    describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — home views summary", () => {
+      const homeViewsGuard = withLegacyScaffold();
+      beforeEach(homeViewsGuard.before);
+      afterEach(homeViewsGuard.after);
+
+      it("home page summarises views when at least one exists", async () => {
+        const model = await buildModel("examples/acme.ddd");
+        const { files } = generateSystems(model);
+        const home = files.get("web_app/src/pages/home.tsx")!;
+        expect(home).toMatch(/2 views/);
+        expect(home).toMatch(/data-testid="home-views-link"/);
+      });
     });
   });
 

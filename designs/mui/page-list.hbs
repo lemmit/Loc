@@ -1,0 +1,79 @@
+// Auto-generated.
+import { Link, useNavigate } from "react-router-dom";
+import {
+  Stack, Typography, Button, Table, TableHead, TableBody, TableRow, TableCell,
+  TableContainer, Paper, Skeleton, Alert, Link as MuiLink, Chip, Breadcrumbs,
+  Box, CircularProgress,
+} from "@mui/material";
+import AddIcon from "@mui/icons-material/Add";
+import ErrorIcon from "@mui/icons-material/Error";
+import { {{hookName}} } from "{{{hookImportPath}}}";
+import { IdValue, DateTimeValue, BoolValue, NumberValue, EmptyValue } from "../../lib/format";
+
+export default function {{aggregateName}}List() {
+  const navigate = useNavigate();
+  const q ={{hookName}}();
+  const count = q.data?.length ?? 0;
+  return (
+    <Stack data-testid="{{slug}}-list" gap={2}>
+      <Breadcrumbs data-testid="{{slug}}-list-breadcrumbs">
+        {{#each breadcrumbs}}{{#if to}}<MuiLink component={Link} to="{{{to}}}">{{label}}</MuiLink>{{else}}<Typography>{{label}}</Typography>{{/if}}
+        {{/each}}
+      </Breadcrumbs>
+      <Stack direction="row" justifyContent="space-between" alignItems="flex-end">
+        <Stack gap={0.5}>
+          <Typography variant="h5">{{humanPlural}}</Typography>
+          <Typography variant="body2" color="text.secondary">{q.isLoading ? "Loading…" : count === 1 ? "1 record" : count + " records"}</Typography>
+        </Stack>
+        <Button startIcon={<AddIcon />} variant="contained" onClick={() => navigate("/{{slug}}/new")} data-testid="{{slug}}-list-create">New {{humanSingularLower}}</Button>
+      </Stack>
+      {q.isLoading && (
+        <Paper variant="outlined" sx=\{{ p: 2 }}>
+          <Stack gap={1}>
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Skeleton key={i} height={28} />
+            ))}
+          </Stack>
+        </Paper>
+      )}
+      {q.isError && <Alert severity="error" icon={<ErrorIcon />}><strong>Couldn't load {{humanPluralLower}}</strong> — {(q.error as Error).message}</Alert>}
+      {q.data && q.data.length === 0 && (
+        <Paper variant="outlined" sx=\{{ p: 4 }} data-testid="{{slug}}-list-empty">
+          <Box sx=\{{ display: "flex", justifyContent: "center", minHeight: 160, alignItems: "center" }}>
+            <Stack gap={1} alignItems="center">
+              <Typography color="text.secondary">No {{humanPluralLower}} yet.</Typography>
+              <Button variant="outlined" onClick={() => navigate("/{{slug}}/new")}>
+                Create your first {{humanSingularLower}}
+              </Button>
+            </Stack>
+          </Box>
+        </Paper>
+      )}
+      {q.data && q.data.length > 0 && (
+        <TableContainer component={Paper} variant="outlined">
+          <Table size="small" stickyHeader>
+            <TableHead>
+              <TableRow>
+                {{#each columns}}<TableCell>{{title}}</TableCell>
+                {{/each}}
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {q.data.map((row) => (
+                <TableRow
+                  key={row.id}
+                  data-testid={`{{slug}}-row-${row.id}`}
+                  sx=\{{ cursor: "pointer", "&:hover": { bgcolor: "action.hover" } }}
+                  onClick={() => navigate(`/{{slug}}/${row.id}`)}
+                >
+                  {{#each columns}}{{> (concat "cell-" kind)}}
+                  {{/each}}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      )}
+    </Stack>
+  );
+}

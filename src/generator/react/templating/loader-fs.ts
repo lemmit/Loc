@@ -47,13 +47,13 @@ function repoRoot(): string {
 }
 
 /** Built-in pack names — resolve under `<repo>/designs/<name>/`. */
-const BUILTIN_PACKS = new Set(["mantine", "shadcn", "ashPhoenix"]);
+const BUILTIN_PACKS = new Set(["mantine", "shadcn", "mui", "ashPhoenix"]);
 
-/** Resolve a pack identifier ("mantine" / "shadcn" / "ashPhoenix" /
- *  "./design/") to an absolute pack directory.  `referenceDir` is
- *  the directory the .ddd source lives in — used to anchor relative
- *  custom-pack paths.  Built-in names resolve under
- *  `<repo>/designs/<name>`. */
+/** Resolve a pack identifier ("mantine" / "shadcn" / "mui" /
+ *  "ashPhoenix" / "./design/") to an absolute pack directory.
+ *  `referenceDir` is the directory the .ddd source lives in — used
+ *  to anchor relative custom-pack paths.  Built-in names resolve
+ *  under `<repo>/designs/<name>`. */
 export function resolvePackDir(ui: string, referenceDir?: string): string {
   if (BUILTIN_PACKS.has(ui)) {
     return path.join(repoRoot(), "designs", ui);

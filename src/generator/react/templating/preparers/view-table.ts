@@ -1,9 +1,7 @@
 // ---------------------------------------------------------------------------
-// View-model preparer for the per-view table page.  Cells reuse the
-// page-list cell-* templates by binding `valueExpr` to `row.<col>`
-// and `testIdExpr` to a view-scoped indexed string (`view-<slug>-
-// row-${idx}-<col>`).  Same VM shape as ListPageVM cells; the
-// renderer just iterates a different Tr scope (q.data.map((row, idx))).
+// View-model preparer for the per-view table page.  Columns carry semantic
+// descriptors so pack templates can dispatch to cell partials directly via
+// `{{> (concat "cell-" kind)}}` without TS-side pre-rendering.
 // ---------------------------------------------------------------------------
 
 import type {
@@ -13,7 +11,7 @@ import type {
   ViewIR,
 } from "../../../../ir/loom-ir.js";
 import { humanize, plural, snake } from "../../../../util/naming.js";
-import type { CellVM, ViewTablePageVM } from "../view-models.js";
+import type { ColumnVM, ViewTablePageVM } from "../view-models.js";
 
 function pascal(s: string): string {
   return s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
@@ -36,36 +34,40 @@ export function prepareViewTablePageVM(
   aggregatesByName: Map<string, AggregateIR>,
 ): ViewTablePageVM {
   const slug = snake(view.name);
-  const columns = collectColumns(view, ctx, aggregatesByName);
-  const cells: CellVM[] = columns.map((c) => cellVMForColumn(slug, c));
+  const rawCols = collectColumns(view, ctx, aggregatesByName);
+  const columns: ColumnVM[] = rawCols.map((c) => columnVMForColumn(slug, c));
   return {
     componentName: `${pascal(view.name)}ViewPage`,
     hookName: `use${pascal(view.name)}View`,
     slug,
     humanView: humanize(view.name),
-    columnHeaders: columns.map((c) => humanize(c.name)),
-    cells,
+    columns,
   };
 }
 
-function cellVMForColumn(slug: string, c: Column): CellVM {
+function columnVMForColumn(slug: string, c: Column): ColumnVM {
   const testIdExpr = `\`view-${slug}-row-\${idx}-${c.name}\``;
   const valueExpr = `row.${c.accessPath}`;
+  const key = c.name;
+  const title = humanize(c.name);
+
   if (c.linkTargetSlug) {
     return {
-      template: "cell-id-link",
+      key,
+      title,
+      kind: "id-link",
       testIdExpr,
       valueExpr,
       toExpr: `\`/${c.linkTargetSlug}/\${${valueExpr}}\``,
     };
   }
-  if (c.kind === "datetime") return { template: "cell-datetime", testIdExpr, valueExpr };
-  if (c.kind === "bool") return { template: "cell-bool", testIdExpr, valueExpr };
-  if (c.kind === "int" || c.kind === "long") return { template: "cell-number", testIdExpr, valueExpr, decimals: 0 };
-  if (c.kind === "decimal") return { template: "cell-number", testIdExpr, valueExpr, decimals: 2 };
-  if (c.kind === "enum") return { template: "cell-enum", testIdExpr, valueExpr };
-  if (c.kind === "id") return { template: "cell-id", testIdExpr, valueExpr };
-  return { template: "cell-string", testIdExpr, valueExpr };
+  if (c.kind === "datetime") return { key, title, kind: "datetime", testIdExpr, valueExpr };
+  if (c.kind === "bool") return { key, title, kind: "bool", testIdExpr, valueExpr };
+  if (c.kind === "int" || c.kind === "long") return { key, title, kind: "number", testIdExpr, valueExpr, decimals: 0 };
+  if (c.kind === "decimal") return { key, title, kind: "number", testIdExpr, valueExpr, decimals: 2 };
+  if (c.kind === "enum") return { key, title, kind: "enum", testIdExpr, valueExpr };
+  if (c.kind === "id") return { key, title, kind: "id", testIdExpr, valueExpr };
+  return { key, title, kind: "string", testIdExpr, valueExpr };
 }
 
 function collectColumns(

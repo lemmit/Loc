@@ -306,6 +306,22 @@ function expandScaffoldPages(sys: SystemIR): void {
       // shape across the C2 default flip.
       page.emitPath = conventionalEmitPath(page.scaffoldOrigin, ctx);
       page.body = expanded;
+      // Slice A11 — detail-page expansion references `id` as a
+      // route param (`Sales.Order.byId(id)`).  The scaffold AST
+      // expander synthesises detail pages with `route:
+      // "/<plural>/:id"` but no declarative `params` block, so
+      // the walker has no way to resolve `id` as a typed route
+      // param.  Synthesise it here so the walker emits
+      // `useParams<{id: string}>()` correctly.
+      if (
+        page.scaffoldOrigin.kind === "aggregate-detail" &&
+        !page.params.some((p) => p.name === "id")
+      ) {
+        page.params.push({
+          name: "id",
+          type: { kind: "primitive", name: "string" },
+        });
+      }
       // INTENTIONALLY leave `page.scaffoldOrigin` set — the page-
       // object emitter dispatches on it to keep producing the
       // per-aggregate `e2e/pages/<agg>.ts` classes (with their
@@ -335,7 +351,25 @@ function conventionalEmitPath(
           : "detail";
     return `src/pages/${slug}/${file}.tsx`;
   }
+  if (origin.kind === "workflow-form") {
+    const wf = ctx.workflowsByName.get(origin.workflowName);
+    if (!wf) return undefined;
+    return `src/pages/workflows/${snakeOnly(wf.name)}.tsx`;
+  }
+  if (origin.kind === "view-list") {
+    return `src/pages/views/${snakeOnly(origin.viewName)}.tsx`;
+  }
+  if (origin.kind === "home") return "src/pages/home.tsx";
+  if (origin.kind === "workflows-index") return "src/pages/workflows/index.tsx";
+  if (origin.kind === "views-index") return "src/pages/views/index.tsx";
   return undefined;
+}
+
+function snakeOnly(s: string): string {
+  return s
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
+    .toLowerCase();
 }
 
 function pluralSnake(s: string): string {

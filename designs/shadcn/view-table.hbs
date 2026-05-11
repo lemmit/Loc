@@ -44,14 +44,14 @@ export default function {{componentName}}() {
           <Table>
             <TableHeader>
               <TableRow>
-                {{#each columnHeaders}}<TableHead>{{this}}</TableHead>
+                {{#each columns}}<TableHead>{{title}}</TableHead>
                 {{/each}}
               </TableRow>
             </TableHeader>
             <TableBody>
               {q.data.map((row, idx) => (
                 <TableRow key={idx} data-testid={`view-{{slug}}-row-${idx}`}>
-                  {{#each cells}}{{{cellHtml}}}
+                  {{#each columns}}{{> (concat "cell-" kind)}}
                   {{/each}}
                 </TableRow>
               ))}

@@ -110,7 +110,7 @@ describe("Slice A8 — QueryView macro", () => {
     const tsx = files.get("web/src/pages/orders_list.tsx")!;
     // `rows` in `Table(rows: rows, ...)` resolves to `orderAll.data`.
     expect(tsx).toMatch(
-      /orderAll\.data && orderAll\.data\.length > 0 && \([\s\S]*orderAll\.data\.map\(\(row\) => \(/,
+      /orderAll\.data && orderAll\.data\.length > 0 && \([\s\S]*orderAll\.data\.map\(\(row, idx\) => \(/,
     );
     // Inner Column accessors still work — `o.status` resolves to
     // `row.status` (Slice A2's lambda-param scope).
