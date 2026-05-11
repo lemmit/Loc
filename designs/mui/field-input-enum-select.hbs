@@ -1,0 +1,13 @@
+<Controller
+          control={control}
+          name="{{path}}"
+          render={({ field, fieldState }) => (
+            <FormControl fullWidth size="small" error={!!fieldState.error}>
+              <InputLabel>{{label}}</InputLabel>
+              <Select label="{{label}}" data-testid="{{testId}}" value={field.value as string ?? ""} onChange={(e) => field.onChange(e.target.value)}>
+                { ({{{enumValuesJson}}}).map((v) => <MenuItem key={v} value={v}>{v}</MenuItem>) }
+              </Select>
+              {fieldState.error && <FormHelperText>{fieldState.error.message}</FormHelperText>}
+            </FormControl>
+          )}
+        />

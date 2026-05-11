@@ -1,0 +1,29 @@
+// Auto-generated.  Do not edit by hand.
+import { createTheme } from "@mui/material/styles";
+
+export const theme = createTheme({
+  palette: {
+    primary: {
+      main: "{{brandShades.[5]}}",
+      light: "{{brandShades.[3]}}",
+      dark: "{{brandShades.[7]}}",
+    },
+  },
+  shape: {
+    borderRadius: {{muiRadius radius}},
+  },
+  typography: {
+    fontFamily: {{json fontFamily}},
+    h1: { fontSize: "2rem", lineHeight: 1.25, fontWeight: 600 },
+    h2: { fontSize: "1.5rem", lineHeight: 1.3, fontWeight: 600 },
+    h3: { fontSize: "1.25rem", lineHeight: 1.35, fontWeight: 600 },
+    h4: { fontSize: "1rem", lineHeight: 1.4, fontWeight: 600 },
+  },
+  components: {
+    MuiButton: { defaultProps: { disableElevation: true } },
+    MuiTextField: { defaultProps: { size: "small", fullWidth: true } },
+    MuiSelect: { defaultProps: { size: "small" } },
+    MuiCard: { defaultProps: { variant: "outlined" } },
+    MuiPaper: { defaultProps: { variant: "outlined" } },
+  },
+});

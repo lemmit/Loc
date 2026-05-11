@@ -1,0 +1,16 @@
+{{#if hasColumns}}<TableContainer component={Paper} variant="outlined"{{{testidAttr}}}>
+{{indent}}<Table size="small"{{#if sticky}} stickyHeader{{/if}}>
+{{headIndent}}<TableHead>
+{{rowIndent}}<TableRow>
+{{#each columns}}{{../cellIndent}}<TableCell>{{{this.header}}}</TableCell>
+{{/each}}{{rowIndent}}</TableRow>
+{{headIndent}}</TableHead>
+{{headIndent}}<TableBody>
+{{rowIndent}}{ {{{rowsExpr}}}.map(({{rowVar}}) => (
+{{cellIndent}}<TableRow key={ {{rowVar}}.id }{{#if hasRowTestid}} data-testid={ {{{rowTestid}}} }{{/if}}{{#if hasOnRowClick}} onClick={() => {{{onRowClick}}} } sx=\{{ cursor: "pointer", "&:hover": { bgcolor: "action.hover" } }}{{/if}}>
+{{#each columns}}{{../cellIndent}}<TableCell>{{{this.cellJsx}}}</TableCell>
+{{/each}}{{cellIndent}}</TableRow>
+{{rowIndent}})) }
+{{headIndent}}</TableBody>
+{{indent}}</Table>
+{{closeIndent}}</TableContainer>{{else}}<TableContainer{{{testidAttr}}} />{{/if}}

@@ -135,7 +135,7 @@ export function validatePickedPack(pack: PickedPack): void {
   // Reserved built-in names — `loader-vfs.resolvePackDir` resolves
   // them to /designs/<name> regardless of what's in /workspace, so
   // a user pack with a built-in name would silently never be used.
-  if (pack.name === "mantine" || pack.name === "shadcn") {
+  if (pack.name === "mantine" || pack.name === "shadcn" || pack.name === "mui") {
     throw new Error(
       `pack-picker: "${pack.name}" is a built-in pack name; pick a different folder name.`,
     );

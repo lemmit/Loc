@@ -1,0 +1,148 @@
+// Auto-generated.
+import { Routes, Route, Link, useLocation, useNavigate } from "react-router-dom";
+import {
+  AppBar, Box, CssBaseline, Divider, Drawer, IconButton,
+  List, ListItem, ListItemButton, ListItemText, ListSubheader,
+  Toolbar, Typography, Alert, Button, Stack,
+} from "@mui/material";
+import MenuIcon from "@mui/icons-material/Menu";
+import React from "react";
+{{#each imports}}import {{specifier}} from "{{from}}";
+{{/each}}
+
+const DRAWER_WIDTH = 240;
+
+class AppErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { error: Error | null }
+> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  override componentDidCatch(error: Error, info: React.ErrorInfo) {
+    // eslint-disable-next-line no-console
+    console.error("App error boundary caught:", error, info.componentStack);
+  }
+  override render() {
+    if (this.state.error) {
+      return (
+        <Stack data-testid="app-error" p={2} gap={2}>
+          <Alert severity="error">{this.state.error.message}</Alert>
+          <Box>
+            <Button
+              variant="outlined"
+              onClick={() => {
+                this.setState({ error: null });
+                window.location.assign("/");
+              }}
+            >
+              Back to home
+            </Button>
+          </Box>
+        </Stack>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function NotFound() {
+  return (
+    <Stack data-testid="not-found" p={2} gap={1}>
+      <Typography variant="h5">Not found</Typography>
+      <Link to="/">← Back to home</Link>
+    </Stack>
+  );
+}
+
+function useIsActive() {
+  const location = useLocation();
+  return (path: string, opts?: { exact?: boolean }) => {
+    if (opts?.exact) return location.pathname === path;
+    return (
+      location.pathname === path || location.pathname.startsWith(path + "/")
+    );
+  };
+}
+
+export default function App() {
+  const isActive = useIsActive();
+  const navigate = useNavigate();
+  const [mobileOpen, setMobileOpen] = React.useState(false);
+
+  const drawerContent = (
+    <Box data-testid="nav-sidebar">
+      <Toolbar />
+      <Divider />
+      <List dense>
+{{#each navSections}}        <ListSubheader sx=\{{ lineHeight: "32px", fontWeight: 600, color: "text.secondary" }}>{{label}}</ListSubheader>
+{{#each entries}}        <ListItem disablePadding>
+          <ListItemButton selected={isActive({{{activeArgs}}})} onClick={() => navigate("{{to}}")} data-testid="{{testId}}">
+            <ListItemText primary="{{label}}" />
+          </ListItemButton>
+        </ListItem>
+{{/each}}{{/each}}      </List>
+    </Box>
+  );
+
+  return (
+    <Box sx=\{{ display: "flex" }}>
+      <CssBaseline />
+      <AppBar position="fixed" sx=\{{ zIndex: (t) => t.zIndex.drawer + 1 }}>
+        <Toolbar>
+          <IconButton
+            color="inherit"
+            edge="start"
+            onClick={() => setMobileOpen(true)}
+            sx=\{{ mr: 2, display: { sm: "none" } }}
+            data-testid="nav-burger"
+          >
+            <MenuIcon />
+          </IconButton>
+          <Box
+            component={Link as React.ElementType}
+            to="/"
+            sx=\{{ color: "inherit", textDecoration: "none", display: "flex", alignItems: "center", gap: 1 }}
+          >
+            <Box sx=\{{ width: 28, height: 28, borderRadius: 1, bgcolor: "primary.light" }} aria-hidden="true" />
+            <Typography variant="h6" sx=\{{ letterSpacing: "-0.01em" }}>{{systemNameHuman}}</Typography>
+          </Box>
+        </Toolbar>
+      </AppBar>
+      <Drawer
+        variant="temporary"
+        open={mobileOpen}
+        onClose={() => setMobileOpen(false)}
+        ModalProps=\{{ keepMounted: true }}
+        sx=\{{ display: { xs: "block", sm: "none" }, "& .MuiDrawer-paper": { width: DRAWER_WIDTH } }}
+      >
+        {drawerContent}
+      </Drawer>
+      <Drawer
+        variant="permanent"
+        sx=\{{ 
+          display: { xs: "none", sm: "block" },
+          width: DRAWER_WIDTH,
+          flexShrink: 0,
+          "& .MuiDrawer-paper": { width: DRAWER_WIDTH, boxSizing: "border-box" },
+        }}
+        open
+      >
+        {drawerContent}
+      </Drawer>
+      <Box
+        component="main"
+        sx=\{{ flexGrow: 1, p: 3, width: { sm: `calc(100% - ${DRAWER_WIDTH}px)` } }}
+      >
+        <Toolbar />
+        <AppErrorBoundary>
+          <Routes>
+{{#each routes}}            <Route path="{{path}}" element={{expr elementJsx}} />
+{{/each}}            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </AppErrorBoundary>
+      </Box>
+    </Box>
+  );
+}

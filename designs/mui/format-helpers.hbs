@@ -1,0 +1,97 @@
+// Auto-generated.  Do not edit by hand.
+import { Typography, Tooltip, Stack } from "@mui/material";
+import type { ReactNode } from "react";
+
+export function EmptyValue() {
+  return <Typography component="span" color="text.secondary">—</Typography>;
+}
+
+export function isEmpty(v: unknown): boolean {
+  return v === null || v === undefined || v === "";
+}
+
+export function IdValue({ id }: { id: string | null | undefined }) {
+  if (isEmpty(id)) return <EmptyValue />;
+  const s = String(id);
+  return (
+    <Tooltip title={s} arrow placement="top">
+      <Typography component="code" sx=\{{ fontFamily: "monospace", fontSize: "0.85em" }}>{s.slice(0, 8)}…</Typography>
+    </Tooltip>
+  );
+}
+
+export function DateTimeValue({ iso }: { iso: string | null | undefined }) {
+  if (isEmpty(iso)) return <EmptyValue />;
+  const s = String(iso);
+  let pretty = s;
+  try {
+    const d = new Date(s);
+    if (!Number.isNaN(d.getTime())) {
+      pretty = d.toLocaleString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    }
+  } catch {
+    // fall through
+  }
+  return (
+    <Tooltip title={s} arrow placement="top">
+      <Typography component="span">{pretty}</Typography>
+    </Tooltip>
+  );
+}
+
+export function BoolValue({ value }: { value: boolean | null | undefined }) {
+  if (isEmpty(value)) return <EmptyValue />;
+  return value
+    ? <Typography component="span" fontWeight={500}>Yes</Typography>
+    : <Typography component="span" color="text.secondary">No</Typography>;
+}
+
+export function NumberValue({ value, decimals = 0 }: { value: number | string | null | undefined; decimals?: number }) {
+  if (isEmpty(value)) return <EmptyValue />;
+  const n = typeof value === "number" ? value : Number(value);
+  if (Number.isNaN(n)) return <Typography component="span">{String(value)}</Typography>;
+  const fmt = new Intl.NumberFormat(undefined, {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: Math.max(decimals, 2),
+  });
+  return <Typography component="span" sx=\{{ fontVariantNumeric: "tabular-nums" }}>{fmt.format(n)}</Typography>;
+}
+
+export function MoneyValue({ value, currency = "USD", decimals = 2 }: { value: number | string | null | undefined; currency?: string; decimals?: number }) {
+  if (isEmpty(value)) return <EmptyValue />;
+  const n = typeof value === "number" ? value : Number(value);
+  if (Number.isNaN(n)) return <Typography component="span">{String(value)}</Typography>;
+  const fmt = new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency,
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+  return <Typography component="span" sx=\{{ fontVariantNumeric: "tabular-nums" }}>{fmt.format(n)}</Typography>;
+}
+
+export function PlainValue({ value }: { value: unknown }) {
+  if (isEmpty(value)) return <Typography component="span" color="text.secondary">—</Typography>;
+  return <Typography component="span">{String(value)}</Typography>;
+}
+
+export function KeyValueRow({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <Stack direction="row" alignItems="flex-start" gap={2}>
+      <Typography component="span" color="text.secondary" fontWeight={500} sx=\{{ minWidth: 140, flexShrink: 0 }}>{label}</Typography>
+      <Stack gap={0.5} sx=\{{ flex: 1, minWidth: 0 }}>{children}</Stack>
+    </Stack>
+  );
+}
