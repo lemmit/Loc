@@ -129,13 +129,19 @@ jobs:
       # Per-file syntax check — works without `mix deps.get`.  Catches
       # any emission that produces malformed Elixir even when the deps
       # can't be fetched.
+      # Per-file syntax check — works without `mix deps.get`.  Catches
+      # any emission that produces malformed Elixir even when the deps
+      # can't be fetched.  Uses explicit `docker run` (rather than the
+      # `uses: docker://…` action shape) so we can mount `/tmp/ci/out`
+      # — `docker://` actions only see `$GITHUB_WORKSPACE`, which left
+      # the previous invocation looking at an empty tree.
       - name: Elixir syntax check
-        uses: docker://hexpm/elixir:1.17.2-erlang-27.0.1-debian-bookworm-20240722-slim
-        with:
-          entrypoint: bash
-          args: |
-            -c '
-              cd /github/workspace/tmp/ci/out/phoenix_app || cd /tmp/ci/out/phoenix_app
+        run: |
+          docker run --rm \
+            -v /tmp/ci/out/phoenix_app:/app \
+            -w /app \
+            hexpm/elixir:1.17.2-erlang-27.0.1-debian-bookworm-20240722-slim \
+            bash -c '
               fail=0
               for f in $(find lib config priv -name "*.ex" -o -name "*.exs"); do
                 out=$(elixir -e "Code.string_to_quoted!(File.read!(\"$f\"))" 2>&1)
