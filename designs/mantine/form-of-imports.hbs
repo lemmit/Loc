@@ -3,5 +3,5 @@
 {{/if}}import { zodResolver } from "@hookform/resolvers/zod";
 import { Create{{aggregateName}}Request, useCreate{{aggregateName}} } from "{{srcImportPrefix}}api/{{aggregateNameCamel}}";
 {{#each idTargets}}import { useAll{{this.namePlural}} } from "{{../srcImportPrefix}}api/{{this.nameCamel}}";
-{{/each}}{{#if hasDefaultOnSubmit}}import { notifications } from "@mantine/notifications";
+{{/each}}{{#if hasDefaultOnSubmit}}import { notifySuccess, notifyError } from "{{srcImportPrefix}}lib/format";
 {{/if}}

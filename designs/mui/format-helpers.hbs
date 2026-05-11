@@ -95,3 +95,12 @@ export function KeyValueRow({
     </Stack>
   );
 }
+
+/** Pack-neutral toast helpers.  MUI uses notistack's enqueueSnackbar API. */
+import { enqueueSnackbar } from "notistack";
+export function notifySuccess(msg: string): void {
+  enqueueSnackbar(msg, { variant: "success" });
+}
+export function notifyError(msg: string): void {
+  enqueueSnackbar(msg, { variant: "error" });
+}

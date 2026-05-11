@@ -95,3 +95,13 @@ export function KeyValueRow({
     </HStack>
   );
 }
+
+/** Pack-neutral toast helpers.  Chakra uses createStandaloneToast. */
+import { createStandaloneToast } from "@chakra-ui/react";
+const { toast: __chakraToast } = createStandaloneToast();
+export function notifySuccess(msg: string): void {
+  __chakraToast({ status: "success", title: msg, duration: 4000, isClosable: true });
+}
+export function notifyError(msg: string): void {
+  __chakraToast({ status: "error", title: msg, duration: 6000, isClosable: true });
+}

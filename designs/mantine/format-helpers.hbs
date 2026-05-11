@@ -103,6 +103,17 @@ export function PlainValue({ value }: { value: unknown }) {
   return <Text component="span">{String(value)}</Text>;
 }
 
+/** Pack-neutral toast helpers.  Walker-generated submit handlers call
+ *  `notifySuccess` / `notifyError` so the notification library stays
+ *  behind a pack-specific adapter.  Mantine uses its notifications API. */
+import { notifications } from "@mantine/notifications";
+export function notifySuccess(msg: string): void {
+  notifications.show({ color: "green", message: msg });
+}
+export function notifyError(msg: string): void {
+  notifications.show({ color: "red", message: msg });
+}
+
 /** Two-column key/value row for detail cards.  Label sits in a
  *  fixed-width left column, value flows to the right.  Rendered as
  *  a flex row so multi-line values wrap cleanly under the label. */

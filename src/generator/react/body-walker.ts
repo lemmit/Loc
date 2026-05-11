@@ -1123,6 +1123,7 @@ function emitEnumBadge(
     valueExpr,
     hasColor: color !== undefined,
     color: color !== undefined ? JSON.stringify(color) : "",
+    rawColor: color ?? "",
     testidAttr: testidAttr(call, ctx),
   });
 }
@@ -1321,10 +1322,10 @@ function emitFormOfAggregate(
       : `{
               try {
                 const out = await create.mutateAsync(vals);
-                notifications.show({ color: "green", message: "${humanize(agg.name)} created" });
+                notifySuccess("${humanize(agg.name)} created");
                 navigate(\`/${slug}/\${out.id}\`);
               } catch (e) {
-                notifications.show({ color: "red", message: (e as Error).message });
+                notifyError((e as Error).message);
               }
             }`;
   return renderPrimitive(ctx, "primitive-form-of", {
@@ -1442,10 +1443,10 @@ function emitFormRuns(
       : `{
               try {
                 await run.mutateAsync(vals);
-                notifications.show({ color: "green", message: "${humanize(workflow.name)} completed" });
+                notifySuccess("${humanize(workflow.name)} completed");
                 navigate("/workflows");
               } catch (e) {
-                notifications.show({ color: "red", message: (e as Error).message });
+                notifyError((e as Error).message);
               }
             }`;
   return renderPrimitive(ctx, "primitive-form-of", {
@@ -2431,10 +2432,16 @@ function emitAlert(
   const message = firstPositionalContent(call, ctx) ?? '""';
   const color = stringNamed(call, "color");
   const title = stringNamed(call, "title");
+  // Semantic palette: "red" / "yellow" / "green" / "blue" / "gray".
+  // `color` is JSON-stringified (e.g. '"red"') for packs (like Mantine)
+  // that accept color names directly.  `rawColor` is the unquoted
+  // semantic name for packs that need to map via a pack helper.
+  const rawColor = color ?? "red";
   return renderPrimitive(ctx, "primitive-alert", {
     message: unwrapTextLiteral(message),
     hasColor: color !== undefined,
-    color: color !== undefined ? JSON.stringify(color) : '"red"',
+    color: JSON.stringify(rawColor),
+    rawColor,
     hasTitle: title !== undefined,
     title: title ?? "",
     testidAttr: testidAttr(call, ctx),

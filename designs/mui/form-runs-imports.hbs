@@ -1,6 +1,6 @@
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { Form } from "@/components/ui/form";
+{{#if useController}}import { useForm, Controller } from "react-hook-form";
+{{else}}import { useForm } from "react-hook-form";
+{{/if}}import { zodResolver } from "@hookform/resolvers/zod";
 import { {{workflowPascal}}Request, use{{workflowPascal}}Workflow } from "{{srcImportPrefix}}api/workflows";
 {{#each idTargets}}import { useAll{{this.namePlural}} } from "{{../srcImportPrefix}}api/{{this.nameCamel}}";
 {{/each}}{{#if hasDefaultOnSubmit}}import { notifySuccess, notifyError } from "{{srcImportPrefix}}lib/format";

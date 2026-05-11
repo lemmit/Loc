@@ -108,6 +108,15 @@ export function PlainValue({ value }: { value: unknown }) {
   return <span>{String(value)}</span>;
 }
 
+/** Pack-neutral toast helpers.  shadcn uses sonner's toast API. */
+import { toast } from "sonner";
+export function notifySuccess(msg: string): void {
+  toast.success(msg);
+}
+export function notifyError(msg: string): void {
+  toast.error(msg);
+}
+
 /** Two-column key/value row for detail cards. */
 export function KeyValueRow({
   label,

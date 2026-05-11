@@ -84,11 +84,14 @@
     "primitive-form-of": "primitive-form-of.hbs",
     "form-of-imports": "form-of-imports.hbs",
     "form-of-decls": "form-of-decls.hbs",
+    "form-runs-imports": "form-runs-imports.hbs",
+    "form-runs-decls": "form-runs-decls.hbs",
     "primitive-breadcrumbs": "primitive-breadcrumbs.hbs",
     "primitive-paper": "primitive-paper.hbs",
     "primitive-skeleton": "primitive-skeleton.hbs",
     "primitive-alert": "primitive-alert.hbs",
-    "primitive-query-view": "primitive-query-view.hbs"
+    "primitive-query-view": "primitive-query-view.hbs",
+    "primitive-key-value-row": "primitive-key-value-row.hbs"
   },
   "helpers": {
     "chakraRadius": {
@@ -97,6 +100,13 @@
       "md": "8px",
       "lg": "12px",
       "xl": "16px"
+    },
+    "colorVariant": {
+      "red": "error",
+      "yellow": "warning",
+      "green": "success",
+      "blue": "info",
+      "gray": "info"
     }
   },
   "imports": {
@@ -131,6 +141,7 @@
     "primitive-paper":          [{ "from": "@chakra-ui/react", "named": ["Box"] }],
     "primitive-skeleton":       [{ "from": "@chakra-ui/react", "named": ["Skeleton", "VStack"] }],
     "primitive-alert":          [{ "from": "@chakra-ui/react", "named": ["Alert", "AlertIcon", "AlertDescription"] }],
+    "primitive-key-value-row":  [{ "from": "../lib/format", "named": ["KeyValueRow"] }],
     "form-wrapper":             [{ "from": "@chakra-ui/react", "named": ["Button", "HStack", "VStack"] }],
     "field-input-string":       [{ "from": "@chakra-ui/react", "named": ["FormControl", "FormErrorMessage", "FormLabel", "Input"] }],
     "field-input-int":          [{ "from": "@chakra-ui/react", "named": ["FormControl", "FormErrorMessage", "FormLabel", "NumberInput", "NumberInputField"] }],

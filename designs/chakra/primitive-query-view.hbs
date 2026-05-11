@@ -5,10 +5,16 @@
 {{indent}}{ {{{queryExpr}}}.isError && (
 {{branchIndent}}{{{errorJsx}}}
 {{indent}}) }
-{{indent}}{ {{{queryExpr}}}.data && {{{queryExpr}}}.data.length === 0 && (
+{{#if single}}{{indent}}{ !{{{queryExpr}}}.isLoading && !{{{queryExpr}}}.isError && !{{{queryExpr}}}.data && (
+{{branchIndent}}{{{emptyJsx}}}
+{{indent}}) }
+{{indent}}{ {{{queryExpr}}}.data && (
+{{branchIndent}}{{{dataJsx}}}
+{{indent}}) }
+{{else}}{{indent}}{ {{{queryExpr}}}.data && {{{queryExpr}}}.data.length === 0 && (
 {{branchIndent}}{{{emptyJsx}}}
 {{indent}}) }
 {{indent}}{ {{{queryExpr}}}.data && {{{queryExpr}}}.data.length > 0 && (
 {{branchIndent}}{{{dataJsx}}}
 {{indent}}) }
-{{closeIndent}}}</>
+{{/if}}{{closeIndent}}</>

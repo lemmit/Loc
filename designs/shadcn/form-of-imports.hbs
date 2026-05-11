@@ -3,5 +3,5 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Form } from "@/components/ui/form";
 import { Create{{aggregateName}}Request, useCreate{{aggregateName}} } from "{{srcImportPrefix}}api/{{aggregateNameCamel}}";
 {{#each idTargets}}import { useAll{{this.namePlural}} } from "{{../srcImportPrefix}}api/{{this.nameCamel}}";
-{{/each}}{{#if hasDefaultOnSubmit}}import { toast } from "sonner";
+{{/each}}{{#if hasDefaultOnSubmit}}import { notifySuccess, notifyError } from "{{srcImportPrefix}}lib/format";
 {{/if}}

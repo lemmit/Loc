@@ -84,11 +84,14 @@
     "primitive-form-of": "primitive-form-of.hbs",
     "form-of-imports": "form-of-imports.hbs",
     "form-of-decls": "form-of-decls.hbs",
+    "form-runs-imports": "form-runs-imports.hbs",
+    "form-runs-decls": "form-runs-decls.hbs",
     "primitive-breadcrumbs": "primitive-breadcrumbs.hbs",
     "primitive-paper": "primitive-paper.hbs",
     "primitive-skeleton": "primitive-skeleton.hbs",
     "primitive-alert": "primitive-alert.hbs",
-    "primitive-query-view": "primitive-query-view.hbs"
+    "primitive-query-view": "primitive-query-view.hbs",
+    "primitive-key-value-row": "primitive-key-value-row.hbs"
   },
   "helpers": {
     "muiRadius": {
@@ -97,6 +100,13 @@
       "md": "8",
       "lg": "12",
       "xl": "16"
+    },
+    "colorVariant": {
+      "red": "error",
+      "yellow": "warning",
+      "green": "success",
+      "blue": "info",
+      "gray": "default"
     },
     "muiIcon": {
       "IconPlus": "Add",
@@ -147,6 +157,7 @@
     "primitive-paper":          [{ "from": "@mui/material", "named": ["Paper"] }],
     "primitive-skeleton":       [{ "from": "@mui/material", "named": ["Skeleton", "Stack"] }],
     "primitive-alert":          [{ "from": "@mui/material", "named": ["Alert"] }],
+    "primitive-key-value-row":  [{ "from": "../lib/format", "named": ["KeyValueRow"] }],
     "form-wrapper":             [{ "from": "@mui/material", "named": ["Button", "Stack"] }],
     "field-input-string":       [{ "from": "@mui/material", "named": ["TextField"] }],
     "field-input-int":          [{ "from": "@mui/material", "named": ["TextField"] }],
