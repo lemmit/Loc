@@ -69,17 +69,11 @@ export default function CustomerList() {
               {q.data.map((row) => (
                 <TableRow key={row.id} data-testid={`customers-row-${row.id}`} className="cursor-pointer" onClick={() => navigate(`/customers/${row.id}`)}>
                   <TableCell><Link to={`/customers/${row.id}`} data-testid={`customers-row-${row.id}-link`} className="text-primary hover:underline"><IdValue id={row.id} /></Link></TableCell>
-
 <TableCell data-testid={`customers-row-${row.id}-username`}>{ row.username === null || row.username === undefined || row.username === "" ? <EmptyValue /> : String(row.username)}</TableCell>
-
 <TableCell data-testid={`customers-row-${row.id}-email`}>{ row.email === null || row.email === undefined || row.email === "" ? <EmptyValue /> : String(row.email)}</TableCell>
-
 <TableCell data-testid={`customers-row-${row.id}-age`} className="text-right"><NumberValue value={row.age} /></TableCell>
-
 <TableCell data-testid={`customers-row-${row.id}-balance`} className="text-right"><NumberValue value={row.balance} decimals={2} /></TableCell>
-
 <TableCell data-testid={`customers-row-${row.id}-vip`}><BoolValue value={row.vip} /></TableCell>
-
                 </TableRow>
               ))}
             </TableBody>

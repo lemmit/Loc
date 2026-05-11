@@ -14,29 +14,60 @@
 // surrounding scope (e.g. `row` for table rows, `data` for detail).
 // ---------------------------------------------------------------------------
 
-/** A single cell in a list-page table row. */
-export interface CellVM {
-  /** Logical template name to render for this cell.  The pack's
-   *  pack.json `emits` map resolves it to a .hbs file.  Examples:
-   *  "cell-id-link", "cell-datetime", "cell-bool", "cell-number",
-   *  "cell-enum", "cell-string", "cell-empty". */
-  template: string;
-  /** Stable testid for Playwright drivers — pack-invariant, computed
-   *  by the preparer from slug + row id + field name.  Templates emit
-   *  it verbatim on `<Table.Td data-testid={...}>`. */
+// ---------------------------------------------------------------------------
+// Column descriptor view-model.  Each column carries semantic metadata so
+// pack templates dispatch to `{{> (concat "cell-" kind)}}` without TS-side
+// pre-rendering.  Replaces the old pre-rendered cell tuple pattern.
+// ---------------------------------------------------------------------------
+
+export type ColumnKind =
+  | "id"
+  | "id-link"
+  | "row-id-link"
+  | "datetime"
+  | "bool"
+  | "number"
+  | "enum"
+  | "string";
+
+export interface ColumnVM {
+  /** Stable key for React reconciliation and AntD `dataIndex` / `key` */
+  key: string;
+  /** Display label for the column header (replaces `columnHeaders[i]`) */
+  title: string;
+  /** Semantic kind — drives cell template selection */
+  kind: ColumnKind;
+  /** `data-testid` expression for the cell */
   testIdExpr: string;
-  /** JS expression that evaluates to the cell's raw value in the
-   *  template's surrounding scope (typically `row.<field>`).  Templates
-   *  splice this into JSX braces; semantics depend on `template`. */
+  /** JS expression that pulls the value from a row */
   valueExpr: string;
-  /** When the cell is a link, the React-Router target as a JS
-   *  template-string expression — e.g. "`/customers/${row.id}`".
-   *  Templates wrap the cell content in an Anchor pointing here.
-   *  Undefined for non-link cells. */
+  /** Link target for `id-link` / `row-id-link` */
   toExpr?: string;
-  /** Decimal precision for number cells.  0 for int/long, 2 for
-   *  decimal.  Undefined for other cell kinds. */
+  /** Decimal places for `number` */
   decimals?: number;
+}
+
+/** Shared dispatcher used by all three preparers (list, view-table, part-
+ *  table).  DSL type → ColumnKind.  Extracted from the three identical
+ *  switch statements in the old code.  Caller decides title / key /
+ *  valueExpr / testIdExpr / toExpr — those are call-site-specific. */
+export function columnKindForField(
+  t: { kind: string; name?: string },
+  target?: string,
+  aggregatesByName?: ReadonlySet<string>,
+): { kind: ColumnKind; decimals?: number } {
+  if (t.kind === "enum") return { kind: "enum" };
+  if (t.kind === "id") {
+    if (target && aggregatesByName?.has(target)) return { kind: "id-link" };
+    return { kind: "id" };
+  }
+  if (t.kind === "primitive") {
+    if (t.name === "datetime") return { kind: "datetime" };
+    if (t.name === "bool") return { kind: "bool" };
+    if (t.name === "int" || t.name === "long") return { kind: "number", decimals: 0 };
+    if (t.name === "decimal") return { kind: "number", decimals: 2 };
+  }
+  return { kind: "string" };
 }
 
 /** A breadcrumb segment.  `to` is undefined for the current-page
@@ -316,16 +347,15 @@ export interface ViewsIndexVM {
   cards: ViewCardVM[];
 }
 
-/** Per-view table page.  Cells reuse the page-list cell-* templates
- *  via TS-side composition (renderer pre-renders each, slots into
- *  cellHtml).  Same architectural pattern as PartTableVM. */
+/** Per-view table page.  Columns carry semantic descriptors so pack
+ *  templates dispatch to cell partials directly via
+ *  `{{> (concat "cell-" kind)}}`.  Replaces old `columnHeaders + cells`. */
 export interface ViewTablePageVM {
   componentName: string;
   hookName: string;
   slug: string;
   humanView: string;
-  columnHeaders: string[];
-  cells: CellVM[];
+  columns: ColumnVM[];
 }
 
 /** A single field-row inside a detail page's main info card.  Each
@@ -360,20 +390,17 @@ export interface FieldRowVM {
 
 /** A nested-collection part-table inside a detail page.  E.g.
  *  Order.lines (`contains lines: OrderLine[]`) emits one PartTableVM.
- *  Cells are reused from the page-list cell templates — same wire
- *  shape, same testid pattern, just a different access expression
- *  (`row.foo` is rooted in the part-row, while the page itself
- *  iterates `data.<name>.map((row) => ...)`). */
+ *  Columns carry semantic descriptors so pack templates dispatch to
+ *  cell partials directly via `{{> (concat "cell-" kind)}}`.
+ *  Replaces old `columnHeaders + cells`. */
 export interface PartTableVM {
   /** Display name / containment slot ("lines"). */
   name: string;
   /** Humanised section title ("Lines", "Order Items"). */
   humanName: string;
-  /** Pre-rendered column header labels. */
-  columnHeaders: string[];
-  /** One CellVM per column, with testIdExpr keyed off the part's
-   *  scoping (`<slug>-detail-<name>-row-${row.id}-<col>`). */
-  cells: CellVM[];
+  /** Column descriptors in source order.  Each carries title, kind,
+   *  testIdExpr, valueExpr and optional toExpr / decimals. */
+  columns: ColumnVM[];
   /** Stable testid for the wrapping element. */
   testId: string;
   /** JS expression for the array on `data` to map over (e.g.
@@ -467,12 +494,12 @@ export interface ListPageVM {
   /** Breadcrumb trail for the list page — typically a 2-segment
    *  "Home / <Plural>" trail. */
   breadcrumbs: BreadcrumbSegmentVM[];
-  /** Column header labels in row order, including the leading "Id"
-   *  column. */
-  columnHeaders: string[];
-  /** One CellVM per column.  Index aligns with columnHeaders.  The
-   *  first entry is always the id link cell. */
-  cells: CellVM[];
+  /** Column descriptors in row order.  Each entry carries the header
+   *  title, semantic kind, and cell expression data so pack templates
+   *  can dispatch to `{{> (concat "cell-" kind)}}` directly without
+   *  TS-side pre-rendering.  Replaces the old `columnHeaders + cells`
+   *  pair. */
+  columns: ColumnVM[];
   /** Name of the React Query hook that fetches the list, e.g.
    *  "useAllCustomers".  Imported from `../../api/<camel>.ts`. */
   hookName: string;

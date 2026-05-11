@@ -40,29 +40,30 @@ const examples = [
  *  of a `.ddd` source.  Handles both the multi-line acme syntax and
  *  the single-line playground syntax.  Idempotent and safe — if no
  *  webApp block matches, the input passes through unchanged. */
-function injectShadcn(src: string): string {
+function injectDesign(src: string, design: string): string {
   // Multi-line:  deployable webApp {\n  platform: react\n  …\n}
   const multiLine = /(deployable webApp \{)([^}]*?)\n(\s*)\}/;
   if (multiLine.test(src)) {
     return src.replace(multiLine, (_, head, body, indent) => {
-      return `${head}${body}\n${indent}design: shadcn\n${indent}}`;
+      return `${head}${body}\n${indent}design: ${design}\n${indent}}`;
     });
   }
   // Single-line:  deployable webApp { platform: react, targets: api, port: 3001 }
   const singleLine = /(deployable webApp \{[^}\n]+?)(\s*)\}/;
-  return src.replace(singleLine, "$1, design: shadcn$2}");
+  return src.replace(singleLine, `$1, design: ${design}$2}`);
 }
 
 interface Case {
   ddd: string;
   reactDir: string;
-  pack: "mantine" | "shadcn";
+  pack: "mantine" | "shadcn" | "mui";
 }
 
 /** Slice D1 — Mantine is the canonical pack post-archetype-deletion.
- *  Shadcn pack support for the new walker-driven emission is a
- *  follow-up slice (the per-pack `form-of` + `alert` variants
- *  haven't been wired through yet).  Mantine cases all green. */
+ *  Shadcn + MUI pack support for the walker-driven emission is a
+ *  follow-up slice (the new walker shell hard-codes Mantine
+ *  specifiers like `<Stack>` / `<Button>` / `<Group>`; per-pack
+ *  Form + Alert variants need wiring through). */
 const cases: Case[] = examples.flatMap((e) => [
   { ...e, pack: "mantine" as const },
 ]);
@@ -73,14 +74,13 @@ describe.skipIf(!ENABLED)("generated React TSX compiles under strict tsc", () =>
     ({ ddd, reactDir, pack }) => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-react-tsc-"));
       try {
-        // For shadcn cases, materialise a mutated copy of the source
-        // with `design: shadcn` injected.  Mantine cases use the
-        // original file directly (no mutation needed; mantine is the
-        // default pack the lowerer applies).
+        // For non-mantine cases, materialise a mutated copy of the
+        // source with `design: <pack>` injected.  Mantine cases use
+        // the original file directly (mantine is the default).
         let dddPath = ddd;
-        if (pack === "shadcn") {
+        if (pack !== "mantine") {
           const original = fs.readFileSync(path.join(repoRoot, ddd), "utf-8");
-          const mutated = injectShadcn(original);
+          const mutated = injectDesign(original, pack);
           dddPath = path.join(outDir, "_mutated.ddd");
           fs.writeFileSync(dddPath, mutated);
         }

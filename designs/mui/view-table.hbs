@@ -1,0 +1,58 @@
+// Auto-generated.
+import { Link } from "react-router-dom";
+import {
+  Stack, Typography, Alert, Link as MuiLink, Chip,
+  Table, TableHead, TableBody, TableRow, TableCell,
+  TableContainer, Paper, Skeleton,
+} from "@mui/material";
+import ErrorIcon from "@mui/icons-material/Error";
+import { {{hookName}} } from "../../api/views";
+import { IdValue, DateTimeValue, BoolValue, NumberValue, EmptyValue } from "../../lib/format";
+
+export default function {{componentName}}() {
+  const q ={{hookName}}();
+  const count = q.data?.length ?? 0;
+  return (
+    <Stack data-testid="view-{{slug}}" gap={2}>
+      <Stack direction="row" justifyContent="space-between" alignItems="flex-end">
+        <Stack gap={0.5}>
+          <Typography variant="overline" color="text.secondary">View</Typography>
+          <Typography variant="h5">{{humanView}}</Typography>
+          <Typography variant="body2" color="text.secondary">{q.isLoading ? "Loading…" : count === 1 ? "1 row" : count + " rows"}</Typography>
+        </Stack>
+        <MuiLink component={Link} to="/views">← back</MuiLink>
+      </Stack>
+      {q.isLoading && (
+        <Paper variant="outlined" sx=\{{ p: 2 }}>
+          <Stack gap={1}>
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Skeleton key={i} height={28} />
+            ))}
+          </Stack>
+        </Paper>
+      )}
+      {q.isError && <Alert severity="error" icon={<ErrorIcon />}>Couldn't load view — {(q.error as Error).message}</Alert>}
+      {q.data && q.data.length === 0 && <Typography color="text.secondary">No rows.</Typography>}
+      {q.data && q.data.length > 0 && (
+        <TableContainer component={Paper} variant="outlined">
+          <Table size="small" stickyHeader>
+            <TableHead>
+              <TableRow>
+                {{#each columns}}<TableCell>{{title}}</TableCell>
+                {{/each}}
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {q.data.map((row, idx) => (
+                <TableRow key={idx} data-testid={`view-{{slug}}-row-${idx}`}>
+                  {{#each columns}}{{> (concat "cell-" kind)}}
+                  {{/each}}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      )}
+    </Stack>
+  );
+}
