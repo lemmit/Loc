@@ -820,6 +820,29 @@ function emitTable(
     }
   }
 
+  // Slice A9 — boolean style props matching Mantine's `<Table>`
+  // surface.  shadcn templates ignore the props (their <Table> has
+  // built-in striping); reading them here keeps the DSL pack-
+  // agnostic.
+  const striped = boolNamed(call, "striped");
+  const highlight = boolNamed(call, "highlight");
+  const sticky = boolNamed(call, "sticky");
+
+  // Slice A9 — `rowTestid:` lambda computes a per-row testid.
+  // The lambda's source-side param rebinds to `row` (Slice A2's
+  // lambdaParams scope) so user code reads `row.id` cleanly.
+  // The expression body emits inside a TS template literal so
+  // dynamic ids interpolate (`orders-row-${row.id}`).
+  const rowTestidLam = lambdaArg(call, "rowTestid");
+  let rowTestidJs: string | undefined;
+  if (rowTestidLam && rowTestidLam.body) {
+    const childCtx: WalkContext = {
+      ...ctx,
+      lambdaParams: extendLambdaParams(ctx, rowTestidLam.param, rowVar),
+    };
+    rowTestidJs = emitExpr(rowTestidLam.body, childCtx);
+  }
+
   const indent = "  ".repeat(depth + 1);
   const headIndent = "  ".repeat(depth + 2);
   const bodyIndent = "  ".repeat(depth + 2);
@@ -833,6 +856,12 @@ function emitTable(
     hasColumns: cols.length > 0,
     hasOnRowClick: onRowClickJs !== undefined,
     onRowClick: onRowClickJs,
+    striped,
+    highlight,
+    sticky,
+    hasAnyStyleProps: striped || highlight || sticky,
+    hasRowTestid: rowTestidJs !== undefined,
+    rowTestid: rowTestidJs,
     indent,
     headIndent,
     bodyIndent,
@@ -841,6 +870,23 @@ function emitTable(
     closeIndent,
     testidAttr: testidAttr(call, ctx),
   });
+}
+
+/** Slice A9 — read a boolean-literal named arg.  Used for Table's
+ *  `striped:` / `highlight:` / `sticky:` style toggles where any
+ *  truthy value flips the prop on.  Returns `false` when the arg
+ *  is missing so the template can read it as a boolean directly. */
+function boolNamed(
+  call: ExprIR & { kind: "call" },
+  name: string,
+): boolean {
+  const argNames = call.argNames ?? [];
+  for (let i = 0; i < call.args.length; i++) {
+    if (argNames[i] !== name) continue;
+    const a = call.args[i]!;
+    if (a.kind === "literal" && a.lit === "bool") return a.value === "true";
+  }
+  return false;
 }
 
 /** Slice A2 — emit one `Column("Header", <accessor>)` into a

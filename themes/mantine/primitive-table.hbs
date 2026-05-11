@@ -1,4 +1,4 @@
-{{#if hasColumns}}<Table{{{testidAttr}}}>
+{{#if hasColumns}}<Table{{#if striped}} striped{{/if}}{{#if highlight}} highlightOnHover{{/if}}{{#if sticky}} stickyHeader{{/if}}{{{testidAttr}}}>
 {{indent}}<Table.Thead>
 {{headIndent}}<Table.Tr>
 {{#each columns}}{{../rowIndent}}<Table.Th>{{{this.header}}}</Table.Th>
@@ -6,7 +6,7 @@
 {{indent}}</Table.Thead>
 {{indent}}<Table.Tbody>
 {{headIndent}}{ {{{rowsExpr}}}.map(({{rowVar}}) => (
-{{rowIndent}}<Table.Tr key={ {{rowVar}}.id }{{#if hasOnRowClick}} onClick={() => {{{onRowClick}}} }{{/if}}>
+{{rowIndent}}<Table.Tr key={ {{rowVar}}.id }{{#if hasRowTestid}} data-testid={ {{{rowTestid}}} }{{/if}}{{#if hasOnRowClick}} onClick={() => {{{onRowClick}}} }{{/if}}>
 {{#each columns}}{{../cellIndent}}<Table.Td>{{{this.cellJsx}}}</Table.Td>
 {{/each}}{{rowIndent}}</Table.Tr>
 {{headIndent}})) }
