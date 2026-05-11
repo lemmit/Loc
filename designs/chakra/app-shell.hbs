@@ -74,6 +74,14 @@ export default function App() {
   const isActive = useIsActive();
   const navigate = useNavigate();
   const { isOpen, onOpen, onClose } = useDisclosure();
+  // Mobile UX: auto-close the temporary Drawer after a route change.
+  // Tapping a sidebar entry on a phone otherwise leaves the drawer
+  // covering the destination page.  Desktop is unaffected — the
+  // permanent sidebar is rendered separately above the `md` breakpoint.
+  const location = useLocation();
+  React.useEffect(() => {
+    onClose();
+  }, [location.pathname]);
 
   const drawerContent = (
     <Box data-testid="nav-sidebar" w={DRAWER_WIDTH}>
