@@ -541,6 +541,16 @@ function emitShellFiles(
     renderRouter(appName, appModule, liveRoutes, apiRoutes, authEnabled),
   );
 
+  // lib/<app>_web/components/core_components.ex — minimal stub so
+  // the html_helpers macro's `import ...CoreComponents` resolves.
+  // Standard Phoenix 1.7 generators ship a much richer module; we
+  // emit just the empty wrapper for now since LiveView pages
+  // reference components by full module path.
+  out.set(
+    `lib/${appName}_web/components/core_components.ex`,
+    renderCoreComponents(appModule),
+  );
+
   // lib/<app>_web/components/layouts.ex
   out.set(`lib/${appName}_web/components/layouts.ex`, renderLayouts(appName, appModule));
 
@@ -708,7 +718,11 @@ defmodule ${appModule}.Repo do
   use AshPostgres.Repo, otp_app: :${appName}
 
   def installed_extensions do
-    ["uuid-ossp", "citext"]
+    # \`ash-functions\` is required by Ash 3.x for fragment-style
+    # validations (e.g. unique_constraint comparisons).  AshPostgres
+    # ships the extension SQL — listing it here is enough for
+    # \`mix ash.setup\` to install it.
+    ["ash-functions", "uuid-ossp", "citext"]
   end
 
   # AshPostgres 2.x requires a min_pg_version/0 callback so it can
@@ -792,6 +806,19 @@ defmodule ${webModule} do
   def component do
     quote do
       use Phoenix.Component
+      unquote(html_helpers())
+    end
+  end
+
+  # HTML helper bundle for layouts + function components.  Required
+  # by \`use PhoenixAppWeb, :html\` invocations (e.g. Layouts).  Mirrors
+  # the standard Phoenix 1.7 generator shape — pulls in Phoenix.HTML,
+  # core components, and a CSRF helper.
+  def html do
+    quote do
+      use Phoenix.Component
+      import Phoenix.Controller,
+        only: [get_csrf_token: 0, view_module: 1, view_template: 1]
       unquote(html_helpers())
     end
   end
@@ -941,6 +968,22 @@ ${scopedBody}
   end
 
 ${rootLines}
+end
+`;
+}
+
+function renderCoreComponents(appModule: string): string {
+  const webModule = `${appModule}Web`;
+  return `# Auto-generated.
+defmodule ${webModule}.CoreComponents do
+  @moduledoc """
+  Stub for the core-components module Phoenix's html_helpers macro
+  imports.  The Loom generator emits LiveView pages that reference
+  components by their fully-qualified module path (or use only the
+  primitives Phoenix.Component / Phoenix.HTML provide), so this
+  module exists purely to satisfy the import.
+  """
+  use Phoenix.Component
 end
 `;
 }
