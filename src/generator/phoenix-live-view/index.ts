@@ -1043,7 +1043,6 @@ config :${appName}, ${appModule}Web.Endpoint,
   server: true
 
 config :logger, level: :info
-config :runtime_tools
 `;
 }
 
