@@ -37,6 +37,22 @@ interface RenderCtx {
   contexts: BoundedContextIR[];
   /** Locals introduced by `let`. */
   locals: Set<string>;
+  /**
+   * URL path prefix for API calls.  Phoenix routes everything under
+   * `scope "/api"`, so aggregate / workflow / view calls must be
+   * prefixed with "/api".  Hono and dotnet serve at the root ("").
+   */
+  apiBasePath: string;
+}
+
+/**
+ * Returns the URL prefix that the deployable's API is mounted under.
+ * Phoenix LiveView serves its HTTP API inside `scope "/api", …`, so
+ * every aggregate, workflow, and view route is reachable at
+ * `/api/<route>`.  Hono and dotnet serve at the root, so no prefix.
+ */
+function apiBasePath(platform: string): string {
+  return platform === "phoenixLiveView" ? "/api" : "";
 }
 
 export function renderE2EFile(
@@ -70,7 +86,12 @@ export function renderE2EFile(
     const d = sys.deployables.find((x) => x.name === t.deployableName);
     if (!d) continue;
     const contexts = collectContextsFor(d, modulesByName);
-    const ctx: RenderCtx = { deployable: d, contexts, locals: new Set() };
+    const ctx: RenderCtx = {
+      deployable: d,
+      contexts,
+      locals: new Set(),
+      apiBasePath: apiBasePath(d.platform),
+    };
     lines.push(...renderTest(t, ctx).map((l) => `  ${l}`));
     lines.push("");
   }
@@ -242,9 +263,10 @@ function renderApiCall(call: ApiCallShape, ctx: RenderCtx): string {
   const slug = snake(plural(agg.name));
   const args = call.args;
 
+  const prefix = ctx.apiBasePath;
   if (call.method === "create") {
     const body = args[0] ? renderE2EExpr(args[0], ctx) : "{}";
-    return `await __post(\`\${base}/${slug}\`, ${body})`;
+    return `await __post(\`\${base}${prefix}/${slug}\`, ${body})`;
   }
   if (call.method === "getById") {
     if (args.length < 1) {
@@ -253,7 +275,7 @@ function renderApiCall(call: ApiCallShape, ctx: RenderCtx): string {
       );
     }
     const idExpr = renderIdArg(args[0], ctx);
-    return `await __get(\`\${base}/${slug}/\${${idExpr}}\`)`;
+    return `await __get(\`\${base}${prefix}/${slug}/\${${idExpr}}\`)`;
   }
   const op = agg.operations.find(
     (o) => o.visibility === "public" && o.name === call.method,
@@ -292,7 +314,8 @@ function renderOperationCall(
   const idExpr = renderIdArg(args[0], ctx);
   const body = args.length >= 2 ? renderE2EExpr(args[1], ctx) : "{}";
   const opSnake = snake(op.name);
-  return `await __post(\`\${base}/${slug}/\${${idExpr}}/${opSnake}\`, ${body})`;
+  const prefix = ctx.apiBasePath;
+  return `await __post(\`\${base}${prefix}/${slug}/\${${idExpr}}/${opSnake}\`, ${body})`;
 }
 
 function renderFindCall(
@@ -303,7 +326,8 @@ function renderFindCall(
 ): string {
   const findSnake = snake(find.name);
   const queryArg = args[0] ? renderE2EExpr(args[0], ctx) : "{}";
-  return `await __getQuery(\`\${base}/${slug}/${findSnake}\`, ${queryArg})`;
+  const prefix = ctx.apiBasePath;
+  return `await __getQuery(\`\${base}${prefix}/${slug}/${findSnake}\`, ${queryArg})`;
 }
 
 function renderIdArg(arg: ExprIR, ctx: RenderCtx): string {

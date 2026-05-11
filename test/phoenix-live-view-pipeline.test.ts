@@ -1308,3 +1308,405 @@ describe("E3 — Ash.transaction/2 domain-list form (workflow-emit unit)", () =>
     expect(wfEx).not.toMatch(/PhoenixApp\.Repo/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Batch F3 — cross-platform UI parity.
+//
+// `test e2e ui "…" against <deployable>` blocks lower against any
+// deployable that mounts a UI — react / static (frontend-only) AND
+// phoenixLiveView (fullstack).  `PlatformSurface.mountsUi` (Phase 2)
+// gates this; assert the orchestrator emits an identically-shaped
+// Playwright spec regardless of which platform hosts the UI.
+// ---------------------------------------------------------------------------
+
+const ACME_UI_E2E_SOURCE = `system AcmeUI {
+  module Sales {
+    context Sales {
+      aggregate Customer {
+        name: string display
+        email: string
+      }
+      repository Customers for Customer { }
+    }
+  }
+  api SalesApi from Sales
+  ui SalesAdmin { scaffold modules: Sales }
+  deployable phoenixApp {
+    platform: phoenixLiveView
+    modules: Sales
+    serves: SalesApi
+    ui: SalesAdmin
+    port: 4000
+  }
+  test e2e "smoke" against phoenixApp {
+    let cust = ui.customers.create({ name: "Acme", email: "a@b.com" })
+    ui.customers.getById(cust)
+  }
+}
+`;
+
+describe("F3 — cross-platform UI parity (test e2e ui against phoenixLiveView)", () => {
+  it("emits a Playwright spec for a `test e2e ui` block targeting a phoenix deployable", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-f3-"));
+    const file = path.join(dir, "acme-ui.ddd");
+    fs.writeFileSync(file, ACME_UI_E2E_SOURCE);
+    const services = createDddServices(NodeFileSystem);
+    const doc =
+      await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
+        URI.file(file),
+      );
+    await services.shared.workspace.DocumentBuilder.build([doc], {
+      validation: true,
+    });
+    const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
+    if (errors.length > 0) {
+      throw new Error(
+        `F3 fixture validation errors:\n` +
+          errors.map((e) => `  ${e.message}`).join("\n"),
+      );
+    }
+    const model = doc.parseResult.value as Model;
+    const { files } = generateSystems(model);
+    const uiSpecPath = "phoenix_app/e2e/AcmeUI.ui.spec.ts";
+    expect(files.has(uiSpecPath)).toBe(true);
+    const spec = files.get(uiSpecPath)!;
+    expect(spec).toMatch(/@playwright\/test/);
+    expect(spec).toMatch(/test\(/);
+    expect(spec).toMatch(/customer/i);
+  });
+
+  it("emits per-page Playwright page objects under phoenix_app/e2e/pages/", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-f3-po-"));
+    const file = path.join(dir, "acme-ui.ddd");
+    fs.writeFileSync(file, ACME_UI_E2E_SOURCE);
+    const services = createDddServices(NodeFileSystem);
+    const doc =
+      await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
+        URI.file(file),
+      );
+    await services.shared.workspace.DocumentBuilder.build([doc], {
+      validation: true,
+    });
+    const model = doc.parseResult.value as Model;
+    const { files } = generateSystems(model);
+    const pageObjects = [...files.keys()].filter((k) =>
+      /^phoenix_app\/e2e\/pages\/.*\.ts$/.test(k),
+    );
+    expect(pageObjects.length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Batch H — HEEx walker closed-primitive completion.
+//
+// Each test constructs a minimal `ExprIR` representing a body call to one
+// of the 12 primitives that previously emitted HEEx comment markers, passes
+// it through `walkBodyToHeex`, and asserts the expected HEEx fragment.
+// ---------------------------------------------------------------------------
+
+import { walkBodyToHeex } from "../src/generator/phoenix-live-view/heex-walker.js";
+import type { PageIR, UiIR } from "../src/ir/loom-ir.js";
+
+/** Minimal stubs for the walker context. */
+const stubPage: PageIR = {
+  name: "TestPage",
+  route: "/test",
+  params: [],
+  state: [],
+  source: "scaffold" as const,
+};
+
+const stubUi: UiIR = {
+  name: "TestAdmin",
+  pages: [],
+  components: [],
+  scaffolds: [],
+  apiParams: [],
+  helperImports: [],
+};
+
+describe("Batch H — HEEx walker closed-primitive completion", () => {
+  it("List emits <.table> with id and rows attribute", () => {
+    const body: ExprIR = {
+      kind: "call",
+      callKind: "free",
+      name: "List",
+      args: [],
+      argNames: [],
+    };
+    const { heex } = walkBodyToHeex(body, stubPage, stubUi, "PhoenixApp");
+    expect(heex).toMatch(/<\.table/);
+    expect(heex).toMatch(/id="list"/);
+    expect(heex).toMatch(/rows={/);
+  });
+
+  it("List with source: arg uses the provided expression as rows", () => {
+    // Page with a state field "customers" so the ref resolves to @customers.
+    const pageWithState: PageIR = {
+      ...stubPage,
+      state: [{ name: "customers", type: { kind: "array", element: { kind: "primitive", name: "string" } }, optional: false }],
+    };
+    const body: ExprIR = {
+      kind: "call",
+      callKind: "free",
+      name: "List",
+      args: [
+        { kind: "ref", name: "customers", refKind: "param", type: { kind: "array", element: { kind: "primitive", name: "string" } } } as ExprIR,
+      ],
+      argNames: ["source"],
+    };
+    const { heex } = walkBodyToHeex(body, pageWithState, stubUi, "PhoenixApp");
+    expect(heex).toMatch(/rows={@customers}/);
+  });
+
+  it("Detail emits <dl> with a field-row div", () => {
+    const body: ExprIR = {
+      kind: "call",
+      callKind: "free",
+      name: "Detail",
+      args: [],
+      argNames: [],
+    };
+    const { heex } = walkBodyToHeex(body, stubPage, stubUi, "PhoenixApp");
+    expect(heex).toMatch(/<dl>/);
+    expect(heex).toMatch(/class="field-row"/);
+    expect(heex).toMatch(/<dt>ID<\/dt>/);
+  });
+
+  it("Form(creates:) emits <.simple_form> with phx-submit and AshPhoenix comment", () => {
+    const body: ExprIR = {
+      kind: "call",
+      callKind: "free",
+      name: "Form",
+      args: [
+        { kind: "ref", name: "Customer", refKind: "param", type: { kind: "primitive", name: "string" } } as ExprIR,
+      ],
+      argNames: ["creates"],
+    };
+    const { heex } = walkBodyToHeex(body, stubPage, stubUi, "PhoenixApp");
+    expect(heex).toMatch(/<\.simple_form/);
+    expect(heex).toMatch(/phx-submit="/);
+    expect(heex).toMatch(/AshPhoenix\.Form\.for_create/);
+    expect(heex).toMatch(/<\.button.*type="submit"/);
+  });
+
+  it("Form(runs:) emits <.simple_form> with workflow comment", () => {
+    const body: ExprIR = {
+      kind: "call",
+      callKind: "free",
+      name: "Form",
+      args: [
+        { kind: "ref", name: "placeOrder", refKind: "param", type: { kind: "primitive", name: "string" } } as ExprIR,
+      ],
+      argNames: ["runs"],
+    };
+    const { heex } = walkBodyToHeex(body, stubPage, stubUi, "PhoenixApp");
+    expect(heex).toMatch(/<\.simple_form/);
+    expect(heex).toMatch(/workflow placeOrder/);
+  });
+
+  it("Form with onSubmit: lambda hoists a handle_event clause", () => {
+    const body: ExprIR = {
+      kind: "call",
+      callKind: "free",
+      name: "Form",
+      args: [
+        { kind: "ref", name: "Customer", refKind: "param", type: { kind: "primitive", name: "string" } } as ExprIR,
+        { kind: "lambda", param: "c", body: { kind: "literal", lit: "null", value: "null" } as ExprIR } as ExprIR,
+      ],
+      argNames: ["creates", "onSubmit"],
+    };
+    const { heex, handlers } = walkBodyToHeex(body, stubPage, stubUi, "PhoenixApp");
+    expect(heex).toMatch(/<\.simple_form/);
+    expect(handlers.length).toBeGreaterThanOrEqual(1);
+    expect(handlers[0]!.name).toMatch(/^event_/);
+  });
+
+  it("MasterDetail emits two-column grid with master and detail panels", () => {
+    const body: ExprIR = {
+      kind: "call",
+      callKind: "free",
+      name: "MasterDetail",
+      args: [],
+      argNames: [],
+    };
+    const { heex } = walkBodyToHeex(body, stubPage, stubUi, "PhoenixApp");
+    expect(heex).toMatch(/grid-cols-\[1fr_2fr\]/);
+    expect(heex).toMatch(/class="master-panel"/);
+    expect(heex).toMatch(/class="detail-panel"/);
+    expect(heex).toMatch(/<\.table/);
+  });
+
+  it("Dashboard emits a grid div wrapping child cards", () => {
+    const body: ExprIR = {
+      kind: "call",
+      callKind: "free",
+      name: "Dashboard",
+      args: [
+        { kind: "call", callKind: "free", name: "Stat", args: [], argNames: [] } as ExprIR,
+      ],
+      argNames: [undefined],
+    };
+    const { heex } = walkBodyToHeex(body, stubPage, stubUi, "PhoenixApp");
+    expect(heex).toMatch(/class="grid/);
+    expect(heex).toMatch(/class="card"/);
+  });
+
+  it("Review emits <dl> and a submit button with phx-click", () => {
+    const body: ExprIR = {
+      kind: "call",
+      callKind: "free",
+      name: "Review",
+      args: [],
+      argNames: [],
+    };
+    const { heex } = walkBodyToHeex(body, stubPage, stubUi, "PhoenixApp");
+    expect(heex).toMatch(/<dl>/);
+    expect(heex).toMatch(/<\.button.*phx-click="submit"/);
+  });
+
+  it("Review with onSubmit: lambda hoists a handle_event clause", () => {
+    const body: ExprIR = {
+      kind: "call",
+      callKind: "free",
+      name: "Review",
+      args: [
+        { kind: "lambda", param: "c", body: { kind: "literal", lit: "null", value: "null" } as ExprIR } as ExprIR,
+      ],
+      argNames: ["onSubmit"],
+    };
+    const { handlers } = walkBodyToHeex(body, stubPage, stubUi, "PhoenixApp");
+    expect(handlers.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("Grid emits <div class='grid'> with column spec", () => {
+    const body: ExprIR = {
+      kind: "call",
+      callKind: "free",
+      name: "Grid",
+      args: [
+        { kind: "literal", lit: "string", value: "2" } as ExprIR,
+      ],
+      argNames: ["cols"],
+    };
+    const { heex } = walkBodyToHeex(body, stubPage, stubUi, "PhoenixApp");
+    expect(heex).toMatch(/<div class="grid/);
+    expect(heex).toMatch(/grid-cols-2/);
+  });
+
+  it("Tabs emits role=tablist with phx-click=switch_tab buttons and panels", () => {
+    const body: ExprIR = {
+      kind: "call",
+      callKind: "free",
+      name: "Tabs",
+      args: [
+        {
+          kind: "call",
+          callKind: "free",
+          name: "Tab",
+          args: [
+            { kind: "literal", lit: "string", value: "Overview" } as ExprIR,
+            { kind: "literal", lit: "string", value: "content" } as ExprIR,
+          ],
+          argNames: [undefined, undefined],
+        } as ExprIR,
+      ],
+      argNames: [undefined],
+    };
+    const { heex } = walkBodyToHeex(body, stubPage, stubUi, "PhoenixApp");
+    expect(heex).toMatch(/role="tablist"/);
+    expect(heex).toMatch(/phx-click="switch_tab"/);
+    expect(heex).toMatch(/phx-value-tab="overview"/);
+    expect(heex).toMatch(/role="tabpanel"/);
+    expect(heex).toMatch(/Overview/);
+  });
+
+  it("Field emits <.input> with field binding, type=text, and label", () => {
+    const body: ExprIR = {
+      kind: "call",
+      callKind: "free",
+      name: "Field",
+      args: [
+        { kind: "ref", name: "email", refKind: "param", type: { kind: "primitive", name: "string" } } as ExprIR,
+        { kind: "literal", lit: "string", value: "Email Address" } as ExprIR,
+      ],
+      argNames: [undefined, "label"],
+    };
+    const { heex } = walkBodyToHeex(body, stubPage, stubUi, "PhoenixApp");
+    expect(heex).toMatch(/<\.input/);
+    expect(heex).toMatch(/field=\{@form\[:email\]\}/);
+    expect(heex).toMatch(/type="text"/);
+    expect(heex).toMatch(/label="Email Address"/);
+  });
+
+  it("Toggle emits <.input type='checkbox'> with field binding", () => {
+    const body: ExprIR = {
+      kind: "call",
+      callKind: "free",
+      name: "Toggle",
+      args: [
+        { kind: "ref", name: "active", refKind: "param", type: { kind: "primitive", name: "bool" } } as ExprIR,
+      ],
+      argNames: [undefined],
+    };
+    const { heex } = walkBodyToHeex(body, stubPage, stubUi, "PhoenixApp");
+    expect(heex).toMatch(/<\.input/);
+    expect(heex).toMatch(/type="checkbox"/);
+    expect(heex).toMatch(/field=\{@form\[:active\]\}/);
+  });
+
+  it("Select emits <.input type='select'> with options binding", () => {
+    const body: ExprIR = {
+      kind: "call",
+      callKind: "free",
+      name: "Select",
+      args: [
+        { kind: "ref", name: "status", refKind: "param", type: { kind: "primitive", name: "string" } } as ExprIR,
+        { kind: "ref", name: "statusOptions", refKind: "param", type: { kind: "array", element: { kind: "primitive", name: "string" } } } as ExprIR,
+        { kind: "literal", lit: "string", value: "Status" } as ExprIR,
+      ],
+      argNames: [undefined, undefined, "label"],
+    };
+    const { heex } = walkBodyToHeex(body, stubPage, stubUi, "PhoenixApp");
+    expect(heex).toMatch(/<\.input/);
+    expect(heex).toMatch(/type="select"/);
+    expect(heex).toMatch(/field=\{@form\[:status\]\}/);
+    expect(heex).toMatch(/options=\{/);
+    expect(heex).toMatch(/label="Status"/);
+  });
+
+  it("Fieldset emits <fieldset> with <legend> and child content", () => {
+    const body: ExprIR = {
+      kind: "call",
+      callKind: "free",
+      name: "Fieldset",
+      args: [
+        { kind: "literal", lit: "string", value: "Personal Info" } as ExprIR,
+        { kind: "call", callKind: "free", name: "Field", args: [], argNames: [] } as ExprIR,
+      ],
+      argNames: [undefined, undefined],
+    };
+    const { heex } = walkBodyToHeex(body, stubPage, stubUi, "PhoenixApp");
+    expect(heex).toMatch(/<fieldset>/);
+    expect(heex).toMatch(/<legend>Personal Info<\/legend>/);
+    expect(heex).toMatch(/<\.input/);
+  });
+
+  it("Stat emits <div class='stat'> with <dt> label and <dd> value", () => {
+    const body: ExprIR = {
+      kind: "call",
+      callKind: "free",
+      name: "Stat",
+      args: [
+        { kind: "literal", lit: "string", value: "Total Orders" } as ExprIR,
+        // String literal so renderInTemplate emits it without <%= %>
+        { kind: "literal", lit: "string", value: "42" } as ExprIR,
+      ],
+      argNames: [undefined, undefined],
+    };
+    const { heex } = walkBodyToHeex(body, stubPage, stubUi, "PhoenixApp");
+    expect(heex).toMatch(/class="stat"/);
+    expect(heex).toMatch(/<dt>Total Orders<\/dt>/);
+    expect(heex).toMatch(/<dd>42<\/dd>/);
+  });
+});
