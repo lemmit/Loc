@@ -185,6 +185,7 @@ jobs:
 
       - name: mix deps.get && mix compile
         run: |
+          set -o pipefail
           docker run --rm \
             -v /tmp/ci/out/phoenix_app:/app \
             -w /app \
@@ -196,4 +197,28 @@ jobs:
               mix local.rebar --force
               mix deps.get --only prod
               mix compile --warnings-as-errors
-            '
+            ' 2>&1 | tee mix.log
+
+      # On mix compile failure surface the tail of the log via
+      # ::error:: annotations (visible in the check-runs API without
+      # auth) and via GITHUB_STEP_SUMMARY (visible on the run page).
+      # Strips ANSI colour codes so the annotation text is grep-able.
+      - name: Surface mix compile output on failure
+        if: failure()
+        run: |
+          echo '## mix deps.get && mix compile output (tail)' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          tail -n 200 mix.log >> $GITHUB_STEP_SUMMARY || true
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          # Pull out Elixir CompileError / Error: lines + their
+          # adjacent context, strip ANSI colour, truncate each line
+          # to 500 chars, and emit as annotations.
+          if [ -f mix.log ]; then
+            tail -n 300 mix.log \
+              | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' \
+              | grep -E '^\*\* \(|error:|warning:|^  [a-z_]+\.exs?:[0-9]+:' \
+              | while IFS= read -r line; do
+                  short=$(printf '%s' "$line" | head -c 500)
+                  echo "::error::$short"
+                done
+          fi

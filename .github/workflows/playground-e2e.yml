@@ -54,11 +54,11 @@ concurrency:
 jobs:
   e2e:
     runs-on: ubuntu-latest
-    # Whole-job timeout: bundle (esm.sh fetches ~150 modules) + WASM
-    # download from jsdelivr + first PGlite boot can take 2-3 minutes
-    # cumulatively across the four specs; 15 leaves plenty of headroom
-    # without letting a hung run consume all the runner minutes.
-    timeout-minutes: 15
+    # Tight cap to protect CI minutes — Playwright per-test timeout
+    # is 4min × ~11 tests; a stuck pipeline could otherwise burn the
+    # full 15 before cancelling.  10 leaves time for the warm-cache
+    # path while bounding the cost of regression runs.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
 
