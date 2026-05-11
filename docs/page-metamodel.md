@@ -257,10 +257,14 @@ Reuses the existing `Statement` rule (covers `let`, `:=`, calls, `emit`).
 | `MasterDetail(of: T, scope, actions?, detail?)` | Split-pane: list + selection state + detail panel. |
 | `Dashboard(items: […])` | Composite read-only page; grid layout. |
 | `Review(of: T, onSubmit)` | Read-only summary view of a typed value, with a submit action. |
-| `Stack`, `Grid`, `Tabs`, `Card`, `Toolbar` | Layout primitives. |
-| `Heading`, `Text`, `Badge`, `Stat`, `Empty` | Display primitives. |
-| `Field`, `Toggle`, `Select`, `Fieldset` | Bindable inputs. |
+| `Stack`, `Group`, `Grid`, `Tabs`, `Card`, `Toolbar`, `Container`, `Paper`, `Breadcrumbs`, `Divider` | Layout primitives. |
+| `Heading`, `Text`, `Badge`, `Stat`, `Empty`, `Anchor`, `Image`, `Avatar`, `Loader`, `Skeleton`, `Alert`, `KeyValueRow` | Display primitives. |
+| `Field`, `NumberField`, `PasswordField`, `Toggle`, `Select`, `Fieldset` | Bindable inputs. |
 | `Action(operation, then?)`, `Button(label, on?)` | Action primitives. |
+| `Money`, `DateDisplay`, `EnumBadge`, `IdLink` | Formatter primitives. |
+| `Table`, `Column` | Tabular display (data lambda accessors). |
+| `Form(of: <Agg>)`, `Form(runs: <wf>)` | RHF-bound form auto-dispatched off the aggregate / workflow IR. |
+| `QueryView(of:, loading:, error:, empty:, data:, single?:)` | 4-arm query-state branching (collection or single-record). |
 
 The set is closed in v0. **Removed from earlier drafts:** `Wizard`, `Stage`,
 `Switch`, `Case`, `When`, `Sequence` — all subsumed by `match` plus the
