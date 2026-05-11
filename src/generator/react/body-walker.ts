@@ -2317,10 +2317,16 @@ function emitBadge(
   ctx: WalkContext,
   depth: number,
 ): string {
-  const label = firstPositionalContent(call, ctx) ?? '"Badge"';
+  const raw = firstPositionalContent(call, ctx) ?? '"Badge"';
   void depth;
   return renderPrimitive(ctx, "primitive-badge", {
-    label: unwrapTextLiteral(label),
+    // `label` is JSX-children-friendly text — quotes stripped from
+    // literals (Mantine / shadcn / chakra render `<Badge>X</Badge>`).
+    // `labelAttr` is the JSX-attribute form — quotes preserved on
+    // literals, JS expressions left as-is (MUI's `<Chip label=…/>`
+    // needs either `label="X"` or `label={expr}`).
+    label: unwrapTextLiteral(raw),
+    labelAttr: unwrapAsAttr(raw),
     testidAttr: testidAttr(call, ctx),
   });
 }

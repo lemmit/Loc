@@ -62,6 +62,9 @@ jobs:
           - web/src/examples/banking-system.ddd
           - web/src/examples/inventory-system.ddd
           - web/src/examples/sales-system.ddd
+          - web/src/examples/storybook-mantine.ddd
+          - web/src/examples/storybook-shadcn.ddd
+          - web/src/examples/storybook-components.ddd
         pack: [mantine, shadcn, mui, chakra]
     # Per-shard timeout: generate + npm install + tsc fit comfortably
     # under 10min; the matrix gives every shard its own runner so the

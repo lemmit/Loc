@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 // the kind of thing that's invisible to the IR-level tests but
 // blows up at user time.
 //
-// Matrix: 4 examples × 4 packs = 16 cases.  Non-mantine variants are
+// Matrix: 7 examples × 4 packs = 28 cases.  Non-mantine variants are
 // produced by injecting `design: <pack>` into the deployable at test-
 // run time, so the canonical example sources stay pack-neutral.
 //
@@ -41,13 +41,24 @@ const examples = [
   { ddd: "web/src/examples/banking-system.ddd", reactDir: "web_app" },
   { ddd: "web/src/examples/inventory-system.ddd", reactDir: "web_app" },
   { ddd: "web/src/examples/sales-system.ddd", reactDir: "web_app" },
+  { ddd: "web/src/examples/storybook-mantine.ddd", reactDir: "web_app" },
+  { ddd: "web/src/examples/storybook-shadcn.ddd", reactDir: "web_app" },
+  { ddd: "web/src/examples/storybook-components.ddd", reactDir: "web_app" },
 ] as const;
 
 /** Inject `design: <pack>` into the `deployable webApp { ... }` block
  *  of a `.ddd` source.  Handles both the multi-line acme syntax and
  *  the single-line playground syntax.  Idempotent and safe — if no
- *  webApp block matches, the input passes through unchanged. */
+ *  webApp block matches, the input passes through unchanged.  When
+ *  an existing `design:` slot is present (the storybook examples
+ *  already declare one), the slot is rewritten in place rather than
+ *  duplicated. */
 function injectDesign(src: string, design: string): string {
+  // Existing slot — multi-line `    design: mantine` or inline `, design: shadcn`.
+  const existing = /(\bdesign:\s*)\w+/;
+  if (existing.test(src)) {
+    return src.replace(existing, `$1${design}`);
+  }
   // Multi-line:  deployable webApp {\n  platform: react\n  …\n}
   const multiLine = /(deployable webApp \{)([^}]*?)\n(\s*)\}/;
   if (multiLine.test(src)) {
@@ -97,16 +108,15 @@ describe.skipIf(!ENABLED)("generated React TSX compiles under strict tsc", () =>
     ({ ddd, reactDir, pack }) => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-react-tsc-"));
       try {
-        // For non-mantine cases, materialise a mutated copy of the
-        // source with `design: <pack>` injected.  Mantine cases use
-        // the original file directly (mantine is the default).
-        let dddPath = ddd;
-        if (pack !== "mantine") {
-          const original = fs.readFileSync(path.join(repoRoot, ddd), "utf-8");
-          const mutated = injectDesign(original, pack);
-          dddPath = path.join(outDir, "_mutated.ddd");
-          fs.writeFileSync(dddPath, mutated);
-        }
+        // Always materialise a mutated copy with `design: <pack>` set
+        // — even for mantine, since some sources (storybook-shadcn,
+        // …) declare a non-mantine pack as their canonical default
+        // and we need to override it.  `injectDesign` rewrites an
+        // existing slot in place rather than duplicating.
+        const original = fs.readFileSync(path.join(repoRoot, ddd), "utf-8");
+        const mutated = injectDesign(original, pack);
+        const dddPath = path.join(outDir, "_mutated.ddd");
+        fs.writeFileSync(dddPath, mutated);
         execSync(`node ${cli} generate system ${dddPath} -o ${outDir}`, {
           stdio: "inherit",
           cwd: repoRoot,
