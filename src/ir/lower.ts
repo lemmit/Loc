@@ -422,6 +422,7 @@ function lowerUi(ui: import("../language/generated/ast.js").Ui): UiIR {
   const components: ComponentIR[] = [];
   const scaffolds: ScaffoldIR[] = [];
   const apiParams: import("./loom-ir.js").UiApiParamIR[] = [];
+  const helperImports: import("./loom-ir.js").UiHelperImportIR[] = [];
   let menu: MenuBlockIR | undefined;
   for (const m of ui.members) {
     if (m.$type === "Page") pages.push(lowerPage(m));
@@ -433,13 +434,24 @@ function lowerUi(ui: import("../language/generated/ast.js").Ui): UiIR {
         apiName: m.apiRef?.$refText ?? "",
       });
     }
+    else if (m.$type === "UiHelperImport") {
+      helperImports.push({ name: m.name, path: m.path });
+    }
     else if (m.$type === "MenuBlock") {
       // First menu block wins.  Validator (Slice 3) flags a duplicate
       // `menu { ... }` block at ui scope as an error.
       if (!menu) menu = lowerMenuBlock(m);
     }
   }
-  return { name: ui.name, pages, components, scaffolds, menu, apiParams };
+  return {
+    name: ui.name,
+    pages,
+    components,
+    scaffolds,
+    menu,
+    apiParams,
+    helperImports,
+  };
 }
 
 function lowerPage(p: import("../language/generated/ast.js").Page): PageIR {

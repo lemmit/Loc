@@ -85,7 +85,20 @@
     "primitive-image": "primitive-image.hbs",
     "primitive-avatar": "primitive-avatar.hbs",
     "primitive-tabs": "primitive-tabs.hbs",
-    "components-ui-tabs": "components-ui-tabs.hbs"
+    "components-ui-tabs": "components-ui-tabs.hbs",
+    "primitive-table": "primitive-table.hbs",
+    "primitive-money": "primitive-money.hbs",
+    "primitive-date-display": "primitive-date-display.hbs",
+    "primitive-enum-badge": "primitive-enum-badge.hbs",
+    "primitive-id-link": "primitive-id-link.hbs",
+    "primitive-form-of": "primitive-form-of.hbs",
+    "form-of-imports": "form-of-imports.hbs",
+    "form-of-decls": "form-of-decls.hbs",
+    "primitive-breadcrumbs": "primitive-breadcrumbs.hbs",
+    "primitive-paper": "primitive-paper.hbs",
+    "primitive-skeleton": "primitive-skeleton.hbs",
+    "primitive-alert": "primitive-alert.hbs",
+    "primitive-query-view": "primitive-query-view.hbs"
   },
   "imports": {
     "primitive-button":         [{ "from": "@/components/ui/button", "named": ["Button"] }],
@@ -108,7 +121,14 @@
       { "from": "@/components/ui/label", "named": ["Label"] }
     ],
     "primitive-loader": [{ "from": "lucide-react", "named": ["Loader2"] }],
-    "primitive-tabs":   [{ "from": "@/components/ui/tabs", "named": ["Tabs", "TabsContent", "TabsList", "TabsTrigger"] }]
+    "primitive-tabs":   [{ "from": "@/components/ui/tabs", "named": ["Tabs", "TabsContent", "TabsList", "TabsTrigger"] }],
+    "primitive-table":  [{ "from": "@/components/ui/table", "named": ["Table", "TableBody", "TableCell", "TableHead", "TableHeader", "TableRow"] }],
+    "primitive-money":  [{ "from": "../lib/format", "named": ["MoneyValue"] }],
+    "primitive-date-display":   [{ "from": "../lib/format", "named": ["DateTimeValue"] }],
+    "primitive-enum-badge":     [{ "from": "@/components/ui/badge", "named": ["Badge"] }],
+    "primitive-id-link": [{ "from": "../lib/format", "named": ["IdValue"] }],
+    "primitive-skeleton":  [{ "from": "@/components/ui/skeleton", "named": ["Skeleton"] }],
+    "primitive-alert":     [{ "from": "@/components/ui/alert",    "named": ["Alert", "AlertDescription", "AlertTitle"] }]
   },
   "shellFiles": {
     "tailwind-config": "tailwind.config.ts",

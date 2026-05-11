@@ -67,7 +67,20 @@
     "primitive-anchor": "primitive-anchor.hbs",
     "primitive-image": "primitive-image.hbs",
     "primitive-avatar": "primitive-avatar.hbs",
-    "primitive-tabs": "primitive-tabs.hbs"
+    "primitive-tabs": "primitive-tabs.hbs",
+    "primitive-table": "primitive-table.hbs",
+    "primitive-money": "primitive-money.hbs",
+    "primitive-date-display": "primitive-date-display.hbs",
+    "primitive-enum-badge": "primitive-enum-badge.hbs",
+    "primitive-id-link": "primitive-id-link.hbs",
+    "primitive-form-of": "primitive-form-of.hbs",
+    "form-of-imports": "form-of-imports.hbs",
+    "form-of-decls": "form-of-decls.hbs",
+    "primitive-breadcrumbs": "primitive-breadcrumbs.hbs",
+    "primitive-paper": "primitive-paper.hbs",
+    "primitive-skeleton": "primitive-skeleton.hbs",
+    "primitive-alert": "primitive-alert.hbs",
+    "primitive-query-view": "primitive-query-view.hbs"
   },
   "imports": {
     "primitive-heading":        [{ "from": "@mantine/core", "named": ["Title"] }],
@@ -91,6 +104,15 @@
     "primitive-anchor":         [{ "from": "@mantine/core", "named": ["Anchor"] }],
     "primitive-image":          [{ "from": "@mantine/core", "named": ["Image"] }],
     "primitive-avatar":         [{ "from": "@mantine/core", "named": ["Avatar"] }],
-    "primitive-tabs":           [{ "from": "@mantine/core", "named": ["Tabs"] }]
+    "primitive-tabs":           [{ "from": "@mantine/core", "named": ["Tabs"] }],
+    "primitive-table":          [{ "from": "@mantine/core", "named": ["Table"] }],
+    "primitive-money":          [{ "from": "../lib/format", "named": ["MoneyValue"] }],
+    "primitive-date-display":   [{ "from": "../lib/format", "named": ["DateTimeValue"] }],
+    "primitive-enum-badge":     [{ "from": "@mantine/core", "named": ["Badge"] }],
+    "primitive-id-link":        [{ "from": "../lib/format", "named": ["IdValue"] }],
+    "primitive-breadcrumbs":    [{ "from": "@mantine/core", "named": ["Breadcrumbs"] }],
+    "primitive-paper":          [{ "from": "@mantine/core", "named": ["Paper"] }],
+    "primitive-skeleton":       [{ "from": "@mantine/core", "named": ["Skeleton", "Stack"] }],
+    "primitive-alert":          [{ "from": "@mantine/core", "named": ["Alert"] }]
   }
 }

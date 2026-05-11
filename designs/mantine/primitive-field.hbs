@@ -1,1 +1,1 @@
-{{#if hasBind}}<TextInput label={{{labelAttr}}} value={{expr bind}} onChange={(e) => {{setter}}(e.currentTarget.value)} />{{else}}<TextInput label={{{labelAttr}}} />{{/if}}
+{{#if hasBind}}<TextInput label={{{labelAttr}}} value={{expr bind}} onChange={(e) => {{setter}}(e.currentTarget.value)}{{{testidAttr}}} />{{else}}<TextInput label={{{labelAttr}}}{{{testidAttr}}} />{{/if}}

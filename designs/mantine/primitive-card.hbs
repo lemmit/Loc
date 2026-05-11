@@ -1,8 +1,8 @@
-{{#if hasTitle}}{{#if hasContent}}<Card withBorder padding="md">
+{{#if hasTitle}}{{#if hasContent}}<Card withBorder padding="md"{{{testidAttr}}}>
 {{indent}}<Title order={3}>{{{titleText}}}</Title>
 {{indent}}{{{contentJsx}}}
-{{closeIndent}}</Card>{{else}}<Card withBorder padding="md">
+{{closeIndent}}</Card>{{else}}<Card withBorder padding="md"{{{testidAttr}}}>
 {{indent}}<Title order={3}>{{{titleText}}}</Title>
-{{closeIndent}}</Card>{{/if}}{{else}}{{#if hasContent}}<Card withBorder padding="md">
+{{closeIndent}}</Card>{{/if}}{{else}}{{#if hasContent}}<Card withBorder padding="md"{{{testidAttr}}}>
 {{indent}}{{{contentJsx}}}
-{{closeIndent}}</Card>{{else}}<Card />{{/if}}{{/if}}
+{{closeIndent}}</Card>{{else}}<Card{{{testidAttr}}} />{{/if}}{{/if}}

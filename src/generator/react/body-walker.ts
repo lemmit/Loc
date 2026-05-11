@@ -49,14 +49,26 @@
 
 import type { ImportSpec, LoadedPack } from "./templating/loader.js";
 import type {
+  AggregateIR,
+  BoundedContextIR,
   ExprIR,
   ParamIR,
   StateFieldIR,
   StmtIR,
   TypeIR,
   UiApiParamIR,
+  UiHelperImportIR,
 } from "../../ir/loom-ir.js";
-import { camel, pascal, plural, snake } from "../../util/naming.js";
+import { camel, humanize, pascal, plural, snake } from "../../util/naming.js";
+import {
+  componentsForFields,
+  idTargetHookVar,
+  idTargetsInFields,
+  initialValuesTs,
+  needsController,
+} from "./form-helpers.js";
+import { prepareFormFieldVM } from "./templating/preparers/form-fields.js";
+import { renderFormField } from "./templating/render.js";
 
 /** Per-source named-import map — `from` module → set of named
  *  exports the page needs from it.  Replaces the old single-source
@@ -162,6 +174,24 @@ export interface WalkResult {
    *  declaration at page-top + an import.  Body refs are
    *  rewritten to use the local var. */
   usedApiHooks: Map<string, ApiHookUse>;
+  /** Slice A4 — non-null when the body contained a `Form(of: <Agg>)`
+   *  primitive.  Shell consumes this to emit `useForm` / `Controller`
+   *  imports, mutation hook, `defaultValues`, and the `onSubmit`
+   *  handler that wraps the form's `<form onSubmit={…}>`. */
+  formOf: FormOfState | null;
+  /** Slice A5 — every static `testid:` literal encountered while
+   *  walking the body, plus the synthesised testid bases the walker
+   *  generates on the user's behalf (e.g. `<form-namespace>-input-
+   *  <field>` for each `Form(of:)` field, `<form-namespace>-submit`
+   *  for the submit button).  The walker-side page-object emitter
+   *  reads this set to surface one typed `Locator` getter per
+   *  testid in the generated `e2e/pages/<page-snake>.ts` class. */
+  collectedTestids: Set<string>;
+  /** Slice A6 — names of UI-declared helpers the body actually
+   *  invoked.  The shell emits one `import { <name> } from
+   *  "<path>"` line per used helper; declared-but-unused helpers
+   *  don't pollute the page TSX. */
+  usedHelpers: Set<string>;
 }
 
 /** A single auto-injected React Query hook call.  Generated when
@@ -212,26 +242,43 @@ const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
   "Stat",
   "Badge",
   "Divider",
+  "Table",
+  "Money",
+  "DateDisplay",
+  "EnumBadge",
+  "IdLink",
+  "Form",
+  "Breadcrumbs",
+  "Paper",
+  "Skeleton",
+  "Alert",
+  "QueryView",
 ]);
 
 export function isWalkableLayoutBody(
   body: ExprIR | undefined,
   userComponents: ReadonlyMap<string, readonly ParamIR[]> = new Map(),
+  helperNames: ReadonlySet<string> = new Set(),
 ): boolean {
   if (!body) return false;
   if (body.kind === "call") {
     if (STDLIB_LAYOUT_COMPONENTS.has(body.name)) return true;
     // Slice 11.18 — calls to user-defined components are walker-
     // eligible too (resolved via the supplied map).
-    return userComponents.has(body.name);
+    if (userComponents.has(body.name)) return true;
+    // Slice A6 — a body whose top-level call is a UI-declared
+    // helper is walker-eligible: the helper renders the page's
+    // JSX in user land.  Without this, `body: RenderBanner("hi")`
+    // would be silently skipped.
+    return helperNames.has(body.name);
   }
   // Slice 11.17 — top-level conditional bodies dispatch through the
   // walker as long as either branch is walkable.  Powers patterns
   // like `body: loading ? Empty("…") : Stack(…)`.
   if (body.kind === "ternary") {
     return (
-      isWalkableLayoutBody(body.then, userComponents) ||
-      isWalkableLayoutBody(body.otherwise, userComponents)
+      isWalkableLayoutBody(body.then, userComponents, helperNames) ||
+      isWalkableLayoutBody(body.otherwise, userComponents, helperNames)
     );
   }
   return false;
@@ -266,9 +313,25 @@ export function walkBodyToTsx(
    *  detected by the walker, hoisted to a hook call at page top,
    *  and rewritten to the local hook variable. */
   apiParams: ReadonlyArray<UiApiParamIR> = [],
+  /** Slice A4 — aggregates reachable from this UI's deployable.
+   *  `Form(of: <Agg>)` and `IdLink(of: <Agg>)` look up the
+   *  aggregate's IR here (field list for form dispatch; display-
+   *  marked field for IdLink's link text). */
+  aggregatesByName: ReadonlyMap<string, AggregateIR> = new Map(),
+  /** Slice A4 — bounded-context map keyed by aggregate name.  The
+   *  form-field preparer needs the BC to resolve enum / value-
+   *  object types declared alongside the aggregate. */
+  bcByAggregate: ReadonlyMap<string, BoundedContextIR> = new Map(),
+  /** Slice A6 — user-authored helper imports declared at the UI
+   *  level via `import helper <name> from "<path>"`.  Body refs
+   *  matching one of these names emit as plain JS calls and the
+   *  shell adds the matching `import { <name> } from "<path>"`. */
+  helperImports: ReadonlyArray<UiHelperImportIR> = [],
 ): WalkResult {
   const apiParamNames = new Map<string, string>();
   for (const p of apiParams) apiParamNames.set(p.name, p.apiName);
+  const helperNameToPath = new Map<string, string>();
+  for (const h of helperImports) helperNameToPath.set(h.name, h.path);
   const ctx: WalkContext = {
     imports: new Map(),
     pack,
@@ -283,6 +346,14 @@ export function walkBodyToTsx(
     usesChildren: false,
     apiParamNames,
     usedApiHooks: new Map(),
+    lambdaParams: new Map(),
+    shellLocals: new Set(),
+    aggregatesByName,
+    bcByAggregate,
+    formOf: null,
+    collectedTestids: new Set(),
+    helperImports: helperNameToPath,
+    usedHelpers: new Set(),
   };
   const tsx = walk(body, ctx, 0);
   return {
@@ -295,6 +366,9 @@ export function walkBodyToTsx(
     usedUserComponents: ctx.usedUserComponents,
     usesChildren: ctx.usesChildren,
     usedApiHooks: ctx.usedApiHooks,
+    formOf: ctx.formOf,
+    collectedTestids: ctx.collectedTestids,
+    usedHelpers: ctx.usedHelpers,
   };
 }
 
@@ -312,6 +386,84 @@ interface WalkContext {
   usesChildren: boolean;
   apiParamNames: ReadonlyMap<string, string>;
   usedApiHooks: Map<string, ApiHookUse>;
+  /** Slice A2 — lambda params bound in the current sub-walk
+   *  (source-side name → emitted JS name).  `Column("ID", o => o.id)`
+   *  walks the accessor body with `o → "row"`; refs to `o` resolve
+   *  to the JS identifier `row`.  Outer scope is unaffected. */
+  lambdaParams: ReadonlyMap<string, string>;
+  /** Slice A4 — identifiers emitted by the page shell that user-
+   *  written sub-expressions can reference (e.g. inside a
+   *  `Form(of:, onSubmit:)` lambda, `create` is the mutation hook
+   *  declared at function top).  Refs matching a name in this set
+   *  emit as the bare identifier — no `unresolved` comment. */
+  shellLocals: ReadonlySet<string>;
+  /** Slice A4 — aggregates reachable from this UI's deployable.
+   *  Powers `Form(of: <Agg>)` field dispatch and `IdLink(of: <Agg>)`
+   *  display-field resolution. */
+  aggregatesByName: ReadonlyMap<string, AggregateIR>;
+  /** Slice A4 — map aggregate name → owning bounded context, so the
+   *  form-field preparer can resolve enums / value-objects declared
+   *  in the same context. */
+  bcByAggregate: ReadonlyMap<string, BoundedContextIR>;
+  /** Slice A4 — when `Form(of: <Agg>)` is walked, the emitter
+   *  records the metadata the shell needs (aggregate, BC, optional
+   *  user-supplied `onSubmit:` lambda body, redirect path) so the
+   *  shell can emit `useForm` + create mutation + `handleSubmit`
+   *  wiring at function top. */
+  formOf: FormOfState | null;
+  /** Slice A5 — accumulator for static `testid:` strings the body
+   *  emits, used by the walker-side page-object builder. */
+  collectedTestids: Set<string>;
+  /** Slice A6 — UI helper-import lookup (name → import path).
+   *  Populated by `walkBodyToTsx` from the UI's `helperImports`
+   *  parameter; consulted by `emitComponent`'s fallthrough so
+   *  body calls to a helper name emit as plain JS calls. */
+  helperImports: ReadonlyMap<string, string>;
+  /** Slice A6 — names of helpers the body actually called.  The
+   *  shell emits one import line per used helper; declared-but-
+   *  unused helpers don't pollute the page TSX. */
+  usedHelpers: Set<string>;
+}
+
+/** Slice A4 — RHF wiring requirements recorded by `emitFormOf`,
+ *  consumed by the page shell to splice the `useForm` declaration +
+ *  `Create<X>Request` + `useCreate<X>` mutation + per-field
+ *  `useAll<TargetX>` hooks at the top of the function body. */
+export interface FormOfState {
+  agg: AggregateIR;
+  bc: BoundedContextIR;
+  /** Non-optional aggregate fields — the form-field preparer walks
+   *  this list (optional fields are excluded from the create
+   *  form, matching the scaffold-path behavior). */
+  fields: AggregateIR["fields"];
+  /** Id<X> targets needing `useAllX()` injection at function top
+   *  (resolved through `idTargetsInFields`).  One hook decl per
+   *  target — collapsed across multiple `Id<X>` fields on the same
+   *  target aggregate. */
+  idTargets: readonly AggregateIR[];
+  /** True when any field needs RHF's `Controller` for binding
+   *  (currently the case for enums + Id<X>-as-select + bool +
+   *  datetime + value-objects). */
+  useController: boolean;
+  /** Default-values literal for `useForm({ defaultValues: ... })`. */
+  defaultValuesTs: string;
+  /** Components needed from the design pack — added on top of the
+   *  base set so the import block stays sorted + de-duped. */
+  fieldComponents: readonly string[];
+  /** Slug-prefixed testid namespace (e.g. `"orders-form"`).  Auto-
+   *  derived from page name unless a `testid:` named arg overrides. */
+  testidNamespace: string;
+  /** Pre-rendered field TSX (already through the per-pack
+   *  `field-input-*` templates) — the shell splices these into the
+   *  `<form>` body. */
+  fieldHtmls: readonly string[];
+  /** Optional user-supplied `onSubmit:` lambda body (an expression
+   *  or a block of statements).  When set, the shell wires it
+   *  inside `handleSubmit(...)` with `vals` (the form data) in
+   *  scope.  When null, the shell defaults to the scaffold
+   *  behavior: `create.mutateAsync(vals)` + notification +
+   *  navigation to `/<plural>/${out.id}`. */
+  onSubmitJs: string | null;
 }
 
 function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
@@ -335,6 +487,13 @@ function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
       if (expr.lit === "null") return `{null}`;
       return `{${expr.value}}`;
     case "ref":
+      // Slice A2 — refs to a lambda-bound param resolve to its
+      // emitted JS name (e.g. `o.id` inside `o => …` walks with
+      // `o → "row"`).  Brace-wrap as a JSX child.
+      {
+        const jsName = ctx.lambdaParams.get(expr.name);
+        if (jsName) return `{${jsName}}`;
+      }
       // Slice 11.4 — refs that match a route param name emit as
       // JSX expressions (`{name}`).  React Router's `useParams()`
       // brings these into scope at render time; the page-shell
@@ -363,6 +522,13 @@ function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
       const inner = `${cond} ? (\n${"  ".repeat(depth + 1)}${thenS}\n${"  ".repeat(depth)}) : (\n${"  ".repeat(depth + 1)}${elseS}\n${"  ".repeat(depth)})`;
       return depth === 0 ? inner : `{${inner}}`;
     }
+    case "member":
+      // Slice A2 — member access in JSX-child position (e.g. an
+      // accessor lambda body `o => o.id` walks `o.id` as the body
+      // of a `<Table.Td>` cell).  Emit as a brace-wrapped JS
+      // expression; `emitExpr` resolves the receiver (lambda
+      // param, hook, state) and concatenates the member name.
+      return `{${emitExpr(expr, ctx)}}`;
     default:
       return `{/* unsupported expr: ${expr.kind} */}`;
   }
@@ -384,6 +550,28 @@ function emitComponent(
       return emitContainer(call, ctx, depth);
     case "Tabs":
       return emitTabs(call, ctx, depth);
+    case "Table":
+      return emitTable(call, ctx, depth);
+    case "Money":
+      return emitMoney(call, ctx, depth);
+    case "DateDisplay":
+      return emitDateDisplay(call, ctx, depth);
+    case "EnumBadge":
+      return emitEnumBadge(call, ctx, depth);
+    case "IdLink":
+      return emitIdLink(call, ctx, depth);
+    case "Form":
+      return emitFormOf(call, ctx, depth);
+    case "Breadcrumbs":
+      return emitBreadcrumbs(call, ctx, depth);
+    case "Paper":
+      return emitPaper(call, ctx, depth);
+    case "Skeleton":
+      return emitSkeleton(call, ctx, depth);
+    case "Alert":
+      return emitAlert(call, ctx, depth);
+    case "QueryView":
+      return emitQueryView(call, ctx, depth);
     case "Toolbar":
       return emitToolbar(call, ctx, depth);
     case "Empty":
@@ -423,10 +611,18 @@ function emitComponent(
     default: {
       // Slice 11.18 — names not in the stdlib dispatch table fall
       // through to user-component invocation when they match a
-      // registered ComponentIR.  Otherwise the original
-      // "unknown component" placeholder fires.
+      // registered ComponentIR.
       if (ctx.userComponents.has(call.name)) {
         return emitUserComponent(call, ctx, depth);
+      }
+      // Slice A6 — UI-declared helper imports (`import helper
+      // <name> from "..."`) emit as plain JS calls in JSX-child
+      // position (brace-wrapped).  The shell adds the matching
+      // import line once `usedHelpers` is populated.
+      if (ctx.helperImports.has(call.name)) {
+        ctx.usedHelpers.add(call.name);
+        const args = call.args.map((a) => emitExpr(a, ctx)).join(", ");
+        return `{${call.name}(${args})}`;
       }
       return `{/* unknown layout component: ${call.name} */}`;
     }
@@ -447,6 +643,7 @@ function emitStack(
     childrenBlock: children.join(`\n${indent}`),
     indent,
     closeIndent,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -463,6 +660,7 @@ function emitGroup(
     childrenBlock: children.join(`\n${indent}`),
     indent,
     closeIndent,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -485,6 +683,7 @@ function emitGrid(
     colIndent,
     childIndent,
     closeIndent,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -508,6 +707,7 @@ function emitContainer(
     closeIndent,
     size,
     hasSize: size !== undefined,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -552,6 +752,7 @@ function emitTabs(
     indent: "  ".repeat(depth + 1),
     innerIndent: "  ".repeat(depth + 2),
     closeIndent: "  ".repeat(depth),
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -564,6 +765,496 @@ function slugify(s: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+/** Slice A2 — Table primitive.
+ *
+ *  Surface:
+ *
+ *    Table(
+ *      rows: <expr>,                  // any data-source expression
+ *      Column("ID", o => o.id),       // positional Column(...) calls
+ *      Column("Status", o => Badge(o.status)),
+ *      onRowClick: o => /* … *\/,     // optional
+ *      testid: "orders-table"          // optional
+ *    )
+ *
+ *  Lowers to a packed-table TSX block with a header row + a body
+ *  produced by `<rowsExpr>.map((row) => …)`.  Column accessors are
+ *  lambdas; the lambda's source-side param name is rebound to the
+ *  emitted JS identifier `row` for the duration of the column body
+ *  walk (via WalkContext.lambdaParams).  Cell bodies that are
+ *  primitive calls (`Badge(…)`) emit as JSX; member-access bodies
+ *  (`o.id`) emit as `{row.id}`. */
+function emitTable(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  const rowsArg = namedArgValue(call, "rows");
+  const rowsExpr = rowsArg ? emitExpr(rowsArg, ctx) : "[]";
+  const onRowClick = lambdaArg(call, "onRowClick");
+
+  const positionals = positionalArgs(call);
+  const cols = positionals
+    .filter(
+      (a): a is ExprIR & { kind: "call" } =>
+        a.kind === "call" && a.name === "Column",
+    )
+    .map((c, i) => emitColumn(c, ctx, i, depth + 3));
+
+  const rowVar = "row";
+  let onRowClickJs: string | undefined;
+  if (onRowClick) {
+    const childCtx: WalkContext = {
+      ...ctx,
+      lambdaParams: extendLambdaParams(ctx, onRowClick.param, rowVar),
+    };
+    if (onRowClick.body) {
+      onRowClickJs = emitExpr(onRowClick.body, childCtx);
+    } else if (onRowClick.block && onRowClick.block.length > 0) {
+      const stmts = onRowClick.block
+        .map((s) => emitStmt(s, childCtx))
+        .join(" ");
+      onRowClickJs = `{ ${stmts} }`;
+    }
+  }
+
+  // Slice A9 — boolean style props matching Mantine's `<Table>`
+  // surface.  shadcn templates ignore the props (their <Table> has
+  // built-in striping); reading them here keeps the DSL pack-
+  // agnostic.
+  const striped = boolNamed(call, "striped");
+  const highlight = boolNamed(call, "highlight");
+  const sticky = boolNamed(call, "sticky");
+
+  // Slice A9 — `rowTestid:` lambda computes a per-row testid.
+  // The lambda's source-side param rebinds to `row` (Slice A2's
+  // lambdaParams scope) so user code reads `row.id` cleanly.
+  // The expression body emits inside a TS template literal so
+  // dynamic ids interpolate (`orders-row-${row.id}`).
+  const rowTestidLam = lambdaArg(call, "rowTestid");
+  let rowTestidJs: string | undefined;
+  if (rowTestidLam && rowTestidLam.body) {
+    const childCtx: WalkContext = {
+      ...ctx,
+      lambdaParams: extendLambdaParams(ctx, rowTestidLam.param, rowVar),
+    };
+    rowTestidJs = emitExpr(rowTestidLam.body, childCtx);
+  }
+
+  const indent = "  ".repeat(depth + 1);
+  const headIndent = "  ".repeat(depth + 2);
+  const bodyIndent = "  ".repeat(depth + 2);
+  const rowIndent = "  ".repeat(depth + 3);
+  const cellIndent = "  ".repeat(depth + 4);
+  const closeIndent = "  ".repeat(depth);
+  return renderPrimitive(ctx, "primitive-table", {
+    rowsExpr,
+    rowVar,
+    columns: cols,
+    hasColumns: cols.length > 0,
+    hasOnRowClick: onRowClickJs !== undefined,
+    onRowClick: onRowClickJs,
+    striped,
+    highlight,
+    sticky,
+    hasAnyStyleProps: striped || highlight || sticky,
+    hasRowTestid: rowTestidJs !== undefined,
+    rowTestid: rowTestidJs,
+    indent,
+    headIndent,
+    bodyIndent,
+    rowIndent,
+    cellIndent,
+    closeIndent,
+    testidAttr: testidAttr(call, ctx),
+  });
+}
+
+/** Slice A9 — read a boolean-literal named arg.  Used for Table's
+ *  `striped:` / `highlight:` / `sticky:` style toggles where any
+ *  truthy value flips the prop on.  Returns `false` when the arg
+ *  is missing so the template can read it as a boolean directly. */
+function boolNamed(
+  call: ExprIR & { kind: "call" },
+  name: string,
+): boolean {
+  const argNames = call.argNames ?? [];
+  for (let i = 0; i < call.args.length; i++) {
+    if (argNames[i] !== name) continue;
+    const a = call.args[i]!;
+    if (a.kind === "literal" && a.lit === "bool") return a.value === "true";
+  }
+  return false;
+}
+
+/** Slice A2 — emit one `Column("Header", <accessor>)` into a
+ *  template-friendly shape: a header string + a per-cell TSX
+ *  fragment.  Accessor lambda bodies that are primitive calls
+ *  walk through the regular emitter (yields JSX); expression
+ *  bodies (member access, refs) emit as `{<expr>}` brace-wrapped
+ *  JS expressions. */
+function emitColumn(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  index: number,
+  depth: number,
+): { header: string; cellJsx: string; key: string } {
+  const positionals = positionalArgs(call);
+  const headerArg = positionals[0];
+  const accessorArg = positionals[1];
+  const headerStr =
+    headerArg && headerArg.kind === "literal" && headerArg.lit === "string"
+      ? headerArg.value
+      : `Column ${index + 1}`;
+  const key = slugify(headerStr) || `col-${index + 1}`;
+
+  const rowVar = "row";
+  let cellJsx = "{/* missing accessor */}";
+  if (accessorArg && accessorArg.kind === "lambda") {
+    const childCtx: WalkContext = {
+      ...ctx,
+      lambdaParams: extendLambdaParams(ctx, accessorArg.param, rowVar),
+    };
+    const body = accessorArg.body;
+    if (body) {
+      if (body.kind === "call") {
+        cellJsx = walk(body, childCtx, depth);
+      } else if (body.kind === "literal" && body.lit === "string") {
+        cellJsx = escapeJsxText(body.value);
+      } else {
+        cellJsx = `{${emitExpr(body, childCtx)}}`;
+      }
+    }
+  }
+  return {
+    header: escapeJsxText(headerStr),
+    cellJsx,
+    key,
+  };
+}
+
+/** Slice A2 — return the value-expression of a named arg (e.g.
+ *  the `<expr>` in `rows: <expr>`).  Undefined when the named arg
+ *  is missing.  Distinct from `stringNamed` (string literals only)
+ *  and `numericNamed` (number literals only): this keeps any
+ *  expression IR for the caller to render as JS. */
+function namedArgValue(
+  call: ExprIR & { kind: "call" },
+  name: string,
+): ExprIR | undefined {
+  const argNames = call.argNames ?? [];
+  for (let i = 0; i < call.args.length; i++) {
+    if (argNames[i] === name) return call.args[i];
+  }
+  return undefined;
+}
+
+/** Slice A2 — extend the WalkContext.lambdaParams map with a new
+ *  binding without mutating the parent map.  Caller spreads the
+ *  rest of the context and overrides `lambdaParams` with the
+ *  result. */
+function extendLambdaParams(
+  ctx: WalkContext,
+  srcName: string,
+  jsName: string,
+): ReadonlyMap<string, string> {
+  const next = new Map(ctx.lambdaParams);
+  next.set(srcName, jsName);
+  return next;
+}
+
+/** Slice A3 — Money(value, currency?, decimals?, testid?).  Renders
+ *  through the pack's `MoneyValue` runtime helper (Intl.NumberFormat
+ *  with `style: "currency"`).  First positional or `value:` named
+ *  arg is the numeric value; `currency:` and `decimals:` are
+ *  optional named args. */
+function emitMoney(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  void depth;
+  const value =
+    namedArgValue(call, "value") ?? positionalArgs(call)[0];
+  const valueExpr = value ? emitExpr(value, ctx) : "0";
+  const currency = stringNamed(call, "currency");
+  const decimals = numericNamed(call, "decimals");
+  return renderPrimitive(ctx, "primitive-money", {
+    valueExpr,
+    hasCurrency: currency !== undefined,
+    currency: currency !== undefined ? JSON.stringify(currency) : "",
+    hasDecimals: decimals !== undefined,
+    decimals: decimals !== undefined ? String(decimals) : "",
+    testidAttr: testidAttr(call, ctx),
+  });
+}
+
+/** Slice A3 — DateDisplay(iso, testid?).  Renders through the
+ *  pack's `DateTimeValue` runtime helper (locale-formatted with
+ *  the raw ISO surfaced in a tooltip).  Accepts a string or null;
+ *  empty values render as the shared dimmed em-dash. */
+function emitDateDisplay(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  void depth;
+  const value =
+    namedArgValue(call, "value") ?? positionalArgs(call)[0];
+  const valueExpr = value ? emitExpr(value, ctx) : '""';
+  return renderPrimitive(ctx, "primitive-date-display", {
+    valueExpr,
+    testidAttr: testidAttr(call, ctx),
+  });
+}
+
+/** Slice A3 — EnumBadge(value, color?, testid?).  Renders the
+ *  per-pack Badge with an optional explicit colour.  Mantine
+ *  passes `color={…}`; shadcn maps `color` to the Badge `variant`
+ *  prop in the template (so the same DSL surface works on both
+ *  packs). */
+function emitEnumBadge(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  void depth;
+  const value =
+    namedArgValue(call, "value") ?? positionalArgs(call)[0];
+  const valueExpr = value ? emitExpr(value, ctx) : '""';
+  const color = stringNamed(call, "color");
+  return renderPrimitive(ctx, "primitive-enum-badge", {
+    valueExpr,
+    hasColor: color !== undefined,
+    color: color !== undefined ? JSON.stringify(color) : "",
+    testidAttr: testidAttr(call, ctx),
+  });
+}
+
+/** Slice A3 — IdLink(id, of: <Aggregate>, testid?).
+ *
+ *  Emits a React-Router `<Link>` to the conventional
+ *  `/<plural-snake>/{id}` detail-page route, with the truncated id
+ *  rendered via the pack's `IdValue` helper as the link text.
+ *
+ *  Link-text choice — IdValue (truncated id) is the deliberate
+ *  match to the scaffold's `cell-id-link.hbs` rendering.  Looking
+ *  up the aggregate's `display`-marked field would require a per-
+ *  row `useXById(id)` hook call from inside the IdLink primitive,
+ *  which doesn't compose cleanly when IdLink appears inside a
+ *  Table cell (one hook per row violates React's rules-of-hooks).
+ *  Detail-page TITLES use the display field — that's where it
+ *  belongs.
+ *
+ *  Slice A4 plumbs aggregates through to the walker; we now use
+ *  that to validate `of:` at emit time — an unresolvable aggregate
+ *  surfaces as a visible TSX comment rather than a silent
+ *  mistakenly-pluralised path. */
+function emitIdLink(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  void depth;
+  const id =
+    namedArgValue(call, "id") ?? positionalArgs(call)[0];
+  const idExpr = id ? emitExpr(id, ctx) : '""';
+  const ofArg = namedArgValue(call, "of");
+  const aggName =
+    ofArg && ofArg.kind === "ref"
+      ? ofArg.name
+      : ofArg && ofArg.kind === "literal" && ofArg.lit === "string"
+        ? ofArg.value
+        : undefined;
+  if (!aggName) {
+    return `{/* IdLink: missing 'of:' aggregate ref */}`;
+  }
+  // When aggregate IR is in scope (Slice A4), prefer the official
+  // aggregate's plural-snake slug over our local pluralisation
+  // pass — `agg.name` is canonical (already validated) and any
+  // future irregular-plural rules live with the IR.  When the
+  // aggregate isn't visible (e.g. a deployable that excludes its
+  // module), we still emit a working link, just without IR-level
+  // verification.
+  const agg = ctx.aggregatesByName.get(aggName);
+  const slug = agg ? plural(snake(agg.name)) : plural(snake(aggName));
+  ctx.usesRouterLink = true;
+  return renderPrimitive(ctx, "primitive-id-link", {
+    idExpr,
+    pathPrefix: `/${slug}/`,
+    testidAttr: testidAttr(call, ctx),
+  });
+}
+
+/** Slice A4 — Form(of: <Aggregate>, onSubmit?: <lambda>, testid?).
+ *
+ *  Walker-side counterpart to the scaffold New-page archetype.
+ *  Introspects the aggregate's IR field list and emits one input
+ *  per field using the SAME `field-input-*` templates the scaffold
+ *  renderer uses (`prepareFormFieldVM` + `renderFormField`), so RHF
+ *  integration is preserved at the field level (`register` /
+ *  `Controller`, error-path access, testid namespace).
+ *
+ *  What gets emitted by THIS function:
+ *   - The form's `<form onSubmit=…><Stack>{fields}{submit}</Stack>
+ *     </form>` JSX block (rendered through `primitive-form-of.hbs`).
+ *
+ *  What the shell (`renderCustomLayoutPage`) emits on top:
+ *   - `useForm` import + declaration with zodResolver wiring
+ *   - `useCreate<Agg>` mutation hook
+ *   - One `useAll<Target>()` hook per `Id<X>` target needing a
+ *     select picker
+ *   - The submit handler — default scaffold behaviour
+ *     (`create.mutateAsync` + notify + navigate) when no explicit
+ *     `onSubmit:` was given.
+ *
+ *  Walker records the FormOfState on `ctx.formOf`; the shell reads
+ *  it after the body walk completes. */
+function emitFormOf(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  const ofArg = namedArgValue(call, "of");
+  const aggName =
+    ofArg && ofArg.kind === "ref"
+      ? ofArg.name
+      : ofArg && ofArg.kind === "literal" && ofArg.lit === "string"
+        ? ofArg.value
+        : undefined;
+  if (!aggName) {
+    return `{/* Form(of: …): missing 'of:' aggregate ref */}`;
+  }
+  const agg = ctx.aggregatesByName.get(aggName);
+  const bc = ctx.bcByAggregate.get(aggName);
+  if (!agg || !bc) {
+    return `{/* Form(of: ${aggName}): aggregate not found in this UI's reachable contexts */}`;
+  }
+  // Optional fields are excluded from create forms — same rule as
+  // the scaffold New-page builder (`!f.optional`).  This keeps the
+  // first iteration of a form schema focused on what the wire
+  // contract REQUIRES; optional fields surface via update-flow
+  // operations on the detail page.
+  const fields = agg.fields.filter((f) => !f.optional);
+  // `idTargetsInFields` and friends take a mutable `Map` — we
+  // don't write to it, so spreading the readonly map into a fresh
+  // mutable one is a zero-risk shape adaptation.
+  const aggregatesByNameMut = new Map(ctx.aggregatesByName);
+  const idTargets = idTargetsInFields(fields, bc, aggregatesByNameMut);
+  const useController = needsController(fields, bc);
+  const defaultValuesTs = initialValuesTs(fields, bc);
+  const fieldComponents = [...componentsForFields(fields, bc)];
+  // Mantine surface: every form needs Stack + Button + Group on
+  // top of whichever input components the fields require.  We add
+  // them through the regular import map so they coalesce with any
+  // other Mantine imports the page accumulates.
+  addMantineImport(ctx, "Stack", "Button", "Group", ...fieldComponents);
+  // Field-by-field testid namespace.  `testid:` named arg pins
+  // it; otherwise we derive a slug from the aggregate name.  This
+  // matches what the scaffold renderer does (`<slug>-new-input-<f>`)
+  // so e2e selectors stay stable when migrating a scaffold New-page
+  // to an explicit one.
+  const testidArg = stringNamed(call, "testid");
+  const testidNamespace = testidArg ?? `${snake(plural(agg.name))}-new`;
+  const fieldVMs = fields.map((f) =>
+    prepareFormFieldVM(
+      f.name,
+      f.type,
+      bc,
+      `${testidNamespace}-input-${f.name}`,
+      aggregatesByNameMut,
+    ),
+  );
+  const fieldHtmls = fieldVMs.map((vm) => renderFormField(vm, ctx.pack));
+  // Slice A5 — surface the synthesised testids (one per field +
+  // the submit button) so the walker page-object emitter exposes
+  // them as Locator getters.  Without this, an explicit page
+  // built around `Form(of:)` would only expose user-supplied
+  // testids, missing the form-internal ones that the per-field
+  // `field-input-*` templates emit by convention.
+  for (const vm of fieldVMs) ctx.collectedTestids.add(vm.testId);
+  ctx.collectedTestids.add(`${testidNamespace}-submit`);
+  // onSubmit:  explicit lambda body OR null (shell uses scaffold
+  // default).  The lambda's `vals` (form data) is in scope by
+  // RHF convention; we rebind the source-side param name to
+  // `vals` via the same lambdaParams scope used by Table columns.
+  let onSubmitJs: string | null = null;
+  const onSubmit = lambdaArg(call, "onSubmit");
+  if (onSubmit) {
+    // Inside the onSubmit lambda the shell will have emitted these
+    // locals at function-top: the `create` mutation hook, the
+    // destructured RHF API (`register`, `handleSubmit`, `control`,
+    // `errors`), and one `useAll<Target>` hook per `Id<X>` field.
+    // Expose them all so user code that references any one resolves
+    // cleanly rather than landing as an `unresolved:` comment.
+    const shellLocals = new Set<string>([
+      "create",
+      "register",
+      "handleSubmit",
+      "control",
+      "errors",
+      ...idTargets.map((t) => idTargetHookVar(t)),
+    ]);
+    const childCtx: WalkContext = {
+      ...ctx,
+      lambdaParams: extendLambdaParams(ctx, onSubmit.param, "vals"),
+      shellLocals,
+    };
+    if (onSubmit.body) {
+      onSubmitJs = emitExpr(onSubmit.body, childCtx);
+    } else if (onSubmit.block && onSubmit.block.length > 0) {
+      const stmts = onSubmit.block
+        .map((s) => emitStmt(s, childCtx))
+        .join(" ");
+      onSubmitJs = `{ ${stmts} }`;
+    }
+  }
+  // Record on the context — shell consumes after the walk to emit
+  // imports + hook decls + outer `<form>` wiring.
+  ctx.formOf = {
+    agg,
+    bc,
+    fields,
+    idTargets,
+    useController,
+    defaultValuesTs,
+    fieldComponents,
+    testidNamespace,
+    fieldHtmls,
+    onSubmitJs,
+  };
+  // The submit body: default scaffold flow when no explicit lambda
+  // was given, otherwise the user-supplied body.  Expression-
+  // bodied lambdas emit as-is (implicit return), preserving the
+  // promise chain for awaiters of `handleSubmit`.  Block-bodied
+  // lambdas + the default scaffold body emit braced statement
+  // sequences.
+  const slug = snake(plural(agg.name));
+  const submitBody =
+    onSubmitJs !== null
+      ? onSubmitJs
+      : `{
+              try {
+                const out = await create.mutateAsync(vals);
+                notifications.show({ color: "green", message: "${humanize(agg.name)} created" });
+                navigate(\`/${slug}/\${out.id}\`);
+              } catch (e) {
+                notifications.show({ color: "red", message: (e as Error).message });
+              }
+            }`;
+  return renderPrimitive(ctx, "primitive-form-of", {
+    fieldHtmls,
+    submitBody,
+    submitTestid: `${testidNamespace}-submit`,
+    testidAttr: testidAttr(call, ctx),
+    indent: "  ".repeat(depth + 1),
+    innerIndent: "  ".repeat(depth + 2),
+    deepIndent: "  ".repeat(depth + 3),
+    deeperIndent: "  ".repeat(depth + 4),
+    closeIndent: "  ".repeat(depth),
+  });
 }
 
 function emitToolbar(
@@ -582,6 +1273,7 @@ function emitToolbar(
     childrenBlock: children.join(`\n${indent}`),
     indent,
     closeIndent,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -598,6 +1290,7 @@ function emitEmpty(
   void depth;
   return renderPrimitive(ctx, "primitive-empty", {
     text: unwrapTextLiteral(msg),
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -638,6 +1331,7 @@ function emitField(
     bind,
     setter,
     hasBind: bind !== undefined,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -659,6 +1353,7 @@ function emitToggle(
     bind,
     setter,
     hasBind: bind !== undefined,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -683,6 +1378,7 @@ function emitNumberField(
     bind,
     setter,
     hasBind: bind !== undefined,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -705,6 +1401,7 @@ function emitPasswordField(
     bind,
     setter,
     hasBind: bind !== undefined,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -719,6 +1416,7 @@ function emitLoader(
   return renderPrimitive(ctx, "primitive-loader", {
     size,
     hasSize: size !== undefined,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -738,6 +1436,7 @@ function emitAnchor(
     label: unwrapTextLiteral(label),
     to,
     hasTo: to !== undefined,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -756,6 +1455,7 @@ function emitImage(
     alt,
     hasSrc: src !== undefined,
     hasAlt: alt !== undefined,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -774,6 +1474,7 @@ function emitAvatar(
     alt,
     hasSrc: src !== undefined,
     hasAlt: alt !== undefined,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -820,6 +1521,7 @@ function emitHeading(
   return renderPrimitive(ctx, "primitive-heading", {
     text: unwrapTextLiteral(text),
     level,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -832,6 +1534,7 @@ function emitText(
   void depth;
   return renderPrimitive(ctx, "primitive-text", {
     text: unwrapTextLiteral(text),
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -873,6 +1576,7 @@ function emitButton(
     hasDisabled: disabled !== undefined,
     loading,
     hasLoading: loading !== undefined,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -954,6 +1658,12 @@ function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // int / decimal / now → emit as numeric literal verbatim.
       return String(expr.value);
     case "ref":
+      // Slice A2 — lambda-bound param refs resolve to their
+      // emitted JS name (e.g. `o → "row"` for column accessors).
+      {
+        const jsName = ctx.lambdaParams.get(expr.name);
+        if (jsName) return jsName;
+      }
       if (ctx.stateNames.has(expr.name)) {
         ctx.usesState = true;
         return expr.name;
@@ -962,6 +1672,10 @@ function emitExpr(expr: ExprIR, ctx: WalkContext): string {
         ctx.usedParams.add(expr.name);
         return expr.name;
       }
+      // Slice A4 — refs to shell-emitted locals (e.g. `create`
+      // inside a `Form(of:, onSubmit: v => create.mutateAsync(v))`
+      // lambda) resolve as themselves.
+      if (ctx.shellLocals.has(expr.name)) return expr.name;
       // Slice 11.23 — refs to `let` bindings are in scope as JS
       // const declarations earlier in the same lambda body.  The IR
       // already tags these with `refKind: "let"`; emit the bare
@@ -978,6 +1692,13 @@ function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // user to import / declare `<name>` somewhere in their app
       // shell.  Powers patterns like `let n = inc(count)` and the
       // statement form `Button("…", onClick: e => { saveOrder() })`.
+      //
+      // Slice A6 — UI-declared helper imports take this path too:
+      // tracking `usedHelpers` so the shell emits the matching
+      // `import { <name> } from "<path>"` line.
+      if (ctx.helperImports.has(expr.name)) {
+        ctx.usedHelpers.add(expr.name);
+      }
       const args = expr.args.map((a) => emitExpr(a, ctx)).join(", ");
       return `${expr.name}(${args})`;
     }
@@ -1001,18 +1722,28 @@ function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // Slice 11.24 — when the method-call's receiver is a hook
       // (detected by tryDetectApiHook on the receiver), emit
       // `<hookVar>.<method>(<args>)` (e.g.
-      // `customerCreate.mutate({...})`).  Otherwise the call
-      // is against an unresolved receiver — emit a visible TODO
-      // placeholder rather than runtime-broken code.
+      // `customerCreate.mutate({...})`).
       const recvHookUse = tryDetectApiHook(expr.receiver, ctx);
       if (recvHookUse) {
         registerApiHook(recvHookUse, ctx);
         const args = expr.args.map((a) => emitExpr(a, ctx)).join(", ");
         return `${recvHookUse.varName}.${expr.member}(${args})`;
       }
+      // Slice A4 — method calls on plain JS receivers (e.g. a
+      // local `create` mutation hook inside a `Form(of:)` page's
+      // onSubmit lambda).  Emit the plain `recv.member(args)`
+      // form when the receiver resolves cleanly (param / state /
+      // lambda param / shell local).  Receivers that emit as the
+      // `/* unresolved: X */ undefined` sentinel keep the
+      // pre-existing Slice 11.23 TODO placeholder — emitting
+      // `undefined.<method>(...)` would be runtime-broken code.
+      const recv = emitExpr(expr.receiver, ctx);
       const argsRendered = expr.args.map((a) => emitExpr(a, ctx)).join(", ");
-      const receiverDesc = describeReceiver(expr.receiver);
-      return `/* TODO: method-call ${receiverDesc}.${expr.member}(${argsRendered}) — needs hooks {} binding (Slice 11.24+) */ undefined`;
+      if (recv.includes("/* unresolved:")) {
+        const receiverDesc = describeReceiver(expr.receiver);
+        return `/* TODO: method-call ${receiverDesc}.${expr.member}(${argsRendered}) — needs hooks {} binding (Slice 11.24+) */ undefined`;
+      }
+      return `${recv}.${expr.member}(${argsRendered})`;
     }
     default:
       return `/* unsupported expr: ${expr.kind} */ undefined`;
@@ -1127,6 +1858,33 @@ function renderApiHookImports(usedApiHooks: Map<string, ApiHookUse>): string {
   return lines.join("");
 }
 
+/** Slice A6 — render `import { … } from "…"` lines for every
+ *  UI-declared helper actually used in the body.  Helpers
+ *  sharing an import path collapse into one line; paths are
+ *  sorted for deterministic output. */
+function renderHelperImports(
+  usedHelpers: Set<string>,
+  declared: ReadonlyArray<UiHelperImportIR>,
+): string {
+  if (usedHelpers.size === 0) return "";
+  const byPath = new Map<string, Set<string>>();
+  for (const h of declared) {
+    if (!usedHelpers.has(h.name)) continue;
+    let names = byPath.get(h.path);
+    if (!names) {
+      names = new Set();
+      byPath.set(h.path, names);
+    }
+    names.add(h.name);
+  }
+  const lines: string[] = [];
+  for (const [path, names] of [...byPath.entries()].sort()) {
+    const sorted = [...names].sort();
+    lines.push(`import { ${sorted.join(", ")} } from "${path}";\n`);
+  }
+  return lines.join("");
+}
+
 function describeReceiver(expr: ExprIR): string {
   if (expr.kind === "ref") return expr.name;
   if (expr.kind === "method-call") return `${describeReceiver(expr.receiver)}.${expr.member}`;
@@ -1211,6 +1969,39 @@ function stringOrRefArgValue(
   return undefined;
 }
 
+/** Slice A1 — read the `testid:` named arg from any primitive call
+ *  and produce a TSX attribute fragment ready to splice into the
+ *  template's opening tag.  Returns `' data-testid="..."'` for
+ *  string literals, `' data-testid={...}'` for refs/expressions, or
+ *  `''` when no `testid:` was supplied.  Templates splice via
+ *  `{{{testidAttr}}}` inside the root element.
+ *
+ *  Slice A5 — string-literal testids also accumulate on
+ *  `ctx.collectedTestids` so the walker-side page-object emitter
+ *  can expose each one as a typed `Locator` getter in the
+ *  generated `e2e/pages/<page-snake>.ts` class. */
+function testidAttr(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+): string {
+  const argNames = call.argNames ?? [];
+  for (let i = 0; i < call.args.length; i++) {
+    if (argNames[i] !== "testid") continue;
+    const a = call.args[i]!;
+    // String literal → quoted attr (no braces).
+    if (a.kind === "literal" && a.lit === "string") {
+      ctx.collectedTestids.add(a.value);
+      return ` data-testid=${JSON.stringify(a.value)}`;
+    }
+    // Anything else → run through emitExpr; brace-wrap as a
+    // JSX expression.  Refs to params/state, binary ops, calls,
+    // etc. all compose.
+    const expr = emitExpr(a, ctx);
+    return ` data-testid={${expr}}`;
+  }
+  return "";
+}
+
 function emitCard(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,
@@ -1240,6 +2031,7 @@ function emitCard(
     contentJsx,
     indent,
     closeIndent,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -1263,6 +2055,7 @@ function emitStat(
     value: unwrapTextLiteral(value),
     indent,
     closeIndent,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -1275,6 +2068,7 @@ function emitBadge(
   void depth;
   return renderPrimitive(ctx, "primitive-badge", {
     label: unwrapTextLiteral(label),
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -1306,6 +2100,187 @@ function emitDivider(
   return renderPrimitive(ctx, "primitive-divider", {
     label,
     hasLabel: label !== undefined,
+    testidAttr: testidAttr(call, ctx),
+  });
+}
+
+/** Slice A7 — Breadcrumbs(...children, testid?).  Wraps a chain of
+ *  positional children (Anchor / Text / arbitrary primitives) in
+ *  the per-pack breadcrumbs container.  Mantine's `<Breadcrumbs>`
+ *  inserts separators automatically; shadcn renders a flex row
+ *  with hand-emitted separators (template responsibility). */
+function emitBreadcrumbs(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  const children = positionalChildren(call, ctx, depth + 1);
+  const indent = "  ".repeat(depth + 1);
+  const closeIndent = "  ".repeat(depth);
+  return renderPrimitive(ctx, "primitive-breadcrumbs", {
+    hasChildren: children.length > 0,
+    childrenBlock: children.join(`\n${indent}`),
+    indent,
+    closeIndent,
+    testidAttr: testidAttr(call, ctx),
+  });
+}
+
+/** Slice A7 — Paper(...children, padding?, testid?).  Per-pack
+ *  surface container with consistent padding + subtle shadow.
+ *  Composable wrapper for tables, cards, alerts.  Defaults to
+ *  `p="md"` (Mantine) / equivalent shadcn class set. */
+function emitPaper(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  const children = positionalChildren(call, ctx, depth + 1);
+  const padding = stringNamed(call, "padding");
+  const indent = "  ".repeat(depth + 1);
+  const closeIndent = "  ".repeat(depth);
+  return renderPrimitive(ctx, "primitive-paper", {
+    hasChildren: children.length > 0,
+    childrenBlock: children.join(`\n${indent}`),
+    hasPadding: padding !== undefined,
+    padding: padding !== undefined ? JSON.stringify(padding) : "",
+    indent,
+    closeIndent,
+    testidAttr: testidAttr(call, ctx),
+  });
+}
+
+/** Slice A7 — Skeleton(height?, count?, testid?).  Per-pack
+ *  loading-placeholder block.  When `count:` > 1, emits a stacked
+ *  group of `count` skeleton lines (matching the scaffold's
+ *  loading-state convention).  `height:` defaults to 28px. */
+function emitSkeleton(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  void depth;
+  const height = numericNamed(call, "height") ?? 28;
+  const count = numericNamed(call, "count") ?? 1;
+  return renderPrimitive(ctx, "primitive-skeleton", {
+    height,
+    count,
+    isMulti: count > 1,
+    testidAttr: testidAttr(call, ctx),
+  });
+}
+
+/** Slice A7 — Alert(message, color?, title?, testid?).  Per-pack
+ *  callout for error / info / warning states.  `color:` accepts
+ *  the per-pack semantic palette ("red"/"green"/"yellow"/"blue").
+ *  `title:` is optional; without it, packs render the message
+ *  alone (Mantine's `<Alert>` skips the bold-title block). */
+function emitAlert(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  void depth;
+  const message = firstPositionalContent(call, ctx) ?? '""';
+  const color = stringNamed(call, "color");
+  const title = stringNamed(call, "title");
+  return renderPrimitive(ctx, "primitive-alert", {
+    message: unwrapTextLiteral(message),
+    hasColor: color !== undefined,
+    color: color !== undefined ? JSON.stringify(color) : '"red"',
+    hasTitle: title !== undefined,
+    title: title ?? "",
+    testidAttr: testidAttr(call, ctx),
+  });
+}
+
+/** Slice A8 — QueryView(of:, loading:, error:, empty:, data:, testid?).
+ *
+ *  Macro for the canonical "4-arm query state" rendering pattern
+ *  the scaffold List page emits inline.  Takes a query
+ *  expression and four branch bodies; lowers to a fragment of
+ *  guarded JSX expressions that render the right branch for the
+ *  query's current state.
+ *
+ *  Surface:
+ *
+ *    QueryView(
+ *      of:      Sales.Order.all,
+ *      loading: Skeleton(count: 5),
+ *      error:   Alert("Couldn't load orders"),
+ *      empty:   Empty("No orders yet."),
+ *      data:    rows => Table(rows: rows, …)
+ *    )
+ *
+ *  The `of:` expression must resolve to a React-Query hook
+ *  variable (typically via the walker's api-hook detection of
+ *  `<param>.<aggregate>.all`).  The hook's `.isLoading`,
+ *  `.isError`, `.data` properties drive the four conditional
+ *  branches.
+ *
+ *  The `data` branch is special: when it's a lambda (`rows => …`),
+ *  the lambda param rebinds to the unwrapped data inside the
+ *  branch.  When it's a plain expression, the branch renders that
+ *  expression directly (still inside the `data &&` guard).
+ *
+ *  All four branch args are required; any missing arg gets a
+ *  null-render placeholder so the page still compiles. */
+function emitQueryView(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  const ofArg = namedArgValue(call, "of");
+  if (!ofArg) {
+    return `{/* QueryView: missing 'of:' query expression */}`;
+  }
+  // Render the query expression; this triggers `tryDetectApiHook`
+  // so the page-shell registers the matching `useAll<X>()` (or
+  // similar) hook decl + import, and we get the local var name
+  // back via emitExpr's hook-detection path.
+  const queryExpr = emitExpr(ofArg, ctx);
+
+  const indent = "  ".repeat(depth + 1);
+  const branchIndent = "  ".repeat(depth + 2);
+  const closeIndent = "  ".repeat(depth);
+
+  const loading = namedArgValue(call, "loading");
+  const error = namedArgValue(call, "error");
+  const empty = namedArgValue(call, "empty");
+  const data = namedArgValue(call, "data");
+
+  const loadingJsx = loading ? walk(loading, ctx, depth + 2) : "null";
+  const errorJsx = error ? walk(error, ctx, depth + 2) : "null";
+  const emptyJsx = empty ? walk(empty, ctx, depth + 2) : "null";
+
+  // `data:` branch supports the lambda-binding form `rows => …`.
+  // Lambda body walks with the lambda param rebound to the
+  // unwrapped query data; non-lambda bodies render as-is.
+  let dataJsx: string;
+  if (data && data.kind === "lambda") {
+    const childCtx: WalkContext = {
+      ...ctx,
+      lambdaParams: extendLambdaParams(ctx, data.param, `${queryExpr}.data`),
+    };
+    dataJsx = data.body
+      ? walk(data.body, childCtx, depth + 2)
+      : "null";
+  } else if (data) {
+    dataJsx = walk(data, ctx, depth + 2);
+  } else {
+    dataJsx = "null";
+  }
+
+  return renderPrimitive(ctx, "primitive-query-view", {
+    queryExpr,
+    loadingJsx,
+    errorJsx,
+    emptyJsx,
+    dataJsx,
+    indent,
+    branchIndent,
+    closeIndent,
+    testidAttr: testidAttr(call, ctx),
   });
 }
 
@@ -1457,9 +2432,18 @@ function renderTextContent(
   // literal): emit the JS-expression form wrapped as a JSX
   // expression.  Powers patterns like `Heading("Welcome, " +
   // name)`, `Text(count + 1)`, `Stat("Count", count * step)`.
-  // Calls fall through to undefined — those are child components,
-  // not text content, and should be walked through `walk` instead.
-  if (expr.kind === "call") return undefined;
+  //
+  // Slice A6 — UI-declared helper calls also belong in text
+  // position; route them through `emitExpr` so they emit as
+  // plain JS calls (`{formatPrice(99)}`).  Stdlib-primitive
+  // calls still fall through to undefined — those are child
+  // components and the caller should `walk` them instead.
+  if (expr.kind === "call") {
+    if (ctx.helperImports.has(expr.name)) {
+      return `{${emitExpr(expr, ctx)}}`;
+    }
+    return undefined;
+  }
   return `{${emitExpr(expr, ctx)}}`;
 }
 
@@ -1541,6 +2525,18 @@ export function renderCustomLayoutPage(
    *  `<paramName>.<aggregate>.<op>` become hook calls injected at
    *  page-top by the walker. */
   apiParams: ReadonlyArray<UiApiParamIR> = [],
+  /** Slice A4 — aggregates reachable from this UI's deployable.
+   *  Required for `Form(of: <Agg>)` field dispatch and
+   *  `IdLink(of: <Agg>)` display-field resolution. */
+  aggregatesByName: ReadonlyMap<string, AggregateIR> = new Map(),
+  /** Slice A4 — owning bounded context per aggregate (drives
+   *  enum / value-object resolution inside the form-field
+   *  preparer). */
+  bcByAggregate: ReadonlyMap<string, BoundedContextIR> = new Map(),
+  /** Slice A6 — user-authored helper imports.  Body refs whose
+   *  call name matches a helper emit as plain JS calls; the shell
+   *  adds `import { <name> } from "<path>"` for each USED helper. */
+  helperImports: ReadonlyArray<UiHelperImportIR> = [],
 ): string {
   const paramNames = new Set(params.map((p) => p.name));
   const stateNames = new Set(state.map((s) => s.name));
@@ -1553,7 +2549,19 @@ export function renderCustomLayoutPage(
     usesRouterLink,
     usedUserComponents,
     usedApiHooks,
-  } = walkBodyToTsx(body, pack, paramNames, stateNames, userComponents, apiParams);
+    formOf,
+    usedHelpers,
+  } = walkBodyToTsx(
+    body,
+    pack,
+    paramNames,
+    stateNames,
+    userComponents,
+    apiParams,
+    aggregatesByName,
+    bcByAggregate,
+    helperImports,
+  );
   // Slice 11.12 — render the title expression through emitExpr
   // (sharing the body's tracking state so the shell destructures
   // any param/state the title references).  Compute the deps
@@ -1577,6 +2585,14 @@ export function renderCustomLayoutPage(
       usesChildren: false,
       apiParamNames: new Map(),
       usedApiHooks: new Map(),
+      lambdaParams: new Map(),
+      shellLocals: new Set(),
+      aggregatesByName: new Map(),
+      bcByAggregate: new Map(),
+      formOf: null,
+      collectedTestids: new Set(),
+      helperImports: new Map(),
+      usedHelpers: new Set(),
     };
     const titleExpr = emitExpr(title, titleCtx);
     // emitExpr may have added to usedParams; reflect title's state
@@ -1603,16 +2619,28 @@ export function renderCustomLayoutPage(
   // multiple ops on the same aggregate dedupe to one import line
   // (matching the existing scaffold output's per-aggregate api file).
   const apiHookImports = renderApiHookImports(usedApiHooks);
+  // Slice A6 — `import { <name> } from "<path>"` per UI-declared
+  // helper actually referenced in the body.  Lines grouped per
+  // path so two helpers from the same module dedupe to one
+  // import line; paths sorted for deterministic output.
+  const helperImportLines = renderHelperImports(usedHelpers, helperImports);
   // Slice 11.24 — api hook declarations, emitted at page-top right
   // before the JSX return.  Each unique `<param>.<aggregate>.<op>`
   // becomes one `const <var> = use<Op><Aggregate>(args?);` line.
   const apiHookDecls = [...usedApiHooks.values()]
     .map((h) => `  const ${h.varName} = ${h.hookName}(${h.argsRendered.join(", ")});\n`)
     .join("");
+  // Slice A4 — RHF wiring when the body included a `Form(of: <Agg>)`
+  // primitive.  Emits the create-mutation hook import, per-Id<X>
+  // target `useAllX()` hooks, the `useForm` declaration, and the
+  // `react-hook-form` import.  When the user provided an explicit
+  // `onSubmit:` lambda the shell wires that into `handleSubmit`;
+  // otherwise the default is the scaffold-equivalent create flow.
+  const form = renderFormOfWiring(formOf, pack);
   const hasParams = params.length > 0;
   const routerSpecifiers: string[] = [];
   if (hasParams) routerSpecifiers.push("useParams");
-  if (usesNavigate) routerSpecifiers.push("useNavigate");
+  if (usesNavigate || form.usesNavigate) routerSpecifiers.push("useNavigate");
   if (usesRouterLink) routerSpecifiers.push("Link");
   const reactRouterImport = routerSpecifiers.length > 0
     ? `import { ${routerSpecifiers.join(", ")} } from "react-router-dom";\n`
@@ -1641,17 +2669,62 @@ export function renderCustomLayoutPage(
     : hasParams
       ? `  useParams${paramsType}();\n`
       : "";
-  const navigateLine = usesNavigate
+  const navigateLine = usesNavigate || form.usesNavigate
     ? `  const navigate = useNavigate();\n`
     : "";
   return `// Auto-generated.  Do not edit by hand.
-${reactImport}${reactRouterImport}${mantineImport}${apiHookImports}${userComponentImports}
+${reactImport}${reactRouterImport}${form.imports}${mantineImport}${apiHookImports}${helperImportLines}${userComponentImports}
 export default function ${pageName}() {
-${paramsLine}${navigateLine}${stateLines}${apiHookDecls}${titleEffect}  return (
+${paramsLine}${navigateLine}${stateLines}${apiHookDecls}${form.decls}${titleEffect}  return (
     ${indentJsx(tsx, "    ")}
   );
 }
 `;
+}
+
+/** Slice A4 — assemble the RHF + create-mutation wiring around a
+ *  `Form(of: <Agg>)` body emission.  Rendered through per-pack
+ *  templates (`form-of-imports.hbs` + `form-of-decls.hbs`) so the
+ *  pack controls exactly which packages it imports and how it
+ *  destructures the RHF result (`form.handleSubmit` for shadcn,
+ *  destructured `{ handleSubmit, register, … }` for mantine).
+ *
+ *  The form's JSX block (rendered by `emitFormOf`) embeds the
+ *  `handleSubmit(...)` call directly; this helper produces only
+ *  the shell-level surroundings: imports + in-function hook
+ *  declarations + the `usesNavigate` signal. */
+function renderFormOfWiring(
+  state: FormOfState | null,
+  pack: LoadedPack,
+): { imports: string; decls: string; usesNavigate: boolean } {
+  if (!state) return { imports: "", decls: "", usesNavigate: false };
+  const { agg, idTargets, useController, defaultValuesTs, onSubmitJs } = state;
+  const tplCtx = {
+    aggregateName: agg.name,
+    aggregateNameCamel: camel(agg.name),
+    pluralAggregateName: plural(agg.name),
+    snakePluralAggregate: snake(plural(agg.name)),
+    humanAgg: humanize(agg.name),
+    humanAggLower: humanize(agg.name).toLowerCase(),
+    idTargets: idTargets.map((t) => ({
+      name: t.name,
+      nameCamel: camel(t.name),
+      namePlural: plural(t.name),
+      hookVar: idTargetHookVar(t),
+    })),
+    useController,
+    defaultValuesTs,
+    hasDefaultOnSubmit: onSubmitJs === null,
+  };
+  const imports = pack.render("form-of-imports", tplCtx);
+  const decls = pack.render("form-of-decls", tplCtx);
+  // The default onSubmit needs `navigate` in scope (post-create
+  // redirect); user-supplied forms might not.
+  return {
+    imports: imports.endsWith("\n") ? imports : imports + "\n",
+    decls: decls.endsWith("\n") ? decls : decls + "\n",
+    usesNavigate: onSubmitJs === null,
+  };
 }
 
 /** Slice 11.18 — render one ComponentIR as a `.tsx` file: typed
@@ -1795,6 +2868,14 @@ function renderInitExpr(expr: ExprIR, pack: LoadedPack): string {
     usesChildren: false,
     apiParamNames: new Map(),
     usedApiHooks: new Map(),
+    lambdaParams: new Map(),
+    shellLocals: new Set(),
+    aggregatesByName: new Map(),
+    bcByAggregate: new Map(),
+    formOf: null,
+    collectedTestids: new Set(),
+    helperImports: new Map(),
+    usedHelpers: new Set(),
   };
   return emitExpr(expr, dummy);
 }

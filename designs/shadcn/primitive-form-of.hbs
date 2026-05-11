@@ -1,0 +1,10 @@
+<Form {...form}>
+{{indent}}<form onSubmit={form.handleSubmit(async (vals) => {{{submitBody}}})}{{{testidAttr}}}>
+{{innerIndent}}<div className="flex flex-col gap-4">
+{{#each fieldHtmls}}{{../deepIndent}}{{{this}}}
+{{/each}}{{deepIndent}}<div className="flex justify-end gap-2 pt-2">
+{{deeperIndent}}<Button type="submit" disabled={create.isPending} data-testid="{{submitTestid}}">Create</Button>
+{{deepIndent}}</div>
+{{innerIndent}}</div>
+{{indent}}</form>
+{{closeIndent}}</Form>

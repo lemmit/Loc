@@ -1,4 +1,4 @@
-{{#if hasTabs}}<Tabs defaultValue={{json defaultValue}}>
+{{#if hasTabs}}<Tabs defaultValue={{json defaultValue}}{{{testidAttr}}}>
 {{indent}}<TabsList>
 {{innerIndent}}{{#each tabs}}<TabsTrigger value={{json this.value}}>{{{this.label}}}</TabsTrigger>{{#unless @last}}
 {{../innerIndent}}{{/unless}}{{/each}}
@@ -7,4 +7,4 @@
 {{../innerIndent}}{{{this.bodyJsx}}}
 {{../indent}}</TabsContent>{{#unless @last}}
 {{../indent}}{{/unless}}{{/each}}
-{{closeIndent}}</Tabs>{{else}}<Tabs defaultValue="" />{{/if}}
+{{closeIndent}}</Tabs>{{else}}<Tabs defaultValue=""{{{testidAttr}}} />{{/if}}

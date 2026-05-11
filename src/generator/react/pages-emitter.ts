@@ -61,7 +61,9 @@ import {
   isWalkableLayoutBody,
   renderCustomLayoutPage,
   renderUserComponentFile,
+  walkBodyToTsx,
 } from "./body-walker.js";
+import { buildWalkerPageObject } from "./walker-page-objects.js";
 
 /** Inputs the page emitter needs in addition to the page IR.  Kept as
  *  a struct so additions (theme overrides, design-pack picks, sidebar
@@ -80,6 +82,21 @@ export interface PageEmitContext {
    *  list-page renderer; other archetypes use the legacy procedural
    *  builders. */
   pack: LoadedPack;
+}
+
+/** Slice A4 — derived map: aggregate name → owning bounded context.
+ *  Required by `Form(of: <Agg>)` and `IdLink(of: <Agg>)` so the
+ *  walker can resolve enum / value-object types declared alongside
+ *  the aggregate.  Built from `ctx.contextsByName` once per emit
+ *  so the walker doesn't repeatedly scan all contexts. */
+function buildBcByAggregate(
+  ctx: PageEmitContext,
+): Map<string, BoundedContextIR> {
+  const out = new Map<string, BoundedContextIR>();
+  for (const bc of ctx.contextsByName.values()) {
+    for (const agg of bc.aggregates) out.set(agg.name, bc);
+  }
+  return out;
 }
 
 /** Emit `src/pages/<route>.tsx` per page in `ui.pages`.  Returns just
@@ -101,6 +118,8 @@ export function deriveExtraRoutesFromUi(
   // invocation.
   const userComponents = new Map<string, readonly ParamIR[]>();
   for (const c of ui.components) userComponents.set(c.name, c.params);
+  // Slice A6 — helper names are also a walker-eligibility signal.
+  const helperNames = new Set(ui.helperImports.map((h) => h.name));
   for (const page of ui.pages) {
     if (!page.route) continue;
     const origin = page.scaffoldOrigin ?? inferBodyDispatch(page.body);
@@ -115,7 +134,7 @@ export function deriveExtraRoutesFromUi(
     }
     // Slice 11.3 — custom-layout pages (walker-rendered) also need
     // an App.tsx import + Route.
-    if (isWalkableLayoutBody(page.body, userComponents)) {
+    if (isWalkableLayoutBody(page.body, userComponents, helperNames)) {
       out.push({
         componentName: page.name,
         importFrom: `./pages/${snake(page.name)}`,
@@ -149,6 +168,10 @@ export function emitPagesForUi(
       renderUserComponentFile(c.name, c.params, c.state, c.body, ctx.pack, userComponents),
     );
   }
+  // Slice A6 — helper names accumulated for walker-eligibility
+  // checks (`isWalkableLayoutBody`).  Same `ui.helperImports`
+  // array is threaded to the per-page render call below.
+  const helperNames = new Set(ui.helperImports.map((h) => h.name));
 
   // The shared Home page wants the aggregate / workflow / view IRs
   // currently in scope; collect them once from `ui.pages` so
@@ -187,7 +210,7 @@ export function emitPagesForUi(
     // Button / Card) route through the recursive walker.  Output
     // goes to `src/pages/<name-snake>.tsx`; App.tsx routing comes
     // through `deriveExtraRoutesFromUi` (Slice 11.1).
-    if (isWalkableLayoutBody(page.body, userComponents)) {
+    if (isWalkableLayoutBody(page.body, userComponents, helperNames)) {
       out.set(
         `src/pages/${snake(page.name)}.tsx`,
         // Slice 11.4 — pass the page's typed route params so the
@@ -210,6 +233,9 @@ export function emitPagesForUi(
           page.title,
           userComponents,
           ui.apiParams,
+          ctx.aggregatesByName,
+          buildBcByAggregate(ctx),
+          ui.helperImports,
         ),
       );
       continue;
@@ -618,5 +644,63 @@ export function emitPageObjectsForUi(
         break;
     }
   }
+  // Slice A5 — walker-emitted pages (those whose bodies are
+  // recognised by `isWalkableLayoutBody` but NOT by the scaffold
+  // dispatcher) get a parallel page-object emission: one class
+  // per page, exposing every static `testid:` literal the walker
+  // captured + form-synthesised testids.
+  //
+  // Path-collision contract: scaffold-archetype pages own
+  // `e2e/pages/<aggregate-camel>.ts`; walker pages emit at
+  // `e2e/pages/<page-snake>.ts`.  These namespaces don't collide
+  // by construction (camel vs snake, aggregate vs page name), but
+  // we still guard against an explicit page named identically to
+  // a scaffold-aggregate fragment by skipping any walker output
+  // whose path is already in `out`.
+  const userComponents = buildUserComponentsMap(ui);
+  const bcByAggregate = buildBcByAggregate(ctx);
+  const helperNames = new Set(ui.helperImports.map((h) => h.name));
+  for (const page of ui.pages) {
+    const origin = page.scaffoldOrigin ?? inferBodyDispatch(page.body);
+    if (origin) continue;
+    if (!isWalkableLayoutBody(page.body, userComponents, helperNames)) continue;
+    if (!page.body) continue;
+    const paramNames = new Set(page.params.map((p) => p.name));
+    const stateNames = new Set(page.state.map((s) => s.name));
+    const { collectedTestids } = walkBodyToTsx(
+      page.body,
+      ctx.pack,
+      paramNames,
+      stateNames,
+      userComponents,
+      ui.apiParams,
+      ctx.aggregatesByName,
+      bcByAggregate,
+      ui.helperImports,
+    );
+    const path = `e2e/pages/${snake(page.name)}.ts`;
+    if (out.has(path)) continue;
+    out.set(
+      path,
+      buildWalkerPageObject({
+        pageName: page.name,
+        params: page.params,
+        route: page.route ?? "",
+        testids: collectedTestids,
+      }),
+    );
+  }
   return out;
+}
+
+/** Slice A5 — UI's component-name → ParamIR map, mirroring how
+ *  `emitPagesForUi` builds it.  `isWalkableLayoutBody` calls this
+ *  to decide whether a body composed of user components is
+ *  walker-eligible. */
+function buildUserComponentsMap(
+  ui: UiIR,
+): Map<string, readonly ParamIR[]> {
+  const map = new Map<string, readonly ParamIR[]>();
+  for (const c of ui.components) map.set(c.name, c.params);
+  return map;
 }

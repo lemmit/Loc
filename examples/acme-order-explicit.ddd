@@ -1,0 +1,124 @@
+// Slice B1 — explicit Order DSL.  Same Order aggregate as
+// `examples/acme.ddd`, but with the three scaffold-archetype pages
+// (`OrderList` / `OrderNew` / `OrderDetail`) replaced by explicit
+// `page` declarations composed from walker stdlib primitives only.
+//
+// Round-trip target: each explicit page renders TSX whose testid
+// surface matches the scaffold-emitted page byte-for-byte (modulo
+// chrome decorations like icons / paper wrappers / loading
+// skeleton structure that the explicit form opts in or out of).
+//
+// What this file is NOT:
+//   - A full mirror of acme.ddd.  Catalog + CustomerMgmt aggregates
+//     stay implicit (scaffold-only) — this file proves only that
+//     the Order pages are hand-writable.
+//   - A drop-in replacement for the scaffold path.  The point is
+//     equivalence, not migration.
+
+system AcmeOrderExplicit {
+
+    theme {
+        primary: "#3b82f6"
+        neutral: "#64748b"
+        radius: "md"
+        fontFamily: "Inter, system-ui, sans-serif"
+    }
+
+    api SalesApi from Sales
+
+    module Sales {
+        context Orders {
+
+            enum OrderStatus { Draft, Confirmed, Shipped, Cancelled }
+
+            aggregate Order {
+                customerId: string display
+                status:     OrderStatus
+                placedAt:   datetime
+            }
+
+            repository Orders for Order { }
+        }
+    }
+
+    storage primarySql { type: postgres }
+
+    ui WebApp {
+        api Sales: SalesApi
+
+        // OrderList — replaces scaffold's `aggregate-list` archetype.
+        // Composes Phase A primitives: Stack + Breadcrumbs + Toolbar
+        // + QueryView (loading/error/empty/data) + Paper + Table with
+        // per-row testids and styling toggles; per-cell rendering via
+        // Column lambdas (IdLink / Text / EnumBadge / DateDisplay).
+        page OrderList {
+            route: "/orders"
+            body:  Stack(
+                Breadcrumbs(
+                    Anchor("Home",   to: "/"),
+                    Text("Orders")
+                ),
+                Toolbar(
+                    Heading("Orders", level: 2),
+                    Button("New order",
+                           to:     "/orders/new",
+                           testid: "orders-list-create")
+                ),
+                QueryView(
+                    of:      Sales.Order.all,
+                    loading: Skeleton(count: 5),
+                    error:   Alert("Couldn't load orders"),
+                    empty:   Empty("No orders yet."),
+                    data:    rows => Paper(
+                        Table(
+                            rows:       rows,
+                            striped:    true,
+                            highlight:  true,
+                            sticky:     true,
+                            rowTestid:  r => "orders-row-" + r.id,
+                            Column("ID",          o => IdLink(o.id, of: Order)),
+                            Column("Customer Id", o => Text(o.customerId)),
+                            Column("Status",      o => EnumBadge(o.status)),
+                            Column("Placed At",   o => DateDisplay(o.placedAt))
+                        ),
+                        padding: "none"
+                    ),
+                    testid: "orders-query"
+                ),
+                testid: "orders-list"
+            )
+        }
+
+        // OrderNew — replaces scaffold's `aggregate-new` archetype.
+        // Form(of: Order) handles all the RHF + zodResolver +
+        // useCreate<Aggregate> wiring; the page chrome (breadcrumbs,
+        // title, card wrapper) is composed by hand.
+        page OrderNew {
+            route: "/orders/new"
+            body:  Stack(
+                Breadcrumbs(
+                    Anchor("Home",   to: "/"),
+                    Anchor("Orders", to: "/orders"),
+                    Text("New")
+                ),
+                Heading("Create order", level: 2),
+                Card(Form(of: Order, testid: "orders-new")),
+                testid: "orders-new-page"
+            )
+        }
+    }
+
+    deployable api {
+        platform: hono
+        modules: Sales { primary: primarySql }
+        serves: SalesApi
+        port: 3000
+    }
+
+    deployable web {
+        platform: static
+        targets: api
+        ui: WebApp { Sales: api }
+        port: 3001
+    }
+}
