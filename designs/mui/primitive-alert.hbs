@@ -1,1 +1,1 @@
-<Alert severity={{{color}}}{{#if hasTitle}} sx=\{{ "& .MuiAlert-message": { width: "100%" } }}{{/if}}{{{testidAttr}}}>{{#if hasTitle}}<strong>{{title}}</strong> — {{/if}}{{{message}}}</Alert>
+<Alert severity="{{#if (eq color "red")}}error{{else}}{{#if (eq color "yellow")}}warning{{else}}{{#if (eq color "green")}}success{{else}}info{{/if}}{{/if}}{{/if}}"{{#if hasTitle}} sx=\{{ "& .MuiAlert-message": { width: "100%" } }}{{/if}}{{{testidAttr}}}>{{#if hasTitle}}<strong>{{title}}</strong> — {{/if}}{{{message}}}</Alert>

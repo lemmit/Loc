@@ -75,6 +75,7 @@
     "form-of-decls": "form-of-decls.hbs",
     "form-runs-imports": "form-runs-imports.hbs",
     "form-runs-decls": "form-runs-decls.hbs",
+    "form-default-onsubmit": "form-default-onsubmit.hbs",
     "primitive-breadcrumbs": "primitive-breadcrumbs.hbs",
     "primitive-paper": "primitive-paper.hbs",
     "primitive-skeleton": "primitive-skeleton.hbs",
@@ -342,6 +343,26 @@
           "KeyValueRow"
         ]
       }
-    ]
+    ],
+    "primitive-form-of": [
+      {
+        "from": "@mantine/core",
+        "named": [
+          "Stack",
+          "Group",
+          "Button"
+        ]
+      }
+    ],
+    "field-input-string":       [{ "from": "@mantine/core", "named": ["TextInput"] }],
+    "field-input-int":          [{ "from": "@mantine/core", "named": ["NumberInput"] }],
+    "field-input-decimal":      [{ "from": "@mantine/core", "named": ["NumberInput"] }],
+    "field-input-bool":         [{ "from": "@mantine/core", "named": ["Switch"] }],
+    "field-input-datetime":     [{ "from": "@mantine/core", "named": ["TextInput"] }],
+    "field-input-id-text":      [{ "from": "@mantine/core", "named": ["TextInput"] }],
+    "field-input-id-select":    [{ "from": "@mantine/core", "named": ["Select"] }],
+    "field-input-enum-select":  [{ "from": "@mantine/core", "named": ["Select"] }],
+    "field-input-array":        [{ "from": "@mantine/core", "named": ["TextInput"] }],
+    "field-input-valueobject":  [{ "from": "@mantine/core", "named": ["Fieldset", "Stack"] }]
   }
 }

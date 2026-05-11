@@ -1,0 +1,7 @@
+  const run = use{{workflowPascal}}Workflow();
+{{#each idTargets}}  const {{this.hookVar}} = useAll{{this.namePlural}}();
+{{/each}}{{#if hasDefaultOnSubmit}}  const toast = useToast();
+{{/if}}  const {{#if useController}}{ register, handleSubmit, control, formState: { errors } }{{else}}{ register, handleSubmit, formState: { errors } }{{/if}} = useForm<{{workflowPascal}}Request>({
+    resolver: zodResolver({{workflowPascal}}Request),
+    defaultValues: {{{defaultValuesTs}}},
+  });
