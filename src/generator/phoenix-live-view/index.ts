@@ -15,8 +15,10 @@ import {
 import { renderAshType, renderExpr } from "./render-expr.js";
 import { emitLiveViewPages, type LiveRoute } from "./liveview-emit.js";
 import { emitApiControllers, type ApiRoute } from "./api-emit.js";
+import { emitOpenApiSpec } from "./openapi-emit.js";
 import { renderSidebarComponent } from "./sidebar-emit.js";
 import { renderThemeCss } from "./theme-emit.js";
+import { emitAggregateResources } from "./domain-emit.js";
 
 // ---------------------------------------------------------------------------
 // Phoenix LiveView / Ash generator orchestrator.
@@ -94,7 +96,7 @@ export function generatePhoenixLiveViewProject(
   // Workflows / Views / Health controllers + their router entries.
   // Workflows / Views are only emitted when `serves:` is populated;
   // Health is always emitted (router references it unconditionally).
-  const { files: apiFiles, apiRoutes } = emitApiControllers({
+  const { files: apiFiles, apiRoutes: baseApiRoutes } = emitApiControllers({
     contexts,
     deployable,
     sys,
@@ -102,6 +104,19 @@ export function generatePhoenixLiveViewProject(
     appModule,
   });
   for (const [path, content] of apiFiles) out.set(path, content);
+
+  // --- OpenAPI spec (Batch D2) ----------------------------------------------
+  // Emits <Api>Spec module, per-aggregate/workflow/view schema modules,
+  // OpenapiController, and a GET /api/openapi.json route entry.
+  const { files: openApiFiles, routes: openApiRoutes } = emitOpenApiSpec({
+    contexts,
+    deployable,
+    sys,
+    appName,
+    appModule,
+  });
+  for (const [path, content] of openApiFiles) out.set(path, content);
+  const apiRoutes = [...baseApiRoutes, ...openApiRoutes];
 
   // --- Sidebar component (Batch C) -----------------------------------------
   // Emitted when the deployable mounts a `ui:` — derived from
@@ -160,24 +175,42 @@ function emitContext(
     out.set(path, renderEventModule(ev, contextModule));
   }
 
-  // Aggregates — Ash.Resource modules
+  // Aggregates — Ash.Resource modules (D1: validations from operation
+  // preconditions / aggregate invariants lower through emitAggregateResources
+  // which has the validate-clause emission; this replaces the orchestrator's
+  // older renderAggregateModule path).
   const allResources: string[] = [];
+  const aggFiles = emitAggregateResources(ctx, appModule, appName);
+  for (const [path, content] of aggFiles) out.set(path, content);
   for (const agg of ctx.aggregates) {
-    const path = `lib/${appName}/${ctxSnake}/${snake(agg.name)}.ex`;
-    const repo = findRepoFor(ctx, agg.name);
-    const repoWithViews = mergeViewFindsForAgg(agg, repo, ctx);
-    const customFinds = repoWithViews
-      ? buildFindActions(repoWithViews, agg, contextModule)
-      : [];
-    out.set(path, renderAggregateModule(agg, ctx, contextModule, customFinds));
     allResources.push(`${contextModule}.${pascal(agg.name)}`);
-
-    // Part resources (child entity tables)
     for (const part of agg.parts) {
-      const partPath = `lib/${appName}/${ctxSnake}/${snake(part.name)}.ex`;
-      out.set(partPath, renderPartModule(part, agg, contextModule));
       allResources.push(`${contextModule}.${pascal(part.name)}`);
     }
+  }
+  // Custom find actions (repository finds + view-derived finds) are
+  // spliced in via a separate side-channel — emitAggregateResources
+  // doesn't yet consume customFinds, so we wrap each aggregate's
+  // emitted source by injecting custom find action lines.  Until
+  // emitAggregateResources accepts customFinds, the orchestrator
+  // keeps its repository-find responsibility here as a post-pass.
+  for (const agg of ctx.aggregates) {
+    const repo = findRepoFor(ctx, agg.name);
+    const repoWithViews = mergeViewFindsForAgg(agg, repo, ctx);
+    if (!repoWithViews) continue;
+    const customFinds = buildFindActions(repoWithViews, agg, contextModule);
+    if (customFinds.length === 0) continue;
+    const path = `lib/${appName}/${ctxSnake}/${snake(agg.name)}.ex`;
+    const existing = out.get(path);
+    if (!existing) continue;
+    // Splice find actions before the `defaults` line inside `actions do`.
+    out.set(
+      path,
+      existing.replace(
+        /(  actions do\n)/,
+        `$1${customFinds.map((s) => "    " + s).join("\n")}\n\n`,
+      ),
+    );
   }
 
   // Domain module per context
@@ -459,6 +492,10 @@ function emitShellFiles(
   out.set(".formatter.exs", renderFormatterExs());
   out.set("Dockerfile", renderDockerfile(appName));
   out.set(".dockerignore", renderDockerignore());
+  // certs/ is the CA-bake landing slot — see the COPY in renderDockerfile.
+  // .gitkeep keeps the dir present in git so the COPY is a no-op when
+  // no proxy CAs are configured.
+  out.set("certs/.gitkeep", "");
 
   // lib/<app>/repo.ex
   out.set(`lib/${appName}/repo.ex`, renderRepo(appName, appModule));
@@ -545,7 +582,8 @@ defmodule ${appModule}.MixProject do
       {:ash_phoenix, "~> 2.0"},
       {:jason, "~> 1.2"},
       {:bandit, "~> 1.5"},
-      {:plug_cowboy, "~> 2.5"}
+      {:plug_cowboy, "~> 2.5"},
+      {:open_api_spex, "~> 3.0"}
     ]
   end
 
@@ -582,9 +620,19 @@ ARG BUILDER_IMAGE="hexpm/elixir:\${ELIXIR_VERSION}-erlang-\${OTP_VERSION}-debian
 ARG RUNNER_IMAGE="debian:\${DEBIAN_VERSION}"
 
 FROM \${BUILDER_IMAGE} AS build
-RUN apt-get update -y && apt-get install -y build-essential git \\
+RUN apt-get update -y && apt-get install -y build-essential git ca-certificates \\
     && apt-get clean && rm -f /var/lib/apt/lists/*_*
 WORKDIR /app
+# Optional proxy CAs — drop *.crt files into ./certs/ to make hex
+# trust them.  The directory always exists (with a .gitkeep), so
+# this COPY is a no-op when no CAs are configured.  Erlang's :inets
+# / :ssl pick up the OS trust store when we point SSL_CERT_FILE +
+# HEX_CACERTS_PATH at it; without these, the proxy CA looks valid
+# to curl/openssl but Erlang refuses the handshake with "unknown_ca".
+COPY certs/ /usr/local/share/ca-certificates/
+RUN update-ca-certificates 2>/dev/null || true
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \\
+    HEX_CACERTS_PATH=/etc/ssl/certs/ca-certificates.crt
 RUN mix local.hex --force && mix local.rebar --force
 ENV MIX_ENV="prod"
 COPY mix.exs mix.lock ./

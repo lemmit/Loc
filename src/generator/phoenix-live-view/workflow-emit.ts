@@ -1,5 +1,6 @@
 import type {
   BoundedContextIR,
+  ParamIR,
   WorkflowIR,
   WorkflowStmtIR,
 } from "../../ir/loom-ir.js";
@@ -65,6 +66,20 @@ function renderWorkflow(
 
   const bodyLines = renderWorkflowBody(wf, ctx, renderCtx, contextModule, appModule);
 
+  // Collect precondition statements to generate a validate_args/1 private
+  // function that runs at the top of the with chain (mirrors dotnet Mediator
+  // validation pipeline pattern).
+  const precondStmts = wf.statements.filter(
+    (s): s is Extract<typeof s, { kind: "precondition" | "requires" }> =>
+      s.kind === "precondition" || s.kind === "requires",
+  );
+  const validateArgsSection = renderValidateArgsFunction(
+    wf.name,
+    wf.params,
+    precondStmts,
+    renderCtx,
+  );
+
   // Emit event broadcasts that are collected separately (stmt-level emits
   // are woven into the with-chain by renderWorkflowBody).
   const body = wf.transactional
@@ -80,7 +95,70 @@ defmodule ${moduleName} do
   def run(${paramPattern}) do
 ${body}
   end
-end
+${validateArgsSection}end
+`;
+}
+
+// ---------------------------------------------------------------------------
+// validate_args/1 — private validation helper for workflow params.
+//
+// Mirrors the .NET Mediator validation pipeline: precondition / requires
+// statements whose predicates reference only workflow parameters are
+// lowered to a `validate_args(args)` private function that the `run/1`
+// function calls first via an `:ok <-` with-clause.
+//
+// The function returns `:ok` on success and `{:error, reason}` on failure,
+// matching the with-chain protocol.
+//
+// When no precondition / requires statements exist, an empty string is
+// returned so no dead code is emitted.
+// ---------------------------------------------------------------------------
+
+type PrecondOrRequires = Extract<
+  WorkflowStmtIR,
+  { kind: "precondition" | "requires" }
+>;
+
+function renderValidateArgsFunction(
+  _wfName: string,
+  params: ParamIR[],
+  stmts: PrecondOrRequires[],
+  renderCtx: RenderCtx,
+): string {
+  if (stmts.length === 0 && params.length === 0) return "";
+  // Only emit the function when there are actual guard predicates.
+  if (stmts.length === 0) return "";
+
+  const paramKeys = new Set(params.map((p) => p.name));
+
+  // Build the body: each stmt becomes one guard clause.
+  const guardLines: string[] = [];
+  for (const stmt of stmts) {
+    const exprStr = renderExpr(stmt.expr, { ...renderCtx, thisName: "args" });
+    if (stmt.kind === "precondition") {
+      const msg = JSON.stringify(`Precondition failed: ${stmt.source}`);
+      guardLines.push(
+        `    if not (${exprStr}), do: throw({:error, ${msg}})`,
+      );
+    } else {
+      guardLines.push(
+        `    if not (${exprStr}), do: throw({:error, :forbidden})`,
+      );
+    }
+  }
+  void paramKeys; // available for future extension (matches-on-param-type)
+
+  const body = guardLines.join("\n");
+  return `
+  defp validate_args(args) do
+    try do
+${body}
+      :ok
+    catch
+      {:error, _} = err -> err
+    end
+  end
+
 `;
 }
 
@@ -103,6 +181,33 @@ function renderWorkflowBody(
 ): WorkflowBodyLine[] {
   void appModule;
   const lines: WorkflowBodyLine[] = [];
+
+  // When the workflow has precondition/requires statements, inject a
+  // `validate_args(args)` with-clause at the head of the chain — mirrors
+  // the .NET Mediator validation pipeline pattern.  The private
+  // `validate_args/1` function (emitted below `run/1`) contains the actual
+  // guards; this keeps `run/1` declarative.
+  const hasPreconditions = wf.statements.some(
+    (s) => s.kind === "precondition" || s.kind === "requires",
+  );
+  const paramPattern = wf.params.length > 0
+    ? `%{${wf.params.map((p) => `${snake(p.name)}: _`).join(", ")}}`
+    : "_args";
+  void paramPattern;
+  if (hasPreconditions && wf.params.length > 0) {
+    // Use the arg map pattern that run/1 destructures.
+    const argsVar = wf.params.map((p) => `${snake(p.name)}: ${snake(p.name)}`).join(", ");
+    lines.push({
+      kind: "with-clause",
+      text: `      :ok <- validate_args(%{${argsVar}})`,
+    });
+  } else if (hasPreconditions) {
+    // No named params — validate_args receives an empty map.
+    lines.push({
+      kind: "with-clause",
+      text: `      :ok <- validate_args(%{})`,
+    });
+  }
 
   for (const st of wf.statements) {
     lines.push(...renderWorkflowStmt(st, ctx, renderCtx, contextModule));
