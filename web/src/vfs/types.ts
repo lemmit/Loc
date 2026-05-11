@@ -62,7 +62,7 @@ export interface Vfs {
   /** List every path that starts with `prefix`, sorted lexicographically.
    *  A prefix without a trailing `/` matches paths starting with the
    *  literal string; a trailing `/` enforces a directory boundary
-   *  (so `/themes/m` vs `/themes/m/`).  Returns absolute paths. */
+   *  (so `/designs/m` vs `/designs/m/`).  Returns absolute paths. */
   list(prefix: VfsPath): ReadonlyArray<VfsPath>;
 
   /** Subscribe to writes/deletes touching paths under `prefix`.

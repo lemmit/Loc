@@ -34,6 +34,11 @@ import { getWorkerVfs } from "./worker-vfs.js";
  *  bundle via `seedBuiltinPacks`. */
 const BUILTIN_PACKS = new Set(["mantine", "shadcn"]);
 
+/** Top-level VFS dirs that hold pack-agnostic Handlebars sources
+ *  (Vite scaffold, API integration, Docker artifacts).  Mirrors the
+ *  on-disk repo-root layout — see `loader-fs.ts`. */
+const SHARED_SOURCE_DIRS = ["/vite/", "/api/", "/docker/"] as const;
+
 /** POSIX-style path join — duplicating the relevant slice of
  *  `node:path/posix` rather than importing it so this module stays
  *  free of any node:* dependency.  Only handles the cases the
@@ -66,12 +71,12 @@ function joinPosix(...parts: string[]): VfsPath {
 }
 
 /** Resolve a `design:` slot value to a VFS path.  Mirrors the Node
- *  `resolvePackDir` contract: built-in names → `/themes/<name>`;
+ *  `resolvePackDir` contract: built-in names → `/designs/<name>`;
  *  absolute paths used as-is; relative paths anchored against
  *  `referenceDir` (defaults to `/workspace`, the playground root). */
 export function resolvePackDir(ui: string, referenceDir?: VfsPath): VfsPath {
   if (BUILTIN_PACKS.has(ui)) {
-    return `/themes/${ui}`;
+    return `/designs/${ui}`;
   }
   if (ui.startsWith("/")) return ui;
   return joinPosix(referenceDir ?? "/workspace", ui);
@@ -106,18 +111,24 @@ export function loadPack(packDir: VfsPath): LoadedPack {
     }
     sources[logicalName] = src;
   }
-  // Pull shared templates (themes/_shared/*.hbs in the on-disk
-  // layout; mirrored to /themes/_shared/ in the VFS by the seeder)
-  // and pass them to compilePack so they register as pack-agnostic
-  // partials.  Same opt-in shape as the Node loader: empty when
-  // no _shared/ directory has been seeded.
+  // Pull shared templates from the top-level shared dirs (vite/, api/,
+  // docker/ in the on-disk layout; mirrored to /vite/, /api/, /docker/
+  // in the VFS by the seeder) and pass them to compilePack so they
+  // register as pack-agnostic partials.
   const sharedSources: Record<string, string> = {};
-  for (const path of vfs.list("/themes/_shared/")) {
-    if (!path.endsWith(".hbs")) continue;
-    const slash = path.lastIndexOf("/");
-    const logicalName = path.slice(slash + 1, -".hbs".length);
-    const src = vfs.read(path);
-    if (src != null) sharedSources[logicalName] = src;
+  for (const dir of SHARED_SOURCE_DIRS) {
+    for (const p of vfs.list(dir)) {
+      if (!p.endsWith(".hbs")) continue;
+      const slash = p.lastIndexOf("/");
+      const logicalName = p.slice(slash + 1, -".hbs".length);
+      if (sharedSources[logicalName] != null) {
+        throw new Error(
+          `loader-vfs: duplicate shared template "${logicalName}" — defined under multiple shared dirs.  Logical names must be unique across ${SHARED_SOURCE_DIRS.join(", ")}.`,
+        );
+      }
+      const src = vfs.read(p);
+      if (src != null) sharedSources[logicalName] = src;
+    }
   }
   return compilePack(
     packDir,

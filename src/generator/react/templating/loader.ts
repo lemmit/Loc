@@ -7,7 +7,7 @@
 // turns a manifest + source map into a ready-to-render `LoadedPack`.
 //
 // Filesystem-bound concerns (locating built-in packs under
-// `<repo>/themes/<name>/`, reading template files) live in the
+// `<repo>/designs/<name>/`, reading template files) live in the
 // sibling `loader-fs.ts` so this module stays free of `node:fs` /
 // `node:path` and bundles cleanly in the playground (which feeds
 // templates in via Vite's `import.meta.glob`).
@@ -187,11 +187,11 @@ export function compilePack(
   sources: Record<string, string>,
   pathFor: (fileName: string) => string,
   /** Cross-pack templates that compose primitives via partials and
-   *  apply to every loaded pack — `themes/_shared/<name>.hbs` in the
-   *  Node loader, an `import.meta.glob` of the same in the browser
-   *  loader.  Registered as Handlebars partials BEFORE pack
+   *  apply to every loaded pack — sourced from `<repo>/{vite,api,docker}/*.hbs`
+   *  in the Node loader, an `import.meta.glob` of the same in the
+   *  browser loader.  Registered as Handlebars partials BEFORE pack
    *  templates so a pack can override a shared template by emitting
-   *  one with the same logical name.  Empty when no _shared/
+   *  one with the same logical name.  Empty when no shared
    *  directory exists; backward-compatible with packs that haven't
    *  opted in.
    *
@@ -272,7 +272,7 @@ export function compilePack(
     const t = templates.get(name);
     if (!t) {
       throw new Error(
-        `loader: pack ${manifest.name}: no template registered for "${name}".  Add it to pack.json's emits map (or place a shared override in themes/_shared/) and create the .hbs file.`,
+        `loader: pack ${manifest.name}: no template registered for "${name}".  Add it to pack.json's emits map (or place a shared default under one of vite/, api/, docker/) and create the .hbs file.`,
       );
     }
     return t.fn(context);

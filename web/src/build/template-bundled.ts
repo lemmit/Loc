@@ -1,12 +1,13 @@
 // ---------------------------------------------------------------------------
-// Built-in pack seeder for the playground worker's VFS.
+// Built-in design + shared-template seeder for the playground worker's VFS.
 //
-// In Node, the React generator reads `themes/<pack>/{pack.json,*.hbs}`
-// off disk via `loader-fs.ts`.  In the playground we have no
-// `node:fs`, so we use Vite's `import.meta.glob` to bundle every
-// built-in theme's manifest + .hbs templates into the worker bundle
-// at build time, then seed them into the worker-local VFS at
-// startup.
+// In Node, the React generator reads `designs/<pack>/{pack.json,*.hbs}`
+// off disk via `loader-fs.ts`, plus pack-agnostic templates from the
+// repo-root `vite/`, `api/`, `docker/` directories.  In the playground
+// we have no `node:fs`, so we use Vite's `import.meta.glob` to bundle
+// every built-in design's manifest + .hbs templates AND the shared-
+// template directories into the worker bundle at build time, then
+// seed them into the worker-local VFS at startup.
 //
 // Phase 1 of the IDE refactor: this file used to *be* the loader
 // (a shim that exposed `loadPack` / `resolvePackDir` to the
@@ -18,53 +19,71 @@
 
 import type { Vfs, VfsPath } from "../vfs/types.js";
 
-// Eager glob of every theme manifest.  Vite parses these as JSON at
+// Eager glob of every design manifest.  Vite parses these as JSON at
 // bundle time and ships the resulting object directly.
 const manifestModules = import.meta.glob<{ default: object }>(
-  "../../../themes/*/pack.json",
+  "../../../designs/*/pack.json",
   { eager: true },
 );
 
-// Eager raw glob of every theme template.  `query: '?raw'` +
+// Eager raw glob of every design template.  `query: '?raw'` +
 // `import: 'default'` tells Vite to inline each .hbs file as a
 // string at bundle time.
 const templateSources = import.meta.glob<string>(
-  "../../../themes/*/*.hbs",
+  "../../../designs/*/*.hbs",
   { eager: true, query: "?raw", import: "default" },
 );
 
-/** Strip the leading `../../../themes/` prefix and split off the
+// Eager raw glob of every pack-agnostic shared-template source.
+// One glob covers all three sibling dirs (vite/, api/, docker/) —
+// they live at the same depth relative to this file.
+const sharedSources = import.meta.glob<string>(
+  ["../../../vite/*.hbs", "../../../api/*.hbs", "../../../docker/*.hbs"],
+  { eager: true, query: "?raw", import: "default" },
+);
+
+/** Strip the leading `../../../designs/` prefix and split off the
  *  pack name.  Returns null for paths that don't match — defensive
  *  against future glob-pattern changes. */
-function parseThemePath(globPath: string): { pack: string; rest: string } | null {
-  const m = globPath.match(/\/themes\/([^/]+)\/(.+)$/);
+function parseDesignPath(globPath: string): { pack: string; rest: string } | null {
+  const m = globPath.match(/\/designs\/([^/]+)\/(.+)$/);
   if (!m) return null;
   return { pack: m[1], rest: m[2] };
 }
 
+/** Match a glob path like `../../../vite/index-html.hbs` and pull out
+ *  the top-level dir name plus filename.  Used to project each
+ *  shared template into the VFS at `/<dir>/<file>`. */
+function parseSharedPath(globPath: string): { dir: string; file: string } | null {
+  const m = globPath.match(/\/(vite|api|docker)\/([^/]+\.hbs)$/);
+  if (!m) return null;
+  return { dir: m[1], file: m[2] };
+}
+
 /** Hydrate the given VFS with every built-in pack's manifest + .hbs
- *  templates under `/themes/<pack>/...`.  Idempotent: re-seeding
- *  with the same content is a no-op for downstream consumers
- *  because writes overwrite-in-place.  Called exactly once at
- *  worker boot from `build.worker.ts`.
+ *  templates under `/designs/<pack>/...`, plus the pack-agnostic
+ *  shared templates under `/vite/...`, `/api/...`, `/docker/...`.
+ *  Idempotent: re-seeding with the same content is a no-op for
+ *  downstream consumers because writes overwrite-in-place.  Called
+ *  exactly once at worker boot from `build.worker.ts`.
  *
- *  Throws when the eager glob comes back empty — that means the
- *  file was moved relative to `themes/` and the relative glob no
- *  longer resolves; failing loud beats a silent "no built-ins"
+ *  Throws when the eager design glob comes back empty — that means
+ *  the file was moved relative to `designs/` and the relative glob
+ *  no longer resolves; failing loud beats a silent "no built-ins"
  *  surface. */
 export function seedBuiltinPacks(vfs: Vfs): void {
   if (Object.keys(manifestModules).length === 0) {
     throw new Error(
-      "seedBuiltinPacks: empty manifest glob — `template-bundled.ts` was probably moved relative to `themes/`.  Update the `import.meta.glob` patterns.",
+      "seedBuiltinPacks: empty manifest glob — `template-bundled.ts` was probably moved relative to `designs/`.  Update the `import.meta.glob` patterns.",
     );
   }
   const entries: Array<readonly [VfsPath, string]> = [];
   for (const [globPath, mod] of Object.entries(manifestModules)) {
-    const parsed = parseThemePath(globPath);
+    const parsed = parseDesignPath(globPath);
     if (!parsed || parsed.rest !== "pack.json") continue;
     const manifest = (mod as { default?: object }).default ?? mod;
     entries.push([
-      `/themes/${parsed.pack}/pack.json`,
+      `/designs/${parsed.pack}/pack.json`,
       // Stringify so the VFS stays homogeneous (everything is
       // text — see `Vfs` interface comment).  The loader
       // JSON.parses on read.
@@ -72,9 +91,14 @@ export function seedBuiltinPacks(vfs: Vfs): void {
     ]);
   }
   for (const [globPath, src] of Object.entries(templateSources)) {
-    const parsed = parseThemePath(globPath);
+    const parsed = parseDesignPath(globPath);
     if (!parsed) continue;
-    entries.push([`/themes/${parsed.pack}/${parsed.rest}`, src]);
+    entries.push([`/designs/${parsed.pack}/${parsed.rest}`, src]);
+  }
+  for (const [globPath, src] of Object.entries(sharedSources)) {
+    const parsed = parseSharedPath(globPath);
+    if (!parsed) continue;
+    entries.push([`/${parsed.dir}/${parsed.file}`, src]);
   }
   vfs.hydrate(entries);
 }

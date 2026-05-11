@@ -7,7 +7,7 @@
 // for that pack from both the workspace VFS (persistence) and the
 // build worker's VFS (immediate effect).
 //
-// Built-in packs (`/themes/...`) are NOT shown here — they live in
+// Built-in packs (`/designs/...`) are NOT shown here — they live in
 // the worker bundle, not the workspace, and aren't user-managed.
 // ---------------------------------------------------------------------------
 

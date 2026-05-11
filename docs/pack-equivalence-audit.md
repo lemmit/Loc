@@ -4,18 +4,19 @@
 > Updated 2026-05-10.
 
 This document tracks the empirical state of each design-system pack
-shipped under `themes/`.  It's the evidence base for any decision to
-move templates into `themes/_shared/` — without proven equivalence,
-sharing is a leaky abstraction.
+shipped under `designs/`.  It's the evidence base for any decision to
+move templates into the sibling shared-template directories (`vite/`,
+`api/`, `docker/`) — without proven equivalence, sharing is a leaky
+abstraction.
 
 The architectural rule:
 
 - **Low-level design-system-dependent templates stay per-pack and
   dead-simple, even with some duplication.**
-- **Templates land in `themes/_shared/` only when they have ZERO
-  design-system content** (runtime-helper-only fragments,
-  pack-agnostic project-shell files like Dockerfile / tsconfig-node /
-  api-client / index-html).
+- **Templates land in a shared directory (`vite/`, `api/`, `docker/`)
+  only when they have ZERO design-system content** — pack-agnostic
+  project-shell or framework-glue files (Dockerfile, tsconfig.node,
+  api-client, index.html).
 - **"Small differences" like `<Table.Td>` vs `<TableCell>`** are
   design-system identity, not duplication.  Don't unify them.
 
@@ -63,22 +64,23 @@ visually compare.
 
 ## Pack-by-pack inventory
 
-### `themes/_shared/` (genuinely DS-agnostic)
+### Shared template directories (genuinely DS-agnostic)
 
-Project-scaffold files only — pure non-JSX glue that has nothing to do
-with the React design system in use.  Field-row helpers were previously
-in this directory; they were reverted to per-pack because each one is a
+Three sibling directories beside `designs/` hold pack-agnostic glue —
+pure non-JSX files that have nothing to do with which React design
+system is active.  They're separated by purpose so each name pulls
+its weight:
+
+| Dir | Files | Purpose |
+|---|---|---|
+| `vite/` | `index-html.hbs`, `tsconfig-node.hbs` | Vite framework entry & node-side TS config |
+| `api/` | `api-client.hbs`, `api-config.hbs` | TS fetch wrapper + `API_BASE_URL` export |
+| `docker/` | `dockerfile.hbs`, `dockerignore.hbs` | Multi-stage Node image + Vite ignore list |
+
+Field-row helpers were previously colocated in a single `_shared/`
+directory; they were reverted to per-pack because each one is a
 single line and the architectural cost of sharing exceeded the
 duplication savings.
-
-| Template | Why shared |
-|---|---|
-| `api-client.hbs` | Pure TS fetch wrapper, no JSX |
-| `api-config.hbs` | Pure TS, exports `API_BASE_URL` |
-| `dockerfile.hbs` | Multi-stage Node image, no design system content |
-| `dockerignore.hbs` | Standard Vite ignore list |
-| `index-html.hbs` | Pure HTML, no DS components |
-| `tsconfig-node.hbs` | Pure JSON config |
 
 ### Per-pack templates that genuinely differ (stay per-pack)
 
@@ -181,16 +183,16 @@ should NOT be unified.  The previously-considered candidates
 - `page-list.hbs` uses pack-specific table + breadcrumb structure.
 - `views-index.hbs` uses pack-specific grid + card-with-icon-button pattern.
 
-**The shared layer is essentially complete.**  The 11 templates already
-in `themes/_shared/` are the genuinely shareable surface.  Further
-movement of templates into `_shared/` would violate the architectural
-rule.
+**The shared layer is essentially complete.**  The 6 templates
+across `vite/`, `api/`, and `docker/` are the genuinely shareable
+surface.  Further movement of templates into a shared directory
+would violate the architectural rule.
 
 ## What CAN still happen
 
 1. **Pack-author guide** (`docs/design-system-packs.md`) — documents
-   the contract a third-party pack must satisfy.
-2. **Custom-pack fixture** (`themes/minimal/` or similar) — proves
+   the contract a third-party pack must satisfy.  ✅ landed in this PR.
+2. **Custom-pack fixture** (`designs/minimal/` or similar) — proves
    the contract works for a pack that's neither Mantine nor shadcn.
 3. **Per-template behavioral tests** — extend `LOOM_REACT_BUILD` to
    also runtime-test that generated apps respond to user input
