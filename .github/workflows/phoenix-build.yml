@@ -56,7 +56,21 @@ jobs:
         run: npm run build
 
       - name: Unit tests
-        run: npx vitest run --reporter=verbose
+        run: |
+          set -o pipefail
+          npx vitest run --reporter=verbose 2>&1 | tee vitest.log
+
+      # Surface the tail of the vitest log to the GitHub Step Summary
+      # whenever Unit tests fail.  Step Summary is visible without
+      # auth, so PR webhook readers (this Claude session included) can
+      # diagnose without scraping protected log endpoints.
+      - name: Surface vitest output on failure
+        if: failure()
+        run: |
+          echo '## Unit tests output (tail)' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          tail -n 200 vitest.log >> $GITHUB_STEP_SUMMARY || true
+          echo '```' >> $GITHUB_STEP_SUMMARY
 
       # Generate a fixture Phoenix project from examples/acme.ddd.
       # The example today targets dotnet + hono + react; we synthesise
