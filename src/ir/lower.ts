@@ -269,22 +269,17 @@ function lowerSystem(sys: import("../language/generated/ast.js").System): System
     apis,
     storages,
   };
-  // Slice C2 — scaffold expander default ON.  Post-process every
-  // page in every UI: where the page has a recognised
-  // `scaffoldOrigin` and the expander knows how to handle it,
-  // replace `body` with the equivalent walker-stdlib composition.
-  // The React emitter then routes through the walker (Phase A
-  // primitives) instead of through the legacy archetype path.
-  //
-  // Opt-out via `LOOM_SCAFFOLD_EXPAND=0` keeps the legacy archetype
-  // path in use for one release as a panic switch — D1 deletes the
-  // archetype path entirely.  `scaffoldOrigin` is intentionally
-  // preserved on each rewritten page so the per-aggregate page-
-  // object emitter still produces the rich `e2e/pages/<agg>.ts`
-  // helper classes.
-  if (process.env.LOOM_SCAFFOLD_EXPAND !== "0") {
-    expandScaffoldPages(built);
-  }
+  // Slice D1 — scaffold expander always runs.  Every page with a
+  // recognised `scaffoldOrigin` gets `body` rewritten to a
+  // walker-stdlib composition; the React emitter then routes
+  // through the walker (Phase A primitives).  The legacy archetype
+  // path (renderers/preparers/templates) was deleted in D1 — this
+  // branch is the only generator path now.  `scaffoldOrigin` is
+  // intentionally preserved on each rewritten page so the
+  // per-aggregate page-object emitter still produces the rich
+  // `e2e/pages/<agg>.ts` helper classes (rich domain methods:
+  // fill, submit, expectRow).
+  expandScaffoldPages(built);
   return built;
 }
 

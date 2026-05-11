@@ -99,12 +99,17 @@ system Acme {
         port: 8081
     }
 
+    ui WebApp {
+        scaffold modules: Catalog, Sales
+    }
+
     // React + React Query + Zod + Mantine frontend.  Inherits its
     // module set from the `api` backend, so pages cover Catalog +
     // Sales aggregates against the same wire shape.
     deployable webApp {
         platform: react
         targets: api
+        ui: WebApp
         port: 3001
     }
 

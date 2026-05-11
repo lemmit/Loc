@@ -299,7 +299,11 @@ describe("Slice C1 — scaffold expander dispatch", () => {
     expect(expandScaffoldToExplicitBody(origin, ctx)).toBeNull();
   });
 
-  it("returns null when the UI has no api params (no api handle to resolve)", () => {
+  it("expands with no-handle fallback when the UI has no api params", () => {
+    // Slice D1 — legacy `scaffold modules: M` deployables that
+    // never declared `api X: Y` parameters still get expansion.
+    // The body uses `<Agg>.all` directly (Pattern D in walker)
+    // instead of `<handle>.<Agg>.all`.
     const ctxNoApi = buildExpandContext(makeSystem(), {
       ...makeUi(),
       apiParams: [],
@@ -309,6 +313,15 @@ describe("Slice C1 — scaffold expander dispatch", () => {
       aggregateName: "Order",
       contextName: "Orders",
     };
-    expect(expandScaffoldToExplicitBody(origin, ctxNoApi)).toBeNull();
+    const body = expandScaffoldToExplicitBody(origin, ctxNoApi);
+    expect(body).not.toBeNull();
+    const qv = findCall(body!, "QueryView")!;
+    if (qv.kind !== "call") return;
+    const ofIdx = (qv.argNames ?? []).indexOf("of");
+    const ofArg = qv.args[ofIdx]!;
+    expect(ofArg.kind).toBe("member");
+    if (ofArg.kind !== "member") return;
+    // Direct ref to Order (no api handle wrapper).
+    expect((ofArg.receiver as { name: string }).name).toBe("Order");
   });
 });

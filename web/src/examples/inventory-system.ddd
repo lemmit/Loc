@@ -70,6 +70,10 @@ system InventorySystem {
     }
   }
 
+  ui WebApp {
+    scaffold modules: Inventory
+  }
+
   deployable api { platform: hono, modules: Inventory, port: 3000 }
-  deployable webApp { platform: react, targets: api, port: 3001 }
+  deployable webApp { platform: react, targets: api, ui: WebApp, port: 3001 }
 }

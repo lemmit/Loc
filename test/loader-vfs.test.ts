@@ -92,8 +92,10 @@ describe("loadPack: built-in pack loading", () => {
   it("loads the mantine pack and exposes its templates", () => {
     const pack = loadPack("/designs/mantine");
     expect(pack.manifest.name).toBe("mantine");
-    expect(pack.templates.has("page-list")).toBe(true);
-    expect(pack.templates.has("page-detail")).toBe(true);
+    // Slice D1 — page-list / page-detail / page-new etc. were
+    // deleted; pack now exposes the walker stdlib primitives.
+    expect(pack.templates.has("primitive-stack")).toBe(true);
+    expect(pack.templates.has("primitive-form-of")).toBe(true);
     expect(pack.templates.has("theme")).toBe(true);
   });
 

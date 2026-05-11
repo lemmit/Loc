@@ -169,43 +169,6 @@ describe("Slice 11.3 — recursive layout walker", () => {
     expect(content).not.toMatch(/onClick=/);
   });
 
-  it("scaffold-archetype bodies still dispatch through scaffold path (not the walker)", async () => {
-    const files = await buildAndGenerate(`
-      system S {
-        module M {
-          context C {
-            aggregate Order { x: int }
-            repository Orders for Order { }
-          }
-        }
-        ui WebApp {
-          page OrderList {
-            route: "/orders"
-            body:  List(of: Order)
-          }
-        }
-        deployable api { platform: hono, modules: M, port: 3000 }
-        deployable web {
-          platform: static
-          targets: api
-          ui: WebApp
-          port: 3001
-        }
-      }
-    `);
-    // OrderList uses List(of: Order) — that's a scaffold
-    // archetype, not a layout primitive.  Goes to conventional
-    // path; walker doesn't fire.
-    expect([...files.keys()]).toContain("web/src/pages/orders/list.tsx");
-    expect(files.get("web/src/pages/order_list.tsx")).toBeUndefined();
-    // The conventional list page uses useAllOrders hook etc. —
-    // confirms the scaffold renderer fired, not the layout walker.
-    // The walker can't emit React Query hooks; if `useAll` is
-    // present, the scaffold path produced the file.
-    const content = files.get("web/src/pages/orders/list.tsx")!;
-    expect(content).toMatch(/useAll/);
-  });
-
   it("unknown components leave a placeholder comment, no crash", async () => {
     const files = await buildAndGenerate(`
       system S {

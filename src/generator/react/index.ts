@@ -23,17 +23,9 @@ import { loadPack, resolvePackDir } from "./templating/loader-fs.js";
 import type { LoadedPack } from "./templating/loader.js";
 import {
   renderAppShell,
-  renderDetailPage,
-  renderHome,
-  renderListPage,
   renderMain,
-  renderNewPage,
   renderShellFile,
   renderTheme,
-  renderViewTablePage,
-  renderViewsIndex,
-  renderWorkflowForm,
-  renderWorkflowsIndex,
 } from "./templating/render.js";
 import {
   emitPagesForUi,
@@ -120,14 +112,10 @@ export function generateReactForContexts(
   const views = allViews(contexts);
 
   if (ui) {
-    // Page-IR-driven emission.  All `src/pages/...` files go through
-    // the page emitter; the home page is rendered through main's
-    // template-pack `renderHome`, threaded as the home callback so
-    // the emitter stays page-IR-shaped without a hard dependency on
-    // the renderer module from this side.  Slice 7: Playwright page
-    // objects under `e2e/pages/` also walk `ui.pages` via
-    // `emitPageObjectsForUi` — same source of truth, byte-identical
-    // file set to the legacy aggregate / workflow / view loops.
+    // Slice D1 — single codegen path: every `src/pages/...` file
+    // (scaffold-derived OR explicit) routes through `emitPagesForUi`
+    // → walker.  The legacy archetype renderers (`renderListPage`,
+    // `renderNewPage`, `renderDetailPage`, etc.) are deleted.
     const contextsByName = new Map<string, BoundedContextIR>();
     for (const ctx of contexts) contextsByName.set(ctx.name, ctx);
     const emitCtx = {
@@ -137,95 +125,24 @@ export function generateReactForContexts(
       contextsByName,
       pack,
     };
-    const pages = emitPagesForUi(
-      ui,
-      emitCtx,
-      (aggs, wfs, vws, sysName) =>
-        renderHome(aggs, wfs, vws, sysName, pack),
-    );
+    const pages = emitPagesForUi(ui, emitCtx);
     pages.forEach((content, path) => out.set(path, content));
     const pageObjects = emitPageObjectsForUi(ui, emitCtx);
     pageObjects.forEach((content, path) => out.set(path, content));
-  } else {
-    // Legacy back-compat path for deployables without a `ui:`
-    // binding: per-aggregate pages + Playwright page objects walked
-    // from the aggregate inventory directly.
-    for (const { agg, ctx } of aggregates) {
-      out.set(
-        `src/pages/${snake(plural(agg.name))}/list.tsx`,
-        renderListPage(agg, aggregatesByName, pack),
-      );
-      out.set(
-        `src/pages/${snake(plural(agg.name))}/new.tsx`,
-        renderNewPage(agg, ctx, aggregatesByName, pack),
-      );
-      out.set(
-        `src/pages/${snake(plural(agg.name))}/detail.tsx`,
-        renderDetailPage(agg, ctx, aggregatesByName, pack),
-      );
-      out.set(
-        `e2e/pages/${camel(agg.name)}.ts`,
-        buildPageObjectModule(agg, ctx),
-      );
-    }
   }
 
-  // Workflow UI — Playwright page objects + the shared workflows API
-  // module are 1:1 with the workflow inventory, not with a generated
-  // page; emit them regardless of the page-emission path.  The per-
-  // workflow form pages and the workflows index live in
-  // `emitPagesForUi` when `ui` is set; the legacy fallback below
-  // covers the no-ui branch.
+  // Workflow UI — the shared workflows API module is 1:1 with the
+  // workflow inventory; emit it regardless of the page-emission
+  // path.  Pages + page-objects emit through `emitPagesForUi` /
+  // `emitPageObjectsForUi`.
   if (hasAnyWorkflow(contexts)) {
     out.set("src/api/workflows.ts", buildWorkflowsApiModule(contexts));
-    if (!ui) {
-      // Legacy back-compat path: pages + page objects walked from
-      // the workflow inventory directly.  When `ui` is set, both
-      // come from `emitPagesForUi` / `emitPageObjectsForUi` and
-      // route through page IR.
-      out.set(
-        "src/pages/workflows/index.tsx",
-        renderWorkflowsIndex(contexts, pack),
-      );
-      for (const { wf, ctx } of workflows) {
-        out.set(
-          `src/pages/workflows/${snake(wf.name)}.tsx`,
-          renderWorkflowForm(wf, ctx, aggregatesByName, pack),
-        );
-        out.set(
-          `e2e/pages/workflows/${snake(wf.name)}.ts`,
-          buildWorkflowPageObject(wf, ctx),
-        );
-      }
-    }
   }
 
-  // View UI — same shape as workflows: per-view page object + the
-  // shared views API module always emitted; the per-view table
-  // pages and the views index go through `emitPagesForUi` when
-  // `ui` is set.
+  // View UI — same shape as workflows: only the shared views API
+  // module needs an unconditional emit.
   if (hasAnyView(contexts)) {
     out.set("src/api/views.ts", buildViewsApiModule(contexts));
-    if (!ui) {
-      // Legacy back-compat path: pages + page objects walked from
-      // the view inventory directly.  When `ui` is set, both come
-      // from `emitPagesForUi` / `emitPageObjectsForUi` and route
-      // through page IR.
-      out.set(
-        "src/pages/views/index.tsx",
-        renderViewsIndex(contexts, pack),
-      );
-      for (const { view, ctx } of views) {
-        out.set(
-          `src/pages/views/${snake(view.name)}.tsx`,
-          renderViewTablePage(view, ctx, aggregatesByName, pack),
-        );
-        out.set(
-          `e2e/pages/views/${snake(view.name)}.ts`,
-          buildViewPageObject(view, ctx),
-        );
-      }
-    }
   }
 
   out.set("e2e/smoke.spec.ts", smokeSpec(aggregates.map((a) => a.agg)));
@@ -270,29 +187,16 @@ export function generateReactForContexts(
       workflows.map((w) => w.wf),
       views.map((v) => v.view),
       sys.name,
-      pack,
       sidebarOverride,
       extraRoutes,
+      pack,
     ),
   );
-  // Home page goes through `emitPagesForUi` when a `ui:` binding is
-  // present (the Slice-4 expander synthesises a `Home` PageIR with
-  // `scaffoldOrigin.kind === "home"` whenever any aggregate /
-  // workflow / view is scaffolded).  Without a `ui:` binding we
-  // emit Home unconditionally — same shape every legacy react
-  // deployable produced.
-  if (!ui) {
-    out.set(
-      "src/pages/home.tsx",
-      renderHome(
-        aggregates.map((a) => a.agg),
-        workflows.map((w) => w.wf),
-        views.map((v) => v.view),
-        sys.name,
-        pack,
-      ),
-    );
-  }
+  // Slice D1 — Home is always synthesised by the scaffold expander
+  // when a `ui:` binding is present.  Deployables without `ui:`
+  // emit no Home page (no scaffold archetype renderer left to fall
+  // back to); D2 will tighten the validator to require a `ui:`
+  // binding for any react deployable.
 
   out.set("package.json", renderShellFile("package-json", {}, pack));
   out.set("tsconfig.json", renderShellFile("tsconfig", {}, pack));

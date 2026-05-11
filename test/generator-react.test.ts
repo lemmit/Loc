@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
 import { URI } from "langium";
 import * as path from "node:path";
@@ -20,28 +20,6 @@ async function buildModel(file: string): Promise<Model> {
     validation: true,
   });
   return doc.parseResult.value as Model;
-}
-
-/** Slice C2 — these tests pin assertions specific to the LEGACY
- *  archetype renderer's output (icons, structured loading skeleton,
- *  styled empty-state CTAs, Breadcrumbs separators).  When the
- *  scaffold expander default is on (`LOOM_SCAFFOLD_EXPAND` defaults
- *  to "1"), scaffold pages route through the walker and emit a
- *  structurally simpler shape — see baseline-output for the new
- *  canonical TSX.  Scoping these tests to the panic-switch state
- *  preserves coverage of the legacy path until D1 deletes it. */
-function withLegacyScaffold(): { before: () => void; after: () => void } {
-  let prior: string | undefined;
-  return {
-    before: () => {
-      prior = process.env.LOOM_SCAFFOLD_EXPAND;
-      process.env.LOOM_SCAFFOLD_EXPAND = "0";
-    },
-    after: () => {
-      if (prior === undefined) delete process.env.LOOM_SCAFFOLD_EXPAND;
-      else process.env.LOOM_SCAFFOLD_EXPAND = prior;
-    },
-  };
 }
 
 describe("react generator", () => {
@@ -147,26 +125,6 @@ describe("react generator", () => {
     expect(files.get("web_app/e2e/pages/_helpers.ts")).toBeFalsy();
   });
 
-  describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — Id<X> op-param select", () => {
-    const guard = withLegacyScaffold();
-    beforeEach(guard.before);
-    afterEach(guard.after);
-
-    it("Phase 3: Id<X> op-param renders Select populated by useAll<X>()", async () => {
-      const model = await buildModel("examples/acme.ddd");
-      const { files } = generateSystems(model);
-      const detail = files.get("web_app/src/pages/orders/detail.tsx")!;
-      expect(detail).toMatch(
-        /import \{ useAllProducts \} from "\.\.\/\.\.\/api\/product"/,
-      );
-      expect(detail).toMatch(/const __products = useAllProducts\(\);/);
-      expect(detail).toMatch(/<Select label="Product Id"/);
-      expect(detail).toMatch(/__products\.data \?\? \[\]/);
-      expect(detail).toMatch(/label: __o\.sku/);
-      expect(detail).toMatch(/data-testid=\{`orders-op-addLine-input-productId-option-\$\{option\.value\}`\}/);
-      expect(detail).not.toMatch(/placeholder="<id>"/);
-    });
-  });
 
   it("Phase 3: page object clicks the testid'd option for Id<X> params", async () => {
     const model = await buildModel("examples/acme.ddd");
@@ -181,21 +139,6 @@ describe("react generator", () => {
     );
   });
 
-  describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — master-detail", () => {
-    const guard = withLegacyScaffold();
-    beforeEach(guard.before);
-    afterEach(guard.after);
-
-    it("detail page shows fields + nested parts (master-detail) + operation buttons", async () => {
-      const model = await buildModel("examples/acme.ddd");
-      const { files } = generateSystems(model);
-      const detail = files.get("web_app/src/pages/orders/detail.tsx")!;
-      expect(detail).toMatch(/use OrderById/.source.replace(/\s/g, ""));
-      expect(detail).toMatch(/data\.lines\.map/);
-      expect(detail).toMatch(/openAddLineModal/);
-      expect(detail).toMatch(/openConfirmModal/);
-    });
-  });
 
   it("API base URL is baked from the target deployable's port", async () => {
     const model = await buildModel("examples/acme.ddd");
@@ -205,82 +148,8 @@ describe("react generator", () => {
     expect(config).toMatch(/http:\/\/localhost:8080/);
   });
 
-  describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0)", () => {
-    const guard = withLegacyScaffold();
-    beforeEach(guard.before);
-    afterEach(guard.after);
 
-    it("sprinkles stable data-testid attributes on every interactive element", async () => {
-      const model = await buildModel("examples/acme.ddd");
-      const { files } = generateSystems(model);
-      const list = files.get("web_app/src/pages/orders/list.tsx")!;
-      const newPage = files.get("web_app/src/pages/orders/new.tsx")!;
-      const detail = files.get("web_app/src/pages/orders/detail.tsx")!;
-      expect(list).toMatch(/data-testid="orders-list-create"/);
-      expect(list).toMatch(/data-testid=\{`orders-row-\$\{row\.id\}`\}/);
-      expect(newPage).toMatch(/data-testid="orders-new-input-customerId"/);
-      expect(newPage).toMatch(/data-testid="orders-new-submit"/);
-      expect(detail).toMatch(/data-testid="orders-detail-status"/);
-      expect(detail).toMatch(/data-testid="orders-op-confirm"/);
-      expect(detail).toMatch(/data-testid="orders-op-confirm-submit"/);
-      expect(detail).toMatch(/data-testid="orders-op-addLine-input-productId"/);
-    });
-  });
 
-  describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — display-field title", () => {
-    const guard = withLegacyScaffold();
-    beforeEach(guard.before);
-    afterEach(guard.after);
-
-    it("detail page uses the display field as title when the aggregate declares one", async () => {
-      const model = await buildModel("examples/acme.ddd");
-      const { files } = generateSystems(model);
-      const product = files.get("web_app/src/pages/products/detail.tsx")!;
-      expect(product).toMatch(
-        /<Title order=\{2\} data-testid="products-detail-title">\{data\.sku\}<\/Title>/,
-      );
-      expect(product).toMatch(/<Text>\{data\.sku\}<\/Text>/);
-      expect(product).toMatch(
-        /<span data-testid="products-detail-id"><IdValue id=\{data\.id\}/,
-      );
-      const customer = files.get("web_app/src/pages/customers/detail.tsx")!;
-      expect(customer).toMatch(
-        /<Title order=\{2\} data-testid="customers-detail-title">\{data\.username\}<\/Title>/,
-      );
-      const order = files.get("web_app/src/pages/orders/detail.tsx")!;
-      expect(order).toMatch(
-        /<Title order=\{2\} data-testid="orders-detail-title">\{data\.id\.slice\(0, 8\) \+ "…"\}<\/Title>/,
-      );
-    });
-  });
-
-  describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — alerts", () => {
-    const guard = withLegacyScaffold();
-    beforeEach(guard.before);
-    afterEach(guard.after);
-
-    it("error / not-found alerts wear icons across list, detail, and view pages", async () => {
-      const model = await buildModel("examples/acme.ddd");
-      const { files } = generateSystems(model);
-      const list = files.get("web_app/src/pages/orders/list.tsx")!;
-      const detail = files.get("web_app/src/pages/orders/detail.tsx")!;
-      const view = files.get("web_app/src/pages/views/active_orders.tsx")!;
-      expect(list).toMatch(/IconAlertCircle/);
-      expect(list).toMatch(
-        /<Alert color="red" variant="light" icon=\{<IconAlertCircle size=\{18\} \/>\} title="Couldn't load orders">/,
-      );
-      expect(detail).toMatch(/IconAlertCircle, IconAlertTriangle/);
-      expect(detail).toMatch(
-        /<Alert color="red" variant="light" icon=\{<IconAlertCircle size=\{18\} \/>\} title="Couldn't load order">/,
-      );
-      expect(detail).toMatch(
-        /<Alert color="yellow" variant="light" icon=\{<IconAlertTriangle size=\{18\} \/>\} title="Not found">/,
-      );
-      expect(view).toMatch(
-        /<Alert color="red" variant="light" icon=\{<IconAlertCircle size=\{18\} \/>\} title="Couldn't load view">/,
-      );
-    });
-  });
 
   it("value-object fieldsets render as filled-variant grouped sub-forms", async () => {
     const model = await buildModel("examples/acme.ddd");
@@ -295,116 +164,8 @@ describe("react generator", () => {
     expect(productNew).toMatch(/<Stack gap="sm">/);
   });
 
-  describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — breadcrumbs", () => {
-    const guard = withLegacyScaffold();
-    beforeEach(guard.before);
-    afterEach(guard.after);
 
-    it("every index-level page (aggregate list, workflows index, views index) shows a Home / <Section> breadcrumb", async () => {
-      const model = await buildModel("examples/acme.ddd");
-      const { files } = generateSystems(model);
 
-      const customersList = files.get("web_app/src/pages/customers/list.tsx")!;
-      expect(customersList).toMatch(
-        /<Breadcrumbs data-testid="customers-list-breadcrumbs">[\s\S]*?<Anchor component=\{Link\} to="\/">Home<\/Anchor>[\s\S]*?<Text>Customers<\/Text>[\s\S]*?<\/Breadcrumbs>/,
-      );
-
-      const ordersList = files.get("web_app/src/pages/orders/list.tsx")!;
-      expect(ordersList).toMatch(
-        /<Breadcrumbs data-testid="orders-list-breadcrumbs">[\s\S]*?<Text>Orders<\/Text>/,
-      );
-
-      const workflowsIndex = files.get("web_app/src/pages/workflows/index.tsx")!;
-      expect(workflowsIndex).toMatch(
-        /<Breadcrumbs data-testid="workflows-index-breadcrumbs">[\s\S]*?<Anchor component=\{Link\} to="\/">Home<\/Anchor>[\s\S]*?<Text>Workflows<\/Text>/,
-      );
-
-      const viewsIndex = files.get("web_app/src/pages/views/index.tsx")!;
-      expect(viewsIndex).toMatch(
-        /<Breadcrumbs data-testid="views-index-breadcrumbs">[\s\S]*?<Text>Views<\/Text>/,
-      );
-    });
-  });
-
-  describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — page polish", () => {
-    const guard = withLegacyScaffold();
-    beforeEach(guard.before);
-    afterEach(guard.after);
-
-    it("polishes pages with formatters, skeleton loaders, op-button icons, and *Id heuristic links", async () => {
-      const model = await buildModel("examples/acme.ddd");
-      const { files } = generateSystems(model);
-      const list = files.get("web_app/src/pages/orders/list.tsx")!;
-      const detail = files.get("web_app/src/pages/orders/detail.tsx")!;
-
-      // Skeleton loading state replaces the bare <Loader />.
-      expect(list).toMatch(/<Skeleton key=\{i\}/);
-      expect(list).not.toMatch(/<Loader \/>/);
-      expect(detail).toMatch(/data-testid="orders-detail-loading"/);
-      expect(detail).toMatch(/<Skeleton/);
-
-      // List + detail import the format helpers.
-      expect(list).toMatch(/from "\.\.\/\.\.\/lib\/format"/);
-      expect(list).toMatch(/IdValue, DateTimeValue, BoolValue, NumberValue, EmptyValue/);
-      expect(detail).toMatch(/IdValue, DateTimeValue, BoolValue, NumberValue, EmptyValue, KeyValueRow/);
-
-      // datetime cell uses DateTimeValue rather than String(...).
-      expect(list).toMatch(/<DateTimeValue iso=\{row\.placedAt\}/);
-
-      // *Id heuristic: `customerId: string` links to /customers/<id>
-      // even though the DSL declares it as a plain string.
-      expect(list).toMatch(
-        /row\.customerId \? <Anchor component=\{Link\} to=\{`\/customers\/\$\{row\.customerId\}`\}/,
-      );
-      expect(detail).toMatch(
-        /data\.customerId \? <Anchor component=\{Link\} to=\{`\/customers\/\$\{data\.customerId\}`\}/,
-      );
-
-      // "+ New" button uses IconPlus rather than ASCII "+ ".
-      expect(list).toMatch(/from "@tabler\/icons-react"/);
-      expect(list).toMatch(/leftSection=\{<IconPlus size=\{16\}/);
-
-      // Op buttons get verb-prefix icons (Add → IconPlus, Confirm → IconCheck).
-      expect(detail).toMatch(/from "@tabler\/icons-react"/);
-      expect(detail).toMatch(
-        /<Button variant="filled" leftSection=\{<IconPlus size=\{16\}[\s\S]*?orders-op-addLine/,
-      );
-      expect(detail).toMatch(
-        /<Button variant="light" leftSection=\{<IconCheck size=\{16\}[\s\S]*?orders-op-confirm/,
-      );
-
-      // Detail field rows use KeyValueRow + DateTimeValue, no <strong>.
-      expect(detail).toMatch(/<KeyValueRow label="Placed At"><span data-testid="orders-detail-placedAt"><DateTimeValue iso=\{data\.placedAt\}/);
-      expect(detail).not.toMatch(/<strong>placedAt<\/strong>/);
-
-      // Generated app declares the icons dependency.
-      const pkg = files.get("web_app/package.json")!;
-      expect(pkg).toMatch(/"@tabler\/icons-react"/);
-
-      // Format helpers shipped at src/lib/format.tsx with NumberValue.
-      const fmt = files.get("web_app/src/lib/format.tsx")!;
-      expect(fmt).toMatch(/export function NumberValue/);
-      expect(fmt).toMatch(/Intl\.NumberFormat/);
-      expect(fmt).toMatch(/export function KeyValueRow/);
-      // No legacy JSX.Element annotations (matches v22 cleanup).
-      expect(fmt).not.toMatch(/: JSX\.Element/);
-    });
-  });
-
-  describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — view formatters", () => {
-    const guard = withLegacyScaffold();
-    beforeEach(guard.before);
-    afterEach(guard.after);
-
-    it("view tables format datetime / int / decimal cells through the format helpers", async () => {
-      const model = await buildModel("examples/acme.ddd");
-      const { files } = generateSystems(model);
-      const view = files.get("web_app/src/pages/views/active_orders.tsx")!;
-      expect(view).toMatch(/<DateTimeValue iso=\{row\.placedAt\}/);
-      expect(view).toMatch(/<Skeleton/);
-      expect(view).not.toMatch(/<Loader \/>/);
-    });
-  });
 
   it("emits Playwright page-object classes per aggregate under e2e/pages/", async () => {
     const model = await buildModel("examples/acme.ddd");
@@ -546,57 +307,8 @@ describe("react generator", () => {
       expect(app).not.toMatch(/data-testid="nav-views"/);
     });
 
-    describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — detail breadcrumbs", () => {
-      const detailGuard = withLegacyScaffold();
-      beforeEach(detailGuard.before);
-      afterEach(detailGuard.after);
 
-      it("detail page uses Breadcrumbs (Home / <Plural> / id) instead of a bare back-anchor", async () => {
-        const model = await buildModel("examples/acme.ddd");
-        const { files } = generateSystems(model);
-        const detail = files.get("web_app/src/pages/orders/detail.tsx")!;
-        expect(detail).toMatch(/<Breadcrumbs data-testid="orders-detail-breadcrumbs">/);
-        expect(detail).toMatch(/<Anchor component=\{Link\} to="\/">Home<\/Anchor>/);
-        expect(detail).toMatch(/<Anchor component=\{Link\} to="\/orders">Orders<\/Anchor>/);
-        expect(detail).not.toMatch(/← back/);
-      });
-    });
 
-    describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0)", () => {
-      const guard = withLegacyScaffold();
-      beforeEach(guard.before);
-      afterEach(guard.after);
-
-      it("list page renders an explicit empty state instead of a zero-row table", async () => {
-        const model = await buildModel("examples/acme.ddd");
-        const { files } = generateSystems(model);
-        const list = files.get("web_app/src/pages/orders/list.tsx")!;
-        // Empty-state branch with a primary call-to-action.
-        expect(list).toMatch(/data-testid="orders-list-empty"/);
-        expect(list).toMatch(/q\.data && q\.data\.length === 0/);
-        expect(list).toMatch(/Create your first order/);
-        // Table only renders when there ARE rows; row hover is on.
-        expect(list).toMatch(/q\.data && q\.data\.length > 0/);
-        expect(list).toMatch(/highlightOnHover/);
-      });
-    });
-
-    describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — home summary", () => {
-      const homeGuard = withLegacyScaffold();
-      beforeEach(homeGuard.before);
-      afterEach(homeGuard.after);
-
-      it("home page lands as a summary, not a duplicate of the sidebar", async () => {
-        const model = await buildModel("examples/acme.ddd");
-        const { files } = generateSystems(model);
-        const home = files.get("web_app/src/pages/home.tsx")!;
-        expect(home).toMatch(/<SimpleGrid cols=\{\{ base: 1, sm: 2, md: 3 \}\}/);
-        expect(home).toMatch(/3 aggregates/);
-        expect(home).toMatch(/1 workflow[^s]/);
-        expect(home).toMatch(/2 views/);
-        expect(home).toMatch(/data-testid="home"/);
-      });
-    });
   });
 
   it("App.tsx wraps Routes in an error boundary and registers a 404 catch-all", async () => {
@@ -782,26 +494,6 @@ describe("react generator", () => {
       expect(api).toMatch(/api\.post\(`\/workflows\/place_order`, input\)/);
     });
 
-    describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — workflows index", () => {
-      const wfIdxGuard = withLegacyScaffold();
-      beforeEach(wfIdxGuard.before);
-      afterEach(wfIdxGuard.after);
-
-      it("emits a workflows index page listing every workflow", async () => {
-        const model = await buildModel("examples/acme.ddd");
-        const { files } = generateSystems(model);
-        const idx = files.get("web_app/src/pages/workflows/index.tsx")!;
-        expect(idx).toMatch(/data-testid="workflow-card-place_order"/);
-        expect(idx).toMatch(/<Title order=\{4\}>Place Order<\/Title>/);
-        expect(idx).toMatch(
-          /workflow-place_order-param-customerId.*<strong>Customer Id<\/strong>: \{"string"\}/,
-        );
-        expect(idx).toMatch(
-          /workflow-place_order-param-productId.*<strong>Product Id<\/strong>: \{"Id<Product>"\}/,
-        );
-        expect(idx).toMatch(/to="\/workflows\/place_order"/);
-      });
-    });
 
     it("emits a per-workflow form page with typed inputs reusing the v4 form helpers", async () => {
       const model = await buildModel("examples/acme.ddd");
@@ -857,19 +549,6 @@ describe("react generator", () => {
       );
     });
 
-    describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — home workflows summary", () => {
-      const homeWfGuard = withLegacyScaffold();
-      beforeEach(homeWfGuard.before);
-      afterEach(homeWfGuard.after);
-
-      it("home page summarises workflows when at least one exists", async () => {
-        const model = await buildModel("examples/acme.ddd");
-        const { files } = generateSystems(model);
-        const home = files.get("web_app/src/pages/home.tsx")!;
-        expect(home).toMatch(/1 workflow[^s]/);
-        expect(home).toMatch(/data-testid="home-workflows-link"/);
-      });
-    });
   });
 
   describe("slice 18.B — view list pages", () => {
@@ -894,55 +573,7 @@ describe("react generator", () => {
       expect(api).toMatch(/export function useOrderSummaryView\(\)/);
     });
 
-    describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — views index", () => {
-      const viewIdxGuard = withLegacyScaffold();
-      beforeEach(viewIdxGuard.before);
-      afterEach(viewIdxGuard.after);
 
-      it("emits a views index page listing every view", async () => {
-        const model = await buildModel("examples/acme.ddd");
-        const { files } = generateSystems(model);
-        const idx = files.get("web_app/src/pages/views/index.tsx")!;
-        expect(idx).toMatch(/data-testid="view-card-active_orders"/);
-        expect(idx).toMatch(/data-testid="view-card-order_summary"/);
-        expect(idx).toMatch(/<Title order=\{4\}>Active Orders<\/Title>/);
-        expect(idx).toMatch(/<Title order=\{4\}>Order Summary<\/Title>/);
-        expect(idx).toMatch(/Source: Order/);
-        expect(idx).toMatch(/Custom shape: orderId, status, lineCount/);
-      });
-    });
-
-    describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0)", () => {
-      const viewGuard = withLegacyScaffold();
-      beforeEach(viewGuard.before);
-      afterEach(viewGuard.after);
-
-      it("emits a per-view table page that calls the query hook", async () => {
-        const model = await buildModel("examples/acme.ddd");
-        const { files } = generateSystems(model);
-        const page = files.get("web_app/src/pages/views/order_summary.tsx")!;
-        expect(page).toMatch(/import \{ useOrderSummaryView \} from "\.\.\/\.\.\/api\/views"/);
-        expect(page).toMatch(/const q = useOrderSummaryView\(\)/);
-        expect(page).toMatch(/<Table\.Th>Order Id<\/Table\.Th>/);
-        expect(page).toMatch(/<Table\.Th>Status<\/Table\.Th>/);
-        expect(page).toMatch(/<Table\.Th>Line Count<\/Table\.Th>/);
-        expect(page).toMatch(
-          /<Anchor component=\{Link\} to=\{`\/orders\/\$\{row\.orderId\}`\}/,
-        );
-        expect(page).toMatch(/q\.data && q\.data\.length === 0 && <Text c="dimmed">No rows\.<\/Text>/);
-        expect(page).toMatch(/q\.isError && <Alert color="red"/);
-      });
-
-      it("shorthand view's table page uses the source aggregate's wire columns", async () => {
-        const model = await buildModel("examples/acme.ddd");
-        const { files } = generateSystems(model);
-        const page = files.get("web_app/src/pages/views/active_orders.tsx")!;
-        expect(page).toMatch(/<Table\.Th>Id<\/Table\.Th>/);
-        expect(page).toMatch(/<Table\.Th>Customer Id<\/Table\.Th>/);
-        expect(page).toMatch(/<Table\.Th>Status<\/Table\.Th>/);
-        expect(page).toMatch(/<Table\.Th>Placed At<\/Table\.Th>/);
-      });
-    });
 
     it("App.tsx registers /views + /views/<slug> routes and sidebar entry", async () => {
       const model = await buildModel("examples/acme.ddd");
@@ -971,19 +602,6 @@ describe("react generator", () => {
       );
     });
 
-    describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — home views summary", () => {
-      const homeViewsGuard = withLegacyScaffold();
-      beforeEach(homeViewsGuard.before);
-      afterEach(homeViewsGuard.after);
-
-      it("home page summarises views when at least one exists", async () => {
-        const model = await buildModel("examples/acme.ddd");
-        const { files } = generateSystems(model);
-        const home = files.get("web_app/src/pages/home.tsx")!;
-        expect(home).toMatch(/2 views/);
-        expect(home).toMatch(/data-testid="home-views-link"/);
-      });
-    });
   });
 
   describe("slice 18.C — DSL e2e for ui.workflows.* + ui.views.*", () => {
