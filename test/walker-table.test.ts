@@ -81,7 +81,7 @@ describe("Slice A2 — Table primitive", () => {
     // The auto-injected hook for `Sales.Order.all` becomes a local
     // `orderAll` (or similar); we just check that some hook variable
     // is being .map'd over.
-    expect(tsx).toMatch(/\.map\(\(row\) => \(/);
+    expect(tsx).toMatch(/\.map\(\(row, idx\) => \(/);
     expect(tsx).toMatch(/<Table\.Tr key=\{ row\.id \}>/);
     expect(tsx).toMatch(/<Table\.Td>\{row\.id\}<\/Table\.Td>/);
     expect(tsx).toMatch(/<Table\.Td>\{row\.customerId\}<\/Table\.Td>/);

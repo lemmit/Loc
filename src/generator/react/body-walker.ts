@@ -864,6 +864,7 @@ function emitTable(
         .join(" ");
       onRowClickJs = `{ ${stmts} }`;
     }
+    propagateChildFlags(ctx, childCtx);
   }
 
   // Slice A9 — boolean style props matching Mantine's `<Table>`
@@ -873,6 +874,15 @@ function emitTable(
   const striped = boolNamed(call, "striped");
   const highlight = boolNamed(call, "highlight");
   const sticky = boolNamed(call, "sticky");
+
+  // Slice A13 — `keyExpr:` named arg overrides the default
+  // `row.id` key.  Views with custom output (no `id` field on the
+  // row type) supply `keyExpr: "idx"` (or similar) so the
+  // `<Table.Tr key=…>` doesn't reference a non-existent field.
+  // String-literal arg only — emitted verbatim into the JSX
+  // expression.
+  const keyExprArg = stringNamed(call, "keyExpr");
+  const keyExpr = keyExprArg ?? `${rowVar}.id`;
 
   // Slice A9 — `rowTestid:` lambda computes a per-row testid.
   // The lambda's source-side param rebinds to `row` (Slice A2's
@@ -887,6 +897,7 @@ function emitTable(
       lambdaParams: extendLambdaParams(ctx, rowTestidLam.param, rowVar),
     };
     rowTestidJs = emitExpr(rowTestidLam.body, childCtx);
+    propagateChildFlags(ctx, childCtx);
   }
 
   const indent = "  ".repeat(depth + 1);
@@ -898,6 +909,7 @@ function emitTable(
   return renderPrimitive(ctx, "primitive-table", {
     rowsExpr,
     rowVar,
+    keyExpr,
     columns: cols,
     hasColumns: cols.length > 0,
     hasOnRowClick: onRowClickJs !== undefined,
@@ -973,6 +985,7 @@ function emitColumn(
         cellJsx = `{${emitExpr(body, childCtx)}}`;
       }
     }
+    propagateChildFlags(ctx, childCtx);
   }
   return {
     header: escapeJsxText(headerStr),
@@ -995,6 +1008,26 @@ function namedArgValue(
     if (argNames[i] === name) return call.args[i];
   }
   return undefined;
+}
+
+/** Slice A13 — propagate boolean / object flags written on a
+ *  child WalkContext back to the parent.  Maps + Sets share
+ *  references through the spread, but primitive flags
+ *  (`usesNavigate`, `usesRouterLink`, `usesState`, `usesChildren`)
+ *  and the `formOf` slot need explicit copy-back, otherwise an
+ *  IdLink emitted inside a `QueryView(data: rows => …)` lambda
+ *  would set `usesRouterLink: true` on the throwaway child ctx
+ *  while the page shell still sees `false` on the parent and
+ *  forgets to import `Link`. */
+function propagateChildFlags(
+  parent: WalkContext,
+  child: WalkContext,
+): void {
+  if (child.usesNavigate) parent.usesNavigate = true;
+  if (child.usesRouterLink) parent.usesRouterLink = true;
+  if (child.usesState) parent.usesState = true;
+  if (child.usesChildren) parent.usesChildren = true;
+  if (child.formOf) parent.formOf = child.formOf;
 }
 
 /** Slice A2 — extend the WalkContext.lambdaParams map with a new
@@ -1246,6 +1279,7 @@ function emitFormOfAggregate(
         .join(" ");
       onSubmitJs = `{ ${stmts} }`;
     }
+    propagateChildFlags(ctx, childCtx);
   }
   ctx.formOf = {
     kind: "aggregate",
@@ -1362,6 +1396,7 @@ function emitFormRuns(
         .join(" ");
       onSubmitJs = `{ ${stmts} }`;
     }
+    propagateChildFlags(ctx, childCtx);
   }
   ctx.formOf = {
     kind: "workflow",
@@ -1932,7 +1967,28 @@ function tryDetectApiHook(expr: ExprIR, ctx: WalkContext): ApiHookUse | null {
       return buildHookUse(inner.member, expr.member, expr.args, ctx);
     }
   }
+  // Slice A13 — Pattern C: member(ref:"Views", viewName) lifts to
+  // `useXxxView()`.  The expander synthesises this shape for
+  // view-list pages; users can also write `Views.<name>` directly
+  // in DSL for custom view-bound bodies.  The hook lives at
+  // `../api/views` (one shared file across all views).
+  if (expr.kind === "member" && expr.receiver.kind === "ref" && expr.receiver.name === "Views") {
+    return buildViewHookUse(expr.member);
+  }
   return null;
+}
+
+/** Slice A13 — `useXxxView()` hook injection.  View hooks live in
+ *  the shared `../api/views.ts` module; the local var name is
+ *  `<viewCamel>View` (e.g. `activeOrdersView`). */
+function buildViewHookUse(viewName: string): ApiHookUse {
+  const viewPascal = pascal(viewName);
+  return {
+    varName: `${camel(viewName)}View`,
+    hookName: `use${viewPascal}View`,
+    importFrom: "../api/views",
+    argsRendered: [],
+  };
 }
 
 /** Build the ApiHookUse for a detected `<aggregate>.<op>(args?)`
@@ -2426,6 +2482,7 @@ function emitQueryView(
     dataJsx = data.body
       ? walk(data.body, childCtx, depth + 2)
       : "null";
+    propagateChildFlags(ctx, childCtx);
   } else if (data) {
     dataJsx = walk(data, ctx, depth + 2);
   } else {

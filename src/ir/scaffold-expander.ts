@@ -56,6 +56,8 @@ export interface ScaffoldExpandContext {
   /** Slice A12 — workflow by name.  Powers `workflow-form`
    *  expander coverage (`Form(runs: <wf>)` field dispatch). */
   workflowsByName: ReadonlyMap<string, import("./loom-ir.js").WorkflowIR>;
+  /** Slice A13 — view by name + per-view shape lookup. */
+  viewsByName: ReadonlyMap<string, import("./loom-ir.js").ViewIR>;
 }
 
 /** Build the expander context from the system + a specific UI.
@@ -70,6 +72,7 @@ export function buildExpandContext(
     string,
     import("./loom-ir.js").WorkflowIR
   >();
+  const viewsByName = new Map<string, import("./loom-ir.js").ViewIR>();
   for (const m of sys.modules) {
     for (const ctx of m.contexts) {
       for (const agg of ctx.aggregates) {
@@ -79,9 +82,18 @@ export function buildExpandContext(
       for (const wf of ctx.workflows) {
         workflowsByName.set(wf.name, wf);
       }
+      for (const v of ctx.views) {
+        viewsByName.set(v.name, v);
+      }
     }
   }
-  return { ui, aggregatesByName, bcByAggregate, workflowsByName };
+  return {
+    ui,
+    aggregatesByName,
+    bcByAggregate,
+    workflowsByName,
+    viewsByName,
+  };
 }
 
 /** Public entry point.  Returns the expanded body `ExprIR` for an
@@ -100,10 +112,11 @@ export function expandScaffoldToExplicitBody(
       return expandAggregateDetail(origin.aggregateName, ctx);
     case "workflow-form":
       return expandWorkflowForm(origin.workflowName, ctx);
+    case "view-list":
+      return expandViewList(origin.viewName, ctx);
     // Spillover — see header comment.  Returning null here keeps
     // the page on the archetype path until a future slice provides
     // the missing primitives.
-    case "view-list":
     case "workflows-index":
     case "views-index":
     case "home":
@@ -413,6 +426,83 @@ function expandWorkflowForm(
     ],
     undefined,
     [["testid", lit(`workflow-${wfSlug}-page`)]],
+  );
+}
+
+// ---------------------------------------------------------------------------
+// View-list expansion
+// ---------------------------------------------------------------------------
+
+function expandViewList(
+  viewName: string,
+  ctx: ScaffoldExpandContext,
+): ExprIR | null {
+  const view = ctx.viewsByName.get(viewName);
+  if (!view) return null;
+  const humanView = humanize(view.name);
+  const viewSlug = snake(view.name);
+
+  // Row fields come from one of two sources:
+  //   - Custom output (full-form view): `view.output.fields`
+  //   - Shorthand:                       source aggregate's fields
+  // Either way, we project them as Column accessors using the
+  // same type-driven dispatch the list expander uses.
+  let fields: Array<{ name: string; type: import("./loom-ir.js").TypeIR }> = [];
+  if (view.output) {
+    fields = view.output.fields;
+  } else {
+    const sourceAgg = ctx.aggregatesByName.get(view.aggregateName);
+    if (sourceAgg) fields = sourceAgg.fields;
+  }
+  const cellVar = "o";
+  const cols: ExprIR[] = [];
+  for (const f of fields) {
+    const inner = f.type.kind === "optional" ? f.type.inner : f.type;
+    if (inner.kind === "valueobject" || inner.kind === "array") continue;
+    cols.push(
+      call("Column", [
+        lit(humanize(f.name)),
+        lambda(cellVar, columnAccessorFor(f.name, f.type, cellVar)),
+      ]),
+    );
+  }
+
+  return call(
+    "Stack",
+    [
+      call("Heading", [lit(humanView)], undefined, [
+        ["level", intLit(2)],
+      ]),
+      call("QueryView", [], undefined, [
+        // `Views.<name>` is the view-hook reference — walker
+        // detects this Pattern C and lifts to `useXxxView()`.
+        ["of", member(ref("Views"), view.name)],
+        ["loading", call("Skeleton", [], undefined, [["count", intLit(5)]])],
+        ["error", call("Alert", [lit(`Couldn't load ${humanView.toLowerCase()}`)])],
+        ["empty", call("Empty", [lit("No rows.")])],
+        [
+          "data",
+          lambda(
+            "rows",
+            call("Paper", [
+              call("Table", [...cols], undefined, [
+                ["rows", ref("rows")],
+                ["striped", boolLit(true)],
+                ["highlight", boolLit(true)],
+                ["sticky", boolLit(true)],
+                // Custom-output views don't have a stable `id`
+                // field on row, so key by index.  Shorthand views
+                // do have `id` (rows are aggregate responses) but
+                // index-by-key still works correctly there.
+                ["keyExpr", lit("idx")],
+              ]),
+            ]),
+          ),
+        ],
+      ]),
+    ],
+    undefined,
+    [["testid", lit(`view-${viewSlug}`)]],
   );
 }
 

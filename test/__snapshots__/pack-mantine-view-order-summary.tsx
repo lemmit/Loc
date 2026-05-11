@@ -1,61 +1,51 @@
-// Auto-generated.
+// Auto-generated.  Do not edit by hand.
 import { Link } from "react-router-dom";
-import { Stack, Title, Group, Anchor, Badge, Table, Alert, Text, Paper, Skeleton } from "@mantine/core";
-import { IconAlertCircle } from "@tabler/icons-react";
+import { IdValue } from "../../lib/format";
+import { Alert, Badge, Center, Paper, Skeleton, Stack, Table, Text, Title } from "@mantine/core";
 import { useOrderSummaryView } from "../../api/views";
-import { IdValue, DateTimeValue, BoolValue, NumberValue, EmptyValue } from "../../lib/format";
 
-export default function OrderSummaryViewPage() {
-  const q = useOrderSummaryView();
-  const count = q.data?.length ?? 0;
+export default function OrderSummaryView() {
+  const orderSummaryView = useOrderSummaryView();
   return (
-    <Stack data-testid="view-order_summary" gap="md">
-      <Group justify="space-between" align="flex-end">
-        <Stack gap={2}>
-          <Text size="sm" c="dimmed" tt="uppercase" fw={600}>View</Text>
-          <Title order={2}>Order Summary</Title>
-          <Text size="sm" c="dimmed">{q.isLoading ? "Loading…" : count === 1 ? "1 row" : count + " rows"}</Text>
-        </Stack>
-        <Anchor component={Link} to="/views">← back</Anchor>
-      </Group>
-      {q.isLoading && (
-        <Paper p="md">
+    <Stack data-testid="view-order_summary">
+      <Title order={2}>Order Summary</Title>
+      <>
+        { orderSummaryView.isLoading && (
           <Stack gap="xs">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <Skeleton key={i} height={28} radius="sm" />
-            ))}
-          </Stack>
-        </Paper>
-      )}
-      {q.isError && <Alert color="red" variant="light" icon={<IconAlertCircle size={18} />} title="Couldn't load view">{(q.error as Error).message}</Alert>}
-      {q.data && q.data.length === 0 && <Text c="dimmed">No rows.</Text>}
-      {q.data && q.data.length > 0 && (
-        <Paper p={0} style={{ overflow: "hidden" }}>
-          <Table.ScrollContainer minWidth={500}>
+    { Array.from({ length: 5 }).map((_, i) => (
+    <Skeleton key={i} height={ 28 } radius="sm" />
+    )) }
+    </Stack>
+        ) }
+        { orderSummaryView.isError && (
+          <Alert color="red" variant="light">Couldn't load order summary</Alert>
+        ) }
+        { orderSummaryView.data && orderSummaryView.data.length === 0 && (
+          <Center mih={200}><Text c="dimmed">No rows.</Text></Center>
+        ) }
+        { orderSummaryView.data && orderSummaryView.data.length > 0 && (
+          <Paper p="md">
             <Table striped highlightOnHover stickyHeader>
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th>Order Id</Table.Th>
-<Table.Th>Status</Table.Th>
-<Table.Th>Line Count</Table.Th>
+                  <Table.Th>Status</Table.Th>
+                  <Table.Th>Line Count</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {q.data.map((row, idx) => (
-                  <Table.Tr key={idx} data-testid={`view-order_summary-row-${idx}`}>
-                    <Table.Td data-testid={`view-order_summary-row-${idx}-orderId`}>{ row.orderId ? <Anchor component={Link} to={`/orders/${row.orderId}`} onClick={(e) => e.stopPropagation()}><IdValue id={row.orderId} /></Anchor> : <EmptyValue />}</Table.Td>
-
-<Table.Td data-testid={`view-order_summary-row-${idx}-status`}><Badge tt="unset" variant="light">{row.status}</Badge></Table.Td>
-
-<Table.Td data-testid={`view-order_summary-row-${idx}-lineCount`} style={{ textAlign: "right" }}><NumberValue value={row.lineCount} /></Table.Td>
-
+                { orderSummaryView.data.map((row, idx) => (
+                  <Table.Tr key={ idx }>
+                    <Table.Td><Link to={`/orders/${ row.orderId }`}><IdValue id={ row.orderId } /></Link></Table.Td>
+                    <Table.Td><Badge>{ row.status }</Badge></Table.Td>
+                    <Table.Td><Text>{row.lineCount}</Text></Table.Td>
                   </Table.Tr>
-                ))}
+                )) }
               </Table.Tbody>
             </Table>
-          </Table.ScrollContainer>
-        </Paper>
-      )}
+          </Paper>
+        ) }
+      </>
     </Stack>
   );
 }

@@ -249,13 +249,33 @@ describe("Slice C1 — scaffold expander dispatch", () => {
     expect((form.args[runsIdx] as { name: string }).name).toBe("placeOrder");
   });
 
-  it("view-list returns null (deferred)", () => {
+  it("view-list expands to Stack(Heading, QueryView(Views.<name>, …))", () => {
+    const sysWithView = makeSystem();
+    sysWithView.modules[0]!.contexts[0]!.views.push({
+      name: "ActiveOrders",
+      aggregateName: "Order",
+    } as never);
+    const ctxWithView = buildExpandContext(sysWithView, makeUi());
     const origin: ScaffoldOriginIR = {
       kind: "view-list",
       viewName: "ActiveOrders",
       contextName: "Orders",
     };
-    expect(expandScaffoldToExplicitBody(origin, ctx)).toBeNull();
+    const body = expandScaffoldToExplicitBody(origin, ctxWithView);
+    expect(body).not.toBeNull();
+    expect((body as { name: string }).name).toBe("Stack");
+    expect(findCall(body!, "Heading")).not.toBeNull();
+    expect(findCall(body!, "QueryView")).not.toBeNull();
+    expect(findCall(body!, "Table")).not.toBeNull();
+    // The QueryView's `of:` is a member access on `Views`.
+    const qv = findCall(body!, "QueryView")!;
+    if (qv.kind !== "call") return;
+    const ofIdx = (qv.argNames ?? []).indexOf("of");
+    const ofArg = qv.args[ofIdx]!;
+    expect(ofArg.kind).toBe("member");
+    if (ofArg.kind !== "member") return;
+    expect((ofArg.receiver as { name: string }).name).toBe("Views");
+    expect(ofArg.member).toBe("ActiveOrders");
   });
 
   it("workflows-index / views-index / home all return null", () => {

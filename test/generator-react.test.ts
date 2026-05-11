@@ -391,15 +391,19 @@ describe("react generator", () => {
     });
   });
 
-  it("view tables format datetime / int / decimal cells through the format helpers", async () => {
-    const model = await buildModel("examples/acme.ddd");
-    const { files } = generateSystems(model);
-    const view = files.get("web_app/src/pages/views/active_orders.tsx")!;
-    // Shorthand view of Order — placedAt (datetime) → DateTimeValue.
-    expect(view).toMatch(/<DateTimeValue iso=\{row\.placedAt\}/);
-    // Skeleton loading state.
-    expect(view).toMatch(/<Skeleton/);
-    expect(view).not.toMatch(/<Loader \/>/);
+  describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — view formatters", () => {
+    const guard = withLegacyScaffold();
+    beforeEach(guard.before);
+    afterEach(guard.after);
+
+    it("view tables format datetime / int / decimal cells through the format helpers", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const view = files.get("web_app/src/pages/views/active_orders.tsx")!;
+      expect(view).toMatch(/<DateTimeValue iso=\{row\.placedAt\}/);
+      expect(view).toMatch(/<Skeleton/);
+      expect(view).not.toMatch(/<Loader \/>/);
+    });
   });
 
   it("emits Playwright page-object classes per aggregate under e2e/pages/", async () => {
@@ -898,36 +902,36 @@ describe("react generator", () => {
       expect(idx).toMatch(/Custom shape: orderId, status, lineCount/);
     });
 
-    it("emits a per-view table page that calls the query hook", async () => {
-      const model = await buildModel("examples/acme.ddd");
-      const { files } = generateSystems(model);
-      const page = files.get("web_app/src/pages/views/order_summary.tsx")!;
-      expect(page).toMatch(/import \{ useOrderSummaryView \} from "\.\.\/\.\.\/api\/views"/);
-      expect(page).toMatch(/const q = useOrderSummaryView\(\)/);
-      // Table headers from the view's declared fields.
-      expect(page).toMatch(/<Table\.Th>Order Id<\/Table\.Th>/);
-      expect(page).toMatch(/<Table\.Th>Status<\/Table\.Th>/);
-      expect(page).toMatch(/<Table\.Th>Line Count<\/Table\.Th>/);
-      // Id<Order> cell auto-links to /orders/<id> (Order has UI in
-      // this deployable's modules).
-      expect(page).toMatch(
-        /<Anchor component=\{Link\} to=\{`\/orders\/\$\{row\.orderId\}`\}/,
-      );
-      // Empty + error states present.
-      expect(page).toMatch(/q\.data && q\.data\.length === 0 && <Text c="dimmed">No rows\.<\/Text>/);
-      expect(page).toMatch(/q\.isError && <Alert color="red"/);
-    });
+    describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0)", () => {
+      const viewGuard = withLegacyScaffold();
+      beforeEach(viewGuard.before);
+      afterEach(viewGuard.after);
 
-    it("shorthand view's table page uses the source aggregate's wire columns", async () => {
-      const model = await buildModel("examples/acme.ddd");
-      const { files } = generateSystems(model);
-      const page = files.get("web_app/src/pages/views/active_orders.tsx")!;
-      // ActiveOrders is shorthand `view ActiveOrders = Order where ...`
-      // — table columns mirror Order's primitive/id/enum fields.
-      expect(page).toMatch(/<Table\.Th>Id<\/Table\.Th>/);
-      expect(page).toMatch(/<Table\.Th>Customer Id<\/Table\.Th>/);
-      expect(page).toMatch(/<Table\.Th>Status<\/Table\.Th>/);
-      expect(page).toMatch(/<Table\.Th>Placed At<\/Table\.Th>/);
+      it("emits a per-view table page that calls the query hook", async () => {
+        const model = await buildModel("examples/acme.ddd");
+        const { files } = generateSystems(model);
+        const page = files.get("web_app/src/pages/views/order_summary.tsx")!;
+        expect(page).toMatch(/import \{ useOrderSummaryView \} from "\.\.\/\.\.\/api\/views"/);
+        expect(page).toMatch(/const q = useOrderSummaryView\(\)/);
+        expect(page).toMatch(/<Table\.Th>Order Id<\/Table\.Th>/);
+        expect(page).toMatch(/<Table\.Th>Status<\/Table\.Th>/);
+        expect(page).toMatch(/<Table\.Th>Line Count<\/Table\.Th>/);
+        expect(page).toMatch(
+          /<Anchor component=\{Link\} to=\{`\/orders\/\$\{row\.orderId\}`\}/,
+        );
+        expect(page).toMatch(/q\.data && q\.data\.length === 0 && <Text c="dimmed">No rows\.<\/Text>/);
+        expect(page).toMatch(/q\.isError && <Alert color="red"/);
+      });
+
+      it("shorthand view's table page uses the source aggregate's wire columns", async () => {
+        const model = await buildModel("examples/acme.ddd");
+        const { files } = generateSystems(model);
+        const page = files.get("web_app/src/pages/views/active_orders.tsx")!;
+        expect(page).toMatch(/<Table\.Th>Id<\/Table\.Th>/);
+        expect(page).toMatch(/<Table\.Th>Customer Id<\/Table\.Th>/);
+        expect(page).toMatch(/<Table\.Th>Status<\/Table\.Th>/);
+        expect(page).toMatch(/<Table\.Th>Placed At<\/Table\.Th>/);
+      });
     });
 
     it("App.tsx registers /views + /views/<slug> routes and sidebar entry", async () => {

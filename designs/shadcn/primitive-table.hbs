@@ -5,8 +5,8 @@
 {{/each}}{{headIndent}}</TableRow>
 {{indent}}</TableHeader>
 {{indent}}<TableBody>
-{{headIndent}}{ {{{rowsExpr}}}.map(({{rowVar}}) => (
-{{rowIndent}}<TableRow key={ {{rowVar}}.id }{{#if hasRowTestid}} data-testid={ {{{rowTestid}}} }{{/if}}{{#if hasOnRowClick}} onClick={() => {{{onRowClick}}} }{{/if}}>
+{{headIndent}}{ {{{rowsExpr}}}.map(({{rowVar}}, idx) => (
+{{rowIndent}}<TableRow key={ {{{keyExpr}}} }{{#if hasRowTestid}} data-testid={ {{{rowTestid}}} }{{/if}}{{#if hasOnRowClick}} onClick={() => {{{onRowClick}}} }{{/if}}>
 {{#each columns}}{{../cellIndent}}<TableCell>{{{this.cellJsx}}}</TableCell>
 {{/each}}{{rowIndent}}</TableRow>
 {{headIndent}})) }
