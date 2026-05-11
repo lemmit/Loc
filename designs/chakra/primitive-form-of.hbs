@@ -2,7 +2,7 @@
 {{indent}}<VStack gap={4}>
 {{#each fieldHtmls}}{{../innerIndent}}{{{this}}}
 {{/each}}{{innerIndent}}<HStack justifyContent="flex-end" mt={1}>
-{{deepIndent}}<Button type="submit" colorScheme="brand" isLoading={create.isPending} data-testid="{{submitTestid}}">Create</Button>
+{{deepIndent}}<Button type="submit" colorScheme="brand" isLoading={ {{submitPendingExpr}} } data-testid="{{submitTestid}}">{{submitLabel}}</Button>
 {{innerIndent}}</HStack>
 {{indent}}</VStack>
 {{closeIndent}}</form>

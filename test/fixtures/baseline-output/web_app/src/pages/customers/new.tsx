@@ -3,7 +3,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CreateCustomerRequest, useCreateCustomer } from "../../api/customer";
-import { notifications } from "@mantine/notifications";
+import { notifySuccess, notifyError } from "../../lib/format";
 import { Anchor, Breadcrumbs, Button, Card, Group, NumberInput, Stack, Text, TextInput, Title } from "@mantine/core";
 
 export default function CustomerNew() {
@@ -25,10 +25,10 @@ export default function CustomerNew() {
         <form onSubmit={handleSubmit(async (vals) => {
                   try {
                     const out = await create.mutateAsync(vals);
-                    notifications.show({ color: "green", message: "Customer created" });
+                    notifySuccess("Customer created");
                     navigate(`/customers/${out.id}`);
                   } catch (e) {
-                    notifications.show({ color: "red", message: (e as Error).message });
+                    notifyError((e as Error).message);
                   }
                 })} data-testid="customers-new">
           <Stack gap="md">

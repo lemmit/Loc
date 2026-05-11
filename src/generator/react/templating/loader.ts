@@ -101,10 +101,15 @@ export interface PackManifest {
   imports?: Record<string, ImportSpec[]>;
 }
 
-/** A single named-import declaration: `import { ...named } from "<from>"`. */
+/** A single named-import declaration: `import { ...named } from "<from>"`.
+ *  Each `named` entry is either a bare symbol (`"Link"` → `import { Link }`)
+ *  or an aliased pair (`{ name: "Link", as: "MuiLink" }` →
+ *  `import { Link as MuiLink }`).  Aliasing lets packs disambiguate
+ *  components whose names collide with another import the walker adds
+ *  (e.g. MUI/Chakra `Link` colliding with react-router-dom `Link`). */
 export interface ImportSpec {
   from: string;
-  named: string[];
+  named: ReadonlyArray<string | { readonly name: string; readonly as: string }>;
 }
 
 /** Compiled, ready-to-render template plus the source path it came

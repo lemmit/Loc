@@ -95,14 +95,21 @@ function addImport(ctx: WalkContext, from: string, ...names: string[]): void {
  *  merge every declared `{ from, named }` spec into the walker's
  *  per-source import map.  When the pack has no entry for the template
  *  the call is a no-op — the template is expected to emit only
- *  import-free JSX (e.g. plain `<div>` wrappers). */
+ *  import-free JSX (e.g. plain `<div>` wrappers).  Each `named` entry
+ *  is either a bare symbol or `{ name, as }`; the latter renders as
+ *  `name as alias` in the emitted import line. */
 function addImportsForTemplate(
   ctx: WalkContext,
   pack: LoadedPack,
   templateName: string,
 ): void {
   const specs: ImportSpec[] = pack.manifest.imports?.[templateName] ?? [];
-  for (const spec of specs) addImport(ctx, spec.from, ...spec.named);
+  for (const spec of specs) {
+    const names = spec.named.map((n) =>
+      typeof n === "string" ? n : `${n.name} as ${n.as}`,
+    );
+    addImport(ctx, spec.from, ...names);
+  }
 }
 
 /** Collect every unique `field-input-*` template name used by a list
@@ -132,7 +139,12 @@ function renderPrimitive(
   templateCtx: unknown,
 ): string {
   const specs: ImportSpec[] = ctx.pack.manifest.imports?.[name] ?? [];
-  for (const spec of specs) addImport(ctx, spec.from, ...spec.named);
+  for (const spec of specs) {
+    const names = spec.named.map((n) =>
+      typeof n === "string" ? n : `${n.name} as ${n.as}`,
+    );
+    addImport(ctx, spec.from, ...names);
+  }
   return ctx.pack.render(name, templateCtx);
 }
 
@@ -1635,10 +1647,21 @@ function emitAnchor(
   // Anchor("label", to: "/path") — text-style link.  With `to:`,
   // routes via React Router's Link; without, falls through to a
   // bare anchor (no href — visible no-op).
+  //
+  // If the pack declares a pack-specific Link alias for primitive-anchor
+  // (e.g. MUI's `Link as MuiLink`, Chakra's `Link as ChakraLink`), the
+  // template renders a native href link — no react-router Link needed.
+  // Only set usesRouterLink for packs whose anchor template uses <Link to>.
   void depth;
   const label = firstPositionalContent(call, ctx) ?? '"link"';
   const to = stringOrRefArgValue(call, "to", ctx);
-  if (to) ctx.usesRouterLink = true;
+  if (to) {
+    const anchorSpecs = ctx.pack.manifest.imports?.["primitive-anchor"] ?? [];
+    const hasPackLink = anchorSpecs.some((spec) =>
+      spec.named.some((n) => typeof n === "object" && "as" in n),
+    );
+    if (!hasPackLink) ctx.usesRouterLink = true;
+  }
   return renderPrimitive(ctx, "primitive-anchor", {
     label: unwrapTextLiteral(label),
     to,

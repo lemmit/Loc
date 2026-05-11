@@ -4,7 +4,7 @@ import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { PlaceOrderRequest, usePlaceOrderWorkflow } from "../../api/workflows";
 import { useAllProducts } from "../../api/product";
-import { notifications } from "@mantine/notifications";
+import { notifySuccess, notifyError } from "../../lib/format";
 import { Anchor, Breadcrumbs, Button, Card, Group, NumberInput, Select, Stack, Text, TextInput, Title } from "@mantine/core";
 
 export default function PlaceOrderWorkflow() {
@@ -27,10 +27,10 @@ export default function PlaceOrderWorkflow() {
         <form onSubmit={handleSubmit(async (vals) => {
                   try {
                     await run.mutateAsync(vals);
-                    notifications.show({ color: "green", message: "Place Order completed" });
+                    notifySuccess("Place Order completed");
                     navigate("/workflows");
                   } catch (e) {
-                    notifications.show({ color: "red", message: (e as Error).message });
+                    notifyError((e as Error).message);
                   }
                 })} data-testid="workflow-place_order">
           <Stack gap="md">

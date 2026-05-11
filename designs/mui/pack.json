@@ -144,7 +144,7 @@
     "primitive-number-field":   [{ "from": "@mui/material", "named": ["TextField"] }],
     "primitive-password-field": [{ "from": "@mui/material", "named": ["TextField"] }],
     "primitive-loader":         [{ "from": "@mui/material", "named": ["CircularProgress"] }],
-    "primitive-anchor":         [{ "from": "@mui/material", "named": ["Link"] }],
+    "primitive-anchor":         [{ "from": "@mui/material", "named": [{ "name": "Link", "as": "MuiLink" }] }],
     "primitive-image":          [],
     "primitive-avatar":         [{ "from": "@mui/material", "named": ["Avatar"] }],
     "primitive-tabs":           [{ "from": "@mui/material", "named": ["Tabs", "Tab", "Box"] }],

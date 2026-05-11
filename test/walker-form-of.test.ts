@@ -154,13 +154,11 @@ describe("Slice A4 — Form(of: <Aggregate>) auto-dispatch", () => {
     const files = await buildAndGenerate(baseOrderSystem(`Form(of: Order)`));
     const tsx = files.get("web/src/pages/create_order.tsx")!;
     expect(tsx).toMatch(/await create\.mutateAsync\(vals\)/);
-    expect(tsx).toMatch(
-      /notifications\.show\(\{ color: "green", message: "Order created" \}\)/,
-    );
+    expect(tsx).toMatch(/notifySuccess\("Order created"\)/);
     expect(tsx).toMatch(/navigate\(`\/orders\/\$\{out\.id\}`\)/);
-    // Default flow needs the notifications import too.
+    // Default flow needs the pack-agnostic notify helpers imported.
     expect(tsx).toMatch(
-      /import \{ notifications \} from "@mantine\/notifications"/,
+      /import \{[^}]*notifySuccess[^}]*\} from ["'].*\/lib\/format["']/,
     );
   });
 
@@ -171,7 +169,7 @@ describe("Slice A4 — Form(of: <Aggregate>) auto-dispatch", () => {
     const tsx = files.get("web/src/pages/create_order.tsx")!;
     expect(tsx).toBeDefined();
     expect(tsx).toMatch(/handleSubmit\(async \(vals\) => create\.mutateAsync\(vals\)\)/);
-    expect(tsx).not.toMatch(/notifications\.show/);
+    expect(tsx).not.toMatch(/notifySuccess|notifyError/);
     expect(tsx).not.toMatch(/import \{ notifications \}/);
   });
 

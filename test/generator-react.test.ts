@@ -96,7 +96,8 @@ describe("react generator", () => {
     expect(newOrder).toMatch(/from "react-hook-form"/);
     expect(newOrder).toMatch(/from "@hookform\/resolvers\/zod"/);
     expect(newOrder).toMatch(/zodResolver\(CreateOrderRequest\)/);
-    expect(newOrder).toMatch(/notifications\.show/);
+    expect(newOrder).toMatch(/notifySuccess\(/);
+    expect(newOrder).toMatch(/notifyError\(/);
     expect(newOrder).toMatch(/useCreateOrder/);
     // Phase 1: no @mantine/form / mantine-form-zod-resolver, no `as never` cast.
     expect(newOrder).not.toMatch(/@mantine\/form/);
@@ -516,7 +517,7 @@ describe("react generator", () => {
       );
       // Submit button + success/error toast.
       expect(page).toMatch(/data-testid="workflow-place_order-submit"/);
-      expect(page).toMatch(/notifications\.show\(\{ color: "green", message: "Place Order completed" \}\)/);
+      expect(page).toMatch(/notifySuccess\("Place Order completed"\)/);
       // After success navigate back to the index.
       expect(page).toMatch(/navigate\("\/workflows"\)/);
     });

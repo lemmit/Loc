@@ -3,7 +3,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CreateOrderRequest, useCreateOrder } from "../../api/order";
-import { notifications } from "@mantine/notifications";
+import { notifySuccess, notifyError } from "../../lib/format";
 import { Anchor, Breadcrumbs, Button, Card, Group, Select, Stack, Text, TextInput, Title } from "@mantine/core";
 
 export default function OrderNew() {
@@ -25,10 +25,10 @@ export default function OrderNew() {
         <form onSubmit={handleSubmit(async (vals) => {
                   try {
                     const out = await create.mutateAsync(vals);
-                    notifications.show({ color: "green", message: "Order created" });
+                    notifySuccess("Order created");
                     navigate(`/orders/${out.id}`);
                   } catch (e) {
-                    notifications.show({ color: "red", message: (e as Error).message });
+                    notifyError((e as Error).message);
                   }
                 })} data-testid="orders-new">
           <Stack gap="md">

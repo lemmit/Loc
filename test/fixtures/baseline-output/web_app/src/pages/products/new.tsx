@@ -3,7 +3,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CreateProductRequest, useCreateProduct } from "../../api/product";
-import { notifications } from "@mantine/notifications";
+import { notifySuccess, notifyError } from "../../lib/format";
 import { Anchor, Breadcrumbs, Button, Card, Fieldset, Group, NumberInput, Stack, Text, TextInput, Title } from "@mantine/core";
 
 export default function ProductNew() {
@@ -25,10 +25,10 @@ export default function ProductNew() {
         <form onSubmit={handleSubmit(async (vals) => {
                   try {
                     const out = await create.mutateAsync(vals);
-                    notifications.show({ color: "green", message: "Product created" });
+                    notifySuccess("Product created");
                     navigate(`/products/${out.id}`);
                   } catch (e) {
-                    notifications.show({ color: "red", message: (e as Error).message });
+                    notifyError((e as Error).message);
                   }
                 })} data-testid="products-new">
           <Stack gap="md">

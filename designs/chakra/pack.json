@@ -128,7 +128,7 @@
     "primitive-number-field":   [{ "from": "@chakra-ui/react", "named": ["NumberInput", "NumberInputField", "FormLabel", "FormControl"] }],
     "primitive-password-field": [{ "from": "@chakra-ui/react", "named": ["Input", "FormLabel", "FormControl"] }],
     "primitive-loader":         [{ "from": "@chakra-ui/react", "named": ["Spinner"] }],
-    "primitive-anchor":         [{ "from": "@chakra-ui/react", "named": ["Link"] }],
+    "primitive-anchor":         [{ "from": "@chakra-ui/react", "named": [{ "name": "Link", "as": "ChakraLink" }] }],
     "primitive-image":          [],
     "primitive-avatar":         [{ "from": "@chakra-ui/react", "named": ["Avatar"] }],
     "primitive-tabs":           [{ "from": "@chakra-ui/react", "named": ["Tabs", "TabList", "Tab", "TabPanels", "TabPanel"] }],
