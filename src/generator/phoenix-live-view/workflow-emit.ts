@@ -83,7 +83,7 @@ function renderWorkflow(
   // Emit event broadcasts that are collected separately (stmt-level emits
   // are woven into the with-chain by renderWorkflowBody).
   const body = wf.transactional
-    ? renderTransactionalBody(bodyLines, appModule, wf)
+    ? renderTransactionalBody(bodyLines, appModule, wf, contextModule)
     : renderSequentialBody(bodyLines);
 
   return `# Auto-generated.
@@ -92,7 +92,12 @@ defmodule ${moduleName} do
 
   alias ${contextModule}
 
-  def run(${paramPattern}) do
+  # E5 — currentUser threading.  Controllers pass
+  # \`conn.assigns.current_user\` as the second positional arg; LiveView
+  # callers pass \`socket.assigns.current_user\`.  Workflows that don't
+  # reference currentUser ignore the param (default = nil).
+  def run(${paramPattern}, current_user \\\\ nil) do
+    _ = current_user
 ${body}
   end
 ${validateArgsSection}end
@@ -302,9 +307,21 @@ function renderWorkflowStmt(
 
 // ---------------------------------------------------------------------------
 // Transactional wrapper — Ash.transaction/2
+//
+// Ash 3.x signature: Ash.transaction(domain_or_resources, fn -> ... end, opts)
+//
+//   Ash.transaction([MyApp.Sales], fn -> ... end)
+//   Ash.transaction([MyApp.Sales.Order, MyApp.Catalog.Product], fn -> ... end)
+//
+// The second argument is a **domain module** (or list of resources / domains)
+// — NOT an Ecto Repo.  Passing the context's domain module is correct for the
+// single-context case that the workflow emitter targets.  When a workflow
+// touches resources from multiple domains, callers should pass a list; that
+// scenario is not representable in the current IR, so passing the domain alone
+// is the safe default.
 // ---------------------------------------------------------------------------
 
-function renderTransactionalBody(lines: WorkflowBodyLine[], appModule: string, wf: WorkflowIR): string {
+function renderTransactionalBody(lines: WorkflowBodyLine[], _appModule: string, wf: WorkflowIR, contextModule: string): string {
   // Separate preconditions (run before transaction) from the body
   const preconds = lines.filter((l) => l.kind === "precondition" || l.kind === "requires");
   const body = lines.filter((l) => l.kind !== "precondition" && l.kind !== "requires");
@@ -333,18 +350,19 @@ function renderTransactionalBody(lines: WorkflowBodyLine[], appModule: string, w
     ? "\n" + emitLines.map((l) => "    " + l.text.trimStart()).join("\n")
     : "";
 
-  // isolation level
-  let isolationOpt = "";
-  if (wf.isolation) {
-    const level = elixirIsolationLevel(wf.isolation);
-    isolationOpt = `, isolation_level: :${level}`;
-  }
+  // isolation_level is an opts keyword in Ash 3.x (third positional arg).
+  const isolationOptLine = wf.isolation
+    ? `,\n      isolation_level: :${elixirIsolationLevel(wf.isolation)}`
+    : "";
 
+  // Ash 3.x: first arg is the domain (or list of domains/resources).
+  // The context module IS the Ash.Domain — wrapping it in a list satisfies
+  // both the single-domain and multi-domain overloads.
   return `${precondLines ? precondLines + "\n" : ""}    result = Ash.transaction(
+      [${contextModule}],
       fn ->
 ${txBody}
-      end,
-      ${appModule}.Repo${isolationOpt}
+      end${isolationOptLine}
     )
 ${emitSection}
     result`;

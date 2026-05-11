@@ -1,0 +1,140 @@
+name: Phoenix LiveView build verification
+
+# Generates a Phoenix project from examples/acme.ddd retargeted onto
+# the phoenixLiveView platform, then runs `mix deps.get && mix compile`
+# inside an Elixir/Erlang container.  Catches Ash 3.x API drift,
+# OpenApiSpex schema mismatches, and any other emission bug that
+# only surfaces when the generated source actually compiles.
+#
+# Triggers:
+#   - PRs that touch the Phoenix generator, the ashPhoenix design pack,
+#     or the parity follow-ups plan.
+#   - Pushes to main (full regression check).
+#   - Manual dispatch.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/generator/phoenix-live-view/**'
+      - 'src/platform/phoenix-live-view.ts'
+      - 'designs/ashPhoenix/**'
+      - 'examples/**'
+      - 'package.json'
+      - '.github/workflows/phoenix-build.yml'
+  pull_request:
+    paths:
+      - 'src/generator/phoenix-live-view/**'
+      - 'src/platform/phoenix-live-view.ts'
+      - 'designs/ashPhoenix/**'
+      - 'examples/**'
+      - 'package.json'
+      - '.github/workflows/phoenix-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-generated-phoenix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # Build the Loom toolchain.  `prepare` lifecycle runs
+      # `langium:generate` which populates src/language/generated/.
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Type-check
+        run: npm run build
+
+      - name: Unit tests
+        run: npx vitest run --reporter=verbose
+
+      # Generate a fixture Phoenix project from examples/acme.ddd.
+      # The example today targets dotnet + hono + react; we synthesise
+      # a sibling .ddd that adds a phoenixLiveView deployable serving
+      # the same modules + UI.
+      - name: Generate fixture .ddd with phoenixLiveView deployable
+        run: |
+          mkdir -p /tmp/ci
+          cat > /tmp/ci/acme-lv.ddd <<'EOF'
+          system AcmeLV {
+            module Sales {
+              context Sales {
+                aggregate Customer {
+                  name: string display
+                  email: string
+                  invariant email.length > 0
+                }
+                repository Customers for Customer { }
+              }
+            }
+            api SalesApi from Sales
+            ui SalesAdmin { scaffold modules: Sales }
+            deployable phoenixApp {
+              platform: phoenixLiveView
+              modules: Sales
+              serves: SalesApi
+              ui: SalesAdmin
+              port: 4000
+            }
+          }
+          EOF
+
+      - name: Generate Phoenix project
+        run: |
+          ./bin/cli.js generate system /tmp/ci/acme-lv.ddd -o /tmp/ci/out
+          ls /tmp/ci/out/phoenix_app
+
+      # Per-file syntax check — works without `mix deps.get`.  Catches
+      # any emission that produces malformed Elixir even when the deps
+      # can't be fetched.
+      - name: Elixir syntax check
+        uses: docker://hexpm/elixir:1.17.2-erlang-27.0.1-debian-bookworm-20240722-slim
+        with:
+          entrypoint: bash
+          args: |
+            -c '
+              cd /github/workspace/tmp/ci/out/phoenix_app || cd /tmp/ci/out/phoenix_app
+              fail=0
+              for f in $(find lib config priv -name "*.ex" -o -name "*.exs"); do
+                out=$(elixir -e "Code.string_to_quoted!(File.read!(\"$f\"))" 2>&1)
+                if [ -n "$out" ]; then
+                  echo "::error file=$f::$out"
+                  fail=1
+                fi
+              done
+              if [ "$fail" -eq 0 ]; then
+                echo "All Elixir files parse cleanly ($(find lib config priv -name "*.ex" -o -name "*.exs" | wc -l) files)."
+              fi
+              exit $fail
+            '
+
+      # Full mix compile against the real Ash 3.x dep set.  This is
+      # the gold-standard check — verifies that the orchestrator's
+      # output is semantically valid (right Ash.transaction signature,
+      # right code_interface form, right OpenApiSpex shapes, etc.).
+      # On the GitHub runner, repo.hex.pm is reachable directly so
+      # the egress-proxy block I hit in the sandbox doesn't apply.
+      - name: mix deps.get && mix compile
+        run: |
+          docker run --rm \
+            -v /tmp/ci/out/phoenix_app:/app \
+            -w /app \
+            -e MIX_ENV=prod \
+            hexpm/elixir:1.17.2-erlang-27.0.1-debian-bookworm-20240722-slim \
+            bash -c '
+              set -e
+              mix local.hex --force
+              mix local.rebar --force
+              mix deps.get --only prod
+              mix compile --warnings-as-errors
+            '

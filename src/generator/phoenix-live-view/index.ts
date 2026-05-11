@@ -16,6 +16,7 @@ import { renderAshType, renderExpr } from "./render-expr.js";
 import { emitLiveViewPages, type LiveRoute } from "./liveview-emit.js";
 import { emitApiControllers, type ApiRoute } from "./api-emit.js";
 import { emitOpenApiSpec } from "./openapi-emit.js";
+import { emitAuth } from "./auth-emit.js";
 import { renderSidebarComponent } from "./sidebar-emit.js";
 import { renderThemeCss } from "./theme-emit.js";
 import { emitAggregateResources } from "./domain-emit.js";
@@ -118,6 +119,16 @@ export function generatePhoenixLiveViewProject(
   for (const [path, content] of openApiFiles) out.set(path, content);
   const apiRoutes = [...baseApiRoutes, ...openApiRoutes];
 
+  // --- Auth modules (Batch E4) ----------------------------------------------
+  // Emits Auth plug + LiveAuth on_mount when deployable.auth?.required.
+  const { files: authFiles, enabled: authEnabled } = emitAuth({
+    sys,
+    deployable,
+    appName,
+    appModule,
+  });
+  for (const [path, content] of authFiles) out.set(path, content);
+
   // --- Sidebar component (Batch C) -----------------------------------------
   // Emitted when the deployable mounts a `ui:` — derived from
   // MenuBlockIR or per-page menuMeta, identical structure to the
@@ -139,7 +150,7 @@ export function generatePhoenixLiveViewProject(
   out.set(`priv/static/assets/theme.css`, renderThemeCss(sys.theme));
 
   // --- Shell files ----------------------------------------------------------
-  emitShellFiles(appName, appModule, deployable, sys, liveRoutes, apiRoutes, out);
+  emitShellFiles(appName, appModule, deployable, sys, liveRoutes, apiRoutes, authEnabled, out);
 
   return out;
 }
@@ -418,32 +429,44 @@ function renderDomainModule(
   contextModule: string,
   resources: string[],
 ): string {
-  const resourceLines = resources
-    .map((r) => `    resource ${r}`)
-    .join("\n");
-
-  // Code interface entries for each aggregate
-  const codeInterfaceEntries: string[] = [];
+  // E2 — Ash 3.x: `define` calls live INSIDE the `resource ... do`
+  // block, NOT in a separate top-level `code_interface do` block
+  // (that was Ash 2.x; removed in 3.0).
+  const resourceBlocks: string[] = [];
+  const partResources = new Set<string>();
   for (const agg of ctx.aggregates) {
-    const aggModule = `${contextModule}.${pascal(agg.name)}`;
-    // Standard CRUD code interface
-    codeInterfaceEntries.push(
-      `    define_for ${aggModule}`,
-      `    define :create_${snake(agg.name)}, action: :create`,
-      `    define :read_${snake(agg.name)}, action: :read`,
-      `    define :get_${snake(agg.name)}, action: :read, get_by: :id`,
-      `    define :update_${snake(agg.name)}, action: :update`,
-      `    define :destroy_${snake(agg.name)}, action: :destroy`,
-    );
-    // Custom find actions from the repository
-    const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
+    for (const part of agg.parts) {
+      partResources.add(`${contextModule}.${pascal(part.name)}`);
+    }
+  }
+  for (const r of resources) {
+    const aggName = r.split(".").pop()!;
+    // Locate the IR aggregate to enumerate its custom finds.
+    const agg = ctx.aggregates.find((a) => pascal(a.name) === aggName);
+    if (!agg) {
+      // Entity-part resource (child table) — registered with no
+      // code-interface defines; Ash 3.x's `resource X` shorthand.
+      resourceBlocks.push(`    resource ${r}`);
+      continue;
+    }
+    const defines: string[] = [
+      `      define :create_${snake(agg.name)}, action: :create`,
+      `      define :list_${snake(plural(agg.name))}, action: :read`,
+      `      define :get_${snake(agg.name)}, action: :read, get_by: [:id]`,
+      `      define :update_${snake(agg.name)}, action: :update, args: [:id]`,
+      `      define :destroy_${snake(agg.name)}, action: :destroy, args: [:id]`,
+    ];
+    const repo = ctx.repositories.find((rr) => rr.aggregateName === agg.name);
     if (repo) {
       for (const find of repo.finds) {
-        codeInterfaceEntries.push(
-          `    define :${snake(find.name)}_${snake(agg.name)}, action: :${snake(find.name)}`,
+        const argsList = find.params.map((p) => `:${snake(p.name)}`).join(", ");
+        const argsClause = argsList ? `, args: [${argsList}]` : "";
+        defines.push(
+          `      define :${snake(find.name)}_${snake(agg.name)}, action: :${snake(find.name)}${argsClause}`,
         );
       }
     }
+    resourceBlocks.push(`    resource ${r} do\n${defines.join("\n")}\n    end`);
   }
 
   return `# Auto-generated.
@@ -451,11 +474,7 @@ defmodule ${contextModule} do
   use Ash.Domain
 
   resources do
-${resourceLines}
-  end
-
-  code_interface do
-${codeInterfaceEntries.join("\n")}
+${resourceBlocks.join("\n")}
   end
 end
 `;
@@ -484,6 +503,7 @@ function emitShellFiles(
   _sys: SystemIR,
   liveRoutes: LiveRoute[],
   apiRoutes: ApiRoute[],
+  authEnabled: boolean,
   out: Map<string, string>,
 ): void {
   const port = deployable.port ?? 4000;
@@ -512,7 +532,7 @@ function emitShellFiles(
   // lib/<app>_web/router.ex
   out.set(
     `lib/${appName}_web/router.ex`,
-    renderRouter(appName, appModule, liveRoutes, apiRoutes),
+    renderRouter(appName, appModule, liveRoutes, apiRoutes, authEnabled),
   );
 
   // lib/<app>_web/components/layouts.ex
@@ -825,9 +845,11 @@ function renderRouter(
   appModule: string,
   liveRoutes: LiveRoute[],
   apiRoutes: ApiRoute[],
+  authEnabled: boolean,
 ): string {
   void appName;
   const webModule = `${appModule}Web`;
+
   // LiveView page entries — strip the leading `<webModule>.` because
   // they're inside a `scope "/", <webModule>` block.
   const liveLines = liveRoutes
@@ -835,10 +857,24 @@ function renderRouter(
       const local = r.liveModule.startsWith(`${webModule}.`)
         ? r.liveModule.slice(webModule.length + 1)
         : r.liveModule;
-      return `    live ${JSON.stringify(r.route)}, ${local}`;
+      return `      live ${JSON.stringify(r.route)}, ${local}`;
     })
     .join("\n");
-  const liveBody = liveLines || `    # No pages declared in this deployable's ui: block.`;
+
+  // When auth is enabled, wrap live routes in a live_session with on_mount.
+  let liveScopeBody: string;
+  if (authEnabled) {
+    const inner = liveLines || `      # No pages declared in this deployable's ui: block.`;
+    liveScopeBody = `
+    live_session :default, on_mount: [${webModule}.LiveAuth] do
+${inner}
+    end`;
+  } else {
+    const flatLines = liveLines
+      ? liveLines.replace(/^      /gm, "    ")
+      : `    # No pages declared in this deployable's ui: block.`;
+    liveScopeBody = `\n${flatLines}`;
+  }
 
   // API routes — Batch A's emitApiControllers returns:
   //   - paths prefixed with `!root:` → outside `/api` scope (health / ready)
@@ -859,6 +895,9 @@ function renderRouter(
     })
     .join("\n");
 
+  // Auth plug line in the :api pipeline — only when auth is enabled.
+  const authApiPlug = authEnabled ? `\n    plug ${webModule}.Auth` : "";
+
   return `# Auto-generated.
 defmodule ${webModule}.Router do
   use ${webModule}, :router
@@ -873,13 +912,12 @@ defmodule ${webModule}.Router do
   end
 
   pipeline :api do
-    plug :accepts, ["json"]
+    plug :accepts, ["json"]${authApiPlug}
   end
 
   scope "/", ${webModule} do
     pipe_through :browser
-
-${liveBody}
+${liveScopeBody}
   end
 
   scope "/api", ${webModule} do

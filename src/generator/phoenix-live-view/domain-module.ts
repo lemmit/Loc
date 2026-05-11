@@ -9,6 +9,22 @@ import { snake, pascal } from "../../util/naming.js";
 //
 // The domain module declares all resources in the context so Ash can
 // resolve cross-resource relationships and code-interface dispatching.
+//
+// Ash 3.x code_interface shape:
+//
+//   resources do
+//     resource MyApp.Sales.Customer do
+//       define :create_customer, action: :create
+//       define :get_customer,    action: :read, get_by: [:id]
+//       define :list_customers,  action: :read
+//       define :update_customer, action: :update
+//       define :destroy_customer, action: :destroy
+//     end
+//   end
+//
+// `define` MUST live inside the `resource ... do` block — NOT in a
+// separate top-level `code_interface do` block (that was the Ash 2.x
+// pattern; Ash 3.0 removed it).
 // ---------------------------------------------------------------------------
 
 export function emitDomainModule(
@@ -45,26 +61,76 @@ function renderDomainModule(
   ctx: BoundedContextIR,
   ctxModule: string,
 ): string {
-  // Collect all resource module names: aggregates + their entity parts +
-  // value objects.
-  const resourceLines: string[] = [];
+  // Build `resource <Module> do ... end` blocks for each aggregate (and its
+  // entity parts) plus value objects.  Each block nests the Ash 3.x
+  // `define` entries that expose code-interface functions on the domain.
+  const resourceBlocks: string[] = [];
 
   for (const agg of ctx.aggregates) {
-    resourceLines.push(`    resource ${ctxModule}.${pascal(agg.name)}`);
+    const aggSnake = snake(agg.name);
+    const aggModule = `${ctxModule}.${pascal(agg.name)}`;
+
+    // Standard CRUD defines.  `get_by: [:id]` makes the read action a
+    // singular get that raises `Ash.Error.Query.NotFound` when missing
+    // (and generates a `!`-bang variant automatically).
+    const defines: string[] = [
+      `      define :create_${aggSnake}, action: :create`,
+      `      define :get_${aggSnake},    action: :read, get_by: [:id]`,
+      `      define :list_${aggSnake}s,  action: :read`,
+      `      define :update_${aggSnake}, action: :update`,
+      `      define :destroy_${aggSnake}, action: :destroy`,
+    ];
+
+    // Custom find actions from the repository.
+    const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
+    if (repo) {
+      for (const find of repo.finds) {
+        // Multi-param finds pass all params as positional args.
+        if (find.params.length > 0) {
+          const argList = find.params.map((p) => `:${snake(p.name)}`).join(", ");
+          defines.push(
+            `      define :${snake(find.name)}, action: :${snake(find.name)}, args: [${argList}]`,
+          );
+        } else {
+          defines.push(
+            `      define :${snake(find.name)}, action: :${snake(find.name)}`,
+          );
+        }
+      }
+    }
+
+    resourceBlocks.push(
+      `    resource ${aggModule} do\n${defines.join("\n")}\n    end`,
+    );
+
+    // Entity parts — simpler: only CRUD, no custom finds.
     for (const part of agg.parts) {
-      resourceLines.push(`    resource ${ctxModule}.${pascal(part.name)}`);
+      const partSnake = snake(part.name);
+      const partModule = `${ctxModule}.${pascal(part.name)}`;
+      const partDefines = [
+        `      define :create_${partSnake}, action: :create`,
+        `      define :get_${partSnake},    action: :read, get_by: [:id]`,
+        `      define :list_${partSnake}s,  action: :read`,
+        `      define :update_${partSnake}, action: :update`,
+        `      define :destroy_${partSnake}, action: :destroy`,
+      ].join("\n");
+      resourceBlocks.push(
+        `    resource ${partModule} do\n${partDefines}\n    end`,
+      );
     }
   }
 
+  // Value objects — embedded resources; no code-interface functions needed
+  // (they are never loaded independently, only as part of an aggregate).
   for (const vo of ctx.valueObjects) {
-    resourceLines.push(`    resource ${ctxModule}.${pascal(vo.name)}`);
+    resourceBlocks.push(`    resource ${ctxModule}.${pascal(vo.name)}`);
   }
 
   return `defmodule ${ctxModule} do
   use Ash.Domain
 
   resources do
-${resourceLines.join("\n")}
+${resourceBlocks.join("\n\n")}
   end
 end
 `;

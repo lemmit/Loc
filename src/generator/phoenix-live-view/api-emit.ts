@@ -207,9 +207,15 @@ function renderWorkflowAction(
 
   return `  @doc "POST /api/workflows/${wfSnake}"
   def ${wfSnake}(conn, params) do
+    # E5 — currentUser threading.  When the deployable has
+    # \`auth: required\`, the Auth plug populates
+    # \`conn.assigns.current_user\` from the JWT.  We pass it as the
+    # second positional arg to run/2; workflows that don't reference
+    # currentUser ignore it (the renderer emits a default value).
+    current_user = Map.get(conn.assigns, :current_user)
     input = ${takeExpr}
 
-    case ${workflowModule}.run(input) do
+    case ${workflowModule}.run(input, current_user) do
       {:ok, result} ->
         conn
         |> put_status(:ok)
@@ -264,7 +270,10 @@ function renderViewAction(
 
   return `  @doc "GET /api/views/${viewSnake}"
   def ${viewSnake}(conn, _params) do
-    case ${viewModule}.run() do
+    # E5 — currentUser available to views via run/1 first arg.
+    # Views that don't reference currentUser ignore it (default value).
+    current_user = Map.get(conn.assigns, :current_user)
+    case ${viewModule}.run(current_user) do
       {:ok, records} ->
         data =
           Enum.map(records, fn record ->
