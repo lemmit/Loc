@@ -13,6 +13,7 @@ import {
   mergeViewFindsForAgg,
 } from "./repository-emit.js";
 import { renderAshType, renderExpr } from "./render-expr.js";
+import { emitLiveViewPages, type LiveRoute } from "./liveview-emit.js";
 
 // ---------------------------------------------------------------------------
 // Phoenix LiveView / Ash generator orchestrator.
@@ -73,8 +74,21 @@ export function generatePhoenixLiveViewProject(
   // --- Migrations -----------------------------------------------------------
   emitMigrations(appName, contexts, appModule, out);
 
+  // --- LiveView pages (Phase 7) --------------------------------------------
+  // Per PageIR in the deployable's `ui:` block: one
+  // lib/<app>_web/live/<page>_live.ex module + a router entry the
+  // shell renderer splices into router.ex.
+  const { files: liveFiles, routes: liveRoutes } = emitLiveViewPages({
+    contexts,
+    deployable,
+    sys,
+    appName,
+    appModule,
+  });
+  for (const [path, content] of liveFiles) out.set(path, content);
+
   // --- Shell files ----------------------------------------------------------
-  emitShellFiles(appName, appModule, deployable, sys, out);
+  emitShellFiles(appName, appModule, deployable, sys, liveRoutes, out);
 
   return out;
 }
@@ -399,6 +413,7 @@ function emitShellFiles(
   appModule: string,
   deployable: DeployableIR,
   _sys: SystemIR,
+  liveRoutes: LiveRoute[],
   out: Map<string, string>,
 ): void {
   const port = deployable.port ?? 4000;
@@ -421,7 +436,7 @@ function emitShellFiles(
   out.set(`lib/${appName}_web/endpoint.ex`, renderEndpoint(appName, appModule));
 
   // lib/<app>_web/router.ex
-  out.set(`lib/${appName}_web/router.ex`, renderRouter(appName, appModule));
+  out.set(`lib/${appName}_web/router.ex`, renderRouter(appName, appModule, liveRoutes));
 
   // lib/<app>_web/components/layouts.ex
   out.set(`lib/${appName}_web/components/layouts.ex`, renderLayouts(appName, appModule));
@@ -717,8 +732,26 @@ end
 `;
 }
 
-function renderRouter(appName: string, appModule: string): string {
+function renderRouter(
+  appName: string,
+  appModule: string,
+  liveRoutes: LiveRoute[],
+): string {
+  void appName;
   const webModule = `${appModule}Web`;
+  // Render `live "<route>", <Page>Live` per PageIR.  Module names
+  // emitted by liveview-emit are fully qualified (e.g.
+  // `MyAppWeb.OrderListLive`); strip the leading `<webModule>.`
+  // because they're inside a `scope "/", <webModule>` block.
+  const liveLines = liveRoutes
+    .map((r) => {
+      const local = r.liveModule.startsWith(`${webModule}.`)
+        ? r.liveModule.slice(webModule.length + 1)
+        : r.liveModule;
+      return `    live ${JSON.stringify(r.route)}, ${local}`;
+    })
+    .join("\n");
+  const liveBody = liveLines || `    # No pages declared in this deployable's ui: block.`;
   return `# Auto-generated.
 defmodule ${webModule}.Router do
   use ${webModule}, :router
@@ -739,13 +772,12 @@ defmodule ${webModule}.Router do
   scope "/", ${webModule} do
     pipe_through :browser
 
-    # Phase 7 will inject live "<route>", PageLive lines here.
-    # live "/", HomeLive
+${liveBody}
   end
 
   scope "/api", ${webModule} do
     pipe_through :api
-    # Phase 7 will inject API routes here.
+    # API routes (workflows / views) — emitted by Phase 8 follow-up.
   end
 
   get "/health", ${webModule}.HealthController, :index

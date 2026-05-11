@@ -450,6 +450,98 @@ nested VO fields.
 
 ---
 
+## Phoenix LiveView fullstack (`platform: phoenixLiveView`)
+
+`generate system` for deployables marked `platform: phoenixLiveView`.
+Single project that both serves an Ash-derived API (when `serves:` is
+populated) AND mounts a `ui:` rendered as Phoenix LiveView modules.
+Owns its own Postgres database (`needsDb: true`).
+
+### File map
+
+For a fullstack `phoenixApp` with `modules: Sales`, `serves: SalesApi`,
+`ui: SalesAdmin`:
+
+```
+phoenix_app/
+├── mix.exs                                       # phoenix, phoenix_live_view, ash, ash_postgres, ash_phoenix
+├── .formatter.exs
+├── Dockerfile                                    # multi-stage hexpm/elixir → debian, mix release
+├── .dockerignore
+├── config/{config,dev,prod,runtime}.exs          # Phoenix + Ecto + Ash config
+├── priv/repo/
+│   ├── migrations/<ts>_create_<table>.exs        # one per aggregate, stable ordering, FK indexes
+│   └── seeds.exs
+├── rel/{env.sh.eex,overlays/bin/server}          # release scaffolding
+├── lib/phoenix_app/
+│   ├── application.ex                            # supervision tree: Repo, Endpoint, PubSub
+│   ├── repo.ex                                   # Ecto.Repo
+│   └── sales/                                    # one folder per BoundedContext
+│       ├── customer.ex                           # Ash.Resource per aggregate
+│       ├── order.ex
+│       ├── order_line.ex                         # entity-part as embedded resource
+│       ├── order_status.ex                       # enums as Ash.Type.Enum
+│       ├── money.ex                              # value objects as Ash.Type.NewType / embedded
+│       ├── events/order_confirmed.ex             # plain defstruct modules
+│       ├── workflows/place_order.ex              # code-interface fns wrapping Ash.transaction
+│       └── views/active_orders.ex                # Ash.Query.filter on read action
+│   └── sales.ex                                  # use Ash.Domain — resource list + code interfaces
+├── lib/phoenix_app_web.ex                        # __using__ macro
+└── lib/phoenix_app_web/
+    ├── endpoint.ex                               # Phoenix.Endpoint
+    ├── router.ex                                 # `live "<route>", <Page>Live` per PageIR
+    ├── components/
+    │   ├── core_components.ex                    # <.input>, <.button>, <.modal>, <.simple_form>, <.table>
+    │   ├── layouts.ex                            # use Phoenix.Component
+    │   └── layouts/{root,app}.html.heex
+    └── live/
+        ├── customer_list_live.ex                 # one per scaffolded PageIR
+        ├── customer_new_live.ex
+        └── customer_detail_live.ex
+```
+
+### Per-aggregate detail
+
+Aggregate IR maps onto Ash:
+
+| IR | Ash construct |
+|---|---|
+| `aggregate X { … }` | `Ash.Resource` with `postgres { table "<plural>"; repo <App>.Repo }` |
+| `field: T` | `attribute :<snake>, <ash-type>, allow_nil?: <bool>` |
+| `contains lines: OrderLine[]` | `relationships do has_many :lines, <App>.<Ctx>.OrderLine end` |
+| `derived total: Money = expr` | `calculations do calculate :total, Money, expr(<lowered>) end` |
+| `invariant <pred> when <guard>` | `validations do validate <pred>, where: [<guard>] end` |
+| `operation op(args) { body }` | `actions do update :<snake_op>, accept: […], change <body-lowered> end` |
+| `valueobject Money { … }` | embedded `Ash.Resource` (composite) or `Ash.Type.NewType` (single-field) |
+| `event LineAdded { … }` | plain `defstruct` module under `<Ctx>.Events.<Event>` |
+| `repository finds: find byCustomer(...) where ...` | `read :by_customer do argument :customer_id, :uuid; filter expr(...) end` |
+| `workflow placeOrder(...) { ... }` | code-interface module with `Ash.transaction(<App>.<Ctx>, fn -> with … end)` |
+| `view ActiveOrders = Order where …` | thin module wrapping `Order |> Ash.Query.filter(…)` |
+| `emit OrderConfirmed { … }` | `Phoenix.PubSub.broadcast(<App>.PubSub, "events", %Events.OrderConfirmed{…})` |
+
+### Per-page detail
+
+PageIR maps onto LiveView:
+
+| IR | LiveView construct |
+|---|---|
+| `page X { route, body }` | `defmodule <App>Web.<X>Live do use <App>Web, :live_view end` at `lib/<app>_web/live/<x>_live.ex` |
+| `state { step: int = 0 }` | `socket.assigns.step`; initialised in `mount/3` via `assign(socket, :step, 0)` |
+| `state.step := 1` (in lambda) | `assign(socket, :step, 1)` inside generated `handle_event/3` |
+| `match { p => v; else => fallback }` | `cond do p -> v; true -> fallback end` (or `<%= cond do … end %>` in HEEx) |
+| `requires <pred>` (page) | guard in `handle_params/3` (v0 stub: bind only; full guard is a follow-up) |
+| `navigate(<P>, {…})` | `push_navigate(socket, to: ~p"/route?…")` |
+| Scaffolded body | `pack.render("page-list" \| "page-new" \| "page-detail", vm)` → HEEx inline in `render/1` |
+| Pack-emitted Playwright page object | `e2e/pages/<x>.ts` — same testid-keyed shape as React; HEEx HTML is selector-compatible |
+
+The framework-specific seams (state read/write, hook hoisting,
+`match`, `navigate`, helper imports) live behind the `WalkerTarget`
+interface in `src/generator/_walker/target.ts` — see
+[page-metamodel.md §16](page-metamodel.md#16-liveview-lowering-platform-phoenixliveview)
+for the full mapping table.
+
+---
+
 ## System orchestration
 
 `generate system` (in `src/system/index.ts`) runs each deployable
@@ -474,9 +566,17 @@ writes everything to a flat tree:
 
 | Platform | Internal port | Env | Depends on `db` | Healthcheck path |
 | --- | --- | --- | --- | --- |
-| `dotnet` | 8080 | `ConnectionStrings__Default=Host=db;Port=5432;Database=<slug>;…` | yes | `/health` |
-| `hono` | 3000 | `DATABASE_URL=postgres://…/<slug>` | yes | `/health` |
-| `react` | 3000 | `VITE_API_BASE_URL=http://localhost:<target.port>` | no | `/` |
+| `dotnet` | 8080 | `ConnectionStrings__Default=Host=db;Port=5432;Database=<slug>;…` | yes | `/ready` |
+| `hono` | 3000 | `DATABASE_URL=postgres://…/<slug>` | yes | `/ready` |
+| `react` / `static` | 3000 | `VITE_API_BASE_URL=http://localhost:<target.port>` | no | `/` |
+| `phoenixLiveView` | 4000 | `DATABASE_URL=ecto://…/<slug>`, `SECRET_KEY_BASE`, `PHX_HOST`, `PHX_SERVER=true`, `PORT=4000` | yes | `/health` |
+
+The platform contract decides UI mount admissibility and DB ownership
+via two `PlatformSurface` flags (`src/platform/surface.ts`):
+`mountsUi` (true on `react`, `static`, `phoenixLiveView`) and
+`needsDb` (true on `dotnet`, `hono`, `phoenixLiveView`).  The system
+orchestrator consults these instead of hardcoding platform names, so
+adding a new platform extends the registry + the two flags only.
 
 ### Per-deployable databases
 

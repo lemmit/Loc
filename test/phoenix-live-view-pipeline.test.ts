@@ -115,6 +115,28 @@ describe("phoenixLiveView pipeline (Phases 1-8)", () => {
     expect(init).toMatch(/CREATE DATABASE phoenix_app;/);
   });
 
+  it("emits one LiveView module per scaffolded page + router lines", async () => {
+    // The fixture's `scaffold modules: Sales` synthesises three pages
+    // for the Customer aggregate (list / new / detail).  Each lands
+    // as a LiveView module under lib/<app>_web/live/ and contributes
+    // a `live "<route>", <Page>Live` line to router.ex.
+    const model = await buildFixture();
+    const { files } = generateSystems(model);
+    const liveFiles = [...files.keys()].filter((k) =>
+      /^phoenix_app\/lib\/phoenix_app_web\/live\/.*_live\.ex$/.test(k),
+    );
+    expect(liveFiles.length).toBeGreaterThanOrEqual(3);
+    // Each LiveView module has the canonical mount/handle_params/render shape.
+    const sample = files.get(liveFiles[0]!)!;
+    expect(sample).toMatch(/use PhoenixAppWeb, :live_view/);
+    expect(sample).toMatch(/def mount\(/);
+    expect(sample).toMatch(/def handle_params\(/);
+    expect(sample).toMatch(/def render\(assigns\) do/);
+    // Router has at least one `live "..."` line.
+    const router = files.get("phoenix_app/lib/phoenix_app_web/router.ex")!;
+    expect(router).toMatch(/live "[^"]+", [A-Z]\w*Live/);
+  });
+
   it("rejects a phoenixLiveView deployable that declares targets:", async () => {
     // A standalone fixture (not a string-replace splice — easier to
     // verify the source by eye).  phoenixApp wrongly declares
