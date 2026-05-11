@@ -66,6 +66,12 @@
       "md": "8px",
       "lg": "12px",
       "xl": "16px"
+    },
+    "alertVariant": {
+      "red": "error",
+      "yellow": "warning",
+      "green": "success",
+      "blue": "info"
     }
   },
   "imports": {

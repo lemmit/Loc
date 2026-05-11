@@ -377,6 +377,12 @@
       "IconAlertTriangle": "AlertTriangle",
       "IconBolt": "Zap",
       "IconLayoutList": "LayoutList"
+    },
+    "alertVariant": {
+      "red": "destructive",
+      "yellow": "default",
+      "green": "default",
+      "blue": "default"
     }
   }
 }

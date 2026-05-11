@@ -82,6 +82,12 @@
       "IconAlertTriangle": "Warning",
       "IconBolt": "Bolt",
       "IconLayoutList": "ViewList"
+    },
+    "alertVariant": {
+      "red": "error",
+      "yellow": "warning",
+      "green": "success",
+      "blue": "info"
     }
   },
   "imports": {
