@@ -710,6 +710,14 @@ defmodule ${appModule}.Repo do
   def installed_extensions do
     ["uuid-ossp", "citext"]
   end
+
+  # AshPostgres 2.x requires a min_pg_version/0 callback so it can
+  # gate extension features per Postgres version.  Targeting 15 — the
+  # oldest still-supported community release at the generator's
+  # current cutoff.
+  def min_pg_version do
+    %Version{major: 15, minor: 0, patch: 0}
+  end
 end
 `;
 }

@@ -310,7 +310,7 @@ defmodule ${specModule} do
   Consumed by OpenapiController to serve GET /api/openapi.json.
   """
 
-  alias OpenApiSpex.{Info, OpenApi, PathItem, Paths, Server}
+  alias OpenApiSpex.{Info, OpenApi, Server}
 
   @behaviour OpenApi
 
@@ -372,10 +372,10 @@ function openApiType(t: TypeIR): string {
       return "%OpenApiSpex.Schema{type: :string}";
     case "valueobject":
       // Reference the VO schema module
-      return `%OpenApiSpex.Schema{"$ref": "#/components/schemas/${t.name}"}`;
+      return `%OpenApiSpex.Reference{"$ref": "#/components/schemas/${t.name}"}`;
     case "entity":
       // Reference the entity part schema module
-      return `%OpenApiSpex.Schema{"$ref": "#/components/schemas/${t.name}Response"}`;
+      return `%OpenApiSpex.Reference{"$ref": "#/components/schemas/${t.name}Response"}`;
     case "array":
       return `%OpenApiSpex.Schema{type: :array, items: ${openApiType(t.element)}}`;
     case "optional":
@@ -472,7 +472,7 @@ defmodule ${moduleName} do
   OpenApiSpex.schema(%{
     title: "${agg.name}ListResponse",
     type: :array,
-    items: %OpenApiSpex.Schema{"$ref": "#/components/schemas/${agg.name}Response"}
+    items: %OpenApiSpex.Reference{"$ref": "#/components/schemas/${agg.name}Response"}
   })
 end
 `;
