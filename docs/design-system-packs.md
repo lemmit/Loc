@@ -179,7 +179,7 @@ can render whatever the design system needs to fulfill the contract.
 |---|---|
 | `page-list` | Aggregate list page: header + create button + table + empty/error/loading states. |
 | `page-detail` | Aggregate detail page: header + breadcrumbs + identity block + parts/operations. |
-| `page-new` | Aggregate creation page: react-hook-form scaffold. |
+| `page-new` | Aggregate creation page.  Today emits an RHF + zodResolver scaffold (see §9.6 — RHF is the current cross-pack form-state baseline). |
 | `operation-modal` | Modal/dialog rendering for aggregate operations. |
 
 ### Workflow + view templates (4)
@@ -557,6 +557,37 @@ behind them.
    same.**  The generator doesn't care whether your components come
    from npm or from vendored source; it cares whether each logical
    name renders correctly.
+
+5. **Idiomatic per pack is the default; cross-pack baselines are
+   exceptions that must be named.**  When a pack ships a load-bearing
+   idiom (MUI's `<DataGrid>`, Mantine's `mantine-datatable`, AntD's
+   `<Form>`), the pack should use it — code emitted under
+   `design: mui` should read the way an MUI developer would write
+   it.  The generator only imposes a cross-pack solution when the
+   alternative is N divergent implementations of one feature with no
+   per-pack value (e.g. form state — see rule 6).
+
+6. **react-hook-form is the current cross-pack form-state baseline,
+   pending a per-pack form-state seam.**  All in-tree packs emit
+   `useForm` + `Controller` + `zodResolver` because the body-walker
+   hardcodes this shape today.  The choice was deliberate (RHF +
+   Zod is well-supported across Mantine, MUI, Chakra, and shadcn,
+   and gives one validation story for all four), but it IS a
+   cross-pack imposition — a future pack whose native form idiom is
+   load-bearing (e.g. AntD's `<Form>`) needs a walker seam to opt
+   into its own form-state strategy.  See
+   `docs/antd-pack-plan.md` §5 for the deferred design.  Until that
+   seam exists, every pack's `form-of-*` templates and `page-new`
+   render an RHF-shaped tree.
+
+7. **DataTable strategy is per pack, not cross-pack.**  Unlike form
+   state, no cross-pack baseline applies — the four in-tree packs
+   already diverge: Mantine uses (or will use) `mantine-datatable`,
+   MUI uses `@mui/x-data-grid`, shadcn + Chakra use TanStack Table
+   headless on top of their own `<Table>` primitive.  When a pack
+   gains a richer table (sort/filter/pagination), it picks the
+   library its community considers canonical — `primitive-table.hbs`
+   may render very different shapes per pack.
 
 ## 10. How a user picks your pack
 
