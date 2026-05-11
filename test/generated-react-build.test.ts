@@ -56,7 +56,7 @@ function injectDesign(src: string, design: string): string {
 interface Case {
   ddd: string;
   reactDir: string;
-  pack: "mantine" | "shadcn" | "mui";
+  pack: "mantine" | "shadcn" | "mui" | "chakra";
 }
 
 /** Slice D1 — Mantine is the canonical pack post-archetype-deletion.
@@ -66,6 +66,9 @@ interface Case {
  *  Form + Alert variants need wiring through). */
 const cases: Case[] = examples.flatMap((e) => [
   { ...e, pack: "mantine" as const },
+  { ...e, pack: "shadcn" as const },
+  { ...e, pack: "mui" as const },
+  { ...e, pack: "chakra" as const },
 ]);
 
 describe.skipIf(!ENABLED)("generated React TSX compiles under strict tsc", () => {

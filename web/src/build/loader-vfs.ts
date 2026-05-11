@@ -32,7 +32,7 @@ import { getWorkerVfs } from "./worker-vfs.js";
  *  before treating `ui` as a user-supplied path, so a workspace pack
  *  cannot shadow them.  Mantine and shadcn ship in the playground
  *  bundle via `seedBuiltinPacks`. */
-const BUILTIN_PACKS = new Set(["mantine", "shadcn", "mui"]);
+const BUILTIN_PACKS = new Set(["mantine", "shadcn", "mui", "chakra"]);
 
 /** Top-level VFS dirs that hold pack-agnostic Handlebars sources
  *  (Vite scaffold, API integration, Docker artifacts).  Mirrors the

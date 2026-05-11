@@ -1,0 +1,5 @@
+<FormControl isInvalid={!!( {{errorExpr}} )}>
+          <FormLabel>{{label}}</FormLabel>
+          <Input {...register("{{path}}")} data-testid="{{testId}}" />
+          <FormErrorMessage>{ {{errorExpr}} }</FormErrorMessage>
+        </FormControl>

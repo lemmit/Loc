@@ -1,0 +1,83 @@
+// Auto-generated.
+import { Link, useNavigate } from "react-router-dom";
+import {
+  VStack, HStack, Text, Heading, Button, Table, Thead, Tbody, Tr, Th, Td,
+  TableContainer, Skeleton, Alert, AlertIcon, AlertDescription,
+  Link as ChakraLink, Badge, Breadcrumb, BreadcrumbItem, BreadcrumbLink,
+  Box,
+} from "@chakra-ui/react";
+import { AddIcon, WarningIcon } from "@chakra-ui/icons";
+import { {{hookName}} } from "{{{hookImportPath}}}";
+import { IdValue, DateTimeValue, BoolValue, NumberValue, EmptyValue } from "../../lib/format";
+
+export default function {{aggregateName}}List() {
+  const navigate = useNavigate();
+  const q ={{hookName}}();
+  const count = q.data?.length ?? 0;
+  return (
+    <VStack data-testid="{{slug}}-list" gap={4} alignItems="stretch">
+      <Breadcrumb data-testid="{{slug}}-list-breadcrumbs">
+        {{#each breadcrumbs}}{{#if to}}<BreadcrumbItem><BreadcrumbLink as={Link} to="{{{to}}}">{{label}}</BreadcrumbLink></BreadcrumbItem>{{else}}<BreadcrumbItem isCurrentPage><BreadcrumbLink>{{label}}</BreadcrumbLink></BreadcrumbItem>{{/if}}
+        {{/each}}
+      </Breadcrumb>
+      <HStack justifyContent="space-between" alignItems="flex-end">
+        <VStack gap={0} alignItems="flex-start">
+          <Heading size="md">{{humanPlural}}</Heading>
+          <Text fontSize="sm" color="gray.500">{q.isLoading ? "Loading…" : count === 1 ? "1 record" : count + " records"}</Text>
+        </VStack>
+        <Button leftIcon={<AddIcon />} colorScheme="brand" onClick={() => navigate("/{{slug}}/new")} data-testid="{{slug}}-list-create">New {{humanSingularLower}}</Button>
+      </HStack>
+      {q.isLoading && (
+        <Box borderWidth="1px" borderRadius="md" p={4}>
+          <VStack gap={2}>
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Skeleton key={i} height="24px" width="100%" />
+            ))}
+          </VStack>
+        </Box>
+      )}
+      {q.isError && (
+        <Alert status="error">
+          <AlertIcon />
+          <AlertDescription><strong>Couldn't load {{humanPluralLower}}</strong> — {(q.error as Error).message}</AlertDescription>
+        </Alert>
+      )}
+      {q.data && q.data.length === 0 && (
+        <Box borderWidth="1px" borderRadius="md" p={8} data-testid="{{slug}}-list-empty">
+          <VStack gap={2} alignItems="center" minH="160px" justifyContent="center">
+            <Text color="gray.500">No {{humanPluralLower}} yet.</Text>
+            <Button variant="outline" onClick={() => navigate("/{{slug}}/new")}>
+              Create your first {{humanSingularLower}}
+            </Button>
+          </VStack>
+        </Box>
+      )}
+      {q.data && q.data.length > 0 && (
+        <TableContainer borderWidth="1px" borderRadius="md">
+          <Table size="sm">
+            <Thead>
+              <Tr>
+                {{#each columns}}<Th>{{title}}</Th>
+                {{/each}}
+              </Tr>
+            </Thead>
+            <Tbody>
+              {q.data.map((row) => (
+                <Tr
+                  key={row.id}
+                  data-testid={`{{slug}}-row-${row.id}`}
+                  cursor="pointer"
+                  _hover=\{{ bg: "gray.50" }}
+                  onClick={() => navigate(`/{{slug}}/${row.id}`)}
+                >
+                  {{#each columns}}{{> (concat "cell-" kind)}}
+                  {{/each}}
+                </Tr>
+              ))}
+            </Tbody>
+          </Table>
+        </TableContainer>
+      )}
+    </VStack>
+  );
+}

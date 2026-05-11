@@ -1,0 +1,8 @@
+<form onSubmit={handleSubmit(async (vals) => {{{submitBody}}})}{{{testidAttr}}}>
+{{indent}}<VStack gap={4}>
+{{#each fieldHtmls}}{{../innerIndent}}{{{this}}}
+{{/each}}{{innerIndent}}<HStack justifyContent="flex-end" mt={1}>
+{{deepIndent}}<Button type="submit" colorScheme="brand" isLoading={create.isPending} data-testid="{{submitTestid}}">Create</Button>
+{{innerIndent}}</HStack>
+{{indent}}</VStack>
+{{closeIndent}}</form>

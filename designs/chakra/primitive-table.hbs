@@ -1,0 +1,16 @@
+{{#if hasColumns}}<TableContainer borderWidth="1px" borderRadius="md"{{{testidAttr}}}>
+{{indent}}<Table size="sm">
+{{headIndent}}<Thead>
+{{rowIndent}}<Tr>
+{{#each columns}}{{../cellIndent}}<Th>{{{this.header}}}</Th>
+{{/each}}{{rowIndent}}</Tr>
+{{headIndent}}</Thead>
+{{headIndent}}<Tbody>
+{{rowIndent}}{ {{{rowsExpr}}}.map(({{rowVar}}) => (
+{{cellIndent}}<Tr key={ {{rowVar}}.id }{{#if hasRowTestid}} data-testid={ {{{rowTestid}}} }{{/if}}{{#if hasOnRowClick}} onClick={() => {{{onRowClick}}} } style=\{{ cursor: "pointer" }}{{/if}}>
+{{#each columns}}{{../cellIndent}}<Td>{{{this.cellJsx}}}</Td>
+{{/each}}{{cellIndent}}</Tr>
+{{rowIndent}})) }
+{{headIndent}}</Tbody>
+{{indent}}</Table>
+{{closeIndent}}</TableContainer>{{else}}<TableContainer{{{testidAttr}}} />{{/if}}

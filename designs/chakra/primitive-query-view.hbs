@@ -1,0 +1,14 @@
+<>
+{{indent}}{ {{{queryExpr}}}.isLoading && (
+{{branchIndent}}{{{loadingJsx}}}
+{{indent}}) }
+{{indent}}{ {{{queryExpr}}}.isError && (
+{{branchIndent}}{{{errorJsx}}}
+{{indent}}) }
+{{indent}}{ {{{queryExpr}}}.data && {{{queryExpr}}}.data.length === 0 && (
+{{branchIndent}}{{{emptyJsx}}}
+{{indent}}) }
+{{indent}}{ {{{queryExpr}}}.data && {{{queryExpr}}}.data.length > 0 && (
+{{branchIndent}}{{{dataJsx}}}
+{{indent}}) }
+{{closeIndent}}}</>

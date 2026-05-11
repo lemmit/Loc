@@ -179,8 +179,7 @@ Platform returns string:
 // otherwise.  Named `design` (not `ui`) to avoid colliding with
 // the test-DSL's `ui.workflows.X(...)` accessor.
 DesignPack returns string:
-    'mantine' | 'shadcn' | 'mui' | 'ashPhoenix' | STRING;
-
+    'mantine' | 'shadcn' | 'mui' | 'chakra' | 'ashPhoenix' | STRING;
 // Per-deployable auth opt-in.  `required` enables JWT-decode middleware
 // and the user-supplied verifier hook.  Absence keeps the deployable
 // open (existing behaviour).  Future modes (`optional`, `forbidden`)

@@ -1,0 +1,31 @@
+// Auto-generated.  Do not edit by hand.
+import { extendTheme } from "@chakra-ui/react";
+
+export const theme = extendTheme({
+  colors: {
+    brand: {
+      50:  "{{brandShades.[0]}}",
+      100: "{{brandShades.[1]}}",
+      200: "{{brandShades.[2]}}",
+      300: "{{brandShades.[3]}}",
+      400: "{{brandShades.[4]}}",
+      500: "{{brandShades.[5]}}",
+      600: "{{brandShades.[6]}}",
+      700: "{{brandShades.[7]}}",
+      800: "{{brandShades.[8]}}",
+      900: "{{brandShades.[9]}}",
+    },
+  },
+  fonts: {
+    body:    {{json fontFamily}},
+    heading: {{json fontFamily}},
+    mono:    {{json fontFamilyMonospace}},
+  },
+  radii: {
+    base: "{{chakraRadius radius}}",
+  },
+  components: {
+    Button: { defaultProps: { colorScheme: "brand" } },
+    Card: { baseStyle: { container: { variant: "outline" } } },
+  },
+});
