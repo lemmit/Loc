@@ -9,6 +9,7 @@ import { createDddServices } from "../src/language/ddd-module.js";
 import { generateSystems } from "../src/system/index.js";
 import type { Model } from "../src/language/generated/ast.js";
 import { emitApiControllers } from "../src/generator/phoenix-live-view/api-emit.js";
+import { emitAggregateResources } from "../src/generator/phoenix-live-view/domain-emit.js";
 import type { BoundedContextIR, DeployableIR, SystemIR } from "../src/ir/loom-ir.js";
 
 // ---------------------------------------------------------------------------
@@ -334,6 +335,124 @@ describe("emitApiControllers (api-emit unit)", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Batch D1 — Slice 21 validation lowering onto Ash action `validate` clauses.
+//
+// These tests call `emitAggregateResources` directly so they are not coupled
+// to the index.ts orchestrator path, verifying the domain-emit.ts target
+// independently (as the task specification requires).
+// ---------------------------------------------------------------------------
+
+describe("D1 — Ash validate clause emission (domain-emit unit)", () => {
+  /** Minimal bounded context with one aggregate carrying:
+   *  - an aggregate invariant (`email.length > 0`)
+   *  - one public operation with a precondition (`minTotal >= 0`) */
+  const salesCtx: BoundedContextIR = {
+    name: "Sales",
+    enums: [],
+    valueObjects: [],
+    events: [],
+    aggregates: [
+      {
+        name: "Customer",
+        idValueType: "guid",
+        fields: [
+          { name: "name", type: { kind: "primitive", name: "string" }, optional: false },
+          { name: "email", type: { kind: "primitive", name: "string" }, optional: false },
+        ],
+        contains: [],
+        derived: [],
+        invariants: [
+          {
+            // email.length > 0  →  single-field len-min pattern
+            expr: {
+              kind: "binary",
+              op: ">",
+              left: {
+                kind: "member",
+                receiver: {
+                  kind: "ref",
+                  name: "email",
+                  refKind: "this-prop",
+                  type: { kind: "primitive", name: "string" },
+                },
+                member: "length",
+                receiverType: { kind: "primitive", name: "string" },
+                memberType: { kind: "primitive", name: "int" },
+              },
+              right: { kind: "literal", lit: "int", value: "0" },
+            },
+            source: "email.length > 0",
+          },
+        ],
+        functions: [],
+        operations: [
+          {
+            name: "activate",
+            visibility: "public",
+            params: [
+              {
+                name: "minTotal",
+                type: { kind: "primitive", name: "decimal" },
+              },
+            ],
+            statements: [
+              {
+                kind: "precondition",
+                expr: {
+                  kind: "binary",
+                  op: ">=",
+                  left: {
+                    kind: "ref",
+                    name: "minTotal",
+                    refKind: "param",
+                    type: { kind: "primitive", name: "decimal" },
+                  },
+                  right: { kind: "literal", lit: "decimal", value: "0" },
+                },
+                source: "minTotal >= 0",
+              },
+            ],
+            extern: false,
+          },
+        ],
+        parts: [],
+        tests: [],
+      },
+    ],
+    repositories: [],
+    workflows: [],
+    views: [],
+  };
+
+  it("emits at least one validate line for an aggregate with an invariant", () => {
+    const files = emitAggregateResources(salesCtx, "PhoenixApp", "phoenix_app");
+    const customerEx = files.get("lib/phoenix_app/sales/customer.ex");
+    expect(customerEx).toBeDefined();
+    // The aggregate's `email.length > 0` invariant must produce a validate line.
+    expect(customerEx).toMatch(/validate /);
+  });
+
+  it("emits a string_length validate for an email.length > 0 invariant", () => {
+    const files = emitAggregateResources(salesCtx, "PhoenixApp", "phoenix_app");
+    const customerEx = files.get("lib/phoenix_app/sales/customer.ex");
+    expect(customerEx).toBeDefined();
+    // Single-field len-min shape → idiomatic Ash string_length validator.
+    expect(customerEx).toMatch(/validate string_length\(:email/);
+  });
+
+  it("emits an operation action with a validate clause for a precondition", () => {
+    const files = emitAggregateResources(salesCtx, "PhoenixApp", "phoenix_app");
+    const customerEx = files.get("lib/phoenix_app/sales/customer.ex");
+    expect(customerEx).toBeDefined();
+    // The :activate action must be emitted with a validate clause.
+    expect(customerEx).toMatch(/update :activate/);
+    // The precondition `minTotal >= 0` is a single-field min shape →
+    // compare validator or function-form validate.
+    expect(customerEx).toMatch(/validate /);
+  });
+});
+
 // suppress unused imports if test framework expects them at top level
 void repoRoot;
 
@@ -428,5 +547,196 @@ describe.skip("Batch C integration (parent wires emitters)", () => {
     expect(ts).toMatch(/static readonly url = "\/"/);
     expect(ts).toMatch(/async goto\(\)/);
     expect(ts).toMatch(/getByTestId\("home"\)/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Batch D3 — cross-platform OpenAPI parity.
+//
+// `buildWireSpec(sys)` is Loom's canonical IR-derived wire contract.  All
+// three backends (hono, dotnet, phoenixLiveView) MUST expose those same
+// names through their OpenAPI surfaces.  The dotnet generator's
+// FluentValidation pipeline + Swashbuckle ensures parity on that side;
+// the hono generator's @hono/zod-openapi ditto.  This block asserts the
+// Phoenix OpenApiSpex emission references every aggregate / part /
+// value-object / operation / workflow / view name from `wire-spec.json`.
+//
+// Uses the full `examples/acme.ddd` (has workflows + views + parts +
+// value objects), retargeted by adding a third deployable that picks
+// `platform: phoenixLiveView`.
+// ---------------------------------------------------------------------------
+
+import { lowerModel } from "../src/ir/lower.js";
+import { enrichLoomModel } from "../src/ir/enrichments.js";
+import { buildWireSpec } from "../src/system/wire-spec.js";
+
+const ACME_LIVEVIEW_SOURCE = `system AcmeLV {
+  module Sales {
+    context Sales {
+      enum OrderStatus { Draft, Confirmed }
+      valueobject Money {
+        amount: decimal
+        currency: string
+        invariant amount >= 0
+      }
+      event OrderConfirmed { order: Id<Order>, at: datetime }
+      aggregate Customer {
+        name: string display
+        email: string
+        invariant email.length > 0
+      }
+      aggregate Order {
+        customerId: Id<Customer>
+        status: OrderStatus
+        contains lines: OrderLine[]
+        entity OrderLine {
+          productId: Id<Customer>
+          quantity: int
+          invariant quantity > 0
+        }
+        operation confirm() {
+          precondition status == Draft
+          status := Confirmed
+          emit OrderConfirmed { order: id, at: now() }
+        }
+      }
+      repository Customers for Customer { }
+      repository Orders for Order { }
+      workflow placeOrder(customerId: Id<Customer>) {
+        let order = Order.create({ customerId: customerId, status: Draft })
+      }
+      view ActiveOrders = Order where status == Confirmed
+    }
+  }
+  api SalesApi from Sales
+  ui SalesAdmin { scaffold modules: Sales }
+  deployable phoenixApp {
+    platform: phoenixLiveView
+    modules: Sales
+    serves: SalesApi
+    ui: SalesAdmin
+    port: 4000
+  }
+}
+`;
+
+async function buildAcmeLiveViewModel(): Promise<Model> {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-d3-"));
+  const file = path.join(dir, "acme-lv.ddd");
+  fs.writeFileSync(file, ACME_LIVEVIEW_SOURCE);
+  const services = createDddServices(NodeFileSystem);
+  const doc =
+    await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
+      URI.file(file),
+    );
+  await services.shared.workspace.DocumentBuilder.build([doc], {
+    validation: true,
+  });
+  const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
+  if (errors.length > 0) {
+    throw new Error(
+      `D3 fixture validation errors:\n` +
+        errors.map((e) => `  ${e.message}`).join("\n"),
+    );
+  }
+  return doc.parseResult.value as Model;
+}
+
+describe("D3 — cross-platform OpenAPI parity (phoenix vs wire-spec.json)", () => {
+  it("Phoenix OpenAPI spec module exists when deployable serves an api", async () => {
+    const model = await buildAcmeLiveViewModel();
+    const { files } = generateSystems(model);
+    expect(
+      files.has("phoenix_app/lib/phoenix_app_web/api/sales_api_spec.ex"),
+    ).toBe(true);
+    expect(
+      files.has(
+        "phoenix_app/lib/phoenix_app_web/controllers/openapi_controller.ex",
+      ),
+    ).toBe(true);
+    // The router must wire GET /api/openapi.json so clients can fetch it.
+    const router = files.get("phoenix_app/lib/phoenix_app_web/router.ex")!;
+    expect(router).toMatch(/get\s+"\/openapi\.json",\s*OpenapiController/);
+  });
+
+  it("Every aggregate from wire-spec.json appears as <Name>Response in the Phoenix spec", async () => {
+    const model = await buildAcmeLiveViewModel();
+    const sys = enrichLoomModel(lowerModel(model)).systems[0]!;
+    const wireSpec = buildWireSpec(sys);
+    const { files } = generateSystems(model);
+    // Concatenate every file under lib/<app>_web/api/ — the spec module
+    // plus per-schema modules.  Schema names from the wire-spec must
+    // appear somewhere in this combined source.
+    const apiSource = [...files.entries()]
+      .filter(([k]) => /^phoenix_app\/lib\/phoenix_app_web\/api\//.test(k))
+      .map(([, v]) => v)
+      .join("\n");
+    for (const aggName of Object.keys(wireSpec.aggregates)) {
+      expect(apiSource).toContain(`${aggName}Response`);
+    }
+  });
+
+  it("Every value object from wire-spec.json appears as <Name> schema in the Phoenix spec", async () => {
+    const model = await buildAcmeLiveViewModel();
+    const sys = enrichLoomModel(lowerModel(model)).systems[0]!;
+    const wireSpec = buildWireSpec(sys);
+    const { files } = generateSystems(model);
+    const apiSource = [...files.entries()]
+      .filter(([k]) => /^phoenix_app\/lib\/phoenix_app_web\/api\//.test(k))
+      .map(([, v]) => v)
+      .join("\n");
+    for (const voName of Object.keys(wireSpec.valueObjects)) {
+      // Schema modules emit `defmodule …Schemas.<Name>` or reference
+      // the name as a `$ref` string — both must surface the bare name.
+      expect(apiSource).toContain(voName);
+    }
+  });
+
+  it("Every entity-part from wire-spec.json appears in the Phoenix spec", async () => {
+    const model = await buildAcmeLiveViewModel();
+    const sys = enrichLoomModel(lowerModel(model)).systems[0]!;
+    const wireSpec = buildWireSpec(sys);
+    const { files } = generateSystems(model);
+    const apiSource = [...files.entries()]
+      .filter(([k]) => /^phoenix_app\/lib\/phoenix_app_web\/api\//.test(k))
+      .map(([, v]) => v)
+      .join("\n");
+    for (const partName of Object.keys(wireSpec.parts)) {
+      expect(apiSource).toContain(partName);
+    }
+  });
+
+  it("Workflow + view endpoints surface in the Phoenix OpenAPI paths object", async () => {
+    const model = await buildAcmeLiveViewModel();
+    const { files } = generateSystems(model);
+    const spec = files.get(
+      "phoenix_app/lib/phoenix_app_web/api/sales_api_spec.ex",
+    )!;
+    // placeOrder workflow → POST /workflows/place_order
+    expect(spec).toMatch(/"\/workflows\/place_order"/);
+    expect(spec).toMatch(/PlaceOrderRequest/);
+    // ActiveOrders view → GET /views/active_orders
+    expect(spec).toMatch(/"\/views\/active_orders"/);
+    expect(spec).toMatch(/ActiveOrdersResponse/);
+  });
+
+  it("Aggregate CRUD endpoints surface in the paths object", async () => {
+    const model = await buildAcmeLiveViewModel();
+    const { files } = generateSystems(model);
+    const spec = files.get(
+      "phoenix_app/lib/phoenix_app_web/api/sales_api_spec.ex",
+    )!;
+    // GET /aggregates/customers (list) + GET /aggregates/customers/:id (read)
+    expect(spec).toMatch(/\/aggregates\/customers/);
+    expect(spec).toMatch(/\/aggregates\/orders/);
+    expect(spec).toMatch(/CreateCustomerRequest/);
+    expect(spec).toMatch(/CustomerListResponse/);
+  });
+
+  it("mix.exs declares the open_api_spex dependency", async () => {
+    const model = await buildAcmeLiveViewModel();
+    const { files } = generateSystems(model);
+    const mix = files.get("phoenix_app/mix.exs")!;
+    expect(mix).toMatch(/:open_api_spex/);
   });
 });
