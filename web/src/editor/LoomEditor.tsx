@@ -56,6 +56,11 @@ export interface LoomEditorProps {
    *  worker stays alive, which costs ~5–10 MB per saved instance
    *  and a few hundred ms of Langium init each. */
   client: LoomLspClient;
+  /** When true, Monaco is configured for a phone-sized viewport:
+   *  16 px font (prevents iOS Safari auto-zoom on focus), word wrap
+   *  so long lines don't force horizontal scroll, larger scrollbar
+   *  thumbs, folding/glyph margins off to claim back gutter pixels. */
+  isMobile?: boolean;
   onChange?: (value: string) => void;
   onDiagnosticsChange?: (items: Diagnostic[]) => void;
 }
@@ -70,6 +75,10 @@ export function LoomEditor(props: LoomEditorProps): JSX.Element {
   const onDiagnosticsRef = useRef(props.onDiagnosticsChange);
   onChangeRef.current = props.onChange;
   onDiagnosticsRef.current = props.onDiagnosticsChange;
+  // Capture once for the create-call; the editor doesn't reflow its
+  // options if `isMobile` flips, but the parent re-keys on
+  // viewport-class transitions so this is fine in practice.
+  const isMobileRef = useRef(props.isMobile ?? false);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -77,6 +86,7 @@ export function LoomEditor(props: LoomEditorProps): JSX.Element {
 
     const client = clientRef.current;
     let version = 0;
+    const isMobile = isMobileRef.current;
 
     const editor = monaco.editor.create(containerRef.current, {
       value: initialValueRef.current,
@@ -84,9 +94,38 @@ export function LoomEditor(props: LoomEditorProps): JSX.Element {
       theme: "vs-dark",
       automaticLayout: true,
       minimap: { enabled: false },
-      fontSize: 13,
+      // 16 px on mobile is the magic number — anything smaller and
+      // iOS Safari auto-zooms the whole page on input focus, which
+      // doesn't undo cleanly and breaks layout calculations.
+      fontSize: isMobile ? 16 : 13,
       scrollBeyondLastLine: false,
       tabSize: 2,
+      ...(isMobile
+        ? {
+            wordWrap: "on" as const,
+            // Fatter scrollbars are easier to grab with a thumb.
+            scrollbar: {
+              verticalScrollbarSize: 14,
+              horizontalScrollbarSize: 14,
+              useShadows: false,
+            },
+            // Claim back gutter pixels — every column counts on a phone.
+            lineNumbersMinChars: 2,
+            folding: false,
+            glyphMargin: false,
+            renderLineHighlight: "none" as const,
+            // Suggestion popups don't get clipped by the small viewport.
+            fixedOverflowWidgets: true,
+            // Touch users can't drag-and-drop selection ranges reliably;
+            // disabling avoids accidental moves while scrolling.
+            dragAndDrop: false,
+            // Right-click is long-press on touch — Monaco's context
+            // menu just gets in the way of the iOS share/copy popup.
+            contextmenu: false,
+            mouseStyle: "default" as const,
+            smoothScrolling: true,
+          }
+        : {}),
     });
     const model = editor.getModel();
     if (!model) {

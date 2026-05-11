@@ -1,0 +1,126 @@
+// Bundle of state + actions threaded from App.tsx down into the
+// shell components.  Keeping it as a plain interface (no React
+// context) means every consumer is explicit about what it reads —
+// the props panel in devtools shows exactly which slice each pane
+// depends on, and re-renders fan out naturally through React's
+// usual prop-equality bailouts.
+//
+// Children destructure what they need; they don't all consume the
+// full ctx.  When a pane needs only 2-3 fields you can pass those
+// instead of the whole ctx — see ProblemsPanel for an example.
+
+import type { ReactNode } from "react";
+import type { LoomLspClient } from "../lsp/client";
+import type { LoomBuildClient } from "../build/client";
+import type { LoomRuntimeClient } from "../runtime/client";
+import type { Diagnostic } from "../lsp/protocol";
+import type { GenerateOk, GenerateResult, VirtualFile } from "../build/protocol";
+import type { BundleFail, BundleOk } from "../bundle/protocol";
+import type { LoomExample } from "../examples";
+import type { TreeFolder } from "../preview/file-tree";
+import type { useWorkspace } from "../workspace/use-workspace";
+import type { PipelineState } from "../pipeline/state";
+import type { DispatchResult } from "../runtime/protocol";
+
+export type ReactBundleStatus =
+  | { kind: "pending" }
+  | { kind: "absent" }
+  | { kind: "fail"; result: BundleFail }
+  | { kind: "ok"; result: BundleOk };
+
+export type WorkspaceState = ReturnType<typeof useWorkspace>;
+
+export interface LayoutCtx {
+  isDesktop: boolean;
+
+  // Example picker
+  exampleId: string;
+  setExampleId: (v: string) => void;
+  augmentedExamplesList: LoomExample[];
+  initialSource: string;
+
+  // Workspace (IDB-backed VFS)
+  workspace: WorkspaceState;
+
+  // Worker clients
+  lspClient: LoomLspClient | null;
+  buildClient: LoomBuildClient | null;
+  runtimeClient: LoomRuntimeClient | null;
+
+  // Editor wiring
+  onSourceChange: (text: string) => void;
+  onDiagnosticsChange: (items: Diagnostic[]) => void;
+  scheduleAutoGenerate: () => void;
+
+  // Diagnostics + counts
+  diagnostics: Diagnostic[];
+  errorCount: number;
+  warningCount: number;
+
+  // Pipeline state + selectors
+  pipeline: PipelineState;
+  generateResult: GenerateResult | null;
+  generateSuccess: GenerateOk | null;
+  honoBundleResult: BundleOk | BundleFail | null;
+  reactBundleResult: BundleOk | BundleFail | null;
+  reactBundleStatus: ReactBundleStatus;
+  honoBundle: BundleOk | null;
+  reactBundle: BundleOk | null;
+  ddl: string | null;
+  persistent: boolean;
+  migrated: boolean;
+  bootErrorMessage: string | null;
+  dispatchSlot: DispatchResult | null;
+
+  // Files
+  files: VirtualFile[];
+  tree: TreeFolder;
+  selectedFile: VirtualFile | null;
+  selectedPath: string | null;
+  setSelectedPath: (p: string | null) => void;
+
+  // Backend tester form
+  reqMethod: string;
+  setReqMethod: (v: string) => void;
+  reqPath: string;
+  setReqPath: (v: string) => void;
+  reqBody: string;
+  setReqBody: (v: string) => void;
+
+  // Live mode
+  liveMode: boolean;
+  setLiveMode: (v: boolean) => void;
+
+  // Share-link feedback
+  copied: boolean;
+  copyShareLink: () => void;
+
+  // Actions
+  runGenerate: () => void;
+  runBundle: () => void;
+  runBoot: () => void;
+  runWipe: () => void;
+  runDispatch: () => void;
+}
+
+// Convenience helper — formats the generated-mode label used in the
+// Files-pane status text and the FooterBar.  Lives here so both
+// the desktop and mobile shells can import a single source of truth.
+export function modeLabel(result: GenerateResult | null): string {
+  if (!result) return "not generated";
+  if (!result.ok) return "failed";
+  switch (result.mode) {
+    case "system": return "system";
+    case "ts": return "single Hono project";
+    case "none": return "empty";
+  }
+}
+
+export function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+// Re-export to keep imports from shells short.
+export type { ReactNode };
