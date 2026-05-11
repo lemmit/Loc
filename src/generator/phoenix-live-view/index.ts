@@ -14,6 +14,9 @@ import {
 } from "./repository-emit.js";
 import { renderAshType, renderExpr } from "./render-expr.js";
 import { emitLiveViewPages, type LiveRoute } from "./liveview-emit.js";
+import { emitApiControllers, type ApiRoute } from "./api-emit.js";
+import { renderSidebarComponent } from "./sidebar-emit.js";
+import { renderThemeCss } from "./theme-emit.js";
 
 // ---------------------------------------------------------------------------
 // Phoenix LiveView / Ash generator orchestrator.
@@ -87,8 +90,41 @@ export function generatePhoenixLiveViewProject(
   });
   for (const [path, content] of liveFiles) out.set(path, content);
 
+  // --- API controllers (Batch A) -------------------------------------------
+  // Workflows / Views / Health controllers + their router entries.
+  // Workflows / Views are only emitted when `serves:` is populated;
+  // Health is always emitted (router references it unconditionally).
+  const { files: apiFiles, apiRoutes } = emitApiControllers({
+    contexts,
+    deployable,
+    sys,
+    appName,
+    appModule,
+  });
+  for (const [path, content] of apiFiles) out.set(path, content);
+
+  // --- Sidebar component (Batch C) -----------------------------------------
+  // Emitted when the deployable mounts a `ui:` — derived from
+  // MenuBlockIR or per-page menuMeta, identical structure to the
+  // React generator's sidebar.
+  if (deployable.uiName) {
+    const ui = sys.uis.find((u) => u.name === deployable.uiName);
+    if (ui) {
+      out.set(
+        `lib/${appName}_web/components/sidebar.ex`,
+        renderSidebarComponent({ ui, appName, appModule }),
+      );
+    }
+  }
+
+  // --- Theme CSS (Batch C) -------------------------------------------------
+  // System-level `theme { primary: ..., neutral: ..., radius: ... }`
+  // tokens lower to CSS custom properties consumable from any
+  // generated layout.  Always emit (empty theme produces a stub).
+  out.set(`priv/static/assets/theme.css`, renderThemeCss(sys.theme));
+
   // --- Shell files ----------------------------------------------------------
-  emitShellFiles(appName, appModule, deployable, sys, liveRoutes, out);
+  emitShellFiles(appName, appModule, deployable, sys, liveRoutes, apiRoutes, out);
 
   return out;
 }
@@ -414,6 +450,7 @@ function emitShellFiles(
   deployable: DeployableIR,
   _sys: SystemIR,
   liveRoutes: LiveRoute[],
+  apiRoutes: ApiRoute[],
   out: Map<string, string>,
 ): void {
   const port = deployable.port ?? 4000;
@@ -436,7 +473,10 @@ function emitShellFiles(
   out.set(`lib/${appName}_web/endpoint.ex`, renderEndpoint(appName, appModule));
 
   // lib/<app>_web/router.ex
-  out.set(`lib/${appName}_web/router.ex`, renderRouter(appName, appModule, liveRoutes));
+  out.set(
+    `lib/${appName}_web/router.ex`,
+    renderRouter(appName, appModule, liveRoutes, apiRoutes),
+  );
 
   // lib/<app>_web/components/layouts.ex
   out.set(`lib/${appName}_web/components/layouts.ex`, renderLayouts(appName, appModule));
@@ -736,13 +776,12 @@ function renderRouter(
   appName: string,
   appModule: string,
   liveRoutes: LiveRoute[],
+  apiRoutes: ApiRoute[],
 ): string {
   void appName;
   const webModule = `${appModule}Web`;
-  // Render `live "<route>", <Page>Live` per PageIR.  Module names
-  // emitted by liveview-emit are fully qualified (e.g.
-  // `MyAppWeb.OrderListLive`); strip the leading `<webModule>.`
-  // because they're inside a `scope "/", <webModule>` block.
+  // LiveView page entries — strip the leading `<webModule>.` because
+  // they're inside a `scope "/", <webModule>` block.
   const liveLines = liveRoutes
     .map((r) => {
       const local = r.liveModule.startsWith(`${webModule}.`)
@@ -752,6 +791,26 @@ function renderRouter(
     })
     .join("\n");
   const liveBody = liveLines || `    # No pages declared in this deployable's ui: block.`;
+
+  // API routes — Batch A's emitApiControllers returns:
+  //   - paths prefixed with `!root:` → outside `/api` scope (health / ready)
+  //   - bare paths → inside `scope "/api"`
+  const rootApiRoutes = apiRoutes.filter((r) => r.path.startsWith("!root:"));
+  const scopedApiRoutes = apiRoutes.filter((r) => !r.path.startsWith("!root:"));
+  const scopedLines = scopedApiRoutes
+    .map(
+      (r) =>
+        `    ${r.method} ${JSON.stringify(r.path)}, ${r.controller}, ${r.action}`,
+    )
+    .join("\n");
+  const scopedBody = scopedLines || `    # No API routes — backend has no workflows / views or 'serves:' is empty.`;
+  const rootLines = rootApiRoutes
+    .map((r) => {
+      const path = r.path.slice("!root:".length);
+      return `  ${r.method} ${JSON.stringify(path)}, ${webModule}.${r.controller}, ${r.action}`;
+    })
+    .join("\n");
+
   return `# Auto-generated.
 defmodule ${webModule}.Router do
   use ${webModule}, :router
@@ -777,10 +836,11 @@ ${liveBody}
 
   scope "/api", ${webModule} do
     pipe_through :api
-    # API routes (workflows / views) — emitted by Phase 8 follow-up.
+
+${scopedBody}
   end
 
-  get "/health", ${webModule}.HealthController, :index
+${rootLines}
 end
 `;
 }

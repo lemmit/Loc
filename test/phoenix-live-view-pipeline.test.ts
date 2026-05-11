@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 import { createDddServices } from "../src/language/ddd-module.js";
 import { generateSystems } from "../src/system/index.js";
 import type { Model } from "../src/language/generated/ast.js";
+import { emitApiControllers } from "../src/generator/phoenix-live-view/api-emit.js";
+import type { BoundedContextIR, DeployableIR, SystemIR } from "../src/ir/loom-ir.js";
 
 // ---------------------------------------------------------------------------
 // Phase 9 — phoenixLiveView pipeline integration test.
@@ -209,5 +211,222 @@ describe("phoenixLiveView pipeline (Phases 1-8)", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// api-emit unit tests — exercise emitApiControllers directly.
+// ---------------------------------------------------------------------------
+
+describe("emitApiControllers (api-emit unit)", () => {
+  // Minimal stub BoundedContextIR — one workflow declared.
+  const workflowCtx: BoundedContextIR = {
+    name: "Sales",
+    enums: [],
+    valueObjects: [],
+    events: [],
+    aggregates: [],
+    repositories: [],
+    workflows: [
+      {
+        name: "placeOrder",
+        params: [{ name: "customerId", type: { kind: "primitive", name: "guid" } }],
+        transactional: false,
+        statements: [],
+        savesAtExit: [],
+      },
+    ],
+    views: [],
+  };
+
+  const stubDeployable: DeployableIR = {
+    name: "phoenixApp",
+    platform: "phoenixLiveView",
+    moduleNames: ["Sales"],
+    port: 4000,
+    serves: ["SalesApi"],
+    uiBindings: [],
+    moduleBindings: [],
+  };
+
+  const stubSys: SystemIR = {
+    name: "Mini",
+    modules: [],
+    deployables: [stubDeployable],
+    e2eTests: [],
+    uis: [],
+    apis: [],
+    storages: [],
+  };
+
+  it("always emits health_controller.ex regardless of workflows", () => {
+    // Even with no workflows, the health controller must be present.
+    const emptyCtx: BoundedContextIR = { ...workflowCtx, workflows: [], views: [] };
+    const { files } = emitApiControllers({
+      contexts: [emptyCtx],
+      deployable: stubDeployable,
+      sys: stubSys,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    expect(files.has("lib/phoenix_app_web/controllers/health_controller.ex")).toBe(true);
+  });
+
+  it("health_controller.ex contains liveness and readiness actions", () => {
+    const { files } = emitApiControllers({
+      contexts: [workflowCtx],
+      deployable: stubDeployable,
+      sys: stubSys,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    const health = files.get("lib/phoenix_app_web/controllers/health_controller.ex")!;
+    expect(health).toMatch(/def liveness\(/);
+    expect(health).toMatch(/def readiness\(/);
+    expect(health).toMatch(/"ok"/);
+    expect(health).toMatch(/service_unavailable/);
+    expect(health).toMatch(/PhoenixApp\.Repo/);
+  });
+
+  it("emits workflows_controller.ex when deployable serves an api and workflows exist", () => {
+    const { files, apiRoutes } = emitApiControllers({
+      contexts: [workflowCtx],
+      deployable: stubDeployable,
+      sys: stubSys,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    expect(files.has("lib/phoenix_app_web/controllers/workflows_controller.ex")).toBe(true);
+    const ctrl = files.get("lib/phoenix_app_web/controllers/workflows_controller.ex")!;
+    expect(ctrl).toMatch(/def place_order\(conn, params\)/);
+    expect(ctrl).toMatch(/PhoenixApp\.Sales\.Workflows\.PlaceOrder\.run/);
+
+    // Route entry exists with correct shape
+    const wfRoute = apiRoutes.find((r) => r.path === "/workflows/place_order");
+    expect(wfRoute).toBeDefined();
+    expect(wfRoute?.method).toBe("post");
+    expect(wfRoute?.action).toBe(":place_order");
+  });
+
+  it("does NOT emit workflows_controller.ex when deployable serves nothing", () => {
+    const noServe: DeployableIR = { ...stubDeployable, serves: [] };
+    const { files } = emitApiControllers({
+      contexts: [workflowCtx],
+      deployable: noServe,
+      sys: stubSys,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    expect(files.has("lib/phoenix_app_web/controllers/workflows_controller.ex")).toBe(false);
+  });
+
+  it("emits !root: sentinel routes for /health and /ready", () => {
+    const { apiRoutes } = emitApiControllers({
+      contexts: [workflowCtx],
+      deployable: stubDeployable,
+      sys: stubSys,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    const health = apiRoutes.find((r) => r.path === "!root:/health");
+    const ready = apiRoutes.find((r) => r.path === "!root:/ready");
+    expect(health).toBeDefined();
+    expect(health?.action).toBe(":liveness");
+    expect(ready).toBeDefined();
+    expect(ready?.action).toBe(":readiness");
+  });
+});
+
 // suppress unused imports if test framework expects them at top level
 void repoRoot;
+
+// ---------------------------------------------------------------------------
+// Batch C — markers for parent integration.
+//
+// These tests will pass once the orchestrator (index.ts) wires the four new
+// emitters.  Kept as .skip() so the build stays green; remove .skip() when
+// the parent integration lands.
+// ---------------------------------------------------------------------------
+
+describe.skip("Batch C integration (parent wires emitters)", () => {
+  it("renderThemeCss produces a :root block with CSS custom properties", async () => {
+    const { renderThemeCss } = await import(
+      "../src/generator/phoenix-live-view/theme-emit.js"
+    );
+    const css = renderThemeCss(undefined);
+    expect(css).toMatch(/:root\s*\{/);
+    expect(css).toMatch(/--color-brand-6:/);
+    expect(css).toMatch(/--color-primary:/);
+    expect(css).toMatch(/--font-family:/);
+    expect(css).toMatch(/--radius:/);
+    expect(css).not.toMatch(/<style>/);
+  });
+
+  it("renderSidebarComponent emits a Phoenix.Component nav block", async () => {
+    const { renderSidebarComponent } = await import(
+      "../src/generator/phoenix-live-view/sidebar-emit.js"
+    );
+    const ui = {
+      name: "SalesAdmin",
+      pages: [{ name: "Home", route: "/", params: [], state: [], source: "scaffold" as const }],
+      components: [],
+      scaffolds: [],
+      apiParams: [],
+      helperImports: [],
+    };
+    const src = renderSidebarComponent({ ui, appName: "sales", appModule: "Sales" });
+    expect(src).toMatch(/defmodule SalesWeb\.Components\.Sidebar/);
+    expect(src).toMatch(/def sidebar\(assigns\)/);
+    expect(src).toMatch(/data-testid="sidebar"/);
+  });
+
+  it("renderWorkflowFormHeex returns a non-placeholder HEEx string when workflow exists", async () => {
+    const { renderWorkflowFormHeex } = await import(
+      "../src/generator/phoenix-live-view/extra-archetype-emit.js"
+    );
+    const { loadPack, resolvePackDir } = await import(
+      "../src/generator/react/templating/loader-fs.js"
+    );
+    const pack = loadPack(resolvePackDir("ashPhoenix"));
+    const ctx = {
+      name: "Sales",
+      enums: [],
+      valueObjects: [],
+      events: [],
+      aggregates: [],
+      repositories: [],
+      workflows: [{ name: "placeOrder", params: [], transactional: false, statements: [], savesAtExit: [] }],
+      views: [],
+    };
+    const heex = renderWorkflowFormHeex({
+      workflowName: "placeOrder",
+      contextName: "Sales",
+      contexts: [ctx],
+      aggregatesByName: new Map(),
+      pack,
+    });
+    expect(heex).toMatch(/data-testid="workflow-place_order"/);
+    expect(heex).not.toMatch(/<!-- TODO:/);
+  });
+
+  it("buildPlaywrightPageObject emits a class with goto() for a home page", async () => {
+    const { buildPlaywrightPageObject } = await import(
+      "../src/generator/phoenix-live-view/page-objects-emit.js"
+    );
+    const page = {
+      name: "Home",
+      route: "/",
+      params: [],
+      state: [],
+      source: "scaffold" as const,
+      scaffoldOrigin: { kind: "home" as const },
+    };
+    const ts = buildPlaywrightPageObject({
+      page,
+      appName: "sales",
+      aggregatesByName: new Map(),
+      contextByAggName: new Map(),
+    });
+    expect(ts).toMatch(/export class HomePage/);
+    expect(ts).toMatch(/static readonly url = "\/"/);
+    expect(ts).toMatch(/async goto\(\)/);
+    expect(ts).toMatch(/getByTestId\("home"\)/);
+  });
+});

@@ -39,6 +39,20 @@ import type { LoadedPack } from "../react/templating/loader.js";
 import { prepareDetailPageVM } from "../react/templating/preparers/detail.js";
 import { prepareListPageVM } from "../react/templating/preparers/list.js";
 import { prepareNewPageVM } from "../react/templating/preparers/new.js";
+import {
+  defaultInitFor,
+  renderRequiresGuard,
+  walkBodyToHeex,
+  type HandleEventClause,
+} from "./heex-walker.js";
+import {
+  renderHomeHeex,
+  renderViewsIndexHeex,
+  renderViewTableHeex,
+  renderWorkflowFormHeex,
+  renderWorkflowsIndexHeex,
+} from "./extra-archetype-emit.js";
+import { buildPlaywrightPageObject } from "./page-objects-emit.js";
 
 /** One router entry the orchestrator splices into router.ex. */
 export interface LiveRoute {
@@ -104,9 +118,24 @@ export function emitLiveViewPages(args: {
       pack,
       aggregatesByName,
       contextByAggName,
+      ui,
+      contexts,
+      sys,
     });
     out.set(filePath, source);
     routes.push({ route: page.route, liveModule });
+
+    // Playwright page object — Batch C emission.  Mirrors the React
+    // generator's per-page `e2e/pages/<page>.ts` so `test e2e ui`
+    // blocks (src/system/ui-e2e-render.ts) drive the Phoenix
+    // deployable identically to a React one.
+    const pageObjectSource = buildPlaywrightPageObject({
+      page,
+      appName,
+      aggregatesByName,
+      contextByAggName,
+    });
+    out.set(`e2e/pages/${snake(page.name)}.ts`, pageObjectSource);
   }
 
   return { files: out, routes };
@@ -120,23 +149,44 @@ interface RenderArgs {
   pack: LoadedPack;
   aggregatesByName: Map<string, AggregateIR>;
   contextByAggName: Map<string, BoundedContextIR>;
+  ui: UiIR;
+  contexts: BoundedContextIR[];
+  sys: SystemIR;
 }
 
 function renderLiveView(a: RenderArgs): string {
-  const { page, liveModule, appModule, pack, aggregatesByName, contextByAggName } = a;
+  const { page, liveModule, appModule, ui } = a;
   const webModule = `${appModule}Web`;
-  const heex = renderPageHeex(a);
+
+  // Scaffold pages render through the pack templates; non-scaffold
+  // pages route through the HEEx walker (Batch B).  The walker also
+  // produces handle_event clauses + alias lines from helper imports
+  // that the body actually references.
+  let heex: string;
+  let handlers: HandleEventClause[] = [];
+  let aliasLines: string[] = [];
+  if (page.scaffoldOrigin) {
+    heex = renderPageHeex(a);
+  } else {
+    const walked = walkBodyToHeex(page.body, page, ui, appModule);
+    heex = walked.heex;
+    handlers = walked.handlers;
+    aliasLines = walked.aliasLines;
+  }
+
   const mount = renderMount(page);
-  const handleParams = renderHandleParams(page);
+  const handleParams = renderHandleParams(page, ui, appModule);
+  const handleEventClauses = renderHandleEventClauses(handlers);
+  const aliasBlock = aliasLines.length > 0 ? aliasLines.join("\n") + "\n" : "";
 
   return `# Auto-generated.
 defmodule ${liveModule} do
   use ${webModule}, :live_view
-
+${aliasBlock}
 ${mount}
 
 ${handleParams}
-
+${handleEventClauses}
   @impl true
   def render(assigns) do
     ~H"""
@@ -145,20 +195,32 @@ ${indent(heex, 4)}
   end
 end
 `;
+}
 
-  // Linting: aggregatesByName / contextByAggName are consumed inside
-  // renderPageHeex via the closure above.  Keep them visible to
-  // future expansions (operation event handlers, etc.).
-  void aggregatesByName;
-  void contextByAggName;
-  void pack;
+function renderHandleEventClauses(handlers: HandleEventClause[]): string {
+  if (handlers.length === 0) return "";
+  return (
+    "\n" +
+    handlers
+      .map(
+        (h) =>
+          `  @impl true
+  def handle_event(${JSON.stringify(h.name)}, ${h.paramsPattern}, socket) do
+${h.body.join("\n")}
+  end\n`,
+      )
+      .join("\n")
+  );
 }
 
 function renderPageHeex(a: RenderArgs): string {
-  const { page, pack, aggregatesByName, contextByAggName } = a;
+  const { page, pack, aggregatesByName, contextByAggName, contexts, sys } = a;
   const origin = page.scaffoldOrigin;
   if (!origin) {
-    return `<!-- TODO: walker-driven body for explicit page '${page.name}' (Phase 7 follow-up) -->`;
+    // Custom page bodies are handled by the HEEx walker (Batch B) at
+    // the renderLiveView level — this function is only called for
+    // scaffold-origin pages.
+    return `<!-- non-scaffold page should route through the walker -->`;
   }
   switch (origin.kind) {
     case "aggregate-list": {
@@ -182,14 +244,27 @@ function renderPageHeex(a: RenderArgs): string {
       return safeRender(pack, "page-detail", vm, page.name);
     }
     case "workflow-form":
+      return renderWorkflowFormHeex({
+        workflowName: origin.workflowName,
+        contextName: origin.contextName,
+        contexts,
+        aggregatesByName,
+        pack,
+      });
     case "view-list":
+      return renderViewTableHeex({
+        viewName: origin.viewName,
+        contextName: origin.contextName,
+        contexts,
+        aggregatesByName,
+        pack,
+      });
     case "workflows-index":
+      return renderWorkflowsIndexHeex({ contexts, pack });
     case "views-index":
+      return renderViewsIndexHeex({ contexts, pack });
     case "home":
-      // v0 stub — Phase 7 follow-up wires preparers + pack templates
-      // for these archetypes.  HEEx body is a placeholder so the
-      // LiveView still mounts cleanly.
-      return `<!-- TODO: ${origin.kind} HEEx (Phase 7 follow-up) -->\n<.header>${page.name}</.header>`;
+      return renderHomeHeex({ contexts, sysName: sys.name, pack });
   }
 }
 
@@ -205,7 +280,9 @@ function safeRender(pack: LoadedPack, templateName: string, vm: unknown, pageNam
 function renderMount(page: PageIR): string {
   const assigns: string[] = [];
   for (const f of page.state) {
-    assigns.push(`      |> assign(:${snake(f.name)}, ${defaultElixirValueFor(f.type)})`);
+    // Type-aware default from the walker — single source of truth so
+    // `state.field` defaults match across scaffold and custom pages.
+    assigns.push(`      |> assign(:${snake(f.name)}, ${defaultInitFor(f.type)})`);
   }
   if (assigns.length === 0) {
     return `  @impl true
@@ -222,57 +299,47 @@ ${assigns.join("\n")}
   end`;
 }
 
-function renderHandleParams(page: PageIR): string {
+function renderHandleParams(page: PageIR, ui: UiIR, appModule: string): string {
   const paramAssigns: string[] = [];
   for (const p of page.params) {
     paramAssigns.push(`      |> assign(:${snake(p.name)}, params["${camel(p.name)}"])`);
   }
-  // `requires` lowering is a Phase 7 follow-up — for v0 we just bind
-  // route params and acknowledge.  The grammar's `requires` predicate
-  // would lower to a guard that push_navigate's home with a flash
-  // on failure.
+  // `requires <pred>` lowers to a guard that push_navigates to the
+  // root and flashes "forbidden" when the predicate is false.  The
+  // walker renders the predicate in handler position (so state refs
+  // resolve to `socket.assigns.…`).
+  const guard = renderRequiresGuard(page, ui, appModule);
+  const guardBlock = guard
+    ? `    if not (${guard}) do
+      {:noreply, socket |> put_flash(:error, "forbidden") |> push_navigate(to: "/")}
+    else
+`
+    : "";
+  const guardClose = guard ? `    end` : "";
+  const noParamsBody = guard
+    ? `${guardBlock}      {:noreply, socket}
+${guardClose}`
+    : `    {:noreply, socket}`;
+  const withParamsBody = guard
+    ? `${guardBlock}      socket =
+        socket
+${paramAssigns.map((l) => "  " + l).join("\n")}
+      {:noreply, socket}
+${guardClose}`
+    : `    socket =
+      socket
+${paramAssigns.join("\n")}
+    {:noreply, socket}`;
   if (paramAssigns.length === 0) {
     return `  @impl true
   def handle_params(_params, _uri, socket) do
-    {:noreply, socket}
+${noParamsBody}
   end`;
   }
   return `  @impl true
   def handle_params(params, _uri, socket) do
-    socket =
-      socket
-${paramAssigns.join("\n")}
-    {:noreply, socket}
+${withParamsBody}
   end`;
-}
-
-function defaultElixirValueFor(t: { kind: string; name?: string; optional?: boolean }): string {
-  if (t.optional) return "nil";
-  switch (t.kind) {
-    case "primitive":
-      switch (t.name) {
-        case "int":
-        case "long":
-        case "decimal":
-          return "0";
-        case "bool":
-          return "false";
-        case "string":
-          return `""`;
-        case "datetime":
-          return "DateTime.utc_now()";
-        case "guid":
-          return `""`;
-        default:
-          return "nil";
-      }
-    case "id-of":
-      return "nil";
-    case "array":
-      return "[]";
-    default:
-      return "nil";
-  }
 }
 
 function indent(s: string, n: number): string {
