@@ -42,7 +42,7 @@ import type {
   WorkflowIR,
 } from "../../ir/loom-ir.js";
 import { camel, snake } from "../../util/naming.js";
-import type { LoadedPack } from "./templating/loader.js";
+import type { LoadedPack } from "../_packs/loader.js";
 import { buildPageObjectModule } from "./page-objects-builder.js";
 import { buildWorkflowPageObject } from "./workflow-builder.js";
 import { buildViewPageObject } from "./view-builder.js";

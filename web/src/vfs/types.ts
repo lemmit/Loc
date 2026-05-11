@@ -13,7 +13,7 @@
 // difference between bundled and user-supplied content.
 //
 // Design constraints:
-//   - **Sync.**  `compilePack` (`src/generator/react/templating/loader.ts`)
+//   - **Sync.**  `compilePack` (`src/generator/_packs/loader.ts`)
 //     is sync; the entire generator depends on it.  Going async would
 //     propagate through every preparer and break the Node loader's
 //     contract.  All VFS reads stay sync; pre-populate eagerly.

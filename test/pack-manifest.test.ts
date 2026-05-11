@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { loadPack, resolvePackDir } from "../src/generator/react/templating/loader-fs.js";
+import { loadPack, resolvePackDir } from "../src/generator/_packs/loader-fs.js";
 
 // ---------------------------------------------------------------------------
 // Manifest-extension tests for `shellFiles` and `shellGlobs` (the

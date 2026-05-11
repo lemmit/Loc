@@ -19,8 +19,8 @@ import {
   buildViewsApiModule,
   hasAnyView,
 } from "./view-builder.js";
-import { loadPack, resolvePackDir } from "./templating/loader-fs.js";
-import type { LoadedPack } from "./templating/loader.js";
+import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
+import type { LoadedPack } from "../_packs/loader.js";
 import {
   renderAppShell,
   renderMain,

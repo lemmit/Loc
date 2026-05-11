@@ -6,7 +6,7 @@ const browserPackLoader = fileURLToPath(
   new URL("./src/build/loader-vfs.ts", import.meta.url),
 );
 
-// Vite plugin that swaps `templating/loader-fs.js` (Node fs-bound)
+// Vite plugin that swaps `_packs/loader-fs.js` (Node fs-bound)
 // for the VFS-backed browser loader.  We use a custom resolver
 // instead of `resolve.alias` because Rollup's alias plugin applies
 // the regex via `id.replace`, which mangles the absolute id path;
@@ -15,7 +15,7 @@ const loomLoaderShim = (): Plugin => ({
   name: "loom-loader-shim",
   enforce: "pre",
   resolveId(source) {
-    if (source.endsWith("/templating/loader-fs.js")) {
+    if (source.endsWith("/_packs/loader-fs.js")) {
       return browserPackLoader;
     }
     return null;
