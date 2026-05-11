@@ -674,7 +674,14 @@ export interface PermissionDeclIR {
 // Vite bundle and serves it via a small static-asset host (nginx in
 // the v0 emitter).  Coexists with `react` until Slice 8 swaps them
 // out — keeps every existing test/example green during the rollout.
-export type Platform = "dotnet" | "hono" | "react" | "static";
+//
+// `phoenixLiveView` is the fullstack Elixir/Ash + Phoenix LiveView
+// platform: a single deployable serves an Ash-derived API AND mounts
+// a `ui:` whose pages render as LiveView modules against the
+// `ashPhoenix` HEEx pack.  Unlike `react`/`static` it owns its own
+// database (`needsDb: true`) and never declares `targets:` —
+// validator enforces both.
+export type Platform = "dotnet" | "hono" | "react" | "static" | "phoenixLiveView";
 
 export interface DeployableIR {
   name: string;

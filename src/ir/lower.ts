@@ -439,7 +439,9 @@ function lowerDeployable(
   const design =
     platform === "react" || platform === "static"
       ? (d.design ?? "mantine")
-      : undefined;
+      : platform === "phoenixLiveView"
+        ? (d.design ?? "ashPhoenix")
+        : undefined;
   // Slice 2: page-metamodel UI binding.  The grammar accepts two
   // surface forms — `ui: WebApp` (sugar) and `ui WebApp { framework: react }`
   // (full block).  Both lower to the same `uiName` + optional
@@ -451,7 +453,19 @@ function lowerDeployable(
     ?? d.uiCompose?.ref?.ref?.name
     ?? d.uiBlock?.ref?.ref?.name
     ?? undefined;
-  const uiFramework = d.uiBlock?.framework ?? undefined;
+  // Explicit `framework: …` in the full block wins; otherwise default
+  // from the platform (`react`/`static` → react; `phoenixLiveView` →
+  // phoenixLiveView).  Backends without a `ui:` binding leave this
+  // undefined.
+  const uiFramework =
+    d.uiBlock?.framework
+    ?? (uiName
+      ? platform === "phoenixLiveView"
+        ? "phoenixLiveView"
+        : platform === "react" || platform === "static"
+          ? "react"
+          : undefined
+      : undefined);
   // Slice 11.26 — explicit api composition.
   const serves = (d.serves ?? [])
     .map((r) => r.ref?.name ?? "")
@@ -492,6 +506,7 @@ function defaultPort(platform: Platform | undefined): number {
   if (platform === "dotnet") return 8080;
   if (platform === "react") return 3001;
   if (platform === "static") return 3001;
+  if (platform === "phoenixLiveView") return 4000;
   return 3000;
 }
 

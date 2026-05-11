@@ -27,12 +27,28 @@ import {
   snake,
 } from "../../../util/naming.js";
 
+/** Output format the pack's templates produce.  `tsx` is the v0
+ *  React/Mantine/shadcn case (Handlebars over .hbs files yielding
+ *  TSX); `heex` is the Phoenix LiveView case (Handlebars over
+ *  .heex.hbs files yielding HEEx).  Drives two things:
+ *    1. Which repo-root shared-source directories the loader pulls
+ *       in (TSX packs get `vite/`+`api/`+`docker/`; HEEx packs get
+ *       a future `phoenix/` once it lands and skip the TSX dirs).
+ *    2. Documentation — pack authors and downstream tooling can
+ *       discriminate without parsing template contents.
+ *  Handlebars itself is content-agnostic, so the compilation path
+ *  doesn't branch on `format`.  Defaults to `"tsx"` for backward
+ *  compatibility with existing manifests that omit the field. */
+export type PackFormat = "tsx" | "heex";
+
 /** Manifest schema for `<pack>/pack.json`. */
 export interface PackManifest {
-  /** Pack name — informational, e.g. "mantine", "shadcn". */
+  /** Pack name — informational, e.g. "mantine", "shadcn", "ashPhoenix". */
   name: string;
   /** Pack version string — informational, e.g. "0.1.0". */
   version: string;
+  /** Output format — `"tsx"` (default) or `"heex"`.  See `PackFormat`. */
+  format?: PackFormat;
   /** Logical template name → filename relative to the pack directory.
    *  Example: { "page-list": "page-list.hbs", "cell-id-link":
    *  "cell-id-link.hbs", ... }.  Names that the generator looks up
