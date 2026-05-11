@@ -1,18 +1,20 @@
 # Design-system packs — author's guide
 
-> Status: contract documented; Mantine and shadcn are the reference
-> implementations.
+> Status: contract is stable.  Four `tsx`-format packs (Mantine,
+> shadcn, MUI, Chakra) and one `heex`-format pack (ashPhoenix) ship
+> in-tree.  Mantine and shadcn are the reference implementations for
+> the npm-package and source-copy distribution models respectively.
 
 A **design-system pack** is the unit of pluggable UI in Loom's React
 generator.  When a user writes `design: <name>` in a `.ddd` source's
 `deployable webApp { ... }` block, the React generator loads that
 pack and renders every UI surface (pages, forms, tables, cells) through
-it.  Built-in packs are `mantine` and `shadcn`; custom packs are any
-directory the user points the slot at.
+it.  Built-in packs are `mantine`, `shadcn`, `mui`, `chakra`, and
+`ashPhoenix`; custom packs are any directory the user points the slot at.
 
-This document is the contract.  If you're writing a third design pack
-— for Material UI, Chakra, your in-house system, whatever — this is
-what you must satisfy.
+This document is the contract.  If you're writing another design pack
+— for Ant Design, Radix Primitives, your in-house system, whatever —
+this is what you must satisfy.
 
 ## 1. Repository layout
 
@@ -63,7 +65,7 @@ template directories the loader pulls in:
 | Format | Shared dirs read |
 |---|---|
 | `tsx` (default) | `vite/`, `api/`, `docker/` |
-| `heex` | `phoenix/` (future; empty in v0 — `ashPhoenix` ships its shell files directly) |
+| `heex` | `phoenix/` (the in-tree `ashPhoenix` pack ships most shell content as regular `emits`; `phoenix/` is reserved for pack-agnostic Phoenix scaffolding shared across future LiveView packs) |
 
 A pack's filename convention should match its format (`*.hbs` for tsx,
 `*.heex.hbs` for heex), but the loader keys off the manifest's
@@ -93,9 +95,18 @@ this map to know which package the named exports come from.
 }
 ```
 
-Mantine maps almost every primitive to `@mantine/core`; shadcn maps
-them to local `@/components/ui/*` paths (because shadcn ships
+Mantine maps almost every primitive to `@mantine/core`; MUI maps them
+to `@mui/material`; Chakra maps them to `@chakra-ui/react`; shadcn
+maps them to local `@/components/ui/*` paths (because shadcn ships
 components as source — see `shellGlobs`).
+
+Each entry in `named` is either a bare symbol (`"Button"`, emitted as
+`import { Button } from ...`) or an aliased pair
+(`{ "name": "Link", "as": "PackLink" }`, emitted as
+`import { Link as PackLink } from ...`).  Aliasing lets a pack
+disambiguate a primitive's component from another import the walker
+adds elsewhere — for example, when both the pack's library and
+`react-router-dom` export a `Link`.
 
 ### `shellFiles` — optional
 Pack-specific files emitted as part of the project shell, declared by
@@ -128,17 +139,26 @@ Mantine doesn't use this because its components come from an npm
 package, not source files.
 
 ### `helpers` — optional
-Pack-specific lookup tables consulted by helpers in templates.  Today
-the only registered helper is `lucide`, used by the shadcn pack to
-translate Tabler-style icon names from the DSL (`IconPlus`) to
-Lucide's names (`Plus`).
+Pack-specific lookup tables consulted by generator-side code (not by
+templates directly).  Registered helpers today:
+
+- `lucide` (shadcn) — Tabler-icon-name → Lucide-icon-name (e.g.
+  `IconPlus` → `Plus`).
+- `muiIcon` (MUI) — Tabler-icon-name → `@mui/icons-material` name
+  (e.g. `IconPlus` → `Add`).
+- `muiRadius` / `chakraRadius` — Mantine-style radius tokens
+  (`xs`/`sm`/`md`/`lg`/`xl`) → pack-native numeric or CSS value.
+
+See §7 for what each helper unlocks.  A pack only needs the helpers
+its templates actually consult.
 
 ## 3. Required emits
 
-The generator dispatches the following 80+ logical names.  Every pack
-must emit a file for each.  Logical names are conceptual contracts;
-the .hbs file behind each can render whatever the design system needs
-to fulfill the contract.
+The generator dispatches ~80 logical names per `tsx` pack and ~40 per
+`heex` pack.  Every pack must emit a file for each name the generator
+calls; missing entries throw at template-resolution time, not silently.
+Logical names are conceptual contracts; the `.hbs` file behind each
+can render whatever the design system needs to fulfill the contract.
 
 ### Project shell (3)
 
@@ -205,21 +225,39 @@ wraps `<KeyValueRow>` from `format-helpers`.
 | `field-row-enum` | enum |
 | `field-row-valueobject` | value object (recursive) |
 
-### Cell templates (8)
+### Cell templates (16)
 
 Cells render an aggregate's columns on the list page and view tables.
-Each wraps the pack's `<TableCell>`-equivalent.
+Each kind has two variants: the `cell-X` template wraps the pack's
+`<TableCell>`-equivalent (used on list-page tables) and the
+`cell-X-value` template emits just the inner value (used inside
+already-cell-wrapped contexts like `primitive-table` view-tables).
 
-| Name | DSL kind |
+| Wrapped (`cell-X`) | Inner (`cell-X-value`) | DSL kind |
+|---|---|---|
+| `cell-string` | `cell-string-value` | string |
+| `cell-id` | `cell-id-value` | id |
+| `cell-id-link` | `cell-id-link-value` | id with link |
+| `cell-row-id-link` | `cell-row-id-link-value` | row-level id link |
+| `cell-datetime` | `cell-datetime-value` | datetime |
+| `cell-bool` | `cell-bool-value` | bool |
+| `cell-number` | `cell-number-value` | int / decimal |
+| `cell-enum` | `cell-enum-value` | enum |
+
+### Form-helper templates (5)
+
+`Form(of: <Agg>)` and `Form(runs: <wf>)` page bodies dispatch to these
+per-pack snippets for the imports/declarations/submit-flow that vary
+between an aggregate-create form and a workflow-run form, plus the
+default submit handler.
+
+| Name | Purpose |
 |---|---|
-| `cell-string` | string |
-| `cell-id` | id |
-| `cell-id-link` | id with link |
-| `cell-row-id-link` | row-level id link |
-| `cell-datetime` | datetime |
-| `cell-bool` | bool |
-| `cell-number` | int / decimal |
-| `cell-enum` | enum |
+| `form-of-imports` | Extra imports for an aggregate `Form(of:)` page (e.g. notify helpers, navigate hook). |
+| `form-of-decls` | Top-of-component declarations for the same (mutation hook, navigate). |
+| `form-runs-imports` | Extra imports for a workflow `Form(runs:)` page. |
+| `form-runs-decls` | Top-of-component declarations for the same (workflow mutation hook). |
+| `form-default-onsubmit` | The submit-handler body when no explicit `onSubmit:` lambda is given on the `Form` node: mutation call → notify → navigate.  Each pack writes this with its native notification API. |
 
 ### Aggregate piece templates (2)
 
@@ -228,36 +266,70 @@ Each wraps the pack's `<TableCell>`-equivalent.
 | `part-table` | Table rendering aggregate "parts" (collection-of-X on the detail page). |
 | `op-button` | A single operation-trigger button on the detail page. |
 
-### Walker primitives (22)
+### Walker primitives (34)
 
 The body-walker dispatches every page-metamodel node through these
 primitives.  The walker calls `pack.render("primitive-X", vm)` and
 expects the pack's template to produce design-system-appropriate JSX.
 
+**Layout / structure**
+
 | Primitive | Use |
 |---|---|
-| `primitive-heading` | Section heading |
-| `primitive-text` | Body text |
-| `primitive-divider` | Visual separator |
 | `primitive-stack` | Vertical flex container |
 | `primitive-group` | Horizontal flex container |
 | `primitive-toolbar` | Horizontal toolbar (group variant) |
 | `primitive-grid` | Grid container |
 | `primitive-container` | Width-constrained container |
-| `primitive-empty` | Empty-state message |
-| `primitive-button` | Action button |
+| `primitive-divider` | Visual separator |
+| `primitive-paper` | Filled / outlined surface wrapper |
 | `primitive-card` | Card with title + content |
+| `primitive-breadcrumbs` | Breadcrumb trail |
+| `primitive-tabs` | Tabs container with header + content slots |
+
+**Content**
+
+| Primitive | Use |
+|---|---|
+| `primitive-heading` | Section heading |
+| `primitive-text` | Body text |
+| `primitive-anchor` | Link / `<a>` |
+| `primitive-image` | `<img>` wrapper |
+| `primitive-avatar` | User-avatar component |
 | `primitive-stat` | Stat block (label + value) |
 | `primitive-badge` | Status pill / chip |
+| `primitive-enum-badge` | Pack-mapped semantic-color badge for enum values |
+| `primitive-money` | Currency value (delegates to `MoneyValue` helper) |
+| `primitive-date-display` | Date/time value (delegates to `DateTimeValue` helper) |
+| `primitive-id-link` | Linked aggregate ID (delegates to `IdValue` helper) |
+| `primitive-key-value-row` | One label/value pair in a key-value list |
+
+**Form inputs (host-level wrappers; per-field rendering lives in `field-input-*`)**
+
+| Primitive | Use |
+|---|---|
 | `primitive-field` | Labeled text input |
 | `primitive-toggle` | Labeled switch / checkbox |
 | `primitive-number-field` | Labeled number input |
 | `primitive-password-field` | Labeled password input |
+| `primitive-form-of` | Outer `<form>` wrapper + submit button used by both `Form(of:)` and `Form(runs:)` page bodies; receives `submitPendingExpr` / `submitLabel` for the variant. |
+
+**Feedback / status**
+
+| Primitive | Use |
+|---|---|
+| `primitive-empty` | Empty-state message |
 | `primitive-loader` | Loading spinner |
-| `primitive-anchor` | Link / `<a>` |
-| `primitive-image` | `<img>` wrapper |
-| `primitive-avatar` | User-avatar component |
-| `primitive-tabs` | Tabs container with header + content slots |
+| `primitive-skeleton` | Skeleton placeholder for loading rows |
+| `primitive-alert` | Inline alert with optional title + semantic color |
+| `primitive-query-view` | `useQuery`-aware wrapper: renders skeleton / alert / children based on hook state |
+
+**Other**
+
+| Primitive | Use |
+|---|---|
+| `primitive-button` | Action button |
+| `primitive-table` | Full table (used by `view-table` rendering of declarative views) |
 
 ## 4. Inherited shared sources
 
@@ -354,7 +426,7 @@ the preparer's view-model.
 The `helpers` field carries pack-specific lookup tables consulted by
 generator-side code, not by templates directly.
 
-### `lucide`
+### `lucide` (shadcn)
 
 shadcn's icon library is `lucide-react`.  The DSL uses Tabler-style
 icon names (`IconPlus`, `IconTrash`, …).  When the React generator
@@ -373,6 +445,44 @@ and substitutes the Lucide equivalent if present:
 
 Mantine doesn't need this — `@tabler/icons-react` exports the
 DSL names directly.
+
+### `muiIcon` (MUI)
+
+Material UI's icon library is `@mui/icons-material`.  The MUI pack
+declares the same DSL-name → MUI-name map shape:
+
+```json
+"helpers": {
+  "muiIcon": {
+    "IconPlus":  "Add",
+    "IconTrash": "Delete",
+    "IconX":     "Close"
+  }
+}
+```
+
+Chakra reuses Lucide (and so inherits the same icon-name story as a
+plain `lucide-react` consumer); ashPhoenix uses Heroicons via Phoenix
+helpers and doesn't go through this table.
+
+### `muiRadius` / `chakraRadius`
+
+Mantine uses string radius tokens (`xs`/`sm`/`md`/`lg`/`xl`) on
+`<Card radius="md">` etc.  MUI takes raw numbers (interpreted in `px`)
+on its `borderRadius` system, and Chakra takes CSS strings.  The
+radius helpers translate the DSL's Mantine-shaped tokens to each
+pack's native form so primitive templates can write
+`{{packRadius radius}}` once instead of branching everywhere:
+
+```json
+"helpers": {
+  "muiRadius":    { "xs": "2", "sm": "4", "md": "8", ... },
+  "chakraRadius": { "xs": "2px", "sm": "4px", "md": "8px", ... }
+}
+```
+
+shadcn doesn't need a radius helper — `<Card>` ships with Tailwind
+classes baked into its source-copied component.
 
 ## 8. Validating your pack
 
@@ -403,12 +513,17 @@ missing CSS imports, asset resolution, Tailwind config errors.
 ### The `LOOM_REACT_BUILD=1` gate
 
 The repo ships `test/generated-react-build.test.ts` which does the
-above for the four example systems × two built-in packs.  Add your
-custom pack to its cases for ongoing coverage:
+above for four example systems × four built-in `tsx` packs (16 cases
+total).  Add your custom pack to its cases for ongoing coverage:
 
 ```sh
 LOOM_REACT_BUILD=1 npx vitest run test/generated-react-build.test.ts
 ```
+
+Under parallel test execution the 16 cases can flake on shared host
+resources (npm install collisions, port conflicts).  Run with
+`--no-file-parallelism` for a deterministic pass when investigating
+a failure.
 
 ### Side-by-side visual check
 
@@ -461,11 +576,14 @@ Or by absolute path:
 design: /opt/loom-packs/your-pack
 ```
 
-Or by built-in name (only Mantine + shadcn today):
+Or by built-in name:
 
 ```
-design: mantine
-design: shadcn
+design: mantine     // npm-package model, the reference
+design: shadcn      // source-copy model, Tailwind + Radix Primitives
+design: mui         // npm-package model, @mui/material
+design: chakra      // npm-package model, @chakra-ui/react
+design: ashPhoenix  // heex format, Phoenix LiveView + Ash domain
 ```
 
 The loader walks up from each .ddd file's location to anchor relative
@@ -512,7 +630,9 @@ the contract is satisfied.
 - `src/generator/react/templating/loader.ts` — pure compile core
 - `src/generator/react/templating/loader-fs.ts` — Node FS adapter
 - `web/src/build/loader-vfs.ts` — playground VFS adapter
-- `designs/mantine/`, `designs/shadcn/` — reference implementations
+- `designs/mantine/`, `designs/shadcn/`, `designs/mui/`,
+  `designs/chakra/`, `designs/ashPhoenix/` — in-tree packs
+- `docs/antd-pack-plan.md` — deferred plan for an Ant Design pack
 - `test/generated-react-build.test.ts` — the static-validation gate
 - `test/pack-manifest.test.ts` — manifest-shape contract tests
 - `test/template-shared-layer.test.ts` — shared-source contract tests
