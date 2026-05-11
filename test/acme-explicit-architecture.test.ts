@@ -17,9 +17,12 @@ import { parseHelper } from "langium/test";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
 import { lowerModel } from "../src/ir/lower.js";
-import { readFileSync } from "fs";
+import { readFileSync } from "node:fs";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const ACME_PATH = "/home/user/Loc/examples/acme.ddd";
+const here = path.dirname(fileURLToPath(import.meta.url));
+const ACME_PATH = path.resolve(here, "..", "examples", "acme.ddd");
 
 async function build() {
   const services = createDddServices(NodeFileSystem);
