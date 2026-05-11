@@ -45,7 +45,7 @@ export default function CustomerNew() {
             />
     
             <Group justify="flex-end" mt="sm">
-              <Button type="submit" loading={create.isPending} data-testid="customers-new-submit">Create</Button>
+              <Button type="submit" loading={ create.isPending } data-testid="customers-new-submit">Create</Button>
             </Group>
           </Stack>
         </form>

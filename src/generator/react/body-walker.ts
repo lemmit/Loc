@@ -58,6 +58,7 @@ import type {
   TypeIR,
   UiApiParamIR,
   UiHelperImportIR,
+  WorkflowIR,
 } from "../../ir/loom-ir.js";
 import { camel, humanize, pascal, plural, snake } from "../../util/naming.js";
 import {
@@ -340,6 +341,14 @@ export function walkBodyToTsx(
    *  matching one of these names emit as plain JS calls and the
    *  shell adds the matching `import { <name> } from "<path>"`. */
   helperImports: ReadonlyArray<UiHelperImportIR> = [],
+  /** Slice A12 — workflows reachable from this UI's deployable.
+   *  `Form(runs: <wf>)` looks up the workflow's IR here (param
+   *  list for form dispatch, owning BC for enum resolution). */
+  workflowsByName: ReadonlyMap<string, WorkflowIR> = new Map(),
+  /** Slice A12 — owning bounded context per workflow (the form-
+   *  field preparer needs the BC to resolve enums / value-objects
+   *  referenced by workflow params). */
+  bcByWorkflow: ReadonlyMap<string, BoundedContextIR> = new Map(),
 ): WalkResult {
   const apiParamNames = new Map<string, string>();
   for (const p of apiParams) apiParamNames.set(p.name, p.apiName);
@@ -363,6 +372,8 @@ export function walkBodyToTsx(
     shellLocals: new Set(),
     aggregatesByName,
     bcByAggregate,
+    workflowsByName,
+    bcByWorkflow,
     formOf: null,
     collectedTestids: new Set(),
     helperImports: helperNameToPath,
@@ -418,11 +429,17 @@ interface WalkContext {
    *  form-field preparer can resolve enums / value-objects declared
    *  in the same context. */
   bcByAggregate: ReadonlyMap<string, BoundedContextIR>;
-  /** Slice A4 — when `Form(of: <Agg>)` is walked, the emitter
-   *  records the metadata the shell needs (aggregate, BC, optional
-   *  user-supplied `onSubmit:` lambda body, redirect path) so the
-   *  shell can emit `useForm` + create mutation + `handleSubmit`
-   *  wiring at function top. */
+  /** Slice A12 — workflows reachable from this UI's deployable.
+   *  Powers `Form(runs: <wf>)` field dispatch. */
+  workflowsByName: ReadonlyMap<string, WorkflowIR>;
+  /** Slice A12 — owning bounded context per workflow. */
+  bcByWorkflow: ReadonlyMap<string, BoundedContextIR>;
+  /** Slice A4/A12 — when `Form(of: <Agg>)` or `Form(runs: <wf>)`
+   *  is walked, the emitter records the metadata the shell needs
+   *  (aggregate or workflow, BC, optional user-supplied
+   *  `onSubmit:` lambda body, redirect path) so the shell can
+   *  emit `useForm` + mutation hook + `handleSubmit` wiring at
+   *  function top. */
   formOf: FormOfState | null;
   /** Slice A5 — accumulator for static `testid:` strings the body
    *  emits, used by the walker-side page-object builder. */
@@ -438,17 +455,20 @@ interface WalkContext {
   usedHelpers: Set<string>;
 }
 
-/** Slice A4 — RHF wiring requirements recorded by `emitFormOf`,
+/** Slice A4 / A12 — RHF wiring requirements recorded by `emitFormOf`,
  *  consumed by the page shell to splice the `useForm` declaration +
- *  `Create<X>Request` + `useCreate<X>` mutation + per-field
- *  `useAll<TargetX>` hooks at the top of the function body. */
-export interface FormOfState {
-  agg: AggregateIR;
+ *  request type + mutation hook + per-field `useAll<TargetX>` hooks
+ *  at the top of the function body.
+ *
+ *  Discriminated union: `kind: "aggregate"` for `Form(of: <Agg>)`,
+ *  `kind: "workflow"` for `Form(runs: <wf>)`.  The two share most
+ *  fields (the form is rendered identically); they differ only in
+ *  the imports / hook decls / default submit redirect that the
+ *  shell emits around the form. */
+export type FormOfState = AggregateFormState | WorkflowFormState;
+
+interface FormStateBase {
   bc: BoundedContextIR;
-  /** Non-optional aggregate fields — the form-field preparer walks
-   *  this list (optional fields are excluded from the create
-   *  form, matching the scaffold-path behavior). */
-  fields: AggregateIR["fields"];
   /** Id<X> targets needing `useAllX()` injection at function top
    *  (resolved through `idTargetsInFields`).  One hook decl per
    *  target — collapsed across multiple `Id<X>` fields on the same
@@ -463,20 +483,31 @@ export interface FormOfState {
   /** Components needed from the design pack — added on top of the
    *  base set so the import block stays sorted + de-duped. */
   fieldComponents: readonly string[];
-  /** Slug-prefixed testid namespace (e.g. `"orders-form"`).  Auto-
-   *  derived from page name unless a `testid:` named arg overrides. */
+  /** Slug-prefixed testid namespace (e.g. `"orders-form"`). */
   testidNamespace: string;
   /** Pre-rendered field TSX (already through the per-pack
    *  `field-input-*` templates) — the shell splices these into the
    *  `<form>` body. */
   fieldHtmls: readonly string[];
-  /** Optional user-supplied `onSubmit:` lambda body (an expression
-   *  or a block of statements).  When set, the shell wires it
-   *  inside `handleSubmit(...)` with `vals` (the form data) in
-   *  scope.  When null, the shell defaults to the scaffold
-   *  behavior: `create.mutateAsync(vals)` + notification +
-   *  navigation to `/<plural>/${out.id}`. */
+  /** Optional user-supplied `onSubmit:` lambda body.  When null,
+   *  the shell uses the scaffold-equivalent default. */
   onSubmitJs: string | null;
+}
+
+export interface AggregateFormState extends FormStateBase {
+  kind: "aggregate";
+  agg: AggregateIR;
+  /** Non-optional aggregate fields — optional fields are excluded
+   *  from the create form, matching the scaffold New-page rule. */
+  fields: AggregateIR["fields"];
+}
+
+export interface WorkflowFormState extends FormStateBase {
+  kind: "workflow";
+  workflow: WorkflowIR;
+  /** Workflow params — all required (no optional filter; workflows
+   *  don't have an "optional" notion the way aggregate fields do). */
+  fields: WorkflowIR["params"];
 }
 
 function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
@@ -1132,6 +1163,24 @@ function emitFormOf(
   ctx: WalkContext,
   depth: number,
 ): string {
+  // Slice A12 — `Form` dispatches on which named arg is present:
+  //   `of:  <Aggregate>` → create-form for the aggregate
+  //   `runs: <workflow>` → workflow-run form
+  // The two share rendering (same per-field preparer + same outer
+  // <form> JSX) but differ in shell wiring (request type, mutation
+  // hook, default redirect).  We branch here, build the matching
+  // FormOfState variant, and let the shell + template handle the
+  // rest.
+  const runsArg = namedArgValue(call, "runs");
+  if (runsArg) return emitFormRuns(call, ctx, depth, runsArg);
+  return emitFormOfAggregate(call, ctx, depth);
+}
+
+function emitFormOfAggregate(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
   const ofArg = namedArgValue(call, "of");
   const aggName =
     ofArg && ofArg.kind === "ref"
@@ -1153,24 +1202,12 @@ function emitFormOf(
   // contract REQUIRES; optional fields surface via update-flow
   // operations on the detail page.
   const fields = agg.fields.filter((f) => !f.optional);
-  // `idTargetsInFields` and friends take a mutable `Map` — we
-  // don't write to it, so spreading the readonly map into a fresh
-  // mutable one is a zero-risk shape adaptation.
   const aggregatesByNameMut = new Map(ctx.aggregatesByName);
   const idTargets = idTargetsInFields(fields, bc, aggregatesByNameMut);
   const useController = needsController(fields, bc);
   const defaultValuesTs = initialValuesTs(fields, bc);
   const fieldComponents = [...componentsForFields(fields, bc)];
-  // Mantine surface: every form needs Stack + Button + Group on
-  // top of whichever input components the fields require.  We add
-  // them through the regular import map so they coalesce with any
-  // other Mantine imports the page accumulates.
   addMantineImport(ctx, "Stack", "Button", "Group", ...fieldComponents);
-  // Field-by-field testid namespace.  `testid:` named arg pins
-  // it; otherwise we derive a slug from the aggregate name.  This
-  // matches what the scaffold renderer does (`<slug>-new-input-<f>`)
-  // so e2e selectors stay stable when migrating a scaffold New-page
-  // to an explicit one.
   const testidArg = stringNamed(call, "testid");
   const testidNamespace = testidArg ?? `${snake(plural(agg.name))}-new`;
   const fieldVMs = fields.map((f) =>
@@ -1183,27 +1220,11 @@ function emitFormOf(
     ),
   );
   const fieldHtmls = fieldVMs.map((vm) => renderFormField(vm, ctx.pack));
-  // Slice A5 — surface the synthesised testids (one per field +
-  // the submit button) so the walker page-object emitter exposes
-  // them as Locator getters.  Without this, an explicit page
-  // built around `Form(of:)` would only expose user-supplied
-  // testids, missing the form-internal ones that the per-field
-  // `field-input-*` templates emit by convention.
   for (const vm of fieldVMs) ctx.collectedTestids.add(vm.testId);
   ctx.collectedTestids.add(`${testidNamespace}-submit`);
-  // onSubmit:  explicit lambda body OR null (shell uses scaffold
-  // default).  The lambda's `vals` (form data) is in scope by
-  // RHF convention; we rebind the source-side param name to
-  // `vals` via the same lambdaParams scope used by Table columns.
   let onSubmitJs: string | null = null;
   const onSubmit = lambdaArg(call, "onSubmit");
   if (onSubmit) {
-    // Inside the onSubmit lambda the shell will have emitted these
-    // locals at function-top: the `create` mutation hook, the
-    // destructured RHF API (`register`, `handleSubmit`, `control`,
-    // `errors`), and one `useAll<Target>` hook per `Id<X>` field.
-    // Expose them all so user code that references any one resolves
-    // cleanly rather than landing as an `unresolved:` comment.
     const shellLocals = new Set<string>([
       "create",
       "register",
@@ -1226,9 +1247,8 @@ function emitFormOf(
       onSubmitJs = `{ ${stmts} }`;
     }
   }
-  // Record on the context — shell consumes after the walk to emit
-  // imports + hook decls + outer `<form>` wiring.
   ctx.formOf = {
+    kind: "aggregate",
     agg,
     bc,
     fields,
@@ -1240,12 +1260,6 @@ function emitFormOf(
     fieldHtmls,
     onSubmitJs,
   };
-  // The submit body: default scaffold flow when no explicit lambda
-  // was given, otherwise the user-supplied body.  Expression-
-  // bodied lambdas emit as-is (implicit return), preserving the
-  // promise chain for awaiters of `handleSubmit`.  Block-bodied
-  // lambdas + the default scaffold body emit braced statement
-  // sequences.
   const slug = snake(plural(agg.name));
   const submitBody =
     onSubmitJs !== null
@@ -1263,6 +1277,123 @@ function emitFormOf(
     fieldHtmls,
     submitBody,
     submitTestid: `${testidNamespace}-submit`,
+    submitPendingExpr: "create.isPending",
+    submitLabel: "Create",
+    testidAttr: testidAttr(call, ctx),
+    indent: "  ".repeat(depth + 1),
+    innerIndent: "  ".repeat(depth + 2),
+    deepIndent: "  ".repeat(depth + 3),
+    deeperIndent: "  ".repeat(depth + 4),
+    closeIndent: "  ".repeat(depth),
+  });
+}
+
+/** Slice A12 — `Form(runs: <wf>)` walker variant.  Same per-field
+ *  preparer + same outer <form> JSX as the aggregate form, but
+ *  the shell wires a workflow request type + mutation hook + a
+ *  default redirect to `/workflows`. */
+function emitFormRuns(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+  runsArg: ExprIR,
+): string {
+  const wfName =
+    runsArg.kind === "ref"
+      ? runsArg.name
+      : runsArg.kind === "literal" && runsArg.lit === "string"
+        ? runsArg.value
+        : undefined;
+  if (!wfName) {
+    return `{/* Form(runs: …): missing 'runs:' workflow ref */}`;
+  }
+  const workflow = ctx.workflowsByName.get(wfName);
+  const bc = ctx.bcByWorkflow.get(wfName);
+  if (!workflow || !bc) {
+    return `{/* Form(runs: ${wfName}): workflow not found in this UI's reachable contexts */}`;
+  }
+  const fields = workflow.params;
+  // form-helpers expect `{ name, type, optional }` rows; workflow
+  // params don't carry an `optional` flag so we adapt here.  All
+  // workflow params are treated as required (matches the scaffold
+  // workflow-form builder, which doesn't filter them either).
+  const fieldsForHelpers = fields.map((f) => ({ ...f, optional: false }));
+  const aggregatesByNameMut = new Map(ctx.aggregatesByName);
+  const idTargets = idTargetsInFields(fieldsForHelpers, bc, aggregatesByNameMut);
+  const useController = needsController(fieldsForHelpers, bc);
+  const defaultValuesTs = initialValuesTs(fieldsForHelpers, bc);
+  const fieldComponents = [...componentsForFields(fieldsForHelpers, bc)];
+  addMantineImport(ctx, "Stack", "Button", "Group", ...fieldComponents);
+  const testidArg = stringNamed(call, "testid");
+  const testidNamespace = testidArg ?? `workflow-${snake(workflow.name)}`;
+  const fieldVMs = fields.map((f) =>
+    prepareFormFieldVM(
+      f.name,
+      f.type,
+      bc,
+      `${testidNamespace}-input-${f.name}`,
+      aggregatesByNameMut,
+    ),
+  );
+  const fieldHtmls = fieldVMs.map((vm) => renderFormField(vm, ctx.pack));
+  for (const vm of fieldVMs) ctx.collectedTestids.add(vm.testId);
+  ctx.collectedTestids.add(`${testidNamespace}-submit`);
+  let onSubmitJs: string | null = null;
+  const onSubmit = lambdaArg(call, "onSubmit");
+  if (onSubmit) {
+    const shellLocals = new Set<string>([
+      "run",
+      "register",
+      "handleSubmit",
+      "control",
+      "errors",
+      ...idTargets.map((t) => idTargetHookVar(t)),
+    ]);
+    const childCtx: WalkContext = {
+      ...ctx,
+      lambdaParams: extendLambdaParams(ctx, onSubmit.param, "vals"),
+      shellLocals,
+    };
+    if (onSubmit.body) {
+      onSubmitJs = emitExpr(onSubmit.body, childCtx);
+    } else if (onSubmit.block && onSubmit.block.length > 0) {
+      const stmts = onSubmit.block
+        .map((s) => emitStmt(s, childCtx))
+        .join(" ");
+      onSubmitJs = `{ ${stmts} }`;
+    }
+  }
+  ctx.formOf = {
+    kind: "workflow",
+    workflow,
+    bc,
+    fields,
+    idTargets,
+    useController,
+    defaultValuesTs,
+    fieldComponents,
+    testidNamespace,
+    fieldHtmls,
+    onSubmitJs,
+  };
+  const submitBody =
+    onSubmitJs !== null
+      ? onSubmitJs
+      : `{
+              try {
+                await run.mutateAsync(vals);
+                notifications.show({ color: "green", message: "${humanize(workflow.name)} completed" });
+                navigate("/workflows");
+              } catch (e) {
+                notifications.show({ color: "red", message: (e as Error).message });
+              }
+            }`;
+  return renderPrimitive(ctx, "primitive-form-of", {
+    fieldHtmls,
+    submitBody,
+    submitTestid: `${testidNamespace}-submit`,
+    submitPendingExpr: "run.isPending",
+    submitLabel: "Run",
     testidAttr: testidAttr(call, ctx),
     indent: "  ".repeat(depth + 1),
     innerIndent: "  ".repeat(depth + 2),
@@ -2602,6 +2733,11 @@ export function renderCustomLayoutPage(
    *  passes `"../../"`.  Used to resolve api-hook + format-helper
    *  imports the shell emits at function-top. */
   srcImportPrefix: string = "../",
+  /** Slice A12 — workflows reachable from this UI's deployable.
+   *  Required for `Form(runs: <wf>)` field dispatch. */
+  workflowsByName: ReadonlyMap<string, WorkflowIR> = new Map(),
+  /** Slice A12 — owning bounded context per workflow. */
+  bcByWorkflow: ReadonlyMap<string, BoundedContextIR> = new Map(),
 ): string {
   const paramNames = new Set(params.map((p) => p.name));
   const stateNames = new Set(state.map((s) => s.name));
@@ -2626,6 +2762,8 @@ export function renderCustomLayoutPage(
     aggregatesByName,
     bcByAggregate,
     helperImports,
+    workflowsByName,
+    bcByWorkflow,
   );
   // Slice 11.12 — render the title expression through emitExpr
   // (sharing the body's tracking state so the shell destructures
@@ -2654,6 +2792,8 @@ export function renderCustomLayoutPage(
       shellLocals: new Set(),
       aggregatesByName: new Map(),
       bcByAggregate: new Map(),
+      workflowsByName: new Map(),
+      bcByWorkflow: new Map(),
       formOf: null,
       collectedTestids: new Set(),
       helperImports: new Map(),
@@ -2765,6 +2905,9 @@ function renderFormOfWiring(
   srcImportPrefix: string = "../",
 ): { imports: string; decls: string; usesNavigate: boolean } {
   if (!state) return { imports: "", decls: "", usesNavigate: false };
+  if (state.kind === "workflow") {
+    return renderFormRunsWiring(state, pack, srcImportPrefix);
+  }
   const { agg, idTargets, useController, defaultValuesTs, onSubmitJs } = state;
   const tplCtx = {
     aggregateName: agg.name,
@@ -2786,8 +2929,42 @@ function renderFormOfWiring(
   };
   const imports = pack.render("form-of-imports", tplCtx);
   const decls = pack.render("form-of-decls", tplCtx);
-  // The default onSubmit needs `navigate` in scope (post-create
-  // redirect); user-supplied forms might not.
+  return {
+    imports: imports.endsWith("\n") ? imports : imports + "\n",
+    decls: decls.endsWith("\n") ? decls : decls + "\n",
+    usesNavigate: onSubmitJs === null,
+  };
+}
+
+/** Slice A12 — workflow-form variant of renderFormOfWiring.  Same
+ *  RHF wiring, but the request type / mutation hook / import
+ *  source come from the workflow surface (`<Wf>Request`,
+ *  `use<Wf>Workflow`, `../api/workflows`) instead of the
+ *  aggregate's. */
+function renderFormRunsWiring(
+  state: WorkflowFormState,
+  pack: LoadedPack,
+  srcImportPrefix: string,
+): { imports: string; decls: string; usesNavigate: boolean } {
+  const { workflow, idTargets, useController, defaultValuesTs, onSubmitJs } = state;
+  const wfPascal = pascal(workflow.name);
+  const tplCtx = {
+    workflowName: workflow.name,
+    workflowPascal: wfPascal,
+    humanWorkflow: humanize(workflow.name),
+    srcImportPrefix,
+    idTargets: idTargets.map((t) => ({
+      name: t.name,
+      nameCamel: camel(t.name),
+      namePlural: plural(t.name),
+      hookVar: idTargetHookVar(t),
+    })),
+    useController,
+    defaultValuesTs,
+    hasDefaultOnSubmit: onSubmitJs === null,
+  };
+  const imports = pack.render("form-runs-imports", tplCtx);
+  const decls = pack.render("form-runs-decls", tplCtx);
   return {
     imports: imports.endsWith("\n") ? imports : imports + "\n",
     decls: decls.endsWith("\n") ? decls : decls + "\n",
@@ -2940,6 +3117,8 @@ function renderInitExpr(expr: ExprIR, pack: LoadedPack): string {
     shellLocals: new Set(),
     aggregatesByName: new Map(),
     bcByAggregate: new Map(),
+    workflowsByName: new Map(),
+    bcByWorkflow: new Map(),
     formOf: null,
     collectedTestids: new Set(),
     helperImports: new Map(),

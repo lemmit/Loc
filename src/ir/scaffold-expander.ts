@@ -53,6 +53,9 @@ export interface ScaffoldExpandContext {
    *  `Form(of:)` field-type dispatch (enums / value-objects live
    *  in the BC, not on the aggregate). */
   bcByAggregate: ReadonlyMap<string, BoundedContextIR>;
+  /** Slice A12 — workflow by name.  Powers `workflow-form`
+   *  expander coverage (`Form(runs: <wf>)` field dispatch). */
+  workflowsByName: ReadonlyMap<string, import("./loom-ir.js").WorkflowIR>;
 }
 
 /** Build the expander context from the system + a specific UI.
@@ -63,15 +66,22 @@ export function buildExpandContext(
 ): ScaffoldExpandContext {
   const aggregatesByName = new Map<string, AggregateIR>();
   const bcByAggregate = new Map<string, BoundedContextIR>();
+  const workflowsByName = new Map<
+    string,
+    import("./loom-ir.js").WorkflowIR
+  >();
   for (const m of sys.modules) {
     for (const ctx of m.contexts) {
       for (const agg of ctx.aggregates) {
         aggregatesByName.set(agg.name, agg);
         bcByAggregate.set(agg.name, ctx);
       }
+      for (const wf of ctx.workflows) {
+        workflowsByName.set(wf.name, wf);
+      }
     }
   }
-  return { ui, aggregatesByName, bcByAggregate };
+  return { ui, aggregatesByName, bcByAggregate, workflowsByName };
 }
 
 /** Public entry point.  Returns the expanded body `ExprIR` for an
@@ -88,10 +98,11 @@ export function expandScaffoldToExplicitBody(
       return expandAggregateNew(origin.aggregateName, ctx);
     case "aggregate-detail":
       return expandAggregateDetail(origin.aggregateName, ctx);
+    case "workflow-form":
+      return expandWorkflowForm(origin.workflowName, ctx);
     // Spillover — see header comment.  Returning null here keeps
     // the page on the archetype path until a future slice provides
     // the missing primitives.
-    case "workflow-form":
     case "view-list":
     case "workflows-index":
     case "views-index":
@@ -365,6 +376,43 @@ function expandAggregateNew(
     ],
     undefined,
     [["testid", lit(`${slug}-new-page`)]],
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Workflow-form expansion
+// ---------------------------------------------------------------------------
+
+function expandWorkflowForm(
+  workflowName: string,
+  ctx: ScaffoldExpandContext,
+): ExprIR | null {
+  const wf = ctx.workflowsByName.get(workflowName);
+  if (!wf) return null;
+  const wfSlug = snake(wf.name);
+  const humanWf = humanize(wf.name);
+  return call(
+    "Stack",
+    [
+      call("Breadcrumbs", [
+        call("Anchor", [lit("Home")], undefined, [["to", lit("/")]]),
+        call("Anchor", [lit("Workflows")], undefined, [
+          ["to", lit("/workflows")],
+        ]),
+        call("Text", [lit(humanWf)]),
+      ]),
+      call("Heading", [lit(humanWf)], undefined, [
+        ["level", intLit(2)],
+      ]),
+      call("Card", [
+        call("Form", [], undefined, [
+          ["runs", ref(wf.name)],
+          ["testid", lit(`workflow-${wfSlug}`)],
+        ]),
+      ]),
+    ],
+    undefined,
+    [["testid", lit(`workflow-${wfSlug}-page`)]],
   );
 }
 
