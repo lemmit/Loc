@@ -44,7 +44,7 @@ export default function ProductNew() {
               )}
             />
     
-              <TextInput label="Currency" {...register("price.currency")} data-testid="products-new-input-price-currency" error={errors.price?.currency?.message} />
+    <TextInput label="Currency" {...register("price.currency")} data-testid="products-new-input-price-currency" error={errors.price?.currency?.message} />
     
               </Stack>
             </Fieldset>

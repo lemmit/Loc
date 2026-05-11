@@ -1968,12 +1968,24 @@ function tryDetectApiHook(expr: ExprIR, ctx: WalkContext): ApiHookUse | null {
     }
   }
   // Slice A13 — Pattern C: member(ref:"Views", viewName) lifts to
-  // `useXxxView()`.  The expander synthesises this shape for
-  // view-list pages; users can also write `Views.<name>` directly
-  // in DSL for custom view-bound bodies.  The hook lives at
-  // `../api/views` (one shared file across all views).
+  // `useXxxView()` from `../api/views`.
   if (expr.kind === "member" && expr.receiver.kind === "ref" && expr.receiver.name === "Views") {
     return buildViewHookUse(expr.member);
+  }
+  // Slice D1 — Pattern D: member(ref:<Aggregate>, op) without an
+  // api param prefix lifts to the same hook Pattern A produces.
+  // Lets UIs without a `api X: Y` binding still get auto-injected
+  // hooks (e.g. legacy `scaffold modules: M` deployables that
+  // never declared api params).
+  if (expr.kind === "member" && expr.receiver.kind === "ref"
+      && ctx.aggregatesByName.has(expr.receiver.name)) {
+    return buildHookUse(expr.receiver.name, expr.member, [], ctx);
+  }
+  // Slice D1 — Pattern E: same as D but with method-call args
+  // (parameterised forms like `Account.byId(id)`).
+  if (expr.kind === "method-call" && expr.receiver.kind === "ref"
+      && ctx.aggregatesByName.has(expr.receiver.name)) {
+    return buildHookUse(expr.receiver.name, expr.member, expr.args, ctx);
   }
   return null;
 }

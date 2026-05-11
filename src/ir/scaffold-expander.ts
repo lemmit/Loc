@@ -133,8 +133,13 @@ function expandAggregateList(
 ): ExprIR | null {
   const agg = ctx.aggregatesByName.get(aggregateName);
   if (!agg) return null;
+  // Slice D1 — when the UI has an api parameter, route hook
+  // detection through `<handle>.<agg>.all` (Pattern A).  When
+  // not, drop the handle prefix → `<agg>.all` (Pattern D) so
+  // legacy `scaffold modules: M` deployables without explicit
+  // api params still get auto-injected hooks.
   const apiHandle = findApiHandleFor(agg, ctx);
-  if (!apiHandle) return null;
+  const queryRoot = apiHandle ? member(ref(apiHandle), agg.name) : ref(agg.name);
   const slug = snake(plural(agg.name));
   const humanPlural = humanize(plural(agg.name));
   const humanLower = humanPlural.toLowerCase();
@@ -191,7 +196,7 @@ function expandAggregateList(
       ]),
       // QueryView(of: api.Agg.all, loading, error, empty, data: rows => Paper(Table(...)))
       call("QueryView", [], undefined, [
-        ["of", member(member(ref(apiHandle), agg.name), "all")],
+        ["of", member(queryRoot, "all")],
         ["loading", call("Skeleton", [], undefined, [["count", intLit(5)]])],
         ["error", call("Alert", [lit(`Couldn't load ${humanLower}`)])],
         ["empty", call("Empty", [lit(`No ${humanLower} yet.`)])],
@@ -233,8 +238,10 @@ function expandAggregateDetail(
 ): ExprIR | null {
   const agg = ctx.aggregatesByName.get(aggregateName);
   if (!agg) return null;
+  // Slice D1 — see expandAggregateList for the no-api-handle
+  // fallback rationale.
   const apiHandle = findApiHandleFor(agg, ctx);
-  if (!apiHandle) return null;
+  const queryRoot = apiHandle ? member(ref(apiHandle), agg.name) : ref(agg.name);
   const slug = snake(plural(agg.name));
   const humanPlural = humanize(plural(agg.name));
   const humanAgg = humanize(agg.name);
@@ -275,9 +282,7 @@ function expandAggregateDetail(
       call("QueryView", [], undefined, [
         [
           "of",
-          methodCall(member(ref(apiHandle), agg.name), "byId", [
-            ref("id"),
-          ]),
+          methodCall(queryRoot, "byId", [ref("id")]),
         ],
         ["single", boolLit(true)],
         ["loading", call("Skeleton", [], undefined, [["count", intLit(3)]])],
