@@ -453,12 +453,18 @@ function renderDomainModule(
       `      define :create_${snake(agg.name)}, action: :create`,
       `      define :list_${snake(plural(agg.name))}, action: :read`,
       `      define :get_${snake(agg.name)}, action: :read, get_by: [:id]`,
-      `      define :update_${snake(agg.name)}, action: :update, args: [:id]`,
-      `      define :destroy_${snake(agg.name)}, action: :destroy, args: [:id]`,
+      `      define :update_${snake(agg.name)}, action: :update, get_by: [:id]`,
+      `      define :destroy_${snake(agg.name)}, action: :destroy, get_by: [:id]`,
     ];
     const repo = ctx.repositories.find((rr) => rr.aggregateName === agg.name);
     if (repo) {
       for (const find of repo.finds) {
+        // Skip the IR-enriched "all" find — `define :list_X, action: :read`
+        // (above) already provides the equivalent code-interface entry.
+        // Emitting `define :all_X, action: :all` would also require a
+        // matching custom `read :all do end` action on the resource;
+        // dropping both keeps the domain block minimal and compile-clean.
+        if (find.name === "all") continue;
         const argsList = find.params.map((p) => `:${snake(p.name)}`).join(", ");
         const argsClause = argsList ? `, args: [${argsList}]` : "";
         defines.push(

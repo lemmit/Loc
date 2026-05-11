@@ -35,7 +35,15 @@ export function buildFindActions(
   contextModule: string,
 ): string[] {
   const ctx: RenderCtx = { thisName: "record", contextModule };
-  return repo.finds.map((find) => renderFindAction(find, agg, ctx));
+  // Skip the IR-enriched "all" find: Ash's `defaults [:read, ...]`
+  // already provides an equivalent default :read action.  Emitting a
+  // custom `read :all do end` block alongside is harmless but
+  // redundant; leaving it would also force the domain to keep a
+  // duplicate `define :all_X, action: :all` which adds noise without
+  // adding behaviour.
+  return repo.finds
+    .filter((f) => f.name !== "all")
+    .map((find) => renderFindAction(find, agg, ctx));
 }
 
 function renderFindAction(find: FindIR, agg: AggregateIR, ctx: RenderCtx): string {

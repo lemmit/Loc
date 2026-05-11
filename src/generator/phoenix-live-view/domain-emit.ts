@@ -260,7 +260,7 @@ function renderActions(
   );
 
   return `\n  actions do
-    defaults [:read, :destroy]
+    defaults [:read, :update, :destroy]
 
 ${defaultCreate}
 ${opActions.join("\n")}

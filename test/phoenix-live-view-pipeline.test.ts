@@ -1493,3 +1493,54 @@ describe("scaffold-form regression — Form(of:Agg) resolves fields + mount assi
   });
 });
 
+// ---------------------------------------------------------------------------
+// Ash 3.x compile-correctness regressions — three drift bugs the
+// phoenix-build CI job (mix compile --warnings-as-errors) would
+// surface.  Pre-empted here so unit tests catch them before CI:
+//   1. Domain `define :update_X, action: :update` references an
+//      :update action that the resource didn't declare (`defaults
+//      [:read, :destroy]` only had :read + :destroy).  Compile fails
+//      with "no action :update on resource".
+//   2. Domain `define :update_X, ..., args: [:id]` should be
+//      `get_by: [:id]` — `args:` would force the caller to pass id
+//      as a positional arg AND declare it as an action argument; the
+//      idiomatic shape is `get_by:` so Ash auto-resolves the record.
+//   3. `define :all_X, action: :all` plus a custom `read :all do
+//      end` action is redundant with the `:read` default — emitted
+//      noise that bloated the domain and forced an empty action
+//      block on every aggregate.
+// ---------------------------------------------------------------------------
+
+describe("Ash 3.x compile-correctness regressions", () => {
+  it("aggregate resource has :update in defaults so domain :update define resolves", async () => {
+    const files = await buildFormFixture();
+    const customer = files.get(
+      "phoenix_app/lib/phoenix_app/sales/customer.ex",
+    )!;
+    expect(customer).toMatch(/defaults \[:read, :update, :destroy\]/);
+  });
+
+  it("domain update/destroy defines use get_by: [:id], not args: [:id]", async () => {
+    const files = await buildFormFixture();
+    const domain = files.get("phoenix_app/lib/phoenix_app/sales.ex")!;
+    expect(domain).toMatch(
+      /define :update_customer, action: :update, get_by: \[:id\]/,
+    );
+    expect(domain).toMatch(
+      /define :destroy_customer, action: :destroy, get_by: \[:id\]/,
+    );
+    expect(domain).not.toMatch(/args: \[:id\]/);
+  });
+
+  it("does not emit redundant :all action / :all_X define (the :read default covers it)", async () => {
+    const files = await buildFormFixture();
+    const customer = files.get(
+      "phoenix_app/lib/phoenix_app/sales/customer.ex",
+    )!;
+    const domain = files.get("phoenix_app/lib/phoenix_app/sales.ex")!;
+    expect(customer).not.toMatch(/read :all do/);
+    expect(domain).not.toMatch(/define :all_customer/);
+    expect(domain).not.toMatch(/action: :all\b/);
+  });
+});
+
