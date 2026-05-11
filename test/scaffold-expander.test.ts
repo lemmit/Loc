@@ -194,13 +194,29 @@ describe("Slice C1 — scaffold expander dispatch", () => {
     expect(ofArg.name).toBe("Order");
   });
 
-  it("aggregate-detail returns null (deferred to A10+)", () => {
+  it("aggregate-detail expands to Stack(Breadcrumbs, Heading, QueryView(single: true))", () => {
     const origin: ScaffoldOriginIR = {
       kind: "aggregate-detail",
       aggregateName: "Order",
       contextName: "Orders",
     };
-    expect(expandScaffoldToExplicitBody(origin, ctx)).toBeNull();
+    const body = expandScaffoldToExplicitBody(origin, ctx);
+    expect(body).not.toBeNull();
+    expect((body as { name: string }).name).toBe("Stack");
+    // KeyValueRow per non-collection field; QueryView wraps the data.
+    expect(findCall(body!, "QueryView")).not.toBeNull();
+    expect(findCall(body!, "KeyValueRow")).not.toBeNull();
+    // The byId query becomes a method-call on the api param.
+    const qv = findCall(body!, "QueryView")!;
+    if (qv.kind !== "call") return;
+    const ofIdx = (qv.argNames ?? []).indexOf("of");
+    const ofArg = qv.args[ofIdx]!;
+    expect(ofArg.kind).toBe("method-call");
+    if (ofArg.kind !== "method-call") return;
+    expect(ofArg.member).toBe("byId");
+    // single: true marks the QueryView as single-record (vs collection).
+    const singleIdx = (qv.argNames ?? []).indexOf("single");
+    expect(singleIdx).toBeGreaterThanOrEqual(0);
   });
 
   it("workflow-form returns null (deferred)", () => {
