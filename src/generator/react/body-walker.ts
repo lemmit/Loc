@@ -1268,7 +1268,7 @@ function emitFormOfAggregate(
   const fields = agg.fields.filter((f) => !f.optional);
   const aggregatesByNameMut = new Map(ctx.aggregatesByName);
   const idTargets = idTargetsInFields(fields, bc, aggregatesByNameMut);
-  const useController = needsController(fields, bc);
+  const useController = needsController(fields, bc, aggregatesByNameMut);
   const defaultValuesTs = initialValuesTs(fields, bc);
   const fieldComponents = [...componentsForFields(fields, bc)];
   const testidArg = stringNamed(call, "testid");
@@ -1389,7 +1389,7 @@ function emitFormRuns(
   const fieldsForHelpers = fields.map((f) => ({ ...f, optional: false }));
   const aggregatesByNameMut = new Map(ctx.aggregatesByName);
   const idTargets = idTargetsInFields(fieldsForHelpers, bc, aggregatesByNameMut);
-  const useController = needsController(fieldsForHelpers, bc);
+  const useController = needsController(fieldsForHelpers, bc, aggregatesByNameMut);
   const defaultValuesTs = initialValuesTs(fieldsForHelpers, bc);
   const fieldComponents = [...componentsForFields(fieldsForHelpers, bc)];
   const testidArg = stringNamed(call, "testid");
