@@ -248,6 +248,10 @@ const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
   "EnumBadge",
   "IdLink",
   "Form",
+  "Breadcrumbs",
+  "Paper",
+  "Skeleton",
+  "Alert",
 ]);
 
 export function isWalkableLayoutBody(
@@ -557,6 +561,14 @@ function emitComponent(
       return emitIdLink(call, ctx, depth);
     case "Form":
       return emitFormOf(call, ctx, depth);
+    case "Breadcrumbs":
+      return emitBreadcrumbs(call, ctx, depth);
+    case "Paper":
+      return emitPaper(call, ctx, depth);
+    case "Skeleton":
+      return emitSkeleton(call, ctx, depth);
+    case "Alert":
+      return emitAlert(call, ctx, depth);
     case "Toolbar":
       return emitToolbar(call, ctx, depth);
     case "Empty":
@@ -2039,6 +2051,96 @@ function emitDivider(
   return renderPrimitive(ctx, "primitive-divider", {
     label,
     hasLabel: label !== undefined,
+    testidAttr: testidAttr(call, ctx),
+  });
+}
+
+/** Slice A7 — Breadcrumbs(...children, testid?).  Wraps a chain of
+ *  positional children (Anchor / Text / arbitrary primitives) in
+ *  the per-pack breadcrumbs container.  Mantine's `<Breadcrumbs>`
+ *  inserts separators automatically; shadcn renders a flex row
+ *  with hand-emitted separators (template responsibility). */
+function emitBreadcrumbs(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  const children = positionalChildren(call, ctx, depth + 1);
+  const indent = "  ".repeat(depth + 1);
+  const closeIndent = "  ".repeat(depth);
+  return renderPrimitive(ctx, "primitive-breadcrumbs", {
+    hasChildren: children.length > 0,
+    childrenBlock: children.join(`\n${indent}`),
+    indent,
+    closeIndent,
+    testidAttr: testidAttr(call, ctx),
+  });
+}
+
+/** Slice A7 — Paper(...children, padding?, testid?).  Per-pack
+ *  surface container with consistent padding + subtle shadow.
+ *  Composable wrapper for tables, cards, alerts.  Defaults to
+ *  `p="md"` (Mantine) / equivalent shadcn class set. */
+function emitPaper(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  const children = positionalChildren(call, ctx, depth + 1);
+  const padding = stringNamed(call, "padding");
+  const indent = "  ".repeat(depth + 1);
+  const closeIndent = "  ".repeat(depth);
+  return renderPrimitive(ctx, "primitive-paper", {
+    hasChildren: children.length > 0,
+    childrenBlock: children.join(`\n${indent}`),
+    hasPadding: padding !== undefined,
+    padding: padding !== undefined ? JSON.stringify(padding) : "",
+    indent,
+    closeIndent,
+    testidAttr: testidAttr(call, ctx),
+  });
+}
+
+/** Slice A7 — Skeleton(height?, count?, testid?).  Per-pack
+ *  loading-placeholder block.  When `count:` > 1, emits a stacked
+ *  group of `count` skeleton lines (matching the scaffold's
+ *  loading-state convention).  `height:` defaults to 28px. */
+function emitSkeleton(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  void depth;
+  const height = numericNamed(call, "height") ?? 28;
+  const count = numericNamed(call, "count") ?? 1;
+  return renderPrimitive(ctx, "primitive-skeleton", {
+    height,
+    count,
+    isMulti: count > 1,
+    testidAttr: testidAttr(call, ctx),
+  });
+}
+
+/** Slice A7 — Alert(message, color?, title?, testid?).  Per-pack
+ *  callout for error / info / warning states.  `color:` accepts
+ *  the per-pack semantic palette ("red"/"green"/"yellow"/"blue").
+ *  `title:` is optional; without it, packs render the message
+ *  alone (Mantine's `<Alert>` skips the bold-title block). */
+function emitAlert(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  void depth;
+  const message = firstPositionalContent(call, ctx) ?? '""';
+  const color = stringNamed(call, "color");
+  const title = stringNamed(call, "title");
+  return renderPrimitive(ctx, "primitive-alert", {
+    message: unwrapTextLiteral(message),
+    hasColor: color !== undefined,
+    color: color !== undefined ? JSON.stringify(color) : '"red"',
+    hasTitle: title !== undefined,
+    title: title ?? "",
     testidAttr: testidAttr(call, ctx),
   });
 }

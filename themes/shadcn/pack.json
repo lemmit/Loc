@@ -88,7 +88,11 @@
     "primitive-id-link": "primitive-id-link.hbs",
     "primitive-form-of": "primitive-form-of.hbs",
     "form-of-imports": "form-of-imports.hbs",
-    "form-of-decls": "form-of-decls.hbs"
+    "form-of-decls": "form-of-decls.hbs",
+    "primitive-breadcrumbs": "primitive-breadcrumbs.hbs",
+    "primitive-paper": "primitive-paper.hbs",
+    "primitive-skeleton": "primitive-skeleton.hbs",
+    "primitive-alert": "primitive-alert.hbs"
   },
   "imports": {
     "primitive-button":         [{ "from": "@/components/ui/button", "named": ["Button"] }],
@@ -116,7 +120,9 @@
     "primitive-money":  [{ "from": "../lib/format", "named": ["MoneyValue"] }],
     "primitive-date-display":   [{ "from": "../lib/format", "named": ["DateTimeValue"] }],
     "primitive-enum-badge":     [{ "from": "@/components/ui/badge", "named": ["Badge"] }],
-    "primitive-id-link": [{ "from": "../lib/format", "named": ["IdValue"] }]
+    "primitive-id-link": [{ "from": "../lib/format", "named": ["IdValue"] }],
+    "primitive-skeleton":  [{ "from": "@/components/ui/skeleton", "named": ["Skeleton"] }],
+    "primitive-alert":     [{ "from": "@/components/ui/alert",    "named": ["Alert", "AlertDescription", "AlertTitle"] }]
   },
   "shellFiles": {
     "tailwind-config": "tailwind.config.ts",

@@ -70,7 +70,11 @@
     "primitive-id-link": "primitive-id-link.hbs",
     "primitive-form-of": "primitive-form-of.hbs",
     "form-of-imports": "form-of-imports.hbs",
-    "form-of-decls": "form-of-decls.hbs"
+    "form-of-decls": "form-of-decls.hbs",
+    "primitive-breadcrumbs": "primitive-breadcrumbs.hbs",
+    "primitive-paper": "primitive-paper.hbs",
+    "primitive-skeleton": "primitive-skeleton.hbs",
+    "primitive-alert": "primitive-alert.hbs"
   },
   "imports": {
     "primitive-heading":        [{ "from": "@mantine/core", "named": ["Title"] }],
@@ -99,6 +103,10 @@
     "primitive-money":          [{ "from": "../lib/format", "named": ["MoneyValue"] }],
     "primitive-date-display":   [{ "from": "../lib/format", "named": ["DateTimeValue"] }],
     "primitive-enum-badge":     [{ "from": "@mantine/core", "named": ["Badge"] }],
-    "primitive-id-link":        [{ "from": "../lib/format", "named": ["IdValue"] }]
+    "primitive-id-link":        [{ "from": "../lib/format", "named": ["IdValue"] }],
+    "primitive-breadcrumbs":    [{ "from": "@mantine/core", "named": ["Breadcrumbs"] }],
+    "primitive-paper":          [{ "from": "@mantine/core", "named": ["Paper"] }],
+    "primitive-skeleton":       [{ "from": "@mantine/core", "named": ["Skeleton", "Stack"] }],
+    "primitive-alert":          [{ "from": "@mantine/core", "named": ["Alert"] }]
   }
 }
