@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 // ---------------------------------------------------------------------------
 // Drift guard: the playground's iframe-html.ts injects a Tailwind
 // Play CDN config that mirrors the shadcn pack's tailwind.config.ts
-// (themes/shadcn/tailwind-config.hbs).  These two literals must agree
+// (designs/shadcn/tailwind-config.hbs).  These two literals must agree
 // on the design tokens (`extend.colors`, `extend.borderRadius`,
 // `container`) — otherwise a class that resolves cleanly in the
 // generated `npm run dev` build silently fails to apply in the
@@ -57,7 +57,7 @@ function extractBlock(src: string, anchor: RegExp): string {
 
 describe("iframe TAILWIND_PLAY_CONFIG ↔ shadcn pack tailwind-config drift guard", () => {
   const hbs = fs.readFileSync(
-    path.join(repoRoot, "themes/shadcn/tailwind-config.hbs"),
+    path.join(repoRoot, "designs/shadcn/tailwind-config.hbs"),
     "utf-8",
   );
   const iframe = fs.readFileSync(

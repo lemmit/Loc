@@ -108,7 +108,7 @@ describe("pack manifest: helpers", () => {
 });
 
 describe("resolvePackDir", () => {
-  it("resolves the built-in `mantine` and `shadcn` ids to the repo themes/", () => {
+  it("resolves the built-in `mantine` and `shadcn` ids to the repo designs/", () => {
     const m = resolvePackDir("mantine");
     const s = resolvePackDir("shadcn");
     expect(fs.existsSync(path.join(m, "pack.json"))).toBe(true);
