@@ -60,6 +60,11 @@ export class DddValidator {
     // type system is the source of truth); structural checks run
     // unconditionally.
     this.checkMatchExpressions(model, accept);
+    // Slice A6 — `import helper <name> from "..."` declarations.
+    // Reject names that shadow walker stdlib primitives so a typo
+    // never silently overrides Stack / Form / etc.  Also flag
+    // duplicate helper names within the same UI.
+    this.checkUiHelperImports(model, accept);
     for (const m of model.members) {
       if (m.$type === "BoundedContext") {
         this.checkContext(m, accept);
@@ -170,6 +175,64 @@ export class DddValidator {
               m as import("./generated/ast.js").System,
               accept,
             );
+          }
+        }
+      }
+    }
+  }
+
+  /** Slice A6 — `import helper <name> from "<path>"` at the UI
+   *  level.  Validate two invariants:
+   *   1. Helper names don't shadow any walker stdlib primitive
+   *      (else a typo would silently divert a body call like
+   *      `Stack(...)` from the primitive to the helper).
+   *   2. No duplicate helper names within the same UI.
+   *
+   *  The stdlib set is duplicated here from `body-walker.ts`
+   *  intentionally — the validator runs before generation and
+   *  the cross-module import would inflate the language-server
+   *  bundle. */
+  private checkUiHelperImports(
+    model: import("./generated/ast.js").Model,
+    accept: ValidationAcceptor,
+  ): void {
+    const STDLIB_PRIMITIVES = new Set<string>([
+      "Stack", "Group", "Grid", "Container", "Tabs", "Tab", "Toolbar",
+      "Empty", "Field", "NumberField", "PasswordField", "Toggle",
+      "Loader", "Anchor", "Image", "Avatar", "Slot", "Heading", "Text",
+      "Button", "Card", "Stat", "Badge", "Divider", "Table", "Column",
+      "Money", "DateDisplay", "EnumBadge", "IdLink", "Form",
+      // Scaffold-archetype call names also reserved (List / Detail
+      // dispatch via inferBodyDispatch).
+      "List", "Detail", "Home", "WorkflowsIndex", "ViewsIndex",
+    ]);
+    for (const member of model.members) {
+      if (member.$type !== "System") continue;
+      const sys = member as import("./generated/ast.js").System;
+      const uis = sys.members.filter(
+        (sm) => sm.$type === "Ui",
+      ) as import("./generated/ast.js").Ui[];
+      for (const ui of uis) {
+        const seen = new Map<string, import("./generated/ast.js").UiHelperImport>();
+        for (const um of ui.members) {
+          if (um.$type !== "UiHelperImport") continue;
+          const h = um as import("./generated/ast.js").UiHelperImport;
+          if (STDLIB_PRIMITIVES.has(h.name)) {
+            accept(
+              "error",
+              `Helper '${h.name}' shadows the walker stdlib primitive '${h.name}'. Rename the helper.`,
+              { node: h, property: "name" },
+            );
+          }
+          const prior = seen.get(h.name);
+          if (prior) {
+            accept(
+              "error",
+              `Duplicate helper import '${h.name}' in ui '${ui.name}'.`,
+              { node: h, property: "name" },
+            );
+          } else {
+            seen.set(h.name, h);
           }
         }
       }

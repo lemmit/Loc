@@ -57,6 +57,7 @@ import type {
   StmtIR,
   TypeIR,
   UiApiParamIR,
+  UiHelperImportIR,
 } from "../../ir/loom-ir.js";
 import { camel, humanize, pascal, plural, snake } from "../../util/naming.js";
 import {
@@ -186,6 +187,11 @@ export interface WalkResult {
    *  reads this set to surface one typed `Locator` getter per
    *  testid in the generated `e2e/pages/<page-snake>.ts` class. */
   collectedTestids: Set<string>;
+  /** Slice A6 — names of UI-declared helpers the body actually
+   *  invoked.  The shell emits one `import { <name> } from
+   *  "<path>"` line per used helper; declared-but-unused helpers
+   *  don't pollute the page TSX. */
+  usedHelpers: Set<string>;
 }
 
 /** A single auto-injected React Query hook call.  Generated when
@@ -247,21 +253,27 @@ const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
 export function isWalkableLayoutBody(
   body: ExprIR | undefined,
   userComponents: ReadonlyMap<string, readonly ParamIR[]> = new Map(),
+  helperNames: ReadonlySet<string> = new Set(),
 ): boolean {
   if (!body) return false;
   if (body.kind === "call") {
     if (STDLIB_LAYOUT_COMPONENTS.has(body.name)) return true;
     // Slice 11.18 — calls to user-defined components are walker-
     // eligible too (resolved via the supplied map).
-    return userComponents.has(body.name);
+    if (userComponents.has(body.name)) return true;
+    // Slice A6 — a body whose top-level call is a UI-declared
+    // helper is walker-eligible: the helper renders the page's
+    // JSX in user land.  Without this, `body: RenderBanner("hi")`
+    // would be silently skipped.
+    return helperNames.has(body.name);
   }
   // Slice 11.17 — top-level conditional bodies dispatch through the
   // walker as long as either branch is walkable.  Powers patterns
   // like `body: loading ? Empty("…") : Stack(…)`.
   if (body.kind === "ternary") {
     return (
-      isWalkableLayoutBody(body.then, userComponents) ||
-      isWalkableLayoutBody(body.otherwise, userComponents)
+      isWalkableLayoutBody(body.then, userComponents, helperNames) ||
+      isWalkableLayoutBody(body.otherwise, userComponents, helperNames)
     );
   }
   return false;
@@ -305,9 +317,16 @@ export function walkBodyToTsx(
    *  form-field preparer needs the BC to resolve enum / value-
    *  object types declared alongside the aggregate. */
   bcByAggregate: ReadonlyMap<string, BoundedContextIR> = new Map(),
+  /** Slice A6 — user-authored helper imports declared at the UI
+   *  level via `import helper <name> from "<path>"`.  Body refs
+   *  matching one of these names emit as plain JS calls and the
+   *  shell adds the matching `import { <name> } from "<path>"`. */
+  helperImports: ReadonlyArray<UiHelperImportIR> = [],
 ): WalkResult {
   const apiParamNames = new Map<string, string>();
   for (const p of apiParams) apiParamNames.set(p.name, p.apiName);
+  const helperNameToPath = new Map<string, string>();
+  for (const h of helperImports) helperNameToPath.set(h.name, h.path);
   const ctx: WalkContext = {
     imports: new Map(),
     pack,
@@ -328,6 +347,8 @@ export function walkBodyToTsx(
     bcByAggregate,
     formOf: null,
     collectedTestids: new Set(),
+    helperImports: helperNameToPath,
+    usedHelpers: new Set(),
   };
   const tsx = walk(body, ctx, 0);
   return {
@@ -342,6 +363,7 @@ export function walkBodyToTsx(
     usedApiHooks: ctx.usedApiHooks,
     formOf: ctx.formOf,
     collectedTestids: ctx.collectedTestids,
+    usedHelpers: ctx.usedHelpers,
   };
 }
 
@@ -387,6 +409,15 @@ interface WalkContext {
   /** Slice A5 — accumulator for static `testid:` strings the body
    *  emits, used by the walker-side page-object builder. */
   collectedTestids: Set<string>;
+  /** Slice A6 — UI helper-import lookup (name → import path).
+   *  Populated by `walkBodyToTsx` from the UI's `helperImports`
+   *  parameter; consulted by `emitComponent`'s fallthrough so
+   *  body calls to a helper name emit as plain JS calls. */
+  helperImports: ReadonlyMap<string, string>;
+  /** Slice A6 — names of helpers the body actually called.  The
+   *  shell emits one import line per used helper; declared-but-
+   *  unused helpers don't pollute the page TSX. */
+  usedHelpers: Set<string>;
 }
 
 /** Slice A4 — RHF wiring requirements recorded by `emitFormOf`,
@@ -565,10 +596,18 @@ function emitComponent(
     default: {
       // Slice 11.18 — names not in the stdlib dispatch table fall
       // through to user-component invocation when they match a
-      // registered ComponentIR.  Otherwise the original
-      // "unknown component" placeholder fires.
+      // registered ComponentIR.
       if (ctx.userComponents.has(call.name)) {
         return emitUserComponent(call, ctx, depth);
+      }
+      // Slice A6 — UI-declared helper imports (`import helper
+      // <name> from "..."`) emit as plain JS calls in JSX-child
+      // position (brace-wrapped).  The shell adds the matching
+      // import line once `usedHelpers` is populated.
+      if (ctx.helperImports.has(call.name)) {
+        ctx.usedHelpers.add(call.name);
+        const args = call.args.map((a) => emitExpr(a, ctx)).join(", ");
+        return `{${call.name}(${args})}`;
       }
       return `{/* unknown layout component: ${call.name} */}`;
     }
@@ -1592,6 +1631,13 @@ function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // user to import / declare `<name>` somewhere in their app
       // shell.  Powers patterns like `let n = inc(count)` and the
       // statement form `Button("…", onClick: e => { saveOrder() })`.
+      //
+      // Slice A6 — UI-declared helper imports take this path too:
+      // tracking `usedHelpers` so the shell emits the matching
+      // `import { <name> } from "<path>"` line.
+      if (ctx.helperImports.has(expr.name)) {
+        ctx.usedHelpers.add(expr.name);
+      }
       const args = expr.args.map((a) => emitExpr(a, ctx)).join(", ");
       return `${expr.name}(${args})`;
     }
@@ -1742,6 +1788,33 @@ function renderApiHookImports(usedApiHooks: Map<string, ApiHookUse>): string {
       byPath.set(h.importFrom, names);
     }
     names.add(h.hookName);
+  }
+  const lines: string[] = [];
+  for (const [path, names] of [...byPath.entries()].sort()) {
+    const sorted = [...names].sort();
+    lines.push(`import { ${sorted.join(", ")} } from "${path}";\n`);
+  }
+  return lines.join("");
+}
+
+/** Slice A6 — render `import { … } from "…"` lines for every
+ *  UI-declared helper actually used in the body.  Helpers
+ *  sharing an import path collapse into one line; paths are
+ *  sorted for deterministic output. */
+function renderHelperImports(
+  usedHelpers: Set<string>,
+  declared: ReadonlyArray<UiHelperImportIR>,
+): string {
+  if (usedHelpers.size === 0) return "";
+  const byPath = new Map<string, Set<string>>();
+  for (const h of declared) {
+    if (!usedHelpers.has(h.name)) continue;
+    let names = byPath.get(h.path);
+    if (!names) {
+      names = new Set();
+      byPath.set(h.path, names);
+    }
+    names.add(h.name);
   }
   const lines: string[] = [];
   for (const [path, names] of [...byPath.entries()].sort()) {
@@ -2118,9 +2191,18 @@ function renderTextContent(
   // literal): emit the JS-expression form wrapped as a JSX
   // expression.  Powers patterns like `Heading("Welcome, " +
   // name)`, `Text(count + 1)`, `Stat("Count", count * step)`.
-  // Calls fall through to undefined — those are child components,
-  // not text content, and should be walked through `walk` instead.
-  if (expr.kind === "call") return undefined;
+  //
+  // Slice A6 — UI-declared helper calls also belong in text
+  // position; route them through `emitExpr` so they emit as
+  // plain JS calls (`{formatPrice(99)}`).  Stdlib-primitive
+  // calls still fall through to undefined — those are child
+  // components and the caller should `walk` them instead.
+  if (expr.kind === "call") {
+    if (ctx.helperImports.has(expr.name)) {
+      return `{${emitExpr(expr, ctx)}}`;
+    }
+    return undefined;
+  }
   return `{${emitExpr(expr, ctx)}}`;
 }
 
@@ -2210,6 +2292,10 @@ export function renderCustomLayoutPage(
    *  enum / value-object resolution inside the form-field
    *  preparer). */
   bcByAggregate: ReadonlyMap<string, BoundedContextIR> = new Map(),
+  /** Slice A6 — user-authored helper imports.  Body refs whose
+   *  call name matches a helper emit as plain JS calls; the shell
+   *  adds `import { <name> } from "<path>"` for each USED helper. */
+  helperImports: ReadonlyArray<UiHelperImportIR> = [],
 ): string {
   const paramNames = new Set(params.map((p) => p.name));
   const stateNames = new Set(state.map((s) => s.name));
@@ -2223,6 +2309,7 @@ export function renderCustomLayoutPage(
     usedUserComponents,
     usedApiHooks,
     formOf,
+    usedHelpers,
   } = walkBodyToTsx(
     body,
     pack,
@@ -2232,6 +2319,7 @@ export function renderCustomLayoutPage(
     apiParams,
     aggregatesByName,
     bcByAggregate,
+    helperImports,
   );
   // Slice 11.12 — render the title expression through emitExpr
   // (sharing the body's tracking state so the shell destructures
@@ -2262,6 +2350,8 @@ export function renderCustomLayoutPage(
       bcByAggregate: new Map(),
       formOf: null,
       collectedTestids: new Set(),
+      helperImports: new Map(),
+      usedHelpers: new Set(),
     };
     const titleExpr = emitExpr(title, titleCtx);
     // emitExpr may have added to usedParams; reflect title's state
@@ -2288,6 +2378,11 @@ export function renderCustomLayoutPage(
   // multiple ops on the same aggregate dedupe to one import line
   // (matching the existing scaffold output's per-aggregate api file).
   const apiHookImports = renderApiHookImports(usedApiHooks);
+  // Slice A6 — `import { <name> } from "<path>"` per UI-declared
+  // helper actually referenced in the body.  Lines grouped per
+  // path so two helpers from the same module dedupe to one
+  // import line; paths sorted for deterministic output.
+  const helperImportLines = renderHelperImports(usedHelpers, helperImports);
   // Slice 11.24 — api hook declarations, emitted at page-top right
   // before the JSX return.  Each unique `<param>.<aggregate>.<op>`
   // becomes one `const <var> = use<Op><Aggregate>(args?);` line.
@@ -2337,7 +2432,7 @@ export function renderCustomLayoutPage(
     ? `  const navigate = useNavigate();\n`
     : "";
   return `// Auto-generated.  Do not edit by hand.
-${reactImport}${reactRouterImport}${form.imports}${mantineImport}${apiHookImports}${userComponentImports}
+${reactImport}${reactRouterImport}${form.imports}${mantineImport}${apiHookImports}${helperImportLines}${userComponentImports}
 export default function ${pageName}() {
 ${paramsLine}${navigateLine}${stateLines}${apiHookDecls}${form.decls}${titleEffect}  return (
     ${indentJsx(tsx, "    ")}
@@ -2538,6 +2633,8 @@ function renderInitExpr(expr: ExprIR, pack: LoadedPack): string {
     bcByAggregate: new Map(),
     formOf: null,
     collectedTestids: new Set(),
+    helperImports: new Map(),
+    usedHelpers: new Set(),
   };
   return emitExpr(expr, dummy);
 }

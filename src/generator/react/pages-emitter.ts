@@ -118,6 +118,8 @@ export function deriveExtraRoutesFromUi(
   // invocation.
   const userComponents = new Map<string, readonly ParamIR[]>();
   for (const c of ui.components) userComponents.set(c.name, c.params);
+  // Slice A6 — helper names are also a walker-eligibility signal.
+  const helperNames = new Set(ui.helperImports.map((h) => h.name));
   for (const page of ui.pages) {
     if (!page.route) continue;
     const origin = page.scaffoldOrigin ?? inferBodyDispatch(page.body);
@@ -132,7 +134,7 @@ export function deriveExtraRoutesFromUi(
     }
     // Slice 11.3 — custom-layout pages (walker-rendered) also need
     // an App.tsx import + Route.
-    if (isWalkableLayoutBody(page.body, userComponents)) {
+    if (isWalkableLayoutBody(page.body, userComponents, helperNames)) {
       out.push({
         componentName: page.name,
         importFrom: `./pages/${snake(page.name)}`,
@@ -166,6 +168,10 @@ export function emitPagesForUi(
       renderUserComponentFile(c.name, c.params, c.state, c.body, ctx.pack, userComponents),
     );
   }
+  // Slice A6 — helper names accumulated for walker-eligibility
+  // checks (`isWalkableLayoutBody`).  Same `ui.helperImports`
+  // array is threaded to the per-page render call below.
+  const helperNames = new Set(ui.helperImports.map((h) => h.name));
 
   // The shared Home page wants the aggregate / workflow / view IRs
   // currently in scope; collect them once from `ui.pages` so
@@ -204,7 +210,7 @@ export function emitPagesForUi(
     // Button / Card) route through the recursive walker.  Output
     // goes to `src/pages/<name-snake>.tsx`; App.tsx routing comes
     // through `deriveExtraRoutesFromUi` (Slice 11.1).
-    if (isWalkableLayoutBody(page.body, userComponents)) {
+    if (isWalkableLayoutBody(page.body, userComponents, helperNames)) {
       out.set(
         `src/pages/${snake(page.name)}.tsx`,
         // Slice 11.4 — pass the page's typed route params so the
@@ -229,6 +235,7 @@ export function emitPagesForUi(
           ui.apiParams,
           ctx.aggregatesByName,
           buildBcByAggregate(ctx),
+          ui.helperImports,
         ),
       );
       continue;
@@ -652,10 +659,11 @@ export function emitPageObjectsForUi(
   // whose path is already in `out`.
   const userComponents = buildUserComponentsMap(ui);
   const bcByAggregate = buildBcByAggregate(ctx);
+  const helperNames = new Set(ui.helperImports.map((h) => h.name));
   for (const page of ui.pages) {
     const origin = page.scaffoldOrigin ?? inferBodyDispatch(page.body);
     if (origin) continue;
-    if (!isWalkableLayoutBody(page.body, userComponents)) continue;
+    if (!isWalkableLayoutBody(page.body, userComponents, helperNames)) continue;
     if (!page.body) continue;
     const paramNames = new Set(page.params.map((p) => p.name));
     const stateNames = new Set(page.state.map((s) => s.name));
@@ -668,6 +676,7 @@ export function emitPageObjectsForUi(
       ui.apiParams,
       ctx.aggregatesByName,
       bcByAggregate,
+      ui.helperImports,
     );
     const path = `e2e/pages/${snake(page.name)}.ts`;
     if (out.has(path)) continue;
