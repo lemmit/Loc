@@ -86,10 +86,11 @@ export function expandScaffoldToExplicitBody(
       return expandAggregateList(origin.aggregateName, ctx);
     case "aggregate-new":
       return expandAggregateNew(origin.aggregateName, ctx);
+    case "aggregate-detail":
+      return expandAggregateDetail(origin.aggregateName, ctx);
     // Spillover — see header comment.  Returning null here keeps
     // the page on the archetype path until a future slice provides
     // the missing primitives.
-    case "aggregate-detail":
     case "workflow-form":
     case "view-list":
     case "workflows-index":
@@ -197,6 +198,136 @@ function expandAggregateList(
     undefined,
     [["testid", lit(`${slug}-list`)]],
   );
+}
+
+// ---------------------------------------------------------------------------
+// Aggregate-detail expansion
+// ---------------------------------------------------------------------------
+
+function expandAggregateDetail(
+  aggregateName: string,
+  ctx: ScaffoldExpandContext,
+): ExprIR | null {
+  const agg = ctx.aggregatesByName.get(aggregateName);
+  if (!agg) return null;
+  const apiHandle = findApiHandleFor(agg, ctx);
+  if (!apiHandle) return null;
+  const slug = snake(plural(agg.name));
+  const humanPlural = humanize(plural(agg.name));
+  const humanAgg = humanize(agg.name);
+  const cellVar = "data";
+
+  // One KeyValueRow per non-collection aggregate field.  Collection
+  // fields (`contains lines: …`) belong in their own nested-table
+  // section — A12+ scope.  Same skip rule as the list expander uses
+  // for value-object cells (no scalar cell renderer for them).
+  const rows: ExprIR[] = [];
+  for (const f of agg.fields) {
+    const inner = f.type.kind === "optional" ? f.type.inner : f.type;
+    if (inner.kind === "valueobject" || inner.kind === "array") continue;
+    rows.push(
+      call("KeyValueRow", [
+        lit(humanize(f.name)),
+        cellAccessorFor(f.name, f.type, cellVar),
+      ]),
+    );
+  }
+
+  return call(
+    "Stack",
+    [
+      // Breadcrumbs(Anchor("Home", to: "/"), Anchor(<Plural>, to: …), Text("Detail"))
+      call("Breadcrumbs", [
+        call("Anchor", [lit("Home")], undefined, [["to", lit("/")]]),
+        call("Anchor", [lit(humanPlural)], undefined, [
+          ["to", lit(`/${slug}`)],
+        ]),
+        call("Text", [lit("Detail")]),
+      ]),
+      // Heading(<HumanAgg> + " detail", level: 2)
+      call("Heading", [lit(`${humanAgg} detail`)], undefined, [
+        ["level", intLit(2)],
+      ]),
+      // QueryView(of: api.Agg.byId(id), single: true, loading, error, empty: not-found, data: data => Card(Stack(...rows)))
+      call("QueryView", [], undefined, [
+        [
+          "of",
+          methodCall(member(ref(apiHandle), agg.name), "byId", [
+            ref("id"),
+          ]),
+        ],
+        ["single", boolLit(true)],
+        ["loading", call("Skeleton", [], undefined, [["count", intLit(3)]])],
+        [
+          "error",
+          call("Alert", [lit(`Couldn't load ${humanAgg.toLowerCase()}`)]),
+        ],
+        [
+          "empty",
+          call("Alert", [lit(`No ${humanAgg.toLowerCase()} matches that id.`)], undefined, [
+            ["color", lit("yellow")],
+          ]),
+        ],
+        ["data", lambda(cellVar, call("Card", [call("Stack", rows)]))],
+      ]),
+    ],
+    undefined,
+    [["testid", lit(`${slug}-detail`)]],
+  );
+}
+
+/** Field-accessor for a detail-page row.  Same dispatch table as
+ *  the list expander uses, but rooted on `data.<field>` instead
+ *  of `o.<field>`.  Skips the IdLink wrapper for plain string ids
+ *  (those are already typed as `string` and don't have a target
+ *  aggregate to link to). */
+function cellAccessorFor(
+  fieldName: string,
+  type: import("./loom-ir.js").TypeIR,
+  rowVar: string,
+): ExprIR {
+  const inner = type.kind === "optional" ? type.inner : type;
+  if (inner.kind === "id") {
+    return call("IdLink", [member(ref(rowVar), fieldName)], undefined, [
+      ["of", ref(inner.targetName)],
+    ]);
+  }
+  if (inner.kind === "primitive") {
+    if (inner.name === "datetime") {
+      return call("DateDisplay", [member(ref(rowVar), fieldName)]);
+    }
+    if (
+      inner.name === "decimal" ||
+      inner.name === "int" ||
+      inner.name === "long"
+    ) {
+      return call("Text", [member(ref(rowVar), fieldName)]);
+    }
+  }
+  if (inner.kind === "enum") {
+    return call("EnumBadge", [member(ref(rowVar), fieldName)]);
+  }
+  return call("Text", [member(ref(rowVar), fieldName)]);
+}
+
+/** Slice A11 — `methodCall` ExprIR helper.  The detail expander
+ *  needs to synthesise `<api>.<Agg>.byId(id)` which is a method
+ *  call (vs `<api>.<Agg>.all` which is plain member access).  The
+ *  walker's `tryDetectApiHook` recognises this shape and lifts it
+ *  to `useByIdAggregate(id)`. */
+function methodCall(
+  receiver: ExprIR,
+  member: string,
+  args: ExprIR[],
+): ExprIR {
+  return {
+    kind: "method-call",
+    receiver,
+    member,
+    args,
+    receiverType: PLACEHOLDER_TYPE,
+    isCollectionOp: false,
+  };
 }
 
 // ---------------------------------------------------------------------------

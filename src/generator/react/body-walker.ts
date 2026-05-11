@@ -2271,6 +2271,13 @@ function emitQueryView(
   const error = namedArgValue(call, "error");
   const empty = namedArgValue(call, "empty");
   const data = namedArgValue(call, "data");
+  // Slice A11 — `single: true` flips QueryView to single-record
+  // semantics (byId queries return `T | undefined`, not `T[]`).
+  // The `empty` branch fires when `data === undefined` after
+  // loading completes; `data` branch fires when `data` is truthy.
+  // Without the flag, the default collection semantics apply
+  // (`data && data.length === 0` / `data && data.length > 0`).
+  const single = boolNamed(call, "single");
 
   const loadingJsx = loading ? walk(loading, ctx, depth + 2) : "null";
   const errorJsx = error ? walk(error, ctx, depth + 2) : "null";
@@ -2300,6 +2307,7 @@ function emitQueryView(
     errorJsx,
     emptyJsx,
     dataJsx,
+    single,
     indent,
     branchIndent,
     closeIndent,

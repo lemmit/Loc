@@ -147,25 +147,25 @@ describe("react generator", () => {
     expect(files.get("web_app/e2e/pages/_helpers.ts")).toBeFalsy();
   });
 
-  it("Phase 3: Id<X> op-param renders Select populated by useAll<X>()", async () => {
-    const model = await buildModel("examples/acme.ddd");
-    const { files } = generateSystems(model);
-    const detail = files.get("web_app/src/pages/orders/detail.tsx")!;
-    // Cross-aggregate hook import.
-    expect(detail).toMatch(
-      /import \{ useAllProducts \} from "\.\.\/\.\.\/api\/product"/,
-    );
-    // Hook called inside the operation form component.
-    expect(detail).toMatch(/const __products = useAllProducts\(\);/);
-    // Select bound by Controller, populated from the hook's data,
-    // labelled by the target's display field (`sku`).
-    expect(detail).toMatch(/<Select label="Product Id"/);
-    expect(detail).toMatch(/__products\.data \?\? \[\]/);
-    expect(detail).toMatch(/label: __o\.sku/);
-    // renderOption emits a per-option testid for Playwright drivers.
-    expect(detail).toMatch(/data-testid=\{`orders-op-addLine-input-productId-option-\$\{option\.value\}`\}/);
-    // Old plain-TextInput placeholder is gone.
-    expect(detail).not.toMatch(/placeholder="<id>"/);
+  describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — Id<X> op-param select", () => {
+    const guard = withLegacyScaffold();
+    beforeEach(guard.before);
+    afterEach(guard.after);
+
+    it("Phase 3: Id<X> op-param renders Select populated by useAll<X>()", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const detail = files.get("web_app/src/pages/orders/detail.tsx")!;
+      expect(detail).toMatch(
+        /import \{ useAllProducts \} from "\.\.\/\.\.\/api\/product"/,
+      );
+      expect(detail).toMatch(/const __products = useAllProducts\(\);/);
+      expect(detail).toMatch(/<Select label="Product Id"/);
+      expect(detail).toMatch(/__products\.data \?\? \[\]/);
+      expect(detail).toMatch(/label: __o\.sku/);
+      expect(detail).toMatch(/data-testid=\{`orders-op-addLine-input-productId-option-\$\{option\.value\}`\}/);
+      expect(detail).not.toMatch(/placeholder="<id>"/);
+    });
   });
 
   it("Phase 3: page object clicks the testid'd option for Id<X> params", async () => {
@@ -181,16 +181,20 @@ describe("react generator", () => {
     );
   });
 
-  it("detail page shows fields + nested parts (master-detail) + operation buttons", async () => {
-    const model = await buildModel("examples/acme.ddd");
-    const { files } = generateSystems(model);
-    const detail = files.get("web_app/src/pages/orders/detail.tsx")!;
-    expect(detail).toMatch(/use OrderById/.source.replace(/\s/g, ""));
-    // Nested-part rendering (lines is a contained collection).
-    expect(detail).toMatch(/data\.lines\.map/);
-    // Operation buttons + their modal forms.
-    expect(detail).toMatch(/openAddLineModal/);
-    expect(detail).toMatch(/openConfirmModal/);
+  describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — master-detail", () => {
+    const guard = withLegacyScaffold();
+    beforeEach(guard.before);
+    afterEach(guard.after);
+
+    it("detail page shows fields + nested parts (master-detail) + operation buttons", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const detail = files.get("web_app/src/pages/orders/detail.tsx")!;
+      expect(detail).toMatch(/use OrderById/.source.replace(/\s/g, ""));
+      expect(detail).toMatch(/data\.lines\.map/);
+      expect(detail).toMatch(/openAddLineModal/);
+      expect(detail).toMatch(/openConfirmModal/);
+    });
   });
 
   it("API base URL is baked from the target deployable's port", async () => {
@@ -223,32 +227,31 @@ describe("react generator", () => {
     });
   });
 
-  it("detail page uses the display field as title when the aggregate declares one", async () => {
-    const model = await buildModel("examples/acme.ddd");
-    const { files } = generateSystems(model);
-    // Product declares `sku: string display` — title binds to data.sku
-    // so users see the SKU rather than the first 8 chars of the id.
-    const product = files.get("web_app/src/pages/products/detail.tsx")!;
-    expect(product).toMatch(
-      /<Title order=\{2\} data-testid="products-detail-title">\{data\.sku\}<\/Title>/,
-    );
-    // Breadcrumb's last segment should also reflect the display value.
-    expect(product).toMatch(/<Text>\{data\.sku\}<\/Text>/);
-    // Id surfaces beside the title via IdValue (tooltip with full id).
-    expect(product).toMatch(
-      /<span data-testid="products-detail-id"><IdValue id=\{data\.id\}/,
-    );
-    // Customer declares `username: string display`.
-    const customer = files.get("web_app/src/pages/customers/detail.tsx")!;
-    expect(customer).toMatch(
-      /<Title order=\{2\} data-testid="customers-detail-title">\{data\.username\}<\/Title>/,
-    );
+  describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — display-field title", () => {
+    const guard = withLegacyScaffold();
+    beforeEach(guard.before);
+    afterEach(guard.after);
 
-    // Order has no display field — title falls back to the id slice.
-    const order = files.get("web_app/src/pages/orders/detail.tsx")!;
-    expect(order).toMatch(
-      /<Title order=\{2\} data-testid="orders-detail-title">\{data\.id\.slice\(0, 8\) \+ "…"\}<\/Title>/,
-    );
+    it("detail page uses the display field as title when the aggregate declares one", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const product = files.get("web_app/src/pages/products/detail.tsx")!;
+      expect(product).toMatch(
+        /<Title order=\{2\} data-testid="products-detail-title">\{data\.sku\}<\/Title>/,
+      );
+      expect(product).toMatch(/<Text>\{data\.sku\}<\/Text>/);
+      expect(product).toMatch(
+        /<span data-testid="products-detail-id"><IdValue id=\{data\.id\}/,
+      );
+      const customer = files.get("web_app/src/pages/customers/detail.tsx")!;
+      expect(customer).toMatch(
+        /<Title order=\{2\} data-testid="customers-detail-title">\{data\.username\}<\/Title>/,
+      );
+      const order = files.get("web_app/src/pages/orders/detail.tsx")!;
+      expect(order).toMatch(
+        /<Title order=\{2\} data-testid="orders-detail-title">\{data\.id\.slice\(0, 8\) \+ "…"\}<\/Title>/,
+      );
+    });
   });
 
   describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — alerts", () => {
@@ -539,15 +542,20 @@ describe("react generator", () => {
       expect(app).not.toMatch(/data-testid="nav-views"/);
     });
 
-    it("detail page uses Breadcrumbs (Home / <Plural> / id) instead of a bare back-anchor", async () => {
-      const model = await buildModel("examples/acme.ddd");
-      const { files } = generateSystems(model);
-      const detail = files.get("web_app/src/pages/orders/detail.tsx")!;
-      expect(detail).toMatch(/<Breadcrumbs data-testid="orders-detail-breadcrumbs">/);
-      expect(detail).toMatch(/<Anchor component=\{Link\} to="\/">Home<\/Anchor>/);
-      expect(detail).toMatch(/<Anchor component=\{Link\} to="\/orders">Orders<\/Anchor>/);
-      // The old "← back" anchor is gone — Breadcrumbs replaces it.
-      expect(detail).not.toMatch(/← back/);
+    describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — detail breadcrumbs", () => {
+      const detailGuard = withLegacyScaffold();
+      beforeEach(detailGuard.before);
+      afterEach(detailGuard.after);
+
+      it("detail page uses Breadcrumbs (Home / <Plural> / id) instead of a bare back-anchor", async () => {
+        const model = await buildModel("examples/acme.ddd");
+        const { files } = generateSystems(model);
+        const detail = files.get("web_app/src/pages/orders/detail.tsx")!;
+        expect(detail).toMatch(/<Breadcrumbs data-testid="orders-detail-breadcrumbs">/);
+        expect(detail).toMatch(/<Anchor component=\{Link\} to="\/">Home<\/Anchor>/);
+        expect(detail).toMatch(/<Anchor component=\{Link\} to="\/orders">Orders<\/Anchor>/);
+        expect(detail).not.toMatch(/← back/);
+      });
     });
 
     describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0)", () => {
