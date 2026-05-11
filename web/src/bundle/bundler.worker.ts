@@ -12,6 +12,7 @@ import type {
 } from "./protocol.js";
 import type { VirtualFile } from "../build/protocol.js";
 import {
+  harvestTsconfigPaths,
   harvestVersions,
   makeEntryStdin,
   makeLoomPlugin,
@@ -93,6 +94,10 @@ async function handleBundle(req: BundleRequest): Promise<BundleResult> {
     // backend's Hono/Drizzle pins for kind=hono and the
     // frontend's React/Mantine pins for kind=react.
     versions: harvestVersions(fs, entryInFs),
+    // Read the entry's nearest tsconfig.json for any `@/*`-style
+    // path aliases.  Empty when no tsconfig is present (legacy mode,
+    // Hono-only bundles).
+    tsconfigPaths: harvestTsconfigPaths(fs, entryInFs),
   };
 
   // Hono kind: stdin re-exports the runtime surface (createApp,
