@@ -92,7 +92,8 @@
     "primitive-breadcrumbs": "primitive-breadcrumbs.hbs",
     "primitive-paper": "primitive-paper.hbs",
     "primitive-skeleton": "primitive-skeleton.hbs",
-    "primitive-alert": "primitive-alert.hbs"
+    "primitive-alert": "primitive-alert.hbs",
+    "primitive-query-view": "primitive-query-view.hbs"
   },
   "imports": {
     "primitive-button":         [{ "from": "@/components/ui/button", "named": ["Button"] }],

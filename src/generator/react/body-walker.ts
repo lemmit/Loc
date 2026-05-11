@@ -252,6 +252,7 @@ const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
   "Paper",
   "Skeleton",
   "Alert",
+  "QueryView",
 ]);
 
 export function isWalkableLayoutBody(
@@ -569,6 +570,8 @@ function emitComponent(
       return emitSkeleton(call, ctx, depth);
     case "Alert":
       return emitAlert(call, ctx, depth);
+    case "QueryView":
+      return emitQueryView(call, ctx, depth);
     case "Toolbar":
       return emitToolbar(call, ctx, depth);
     case "Empty":
@@ -2141,6 +2144,96 @@ function emitAlert(
     color: color !== undefined ? JSON.stringify(color) : '"red"',
     hasTitle: title !== undefined,
     title: title ?? "",
+    testidAttr: testidAttr(call, ctx),
+  });
+}
+
+/** Slice A8 — QueryView(of:, loading:, error:, empty:, data:, testid?).
+ *
+ *  Macro for the canonical "4-arm query state" rendering pattern
+ *  the scaffold List page emits inline.  Takes a query
+ *  expression and four branch bodies; lowers to a fragment of
+ *  guarded JSX expressions that render the right branch for the
+ *  query's current state.
+ *
+ *  Surface:
+ *
+ *    QueryView(
+ *      of:      Sales.Order.all,
+ *      loading: Skeleton(count: 5),
+ *      error:   Alert("Couldn't load orders"),
+ *      empty:   Empty("No orders yet."),
+ *      data:    rows => Table(rows: rows, …)
+ *    )
+ *
+ *  The `of:` expression must resolve to a React-Query hook
+ *  variable (typically via the walker's api-hook detection of
+ *  `<param>.<aggregate>.all`).  The hook's `.isLoading`,
+ *  `.isError`, `.data` properties drive the four conditional
+ *  branches.
+ *
+ *  The `data` branch is special: when it's a lambda (`rows => …`),
+ *  the lambda param rebinds to the unwrapped data inside the
+ *  branch.  When it's a plain expression, the branch renders that
+ *  expression directly (still inside the `data &&` guard).
+ *
+ *  All four branch args are required; any missing arg gets a
+ *  null-render placeholder so the page still compiles. */
+function emitQueryView(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  const ofArg = namedArgValue(call, "of");
+  if (!ofArg) {
+    return `{/* QueryView: missing 'of:' query expression */}`;
+  }
+  // Render the query expression; this triggers `tryDetectApiHook`
+  // so the page-shell registers the matching `useAll<X>()` (or
+  // similar) hook decl + import, and we get the local var name
+  // back via emitExpr's hook-detection path.
+  const queryExpr = emitExpr(ofArg, ctx);
+
+  const indent = "  ".repeat(depth + 1);
+  const branchIndent = "  ".repeat(depth + 2);
+  const closeIndent = "  ".repeat(depth);
+
+  const loading = namedArgValue(call, "loading");
+  const error = namedArgValue(call, "error");
+  const empty = namedArgValue(call, "empty");
+  const data = namedArgValue(call, "data");
+
+  const loadingJsx = loading ? walk(loading, ctx, depth + 2) : "null";
+  const errorJsx = error ? walk(error, ctx, depth + 2) : "null";
+  const emptyJsx = empty ? walk(empty, ctx, depth + 2) : "null";
+
+  // `data:` branch supports the lambda-binding form `rows => …`.
+  // Lambda body walks with the lambda param rebound to the
+  // unwrapped query data; non-lambda bodies render as-is.
+  let dataJsx: string;
+  if (data && data.kind === "lambda") {
+    const childCtx: WalkContext = {
+      ...ctx,
+      lambdaParams: extendLambdaParams(ctx, data.param, `${queryExpr}.data`),
+    };
+    dataJsx = data.body
+      ? walk(data.body, childCtx, depth + 2)
+      : "null";
+  } else if (data) {
+    dataJsx = walk(data, ctx, depth + 2);
+  } else {
+    dataJsx = "null";
+  }
+
+  return renderPrimitive(ctx, "primitive-query-view", {
+    queryExpr,
+    loadingJsx,
+    errorJsx,
+    emptyJsx,
+    dataJsx,
+    indent,
+    branchIndent,
+    closeIndent,
     testidAttr: testidAttr(call, ctx),
   });
 }
