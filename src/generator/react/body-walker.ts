@@ -47,7 +47,7 @@
 //   - `isWalkableLayoutBody(body)` — predicate the page emitter
 //     uses to decide whether to dispatch to the walker.
 
-import type { ImportSpec, LoadedPack } from "./templating/loader.js";
+import type { ImportSpec, LoadedPack } from "../_packs/loader.js";
 import type {
   AggregateIR,
   BoundedContextIR,

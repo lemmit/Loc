@@ -32,7 +32,7 @@ import type {
   ViewIR,
   WorkflowIR,
 } from "../../../ir/loom-ir.js";
-import type { LoadedPack } from "./loader.js";
+import type { LoadedPack } from "../../_packs/loader.js";
 import { prepareAppShellVM } from "./preparers/app-shell.js";
 import { prepareThemeVM } from "./preparers/theme.js";
 import type { FormFieldVM } from "./view-models.js";

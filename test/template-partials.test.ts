@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { compilePack } from "../src/generator/react/templating/loader.js";
+import { compilePack } from "../src/generator/_packs/loader.js";
 
 // ---------------------------------------------------------------------------
 // Partial composition — every template loaded into a pack is also

@@ -25,7 +25,7 @@ import {
   pascal,
   plural,
   snake,
-} from "../../../util/naming.js";
+} from "../../util/naming.js";
 
 /** Output format the pack's templates produce.  `tsx` is the v0
  *  React/Mantine/shadcn case (Handlebars over .hbs files yielding

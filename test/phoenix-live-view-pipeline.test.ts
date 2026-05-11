@@ -720,7 +720,7 @@ describe.skip("Batch C integration (parent wires emitters)", () => {
       "../src/generator/phoenix-live-view/extra-archetype-emit.js"
     );
     const { loadPack, resolvePackDir } = await import(
-      "../src/generator/react/templating/loader-fs.js"
+      "../src/generator/_packs/loader-fs.js"
     );
     const pack = loadPack(resolvePackDir("ashPhoenix"));
     const ctx = {

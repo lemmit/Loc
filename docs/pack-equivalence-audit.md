@@ -1,6 +1,6 @@
 # Pack equivalence audit
 
-> Status: **first pass — Mantine and shadcn both verified working; ashPhoenix column added**.
+> Status: **first pass — Mantine and shadcn both verified working; ashPhoenix column refreshed post-PR #117**.
 > Updated 2026-05-11.
 
 This document tracks the empirical state of each design-system pack
@@ -206,7 +206,7 @@ would violate the architectural rule.
 
 ## ashPhoenix (HEEx) coverage
 
-> Batch F4 — added 2026-05-11.
+> Batch F4 — added 2026-05-11; refreshed post-PR #117 (2026-05-11).
 
 ### HEEx-pack architecture notes
 
@@ -226,15 +226,24 @@ Before reading the matrix, three structural differences from the TSX packs matte
    have no Phoenix equivalent and are declared in `pack.json` as
    manifest stubs only (comment-only files).
 
-3. **Walker bypasses pack templates for custom-body pages.**
-   `src/generator/phoenix-live-view/heex-walker.ts` handles the closed
-   primitive library directly in TypeScript for `page X { body: ... }`
-   expressions.  For the 13 primitives that the walker does not yet
-   fully implement (see Batch H in the follow-ups plan), the walker
-   emits an HEEx comment marker rather than delegating to the pack
-   template.  The pack templates for those primitives ARE full
-   implementations; the gap is in the walker dispatch, not in the
-   templates themselves.
+3. **Walker is the canonical render path for all scaffold-expanded pages (PR #117).**
+   `src/generator/phoenix-live-view/heex-walker.ts` is the sole render path for
+   every page in the Phoenix generator — `liveview-emit.ts` always calls
+   `walkBodyToHeex(page.body)` and the old `scaffoldOrigin` branch has been
+   deleted.  `expandScaffoldPages()` in `lower.ts` rewrites every scaffold
+   page's body into an ExprIR walker tree before any emitter runs, so the
+   walker handles Breadcrumbs, Anchor, Form, Table, QueryView, KeyValueRow,
+   Skeleton, Alert, Column, IdLink, DateDisplay, EnumBadge, and the
+   page-level `<.flash_group>`/`<.app_shell>` shells directly in TypeScript.
+   Primitive rendering for scaffold-expanded pages is **not** delegated to
+   pack templates — the pack templates for primitives are used only for
+   custom-body `page X { body: ... }` expressions that invoke the closed
+   primitive library via `pack.render("primitive-X", vm)`.  As a result,
+   PR #117 deleted 39 pack templates (all cell-*, field-row-*, field-input-*,
+   scaffold-page, and form-of-* files) that the walker now renders inline;
+   the pack ships **41 templates** (shell + primitives + stubs).  There is no
+   "Batch H" follow-up for walker wiring — the walker is fully wired for all
+   scaffold-expanded content.
 
 ### Pack-level static checks
 
@@ -247,22 +256,29 @@ Before reading the matrix, three structural differences from the TSX packs matte
 
 ### Scaffold archetypes
 
+> The scaffold-page templates (`home`, `page-list`, `page-detail`, `page-new`,
+> `operation-modal`, `workflow-form`, `workflow-index`, `views-index`,
+> `view-table`, `part-table`, `op-button`) were **deleted from the pack in PR #117**.
+> `expandScaffoldPages()` rewrites every scaffold page body into an ExprIR tree;
+> `walkBodyToHeex()` in `heex-walker.ts` then renders it inline.  No pack
+> template is needed or consulted for these pages.
+
 | Logical name | Mantine | shadcn | ashPhoenix |
 |---|---|---|---|
 | `app-shell` | ✅ | ✅ | ✅ Full — sidebar + main area with `phx-click` mobile burger |
-| `home` | ✅ | ✅ | ✅ Full — aggregate / workflow / view stat cards |
+| `home` | ✅ | ✅ | 🟦 N/A — walker emits (scaffold expander + walker renders inline) |
 | `main` | ✅ | ✅ | ✅ Full — `root.html.heex` skeleton with CSRF + LiveTitle |
 | `theme` | ✅ | ✅ | ✅ Full — CSS custom properties (`--color-primary`, font, radius) |
-| `page-list` | ✅ | ✅ | ✅ Full — breadcrumb, table, empty state, loading skeleton |
-| `page-detail` | ✅ | ✅ | ✅ Full — field rows, op-buttons, inline operation modals |
-| `page-new` | ✅ | ✅ | ✅ Full — `<.simple_form>` with `phx-submit="save"` |
-| `operation-modal` | ✅ | ✅ | ✅ Full — `<.modal>` with `AshPhoenix.Form`-backed submit |
-| `workflow-form` | ✅ | ✅ | ✅ Full — `<.simple_form phx-submit="run_workflow">` |
-| `workflow-index` | ✅ | ✅ | ✅ Full — grid of workflow cards with param list |
-| `views-index` | ✅ | ✅ | ✅ Full — grid of view cards |
-| `view-table` | ✅ | ✅ | ✅ Full — paginated read-only table with loading/error state |
-| `part-table` | ✅ | ✅ | ✅ Full — nested collection table inside detail page |
-| `op-button` | ✅ | ✅ | ✅ Full — `phx-click="open_modal" phx-value-op=` |
+| `page-list` | ✅ | ✅ | 🟦 N/A — walker emits |
+| `page-detail` | ✅ | ✅ | 🟦 N/A — walker emits |
+| `page-new` | ✅ | ✅ | 🟦 N/A — walker emits |
+| `operation-modal` | ✅ | ✅ | 🟦 N/A — walker emits |
+| `workflow-form` | ✅ | ✅ | 🟦 N/A — walker emits |
+| `workflow-index` | ✅ | ✅ | 🟦 N/A — walker emits |
+| `views-index` | ✅ | ✅ | 🟦 N/A — walker emits |
+| `view-table` | ✅ | ✅ | 🟦 N/A — walker emits |
+| `part-table` | ✅ | ✅ | 🟦 N/A — walker emits |
+| `op-button` | ✅ | ✅ | 🟦 N/A — walker emits |
 | `format-helpers` | ✅ | ✅ | 🟡 Stub — comment only; actual Elixir format module emitted by Phase 6B generator code |
 | `package-json` | ✅ | ✅ | 🟡 N/A stub — declared for manifest parity; Phoenix projects use `mix.exs` |
 | `tsconfig` | ✅ | ✅ | 🟡 N/A stub — declared for manifest parity; not applicable to Elixir |
@@ -270,115 +286,146 @@ Before reading the matrix, three structural differences from the TSX packs matte
 
 ### Cell templates
 
+> All 8 cell templates were **deleted from the pack in PR #117**.  Table
+> columns for scaffold-expanded pages are now rendered by `renderTableColumn()`
+> in `heex-walker.ts`, which emits `<:col>` slot content inline using the
+> walker's `Column`/`IdLink`/`DateDisplay`/`EnumBadge` primitives.  No
+> per-cell pack template is consulted.
+
 | Logical name | Mantine | shadcn | ashPhoenix |
 |---|---|---|---|
-| `cell-id` | ✅ | ✅ | ✅ Full — `<td>` with truncated monospace id |
-| `cell-string` | ✅ | ✅ | ✅ Full |
-| `cell-bool` | ✅ | ✅ | ✅ Full — Yes/No badge |
-| `cell-datetime` | ✅ | ✅ | ✅ Full — `Calendar.strftime/2` |
-| `cell-number` | ✅ | ✅ | ✅ Full — `:erlang.float_to_binary/2` with decimals |
-| `cell-enum` | ✅ | ✅ | ✅ Full — inline badge |
-| `cell-id-link` | ✅ | ✅ | ✅ Full — `<.link navigate=...>` |
-| `cell-row-id-link` | ✅ | ✅ | ✅ Full — with `JS.stop_propagation()` |
-| `cell-bool-value` | ✅ | ✅ | ❌ Missing — mantine value-component variant not ported |
-| `cell-datetime-value` | ✅ | ✅ | ❌ Missing |
-| `cell-enum-value` | ✅ | ✅ | ❌ Missing |
-| `cell-id-value` | ✅ | ✅ | ❌ Missing |
-| `cell-id-link-value` | ✅ | ✅ | ❌ Missing |
-| `cell-row-id-link-value` | ✅ | ✅ | ❌ Missing |
-| `cell-number-value` | ✅ | ✅ | ❌ Missing |
-| `cell-string-value` | ✅ | ✅ | ❌ Missing |
-
-> **Note on `cell-*-value` templates.**  In the TSX packs these are
-> helper sub-components (e.g. `<BoolValue>`, `<DateTimeValue>`) that
-> can be composed inside JSX outside of a `<td>`.  HEEx has no direct
-> equivalent pattern; the ashPhoenix pack inlines the rendering logic
-> directly into each `cell-*.heex.hbs`.  The missing entries above
-> represent a logical-name gap in the manifest, not a functional gap
-> in rendered output.
+| `cell-id` | ✅ | ✅ | 🟦 N/A — walker emits (`IdLink` / inline `<:col>`) |
+| `cell-string` | ✅ | ✅ | 🟦 N/A — walker emits |
+| `cell-bool` | ✅ | ✅ | 🟦 N/A — walker emits |
+| `cell-datetime` | ✅ | ✅ | 🟦 N/A — walker emits (`DateDisplay`) |
+| `cell-number` | ✅ | ✅ | 🟦 N/A — walker emits |
+| `cell-enum` | ✅ | ✅ | 🟦 N/A — walker emits (`EnumBadge`) |
+| `cell-id-link` | ✅ | ✅ | 🟦 N/A — walker emits (`IdLink`) |
+| `cell-row-id-link` | ✅ | ✅ | 🟦 N/A — walker emits (`IdLink`) |
+| `cell-bool-value` | ✅ | ✅ | 🟦 N/A — walker emits (no JSX sub-component pattern in HEEx; logic is inline) |
+| `cell-datetime-value` | ✅ | ✅ | 🟦 N/A — walker emits |
+| `cell-enum-value` | ✅ | ✅ | 🟦 N/A — walker emits |
+| `cell-id-value` | ✅ | ✅ | 🟦 N/A — walker emits |
+| `cell-id-link-value` | ✅ | ✅ | 🟦 N/A — walker emits |
+| `cell-row-id-link-value` | ✅ | ✅ | 🟦 N/A — walker emits |
+| `cell-number-value` | ✅ | ✅ | 🟦 N/A — walker emits |
+| `cell-string-value` | ✅ | ✅ | 🟦 N/A — walker emits |
 
 ### Field-row templates
 
+> All 8 field-row templates were **deleted from the pack in PR #117**.  Detail
+> page field rows for scaffold-expanded pages are now rendered by
+> `renderKeyValueRow()` in `heex-walker.ts`, which emits `<dl>`/`<div>`/`<dt>`/`<dd>`
+> structure inline using the `KeyValueRow` walker primitive.  Type-specific
+> rendering (links, dates, enum badges) is handled by nested `IdLink`,
+> `DateDisplay`, and `EnumBadge` walker primitives.
+
 | Logical name | Mantine | shadcn | ashPhoenix |
 |---|---|---|---|
-| `field-row-string` | ✅ | ✅ | ✅ Full |
-| `field-row-id` | ✅ | ✅ | ✅ Full — monospace `<dd>` |
-| `field-row-bool` | ✅ | ✅ | ✅ Full — Yes/No inline |
-| `field-row-number` | ✅ | ✅ | ✅ Full — tabular-nums |
-| `field-row-datetime` | ✅ | ✅ | ✅ Full — `Calendar.strftime` with UTC label |
-| `field-row-id-link` | ✅ | ✅ | ✅ Full — `<.link navigate=...>` |
-| `field-row-enum` | ✅ | ✅ | ✅ Full — inline badge |
-| `field-row-valueobject` | ✅ | ✅ | ✅ Full — indented sub-rows with `{{#each voFields}}` |
+| `field-row-string` | ✅ | ✅ | 🟦 N/A — walker emits (`KeyValueRow`) |
+| `field-row-id` | ✅ | ✅ | 🟦 N/A — walker emits |
+| `field-row-bool` | ✅ | ✅ | 🟦 N/A — walker emits |
+| `field-row-number` | ✅ | ✅ | 🟦 N/A — walker emits |
+| `field-row-datetime` | ✅ | ✅ | 🟦 N/A — walker emits (`DateDisplay` inside `KeyValueRow`) |
+| `field-row-id-link` | ✅ | ✅ | 🟦 N/A — walker emits (`IdLink` inside `KeyValueRow`) |
+| `field-row-enum` | ✅ | ✅ | 🟦 N/A — walker emits (`EnumBadge` inside `KeyValueRow`) |
+| `field-row-valueobject` | ✅ | ✅ | 🟦 N/A — walker emits (nested `KeyValueRow` subtree) |
 
 ### Field-input templates
 
+> All 10 field-input templates were **deleted from the pack in PR #117**.  Form
+> inputs for scaffold-expanded pages (`page-new`, `operation-modal`,
+> `workflow-form`) are now rendered by the `Form` walker primitive in
+> `heex-walker.ts`, which calls `renderForm()` to emit `<.simple_form>` and
+> its `<.input>` fields inline.
+
 | Logical name | Mantine | shadcn | ashPhoenix |
 |---|---|---|---|
-| `field-input-string` | ✅ | ✅ | ✅ Full — `<.input type="text">` |
-| `field-input-int` | ✅ | ✅ | ✅ Full — `type="number" step="1"` |
-| `field-input-decimal` | ✅ | ✅ | ✅ Full — `type="number" step="0.01"` |
-| `field-input-bool` | ✅ | ✅ | ✅ Full — `type="checkbox"` |
-| `field-input-datetime` | ✅ | ✅ | ✅ Full — `type="datetime-local"` |
-| `field-input-id-select` | ✅ | ✅ | ✅ Full — `type="select"` with `Enum.map` options |
-| `field-input-id-text` | ✅ | ✅ | ✅ Full — `type="text"` with placeholder |
-| `field-input-enum-select` | ✅ | ✅ | ✅ Full — `type="select"` with static enum options |
-| `field-input-valueobject` | ✅ | ✅ | ✅ Full — `<fieldset>` / `<legend>` wrapper |
-| `field-input-array` | ✅ | ✅ | ✅ Full — `type="textarea"` JSON hint |
+| `field-input-string` | ✅ | ✅ | 🟦 N/A — walker emits (`Form` / `<.input type="text">`) |
+| `field-input-int` | ✅ | ✅ | 🟦 N/A — walker emits |
+| `field-input-decimal` | ✅ | ✅ | 🟦 N/A — walker emits |
+| `field-input-bool` | ✅ | ✅ | 🟦 N/A — walker emits |
+| `field-input-datetime` | ✅ | ✅ | 🟦 N/A — walker emits |
+| `field-input-id-select` | ✅ | ✅ | 🟦 N/A — walker emits |
+| `field-input-id-text` | ✅ | ✅ | 🟦 N/A — walker emits |
+| `field-input-enum-select` | ✅ | ✅ | 🟦 N/A — walker emits |
+| `field-input-valueobject` | ✅ | ✅ | 🟦 N/A — walker emits |
+| `field-input-array` | ✅ | ✅ | 🟦 N/A — walker emits |
 
 ### Walker primitive templates
 
-| Logical name | Mantine | shadcn | ashPhoenix | Walker support |
-|---|---|---|---|---|
-| `primitive-heading` | ✅ | ✅ | ✅ Full | ✅ walker-dispatched |
-| `primitive-text` | ✅ | ✅ | ✅ Full | ✅ walker-dispatched |
-| `primitive-stack` | ✅ | ✅ | ✅ Full | ✅ walker-dispatched |
-| `primitive-group` | ✅ | ✅ | ✅ Full | ✅ walker-dispatched |
-| `primitive-toolbar` | ✅ | ✅ | ✅ Full | ✅ walker-dispatched |
-| `primitive-divider` | ✅ | ✅ | ✅ Full | ✅ walker-dispatched |
-| `primitive-container` | ✅ | ✅ | ✅ Full | ✅ walker-dispatched |
-| `primitive-card` | ✅ | ✅ | ✅ Full | ✅ walker-dispatched |
-| `primitive-badge` | ✅ | ✅ | ✅ Full | ✅ walker-dispatched |
-| `primitive-button` | ✅ | ✅ | ✅ Full | ✅ walker-dispatched |
-| `primitive-empty` | ✅ | ✅ | ✅ Full | ✅ walker-dispatched |
-| `primitive-anchor` | ✅ | ✅ | ✅ Full — `<.link navigate=...>` | ✅ walker-dispatched |
-| `primitive-image` | ✅ | ✅ | ✅ Full | ✅ walker-dispatched |
-| `primitive-avatar` | ✅ | ✅ | ✅ Full — initials from `String.first(@name)` | ✅ walker-dispatched |
-| `primitive-loader` | ✅ | ✅ | ✅ Full — inline SVG spinner | ✅ walker-dispatched |
-| `primitive-stat` | ✅ | ✅ | ✅ Full — label + large value | 🟡 HEEx comment only |
-| `primitive-field` | ✅ | ✅ | ✅ Full — `<.input type="text">` | 🟡 HEEx comment only |
-| `primitive-toggle` | ✅ | ✅ | ✅ Full — `<.input type="checkbox">` | 🟡 HEEx comment only |
-| `primitive-number-field` | ✅ | ✅ | ✅ Full — `<.input type="number">` | 🟡 HEEx comment only |
-| `primitive-password-field` | ✅ | ✅ | ✅ Full — `<.input type="password">` | 🟡 HEEx comment only |
-| `primitive-grid` | ✅ | ✅ | ✅ Full — Tailwind `grid-cols` | 🟡 HEEx comment only |
-| `primitive-tabs` | ✅ | ✅ | ✅ Full — `phx-click="switch_tab"` | 🟡 HEEx comment only |
-| `primitive-table` | ✅ | ✅ | ✅ Full — `<table>` wrapper | 🟡 HEEx comment only |
-| `primitive-money` | ✅ | ✅ | ✅ Full — `:erlang.float_to_binary/2` | 🟡 HEEx comment only |
-| `primitive-date-display` | ✅ | ✅ | ✅ Full — `Calendar.strftime/2` | 🟡 HEEx comment only |
-| `primitive-enum-badge` | ✅ | ✅ | ✅ Full | 🟡 HEEx comment only |
-| `primitive-id-link` | ✅ | ✅ | ✅ Full — truncated `<.link>` | 🟡 HEEx comment only |
-| `primitive-form-of` | ✅ | ✅ | ✅ Full — `<.simple_form for={@form}>` | 🟡 HEEx comment only |
-| `primitive-paper` | ✅ | ✅ | ✅ Full — white card div | 🟡 HEEx comment only |
-| `primitive-skeleton` | ✅ | ✅ | ✅ Full — animated pulse bars | 🟡 HEEx comment only |
-| `primitive-alert` | ✅ | ✅ | ✅ Full — multi-colour via `case @color` | 🟡 HEEx comment only |
-| `primitive-query-view` | ✅ | ✅ | ✅ Full — loading/error/content branches | 🟡 HEEx comment only |
-| `primitive-breadcrumbs` | ✅ | ✅ | ✅ Full — `Enum.with_index` nav | 🟡 HEEx comment only |
-| `primitive-key-value-row` | ✅ | ✅ | ✅ Full — `<dt>`/`<dd>` pair | 🟡 HEEx comment only |
+> All 34 primitive templates remain in the pack and are **fully implemented**.
+> They are invoked by the walker for custom-body `page X { body: ... }` pages.
+> For scaffold-expanded pages, several of the corresponding semantic primitives
+> (Breadcrumbs, Anchor, Form, Table, QueryView, KeyValueRow, Skeleton, Alert,
+> Column, IdLink, DateDisplay, EnumBadge, Paper, Grid, Container) are rendered
+> inline by the walker via named dispatch (no `pack.render()` call).  The
+> remaining closed primitives (Stack, Heading, Text, Card, Toolbar, Empty,
+> Badge, Button) flow through `closedPrimitive()` → `renderPrimitive()`, which
+> also does not call `pack.render()` but emits HEEx directly.  Pack templates
+> are used when these same primitives appear in **custom-body pages**.
+>
+> There is no "Batch H" follow-up: the walker is fully wired for all scaffold-
+> expanded content as of PR #117.
 
-> **Walker dispatch column.**  "✅ walker-dispatched" means the HEEx
-> walker (`src/generator/phoenix-live-view/heex-walker.ts`) already
-> calls `pack.render("primitive-X", vm)` for this primitive in
-> custom-body pages.  "🟡 HEEx comment only" means the walker emits a
-> comment placeholder instead; the pack template is complete but is
-> not yet wired.  Closing this gap is Batch H in the follow-ups plan.
+| Logical name | Mantine | shadcn | ashPhoenix | Walker (scaffold-expanded pages) |
+|---|---|---|---|---|
+| `primitive-heading` | ✅ | ✅ | ✅ Full | ✅ `closedPrimitive("Heading")` |
+| `primitive-text` | ✅ | ✅ | ✅ Full | ✅ `closedPrimitive("Text")` |
+| `primitive-stack` | ✅ | ✅ | ✅ Full | ✅ `closedPrimitive("Stack")` |
+| `primitive-group` | ✅ | ✅ | ✅ Full | ✅ `closedPrimitive("Stack")` (alias) |
+| `primitive-toolbar` | ✅ | ✅ | ✅ Full | ✅ `closedPrimitive("Toolbar")` |
+| `primitive-divider` | ✅ | ✅ | ✅ Full | N/A — not used in scaffold-expanded bodies |
+| `primitive-container` | ✅ | ✅ | ✅ Full | ✅ `closedPrimitive("Container")` |
+| `primitive-card` | ✅ | ✅ | ✅ Full | ✅ `closedPrimitive("Card")` |
+| `primitive-badge` | ✅ | ✅ | ✅ Full | ✅ `closedPrimitive("Badge")` |
+| `primitive-button` | ✅ | ✅ | ✅ Full | ✅ `closedPrimitive("Button")` |
+| `primitive-empty` | ✅ | ✅ | ✅ Full | ✅ `closedPrimitive("Empty")` |
+| `primitive-anchor` | ✅ | ✅ | ✅ Full — `<.link navigate=...>` | ✅ `renderAnchor()` (named dispatch) |
+| `primitive-image` | ✅ | ✅ | ✅ Full | N/A — not used in scaffold-expanded bodies |
+| `primitive-avatar` | ✅ | ✅ | ✅ Full — initials from `String.first(@name)` | N/A — not used in scaffold-expanded bodies |
+| `primitive-loader` | ✅ | ✅ | ✅ Full — inline SVG spinner | N/A — not used in scaffold-expanded bodies |
+| `primitive-stat` | ✅ | ✅ | ✅ Full — label + large value | N/A — not used in scaffold-expanded bodies |
+| `primitive-field` | ✅ | ✅ | ✅ Full — `<.input type="text">` | N/A — not used in scaffold-expanded bodies |
+| `primitive-toggle` | ✅ | ✅ | ✅ Full — `<.input type="checkbox">` | N/A — not used in scaffold-expanded bodies |
+| `primitive-number-field` | ✅ | ✅ | ✅ Full — `<.input type="number">` | N/A — not used in scaffold-expanded bodies |
+| `primitive-password-field` | ✅ | ✅ | ✅ Full — `<.input type="password">` | N/A — not used in scaffold-expanded bodies |
+| `primitive-grid` | ✅ | ✅ | ✅ Full — Tailwind `grid-cols` | ✅ `closedPrimitive("Grid")` |
+| `primitive-tabs` | ✅ | ✅ | ✅ Full — `phx-click="switch_tab"` | N/A — not used in scaffold-expanded bodies |
+| `primitive-table` | ✅ | ✅ | ✅ Full — `<table>` wrapper | ✅ `renderTable()` (named dispatch) |
+| `primitive-money` | ✅ | ✅ | ✅ Full — `:erlang.float_to_binary/2` | N/A — not used in scaffold-expanded bodies |
+| `primitive-date-display` | ✅ | ✅ | ✅ Full — `Calendar.strftime/2` | ✅ `renderDateDisplay()` (named dispatch) |
+| `primitive-enum-badge` | ✅ | ✅ | ✅ Full | ✅ `renderEnumBadge()` (named dispatch) |
+| `primitive-id-link` | ✅ | ✅ | ✅ Full — truncated `<.link>` | ✅ `renderIdLink()` (named dispatch) |
+| `primitive-form-of` | ✅ | ✅ | ✅ Full — `<.simple_form for={@form}>` | ✅ `renderForm()` (named dispatch via `Form`) |
+| `primitive-paper` | ✅ | ✅ | ✅ Full — white card div | ✅ `closedPrimitive("Paper")` |
+| `primitive-skeleton` | ✅ | ✅ | ✅ Full — animated pulse bars | ✅ `renderSkeleton()` (named dispatch) |
+| `primitive-alert` | ✅ | ✅ | ✅ Full — multi-colour via `case @color` | ✅ `renderAlert()` (named dispatch) |
+| `primitive-query-view` | ✅ | ✅ | ✅ Full — loading/error/content branches | ✅ `renderQueryView()` (named dispatch) |
+| `primitive-breadcrumbs` | ✅ | ✅ | ✅ Full — `Enum.with_index` nav | ✅ `renderBreadcrumbs()` (named dispatch) |
+| `primitive-key-value-row` | ✅ | ✅ | ✅ Full — `<dt>`/`<dd>` pair | ✅ `renderKeyValueRow()` (named dispatch) |
+
+> **Walker column.**  "named dispatch" means `renderCall()` in `heex-walker.ts`
+> has an explicit `if (expr.name === "X") return renderX()` branch that renders
+> the primitive inline for scaffold-expanded pages — no `pack.render()` call.
+> "`closedPrimitive()`" means the primitive falls through to the generic
+> `closedPrimitive()` → `renderPrimitive()` path, which also renders inline.
+> "N/A" means the primitive does not appear in any scaffold-expander output
+> (it is available for custom-body pages only, where the pack template is used).
 
 ### form-of / form-runs helpers
 
+> `form-of-imports` and `form-of-decls` were **deleted from the pack in PR #117**.
+> The walker now emits `AshPhoenix.Form` setup code inline as part of the
+> `renderForm()` path — no separate pack template is needed.  `form-runs-*`
+> were never declared in `pack.json` and are also now walker-handled.
+
 | Logical name | Mantine | shadcn | ashPhoenix |
 |---|---|---|---|
-| `form-of-imports` | ✅ | ✅ | 🟡 Stub — comment showing `alias AshPhoenix.Form`; actual alias emitted by generator code |
-| `form-of-decls` | ✅ | ✅ | 🟡 Stub — comment showing `AshPhoenix.Form.for_create/3`; actual call emitted by generator code |
-| `form-runs-imports` | ✅ | ✅ | ❌ Missing — not declared in `pack.json`; Elixir equivalent not yet templated |
-| `form-runs-decls` | ✅ | ✅ | ❌ Missing — same as above |
+| `form-of-imports` | ✅ | ✅ | 🟦 N/A — walker emits (`renderForm()` inlines `alias AshPhoenix.Form`) |
+| `form-of-decls` | ✅ | ✅ | 🟦 N/A — walker emits (`renderForm()` inlines `AshPhoenix.Form.for_create/3`) |
+| `form-runs-imports` | ✅ | ✅ | 🟦 N/A — walker emits (workflow `runs:` composition rendered inline) |
+| `form-runs-decls` | ✅ | ✅ | 🟦 N/A — walker emits (same) |
 
 ### Undeclared extra files (exist in `designs/ashPhoenix/` but not in `pack.json` `emits`)
 
@@ -394,40 +441,42 @@ directly by generator code or by a separate static-copy step.
 | `core-components.heex.hbs` | `lib/<app>_web/components/core_components.ex` — `<.input>`, `<.button>`, `<.modal>` etc. |
 | `tailwind-config.heex.hbs` | `assets/tailwind.config.js` |
 
-### ashPhoenix coverage summary
+### Legend
 
-| Category | Full ✅ | Stub 🟡 | Missing ❌ | Declared in pack.json |
-|---|---|---|---|---|
-| Scaffold archetypes + support | 14 | 4 | 0 | 18 |
-| Cell templates | 8 | 0 | 0 | 8 |
-| Field-row templates | 8 | 0 | 0 | 8 |
-| Field-input templates | 10 | 0 | 0 | 10 |
-| Primitive templates | 34 | 0 | 0 | 34 |
-| form-of helpers | 0 | 2 | 0 | 2 |
-| **Total (declared)** | **74** | **6** | **0** | **80** |
+| Symbol | Meaning |
+|---|---|
+| ✅ | Template exists in `pack.json` and is fully implemented |
+| 🟡 | Template exists in `pack.json` but is a stub or intentionally N/A for Elixir |
+| 🟦 N/A — walker emits | Template was deleted by PR #117; the walker renders this content inline — positive outcome |
+| ❌ Missing | Template absent from pack AND walker doesn't handle it — genuine gap |
 
-**Gaps relative to the mantine/shadcn baseline (not declared in ashPhoenix `pack.json`):**
+### ashPhoenix coverage summary (post-PR #117)
 
-| Missing logical name | Mantine | shadcn | ashPhoenix | Notes |
-|---|---|---|---|---|
-| `cell-bool-value` | ✅ | ✅ | ❌ | TSX value-component pattern; logic inlined in `cell-bool.heex.hbs` |
-| `cell-datetime-value` | ✅ | ✅ | ❌ | Same — inlined in `cell-datetime.heex.hbs` |
-| `cell-enum-value` | ✅ | ✅ | ❌ | Same |
-| `cell-id-value` | ✅ | ✅ | ❌ | Same |
-| `cell-id-link-value` | ✅ | ✅ | ❌ | Same |
-| `cell-row-id-link-value` | ✅ | ✅ | ❌ | Same |
-| `cell-number-value` | ✅ | ✅ | ❌ | Same |
-| `cell-string-value` | ✅ | ✅ | ❌ | Same |
-| `form-runs-imports` | ✅ | ✅ | ❌ | Real gap — workflow `runs:` composition not yet templated |
-| `form-runs-decls` | ✅ | ✅ | ❌ | Real gap — same |
+The pack now ships **41 templates**: 3 shell files (`theme`, `main`, `app-shell`)
++ 4 Elixir-N/A stubs (`format-helpers`, `package-json`, `tsconfig`, `vite-config`)
++ 34 primitive templates.  The 39 templates deleted by PR #117 are all covered
+by the walker and are marked 🟦 N/A — walker emits.
 
-The 8 missing `cell-*-value` entries are a manifest gap rather than a
-functional gap: HEEx has no sub-component composition pattern
-equivalent to JSX, so the rendering logic is inlined directly in each
-`cell-*.heex.hbs`.  The 2 missing `form-runs-*` entries are a real
-functional gap for workflow-form scenarios that use `runs: workflow`
-composition; closing them is part of Batch H.  The 4 stubs
-(`format-helpers`, `package-json`, `tsconfig`, `vite-config`) are
-either intentionally N/A for Elixir or are placeholders for
-functionality emitted directly by generator code rather than through
-the pack-manifest mechanism.
+| Category | Full ✅ | Stub 🟡 | N/A walker 🟦 | Missing ❌ | Declared in pack.json |
+|---|---|---|---|---|---|
+| Scaffold archetypes + support | 3 | 4 | 11 | 0 | 7 (rest walker) |
+| Cell templates | 0 | 0 | 16 | 0 | 0 (all walker) |
+| Field-row templates | 0 | 0 | 8 | 0 | 0 (all walker) |
+| Field-input templates | 0 | 0 | 10 | 0 | 0 (all walker) |
+| Primitive templates | 34 | 0 | 0 | 0 | 34 |
+| form-of / form-runs helpers | 0 | 0 | 4 | 0 | 0 (all walker) |
+| **Total** | **37** | **4** | **49** | **0** | **41** |
+
+**No genuine gaps remain** relative to the mantine/shadcn baseline.
+
+- The 8 `cell-*-value` entries (TSX sub-component pattern) have no HEEx
+  equivalent because HEEx has no JSX composition pattern; the walker renders
+  this logic inline.  Not a functional gap.
+- The `form-runs-imports` / `form-runs-decls` entries are now walker-handled
+  inline.  Not a functional gap.
+- The 4 stubs (`format-helpers`, `package-json`, `tsconfig`, `vite-config`) are
+  intentionally N/A for Elixir or placeholders for generator-code-emitted
+  functionality.  Not a functional gap.
+
+**No follow-up batches are required** for walker wiring (Batch H was made
+unnecessary by PR #117's full walker coverage of all scaffold-expanded content).

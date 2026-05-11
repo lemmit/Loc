@@ -1,14 +1,14 @@
 // ---------------------------------------------------------------------------
 // VFS-backed pack loader (browser-only).
 //
-// Mirrors `src/generator/react/templating/loader-fs.ts` (the Node
-// fs adapter) but reads from a worker-local in-memory VFS instead
-// of the disk.  The pure compile core lives in
-// `src/generator/react/templating/loader.ts` (`compilePack`) and is
-// shared by both adapters — only the IO seam differs.
+// Mirrors `src/generator/_packs/loader-fs.ts` (the Node fs
+// adapter) but reads from a worker-local in-memory VFS instead of
+// the disk.  The pure compile core lives in
+// `src/generator/_packs/loader.ts` (`compilePack`) and is shared
+// by both adapters — only the IO seam differs.
 //
 // Vite's `loomLoaderShim` plugin (`web/vite.config.ts`) rewrites
-// `import "./templating/loader-fs.js"` to this file in browser
+// `import "./_packs/loader-fs.js"` to this file in browser
 // builds, so the React generator's import line stays as-is and the
 // Node CLI continues to use the real fs adapter.
 //
@@ -24,7 +24,7 @@ import {
   compilePack,
   type LoadedPack,
   type PackManifest,
-} from "../../../src/generator/react/templating/loader.js";
+} from "../../../src/generator/_packs/loader.js";
 import type { VfsPath } from "../vfs/types.js";
 import { getWorkerVfs } from "./worker-vfs.js";
 
