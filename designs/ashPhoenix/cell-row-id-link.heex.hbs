@@ -1,6 +1,0 @@
-<%!-- cell-row-id-link: row-level id link (first column, stops propagation via link) --%>
-<td class="px-4 py-3 text-sm">
-  <.link navigate={{{toExpr}}} data-testid={{{testIdExpr}}} class="font-mono text-blue-600 hover:underline" phx-click={JS.stop_propagation()}>
-    <%= String.slice({{valueExpr}}, 0, 8) %>…
-  </.link>
-</td>
