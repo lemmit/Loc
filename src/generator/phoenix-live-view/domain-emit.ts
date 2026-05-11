@@ -61,7 +61,11 @@ function renderAggregateResource(
 
   const renderCtx: RenderCtx = { thisName: "record", contextModule: ctxModule };
 
+  // Build the @derive field list: :id, all declared fields, :inserted_at, :updated_at
+  const deriveFields = [":id", ...agg.fields.map((f) => `:${snake(f.name)}`), ":inserted_at", ":updated_at"].join(", ");
+
   return `defmodule ${moduleName} do
+  @derive {Jason.Encoder, only: [${deriveFields}]}
   use Ash.Resource,
     domain: ${ctxModule},
     data_layer: AshPostgres.DataLayer
