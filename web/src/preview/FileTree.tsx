@@ -8,30 +8,41 @@ interface FileTreeProps {
   onSelect: (path: string) => void;
 }
 
-// Visual constants tuned by hand against a 240px pane width:
-//   - 16px per nesting level (deep enough to read at a glance)
-//   - 8px gutter on the left so depth=0 isn't flush against the
+// Visual constants tuned by hand against a 240 px pane width:
+//   - 16 px per nesting level (deep enough to read at a glance)
+//   - 8 px gutter on the left so depth=0 isn't flush against the
 //     scroll-area border
-//   - 14px reserved for the chevron / file-bullet glyph
+//   - 14 px reserved for the chevron / file-bullet glyph
+//
+// Row height is min 36 px so touch users can land a finger on a row
+// without misfiring on the neighbour.  The iOS HIG nominal of 44 px
+// would push the file tree into "too sparse" on desktop where mouse
+// targeting is precise, so 36 px is a deliberate middle ground —
+// still well above the 2 × 4 padding the rows used to have.
 const INDENT_STEP = 16;
 const GUTTER = 8;
 const CHEVRON_WIDTH = 14;
+const ROW_MIN_HEIGHT = 36;
 
 const baseRowStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
-  gap: 4,
+  gap: 6,
   width: "100%",
   background: "transparent",
   border: "none",
   textAlign: "left",
   cursor: "pointer",
-  padding: "2px 4px",
+  padding: "6px 8px",
+  minHeight: ROW_MIN_HEIGHT,
   fontFamily: "inherit",
   color: "inherit",
   whiteSpace: "nowrap",
   overflow: "hidden",
   textOverflow: "ellipsis",
+  // Suppress the iOS tap highlight overlay — we render our own
+  // pressed state and the default grey blob looks misplaced.
+  WebkitTapHighlightColor: "transparent",
 };
 
 export function FileTree({ root, selectedPath, onSelect }: FileTreeProps): JSX.Element {
@@ -68,11 +79,23 @@ function NodeRow({ node, depth, selectedPath, onSelect }: NodeRowProps): JSX.Ele
   // Folders default to expanded — users want the whole layout
   // visible so they can spot which file they care about quickly.
   const [open, setOpen] = useState(true);
+  // Hover covers mouse; pressed covers touch (where hover is meaningless).
+  // Together they give every input modality some feedback before the
+  // tap is committed.
   const [hover, setHover] = useState(false);
-  // The chevron occupies CHEVRON_WIDTH; files (no chevron) get the
-  // same offset on top of paddingLeft so file names line up with
-  // their parent folder's name.
+  const [pressed, setPressed] = useState(false);
   const paddingLeft = GUTTER + depth * INDENT_STEP;
+
+  const rowEvents = {
+    onMouseEnter: () => setHover(true),
+    onMouseLeave: () => {
+      setHover(false);
+      setPressed(false);
+    },
+    onPointerDown: () => setPressed(true),
+    onPointerUp: () => setPressed(false),
+    onPointerCancel: () => setPressed(false),
+  };
 
   if (node.kind === "folder") {
     return (
@@ -80,26 +103,29 @@ function NodeRow({ node, depth, selectedPath, onSelect }: NodeRowProps): JSX.Ele
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          onMouseEnter={() => setHover(true)}
-          onMouseLeave={() => setHover(false)}
+          {...rowEvents}
           style={{
             ...baseRowStyle,
             paddingLeft,
-            background: hover ? "var(--mantine-color-dark-6)" : "transparent",
+            background: pressed
+              ? "var(--mantine-color-dark-5)"
+              : hover
+                ? "var(--mantine-color-dark-6)"
+                : "transparent",
           }}
         >
           <span
             style={{
               width: CHEVRON_WIDTH,
               display: "inline-block",
-              fontSize: 10,
+              fontSize: 11,
               color: "var(--mantine-color-dimmed)",
               flex: "0 0 auto",
             }}
           >
             {open ? "▾" : "▸"}
           </span>
-          <span style={{ fontSize: 13, fontWeight: 500 }}>{node.name}</span>
+          <span style={{ fontSize: 14, fontWeight: 500 }}>{node.name}</span>
         </button>
         {open &&
           node.children.map((c) => (
@@ -119,16 +145,17 @@ function NodeRow({ node, depth, selectedPath, onSelect }: NodeRowProps): JSX.Ele
     <button
       type="button"
       onClick={() => onSelect(node.path)}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
+      {...rowEvents}
       style={{
         ...baseRowStyle,
         paddingLeft,
         background: selected
           ? "var(--mantine-color-blue-9)"
-          : hover
-            ? "var(--mantine-color-dark-6)"
-            : "transparent",
+          : pressed
+            ? "var(--mantine-color-dark-5)"
+            : hover
+              ? "var(--mantine-color-dark-6)"
+              : "transparent",
         color: selected ? "white" : "inherit",
         borderRadius: 0,
       }}
@@ -137,14 +164,14 @@ function NodeRow({ node, depth, selectedPath, onSelect }: NodeRowProps): JSX.Ele
         style={{
           width: CHEVRON_WIDTH,
           display: "inline-block",
-          fontSize: 10,
+          fontSize: 11,
           color: selected ? "rgba(255,255,255,0.6)" : "var(--mantine-color-dimmed)",
           flex: "0 0 auto",
         }}
       >
         ·
       </span>
-      <span style={{ fontSize: 13, fontFamily: "var(--mantine-font-family-monospace)" }}>
+      <span style={{ fontSize: 14, fontFamily: "var(--mantine-font-family-monospace)" }}>
         {node.name}
       </span>
     </button>
