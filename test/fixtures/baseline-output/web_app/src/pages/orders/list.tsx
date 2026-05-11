@@ -43,7 +43,7 @@ export default function OrderList() {
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                { orderAll.data.map((row) => (
+                { orderAll.data.map((row, idx) => (
                   <Table.Tr key={ row.id } data-testid={ ("orders-row-" + row.id) }>
                     <Table.Td><Link to={`/orders/${ row.id }`}><IdValue id={ row.id } /></Link></Table.Td>
                     <Table.Td><Text>{row.customerId}</Text></Table.Td>

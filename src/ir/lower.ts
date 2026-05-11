@@ -356,6 +356,9 @@ function conventionalEmitPath(
     if (!wf) return undefined;
     return `src/pages/workflows/${snakeOnly(wf.name)}.tsx`;
   }
+  if (origin.kind === "view-list") {
+    return `src/pages/views/${snakeOnly(origin.viewName)}.tsx`;
+  }
   return undefined;
 }
 

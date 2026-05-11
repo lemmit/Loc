@@ -43,7 +43,7 @@ export default function CustomerList() {
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                { customerAll.data.map((row) => (
+                { customerAll.data.map((row, idx) => (
                   <Table.Tr key={ row.id } data-testid={ ("customers-row-" + row.id) }>
                     <Table.Td><Link to={`/customers/${ row.id }`}><IdValue id={ row.id } /></Link></Table.Td>
                     <Table.Td><Text>{row.username}</Text></Table.Td>
