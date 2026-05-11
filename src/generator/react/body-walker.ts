@@ -70,6 +70,7 @@ import {
 } from "./form-helpers.js";
 import { prepareFormFieldVM } from "./templating/preparers/form-fields.js";
 import { renderFormField } from "./templating/render.js";
+import type { FormFieldVM } from "./templating/view-models.js";
 
 /** Per-source named-import map — `from` module → set of named
  *  exports the page needs from it.  Replaces the old single-source
@@ -100,6 +101,33 @@ function addImport(ctx: WalkContext, from: string, ...names: string[]): void {
  *  while the migration finishes. */
 function addMantineImport(ctx: WalkContext, ...names: string[]): void {
   addImport(ctx, "@mantine/core", ...names);
+}
+
+/** Slice post-D2 — register the imports a non-rendered primitive
+ *  needs.  Used by `Form(of:)` / `Form(runs:)` emission: the form-
+ *  shell JSX uses `<Stack>` / `<Button>` / `<Group>` (Mantine) /
+ *  `<div className="...">` / `<Button>` (shadcn) etc., but the
+ *  walker emits them as literal JSX (not via `renderPrimitive`),
+ *  so the pack's `imports.primitive-X` declarations don't auto-
+ *  add.  This helper looks them up and registers them. */
+function addImportsForPrimitive(ctx: WalkContext, name: string): void {
+  const specs: ImportSpec[] = ctx.pack.manifest.imports?.[name] ?? [];
+  for (const spec of specs) addImport(ctx, spec.from, ...spec.named);
+}
+
+/** Slice post-D2 — walk a `FormFieldVM` tree and register each
+ *  child template's imports via `imports.field-input-*` on the
+ *  pack manifest.  This replaces the previous Mantine-component-
+ *  name → primitive mapping: each field-input-* template is its
+ *  own pack contract surface, so packs declare imports per
+ *  template directly (e.g. shadcn's `field-input-id-select`
+ *  imports `Select`, `SelectTrigger`, … from
+ *  `@/components/ui/select`). */
+function registerFormFieldImports(ctx: WalkContext, vm: FormFieldVM): void {
+  addImportsForPrimitive(ctx, vm.template);
+  if (vm.children) {
+    for (const c of vm.children) registerFormFieldImports(ctx, c);
+  }
 }
 
 /** Render a primitive through the pack and merge its declared
@@ -1240,7 +1268,6 @@ function emitFormOfAggregate(
   const useController = needsController(fields, bc);
   const defaultValuesTs = initialValuesTs(fields, bc);
   const fieldComponents = [...componentsForFields(fields, bc)];
-  addMantineImport(ctx, "Stack", "Button", "Group", ...fieldComponents);
   const testidArg = stringNamed(call, "testid");
   const testidNamespace = testidArg ?? `${snake(plural(agg.name))}-new`;
   const fieldVMs = fields.map((f) =>
@@ -1252,6 +1279,15 @@ function emitFormOfAggregate(
       aggregatesByNameMut,
     ),
   );
+  // The pack's `primitive-form-of` imports cover the form-shell
+  // components (Stack/Button/Group on Mantine, equivalents on
+  // other packs).  Per-field input components come from each
+  // `field-input-*` template's import declaration in pack.json
+  // (recursing into value-object children).  All resolve through
+  // `addImportsForPrimitive` so the page's import block is
+  // pack-neutral.
+  addImportsForPrimitive(ctx, "primitive-form-of");
+  for (const vm of fieldVMs) registerFormFieldImports(ctx, vm);
   const fieldHtmls = fieldVMs.map((vm) => renderFormField(vm, ctx.pack));
   for (const vm of fieldVMs) ctx.collectedTestids.add(vm.testId);
   ctx.collectedTestids.add(`${testidNamespace}-submit`);
@@ -1298,15 +1334,11 @@ function emitFormOfAggregate(
   const submitBody =
     onSubmitJs !== null
       ? onSubmitJs
-      : `{
-              try {
-                const out = await create.mutateAsync(vals);
-                notifications.show({ color: "green", message: "${humanize(agg.name)} created" });
-                navigate(\`/${slug}/\${out.id}\`);
-              } catch (e) {
-                notifications.show({ color: "red", message: (e as Error).message });
-              }
-            }`;
+      : ctx.pack.render("form-default-onsubmit", {
+          mutationCall: "const out = await create.mutateAsync(vals);",
+          successMessage: `${humanize(agg.name)} created`,
+          redirectStmt: `navigate(\`/${slug}/\${out.id}\`)`,
+        });
   return renderPrimitive(ctx, "primitive-form-of", {
     fieldHtmls,
     submitBody,
@@ -1357,7 +1389,6 @@ function emitFormRuns(
   const useController = needsController(fieldsForHelpers, bc);
   const defaultValuesTs = initialValuesTs(fieldsForHelpers, bc);
   const fieldComponents = [...componentsForFields(fieldsForHelpers, bc)];
-  addMantineImport(ctx, "Stack", "Button", "Group", ...fieldComponents);
   const testidArg = stringNamed(call, "testid");
   const testidNamespace = testidArg ?? `workflow-${snake(workflow.name)}`;
   const fieldVMs = fields.map((f) =>
@@ -1369,6 +1400,15 @@ function emitFormRuns(
       aggregatesByNameMut,
     ),
   );
+  // The pack's `primitive-form-of` imports cover the form-shell
+  // components (Stack/Button/Group on Mantine, equivalents on
+  // other packs).  Per-field input components come from each
+  // `field-input-*` template's import declaration in pack.json
+  // (recursing into value-object children).  All resolve through
+  // `addImportsForPrimitive` so the page's import block is
+  // pack-neutral.
+  addImportsForPrimitive(ctx, "primitive-form-of");
+  for (const vm of fieldVMs) registerFormFieldImports(ctx, vm);
   const fieldHtmls = fieldVMs.map((vm) => renderFormField(vm, ctx.pack));
   for (const vm of fieldVMs) ctx.collectedTestids.add(vm.testId);
   ctx.collectedTestids.add(`${testidNamespace}-submit`);
@@ -1414,15 +1454,11 @@ function emitFormRuns(
   const submitBody =
     onSubmitJs !== null
       ? onSubmitJs
-      : `{
-              try {
-                await run.mutateAsync(vals);
-                notifications.show({ color: "green", message: "${humanize(workflow.name)} completed" });
-                navigate("/workflows");
-              } catch (e) {
-                notifications.show({ color: "red", message: (e as Error).message });
-              }
-            }`;
+      : ctx.pack.render("form-default-onsubmit", {
+          mutationCall: "await run.mutateAsync(vals);",
+          successMessage: `${humanize(workflow.name)} completed`,
+          redirectStmt: `navigate("/workflows")`,
+        });
   return renderPrimitive(ctx, "primitive-form-of", {
     fieldHtmls,
     submitBody,
@@ -2409,7 +2445,7 @@ function emitAlert(
   return renderPrimitive(ctx, "primitive-alert", {
     message: unwrapTextLiteral(message),
     hasColor: color !== undefined,
-    color: color !== undefined ? JSON.stringify(color) : '"red"',
+    color: color ?? "red",
     hasTitle: title !== undefined,
     title: title ?? "",
     testidAttr: testidAttr(call, ctx),

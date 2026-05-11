@@ -1,1 +1,1 @@
-<Alert variant={{{color}}}{{{testidAttr}}}>{{#if hasTitle}}<AlertTitle>{{title}}</AlertTitle>{{/if}}<AlertDescription>{{{message}}}</AlertDescription></Alert>
+<Alert variant="{{#if (eq color "red")}}destructive{{else}}default{{/if}}"{{{testidAttr}}}>{{#if hasTitle}}<AlertTitle>{{title}}</AlertTitle>{{/if}}<AlertDescription>{{{message}}}</AlertDescription></Alert>

@@ -93,6 +93,7 @@
     "form-of-decls": "form-of-decls.hbs",
     "form-runs-imports": "form-runs-imports.hbs",
     "form-runs-decls": "form-runs-decls.hbs",
+    "form-default-onsubmit": "form-default-onsubmit.hbs",
     "primitive-breadcrumbs": "primitive-breadcrumbs.hbs",
     "primitive-paper": "primitive-paper.hbs",
     "primitive-skeleton": "primitive-skeleton.hbs",
@@ -273,7 +274,36 @@
           "KeyValueRow"
         ]
       }
-    ]
+    ],
+    "primitive-form-of": [
+      {
+        "from": "@/components/ui/button",
+        "named": [
+          "Button"
+        ]
+      },
+      {
+        "from": "@/components/ui/form",
+        "named": [
+          "Form",
+          "FormControl",
+          "FormField",
+          "FormItem",
+          "FormLabel",
+          "FormMessage"
+        ]
+      }
+    ],
+    "field-input-string":       [{ "from": "@/components/ui/input", "named": ["Input"] }],
+    "field-input-int":          [{ "from": "@/components/ui/input", "named": ["Input"] }],
+    "field-input-decimal":      [{ "from": "@/components/ui/input", "named": ["Input"] }],
+    "field-input-bool":         [{ "from": "@/components/ui/switch", "named": ["Switch"] }],
+    "field-input-datetime":     [{ "from": "@/components/ui/input", "named": ["Input"] }],
+    "field-input-id-text":      [{ "from": "@/components/ui/input", "named": ["Input"] }],
+    "field-input-id-select":    [{ "from": "@/components/ui/select", "named": ["Select", "SelectContent", "SelectItem", "SelectTrigger", "SelectValue"] }],
+    "field-input-enum-select":  [{ "from": "@/components/ui/select", "named": ["Select", "SelectContent", "SelectItem", "SelectTrigger", "SelectValue"] }],
+    "field-input-array":        [{ "from": "@/components/ui/input", "named": ["Input"] }],
+    "field-input-valueobject":  []
   },
   "shellFiles": {
     "tailwind-config": "tailwind.config.ts",

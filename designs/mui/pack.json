@@ -84,11 +84,15 @@
     "primitive-form-of": "primitive-form-of.hbs",
     "form-of-imports": "form-of-imports.hbs",
     "form-of-decls": "form-of-decls.hbs",
+    "form-runs-imports": "form-runs-imports.hbs",
+    "form-runs-decls": "form-runs-decls.hbs",
+    "form-default-onsubmit": "form-default-onsubmit.hbs",
     "primitive-breadcrumbs": "primitive-breadcrumbs.hbs",
     "primitive-paper": "primitive-paper.hbs",
     "primitive-skeleton": "primitive-skeleton.hbs",
     "primitive-alert": "primitive-alert.hbs",
-    "primitive-query-view": "primitive-query-view.hbs"
+    "primitive-query-view": "primitive-query-view.hbs",
+    "primitive-key-value-row": "primitive-key-value-row.hbs"
   },
   "helpers": {
     "muiRadius": {
@@ -134,7 +138,7 @@
     "primitive-number-field":   [{ "from": "@mui/material", "named": ["TextField"] }],
     "primitive-password-field": [{ "from": "@mui/material", "named": ["TextField"] }],
     "primitive-loader":         [{ "from": "@mui/material", "named": ["CircularProgress"] }],
-    "primitive-anchor":         [{ "from": "@mui/material", "named": ["Link"] }],
+    "primitive-anchor":         [],
     "primitive-image":          [],
     "primitive-avatar":         [{ "from": "@mui/material", "named": ["Avatar"] }],
     "primitive-tabs":           [{ "from": "@mui/material", "named": ["Tabs", "Tab", "Box"] }],
@@ -146,6 +150,18 @@
     "primitive-breadcrumbs":    [{ "from": "@mui/material", "named": ["Breadcrumbs"] }],
     "primitive-paper":          [{ "from": "@mui/material", "named": ["Paper"] }],
     "primitive-skeleton":       [{ "from": "@mui/material", "named": ["Skeleton", "Stack"] }],
-    "primitive-alert":          [{ "from": "@mui/material", "named": ["Alert"] }]
+    "primitive-alert":          [{ "from": "@mui/material", "named": ["Alert"] }],
+    "primitive-key-value-row":  [{ "from": "../lib/format", "named": ["KeyValueRow"] }],
+    "primitive-form-of":        [{ "from": "@mui/material", "named": ["Stack", "Button"] }],
+    "field-input-string":       [{ "from": "@mui/material", "named": ["TextField"] }],
+    "field-input-int":          [{ "from": "@mui/material", "named": ["TextField"] }],
+    "field-input-decimal":      [{ "from": "@mui/material", "named": ["TextField"] }],
+    "field-input-bool":         [{ "from": "@mui/material", "named": ["FormControlLabel", "Switch"] }],
+    "field-input-datetime":     [{ "from": "@mui/material", "named": ["TextField"] }],
+    "field-input-id-text":      [{ "from": "@mui/material", "named": ["TextField"] }],
+    "field-input-id-select":    [{ "from": "@mui/material", "named": ["FormControl", "FormHelperText", "InputLabel", "MenuItem", "Select"] }],
+    "field-input-enum-select":  [{ "from": "@mui/material", "named": ["FormControl", "FormHelperText", "InputLabel", "MenuItem", "Select"] }],
+    "field-input-array":        [{ "from": "@mui/material", "named": ["TextField"] }],
+    "field-input-valueobject":  [{ "from": "@mui/material", "named": ["Box", "Stack"] }]
   }
 }

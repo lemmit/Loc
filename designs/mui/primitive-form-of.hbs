@@ -2,7 +2,7 @@
 {{indent}}<Stack gap={2}>
 {{#each fieldHtmls}}{{../innerIndent}}{{{this}}}
 {{/each}}{{innerIndent}}<Stack direction="row" justifyContent="flex-end" sx=\{{ mt: 1 }}>
-{{deepIndent}}<Button type="submit" variant="contained" disabled={create.isPending} data-testid="{{submitTestid}}">Create</Button>
+{{deepIndent}}<Button type="submit" variant="contained" disabled={ {{submitPendingExpr}} } data-testid="{{submitTestid}}">{{submitLabel}}</Button>
 {{innerIndent}}</Stack>
 {{indent}}</Stack>
 {{closeIndent}}</form>
