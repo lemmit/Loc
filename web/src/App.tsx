@@ -11,17 +11,20 @@ import {
   Select,
   Stack,
   Switch,
+  Tabs,
   Text,
   Textarea,
   TextInput,
   Title,
 } from "@mantine/core";
+import { useMediaQuery } from "@mantine/hooks";
 import { LoomEditor } from "./editor/LoomEditor";
 import { LoomLspClient } from "./lsp/client";
 import type { Diagnostic } from "./lsp/protocol";
 import { examples, defaultExample, type LoomExample } from "./examples";
 import { LoomBuildClient } from "./build/client";
 import type { GenerateResult, VirtualFile } from "./build/protocol";
+import type { BundleFail, BundleOk } from "./bundle/protocol";
 import { PackPicker } from "./workspace/PackPicker";
 import { WorkspaceTree } from "./workspace/WorkspaceTree";
 import { useWorkspace } from "./workspace/use-workspace";
@@ -143,6 +146,15 @@ export default function App(): JSX.Element {
       ...examples,
     ];
   }, [hashSourceOnMount]);
+
+  // Responsive layout switch.  Below the Mantine `sm` breakpoint
+  // (768 px) the playground stacks vertically: editor on top, files /
+  // preview below, with the bottom Problems / Backend split collapsed
+  // into tabs.  The `true` initial value keeps SSR + Playwright's
+  // 1280-px default viewport on the desktop branch — no flicker for
+  // the e2e suite, one tick of desktop before mobile resolves on a
+  // real phone load.
+  const isDesktop = useMediaQuery("(min-width: 768px)", true) ?? true;
 
   // Workspace persistence (IDB-backed VFS) — opening, hydration,
   // and the persisted-source lookup all live in `useWorkspace`.
@@ -419,6 +431,9 @@ export default function App(): JSX.Element {
   const honoBundleResult = pipeline.bundle.kind === "result"
     ? pipeline.bundle.hono
     : null;
+  const reactBundleResult = pipeline.bundle.kind === "result"
+    ? pipeline.bundle.react
+    : null;
   const honoBundle = selHonoBundleOk(pipeline);
   const reactBundle = selReactBundleOk(pipeline);
   const ddl = selBootedDDL(pipeline);
@@ -428,6 +443,23 @@ export default function App(): JSX.Element {
   const dispatchSlot = pipeline.dispatch.kind === "result"
     ? pipeline.dispatch.result
     : null;
+
+  // The React-bundle slot collapses three distinct states into one
+  // `null` from `selReactBundleOk`: never bundled, bundled but the
+  // example has no React deployable, bundled and React failed.  The
+  // Preview UI needs to tell them apart so it stops claiming "needs
+  // Bundle" after a successful Bundle + Boot.
+  type ReactBundleStatus =
+    | { kind: "pending" }
+    | { kind: "absent" }
+    | { kind: "fail"; result: BundleFail }
+    | { kind: "ok"; result: BundleOk };
+  const reactBundleStatus: ReactBundleStatus = (() => {
+    if (pipeline.bundle.kind !== "result") return { kind: "pending" };
+    const r = pipeline.bundle.react;
+    if (r === null) return { kind: "absent" };
+    return r.ok ? { kind: "ok", result: r } : { kind: "fail", result: r };
+  })();
 
   async function runGenerate(): Promise<void> {
     const client = buildClientRef.current;
@@ -607,7 +639,7 @@ export default function App(): JSX.Element {
   );
 
   return (
-    <AppShell header={{ height: { base: 96, sm: 48 } }} footer={{ height: 28 }} padding={0}>
+    <AppShell header={{ height: { base: 132, sm: 48 } }} footer={{ height: 28 }} padding={0}>
       <AppShell.Header>
         <Group h="100%" px="md" justify="space-between" wrap="wrap" gap="xs">
           <Group gap="md" wrap="wrap">
@@ -622,7 +654,10 @@ export default function App(): JSX.Element {
               }}
               data={augmentedExamplesList.map((e) => ({ value: e.id, label: e.label }))}
               allowDeselect={false}
-              w={300}
+              // Fixed 300 px is wider than a small phone, so on mobile
+              // we let the Select claim the full row.  Wrapping in
+              // the outer Group keeps it flowing onto its own line.
+              w={isDesktop ? 300 : "100%"}
             />
             <Button
               size="xs"
@@ -703,9 +738,25 @@ export default function App(): JSX.Element {
         height:
           "calc(100dvh - var(--app-shell-header-height, 48px) - var(--app-shell-footer-height, 28px))",
       }}>
-        <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
+        <Box style={{
+          flex: 1,
+          minHeight: 0,
+          display: "flex",
+          // Below `sm` the editor stacks above the files/preview
+          // pane so each gets the full viewport width — two narrow
+          // columns are unreadable on a phone.
+          flexDirection: isDesktop ? "row" : "column",
+        }}>
           {/* Editor pane */}
-          <Box style={{ flex: 1, minWidth: 0, borderRight: "1px solid var(--mantine-color-dark-4)" }}>
+          <Box style={{
+            flex: 1,
+            minWidth: 0,
+            minHeight: 0,
+            // Border moves to the bottom on mobile so it still acts
+            // as the visual divider between editor and right pane.
+            borderRight: isDesktop ? "1px solid var(--mantine-color-dark-4)" : "none",
+            borderBottom: isDesktop ? "none" : "1px solid var(--mantine-color-dark-4)",
+          }}>
             {lspClientRef.current && (
               <LoomEditor
                 key={exampleId}
@@ -734,7 +785,7 @@ export default function App(): JSX.Element {
           {/* Right pane — toggle between Files (tree + viewer) and
               Preview (iframe of the generated React app, fetches
               routed back to the runtime worker). */}
-          <Box style={{ flex: 1.5, minWidth: 0, display: "flex", flexDirection: "column" }}>
+          <Box style={{ flex: isDesktop ? 1.5 : 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
             <Group px="sm" py={4} bg="dark.6" justify="space-between" gap="xs">
               <SegmentedControl
                 size="xs"
@@ -750,34 +801,114 @@ export default function App(): JSX.Element {
                 <Text size="xs" c="dimmed">
                   {files.length} file{files.length === 1 ? "" : "s"} · {modeLabel(generateResult)}
                 </Text>
-              ) : (
-                <Text size="xs" c={reactBundle && ddl ? "green" : "dimmed"}>
-                  {reactBundle && ddl
-                    ? "live"
-                    : reactBundle
-                      ? "needs Boot"
-                      : "needs Bundle"}
-                </Text>
-              )}
+              ) : (() => {
+                // Status pill on the Preview tab.  Reads the four-way
+                // discriminator so a successful Bundle + Boot doesn't
+                // keep saying "needs Bundle", and so single-context
+                // examples (no React deployable) and failed React
+                // bundles each get their own honest label.
+                switch (reactBundleStatus.kind) {
+                  case "ok":
+                    return (
+                      <Text size="xs" c={ddl ? "green" : "dimmed"}>
+                        {ddl ? "live" : "needs Boot"}
+                      </Text>
+                    );
+                  case "fail":
+                    return (
+                      <Text size="xs" c="red" title="The React bundle failed — see Bundle errors in the Files tab for details.">
+                        preview bundle failed
+                      </Text>
+                    );
+                  case "absent":
+                    return (
+                      <Text size="xs" c="dimmed" title="This example has no React deployable — pick a system-mode example (e.g. Sales System) to enable Preview.">
+                        no preview
+                      </Text>
+                    );
+                  case "pending":
+                    return (
+                      <Text size="xs" c="dimmed">
+                        needs Bundle
+                      </Text>
+                    );
+                }
+              })()}
             </Group>
             {rightPane === "files" ? (
-              <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
-                <Box style={{ width: 240, minWidth: 240, borderRight: "1px solid var(--mantine-color-dark-4)", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-                  <ScrollArea style={{ flex: 1, minHeight: 0 }}>
-                    <FileTree
-                      root={tree}
-                      selectedPath={selectedPath}
-                      onSelect={setSelectedPath}
-                    />
-                  </ScrollArea>
-                </Box>
-                <Box style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+              <Box style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: isDesktop ? "row" : "column" }}>
+                {isDesktop ? (
+                  <Box style={{ width: 240, minWidth: 240, borderRight: "1px solid var(--mantine-color-dark-4)", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                    <ScrollArea style={{ flex: 1, minHeight: 0 }}>
+                      <FileTree
+                        root={tree}
+                        selectedPath={selectedPath}
+                        onSelect={setSelectedPath}
+                      />
+                    </ScrollArea>
+                  </Box>
+                ) : (
+                  // Mobile: collapsible <details> above the viewer.
+                  // Native HTML — accessible, keyboard-friendly, no
+                  // Mantine dependency for a one-off toggle.  Closed
+                  // by default so the viewer keeps the screen real
+                  // estate; tap "Files (N)" to pick a file.
+                  <Box
+                    component="details"
+                    data-testid="file-tree-mobile"
+                    style={{
+                      borderBottom: "1px solid var(--mantine-color-dark-4)",
+                      background: "var(--mantine-color-dark-7)",
+                      flexShrink: 0,
+                    }}
+                  >
+                    <Box
+                      component="summary"
+                      px="sm"
+                      py={6}
+                      style={{
+                        cursor: "pointer",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: "var(--mantine-color-dimmed)",
+                        userSelect: "none",
+                      }}
+                    >
+                      Files ({files.length})
+                    </Box>
+                    <Box style={{ maxHeight: 200, overflow: "auto" }}>
+                      <FileTree
+                        root={tree}
+                        selectedPath={selectedPath}
+                        onSelect={(p) => {
+                          setSelectedPath(p);
+                          // Auto-close the dropdown after picking so
+                          // the viewer is immediately readable.  The
+                          // <details> open state is uncontrolled, so
+                          // we toggle it imperatively.
+                          const root = document.querySelector(
+                            '[data-testid="file-tree-mobile"]',
+                          ) as HTMLDetailsElement | null;
+                          if (root) root.open = false;
+                        }}
+                      />
+                    </Box>
+                  </Box>
+                )}
+                <Box style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
                   <Group px="sm" py={4} bg="dark.7" gap="xs">
                     <Text size="xs" ff="monospace" c={selectedFile ? undefined : "dimmed"}>
                       {selectedFile?.path ?? "no file selected"}
                     </Text>
                   </Group>
-                  <Box style={{ flex: 1, minHeight: 0 }}>
+                  {/* Monaco's `automaticLayout` ResizeObserver needs
+                      a parent with a definite 2D size on the very
+                      first paint, otherwise it latches at 0×0 and
+                      stays blank.  `display: flex` here promotes the
+                      FileViewer's `<div height: 100% width: 100%>`
+                      to a flex item, which stretches to fill — same
+                      pattern as the LoomEditor wrapper above. */}
+                  <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
                     {selectedFile ? (
                       <FileViewer
                         key={selectedFile.path}
@@ -794,27 +925,47 @@ export default function App(): JSX.Element {
                       </Box>
                     )}
                   </Box>
-                  {honoBundleResult && !honoBundleResult.ok && (
+                  {((honoBundleResult && !honoBundleResult.ok) ||
+                    (reactBundleResult && !reactBundleResult.ok)) && (
                     <Box
                       p="xs"
                       style={{
                         borderTop: "1px solid var(--mantine-color-dark-4)",
                         background: "var(--mantine-color-dark-7)",
-                        maxHeight: 160,
+                        maxHeight: 200,
                         overflow: "auto",
                       }}
                     >
-                      <Text size="xs" fw={600} tt="uppercase" c="red" mb={4}>
-                        Bundle errors
-                      </Text>
-                      <Stack gap={2}>
-                        {honoBundleResult.diagnostics.map((d, i) => (
-                          <Text key={i} size="xs" ff="monospace" style={{ whiteSpace: "pre-wrap" }}>
-                            {d.file ? `${d.file}:${d.line ?? "?"}: ` : ""}
-                            {d.message}
+                      {honoBundleResult && !honoBundleResult.ok && (
+                        <>
+                          <Text size="xs" fw={600} tt="uppercase" c="red" mb={4}>
+                            Hono bundle errors
                           </Text>
-                        ))}
-                      </Stack>
+                          <Stack gap={2} mb={honoBundleResult && reactBundleResult && !reactBundleResult.ok ? "sm" : 0}>
+                            {honoBundleResult.diagnostics.map((d, i) => (
+                              <Text key={i} size="xs" ff="monospace" style={{ whiteSpace: "pre-wrap" }}>
+                                {d.file ? `${d.file}:${d.line ?? "?"}: ` : ""}
+                                {d.message}
+                              </Text>
+                            ))}
+                          </Stack>
+                        </>
+                      )}
+                      {reactBundleResult && !reactBundleResult.ok && (
+                        <>
+                          <Text size="xs" fw={600} tt="uppercase" c="red" mb={4}>
+                            React bundle errors
+                          </Text>
+                          <Stack gap={2}>
+                            {reactBundleResult.diagnostics.map((d, i) => (
+                              <Text key={i} size="xs" ff="monospace" style={{ whiteSpace: "pre-wrap" }}>
+                                {d.file ? `${d.file}:${d.line ?? "?"}: ` : ""}
+                                {d.message}
+                              </Text>
+                            ))}
+                          </Stack>
+                        </>
+                      )}
                     </Box>
                   )}
                 </Box>
@@ -833,13 +984,15 @@ export default function App(): JSX.Element {
                     <Text size="sm" c="dimmed">
                       {!generateSuccess
                         ? "Generate a system-mode source first (the Sales System example has both Hono + React deployables)."
-                        : !reactBundle
-                          ? honoBundleResult && !honoBundleResult.ok
-                            ? "Bundling the React app failed — switch to Files for details."
-                            : "Click Bundle to compile the React frontend (~10 s on first run)."
-                          : !ddl
-                            ? "Boot the backend first — the React app calls into PGlite via the runtime worker."
-                            : "Loading…"}
+                        : reactBundleStatus.kind === "absent"
+                          ? "This example has no React frontend.  Pick a system-mode example (e.g. Sales System) to use Preview."
+                          : reactBundleStatus.kind === "fail"
+                            ? "React bundling failed — switch to Files for details."
+                            : reactBundleStatus.kind === "pending"
+                              ? "Click Bundle to compile the React frontend (~10 s on first run)."
+                              : !ddl
+                                ? "Boot the backend first — the React app calls into PGlite via the runtime worker."
+                                : "Loading…"}
                     </Text>
                   </Box>
                 )}
@@ -847,89 +1000,73 @@ export default function App(): JSX.Element {
             )}
           </Box>
         </Box>
-        <Box
-          style={{
-            height: 220,
-            borderTop: "1px solid var(--mantine-color-dark-4)",
-            background: "var(--mantine-color-dark-7)",
-            overflow: "hidden",
-            display: "flex",
-          }}
-        >
-          {/* Problems — half-width.  */}
-          <Box style={{ flex: 1, minWidth: 0, borderRight: "1px solid var(--mantine-color-dark-4)", display: "flex", flexDirection: "column" }}>
-            <Group px="sm" py={4} bg="dark.6" gap="xs">
-              <Text size="xs" fw={600} tt="uppercase" c="dimmed">
-                Problems
-              </Text>
-            </Group>
+        {/* Bottom panel — Problems on one half, Backend on the other.
+            Desktop renders them side-by-side at a fixed 220 px.  Mobile
+            shrinks to 180 px and collapses the split into a Tabs strip
+            so each panel gets full width while it's foregrounded. */}
+        {(() => {
+          const problemsBody = (
             <ScrollArea style={{ flex: 1, minHeight: 0 }}>
               <DiagnosticsPanel items={diagnostics} />
             </ScrollArea>
-          </Box>
-          {/* Backend panel — half-width.  Shows a Boot button until
-              the bundle is up; afterwards reveals a request composer
-              that fires Requests through `app.fetch`. */}
-          <Box style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
-            <Group px="sm" py={4} bg="dark.6" justify="space-between" gap="xs">
-              <Text size="xs" fw={600} tt="uppercase" c="dimmed">
-                Backend
-              </Text>
-              <Group gap="xs">
-                {ddl ? (
-                  <Badge size="xs" color="green" variant="light" data-testid="backend-status">booted</Badge>
-                ) : (
-                  <Badge size="xs" color="gray" variant="light" data-testid="backend-status">offline</Badge>
-                )}
-                {ddl && (
-                  <Badge
-                    size="xs"
-                    color={persistent ? "blue" : "gray"}
-                    variant="light"
-                    title={
-                      persistent
-                        ? "Rows survive page reload — PGlite is OPFS-backed, keyed by source hash."
-                        : "Browser refused OPFS storage — rows live in memory and are wiped on reload."
-                    }
-                    data-testid="persistence-status"
-                  >
-                    {persistent ? "persisted" : "in-memory"}
-                  </Badge>
-                )}
-                {ddl && migrated && (
-                  <Badge
-                    size="xs"
-                    color="orange"
-                    variant="light"
-                    title="Schema changed since the previous boot — DROP SCHEMA + re-applied DDL.  Pre-existing rows were dropped."
-                    data-testid="migrated-status"
-                  >
-                    schema migrated
-                  </Badge>
-                )}
-                {ddl && (
-                  <Button
-                    size="xs"
-                    variant="default"
-                    onClick={runWipe}
-                    title="Drop every row in the booted PGlite and re-apply the schema."
-                    data-testid="btn-wipe"
-                  >
-                    Reset DB
-                  </Button>
-                )}
+          );
+          const backendHeaderRight = (
+            <Group gap="xs" wrap="wrap" justify="flex-end">
+              {ddl ? (
+                <Badge size="xs" color="green" variant="light" data-testid="backend-status">booted</Badge>
+              ) : (
+                <Badge size="xs" color="gray" variant="light" data-testid="backend-status">offline</Badge>
+              )}
+              {ddl && (
+                <Badge
+                  size="xs"
+                  color={persistent ? "blue" : "gray"}
+                  variant="light"
+                  title={
+                    persistent
+                      ? "Rows survive page reload — PGlite is OPFS-backed, keyed by source hash."
+                      : "Browser refused OPFS storage — rows live in memory and are wiped on reload."
+                  }
+                  data-testid="persistence-status"
+                >
+                  {persistent ? "persisted" : "in-memory"}
+                </Badge>
+              )}
+              {ddl && migrated && (
+                <Badge
+                  size="xs"
+                  color="orange"
+                  variant="light"
+                  title="Schema changed since the previous boot — DROP SCHEMA + re-applied DDL.  Pre-existing rows were dropped."
+                  data-testid="migrated-status"
+                >
+                  schema migrated
+                </Badge>
+              )}
+              {ddl && (
                 <Button
                   size="xs"
-                  onClick={runBoot}
-                  loading={pipeline.booting}
-                  disabled={!honoBundle}
                   variant="default"
-                  data-testid="btn-boot"
+                  onClick={runWipe}
+                  title="Drop every row in the booted PGlite and re-apply the schema."
+                  data-testid="btn-wipe"
                 >
-                  {ddl ? "Reboot" : "Boot"}
+                  Reset DB
                 </Button>
-              </Group>
+              )}
+              <Button
+                size="xs"
+                onClick={runBoot}
+                loading={pipeline.booting}
+                disabled={!honoBundle}
+                variant="default"
+                data-testid="btn-boot"
+              >
+                {ddl ? "Reboot" : "Boot"}
+              </Button>
             </Group>
+          );
+          const backendBody = (
             <Box style={{ flex: 1, minHeight: 0, overflow: "auto" }} p="xs">
               {bootErrorMessage && (
                 <Code block c="red" mb="xs" style={{ whiteSpace: "pre-wrap", fontSize: 11 }}>
@@ -938,14 +1075,14 @@ export default function App(): JSX.Element {
               )}
               {ddl ? (
                 <Stack gap={6}>
-                  <Group gap={6} wrap="nowrap">
+                  <Group gap={6} wrap="wrap">
                     <Select
                       size="xs"
                       value={reqMethod}
                       onChange={(v) => v && setReqMethod(v)}
                       data={["GET", "POST", "PUT", "DELETE", "PATCH"]}
                       allowDeselect={false}
-                      w={90}
+                      w={isDesktop ? 90 : "100%"}
                       data-testid="req-method"
                     />
                     <TextInput
@@ -953,7 +1090,7 @@ export default function App(): JSX.Element {
                       value={reqPath}
                       onChange={(e) => setReqPath(e.currentTarget.value)}
                       placeholder="/products"
-                      style={{ flex: 1 }}
+                      style={{ flex: isDesktop ? 1 : "1 1 100%" }}
                       data-testid="req-path"
                     />
                     <Button
@@ -1014,8 +1151,83 @@ export default function App(): JSX.Element {
                 </Text>
               )}
             </Box>
-          </Box>
-        </Box>
+          );
+          if (isDesktop) {
+            return (
+              <Box
+                style={{
+                  height: 220,
+                  flexShrink: 0,
+                  borderTop: "1px solid var(--mantine-color-dark-4)",
+                  background: "var(--mantine-color-dark-7)",
+                  overflow: "hidden",
+                  display: "flex",
+                }}
+              >
+                <Box style={{ flex: 1, minWidth: 0, borderRight: "1px solid var(--mantine-color-dark-4)", display: "flex", flexDirection: "column" }}>
+                  <Group px="sm" py={4} bg="dark.6" gap="xs">
+                    <Text size="xs" fw={600} tt="uppercase" c="dimmed">
+                      Problems
+                    </Text>
+                  </Group>
+                  {problemsBody}
+                </Box>
+                <Box style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+                  <Group px="sm" py={4} bg="dark.6" justify="space-between" gap="xs" wrap="wrap">
+                    <Text size="xs" fw={600} tt="uppercase" c="dimmed">
+                      Backend
+                    </Text>
+                    {backendHeaderRight}
+                  </Group>
+                  {backendBody}
+                </Box>
+              </Box>
+            );
+          }
+          // Mobile: tabbed split so each panel gets full width.  The
+          // Backend's status badges + Boot button move into the tab
+          // body's header strip (Tabs.List itself is just the labels).
+          return (
+            <Box
+              style={{
+                height: 200,
+                flexShrink: 0,
+                borderTop: "1px solid var(--mantine-color-dark-4)",
+                background: "var(--mantine-color-dark-7)",
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
+              }}
+            >
+              <Tabs
+                defaultValue="problems"
+                variant="default"
+                keepMounted
+                styles={{
+                  root: { display: "flex", flexDirection: "column", flex: 1, minHeight: 0 },
+                  panel: { flex: 1, minHeight: 0, display: "flex", flexDirection: "column" },
+                }}
+                data-testid="bottom-panel-tabs"
+              >
+                <Tabs.List bg="dark.6">
+                  <Tabs.Tab value="problems" data-testid="bottom-tab-problems">
+                    Problems
+                  </Tabs.Tab>
+                  <Tabs.Tab value="backend" data-testid="bottom-tab-backend">
+                    Backend
+                  </Tabs.Tab>
+                </Tabs.List>
+                <Tabs.Panel value="problems">{problemsBody}</Tabs.Panel>
+                <Tabs.Panel value="backend">
+                  <Group px="sm" py={4} bg="dark.6" justify="flex-end" gap="xs" wrap="wrap">
+                    {backendHeaderRight}
+                  </Group>
+                  {backendBody}
+                </Tabs.Panel>
+              </Tabs>
+            </Box>
+          );
+        })()}
       </AppShell.Main>
       <AppShell.Footer>
         <Group h="100%" px="md" gap="md" justify="space-between">
