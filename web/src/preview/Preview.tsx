@@ -95,10 +95,20 @@ export function Preview({ js, css, versions, runtime }: PreviewProps): JSX.Eleme
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const fullscreenTargetRef = useRef<HTMLDivElement | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  // CSS-based fallback for platforms where `Element.requestFullscreen`
+  // is unsupported or rejects.  iOS Safari (and every iOS browser,
+  // since they all use WebKit) doesn't implement the standard API
+  // for arbitrary elements — only `<video>` via the WebKit-prefixed
+  // `webkitEnterFullscreen`.  Without this fallback the Maximize
+  // button is a no-op on mobile.  We track the two modes separately
+  // (native vs pseudo) but expose a single "is maximised" boolean
+  // to the UI so the button icon stays in sync regardless of path.
+  const [pseudoFullscreen, setPseudoFullscreen] = useState(false);
+  const isMaximized = isFullscreen || pseudoFullscreen;
 
-  // Track fullscreen state so the toggle button reflects browser
-  // truth — including Esc-to-exit and any future per-iframe fs
-  // request from inside the bundle itself.
+  // Track native fullscreen state so the toggle button reflects
+  // browser truth — including Esc-to-exit and any future per-iframe
+  // fs request from inside the bundle itself.
   useEffect(() => {
     const onChange = (): void => {
       setIsFullscreen(document.fullscreenElement !== null);
@@ -107,18 +117,48 @@ export function Preview({ js, css, versions, runtime }: PreviewProps): JSX.Eleme
     return () => document.removeEventListener("fullscreenchange", onChange);
   }, []);
 
+  // Esc-to-exit for the CSS fallback.  Native fullscreen exits on
+  // Esc automatically; the pseudo overlay needs its own handler
+  // because it's just a position:fixed box.
+  useEffect(() => {
+    if (!pseudoFullscreen) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") setPseudoFullscreen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [pseudoFullscreen]);
+
   const toggleFullscreen = async (): Promise<void> => {
-    try {
-      if (document.fullscreenElement) {
-        await document.exitFullscreen();
-      } else if (fullscreenTargetRef.current) {
-        await fullscreenTargetRef.current.requestFullscreen();
-      }
-    } catch {
-      // Fullscreen API rejects when permission is missing or the
-      // user gesture wasn't propagated.  Swallow — the button just
-      // becomes a no-op in those rare cases instead of throwing.
+    // Exit whichever mode is active.
+    if (pseudoFullscreen) {
+      setPseudoFullscreen(false);
+      return;
     }
+    if (document.fullscreenElement) {
+      try {
+        await document.exitFullscreen();
+      } catch {
+        /* nothing else to do */
+      }
+      return;
+    }
+    // Enter native fullscreen when the API is genuinely available.
+    // `document.fullscreenEnabled` returns false on iOS Safari and
+    // any embedded WebView that opts out, which is the case we need
+    // the CSS fallback for.  Wrap the call in try/catch anyway —
+    // Permissions-Policy frame-ancestors can reject the request at
+    // runtime even when the API is exposed.
+    const target = fullscreenTargetRef.current;
+    if (document.fullscreenEnabled && target?.requestFullscreen) {
+      try {
+        await target.requestFullscreen();
+        return;
+      } catch {
+        // Fall through to the CSS overlay below.
+      }
+    }
+    setPseudoFullscreen(true);
   };
 
   // Wire the SW's runtime bridge to the in-process runtime worker.
@@ -211,14 +251,42 @@ export function Preview({ js, css, versions, runtime }: PreviewProps): JSX.Eleme
   }, [js, css, versions, runtimeAttached]);
 
   return (
-    <Box style={{ height: "100%", width: "100%", display: "flex", flexDirection: "column" }}>
+    // The whole Preview is the fullscreen target so the toolbar (and
+    // therefore the Minimise button) stays accessible — important
+    // for the CSS fallback path, since pseudo-fullscreen has no Esc
+    // affordance on a touch device.  In native fullscreen Esc still
+    // works; the visible toolbar is just a bonus.
+    <Box
+      ref={fullscreenTargetRef}
+      style={{
+        height: "100%",
+        width: "100%",
+        display: "flex",
+        flexDirection: "column",
+        // Pseudo-fullscreen overlay.  `position: fixed` lifts the
+        // Preview out of the playground's column flex and pins it to
+        // the viewport edges; `100dvh` follows iOS's dynamic
+        // viewport so the iframe doesn't sit under the bottom URL
+        // bar.  zIndex picks any value above Mantine's defaults.
+        ...(pseudoFullscreen
+          ? {
+              position: "fixed" as const,
+              inset: 0,
+              height: "100dvh",
+              width: "100dvw",
+              zIndex: 9999,
+              background: "white",
+            }
+          : {}),
+      }}
+    >
       <Box px="sm" py={4} bg="dark.6" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
         <Group justify="space-between" wrap="nowrap" gap="xs">
           <Text size="xs" fw={600} tt="uppercase" c="dimmed">
             Preview — generated React app, fetches routed to PGlite
           </Text>
           <Tooltip
-            label={isFullscreen ? "Exit full screen (Esc)" : "Open full screen"}
+            label={isMaximized ? "Exit full screen (Esc)" : "Open full screen"}
             withArrow
             position="left"
             openDelay={300}
@@ -230,16 +298,15 @@ export function Preview({ js, css, versions, runtime }: PreviewProps): JSX.Eleme
               onClick={() => {
                 void toggleFullscreen();
               }}
-              aria-label={isFullscreen ? "Exit full screen" : "Open full screen"}
+              aria-label={isMaximized ? "Exit full screen" : "Open full screen"}
               data-testid="preview-fullscreen-toggle"
             >
-              {isFullscreen ? <MinimizeIcon /> : <MaximizeIcon />}
+              {isMaximized ? <MinimizeIcon /> : <MaximizeIcon />}
             </ActionIcon>
           </Tooltip>
         </Group>
       </Box>
       <Box
-        ref={fullscreenTargetRef}
         style={{ flex: 1, minHeight: 0, background: "white" }}
       >
         {!SW_AVAILABLE ? (
