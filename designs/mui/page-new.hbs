@@ -1,0 +1,59 @@
+// Auto-generated.
+import { Link, useNavigate } from "react-router-dom";
+import {
+  Stack, Typography, Button, Card, CardContent, Breadcrumbs,
+  Link as MuiLink, TextField, FormControlLabel, Switch, Select,
+  MenuItem, FormControl, InputLabel, FormHelperText, Box,
+} from "@mui/material";
+import { enqueueSnackbar } from "notistack";
+import { {{useFormImports}} } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { Create{{aggregateName}}Request, useCreate{{aggregateName}} } from "../../api/{{aggregateNameCamel}}";
+{{#each idHookImportLines}}{{{this}}}
+{{/each}}
+export default function {{aggregateName}}New() {
+  const navigate = useNavigate();
+  const create = useCreate{{aggregateName}}();
+{{#each idHookCalls}}{{{this}}}
+{{/each}}  const {{{destructuredHookFields}}} = useForm<Create{{aggregateName}}Request>({
+    resolver: zodResolver(Create{{aggregateName}}Request),
+    defaultValues: {{{defaultValuesTs}}},
+  });
+  return (
+    <Stack sx=\{{ maxWidth: 640 }} data-testid="{{slug}}-new" gap={2}>
+      <Breadcrumbs>
+        <MuiLink component={Link} to="/">Home</MuiLink>
+        <MuiLink component={Link} to="/{{slug}}">{{humanPlural}}</MuiLink>
+        <Typography>New</Typography>
+      </Breadcrumbs>
+      <Stack gap={0.5}>
+        <Typography variant="overline" color="text.secondary">New {{humanAggLower}}</Typography>
+        <Typography variant="h5">Create {{humanAggLower}}</Typography>
+      </Stack>
+      <Card>
+        <CardContent>
+          <form
+            onSubmit={handleSubmit(async (vals) => {
+              try {
+                const out = await create.mutateAsync(vals);
+                enqueueSnackbar("{{humanAgg}} created", { variant: "success" });
+                navigate(`/{{slug}}/${out.id}`);
+              } catch (e) {
+                enqueueSnackbar((e as Error).message, { variant: "error" });
+              }
+            })}
+          >
+            <Stack gap={2}>
+            {{#each fieldHtmls}}{{{this}}}
+            {{/each}}
+              <Stack direction="row" justifyContent="flex-end" gap={1} sx=\{{ mt: 1 }}>
+                <Button variant="outlined" onClick={() => navigate("/{{slug}}")}>Cancel</Button>
+                <Button type="submit" variant="contained" disabled={create.isPending} data-testid="{{slug}}-new-submit">Create</Button>
+              </Stack>
+            </Stack>
+          </form>
+        </CardContent>
+      </Card>
+    </Stack>
+  );
+}

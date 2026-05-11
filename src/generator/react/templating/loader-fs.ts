@@ -47,7 +47,7 @@ function repoRoot(): string {
  *  the .ddd source lives in — used to anchor relative custom-pack
  *  paths.  Built-in names resolve under `<repo>/designs/<name>`. */
 export function resolvePackDir(ui: string, referenceDir?: string): string {
-  if (ui === "mantine" || ui === "shadcn") {
+  if (ui === "mantine" || ui === "shadcn" || ui === "mui") {
     return path.join(repoRoot(), "designs", ui);
   }
   // Treat anything else as a path.  Absolute paths used as-is;

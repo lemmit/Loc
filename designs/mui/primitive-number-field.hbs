@@ -1,0 +1,1 @@
+{{#if hasBind}}<TextField type="number" label={{{labelAttr}}} value={{expr bind}} onChange={(e) => {{setter}}(e.target.value === "" ? 0 : Number(e.target.value))}{{{testidAttr}}} />{{else}}<TextField type="number" label={{{labelAttr}}}{{{testidAttr}}} />{{/if}}

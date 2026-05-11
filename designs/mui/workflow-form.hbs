@@ -1,0 +1,60 @@
+// Auto-generated.
+import { Link, useNavigate } from "react-router-dom";
+import {
+  Stack, Typography, Button, Card, CardContent, Breadcrumbs,
+  Link as MuiLink, TextField, FormControlLabel, Switch, Select,
+  MenuItem, FormControl, InputLabel, FormHelperText, Box,
+} from "@mui/material";
+import { enqueueSnackbar } from "notistack";
+import { {{useFormImports}} } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { {{workflowPascal}}Request, use{{workflowPascal}}Workflow } from "../../api/workflows";
+{{#each idHookImportLines}}{{{this}}}
+{{/each}}
+export default function {{componentName}}() {
+  const navigate = useNavigate();
+  const run = use{{workflowPascal}}Workflow();
+{{#each idHookCalls}}{{{this}}}
+{{/each}}  const {{{destructured}}} = useForm<{{workflowPascal}}Request>({
+    resolver: zodResolver({{workflowPascal}}Request),
+    defaultValues: {{{defaultValuesTs}}},
+  });
+  return (
+    <Stack sx=\{{ maxWidth: 640 }} data-testid="workflow-{{slug}}" gap={2}>
+      <Breadcrumbs>
+        <MuiLink component={Link} to="/">Home</MuiLink>
+        <MuiLink component={Link} to="/workflows">Workflows</MuiLink>
+        <Typography>{{humanWorkflow}}</Typography>
+      </Breadcrumbs>
+      <Stack gap={0.5}>
+        <Typography variant="overline" color="text.secondary">Workflow</Typography>
+        <Typography variant="h5">{{humanWorkflow}}</Typography>
+      </Stack>
+      <Card>
+        <CardContent>
+          <form
+            onSubmit={handleSubmit(async (vals) => {
+              try {
+                await run.mutateAsync(vals);
+                enqueueSnackbar("{{humanWorkflow}} completed", { variant: "success" });
+                navigate("/workflows");
+              } catch (e) {
+                enqueueSnackbar((e as Error).message, { variant: "error" });
+              }
+            })}
+          >
+            <Stack gap={2}>
+            {{#if hasParams}}{{#each fieldHtmls}}{{{this}}}
+            {{/each}}{{else}}<Typography>This workflow has no parameters.</Typography>
+            {{/if}}
+              <Stack direction="row" justifyContent="flex-end" gap={1} sx=\{{ mt: 1 }}>
+                <Button variant="outlined" onClick={() => navigate("/workflows")}>Cancel</Button>
+                <Button type="submit" variant="contained" disabled={run.isPending} data-testid="workflow-{{slug}}-submit">Run</Button>
+              </Stack>
+            </Stack>
+          </form>
+        </CardContent>
+      </Card>
+    </Stack>
+  );
+}
