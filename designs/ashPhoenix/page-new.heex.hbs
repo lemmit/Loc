@@ -1,0 +1,35 @@
+<%!-- Auto-generated. Create form for {{humanAgg}}. --%>
+<div data-testid="{{slug}}-new" class="max-w-2xl space-y-4">
+  <nav aria-label="breadcrumb">
+    <ol class="flex items-center gap-2 text-sm text-gray-500">
+      <li class="flex items-center gap-2">
+        <.link navigate="/" class="hover:text-gray-900 hover:underline">Home</.link>
+        <span aria-hidden="true">/</span>
+      </li>
+      <li class="flex items-center gap-2">
+        <.link navigate="/{{slug}}" class="hover:text-gray-900 hover:underline">{{humanPlural}}</.link>
+        <span aria-hidden="true">/</span>
+      </li>
+      <li><span class="text-gray-900 font-medium">New</span></li>
+    </ol>
+  </nav>
+
+  <div class="space-y-0.5">
+    <p class="text-sm font-semibold uppercase tracking-wide text-gray-400">New {{humanAggLower}}</p>
+    <h2 class="text-2xl font-semibold tracking-tight">Create {{humanAggLower}}</h2>
+  </div>
+
+  <div class="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+    <.simple_form for={@form} phx-submit="save" phx-change="validate">
+      {{#each fields}}{{> (lookup . "template") this}}{{/each}}
+      <:actions>
+        <.link navigate="/{{slug}}" class="inline-flex items-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50">
+          Cancel
+        </.link>
+        <.button type="submit" data-testid="{{slug}}-new-submit" phx-disable-with="Creating…">
+          Create
+        </.button>
+      </:actions>
+    </.simple_form>
+  </div>
+</div>

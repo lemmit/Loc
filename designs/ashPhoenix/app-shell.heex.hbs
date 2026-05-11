@@ -1,0 +1,60 @@
+<%!-- Auto-generated. Root layout shell with sidebar. Rendered as the app layout template. --%>
+<%!-- This file maps to lib/<app>_web/components/layouts/app.html.heex --%>
+<div class="flex h-screen overflow-hidden bg-gray-100">
+  <%!-- Sidebar --%>
+  <aside id="sidebar"
+         class="flex w-64 flex-col border-r border-gray-200 bg-white"
+         data-testid="nav-sidebar"
+         aria-label="Primary navigation">
+    <%!-- Brand header --%>
+    <div class="flex h-14 flex-shrink-0 items-center border-b border-gray-200 px-4">
+      <.link navigate="/" class="flex items-center gap-2 no-underline text-inherit">
+        <div class="h-7 w-7 rounded-md" style="background-color: var(--color-primary)" aria-hidden="true"></div>
+        <span class="text-base font-semibold tracking-tight">{{systemNameHuman}}</span>
+      </.link>
+    </div>
+
+    <%!-- Nav sections --%>
+    <nav class="flex flex-1 flex-col gap-1 overflow-y-auto p-3">
+      {{#each navSections}}
+      <div class="mb-3">
+        <p class="mb-1 px-2 text-xs font-semibold uppercase tracking-wider text-gray-400">{{label}}</p>
+        {{#each entries}}
+        <.link navigate="{{to}}"
+               data-testid="{{testId}}"
+               class={["flex items-center rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                        if @current_path == "{{to}}" || String.starts_with?(@current_path || "", "{{to}}/") do
+                          "bg-blue-50 text-blue-700"
+                        else
+                          "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
+                        end]}>
+          {{label}}
+        </.link>
+        {{/each}}
+      </div>
+      {{/each}}
+    </nav>
+  </aside>
+
+  <%!-- Main content area --%>
+  <div class="flex flex-1 flex-col overflow-hidden">
+    <%!-- Top bar (mobile burger lives here) --%>
+    <header class="flex h-14 flex-shrink-0 items-center border-b border-gray-200 bg-white px-4 lg:hidden">
+      <button type="button"
+              class="rounded-md p-2 text-gray-500 hover:bg-gray-100"
+              data-testid="nav-burger"
+              aria-label="Open sidebar"
+              phx-click={JS.toggle(to: "#sidebar")}>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-6 w-6">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+        </svg>
+      </button>
+      <span class="ml-3 text-sm font-semibold">{{systemNameHuman}}</span>
+    </header>
+
+    <main class="flex-1 overflow-y-auto p-6">
+      <.flash_group flash={@flash} />
+      <%= @inner_content %>
+    </main>
+  </div>
+</div>

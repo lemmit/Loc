@@ -1,0 +1,75 @@
+<%!-- Auto-generated. List page for {{humanPlural}}. --%>
+<div data-testid="{{slug}}-list" class="space-y-4">
+  <nav aria-label="breadcrumb" data-testid="{{slug}}-list-breadcrumbs">
+    <ol class="flex items-center gap-2 text-sm text-gray-500">
+      {{#each breadcrumbs}}
+      <li class="flex items-center gap-2">
+        {{#if to}}<.link navigate="{{{to}}}" class="hover:text-gray-900 hover:underline">{{label}}</.link><span aria-hidden="true">/</span>{{else}}<span class="text-gray-900 font-medium">{{label}}</span>{{/if}}
+      </li>
+      {{/each}}
+    </ol>
+  </nav>
+
+  <div class="flex items-end justify-between">
+    <div class="space-y-0.5">
+      <h2 class="text-2xl font-semibold tracking-tight">{{humanPlural}}</h2>
+      <p class="text-sm text-gray-500">
+        <%= if assigns[:loading] do %>Loading…<% else %><%= length(@rows) %> <%= if length(@rows) == 1, do: "record", else: "records" %><% end %>
+      </p>
+    </div>
+    <.link navigate="/{{slug}}/new" data-testid="{{slug}}-list-create"
+           class="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+      <span aria-hidden="true">+</span> New {{humanSingularLower}}
+    </.link>
+  </div>
+
+  <%= if assigns[:loading] do %>
+  <div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm space-y-2">
+    <%= for _i <- 1..5 do %>
+    <div class="h-7 animate-pulse rounded bg-gray-200"></div>
+    <% end %>
+  </div>
+  <% end %>
+
+  <%= if assigns[:flash_error] do %>
+  <div class="rounded-lg border border-red-200 bg-red-50 p-4 text-red-700" role="alert">
+    <p class="font-medium">Couldn't load {{humanPluralLower}}</p>
+    <p class="text-sm mt-1"><%= @flash_error %></p>
+  </div>
+  <% end %>
+
+  <%= if !assigns[:loading] && @rows == [] do %>
+  <div class="rounded-lg border border-gray-200 bg-white p-16" data-testid="{{slug}}-list-empty">
+    <div class="flex flex-col items-center gap-3 text-center">
+      <p class="text-gray-500">No {{humanPluralLower}} yet.</p>
+      <.link navigate="/{{slug}}/new"
+             class="inline-flex items-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50">
+        Create your first {{humanSingularLower}}
+      </.link>
+    </div>
+  </div>
+  <% end %>
+
+  <%= if !assigns[:loading] && @rows != [] do %>
+  <div class="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm" data-testid="{{slug}}-table-container">
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+          <tr>
+            {{#each columnHeaders}}
+            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{{this}}</th>
+            {{/each}}
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100 bg-white">
+          <%= for row <- @rows do %>
+          <tr data-testid={"{{slug}}-row-#{row.id}"} class="cursor-pointer hover:bg-gray-50" phx-click="navigate_to_row" phx-value-id={row.id}>
+            {{#each cells}}{{> (lookup . "template") this}}{{/each}}
+          </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <% end %>
+</div>

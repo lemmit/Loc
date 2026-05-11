@@ -1,0 +1,8 @@
+<%!-- cell-datetime: formats a datetime value --%>
+<td data-testid={{{testIdExpr}}} class="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">
+  <%= if {{valueExpr}} do %>
+    <%= Calendar.strftime({{valueExpr}}, "%Y-%m-%d %H:%M") %>
+  <% else %>
+    <span class="text-gray-400">—</span>
+  <% end %>
+</td>

@@ -1,0 +1,7 @@
+<%!-- field-row-bool: key-value row for a boolean field --%>
+<div class="flex flex-col sm:flex-row sm:gap-4" data-testid="{{testId}}">
+  <dt class="text-sm font-medium text-gray-500 sm:w-40 sm:flex-shrink-0">{{label}}</dt>
+  <dd class="text-sm text-gray-900">
+    <%= if {{valueExpr}}, do: "Yes", else: "No" %>
+  </dd>
+</div>

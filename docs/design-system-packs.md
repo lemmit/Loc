@@ -39,6 +39,7 @@ templates the pack inherits for free — see §6.
 {
   "name": "mantine",
   "version": "0.1.0",
+  "format": "tsx",
   "emits": { "<logical-name>": "<file-name.hbs>", ... },
   "imports": { "<logical-name>": [{ "from": "...", "named": [...] }], ... },
   "shellFiles": { "<logical-name>": "<output-path>" },
@@ -46,6 +47,27 @@ templates the pack inherits for free — see §6.
   "helpers": { "lucide": { "IconPlus": "Plus", ... } }
 }
 ```
+
+### `format`
+
+Optional, defaults to `"tsx"`.  Discriminates the output language the
+pack's templates produce — `"tsx"` for React/Mantine/shadcn-style packs
+(Handlebars over `.hbs` files yielding TSX); `"heex"` for Phoenix
+LiveView packs (Handlebars over `.heex.hbs` files yielding HEEx, e.g.
+the built-in `ashPhoenix` pack).
+
+The Handlebars compiler is content-agnostic, so `format` does not
+change template compilation.  It DOES gate which repo-root shared
+template directories the loader pulls in:
+
+| Format | Shared dirs read |
+|---|---|
+| `tsx` (default) | `vite/`, `api/`, `docker/` |
+| `heex` | `phoenix/` (future; empty in v0 — `ashPhoenix` ships its shell files directly) |
+
+A pack's filename convention should match its format (`*.hbs` for tsx,
+`*.heex.hbs` for heex), but the loader keys off the manifest's
+`emits` paths verbatim — this is convention, not enforcement.
 
 ### `name`, `version`
 Display strings.  The generator does not use `name` for resolution

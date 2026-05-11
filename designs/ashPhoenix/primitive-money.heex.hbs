@@ -1,0 +1,4 @@
+<%!-- primitive-money --%>
+<span class="tabular-nums" data-testid={assigns[:testid]}>
+  <%= @currency %> <%= :erlang.float_to_binary(@amount / 1, decimals: 2) %>
+</span>

@@ -5,6 +5,7 @@ const dotnetPlatform: PlatformSurface = {
   name: "dotnet",
   defaultPort: 8080,
   needsDb: true,
+  mountsUi: false,
   // .NET repository auto-emits `SaveAsync` and `GetByIdAsync`.  Find
   // names are Pascal-cased on the C# side, so a DSL find named
   // `saveAsync` lowers to `SaveAsync()` colliding with the auto

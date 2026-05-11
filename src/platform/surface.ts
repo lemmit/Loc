@@ -43,6 +43,14 @@ export interface PlatformSurface {
   /** Whether deployables on this platform get a postgres database
    * created by the db-init script. */
   readonly needsDb: boolean;
+  /** Whether deployables on this platform mount a `ui:` binding
+   * (i.e. render pages from a `ui { ... }` SystemMember).  React
+   * and static frontends do; dotnet and hono backends don't;
+   * phoenixLiveView does AS A FULLSTACK platform — its single
+   * deployable both `serves:` an Api and mounts a `ui:`.
+   * Consulted by the deployable validator instead of hardcoded
+   * platform-string lists. */
+  readonly mountsUi: boolean;
   /** Repository method names this platform auto-emits for every
    * aggregate.  A user-declared find with one of these names would
    * collide with the auto-emitted method (TS: duplicate function

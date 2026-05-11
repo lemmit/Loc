@@ -3,6 +3,7 @@ import type { PlatformSurface } from "./surface.js";
 import dotnetPlatform from "./dotnet.js";
 import honoPlatform from "./hono.js";
 import reactPlatform from "./react.js";
+import phoenixLiveViewPlatform from "./phoenix-live-view.js";
 
 // ---------------------------------------------------------------------------
 // Single source of truth for which platforms exist + how the system
@@ -21,6 +22,13 @@ const platforms: Record<Platform, PlatformSurface> = {
   // declared as `platform: static` lowers through the same code path
   // a `platform: react` deployable does.  Slice 8 finishes the swap.
   static: reactPlatform,
+  // Fullstack Elixir/Ash + Phoenix LiveView platform.  Owns its own
+  // database, mounts a `ui:`, and (when populated) `serves:` an
+  // Ash-derived API.  Stub implementation in v0 — emits a minimal
+  // mix project shell; Phase 3 of the plan adds Ash domain
+  // emission, Phase 6 ships the `ashPhoenix` HEEx pack, Phase 7
+  // emits the LiveView modules per page.
+  phoenixLiveView: phoenixLiveViewPlatform,
 };
 
 export function platformFor(name: Platform): PlatformSurface {

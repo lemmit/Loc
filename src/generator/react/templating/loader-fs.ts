@@ -19,10 +19,14 @@ import { fileURLToPath } from "node:url";
 import { compilePack, type LoadedPack, type PackManifest } from "./loader.js";
 
 /** Names of the repo-root template directories that supply
- *  pack-agnostic Handlebars sources (Vite scaffold, API integration,
- *  Docker artifacts).  Each is read flat — no nesting — and merged
+ *  pack-agnostic Handlebars sources, keyed by pack format.  TSX packs
+ *  (mantine, shadcn) consume the React/Vite/Docker scaffolds; HEEx
+ *  packs (ashPhoenix) consume their own future `phoenix/` shared
+ *  layer (empty in v0 — the ashPhoenix pack ships its shell files
+ *  directly).  Each directory is read flat — no nesting — and merged
  *  into a single shared-sources map keyed by logical name. */
-const SHARED_SOURCE_DIRS = ["vite", "api", "docker"] as const;
+const SHARED_SOURCE_DIRS_TSX = ["vite", "api", "docker"] as const;
+const SHARED_SOURCE_DIRS_HEEX: readonly string[] = ["phoenix"];
 
 /** Resolve the repo-root directory by walking up from this file
  *  until a `designs/` sibling is found.  Used to anchor both the
@@ -42,12 +46,16 @@ function repoRoot(): string {
   );
 }
 
-/** Resolve a pack identifier ("mantine" / "shadcn" / "./design/")
- *  to an absolute pack directory.  `referenceDir` is the directory
- *  the .ddd source lives in — used to anchor relative custom-pack
- *  paths.  Built-in names resolve under `<repo>/designs/<name>`. */
+/** Built-in pack names — resolve under `<repo>/designs/<name>/`. */
+const BUILTIN_PACKS = new Set(["mantine", "shadcn", "mui", "ashPhoenix"]);
+
+/** Resolve a pack identifier ("mantine" / "shadcn" / "mui" /
+ *  "ashPhoenix" / "./design/") to an absolute pack directory.
+ *  `referenceDir` is the directory the .ddd source lives in — used
+ *  to anchor relative custom-pack paths.  Built-in names resolve
+ *  under `<repo>/designs/<name>`. */
 export function resolvePackDir(ui: string, referenceDir?: string): string {
-  if (ui === "mantine" || ui === "shadcn" || ui === "mui") {
+  if (BUILTIN_PACKS.has(ui)) {
     return path.join(repoRoot(), "designs", ui);
   }
   // Treat anything else as a path.  Absolute paths used as-is;
@@ -58,16 +66,18 @@ export function resolvePackDir(ui: string, referenceDir?: string): string {
 }
 
 /** Read every `.hbs` file in each of the repo-root shared-source
- *  directories (`vite/`, `api/`, `docker/`) and return them keyed by
- *  logical name (the filename minus `.hbs`).  Shared templates are
- *  pack-agnostic: the React generator's preparers refer to them by
- *  logical name (e.g. `dockerfile`, `index-html`) and they emit
- *  identically regardless of which design pack is active.  Missing
- *  directories are silently skipped — keeps the contract opt-in. */
-function readSharedSources(): Record<string, string> {
+ *  directories that match the pack's `format` (TSX packs read
+ *  `vite/`+`api/`+`docker/`; HEEx packs read `phoenix/`) and return
+ *  them keyed by logical name (the filename minus `.hbs`).  Shared
+ *  templates are pack-agnostic within their format: preparers refer
+ *  to them by logical name and they emit identically regardless of
+ *  which design pack of that format is active.  Missing directories
+ *  are silently skipped — keeps the contract opt-in. */
+function readSharedSources(format: "tsx" | "heex"): Record<string, string> {
   const root = repoRoot();
   const out: Record<string, string> = {};
-  for (const dirName of SHARED_SOURCE_DIRS) {
+  const dirs = format === "heex" ? SHARED_SOURCE_DIRS_HEEX : SHARED_SOURCE_DIRS_TSX;
+  for (const dirName of dirs) {
     const dir = path.join(root, dirName);
     if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) continue;
     for (const file of fs.readdirSync(dir)) {
@@ -75,7 +85,7 @@ function readSharedSources(): Record<string, string> {
       const logicalName = file.slice(0, -".hbs".length);
       if (out[logicalName] != null) {
         throw new Error(
-          `loader: duplicate shared template "${logicalName}" — defined under both \`${dirName}/\` and a sibling shared dir.  Logical names must be unique across vite/, api/, docker/.`,
+          `loader: duplicate shared template "${logicalName}" — defined under multiple shared dirs.  Logical names must be unique across the active format's shared directories.`,
         );
       }
       out[logicalName] = fs.readFileSync(path.join(dir, file), "utf-8");
@@ -112,7 +122,7 @@ export function loadPack(packDir: string): LoadedPack {
     }
     sources[logicalName] = fs.readFileSync(filePath, "utf-8");
   }
-  const sharedSources = readSharedSources();
+  const sharedSources = readSharedSources(manifest.format ?? "tsx");
   return compilePack(
     packDir,
     manifest,

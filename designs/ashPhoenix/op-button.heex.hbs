@@ -1,0 +1,5 @@
+<%!-- op-button: operation trigger button in the detail page header --%>
+<.button phx-click="open_modal" phx-value-op="{{name}}" data-testid="{{testId}}"
+         class={if "{{variant}}" == "filled" do "btn-primary" else "btn-secondary" end}>
+  {{humanName}}
+</.button>

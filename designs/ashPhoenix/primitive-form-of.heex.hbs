@@ -1,0 +1,7 @@
+<%!-- primitive-form-of --%>
+<.simple_form for={@form} phx-submit={@on_submit} phx-change={assigns[:on_change]}>
+  <%= @inner_content %>
+  <:actions>
+    <.button type="submit" phx-disable-with="Saving…"><%= assigns[:submit_label] || "Save" %></.button>
+  </:actions>
+</.simple_form>

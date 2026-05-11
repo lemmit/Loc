@@ -585,7 +585,34 @@ lowering time, lowered to typed router calls / notifications.
 
 ---
 
-## 16. See also
+## 16. LiveView lowering (`platform: phoenixLiveView`)
+
+A deployable that picks `platform: phoenixLiveView` consumes the same
+`ui { … }` source the React platform consumes — the metamodel is
+framework-neutral by design.  The generator (`src/generator/phoenix-live-view/`)
+lowers the IR onto Phoenix LiveView semantics.  Per-construct mapping:
+
+| Metamodel construct | LiveView lowering |
+|---|---|
+| `page X { route: "/path", body: … }` | `lib/<app>_web/live/<page_snake>_live.ex` — a `Phoenix.LiveView` module with `mount/3`, `handle_params/3`, `handle_event/3`, `render/1`. |
+| `state { step: int = 0, draft: T = {} }` | `socket.assigns.step` / `socket.assigns.draft`; `mount/3` initialises via `assign(socket, :step, …)`. |
+| `step := 1` (inside a lambda body) | `assign(socket, :step, 1)` inside the corresponding `handle_event/3` clause. |
+| `match { p1 => v1, … else => fallback }` | `cond do p1 -> v1; … true -> fallback end` (expressions); `<%= cond do … end %>` in HEEx templates. |
+| `requires <expr>` (page-level) | guard in `handle_params/3` that `push_navigate`s home with a `flash` on failure (v0 stub: bind only — full guard is a follow-up). |
+| `navigate(<Page>, {…})` (in a lambda) | `push_navigate(socket, to: ~p"/route?…")` with the target page's route + interpolated args. |
+| `Form(creates: T)` / `Form(into: state)` | `<.simple_form for={@form} phx-submit="save">` over `AshPhoenix.Form.for_create/3` (or a draft assign for wizard steps). |
+| Body of an aggregate-scaffolded page | `pack.render("page-list" | "page-new" | "page-detail", vm)` → HEEx inline in the LiveView's `render/1` — the same framework-neutral preparer VMs the React generator uses (`src/generator/react/templating/preparers/`). |
+| `import helper X from "path"` | Elixir `alias` / `import` directives at the LiveView module top (vs JS `import` in TSX). |
+| `Sales.Customer.create.mutate(args)` (api binding) | direct context call `<App>.Sales.create_customer!(args)` — no hook hoisting, since LiveView reads in `mount/3` / `handle_event/3`. |
+| Page object emission | unchanged — Playwright drives any rendered HTML, including LiveView, via the same testid-keyed page objects. |
+
+The framework-specific seams (state read/write, `match` lowering,
+api-call lowering, navigation, helper imports) live behind the
+`WalkerTarget` interface in `src/generator/_walker/target.ts`.  v0
+covers scaffold-driven pages end-to-end; pages with explicit `body:`
+expressions emit a TODO stub pending the HEEx walker.
+
+## 17. See also
 
 - [`examples/sales-ui.ddd`](../examples/sales-ui.ddd) — concrete example
   exercising every construct above.

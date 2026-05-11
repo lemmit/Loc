@@ -307,14 +307,15 @@ export class DddValidator {
     accept: ValidationAcceptor,
   ): void {
     // Slice 3 — page-metamodel UI binding rules (3, 4).
-    // Rule 3: only `react` and `static` platforms admit `ui:`.
+    // Rule 3: only platforms that mount a UI admit `ui:` — `react`,
+    //         `static`, and `phoenixLiveView` (fullstack Ash + Phoenix).
     // Rule 4: every `static` deployable must declare `ui:` (otherwise
     //         it has nothing to serve).
     const hasUiBinding = !!(d.uiSugar || d.uiCompose || d.uiBlock);
-    if (hasUiBinding && d.platform !== "react" && d.platform !== "static") {
+    if (hasUiBinding && !platformMountsUi(d.platform)) {
       accept(
         "error",
-        `'ui:' binding is only valid on 'platform: react' or 'platform: static' deployables (got '${d.platform}').`,
+        `'ui:' binding is only valid on platforms that mount a UI ('react', 'static', 'phoenixLiveView'); got '${d.platform}'.`,
         {
           node: d,
           property: d.uiSugar ? "uiSugar" : d.uiCompose ? "uiCompose" : "uiBlock",
@@ -328,17 +329,21 @@ export class DddValidator {
         { node: d, property: "name" },
       );
     }
-    // Rule 13: framework only `react` in v0.  The grammar enum
-    // restricts to `'react'` so this is structurally enforced; an
-    // explicit check here documents the intent and keeps a stable
-    // diagnostic message when more frameworks land.
+    // Rule 13: framework values must match the deployable's platform.
+    // `react`/`static` mount the `react` framework; `phoenixLiveView`
+    // mounts the `phoenixLiveView` framework.  The grammar enum admits
+    // both values; this rule rejects cross-pairing
+    // (e.g. `platform: react` + `framework: phoenixLiveView`).
     const framework = d.uiBlock?.framework;
-    if (framework && framework !== "react" && d.uiBlock) {
-      accept(
-        "error",
-        `Framework '${framework}' is not yet supported (v0 ships only 'react'). Drop the framework override or pick 'react'.`,
-        { node: d.uiBlock, property: "framework" },
-      );
+    if (framework && d.uiBlock) {
+      const expected = expectedFrameworkFor(d.platform);
+      if (expected && framework !== expected) {
+        accept(
+          "error",
+          `Framework '${framework}' does not match platform '${d.platform}' (expected '${expected}'). Drop the framework override or align it with the platform.`,
+          { node: d.uiBlock, property: "framework" },
+        );
+      }
     }
 
     // Existing rules — react/static both behave like frontends.
@@ -399,7 +404,7 @@ export class DddValidator {
     d: import("./generated/ast.js").Deployable,
     accept: ValidationAcceptor,
   ): void {
-    const isBackend = d.platform !== "react" && d.platform !== "static";
+    const isBackend = platformOwnsBackend(d.platform);
     for (const mb of d.moduleBindings ?? []) {
       const block = mb.storages ?? [];
       if (block.length === 0) continue; // bare-list form
@@ -444,7 +449,9 @@ export class DddValidator {
   }
 
   /** Slice 11.26 — `serves:` validations.
-   *    - Only valid on BACKEND platforms (dotnet, hono).
+   *    - Only valid on platforms that own a backend (dotnet, hono,
+   *      phoenixLiveView).  Frontend-only platforms (react, static)
+   *      have no api surface to serve.
    *    - Each api ref must resolve.
    *    - No duplicate api names within one deployable's serves list. */
   private checkDeployableServes(
@@ -452,10 +459,10 @@ export class DddValidator {
     accept: ValidationAcceptor,
   ): void {
     if (!d.serves || d.serves.length === 0) return;
-    if (d.platform === "react" || d.platform === "static") {
+    if (!platformOwnsBackend(d.platform)) {
       accept(
         "error",
-        `'serves:' is only valid on a backend deployable (dotnet, hono).  Got platform '${d.platform}'.`,
+        `'serves:' is only valid on a backend deployable (dotnet, hono, phoenixLiveView).  Got platform '${d.platform}'.`,
         { node: d, property: "serves" },
       );
       return;
@@ -1540,6 +1547,32 @@ function singular(selector: string): string {
 
 function pathString(lv: import("./generated/ast.js").LValue): string {
   return [lv.head, ...lv.tail].join(".");
+}
+
+// ---------------------------------------------------------------------------
+// Platform classification helpers.
+//
+// Single source of truth for "which platform admits a UI mount" and
+// "which platform owns a backend (databases, APIs, workflows)".  Used
+// across the deployable validator so adding a new platform requires
+// extending exactly these two predicates plus the `Platform` grammar
+// enum + the `Framework` enum.  Phase 2 will move these onto
+// `PlatformSurface` (`mountsUi: boolean`) so the validator consults
+// the platform registry rather than hardcoding the list.
+// ---------------------------------------------------------------------------
+
+function platformMountsUi(platform: string | undefined): boolean {
+  return platform === "react" || platform === "static" || platform === "phoenixLiveView";
+}
+
+function platformOwnsBackend(platform: string | undefined): boolean {
+  return platform === "dotnet" || platform === "hono" || platform === "phoenixLiveView";
+}
+
+function expectedFrameworkFor(platform: string | undefined): string | undefined {
+  if (platform === "react" || platform === "static") return "react";
+  if (platform === "phoenixLiveView") return "phoenixLiveView";
+  return undefined;
 }
 
 export function registerValidationChecks(services: DddServices): void {

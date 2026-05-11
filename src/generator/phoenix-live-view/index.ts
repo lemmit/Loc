@@ -1,0 +1,1035 @@
+import type {
+  BoundedContextIR,
+  DeployableIR,
+  SystemIR,
+} from "../../ir/loom-ir.js";
+import { pascal, snake, plural } from "../../util/naming.js";
+import { emitWorkflows } from "./workflow-emit.js";
+import { emitViews } from "./view-emit.js";
+import { emitMigrations } from "./migrations-emit.js";
+import {
+  buildFindActions,
+  findRepoFor,
+  mergeViewFindsForAgg,
+} from "./repository-emit.js";
+import { renderAshType, renderExpr } from "./render-expr.js";
+import { emitLiveViewPages, type LiveRoute } from "./liveview-emit.js";
+import { emitApiControllers, type ApiRoute } from "./api-emit.js";
+import { renderSidebarComponent } from "./sidebar-emit.js";
+import { renderThemeCss } from "./theme-emit.js";
+
+// ---------------------------------------------------------------------------
+// Phoenix LiveView / Ash generator orchestrator.
+//
+// `generatePhoenixLiveViewProject` is the single entry point called by
+// the platform's `emitProject`.  It mirrors dotnet/index.ts's shape:
+//
+//   - Iterates contexts, aggregates, workflows, views.
+//   - Calls per-emitter functions (workflow-emit, view-emit, etc.).
+//   - Emits Phoenix/Ash shell files: mix.exs, config/*, lib/<app>/*, etc.
+//
+// File layout:
+//   lib/<app>/<ctx>/<agg>.ex                  — Ash.Resource modules
+//   lib/<app>/<ctx>/workflows/<wf>.ex          — workflow modules
+//   lib/<app>/<ctx>/views/<view>.ex            — view query modules
+//   lib/<app>/<ctx>.ex                         — Ash.Domain per context
+//   lib/<app>/repo.ex                          — Ecto.Repo
+//   lib/<app>/application.ex                   — supervision tree
+//   lib/<app>_web.ex                           — __using__ macro
+//   lib/<app>_web/endpoint.ex                  — Phoenix.Endpoint
+//   lib/<app>_web/router.ex                    — minimal router scaffold
+//   lib/<app>_web/components/layouts.ex        — layout components
+//   lib/<app>_web/components/layouts/root.html.heex
+//   lib/<app>_web/components/layouts/app.html.heex
+//   config/config.exs, dev.exs, prod.exs, runtime.exs
+//   priv/repo/migrations/<ts>_create_<table>.exs
+//   priv/repo/seeds.exs
+//   rel/env.sh.eex, rel/overlays/bin/server
+//   mix.exs, .formatter.exs, Dockerfile, .dockerignore
+// ---------------------------------------------------------------------------
+
+export interface GeneratePhoenixLiveViewArgs {
+  contexts: BoundedContextIR[];
+  deployable: DeployableIR;
+  sys: SystemIR;
+}
+
+export function generatePhoenixLiveViewProject(
+  args: GeneratePhoenixLiveViewArgs,
+): Map<string, string> {
+  const { contexts, deployable, sys } = args;
+  const out = new Map<string, string>();
+
+  const appName = toSnakeApp(deployable.name);
+  const appModule = toModulePrefix(appName);
+
+  // --- Per-context domain files -------------------------------------------
+  for (const ctx of contexts) {
+    emitContext(appName, ctx, appModule, out);
+  }
+
+  // --- Workflow + view files -----------------------------------------------
+  for (const ctx of contexts) {
+    emitWorkflows(appName, ctx, appModule, out);
+    emitViews(appName, ctx, appModule, out);
+  }
+
+  // --- Migrations -----------------------------------------------------------
+  emitMigrations(appName, contexts, appModule, out);
+
+  // --- LiveView pages (Phase 7) --------------------------------------------
+  // Per PageIR in the deployable's `ui:` block: one
+  // lib/<app>_web/live/<page>_live.ex module + a router entry the
+  // shell renderer splices into router.ex.
+  const { files: liveFiles, routes: liveRoutes } = emitLiveViewPages({
+    contexts,
+    deployable,
+    sys,
+    appName,
+    appModule,
+  });
+  for (const [path, content] of liveFiles) out.set(path, content);
+
+  // --- API controllers (Batch A) -------------------------------------------
+  // Workflows / Views / Health controllers + their router entries.
+  // Workflows / Views are only emitted when `serves:` is populated;
+  // Health is always emitted (router references it unconditionally).
+  const { files: apiFiles, apiRoutes } = emitApiControllers({
+    contexts,
+    deployable,
+    sys,
+    appName,
+    appModule,
+  });
+  for (const [path, content] of apiFiles) out.set(path, content);
+
+  // --- Sidebar component (Batch C) -----------------------------------------
+  // Emitted when the deployable mounts a `ui:` — derived from
+  // MenuBlockIR or per-page menuMeta, identical structure to the
+  // React generator's sidebar.
+  if (deployable.uiName) {
+    const ui = sys.uis.find((u) => u.name === deployable.uiName);
+    if (ui) {
+      out.set(
+        `lib/${appName}_web/components/sidebar.ex`,
+        renderSidebarComponent({ ui, appName, appModule }),
+      );
+    }
+  }
+
+  // --- Theme CSS (Batch C) -------------------------------------------------
+  // System-level `theme { primary: ..., neutral: ..., radius: ... }`
+  // tokens lower to CSS custom properties consumable from any
+  // generated layout.  Always emit (empty theme produces a stub).
+  out.set(`priv/static/assets/theme.css`, renderThemeCss(sys.theme));
+
+  // --- Shell files ----------------------------------------------------------
+  emitShellFiles(appName, appModule, deployable, sys, liveRoutes, apiRoutes, out);
+
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Context emission — one Ash.Resource per aggregate + one Ash.Domain per ctx
+// ---------------------------------------------------------------------------
+
+function emitContext(
+  appName: string,
+  ctx: BoundedContextIR,
+  appModule: string,
+  out: Map<string, string>,
+): void {
+  const ctxSnake = snake(ctx.name);
+  const contextModule = `${appModule}.${pascal(ctx.name)}`;
+
+  // Enums — Ash enum types
+  for (const en of ctx.enums) {
+    const path = `lib/${appName}/${ctxSnake}/${snake(en.name)}.ex`;
+    out.set(path, renderEnumModule(en, contextModule));
+  }
+
+  // Value objects — Ash embedded resources
+  for (const vo of ctx.valueObjects) {
+    const path = `lib/${appName}/${ctxSnake}/${snake(vo.name)}.ex`;
+    out.set(path, renderValueObjectModule(vo, contextModule));
+  }
+
+  // Events
+  for (const ev of ctx.events) {
+    const path = `lib/${appName}/${ctxSnake}/events/${snake(ev.name)}.ex`;
+    out.set(path, renderEventModule(ev, contextModule));
+  }
+
+  // Aggregates — Ash.Resource modules
+  const allResources: string[] = [];
+  for (const agg of ctx.aggregates) {
+    const path = `lib/${appName}/${ctxSnake}/${snake(agg.name)}.ex`;
+    const repo = findRepoFor(ctx, agg.name);
+    const repoWithViews = mergeViewFindsForAgg(agg, repo, ctx);
+    const customFinds = repoWithViews
+      ? buildFindActions(repoWithViews, agg, contextModule)
+      : [];
+    out.set(path, renderAggregateModule(agg, ctx, contextModule, customFinds));
+    allResources.push(`${contextModule}.${pascal(agg.name)}`);
+
+    // Part resources (child entity tables)
+    for (const part of agg.parts) {
+      const partPath = `lib/${appName}/${ctxSnake}/${snake(part.name)}.ex`;
+      out.set(partPath, renderPartModule(part, agg, contextModule));
+      allResources.push(`${contextModule}.${pascal(part.name)}`);
+    }
+  }
+
+  // Domain module per context
+  const domainPath = `lib/${appName}/${ctxSnake}.ex`;
+  out.set(domainPath, renderDomainModule(ctx, contextModule, allResources));
+}
+
+// ---------------------------------------------------------------------------
+// Ash.Resource rendering (aggregate)
+// ---------------------------------------------------------------------------
+
+function renderAggregateModule(
+  agg: import("../../ir/loom-ir.js").AggregateIR,
+  _ctx: BoundedContextIR,
+  contextModule: string,
+  customFinds: string[],
+): string {
+  const moduleName = `${contextModule}.${pascal(agg.name)}`;
+  const tableName = plural(snake(agg.name));
+  const idType = idAshType(agg.idValueType);
+
+  // Attributes
+  const attrLines = agg.fields.map((f) => {
+    const ashType = renderAshType(f.type, contextModule);
+    const opts = f.optional ? "allow_nil?: true" : "allow_nil?: false";
+    return `    attribute :${snake(f.name)}, ${ashType}, ${opts}`;
+  });
+
+  // Relationships (containments)
+  const relLines = agg.contains.map((c) => {
+    const partModule = `${contextModule}.${pascal(c.partName)}`;
+    if (c.collection) {
+      return `    has_many :${snake(c.name)}, ${partModule}`;
+    }
+    return `    has_one :${snake(c.name)}, ${partModule}`;
+  });
+
+  // Calculations (derived fields)
+  const calcLines = agg.derived.map((d) => {
+    const ashType = renderAshType(d.type, contextModule);
+    return `    calculate :${snake(d.name)}, ${ashType}, expr(${renderAshExprInline(d.expr, contextModule)})`;
+  });
+
+  // Validations (invariants)
+  const validationLines = agg.invariants.map((inv) => {
+    const exprStr = renderAshExprInline(inv.expr, contextModule);
+    if (inv.guard) {
+      const guardStr = renderAshExprInline(inv.guard, contextModule);
+      return `    validate attribute_does_not_equal(:_placeholder, nil) do\n      where [${exprStr}]\n      message "Invariant: ${inv.source.replace(/"/g, "'")}"\n    end`;
+    }
+    void exprStr;
+    return `    # invariant: ${inv.source}`;
+  });
+
+  // Actions — defaults + custom finds
+  const defaultActions = `    defaults [:read, :create, :update, :destroy]`;
+  const customActionBlock = customFinds.length > 0
+    ? "\n" + customFinds.join("\n\n")
+    : "";
+
+  return `# Auto-generated.
+defmodule ${moduleName} do
+  use Ash.Resource,
+    otp_app: :${snake(contextModule.split(".")[0] ?? "app")},
+    domain: ${contextModule},
+    data_layer: AshPostgres.DataLayer
+
+  postgres do
+    table "${tableName}"
+    repo ${contextModule.split(".")[0]}.Repo
+  end
+
+  attributes do
+    uuid_primary_key :id
+${attrLines.join("\n")}
+  end
+${relLines.length > 0 ? "\n  relationships do\n" + relLines.join("\n") + "\n  end\n" : ""}${calcLines.length > 0 ? "\n  calculations do\n" + calcLines.join("\n") + "\n  end\n" : ""}${validationLines.length > 0 ? "\n  validations do\n" + validationLines.join("\n") + "\n  end\n" : ""}
+  actions do
+${defaultActions}${customActionBlock}
+  end
+end
+`;
+}
+
+// ---------------------------------------------------------------------------
+// Ash.Resource rendering (entity part / child)
+// ---------------------------------------------------------------------------
+
+function renderPartModule(
+  part: import("../../ir/loom-ir.js").EntityPartIR,
+  parentAgg: import("../../ir/loom-ir.js").AggregateIR,
+  contextModule: string,
+): string {
+  const moduleName = `${contextModule}.${pascal(part.name)}`;
+  const tableName = plural(snake(part.name));
+  const parentModule = `${contextModule}.${pascal(parentAgg.name)}`;
+
+  const attrLines = part.fields.map((f) => {
+    const ashType = renderAshType(f.type, contextModule);
+    const opts = f.optional ? "allow_nil?: true" : "allow_nil?: false";
+    return `    attribute :${snake(f.name)}, ${ashType}, ${opts}`;
+  });
+
+  return `# Auto-generated.
+defmodule ${moduleName} do
+  use Ash.Resource,
+    otp_app: :${snake(contextModule.split(".")[0] ?? "app")},
+    domain: ${contextModule},
+    data_layer: AshPostgres.DataLayer
+
+  postgres do
+    table "${tableName}"
+    repo ${contextModule.split(".")[0]}.Repo
+  end
+
+  attributes do
+    uuid_primary_key :id
+${attrLines.join("\n")}
+  end
+
+  relationships do
+    belongs_to :${snake(parentAgg.name)}, ${parentModule}, allow_nil?: false
+  end
+
+  actions do
+    defaults [:read, :create, :update, :destroy]
+  end
+end
+`;
+}
+
+// ---------------------------------------------------------------------------
+// Enum module
+// ---------------------------------------------------------------------------
+
+function renderEnumModule(
+  en: import("../../ir/loom-ir.js").EnumIR,
+  contextModule: string,
+): string {
+  const moduleName = `${contextModule}.${pascal(en.name)}`;
+  const values = en.values.map((v) => `  :${snake(v)}`).join(",\n");
+  return `# Auto-generated.
+defmodule ${moduleName} do
+  use Ash.Type.Enum, values: [
+${values}
+  ]
+end
+`;
+}
+
+// ---------------------------------------------------------------------------
+// Value object module (embedded Ash.Resource)
+// ---------------------------------------------------------------------------
+
+function renderValueObjectModule(
+  vo: import("../../ir/loom-ir.js").ValueObjectIR,
+  contextModule: string,
+): string {
+  const moduleName = `${contextModule}.${pascal(vo.name)}`;
+  const attrLines = vo.fields.map((f) => {
+    const ashType = renderAshType(f.type, contextModule);
+    const opts = f.optional ? "allow_nil?: true" : "allow_nil?: false";
+    return `    attribute :${snake(f.name)}, ${ashType}, ${opts}`;
+  });
+
+  return `# Auto-generated.
+defmodule ${moduleName} do
+  use Ash.Resource, data_layer: :embedded
+
+  attributes do
+${attrLines.join("\n")}
+  end
+end
+`;
+}
+
+// ---------------------------------------------------------------------------
+// Event module
+// ---------------------------------------------------------------------------
+
+function renderEventModule(
+  ev: import("../../ir/loom-ir.js").EventIR,
+  contextModule: string,
+): string {
+  const moduleName = `${contextModule}.Events.${pascal(ev.name)}`;
+  void renderAshType; // used in sibling fns
+  return `# Auto-generated.
+defmodule ${moduleName} do
+  @moduledoc "Domain event: ${pascal(ev.name)}"
+
+  defstruct ${ev.fields.map((f) => `:${snake(f.name)}`).join(", ")}
+  @type t :: %__MODULE__{
+${ev.fields.map((f) => `    ${snake(f.name)}: term()`).join(",\n")}
+  }
+end
+`;
+}
+
+// ---------------------------------------------------------------------------
+// Ash.Domain rendering (per context)
+// ---------------------------------------------------------------------------
+
+function renderDomainModule(
+  ctx: BoundedContextIR,
+  contextModule: string,
+  resources: string[],
+): string {
+  const resourceLines = resources
+    .map((r) => `    resource ${r}`)
+    .join("\n");
+
+  // Code interface entries for each aggregate
+  const codeInterfaceEntries: string[] = [];
+  for (const agg of ctx.aggregates) {
+    const aggModule = `${contextModule}.${pascal(agg.name)}`;
+    // Standard CRUD code interface
+    codeInterfaceEntries.push(
+      `    define_for ${aggModule}`,
+      `    define :create_${snake(agg.name)}, action: :create`,
+      `    define :read_${snake(agg.name)}, action: :read`,
+      `    define :get_${snake(agg.name)}, action: :read, get_by: :id`,
+      `    define :update_${snake(agg.name)}, action: :update`,
+      `    define :destroy_${snake(agg.name)}, action: :destroy`,
+    );
+    // Custom find actions from the repository
+    const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
+    if (repo) {
+      for (const find of repo.finds) {
+        codeInterfaceEntries.push(
+          `    define :${snake(find.name)}_${snake(agg.name)}, action: :${snake(find.name)}`,
+        );
+      }
+    }
+  }
+
+  return `# Auto-generated.
+defmodule ${contextModule} do
+  use Ash.Domain
+
+  resources do
+${resourceLines}
+  end
+
+  code_interface do
+${codeInterfaceEntries.join("\n")}
+  end
+end
+`;
+}
+
+// ---------------------------------------------------------------------------
+// Inline Elixir expression rendering (for Ash expr/filter contexts)
+// Delegates to the Phase 3A render-expr module.
+// ---------------------------------------------------------------------------
+
+function renderAshExprInline(
+  expr: import("../../ir/loom-ir.js").ExprIR,
+  contextModule: string,
+): string {
+  return renderExpr(expr, { thisName: "record", contextModule });
+}
+
+// ---------------------------------------------------------------------------
+// Shell files — Phoenix boilerplate
+// ---------------------------------------------------------------------------
+
+function emitShellFiles(
+  appName: string,
+  appModule: string,
+  deployable: DeployableIR,
+  _sys: SystemIR,
+  liveRoutes: LiveRoute[],
+  apiRoutes: ApiRoute[],
+  out: Map<string, string>,
+): void {
+  const port = deployable.port ?? 4000;
+
+  out.set("mix.exs", renderMixExs(appName, appModule));
+  out.set(".formatter.exs", renderFormatterExs());
+  out.set("Dockerfile", renderDockerfile(appName));
+  out.set(".dockerignore", renderDockerignore());
+
+  // lib/<app>/repo.ex
+  out.set(`lib/${appName}/repo.ex`, renderRepo(appName, appModule));
+
+  // lib/<app>/application.ex
+  out.set(`lib/${appName}/application.ex`, renderApplication(appName, appModule));
+
+  // lib/<app>_web.ex
+  out.set(`lib/${appName}_web.ex`, renderWebModule(appName, appModule));
+
+  // lib/<app>_web/endpoint.ex
+  out.set(`lib/${appName}_web/endpoint.ex`, renderEndpoint(appName, appModule));
+
+  // lib/<app>_web/router.ex
+  out.set(
+    `lib/${appName}_web/router.ex`,
+    renderRouter(appName, appModule, liveRoutes, apiRoutes),
+  );
+
+  // lib/<app>_web/components/layouts.ex
+  out.set(`lib/${appName}_web/components/layouts.ex`, renderLayouts(appName, appModule));
+
+  // lib/<app>_web/components/layouts/root.html.heex
+  out.set(`lib/${appName}_web/components/layouts/root.html.heex`, renderRootLayout(appName));
+
+  // lib/<app>_web/components/layouts/app.html.heex
+  out.set(`lib/${appName}_web/components/layouts/app.html.heex`, renderAppLayout());
+
+  // Config
+  out.set("config/config.exs", renderConfigExs(appName, appModule));
+  out.set("config/dev.exs", renderDevExs(appName, appModule, port));
+  out.set("config/prod.exs", renderProdExs(appName, appModule));
+  out.set("config/runtime.exs", renderRuntimeExs(appName, appModule));
+
+  // Priv
+  out.set("priv/repo/seeds.exs", `# Auto-generated — empty seeds stub.\n`);
+
+  // Release
+  out.set("rel/env.sh.eex", renderRelEnv(appName));
+  out.set("rel/overlays/bin/server", renderRelServer(appName));
+}
+
+// ---------------------------------------------------------------------------
+// Individual shell file renderers
+// ---------------------------------------------------------------------------
+
+function renderMixExs(appName: string, appModule: string): string {
+  return `# Auto-generated.
+defmodule ${appModule}.MixProject do
+  use Mix.Project
+
+  def project do
+    [
+      app: :${appName},
+      version: "0.1.0",
+      elixir: "~> 1.16",
+      elixirc_paths: elixirc_paths(Mix.env()),
+      start_permanent: Mix.env() == :prod,
+      aliases: aliases(),
+      deps: deps()
+    ]
+  end
+
+  def application do
+    [
+      mod: {${appModule}.Application, []},
+      extra_applications: [:logger, :runtime_tools]
+    ]
+  end
+
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
+
+  defp deps do
+    [
+      {:phoenix, "~> 1.7"},
+      {:phoenix_live_view, "~> 1.0"},
+      {:phoenix_html, "~> 4.1"},
+      {:phoenix_ecto, "~> 4.4"},
+      {:ecto_sql, "~> 3.10"},
+      {:postgrex, ">= 0.0.0"},
+      {:ash, "~> 3.0"},
+      {:ash_postgres, "~> 2.0"},
+      {:ash_phoenix, "~> 2.0"},
+      {:jason, "~> 1.2"},
+      {:bandit, "~> 1.5"},
+      {:plug_cowboy, "~> 2.5"}
+    ]
+  end
+
+  defp aliases do
+    [
+      setup: ["deps.get", "ash.setup"],
+      "ecto.setup": ["ecto.create", "ash.codegen", "ash.migrate"],
+      "ecto.reset": ["ecto.drop", "ecto.setup"]
+    ]
+  end
+end
+`;
+}
+
+function renderFormatterExs(): string {
+  return `[
+  import_deps: [:ecto, :ecto_sql, :phoenix, :ash, :ash_postgres, :ash_phoenix],
+  subdirectories: ["priv/*/migrations"],
+  plugins: [Phoenix.LiveView.HTMLFormatter],
+  inputs: ["*.{heex,ex,exs}", "{config,lib,test}/**/*.{heex,ex,exs}", "priv/*/seeds.exs"]
+]
+`;
+}
+
+function renderDockerfile(appName: string): string {
+  return `# syntax=docker/dockerfile:1
+# Auto-generated.
+
+ARG ELIXIR_VERSION=1.17.2
+ARG OTP_VERSION=27.0.1
+ARG DEBIAN_VERSION=bookworm-20240722-slim
+
+ARG BUILDER_IMAGE="hexpm/elixir:\${ELIXIR_VERSION}-erlang-\${OTP_VERSION}-debian-\${DEBIAN_VERSION}"
+ARG RUNNER_IMAGE="debian:\${DEBIAN_VERSION}"
+
+FROM \${BUILDER_IMAGE} AS build
+RUN apt-get update -y && apt-get install -y build-essential git \\
+    && apt-get clean && rm -f /var/lib/apt/lists/*_*
+WORKDIR /app
+RUN mix local.hex --force && mix local.rebar --force
+ENV MIX_ENV="prod"
+COPY mix.exs mix.lock ./
+RUN mix deps.get --only $MIX_ENV
+RUN mkdir config
+COPY config/config.exs config/$MIX_ENV.exs config/
+RUN mix deps.compile
+COPY priv priv
+COPY lib lib
+RUN mix compile
+COPY config/runtime.exs config/
+COPY rel rel
+RUN mix release
+
+FROM \${RUNNER_IMAGE}
+RUN apt-get update -y \\
+    && apt-get install -y libstdc++6 openssl libncurses5 locales ca-certificates \\
+    && apt-get clean && rm -f /var/lib/apt/lists/*_*
+RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
+ENV LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8
+WORKDIR /app
+RUN chown nobody /app
+ENV MIX_ENV="prod"
+COPY --from=build --chown=nobody:root /app/_build/\${MIX_ENV}/rel/${appName} ./
+USER nobody
+CMD ["/app/bin/server"]
+`;
+}
+
+function renderDockerignore(): string {
+  return `# Auto-generated.
+_build
+deps
+.elixir_ls
+.fetch
+priv/static/assets
+.git
+.env
+.env.*
+*.log
+`;
+}
+
+function renderRepo(appName: string, appModule: string): string {
+  return `# Auto-generated.
+defmodule ${appModule}.Repo do
+  use AshPostgres.Repo, otp_app: :${appName}
+
+  def installed_extensions do
+    ["uuid-ossp", "citext"]
+  end
+end
+`;
+}
+
+function renderApplication(appName: string, appModule: string): string {
+  return `# Auto-generated.
+defmodule ${appModule}.Application do
+  use Application
+
+  @impl true
+  def start(_type, _args) do
+    children = [
+      ${appModule}.Repo,
+      {Phoenix.PubSub, name: ${appModule}.PubSub},
+      ${appModule}Web.Endpoint
+    ]
+
+    opts = [strategy: :one_for_one, name: ${appModule}.Supervisor]
+    Supervisor.start_link(children, opts)
+  end
+
+  @impl true
+  def config_change(changed, _new, removed) do
+    ${appModule}Web.Endpoint.config_change(changed, removed)
+    :ok
+  end
+end
+`;
+}
+
+function renderWebModule(appName: string, appModule: string): string {
+  const webModule = `${appModule}Web`;
+  return `# Auto-generated.
+defmodule ${webModule} do
+  @moduledoc """
+  The entrypoint for defining web interface, such as controllers, components,
+  channels, and so on.  This can be used in your application as:
+
+      use ${webModule}, :live_view
+
+  """
+
+  def live_view do
+    quote do
+      use Phoenix.LiveView, layout: {${webModule}.Layouts, :app}
+      unquote(html_helpers())
+    end
+  end
+
+  def live_component do
+    quote do
+      use Phoenix.LiveComponent
+      unquote(html_helpers())
+    end
+  end
+
+  def router do
+    quote do
+      use Phoenix.Router, helpers: false
+      import Plug.Conn
+      import Phoenix.Controller
+      import Phoenix.LiveView.Router
+    end
+  end
+
+  def channel do
+    quote do
+      use Phoenix.Channel
+    end
+  end
+
+  def component do
+    quote do
+      use Phoenix.Component
+      unquote(html_helpers())
+    end
+  end
+
+  defp html_helpers do
+    quote do
+      use Phoenix.HTML
+      import Phoenix.LiveView.Helpers
+      import ${webModule}.CoreComponents
+      alias Phoenix.LiveView.JS
+    end
+  end
+
+  defmacro __using__(which) when is_atom(which) do
+    apply(__MODULE__, which, [])
+  end
+end
+`;
+}
+
+function renderEndpoint(appName: string, appModule: string): string {
+  const webModule = `${appModule}Web`;
+  return `# Auto-generated.
+defmodule ${webModule}.Endpoint do
+  use Phoenix.Endpoint, otp_app: :${appName}
+
+  @session_options [
+    store: :cookie,
+    key: "_${appName}_key",
+    signing_salt: "loom-generated",
+    same_site: "Lax"
+  ]
+
+  socket "/live", Phoenix.LiveView.Socket, websocket: [connect_info: [session: @session_options]]
+
+  plug Plug.Static,
+    at: "/",
+    from: :${appName},
+    gzip: false,
+    only: ~w(assets fonts images favicon.ico robots.txt)
+
+  if code_reloading? do
+    plug Phoenix.CodeReloader
+    plug Phoenix.Ecto.CheckRepoStatus, otp_app: :${appName}
+  end
+
+  plug Plug.RequestId
+  plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
+
+  plug Plug.Parsers,
+    parsers: [:urlencoded, :multipart, :json],
+    pass: ["*/*"],
+    json_decoder: Phoenix.json_library()
+
+  plug Plug.MethodOverride
+  plug Plug.Head
+  plug Plug.Session, @session_options
+  plug ${webModule}.Router
+end
+`;
+}
+
+function renderRouter(
+  appName: string,
+  appModule: string,
+  liveRoutes: LiveRoute[],
+  apiRoutes: ApiRoute[],
+): string {
+  void appName;
+  const webModule = `${appModule}Web`;
+  // LiveView page entries — strip the leading `<webModule>.` because
+  // they're inside a `scope "/", <webModule>` block.
+  const liveLines = liveRoutes
+    .map((r) => {
+      const local = r.liveModule.startsWith(`${webModule}.`)
+        ? r.liveModule.slice(webModule.length + 1)
+        : r.liveModule;
+      return `    live ${JSON.stringify(r.route)}, ${local}`;
+    })
+    .join("\n");
+  const liveBody = liveLines || `    # No pages declared in this deployable's ui: block.`;
+
+  // API routes — Batch A's emitApiControllers returns:
+  //   - paths prefixed with `!root:` → outside `/api` scope (health / ready)
+  //   - bare paths → inside `scope "/api"`
+  const rootApiRoutes = apiRoutes.filter((r) => r.path.startsWith("!root:"));
+  const scopedApiRoutes = apiRoutes.filter((r) => !r.path.startsWith("!root:"));
+  const scopedLines = scopedApiRoutes
+    .map(
+      (r) =>
+        `    ${r.method} ${JSON.stringify(r.path)}, ${r.controller}, ${r.action}`,
+    )
+    .join("\n");
+  const scopedBody = scopedLines || `    # No API routes — backend has no workflows / views or 'serves:' is empty.`;
+  const rootLines = rootApiRoutes
+    .map((r) => {
+      const path = r.path.slice("!root:".length);
+      return `  ${r.method} ${JSON.stringify(path)}, ${webModule}.${r.controller}, ${r.action}`;
+    })
+    .join("\n");
+
+  return `# Auto-generated.
+defmodule ${webModule}.Router do
+  use ${webModule}, :router
+
+  pipeline :browser do
+    plug :accepts, ["html"]
+    plug :fetch_session
+    plug :fetch_live_flash
+    plug :put_root_layout, html: {${webModule}.Layouts, :root}
+    plug :protect_from_forgery
+    plug :put_secure_browser_headers
+  end
+
+  pipeline :api do
+    plug :accepts, ["json"]
+  end
+
+  scope "/", ${webModule} do
+    pipe_through :browser
+
+${liveBody}
+  end
+
+  scope "/api", ${webModule} do
+    pipe_through :api
+
+${scopedBody}
+  end
+
+${rootLines}
+end
+`;
+}
+
+function renderLayouts(appName: string, appModule: string): string {
+  const webModule = `${appModule}Web`;
+  return `# Auto-generated.
+defmodule ${webModule}.Layouts do
+  use ${webModule}, :html
+
+  embed_templates "layouts/*"
+end
+`;
+}
+
+function renderRootLayout(appName: string): string {
+  return `<!DOCTYPE html>
+<html lang="en" class="[scrollbar-gutter:stable]">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="csrf-token" content={get_csrf_token()} />
+    <.live_title suffix=" · ${appName}">
+      <%= assigns[:page_title] || "${appName}" %>
+    </.live_title>
+    <link phx-track-static rel="stylesheet" href={~p"/assets/app.css"} />
+    <script defer phx-track-static type="text/javascript" src={~p"/assets/app.js"}>
+    </script>
+  </head>
+  <body class="bg-white antialiased">
+    <%= @inner_content %>
+  </body>
+</html>
+`;
+}
+
+function renderAppLayout(): string {
+  return `<header class="px-4 sm:px-6 lg:px-8">
+  <div class="flex items-center justify-between border-b border-zinc-100 py-3 text-sm">
+    <div class="flex items-center gap-4">
+      <nav class="flex items-center gap-4 font-semibold leading-6 text-zinc-900">
+        <a href="/">Home</a>
+      </nav>
+    </div>
+  </div>
+</header>
+<main class="px-4 py-20 sm:px-6 lg:px-8">
+  <div class="mx-auto max-w-2xl">
+    <.flash_group flash={@flash} />
+    <%= @inner_content %>
+  </div>
+</main>
+`;
+}
+
+function renderConfigExs(appName: string, appModule: string): string {
+  return `# Auto-generated.
+import Config
+
+config :${appName}, ecto_repos: [${appModule}.Repo]
+config :${appName}, ${appModule}Web.Endpoint, url: [host: "localhost"]
+
+config :${appName},
+  ash_domains: [
+    # Phase 3 populates this list; domains are registered per context.
+  ]
+
+config :phoenix, :json_library, Jason
+
+import_config "\#{config_env()}.exs"
+`;
+}
+
+function renderDevExs(appName: string, appModule: string, port: number): string {
+  return `# Auto-generated.
+import Config
+
+config :${appName}, ${appModule}.Repo,
+  username: "postgres",
+  password: "postgres",
+  hostname: "localhost",
+  database: "${appName}_dev",
+  stacktrace: true,
+  show_sensitive_data_on_connection_error: true,
+  pool_size: 10
+
+config :${appName}, ${appModule}Web.Endpoint,
+  http: [ip: {127, 0, 0, 1}, port: ${port}],
+  check_origin: false,
+  code_reloader: true,
+  debug_errors: true,
+  secret_key_base: "dev-secret-key-base-replace-in-production-with-mix-phx-gen-secret",
+  watchers: []
+
+config :logger, :console, format: "[$level] $message\\n"
+config :phoenix, :stacktrace_depth, 20
+config :phoenix, :plug_init_mode, :runtime
+config :phoenix_live_view, :debug_heex_annotations, true
+`;
+}
+
+function renderProdExs(appName: string, appModule: string): string {
+  return `# Auto-generated.
+import Config
+
+config :${appName}, ${appModule}Web.Endpoint,
+  cache_static_manifest: "priv/static/cache_manifest.json",
+  server: true
+
+config :logger, level: :info
+config :runtime_tools
+`;
+}
+
+function renderRuntimeExs(appName: string, appModule: string): string {
+  return `# Auto-generated.
+import Config
+
+if config_env() == :prod do
+  database_url = System.fetch_env!("DATABASE_URL")
+  config :${appName}, ${appModule}.Repo,
+    url: database_url,
+    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10")
+
+  secret_key_base = System.fetch_env!("SECRET_KEY_BASE")
+  host = System.get_env("PHX_HOST") || "example.com"
+  port = String.to_integer(System.get_env("PORT") || "4000")
+
+  config :${appName}, ${appModule}Web.Endpoint,
+    url: [host: host, port: 443, scheme: "https"],
+    http: [ip: {0, 0, 0, 0, 0, 0, 0, 0}, port: port],
+    secret_key_base: secret_key_base
+
+  config :${appName}, ${appModule}.Repo,
+    ssl: true,
+    ssl_opts: [verify: :verify_none]
+end
+`;
+}
+
+function renderRelEnv(appName: string): string {
+  return `#!/bin/sh
+# Auto-generated.
+
+# Elixir release env — set env vars that differ between environments.
+# Variables here override config/runtime.exs values.
+
+# Uncomment to use a custom release name:
+# export RELEASE_NAME="${appName}"
+`;
+}
+
+function renderRelServer(appName: string): string {
+  return `#!/bin/sh
+# Auto-generated.
+set -euo pipefail
+
+exec "./${appName}/bin/${appName}" start
+`;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function toSnakeApp(name: string): string {
+  return name
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/[^a-zA-Z0-9_]+/g, "_")
+    .toLowerCase();
+}
+
+function toModulePrefix(snakeName: string): string {
+  return snakeName
+    .split("_")
+    .filter(Boolean)
+    .map((s) => s[0]!.toUpperCase() + s.slice(1))
+    .join("");
+}
+
+function idAshType(idValueType: string): string {
+  switch (idValueType) {
+    case "int": return ":integer";
+    case "long": return ":integer";
+    case "string": return ":string";
+    default: return ":uuid";
+  }
+}
+
+// suppress unused warning — used in inline require above
+void plural;
+void idAshType;

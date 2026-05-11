@@ -158,24 +158,28 @@ UiBlockBinding:
         ('framework' ':' framework=Framework ','?)?
     '}';
 
-// React is the only framework wired up in v0.  Future values
-// (`blazor-wasm`, `blazor-server`, `liveview`, …) extend this enum
-// when their respective codegen backends land.
+// Frameworks the `ui:` mount lowers against.  `react` renders TSX
+// against a design pack (`mantine`/`shadcn`); `phoenixLiveView`
+// renders HEEx against the `ashPhoenix` pack as part of a fullstack
+// Elixir/Ash deployable.  Future values (`blazor-wasm`,
+// `blazor-server`, …) extend this enum when their codegen backends
+// land.
 Framework returns string:
-    'react';
+    'react' | 'phoenixLiveView';
 
 Platform returns string:
-    'dotnet' | 'hono' | 'react' | 'static';
+    'dotnet' | 'hono' | 'react' | 'static' | 'phoenixLiveView';
 
-// React design-system pack selector — picks the template pack the
-// frontend generator renders pages against.  `mantine` (default),
-// `shadcn`, and `mui` are built-in packs shipped with Loom.  STRING
-// points at a custom pack: a directory with `pack.json` resolved
-// relative to the .ddd file.  Only meaningful when `platform: react`;
-// ignored for other platforms.  Named `design` (not `ui`) to avoid
-// colliding with the test-DSL's `ui.workflows.X(...)` accessor.
+// Design-system pack selector — picks the template pack the UI
+// generator renders pages against.  `mantine` (default), `shadcn`,
+// and `mui` are React/TSX packs; `ashPhoenix` is the HEEx pack for
+// the Phoenix LiveView platform.  STRING points at a custom pack:
+// a directory with `pack.json` resolved relative to the .ddd file.
+// Only meaningful when the deployable mounts a UI; ignored
+// otherwise.  Named `design` (not `ui`) to avoid colliding with
+// the test-DSL's `ui.workflows.X(...)` accessor.
 DesignPack returns string:
-    'mantine' | 'shadcn' | 'mui' | STRING;
+    'mantine' | 'shadcn' | 'mui' | 'ashPhoenix' | STRING;
 
 // Per-deployable auth opt-in.  `required` enables JWT-decode middleware
 // and the user-supplied verifier hook.  Absence keeps the deployable

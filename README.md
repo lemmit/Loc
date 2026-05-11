@@ -3,7 +3,7 @@
 A high-descriptive, Langium-based DSL for **Domain-Driven Design**.
 Write your aggregates, value objects, invariants, and operations in
 `.ddd` sources; mechanically generate idiomatic, runnable projects in
-three platforms wired together as one `docker compose` stack:
+several platforms wired together as one `docker compose` stack:
 
 - **TypeScript backend** — Hono (HTTP) + Drizzle ORM + Zod (with OpenAPI
   via `@hono/zod-openapi`)
@@ -11,6 +11,10 @@ three platforms wired together as one `docker compose` stack:
   + Swashbuckle (OpenAPI)
 - **React frontend** — Vite + React Router + React Query + Zod + Mantine
   + Playwright page objects per aggregate
+- **Phoenix LiveView (fullstack)** — Elixir + Ash + AshPostgres +
+  AshPhoenix.LiveView in a single deployable that both serves an
+  Ash-derived API (`serves:`) and mounts a `ui:` (HEEx via the
+  `ashPhoenix` design pack)
 
 The pipeline is fully type-safe end-to-end and DDD-faithful by construction:
 

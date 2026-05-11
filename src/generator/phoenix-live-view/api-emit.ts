@@ -1,0 +1,327 @@
+import type {
+  BoundedContextIR,
+  DeployableIR,
+  SystemIR,
+} from "../../ir/loom-ir.js";
+import { pascal, snake } from "../../util/naming.js";
+
+// ---------------------------------------------------------------------------
+// API controller emission for Phoenix LiveView / Ash.
+//
+// Emits three controller files (when applicable) and a companion route list
+// that the orchestrator (index.ts) can splice into router.ex:
+//
+//   lib/<app>_web/controllers/workflows_controller.ex
+//     — one action per workflow; delegates to <App>.<Ctx>.Workflows.<Wf>.run/1
+//
+//   lib/<app>_web/controllers/views_controller.ex
+//     — one action per view; delegates to <App>.<Ctx>.Views.<View>.run/1
+//
+//   lib/<app>_web/controllers/health_controller.ex
+//     — ALWAYS emitted; two actions:
+//       liveness/2  → GET /health  (cheap, no DB)
+//       readiness/2 → GET /ready   (Ecto ping)
+//
+// Route injection convention
+// --------------------------
+// The `apiRoutes` array returned here carries routes that land INSIDE the
+// `scope "/api"` block.  Routes whose path starts with the sentinel prefix
+// `!root:` (e.g. `!root:/health`) are OUTSIDE the api scope; the orchestrator
+// must strip the prefix and place them at the router's root level.
+//
+// Concretely:
+//   apiRoutes entries with path "/workflows/…" or "/views/…"
+//     → splice as `post|get "<path>", WorkflowsController|ViewsController, :<action>`
+//       inside `scope "/api", …Web do … end`
+//   apiRoutes entries with path "!root:/health" or "!root:/ready"
+//     → strip "!root:" prefix; emit as bare `get "/health", HealthController, :liveness`
+//       at the router's top level (outside any scope block).
+// ---------------------------------------------------------------------------
+
+export interface ApiEmitArgs {
+  contexts: BoundedContextIR[];
+  deployable: DeployableIR;
+  sys: SystemIR;
+  /** snake_case application name, e.g. "phoenix_app" */
+  appName: string;
+  /** PascalCase module prefix, e.g. "PhoenixApp" */
+  appModule: string;
+}
+
+export interface ApiRoute {
+  method: "get" | "post" | "put" | "delete";
+  /**
+   * Path inside `scope "/api"` — e.g. "/workflows/place_order".
+   * Paths that start with `!root:` (e.g. `!root:/health`) are outside
+   * the api scope; the orchestrator strips the prefix and splices them
+   * at router root level.
+   */
+  path: string;
+  /**
+   * Controller module local name (without `<App>Web.` prefix),
+   * e.g. "WorkflowsController".
+   */
+  controller: string;
+  /** Action atom, e.g. ":place_order". */
+  action: string;
+}
+
+export interface ApiEmitResult {
+  files: Map<string, string>;
+  apiRoutes: ApiRoute[];
+}
+
+// ---------------------------------------------------------------------------
+// Public entry point
+// ---------------------------------------------------------------------------
+
+export function emitApiControllers(args: ApiEmitArgs): ApiEmitResult {
+  const { contexts, deployable, appName, appModule } = args;
+  const files = new Map<string, string>();
+  const apiRoutes: ApiRoute[] = [];
+
+  const hasServes = deployable.serves.length > 0;
+
+  // Collect all workflows and views across all contexts
+  const allWorkflows: Array<{ ctx: BoundedContextIR; wf: import("../../ir/loom-ir.js").WorkflowIR }> = [];
+  const allViews: Array<{ ctx: BoundedContextIR; view: import("../../ir/loom-ir.js").ViewIR }> = [];
+
+  for (const ctx of contexts) {
+    for (const wf of ctx.workflows) {
+      allWorkflows.push({ ctx, wf });
+    }
+    for (const view of ctx.views) {
+      allViews.push({ ctx, view });
+    }
+  }
+
+  // --- Workflows controller --------------------------------------------------
+  if (hasServes && allWorkflows.length > 0) {
+    const controllerPath = `lib/${appName}_web/controllers/workflows_controller.ex`;
+    files.set(controllerPath, renderWorkflowsController(allWorkflows, appModule));
+
+    for (const { wf } of allWorkflows) {
+      const actionSnake = snake(wf.name);
+      apiRoutes.push({
+        method: "post",
+        path: `/workflows/${actionSnake}`,
+        controller: "WorkflowsController",
+        action: `:${actionSnake}`,
+      });
+    }
+  }
+
+  // --- Views controller ------------------------------------------------------
+  if (hasServes && allViews.length > 0) {
+    const controllerPath = `lib/${appName}_web/controllers/views_controller.ex`;
+    files.set(controllerPath, renderViewsController(allViews, appModule));
+
+    for (const { view } of allViews) {
+      const actionSnake = snake(view.name);
+      apiRoutes.push({
+        method: "get",
+        path: `/views/${actionSnake}`,
+        controller: "ViewsController",
+        action: `:${actionSnake}`,
+      });
+    }
+  }
+
+  // --- Health controller — always emitted ------------------------------------
+  const healthPath = `lib/${appName}_web/controllers/health_controller.ex`;
+  files.set(healthPath, renderHealthController(appModule));
+
+  // Health/ready routes use the !root: sentinel so the orchestrator places
+  // them outside the /api scope.
+  apiRoutes.push({
+    method: "get",
+    path: "!root:/health",
+    controller: "HealthController",
+    action: ":liveness",
+  });
+  apiRoutes.push({
+    method: "get",
+    path: "!root:/ready",
+    controller: "HealthController",
+    action: ":readiness",
+  });
+
+  return { files, apiRoutes };
+}
+
+// ---------------------------------------------------------------------------
+// WorkflowsController
+// ---------------------------------------------------------------------------
+
+function renderWorkflowsController(
+  workflows: Array<{ ctx: BoundedContextIR; wf: import("../../ir/loom-ir.js").WorkflowIR }>,
+  appModule: string,
+): string {
+  const webModule = `${appModule}Web`;
+
+  const actions = workflows
+    .map(({ ctx, wf }) => renderWorkflowAction(ctx, wf, appModule))
+    .join("\n\n");
+
+  return `# Auto-generated.
+defmodule ${webModule}.WorkflowsController do
+  use ${webModule}, :controller
+
+  @moduledoc """
+  HTTP entry points for all workflow code-interface functions.
+  Each action delegates to the matching workflow module's run/1.
+
+  TODO: Wire Plug.RequestId for trace_id propagation.
+  """
+
+${actions}
+
+  # ---------------------------------------------------------------------------
+  # Error helpers
+  # ---------------------------------------------------------------------------
+
+  defp error_response(conn, reason) do
+    trace_id = get_resp_header(conn, "x-request-id") |> List.first("unknown")
+    conn
+    |> put_status(:bad_request)
+    |> json(%{error: inspect(reason), trace_id: trace_id})
+  end
+end
+`;
+}
+
+function renderWorkflowAction(
+  ctx: BoundedContextIR,
+  wf: import("../../ir/loom-ir.js").WorkflowIR,
+  appModule: string,
+): string {
+  const wfSnake = snake(wf.name);
+  const contextModule = `${appModule}.${pascal(ctx.name)}`;
+  const workflowModule = `${contextModule}.Workflows.${pascal(wf.name)}`;
+
+  // Build the permitted param key list from the workflow's declared params
+  const allowedKeys = wf.params.map((p) => `"${snake(p.name)}"`).join(", ");
+  const takeExpr = allowedKeys.length > 0
+    ? `Map.take(params, [${allowedKeys}])`
+    : `%{}`;
+
+  return `  @doc "POST /api/workflows/${wfSnake}"
+  def ${wfSnake}(conn, params) do
+    input = ${takeExpr}
+
+    case ${workflowModule}.run(input) do
+      {:ok, result} ->
+        conn
+        |> put_status(:ok)
+        |> json(%{data: result})
+
+      {:error, reason} ->
+        error_response(conn, reason)
+    end
+  end`;
+}
+
+// ---------------------------------------------------------------------------
+// ViewsController
+// ---------------------------------------------------------------------------
+
+function renderViewsController(
+  views: Array<{ ctx: BoundedContextIR; view: import("../../ir/loom-ir.js").ViewIR }>,
+  appModule: string,
+): string {
+  const webModule = `${appModule}Web`;
+
+  const actions = views
+    .map(({ ctx, view }) => renderViewAction(ctx, view, appModule))
+    .join("\n\n");
+
+  return `# Auto-generated.
+defmodule ${webModule}.ViewsController do
+  use ${webModule}, :controller
+
+  @moduledoc """
+  HTTP entry points for all view query modules.
+  Each action delegates to the matching view module's run/1 and
+  strips Ash internal fields before encoding the JSON response.
+  """
+
+${actions}
+end
+`;
+}
+
+function renderViewAction(
+  ctx: BoundedContextIR,
+  view: import("../../ir/loom-ir.js").ViewIR,
+  appModule: string,
+): string {
+  const viewSnake = snake(view.name);
+  const contextModule = `${appModule}.${pascal(ctx.name)}`;
+  const viewModule = `${contextModule}.Views.${pascal(view.name)}`;
+
+  // Ash internal metadata fields to strip before JSON encoding
+  const ashInternalKeys = `~w(__meta__ __struct__ __order__ __lateral_join_source__ calculations aggregates relationships)a`;
+
+  return `  @doc "GET /api/views/${viewSnake}"
+  def ${viewSnake}(conn, _params) do
+    case ${viewModule}.run() do
+      {:ok, records} ->
+        data =
+          Enum.map(records, fn record ->
+            record
+            |> Map.from_struct()
+            |> Map.drop(${ashInternalKeys})
+          end)
+
+        conn
+        |> put_status(:ok)
+        |> json(%{data: data})
+
+      {:error, reason} ->
+        trace_id = get_resp_header(conn, "x-request-id") |> List.first("unknown")
+
+        conn
+        |> put_status(:internal_server_error)
+        |> json(%{error: inspect(reason), trace_id: trace_id})
+    end
+  end`;
+}
+
+// ---------------------------------------------------------------------------
+// HealthController
+// ---------------------------------------------------------------------------
+
+function renderHealthController(appModule: string): string {
+  const webModule = `${appModule}Web`;
+
+  return `# Auto-generated.
+defmodule ${webModule}.HealthController do
+  use ${webModule}, :controller
+
+  @moduledoc """
+  Liveness and readiness probes.
+
+  GET /health — cheap liveness check; always returns 200 while the BEAM is running.
+  GET /ready  — DB-aware readiness check; returns 503 when the database is unreachable.
+  """
+
+  @doc "GET /health — liveness probe (no DB dependency)."
+  def liveness(conn, _params) do
+    json(conn, %{status: "ok"})
+  end
+
+  @doc "GET /ready — readiness probe (pings the database)."
+  def readiness(conn, _params) do
+    try do
+      Ecto.Adapters.SQL.query!(${appModule}.Repo, "SELECT 1", [])
+      json(conn, %{status: "ready"})
+    rescue
+      _e ->
+        conn
+        |> put_status(:service_unavailable)
+        |> json(%{status: "not_ready"})
+    end
+  end
+end
+`;
+}

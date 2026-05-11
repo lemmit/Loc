@@ -1,0 +1,6 @@
+<%!-- field-input-id-select: select for an Id<X> field when the target aggregate is known --%>
+<.input field={@form[:"{{path}}"]} type="select"
+        label="{{label}}"
+        data-testid="{{testId}}"
+        options={Enum.map(@{{hookVar}} || [], &{&1.{{displayField}}, &1.id})}
+        prompt="Select a {{label}}" />
