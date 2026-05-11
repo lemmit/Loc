@@ -16,7 +16,11 @@
 // esm.sh, just like runtime.spec.ts.
 
 import { expect, test } from "@playwright/test";
-import { browserCanReachEsmSh, waitForPlaygroundReady } from "./_helpers";
+import {
+  browserCanReachEsmSh,
+  selectExample,
+  waitForPlaygroundReady,
+} from "./_helpers";
 
 test("editor → shadcn-design system → preview boots", async ({ page }) => {
   const consoleErrors: string[] = [];
@@ -27,6 +31,10 @@ test("editor → shadcn-design system → preview boots", async ({ page }) => {
 
   await page.goto("/");
   await waitForPlaygroundReady(page);
+  // The find-and-edit step below anchors on "port: 3001" (from the
+  // sales-system fixture).  Pin that example explicitly — default
+  // moved when storybook entries went to the top of the dropdown.
+  await selectExample(page, /Sales System/);
 
   await test.step("Inject `design: shadcn` into the webApp deployable", async () => {
     // Mutate the source through the editor exactly the way a user

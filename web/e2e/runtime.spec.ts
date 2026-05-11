@@ -9,7 +9,11 @@
 // any normal dev box pass this probe trivially.
 
 import { expect, test } from "@playwright/test";
-import { browserCanReachEsmSh, waitForPlaygroundReady } from "./_helpers";
+import {
+  browserCanReachEsmSh,
+  selectExample,
+  waitForPlaygroundReady,
+} from "./_helpers";
 
 test("editor → generate → bundle → boot → dispatch", async ({ page }) => {
   const consoleErrors: string[] = [];
@@ -20,6 +24,9 @@ test("editor → generate → bundle → boot → dispatch", async ({ page }) =>
 
   await page.goto("/");
   await waitForPlaygroundReady(page);
+  // Pin sales-system explicitly — the default example moved when
+  // the storybook entries were added at the top of the dropdown.
+  await selectExample(page, /Sales System/);
 
   if (!(await browserCanReachEsmSh(page))) {
     test.skip(true, "browser cannot reach esm.sh from this environment");
