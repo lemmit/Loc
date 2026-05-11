@@ -125,11 +125,14 @@ export interface VirtualFsContext {
    *  instead of esm.sh's "latest" (which breaks at 0.45.2). */
   versions: Map<string, string>;
   /** TypeScript path-alias mappings (e.g. `@/*` → `<slug>/src/*`)
-   *  harvested from the entry's nearest `tsconfig.json`.  Empty
-   *  when no tsconfig is present.  Each alias key keeps the
-   *  trailing `*` if present so the resolver can substitute the
-   *  matched suffix; static aliases (no `*`) are stored verbatim. */
-  tsconfigPaths: TsconfigAliasEntry[];
+   *  harvested from the entry's nearest `tsconfig.json`.  Optional:
+   *  callers that don't need alias resolution (Node-side smoke
+   *  scripts, legacy single-context bundles) can omit it; the
+   *  plugin treats `undefined` as "no aliases".  Each alias key
+   *  keeps the trailing `*` if present so the resolver can
+   *  substitute the matched suffix; static aliases (no `*`) are
+   *  stored verbatim. */
+  tsconfigPaths?: TsconfigAliasEntry[];
 }
 
 /** One alias mapping derived from a tsconfig `compilerOptions.paths`
@@ -637,10 +640,11 @@ export function makeLoomPlugin(ctx: VirtualFsContext, opts?: PluginOptions): Plu
       // alias's targets don't resolve — those cases keep falling
       // through to the bare-specifier handler (which is the right
       // behaviour for unaliased imports like `@radix-ui/react-slot`).
-      if (ctx.tsconfigPaths.length > 0) {
+      const tsconfigPaths = ctx.tsconfigPaths ?? [];
+      if (tsconfigPaths.length > 0) {
         build.onResolve({ filter: /^[^./]/ }, (args) => {
           if (args.namespace === HTTP_NAMESPACE) return undefined;
-          const aliased = applyTsconfigAlias(args.path, ctx.tsconfigPaths, ctx.files);
+          const aliased = applyTsconfigAlias(args.path, tsconfigPaths, ctx.files);
           if (!aliased) return undefined;
           return { path: aliased, namespace: ENTRY_NAMESPACE };
         });
