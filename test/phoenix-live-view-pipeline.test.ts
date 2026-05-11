@@ -457,6 +457,225 @@ describe("D1 — Ash validate clause emission (domain-emit unit)", () => {
 void repoRoot;
 
 // ---------------------------------------------------------------------------
+// Batch E4 — JWT auth module emission.
+//
+// Asserts that `lib/<app>_web/auth.ex` and `lib/<app>_web/live_auth.ex`
+// are emitted when the phoenixApp deployable carries `auth: required`.
+// Also asserts that the router wires the Auth plug into `:api` and wraps
+// LiveView routes in a `live_session` with the LiveAuth on_mount hook.
+// ---------------------------------------------------------------------------
+
+import { emitAuth } from "../src/generator/phoenix-live-view/auth-emit.js";
+
+describe("E4 — JWT auth emission (auth-emit unit)", () => {
+  const baseDeployable: DeployableIR = {
+    name: "phoenixApp",
+    platform: "phoenixLiveView",
+    moduleNames: ["Sales"],
+    port: 4000,
+    serves: ["SalesApi"],
+    uiBindings: [],
+    moduleBindings: [],
+  };
+
+  const baseSys: SystemIR = {
+    name: "Mini",
+    modules: [],
+    deployables: [baseDeployable],
+    e2eTests: [],
+    uis: [],
+    apis: [],
+    storages: [],
+  };
+
+  it("returns enabled=false and no files when auth is not required", () => {
+    const { files, enabled } = emitAuth({
+      sys: baseSys,
+      deployable: { ...baseDeployable, auth: undefined },
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    expect(enabled).toBe(false);
+    expect(files.size).toBe(0);
+  });
+
+  it("returns enabled=false when auth.required is false", () => {
+    const { enabled } = emitAuth({
+      sys: baseSys,
+      deployable: { ...baseDeployable, auth: { required: false } },
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    expect(enabled).toBe(false);
+  });
+
+  it("emits lib/<app>_web/auth.ex when auth: required", () => {
+    const authDeployable: DeployableIR = { ...baseDeployable, auth: { required: true } };
+    const { files, enabled } = emitAuth({
+      sys: baseSys,
+      deployable: authDeployable,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    expect(enabled).toBe(true);
+    expect(files.has("lib/phoenix_app_web/auth.ex")).toBe(true);
+  });
+
+  it("emits lib/<app>_web/live_auth.ex when auth: required", () => {
+    const authDeployable: DeployableIR = { ...baseDeployable, auth: { required: true } };
+    const { files } = emitAuth({
+      sys: baseSys,
+      deployable: authDeployable,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    expect(files.has("lib/phoenix_app_web/live_auth.ex")).toBe(true);
+  });
+
+  it("auth.ex contains @behaviour Plug + call/2 with Bearer extraction", () => {
+    const authDeployable: DeployableIR = { ...baseDeployable, auth: { required: true } };
+    const { files } = emitAuth({
+      sys: baseSys,
+      deployable: authDeployable,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    const authEx = files.get("lib/phoenix_app_web/auth.ex")!;
+    expect(authEx).toMatch(/@behaviour Plug/);
+    expect(authEx).toMatch(/def call\(conn, _opts\)/);
+    expect(authEx).toMatch(/"Bearer " <> token/);
+    expect(authEx).toMatch(/assign\(conn, :current_user, build_user\(claims\)\)/);
+    expect(authEx).toMatch(/put_status\(:unauthorized\)/);
+    expect(authEx).toMatch(/halt\(\)/);
+  });
+
+  it("auth.ex maps UserIR fields to claims extractions in build_user/1", () => {
+    const sysWithUser: SystemIR = {
+      ...baseSys,
+      user: {
+        fields: [
+          { name: "id", type: { kind: "primitive", name: "guid" }, optional: false },
+          { name: "permissions", type: { kind: "array", element: { kind: "primitive", name: "string" } }, optional: false },
+          { name: "email", type: { kind: "primitive", name: "string" }, optional: false },
+        ],
+      },
+    };
+    const authDeployable: DeployableIR = { ...baseDeployable, auth: { required: true } };
+    const { files } = emitAuth({
+      sys: sysWithUser,
+      deployable: authDeployable,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    const authEx = files.get("lib/phoenix_app_web/auth.ex")!;
+    // Each field should have a claims["<field>"] extraction.
+    expect(authEx).toContain('claims["id"]');
+    expect(authEx).toContain('claims["permissions"]');
+    expect(authEx).toContain('claims["email"]');
+    // Array field gets a default of [].
+    expect(authEx).toMatch(/claims\["permissions"\] \|\| \[\]/);
+  });
+
+  it("live_auth.ex contains on_mount/4 with redirect to /login on failure", () => {
+    const authDeployable: DeployableIR = { ...baseDeployable, auth: { required: true } };
+    const { files } = emitAuth({
+      sys: baseSys,
+      deployable: authDeployable,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    const liveAuthEx = files.get("lib/phoenix_app_web/live_auth.ex")!;
+    expect(liveAuthEx).toMatch(/def on_mount\(:default, _params, session, socket\)/);
+    expect(liveAuthEx).toMatch(/assign\(socket, :current_user, user\)/);
+    expect(liveAuthEx).toMatch(/Phoenix\.LiveView\.redirect\(socket, to: "\/login"\)/);
+  });
+});
+
+describe("E4 — router wiring (orchestrator integration)", () => {
+  const AUTH_FIXTURE = `system MiniAuth {
+  module Sales {
+    context Sales {
+      aggregate Customer {
+        name: string display
+        email: string
+      }
+      repository Customers for Customer { }
+    }
+  }
+  api SalesApi from Sales
+  ui SalesAdmin {
+    scaffold modules: Sales
+  }
+  user {
+    id: guid
+    permissions: string[]
+  }
+  deployable phoenixApp {
+    platform: phoenixLiveView,
+    modules: Sales,
+    serves: SalesApi,
+    ui: SalesAdmin,
+    port: 4000,
+    auth: required
+  }
+}
+`;
+
+  async function buildAuthFixture(): Promise<Model> {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-e4-"));
+    const file = path.join(dir, "auth.ddd");
+    fs.writeFileSync(file, AUTH_FIXTURE);
+    const services = createDddServices(NodeFileSystem);
+    const doc =
+      await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
+        URI.file(file),
+      );
+    await services.shared.workspace.DocumentBuilder.build([doc], {
+      validation: true,
+    });
+    const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
+    if (errors.length > 0) {
+      throw new Error(
+        `E4 fixture validation errors:\n` +
+          errors.map((e) => `  ${e.message}`).join("\n"),
+      );
+    }
+    return doc.parseResult.value as Model;
+  }
+
+  it("emits auth.ex AND live_auth.ex when deployable has auth: required", async () => {
+    const model = await buildAuthFixture();
+    const { files } = generateSystems(model);
+    expect(files.has("phoenix_app/lib/phoenix_app_web/auth.ex")).toBe(true);
+    expect(files.has("phoenix_app/lib/phoenix_app_web/live_auth.ex")).toBe(true);
+  });
+
+  it("router.ex splices Auth plug into :api pipeline", async () => {
+    const model = await buildAuthFixture();
+    const { files } = generateSystems(model);
+    const router = files.get("phoenix_app/lib/phoenix_app_web/router.ex")!;
+    expect(router).toMatch(/pipeline :api do[\s\S]*plug PhoenixAppWeb\.Auth/);
+  });
+
+  it("router.ex wraps LiveView routes in live_session with LiveAuth on_mount", async () => {
+    const model = await buildAuthFixture();
+    const { files } = generateSystems(model);
+    const router = files.get("phoenix_app/lib/phoenix_app_web/router.ex")!;
+    expect(router).toMatch(/live_session :default, on_mount: \[PhoenixAppWeb\.LiveAuth\]/);
+  });
+
+  it("does NOT emit auth files or wire the plug when auth is absent", async () => {
+    const model = await buildFixture(); // the base fixture has no auth:
+    const { files } = generateSystems(model);
+    expect(files.has("phoenix_app/lib/phoenix_app_web/auth.ex")).toBe(false);
+    expect(files.has("phoenix_app/lib/phoenix_app_web/live_auth.ex")).toBe(false);
+    const router = files.get("phoenix_app/lib/phoenix_app_web/router.ex")!;
+    expect(router).not.toMatch(/plug PhoenixAppWeb\.Auth/);
+    expect(router).not.toMatch(/live_session :default/);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Batch C — markers for parent integration.
 //
 // These tests will pass once the orchestrator (index.ts) wires the four new
@@ -738,5 +957,354 @@ describe("D3 — cross-platform OpenAPI parity (phoenix vs wire-spec.json)", () 
     const { files } = generateSystems(model);
     const mix = files.get("phoenix_app/mix.exs")!;
     expect(mix).toMatch(/:open_api_spex/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Batch E6 — Full-form view bind projection.
+//
+// Exercises `emitViews` directly with a synthetic `OrderSummary` view IR
+// (matching the shape that `lowerView` produces for the acme.ddd definition)
+// and asserts the generated Elixir module contains:
+//   - Ash.Query.filter for the source predicate
+//   - Ash.Query.load for association-backed bind exprs (lines.count → :lines)
+//   - Ash.read!() instead of the old code-interface call
+//   - Enum.map projection with snake_case keys for every declared bind
+// ---------------------------------------------------------------------------
+
+import { emitViews } from "../src/generator/phoenix-live-view/view-emit.js";
+import type { ExprIR } from "../src/ir/loom-ir.js";
+
+describe("E6 — full-form view bind projection (view-emit unit)", () => {
+  // Synthetic ViewIR for `view OrderSummary { orderId status lineCount from Order … bind … }`
+  const orderSummaryCtx: BoundedContextIR = {
+    name: "Sales",
+    enums: [{ name: "OrderStatus", values: ["Draft", "Confirmed", "Cancelled"] }],
+    valueObjects: [],
+    events: [],
+    aggregates: [
+      {
+        name: "Order",
+        idValueType: "guid",
+        fields: [
+          { name: "status", type: { kind: "enum", name: "OrderStatus" }, optional: false },
+        ],
+        contains: [],
+        derived: [],
+        invariants: [],
+        functions: [],
+        operations: [],
+        parts: [],
+        tests: [],
+      },
+    ],
+    repositories: [],
+    workflows: [],
+    views: [
+      {
+        name: "OrderSummary",
+        aggregateName: "Order",
+        // filter: status != Cancelled
+        filter: {
+          kind: "binary",
+          op: "!=",
+          left: {
+            kind: "ref",
+            name: "status",
+            refKind: "this-prop",
+            type: { kind: "enum", name: "OrderStatus" },
+          } as ExprIR,
+          right: {
+            kind: "literal",
+            lit: "string",
+            value: "Cancelled",
+          } as ExprIR,
+        } as ExprIR,
+        output: {
+          fields: [
+            { name: "orderId", type: { kind: "id", of: "Order" }, optional: false },
+            { name: "status", type: { kind: "enum", name: "OrderStatus" }, optional: false },
+            { name: "lineCount", type: { kind: "primitive", name: "int" }, optional: false },
+          ],
+          binds: [
+            // bind orderId = id  →  record.id
+            {
+              name: "orderId",
+              type: { kind: "id", of: "Order" },
+              expr: { kind: "id" } as ExprIR,
+            },
+            // bind status = status  →  record.status
+            {
+              name: "status",
+              type: { kind: "enum", name: "OrderStatus" },
+              expr: {
+                kind: "ref",
+                name: "status",
+                refKind: "this-prop",
+                type: { kind: "enum", name: "OrderStatus" },
+              } as ExprIR,
+            },
+            // bind lineCount = lines.count  →  Enum.count(record.lines)
+            {
+              name: "lineCount",
+              type: { kind: "primitive", name: "int" },
+              expr: {
+                kind: "member",
+                receiver: {
+                  kind: "ref",
+                  name: "lines",
+                  refKind: "this-prop",
+                  type: { kind: "array", element: { kind: "entity", name: "OrderLine" } },
+                } as ExprIR,
+                member: "count",
+                receiverType: { kind: "array", element: { kind: "entity", name: "OrderLine" } },
+                memberType: { kind: "primitive", name: "int" },
+              } as ExprIR,
+            },
+          ],
+          auxiliaries: [],
+        },
+      },
+    ],
+  };
+
+  function getViewFile(): string {
+    const out = new Map<string, string>();
+    emitViews("acme", orderSummaryCtx, "Acme", out);
+    const file = out.get("lib/acme/sales/views/order_summary.ex");
+    expect(file).toBeDefined();
+    return file!;
+  }
+
+  it("emits the projection module at the expected path", () => {
+    const out = new Map<string, string>();
+    emitViews("acme", orderSummaryCtx, "Acme", out);
+    expect(out.has("lib/acme/sales/views/order_summary.ex")).toBe(true);
+  });
+
+  it("emits Ash.Query.filter for the source predicate", () => {
+    const src = getViewFile();
+    expect(src).toMatch(/Ash\.Query\.filter\(/);
+  });
+
+  it("emits Ash.Query.load for the lines association needed by lineCount bind", () => {
+    const src = getViewFile();
+    expect(src).toMatch(/Ash\.Query\.load\(\[:lines\]\)/);
+  });
+
+  it("emits Ash.read! instead of a code-interface call", () => {
+    const src = getViewFile();
+    expect(src).toMatch(/Ash\.read!\(\)/);
+    expect(src).not.toMatch(/read_order\(/);
+  });
+
+  it("emits Enum.map projection with snake_case keys order_id, status, line_count", () => {
+    const src = getViewFile();
+    expect(src).toMatch(/Enum\.map\(fn record ->/);
+    expect(src).toMatch(/order_id:/);
+    expect(src).toMatch(/status:/);
+    expect(src).toMatch(/line_count:/);
+  });
+
+  it("lowers lines.count bind to Enum.count(record.lines)", () => {
+    const src = getViewFile();
+    expect(src).toMatch(/line_count: Enum\.count\(record\.lines\)/);
+  });
+
+  it("lowers id bind to record.id", () => {
+    const src = getViewFile();
+    expect(src).toMatch(/order_id: record\.id/);
+  });
+
+  it("lowers this-prop bind to record.<field>", () => {
+    const src = getViewFile();
+    expect(src).toMatch(/status: record\.status/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// E2 — Ash 3.x `code_interface` shape inside `resource ... do` blocks.
+//
+// `emitDomainModule` in domain-module.ts must emit `define` calls INSIDE
+// `resource <Module> do ... end` blocks (Ash 3.x), not in a separate
+// top-level `code_interface do` block (Ash 2.x pattern).
+// ---------------------------------------------------------------------------
+
+import { emitDomainModule } from "../src/generator/phoenix-live-view/domain-module.js";
+
+describe("E2 — Ash 3.x code_interface shape (domain-module unit)", () => {
+  const salesCtxE2: BoundedContextIR = {
+    name: "Sales",
+    enums: [],
+    valueObjects: [],
+    events: [],
+    aggregates: [
+      {
+        name: "Customer",
+        idValueType: "guid",
+        fields: [
+          { name: "name", type: { kind: "primitive", name: "string" }, optional: false },
+          { name: "email", type: { kind: "primitive", name: "string" }, optional: false },
+        ],
+        contains: [],
+        derived: [],
+        invariants: [],
+        functions: [],
+        operations: [],
+        parts: [],
+        tests: [],
+      },
+    ],
+    repositories: [
+      {
+        name: "Customers",
+        aggregateName: "Customer",
+        finds: [
+          {
+            name: "findByEmail",
+            params: [{ name: "email", type: { kind: "primitive", name: "string" } }],
+            returnType: { kind: "primitive", name: "guid" },
+          },
+        ],
+      },
+    ],
+    workflows: [],
+    views: [],
+  };
+
+  it("emits define calls INSIDE resource ... do blocks, not in a top-level code_interface do", () => {
+    const files = emitDomainModule(salesCtxE2, "PhoenixApp", "phoenix_app");
+    const domainEx = files.get("lib/phoenix_app/sales.ex")!;
+    expect(domainEx).toBeDefined();
+
+    // Ash 3.x: define nested inside resource ... do.
+    expect(domainEx).toMatch(/resource PhoenixApp\.Sales\.Customer do/);
+    expect(domainEx).toMatch(/define :create_customer, action: :create/);
+    expect(domainEx).toMatch(/define :get_customer,\s+action: :read, get_by: \[:id\]/);
+    expect(domainEx).toMatch(/define :list_customers,\s+action: :read/);
+    expect(domainEx).toMatch(/define :update_customer, action: :update/);
+    expect(domainEx).toMatch(/define :destroy_customer, action: :destroy/);
+
+    // MUST NOT emit a top-level `code_interface do` block (Ash 2.x).
+    expect(domainEx).not.toMatch(/^  code_interface do/m);
+
+    // MUST NOT use the Ash 2.x `define_for` directive.
+    expect(domainEx).not.toMatch(/define_for/);
+  });
+
+  it("emits custom find defines with args: [...] for parametrised finds", () => {
+    const files = emitDomainModule(salesCtxE2, "PhoenixApp", "phoenix_app");
+    const domainEx = files.get("lib/phoenix_app/sales.ex")!;
+    expect(domainEx).toBeDefined();
+    // findByEmail has one param → args: [:email]
+    expect(domainEx).toMatch(/define :find_by_email, action: :find_by_email, args: \[:email\]/);
+  });
+
+  it("emits define blocks for entity parts in their own resource ... do block", () => {
+    const ctxWithPart: BoundedContextIR = {
+      ...salesCtxE2,
+      aggregates: [
+        {
+          ...salesCtxE2.aggregates[0]!,
+          parts: [
+            {
+              name: "OrderLine",
+              fields: [
+                { name: "quantity", type: { kind: "primitive", name: "int" }, optional: false },
+              ],
+              invariants: [],
+              tests: [],
+            },
+          ],
+        },
+      ],
+    };
+    const files = emitDomainModule(ctxWithPart, "PhoenixApp", "phoenix_app");
+    const domainEx = files.get("lib/phoenix_app/sales.ex")!;
+    expect(domainEx).toBeDefined();
+    expect(domainEx).toMatch(/resource PhoenixApp\.Sales\.OrderLine do/);
+    expect(domainEx).toMatch(/define :create_order_line, action: :create/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// E3 — Ash.transaction/2 passes a domain list, not an Ecto Repo.
+//
+// `emitWorkflows` in workflow-emit.ts must produce
+//   Ash.transaction([<ContextModule>], fn -> ... end)
+// not
+//   Ash.transaction(fn -> ... end, <AppModule>.Repo)
+// ---------------------------------------------------------------------------
+
+import { emitWorkflows } from "../src/generator/phoenix-live-view/workflow-emit.js";
+
+describe("E3 — Ash.transaction/2 domain-list form (workflow-emit unit)", () => {
+  const transactionalCtx: BoundedContextIR = {
+    name: "Sales",
+    enums: [],
+    valueObjects: [],
+    events: [],
+    aggregates: [],
+    repositories: [],
+    workflows: [
+      {
+        name: "placeOrder",
+        params: [{ name: "customerId", type: { kind: "primitive", name: "guid" } }],
+        transactional: true,
+        statements: [
+          {
+            kind: "factory-let",
+            name: "order",
+            aggName: "Order",
+            fields: [
+              {
+                name: "customerId",
+                value: {
+                  kind: "ref",
+                  name: "customerId",
+                  refKind: "param",
+                  type: { kind: "primitive", name: "guid" },
+                },
+              },
+            ],
+          },
+        ],
+        savesAtExit: [],
+      },
+    ],
+    views: [],
+  };
+
+  it("emits Ash.transaction([ with a list opener — NOT passing a Repo module", () => {
+    const out = new Map<string, string>();
+    emitWorkflows("phoenix_app", transactionalCtx, "PhoenixApp", out);
+    const wfEx = out.get("lib/phoenix_app/sales/workflows/place_order.ex")!;
+    expect(wfEx).toBeDefined();
+
+    // Must use the list-form: Ash.transaction([PhoenixApp.Sales], fn ->
+    expect(wfEx).toMatch(/Ash\.transaction\(\s*\[PhoenixApp\.Sales\]/);
+
+    // Must NOT pass a Repo as first positional arg in the old form.
+    expect(wfEx).not.toMatch(/Ash\.transaction\(\s*fn\s*->/);
+    expect(wfEx).not.toMatch(/PhoenixApp\.Repo/);
+  });
+
+  it("transactional workflow with isolation level still uses domain-list form", () => {
+    const ctxWithIsolation: BoundedContextIR = {
+      ...transactionalCtx,
+      workflows: [
+        {
+          ...transactionalCtx.workflows[0]!,
+          isolation: "serializable",
+        },
+      ],
+    };
+    const out = new Map<string, string>();
+    emitWorkflows("phoenix_app", ctxWithIsolation, "PhoenixApp", out);
+    const wfEx = out.get("lib/phoenix_app/sales/workflows/place_order.ex")!;
+    expect(wfEx).toBeDefined();
+    expect(wfEx).toMatch(/Ash\.transaction\(\s*\[PhoenixApp\.Sales\]/);
+    expect(wfEx).toMatch(/isolation_level: :serializable/);
+    expect(wfEx).not.toMatch(/PhoenixApp\.Repo/);
   });
 });
