@@ -1,0 +1,6 @@
+<%!-- cell-id-link: renders an id as a navigable link --%>
+<td class="px-4 py-3 text-sm">
+  <.link navigate={{{toExpr}}} data-testid={{{testIdExpr}}} class="font-mono text-blue-600 hover:underline">
+    <%= String.slice({{valueExpr}}, 0, 8) %>…
+  </.link>
+</td>

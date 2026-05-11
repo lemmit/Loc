@@ -1,0 +1,55 @@
+<%!-- Auto-generated. Read-only table for view {{humanView}}. --%>
+<div data-testid="view-{{slug}}" class="space-y-4">
+  <div class="flex items-end justify-between">
+    <div class="space-y-0.5">
+      <p class="text-sm font-semibold uppercase tracking-wide text-gray-400">View</p>
+      <h2 class="text-2xl font-semibold tracking-tight">{{humanView}}</h2>
+      <p class="text-sm text-gray-500">
+        <%= if assigns[:loading] do %>Loading…<% else %><%= length(@rows) %> <%= if length(@rows) == 1, do: "row", else: "rows" %><% end %>
+      </p>
+    </div>
+    <.link navigate="/views" class="text-sm text-blue-600 hover:underline">← back</.link>
+  </div>
+
+  <%= if assigns[:loading] do %>
+  <div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm space-y-2">
+    <%= for _i <- 1..5 do %>
+    <div class="h-7 animate-pulse rounded bg-gray-200"></div>
+    <% end %>
+  </div>
+  <% end %>
+
+  <%= if assigns[:flash_error] do %>
+  <div class="rounded-lg border border-red-200 bg-red-50 p-4 text-red-700" role="alert">
+    <p class="font-medium">Couldn't load view</p>
+    <p class="text-sm mt-1"><%= @flash_error %></p>
+  </div>
+  <% end %>
+
+  <%= if !assigns[:loading] && @rows == [] do %>
+  <p class="text-gray-500 text-sm">No rows.</p>
+  <% end %>
+
+  <%= if !assigns[:loading] && @rows != [] do %>
+  <div class="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+          <tr>
+            {{#each columnHeaders}}
+            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{{this}}</th>
+            {{/each}}
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100 bg-white">
+          <%= for {row, idx} <- Enum.with_index(@rows) do %>
+          <tr data-testid={"view-{{slug}}-row-#{idx}"}>
+            {{#each cells}}{{> (lookup . "template") this}}{{/each}}
+          </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <% end %>
+</div>

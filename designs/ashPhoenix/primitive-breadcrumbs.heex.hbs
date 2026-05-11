@@ -1,0 +1,15 @@
+<%!-- primitive-breadcrumbs --%>
+<nav aria-label="breadcrumb">
+  <ol class="flex items-center gap-2 text-sm text-gray-500">
+    <%= for {seg, i} <- Enum.with_index(@segments) do %>
+    <li class="flex items-center gap-2">
+      <%= if seg.to do %>
+        <.link navigate={seg.to} class="hover:text-gray-900 hover:underline"><%= seg.label %></.link>
+        <%= if i < length(@segments) - 1 do %><span aria-hidden="true">/</span><% end %>
+      <% else %>
+        <span class="text-gray-900 font-medium"><%= seg.label %></span>
+      <% end %>
+    </li>
+    <% end %>
+  </ol>
+</nav>

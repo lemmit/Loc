@@ -1,0 +1,8 @@
+<%!-- cell-number: renders a numeric value with optional decimals --%>
+<td data-testid={{{testIdExpr}}} class="px-4 py-3 text-sm text-right tabular-nums text-gray-700">
+  <%= if {{valueExpr}} do %>
+    <%= :erlang.float_to_binary({{valueExpr}} / 1, decimals: {{decimals}}) %>
+  <% else %>
+    <span class="text-gray-400">—</span>
+  <% end %>
+</td>

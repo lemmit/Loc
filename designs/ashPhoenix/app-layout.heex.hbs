@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-gray-50">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="csrf-token" content={get_csrf_token()} />
+    <.live_title suffix=" · {{systemNameHuman}}">
+      <%= assigns[:page_title] || "{{systemNameHuman}}" %>
+    </.live_title>
+    <link phx-track-static rel="stylesheet" href={~p"/assets/app.css"} />
+    <script defer phx-track-static type="text/javascript" src={~p"/assets/app.js"}></script>
+  </head>
+  <body class="h-full">
+    <div class="flex h-full">
+      <%!-- Sidebar --%>
+      <div class="hidden lg:flex lg:w-64 lg:flex-col">
+        <div class="flex flex-col gap-y-5 overflow-y-auto border-r border-gray-200 bg-white px-6 pb-4">
+          <div class="flex h-16 shrink-0 items-center">
+            <span class="text-lg font-semibold text-gray-900">{{systemNameHuman}}</span>
+          </div>
+          <nav class="flex flex-1 flex-col">
+            <ul role="list" class="flex flex-1 flex-col gap-y-7">
+              {{#each navSections}}
+              <li>
+                <div class="text-xs font-semibold leading-6 text-gray-400 uppercase tracking-wider">{{label}}</div>
+                <ul role="list" class="-mx-2 mt-2 space-y-1">
+                  {{#each entries}}
+                  <li>
+                    <.link
+                      navigate={{{to}}}
+                      data-testid="{{testId}}"
+                      class={["group flex gap-x-3 rounded-md p-2 text-sm leading-6 font-medium",
+                               "text-gray-700 hover:text-blue-600 hover:bg-gray-50"]}
+                    >
+                      {{label}}
+                    </.link>
+                  </li>
+                  {{/each}}
+                </ul>
+              </li>
+              {{/each}}
+            </ul>
+          </nav>
+        </div>
+      </div>
+
+      <%!-- Main content area --%>
+      <div class="flex flex-1 flex-col overflow-y-auto">
+        <main class="flex-1">
+          <div class="py-6">
+            <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+              <.flash_group flash={@flash} />
+              <%= @inner_content %>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+  </body>
+</html>

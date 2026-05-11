@@ -1,0 +1,21 @@
+<%!-- primitive-tabs --%>
+<div>
+  <div class="border-b border-gray-200">
+    <nav class="-mb-px flex space-x-6">
+      <%= for {tab, _i} <- Enum.with_index(@tabs) do %>
+      <button type="button"
+              phx-click="switch_tab"
+              phx-value-tab={tab.id}
+              class={["whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium",
+                       if @active_tab == tab.id do
+                         "border-blue-600 text-blue-600"
+                       else
+                         "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                       end]}>
+        <%= tab.label %>
+      </button>
+      <% end %>
+    </nav>
+  </div>
+  <div class="mt-4"><%= @inner_content %></div>
+</div>

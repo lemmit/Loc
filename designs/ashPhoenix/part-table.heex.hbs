@@ -1,0 +1,28 @@
+<%!-- part-table: nested collection table inside a detail page --%>
+<div class="space-y-2" data-testid="{{testId}}">
+  <h3 class="text-base font-semibold text-gray-700">{{humanName}}</h3>
+  <%= if {{arrayExpr}} == [] do %>
+  <p class="text-sm text-gray-500">No {{humanName}} yet.</p>
+  <% else %>
+  <div class="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+          <tr>
+            {{#each columnHeaders}}
+            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{{this}}</th>
+            {{/each}}
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100 bg-white">
+          <%= for row <- {{arrayExpr}} do %>
+          <tr data-testid={"{{testId}}-row-#{row.id}"}>
+            {{#each cells}}{{> (lookup . "template") this}}{{/each}}
+          </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <% end %>
+</div>

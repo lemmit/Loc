@@ -11,7 +11,7 @@ import type {
   TypeIR,
 } from "./loom-ir.js";
 import { allContexts, findUsesCurrentUser } from "./loom-ir.js";
-import { allPlatforms } from "../platform/registry.js";
+import { allPlatforms, platformFor } from "../platform/registry.js";
 import { camel, plural, snake } from "../util/naming.js";
 
 // ---------------------------------------------------------------------------
@@ -286,9 +286,14 @@ function validateReactIdReferences(
   }
 
   for (const d of sys.deployables) {
-    if (d.platform !== "react") continue;
+    // UI-mounting deployables (today: react / static / phoenixLiveView)
+    // emit per-aggregate forms whose `Id<X>` inputs need the target
+    // aggregate to be reachable from the deployable's mounted set.
+    // Backend-only deployables (dotnet / hono) skip — they don't
+    // render UI forms.
+    if (!platformFor(d.platform).mountsUi) continue;
     // Aggregates mounted by this deployable's `moduleNames` set —
-    // the React generator only emits `useAll<X>()` imports for
+    // UI generators only emit per-aggregate hooks/queries for
     // these; anything outside is unreachable.
     const mounted = new Set<string>();
     for (const moduleName of d.moduleNames) {

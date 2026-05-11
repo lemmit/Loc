@@ -1,0 +1,12 @@
+<%!-- primitive-alert --%>
+<div class={["rounded-lg border p-4",
+              case @color do
+                "red" -> "border-red-200 bg-red-50 text-red-700"
+                "yellow" -> "border-yellow-200 bg-yellow-50 text-yellow-700"
+                "green" -> "border-green-200 bg-green-50 text-green-700"
+                _ -> "border-blue-200 bg-blue-50 text-blue-700"
+              end]}
+     role="alert">
+  <%= if assigns[:title] do %><p class="font-medium"><%= @title %></p><% end %>
+  <p class="text-sm mt-1"><%= @message %></p>
+</div>
