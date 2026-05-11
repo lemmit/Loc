@@ -58,13 +58,21 @@ export function emitLiveViewPages(args: {
   if (!ui) return { files: out, routes };
 
   // Workspace-wide aggregate registry — needed by the page-object
-  // emitter's domain-method synthesis (fill, submit, expectRow).
+  // emitter's domain-method synthesis (fill, submit, expectRow) AND
+  // by the form-binding lookup in renderForm (heex-walker.ts) so
+  // `Form(of: Agg)` resolves to the aggregate's fields.
   const aggregatesByName = new Map<string, AggregateIR>();
   const contextByAggName = new Map<string, BoundedContextIR>();
+  // Module-qualified context name per aggregate, e.g.
+  // "PhoenixApp.Sales" — used by the LiveView mount stub to build
+  // `AshPhoenix.Form.for_create(PhoenixApp.Sales.Customer, :create)`.
+  const contextModuleByAggName = new Map<string, string>();
   for (const ctx of contexts) {
+    const ctxModule = `${appModule}.${pascal(ctx.name)}`;
     for (const agg of ctx.aggregates) {
       aggregatesByName.set(agg.name, agg);
       contextByAggName.set(agg.name, ctx);
+      contextModuleByAggName.set(agg.name, ctxModule);
     }
   }
 
@@ -78,6 +86,8 @@ export function emitLiveViewPages(args: {
       appName,
       appModule,
       ui,
+      aggregatesByName,
+      contextModuleByAggName,
     });
     out.set(filePath, source);
     routes.push({ route: page.route, liveModule });
@@ -104,10 +114,15 @@ interface RenderArgs {
   appName: string;
   appModule: string;
   ui: UiIR;
+  aggregatesByName: ReadonlyMap<string, AggregateIR>;
+  /** Module-qualified name of the bounded context an aggregate lives in,
+   *  keyed by aggregate PascalCase name.  Used to build the Ash
+   *  `for_create(<Ctx>.<Agg>, :create)` call in mount/3. */
+  contextModuleByAggName: ReadonlyMap<string, string>;
 }
 
 function renderLiveView(a: RenderArgs): string {
-  const { page, liveModule, appModule, ui } = a;
+  const { page, liveModule, appModule, ui, aggregatesByName, contextModuleByAggName } = a;
   const webModule = `${appModule}Web`;
 
   // All pages — scaffold and custom — route through the HEEx walker.
@@ -116,12 +131,18 @@ function renderLiveView(a: RenderArgs): string {
   // populated with a walker-stdlib ExprIR tree.  The walker produces
   // handle_event clauses and alias lines from helper imports the body
   // actually references.
-  const walked = walkBodyToHeex(page.body, page, ui, appModule);
+  const walked = walkBodyToHeex(
+    page.body,
+    page,
+    ui,
+    appModule,
+    aggregatesByName,
+  );
   const heex = walked.heex;
   const handlers: HandleEventClause[] = walked.handlers;
   const aliasLines: string[] = walked.aliasLines;
 
-  const mount = renderMount(page);
+  const mount = renderMount(page, walked.formBindings, contextModuleByAggName);
   const handleParams = renderHandleParams(page, ui, appModule);
   const handleEventClauses = renderHandleEventClauses(handlers);
   const aliasBlock = aliasLines.length > 0 ? aliasLines.join("\n") + "\n" : "";
@@ -161,12 +182,39 @@ ${h.body.join("\n")}
 }
 
 
-function renderMount(page: PageIR): string {
+function renderMount(
+  page: PageIR,
+  formBindings: import("./heex-walker.js").FormBinding[],
+  contextModuleByAggName: ReadonlyMap<string, string>,
+): string {
   const assigns: string[] = [];
   for (const f of page.state) {
     // Type-aware default from the walker — single source of truth so
     // `state.field` defaults match across scaffold and custom pages.
     assigns.push(`      |> assign(:${snake(f.name)}, ${defaultInitFor(f.type)})`);
+  }
+  // @form assignment — one per Form(of:/runs:) call in the page body.
+  // For aggregate-of: AshPhoenix.Form.for_create(<Ctx>.<Agg>, :create);
+  // for workflow-runs: a placeholder for_action (workflow form
+  // resolution is wider and tracked separately — see plan §Forms-Wf).
+  // Multiple forms on one page currently collapse to a single @form;
+  // pages with >1 form should split into nested LiveComponents — out
+  // of scope for the basic mount-stub fix.
+  for (const fb of formBindings) {
+    if (fb.kind === "aggregate") {
+      const ctxModule = contextModuleByAggName.get(fb.name);
+      if (!ctxModule) continue; // unresolved — validator catches; silent skip
+      assigns.push(
+        `      |> assign(:form, AshPhoenix.Form.for_create(${ctxModule}.${pascal(fb.name)}, :create) |> to_form())`,
+      );
+      break; // single @form per page
+    } else {
+      // Workflow form — placeholder until workflow-form mounting lands.
+      // Keeps the page mountable (form is empty but the assigns shape
+      // matches what the HEEx body expects).
+      assigns.push(`      |> assign(:form, %{} |> to_form())`);
+      break;
+    }
   }
   if (assigns.length === 0) {
     return `  @impl true

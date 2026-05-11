@@ -1395,3 +1395,101 @@ describe("F3 — cross-platform UI parity (test e2e ui against phoenixLiveView)"
     expect(pageObjects.length).toBeGreaterThanOrEqual(3);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Scaffold-form regression — the walker's `renderForm` previously
+// emitted a single hardcoded `<.input field={@form[:_placeholder]}>`
+// for every scaffold-expanded `new <Aggregate>` page regardless of
+// the aggregate's actual fields, AND the LiveView `mount/3` stub
+// never assigned `@form`.  Both bugs combined made every generated
+// new-page broken at runtime.  These tests pin the fix.
+// ---------------------------------------------------------------------------
+
+const FORM_FIXTURE = `system AcmeForm {
+  module Sales {
+    context Sales {
+      aggregate Customer {
+        name: string display
+        email: string
+      }
+      repository Customers for Customer { }
+      aggregate Order {
+        customerId: Id<Customer>
+        total: decimal
+      }
+      repository Orders for Order { }
+    }
+  }
+  api SalesApi from Sales
+  ui SalesAdmin { scaffold modules: Sales }
+  deployable phoenixApp {
+    platform: phoenixLiveView
+    modules: Sales
+    serves: SalesApi
+    ui: SalesAdmin
+    port: 4000
+  }
+}
+`;
+
+async function buildFormFixture() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-form-fix-"));
+  const file = path.join(dir, "form-fix.ddd");
+  fs.writeFileSync(file, FORM_FIXTURE);
+  const services = createDddServices(NodeFileSystem);
+  const doc =
+    await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
+      URI.file(file),
+    );
+  await services.shared.workspace.DocumentBuilder.build([doc], {
+    validation: true,
+  });
+  const model = doc.parseResult.value as Model;
+  const { files } = generateSystems(model);
+  return files;
+}
+
+describe("scaffold-form regression — Form(of:Agg) resolves fields + mount assigns @form", () => {
+  it("emits one <.input> per aggregate field (id excluded), not a single _placeholder", async () => {
+    const files = await buildFormFixture();
+    const customerNew = files.get(
+      "phoenix_app/lib/phoenix_app_web/live/customer_new_live.ex",
+    )!;
+    expect(customerNew).toBeDefined();
+    expect(customerNew).not.toMatch(/@form\[:_placeholder\]/);
+    expect(customerNew).toMatch(/@form\[:name\].*?label="Name"/);
+    expect(customerNew).toMatch(/@form\[:email\].*?label="Email"/);
+    expect(customerNew).not.toMatch(/@form\[:id\]/);
+  });
+
+  it("emits type=number step=0.01 for decimal fields", async () => {
+    const files = await buildFormFixture();
+    const orderNew = files.get(
+      "phoenix_app/lib/phoenix_app_web/live/order_new_live.ex",
+    )!;
+    expect(orderNew).toMatch(
+      /@form\[:total\].*?type="number".*?step="0\.01"/,
+    );
+  });
+
+  it("mount/3 assigns @form via AshPhoenix.Form.for_create(<Ctx>.<Agg>, :create)", async () => {
+    const files = await buildFormFixture();
+    const customerNew = files.get(
+      "phoenix_app/lib/phoenix_app_web/live/customer_new_live.ex",
+    )!;
+    expect(customerNew).toMatch(
+      /assign\(:form, AshPhoenix\.Form\.for_create\(PhoenixApp\.Sales\.Customer, :create\) \|> to_form\(\)\)/,
+    );
+  });
+
+  it("pages with no form do not gain a stray @form assign", async () => {
+    const files = await buildFormFixture();
+    // The list page has no form binding — its mount stub must stay empty.
+    const customerList = files.get(
+      "phoenix_app/lib/phoenix_app_web/live/customer_list_live.ex",
+    )!;
+    expect(customerList).toBeDefined();
+    expect(customerList).not.toMatch(/AshPhoenix\.Form\.for_create/);
+  });
+});
+
