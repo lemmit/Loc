@@ -42,14 +42,11 @@ export async function waitForPlaygroundReady(page: Page): Promise<void> {
 // Tests that rely on a particular starter source (sales-system,
 // banking-system, …) call this after `waitForPlaygroundReady` so
 // the default-example ordering in `examples/index.ts` can change
-// without breaking specs.  Mantine `<Select>` renders the current
-// label inside a `role="textbox"` input; clicking it opens the
-// listbox, then `role="option"` matches by accessible name.
+// without breaking specs.  Mantine's `<Select>` renders the active
+// option label inside an accessible-labeled input; clicking it
+// opens a listbox of `role="option"` entries.
 export async function selectExample(page: Page, label: string | RegExp): Promise<void> {
-  // The example combobox is the first `role="textbox"` in the
-  // header — `getByRole("textbox", { name: "" })` matches because
-  // Mantine's `<Select>` doesn't ship a built-in aria-label.
-  await page.getByRole("textbox", { name: "" }).first().click();
+  await page.getByLabel("Choose example").click();
   await page.getByRole("option", { name: label }).first().click();
   // Re-wait for the LSP "0 errors" badge — switching examples
   // re-mounts the editor and re-parses the source, so the badge
