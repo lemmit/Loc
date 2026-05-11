@@ -3,88 +3,30 @@
 //
 // View-models are framework-neutral: they carry every *decision* the
 // generator has made (humanized labels, formatter choice per type,
-// link targets, op-icon picks, etc.) but no UI-library-specific text.
-// Mantine, shadcn, and custom packs all render against the same VMs.
+// link targets) but no UI-library-specific text.  Every pack
+// (Mantine, shadcn, MUI, chakra, ashPhoenix) renders against the same VMs.
 //
 // VMs lean on string-typed JS expression slots (`valueExpr`,
-// `keyExpr`) where the template needs to splice raw JS — for instance
-// `row.customerId` or `data.id.slice(0, 8)`.  Templates are responsible
-// for placing these inside `{}`/`{{{ }}}` JSX braces; preparers are
-// responsible for ensuring the expressions evaluate correctly in the
-// surrounding scope (e.g. `row` for table rows, `data` for detail).
+// `errorExpr`) where the template needs to splice raw JS.  Templates
+// are responsible for placing these inside `{}`/`{{{ }}}` JSX braces;
+// preparers are responsible for ensuring the expressions evaluate
+// correctly in the surrounding scope.
+//
+// Scope: only the VMs consumed by the live preparers + walker survive.
+// The archetype-era VMs (ListPageVM / DetailPageVM / NewPageVM /
+// WorkflowFormVM / ViewTablePageVM / HomeVM / OperationModalVM /
+// ColumnVM / FieldRowVM / BreadcrumbSegmentVM / MainVM) were deleted
+// alongside their preparers + templates when the walker became the
+// single codegen path.
 // ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Column descriptor view-model.  Each column carries semantic metadata so
-// pack templates dispatch to `{{> (concat "cell-" kind)}}` without TS-side
-// pre-rendering.  Replaces the old pre-rendered cell tuple pattern.
-// ---------------------------------------------------------------------------
-
-export type ColumnKind =
-  | "id"
-  | "id-link"
-  | "row-id-link"
-  | "datetime"
-  | "bool"
-  | "number"
-  | "enum"
-  | "string";
-
-export interface ColumnVM {
-  /** Stable key for React reconciliation and AntD `dataIndex` / `key` */
-  key: string;
-  /** Display label for the column header (replaces `columnHeaders[i]`) */
-  title: string;
-  /** Semantic kind — drives cell template selection */
-  kind: ColumnKind;
-  /** `data-testid` expression for the cell */
-  testIdExpr: string;
-  /** JS expression that pulls the value from a row */
-  valueExpr: string;
-  /** Link target for `id-link` / `row-id-link` */
-  toExpr?: string;
-  /** Decimal places for `number` */
-  decimals?: number;
-}
-
-/** Shared dispatcher used by all three preparers (list, view-table, part-
- *  table).  DSL type → ColumnKind.  Extracted from the three identical
- *  switch statements in the old code.  Caller decides title / key /
- *  valueExpr / testIdExpr / toExpr — those are call-site-specific. */
-export function columnKindForField(
-  t: { kind: string; name?: string },
-  target?: string,
-  aggregatesByName?: ReadonlySet<string>,
-): { kind: ColumnKind; decimals?: number } {
-  if (t.kind === "enum") return { kind: "enum" };
-  if (t.kind === "id") {
-    if (target && aggregatesByName?.has(target)) return { kind: "id-link" };
-    return { kind: "id" };
-  }
-  if (t.kind === "primitive") {
-    if (t.name === "datetime") return { kind: "datetime" };
-    if (t.name === "bool") return { kind: "bool" };
-    if (t.name === "int" || t.name === "long") return { kind: "number", decimals: 0 };
-    if (t.name === "decimal") return { kind: "number", decimals: 2 };
-  }
-  return { kind: "string" };
-}
-
-/** A breadcrumb segment.  `to` is undefined for the current-page
- *  segment (rendered as plain text); otherwise rendered as an
- *  Anchor link. */
-export interface BreadcrumbSegmentVM {
-  label: string;
-  to?: string;
-}
 
 /** Theme view-model — semantic design tokens, framework-neutral.
  *  Each pack's `theme` template projects these tokens to its idiom:
  *  Mantine emits a `createTheme(...)` config with the shade arrays
- *  baked in; shadcn (Phase 2) will emit CSS variables on :root.
- *  Defaults are applied by the preparer so every generated app
- *  gets a coherent baseline even when the DSL declares no
- *  `theme { ... }` block. */
+ *  baked in; shadcn emits CSS variables on :root; MUI / chakra use
+ *  their own theming APIs.  Defaults are applied by the preparer so
+ *  every generated app gets a coherent baseline even when the DSL
+ *  declares no `theme { ... }` block. */
 export interface ThemeVM {
   /** 10-shade brand colour ramp.  Index 6 anchors the user's input
    *  hex; the rest are interpolated against white (lighter half) and
@@ -163,27 +105,6 @@ export interface AppShellVM {
   navSections: NavSectionVM[];
 }
 
-/** Trivial VM for main.tsx — no decisions, but routed through the
- *  pack so a future shadcn pack can swap the provider chain
- *  (MantineProvider + ModalsProvider → shadcn's Toaster + Sonner). */
-export interface MainVM {
-  // No fields today; reserved for shape stability.
-}
-
-/** Top-level view-model for the home page (landing). */
-export interface HomeVM {
-  /** Humanised system name for the eyebrow label. */
-  systemNameHuman: string;
-  aggregateCount: number;
-  workflowCount: number;
-  viewCount: number;
-  /** Slug of the first aggregate, used as the target of the "Browse
-   *  the sidebar →" link.  Undefined when the deployable has no
-   *  aggregates (in practice empty deployables don't generate
-   *  React projects, but the field is optional for safety). */
-  firstAggregateSlug?: string;
-}
-
 /** A single form input.  Picked per field type by the preparer:
  *  string → field-input-string, int/long → field-input-int, etc.
  *  Value-objects compose recursively: the preparer returns the
@@ -220,290 +141,4 @@ export interface FormFieldVM {
   /** Recursive children for value-object Fieldsets.  Renderer walks
    *  these, pre-renders each, joins into `innerHtml`. */
   children?: FormFieldVM[];
-}
-
-/** Top-level VM for an aggregate's `new` page. */
-export interface NewPageVM {
-  aggregateName: string;
-  aggregateNameCamel: string;
-  slug: string;
-  humanAgg: string;
-  humanAggLower: string;
-  humanPlural: string;
-  /** Symbol names for the `@mantine/core` import line.  The Mantine
-   *  template splices via `{{join mantineImports ", "}}`; shadcn
-   *  pack ignores it (its own template has fixed imports). */
-  mantineImports: string[];
-  /** Pre-formatted import lines for cross-aggregate `useAllX()`
-   *  hooks the form's id-selects reference. */
-  idHookImportLines: string[];
-  /** Pre-formatted const declarations calling those hooks inside
-   *  the page function body. */
-  idHookCalls: string[];
-  /** "useForm" or "useForm, Controller" for the RHF import. */
-  useFormImports: string;
-  /** Destructured argument list for the useForm() return — either
-   *  with `control` (when any field needs Controller) or without. */
-  destructuredHookFields: string;
-  /** initialValuesTs() result — TS object literal for RHF defaults. */
-  defaultValuesTs: string;
-  /** One FormFieldVM per non-optional source field (preparer filters
-   *  optional fields out of the create form, matching legacy
-   *  buildNewPage behaviour).  Renderer pre-renders each into HTML
-   *  and slots them via {{{this}}} loops. */
-  fields: FormFieldVM[];
-}
-
-/** Top-level VM for one operation's modal-form pair (the
- *  `function openXModal` + `function XForm` block emitted at
- *  module scope after a detail page's default export).  Phase 1.4
- *  ports this so the modal forms render through pack templates,
- *  reusing the same field-input-* set as page-new. */
-export interface OperationModalVM {
-  aggregateName: string;
-  slug: string;
-  /** Raw camelCase op name. */
-  opName: string;
-  /** PascalCase variant for type / function identifiers. */
-  opPascal: string;
-  /** Humanised label for modal title + submit-button text. */
-  humanOp: string;
-  /** Whether this op has any parameters.  When false, the template
-   *  emits a "This operation has no parameters." placeholder. */
-  hasParams: boolean;
-  /** Pre-formatted const declarations for `useAllX()` hooks any
-   *  Id<X> param's select references. */
-  idHookCalls: string[];
-  /** Destructured argument list for useForm(). */
-  destructured: string;
-  /** initialValuesTs() result for the op's params. */
-  defaultValuesTs: string;
-  /** One FormFieldVM per param. */
-  fields: FormFieldVM[];
-}
-
-/** Top-level VM for a per-workflow form page. */
-export interface WorkflowFormVM {
-  /** PascalCase workflow name (drives `<Wf>Request` / `use<Wf>Workflow`). */
-  workflowPascal: string;
-  /** PascalCase workflow page-component name. */
-  componentName: string;
-  /** Snake-case slug (URL + testid). */
-  slug: string;
-  /** Humanised workflow label for the title / breadcrumbs / toast. */
-  humanWorkflow: string;
-  mantineImports: string[];
-  idHookImportLines: string[];
-  idHookCalls: string[];
-  useFormImports: string;
-  destructured: string;
-  defaultValuesTs: string;
-  /** Whether the workflow has any parameters; when false the
-   *  template emits a "This workflow has no parameters." line. */
-  hasParams: boolean;
-  fields: FormFieldVM[];
-}
-
-/** A single workflow parameter for the workflows index card. */
-export interface WorkflowCardParamVM {
-  /** Raw param name (camelCase) — used in testids. */
-  name: string;
-  /** Humanised label ("Customer Id"). */
-  humanName: string;
-  /** JSON-quoted type-label string ready to splice as a JS string
-   *  literal — e.g. `"string"` or `"Id<Product>"`.  Quoted so JSX
-   *  doesn't try to parse `<Product>` as an opening tag. */
-  typeLabelJson: string;
-}
-
-/** A single workflow listed on the workflows index page. */
-export interface WorkflowCardVM {
-  slug: string;
-  humanWorkflow: string;
-  /** Structured per-param data.  Each pack's template iterates and
-   *  renders in its own idiom. */
-  params: WorkflowCardParamVM[];
-  /** True when the workflow declares zero parameters — the
-   *  template emits a "No parameters." note instead. */
-  hasParams: boolean;
-}
-
-/** Workflows index page (the /workflows route). */
-export interface WorkflowsIndexVM {
-  cards: WorkflowCardVM[];
-}
-
-/** A single view listed on the views index page. */
-export interface ViewCardVM {
-  slug: string;
-  humanView: string;
-  /** Pre-formatted shape line — either "Source: <Aggregate>" for
-   *  shorthand views or "Custom shape: <field names>" for full-form. */
-  shapeLine: string;
-}
-
-/** Views index page (the /views route). */
-export interface ViewsIndexVM {
-  cards: ViewCardVM[];
-}
-
-/** Per-view table page.  Columns carry semantic descriptors so pack
- *  templates dispatch to cell partials directly via
- *  `{{> (concat "cell-" kind)}}`.  Replaces old `columnHeaders + cells`. */
-export interface ViewTablePageVM {
-  componentName: string;
-  hookName: string;
-  slug: string;
-  humanView: string;
-  columns: ColumnVM[];
-}
-
-/** A single field-row inside a detail page's main info card.  Each
- *  row picks a `field-row-*` template per-pack (e.g. `field-row-id`,
- *  `field-row-datetime`, `field-row-valueobject`) and is rendered
- *  in TS by the preparer, then injected into the page VM as
- *  `rowHtml`.  Same TS-side composition pattern as cells. */
-export interface FieldRowVM {
-  /** Logical template name to render for this row. */
-  template: string;
-  /** Humanised label that appears in the left column of the
-   *  KeyValueRow (or pack equivalent). */
-  label: string;
-  /** Stable per-field testid for Playwright drivers — pack-invariant
-   *  by construction so e2e tests survive pack swaps. */
-  testId: string;
-  /** JS expression evaluating to the field's raw value in the
-   *  surrounding scope (typically `data.<field>`). */
-  valueExpr: string;
-  /** Link target (template-string expression) for `field-row-id-link`
-   *  rows; undefined for non-link rows. */
-  toExpr?: string;
-  /** Decimal precision for number rows. */
-  decimals?: number;
-  /** For value-object field-row rendering: per-VO-field display
-   *  data ({ humanLabel, testId, valueExpr }) the template
-   *  iterates and renders in its pack's idiom (Mantine <Text> /
-   *  shadcn Tailwind div).  Replaces the older `innerHtml` slot
-   *  which baked Mantine JSX into the preparer. */
-  voFields?: { humanLabel: string; testId: string; valueExpr: string }[];
-}
-
-/** A nested-collection part-table inside a detail page.  E.g.
- *  Order.lines (`contains lines: OrderLine[]`) emits one PartTableVM.
- *  Columns carry semantic descriptors so pack templates dispatch to
- *  cell partials directly via `{{> (concat "cell-" kind)}}`.
- *  Replaces old `columnHeaders + cells`. */
-export interface PartTableVM {
-  /** Display name / containment slot ("lines"). */
-  name: string;
-  /** Humanised section title ("Lines", "Order Items"). */
-  humanName: string;
-  /** Column descriptors in source order.  Each carries title, kind,
-   *  testIdExpr, valueExpr and optional toExpr / decimals. */
-  columns: ColumnVM[];
-  /** Stable testid for the wrapping element. */
-  testId: string;
-  /** JS expression for the array on `data` to map over (e.g.
-   *  `data.lines`). */
-  arrayExpr: string;
-}
-
-/** A single operation button rendered in the detail page header
- *  group.  The first op gets variant=filled (primary), subsequent
- *  ops get variant=light, so the most-likely "next step" pops
- *  visually. */
-export interface OperationButtonVM {
-  /** Raw camelCase op name (e.g. "addLine") — used for testid + JS
-   *  identifier construction. */
-  name: string;
-  /** Humanised button label ("Add Line"). */
-  humanName: string;
-  /** "filled" for the leading op, "light" for the rest. */
-  variant: string;
-  /** Tabler icon component name (e.g. "IconPlus") or undefined. */
-  icon?: string;
-  /** Stable testid. */
-  testId: string;
-}
-
-/** Top-level view-model for the detail page. */
-export interface DetailPageVM {
-  /** PascalCase aggregate name — drives the React component export
-   *  name (`OrderDetail`). */
-  aggregateName: string;
-  /** camelCase aggregate name (`order`) for JS identifiers. */
-  aggregateNameCamel: string;
-  /** Snake-case plural slug ("orders") — drives testid prefixes
-   *  and link targets. */
-  slug: string;
-  /** Singular humanised label ("Order") for the type-eyebrow. */
-  humanAgg: string;
-  /** Lowercase singular ("order") for alert / not-found copy. */
-  humanAggLower: string;
-  /** Plural humanised ("Orders") for the breadcrumb. */
-  humanPlural: string;
-  /** JS expression for the page title — either `data.<displayField>`
-   *  when the aggregate declares one, or a short id slice. */
-  titleExpr: string;
-  /** Field rows in source order. */
-  fieldRows: FieldRowVM[];
-  /** Nested part-tables in source order. */
-  parts: PartTableVM[];
-  /** Operation buttons (empty when the aggregate has no public ops). */
-  opButtons: OperationButtonVM[];
-  /** Imports lines for `useXById`, `useOpY`, request-type symbols,
-   *  and any cross-aggregate `useAll<X>()` hooks the operation
-   *  modals reference.  Pre-formatted as full `import ... from "...";`
-   *  strings so the template just splices them in. */
-  apiImportLines: string[];
-  /** Tabler icon names to import — at minimum IconAlertCircle and
-   *  IconAlertTriangle for the error / not-found alerts; plus one
-   *  per operation button that has a verb-mapped icon. */
-  tablerIcons: string[];
-  /** Whether any operation form needs RHF's Controller (for
-   *  Select / Switch / NumberInput) or just register (TextInput). */
-  needsController: boolean;
-  /** Per-op modal-form function blocks, pre-rendered as TSX strings
-   *  by the renderer (which calls renderOperationModal once per op).
-   *  Templates emit them verbatim at module scope after the default
-   *  export. */
-  operationsModalsTsx: string[];
-  /** Per-op `useXOrder(id ?? "")` mutation-hook lines, formatted as
-   *  TS const declarations.  Templates emit them inside the page
-   *  function body. */
-  opHookCallLines: string[];
-}
-
-/** Top-level view-model for an aggregate list page. */
-export interface ListPageVM {
-  /** PascalCase aggregate name — drives the React component export
-   *  name (e.g. "Customer" → `function CustomerList()`). */
-  aggregateName: string;
-  /** Snake-case plural slug — drives URL paths and testid prefixes
-   *  ("customers" → "/customers", "customers-list-create"). */
-  slug: string;
-  /** Plural humanised label for the page title and breadcrumb tail
-   *  ("Customers", "Order Lines"). */
-  humanPlural: string;
-  /** Plural humanised lowercase label for empty-state / alert copy
-   *  ("customers", "order lines"). */
-  humanPluralLower: string;
-  /** Singular humanised lowercase label for the "+ New <thing>"
-   *  button copy ("customer", "order line"). */
-  humanSingularLower: string;
-  /** Breadcrumb trail for the list page — typically a 2-segment
-   *  "Home / <Plural>" trail. */
-  breadcrumbs: BreadcrumbSegmentVM[];
-  /** Column descriptors in row order.  Each entry carries the header
-   *  title, semantic kind, and cell expression data so pack templates
-   *  can dispatch to `{{> (concat "cell-" kind)}}` directly without
-   *  TS-side pre-rendering.  Replaces the old `columnHeaders + cells`
-   *  pair. */
-  columns: ColumnVM[];
-  /** Name of the React Query hook that fetches the list, e.g.
-   *  "useAllCustomers".  Imported from `../../api/<camel>.ts`. */
-  hookName: string;
-  /** camelCase aggregate name for the api-module import path
-   *  (`../../api/<camel>` → `../../api/customer`). */
-  hookImportPath: string;
 }
