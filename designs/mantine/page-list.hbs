@@ -50,14 +50,14 @@ export default function {{aggregateName}}List() {
             <Table striped highlightOnHover stickyHeader>
               <Table.Thead>
                 <Table.Tr>
-                  {{#each columnHeaders}}<Table.Th>{{this}}</Table.Th>
+                  {{#each columns}}<Table.Th>{{title}}</Table.Th>
                   {{/each}}
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
                 {q.data.map((row) => (
                   <Table.Tr key={row.id} data-testid={`{{slug}}-row-${row.id}`} style=\{{ cursor: "pointer" }} onClick={() => navigate(`/{{slug}}/${row.id}`)}>
-                    {{#each columns}}{{{cellHtml}}}
+                    {{#each columns}}{{> (concat "cell-" kind)}}
                     {{/each}}
                   </Table.Tr>
                 ))}

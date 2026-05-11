@@ -3,14 +3,14 @@
 //
 // Each page kind has a single entry point here that:
 //   1. Calls the matching preparer to build the page VM.
-//   2. Pre-renders every component VM (cells, fields, ...) inside
-//      the page VM through the pack so the templates produce
-//      already-rendered HTML strings.
-//   3. Renders the page template with the enriched VM.
+//   2. Pre-renders component VMs that still need TS-side composition
+//      (field rows, op buttons, form fields) while letting table pages
+//      dispatch cell partials directly via `{{> (concat "cell-" kind)}}`.
+//   3. Renders the page template with the VM.
 //
-// The pre-render step is what keeps page templates flat — a list
-// page emits `{{{cellHtml}}}` per column, no Handlebars partials
-// or `{{> (lookup ...) ...}}` indirection.
+// List / view-table / part-table cells no longer pre-render in TS;
+// preparers emit `columns: ColumnVM[]` and pack templates select the
+// right cell-* partial at render time.
 // ---------------------------------------------------------------------------
 
 import type {
@@ -35,33 +35,21 @@ import { prepareViewsIndexVM } from "./preparers/views-index.js";
 import { prepareWorkflowFormVM } from "./preparers/workflow-form.js";
 import { prepareWorkflowsIndexVM } from "./preparers/workflow-index.js";
 import type {
-  CellVM,
   FormFieldVM,
-  ListPageVM,
   PartTableVM,
 } from "./view-models.js";
 
-/** A column slot enriched with its already-rendered cell HTML.  Page
- *  templates iterate `columns` and emit `{{{cellHtml}}}` for each. */
-interface RenderedColumn {
-  header: string;
-  cellHtml: string;
-  cell: CellVM;
-}
-
 /** Render an aggregate list page through the loaded pack.  Returns
- *  the final TSX source for `src/pages/<plural>/list.tsx`. */
+ *  the final TSX source for `src/pages/<plural>/list.tsx`.
+ *  Columns carry semantic descriptors; pack templates dispatch to
+ *  `{{> (concat "cell-" kind)}}` directly — no TS-side pre-render. */
 export function renderListPage(
   agg: AggregateIR,
   aggregatesByName: Map<string, AggregateIR>,
   pack: LoadedPack,
 ): string {
   const vm = prepareListPageVM(agg, aggregatesByName);
-  const columns = enrichColumns(vm, pack);
-  // Final page context = base VM + the rendered columns array.
-  // Templates reference `vm.aggregateName`, `vm.slug`,
-  // `vm.breadcrumbs`, `columns[i].header`, `columns[i].cellHtml`.
-  return pack.render("page-list", { ...vm, columns });
+  return pack.render("page-list", vm);
 }
 
 /** Render a project-shell file through the loaded pack — used for
@@ -177,11 +165,9 @@ export function renderDetailPage(
 }
 
 function renderPartTable(part: PartTableVM, pack: LoadedPack): string {
-  const cells = part.cells.map((cell) => ({
-    ...cell,
-    cellHtml: pack.render(cell.template, cell),
-  }));
-  return pack.render("part-table", { ...part, cells });
+  // Columns carry semantic descriptors; the template dispatches
+  // `{{> (concat "cell-" kind)}}` — no TS-side pre-render needed.
+  return pack.render("part-table", part);
 }
 
 /** Render a single form field through the loaded pack.  Recursive
@@ -254,10 +240,9 @@ export function renderViewsIndex(
   return pack.render("views-index", vm);
 }
 
-/** Render a per-view table page through the loaded pack.  Cells
- *  reuse the page-list cell-* templates by binding their VMs to
- *  view-scoped testid + access expressions (`row.<col>` and
- *  `view-<slug>-row-${idx}-<col>`). */
+/** Render a per-view table page through the loaded pack.  Columns
+ *  carry semantic descriptors; the template dispatches
+ *  `{{> (concat "cell-" kind)}}` directly — no TS-side pre-render. */
 export function renderViewTablePage(
   view: ViewIR,
   ctx: BoundedContextIR,
@@ -265,22 +250,6 @@ export function renderViewTablePage(
   pack: LoadedPack,
 ): string {
   const vm = prepareViewTablePageVM(view, ctx, aggregatesByName);
-  const cells = vm.cells.map((cell) => ({
-    ...cell,
-    cellHtml: pack.render(cell.template, cell),
-  }));
-  return pack.render("view-table", { ...vm, cells });
+  return pack.render("view-table", vm);
 }
 
-function enrichColumns(vm: ListPageVM, pack: LoadedPack): RenderedColumn[] {
-  // Headers and cells are index-aligned by construction in the
-  // preparer.  Walk both arrays in lockstep.
-  const out: RenderedColumn[] = [];
-  for (let i = 0; i < vm.cells.length; i++) {
-    const cell = vm.cells[i]!;
-    const header = vm.columnHeaders[i] ?? "";
-    const cellHtml = pack.render(cell.template, cell);
-    out.push({ header, cellHtml, cell });
-  }
-  return out;
-}
