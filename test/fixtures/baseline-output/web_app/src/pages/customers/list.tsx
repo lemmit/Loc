@@ -1,79 +1,61 @@
-// Auto-generated.
-import { Link, useNavigate } from "react-router-dom";
-import { Stack, Title, Group, Button, Table, Skeleton, Alert, Anchor, Badge, Breadcrumbs, Center, Text, Paper } from "@mantine/core";
-import { IconPlus, IconAlertCircle } from "@tabler/icons-react";
+// Auto-generated.  Do not edit by hand.
+import { useNavigate, Link } from "react-router-dom";
+import { IdValue } from "../../lib/format";
+import { Alert, Anchor, Breadcrumbs, Button, Center, Group, Paper, Skeleton, Stack, Table, Text, Title } from "@mantine/core";
 import { useAllCustomers } from "../../api/customer";
-import { IdValue, DateTimeValue, BoolValue, NumberValue, EmptyValue } from "../../lib/format";
 
 export default function CustomerList() {
   const navigate = useNavigate();
-  const q = useAllCustomers();
-  const count = q.data?.length ?? 0;
+  const customerAll = useAllCustomers();
   return (
-    <Stack data-testid="customers-list" gap="md">
-      <Breadcrumbs data-testid="customers-list-breadcrumbs">
+    <Stack data-testid="customers-list">
+      <Breadcrumbs>
         <Anchor component={Link} to="/">Home</Anchor>
-<Text>Customers</Text>
+        <Text>Customers</Text>
       </Breadcrumbs>
-      <Group justify="space-between" align="flex-end">
-        <Stack gap={2}>
-          <Title order={2}>Customers</Title>
-          <Text size="sm" c="dimmed">{q.isLoading ? "Loading…" : count === 1 ? "1 record" : count + " records"}</Text>
-        </Stack>
-        <Button leftSection={<IconPlus size={16} stroke={2} />} onClick={() => navigate("/customers/new")} data-testid="customers-list-create">New customer</Button>
+      <Group justify="space-between">
+        <Title order={2}>Customers</Title>
+        <Button onClick={() => navigate("/customers/new")} data-testid="customers-list-create">New customer</Button>
       </Group>
-      {q.isLoading && (
-        <Paper p="md">
+      <>
+        { customerAll.isLoading && (
           <Stack gap="xs">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <Skeleton key={i} height={28} radius="sm" />
-            ))}
-          </Stack>
-        </Paper>
-      )}
-      {q.isError && <Alert color="red" variant="light" icon={<IconAlertCircle size={18} />} title="Couldn't load customers">{(q.error as Error).message}</Alert>}
-      {q.data && q.data.length === 0 && (
-        <Paper p="xl" data-testid="customers-list-empty">
-          <Center mih={160}>
-            <Stack gap="xs" align="center">
-              <Text c="dimmed">No customers yet.</Text>
-              <Button variant="light" onClick={() => navigate("/customers/new")}>
-                Create your first customer
-              </Button>
-            </Stack>
-          </Center>
-        </Paper>
-      )}
-      {q.data && q.data.length > 0 && (
-        <Paper p={0} style={{ overflow: "hidden" }}>
-          <Table.ScrollContainer minWidth={500}>
+    { Array.from({ length: 5 }).map((_, i) => (
+    <Skeleton key={i} height={ 28 } radius="sm" />
+    )) }
+    </Stack>
+        ) }
+        { customerAll.isError && (
+          <Alert color="red" variant="light">Couldn't load customers</Alert>
+        ) }
+        { customerAll.data && customerAll.data.length === 0 && (
+          <Center mih={200}><Text c="dimmed">No customers yet.</Text></Center>
+        ) }
+        { customerAll.data && customerAll.data.length > 0 && (
+          <Paper p="md">
             <Table striped highlightOnHover stickyHeader>
               <Table.Thead>
                 <Table.Tr>
-                  <Table.Th>Id</Table.Th>
-<Table.Th>Username</Table.Th>
-<Table.Th>Email</Table.Th>
-<Table.Th>Age</Table.Th>
+                  <Table.Th>ID</Table.Th>
+                  <Table.Th>Username</Table.Th>
+                  <Table.Th>Email</Table.Th>
+                  <Table.Th>Age</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {q.data.map((row) => (
-                  <Table.Tr key={row.id} data-testid={`customers-row-${row.id}`} style={{ cursor: "pointer" }} onClick={() => navigate(`/customers/${row.id}`)}>
-                    <Table.Td><Anchor component={Link} to={`/customers/${row.id}`} data-testid={`customers-row-${row.id}-link`}><IdValue id={row.id} /></Anchor></Table.Td>
-
-<Table.Td data-testid={`customers-row-${row.id}-username`}>{ row.username === null || row.username === undefined || row.username === "" ? <EmptyValue /> : String(row.username)}</Table.Td>
-
-<Table.Td data-testid={`customers-row-${row.id}-email`}>{ row.email === null || row.email === undefined || row.email === "" ? <EmptyValue /> : String(row.email)}</Table.Td>
-
-<Table.Td data-testid={`customers-row-${row.id}-age`} style={{ textAlign: "right" }}><NumberValue value={row.age} /></Table.Td>
-
+                { customerAll.data.map((row) => (
+                  <Table.Tr key={ row.id } data-testid={ ("customers-row-" + row.id) }>
+                    <Table.Td><Link to={`/customers/${ row.id }`}><IdValue id={ row.id } /></Link></Table.Td>
+                    <Table.Td><Text>{row.username}</Text></Table.Td>
+                    <Table.Td><Text>{row.email}</Text></Table.Td>
+                    <Table.Td><Text>{row.age}</Text></Table.Td>
                   </Table.Tr>
-                ))}
+                )) }
               </Table.Tbody>
             </Table>
-          </Table.ScrollContainer>
-        </Paper>
-      )}
+          </Paper>
+        ) }
+      </>
     </Stack>
   );
 }

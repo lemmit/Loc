@@ -84,6 +84,27 @@ export interface PageEmitContext {
   pack: LoadedPack;
 }
 
+/** Slice C2 — compute the relative-path prefix from a page's emit
+ *  path back to the `src/` root.  Used by the walker shell to
+ *  rewrite per-pack `../api/X` and `../lib/format` imports so they
+ *  resolve correctly regardless of how deep the page lives.
+ *
+ *    src/pages/x.tsx                 → "../"
+ *    src/pages/orders/list.tsx       → "../../"
+ *    src/pages/views/active_orders/x → "../../../"
+ *
+ *  Robust to the legacy `src/` prefix that some emitter call sites
+ *  pass; the leading "src/" segment is stripped before counting. */
+function computeSrcImportPrefix(emitPath: string): string {
+  let path = emitPath;
+  if (path.startsWith("src/")) path = path.slice(4);
+  // Count directory hops from `src/` (root) to the file's parent.
+  // `pages/x.tsx` has one segment of directories (`pages/`) → 1 hop.
+  // `pages/orders/list.tsx` has two (`pages/orders/`) → 2 hops.
+  const dirCount = path.split("/").length - 1;
+  return "../".repeat(Math.max(dirCount, 1));
+}
+
 /** Slice A4 — derived map: aggregate name → owning bounded context.
  *  Required by `Form(of: <Agg>)` and `IdLink(of: <Agg>)` so the
  *  walker can resolve enum / value-object types declared alongside
@@ -195,8 +216,16 @@ export function emitPagesForUi(
     // (`body: List(of: Order)`, `body: Form(creates: T)`, etc.)
     // get one inferred from the body shape so the same renderer
     // table fires.
+    //
+    // Slice C1 — pages with `scaffoldOrigin` set BUT a walker-
+    // eligible body (rewritten by the scaffold expander) skip the
+    // archetype renderer and fall through to the walker branch
+    // below.  `scaffoldOrigin` stays set so the per-aggregate
+    // page-object emitter still fires (preserves the rich
+    // `e2e/pages/<agg>.ts` helper classes); only the page TSX
+    // changes path.
     const origin = page.scaffoldOrigin ?? inferBodyDispatch(page.body);
-    if (origin) {
+    if (origin && !page.expandedFromScaffold) {
       emitScaffoldPage(page, origin, ctx, ui, {
         aggregates: aggsForHome,
         workflows: wfsForHome,
@@ -211,19 +240,21 @@ export function emitPagesForUi(
     // goes to `src/pages/<name-snake>.tsx`; App.tsx routing comes
     // through `deriveExtraRoutesFromUi` (Slice 11.1).
     if (isWalkableLayoutBody(page.body, userComponents, helperNames)) {
+      // Slice C1 — `page.emitPath` overrides the default
+      // `src/pages/<page-snake>.tsx` location.  Set by the
+      // scaffold expander to land rewritten pages at their
+      // conventional archetype path (`src/pages/<plural>/<arch>.tsx`)
+      // so URL/file shape stays stable across the C2 default flip.
+      const emitPath = page.emitPath ?? `src/pages/${snake(page.name)}.tsx`;
+      // Slice C2 — relative-path prefix from the emitted TSX back
+      // to `src/`.  Default-located walker pages (`src/pages/<x>.tsx`)
+      // need 1 hop (`"../"`); scaffold-expanded pages at
+      // `src/pages/<plural>/<arch>.tsx` need 2 hops (`"../../"`).
+      // Computed from the depth difference between emitPath and
+      // `src/`.
+      const srcImportPrefix = computeSrcImportPrefix(emitPath);
       out.set(
-        `src/pages/${snake(page.name)}.tsx`,
-        // Slice 11.4 — pass the page's typed route params so the
-        // walker can resolve refs to them and the page shell can
-        // emit `useParams<{...}>()`.
-        // Slice 11.7 — also pass the page's `state {}` fields so
-        // the walker can resolve state refs and emit `useState`
-        // declarations + `setX(…)` setter calls in onClick handlers.
-        // Slice 11.12 — also pass the page's optional `title:` expr
-        // so the walker shell can emit `useEffect(() => { document.title = ... })`.
-        // Slice 11.24 — also pass the UI's api parameters so the
-        // walker can inject React Query hooks for body refs of
-        // the form `<paramName>.<aggregate>.<op>`.
+        emitPath,
         renderCustomLayoutPage(
           page.name,
           page.body!,
@@ -236,6 +267,7 @@ export function emitPagesForUi(
           ctx.aggregatesByName,
           buildBcByAggregate(ctx),
           ui.helperImports,
+          srcImportPrefix,
         ),
       );
       continue;
