@@ -607,10 +607,10 @@ export default function App(): JSX.Element {
   );
 
   return (
-    <AppShell header={{ height: 48 }} footer={{ height: 28 }} padding={0}>
+    <AppShell header={{ height: { base: 96, sm: 48 } }} footer={{ height: 28 }} padding={0}>
       <AppShell.Header>
-        <Group h="100%" px="md" justify="space-between">
-          <Group gap="md">
+        <Group h="100%" px="md" justify="space-between" wrap="wrap" gap="xs">
+          <Group gap="md" wrap="wrap">
             <Title order={5}>Loom Playground</Title>
             <Select
               size="xs"
@@ -654,7 +654,7 @@ export default function App(): JSX.Element {
               buildClient={buildClientRef.current}
             />
           </Group>
-          <Group gap="xs">
+          <Group gap="xs" wrap="wrap">
             <Button
               size="xs"
               onClick={runGenerate}
@@ -692,7 +692,17 @@ export default function App(): JSX.Element {
           </Group>
         </Group>
       </AppShell.Header>
-      <AppShell.Main style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 76px)" }}>
+      <AppShell.Main style={{
+        display: "flex",
+        flexDirection: "column",
+        // Subtract the header + footer heights via the Mantine
+        // AppShell CSS vars so the layout adapts when the header
+        // grows to fit the toolbar on narrow viewports (mobile).
+        // Hardcoding 76px previously caused the second-row toolbar
+        // content to overlay the right pane's tab strip.
+        height:
+          "calc(100dvh - var(--app-shell-header-height, 48px) - var(--app-shell-footer-height, 28px))",
+      }}>
         <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
           {/* Editor pane */}
           <Box style={{ flex: 1, minWidth: 0, borderRight: "1px solid var(--mantine-color-dark-4)" }}>
