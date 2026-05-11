@@ -3,7 +3,7 @@ import type {
   DeployableIR,
   SystemIR,
 } from "../../ir/loom-ir.js";
-import { pascal, snake } from "../../util/naming.js";
+import { pascal, snake, plural } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // API controller emission for Phoenix LiveView / Ash.
@@ -49,7 +49,7 @@ export interface ApiEmitArgs {
 }
 
 export interface ApiRoute {
-  method: "get" | "post" | "put" | "delete";
+  method: "get" | "post" | "put" | "patch" | "delete";
   /**
    * Path inside `scope "/api"` — e.g. "/workflows/place_order".
    * Paths that start with `!root:` (e.g. `!root:/health`) are outside
@@ -123,6 +123,61 @@ export function emitApiControllers(args: ApiEmitArgs): ApiEmitResult {
         path: `/views/${actionSnake}`,
         controller: "ViewsController",
         action: `:${actionSnake}`,
+      });
+    }
+  }
+
+  // --- Aggregates controller ------------------------------------------------
+  // Collect all aggregates across all contexts.
+  const allAggregates: Array<{ ctx: BoundedContextIR; agg: import("../../ir/loom-ir.js").AggregateIR }> = [];
+  for (const ctx of contexts) {
+    for (const agg of ctx.aggregates) {
+      allAggregates.push({ ctx, agg });
+    }
+  }
+
+  if (hasServes && allAggregates.length > 0) {
+    const controllerPath = `lib/${appName}_web/controllers/aggregates_controller.ex`;
+    files.set(controllerPath, renderAggregatesController(allAggregates, appModule));
+
+    for (const { agg } of allAggregates) {
+      const aggSnake = snake(agg.name);
+      const aggPlural = snake(plural(agg.name));
+
+      // GET /aggregates/<plural>  → list
+      apiRoutes.push({
+        method: "get",
+        path: `/aggregates/${aggPlural}`,
+        controller: "AggregatesController",
+        action: `:list_${aggPlural}`,
+      });
+      // POST /aggregates/<plural>  → create
+      apiRoutes.push({
+        method: "post",
+        path: `/aggregates/${aggPlural}`,
+        controller: "AggregatesController",
+        action: `:create_${aggSnake}`,
+      });
+      // GET /aggregates/<plural>/:id  → get
+      apiRoutes.push({
+        method: "get",
+        path: `/aggregates/${aggPlural}/:id`,
+        controller: "AggregatesController",
+        action: `:get_${aggSnake}`,
+      });
+      // PATCH /aggregates/<plural>/:id  → update
+      apiRoutes.push({
+        method: "patch",
+        path: `/aggregates/${aggPlural}/:id`,
+        controller: "AggregatesController",
+        action: `:update_${aggSnake}`,
+      });
+      // DELETE /aggregates/<plural>/:id  → destroy
+      apiRoutes.push({
+        method: "delete",
+        path: `/aggregates/${aggPlural}/:id`,
+        controller: "AggregatesController",
+        action: `:destroy_${aggSnake}`,
       });
     }
   }
@@ -293,6 +348,77 @@ function renderViewAction(
         |> put_status(:internal_server_error)
         |> json(%{error: inspect(reason), trace_id: trace_id})
     end
+  end`;
+}
+
+// ---------------------------------------------------------------------------
+// AggregatesController
+// ---------------------------------------------------------------------------
+
+function renderAggregatesController(
+  aggregates: Array<{ ctx: BoundedContextIR; agg: import("../../ir/loom-ir.js").AggregateIR }>,
+  appModule: string,
+): string {
+  const webModule = `${appModule}Web`;
+
+  const actions = aggregates
+    .map(({ ctx, agg }) => renderAggregateActions(ctx, agg, appModule))
+    .join("\n\n");
+
+  return `# Auto-generated.
+defmodule ${webModule}.AggregatesController do
+  use ${webModule}, :controller
+
+  @moduledoc """
+  HTTP entry points for all aggregate CRUD code-interface functions.
+  Each action delegates to the matching Ash domain code-interface entry.
+  """
+
+${actions}
+end
+`;
+}
+
+function renderAggregateActions(
+  ctx: BoundedContextIR,
+  agg: import("../../ir/loom-ir.js").AggregateIR,
+  appModule: string,
+): string {
+  const aggSnake = snake(agg.name);
+  const aggPlural = snake(plural(agg.name));
+  const contextModule = `${appModule}.${pascal(ctx.name)}`;
+
+  return `  @doc "GET /api/aggregates/${aggPlural}"
+  def list_${aggPlural}(conn, _params) do
+    records = ${contextModule}.list_${aggPlural}!()
+    json(conn, records)
+  end
+
+  @doc "GET /api/aggregates/${aggPlural}/:id"
+  def get_${aggSnake}(conn, %{"id" => id}) do
+    record = ${contextModule}.get_${aggSnake}!(id)
+    json(conn, record)
+  end
+
+  @doc "POST /api/aggregates/${aggPlural}"
+  def create_${aggSnake}(conn, params) do
+    record = ${contextModule}.create_${aggSnake}!(params)
+    conn
+    |> put_status(:created)
+    |> json(record)
+  end
+
+  @doc "PATCH /api/aggregates/${aggPlural}/:id"
+  def update_${aggSnake}(conn, %{"id" => id} = params) do
+    attrs = Map.drop(params, ["id"])
+    record = ${contextModule}.update_${aggSnake}!(id, attrs)
+    json(conn, record)
+  end
+
+  @doc "DELETE /api/aggregates/${aggPlural}/:id"
+  def destroy_${aggSnake}(conn, %{"id" => id}) do
+    ${contextModule}.destroy_${aggSnake}!(id)
+    send_resp(conn, 204, "")
   end`;
 }
 

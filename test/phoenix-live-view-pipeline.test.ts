@@ -1494,6 +1494,313 @@ describe("scaffold-form regression — Form(of:Agg) resolves fields + mount assi
 });
 
 // ---------------------------------------------------------------------------
+// Aggregates controller + router + @derive — unit tests (api-emit + domain-emit)
+// ---------------------------------------------------------------------------
+
+describe("AggregatesController emission (api-emit unit)", () => {
+  const aggCtx: BoundedContextIR = {
+    name: "Sales",
+    enums: [],
+    valueObjects: [],
+    events: [],
+    aggregates: [
+      {
+        name: "Customer",
+        idValueType: "guid",
+        fields: [
+          { name: "name", type: { kind: "primitive", name: "string" }, optional: false },
+          { name: "email", type: { kind: "primitive", name: "string" }, optional: false },
+        ],
+        contains: [],
+        derived: [],
+        invariants: [],
+        functions: [],
+        operations: [],
+        parts: [],
+        tests: [],
+      },
+    ],
+    repositories: [],
+    workflows: [],
+    views: [],
+  };
+
+  const stubDeployable: DeployableIR = {
+    name: "phoenixApp",
+    platform: "phoenixLiveView",
+    moduleNames: ["Sales"],
+    port: 4000,
+    serves: ["SalesApi"],
+    uiBindings: [],
+    moduleBindings: [],
+  };
+
+  const stubSys: SystemIR = {
+    name: "Mini",
+    modules: [],
+    deployables: [stubDeployable],
+    e2eTests: [],
+    uis: [],
+    apis: [],
+    storages: [],
+  };
+
+  it("emits aggregates_controller.ex when deployable serves an api and aggregates exist", () => {
+    const { files } = emitApiControllers({
+      contexts: [aggCtx],
+      deployable: stubDeployable,
+      sys: stubSys,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    expect(files.has("lib/phoenix_app_web/controllers/aggregates_controller.ex")).toBe(true);
+  });
+
+  it("does NOT emit aggregates_controller.ex when deployable serves nothing", () => {
+    const noServe: DeployableIR = { ...stubDeployable, serves: [] };
+    const { files } = emitApiControllers({
+      contexts: [aggCtx],
+      deployable: noServe,
+      sys: stubSys,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    expect(files.has("lib/phoenix_app_web/controllers/aggregates_controller.ex")).toBe(false);
+  });
+
+  it("aggregates_controller.ex contains list_customers action", () => {
+    const { files } = emitApiControllers({
+      contexts: [aggCtx],
+      deployable: stubDeployable,
+      sys: stubSys,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    const ctrl = files.get("lib/phoenix_app_web/controllers/aggregates_controller.ex")!;
+    expect(ctrl).toMatch(/def list_customers\(conn, _params\)/);
+    expect(ctrl).toMatch(/PhoenixApp\.Sales\.list_customers!/);
+  });
+
+  it("aggregates_controller.ex contains get_customer action", () => {
+    const { files } = emitApiControllers({
+      contexts: [aggCtx],
+      deployable: stubDeployable,
+      sys: stubSys,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    const ctrl = files.get("lib/phoenix_app_web/controllers/aggregates_controller.ex")!;
+    expect(ctrl).toMatch(/def get_customer\(conn, %\{"id" => id\}\)/);
+    expect(ctrl).toMatch(/PhoenixApp\.Sales\.get_customer!\(id\)/);
+  });
+
+  it("aggregates_controller.ex contains create_customer action", () => {
+    const { files } = emitApiControllers({
+      contexts: [aggCtx],
+      deployable: stubDeployable,
+      sys: stubSys,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    const ctrl = files.get("lib/phoenix_app_web/controllers/aggregates_controller.ex")!;
+    expect(ctrl).toMatch(/def create_customer\(conn, params\)/);
+    expect(ctrl).toMatch(/PhoenixApp\.Sales\.create_customer!\(params\)/);
+  });
+
+  it("aggregates_controller.ex contains update_customer action", () => {
+    const { files } = emitApiControllers({
+      contexts: [aggCtx],
+      deployable: stubDeployable,
+      sys: stubSys,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    const ctrl = files.get("lib/phoenix_app_web/controllers/aggregates_controller.ex")!;
+    expect(ctrl).toMatch(/def update_customer\(conn, %\{"id" => id\} = params\)/);
+    expect(ctrl).toMatch(/Map\.drop\(params, \["id"\]\)/);
+    expect(ctrl).toMatch(/PhoenixApp\.Sales\.update_customer!\(id, attrs\)/);
+  });
+
+  it("aggregates_controller.ex contains destroy_customer action", () => {
+    const { files } = emitApiControllers({
+      contexts: [aggCtx],
+      deployable: stubDeployable,
+      sys: stubSys,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    const ctrl = files.get("lib/phoenix_app_web/controllers/aggregates_controller.ex")!;
+    expect(ctrl).toMatch(/def destroy_customer\(conn, %\{"id" => id\}\)/);
+    expect(ctrl).toMatch(/PhoenixApp\.Sales\.destroy_customer!\(id\)/);
+    expect(ctrl).toMatch(/send_resp\(conn, 204, ""\)/);
+  });
+
+  it("emits 5 aggregate routes for customer (list, create, get, update, destroy)", () => {
+    const { apiRoutes } = emitApiControllers({
+      contexts: [aggCtx],
+      deployable: stubDeployable,
+      sys: stubSys,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    const listRoute = apiRoutes.find((r) => r.path === "/aggregates/customers" && r.method === "get");
+    const createRoute = apiRoutes.find((r) => r.path === "/aggregates/customers" && r.method === "post");
+    const getRoute = apiRoutes.find((r) => r.path === "/aggregates/customers/:id" && r.method === "get");
+    const updateRoute = apiRoutes.find((r) => r.path === "/aggregates/customers/:id" && r.method === "patch");
+    const destroyRoute = apiRoutes.find((r) => r.path === "/aggregates/customers/:id" && r.method === "delete");
+
+    expect(listRoute).toBeDefined();
+    expect(listRoute?.action).toBe(":list_customers");
+    expect(listRoute?.controller).toBe("AggregatesController");
+
+    expect(createRoute).toBeDefined();
+    expect(createRoute?.action).toBe(":create_customer");
+
+    expect(getRoute).toBeDefined();
+    expect(getRoute?.action).toBe(":get_customer");
+
+    expect(updateRoute).toBeDefined();
+    expect(updateRoute?.action).toBe(":update_customer");
+
+    expect(destroyRoute).toBeDefined();
+    expect(destroyRoute?.action).toBe(":destroy_customer");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Aggregates controller + router integration — via generateSystems
+// ---------------------------------------------------------------------------
+
+describe("AggregatesController router integration (orchestrator)", () => {
+  it("router.ex has aggregate routes for customers when deployable serves an api", async () => {
+    const model = await buildFixture();
+    const { files } = generateSystems(model);
+    const router = files.get("phoenix_app/lib/phoenix_app_web/router.ex")!;
+    // List and create on collection path
+    expect(router).toMatch(/get "\/aggregates\/customers", AggregatesController, :list_customers/);
+    expect(router).toMatch(/post "\/aggregates\/customers", AggregatesController, :create_customer/);
+    // Get, update, destroy on member path
+    expect(router).toMatch(/get "\/aggregates\/customers\/:id", AggregatesController, :get_customer/);
+    expect(router).toMatch(/patch "\/aggregates\/customers\/:id", AggregatesController, :update_customer/);
+    expect(router).toMatch(/delete "\/aggregates\/customers\/:id", AggregatesController, :destroy_customer/);
+  });
+
+  it("aggregates_controller.ex is in the generated file map when deployable serves an api", async () => {
+    const model = await buildFixture();
+    const { files } = generateSystems(model);
+    expect(files.has("phoenix_app/lib/phoenix_app_web/controllers/aggregates_controller.ex")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// @derive Jason.Encoder — domain-emit unit test
+// ---------------------------------------------------------------------------
+
+describe("@derive Jason.Encoder emission (domain-emit unit)", () => {
+  it("emits @derive {Jason.Encoder, only: [...]} on aggregate resource", () => {
+    const ctx: BoundedContextIR = {
+      name: "Sales",
+      enums: [],
+      valueObjects: [],
+      events: [],
+      aggregates: [
+        {
+          name: "Customer",
+          idValueType: "guid",
+          fields: [
+            { name: "name", type: { kind: "primitive", name: "string" }, optional: false },
+            { name: "email", type: { kind: "primitive", name: "string" }, optional: false },
+          ],
+          contains: [],
+          derived: [],
+          invariants: [],
+          functions: [],
+          operations: [],
+          parts: [],
+          tests: [],
+        },
+      ],
+      repositories: [],
+      workflows: [],
+      views: [],
+    };
+
+    const files = emitAggregateResources(ctx, "PhoenixApp", "phoenix_app");
+    const customerEx = files.get("lib/phoenix_app/sales/customer.ex")!;
+    expect(customerEx).toBeDefined();
+    expect(customerEx).toMatch(/@derive \{Jason\.Encoder, only: \[:id, :name, :email, :inserted_at, :updated_at\]\}/);
+  });
+
+  it("@derive includes :id and timestamps in correct positions", () => {
+    const ctx: BoundedContextIR = {
+      name: "Sales",
+      enums: [],
+      valueObjects: [],
+      events: [],
+      aggregates: [
+        {
+          name: "Order",
+          idValueType: "guid",
+          fields: [
+            { name: "total", type: { kind: "primitive", name: "decimal" }, optional: false },
+          ],
+          contains: [],
+          derived: [],
+          invariants: [],
+          functions: [],
+          operations: [],
+          parts: [],
+          tests: [],
+        },
+      ],
+      repositories: [],
+      workflows: [],
+      views: [],
+    };
+
+    const files = emitAggregateResources(ctx, "PhoenixApp", "phoenix_app");
+    const orderEx = files.get("lib/phoenix_app/sales/order.ex")!;
+    expect(orderEx).toBeDefined();
+    expect(orderEx).toMatch(/@derive \{Jason\.Encoder, only: \[:id, :total, :inserted_at, :updated_at\]\}/);
+  });
+
+  it("@derive is placed before use Ash.Resource in the module", () => {
+    const ctx: BoundedContextIR = {
+      name: "Sales",
+      enums: [],
+      valueObjects: [],
+      events: [],
+      aggregates: [
+        {
+          name: "Customer",
+          idValueType: "guid",
+          fields: [
+            { name: "name", type: { kind: "primitive", name: "string" }, optional: false },
+          ],
+          contains: [],
+          derived: [],
+          invariants: [],
+          functions: [],
+          operations: [],
+          parts: [],
+          tests: [],
+        },
+      ],
+      repositories: [],
+      workflows: [],
+      views: [],
+    };
+
+    const files = emitAggregateResources(ctx, "PhoenixApp", "phoenix_app");
+    const customerEx = files.get("lib/phoenix_app/sales/customer.ex")!;
+    const derivePos = customerEx.indexOf("@derive");
+    const usePos = customerEx.indexOf("use Ash.Resource");
+    expect(derivePos).toBeGreaterThanOrEqual(0);
+    expect(usePos).toBeGreaterThan(derivePos);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Ash 3.x compile-correctness regressions — three drift bugs the
 // phoenix-build CI job (mix compile --warnings-as-errors) would
 // surface.  Pre-empted here so unit tests catch them before CI:
