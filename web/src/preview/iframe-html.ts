@@ -80,7 +80,7 @@ function needsTailwindCdn(css?: string): boolean {
   return !!css && /^\s*@tailwind\b/m.test(css);
 }
 
-/** Tailwind Play CDN configuration — mirrors `themes/shadcn/tailwind-
+/** Tailwind Play CDN configuration — mirrors `designs/shadcn/tailwind-
  *  config.hbs` so the JIT compiler sees the same theme extension
  *  (CSS-variable colour palette, custom radius scale) the generated
  *  build would have used at compile time.  Inlined as a `<script>`

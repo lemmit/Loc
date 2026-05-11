@@ -21,7 +21,10 @@ on:
     paths:
       - 'web/**'
       - 'src/**'
-      - 'themes/**'
+      - 'designs/**'
+      - 'vite/**'
+      - 'api/**'
+      - 'docker/**'
       - 'package.json'
       - 'package-lock.json'
       - 'langium-config.json'
@@ -31,7 +34,10 @@ on:
     paths:
       - 'web/**'
       - 'src/**'
-      - 'themes/**'
+      - 'designs/**'
+      - 'vite/**'
+      - 'api/**'
+      - 'docker/**'
       - 'package.json'
       - 'package-lock.json'
       - 'langium-config.json'

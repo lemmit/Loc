@@ -58,37 +58,37 @@ describe("MemoryVfs: path normalisation", () => {
 
 describe("MemoryVfs: list", () => {
   const vfs = new MemoryVfs();
-  vfs.write("/themes/mantine/pack.json", "{}");
-  vfs.write("/themes/mantine/page-list.hbs", "...");
-  vfs.write("/themes/shadcn/pack.json", "{}");
+  vfs.write("/designs/mantine/pack.json", "{}");
+  vfs.write("/designs/mantine/page-list.hbs", "...");
+  vfs.write("/designs/shadcn/pack.json", "{}");
   vfs.write("/workspace/main.ddd", "system X {}");
 
   it("lists entries under a directory prefix (trailing slash optional)", () => {
-    expect(vfs.list("/themes/mantine/")).toEqual([
-      "/themes/mantine/pack.json",
-      "/themes/mantine/page-list.hbs",
+    expect(vfs.list("/designs/mantine/")).toEqual([
+      "/designs/mantine/pack.json",
+      "/designs/mantine/page-list.hbs",
     ]);
-    expect(vfs.list("/themes/mantine")).toEqual([
-      "/themes/mantine/pack.json",
-      "/themes/mantine/page-list.hbs",
+    expect(vfs.list("/designs/mantine")).toEqual([
+      "/designs/mantine/pack.json",
+      "/designs/mantine/page-list.hbs",
     ]);
   });
 
-  it("does NOT do literal-startsWith — `/themes/man` is a prefix, not a directory", () => {
-    // Anti-regression: an earlier draft accepted `list("/themes/man")`
-    // as a glob-prefix match for `/themes/mantine/...`.  That made
+  it("does NOT do literal-startsWith — `/designs/man` is a prefix, not a directory", () => {
+    // Anti-regression: an earlier draft accepted `list("/designs/man")`
+    // as a glob-prefix match for `/designs/mantine/...`.  That made
     // `list("/workspace/main")` return both `main.ddd` and
     // `maintenance.ddd`, which is surprising.  The contract is now
     // strictly directory-boundary; callers that want a glob filter
     // do it themselves.
-    expect(vfs.list("/themes/man")).toEqual([]);
+    expect(vfs.list("/designs/man")).toEqual([]);
   });
 
   it("returns the whole VFS when prefix is `/`", () => {
     expect(vfs.list("/")).toEqual([
-      "/themes/mantine/pack.json",
-      "/themes/mantine/page-list.hbs",
-      "/themes/shadcn/pack.json",
+      "/designs/mantine/pack.json",
+      "/designs/mantine/page-list.hbs",
+      "/designs/shadcn/pack.json",
       "/workspace/main.ddd",
     ]);
   });
@@ -97,21 +97,21 @@ describe("MemoryVfs: list", () => {
 describe("MemoryVfs: subscribe", () => {
   it("notifies subscribers whose prefix is a parent of the changed path", () => {
     const vfs = new MemoryVfs();
-    const themesListener = vi.fn();
+    const designsListener = vi.fn();
     const workspaceListener = vi.fn();
-    vfs.subscribe("/themes", themesListener);
+    vfs.subscribe("/designs", designsListener);
     vfs.subscribe("/workspace", workspaceListener);
 
-    vfs.write("/themes/mantine/page-list.hbs", "...");
-    expect(themesListener).toHaveBeenCalledWith(["/themes/mantine/page-list.hbs"]);
+    vfs.write("/designs/mantine/page-list.hbs", "...");
+    expect(designsListener).toHaveBeenCalledWith(["/designs/mantine/page-list.hbs"]);
     expect(workspaceListener).not.toHaveBeenCalled();
   });
 
   it("does NOT notify when the changed path lies outside the prefix", () => {
     const vfs = new MemoryVfs();
     const listener = vi.fn();
-    vfs.subscribe("/themes/mantine", listener);
-    vfs.write("/themes/shadcn/x.hbs", "...");
+    vfs.subscribe("/designs/mantine", listener);
+    vfs.write("/designs/shadcn/x.hbs", "...");
     expect(listener).not.toHaveBeenCalled();
   });
 
@@ -128,13 +128,13 @@ describe("MemoryVfs: subscribe", () => {
   it("hydrate fires a single notification batched across paths", () => {
     const vfs = new MemoryVfs();
     const listener = vi.fn();
-    vfs.subscribe("/themes", listener);
+    vfs.subscribe("/designs", listener);
     vfs.hydrate([
-      ["/themes/a.hbs", "1"],
-      ["/themes/b.hbs", "2"],
+      ["/designs/a.hbs", "1"],
+      ["/designs/b.hbs", "2"],
     ]);
     expect(listener).toHaveBeenCalledTimes(1);
-    expect(listener).toHaveBeenCalledWith(["/themes/a.hbs", "/themes/b.hbs"]);
+    expect(listener).toHaveBeenCalledWith(["/designs/a.hbs", "/designs/b.hbs"]);
   });
 });
 

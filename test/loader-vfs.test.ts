@@ -28,18 +28,18 @@ import { loadPack, resolvePackDir } from "../web/src/build/loader-vfs.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");
-const themesDir = path.join(repoRoot, "themes");
+const designsDir = path.join(repoRoot, "designs");
 
-/** Seed a MemoryVfs from the on-disk `themes/` tree, mirroring what
+/** Seed a MemoryVfs from the on-disk `designs/` tree, mirroring what
  *  `seedBuiltinPacks` does in the worker via `import.meta.glob`. */
-function hydrateBuiltinThemes(vfs: MemoryVfs): void {
-  for (const pack of fs.readdirSync(themesDir)) {
-    const dir = path.join(themesDir, pack);
+function hydrateBuiltinDesigns(vfs: MemoryVfs): void {
+  for (const pack of fs.readdirSync(designsDir)) {
+    const dir = path.join(designsDir, pack);
     if (!fs.statSync(dir).isDirectory()) continue;
     for (const file of fs.readdirSync(dir)) {
       const full = path.join(dir, file);
       if (!fs.statSync(full).isFile()) continue;
-      vfs.write(`/themes/${pack}/${file}`, fs.readFileSync(full, "utf-8"));
+      vfs.write(`/designs/${pack}/${file}`, fs.readFileSync(full, "utf-8"));
     }
   }
 }
@@ -48,14 +48,14 @@ let vfs: MemoryVfs;
 
 beforeAll(() => {
   vfs = new MemoryVfs();
-  hydrateBuiltinThemes(vfs);
+  hydrateBuiltinDesigns(vfs);
   setWorkerVfs(vfs);
 });
 
 describe("resolvePackDir: built-in names", () => {
-  it("resolves `mantine` and `shadcn` to /themes/<name>", () => {
-    expect(resolvePackDir("mantine")).toBe("/themes/mantine");
-    expect(resolvePackDir("shadcn")).toBe("/themes/shadcn");
+  it("resolves `mantine` and `shadcn` to /designs/<name>", () => {
+    expect(resolvePackDir("mantine")).toBe("/designs/mantine");
+    expect(resolvePackDir("shadcn")).toBe("/designs/shadcn");
   });
 });
 
@@ -84,13 +84,13 @@ describe("resolvePackDir: paths", () => {
     // Even if the user names their pack "mantine", `resolvePackDir`
     // returns the built-in path — not the workspace path — so the
     // user pack can't shadow the built-in.
-    expect(resolvePackDir("mantine", "/workspace/somewhere")).toBe("/themes/mantine");
+    expect(resolvePackDir("mantine", "/workspace/somewhere")).toBe("/designs/mantine");
   });
 });
 
 describe("loadPack: built-in pack loading", () => {
   it("loads the mantine pack and exposes its templates", () => {
-    const pack = loadPack("/themes/mantine");
+    const pack = loadPack("/designs/mantine");
     expect(pack.manifest.name).toBe("mantine");
     expect(pack.templates.has("page-list")).toBe(true);
     expect(pack.templates.has("page-detail")).toBe(true);
@@ -98,7 +98,7 @@ describe("loadPack: built-in pack loading", () => {
   });
 
   it("loads the shadcn pack including its declared helpers", () => {
-    const pack = loadPack("/themes/shadcn");
+    const pack = loadPack("/designs/shadcn");
     expect(pack.manifest.name).toBe("shadcn");
     // shadcn declares a `lucide` icon-rename helper in its manifest
     // (PR #58).  The VFS loader path must wire the helper-registration
@@ -109,15 +109,15 @@ describe("loadPack: built-in pack loading", () => {
 
 describe("loadPack: error paths", () => {
   it("throws a clear error when the pack manifest is missing", () => {
-    expect(() => loadPack("/themes/does-not-exist")).toThrow(
-      /pack manifest not found at \/themes\/does-not-exist\/pack\.json/,
+    expect(() => loadPack("/designs/does-not-exist")).toThrow(
+      /pack manifest not found at \/designs\/does-not-exist\/pack\.json/,
     );
   });
 
   it("throws a clear error when an emits entry has no template file", () => {
     const stub = new MemoryVfs();
     stub.write(
-      "/themes/stub/pack.json",
+      "/designs/stub/pack.json",
       JSON.stringify({
         name: "stub",
         version: "0.0.0",
@@ -127,8 +127,8 @@ describe("loadPack: error paths", () => {
     // Note: page-list.hbs intentionally not seeded.
     setWorkerVfs(stub);
     try {
-      expect(() => loadPack("/themes/stub")).toThrow(
-        /pack stub: template "page-list" → "page-list\.hbs" not found at \/themes\/stub\/page-list\.hbs/,
+      expect(() => loadPack("/designs/stub")).toThrow(
+        /pack stub: template "page-list" → "page-list\.hbs" not found at \/designs\/stub\/page-list\.hbs/,
       );
     } finally {
       // Restore the well-formed VFS for any tests that run after.

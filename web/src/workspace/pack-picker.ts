@@ -133,7 +133,7 @@ export function validatePickedPack(pack: PickedPack): void {
     throw new Error("pack-picker: chosen directory has no name.");
   }
   // Reserved built-in names — `loader-vfs.resolvePackDir` resolves
-  // them to /themes/<name> regardless of what's in /workspace, so
+  // them to /designs/<name> regardless of what's in /workspace, so
   // a user pack with a built-in name would silently never be used.
   if (pack.name === "mantine" || pack.name === "shadcn") {
     throw new Error(
