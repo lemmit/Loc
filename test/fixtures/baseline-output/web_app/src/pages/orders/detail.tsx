@@ -1,5 +1,5 @@
 // Auto-generated.  Do not edit by hand.
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link as RouterLink } from "react-router-dom";
 import { DateTimeValue, KeyValueRow } from "../../lib/format";
 import { Alert, Anchor, Badge, Breadcrumbs, Card, Skeleton, Stack, Text, Title } from "@mantine/core";
 import { useOrderById } from "../../api/order";
@@ -10,8 +10,8 @@ export default function OrderDetail() {
   return (
     <Stack data-testid="orders-detail">
       <Breadcrumbs>
-        <Anchor component={Link} to="/">Home</Anchor>
-        <Anchor component={Link} to="/orders">Orders</Anchor>
+        <Anchor component={RouterLink} to="/">Home</Anchor>
+        <Anchor component={RouterLink} to="/orders">Orders</Anchor>
         <Text>Detail</Text>
       </Breadcrumbs>
       <Title order={2}>Order detail</Title>

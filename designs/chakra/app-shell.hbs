@@ -1,5 +1,5 @@
 // Auto-generated.
-import { Routes, Route, Link, useLocation, useNavigate } from "react-router-dom";
+import { Routes, Route, Link as RouterLink, useLocation, useNavigate } from "react-router-dom";
 import {
   Box, Flex, VStack, HStack, Divider, IconButton,
   Text, Heading, Alert, AlertIcon, AlertDescription, Button,
@@ -55,7 +55,7 @@ function NotFound() {
   return (
     <VStack data-testid="not-found" p={4} gap={1} alignItems="flex-start">
       <Heading size="md">Not found</Heading>
-      <Link to="/">← Back to home</Link>
+      <RouterLink to="/">← Back to home</RouterLink>
     </VStack>
   );
 }
@@ -133,7 +133,7 @@ export default function App() {
           px={4}
         >
           <Box
-            as={Link as React.ElementType}
+            as={RouterLink as React.ElementType}
             to="/"
             color="white"
             textDecoration="none"

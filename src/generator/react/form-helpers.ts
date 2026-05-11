@@ -28,65 +28,22 @@ import { camel, plural } from "../../util/naming.js";
 //     calls with dot-paths (`register("price.amount")`).
 // ---------------------------------------------------------------------------
 
-/**
- * Walk each field type and return the set of Mantine + RHF imports the
- * form will need.  Drives a precise import line so generated pages don't
- * pull in unused components.  Always includes `TextInput` (used by the
- * fallback path) and `Controller` (used by every non-trivial input).
- */
-export function componentsForFields(
-  fields: { type: TypeIR }[],
-  ctx: BoundedContextIR,
-): Set<string> {
-  const out = new Set<string>(["TextInput"]);
-  const visit = (t: TypeIR) => {
-    const inner = unwrapOpt(t);
-    if (inner.kind === "primitive") {
-      if (
-        inner.name === "int" ||
-        inner.name === "long" ||
-        inner.name === "decimal"
-      ) {
-        out.add("NumberInput");
-      }
-      if (inner.name === "bool") out.add("Switch");
-      // datetime uses native `<input type="datetime-local">` (a
-      // styled `<TextInput>` from Mantine + the type attribute) —
-      // already covered by the default-set's TextInput.  See
-      // `formInput` for the rationale (Mantine's `<DateTimePicker>`
-      // doesn't render an `<input>` child and resists Playwright's
-      // `.fill()`).
-      return;
-    }
-    if (inner.kind === "id") {
-      // Phase 3: `Id<X>` → `<Select>` populated by `useAll<X>()`.
-      // Falls back to `<TextInput>` (already in set) when the target
-      // aggregate is unknown — pages-builder emits a generation-time
-      // error in that case.
-      out.add("Select");
-      return;
-    }
-    if (inner.kind === "enum") {
-      out.add("Select");
-      return;
-    }
-    if (inner.kind === "valueobject") {
-      out.add("Fieldset");
-      const vo = ctx.valueObjects.find((v) => v.name === inner.name);
-      if (vo) for (const f of vo.fields) visit(f.type);
-      return;
-    }
-    if (inner.kind === "array") visit(inner.element);
-  };
-  for (const f of fields) visit(f.type);
-  return out;
-}
-
 /** Whether the given field set requires `Controller` (anything that's
- * not a plain TextInput).  Drives the import line for `react-hook-form`. */
+ * not a plain TextInput).  Drives the import line for `react-hook-form`.
+ *
+ * Id<X> dispatches on the target's display field:
+ *  - target with a `display`-marked field → field-input-id-select.hbs
+ *    (renders inside a `<Controller>`).
+ *  - target without one → field-input-id-text.hbs (plain TextInput via
+ *    `register`, no Controller).
+ *
+ * `aggregatesByName` lets the probe resolve the target so the import
+ * surface is precise — no unused `Controller` import when every Id
+ * field falls back to the text variant. */
 export function needsController(
   fields: { type: TypeIR }[],
   ctx: BoundedContextIR,
+  aggregatesByName: Map<string, AggregateIR>,
 ): boolean {
   const probe = (t: TypeIR): boolean => {
     const inner = unwrapOpt(t);
@@ -100,13 +57,8 @@ export function needsController(
     }
     if (inner.kind === "enum") return true;
     if (inner.kind === "id") {
-      // Id<X> with a `display`-marked field on the target renders
-      // via `field-input-id-select.hbs` which wraps a `<Controller>`.
-      // Id<X> without a display falls back to `field-input-id-text.hbs`
-      // (plain TextInput via register).  We can't tell the difference
-      // without an `aggregatesByName` lookup, so conservatively pull
-      // Controller in — unused imports are cheaper than missing ones.
-      return true;
+      const target = aggregatesByName.get(inner.targetName);
+      return !!target?.fields.some((f) => f.display);
     }
     if (inner.kind === "valueobject") {
       const vo = ctx.valueObjects.find((v) => v.name === inner.name);

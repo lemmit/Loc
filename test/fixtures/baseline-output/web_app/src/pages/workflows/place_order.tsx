@@ -1,5 +1,5 @@
 // Auto-generated.  Do not edit by hand.
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link as RouterLink } from "react-router-dom";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { PlaceOrderRequest, usePlaceOrderWorkflow } from "../../api/workflows";
@@ -18,8 +18,8 @@ export default function PlaceOrderWorkflow() {
   return (
     <Stack data-testid="workflow-place_order-page">
       <Breadcrumbs>
-        <Anchor component={Link} to="/">Home</Anchor>
-        <Anchor component={Link} to="/workflows">Workflows</Anchor>
+        <Anchor component={RouterLink} to="/">Home</Anchor>
+        <Anchor component={RouterLink} to="/workflows">Workflows</Anchor>
         <Text>Place Order</Text>
       </Breadcrumbs>
       <Title order={2}>Place Order</Title>

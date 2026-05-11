@@ -1,5 +1,5 @@
 // Auto-generated.
-import { Routes, Route, Link, useLocation, useNavigate } from "react-router-dom";
+import { Routes, Route, Link as RouterLink, useLocation, useNavigate } from "react-router-dom";
 import {
   AppBar, Box, CssBaseline, Divider, Drawer, IconButton,
   List, ListItem, ListItemButton, ListItemText, ListSubheader,
@@ -51,7 +51,7 @@ function NotFound() {
   return (
     <Stack data-testid="not-found" p={2} gap={1}>
       <Typography variant="h5">Not found</Typography>
-      <Link to="/">← Back to home</Link>
+      <RouterLink to="/">← Back to home</RouterLink>
     </Stack>
   );
 }
@@ -101,7 +101,7 @@ export default function App() {
             <MenuIcon />
           </IconButton>
           <Box
-            component={Link as React.ElementType}
+            component={RouterLink as React.ElementType}
             to="/"
             sx=\{{ color: "inherit", textDecoration: "none", display: "flex", alignItems: "center", gap: 1 }}
           >

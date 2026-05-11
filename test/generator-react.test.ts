@@ -268,7 +268,7 @@ describe("react generator", () => {
       );
       // Per-aggregate NavLink with active prop wired through useLocation.
       expect(app).toMatch(
-        /<NavLink component=\{Link\} to="\/orders" label="Orders" active=\{isActive\("\/orders"\)\}/,
+        /<NavLink component=\{RouterLink\} to="\/orders" label="Orders" active=\{isActive\("\/orders"\)\}/,
       );
       // Index-page NavLinks use exact-match so /workflows doesn't
       // shadow /workflows/<slug>.
@@ -542,10 +542,10 @@ describe("react generator", () => {
       // Sidebar entry — "All workflows" parent NavLink + one
       // NavLink per workflow (slice 20 navbar redesign).
       expect(app).toMatch(
-        /<NavLink component=\{Link\} to="\/workflows" label="All workflows"[\s\S]*?data-testid="nav-workflows"/,
+        /<NavLink component=\{RouterLink\} to="\/workflows" label="All workflows"[\s\S]*?data-testid="nav-workflows"/,
       );
       expect(app).toMatch(
-        /<NavLink component=\{Link\} to="\/workflows\/place_order" label="Place Order"[\s\S]*?data-testid="nav-workflow-place_order"/,
+        /<NavLink component=\{RouterLink\} to="\/workflows\/place_order" label="Place Order"[\s\S]*?data-testid="nav-workflow-place_order"/,
       );
     });
 
@@ -595,10 +595,10 @@ describe("react generator", () => {
         /<Route path="\/views\/active_orders" element=\{<ActiveOrdersViewPage \/>\} \/>/,
       );
       expect(app).toMatch(
-        /<NavLink component=\{Link\} to="\/views" label="All views"[\s\S]*?data-testid="nav-views"/,
+        /<NavLink component=\{RouterLink\} to="\/views" label="All views"[\s\S]*?data-testid="nav-views"/,
       );
       expect(app).toMatch(
-        /<NavLink component=\{Link\} to="\/views\/active_orders" label="Active Orders"[\s\S]*?data-testid="nav-view-active_orders"/,
+        /<NavLink component=\{RouterLink\} to="\/views\/active_orders" label="Active Orders"[\s\S]*?data-testid="nav-view-active_orders"/,
       );
     });
 

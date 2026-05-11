@@ -1,5 +1,5 @@
 // Auto-generated.  Do not edit by hand.
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link as RouterLink } from "react-router-dom";
 import { IdValue } from "../../lib/format";
 import { Alert, Anchor, Breadcrumbs, Button, Center, Group, Paper, Skeleton, Stack, Table, Text, Title } from "@mantine/core";
 import { useAllProducts } from "../../api/product";
@@ -10,7 +10,7 @@ export default function ProductList() {
   return (
     <Stack data-testid="products-list">
       <Breadcrumbs>
-        <Anchor component={Link} to="/">Home</Anchor>
+        <Anchor component={RouterLink} to="/">Home</Anchor>
         <Text>Products</Text>
       </Breadcrumbs>
       <Group justify="space-between">
@@ -43,7 +43,7 @@ export default function ProductList() {
               <Table.Tbody>
                 { productAll.data.map((row, idx) => (
                   <Table.Tr key={ row.id } data-testid={ ("products-row-" + row.id) }>
-                    <Table.Td><Link to={`/products/${ row.id }`}><IdValue id={ row.id } /></Link></Table.Td>
+                    <Table.Td><RouterLink to={`/products/${ row.id }`}><IdValue id={ row.id } /></RouterLink></Table.Td>
                     <Table.Td><Text>{row.sku}</Text></Table.Td>
                   </Table.Tr>
                 )) }

@@ -62,7 +62,6 @@ import type {
 } from "../../ir/loom-ir.js";
 import { camel, humanize, pascal, plural, snake } from "../../util/naming.js";
 import {
-  componentsForFields,
   idTargetHookVar,
   idTargetsInFields,
   initialValuesTs,
@@ -196,8 +195,11 @@ export interface WalkResult {
   usesState: boolean;
   /** Slice 11.15 — true when any walked node emitted JSX that
    *  references React Router's `Link` component (e.g.
-   *  `Anchor("…", to: …)` → `<Anchor component={Link}>`).  The
-   *  shell adds `Link` to the existing react-router-dom import. */
+   *  `Anchor("…", to: …)` → `<Anchor component={RouterLink}>`).
+   *  The shell adds `Link as RouterLink` to the existing
+   *  react-router-dom import — the alias keeps the slot free for
+   *  design packs whose own primitive is named `Link` (MUI,
+   *  chakra) without an identifier collision. */
   usesRouterLink: boolean;
   /** Slice 11.18 — names of user-defined components the walker
    *  invoked while emitting (e.g. `WelcomeBox("Alice")` →
@@ -508,9 +510,6 @@ interface FormStateBase {
   useController: boolean;
   /** Default-values literal for `useForm({ defaultValues: ... })`. */
   defaultValuesTs: string;
-  /** Components needed from the design pack — added on top of the
-   *  base set so the import block stays sorted + de-duped. */
-  fieldComponents: readonly string[];
   /** Slug-prefixed testid namespace (e.g. `"orders-form"`). */
   testidNamespace: string;
   /** Pre-rendered field TSX (already through the per-pack
@@ -1265,9 +1264,8 @@ function emitFormOfAggregate(
   const fields = agg.fields.filter((f) => !f.optional);
   const aggregatesByNameMut = new Map(ctx.aggregatesByName);
   const idTargets = idTargetsInFields(fields, bc, aggregatesByNameMut);
-  const useController = needsController(fields, bc);
+  const useController = needsController(fields, bc, aggregatesByNameMut);
   const defaultValuesTs = initialValuesTs(fields, bc);
-  const fieldComponents = [...componentsForFields(fields, bc)];
   const testidArg = stringNamed(call, "testid");
   const testidNamespace = testidArg ?? `${snake(plural(agg.name))}-new`;
   const fieldVMs = fields.map((f) =>
@@ -1325,7 +1323,6 @@ function emitFormOfAggregate(
     idTargets,
     useController,
     defaultValuesTs,
-    fieldComponents,
     testidNamespace,
     fieldHtmls,
     onSubmitJs,
@@ -1386,9 +1383,8 @@ function emitFormRuns(
   const fieldsForHelpers = fields.map((f) => ({ ...f, optional: false }));
   const aggregatesByNameMut = new Map(ctx.aggregatesByName);
   const idTargets = idTargetsInFields(fieldsForHelpers, bc, aggregatesByNameMut);
-  const useController = needsController(fieldsForHelpers, bc);
+  const useController = needsController(fieldsForHelpers, bc, aggregatesByNameMut);
   const defaultValuesTs = initialValuesTs(fieldsForHelpers, bc);
-  const fieldComponents = [...componentsForFields(fieldsForHelpers, bc)];
   const testidArg = stringNamed(call, "testid");
   const testidNamespace = testidArg ?? `workflow-${snake(workflow.name)}`;
   const fieldVMs = fields.map((f) =>
@@ -1446,7 +1442,6 @@ function emitFormRuns(
     idTargets,
     useController,
     defaultValuesTs,
-    fieldComponents,
     testidNamespace,
     fieldHtmls,
     onSubmitJs,
@@ -2322,10 +2317,16 @@ function emitBadge(
   ctx: WalkContext,
   depth: number,
 ): string {
-  const label = firstPositionalContent(call, ctx) ?? '"Badge"';
+  const raw = firstPositionalContent(call, ctx) ?? '"Badge"';
   void depth;
   return renderPrimitive(ctx, "primitive-badge", {
-    label: unwrapTextLiteral(label),
+    // `label` is JSX-children-friendly text — quotes stripped from
+    // literals (Mantine / shadcn / chakra render `<Badge>X</Badge>`).
+    // `labelAttr` is the JSX-attribute form — quotes preserved on
+    // literals, JS expressions left as-is (MUI's `<Chip label=…/>`
+    // needs either `label="X"` or `label={expr}`).
+    label: unwrapTextLiteral(raw),
+    labelAttr: unwrapAsAttr(raw),
     testidAttr: testidAttr(call, ctx),
   });
 }
@@ -2951,7 +2952,7 @@ export function renderCustomLayoutPage(
   const routerSpecifiers: string[] = [];
   if (hasParams) routerSpecifiers.push("useParams");
   if (usesNavigate || form.usesNavigate) routerSpecifiers.push("useNavigate");
-  if (usesRouterLink) routerSpecifiers.push("Link");
+  if (usesRouterLink) routerSpecifiers.push("Link as RouterLink");
   const reactRouterImport = routerSpecifiers.length > 0
     ? `import { ${routerSpecifiers.join(", ")} } from "react-router-dom";\n`
     : "";
@@ -3109,7 +3110,7 @@ export function renderUserComponentFile(
   // a component subtree (e.g. Button(to:) inside).
   const routerSpecifiers: string[] = [];
   if (usesNavigate) routerSpecifiers.push("useNavigate");
-  if (usesRouterLink) routerSpecifiers.push("Link");
+  if (usesRouterLink) routerSpecifiers.push("Link as RouterLink");
   const reactRouterImport = routerSpecifiers.length > 0
     ? `import { ${routerSpecifiers.join(", ")} } from "react-router-dom";\n`
     : "";

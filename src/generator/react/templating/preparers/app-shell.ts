@@ -62,9 +62,15 @@ export function prepareAppShellVM(
   const imports: ImportVM[] = [];
   const routes: RouteVM[] = [];
 
-  // Home page — always present, mounted at "/".
-  imports.push({ specifier: "Home", from: "./pages/home" });
-  routes.push({ path: "/", elementJsx: "<Home />" });
+  // Home page — generator-synthesised landing, mounted at "/".
+  // Skipped when an explicit `page` already claims route "/" (the
+  // user's page wins; no synthesised Home file is emitted either,
+  // so referencing one here would dangle).
+  const userHasRootRoute = extraRoutes?.some((r) => r.route === "/") ?? false;
+  if (!userHasRootRoute) {
+    imports.push({ specifier: "Home", from: "./pages/home" });
+    routes.push({ path: "/", elementJsx: "<Home />" });
+  }
 
   // Per-aggregate pages.
   for (const agg of aggregates) {

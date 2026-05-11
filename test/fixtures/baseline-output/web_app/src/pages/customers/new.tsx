@@ -1,5 +1,5 @@
 // Auto-generated.  Do not edit by hand.
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link as RouterLink } from "react-router-dom";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CreateCustomerRequest, useCreateCustomer } from "../../api/customer";
@@ -16,8 +16,8 @@ export default function CustomerNew() {
   return (
     <Stack data-testid="customers-new-page">
       <Breadcrumbs>
-        <Anchor component={Link} to="/">Home</Anchor>
-        <Anchor component={Link} to="/customers">Customers</Anchor>
+        <Anchor component={RouterLink} to="/">Home</Anchor>
+        <Anchor component={RouterLink} to="/customers">Customers</Anchor>
         <Text>New</Text>
       </Breadcrumbs>
       <Title order={2}>Create customer</Title>

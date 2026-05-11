@@ -1,8 +1,9 @@
 // Slice 11.15 — Anchor (text-style link) primitive.
 //
 //   Anchor("View orders", to: "/orders")
-//     → Mantine <Anchor component={Link} to="/orders">…</Anchor>
-//       (Link from react-router-dom, SPA navigation)
+//     → Mantine <Anchor component={RouterLink} to="/orders">…</Anchor>
+//       (`Link as RouterLink` from react-router-dom — aliased so packs
+//        whose own primitive is named `Link` don't collide.)
 //
 // Without `to:` falls through to a bare <Anchor> (no href —
 // visible no-op).
@@ -22,7 +23,7 @@ async function buildAndGenerate(src: string): Promise<Map<string, string>> {
 }
 
 describe("Slice 11.15 — Anchor primitive", () => {
-  it('Anchor("label", to: "/path") emits <Anchor component={Link} to=...>', async () => {
+  it('Anchor("label", to: "/path") emits <Anchor component={RouterLink} to=...>', async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
@@ -46,14 +47,14 @@ describe("Slice 11.15 — Anchor primitive", () => {
     `);
     const content = files.get("web/src/pages/home.tsx")!;
     expect(content).toBeDefined();
-    expect(content).toMatch(/import \{ Link \} from "react-router-dom";/);
+    expect(content).toMatch(/import \{ Link as RouterLink \} from "react-router-dom";/);
     expect(content).toMatch(/import \{ Anchor, Stack, Title \} from "@mantine\/core";/);
     expect(content).toMatch(
-      /<Anchor component=\{Link\} to="\/orders">View orders<\/Anchor>/,
+      /<Anchor component=\{RouterLink\} to="\/orders">View orders<\/Anchor>/,
     );
   });
 
-  it("Anchor without to: emits a bare <Anchor> (no Link import)", async () => {
+  it("Anchor without to: emits a bare <Anchor> (no RouterLink import)", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
@@ -98,7 +99,7 @@ describe("Slice 11.15 — Anchor primitive", () => {
     `);
     const content = files.get("web/src/pages/user.tsx")!;
     // Same shape as Button(to: <param-ref>) — template literal at render time.
-    expect(content).toMatch(/<Anchor component=\{Link\} to=`\$\{slug\}`>/);
+    expect(content).toMatch(/<Anchor component=\{RouterLink\} to=`\$\{slug\}`>/);
   });
 
   it("page combining navigate (Button to:) + Link (Anchor to:) imports both specifiers", async () => {
@@ -126,9 +127,9 @@ describe("Slice 11.15 — Anchor primitive", () => {
     const content = files.get("web/src/pages/home.tsx")!;
     // Single import line with both useNavigate (for Button) and Link (for Anchor).
     expect(content).toMatch(
-      /import \{ useNavigate, Link \} from "react-router-dom";/,
+      /import \{ useNavigate, Link as RouterLink \} from "react-router-dom";/,
     );
-    expect(content).toMatch(/<Anchor component=\{Link\} to="\/settings">/);
+    expect(content).toMatch(/<Anchor component=\{RouterLink\} to="\/settings">/);
     expect(content).toMatch(/<Button onClick=\{\(\) => navigate\("\/logout"\)\}>/);
   });
 });

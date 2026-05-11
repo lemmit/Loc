@@ -36,30 +36,6 @@
     "field-input-enum-select": "field-input-enum-select.hbs",
     "field-input-valueobject": "field-input-valueobject.hbs",
     "field-input-array": "field-input-array.hbs",
-    "field-row-string": "field-row-string.hbs",
-    "field-row-id": "field-row-id.hbs",
-    "field-row-id-link": "field-row-id-link.hbs",
-    "field-row-datetime": "field-row-datetime.hbs",
-    "field-row-bool": "field-row-bool.hbs",
-    "field-row-number": "field-row-number.hbs",
-    "field-row-enum": "field-row-enum.hbs",
-    "field-row-valueobject": "field-row-valueobject.hbs",
-    "cell-id": "cell-id.hbs",
-    "cell-id-link": "cell-id-link.hbs",
-    "cell-row-id-link": "cell-row-id-link.hbs",
-    "cell-datetime": "cell-datetime.hbs",
-    "cell-bool": "cell-bool.hbs",
-    "cell-number": "cell-number.hbs",
-    "cell-enum": "cell-enum.hbs",
-    "cell-string": "cell-string.hbs",
-    "cell-bool-value":        "cell-bool-value.hbs",
-    "cell-datetime-value":    "cell-datetime-value.hbs",
-    "cell-enum-value":        "cell-enum-value.hbs",
-    "cell-id-value":          "cell-id-value.hbs",
-    "cell-id-link-value":     "cell-id-link-value.hbs",
-    "cell-row-id-link-value": "cell-row-id-link-value.hbs",
-    "cell-number-value":      "cell-number-value.hbs",
-    "cell-string-value":      "cell-string-value.hbs",
     "primitive-heading": "primitive-heading.hbs",
     "primitive-text": "primitive-text.hbs",
     "primitive-divider": "primitive-divider.hbs",
@@ -294,16 +270,87 @@
         ]
       }
     ],
-    "field-input-string":       [{ "from": "@/components/ui/input", "named": ["Input"] }],
-    "field-input-int":          [{ "from": "@/components/ui/input", "named": ["Input"] }],
-    "field-input-decimal":      [{ "from": "@/components/ui/input", "named": ["Input"] }],
-    "field-input-bool":         [{ "from": "@/components/ui/switch", "named": ["Switch"] }],
-    "field-input-datetime":     [{ "from": "@/components/ui/input", "named": ["Input"] }],
-    "field-input-id-text":      [{ "from": "@/components/ui/input", "named": ["Input"] }],
-    "field-input-id-select":    [{ "from": "@/components/ui/select", "named": ["Select", "SelectContent", "SelectItem", "SelectTrigger", "SelectValue"] }],
-    "field-input-enum-select":  [{ "from": "@/components/ui/select", "named": ["Select", "SelectContent", "SelectItem", "SelectTrigger", "SelectValue"] }],
-    "field-input-array":        [{ "from": "@/components/ui/input", "named": ["Input"] }],
-    "field-input-valueobject":  []
+    "field-input-string": [
+      {
+        "from": "@/components/ui/input",
+        "named": [
+          "Input"
+        ]
+      }
+    ],
+    "field-input-int": [
+      {
+        "from": "@/components/ui/input",
+        "named": [
+          "Input"
+        ]
+      }
+    ],
+    "field-input-decimal": [
+      {
+        "from": "@/components/ui/input",
+        "named": [
+          "Input"
+        ]
+      }
+    ],
+    "field-input-bool": [
+      {
+        "from": "@/components/ui/switch",
+        "named": [
+          "Switch"
+        ]
+      }
+    ],
+    "field-input-datetime": [
+      {
+        "from": "@/components/ui/input",
+        "named": [
+          "Input"
+        ]
+      }
+    ],
+    "field-input-id-text": [
+      {
+        "from": "@/components/ui/input",
+        "named": [
+          "Input"
+        ]
+      }
+    ],
+    "field-input-id-select": [
+      {
+        "from": "@/components/ui/select",
+        "named": [
+          "Select",
+          "SelectContent",
+          "SelectItem",
+          "SelectTrigger",
+          "SelectValue"
+        ]
+      }
+    ],
+    "field-input-enum-select": [
+      {
+        "from": "@/components/ui/select",
+        "named": [
+          "Select",
+          "SelectContent",
+          "SelectItem",
+          "SelectTrigger",
+          "SelectValue"
+        ]
+      }
+    ],
+    "field-input-array": [
+      {
+        "from": "@/components/ui/input",
+        "named": [
+          "Input"
+        ]
+      }
+    ],
+    "field-input-valueobject": []
   },
   "shellFiles": {
     "tailwind-config": "tailwind.config.ts",
@@ -330,6 +377,12 @@
       "IconAlertTriangle": "AlertTriangle",
       "IconBolt": "Zap",
       "IconLayoutList": "LayoutList"
+    },
+    "alertVariant": {
+      "red": "destructive",
+      "yellow": "default",
+      "green": "default",
+      "blue": "default"
     }
   }
 }
