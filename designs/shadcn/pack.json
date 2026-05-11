@@ -98,7 +98,8 @@
     "primitive-paper": "primitive-paper.hbs",
     "primitive-skeleton": "primitive-skeleton.hbs",
     "primitive-alert": "primitive-alert.hbs",
-    "primitive-query-view": "primitive-query-view.hbs"
+    "primitive-query-view": "primitive-query-view.hbs",
+    "primitive-key-value-row": "primitive-key-value-row.hbs"
   },
   "imports": {
     "primitive-button":         [{ "from": "@/components/ui/button", "named": ["Button"] }],
@@ -128,7 +129,8 @@
     "primitive-enum-badge":     [{ "from": "@/components/ui/badge", "named": ["Badge"] }],
     "primitive-id-link": [{ "from": "../lib/format", "named": ["IdValue"] }],
     "primitive-skeleton":  [{ "from": "@/components/ui/skeleton", "named": ["Skeleton"] }],
-    "primitive-alert":     [{ "from": "@/components/ui/alert",    "named": ["Alert", "AlertDescription", "AlertTitle"] }]
+    "primitive-alert":     [{ "from": "@/components/ui/alert",    "named": ["Alert", "AlertDescription", "AlertTitle"] }],
+    "primitive-key-value-row": [{ "from": "../lib/format", "named": ["KeyValueRow"] }]
   },
   "shellFiles": {
     "tailwind-config": "tailwind.config.ts",

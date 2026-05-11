@@ -265,6 +265,7 @@ const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
   "Skeleton",
   "Alert",
   "QueryView",
+  "KeyValueRow",
 ]);
 
 export function isWalkableLayoutBody(
@@ -584,6 +585,8 @@ function emitComponent(
       return emitAlert(call, ctx, depth);
     case "QueryView":
       return emitQueryView(call, ctx, depth);
+    case "KeyValueRow":
+      return emitKeyValueRow(call, ctx, depth);
     case "Toolbar":
       return emitToolbar(call, ctx, depth);
     case "Empty":
@@ -2300,6 +2303,33 @@ function emitQueryView(
     indent,
     branchIndent,
     closeIndent,
+    testidAttr: testidAttr(call, ctx),
+  });
+}
+
+/** Slice A10 — KeyValueRow(label, child, testid?).  Two-column
+ *  detail-page row that pairs a fixed-width label with a value.
+ *  First positional is the label string; second positional is the
+ *  child JSX (any walker primitive).  Per-pack runtime helper
+ *  `KeyValueRow` does the layout. */
+function emitKeyValueRow(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  const positionals = positionalArgs(call);
+  const labelArg = positionals[0];
+  const childArg = positionals[1];
+  const labelStr =
+    labelArg && labelArg.kind === "literal" && labelArg.lit === "string"
+      ? labelArg.value
+      : "";
+  const childJsx = childArg
+    ? walk(childArg, ctx, depth + 2)
+    : "{/* missing value */}";
+  return renderPrimitive(ctx, "primitive-key-value-row", {
+    label: escapeJsxText(labelStr),
+    childJsx,
     testidAttr: testidAttr(call, ctx),
   });
 }

@@ -80,7 +80,8 @@
     "primitive-paper": "primitive-paper.hbs",
     "primitive-skeleton": "primitive-skeleton.hbs",
     "primitive-alert": "primitive-alert.hbs",
-    "primitive-query-view": "primitive-query-view.hbs"
+    "primitive-query-view": "primitive-query-view.hbs",
+    "primitive-key-value-row": "primitive-key-value-row.hbs"
   },
   "imports": {
     "primitive-heading":        [{ "from": "@mantine/core", "named": ["Title"] }],
@@ -113,6 +114,7 @@
     "primitive-breadcrumbs":    [{ "from": "@mantine/core", "named": ["Breadcrumbs"] }],
     "primitive-paper":          [{ "from": "@mantine/core", "named": ["Paper"] }],
     "primitive-skeleton":       [{ "from": "@mantine/core", "named": ["Skeleton", "Stack"] }],
-    "primitive-alert":          [{ "from": "@mantine/core", "named": ["Alert"] }]
+    "primitive-alert":          [{ "from": "@mantine/core", "named": ["Alert"] }],
+    "primitive-key-value-row":  [{ "from": "../lib/format", "named": ["KeyValueRow"] }]
   }
 }
