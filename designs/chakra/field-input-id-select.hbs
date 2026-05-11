@@ -1,0 +1,16 @@
+<Controller
+          control={control}
+          name="{{path}}"
+          render={({ field, fieldState }) => (
+            <FormControl isInvalid={!!fieldState.error}>
+              <FormLabel>{{label}}</FormLabel>
+              <Select data-testid="{{testId}}" value={field.value as string ?? ""} onChange={(e) => field.onChange(e.target.value)}>
+                <option value="">— select —</option>
+                {({{{hookVar}}}.data ?? []).map((__o) => (
+                  <option key={__o.id} value={__o.id} data-testid={`{{testId}}-option-${__o.id}`}>{__o["{{displayField}}"]}</option>
+                ))}
+              </Select>
+              <FormErrorMessage>{fieldState.error?.message}</FormErrorMessage>
+            </FormControl>
+          )}
+        />

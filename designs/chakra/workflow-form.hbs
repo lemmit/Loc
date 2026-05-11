@@ -1,0 +1,63 @@
+// Auto-generated.
+import { Link, useNavigate } from "react-router-dom";
+import {
+  VStack, HStack, Text, Heading, Button, Card, CardBody,
+  Breadcrumb, BreadcrumbItem, BreadcrumbLink,
+  Link as ChakraLink, Box,
+  FormControl, FormLabel, FormErrorMessage, Input, Select, Switch,
+  NumberInput, NumberInputField,
+  useToast,
+} from "@chakra-ui/react";
+import { {{useFormImports}} } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { {{workflowPascal}}Request, use{{workflowPascal}}Workflow } from "../../api/workflows";
+{{#each idHookImportLines}}{{{this}}}
+{{/each}}
+export default function {{componentName}}() {
+  const navigate = useNavigate();
+  const run = use{{workflowPascal}}Workflow();
+  const toast = useToast();
+{{#each idHookCalls}}{{{this}}}
+{{/each}}  const {{{destructured}}} = useForm<{{workflowPascal}}Request>({
+    resolver: zodResolver({{workflowPascal}}Request),
+    defaultValues: {{{defaultValuesTs}}},
+  });
+  return (
+    <VStack maxW="640px" data-testid="workflow-{{slug}}" gap={4} alignItems="stretch">
+      <Breadcrumb>
+        <BreadcrumbItem><BreadcrumbLink as={Link} to="/">Home</BreadcrumbLink></BreadcrumbItem>
+        <BreadcrumbItem><BreadcrumbLink as={Link} to="/workflows">Workflows</BreadcrumbLink></BreadcrumbItem>
+        <BreadcrumbItem isCurrentPage><BreadcrumbLink>{{humanWorkflow}}</BreadcrumbLink></BreadcrumbItem>
+      </Breadcrumb>
+      <VStack gap={0} alignItems="flex-start">
+        <Text fontSize="xs" color="gray.500" textTransform="uppercase" letterSpacing="wide">Workflow</Text>
+        <Heading size="md">{{humanWorkflow}}</Heading>
+      </VStack>
+      <Card variant="outline">
+        <CardBody>
+          <form
+            onSubmit={handleSubmit(async (vals) => {
+              try {
+                await run.mutateAsync(vals);
+                toast({ title: "{{humanWorkflow}} completed", status: "success", duration: 3000, isClosable: true });
+                navigate("/workflows");
+              } catch (e) {
+                toast({ title: (e as Error).message, status: "error", duration: 5000, isClosable: true });
+              }
+            })}
+          >
+            <VStack gap={4}>
+            {{#if hasParams}}{{#each fieldHtmls}}{{{this}}}
+            {{/each}}{{else}}<Text>This workflow has no parameters.</Text>
+            {{/if}}
+              <HStack justifyContent="flex-end" gap={2} w="full" mt={1}>
+                <Button variant="outline" onClick={() => navigate("/workflows")}>Cancel</Button>
+                <Button type="submit" colorScheme="brand" isLoading={run.isPending} data-testid="workflow-{{slug}}-submit">Run</Button>
+              </HStack>
+            </VStack>
+          </form>
+        </CardBody>
+      </Card>
+    </VStack>
+  );
+}

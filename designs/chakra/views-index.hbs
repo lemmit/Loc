@@ -1,0 +1,38 @@
+// Auto-generated.
+import { Link } from "react-router-dom";
+import {
+  Breadcrumb, BreadcrumbItem, BreadcrumbLink,
+  VStack, HStack, Text, Heading, Card, CardBody,
+  Button, SimpleGrid,
+} from "@chakra-ui/react";
+
+export default function ViewsIndex() {
+  return (
+    <VStack data-testid="views-index" gap={4} alignItems="stretch">
+      <Breadcrumb data-testid="views-index-breadcrumbs">
+        <BreadcrumbItem><BreadcrumbLink as={Link} to="/">Home</BreadcrumbLink></BreadcrumbItem>
+        <BreadcrumbItem isCurrentPage><BreadcrumbLink>Views</BreadcrumbLink></BreadcrumbItem>
+      </Breadcrumb>
+      <VStack gap={0} alignItems="flex-start">
+        <Heading size="md">Views</Heading>
+        <Text color="gray.500">Saved queries. Pick one to inspect.</Text>
+      </VStack>
+      <SimpleGrid columns=\{{ base: 1, sm: 2 }} spacing={4}>
+{{#each cards}}      <Card variant="outline" data-testid="view-card-{{slug}}">
+        <CardBody>
+          <VStack gap={2} alignItems="stretch">
+            <HStack justifyContent="space-between" alignItems="center">
+              <HStack gap={2} alignItems="center">
+                <Text fontSize="sm">📋</Text>
+                <Heading size="sm">{{humanView}}</Heading>
+              </HStack>
+              <Button as={Link} to="/views/{{slug}}" variant="outline" size="sm" data-testid="view-{{slug}}-open">Open →</Button>
+            </HStack>
+            <Text fontSize="sm" color="gray.500">{{shapeLine}}</Text>
+          </VStack>
+        </CardBody>
+      </Card>
+{{/each}}      </SimpleGrid>
+    </VStack>
+  );
+}

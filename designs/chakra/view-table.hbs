@@ -1,0 +1,63 @@
+// Auto-generated.
+import { Link } from "react-router-dom";
+import {
+  VStack, HStack, Text, Heading, Alert, AlertIcon, AlertDescription,
+  Link as ChakraLink, Badge,
+  Table, Thead, Tbody, Tr, Th, Td,
+  TableContainer, Skeleton, Box,
+} from "@chakra-ui/react";
+import { {{hookName}} } from "../../api/views";
+import { IdValue, DateTimeValue, BoolValue, NumberValue, EmptyValue } from "../../lib/format";
+
+export default function {{componentName}}() {
+  const q ={{hookName}}();
+  const count = q.data?.length ?? 0;
+  return (
+    <VStack data-testid="view-{{slug}}" gap={4} alignItems="stretch">
+      <HStack justifyContent="space-between" alignItems="flex-end">
+        <VStack gap={0} alignItems="flex-start">
+          <Text fontSize="xs" color="gray.500" textTransform="uppercase" letterSpacing="wide">View</Text>
+          <Heading size="md">{{humanView}}</Heading>
+          <Text fontSize="sm" color="gray.500">{q.isLoading ? "Loading…" : count === 1 ? "1 row" : count + " rows"}</Text>
+        </VStack>
+        <ChakraLink as={Link} to="/views" color="brand.600">← back</ChakraLink>
+      </HStack>
+      {q.isLoading && (
+        <Box borderWidth="1px" borderRadius="md" p={4}>
+          <VStack gap={2}>
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Skeleton key={i} height="24px" width="100%" />
+            ))}
+          </VStack>
+        </Box>
+      )}
+      {q.isError && (
+        <Alert status="error">
+          <AlertIcon />
+          <AlertDescription>Couldn't load view — {(q.error as Error).message}</AlertDescription>
+        </Alert>
+      )}
+      {q.data && q.data.length === 0 && <Text color="gray.500">No rows.</Text>}
+      {q.data && q.data.length > 0 && (
+        <TableContainer borderWidth="1px" borderRadius="md">
+          <Table size="sm">
+            <Thead>
+              <Tr>
+                {{#each columns}}<Th>{{title}}</Th>
+                {{/each}}
+              </Tr>
+            </Thead>
+            <Tbody>
+              {q.data.map((row, idx) => (
+                <Tr key={idx} data-testid={`view-{{slug}}-row-${idx}`}>
+                  {{#each columns}}{{> (concat "cell-" kind)}}
+                  {{/each}}
+                </Tr>
+              ))}
+            </Tbody>
+          </Table>
+        </TableContainer>
+      )}
+    </VStack>
+  );
+}

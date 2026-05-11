@@ -1,0 +1,13 @@
+<Controller
+          control={control}
+          name="{{path}}"
+          render={({ field, fieldState }) => (
+            <FormControl isInvalid={!!fieldState.error}>
+              <FormLabel>{{label}}</FormLabel>
+              <NumberInput value={field.value ?? 0} onChange={(_s, n) => field.onChange(Number.isNaN(n) ? 0 : n)} step={0.01} precision={2} data-testid="{{testId}}">
+                <NumberInputField />
+              </NumberInput>
+              <FormErrorMessage>{fieldState.error?.message}</FormErrorMessage>
+            </FormControl>
+          )}
+        />

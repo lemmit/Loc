@@ -1,0 +1,12 @@
+{{#if hasTabs}}<Tabs{{{testidAttr}}}>
+{{indent}}<TabList>
+{{innerIndent}}{{#each tabs}}<Tab>{{{this.label}}}</Tab>{{#unless @last}}
+{{../innerIndent}}{{/unless}}{{/each}}
+{{indent}}</TabList>
+{{indent}}<TabPanels>
+{{indent}}{{#each tabs}}<TabPanel>
+{{../innerIndent}}{{{this.bodyJsx}}}
+{{../indent}}</TabPanel>{{#unless @last}}
+{{../indent}}{{/unless}}{{/each}}
+{{indent}}</TabPanels>
+{{closeIndent}}</Tabs>{{else}}<Tabs{{{testidAttr}}} />{{/if}}

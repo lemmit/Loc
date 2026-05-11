@@ -47,7 +47,7 @@ function repoRoot(): string {
 }
 
 /** Built-in pack names — resolve under `<repo>/designs/<name>/`. */
-const BUILTIN_PACKS = new Set(["mantine", "shadcn", "mui", "ashPhoenix"]);
+const BUILTIN_PACKS = new Set(["mantine", "shadcn", "mui", "chakra", "ashPhoenix"]);
 
 /** Resolve a pack identifier ("mantine" / "shadcn" / "mui" /
  *  "ashPhoenix" / "./design/") to an absolute pack directory.

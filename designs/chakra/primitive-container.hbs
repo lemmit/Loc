@@ -1,0 +1,5 @@
+{{#if hasSize}}{{#if hasChildren}}<Container maxW={{json size}}{{{testidAttr}}}>
+{{indent}}{{{childrenBlock}}}
+{{closeIndent}}</Container>{{else}}<Container maxW={{json size}}{{{testidAttr}}} />{{/if}}{{else}}{{#if hasChildren}}<Container{{{testidAttr}}}>
+{{indent}}{{{childrenBlock}}}
+{{closeIndent}}</Container>{{else}}<Container{{{testidAttr}}} />{{/if}}{{/if}}

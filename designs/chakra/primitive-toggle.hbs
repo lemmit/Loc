@@ -1,0 +1,1 @@
+{{#if hasBind}}<FormControl display="flex" alignItems="center"{{{testidAttr}}}><FormLabel mb={0}>{{{labelAttr}}}</FormLabel><Switch isChecked={{expr bind}} onChange={(e) => {{setter}}(e.target.checked)} /></FormControl>{{else}}<FormControl display="flex" alignItems="center"{{{testidAttr}}}><FormLabel mb={0}>{{{labelAttr}}}</FormLabel><Switch /></FormControl>{{/if}}

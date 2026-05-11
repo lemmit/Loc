@@ -1,0 +1,5 @@
+<FormControl isInvalid={!!( {{errorExpr}} )}>
+          <FormLabel>{{label}}</FormLabel>
+          <Input {...register("{{path}}")} data-testid="{{testId}}" placeholder="(arrays not yet supported in forms)" isDisabled />
+          <FormErrorMessage>{ {{errorExpr}} }</FormErrorMessage>
+        </FormControl>
