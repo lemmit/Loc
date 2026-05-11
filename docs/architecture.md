@@ -303,19 +303,44 @@ What the reader gets from any single declaration:
 | `deployable webApp` | what UI runs, which backend fills each api param |
 
 
-## Coexistence with `scaffold`
+## Scaffold expands to walker stdlib (Slice C2 / D1)
 
 The `scaffold modules: M` directive (page-metamodel §10) keeps
-working alongside the explicit-architecture form.  Synthesised
-pages emit through the legacy List/Detail/Form archetype path;
-the explicit-form scaffolding (api decls, UI api params, etc)
-exists for **future** explicit `page` declarations on the same
-UI to use directly.
+working — but as **compile-time sugar**.  Synthesised pages now
+lower to explicit walker-stdlib bodies via
+`src/ir/scaffold-expander.ts`:
 
-A migrated `examples/acme.ddd` (PR #94) demonstrates the
-coexistence: `scaffold modules: Catalog, Sales, CustomerMgmt`
-synthesises CRUD pages, while the new explicit declarations
-provide the layered composition framework on top.
+```
+scaffold aggregates: Order
+  ↓ (AST expander synthesises pages with scaffoldOrigin)
+page OrderList { route: "/orders"  body: List(of: Order) }
+  ↓ (IR-level scaffold expander rewrites body)
+page OrderList {
+  route: "/orders"
+  body: Stack(
+    Breadcrumbs(Anchor("Home", to: "/"), Text("Orders")),
+    Toolbar(Heading("Orders", level: 2),
+            Button("New order", to: "/orders/new", testid: ...)),
+    QueryView(of: Sales.Order.all,
+              loading: Skeleton(count: 5),
+              error: Alert("Couldn't load orders"),
+              empty: Empty("No orders yet."),
+              data: rows => Paper(Table(rows, …))),
+    testid: "orders-list"
+  )
+}
+  ↓ (single walker emit path)
+src/pages/orders/list.tsx
+```
+
+There is **one** codegen path: the walker.  The legacy
+archetype renderers (`renderListPage`, `renderDetailPage`,
+`renderNewPage`, etc.) and their per-pack templates
+(`page-list.hbs`, `page-detail.hbs`, etc.) were deleted in
+Slice D1.
+
+A migrated `examples/acme.ddd` (PR #94) demonstrates the new
+shape end-to-end.
 
 
 ## What the validator catches
