@@ -106,6 +106,10 @@ import {
   withLocal,
   type Env,
 } from "./lower-expr.js";
+import {
+  buildExpandContext,
+  expandScaffoldToExplicitBody,
+} from "./scaffold-expander.js";
 
 // ---------------------------------------------------------------------------
 // Lowering — structure layer.
@@ -254,7 +258,48 @@ function lowerSystem(sys: import("../language/generated/ast.js").System): System
       name: s.name,
       type: s.type as import("./loom-ir.js").StorageKind,
     }));
-  return { name: sys.name, modules, deployables, e2eTests, user, theme, uis, apis, storages };
+  const built: SystemIR = {
+    name: sys.name,
+    modules,
+    deployables,
+    e2eTests,
+    user,
+    theme,
+    uis,
+    apis,
+    storages,
+  };
+  // Slice C1 — dark-launched scaffold expander.  When
+  // `LOOM_SCAFFOLD_EXPAND=1` is set, post-process every page in
+  // every UI: where the page has a recognised `scaffoldOrigin`
+  // and the expander knows how to handle it, replace `body` with
+  // the equivalent walker-stdlib composition.  The React emitter
+  // then routes through the walker (Phase A primitives) instead
+  // of through the legacy archetype path.  Default off — flag
+  // flips in C2 once the re-baselined fixture is committed.
+  if (process.env.LOOM_SCAFFOLD_EXPAND === "1") {
+    expandScaffoldPages(built);
+  }
+  return built;
+}
+
+/** Slice C1 — in-place rewrite of every UI's pages.  When the
+ *  expander handles a page's `scaffoldOrigin`, swap `body` with
+ *  the synthesised walker-stdlib expression and clear the
+ *  `scaffoldOrigin` discriminator so the React emitter dispatches
+ *  through the walker path instead of the archetype path. */
+function expandScaffoldPages(sys: SystemIR): void {
+  for (const ui of sys.uis) {
+    const ctx = buildExpandContext(sys, ui);
+    for (const page of ui.pages) {
+      if (!page.scaffoldOrigin) continue;
+      const expanded = expandScaffoldToExplicitBody(page.scaffoldOrigin, ctx);
+      if (!expanded) continue;
+      page.body = expanded;
+      page.source = "explicit";
+      page.scaffoldOrigin = undefined;
+    }
+  }
 }
 
 function lowerTheme(
