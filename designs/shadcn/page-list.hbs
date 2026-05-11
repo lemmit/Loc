@@ -57,14 +57,14 @@ export default function {{aggregateName}}List() {
           <Table>
             <TableHeader>
               <TableRow>
-                {{#each columnHeaders}}<TableHead>{{this}}</TableHead>
+                {{#each columns}}<TableHead>{{title}}</TableHead>
                 {{/each}}
               </TableRow>
             </TableHeader>
             <TableBody>
               {q.data.map((row) => (
                 <TableRow key={row.id} data-testid={`{{slug}}-row-${row.id}`} className="cursor-pointer" onClick={() => navigate(`/{{slug}}/${row.id}`)}>
-                  {{#each columns}}{{{cellHtml}}}
+                  {{#each columns}}{{> (concat "cell-" kind)}}
                   {{/each}}
                 </TableRow>
               ))}

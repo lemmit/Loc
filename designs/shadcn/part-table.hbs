@@ -1,4 +1,4 @@
-{{#if columnHeaders.length}}<Card>
+{{#if columns.length}}<Card>
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle className="text-base">{{humanName}}</CardTitle>
@@ -9,14 +9,14 @@
           <Table data-testid="{{testId}}">
             <TableHeader>
               <TableRow>
-                {{#each columnHeaders}}<TableHead>{{this}}</TableHead>
+                {{#each columns}}<TableHead>{{title}}</TableHead>
                 {{/each}}
               </TableRow>
             </TableHeader>
             <TableBody>
               { {{{arrayExpr}}}.map((row) => (
                 <TableRow key={row.id} data-testid={`{{testId}}-row-${row.id}`}>
-                  {{#each cells}}{{{cellHtml}}}
+                  {{#each columns}}{{> (concat "cell-" kind)}}
                   {{/each}}
                 </TableRow>
               ))}

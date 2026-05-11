@@ -29,7 +29,7 @@ import {
 } from "../../form-helpers.js";
 import { iconForOp, stringIdHeuristic } from "../../pages-builder.js";
 import type {
-  CellVM,
+  ColumnVM,
   DetailPageVM,
   FieldRowVM,
   OperationButtonVM,
@@ -257,32 +257,31 @@ function collectionPartVM(
 ): PartTableVM {
   const partFields = part.fields.filter((f) => isPrimitiveLike(f.type));
   const cols = ["id", ...partFields.map((f) => f.name)];
-  const columnHeaders = cols.map((c) => humanize(c));
-  const cells: CellVM[] = [];
-  for (const c of cols) {
-    cells.push(partCellVM(slug, name, c, partFields, aggregatesByName));
-  }
+  const columns: ColumnVM[] = cols.map((c) =>
+    partColumnVM(slug, name, c, partFields, aggregatesByName),
+  );
   return {
     name,
     humanName: humanize(name),
-    columnHeaders,
-    cells,
+    columns,
     testId: `${slug}-detail-${name}`,
     arrayExpr: `data.${name}`,
   };
 }
 
-function partCellVM(
+function partColumnVM(
   slug: string,
   partName: string,
   col: string,
   partFields: FieldIR[],
   aggregatesByName: Map<string, AggregateIR>,
-): CellVM {
+): ColumnVM {
   const testIdExpr = `\`${slug}-detail-${partName}-row-\${row.id}-${col}\``;
   const valueExpr = `row.${col}`;
+  const key = col;
+  const title = humanize(col);
   if (col === "id") {
-    return { template: "cell-id", testIdExpr, valueExpr };
+    return { key, title, kind: "id", testIdExpr, valueExpr };
   }
   const fld = partFields.find((f) => f.name === col);
   if (fld) {
@@ -291,52 +290,55 @@ function partCellVM(
       if (aggregatesByName.has(t.targetName)) {
         const target = snake(plural(t.targetName));
         return {
-          template: "cell-id-link",
+          key,
+          title,
+          kind: "id-link",
           testIdExpr,
           valueExpr,
           toExpr: `\`/${target}/\${${valueExpr}}\``,
         };
       }
-      return { template: "cell-id", testIdExpr, valueExpr };
+      return { key, title, kind: "id", testIdExpr, valueExpr };
     }
     if (t.kind === "primitive" && t.name === "datetime") {
-      return { template: "cell-datetime", testIdExpr, valueExpr };
+      return { key, title, kind: "datetime", testIdExpr, valueExpr };
     }
     if (t.kind === "primitive" && t.name === "bool") {
-      return { template: "cell-bool", testIdExpr, valueExpr };
+      return { key, title, kind: "bool", testIdExpr, valueExpr };
     }
     if (t.kind === "primitive" && (t.name === "int" || t.name === "long")) {
-      return { template: "cell-number", testIdExpr, valueExpr, decimals: 0 };
+      return { key, title, kind: "number", testIdExpr, valueExpr, decimals: 0 };
     }
     if (t.kind === "primitive" && t.name === "decimal") {
-      return { template: "cell-number", testIdExpr, valueExpr, decimals: 2 };
+      return { key, title, kind: "number", testIdExpr, valueExpr, decimals: 2 };
     }
     if (t.kind === "enum") {
-      return { template: "cell-enum", testIdExpr, valueExpr };
+      return { key, title, kind: "enum", testIdExpr, valueExpr };
     }
     const heur = stringIdHeuristic(col, t as { kind: string; name?: string }, aggregatesByName);
     if (heur) {
       const target = snake(plural(heur.targetName));
       return {
-        template: "cell-id-link",
+        key,
+        title,
+        kind: "id-link",
         testIdExpr,
         valueExpr,
         toExpr: `\`/${target}/\${${valueExpr}}\``,
       };
     }
   }
-  return { template: "cell-string", testIdExpr, valueExpr };
+  return { key, title, kind: "string", testIdExpr, valueExpr };
 }
 
 function rawObjectPart(slug: string, name: string): PartTableVM {
-  // Sentinel: no cells / no columns.  Template falls back to a
-  // JSON dump for these single-instance parts.  arrayExpr is the
-  // access path on `data` for the JSON.stringify() call.
+  // Sentinel: no columns.  Template falls back to a JSON dump for
+  // these single-instance parts.  arrayExpr is the access path on
+  // `data` for the JSON.stringify() call.
   return {
     name,
     humanName: humanize(name),
-    columnHeaders: [],
-    cells: [],
+    columns: [],
     testId: `${slug}-detail-${name}`,
     arrayExpr: `data.${name}`,
   };

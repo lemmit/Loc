@@ -62,17 +62,11 @@ export default function CustomerList() {
                 {q.data.map((row) => (
                   <Table.Tr key={row.id} data-testid={`customers-row-${row.id}`} style={{ cursor: "pointer" }} onClick={() => navigate(`/customers/${row.id}`)}>
                     <Table.Td><Anchor component={Link} to={`/customers/${row.id}`} data-testid={`customers-row-${row.id}-link`}><IdValue id={row.id} /></Anchor></Table.Td>
-
 <Table.Td data-testid={`customers-row-${row.id}-username`}>{ row.username === null || row.username === undefined || row.username === "" ? <EmptyValue /> : String(row.username)}</Table.Td>
-
 <Table.Td data-testid={`customers-row-${row.id}-email`}>{ row.email === null || row.email === undefined || row.email === "" ? <EmptyValue /> : String(row.email)}</Table.Td>
-
 <Table.Td data-testid={`customers-row-${row.id}-age`} style={{ textAlign: "right" }}><NumberValue value={row.age} /></Table.Td>
-
 <Table.Td data-testid={`customers-row-${row.id}-balance`} style={{ textAlign: "right" }}><NumberValue value={row.balance} decimals={2} /></Table.Td>
-
 <Table.Td data-testid={`customers-row-${row.id}-vip`}><BoolValue value={row.vip} /></Table.Td>
-
                   </Table.Tr>
                 ))}
               </Table.Tbody>
