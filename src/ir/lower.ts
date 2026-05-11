@@ -269,15 +269,20 @@ function lowerSystem(sys: import("../language/generated/ast.js").System): System
     apis,
     storages,
   };
-  // Slice C1 — dark-launched scaffold expander.  When
-  // `LOOM_SCAFFOLD_EXPAND=1` is set, post-process every page in
-  // every UI: where the page has a recognised `scaffoldOrigin`
-  // and the expander knows how to handle it, replace `body` with
-  // the equivalent walker-stdlib composition.  The React emitter
-  // then routes through the walker (Phase A primitives) instead
-  // of through the legacy archetype path.  Default off — flag
-  // flips in C2 once the re-baselined fixture is committed.
-  if (process.env.LOOM_SCAFFOLD_EXPAND === "1") {
+  // Slice C2 — scaffold expander default ON.  Post-process every
+  // page in every UI: where the page has a recognised
+  // `scaffoldOrigin` and the expander knows how to handle it,
+  // replace `body` with the equivalent walker-stdlib composition.
+  // The React emitter then routes through the walker (Phase A
+  // primitives) instead of through the legacy archetype path.
+  //
+  // Opt-out via `LOOM_SCAFFOLD_EXPAND=0` keeps the legacy archetype
+  // path in use for one release as a panic switch — D1 deletes the
+  // archetype path entirely.  `scaffoldOrigin` is intentionally
+  // preserved on each rewritten page so the per-aggregate page-
+  // object emitter still produces the rich `e2e/pages/<agg>.ts`
+  // helper classes.
+  if (process.env.LOOM_SCAFFOLD_EXPAND !== "0") {
     expandScaffoldPages(built);
   }
   return built;
@@ -295,11 +300,56 @@ function expandScaffoldPages(sys: SystemIR): void {
       if (!page.scaffoldOrigin) continue;
       const expanded = expandScaffoldToExplicitBody(page.scaffoldOrigin, ctx);
       if (!expanded) continue;
+      // Compute the conventional emit path so the rewritten page
+      // lands at `src/pages/<plural>/<arch>.tsx` (matches what the
+      // scaffold renderer would have used).  Preserves URL/file
+      // shape across the C2 default flip.
+      page.emitPath = conventionalEmitPath(page.scaffoldOrigin, ctx);
       page.body = expanded;
-      page.source = "explicit";
-      page.scaffoldOrigin = undefined;
+      // INTENTIONALLY leave `page.scaffoldOrigin` set — the page-
+      // object emitter dispatches on it to keep producing the
+      // per-aggregate `e2e/pages/<agg>.ts` classes (with their
+      // rich domain methods: fill, submit, expectRow…) while the
+      // page-emitter detects `expandedFromScaffold` and routes
+      // through the walker instead of the archetype renderer.
+      // Without this, the C2 flip would lose ~80 lines of e2e
+      // helper code per aggregate.
+      page.expandedFromScaffold = true;
     }
   }
+}
+
+function conventionalEmitPath(
+  origin: import("./loom-ir.js").ScaffoldOriginIR,
+  ctx: import("./scaffold-expander.js").ScaffoldExpandContext,
+): string | undefined {
+  if (origin.kind === "aggregate-list" || origin.kind === "aggregate-new" || origin.kind === "aggregate-detail") {
+    const agg = ctx.aggregatesByName.get(origin.aggregateName);
+    if (!agg) return undefined;
+    const slug = pluralSnake(agg.name);
+    const file =
+      origin.kind === "aggregate-list"
+        ? "list"
+        : origin.kind === "aggregate-new"
+          ? "new"
+          : "detail";
+    return `src/pages/${slug}/${file}.tsx`;
+  }
+  return undefined;
+}
+
+function pluralSnake(s: string): string {
+  // tiny inline copy of util/naming → avoids the
+  // `import { plural, snake }` pulling more types than we need.
+  const snake = s
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
+    .toLowerCase();
+  if (snake.endsWith("y") && !/[aeiou]y$/.test(snake)) {
+    return snake.slice(0, -1) + "ies";
+  }
+  if (/(s|x|z|ch|sh)$/.test(snake)) return snake + "es";
+  return snake + "s";
 }
 
 function lowerTheme(

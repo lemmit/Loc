@@ -131,6 +131,15 @@ function expandAggregateList(
     ]),
   );
   for (const f of agg.fields) {
+    // Slice C2 — value-object fields don't render cleanly as a
+    // single cell (they're a struct, not a scalar).  Scaffold's
+    // archetype renderer flattens them into one column per leaf
+    // field; replicating that here needs more primitive surface
+    // (FlatColumns?) than B1 provides.  Skip for now — the column
+    // surface is a v0 superset of what's strictly required for
+    // tsc-clean output.
+    const inner = f.type.kind === "optional" ? f.type.inner : f.type;
+    if (inner.kind === "valueobject" || inner.kind === "array") continue;
     cols.push(
       call("Column", [
         lit(humanize(f.name)),

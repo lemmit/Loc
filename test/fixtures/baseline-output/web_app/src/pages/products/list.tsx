@@ -1,73 +1,57 @@
-// Auto-generated.
-import { Link, useNavigate } from "react-router-dom";
-import { Stack, Title, Group, Button, Table, Skeleton, Alert, Anchor, Badge, Breadcrumbs, Center, Text, Paper } from "@mantine/core";
-import { IconPlus, IconAlertCircle } from "@tabler/icons-react";
+// Auto-generated.  Do not edit by hand.
+import { useNavigate, Link } from "react-router-dom";
+import { IdValue } from "../../lib/format";
+import { Alert, Anchor, Breadcrumbs, Button, Center, Group, Paper, Skeleton, Stack, Table, Text, Title } from "@mantine/core";
 import { useAllProducts } from "../../api/product";
-import { IdValue, DateTimeValue, BoolValue, NumberValue, EmptyValue } from "../../lib/format";
 
 export default function ProductList() {
   const navigate = useNavigate();
-  const q = useAllProducts();
-  const count = q.data?.length ?? 0;
+  const productAll = useAllProducts();
   return (
-    <Stack data-testid="products-list" gap="md">
-      <Breadcrumbs data-testid="products-list-breadcrumbs">
+    <Stack data-testid="products-list">
+      <Breadcrumbs>
         <Anchor component={Link} to="/">Home</Anchor>
-<Text>Products</Text>
+        <Text>Products</Text>
       </Breadcrumbs>
-      <Group justify="space-between" align="flex-end">
-        <Stack gap={2}>
-          <Title order={2}>Products</Title>
-          <Text size="sm" c="dimmed">{q.isLoading ? "Loading…" : count === 1 ? "1 record" : count + " records"}</Text>
-        </Stack>
-        <Button leftSection={<IconPlus size={16} stroke={2} />} onClick={() => navigate("/products/new")} data-testid="products-list-create">New product</Button>
+      <Group justify="space-between">
+        <Title order={2}>Products</Title>
+        <Button onClick={() => navigate("/products/new")} data-testid="products-list-create">New product</Button>
       </Group>
-      {q.isLoading && (
-        <Paper p="md">
+      <>
+        { productAll.isLoading && (
           <Stack gap="xs">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <Skeleton key={i} height={28} radius="sm" />
-            ))}
-          </Stack>
-        </Paper>
-      )}
-      {q.isError && <Alert color="red" variant="light" icon={<IconAlertCircle size={18} />} title="Couldn't load products">{(q.error as Error).message}</Alert>}
-      {q.data && q.data.length === 0 && (
-        <Paper p="xl" data-testid="products-list-empty">
-          <Center mih={160}>
-            <Stack gap="xs" align="center">
-              <Text c="dimmed">No products yet.</Text>
-              <Button variant="light" onClick={() => navigate("/products/new")}>
-                Create your first product
-              </Button>
-            </Stack>
-          </Center>
-        </Paper>
-      )}
-      {q.data && q.data.length > 0 && (
-        <Paper p={0} style={{ overflow: "hidden" }}>
-          <Table.ScrollContainer minWidth={500}>
+    { Array.from({ length: 5 }).map((_, i) => (
+    <Skeleton key={i} height={ 28 } radius="sm" />
+    )) }
+    </Stack>
+        ) }
+        { productAll.isError && (
+          <Alert color="red" variant="light">Couldn't load products</Alert>
+        ) }
+        { productAll.data && productAll.data.length === 0 && (
+          <Center mih={200}><Text c="dimmed">No products yet.</Text></Center>
+        ) }
+        { productAll.data && productAll.data.length > 0 && (
+          <Paper p="md">
             <Table striped highlightOnHover stickyHeader>
               <Table.Thead>
                 <Table.Tr>
-                  <Table.Th>Id</Table.Th>
-<Table.Th>Sku</Table.Th>
+                  <Table.Th>ID</Table.Th>
+                  <Table.Th>Sku</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {q.data.map((row) => (
-                  <Table.Tr key={row.id} data-testid={`products-row-${row.id}`} style={{ cursor: "pointer" }} onClick={() => navigate(`/products/${row.id}`)}>
-                    <Table.Td><Anchor component={Link} to={`/products/${row.id}`} data-testid={`products-row-${row.id}-link`}><IdValue id={row.id} /></Anchor></Table.Td>
-
-<Table.Td data-testid={`products-row-${row.id}-sku`}>{ row.sku === null || row.sku === undefined || row.sku === "" ? <EmptyValue /> : String(row.sku)}</Table.Td>
-
+                { productAll.data.map((row) => (
+                  <Table.Tr key={ row.id } data-testid={ ("products-row-" + row.id) }>
+                    <Table.Td><Link to={`/products/${ row.id }`}><IdValue id={ row.id } /></Link></Table.Td>
+                    <Table.Td><Text>{row.sku}</Text></Table.Td>
                   </Table.Tr>
-                ))}
+                )) }
               </Table.Tbody>
             </Table>
-          </Table.ScrollContainer>
-        </Paper>
-      )}
+          </Paper>
+        ) }
+      </>
     </Stack>
   );
 }

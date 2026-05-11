@@ -124,13 +124,25 @@ function renderPrimitive(
  *  sorted within each line and sources sorted by `from`.  Empty
  *  map renders as an empty string so callers can splice the
  *  result without a guard. */
-export function renderImportLines(imports: ImportMap): string {
+export function renderImportLines(
+  imports: ImportMap,
+  /** Slice C2 — page-relative prefix for paths the pack writes
+   *  with the default `../` shape (which assumes pages live one
+   *  hop under `src/`).  Scaffold-expanded pages live two hops
+   *  under `src/`, so they pass `"../../"` and we rewrite each
+   *  pack-supplied `../X` → `../../X`. */
+  srcImportPrefix: string = "../",
+): string {
   if (imports.size === 0) return "";
   const lines = [...imports.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([from, named]) =>
-      `import { ${[...named].sort().join(", ")} } from "${from}";\n`,
-    );
+    .map(([from, named]) => {
+      const path =
+        srcImportPrefix !== "../" && from.startsWith("../")
+          ? srcImportPrefix + from.slice(3)
+          : from;
+      return `import { ${[...named].sort().join(", ")} } from "${path}";\n`;
+    });
   return lines.join("");
 }
 
@@ -1840,7 +1852,11 @@ function registerApiHook(hook: ApiHookUse, ctx: WalkContext): void {
  *  to a single import line — matches the existing scaffold output
  *  shape (one api/<aggregate>.ts per aggregate, exporting all
  *  hooks). */
-function renderApiHookImports(usedApiHooks: Map<string, ApiHookUse>): string {
+function renderApiHookImports(
+  usedApiHooks: Map<string, ApiHookUse>,
+  /** Slice C2 — see `renderImportLines` for prefix semantics. */
+  srcImportPrefix: string = "../",
+): string {
   const byPath = new Map<string, Set<string>>();
   for (const h of usedApiHooks.values()) {
     let names = byPath.get(h.importFrom);
@@ -1853,7 +1869,11 @@ function renderApiHookImports(usedApiHooks: Map<string, ApiHookUse>): string {
   const lines: string[] = [];
   for (const [path, names] of [...byPath.entries()].sort()) {
     const sorted = [...names].sort();
-    lines.push(`import { ${sorted.join(", ")} } from "${path}";\n`);
+    const rewritten =
+      srcImportPrefix !== "../" && path.startsWith("../")
+        ? srcImportPrefix + path.slice(3)
+        : path;
+    lines.push(`import { ${sorted.join(", ")} } from "${rewritten}";\n`);
   }
   return lines.join("");
 }
@@ -2537,6 +2557,13 @@ export function renderCustomLayoutPage(
    *  call name matches a helper emit as plain JS calls; the shell
    *  adds `import { <name> } from "<path>"` for each USED helper. */
   helperImports: ReadonlyArray<UiHelperImportIR> = [],
+  /** Slice C2 — relative-path prefix from the emitted page TSX
+   *  back to the `src/` root.  Defaults to `"../"` for pages at
+   *  `src/pages/<name>.tsx` (1 hop).  Scaffold-expanded pages live
+   *  at `src/pages/<plural>/<arch>.tsx` (2 hops) so the caller
+   *  passes `"../../"`.  Used to resolve api-hook + format-helper
+   *  imports the shell emits at function-top. */
+  srcImportPrefix: string = "../",
 ): string {
   const paramNames = new Set(params.map((p) => p.name));
   const stateNames = new Set(state.map((s) => s.name));
@@ -2608,17 +2635,17 @@ export function renderCustomLayoutPage(
   }
   const effectiveUsesState = usesState || usesStateForTitle;
 
-  const mantineImport = renderImportLines(imports);
+  const mantineImport = renderImportLines(imports, srcImportPrefix);
   // Slice 11.18 — one default-import line per user component
   // referenced in the body, sorted alphabetically.
   const userComponentImports = [...usedUserComponents]
     .sort()
-    .map((name) => `import ${name} from "../components/${name}";\n`)
+    .map((name) => `import ${name} from "${srcImportPrefix}components/${name}";\n`)
     .join("");
   // Slice 11.24 — api hook imports, grouped per `from` path so
   // multiple ops on the same aggregate dedupe to one import line
   // (matching the existing scaffold output's per-aggregate api file).
-  const apiHookImports = renderApiHookImports(usedApiHooks);
+  const apiHookImports = renderApiHookImports(usedApiHooks, srcImportPrefix);
   // Slice A6 — `import { <name> } from "<path>"` per UI-declared
   // helper actually referenced in the body.  Lines grouped per
   // path so two helpers from the same module dedupe to one
@@ -2636,7 +2663,7 @@ export function renderCustomLayoutPage(
   // `react-hook-form` import.  When the user provided an explicit
   // `onSubmit:` lambda the shell wires that into `handleSubmit`;
   // otherwise the default is the scaffold-equivalent create flow.
-  const form = renderFormOfWiring(formOf, pack);
+  const form = renderFormOfWiring(formOf, pack, srcImportPrefix);
   const hasParams = params.length > 0;
   const routerSpecifiers: string[] = [];
   if (hasParams) routerSpecifiers.push("useParams");
@@ -2696,6 +2723,8 @@ ${paramsLine}${navigateLine}${stateLines}${apiHookDecls}${form.decls}${titleEffe
 function renderFormOfWiring(
   state: FormOfState | null,
   pack: LoadedPack,
+  /** Slice C2 — see `renderImportLines` for prefix semantics. */
+  srcImportPrefix: string = "../",
 ): { imports: string; decls: string; usesNavigate: boolean } {
   if (!state) return { imports: "", decls: "", usesNavigate: false };
   const { agg, idTargets, useController, defaultValuesTs, onSubmitJs } = state;
@@ -2706,6 +2735,7 @@ function renderFormOfWiring(
     snakePluralAggregate: snake(plural(agg.name)),
     humanAgg: humanize(agg.name),
     humanAggLower: humanize(agg.name).toLowerCase(),
+    srcImportPrefix,
     idTargets: idTargets.map((t) => ({
       name: t.name,
       nameCamel: camel(t.name),
