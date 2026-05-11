@@ -2067,7 +2067,7 @@ function buildHookUse(
   else if (op === "delete") hookName = `useDelete${aggSingle}`;
   else hookName = `use${pascal(op)}${aggSingle}`;
   const varName = `${camel(aggSingle)}${pascal(op)}`;
-  const importFrom = `../api/${snake(aggSingle)}`;
+  const importFrom = `../api/${camel(aggSingle)}`;
   // Render args via the main ctx so refs to params/state propagate
   // (param refs add to `usedParams` → the shell destructures them
   // from `useParams`; state refs are an error since the hook lives

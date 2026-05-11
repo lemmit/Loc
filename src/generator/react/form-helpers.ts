@@ -99,6 +99,15 @@ export function needsController(
       );
     }
     if (inner.kind === "enum") return true;
+    if (inner.kind === "id") {
+      // Id<X> with a `display`-marked field on the target renders
+      // via `field-input-id-select.hbs` which wraps a `<Controller>`.
+      // Id<X> without a display falls back to `field-input-id-text.hbs`
+      // (plain TextInput via register).  We can't tell the difference
+      // without an `aggregatesByName` lookup, so conservatively pull
+      // Controller in — unused imports are cheaper than missing ones.
+      return true;
+    }
     if (inner.kind === "valueobject") {
       const vo = ctx.valueObjects.find((v) => v.name === inner.name);
       return !!vo && vo.fields.some((f) => probe(f.type));

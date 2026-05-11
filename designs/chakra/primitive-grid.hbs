@@ -1,4 +1,6 @@
 {{#if hasChildren}}<SimpleGrid columns=\{{ base: 1, sm: 2, md: 3 }} spacing={4}{{{testidAttr}}}>
-{{#each children}}{{../indent}}{{{this}}}{{#unless @last}}
-{{/unless}}{{/each}}
+{{colIndent}}{{#each children}}<Box>
+{{../childIndent}}{{{this}}}
+{{../colIndent}}</Box>{{#unless @last}}
+{{../colIndent}}{{/unless}}{{/each}}
 {{closeIndent}}</SimpleGrid>{{else}}<SimpleGrid{{{testidAttr}}} />{{/if}}

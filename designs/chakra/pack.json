@@ -110,7 +110,7 @@
     "primitive-stack":          [{ "from": "@chakra-ui/react", "named": ["VStack"] }],
     "primitive-group":          [{ "from": "@chakra-ui/react", "named": ["HStack"] }],
     "primitive-toolbar":        [{ "from": "@chakra-ui/react", "named": ["HStack"] }],
-    "primitive-grid":           [{ "from": "@chakra-ui/react", "named": ["SimpleGrid"] }],
+    "primitive-grid":           [{ "from": "@chakra-ui/react", "named": ["Box", "SimpleGrid"] }],
     "primitive-container":      [{ "from": "@chakra-ui/react", "named": ["Container"] }],
     "primitive-empty":          [{ "from": "@chakra-ui/react", "named": ["Box", "Text"] }],
     "primitive-button":         [{ "from": "@chakra-ui/react", "named": ["Button"] }],
