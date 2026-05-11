@@ -279,6 +279,23 @@ function renderCall(
   if (expr.name === "toast") {
     return renderToast(expr, ctx);
   }
+  // Extended closed primitive library — complex primitives with
+  // dedicated renderers.
+  switch (expr.name) {
+    case "List":        return renderList(expr, ctx);
+    case "Detail":      return renderDetail(expr, ctx);
+    case "Form":        return renderForm(expr, ctx);
+    case "MasterDetail": return renderMasterDetail(expr, ctx);
+    case "Dashboard":   return renderDashboard(expr, ctx);
+    case "Review":      return renderReview(expr, ctx);
+    case "Grid":        return renderGrid(expr, ctx);
+    case "Tabs":        return renderTabs(expr, ctx);
+    case "Field":       return renderField(expr, ctx);
+    case "Toggle":      return renderToggle(expr, ctx);
+    case "Select":      return renderSelect(expr, ctx);
+    case "Fieldset":    return renderFieldset(expr, ctx);
+    case "Stat":        return renderStat(expr, ctx);
+  }
   // Closed primitive library — rendered as HEEx component invocations.
   const prim = closedPrimitive(expr.name);
   if (prim) return renderPrimitive(prim, expr, ctx);
@@ -517,6 +534,388 @@ function renderToast(
 // ---------------------------------------------------------------------------
 // Closed primitive library — HEEx component dispatch.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Shared argument-extraction helpers (mirrors React body-walker helpers).
+// ---------------------------------------------------------------------------
+
+function namedArgValue(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  name: string,
+): ExprIR | undefined {
+  const argNames = expr.argNames ?? [];
+  for (let i = 0; i < expr.args.length; i++) {
+    if (argNames[i] === name) return expr.args[i];
+  }
+  return undefined;
+}
+
+function positionalArgs(expr: Extract<ExprIR, { kind: "call" }>): ExprIR[] {
+  const argNames = expr.argNames ?? [];
+  return expr.args.filter((_, i) => !argNames[i]);
+}
+
+function stringNamed(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  name: string,
+): string | undefined {
+  const v = namedArgValue(expr, name);
+  if (v && v.kind === "literal" && v.lit === "string") return v.value;
+  return undefined;
+}
+
+function namedLambdaArg(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  name: string,
+): Extract<ExprIR, { kind: "lambda" }> | undefined {
+  const v = namedArgValue(expr, name);
+  if (v && v.kind === "lambda") return v;
+  return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Extended primitive renderers — Batch H.
+// ---------------------------------------------------------------------------
+
+/** List(of: T, source?: expr) → <.table id="list" rows={…}> */
+function renderList(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  ctx: WalkContext,
+): string {
+  const sourceArg = namedArgValue(expr, "source");
+  const ofArg = namedArgValue(expr, "of");
+  const rowsExpr = sourceArg
+    ? renderExpr(sourceArg, { ...ctx, position: "template" })
+    : ofArg && ofArg.kind === "ref"
+      ? `@${snake(ofArg.name)}_list`
+      : "@rows";
+  return `<.table id="list" rows={${rowsExpr}}>
+  <:col :let={row} label="ID"><%= row.id %></:col>
+  <%!-- TODO: add columns per field of T --%>
+</.table>`;
+}
+
+/** Detail(of: T, by: Id<T>) → <dl> of field rows */
+function renderDetail(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  ctx: WalkContext,
+): string {
+  const ofArg = namedArgValue(expr, "of");
+  const recordExpr = ofArg && ofArg.kind === "ref"
+    ? `@${snake(ofArg.name)}`
+    : "@record";
+  // Wire per-operation buttons for known action args.
+  const actionLines: string[] = [];
+  const actionArg = namedArgValue(expr, "actions");
+  if (actionArg) {
+    const eventName = hoistLambdaToHandler(actionArg, ctx);
+    actionLines.push(`  <.button phx-click="${eventName}">Action</.button>`);
+  }
+  const actionsBlock = actionLines.length > 0 ? "\n" + actionLines.join("\n") : "";
+  return `<dl>
+  <%!-- TODO: render fields from ${recordExpr} --%>
+  <div class="field-row">
+    <dt>ID</dt>
+    <dd><%= ${recordExpr}.id %></dd>
+  </div>${actionsBlock}
+</dl>`;
+}
+
+/** Form(creates: T | runs: workflow | into: state, fields, onSubmit, then?) */
+function renderForm(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  ctx: WalkContext,
+): string {
+  const onSubmitLam = namedLambdaArg(expr, "onSubmit");
+  const eventName = onSubmitLam
+    ? hoistLambdaToHandler(onSubmitLam, ctx)
+    : "save";
+
+  const createsArg = namedArgValue(expr, "creates");
+  const runsArg = namedArgValue(expr, "runs");
+  const intoArg = namedArgValue(expr, "into");
+
+  // Determine form source annotation.
+  let formComment: string;
+  if (createsArg && createsArg.kind === "ref") {
+    const mod = pascal(createsArg.name);
+    formComment = `<%!-- AshPhoenix.Form.for_create(${mod}, :create) --%>`;
+  } else if (runsArg && runsArg.kind === "ref") {
+    formComment = `<%!-- AshPhoenix.Form against workflow ${runsArg.name} --%>`;
+  } else if (intoArg) {
+    formComment = `<%!-- wizard step bound to socket assigns --%>`;
+  } else {
+    formComment = `<%!-- TODO: specify creates:, runs:, or into: --%>`;
+  }
+
+  // Collect declared fields.
+  const fieldsArg = namedArgValue(expr, "fields");
+  let fieldsBlock = "  <%!-- TODO: add <.input> per declared field --%>";
+  if (fieldsArg && fieldsArg.kind === "call") {
+    // Single field short-hand.
+    fieldsBlock = `  ${renderFieldInput(fieldsArg, ctx)}`;
+  }
+
+  return `${formComment}
+<.simple_form for={@form} phx-submit="${eventName}">
+${fieldsBlock}
+  <:actions>
+    <.button type="submit">Submit</.button>
+  </:actions>
+</.simple_form>`;
+}
+
+/** Render a Field/Toggle/Select IR as an <.input> inside a form. */
+function renderFieldInput(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  _ctx: WalkContext,
+): string {
+  const positionals = positionalArgs(expr);
+  const nameArg = positionals[0] ?? namedArgValue(expr, "name");
+  const fieldName = nameArg && nameArg.kind === "ref"
+    ? snake(nameArg.name)
+    : nameArg && nameArg.kind === "literal" && nameArg.lit === "string"
+      ? snake(nameArg.value)
+      : "field";
+  const labelArg = namedArgValue(expr, "label");
+  const label = labelArg && labelArg.kind === "literal" && labelArg.lit === "string"
+    ? labelArg.value
+    : fieldName;
+  if (expr.name === "Toggle") {
+    return `<.input field={@form[:${fieldName}]} type="checkbox" label="${label}" />`;
+  }
+  if (expr.name === "Select") {
+    return `<.input field={@form[:${fieldName}]} type="select" options={@${fieldName}_options} label="${label}" />`;
+  }
+  return `<.input field={@form[:${fieldName}]} type="text" label="${label}" />`;
+}
+
+/** MasterDetail(of: T, …) → two-column grid with list + detail panel */
+function renderMasterDetail(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  ctx: WalkContext,
+): string {
+  const ofArg = namedArgValue(expr, "of");
+  const listExpr = ofArg && ofArg.kind === "ref"
+    ? `@${snake(ofArg.name)}_list`
+    : "@rows";
+  const actionsArg = namedArgValue(expr, "actions");
+  let actionsBlock = "";
+  if (actionsArg) {
+    const eventName = hoistLambdaToHandler(actionsArg, ctx);
+    actionsBlock = `\n      <.button phx-click="${eventName}">Action</.button>`;
+  }
+  return `<div class="grid grid-cols-[1fr_2fr] gap-4">
+  <div class="master-panel">
+    <.table id="master-list" rows={${listExpr}}>
+      <:col :let={row} label="ID">
+        <span phx-click="select_row" phx-value-id={row.id}><%= row.id %></span>
+      </:col>
+      <%!-- TODO: add columns per field of T --%>
+    </.table>
+  </div>
+  <div class="detail-panel">
+    <%= if @selected_row do %>
+      <dl>
+        <%!-- TODO: render fields from @selected_row --%>
+      </dl>${actionsBlock}
+    <% else %>
+      <.empty />
+    <% end %>
+  </div>
+</div>`;
+}
+
+/** Dashboard(items: […]) → grid of cards */
+function renderDashboard(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  ctx: WalkContext,
+): string {
+  const positionals = positionalArgs(expr);
+  const itemsArg = namedArgValue(expr, "items");
+  const children = [...(itemsArg ? [itemsArg] : []), ...positionals];
+  const childrenHeex = children
+    .map((c) => renderChild(c, ctx))
+    .map((h) => `  <div class="card">\n    ${h}\n  </div>`)
+    .join("\n");
+  return `<div class="grid grid-cols-3 gap-4">
+${childrenHeex || "  <%!-- TODO: add dashboard items --%>"}
+</div>`;
+}
+
+/** Review(of: T, onSubmit) → read-only dl + submit button */
+function renderReview(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  ctx: WalkContext,
+): string {
+  const ofArg = namedArgValue(expr, "of");
+  const recordExpr = ofArg && ofArg.kind === "ref"
+    ? `@${snake(ofArg.name)}`
+    : "@record";
+  const onSubmitLam = namedLambdaArg(expr, "onSubmit");
+  const eventName = onSubmitLam
+    ? hoistLambdaToHandler(onSubmitLam, ctx)
+    : "submit";
+  return `<dl>
+  <%!-- TODO: render review fields from ${recordExpr} --%>
+</dl>
+<.button phx-click="${eventName}">Submit</.button>`;
+}
+
+/** Grid(…children) → <div class="grid"> */
+function renderGrid(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  ctx: WalkContext,
+): string {
+  const cols = stringNamed(expr, "cols") ?? stringNamed(expr, "columns") ?? "3";
+  const positionals = positionalArgs(expr);
+  const childrenHeex = positionals
+    .map((c) => renderChild(c, ctx))
+    .join("\n");
+  return `<div class="grid grid-cols-${cols} gap-4">
+${indent(childrenHeex || "<%!-- TODO: add grid children --%>", 2)}
+</div>`;
+}
+
+/** Tabs(Tab("label", body), …) → <div role="tablist"> with phx-click */
+function renderTabs(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  ctx: WalkContext,
+): string {
+  const positionals = positionalArgs(expr);
+  const tabs = positionals.map((arg, i) => {
+    if (arg.kind !== "call" || arg.name !== "Tab") {
+      return {
+        value: `tab-${i + 1}`,
+        label: `Tab ${i + 1}`,
+        bodyHeex: `<%!-- missing tab body --%>`,
+      };
+    }
+    const tabPositionals = positionalArgs(arg);
+    const labelArg = tabPositionals[0];
+    const bodyArg = tabPositionals[1];
+    const labelStr =
+      labelArg && labelArg.kind === "literal" && labelArg.lit === "string"
+        ? labelArg.value
+        : `Tab ${i + 1}`;
+    const bodyHeex = bodyArg ? renderChild(bodyArg, ctx) : `<%!-- missing tab body --%>`;
+    return {
+      value: snake(labelStr) || `tab_${i + 1}`,
+      label: labelStr,
+      bodyHeex,
+    };
+  });
+
+  const tabButtons = tabs
+    .map(
+      (t) =>
+        `  <button role="tab" phx-click="switch_tab" phx-value-tab="${t.value}" class={if @active_tab == "${t.value}", do: "tab tab--active", else: "tab"}>${t.label}</button>`,
+    )
+    .join("\n");
+
+  const tabPanels = tabs
+    .map(
+      (t) =>
+        `  <div role="tabpanel" hidden={@active_tab != "${t.value}"}>\n    ${t.bodyHeex}\n  </div>`,
+    )
+    .join("\n");
+
+  return `<div>
+  <div role="tablist">
+${tabButtons}
+  </div>
+${tabPanels}
+</div>`;
+}
+
+/** Field(name, label?) → <.input field={@form[:name]} type="text" label=…> */
+function renderField(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  _ctx: WalkContext,
+): string {
+  const positionals = positionalArgs(expr);
+  const nameArg = positionals[0] ?? namedArgValue(expr, "name");
+  const fieldName = nameArg && nameArg.kind === "ref"
+    ? snake(nameArg.name)
+    : nameArg && nameArg.kind === "literal" && nameArg.lit === "string"
+      ? snake(nameArg.value)
+      : "field";
+  const label = stringNamed(expr, "label") ?? fieldName;
+  const typeStr = stringNamed(expr, "type") ?? "text";
+  return `<.input field={@form[:${fieldName}]} type="${typeStr}" label="${label}" />`;
+}
+
+/** Toggle(name, label?) → <.input type="checkbox" …> */
+function renderToggle(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  _ctx: WalkContext,
+): string {
+  const positionals = positionalArgs(expr);
+  const nameArg = positionals[0] ?? namedArgValue(expr, "name");
+  const fieldName = nameArg && nameArg.kind === "ref"
+    ? snake(nameArg.name)
+    : nameArg && nameArg.kind === "literal" && nameArg.lit === "string"
+      ? snake(nameArg.value)
+      : "field";
+  const label = stringNamed(expr, "label") ?? fieldName;
+  return `<.input field={@form[:${fieldName}]} type="checkbox" label="${label}" />`;
+}
+
+/** Select(name, options, label?) → <.input type="select" options={…}> */
+function renderSelect(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  ctx: WalkContext,
+): string {
+  const positionals = positionalArgs(expr);
+  const nameArg = positionals[0] ?? namedArgValue(expr, "name");
+  const optionsArg = positionals[1] ?? namedArgValue(expr, "options");
+  const fieldName = nameArg && nameArg.kind === "ref"
+    ? snake(nameArg.name)
+    : nameArg && nameArg.kind === "literal" && nameArg.lit === "string"
+      ? snake(nameArg.value)
+      : "field";
+  const label = stringNamed(expr, "label") ?? fieldName;
+  const optionsExpr = optionsArg
+    ? renderExpr(optionsArg, { ...ctx, position: "template" })
+    : `@${fieldName}_options`;
+  return `<.input field={@form[:${fieldName}]} type="select" options={${optionsExpr}} label="${label}" />`;
+}
+
+/** Fieldset(legend, children) → <fieldset><legend>…</legend>…</fieldset> */
+function renderFieldset(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  ctx: WalkContext,
+): string {
+  const positionals = positionalArgs(expr);
+  const legendArg = positionals[0] ?? namedArgValue(expr, "legend");
+  const legendText = legendArg
+    ? renderInTemplate(legendArg, ctx)
+    : "Fieldset";
+  const childrenArg = positionals[1] ?? namedArgValue(expr, "children");
+  const childrenHeex = childrenArg
+    ? renderChild(childrenArg, ctx)
+    : "<%!-- TODO: add fieldset children --%>";
+  return `<fieldset>
+  <legend>${legendText}</legend>
+  ${childrenHeex}
+</fieldset>`;
+}
+
+/** Stat(label, value) → <div class="stat"><dt>…</dt><dd>…</dd></div> */
+function renderStat(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  ctx: WalkContext,
+): string {
+  const positionals = positionalArgs(expr);
+  const labelArg = positionals[0] ?? namedArgValue(expr, "label");
+  const valueArg = positionals[1] ?? namedArgValue(expr, "value");
+  const labelHeex = labelArg ? renderInTemplate(labelArg, ctx) : "Label";
+  const valueHeex = valueArg ? renderInTemplate(valueArg, ctx) : "Value";
+  return `<div class="stat">
+  <dt>${labelHeex}</dt>
+  <dd>${valueHeex}</dd>
+</div>`;
+}
 
 interface PrimitiveSpec {
   /** HEEx component tag, e.g. ".heading", "div" (for raw layout), or

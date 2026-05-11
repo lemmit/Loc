@@ -218,16 +218,29 @@ function lowerSystem(sys: import("../language/generated/ast.js").System): System
   // UI test (Playwright spec via page objects), anything else →
   // api test (vitest+fetch).  This avoids reserving a `'ui'` keyword
   // that would shadow the body's `ui.X.Y(...)` identifiers.
-  const e2eTests = e2eBlocks.map((b) => {
+  const e2eTests: import("./loom-ir.js").TestE2EIR[] = [];
+  for (const b of e2eBlocks) {
     const targetName = b.deployable?.ref?.name ?? "";
     const target = deployables.find((d) => d.name === targetName);
-    // Slice 8: `static` deployables also lower e2e tests as UI tests
-    // (Playwright spec via page objects) — same shape `react` has.
     const targetPlatform = target?.platform;
-    const kind: "api" | "ui" =
-      targetPlatform === "react" || targetPlatform === "static" ? "ui" : "api";
-    return lowerE2E(b, e2eEnv, kind);
-  });
+    // Slice 8 + F3: kind dispatch.
+    //   - `react` / `static` are frontend-only → only `ui` (Playwright).
+    //   - `dotnet` / `hono` are backend-only → only `api` (vitest+fetch).
+    //   - `phoenixLiveView` is fullstack — emit BOTH a UI spec (driven
+    //     by Playwright page objects) AND an API spec (driven by
+    //     fetch against the deployable's HTTP surface).
+    const isFrontendOnly =
+      targetPlatform === "react" || targetPlatform === "static";
+    const isFullstack = targetPlatform === "phoenixLiveView";
+    if (isFrontendOnly) {
+      e2eTests.push(lowerE2E(b, e2eEnv, "ui"));
+    } else if (isFullstack) {
+      e2eTests.push(lowerE2E(b, e2eEnv, "ui"));
+      e2eTests.push(lowerE2E(b, e2eEnv, "api"));
+    } else {
+      e2eTests.push(lowerE2E(b, e2eEnv, "api"));
+    }
+  }
   // Slice 2 — page metamodel.  `ui { ... }` blocks are SystemMembers;
   // lower each into a UiIR and attach to the system.  Order
   // preserves source order so Slice 4's scaffold expander emits
