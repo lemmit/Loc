@@ -1,6 +1,0 @@
-<%!-- field-input-valueobject: fieldset for a value-object (composite) field --%>
-<fieldset class="rounded-md border border-gray-200 p-4 space-y-3" data-testid="{{testId}}">
-  <legend class="px-1 text-sm font-medium text-gray-700">{{label}}</legend>
-  <%!-- Children rendered by Phase 7 LiveView emitter --%>
-  {{#each children}}{{> (lookup . "template") this}}{{/each}}
-</fieldset>
