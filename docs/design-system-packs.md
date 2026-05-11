@@ -179,7 +179,7 @@ can render whatever the design system needs to fulfill the contract.
 |---|---|
 | `page-list` | Aggregate list page: header + create button + table + empty/error/loading states. |
 | `page-detail` | Aggregate detail page: header + breadcrumbs + identity block + parts/operations. |
-| `page-new` | Aggregate creation page.  Today emits an RHF + zodResolver scaffold (see §9.6 — RHF is the current cross-pack form-state baseline). |
+| `page-new` | Aggregate creation page.  Emits an RHF + zodResolver scaffold; see §9.6 — RHF is the cross-pack form-state policy for every pack. |
 | `operation-modal` | Modal/dialog rendering for aggregate operations. |
 
 ### Workflow + view templates (4)
@@ -567,18 +567,22 @@ behind them.
    alternative is N divergent implementations of one feature with no
    per-pack value (e.g. form state — see rule 6).
 
-6. **react-hook-form is the current cross-pack form-state baseline,
-   pending a per-pack form-state seam.**  All in-tree packs emit
-   `useForm` + `Controller` + `zodResolver` because the body-walker
-   hardcodes this shape today.  The choice was deliberate (RHF +
-   Zod is well-supported across Mantine, MUI, Chakra, and shadcn,
-   and gives one validation story for all four), but it IS a
-   cross-pack imposition — a future pack whose native form idiom is
-   load-bearing (e.g. AntD's `<Form>`) needs a walker seam to opt
-   into its own form-state strategy.  See
-   `docs/antd-pack-plan.md` §5 for the deferred design.  Until that
-   seam exists, every pack's `form-of-*` templates and `page-new`
-   render an RHF-shaped tree.
+6. **react-hook-form is the cross-pack form-state policy — for all
+   packs, no exceptions.**  Every pack's `form-of-*` templates and
+   `page-new` emit `useForm` + `Controller` + `zodResolver`.  The
+   rationale: RHF + Zod gives one validation story across every
+   design system worth supporting, and the controlled-input contract
+   it expects of the underlying component (`value`, `onChange`,
+   `ref`) is universal — every component library cooperates.
+
+   This is the one place rule 5 doesn't apply.  When a pack ships a
+   native form abstraction with its own state machine (AntD's
+   `<Form>`, Formik-style libraries, etc.), the pack still uses RHF
+   underneath.  Wrap the pack's input components for visual
+   consistency if they require a labelled-shell parent — but never
+   replace RHF with the pack's native form-state engine.  Picking
+   one form-state library is worth more to users than per-pack
+   parity on form internals.
 
 7. **DataTable strategy is per pack, not cross-pack.**  Unlike form
    state, no cross-pack baseline applies — the four in-tree packs

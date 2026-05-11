@@ -61,7 +61,7 @@ The decisions to make at template-author time:
 | `primitive-card` | `<Card title=…>` | AntD's Card has prescriptive header slots — use `title`/`extra` props, not children |
 | `primitive-field` | `<Form.Item label=…><Input/></Form.Item>` | AntD couples label+input via `Form.Item`; the field-input templates need to emit `Form.Item` wrappers, not standalone `<Input>` |
 | `primitive-tabs` | `<Tabs items=[]>` | AntD's v5 `items` prop is declarative, not children-based |
-| `primitive-form-of` | `<Form layout="vertical" onFinish=…>` | AntD's `<Form>` is the idiomatic choice — see §5.  Requires the body-walker to gain a per-pack form-state seam (today it hardcodes RHF). |
+| `primitive-form-of` | Plain `<form onSubmit={handleSubmit(...)}>` | RHF stays — every pack uses it (`design-system-packs.md` §9.6).  See §5 for how AntD's `<Form.Item>` is used as a labelled-shell wrapper without bringing AntD's form-state engine. |
 | `primitive-table` (view-table) | `<Table columns=[] dataSource=[]>` | This is the big one — see below |
 | `primitive-alert` | `<Alert type="error" message=… description=…>` | `type` takes `success`/`info`/`warning`/`error`; map semantic colors via a `helpers.colorSeverity` table or inline conditional |
 
@@ -96,35 +96,30 @@ participate in the `cell-*` family or emit their own table shape —
 the field is already there in `pack.json` and no new contract is
 needed.
 
-### 5. The AntD-form question
+### 5. Forms — RHF, like every other pack
 
-AntD's `<Form>` component has its own state machine, `getFieldValue`/
-`setFieldValue` API, and `onFinish` lifecycle.  This conflicts with
-the generator's existing react-hook-form integration: the four
-in-tree `tsx` packs all emit `useForm` + `Controller` and expect
-raw `<input>` shape semantics underneath.
+AntD's `<Form>` is the visible form-state engine in most AntD
+codebases, but the project's cross-pack form-state policy
+(`docs/design-system-packs.md` §9.6) is **RHF for all packs, no
+exceptions**.  AntD does not get to pick its own form-state engine
+just because it ships one.
 
-Two options, with the project's "idiomatic per pack" principle
-pulling the answer one way:
+What this means concretely for the AntD pack:
 
-**Option A — use AntD's native `<Form>`.**  AntD's `<Form>` is as
-load-bearing in AntD codebases as MUI's `<DataGrid>` is for MUI
-tables.  Picking RHF here is the same anti-idiom we explicitly chose
-to avoid for tables (see "DataTables" below).  Cost: this pack
-diverges from the other four on form state, and the body-walker's
-form path needs a per-pack switch (today it assumes RHF).
+- `primitive-form-of.hbs` emits a plain `<form
+  onSubmit={handleSubmit(...)}>` element, NOT `<Form
+  onFinish={...}>`.  No `useForm` from `antd`.
+- Each `field-input-*.hbs` wraps AntD's input component
+  (`<Input>`, `<Select>`, `<InputNumber>`, `<Switch>`, …) in
+  `<Form.Item label="…" help={...}>` for visual consistency with
+  AntD codebases — `Form.Item` works standalone outside a parent
+  `<Form>`, used purely as a labelled-shell wrapper.
+- Validation errors come from RHF's `fieldState.error` and feed into
+  `Form.Item`'s `help={fieldState.error?.message}` and
+  `validateStatus={fieldState.error ? "error" : ""}`.
 
-**Option B — RHF inside `<Form.Item>` shells.**  Wrap AntD's inputs in
-`<Form.Item label="…" help={…}>` for the visual label/error slot but
-keep RHF outside.  Mechanically simpler — body-walker stays as-is —
-but the result is a half-AntD form that AntD users would not write
-by hand.
-
-**Recommended: Option A.**  The whole point of an AntD pack is to
-produce code an AntD developer would recognize.  Expect this to
-require adding a per-pack form-state strategy to the walker (the
-same way each pack picks its DataTable engine — see §6).  RHF stays
-the default for packs that don't declare a native form story.
+This is exactly the recipe every other pack uses with its own
+component library; only the wrapper component name changes.
 
 ### 6. DataTables (idiomatic per pack)
 
@@ -181,24 +176,22 @@ must-pass before merging.
 
 ## Effort estimate
 
-Larger than the MUI or Chakra pack because two architectural seams
-need to grow to admit AntD's idioms:
+Comparable to the MUI or Chakra pack: ~80 emits, mostly mirroring
+Chakra structurally.  One architectural seam is a real prerequisite,
+one is just template work:
 
-1. **Per-pack form-state seam in the body-walker** (see §5).  The
-   walker currently emits `useForm` + `Controller` unconditionally;
-   AntD wants `<Form form={form}>` + `useForm` from `antd`.  This
-   is the load-bearing change — once it exists, other packs continue
-   to pick "RHF" via a pack-level `formState: "rhf"` flag (or
-   equivalent contract entry) and AntD picks `formState: "antd"`.
-2. **Declarative-table per pack** (see §4 + §6).  Mantine and MUI
-   already need this for `mantine-datatable` / `@mui/x-data-grid`;
-   AntD becomes the third declarative-table pack and shares whatever
-   shape the seam settles on.  Worth designing all three together
-   rather than retrofitting AntD onto a Mantine/MUI-specific design.
+1. **Declarative-table per pack** (see §4 + §6) is the load-bearing
+   shared design.  Mantine and MUI both want this for
+   `mantine-datatable` / `@mui/x-data-grid`; AntD's `<Table
+   columns dataSource>` is a third declarative-table consumer of the
+   same seam.  Worth designing the seam against all three at once
+   rather than retrofitting AntD onto a Mantine/MUI-specific shape.
 
-The remaining ~70 templates are MUI/Chakra-shape rename-fests once
-the two seams above land.  Without those seams the pack ships in a
-non-idiomatic shape and defeats the point.
+2. **`<Form.Item>` wrapping** (see §5) is mechanical — every
+   `field-input-*` template gets the same wrapper shape around the
+   AntD input.  No walker changes; RHF stays.
+
+The remaining ~70 templates are MUI/Chakra-shape rename-fests.
 
 ## Open questions to resolve when picking it up
 
