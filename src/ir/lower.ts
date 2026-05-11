@@ -351,7 +351,19 @@ function conventionalEmitPath(
           : "detail";
     return `src/pages/${slug}/${file}.tsx`;
   }
+  if (origin.kind === "workflow-form") {
+    const wf = ctx.workflowsByName.get(origin.workflowName);
+    if (!wf) return undefined;
+    return `src/pages/workflows/${snakeOnly(wf.name)}.tsx`;
+  }
   return undefined;
+}
+
+function snakeOnly(s: string): string {
+  return s
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
+    .toLowerCase();
 }
 
 function pluralSnake(s: string): string {

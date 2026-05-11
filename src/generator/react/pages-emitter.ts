@@ -120,6 +120,32 @@ function buildBcByAggregate(
   return out;
 }
 
+/** Slice A12 — derived map: workflow name → workflow IR.  Powers
+ *  `Form(runs: <wf>)` field dispatch in the walker. */
+function buildWorkflowsByName(
+  ctx: PageEmitContext,
+): Map<string, import("../../ir/loom-ir.js").WorkflowIR> {
+  const out = new Map<
+    string,
+    import("../../ir/loom-ir.js").WorkflowIR
+  >();
+  for (const bc of ctx.contextsByName.values()) {
+    for (const wf of bc.workflows) out.set(wf.name, wf);
+  }
+  return out;
+}
+
+/** Slice A12 — derived map: workflow name → owning bounded context. */
+function buildBcByWorkflow(
+  ctx: PageEmitContext,
+): Map<string, BoundedContextIR> {
+  const out = new Map<string, BoundedContextIR>();
+  for (const bc of ctx.contextsByName.values()) {
+    for (const wf of bc.workflows) out.set(wf.name, bc);
+  }
+  return out;
+}
+
 /** Emit `src/pages/<route>.tsx` per page in `ui.pages`.  Returns just
  *  the page-file map; api modules / page objects / shell files stay
  *  in `index.ts`. */
@@ -268,6 +294,8 @@ export function emitPagesForUi(
           buildBcByAggregate(ctx),
           ui.helperImports,
           srcImportPrefix,
+          buildWorkflowsByName(ctx),
+          buildBcByWorkflow(ctx),
         ),
       );
       continue;

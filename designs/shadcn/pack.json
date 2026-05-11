@@ -94,6 +94,8 @@
     "primitive-form-of": "primitive-form-of.hbs",
     "form-of-imports": "form-of-imports.hbs",
     "form-of-decls": "form-of-decls.hbs",
+    "form-runs-imports": "form-runs-imports.hbs",
+    "form-runs-decls": "form-runs-decls.hbs",
     "primitive-breadcrumbs": "primitive-breadcrumbs.hbs",
     "primitive-paper": "primitive-paper.hbs",
     "primitive-skeleton": "primitive-skeleton.hbs",

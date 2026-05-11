@@ -219,13 +219,34 @@ describe("Slice C1 — scaffold expander dispatch", () => {
     expect(singleIdx).toBeGreaterThanOrEqual(0);
   });
 
-  it("workflow-form returns null (deferred)", () => {
+  it("workflow-form expands to Stack(Breadcrumbs, Heading, Card(Form(runs:)))", () => {
+    // Augment the test ctx with a synthetic workflow.
+    const sysWithWf = makeSystem();
+    sysWithWf.modules[0]!.contexts[0]!.workflows.push({
+      name: "placeOrder",
+      params: [{ name: "qty", type: { kind: "primitive", name: "int" } }],
+      transactional: false,
+      statements: [],
+      savesAtExit: [],
+    } as never);
+    const ctxWithWf = buildExpandContext(sysWithWf, makeUi());
     const origin: ScaffoldOriginIR = {
       kind: "workflow-form",
       workflowName: "placeOrder",
       contextName: "Orders",
     };
-    expect(expandScaffoldToExplicitBody(origin, ctx)).toBeNull();
+    const body = expandScaffoldToExplicitBody(origin, ctxWithWf);
+    expect(body).not.toBeNull();
+    expect((body as { name: string }).name).toBe("Stack");
+    expect(findCall(body!, "Breadcrumbs")).not.toBeNull();
+    expect(findCall(body!, "Heading")).not.toBeNull();
+    expect(findCall(body!, "Card")).not.toBeNull();
+    const form = findCall(body!, "Form")!;
+    expect(form.kind).toBe("call");
+    if (form.kind !== "call") return;
+    const runsIdx = (form.argNames ?? []).indexOf("runs");
+    expect(runsIdx).toBeGreaterThanOrEqual(0);
+    expect((form.args[runsIdx] as { name: string }).name).toBe("placeOrder");
   });
 
   it("view-list returns null (deferred)", () => {

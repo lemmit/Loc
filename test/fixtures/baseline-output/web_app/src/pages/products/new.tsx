@@ -50,7 +50,7 @@ export default function ProductNew() {
             </Fieldset>
     
             <Group justify="flex-end" mt="sm">
-              <Button type="submit" loading={create.isPending} data-testid="products-new-submit">Create</Button>
+              <Button type="submit" loading={ create.isPending } data-testid="products-new-submit">Create</Button>
             </Group>
           </Stack>
         </form>
