@@ -38,7 +38,10 @@ permissions:
 jobs:
   build-generated-phoenix:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # Tight cap to protect CI minutes.  First-run cold mix compile is
+    # ~3-4min; warm runs (with deps cache below) are ~1min.  10min
+    # leaves headroom without letting a hung job burn through quota.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
 
@@ -162,6 +165,24 @@ jobs:
       # right code_interface form, right OpenApiSpex shapes, etc.).
       # On the GitHub runner, repo.hex.pm is reachable directly so
       # the egress-proxy block I hit in the sandbox doesn't apply.
+
+      # Cache the hex dep tree + Elixir build outputs across runs so
+      # only the first cold run pays the ~3-4min download/compile
+      # cost.  Cache key is rooted on the lockfile content (mix.lock
+      # would be regenerated identically by the emitter unless deps
+      # changed); since the generator emits mix.exs but not mix.lock,
+      # we use the emitter source as the dep signature.  Restore on
+      # any miss so a wrong key still gets partial deps.
+      - name: Cache Phoenix deps + _build
+        uses: actions/cache@v5
+        with:
+          path: |
+            /tmp/ci/out/phoenix_app/deps
+            /tmp/ci/out/phoenix_app/_build
+          key: phoenix-mix-${{ hashFiles('src/generator/phoenix-live-view/**', 'designs/ashPhoenix/**') }}
+          restore-keys: |
+            phoenix-mix-
+
       - name: mix deps.get && mix compile
         run: |
           docker run --rm \
