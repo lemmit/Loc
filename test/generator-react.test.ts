@@ -581,18 +581,21 @@ describe("react generator", () => {
       });
     });
 
-    it("home page lands as a summary, not a duplicate of the sidebar", async () => {
-      const model = await buildModel("examples/acme.ddd");
-      const { files } = generateSystems(model);
-      const home = files.get("web_app/src/pages/home.tsx")!;
-      // SimpleGrid of construct-kind summary cards.
-      expect(home).toMatch(/<SimpleGrid cols=\{\{ base: 1, sm: 2, md: 3 \}\}/);
-      // Counts mention the right cardinalities (acme has 3 aggregates
-      // — Product + Order + Customer — plus 1 workflow and 2 views).
-      expect(home).toMatch(/3 aggregates/);
-      expect(home).toMatch(/1 workflow[^s]/);
-      expect(home).toMatch(/2 views/);
-      expect(home).toMatch(/data-testid="home"/);
+    describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — home summary", () => {
+      const homeGuard = withLegacyScaffold();
+      beforeEach(homeGuard.before);
+      afterEach(homeGuard.after);
+
+      it("home page lands as a summary, not a duplicate of the sidebar", async () => {
+        const model = await buildModel("examples/acme.ddd");
+        const { files } = generateSystems(model);
+        const home = files.get("web_app/src/pages/home.tsx")!;
+        expect(home).toMatch(/<SimpleGrid cols=\{\{ base: 1, sm: 2, md: 3 \}\}/);
+        expect(home).toMatch(/3 aggregates/);
+        expect(home).toMatch(/1 workflow[^s]/);
+        expect(home).toMatch(/2 views/);
+        expect(home).toMatch(/data-testid="home"/);
+      });
     });
   });
 
@@ -779,25 +782,25 @@ describe("react generator", () => {
       expect(api).toMatch(/api\.post\(`\/workflows\/place_order`, input\)/);
     });
 
-    it("emits a workflows index page listing every workflow", async () => {
-      const model = await buildModel("examples/acme.ddd");
-      const { files } = generateSystems(model);
-      const idx = files.get("web_app/src/pages/workflows/index.tsx")!;
-      // One card per workflow, with a Run link.
-      expect(idx).toMatch(/data-testid="workflow-card-place_order"/);
-      // Humanised title.
-      expect(idx).toMatch(/<Title order=\{4\}>Place Order<\/Title>/);
-      // Parameter signature surfaces in a dimmed text row.  The
-      // type label is emitted as a string literal so JSX doesn't
-      // parse `Id<Product>` as an opening element.
-      expect(idx).toMatch(
-        /workflow-place_order-param-customerId.*<strong>Customer Id<\/strong>: \{"string"\}/,
-      );
-      expect(idx).toMatch(
-        /workflow-place_order-param-productId.*<strong>Product Id<\/strong>: \{"Id<Product>"\}/,
-      );
-      // "Run" button links to the per-workflow page.
-      expect(idx).toMatch(/to="\/workflows\/place_order"/);
+    describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — workflows index", () => {
+      const wfIdxGuard = withLegacyScaffold();
+      beforeEach(wfIdxGuard.before);
+      afterEach(wfIdxGuard.after);
+
+      it("emits a workflows index page listing every workflow", async () => {
+        const model = await buildModel("examples/acme.ddd");
+        const { files } = generateSystems(model);
+        const idx = files.get("web_app/src/pages/workflows/index.tsx")!;
+        expect(idx).toMatch(/data-testid="workflow-card-place_order"/);
+        expect(idx).toMatch(/<Title order=\{4\}>Place Order<\/Title>/);
+        expect(idx).toMatch(
+          /workflow-place_order-param-customerId.*<strong>Customer Id<\/strong>: \{"string"\}/,
+        );
+        expect(idx).toMatch(
+          /workflow-place_order-param-productId.*<strong>Product Id<\/strong>: \{"Id<Product>"\}/,
+        );
+        expect(idx).toMatch(/to="\/workflows\/place_order"/);
+      });
     });
 
     it("emits a per-workflow form page with typed inputs reusing the v4 form helpers", async () => {
@@ -854,15 +857,18 @@ describe("react generator", () => {
       );
     });
 
-    it("home page summarises workflows when at least one exists", async () => {
-      const model = await buildModel("examples/acme.ddd");
-      const { files } = generateSystems(model);
-      const home = files.get("web_app/src/pages/home.tsx")!;
-      // Slice 20 simplified the home page: a card per construct
-      // kind with a count + "Open <kind>" link, instead of a full
-      // navigation re-listing.
-      expect(home).toMatch(/1 workflow[^s]/);
-      expect(home).toMatch(/data-testid="home-workflows-link"/);
+    describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — home workflows summary", () => {
+      const homeWfGuard = withLegacyScaffold();
+      beforeEach(homeWfGuard.before);
+      afterEach(homeWfGuard.after);
+
+      it("home page summarises workflows when at least one exists", async () => {
+        const model = await buildModel("examples/acme.ddd");
+        const { files } = generateSystems(model);
+        const home = files.get("web_app/src/pages/home.tsx")!;
+        expect(home).toMatch(/1 workflow[^s]/);
+        expect(home).toMatch(/data-testid="home-workflows-link"/);
+      });
     });
   });
 
@@ -888,18 +894,22 @@ describe("react generator", () => {
       expect(api).toMatch(/export function useOrderSummaryView\(\)/);
     });
 
-    it("emits a views index page listing every view", async () => {
-      const model = await buildModel("examples/acme.ddd");
-      const { files } = generateSystems(model);
-      const idx = files.get("web_app/src/pages/views/index.tsx")!;
-      expect(idx).toMatch(/data-testid="view-card-active_orders"/);
-      expect(idx).toMatch(/data-testid="view-card-order_summary"/);
-      expect(idx).toMatch(/<Title order=\{4\}>Active Orders<\/Title>/);
-      expect(idx).toMatch(/<Title order=\{4\}>Order Summary<\/Title>/);
-      // Shorthand view shows the source aggregate; full-form view
-      // shows "Custom shape: <field names>".
-      expect(idx).toMatch(/Source: Order/);
-      expect(idx).toMatch(/Custom shape: orderId, status, lineCount/);
+    describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — views index", () => {
+      const viewIdxGuard = withLegacyScaffold();
+      beforeEach(viewIdxGuard.before);
+      afterEach(viewIdxGuard.after);
+
+      it("emits a views index page listing every view", async () => {
+        const model = await buildModel("examples/acme.ddd");
+        const { files } = generateSystems(model);
+        const idx = files.get("web_app/src/pages/views/index.tsx")!;
+        expect(idx).toMatch(/data-testid="view-card-active_orders"/);
+        expect(idx).toMatch(/data-testid="view-card-order_summary"/);
+        expect(idx).toMatch(/<Title order=\{4\}>Active Orders<\/Title>/);
+        expect(idx).toMatch(/<Title order=\{4\}>Order Summary<\/Title>/);
+        expect(idx).toMatch(/Source: Order/);
+        expect(idx).toMatch(/Custom shape: orderId, status, lineCount/);
+      });
     });
 
     describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0)", () => {
@@ -961,12 +971,18 @@ describe("react generator", () => {
       );
     });
 
-    it("home page summarises views when at least one exists", async () => {
-      const model = await buildModel("examples/acme.ddd");
-      const { files } = generateSystems(model);
-      const home = files.get("web_app/src/pages/home.tsx")!;
-      expect(home).toMatch(/2 views/);
-      expect(home).toMatch(/data-testid="home-views-link"/);
+    describe("legacy archetype renderer (LOOM_SCAFFOLD_EXPAND=0) — home views summary", () => {
+      const homeViewsGuard = withLegacyScaffold();
+      beforeEach(homeViewsGuard.before);
+      afterEach(homeViewsGuard.after);
+
+      it("home page summarises views when at least one exists", async () => {
+        const model = await buildModel("examples/acme.ddd");
+        const { files } = generateSystems(model);
+        const home = files.get("web_app/src/pages/home.tsx")!;
+        expect(home).toMatch(/2 views/);
+        expect(home).toMatch(/data-testid="home-views-link"/);
+      });
     });
   });
 

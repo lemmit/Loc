@@ -359,6 +359,9 @@ function conventionalEmitPath(
   if (origin.kind === "view-list") {
     return `src/pages/views/${snakeOnly(origin.viewName)}.tsx`;
   }
+  if (origin.kind === "home") return "src/pages/home.tsx";
+  if (origin.kind === "workflows-index") return "src/pages/workflows/index.tsx";
+  if (origin.kind === "views-index") return "src/pages/views/index.tsx";
   return undefined;
 }
 
