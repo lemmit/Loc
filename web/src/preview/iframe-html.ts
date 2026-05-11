@@ -206,6 +206,18 @@ ${styleTagFor(args.css)}
 <style>
   html, body { margin: 0; padding: 0; height: 100%; }
   body { background: #fff; font-family: system-ui, sans-serif; }
+  /* iOS Safari auto-zooms when a focused input has font-size < 16px,
+     blowing past the user's pinch-zoom setting and forcing them to
+     re-pan after every tap.  Mantine / shadcn primitives ship 14 px
+     inputs by default; the @media guard makes sure the override only
+     fires on phones where the auto-zoom kicks in, leaving desktop
+     typography untouched.  Targets the form-control trio that
+     triggers the heuristic; buttons and labels aren't affected. */
+  @media (max-width: 768px) {
+    input, select, textarea {
+      font-size: 16px !important;
+    }
+  }
 </style>
 </head>
 <body>

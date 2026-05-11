@@ -88,7 +88,18 @@ function useIsActive() {
 
 export default function App() {
   const isActive = useIsActive();
-  const [opened, { toggle }] = useDisclosure();
+  const [opened, { toggle, close }] = useDisclosure();
+  // Mobile UX: auto-close the navbar drawer after a route change.
+  // Tapping a NavLink on a phone otherwise leaves the menu covering
+  // the destination page, which is contrary to how every other
+  // mobile app behaves.  Desktop is unaffected — the navbar isn't
+  // collapsible above the `sm` breakpoint, so close() is a no-op there.
+  const location = useLocation();
+  React.useEffect(() => {
+    close();
+    // close() is stable from useDisclosure; depending on location
+    // alone keeps the effect from re-firing on unrelated re-renders.
+  }, [location.pathname]);
   return (
     <AppShell
       header={{ height: 56 }}
