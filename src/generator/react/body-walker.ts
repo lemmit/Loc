@@ -62,7 +62,6 @@ import type {
 } from "../../ir/loom-ir.js";
 import { camel, humanize, pascal, plural, snake } from "../../util/naming.js";
 import {
-  componentsForFields,
   idTargetHookVar,
   idTargetsInFields,
   initialValuesTs,
@@ -511,9 +510,6 @@ interface FormStateBase {
   useController: boolean;
   /** Default-values literal for `useForm({ defaultValues: ... })`. */
   defaultValuesTs: string;
-  /** Components needed from the design pack — added on top of the
-   *  base set so the import block stays sorted + de-duped. */
-  fieldComponents: readonly string[];
   /** Slug-prefixed testid namespace (e.g. `"orders-form"`). */
   testidNamespace: string;
   /** Pre-rendered field TSX (already through the per-pack
@@ -1270,7 +1266,6 @@ function emitFormOfAggregate(
   const idTargets = idTargetsInFields(fields, bc, aggregatesByNameMut);
   const useController = needsController(fields, bc, aggregatesByNameMut);
   const defaultValuesTs = initialValuesTs(fields, bc);
-  const fieldComponents = [...componentsForFields(fields, bc)];
   const testidArg = stringNamed(call, "testid");
   const testidNamespace = testidArg ?? `${snake(plural(agg.name))}-new`;
   const fieldVMs = fields.map((f) =>
@@ -1328,7 +1323,6 @@ function emitFormOfAggregate(
     idTargets,
     useController,
     defaultValuesTs,
-    fieldComponents,
     testidNamespace,
     fieldHtmls,
     onSubmitJs,
@@ -1391,7 +1385,6 @@ function emitFormRuns(
   const idTargets = idTargetsInFields(fieldsForHelpers, bc, aggregatesByNameMut);
   const useController = needsController(fieldsForHelpers, bc, aggregatesByNameMut);
   const defaultValuesTs = initialValuesTs(fieldsForHelpers, bc);
-  const fieldComponents = [...componentsForFields(fieldsForHelpers, bc)];
   const testidArg = stringNamed(call, "testid");
   const testidNamespace = testidArg ?? `workflow-${snake(workflow.name)}`;
   const fieldVMs = fields.map((f) =>
@@ -1449,7 +1442,6 @@ function emitFormRuns(
     idTargets,
     useController,
     defaultValuesTs,
-    fieldComponents,
     testidNamespace,
     fieldHtmls,
     onSubmitJs,
