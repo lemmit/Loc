@@ -1,0 +1,7 @@
+{{#if useController}}import { useForm, Controller } from "react-hook-form";
+{{else}}import { useForm } from "react-hook-form";
+{{/if}}import { zodResolver } from "@hookform/resolvers/zod";
+import { Create{{aggregateName}}Request, useCreate{{aggregateName}} } from "{{srcImportPrefix}}api/{{aggregateNameCamel}}";
+{{#each idTargets}}import { useAll{{this.namePlural}} } from "{{../srcImportPrefix}}api/{{this.nameCamel}}";
+{{/each}}{{#if hasDefaultOnSubmit}}import { notifications } from "@mantine/notifications";
+{{/if}}

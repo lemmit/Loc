@@ -10,9 +10,19 @@
 //
 // Fixture pack lives at `web/test-fixtures/pack-foo/` — a clone
 // of the built-in mantine pack with the manifest renamed to
-// `foo`.  After import, the user can `design: "./design/foo"`
-// in their `.ddd` and the generator picks it up exactly like a
-// built-in pack.
+// `foo`.  After import, a `design: "./design/foo"` slot in the
+// source is resolved by the build worker exactly like a built-in
+// pack.
+//
+// The source is pre-edited and loaded through the playground's
+// URL-hash share mechanism (`#s=<base64url(source)>`).  An earlier
+// version of this spec used Monaco's Find widget + keyboard
+// scripting to inject the design slot interactively; that path was
+// timing-fragile and broke entirely once the default example
+// switched from `sales-system` (with `port: 3001`) to
+// `storybook-components` (no `port:` anchor).  URL-hash bootstrap
+// is deterministic regardless of default example or LSP startup
+// timing.
 //
 // No network needed — the spec stops at Generate and asserts
 // "generated N files".  Bundle/Boot/Preview would require esm.sh
@@ -28,6 +38,13 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixtureDir = path.resolve(here, "..", "test-fixtures", "pack-foo");
+const salesSystemPath = path.resolve(
+  here,
+  "..",
+  "src",
+  "examples",
+  "sales-system.ddd",
+);
 
 interface FixtureEntry {
   name: string;
@@ -42,12 +59,22 @@ function readFixturePack(): FixtureEntry[] {
   });
 }
 
+// Mirror of `web/src/util/share.ts:encodeSource` — base64url-encoded
+// UTF-8, no `=` padding.  Inlined here so the test isn't coupled to
+// importing browser-only utilities through Vite.
+function encodeForHash(text: string): string {
+  return Buffer.from(text, "utf-8")
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
 test("pack picker → workspace tree → generate against custom design", async ({ page, context }) => {
   await context.clearCookies();
   // Wipe IDB so the test starts from a known state — otherwise a
-  // prior run's "Workspace (autosaved)" would shift the editor
-  // off the default example and make the design-edit step
-  // ambiguous.
+  // prior run's "Workspace (autosaved)" would shift the editor off
+  // the URL-hash source and make the design-slot test ambiguous.
   await page.goto("/");
   await page.evaluate(async () => {
     const dbs = await indexedDB.databases?.();
@@ -91,7 +118,30 @@ test("pack picker → workspace tree → generate against custom design", async 
       };
   }, fixtureFiles);
 
-  await page.goto("/");
+  // Pre-edit Sales System to inject `design: "./design/foo"` next to
+  // the `port: 3001` line in the webApp deployable, and load it
+  // through the URL-hash share mechanism.  The playground reads
+  // `#s=...` on mount and synthesises a "Shared link (from URL)"
+  // entry at the top of the example dropdown — exampleId starts as
+  // "shared" and stays there because workspace.persistedSource is
+  // null after the IDB wipe.
+  const salesSystemSource = fs.readFileSync(salesSystemPath, "utf-8");
+  const sourceWithDesign = salesSystemSource.replace(
+    /(deployable webApp \{[\s\S]*?port: 3001)/,
+    '$1\n    design: "./design/foo"',
+  );
+  expect(
+    sourceWithDesign,
+    "expected the design slot injection to land — anchor changed?",
+  ).toContain('design: "./design/foo"');
+
+  // page.goto with a hash-only URL change doesn't fully reload the
+  // page in Chromium (it's treated as an in-page navigation), so the
+  // React app stays mounted and never re-reads `window.location.hash`.
+  // Set the URL first, then `reload()` to force a clean mount that
+  // sees the hash on its first `readHashSource()` call.
+  await page.goto("/#s=" + encodeForHash(sourceWithDesign));
+  await page.reload();
   await waitForPlaygroundReady(page);
 
   // Click the Import button — should resolve via the stubbed
@@ -106,24 +156,10 @@ test("pack picker → workspace tree → generate against custom design", async 
     timeout: 10_000,
   });
 
-  // Now edit the .ddd to use `design: "./design/foo"`.  Sales-system
-  // example has `deployable webApp { ... port: 3001 }` — append
-  // the design slot.  Same Monaco-driven keyboard flow used in
-  // preview-shadcn.spec.ts.
-  const editor = page.locator(".monaco-editor").first();
-  await editor.click();
-  await page.keyboard.press("Control+f");
-  const findInput = page
-    .locator(
-      ".monaco-editor .find-widget .find-part textarea, .monaco-editor .find-widget .find-part input",
-    )
-    .first();
-  await findInput.fill("port: 3001");
-  await page.keyboard.press("Enter");
-  await page.keyboard.press("Escape");
-  await page.keyboard.press("End");
-  await page.keyboard.press("Enter");
-  await page.keyboard.type('design: "./design/foo"');
+  // LSP only sees the source text — the `design:` slot is
+  // syntactically valid regardless of whether the pack actually
+  // exists in the workspace VFS yet, so 0 errors is the steady
+  // state both before and after the import.
   await expect(page.getByText(/^0 errors$/)).toBeVisible({ timeout: 10_000 });
 
   // Click Generate.  Worker resolves `design: "./design/foo"` →
