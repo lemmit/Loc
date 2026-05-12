@@ -84,12 +84,17 @@ function emitSystem(
   // UI e2e specs — one per deployable that mounts a `ui:` and has
   // any `test e2e ui ... against <this-deployable>` blocks.
   // Consults `PlatformSurface.mountsUi` so any new platform that
-  // mounts a UI (today: react / static / phoenixLiveView) picks
-  // these up without an additional code edit here.  Emitted into
-  // the deployable's existing `e2e/` directory next to the auto-
-  // generated page objects + smoke spec.
+  // admits a UI mount (react / static / phoenixLiveView / fullstack
+  // dotnet) picks these up without an additional code edit here.
+  // Dotnet is dual-mode (mountsUi is `true`, but backend-only dotnet
+  // deployables have no `uiName`) — gate on `d.uiName` so we don't
+  // call the spec renderer for backend-only deployables; it would
+  // return null anyway, but the explicit gate makes the intent
+  // unambiguous.  Emitted into the deployable's existing `e2e/`
+  // directory next to the auto-generated page objects + smoke spec.
   for (const d of sys.deployables) {
     if (!platformFor(d.platform).mountsUi) continue;
+    if (!d.uiName) continue;
     const uiSpec = renderUIE2EFile(sys, modulesByName, d);
     if (uiSpec) {
       const slug = serviceSlug(d.name);

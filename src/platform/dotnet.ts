@@ -5,7 +5,14 @@ const dotnetPlatform: PlatformSurface = {
   name: "dotnet",
   defaultPort: 8080,
   needsDb: true,
-  mountsUi: false,
+  // .NET admits an embedded React SPA via static-files middleware +
+  // SPA fallback route — see the fullstack branch in
+  // `generator/dotnet/index.ts` that fires when `deployable.uiName`
+  // is set.  Backend-only dotnet deployables (no `ui:`) stay
+  // unaffected; the deployable validator only errors when
+  // `hasUiBinding && !platformMountsUi`, which never fires absent
+  // an explicit `ui:` declaration.
+  mountsUi: true,
   // .NET repository auto-emits `SaveAsync` and `GetByIdAsync`.  Find
   // names are Pascal-cased on the C# side, so a DSL find named
   // `saveAsync` lowers to `SaveAsync()` colliding with the auto

@@ -37,6 +37,7 @@ export function emitWorkflows(
   ctx: BoundedContextIR,
   ns: string,
   out: Map<string, string>,
+  options?: { routePrefix?: string },
 ): void {
   if (ctx.workflows.length === 0) return;
   const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
@@ -58,7 +59,7 @@ export function emitWorkflows(
   }
   out.set(
     `Api/${ctx.name}WorkflowsController.cs`,
-    renderController(ctx, ns),
+    renderController(ctx, ns, options?.routePrefix),
   );
 }
 
@@ -453,8 +454,13 @@ function renderExprWithCmdParams(
 // Controller — one class per context exposing every workflow as a POST.
 // ---------------------------------------------------------------------------
 
-function renderController(ctx: BoundedContextIR, ns: string): string {
+function renderController(
+  ctx: BoundedContextIR,
+  ns: string,
+  routePrefix?: string,
+): string {
   const className = `${ctx.name}WorkflowsController`;
+  const route = `${routePrefix ?? ""}workflows`;
   const blocks: string[] = [];
   for (const wf of ctx.workflows) {
     const cmdArgs = wf.params
@@ -485,7 +491,7 @@ using ${ns}.Domain.Enums;
 namespace ${ns}.Api;
 
 [ApiController]
-[Route("workflows")]
+[Route("${route}")]
 public sealed class ${className} : ControllerBase
 {
     private readonly IMediator _mediator;

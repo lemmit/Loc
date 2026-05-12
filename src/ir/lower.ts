@@ -472,39 +472,45 @@ function lowerDeployable(
   // `auth: required` is the only AuthMode in slice 1A.  Future modes
   // (`optional` / `forbidden`) would extend this branch.
   const auth = d.auth === "required" ? { required: true } : undefined;
-  // `design` defaults to "mantine" only when this is a react frontend
-  // — ignoring it on other platforms keeps the IR honest about which
-  // deployables actually render UI.  The grammar accepts the keyword
-  // anywhere but the generator stack only honours it under react.
-  // Slice 8: `static` deployables share the React design-pack
-  // semantics (the v0 static frontend IS a React bundle).
-  const design =
-    platform === "react" || platform === "static"
-      ? (d.design ?? "mantine")
-      : platform === "phoenixLiveView"
-        ? (d.design ?? "ashPhoenix")
-        : undefined;
-  // Slice 2: page-metamodel UI binding.  The grammar accepts two
-  // surface forms — `ui: WebApp` (sugar) and `ui WebApp { framework: react }`
-  // (full block).  Both lower to the same `uiName` + optional
-  // `uiFramework` here.  Validator (Slice 3) enforces that the
-  // referenced ui exists, the platform supports a UI mount, and the
-  // framework value is one of the v0-allowed alternatives.
+  // `design` defaults only on platforms that actually render UI in
+  // this deployable — keeping the IR honest about which deployables
+  // mount a frontend.  `react`/`static` always render React (TSX
+  // packs).  `phoenixLiveView` is fullstack and always renders HEEx
+  // against the `ashPhoenix` pack.  `dotnet` is dual-mode: it renders
+  // an embedded React SPA when (and only when) the deployable declares
+  // `ui:`; backend-only dotnet drops the field.  Other platforms
+  // (`hono`) silently drop `design:` and the validator already warns.
   const uiName =
     d.uiSugar?.ref?.ref?.name
     ?? d.uiCompose?.ref?.ref?.name
     ?? d.uiBlock?.ref?.ref?.name
     ?? undefined;
+  const design =
+    platform === "react" || platform === "static"
+      ? (d.design ?? "mantine")
+      : platform === "phoenixLiveView"
+        ? (d.design ?? "ashPhoenix")
+        : platform === "dotnet" && uiName
+          ? (d.design ?? "mantine")
+          : undefined;
+  // Slice 2: page-metamodel UI binding.  The grammar accepts two
+  // surface forms — `ui: WebApp` (sugar) and `ui WebApp { framework: react }`
+  // (full block).  Both lower to the same `uiName` + optional
+  // `uiFramework` here.  `uiName` is computed above so the `design`
+  // default can branch on it for dual-mode platforms (fullstack
+  // dotnet).  Validator (Slice 3) enforces that the referenced ui
+  // exists, the platform supports a UI mount, and the framework value
+  // is one of the v0-allowed alternatives.
   // Explicit `framework: …` in the full block wins; otherwise default
-  // from the platform (`react`/`static` → react; `phoenixLiveView` →
-  // phoenixLiveView).  Backends without a `ui:` binding leave this
-  // undefined.
+  // from the platform.  Fullstack dotnet renders React; phoenixLiveView
+  // renders LiveView; react/static render React.  Backends without a
+  // `ui:` binding leave this undefined.
   const uiFramework =
     d.uiBlock?.framework
     ?? (uiName
       ? platform === "phoenixLiveView"
         ? "phoenixLiveView"
-        : platform === "react" || platform === "static"
+        : platform === "react" || platform === "static" || platform === "dotnet"
           ? "react"
           : undefined
       : undefined);

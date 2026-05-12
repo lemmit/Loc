@@ -57,6 +57,7 @@ export function emitCqrs(
   ctx: BoundedContextIR,
   ns: string,
   out: Map<string, string>,
+  options?: { routePrefix?: string },
 ): void {
   const aggFolder = plural(agg.name);
   const requiredFields = agg.fields.filter((f) => !f.optional);
@@ -67,7 +68,7 @@ export function emitCqrs(
   emitOperationCommandsAndHandlers(agg, ctx, ns, aggFolder, out);
   emitGetByIdQueryAndHandler(agg, ctx, ns, aggFolder, out);
   emitFindQueriesAndHandlers(agg, repo, ctx, ns, aggFolder, out);
-  emitController(agg, repo, ctx, requiredFields, ns, out);
+  emitController(agg, repo, ctx, requiredFields, ns, out, options?.routePrefix);
 }
 
 // ---------------------------------------------------------------------------
@@ -510,6 +511,7 @@ function emitController(
   requiredFields: AggregateIR["fields"],
   ns: string,
   out: Map<string, string>,
+  routePrefix?: string,
 ): void {
   out.set(
     `Api/${pascal(plural(agg.name))}Controller.cs`,
@@ -541,6 +543,7 @@ function emitController(
             ? "optional"
             : "single") as "list" | "optional" | "single",
       })),
+      routePrefix,
     }),
   );
 }

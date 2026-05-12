@@ -23,6 +23,12 @@ interface ControllerShape {
      * cross-platform contract check to pass. */
     returnShape: "list" | "optional" | "single";
   }>;
+  /** Prefix prepended to the controller's `[Route(...)]` (e.g.
+   *  `"api/"` for fullstack-dotnet — leaves `/orders/*` paths free
+   *  for the SPA's client-side router and namespaces controllers
+   *  under `/api/orders/*`).  Empty for standalone .NET (controllers
+   *  stay at root, matching the v0 behaviour). */
+  routePrefix?: string;
 }
 
 export function renderController(
@@ -32,7 +38,7 @@ export function renderController(
   shape: ControllerShape,
 ): string {
   const className = `${plural(pascal(agg.name))}Controller`;
-  const route = snake(plural(agg.name));
+  const route = `${shape.routePrefix ?? ""}${snake(plural(agg.name))}`;
 
   const createBody = renderCmdConstructorBody(shape.createCmdArgs, "            ");
 

@@ -365,6 +365,11 @@ describe("page metamodel — IR shape (Slice 2)", () => {
   });
 
   it("attaches uiName + uiFramework to deployable IR (sugar form)", async () => {
+    // Fullstack dotnet (Part B): `ui:` on a dotnet deployable defaults
+    // the framework to `react` — the embedded SPA renders against the
+    // React generator, with output landing under ClientApp/ of the
+    // .NET project.  Backend-only dotnet (no `ui:`) leaves both
+    // `uiName` and `uiFramework` undefined.
     const loom = await buildLoom(`
       system Acme {
         module M { context C { } }
@@ -378,7 +383,7 @@ describe("page metamodel — IR shape (Slice 2)", () => {
     `);
     const dep = firstSystem(loom).deployables.find((d) => d.name === "api")!;
     expect(dep.uiName).toBe("WebApp");
-    expect(dep.uiFramework).toBeUndefined();
+    expect(dep.uiFramework).toBe("react");
   });
 
   it("attaches uiName + uiFramework to deployable IR (block form)", async () => {
