@@ -145,6 +145,34 @@ export function loadPack(packDir: string): LoadedPack {
     sources[logicalName] = fs.readFileSync(filePath, "utf-8");
   }
   const sharedSources = readSharedSources(manifest.format ?? "tsx");
+  // Phase 0.5: stack templates.  When the pack declares
+  // `stack: "vN"`, pull every `.hbs` from `<repo>/stacks/<vN>/`
+  // into the same shared-partials map so pack templates can
+  // `{{> stack-package-deps}}` etc.  Stack files are siblings of
+  // pack-shared partials — same registration order semantics.  Pack
+  // templates still win when names collide (compilePack registers
+  // shared first, then pack overwrites).
+  if (manifest.stack) {
+    const stackDir = path.join(repoRoot(), "stacks", manifest.stack);
+    if (!fs.existsSync(stackDir) || !fs.statSync(stackDir).isDirectory()) {
+      throw new Error(
+        `loader: pack ${manifest.name}@${manifest.version} declares stack="${manifest.stack}" but no such directory exists at ${stackDir}.`,
+      );
+    }
+    for (const file of fs.readdirSync(stackDir)) {
+      if (!file.endsWith(".hbs")) continue;
+      const logicalName = file.slice(0, -".hbs".length);
+      if (sharedSources[logicalName] != null) {
+        throw new Error(
+          `loader: stack ${manifest.stack} partial '${logicalName}' clashes with an existing shared template name.  Rename one.`,
+        );
+      }
+      sharedSources[logicalName] = fs.readFileSync(
+        path.join(stackDir, file),
+        "utf-8",
+      );
+    }
+  }
   return compilePack(
     packDir,
     manifest,

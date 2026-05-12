@@ -57,6 +57,16 @@ export interface PackManifest {
    *  packs not under the built-in tree may set any string; the
    *  cross-check only fires for paths under `designs/<family>/<vN>/`. */
   version: string;
+  /** Stack identifier — names the cross-cutting framework baseline
+   *  (React / react-router / zod / Vite / TS versions) the pack
+   *  ships against.  Phase 0.5: `"v1"` = React 18 family, `"v2"` =
+   *  React 19 family.  The loader resolves to `<repo>/stacks/<id>/`
+   *  and registers every `.hbs` it finds there as a Handlebars
+   *  partial, so pack templates can pull in cross-cutting
+   *  fragments via `{{> stack-package-deps}}` and friends.  Omit
+   *  the field for packs outside the TSX-stack world (e.g.
+   *  ashPhoenix runs on Elixir / Phoenix and ignores this axis). */
+  stack?: string;
   /** Output format — `"tsx"` (default) or `"heex"`.  See `PackFormat`. */
   format?: PackFormat;
   /** Logical template name → filename relative to the pack directory.

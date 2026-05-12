@@ -45,6 +45,25 @@ const sharedSources = import.meta.glob<string>(
   { eager: true, query: "?raw", import: "default" },
 );
 
+// Phase 0.5: stack templates.  When a pack's pack.json declares
+// `stack: "vN"`, the VFS loader pulls extra partials from
+// `/stacks/<vN>/`.  Bundle every stack's `.hbs` files so the
+// browser-side worker can find them at the expected path.  Same
+// `?raw` import pattern as the design templates.
+const stackSources = import.meta.glob<string>(
+  "../../../stacks/*/*.hbs",
+  { eager: true, query: "?raw", import: "default" },
+);
+
+// Eager glob of every stack manifest (stack.json).  Not used by
+// the pack loader today — the .hbs partials carry the only
+// load-bearing info — but seeded into the VFS so future bundler
+// hints can read it (Phase 0.5 PR B will).
+const stackManifests = import.meta.glob<{ default: object }>(
+  "../../../stacks/*/stack.json",
+  { eager: true },
+);
+
 /** Strip the leading `../../../designs/` prefix and split off the
  *  pack family + version segments.  Returns null for paths that
  *  don't match — defensive against future glob-pattern changes.
@@ -67,6 +86,18 @@ function parseSharedPath(globPath: string): { dir: string; file: string } | null
   const m = globPath.match(/\/(vite|api|docker)\/([^/]+\.hbs)$/);
   if (!m) return null;
   return { dir: m[1], file: m[2] };
+}
+
+/** Strip the leading `../../../stacks/` prefix and split off the
+ *  stack id + filename.  Used to project each stack template into
+ *  the VFS at `/stacks/<id>/<file>` — symmetric with how the loader
+ *  reads it back in `loader-vfs.ts`. */
+function parseStackPath(
+  globPath: string,
+): { id: string; file: string } | null {
+  const m = globPath.match(/\/stacks\/([^/]+)\/([^/]+\.(?:hbs|json))$/);
+  if (!m) return null;
+  return { id: m[1], file: m[2] };
 }
 
 /** Hydrate the given VFS with every built-in pack's manifest + .hbs
@@ -111,6 +142,17 @@ export function seedBuiltinPacks(vfs: Vfs): void {
     const parsed = parseSharedPath(globPath);
     if (!parsed) continue;
     entries.push([`/${parsed.dir}/${parsed.file}`, src]);
+  }
+  for (const [globPath, src] of Object.entries(stackSources)) {
+    const parsed = parseStackPath(globPath);
+    if (!parsed) continue;
+    entries.push([`/stacks/${parsed.id}/${parsed.file}`, src]);
+  }
+  for (const [globPath, mod] of Object.entries(stackManifests)) {
+    const parsed = parseStackPath(globPath);
+    if (!parsed || parsed.file !== "stack.json") continue;
+    const manifest = (mod as { default?: object }).default ?? mod;
+    entries.push([`/stacks/${parsed.id}/stack.json`, JSON.stringify(manifest)]);
   }
   vfs.hydrate(entries);
 }

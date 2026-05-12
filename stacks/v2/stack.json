@@ -1,0 +1,17 @@
+{
+  "id": "v2",
+  "description": "Cutting-edge stack — React 19 family.",
+  "deps": {
+    "react": "19.2",
+    "react-dom": "19.2",
+    "router": "6 (react-router-dom@^6.27.0 — RR 7 framework-mode is a follow-up)",
+    "zod": "3 (zod 4 is a follow-up; v9 storybook still on zod 3 alongside resolvers 3)",
+    "typescript": "5.7 (TS 6 follow-up)",
+    "vite": "5 (Vite 8 follow-up)"
+  },
+  "bundler": {
+    "rdcShim": false,
+    "importmapReactDomQuery": "?external=react&dev=false",
+    "comment": "React 19: skip the v18 react-dom/client shim (dropped namespace forwarding). Importmap externalises react in the react-dom URL so esm.sh doesn't inline a second React inside the react-dom build — that produced the `dispatcher.getOwner is not a function` error in PR #152's hunt."
+  }
+}

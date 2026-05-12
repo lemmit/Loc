@@ -1,6 +1,7 @@
 {
   "name": "mantine",
   "version": "v7",
+  "stack": "v1",
   "emits": {
     "theme": "theme.hbs",
     "main": "main.hbs",

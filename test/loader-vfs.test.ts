@@ -29,6 +29,7 @@ import { loadPack, resolvePackDir } from "../web/src/build/loader-vfs.js";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");
 const designsDir = path.join(repoRoot, "designs");
+const stacksDir = path.join(repoRoot, "stacks");
 
 /** Seed a MemoryVfs from the on-disk `designs/` tree, mirroring what
  *  `seedBuiltinPacks` does in the worker via `import.meta.glob`.
@@ -51,11 +52,28 @@ function hydrateBuiltinDesigns(vfs: MemoryVfs): void {
   }
 }
 
+/** Seed the stack templates that built-in packs depend on via the
+ *  `stack: "vN"` manifest field.  Mirrors the stacks/ branch in
+ *  `seedBuiltinPacks`. */
+function hydrateBuiltinStacks(vfs: MemoryVfs): void {
+  if (!fs.existsSync(stacksDir)) return;
+  for (const id of fs.readdirSync(stacksDir)) {
+    const stackDir = path.join(stacksDir, id);
+    if (!fs.statSync(stackDir).isDirectory()) continue;
+    for (const file of fs.readdirSync(stackDir)) {
+      const full = path.join(stackDir, file);
+      if (!fs.statSync(full).isFile()) continue;
+      vfs.write(`/stacks/${id}/${file}`, fs.readFileSync(full, "utf-8"));
+    }
+  }
+}
+
 let vfs: MemoryVfs;
 
 beforeAll(() => {
   vfs = new MemoryVfs();
   hydrateBuiltinDesigns(vfs);
+  hydrateBuiltinStacks(vfs);
   setWorkerVfs(vfs);
 });
 
