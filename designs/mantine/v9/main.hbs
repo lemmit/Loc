@@ -1,6 +1,13 @@
 // Auto-generated.
 import React from "react";
-import ReactDOM from "react-dom/client";
+// Named import — React 19's react-dom no longer re-exports the
+// client APIs through its namespace, so the v7 idiom
+// `import ReactDOM from "react-dom/client"; ReactDOM.createRoot(...)`
+// resolves `createRoot` to `undefined` under React 19 (`TypeError:
+// ReactDOM.createRoot is not a function`).  The named-import form
+// works in both React 18 and 19 — it's the canonical idiom across
+// the React 18+ docs.
+import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { MantineProvider } from "@mantine/core";
 import { Notifications } from "@mantine/notifications";
@@ -27,7 +34,7 @@ const basename =
     ? (window as { __LOOM_BASENAME__?: string }).__LOOM_BASENAME__
     : undefined) ?? undefined;
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
+createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <MantineProvider theme={theme} defaultColorScheme="light">

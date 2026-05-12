@@ -130,9 +130,9 @@ function selectCases(): Case[] {
 
 const cases = ENABLED ? selectCases() : [];
 
-describe.skipIf(!ENABLED)("generated React TSX compiles under strict tsc", () => {
+describe.skipIf(!ENABLED)("generated React TSX compiles + bundles under strict tsc + vite build", () => {
   it.each(cases.map((c) => ({ ...c, packLabel: packId(c.pack) })))(
-    "$ddd × $packLabel → $reactDir compiles cleanly",
+    "$ddd × $packLabel → $reactDir type-checks and bundles",
     ({ ddd, reactDir, pack }) => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-react-tsc-"));
       try {
@@ -168,6 +168,21 @@ describe.skipIf(!ENABLED)("generated React TSX compiles under strict tsc", () =>
           cwd: projectDir,
           stdio: "inherit",
           timeout: 90_000,
+        });
+        // `vite build` — the production bundling step.  `tsc --noEmit`
+        // alone is a type-check; it doesn't catch class-shape issues
+        // that only surface when esbuild/rollup actually load the
+        // modules and resolve imports.  Example caught by adding
+        // this: the React-18 idiom `import ReactDOM from
+        // "react-dom/client"; ReactDOM.createRoot(...)` type-checks
+        // under React 19 (TS accepts the default-import as namespace-
+        // shaped) but bombs at runtime ("ReactDOM.createRoot is not
+        // a function") because React 19 dropped the namespace
+        // forwarding.  `vite build` short-circuits that gap.
+        execSync(`npx vite build --logLevel warn`, {
+          cwd: projectDir,
+          stdio: "inherit",
+          timeout: 120_000,
         });
         expect(true).toBe(true);
       } finally {
