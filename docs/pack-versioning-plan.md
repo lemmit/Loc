@@ -1,5 +1,27 @@
 # Loom stack modernization — pack versioning + latest stable everywhere
 
+> **Status:** Phase 0 + Phase 1.2 (mantine@v9) shipped. See
+> [`stack-versions-audit.md`](./stack-versions-audit.md) for the rolling
+> version audit, [`per-pack-migration.md`](./per-pack-migration.md) for
+> the per-pack scope of the remaining Phase 1 PRs, and
+> [`adding-a-pack-version.md`](./adding-a-pack-version.md) for the
+> recipe distilled from PR #148.
+
+## Status tracker
+
+| phase | scope | PR | status |
+| --- | --- | --- | --- |
+| 0 | Versioning machinery — `design: "family@vN"`, directory layout, validator + IR + loaders | #147 | ✅ merged |
+| 1.2 | `mantine@v9` (React 19) — opt-in via pinned form; bareword default still v7 | #148 + #149 fix | ✅ merged |
+| 1.1 | `tailwind@v4` + `shadcn@v4` (CSS-first config, utility renames) | — | pending |
+| 1.3 | `mui@v7` (Pigment CSS, Grid v2) | — | pending |
+| 1.4 | `chakra@v3` (compound components, `createSystem`, `toaster` — largest delta) | — | pending |
+| 1.5 | `ashPhoenix` minor → Phoenix 1.8 + Ash 3.24 | — | pending |
+| 1.X | Promote `BUILTIN_PACK_LATEST.mantine = "v9"` + refresh `test/fixtures/baseline-output/` | — | pending |
+| 2.a | Hono backend deps (hono 4.6→4.12; drizzle 0.36→0.45; zod 3→4) | — | pending |
+| 2.b | Phoenix backend (tighten `postgrex: ">= 0.0.0"`; phoenix 1.7→1.8) | — | pending |
+| 2.c | .NET deps (deferred — .NET 8 LTS through 2026-11) | — | not urgent |
+
 ## Context
 
 Three findings from this session point at the same gap:
@@ -229,3 +251,72 @@ Once a new pack version has been live for a release cycle:
 **Phase 2:**
 - `LOOM_TS_BUILD=1` runs full `tsc --noEmit` against emitted Hono projects with the new drizzle/zod versions.
 - `LOOM_PHOENIX_BUILD=1 npx vitest run test/generated-phoenix-build.test.ts` runs `mix compile --warnings-as-errors` against Ash 3.24 / Phoenix 1.8 in the Elixir docker image.
+
+## Lessons learned (Phase 0 + 1.2)
+
+Each row is a thing the next Phase 1.X PR should avoid repeating. The
+intent is to keep them at the bottom of this plan so they stay
+visible — when adding a pack version, skim this section before
+writing any code.
+
+### 1. `tsc --noEmit` ≠ "it works"
+
+The original CI shard only ran `npx tsc --noEmit` against the
+generated TSX. That accepted v7-style `import ReactDOM from
+"react-dom/client"; ReactDOM.createRoot(...)` under React 19 (the
+default-import is type-shaped as a namespace) — and the bundle
+exploded at runtime with `TypeError: ReactDOM.createRoot is not a
+function`.
+
+PR #149 added `npx vite build` to every shard so the production
+bundling step gates the new versions. ~5 s extra per shard, well
+worth it. **Future pack PRs should not skip this gate** — if
+`vite build` doesn't run, runtime-only regressions slip through.
+
+### 2. Audit the pack against the migration guide BEFORE rewriting
+
+For mantine@v9 the audit found we use none of the v9-deprecated
+APIs (`Text color`, `Grid gutter`, `Collapse in`, `useFullscreen`,
+`@mantine/dates` Date-object components). Result: template changes
+were essentially nil; just `package-json.hbs` deps.
+
+Without that audit I would have wasted hours hand-applying prop
+renames that didn't apply. Standard workflow per pack:
+
+```bash
+# After git mv-ing the existing pack into the new vN/ dir:
+cd designs/<family>/<vNew>
+grep -lE '<oldProp1>|<oldProp2>' *.hbs    # what does the pack ACTUALLY use?
+# Then cross-reference the migration guide.
+```
+
+### 3. Don't conflate "ship vN" with "flip the default"
+
+`BUILTIN_PACK_LATEST.mantine` flipping from v7 to v9 changes the
+output of every bareword `design: mantine` source. The byte-equivalence
+fixture at `test/fixtures/baseline-output/` will fail until refreshed.
+
+These are two separable acts. Phase 1.X PRs ship the new pack as
+opt-in (default unchanged). A follow-up "promote vN to default" PR
+flips the map and refreshes the fixture in one go.
+
+### 4. The default-import idiom doesn't survive React 18 → 19
+
+`import ReactDOM from "react-dom/client"` only works in React 18
+because the bundle plugin's `react-dom/client` shim provides a
+default export. React 19's real `react-dom/client` only exposes
+named exports. **Always emit `import { createRoot } from "react-dom/client"`**
+in any new pack's `main.hbs`. (Old `mantine@v7` keeps the legacy
+form because it still works under React 18 and we don't want to
+churn v7-pinned bundles.)
+
+### 5. esm.sh peerDep resolution can pull versions you didn't ask for
+
+`@chakra-ui/icons@2.2.6` declared
+`peerDependency: { "@chakra-ui/react": ">=2.0.0" }`. esm.sh resolved
+that to v3 transitively, ignoring our package.json's pin to v2.
+PR #146 fixed the symptom (dropped the icons dep). The general
+lesson: when a transitive peer-dep range is loose, esm.sh picks
+"latest matching" — which may be a future major. New pack versions
+should either avoid such packages or pin them tighter via direct
+deps when possible.
