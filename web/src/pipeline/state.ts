@@ -110,7 +110,15 @@ export type PipelineAction =
   // "Reset DB" — clears stale dispatch result without touching the
   // boot/bundle/generate slots, since the booted PGlite is still
   // valid (just emptied of rows).
-  | { type: "DISPATCH_CLEAR" };
+  | { type: "DISPATCH_CLEAR" }
+  // Runtime worker was killed by the browser (mobile Safari /
+  // memory pressure) and the parent has just respawned a fresh
+  // one.  The previous PGlite database belongs to the dead worker
+  // and isn't recoverable — drop the booted slot back to a
+  // failure state so the UI prompts the user to click Boot again.
+  // Bundle / generate stay intact (the source + bundle code are
+  // main-thread state, unaffected by the worker dying).
+  | { type: "RUNTIME_LOST" };
 
 // ---------------------------------------------------------------------
 // Convenience selectors.  Keeps JSX terse + makes the read paths
