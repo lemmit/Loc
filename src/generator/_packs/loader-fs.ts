@@ -17,6 +17,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { compilePack, type LoadedPack, type PackManifest } from "./loader.js";
+import { BUILTIN_PACK_FORMATS } from "./builtin-formats.js";
 
 /** Names of the repo-root template directories that supply
  *  pack-agnostic Handlebars sources, keyed by pack format.  TSX packs
@@ -46,8 +47,10 @@ function repoRoot(): string {
   );
 }
 
-/** Built-in pack names — resolve under `<repo>/designs/<name>/`. */
-const BUILTIN_PACKS = new Set(["mantine", "shadcn", "mui", "chakra", "ashPhoenix"]);
+/** Built-in pack names — resolve under `<repo>/designs/<name>/`.
+ *  Derived from `BUILTIN_PACK_FORMATS` so the loader and the validator
+ *  agree on which `design:` values are bundled vs. custom paths. */
+const BUILTIN_PACKS = new Set(Object.keys(BUILTIN_PACK_FORMATS));
 
 /** Resolve a pack identifier ("mantine" / "shadcn" / "mui" /
  *  "ashPhoenix" / "./design/") to an absolute pack directory.
