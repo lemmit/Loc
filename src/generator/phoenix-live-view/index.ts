@@ -150,7 +150,7 @@ export function generatePhoenixLiveViewProject(
   out.set(`priv/static/assets/theme.css`, renderThemeCss(sys.theme));
 
   // --- Shell files ----------------------------------------------------------
-  emitShellFiles(appName, appModule, deployable, sys, liveRoutes, apiRoutes, authEnabled, out);
+  emitShellFiles(appName, appModule, deployable, sys, contexts, liveRoutes, apiRoutes, authEnabled, out);
 
   return out;
 }
@@ -507,6 +507,7 @@ function emitShellFiles(
   appModule: string,
   deployable: DeployableIR,
   _sys: SystemIR,
+  contexts: BoundedContextIR[],
   liveRoutes: LiveRoute[],
   apiRoutes: ApiRoute[],
   authEnabled: boolean,
@@ -561,7 +562,7 @@ function emitShellFiles(
   out.set(`lib/${appName}_web/components/layouts/app.html.heex`, renderAppLayout());
 
   // Config
-  out.set("config/config.exs", renderConfigExs(appName, appModule));
+  out.set("config/config.exs", renderConfigExs(appName, appModule, contexts));
   out.set("config/dev.exs", renderDevExs(appName, appModule, port));
   out.set("config/prod.exs", renderProdExs(appName, appModule));
   out.set("config/runtime.exs", renderRuntimeExs(appName, appModule));
@@ -1367,7 +1368,19 @@ function renderAppLayout(): string {
 `;
 }
 
-function renderConfigExs(appName: string, appModule: string): string {
+function renderConfigExs(
+  appName: string,
+  appModule: string,
+  contexts: BoundedContextIR[],
+): string {
+  // Ash 3.x requires every domain to be registered here; without it
+  // `mix compile --warnings-as-errors` rejects with
+  // "Domain <Mod> is not present in :ash_domains".  Domains are
+  // \`<appModule>.<PascalContextName>\` (matching what
+  // emitAggregateResources emits as the resource's :domain).
+  const ashDomains = contexts
+    .map((ctx) => `${appModule}.${pascal(ctx.name)}`)
+    .join(", ");
   return `# Auto-generated.
 import Config
 
@@ -1375,9 +1388,7 @@ config :${appName}, ecto_repos: [${appModule}.Repo]
 config :${appName}, ${appModule}Web.Endpoint, url: [host: "localhost"]
 
 config :${appName},
-  ash_domains: [
-    # Phase 3 populates this list; domains are registered per context.
-  ]
+  ash_domains: [${ashDomains}]
 
 config :phoenix, :json_library, Jason
 
