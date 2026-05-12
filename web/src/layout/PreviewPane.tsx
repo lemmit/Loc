@@ -1,6 +1,6 @@
 import { Box, Text } from "@mantine/core";
 import { Preview } from "../preview/Preview";
-import type { LayoutCtx } from "./ctx";
+import { formatUnsupportedDeployables, type LayoutCtx } from "./ctx";
 
 interface Props {
   ctx: LayoutCtx;
@@ -10,7 +10,23 @@ interface Props {
 // backend is booted, mount <Preview>.  Otherwise show a hint that
 // describes the next required step.
 export function PreviewPane({ ctx }: Props): JSX.Element {
-  const { reactBundle, ddl, runtimeClient, generateSuccess, reactBundleStatus } = ctx;
+  const {
+    reactBundle,
+    ddl,
+    runtimeClient,
+    generateSuccess,
+    reactBundleStatus,
+    unsupportedDeployables,
+  } = ctx;
+
+  // When the only deployables in the generated output are runtimes
+  // the browser can't host (.NET, Phoenix LiveView), explain why
+  // Preview is grey — the user otherwise hits a generic "no React
+  // frontend" message that hides the real reason.
+  const absentHint =
+    unsupportedDeployables.length > 0
+      ? `This example only declares ${formatUnsupportedDeployables(unsupportedDeployables)}, which the browser playground can't host.  Files-only — pick a system with a Hono + React deployable (e.g. Sales System) to use Preview.`
+      : "This example has no React frontend.  Pick a system-mode example (e.g. Sales System) to use Preview.";
 
   return (
     <Box style={{ flex: 1, minHeight: 0 }}>
@@ -27,7 +43,7 @@ export function PreviewPane({ ctx }: Props): JSX.Element {
             {!generateSuccess
               ? "Generate a system-mode source first (the Sales System example has both Hono + React deployables)."
               : reactBundleStatus.kind === "absent"
-                ? "This example has no React frontend.  Pick a system-mode example (e.g. Sales System) to use Preview."
+                ? absentHint
                 : reactBundleStatus.kind === "fail"
                   ? "React bundling failed — switch to Files for details."
                   : reactBundleStatus.kind === "pending"

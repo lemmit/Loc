@@ -27,22 +27,53 @@ import { DesktopHeader, MobileHeader } from "./layout/HeaderBar";
 import { DesktopShell } from "./layout/DesktopShell";
 import { MobileShell } from "./layout/MobileShell";
 import { FooterBar } from "./layout/FooterBar";
-import type { LayoutCtx, ReactBundleStatus } from "./layout/ctx";
+import {
+  formatUnsupportedDeployables,
+  type LayoutCtx,
+  type ReactBundleStatus,
+  type UnsupportedDeployable,
+  type UnsupportedPlatform,
+} from "./layout/ctx";
 
-// Find the right entry paths in a generated tree.  Legacy
-// single-context mode dumps everything at the root.  System mode
-// wraps each deployable in a slug folder.
-function findEntries(files: VirtualFile[]): { hono: string | null; react: string | null } {
+/** Per-deployable summary derived from the generated file tree.
+ *  The playground only knows how to bundle + boot Hono backends and
+ *  React frontends in the browser; .NET (Program.cs/csproj) and
+ *  Phoenix LiveView (mix.exs) deployables are surfaced separately so
+ *  the UI can say "Files-only" instead of failing with a generic
+ *  "no entry found" error. */
+interface DeployableAnalysis {
+  /** Hono entry path (single-context root or system-mode slug folder). */
+  hono: string | null;
+  /** React entry path (always under a system-mode slug folder). */
+  react: string | null;
+  /** Deployables the browser cannot bundle/boot — listed so the UI
+   *  can name them in status messages.  Empty for Hono/React-only
+   *  systems. */
+  unsupported: UnsupportedDeployable[];
+}
+
+function analyzeDeployables(files: VirtualFile[]): DeployableAnalysis {
+  // Legacy single-context mode dumps Hono at the root with no slug —
+  // there are no .NET / Phoenix outputs in that mode, so the
+  // unsupported list is always empty.
   if (files.some((f) => f.path === "http/index.ts")) {
-    return { hono: "http/index.ts", react: null };
+    return { hono: "http/index.ts", react: null, unsupported: [] };
   }
   let hono: string | null = null;
   let react: string | null = null;
+  const platformBySlug = new Map<string, UnsupportedPlatform>();
   for (const f of files) {
     if (!hono && /^[^/]+\/http\/index\.ts$/.test(f.path)) hono = f.path;
     if (!react && /^[^/]+\/src\/main\.tsx$/.test(f.path)) react = f.path;
+    const dotnet = f.path.match(/^([^/]+)\/Program\.cs$/);
+    if (dotnet) platformBySlug.set(dotnet[1], "dotnet");
+    const phoenix = f.path.match(/^([^/]+)\/mix\.exs$/);
+    if (phoenix) platformBySlug.set(phoenix[1], "phoenixLiveView");
   }
-  return { hono, react };
+  const unsupported: UnsupportedDeployable[] = [...platformBySlug]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([slug, platform]) => ({ slug, platform }));
+  return { hono, react, unsupported };
 }
 
 export default function App(): JSX.Element {
@@ -305,19 +336,21 @@ export default function App(): JSX.Element {
   async function runBundle(): Promise<void> {
     const client = bundleClientRef.current;
     if (!client || !generateSuccess) return;
-    const entries = findEntries(generateSuccess.files);
+    const entries = analyzeDeployables(generateSuccess.files);
     if (!entries.hono) {
+      // The playground's runtime is Hono + React only.  Spell out
+      // why bundling can't proceed: either nothing recognisable was
+      // emitted, or the system only declares deployables the
+      // browser can't run (.NET, Phoenix LiveView).
+      const message =
+        entries.unsupported.length > 0
+          ? `Nothing to bundle in the browser — this system only declares ${formatUnsupportedDeployables(entries.unsupported)}, which run outside the playground.  Generated files are visible in the Files pane.`
+          : "No bundlable backend in generated output (looked for http/index.ts).";
       dispatch({
         type: "BUNDLE_DONE",
         hono: {
           ok: false,
-          diagnostics: [
-            {
-              severity: "error",
-              message:
-                "No hono deployable found in generated output (looked for http/index.ts).",
-            },
-          ],
+          diagnostics: [{ severity: "error", message }],
         },
         react: null,
       });
@@ -415,6 +448,12 @@ export default function App(): JSX.Element {
     () => files.find((f) => f.path === selectedPath) ?? null,
     [files, selectedPath],
   );
+  // Per-deployable platform analysis — used by FooterBar/PreviewPane
+  // to tell the user which deployables can't run in the browser.
+  const deployableAnalysis = useMemo(
+    () => analyzeDeployables(files),
+    [files],
+  );
 
   // Bundle every piece of state + every action into a single ctx
   // object that the shell + its panes consume.  Children destructure
@@ -458,6 +497,7 @@ export default function App(): JSX.Element {
     selectedFile,
     selectedPath,
     setSelectedPath,
+    unsupportedDeployables: deployableAnalysis.unsupported,
     reqMethod,
     setReqMethod,
     reqPath,
