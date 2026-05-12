@@ -25,6 +25,7 @@
 
 export const BUILTIN_PACK_FORMATS = {
   "mantine@v7":    "tsx",
+  "mantine@v9":    "tsx",
   "chakra@v2":     "tsx",
   "mui@v5":        "tsx",
   "shadcn@v3":     "tsx",
@@ -40,6 +41,11 @@ export const BUILTIN_PACK_FORMATS = {
  *  behaviour so the existing examples generate byte-identical
  *  output. */
 export const BUILTIN_PACK_LATEST = {
+  // Promotion to v9 happens in a separate PR paired with refreshing
+  // `test/fixtures/baseline-output/` — flipping the default changes
+  // every bareword `design: mantine` emit (e.g. acme.ddd) to the
+  // Mantine 9 / React 19 dep set.  Keep at v7 here so this PR ships
+  // v9 as a strictly additive option (`design: "mantine@v9"`).
   mantine:    "v7",
   chakra:     "v2",
   mui:        "v5",

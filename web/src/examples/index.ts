@@ -9,6 +9,7 @@ import inventorySource from "./inventory.ddd?raw";
 import inventorySystemSource from "./inventory-system.ddd?raw";
 import acmeSource from "./acme.ddd?raw";
 import storybookMantineSource from "./storybook-mantine.ddd?raw";
+import storybookMantineV9Source from "./storybook-mantine-v9.ddd?raw";
 import storybookShadcnSource from "./storybook-shadcn.ddd?raw";
 import storybookMuiSource from "./storybook-mui.ddd?raw";
 import storybookChakraSource from "./storybook-chakra.ddd?raw";
@@ -54,6 +55,18 @@ export const examples: LoomExample[] = [
     source: storybookMantineSource,
     blurb:
       "Catalogue: each aggregate demonstrates one UI primitive — cells, fields, value-objects, references, ops, workflows, views.",
+  },
+  {
+    // First example pinned to a specific pack version
+    // (`design: \"mantine@v9\"`).  Demonstrates the Phase 0 pack-
+    // versioning mechanic — selecting this regenerates against the
+    // Mantine 9 + React 19 deps while the bareword Mantine entry
+    // above still tracks v7 until the default flips.
+    id: "storybook-mantine-v9",
+    label: "Mantine 9 · pinned storybook (React 19)",
+    source: storybookMantineV9Source,
+    blurb:
+      "Same catalogue as the Mantine storybook, generated against the new Mantine 9 + React 19 pack — explicit `design: \"mantine@v9\"`.",
   },
   {
     id: "storybook-shadcn",
