@@ -169,6 +169,28 @@ export function Preview({ js, css, versions, runtime }: PreviewProps): JSX.Eleme
   // re-mount); the cleanup closes the port so the SW falls back
   // to 502 until the next attach completes.
   const [runtimeAttached, setRuntimeAttached] = useState(false);
+  // Bumped whenever the SW posts a `loom-sw/awake` message —
+  // either right after activation or as a recovery signal when its
+  // module-level state was cleared by a browser-imposed kill.
+  // Mobile Safari and desktop browsers under memory pressure
+  // terminate idle Service Workers; on revival, `currentBundle`
+  // and `runtimePort` reset to null and every sandbox fetch comes
+  // back 502/503 until the parent re-initialises.  Including this
+  // counter in the attach + push effect deps forces both to re-run.
+  const [swRevision, setSwRevision] = useState(0);
+
+  useEffect(() => {
+    if (!SW_AVAILABLE) return;
+    const onMessage = (event: MessageEvent): void => {
+      const data = event.data as { type?: string } | undefined;
+      if (data?.type === "loom-sw/awake") {
+        setSwRevision((r) => r + 1);
+      }
+    };
+    navigator.serviceWorker.addEventListener("message", onMessage);
+    return () => navigator.serviceWorker.removeEventListener("message", onMessage);
+  }, []);
+
   useEffect(() => {
     if (!SW_AVAILABLE) return;
     let dispose: (() => void) | undefined;
@@ -206,7 +228,7 @@ export function Preview({ js, css, versions, runtime }: PreviewProps): JSX.Eleme
       setRuntimeAttached(false);
       dispose?.();
     };
-  }, [runtime]);
+  }, [runtime, swRevision]);
 
   // Build the document and push it to the SW.  Once both the
   // bundle is pushed AND the runtime port is attached we set
@@ -248,7 +270,9 @@ export function Preview({ js, css, versions, runtime }: PreviewProps): JSX.Eleme
     return () => {
       cancelled = true;
     };
-  }, [js, css, versions, runtimeAttached]);
+    // swRevision is included so a Service-Worker revival (which
+    // wipes `currentBundle` in the SW) re-pushes the latest bundle.
+  }, [js, css, versions, runtimeAttached, swRevision]);
 
   return (
     // The whole Preview is the fullscreen target so the toolbar (and
