@@ -142,6 +142,33 @@ export function loadPack(packDir: VfsPath): LoadedPack {
       if (src != null) sharedSources[logicalName] = src;
     }
   }
+  // Phase 0.5: stack partials.  Same mechanism as the per-pack
+  // sharedSources above — when the manifest declares a stack, every
+  // `.hbs` in `/stacks/<id>/` is registered alongside the shared
+  // templates.  See `loader-fs.ts` for the on-disk mirror; the VFS
+  // seeder (`template-bundled.ts`) pre-loads the stack directories
+  // exactly like it does for designs/.
+  if (manifest.stack) {
+    const stackDir = `/stacks/${manifest.stack}`;
+    const stackPaths = vfs.list(stackDir);
+    if (stackPaths.length === 0) {
+      throw new Error(
+        `loader-vfs: pack ${manifest.name}@${manifest.version} declares stack="${manifest.stack}" but no templates found at ${stackDir}.`,
+      );
+    }
+    for (const p of stackPaths) {
+      if (!p.endsWith(".hbs")) continue;
+      const slash = p.lastIndexOf("/");
+      const logicalName = p.slice(slash + 1, -".hbs".length);
+      if (sharedSources[logicalName] != null) {
+        throw new Error(
+          `loader-vfs: stack ${manifest.stack} partial '${logicalName}' clashes with an existing shared template name.  Rename one.`,
+        );
+      }
+      const src = vfs.read(p);
+      if (src != null) sharedSources[logicalName] = src;
+    }
+  }
   return compilePack(
     packDir,
     manifest,

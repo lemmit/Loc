@@ -1,6 +1,7 @@
 {
   "name": "chakra",
   "version": "v2",
+  "stack": "v1",
   "emits": {
     "theme": "theme.hbs",
     "main": "main.hbs",

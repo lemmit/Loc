@@ -1,0 +1,17 @@
+{
+  "id": "v1",
+  "description": "Conservative stack — React 18 family.",
+  "deps": {
+    "react": "18",
+    "react-dom": "18",
+    "router": "6 (react-router-dom@^6.27.0)",
+    "zod": "3",
+    "typescript": "5.7",
+    "vite": "5"
+  },
+  "bundler": {
+    "rdcShim": true,
+    "importmapReactDomQuery": "?dev=false&deps=react@<reactRange>",
+    "comment": "React 18: the v18 react-dom/client shim is active and the importmap pins react-dom to a specific deps-resolution. PR #151 and #152 are the v2 counterparts that wire the React-19 hints — once `bundler-hints.json` becomes load-bearing, this block describes the v18 behaviour."
+  }
+}

@@ -1,6 +1,7 @@
 {
   "name": "mui",
   "version": "v5",
+  "stack": "v1",
   "emits": {
     "theme": "theme.hbs",
     "main": "main.hbs",
