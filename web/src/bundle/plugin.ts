@@ -546,6 +546,26 @@ export function makeLoomPlugin(ctx: VirtualFsContext, opts?: PluginOptions): Plu
       // user imports AND `import "react"` inside esm.sh-fetched
       // transitive deps.
       if (externalReactRuntime) {
+        // Detect the user's React major from the harvested versions
+        // map.  The RDC shim below was built for React 18 — it
+        // re-implements `react-dom/client` by toggling
+        // `__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED.usingClientEntryPoint`
+        // around `ReactDOM.createRoot(...)` to silence a v18 dev
+        // warning.  Two problems on React 19:
+        //   1. The deprecation warning is gone (createRoot lives only
+        //      on react-dom/client now, no warning needed).
+        //   2. `ReactDOM.createRoot` is *undefined* on React 19's
+        //      `react-dom` namespace — the namespace forwarding was
+        //      removed.  The shim therefore produces a runtime
+        //      `TypeError: ReactDOM.createRoot is not a function`
+        //      every time a v19 user clicks Bundle + Preview.
+        // For React >= 19 we skip the shim entirely and let esm.sh
+        // serve `react-dom/client` directly.  esm.sh's React 19
+        // build exports `createRoot` / `hydrateRoot` as named exports
+        // exactly as the generator's main.tsx imports them.
+        const reactRange = ctx.versions.get("react") ?? "";
+        const reactMajor = Number(/(\d+)/.exec(reactRange)?.[1] ?? "0");
+        const useRdcShim = reactMajor > 0 && reactMajor < 19;
         build.onResolve({ filter: /.*/ }, (args) => {
           if (REACT_EXTERNAL_SET.has(args.path)) {
             return { path: args.path, external: true };
@@ -553,48 +573,53 @@ export function makeLoomPlugin(ctx: VirtualFsContext, opts?: PluginOptions): Plu
           return undefined;
         });
 
-        // `react-dom/client` shim.  esm.sh's
+        // `react-dom/client` shim — React 18 ONLY.  esm.sh's
         // react-dom/client just forwards `react-dom`'s createRoot
         // accessor without setting the internal `usingClientEntryPoint`
-        // flag, so React logs a deprecation warning ("you should
+        // flag, so React 18 logs a deprecation warning ("you should
         // import createRoot from react-dom/client").  We re-implement
-        // the wrapper exactly like the real react-dom/client.js does:
-        // toggle the secret-internals flag around each call so the
-        // warning's runtime check sees `usingClientEntryPoint=true`.
-        build.onResolve({ filter: /^react-dom\/client$/ }, (args) => {
-          if (args.namespace === HTTP_NAMESPACE) return undefined;
-          return {
-            path: "loom-rdc-shim",
-            namespace: RDC_SHIM_NAMESPACE,
-          };
-        });
-        build.onLoad({ filter: /.*/, namespace: RDC_SHIM_NAMESPACE }, () => ({
-          contents: [
-            `import * as ReactDOM from "react-dom";`,
-            "",
-            "const internals =",
-            "  ReactDOM.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED;",
-            "",
-            "export function createRoot(container, options) {",
-            "  if (internals) internals.usingClientEntryPoint = true;",
-            "  try { return ReactDOM.createRoot(container, options); }",
-            "  finally { if (internals) internals.usingClientEntryPoint = false; }",
-            "}",
-            "",
-            "export function hydrateRoot(container, initialChildren, options) {",
-            "  if (internals) internals.usingClientEntryPoint = true;",
-            "  try { return ReactDOM.hydrateRoot(container, initialChildren, options); }",
-            "  finally { if (internals) internals.usingClientEntryPoint = false; }",
-            "}",
-            "",
-            "// `import ReactDOM from \"react-dom/client\"` (default-import",
-            "// form, what the generator emits in main.tsx) needs a default",
-            "// export shaped like a namespace.",
-            "export default { createRoot, hydrateRoot };",
-            "",
-          ].join("\n"),
-          loader: "js",
-        }));
+        // the wrapper exactly like the real react-dom/client.js does
+        // for React 18: toggle the secret-internals flag around each
+        // call so the warning's runtime check sees
+        // `usingClientEntryPoint=true`.  React 19 fall-through skips
+        // this entirely (see `useRdcShim` comment above).
+        if (useRdcShim) {
+          build.onResolve({ filter: /^react-dom\/client$/ }, (args) => {
+            if (args.namespace === HTTP_NAMESPACE) return undefined;
+            return {
+              path: "loom-rdc-shim",
+              namespace: RDC_SHIM_NAMESPACE,
+            };
+          });
+          build.onLoad({ filter: /.*/, namespace: RDC_SHIM_NAMESPACE }, () => ({
+            contents: [
+              `import * as ReactDOM from "react-dom";`,
+              "",
+              "const internals =",
+              "  ReactDOM.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED;",
+              "",
+              "export function createRoot(container, options) {",
+              "  if (internals) internals.usingClientEntryPoint = true;",
+              "  try { return ReactDOM.createRoot(container, options); }",
+              "  finally { if (internals) internals.usingClientEntryPoint = false; }",
+              "}",
+              "",
+              "export function hydrateRoot(container, initialChildren, options) {",
+              "  if (internals) internals.usingClientEntryPoint = true;",
+              "  try { return ReactDOM.hydrateRoot(container, initialChildren, options); }",
+              "  finally { if (internals) internals.usingClientEntryPoint = false; }",
+              "}",
+              "",
+              "// `import ReactDOM from \"react-dom/client\"` (default-import",
+              "// form, what the React 18 generator emits in main.tsx) needs",
+              "// a default export shaped like a namespace.  React 19 packs",
+              "// use named imports and don't hit this shim path.",
+              "export default { createRoot, hydrateRoot };",
+              "",
+            ].join("\n"),
+            loader: "js",
+          }));
+        }
       }
 
       // Aliased shims always win — checked before the bare-import

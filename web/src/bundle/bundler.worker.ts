@@ -26,10 +26,40 @@ declare const self: DedicatedWorkerGlobalScope;
 
 // esbuild-wasm needs a one-time init.  We do it lazily on the first
 // bundle so the worker boots cheaply if the user never clicks Bundle.
+//
+// We **pre-fetch + compile the wasm ourselves** rather than letting
+// esbuild fetch it via `wasmURL`.  Two reasons:
+//   1. esbuild's internal path uses `WebAssembly.instantiateStreaming`
+//      when the response Content-Type is `application/wasm`.  Some
+//      GitHub Pages deploys negotiate `Content-Encoding: gzip` on the
+//      .wasm — the underlying file is still wasm but the encoded
+//      stream isn't, and Chromium's streaming-instantiation rejects
+//      with no actionable diagnostic.  `WebAssembly.compile(buffer)`
+//      goes through the decoded ArrayBuffer and bypasses the check
+//      entirely.
+//   2. esbuild wraps any fetch failure as `Error("Failed to download
+//      <url>")` — losing the HTTP status, response body, and request
+//      mode.  Our own fetch surfaces the real error so a future
+//      regression here is debuggable from the console.
+//
+// Result: identical bundling behaviour, but the init path is no
+// longer susceptible to whatever combination of CDN headers, Content
+// Encoding negotiation, and streaming-API content-type checks
+// happens to fail on a given browser × hosting platform.
 let initPromise: Promise<void> | null = null;
 async function ensureInit(): Promise<void> {
   if (!initPromise) {
-    initPromise = esbuild.initialize({ wasmURL, worker: false });
+    initPromise = (async () => {
+      const res = await fetch(wasmURL);
+      if (!res.ok) {
+        throw new Error(
+          `bundler.worker: failed to fetch esbuild wasm (${res.status} ${res.statusText}) from ${wasmURL}`,
+        );
+      }
+      const buf = await res.arrayBuffer();
+      const wasmModule = await WebAssembly.compile(buf);
+      await esbuild.initialize({ wasmModule, worker: false });
+    })();
   }
   return initPromise;
 }
