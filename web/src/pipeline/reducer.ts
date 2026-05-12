@@ -104,6 +104,24 @@ export function pipelineReducer(
       };
     case "DISPATCH_CLEAR":
       return { ...state, dispatch: NONE_DISPATCH };
+
+    // ---- Runtime worker respawn (lost state) --------------------------
+    case "RUNTIME_LOST":
+      // The fresh worker has no PGlite + no imported bundle, so the
+      // previous `boot.kind === "ok"` is no longer true.  Surface it
+      // as a fail so the Backend panel shows the message instead of
+      // staying green with a phantom DDL.  Clear dispatch too — any
+      // pending response from the old worker will never arrive.
+      // Leave bundle + generate untouched; they're main-thread state.
+      return {
+        ...state,
+        boot: {
+          kind: "fail",
+          message:
+            "The runtime worker was terminated while the tab was in the background.  Click Boot to start a fresh PGlite — any previously-stored rows in this session are lost.",
+        },
+        dispatch: NONE_DISPATCH,
+      };
   }
 }
 

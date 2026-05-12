@@ -185,7 +185,16 @@ export default function App(): JSX.Element {
       },
     });
     const bundleClient = new LoomBundleClient();
-    const runtimeClient = new LoomRuntimeClient();
+    const runtimeClient = new LoomRuntimeClient({
+      // When App's visibilitychange handler respawns the runtime
+      // worker (assumed-killed-while-backgrounded), the booted
+      // PGlite is gone — drop the pipeline back to "needs Boot"
+      // with an explanatory message instead of leaving a green
+      // "booted" badge while every dispatch hangs.  `dispatch`
+      // from `useReducer` is stable, so closing over it here is
+      // safe across renders.
+      onRespawn: () => dispatch({ type: "RUNTIME_LOST" }),
+    });
     buildClientRef.current = build;
     bundleClientRef.current = bundleClient;
     runtimeClientRef.current = runtimeClient;
@@ -207,7 +216,16 @@ export default function App(): JSX.Element {
   // Worker-rehydrate on tab background-kill.  Mobile Safari (and
   // some desktop browsers under memory pressure) terminate
   // backgrounded workers — without intervention, the next
-  // `generateFromPath` lands on a worker whose VFS is empty.
+  // `generateFromPath` lands on a worker whose VFS is empty AND
+  // the next `dispatch()` against a killed runtime worker hangs
+  // forever instead of failing fast.  Respawn both proactively.
+  //
+  // The build worker's respawn is correctness-preserving (the
+  // `seedWorkspace` callback replays VFS state into the fresh
+  // worker).  The runtime worker's respawn is NOT — PGlite +
+  // imported bundle modules can't be re-created without re-booting
+  // — so `LoomRuntimeClient.onRespawn` dispatches RUNTIME_LOST and
+  // the Backend panel shows "click Boot again".
   useEffect(() => {
     let hiddenAt: number | null = null;
     const HIDDEN_RESPAWN_MS = 30_000;
@@ -219,12 +237,23 @@ export default function App(): JSX.Element {
         hiddenAt = null;
         if (elapsed > HIDDEN_RESPAWN_MS) {
           buildClientRef.current?.respawn();
+          // Only respawn the runtime client if it was actually
+          // booted — respawning an unbooted client just creates a
+          // spurious RUNTIME_LOST dispatch and a "click Boot
+          // again" message the user has never engaged with.
+          // `pipeline.boot.kind === "ok"` is the same guard the
+          // Backend panel uses to render its action buttons.
+          if (pipeline.boot.kind === "ok") {
+            runtimeClientRef.current?.respawn();
+          }
         }
       }
     };
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
-  }, []);
+    // Re-bind the listener whenever boot state transitions in or
+    // out of "ok" so the guard above always reads fresh state.
+  }, [pipeline.boot.kind]);
 
   // Replay any persisted custom packs into the build worker once
   // both the IDB-backed workspace VFS and the build client are ready.
