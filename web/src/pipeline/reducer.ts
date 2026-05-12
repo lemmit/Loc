@@ -106,22 +106,35 @@ export function pipelineReducer(
       return { ...state, dispatch: NONE_DISPATCH };
 
     // ---- Runtime worker respawn (lost state) --------------------------
-    case "RUNTIME_LOST":
+    case "RUNTIME_LOST": {
       // The fresh worker has no PGlite + no imported bundle, so the
       // previous `boot.kind === "ok"` is no longer true.  Surface it
       // as a fail so the Backend panel shows the message instead of
       // staying green with a phantom DDL.  Clear dispatch too — any
       // pending response from the old worker will never arrive.
       // Leave bundle + generate untouched; they're main-thread state.
+      //
+      // The PGlite database itself may or may not survive depending
+      // on how the previous boot landed:
+      //   - `persistent: true`  →  OPFS-backed, keyed by source
+      //     hash.  The fresh worker reattaches the same island on
+      //     the next Boot — rows are preserved.
+      //   - `persistent: false` →  in-memory only (Safari private
+      //     mode, hostile-storage policies).  The data lived inside
+      //     the dead worker's heap and is genuinely gone.
+      // We surface the right wording for each case so the user
+      // knows whether they need to recreate test data.
+      const wasPersistent =
+        state.boot.kind === "ok" && state.boot.persistent;
+      const message = wasPersistent
+        ? "The runtime worker was terminated while the tab was in the background.  Click Boot to reattach — your rows are persisted in OPFS and will be restored."
+        : "The runtime worker was terminated while the tab was in the background.  Click Boot to start a fresh PGlite — the previous database was in-memory only, so any rows from this session are gone.";
       return {
         ...state,
-        boot: {
-          kind: "fail",
-          message:
-            "The runtime worker was terminated while the tab was in the background.  Click Boot to start a fresh PGlite — any previously-stored rows in this session are lost.",
-        },
+        boot: { kind: "fail", message },
         dispatch: NONE_DISPATCH,
       };
+    }
   }
 }
 
