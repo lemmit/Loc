@@ -47,9 +47,25 @@ function importMap(versions: Record<string, string>): Record<string, string> {
   // esm.sh "external" set narrow, which is what dedupes Mantine
   // and friends to a single shard (see plugin.ts comment on
   // REACT_RUNTIME_EXTERNALS).
+  //
+  // **`?external=react` is critical for react-dom.**  Without it,
+  // esm.sh's react-dom build inlines a *full copy* of react.
+  // Loading that response via the importmap pulls in two React
+  // instances — one from the importmap's `react` entry, one
+  // bundled inside react-dom — each with their own
+  // `ReactSharedInternals`.  Components render with the importmap
+  // React and call `createElement`, which reads
+  // `ReactSharedInternals.A` from the importmap React; but
+  // react-dom's `createRoot` writes the dispatcher to the
+  // *inlined* React's `ReactSharedInternals`.  The mismatch
+  // surfaces at the first JSX render as
+  // `TypeError: dispatcher.getOwner is not a function`.  Setting
+  // `?external=react` makes react-dom's transitive `import "react"`
+  // stay bare — the importmap then satisfies it once, so there's
+  // exactly one React module instance at runtime.
   return {
     "react": `https://esm.sh/react@${reactVer}?dev=false`,
-    "react-dom": `https://esm.sh/react-dom@${reactDomVer}?dev=false&deps=react@${reactVer}`,
+    "react-dom": `https://esm.sh/react-dom@${reactDomVer}?external=react&dev=false`,
   };
 }
 
