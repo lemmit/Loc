@@ -825,8 +825,13 @@ defmodule ${webModule} do
 
   defp html_helpers do
     quote do
-      use Phoenix.HTML
-      import Phoenix.LiveView.Helpers
+      # phoenix_html 4.x dropped \`use Phoenix.HTML\` — import the
+      # safe-string helpers directly instead.  Same surface, no
+      # macro fan-out.
+      import Phoenix.HTML
+      # Phoenix.LiveView.Helpers was folded into Phoenix.Component in
+      # LiveView 0.18+; the function components surface (\`~H\`, etc.)
+      # comes from \`use Phoenix.Component\` on the caller side.
       import ${webModule}.CoreComponents
       alias Phoenix.LiveView.JS
     end
