@@ -31,15 +31,22 @@ const repoRoot = path.resolve(here, "..");
 const designsDir = path.join(repoRoot, "designs");
 
 /** Seed a MemoryVfs from the on-disk `designs/` tree, mirroring what
- *  `seedBuiltinPacks` does in the worker via `import.meta.glob`. */
+ *  `seedBuiltinPacks` does in the worker via `import.meta.glob`.
+ *  Phase 0 of pack versioning: packs live two levels deep at
+ *  `designs/<family>/<version>/...`, so the walk now nests one more
+ *  level than it did pre-versioning. */
 function hydrateBuiltinDesigns(vfs: MemoryVfs): void {
-  for (const pack of fs.readdirSync(designsDir)) {
-    const dir = path.join(designsDir, pack);
-    if (!fs.statSync(dir).isDirectory()) continue;
-    for (const file of fs.readdirSync(dir)) {
-      const full = path.join(dir, file);
-      if (!fs.statSync(full).isFile()) continue;
-      vfs.write(`/designs/${pack}/${file}`, fs.readFileSync(full, "utf-8"));
+  for (const family of fs.readdirSync(designsDir)) {
+    const familyDir = path.join(designsDir, family);
+    if (!fs.statSync(familyDir).isDirectory()) continue;
+    for (const version of fs.readdirSync(familyDir)) {
+      const versionDir = path.join(familyDir, version);
+      if (!fs.statSync(versionDir).isDirectory()) continue;
+      for (const file of fs.readdirSync(versionDir)) {
+        const full = path.join(versionDir, file);
+        if (!fs.statSync(full).isFile()) continue;
+        vfs.write(`/designs/${family}/${version}/${file}`, fs.readFileSync(full, "utf-8"));
+      }
     }
   }
 }
@@ -53,9 +60,17 @@ beforeAll(() => {
 });
 
 describe("resolvePackDir: built-in names", () => {
-  it("resolves `mantine` and `shadcn` to /designs/<name>", () => {
-    expect(resolvePackDir("mantine")).toBe("/designs/mantine");
-    expect(resolvePackDir("shadcn")).toBe("/designs/shadcn");
+  it("resolves bareword built-ins to /designs/<family>/<latest-version>", () => {
+    // Bareword resolution flows through BUILTIN_PACK_LATEST — the
+    // version segment comes from the toolchain default, not from
+    // the input.  Update these expectations when you bump
+    // BUILTIN_PACK_LATEST.
+    expect(resolvePackDir("mantine")).toBe("/designs/mantine/v7");
+    expect(resolvePackDir("shadcn")).toBe("/designs/shadcn/v3");
+  });
+  it("resolves pinned built-ins to /designs/<family>/<version>", () => {
+    expect(resolvePackDir("mantine@v7")).toBe("/designs/mantine/v7");
+    expect(resolvePackDir("chakra@v2")).toBe("/designs/chakra/v2");
   });
 });
 
@@ -84,13 +99,13 @@ describe("resolvePackDir: paths", () => {
     // Even if the user names their pack "mantine", `resolvePackDir`
     // returns the built-in path — not the workspace path — so the
     // user pack can't shadow the built-in.
-    expect(resolvePackDir("mantine", "/workspace/somewhere")).toBe("/designs/mantine");
+    expect(resolvePackDir("mantine", "/workspace/somewhere")).toBe("/designs/mantine/v7");
   });
 });
 
 describe("loadPack: built-in pack loading", () => {
   it("loads the mantine pack and exposes its templates", () => {
-    const pack = loadPack("/designs/mantine");
+    const pack = loadPack("/designs/mantine/v7");
     expect(pack.manifest.name).toBe("mantine");
     // Slice D1 — page-list / page-detail / page-new etc. were
     // deleted; pack now exposes the walker stdlib primitives.
@@ -100,7 +115,7 @@ describe("loadPack: built-in pack loading", () => {
   });
 
   it("loads the shadcn pack including its declared helpers", () => {
-    const pack = loadPack("/designs/shadcn");
+    const pack = loadPack("/designs/shadcn/v3");
     expect(pack.manifest.name).toBe("shadcn");
     // shadcn declares a `lucide` icon-rename helper in its manifest
     // (PR #58).  The VFS loader path must wire the helper-registration

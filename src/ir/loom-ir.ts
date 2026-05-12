@@ -696,10 +696,23 @@ export interface DeployableIR {
    * the target's port. */
   targetName?: string;
   /** Design-system template pack the React frontend generator renders
-   *  pages against.  Built-ins: "mantine" (default) and "shadcn".  A
-   *  string starting with "./" or "/" is a custom pack path resolved
-   *  relative to the .ddd file (a directory containing pack.json).
-   *  Only meaningful when platform === "react"; ignored otherwise.
+   *  pages against.  Built-ins: "mantine", "chakra", "mui", "shadcn",
+   *  "ashPhoenix".  A string starting with "./" or "/" is a custom
+   *  pack path resolved relative to the .ddd file (a directory
+   *  containing pack.json).  Only meaningful when platform === "react"
+   *  (or "static"/"dotnet" with a UI mount, or "phoenixLiveView");
+   *  ignored otherwise.
+   *
+   *  **Phase 0 of pack versioning:** after lowering this field is
+   *  always fully qualified (`family@version`, e.g. `"mantine@v7"`)
+   *  for built-in packs.  The bareword DSL form `design: mantine`
+   *  resolves through `BUILTIN_PACK_LATEST` during lowering, so
+   *  downstream consumers (generator dispatch at
+   *  `src/generator/react/index.ts:106`, the build-matrix CI test,
+   *  snapshot fixtures) see an unambiguous string and don't need to
+   *  re-resolve the toolchain default.  Custom paths flow through
+   *  verbatim.
+   *
    *  Named `design` rather than `ui` because the test DSL already
    *  uses `ui.workflows.X(...)` as a member-access namespace; making
    *  `ui` a keyword in the deployable block would shadow the test-DSL

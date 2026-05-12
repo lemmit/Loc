@@ -25,14 +25,9 @@ import {
   type LoadedPack,
   type PackManifest,
 } from "../../../src/generator/_packs/loader.js";
+import { parseBuiltinDesignRef } from "../../../src/generator/_packs/builtin-formats.js";
 import type { VfsPath } from "../vfs/types.js";
 import { getWorkerVfs } from "./worker-vfs.js";
-
-/** Built-in pack names — reserved.  `resolvePackDir` matches these
- *  before treating `ui` as a user-supplied path, so a workspace pack
- *  cannot shadow them.  Mantine and shadcn ship in the playground
- *  bundle via `seedBuiltinPacks`. */
-const BUILTIN_PACKS = new Set(["mantine", "shadcn", "mui", "chakra"]);
 
 /** Top-level VFS dirs that hold pack-agnostic Handlebars sources
  *  (Vite scaffold, API integration, Docker artifacts).  Mirrors the
@@ -71,12 +66,17 @@ function joinPosix(...parts: string[]): VfsPath {
 }
 
 /** Resolve a `design:` slot value to a VFS path.  Mirrors the Node
- *  `resolvePackDir` contract: built-in names → `/designs/<name>`;
- *  absolute paths used as-is; relative paths anchored against
- *  `referenceDir` (defaults to `/workspace`, the playground root). */
+ *  `resolvePackDir` contract: built-in `family@version` refs →
+ *  `/designs/<family>/<version>`; absolute paths used as-is;
+ *  relative paths anchored against `referenceDir` (defaults to
+ *  `/workspace`, the playground root).  Bareword built-ins (no
+ *  `@version`) resolve through the shared `parseBuiltinDesignRef`
+ *  helper so the family→default-version map (`BUILTIN_PACK_LATEST`)
+ *  is the single source of truth across both loaders. */
 export function resolvePackDir(ui: string, referenceDir?: VfsPath): VfsPath {
-  if (BUILTIN_PACKS.has(ui)) {
-    return `/designs/${ui}`;
+  const parsed = parseBuiltinDesignRef(ui);
+  if (parsed) {
+    return `/designs/${parsed.family}/${parsed.version}`;
   }
   if (ui.startsWith("/")) return ui;
   return joinPosix(referenceDir ?? "/workspace", ui);
@@ -98,6 +98,18 @@ export function loadPack(packDir: VfsPath): LoadedPack {
   if (!manifest.emits || typeof manifest.emits !== "object") {
     throw new Error(
       `loader-vfs: pack at ${packDir} has no \`emits\` map in pack.json.  Add { emits: { "page-list": "page-list.hbs", ... } }.`,
+    );
+  }
+  // Phase 0 pack-versioning cross-check.  Built-in packs land at
+  // `/designs/<family>/<version>/`; the version segment is
+  // load-bearing for resolution, so a mismatch with manifest.version
+  // means a copy-paste fork left the manifest stale.  Bail loudly
+  // instead of silently shadowing sibling packs.  Only fires for
+  // paths that match the built-in layout.
+  const m = packDir.match(/^\/designs\/([^/]+)\/([^/]+)$/);
+  if (m && manifest.version !== m[2]) {
+    throw new Error(
+      `loader-vfs: pack at ${packDir} has version="${manifest.version}" but lives under directory "${m[2]}".  The two must match (e.g. /designs/mantine/v7/pack.json must declare "version": "v7").`,
     );
   }
   const sources: Record<string, string> = {};

@@ -65,7 +65,11 @@ jobs:
           - web/src/examples/storybook-mantine.ddd
           - web/src/examples/storybook-shadcn.ddd
           - web/src/examples/storybook-components.ddd
-        pack: [mantine, shadcn, mui, chakra]
+        # Phase 0 of pack versioning: shard keys carry the explicit
+        # `family@version` so each cell tests a specific pack version,
+        # not "whatever BUILTIN_PACK_LATEST resolves to today".  Phase
+        # 1.X PRs (mantine@v9, chakra@v3, …) append entries here.
+        pack: ["mantine@v7", "shadcn@v3", "mui@v5", "chakra@v2"]
     # Per-shard timeout: generate + npm install + tsc fit comfortably
     # under 10min; the matrix gives every shard its own runner so the
     # total wall time is min(shard times) ≈ one shard, not their sum.

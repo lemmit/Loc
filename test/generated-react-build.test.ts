@@ -46,55 +46,82 @@ const examples = [
   { ddd: "web/src/examples/storybook-components.ddd", reactDir: "web_app" },
 ] as const;
 
-/** Inject `design: <pack>` into the `deployable webApp { ... }` block
- *  of a `.ddd` source.  Handles both the multi-line acme syntax and
- *  the single-line playground syntax.  Idempotent and safe — if no
- *  webApp block matches, the input passes through unchanged.  When
- *  an existing `design:` slot is present (the storybook examples
- *  already declare one), the slot is rewritten in place rather than
- *  duplicated. */
-function injectDesign(src: string, design: string): string {
-  // Existing slot — multi-line `    design: mantine` or inline `, design: shadcn`.
-  const existing = /(\bdesign:\s*)\w+/;
+/** Inject `design: "<family>@<version>"` into the `deployable webApp
+ *  { ... }` block of a `.ddd` source.  Handles both the multi-line
+ *  acme syntax and the single-line playground syntax.  Idempotent and
+ *  safe — if no webApp block matches, the input passes through
+ *  unchanged.  When an existing `design:` slot is present (the
+ *  storybook examples already declare one), the slot is rewritten in
+ *  place rather than duplicated.
+ *
+ *  Phase 0 of pack versioning: writes the pinned `family@version`
+ *  quoted form so each shard tests a specific pack version, not
+ *  "whatever BUILTIN_PACK_LATEST resolves to today".  Pre-existing
+ *  bareword slots and pinned slots both get rewritten in place. */
+function injectDesign(src: string, qualified: string): string {
+  // Existing slot — either bareword (`design: mantine`) or pinned
+  // (`design: "mantine@v7"`).  Match both shapes and rewrite to the
+  // quoted pinned form.
+  const existing = /(\bdesign:\s*)(?:"[^"]*"|\w+)/;
+  const replacement = `$1"${qualified}"`;
   if (existing.test(src)) {
-    return src.replace(existing, `$1${design}`);
+    return src.replace(existing, replacement);
   }
   // Multi-line:  deployable webApp {\n  platform: react\n  …\n}
   const multiLine = /(deployable webApp \{)([^}]*?)\n(\s*)\}/;
   if (multiLine.test(src)) {
     return src.replace(multiLine, (_, head, body, indent) => {
-      return `${head}${body}\n${indent}design: ${design}\n${indent}}`;
+      return `${head}${body}\n${indent}design: "${qualified}"\n${indent}}`;
     });
   }
   // Single-line:  deployable webApp { platform: react, targets: api, port: 3001 }
   const singleLine = /(deployable webApp \{[^}\n]+?)(\s*)\}/;
-  return src.replace(singleLine, `$1, design: ${design}$2}`);
+  return src.replace(singleLine, `$1, design: "${qualified}"$2}`);
 }
 
-type Pack = "mantine" | "shadcn" | "mui" | "chakra";
-const PACKS: readonly Pack[] = ["mantine", "shadcn", "mui", "chakra"];
+interface PackSpec {
+  family: "mantine" | "shadcn" | "mui" | "chakra";
+  version: string;
+}
+
+/** The matrix of `family@version` shards the test sweeps.  Phase 0
+ *  ships one version per family — the same set that existed before
+ *  versioning, now explicitly pinned.  Phase 1.X PRs (mantine@v9,
+ *  chakra@v3, …) append entries here; the matrix grows
+ *  multiplicatively without other code edits. */
+const PACKS: readonly PackSpec[] = [
+  { family: "mantine", version: "v7" },
+  { family: "shadcn",  version: "v3" },
+  { family: "mui",     version: "v5" },
+  { family: "chakra",  version: "v2" },
+];
+
+function packId(p: PackSpec): string {
+  return `${p.family}@${p.version}`;
+}
 
 interface Case {
   ddd: string;
   reactDir: string;
-  pack: Pack;
+  pack: PackSpec;
 }
 
 const allCases: Case[] = examples.flatMap((e) =>
   PACKS.map((pack) => ({ ...e, pack })),
 );
 
-/** Filter to the case named by `LOOM_REACT_BUILD_CASE=<ddd>:<pack>`,
- *  or return every case when no filter is set.  Throws on a malformed
- *  shard spec so the CI matrix surfaces typos loudly instead of
- *  silently skipping a case. */
+/** Filter to the case named by
+ *  `LOOM_REACT_BUILD_CASE=<ddd>:<family>@<version>`, or return every
+ *  case when no filter is set.  Throws on a malformed shard spec so
+ *  the CI matrix surfaces typos loudly instead of silently skipping
+ *  a case. */
 function selectCases(): Case[] {
   if (SHARD === undefined) return allCases;
-  const [ddd, pack] = SHARD.split(":");
-  const match = allCases.find((c) => c.ddd === ddd && c.pack === pack);
+  const [ddd, packStr] = SHARD.split(":");
+  const match = allCases.find((c) => c.ddd === ddd && packId(c.pack) === packStr);
   if (!match) {
     throw new Error(
-      `LOOM_REACT_BUILD_CASE="${SHARD}" did not match any case.  Available: ${allCases.map((c) => `${c.ddd}:${c.pack}`).join(", ")}`,
+      `LOOM_REACT_BUILD_CASE="${SHARD}" did not match any case.  Available: ${allCases.map((c) => `${c.ddd}:${packId(c.pack)}`).join(", ")}`,
     );
   }
   return [match];
@@ -103,8 +130,8 @@ function selectCases(): Case[] {
 const cases = ENABLED ? selectCases() : [];
 
 describe.skipIf(!ENABLED)("generated React TSX compiles under strict tsc", () => {
-  it.each(cases)(
-    "$ddd × $pack → $reactDir compiles cleanly",
+  it.each(cases.map((c) => ({ ...c, packLabel: packId(c.pack) })))(
+    "$ddd × $packLabel → $reactDir compiles cleanly",
     ({ ddd, reactDir, pack }) => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-react-tsc-"));
       try {
@@ -114,7 +141,7 @@ describe.skipIf(!ENABLED)("generated React TSX compiles under strict tsc", () =>
         // and we need to override it.  `injectDesign` rewrites an
         // existing slot in place rather than duplicating.
         const original = fs.readFileSync(path.join(repoRoot, ddd), "utf-8");
-        const mutated = injectDesign(original, pack);
+        const mutated = injectDesign(original, packId(pack));
         const dddPath = path.join(outDir, "_mutated.ddd");
         fs.writeFileSync(dddPath, mutated);
         execSync(`node ${cli} generate system ${dddPath} -o ${outDir}`, {

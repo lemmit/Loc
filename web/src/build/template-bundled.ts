@@ -20,9 +20,12 @@
 import type { Vfs, VfsPath } from "../vfs/types.js";
 
 // Eager glob of every design manifest.  Vite parses these as JSON at
-// bundle time and ships the resulting object directly.
+// bundle time and ships the resulting object directly.  After Phase 0
+// of the pack-versioning rollout, packs live under
+// `designs/<family>/<version>/pack.json` — the extra `*` segment
+// matches the version dir.
 const manifestModules = import.meta.glob<{ default: object }>(
-  "../../../designs/*/pack.json",
+  "../../../designs/*/*/pack.json",
   { eager: true },
 );
 
@@ -30,7 +33,7 @@ const manifestModules = import.meta.glob<{ default: object }>(
 // `import: 'default'` tells Vite to inline each .hbs file as a
 // string at bundle time.
 const templateSources = import.meta.glob<string>(
-  "../../../designs/*/*.hbs",
+  "../../../designs/*/*/*.hbs",
   { eager: true, query: "?raw", import: "default" },
 );
 
@@ -43,12 +46,18 @@ const sharedSources = import.meta.glob<string>(
 );
 
 /** Strip the leading `../../../designs/` prefix and split off the
- *  pack name.  Returns null for paths that don't match — defensive
- *  against future glob-pattern changes. */
-function parseDesignPath(globPath: string): { pack: string; rest: string } | null {
-  const m = globPath.match(/\/designs\/([^/]+)\/(.+)$/);
+ *  pack family + version segments.  Returns null for paths that
+ *  don't match — defensive against future glob-pattern changes.
+ *  Phase 0 of pack versioning: every built-in pack now lives under
+ *  `designs/<family>/<version>/`, so paths land in the VFS at
+ *  `/designs/<family>/<version>/<rest>` — symmetric with what
+ *  `resolvePackDir` looks up on read. */
+function parseDesignPath(
+  globPath: string,
+): { family: string; version: string; rest: string } | null {
+  const m = globPath.match(/\/designs\/([^/]+)\/([^/]+)\/(.+)$/);
   if (!m) return null;
-  return { pack: m[1], rest: m[2] };
+  return { family: m[1], version: m[2], rest: m[3] };
 }
 
 /** Match a glob path like `../../../vite/index-html.hbs` and pull out
@@ -83,7 +92,7 @@ export function seedBuiltinPacks(vfs: Vfs): void {
     if (!parsed || parsed.rest !== "pack.json") continue;
     const manifest = (mod as { default?: object }).default ?? mod;
     entries.push([
-      `/designs/${parsed.pack}/pack.json`,
+      `/designs/${parsed.family}/${parsed.version}/pack.json`,
       // Stringify so the VFS stays homogeneous (everything is
       // text — see `Vfs` interface comment).  The loader
       // JSON.parses on read.
@@ -93,7 +102,10 @@ export function seedBuiltinPacks(vfs: Vfs): void {
   for (const [globPath, src] of Object.entries(templateSources)) {
     const parsed = parseDesignPath(globPath);
     if (!parsed) continue;
-    entries.push([`/designs/${parsed.pack}/${parsed.rest}`, src]);
+    entries.push([
+      `/designs/${parsed.family}/${parsed.version}/${parsed.rest}`,
+      src,
+    ]);
   }
   for (const [globPath, src] of Object.entries(sharedSources)) {
     const parsed = parseSharedPath(globPath);

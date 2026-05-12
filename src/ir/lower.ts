@@ -110,6 +110,31 @@ import {
   buildExpandContext,
   expandScaffoldToExplicitBody,
 } from "./scaffold-expander.js";
+import {
+  parseBuiltinDesignRef,
+  type BuiltinPackFamily,
+} from "../generator/_packs/builtin-formats.js";
+
+/** Fold a bareword built-in family or pinned `family@version`
+ *  reference (or `undefined`) into the fully-qualified form the rest
+ *  of the toolchain stores.  Phase 0 of pack versioning: lowering
+ *  resolves the toolchain default for bareword built-ins so that
+ *  every downstream consumer (generator dispatch, build matrix,
+ *  snapshot tests) sees an unambiguous `family@version` string and
+ *  doesn't need its own copy of the resolution logic.  Custom paths
+ *  pass through verbatim; nothing to qualify there. */
+function qualifyDesign(
+  raw: string | undefined,
+  fallback: BuiltinPackFamily,
+): string {
+  const value = raw ?? fallback;
+  const parsed = parseBuiltinDesignRef(value);
+  // Built-in family: return the parsed `family@version` (handles both
+  // bareword input -> latest-version-resolved, and pinned input -> as-is).
+  // Anything else (custom path, unknown family) flows through verbatim;
+  // the loader's reference-dir resolution handles the rest.
+  return parsed ? parsed.qualified : value;
+}
 
 // ---------------------------------------------------------------------------
 // Lowering — structure layer.
@@ -487,11 +512,11 @@ function lowerDeployable(
     ?? undefined;
   const design =
     platform === "react" || platform === "static"
-      ? (d.design ?? "mantine")
+      ? qualifyDesign(d.design, "mantine")
       : platform === "phoenixLiveView"
-        ? (d.design ?? "ashPhoenix")
+        ? qualifyDesign(d.design, "ashPhoenix")
         : platform === "dotnet" && uiName
-          ? (d.design ?? "mantine")
+          ? qualifyDesign(d.design, "mantine")
           : undefined;
   // Slice 2: page-metamodel UI binding.  The grammar accepts two
   // surface forms — `ui: WebApp` (sugar) and `ui WebApp { framework: react }`
