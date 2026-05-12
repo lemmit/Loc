@@ -21,7 +21,12 @@ export default defineConfig({
   // No retries by default — we want a clean signal locally.  CI
   // can opt in via PWTEST_RETRIES.
   retries: process.env.CI ? 1 : 0,
-  workers: 1,
+  // CI runs Playwright with 2 workers to halve wall time on the
+  // Bundle/Boot specs (each spends 2-3min fetching esm.sh /
+  // jsdelivr).  Locally workers=1 keeps test output linear when a
+  // developer is iterating on a single spec.  Tests use isolated
+  // browser contexts so per-worker IDB / cookies don't collide.
+  workers: process.env.CI ? 2 : 1,
   reporter: process.env.CI ? "github" : [["list"]],
   use: {
     baseURL: "http://127.0.0.1:4173",

@@ -150,7 +150,7 @@ export function generatePhoenixLiveViewProject(
   out.set(`priv/static/assets/theme.css`, renderThemeCss(sys.theme));
 
   // --- Shell files ----------------------------------------------------------
-  emitShellFiles(appName, appModule, deployable, sys, liveRoutes, apiRoutes, authEnabled, out);
+  emitShellFiles(appName, appModule, deployable, sys, contexts, liveRoutes, apiRoutes, authEnabled, out);
 
   return out;
 }
@@ -507,6 +507,7 @@ function emitShellFiles(
   appModule: string,
   deployable: DeployableIR,
   _sys: SystemIR,
+  contexts: BoundedContextIR[],
   liveRoutes: LiveRoute[],
   apiRoutes: ApiRoute[],
   authEnabled: boolean,
@@ -541,6 +542,16 @@ function emitShellFiles(
     renderRouter(appName, appModule, liveRoutes, apiRoutes, authEnabled),
   );
 
+  // lib/<app>_web/components/core_components.ex — minimal stub so
+  // the html_helpers macro's `import ...CoreComponents` resolves.
+  // Standard Phoenix 1.7 generators ship a much richer module; we
+  // emit just the empty wrapper for now since LiveView pages
+  // reference components by full module path.
+  out.set(
+    `lib/${appName}_web/components/core_components.ex`,
+    renderCoreComponents(appModule),
+  );
+
   // lib/<app>_web/components/layouts.ex
   out.set(`lib/${appName}_web/components/layouts.ex`, renderLayouts(appName, appModule));
 
@@ -551,7 +562,7 @@ function emitShellFiles(
   out.set(`lib/${appName}_web/components/layouts/app.html.heex`, renderAppLayout());
 
   // Config
-  out.set("config/config.exs", renderConfigExs(appName, appModule));
+  out.set("config/config.exs", renderConfigExs(appName, appModule, contexts));
   out.set("config/dev.exs", renderDevExs(appName, appModule, port));
   out.set("config/prod.exs", renderProdExs(appName, appModule));
   out.set("config/runtime.exs", renderRuntimeExs(appName, appModule));
@@ -708,7 +719,19 @@ defmodule ${appModule}.Repo do
   use AshPostgres.Repo, otp_app: :${appName}
 
   def installed_extensions do
-    ["uuid-ossp", "citext"]
+    # \`ash-functions\` is required by Ash 3.x for fragment-style
+    # validations (e.g. unique_constraint comparisons).  AshPostgres
+    # ships the extension SQL — listing it here is enough for
+    # \`mix ash.setup\` to install it.
+    ["ash-functions", "uuid-ossp", "citext"]
+  end
+
+  # AshPostgres 2.x requires a min_pg_version/0 callback so it can
+  # gate extension features per Postgres version.  Targeting 15 — the
+  # oldest still-supported community release at the generator's
+  # current cutoff.
+  def min_pg_version do
+    %Version{major: 15, minor: 0, patch: 0}
   end
 end
 `;
@@ -781,6 +804,31 @@ defmodule ${webModule} do
     end
   end
 
+  # Controller bundle for the API + LV controllers we emit
+  # (AggregatesController, OpenapiController, HealthController, …).
+  # Standard Phoenix 1.7 shape — pulls in the controller DSL plus
+  # the formats this generator emits (json + html for layout-bearing
+  # endpoints).  Caller modules use \`use PhoenixAppWeb, :controller\`.
+  def controller do
+    quote do
+      use Phoenix.Controller, formats: [:html, :json], layouts: [html: ${webModule}.Layouts]
+
+      import Plug.Conn
+      unquote(verified_routes())
+    end
+  end
+
+  # Verified-routes helper bundle — exposed both to controllers and
+  # LiveView modules so \`~p\` paths are reachable everywhere.
+  def verified_routes do
+    quote do
+      use Phoenix.VerifiedRoutes,
+        endpoint: ${webModule}.Endpoint,
+        router: ${webModule}.Router,
+        statics: ~w(assets fonts images favicon.ico robots.txt)
+    end
+  end
+
   def component do
     quote do
       use Phoenix.Component
@@ -788,12 +836,33 @@ defmodule ${webModule} do
     end
   end
 
+  # HTML helper bundle for layouts + function components.  Required
+  # by \`use PhoenixAppWeb, :html\` invocations (e.g. Layouts).  Mirrors
+  # the standard Phoenix 1.7 generator shape — pulls in Phoenix.HTML,
+  # core components, and a CSRF helper.
+  def html do
+    quote do
+      use Phoenix.Component
+      import Phoenix.Controller,
+        only: [get_csrf_token: 0, view_module: 1, view_template: 1]
+      unquote(html_helpers())
+    end
+  end
+
   defp html_helpers do
     quote do
-      use Phoenix.HTML
-      import Phoenix.LiveView.Helpers
+      # phoenix_html 4.x dropped \`use Phoenix.HTML\` — import the
+      # safe-string helpers directly instead.  Same surface, no
+      # macro fan-out.
+      import Phoenix.HTML
+      # Phoenix.LiveView.Helpers was folded into Phoenix.Component in
+      # LiveView 0.18+; the function components surface (\`~H\`, etc.)
+      # comes from \`use Phoenix.Component\` on the caller side.
       import ${webModule}.CoreComponents
       alias Phoenix.LiveView.JS
+      # Verified routes — provides the \`~p\` sigil that emitted
+      # sidebar / page templates use for path interpolation.
+      unquote(verified_routes())
     end
   end
 
@@ -937,6 +1006,317 @@ end
 `;
 }
 
+function renderCoreComponents(appModule: string): string {
+  const webModule = `${appModule}Web`;
+  return `# Auto-generated.
+defmodule ${webModule}.CoreComponents do
+  @moduledoc """
+  Function components consumed by emitted layouts + LiveView pages.
+  Mirrors the subset of Phoenix 1.7's standard CoreComponents that
+  Loom's HEEx walker calls into: \`flash_group\`, \`header\`, \`button\`,
+  \`input\`, \`simple_form\`, \`table\`, \`badge\`, \`empty\`.
+
+  Layouts are intentionally minimal/Tailwind-ish — projects can swap
+  in a richer component module without touching the emitter.
+  """
+  use Phoenix.Component
+
+  @doc "Renders all currently-set flash messages."
+  attr :flash, :map, default: %{}
+
+  def flash_group(assigns) do
+    ~H"""
+    <div :if={Phoenix.Flash.get(@flash, :info)} class="rounded-md bg-blue-50 p-3 text-sm text-blue-700 mb-4">
+      <%= Phoenix.Flash.get(@flash, :info) %>
+    </div>
+    <div :if={Phoenix.Flash.get(@flash, :error)} class="rounded-md bg-red-50 p-3 text-sm text-red-700 mb-4">
+      <%= Phoenix.Flash.get(@flash, :error) %>
+    </div>
+    """
+  end
+
+  @doc "Page-section heading with optional subtitle + actions slot."
+  attr :class, :string, default: nil
+  # \`level\` is forwarded from the DSL Heading primitive (1..4).  Styling
+  # is uniform here (single .text-2xl line) — the attr is accepted so
+  # consumers can render their own sized variants without re-declaring.
+  attr :level, :integer, default: 1
+  slot :inner_block, required: true
+  slot :subtitle
+  slot :actions
+
+  def header(assigns) do
+    ~H"""
+    <header class={["flex items-center justify-between gap-6 mb-6", @class]}>
+      <div>
+        <h1 class={[
+          "font-semibold leading-7 text-zinc-900",
+          @level <= 1 && "text-2xl",
+          @level == 2 && "text-xl",
+          @level == 3 && "text-lg",
+          @level >= 4 && "text-base"
+        ]}>
+          {render_slot(@inner_block)}
+        </h1>
+        <p :if={@subtitle != []} class="mt-1 text-sm text-zinc-600">
+          {render_slot(@subtitle)}
+        </p>
+      </div>
+      <div :if={@actions != []} class="flex gap-2 flex-shrink-0">
+        {render_slot(@actions)}
+      </div>
+    </header>
+    """
+  end
+
+  @doc """
+  Styled button.  Accepts type=button|submit|reset + arbitrary attrs.
+  When \`to:\` is set, renders a \`<.link navigate>\` styled as a button
+  (matches the DSL Button primitive's \`to:\` named arg for navigation).
+  \`testid:\` is hoisted onto the rendered element for Playwright drivers.
+  """
+  attr :type, :string, default: "button"
+  attr :class, :string, default: nil
+  attr :to, :string, default: nil, doc: "when set, renders as a navigation link"
+  attr :testid, :string, default: nil, doc: "data-testid forwarded to the root element"
+  attr :rest, :global, include: ~w(form name value disabled phx-click phx-submit phx-disable-with)
+  slot :inner_block, required: true
+
+  def button(assigns) do
+    classes =
+      [
+        "inline-flex items-center justify-center rounded-md bg-zinc-900 px-3 py-2 text-sm font-semibold text-white hover:bg-zinc-700 disabled:opacity-50",
+        assigns.class
+      ]
+
+    assigns = assign(assigns, :classes, classes)
+
+    if assigns.to do
+      ~H"""
+      <.link navigate={@to} class={@classes} data-testid={@testid} {@rest}>
+        {render_slot(@inner_block)}
+      </.link>
+      """
+    else
+      ~H"""
+      <button type={@type} class={@classes} data-testid={@testid} {@rest}>
+        {render_slot(@inner_block)}
+      </button>
+      """
+    end
+  end
+
+  @doc "Form input with label + error message.  Supports text/number/email/checkbox/select/textarea."
+  attr :id, :any, default: nil
+  attr :name, :any
+  attr :label, :string, default: nil
+  attr :value, :any
+  attr :type, :string, default: "text"
+  attr :field, Phoenix.HTML.FormField,
+    doc: "a form field struct retrieved from the form, for example: @form[:email]"
+  attr :errors, :list, default: []
+  attr :checked, :boolean
+  attr :prompt, :string, default: nil
+  attr :options, :list, default: []
+  attr :multiple, :boolean, default: false
+  attr :rest, :global, include: ~w(autocomplete cols disabled form list max maxlength min minlength pattern placeholder readonly required rows size step)
+
+  def input(%{field: %Phoenix.HTML.FormField{} = field} = assigns) do
+    assigns
+    |> assign(field: nil, id: assigns.id || field.id)
+    |> assign(:errors, Enum.map(field.errors, &translate_error/1))
+    |> assign_new(:name, fn -> if assigns.multiple, do: field.name <> "[]", else: field.name end)
+    |> assign_new(:value, fn -> field.value end)
+    |> input()
+  end
+
+  def input(%{type: "checkbox"} = assigns) do
+    assigns = assign_new(assigns, :checked, fn -> Phoenix.HTML.Form.normalize_value("checkbox", assigns[:value]) end)
+
+    ~H"""
+    <div>
+      <label class="flex items-center gap-3 text-sm leading-6 text-zinc-600">
+        <input type="hidden" name={@name} value="false" />
+        <input
+          type="checkbox"
+          id={@id}
+          name={@name}
+          value="true"
+          checked={@checked}
+          class="rounded border-zinc-300 text-zinc-900 focus:ring-0"
+          {@rest}
+        />
+        {@label}
+      </label>
+      <.error :for={msg <- @errors}>{msg}</.error>
+    </div>
+    """
+  end
+
+  def input(%{type: "select"} = assigns) do
+    ~H"""
+    <div>
+      <.label for={@id}>{@label}</.label>
+      <select
+        id={@id}
+        name={@name}
+        class="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm focus:border-zinc-400 focus:ring-0"
+        multiple={@multiple}
+        {@rest}
+      >
+        <option :if={@prompt} value="">{@prompt}</option>
+        {Phoenix.HTML.Form.options_for_select(@options, @value)}
+      </select>
+      <.error :for={msg <- @errors}>{msg}</.error>
+    </div>
+    """
+  end
+
+  def input(%{type: "textarea"} = assigns) do
+    ~H"""
+    <div>
+      <.label for={@id}>{@label}</.label>
+      <textarea
+        id={@id}
+        name={@name}
+        class="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm focus:border-zinc-400 focus:ring-0"
+        {@rest}
+      >{Phoenix.HTML.Form.normalize_value("textarea", @value)}</textarea>
+      <.error :for={msg <- @errors}>{msg}</.error>
+    </div>
+    """
+  end
+
+  def input(assigns) do
+    ~H"""
+    <div>
+      <.label for={@id}>{@label}</.label>
+      <input
+        type={@type}
+        name={@name}
+        id={@id}
+        value={Phoenix.HTML.Form.normalize_value(@type, @value)}
+        class="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm focus:border-zinc-400 focus:ring-0"
+        {@rest}
+      />
+      <.error :for={msg <- @errors}>{msg}</.error>
+    </div>
+    """
+  end
+
+  attr :for, :string, default: nil
+  slot :inner_block, required: true
+
+  def label(assigns) do
+    ~H"""
+    <label for={@for} class="block text-sm font-medium leading-6 text-zinc-900">
+      {render_slot(@inner_block)}
+    </label>
+    """
+  end
+
+  slot :inner_block, required: true
+
+  def error(assigns) do
+    ~H"""
+    <p class="mt-1 text-sm leading-6 text-rose-600">{render_slot(@inner_block)}</p>
+    """
+  end
+
+  @doc "Form wrapper that renders a Phoenix.HTML.Form with submit handler."
+  attr :for, :any, required: true
+  attr :as, :any, default: nil
+  attr :rest, :global, include: ~w(autocomplete name rel action enctype method novalidate target multipart phx-change phx-submit phx-trigger-action phx-disable-with)
+  slot :inner_block, required: true
+  slot :actions
+
+  def simple_form(assigns) do
+    ~H"""
+    <.form :let={f} for={@for} as={@as} {@rest}>
+      <div class="space-y-4">
+        {render_slot(@inner_block, f)}
+        <div :for={action <- @actions} class="mt-4 flex items-center justify-end gap-2">
+          {render_slot(action, f)}
+        </div>
+      </div>
+    </.form>
+    """
+  end
+
+  @doc "Data table with :col slots."
+  attr :id, :string, required: true
+  attr :rows, :list, required: true
+  attr :row_id, :any, default: nil, doc: "function that returns the id for the row"
+  attr :row_click, :any, default: nil, doc: "function or {JS, …} to invoke on row click"
+  attr :row_item, :any, default: &Function.identity/1, doc: "function to derive the row data shown to the slot"
+  slot :col, required: true do
+    attr :label, :string
+  end
+  slot :action, doc: "trailing per-row action column"
+
+  def table(assigns) do
+    assigns = assign_new(assigns, :row_id, fn -> nil end)
+
+    ~H"""
+    <div class="overflow-x-auto">
+      <table id={@id} class="min-w-full divide-y divide-zinc-200 text-sm">
+        <thead class="bg-zinc-50">
+          <tr>
+            <th :for={col <- @col} class="px-3 py-2 text-left font-semibold text-zinc-700">{col[:label]}</th>
+            <th :if={@action != []} class="px-3 py-2 text-right font-semibold text-zinc-700">
+              <span class="sr-only">Actions</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-zinc-100 bg-white">
+          <tr :for={row <- @rows} id={@row_id && @row_id.(row)} class={@row_click && "hover:bg-zinc-50 cursor-pointer"}>
+            <td :for={col <- @col} phx-click={@row_click && @row_click.(row)} class="px-3 py-2 text-zinc-900">
+              {render_slot(col, @row_item.(row))}
+            </td>
+            <td :if={@action != []} class="px-3 py-2 text-right">
+              <span :for={action <- @action}>{render_slot(action, @row_item.(row))}</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    """
+  end
+
+  @doc "Colored pill — used for status / enum displays."
+  attr :class, :string, default: nil
+  slot :inner_block, required: true
+
+  def badge(assigns) do
+    ~H"""
+    <span class={["inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700", @class]}>
+      {render_slot(@inner_block)}
+    </span>
+    """
+  end
+
+  @doc "Empty-state placeholder rendered when a list is empty."
+  attr :class, :string, default: nil
+
+  def empty(assigns) do
+    ~H"""
+    <div class={["text-center text-sm text-zinc-500 py-8", @class]}>
+      No items.
+    </div>
+    """
+  end
+
+  # ---- Internal helpers -----------------------------------------------------
+
+  defp translate_error({msg, opts}) do
+    Enum.reduce(opts, msg, fn {key, value}, acc ->
+      String.replace(acc, "%{#{key}}", fn _ -> to_string(value) end)
+    end)
+  end
+end
+`;
+}
+
 function renderLayouts(appName: string, appModule: string): string {
   const webModule = `${appModule}Web`;
   return `# Auto-generated.
@@ -988,7 +1368,19 @@ function renderAppLayout(): string {
 `;
 }
 
-function renderConfigExs(appName: string, appModule: string): string {
+function renderConfigExs(
+  appName: string,
+  appModule: string,
+  contexts: BoundedContextIR[],
+): string {
+  // Ash 3.x requires every domain to be registered here; without it
+  // `mix compile --warnings-as-errors` rejects with
+  // "Domain <Mod> is not present in :ash_domains".  Domains are
+  // \`<appModule>.<PascalContextName>\` (matching what
+  // emitAggregateResources emits as the resource's :domain).
+  const ashDomains = contexts
+    .map((ctx) => `${appModule}.${pascal(ctx.name)}`)
+    .join(", ");
   return `# Auto-generated.
 import Config
 
@@ -996,9 +1388,7 @@ config :${appName}, ecto_repos: [${appModule}.Repo]
 config :${appName}, ${appModule}Web.Endpoint, url: [host: "localhost"]
 
 config :${appName},
-  ash_domains: [
-    # Phase 3 populates this list; domains are registered per context.
-  ]
+  ash_domains: [${ashDomains}]
 
 config :phoenix, :json_library, Jason
 
@@ -1043,7 +1433,6 @@ config :${appName}, ${appModule}Web.Endpoint,
   server: true
 
 config :logger, level: :info
-config :runtime_tools
 `;
 }
 

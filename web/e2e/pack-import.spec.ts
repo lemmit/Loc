@@ -31,7 +31,7 @@
 // network-required steps.
 
 import { expect, test } from "@playwright/test";
-import { waitForPlaygroundReady } from "./_helpers";
+import { selectExample, waitForPlaygroundReady } from "./_helpers";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -143,6 +143,10 @@ test("pack picker → workspace tree → generate against custom design", async 
   await page.goto("/#s=" + encodeForHash(sourceWithDesign));
   await page.reload();
   await waitForPlaygroundReady(page);
+  // The find-and-edit step below anchors on "port: 3001" (from the
+  // sales-system fixture).  Pin that example explicitly — default
+  // moved when storybook entries went to the top of the dropdown.
+  await selectExample(page, /Sales System/);
 
   // Click the Import button — should resolve via the stubbed
   // showDirectoryPicker, walk the synthetic handle, and write

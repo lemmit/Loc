@@ -51,6 +51,13 @@ export function DesktopHeader({ ctx }: Props): JSX.Element {
           data={augmentedExamplesList.map((e) => ({ value: e.id, label: e.label }))}
           allowDeselect={false}
           w={300}
+          // Screen readers + Playwright locators need a stable
+          // accessible name — without one the combobox is an
+          // empty-name `role="textbox"` and the first-match query
+          // is order-dependent.  Mantine's `label` prop is the
+          // visible-text variant; we use `aria-label` because the
+          // toolbar is space-constrained.
+          aria-label="Choose example"
         />
         <Button
           size="xs"
@@ -156,6 +163,9 @@ export function MobileHeader({ ctx }: Props): JSX.Element {
           // 16px font keeps iOS Safari from auto-zooming on focus.
           styles={{ input: { fontSize: 16, minHeight: 36 } }}
           style={{ flex: 1, minWidth: 0 }}
+          // Matches DesktopHeader — gives the example combobox a
+          // stable accessible name for SRs + the e2e suite.
+          aria-label="Choose example"
         />
       </Group>
       <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
