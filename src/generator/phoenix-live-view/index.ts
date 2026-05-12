@@ -859,6 +859,9 @@ defmodule ${webModule} do
       # comes from \`use Phoenix.Component\` on the caller side.
       import ${webModule}.CoreComponents
       alias Phoenix.LiveView.JS
+      # Verified routes — provides the \`~p\` sigil that emitted
+      # sidebar / page templates use for path interpolation.
+      unquote(verified_routes())
     end
   end
 
