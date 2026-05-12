@@ -6,10 +6,24 @@ import {
   Drawer, DrawerOverlay, DrawerContent, DrawerBody,
   useDisclosure, List, ListItem,
 } from "@chakra-ui/react";
-import { HamburgerIcon } from "@chakra-ui/icons";
 import React from "react";
 {{#each imports}}import {{specifier}} from "{{from}}";
 {{/each}}
+
+// `@chakra-ui/icons` is intentionally NOT a dep here: its v2 release
+// (the only one that ships HamburgerIcon under that import name)
+// declares `peerDependency: "@chakra-ui/react": ">=2.0.0"`, which esm.sh
+// resolves to the latest matching version (3.x) — that branch dropped
+// `forwardRef` and the bundle fails with "No matching export … for
+// import 'forwardRef'".  Inlining the SVG sidesteps the peerDep
+// without pulling another icon library.
+function HamburgerIcon(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+      <path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z" />
+    </svg>
+  );
+}
 
 const DRAWER_WIDTH = "240px";
 
