@@ -1,5 +1,5 @@
 // Auto-generated.
-import { Routes, Route, Link, useLocation } from "react-router-dom";
+import { Routes, Route, Link as RouterLink, useLocation } from "react-router-dom";
 import { AppShell, Burger, Divider, Group, Title, NavLink, Anchor, Alert, Button, Stack } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import React from "react";
@@ -53,7 +53,7 @@ function NotFound() {
   return (
     <Stack data-testid="not-found" p="md">
       <Title order={2}>Not found</Title>
-      <Anchor component={Link} to="/">← Back to home</Anchor>
+      <Anchor component={RouterLink} to="/">← Back to home</Anchor>
     </Stack>
   );
 }
@@ -75,7 +75,18 @@ function useIsActive() {
 
 export default function App() {
   const isActive = useIsActive();
-  const [opened, { toggle }] = useDisclosure();
+  const [opened, { toggle, close }] = useDisclosure();
+  // Mobile UX: auto-close the navbar drawer after a route change.
+  // Tapping a NavLink on a phone otherwise leaves the menu covering
+  // the destination page, which is contrary to how every other
+  // mobile app behaves.  Desktop is unaffected — the navbar isn't
+  // collapsible above the `sm` breakpoint, so close() is a no-op there.
+  const location = useLocation();
+  React.useEffect(() => {
+    close();
+    // close() is stable from useDisclosure; depending on location
+    // alone keeps the effect from re-firing on unrelated re-renders.
+  }, [location.pathname]);
   return (
     <AppShell
       header=\{{ height: 56 }}
@@ -92,7 +103,7 @@ export default function App() {
               size="sm"
               data-testid="nav-burger"
             />
-            <Anchor component={Link} to="/" underline="never" c="inherit">
+            <Anchor component={RouterLink} to="/" underline="never" c="inherit">
               <Group gap={8} align="center">
                 <div style=\{{ width: 28, height: 28, borderRadius: 6, background: "var(--mantine-color-brand-6)" }} aria-hidden="true" />
                 <Title order={4} style=\{{ letterSpacing: "-0.01em" }}>{{systemNameHuman}}</Title>
@@ -104,7 +115,7 @@ export default function App() {
       <AppShell.Navbar p="md">
         <Stack gap={4} data-testid="nav-sidebar">
 {{#each navSections}}          <Divider my="xs" label="{{label}}" labelPosition="left" />
-{{#each entries}}          <NavLink component={Link} to="{{to}}" label="{{label}}" active={isActive({{{activeArgs}}})} data-testid="{{testId}}" />
+{{#each entries}}          <NavLink component={RouterLink} to="{{to}}" label="{{label}}" active={isActive({{{activeArgs}}})} data-testid="{{testId}}" />
 {{/each}}{{/each}}        </Stack>
       </AppShell.Navbar>
       <AppShell.Main>

@@ -1,0 +1,9 @@
+{
+              try {
+                {{{mutationCall}}}
+                notifications.show({ color: "green", message: "{{successMessage}}" });
+                {{{redirectStmt}}};
+              } catch (e) {
+                notifications.show({ color: "red", message: (e as Error).message });
+              }
+            }
