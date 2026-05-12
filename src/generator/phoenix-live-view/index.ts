@@ -803,6 +803,31 @@ defmodule ${webModule} do
     end
   end
 
+  # Controller bundle for the API + LV controllers we emit
+  # (AggregatesController, OpenapiController, HealthController, …).
+  # Standard Phoenix 1.7 shape — pulls in the controller DSL plus
+  # the formats this generator emits (json + html for layout-bearing
+  # endpoints).  Caller modules use \`use PhoenixAppWeb, :controller\`.
+  def controller do
+    quote do
+      use Phoenix.Controller, formats: [:html, :json], layouts: [html: ${webModule}.Layouts]
+
+      import Plug.Conn
+      unquote(verified_routes())
+    end
+  end
+
+  # Verified-routes helper bundle — exposed both to controllers and
+  # LiveView modules so \`~p\` paths are reachable everywhere.
+  def verified_routes do
+    quote do
+      use Phoenix.VerifiedRoutes,
+        endpoint: ${webModule}.Endpoint,
+        router: ${webModule}.Router,
+        statics: ~w(assets fonts images favicon.ico robots.txt)
+    end
+  end
+
   def component do
     quote do
       use Phoenix.Component
