@@ -7,6 +7,7 @@
 
 import type { Loader, Plugin, PluginBuild } from "esbuild-wasm";
 import { VIRTUAL_SHIMS } from "./aliases.js";
+import { stackHintsForReactMajor } from "./stacks.js";
 
 const ENTRY_NAMESPACE = "virtual-fs";
 const SHIM_NAMESPACE = "virtual-shim";
@@ -527,7 +528,17 @@ const SHIMS_BY_SPEC = new Map(VIRTUAL_SHIMS.map((s) => [s.specifier, s]));
 
 export function makeLoomPlugin(ctx: VirtualFsContext, opts?: PluginOptions): Plugin {
   const httpGate = makeSemaphore(6);
-  const externalReactRuntime = !!opts?.externalReactRuntime;
+  // Resolve stack hints from the React major declared in the project's
+  // package.json.  See `stacks.ts` for the per-stack policy.  The
+  // bundler caller still passes `externalReactRuntime` as a request-
+  // kind toggle (set for `kind: "react"` bundles, off for Hono); the
+  // stack then decides *how* to externalise, including whether to
+  // skip externalisation entirely (stack v2 / React 19).
+  const callerWantsReactRuntime = !!opts?.externalReactRuntime;
+  const stack = stackHintsForReactMajor(ctx.versions.get("react"));
+  const externalReactRuntime =
+    callerWantsReactRuntime && stack.externalReactRuntime;
+  const useRdcShim = callerWantsReactRuntime && stack.rdcShim;
   return {
     name: "loom-bundler",
     setup(build: PluginBuild) {
@@ -539,33 +550,16 @@ export function makeLoomPlugin(ctx: VirtualFsContext, opts?: PluginOptions): Plu
         namespace: ENTRY_NAMESPACE,
       }));
 
-      // React runtime externals always win — kept as bare imports
-      // in the output so the iframe importmap can satisfy them.
-      // Must fire before any other resolver, including the shim
-      // table and the http resolver, so it catches both top-level
-      // user imports AND `import "react"` inside esm.sh-fetched
-      // transitive deps.
+      // React runtime externals — emitted only when the active
+      // stack opts in.  Stack v1 (React 18) externalises; the
+      // iframe importmap dedupes the runtime cleanly.  Stack v2
+      // (React 19) opts OUT and bundles React/React-DOM inline —
+      // esm.sh's v19 build resolves transitive `react` imports to
+      // canonical URLs that the importmap can't intercept,
+      // producing the `dispatcher.getOwner is not a function`
+      // class of error.  Inlining keeps the entire runtime in one
+      // module graph with a single `ReactSharedInternals`.
       if (externalReactRuntime) {
-        // Detect the user's React major from the harvested versions
-        // map.  The RDC shim below was built for React 18 — it
-        // re-implements `react-dom/client` by toggling
-        // `__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED.usingClientEntryPoint`
-        // around `ReactDOM.createRoot(...)` to silence a v18 dev
-        // warning.  Two problems on React 19:
-        //   1. The deprecation warning is gone (createRoot lives only
-        //      on react-dom/client now, no warning needed).
-        //   2. `ReactDOM.createRoot` is *undefined* on React 19's
-        //      `react-dom` namespace — the namespace forwarding was
-        //      removed.  The shim therefore produces a runtime
-        //      `TypeError: ReactDOM.createRoot is not a function`
-        //      every time a v19 user clicks Bundle + Preview.
-        // For React >= 19 we skip the shim entirely and let esm.sh
-        // serve `react-dom/client` directly.  esm.sh's React 19
-        // build exports `createRoot` / `hydrateRoot` as named exports
-        // exactly as the generator's main.tsx imports them.
-        const reactRange = ctx.versions.get("react") ?? "";
-        const reactMajor = Number(/(\d+)/.exec(reactRange)?.[1] ?? "0");
-        const useRdcShim = reactMajor > 0 && reactMajor < 19;
         build.onResolve({ filter: /.*/ }, (args) => {
           if (REACT_EXTERNAL_SET.has(args.path)) {
             return { path: args.path, external: true };

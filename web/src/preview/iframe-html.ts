@@ -18,6 +18,8 @@
 // same React instance.  Without that, the bundle ends up with
 // multiple React copies and `useRef` returns null at runtime.
 
+import { stackHintsForReactMajor } from "../bundle/stacks.js";
+
 interface MakePreviewArgs {
   js: string;
   css?: string;
@@ -40,32 +42,21 @@ const REACT_FALLBACK_VERSION = "18.3.1";
 function importMap(versions: Record<string, string>): Record<string, string> {
   const reactVer = versions["react"] ?? REACT_FALLBACK_VERSION;
   const reactDomVer = versions["react-dom"] ?? reactVer;
-  // Only `react` and `react-dom` are externalised — everything
-  // else (`react/jsx-runtime`, `react-dom/client`, …) is bundled
-  // inline by esbuild and reaches React/React-DOM through these
-  // two entries.  Keeping the importmap minimal also keeps the
-  // esm.sh "external" set narrow, which is what dedupes Mantine
-  // and friends to a single shard (see plugin.ts comment on
-  // REACT_RUNTIME_EXTERNALS).
-  //
-  // **`?external=react` is critical for react-dom.**  Without it,
-  // esm.sh's react-dom build inlines a *full copy* of react.
-  // Loading that response via the importmap pulls in two React
-  // instances — one from the importmap's `react` entry, one
-  // bundled inside react-dom — each with their own
-  // `ReactSharedInternals`.  Components render with the importmap
-  // React and call `createElement`, which reads
-  // `ReactSharedInternals.A` from the importmap React; but
-  // react-dom's `createRoot` writes the dispatcher to the
-  // *inlined* React's `ReactSharedInternals`.  The mismatch
-  // surfaces at the first JSX render as
-  // `TypeError: dispatcher.getOwner is not a function`.  Setting
-  // `?external=react` makes react-dom's transitive `import "react"`
-  // stay bare — the importmap then satisfies it once, so there's
-  // exactly one React module instance at runtime.
+  const stack = stackHintsForReactMajor(versions["react"]);
+  // Stack v2 (React 19): bundler inlines React — no importmap entries.
+  // The bundle is self-contained; emitting `react` / `react-dom`
+  // mappings would only confuse modules that look for a host-supplied
+  // React (we don't have any).
+  if (!stack.externalReactRuntime) {
+    return {};
+  }
+  // Stack v1 (React 18): externalise react/react-dom and let the
+  // importmap satisfy them at iframe load.  esm.sh's v18 build dedupes
+  // through this path because react-dom's transitive `import "react"`
+  // converges on the same wrapper URL that the importmap resolves.
   return {
     "react": `https://esm.sh/react@${reactVer}?dev=false`,
-    "react-dom": `https://esm.sh/react-dom@${reactDomVer}?external=react&dev=false`,
+    "react-dom": `https://esm.sh/react-dom@${reactDomVer}${stack.importmapReactDomQuery(reactVer)}`,
   };
 }
 
