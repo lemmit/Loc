@@ -41,8 +41,47 @@ self.addEventListener("install", () => {
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil((async () => {
+    await self.clients.claim();
+    // Broadcast on every activation so freshly-installed SWs trigger
+    // the parent's init effects.  Cold installs run install->activate
+    // BEFORE the playground's React tree finishes mounting, so this
+    // notification may land on no listeners; the parent's mount
+    // effect attaches independently in that case.  Cheap enough to
+    // fire unconditionally.
+    await broadcastWake("activated");
+  })());
 });
+
+/** Fire-and-forget broadcast to every controlled client so the
+ *  parent can re-attach the runtime port + re-push the latest
+ *  bundle.  We don't wait for an ack — the parent's reaction is
+ *  to bump a revision counter that re-runs its existing init
+ *  effects; if the broadcast misses (e.g. no clients controlled
+ *  yet), the next sandbox fetch from a fresh-state SW will
+ *  re-broadcast (see the throttled `maybeBroadcastWake` below). */
+async function broadcastWake(reason) {
+  try {
+    const clients = await self.clients.matchAll({ includeUncontrolled: false });
+    for (const client of clients) {
+      client.postMessage({ type: "loom-sw/awake", reason });
+    }
+  } catch (_) {
+    // best-effort — broadcast must never break a real fetch.
+  }
+}
+
+// Throttle so a flurry of in-flight runtime requests after a SW
+// revival doesn't spam the parent with N wake messages.  One per
+// second is enough — the parent only needs to learn once that the
+// SW lost state before its re-init effects fire.
+let lastWakeBroadcastAt = 0;
+function maybeBroadcastWake(reason) {
+  const now = Date.now();
+  if (now - lastWakeBroadcastAt < 1_000) return;
+  lastWakeBroadcastAt = now;
+  void broadcastWake(reason);
+}
 
 self.addEventListener("message", (event) => {
   const data = event.data;
@@ -103,10 +142,22 @@ async function handleSandboxRequest(request, url) {
     // request.  Origin/search/hash are preserved.
     const routeUrl = new URL(request.url);
     routeUrl.pathname = "/" + subpath.slice(RUNTIME_SUBPATH.length);
+    // If the SW has just been revived after a browser-imposed kill,
+    // `runtimePort` is null even though the parent thinks it's
+    // attached.  Nudge the parent to re-attach by broadcasting a
+    // wake message; the parent's listener (Preview.tsx) re-runs
+    // its attach + push effects.  This fetch itself still 502s —
+    // React Query / the user's retry logic picks up the next
+    // request once the port is back.
+    if (!runtimePort) maybeBroadcastWake("runtime-fetch-without-port");
     return forwardRuntime(request, routeUrl.toString());
   }
 
   if (currentBundle == null) {
+    // Same recovery path for the bundle.  After a revival, the SPA
+    // entry would otherwise stay 503 forever — broadcast so the
+    // parent re-pushes its latest bundle.
+    maybeBroadcastWake("navigation-without-bundle");
     return new Response(
       "Loom preview sandbox is not ready yet — bundle the source first.\n",
       {
