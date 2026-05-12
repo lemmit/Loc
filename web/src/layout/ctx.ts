@@ -28,6 +28,15 @@ export type ReactBundleStatus =
   | { kind: "fail"; result: BundleFail }
   | { kind: "ok"; result: BundleOk };
 
+/** Platforms whose generated output the playground cannot bundle or
+ *  boot — i.e. anything other than Hono + React.  Listed in the UI so
+ *  the user understands why Preview is grey instead of erroring out. */
+export type UnsupportedPlatform = "dotnet" | "phoenixLiveView";
+export interface UnsupportedDeployable {
+  slug: string;
+  platform: UnsupportedPlatform;
+}
+
 export type WorkspaceState = ReturnType<typeof useWorkspace>;
 
 export interface LayoutCtx {
@@ -78,6 +87,11 @@ export interface LayoutCtx {
   selectedFile: VirtualFile | null;
   selectedPath: string | null;
   setSelectedPath: (p: string | null) => void;
+  /** Deployables in the generated output that the playground can't
+   *  run (.NET, Phoenix LiveView).  Empty for Hono/React-only
+   *  systems; the FooterBar + PreviewPane reference this to explain
+   *  why those deployables are file-pane-only. */
+  unsupportedDeployables: ReadonlyArray<UnsupportedDeployable>;
 
   // Backend tester form
   reqMethod: string;
@@ -120,6 +134,19 @@ export function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+/** Human label for a runtime the playground can't host in-browser. */
+export function unsupportedPlatformLabel(p: UnsupportedPlatform): string {
+  return p === "dotnet" ? ".NET" : "Phoenix LiveView";
+}
+
+/** Render the unsupported-deployable list as a comma-joined string —
+ *  `"slugA (.NET), slugB (Phoenix LiveView)"`. */
+export function formatUnsupportedDeployables(
+  items: ReadonlyArray<UnsupportedDeployable>,
+): string {
+  return items.map((d) => `${d.slug} (${unsupportedPlatformLabel(d.platform)})`).join(", ");
 }
 
 // Re-export to keep imports from shells short.

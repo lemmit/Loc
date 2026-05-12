@@ -541,6 +541,107 @@ describe("validation", () => {
       `);
       expect(warnings.some((w) => /no 'else' arm/.test(w))).toBe(false);
     });
+
+    // Rule 14 — design-pack format must match the deployable's framework.
+    // TSX packs (mantine/shadcn/mui/chakra) need a `react` framework;
+    // HEEx packs (ashPhoenix) need `phoenixLiveView`.  Custom packs warn
+    // (validator can't read pack.json); `design:` on a non-UI deployable
+    // warns that the value will be dropped.
+    it("rejects a heex pack on a react frontend", async () => {
+      const { errors } = await parse(`
+        system S {
+          module M { context T { } }
+          ui WebApp { }
+          deployable api { platform: hono, modules: M, port: 3000 }
+          deployable web {
+            platform: react
+            targets: api
+            ui: WebApp
+            port: 3001
+            design: ashPhoenix
+          }
+        }
+      `);
+      expect(
+        errors.some((e) => /Design pack 'ashPhoenix' is a heex pack but framework 'react' renders tsx/.test(e)),
+      ).toBe(true);
+    });
+
+    it("rejects a tsx pack on a phoenixLiveView fullstack deployable", async () => {
+      const { errors } = await parse(`
+        system S {
+          module M { context T { } }
+          ui WebApp { }
+          deployable fullstack {
+            platform: phoenixLiveView
+            modules: M
+            ui: WebApp
+            port: 4000
+            design: shadcn
+          }
+        }
+      `);
+      expect(
+        errors.some((e) => /Design pack 'shadcn' is a tsx pack but framework 'phoenixLiveView' renders heex/.test(e)),
+      ).toBe(true);
+    });
+
+    it("accepts a matching tsx pack on a react frontend", async () => {
+      const { errors } = await parse(`
+        system S {
+          module M { context T { } }
+          ui WebApp { }
+          deployable api { platform: hono, modules: M, port: 3000 }
+          deployable web {
+            platform: react
+            targets: api
+            ui: WebApp
+            port: 3001
+            design: shadcn
+          }
+        }
+      `);
+      expect(errors).toEqual([]);
+    });
+
+    it("warns (does not error) on a custom design pack path", async () => {
+      const { errors, warnings } = await parse(`
+        system S {
+          module M { context T { } }
+          ui WebApp { }
+          deployable api { platform: hono, modules: M, port: 3000 }
+          deployable web {
+            platform: react
+            targets: api
+            ui: WebApp
+            port: 3001
+            design: "./my-custom-pack"
+          }
+        }
+      `);
+      expect(errors).toEqual([]);
+      expect(
+        warnings.some((w) => /Custom design pack '\.\/my-custom-pack'.*not checked at parse time/.test(w)),
+      ).toBe(true);
+    });
+
+    it("warns when 'design:' is set on a deployable with no UI mount", async () => {
+      const { errors, warnings } = await parse(`
+        system S {
+          module M { context T { } }
+          deployable api {
+            platform: hono
+            modules: M
+            port: 3000
+            design: shadcn
+          }
+        }
+      `);
+      expect(errors).toEqual([]);
+      expect(
+        warnings.some((w) => /Design pack 'shadcn' set on deployable 'api'.*has no UI mount.*ignored/.test(w)),
+      ).toBe(true);
+    });
   });
 });
 

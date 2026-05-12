@@ -1,5 +1,10 @@
 import { Group, Text } from "@mantine/core";
-import { formatBytes, modeLabel, type LayoutCtx } from "./ctx";
+import {
+  formatBytes,
+  formatUnsupportedDeployables,
+  modeLabel,
+  type LayoutCtx,
+} from "./ctx";
 
 interface Props {
   ctx: LayoutCtx;
@@ -10,7 +15,7 @@ interface Props {
 // the right-side details collapse onto the same line — Mantine `Group`
 // with `wrap="wrap"` handles overflow gracefully.
 export function FooterBar({ ctx }: Props): JSX.Element {
-  const { isDesktop, generateResult, honoBundleResult } = ctx;
+  const { isDesktop, generateResult, honoBundleResult, unsupportedDeployables } = ctx;
   return (
     <Group h="100%" px="md" gap="md" justify="space-between" wrap="wrap">
       {isDesktop && (
@@ -26,6 +31,11 @@ export function FooterBar({ ctx }: Props): JSX.Element {
               ? `generated ${generateResult.files.length} file(s) (${modeLabel(generateResult)})`
               : "no generation yet"}
         </Text>
+        {unsupportedDeployables.length > 0 && (
+          <Text size="xs" c="yellow">
+            files-only: {formatUnsupportedDeployables(unsupportedDeployables)}
+          </Text>
+        )}
         <Text size="xs" c="dimmed">
           {honoBundleResult === null
             ? "no bundle yet"

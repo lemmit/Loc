@@ -45,6 +45,10 @@ import {
   type DddType,
   type Env,
 } from "./type-system.js";
+import {
+  BUILTIN_PACK_FORMATS,
+  packFormatForBuiltin,
+} from "../generator/_packs/builtin-formats.js";
 
 export class DddValidator {
   // Entry: full model walk
@@ -336,7 +340,7 @@ export class DddValidator {
     // (e.g. `platform: react` + `framework: phoenixLiveView`).
     const framework = d.uiBlock?.framework;
     if (framework && d.uiBlock) {
-      const expected = expectedFrameworkFor(d.platform);
+      const expected = expectedFrameworkFor(d.platform, hasUiBinding);
       if (expected && framework !== expected) {
         accept(
           "error",
@@ -345,6 +349,17 @@ export class DddValidator {
         );
       }
     }
+
+    // Rule 14: design-pack format must match the framework the deployable
+    // renders against.  TSX packs (mantine/shadcn/mui/chakra) need a
+    // `react` framework; HEEx packs (ashPhoenix) need `phoenixLiveView`.
+    // Without this rule, a mismatched pair (e.g. `platform: react,
+    // design: ashPhoenix`) lowers cleanly and explodes at generation
+    // time with a confusing "template not registered" error.  Custom
+    // packs (any name not in BUILTIN_PACK_FORMATS) get a warning
+    // instead — the validator can't read their `pack.json` to know the
+    // format, but a typo should still surface loudly.
+    this.checkDeployableDesignPack(d, hasUiBinding, framework, accept);
 
     // Existing rules — react/static both behave like frontends.
     if (d.platform === "react" || d.platform === "static") {
@@ -386,6 +401,64 @@ export class DddValidator {
     this.checkDeployableServes(d, accept);
     this.checkDeployableUiCompose(d, accept);
     this.checkDeployableModuleStorages(d, accept);
+  }
+
+  /** Rule 14 — design-pack format must match the deployable's
+   *  framework.  Three cases:
+   *    1. `design:` set to a built-in name (mantine/shadcn/mui/chakra/
+   *       ashPhoenix) whose format doesn't match the deployable's
+   *       framework → error.  Suggests the valid built-ins for the
+   *       framework's format so the fix is one rename away.
+   *    2. `design:` set to a custom path (anything not in the
+   *       built-in map) → warning.  The validator is sync + IO-free,
+   *       so it can't read the custom pack's `pack.json` to check the
+   *       format; the warning surfaces the unchecked surface so a
+   *       typo still gets attention.
+   *    3. `design:` set on a deployable with no UI mount and on a
+   *       platform that doesn't render UI either → warning that the
+   *       value is dropped at lowering and has no effect. */
+  private checkDeployableDesignPack(
+    d: import("./generated/ast.js").Deployable,
+    hasUiBinding: boolean,
+    explicitFramework: string | undefined,
+    accept: ValidationAcceptor,
+  ): void {
+    if (d.design == null) return;
+    // Case 3 — design set on a non-UI deployable.  Lowering at
+    // ir/lower.ts:481 silently drops `design` for non-react/static/
+    // phoenixLiveView platforms, so a hono+design or dotnet+design
+    // (no `ui:`) combination silently does nothing today.  Warn
+    // before the silent drop costs the user a debugging session.
+    if (!hasUiBinding && !platformMountsUi(d.platform)) {
+      accept(
+        "warning",
+        `Design pack '${d.design}' set on deployable '${d.name}' (platform '${d.platform}' has no UI mount) — value is ignored at generation.`,
+        { node: d, property: "design" },
+      );
+      return;
+    }
+    const framework = explicitFramework ?? expectedFrameworkFor(d.platform, hasUiBinding);
+    const expectedFormat = expectedPackFormatFor(framework);
+    const actualFormat = packFormatForBuiltin(d.design);
+    if (actualFormat == null) {
+      // Case 2 — custom pack path.  Skip the strict check but warn
+      // loudly so a misspelt built-in name (or a custom pack that
+      // ships the wrong format) doesn't slip through silently.
+      accept(
+        "warning",
+        `Custom design pack '${d.design}' on deployable '${d.name}' — format compatibility with framework '${framework ?? "(none)"}' is not checked at parse time; ensure its pack.json declares format '${expectedFormat ?? "tsx"}'.`,
+        { node: d, property: "design" },
+      );
+      return;
+    }
+    // Case 1 — built-in pack whose format doesn't match.
+    if (expectedFormat && actualFormat !== expectedFormat) {
+      accept(
+        "error",
+        `Design pack '${d.design}' is a ${actualFormat} pack but framework '${framework}' renders ${expectedFormat}. Use one of: ${builtinPackNamesForFormat(expectedFormat)}.`,
+        { node: d, property: "design" },
+      );
+    }
   }
 
   /** Slice 11.27 — `modules: <M> { primary: <Storage>, ... }`
@@ -1569,10 +1642,40 @@ function platformOwnsBackend(platform: string | undefined): boolean {
   return platform === "dotnet" || platform === "hono" || platform === "phoenixLiveView";
 }
 
-function expectedFrameworkFor(platform: string | undefined): string | undefined {
+/** Framework a deployable will render against, given its platform and
+ *  whether it actually declares a `ui:` mount.  `hasUi` is the second
+ *  argument because some platforms (e.g. fullstack `dotnet` once Part B
+ *  lands) only render UI when the deployable opts in; for backend-only
+ *  cases the framework is `undefined` and downstream rules no-op. */
+function expectedFrameworkFor(
+  platform: string | undefined,
+  hasUi: boolean,
+): string | undefined {
   if (platform === "react" || platform === "static") return "react";
   if (platform === "phoenixLiveView") return "phoenixLiveView";
+  void hasUi;
   return undefined;
+}
+
+/** Format a given framework's design pack must declare.  Mirrors
+ *  `expectedFrameworkFor`; used by Rule 14 to cross-check the
+ *  deployable's `design:` against its framework. */
+function expectedPackFormatFor(
+  framework: string | undefined,
+): "tsx" | "heex" | undefined {
+  if (framework === "react") return "tsx";
+  if (framework === "phoenixLiveView") return "heex";
+  return undefined;
+}
+
+/** Comma-joined list of built-in pack names whose format matches the
+ *  given target — used to make Rule 14's diagnostic suggest valid
+ *  replacements ("Use one of: mantine, shadcn, mui, chakra."). */
+function builtinPackNamesForFormat(format: "tsx" | "heex"): string {
+  return Object.entries(BUILTIN_PACK_FORMATS)
+    .filter(([, f]) => f === format)
+    .map(([name]) => name)
+    .join(", ");
 }
 
 export function registerValidationChecks(services: DddServices): void {
