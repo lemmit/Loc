@@ -1,0 +1,129 @@
+// Banking on fullstack .NET — same banking domain as
+// `banking-system.ddd` (Hono + React split) and `phoenix-banking.ddd`
+// (Elixir/Ash fullstack), but deployed as a single .NET service that
+// hosts the React SPA from wwwroot/.
+//
+// Three-way diff target: pick this, `banking-system`, and
+// `phoenix-banking` from the dropdown to compare how identical
+// aggregates / value-objects / workflows lower across Drizzle+Hono,
+// EF Core + Mediator (.NET), and Ash + Reactor (Elixir).
+//
+// Files-only in the playground (.NET doesn't boot in-browser).
+
+system DotnetBanking {
+
+  theme {
+    primary: "#059669"
+    neutral: "#52525b"
+    radius: "sm"
+    fontFamily: "system-ui, -apple-system, sans-serif"
+  }
+
+  module Banking {
+    context Banking {
+
+      enum AccountStatus { Open, Frozen, Closed }
+
+      valueobject Money {
+        amount: decimal
+        currency: string
+        invariant amount >= 0
+        invariant currency.length == 3
+      }
+
+      event AccountOpened {
+        account: Id<Account>,
+        holder: Id<Customer>,
+        at: datetime
+      }
+
+      event AccountFrozen { account: Id<Account>, reason: string, at: datetime }
+
+      event MoneyDeposited { account: Id<Account>, amount: Money, at: datetime }
+      event MoneyWithdrawn { account: Id<Account>, amount: Money, at: datetime }
+
+      aggregate Customer {
+        name: string display
+        email: string
+        invariant name.length > 0
+        invariant email.length > 0
+      }
+
+      aggregate Account {
+        holder: Id<Customer>
+        status: AccountStatus
+        balance: Money
+        openedAt: datetime
+        closedAt: datetime?
+
+        function isMutable(): bool = status == Open
+
+        invariant balance.amount >= 0
+
+        operation deposit(amount: Money) {
+          precondition isMutable()
+          precondition amount.amount > 0
+          balance := Money(balance.amount + amount.amount, balance.currency)
+          emit MoneyDeposited { account: id, amount: amount, at: now() }
+        }
+
+        operation withdraw(amount: Money) {
+          precondition isMutable()
+          precondition amount.amount > 0
+          precondition balance.amount >= amount.amount
+          balance := Money(balance.amount - amount.amount, balance.currency)
+          emit MoneyWithdrawn { account: id, amount: amount, at: now() }
+        }
+
+        operation freeze(reason: string) {
+          precondition status == Open
+          status := Frozen
+          emit AccountFrozen { account: id, reason: reason, at: now() }
+        }
+      }
+
+      repository Customers for Customer {
+        find byEmail(email: string): Customer? where this.email == email
+      }
+
+      repository Accounts for Account {
+        find byHolder(holder: Id<Customer>): Account[] where this.holder == holder
+        find openByHolder(holder: Id<Customer>): Account[]
+          where this.holder == holder && this.status == Open
+      }
+
+      // Atomic two-side transfer.  EF Core's pipeline keeps the
+      // withdraw + deposit in one DB transaction; a failing
+      // precondition throws DomainException → 400 with the violated
+      // rule, and the transaction rolls back.
+      workflow transferFunds(
+        fromAccount: Id<Account>,
+        toAccount: Id<Account>,
+        amount: Money
+      ) transactional {
+        precondition amount.amount > 0
+        let src = Accounts.getById(fromAccount)
+        let dst = Accounts.getById(toAccount)
+        src.withdraw(amount)
+        dst.deposit(amount)
+      }
+
+      view OpenAccounts = Account where status == Open
+    }
+  }
+
+  ui WebApp {
+    scaffold modules: Banking
+  }
+
+  // Single fullstack .NET deployable — backend on /api/*, SPA
+  // (shadcn pack for variety) served from wwwroot/ at /, all in
+  // one container.
+  deployable app {
+    platform: dotnet
+    modules: Banking
+    ui: WebApp
+    port: 8080
+    design: shadcn
+  }
+}

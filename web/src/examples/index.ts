@@ -15,6 +15,7 @@ import storybookChakraSource from "./storybook-chakra.ddd?raw";
 import storybookComponentsSource from "./storybook-components.ddd?raw";
 import dotnetFullstackSource from "./dotnet-fullstack.ddd?raw";
 import dotnetBackendSource from "./dotnet-backend.ddd?raw";
+import dotnetBankingSource from "./dotnet-banking.ddd?raw";
 import phoenixFullstackSource from "./phoenix-fullstack.ddd?raw";
 import phoenixBankingSource from "./phoenix-banking.ddd?raw";
 
@@ -130,10 +131,17 @@ export const examples: LoomExample[] = [
   },
   {
     id: "dotnet-fullstack",
-    label: "Fullstack .NET (embeds React SPA)",
+    label: "Fullstack .NET (Sales)",
     source: dotnetFullstackSource,
     blurb:
-      "Single .NET deployable that serves both /api/* and a React SPA from wwwroot/. Files-only in the playground (.NET doesn't boot in-browser).",
+      "Single .NET deployable serving /api/* and a React SPA (Mantine) from wwwroot/. Files-only in the playground (.NET doesn't boot in-browser).",
+  },
+  {
+    id: "dotnet-banking",
+    label: "Fullstack .NET (Banking)",
+    source: dotnetBankingSource,
+    blurb:
+      "Same banking domain as `banking-system.ddd` rendered as fullstack .NET with the shadcn pack. Three-way diff target alongside `phoenix-banking` and `banking-system`.",
   },
   {
     id: "phoenix-fullstack",
