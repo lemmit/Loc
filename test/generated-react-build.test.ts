@@ -91,6 +91,7 @@ interface PackSpec {
  *  multiplicatively without other code edits. */
 const PACKS: readonly PackSpec[] = [
   { family: "mantine", version: "v7" },
+  { family: "mantine", version: "v9" },
   { family: "shadcn",  version: "v3" },
   { family: "mui",     version: "v5" },
   { family: "chakra",  version: "v2" },

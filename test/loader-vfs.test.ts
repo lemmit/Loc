@@ -64,12 +64,17 @@ describe("resolvePackDir: built-in names", () => {
     // Bareword resolution flows through BUILTIN_PACK_LATEST — the
     // version segment comes from the toolchain default, not from
     // the input.  Update these expectations when you bump
-    // BUILTIN_PACK_LATEST.
+    // BUILTIN_PACK_LATEST (e.g. mantine flipping to v9 is a
+    // deliberate follow-up paired with fixture refresh).
     expect(resolvePackDir("mantine")).toBe("/designs/mantine/v7");
     expect(resolvePackDir("shadcn")).toBe("/designs/shadcn/v3");
   });
   it("resolves pinned built-ins to /designs/<family>/<version>", () => {
+    // Both old + new mantine majors are loadable.  Pinning is the
+    // opt-out for projects that don't want to ride BUILTIN_PACK_LATEST
+    // forward across toolchain upgrades.
     expect(resolvePackDir("mantine@v7")).toBe("/designs/mantine/v7");
+    expect(resolvePackDir("mantine@v9")).toBe("/designs/mantine/v9");
     expect(resolvePackDir("chakra@v2")).toBe("/designs/chakra/v2");
   });
 });
@@ -98,7 +103,8 @@ describe("resolvePackDir: paths", () => {
   it("rejects user-pack names that collide with built-ins (built-ins win)", () => {
     // Even if the user names their pack "mantine", `resolvePackDir`
     // returns the built-in path — not the workspace path — so the
-    // user pack can't shadow the built-in.
+    // user pack can't shadow the built-in.  Version segment tracks
+    // the current BUILTIN_PACK_LATEST.mantine.
     expect(resolvePackDir("mantine", "/workspace/somewhere")).toBe("/designs/mantine/v7");
   });
 });

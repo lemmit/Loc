@@ -1,0 +1,5 @@
+{{#if isMulti}}<Stack gap="xs"{{{testidAttr}}}>
+{ Array.from({ length: {{count}} }).map((_, i) => (
+<Skeleton key={i} height={ {{height}} } radius="sm" />
+)) }
+</Stack>{{else}}<Skeleton height={ {{height}} } radius="sm"{{{testidAttr}}} />{{/if}}
