@@ -2,12 +2,13 @@ import type {
   AggregateIR,
   BoundedContextIR,
   ExprIR,
+  TypeIR,
   WorkflowIR,
   WorkflowStmtIR,
 } from "../../ir/loom-ir.js";
 import { camel, snake } from "../../util/naming.js";
 import { renderTsExpr } from "./render-expr.js";
-import { wireToDomainExpr, zodFor } from "./routes-builder.js";
+import { emitWireSchema, wireToDomainExpr, zodFor } from "./routes-builder.js";
 
 // ---------------------------------------------------------------------------
 // Hono workflow emission.
@@ -95,6 +96,36 @@ export function buildWorkflowsFile(
     );
   }
   lines.push("");
+
+  // Wire-schema declarations for every VO / enum a workflow param
+  // references.  Without these, `zodFor(p.type)` below emits a bare
+  // `MoneySchema` reference that's not in scope — esbuild bundles
+  // the file anyway (it doesn't fail on undefined identifiers) but
+  // module evaluation throws `ReferenceError: MoneySchema is not
+  // defined` at runtime Boot.  Each per-aggregate routes file emits
+  // its own copies independently; the bundle ends up with renamed
+  // duplicates (`MoneySchema`, `MoneySchema2`) which is fine —
+  // they're scoped per emitted file.
+  const workflowVOs = collectUsedValueObjects(ctx);
+  const workflowEnumsUsed = collectUsedEnums(ctx);
+  for (const e of workflowEnumsUsed) {
+    const values = e.values.map((v) => `"${v}"`).join(", ");
+    lines.push(`const ${e.name}Schema = z.enum([${values}]).openapi("${e.name}");`);
+  }
+  for (const vo of workflowVOs) {
+    lines.push(
+      ...emitWireSchema(
+        `const ${vo.name}Schema`,
+        `${vo.name}`,
+        vo.fields.map((f) => ({ name: f.name, base: zodFor(f.type) })),
+        vo.invariants,
+        new Set(vo.fields.map((f) => f.name)),
+      ),
+    );
+  }
+  if (workflowVOs.length > 0 || workflowEnumsUsed.length > 0) {
+    lines.push("");
+  }
 
   // Per-workflow request schema.
   for (const wf of ctx.workflows) {
@@ -364,4 +395,35 @@ function pgIsolationLevel(
 
 function capitalize(s: string): string {
   return s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
+}
+
+/** Value objects referenced by any workflow's parameters.  Same
+ *  shape as `routes-builder.collectUsedValueObjects` but scoped to
+ *  workflow params instead of aggregate-level surfaces.  Used to
+ *  decide which `<Vo>Schema` declarations the workflows file needs
+ *  to emit so its request schemas don't reference undefined names. */
+function collectUsedValueObjects(ctx: BoundedContextIR) {
+  const used = new Set<string>();
+  const visit = (t: TypeIR): void => {
+    if (t.kind === "valueobject") used.add(t.name);
+    if (t.kind === "array") visit(t.element);
+    if (t.kind === "optional") visit(t.inner);
+  };
+  for (const wf of ctx.workflows) {
+    for (const p of wf.params) visit(p.type);
+  }
+  return ctx.valueObjects.filter((v) => used.has(v.name));
+}
+
+function collectUsedEnums(ctx: BoundedContextIR) {
+  const used = new Set<string>();
+  const visit = (t: TypeIR): void => {
+    if (t.kind === "enum") used.add(t.name);
+    if (t.kind === "array") visit(t.element);
+    if (t.kind === "optional") visit(t.inner);
+  };
+  for (const wf of ctx.workflows) {
+    for (const p of wf.params) visit(p.type);
+  }
+  return ctx.enums.filter((e) => used.has(e.name));
 }
