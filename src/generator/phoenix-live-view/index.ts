@@ -1010,13 +1010,29 @@ function renderCoreComponents(appModule: string): string {
   return `# Auto-generated.
 defmodule ${webModule}.CoreComponents do
   @moduledoc """
-  Stub for the core-components module Phoenix's html_helpers macro
-  imports.  The Loom generator emits LiveView pages that reference
-  components by their fully-qualified module path (or use only the
-  primitives Phoenix.Component / Phoenix.HTML provide), so this
-  module exists purely to satisfy the import.
+  Function components consumed by emitted layouts + LiveView pages.
+  Standard Phoenix 1.7 generators ship a much richer module; we
+  emit the minimal subset the generator's templates actually call.
   """
   use Phoenix.Component
+
+  @doc """
+  Renders all currently-set flash messages.  Called by the app
+  layout's \`<.flash_group flash={@flash} />\` slot — pure render,
+  no JS interaction.
+  """
+  attr :flash, :map, default: %{}, doc: "the @flash map from conn or socket assigns"
+
+  def flash_group(assigns) do
+    ~H"""
+    <div :if={Phoenix.Flash.get(@flash, :info)} class="rounded-md bg-blue-50 p-3 text-sm text-blue-700 mb-4">
+      <%= Phoenix.Flash.get(@flash, :info) %>
+    </div>
+    <div :if={Phoenix.Flash.get(@flash, :error)} class="rounded-md bg-red-50 p-3 text-sm text-red-700 mb-4">
+      <%= Phoenix.Flash.get(@flash, :error) %>
+    </div>
+    """
+  end
 end
 `;
 }
