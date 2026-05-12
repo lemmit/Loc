@@ -57,10 +57,9 @@ test("editor change → reload → source restored from IDB", async ({ page, con
   // "Workspace (autosaved)" — Mantine Select renders the active
   // option's label inside the textbox value, so we read it from
   // there (not from the collapsed listbox, which is `hidden`).
-  await expect(page.getByLabel("Choose example")).toHaveValue(
-    "Workspace (autosaved)",
-    { timeout: 10_000 },
-  );
+  await expect(
+    page.getByRole("textbox", { name: "Choose example" }),
+  ).toHaveValue("Workspace (autosaved)", { timeout: 10_000 });
 
   // The editor's first line should be the marker we typed before
   // reload.  Monaco renders text inside `.view-line` divs.

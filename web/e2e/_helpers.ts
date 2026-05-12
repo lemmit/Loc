@@ -45,8 +45,14 @@ export async function waitForPlaygroundReady(page: Page): Promise<void> {
 // without breaking specs.  Mantine's `<Select>` renders the active
 // option label inside an accessible-labeled input; clicking it
 // opens a listbox of `role="option"` entries.
+//
+// We target `role="textbox"` with the accessible name (not
+// `getByLabel`) because Mantine threads the same `aria-label`
+// onto both the underlying `<input>` AND the listbox container —
+// `getByLabel` matches both and Playwright's strict mode errors.
+// `getByRole("textbox")` limits to the input.
 export async function selectExample(page: Page, label: string | RegExp): Promise<void> {
-  await page.getByLabel("Choose example").click();
+  await page.getByRole("textbox", { name: "Choose example" }).click();
   await page.getByRole("option", { name: label }).first().click();
   // Re-wait for the LSP "0 errors" badge — switching examples
   // re-mounts the editor and re-parses the source, so the badge
