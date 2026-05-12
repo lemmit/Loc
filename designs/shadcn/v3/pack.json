@@ -1,14 +1,31 @@
 {
-  "name": "mantine",
-  "version": "0.1.0",
+  "name": "shadcn",
+  "version": "v3",
   "emits": {
     "theme": "theme.hbs",
     "main": "main.hbs",
-    "format-helpers": "format-helpers.hbs",
     "app-shell": "app-shell.hbs",
     "package-json": "package-json.hbs",
     "tsconfig": "tsconfig.hbs",
     "vite-config": "vite-config.hbs",
+    "tailwind-config": "tailwind-config.hbs",
+    "postcss-config": "postcss-config.hbs",
+    "globals-css": "globals-css.hbs",
+    "lib-utils": "lib-utils.hbs",
+    "format-helpers": "format-helpers.hbs",
+    "components-ui-button": "components-ui-button.hbs",
+    "components-ui-card": "components-ui-card.hbs",
+    "components-ui-input": "components-ui-input.hbs",
+    "components-ui-label": "components-ui-label.hbs",
+    "components-ui-table": "components-ui-table.hbs",
+    "components-ui-form": "components-ui-form.hbs",
+    "components-ui-select": "components-ui-select.hbs",
+    "components-ui-switch": "components-ui-switch.hbs",
+    "components-ui-badge": "components-ui-badge.hbs",
+    "components-ui-alert": "components-ui-alert.hbs",
+    "components-ui-skeleton": "components-ui-skeleton.hbs",
+    "components-ui-dialog": "components-ui-dialog.hbs",
+    "components-ui-tooltip": "components-ui-tooltip.hbs",
     "field-input-string": "field-input-string.hbs",
     "field-input-int": "field-input-int.hbs",
     "field-input-decimal": "field-input-decimal.hbs",
@@ -41,6 +58,7 @@
     "primitive-image": "primitive-image.hbs",
     "primitive-avatar": "primitive-avatar.hbs",
     "primitive-tabs": "primitive-tabs.hbs",
+    "components-ui-tabs": "components-ui-tabs.hbs",
     "primitive-table": "primitive-table.hbs",
     "primitive-money": "primitive-money.hbs",
     "primitive-date-display": "primitive-date-display.hbs",
@@ -60,82 +78,9 @@
     "primitive-key-value-row": "primitive-key-value-row.hbs"
   },
   "imports": {
-    "primitive-heading": [
-      {
-        "from": "@mantine/core",
-        "named": [
-          "Title"
-        ]
-      }
-    ],
-    "primitive-text": [
-      {
-        "from": "@mantine/core",
-        "named": [
-          "Text"
-        ]
-      }
-    ],
-    "primitive-divider": [
-      {
-        "from": "@mantine/core",
-        "named": [
-          "Divider"
-        ]
-      }
-    ],
-    "primitive-stack": [
-      {
-        "from": "@mantine/core",
-        "named": [
-          "Stack"
-        ]
-      }
-    ],
-    "primitive-group": [
-      {
-        "from": "@mantine/core",
-        "named": [
-          "Group"
-        ]
-      }
-    ],
-    "primitive-toolbar": [
-      {
-        "from": "@mantine/core",
-        "named": [
-          "Group"
-        ]
-      }
-    ],
-    "primitive-grid": [
-      {
-        "from": "@mantine/core",
-        "named": [
-          "Grid"
-        ]
-      }
-    ],
-    "primitive-container": [
-      {
-        "from": "@mantine/core",
-        "named": [
-          "Container"
-        ]
-      }
-    ],
-    "primitive-empty": [
-      {
-        "from": "@mantine/core",
-        "named": [
-          "Center",
-          "Text"
-        ]
-      }
-    ],
     "primitive-button": [
       {
-        "from": "@mantine/core",
+        "from": "@/components/ui/button",
         "named": [
           "Button"
         ]
@@ -143,25 +88,18 @@
     ],
     "primitive-card": [
       {
-        "from": "@mantine/core",
+        "from": "@/components/ui/card",
         "named": [
           "Card",
-          "Title"
-        ]
-      }
-    ],
-    "primitive-stat": [
-      {
-        "from": "@mantine/core",
-        "named": [
-          "Stack",
-          "Text"
+          "CardContent",
+          "CardHeader",
+          "CardTitle"
         ]
       }
     ],
     "primitive-badge": [
       {
-        "from": "@mantine/core",
+        "from": "@/components/ui/badge",
         "named": [
           "Badge"
         ]
@@ -169,81 +107,89 @@
     ],
     "primitive-field": [
       {
-        "from": "@mantine/core",
+        "from": "@/components/ui/input",
         "named": [
-          "TextInput"
+          "Input"
+        ]
+      },
+      {
+        "from": "@/components/ui/label",
+        "named": [
+          "Label"
         ]
       }
     ],
     "primitive-toggle": [
       {
-        "from": "@mantine/core",
+        "from": "@/components/ui/switch",
         "named": [
           "Switch"
+        ]
+      },
+      {
+        "from": "@/components/ui/label",
+        "named": [
+          "Label"
         ]
       }
     ],
     "primitive-number-field": [
       {
-        "from": "@mantine/core",
+        "from": "@/components/ui/input",
         "named": [
-          "NumberInput"
+          "Input"
+        ]
+      },
+      {
+        "from": "@/components/ui/label",
+        "named": [
+          "Label"
         ]
       }
     ],
     "primitive-password-field": [
       {
-        "from": "@mantine/core",
+        "from": "@/components/ui/input",
         "named": [
-          "PasswordInput"
+          "Input"
+        ]
+      },
+      {
+        "from": "@/components/ui/label",
+        "named": [
+          "Label"
         ]
       }
     ],
     "primitive-loader": [
       {
-        "from": "@mantine/core",
+        "from": "lucide-react",
         "named": [
-          "Loader"
-        ]
-      }
-    ],
-    "primitive-anchor": [
-      {
-        "from": "@mantine/core",
-        "named": [
-          "Anchor"
-        ]
-      }
-    ],
-    "primitive-image": [
-      {
-        "from": "@mantine/core",
-        "named": [
-          "Image"
-        ]
-      }
-    ],
-    "primitive-avatar": [
-      {
-        "from": "@mantine/core",
-        "named": [
-          "Avatar"
+          "Loader2"
         ]
       }
     ],
     "primitive-tabs": [
       {
-        "from": "@mantine/core",
+        "from": "@/components/ui/tabs",
         "named": [
-          "Tabs"
+          "Tabs",
+          "TabsContent",
+          "TabsList",
+          "TabsTrigger"
         ]
       }
     ],
     "primitive-table": [
       {
-        "from": "@mantine/core",
+        "from": "@/components/ui/table",
         "named": [
-          "Table"
+          "Table",
+          "TableBody",
+          "TableCell",
+          "TableHead",
+          "TableHeader",
+          "TableRow"
         ]
       }
     ],
@@ -265,7 +211,7 @@
     ],
     "primitive-enum-badge": [
       {
-        "from": "@mantine/core",
+        "from": "@/components/ui/badge",
         "named": [
           "Badge"
         ]
@@ -279,36 +225,21 @@
         ]
       }
     ],
-    "primitive-breadcrumbs": [
-      {
-        "from": "@mantine/core",
-        "named": [
-          "Breadcrumbs"
-        ]
-      }
-    ],
-    "primitive-paper": [
-      {
-        "from": "@mantine/core",
-        "named": [
-          "Paper"
-        ]
-      }
-    ],
     "primitive-skeleton": [
       {
-        "from": "@mantine/core",
+        "from": "@/components/ui/skeleton",
         "named": [
-          "Skeleton",
-          "Stack"
+          "Skeleton"
         ]
       }
     ],
     "primitive-alert": [
       {
-        "from": "@mantine/core",
+        "from": "@/components/ui/alert",
         "named": [
-          "Alert"
+          "Alert",
+          "AlertDescription",
+          "AlertTitle"
         ]
       }
     ],
@@ -322,41 +253,50 @@
     ],
     "primitive-form-of": [
       {
-        "from": "@mantine/core",
+        "from": "@/components/ui/button",
         "named": [
-          "Stack",
-          "Group",
           "Button"
+        ]
+      },
+      {
+        "from": "@/components/ui/form",
+        "named": [
+          "Form",
+          "FormControl",
+          "FormField",
+          "FormItem",
+          "FormLabel",
+          "FormMessage"
         ]
       }
     ],
     "field-input-string": [
       {
-        "from": "@mantine/core",
+        "from": "@/components/ui/input",
         "named": [
-          "TextInput"
+          "Input"
         ]
       }
     ],
     "field-input-int": [
       {
-        "from": "@mantine/core",
+        "from": "@/components/ui/input",
         "named": [
-          "NumberInput"
+          "Input"
         ]
       }
     ],
     "field-input-decimal": [
       {
-        "from": "@mantine/core",
+        "from": "@/components/ui/input",
         "named": [
-          "NumberInput"
+          "Input"
         ]
       }
     ],
     "field-input-bool": [
       {
-        "from": "@mantine/core",
+        "from": "@/components/ui/switch",
         "named": [
           "Switch"
         ]
@@ -364,55 +304,85 @@
     ],
     "field-input-datetime": [
       {
-        "from": "@mantine/core",
+        "from": "@/components/ui/input",
         "named": [
-          "TextInput"
+          "Input"
         ]
       }
     ],
     "field-input-id-text": [
       {
-        "from": "@mantine/core",
+        "from": "@/components/ui/input",
         "named": [
-          "TextInput"
+          "Input"
         ]
       }
     ],
     "field-input-id-select": [
       {
-        "from": "@mantine/core",
+        "from": "@/components/ui/select",
         "named": [
-          "Select"
+          "Select",
+          "SelectContent",
+          "SelectItem",
+          "SelectTrigger",
+          "SelectValue"
         ]
       }
     ],
     "field-input-enum-select": [
       {
-        "from": "@mantine/core",
+        "from": "@/components/ui/select",
         "named": [
-          "Select"
+          "Select",
+          "SelectContent",
+          "SelectItem",
+          "SelectTrigger",
+          "SelectValue"
         ]
       }
     ],
     "field-input-array": [
       {
-        "from": "@mantine/core",
+        "from": "@/components/ui/input",
         "named": [
-          "TextInput"
+          "Input"
         ]
       }
     ],
-    "field-input-valueobject": [
-      {
-        "from": "@mantine/core",
-        "named": [
-          "Fieldset",
-          "Stack"
-        ]
-      }
-    ]
+    "field-input-valueobject": []
+  },
+  "shellFiles": {
+    "tailwind-config": "tailwind.config.ts",
+    "postcss-config": "postcss.config.js",
+    "globals-css": "src/globals.css",
+    "lib-utils": "src/lib/utils.ts"
+  },
+  "shellGlobs": {
+    "components-ui-*": "src/components/ui/{1}.tsx"
   },
   "helpers": {
-    "alertVariant": {}
+    "lucide": {
+      "IconPlus": "Plus",
+      "IconTrash": "Trash2",
+      "IconCheck": "Check",
+      "IconX": "X",
+      "IconTruckDelivery": "Truck",
+      "IconCreditCard": "CreditCard",
+      "IconPlayerPlay": "Play",
+      "IconPlayerStop": "Square",
+      "IconPencil": "Pencil",
+      "IconLink": "Link",
+      "IconAlertCircle": "AlertCircle",
+      "IconAlertTriangle": "AlertTriangle",
+      "IconBolt": "Zap",
+      "IconLayoutList": "LayoutList"
+    },
+    "alertVariant": {
+      "red": "destructive",
+      "yellow": "default",
+      "green": "default",
+      "blue": "default"
+    }
   }
 }

@@ -627,6 +627,55 @@ describe("validation", () => {
       ).toBe(true);
     });
 
+    it("accepts a pinned built-in version (`design: \"mantine@v7\"`)", async () => {
+      // Phase 0 of pack versioning: explicit pin works alongside
+      // the bareword form.  Validates `parseBuiltinDesignRef` is
+      // wired into Rule 14 — pinned form resolves to the same
+      // {family, format} as the bareword.
+      const { errors } = await parse(`
+        system S {
+          module M { context T { } }
+          ui WebApp { }
+          deployable api { platform: hono, modules: M, port: 3000 }
+          deployable web {
+            platform: react
+            targets: api
+            ui: WebApp
+            port: 3001
+            design: "mantine@v7"
+          }
+        }
+      `);
+      expect(errors).toEqual([]);
+    });
+
+    it("rejects an unknown version of a known built-in family", async () => {
+      // `mantine@v999` is a registered family but not a registered
+      // version → distinctive error listing the available versions
+      // for the family.  Catches typos and forward-references to
+      // versions that haven't shipped yet.
+      const { errors } = await parse(`
+        system S {
+          module M { context T { } }
+          ui WebApp { }
+          deployable api { platform: hono, modules: M, port: 3000 }
+          deployable web {
+            platform: react
+            targets: api
+            ui: WebApp
+            port: 3001
+            design: "mantine@v999"
+          }
+        }
+      `);
+      expect(
+        errors.some((e) =>
+          /no version 'v999' of pack family 'mantine'/.test(e) &&
+          /Available: 'mantine@v7'/.test(e),
+        ),
+      ).toBe(true);
+    });
+
     it("warns when 'design:' is set on a deployable with no UI mount", async () => {
       const { errors, warnings } = await parse(`
         system S {

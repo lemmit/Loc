@@ -46,8 +46,10 @@ import {
   type Env,
 } from "./type-system.js";
 import {
-  BUILTIN_PACK_FORMATS,
+  BUILTIN_PACK_LATEST,
+  builtinVersionsForFamily,
   packFormatForBuiltin,
+  parseBuiltinDesignRef,
 } from "../generator/_packs/builtin-formats.js";
 import { platformFor } from "../platform/registry.js";
 
@@ -440,8 +442,15 @@ export class DddValidator {
     }
     const framework = explicitFramework ?? expectedFrameworkFor(d.platform, hasUiBinding);
     const expectedFormat = expectedPackFormatFor(framework);
-    const actualFormat = packFormatForBuiltin(d.design);
-    if (actualFormat == null) {
+    // Phase 0 of pack-versioning: parse the slot value into
+    // {family, version, qualified}.  Bareword (`mantine`) and pinned
+    // (`mantine@v7`) forms both produce a parsed ref pointing at a
+    // built-in family; custom paths (`./design/foo`) parse to null and
+    // fall through to Case 2.  Distinguishing "known family, unknown
+    // version" from "custom path" lets us emit a distinctive error
+    // listing available versions instead of a generic warning.
+    const parsedRef = parseBuiltinDesignRef(d.design);
+    if (parsedRef == null) {
       // Case 2 — custom pack path.  Skip the strict check but warn
       // loudly so a misspelt built-in name (or a custom pack that
       // ships the wrong format) doesn't slip through silently.
@@ -452,7 +461,21 @@ export class DddValidator {
       );
       return;
     }
-    // Case 1 — built-in pack whose format doesn't match.
+    const actualFormat = packFormatForBuiltin(d.design);
+    if (actualFormat == null) {
+      // Case 1b — built-in family known but the pinned version isn't
+      // registered (e.g. user wrote `design: "mantine@v999"`).  List
+      // the available versions so the fix is a one-character edit.
+      const available = builtinVersionsForFamily(parsedRef.family);
+      accept(
+        "error",
+        `Design pack '${d.design}' on deployable '${d.name}' — no version '${parsedRef.version}' of pack family '${parsedRef.family}'. Available: ${available.map((v) => `'${parsedRef.family}@${v}'`).join(", ")}.`,
+        { node: d, property: "design" },
+      );
+      return;
+    }
+    // Case 1a — built-in pack version exists but its format doesn't
+    // match the deployable's framework.
     if (expectedFormat && actualFormat !== expectedFormat) {
       accept(
         "error",
@@ -1681,13 +1704,18 @@ function expectedPackFormatFor(
   return undefined;
 }
 
-/** Comma-joined list of built-in pack names whose format matches the
- *  given target — used to make Rule 14's diagnostic suggest valid
- *  replacements ("Use one of: mantine, shadcn, mui, chakra."). */
+/** Comma-joined list of built-in pack family names whose default
+ *  version produces the given format — used to make Rule 14's
+ *  diagnostic suggest valid replacements ("Use one of: mantine,
+ *  shadcn, mui, chakra.").  Reads `BUILTIN_PACK_LATEST` so the
+ *  suggestion follows the bareword resolution rule: each family
+ *  shows up once, no `@version` noise. */
 function builtinPackNamesForFormat(format: "tsx" | "heex"): string {
-  return Object.entries(BUILTIN_PACK_FORMATS)
-    .filter(([, f]) => f === format)
-    .map(([name]) => name)
+  return (Object.keys(BUILTIN_PACK_LATEST) as Array<keyof typeof BUILTIN_PACK_LATEST>)
+    .filter((family) => {
+      const f = packFormatForBuiltin(family);
+      return f === format;
+    })
     .join(", ");
 }
 

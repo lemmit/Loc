@@ -57,7 +57,7 @@ function extractBlock(src: string, anchor: RegExp): string {
 
 describe("iframe TAILWIND_PLAY_CONFIG ↔ shadcn pack tailwind-config drift guard", () => {
   const hbs = fs.readFileSync(
-    path.join(repoRoot, "designs/shadcn/tailwind-config.hbs"),
+    path.join(repoRoot, "designs/shadcn/v3/tailwind-config.hbs"),
     "utf-8",
   );
   const iframe = fs.readFileSync(

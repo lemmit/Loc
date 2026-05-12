@@ -17,7 +17,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { compilePack, type LoadedPack, type PackManifest } from "./loader.js";
-import { BUILTIN_PACK_FORMATS } from "./builtin-formats.js";
+import { parseBuiltinDesignRef } from "./builtin-formats.js";
 
 /** Names of the repo-root template directories that supply
  *  pack-agnostic Handlebars sources, keyed by pack format.  TSX packs
@@ -47,19 +47,21 @@ function repoRoot(): string {
   );
 }
 
-/** Built-in pack names — resolve under `<repo>/designs/<name>/`.
- *  Derived from `BUILTIN_PACK_FORMATS` so the loader and the validator
- *  agree on which `design:` values are bundled vs. custom paths. */
-const BUILTIN_PACKS = new Set(Object.keys(BUILTIN_PACK_FORMATS));
-
-/** Resolve a pack identifier ("mantine" / "shadcn" / "mui" /
- *  "ashPhoenix" / "./design/") to an absolute pack directory.
+/** Resolve a pack identifier to an absolute pack directory.
  *  `referenceDir` is the directory the .ddd source lives in — used
- *  to anchor relative custom-pack paths.  Built-in names resolve
- *  under `<repo>/designs/<name>`. */
+ *  to anchor relative custom-pack paths.
+ *
+ *  Built-in identifiers carry a `family@version` segment after Phase
+ *  0 of the pack-versioning rollout: bareword `mantine` resolves to
+ *  the toolchain default version via `BUILTIN_PACK_LATEST`; an
+ *  explicit pin `mantine@v9` skips the default.  Either way the pack
+ *  lives under `<repo>/designs/<family>/<version>/`.  Anything that
+ *  isn't a registered family falls through to the custom-pack path
+ *  resolution. */
 export function resolvePackDir(ui: string, referenceDir?: string): string {
-  if (BUILTIN_PACKS.has(ui)) {
-    return path.join(repoRoot(), "designs", ui);
+  const parsed = parseBuiltinDesignRef(ui);
+  if (parsed) {
+    return path.join(repoRoot(), "designs", parsed.family, parsed.version);
   }
   // Treat anything else as a path.  Absolute paths used as-is;
   // relative paths anchored against the .ddd file's dir when
@@ -113,6 +115,23 @@ export function loadPack(packDir: string): LoadedPack {
   if (!manifest.emits || typeof manifest.emits !== "object") {
     throw new Error(
       `loader: pack at ${packDir} has no \`emits\` map in pack.json.  Add { emits: { "page-list": "page-list.hbs", ... } }.`,
+    );
+  }
+  // Phase 0 pack-versioning cross-check: when a pack lives under the
+  // built-in `designs/<family>/<vNN>/` tree, the parent dir name is
+  // load-bearing — it's what `design: family@vNN` resolves to.  A
+  // mismatch with `manifest.version` means a copy-paste fork left the
+  // manifest pointing at the old version; that would silently shadow
+  // sibling packs.  Bail loudly instead.  Only fires for paths that
+  // match the built-in layout; arbitrary custom packs are exempt.
+  const builtinSegments = path.relative(path.join(repoRoot(), "designs"), packDir).split(path.sep);
+  if (
+    builtinSegments.length === 2 &&
+    !builtinSegments[0].startsWith("..") &&
+    manifest.version !== builtinSegments[1]
+  ) {
+    throw new Error(
+      `loader: pack at ${packDir} has version="${manifest.version}" but lives under directory "${builtinSegments[1]}".  The two must match (e.g. designs/mantine/v7/pack.json must declare "version": "v7").`,
     );
   }
   const sources: Record<string, string> = {};

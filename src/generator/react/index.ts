@@ -98,12 +98,11 @@ export function generateReactForContexts(
   for (const { agg } of aggregates) aggregatesByName.set(agg.name, agg);
 
   // Phase 0: route list-page emission through the new template-pack
-  // layer.  Loads the pack named by `deployable.design` (defaulted
-  // to "mantine" by the lowerer for react deployables); other page
-  // kinds still use the legacy TS builders for now.  Subsequent
-  // phases port each remaining page kind, deleting its TS builder
-  // as it lands.
-  const design = deployable.design ?? "mantine";
+  // layer.  `deployable.design` is fully qualified by the lowering
+  // pass (e.g. "mantine@v7"); the `??` default is defensive against
+  // programmatic IR construction that bypasses lowering and matches
+  // the current toolchain's default Mantine version.
+  const design = deployable.design ?? "mantine@v7";
   const pack = loadPack(resolvePackDir(design));
 
   // Slice 5 — page metamodel routing.  When the deployable declares

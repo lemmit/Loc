@@ -43,9 +43,19 @@ export type PackFormat = "tsx" | "heex";
 
 /** Manifest schema for `<pack>/pack.json`. */
 export interface PackManifest {
-  /** Pack name — informational, e.g. "mantine", "shadcn", "ashPhoenix". */
+  /** Pack family name — informational, e.g. "mantine", "shadcn",
+   *  "ashPhoenix".  Used in error messages; resolution is by
+   *  directory layout, not by this field. */
   name: string;
-  /** Pack version string — informational, e.g. "0.1.0". */
+  /** Pack version — **load-bearing after Phase 0 of pack versioning.**
+   *  Built-in packs ship at `designs/<family>/<vNN>/`; this field
+   *  must equal the parent directory's `vNN` segment (e.g. `"v7"`
+   *  for `designs/mantine/v7/pack.json`).  Loaders cross-check at
+   *  load time and throw on mismatch — that catches copy-paste
+   *  accidents (e.g. forking `designs/mantine/v7/` into
+   *  `designs/mantine/v9/` without updating the manifest).  Custom
+   *  packs not under the built-in tree may set any string; the
+   *  cross-check only fires for paths under `designs/<family>/<vN>/`. */
   version: string;
   /** Output format — `"tsx"` (default) or `"heex"`.  See `PackFormat`. */
   format?: PackFormat;
