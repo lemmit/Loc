@@ -30,37 +30,43 @@ export interface LoomExample {
 // generator-level showcase that doesn't preview cleanly (its React
 // frontend targets a .NET deployable we don't run in the browser).
 export const examples: LoomExample[] = [
+  // Storybook entries lead with the discriminator (pack name or
+  // "components") so the eye lands on what makes each one different,
+  // not on a five-word identical prefix.  The previous
+  // "UI Storybook (Mantine, aggregate-CRUD)" pattern made MUI / Chakra
+  // entries hard to spot in a narrow mobile dropdown — they all
+  // looked like "UI Storybook (..." until you read to the parenthesis.
   {
     id: "storybook-components",
-    label: "UI Storybook (components page)",
+    label: "Components storybook (single page)",
     source: storybookComponentsSource,
     blurb:
       "Single long page exercising every page-metamodel primitive — layout, display, input, action — no aggregates.",
   },
   {
     id: "storybook-mantine",
-    label: "UI Storybook (Mantine, aggregate-CRUD)",
+    label: "Mantine · aggregate-CRUD storybook",
     source: storybookMantineSource,
     blurb:
       "Catalogue: each aggregate demonstrates one UI primitive — cells, fields, value-objects, references, ops, workflows, views.",
   },
   {
     id: "storybook-shadcn",
-    label: "UI Storybook (shadcn, aggregate-CRUD)",
+    label: "shadcn · aggregate-CRUD storybook",
     source: storybookShadcnSource,
     blurb:
       "Same catalogue as the Mantine storybook, rendered through the shadcn/ui pack.",
   },
   {
     id: "storybook-mui",
-    label: "UI Storybook (MUI, aggregate-CRUD)",
+    label: "MUI · aggregate-CRUD storybook",
     source: storybookMuiSource,
     blurb:
       "Same catalogue as the Mantine storybook, rendered through the Material UI pack.",
   },
   {
     id: "storybook-chakra",
-    label: "UI Storybook (Chakra, aggregate-CRUD)",
+    label: "Chakra · aggregate-CRUD storybook",
     source: storybookChakraSource,
     blurb:
       "Same catalogue as the Mantine storybook, rendered through the Chakra UI pack.",
