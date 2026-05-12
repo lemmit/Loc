@@ -14,6 +14,9 @@ import storybookMuiSource from "./storybook-mui.ddd?raw";
 import storybookChakraSource from "./storybook-chakra.ddd?raw";
 import storybookComponentsSource from "./storybook-components.ddd?raw";
 import dotnetFullstackSource from "./dotnet-fullstack.ddd?raw";
+import dotnetBackendSource from "./dotnet-backend.ddd?raw";
+import phoenixFullstackSource from "./phoenix-fullstack.ddd?raw";
+import phoenixBankingSource from "./phoenix-banking.ddd?raw";
 
 export interface LoomExample {
   id: string;
@@ -113,11 +116,32 @@ export const examples: LoomExample[] = [
       "Modules, multiple deployables, .NET + Hono + React — generator showcase, partial Preview only.",
   },
   {
+    id: "dotnet-backend",
+    label: ".NET backend only (CQRS + EF Core)",
+    source: dotnetBackendSource,
+    blurb:
+      "Pure .NET backend — Mediator commands/queries, per-aggregate controllers, EF Core configurations, FluentValidation pipeline. No UI. Files-only in the playground.",
+  },
+  {
     id: "dotnet-fullstack",
     label: "Fullstack .NET (embeds React SPA)",
     source: dotnetFullstackSource,
     blurb:
       "Single .NET deployable that serves both /api/* and a React SPA from wwwroot/. Files-only in the playground (.NET doesn't boot in-browser).",
+  },
+  {
+    id: "phoenix-fullstack",
+    label: "Fullstack Phoenix LiveView (Sales)",
+    source: phoenixFullstackSource,
+    blurb:
+      "Elixir/Ash + Phoenix LiveView: Ash resources, JSON API, LiveView pages (HEEx), Ecto migrations. Files-only in the playground (Phoenix runs on BEAM, not Node).",
+  },
+  {
+    id: "phoenix-banking",
+    label: "Fullstack Phoenix LiveView (Banking)",
+    source: phoenixBankingSource,
+    blurb:
+      "Same banking domain as `banking-system.ddd` rendered as Elixir/Ash — exercises optional fields, where-filters, and a transactional `transferFunds` Reactor saga.",
   },
 ];
 

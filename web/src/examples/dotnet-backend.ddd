@@ -1,0 +1,116 @@
+// Pure .NET backend — no UI, no React SPA.  A focused look at
+// what the .NET generator produces for a system declaring only
+// `platform: dotnet`: CQRS commands + queries via Mediator,
+// per-aggregate controllers, EF Core configurations, repositories,
+// FluentValidation pipeline, domain exceptions → HTTP responses.
+//
+// Same Sales domain as `sales-system.ddd` (Hono) and
+// `dotnet-fullstack.ddd` (.NET + embedded SPA), so the three are
+// easy to diff against each other to see what each backend
+// generator emits for identical input.
+//
+// Files-only in the playground (.NET doesn't boot in-browser).
+
+system SalesBackend {
+
+  module Sales {
+    context Sales {
+
+      enum OrderStatus { Draft, Confirmed, Shipped, Cancelled }
+
+      valueobject Money {
+        amount: decimal
+        currency: string
+        invariant amount >= 0
+        invariant currency.length == 3
+      }
+
+      event OrderConfirmed { order: Id<Order>, at: datetime }
+
+      aggregate Customer {
+        name: string display
+        email: string
+        invariant email.length > 0
+      }
+
+      aggregate Product {
+        sku: string display
+        price: Money
+        invariant sku.length > 0
+      }
+
+      aggregate Order {
+        customerId: Id<Customer>
+        status: OrderStatus
+        placedAt: datetime
+        contains lines: OrderLine[]
+
+        entity OrderLine {
+          productId: Id<Product>
+          quantity: int
+          invariant quantity > 0
+        }
+
+        invariant lines.count > 0 when status == Confirmed
+
+        function isMutable(): bool = status == Draft
+
+        operation addLine(productId: Id<Product>, qty: int) {
+          precondition isMutable()
+          precondition qty > 0
+          lines += new OrderLine { productId: productId, quantity: qty }
+        }
+
+        operation confirm() {
+          precondition isMutable()
+          precondition lines.count > 0
+          status := Confirmed
+          emit OrderConfirmed { order: id, at: now() }
+        }
+      }
+
+      repository Customers for Customer {
+        find byEmail(email: string): Customer? where this.email == email
+      }
+
+      repository Products for Product { }
+
+      repository Orders for Order {
+        find byCustomer(customerId: Id<Customer>): Order[]
+          where this.customerId == customerId
+      }
+
+      // Transactional workflow — places a single-line order in
+      // one DB transaction.  Mediator runs the FluentValidation
+      // pipeline at the boundary; DomainException maps to 400.
+      workflow placeOrder(
+        customerId: Id<Customer>,
+        productId: Id<Product>,
+        quantity: int
+      ) transactional {
+        precondition quantity > 0
+        let customer = Customers.getById(customerId)
+        let product = Products.getById(productId)
+        let order = Order.create({
+          customerId: customerId,
+          status: Draft,
+          placedAt: now()
+        })
+        order.addLine(productId, quantity)
+        order.confirm()
+      }
+
+      view ActiveOrders = Order where status == Confirmed
+    }
+  }
+
+  // Backend only — no `ui:` binding, no React project.  Pair with
+  // a separate frontend deployable in your own .ddd source if you
+  // want a split-deployment topology; or use `dotnet-fullstack.ddd`
+  // for the single-container shape.
+  deployable api {
+    platform: dotnet
+    modules: Sales
+    port: 8080
+  }
+}
