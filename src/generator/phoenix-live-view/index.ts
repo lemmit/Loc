@@ -1011,17 +1011,17 @@ function renderCoreComponents(appModule: string): string {
 defmodule ${webModule}.CoreComponents do
   @moduledoc """
   Function components consumed by emitted layouts + LiveView pages.
-  Standard Phoenix 1.7 generators ship a much richer module; we
-  emit the minimal subset the generator's templates actually call.
+  Mirrors the subset of Phoenix 1.7's standard CoreComponents that
+  Loom's HEEx walker calls into: \`flash_group\`, \`header\`, \`button\`,
+  \`input\`, \`simple_form\`, \`table\`, \`badge\`, \`empty\`.
+
+  Layouts are intentionally minimal/Tailwind-ish — projects can swap
+  in a richer component module without touching the emitter.
   """
   use Phoenix.Component
 
-  @doc """
-  Renders all currently-set flash messages.  Called by the app
-  layout's \`<.flash_group flash={@flash} />\` slot — pure render,
-  no JS interaction.
-  """
-  attr :flash, :map, default: %{}, doc: "the @flash map from conn or socket assigns"
+  @doc "Renders all currently-set flash messages."
+  attr :flash, :map, default: %{}
 
   def flash_group(assigns) do
     ~H"""
@@ -1032,6 +1032,259 @@ defmodule ${webModule}.CoreComponents do
       <%= Phoenix.Flash.get(@flash, :error) %>
     </div>
     """
+  end
+
+  @doc "Page-section heading with optional subtitle + actions slot."
+  attr :class, :string, default: nil
+  slot :inner_block, required: true
+  slot :subtitle
+  slot :actions
+
+  def header(assigns) do
+    ~H"""
+    <header class={["flex items-center justify-between gap-6 mb-6", @class]}>
+      <div>
+        <h1 class="text-2xl font-semibold leading-7 text-zinc-900">
+          {render_slot(@inner_block)}
+        </h1>
+        <p :if={@subtitle != []} class="mt-1 text-sm text-zinc-600">
+          {render_slot(@subtitle)}
+        </p>
+      </div>
+      <div :if={@actions != []} class="flex gap-2 flex-shrink-0">
+        {render_slot(@actions)}
+      </div>
+    </header>
+    """
+  end
+
+  @doc "Styled button.  Accepts type=button|submit|reset + arbitrary attrs."
+  attr :type, :string, default: "button"
+  attr :class, :string, default: nil
+  attr :rest, :global, include: ~w(form name value disabled phx-click phx-submit phx-disable-with)
+  slot :inner_block, required: true
+
+  def button(assigns) do
+    ~H"""
+    <button
+      type={@type}
+      class={[
+        "inline-flex items-center justify-center rounded-md bg-zinc-900 px-3 py-2 text-sm font-semibold text-white hover:bg-zinc-700 disabled:opacity-50",
+        @class
+      ]}
+      {@rest}
+    >
+      {render_slot(@inner_block)}
+    </button>
+    """
+  end
+
+  @doc "Form input with label + error message.  Supports text/number/email/checkbox/select/textarea."
+  attr :id, :any, default: nil
+  attr :name, :any
+  attr :label, :string, default: nil
+  attr :value, :any
+  attr :type, :string, default: "text"
+  attr :field, Phoenix.HTML.FormField,
+    doc: "a form field struct retrieved from the form, for example: @form[:email]"
+  attr :errors, :list, default: []
+  attr :checked, :boolean
+  attr :prompt, :string, default: nil
+  attr :options, :list, default: []
+  attr :multiple, :boolean, default: false
+  attr :rest, :global, include: ~w(autocomplete cols disabled form list max maxlength min minlength pattern placeholder readonly required rows size step)
+
+  def input(%{field: %Phoenix.HTML.FormField{} = field} = assigns) do
+    assigns
+    |> assign(field: nil, id: assigns.id || field.id)
+    |> assign(:errors, Enum.map(field.errors, &translate_error/1))
+    |> assign_new(:name, fn -> if assigns.multiple, do: field.name <> "[]", else: field.name end)
+    |> assign_new(:value, fn -> field.value end)
+    |> input()
+  end
+
+  def input(%{type: "checkbox"} = assigns) do
+    assigns = assign_new(assigns, :checked, fn -> Phoenix.HTML.Form.normalize_value("checkbox", assigns[:value]) end)
+
+    ~H"""
+    <div>
+      <label class="flex items-center gap-3 text-sm leading-6 text-zinc-600">
+        <input type="hidden" name={@name} value="false" />
+        <input
+          type="checkbox"
+          id={@id}
+          name={@name}
+          value="true"
+          checked={@checked}
+          class="rounded border-zinc-300 text-zinc-900 focus:ring-0"
+          {@rest}
+        />
+        {@label}
+      </label>
+      <.error :for={msg <- @errors}>{msg}</.error>
+    </div>
+    """
+  end
+
+  def input(%{type: "select"} = assigns) do
+    ~H"""
+    <div>
+      <.label for={@id}>{@label}</.label>
+      <select
+        id={@id}
+        name={@name}
+        class="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm focus:border-zinc-400 focus:ring-0"
+        multiple={@multiple}
+        {@rest}
+      >
+        <option :if={@prompt} value="">{@prompt}</option>
+        {Phoenix.HTML.Form.options_for_select(@options, @value)}
+      </select>
+      <.error :for={msg <- @errors}>{msg}</.error>
+    </div>
+    """
+  end
+
+  def input(%{type: "textarea"} = assigns) do
+    ~H"""
+    <div>
+      <.label for={@id}>{@label}</.label>
+      <textarea
+        id={@id}
+        name={@name}
+        class="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm focus:border-zinc-400 focus:ring-0"
+        {@rest}
+      >{Phoenix.HTML.Form.normalize_value("textarea", @value)}</textarea>
+      <.error :for={msg <- @errors}>{msg}</.error>
+    </div>
+    """
+  end
+
+  def input(assigns) do
+    ~H"""
+    <div>
+      <.label for={@id}>{@label}</.label>
+      <input
+        type={@type}
+        name={@name}
+        id={@id}
+        value={Phoenix.HTML.Form.normalize_value(@type, @value)}
+        class="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm focus:border-zinc-400 focus:ring-0"
+        {@rest}
+      />
+      <.error :for={msg <- @errors}>{msg}</.error>
+    </div>
+    """
+  end
+
+  attr :for, :string, default: nil
+  slot :inner_block, required: true
+
+  def label(assigns) do
+    ~H"""
+    <label for={@for} class="block text-sm font-medium leading-6 text-zinc-900">
+      {render_slot(@inner_block)}
+    </label>
+    """
+  end
+
+  slot :inner_block, required: true
+
+  def error(assigns) do
+    ~H"""
+    <p class="mt-1 text-sm leading-6 text-rose-600">{render_slot(@inner_block)}</p>
+    """
+  end
+
+  @doc "Form wrapper that renders a Phoenix.HTML.Form with submit handler."
+  attr :for, :any, required: true
+  attr :as, :any, default: nil
+  attr :rest, :global, include: ~w(autocomplete name rel action enctype method novalidate target multipart phx-change phx-submit phx-trigger-action phx-disable-with)
+  slot :inner_block, required: true
+  slot :actions
+
+  def simple_form(assigns) do
+    ~H"""
+    <.form :let={f} for={@for} as={@as} {@rest}>
+      <div class="space-y-4">
+        {render_slot(@inner_block, f)}
+        <div :for={action <- @actions} class="mt-4 flex items-center justify-end gap-2">
+          {render_slot(action, f)}
+        </div>
+      </div>
+    </.form>
+    """
+  end
+
+  @doc "Data table with :col slots."
+  attr :id, :string, required: true
+  attr :rows, :list, required: true
+  attr :row_id, :any, default: nil, doc: "function that returns the id for the row"
+  attr :row_click, :any, default: nil, doc: "function or {JS, …} to invoke on row click"
+  attr :row_item, :any, default: &Function.identity/1, doc: "function to derive the row data shown to the slot"
+  slot :col, required: true do
+    attr :label, :string
+  end
+  slot :action, doc: "trailing per-row action column"
+
+  def table(assigns) do
+    assigns = assign_new(assigns, :row_id, fn -> nil end)
+
+    ~H"""
+    <div class="overflow-x-auto">
+      <table id={@id} class="min-w-full divide-y divide-zinc-200 text-sm">
+        <thead class="bg-zinc-50">
+          <tr>
+            <th :for={col <- @col} class="px-3 py-2 text-left font-semibold text-zinc-700">{col[:label]}</th>
+            <th :if={@action != []} class="px-3 py-2 text-right font-semibold text-zinc-700">
+              <span class="sr-only">Actions</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-zinc-100 bg-white">
+          <tr :for={row <- @rows} id={@row_id && @row_id.(row)} class={@row_click && "hover:bg-zinc-50 cursor-pointer"}>
+            <td :for={col <- @col} phx-click={@row_click && @row_click.(row)} class="px-3 py-2 text-zinc-900">
+              {render_slot(col, @row_item.(row))}
+            </td>
+            <td :if={@action != []} class="px-3 py-2 text-right">
+              <span :for={action <- @action}>{render_slot(action, @row_item.(row))}</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    """
+  end
+
+  @doc "Colored pill — used for status / enum displays."
+  attr :class, :string, default: nil
+  slot :inner_block, required: true
+
+  def badge(assigns) do
+    ~H"""
+    <span class={["inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700", @class]}>
+      {render_slot(@inner_block)}
+    </span>
+    """
+  end
+
+  @doc "Empty-state placeholder rendered when a list is empty."
+  attr :class, :string, default: nil
+
+  def empty(assigns) do
+    ~H"""
+    <div class={["text-center text-sm text-zinc-500 py-8", @class]}>
+      No items.
+    </div>
+    """
+  end
+
+  # ---- Internal helpers -----------------------------------------------------
+
+  defp translate_error({msg, opts}) do
+    Enum.reduce(opts, msg, fn {key, value}, acc ->
+      String.replace(acc, "%{#{key}}", fn _ -> to_string(value) end)
+    end)
   end
 end
 `;
