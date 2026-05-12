@@ -44,7 +44,7 @@ const SAMPLE_DISPATCH = {
   },
 };
 
-function bootedState() {
+function bootedState(persistent: boolean) {
   let s = pipelineReducer(initialPipelineState, { type: "GENERATE_START" });
   s = pipelineReducer(s, { type: "GENERATE_DONE", result: SAMPLE_GENERATE });
   s = pipelineReducer(s, { type: "BUNDLE_START" });
@@ -53,7 +53,7 @@ function bootedState() {
   s = pipelineReducer(s, {
     type: "BOOT_OK",
     ddl: "CREATE TABLE foo();",
-    persistent: true,
+    persistent,
     migrated: false,
   });
   s = pipelineReducer(s, { type: "DISPATCH_START" });
@@ -62,24 +62,45 @@ function bootedState() {
 }
 
 describe("pipelineReducer — RUNTIME_LOST", () => {
-  it("flips boot to fail with an explanatory message", () => {
-    const after = pipelineReducer(bootedState(), { type: "RUNTIME_LOST" });
+  it("flips boot to fail with the persisted-restored message when the prior boot was OPFS-backed", () => {
+    // Persistent boot: PGlite's data island lives in OPFS, keyed
+    // by source hash (see runtime/runtime.worker.ts).  When the
+    // worker respawns, the next Boot reattaches the same island
+    // and the rows come back.  The message has to reflect that —
+    // misleading the user into thinking their data is gone was
+    // the bug this commit corrects.
+    const after = pipelineReducer(bootedState(true), { type: "RUNTIME_LOST" });
     expect(after.boot.kind).toBe("fail");
     if (after.boot.kind === "fail") {
-      // Message names the cause + the recovery so the Backend
-      // panel doesn't render a silent error.
       expect(after.boot.message).toMatch(/runtime worker.*terminated/i);
+      expect(after.boot.message).toMatch(/persisted in OPFS/i);
+      expect(after.boot.message).toMatch(/will be restored/i);
       expect(after.boot.message).toMatch(/click Boot/i);
     }
   });
 
+  it("flips boot to fail with the in-memory-lost message when the prior boot was ephemeral", () => {
+    // In-memory boot (Safari private mode, hostile-storage
+    // policies — `persistent: false`): the data lived in the dead
+    // worker's heap.  Genuinely gone, and the message says so.
+    const after = pipelineReducer(bootedState(false), { type: "RUNTIME_LOST" });
+    expect(after.boot.kind).toBe("fail");
+    if (after.boot.kind === "fail") {
+      expect(after.boot.message).toMatch(/in-memory only/i);
+      expect(after.boot.message).toMatch(/are gone/i);
+      // The persistent-restored phrase MUST NOT appear — that
+      // would falsely promise recovery.
+      expect(after.boot.message).not.toMatch(/will be restored/i);
+    }
+  });
+
   it("clears dispatch (the old worker's reply will never arrive)", () => {
-    const after = pipelineReducer(bootedState(), { type: "RUNTIME_LOST" });
+    const after = pipelineReducer(bootedState(true), { type: "RUNTIME_LOST" });
     expect(after.dispatch.kind).toBe("none");
   });
 
   it("leaves generate + bundle intact (they're main-thread state)", () => {
-    const before = bootedState();
+    const before = bootedState(true);
     const after = pipelineReducer(before, { type: "RUNTIME_LOST" });
     expect(after.generate).toEqual(before.generate);
     expect(after.bundle).toEqual(before.bundle);
@@ -90,7 +111,7 @@ describe("pipelineReducer — RUNTIME_LOST", () => {
     // in-flight pipeline call.  If a Boot was somehow mid-flight,
     // its own DONE/FAIL action is the one that flips `booting`
     // back — we don't want RUNTIME_LOST to silently swallow that.
-    const after = pipelineReducer(bootedState(), { type: "RUNTIME_LOST" });
+    const after = pipelineReducer(bootedState(true), { type: "RUNTIME_LOST" });
     expect(after.booting).toBe(false);
     expect(after.dispatching).toBe(false);
   });
@@ -99,7 +120,12 @@ describe("pipelineReducer — RUNTIME_LOST", () => {
     // Defence in depth: even if some external trigger fires the
     // action on a fresh pipeline, the reducer must produce a
     // consistent state (no `undefined`s, no half-booted slot).
+    // No prior `persistent` to read, so the message falls into
+    // the in-memory branch (no promise of recovery).
     const after = pipelineReducer(initialPipelineState, { type: "RUNTIME_LOST" });
     expect(after.boot.kind).toBe("fail");
+    if (after.boot.kind === "fail") {
+      expect(after.boot.message).not.toMatch(/will be restored/i);
+    }
   });
 });
