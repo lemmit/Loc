@@ -5,7 +5,8 @@ import { LoomLspClient } from "./lsp/client";
 import type { Diagnostic } from "./lsp/protocol";
 import { examples, defaultExample, type LoomExample } from "./examples";
 import { LoomBuildClient } from "./build/client";
-import type { VirtualFile } from "./build/protocol";
+import type { GenerateOk, GenerateResult, VirtualFile } from "./build/protocol";
+import type { BundleOk } from "./bundle/protocol";
 import { LoomBundleClient } from "./bundle/client";
 import { LoomRuntimeClient } from "./runtime/client";
 import { registerPreviewSw } from "./preview/sw-host";
@@ -13,6 +14,7 @@ import { buildTree } from "./preview/file-tree";
 import { useWorkspace } from "./workspace/use-workspace";
 import { buildShareUrl, readHashSource, writeHashSource } from "./util/share";
 import { fnv1a32 } from "./util/hash";
+import { usePersistedState } from "./util/usePersistedState";
 import { initialPipelineState, pipelineReducer } from "./pipeline/reducer";
 import {
   bootError as selBootError,
@@ -30,6 +32,7 @@ import { FooterBar } from "./layout/FooterBar";
 import {
   formatUnsupportedDeployables,
   type LayoutCtx,
+  type MobileTab,
   type ReactBundleStatus,
   type UnsupportedDeployable,
   type UnsupportedPlatform,
@@ -160,6 +163,13 @@ export default function App(): JSX.Element {
   const [liveMode, setLiveMode] = useState(false);
   const liveModeRef = useRef(liveMode);
   liveModeRef.current = liveMode;
+  // Bottom-tab navigation state for the mobile shell — lifted here so
+  // `runFull` can jump to Preview/Backend after a clean cascade.
+  // Persisted across reloads so users land back on their last panel.
+  const [activeTab, setActiveTab] = usePersistedState<MobileTab>(
+    "loom.mobile.activeTab",
+    "code",
+  );
 
   const sourceRef = useRef<string>(initialSource);
   const buildClientRef = useRef<LoomBuildClient | null>(null);
@@ -342,9 +352,19 @@ export default function App(): JSX.Element {
     return r.ok ? { kind: "ok", result: r } : { kind: "fail", result: r };
   })();
 
-  async function runGenerate(): Promise<void> {
+  // The pipeline steps are split into composable `*Step` workers that
+  // accept their inputs as parameters and return the freshly computed
+  // result — that way the cascade (live mode auto-chain, or the
+  // mobile "Run" button's runFull) doesn't depend on React state
+  // having re-rendered with the new pipeline slot.  Reading
+  // `generateSuccess` / `honoBundle` from the render closure was
+  // racey: the dispatch that produces them and the synchronous
+  // follow-up call execute in the same microtask, so the follow-up
+  // saw the *previous* render's stale value and bailed out.
+
+  async function runGenerateStep(): Promise<GenerateResult | null> {
     const client = buildClientRef.current;
-    if (!client) return;
+    if (!client) return null;
     dispatch({ type: "GENERATE_START" });
     await client.vfsWrite([
       { path: "/workspace/main.ddd", content: sourceRef.current },
@@ -356,16 +376,18 @@ export default function App(): JSX.Element {
     } else {
       setSelectedPath(null);
     }
-    if (liveModeRef.current && result.ok && result.files.length > 0) {
-      void runBundleRef.current();
-    }
+    return result;
   }
-  runGenerateRef.current = runGenerate;
 
-  async function runBundle(): Promise<void> {
+  interface BundleStepResult {
+    hono: BundleOk | { ok: false };
+    react: BundleOk | { ok: false } | null;
+  }
+
+  async function runBundleStep(gen: GenerateOk): Promise<BundleStepResult | null> {
     const client = bundleClientRef.current;
-    if (!client || !generateSuccess) return;
-    const entries = analyzeDeployables(generateSuccess.files);
+    if (!client) return null;
+    const entries = analyzeDeployables(gen.files);
     if (!entries.hono) {
       // The playground's runtime is Hono + React only.  Spell out
       // why bundling can't proceed: either nothing recognisable was
@@ -375,46 +397,39 @@ export default function App(): JSX.Element {
         entries.unsupported.length > 0
           ? `Nothing to bundle in the browser — this system only declares ${formatUnsupportedDeployables(entries.unsupported)}, which run outside the playground.  Generated files are visible in the Files pane.`
           : "No bundlable backend in generated output (looked for http/index.ts).";
-      dispatch({
-        type: "BUNDLE_DONE",
-        hono: {
-          ok: false,
-          diagnostics: [{ severity: "error", message }],
-        },
-        react: null,
-      });
-      return;
+      const failed = {
+        ok: false as const,
+        diagnostics: [{ severity: "error" as const, message }],
+      };
+      dispatch({ type: "BUNDLE_DONE", hono: failed, react: null });
+      return { hono: failed, react: null };
     }
     dispatch({ type: "BUNDLE_START" });
     const honoRes = await client.bundle({
       kind: "hono",
-      files: generateSuccess.files,
+      files: gen.files,
       entryPath: entries.hono,
     });
     let reactRes: typeof honoRes | null = null;
     if (honoRes.ok && entries.react) {
       reactRes = await client.bundle({
         kind: "react",
-        files: generateSuccess.files,
+        files: gen.files,
         entryPath: entries.react,
       });
     }
     dispatch({ type: "BUNDLE_DONE", hono: honoRes, react: reactRes });
-    if (liveModeRef.current && honoRes.ok) {
-      void runBootRef.current();
-    }
+    return { hono: honoRes, react: reactRes };
   }
-  const runBundleRef = useRef<() => Promise<void> | void>(() => {});
-  runBundleRef.current = runBundle;
 
-  async function runBoot(): Promise<void> {
+  async function runBootStep(hono: BundleOk): Promise<boolean> {
     const runtime = runtimeClientRef.current;
-    if (!runtime || !honoBundle) return;
+    if (!runtime) return false;
     dispatch({ type: "BOOT_START" });
     try {
       const sourceHash = fnv1a32(sourceRef.current);
       const dataDir = `opfs-ahp://loom-${sourceHash}`;
-      const res = await runtime.boot({ bundleCode: honoBundle.code, dataDir });
+      const res = await runtime.boot({ bundleCode: hono.code, dataDir });
       if (res.ok) {
         dispatch({
           type: "BOOT_OK",
@@ -422,18 +437,68 @@ export default function App(): JSX.Element {
           persistent: res.persistent,
           migrated: res.migrated,
         });
-      } else {
-        dispatch({ type: "BOOT_FAIL", message: res.message });
+        return true;
       }
+      dispatch({ type: "BOOT_FAIL", message: res.message });
+      return false;
     } catch (err) {
       dispatch({
         type: "BOOT_FAIL",
         message: err instanceof Error ? err.message : String(err),
       });
+      return false;
     }
   }
-  const runBootRef = useRef<() => Promise<void> | void>(() => {});
-  runBootRef.current = runBoot;
+
+  // Single-step entry points — Desktop's individual Generate / Bundle
+  // / Boot buttons still call these.  Live-mode cascade is now driven
+  // from inside `runGenerate` by passing the fresh result to the next
+  // step explicitly (no ref ping-pong).
+  async function runGenerate(): Promise<void> {
+    const result = await runGenerateStep();
+    if (
+      liveModeRef.current &&
+      result?.ok &&
+      result.files.length > 0
+    ) {
+      const bundleRes = await runBundleStep(result);
+      if (bundleRes?.hono.ok) {
+        await runBootStep(bundleRes.hono);
+      }
+    }
+  }
+  runGenerateRef.current = runGenerate;
+
+  async function runBundle(): Promise<void> {
+    if (!generateSuccess) return;
+    const result = await runBundleStep(generateSuccess);
+    if (liveModeRef.current && result?.hono.ok) {
+      await runBootStep(result.hono);
+    }
+  }
+
+  async function runBoot(): Promise<void> {
+    if (!honoBundle) return;
+    await runBootStep(honoBundle);
+  }
+
+  // Full cascade — the mobile "Run" primary action.  Generates,
+  // bundles, boots, and on success jumps the bottom-tab nav to
+  // Preview (or Backend when there's no React deployable to render).
+  // On any failure the user is left on their current tab; the
+  // Problems tab carries a red-dot indicator for errors.
+  async function runFull(): Promise<void> {
+    const gen = await runGenerateStep();
+    if (!gen?.ok || gen.files.length === 0) return;
+    const bundleRes = await runBundleStep(gen);
+    if (!bundleRes?.hono.ok) return;
+    const booted = await runBootStep(bundleRes.hono);
+    if (!booted) return;
+    // React frontend present and successfully bundled → Preview is
+    // the natural destination.  Otherwise the user gets the Backend
+    // tab so they can poke endpoints against the live runtime.
+    setActiveTab(bundleRes.react?.ok ? "preview" : "backend");
+  }
 
   async function runWipe(): Promise<void> {
     const runtime = runtimeClientRef.current;
@@ -535,6 +600,8 @@ export default function App(): JSX.Element {
     setReqBody,
     liveMode,
     setLiveMode,
+    activeTab,
+    setActiveTab,
     copied,
     copyShareLink,
     runGenerate: () => void runGenerate(),
@@ -542,6 +609,7 @@ export default function App(): JSX.Element {
     runBoot: () => void runBoot(),
     runWipe: () => void runWipe(),
     runDispatch: () => void runDispatch(),
+    runFull: () => void runFull(),
   };
 
   return (

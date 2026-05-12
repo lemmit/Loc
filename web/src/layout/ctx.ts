@@ -39,6 +39,13 @@ export interface UnsupportedDeployable {
 
 export type WorkspaceState = ReturnType<typeof useWorkspace>;
 
+/** Bottom-tab identifiers for the mobile shell.  Lifted to the
+ *  context so the `runFull` cascade (from the header's Run button)
+ *  can navigate to Preview or Backend on a successful boot — the
+ *  Mobile shell consumes activeTab/setActiveTab from here instead of
+ *  owning its own state. */
+export type MobileTab = "code" | "files" | "preview" | "problems" | "backend";
+
 export interface LayoutCtx {
   isDesktop: boolean;
 
@@ -105,6 +112,12 @@ export interface LayoutCtx {
   liveMode: boolean;
   setLiveMode: (v: boolean) => void;
 
+  // Mobile bottom-tab navigation state — lifted from MobileShell so
+  // actions like `runFull` (header Run button) can navigate after a
+  // successful cascade.  Persisted to localStorage by App.tsx.
+  activeTab: MobileTab;
+  setActiveTab: (t: MobileTab) => void;
+
   // Share-link feedback
   copied: boolean;
   copyShareLink: () => void;
@@ -115,6 +128,13 @@ export interface LayoutCtx {
   runBoot: () => void;
   runWipe: () => void;
   runDispatch: () => void;
+  /** Full pipeline cascade — Generate → Bundle → Boot.  On a clean
+   *  end, jumps the mobile shell to Preview (if a React deployable
+   *  exists) or Backend (if Hono-only).  Used by the mobile header's
+   *  "Run" button; desktop continues to expose the per-step buttons.
+   *  Pipeline `generating | bundling | booting` flags double as the
+   *  loading indicator so a single spinner spans all three stages. */
+  runFull: () => void;
 }
 
 // Convenience helper — formats the generated-mode label used in the

@@ -4,14 +4,11 @@ import { FilesPane } from "./FilesPane";
 import { PreviewPane } from "./PreviewPane";
 import { ProblemsPanelScrollable } from "./ProblemsPanel";
 import { BackendBody, BackendHeader } from "./BackendPanel";
-import { usePersistedState } from "../util/usePersistedState";
-import type { LayoutCtx } from "./ctx";
+import type { LayoutCtx, MobileTab } from "./ctx";
 
 interface Props {
   ctx: LayoutCtx;
 }
-
-type MobileTab = "code" | "files" | "preview" | "problems" | "backend";
 
 const TAB_VALUES: readonly MobileTab[] = ["code", "files", "preview", "problems", "backend"] as const;
 
@@ -26,14 +23,11 @@ function isMobileTab(v: string | null): v is MobileTab {
 // panel at a time gives Code the entire viewport minus header +
 // tab-bar (~660 px), enough to actually read and write code.
 //
-// Active tab is persisted to localStorage so reloads land back on
-// the panel the user was looking at.
+// Active tab + persistence live in App.tsx so the header's Run
+// cascade can navigate to Preview/Backend on a clean boot.  We just
+// read it off the ctx here.
 export function MobileShell({ ctx }: Props): JSX.Element {
-  const [activeTab, setActiveTab] = usePersistedState<MobileTab>(
-    "loom.mobile.activeTab",
-    "code",
-  );
-  const { errorCount, diagnostics } = ctx;
+  const { activeTab, setActiveTab, errorCount, diagnostics } = ctx;
 
   return (
     <Tabs

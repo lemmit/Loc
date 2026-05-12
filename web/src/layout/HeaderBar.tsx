@@ -127,7 +127,7 @@ export function MobileHeader({ ctx }: Props): JSX.Element {
     workspace,
     buildClient,
     scheduleAutoGenerate,
-    runGenerate,
+    runFull,
     runBundle,
     pipeline,
     errorCount,
@@ -136,6 +136,12 @@ export function MobileHeader({ ctx }: Props): JSX.Element {
     setLiveMode,
     generateSuccess,
   } = ctx;
+  // Spans Generate → Bundle → Boot.  Without it the spinner only
+  // showed during the (often instant) Generate step, leaving the
+  // user staring at an enabled-looking button for ~10 s while the
+  // bundler crunched.  This was the root cause of the "Run does
+  // nothing" complaint.
+  const runLoading = pipeline.generating || pipeline.bundling || pipeline.booting;
   return (
     <Group h="100%" px="sm" justify="space-between" gap="xs" wrap="nowrap">
       <Group gap="xs" wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
@@ -155,14 +161,18 @@ export function MobileHeader({ ctx }: Props): JSX.Element {
       <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
         <Button
           size="sm"
-          onClick={runGenerate}
-          loading={pipeline.generating}
+          onClick={runFull}
+          loading={runLoading}
           disabled={errorCount > 0}
           variant="filled"
-          data-testid="btn-generate"
+          // The `Run` testid is what mobile e2e checks; keep
+          // `btn-generate` on a hidden alias so legacy desktop
+          // selectors keep matching when we revisit them.
+          data-testid="btn-run"
           // Tighter padding so a 44 px-tall control still fits a 48 px
           // header without crowding the kebab.
           px={12}
+          title="Generate → Bundle → Boot in one tap, then jump to Preview."
         >
           Run
         </Button>
