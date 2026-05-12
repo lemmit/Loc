@@ -780,6 +780,76 @@ describe("typescript generator", () => {
     );
   });
 
+  it("emits <Vo>Schema / <Enum>Schema declarations for value-object + enum workflow params", async () => {
+    // Regression for the Banking-system "Bundle import failed:
+    // Can't find variable: MoneySchema" runtime crash.  The
+    // workflow-routes emitter called `zodFor(p.type)` for each
+    // workflow param — which returns a bare `MoneySchema` /
+    // `<Enum>Schema` reference — without first declaring the
+    // matching `const`.  esbuild bundles the file fine (it doesn't
+    // fail on undefined identifiers), so the breakage only surfaces
+    // at module evaluation when the runtime worker dynamic-imports
+    // the bundle.  This test asserts that http/workflows.ts emits
+    // the schema declarations needed to make its request schemas
+    // self-contained, exactly like http/<agg>.routes.ts already does.
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(`
+      context Banking {
+        enum AccountStatus { Open, Frozen, Closed }
+        valueobject Money {
+          amount: decimal
+          currency: string
+          invariant amount >= 0
+          invariant currency.length == 3
+        }
+        aggregate Account {
+          holder: string display
+          status: AccountStatus
+          balance: Money
+          operation deposit(amount: Money) {
+            precondition amount.amount > 0
+            balance := Money(balance.amount + amount.amount, balance.currency)
+          }
+          operation withdraw(amount: Money) {
+            precondition amount.amount > 0
+            balance := Money(balance.amount - amount.amount, balance.currency)
+          }
+        }
+        repository Accounts for Account { }
+        workflow transferFunds(
+          fromAccount: Id<Account>,
+          toAccount: Id<Account>,
+          amount: Money,
+        ) transactional {
+          let from = Accounts.getById(fromAccount)
+          let to = Accounts.getById(toAccount)
+          from.withdraw(amount)
+          to.deposit(amount)
+        }
+      }
+    `, { validation: true });
+    const wf = generateTypeScript(doc.parseResult.value as Model).get("http/workflows.ts")!;
+    // The Money schema is declared as a local const, with the
+    // openapi("Money") tag so it appears in /openapi.json.  Invariant
+    // refinements stay outside the openapi name (see emitWireSchema).
+    expect(wf).toMatch(/const MoneySchema = z\.object\(\{[\s\S]*?\}\)\.openapi\("Money"\)/);
+    // TransferFundsRequest references MoneySchema by name, not by
+    // an inline z.object — that's what would otherwise crash at
+    // boot when MoneySchema isn't declared.
+    expect(wf).toMatch(/amount: MoneySchema,/);
+    // Sanity: no dangling reference to a *Schema name that wasn't
+    // declared in this file.  Match every `<X>Schema` reference,
+    // then check each appears at least once as `const <X>Schema =`.
+    const refs = new Set([...wf.matchAll(/\b([A-Z][A-Za-z0-9]*)Schema\b/g)].map((m) => m[1]));
+    for (const name of refs) {
+      expect(wf, `missing declaration for ${name}Schema in workflows.ts`).toMatch(
+        new RegExp(`const ${name}Schema\\b`),
+      );
+    }
+  });
+
   it("emits explicit isolationLevel for transactional(level) workflows", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);

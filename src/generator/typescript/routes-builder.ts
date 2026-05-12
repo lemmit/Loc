@@ -596,7 +596,7 @@ function cap(s: string): string {
 // `.openapi("Name")` call so the schema's openapi metadata stays
 // pinned to the same component name.
 // ---------------------------------------------------------------------------
-function emitWireSchema(
+export function emitWireSchema(
   declPrefix: string, // e.g. `const Create<Agg>Request` or `const <VO>Schema`
   openapiName: string, // component name passed to `.openapi(...)`
   fields: { name: string; base: string }[],
