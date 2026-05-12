@@ -54,11 +54,6 @@ concurrency:
 jobs:
   e2e:
     runs-on: ubuntu-latest
-    # TEMPORARY: skipped on the claude/fix-failing-actions branch
-    # while we iterate on the Phoenix-build CI surface — saves
-    # ~10min of runner time per push.  REVERT before this PR
-    # merges (the e2e suite must run on main).
-    if: github.head_ref != 'claude/fix-failing-actions' && github.ref != 'refs/heads/claude/fix-failing-actions'
     # Tight cap to protect CI minutes — Playwright per-test timeout
     # is 4min × ~11 tests; a stuck pipeline could otherwise burn the
     # full 15 before cancelling.  10 leaves time for the warm-cache

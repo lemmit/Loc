@@ -59,39 +59,7 @@ jobs:
         run: npm run build
 
       - name: Unit tests
-        run: |
-          set -o pipefail
-          npx vitest run --reporter=verbose 2>&1 | tee vitest.log
-
-      # Surface the failing test names + assertions from the vitest log
-      # as GitHub Actions annotations whenever Unit tests fail.  Each
-      # `::error::` line becomes an annotation entry on the check run,
-      # which is reachable via the unauthenticated REST endpoint that
-      # the PR webhook readers (this Claude session included) consume.
-      # Also dumps the tail to GITHUB_STEP_SUMMARY for human readers.
-      - name: Surface vitest failures on failure
-        if: failure()
-        run: |
-          echo '## Unit tests output (tail)' >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          tail -n 300 vitest.log >> $GITHUB_STEP_SUMMARY || true
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          # Extract failing test names + their immediate context and
-          # turn them into ::error:: annotations (visible in the
-          # check-runs API without log auth).  `awk` grabs the FAIL
-          # block (~ vitest's verbose "FAIL  test/foo.test.ts > …"
-          # header through the next blank line); `head -c` keeps each
-          # annotation under GitHub's 64KB cap.
-          if grep -E '^ FAIL  | ❯ |AssertionError|Error:' vitest.log > vitest.fails 2>/dev/null; then
-            while IFS= read -r line; do
-              # Strip leading whitespace + the indented vitest prefix
-              clean=$(printf '%s' "$line" | sed 's/^[[:space:]]*//')
-              # Truncate to 500 chars (annotations get truncated by
-              # GH anyway, and keep the room for many fails).
-              short=$(printf '%s' "$clean" | head -c 500)
-              echo "::error::$short"
-            done < vitest.fails
-          fi
+        run: npx vitest run --reporter=verbose
 
       # Generate a fixture Phoenix project from examples/acme.ddd.
       # The example today targets dotnet + hono + react; we synthesise
