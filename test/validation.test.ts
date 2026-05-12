@@ -219,7 +219,11 @@ describe("validation", () => {
       ).toBe(true);
     });
 
-    it("rejects 'ui:' on a 'platform: dotnet' deployable (v0)", async () => {
+    it("accepts 'ui:' on a 'platform: dotnet' deployable (fullstack mode)", async () => {
+      // Part B: dotnet flipped from backend-only to dual-mode.  A
+      // dotnet deployable that declares `ui:` becomes a fullstack
+      // service that hosts an embedded React SPA from wwwroot/.
+      // Backend-only dotnet (no `ui:`) keeps working unchanged.
       const { errors } = await parse(`
         system S {
           module M { context T { } }
@@ -227,9 +231,7 @@ describe("validation", () => {
           deployable api { platform: dotnet, modules: M, ui: WebApp, port: 8080 }
         }
       `);
-      expect(
-        errors.some((e) => /'ui:' binding is only valid/.test(e)),
-      ).toBe(true);
+      expect(errors).toEqual([]);
     });
 
     it("rejects a 'platform: static' deployable without a 'ui:' binding", async () => {

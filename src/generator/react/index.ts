@@ -52,15 +52,37 @@ import { deriveSidebarFromUi } from "./menu-emitter.js";
 // validated, not just trusted.
 // ---------------------------------------------------------------------------
 
+/** Options for the React generator's secondary entry point — used by
+ *  the .NET orchestrator's fullstack branch (Part B) where the React
+ *  project becomes a sub-tree of the .NET project and the SPA calls
+ *  its host's API on the same origin.
+ *    - `apiBaseUrl`: overrides the computed `http://localhost:<port>`
+ *      target URL.  Fullstack dotnet passes `"/api"` so the SPA hits
+ *      its embedded API server on the same origin (.NET controllers
+ *      get the matching `/api` route prefix).
+ *    - `pathPrefix`: prepended to every emitted path.  Fullstack
+ *      dotnet passes `"ClientApp/"` so the React project lands under
+ *      the .NET project's `ClientApp/` directory; the Dockerfile
+ *      multi-stage build then `npm run build`s it and copies the
+ *      output into `wwwroot/`. */
+export interface GenerateReactOptions {
+  apiBaseUrl?: string;
+  pathPrefix?: string;
+}
+
 export function generateReactForContexts(
   contexts: BoundedContextIR[],
   sys: SystemIR,
   deployable: DeployableIR,
+  options: GenerateReactOptions = {},
 ): Map<string, string> {
   const out = new Map<string, string>();
 
   const target = sys.deployables.find((d) => d.name === deployable.targetName);
-  const apiBaseUrl = `http://localhost:${target?.port ?? 8080}`;
+  // Standalone react picks the target deployable's port; fullstack
+  // dotnet overrides with `"/api"` for same-origin SPA fetches.
+  const apiBaseUrl =
+    options.apiBaseUrl ?? `http://localhost:${target?.port ?? 8080}`;
 
   // Per-aggregate api modules + pages.
   const aggregates: Array<{ agg: AggregateIR; ctx: BoundedContextIR }> = [];
@@ -217,7 +239,19 @@ export function generateReactForContexts(
   emitShellFiles(pack, out);
   emitShellGlobs(pack, out);
 
-  return out;
+  // Path-prefix transform — applied once at the end so the per-page
+  // emitters, pack shellFiles, shellGlobs, e2e harness, and every
+  // `out.set(...)` above stay path-agnostic.  Empty prefix is a
+  // no-op (default for standalone react); fullstack dotnet passes
+  // `"ClientApp/"` to land the project under the .NET project's
+  // ClientApp/ directory.
+  const pathPrefix = options.pathPrefix ?? "";
+  if (pathPrefix === "") return out;
+  const prefixed = new Map<string, string>();
+  for (const [path, content] of out) {
+    prefixed.set(`${pathPrefix}${path}`, content);
+  }
+  return prefixed;
 }
 
 /** Emit each entry in the pack manifest's `shellFiles` map (logical

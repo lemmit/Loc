@@ -1,0 +1,69 @@
+// Loom Fullstack .NET — single deployable that BOTH serves the API
+// AND hosts a React SPA from wwwroot/.  Mirrors the proven
+// phoenixLiveView fullstack shape, but for the .NET ecosystem.
+//
+// Generated layout (one deployable, one container, one service):
+//   app/Program.cs              - UseStaticFiles + MapFallbackToFile
+//   app/Api/*Controller.cs      - routes under /api/*
+//   app/ClientApp/src/...       - React SPA (Mantine pack by default)
+//   app/ClientApp/package.json  - Vite + React tooling
+//   app/Dockerfile              - multi-stage: node → dotnet → runtime
+//                                 (SPA dist/ → /app/wwwroot/)
+//
+// Files-only in the playground — .NET doesn't boot in-browser; the
+// FooterBar shows a yellow "files-only" chip.  Build the Docker
+// image locally to actually run the service end-to-end.
+
+system FullstackOrders {
+
+  theme {
+    primary: "#0ea5e9"
+    radius: "md"
+    fontFamily: "Inter, system-ui, sans-serif"
+  }
+
+  module Sales {
+    context Sales {
+
+      valueobject Money {
+        amount: decimal
+        currency: string
+        invariant amount >= 0
+        invariant currency.length == 3
+      }
+
+      aggregate Customer {
+        name: string display
+        email: string
+        invariant email.length > 0
+      }
+
+      aggregate Order {
+        customerId: Id<Customer>
+        amount: Money
+        notes: string
+
+        operation cancel(reason: string) {
+          // empty — exposes a per-aggregate op button in the SPA
+        }
+      }
+
+      repository Customers for Customer { }
+      repository Orders for Order { }
+
+    }
+  }
+
+  ui WebApp {
+    scaffold modules: Sales
+  }
+
+  // Single fullstack .NET deployable — both API and SPA host.
+  deployable app {
+    platform: dotnet
+    modules: Sales
+    ui: WebApp
+    port: 8080
+    design: mantine
+  }
+}

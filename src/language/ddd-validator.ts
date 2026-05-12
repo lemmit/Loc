@@ -49,6 +49,7 @@ import {
   BUILTIN_PACK_FORMATS,
   packFormatForBuiltin,
 } from "../generator/_packs/builtin-formats.js";
+import { platformFor } from "../platform/registry.js";
 
 export class DddValidator {
   // Entry: full model walk
@@ -319,7 +320,7 @@ export class DddValidator {
     if (hasUiBinding && !platformMountsUi(d.platform)) {
       accept(
         "error",
-        `'ui:' binding is only valid on platforms that mount a UI ('react', 'static', 'phoenixLiveView'); got '${d.platform}'.`,
+        `'ui:' binding is only valid on platforms that mount a UI ('react', 'static', 'phoenixLiveView', 'dotnet'); got '${d.platform}'.`,
         {
           node: d,
           property: d.uiSugar ? "uiSugar" : d.uiCompose ? "uiCompose" : "uiBlock",
@@ -564,11 +565,13 @@ export class DddValidator {
   }
 
   /** Slice 11.26 — `ui: WebApp { Sales: salesApi, ... }` compose-block
-   *  validations.  This is the FRONTEND composition shape — each
-   *  binding maps a UI api parameter (declared as `api Sales: SalesApi`
-   *  in the ui block) to a backend deployable that supplies its
-   *  contract.
-   *    - Only valid on FRONTEND platforms (react, static).
+   *  validations.  Each binding maps a UI api parameter (declared as
+   *  `api Sales: SalesApi` in the ui block) to a backend deployable
+   *  that supplies its contract.  The rule applies to any deployable
+   *  that mounts a UI (`platformMountsUi`) — split frontends (react /
+   *  static) AND fullstack backends (phoenixLiveView, fullstack dotnet);
+   *  in the fullstack case the deployable can be both source and
+   *  target of its own bindings (it serves the api it consumes).
    *    - Each binding's `name` must match a UiApiParam in the ui.
    *    - Each binding's `source` must resolve AND `serves:` the
    *      param's declared api.
@@ -1625,17 +1628,26 @@ function pathString(lv: import("./generated/ast.js").LValue): string {
 // ---------------------------------------------------------------------------
 // Platform classification helpers.
 //
-// Single source of truth for "which platform admits a UI mount" and
-// "which platform owns a backend (databases, APIs, workflows)".  Used
-// across the deployable validator so adding a new platform requires
-// extending exactly these two predicates plus the `Platform` grammar
-// enum + the `Framework` enum.  Phase 2 will move these onto
-// `PlatformSurface` (`mountsUi: boolean`) so the validator consults
-// the platform registry rather than hardcoding the list.
+// `platformMountsUi` consults the platform registry (`PlatformSurface
+// .mountsUi`) so adding a new platform requires extending exactly that
+// flag plus the `Platform` grammar enum + the `Framework` enum.
+// `platformOwnsBackend` and `expectedFrameworkFor` still live here
+// because the grammar enum is the source of truth for the validator
+// (not the runtime registry) — a future refactor can move the backend
+// flag to `PlatformSurface` too once the grammar/registry split is
+// resolved.
 // ---------------------------------------------------------------------------
 
 function platformMountsUi(platform: string | undefined): boolean {
-  return platform === "react" || platform === "static" || platform === "phoenixLiveView";
+  if (platform == null) return false;
+  // The registry's `mountsUi` is the single source of truth.  Cast is
+  // safe because the grammar enum and the registry stay in lockstep
+  // (registry barfs at boot if a platform is missing).
+  try {
+    return platformFor(platform as import("../ir/loom-ir.js").Platform).mountsUi;
+  } catch {
+    return false;
+  }
 }
 
 function platformOwnsBackend(platform: string | undefined): boolean {
@@ -1643,17 +1655,18 @@ function platformOwnsBackend(platform: string | undefined): boolean {
 }
 
 /** Framework a deployable will render against, given its platform and
- *  whether it actually declares a `ui:` mount.  `hasUi` is the second
- *  argument because some platforms (e.g. fullstack `dotnet` once Part B
- *  lands) only render UI when the deployable opts in; for backend-only
- *  cases the framework is `undefined` and downstream rules no-op. */
+ *  whether it actually declares a `ui:` mount.  `hasUi` matters for
+ *  platforms that are dual-mode: `dotnet` is backend-only without
+ *  `ui:` and serves an embedded React SPA when `ui:` is set.  For
+ *  always-frontend platforms (`react`/`static`) and always-fullstack
+ *  platforms (`phoenixLiveView`) the answer is independent of `hasUi`. */
 function expectedFrameworkFor(
   platform: string | undefined,
   hasUi: boolean,
 ): string | undefined {
   if (platform === "react" || platform === "static") return "react";
   if (platform === "phoenixLiveView") return "phoenixLiveView";
-  void hasUi;
+  if (platform === "dotnet" && hasUi) return "react";
   return undefined;
 }
 

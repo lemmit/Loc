@@ -8,10 +8,21 @@ import { pascal, plural } from "../../../util/naming.js";
 export function renderProgram(
   ctx: BoundedContextIR,
   ns: string,
-  options?: { authRequired?: boolean; usesValidators?: boolean },
+  options?: {
+    authRequired?: boolean;
+    usesValidators?: boolean;
+    /** Fullstack-dotnet flag: when true, the deployable hosts an
+     *  embedded React SPA from `wwwroot/`.  Adds `UseDefaultFiles` +
+     *  `UseStaticFiles` middleware and a `MapFallbackToFile` so SPA
+     *  client-side routes load `index.html` while controller routes
+     *  (now under `/api/*`, see `routePrefix` in the api template)
+     *  match first.  Off for backend-only .NET. */
+    hasEmbeddedSpa?: boolean;
+  },
 ): string {
   const authRequired = !!options?.authRequired;
   const usesValidators = !!options?.usesValidators;
+  const hasEmbeddedSpa = !!options?.hasEmbeddedSpa;
   const repoRegistrations = ctx.aggregates
     .map(
       (a) =>
@@ -242,7 +253,18 @@ app.UseHttpLogging();
 app.UseCors();
 app.UseSwagger();
 ${authMount}app.MapControllers();
-
+${hasEmbeddedSpa ? `
+// Fullstack mode — host the embedded React SPA from wwwroot/.
+// UseDefaultFiles rewrites GET / to /index.html before UseStaticFiles
+// serves the bundle; MapFallbackToFile catches client-side router
+// paths (e.g. /orders/123) that don't match a controller route,
+// returning index.html so the SPA can deep-link.  Controller routes
+// live under /api/* — the routePrefix passed to renderController
+// keeps them disambiguated from the SPA's path namespace.
+app.UseDefaultFiles();
+app.UseStaticFiles();
+app.MapFallbackToFile("index.html");
+` : ""}
 // Dev-friendly schema bootstrap: create the schema from the model on
 // first boot.  System-mode compose isolates each deployable to its own
 // database (see db-init/), so EnsureCreated runs cleanly without
@@ -349,7 +371,48 @@ export function renderTestCsproj(ns: string): string {
 `;
 }
 
-export function renderDockerfile(ns: string): string {
+export function renderDockerfile(
+  ns: string,
+  options?: { hasEmbeddedSpa?: boolean },
+): string {
+  if (options?.hasEmbeddedSpa) {
+    // Fullstack mode — multi-stage build.  Stage 1 builds the React
+    // SPA under ClientApp/, stage 2 builds the .NET project, stage 3
+    // ships the runtime image with the .NET publish output AND the
+    // SPA bundle copied into wwwroot/ so `app.UseStaticFiles()` +
+    // `app.MapFallbackToFile("index.html")` can serve it on the same
+    // origin as the API.  Two SDK images instead of one — costs a bit
+    // of cache bandwidth but keeps the runtime image small.
+    return `# syntax=docker/dockerfile:1
+# Auto-generated — fullstack .NET + React (embedded SPA).
+
+FROM node:20-alpine AS spa-build
+WORKDIR /spa
+COPY ClientApp/package.json ClientApp/package-lock.json* ./
+RUN npm ci --prefer-offline --no-audit --no-fund || npm install
+COPY ClientApp/ ./
+RUN npm run build
+
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS dotnet-build
+WORKDIR /src
+COPY certs/ /usr/local/share/ca-certificates/
+RUN update-ca-certificates 2>&1 | tail -1 || true
+COPY ${ns}.csproj ./
+RUN dotnet restore ${ns}.csproj
+COPY . .
+RUN dotnet publish ${ns}.csproj -c Release -o /app/publish --no-restore /p:UseAppHost=false
+
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+WORKDIR /app
+ENV ASPNETCORE_URLS=http://+:8080
+EXPOSE 8080
+COPY --from=dotnet-build /app/publish ./
+# SPA bundle lands under wwwroot/ so UseStaticFiles + MapFallbackToFile
+# can serve it on the same origin as the /api/* controller routes.
+COPY --from=spa-build /spa/dist ./wwwroot
+ENTRYPOINT ["dotnet", "${ns}.dll"]
+`;
+  }
   return `# syntax=docker/dockerfile:1
 # Auto-generated.
 

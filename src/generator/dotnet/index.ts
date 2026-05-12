@@ -38,6 +38,7 @@ import {
   renderTestsFile,
   renderValueObject,
 } from "./templates.js";
+import { generateReactForContexts } from "../react/index.js";
 
 // ---------------------------------------------------------------------------
 // .NET backend entry point.
@@ -109,6 +110,16 @@ function emitProjectFromContexts(
   out: Map<string, string>,
   system?: { deployable: DeployableIR; sys: SystemIR },
 ): void {
+  // Fullstack-dotnet branch — when the deployable declares a `ui:`
+  // mount, the .NET project hosts an embedded React SPA from
+  // `wwwroot/`.  Controllers move to `/api/*` so the SPA's path
+  // namespace stays free for client-side routing; `Program.cs` adds
+  // `UseStaticFiles` + `MapFallbackToFile`; the Dockerfile becomes
+  // multi-stage and copies the SPA bundle into `wwwroot/`.  See
+  // `src/platform/dotnet.ts:mountsUi` + `src/ir/lower.ts` for the
+  // upstream wiring.
+  const hasEmbeddedSpa = !!system?.deployable.uiName;
+  const routePrefix = hasEmbeddedSpa ? "api/" : undefined;
   // Common files written once per project, regardless of how many
   // contexts contribute their domain code.
   emitCommon(ns, out);
@@ -123,10 +134,10 @@ function emitProjectFromContexts(
       out.set(`Domain/Events/${ev.name}.cs`, renderEvent(ev, ns));
     }
     for (const agg of ctx.aggregates) {
-      emitAggregate(agg, ctx, ns, out);
+      emitAggregate(agg, ctx, ns, out, routePrefix);
     }
-    emitWorkflows(ctx, ns, out);
-    emitViews(ctx, ns, out);
+    emitWorkflows(ctx, ns, out, { routePrefix });
+    emitViews(ctx, ns, out, { routePrefix });
   }
   // DbContext + project shell are emitted once, with all aggregates
   // collected from the union of contexts.
@@ -168,8 +179,44 @@ function emitProjectFromContexts(
       renderValidationBehavior(ns),
     );
   }
-  emitProject(merged, ns, out, { authRequired, usesValidators });
+  emitProject(merged, ns, out, {
+    authRequired,
+    usesValidators,
+    hasEmbeddedSpa,
+  });
   emitTestProject(merged, ns, out);
+  // Fullstack mode — generate the React project under ClientApp/.
+  // The SPA hits `/api/*` on its own origin (apiBaseUrl: ""), so
+  // `api/config.ts` produces `fetch("/api/...")`-shaped calls that
+  // line up with the .NET controllers' new route prefix.  Filter
+  // out files the .NET project owns (Dockerfile, .dockerignore,
+  // certs, e2e suite — the .NET project ships its own equivalents
+  // at the root).
+  if (hasEmbeddedSpa && system) {
+    const spaFiles = generateReactForContexts(
+      contexts,
+      system.sys,
+      system.deployable,
+      { apiBaseUrl: "/api", pathPrefix: "ClientApp/" },
+    );
+    for (const [path, content] of spaFiles) {
+      // The React generator's pack also ships `Dockerfile` /
+      // `.dockerignore` / `certs/.gitkeep` at the project root —
+      // duplicates of the .NET project's equivalents and unused in
+      // fullstack mode (the .NET Dockerfile multi-stage owns the
+      // SPA build).  Skip them so the file map stays clean.  The
+      // e2e harness lives outside ClientApp/ in fullstack mode (or
+      // not at all — users own that surface).
+      if (
+        path === "ClientApp/Dockerfile" ||
+        path === "ClientApp/.dockerignore" ||
+        path === "ClientApp/certs/.gitkeep" ||
+        path.startsWith("ClientApp/e2e/")
+      ) continue;
+      out.set(path, content);
+    }
+    out.set("ClientApp/.gitignore", "node_modules\ndist\n");
+  }
 }
 
 function emitContext(
@@ -277,6 +324,7 @@ function emitAggregate(
   ctx: BoundedContextIR,
   ns: string,
   out: Map<string, string>,
+  routePrefix?: string,
 ): void {
   const aggFolder = plural(agg.name);
   const repo = findRepoFor(ctx, agg.name);
@@ -305,7 +353,7 @@ function emitAggregate(
     `Infrastructure/Persistence/Configurations/${agg.name}Configuration.cs`,
     renderConfiguration(agg, ns, ctx),
   );
-  emitCqrs(agg, repo, ctx, ns, out);
+  emitCqrs(agg, repo, ctx, ns, out, { routePrefix });
   const testsFile = renderTestsFile(agg, ctx, ns);
   if (testsFile) {
     out.set(`Tests/${ns}.Tests/${aggFolder}/${agg.name}Tests.cs`, testsFile);
@@ -333,21 +381,27 @@ function emitProject(
   ctx: BoundedContextIR,
   ns: string,
   out: Map<string, string>,
-  options?: { authRequired?: boolean; usesValidators?: boolean },
+  options?: {
+    authRequired?: boolean;
+    usesValidators?: boolean;
+    hasEmbeddedSpa?: boolean;
+  },
 ): void {
   const hasExtern = ctx.aggregates.some((a) =>
     a.operations.some((o) => o.extern),
   );
   const usesValidators = !!options?.usesValidators;
+  const hasEmbeddedSpa = !!options?.hasEmbeddedSpa;
   out.set(
     "Program.cs",
     renderProgram(ctx, ns, {
       authRequired: !!options?.authRequired,
       usesValidators,
+      hasEmbeddedSpa,
     }),
   );
   out.set(`${ns}.csproj`, renderCsproj(ns, hasExtern, usesValidators));
-  out.set("Dockerfile", renderDockerfile(ns));
+  out.set("Dockerfile", renderDockerfile(ns, { hasEmbeddedSpa }));
   out.set(".dockerignore", renderDockerignore());
   out.set("certs/.gitkeep", "");
 }

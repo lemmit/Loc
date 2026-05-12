@@ -34,6 +34,7 @@ export function emitViews(
   ctx: BoundedContextIR,
   ns: string,
   out: Map<string, string>,
+  options?: { routePrefix?: string },
 ): void {
   if (ctx.views.length === 0) return;
   const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
@@ -57,7 +58,7 @@ export function emitViews(
   }
   out.set(
     `Api/${ctx.name}ViewsController.cs`,
-    renderController(ctx, ns),
+    renderController(ctx, ns, options?.routePrefix),
   );
 }
 
@@ -286,8 +287,13 @@ function csIdsSourceForAux(
   return `${prev.mapVar}.Values.Select(__a => __a.${pascal(finalField)}).ToList()`;
 }
 
-function renderController(ctx: BoundedContextIR, ns: string): string {
+function renderController(
+  ctx: BoundedContextIR,
+  ns: string,
+  routePrefix?: string,
+): string {
   const className = `${ctx.name}ViewsController`;
+  const route = `${routePrefix ?? ""}views`;
   const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
   const blocks: string[] = [];
   for (const view of ctx.views) {
@@ -325,7 +331,7 @@ ${aggResponseUsings.join("\n")}
 namespace ${ns}.Api;
 
 [ApiController]
-[Route("views")]
+[Route("${route}")]
 public sealed class ${className} : ControllerBase
 {
     private readonly IMediator _mediator;

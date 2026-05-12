@@ -286,12 +286,16 @@ function validateReactIdReferences(
   }
 
   for (const d of sys.deployables) {
-    // UI-mounting deployables (today: react / static / phoenixLiveView)
-    // emit per-aggregate forms whose `Id<X>` inputs need the target
-    // aggregate to be reachable from the deployable's mounted set.
-    // Backend-only deployables (dotnet / hono) skip — they don't
-    // render UI forms.
+    // UI-mounting deployables emit per-aggregate forms whose `Id<X>`
+    // inputs need the target aggregate to be reachable from the
+    // deployable's mounted set.  Backend-only deployables (hono)
+    // skip — no UI.  `dotnet` is dual-mode now (`mountsUi: true` to
+    // admit the fullstack `ui:` branch); when no `ui:` is declared
+    // it stays backend-only and skips too — without this guard a
+    // backend-only dotnet deployable would trigger spurious
+    // Id-reachability errors against the (then irrelevant) UI.
     if (!platformFor(d.platform).mountsUi) continue;
+    if (d.platform === "dotnet" && !d.uiName) continue;
     // Aggregates mounted by this deployable's `moduleNames` set —
     // UI generators only emit per-aggregate hooks/queries for
     // these; anything outside is unreachable.
@@ -374,7 +378,7 @@ function checkIdReference(
     diags.push({
       severity: "error",
       message:
-        `react deployable '${deployableName}': '${source}' references Id<${target}>, but no aggregate '${target}' is declared in the system.`,
+        `UI-mounting deployable '${deployableName}': '${source}' references Id<${target}>, but no aggregate '${target}' is declared in the system.`,
       source: `${deployableName}/${source}`,
     });
     return;
@@ -386,7 +390,7 @@ function checkIdReference(
     diags.push({
       severity: "error",
       message:
-        `react deployable '${deployableName}': '${source}' references Id<${target}>, but '${target}' is not mounted on this deployable's modules.  ` +
+        `UI-mounting deployable '${deployableName}': '${source}' references Id<${target}>, but '${target}' is not mounted on this deployable's modules.  ` +
         `Mount the module containing '${target}' on the deployable's targeted backend, or remove the reference.`,
       source: `${deployableName}/${source}`,
     });
@@ -398,7 +402,7 @@ function checkIdReference(
     diags.push({
       severity: "error",
       message:
-        `react deployable '${deployableName}': '${source}' references Id<${target}>, but '${target}' has no 'display' field.  ` +
+        `UI-mounting deployable '${deployableName}': '${source}' references Id<${target}>, but '${target}' has no 'display' field.  ` +
         `Add 'string display' to one of '${target}''s string fields (e.g. 'name: string display') so the form's <Select> picker can label options.`,
       source: `${deployableName}/${source}`,
     });

@@ -13,6 +13,7 @@ import storybookShadcnSource from "./storybook-shadcn.ddd?raw";
 import storybookMuiSource from "./storybook-mui.ddd?raw";
 import storybookChakraSource from "./storybook-chakra.ddd?raw";
 import storybookComponentsSource from "./storybook-components.ddd?raw";
+import dotnetFullstackSource from "./dotnet-fullstack.ddd?raw";
 
 export interface LoomExample {
   id: string;
@@ -110,6 +111,13 @@ export const examples: LoomExample[] = [
     source: acmeSource,
     blurb:
       "Modules, multiple deployables, .NET + Hono + React — generator showcase, partial Preview only.",
+  },
+  {
+    id: "dotnet-fullstack",
+    label: "Fullstack .NET (embeds React SPA)",
+    source: dotnetFullstackSource,
+    blurb:
+      "Single .NET deployable that serves both /api/* and a React SPA from wwwroot/. Files-only in the playground (.NET doesn't boot in-browser).",
   },
 ];
 
