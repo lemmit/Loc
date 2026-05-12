@@ -10,6 +10,8 @@ import inventorySystemSource from "./inventory-system.ddd?raw";
 import acmeSource from "./acme.ddd?raw";
 import storybookMantineSource from "./storybook-mantine.ddd?raw";
 import storybookShadcnSource from "./storybook-shadcn.ddd?raw";
+import storybookMuiSource from "./storybook-mui.ddd?raw";
+import storybookChakraSource from "./storybook-chakra.ddd?raw";
 import storybookComponentsSource from "./storybook-components.ddd?raw";
 
 export interface LoomExample {
@@ -48,6 +50,20 @@ export const examples: LoomExample[] = [
     source: storybookShadcnSource,
     blurb:
       "Same catalogue as the Mantine storybook, rendered through the shadcn/ui pack.",
+  },
+  {
+    id: "storybook-mui",
+    label: "UI Storybook (MUI, aggregate-CRUD)",
+    source: storybookMuiSource,
+    blurb:
+      "Same catalogue as the Mantine storybook, rendered through the Material UI pack.",
+  },
+  {
+    id: "storybook-chakra",
+    label: "UI Storybook (Chakra, aggregate-CRUD)",
+    source: storybookChakraSource,
+    blurb:
+      "Same catalogue as the Mantine storybook, rendered through the Chakra UI pack.",
   },
   {
     id: "sales-system",
