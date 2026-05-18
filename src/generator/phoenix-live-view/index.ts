@@ -608,13 +608,13 @@ defmodule ${appModule}.MixProject do
 
   defp deps do
     [
-      {:phoenix, "~> 1.7"},
+      {:phoenix, "~> 1.8"},
       {:phoenix_live_view, "~> 1.0"},
       {:phoenix_html, "~> 4.1"},
       {:phoenix_ecto, "~> 4.4"},
       {:ecto_sql, "~> 3.10"},
-      {:postgrex, ">= 0.0.0"},
-      {:ash, "~> 3.0"},
+      {:postgrex, "~> 0.20"},
+      {:ash, "~> 3.24"},
       {:ash_postgres, "~> 2.0"},
       {:ash_phoenix, "~> 2.0"},
       {:jason, "~> 1.2"},
