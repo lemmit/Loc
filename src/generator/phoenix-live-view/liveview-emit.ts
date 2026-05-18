@@ -334,11 +334,13 @@ ${coreBody
     end`
     : coreBody;
 
-  const paramsVar = hasParams || hasLoad ? "params" : "_params";
-  // `params` is referenced by the load block only through
-  // socket.assigns.id (bound above), so when there are no param
-  // assigns but there IS a load, still bind params for clarity.
-  const headParamsVar = hasParams ? "params" : paramsVar;
+  // The function head binds `params` only when the body actually
+  // reads it (route-param assigns do `params["x"]`).  Load blocks
+  // reference `socket.assigns.id`, never `params`, so a load-only
+  // page (e.g. a list page with no route params) must use
+  // `_params` — otherwise `mix compile --warnings-as-errors`
+  // fails on the unused variable.
+  const headParamsVar = hasParams ? "params" : "_params";
 
   return `  @impl true
   def handle_params(${headParamsVar}, _uri, socket) do
