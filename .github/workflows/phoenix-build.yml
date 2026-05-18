@@ -136,18 +136,26 @@ jobs:
 
       # Cache the hex dep tree + Elixir build outputs across runs so
       # only the first cold run pays the ~3-4min download/compile
-      # cost.  Cache key is rooted on the lockfile content (mix.lock
-      # would be regenerated identically by the emitter unless deps
-      # changed); since the generator emits mix.exs but not mix.lock,
-      # we use the emitter source as the dep signature.  Restore on
-      # any miss so a wrong key still gets partial deps.
+      # cost.  The cache (deps/ + _build/) is several hundred MB, so
+      # the key MUST be stable across unrelated generator edits —
+      # otherwise every template tweak mints a fresh giant entry and
+      # churns the 10GB repo cache (evicting the npm / Playwright
+      # caches).  The dep set only changes when the emitted mix.exs
+      # changes, so we sign the key on that file's hash rather than
+      # the whole emitter source.  hashFiles() can't read /tmp, so we
+      # compute the digest in a prior step.
+      - name: Compute Phoenix dep signature
+        id: phoenix-depsig
+        run: |
+          echo "hash=$(sha256sum /tmp/ci/out/phoenix_app/mix.exs | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
       - name: Cache Phoenix deps + _build
         uses: actions/cache@v5
         with:
           path: |
             /tmp/ci/out/phoenix_app/deps
             /tmp/ci/out/phoenix_app/_build
-          key: phoenix-mix-${{ hashFiles('src/generator/phoenix-live-view/**', 'designs/ashPhoenix/**') }}
+          key: phoenix-mix-${{ steps.phoenix-depsig.outputs.hash }}
           restore-keys: |
             phoenix-mix-
 

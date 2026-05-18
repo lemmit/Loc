@@ -1,0 +1,64 @@
+name: Cleanup old workflow artifacts
+
+# Belt-and-braces guard for the 500MB Actions storage quota.  Per-
+# workflow retention-days already bounds each artifact's lifetime, but
+# this sweep catches anything that slips through (e.g. a workflow that
+# forgets to set retention, or a retention bump) by hard-deleting any
+# artifact older than MAX_AGE_DAYS.  Cheap: a few seconds of runner
+# time once a day.
+
+on:
+  schedule:
+    # 03:17 UTC daily — odd minute to avoid the top-of-hour scheduler
+    # congestion that delays cron workflows.
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      max_age_days:
+        description: 'Delete artifacts older than this many days'
+        required: false
+        default: '2'
+
+permissions:
+  actions: write
+
+concurrency:
+  group: cleanup-artifacts
+  cancel-in-progress: true
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Delete artifacts older than the cutoff
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const maxAgeDays = Number(
+              context.payload.inputs?.max_age_days ?? '2'
+            );
+            const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
+            const it = github.paginate.iterator(
+              github.rest.actions.listArtifactsForRepo,
+              { owner: context.repo.owner, repo: context.repo.repo, per_page: 100 }
+            );
+            let deleted = 0, freedBytes = 0;
+            for await (const { data } of it) {
+              for (const a of data) {
+                if (new Date(a.created_at).getTime() >= cutoff) continue;
+                await github.rest.actions.deleteArtifact({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  artifact_id: a.id,
+                });
+                deleted++;
+                freedBytes += a.size_in_bytes ?? 0;
+                core.info(`deleted ${a.name} (#${a.id}, ${a.size_in_bytes} B, ${a.created_at})`);
+              }
+            }
+            const freedMb = (freedBytes / 1024 / 1024).toFixed(1);
+            core.notice(
+              `Cleanup done: deleted ${deleted} artifact(s) older than ` +
+              `${maxAgeDays}d, freed ~${freedMb} MB.`
+            );
