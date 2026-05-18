@@ -19,9 +19,31 @@ Two axes:
 - **design pack** = the UI library + its conventions (e.g. `mantine`,
   `chakra`, `shadcn`, `mui`). Versioned per-major: `mantine@v7`,
   `mantine@v9`.
-- **stack** = the framework baseline the pack runs on. Today: `v1`
-  (React 18 + RR 6 + zod 3 + TS 5.7 + Vite 5) and `v2` (React 19 +
-  RR 6 + zod 3 + TS 5.7 + Vite 5; further axes to update over time).
+- **stack** = the framework baseline the pack runs on. Today:
+  - `v1` — React 18 + RR 6 + zod 3 + TS 5.7 + Vite 5
+  - `v2` — React 19 + RR 6 + zod 3 + TS 5.7 + Vite 5
+  - `v3` — React 19 + **RR 7** + **zod 4** (+ `@hookform/resolvers` 5)
+    + TS 5.7 + Vite 5
+
+  `v3` is the cutting-edge base. It is a *separate* base, not a
+  mutation of v2: existing packs stay on v2 and a pack opts into v3
+  by declaring `stack: "v3"` (then verified by its per-pack
+  `LOOM_REACT_BUILD_CASE` shard + runtime e2e — same gate
+  chakra@v3/mui@v7/shadcn@v4 went through). No per-lib axis split:
+  React/router/zod move together in practice, so splitting them
+  would multiply the compat matrix for combinations nobody ships.
+
+  **Router 7 is not a pure dep pin.** RR 7 renamed the npm package
+  `react-router-dom` → `react-router` (library mode keeps the v6
+  API, so only the import specifier changes — framework mode is a
+  separate, larger initiative, deliberately *not* in this base).
+  That rename leaks into emitted source, so it's centralised in
+  `src/generator/_packs/stack-runtime.ts` (`routerPackageForStack`),
+  read by both emission paths: pack shell templates
+  (`main.hbs`/`app-shell.hbs` via the `{{routerPackage}}` Handlebars
+  var injected in `render.ts`) and the page body-walker. Defaults to
+  `react-router-dom` for every pre-v3 / custom pack → byte-identical
+  output until a pack actually adopts v3.
 
 Packs declare their stack in `pack.json`. They aren't free
 combinations — `chakra@v3` requires React 19, so it would declare
