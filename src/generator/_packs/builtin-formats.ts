@@ -61,14 +61,16 @@ export const BUILTIN_PACK_LATEST = {
   // mantine — these flips don't touch test/fixtures/baseline-output/.
   chakra:     "v3",
   mui:        "v7",
-  // shadcn stays at v3: shadcn@v4 is Tailwind-4 CSS-first
-  // (`@import "tailwindcss"`), but the playground preview injects the
-  // Tailwind *3* Play CDN, gated on `@tailwind` directives in the
-  // bundled CSS (see web/src/preview/iframe-html.ts).  Promoting the
-  // bareword before the in-browser bundler grows a Tailwind-4 path
-  // would ship unstyled previews.  Pinned `design: "shadcn@v4"`
-  // still works (vite-built deploys are fine).
-  shadcn:     "v3",
+  // shadcn promoted to v4 (Tailwind 4 CSS-first / React 19, stack
+  // v2).  The blocker — the in-browser playground only knew the
+  // Tailwind 3 Play CDN — was cleared: `iframe-html.ts`'s
+  // `tailwindFlavor` now routes `@import "tailwindcss"` CSS through
+  // `@tailwindcss/browser`, and the bundler externalises the v4
+  // `@import`s.  Bareword `design: shadcn` now resolves to
+  // shadcn@v4; the Tailwind-3 pack stays loadable via the explicit
+  // pin `design: "shadcn@v3"`.  acme.ddd has no `design:` slot so
+  // this doesn't touch test/fixtures/baseline-output/.
+  shadcn:     "v4",
   ashPhoenix: "v3",
 } as const satisfies Record<string, string>;
 

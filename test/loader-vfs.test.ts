@@ -81,10 +81,13 @@ describe("resolvePackDir: built-in names", () => {
   it("resolves bareword built-ins to /designs/<family>/<latest-version>", () => {
     // Bareword resolution flows through BUILTIN_PACK_LATEST — the
     // version segment comes from the toolchain default, not from
-    // the input.  mantine was promoted to v9 (Mantine 9 / React 19);
-    // update these when BUILTIN_PACK_LATEST changes again.
+    // the input.  Promoted defaults so far: mantine→v9, chakra→v3,
+    // mui→v7, shadcn→v4.  Update these when BUILTIN_PACK_LATEST
+    // changes again.
     expect(resolvePackDir("mantine")).toBe("/designs/mantine/v9");
-    expect(resolvePackDir("shadcn")).toBe("/designs/shadcn/v3");
+    expect(resolvePackDir("shadcn")).toBe("/designs/shadcn/v4");
+    expect(resolvePackDir("chakra")).toBe("/designs/chakra/v3");
+    expect(resolvePackDir("mui")).toBe("/designs/mui/v7");
   });
   it("resolves pinned built-ins to /designs/<family>/<version>", () => {
     // Both old + new mantine majors are loadable.  Pinning is the
