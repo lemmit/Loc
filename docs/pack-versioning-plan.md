@@ -19,7 +19,7 @@
 | 1.1 | `shadcn@v4` + Tailwind 4 (CSS-first config, `@tailwindcss/vite`, `tw-animate-css`) — stack v2 | this PR | ✅ pack landed (pinned `design: "shadcn@v4"`; bareword still v3) |
 | 1.3 | `mui@v7` (new Grid `size=`, React 19) — stack v2 | #160 | ✅ pack landed (pinned `design: "mui@v7"`; bareword still v5) |
 | 1.4 | `chakra@v3` (compound components, `createSystem`, `toaster` — largest delta) — stack v2 | #157 | ✅ pack landed (pinned `design: "chakra@v3"`; bareword still v2) |
-| 1.5 | `ashPhoenix` minor → Phoenix 1.8 + Ash 3.24 — separate ecosystem, no React stack | — | pending |
+| 1.5 | `ashPhoenix` minor → Phoenix 1.8 + Ash 3.24 — separate ecosystem, no React stack.  Scaffold already emits 1.8 idioms (`use Phoenix.Controller, formats:`, `Layouts` module, `put_root_layout` tuple), so this was a dep-only bump: phoenix `~> 1.8`, postgrex `~> 0.20` (tighten), ash `~> 3.24` | this PR | ✅ deps bumped; gated on `LOOM_PHOENIX_BUILD` docker compile |
 | 1.X | Promote `BUILTIN_PACK_LATEST.mantine = "v9"` + refresh `test/fixtures/baseline-output/` — bareword `design: mantine` now emits Mantine 9 / React 19; `design: "mantine@v7"` still pins React 18 | #156 | ✅ merged |
 | 1.X | Promote `BUILTIN_PACK_LATEST.chakra = "v3"` + `mui = "v7"` — bareword `design: chakra` / `mui` roll forward; old majors stay pinned via `"chakra@v2"` / `"mui@v5"`. No fixture refresh (acme tracks mantine). shadcn held at v3 — playground injects the Tailwind 3 Play CDN, so promoting shadcn@v4 needs an in-browser Tailwind 4 path first | this PR | ✅ pack defaults flipped |
 | 1.X | Playground in-browser Tailwind 4 path — bundler externalises `@import "tailwindcss"`/`tw-animate-css`; iframe loads `@tailwindcss/browser` for v4 CSS (the v3 Play-CDN analogue).  Unblocks the shadcn@v4 promote (gated on the deployed playground-e2e confirming the pinned `storybook-shadcn-v4` preview boots styled) | this PR | ✅ playground supports v4; shadcn promote is the gated follow-up |
@@ -213,7 +213,7 @@ Inline string bumps:
 | --- | --- | --- |
 | Hono | `src/generator/typescript/index.ts:204-216` | hono ^4.6→^4.12; drizzle-orm ^0.36→^0.45; drizzle-kit latest; @hono/zod-openapi same-major; pg latest; zod ^4 |
 | .NET | `src/generator/dotnet/templates/program.tpl.ts:325-360` | Defer past 2026-11 (.NET 8 LTS). Then 8.0.10→10.0.x with FluentValidation 11.10→12.1, MediatR 2.1.7→14.1 |
-| Phoenix | `src/generator/phoenix-live-view/index.ts:600` | phoenix `~> 1.7`→`~> 1.8`; **tighten `postgrex: ">= 0.0.0"`→`~> 0.20`** (pre-existing esm.sh-style trap); ash patches |
+| Phoenix | `src/generator/phoenix-live-view/index.ts:609` | ✅ **done in Phase 1.5** — phoenix `~> 1.7`→`~> 1.8`; postgrex `">= 0.0.0"`→`~> 0.20`; ash `~> 3.0`→`~> 3.24` |
 
 Wire each into a centralised `BACKEND_PINS` const per generator so deps management is one diff in one place.
 
