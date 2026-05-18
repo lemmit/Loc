@@ -15,7 +15,8 @@
 | 0 | Versioning machinery — `design: "family@vN"`, directory layout, validator + IR + loaders | #147 | ✅ merged |
 | 0.5a | Stack scaffold — `stacks/v1` + `stacks/v2`, `PackManifest.stack` field, loader merges stack partials | #153 | ✅ merged |
 | 0.5b | Stack-driven bundler hints (`web/src/bundle/stacks.ts`); stack v2 inlines React instead of externalising; runtime-gate e2e spec | #154 | ✅ merged |
-| 0.5c | `stacks/v3` scaffold — React 19 + **Router 7** + **zod 4** (+ resolvers 5).  New cutting-edge base (separate, not a v2 mutation).  Router-7 package rename (`react-router-dom`→`react-router`) centralised in `stack-runtime.ts`'s `routerPackageForStack`, read by pack shells (`{{routerPackage}}`) + body-walker.  No pack on v3 yet → byte-identical; validated by a throwaway shadcn@v4-on-v3 `tsc + vite build` run | this PR | ✅ scaffold + seam, byte-identical |
+| 0.5c | `stacks/v3` scaffold — React 19 + **Router 7** + **zod 4** (+ resolvers 5).  New cutting-edge base (separate, not a v2 mutation).  Router-7 package rename (`react-router-dom`→`react-router`) centralised in `stack-runtime.ts`'s `routerPackageForStack`, read by pack shells (`{{routerPackage}}`) + body-walker.  Scaffold-only (no pack on v3) → byte-identical; validated by a throwaway shadcn@v4-on-v3 `tsc + vite build` run | #168 | ✅ scaffold + seam, byte-identical |
+| 0.5d | Per-pack stack-v3 adoption — every current pack major flips `stack: "v2"`→`"v3"`: chakra@v3 (#169), mui@v7 (#170), shadcn@v4 (#171), mantine@v9 (#172).  Bareword `design: <family>` now emits React 19 + RR 7 + zod 4 + resolvers 5; prior majors (chakra@v2 / mui@v5 / shadcn@v3 / mantine@v7) stay on v1/v2 as the opt-outs.  mantine@v9 paired with a baseline-fixture refresh (acme tracks bareword mantine) + 6 stale walker router assertions updated.  Each gated by its `LOOM_REACT_BUILD` shard | #169–#172 | ✅ rollout complete |
 | 1.2 | `mantine@v9` (stack v2 = React 19) — opt-in via pinned form; bareword default still v7 | #148 + #149 + #151 + #152 + #154 | ✅ working live |
 | 1.1 | `shadcn@v4` + Tailwind 4 (CSS-first config, `@tailwindcss/vite`, `tw-animate-css`) — stack v2 | this PR | ✅ pack landed (pinned `design: "shadcn@v4"`; bareword still v3) |
 | 1.3 | `mui@v7` (new Grid `size=`, React 19) — stack v2 | #160 | ✅ pack landed (pinned `design: "mui@v7"`; bareword still v5) |
@@ -459,6 +460,24 @@ the **deployed** playground-e2e (`shadcn-v4-preview-runtime.spec.ts`,
 esm.sh-dependent so it self-skips locally) confirming the pinned
 `storybook-shadcn-v4` preview boots styled — same "prove out live
 before flipping" discipline as mantine@v9 (lesson #7).
+
+### 13. Flipping the *default* pack's stack churns walker tests
+
+The stack-v3 rollout moved the default pack (mantine@v9 — what a
+`react`/`static` deployable with no `design:` slot resolves to) onto
+Router 7. Six walker suites (`typed-page-params`,
+`button-navigation`, `walker-anchor`, `walker-formatters`) hardcoded
+`from "react-router-dom"` because they generate through the default
+pack. They went red the moment mantine@v9 flipped — *not* a
+regression, just stale literals. Negative assertions
+(`not.toMatch(/react-router-dom/)`) were already correct. **When a
+stack change reaches the default pack, grep the test suite for the
+old framework literal before declaring the per-pack PR done** —
+update positive assertions in the same PR (the byte-identical guard
++ `npm test` catches them, but only if you run the full suite, not
+just the per-pack shard). Per-pack PRs that *don't* touch the
+default (chakra/mui/shadcn here) stay green because their tests pin
+their own pack.
 
 ## Backend stacks (Phase 2)
 
