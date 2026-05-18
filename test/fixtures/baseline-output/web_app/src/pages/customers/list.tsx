@@ -1,5 +1,5 @@
 // Auto-generated.  Do not edit by hand.
-import { useNavigate, Link as RouterLink } from "react-router-dom";
+import { useNavigate, Link as RouterLink } from "react-router";
 import { IdValue } from "../../lib/format";
 import { Alert, Anchor, Breadcrumbs, Button, Center, Group, Paper, Skeleton, Stack, Table, Text, Title } from "@mantine/core";
 import { useAllCustomers } from "../../api/customer";

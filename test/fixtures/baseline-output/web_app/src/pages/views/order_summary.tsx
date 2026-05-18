@@ -1,5 +1,5 @@
 // Auto-generated.  Do not edit by hand.
-import { Link as RouterLink } from "react-router-dom";
+import { Link as RouterLink } from "react-router";
 import { IdValue } from "../../lib/format";
 import { Alert, Badge, Center, Paper, Skeleton, Stack, Table, Text, Title } from "@mantine/core";
 import { useOrderSummaryView } from "../../api/views";
