@@ -1,0 +1,10 @@
+{{#if hasTabs}}<Tabs.Root defaultValue="{{defaultValue}}"{{{testidAttr}}}>
+{{indent}}<Tabs.List>
+{{innerIndent}}{{#each tabs}}<Tabs.Trigger value="{{this.value}}">{{{this.label}}}</Tabs.Trigger>{{#unless @last}}
+{{../innerIndent}}{{/unless}}{{/each}}
+{{indent}}</Tabs.List>
+{{indent}}{{#each tabs}}<Tabs.Content value="{{this.value}}">
+{{../innerIndent}}{{{this.bodyJsx}}}
+{{../indent}}</Tabs.Content>{{#unless @last}}
+{{../indent}}{{/unless}}{{/each}}
+{{closeIndent}}</Tabs.Root>{{else}}<Tabs.Root{{{testidAttr}}} />{{/if}}

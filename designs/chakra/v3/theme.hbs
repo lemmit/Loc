@@ -1,0 +1,51 @@
+// Auto-generated.  Do not edit by hand.
+import { createSystem, defaultConfig, defineConfig } from "@chakra-ui/react";
+
+// Chakra v3: `extendTheme` was removed in favour of a config object
+// merged into `defaultConfig` via `createSystem`.  Tokens are
+// value-wrapped (`{ value: … }`); `colorPalette="brand"` resolves
+// through the semantic-token aliases below (Chakra v3 does not
+// derive palette roles from the raw 50–900 scale automatically).
+const config = defineConfig({
+  theme: {
+    tokens: {
+      colors: {
+        brand: {
+          50:  { value: "{{brandShades.[0]}}" },
+          100: { value: "{{brandShades.[1]}}" },
+          200: { value: "{{brandShades.[2]}}" },
+          300: { value: "{{brandShades.[3]}}" },
+          400: { value: "{{brandShades.[4]}}" },
+          500: { value: "{{brandShades.[5]}}" },
+          600: { value: "{{brandShades.[6]}}" },
+          700: { value: "{{brandShades.[7]}}" },
+          800: { value: "{{brandShades.[8]}}" },
+          900: { value: "{{brandShades.[9]}}" },
+        },
+      },
+      fonts: {
+        body:    { value: {{json fontFamily}} },
+        heading: { value: {{json fontFamily}} },
+        mono:    { value: {{json fontFamilyMonospace}} },
+      },
+      radii: {
+        base: { value: "{{chakraRadius radius}}" },
+      },
+    },
+    semanticTokens: {
+      colors: {
+        brand: {
+          solid:      { value: "{colors.brand.500}" },
+          contrast:   { value: "white" },
+          fg:         { value: "{colors.brand.700}" },
+          muted:      { value: "{colors.brand.100}" },
+          subtle:     { value: "{colors.brand.50}" },
+          emphasized: { value: "{colors.brand.600}" },
+          focusRing:  { value: "{colors.brand.500}" },
+        },
+      },
+    },
+  },
+});
+
+export const system = createSystem(defaultConfig, config);

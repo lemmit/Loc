@@ -1,0 +1,13 @@
+<Controller
+          control={control}
+          name="{{path}}"
+          render={({ field, fieldState }) => (
+            <Field.Root invalid={!!fieldState.error}>
+              <Field.Label>{{label}}</Field.Label>
+              <NumberInput.Root value={String(field.value ?? 0)} onValueChange={(e) => field.onChange(Number.isNaN(e.valueAsNumber) ? 0 : e.valueAsNumber)} step={1} data-testid="{{testId}}">
+                <NumberInput.Input />
+              </NumberInput.Root>
+              <Field.ErrorText>{fieldState.error?.message}</Field.ErrorText>
+            </Field.Root>
+          )}
+        />

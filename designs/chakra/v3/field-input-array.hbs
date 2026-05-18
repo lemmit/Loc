@@ -1,0 +1,5 @@
+<Field.Root invalid={!!( {{errorExpr}} )}>
+          <Field.Label>{{label}}</Field.Label>
+          <Input {...register("{{path}}")} data-testid="{{testId}}" placeholder="(arrays not yet supported in forms)" disabled />
+          <Field.ErrorText>{ {{errorExpr}} }</Field.ErrorText>
+        </Field.Root>

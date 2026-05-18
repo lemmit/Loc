@@ -1,0 +1,442 @@
+{
+  "name": "chakra",
+  "version": "v3",
+  "stack": "v2",
+  "emits": {
+    "theme": "theme.hbs",
+    "main": "main.hbs",
+    "toaster": "toaster.hbs",
+    "format-helpers": "format-helpers.hbs",
+    "app-shell": "app-shell.hbs",
+    "package-json": "package-json.hbs",
+    "tsconfig": "tsconfig.hbs",
+    "vite-config": "vite-config.hbs",
+    "field-input-string": "field-input-string.hbs",
+    "field-input-int": "field-input-int.hbs",
+    "field-input-decimal": "field-input-decimal.hbs",
+    "field-input-bool": "field-input-bool.hbs",
+    "field-input-datetime": "field-input-datetime.hbs",
+    "field-input-id-select": "field-input-id-select.hbs",
+    "field-input-id-text": "field-input-id-text.hbs",
+    "field-input-enum-select": "field-input-enum-select.hbs",
+    "field-input-valueobject": "field-input-valueobject.hbs",
+    "field-input-array": "field-input-array.hbs",
+    "primitive-heading": "primitive-heading.hbs",
+    "primitive-text": "primitive-text.hbs",
+    "primitive-divider": "primitive-divider.hbs",
+    "primitive-stack": "primitive-stack.hbs",
+    "primitive-group": "primitive-group.hbs",
+    "primitive-toolbar": "primitive-toolbar.hbs",
+    "primitive-grid": "primitive-grid.hbs",
+    "primitive-container": "primitive-container.hbs",
+    "primitive-empty": "primitive-empty.hbs",
+    "primitive-button": "primitive-button.hbs",
+    "primitive-card": "primitive-card.hbs",
+    "primitive-stat": "primitive-stat.hbs",
+    "primitive-badge": "primitive-badge.hbs",
+    "primitive-field": "primitive-field.hbs",
+    "primitive-toggle": "primitive-toggle.hbs",
+    "primitive-number-field": "primitive-number-field.hbs",
+    "primitive-password-field": "primitive-password-field.hbs",
+    "primitive-loader": "primitive-loader.hbs",
+    "primitive-anchor": "primitive-anchor.hbs",
+    "primitive-image": "primitive-image.hbs",
+    "primitive-avatar": "primitive-avatar.hbs",
+    "primitive-tabs": "primitive-tabs.hbs",
+    "primitive-table": "primitive-table.hbs",
+    "primitive-money": "primitive-money.hbs",
+    "primitive-date-display": "primitive-date-display.hbs",
+    "primitive-enum-badge": "primitive-enum-badge.hbs",
+    "primitive-id-link": "primitive-id-link.hbs",
+    "primitive-form-of": "primitive-form-of.hbs",
+    "form-of-imports": "form-of-imports.hbs",
+    "form-of-decls": "form-of-decls.hbs",
+    "form-runs-imports": "form-runs-imports.hbs",
+    "form-runs-decls": "form-runs-decls.hbs",
+    "form-default-onsubmit": "form-default-onsubmit.hbs",
+    "primitive-breadcrumbs": "primitive-breadcrumbs.hbs",
+    "primitive-paper": "primitive-paper.hbs",
+    "primitive-skeleton": "primitive-skeleton.hbs",
+    "primitive-alert": "primitive-alert.hbs",
+    "primitive-query-view": "primitive-query-view.hbs",
+    "primitive-key-value-row": "primitive-key-value-row.hbs"
+  },
+  "shellFiles": {
+    "toaster": "src/lib/toaster.tsx"
+  },
+  "helpers": {
+    "chakraRadius": {
+      "xs": "2px",
+      "sm": "4px",
+      "md": "8px",
+      "lg": "12px",
+      "xl": "16px"
+    },
+    "alertVariant": {
+      "red": "error",
+      "yellow": "warning",
+      "green": "success",
+      "blue": "info"
+    }
+  },
+  "imports": {
+    "primitive-heading": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Heading"
+        ]
+      }
+    ],
+    "primitive-text": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Text"
+        ]
+      }
+    ],
+    "primitive-divider": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Separator"
+        ]
+      }
+    ],
+    "primitive-stack": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "VStack"
+        ]
+      }
+    ],
+    "primitive-group": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "HStack"
+        ]
+      }
+    ],
+    "primitive-toolbar": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "HStack"
+        ]
+      }
+    ],
+    "primitive-grid": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Box",
+          "SimpleGrid"
+        ]
+      }
+    ],
+    "primitive-container": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Container"
+        ]
+      }
+    ],
+    "primitive-empty": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Box",
+          "Text"
+        ]
+      }
+    ],
+    "primitive-button": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Button"
+        ]
+      }
+    ],
+    "primitive-card": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Card",
+          "Heading"
+        ]
+      }
+    ],
+    "primitive-stat": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Stat"
+        ]
+      }
+    ],
+    "primitive-badge": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Badge"
+        ]
+      }
+    ],
+    "primitive-field": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Field",
+          "Input"
+        ]
+      }
+    ],
+    "primitive-toggle": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Field",
+          "Switch"
+        ]
+      }
+    ],
+    "primitive-number-field": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Field",
+          "NumberInput"
+        ]
+      }
+    ],
+    "primitive-password-field": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Field",
+          "Input"
+        ]
+      }
+    ],
+    "primitive-loader": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Spinner"
+        ]
+      }
+    ],
+    "primitive-anchor": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Link",
+          "Text"
+        ]
+      }
+    ],
+    "primitive-image": [],
+    "primitive-avatar": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Avatar"
+        ]
+      }
+    ],
+    "primitive-tabs": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Tabs"
+        ]
+      }
+    ],
+    "primitive-table": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Table"
+        ]
+      }
+    ],
+    "primitive-money": [
+      {
+        "from": "../lib/format",
+        "named": [
+          "MoneyValue"
+        ]
+      }
+    ],
+    "primitive-date-display": [
+      {
+        "from": "../lib/format",
+        "named": [
+          "DateTimeValue"
+        ]
+      }
+    ],
+    "primitive-enum-badge": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Badge"
+        ]
+      }
+    ],
+    "primitive-id-link": [
+      {
+        "from": "../lib/format",
+        "named": [
+          "IdValue"
+        ]
+      }
+    ],
+    "primitive-breadcrumbs": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Breadcrumb"
+        ]
+      }
+    ],
+    "primitive-paper": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Box"
+        ]
+      }
+    ],
+    "primitive-skeleton": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Skeleton",
+          "VStack"
+        ]
+      }
+    ],
+    "primitive-alert": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Alert"
+        ]
+      }
+    ],
+    "primitive-key-value-row": [
+      {
+        "from": "../lib/format",
+        "named": [
+          "KeyValueRow"
+        ]
+      }
+    ],
+    "primitive-form-of": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "VStack",
+          "HStack",
+          "Button"
+        ]
+      }
+    ],
+    "field-input-string": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Field",
+          "Input"
+        ]
+      }
+    ],
+    "field-input-int": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Field",
+          "NumberInput"
+        ]
+      }
+    ],
+    "field-input-decimal": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Field",
+          "NumberInput"
+        ]
+      }
+    ],
+    "field-input-bool": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Field",
+          "Switch"
+        ]
+      }
+    ],
+    "field-input-datetime": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Field",
+          "Input"
+        ]
+      }
+    ],
+    "field-input-id-text": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Field",
+          "Input"
+        ]
+      }
+    ],
+    "field-input-id-select": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Field",
+          "NativeSelect"
+        ]
+      }
+    ],
+    "field-input-enum-select": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Field",
+          "NativeSelect"
+        ]
+      }
+    ],
+    "field-input-array": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Field",
+          "Input"
+        ]
+      }
+    ],
+    "field-input-valueobject": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Box",
+          "VStack"
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,9 @@
+{
+              try {
+                {{{mutationCall}}}
+                toaster.create({ type: "success", title: "{{successMessage}}" });
+                {{{redirectStmt}}};
+              } catch (e) {
+                toaster.create({ type: "error", title: (e as Error).message });
+              }
+            }

@@ -1,0 +1,14 @@
+{{#if hasTitle}}{{#if hasContent}}<Card.Root variant="outline"{{{testidAttr}}}>
+{{indent}}<Card.Body>
+{{indent}}<Heading size="sm">{{{titleText}}}</Heading>
+{{indent}}{{{contentJsx}}}
+{{indent}}</Card.Body>
+{{closeIndent}}</Card.Root>{{else}}<Card.Root variant="outline"{{{testidAttr}}}>
+{{indent}}<Card.Body>
+{{indent}}<Heading size="sm">{{{titleText}}}</Heading>
+{{indent}}</Card.Body>
+{{closeIndent}}</Card.Root>{{/if}}{{else}}{{#if hasContent}}<Card.Root variant="outline"{{{testidAttr}}}>
+{{indent}}<Card.Body>
+{{indent}}{{{contentJsx}}}
+{{indent}}</Card.Body>
+{{closeIndent}}</Card.Root>{{else}}<Card.Root variant="outline"{{{testidAttr}}} />{{/if}}{{/if}}

@@ -1,0 +1,3 @@
+{{#if hasChildren}}<Box borderWidth="1px" borderRadius="md"{{#if hasPadding}} p={ {{{padding}}} }{{else}} p={4}{{/if}}{{{testidAttr}}}>
+{{indent}}{{{childrenBlock}}}
+{{closeIndent}}</Box>{{else}}<Box borderWidth="1px" borderRadius="md"{{#if hasPadding}} p={ {{{padding}}} }{{else}} p={4}{{/if}}{{{testidAttr}}} />{{/if}}

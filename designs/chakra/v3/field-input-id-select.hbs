@@ -1,0 +1,19 @@
+<Controller
+          control={control}
+          name="{{path}}"
+          render={({ field, fieldState }) => (
+            <Field.Root invalid={!!fieldState.error}>
+              <Field.Label>{{label}}</Field.Label>
+              <NativeSelect.Root data-testid="{{testId}}">
+                <NativeSelect.Field value={field.value as string ?? ""} onChange={(e) => field.onChange(e.target.value)}>
+                  <option value="">— select —</option>
+                  {({{{hookVar}}}.data ?? []).map((__o) => (
+                    <option key={__o.id} value={__o.id} data-testid={`{{testId}}-option-${__o.id}`}>{__o["{{displayField}}"]}</option>
+                  ))}
+                </NativeSelect.Field>
+                <NativeSelect.Indicator />
+              </NativeSelect.Root>
+              <Field.ErrorText>{fieldState.error?.message}</Field.ErrorText>
+            </Field.Root>
+          )}
+        />

@@ -1,0 +1,1 @@
+{{#if hasBind}}<Switch.Root checked={{expr bind}} onCheckedChange={(e) => {{setter}}(e.checked)}{{{testidAttr}}}><Switch.HiddenInput /><Switch.Control /><Switch.Label>{{{labelAttr}}}</Switch.Label></Switch.Root>{{else}}<Switch.Root{{{testidAttr}}}><Switch.HiddenInput /><Switch.Control /><Switch.Label>{{{labelAttr}}}</Switch.Label></Switch.Root>{{/if}}
