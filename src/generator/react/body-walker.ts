@@ -221,7 +221,7 @@ export interface WalkResult {
    *  primitive.  Shell consumes this to emit `useForm` / `Controller`
    *  imports, mutation hook, `defaultValues`, and the `onSubmit`
    *  handler that wraps the form's `<form onSubmit={…}>`. */
-  formOf: FormOfState | null;
+  formOfs: FormOfState[];
   /** Slice A5 — every static `testid:` literal encountered while
    *  walking the body, plus the synthesised testid bases the walker
    *  generates on the user's behalf (e.g. `<form-namespace>-input-
@@ -404,7 +404,7 @@ export function walkBodyToTsx(
     bcByAggregate,
     workflowsByName,
     bcByWorkflow,
-    formOf: null,
+    formOfs: [],
     collectedTestids: new Set(),
     helperImports: helperNameToPath,
     usedHelpers: new Set(),
@@ -420,7 +420,7 @@ export function walkBodyToTsx(
     usedUserComponents: ctx.usedUserComponents,
     usesChildren: ctx.usesChildren,
     usedApiHooks: ctx.usedApiHooks,
-    formOf: ctx.formOf,
+    formOfs: ctx.formOfs,
     collectedTestids: ctx.collectedTestids,
     usedHelpers: ctx.usedHelpers,
   };
@@ -470,7 +470,7 @@ interface WalkContext {
    *  `onSubmit:` lambda body, redirect path) so the shell can
    *  emit `useForm` + mutation hook + `handleSubmit` wiring at
    *  function top. */
-  formOf: FormOfState | null;
+  formOfs: FormOfState[];
   /** Slice A5 — accumulator for static `testid:` strings the body
    *  emits, used by the walker-side page-object builder. */
   collectedTestids: Set<string>;
@@ -1054,7 +1054,9 @@ function propagateChildFlags(
   if (child.usesRouterLink) parent.usesRouterLink = true;
   if (child.usesState) parent.usesState = true;
   if (child.usesChildren) parent.usesChildren = true;
-  if (child.formOf) parent.formOf = child.formOf;
+  for (const f of child.formOfs) {
+    if (!parent.formOfs.includes(f)) parent.formOfs.push(f);
+  }
 }
 
 /** Slice A2 — extend the WalkContext.lambdaParams map with a new
@@ -1315,7 +1317,7 @@ function emitFormOfAggregate(
     }
     propagateChildFlags(ctx, childCtx);
   }
-  ctx.formOf = {
+  ctx.formOfs.push({
     kind: "aggregate",
     agg,
     bc,
@@ -1326,7 +1328,7 @@ function emitFormOfAggregate(
     testidNamespace,
     fieldHtmls,
     onSubmitJs,
-  };
+  });
   const slug = snake(plural(agg.name));
   const submitBody =
     onSubmitJs !== null
@@ -1434,7 +1436,7 @@ function emitFormRuns(
     }
     propagateChildFlags(ctx, childCtx);
   }
-  ctx.formOf = {
+  ctx.formOfs.push({
     kind: "workflow",
     workflow,
     bc,
@@ -1445,7 +1447,7 @@ function emitFormRuns(
     testidNamespace,
     fieldHtmls,
     onSubmitJs,
-  };
+  });
   const submitBody =
     onSubmitJs !== null
       ? onSubmitJs
@@ -2856,7 +2858,7 @@ export function renderCustomLayoutPage(
     usesRouterLink,
     usedUserComponents,
     usedApiHooks,
-    formOf,
+    formOfs,
     usedHelpers,
   } = walkBodyToTsx(
     body,
@@ -2900,7 +2902,7 @@ export function renderCustomLayoutPage(
       bcByAggregate: new Map(),
       workflowsByName: new Map(),
       bcByWorkflow: new Map(),
-      formOf: null,
+      formOfs: [],
       collectedTestids: new Set(),
       helperImports: new Map(),
       usedHelpers: new Set(),
@@ -2941,13 +2943,28 @@ export function renderCustomLayoutPage(
   const apiHookDecls = [...usedApiHooks.values()]
     .map((h) => `  const ${h.varName} = ${h.hookName}(${h.argsRendered.join(", ")});\n`)
     .join("");
-  // Slice A4 — RHF wiring when the body included a `Form(of: <Agg>)`
-  // primitive.  Emits the create-mutation hook import, per-Id<X>
-  // target `useAllX()` hooks, the `useForm` declaration, and the
-  // `react-hook-form` import.  When the user provided an explicit
-  // `onSubmit:` lambda the shell wires that into `handleSubmit`;
-  // otherwise the default is the scaffold-equivalent create flow.
-  const form = renderFormOfWiring(formOf, pack, srcImportPrefix);
+  // Slice A4 — RHF wiring when the body included `Form(of:)` /
+  // `Form(runs:)` / `Form(of:, op:)` primitives.  Emits the
+  // mutation-hook import, per-Id<X> target `useAllX()` hooks, the
+  // `useForm` declaration, and the `react-hook-form` import.  A
+  // detail page can host several forms (one per operation modal)
+  // plus its QueryView, so wiring is concatenated across every
+  // recorded form state.
+  const form = formOfs.reduce<{
+    imports: string;
+    decls: string;
+    usesNavigate: boolean;
+  }>(
+    (acc, state) => {
+      const w = renderFormOfWiring(state, pack, srcImportPrefix);
+      return {
+        imports: acc.imports + w.imports,
+        decls: acc.decls + w.decls,
+        usesNavigate: acc.usesNavigate || w.usesNavigate,
+      };
+    },
+    { imports: "", decls: "", usesNavigate: false },
+  );
   const hasParams = params.length > 0;
   const routerSpecifiers: string[] = [];
   if (hasParams) routerSpecifiers.push("useParams");
@@ -3005,12 +3022,11 @@ ${paramsLine}${navigateLine}${stateLines}${apiHookDecls}${form.decls}${titleEffe
  *  the shell-level surroundings: imports + in-function hook
  *  declarations + the `usesNavigate` signal. */
 function renderFormOfWiring(
-  state: FormOfState | null,
+  state: FormOfState,
   pack: LoadedPack,
   /** Slice C2 — see `renderImportLines` for prefix semantics. */
   srcImportPrefix: string = "../",
 ): { imports: string; decls: string; usesNavigate: boolean } {
-  if (!state) return { imports: "", decls: "", usesNavigate: false };
   if (state.kind === "workflow") {
     return renderFormRunsWiring(state, pack, srcImportPrefix);
   }
@@ -3225,7 +3241,7 @@ function renderInitExpr(expr: ExprIR, pack: LoadedPack): string {
     bcByAggregate: new Map(),
     workflowsByName: new Map(),
     bcByWorkflow: new Map(),
-    formOf: null,
+    formOfs: [],
     collectedTestids: new Set(),
     helperImports: new Map(),
     usedHelpers: new Set(),
