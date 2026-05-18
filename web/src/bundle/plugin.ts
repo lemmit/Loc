@@ -624,6 +624,22 @@ export function makeLoomPlugin(ctx: VirtualFsContext, opts?: PluginOptions): Plu
         return { path: args.path, namespace: SHIM_NAMESPACE };
       });
 
+      // Tailwind 4 (shadcn@v4) is CSS-first: the generated
+      // globals.css does `@import "tailwindcss"` (+ optionally
+      // `@import "tw-animate-css"`).  esbuild's css loader would
+      // otherwise hand those bare specifiers to the esm.sh resolver
+      // below as JS modules and break the bundle.  Mark them
+      // external so the `@import` directives survive verbatim into
+      // the bundled CSS, where the iframe's `@tailwindcss/browser`
+      // runtime compiles them at load time — the v4 analogue of the
+      // v3 Play-CDN `@tailwind`-directive path.  Generated code
+      // never JS-imports these specifiers, so a kind check isn't
+      // needed.
+      build.onResolve(
+        { filter: /^tailwindcss($|\/)|^tw-animate-css$/ },
+        (args) => ({ path: args.path, external: true }),
+      );
+
       // Relative imports within the virtual fs.  Fires for the
       // stdin entry (which has no namespace) and for transitive
       // virtual-fs files; http-namespace files have their own

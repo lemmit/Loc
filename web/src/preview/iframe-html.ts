@@ -62,29 +62,47 @@ function importMap(versions: Record<string, string>): Record<string, string> {
 
 const ESCAPE_END_SCRIPT = (s: string): string => s.replace(/<\/script/gi, "<\\/script");
 
-function styleTagFor(css?: string): string {
-  if (!css) return "";
-  // shadcn-generated globals.css starts with `@tailwind base; @tailwind
-  // components; @tailwind utilities;` — those are PostCSS directives that
-  // need a build step.  In the playground we don't have a Tailwind build
-  // pipeline (esbuild-wasm's CSS loader is plain text), so we detect the
-  // directives and route the CSS through Tailwind's Play CDN: a JIT
-  // compiler that processes `<style type="text/tailwindcss">` blocks at
-  // load time and watches the DOM for new classes.  Mantine's
-  // pre-compiled CSS goes through the regular `<style>` tag — no JIT
-  // needed.
-  if (/^\s*@tailwind\b/m.test(css)) {
-    return `<style type="text/tailwindcss">\n${css}\n</style>`;
-  }
-  return `<style>\n${css}\n</style>`;
+/** Which Tailwind dialect the bundled CSS is written in, or `null`
+ *  for non-Tailwind (pre-compiled) CSS like Mantine's.
+ *
+ *  - `"v3"`: shadcn@v3 — globals.css opens with `@tailwind base;
+ *    @tailwind components; @tailwind utilities;`.  Compiled by the
+ *    Tailwind 3 Play CDN + an inlined `window.tailwind.config`.
+ *  - `"v4"`: shadcn@v4 — Tailwind 4 is CSS-first; globals.css opens
+ *    with `@import "tailwindcss";` and carries its config inline via
+ *    `@theme` / `@custom-variant`.  Compiled by `@tailwindcss/browser`
+ *    (the v4 successor to the Play CDN); no JS config object. */
+function tailwindFlavor(css?: string): "v3" | "v4" | null {
+  if (!css) return null;
+  if (/^\s*@tailwind\b/m.test(css)) return "v3";
+  if (/^\s*@import\s+["']tailwindcss["']/m.test(css)) return "v4";
+  return null;
 }
 
-/** True when the bundled CSS contains `@tailwind` directives, which is
- *  the playground's signal that the iframe needs the Tailwind Play CDN
- *  + a matching tailwind.config (currently identifies the shadcn pack;
- *  future packs that ship Tailwind would benefit from the same path). */
-function needsTailwindCdn(css?: string): boolean {
-  return !!css && /^\s*@tailwind\b/m.test(css);
+function styleTagFor(css?: string): string {
+  if (!css) return "";
+  // In the playground we have no Tailwind build pipeline
+  // (esbuild-wasm's CSS loader is plain text), so Tailwind-authored
+  // CSS is routed through an in-browser JIT compiler that processes
+  // `<style type="text/tailwindcss">` blocks at load time and
+  // watches the DOM for new classes.  v3 → Play CDN; v4 →
+  // `@tailwindcss/browser`.  Mantine's pre-compiled CSS goes through
+  // a plain `<style>` tag — no JIT needed.
+  const flavor = tailwindFlavor(css);
+  if (flavor === "v3") {
+    return `<style type="text/tailwindcss">\n${css}\n</style>`;
+  }
+  if (flavor === "v4") {
+    // `@tailwindcss/browser` resolves `@import "tailwindcss"`
+    // itself, but cannot fetch the third-party `@import
+    // "tw-animate-css"` (bare specifier, no resolver) — strip it so
+    // the compile doesn't error.  Same intentional divergence as
+    // v3's `tailwindcss-animate`: animation utilities won't run in
+    // the preview but render fine in a real `vite build` deploy.
+    const v4 = css.replace(/^\s*@import\s+["']tw-animate-css["'];?\s*$/m, "");
+    return `<style type="text/tailwindcss">\n${v4}\n</style>`;
+  }
+  return `<style>\n${css}\n</style>`;
 }
 
 /** Tailwind Play CDN configuration — mirrors `designs/shadcn/tailwind-
@@ -190,15 +208,22 @@ export function makePreviewHtml(args: MakePreviewArgs): string {
         `window.__LOOM_API_BASE__ = ${JSON.stringify(args.sandboxBase + "/runtime")};` +
         `</script>`
       : "";
-  // Tailwind Play CDN + config — only when the bundle's CSS uses
-  // `@tailwind` directives.  The CDN script must run BEFORE the
-  // bundle so its DOM observer is registered; we put the config
-  // script first (the CDN reads `window.tailwind.config` on init)
-  // and the CDN script second.
-  const tailwindScripts = needsTailwindCdn(args.css)
-    ? `<script>${TAILWIND_PLAY_CONFIG}</script>\n` +
-      `<script src="https://cdn.tailwindcss.com"></script>`
-    : "";
+  // In-browser Tailwind compiler — only when the bundle's CSS is
+  // Tailwind-authored.  Must run BEFORE the bundle so the DOM
+  // observer is registered ahead of first paint.
+  //   - v3: inline `window.tailwind.config` (the CDN reads it on
+  //     init) then the Tailwind 3 Play CDN.
+  //   - v4: just `@tailwindcss/browser` — Tailwind 4 config lives
+  //     in the CSS (`@theme` / `@custom-variant`), so there is no
+  //     JS config object to inline.
+  const twFlavor = tailwindFlavor(args.css);
+  const tailwindScripts =
+    twFlavor === "v3"
+      ? `<script>${TAILWIND_PLAY_CONFIG}</script>\n` +
+        `<script src="https://cdn.tailwindcss.com"></script>`
+      : twFlavor === "v4"
+        ? `<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>`
+        : "";
   return `<!doctype html>
 <html lang="en">
 <head>

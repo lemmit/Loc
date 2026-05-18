@@ -22,6 +22,7 @@
 | 1.5 | `ashPhoenix` minor → Phoenix 1.8 + Ash 3.24 — separate ecosystem, no React stack | — | pending |
 | 1.X | Promote `BUILTIN_PACK_LATEST.mantine = "v9"` + refresh `test/fixtures/baseline-output/` — bareword `design: mantine` now emits Mantine 9 / React 19; `design: "mantine@v7"` still pins React 18 | #156 | ✅ merged |
 | 1.X | Promote `BUILTIN_PACK_LATEST.chakra = "v3"` + `mui = "v7"` — bareword `design: chakra` / `mui` roll forward; old majors stay pinned via `"chakra@v2"` / `"mui@v5"`. No fixture refresh (acme tracks mantine). shadcn held at v3 — playground injects the Tailwind 3 Play CDN, so promoting shadcn@v4 needs an in-browser Tailwind 4 path first | this PR | ✅ pack defaults flipped |
+| 1.X | Playground in-browser Tailwind 4 path — bundler externalises `@import "tailwindcss"`/`tw-animate-css`; iframe loads `@tailwindcss/browser` for v4 CSS (the v3 Play-CDN analogue).  Unblocks the shadcn@v4 promote (gated on the deployed playground-e2e confirming the pinned `storybook-shadcn-v4` preview boots styled) | this PR | ✅ playground supports v4; shadcn promote is the gated follow-up |
 | 2.a | Hono backend deps (hono 4.6→4.12; drizzle 0.36→0.45; zod 3→4) — first **backend stack** (`hono@v4`) | — | pending |
 | 2.b | Phoenix backend (tighten `postgrex: ">= 0.0.0"`; phoenix 1.7→1.8) — `phoenix@v1` stack | — | pending |
 | 2.c | .NET stack scaffold (`dotnet@v8` baseline; `dotnet@v10` follow-up after 2026-11) | — | not urgent |
@@ -443,6 +444,20 @@ Tailwind-4 path (a real task, not a map flip). General rule:
 JS-runtime (Mantine/Chakra/MUI). CSS-pipeline packs (shadcn) also
 need the playground's in-browser CSS path to understand the new
 major.**
+
+**Update — the v4 path now exists.** `tailwindFlavor(css)` replaces
+`needsTailwindCdn`: `@tailwind` → v3 Play CDN + inlined config;
+`@import "tailwindcss"` → `@tailwindcss/browser` (no JS config, v4
+reads `@theme` from the CSS). The bundler marks `@import
+"tailwindcss"` / `tw-animate-css` external so the directives survive
+verbatim into the bundled CSS instead of esbuild trying to fetch
+them off esm.sh as JS. `tw-animate-css` is stripped before injection
+(no in-browser resolver; same animation-divergence caveat as v3's
+`tailwindcss-animate`). The shadcn@v4 promote is now gated only on
+the **deployed** playground-e2e (`shadcn-v4-preview-runtime.spec.ts`,
+esm.sh-dependent so it self-skips locally) confirming the pinned
+`storybook-shadcn-v4` preview boots styled — same "prove out live
+before flipping" discipline as mantine@v9 (lesson #7).
 
 ## Backend stacks (Phase 2)
 
