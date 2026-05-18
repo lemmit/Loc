@@ -8,9 +8,36 @@ Phase 1.X / Phase 2.
 Snapshot date: **2026-05** (verify against npm/nuget/hex before
 acting; these numbers age).
 
-## Design packs (`designs/<family>/<vN>/package-json.hbs`)
+> **Phase 0.5 note:** the cross-cutting deps below are no longer
+> declared per-pack. They live in `stacks/<id>/stack-package-deps.hbs`
+> (and `-devdeps.hbs`) and are pulled into each pack's
+> `package-json.hbs` via `{{> stack-package-deps}}`. The columns
+> below are still organised per-pack for readability, but a pack's
+> column == the stack it declares (`mantine@v7` → stack `v1`,
+> `mantine@v9` → stack `v2`, …). See
+> [`stack-versioning.md`](./stack-versioning.md).
 
-### React-side cross-cutting deps (declared by every TSX pack)
+## Design packs (pack-specific deps in `designs/<family>/<vN>/package-json.hbs`; framework deps in `stacks/<id>/`)
+
+### Stack-supplied cross-cutting deps (one row per stack)
+
+| package | stack v1 (mantine@v7, chakra@v2, mui@v5, shadcn@v3) | stack v2 (mantine@v9) | latest stable |
+| --- | --- | --- | --- |
+| `react` / `react-dom` | ^18.3.0 | **^19.2.0** | 19.2 |
+| `react-router-dom` | ^6.27.0 | ^6.27.0 (RR 7 is a follow-up stack axis) | **7.x** |
+| `@tanstack/react-query` | ^5.59.0 | ^5.59.0 | 5.100 |
+| `react-hook-form` | ^7.53.0 | ^7.53.0 | 7.75 |
+| `@hookform/resolvers` | ^3.9.0 | ^3.9.0 | **5.x** |
+| `zod` | ^3.23.0 | ^3.23.0 | **4.x** |
+| `dayjs` | ^1.11.0 | ^1.11.0 | 1.11 |
+| `@types/react` / `-dom` (dev) | ^18.3.0 | **^19.2.0** | 19.2 |
+| `@vitejs/plugin-react` (dev) | ^4.3.0 | ^4.3.0 | latest 4.x |
+| `typescript` (dev) | ^5.7.0 | ^5.7.0 | **6.x** |
+| `vite` (dev) | ^5.4.0 | ^5.4.0 | **8.x** |
+
+Per-pack legacy table (kept for the per-dep latest-stable column):
+
+### React-side cross-cutting deps (historically declared by every TSX pack; now stack-supplied)
 
 | package | mantine@v7 | mantine@v9 | shadcn@v3 | mui@v5 | chakra@v2 | latest stable |
 | --- | --- | --- | --- | --- | --- | --- |
