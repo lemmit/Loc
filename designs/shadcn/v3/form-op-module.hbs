@@ -1,0 +1,42 @@
+function {{opPascal}}OpModal({ mut }: { mut: ReturnType<typeof use{{opPascal}}{{aggregateName}}> }) {
+  const [open, setOpen] = useState(false);
+{{#each idTargets}}  const {{this.hookVar}} = useAll{{this.namePlural}}();
+{{/each}}  const form = useForm<{{opPascal}}Request>({
+    resolver: zodResolver({{opPascal}}Request),
+    defaultValues: {{{defaultValuesTs}}},
+  });
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button data-testid="{{slug}}-op-{{opName}}">{{triggerLabel}}</Button>
+      </DialogTrigger>
+      <DialogContent data-testid="{{slug}}-op-{{opName}}-form">
+        <DialogHeader>
+          <DialogTitle>{{humanOp}}</DialogTitle>
+        </DialogHeader>
+        <Form {...form}>
+          <form
+            onSubmit={form.handleSubmit(async (vals) => {
+              try {
+                await mut.mutateAsync(vals);
+                toast.success("{{humanOp}} succeeded");
+                setOpen(false);
+              } catch (e) {
+                toast.error((e as Error).message);
+              }
+            })}
+          >
+            <div className="flex flex-col gap-4">
+              {{#if hasParams}}{{#each fieldHtmls}}{{{this}}}
+              {{/each}}{{else}}<p className="text-sm text-muted-foreground">This operation has no parameters.</p>
+              {{/if}}<div className="flex justify-end gap-2 pt-2">
+                <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+                <Button type="submit" disabled={mut.isPending} data-testid="{{slug}}-op-{{opName}}-submit">{{humanOp}}</Button>
+              </div>
+            </div>
+          </form>
+        </Form>
+      </DialogContent>
+    </Dialog>
+  );
+}

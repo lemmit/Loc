@@ -1,0 +1,44 @@
+function {{opPascal}}OpModal({ mut }: { mut: ReturnType<typeof use{{opPascal}}{{aggregateName}}> }) {
+  const { isOpen, onOpen, onClose } = useDisclosure();
+  const toast = useToast();
+{{#each idTargets}}  const {{this.hookVar}} = useAll{{this.namePlural}}();
+{{/each}}  const {{{destructured}}} = useForm<{{opPascal}}Request>({
+    resolver: zodResolver({{opPascal}}Request),
+    defaultValues: {{{defaultValuesTs}}},
+  });
+  return (
+    <>
+      <Button colorScheme="brand" onClick={onOpen} data-testid="{{slug}}-op-{{opName}}">{{triggerLabel}}</Button>
+      <Modal isOpen={isOpen} onClose={onClose}>
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>{{humanOp}}</ModalHeader>
+          <ModalCloseButton />
+          <form
+            data-testid="{{slug}}-op-{{opName}}-form"
+            onSubmit={handleSubmit(async (vals) => {
+              try {
+                await mut.mutateAsync(vals);
+                toast({ status: "success", description: "{{humanOp}} succeeded" });
+                onClose();
+              } catch (e) {
+                toast({ status: "error", description: (e as Error).message });
+              }
+            })}
+          >
+            <ModalBody>
+              <VStack gap={4}>
+                {{#if hasParams}}{{#each fieldHtmls}}{{{this}}}
+                {{/each}}{{else}}<Text color="gray.500">This operation has no parameters.</Text>
+                {{/if}}</VStack>
+            </ModalBody>
+            <ModalFooter gap={2}>
+              <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+              <Button type="submit" colorScheme="brand" isLoading={mut.isPending} data-testid="{{slug}}-op-{{opName}}-submit">{{humanOp}}</Button>
+            </ModalFooter>
+          </form>
+        </ModalContent>
+      </Modal>
+    </>
+  );
+}

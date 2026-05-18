@@ -52,6 +52,7 @@ import type {
   AggregateIR,
   BoundedContextIR,
   ExprIR,
+  OperationIR,
   ParamIR,
   StateFieldIR,
   StmtIR,
@@ -221,7 +222,7 @@ export interface WalkResult {
    *  primitive.  Shell consumes this to emit `useForm` / `Controller`
    *  imports, mutation hook, `defaultValues`, and the `onSubmit`
    *  handler that wraps the form's `<form onSubmit={…}>`. */
-  formOf: FormOfState | null;
+  formOfs: FormOfState[];
   /** Slice A5 — every static `testid:` literal encountered while
    *  walking the body, plus the synthesised testid bases the walker
    *  generates on the user's behalf (e.g. `<form-namespace>-input-
@@ -297,6 +298,7 @@ const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
   "Alert",
   "QueryView",
   "KeyValueRow",
+  "Modal",
 ]);
 
 export function isWalkableLayoutBody(
@@ -404,7 +406,7 @@ export function walkBodyToTsx(
     bcByAggregate,
     workflowsByName,
     bcByWorkflow,
-    formOf: null,
+    formOfs: [],
     collectedTestids: new Set(),
     helperImports: helperNameToPath,
     usedHelpers: new Set(),
@@ -420,7 +422,7 @@ export function walkBodyToTsx(
     usedUserComponents: ctx.usedUserComponents,
     usesChildren: ctx.usesChildren,
     usedApiHooks: ctx.usedApiHooks,
-    formOf: ctx.formOf,
+    formOfs: ctx.formOfs,
     collectedTestids: ctx.collectedTestids,
     usedHelpers: ctx.usedHelpers,
   };
@@ -470,7 +472,7 @@ interface WalkContext {
    *  `onSubmit:` lambda body, redirect path) so the shell can
    *  emit `useForm` + mutation hook + `handleSubmit` wiring at
    *  function top. */
-  formOf: FormOfState | null;
+  formOfs: FormOfState[];
   /** Slice A5 — accumulator for static `testid:` strings the body
    *  emits, used by the walker-side page-object builder. */
   collectedTestids: Set<string>;
@@ -495,7 +497,10 @@ interface WalkContext {
  *  fields (the form is rendered identically); they differ only in
  *  the imports / hook decls / default submit redirect that the
  *  shell emits around the form. */
-export type FormOfState = AggregateFormState | WorkflowFormState;
+export type FormOfState =
+  | AggregateFormState
+  | WorkflowFormState
+  | OperationFormState;
 
 interface FormStateBase {
   bc: BoundedContextIR;
@@ -535,6 +540,28 @@ export interface WorkflowFormState extends FormStateBase {
   /** Workflow params — all required (no optional filter; workflows
    *  don't have an "optional" notion the way aggregate fields do). */
   fields: WorkflowIR["params"];
+}
+
+/** `Form(of: <Agg>, op: <name>)` — an aggregate-operation
+ *  invocation form.  Unlike create/workflow forms (one per page,
+ *  page-scope `useForm`), op-forms are emitted as module-scope
+ *  components (`function <Op>Form`) opened via the Mantine modals
+ *  manager, so a Detail page can host several without RHF-local
+ *  collisions.  The page scope only declares the mutation hook
+ *  (`const <op> = use<Op><Agg>(id ?? "")`) passed in as `mut`. */
+export interface OperationFormState extends FormStateBase {
+  kind: "operation";
+  agg: AggregateIR;
+  op: OperationIR;
+  /** Operation params (always required — params have no optional
+   *  notion).  Empty ⇒ the form renders a "no parameters" note. */
+  fields: OperationIR["params"];
+  /** Trigger button surface, read from the enclosing `Modal`'s
+   *  `trigger: Button(...)`.  Packs without a modals manager
+   *  (shadcn/mui/chakra) render the trigger inside the self-
+   *  contained `<Op>OpModal` component, so they need it here. */
+  triggerLabel: string;
+  triggerVariant: string;
 }
 
 function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
@@ -675,6 +702,8 @@ function emitComponent(
       return emitButton(call, ctx, depth);
     case "Card":
       return emitCard(call, ctx, depth);
+    case "Modal":
+      return emitModal(call, ctx, depth);
     case "Stat":
       return emitStat(call, ctx, depth);
     case "Badge":
@@ -1054,7 +1083,9 @@ function propagateChildFlags(
   if (child.usesRouterLink) parent.usesRouterLink = true;
   if (child.usesState) parent.usesState = true;
   if (child.usesChildren) parent.usesChildren = true;
-  if (child.formOf) parent.formOf = child.formOf;
+  for (const f of child.formOfs) {
+    if (!parent.formOfs.includes(f)) parent.formOfs.push(f);
+  }
 }
 
 /** Slice A2 — extend the WalkContext.lambdaParams map with a new
@@ -1233,6 +1264,12 @@ function emitFormOf(
   // rest.
   const runsArg = namedArgValue(call, "runs");
   if (runsArg) return emitFormRuns(call, ctx, depth, runsArg);
+  // `Form(of: <Agg>, op: <name>)` → operation-invocation form.
+  // Hosted inside a `Modal`; rendered as a module-scope component
+  // (own `useForm`) so multiple op-forms on one detail page don't
+  // collide on RHF locals.
+  const opArg = namedArgValue(call, "op");
+  if (opArg) return emitFormOfOperation(call, ctx, opArg);
   return emitFormOfAggregate(call, ctx, depth);
 }
 
@@ -1315,7 +1352,7 @@ function emitFormOfAggregate(
     }
     propagateChildFlags(ctx, childCtx);
   }
-  ctx.formOf = {
+  ctx.formOfs.push({
     kind: "aggregate",
     agg,
     bc,
@@ -1326,7 +1363,7 @@ function emitFormOfAggregate(
     testidNamespace,
     fieldHtmls,
     onSubmitJs,
-  };
+  });
   const slug = snake(plural(agg.name));
   const submitBody =
     onSubmitJs !== null
@@ -1434,7 +1471,7 @@ function emitFormRuns(
     }
     propagateChildFlags(ctx, childCtx);
   }
-  ctx.formOf = {
+  ctx.formOfs.push({
     kind: "workflow",
     workflow,
     bc,
@@ -1445,7 +1482,7 @@ function emitFormRuns(
     testidNamespace,
     fieldHtmls,
     onSubmitJs,
-  };
+  });
   const submitBody =
     onSubmitJs !== null
       ? onSubmitJs
@@ -1467,6 +1504,96 @@ function emitFormRuns(
     deeperIndent: "  ".repeat(depth + 4),
     closeIndent: "  ".repeat(depth),
   });
+}
+
+/** `Form(of: <Agg>, op: <name>)` — records an OperationFormState
+ *  and emits no inline JSX.  The enclosing `Modal` primitive
+ *  renders the trigger button; the shell emits the module-scope
+ *  `<Op>Form` component + `open<Op>Modal` opener + the page-scope
+ *  `const <op> = use<Op><Agg>(id ?? "")` mutation hook from the
+ *  recorded state.  Field rendering is byte-identical to
+ *  `Form(of:)` (same preparer + `field-input-*` templates). */
+function emitFormOfOperation(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  opArg: ExprIR,
+): string {
+  const ofArg = namedArgValue(call, "of");
+  const aggName =
+    ofArg && ofArg.kind === "ref"
+      ? ofArg.name
+      : ofArg && ofArg.kind === "literal" && ofArg.lit === "string"
+        ? ofArg.value
+        : undefined;
+  const opName =
+    opArg.kind === "ref"
+      ? opArg.name
+      : opArg.kind === "literal" && opArg.lit === "string"
+        ? opArg.value
+        : undefined;
+  if (!aggName || !opName) {
+    return `{/* Form(of:, op:): missing 'of:' or 'op:' ref */}`;
+  }
+  const agg = ctx.aggregatesByName.get(aggName);
+  const bc = ctx.bcByAggregate.get(aggName);
+  if (!agg || !bc) {
+    return `{/* Form(of: ${aggName}, op: ${opName}): aggregate not found */}`;
+  }
+  const op = agg.operations.find(
+    (o) => o.name === opName && o.visibility === "public",
+  );
+  if (!op) {
+    return `{/* Form(of: ${aggName}, op: ${opName}): no public operation */}`;
+  }
+  // Op params carry no `optional` flag — adapt for form-helpers
+  // exactly as the workflow-form variant does.
+  const fields = op.params;
+  const fieldsForHelpers = fields.map((f) => ({ ...f, optional: false }));
+  const aggregatesByNameMut = new Map(ctx.aggregatesByName);
+  const idTargets = idTargetsInFields(fieldsForHelpers, bc, aggregatesByNameMut);
+  const useController = needsController(
+    fieldsForHelpers,
+    bc,
+    aggregatesByNameMut,
+  );
+  const defaultValuesTs = initialValuesTs(fieldsForHelpers, bc);
+  const testidArg = stringNamed(call, "testid");
+  const testidNamespace =
+    testidArg ?? `${snake(plural(agg.name))}-op-${op.name}`;
+  const fieldVMs = fields.map((f) =>
+    prepareFormFieldVM(
+      f.name,
+      f.type,
+      bc,
+      `${testidNamespace}-input-${f.name}`,
+      aggregatesByNameMut,
+    ),
+  );
+  for (const vm of fieldVMs) registerFormFieldImports(ctx, vm);
+  const fieldHtmls = fieldVMs.map((vm) => renderFormField(vm, ctx.pack));
+  for (const vm of fieldVMs) ctx.collectedTestids.add(vm.testId);
+  ctx.collectedTestids.add(testidNamespace);
+  ctx.collectedTestids.add(`${testidNamespace}-form`);
+  ctx.collectedTestids.add(`${testidNamespace}-submit`);
+  ctx.formOfs.push({
+    kind: "operation",
+    agg,
+    op,
+    bc,
+    fields,
+    idTargets,
+    useController,
+    defaultValuesTs,
+    testidNamespace,
+    fieldHtmls,
+    onSubmitJs: null,
+    // Defaults — the enclosing Modal overrides from its trigger.
+    triggerLabel: humanize(op.name),
+    triggerVariant: "filled",
+  });
+  // No inline JSX — the Modal primitive renders the trigger and
+  // the shell emits the module-scope form component.
+  return "";
 }
 
 function emitToolbar(
@@ -2288,6 +2415,69 @@ function emitCard(
   });
 }
 
+/** `Modal(trigger: Button(...), title: "…", Form(of: A, op: x))`
+ *  — a button that opens a modal hosting an operation form.  For
+ *  the Mantine packs the modal chrome is the `@mantine/modals`
+ *  manager (`modals.open`), so this primitive emits only the
+ *  trigger button wired to the module-scope `open<Op>Modal`
+ *  opener; walking the `Form(of:, op:)` child records the
+ *  OperationFormState the shell turns into that opener + the
+ *  `<Op>Form` component + the page-scope mutation hook. */
+function emitModal(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  const positionals = positionalArgs(call);
+  const formChild = positionals.find(
+    (a): a is ExprIR & { kind: "call" } =>
+      a.kind === "call" && a.name === "Form",
+  );
+  const triggerArg = namedArgValue(call, "trigger");
+  if (
+    !formChild ||
+    !triggerArg ||
+    triggerArg.kind !== "call"
+  ) {
+    return `{/* Modal: expects trigger: Button(...) and a Form(of:, op:) child */}`;
+  }
+  // Walk the form child first — records the OperationFormState
+  // (and returns "" — the form has no inline JSX).
+  walk(formChild, ctx, depth);
+  const opArg = namedArgValue(formChild, "op");
+  const opName =
+    opArg && opArg.kind === "ref"
+      ? opArg.name
+      : opArg && opArg.kind === "literal" && opArg.lit === "string"
+        ? opArg.value
+        : undefined;
+  if (!opName) {
+    return `{/* Modal: child Form missing op: */}`;
+  }
+  const label = unwrapTextLiteral(
+    firstPositionalContent(triggerArg, ctx) ?? '"Action"',
+  );
+  const variant = stringNamed(triggerArg, "variant") ?? "filled";
+  // Backfill the trigger surface onto the OperationFormState the
+  // form child just pushed so packs that own the trigger inside
+  // their module component (shadcn/mui/chakra) can render it.
+  for (let i = ctx.formOfs.length - 1; i >= 0; i--) {
+    const st = ctx.formOfs[i]!;
+    if (st.kind === "operation" && st.op.name === opName) {
+      st.triggerLabel = label;
+      st.triggerVariant = variant;
+      break;
+    }
+  }
+  return renderPrimitive(ctx, "primitive-modal", {
+    label,
+    variant,
+    opPascal: pascal(opName),
+    opCamel: camel(opName),
+    testidAttr: testidAttr(triggerArg, ctx),
+  });
+}
+
 function emitStat(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,
@@ -2856,7 +3046,7 @@ export function renderCustomLayoutPage(
     usesRouterLink,
     usedUserComponents,
     usedApiHooks,
-    formOf,
+    formOfs,
     usedHelpers,
   } = walkBodyToTsx(
     body,
@@ -2900,7 +3090,7 @@ export function renderCustomLayoutPage(
       bcByAggregate: new Map(),
       workflowsByName: new Map(),
       bcByWorkflow: new Map(),
-      formOf: null,
+      formOfs: [],
       collectedTestids: new Set(),
       helperImports: new Map(),
       usedHelpers: new Set(),
@@ -2941,13 +3131,38 @@ export function renderCustomLayoutPage(
   const apiHookDecls = [...usedApiHooks.values()]
     .map((h) => `  const ${h.varName} = ${h.hookName}(${h.argsRendered.join(", ")});\n`)
     .join("");
-  // Slice A4 — RHF wiring when the body included a `Form(of: <Agg>)`
-  // primitive.  Emits the create-mutation hook import, per-Id<X>
-  // target `useAllX()` hooks, the `useForm` declaration, and the
-  // `react-hook-form` import.  When the user provided an explicit
-  // `onSubmit:` lambda the shell wires that into `handleSubmit`;
-  // otherwise the default is the scaffold-equivalent create flow.
-  const form = renderFormOfWiring(formOf, pack, srcImportPrefix);
+  // Slice A4 — RHF wiring when the body included `Form(of:)` /
+  // `Form(runs:)` / `Form(of:, op:)` primitives.  Emits the
+  // mutation-hook import, per-Id<X> target `useAllX()` hooks, the
+  // `useForm` declaration, and the `react-hook-form` import.  A
+  // detail page can host several forms (one per operation modal)
+  // plus its QueryView, so wiring is concatenated across every
+  // recorded form state.
+  const form = formOfs.reduce<{
+    imports: string;
+    decls: string;
+    moduleScope: string;
+    usesNavigate: boolean;
+  }>(
+    (acc, state) => {
+      const w = renderFormOfWiring(state, pack, srcImportPrefix);
+      return {
+        imports: acc.imports + w.imports,
+        decls: acc.decls + w.decls,
+        moduleScope: acc.moduleScope + w.moduleScope,
+        usesNavigate: acc.usesNavigate || w.usesNavigate,
+      };
+    },
+    { imports: "", decls: "", moduleScope: "", usesNavigate: false },
+  );
+  // A detail page with several operation forms concatenates each
+  // form's raw import block, so the same module is imported more
+  // than once (`useForm` from one op, `useForm, Controller` from
+  // another → TS duplicate identifier).  Merge all named imports
+  // by module — union the specifiers, emit one line per module,
+  // first-seen order — exactly the contract `renderImportLines`
+  // applies to the structured import set.
+  form.imports = mergeNamedImportLines(form.imports);
   const hasParams = params.length > 0;
   const routerSpecifiers: string[] = [];
   if (hasParams) routerSpecifiers.push("useParams");
@@ -2984,7 +3199,7 @@ export function renderCustomLayoutPage(
     ? `  const navigate = useNavigate();\n`
     : "";
   return `// Auto-generated.  Do not edit by hand.
-${reactImport}${reactRouterImport}${form.imports}${mantineImport}${apiHookImports}${helperImportLines}${userComponentImports}
+${reactImport}${reactRouterImport}${form.imports}${mantineImport}${apiHookImports}${helperImportLines}${userComponentImports}${form.moduleScope}
 export default function ${pageName}() {
 ${paramsLine}${navigateLine}${stateLines}${apiHookDecls}${form.decls}${titleEffect}  return (
     ${indentJsx(tsx, "    ")}
@@ -3004,15 +3219,74 @@ ${paramsLine}${navigateLine}${stateLines}${apiHookDecls}${form.decls}${titleEffe
  *  `handleSubmit(...)` call directly; this helper produces only
  *  the shell-level surroundings: imports + in-function hook
  *  declarations + the `usesNavigate` signal. */
+/** Merge repeated `import { … } from "M";` lines that target the
+ *  same module M into a single declaration (union of specifiers,
+ *  first-seen order).  Modules that appear exactly once — every
+ *  create/workflow page, and every line for a single-op page —
+ *  pass through byte-identical, so only multi-operation detail
+ *  pages are rewritten.  Non-named-import lines (blank, side-
+ *  effect, default) pass through unchanged in place. */
+function mergeNamedImportLines(block: string): string {
+  const lines = block.split("\n");
+  const re = /^import \{ (.+) \} from "(.+)";$/;
+  const count = new Map<string, number>();
+  for (const line of lines) {
+    const m = re.exec(line);
+    if (m) count.set(m[2]!, (count.get(m[2]!) ?? 0) + 1);
+  }
+  const merged = new Map<string, string[]>();
+  const emitted = new Set<string>();
+  const out: string[] = [];
+  for (const line of lines) {
+    const m = re.exec(line);
+    if (!m || count.get(m[2]!) === 1) {
+      out.push(line);
+      continue;
+    }
+    const mod = m[2]!;
+    const names = m[1]!.split(",").map((s) => s.trim());
+    let bucket = merged.get(mod);
+    if (!bucket) {
+      bucket = [];
+      merged.set(mod, bucket);
+    }
+    for (const n of names) if (!bucket.includes(n)) bucket.push(n);
+    if (!emitted.has(mod)) {
+      emitted.add(mod);
+      out.push(line); // placeholder — rewritten below
+    }
+  }
+  // Rewrite each first-occurrence placeholder with the unioned line.
+  for (let i = 0; i < out.length; i++) {
+    const m = re.exec(out[i]!);
+    if (m && merged.has(m[2]!)) {
+      out[i] = `import { ${merged.get(m[2]!)!.join(", ")} } from "${m[2]!}";`;
+    }
+  }
+  return out.join("\n");
+}
+
+type FormWiring = {
+  imports: string;
+  decls: string;
+  /** Module-scope helper functions emitted above `export default
+   *  function` (operation forms only — their `<Op>Form` component
+   *  + `open<Op>Modal` opener).  Empty for create/workflow forms. */
+  moduleScope: string;
+  usesNavigate: boolean;
+};
+
 function renderFormOfWiring(
-  state: FormOfState | null,
+  state: FormOfState,
   pack: LoadedPack,
   /** Slice C2 — see `renderImportLines` for prefix semantics. */
   srcImportPrefix: string = "../",
-): { imports: string; decls: string; usesNavigate: boolean } {
-  if (!state) return { imports: "", decls: "", usesNavigate: false };
+): FormWiring {
   if (state.kind === "workflow") {
     return renderFormRunsWiring(state, pack, srcImportPrefix);
+  }
+  if (state.kind === "operation") {
+    return renderFormOpWiring(state, pack, srcImportPrefix);
   }
   const { agg, idTargets, useController, defaultValuesTs, onSubmitJs } = state;
   const tplCtx = {
@@ -3038,7 +3312,62 @@ function renderFormOfWiring(
   return {
     imports: imports.endsWith("\n") ? imports : imports + "\n",
     decls: decls.endsWith("\n") ? decls : decls + "\n",
+    moduleScope: "",
     usesNavigate: onSubmitJs === null,
+  };
+}
+
+/** `Form(of: <Agg>, op: <name>)` wiring.  Splits into three
+ *  emission sites: page-scope `decls` (the mutation hook
+ *  `const <op> = use<Op><Agg>(id ?? "")`), `imports` (op hook +
+ *  request type + RHF + notifications + modals manager), and
+ *  `moduleScope` (the `<Op>Form` component — own `useForm`, op-
+ *  param inputs — plus the `open<Op>Modal` opener the trigger
+ *  button calls).  Mirrors the deleted legacy operation-modal
+ *  renderer's contract. */
+function renderFormOpWiring(
+  state: OperationFormState,
+  pack: LoadedPack,
+  srcImportPrefix: string,
+): FormWiring {
+  const { agg, op, idTargets, useController, defaultValuesTs, fieldHtmls } =
+    state;
+  const opPascal = pascal(op.name);
+  const tplCtx = {
+    aggregateName: agg.name,
+    aggregateNameCamel: camel(agg.name),
+    opName: op.name,
+    opPascal,
+    opCamel: camel(op.name),
+    humanOp: humanize(op.name),
+    slug: snake(plural(agg.name)),
+    srcImportPrefix,
+    idTargets: idTargets.map((t) => ({
+      name: t.name,
+      nameCamel: camel(t.name),
+      namePlural: plural(t.name),
+      hookVar: idTargetHookVar(t),
+    })),
+    useController,
+    defaultValuesTs,
+    hasParams: fieldHtmls.length > 0,
+    fieldHtmls,
+    triggerLabel: state.triggerLabel,
+    triggerVariant: state.triggerVariant,
+    destructured: useController
+      ? "{ register, handleSubmit, control, formState: { errors } }"
+      : "{ register, handleSubmit, formState: { errors } }",
+  };
+  const imports = pack.render("form-op-imports", tplCtx);
+  const decls = pack.render("form-op-decls", tplCtx);
+  const moduleScope = pack.render("form-op-module", tplCtx);
+  return {
+    imports: imports.endsWith("\n") ? imports : imports + "\n",
+    decls: decls.endsWith("\n") ? decls : decls + "\n",
+    moduleScope: moduleScope.endsWith("\n")
+      ? moduleScope
+      : moduleScope + "\n",
+    usesNavigate: false,
   };
 }
 
@@ -3051,7 +3380,7 @@ function renderFormRunsWiring(
   state: WorkflowFormState,
   pack: LoadedPack,
   srcImportPrefix: string,
-): { imports: string; decls: string; usesNavigate: boolean } {
+): FormWiring {
   const { workflow, idTargets, useController, defaultValuesTs, onSubmitJs } = state;
   const wfPascal = pascal(workflow.name);
   const tplCtx = {
@@ -3074,6 +3403,7 @@ function renderFormRunsWiring(
   return {
     imports: imports.endsWith("\n") ? imports : imports + "\n",
     decls: decls.endsWith("\n") ? decls : decls + "\n",
+    moduleScope: "",
     usesNavigate: onSubmitJs === null,
   };
 }
@@ -3225,7 +3555,7 @@ function renderInitExpr(expr: ExprIR, pack: LoadedPack): string {
     bcByAggregate: new Map(),
     workflowsByName: new Map(),
     bcByWorkflow: new Map(),
-    formOf: null,
+    formOfs: [],
     collectedTestids: new Set(),
     helperImports: new Map(),
     usedHelpers: new Set(),

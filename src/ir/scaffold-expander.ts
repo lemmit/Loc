@@ -247,10 +247,10 @@ function expandAggregateDetail(
   const humanAgg = humanize(agg.name);
   const cellVar = "data";
 
-  // One KeyValueRow per non-collection aggregate field.  Collection
-  // fields (`contains lines: …`) belong in their own nested-table
-  // section — A12+ scope.  Same skip rule as the list expander uses
-  // for value-object cells (no scalar cell renderer for them).
+  // One KeyValueRow per non-collection aggregate field.  Value-object
+  // / array fields have no scalar cell renderer — same skip rule as
+  // the list expander.  Collection containments render below as their
+  // own nested-table section (related-entity lists).
   const rows: ExprIR[] = [];
   for (const f of agg.fields) {
     const inner = f.type.kind === "optional" ? f.type.inner : f.type;
@@ -262,6 +262,126 @@ function expandAggregateDetail(
       ]),
     );
   }
+
+  // Related-entity lists.  Each `contains <name>: <Part>[]` collection
+  // becomes a titled Card holding a Table over `data.<name>`, one
+  // Column per part field (same type-driven accessor the list
+  // expander uses for aggregate columns).  Non-collection (single)
+  // containments render as a small KeyValueRow card so the nested
+  // record is still visible without a JSON-dump primitive.
+  const relatedCards: ExprIR[] = [];
+  for (const c of agg.contains) {
+    const part = agg.parts.find((p) => p.name === c.partName);
+    if (!part) continue;
+    const humanPart = humanize(c.name);
+    if (c.collection) {
+      const partRowVar = "row";
+      const cols: ExprIR[] = [];
+      for (const f of part.fields) {
+        const inner = f.type.kind === "optional" ? f.type.inner : f.type;
+        if (inner.kind === "valueobject" || inner.kind === "array") continue;
+        cols.push(
+          call("Column", [
+            lit(humanize(f.name)),
+            lambda(partRowVar, columnAccessorFor(f.name, f.type, partRowVar)),
+          ]),
+        );
+      }
+      relatedCards.push(
+        call(
+          "Card",
+          [
+            call("Stack", [
+              call("Heading", [lit(humanPart)], undefined, [
+                ["level", intLit(4)],
+              ]),
+              call("Table", [...cols], undefined, [
+                ["rows", member(ref(cellVar), c.name)],
+                ["striped", boolLit(true)],
+                ["highlight", boolLit(true)],
+                ["keyExpr", lit("idx")],
+              ]),
+            ]),
+          ],
+          undefined,
+          [["testid", lit(`${slug}-detail-${snake(c.name)}`)]],
+        ),
+      );
+    } else {
+      const singleRows: ExprIR[] = [];
+      for (const f of part.fields) {
+        const inner = f.type.kind === "optional" ? f.type.inner : f.type;
+        if (inner.kind === "valueobject" || inner.kind === "array") continue;
+        singleRows.push(
+          call("KeyValueRow", [
+            lit(humanize(f.name)),
+            cellAccessorFor(
+              `${c.name}.${f.name}`,
+              f.type,
+              cellVar,
+            ),
+          ]),
+        );
+      }
+      relatedCards.push(
+        call(
+          "Card",
+          [
+            call("Stack", [
+              call("Heading", [lit(humanPart)], undefined, [
+                ["level", intLit(4)],
+              ]),
+              call("Stack", singleRows),
+            ]),
+          ],
+          undefined,
+          [["testid", lit(`${slug}-detail-${snake(c.name)}`)]],
+        ),
+      );
+    }
+  }
+
+  // Operation controls.  Each public operation becomes a Modal
+  // whose trigger Button opens an auto-generated form bound to the
+  // `use<Op><Agg>` mutation hook.  First op filled, the rest light
+  // (matches the legacy detail preparer's button grouping).
+  const opModals: ExprIR[] = [];
+  const publicOps = agg.operations.filter((o) => o.visibility === "public");
+  publicOps.forEach((op, i) => {
+    opModals.push(
+      call(
+        "Modal",
+        [
+          call("Form", [], undefined, [
+            ["of", ref(agg.name)],
+            ["op", ref(op.name)],
+            ["testid", lit(`${slug}-op-${op.name}`)],
+          ]),
+        ],
+        undefined,
+        [
+          ["title", lit(humanize(op.name))],
+          [
+            "trigger",
+            call("Button", [lit(humanize(op.name))], undefined, [
+              ["variant", lit(i === 0 ? "filled" : "light")],
+              ["testid", lit(`${slug}-op-${op.name}`)],
+            ]),
+          ],
+        ],
+      ),
+    );
+  });
+
+  // Compose the loaded-record body: the field card, then the
+  // operation-button row, then the related-entity lists.
+  const dataSections: ExprIR[] = [call("Card", [call("Stack", rows)])];
+  if (opModals.length > 0) dataSections.push(call("Group", opModals));
+  dataSections.push(...relatedCards);
+  const dataBody =
+    dataSections.length > 1
+      ? call("Stack", dataSections)
+      : dataSections[0]!;
 
   return call(
     "Stack",
@@ -296,7 +416,7 @@ function expandAggregateDetail(
             ["color", lit("yellow")],
           ]),
         ],
-        ["data", lambda(cellVar, call("Card", [call("Stack", rows)]))],
+        ["data", lambda(cellVar, dataBody)],
       ]),
     ],
     undefined,

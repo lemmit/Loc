@@ -461,13 +461,58 @@ rendered string.
 | File | Owns |
 | --- | --- |
 | `index.ts` | Project shell (Vite, package.json, tsconfig, index.html, Dockerfile, certs/ dir, App.tsx with router, main.tsx with providers, e2e/ suite shell). |
-| `api-builder.ts` | Per-aggregate API module: Zod schemas (request + response, walked via `wireFieldsForAggregate`) + React Query hooks (one per route). |
-| `pages-builder.ts` | List / New / Detail page TSX, plus part-table rendering and operation-modal scaffolding. |
-| `form-helpers.ts` | Mantine input set computation (precise import lines), per-type input rendering (TextInput / NumberInput / Switch / Select / Fieldset / native datetime), initial-value generation. |
-| `page-objects-builder.ts` | Per-aggregate Playwright page-object class — keyed off the `data-testid` attributes pages-builder sprinkles. |
+| `api-builder.ts` | Per-aggregate API module: Zod schemas (request + response, walked via `wireFieldsForAggregate`) + React Query hooks (one per route, plus one `use<Op><Agg>` mutation hook per public operation). |
+| `body-walker.ts` | The **single** page-codegen path.  Walks a page's `body:` `ExprIR` and emits TSX by dispatching every walker-stdlib primitive (`Stack`/`Table`/`QueryView`/`Form`/`Modal`/`KeyValueRow`/…) through the active design pack's `primitive-*` templates.  No archetype renderers — `page <Name> { body: … }` and scaffolded pages share this one walker. |
+| `form-helpers.ts` | Per-type form-input dispatch (`prepareFormFieldVM`/`renderFormField`): text/number/switch/select/fieldset/datetime, RHF `register` vs `Controller`, initial-value generation, `Id<X>` → `useAll<Target>()` picker injection.  Shared by `Form(of:)`, `Form(runs:)`, and operation-modal forms. |
+| `pages-emitter.ts` | Page shell: wraps the walker's body TSX with `useForm`/mutation-hook/`useParams`/import declarations the body recorded on the walk context. |
+| `page-objects-builder.ts` / `walker-page-objects.ts` | Per-aggregate Playwright page-object class — keyed off the `data-testid` strings every primitive threads through (`testid:` named arg). |
+
+`pages-builder.ts` is the **deleted** legacy archetype renderer's
+husk, retained only as a utility module the Phoenix LiveView
+pipeline still imports; it is not on the React codegen path.
 
 The React side has no `render-expr.ts` / `render-stmt.ts`: the
 frontend doesn't run domain logic, only consumes the wire shape.
+
+### Scaffold expansion (compile-time sugar, not a codegen path)
+
+`scaffold` is **not** a parallel renderer.  It is a two-stage
+compile-time rewrite that lowers a domain selector into ordinary
+walker-stdlib pages a user could have hand-written:
+
+```
+ui { scaffold modules: Sales }
+        │
+        ▼  Pass 1 — AST→AST   src/language/ddd-scaffold-ast-expander.ts
+   synthesised `Page` AST nodes (name, route, menu, and a
+   high-level body call: List(of:) / Form(of:) / Detail(of:, by:) …)
+   each tagged with a `scaffoldOrigin` discriminator
+        │
+        ▼  Pass 2 — IR rewrite   src/ir/scaffold-expander.ts
+   `lowerSystem` → `expandScaffoldPages`: every page whose
+   `scaffoldOrigin` is recognised gets its `body` replaced with the
+   fully-expanded walker-stdlib `ExprIR` (`expandAggregateList`,
+   `expandAggregateDetail`, `expandWorkflowForm`, …)
+        │
+        ▼  the ordinary body-walker renders it through the pack
+```
+
+The IR expander is the contract for *what a scaffolded page
+contains*.  Per archetype:
+
+| Origin | Synthesised body |
+| --- | --- |
+| `aggregate-list` | `Stack(Breadcrumbs, Toolbar(Heading, Button "New"), QueryView(of: api.Agg.all, …, data: Paper(Table(Column per non-collection field))))` |
+| `aggregate-new` | `Stack(Breadcrumbs, Heading, Card(Form(of: Agg)))` |
+| `aggregate-detail` | `Stack(Breadcrumbs, Heading, QueryView(of: api.Agg.byId(id), single: true, data:` → `Card(Stack(KeyValueRow per scalar field))` **+ one `Modal(trigger: Button, Form(of: Agg, op: <name>))` per public operation + one `Card(Heading, Table)` per `contains` collection (related-entity list)** `))` |
+| `workflow-form` | `Stack(Breadcrumbs, Heading, Card(Form(runs: wf)))` |
+| `view-list` | `Stack(Heading, QueryView(of: Views.<name>, data: Paper(Table)))` |
+| `home` / `workflows-index` / `views-index` | `Stack(Heading, Stack(Card per aggregate/workflow/view))` |
+
+Because the output is plain walker stdlib, every scaffolded feature
+is reachable from an explicit `page <Name> { body: … }` —
+`examples/acme-order-explicit.ddd` is the hand-written equivalent of
+`scaffold aggregates: Order` and is asserted byte-equivalent in CI.
 
 ---
 

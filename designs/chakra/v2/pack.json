@@ -58,7 +58,11 @@
     "primitive-skeleton": "primitive-skeleton.hbs",
     "primitive-alert": "primitive-alert.hbs",
     "primitive-query-view": "primitive-query-view.hbs",
-    "primitive-key-value-row": "primitive-key-value-row.hbs"
+    "primitive-key-value-row": "primitive-key-value-row.hbs",
+    "primitive-modal": "primitive-modal.hbs",
+    "form-op-imports": "form-op-imports.hbs",
+    "form-op-decls": "form-op-decls.hbs",
+    "form-op-module": "form-op-module.hbs"
   },
   "helpers": {
     "chakraRadius": {
@@ -473,6 +477,25 @@
         "named": [
           "Box",
           "VStack"
+        ]
+      }
+    ],
+    "primitive-modal": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "Modal",
+          "ModalOverlay",
+          "ModalContent",
+          "ModalHeader",
+          "ModalCloseButton",
+          "ModalBody",
+          "ModalFooter",
+          "useDisclosure",
+          "useToast",
+          "VStack",
+          "Button",
+          "Text"
         ]
       }
     ]

@@ -74,7 +74,11 @@
     "primitive-skeleton": "primitive-skeleton.hbs",
     "primitive-alert": "primitive-alert.hbs",
     "primitive-query-view": "primitive-query-view.hbs",
-    "primitive-key-value-row": "primitive-key-value-row.hbs"
+    "primitive-key-value-row": "primitive-key-value-row.hbs",
+    "primitive-modal": "primitive-modal.hbs",
+    "form-op-imports": "form-op-imports.hbs",
+    "form-op-decls": "form-op-decls.hbs",
+    "form-op-module": "form-op-module.hbs"
   },
   "imports": {
     "primitive-button": [
@@ -349,7 +353,26 @@
         ]
       }
     ],
-    "field-input-valueobject": []
+    "field-input-valueobject": [],
+    "primitive-modal": [
+      {
+        "from": "@/components/ui/button",
+        "named": [
+          "Button"
+        ]
+      },
+      {
+        "from": "@/components/ui/form",
+        "named": [
+          "Form",
+          "FormControl",
+          "FormField",
+          "FormItem",
+          "FormLabel",
+          "FormMessage"
+        ]
+      }
+    ]
   },
   "shellFiles": {
     "globals-css": "src/globals.css",
