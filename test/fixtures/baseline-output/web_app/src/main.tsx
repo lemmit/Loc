@@ -8,7 +8,7 @@ import React from "react";
 // works in both React 18 and 19 — it's the canonical idiom across
 // the React 18+ docs.
 import { createRoot } from "react-dom/client";
-import { BrowserRouter } from "react-router-dom";
+import { BrowserRouter } from "react-router";
 import { MantineProvider } from "@mantine/core";
 import { Notifications } from "@mantine/notifications";
 import { ModalsProvider } from "@mantine/modals";

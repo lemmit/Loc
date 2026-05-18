@@ -1,6 +1,6 @@
 // Slice 11.5 — `Button("label", to: "/path")` wires the rendered
 // Mantine button to a React-Router navigate call.  The page shell
-// pulls `useNavigate` from `react-router-dom` and declares
+// pulls `useNavigate` from `react-router` and declares
 // `const navigate = useNavigate()` so the generated onClick lambda
 // resolves at render time.
 
@@ -42,7 +42,7 @@ describe("Slice 11.5 — Button(to:) navigation in walker-rendered pages", () =>
     expect(content).toBeDefined();
     // useNavigate import + hook call.
     expect(content).toMatch(
-      /import \{ useNavigate \} from "react-router-dom";/,
+      /import \{ useNavigate \} from "react-router";/,
     );
     expect(content).toMatch(/const navigate = useNavigate\(\);/);
     // Button onClick lambda navigates to the literal path.
@@ -134,7 +134,7 @@ describe("Slice 11.5 — Button(to:) navigation in walker-rendered pages", () =>
     // Single combined import line (specifier order: useParams first,
     // useNavigate second, matches the shell logic).
     expect(content).toMatch(
-      /import \{ useParams, useNavigate \} from "react-router-dom";/,
+      /import \{ useParams, useNavigate \} from "react-router";/,
     );
     expect(content).toMatch(/const \{ slug \} = useParams<\{ slug: string \}>\(\);/);
     expect(content).toMatch(/const navigate = useNavigate\(\);/);

@@ -1,5 +1,5 @@
 // Auto-generated.  Do not edit by hand.
-import { Link as RouterLink } from "react-router-dom";
+import { Link as RouterLink } from "react-router";
 import { Anchor, Breadcrumbs, Card, Stack, Text, Title } from "@mantine/core";
 
 export default function ViewsIndex() {
