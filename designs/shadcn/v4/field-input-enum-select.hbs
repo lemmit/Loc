@@ -1,0 +1,22 @@
+<FormField
+          control={form.control}
+          name="{{path}}"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{{label}}</FormLabel>
+              <Select onValueChange={field.onChange} value={(field.value as string) ?? ""}>
+                <FormControl>
+                  <SelectTrigger data-testid="{{testId}}">
+                    <SelectValue placeholder="Select…" />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  {({{{enumValuesJson}}}).map((__v: string) => (
+                    <SelectItem key={__v} value={__v}>{__v}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <FormMessage />
+            </FormItem>
+          )}
+        />

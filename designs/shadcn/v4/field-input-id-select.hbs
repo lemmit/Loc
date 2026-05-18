@@ -1,0 +1,24 @@
+<FormField
+          control={form.control}
+          name="{{path}}"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{{label}}</FormLabel>
+              <Select onValueChange={field.onChange} value={(field.value as string) ?? ""}>
+                <FormControl>
+                  <SelectTrigger data-testid="{{testId}}">
+                    <SelectValue placeholder="Select…" />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  {({{{hookVar}}}.data ?? []).map((__o) => (
+                    <SelectItem key={__o.id} value={__o.id} data-testid={`{{testId}}-option-${__o.id}`}>
+                      {__o.{{displayField}} }
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <FormMessage />
+            </FormItem>
+          )}
+        />

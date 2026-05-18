@@ -1,0 +1,127 @@
+// Auto-generated.  Do not edit by hand.
+//
+// shadcn-flavoured runtime formatting helpers.  Same exported
+// surface as the Mantine variant (IdValue / DateTimeValue /
+// BoolValue / NumberValue / EmptyValue / PlainValue / KeyValueRow)
+// so generated pages can swap packs without changing import call
+// sites — only the rendered DOM differs.
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
+import type { ReactNode } from "react";
+
+/** Empty placeholder for null / undefined / "" values. */
+export function EmptyValue() {
+  return <span className="text-muted-foreground">—</span>;
+}
+
+/** True when the value should render as EmptyValue. */
+export function isEmpty(v: unknown): boolean {
+  return v === null || v === undefined || v === "";
+}
+
+/** Short id display: first 8 chars + ellipsis, full id in tooltip. */
+export function IdValue({ id }: { id: string | null | undefined }) {
+  if (isEmpty(id)) return <EmptyValue />;
+  const s = String(id);
+  return (
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">{s.slice(0, 8)}…</code>
+        </TooltipTrigger>
+        <TooltipContent>{s}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+/** Locale-formatted datetime; raw ISO surfaced in tooltip. */
+export function DateTimeValue({ iso }: { iso: string | null | undefined }) {
+  if (isEmpty(iso)) return <EmptyValue />;
+  const s = String(iso);
+  let pretty = s;
+  try {
+    const d = new Date(s);
+    if (!Number.isNaN(d.getTime())) {
+      pretty = d.toLocaleString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    }
+  } catch {
+    // fall through with raw string
+  }
+  return (
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span>{pretty}</span>
+        </TooltipTrigger>
+        <TooltipContent>{s}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+/** Boolean value as Yes / No, dimmed when false. */
+export function BoolValue({ value }: { value: boolean | null | undefined }) {
+  if (isEmpty(value)) return <EmptyValue />;
+  return value
+    ? <span className="font-medium">Yes</span>
+    : <span className="text-muted-foreground">No</span>;
+}
+
+/** Locale-aware numeric value. */
+export function NumberValue({ value, decimals = 0 }: { value: number | string | null | undefined; decimals?: number }) {
+  if (isEmpty(value)) return <EmptyValue />;
+  const n = typeof value === "number" ? value : Number(value);
+  if (Number.isNaN(n)) return <span>{String(value)}</span>;
+  const fmt = new Intl.NumberFormat(undefined, {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: Math.max(decimals, 2),
+  });
+  return <span className="tabular-nums">{fmt.format(n)}</span>;
+}
+
+/** Currency-formatted numeric value.  Defaults to USD with two
+ *  fractional digits; pass `currency` to switch (e.g. "EUR") and
+ *  `decimals` to override scale. */
+export function MoneyValue({ value, currency = "USD", decimals = 2 }: { value: number | string | null | undefined; currency?: string; decimals?: number }) {
+  if (isEmpty(value)) return <EmptyValue />;
+  const n = typeof value === "number" ? value : Number(value);
+  if (Number.isNaN(n)) return <span>{String(value)}</span>;
+  const fmt = new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency,
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+  return <span className="tabular-nums">{fmt.format(n)}</span>;
+}
+
+/** Generic value display with empty-state handling. */
+export function PlainValue({ value }: { value: unknown }) {
+  if (isEmpty(value)) return <EmptyValue />;
+  return <span>{String(value)}</span>;
+}
+
+/** Two-column key/value row for detail cards. */
+export function KeyValueRow({
+  label,
+  children,
+  className,
+}: {
+  label: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={cn("flex items-start gap-4", className)}>
+      <span className="min-w-[140px] font-medium text-muted-foreground">{label}</span>
+      <div className="flex flex-1 flex-col gap-0.5 min-w-0">{children}</div>
+    </div>
+  );
+}

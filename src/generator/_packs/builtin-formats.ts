@@ -31,6 +31,7 @@ export const BUILTIN_PACK_FORMATS = {
   "mui@v5":        "tsx",
   "mui@v7":        "tsx",
   "shadcn@v3":     "tsx",
+  "shadcn@v4":     "tsx",
   "ashPhoenix@v3": "heex",
 } as const satisfies Record<string, "tsx" | "heex">;
 
