@@ -1,0 +1,9 @@
+{
+              try {
+                {{{mutationCall}}}
+                enqueueSnackbar("{{successMessage}}", { variant: "success" });
+                {{{redirectStmt}}};
+              } catch (e) {
+                enqueueSnackbar((e as Error).message, { variant: "error" });
+              }
+            }

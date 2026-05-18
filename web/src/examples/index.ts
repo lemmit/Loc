@@ -12,6 +12,7 @@ import storybookMantineSource from "./storybook-mantine.ddd?raw";
 import storybookMantineV9Source from "./storybook-mantine-v9.ddd?raw";
 import storybookShadcnSource from "./storybook-shadcn.ddd?raw";
 import storybookMuiSource from "./storybook-mui.ddd?raw";
+import storybookMuiV7Source from "./storybook-mui-v7.ddd?raw";
 import storybookChakraSource from "./storybook-chakra.ddd?raw";
 import storybookChakraV3Source from "./storybook-chakra-v3.ddd?raw";
 import storybookComponentsSource from "./storybook-components.ddd?raw";
@@ -82,6 +83,13 @@ export const examples: LoomExample[] = [
     source: storybookMuiSource,
     blurb:
       "Same catalogue as the Mantine storybook, rendered through the Material UI pack.",
+  },
+  {
+    id: "storybook-mui-v7",
+    label: "MUI v7 · aggregate-CRUD storybook",
+    source: storybookMuiV7Source,
+    blurb:
+      "The MUI storybook pinned to the Material UI v7 pack (new Grid, React 19).",
   },
   {
     id: "storybook-chakra",

@@ -17,8 +17,8 @@
 | 0.5b | Stack-driven bundler hints (`web/src/bundle/stacks.ts`); stack v2 inlines React instead of externalising; runtime-gate e2e spec | #154 | ✅ merged |
 | 1.2 | `mantine@v9` (stack v2 = React 19) — opt-in via pinned form; bareword default still v7 | #148 + #149 + #151 + #152 + #154 | ✅ working live |
 | 1.1 | `tailwind@v4` + `shadcn@v4` (CSS-first config, utility renames) — stack v2 | — | pending |
-| 1.3 | `mui@v7` (Pigment CSS, Grid v2) — stack v2 | — | pending |
-| 1.4 | `chakra@v3` (compound components, `createSystem`, `toaster` — largest delta) — stack v2 | this PR | ✅ pack landed (pinned `design: "chakra@v3"`; bareword still v2) |
+| 1.3 | `mui@v7` (new Grid `size=`, React 19) — stack v2 | this PR | ✅ pack landed (pinned `design: "mui@v7"`; bareword still v5) |
+| 1.4 | `chakra@v3` (compound components, `createSystem`, `toaster` — largest delta) — stack v2 | #157 | ✅ pack landed (pinned `design: "chakra@v3"`; bareword still v2) |
 | 1.5 | `ashPhoenix` minor → Phoenix 1.8 + Ash 3.24 — separate ecosystem, no React stack | — | pending |
 | 1.X | Promote `BUILTIN_PACK_LATEST.mantine = "v9"` + refresh `test/fixtures/baseline-output/` — bareword `design: mantine` now emits Mantine 9 / React 19; `design: "mantine@v7"` still pins React 18 | #156 | ✅ merged |
 | 2.a | Hono backend deps (hono 4.6→4.12; drizzle 0.36→0.45; zod 3→4) — first **backend stack** (`hono@v4`) | — | pending |
@@ -385,6 +385,18 @@ Two `tsc` errors only a real type-check surfaces, both in
   v3's idiom is `<Box asChild …><RouterLink to="/">…</RouterLink></Box>`
   — Box renders the child element and applies its style props as a
   class. Same pattern for `Link asChild` wrapping a router link.
+
+### 10. "Latest stable" ≠ "adopt every optional new engine"
+
+MUI v7's headline feature is Pigment CSS (zero-runtime). It is
+**opt-in** — v7's default is still the emotion engine, and that is
+just as "latest stable". The "no technical debt" rule is about not
+shipping *compat shims for upstream breaking changes*, not about
+chasing every optional new subsystem (which would add build
+complexity for no functional gain). mui@v7's real migration surface
+was tiny: named `createRoot` (React 19) + the new `Grid` `size=`
+prop. Audit-first (lesson #2) caught that the rest of the pack was
+already v7-clean.
 
 ## Backend stacks (Phase 2)
 

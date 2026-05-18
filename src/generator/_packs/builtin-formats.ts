@@ -29,6 +29,7 @@ export const BUILTIN_PACK_FORMATS = {
   "chakra@v2":     "tsx",
   "chakra@v3":     "tsx",
   "mui@v5":        "tsx",
+  "mui@v7":        "tsx",
   "shadcn@v3":     "tsx",
   "ashPhoenix@v3": "heex",
 } as const satisfies Record<string, "tsx" | "heex">;
