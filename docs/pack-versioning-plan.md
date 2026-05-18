@@ -16,8 +16,8 @@
 | 0.5a | Stack scaffold — `stacks/v1` + `stacks/v2`, `PackManifest.stack` field, loader merges stack partials | #153 | ✅ merged |
 | 0.5b | Stack-driven bundler hints (`web/src/bundle/stacks.ts`); stack v2 inlines React instead of externalising; runtime-gate e2e spec | #154 | ✅ merged |
 | 1.2 | `mantine@v9` (stack v2 = React 19) — opt-in via pinned form; bareword default still v7 | #148 + #149 + #151 + #152 + #154 | ✅ working live |
-| 1.1 | `tailwind@v4` + `shadcn@v4` (CSS-first config, utility renames) — stack v2 | — | pending |
-| 1.3 | `mui@v7` (new Grid `size=`, React 19) — stack v2 | this PR | ✅ pack landed (pinned `design: "mui@v7"`; bareword still v5) |
+| 1.1 | `shadcn@v4` + Tailwind 4 (CSS-first config, `@tailwindcss/vite`, `tw-animate-css`) — stack v2 | this PR | ✅ pack landed (pinned `design: "shadcn@v4"`; bareword still v3) |
+| 1.3 | `mui@v7` (new Grid `size=`, React 19) — stack v2 | #160 | ✅ pack landed (pinned `design: "mui@v7"`; bareword still v5) |
 | 1.4 | `chakra@v3` (compound components, `createSystem`, `toaster` — largest delta) — stack v2 | #157 | ✅ pack landed (pinned `design: "chakra@v3"`; bareword still v2) |
 | 1.5 | `ashPhoenix` minor → Phoenix 1.8 + Ash 3.24 — separate ecosystem, no React stack | — | pending |
 | 1.X | Promote `BUILTIN_PACK_LATEST.mantine = "v9"` + refresh `test/fixtures/baseline-output/` — bareword `design: mantine` now emits Mantine 9 / React 19; `design: "mantine@v7"` still pins React 18 | #156 | ✅ merged |
@@ -397,6 +397,32 @@ complexity for no functional gain). mui@v7's real migration surface
 was tiny: named `createRoot` (React 19) + the new `Grid` `size=`
 prop. Audit-first (lesson #2) caught that the rest of the pack was
 already v7-clean.
+
+### 11. Tailwind 4 is a config-shape migration, not a class-rename slog
+
+The headline fear for shadcn@v4 was "utility renames across every
+component file". In practice the v3 utility strings (`shadow-sm`,
+`outline-none`, `ring-*`, `animate-in`, …) still resolve in
+Tailwind 4 — the real, hard breaks are all infrastructure:
+
+- `tailwind.config.ts` + `postcss.config.js` deleted; `@tailwind`
+  triple-directive → single `@import "tailwindcss"`; tokens move
+  into `@theme inline` (kept the `var(--token)` indirection so the
+  `:root` HSL values stay the source of truth and colours don't
+  shift).
+- `tailwindcss` + `autoprefixer` + `postcss` → `tailwindcss@4` +
+  `@tailwindcss/vite` plugin (no PostCSS pipeline at all).
+- `tailwindcss-animate` (JS plugin) → `tw-animate-css` (CSS
+  `@import`) — same `animate-in`/`fade-in` utility names, so the
+  Radix primitives need zero edits.
+- `tailwind-merge` must jump v2 → v3 (v2 only knows TW3 classes).
+- Tailwind 4's default border colour became `currentColor`; a
+  one-line `@layer base { * { border-color: … } }` reasserts the
+  v3 look (shadcn components assume it).
+
+Net: ~5 infra files, **zero** component-class edits. A
+`vite build` shard proves the CSS pipeline resolves; the runtime
+e2e gate catches visual/mount regressions the build can't see.
 
 ## Backend stacks (Phase 2)
 

@@ -11,6 +11,7 @@ import acmeSource from "./acme.ddd?raw";
 import storybookMantineSource from "./storybook-mantine.ddd?raw";
 import storybookMantineV9Source from "./storybook-mantine-v9.ddd?raw";
 import storybookShadcnSource from "./storybook-shadcn.ddd?raw";
+import storybookShadcnV4Source from "./storybook-shadcn-v4.ddd?raw";
 import storybookMuiSource from "./storybook-mui.ddd?raw";
 import storybookMuiV7Source from "./storybook-mui-v7.ddd?raw";
 import storybookChakraSource from "./storybook-chakra.ddd?raw";
@@ -76,6 +77,13 @@ export const examples: LoomExample[] = [
     source: storybookShadcnSource,
     blurb:
       "Same catalogue as the Mantine storybook, rendered through the shadcn/ui pack.",
+  },
+  {
+    id: "storybook-shadcn-v4",
+    label: "shadcn v4 · aggregate-CRUD storybook",
+    source: storybookShadcnV4Source,
+    blurb:
+      "The shadcn storybook pinned to the Tailwind 4 / shadcn v4 pack (CSS-first config, React 19).",
   },
   {
     id: "storybook-mui",

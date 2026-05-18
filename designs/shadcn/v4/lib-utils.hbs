@@ -1,0 +1,12 @@
+// Auto-generated.
+// shadcn's canonical class-merge helper.  `cn()` accepts the same
+// argument shapes as `clsx` (booleans, strings, arrays, objects)
+// and resolves Tailwind class conflicts via `tailwind-merge` so
+// later classes override earlier ones reliably.  Every shadcn UI
+// primitive composes via this helper.
+import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
+
+export function cn(...inputs: ClassValue[]): string {
+  return twMerge(clsx(inputs));
+}

@@ -1,0 +1,6 @@
+{{#if hasChildren}}<div className="grid grid-cols-3 gap-4"{{{testidAttr}}}>
+{{colIndent}}{{#each children}}<div>
+{{../childIndent}}{{{this}}}
+{{../colIndent}}</div>{{#unless @last}}
+{{../colIndent}}{{/unless}}{{/each}}
+{{closeIndent}}</div>{{else}}<div className="grid grid-cols-3 gap-4"{{{testidAttr}}} />{{/if}}

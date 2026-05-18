@@ -1,0 +1,9 @@
+{
+              try {
+                {{{mutationCall}}}
+                toast.success("{{successMessage}}");
+                {{{redirectStmt}}};
+              } catch (e) {
+                toast.error((e as Error).message);
+              }
+            }

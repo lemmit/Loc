@@ -1,0 +1,12 @@
+<FormField
+          control={form.control}
+          name="{{path}}"
+          render={({ field }) => (
+            <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3">
+              <FormLabel>{{label}}</FormLabel>
+              <FormControl>
+                <Switch data-testid="{{testId}}" checked={!!field.value} onCheckedChange={field.onChange} />
+              </FormControl>
+            </FormItem>
+          )}
+        />

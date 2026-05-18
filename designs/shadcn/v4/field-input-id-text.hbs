@@ -1,0 +1,13 @@
+<FormField
+          control={form.control}
+          name="{{path}}"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{{label}}</FormLabel>
+              <FormControl>
+                <Input data-testid="{{testId}}" placeholder={{{placeholderJson}}} {...field} value={(field.value as string) ?? ""} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />

@@ -1,0 +1,23 @@
+// Auto-generated.  Do not edit by hand.
+//
+// shadcn pack: theme tokens live in `src/globals.css` as CSS
+// variables on `:root` (the canonical shadcn pattern).  This file
+// is kept as a stub so the generator's orchestrator can keep its
+// pack-invariant emission contract without special-casing — a
+// future custom pack might still want a TS theme module here.
+//
+// The brand / neutral / radius / fontFamily tokens from the DSL
+// `theme {}` block are NOT yet projected into globals.css; that
+// will land in a follow-up.  For now the shadcn pack uses
+// shadcn's stock zinc-based palette regardless of theme tokens.
+
+export const themeTokens = {
+  brandShades: [
+{{#each brandShades}}    "{{this}}",
+{{/each}}  ] as const,
+  neutralShades: [
+{{#each neutralShades}}    "{{this}}",
+{{/each}}  ] as const,
+  radius: {{json radius}},
+  fontFamily: {{json fontFamily}},
+} as const;

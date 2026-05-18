@@ -1,0 +1,6 @@
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { {{workflowPascal}}Request, use{{workflowPascal}}Workflow } from "{{srcImportPrefix}}api/workflows";
+{{#each idTargets}}import { useAll{{this.namePlural}} } from "{{../srcImportPrefix}}api/{{this.nameCamel}}";
+{{/each}}{{#if hasDefaultOnSubmit}}import { toast } from "sonner";
+{{/if}}
