@@ -48,6 +48,7 @@
 //     uses to decide whether to dispatch to the walker.
 
 import type { ImportSpec, LoadedPack } from "../_packs/loader.js";
+import { routerPackageForStack } from "../_packs/stack-runtime.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -3169,7 +3170,7 @@ export function renderCustomLayoutPage(
   if (usesNavigate || form.usesNavigate) routerSpecifiers.push("useNavigate");
   if (usesRouterLink) routerSpecifiers.push("Link as RouterLink");
   const reactRouterImport = routerSpecifiers.length > 0
-    ? `import { ${routerSpecifiers.join(", ")} } from "react-router-dom";\n`
+    ? `import { ${routerSpecifiers.join(", ")} } from "${routerPackageForStack(pack.manifest.stack)}";\n`
     : "";
   // Slice 11.7 — emit the `useState` hook + per-field declaration
   // when any state ref or `:=` mutation surfaced during the walk.
@@ -3442,7 +3443,7 @@ export function renderUserComponentFile(
   if (usesNavigate) routerSpecifiers.push("useNavigate");
   if (usesRouterLink) routerSpecifiers.push("Link as RouterLink");
   const reactRouterImport = routerSpecifiers.length > 0
-    ? `import { ${routerSpecifiers.join(", ")} } from "react-router-dom";\n`
+    ? `import { ${routerSpecifiers.join(", ")} } from "${routerPackageForStack(pack.manifest.stack)}";\n`
     : "";
   const reactImport = usesState
     ? `import { useState } from "react";\n`

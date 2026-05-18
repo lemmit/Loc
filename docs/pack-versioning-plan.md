@@ -15,6 +15,7 @@
 | 0 | Versioning machinery — `design: "family@vN"`, directory layout, validator + IR + loaders | #147 | ✅ merged |
 | 0.5a | Stack scaffold — `stacks/v1` + `stacks/v2`, `PackManifest.stack` field, loader merges stack partials | #153 | ✅ merged |
 | 0.5b | Stack-driven bundler hints (`web/src/bundle/stacks.ts`); stack v2 inlines React instead of externalising; runtime-gate e2e spec | #154 | ✅ merged |
+| 0.5c | `stacks/v3` scaffold — React 19 + **Router 7** + **zod 4** (+ resolvers 5).  New cutting-edge base (separate, not a v2 mutation).  Router-7 package rename (`react-router-dom`→`react-router`) centralised in `stack-runtime.ts`'s `routerPackageForStack`, read by pack shells (`{{routerPackage}}`) + body-walker.  No pack on v3 yet → byte-identical; validated by a throwaway shadcn@v4-on-v3 `tsc + vite build` run | this PR | ✅ scaffold + seam, byte-identical |
 | 1.2 | `mantine@v9` (stack v2 = React 19) — opt-in via pinned form; bareword default still v7 | #148 + #149 + #151 + #152 + #154 | ✅ working live |
 | 1.1 | `shadcn@v4` + Tailwind 4 (CSS-first config, `@tailwindcss/vite`, `tw-animate-css`) — stack v2 | this PR | ✅ pack landed (pinned `design: "shadcn@v4"`; bareword still v3) |
 | 1.3 | `mui@v7` (new Grid `size=`, React 19) — stack v2 | #160 | ✅ pack landed (pinned `design: "mui@v7"`; bareword still v5) |

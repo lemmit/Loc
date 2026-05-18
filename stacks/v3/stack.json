@@ -1,0 +1,18 @@
+{
+  "id": "v3",
+  "description": "Cutting-edge stack — React 19 + Router 7 + Zod 4 family.",
+  "deps": {
+    "react": "19.2",
+    "react-dom": "19.2",
+    "router": "7 (react-router@^7.0.0 — package renamed from react-router-dom; library mode, v6-compatible API; framework mode is a separate initiative)",
+    "react-hook-form": "7 + @hookform/resolvers@^5 (resolvers 5 is the zod-4-compatible major)",
+    "zod": "4 (^4.0.0)",
+    "typescript": "5.7 (TS 6 follow-up — unchanged from v2)",
+    "vite": "5 (Vite 8 follow-up — unchanged from v2)"
+  },
+  "bundler": {
+    "rdcShim": false,
+    "importmapReactDomQuery": "?external=react&dev=false",
+    "comment": "React 19 — identical bundler policy to v2 (same React major). The v3 delta vs v2 is router 6->7 (package rename, handled by the generator's routerPackageForStack seam) and zod 3->4 + resolvers 3->5; none of those need bundler-side wiring (esm.sh resolves the bare specifiers)."
+  }
+}

@@ -33,6 +33,7 @@ import type {
   WorkflowIR,
 } from "../../../ir/loom-ir.js";
 import type { LoadedPack } from "../../_packs/loader.js";
+import { routerPackageForStack } from "../../_packs/stack-runtime.js";
 import { prepareAppShellVM } from "./preparers/app-shell.js";
 import { prepareThemeVM } from "./preparers/theme.js";
 import type { FormFieldVM } from "./view-models.js";
@@ -64,15 +65,28 @@ export function renderAppShell(
   extraRoutes: import("./preparers/app-shell.js").ExtraPageRoute[] | undefined,
   pack: LoadedPack,
 ): string {
-  return pack.render(
-    "app-shell",
-    prepareAppShellVM(aggs, workflows, views, systemName, sidebarOverride, extraRoutes),
-  );
+  return pack.render("app-shell", {
+    ...prepareAppShellVM(
+      aggs,
+      workflows,
+      views,
+      systemName,
+      sidebarOverride,
+      extraRoutes,
+    ),
+    // Router 7 (stack v3) renamed the package react-router-dom →
+    // react-router; library mode keeps the v6 API so only the
+    // import specifier changes.  Pre-v3 stacks resolve to
+    // react-router-dom (byte-identical).
+    routerPackage: routerPackageForStack(pack.manifest.stack),
+  });
 }
 
-/** Render `src/main.tsx` — Mantine providers + React-Query client. */
+/** Render `src/main.tsx` — provider chain + React-Query client. */
 export function renderMain(pack: LoadedPack): string {
-  return pack.render("main", {});
+  return pack.render("main", {
+    routerPackage: routerPackageForStack(pack.manifest.stack),
+  });
 }
 
 /** Render one form-field input through its per-pack
