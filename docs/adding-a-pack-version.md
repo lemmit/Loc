@@ -55,35 +55,62 @@ against the parent directory name and throws on mismatch (PR #147
 machinery). The cross-check catches copy-paste forks that leave the
 manifest stale.
 
-## Step 3 — Update `package-json.hbs`
+## Step 3 — Pick a stack (don't re-state framework deps)
 
-Every Phase 1.X new pack version targets the **cross-cutting
-baseline** from
-[`per-pack-migration.md`](./per-pack-migration.md#cross-cutting-baseline-applies-to-every-new-pack-version):
+**Phase 0.5 changed this step.** The cross-cutting framework deps
+(React, react-router, zod, Vite, TS, RHF, dayjs) no longer live in
+each pack's `package-json.hbs` — they live in `stacks/<id>/`. See
+[`stack-versioning.md`](./stack-versioning.md) for the architecture.
 
+Decide which stack the new pack version targets:
+
+- A pack version that requires **React 19** declares `"stack": "v2"`
+  in its `pack.json`.
+- A pack version still on **React 18** declares `"stack": "v1"`.
+- If the framework baseline you need doesn't exist yet (e.g. you're
+  the first pack to want React-router 7 framework mode), create a
+  new stack first — see "Adding a new frontend stack" in
+  [`stack-versioning.md`](./stack-versioning.md), and add a `STACKS`
+  entry to `web/src/bundle/stacks.ts` if the bundler must behave
+  differently.
+
+Then `designs/<family>/<vNew>/package-json.hbs` carries **only the
+pack-specific deps**, with the framework deps pulled in via the
+stack partials:
+
+```handlebars
+{
+  ...
+  "dependencies": {
+{{> stack-package-deps}},
+    "@<family>/core": "^<newMajor>.0.0",
+    ... pack-specific deps only ...
+  },
+  "devDependencies": {
+{{> stack-package-devdeps}}
+  }
+}
 ```
-"react":              "^19.2.0",
-"react-dom":          "^19.2.0",
-"react-router":       "^7.0.0",    (NB: package renamed from react-router-dom)
-"vite":               "^8.0.0",
-"typescript":         "^6.0.0",
-"zod":                "^4.0.0",
-"@hookform/resolvers":"^5.0.0",
-"framer-motion":      "^12.0.0",    (if pack uses it)
-"lucide-react":       "^1.0.0",     (if pack uses it)
-"@types/react":       "^19.2.0",
-"@types/react-dom":   "^19.2.0",
-"@vitejs/plugin-react":"^4.3.0",
-```
 
-Plus the pack-specific deps at their new majors:
+Pack-specific dep examples at their new majors:
 
 - mantine: `@mantine/core` / `@mantine/hooks` / `@mantine/notifications` / `@mantine/modals` / `@mantine/dates` → `^9.2.0`
 - mui: `@mui/material` / `@mui/icons-material` → `^7.0.0`
 - chakra: `@chakra-ui/react` → `^3.x.0` plus `next-themes`
 - shadcn (with tailwind 4): `tailwindcss` → `^4.x`, `@tailwindcss/postcss` (new), drop `tailwindcss-animate`
 
-Reference table: [`stack-versions-audit.md`](./stack-versions-audit.md).
+If a pack needs an extra devDep the stack doesn't supply (shadcn's
+`@types/node`, say), append it after the partial:
+
+```handlebars
+  "devDependencies": {
+{{> stack-package-devdeps}},
+    "@types/node": "^22.0.0"
+  }
+```
+
+Reference table for the framework baseline each stack pins:
+[`stack-versions-audit.md`](./stack-versions-audit.md).
 
 ## Step 4 — Apply template changes
 
@@ -242,7 +269,10 @@ In a separate PR after the new version has soaked:
 | anti-pattern | why |
 | --- | --- |
 | Skipping `vite build` in CI to "save time" | PR #149's exact regression slips back in |
+| Skipping the runtime preview e2e (`mantine-v9-preview-runtime.spec.ts` pattern) for a new stack | PRs #149/#151/#152 each shipped a "fix" that type-checked + bundled but failed live; only the runtime gate caught it |
+| Re-stating React/router/zod/Vite/TS deps in `package-json.hbs` | Phase 0.5 moved those to `stacks/<id>/`; duplicating them defeats the stack abstraction and drifts |
 | Flipping `BUILTIN_PACK_LATEST` in the same PR as the new pack | byte-equivalence fixture goes stale; two unrelated changes in one diff |
 | Keeping `forwardRef` wrappers / `<Context.Provider>` "for symmetry with v7" | new pack versions are clean breaks — no compat shims inside one pack |
-| Adopting `react-router-dom` (v6 name) in new packs | v7 renamed to `react-router`; "no technical debt" rule from the plan |
-| Letting `manifest.version` drift from the parent dir | loader throws on mismatch — fix at the source, don't disable the check |
+| Adopting `react-router-dom` (v6 name) in new packs targeting an RR-7 stack | v7 renamed to `react-router`; "no technical debt" rule from the plan |
+| Letting `manifest.version` (or `manifest.stack`) drift from reality | loader throws on version/dir mismatch; a wrong `stack` resolves the wrong framework deps |
+| Externalising React for a React-19 stack | the duplicate-`ReactSharedInternals` bug (lesson #6) — stack v2 inlines React on purpose |

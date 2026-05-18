@@ -214,11 +214,20 @@ Chakra peerDep that bit PR #146.
 
 ---
 
-## Cross-cutting baseline (applies to every new pack version)
+## Cross-cutting baseline (now owned by the stack, not the pack)
 
-These changes ride with every Phase 1.X PR's `package-json.hbs`. See
-also [`adding-a-pack-version.md`](./adding-a-pack-version.md) for
-the recipe.
+**Phase 0.5 superseded part of this section.** The dep *pins* for
+the framework baseline no longer live in each pack's
+`package-json.hbs` — they live in `stacks/<id>/` and a pack picks a
+stack via `pack.json: { "stack": "vN" }`. See
+[`stack-versioning.md`](./stack-versioning.md). The breaking-change
+notes below still apply to the *templates* a new pack version
+ships (component APIs, import idioms); only the version-pin
+mechanics moved. When a new pack needs a framework baseline that no
+stack provides yet, create the stack first.
+
+See also [`adding-a-pack-version.md`](./adding-a-pack-version.md)
+for the end-to-end recipe.
 
 ### React 18 → 19
 

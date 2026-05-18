@@ -1,9 +1,10 @@
 # Loom stack modernization — pack versioning + latest stable everywhere
 
-> **Status:** Phase 0 + Phase 1.2 (mantine@v9) shipped. See
-> [`stack-versions-audit.md`](./stack-versions-audit.md) for the rolling
-> version audit, [`per-pack-migration.md`](./per-pack-migration.md) for
-> the per-pack scope of the remaining Phase 1 PRs, and
+> **Status:** Phase 0, Phase 0.5 (A + B), and Phase 1.2 (mantine@v9) shipped.
+> See [`stack-versioning.md`](./stack-versioning.md) for the stack
+> architecture, [`stack-versions-audit.md`](./stack-versions-audit.md)
+> for the rolling version audit, [`per-pack-migration.md`](./per-pack-migration.md)
+> for the per-pack scope of remaining Phase 1 PRs, and
 > [`adding-a-pack-version.md`](./adding-a-pack-version.md) for the
 > recipe distilled from PR #148.
 
@@ -12,15 +13,17 @@
 | phase | scope | PR | status |
 | --- | --- | --- | --- |
 | 0 | Versioning machinery — `design: "family@vN"`, directory layout, validator + IR + loaders | #147 | ✅ merged |
-| 1.2 | `mantine@v9` (React 19) — opt-in via pinned form; bareword default still v7 | #148 + #149 fix | ✅ merged |
-| 1.1 | `tailwind@v4` + `shadcn@v4` (CSS-first config, utility renames) | — | pending |
-| 1.3 | `mui@v7` (Pigment CSS, Grid v2) | — | pending |
-| 1.4 | `chakra@v3` (compound components, `createSystem`, `toaster` — largest delta) | — | pending |
-| 1.5 | `ashPhoenix` minor → Phoenix 1.8 + Ash 3.24 | — | pending |
+| 0.5a | Stack scaffold — `stacks/v1` + `stacks/v2`, `PackManifest.stack` field, loader merges stack partials | #153 | ✅ merged |
+| 0.5b | Stack-driven bundler hints (`web/src/bundle/stacks.ts`); stack v2 inlines React instead of externalising; runtime-gate e2e spec | #154 | ✅ merged |
+| 1.2 | `mantine@v9` (stack v2 = React 19) — opt-in via pinned form; bareword default still v7 | #148 + #149 + #151 + #152 + #154 | ✅ working live |
+| 1.1 | `tailwind@v4` + `shadcn@v4` (CSS-first config, utility renames) — stack v2 | — | pending |
+| 1.3 | `mui@v7` (Pigment CSS, Grid v2) — stack v2 | — | pending |
+| 1.4 | `chakra@v3` (compound components, `createSystem`, `toaster` — largest delta) — stack v2 | — | pending |
+| 1.5 | `ashPhoenix` minor → Phoenix 1.8 + Ash 3.24 — separate ecosystem, no React stack | — | pending |
 | 1.X | Promote `BUILTIN_PACK_LATEST.mantine = "v9"` + refresh `test/fixtures/baseline-output/` | — | pending |
-| 2.a | Hono backend deps (hono 4.6→4.12; drizzle 0.36→0.45; zod 3→4) | — | pending |
-| 2.b | Phoenix backend (tighten `postgrex: ">= 0.0.0"`; phoenix 1.7→1.8) | — | pending |
-| 2.c | .NET deps (deferred — .NET 8 LTS through 2026-11) | — | not urgent |
+| 2.a | Hono backend deps (hono 4.6→4.12; drizzle 0.36→0.45; zod 3→4) — first **backend stack** (`hono@v4`) | — | pending |
+| 2.b | Phoenix backend (tighten `postgrex: ">= 0.0.0"`; phoenix 1.7→1.8) — `phoenix@v1` stack | — | pending |
+| 2.c | .NET stack scaffold (`dotnet@v8` baseline; `dotnet@v10` follow-up after 2026-11) | — | not urgent |
 
 ## Context
 
@@ -320,3 +323,98 @@ lesson: when a transitive peer-dep range is loose, esm.sh picks
 "latest matching" — which may be a future major. New pack versions
 should either avoid such packages or pin them tighter via direct
 deps when possible.
+
+### 6. The "two Reacts" class of error doesn't externalise away
+
+PRs #149 → #151 → #152 each chased the
+`TypeError: dispatcher.getOwner is not a function` error by
+tweaking how React was externalised — named imports in `main.hbs`,
+shim toggles, `?external=react` on the iframe importmap. **None of
+them worked live.** The deeper issue: esm.sh's React-19 build
+resolves transitive `react` imports to a canonical URL
+(`/react@19.2.6/.../react.development.mjs`) that the bundle's
+inlined react-dom and the importmap-loaded React end up routing to
+through different facade URLs. The browser treats those URL keys
+as distinct modules — same content, two `ReactSharedInternals`
+objects, two dispatchers. The render-time `getOwner()` reads one
+side; react-dom's `createRoot()` writes the other; mismatch.
+
+**Fix that finally worked:** PR #154 stopped externalising React
+for stack v2 entirely. The bundle now inlines `react` and
+`react-dom`; the importmap is empty for v2; the iframe has exactly
+one React module graph. Bundle grows ~200 KB minified — fine.
+
+**Generalisable:** when you can't *prove* a single-instance graph
+through analysis, bundle the conflicting library inline. The bundle
+size cost is almost always cheaper than the analysis time.
+
+### 7. A runtime gate is non-negotiable for new framework versions
+
+The string of "fixes" that never fixed anything (PRs #149, #151,
+#152) all type-checked, all passed `vite build`, all looked right.
+Each one assumed it had isolated the cause; none ran the iframe in
+a real browser to verify. PR #154 added
+`web/e2e/mantine-v9-preview-runtime.spec.ts` — boots the v9
+preview through `vite preview`, watches `console.error` +
+`pageerror` for any rendering failure. **Future stacks must ship
+the equivalent.** When the fix doesn't take, the runtime gate
+surfaces a real-browser stack trace instead of forcing
+curl-and-guess.
+
+## Backend stacks (Phase 2)
+
+The stack abstraction generalises beyond React. Backends (Hono,
+Phoenix LiveView, .NET) currently live in `src/generator/<platform>/`
+with dep versions hardcoded inline. The Phase-0.5 stack mechanism
+extends cleanly to them.
+
+**Naming.** Frontend stacks ship as `v1` / `v2` (where the React
+major is the discriminator). Backend stacks would be named after
+their upstream framework's major: `dotnet@v8`, `dotnet@v10`,
+`hono@v4`, `phoenix@v1`. Each is a directory under `stacks/`
+with the same shape as `stacks/v1` and `stacks/v2`.
+
+**DSL.** No new syntax — the existing `STRING` alternative on
+`Platform` is unused today (`Platform` is keyword-only:
+`'dotnet' | 'hono' | 'react' | 'static' | 'phoenixLiveView'`).
+For Phase 2 we either extend `Platform` to accept `STRING` (so
+users can write `platform: "dotnet@v8"`), **or** keep `Platform`
+as a bareword and add a `stack:` field to the deployable
+(`platform: dotnet, stack: "v8"`). The latter mirrors how UI packs
+declare their stack and keeps the grammar surgery minimal.
+
+**What changes when a backend gets versioned.** Today
+`src/generator/typescript/index.ts:204-216` has Hono / drizzle /
+zod versions as string literals. A `hono@v4` stack would move
+those into `stacks/hono@v4/package-json-base.hbs` exactly the way
+the frontend stacks moved React 18's deps into
+`stacks/v1/stack-package-deps.hbs`. The generator looks up the
+deployable's stack and merges the partials.
+
+**`hono@v4` (first backend stack):** hono 4.6 → 4.12, drizzle
+0.36 → 0.45, zod stays at 3.x (the frontend's `zod` is a
+separate axis — backend can update independently). Tighten
+`postgrex: ">= 0.0.0"` along the way.
+
+**`phoenix@v1` (Phoenix 1.7) → `phoenix@v2` (Phoenix 1.8):** the
+template diffs from Phoenix 1.7 → 1.8 (single `root.html.heex`,
+`Application.compile_env/3` for endpoint config, OTP 25+, `:formats`
+required on controllers) are large enough that a clean break is
+warranted.
+
+**`dotnet@v8` (now) → `dotnet@v10` (post-2026-11):** .NET 8 is
+LTS through Nov 2026 — keep the stack stable there. `dotnet@v10`
+becomes the new default after the third-party EF / DB-driver
+ecosystem catches up.
+
+**Bundler hints don't apply to backends.** The
+`web/src/bundle/stacks.ts` machinery is specific to the playground's
+in-browser bundle of React frontends. Backend stacks only need the
+template-partial side (deps, project structure). No bundler hooks
+required.
+
+**Migration ordering.** Per the status tracker above, Phase 2.a
+(Hono) lands first because it's the only backend the playground
+runs in-browser via PGlite. Phase 2.b (Phoenix) and 2.c (.NET) are
+file-only deployables in the playground; their stacks affect only
+the emitted project structure.
