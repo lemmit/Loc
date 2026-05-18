@@ -1,0 +1,39 @@
+function {{opPascal}}OpModal({ mut }: { mut: ReturnType<typeof use{{opPascal}}{{aggregateName}}> }) {
+  const [open, setOpen] = useState(false);
+{{#each idTargets}}  const {{this.hookVar}} = useAll{{this.namePlural}}();
+{{/each}}  const {{{destructured}}} = useForm<{{opPascal}}Request>({
+    resolver: zodResolver({{opPascal}}Request),
+    defaultValues: {{{defaultValuesTs}}},
+  });
+  return (
+    <>
+      <Button variant="contained" onClick={() => setOpen(true)} data-testid="{{slug}}-op-{{opName}}">{{triggerLabel}}</Button>
+      <Dialog open={open} onClose={() => setOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle>{{humanOp}}</DialogTitle>
+        <form
+          data-testid="{{slug}}-op-{{opName}}-form"
+          onSubmit={handleSubmit(async (vals) => {
+            try {
+              await mut.mutateAsync(vals);
+              enqueueSnackbar("{{humanOp}} succeeded", { variant: "success" });
+              setOpen(false);
+            } catch (e) {
+              enqueueSnackbar((e as Error).message, { variant: "error" });
+            }
+          })}
+        >
+          <DialogContent>
+            <Stack gap={2}>
+              {{#if hasParams}}{{#each fieldHtmls}}{{{this}}}
+              {{/each}}{{else}}<Typography color="text.secondary">This operation has no parameters.</Typography>
+              {{/if}}</Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button type="button" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button type="submit" variant="contained" disabled={mut.isPending} data-testid="{{slug}}-op-{{opName}}-submit">{{humanOp}}</Button>
+          </DialogActions>
+        </form>
+      </Dialog>
+    </>
+  );
+}

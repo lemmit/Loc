@@ -1,12 +1,106 @@
 // Auto-generated.  Do not edit by hand.
 import { useParams, Link as RouterLink } from "react-router-dom";
+import { useForm, Controller } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { AddLineRequest, useAddLineOrder, ConfirmRequest, useConfirmOrder } from "../../api/order";
+import { useAllProducts } from "../../api/product";
+import { notifications } from "@mantine/notifications";
+import { modals } from "@mantine/modals";
 import { DateTimeValue, IdValue, KeyValueRow } from "../../lib/format";
-import { Alert, Anchor, Badge, Breadcrumbs, Card, Skeleton, Stack, Table, Text, Title } from "@mantine/core";
+import { Alert, Anchor, Badge, Breadcrumbs, Button, Card, Group, NumberInput, Select, Skeleton, Stack, Table, Text, Title } from "@mantine/core";
 import { useOrderById } from "../../api/order";
+function openAddLineModal(mut: ReturnType<typeof useAddLineOrder>): void {
+  modals.open({
+    title: "Add Line",
+    children: <AddLineForm mut={mut} onClose={() => modals.closeAll()} />,
+  });
+}
+
+function AddLineForm({ mut, onClose }: { mut: ReturnType<typeof useAddLineOrder>; onClose: () => void }) {
+  const __products = useAllProducts();
+  const { register, handleSubmit, control, formState: { errors } } = useForm<AddLineRequest>({
+    resolver: zodResolver(AddLineRequest),
+    defaultValues: { productId: "", qty: 0 },
+  });
+  return (
+    <form
+      data-testid="orders-op-addLine-form"
+      onSubmit={handleSubmit(async (vals) => {
+        try {
+          await mut.mutateAsync(vals);
+          notifications.show({ color: "green", message: "Add Line succeeded" });
+          onClose();
+        } catch (e) {
+          notifications.show({ color: "red", message: (e as Error).message });
+        }
+      })}
+    >
+      <Stack>
+        <Controller
+          control={control}
+          name="productId"
+          render={({ field, fieldState }) => (
+            <Select label="Product Id" data-testid="orders-op-addLine-input-productId" placeholder="Select…" searchable data={(__products.data ?? []).map((__o) => ({ value: __o.id, label: __o.sku }))} renderOption={({ option }) => <div data-testid={`orders-op-addLine-input-productId-option-${option.value}`}>{option.label}</div>} allowDeselect={false} value={field.value as string} onChange={(v) => field.onChange(v ?? "")} error={fieldState.error?.message} />
+          )}
+        />
+
+        <Controller
+          control={control}
+          name="qty"
+          render={({ field, fieldState }) => (
+            <NumberInput label="Qty" data-testid="orders-op-addLine-input-qty" allowDecimal={false} value={field.value as number | "" | undefined} onChange={(v) => field.onChange(typeof v === "number" ? v : Number(v) || 0)} error={fieldState.error?.message} />
+          )}
+        />
+
+        <Group justify="flex-end" mt="sm">
+          <Button variant="default" onClick={onClose}>Cancel</Button>
+          <Button type="submit" loading={mut.isPending} data-testid="orders-op-addLine-submit">Add Line</Button>
+        </Group>
+      </Stack>
+    </form>
+  );
+}
+function openConfirmModal(mut: ReturnType<typeof useConfirmOrder>): void {
+  modals.open({
+    title: "Confirm",
+    children: <ConfirmForm mut={mut} onClose={() => modals.closeAll()} />,
+  });
+}
+
+function ConfirmForm({ mut, onClose }: { mut: ReturnType<typeof useConfirmOrder>; onClose: () => void }) {
+  const { register, handleSubmit, formState: { errors } } = useForm<ConfirmRequest>({
+    resolver: zodResolver(ConfirmRequest),
+    defaultValues: {  },
+  });
+  return (
+    <form
+      data-testid="orders-op-confirm-form"
+      onSubmit={handleSubmit(async (vals) => {
+        try {
+          await mut.mutateAsync(vals);
+          notifications.show({ color: "green", message: "Confirm succeeded" });
+          onClose();
+        } catch (e) {
+          notifications.show({ color: "red", message: (e as Error).message });
+        }
+      })}
+    >
+      <Stack>
+        <Text c="dimmed">This operation has no parameters.</Text>
+        <Group justify="flex-end" mt="sm">
+          <Button variant="default" onClick={onClose}>Cancel</Button>
+          <Button type="submit" loading={mut.isPending} data-testid="orders-op-confirm-submit">Confirm</Button>
+        </Group>
+      </Stack>
+    </form>
+  );
+}
 
 export default function OrderDetail() {
   const { id } = useParams<{ id: string }>();
   const orderById = useOrderById(id);
+  const addLine = useAddLineOrder(id ?? "");
+  const confirm = useConfirmOrder(id ?? "");
   return (
     <Stack data-testid="orders-detail">
       <Breadcrumbs>
@@ -38,6 +132,12 @@ export default function OrderDetail() {
                 <KeyValueRow label="Placed At"><DateTimeValue iso={ orderById.data.placedAt } /></KeyValueRow>
               </Stack>
             </Card>
+            <Group>
+              <Button variant="filled" onClick={() => openAddLineModal(addLine)} data-testid="orders-op-addLine">Add Line</Button>
+    
+              <Button variant="light" onClick={() => openConfirmModal(confirm)} data-testid="orders-op-confirm">Confirm</Button>
+    
+            </Group>
             <Card withBorder padding="md" data-testid="orders-detail-lines">
               <Stack>
                 <Title order={4}>Lines</Title>

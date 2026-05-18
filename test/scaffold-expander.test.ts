@@ -220,6 +220,60 @@ describe("Slice C1 — scaffold expander dispatch", () => {
     expect(singleIdx).toBeGreaterThanOrEqual(0);
   });
 
+  it("aggregate-detail emits a Modal + Form(of:, op:) per public operation", () => {
+    const sysWithOps = makeSystem();
+    const order = sysWithOps.modules[0]!.contexts[0]!.aggregates[0]!;
+    order.operations = [
+      {
+        name: "confirm",
+        visibility: "public",
+        params: [],
+        statements: [],
+        extern: false,
+      },
+      {
+        name: "addLine",
+        visibility: "public",
+        params: [{ name: "qty", type: { kind: "primitive", name: "int" } }],
+        statements: [],
+        extern: false,
+      },
+      {
+        name: "recalc",
+        visibility: "private",
+        params: [],
+        statements: [],
+        extern: false,
+      },
+    ];
+    const ctxOps = buildExpandContext(sysWithOps, makeUi());
+    const body = expandScaffoldToExplicitBody(
+      { kind: "aggregate-detail", aggregateName: "Order", contextName: "Orders" },
+      ctxOps,
+    );
+    // One Modal per *public* operation (private `recalc` excluded).
+    const modals: ExprIR[] = [];
+    (function collect(n: ExprIR | undefined) {
+      if (!n) return;
+      if (n.kind === "call") {
+        if (n.name === "Modal") modals.push(n);
+        for (const a of n.args) collect(a);
+      }
+      if (n.kind === "lambda") collect(n.body);
+    })(body!);
+    expect(modals.length).toBe(2);
+    // Each Modal hosts a Form carrying an `op:` named arg + a
+    // trigger Button.
+    const modal = modals[0]!;
+    if (modal.kind !== "call") return;
+    const innerForm = findCall(modal, "Form")!;
+    expect(innerForm.kind).toBe("call");
+    if (innerForm.kind !== "call") return;
+    expect((innerForm.argNames ?? []).includes("op")).toBe(true);
+    expect((modal.argNames ?? []).includes("trigger")).toBe(true);
+    expect(findCall(modal, "Button")).not.toBeNull();
+  });
+
   it("workflow-form expands to Stack(Breadcrumbs, Heading, Card(Form(runs:)))", () => {
     // Augment the test ctx with a synthetic workflow.
     const sysWithWf = makeSystem();

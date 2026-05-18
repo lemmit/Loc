@@ -341,6 +341,48 @@ function expandAggregateDetail(
     }
   }
 
+  // Operation controls.  Each public operation becomes a Modal
+  // whose trigger Button opens an auto-generated form bound to the
+  // `use<Op><Agg>` mutation hook.  First op filled, the rest light
+  // (matches the legacy detail preparer's button grouping).
+  const opModals: ExprIR[] = [];
+  const publicOps = agg.operations.filter((o) => o.visibility === "public");
+  publicOps.forEach((op, i) => {
+    opModals.push(
+      call(
+        "Modal",
+        [
+          call("Form", [], undefined, [
+            ["of", ref(agg.name)],
+            ["op", ref(op.name)],
+            ["testid", lit(`${slug}-op-${op.name}`)],
+          ]),
+        ],
+        undefined,
+        [
+          ["title", lit(humanize(op.name))],
+          [
+            "trigger",
+            call("Button", [lit(humanize(op.name))], undefined, [
+              ["variant", lit(i === 0 ? "filled" : "light")],
+              ["testid", lit(`${slug}-op-${op.name}`)],
+            ]),
+          ],
+        ],
+      ),
+    );
+  });
+
+  // Compose the loaded-record body: the field card, then the
+  // operation-button row, then the related-entity lists.
+  const dataSections: ExprIR[] = [call("Card", [call("Stack", rows)])];
+  if (opModals.length > 0) dataSections.push(call("Group", opModals));
+  dataSections.push(...relatedCards);
+  const dataBody =
+    dataSections.length > 1
+      ? call("Stack", dataSections)
+      : dataSections[0]!;
+
   return call(
     "Stack",
     [
@@ -374,18 +416,7 @@ function expandAggregateDetail(
             ["color", lit("yellow")],
           ]),
         ],
-        [
-          "data",
-          lambda(
-            cellVar,
-            relatedCards.length > 0
-              ? call("Stack", [
-                  call("Card", [call("Stack", rows)]),
-                  ...relatedCards,
-                ])
-              : call("Card", [call("Stack", rows)]),
-          ),
-        ],
+        ["data", lambda(cellVar, dataBody)],
       ]),
     ],
     undefined,
