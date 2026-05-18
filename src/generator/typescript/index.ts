@@ -184,6 +184,34 @@ function findRepoFor(ctx: BoundedContextIR, name: string): RepositoryIR | undefi
   return ctx.repositories.find((r) => r.aggregateName === name);
 }
 
+// ---------------------------------------------------------------------------
+// Centralised backend dependency pins.  One place to bump the Hono
+// stack's versions instead of hunting literals inside the package.json
+// builder.  All bumps here are within-major (or within-0.x for the
+// pre-1.0 drizzle / @hono/zod-openapi packages) — zod 3→4 and TS 5→6
+// are majors deferred to a later phase (they need template changes,
+// not just a pin bump).  The `LOOM_TS_BUILD` shard (`tsc --noEmit`
+// against an emitted Hono project) is the gate that proves these
+// resolve + typecheck together.
+const BACKEND_PINS = {
+  dependencies: {
+    hono: "^4.12.0",
+    "@hono/node-server": "^1.14.0",
+    "@hono/zod-openapi": "^0.19.0",
+    zod: "^3.24.0",
+    "drizzle-orm": "^0.45.0",
+    pg: "^8.13.0",
+  },
+  devDependencies: {
+    typescript: "^5.7.0",
+    tsx: "^4.19.0",
+    tsup: "^8.3.0",
+    vitest: "^2.1.0",
+    "drizzle-kit": "^0.30.0",
+    "@types/pg": "^8.11.0",
+  },
+} as const;
+
 const PROJECT_PACKAGE_JSON = JSON.stringify(
   {
     name: "ddd-generated-app",
@@ -200,22 +228,8 @@ const PROJECT_PACKAGE_JSON = JSON.stringify(
       "db:push": "drizzle-kit push",
       "db:studio": "drizzle-kit studio",
     },
-    dependencies: {
-      hono: "^4.6.0",
-      "@hono/node-server": "^1.13.0",
-      "@hono/zod-openapi": "^0.18.0",
-      zod: "^3.23.0",
-      "drizzle-orm": "^0.36.0",
-      pg: "^8.13.0",
-    },
-    devDependencies: {
-      typescript: "^5.7.0",
-      tsx: "^4.19.0",
-      tsup: "^8.3.0",
-      vitest: "^2.1.0",
-      "drizzle-kit": "^0.28.0",
-      "@types/pg": "^8.11.0",
-    },
+    dependencies: { ...BACKEND_PINS.dependencies },
+    devDependencies: { ...BACKEND_PINS.devDependencies },
   },
   null,
   2,

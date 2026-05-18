@@ -23,7 +23,7 @@
 | 1.X | Promote `BUILTIN_PACK_LATEST.mantine = "v9"` + refresh `test/fixtures/baseline-output/` — bareword `design: mantine` now emits Mantine 9 / React 19; `design: "mantine@v7"` still pins React 18 | #156 | ✅ merged |
 | 1.X | Promote `BUILTIN_PACK_LATEST.chakra = "v3"` + `mui = "v7"` — bareword `design: chakra` / `mui` roll forward; old majors stay pinned via `"chakra@v2"` / `"mui@v5"`. No fixture refresh (acme tracks mantine). shadcn held at v3 — playground injects the Tailwind 3 Play CDN, so promoting shadcn@v4 needs an in-browser Tailwind 4 path first | this PR | ✅ pack defaults flipped |
 | 1.X | Playground in-browser Tailwind 4 path — bundler externalises `@import "tailwindcss"`/`tw-animate-css`; iframe loads `@tailwindcss/browser` for v4 CSS (the v3 Play-CDN analogue).  Unblocks the shadcn@v4 promote (gated on the deployed playground-e2e confirming the pinned `storybook-shadcn-v4` preview boots styled) | this PR | ✅ playground supports v4; shadcn promote is the gated follow-up |
-| 2.a | Hono backend deps (hono 4.6→4.12; drizzle 0.36→0.45; zod 3→4) — first **backend stack** (`hono@v4`) | — | pending |
+| 2.a | Hono backend **minor** dep bumps via a centralised `BACKEND_PINS` const (hono 4.6→4.12, @hono/node-server 1.13→1.14, @hono/zod-openapi 0.18→0.19, zod 3.23→3.24, drizzle-orm 0.36→0.45, drizzle-kit 0.28→0.30).  zod 3→4 / TS 5→6 = majors, deferred (template changes, not pin bumps).  Backend-stack *abstraction* deferred pending an architecture rethink (backends are versioned code modules, not dep bundles — see note below) | this PR | ✅ deps bumped, `LOOM_TS_BUILD` green |
 | 2.b | Phoenix backend (tighten `postgrex: ">= 0.0.0"`; phoenix 1.7→1.8) — `phoenix@v1` stack | — | pending |
 | 2.c | .NET stack scaffold (`dotnet@v8` baseline; `dotnet@v10` follow-up after 2026-11) | — | not urgent |
 
@@ -460,6 +460,24 @@ esm.sh-dependent so it self-skips locally) confirming the pinned
 before flipping" discipline as mantine@v9 (lesson #7).
 
 ## Backend stacks (Phase 2)
+
+> **⚠️ Architecture under reconsideration (do not implement the
+> `stacks/<backend>` shape below yet).** The `stacks/<id>/` dep-partial
+> abstraction fits *data-shaped* versioning (a design pack is templates
+> + a manifest; a frontend stack is a thin dep/bundler-hint axis). A
+> backend is **code**: a `PlatformSurface` impl plus a whole
+> `src/generator/<platform>/` tree of procedural emitters,
+> render-expr/render-stmt, project structure, Dockerfile. A real major
+> bump (.NET 8→10 = MediatR 2→14; Hono 4→5; Phoenix scaffold churn) is
+> *generator-logic* change, not a dep string — so a backend major is
+> better modelled as **a separate `PlatformSurface` module discovered
+> by the registry** (`src/platform/registry.ts` keyed `family@version`,
+> bareword → `BUILTIN_PLATFORM_LATEST`, pinned via `platform:
+> "dotnet@v10"`), with shared logic shared by ordinary imports. Minor
+> within-major dep bumps stay cheap via a per-generator `BACKEND_PINS`
+> const (done for Hono in Phase 2.a). Decision deferred by owner; the
+> `stacks/<backend>` text below is retained only for historical
+> context and is superseded by this note.
 
 The stack abstraction generalises beyond React. Backends (Hono,
 Phoenix LiveView, .NET) currently live in `src/generator/<platform>/`
