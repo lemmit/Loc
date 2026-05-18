@@ -34,6 +34,9 @@ const FIXTURE_SOURCE = `system MiniLiveView {
         name: string display
         email: string
         invariant email.length > 0
+        operation adjustCredit(amount: decimal) {
+          precondition amount > 0
+        }
       }
       repository Customers for Customer { }
     }
@@ -138,6 +141,59 @@ describe("phoenixLiveView pipeline (Phases 1-8)", () => {
     // Router has at least one `live "..."` line.
     const router = files.get("phoenix_app/lib/phoenix_app_web/router.ex")!;
     expect(router).toMatch(/live "[^"]+", [A-Z]\w*Live/);
+  });
+
+  it("scaffolded detail page loads @data + emits operation modal/handlers", async () => {
+    // The Customer aggregate has `operation adjustCredit(amount: decimal)`.
+    // The detail LiveView must (a) load the record into @data via the
+    // get_<agg> code interface in handle_params, (b) assign the op
+    // form via AshPhoenix.Form.for_update, (c) emit validate_/submit_
+    // handle_event clauses, (d) render the <.modal> + trigger, and
+    // the CoreComponents module must define `modal` + the JS helpers.
+    const model = await buildFixture();
+    const { files } = generateSystems(model);
+    const detail = files.get(
+      "phoenix_app/lib/phoenix_app_web/live/customer_detail_live.ex",
+    )!;
+    expect(detail, "detail LiveView is emitted").toBeDefined();
+
+    // (a) record load + idiomatic not-found/error mapping.
+    expect(detail).toMatch(
+      /record = PhoenixApp\.Sales\.get_customer!\(socket\.assigns\.id\)/,
+    );
+    expect(detail).toMatch(/rescue\n\s*Ash\.Error\.Query\.NotFound -> assign\(socket, :data, :not_found\)/);
+    expect(detail).toMatch(/Ash\.Error\.Invalid -> assign\(socket, :data, :error\)/);
+
+    // (b) operation form bound to the loaded record.
+    expect(detail).toMatch(
+      /assign\(:adjust_credit_form, AshPhoenix\.Form\.for_update\(record, :adjust_credit, as: "adjust_credit"\) \|> to_form\(\)\)/,
+    );
+
+    // (c) AshPhoenix form lifecycle handle_event clauses.
+    expect(detail).toMatch(
+      /def handle_event\("validate_adjust_credit", %\{"adjust_credit" => params\}, socket\)/,
+    );
+    expect(detail).toMatch(
+      /def handle_event\("submit_adjust_credit", %\{"adjust_credit" => params\}, socket\)/,
+    );
+    expect(detail).toMatch(/AshPhoenix\.Form\.submit\(socket\.assigns\.adjust_credit_form, params: params\)/);
+
+    // (d) modal + trigger in the rendered HEEx.
+    expect(detail).toMatch(/<\.modal id="customer-op-adjust_credit-modal">/);
+    expect(detail).toMatch(/show_modal\("customer-op-adjust_credit-modal"\)/);
+    expect(detail).toMatch(/<\.simple_form for=\{@adjust_credit_form\} phx-change="validate_adjust_credit" phx-submit="submit_adjust_credit">/);
+
+    // 4-way cond now distinguishes not-found (empty) from error.
+    expect(detail).toMatch(/<% @data == :not_found -> %>/);
+
+    // CoreComponents gains the modal component + JS helpers.
+    const core = files.get(
+      "phoenix_app/lib/phoenix_app_web/components/core_components.ex",
+    )!;
+    expect(core).toMatch(/alias Phoenix\.LiveView\.JS/);
+    expect(core).toMatch(/def modal\(assigns\) do/);
+    expect(core).toMatch(/def show_modal\(js \\\\ %JS\{\}, id\)/);
+    expect(core).toMatch(/def hide_modal\(js \\\\ %JS\{\}, id\)/);
   });
 
   it("rejects a phoenixLiveView deployable that declares targets:", async () => {

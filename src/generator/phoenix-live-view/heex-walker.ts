@@ -81,13 +81,40 @@ export interface WalkResult {
    *  `for_action(...)` for workflows) and convert to `to_form(...)`.
    *  Empty when the page body has no form. */
   formBindings: FormBinding[];
+  /** Query bindings discovered inside the page body — one per
+   *  `QueryView(of: …)` call.  The LiveView emitter consumes these
+   *  in `handle_params/3` to load `@data` (single/detail) or
+   *  `@items` (list) via the aggregate's Ash code-interface.
+   *  Empty when the page has no QueryView. */
+  queryBindings: QueryBinding[];
 }
 
 export interface FormBinding {
   /** Which kind of source the form is bound to. */
-  kind: "aggregate" | "workflow";
-  /** Source name in PascalCase (e.g. "Customer", "PlaceOrder"). */
+  kind: "aggregate" | "workflow" | "operation";
+  /** Source name in PascalCase (e.g. "Customer", "PlaceOrder"; for
+   *  an operation form, the owning aggregate). */
   name: string;
+  /** kind:"operation" only — snake-cased operation name (the Ash
+   *  `update :<op>` action the form submits to). */
+  op?: string;
+  /** kind:"operation" only — deterministic DOM id for the
+   *  `<.modal>` wrapping the operation form. */
+  modalId?: string;
+  /** kind:"operation" only — the operation's params, for `<.input>`
+   *  emission and the `for_update` form constructor. */
+  params?: readonly { name: string; type: TypeIR }[];
+}
+
+export interface QueryBinding {
+  /** "single" → detail page (loads one record into `@data`);
+   *  "list" → list page (loads the collection into `@items`). */
+  kind: "single" | "list";
+  /** LiveView assign the page's `cond` reads ("data" / "items"). */
+  assign: string;
+  /** Aggregate PascalCase name resolved from the `of:` query call,
+   *  used to build the `<Ctx>.get_<agg>!` / `list_<agg>s` call. */
+  aggregate: string;
 }
 
 export interface WalkContext {
@@ -102,6 +129,8 @@ export interface WalkContext {
   aggregatesByName: ReadonlyMap<string, AggregateIR>;
   /** Form bindings discovered as the walker visits `Form(...)` calls. */
   formBindings: FormBinding[];
+  /** Query bindings discovered as the walker visits `QueryView(...)`. */
+  queryBindings: QueryBinding[];
   /** PageIR being walked — its `state[]` drives state-reference resolution
    *  and its `params[]` resolves route-param refs. */
   page: PageIR;
@@ -138,6 +167,7 @@ export function walkBodyToHeex(
     appModule,
     aggregatesByName,
     formBindings: [],
+    queryBindings: [],
     page,
     ui,
     stateNames,
@@ -160,6 +190,7 @@ export function walkBodyToHeex(
     handlers: ctx.handlers,
     aliasLines,
     formBindings: ctx.formBindings,
+    queryBindings: ctx.queryBindings,
   };
 }
 
@@ -327,6 +358,7 @@ function renderCall(
   // Scaffold expander primitives with custom HEEx shapes.
   if (expr.name === "Breadcrumbs") return renderBreadcrumbs(expr, ctx);
   if (expr.name === "Anchor") return renderAnchor(expr, ctx);
+  if (expr.name === "Modal") return renderModal(expr, ctx);
   if (expr.name === "Form") return renderForm(expr, ctx);
   if (expr.name === "Table") return renderTable(expr, ctx);
   if (expr.name === "QueryView") return renderQueryView(expr, ctx);
@@ -626,6 +658,103 @@ function renderAnchor(
   return `<a href="${to}"${testidAttr}>${label}</a>`;
 }
 
+/** `Modal(trigger: Button(...), title: "…", Form(of: Agg, op: x))`
+ *  → a `<.button phx-click={show_modal(id)}>` trigger followed by
+ *  a `<.modal id=…>` hosting a `<.simple_form for={@<op>_form}>`
+ *  whose inputs are the operation's params.  Registers an
+ *  `kind:"operation"` FormBinding the LiveView emitter turns into
+ *  the `@<op>_form` assign + `validate_<op>`/`submit_<op>`
+ *  handle_event clauses.  The `Form(of:, op:)` child is consumed
+ *  here (never visited by renderChild) — mirrors the React
+ *  walker's `emitModal`. */
+function renderModal(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  ctx: WalkContext,
+): string {
+  let title = "";
+  let triggerExpr: ExprIR | undefined;
+  const positional: ExprIR[] = [];
+  for (let i = 0; i < expr.args.length; i++) {
+    const name = expr.argNames?.[i];
+    const arg = expr.args[i]!;
+    if (name === "title") {
+      title =
+        arg.kind === "literal"
+          ? arg.value
+          : renderExpr(arg, { ...ctx, position: "template" });
+    } else if (name === "trigger") {
+      triggerExpr = arg;
+    } else if (!name) {
+      positional.push(arg);
+    }
+  }
+  const formChild = positional.find(
+    (c): c is Extract<ExprIR, { kind: "call" }> =>
+      c.kind === "call" && c.name === "Form",
+  );
+  const ofName = formChild ? findPascalArg(formChild, "of") : undefined;
+  const opName = formChild ? findPascalArg(formChild, "op") : undefined;
+  if (!formChild || !ofName || !opName) {
+    return `<!-- malformed Modal: expected trigger: Button + Form(of:, op:) -->`;
+  }
+  const aggSnake = snake(ofName);
+  const opSnake = snake(opName);
+  const modalId = `${aggSnake}-op-${opSnake}-modal`;
+  const formAssign = `${opSnake}_form`;
+
+  const agg = ctx.aggregatesByName.get(ofName);
+  const op = agg?.operations.find((o) => o.name === opName);
+  const params = op
+    ? op.params.map((p) => ({ name: p.name, type: p.type }))
+    : [];
+
+  ctx.formBindings.push({
+    kind: "operation",
+    name: ofName,
+    op: opSnake,
+    modalId,
+    params,
+  });
+
+  // Trigger button surface from the `trigger: Button(...)` arg.
+  let label = humanize(opName);
+  let testid = "";
+  if (
+    triggerExpr &&
+    triggerExpr.kind === "call" &&
+    triggerExpr.name === "Button"
+  ) {
+    for (let i = 0; i < triggerExpr.args.length; i++) {
+      const n = triggerExpr.argNames?.[i];
+      const a = triggerExpr.args[i]!;
+      if (!n && a.kind === "literal") label = a.value;
+      else if (n === "testid" && a.kind === "literal") testid = a.value;
+    }
+  }
+  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const heading = title || humanize(opName);
+
+  const inputs =
+    params.length > 0
+      ? params.map(
+          (p) => `    ${renderFieldInputForField(p, formAssign)}`,
+        )
+      : [`    <%!-- ${opSnake} has no parameters --%>`];
+
+  return [
+    `<.button phx-click={show_modal("${modalId}")}${testidAttr}>${label}</.button>`,
+    `<.modal id="${modalId}">`,
+    `  <:title>${heading}</:title>`,
+    `  <.simple_form for={@${formAssign}} phx-change="validate_${opSnake}" phx-submit="submit_${opSnake}">`,
+    ...inputs,
+    `    <:actions>`,
+    `      <.button type="submit">${heading}</.button>`,
+    `    </:actions>`,
+    `  </.simple_form>`,
+    `</.modal>`,
+  ].join("\n");
+}
+
 /** `Form(of: Agg, testid: "...", ...)` → `<.simple_form>` with auto
  *  inputs derived from the aggregate/workflow args.
  *  `runs: Wf` (workflow form) also emits a `<.simple_form>` but
@@ -634,6 +763,12 @@ function renderForm(
   expr: Extract<ExprIR, { kind: "call" }>,
   ctx: WalkContext,
 ): string {
+  // `Form(of:, op:)` is the operation-modal form — owned and
+  // rendered by `renderModal` (it consumes its Form child
+  // directly).  This guard makes the function total if a stray
+  // op-form is ever reached without its Modal wrapper: bail before
+  // pushing a bogus `kind:"aggregate"` create binding.
+  if (findPascalArg(expr, "op")) return "";
   let ofTarget = "";
   let runsTarget = "";
   let testid = "";
@@ -720,6 +855,7 @@ function findPascalArg(
  *  is out of scope here (see follow-up plan §Form-of-Id). */
 function renderFieldInputForField(
   f: { name: string; type: TypeIR },
+  formAssign = "form",
 ): string {
   const fieldName = snake(f.name);
   const label = humanize(f.name);
@@ -727,7 +863,7 @@ function renderFieldInputForField(
   const isDecimal =
     f.type.kind === "primitive" && f.type.name === "decimal";
   const extraAttrs = isDecimal ? ` step="0.01"` : "";
-  return `<.input field={@form[:${fieldName}]} type="${inputType}" label="${label}"${extraAttrs} />`;
+  return `<.input field={@${formAssign}[:${fieldName}]} type="${inputType}" label="${label}"${extraAttrs} />`;
 }
 
 /** Map a TypeIR to the HTML `<input type="…">` attribute Ash forms
@@ -842,11 +978,36 @@ function renderColLetVar(
  *  pre-loading (or setting nil for lazy loading).  The success branch
  *  renders the lambda body directly — the Table primitive reads its
  *  own `rows={…}` from the same assign, so no for-loop is needed here. */
+/** Resolve the aggregate PascalCase name out of a `QueryView`
+ *  `of:` argument.  The scaffold-expander emits one of:
+ *    detail  → method-call `<api>.<Agg>.byId(id)` (receiver is a
+ *              member `{receiver: ref(api), member: Agg}`), or the
+ *              no-api fallback `<Agg>.byId(id)` (receiver ref(Agg))
+ *    list    → member access `<api>.<Agg>.all` (the `.all` is the
+ *              outer member; its receiver is `<api>.<Agg>`), or the
+ *              fallback bare `ref(Agg)` / `<Agg>.all`. */
+function resolveQueryAggregate(arg: ExprIR): string | undefined {
+  if (arg.kind === "method-call") {
+    if (arg.receiver.kind === "member") return arg.receiver.member;
+    if (arg.receiver.kind === "ref") return arg.receiver.name;
+  }
+  if (arg.kind === "member") {
+    // `<api>.<Agg>.all` → receiver is `<api>.<Agg>` (a member);
+    // `<Agg>.all` → receiver is ref(Agg).
+    if (arg.receiver.kind === "member") return arg.receiver.member;
+    if (arg.receiver.kind === "ref") return arg.receiver.name;
+    return arg.member;
+  }
+  if (arg.kind === "ref") return arg.name;
+  return undefined;
+}
+
 function renderQueryView(
   expr: Extract<ExprIR, { kind: "call" }>,
   ctx: WalkContext,
 ): string {
   let ofExpr = "";
+  let ofArgNode: ExprIR | undefined;
   let loadingHeex = `<div class="animate-pulse">Loading...</div>`;
   let errorHeex = `<div class="alert alert-error">Error loading data.</div>`;
   let emptyHeex = `<div class="empty">No items.</div>`;
@@ -859,6 +1020,7 @@ function renderQueryView(
     const name = expr.argNames?.[i];
     const arg = expr.args[i]!;
     if (name === "of") {
+      ofArgNode = arg;
       ofExpr = renderExpr(arg, { ...ctx, position: "template" });
     } else if (name === "single") {
       isSingle = arg.kind === "literal" && arg.value === "true";
@@ -890,14 +1052,34 @@ function renderQueryView(
   }
   void ofExpr;
 
+  // Register the query binding so the LiveView emitter loads the
+  // record(s) in handle_params (the assign the cond below reads is
+  // never populated otherwise — see QueryBinding).
+  const aggName = ofArgNode
+    ? resolveQueryAggregate(ofArgNode)
+    : undefined;
+  if (aggName) {
+    ctx.queryBindings.push({
+      kind: isSingle ? "single" : "list",
+      assign: assignName,
+      aggregate: aggName,
+    });
+  }
+
   if (isSingle) {
-    // Single-record query (detail page): success branch renders data body once.
+    // Single-record (detail page).  handle_params assigns one of:
+    //   nil        → still loading            → loading branch
+    //   :error     → Ash load error           → error branch
+    //   :not_found → no record for that id     → empty branch
+    //   record     → loaded                    → data branch
     return [
       `<%= cond do %>`,
       `  <% is_nil(@${assignName}) -> %>`,
       `    ${loadingHeex}`,
       `  <% @${assignName} == :error -> %>`,
       `    ${errorHeex}`,
+      `  <% @${assignName} == :not_found -> %>`,
+      `    ${emptyHeex}`,
       `  <% true -> %>`,
       `    ${dataHeex}`,
       `<% end %>`,
@@ -1045,6 +1227,8 @@ function closedPrimitive(name: string): PrimitiveSpec | null {
       return { tag: "div", staticAttrs: ["class"], takesChildren: true };
     case "Toolbar":
       return { tag: "div", staticAttrs: ["class"], takesChildren: true };
+    case "Group":
+      return { tag: "div", staticAttrs: ["class"], takesChildren: true };
     case "Empty":
       return { tag: ".empty", takesChildren: false };
     case "Badge":
@@ -1134,6 +1318,7 @@ function isHEExCall(name: string): boolean {
     closedPrimitive(name) !== null ||
     name === "Breadcrumbs" ||
     name === "Anchor" ||
+    name === "Modal" ||
     name === "Form" ||
     name === "Table" ||
     name === "QueryView" ||
@@ -1268,6 +1453,7 @@ export function renderRequiresGuard(
     appModule,
     aggregatesByName: new Map(),
     formBindings: [],
+    queryBindings: [],
     page,
     ui,
     stateNames: new Set(page.state.map((f) => snake(f.name))),

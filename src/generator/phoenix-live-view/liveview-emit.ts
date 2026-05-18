@@ -143,8 +143,20 @@ function renderLiveView(a: RenderArgs): string {
   const aliasLines: string[] = walked.aliasLines;
 
   const mount = renderMount(page, walked.formBindings, contextModuleByAggName);
-  const handleParams = renderHandleParams(page, ui, appModule);
-  const handleEventClauses = renderHandleEventClauses(handlers);
+  const handleParams = renderHandleParams(
+    page,
+    ui,
+    appModule,
+    walked.queryBindings,
+    walked.formBindings,
+    contextModuleByAggName,
+  );
+  const detailBaseRoute = page.route
+    ? page.route.replace(/\/:[^/]+$/, "")
+    : null;
+  const handleEventClauses =
+    renderHandleEventClauses(handlers) +
+    renderOperationEventClauses(walked.formBindings, detailBaseRoute);
   const aliasBlock = aliasLines.length > 0 ? aliasLines.join("\n") + "\n" : "";
 
   return `# Auto-generated.
@@ -201,6 +213,10 @@ function renderMount(
   // pages with >1 form should split into nested LiveComponents — out
   // of scope for the basic mount-stub fix.
   for (const fb of formBindings) {
+    // Operation forms bind to a *loaded* record (`for_update`), so
+    // they're assigned in handle_params after @data loads — never
+    // in mount (no record here).  Skip.
+    if (fb.kind === "operation") continue;
     if (fb.kind === "aggregate") {
       const ctxModule = contextModuleByAggName.get(fb.name);
       if (!ctxModule) continue; // unresolved — validator catches; silent skip
@@ -208,7 +224,7 @@ function renderMount(
         `      |> assign(:form, AshPhoenix.Form.for_create(${ctxModule}.${pascal(fb.name)}, :create) |> to_form())`,
       );
       break; // single @form per page
-    } else {
+    } else if (fb.kind === "workflow") {
       // Workflow form — placeholder until workflow-form mounting lands.
       // Keeps the page mountable (form is empty but the assigns shape
       // matches what the HEEx body expects).
@@ -231,47 +247,158 @@ ${assigns.join("\n")}
   end`;
 }
 
-function renderHandleParams(page: PageIR, ui: UiIR, appModule: string): string {
+function renderHandleParams(
+  page: PageIR,
+  ui: UiIR,
+  appModule: string,
+  queryBindings: import("./heex-walker.js").QueryBinding[],
+  formBindings: import("./heex-walker.js").FormBinding[],
+  contextModuleByAggName: ReadonlyMap<string, string>,
+): string {
   const paramAssigns: string[] = [];
   for (const p of page.params) {
-    paramAssigns.push(`      |> assign(:${snake(p.name)}, params["${camel(p.name)}"])`);
+    paramAssigns.push(`assign(:${snake(p.name)}, params["${camel(p.name)}"])`);
   }
-  // `requires <pred>` lowers to a guard that push_navigates to the
-  // root and flashes "forbidden" when the predicate is false.  The
-  // walker renders the predicate in handler position (so state refs
-  // resolve to `socket.assigns.…`).
+
+  // QueryView record loading.  The scaffold detail/list page reads
+  // @data / @items in its `cond`, but nothing populates them unless
+  // we load here (handle_params runs after @id is bound from the
+  // route).  `single` → load one record via the `get_<agg>` code
+  // interface (bang variant raises Ash.Error.Query.NotFound for a
+  // missing id, which we map to the `:not_found` sentinel the
+  // 4-way cond renders as the `empty:` slot).  `list` → the
+  // collection via `list_<agg>s`.
+  const loadBlocks: string[] = [];
+  for (const qb of queryBindings) {
+    const ctxModule = contextModuleByAggName.get(qb.aggregate);
+    if (!ctxModule) continue; // unresolved — validator catches upstream
+    const aggSnake = snake(qb.aggregate);
+    if (qb.kind === "single") {
+      // Operation forms for this aggregate bind to the loaded
+      // record via `for_update` — assigned here, in the success
+      // branch, where `record` is in scope.
+      const opAssigns = formBindings
+        .filter((fb) => fb.kind === "operation" && fb.name === qb.aggregate)
+        .map(
+          (fb) =>
+            `        |> assign(:${fb.op}_form, AshPhoenix.Form.for_update(record, :${fb.op}, as: "${fb.op}") |> to_form())`,
+        );
+      loadBlocks.push(
+        `    socket =
+      try do
+        record = ${ctxModule}.get_${aggSnake}!(socket.assigns.id)
+
+        socket
+        |> assign(:${qb.assign}, record)
+${opAssigns.length > 0 ? opAssigns.join("\n") + "\n" : ""}      rescue
+        Ash.Error.Query.NotFound -> assign(socket, :${qb.assign}, :not_found)
+        Ash.Error.Invalid -> assign(socket, :${qb.assign}, :error)
+      end`,
+      );
+    } else {
+      loadBlocks.push(
+        `    socket =
+      try do
+        assign(socket, :${qb.assign}, ${ctxModule}.list_${aggSnake}s!())
+      rescue
+        _ -> assign(socket, :${qb.assign}, :error)
+      end`,
+      );
+    }
+  }
+
+  const hasParams = paramAssigns.length > 0;
+  const hasLoad = loadBlocks.length > 0;
+
+  // Core body (sans guard): param assigns, then record load(s).
+  const bodyParts: string[] = [];
+  if (hasParams) {
+    bodyParts.push(
+      `    socket =\n      socket\n${paramAssigns.map((a) => `      |> ${a}`).join("\n")}`,
+    );
+  }
+  if (hasLoad) bodyParts.push(loadBlocks.join("\n\n"));
+  bodyParts.push(`    {:noreply, socket}`);
+  const coreBody = bodyParts.join("\n\n");
+
+  // `requires <pred>` guard wraps the whole body.
   const guard = renderRequiresGuard(page, ui, appModule);
-  const guardBlock = guard
+  const body = guard
     ? `    if not (${guard}) do
       {:noreply, socket |> put_flash(:error, "forbidden") |> push_navigate(to: "/")}
     else
-`
-    : "";
-  const guardClose = guard ? `    end` : "";
-  const noParamsBody = guard
-    ? `${guardBlock}      {:noreply, socket}
-${guardClose}`
-    : `    {:noreply, socket}`;
-  const withParamsBody = guard
-    ? `${guardBlock}      socket =
-        socket
-${paramAssigns.map((l) => "  " + l).join("\n")}
-      {:noreply, socket}
-${guardClose}`
-    : `    socket =
-      socket
-${paramAssigns.join("\n")}
-    {:noreply, socket}`;
-  if (paramAssigns.length === 0) {
-    return `  @impl true
-  def handle_params(_params, _uri, socket) do
-${noParamsBody}
-  end`;
-  }
+${coreBody
+  .split("\n")
+  .map((l) => (l.length > 0 ? "  " + l : l))
+  .join("\n")}
+    end`
+    : coreBody;
+
+  const paramsVar = hasParams || hasLoad ? "params" : "_params";
+  // `params` is referenced by the load block only through
+  // socket.assigns.id (bound above), so when there are no param
+  // assigns but there IS a load, still bind params for clarity.
+  const headParamsVar = hasParams ? "params" : paramsVar;
+
   return `  @impl true
-  def handle_params(params, _uri, socket) do
-${withParamsBody}
+  def handle_params(${headParamsVar}, _uri, socket) do
+${body}
   end`;
+}
+
+/** Per-operation `validate_<op>` / `submit_<op>` handle_event
+ *  clauses.  Mirrors the AshPhoenix 3.x form lifecycle: validate
+ *  on change, submit on submit; on success re-load the record into
+ *  @data, rebuild the op form, flash, and push_patch back to the
+ *  detail route (canonical re-load path).  One pair per
+ *  `kind:"operation"` FormBinding. */
+function renderOperationEventClauses(
+  formBindings: import("./heex-walker.js").FormBinding[],
+  /** The detail page's route with the trailing `/:id` stripped,
+   *  e.g. "/customers" — used to push_patch back after submit. */
+  detailBaseRoute: string | null,
+): string {
+  const ops = formBindings.filter((fb) => fb.kind === "operation");
+  if (ops.length === 0) return "";
+  return (
+    "\n" +
+    ops
+      .map((fb) => {
+        const op = fb.op!;
+        const human = humanizeOp(op);
+        const reload = detailBaseRoute
+          ? `\n         |> push_patch(to: ~p"${detailBaseRoute}/#{record.id}")`
+          : "";
+        return `  @impl true
+  def handle_event("validate_${op}", %{"${op}" => params}, socket) do
+    form = AshPhoenix.Form.validate(socket.assigns.${op}_form, params)
+    {:noreply, assign(socket, :${op}_form, form)}
+  end
+
+  @impl true
+  def handle_event("submit_${op}", %{"${op}" => params}, socket) do
+    case AshPhoenix.Form.submit(socket.assigns.${op}_form, params: params) do
+      {:ok, record} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "${human} succeeded")
+         |> assign(:data, record)
+         |> assign(:${op}_form, AshPhoenix.Form.for_update(record, :${op}, as: "${op}") |> to_form())${reload}}
+
+      {:error, form} ->
+        {:noreply, assign(socket, :${op}_form, form)}
+    end
+  end\n`;
+      })
+      .join("\n")
+  );
+}
+
+/** "adjust_credit" → "Adjust credit" — sentence-case the snake op
+ *  name for flash copy. */
+function humanizeOp(opSnake: string): string {
+  const s = opSnake.replace(/_/g, " ");
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 function indent(s: string, n: number): string {

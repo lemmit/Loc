@@ -42,6 +42,9 @@ const FIXTURE_DDD = `system AcmeLV {
         name: string display
         email: string
         invariant email.length > 0
+        operation adjustCredit(amount: decimal) {
+          precondition amount > 0
+        }
       }
       repository Customers for Customer { }
     }
