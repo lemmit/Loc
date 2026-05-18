@@ -21,6 +21,7 @@
 | 1.4 | `chakra@v3` (compound components, `createSystem`, `toaster` — largest delta) — stack v2 | #157 | ✅ pack landed (pinned `design: "chakra@v3"`; bareword still v2) |
 | 1.5 | `ashPhoenix` minor → Phoenix 1.8 + Ash 3.24 — separate ecosystem, no React stack | — | pending |
 | 1.X | Promote `BUILTIN_PACK_LATEST.mantine = "v9"` + refresh `test/fixtures/baseline-output/` — bareword `design: mantine` now emits Mantine 9 / React 19; `design: "mantine@v7"` still pins React 18 | #156 | ✅ merged |
+| 1.X | Promote `BUILTIN_PACK_LATEST.chakra = "v3"` + `mui = "v7"` — bareword `design: chakra` / `mui` roll forward; old majors stay pinned via `"chakra@v2"` / `"mui@v5"`. No fixture refresh (acme tracks mantine). shadcn held at v3 — playground injects the Tailwind 3 Play CDN, so promoting shadcn@v4 needs an in-browser Tailwind 4 path first | this PR | ✅ pack defaults flipped |
 | 2.a | Hono backend deps (hono 4.6→4.12; drizzle 0.36→0.45; zod 3→4) — first **backend stack** (`hono@v4`) | — | pending |
 | 2.b | Phoenix backend (tighten `postgrex: ">= 0.0.0"`; phoenix 1.7→1.8) — `phoenix@v1` stack | — | pending |
 | 2.c | .NET stack scaffold (`dotnet@v8` baseline; `dotnet@v10` follow-up after 2026-11) | — | not urgent |
@@ -423,6 +424,25 @@ Tailwind 4 — the real, hard breaks are all infrastructure:
 Net: ~5 infra files, **zero** component-class edits. A
 `vite build` shard proves the CSS pipeline resolves; the runtime
 e2e gate catches visual/mount regressions the build can't see.
+
+### 12. Promoting a bareword default has a playground side the build can't see
+
+chakra@v3 and mui@v7 promoted cleanly (one-line `BUILTIN_PACK_LATEST`
+flip; no fixture refresh — acme.ddd has no `design:` slot so it
+tracks mantine). shadcn@v4 **could not** be promoted the same way:
+the in-browser playground preview detects shadcn by `@tailwind`
+directives in the bundled CSS and injects the **Tailwind 3** Play
+CDN (`web/src/preview/iframe-html.ts`, `needsTailwindCdn`). v4's
+CSS-first `@import "tailwindcss"` has no `@tailwind` directive, so a
+promoted bareword would ship *unstyled* previews even though
+`vite build` (the CI shard) is green — vite-built deploys are fine,
+the gap is purely the esbuild-wasm in-browser path. Promoting
+shadcn@v4 is therefore blocked on giving the playground bundler a
+Tailwind-4 path (a real task, not a map flip). General rule:
+**a promote is only a one-liner for packs whose styling is
+JS-runtime (Mantine/Chakra/MUI). CSS-pipeline packs (shadcn) also
+need the playground's in-browser CSS path to understand the new
+major.**
 
 ## Backend stacks (Phase 2)
 

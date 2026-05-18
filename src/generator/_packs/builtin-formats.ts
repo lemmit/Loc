@@ -51,8 +51,23 @@ export const BUILTIN_PACK_LATEST = {
   // that want React 18.  This flip was paired with refreshing
   // `test/fixtures/baseline-output/` (acme.ddd uses the bareword).
   mantine:    "v9",
-  chakra:     "v2",
-  mui:        "v5",
+  // chakra promoted to v3 (Chakra UI 3 / React 19, stack v2) and mui
+  // to v7 (Material UI 7) once their pinned packs proved out via the
+  // tsc + vite-build shards and runtime-gate e2e specs.  Bareword
+  // `design: chakra` / `design: mui` now resolve to the new majors;
+  // the old packs stay loadable via the explicit pins
+  // `design: "chakra@v2"` / `design: "mui@v5"`.  acme.ddd (the
+  // baseline fixture source) has no `design:` slot so it tracks
+  // mantine — these flips don't touch test/fixtures/baseline-output/.
+  chakra:     "v3",
+  mui:        "v7",
+  // shadcn stays at v3: shadcn@v4 is Tailwind-4 CSS-first
+  // (`@import "tailwindcss"`), but the playground preview injects the
+  // Tailwind *3* Play CDN, gated on `@tailwind` directives in the
+  // bundled CSS (see web/src/preview/iframe-html.ts).  Promoting the
+  // bareword before the in-browser bundler grows a Tailwind-4 path
+  // would ship unstyled previews.  Pinned `design: "shadcn@v4"`
+  // still works (vite-built deploys are fine).
   shadcn:     "v3",
   ashPhoenix: "v3",
 } as const satisfies Record<string, string>;
