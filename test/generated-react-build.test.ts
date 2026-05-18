@@ -95,6 +95,7 @@ const PACKS: readonly PackSpec[] = [
   { family: "shadcn",  version: "v3" },
   { family: "mui",     version: "v5" },
   { family: "chakra",  version: "v2" },
+  { family: "chakra",  version: "v3" },
 ];
 
 function packId(p: PackSpec): string {

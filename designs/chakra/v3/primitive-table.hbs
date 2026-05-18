@@ -1,0 +1,16 @@
+{{#if hasColumns}}<Table.ScrollArea borderWidth="1px" borderRadius="md"{{{testidAttr}}}>
+{{indent}}<Table.Root size="sm">
+{{headIndent}}<Table.Header>
+{{rowIndent}}<Table.Row>
+{{#each columns}}{{../cellIndent}}<Table.ColumnHeader>{{{this.header}}}</Table.ColumnHeader>
+{{/each}}{{rowIndent}}</Table.Row>
+{{headIndent}}</Table.Header>
+{{headIndent}}<Table.Body>
+{{rowIndent}}{ {{{rowsExpr}}}.map(({{rowVar}}) => (
+{{cellIndent}}<Table.Row key={ {{rowVar}}.id }{{#if hasRowTestid}} data-testid={ {{{rowTestid}}} }{{/if}}{{#if hasOnRowClick}} onClick={() => {{{onRowClick}}} } style=\{{ cursor: "pointer" }}{{/if}}>
+{{#each columns}}{{../cellIndent}}<Table.Cell>{{{this.cellJsx}}}</Table.Cell>
+{{/each}}{{cellIndent}}</Table.Row>
+{{rowIndent}})) }
+{{headIndent}}</Table.Body>
+{{indent}}</Table.Root>
+{{closeIndent}}</Table.ScrollArea>{{else}}<Table.ScrollArea{{{testidAttr}}} />{{/if}}

@@ -13,6 +13,7 @@ import storybookMantineV9Source from "./storybook-mantine-v9.ddd?raw";
 import storybookShadcnSource from "./storybook-shadcn.ddd?raw";
 import storybookMuiSource from "./storybook-mui.ddd?raw";
 import storybookChakraSource from "./storybook-chakra.ddd?raw";
+import storybookChakraV3Source from "./storybook-chakra-v3.ddd?raw";
 import storybookComponentsSource from "./storybook-components.ddd?raw";
 import dotnetFullstackSource from "./dotnet-fullstack.ddd?raw";
 import dotnetBackendSource from "./dotnet-backend.ddd?raw";
@@ -88,6 +89,13 @@ export const examples: LoomExample[] = [
     source: storybookChakraSource,
     blurb:
       "Same catalogue as the Mantine storybook, rendered through the Chakra UI pack.",
+  },
+  {
+    id: "storybook-chakra-v3",
+    label: "Chakra v3 · aggregate-CRUD storybook",
+    source: storybookChakraV3Source,
+    blurb:
+      "The Chakra storybook pinned to the Chakra UI v3 pack (compound components, createSystem theme).",
   },
   {
     id: "sales-system",

@@ -1,0 +1,13 @@
+<Controller
+          control={control}
+          name="{{path}}"
+          render={({ field }) => (
+            <Field.Root>
+              <Switch.Root checked={!!field.value} onCheckedChange={(e) => field.onChange(e.checked)} data-testid="{{testId}}">
+                <Switch.HiddenInput />
+                <Switch.Control />
+                <Switch.Label>{{label}}</Switch.Label>
+              </Switch.Root>
+            </Field.Root>
+          )}
+        />

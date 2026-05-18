@@ -27,6 +27,7 @@ export const BUILTIN_PACK_FORMATS = {
   "mantine@v7":    "tsx",
   "mantine@v9":    "tsx",
   "chakra@v2":     "tsx",
+  "chakra@v3":     "tsx",
   "mui@v5":        "tsx",
   "shadcn@v3":     "tsx",
   "ashPhoenix@v3": "heex",

@@ -1,0 +1,206 @@
+// Auto-generated.
+import { Routes, Route, Link as RouterLink, useLocation, useNavigate } from "react-router-dom";
+import {
+  Box, Flex, VStack, HStack, Separator, IconButton,
+  Text, Heading, Alert, Button,
+  Drawer, Portal, useDisclosure, List,
+} from "@chakra-ui/react";
+import React from "react";
+{{#each imports}}import {{specifier}} from "{{from}}";
+{{/each}}
+
+// `@chakra-ui/icons` is intentionally NOT a dep here: inlining the
+// SVG sidesteps the peerDependency resolution trap without pulling
+// another icon library.
+function HamburgerIcon(): React.JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+      <path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z" />
+    </svg>
+  );
+}
+
+const DRAWER_WIDTH = "240px";
+
+class AppErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { error: Error | null }
+> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  override componentDidCatch(error: Error, info: React.ErrorInfo) {
+    // eslint-disable-next-line no-console
+    console.error("App error boundary caught:", error, info.componentStack);
+  }
+  override render() {
+    if (this.state.error) {
+      return (
+        <VStack data-testid="app-error" p={4} gap={2} alignItems="flex-start">
+          <Alert.Root status="error">
+            <Alert.Indicator />
+            <Alert.Content>
+              <Alert.Description>{this.state.error.message}</Alert.Description>
+            </Alert.Content>
+          </Alert.Root>
+          <Box>
+            <Button
+              variant="outline"
+              onClick={() => {
+                this.setState({ error: null });
+                window.location.assign("/");
+              }}
+            >
+              Back to home
+            </Button>
+          </Box>
+        </VStack>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function NotFound() {
+  return (
+    <VStack data-testid="not-found" p={4} gap={1} alignItems="flex-start">
+      <Heading size="md">Not found</Heading>
+      <RouterLink to="/">← Back to home</RouterLink>
+    </VStack>
+  );
+}
+
+function useIsActive() {
+  const location = useLocation();
+  return (path: string, opts?: { exact?: boolean }) => {
+    if (opts?.exact) return location.pathname === path;
+    return (
+      location.pathname === path || location.pathname.startsWith(path + "/")
+    );
+  };
+}
+
+export default function App() {
+  const isActive = useIsActive();
+  const navigate = useNavigate();
+  const { open, onOpen, onClose } = useDisclosure();
+  // Mobile UX: auto-close the temporary Drawer after a route change.
+  const location = useLocation();
+  React.useEffect(() => {
+    onClose();
+  }, [location.pathname]);
+
+  const drawerContent = (
+    <Box data-testid="nav-sidebar" w={DRAWER_WIDTH}>
+      <Box h="64px" />
+      <Separator />
+      <List.Root gap={0} pt={2} listStyleType="none">
+{{#each navSections}}        <Text fontSize="xs" fontWeight={600} color="gray.500" px={4} py={1} textTransform="uppercase">{{label}}</Text>
+{{#each entries}}        <List.Item>
+          <Box
+            as="button"
+            w="full"
+            textAlign="left"
+            px={4}
+            py={2}
+            fontWeight={isActive({{{activeArgs}}}) ? 600 : 400}
+            bg={isActive({{{activeArgs}}}) ? "brand.50" : "transparent"}
+            color={isActive({{{activeArgs}}}) ? "brand.600" : "inherit"}
+            _hover=\{{ bg: "gray.100" }}
+            onClick={() => navigate("{{to}}")}
+            data-testid="{{testId}}"
+          >
+            {{label}}
+          </Box>
+        </List.Item>
+{{/each}}{{/each}}      </List.Root>
+    </Box>
+  );
+
+  return (
+    <Flex>
+      {/* Mobile drawer */}
+      <Drawer.Root open={open} placement="start" onOpenChange={(e) => { if (!e.open) onClose(); }}>
+        <Portal>
+          <Drawer.Backdrop />
+          <Drawer.Positioner>
+            <Drawer.Content>
+              <Drawer.Body p={0}>
+                {drawerContent}
+              </Drawer.Body>
+            </Drawer.Content>
+          </Drawer.Positioner>
+        </Portal>
+      </Drawer.Root>
+
+      {/* Desktop sidebar */}
+      <Box
+        display=\{{ base: "none", md: "block" }}
+        w={DRAWER_WIDTH}
+        minH="100vh"
+        borderRight="1px"
+        borderColor="gray.200"
+        flexShrink={0}
+      >
+        <Box
+          position="sticky"
+          top={0}
+          h="64px"
+          bg="brand.600"
+          display="flex"
+          alignItems="center"
+          px={4}
+        >
+          <Box
+            asChild
+            color="white"
+            textDecoration="none"
+            display="flex"
+            alignItems="center"
+            gap={2}
+          >
+            <RouterLink to="/">
+              <Box w={7} h={7} borderRadius="md" bg="brand.300" aria-hidden="true" />
+              <Text fontWeight={600} fontSize="md" color="white">{{systemNameHuman}}</Text>
+            </RouterLink>
+          </Box>
+        </Box>
+        {drawerContent}
+      </Box>
+
+      {/* Main content */}
+      <Box flex={1} minW={0}>
+        {/* Top bar (mobile only) */}
+        <HStack
+          display=\{{ base: "flex", md: "none" }}
+          h="64px"
+          px={4}
+          bg="brand.600"
+          color="white"
+          justifyContent="space-between"
+        >
+          <IconButton
+            aria-label="Open menu"
+            variant="ghost"
+            color="white"
+            onClick={onOpen}
+            data-testid="nav-burger"
+          >
+            <HamburgerIcon />
+          </IconButton>
+          <Text fontWeight={600}>{{systemNameHuman}}</Text>
+          <Box w={8} />
+        </HStack>
+        <Box p={6}>
+          <AppErrorBoundary>
+            <Routes>
+{{#each routes}}              <Route path="{{path}}" element={{expr elementJsx}} />
+{{/each}}              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </AppErrorBoundary>
+        </Box>
+      </Box>
+    </Flex>
+  );
+}
