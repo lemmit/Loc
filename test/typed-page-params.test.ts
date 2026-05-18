@@ -49,7 +49,7 @@ describe("Slice 11.4 — typed page parameters in walker-rendered pages", () => 
     expect(content).toBeDefined();
     // useParams import + typed generic + destructure of `name`.
     expect(content).toMatch(
-      /import \{ useParams \} from "react-router-dom";/,
+      /import \{ useParams \} from "react-router";/,
     );
     expect(content).toMatch(
       /const \{ name \} = useParams<\{ name: string \}>\(\);/,
@@ -142,7 +142,7 @@ describe("Slice 11.4 — typed page parameters in walker-rendered pages", () => 
     `);
     const content = files.get("web/src/pages/welcome.tsx")!;
     expect(content).not.toMatch(/useParams/);
-    expect(content).not.toMatch(/react-router-dom/);
+    expect(content).not.toMatch(/react-router/);
     expect(content).toMatch(/<Title order=\{2\}>Welcome<\/Title>/);
   });
 

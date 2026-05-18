@@ -132,7 +132,7 @@ describe("Slice A3 — formatter primitives", () => {
     expect(tsx).toBeDefined();
     expect(tsx).toMatch(/<RouterLink to=\{`\/customers\/\$\{ customerId \}`\}[^>]*>/);
     expect(tsx).toMatch(/<IdValue id=\{ customerId \} \/>/);
-    expect(tsx).toMatch(/import \{[^}]*\bLink as RouterLink\b[^}]*\} from "react-router-dom"/);
+    expect(tsx).toMatch(/import \{[^}]*\bLink as RouterLink\b[^}]*\} from "react-router"/);
     expect(tsx).toMatch(/import \{[^}]*\bIdValue\b[^}]*\} from "\.\.\/lib\/format"/);
   });
 

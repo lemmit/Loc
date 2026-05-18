@@ -2,7 +2,7 @@
 //
 //   Anchor("View orders", to: "/orders")
 //     → Mantine <Anchor component={RouterLink} to="/orders">…</Anchor>
-//       (`Link as RouterLink` from react-router-dom — aliased so packs
+//       (`Link as RouterLink` from react-router — aliased so packs
 //        whose own primitive is named `Link` don't collide.)
 //
 // Without `to:` falls through to a bare <Anchor> (no href —
@@ -47,7 +47,7 @@ describe("Slice 11.15 — Anchor primitive", () => {
     `);
     const content = files.get("web/src/pages/home.tsx")!;
     expect(content).toBeDefined();
-    expect(content).toMatch(/import \{ Link as RouterLink \} from "react-router-dom";/);
+    expect(content).toMatch(/import \{ Link as RouterLink \} from "react-router";/);
     expect(content).toMatch(/import \{ Anchor, Stack, Title \} from "@mantine\/core";/);
     expect(content).toMatch(
       /<Anchor component=\{RouterLink\} to="\/orders">View orders<\/Anchor>/,
@@ -74,7 +74,7 @@ describe("Slice 11.15 — Anchor primitive", () => {
       }
     `);
     const content = files.get("web/src/pages/plain.tsx")!;
-    expect(content).not.toMatch(/react-router-dom/);
+    expect(content).not.toMatch(/react-router/);
     expect(content).toMatch(/<Anchor>Bare link<\/Anchor>/);
   });
 
@@ -127,7 +127,7 @@ describe("Slice 11.15 — Anchor primitive", () => {
     const content = files.get("web/src/pages/home.tsx")!;
     // Single import line with both useNavigate (for Button) and Link (for Anchor).
     expect(content).toMatch(
-      /import \{ useNavigate, Link as RouterLink \} from "react-router-dom";/,
+      /import \{ useNavigate, Link as RouterLink \} from "react-router";/,
     );
     expect(content).toMatch(/<Anchor component=\{RouterLink\} to="\/settings">/);
     expect(content).toMatch(/<Button onClick=\{\(\) => navigate\("\/logout"\)\}>/);
