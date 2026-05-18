@@ -94,6 +94,7 @@ const PACKS: readonly PackSpec[] = [
   { family: "mantine", version: "v9" },
   { family: "shadcn",  version: "v3" },
   { family: "mui",     version: "v5" },
+  { family: "mui",     version: "v7" },
   { family: "chakra",  version: "v2" },
   { family: "chakra",  version: "v3" },
 ];
