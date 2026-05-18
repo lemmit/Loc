@@ -107,15 +107,17 @@ jobs:
         working-directory: web
         run: npm run e2e
 
-      # Upload the trace+video bundle Playwright produces on failure
-      # so we can inspect what the browser actually saw without
-      # re-running locally.
+      # Upload the Playwright HTML report (with embedded trace) on
+      # failure so we can inspect what the browser saw without
+      # re-running locally.  Only the report dir is shipped — the raw
+      # test-results/ tree is redundant with it and would double the
+      # artifact size.  Short retention + max compression keep this
+      # well under the 500MB Actions storage quota.
       - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@v7
         with:
           name: playwright-report
-          path: |
-            web/playwright-report/
-            web/test-results/
-          retention-days: 7
+          path: web/playwright-report/
+          retention-days: 2
+          compression-level: 9

@@ -32,7 +32,12 @@ export default defineConfig({
     baseURL: "http://127.0.0.1:4173",
     headless: true,
     trace: "retain-on-failure",
-    video: "retain-on-failure",
+    // Video deliberately disabled: it is by far the heaviest CI
+    // artifact and counts against the 500MB storage quota.  The
+    // retained trace already carries DOM snapshots, per-action
+    // screenshots, console and network, which is enough to triage
+    // a failing spec.
+    video: "off",
     screenshot: "only-on-failure",
   },
   webServer: {
