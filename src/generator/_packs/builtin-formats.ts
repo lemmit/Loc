@@ -41,12 +41,13 @@ export const BUILTIN_PACK_FORMATS = {
  *  behaviour so the existing examples generate byte-identical
  *  output. */
 export const BUILTIN_PACK_LATEST = {
-  // Promotion to v9 happens in a separate PR paired with refreshing
-  // `test/fixtures/baseline-output/` — flipping the default changes
-  // every bareword `design: mantine` emit (e.g. acme.ddd) to the
-  // Mantine 9 / React 19 dep set.  Keep at v7 here so this PR ships
-  // v9 as a strictly additive option (`design: "mantine@v9"`).
-  mantine:    "v7",
+  // mantine promoted to v9 (Mantine 9 / React 19, stack v2) once the
+  // pinned v9 pack proved out live in the playground.  Bareword
+  // `design: mantine` now resolves to mantine@v9; the v7 pack stays
+  // loadable via the explicit pin `design: "mantine@v7"` for projects
+  // that want React 18.  This flip was paired with refreshing
+  // `test/fixtures/baseline-output/` (acme.ddd uses the bareword).
+  mantine:    "v9",
   chakra:     "v2",
   mui:        "v5",
   shadcn:     "v3",

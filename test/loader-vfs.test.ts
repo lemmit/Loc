@@ -81,10 +81,9 @@ describe("resolvePackDir: built-in names", () => {
   it("resolves bareword built-ins to /designs/<family>/<latest-version>", () => {
     // Bareword resolution flows through BUILTIN_PACK_LATEST — the
     // version segment comes from the toolchain default, not from
-    // the input.  Update these expectations when you bump
-    // BUILTIN_PACK_LATEST (e.g. mantine flipping to v9 is a
-    // deliberate follow-up paired with fixture refresh).
-    expect(resolvePackDir("mantine")).toBe("/designs/mantine/v7");
+    // the input.  mantine was promoted to v9 (Mantine 9 / React 19);
+    // update these when BUILTIN_PACK_LATEST changes again.
+    expect(resolvePackDir("mantine")).toBe("/designs/mantine/v9");
     expect(resolvePackDir("shadcn")).toBe("/designs/shadcn/v3");
   });
   it("resolves pinned built-ins to /designs/<family>/<version>", () => {
@@ -123,7 +122,7 @@ describe("resolvePackDir: paths", () => {
     // returns the built-in path — not the workspace path — so the
     // user pack can't shadow the built-in.  Version segment tracks
     // the current BUILTIN_PACK_LATEST.mantine.
-    expect(resolvePackDir("mantine", "/workspace/somewhere")).toBe("/designs/mantine/v7");
+    expect(resolvePackDir("mantine", "/workspace/somewhere")).toBe("/designs/mantine/v9");
   });
 });
 
