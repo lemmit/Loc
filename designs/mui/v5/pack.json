@@ -463,7 +463,12 @@
       {
         "from": "@mui/material",
         "named": [
+          "Dialog",
+          "DialogTitle",
+          "DialogContent",
+          "DialogActions",
           "Stack",
+          "Typography",
           "Button"
         ]
       }

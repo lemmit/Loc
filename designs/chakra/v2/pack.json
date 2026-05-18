@@ -484,6 +484,15 @@
       {
         "from": "@chakra-ui/react",
         "named": [
+          "Modal",
+          "ModalOverlay",
+          "ModalContent",
+          "ModalHeader",
+          "ModalCloseButton",
+          "ModalBody",
+          "ModalFooter",
+          "useDisclosure",
+          "useToast",
           "VStack",
           "Button",
           "Text"
