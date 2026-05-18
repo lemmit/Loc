@@ -58,6 +58,7 @@ function makeOrderAggregate(): AggregateIR {
     operations: [],
     invariants: [],
     functions: [],
+    contains: [],
     parts: [],
   };
 }
