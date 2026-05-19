@@ -4,7 +4,7 @@ import { URI } from "langium";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createDddServices } from "../src/language/ddd-module.js";
-import { generateTypeScript } from "../src/generator/typescript/index.js";
+import { generateTypeScript } from "../src/platform/hono/v4/emit.js";
 import { BACKEND_PINS as HONO_V4_PINS } from "../src/platform/hono/v4/pins.js";
 import type { Model } from "../src/language/generated/ast.js";
 
@@ -930,7 +930,7 @@ describe("typescript generator", () => {
       const { lowerModel } = await import("../src/ir/lower.js");
       const { enrichLoomModel } = await import("../src/ir/enrichments.js");
       const { generateTypeScriptForContexts } = await import(
-        "../src/generator/typescript/index.js"
+        "../src/platform/hono/v4/emit.js"
       );
       const loom = enrichLoomModel(lowerModel(doc.parseResult.value as Model));
       const sys = loom.systems[0]!;

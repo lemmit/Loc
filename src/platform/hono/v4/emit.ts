@@ -1,13 +1,22 @@
-import type { Model } from "../../language/generated/ast.js";
-import { lowerModel } from "../../ir/lower.js";
-import { enrichLoomModel } from "../../ir/enrichments.js";
+// packaging-split P2 — this orchestrator (project assembly: which
+// files, framework wiring, package.json/Dockerfile) is
+// backend-specific, so it lives in the hono@v4 *package* and drives
+// the shared neutral emitter library under
+// `src/generator/typescript/` by ordinary import (package → shared,
+// the B2.1 invariant).  Subsequent P2 slices move the remaining
+// Hono-framework builders (routes/workflow/view/auth/observability)
+// in here too, leaving only the framework-neutral helpers
+// (render-expr/stmt, templates, zod-refine) in core.
+import type { Model } from "../../../language/generated/ast.js";
+import { lowerModel } from "../../../ir/lower.js";
+import { enrichLoomModel } from "../../../ir/enrichments.js";
 import type {
   BoundedContextIR,
   DeployableIR,
   RepositoryIR,
   SystemIR,
-} from "../../ir/loom-ir.js";
-import { camel } from "../../util/naming.js";
+} from "../../../ir/loom-ir.js";
+import { camel } from "../../../util/naming.js";
 import {
   renderAggregate,
   renderEnumsAndValueObjects,
@@ -16,14 +25,14 @@ import {
   renderIds,
   renderSchema,
   renderTestsFile,
-} from "./templates.js";
-import { emitAuthFiles } from "./auth-emit.js";
-import { buildRepositoryFile } from "./repository-builder.js";
-import { buildRoutesFile } from "./routes-builder.js";
-import { buildExternHandlersFile } from "./extern-builder.js";
-import { buildWorkflowsFile } from "./workflow-builder.js";
-import { buildViewsRoutesFile } from "./view-routes-builder.js";
-import { emitObservabilityFiles } from "./observability-builder.js";
+} from "../../../generator/typescript/templates.js";
+import { emitAuthFiles } from "../../../generator/typescript/auth-emit.js";
+import { buildRepositoryFile } from "../../../generator/typescript/repository-builder.js";
+import { buildRoutesFile } from "../../../generator/typescript/routes-builder.js";
+import { buildExternHandlersFile } from "../../../generator/typescript/extern-builder.js";
+import { buildWorkflowsFile } from "../../../generator/typescript/workflow-builder.js";
+import { buildViewsRoutesFile } from "../../../generator/typescript/view-routes-builder.js";
+import { emitObservabilityFiles } from "../../../generator/typescript/observability-builder.js";
 
 const ERRORS_TS = `// Auto-generated.
 export class DomainError extends Error {

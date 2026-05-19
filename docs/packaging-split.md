@@ -134,9 +134,9 @@ speaks. Treat it like a plugin ABI.
 
 | Phase | Scope | Gate |
 | --- | --- | --- |
-| **P0** | Define the `loom` manifest TypeScript type + a `discoverBackends()` reader. In-tree backends get a manifest object (co-located, not yet package.json). `registry.ts` keeps its static map as the fallback. **Byte-identical.** | `npm test` + fixture clean |
-| **P1** | `resolvePlatformRef` resolves via the discovery layer (reading in-tree manifests) instead of the hardcoded `versionedPlatforms`. Single bundle still; same surfaces returned. **Byte-identical.** | fixture + `LOOM_TS_BUILD` + the new layering test |
-| **P2** | Split `src/generator/typescript/` along the core/backend line; move the Hono-framework half into `src/platform/hono/v4/` (still in-tree, still one package). **Byte-identical.** | fixture + `LOOM_TS_BUILD` |
+| **P0** ✅ | `loom` manifest type + `discoverBackends()`; injectable source; `registry` derives from it. **Byte-identical.** (PR #180) | `npm test` 905 + fixture clean |
+| **P1** ✅ | _Subsumed by P0_ — `resolvePlatformRef`/`backendVersionsForFamily`/`isRegisteredBackendRef` already resolve through `discoverBackends()` (the injectable seam, in-tree manifests). Same surfaces; byte-identical. | as P0 |
+| **P2** 🔄 | Split `src/generator/typescript/` along the core↔backend line into `src/platform/hono/v4/`. **P2a done:** the orchestrator (`generateTypeScript`/`generateTypeScriptForContexts` + project assembly + `package.json`/Dockerfile) moved → `src/platform/hono/v4/emit.ts`; it drives the still-shared neutral library by ordinary import (package → shared). **P2b pending:** relocate the remaining Hono-framework builders (routes/workflow/view/auth/observability) into the package, leaving only framework-neutral helpers (render-expr/stmt, templates, zod-refine, repository/drizzle) in core. **Byte-identical.** | fixture + `LOOM_TS_BUILD` + layering test |
 | **P3** | Repo → workspaces: `packages/{core,cli,backend-hono-v4,…}`. Wire `@loom/core` `exports`; backends `peerDependency` it; manifests become real package.json `loom` keys. Resolver reads the project closure. CLI = `@loom/cli`. Output unchanged. | full suite + `LOOM_TS_BUILD` + a from-registry install smoke |
 | **P4** | Publish. Backends versioned/released independently; `@loom/cli` install docs. | e2e against a clean `npm i` |
 

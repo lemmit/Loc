@@ -8,7 +8,7 @@
 // touches — no flat-file replacement, the previous version stays
 // loadable.
 // ---------------------------------------------------------------------------
-import { generateTypeScriptForContexts } from "../../../generator/typescript/index.js";
+import { generateTypeScriptForContexts } from "./emit.js";
 import type { ComposeServiceShape, PlatformSurface } from "../../surface.js";
 import type { LoomBackendManifest } from "../../manifest.js";
 import { BACKEND_PINS } from "./pins.js";
