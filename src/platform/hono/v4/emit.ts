@@ -26,13 +26,14 @@ import {
   renderSchema,
   renderTestsFile,
 } from "../../../generator/typescript/templates.js";
-import { emitAuthFiles } from "../../../generator/typescript/auth-emit.js";
 import { buildRepositoryFile } from "../../../generator/typescript/repository-builder.js";
-import { buildRoutesFile } from "../../../generator/typescript/routes-builder.js";
 import { buildExternHandlersFile } from "../../../generator/typescript/extern-builder.js";
-import { buildWorkflowsFile } from "../../../generator/typescript/workflow-builder.js";
-import { buildViewsRoutesFile } from "../../../generator/typescript/view-routes-builder.js";
-import { emitObservabilityFiles } from "../../../generator/typescript/observability-builder.js";
+// Hono-framework builders now live in this package (P2b) — siblings.
+import { emitAuthFiles } from "./auth-emit.js";
+import { buildRoutesFile } from "./routes-builder.js";
+import { buildWorkflowsFile } from "./workflow-builder.js";
+import { buildViewsRoutesFile } from "./view-routes-builder.js";
+import { emitObservabilityFiles } from "./observability-builder.js";
 
 const ERRORS_TS = `// Auto-generated.
 export class DomainError extends Error {
