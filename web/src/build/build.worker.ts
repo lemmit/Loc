@@ -6,10 +6,10 @@ import { lowerModel } from "../../../src/ir/lower.js";
 import { enrichLoomModel } from "../../../src/ir/enrichments.js";
 import { validateLoomModel } from "../../../src/ir/validate.js";
 import { generateSystems } from "../../../src/system/index.js";
-import { generateTypeScript } from "../../../src/generator/typescript/index.js";
-// Playground legacy single-context build targets the default Hono
-// backend; like the CLI entrypoint it supplies that package's pins
-// to the version-agnostic shared emitter (B2.1).
+// P2a moved the TS orchestrator into the hono@v4 package; the
+// playground legacy single-context build targets the default Hono
+// backend and supplies that package's pins (B2.1).
+import { generateTypeScript } from "../../../src/platform/hono/v4/emit.js";
 import { BACKEND_PINS as HONO_V4_PINS } from "../../../src/platform/hono/v4/pins.js";
 import { MemoryVfs } from "../vfs/memory-vfs.js";
 import { seedBuiltinPacks } from "./template-bundled.js";

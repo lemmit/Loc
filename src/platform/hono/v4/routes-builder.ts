@@ -9,22 +9,22 @@ import type {
   RepositoryIR,
   TypeIR,
   ValueObjectIR,
-} from "../../ir/loom-ir.js";
+} from "../../../ir/loom-ir.js";
 import {
   findUsesCurrentUser,
   operationUsesCurrentUser,
-} from "../../ir/loom-ir.js";
-import { wireShapeFor } from "../../ir/enrichments.js";
+} from "../../../ir/loom-ir.js";
+import { wireShapeFor } from "../../../ir/enrichments.js";
 import {
   type ClassifyContext,
   type SingleFieldPattern,
-} from "../../ir/invariant-classify.js";
+} from "../../../ir/invariant-classify.js";
 import {
   chainSingleFieldNative,
   refineClauseFor,
   takeSingleFieldChain,
-} from "./zod-refine.js";
-import { camel, plural, snake } from "../../util/naming.js";
+} from "../../../generator/typescript/zod-refine.js";
+import { camel, plural, snake } from "../../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Hono routes file with OpenAPI annotations.

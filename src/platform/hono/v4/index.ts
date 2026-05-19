@@ -8,9 +8,20 @@
 // touches — no flat-file replacement, the previous version stays
 // loadable.
 // ---------------------------------------------------------------------------
-import { generateTypeScriptForContexts } from "../../../generator/typescript/index.js";
+import { generateTypeScriptForContexts } from "./emit.js";
 import type { ComposeServiceShape, PlatformSurface } from "../../surface.js";
+import type { LoomBackendManifest } from "../../manifest.js";
 import { BACKEND_PINS } from "./pins.js";
+
+/** packaging-split P0 — the descriptor the resolver discovers this
+ *  package by.  In-tree today; becomes the `loom` key in this
+ *  package's package.json when it is extracted (P3). */
+export const loomManifest: LoomBackendManifest = {
+  kind: "backend",
+  family: "hono",
+  loomVersion: "v4",
+  core: "^1.0.0",
+};
 
 const honoPlatform: PlatformSurface = {
   name: "hono",

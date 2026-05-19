@@ -5,9 +5,9 @@ import type {
   TypeIR,
   WorkflowIR,
   WorkflowStmtIR,
-} from "../../ir/loom-ir.js";
-import { camel, snake } from "../../util/naming.js";
-import { renderTsExpr } from "./render-expr.js";
+} from "../../../ir/loom-ir.js";
+import { camel, snake } from "../../../util/naming.js";
+import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
 import { emitWireSchema, wireToDomainExpr, zodFor } from "./routes-builder.js";
 
 // ---------------------------------------------------------------------------
@@ -340,7 +340,7 @@ function lookupOp(
   ctx: BoundedContextIR,
   aggName: string,
   opName: string,
-): import("../../ir/loom-ir.js").OperationIR | undefined {
+): import("../../../ir/loom-ir.js").OperationIR | undefined {
   return ctx.aggregates
     .find((a) => a.name === aggName)
     ?.operations.find((o) => o.name === opName);
@@ -379,7 +379,7 @@ function collectReposForWorkflow(wf: WorkflowIR): {
 /** Drizzle-postgres `isolationLevel` enum values are space-cased
  *  lowercase strings.  Map DSL camelCase tokens onto them. */
 function pgIsolationLevel(
-  level: import("../../ir/loom-ir.js").IsolationLevel,
+  level: import("../../../ir/loom-ir.js").IsolationLevel,
 ): string {
   switch (level) {
     case "readUncommitted":
