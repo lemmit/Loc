@@ -11,7 +11,7 @@
 // secondary index keyed off the same Map.
 // ---------------------------------------------------------------------------
 
-import type { Vfs, VfsListener, VfsPath } from "./types.js";
+import type { RestorableVfs, VfsListener, VfsPath } from "./types.js";
 
 /** Normalise a VFS path: enforce leading `/`, collapse `..` and `.`,
  *  and reject any path that escapes the root.  The escape check
@@ -45,7 +45,7 @@ interface Subscription {
   listener: VfsListener;
 }
 
-export class MemoryVfs implements Vfs {
+export class MemoryVfs implements RestorableVfs {
   private readonly entries = new Map<VfsPath, string>();
   private readonly subs = new Set<Subscription>();
 
@@ -122,6 +122,19 @@ export class MemoryVfs implements Vfs {
 
   snapshot(): ReadonlyMap<VfsPath, string> {
     return new Map(this.entries);
+  }
+
+  restore(entries: Iterable<readonly [VfsPath, string]>): void {
+    // Atomic replace: union of old + new keys is the affected set so
+    // subscribers see removals as well as adds/changes in one fan-out.
+    const affected = new Set<VfsPath>(this.entries.keys());
+    this.entries.clear();
+    for (const [path, content] of entries) {
+      const norm = normalize(path);
+      this.entries.set(norm, content);
+      affected.add(norm);
+    }
+    if (affected.size > 0) this.notify([...affected].sort());
   }
 
   private notify(changed: ReadonlyArray<VfsPath>): void {

@@ -22,7 +22,7 @@
 // ---------------------------------------------------------------------------
 
 import { MemoryVfs } from "./memory-vfs.js";
-import type { Vfs, VfsListener, VfsPath } from "./types.js";
+import type { RestorableVfs, VfsListener, VfsPath } from "./types.js";
 
 /** Default DB name — namespaced under `loom-` so multiple Loom
  *  apps on the same origin don't collide.  Test code passes a
@@ -36,7 +36,7 @@ const DB_VERSION = 1;
  *  into one IDB write per natural pause. */
 const FLUSH_DEBOUNCE_MS = 250;
 
-export class IdbVfs implements Vfs {
+export class IdbVfs implements RestorableVfs {
   /** True iff the underlying IDB connection succeeded.  When false,
    *  the VFS still works but writes don't survive reload. */
   readonly persistent: boolean;
@@ -120,6 +120,19 @@ export class IdbVfs implements Vfs {
     this.mem.hydrate(list);
     for (const [path, content] of list) {
       this.queueFlush(path, content);
+    }
+  }
+
+  restore(entries: Iterable<readonly [VfsPath, string]>): void {
+    const before = new Set(this.mem.snapshot().keys());
+    this.mem.restore(entries);
+    // Work off the post-restore snapshot so paths are normalised
+    // consistently with `before`: write everything kept, delete
+    // whatever the snapshot dropped.
+    const after = this.mem.snapshot();
+    for (const [path, content] of after) this.queueFlush(path, content);
+    for (const path of before) {
+      if (!after.has(path)) this.queueFlush(path, null);
     }
   }
 
