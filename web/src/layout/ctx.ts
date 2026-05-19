@@ -12,7 +12,7 @@
 import type { ReactNode } from "react";
 import type { LoomLspClient } from "../lsp/client";
 import type { LoomBuildClient } from "../build/client";
-import type { LoomRuntimeClient } from "../runtime/client";
+import type { RuntimeEngine } from "../engine";
 import type { Diagnostic } from "../lsp/protocol";
 import type { GenerateOk, GenerateResult, VirtualFile } from "../build/protocol";
 import type { BundleFail, BundleOk } from "../bundle/protocol";
@@ -61,7 +61,7 @@ export interface LayoutCtx {
   // Worker clients
   lspClient: LoomLspClient | null;
   buildClient: LoomBuildClient | null;
-  runtimeClient: LoomRuntimeClient | null;
+  engine: RuntimeEngine | null;
 
   // Editor wiring
   onSourceChange: (text: string) => void;

@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ActionIcon, Box, Group, Text, Tooltip } from "@mantine/core";
-import type { LoomRuntimeClient } from "../runtime/client";
-import { makePreviewHtml } from "./iframe-html";
-import { attachRuntimePort, pushBundle, sandboxUrl } from "./sw-host";
+import type { RuntimeDispatcher } from "../engine";
+import { SwIframePreviewHost } from "./sw-iframe-host";
 import { fnv1a32 } from "../util/hash";
 
 interface PreviewProps {
@@ -14,9 +13,10 @@ interface PreviewProps {
    *  Drives the iframe's importmap so React/React-DOM resolve to
    *  the same esm.sh URL the bundle was compiled against. */
   versions?: Record<string, string>;
-  /** Live runtime worker.  In-iframe fetches against the sandbox
-   *  runtime path are forwarded through the SW to this client. */
-  runtime: LoomRuntimeClient;
+  /** Live runtime dispatcher (the RuntimeEngine).  In-iframe fetches
+   *  against the sandbox runtime path are forwarded through the SW
+   *  to this. */
+  runtime: RuntimeDispatcher;
 }
 
 // Preview requires Service Worker support to serve the iframe
@@ -94,6 +94,9 @@ function MinimizeIcon({ size = 14 }: { size?: number }): JSX.Element {
 export function Preview({ js, css, versions, runtime }: PreviewProps): JSX.Element {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const fullscreenTargetRef = useRef<HTMLDivElement | null>(null);
+  const hostRef = useRef<SwIframePreviewHost | null>(null);
+  if (hostRef.current === null) hostRef.current = new SwIframePreviewHost();
+  const host = hostRef.current;
   const [isFullscreen, setIsFullscreen] = useState(false);
   // CSS-based fallback for platforms where `Element.requestFullscreen`
   // is unsupported or rejects.  iOS Safari (and every iOS browser,
@@ -196,26 +199,7 @@ export function Preview({ js, css, versions, runtime }: PreviewProps): JSX.Eleme
     let dispose: (() => void) | undefined;
     let cancelled = false;
     void (async () => {
-      const reg = await navigator.serviceWorker.ready;
-      if (cancelled) return;
-      const detach = await attachRuntimePort(reg, async (req) => {
-        const result = await runtime.dispatch({
-          url: req.url,
-          method: req.method,
-          headers: req.headers,
-          body: req.body,
-        });
-        if (result.ok) {
-          return {
-            ok: true,
-            status: result.response.status,
-            statusText: result.response.statusText,
-            headers: result.response.headers,
-            body: result.response.body,
-          };
-        }
-        return { ok: false, message: result.message };
-      });
+      const detach = await host.attachRuntime((r) => runtime.dispatch(r));
       if (cancelled) {
         detach?.();
         return;
@@ -252,13 +236,10 @@ export function Preview({ js, css, versions, runtime }: PreviewProps): JSX.Eleme
     // user routes (no match → "Not found"), and link clicks would
     // pushState to `/customers`, leaking out of SW scope and
     // breaking subsequent runtime fetches.
-    const sandboxBase = new URL(sandboxUrl()).pathname.replace(/\/$/, "");
-    const html = makePreviewHtml({ js, css, versions, sandboxBase });
+    const { html, bundle } = host.synthHtml({ js, css, versions });
     void (async () => {
       try {
-        const reg = await navigator.serviceWorker.ready;
-        if (cancelled) return;
-        await pushBundle(reg, { html, js, css });
+        await host.setBundle(bundle);
         if (cancelled) return;
         setPushedHash(fnv1a32(html));
       } catch {
@@ -357,8 +338,11 @@ export function Preview({ js, css, versions, runtime }: PreviewProps): JSX.Eleme
           pushedHash !== null && (
             <iframe
               key={pushedHash}
-              ref={iframeRef}
-              src={sandboxUrl()}
+              ref={(el) => {
+                iframeRef.current = el;
+                host.bindIframe(el);
+              }}
+              src={host.url()}
               style={{ width: "100%", height: "100%", border: "none" }}
               title="Loom-generated app"
               data-testid="preview-iframe"

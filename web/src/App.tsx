@@ -7,8 +7,8 @@ import { examples, defaultExample, type LoomExample } from "./examples";
 import { LoomBuildClient } from "./build/client";
 import type { GenerateOk, GenerateResult, VirtualFile } from "./build/protocol";
 import type { BundleOk } from "./bundle/protocol";
-import { LoomBundleClient } from "./bundle/client";
-import { LoomRuntimeClient } from "./runtime/client";
+import { engineRegistry, type RuntimeEngine } from "./engine";
+import { emptyDependencySet } from "./engine";
 import { registerPreviewSw } from "./preview/sw-host";
 import { buildTree } from "./preview/file-tree";
 import { useWorkspace } from "./workspace/use-workspace";
@@ -173,8 +173,7 @@ export default function App(): JSX.Element {
 
   const sourceRef = useRef<string>(initialSource);
   const buildClientRef = useRef<LoomBuildClient | null>(null);
-  const bundleClientRef = useRef<LoomBundleClient | null>(null);
-  const runtimeClientRef = useRef<LoomRuntimeClient | null>(null);
+  const engineRef = useRef<RuntimeEngine | null>(null);
   const lspClientRef = useRef<LoomLspClient | null>(null);
   if (lspClientRef.current === null) {
     lspClientRef.current = new LoomLspClient();
@@ -194,30 +193,27 @@ export default function App(): JSX.Element {
         });
       },
     });
-    const bundleClient = new LoomBundleClient();
-    const runtimeClient = new LoomRuntimeClient({
-      // When App's visibilitychange handler respawns the runtime
-      // worker (assumed-killed-while-backgrounded), the booted
-      // PGlite is gone — drop the pipeline back to "needs Boot"
-      // with an explanatory message instead of leaving a green
-      // "booted" badge while every dispatch hangs.  `dispatch`
-      // from `useReducer` is stable, so closing over it here is
-      // safe across renders.
-      onRespawn: () => dispatch({ type: "RUNTIME_LOST" }),
+    // The runtime engine encapsulates the bundle + runtime workers
+    // behind the RuntimeEngine seam.  `onLost` maps 1:1 to the old
+    // `LoomRuntimeClient.onRespawn`: when App's visibilitychange
+    // handler respawns the runtime after a background-kill, the
+    // booted PGlite is gone — drop the pipeline back to "needs Boot"
+    // with an explanatory message instead of leaving a green
+    // "booted" badge while every dispatch hangs.  `dispatch` from
+    // `useReducer` is stable, so closing over it here is safe.
+    const engine = engineRegistry.create("esbuild-pglite", {
+      onLost: () => dispatch({ type: "RUNTIME_LOST" }),
     });
     buildClientRef.current = build;
-    bundleClientRef.current = bundleClient;
-    runtimeClientRef.current = runtimeClient;
+    engineRef.current = engine;
     setBuildClientReady(true);
     void registerPreviewSw();
     return () => {
       buildClientRef.current = null;
-      bundleClientRef.current = null;
-      runtimeClientRef.current = null;
+      engineRef.current = null;
       setBuildClientReady(false);
       build.dispose();
-      bundleClient.dispose();
-      runtimeClient.dispose();
+      engine.dispose();
       lspClientRef.current?.dispose();
       lspClientRef.current = null;
     };
@@ -254,7 +250,7 @@ export default function App(): JSX.Element {
           // `pipeline.boot.kind === "ok"` is the same guard the
           // Backend panel uses to render its action buttons.
           if (pipeline.boot.kind === "ok") {
-            runtimeClientRef.current?.respawn();
+            engineRef.current?.respawn();
           }
         }
       }
@@ -287,7 +283,7 @@ export default function App(): JSX.Element {
     dispatch({ type: "RESET" });
     setDiagnostics([]);
     setSelectedPath(null);
-    runtimeClientRef.current?.reset();
+    void engineRef.current?.reset();
     scheduleAutoGenerate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSource]);
@@ -385,8 +381,8 @@ export default function App(): JSX.Element {
   }
 
   async function runBundleStep(gen: GenerateOk): Promise<BundleStepResult | null> {
-    const client = bundleClientRef.current;
-    if (!client) return null;
+    const engine = engineRef.current;
+    if (!engine) return null;
     const entries = analyzeDeployables(gen.files);
     if (!entries.hono) {
       // The playground's runtime is Hono + React only.  Spell out
@@ -405,31 +401,24 @@ export default function App(): JSX.Element {
       return { hono: failed, react: null };
     }
     dispatch({ type: "BUNDLE_START" });
-    const honoRes = await client.bundle({
-      kind: "hono",
+    const { hono: honoRes, react: reactRes } = await engine.prepare({
       files: gen.files,
-      entryPath: entries.hono,
+      dependencies: emptyDependencySet(),
+      honoEntry: entries.hono,
+      reactEntry: entries.react ?? undefined,
     });
-    let reactRes: typeof honoRes | null = null;
-    if (honoRes.ok && entries.react) {
-      reactRes = await client.bundle({
-        kind: "react",
-        files: gen.files,
-        entryPath: entries.react,
-      });
-    }
     dispatch({ type: "BUNDLE_DONE", hono: honoRes, react: reactRes });
     return { hono: honoRes, react: reactRes };
   }
 
   async function runBootStep(hono: BundleOk): Promise<boolean> {
-    const runtime = runtimeClientRef.current;
-    if (!runtime) return false;
+    const engine = engineRef.current;
+    if (!engine) return false;
     dispatch({ type: "BOOT_START" });
     try {
       const sourceHash = fnv1a32(sourceRef.current);
       const dataDir = `opfs-ahp://loom-${sourceHash}`;
-      const res = await runtime.boot({ bundleCode: hono.code, dataDir });
+      const res = await engine.boot(hono.code, dataDir);
       if (res.ok) {
         dispatch({
           type: "BOOT_OK",
@@ -501,15 +490,15 @@ export default function App(): JSX.Element {
   }
 
   async function runWipe(): Promise<void> {
-    const runtime = runtimeClientRef.current;
-    if (!runtime || ddl === null) return;
-    await runtime.wipe();
+    const engine = engineRef.current;
+    if (!engine || ddl === null) return;
+    await engine.wipe();
     dispatch({ type: "DISPATCH_CLEAR" });
   }
 
   async function runDispatch(): Promise<void> {
-    const runtime = runtimeClientRef.current;
-    if (!runtime || ddl === null) return;
+    const engine = engineRef.current;
+    if (!engine || ddl === null) return;
     dispatch({ type: "DISPATCH_START" });
     try {
       const url = reqPath.startsWith("http")
@@ -523,7 +512,7 @@ export default function App(): JSX.Element {
       if (body !== null && body.length > 0) {
         headers["content-type"] = "application/json";
       }
-      const result = await runtime.dispatch({ url, method: reqMethod, headers, body });
+      const result = await engine.dispatch({ url, method: reqMethod, headers, body });
       dispatch({ type: "DISPATCH_DONE", result });
     } catch (err) {
       dispatch({
@@ -561,7 +550,7 @@ export default function App(): JSX.Element {
     workspace,
     lspClient: lspClientRef.current,
     buildClient: buildClientRef.current,
-    runtimeClient: runtimeClientRef.current,
+    engine: engineRef.current,
     onSourceChange: (text) => {
       sourceRef.current = text;
       scheduleHashSync(text);

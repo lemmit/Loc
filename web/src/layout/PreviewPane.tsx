@@ -13,7 +13,7 @@ export function PreviewPane({ ctx }: Props): JSX.Element {
   const {
     reactBundle,
     ddl,
-    runtimeClient,
+    engine,
     generateSuccess,
     reactBundleStatus,
     unsupportedDeployables,
@@ -30,12 +30,12 @@ export function PreviewPane({ ctx }: Props): JSX.Element {
 
   return (
     <Box style={{ flex: 1, minHeight: 0 }}>
-      {reactBundle && ddl && runtimeClient ? (
+      {reactBundle && ddl && engine ? (
         <Preview
           js={reactBundle.code}
           css={reactBundle.css}
           versions={reactBundle.versions}
-          runtime={runtimeClient}
+          runtime={engine}
         />
       ) : (
         <Box p="md">
