@@ -81,3 +81,14 @@ export interface Vfs {
    *  it into the fresh worker). */
   snapshot(): ReadonlyMap<VfsPath, string>;
 }
+
+/** Vfs that can atomically replace its entire contents from a prior
+ *  snapshot — the inverse of `snapshot()`.  Used by the tab-
+ *  suspension fix (P4): on resume, replay the persisted snapshot
+ *  instead of cold-rebooting.  Unlike `hydrate` (additive merge),
+ *  `restore` removes entries not present in the snapshot and fires a
+ *  single notification covering every affected path (added, changed,
+ *  AND removed) so subscribers re-sync exactly. */
+export interface RestorableVfs extends Vfs {
+  restore(entries: Iterable<readonly [VfsPath, string]>): void;
+}
