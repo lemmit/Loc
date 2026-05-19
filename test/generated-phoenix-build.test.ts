@@ -38,9 +38,14 @@ const ENABLED = process.env.LOOM_PHOENIX_BUILD === "1";
 const FIXTURE_DDD = `system AcmeLV {
   module Sales {
     context Sales {
+      valueobject Money {
+        amount: decimal
+        currency: string
+      }
       aggregate Customer {
         name: string display
         email: string
+        creditLimit: Money
         invariant email.length > 0
         operation adjustCredit(amount: decimal) {
           precondition amount > 0

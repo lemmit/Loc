@@ -247,14 +247,27 @@ function expandAggregateDetail(
   const humanAgg = humanize(agg.name);
   const cellVar = "data";
 
-  // One KeyValueRow per non-collection aggregate field.  Value-object
-  // / array fields have no scalar cell renderer — same skip rule as
-  // the list expander.  Collection containments render below as their
-  // own nested-table section (related-entity lists).
+  // One KeyValueRow per scalar aggregate field.  Value-object fields
+  // are flattened into one nested KeyValueRow per leaf (legacy
+  // detail-preparer parity — they were previously dropped).  Array
+  // fields still have no scalar cell renderer; collection
+  // containments render below as their own nested-table section.
   const rows: ExprIR[] = [];
   for (const f of agg.fields) {
     const inner = f.type.kind === "optional" ? f.type.inner : f.type;
-    if (inner.kind === "valueobject" || inner.kind === "array") continue;
+    if (inner.kind === "array") continue;
+    if (inner.kind === "valueobject") {
+      rows.push(
+        ...valueObjectRows(
+          member(ref(cellVar), f.name),
+          humanize(f.name),
+          inner.name,
+          ctx,
+          agg.name,
+        ),
+      );
+      continue;
+    }
     rows.push(
       call("KeyValueRow", [
         lit(humanize(f.name)),
@@ -434,28 +447,79 @@ function cellAccessorFor(
   type: import("./loom-ir.js").TypeIR,
   rowVar: string,
 ): ExprIR {
+  return typedCellFor(member(ref(rowVar), fieldName), type);
+}
+
+/** Type-dispatched cell renderer rooted at an arbitrary receiver
+ *  expression (vs `cellAccessorFor`, which roots at
+ *  `<rowVar>.<fieldName>`).  Lets value-object leaves render through
+ *  a nested member chain (`data.shipTo.city`) built from real
+ *  member IR nodes — so React emits `data.shipTo.city` and Phoenix
+ *  emits `@data.ship_to.city` correctly (a dotted member string
+ *  would mis-snake on the Phoenix HEEx walker). */
+function typedCellFor(
+  receiver: ExprIR,
+  type: import("./loom-ir.js").TypeIR,
+): ExprIR {
   const inner = type.kind === "optional" ? type.inner : type;
   if (inner.kind === "id") {
-    return call("IdLink", [member(ref(rowVar), fieldName)], undefined, [
+    return call("IdLink", [receiver], undefined, [
       ["of", ref(inner.targetName)],
     ]);
   }
   if (inner.kind === "primitive") {
     if (inner.name === "datetime") {
-      return call("DateDisplay", [member(ref(rowVar), fieldName)]);
+      return call("DateDisplay", [receiver]);
     }
     if (
       inner.name === "decimal" ||
       inner.name === "int" ||
       inner.name === "long"
     ) {
-      return call("Text", [member(ref(rowVar), fieldName)]);
+      return call("Text", [receiver]);
     }
   }
   if (inner.kind === "enum") {
-    return call("EnumBadge", [member(ref(rowVar), fieldName)]);
+    return call("EnumBadge", [receiver]);
   }
-  return call("Text", [member(ref(rowVar), fieldName)]);
+  return call("Text", [receiver]);
+}
+
+/** Flatten a value-object–typed aggregate field into one
+ *  `KeyValueRow` per leaf, recursing through nested value objects.
+ *  `receiver` is the member chain to the VO instance
+ *  (`data.<field>`); `labelPrefix` is the humanised path so far.
+ *  Array leaves are skipped (no scalar cell renderer — same rule
+ *  as the top-level field loop).  Restores the legacy
+ *  detail-preparer behaviour where value objects rendered as
+ *  nested labelled field groups instead of being dropped. */
+function valueObjectRows(
+  receiver: ExprIR,
+  labelPrefix: string,
+  voName: string,
+  ctx: ScaffoldExpandContext,
+  aggregateName: string,
+): ExprIR[] {
+  const bc = ctx.bcByAggregate.get(aggregateName);
+  const vo = bc?.valueObjects.find((v) => v.name === voName);
+  if (!vo) return [];
+  const out: ExprIR[] = [];
+  for (const lf of vo.fields) {
+    const li = lf.type.kind === "optional" ? lf.type.inner : lf.type;
+    if (li.kind === "array") continue;
+    const leafReceiver = member(receiver, lf.name);
+    const label = `${labelPrefix} ${humanize(lf.name)}`;
+    if (li.kind === "valueobject") {
+      out.push(
+        ...valueObjectRows(leafReceiver, label, li.name, ctx, aggregateName),
+      );
+      continue;
+    }
+    out.push(
+      call("KeyValueRow", [lit(label), typedCellFor(leafReceiver, lf.type)]),
+    );
+  }
+  return out;
 }
 
 /** Slice A11 — `methodCall` ExprIR helper.  The detail expander

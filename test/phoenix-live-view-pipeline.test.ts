@@ -30,9 +30,14 @@ const FIXTURE_SOURCE = `system MiniLiveView {
 
   module Sales {
     context Sales {
+      valueobject Money {
+        amount: decimal
+        currency: string
+      }
       aggregate Customer {
         name: string display
         email: string
+        creditLimit: Money
         invariant email.length > 0
         operation adjustCredit(amount: decimal) {
           precondition amount > 0
@@ -185,6 +190,14 @@ describe("phoenixLiveView pipeline (Phases 1-8)", () => {
 
     // 4-way cond now distinguishes not-found (empty) from error.
     expect(detail).toMatch(/<% @data == :not_found -> %>/);
+
+    // Value-object field `creditLimit: Money` flattens into one
+    // nested KeyValueRow per leaf (not dropped), via real nested
+    // member access (correctly snake-cased per segment).
+    expect(detail).toMatch(/Credit Limit Amount/);
+    expect(detail).toMatch(/Credit Limit Currency/);
+    expect(detail).toMatch(/@data\.credit_limit\.amount/);
+    expect(detail).toMatch(/@data\.credit_limit\.currency/);
 
     // CoreComponents gains the modal component + JS helpers.
     const core = files.get(
