@@ -58,11 +58,7 @@ jobs:
     # is 4min × ~11 tests; a stuck pipeline could otherwise burn the
     # full 15 before cancelling.  10 leaves time for the warm-cache
     # path while bounding the cost of regression runs.
-    # Temporarily 25 while diagnosing the npm-default path: the run
-    # is narrowed to one spec below, but the npm engine does a real
-    # npm install per bundle so headroom matters.  Restore to 10 (or
-    # a measured value) once the suite is green on npm-default.
-    timeout-minutes: 25
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
 
@@ -109,11 +105,7 @@ jobs:
 
       - name: Run Playwright specs
         working-directory: web
-        # Narrowed to the canonical generate→bundle→boot→preview→
-        # dispatch spec while diagnosing npm-default: fast, readable
-        # verdict before committing the full 19-spec suite to a long
-        # runner.  Restore to `npm run e2e` once green.
-        run: npm run e2e -- runtime.spec.ts
+        run: npm run e2e
 
       # Upload the Playwright HTML report (with embedded trace) on
       # failure so we can inspect what the browser saw without
