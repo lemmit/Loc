@@ -39,6 +39,7 @@ import type {
   RuntimeEngineOptions,
 } from "./runtime-engine.js";
 import { install, type InstallCache } from "./npm/install.js";
+import { VfsBundlerClient } from "./npm/vfs-bundler-client.js";
 
 export interface EsbuildRunInput {
   /** Bundle a synthesised entry (Hono path: makeEntryStdin output). */
@@ -54,13 +55,6 @@ export type EsbuildRun = (
   { ok: true; code: string; css?: string } | { ok: false; message: string }
 >;
 
-const DEFAULT_RUN: EsbuildRun = () => {
-  throw new Error(
-    "NpmInstallBundleEngine: no esbuild runner wired (B4 supplies the " +
-      "esbuild-wasm worker builder).  Inject an EsbuildRun to use this " +
-      "engine before then.",
-  );
-};
 
 /** Nearest package.json to the entry → its `dependencies`, plus the
  *  runtime-layer PGlite pin (the bundle entry imports it even though
@@ -101,7 +95,8 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
 
   private runtime: LoomRuntimeClient | null = null;
   private readonly onLost?: () => void;
-  private readonly run: EsbuildRun;
+  private readonly injectedRun?: EsbuildRun;
+  private vfsBundler: VfsBundlerClient | null = null;
   private readonly cache?: InstallCache;
 
   constructor(
@@ -111,8 +106,17 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
     } = {},
   ) {
     this.onLost = opts.onLost;
-    this.run = opts.esbuildRun ?? DEFAULT_RUN;
+    this.injectedRun = opts.esbuildRun;
     this.cache = opts.cache;
+  }
+
+  /** Injected runner (spikes / tests) wins; otherwise the in-browser
+   *  esbuild-wasm worker, created lazily so non-browser callers that
+   *  inject never construct a Worker. */
+  private esbuildRun(): EsbuildRun {
+    if (this.injectedRun) return this.injectedRun;
+    this.vfsBundler ??= new VfsBundlerClient();
+    return this.vfsBundler.run;
   }
 
   /** The runtime worker is created lazily on first boot — `prepare`
@@ -133,8 +137,9 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
       { cache: this.cache },
     );
     const versionRec = Object.fromEntries(versions);
+    const run = this.esbuildRun();
 
-    const honoRun = await this.run({
+    const honoRun = await run({
       stdinContents: makeEntryStdin(
         input.honoEntry,
         schemaPathFor(input.honoEntry),
@@ -156,7 +161,7 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
 
     let react: BundleResult | null = null;
     if (hono.ok && input.reactEntry) {
-      const r = await this.run({ entry: "/" + input.reactEntry, files });
+      const r = await run({ entry: "/" + input.reactEntry, files });
       react = r.ok
         ? {
             ok: true,
@@ -199,6 +204,7 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
   }
   dispose(): void {
     this.runtime?.dispose();
+    this.vfsBundler?.dispose();
   }
 }
 

@@ -34,3 +34,4 @@ export type {
 export type { RestorableVfs } from "./vfs.js";
 
 export { EngineRegistry, engineRegistry } from "./registry.js";
+export { selectedEngineId } from "./select.js";
