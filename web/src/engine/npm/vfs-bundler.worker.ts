@@ -14,6 +14,8 @@
 import * as esbuild from "esbuild-wasm";
 import wasmURL from "esbuild-wasm/esbuild.wasm?url";
 import { makeVfsNpmPlugin } from "./esbuild-vfs-plugin.js";
+import { install } from "./install.js";
+import { IdbInstallCache } from "./install-cache-idb.js";
 
 declare const self: DedicatedWorkerGlobalScope;
 
@@ -21,7 +23,10 @@ export interface VfsBundleRequest {
   id: number;
   stdinContents?: string;
   entry?: string;
-  files: Map<string, string | Uint8Array>;
+  /** Generated project files only — the worker installs rootDeps
+   *  into its own copy, so node_modules never crosses postMessage. */
+  generatedFiles: Map<string, string | Uint8Array>;
+  rootDeps: Record<string, string>;
   externalReactRuntime?: boolean;
 }
 
@@ -29,12 +34,30 @@ export interface VfsBundleRequest {
 // iframe importmap supplies one shared instance (mirrors the esm.sh
 // path).  Wildcards cover jsx-runtime / client subpaths.
 const REACT_EXTERNALS = ["react", "react-dom", "react/*", "react-dom/*"];
+
 export interface VfsBundleResponse {
   id: number;
   ok: boolean;
   code?: string;
   css?: string;
+  versions?: Record<string, string>;
   message?: string;
+}
+
+// IDB-backed install cache, worker-scoped (IndexedDB is available in
+// DedicatedWorkerGlobalScope).  Opened once; memory-only no-op when
+// IDB is unavailable.  This is why a dep set installs once and
+// replays across prepares/reloads.
+let cachePromise: Promise<IdbInstallCache> | null = null;
+function getCache(): Promise<IdbInstallCache> {
+  if (!cachePromise) {
+    cachePromise = (async () => {
+      const c = new IdbInstallCache();
+      await c.open();
+      return c;
+    })();
+  }
+  return cachePromise;
 }
 
 let initPromise: Promise<void> | null = null;
@@ -55,9 +78,19 @@ function ensureInit(): Promise<void> {
 }
 
 self.onmessage = async (ev: MessageEvent<VfsBundleRequest>): Promise<void> => {
-  const { id, stdinContents, entry, files, externalReactRuntime } = ev.data;
+  const { id, stdinContents, entry, generatedFiles, rootDeps, externalReactRuntime } =
+    ev.data;
   try {
     await ensureInit();
+    // Install in the worker, into our own copy of the generated
+    // tree — off the main thread, and node_modules stays here.
+    const files = new Map(generatedFiles);
+    const { versions } = await install(
+      rootDeps,
+      (p, d) => files.set(p, d),
+      { cache: await getCache() },
+    );
+    const versionRec = Object.fromEntries(versions);
     const common = {
       bundle: true,
       format: "esm" as const,
@@ -90,6 +123,7 @@ self.onmessage = async (ev: MessageEvent<VfsBundleRequest>): Promise<void> => {
       ok: true,
       code: js?.text ?? out.outputFiles[0]?.text ?? "",
       css: css?.text,
+      versions: versionRec,
     };
     self.postMessage(resp);
   } catch (err) {

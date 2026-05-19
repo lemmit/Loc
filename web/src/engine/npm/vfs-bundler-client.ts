@@ -13,7 +13,11 @@ export class VfsBundlerClient {
   private pending = new Map<
     number,
     {
-      resolve: (v: { ok: true; code: string; css?: string } | { ok: false; message: string }) => void;
+      resolve: (
+        v:
+          | { ok: true; code: string; css?: string; versions: Record<string, string> }
+          | { ok: false; message: string },
+      ) => void;
     }
   >();
 
@@ -29,7 +33,12 @@ export class VfsBundlerClient {
       this.pending.delete(m.id);
       slot.resolve(
         m.ok
-          ? { ok: true, code: m.code ?? "", css: m.css }
+          ? {
+              ok: true,
+              code: m.code ?? "",
+              css: m.css,
+              versions: m.versions ?? {},
+            }
           : { ok: false, message: m.message ?? "vfs-bundler: unknown error" },
       );
     };
@@ -44,7 +53,9 @@ export class VfsBundlerClient {
         id,
         stdinContents: input.stdinContents,
         entry: input.entry,
-        files: input.files,
+        generatedFiles: input.generatedFiles,
+        rootDeps: input.rootDeps,
+        externalReactRuntime: input.externalReactRuntime,
       } satisfies VfsBundleRequest);
     });
   };

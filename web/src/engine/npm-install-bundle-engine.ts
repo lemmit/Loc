@@ -38,17 +38,19 @@ import type {
   RuntimeEngine,
   RuntimeEngineOptions,
 } from "./runtime-engine.js";
-import { install, type InstallCache } from "./npm/install.js";
-import { IdbInstallCache } from "./npm/install-cache-idb.js";
 import { postProcessNpmBundle } from "./npm/postprocess.js";
 import { VfsBundlerClient } from "./npm/vfs-bundler-client.js";
 
 export interface EsbuildRunInput {
+  /** The generated project files only (small).  The runner installs
+   *  `rootDeps` into its own copy — node_modules never crosses the
+   *  worker boundary. */
+  generatedFiles: Map<string, string | Uint8Array>;
+  rootDeps: Record<string, string>;
   /** Bundle a synthesised entry (Hono path: makeEntryStdin output). */
   stdinContents?: string;
   /** Bundle a real file entry by absolute VFS path (React path). */
   entry?: string;
-  files: Map<string, string | Uint8Array>;
   /** React build: keep react/react-dom external so the iframe
    *  importmap supplies a single instance — mirrors the esm.sh
    *  path's externalisation and avoids the dual-React/"Invalid hook
@@ -59,7 +61,8 @@ export interface EsbuildRunInput {
 export type EsbuildRun = (
   input: EsbuildRunInput,
 ) => Promise<
-  { ok: true; code: string; css?: string } | { ok: false; message: string }
+  | { ok: true; code: string; css?: string; versions: Record<string, string> }
+  | { ok: false; message: string }
 >;
 
 
@@ -104,40 +107,18 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
   private readonly onLost?: () => void;
   private readonly injectedRun?: EsbuildRun;
   private vfsBundler: VfsBundlerClient | null = null;
-  private readonly injectedCache?: InstallCache;
-  private cachePromise: Promise<InstallCache> | null = null;
 
   constructor(
-    opts: RuntimeEngineOptions & {
-      esbuildRun?: EsbuildRun;
-      cache?: InstallCache;
-    } = {},
+    opts: RuntimeEngineOptions & { esbuildRun?: EsbuildRun } = {},
   ) {
     this.onLost = opts.onLost;
     this.injectedRun = opts.esbuildRun;
-    this.injectedCache = opts.cache;
-  }
-
-  /** Injected cache (tests) wins; otherwise a lazily-opened
-   *  IdbInstallCache so a dependency set installs once and replays
-   *  across prepares / reloads instead of re-fetching tens of MB
-   *  every Bundle.  Memoised; `open()` is a no-op (memory-only) when
-   *  IDB is unavailable, so non-browser callers still work. */
-  private async resolveCache(): Promise<InstallCache> {
-    if (this.injectedCache) return this.injectedCache;
-    if (!this.cachePromise) {
-      this.cachePromise = (async () => {
-        const c = new IdbInstallCache();
-        await c.open();
-        return c;
-      })();
-    }
-    return this.cachePromise;
   }
 
   /** Injected runner (spikes / tests) wins; otherwise the in-browser
    *  esbuild-wasm worker, created lazily so non-browser callers that
-   *  inject never construct a Worker. */
+   *  inject never construct a Worker.  The worker now owns install
+   *  + the IDB cache, so node_modules never crosses the boundary. */
   private esbuildRun(): EsbuildRun {
     if (this.injectedRun) return this.injectedRun;
     this.vfsBundler ??= new VfsBundlerClient();
@@ -152,25 +133,19 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
   }
 
   async prepare(input: PrepareInput): Promise<PreparedBuild> {
-    const files = new Map<string, string | Uint8Array>();
-    for (const f of input.files) files.set("/" + f.path, f.content);
+    const generatedFiles = new Map<string, string | Uint8Array>();
+    for (const f of input.files) generatedFiles.set("/" + f.path, f.content);
 
-    const rootDeps = harvestRootDeps(files, input.honoEntry);
-    const cache = await this.resolveCache();
-    const { versions } = await install(
-      rootDeps,
-      (p, d) => files.set(p, d),
-      { cache },
-    );
-    const versionRec = Object.fromEntries(versions);
+    const rootDeps = harvestRootDeps(generatedFiles, input.honoEntry);
     const run = this.esbuildRun();
 
     const honoRun = await run({
+      generatedFiles,
+      rootDeps,
       stdinContents: makeEntryStdin(
         input.honoEntry,
         schemaPathFor(input.honoEntry),
       ),
-      files,
     });
     // Apply the npm-pglite postprocess HERE — the runtime worker
     // boots `hono.code` verbatim, and unlike the esm.sh path (where
@@ -190,7 +165,7 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
           size: code.length,
           durationMs: 0,
           fetchedUrls: [],
-          versions: versionRec,
+          versions: honoRun.versions,
           diagnostics: [],
         };
       } catch (err) {
@@ -209,8 +184,9 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
     let react: BundleResult | null = null;
     if (hono.ok && input.reactEntry) {
       const r = await run({
+        generatedFiles,
+        rootDeps,
         entry: "/" + input.reactEntry,
-        files,
         externalReactRuntime: true,
       });
       react = r.ok
@@ -222,7 +198,7 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
             size: r.code.length,
             durationMs: 0,
             fetchedUrls: [],
-            versions: versionRec,
+            versions: r.versions,
             diagnostics: [],
           }
         : { ok: false, diagnostics: [{ severity: "error", message: r.message }] };
