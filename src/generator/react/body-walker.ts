@@ -562,7 +562,10 @@ export interface OperationFormState extends FormStateBase {
    *  (shadcn/mui/chakra) render the trigger inside the self-
    *  contained `<Op>OpModal` component, so they need it here. */
   triggerLabel: string;
-  triggerVariant: string;
+  /** True when this is the aggregate's primary operation (first
+   *  public op) — `false` for the rest.  Platform-neutral emphasis
+   *  token; each pack's template maps it to its button vocabulary. */
+  triggerPrimary: boolean;
 }
 
 function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
@@ -1590,7 +1593,7 @@ function emitFormOfOperation(
     onSubmitJs: null,
     // Defaults — the enclosing Modal overrides from its trigger.
     triggerLabel: humanize(op.name),
-    triggerVariant: "filled",
+    triggerPrimary: true,
   });
   // No inline JSX — the Modal primitive renders the trigger and
   // the shell emits the module-scope form component.
@@ -2458,7 +2461,12 @@ function emitModal(
   const label = unwrapTextLiteral(
     firstPositionalContent(triggerArg, ctx) ?? '"Action"',
   );
-  const variant = stringNamed(triggerArg, "variant") ?? "filled";
+  // Platform-neutral emphasis token from the scaffold-expander
+  // (`primary` for the aggregate's first public op, `secondary`
+  // for the rest).  Each pack's template maps it to its own button
+  // vocabulary — the walker never emits a pack-specific variant.
+  const emphasis = stringNamed(triggerArg, "emphasis") ?? "primary";
+  const triggerPrimary = emphasis === "primary";
   // Backfill the trigger surface onto the OperationFormState the
   // form child just pushed so packs that own the trigger inside
   // their module component (shadcn/mui/chakra) can render it.
@@ -2466,13 +2474,13 @@ function emitModal(
     const st = ctx.formOfs[i]!;
     if (st.kind === "operation" && st.op.name === opName) {
       st.triggerLabel = label;
-      st.triggerVariant = variant;
+      st.triggerPrimary = triggerPrimary;
       break;
     }
   }
   return renderPrimitive(ctx, "primitive-modal", {
     label,
-    variant,
+    emphasisPrimary: triggerPrimary,
     opPascal: pascal(opName),
     opCamel: camel(opName),
     testidAttr: testidAttr(triggerArg, ctx),
@@ -3354,7 +3362,7 @@ function renderFormOpWiring(
     hasParams: fieldHtmls.length > 0,
     fieldHtmls,
     triggerLabel: state.triggerLabel,
-    triggerVariant: state.triggerVariant,
+    triggerPrimary: state.triggerPrimary,
     destructured: useController
       ? "{ register, handleSubmit, control, formState: { errors } }"
       : "{ register, handleSubmit, formState: { errors } }",

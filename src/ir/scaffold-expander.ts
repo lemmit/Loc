@@ -356,8 +356,11 @@ function expandAggregateDetail(
 
   // Operation controls.  Each public operation becomes a Modal
   // whose trigger Button opens an auto-generated form bound to the
-  // `use<Op><Agg>` mutation hook.  First op filled, the rest light
-  // (matches the legacy detail preparer's button grouping).
+  // `use<Op><Agg>` mutation hook.  The first op is the primary
+  // action, the rest secondary — expressed as a platform-neutral
+  // `emphasis:` token (each design pack maps it to its own button
+  // vocabulary; the IR carries intent, never a pack-specific
+  // variant string).
   const opModals: ExprIR[] = [];
   const publicOps = agg.operations.filter((o) => o.visibility === "public");
   publicOps.forEach((op, i) => {
@@ -377,7 +380,7 @@ function expandAggregateDetail(
           [
             "trigger",
             call("Button", [lit(humanize(op.name))], undefined, [
-              ["variant", lit(i === 0 ? "filled" : "light")],
+              ["emphasis", lit(i === 0 ? "primary" : "secondary")],
               ["testid", lit(`${slug}-op-${op.name}`)],
             ]),
           ],

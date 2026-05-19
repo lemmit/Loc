@@ -7,7 +7,7 @@ function {{opPascal}}OpModal({ mut }: { mut: ReturnType<typeof use{{opPascal}}{{
   });
   return (
     <>
-      <Button colorPalette="brand" onClick={onOpen} data-testid="{{slug}}-op-{{opName}}">{{triggerLabel}}</Button>
+      <Button colorPalette="brand" variant="{{#if triggerPrimary}}solid{{else}}outline{{/if}}" onClick={onOpen} data-testid="{{slug}}-op-{{opName}}">{{triggerLabel}}</Button>
       <Dialog.Root open={open} onOpenChange={(e) => { if (!e.open) onClose(); }}>
         <Portal>
           <Dialog.Backdrop />
