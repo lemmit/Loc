@@ -136,7 +136,17 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
     const generatedFiles = new Map<string, string | Uint8Array>();
     for (const f of input.files) generatedFiles.set("/" + f.path, f.content);
 
-    const rootDeps = harvestRootDeps(generatedFiles, input.honoEntry);
+    // System-mode emits a package.json per deployable: the Hono
+    // backend's has hono/drizzle/zod, the React frontend's has
+    // react/react-dom/mantine/etc.  Install the UNION so BOTH builds
+    // resolve (harvesting only the Hono one left the React bundle
+    // unable to find react — caught by the #2 parity spike).
+    const rootDeps = {
+      ...harvestRootDeps(generatedFiles, input.honoEntry),
+      ...(input.reactEntry
+        ? harvestRootDeps(generatedFiles, input.reactEntry)
+        : {}),
+    };
     const run = this.esbuildRun();
 
     const honoRun = await run({

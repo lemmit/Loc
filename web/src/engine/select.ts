@@ -10,7 +10,14 @@
 
 import { engineRegistry } from "./registry.js";
 
-const DEFAULT_ENGINE = "npm-install-bundle";
+// Default stays the proven `esbuild-pglite`.  npm-install-bundle was
+// briefly defaulted, but the #2 parity spike proved its React build
+// is not yet system-mode-ready (CSS imports + deep mantine subpath
+// resolution).  Until that lands (CSS pipeline + resolver hardening,
+// or a hybrid: npm backend + esm.sh React), npm stays OPT-IN —
+// ?engine=npm-install-bundle / localStorage loom.engine.  Re-flip by
+// changing DEFAULT_ENGINE once the React build passes e2e.
+const DEFAULT_ENGINE = "esbuild-pglite";
 
 export function selectedEngineId(): string {
   try {
