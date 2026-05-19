@@ -1,0 +1,33 @@
+// Engine seam barrel.  P0 scaffolding — interfaces + registry only;
+// no implementation is wired into the app yet, so importing this has
+// no runtime effect.
+export type {
+  DependencyResolution,
+  DependencySpec,
+  VendoredPackage,
+  DependencySet,
+  ResolvedTarball,
+  RegistryResolver,
+} from "./dependencies.js";
+export { emptyDependencySet } from "./dependencies.js";
+
+export type {
+  EngineCapabilities,
+  PrepareInput,
+  PreviewMaterial,
+  PrepareResult,
+  EngineSnapshot,
+  RuntimeEngineOptions,
+  RuntimeEngine,
+  RuntimeEngineFactory,
+} from "./runtime-engine.js";
+
+export type {
+  PreviewBundle,
+  PreviewHost,
+  PreviewHtmlSynth,
+} from "./preview-host.js";
+
+export type { RestorableVfs } from "./vfs.js";
+
+export { EngineRegistry, engineRegistry } from "./registry.js";
