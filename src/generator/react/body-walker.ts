@@ -3234,8 +3234,13 @@ ${paramsLine}${navigateLine}${stateLines}${apiHookDecls}${form.decls}${titleEffe
  *  create/workflow page, and every line for a single-op page —
  *  pass through byte-identical, so only multi-operation detail
  *  pages are rewritten.  Non-named-import lines (blank, side-
- *  effect, default) pass through unchanged in place. */
-function mergeNamedImportLines(block: string): string {
+ *  effect, default) pass through unchanged in place.
+ *
+ *  Exported for test coverage (`test/walker-merge-imports.test.ts`)
+ *  — the edge cases it handles (RHF Controller-vary across ops,
+ *  per-op api lines from the same module, identical lines, etc.)
+ *  are subtle enough to warrant explicit regression locking. */
+export function mergeNamedImportLines(block: string): string {
   const lines = block.split("\n");
   const re = /^import \{ (.+) \} from "(.+)";$/;
   const count = new Map<string, number>();
