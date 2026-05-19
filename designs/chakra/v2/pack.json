@@ -48,9 +48,7 @@
     "primitive-enum-badge": "primitive-enum-badge.hbs",
     "primitive-id-link": "primitive-id-link.hbs",
     "primitive-form-of": "primitive-form-of.hbs",
-    "form-of-imports": "form-of-imports.hbs",
     "form-of-decls": "form-of-decls.hbs",
-    "form-runs-imports": "form-runs-imports.hbs",
     "form-runs-decls": "form-runs-decls.hbs",
     "form-default-onsubmit": "form-default-onsubmit.hbs",
     "primitive-breadcrumbs": "primitive-breadcrumbs.hbs",
@@ -60,7 +58,6 @@
     "primitive-query-view": "primitive-query-view.hbs",
     "primitive-key-value-row": "primitive-key-value-row.hbs",
     "primitive-modal": "primitive-modal.hbs",
-    "form-op-imports": "form-op-imports.hbs",
     "form-op-decls": "form-op-decls.hbs",
     "form-op-module": "form-op-module.hbs"
   },
@@ -496,6 +493,14 @@
           "VStack",
           "Button",
           "Text"
+        ]
+      }
+    ],
+    "form-default-onsubmit": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "useToast"
         ]
       }
     ]

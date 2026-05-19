@@ -66,7 +66,7 @@ describe("Slice A4 — Form(of: <Aggregate>) auto-dispatch", () => {
     const files = await buildAndGenerate(baseOrderSystem(`Form(of: Order)`));
     const tsx = files.get("web/src/pages/create_order.tsx")!;
     expect(tsx).toBeDefined();
-    expect(tsx).toMatch(/import \{ useForm[^}]*\} from "react-hook-form"/);
+    expect(tsx).toMatch(/import \{[^}]*useForm[^}]*\} from "react-hook-form"/);
     expect(tsx).toMatch(/import \{ zodResolver \} from "@hookform\/resolvers\/zod"/);
     expect(tsx).toMatch(
       /import \{ CreateOrderRequest, useCreateOrder \} from "\.\.\/api\/order"/,

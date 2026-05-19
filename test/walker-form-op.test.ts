@@ -75,7 +75,7 @@ describe("scaffold detail page — operation modals", () => {
     expect(tsx).toMatch(/const addLine = useAddLineOrder\(id \?\? ""\)/);
     // Imports merged into a single api line (no duplicate-identifier).
     expect(tsx).toMatch(
-      /import \{[^}]*useConfirmOrder[^}]*useAddLineOrder[^}]*\} from "\.\.\/\.\.\/api\/order"/,
+      /import \{[^}]*useAddLineOrder[^}]*useConfirmOrder[^}]*\} from "\.\.\/\.\.\/api\/order"/,
     );
     // useForm imported exactly once even though two ops use it.
     expect(tsx.match(/from "react-hook-form"/g)!.length).toBe(1);
