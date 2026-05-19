@@ -114,6 +114,7 @@ import {
   parseBuiltinDesignRef,
   type BuiltinPackFamily,
 } from "../generator/_packs/builtin-formats.js";
+import { parseBuiltinPlatformRef } from "../platform/registry.js";
 
 /** Fold a bareword built-in family or pinned `family@version`
  *  reference (or `undefined`) into the fully-qualified form the rest
@@ -134,6 +135,27 @@ function qualifyDesign(
   // Anything else (custom path, unknown family) flows through verbatim;
   // the loader's reference-dir resolution handles the rest.
   return parsed ? parsed.qualified : value;
+}
+
+/** Backend-packages B1 — split a `platform:` value into the family
+ *  (the closed `Platform` union every consumer branches on) and the
+ *  fully-qualified ref (`family@version`, mirrors `qualifyDesign`).
+ *  Bareword backend → family + `family@latest`.  Backend pin
+ *  (`hono@v4`) → family + the pin verbatim.  Frontend / unknown
+ *  (`react`, `static`) → value for both (no version axis here).
+ *  Byte-identical for every existing source: `family` equals the
+ *  pre-B1 bareword, so all `platform === "…"` logic is unchanged;
+ *  `platformRef` is additive (dispatch still keys on `platform`
+ *  until B3). */
+function qualifyPlatform(raw: string | undefined): {
+  family: Platform;
+  ref: string;
+} {
+  const value = raw ?? "hono";
+  const parsed = parseBuiltinPlatformRef(value);
+  return parsed
+    ? { family: parsed.family as Platform, ref: parsed.qualified }
+    : { family: value as Platform, ref: value };
 }
 
 // ---------------------------------------------------------------------------
@@ -493,7 +515,7 @@ function lowerE2E(
 function lowerDeployable(
   d: import("../language/generated/ast.js").Deployable,
 ): DeployableIR {
-  const platform = (d.platform ?? "hono") as Platform;
+  const { family: platform, ref: platformRef } = qualifyPlatform(d.platform);
   // `auth: required` is the only AuthMode in slice 1A.  Future modes
   // (`optional` / `forbidden`) would extend this branch.
   const auth = d.auth === "required" ? { required: true } : undefined;
@@ -562,6 +584,7 @@ function lowerDeployable(
   return {
     name: d.name,
     platform,
+    platformRef,
     moduleNames: moduleBindings.map((b) => b.moduleName).filter(Boolean),
     port: d.port ?? defaultPort(platform),
     targetName: d.targets?.ref?.name,
