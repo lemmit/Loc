@@ -196,3 +196,11 @@ mirror the battle-tested `design:` path). Defer B2+ — restructuring
 a backend into the 3-slice package and the first real `@v5` are
 separate, independently-gated PRs, sequenced when an upstream major
 actually forces the change (Hono 5 / .NET 10 timing).
+
+## Sequel: distribution
+
+B0–B2.1 make backends versioned packages **in-tree**. Shipping them
+as separately-installable npm packages discovered via a manifest is
+designed in [`packaging-split.md`](./packaging-split.md) — it
+depends on, and validates, the `package → shared` layering
+invariant B2.1 established.
