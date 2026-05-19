@@ -30,11 +30,6 @@ export interface VfsBundleRequest {
   externalReactRuntime?: boolean;
 }
 
-// Keep the React runtime external on the frontend build so the
-// iframe importmap supplies one shared instance (mirrors the esm.sh
-// path).  Wildcards cover jsx-runtime / client subpaths.
-const REACT_EXTERNALS = ["react", "react-dom", "react/*", "react-dom/*"];
-
 export interface VfsBundleResponse {
   id: number;
   ok: boolean;
@@ -99,9 +94,13 @@ self.onmessage = async (ev: MessageEvent<VfsBundleRequest>): Promise<void> => {
       logLevel: "silent" as const,
       write: false as const,
       sourcemap: false as const,
+      // outdir gives JS-imported CSS (Mantine `*.css`) an output
+      // path so esbuild bundles it into a sibling .css output file
+      // instead of erroring "without an output path configured".
+      // write:false → it comes back in outputFiles, collected below.
+      outdir: "/" as const,
       loader: { ".wasm": "binary" as const },
-      external: externalReactRuntime ? REACT_EXTERNALS : undefined,
-      plugins: [makeVfsNpmPlugin(files)],
+      plugins: [makeVfsNpmPlugin(files, "/node_modules", !!externalReactRuntime)],
     };
     const out = await esbuild.build(
       stdinContents

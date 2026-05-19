@@ -180,7 +180,8 @@ export function resolveBare(
     if (sub !== ".") return null;
   }
 
-  // 2. legacy: subpath → file under the package; "." → module/main.
+  // 2. legacy (no exports): "." → module/main; subpath → file under
+  // the package.
   if (sub === ".") {
     for (const field of ["module", "main"]) {
       const v = pkg[field];
@@ -191,5 +192,25 @@ export function resolveBare(
     }
     return probeFile(joinPosix(pkgDir, "index"), src);
   }
-  return probeFile(joinPosix(pkgDir, sub), src);
+  // Direct: `<pkg>/<sub>` at the package root.
+  const direct = probeFile(joinPosix(pkgDir, sub), src);
+  if (direct) return direct;
+  // Rollup-era packages (no `exports`) ship all code — incl. the
+  // subpath modules consumers import bare — under the `module`/`main`
+  // directory (e.g. react-remove-scroll-bar `dist/es2015/index.js`
+  // → `react-remove-scroll-bar/constants` is `dist/es2015/
+  // constants.js`; dom-helpers `esm/index.js` → `dom-helpers/
+  // addClass` is `esm/addClass.js`).  Node's classic resolver
+  // wouldn't find these, but every real bundler resolves them this
+  // way and the whole Mantine/react-transition-group tree depends on
+  // it.  Only reached when the direct path missed.
+  for (const field of ["module", "main"]) {
+    const v = pkg[field];
+    if (typeof v !== "string") continue;
+    const baseDir = v.slice(0, v.lastIndexOf("/"));
+    if (!baseDir) continue;
+    const r = probeFile(joinPosix(pkgDir, baseDir, sub), src);
+    if (r) return r;
+  }
+  return null;
 }

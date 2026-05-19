@@ -10,14 +10,16 @@
 
 import { engineRegistry } from "./registry.js";
 
-// Default stays the proven `esbuild-pglite`.  npm-install-bundle was
-// briefly defaulted, but the #2 parity spike proved its React build
-// is not yet system-mode-ready (CSS imports + deep mantine subpath
-// resolution).  Until that lands (CSS pipeline + resolver hardening,
-// or a hybrid: npm backend + esm.sh React), npm stays OPT-IN —
-// ?engine=npm-install-bundle / localStorage loom.engine.  Re-flip by
-// changing DEFAULT_ENGINE once the React build passes e2e.
-const DEFAULT_ENGINE = "esbuild-pglite";
+// Default: npm-install-bundle — the single-engine target (no esm.sh,
+// kills the drizzle/split-shard bug class).  The #2 parity spike now
+// passes the engine half for BOTH paths: backend boots+serves real
+// PGlite, and the React frontend bundles with Mantine CSS extracted
+// and react/react-dom kept external for the importmap.  Residual
+// e2e-only unknown: the iframe importmap actually serving those
+// externals (same mechanism the esm.sh path already uses).
+// esm.sh stays available as an opt-out fallback —
+// ?engine=esbuild-pglite — and is deleted once e2e is green.
+const DEFAULT_ENGINE = "npm-install-bundle";
 
 export function selectedEngineId(): string {
   try {

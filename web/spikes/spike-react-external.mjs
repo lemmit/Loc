@@ -31,9 +31,8 @@ const esbuildRun = async ({ stdinContents, entry, generatedFiles, rootDeps, exte
     const { versions } = await install(rootDeps, (p, d) => files.set(p, d));
     const common = {
       bundle: true, format: "esm", platform: "browser", target: "es2022",
-      logLevel: "silent", write: false, loader: { ".wasm": "binary" },
-      external: externalReactRuntime ? ["react", "react-dom", "react/*", "react-dom/*"] : undefined,
-      plugins: [makeVfsNpmPlugin(files)],
+      logLevel: "silent", write: false, outdir: "/", loader: { ".wasm": "binary" },
+      plugins: [makeVfsNpmPlugin(files, "/node_modules", !!externalReactRuntime)],
     };
     const out = await esbuild.build(
       stdinContents
@@ -41,7 +40,8 @@ const esbuildRun = async ({ stdinContents, entry, generatedFiles, rootDeps, exte
         : { ...common, entryPoints: [entry] },
     );
     const js = out.outputFiles.find((f) => f.path.endsWith(".js")) ?? out.outputFiles[0];
-    return { ok: true, code: js.text, versions: Object.fromEntries(versions) };
+    const css = out.outputFiles.find((f) => f.path.endsWith(".css"));
+    return { ok: true, code: js.text, css: css?.text, versions: Object.fromEntries(versions) };
   } catch (err) {
     return { ok: false, message: err.errors?.[0]?.text ?? String(err) };
   }
@@ -71,8 +71,18 @@ const check = (label, cond) => { log(`  ${cond ? "OK  " : "FAIL"} ${label}`); if
 check("hono bundle ok", prepared.hono.ok);
 check("react bundle present + ok", r != null && r.ok);
 if (r && r.ok) {
-  check("react kept EXTERNAL (import from \"react\" retained)", /from\s*"react"/.test(r.code));
-  check("react-dom kept EXTERNAL", /from\s*"react-dom"/.test(r.code));
+  check("Mantine CSS extracted (react.css non-empty)", !!r.css && r.css.length > 1000);
+  // React 19 + automatic JSX: the app imports react/jsx-runtime and
+  // react-dom/client (not bare "react"); the external react/* +
+  // react-dom/* globs keep those out of the bundle.
+  check(
+    "react runtime kept EXTERNAL (react / react-dom imports retained)",
+    /from\s*"(react|react-dom)(\/[^"]+)?"/.test(r.code),
+  );
+  check(
+    "react-dom client kept EXTERNAL",
+    /from\s*"react-dom(\/[^"]+)?"/.test(r.code),
+  );
   // A second bundled React would carry its scheduler/runtime guts; a
   // properly-externalised bundle does not define them locally.
   check(
