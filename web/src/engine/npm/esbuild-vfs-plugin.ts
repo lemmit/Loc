@@ -1,0 +1,155 @@
+// esbuild plugin resolving over the installed in-VFS node_modules
+// (Phase B3b) — the npm-in-browser counterpart of plugin.ts's esm.sh
+// resolver.  Generated project files AND installed packages live in
+// one file map; bare specifiers go through the B2 exports-aware
+// resolver, relatives/absolutes probe the map directly.  No esm.sh,
+// so the whole esm.sh-split-shard bug class (drizzle extractUsedTable)
+// cannot occur.
+//
+// Standalone — plugin.ts (the proven esm.sh path) is untouched.
+
+import type { Loader, Plugin } from "esbuild-wasm";
+import { resolveBare, type FileSource } from "../node-resolve.js";
+
+const NS = "vfs";
+const EMPTY = "vfs-empty";
+
+// Node builtins the curated backend may reference in branches the
+// browser/PGlite path never takes (the `pg` driver tree etc.).
+// Stubbed so the bundle stays self-contained and builds; B4 verifies
+// the live browser entry never actually needs one.
+const NODE_BUILTINS = new Set([
+  "assert", "async_hooks", "buffer", "child_process", "cluster",
+  "console", "constants", "crypto", "dgram", "diagnostics_channel",
+  "dns", "domain", "events", "fs", "http", "http2", "https",
+  "inspector", "module", "net", "os", "path", "perf_hooks",
+  "process", "punycode", "querystring", "readline", "repl",
+  "stream", "string_decoder", "sys", "timers", "tls", "trace_events",
+  "tty", "url", "util", "v8", "vm", "wasi", "worker_threads", "zlib",
+]);
+
+/** A node builtin: `node:*`, an exact name, or a subpath like
+ *  `fs/promises` / `stream/promises` (head segment is a builtin). */
+function isNodeBuiltin(spec: string): boolean {
+  if (spec.startsWith("node:")) return true;
+  return NODE_BUILTINS.has(spec.split("/")[0]);
+}
+
+function dirOf(p: string): string {
+  const i = p.lastIndexOf("/");
+  return i <= 0 ? "/" : p.slice(0, i);
+}
+
+function joinPosix(...parts: string[]): string {
+  const segs: string[] = [];
+  for (const part of parts.join("/").split("/")) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") segs.pop();
+    else segs.push(part);
+  }
+  return "/" + segs.join("/");
+}
+
+const EXTS = [".ts", ".tsx", ".mjs", ".js", ".cjs", ".json"];
+const INDEX = ["index.ts", "index.tsx", "index.js", "index.mjs", "index.cjs"];
+
+function probe(base: string, src: FileSource): string | null {
+  if (src.exists(base)) return base;
+  // Generated TS uses `.js`-suffixed ESM specifiers for `.ts` files.
+  if (base.endsWith(".js")) {
+    for (const e of [".ts", ".tsx"]) {
+      const p = base.slice(0, -3) + e;
+      if (src.exists(p)) return p;
+    }
+  }
+  for (const e of EXTS) if (src.exists(base + e)) return base + e;
+  for (const i of INDEX) {
+    const p = joinPosix(base, i);
+    if (src.exists(p)) return p;
+  }
+  return null;
+}
+
+export function makeVfsNpmPlugin(
+  files: Map<string, string | Uint8Array>,
+  nmRoot = "/node_modules",
+): Plugin {
+  const td = new TextDecoder();
+  const asText = (v: string | Uint8Array): string =>
+    typeof v === "string" ? v : td.decode(v);
+  const src: FileSource = {
+    read: (p) => {
+      const v = files.get(p);
+      return v == null ? undefined : asText(v);
+    },
+    exists: (p) => files.has(p),
+  };
+
+  return {
+    name: "loom-vfs-npm",
+    setup(build) {
+      build.onResolve({ filter: /.*/ }, (args) => {
+        const spec = args.path;
+        if (isNodeBuiltin(spec)) {
+          return { path: spec, namespace: EMPTY };
+        }
+        if (spec.startsWith("/") || spec.startsWith("./") || spec.startsWith("../")) {
+          const fromDir =
+            args.importer && args.importer.startsWith("/")
+              ? dirOf(args.importer)
+              : args.resolveDir || "/";
+          const abs = spec.startsWith("/")
+            ? joinPosix(spec)
+            : joinPosix(fromDir, spec);
+          const r = probe(abs, src);
+          return r
+            ? { path: r, namespace: NS }
+            : { errors: [{ text: `vfs: cannot resolve ${spec} from ${args.importer || "<entry>"}` }] };
+        }
+        const r = resolveBare(spec, src, nmRoot);
+        return r
+          ? { path: r, namespace: NS }
+          : { errors: [{ text: `vfs: bare "${spec}" not in installed node_modules` }] };
+      });
+
+      build.onLoad({ filter: /.*/, namespace: EMPTY }, (args) => {
+        const name = args.path.replace(/^node:/, "").split("/")[0];
+        // crypto is the one builtin the live browser/PGlite backend
+        // path actually uses (generated repos call randomUUID for
+        // ids).  Back it by Web Crypto.  CJS form so esbuild does
+        // runtime property access — no static "no matching export"
+        // for arbitrary named imports from the empty stubs.
+        if (name === "crypto") {
+          return {
+            contents: [
+              "const c = globalThis.crypto;",
+              "const randomUUID = () => c.randomUUID();",
+              "const getRandomValues = (a) => c.getRandomValues(a);",
+              "const randomBytes = (n) => c.getRandomValues(new Uint8Array(n));",
+              "module.exports = { randomUUID, getRandomValues, randomBytes, webcrypto: c, default: c };",
+            ].join("\n"),
+            loader: "js",
+          };
+        }
+        return { contents: "module.exports = {};", loader: "js" };
+      });
+
+      build.onLoad({ filter: /.*/, namespace: NS }, (args) => {
+        const v = files.get(args.path);
+        if (v == null) return { errors: [{ text: `vfs: missing ${args.path}` }] };
+        const ext = args.path.slice(args.path.lastIndexOf("."));
+        const loader: Loader =
+          ext === ".ts"
+            ? "ts"
+            : ext === ".tsx"
+              ? "tsx"
+              : ext === ".json"
+                ? "json"
+                : ext === ".css"
+                  ? "css"
+                  : "js";
+        return { contents: asText(v), loader, resolveDir: dirOf(args.path) };
+      });
+    },
+  };
+}

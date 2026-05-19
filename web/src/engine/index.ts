@@ -23,6 +23,7 @@ export type {
   RuntimeEngineFactory,
 } from "./runtime-engine.js";
 export { EsbuildPgliteEngine } from "./esbuild-pglite-engine.js";
+export { NpmInstallBundleEngine } from "./npm-install-bundle-engine.js";
 
 export type {
   PreviewBundle,
