@@ -500,7 +500,7 @@ describe("react generator", () => {
       const { files } = generateSystems(model);
       const page = files.get("web_app/src/pages/workflows/place_order.tsx")!;
       // RHF + zodResolver wiring matches the aggregate-operation pattern.
-      expect(page).toMatch(/import \{ useForm, Controller \} from "react-hook-form"/);
+      expect(page).toMatch(/import \{ Controller, useForm \} from "react-hook-form"/);
       expect(page).toMatch(/zodResolver\(PlaceOrderRequest\)/);
       expect(page).toMatch(/usePlaceOrderWorkflow/);
       // String param → TextInput; Id<X> → Select with target's display field;

@@ -8,7 +8,7 @@ function {{opPascal}}OpModal({ mut }: { mut: ReturnType<typeof use{{opPascal}}{{
   });
   return (
     <>
-      <Button colorScheme="brand" onClick={onOpen} data-testid="{{slug}}-op-{{opName}}">{{triggerLabel}}</Button>
+      <Button colorScheme="brand" variant="{{#if triggerPrimary}}solid{{else}}outline{{/if}}" onClick={onOpen} data-testid="{{slug}}-op-{{opName}}">{{triggerLabel}}</Button>
       <Modal isOpen={isOpen} onClose={onClose}>
         <ModalOverlay />
         <ModalContent>

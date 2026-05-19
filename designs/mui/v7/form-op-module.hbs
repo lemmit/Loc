@@ -7,7 +7,7 @@ function {{opPascal}}OpModal({ mut }: { mut: ReturnType<typeof use{{opPascal}}{{
   });
   return (
     <>
-      <Button variant="contained" onClick={() => setOpen(true)} data-testid="{{slug}}-op-{{opName}}">{{triggerLabel}}</Button>
+      <Button variant="{{#if triggerPrimary}}contained{{else}}outlined{{/if}}" onClick={() => setOpen(true)} data-testid="{{slug}}-op-{{opName}}">{{triggerLabel}}</Button>
       <Dialog open={open} onClose={() => setOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle>{{humanOp}}</DialogTitle>
         <form

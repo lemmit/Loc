@@ -6,7 +6,11 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { createDddServices } from "../language/ddd-module.js";
 import type { Model } from "../language/generated/ast.js";
-import { generateTypeScript } from "../generator/typescript/index.js";
+import { generateTypeScript } from "../platform/hono/v4/emit.js";
+// Legacy single-context `generate ts` targets the default Hono
+// backend; the CLI (an entrypoint) supplies that package's pins to
+// the version-agnostic shared emitter (B2.1).
+import { BACKEND_PINS as HONO_V4_PINS } from "../platform/hono/v4/pins.js";
 import { generateDotnet } from "../generator/dotnet/index.js";
 import { generateSystems } from "../system/index.js";
 import { lowerModel } from "../ir/lower.js";
@@ -185,7 +189,7 @@ async function runGenerate(
       return { hadError: true };
     }
   } else if (target === "ts") {
-    files = generateTypeScript(result.model);
+    files = generateTypeScript(result.model, HONO_V4_PINS);
   } else {
     files = generateDotnet(result.model);
   }

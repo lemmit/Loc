@@ -6,7 +6,11 @@ import { lowerModel } from "../../../src/ir/lower.js";
 import { enrichLoomModel } from "../../../src/ir/enrichments.js";
 import { validateLoomModel } from "../../../src/ir/validate.js";
 import { generateSystems } from "../../../src/system/index.js";
-import { generateTypeScript } from "../../../src/generator/typescript/index.js";
+// P2a moved the TS orchestrator into the hono@v4 package; the
+// playground legacy single-context build targets the default Hono
+// backend and supplies that package's pins (B2.1).
+import { generateTypeScript } from "../../../src/platform/hono/v4/emit.js";
+import { BACKEND_PINS as HONO_V4_PINS } from "../../../src/platform/hono/v4/pins.js";
 import { MemoryVfs } from "../vfs/memory-vfs.js";
 import { seedBuiltinPacks } from "./template-bundled.js";
 import { setWorkerVfs } from "./worker-vfs.js";
@@ -126,7 +130,7 @@ async function handleGenerate(text: string): Promise<GenerateResult> {
   }
   if (loom.contexts.length > 0) {
     try {
-      const out = generateTypeScript(parsed.model);
+      const out = generateTypeScript(parsed.model, HONO_V4_PINS);
       return {
         ok: true,
         mode: "ts",

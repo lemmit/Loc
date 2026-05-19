@@ -4,10 +4,10 @@ import type {
   ExprIR,
   TypeIR,
   ViewIR,
-} from "../../ir/loom-ir.js";
-import { viewUsesCurrentUser } from "../../ir/loom-ir.js";
-import { camel, plural, snake } from "../../util/naming.js";
-import { renderTsExpr } from "./render-expr.js";
+} from "../../../ir/loom-ir.js";
+import { viewUsesCurrentUser } from "../../../ir/loom-ir.js";
+import { camel, plural, snake } from "../../../util/naming.js";
+import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
 
 // ---------------------------------------------------------------------------
 // Hono view routes emission.
