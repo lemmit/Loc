@@ -13,7 +13,6 @@ import { createDddServices } from "../../out/language/ddd-module.js";
 import { generateTypeScript } from "../../out/generator/typescript/index.js";
 import { makeVfsNpmPlugin } from "../src/engine/npm/esbuild-vfs-plugin.ts";
 import { NpmInstallBundleEngine } from "../src/engine/npm-install-bundle-engine.ts";
-import { postProcessNpmBundle } from "../src/engine/npm/postprocess.ts";
 import { pgliteAssetUrl } from "../src/bundle/plugin.ts";
 import { synthDDL } from "../src/runtime/ddl.ts";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -59,11 +58,11 @@ if (!prepared.hono.ok) {
 }
 log(`# bundled ${(prepared.hono.code.length / 1024).toFixed(0)} KB (real pglite, no esm.sh)`);
 
-// postprocess (npm-safe) → import → boot real PGlite (injected wasms,
-// exactly as the runtime worker does) → DDL → dispatch.
-const patched = postProcessNpmBundle(prepared.hono.code);
+// engine.prepare() now applies postProcessNpmBundle internally, so
+// use hono.code as-is (this is exactly what the runtime worker
+// boots) → import → boot real PGlite (injected wasms) → DDL → dispatch.
 const tmp = path.join(os.tmpdir(), `loom-b4-${process.pid}.mjs`);
-writeFileSync(tmp, patched);
+writeFileSync(tmp, prepared.hono.code);
 const mod = await import(pathToFileURL(tmp).href);
 for (const n of ["createApp", "schema", "drizzle", "PGlite", "is", "Table", "getTableConfig"]) {
   if (!(n in mod)) { log(`FAIL — bundle missing export ${n}`); process.exit(1); }

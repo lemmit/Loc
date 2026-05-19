@@ -10,7 +10,7 @@
 
 import { engineRegistry } from "./registry.js";
 
-const DEFAULT_ENGINE = "esbuild-pglite";
+const DEFAULT_ENGINE = "npm-install-bundle";
 
 export function selectedEngineId(): string {
   try {

@@ -39,6 +39,7 @@ import type {
   RuntimeEngineOptions,
 } from "./runtime-engine.js";
 import { install, type InstallCache } from "./npm/install.js";
+import { postProcessNpmBundle } from "./npm/postprocess.js";
 import { VfsBundlerClient } from "./npm/vfs-bundler-client.js";
 
 export interface EsbuildRunInput {
@@ -146,18 +147,39 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
       ),
       files,
     });
-    const hono: BundleResult = honoRun.ok
-      ? {
+    // Apply the npm-pglite postprocess HERE — the runtime worker
+    // boots `hono.code` verbatim, and unlike the esm.sh path (where
+    // bundler.worker post-processes internally) nothing else would.
+    // Failure → a bundle diagnostic, not a thrown rejection that
+    // skips BUNDLE_DONE.
+    let hono: BundleResult;
+    if (!honoRun.ok) {
+      hono = { ok: false, diagnostics: [{ severity: "error", message: honoRun.message }] };
+    } else {
+      try {
+        const code = postProcessNpmBundle(honoRun.code);
+        hono = {
           ok: true,
           kind: "hono",
-          code: honoRun.code,
-          size: honoRun.code.length,
+          code,
+          size: code.length,
           durationMs: 0,
           fetchedUrls: [],
           versions: versionRec,
           diagnostics: [],
-        }
-      : { ok: false, diagnostics: [{ severity: "error", message: honoRun.message }] };
+        };
+      } catch (err) {
+        hono = {
+          ok: false,
+          diagnostics: [
+            {
+              severity: "error",
+              message: err instanceof Error ? err.message : String(err),
+            },
+          ],
+        };
+      }
+    }
 
     let react: BundleResult | null = null;
     if (hono.ok && input.reactEntry) {
