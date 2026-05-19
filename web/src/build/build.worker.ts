@@ -7,6 +7,10 @@ import { enrichLoomModel } from "../../../src/ir/enrichments.js";
 import { validateLoomModel } from "../../../src/ir/validate.js";
 import { generateSystems } from "../../../src/system/index.js";
 import { generateTypeScript } from "../../../src/generator/typescript/index.js";
+// Playground legacy single-context build targets the default Hono
+// backend; like the CLI entrypoint it supplies that package's pins
+// to the version-agnostic shared emitter (B2.1).
+import { BACKEND_PINS as HONO_V4_PINS } from "../../../src/platform/hono/v4/pins.js";
 import { MemoryVfs } from "../vfs/memory-vfs.js";
 import { seedBuiltinPacks } from "./template-bundled.js";
 import { setWorkerVfs } from "./worker-vfs.js";
@@ -126,7 +130,7 @@ async function handleGenerate(text: string): Promise<GenerateResult> {
   }
   if (loom.contexts.length > 0) {
     try {
-      const out = generateTypeScript(parsed.model);
+      const out = generateTypeScript(parsed.model, HONO_V4_PINS);
       return {
         ok: true,
         mode: "ts",
