@@ -58,7 +58,14 @@ jobs:
     # is 4min × ~11 tests; a stuck pipeline could otherwise burn the
     # full 15 before cancelling.  10 leaves time for the warm-cache
     # path while bounding the cost of regression runs.
-    timeout-minutes: 10
+    # 10 was sized for warm-cache pushes to main and turned out too
+    # tight for cold-network PR runs of the full 19-spec suite
+    # (240s/test × CI retry × 2 workers): both #184 (baseline P0
+    # seam, no behaviour change) and #188 (cumulative) hit it as
+    # `cancelled` at exactly ~10 min — independent of any engine
+    # change, so the cap, not the suite, is the blocker.  25 covers
+    # the good path with retry headroom; revisit if it proves loose.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
 
