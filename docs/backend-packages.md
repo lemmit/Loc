@@ -142,9 +142,9 @@ never apply to backends (no in-browser bundling of backends).
 
 | Phase | Scope | Risk gate |
 | --- | --- | --- |
-| **B0** | Registry generalisation: family@version keying + `BUILTIN_PLATFORM_LATEST`, single versions registered (`hono@v4`, `dotnet@v8`, `phoenix@v1`). No grammar change yet; bareword resolves to the sole version. **Byte-identical.** | `npm test` + baseline fixture diff clean |
-| **B1** | Grammar `Platform \| STRING` + validator/lower qualify. `platform: "hono@v4"` pins; bareword unchanged. **Byte-identical.** | parsing + validation tests; fixture clean |
-| **B2** | Restructure one backend into the 3-slice package layout *without* behaviour change (pure file move + import rewire, `hono@v4`). **Byte-identical.** | fixture + `LOOM_TS_BUILD` |
+| **B0** ✅ | Registry generalisation: family@version keying + `BUILTIN_PLATFORM_LATEST`, single versions registered. Bareword resolves to the sole version. **Byte-identical.** (PR #175) | `npm test` 888 + baseline fixture clean |
+| **B1** ✅ | Grammar `Platform \| STRING` + validator/lower qualify. `platform: "hono@v4"` pins; bareword unchanged. **Byte-identical.** (branch `claude/backend-pkg-b1-grammar`) | `npm test` 896 + parsing/validation tests + fixture clean |
+| **B2** ✅ | `hono@v4` becomes a versioned package: `src/platform/hono/v4/{index.ts,pins.ts}`, registry points at it, `BACKEND_PINS` ownership moved out of the shared emitter (which now imports it). The bulk emitter stays shared under `src/generator/typescript/` — a future `hono@v5` forks only what changes, by ordinary import. **Byte-identical.** (branch `claude/backend-pkg-b2-hono-package`) | fixture clean + `LOOM_TS_BUILD` 3/3 |
 | **B3** | First real new major: `hono@v5` as a separate package reusing v4's stable slices. Bareword stays v4; opt-in via pin. | new `LOOM_TS_BUILD` shard for `@v5`; promote later |
 | **B4+** | `dotnet@v10` (post-2026-11 LTS), `phoenix@v2` (already 1.8 — fold the existing in-place bump into the package boundary). | per-backend build gate |
 

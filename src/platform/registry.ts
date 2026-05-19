@@ -1,7 +1,7 @@
 import type { Platform } from "../ir/loom-ir.js";
 import type { PlatformSurface } from "./surface.js";
 import dotnetPlatform from "./dotnet.js";
-import honoPlatform from "./hono.js";
+import honoPlatform from "./hono/v4/index.js";
 import reactPlatform from "./react.js";
 import phoenixLiveViewPlatform from "./phoenix-live-view.js";
 
