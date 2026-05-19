@@ -8,7 +8,7 @@ function {{opPascal}}OpModal({ mut }: { mut: ReturnType<typeof use{{opPascal}}{{
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button data-testid="{{slug}}-op-{{opName}}">{{triggerLabel}}</Button>
+        <Button variant="{{#if triggerPrimary}}default{{else}}secondary{{/if}}" data-testid="{{slug}}-op-{{opName}}">{{triggerLabel}}</Button>
       </DialogTrigger>
       <DialogContent data-testid="{{slug}}-op-{{opName}}-form">
         <DialogHeader>
