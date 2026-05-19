@@ -51,7 +51,12 @@ import {
   packFormatForBuiltin,
   parseBuiltinDesignRef,
 } from "../generator/_packs/builtin-formats.js";
-import { platformFor } from "../platform/registry.js";
+import {
+  backendVersionsForFamily,
+  isRegisteredBackendRef,
+  parseBuiltinPlatformRef,
+  platformFor,
+} from "../platform/registry.js";
 
 export class DddValidator {
   // Entry: full model walk
@@ -318,6 +323,7 @@ export class DddValidator {
     //         `static`, and `phoenixLiveView` (fullstack Ash + Phoenix).
     // Rule 4: every `static` deployable must declare `ui:` (otherwise
     //         it has nothing to serve).
+    this.checkDeployablePlatform(d, accept);
     const hasUiBinding = !!(d.uiSugar || d.uiCompose || d.uiBlock);
     if (hasUiBinding && !platformMountsUi(d.platform)) {
       accept(
@@ -420,6 +426,49 @@ export class DddValidator {
    *    3. `design:` set on a deployable with no UI mount and on a
    *       platform that doesn't render UI either → warning that the
    *       value is dropped at lowering and has no effect. */
+  /** Backend-packages B1 — validate the `platform:` value now that
+   *  the grammar admits an arbitrary STRING (for `family@version`
+   *  pins).  Mirrors `checkDeployableDesignPack`'s version error:
+   *
+   *    - backend bareword (`hono`) / frontend keyword
+   *      (`react`/`static`) → always fine.
+   *    - backend pin (`"hono@v4"`) → the version must be a
+   *      registered surface, else error listing the available pins.
+   *    - anything else (`"frobnicator"`, a typo'd quoted platform)
+   *      → unknown-platform error (the grammar enum used to reject
+   *      these; the STRING alternative no longer does). */
+  private checkDeployablePlatform(
+    d: import("./generated/ast.js").Deployable,
+    accept: ValidationAcceptor,
+  ): void {
+    const raw = d.platform;
+    if (raw == null) return;
+    const parsed = parseBuiltinPlatformRef(raw);
+    if (parsed == null) {
+      // Not a backend family — only the frontend keywords remain
+      // valid.  (Bareword `react`/`static` and their quoted forms.)
+      if (raw !== "react" && raw !== "static") {
+        accept(
+          "error",
+          `Unknown platform '${raw}' on deployable '${d.name}'. Valid: 'dotnet', 'hono', 'react', 'static', 'phoenixLiveView' (backends also accept a pinned form, e.g. 'hono@v4').`,
+          { node: d, property: "platform" },
+        );
+      }
+      return;
+    }
+    // Backend.  A pin (`@version` in the source) must resolve to a
+    // registered surface; a bareword always resolves (latest).
+    const isPinned = raw.includes("@");
+    if (isPinned && !isRegisteredBackendRef(parsed.qualified)) {
+      const available = backendVersionsForFamily(parsed.family);
+      accept(
+        "error",
+        `Platform '${raw}' on deployable '${d.name}' — no version '${parsed.version}' of backend '${parsed.family}'. Available: ${available.map((v) => `'${parsed.family}@${v}'`).join(", ")}.`,
+        { node: d, property: "platform" },
+      );
+    }
+  }
+
   private checkDeployableDesignPack(
     d: import("./generated/ast.js").Deployable,
     hasUiBinding: boolean,
@@ -1673,8 +1722,22 @@ function platformMountsUi(platform: string | undefined): boolean {
   }
 }
 
+/** The bareword family of a `platform:` value — strips a
+ *  `@version` pin so the predicate helpers + framework checks work
+ *  on `platform: "hono@v4"` exactly as on `platform: hono`.
+ *  Frontend / unknown names pass through unchanged
+ *  (`parseBuiltinPlatformRef` returns null for them). */
+function platformFamily(platform: string | undefined): string | undefined {
+  if (platform == null) return undefined;
+  return parseBuiltinPlatformRef(platform)?.family ?? platform;
+}
+
 function platformOwnsBackend(platform: string | undefined): boolean {
-  return platform === "dotnet" || platform === "hono" || platform === "phoenixLiveView";
+  // The backend families are exactly the keys
+  // `parseBuiltinPlatformRef` recognises (BUILTIN_PLATFORM_LATEST),
+  // so a non-null parse — bareword or `family@version` pin — *is*
+  // the backend predicate.
+  return platform != null && parseBuiltinPlatformRef(platform) !== null;
 }
 
 /** Framework a deployable will render against, given its platform and
@@ -1687,9 +1750,13 @@ function expectedFrameworkFor(
   platform: string | undefined,
   hasUi: boolean,
 ): string | undefined {
-  if (platform === "react" || platform === "static") return "react";
-  if (platform === "phoenixLiveView") return "phoenixLiveView";
-  if (platform === "dotnet" && hasUi) return "react";
+  // Normalise a `family@version` pin to its family first so a
+  // pinned backend (`"phoenixLiveView@v1"`, `"dotnet@v8"`) maps to
+  // the same framework as its bareword.
+  const fam = platformFamily(platform);
+  if (fam === "react" || fam === "static") return "react";
+  if (fam === "phoenixLiveView") return "phoenixLiveView";
+  if (fam === "dotnet" && hasUi) return "react";
   return undefined;
 }
 

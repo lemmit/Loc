@@ -685,7 +685,21 @@ export type Platform = "dotnet" | "hono" | "react" | "static" | "phoenixLiveView
 
 export interface DeployableIR {
   name: string;
+  /** The platform **family** (`"hono"`, `"dotnet"`, `"react"`, …) —
+   *  the closed union every downstream consumer branches on.  A
+   *  `family@version` pin in the source is normalised here to its
+   *  family so `platform === "hono"` etc. stay valid (byte-identical
+   *  to pre-backend-packages output). */
   platform: Platform;
+  /** Backend-packages B1 — the fully-qualified backend ref
+   *  (`"hono@v4"`) after lowering, mirroring `design?`.  Bareword
+   *  `platform: hono` resolves through `BUILTIN_PLATFORM_LATEST`;
+   *  a pin (`platform: "hono@v4"`) flows through as written.  For
+   *  frontend platforms (`react`/`static`) this equals `platform`
+   *  (they version via the design/stack axis, not here).  The
+   *  system orchestrator's dispatch stays on `platform` in B1; B3
+   *  switches it to this field once a family has >1 version. */
+  platformRef: string;
   /** Names of modules included in this deployable.  For react frontends,
    * inherited from the targeted backend deployable. */
   moduleNames: string[];

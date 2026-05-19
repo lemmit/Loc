@@ -112,6 +112,25 @@ function resolvePlatformRef(ref: string): PlatformSurface {
   return platforms[ref as Platform];
 }
 
+/** Versions registered for a backend family (e.g. `["v4"]` for
+ *  `hono`).  Used by the validator's "no such version" error to
+ *  list the available pins — mirrors `builtinVersionsForFamily`
+ *  for design packs. */
+export function backendVersionsForFamily(family: BackendFamily): string[] {
+  const prefix = `${family}@`;
+  return Object.keys(versionedPlatforms)
+    .filter((k) => k.startsWith(prefix))
+    .map((k) => k.slice(prefix.length))
+    .sort();
+}
+
+/** True when `qualified` (a `family@version` string) is a
+ *  registered backend surface.  The validator uses this to reject
+ *  a pinned platform whose version doesn't exist. */
+export function isRegisteredBackendRef(qualified: string): boolean {
+  return qualified in versionedPlatforms;
+}
+
 export function platformFor(name: Platform): PlatformSurface {
   return resolvePlatformRef(name);
 }
