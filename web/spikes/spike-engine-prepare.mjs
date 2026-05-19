@@ -12,6 +12,7 @@ import { URI } from "langium";
 import { createDddServices } from "../../out/language/ddd-module.js";
 import { generateTypeScript } from "../../out/generator/typescript/index.js";
 import { makeVfsNpmPlugin } from "../src/engine/npm/esbuild-vfs-plugin.ts";
+import { install } from "../src/engine/npm/install.ts";
 import { NpmInstallBundleEngine } from "../src/engine/npm-install-bundle-engine.ts";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -21,8 +22,12 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const log = (...a) => console.log(...a);
 
 // node-esbuild EsbuildRun: the seam B4 fills with an esbuild-wasm worker.
-const esbuildRun = async ({ stdinContents, entry, files }) => {
+// Mirrors the production worker: install rootDeps into a copy of the
+// generated tree, then esbuild over it.
+const esbuildRun = async ({ stdinContents, entry, generatedFiles, rootDeps, externalReactRuntime }) => {
   try {
+    const files = new Map(generatedFiles);
+    const { versions } = await install(rootDeps, (p, d) => files.set(p, d));
     const common = {
       bundle: true,
       format: "esm",
@@ -31,6 +36,7 @@ const esbuildRun = async ({ stdinContents, entry, files }) => {
       logLevel: "silent",
       write: false,
       loader: { ".wasm": "binary" },
+      external: externalReactRuntime ? ["react", "react-dom", "react/*", "react-dom/*"] : undefined,
       plugins: [makeVfsNpmPlugin(files)],
     };
     const out = await esbuild.build(
@@ -38,7 +44,7 @@ const esbuildRun = async ({ stdinContents, entry, files }) => {
         ? { ...common, stdin: { contents: stdinContents, resolveDir: "/", sourcefile: "__entry__.ts", loader: "ts" } }
         : { ...common, entryPoints: [entry] },
     );
-    return { ok: true, code: out.outputFiles[0].text };
+    return { ok: true, code: out.outputFiles[0].text, versions: Object.fromEntries(versions) };
   } catch (err) {
     return { ok: false, message: (err.errors?.[0]?.text) ?? String(err) };
   }

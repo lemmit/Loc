@@ -70,9 +70,17 @@ function probe(base: string, src: FileSource): string | null {
   return null;
 }
 
+/** Keep react/react-dom (and their subpaths: jsx-runtime,
+ *  react-dom/client, …) external so the iframe importmap supplies a
+ *  single instance.  Must be done IN the plugin: esbuild's `external`
+ *  option is overridden by this catch-all onResolve, so relying on it
+ *  alone silently bundles a second React. */
+const REACT_RUNTIME_RE = /^(react|react-dom)(\/|$)/;
+
 export function makeVfsNpmPlugin(
   files: Map<string, string | Uint8Array>,
   nmRoot = "/node_modules",
+  externalReact = false,
 ): Plugin {
   const td = new TextDecoder();
   const asText = (v: string | Uint8Array): string =>
@@ -90,6 +98,9 @@ export function makeVfsNpmPlugin(
     setup(build) {
       build.onResolve({ filter: /.*/ }, (args) => {
         const spec = args.path;
+        if (externalReact && REACT_RUNTIME_RE.test(spec)) {
+          return { path: spec, external: true };
+        }
         if (isNodeBuiltin(spec)) {
           return { path: spec, namespace: EMPTY };
         }

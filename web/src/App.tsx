@@ -7,7 +7,7 @@ import { examples, defaultExample, type LoomExample } from "./examples";
 import { LoomBuildClient } from "./build/client";
 import type { GenerateOk, GenerateResult, VirtualFile } from "./build/protocol";
 import type { BundleOk } from "./bundle/protocol";
-import { engineRegistry, type RuntimeEngine } from "./engine";
+import { engineRegistry, selectedEngineId, type RuntimeEngine } from "./engine";
 import { emptyDependencySet } from "./engine";
 import { registerPreviewSw } from "./preview/sw-host";
 import { buildTree } from "./preview/file-tree";
@@ -201,7 +201,7 @@ export default function App(): JSX.Element {
     // with an explanatory message instead of leaving a green
     // "booted" badge while every dispatch hangs.  `dispatch` from
     // `useReducer` is stable, so closing over it here is safe.
-    const engine = engineRegistry.create("esbuild-pglite", {
+    const engine = engineRegistry.create(selectedEngineId(), {
       onLost: () => dispatch({ type: "RUNTIME_LOST" }),
     });
     buildClientRef.current = build;

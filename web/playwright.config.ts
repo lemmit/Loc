@@ -27,7 +27,11 @@ export default defineConfig({
   // developer is iterating on a single spec.  Tests use isolated
   // browser contexts so per-worker IDB / cookies don't collide.
   workers: process.env.CI ? 2 : 1,
-  reporter: process.env.CI ? "github" : [["list"]],
+  // `list` everywhere: when the job is time-capped mid-run the
+  // `github` reporter emits nothing until the end, giving zero
+  // diagnostic signal.  `list` prints per-spec ok/✘/timing live so a
+  // capped run still tells us which specs are slow vs stuck.
+  reporter: [["list"]],
   use: {
     baseURL: "http://127.0.0.1:4173",
     headless: true,

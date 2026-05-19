@@ -38,29 +38,33 @@ import type {
   RuntimeEngine,
   RuntimeEngineOptions,
 } from "./runtime-engine.js";
-import { install, type InstallCache } from "./npm/install.js";
+import { postProcessNpmBundle } from "./npm/postprocess.js";
+import { VfsBundlerClient } from "./npm/vfs-bundler-client.js";
 
 export interface EsbuildRunInput {
+  /** The generated project files only (small).  The runner installs
+   *  `rootDeps` into its own copy — node_modules never crosses the
+   *  worker boundary. */
+  generatedFiles: Map<string, string | Uint8Array>;
+  rootDeps: Record<string, string>;
   /** Bundle a synthesised entry (Hono path: makeEntryStdin output). */
   stdinContents?: string;
   /** Bundle a real file entry by absolute VFS path (React path). */
   entry?: string;
-  files: Map<string, string | Uint8Array>;
+  /** React build: keep react/react-dom external so the iframe
+   *  importmap supplies a single instance — mirrors the esm.sh
+   *  path's externalisation and avoids the dual-React/"Invalid hook
+   *  call" failure that bundling React per-frontend would cause. */
+  externalReactRuntime?: boolean;
 }
 
 export type EsbuildRun = (
   input: EsbuildRunInput,
 ) => Promise<
-  { ok: true; code: string; css?: string } | { ok: false; message: string }
+  | { ok: true; code: string; css?: string; versions: Record<string, string> }
+  | { ok: false; message: string }
 >;
 
-const DEFAULT_RUN: EsbuildRun = () => {
-  throw new Error(
-    "NpmInstallBundleEngine: no esbuild runner wired (B4 supplies the " +
-      "esbuild-wasm worker builder).  Inject an EsbuildRun to use this " +
-      "engine before then.",
-  );
-};
 
 /** Nearest package.json to the entry → its `dependencies`, plus the
  *  runtime-layer PGlite pin (the bundle entry imports it even though
@@ -101,18 +105,24 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
 
   private runtime: LoomRuntimeClient | null = null;
   private readonly onLost?: () => void;
-  private readonly run: EsbuildRun;
-  private readonly cache?: InstallCache;
+  private readonly injectedRun?: EsbuildRun;
+  private vfsBundler: VfsBundlerClient | null = null;
 
   constructor(
-    opts: RuntimeEngineOptions & {
-      esbuildRun?: EsbuildRun;
-      cache?: InstallCache;
-    } = {},
+    opts: RuntimeEngineOptions & { esbuildRun?: EsbuildRun } = {},
   ) {
     this.onLost = opts.onLost;
-    this.run = opts.esbuildRun ?? DEFAULT_RUN;
-    this.cache = opts.cache;
+    this.injectedRun = opts.esbuildRun;
+  }
+
+  /** Injected runner (spikes / tests) wins; otherwise the in-browser
+   *  esbuild-wasm worker, created lazily so non-browser callers that
+   *  inject never construct a Worker.  The worker now owns install
+   *  + the IDB cache, so node_modules never crosses the boundary. */
+  private esbuildRun(): EsbuildRun {
+    if (this.injectedRun) return this.injectedRun;
+    this.vfsBundler ??= new VfsBundlerClient();
+    return this.vfsBundler.run;
   }
 
   /** The runtime worker is created lazily on first boot — `prepare`
@@ -123,40 +133,72 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
   }
 
   async prepare(input: PrepareInput): Promise<PreparedBuild> {
-    const files = new Map<string, string | Uint8Array>();
-    for (const f of input.files) files.set("/" + f.path, f.content);
+    const generatedFiles = new Map<string, string | Uint8Array>();
+    for (const f of input.files) generatedFiles.set("/" + f.path, f.content);
 
-    const rootDeps = harvestRootDeps(files, input.honoEntry);
-    const { versions } = await install(
+    // System-mode emits a package.json per deployable: the Hono
+    // backend's has hono/drizzle/zod, the React frontend's has
+    // react/react-dom/mantine/etc.  Install the UNION so BOTH builds
+    // resolve (harvesting only the Hono one left the React bundle
+    // unable to find react — caught by the #2 parity spike).
+    const rootDeps = {
+      ...harvestRootDeps(generatedFiles, input.honoEntry),
+      ...(input.reactEntry
+        ? harvestRootDeps(generatedFiles, input.reactEntry)
+        : {}),
+    };
+    const run = this.esbuildRun();
+
+    const honoRun = await run({
+      generatedFiles,
       rootDeps,
-      (p, d) => files.set(p, d),
-      { cache: this.cache },
-    );
-    const versionRec = Object.fromEntries(versions);
-
-    const honoRun = await this.run({
       stdinContents: makeEntryStdin(
         input.honoEntry,
         schemaPathFor(input.honoEntry),
       ),
-      files,
     });
-    const hono: BundleResult = honoRun.ok
-      ? {
+    // Apply the npm-pglite postprocess HERE — the runtime worker
+    // boots `hono.code` verbatim, and unlike the esm.sh path (where
+    // bundler.worker post-processes internally) nothing else would.
+    // Failure → a bundle diagnostic, not a thrown rejection that
+    // skips BUNDLE_DONE.
+    let hono: BundleResult;
+    if (!honoRun.ok) {
+      hono = { ok: false, diagnostics: [{ severity: "error", message: honoRun.message }] };
+    } else {
+      try {
+        const code = postProcessNpmBundle(honoRun.code);
+        hono = {
           ok: true,
           kind: "hono",
-          code: honoRun.code,
-          size: honoRun.code.length,
+          code,
+          size: code.length,
           durationMs: 0,
           fetchedUrls: [],
-          versions: versionRec,
+          versions: honoRun.versions,
           diagnostics: [],
-        }
-      : { ok: false, diagnostics: [{ severity: "error", message: honoRun.message }] };
+        };
+      } catch (err) {
+        hono = {
+          ok: false,
+          diagnostics: [
+            {
+              severity: "error",
+              message: err instanceof Error ? err.message : String(err),
+            },
+          ],
+        };
+      }
+    }
 
     let react: BundleResult | null = null;
     if (hono.ok && input.reactEntry) {
-      const r = await this.run({ entry: "/" + input.reactEntry, files });
+      const r = await run({
+        generatedFiles,
+        rootDeps,
+        entry: "/" + input.reactEntry,
+        externalReactRuntime: true,
+      });
       react = r.ok
         ? {
             ok: true,
@@ -166,7 +208,7 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
             size: r.code.length,
             durationMs: 0,
             fetchedUrls: [],
-            versions: versionRec,
+            versions: r.versions,
             diagnostics: [],
           }
         : { ok: false, diagnostics: [{ severity: "error", message: r.message }] };
@@ -199,6 +241,7 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
   }
   dispose(): void {
     this.runtime?.dispose();
+    this.vfsBundler?.dispose();
   }
 }
 
