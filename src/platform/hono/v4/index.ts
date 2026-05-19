@@ -1,5 +1,16 @@
-import { generateTypeScriptForContexts } from "../generator/typescript/index.js";
-import type { ComposeServiceShape, PlatformSurface } from "./surface.js";
+// ---------------------------------------------------------------------------
+// hono@v4 — the versioned backend package (backend-packages B2, see
+// docs/backend-packages.md).  Owns its dep pins (`./pins.ts`) and
+// the `PlatformSurface` wiring; drives the shared TypeScript/Hono
+// emitter under `src/generator/typescript/`.  A future `hono@v5`
+// is a sibling directory that reuses the stable emitter slices by
+// ordinary import and overrides only what the Hono-major change
+// touches — no flat-file replacement, the previous version stays
+// loadable.
+// ---------------------------------------------------------------------------
+import { generateTypeScriptForContexts } from "../../../generator/typescript/index.js";
+import type { ComposeServiceShape, PlatformSurface } from "../../surface.js";
+import { BACKEND_PINS } from "./pins.js";
 
 const honoPlatform: PlatformSurface = {
   name: "hono",
@@ -13,7 +24,12 @@ const honoPlatform: PlatformSurface = {
   // function implementation".
   reservedRepositoryFindNames: new Set(["save", "findById", "getById"]),
   emitProject({ contexts, deployable, sys }): Map<string, string> {
-    return generateTypeScriptForContexts(contexts, { deployable, sys });
+    // The package supplies its own pins to the shared emitter —
+    // edge points package → shared, never the reverse (B2.1).
+    return generateTypeScriptForContexts(contexts, BACKEND_PINS, {
+      deployable,
+      sys,
+    });
   },
   composeService({ slug }): ComposeServiceShape {
     return {

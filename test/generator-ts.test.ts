@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createDddServices } from "../src/language/ddd-module.js";
 import { generateTypeScript } from "../src/generator/typescript/index.js";
+import { BACKEND_PINS as HONO_V4_PINS } from "../src/platform/hono/v4/pins.js";
 import type { Model } from "../src/language/generated/ast.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -22,7 +23,7 @@ async function buildModel(file: string): Promise<Model> {
 describe("typescript generator", () => {
   it("emits the expected file set for sales.ddd", async () => {
     const model = await buildModel("examples/sales.ddd");
-    const files = generateTypeScript(model);
+    const files = generateTypeScript(model, HONO_V4_PINS);
     const keys = [...files.keys()].sort();
     expect(keys).toContain("domain/ids.ts");
     expect(keys).toContain("domain/value-objects.ts");
@@ -39,7 +40,7 @@ describe("typescript generator", () => {
 
   it("renders the Order aggregate with branded ids and operations", async () => {
     const model = await buildModel("examples/sales.ddd");
-    const files = generateTypeScript(model);
+    const files = generateTypeScript(model, HONO_V4_PINS);
     const order = files.get("domain/order.ts")!;
     expect(order).toMatch(/export class Order/);
     expect(order).toMatch(/Ids\.OrderId/);
@@ -51,14 +52,14 @@ describe("typescript generator", () => {
 
   it("renders OrderLine with implicit id and parent injection", async () => {
     const model = await buildModel("examples/sales.ddd");
-    const files = generateTypeScript(model);
+    const files = generateTypeScript(model, HONO_V4_PINS);
     const order = files.get("domain/order.ts")!;
     expect(order).toMatch(/OrderLine\._create\(\{ id: Ids\.newOrderLineId\(\), parentId: this\._id/);
   });
 
   it("emits a vitest test file when `test` blocks are declared", async () => {
     const model = await buildModel("examples/sales.ddd");
-    const files = generateTypeScript(model);
+    const files = generateTypeScript(model, HONO_V4_PINS);
     const tests = files.get("domain/order.test.ts")!;
     expect(tests).toMatch(/import { describe, it, expect } from "vitest"/);
     expect(tests).toMatch(/it\("money literal builds"/);
@@ -67,7 +68,7 @@ describe("typescript generator", () => {
 
   it("emits Dockerfile + .dockerignore", async () => {
     const model = await buildModel("examples/sales.ddd");
-    const files = generateTypeScript(model);
+    const files = generateTypeScript(model, HONO_V4_PINS);
     const dockerfile = files.get("Dockerfile")!;
     expect(dockerfile).toMatch(/FROM node:24-alpine AS build/);
     expect(dockerfile).toMatch(/FROM node:24-alpine AS runtime/);
@@ -79,7 +80,7 @@ describe("typescript generator", () => {
   describe("slice 16.A — container basics", () => {
     it("http/index.ts mounts /ready that pings the DB and returns 503 on failure", async () => {
       const model = await buildModel("examples/sales.ddd");
-      const files = generateTypeScript(model);
+      const files = generateTypeScript(model, HONO_V4_PINS);
       const httpIndex = files.get("http/index.ts")!;
       expect(httpIndex).toMatch(/app\.get\("\/ready"/);
       // Drizzle ping via sql`select 1` — cheap, dialect-agnostic.
@@ -92,7 +93,7 @@ describe("typescript generator", () => {
 
     it("root index.ts captures the server and listens for SIGTERM/SIGINT", async () => {
       const model = await buildModel("examples/sales.ddd");
-      const files = generateTypeScript(model);
+      const files = generateTypeScript(model, HONO_V4_PINS);
       const idx = files.get("index.ts")!;
       expect(idx).toMatch(/const server = serve\(/);
       expect(idx).toMatch(/process\.on\("SIGTERM"/);
@@ -103,7 +104,7 @@ describe("typescript generator", () => {
 
     it("root index.ts fails fast on missing DATABASE_URL", async () => {
       const model = await buildModel("examples/sales.ddd");
-      const files = generateTypeScript(model);
+      const files = generateTypeScript(model, HONO_V4_PINS);
       const idx = files.get("index.ts")!;
       expect(idx).toMatch(/if \(!process\.env\.DATABASE_URL\)/);
       expect(idx).toMatch(/DATABASE_URL is required/);
@@ -113,7 +114,7 @@ describe("typescript generator", () => {
   describe("slice 16.C — request observability", () => {
     it("emits obs/request-id.ts with the correlation-id middleware", async () => {
       const model = await buildModel("examples/sales.ddd");
-      const files = generateTypeScript(model);
+      const files = generateTypeScript(model, HONO_V4_PINS);
       const reqId = files.get("obs/request-id.ts")!;
       // Mints a fresh UUID when no inbound header is set.
       expect(reqId).toMatch(/randomUUID\(\)/);
@@ -134,7 +135,7 @@ describe("typescript generator", () => {
 
     it("http/index.ts mounts requestIdMiddleware before cors and any business route", async () => {
       const model = await buildModel("examples/sales.ddd");
-      const files = generateTypeScript(model);
+      const files = generateTypeScript(model, HONO_V4_PINS);
       const httpIndex = files.get("http/index.ts")!;
       expect(httpIndex).toMatch(/import \{ requestIdMiddleware \} from "\.\.\/obs\/request-id"/);
       expect(httpIndex).toMatch(/app\.use\("\*", requestIdMiddleware\)/);
@@ -149,7 +150,7 @@ describe("typescript generator", () => {
 
     it("per-aggregate app.onError threads trace_id into every error envelope", async () => {
       const model = await buildModel("examples/sales.ddd");
-      const files = generateTypeScript(model);
+      const files = generateTypeScript(model, HONO_V4_PINS);
       const routes = files.get("http/order.routes.ts")!;
       // trace_id pulled off the context via a typed cast (the
       // sub-router's OpenAPIHono is constructed without a typed
@@ -166,7 +167,7 @@ describe("typescript generator", () => {
 
   it("Hono routes use @hono/zod-openapi and expose /openapi.json", async () => {
     const model = await buildModel("examples/sales.ddd");
-    const files = generateTypeScript(model);
+    const files = generateTypeScript(model, HONO_V4_PINS);
     const orderRoutes = files.get("http/order.routes.ts")!;
     expect(orderRoutes).toMatch(/from "@hono\/zod-openapi"/);
     expect(orderRoutes).toMatch(/createRoute\(\{/);
@@ -183,7 +184,7 @@ describe("typescript generator", () => {
 
   it("emits a full wire-shape OrderResponse + findAll route + repo serializer", async () => {
     const model = await buildModel("examples/sales.ddd");
-    const files = generateTypeScript(model);
+    const files = generateTypeScript(model, HONO_V4_PINS);
     const orderRoutes = files.get("http/order.routes.ts")!;
     // Response carries every aggregate field + parts + derived.
     expect(orderRoutes).toMatch(/OrderResponse = z\.object/);
@@ -200,7 +201,7 @@ describe("typescript generator", () => {
 
   it("lowers `where` filter expressions to Drizzle operators (not a TODO comment)", async () => {
     const model = await buildModel("examples/sales.ddd");
-    const files = generateTypeScript(model);
+    const files = generateTypeScript(model, HONO_V4_PINS);
     const repo = files.get("db/repositories/order-repository.ts")!;
     // sales.ddd's `activeForCustomer` declares
     //   where this.customerId == forCustomer && this.status == Draft
@@ -236,7 +237,7 @@ describe("typescript generator", () => {
         }
       }
     `, { validation: true });
-    const files = generateTypeScript(doc.parseResult.value as Model);
+    const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
     const repo = files.get("db/repositories/order-repository.ts")!;
     // The `all()` method now eagerly loads `shipping` via inArray +
     // builds a per-parent map keyed by parentId; hydrate looks up
@@ -267,7 +268,7 @@ describe("typescript generator", () => {
         repository Orders for Order { }
       }
     `, { validation: true });
-    const files = generateTypeScript(doc.parseResult.value as Model);
+    const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
 
     // 1. Per-aggregate extern handler module.
     const extern = files.get("domain/order-extern.ts")!;
@@ -305,7 +306,7 @@ describe("typescript generator", () => {
   describe("slice 16.B — extern handler exception envelope", () => {
     it("domain/errors.ts exports ExternHandlerError", async () => {
       const model = await buildModel("examples/sales.ddd");
-      const files = generateTypeScript(model);
+      const files = generateTypeScript(model, HONO_V4_PINS);
       const errors = files.get("domain/errors.ts")!;
       expect(errors).toMatch(/export class ExternHandlerError extends Error/);
       // Carries op + agg names + the inner cause.
@@ -334,7 +335,7 @@ describe("typescript generator", () => {
           repository Orders for Order { }
         }
       `, { validation: true });
-      const files = generateTypeScript(doc.parseResult.value as Model);
+      const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
       const routes = files.get("http/order.routes.ts")!;
       // Imports the new error type.
       expect(routes).toMatch(
@@ -364,7 +365,7 @@ describe("typescript generator", () => {
       // errors.  Forking it would break every OpenAPI-generated
       // client.  Pin the absence.
       const model = await buildModel("examples/sales.ddd");
-      const files = generateTypeScript(model);
+      const files = generateTypeScript(model, HONO_V4_PINS);
       const httpIndex = files.get("http/index.ts")!;
       const orderRoutes = files.get("http/order.routes.ts")!;
       expect(httpIndex).not.toMatch(/defaultHook/);
@@ -391,7 +392,7 @@ describe("typescript generator", () => {
           }
         }
       `, { validation: true });
-      const files = generateTypeScript(doc.parseResult.value as Model);
+      const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
       const wf = files.get("http/workflows.ts")!;
       // Same import line as the per-aggregate router.
       expect(wf).toMatch(
@@ -422,7 +423,7 @@ describe("typescript generator", () => {
           repository Orders for Order { }
         }
       `, { validation: true });
-      const files = generateTypeScript(doc.parseResult.value as Model);
+      const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
       const extern = files.get("domain/order-extern.ts")!;
       // User handler code can import ExternHandlerError straight
       // from the per-aggregate file rather than reaching for
@@ -469,7 +470,7 @@ describe("typescript generator", () => {
         }
       }
     `, { validation: true });
-    const files = generateTypeScript(doc.parseResult.value as Model);
+    const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
     const wf = files.get("http/workflows.ts")!;
 
     // Imports + Zod schema for params.
@@ -520,7 +521,7 @@ describe("typescript generator", () => {
         }
       }
     `, { validation: true });
-    const files = generateTypeScript(doc.parseResult.value as Model);
+    const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
     const wf = files.get("http/workflows.ts")!;
     expect(wf).toMatch(/await db\.transaction\(async \(tx\) => \{/);
     expect(wf).toMatch(/const customers = new CustomerRepository\(tx, events\);/);
@@ -547,7 +548,7 @@ describe("typescript generator", () => {
         view ActiveOrders = Order where status == Confirmed
       }
     `, { validation: true });
-    const files = generateTypeScript(doc.parseResult.value as Model);
+    const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
 
     // 1. http/views.ts mounts the route; reuses the aggregate's
     //    list response schema for OpenAPI symmetry.
@@ -602,7 +603,7 @@ describe("typescript generator", () => {
         }
       }
     `, { validation: true });
-    const files = generateTypeScript(doc.parseResult.value as Model);
+    const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
     const views = files.get("http/views.ts")!;
 
     // Custom Zod schema declared at top of the file.
@@ -649,7 +650,7 @@ describe("typescript generator", () => {
         }
       }
     `, { validation: true });
-    const files = generateTypeScript(doc.parseResult.value as Model);
+    const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
     const views = files.get("http/views.ts")!;
 
     // Foreign aggregate's repo is imported and instantiated.
@@ -695,7 +696,7 @@ describe("typescript generator", () => {
         }
       }
     `, { validation: true });
-    const files = generateTypeScript(doc.parseResult.value as Model);
+    const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
     const wf = files.get("http/workflows.ts")!;
 
     // Per-aggregate extern registry is imported with an alias.
@@ -733,7 +734,7 @@ describe("typescript generator", () => {
         }
       }
     `, { validation: true });
-    const wf = generateTypeScript(doc.parseResult.value as Model).get("http/workflows.ts")!;
+    const wf = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS).get("http/workflows.ts")!;
     expect(wf).toMatch(/order\.checkDeduct\(amount\);/);
     expect(wf).toMatch(/await __handler\(order, \{ amount: amount \}\);/);
   });
@@ -762,7 +763,7 @@ describe("typescript generator", () => {
         }
       }
     `, { validation: true });
-    const wf = generateTypeScript(doc.parseResult.value as Model).get(
+    const wf = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS).get(
       "http/views.ts",
     )!;
 
@@ -830,7 +831,7 @@ describe("typescript generator", () => {
         }
       }
     `, { validation: true });
-    const wf = generateTypeScript(doc.parseResult.value as Model).get("http/workflows.ts")!;
+    const wf = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS).get("http/workflows.ts")!;
     // The Money schema is declared as a local const, with the
     // openapi("Money") tag so it appears in /openapi.json.  Invariant
     // refinements stay outside the openapi name (see emitWireSchema).
@@ -887,7 +888,7 @@ describe("typescript generator", () => {
         }
       }
     `, { validation: true });
-    const wf = generateTypeScript(doc.parseResult.value as Model).get("http/workflows.ts")!;
+    const wf = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS).get("http/workflows.ts")!;
     expect(wf).toMatch(/\}, \{ isolationLevel: "serializable" \}\);/);
     expect(wf).toMatch(/\}, \{ isolationLevel: "repeatable read" \}\);/);
     expect(wf).toMatch(/\}, \{ isolationLevel: "read uncommitted" \}\);/);
@@ -906,7 +907,7 @@ describe("typescript generator", () => {
     // OrderLine part gets a parentId index so findById's eager-load
     // join doesn't sequential-scan.
     const model = await buildModel("examples/sales.ddd");
-    const files = generateTypeScript(model);
+    const files = generateTypeScript(model, HONO_V4_PINS);
     const schema = files.get("db/schema.ts")!;
     expect(schema).toMatch(/import \{[^}]*\bindex\b[^}]*\} from "drizzle-orm\/pg-core"/);
     expect(schema).toMatch(/orderCustomerIdIdx: index\("orders_customer_id_idx"\)\.on\(table\.customerId\)/);
@@ -935,7 +936,7 @@ describe("typescript generator", () => {
       const sys = loom.systems[0]!;
       const dep = sys.deployables.find((d) => d.platform === "hono")!;
       const contexts = sys.modules.flatMap((m) => m.contexts);
-      return generateTypeScriptForContexts(contexts, { deployable: dep, sys });
+      return generateTypeScriptForContexts(contexts, HONO_V4_PINS, { deployable: dep, sys });
     }
 
     const SRC_AUTH_REQUIRED = `
@@ -1144,7 +1145,7 @@ describe("typescript generator", () => {
   describe("invariants on the wire (slice 21.A — Hono Zod refines)", () => {
     it("absorbs single-field invariants on a value-object schema into idiomatic native chains", async () => {
       const model = await buildModel("examples/sales.ddd");
-      const files = generateTypeScript(model);
+      const files = generateTypeScript(model, HONO_V4_PINS);
       // sales.ddd Money: `invariant amount >= 0` + `invariant currency.length == 3`.
       const orderRoutes = files.get("http/order.routes.ts")!;
       expect(orderRoutes).toMatch(/amount: z\.coerce\.number\(\)\.min\(0\)/);
@@ -1158,7 +1159,7 @@ describe("typescript generator", () => {
 
     it("absorbs single-field op-precondition into idiomatic chain on <Op>Request", async () => {
       const model = await buildModel("examples/sales.ddd");
-      const files = generateTypeScript(model);
+      const files = generateTypeScript(model, HONO_V4_PINS);
       // sales.ddd Order.addLine: `precondition qty > 0` (with int qty).
       const orderRoutes = files.get("http/order.routes.ts")!;
       // `qty > 0` → recognised as min(1) on the int field.
@@ -1169,7 +1170,7 @@ describe("typescript generator", () => {
 
     it("excludes invariants referencing aggregate state from Create<Agg>Request", async () => {
       const model = await buildModel("examples/sales.ddd");
-      const files = generateTypeScript(model);
+      const files = generateTypeScript(model, HONO_V4_PINS);
       const orderRoutes = files.get("http/order.routes.ts")!;
       // sales.ddd Order has `invariant lines.count > 0 when status == Confirmed`.
       // `lines` is a containment, not in the create-request body — the
@@ -1187,7 +1188,7 @@ describe("typescript generator", () => {
 
     it("excludes preconditions referencing helper-fns / aggregate state from <Op>Request", async () => {
       const model = await buildModel("examples/sales.ddd");
-      const files = generateTypeScript(model);
+      const files = generateTypeScript(model, HONO_V4_PINS);
       const orderRoutes = files.get("http/order.routes.ts")!;
       // Order.addLine has `precondition isMutable()` — references
       // `this.status` via a helper-fn.  Must NOT appear as a refine
@@ -1222,7 +1223,7 @@ describe("typescript generator", () => {
         `,
         { validation: true },
       );
-      const files = generateTypeScript(doc.parseResult.value as Model);
+      const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
       const routes = files.get("http/user.routes.ts")!;
       expect(routes).toMatch(
         /CreateUserRequest = z\.object\(\{[\s\S]*email: z\.string\(\)\.regex\(\/\^\[\^@\]\+@\.\+\$\/\)/,
@@ -1245,7 +1246,7 @@ describe("typescript generator", () => {
         `,
         { validation: true },
       );
-      const files = generateTypeScript(doc.parseResult.value as Model);
+      const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
       const userClass = files.get("domain/user.ts")!;
       expect(userClass).toMatch(
         /new RegExp\("\^\[\^@\]\+@\.\+\$"\)\.test\(this\._email\)/,
@@ -1271,7 +1272,7 @@ describe("typescript generator", () => {
         `,
         { validation: true },
       );
-      const files = generateTypeScript(doc.parseResult.value as Model);
+      const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
       const routes = files.get("http/reservation.routes.ts")!;
       // `fromTime < toTime` is cross-field — falls through to .refine.
       expect(routes).toMatch(

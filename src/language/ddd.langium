@@ -167,8 +167,13 @@ UiBlockBinding:
 Framework returns string:
     'react' | 'phoenixLiveView';
 
+// Backend platforms accept a quoted `family@version` pin
+// (`platform: "hono@v4"`) via the STRING alternative — symmetric
+// with `DesignPack` below.  Bareword keywords are unchanged so
+// every existing source parses identically; the validator + lowering
+// (`parseBuiltinPlatformRef`) are the resolution authority.
 Platform returns string:
-    'dotnet' | 'hono' | 'react' | 'static' | 'phoenixLiveView';
+    'dotnet' | 'hono' | 'react' | 'static' | 'phoenixLiveView' | STRING;
 
 // Design-system pack selector — picks the template pack the UI
 // generator renders pages against.  `mantine` (default), `shadcn`,

@@ -54,11 +54,17 @@ concurrency:
 jobs:
   e2e:
     runs-on: ubuntu-latest
-    # Tight cap to protect CI minutes — Playwright per-test timeout
-    # is 4min × ~11 tests; a stuck pipeline could otherwise burn the
-    # full 15 before cancelling.  10 leaves time for the warm-cache
-    # path while bounding the cost of regression runs.
-    timeout-minutes: 10
+    # Job cap.  Playwright per-test timeout is 4min × ~11 tests; a
+    # stuck pipeline could otherwise burn well past this.  Bumped
+    # from 10 → 30 once stack v3 (React 19) + Tailwind 4 + the new
+    # pack majors landed: the playground preview's cold esm.sh
+    # fetches got heavier and the 10-minute cap began swallowing
+    # otherwise-healthy runs (two consecutive `cancelled` verdicts
+    # at the exact 10-min mark on the post-backend-packages CI),
+    # giving us no signal.  30 leaves ample headroom for cold
+    # cache + a deliberate safety margin without making a genuinely
+    # stuck pipeline expensive.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
 
