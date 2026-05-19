@@ -22,7 +22,13 @@ export interface VfsBundleRequest {
   stdinContents?: string;
   entry?: string;
   files: Map<string, string | Uint8Array>;
+  externalReactRuntime?: boolean;
 }
+
+// Keep the React runtime external on the frontend build so the
+// iframe importmap supplies one shared instance (mirrors the esm.sh
+// path).  Wildcards cover jsx-runtime / client subpaths.
+const REACT_EXTERNALS = ["react", "react-dom", "react/*", "react-dom/*"];
 export interface VfsBundleResponse {
   id: number;
   ok: boolean;
@@ -49,7 +55,7 @@ function ensureInit(): Promise<void> {
 }
 
 self.onmessage = async (ev: MessageEvent<VfsBundleRequest>): Promise<void> => {
-  const { id, stdinContents, entry, files } = ev.data;
+  const { id, stdinContents, entry, files, externalReactRuntime } = ev.data;
   try {
     await ensureInit();
     const common = {
@@ -61,6 +67,7 @@ self.onmessage = async (ev: MessageEvent<VfsBundleRequest>): Promise<void> => {
       write: false as const,
       sourcemap: false as const,
       loader: { ".wasm": "binary" as const },
+      external: externalReactRuntime ? REACT_EXTERNALS : undefined,
       plugins: [makeVfsNpmPlugin(files)],
     };
     const out = await esbuild.build(

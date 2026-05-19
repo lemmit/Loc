@@ -39,6 +39,7 @@ import type {
   RuntimeEngineOptions,
 } from "./runtime-engine.js";
 import { install, type InstallCache } from "./npm/install.js";
+import { IdbInstallCache } from "./npm/install-cache-idb.js";
 import { postProcessNpmBundle } from "./npm/postprocess.js";
 import { VfsBundlerClient } from "./npm/vfs-bundler-client.js";
 
@@ -48,6 +49,11 @@ export interface EsbuildRunInput {
   /** Bundle a real file entry by absolute VFS path (React path). */
   entry?: string;
   files: Map<string, string | Uint8Array>;
+  /** React build: keep react/react-dom external so the iframe
+   *  importmap supplies a single instance — mirrors the esm.sh
+   *  path's externalisation and avoids the dual-React/"Invalid hook
+   *  call" failure that bundling React per-frontend would cause. */
+  externalReactRuntime?: boolean;
 }
 
 export type EsbuildRun = (
@@ -98,7 +104,8 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
   private readonly onLost?: () => void;
   private readonly injectedRun?: EsbuildRun;
   private vfsBundler: VfsBundlerClient | null = null;
-  private readonly cache?: InstallCache;
+  private readonly injectedCache?: InstallCache;
+  private cachePromise: Promise<InstallCache> | null = null;
 
   constructor(
     opts: RuntimeEngineOptions & {
@@ -108,7 +115,24 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
   ) {
     this.onLost = opts.onLost;
     this.injectedRun = opts.esbuildRun;
-    this.cache = opts.cache;
+    this.injectedCache = opts.cache;
+  }
+
+  /** Injected cache (tests) wins; otherwise a lazily-opened
+   *  IdbInstallCache so a dependency set installs once and replays
+   *  across prepares / reloads instead of re-fetching tens of MB
+   *  every Bundle.  Memoised; `open()` is a no-op (memory-only) when
+   *  IDB is unavailable, so non-browser callers still work. */
+  private async resolveCache(): Promise<InstallCache> {
+    if (this.injectedCache) return this.injectedCache;
+    if (!this.cachePromise) {
+      this.cachePromise = (async () => {
+        const c = new IdbInstallCache();
+        await c.open();
+        return c;
+      })();
+    }
+    return this.cachePromise;
   }
 
   /** Injected runner (spikes / tests) wins; otherwise the in-browser
@@ -132,10 +156,11 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
     for (const f of input.files) files.set("/" + f.path, f.content);
 
     const rootDeps = harvestRootDeps(files, input.honoEntry);
+    const cache = await this.resolveCache();
     const { versions } = await install(
       rootDeps,
       (p, d) => files.set(p, d),
-      { cache: this.cache },
+      { cache },
     );
     const versionRec = Object.fromEntries(versions);
     const run = this.esbuildRun();
@@ -183,7 +208,11 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
 
     let react: BundleResult | null = null;
     if (hono.ok && input.reactEntry) {
-      const r = await run({ entry: "/" + input.reactEntry, files });
+      const r = await run({
+        entry: "/" + input.reactEntry,
+        files,
+        externalReactRuntime: true,
+      });
       react = r.ok
         ? {
             ok: true,

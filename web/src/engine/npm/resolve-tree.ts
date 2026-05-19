@@ -12,7 +12,7 @@
 // drizzle's 28 peers are optional DB drivers we don't use).
 
 import { fetchPackument, type Packument, type VersionMeta } from "./registry.js";
-import { maxSatisfying } from "./semver.js";
+import { cmp, maxSatisfying, parse } from "./semver.js";
 
 export interface PlannedPackage {
   name: string;
@@ -41,12 +41,12 @@ export async function planInstall(
       );
     }
     const prev = chosen.get(name);
-    // Flat dedupe: only (re)descend when this is a new pick or a
-    // higher version than what we already planned.
-    if (prev && prev.version === version) continue;
-    if (prev && maxSatisfying([prev.version, version], `>=${prev.version}`) === prev.version && prev.version !== version) {
-      // already have an equal-or-higher pin; skip
-      continue;
+    if (prev) {
+      // Flat dedupe, highest-wins: skip (keep prev, don't re-descend)
+      // unless this requirement resolves to a strictly newer version.
+      const a = parse(prev.version);
+      const b = parse(version);
+      if (!b || (a && cmp(b, a) <= 0)) continue;
     }
     const meta = pack.versions[version];
     chosen.set(name, { name, version, meta });
