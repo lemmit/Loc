@@ -18,16 +18,19 @@ export default defineConfig({
   // Whole-test timeout: bundle + WASM + first dispatch take time.
   timeout: 240_000,
   expect: { timeout: 60_000 },
-  // No retries by default — we want a clean signal locally.  CI
-  // can opt in via PWTEST_RETRIES.
-  retries: process.env.CI ? 1 : 0,
+  // Diagnosing the npm-default e2e: no CI retries (avoid the 2×
+  // doubling) so a slow/failing spec shows once, fast.
+  retries: 0,
   // CI runs Playwright with 2 workers to halve wall time on the
   // Bundle/Boot specs (each spends 2-3min fetching esm.sh /
   // jsdelivr).  Locally workers=1 keeps test output linear when a
   // developer is iterating on a single spec.  Tests use isolated
   // browser contexts so per-worker IDB / cookies don't collide.
   workers: process.env.CI ? 2 : 1,
-  reporter: process.env.CI ? "github" : [["list"]],
+  // `list` everywhere: per-spec pass/fail/hang must be visible live
+  // — the `github` reporter emits nothing until the end, useless
+  // when the job is time-capped mid-run.
+  reporter: [["list"]],
   use: {
     baseURL: "http://127.0.0.1:4173",
     headless: true,
