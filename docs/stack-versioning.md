@@ -157,6 +157,14 @@ template can shadow it if it must.
 
 ## Backend stacks (Phase 2)
 
+> **⚠️ Superseded.** This `stacks/<backend>` design is **not** the
+> chosen direction — backends are versioned *code* packages, not
+> dep bundles. See [`backend-packages.md`](./backend-packages.md)
+> for the adopted model (versioned `PlatformSurface` packages:
+> target-IR shaping + final lowering + templating per major,
+> registry keyed `family@version`). The text below is kept only
+> for historical context.
+
 The mechanism generalises to backends. .NET, Hono, and Phoenix
 each have a framework baseline that today is hardcoded in
 `src/generator/<platform>/...`. Moving those into `stacks/` gives

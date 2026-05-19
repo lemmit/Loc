@@ -28,6 +28,7 @@
 | 2.a | Hono backend **minor** dep bumps via a centralised `BACKEND_PINS` const (hono 4.6→4.12, @hono/node-server 1.13→1.14, @hono/zod-openapi 0.18→0.19, zod 3.23→3.24, drizzle-orm 0.36→0.45, drizzle-kit 0.28→0.30).  zod 3→4 / TS 5→6 = majors, deferred (template changes, not pin bumps).  Backend-stack *abstraction* deferred pending an architecture rethink (backends are versioned code modules, not dep bundles — see note below) | this PR | ✅ deps bumped, `LOOM_TS_BUILD` green |
 | 2.b | Phoenix backend (tighten `postgrex: ">= 0.0.0"`; phoenix 1.7→1.8) — `phoenix@v1` stack | — | pending |
 | 2.c | .NET stack scaffold (`dotnet@v8` baseline; `dotnet@v10` follow-up after 2026-11) | — | not urgent |
+| 2.x | **Backend-packages architecture** — versioned `PlatformSurface` packages (target-IR shaping + final lowering + templating per major), registry keyed `family@version`, `platform: "hono@v5"` pin (mirrors `design:`).  Design doc: [`backend-packages.md`](./backend-packages.md).  Commit to B0+B1 (byte-identical registry + grammar machinery); B2+ are gated follow-ups when an upstream major (Hono 5 / .NET 10) forces it | this PR (doc) | 📄 design proposed, awaiting review |
 
 ## Context
 
@@ -495,9 +496,11 @@ their own pack.
 > bareword → `BUILTIN_PLATFORM_LATEST`, pinned via `platform:
 > "dotnet@v10"`), with shared logic shared by ordinary imports. Minor
 > within-major dep bumps stay cheap via a per-generator `BACKEND_PINS`
-> const (done for Hono in Phase 2.a). Decision deferred by owner; the
-> `stacks/<backend>` text below is retained only for historical
-> context and is superseded by this note.
+> const (done for Hono in Phase 2.a). **Now fully specified in
+> [`backend-packages.md`](./backend-packages.md)** (target-IR
+> shaping + final lowering + templating per versioned package;
+> B0–B4 migration path). The `stacks/<backend>` text below is
+> retained only for historical context and is superseded.
 
 The stack abstraction generalises beyond React. Backends (Hono,
 Phoenix LiveView, .NET) currently live in `src/generator/<platform>/`
