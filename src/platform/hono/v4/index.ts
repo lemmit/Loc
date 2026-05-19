@@ -10,6 +10,7 @@
 // ---------------------------------------------------------------------------
 import { generateTypeScriptForContexts } from "../../../generator/typescript/index.js";
 import type { ComposeServiceShape, PlatformSurface } from "../../surface.js";
+import { BACKEND_PINS } from "./pins.js";
 
 const honoPlatform: PlatformSurface = {
   name: "hono",
@@ -23,7 +24,12 @@ const honoPlatform: PlatformSurface = {
   // function implementation".
   reservedRepositoryFindNames: new Set(["save", "findById", "getById"]),
   emitProject({ contexts, deployable, sys }): Map<string, string> {
-    return generateTypeScriptForContexts(contexts, { deployable, sys });
+    // The package supplies its own pins to the shared emitter —
+    // edge points package → shared, never the reverse (B2.1).
+    return generateTypeScriptForContexts(contexts, BACKEND_PINS, {
+      deployable,
+      sys,
+    });
   },
   composeService({ slug }): ComposeServiceShape {
     return {

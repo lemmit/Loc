@@ -1,8 +1,4 @@
 import type { Model } from "../../language/generated/ast.js";
-// Backend-packages B2 — the dep pins are owned by the hono@v4
-// package; this shared emitter imports them.  (B3: parameterise on
-// the active version's pins when hono@v5 forks.)
-import { BACKEND_PINS } from "../../platform/hono/v4/pins.js";
 import { lowerModel } from "../../ir/lower.js";
 import { enrichLoomModel } from "../../ir/enrichments.js";
 import type {
@@ -70,13 +66,16 @@ export class ExternHandlerError extends Error {
  * Legacy entry: lowers the whole model and emits one project from all
  * top-level bounded contexts.  Used by `ddd generate ts <file> -o <dir>`.
  */
-export function generateTypeScript(model: Model): Map<string, string> {
+export function generateTypeScript(
+  model: Model,
+  pins: BackendPins,
+): Map<string, string> {
   // Lowering produces a faithful AST projection; enrichment populates
   // wireShape, the implicit `findAll` find, and react `moduleNames`
   // inheritance.  Every backend consumes the enriched IR, never the
   // raw lowered output.
   const loom = enrichLoomModel(lowerModel(model));
-  return generateTypeScriptForContexts(loom.contexts);
+  return generateTypeScriptForContexts(loom.contexts, pins);
 }
 
 /**
@@ -93,6 +92,7 @@ export function generateTypeScript(model: Model): Map<string, string> {
  */
 export function generateTypeScriptForContexts(
   contexts: BoundedContextIR[],
+  pins: BackendPins,
   system?: { deployable: DeployableIR; sys: SystemIR },
 ): Map<string, string> {
   const out = new Map<string, string>();
@@ -173,7 +173,7 @@ export function generateTypeScriptForContexts(
     emitAuthFiles(system.sys, out);
   }
   emitObservabilityFiles(out);
-  out.set("package.json", PROJECT_PACKAGE_JSON);
+  out.set("package.json", projectPackageJson(pins));
   out.set("tsconfig.json", PROJECT_TSCONFIG_JSON);
   out.set("tsup.config.ts", TSUP_CONFIG);
   out.set("index.ts", PROJECT_INDEX_TS);
@@ -188,28 +188,43 @@ function findRepoFor(ctx: BoundedContextIR, name: string): RepositoryIR | undefi
   return ctx.repositories.find((r) => r.aggregateName === name);
 }
 
-const PROJECT_PACKAGE_JSON = JSON.stringify(
-  {
-    name: "ddd-generated-app",
-    version: "0.0.0",
-    type: "module",
-    private: true,
-    scripts: {
-      dev: "tsx index.ts",
-      build: "tsup",
-      typecheck: "tsc --noEmit",
-      test: "vitest run",
-      "db:generate": "drizzle-kit generate",
-      "db:migrate": "drizzle-kit migrate",
-      "db:push": "drizzle-kit push",
-      "db:studio": "drizzle-kit studio",
-    },
-    dependencies: { ...BACKEND_PINS.dependencies },
-    devDependencies: { ...BACKEND_PINS.devDependencies },
-  },
-  null,
-  2,
-) + "\n";
+// Backend-packages B2.1 — the shared TypeScript/Hono emitter is
+// version-agnostic.  Dep pins are owned by the active backend
+// *package* (`src/platform/hono/<vN>/pins.ts`) and threaded in as a
+// parameter; the emitter never imports a package (no shared→package
+// edge), so it stays usable by any backend version and a future
+// `hono@v5` just passes different pins.
+export interface BackendPins {
+  dependencies: Record<string, string>;
+  devDependencies: Record<string, string>;
+}
+
+function projectPackageJson(pins: BackendPins): string {
+  return (
+    JSON.stringify(
+      {
+        name: "ddd-generated-app",
+        version: "0.0.0",
+        type: "module",
+        private: true,
+        scripts: {
+          dev: "tsx index.ts",
+          build: "tsup",
+          typecheck: "tsc --noEmit",
+          test: "vitest run",
+          "db:generate": "drizzle-kit generate",
+          "db:migrate": "drizzle-kit migrate",
+          "db:push": "drizzle-kit push",
+          "db:studio": "drizzle-kit studio",
+        },
+        dependencies: { ...pins.dependencies },
+        devDependencies: { ...pins.devDependencies },
+      },
+      null,
+      2,
+    ) + "\n"
+  );
+}
 
 const DRIZZLE_CONFIG = `// Auto-generated.  Drizzle Kit configuration — adjust to taste.
 import { defineConfig } from "drizzle-kit";
