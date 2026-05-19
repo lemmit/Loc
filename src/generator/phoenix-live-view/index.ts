@@ -1014,12 +1014,13 @@ defmodule ${webModule}.CoreComponents do
   Function components consumed by emitted layouts + LiveView pages.
   Mirrors the subset of Phoenix 1.7's standard CoreComponents that
   Loom's HEEx walker calls into: \`flash_group\`, \`header\`, \`button\`,
-  \`input\`, \`simple_form\`, \`table\`, \`badge\`, \`empty\`.
+  \`input\`, \`simple_form\`, \`table\`, \`badge\`, \`empty\`, \`modal\`.
 
   Layouts are intentionally minimal/Tailwind-ish — projects can swap
   in a richer component module without touching the emitter.
   """
   use Phoenix.Component
+  alias Phoenix.LiveView.JS
 
   @doc "Renders all currently-set flash messages."
   attr :flash, :map, default: %{}
@@ -1306,7 +1307,109 @@ defmodule ${webModule}.CoreComponents do
     """
   end
 
+  @doc """
+  A modal dialog driven by \`show_modal/1\` + \`hide_modal/1\` JS
+  commands.  The \`:title\` slot renders the heading; the default
+  slot is the body (typically a \`<.simple_form>\`).
+  """
+  attr :id, :string, required: true
+  attr :show, :boolean, default: false
+  attr :on_cancel, JS, default: %JS{}
+  slot :title
+  slot :inner_block, required: true
+
+  def modal(assigns) do
+    ~H"""
+    <div
+      id={@id}
+      phx-mounted={@show && show_modal(@id)}
+      phx-remove={hide_modal(@id)}
+      class="relative z-50 hidden"
+    >
+      <div id={"#{@id}-bg"} class="fixed inset-0 bg-zinc-900/30 transition-opacity" aria-hidden="true" />
+      <div
+        class="fixed inset-0 overflow-y-auto"
+        aria-labelledby={"#{@id}-title"}
+        role="dialog"
+        aria-modal="true"
+        tabindex="0"
+      >
+        <div class="flex min-h-full items-center justify-center p-4">
+          <div class="w-full max-w-lg">
+            <.focus_wrap
+              id={"#{@id}-container"}
+              phx-window-keydown={hide_modal(@on_cancel, @id)}
+              phx-key="escape"
+              phx-click-away={hide_modal(@on_cancel, @id)}
+              class="relative hidden rounded-md bg-white p-6 shadow-lg ring-1 ring-zinc-200 transition"
+            >
+              <div class="absolute top-4 right-4">
+                <button
+                  type="button"
+                  phx-click={hide_modal(@on_cancel, @id)}
+                  class="rounded-md p-1 text-zinc-400 hover:text-zinc-600"
+                  aria-label="close"
+                >
+                  &times;
+                </button>
+              </div>
+              <h2
+                :if={@title != []}
+                id={"#{@id}-title"}
+                class="text-lg font-semibold leading-7 text-zinc-900 mb-4"
+              >
+                {render_slot(@title)}
+              </h2>
+              <div id={"#{@id}-content"}>
+                {render_slot(@inner_block)}
+              </div>
+            </.focus_wrap>
+          </div>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
   # ---- Internal helpers -----------------------------------------------------
+
+  @doc false
+  def show_modal(js \\\\ %JS{}, id) when is_binary(id) do
+    js
+    |> JS.show(to: "##{id}")
+    |> JS.show(
+      to: "##{id}-bg",
+      transition:
+        {"transition-all transform ease-out duration-200", "opacity-0", "opacity-100"}
+    )
+    |> JS.show(
+      to: "##{id}-container",
+      transition:
+        {"transition-all transform ease-out duration-200",
+         "opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95",
+         "opacity-100 translate-y-0 sm:scale-100"}
+    )
+    |> JS.focus_first(to: "##{id}-content")
+  end
+
+  @doc false
+  def hide_modal(js \\\\ %JS{}, id) do
+    js
+    |> JS.hide(
+      to: "##{id}-bg",
+      transition:
+        {"transition-all transform ease-in duration-150", "opacity-100", "opacity-0"}
+    )
+    |> JS.hide(
+      to: "##{id}-container",
+      transition:
+        {"transition-all transform ease-in duration-150",
+         "opacity-100 translate-y-0 sm:scale-100",
+         "opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"}
+    )
+    |> JS.hide(to: "##{id}", transition: {"block", "block", "hidden"})
+    |> JS.pop_focus()
+  end
 
   defp translate_error({msg, opts}) do
     Enum.reduce(opts, msg, fn {key, value}, acc ->
