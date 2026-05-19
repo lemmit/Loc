@@ -1,7 +1,10 @@
 import type { Platform } from "../ir/loom-ir.js";
 import type { PlatformSurface } from "./surface.js";
+import type { LoomBackendManifest } from "./manifest.js";
 import dotnetPlatform from "./dotnet.js";
-import honoPlatform from "./hono/v4/index.js";
+import honoPlatform, {
+  loomManifest as honoV4Manifest,
+} from "./hono/v4/index.js";
 import reactPlatform from "./react.js";
 import phoenixLiveViewPlatform from "./phoenix-live-view.js";
 
@@ -56,14 +59,77 @@ export const BUILTIN_PLATFORM_LATEST = {
 
 export type BackendFamily = keyof typeof BUILTIN_PLATFORM_LATEST;
 
-/** Versioned backend surfaces, keyed `family@version`.  Today each
- *  family maps its single version to the same surface the bareword
- *  used — the byte-identical guarantee.  B3+ add `"hono@v5"` etc. */
-const versionedPlatforms: Record<string, PlatformSurface> = {
-  "hono@v4": honoPlatform,
-  "dotnet@v8": dotnetPlatform,
-  "phoenixLiveView@v1": phoenixLiveViewPlatform,
-};
+// ---------------------------------------------------------------------------
+// packaging-split P0 (docs/packaging-split.md) — backends are
+// resolved through a *discovery* seam keyed by their manifest, not a
+// hardcoded map.  P0 keeps everything in-tree and returns the exact
+// same surfaces, so `versionedPlatforms` is now *derived* from the
+// discovered set: byte-identical.  The source is injectable so the
+// playground (P1) can back it with a VFS impl instead of fs /
+// node_modules, exactly as it swaps `loader-fs`→`loader-vfs`.
+// ---------------------------------------------------------------------------
+
+export interface DiscoveredBackend {
+  manifest: LoomBackendManifest;
+  surface: PlatformSurface;
+}
+
+// hono@v4 ships a real co-located manifest (it is the only backend
+// already restructured into a versioned package dir).  dotnet@v8 /
+// phoenixLiveView@v1 are still flat `src/platform/<name>.ts`; their
+// manifests are synthesised here until they are packaged (P2), so
+// the discovered set — and thus every resolution — is unchanged.
+const inTreeBackends: DiscoveredBackend[] = [
+  { manifest: honoV4Manifest, surface: honoPlatform },
+  {
+    manifest: {
+      kind: "backend",
+      family: "dotnet",
+      loomVersion: "v8",
+      core: "^1.0.0",
+    },
+    surface: dotnetPlatform,
+  },
+  {
+    manifest: {
+      kind: "backend",
+      family: "phoenixLiveView",
+      loomVersion: "v1",
+      core: "^1.0.0",
+    },
+    surface: phoenixLiveViewPlatform,
+  },
+];
+
+let backendSource: () => DiscoveredBackend[] = () => inTreeBackends;
+
+/** Swap the backend discovery source.  The playground injects a
+ *  VFS-backed implementation here (P1); tests use it to assert the
+ *  resolver is source-agnostic. */
+export function setBackendSource(src: () => DiscoveredBackend[]): void {
+  backendSource = src;
+}
+
+/** Restore the default in-tree discovery source. */
+export function resetBackendSource(): void {
+  backendSource = () => inTreeBackends;
+}
+
+/** Every backend the active source discovers. */
+export function discoverBackends(): DiscoveredBackend[] {
+  return backendSource();
+}
+
+/** `family@loomVersion` → surface, derived from the discovered set.
+ *  Replaces the former hardcoded `versionedPlatforms` literal;
+ *  with the in-tree source it yields the identical three entries. */
+function qualifiedBackendSurfaces(): Record<string, PlatformSurface> {
+  const out: Record<string, PlatformSurface> = {};
+  for (const b of discoverBackends()) {
+    out[`${b.manifest.family}@${b.manifest.loomVersion}`] = b.surface;
+  }
+  return out;
+}
 
 /** Resolved view of a `platform:` value pointing at a backend
  *  family.  `null` for frontend (`react`/`static`) or unknown
@@ -100,11 +166,12 @@ export function parseBuiltinPlatformRef(
 function resolvePlatformRef(ref: string): PlatformSurface {
   const parsed = parseBuiltinPlatformRef(ref);
   if (parsed) {
-    const surface = versionedPlatforms[parsed.qualified];
+    const map = qualifiedBackendSurfaces();
+    const surface = map[parsed.qualified];
     if (!surface) {
       throw new Error(
         `Unknown backend platform version "${parsed.qualified}". ` +
-          `Registered: ${Object.keys(versionedPlatforms).join(", ")}.`,
+          `Discovered: ${Object.keys(map).join(", ")}.`,
       );
     }
     return surface;
@@ -118,7 +185,7 @@ function resolvePlatformRef(ref: string): PlatformSurface {
  *  for design packs. */
 export function backendVersionsForFamily(family: BackendFamily): string[] {
   const prefix = `${family}@`;
-  return Object.keys(versionedPlatforms)
+  return Object.keys(qualifiedBackendSurfaces())
     .filter((k) => k.startsWith(prefix))
     .map((k) => k.slice(prefix.length))
     .sort();
@@ -128,7 +195,7 @@ export function backendVersionsForFamily(family: BackendFamily): string[] {
  *  registered backend surface.  The validator uses this to reject
  *  a pinned platform whose version doesn't exist. */
 export function isRegisteredBackendRef(qualified: string): boolean {
-  return qualified in versionedPlatforms;
+  return qualified in qualifiedBackendSurfaces();
 }
 
 export function platformFor(name: Platform): PlatformSurface {
