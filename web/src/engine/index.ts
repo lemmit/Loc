@@ -14,13 +14,15 @@ export { emptyDependencySet } from "./dependencies.js";
 export type {
   EngineCapabilities,
   PrepareInput,
+  PreparedBuild,
+  RuntimeDispatcher,
   PreviewMaterial,
-  PrepareResult,
   EngineSnapshot,
   RuntimeEngineOptions,
   RuntimeEngine,
   RuntimeEngineFactory,
 } from "./runtime-engine.js";
+export { EsbuildPgliteEngine } from "./esbuild-pglite-engine.js";
 
 export type {
   PreviewBundle,

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ActionIcon, Box, Group, Text, Tooltip } from "@mantine/core";
-import type { LoomRuntimeClient } from "../runtime/client";
+import type { RuntimeDispatcher } from "../engine";
 import { makePreviewHtml } from "./iframe-html";
 import { attachRuntimePort, pushBundle, sandboxUrl } from "./sw-host";
 import { fnv1a32 } from "../util/hash";
@@ -14,9 +14,10 @@ interface PreviewProps {
    *  Drives the iframe's importmap so React/React-DOM resolve to
    *  the same esm.sh URL the bundle was compiled against. */
   versions?: Record<string, string>;
-  /** Live runtime worker.  In-iframe fetches against the sandbox
-   *  runtime path are forwarded through the SW to this client. */
-  runtime: LoomRuntimeClient;
+  /** Live runtime dispatcher (the RuntimeEngine).  In-iframe fetches
+   *  against the sandbox runtime path are forwarded through the SW
+   *  to this. */
+  runtime: RuntimeDispatcher;
 }
 
 // Preview requires Service Worker support to serve the iframe
