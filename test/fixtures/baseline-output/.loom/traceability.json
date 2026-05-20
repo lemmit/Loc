@@ -1,0 +1,186 @@
+{
+  "version": 1,
+  "requirements": [
+    {
+      "id": "US-001",
+      "type": "UserStory",
+      "title": "A customer can place an order",
+      "status": "InProgress",
+      "priority": 1
+    },
+    {
+      "id": "AC-001",
+      "type": "AcceptanceCriteria",
+      "title": "An order can only be confirmed when it has at least one line",
+      "parentId": "US-001"
+    },
+    {
+      "id": "AC-002",
+      "type": "AcceptanceCriteria",
+      "title": "Lines can only be added while the order is a draft",
+      "parentId": "US-001"
+    },
+    {
+      "id": "US-002",
+      "type": "UserStory",
+      "title": "A user can browse the product catalog",
+      "status": "Approved"
+    },
+    {
+      "id": "AC-003",
+      "type": "AcceptanceCriteria",
+      "title": "Products are uniquely identified by SKU",
+      "parentId": "US-002"
+    }
+  ],
+  "solutions": [
+    {
+      "id": "SOL-001",
+      "forRequirement": "US-001",
+      "title": "Ordering is driven by the Order aggregate and the placeOrder workflow",
+      "entitles": [
+        {
+          "qualifiedName": "Sales.Orders.Order.addLine",
+          "kind": "operation"
+        },
+        {
+          "qualifiedName": "Sales.Orders.Order.confirm",
+          "kind": "operation"
+        },
+        {
+          "qualifiedName": "Sales.Orders.placeOrder",
+          "kind": "workflow"
+        }
+      ]
+    },
+    {
+      "id": "SOL-002",
+      "forRequirement": "US-002",
+      "title": "The catalog is served by the Product aggregate on its own deployable",
+      "entitles": [
+        {
+          "qualifiedName": "Catalog.Products.Product",
+          "kind": "aggregate"
+        },
+        {
+          "qualifiedName": "catalogApi",
+          "kind": "deployable"
+        }
+      ]
+    }
+  ],
+  "testCases": [
+    {
+      "id": "TC-001",
+      "verifies": "AC-001",
+      "title": "Confirming an empty order is rejected",
+      "covers": [
+        {
+          "qualifiedName": "Sales.Orders.Order.confirm",
+          "kind": "operation"
+        }
+      ]
+    },
+    {
+      "id": "TC-002",
+      "verifies": "US-001",
+      "title": "Add a line then confirm the order",
+      "covers": [
+        {
+          "qualifiedName": "Sales.Orders.Order.addLine",
+          "kind": "operation"
+        },
+        {
+          "qualifiedName": "Sales.Orders.Order.confirm",
+          "kind": "operation"
+        }
+      ]
+    },
+    {
+      "id": "TC-003",
+      "verifies": "AC-003",
+      "title": "Create a product and look it up by SKU",
+      "covers": [
+        {
+          "qualifiedName": "Catalog.Products.Product",
+          "kind": "aggregate"
+        }
+      ]
+    }
+  ],
+  "index": {
+    "childrenOf": {
+      "US-001": [
+        "AC-001",
+        "AC-002"
+      ],
+      "AC-001": [],
+      "AC-002": [],
+      "US-002": [
+        "AC-003"
+      ],
+      "AC-003": []
+    },
+    "testsByRequirement": {
+      "US-001": [
+        "TC-002",
+        "TC-001"
+      ],
+      "AC-001": [
+        "TC-001"
+      ],
+      "AC-002": [],
+      "US-002": [
+        "TC-003"
+      ],
+      "AC-003": [
+        "TC-003"
+      ]
+    },
+    "solutionByRequirement": {
+      "US-001": "SOL-001",
+      "AC-001": null,
+      "AC-002": null,
+      "US-002": "SOL-002",
+      "AC-003": null
+    },
+    "codeElements": {
+      "Sales.Orders.Order.addLine": "operation",
+      "Sales.Orders.Order.confirm": "operation",
+      "Sales.Orders.placeOrder": "workflow",
+      "Catalog.Products.Product": "aggregate",
+      "catalogApi": "deployable"
+    },
+    "testsByCodeElement": {
+      "Sales.Orders.Order.confirm": [
+        "TC-001",
+        "TC-002"
+      ],
+      "Sales.Orders.Order.addLine": [
+        "TC-002"
+      ],
+      "Catalog.Products.Product": [
+        "TC-003"
+      ]
+    },
+    "execTestsByTestCase": {
+      "TC-001": [],
+      "TC-002": [
+        "create then confirm an order with one line"
+      ],
+      "TC-003": [
+        "create a product, look it up by id"
+      ]
+    }
+  },
+  "summary": {
+    "codeCoverage": {
+      "covered": 3,
+      "total": 5
+    },
+    "requirementCoverage": {
+      "covered": 4,
+      "total": 5
+    }
+  }
+}
