@@ -1,28 +1,19 @@
-// Bundle post-process for the npm-in-browser engine (Phase B4).
+// Bundle post-process for the npm-in-browser engine.
 //
-// Distinct from plugin.ts's `postProcessBundle`, which is tuned to
-// esm.sh's *minified* PGlite output (its node-detection regex matches
-// esm.sh's specific mangled variable names).  The real
-// @electric-sql/pglite npm tarball is bundled differently, so that
-// regex would silently no-op.
-//
-// What actually has to be rewritten is source-independent: PGlite
-// computes asset URLs as `new URL("./pglite.wasm", import.meta.url)`.
-// When the bundle is loaded from a `blob:` URL in the runtime worker,
-// `import.meta.url` is that blob URL and the URL constructor throws
-// ("blob: cannot be a base").  Replacing `import.meta.url` with a
-// real jsdelivr base fixes it regardless of how PGlite was built —
-// the same fix plugin.ts applies, minus the esm.sh-only node-
-// detection regex.
+// PGlite computes asset URLs as `new URL("./pglite.wasm",
+// import.meta.url)`.  When the bundle is loaded from a `blob:` URL in
+// the runtime worker, `import.meta.url` is that blob URL and the URL
+// constructor throws ("blob: cannot be a base").  Replacing
+// `import.meta.url` with a real jsdelivr base fixes it regardless of
+// how PGlite was built.
 //
 // Node-detection is also neutralised.  In a real browser worker
 // `typeof process.versions.node` is falsy so PGlite *would* take the
 // browser branch on its own — but forcing it (a) guarantees the
 // browser path even under any process-shim, and (b) makes node-side
-// verification representative of the browser.  Unlike esm.sh's
-// mangled output, the npm tarball keeps the detection un-mangled
-// (`typeof process.versions.node == "string"`), so the pattern is
-// stable and readable rather than a brittle minifier-shape regex.
+// verification representative of the browser.  The npm tarball keeps
+// the detection un-mangled (`typeof process.versions.node ==
+// "string"`), so the pattern is stable and readable.
 
 import { pgliteImportMetaUrl } from "../../bundle/plugin.js";
 

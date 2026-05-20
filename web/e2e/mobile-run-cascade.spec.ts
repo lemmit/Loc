@@ -12,7 +12,7 @@
 // assertion, same idiom as runtime.spec.ts.
 
 import { expect, test } from "@playwright/test";
-import { browserCanReachEsmSh } from "./_helpers";
+import { browserCanReachNetwork } from "./_helpers";
 
 test("mobile Run kicks the pipeline and surfaces files", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
@@ -42,7 +42,7 @@ test("mobile Run kicks the pipeline and surfaces files", async ({ page }) => {
   // state for the Bundle + Boot stages.
   await expect(run).toHaveAttribute("data-loading", "true");
 
-  if (await browserCanReachEsmSh(page)) {
+  if (await browserCanReachNetwork(page)) {
     // Full cascade should reach Preview.
     await expect(page.getByTestId("mobile-tab-preview")).toHaveAttribute(
       "aria-selected",

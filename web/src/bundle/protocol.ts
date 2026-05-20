@@ -42,9 +42,18 @@ export interface BundleOk {
   /** Distinct external URLs the http resolver fetched (for stats). */
   fetchedUrls: string[];
   /** Pkg → semver range harvested from the generator's package.json.
-   *  Forwarded to the iframe importmap so React/React-DOM resolve to
-   *  the same esm.sh URL the bundle was compiled against. */
+   *  Carried as bundle metadata (and part of the preview cache key). */
   versions?: Record<string, string>;
+  /** C2: when the react bundle externalised a prebuilt design-pack
+   *  vendor, this is the importmap (bare specifier → origin-absolute
+   *  vendor chunk url) the iframe must inject so the app's external
+   *  imports (react, @mantine/core, …) resolve.  Absent → the bundle
+   *  is self-contained and no vendor importmap is needed. */
+  vendorImportmap?: Record<string, string>;
+  /** C2: origin-absolute url of the prebuilt vendor.css (Mantine et
+   *  al.) the iframe should link.  Absent when the pack has no
+   *  precompiled CSS (mui/chakra CSS-in-JS, shadcn Tailwind runtime). */
+  vendorCssUrl?: string;
   diagnostics: BundleDiagnostic[];
 }
 

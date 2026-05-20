@@ -21,6 +21,7 @@ import {
   renderWorkflowDiagram,
 } from "./mermaid.js";
 import { renderC4Model, renderC4SpecJson } from "./likec4.js";
+import { renderTraceabilityArtifacts } from "./traceability.js";
 
 // ---------------------------------------------------------------------------
 // System-mode generation.
@@ -54,6 +55,13 @@ export function generateSystems(model: Model): SystemEmission {
   const out = new Map<string, string>();
   for (const sys of loom.systems) {
     emitSystem(sys, loom, out);
+  }
+  // Traceability artifacts (Slice 12) — model-global (requirements may
+  // reference code across systems), so emitted once at the output root
+  // rather than per system.  No-op when the source declares no
+  // requirement / solution / testCase.
+  for (const [path, content] of renderTraceabilityArtifacts(loom)) {
+    out.set(path, content);
   }
   return { files: out };
 }

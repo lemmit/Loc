@@ -158,5 +158,6 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 - `docs/technical.md` — pipeline architecture (the canonical, detailed version of the summary above).
 - `docs/architecture.md` — system-level composition model (api/storage/ui/deployable layers).
 - `docs/page-metamodel.md` — page DSL surface (pages, components, scaffolding, state, match, lambdas).
+- `docs/traceability.md` — requirement / solution / testCase artifacts and the generated `.loom/` coverage + gaps reports.
 - `docs/tools.md` — CLI, `.loomignore`, watch mode, Docker workflow, OpenAPI parity check, proxy CAs.
 - `experience_gathered.md` — gotchas log; read before non-trivial work.

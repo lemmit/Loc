@@ -17,7 +17,7 @@
 
 import { expect, test } from "@playwright/test";
 import {
-  browserCanReachEsmSh,
+  browserCanReachNetwork,
   selectExample,
   waitForPlaygroundReady,
 } from "./_helpers";
@@ -74,7 +74,7 @@ test("editor → shadcn-design system → preview boots", async ({ page }) => {
     await expect(page.getByText(/generated \d+ file\(s\)/)).toBeVisible({ timeout: 60_000 });
   });
 
-  if (!(await browserCanReachEsmSh(page))) {
+  if (!(await browserCanReachNetwork(page))) {
     test.skip(true, "browser cannot reach esm.sh — Bundle/Boot/Preview steps need network");
   }
 

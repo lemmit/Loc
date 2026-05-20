@@ -10,16 +10,14 @@
 // `<base>/sandbox/runtime`).  An inline `fetch` shim installed here
 // intercepts requests under that prefix and forwards them over the
 // `MessagePort` the stub stashed on `window.__LOOM_PORT__`; every
-// other fetch (esm.sh, Tailwind CDN) falls through to the real
-// `fetch`.  This replaces the old Service-Worker interception.
+// other fetch (Tailwind CDN, vendor chunks) falls through to the
+// real `fetch`.  This replaces the old Service-Worker interception.
 //
-// React runtime modules (`react`, `react-dom`, `react/jsx-runtime`,
-// …) are externalised at bundle time and provided via a dynamic
-// `<script type="importmap">` here, so every component shares the
-// same React instance.  Without that, the bundle ends up with
-// multiple React copies and `useRef` returns null at runtime.
-
-import { stackHintsForReactMajor } from "../bundle/stacks.js";
+// When the bundle externalised a prebuilt design-pack vendor, the
+// app's bare imports (`react`, `react-dom`, `@mantine/core`, …) are
+// satisfied by a `<script type="importmap">` pointing at the vendor
+// chunks, so every component shares one React instance.  A
+// self-contained bundle inlines its deps and needs no importmap.
 
 // Inline runtime `fetch` bridge.  Classic script so it runs
 // synchronously during parse — before the bundle module fetches —
@@ -87,10 +85,19 @@ const RUNTIME_FETCH_SHIM = `
 interface MakePreviewArgs {
   js: string;
   css?: string;
-  /** Versions harvested from the generator's package.json.
-   *  Lookups for `react` / `react-dom` decide what the importmap
-   *  pins; if unset, falls back to a known-good 18.x. */
+  /** Versions harvested from the generator's package.json.  Carried
+   *  as bundle metadata (and part of the preview's cache key); the
+   *  importmap itself comes from `vendorImportmap`. */
   versions?: Record<string, string>;
+  /** C2: when the bundle externalised a prebuilt design-pack vendor,
+   *  this importmap (bare spec → origin-absolute vendor chunk url)
+   *  supplies react/@mantine/… to the iframe.  When set it REPLACES
+   *  the version-derived react/react-dom map — the externalised app
+   *  bundle resolves every bare import through it.  Absent → the
+   *  bundle is self-contained and the version map applies. */
+  vendorImportmap?: Record<string, string>;
+  /** C2: origin-absolute url of the prebuilt vendor.css to link. */
+  vendorCssUrl?: string;
   /** Basename for the app — the sandbox stub's directory, no trailing
    *  slash, e.g. `/loc/playground/sandbox` on GH Pages.  The
    *  generated `main.tsx` reads this as `window.__LOOM_BASENAME__`
@@ -101,30 +108,49 @@ interface MakePreviewArgs {
   sandboxBase?: string;
 }
 
-const REACT_FALLBACK_VERSION = "18.3.1";
-
-function importMap(versions: Record<string, string>): Record<string, string> {
-  const reactVer = versions["react"] ?? REACT_FALLBACK_VERSION;
-  const reactDomVer = versions["react-dom"] ?? reactVer;
-  const stack = stackHintsForReactMajor(versions["react"]);
-  // Stack v2 (React 19): bundler inlines React — no importmap entries.
-  // The bundle is self-contained; emitting `react` / `react-dom`
-  // mappings would only confuse modules that look for a host-supplied
-  // React (we don't have any).
-  if (!stack.externalReactRuntime) {
-    return {};
-  }
-  // Stack v1 (React 18): externalise react/react-dom and let the
-  // importmap satisfy them at iframe load.  esm.sh's v18 build dedupes
-  // through this path because react-dom's transitive `import "react"`
-  // converges on the same wrapper URL that the importmap resolves.
-  return {
-    "react": `https://esm.sh/react@${reactVer}?dev=false`,
-    "react-dom": `https://esm.sh/react-dom@${reactDomVer}${stack.importmapReactDomQuery(reactVer)}`,
-  };
-}
-
 const ESCAPE_END_SCRIPT = (s: string): string => s.replace(/<\/script/gi, "<\\/script");
+
+// Content-Security-Policy for the preview document.
+//
+// This is the egress lock the cross-origin sandbox needs once
+// untrusted user expressions run in the preview: it can't phone home.
+// It's harmless (pure hardening) while same-origin, so we always emit
+// it.  After esm.sh was removed the document loads nothing third-party
+// except the Tailwind compiler (shadcn packs only), so the allowlist
+// is small:
+//
+//   - script-src 'self'        vendor chunks + dynamic-import splits
+//                              (served same-origin from deployBase/vendor;
+//                              after the origin flip they must be served
+//                              from SANDBOX_ORIGIN too, where 'self' still
+//                              matches the iframe).
+//     'unsafe-inline'          the shim / hostScript / bundle module +
+//                              the importmap (all inline).
+//     'unsafe-eval'            the Tailwind in-browser JIT (shadcn).
+//     cdn.tailwindcss.com /
+//     cdn.jsdelivr.net         the Tailwind CDN scripts (shadcn v3 / v4).
+//   - style-src 'self' 'unsafe-inline'   vendor.css link + inline <style>
+//                              + Mantine/Tailwind runtime-injected styles.
+//   - img-src / font-src       same-origin + data:/blob: (no web fonts
+//                              from CDNs in the current packs — if one is
+//                              added, widen this).
+//   - connect-src 'none'       THE lock.  The app's only network call is
+//                              its API, which the fetch shim answers over
+//                              the bridge port without touching the
+//                              network; any other fetch/XHR/WebSocket is
+//                              refused.
+//   - base-uri / form-action 'none'   no base-tag hijack, no native form
+//                              navigation out of the sandbox.
+const PREVIEW_CSP = [
+  "default-src 'none'",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdn.jsdelivr.net",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "connect-src 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+].join("; ");
 
 /** Which Tailwind dialect the bundled CSS is written in, or `null`
  *  for non-Tailwind (pre-compiled) CSS like Mantine's.
@@ -244,8 +270,14 @@ tailwind.config = {
 `.trim();
 
 export function makePreviewHtml(args: MakePreviewArgs): string {
-  const map = importMap(args.versions ?? {});
+  // A prebuilt-vendor bundle is externalised — every bare import
+  // (react, @mantine/core, …) resolves through the prebuilt importmap.
+  // A self-contained bundle inlines its deps, so it needs no importmap.
+  const map = args.vendorImportmap ?? {};
   const importMapJson = JSON.stringify({ imports: map }, null, 2);
+  const vendorCssLink = args.vendorCssUrl
+    ? `<link rel="stylesheet" href="${args.vendorCssUrl}">`
+    : "";
   // No `<base href>`: relative URLs resolve against the document's
   // own URL (the stub's path on SANDBOX_ORIGIN).  Inject the globals
   // the bundle reads:
@@ -290,12 +322,14 @@ export function makePreviewHtml(args: MakePreviewArgs): string {
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="${PREVIEW_CSP}">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Loom Preview</title>
 <script>${ESCAPE_END_SCRIPT(RUNTIME_FETCH_SHIM)}</script>
 <script type="importmap">
 ${ESCAPE_END_SCRIPT(importMapJson)}
 </script>
+${vendorCssLink}
 ${tailwindScripts}
 ${styleTagFor(args.css)}
 <style>

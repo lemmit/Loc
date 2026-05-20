@@ -17,6 +17,8 @@ import {
   isContainment,
   isEnumDecl,
   isModel,
+  isSystem,
+  isTargetable,
   isValueObject,
   type Aggregate,
   type EntityPart,
@@ -77,6 +79,22 @@ export class DddScopeComputation extends DefaultScopeComputation {
           exports.push(this.descriptions.createDescription(node, name, document));
         }
       }
+      // Traceability code references (Slice 12): every `Targetable`
+      // (module / context / aggregate / operation / value-object /
+      // event / repository / workflow / view / deployable / api) is
+      // exported under its qualified dotted name so a Solution's
+      // `entitles [...]` / TestCase's `covers [...]` cross-references
+      // resolve through Langium's standard machinery.  Most of these
+      // (operations, workflows, deployables, …) are not exported by
+      // the default computation at all, so there is no duplication;
+      // aggregates / value-objects also keep their bare-name export
+      // above for `Id<X>` / named-type resolution.
+      if (isTargetable(node)) {
+        const qn = qualifiedNameOf(node);
+        if (qn) {
+          exports.push(this.descriptions.createDescription(node, qn, document));
+        }
+      }
     }
     // Also include the default exports (Module, Deployable, etc.) so
     // local references like `repository ... for Order` keep working.
@@ -93,6 +111,29 @@ export class DddScopeComputation extends DefaultScopeComputation {
     }
     return exports;
   }
+}
+
+/**
+ * Qualified dotted name for a `Targetable` code symbol — the path of
+ * named structural ancestors from just below the enclosing `system`
+ * down to the node itself, e.g. `Identity.Auth.LoginSession.start`
+ * for `operation start` in `aggregate LoginSession` in `context Auth`
+ * in `module Identity`.  The `system` wrapper is intentionally excluded
+ * so references read the same regardless of which system ships the
+ * symbol; deployables / apis (direct children of `system`) resolve to
+ * their bare name.  Returns undefined if any path segment is unnamed.
+ */
+export function qualifiedNameOf(node: AstNode): string | undefined {
+  const segments: string[] = [];
+  let cur: AstNode | undefined = node;
+  while (cur && !isSystem(cur) && !isModel(cur)) {
+    const name = (cur as { name?: unknown }).name;
+    if (typeof name === "string" && name.length > 0) {
+      segments.unshift(name);
+    }
+    cur = cur.$container;
+  }
+  return segments.length > 0 ? segments.join(".") : undefined;
 }
 
 export function enclosingAggregate(node: AstNode | undefined): Aggregate | undefined {

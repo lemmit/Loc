@@ -5,11 +5,11 @@ import { defineConfig, devices } from "@playwright/test";
 // same artifact CI deploys to GitHub Pages).  Using `preview`
 // rather than `dev` catches issues that only surface post-bundling
 // — e.g. the Monaco worker glue, the esbuild WASM URL resolution,
-// and our `postProcessBundle` rewrite all run as they would in
+// and the npm-pglite postprocess rewrite all run as they would in
 // production.
 //
-// Heads up: the spec calls `Bundle` which fetches ~150 modules
-// from esm.sh and `Boot` which downloads PGlite's WASM + .data
+// Heads up: the spec calls `Bundle` which installs real npm tarballs
+// from the registry and `Boot` which downloads PGlite's WASM + .data
 // from jsdelivr.  Tests need real internet access and generous
 // per-action timeouts.
 
@@ -22,8 +22,8 @@ export default defineConfig({
   // can opt in via PWTEST_RETRIES.
   retries: process.env.CI ? 1 : 0,
   // CI runs Playwright with 2 workers to halve wall time on the
-  // Bundle/Boot specs (each spends 2-3min fetching esm.sh /
-  // jsdelivr).  Locally workers=1 keeps test output linear when a
+  // Bundle/Boot specs (each spends 2-3min installing tarballs /
+  // fetching jsdelivr).  Locally workers=1 keeps test output linear when a
   // developer is iterating on a single spec.  Tests use isolated
   // browser contexts so per-worker IDB / cookies don't collide.
   workers: process.env.CI ? 2 : 1,

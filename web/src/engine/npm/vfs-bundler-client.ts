@@ -15,7 +15,14 @@ import type {
 } from "./vfs-bundler.worker.js";
 
 type RunResult =
-  | { ok: true; code: string; css?: string; versions: Record<string, string> }
+  | {
+      ok: true;
+      code: string;
+      css?: string;
+      versions: Record<string, string>;
+      vendorImportmap?: Record<string, string>;
+      vendorCssUrl?: string;
+    }
   | { ok: false; message: string };
 
 // Generous cap: a cold run does a full npm install + esbuild-wasm
@@ -55,6 +62,8 @@ export class VfsBundlerClient {
               code: m.code ?? "",
               css: m.css,
               versions: m.versions ?? {},
+              vendorImportmap: m.vendorImportmap,
+              vendorCssUrl: m.vendorCssUrl,
             }
           : { ok: false, message: m.message ?? "vfs-bundler: unknown error" },
       );
@@ -109,6 +118,14 @@ export class VfsBundlerClient {
         generatedFiles: input.generatedFiles,
         rootDeps: input.rootDeps,
         externalReactRuntime: input.externalReactRuntime,
+        // Resolve the configured base (relative "./" on GH Pages) to an
+        // absolute url against the main document.  The worker can't do
+        // this — a relative fetch there resolves against the worker's
+        // own assets/ url and misses the deployed vendor/ + npm-mirror/.
+        deployBase: new URL(
+          import.meta.env?.BASE_URL ?? "/",
+          document.baseURI,
+        ).href,
       } satisfies VfsBundleRequest);
     });
   };

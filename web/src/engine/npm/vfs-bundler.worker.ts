@@ -29,6 +29,10 @@ export interface VfsBundleRequest {
   generatedFiles: Map<string, string | Uint8Array>;
   rootDeps: Record<string, string>;
   externalReactRuntime?: boolean;
+  /** Absolute deploy base (origin + base path, trailing slash) the
+   *  main thread resolves from its document url — used for the
+   *  vendor/ and npm-mirror/ fetches (see `deployBase`). */
+  deployBase?: string;
 }
 
 export interface VfsBundleResponse {
@@ -37,10 +41,73 @@ export interface VfsBundleResponse {
   code?: string;
   css?: string;
   versions?: Record<string, string>;
+  /** C2: set on the react bundle when a prebuilt design-pack vendor was
+   *  externalised — the iframe importmap (bare spec → origin-absolute
+   *  url) and the optional vendor.css url. */
+  vendorImportmap?: Record<string, string>;
+  vendorCssUrl?: string;
   /** C0 perf instrumentation — install vs esbuild-wasm bundle split. */
   installMs?: number;
   bundleMs?: number;
   message?: string;
+}
+
+// C2: detect the design pack from the frontend deps by a signature
+// package, so we can look up its prebuilt vendor.  Each pack has a
+// unique anchor dependency.
+function detectPack(deps: Record<string, string>): string | null {
+  if ("@mantine/core" in deps) return "mantine";
+  if ("@mui/material" in deps) return "mui";
+  if ("@chakra-ui/react" in deps) return "chakra";
+  if ("tailwind-merge" in deps || "class-variance-authority" in deps) return "shadcn";
+  return null;
+}
+
+interface VendorManifest {
+  imports: Record<string, string>;
+  css: string | null;
+}
+
+// Absolute deploy base (e.g. https://host/Loc/playground/), passed in
+// by the main thread on every request.  We cannot derive it here:
+// `import.meta.env.BASE_URL` is the configured relative base ("./"), so
+// a relative fetch in this worker resolves against the worker's OWN url
+// (under assets/) and misses the deployed `vendor/` and `npm-mirror/`
+// dirs.  The main thread knows the real document url, so it resolves
+// the base to an absolute url and hands it over.
+let deployBase = "/";
+
+// C2: fetched prebuilt vendor manifest per pack (importmap + css url),
+// with relative urls rewritten absolute (against deployBase) so the
+// iframe importmap (whose document lives on the sandbox origin)
+// resolves them.  Missing/404 (dev, or build:vendor not run) → null →
+// the react bundle falls back to the self-contained install path.
+const vendorPromises = new Map<string, Promise<VendorManifest | null>>();
+function getVendor(pack: string): Promise<VendorManifest | null> {
+  let p = vendorPromises.get(pack);
+  if (!p) {
+    p = (async () => {
+      try {
+        const res = await fetch(`${deployBase}vendor/${pack}/importmap.json`);
+        if (!res.ok) return null;
+        const raw = (await res.json()) as VendorManifest;
+        const imports: Record<string, string> = {};
+        // urls in the manifest are web-root-relative (`vendor/<pack>/
+        // x.js`); resolve against the deploy base to absolute urls.
+        for (const [spec, url] of Object.entries(raw.imports)) {
+          imports[spec] = new URL(url, deployBase).href;
+        }
+        return {
+          imports,
+          css: raw.css ? new URL(raw.css, deployBase).href : null,
+        };
+      } catch {
+        return null;
+      }
+    })();
+    vendorPromises.set(pack, p);
+  }
+  return p;
 }
 
 // IDB-backed install cache, worker-scoped (IndexedDB is available in
@@ -69,7 +136,7 @@ function getMirror(): Promise<Map<string, string>> {
     mirrorPromise = (async () => {
       const map = new Map<string, string>();
       try {
-        const base = (import.meta.env?.BASE_URL ?? "/") + "npm-mirror/";
+        const base = deployBase + "npm-mirror/";
         const res = await fetch(base + "manifest.json");
         if (res.ok) {
           const manifest = (await res.json()) as Record<string, string>;
@@ -103,13 +170,113 @@ function ensureInit(): Promise<void> {
   return initPromise;
 }
 
+// Bare specifiers the iframe handles itself (Tailwind runtime) — never
+// part of the vendor importmap, so excluded from the coverage check.
+const TAILWIND_RE = /^tailwindcss($|\/)|^tw-animate-css$/;
+
+const BUILD_COMMON = {
+  bundle: true,
+  format: "esm" as const,
+  platform: "browser" as const,
+  target: "es2022",
+  logLevel: "silent" as const,
+  write: false as const,
+  sourcemap: false as const,
+  // Generated components use the automatic JSX runtime (no
+  // `import React`).  Without this esbuild defaults to the classic
+  // transform (React.createElement) → "React is not defined" at
+  // runtime once React is bundled.  Mirrors the esm.sh bundler.worker.
+  jsx: "automatic" as const,
+  // outdir gives JS-imported CSS (Mantine `*.css`) an output path so
+  // esbuild bundles it into a sibling .css output file instead of
+  // erroring "without an output path configured".  write:false → it
+  // comes back in outputFiles, collected below.
+  outdir: "/" as const,
+  loader: { ".wasm": "binary" as const },
+};
+
 self.onmessage = async (ev: MessageEvent<VfsBundleRequest>): Promise<void> => {
   const { id, stdinContents, entry, generatedFiles, rootDeps, externalReactRuntime } =
     ev.data;
+  if (ev.data.deployBase) deployBase = ev.data.deployBase;
   try {
     await ensureInit();
-    // Install in the worker, into our own copy of the generated
-    // tree — off the main thread, and node_modules stays here.
+    const isReact = !stdinContents && !!entry;
+    // C2: react bundle with a prebuilt design-pack vendor → externalise
+    // the whole vendor and skip install entirely (the iframe importmap
+    // supplies react/@mantine/… at load).  The app-only bundle is the
+    // ~15-26s → ~1-2s win.  Falls back to the self-contained install
+    // path when no vendor is prebuilt OR the app imports a specifier
+    // the prebuilt importmap doesn't cover (a clean fallback beats a
+    // runtime "Failed to resolve module specifier" in the iframe).
+    const pack = isReact ? detectPack(rootDeps) : null;
+    const vendor = pack ? await getVendor(pack) : null;
+
+    const aliases = entry
+      ? harvestTsconfigPaths(generatedFiles as unknown as Map<string, string>, entry)
+      : [];
+
+    if (vendor && entry) {
+      const appFiles = new Map(generatedFiles);
+      const externals = new Set<string>();
+      const recorder: esbuild.Plugin = {
+        name: "record-externals",
+        setup(build) {
+          build.onEnd((result) => {
+            for (const o of Object.values(result.metafile?.outputs ?? {})) {
+              for (const imp of o.imports ?? []) {
+                if (imp.external && !imp.path.startsWith(".") && !imp.path.startsWith("/")) {
+                  externals.add(imp.path);
+                }
+              }
+            }
+          });
+        },
+      };
+      const tBundle = performance.now();
+      const out = await esbuild.build({
+        ...BUILD_COMMON,
+        entryPoints: [entry],
+        metafile: true,
+        plugins: [
+          makeVfsNpmPlugin(appFiles, "/node_modules", false, aliases, true),
+          recorder,
+        ],
+      });
+      const missing = [...externals].filter(
+        (s) => !vendor.imports[s] && !TAILWIND_RE.test(s),
+      );
+      if (missing.length === 0) {
+        const bundleMs = Math.round(performance.now() - tBundle);
+        // eslint-disable-next-line no-console
+        console.info(
+          `[npm-engine] react: install=0ms bundle=${bundleMs}ms ` +
+            `(vendor externalised: ${pack}, ${externals.size} specs)`,
+        );
+        const js = out.outputFiles.find((f) => f.path.endsWith(".js"));
+        const css = out.outputFiles.find((f) => f.path.endsWith(".css"));
+        self.postMessage({
+          id,
+          ok: true,
+          code: js?.text ?? out.outputFiles[0]?.text ?? "",
+          css: css?.text,
+          versions: {},
+          vendorImportmap: vendor.imports,
+          vendorCssUrl: vendor.css ?? undefined,
+          installMs: 0,
+          bundleMs,
+        } satisfies VfsBundleResponse);
+        return;
+      }
+      // eslint-disable-next-line no-console
+      console.info(
+        `[npm-engine] react: prebuilt ${pack} vendor missing ${missing.length} ` +
+          `spec(s) (${missing.join(", ")}) — falling back to self-contained bundle`,
+      );
+    }
+
+    // Self-contained path: install into our own copy of the generated
+    // tree (off the main thread; node_modules stays here), then bundle.
     const files = new Map(generatedFiles);
     const tInstall = performance.now();
     const { versions, fileCount } = await install(
@@ -120,37 +287,9 @@ self.onmessage = async (ev: MessageEvent<VfsBundleRequest>): Promise<void> => {
     const installMs = Math.round(performance.now() - tInstall);
     const versionRec = Object.fromEntries(versions);
     const common = {
-      bundle: true,
-      format: "esm" as const,
-      platform: "browser" as const,
-      target: "es2022",
-      logLevel: "silent" as const,
-      write: false as const,
-      sourcemap: false as const,
-      // Generated components use the automatic JSX runtime (no
-      // `import React`).  Without this esbuild defaults to the
-      // classic transform (React.createElement) → "React is not
-      // defined" at runtime once React is bundled.  Mirrors the
-      // esm.sh bundler.worker.
-      jsx: "automatic" as const,
-      // outdir gives JS-imported CSS (Mantine `*.css`) an output
-      // path so esbuild bundles it into a sibling .css output file
-      // instead of erroring "without an output path configured".
-      // write:false → it comes back in outputFiles, collected below.
-      outdir: "/" as const,
-      loader: { ".wasm": "binary" as const },
+      ...BUILD_COMMON,
       plugins: [
-        makeVfsNpmPlugin(
-          files,
-          "/node_modules",
-          !!externalReactRuntime,
-          // tsconfig `@/*` aliases (shadcn etc.); harvested from the
-          // entry's nearest tsconfig.  Backend (stdin) builds have no
-          // entry path and don't use these aliases.
-          entry
-            ? harvestTsconfigPaths(files as unknown as Map<string, string>, entry)
-            : [],
-        ),
+        makeVfsNpmPlugin(files, "/node_modules", !!externalReactRuntime, aliases),
       ],
     };
     const tBundle = performance.now();
@@ -180,7 +319,7 @@ self.onmessage = async (ev: MessageEvent<VfsBundleRequest>): Promise<void> => {
     );
     const js = out.outputFiles.find((f) => f.path.endsWith(".js"));
     const css = out.outputFiles.find((f) => f.path.endsWith(".css"));
-    const resp: VfsBundleResponse = {
+    self.postMessage({
       id,
       ok: true,
       code: js?.text ?? out.outputFiles[0]?.text ?? "",
@@ -188,8 +327,7 @@ self.onmessage = async (ev: MessageEvent<VfsBundleRequest>): Promise<void> => {
       versions: versionRec,
       installMs,
       bundleMs,
-    };
-    self.postMessage(resp);
+    } satisfies VfsBundleResponse);
   } catch (err) {
     const message =
       (err as { errors?: Array<{ text: string }> }).errors?.[0]?.text ??

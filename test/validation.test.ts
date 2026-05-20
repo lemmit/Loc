@@ -2069,4 +2069,49 @@ describe("Loom IR validation (post-lowering)", async () => {
       expect(errors).toEqual([]);
     });
   });
+
+  describe("traceability (Slice 12)", () => {
+    it("accepts a well-formed requirement / solution / testCase", async () => {
+      const { errors } = await parse(`
+        requirement US-001 { type: UserStory  title: "Login"  status: InProgress  priority: 1 }
+        requirement AC-001 parent US-001 { type: AcceptanceCriteria  title: "Valid creds" }
+        system S {
+          module M { context C { aggregate A { operation go() {} } } }
+        }
+        solution SOL-001 for US-001 { title: "x"  entitles [ M.C.A.go ] }
+        testCase TC-001 verifies AC-001 { title: "t"  covers [ M.C.A.go ] }
+      `);
+      expect(errors).toEqual([]);
+    });
+
+    it("flags missing required type/title, unknown keys, and bad enum values", async () => {
+      const { errors } = await parse(`
+        requirement R1 { status: Nope }
+        requirement R2 { type: Bogus  title: 5  foo: 1 }
+      `);
+      expect(errors.some((e) => /missing the required 'type'/.test(e))).toBe(true);
+      expect(errors.some((e) => /missing the required 'title'/.test(e))).toBe(true);
+      expect(errors.some((e) => /status must be one of/.test(e))).toBe(true);
+      expect(errors.some((e) => /type must be one of/.test(e))).toBe(true);
+      expect(errors.some((e) => /title must be a string literal/.test(e))).toBe(true);
+      expect(errors.some((e) => /Unknown requirement property 'foo'/.test(e))).toBe(true);
+    });
+
+    it("flags a cyclic parent chain", async () => {
+      const { errors } = await parse(`
+        requirement A parent B { type: UserStory  title: "a" }
+        requirement B parent A { type: UserStory  title: "b" }
+      `);
+      expect(errors.some((e) => /cyclic parent chain/.test(e))).toBe(true);
+    });
+
+    it("rejects an unresolved code reference", async () => {
+      const { errors } = await parse(`
+        requirement US-001 { type: UserStory  title: "x" }
+        system S { module M { context C { aggregate A { operation go() {} } } } }
+        solution SOL-001 for US-001 { entitles [ M.C.A.missing ] }
+      `);
+      expect(errors.some((e) => /missing/.test(e))).toBe(true);
+    });
+  });
 });
