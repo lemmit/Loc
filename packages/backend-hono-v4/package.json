@@ -1,0 +1,20 @@
+{
+  "name": "@loom/backend-hono-v4",
+  "version": "0.0.0-experimental",
+  "private": true,
+  "type": "module",
+  "description": "Hono 4.x backend generator — versioned package for Loom.  Discovered by the core resolver via the `loom` key below.",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "peerDependencies": {
+    "loc-ddd-dsl": "*"
+  },
+  "loom": {
+    "kind": "backend",
+    "family": "hono",
+    "loomVersion": "v4",
+    "core": "^1.0.0"
+  }
+}
