@@ -1,0 +1,11 @@
+%% Loom sequence diagram — generated from the IR, do not edit by hand.
+%% System: Acme
+sequenceDiagram
+  autonumber
+  participant WF as Workflow
+  participant Order
+  note over WF: Orders · placeOrder(customerId, productId, quantity)
+  note over WF: precondition: quantity > 0
+  WF->>Order: create()
+  Order-->>WF: order
+  WF->>Order: addLine()

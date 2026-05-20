@@ -1,0 +1,24 @@
+%% Loom deployment diagram — generated from the IR, do not edit by hand.
+%% System: Acme
+flowchart LR
+  mod_Catalog["📦 Catalog"]
+  mod_Sales["📦 Sales"]
+  mod_CustomerMgmt["📦 CustomerMgmt"]
+  subgraph deployables["🚀 Deployables"]
+    direction TB
+    deploy_api{{"api · dotnet"}}
+    deploy_catalogWeb{{"catalogWeb · hono"}}
+    deploy_catalogApi{{"catalogApi · dotnet"}}
+    deploy_webApp{{"webApp · static"}}
+  end
+  deploy_api --> mod_Catalog
+  deploy_api --> mod_Sales
+  deploy_api --> mod_CustomerMgmt
+  deploy_catalogWeb --> mod_Catalog
+  deploy_catalogWeb --> mod_CustomerMgmt
+  deploy_catalogApi --> mod_Catalog
+  deploy_catalogApi --> mod_CustomerMgmt
+  deploy_webApp --> mod_Catalog
+  deploy_webApp --> mod_Sales
+  deploy_webApp --> mod_CustomerMgmt
+  deploy_webApp -.->|calls| deploy_api

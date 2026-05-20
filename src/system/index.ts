@@ -13,7 +13,13 @@ import { platformFor } from "../platform/registry.js";
 import { renderE2EFile } from "./e2e-render.js";
 import { renderUIE2EFile } from "./ui-e2e-render.js";
 import { renderWireSpec } from "./wire-spec.js";
-import { renderDomainDiagram, renderWorkflowDiagram } from "./mermaid.js";
+import {
+  renderDeploymentDiagram,
+  renderDomainDiagram,
+  renderErDiagram,
+  renderSequenceDiagram,
+  renderWorkflowDiagram,
+} from "./mermaid.js";
 
 // ---------------------------------------------------------------------------
 // System-mode generation.
@@ -76,6 +82,9 @@ function emitSystem(
   // them in fences.  See `mermaid.ts`.
   out.set(".loom/domain.mmd", renderDomainDiagram(sys));
   out.set(".loom/workflows.mmd", renderWorkflowDiagram(sys));
+  out.set(".loom/er.mmd", renderErDiagram(sys));
+  out.set(".loom/sequence.mmd", renderSequenceDiagram(sys));
+  out.set(".loom/deployment.mmd", renderDeploymentDiagram(sys));
 
   // E2E test scaffolding — emitted only when the system declares
   // `test e2e` blocks.  Lives at the system root so it can run against

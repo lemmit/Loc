@@ -1,5 +1,32 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`deployment.mmd > emits the expected flowchart for examples/acme.ddd 1`] = `
+"%% Loom deployment diagram — generated from the IR, do not edit by hand.
+%% System: Acme
+flowchart LR
+  mod_Catalog["📦 Catalog"]
+  mod_Sales["📦 Sales"]
+  mod_CustomerMgmt["📦 CustomerMgmt"]
+  subgraph deployables["🚀 Deployables"]
+    direction TB
+    deploy_api{{"api · dotnet"}}
+    deploy_catalogWeb{{"catalogWeb · hono"}}
+    deploy_catalogApi{{"catalogApi · dotnet"}}
+    deploy_webApp{{"webApp · static"}}
+  end
+  deploy_api --> mod_Catalog
+  deploy_api --> mod_Sales
+  deploy_api --> mod_CustomerMgmt
+  deploy_catalogWeb --> mod_Catalog
+  deploy_catalogWeb --> mod_CustomerMgmt
+  deploy_catalogApi --> mod_Catalog
+  deploy_catalogApi --> mod_CustomerMgmt
+  deploy_webApp --> mod_Catalog
+  deploy_webApp --> mod_Sales
+  deploy_webApp --> mod_CustomerMgmt
+  deploy_webApp -.->|calls| deploy_api"
+`;
+
 exports[`domain.mmd > emits the expected classDiagram for examples/acme.ddd 1`] = `
 "%% Loom domain diagram — generated from the IR, do not edit by hand.
 %% System: Acme
@@ -85,6 +112,54 @@ classDiagram
   ActiveOrders ..> Order : reads
   OrderSummary ..> Order : reads
   Customers ..> Customer : manages"
+`;
+
+exports[`er.mmd > emits the expected erDiagram for examples/acme.ddd 1`] = `
+"%% Loom ER diagram — generated from the IR, do not edit by hand.
+%% System: Acme
+erDiagram
+  Product {
+    guid id PK
+    string sku
+    Money price
+  }
+  Money {
+    decimal amount
+    string currency
+  }
+  Order {
+    guid id PK
+    string customerId
+    OrderStatus status
+    datetime placedAt
+  }
+  OrderLine {
+    Id_Product productId FK
+    int quantity
+  }
+  Customer {
+    guid id PK
+    string username
+    string email
+    int age
+  }
+  Product ||--|| Money : "price"
+  Order ||--o{ OrderLine : "lines"
+  OrderLine }o--|| Product : "productId""
+`;
+
+exports[`sequence.mmd > emits the expected sequenceDiagram for examples/acme.ddd 1`] = `
+"%% Loom sequence diagram — generated from the IR, do not edit by hand.
+%% System: Acme
+sequenceDiagram
+  autonumber
+  participant WF as Workflow
+  participant Order
+  note over WF: Orders · placeOrder(customerId, productId, quantity)
+  note over WF: precondition: quantity > 0
+  WF->>Order: create()
+  Order-->>WF: order
+  WF->>Order: addLine()"
 `;
 
 exports[`workflows.mmd > emits the expected flowchart for examples/acme.ddd 1`] = `
