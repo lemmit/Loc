@@ -243,14 +243,26 @@ export default function App(): JSX.Element {
         hiddenAt = null;
         if (elapsed > HIDDEN_RESPAWN_MS) {
           buildClientRef.current?.respawn();
-          // Only respawn the runtime client if it was actually
-          // booted — respawning an unbooted client just creates a
-          // spurious RUNTIME_LOST dispatch and a "click Boot
-          // again" message the user has never engaged with.
-          // `pipeline.boot.kind === "ok"` is the same guard the
-          // Backend panel uses to render its action buttons.
+          // Only act on the runtime if it was actually booted —
+          // an unbooted client has nothing to recover and would
+          // just emit a spurious "click Boot again" the user never
+          // engaged with.  `pipeline.boot.kind === "ok"` is the same
+          // guard the Backend panel uses for its action buttons.
           if (pipeline.boot.kind === "ok") {
-            engineRef.current?.respawn();
+            // Try to transparently recover: re-boot the retained
+            // bundle into a fresh worker — OPFS-backed PGlite data
+            // reattaches via the same dataDir, so the user keeps
+            // their booted state instead of being told to re-Boot.
+            // Only fall back to respawn() → onLost → RUNTIME_LOST
+            // when recovery isn't possible (nothing booted to
+            // snapshot) or fails (e.g. in-memory/non-persistent DB).
+            void (async () => {
+              const engine = engineRef.current;
+              if (!engine) return;
+              const snap = await engine.snapshot();
+              if (snap && (await engine.restore(snap))) return;
+              engine.respawn();
+            })();
           }
         }
       }
