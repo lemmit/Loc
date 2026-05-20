@@ -10,7 +10,7 @@ import * as esbuild from "esbuild";
 import { NodeFileSystem } from "langium/node";
 import { URI } from "langium";
 import { createDddServices } from "../../out/language/ddd-module.js";
-import { generateTypeScript } from "../../out/generator/typescript/index.js";
+import { generateTypeScript } from "../../out/platform/hono/v4/emit.js";
 import { makeEntryStdin, schemaPathFor } from "../src/bundle/plugin.ts";
 import { install } from "../src/engine/npm/install.ts";
 import { makeVfsNpmPlugin } from "../src/engine/npm/esbuild-vfs-plugin.ts";
