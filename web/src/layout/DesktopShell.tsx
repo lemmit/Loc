@@ -1,5 +1,5 @@
-import { Box, Group as MGroup, ScrollArea, Text, UnstyledButton } from "@mantine/core";
-import { useState, type ReactNode } from "react";
+import { Box, Group as MGroup, SegmentedControl, Text, UnstyledButton } from "@mantine/core";
+import { useMemo, useState, type ReactNode } from "react";
 import {
   Group,
   Panel,
@@ -10,10 +10,22 @@ import {
 import { EditorPane } from "./EditorPane";
 import { PreviewPane } from "./PreviewPane";
 import { DevToolsDock, type DockTab } from "./DevToolsDock";
-import { FileTree } from "../preview/FileTree";
+import { ExplorerTree } from "../preview/ExplorerTree";
 import { FileViewer } from "../preview/FileViewer";
+import { useWorkspaceFiles } from "../workspace/use-workspace-files";
 import { usePersistedState } from "../util/usePersistedState";
+import type { TreeNode } from "../preview/file-tree";
 import { modeLabel, type LayoutCtx } from "./ctx";
+
+type ExplorerMode = "user" | "generated";
+
+// The active non-source document in the center area — a file opened
+// from either Explorer view.  `source` (main.ddd) is the other tab.
+interface SecondaryDoc {
+  source: "generated" | "workspace";
+  path: string;
+  content: string;
+}
 
 interface Props {
   ctx: LayoutCtx;
@@ -39,15 +51,57 @@ const layoutStorage = typeof window !== "undefined" ? window.localStorage : unde
 //   │ Bottom — Dev Tools (tabbed)             │
 //   └─────────────────────────────────────────┘
 export function DesktopShell({ ctx }: Props): JSX.Element {
-  const { files, generateResult, reactBundleStatus, ddl, selectedFile, selectedPath, setSelectedPath, tree } = ctx;
+  const { files, generateResult, reactBundleStatus, ddl, setSelectedPath, tree, workspace } = ctx;
 
-  // Which document the center area shows.  "source" is the editable
-  // .ddd; "file" is a read-only view of a generated output file picked
-  // from the Explorer.  Selecting a tree node flips to "file"; the
-  // Source tab flips back.  The editor stays mounted underneath either
-  // way so Monaco keeps its model + undo history.
-  const [centerView, setCenterView] = useState<"source" | "file">("source");
+  // Center area shows either the editable source (main.ddd) or a
+  // read-only view of a file opened from the Explorer.  The editor
+  // stays mounted underneath so Monaco keeps its model + undo history.
+  const [centerView, setCenterView] = useState<"source" | "secondary">("source");
+  const [secondaryDoc, setSecondaryDoc] = useState<SecondaryDoc | null>(null);
+  const [explorerMode, setExplorerMode] = usePersistedState<ExplorerMode>(
+    "loom.desktop.explorerMode",
+    "generated",
+  );
   const [dockTab, setDockTab] = usePersistedState<DockTab>("loom.desktop.dockTab", "problems");
+
+  const workspaceNodes = useWorkspaceFiles(workspace.vfs);
+  // main.ddd is the user's source; surface it even before the first
+  // autosave has written it into the workspace VFS.
+  const userNodes = useMemo<TreeNode[]>(() => {
+    if (workspaceNodes.some((n) => n.kind === "file" && n.path === "main.ddd")) {
+      return workspaceNodes;
+    }
+    return [{ kind: "file", name: "main.ddd", path: "main.ddd", size: 0 }, ...workspaceNodes];
+  }, [workspaceNodes]);
+
+  const onPickGenerated = (path: string): void => {
+    const file = files.find((f) => f.path === path);
+    if (!file) return;
+    setSelectedPath(path);
+    setSecondaryDoc({ source: "generated", path, content: file.content });
+    setCenterView("secondary");
+  };
+
+  const onPickUser = (path: string): void => {
+    if (path === "main.ddd") {
+      setCenterView("source");
+      return;
+    }
+    const content = workspace.vfs?.read(`/workspace/${path}`);
+    if (content == null) return;
+    setSecondaryDoc({ source: "workspace", path, content });
+    setCenterView("secondary");
+  };
+
+  // Which row each Explorer view highlights as active.
+  const generatedSelection =
+    secondaryDoc?.source === "generated" ? secondaryDoc.path : null;
+  const userSelection =
+    centerView === "source"
+      ? "main.ddd"
+      : secondaryDoc?.source === "workspace"
+        ? secondaryDoc.path
+        : null;
 
   const leftRef = usePanelRef();
   const rightRef = usePanelRef();
@@ -58,11 +112,6 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
 
   const vLayout = useDefaultLayout({ id: "loom.desktop.v.v4", storage: layoutStorage });
   const hLayout = useDefaultLayout({ id: "loom.desktop.h.v4", storage: layoutStorage });
-
-  const onPickFile = (p: string | null): void => {
-    setSelectedPath(p);
-    if (p) setCenterView("file");
-  };
 
   const previewStatus = ((): JSX.Element => {
     switch (reactBundleStatus.kind) {
@@ -132,9 +181,34 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
                       {files.length} file{files.length === 1 ? "" : "s"} · {modeLabel(generateResult)}
                     </Text>
                   </RegionHeader>
-                  <ScrollArea style={{ flex: 1, minHeight: 0 }} data-testid="explorer-tree">
-                    <FileTree root={tree} selectedPath={selectedPath} onSelect={onPickFile} />
-                  </ScrollArea>
+                  <Box px="xs" py={4} style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
+                    <SegmentedControl
+                      size="xs"
+                      fullWidth
+                      value={explorerMode}
+                      onChange={(v) => setExplorerMode(v as ExplorerMode)}
+                      data={[
+                        { label: "User code", value: "user" },
+                        { label: "Generated", value: "generated" },
+                      ]}
+                      data-testid="explorer-mode"
+                    />
+                  </Box>
+                  {explorerMode === "generated" ? (
+                    <ExplorerTree
+                      nodes={tree.children}
+                      selectedPath={generatedSelection}
+                      onActivateFile={onPickGenerated}
+                      emptyHint="No files yet — click Generate."
+                    />
+                  ) : (
+                    <ExplorerTree
+                      nodes={userNodes}
+                      selectedPath={userSelection}
+                      onActivateFile={onPickUser}
+                      emptyHint="No workspace files."
+                    />
+                  )}
                 </Box>
               </Panel>
 
@@ -147,20 +221,21 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
                     <DocTab active={centerView === "source"} onClick={() => setCenterView("source")} testid="doc-tab-source">
                       main.ddd
                     </DocTab>
-                    {selectedFile && (
-                      <DocTab active={centerView === "file"} onClick={() => setCenterView("file")} testid="doc-tab-file">
-                        {selectedFile.path}
+                    {secondaryDoc && (
+                      <DocTab active={centerView === "secondary"} onClick={() => setCenterView("secondary")} testid="doc-tab-file">
+                        {secondaryDoc.path}
                       </DocTab>
                     )}
                   </MGroup>
-                  {/* Both surfaces mounted; toggled by display so Monaco
-                      keeps its model and the viewer keeps scroll position. */}
+                  {/* Editor stays mounted (display toggle) so Monaco keeps
+                      its model + undo history; the read-only viewer
+                      remounts per file via its key. */}
                   <Box style={{ flex: 1, minHeight: 0, display: centerView === "source" ? "flex" : "none" }}>
                     <EditorPane ctx={ctx} />
                   </Box>
-                  {selectedFile && (
-                    <Box style={{ flex: 1, minHeight: 0, display: centerView === "file" ? "flex" : "none" }}>
-                      <FileViewer key={selectedFile.path} path={selectedFile.path} content={selectedFile.content} />
+                  {secondaryDoc && (
+                    <Box style={{ flex: 1, minHeight: 0, display: centerView === "secondary" ? "flex" : "none" }}>
+                      <FileViewer key={secondaryDoc.path} path={secondaryDoc.path} content={secondaryDoc.content} />
                     </Box>
                   )}
                 </Box>
