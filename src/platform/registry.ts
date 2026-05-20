@@ -115,6 +115,16 @@ export function resetBackendSource(): void {
   backendSource = () => inTreeBackends;
 }
 
+/** The in-tree backend set the registry was bootstrapped with —
+ *  i.e. the entries `versionedPlatforms` originally aliased.  fs-
+ *  backed discovery (P3, see `fs-discovery.ts`) composes against
+ *  this so families/versions not yet packaged as npm workspace
+ *  modules still resolve from in-tree code.  Returned as
+ *  `readonly` so callers can't mutate the source-of-truth array. */
+export function defaultBuiltInBackends(): readonly DiscoveredBackend[] {
+  return inTreeBackends;
+}
+
 /** Every backend the active source discovers. */
 export function discoverBackends(): DiscoveredBackend[] {
   return backendSource();
