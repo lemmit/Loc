@@ -125,11 +125,16 @@ The preview origin is a single build constant, `SANDBOX_ORIGIN`:
 - The generated **bundle is delivered over `postMessage`**, never written to the
   sandbox host — so the stub is fixed and deployed once, and the same mechanism
   works after the flip (a cross-origin host can't be handed files anyway).
-- Fix the iframe attribute now at `sandbox="allow-scripts allow-same-origin
-  allow-forms"`. It's a **no-op while same-origin** and becomes a **real
-  boundary** the instant `SANDBOX_ORIGIN` differs. The attribute never changes;
-  only the constant does. (`allow-same-origin` is safe in both phases — it
-  refers to the sandbox's *own* origin, not the playground's.)
+- **Isolation comes from the origin, not the `sandbox` attribute.** While
+  same-origin we **omit** `sandbox` entirely: a `sandbox` carrying both
+  `allow-scripts` and `allow-same-origin` provides no boundary (escaping lands
+  on the parent origin — where we already are) and only emits the browser's
+  "an iframe … can escape its sandboxing" warning. Once `SANDBOX_ORIGIN` is a
+  distinct origin the boundary is the origin itself; the attribute is then
+  applied as **defence-in-depth** (`allow-scripts allow-same-origin
+  allow-forms` — blocks top-navigation/popups), and its "can escape" caveat is
+  benign because escape means the sandbox's *own* origin, already isolated from
+  the parent. So the attribute is gated on `!SANDBOX_SAME_ORIGIN`, not fixed.
 - The bridge validates `event.origin === SANDBOX_ORIGIN`, correct in both modes.
 - **`BrowserRouter` is retained throughout** (both origins are real/non-opaque).
   No router change, no `main.hbs` edits, no HashRouter — that entire branch of
