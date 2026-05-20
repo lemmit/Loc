@@ -84,38 +84,20 @@ test("editor → generate → bundle → boot → dispatch", async ({ page }) =>
     expect(parsed[0].price.currency).toBe("USD");
   });
 
-  await test.step("Service Worker serves the latest bundle on sandbox URL", async () => {
-    // Switching to the Preview tab triggers the bundle push
-    // (Preview.tsx subscribes to navigator.serviceWorker.ready and
-    // posts the synthesized HTML to the SW).  Then a direct fetch
-    // to the sandbox URL — same-origin, in-scope — must return the
-    // pushed HTML rather than the 503 "bundle first" placeholder.
-    // Preview is always mounted in the four-region shell — no tab to click.
-    await expect(page.getByTestId("preview-region")).toBeVisible();
-    const result = await page.evaluate(async () => {
-      const url = new URL("__loom_sandbox__/", location.href).toString();
-      // Up to 10 s for the bundle push round-trip.
-      const start = Date.now();
-      while (Date.now() - start < 10_000) {
-        const res = await fetch(url, { cache: "no-store" });
-        const body = await res.text();
-        if (res.status === 200 && body.includes("<div id=\"root\">")) {
-          return { status: res.status, hasRoot: true };
-        }
-        await new Promise((r) => setTimeout(r, 200));
-      }
-      return { status: -1, hasRoot: false };
-    });
-    expect(result.hasRoot, "sandbox URL serves bundled HTML").toBe(true);
-    expect(result.status).toBe(200);
-  });
-
-  await test.step("Preview loads the React app and round-trips a fetch", async () => {
+  await test.step("Preview loads the React app via the sandbox bridge", async () => {
     // The Preview tab is only meaningful when the source has a
     // React deployable.  The default Sales System example does;
     // assertions guard against running on a single-context source.
-    // Preview is always mounted in the four-region shell — no tab to click.
+    //
+    // In the four-region shell the Preview is always mounted (no tab
+    // to click); mounting the iframe loads the static stub from
+    // SANDBOX_ORIGIN, the parent hands it the synthesised document +
+    // a MessagePort, the stub `document.write`s the app, and the
+    // app's API fetches ride the bridge back to the runtime worker.
+    // A visible heading proves the document was delivered and booted;
+    // the data round-trip is exercised by the app's own list query.
     await expect(page.getByTestId("preview-region")).toBeVisible();
+
     const iframe = page.frameLocator('[data-testid="preview-iframe"]');
     // Mantine renders into the iframe — wait for any visible heading
     // or the home-page link list the React generator emits.

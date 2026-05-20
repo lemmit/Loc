@@ -71,25 +71,3 @@ test("auto-Generate fires after page-load idle without clicking the button", asy
   await expect(page.getByText(/\d+ files? · /)).toBeVisible({ timeout: 5_000 });
   await expect(page.getByText(/generated \d+ file\(s\)/)).toBeVisible();
 });
-
-test("preview Service Worker registers (scaffolding — claims clients)", async ({
-  page,
-}) => {
-  await page.goto("/");
-  await waitForPlaygroundReady(page);
-  // SW registers in App.tsx mount effect.  Wait for the
-  // `controller` field to be set, which indicates the SW reached
-  // `activated` and called `clients.claim()`.  Up to 10 s — install
-  // can be slow on a cold cache, but should be near-instant warm.
-  const ok = await page.evaluate(async () => {
-    if (!("serviceWorker" in navigator)) return false;
-    const start = Date.now();
-    while (Date.now() - start < 10_000) {
-      const reg = await navigator.serviceWorker.getRegistration();
-      if (reg && (reg.active || navigator.serviceWorker.controller)) return true;
-      await new Promise((r) => setTimeout(r, 100));
-    }
-    return false;
-  });
-  expect(ok, "preview SW registered + active within 10 s").toBe(true);
-});

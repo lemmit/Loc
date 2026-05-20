@@ -14,6 +14,7 @@
 import * as esbuild from "esbuild-wasm";
 import wasmURL from "esbuild-wasm/esbuild.wasm?url";
 import { makeVfsNpmPlugin } from "./esbuild-vfs-plugin.js";
+import { harvestTsconfigPaths } from "../../bundle/plugin.js";
 import { install } from "./install.js";
 import { IdbInstallCache } from "./install-cache-idb.js";
 
@@ -58,6 +59,33 @@ function getCache(): Promise<IdbInstallCache> {
   return cachePromise;
 }
 
+// C1 local tarball mirror: name@version → same-origin asset URL,
+// loaded once from the manifest the build step ships under
+// <base>/npm-mirror/.  Missing/404 (dev, or no mirror built) → empty
+// map → install falls back to the registry.
+let mirrorPromise: Promise<Map<string, string>> | null = null;
+function getMirror(): Promise<Map<string, string>> {
+  if (!mirrorPromise) {
+    mirrorPromise = (async () => {
+      const map = new Map<string, string>();
+      try {
+        const base = (import.meta.env?.BASE_URL ?? "/") + "npm-mirror/";
+        const res = await fetch(base + "manifest.json");
+        if (res.ok) {
+          const manifest = (await res.json()) as Record<string, string>;
+          for (const [k, file] of Object.entries(manifest)) {
+            map.set(k, base + file);
+          }
+        }
+      } catch {
+        /* no mirror → registry fallback */
+      }
+      return map;
+    })();
+  }
+  return mirrorPromise;
+}
+
 let initPromise: Promise<void> | null = null;
 function ensureInit(): Promise<void> {
   if (!initPromise) {
@@ -87,7 +115,7 @@ self.onmessage = async (ev: MessageEvent<VfsBundleRequest>): Promise<void> => {
     const { versions, fileCount } = await install(
       rootDeps,
       (p, d) => files.set(p, d),
-      { cache: await getCache() },
+      { cache: await getCache(), mirror: await getMirror() },
     );
     const installMs = Math.round(performance.now() - tInstall);
     const versionRec = Object.fromEntries(versions);
@@ -99,13 +127,31 @@ self.onmessage = async (ev: MessageEvent<VfsBundleRequest>): Promise<void> => {
       logLevel: "silent" as const,
       write: false as const,
       sourcemap: false as const,
+      // Generated components use the automatic JSX runtime (no
+      // `import React`).  Without this esbuild defaults to the
+      // classic transform (React.createElement) → "React is not
+      // defined" at runtime once React is bundled.  Mirrors the
+      // esm.sh bundler.worker.
+      jsx: "automatic" as const,
       // outdir gives JS-imported CSS (Mantine `*.css`) an output
       // path so esbuild bundles it into a sibling .css output file
       // instead of erroring "without an output path configured".
       // write:false → it comes back in outputFiles, collected below.
       outdir: "/" as const,
       loader: { ".wasm": "binary" as const },
-      plugins: [makeVfsNpmPlugin(files, "/node_modules", !!externalReactRuntime)],
+      plugins: [
+        makeVfsNpmPlugin(
+          files,
+          "/node_modules",
+          !!externalReactRuntime,
+          // tsconfig `@/*` aliases (shadcn etc.); harvested from the
+          // entry's nearest tsconfig.  Backend (stdin) builds have no
+          // entry path and don't use these aliases.
+          entry
+            ? harvestTsconfigPaths(files as unknown as Map<string, string>, entry)
+            : [],
+        ),
+      ],
     };
     const tBundle = performance.now();
     const out = await esbuild.build(

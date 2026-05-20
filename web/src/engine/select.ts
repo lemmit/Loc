@@ -1,26 +1,19 @@
-// Engine selection (Phase B4).
+// Engine selection.
 //
-// Default stays the proven `esbuild-pglite`.  The npm-in-browser
-// engine is opt-in — `?engine=npm-install-bundle` or
-// localStorage `loom.engine` — so it can be exercised / dogfooded
-// without a silent default flip.  Unknown ids fall back to the
-// default rather than throwing, so a stale link can't brick the
-// playground.  Flip the default by changing DEFAULT_ENGINE once e2e
-// parity is confirmed.
+// Default: `npm-install-bundle` — real npm tarballs, no esm.sh, so
+// the drizzle/split-shard bug class (which leaves the esm.sh path
+// broken in production) is gone.  The engine is correctness-complete
+// (backend boots + serves; all four design packs render in-browser)
+// and C1 (local tarball mirror) made install fast.  esm.sh stays as
+// an OPT-OUT fallback — `?engine=esbuild-pglite` or localStorage
+// `loom.engine` — and is deleted once C2 (vendor prebuild) lands the
+// bundle-speed win and the e2e is green.  Unknown ids fall back to
+// the default rather than throwing, so a stale link can't brick the
+// playground.
 
 import { engineRegistry } from "./registry.js";
 
-// Default: the proven `esbuild-pglite`.  npm-install-bundle is
-// CORRECTNESS-proven (node spikes: install/resolve/bundle/boot/serve,
-// React+CSS+externalisation) and stays available OPT-IN
-// (?engine=npm-install-bundle).  It is NOT the default: the #188 e2e
-// proved the in-browser path (esbuild-wasm — ~10× slower than the
-// native esbuild the spikes used — + a per-session npm install of a
-// Mantine-scale tree) does not produce a bundle within the 180s spec
-// budget.  Re-flip only once an in-browser perf story lands (shipped
-// warm/prebuilt install cache or precomputed bundles) and the e2e is
-// green on npm-default.
-const DEFAULT_ENGINE = "esbuild-pglite";
+const DEFAULT_ENGINE = "npm-install-bundle";
 
 export function selectedEngineId(): string {
   try {

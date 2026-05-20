@@ -150,9 +150,9 @@ export type RuntimeEngineFactory = (
   opts?: RuntimeEngineOptions,
 ) => RuntimeEngine;
 
-/** Frontend assets the `PreviewHost` (P2) renders.  Declared here so
- *  `preview-host.ts` has a stable import; not part of the engine
- *  interface — the preview pulls these off `PreparedBuild.react`. */
+/** Frontend assets the preview renders.  Not part of the engine
+ *  interface — `Preview.tsx` pulls these off `PreparedBuild.react`
+ *  and feeds them to `makePreviewHtml`. */
 export interface PreviewMaterial {
   js: string;
   css?: string;

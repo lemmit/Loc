@@ -25,12 +25,6 @@ export type {
 export { EsbuildPgliteEngine } from "./esbuild-pglite-engine.js";
 export { NpmInstallBundleEngine } from "./npm-install-bundle-engine.js";
 
-export type {
-  PreviewBundle,
-  PreviewHost,
-  PreviewHtmlSynth,
-} from "./preview-host.js";
-
 export type { RestorableVfs } from "./vfs.js";
 
 export { EngineRegistry, engineRegistry } from "./registry.js";

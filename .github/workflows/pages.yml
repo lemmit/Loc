@@ -63,6 +63,14 @@ jobs:
         working-directory: web
         run: npm run e2e:smoke
 
+      # C1: download the curated stacks' tarballs into
+      # web/public/npm-mirror/ so the deployed playground installs
+      # same-origin (no registry.npmjs.org round-trips).  vite build
+      # copies public/ into dist/.
+      - name: Build npm mirror
+        working-directory: web
+        run: npm run build:npm-mirror
+
       - name: Build playground
         working-directory: web
         run: npm run build
