@@ -14,6 +14,7 @@ import type { TsconfigAliasEntry } from "../../bundle/plugin.js";
 
 const NS = "vfs";
 const EMPTY = "vfs-empty";
+const EMPTY_CSS = "vfs-empty-css";
 
 // Node builtins the curated backend may reference in branches the
 // browser/PGlite path never takes (the `pg` driver tree etc.).
@@ -95,6 +96,12 @@ export function makeVfsNpmPlugin(
    *  matched before bare-package resolution so `@/components/ui/button`
    *  resolves to a real file instead of being treated as a package. */
   aliases: TsconfigAliasEntry[] = [],
+  /** C2: externalise the whole vendor (every bare specifier left
+   *  after aliases) so esbuild bundles ONLY the generated app —
+   *  the prebuilt vendor + iframe importmap supply the rest.  Bare
+   *  CSS imports (e.g. `@mantine/core/styles.css`) become empty
+   *  stubs since the prebuilt vendor.css covers them. */
+  externalizeVendor = false,
 ): Plugin {
   const td = new TextDecoder();
   const asText = (v: string | Uint8Array): string =>
@@ -155,10 +162,23 @@ export function makeVfsNpmPlugin(
           }
         }
         const r = resolveBare(spec, src, nmRoot);
-        return r
-          ? { path: r, namespace: NS }
-          : { errors: [{ text: `vfs: bare "${spec}" not in installed node_modules` }] };
+        if (r) return { path: r, namespace: NS };
+        // Vendor-externalise: a bare specifier with no app-side
+        // resolution is vendor — externalise it (JS) or stub it
+        // (CSS, covered by the prebuilt vendor.css).  esbuild then
+        // bundles only the app; the iframe importmap resolves these.
+        if (externalizeVendor) {
+          return spec.endsWith(".css")
+            ? { path: spec, namespace: EMPTY_CSS }
+            : { path: spec, external: true };
+        }
+        return { errors: [{ text: `vfs: bare "${spec}" not in installed node_modules` }] };
       });
+
+      build.onLoad({ filter: /.*/, namespace: EMPTY_CSS }, () => ({
+        contents: "",
+        loader: "css",
+      }));
 
       build.onLoad({ filter: /.*/, namespace: EMPTY }, (args) => {
         const name = args.path.replace(/^node:/, "").split("/")[0];
