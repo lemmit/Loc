@@ -1,0 +1,15 @@
+{
+  "name": "@loom/core",
+  "version": "0.0.0-experimental",
+  "private": true,
+  "type": "module",
+  "description": "Loom toolchain core — pipeline (parser/validator/lowering/IR/enrichment), the framework-neutral generator library, and the PlatformSurface contract.  Backend packages peer-depend on this; the CLI wraps it.",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "loom": {
+    "kind": "core",
+    "contract": "1.0.0"
+  }
+}
