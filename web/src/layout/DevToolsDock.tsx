@@ -1,18 +1,19 @@
 import { Box, Group, ScrollArea, Stack, Text, UnstyledButton } from "@mantine/core";
 import { ProblemsPanel } from "./ProblemsPanel";
 import { BackendBody, BackendHeader } from "./BackendPanel";
-import type { LayoutCtx } from "./ctx";
+import { formatBytes, modeLabel, type LayoutCtx } from "./ctx";
 
-// Identifiers for the consolidated bottom dock.  Today's playground
-// scatters status across the IDE — diagnostics in one panel, the
+// Identifiers for the consolidated bottom dock.  The playground used
+// to scatter status across the IDE — LSP diagnostics in one panel, the
 // backend tester in another, bundle errors hidden at the foot of the
-// Files pane, boot errors inside the Backend body.  The dock gathers
-// them into one tabbed surface; each tab carries a status dot so the
-// user sees where the red is without opening every tab.
+// Files pane, generator errors only counted in the footer, boot errors
+// inside the Backend body.  The dock gathers them into one tabbed
+// surface; each tab carries a status dot so the user sees where the
+// red is without opening every tab.
 //
-// Generator / Frontend-log / Tests tabs land in a later phase — the
-// `data` array below is the single place to register a new one.
-export type DockTab = "problems" | "bundler" | "backend";
+// A Frontend-log / Tests tab can join later — the `tabs` array below
+// is the single place to register one.
+export type DockTab = "problems" | "generator" | "bundler" | "backend";
 
 interface Props {
   ctx: LayoutCtx;
@@ -23,7 +24,7 @@ interface Props {
 type DotColour = "red" | "yellow" | "green" | "gray" | null;
 
 export function DevToolsDock({ ctx, tab, setTab }: Props): JSX.Element {
-  const { diagnostics, errorCount, warningCount, honoBundleResult, reactBundleResult, ddl } = ctx;
+  const { diagnostics, errorCount, warningCount, generateResult, honoBundleResult, reactBundleResult, ddl } = ctx;
 
   const bundleFailed =
     (honoBundleResult != null && !honoBundleResult.ok) ||
@@ -31,11 +32,13 @@ export function DevToolsDock({ ctx, tab, setTab }: Props): JSX.Element {
 
   const problemsDot: DotColour =
     errorCount > 0 ? "red" : warningCount > 0 ? "yellow" : null;
+  const generatorDot: DotColour = generateResult?.ok === false ? "red" : null;
   const bundlerDot: DotColour = bundleFailed ? "red" : null;
   const backendDot: DotColour = ddl ? "green" : "gray";
 
   const tabs: { id: DockTab; label: string; dot: DotColour }[] = [
     { id: "problems", label: "Problems", dot: problemsDot },
+    { id: "generator", label: "Generator", dot: generatorDot },
     { id: "bundler", label: "Bundler", dot: bundlerDot },
     { id: "backend", label: "Backend", dot: backendDot },
   ];
@@ -98,6 +101,7 @@ export function DevToolsDock({ ctx, tab, setTab }: Props): JSX.Element {
             <ProblemsPanel items={diagnostics} />
           </ScrollArea>
         )}
+        {tab === "generator" && <GeneratorBody ctx={ctx} />}
         {tab === "bundler" && <BundlerBody ctx={ctx} />}
         {tab === "backend" && <BackendBody ctx={ctx} />}
       </Box>
@@ -105,19 +109,106 @@ export function DevToolsDock({ ctx, tab, setTab }: Props): JSX.Element {
   );
 }
 
-// Bundle diagnostics — moved out of the Files pane footer so a failed
-// Hono/React bundle surfaces in the same place as every other build
-// signal.  Renders a clean hint when nothing has failed.
+// Generator status — the generate step's mode + file count on success,
+// or its diagnostics on failure.  Build diagnostics used to be only
+// *counted* in the footer ("generate: N error(s)") with no detailed
+// view anywhere; this is that view.
+function GeneratorBody({ ctx }: { ctx: LayoutCtx }): JSX.Element {
+  const { generateResult } = ctx;
+
+  if (generateResult == null) {
+    return (
+      <Text c="dimmed" size="sm" p="sm">
+        Not generated yet.
+      </Text>
+    );
+  }
+
+  if (generateResult.ok) {
+    const warnings = generateResult.diagnostics.filter((d) => d.severity === "warning");
+    return (
+      <ScrollArea style={{ flex: 1, minHeight: 0 }}>
+        <Box p="xs">
+          <Text size="sm">
+            Generated {generateResult.files.length} file
+            {generateResult.files.length === 1 ? "" : "s"} ({modeLabel(generateResult)}).
+          </Text>
+          {warnings.length > 0 && (
+            <Stack gap={2} mt="xs">
+              {warnings.map((d, i) => (
+                <Text key={i} size="xs" ff="monospace" c="yellow" style={{ whiteSpace: "pre-wrap" }}>
+                  {d.line != null ? `${d.line}${d.column != null ? `:${d.column}` : ""}: ` : ""}
+                  {d.message}
+                </Text>
+              ))}
+            </Stack>
+          )}
+        </Box>
+      </ScrollArea>
+    );
+  }
+
+  return (
+    <ScrollArea style={{ flex: 1, minHeight: 0 }}>
+      <Box p="xs">
+        <Text size="xs" fw={600} tt="uppercase" c="red" mb={4}>
+          Generation failed
+        </Text>
+        <Stack gap={2}>
+          {generateResult.diagnostics.map((d, i) => (
+            <Text
+              key={i}
+              size="xs"
+              ff="monospace"
+              c={d.severity === "error" ? "red" : "yellow"}
+              style={{ whiteSpace: "pre-wrap" }}
+            >
+              {d.line != null ? `${d.line}${d.column != null ? `:${d.column}` : ""}: ` : ""}
+              {d.message}
+            </Text>
+          ))}
+        </Stack>
+      </Box>
+    </ScrollArea>
+  );
+}
+
+// Bundle status — success summary (size / deps / duration), or the
+// Hono/React diagnostics on failure.  Replaces the error drawer that
+// used to hide at the foot of the Files pane.
 function BundlerBody({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const { honoBundleResult, reactBundleResult } = ctx;
   const honoFailed = honoBundleResult != null && !honoBundleResult.ok;
   const reactFailed = reactBundleResult != null && !reactBundleResult.ok;
 
-  if (!honoFailed && !reactFailed) {
+  if (honoBundleResult == null && reactBundleResult == null) {
     return (
       <Text c="dimmed" size="sm" p="sm">
-        No bundle errors.
+        No bundle yet.
       </Text>
+    );
+  }
+
+  if (!honoFailed && !reactFailed) {
+    return (
+      <ScrollArea style={{ flex: 1, minHeight: 0 }}>
+        <Stack gap={2} p="xs">
+          {honoBundleResult?.ok && (
+            <Text size="sm">
+              Hono: bundled {formatBytes(honoBundleResult.size)} in {honoBundleResult.durationMs} ms
+              {" "}({honoBundleResult.fetchedUrls.length} dep
+              {honoBundleResult.fetchedUrls.length === 1 ? "" : "s"} fetched).
+            </Text>
+          )}
+          {reactBundleResult?.ok && (
+            <Text size="sm">
+              React: bundled {formatBytes(reactBundleResult.size)} in {reactBundleResult.durationMs} ms
+              {" "}({reactBundleResult.fetchedUrls.length} dep
+              {reactBundleResult.fetchedUrls.length === 1 ? "" : "s"} fetched).
+            </Text>
+          )}
+        </Stack>
+      </ScrollArea>
     );
   }
 
