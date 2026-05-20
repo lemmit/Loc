@@ -162,6 +162,11 @@ export interface AggregateIR {
 export interface TestIR {
   name: string;
   statements: TestStmtIR[];
+  /** Traceability back-link (Slice 12): the `verifies <TC-id>` clause
+   *  naming the TestCase this executable test realises.  Undefined when
+   *  the test declares no link.  Enrichment uses it to mark a TestCase
+   *  as backed by an executable test. */
+  verifiesTestCase?: string;
 }
 
 export type TestStmtIR =
@@ -339,6 +344,106 @@ export interface LoomModel {
    * picked by the user.
    */
   contexts: BoundedContextIR[];
+  /** Traceability artifacts (Slice 12) — model-wide, since a Solution
+   *  or TestCase may reference code across modules and systems. */
+  requirements: RequirementIR[];
+  solutions: SolutionIR[];
+  testCases: TestCaseIR[];
+  /** Derived traceability index, populated by `enrichLoomModel`.  Left
+   *  undefined by lowering so an unenriched model is a type error to
+   *  consume from a report generator. */
+  traceability?: TraceabilityIR;
+}
+
+// ---------------------------------------------------------------------------
+// Traceability (Slice 12)
+// ---------------------------------------------------------------------------
+
+export type RequirementType =
+  | "UserStory"
+  | "UseCase"
+  | "AcceptanceCriteria"
+  | "BusinessReq";
+
+export type RequirementStatus =
+  | "Draft"
+  | "Approved"
+  | "InProgress"
+  | "Done";
+
+export interface RequirementIR {
+  id: string;
+  type: RequirementType;
+  title: string;
+  status?: RequirementStatus;
+  priority?: number;
+  /** Parent requirement id (hierarchy), or undefined for a root. */
+  parentId?: string;
+}
+
+/** The kind of code symbol a CodeRefIR points at — read off the
+ *  resolved AST node's type at lowering time so backends never
+ *  re-resolve. */
+export type CodeRefKind =
+  | "module"
+  | "context"
+  | "aggregate"
+  | "operation"
+  | "valueobject"
+  | "event"
+  | "repository"
+  | "workflow"
+  | "view"
+  | "deployable"
+  | "api";
+
+/** A resolved, qualified reference from a Solution/TestCase into the
+ *  domain model (`Identity.Auth.LoginSession.start`). */
+export interface CodeRefIR {
+  qualifiedName: string;
+  kind: CodeRefKind;
+}
+
+export interface SolutionIR {
+  id: string;
+  /** Requirement this solution justifies (`for <req>`). */
+  forRequirement: string;
+  title: string;
+  /** Code symbols this solution legitimises (`entitles [...]`). */
+  entitles: CodeRefIR[];
+}
+
+export interface TestCaseIR {
+  id: string;
+  /** Requirement this test case verifies (`verifies <req>`). */
+  verifies: string;
+  title: string;
+  /** Code symbols this test case exercises (`covers [...]`). */
+  covers: CodeRefIR[];
+}
+
+/** Derived traceability / coverage index built by `enrichLoomModel`
+ *  in one pure pass.  Every report generator reads these precomputed
+ *  views rather than recomputing — the same contract `wireShape` has. */
+export interface TraceabilityIR {
+  /** Requirement id → its direct child requirement ids. */
+  childrenOf: Record<string, string[]>;
+  /** Requirement id → TestCase ids that verify it directly OR verify
+   *  one of its (transitive) descendants. */
+  testsByRequirement: Record<string, string[]>;
+  /** Requirement id → Solution id justifying it, or null if none. */
+  solutionByRequirement: Record<string, string | null>;
+  /** Every targetable code symbol referenced anywhere, keyed by
+   *  qualified name (union of all entitles + covers). */
+  codeElements: Record<string, CodeRefKind>;
+  /** Code qualified name → TestCase ids that `cover` it. */
+  testsByCodeElement: Record<string, string[]>;
+  /** Code qualified name → ids of executable tests (TestIR /
+   *  TestE2EIR names) whose `verifies` testCase covers it. */
+  execTestsByCodeElement: Record<string, string[]>;
+  /** TestCase id → executable-test names backing it (via the test's
+   *  `verifies` back-link). */
+  execTestsByTestCase: Record<string, string[]>;
 }
 
 /** A deployment plan: modules grouping bounded contexts, plus the
@@ -443,6 +548,8 @@ export interface TestE2EIR {
   kind: "api" | "ui";
   deployableName: string;
   statements: TestStmtIR[];
+  /** Traceability back-link (Slice 12) — see `TestIR.verifiesTestCase`. */
+  verifiesTestCase?: string;
 }
 
 // ---------------------------------------------------------------------------
