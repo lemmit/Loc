@@ -3,6 +3,25 @@
 // Same body as `banking.ddd` — just lifted into a `system` block
 // with a hono + react deployable pair.
 
+// Traceability — see docs/traceability.md.  Solution/testCase below
+// reference account operations by qualified name; `ddd generate system`
+// emits the coverage + gaps reports under `.loom/`.
+requirement US-001 {
+  type: UserStory
+  title: "A customer can move money between accounts"
+  status: InProgress
+}
+
+requirement AC-001 parent US-001 {
+  type: AcceptanceCriteria
+  title: "A withdrawal cannot overdraw the account"
+}
+
+requirement AC-002 parent US-001 {
+  type: AcceptanceCriteria
+  title: "A frozen account rejects deposits and withdrawals"
+}
+
 system BankingSystem {
 
   // Banking-y green for the demo — financial software vibe.
@@ -134,4 +153,27 @@ system BankingSystem {
 
   deployable api { platform: hono, modules: Banking, port: 3000 }
   deployable webApp { platform: react, targets: api, ui: WebApp, port: 3001 }
+}
+
+solution SOL-001 for US-001 {
+  title: "Transfers are orchestrated by transferFunds over the Account aggregate"
+  entitles [
+    Banking.Banking.Account.deposit,
+    Banking.Banking.Account.withdraw,
+    Banking.Banking.transferFunds
+  ]
+}
+
+testCase TC-001 verifies AC-001 {
+  title: "Withdrawing more than the balance is rejected"
+  covers [ Banking.Banking.Account.withdraw ]
+}
+
+testCase TC-002 verifies AC-002 {
+  title: "Operations on a frozen account are rejected"
+  covers [
+    Banking.Banking.Account.deposit,
+    Banking.Banking.Account.withdraw,
+    Banking.Banking.Account.freeze
+  ]
 }

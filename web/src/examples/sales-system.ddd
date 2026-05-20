@@ -2,6 +2,20 @@
 // declares a Hono backend and a React frontend so the playground
 // can preview both halves of the stack together.
 
+// Traceability — requirements above the model, solution/testCase below
+// referencing code by qualified name.  Generating the system also emits
+// coverage + gaps reports under `.loom/` (see docs/traceability.md).
+requirement US-001 {
+  type: UserStory
+  title: "A customer can place an order"
+  status: InProgress
+}
+
+requirement AC-001 parent US-001 {
+  type: AcceptanceCriteria
+  title: "An order can only be confirmed when it has at least one line"
+}
+
 system SalesSystem {
 
   // Visual identity for the React frontend — design tokens land
@@ -120,4 +134,21 @@ system SalesSystem {
     ui: WebApp
     port: 3001
   }
+}
+
+solution SOL-001 for US-001 {
+  title: "Ordering flows through the Order aggregate and the placeOrder workflow"
+  entitles [
+    Sales.Sales.Order.addLine,
+    Sales.Sales.Order.confirm,
+    Sales.Sales.placeOrder
+  ]
+}
+
+testCase TC-001 verifies AC-001 {
+  title: "Add a line then confirm the order"
+  covers [
+    Sales.Sales.Order.addLine,
+    Sales.Sales.Order.confirm
+  ]
 }
