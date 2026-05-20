@@ -110,6 +110,48 @@ interface MakePreviewArgs {
 
 const ESCAPE_END_SCRIPT = (s: string): string => s.replace(/<\/script/gi, "<\\/script");
 
+// Content-Security-Policy for the preview document.
+//
+// This is the egress lock the cross-origin sandbox needs once
+// untrusted user expressions run in the preview: it can't phone home.
+// It's harmless (pure hardening) while same-origin, so we always emit
+// it.  After esm.sh was removed the document loads nothing third-party
+// except the Tailwind compiler (shadcn packs only), so the allowlist
+// is small:
+//
+//   - script-src 'self'        vendor chunks + dynamic-import splits
+//                              (served same-origin from deployBase/vendor;
+//                              after the origin flip they must be served
+//                              from SANDBOX_ORIGIN too, where 'self' still
+//                              matches the iframe).
+//     'unsafe-inline'          the shim / hostScript / bundle module +
+//                              the importmap (all inline).
+//     'unsafe-eval'            the Tailwind in-browser JIT (shadcn).
+//     cdn.tailwindcss.com /
+//     cdn.jsdelivr.net         the Tailwind CDN scripts (shadcn v3 / v4).
+//   - style-src 'self' 'unsafe-inline'   vendor.css link + inline <style>
+//                              + Mantine/Tailwind runtime-injected styles.
+//   - img-src / font-src       same-origin + data:/blob: (no web fonts
+//                              from CDNs in the current packs — if one is
+//                              added, widen this).
+//   - connect-src 'none'       THE lock.  The app's only network call is
+//                              its API, which the fetch shim answers over
+//                              the bridge port without touching the
+//                              network; any other fetch/XHR/WebSocket is
+//                              refused.
+//   - base-uri / form-action 'none'   no base-tag hijack, no native form
+//                              navigation out of the sandbox.
+const PREVIEW_CSP = [
+  "default-src 'none'",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdn.jsdelivr.net",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "connect-src 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+].join("; ");
+
 /** Which Tailwind dialect the bundled CSS is written in, or `null`
  *  for non-Tailwind (pre-compiled) CSS like Mantine's.
  *
@@ -280,6 +322,7 @@ export function makePreviewHtml(args: MakePreviewArgs): string {
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="${PREVIEW_CSP}">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Loom Preview</title>
 <script>${ESCAPE_END_SCRIPT(RUNTIME_FETCH_SHIM)}</script>
