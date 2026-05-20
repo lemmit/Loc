@@ -89,14 +89,15 @@ test("editor → generate → bundle → boot → dispatch", async ({ page }) =>
     // React deployable.  The default Sales System example does;
     // assertions guard against running on a single-context source.
     //
-    // Switching to Preview mounts the iframe, which loads the static
-    // stub from SANDBOX_ORIGIN; the parent hands it the synthesised
-    // document + a MessagePort, the stub `document.write`s the app,
-    // and the app's API fetches ride the bridge back to the runtime
-    // worker.  A visible heading proves the document was delivered
-    // and booted; the data round-trip is exercised by the app's own
-    // list query.
-    await page.getByTestId("right-pane-tabs").locator("text=Preview").click();
+    // In the four-region shell the Preview is always mounted (no tab
+    // to click); mounting the iframe loads the static stub from
+    // SANDBOX_ORIGIN, the parent hands it the synthesised document +
+    // a MessagePort, the stub `document.write`s the app, and the
+    // app's API fetches ride the bridge back to the runtime worker.
+    // A visible heading proves the document was delivered and booted;
+    // the data round-trip is exercised by the app's own list query.
+    await expect(page.getByTestId("preview-region")).toBeVisible();
+
     const iframe = page.frameLocator('[data-testid="preview-iframe"]');
     // Mantine renders into the iframe — wait for any visible heading
     // or the home-page link list the React generator emits.
