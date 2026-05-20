@@ -59,6 +59,33 @@ function getCache(): Promise<IdbInstallCache> {
   return cachePromise;
 }
 
+// C1 local tarball mirror: name@version → same-origin asset URL,
+// loaded once from the manifest the build step ships under
+// <base>/npm-mirror/.  Missing/404 (dev, or no mirror built) → empty
+// map → install falls back to the registry.
+let mirrorPromise: Promise<Map<string, string>> | null = null;
+function getMirror(): Promise<Map<string, string>> {
+  if (!mirrorPromise) {
+    mirrorPromise = (async () => {
+      const map = new Map<string, string>();
+      try {
+        const base = (import.meta.env?.BASE_URL ?? "/") + "npm-mirror/";
+        const res = await fetch(base + "manifest.json");
+        if (res.ok) {
+          const manifest = (await res.json()) as Record<string, string>;
+          for (const [k, file] of Object.entries(manifest)) {
+            map.set(k, base + file);
+          }
+        }
+      } catch {
+        /* no mirror → registry fallback */
+      }
+      return map;
+    })();
+  }
+  return mirrorPromise;
+}
+
 let initPromise: Promise<void> | null = null;
 function ensureInit(): Promise<void> {
   if (!initPromise) {
@@ -88,7 +115,7 @@ self.onmessage = async (ev: MessageEvent<VfsBundleRequest>): Promise<void> => {
     const { versions, fileCount } = await install(
       rootDeps,
       (p, d) => files.set(p, d),
-      { cache: await getCache() },
+      { cache: await getCache(), mirror: await getMirror() },
     );
     const installMs = Math.round(performance.now() - tInstall);
     const versionRec = Object.fromEntries(versions);

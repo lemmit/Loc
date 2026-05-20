@@ -4,3 +4,5 @@ dist
 .vite
 test-results/
 playwright-report/
+
+public/npm-mirror/
