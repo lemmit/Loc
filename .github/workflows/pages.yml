@@ -71,6 +71,14 @@ jobs:
         working-directory: web
         run: npm run build:npm-mirror
 
+      # C2: prebuild each design pack's frontend vendor (react + UI
+      # libs) into shipped ESM chunks + importmap so the per-session
+      # esbuild-wasm bundle externalises the vendor and bundles only
+      # the generated app.  vite build copies public/ into dist/.
+      - name: Build design-pack vendor
+        working-directory: web
+        run: npm run build:vendor
+
       - name: Build playground
         working-directory: web
         run: npm run build
