@@ -3,9 +3,13 @@
 // Same body as `banking.ddd` — just lifted into a `system` block
 // with a hono + react deployable pair.
 
-// Traceability — see docs/traceability.md.  Solution/testCase below
-// reference account operations by qualified name; `ddd generate system`
-// emits the coverage + gaps reports under `.loom/`.
+// ---------------------------------------------------------------------------
+// Traceability (see docs/traceability.md).  Full chain end to end:
+//   requirement ─► solution (entitles code); testCase (verifies + covers);
+//   aggregate `test "…" verifies <TC>` (the executable proof).
+// The two Account tests below back TC-001 / TC-002 and generate runnable
+// vitest specs; coverage + gaps land under `.loom/`.
+// ---------------------------------------------------------------------------
 requirement US-001 {
   type: UserStory
   title: "A customer can move money between accounts"
@@ -114,6 +118,32 @@ system BankingSystem {
           at: datetime
           invariant amount.amount > 0
           invariant kind.length > 0
+        }
+
+        // Executable tests, linked to the test cases below via
+        // `verifies`.  `ddd generate system` turns these into runnable
+        // vitest specs in the Hono project's `domain/` folder, and the
+        // link feeds the coverage report under `.loom/`.
+        test "withdrawing more than the balance is rejected" verifies TC-001 {
+          let acct = Account.create({
+            holder: "00000000-0000-0000-0000-000000000001",
+            status: Open,
+            balance: { amount: 100.0, currency: "USD" },
+            openedAt: "2024-01-01T00:00:00Z"
+          })
+          expectThrows acct.withdraw(Money(1000.0, "USD"))
+        }
+
+        test "a frozen account rejects deposits and withdrawals" verifies TC-002 {
+          let acct = Account.create({
+            holder: "00000000-0000-0000-0000-000000000001",
+            status: Open,
+            balance: { amount: 100.0, currency: "USD" },
+            openedAt: "2024-01-01T00:00:00Z"
+          })
+          acct.freeze("fraud review")
+          expectThrows acct.deposit(Money(10.0, "USD"))
+          expectThrows acct.withdraw(Money(10.0, "USD"))
         }
       }
 

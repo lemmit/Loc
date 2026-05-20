@@ -39,7 +39,7 @@ Entitles:
 
 ### TC-001 — Confirming an empty order is rejected
 verifies: `AC-001`
-executable tests: _none_
+executable tests: "confirming an order with no lines is rejected"
 
 Covers:
 - `Sales.Orders.Order.confirm` (operation)

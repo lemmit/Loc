@@ -109,6 +109,19 @@ system Acme {
                     quantity: int
                     invariant quantity > 0
                 }
+
+                // Aggregate-level unit test (the e2e tests further down
+                // exercise the same behaviour through HTTP).  Linked to
+                // TC-001 via `verifies`, so the traceability report shows
+                // both a unit and an e2e test backing the test case.
+                test "confirming an order with no lines is rejected" verifies TC-001 {
+                    let order = Order.create({
+                        customerId: "cust-001",
+                        status: Draft,
+                        placedAt: "2024-01-01T00:00:00Z"
+                    })
+                    expectThrows order.confirm()
+                }
             }
 
             repository Orders for Order {

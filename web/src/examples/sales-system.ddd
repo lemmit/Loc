@@ -2,9 +2,20 @@
 // declares a Hono backend and a React frontend so the playground
 // can preview both halves of the stack together.
 
-// Traceability — requirements above the model, solution/testCase below
-// referencing code by qualified name.  Generating the system also emits
-// coverage + gaps reports under `.loom/` (see docs/traceability.md).
+// ---------------------------------------------------------------------------
+// Traceability (see docs/traceability.md).  This file shows the full chain:
+//
+//   requirement  ─►  solution (entitles code)
+//        │
+//        ▼
+//   testCase (verifies requirement, covers code)
+//        ▲
+//        │ verifies
+//   test "…"  (executable unit test inside the aggregate)
+//
+// `ddd generate system` turns the aggregate `test` blocks into runnable
+// vitest specs and emits coverage + gaps reports under `.loom/`.
+// ---------------------------------------------------------------------------
 requirement US-001 {
   type: UserStory
   title: "A customer can place an order"
@@ -14,6 +25,11 @@ requirement US-001 {
 requirement AC-001 parent US-001 {
   type: AcceptanceCriteria
   title: "An order can only be confirmed when it has at least one line"
+}
+
+requirement AC-002 parent US-001 {
+  type: AcceptanceCriteria
+  title: "Lines can only be added while the order is still a draft"
 }
 
 system SalesSystem {
@@ -84,6 +100,31 @@ system SalesSystem {
           quantity: int
           invariant quantity > 0
         }
+
+        // Executable tests, linked to the test cases below via
+        // `verifies`.  They generate runnable vitest specs in the Hono
+        // project's `domain/` folder.
+        test "adding a line then confirming yields a confirmed order" verifies TC-001 {
+          let order = Order.create({
+            customerId: "00000000-0000-0000-0000-000000000001",
+            status: Draft,
+            placedAt: "2024-01-01T00:00:00Z"
+          })
+          order.addLine("00000000-0000-0000-0000-000000000002", 2)
+          order.confirm()
+          expect order.status == Confirmed
+        }
+
+        test "lines cannot be added once the order is confirmed" verifies TC-002 {
+          let order = Order.create({
+            customerId: "00000000-0000-0000-0000-000000000001",
+            status: Draft,
+            placedAt: "2024-01-01T00:00:00Z"
+          })
+          order.addLine("00000000-0000-0000-0000-000000000002", 2)
+          order.confirm()
+          expectThrows order.addLine("00000000-0000-0000-0000-000000000002", 1)
+        }
       }
 
       repository Customers for Customer { }
@@ -151,4 +192,9 @@ testCase TC-001 verifies AC-001 {
     Sales.Sales.Order.addLine,
     Sales.Sales.Order.confirm
   ]
+}
+
+testCase TC-002 verifies AC-002 {
+  title: "Adding a line to a confirmed order is rejected"
+  covers [ Sales.Sales.Order.addLine ]
 }
