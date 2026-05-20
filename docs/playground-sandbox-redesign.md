@@ -233,25 +233,38 @@ today's `__LOOM_BASENAME__` / `__LOOM_API_BASE__` globals are
   so the generated API client's calls transparently ride the bridge. No change
   to the generated API client.
 
-### Network containment (CSP)
+### Network containment (CSP) — implemented
 
-Add a `<meta http-equiv="Content-Security-Policy">` to the sandbox document:
+A `<meta http-equiv="Content-Security-Policy">` is emitted into the sandbox
+document (`PREVIEW_CSP` in `iframe-html.ts`). The earlier "inline-stack default"
+plan is **dropped** — it was both unsafe (React-18 packs must stay external,
+`stacks.ts`) and made moot by the removal of the esm.sh runtime engine: the
+document now loads its deps from **same-origin vendor chunks**
+(`deployBase/vendor/<pack>/…`), not a CDN. So the policy is small:
 
-- `connect-src 'none'` is the goal — all data access is via the bridge, not the
-  network. Achievable **only if** runtime deps are inlined (no esm.sh importmap
-  at runtime). The React-19 "stack v2" path already inlines React
-  (`iframe-html.ts:46-51`); make that the **default for preview** so CSP can be
-  tight. The React-18 importmap path and the Tailwind Play CDN /
-  `@tailwindcss/browser` scripts (`iframe-html.ts:220-226`) require an explicit
-  allowlist of those exact CDN origins — a conscious, bounded relaxation that
-  still blocks arbitrary egress.
-- `script-src 'unsafe-inline'` (the inlined module) + any allowlisted CDN.
-- `base-uri 'none'`, `form-action 'none'`.
+- `connect-src 'none'` — **the lock.** The app's only network call is its API,
+  which the fetch shim answers over the bridge port without touching the
+  network; any other `fetch`/XHR/WebSocket is refused.
+- `script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdn.jsdelivr.net`
+  — `'self'` for the same-origin vendor chunks / dynamic-import splits;
+  `'unsafe-inline'` for the shim/hostScript/bundle module/importmap;
+  `'unsafe-eval'` + the two CDN hosts for the Tailwind in-browser JIT (shadcn
+  packs only).
+- `style-src 'self' 'unsafe-inline'`, `img-src 'self' data: blob:`,
+  `font-src 'self' data:`, `base-uri 'none'`, `form-action 'none'`.
 
-This is a real decision point: **tight CSP wants everything inlined**; the
-shadcn/Tailwind-CDN packs are the holdouts. Recommend: default preview to the
-inline stack; allowlist the specific Tailwind CDN host for the packs that need
-it; document the gap.
+Verified by `web/e2e/sandbox-bridge.spec.ts` (no network): the bridged API path
+still works under `connect-src 'none'`, and an arbitrary cross-origin fetch is
+refused. **Not yet verified:** that every design pack (Mantine / shadcn v3+v4 /
+MUI / Chakra) renders under this CSP in a browser — fonts, images, and the
+Tailwind JIT are the things an allowlist gets wrong; needs a browser-with-network
+run.
+
+> **Flip-time note:** the vendor chunks are origin-absolute under the
+> *playground's* deploy base. Once `SANDBOX_ORIGIN` is a distinct origin, they
+> must also be served from `SANDBOX_ORIGIN` (the sandbox site hosts `/vendor`
+> and `/sandbox`) so `script-src 'self'` — `'self'` being the iframe's own
+> origin = `SANDBOX_ORIGIN` — keeps matching.
 
 ## How tests slot in (the original ask)
 
@@ -347,16 +360,17 @@ Swap transport and isolation with the *same* preview behaviour.
 - **Gate:** generate → bundle → boot → interact works on localhost **and** a
   non-root deploy-base build; runtime fetches resolve; no SW registered.
 
-### Phase 2 — CSP + inline-stack default
+### Phase 2 — CSP (done; inline-stack default dropped)
 
-- Default preview to the React-19 **inline** stack (`iframe-html.ts:46-51`,
-  `web/src/bundle/stacks.ts`) so runtime deps aren't fetched.
-- CSP builder in `iframe-html.ts`: target `connect-src 'none'`,
-  `script-src 'unsafe-inline'` + an explicit allowlist for the Tailwind CDN
-  hosts the shadcn packs load (`iframe-html.ts:220-226`); `base-uri 'none'`,
-  `form-action 'none'`.
-- **Gate:** app still loads under the locked CSP; an injected
-  `fetch("https://example.com")` from sandbox code is blocked (assert in e2e).
+- `PREVIEW_CSP` `<meta>` in `iframe-html.ts` — see [Network containment](#network-containment-csp--implemented)
+  for the full policy and rationale. The inline-stack-default idea is dropped
+  (unsafe for React-18 packs, and made moot by the esm.sh-engine removal — deps
+  are now same-origin vendor chunks).
+- **Gate (verified here):** `connect-src 'none'` blocks an arbitrary
+  `fetch("https://example.com")` while the bridged API path still works
+  (`web/e2e/sandbox-bridge.spec.ts`).
+- **Gate (outstanding):** each design pack renders under the CSP in a browser
+  (Tailwind JIT / fonts / images) — needs a browser-with-network run.
 
 ### Phase 3 — API test runner
 
@@ -398,9 +412,11 @@ Swap transport and isolation with the *same* preview behaviour.
   has no security boundary; the untrusted user-expression feature is gated on
   pointing `SANDBOX_ORIGIN` at a distinct origin first. Track this so the two
   don't ship out of order.
-- **CSP vs Tailwind/esm.sh.** Tight `connect-src 'none'` is incompatible with
-  the CDN-driven packs as written. Either inline everything (work in the
-  bundler) or allowlist specific hosts (weaker, but bounded).
+- **CSP vs the Tailwind CDN.** With esm.sh gone, the only third-party loads left
+  are the Tailwind compiler scripts (shadcn packs); they're allowlisted by host
+  in `script-src`. `connect-src 'none'` holds for every pack because the app's
+  API rides the bridge, not the network. Outstanding: confirm each pack renders
+  under the policy in a browser (Tailwind JIT needs `'unsafe-eval'`, included).
 - **`srcdoc` size** with large inlined bundles — fall back to the bootstrap +
   in-sandbox blob pattern if it bites.
 - **Driver fidelity.** Auto-wait need only be "good enough" for deterministic

@@ -16,23 +16,28 @@
 import { expect, test } from "@playwright/test";
 import { makePreviewHtml } from "../src/preview/iframe-html";
 
-test("stub handshake → document.write → fetch shim round-trips over the port", async ({
+test("stub handshake → document.write → fetch shim round-trips, CSP blocks egress", async ({
   page,
 }) => {
   await page.goto("/");
 
-  // The "bundle": a trivial module that hits the API base and writes
-  // the response text into #root.  No imports → no esm.sh needed.
+  // The "bundle": a trivial module with no imports (so no vendor /
+  // network needed).  It (1) hits the API base — must succeed over the
+  // bridge despite `connect-src 'none'`, because the shim answers it
+  // without touching the network — and (2) attempts an arbitrary
+  // cross-origin fetch — must be refused by the CSP before any network
+  // attempt, so this passes even where the browser has no egress.
   const appJs = `
     (async () => {
+      let api = "apierr";
       try {
         const res = await fetch(window.__LOOM_API_BASE__ + "/ping");
-        const text = await res.text();
-        document.getElementById("root").textContent =
-          "BRIDGE:" + res.status + ":" + text;
-      } catch (e) {
-        document.getElementById("root").textContent = "ERR:" + (e && e.message);
-      }
+        api = "BRIDGE:" + res.status + ":" + (await res.text());
+      } catch (e) { api = "apierr:" + (e && e.message); }
+      let ext = "ALLOWED";
+      try { await fetch("https://example.com/exfil"); }
+      catch (e) { ext = "BLOCKED"; }
+      document.getElementById("root").textContent = api + "|ext:" + ext;
     })();
   `;
   const html = makePreviewHtml({ js: appJs, sandboxBase: "/sandbox" });
@@ -97,7 +102,9 @@ test("stub handshake → document.write → fetch shim round-trips over the port
     });
   }, html);
 
-  // The shim derived "/ping" as the route (API base prefix stripped)
-  // and the parent's reply was reconstructed into a real Response.
-  expect(result).toBe("BRIDGE:200:pong /ping");
+  // The shim derived "/ping" (API base prefix stripped) and the
+  // parent's reply was reconstructed into a real Response over the
+  // bridge — proving `connect-src 'none'` doesn't break the API path —
+  // while the arbitrary cross-origin fetch was refused by the CSP.
+  expect(result).toBe("BRIDGE:200:pong /ping|ext:BLOCKED");
 });
