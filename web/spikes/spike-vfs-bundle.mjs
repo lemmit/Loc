@@ -11,6 +11,7 @@ import { NodeFileSystem } from "langium/node";
 import { URI } from "langium";
 import { createDddServices } from "../../out/language/ddd-module.js";
 import { generateTypeScript } from "../../out/platform/hono/v4/emit.js";
+import { BACKEND_PINS } from "../../out/platform/hono/v4/pins.js";
 import { makeEntryStdin, schemaPathFor } from "../src/bundle/plugin.ts";
 import { install } from "../src/engine/npm/install.ts";
 import { makeVfsNpmPlugin } from "../src/engine/npm/esbuild-vfs-plugin.ts";
@@ -33,7 +34,7 @@ if ((doc.diagnostics ?? []).some((d) => d.severity === 1)) {
   console.error("parse errors");
   process.exit(1);
 }
-const fileMap = generateTypeScript(doc.parseResult.value);
+const fileMap = generateTypeScript(doc.parseResult.value, BACKEND_PINS);
 const entry = "http/index.ts";
 const schemaPath = schemaPathFor(entry);
 log(`# generated ${fileMap.size} files`);

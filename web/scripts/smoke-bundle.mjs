@@ -14,6 +14,7 @@ import { createDddServices } from "../../out/language/ddd-module.js";
 import { lowerModel } from "../../out/ir/lower.js";
 import { enrichLoomModel } from "../../out/ir/enrichments.js";
 import { generateTypeScript } from "../../out/platform/hono/v4/emit.js";
+import { BACKEND_PINS } from "../../out/platform/hono/v4/pins.js";
 import {
   harvestVersions,
   makeEntryStdin,
@@ -39,7 +40,7 @@ if (errs.length > 0) {
 
 const enriched = enrichLoomModel(lowerModel(doc.parseResult.value));
 console.log(`# generated context count: ${enriched.contexts.length}`);
-const fileMap = generateTypeScript(doc.parseResult.value);
+const fileMap = generateTypeScript(doc.parseResult.value, BACKEND_PINS);
 console.log(`# generator emitted ${fileMap.size} files`);
 
 const fs = new Map([...fileMap]);

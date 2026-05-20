@@ -1,9 +1,14 @@
-// Full end-to-end smoke: generate → bundle → import bundle in Node →
-// boot PGlite + the generated Hono app → dispatch a Request.
+// Full end-to-end smoke: generate → install (real npm tarballs) →
+// bundle (VFS-npm plugin, NO esm.sh) → import in Node → boot PGlite +
+// the generated Hono app → dispatch + round-trip a product.
 //
-// The browser runtime worker exercises the same module shape; if
-// this passes, the only browser-specific surface left is the
-// postMessage RPC plumbing.
+// Switched off the esm.sh bundler: esm.sh serves a broken drizzle-orm
+// build (pg-core/utils drops the `extractUsedTable` export), which
+// fails every backend bundle — the exact bug class the npm-in-browser
+// engine was built to escape.  This smoke now exercises that engine's
+// pipeline (the same install + makeVfsNpmPlugin + postProcessNpmBundle
+// path the browser worker runs), so it reflects the runtime we intend
+// to ship and is independent of esm.sh's upstream breakage.
 
 import * as esbuild from "esbuild";
 import { NodeFileSystem } from "langium/node";
@@ -13,19 +18,19 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import os from "node:os";
 import { createDddServices } from "../../out/language/ddd-module.js";
-import { lowerModel } from "../../out/ir/lower.js";
-import { enrichLoomModel } from "../../out/ir/enrichments.js";
 import { generateTypeScript } from "../../out/platform/hono/v4/emit.js";
+import { BACKEND_PINS } from "../../out/platform/hono/v4/pins.js";
 import {
-  harvestVersions,
   makeEntryStdin,
-  makeLoomPlugin,
   pgliteAssetUrl,
-  postProcessBundle,
   resolveInFs,
   schemaPathFor,
+  RUNTIME_VERSIONS,
 } from "../src/bundle/plugin.ts";
 import { synthDDL } from "../src/runtime/ddl.ts";
+import { install } from "../src/engine/npm/install.ts";
+import { makeVfsNpmPlugin } from "../src/engine/npm/esbuild-vfs-plugin.ts";
+import { postProcessNpmBundle } from "../src/engine/npm/postprocess.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const sourcePath = path.resolve(here, "../../examples/sales.ddd");
@@ -40,23 +45,28 @@ if ((doc.diagnostics ?? []).some((d) => d.severity === 1)) {
   console.error("parse errors");
   process.exit(1);
 }
-const fileMap = generateTypeScript(doc.parseResult.value);
-const fs = new Map([...fileMap]);
+const fileMap = generateTypeScript(doc.parseResult.value, BACKEND_PINS);
 const entry = "http/index.ts";
 const schemaPath = schemaPathFor(entry);
-if (!resolveInFs(fs, entry) || !resolveInFs(fs, schemaPath)) {
+if (!resolveInFs(fileMap, entry) || !resolveInFs(fileMap, schemaPath)) {
   console.error("entry/schema missing");
   process.exit(1);
 }
 console.log(`# generated ${fileMap.size} files`);
 
-console.log("# 2/5 bundling (esbuild + esm.sh + plugin)…");
-const ctx = {
-  files: fs,
-  fetchedUrls: new Set(),
-  fetchCache: new Map(),
-  versions: harvestVersions(fs),
+console.log("# 2/5 installing real npm tarballs + bundling (VFS plugin, no esm.sh)…");
+// One VFS: generated files (absolute paths) + installed node_modules.
+const vfs = new Map();
+for (const [p, c] of fileMap) vfs.set("/" + p, c);
+const pkg = JSON.parse(fileMap.get("package.json") ?? "{}");
+const rootDeps = {
+  ...(pkg.dependencies ?? {}),
+  "@electric-sql/pglite": RUNTIME_VERSIONS["@electric-sql/pglite"],
 };
+const t0 = Date.now();
+const { versions, fileCount } = await install(rootDeps, (p, d) => vfs.set(p, d));
+console.log(`# installed ${versions.size} pkgs / ${fileCount} files in ${Date.now() - t0} ms`);
+
 const bundleStart = Date.now();
 const out = await esbuild.build({
   stdin: {
@@ -72,21 +82,18 @@ const out = await esbuild.build({
   logLevel: "silent",
   write: false,
   sourcemap: false,
+  outdir: "/",
   loader: { ".wasm": "binary" },
-  plugins: [makeLoomPlugin(ctx)],
+  plugins: [makeVfsNpmPlugin(vfs)],
 });
-const bundleMs = Date.now() - bundleStart;
-const code = out.outputFiles[0].text;
-console.log(
-  `# bundled ${(code.length / 1024).toFixed(0)} KB in ${bundleMs} ms (${ctx.fetchedUrls.size} esm.sh modules)`,
-);
+const js = out.outputFiles.find((f) => f.path.endsWith(".js")) ?? out.outputFiles[0];
+const code = js.text;
+console.log(`# bundled ${(code.length / 1024).toFixed(0)} KB in ${Date.now() - bundleStart} ms (real node_modules)`);
 
 console.log("# 3/5 post-processing + writing bundle + importing…");
-// `postProcessBundle` mirrors what bundler.worker.ts ships in
-// production: forces PGlite's browser code path and rewrites
-// `import.meta.url` to a real jsdelivr URL so PGlite's relative
-// asset URL constructions don't blow up under blob: bases.
-const patched = postProcessBundle(code);
+// npm-engine postprocess: neutralise PGlite node-detection + rewrite
+// import.meta.url to a real jsdelivr base (blob:-URL fix).
+const patched = postProcessNpmBundle(code);
 const tmpFile = path.join(os.tmpdir(), `loom-bundle-${process.pid}.mjs`);
 writeFileSync(tmpFile, patched);
 const mod = await import(pathToFileURL(tmpFile).href);
