@@ -49,6 +49,13 @@ export class EsbuildPgliteEngine implements RuntimeEngine {
 
   private readonly bundle: LoomBundleClient;
   private readonly runtime: LoomRuntimeClient;
+  /** Last successful boot inputs — the snapshot needed to transparently
+   *  re-boot after the browser kills a backgrounded worker.  The
+   *  PGlite data itself survives in OPFS (keyed by `dataDir`), so
+   *  re-booting the same bundle + dataDir reattaches it. */
+  private lastBoot:
+    | { bundleCode: string; dataDir?: string; persistent: boolean }
+    | null = null;
 
   constructor(opts: RuntimeEngineOptions = {}) {
     this.bundle = new LoomBundleClient();
@@ -75,8 +82,10 @@ export class EsbuildPgliteEngine implements RuntimeEngine {
     return { hono, react };
   }
 
-  boot(bundleCode: string, dataDir?: string): Promise<BootResult> {
-    return this.runtime.boot({ bundleCode, dataDir });
+  async boot(bundleCode: string, dataDir?: string): Promise<BootResult> {
+    const res = await this.runtime.boot({ bundleCode, dataDir });
+    if (res.ok) this.lastBoot = { bundleCode, dataDir, persistent: res.persistent };
+    return res;
   }
 
   dispatch(req: SerializedRequest): Promise<DispatchResult> {
@@ -95,15 +104,33 @@ export class EsbuildPgliteEngine implements RuntimeEngine {
     this.runtime.respawn();
   }
 
-  // Tab-suspension persistence lands in P4.  Until then the engine
-  // has nothing to restore: snapshot yields null and the caller
-  // cold-boots as today.
+  // Tab-suspension recovery: capture the inputs needed to re-boot.
+  // Null until a successful boot — nothing to recover, caller
+  // cold-boots as before.
   async snapshot(): Promise<EngineSnapshot | null> {
-    return null;
+    // Only offer recovery when the data actually survived (OPFS).
+    // A non-persistent (in-memory) DB is genuinely gone on
+    // worker-kill, so let the caller drop to RUNTIME_LOST and show
+    // its "rows are gone" message rather than silently re-booting an
+    // empty DB.
+    return this.lastBoot?.persistent
+      ? { engineId: this.capabilities.id, version: 1, blob: this.lastBoot }
+      : null;
   }
 
-  async restore(_snap: EngineSnapshot): Promise<boolean> {
-    return false;
+  // Silently respawn the (browser-killed) worker and re-boot from the
+  // snapshot.  OPFS-backed data reattaches via the same dataDir, so a
+  // successful restore is transparent — the caller keeps its "booted"
+  // state instead of dropping to "needs Boot".
+  async restore(snap: EngineSnapshot): Promise<boolean> {
+    if (snap.engineId !== this.capabilities.id || snap.version !== 1) {
+      return false;
+    }
+    const blob = snap.blob as { bundleCode: string; dataDir?: string } | null;
+    if (!blob?.bundleCode) return false;
+    this.runtime.respawn(true); // silent — recovery, not loss
+    const res = await this.boot(blob.bundleCode, blob.dataDir);
+    return res.ok;
   }
 
   dispose(): void {

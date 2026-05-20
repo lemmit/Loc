@@ -107,6 +107,9 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
   private readonly onLost?: () => void;
   private readonly injectedRun?: EsbuildRun;
   private vfsBundler: VfsBundlerClient | null = null;
+  private lastBoot:
+    | { bundleCode: string; dataDir?: string; persistent: boolean }
+    | null = null;
 
   constructor(
     opts: RuntimeEngineOptions & { esbuildRun?: EsbuildRun } = {},
@@ -218,8 +221,10 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
 
   // boot/dispatch/wipe/reset/respawn delegate to the shared
   // PGlite+Hono runtime client, identical to EsbuildPgliteEngine.
-  boot(bundleCode: string, dataDir?: string): Promise<BootResult> {
-    return this.rt().boot({ bundleCode, dataDir });
+  async boot(bundleCode: string, dataDir?: string): Promise<BootResult> {
+    const res = await this.rt().boot({ bundleCode, dataDir });
+    if (res.ok) this.lastBoot = { bundleCode, dataDir, persistent: res.persistent };
+    return res;
   }
   dispatch(req: SerializedRequest): Promise<DispatchResult> {
     return this.rt().dispatch(req);
@@ -233,11 +238,22 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
   respawn(): void {
     this.runtime?.respawn();
   }
+  // Same tab-suspension recovery as EsbuildPgliteEngine: re-boot the
+  // retained bundle into a fresh worker; OPFS data reattaches.
   async snapshot(): Promise<EngineSnapshot | null> {
-    return null; // P4
+    return this.lastBoot?.persistent
+      ? { engineId: this.capabilities.id, version: 1, blob: this.lastBoot }
+      : null;
   }
-  async restore(_snap: EngineSnapshot): Promise<boolean> {
-    return false; // P4
+  async restore(snap: EngineSnapshot): Promise<boolean> {
+    if (snap.engineId !== this.capabilities.id || snap.version !== 1) {
+      return false;
+    }
+    const blob = snap.blob as { bundleCode: string; dataDir?: string } | null;
+    if (!blob?.bundleCode) return false;
+    this.rt().respawn(true);
+    const res = await this.boot(blob.bundleCode, blob.dataDir);
+    return res.ok;
   }
   dispose(): void {
     this.runtime?.dispose();
