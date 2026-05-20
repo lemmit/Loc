@@ -36,6 +36,9 @@ export interface VfsBundleResponse {
   code?: string;
   css?: string;
   versions?: Record<string, string>;
+  /** C0 perf instrumentation — install vs esbuild-wasm bundle split. */
+  installMs?: number;
+  bundleMs?: number;
   message?: string;
 }
 
@@ -80,11 +83,13 @@ self.onmessage = async (ev: MessageEvent<VfsBundleRequest>): Promise<void> => {
     // Install in the worker, into our own copy of the generated
     // tree — off the main thread, and node_modules stays here.
     const files = new Map(generatedFiles);
-    const { versions } = await install(
+    const tInstall = performance.now();
+    const { versions, fileCount } = await install(
       rootDeps,
       (p, d) => files.set(p, d),
       { cache: await getCache() },
     );
+    const installMs = Math.round(performance.now() - tInstall);
     const versionRec = Object.fromEntries(versions);
     const common = {
       bundle: true,
@@ -102,6 +107,7 @@ self.onmessage = async (ev: MessageEvent<VfsBundleRequest>): Promise<void> => {
       loader: { ".wasm": "binary" as const },
       plugins: [makeVfsNpmPlugin(files, "/node_modules", !!externalReactRuntime)],
     };
+    const tBundle = performance.now();
     const out = await esbuild.build(
       stdinContents
         ? {
@@ -115,6 +121,17 @@ self.onmessage = async (ev: MessageEvent<VfsBundleRequest>): Promise<void> => {
           }
         : { ...common, entryPoints: [entry as string] },
     );
+    const bundleMs = Math.round(performance.now() - tBundle);
+    // C0 — perf instrumentation: the install-vs-bundle split decides
+    // whether the npm-default perf work targets install latency (C1)
+    // or esbuild-wasm bundling (C2).  `kind` distinguishes the small
+    // Hono backend bundle from the heavy React/Mantine frontend one.
+    const kind = stdinContents ? "hono" : "react";
+    // eslint-disable-next-line no-console
+    console.info(
+      `[npm-engine] ${kind}: install=${installMs}ms bundle=${bundleMs}ms ` +
+        `(${versions.size} pkgs, ${fileCount} files installed)`,
+    );
     const js = out.outputFiles.find((f) => f.path.endsWith(".js"));
     const css = out.outputFiles.find((f) => f.path.endsWith(".css"));
     const resp: VfsBundleResponse = {
@@ -123,6 +140,8 @@ self.onmessage = async (ev: MessageEvent<VfsBundleRequest>): Promise<void> => {
       code: js?.text ?? out.outputFiles[0]?.text ?? "",
       css: css?.text,
       versions: versionRec,
+      installMs,
+      bundleMs,
     };
     self.postMessage(resp);
   } catch (err) {
