@@ -4,14 +4,23 @@ import { parseHelper } from "langium/test";
 import { createDddServices } from "../src/language/ddd-module.js";
 import { lowerModel } from "../src/ir/lower.js";
 import { enrichLoomModel } from "../src/ir/enrichments.js";
+import { generateSystems } from "../src/system/index.js";
 import type { LoomModel } from "../src/ir/loom-ir.js";
 import type { Model } from "../src/language/generated/ast.js";
 
-async function build(source: string): Promise<LoomModel> {
+async function parse(source: string): Promise<Model> {
   const services = createDddServices(NodeFileSystem);
   const helper = parseHelper(services.Ddd);
   const doc = await helper(source, { validation: true });
-  return enrichLoomModel(lowerModel(doc.parseResult.value as Model));
+  const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
+  if (errors.length) {
+    throw new Error("unexpected diagnostics:\n" + errors.map((d) => d.message).join("\n"));
+  }
+  return doc.parseResult.value as Model;
+}
+
+async function build(source: string): Promise<LoomModel> {
+  return enrichLoomModel(lowerModel(await parse(source)));
 }
 
 const SOURCE = `
@@ -33,12 +42,12 @@ const SOURCE = `
   }
 
   solution SOL-001 for US-001 {
-    title "Login via aggregate"
+    title: "Login via aggregate"
     entitles [ Identity.Auth.LoginSession.start, AuthApi ]
   }
 
   testCase TC-001 verifies AC-001 {
-    title "Successful login"
+    title: "Successful login"
     covers [ Identity.Auth.LoginSession.start ]
   }
 `;
@@ -89,5 +98,46 @@ describe("traceability IR (Slice 12)", () => {
     // Executable-test back-link reaches the covered code element.
     expect(t.execTestsByTestCase["TC-001"]).toEqual(["start works"]);
     expect(t.execTestsByCodeElement["Identity.Auth.LoginSession.start"]).toEqual(["start works"]);
+  });
+
+  it("emits .loom documentation artifacts", async () => {
+    const { files } = generateSystems(await parse(SOURCE));
+    for (const p of [
+      ".loom/traceability.md",
+      ".loom/coverage.md",
+      ".loom/gaps.md",
+      ".loom/traceability-matrix.md",
+      ".loom/traceability.mmd",
+      ".loom/traceability.json",
+    ]) {
+      expect(files.has(p), `missing ${p}`).toBe(true);
+    }
+
+    expect(files.get(".loom/coverage.md")).toContain(
+      "Overall: **50%** (1/2 referenced code elements covered",
+    );
+    expect(files.get(".loom/gaps.md")).toContain("`AuthApi` (deployable)");
+    expect(files.get(".loom/gaps.md")).toContain("`US-002` — Uncovered story");
+
+    const json = JSON.parse(files.get(".loom/traceability.json")!);
+    expect(json.summary.codeCoverage).toEqual({ covered: 1, total: 2 });
+    expect(json.summary.requirementCoverage).toEqual({ covered: 2, total: 3 });
+
+    // Mermaid: each code node defined exactly once even when both
+    // entitled and covered.
+    const mmd = files.get(".loom/traceability.mmd")!;
+    const defs = mmd.match(/Identity\.Auth\.LoginSession\.start/g) ?? [];
+    // node defined exactly once; edges reference it by node id
+    expect(defs.length).toBe(1);
+    expect(mmd).toContain("-->|entitles|");
+    expect(mmd).toContain("-.->|covers|");
+  });
+
+  it("emits no traceability artifacts when none are declared", async () => {
+    const { files } = generateSystems(
+      await parse(`system S { module M { context C { aggregate A { name: string } repository As for A {} } } deployable D { platform: hono  modules: M } }`),
+    );
+    expect([...files.keys()].some((k) => k.startsWith(".loom/traceability"))).toBe(false);
+    expect(files.has(".loom/coverage.md")).toBe(false);
   });
 });

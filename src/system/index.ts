@@ -14,6 +14,7 @@ import { renderE2EFile } from "./e2e-render.js";
 import { renderUIE2EFile } from "./ui-e2e-render.js";
 import { renderWireSpec } from "./wire-spec.js";
 import { renderDomainDiagram, renderWorkflowDiagram } from "./mermaid.js";
+import { renderTraceabilityArtifacts } from "./traceability.js";
 
 // ---------------------------------------------------------------------------
 // System-mode generation.
@@ -47,6 +48,13 @@ export function generateSystems(model: Model): SystemEmission {
   const out = new Map<string, string>();
   for (const sys of loom.systems) {
     emitSystem(sys, loom, out);
+  }
+  // Traceability artifacts (Slice 12) — model-global (requirements may
+  // reference code across systems), so emitted once at the output root
+  // rather than per system.  No-op when the source declares no
+  // requirement / solution / testCase.
+  for (const [path, content] of renderTraceabilityArtifacts(loom)) {
+    out.set(path, content);
   }
   return { files: out };
 }
