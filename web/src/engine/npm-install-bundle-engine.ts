@@ -61,7 +61,17 @@ export interface EsbuildRunInput {
 export type EsbuildRun = (
   input: EsbuildRunInput,
 ) => Promise<
-  | { ok: true; code: string; css?: string; versions: Record<string, string> }
+  | {
+      ok: true;
+      code: string;
+      css?: string;
+      versions: Record<string, string>;
+      /** C2: present when the runner externalised a prebuilt
+       *  design-pack vendor — the iframe importmap + optional
+       *  vendor.css url to forward to the preview. */
+      vendorImportmap?: Record<string, string>;
+      vendorCssUrl?: string;
+    }
   | { ok: false; message: string }
 >;
 
@@ -195,13 +205,13 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
 
     let react: BundleResult | null = null;
     if (hono.ok && input.reactEntry) {
-      // Bundle the frontend self-contained: react/react-dom come from
-      // the single deduped node_modules, so they're one instance and
-      // need NO importmap.  (Externalising react — the earlier
-      // approach — left a bare `import "react"` the iframe importmap
-      // couldn't resolve: "Failed to resolve module specifier react".
-      // Externalisation only works once C2 ships a prebuilt vendor
-      // target for the importmap to point at.)
+      // C2: the worker externalises the prebuilt design-pack vendor
+      // when one is shipped (app-only bundle + iframe importmap), and
+      // otherwise bundles the frontend self-contained (react from the
+      // single deduped node_modules — one instance, no importmap).
+      // Either way the engine forwards the worker's vendorImportmap /
+      // vendorCssUrl (set only on the externalised path) onto the
+      // react BundleResult for the preview.
       const r = await run({
         generatedFiles,
         rootDeps: harvestDeps(generatedFiles, input.reactEntry),
@@ -217,6 +227,8 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
             durationMs: 0,
             fetchedUrls: [],
             versions: r.versions,
+            vendorImportmap: r.vendorImportmap,
+            vendorCssUrl: r.vendorCssUrl,
             diagnostics: [],
           }
         : { ok: false, diagnostics: [{ severity: "error", message: r.message }] };

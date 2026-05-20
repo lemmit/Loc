@@ -15,7 +15,14 @@ import type {
 } from "./vfs-bundler.worker.js";
 
 type RunResult =
-  | { ok: true; code: string; css?: string; versions: Record<string, string> }
+  | {
+      ok: true;
+      code: string;
+      css?: string;
+      versions: Record<string, string>;
+      vendorImportmap?: Record<string, string>;
+      vendorCssUrl?: string;
+    }
   | { ok: false; message: string };
 
 // Generous cap: a cold run does a full npm install + esbuild-wasm
@@ -55,6 +62,8 @@ export class VfsBundlerClient {
               code: m.code ?? "",
               css: m.css,
               versions: m.versions ?? {},
+              vendorImportmap: m.vendorImportmap,
+              vendorCssUrl: m.vendorCssUrl,
             }
           : { ok: false, message: m.message ?? "vfs-bundler: unknown error" },
       );

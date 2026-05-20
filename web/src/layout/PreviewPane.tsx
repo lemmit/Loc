@@ -35,6 +35,8 @@ export function PreviewPane({ ctx }: Props): JSX.Element {
           js={reactBundle.code}
           css={reactBundle.css}
           versions={reactBundle.versions}
+          vendorImportmap={reactBundle.vendorImportmap}
+          vendorCssUrl={reactBundle.vendorCssUrl}
           runtime={engine}
         />
       ) : (
