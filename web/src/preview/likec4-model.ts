@@ -37,7 +37,9 @@ export async function buildLayoutedModel(spec: C4Spec): Promise<LayoutedC4Model>
         buildNode(spec.root),
         ...spec.relationships.map((r) => model.rel(r.source, r.target, r.label)),
       ),
-      views.views(views.viewOf(spec.viewId, spec.viewOf, views.$include("*"))),
+      views.views(
+        views.viewOf(spec.viewId, spec.viewOf, { title: spec.viewTitle }, views.$include("*")),
+      ),
     )
     .toLikeC4Model();
   /* eslint-enable @typescript-eslint/no-explicit-any */

@@ -135,6 +135,8 @@ export interface C4Spec {
   viewId: string;
   /** FQN the rendered view is `view of`. */
   viewOf: string;
+  /** Human-readable title shown in the renderer's view panel. */
+  viewTitle: string;
 }
 
 export function buildC4Spec(sys: SystemIR): C4Spec {
@@ -175,6 +177,7 @@ export function buildC4Spec(sys: SystemIR): C4Spec {
     relationships,
     viewId: "containers",
     viewOf: sysId,
+    viewTitle: `${sys.name} — containers`,
   };
 }
 
