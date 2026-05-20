@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import * as monaco from "monaco-editor";
-import { Box, Group, SegmentedControl, Text } from "@mantine/core";
+import { ActionIcon, Box, Group, SegmentedControl, Text } from "@mantine/core";
 import { installMonacoEnvironment } from "../editor/monaco-env";
 import { languageFromPath } from "./file-tree";
 
@@ -74,14 +74,36 @@ function loadMermaid(): Promise<typeof import("mermaid").default> {
   return mermaidReady;
 }
 
-// Mermaid preview with a Diagram / Source toggle.  Rendering can fail
-// on malformed input, so we surface the error and let the user drop to
-// the raw source.
+// Monotonic id source — `mermaid.render` requires a DOM id that is
+// unique per call.  Reusing one (e.g. a stable ref) collides with the
+// SVG already in the document when toggling Source→Diagram, which made
+// the re-render come back empty until the component remounted.
+let mermaidRenderSeq = 0;
+
+const ZOOM_STEP = 1.2;
+const ZOOM_MIN = 0.2;
+const ZOOM_MAX = 8;
+
+// Mermaid preview with a Diagram / Source toggle and pan + zoom.
+// Rendering can fail on malformed input, so we surface the error and
+// let the user drop to the raw source.
 function MermaidViewer({ content }: { content: string }): JSX.Element {
   const [view, setView] = useState<"diagram" | "source">("diagram");
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const idRef = useRef(`mmd-${Math.random().toString(36).slice(2)}`);
+
+  // Viewport transform.  Pan stays interactive after zooming so the
+  // user can drag to the region they care about.
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const dragRef = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
+
+  // Reset the viewport whenever the document changes so each diagram
+  // opens fitted at the top-left rather than wherever the last one was.
+  useEffect(() => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  }, [content]);
 
   useEffect(() => {
     if (view !== "diagram") return;
@@ -90,7 +112,8 @@ function MermaidViewer({ content }: { content: string }): JSX.Element {
     void (async () => {
       try {
         const mermaid = await loadMermaid();
-        const { svg } = await mermaid.render(idRef.current, content);
+        const id = `mmd-${mermaidRenderSeq++}`;
+        const { svg } = await mermaid.render(id, content);
         if (!cancelled) setSvg(svg);
       } catch (err) {
         if (!cancelled) {
@@ -104,9 +127,36 @@ function MermaidViewer({ content }: { content: string }): JSX.Element {
     };
   }, [content, view]);
 
+  const zoomBy = (factor: number): void =>
+    setZoom((z) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z * factor)));
+  const resetView = (): void => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  };
+
+  const onPointerDown = (e: React.PointerEvent): void => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragRef.current = { x: e.clientX, y: e.clientY, ox: pan.x, oy: pan.y };
+  };
+  const onPointerMove = (e: React.PointerEvent): void => {
+    const d = dragRef.current;
+    if (!d) return;
+    setPan({ x: d.ox + (e.clientX - d.x), y: d.oy + (e.clientY - d.y) });
+  };
+  const endDrag = (e: React.PointerEvent): void => {
+    dragRef.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  };
+  const onWheel = (e: React.WheelEvent): void => {
+    // Plain wheel zooms; the user then drags to reposition.
+    zoomBy(e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP);
+  };
+
   return (
     <Box style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column" }}>
-      <Group px="xs" py={4} bg="dark.6" gap="xs" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
+      <Group px="xs" py={4} bg="dark.6" gap="xs" justify="space-between" wrap="nowrap" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
         <SegmentedControl
           size="xs"
           value={view}
@@ -117,6 +167,22 @@ function MermaidViewer({ content }: { content: string }): JSX.Element {
           ]}
           data-testid="mmd-view"
         />
+        {view === "diagram" && svg && !error && (
+          <Group gap={4} wrap="nowrap">
+            <ActionIcon size="sm" variant="default" onClick={() => zoomBy(1 / ZOOM_STEP)} data-testid="mmd-zoom-out" aria-label="Zoom out">
+              −
+            </ActionIcon>
+            <Text size="xs" c="dimmed" w={40} ta="center" data-testid="mmd-zoom-level">
+              {Math.round(zoom * 100)}%
+            </Text>
+            <ActionIcon size="sm" variant="default" onClick={() => zoomBy(ZOOM_STEP)} data-testid="mmd-zoom-in" aria-label="Zoom in">
+              +
+            </ActionIcon>
+            <ActionIcon size="sm" variant="default" onClick={resetView} data-testid="mmd-zoom-reset" aria-label="Reset view">
+              ⤢
+            </ActionIcon>
+          </Group>
+        )}
       </Group>
       {view === "source" ? (
         <Box
@@ -145,12 +211,31 @@ function MermaidViewer({ content }: { content: string }): JSX.Element {
         </Box>
       ) : svg ? (
         <Box
-          data-testid="mmd-svg"
-          p="md"
-          style={{ flex: 1, minHeight: 0, overflow: "auto", textAlign: "center" }}
-          // Mermaid output is sanitised by its own strict securityLevel.
-          dangerouslySetInnerHTML={{ __html: svg }}
-        />
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
+          onWheel={onWheel}
+          style={{
+            flex: 1,
+            minHeight: 0,
+            overflow: "hidden",
+            cursor: dragRef.current ? "grabbing" : "grab",
+            touchAction: "none",
+          }}
+        >
+          <Box
+            data-testid="mmd-svg"
+            style={{
+              transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+              transformOrigin: "0 0",
+              width: "fit-content",
+              padding: 16,
+            }}
+            // Mermaid output is sanitised by its own strict securityLevel.
+            dangerouslySetInnerHTML={{ __html: svg }}
+          />
+        </Box>
       ) : (
         <Text size="sm" c="dimmed" p="sm">
           Rendering…
