@@ -79,6 +79,19 @@ export default defineConfig({
         manualChunks(id) {
           if (!id.includes("/node_modules/")) return undefined;
           if (id.includes("/node_modules/monaco-editor/")) return "monaco";
+          // LikeC4 ecosystem (model/react/builder + xyflow + the
+          // Graphviz WASM layouter) is only reached via the dynamic
+          // import in the `.c4` viewer, so this stays a lazy chunk —
+          // grouping it gives one cacheable vendor bundle instead of a
+          // handful of hashed fragments that all load together anyway.
+          if (
+            id.includes("/node_modules/likec4/") ||
+            id.includes("/node_modules/@likec4/") ||
+            id.includes("/node_modules/@xyflow/") ||
+            id.includes("/node_modules/@hpcc-js/")
+          ) {
+            return "likec4";
+          }
           if (
             id.includes("/node_modules/@mantine/") ||
             id.includes("/node_modules/@floating-ui/")
@@ -96,6 +109,11 @@ export default defineConfig({
         },
       },
     },
+    // The app's own entry chunk sits well under this; the limit is
+    // raised only to mute the warning for the two intentional, lazily
+    // loaded vendor bundles — Monaco (~3.9 MB) and LikeC4 — both of
+    // which are cached after first use and never block initial paint.
+    chunkSizeWarningLimit: 4000,
   },
   worker: {
     format: "es",

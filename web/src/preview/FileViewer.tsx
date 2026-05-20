@@ -39,7 +39,16 @@ const LikeC4Canvas = lazy(async () => {
   return {
     default: ({ model, viewId }: { model: LayoutedC4Model; viewId: string }) => (
       <LikeC4ModelProvider likec4model={model}>
-        <LikeC4View viewId={viewId as never} colorScheme="dark" />
+        <LikeC4View
+          viewId={viewId as never}
+          colorScheme="dark"
+          background="dots"
+          controls
+          enableFocusMode
+          enableElementDetails
+          enableRelationshipDetails
+          enableRelationshipBrowser
+        />
       </LikeC4ModelProvider>
     ),
   };
