@@ -1,0 +1,100 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`domain.mmd > emits the expected classDiagram for examples/acme.ddd 1`] = `
+"%% Loom domain diagram — generated from the IR, do not edit by hand.
+%% System: Acme
+classDiagram
+  direction LR
+  %% Catalog / Products
+  class Money {
+    <<value>>
+    +decimal amount
+    +string currency
+  }
+  class Product {
+    <<aggregate>>
+    +Id~Product~ id
+    +string sku
+    +Money price
+  }
+  class Products {
+    <<repository>>
+    +all() Product[]
+    +bySku(sku) Product?
+  }
+  %% Sales / Orders
+  class OrderStatus {
+    <<enumeration>>
+    +Draft
+    +Confirmed
+    +Shipped
+    +Cancelled
+  }
+  class OrderConfirmed {
+    <<event>>
+    +Id~Order~ order
+    +datetime at
+  }
+  class Order {
+    <<aggregate>>
+    +Id~Order~ id
+    +string customerId
+    +OrderStatus status
+    +datetime placedAt
+    +isMutable() bool
+    +addLine(productId, qty)
+    +confirm()
+  }
+  class OrderLine {
+    <<entity>>
+    +Id~Product~ productId
+    +int quantity
+  }
+  class Orders {
+    <<repository>>
+    +all() Order[]
+    +byCustomer(customerId) Order[]
+  }
+  class ActiveOrders {
+    <<view>>
+  }
+  class OrderSummary {
+    <<view>>
+  }
+  %% CustomerMgmt / Customers
+  class Customer {
+    <<aggregate>>
+    +Id~Customer~ id
+    +string username
+    +string email
+    +int age
+  }
+  class Customers {
+    <<repository>>
+    +all() Customer[]
+    +byEmail(email) Customer?
+  }
+  Product ..> Money : uses
+  Products ..> Product : manages
+  Order ..> OrderStatus : uses
+  Order *-- "*" OrderLine : lines
+  OrderLine ..> Product : ref
+  Orders ..> Order : manages
+  ActiveOrders ..> Order : reads
+  OrderSummary ..> Order : reads
+  Customers ..> Customer : manages"
+`;
+
+exports[`workflows.mmd > emits the expected flowchart for examples/acme.ddd 1`] = `
+"%% Loom workflow diagram — generated from the IR, do not edit by hand.
+%% System: Acme
+flowchart TD
+  subgraph wf_0["Orders · placeOrder(customerId, productId, quantity)"]
+    direction TB
+    w0s0{{"precondition: quantity > 0"}}
+    w0s1["order = Order.create()"]
+    w0s2["order.addLine()"]
+    w0s0 --> w0s1
+    w0s1 --> w0s2
+  end"
+`;
