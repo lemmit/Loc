@@ -6,3 +6,5 @@ test-results/
 playwright-report/
 
 public/npm-mirror/
+
+public/vendor/
