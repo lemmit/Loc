@@ -1,23 +1,139 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import * as monaco from "monaco-editor";
 import { ActionIcon, Box, Group, SegmentedControl, Text } from "@mantine/core";
 import { installMonacoEnvironment } from "../editor/monaco-env";
 import { languageFromPath } from "./file-tree";
+import type { VirtualFile } from "../build/protocol";
+import type { C4Spec, LayoutedC4Model } from "./likec4-model";
+import { buildLayoutedModel } from "./likec4-model";
 
 installMonacoEnvironment();
 
 interface FileViewerProps {
   path: string;
   content: string;
+  // The full generated file set, so the `.c4` viewer can find its sibling
+  // `.c4.json` model projection.  Absent (e.g. the secondary pane) → the
+  // `.c4` falls back to the source view.
+  files?: VirtualFile[];
 }
 
-// Dispatcher: Mermaid sources (`.mmd`) get a rendered SVG preview;
-// everything else uses the read-only Monaco viewer.  Branching here
-// (rather than with a conditional hook inside one component) keeps each
-// viewer's hooks unconditional.
-export function FileViewer({ path, content }: FileViewerProps): JSX.Element {
+// Dispatcher: Mermaid sources (`.mmd`) get a rendered SVG preview; LikeC4
+// (`.c4`) gets an interactive diagram rebuilt from its sibling `.c4.json`;
+// everything else uses the read-only Monaco viewer.  Branching here (rather
+// than with a conditional hook inside one component) keeps each viewer's
+// hooks unconditional.
+export function FileViewer({ path, content, files }: FileViewerProps): JSX.Element {
   if (path.endsWith(".mmd")) return <MermaidViewer content={content} />;
+  if (path.endsWith(".c4")) {
+    const spec = files?.find((f) => f.path === `${path}.json`);
+    if (spec) return <LikeC4Viewer specJson={spec.content} source={content} />;
+  }
   return <MonacoViewer path={path} content={content} />;
+}
+
+// The LikeC4 React canvas (provider + view) is large and pulls its own
+// runtime, so it's lazily imported the first time a `.c4` diagram is shown.
+const LikeC4Canvas = lazy(async () => {
+  const { LikeC4ModelProvider, LikeC4View } = await import("likec4/react");
+  return {
+    default: ({ model, viewId }: { model: LayoutedC4Model; viewId: string }) => (
+      <LikeC4ModelProvider likec4model={model}>
+        <LikeC4View viewId={viewId as never} colorScheme="dark" />
+      </LikeC4ModelProvider>
+    ),
+  };
+});
+
+// LikeC4 architecture preview with a Diagram / Source toggle.  The diagram is
+// rebuilt from the sidecar `.c4.json` (the playground can't run LikeC4's
+// Langium parser in-browser) and laid out with Graphviz WASM, so the build is
+// async and can fail — we surface errors and let the user drop to source.
+function LikeC4Viewer({ specJson, source }: { specJson: string; source: string }): JSX.Element {
+  const [view, setView] = useState<"diagram" | "source">("diagram");
+  const [model, setModel] = useState<LayoutedC4Model | null>(null);
+  const [viewId, setViewId] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setModel(null);
+    setError(null);
+    void (async () => {
+      try {
+        const spec = JSON.parse(specJson) as C4Spec;
+        const built = await buildLayoutedModel(spec);
+        if (!cancelled) {
+          setViewId(spec.viewId);
+          setModel(built);
+        }
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [specJson]);
+
+  return (
+    <Box style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column" }}>
+      <Group px="xs" py={4} bg="dark.6" gap="xs" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
+        <SegmentedControl
+          size="xs"
+          value={view}
+          onChange={(v) => setView(v as "diagram" | "source")}
+          data={[
+            { label: "Diagram", value: "diagram" },
+            { label: "Source", value: "source" },
+          ]}
+          data-testid="c4-view"
+        />
+      </Group>
+      {view === "source" ? (
+        <Box
+          component="pre"
+          p="sm"
+          style={{
+            flex: 1,
+            minHeight: 0,
+            overflow: "auto",
+            margin: 0,
+            fontFamily: "var(--mantine-font-family-monospace)",
+            fontSize: 12,
+            whiteSpace: "pre",
+          }}
+        >
+          {source}
+        </Box>
+      ) : error ? (
+        <Box p="sm" style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+          <Text size="sm" c="red" mb="xs">
+            Could not render diagram.
+          </Text>
+          <Text size="xs" ff="monospace" c="dimmed" style={{ whiteSpace: "pre-wrap" }}>
+            {error}
+          </Text>
+        </Box>
+      ) : model ? (
+        <Box data-testid="c4-diagram" style={{ flex: 1, minHeight: 0, position: "relative" }}>
+          <Suspense
+            fallback={
+              <Text size="sm" c="dimmed" p="sm">
+                Rendering…
+              </Text>
+            }
+          >
+            <LikeC4Canvas model={model} viewId={viewId} />
+          </Suspense>
+        </Box>
+      ) : (
+        <Text size="sm" c="dimmed" p="sm">
+          Rendering…
+        </Text>
+      )}
+    </Box>
+  );
 }
 
 // Read-only Monaco panel for viewing a generated file.  We reuse

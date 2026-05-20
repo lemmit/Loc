@@ -1,0 +1,132 @@
+{
+  "systemTitle": "Acme",
+  "root": {
+    "localId": "Acme",
+    "kind": "system",
+    "title": "Acme",
+    "children": [
+      {
+        "localId": "api",
+        "kind": "container",
+        "title": "api",
+        "technology": "dotnet",
+        "children": [
+          {
+            "localId": "Catalog",
+            "kind": "component",
+            "title": "Catalog",
+            "children": []
+          },
+          {
+            "localId": "Sales",
+            "kind": "component",
+            "title": "Sales",
+            "children": []
+          },
+          {
+            "localId": "CustomerMgmt",
+            "kind": "component",
+            "title": "CustomerMgmt",
+            "children": []
+          }
+        ]
+      },
+      {
+        "localId": "catalogWeb",
+        "kind": "container",
+        "title": "catalogWeb",
+        "technology": "hono",
+        "children": [
+          {
+            "localId": "Catalog",
+            "kind": "component",
+            "title": "Catalog",
+            "children": []
+          },
+          {
+            "localId": "CustomerMgmt",
+            "kind": "component",
+            "title": "CustomerMgmt",
+            "children": []
+          }
+        ]
+      },
+      {
+        "localId": "catalogApi",
+        "kind": "container",
+        "title": "catalogApi",
+        "technology": "dotnet",
+        "children": [
+          {
+            "localId": "Catalog",
+            "kind": "component",
+            "title": "Catalog",
+            "children": []
+          },
+          {
+            "localId": "CustomerMgmt",
+            "kind": "component",
+            "title": "CustomerMgmt",
+            "children": []
+          }
+        ]
+      },
+      {
+        "localId": "webApp",
+        "kind": "container",
+        "title": "webApp",
+        "technology": "static",
+        "children": [
+          {
+            "localId": "Catalog",
+            "kind": "component",
+            "title": "Catalog",
+            "children": []
+          },
+          {
+            "localId": "Sales",
+            "kind": "component",
+            "title": "Sales",
+            "children": []
+          },
+          {
+            "localId": "CustomerMgmt",
+            "kind": "component",
+            "title": "CustomerMgmt",
+            "children": []
+          }
+        ]
+      },
+      {
+        "localId": "db",
+        "kind": "database",
+        "title": "PostgreSQL",
+        "children": []
+      }
+    ]
+  },
+  "relationships": [
+    {
+      "source": "Acme.api",
+      "target": "Acme.db",
+      "label": "reads / writes"
+    },
+    {
+      "source": "Acme.catalogWeb",
+      "target": "Acme.db",
+      "label": "reads / writes"
+    },
+    {
+      "source": "Acme.catalogApi",
+      "target": "Acme.db",
+      "label": "reads / writes"
+    },
+    {
+      "source": "Acme.webApp",
+      "target": "Acme.api",
+      "label": "calls"
+    }
+  ],
+  "viewId": "containers",
+  "viewOf": "Acme"
+}

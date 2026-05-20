@@ -20,7 +20,7 @@ import {
   renderSequenceDiagram,
   renderWorkflowDiagram,
 } from "./mermaid.js";
-import { renderC4Model } from "./likec4.js";
+import { renderC4Model, renderC4SpecJson } from "./likec4.js";
 import { renderTraceabilityArtifacts } from "./traceability.js";
 
 // ---------------------------------------------------------------------------
@@ -95,8 +95,12 @@ function emitSystem(
   out.set(".loom/sequence.mmd", renderSequenceDiagram(sys));
   out.set(".loom/deployment.mmd", renderDeploymentDiagram(sys));
   // LikeC4 architecture model (https://likec4.dev) — opens in the
-  // LikeC4 CLI / VS Code extension.  See `likec4.ts`.
+  // LikeC4 CLI / VS Code extension.  See `likec4.ts`.  The sibling
+  // `.c4.json` is the same model as structured data, which the playground
+  // rebuilds (it can't run the Langium parser in-browser) to render the
+  // diagram; hidden from the playground's file tree.
   out.set(".loom/architecture.c4", renderC4Model(sys));
+  out.set(".loom/architecture.c4.json", renderC4SpecJson(sys));
 
   // E2E test scaffolding — emitted only when the system declares
   // `test e2e` blocks.  Lives at the system root so it can run against
