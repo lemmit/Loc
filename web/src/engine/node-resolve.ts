@@ -1,17 +1,14 @@
 // ---------------------------------------------------------------------------
 // Node module resolution over a flat in-VFS node_modules — the core
-// of the npm-in-browser engine (Phase B2).
+// of the npm-in-browser engine.
 //
-// Replaces `pinnedEsmShUrl` (esm.sh HTTP) with real Node resolution
-// against the package's *own published files*.  This is what kills
-// the esm.sh-split-shard bug class: we read drizzle-orm's real
-// `pg-core/index.js` (which re-exports the real `utils.js` that B1
-// proved exports `extractUsedTable`), not esm.sh's lossy re-build.
+// Real Node resolution against each package's *own published files*:
+// we read drizzle-orm's real `pg-core/index.js` (which re-exports the
+// real `utils.js` that exports `extractUsedTable`), so the whole
+// CDN-split-shard bug class can't occur.
 //
 // Pure: parameterised over a `FileSource` so it runs against the
-// playground VFS, an in-memory Map (the spike), or anything else.
-// Additive in B2 — not wired into the app yet; the existing
-// EsbuildPgliteEngine path is untouched.
+// playground VFS, an in-memory Map, or anything else.
 //
 // Scope: the subset real generated projects + their deps need —
 //   - bare + subpath specifiers, `@scope/name`
