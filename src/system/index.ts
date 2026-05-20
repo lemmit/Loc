@@ -13,6 +13,7 @@ import { platformFor } from "../platform/registry.js";
 import { renderE2EFile } from "./e2e-render.js";
 import { renderUIE2EFile } from "./ui-e2e-render.js";
 import { renderWireSpec } from "./wire-spec.js";
+import { renderSystemDiagram } from "./mermaid.js";
 
 // ---------------------------------------------------------------------------
 // System-mode generation.
@@ -70,6 +71,10 @@ function emitSystem(
   // Wire-spec artifact — diffable record of every aggregate / part /
   // value object's canonical wire shape.  See `wire-spec.ts`.
   out.set(".loom/wire-spec.json", renderWireSpec(sys));
+  // Mermaid system-structure diagram — a derived view of the IR
+  // (modules → contexts → aggregates/VOs/events/repos + deployables).
+  // The playground previews it inline; GitHub renders it in fences.
+  out.set(".loom/system.mmd", renderSystemDiagram(sys));
 
   // E2E test scaffolding — emitted only when the system declares
   // `test e2e` blocks.  Lives at the system root so it can run against
