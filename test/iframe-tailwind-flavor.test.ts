@@ -37,7 +37,7 @@ describe("iframe-html — Tailwind v3 path (shadcn@v3)", () => {
   const html = makePreviewHtml({ js: "/* b */", css: V3_CSS });
 
   it("loads the Tailwind 3 Play CDN with an inlined config", () => {
-    expect(html).toContain("https://cdn.tailwindcss.com");
+    expect(html).toContain('<script src="https://cdn.tailwindcss.com"></script>');
     expect(html).toMatch(/tailwind\.config\s*=/);
   });
 
@@ -58,7 +58,9 @@ describe("iframe-html — Tailwind v4 path (shadcn@v4)", () => {
   });
 
   it("does not inline a v3 `tailwind.config` or load the v3 Play CDN", () => {
-    expect(html).not.toContain("https://cdn.tailwindcss.com");
+    // The CSP `script-src` allowlists the CDN domain; what matters is
+    // that the v3 Play CDN `<script>` itself isn't injected.
+    expect(html).not.toContain('src="https://cdn.tailwindcss.com"');
     expect(html).not.toMatch(/tailwind\.config\s*=/);
   });
 
@@ -83,7 +85,8 @@ describe("iframe-html — non-Tailwind CSS (Mantine)", () => {
   it("uses a plain <style> tag and no JIT script", () => {
     expect(html).toContain("<style>");
     expect(html).not.toContain('type="text/tailwindcss"');
-    expect(html).not.toContain("cdn.tailwindcss.com");
+    // CSP `script-src` names the CDN domain; assert no CDN `<script>` loads.
+    expect(html).not.toContain('src="https://cdn.tailwindcss.com"');
     expect(html).not.toContain("@tailwindcss/browser");
   });
 });
