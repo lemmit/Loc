@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Loom preview sandbox</title>
+</head>
+<body>
+<script>
+// Loom preview sandbox stub.
+//
+// Plain, dependency-free, deployable to any static host (it is the
+// single file the sandbox origin serves).  It does two things:
+//   1. announce readiness to the parent so it posts the init message
+//      only once our listener is attached;
+//   2. accept the transferred MessagePort + synthesised document, and
+//      render the app in place via document.write.
+//
+// document.write keeps THIS document's URL (a real path on the
+// sandbox origin), so the app's BrowserRouter / history.pushState
+// work normally.  The Window object survives document.open(), so the
+// port we stash on `window.__LOOM_PORT__` is still there when the
+// written document's inline fetch-shim picks it up.
+(function () {
+  "use strict";
+  var parentWin = window.parent;
+  function onInit(e) {
+    if (e.source !== parentWin) return;
+    var d = e.data;
+    if (!d || d.type !== "loom-init") return;
+    var port = e.ports && e.ports[0];
+    if (!port) return;
+    window.removeEventListener("message", onInit);
+    window.__LOOM_PORT__ = port;
+    document.open();
+    document.write(d.html);
+    document.close();
+  }
+  window.addEventListener("message", onInit);
+  if (parentWin && parentWin !== window) {
+    parentWin.postMessage({ type: "loom-stub-ready" }, "*");
+  }
+})();
+</script>
+</body>
+</html>

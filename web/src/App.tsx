@@ -9,7 +9,6 @@ import type { GenerateOk, GenerateResult, VirtualFile } from "./build/protocol";
 import type { BundleOk } from "./bundle/protocol";
 import { engineRegistry, selectedEngineId, type RuntimeEngine } from "./engine";
 import { emptyDependencySet } from "./engine";
-import { registerPreviewSw } from "./preview/sw-host";
 import { buildTree } from "./preview/file-tree";
 import { useWorkspace } from "./workspace/use-workspace";
 import { buildShareUrl, readHashSource, writeHashSource } from "./util/share";
@@ -207,7 +206,6 @@ export default function App(): JSX.Element {
     buildClientRef.current = build;
     engineRef.current = engine;
     setBuildClientReady(true);
-    void registerPreviewSw();
     return () => {
       buildClientRef.current = null;
       engineRef.current = null;
