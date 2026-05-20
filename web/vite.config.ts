@@ -42,11 +42,15 @@ export default defineConfig({
   // a sub-path or the root of any host.
   base: "./",
   plugins: [loomLoaderShim(), react()],
-  resolve: {
-    alias: {
-      "@loom": fileURLToPath(new URL("../src", import.meta.url)),
-    },
-  },
+  // `resolve.alias` previously claimed the whole `@loom/*` namespace
+  // as a path alias to `../src`, but nothing in the repo ever imported
+  // through it (`grep -rn 'from "@loom/'` is empty).  Removing it
+  // unblocks packaging-split P3: workspace packages with real
+  // `@loom/*` npm names (`@loom/backend-hono-v4`, future `@loom/core`,
+  // `@loom/cli`) would otherwise be intercepted by Vite's resolver
+  // and rewritten to `../src/...`.  When a published `@loom/core`
+  // becomes the playground's toolchain dependency, a narrowly-scoped
+  // alias (just `@loom/core` → `../src`) replaces this if needed.
   server: {
     port: 5173,
     host: "127.0.0.1",
