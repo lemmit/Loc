@@ -73,8 +73,10 @@ classDiagram
   }
   Product ..> Money : uses
   Products ..> Product : manages
+  OrderConfirmed ..> Order : ref
   Order ..> OrderStatus : uses
   Order *-- "*" OrderLine : lines
+  Order ..> OrderConfirmed : emits
   OrderLine ..> Product : ref
   Orders ..> Order : manages
   ActiveOrders ..> Order : reads

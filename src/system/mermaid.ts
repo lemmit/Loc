@@ -104,12 +104,24 @@ export function buildDomainDiagram(sys: SystemIR): string {
       classes.push(`  %% ${m.name} / ${c.name}`);
       for (const e of c.enums) classes.push(...enumClass(e.name, e.values));
       for (const v of c.valueObjects) classes.push(...valueObjectClass(v));
-      for (const ev of c.events) classes.push(...simpleClass(ev.name, "event", ev.fields));
+      for (const ev of c.events) {
+        classes.push(...simpleClass(ev.name, "event", ev.fields));
+        // Events carry Id<X> fields — wire those as data references.
+        collectFieldEdges(ev.name, ev.fields, c, rel);
+      }
       for (const a of c.aggregates) {
         classes.push(...aggregateClass(a));
         collectFieldEdges(a.name, a.fields, c, rel);
         for (const con of a.contains) {
           rel(`  ${a.name} *-- "${con.collection ? "*" : "1"}" ${con.partName} : ${con.name}`);
+        }
+        // Producer edges: an operation that emits an event wires the
+        // aggregate to that event.  (Loom has no consumer construct —
+        // nothing subscribes to events — so there is no consume side.)
+        for (const op of a.operations) {
+          for (const st of op.statements) {
+            if (st.kind === "emit") rel(`  ${a.name} ..> ${st.eventName} : emits`);
+          }
         }
         // Entity parts are declared inside their owning aggregate.
         for (const p of a.parts) {
