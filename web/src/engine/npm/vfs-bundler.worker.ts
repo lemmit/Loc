@@ -100,6 +100,12 @@ self.onmessage = async (ev: MessageEvent<VfsBundleRequest>): Promise<void> => {
       logLevel: "silent" as const,
       write: false as const,
       sourcemap: false as const,
+      // Generated components use the automatic JSX runtime (no
+      // `import React`).  Without this esbuild defaults to the
+      // classic transform (React.createElement) → "React is not
+      // defined" at runtime once React is bundled.  Mirrors the
+      // esm.sh bundler.worker.
+      jsx: "automatic" as const,
       // outdir gives JS-imported CSS (Mantine `*.css`) an output
       // path so esbuild bundles it into a sibling .css output file
       // instead of erroring "without an output path configured".

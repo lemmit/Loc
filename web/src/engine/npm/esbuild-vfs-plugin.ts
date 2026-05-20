@@ -78,6 +78,14 @@ function probe(base: string, src: FileSource): string | null {
  *  alone silently bundles a second React. */
 const REACT_RUNTIME_RE = /^(react|react-dom)(\/|$)/;
 
+// shadcn globals.css does `@import "tailwindcss"` (+ optionally
+// `@import "tw-animate-css"`).  esbuild's CSS loader would try to
+// resolve those into JS (tailwindcss/dist/lib.mjs) and fail; instead
+// leave them external so the directive survives into the bundled CSS,
+// where the iframe's `@tailwindcss/browser` compiles it at runtime.
+// Mirrors the esm.sh plugin.
+const TAILWIND_CSS_RE = /^tailwindcss($|\/)|^tw-animate-css$/;
+
 export function makeVfsNpmPlugin(
   files: Map<string, string | Uint8Array>,
   nmRoot = "/node_modules",
@@ -104,6 +112,11 @@ export function makeVfsNpmPlugin(
     setup(build) {
       build.onResolve({ filter: /.*/ }, (args) => {
         const spec = args.path;
+        if (TAILWIND_CSS_RE.test(spec)) {
+          // Keep `@import "tailwindcss"` in the output CSS for the
+          // iframe's Tailwind browser runtime to compile.
+          return { path: spec, external: true };
+        }
         if (externalReact && REACT_RUNTIME_RE.test(spec)) {
           return { path: spec, external: true };
         }
