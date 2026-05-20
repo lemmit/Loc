@@ -20,6 +20,7 @@ import {
   renderSequenceDiagram,
   renderWorkflowDiagram,
 } from "./mermaid.js";
+import { renderC4Model } from "./likec4.js";
 
 // ---------------------------------------------------------------------------
 // System-mode generation.
@@ -85,6 +86,9 @@ function emitSystem(
   out.set(".loom/er.mmd", renderErDiagram(sys));
   out.set(".loom/sequence.mmd", renderSequenceDiagram(sys));
   out.set(".loom/deployment.mmd", renderDeploymentDiagram(sys));
+  // LikeC4 architecture model (https://likec4.dev) — opens in the
+  // LikeC4 CLI / VS Code extension.  See `likec4.ts`.
+  out.set(".loom/architecture.c4", renderC4Model(sys));
 
   // E2E test scaffolding — emitted only when the system declares
   // `test e2e` blocks.  Lives at the system root so it can run against
