@@ -8,9 +8,6 @@
   "exports": {
     ".": "./index.js"
   },
-  "peerDependencies": {
-    "loc-ddd-dsl": "*"
-  },
   "loom": {
     "kind": "backend",
     "family": "hono",
