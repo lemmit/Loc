@@ -29,8 +29,57 @@ import { install } from "../src/engine/npm/install.ts";
 import { makeVfsNpmPlugin } from "../src/engine/npm/esbuild-vfs-plugin.ts";
 import { resolveBare } from "../src/engine/node-resolve.ts";
 import { harvestTsconfigPaths } from "../src/bundle/plugin.ts";
+import { init as initCjsLexer, parse as cjsParse } from "cjs-module-lexer";
+
+await initCjsLexer();
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+
+// A CJS module bundled to an ESM entry by esbuild exposes only a
+// `default` export — esbuild can't see named exports through the
+// `module.exports = require('./cjs/x')` reexport that react & co use.
+// Across the externalise boundary the iframe imports them natively
+// (`import { Fragment } from "react/jsx-runtime"`), which then fails:
+// "does not provide an export named 'Fragment'".  cjs-module-lexer
+// follows that reexport chain (the same way Node derives CJS named
+// exports) so we can emit a facade that re-exports the real bindings.
+function joinRel(fromFile, rel) {
+  const segs = [];
+  const dir = fromFile.slice(0, fromFile.lastIndexOf("/"));
+  for (const part of (dir + "/" + rel).split("/")) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") segs.pop();
+    else segs.push(part);
+  }
+  return "/" + segs.join("/");
+}
+
+function resolveRel(fromFile, rel, src) {
+  const base = joinRel(fromFile, rel);
+  for (const c of [base, base + ".js", base + ".cjs", base + "/index.js"]) {
+    if (src.exists(c)) return c;
+  }
+  return null;
+}
+
+function cjsNamedExports(file, src, seen = new Set()) {
+  if (!file || seen.has(file)) return new Set();
+  seen.add(file);
+  const code = src.read(file);
+  if (code == null) return new Set();
+  let parsed;
+  try {
+    parsed = cjsParse(code);
+  } catch {
+    return new Set();
+  }
+  const names = new Set(parsed.exports);
+  for (const re of parsed.reexports) {
+    const target = re.startsWith(".") ? resolveRel(file, re, src) : resolveBare(re, src);
+    for (const n of cjsNamedExports(target, src, seen)) names.add(n);
+  }
+  return names;
+}
 
 // Per pack: the example to read real frontend deps from, and any CSS
 // the app imports from JS (prebuilt into vendor.css + injected by the
@@ -128,8 +177,29 @@ async function buildPack({ pack, ddd, css: cssSpecs }) {
   const entryPoints = [];
   for (const spec of jsSpecs) {
     const resolved = resolveBare(spec, src);
-    if (resolved) entryPoints.push({ out: sanitize(spec), in: resolved });
-    else console.warn(`#   ${pack}: skip (unresolved) ${spec}`);
+    if (!resolved) {
+      console.warn(`#   ${pack}: skip (unresolved) ${spec}`);
+      continue;
+    }
+    // CJS module → emit a facade that re-exports its real named
+    // bindings (else the entry would expose only `default` and the
+    // iframe's native named imports break).  ESM modules return no
+    // CJS exports → use the real entry, esbuild keeps their names.
+    const names = [...cjsNamedExports(resolved, src)].filter(
+      (n) => n !== "default" && n !== "__esModule" && /^[A-Za-z_$][\w$]*$/.test(n),
+    );
+    if (names.length) {
+      const facadePath = `/__facade__/${sanitize(spec)}.js`;
+      vfs.set(
+        facadePath,
+        `import __m from ${JSON.stringify(spec)};\n` +
+          `export default __m;\n` +
+          `export const { ${names.join(", ")} } = __m;\n`,
+      );
+      entryPoints.push({ out: sanitize(spec), in: facadePath });
+    } else {
+      entryPoints.push({ out: sanitize(spec), in: resolved });
+    }
   }
 
   const outDir = path.resolve(here, `../public/vendor/${pack}`);
@@ -147,6 +217,9 @@ async function buildPack({ pack, ddd, css: cssSpecs }) {
     target: "es2022",
     minify: true,
     jsx: "automatic",
+    // Ship production react/react-dom (smaller, no dev warnings) — the
+    // vendor is a fixed prebuilt artifact, never the dev build.
+    define: { "process.env.NODE_ENV": '"production"' },
     outdir: "/vendor",
     write: false,
     logLevel: "silent",
