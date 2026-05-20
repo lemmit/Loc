@@ -4,7 +4,7 @@ entry Model:
     members+=ModelMember*;
 
 ModelMember:
-    System | BoundedContext;
+    System | BoundedContext | Requirement | Solution | TestCase;
 
 // ---------------------------------------------------------------------------
 // System / Module / Deployable — the deployment shape.
@@ -68,7 +68,8 @@ UserFieldName returns string:
 // (e.g., `api.orders.create({...})`).  Renders to a vitest test file
 // at the system output root.
 TestE2E:
-    'test' 'e2e' name=STRING 'against' deployable=[Deployable:LooseName] '{'
+    'test' 'e2e' name=STRING 'against' deployable=[Deployable:LooseName]
+        ('verifies' verifies=[TestCase:TraceId])? '{'
         body+=TestStatement*
     '}';
 
@@ -396,6 +397,85 @@ MenuLinkProp:
     name=LooseName ':' value=Expression;
 
 // ---------------------------------------------------------------------------
+// Traceability (Slice 12) — Requirement / Solution / TestCase.
+//
+// Three analytical artefacts that sit *above* the domain model and
+// reference it one-directionally: the generated code stays clean (no
+// `implements` back-links).  `Requirement` is one generalised box with
+// a `type` discriminator (UserStory / UseCase / AcceptanceCriteria /
+// BusinessReq) and an optional `parent` for hierarchy.  `Solution`
+// records the design rationale ("talkback") for a requirement and
+// `entitles` the concrete code symbols it legitimises.  `TestCase`
+// `verifies` a requirement and `covers` the code symbols it exercises.
+//
+// Code references are qualified cross-references (`Identity.Auth.
+// LoginSession.start`) resolved via the qualified-name index in
+// ddd-scope.ts — full IDE navigation, no magic strings.  Executable
+// tests (`test` / `test e2e`) back-link to a TestCase via `verifies`,
+// completing the chain Requirement -> Solution -> TestCase -> test ->
+// code.  See docs/traceability.md.
+// ---------------------------------------------------------------------------
+
+Requirement:
+    'requirement' name=TraceId ('parent' parent=[Requirement:TraceId])? '{'
+        props+=RequirementProp*
+    '}';
+
+// Permissive key/value prop-bag — the same pattern `ThemeProp` and
+// `PageMenuMeta` use.  We deliberately do NOT promote the keys
+// (`type`, `status`, `priority`) or the enum-like values (`UserStory`,
+// `Draft`, …) to grammar keywords: doing so would steal extremely
+// common domain identifiers (`status` alone appears in scores of
+// example aggregates).  The validator (Slice 12) enforces the allowed
+// key set { type, title, status, priority }, that `type` + `title` are
+// present, and the RequirementType / RequirementStatus value enums.
+RequirementProp:
+    name=RequirementPropKey ':' value=Expression;
+
+// `type` and `title` are already global keywords (Storage `type:`,
+// page `title:`), so they are admitted explicitly; everything else
+// (`status`, `priority`) flows through the ordinary ID alternative
+// and never becomes a keyword.
+RequirementPropKey returns string:
+    ID | 'type' | 'title';
+
+// Ticket-style identifier for traceability artefacts — `US-001`,
+// `AC-001`, `SOL-001`, `TC-001`.  Backed by the `TRACE_ID` terminal
+// (below) so the literal text — including leading zeros — is preserved
+// (a parser-level `ID ('-' INT)*` rule would reassemble `US-001` as
+// `US-1`, collapsing `US-001` and `US-01`).  A plain `ID` is also
+// admitted for hyphen-free names.
+TraceId returns string:
+    TRACE_ID | ID;
+
+Solution:
+    'solution' name=TraceId 'for' requirement=[Requirement:TraceId] '{'
+        ('title' ':' title=STRING)?
+        ('entitles' '[' (entitles+=[Targetable:QualifiedName]
+                         (',' entitles+=[Targetable:QualifiedName])* ','?)? ']')?
+    '}';
+
+TestCase:
+    'testCase' name=TraceId 'verifies' requirement=[Requirement:TraceId] '{'
+        ('title' ':' title=STRING)?
+        ('covers' '[' (covers+=[Targetable:QualifiedName]
+                       (',' covers+=[Targetable:QualifiedName])* ','?)? ']')?
+    '}';
+
+// Dotted-path datatype rule backing every code cross-reference.  The
+// qualified-name provider in ddd-scope.ts exports each `Targetable`
+// node under the same dotted form (Module.Context.Aggregate.operation).
+QualifiedName returns string:
+    ID ('.' ID)*;
+
+// The family of code symbols a Solution may `entitle` or a TestCase
+// may `cover`.  Intentionally broad — anything from a whole module
+// down to a single operation, plus deployables and api contracts.
+type Targetable =
+    Module | BoundedContext | Aggregate | ValueObject | EventDecl
+  | Repository | Workflow | View | Operation | Deployable | Api;
+
+// ---------------------------------------------------------------------------
 // Top-level
 // ---------------------------------------------------------------------------
 
@@ -435,7 +515,7 @@ AggregateMember:
     Containment | DerivedProp | Invariant | FunctionDecl | Operation | EntityPart | TestBlock | Property;
 
 TestBlock:
-    'test' name=STRING '{'
+    'test' name=STRING ('verifies' verifies=[TestCase:TraceId])? '{'
         body+=TestStatement*
     '}';
 
@@ -826,4 +906,13 @@ hidden terminal SL_COMMENT: /\/\/[^\n\r]*/;
 terminal STRING: /"(\\.|[^"\\])*"/;
 terminal DECIMAL: /[0-9]+\.[0-9]+/;
 terminal INT returns number: /[0-9]+/;
+// Ticket-style trace identifier (`US-001`, `AC-001`, `SOL-001`).  Must
+// end in `-<digits>` so ordinary hyphen-free identifiers fall through
+// to ID and so expression subtraction that ends in an identifier
+// (`price-discount`) is never captured.  The only residual collision
+// is `name-<digits>` written with no surrounding spaces (e.g. `x-1`);
+// Loom's house style — and every example — spaces binary operators,
+// so this stays theoretical.  Declared before ID for longest-match
+// priority on inputs like `US-001`.
+terminal TRACE_ID: /[A-Za-z][A-Za-z0-9]*(-[A-Za-z0-9]+)*-[0-9]+/;
 terminal ID: /[_a-zA-Z][\w_]*/;

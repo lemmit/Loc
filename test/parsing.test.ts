@@ -530,4 +530,80 @@ describe("page metamodel — grammar smoke tests (Slice 1)", () => {
     const { errors } = await parseExample("examples/acme.ddd");
     expect(errors).toEqual([]);
   });
+
+  it("parses requirement / solution / testCase with resolved code refs", async () => {
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(
+      `
+      requirement US-001 {
+        type: UserStory
+        title: "User can log in"
+        status: InProgress
+        priority: 1
+      }
+      requirement AC-001 parent US-001 {
+        type: AcceptanceCriteria
+        title: "Valid credentials grant access"
+      }
+      system Shop {
+        module Identity {
+          context Auth {
+            aggregate LoginSession {
+              operation start() {}
+              test "successful start" verifies TC-001 {}
+            }
+          }
+        }
+        deployable AuthApi { platform: hono  modules: Identity }
+      }
+      solution SOL-001 for US-001 {
+        title: "Login via aggregate"
+        entitles [ Identity.Auth.LoginSession.start, AuthApi ]
+      }
+      testCase TC-001 verifies AC-001 {
+        title: "Successful login"
+        covers [ Identity.Auth.LoginSession.start ]
+      }
+      `,
+      { validation: true },
+    );
+    expect(
+      (doc.diagnostics ?? [])
+        .filter((d) => d.severity === 1)
+        .map((d) => d.message),
+    ).toEqual([]);
+
+    const members = (doc.parseResult.value as Model).members;
+    const sol = members.find((m) => m.$type === "Solution") as
+      | import("../src/language/generated/ast.js").Solution
+      | undefined;
+    // Qualified cross-reference resolved to the operation `start`.
+    expect(sol?.entitles[0]?.ref?.$type).toBe("Operation");
+    expect(sol?.entitles[0]?.ref?.name).toBe("start");
+    expect(sol?.requirement.ref?.name).toBe("US-001");
+  });
+
+  it("rejects an unresolved qualified code reference", async () => {
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(
+      `
+      requirement US-001 { type: UserStory  title: "x" }
+      system Shop {
+        module Identity { context Auth { aggregate LoginSession { operation start() {} } } }
+      }
+      testCase TC-001 verifies US-001 {
+        covers [ Identity.Auth.LoginSession.nonexistent ]
+      }
+      `,
+      { validation: true },
+    );
+    const messages = (doc.diagnostics ?? [])
+      .filter((d) => d.severity === 1)
+      .map((d) => d.message);
+    expect(messages.some((m) => m.includes("nonexistent"))).toBe(true);
+  });
 });
