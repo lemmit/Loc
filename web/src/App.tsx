@@ -536,7 +536,12 @@ export default function App(): JSX.Element {
   }
 
   const files: VirtualFile[] = generateSuccess?.files ?? [];
-  const tree = useMemo(() => buildTree(files), [files]);
+  // The `.c4.json` sidecar backs the in-browser LikeC4 render of its
+  // `.c4` sibling — kept in `files` for lookup, but hidden from the tree.
+  const tree = useMemo(
+    () => buildTree(files.filter((f) => !f.path.endsWith(".c4.json"))),
+    [files],
+  );
   const selectedFile = useMemo(
     () => files.find((f) => f.path === selectedPath) ?? null,
     [files, selectedPath],

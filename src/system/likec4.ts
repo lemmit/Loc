@@ -13,10 +13,10 @@ import type { DeployableIR, SystemIR } from "../ir/loom-ir.js";
 //   - relationships: frontend → backend ("calls"), backend → database.
 //
 // Like the Mermaid artifacts this is a derived view, not a contract —
-// no DSL drives it.  The playground shows it as source today; rendering
-// LikeC4 in-browser (its layout engine + Graphviz WASM) is a separate
-// step.  Meanwhile the file opens directly in the LikeC4 CLI / VS Code
-// extension.
+// no DSL drives it.  The playground renders it in-browser by rebuilding
+// the model from the sibling `.c4.json` (see `buildC4Spec` below) and
+// laying it out with Graphviz WASM.  The `.c4` text also opens directly
+// in the LikeC4 CLI / VS Code extension.
 // ---------------------------------------------------------------------------
 
 // Backends that own persistence — used to wire database relationships.
@@ -98,4 +98,87 @@ function container(d: DeployableIR): string[] {
 /** Serialise to a LikeC4 document with a trailing newline. */
 export function renderC4Model(sys: SystemIR): string {
   return buildC4Model(sys) + "\n";
+}
+
+// ---------------------------------------------------------------------------
+// Structured projection of the same model, for the playground's in-browser
+// renderer.  The `.c4` text opens in the LikeC4 CLI / VS Code; the playground
+// can't run the Langium parser, so it rebuilds the model from this JSON via
+// LikeC4's programmatic Builder (see web/src/preview/likec4-model.ts).  Both
+// projections derive from the IR so they stay in step.
+// ---------------------------------------------------------------------------
+
+export type C4Kind = "system" | "container" | "component" | "database";
+
+export interface C4SpecNode {
+  /** Id local to the parent; the full dotted FQN is rebuilt by nesting. */
+  localId: string;
+  kind: C4Kind;
+  title: string;
+  technology?: string;
+  children: C4SpecNode[];
+}
+
+export interface C4Relationship {
+  /** Full dotted FQNs, matching the nested element ids. */
+  source: string;
+  target: string;
+  label: string;
+}
+
+export interface C4Spec {
+  systemTitle: string;
+  /** The system element, with containers / components / database nested under it. */
+  root: C4SpecNode;
+  relationships: C4Relationship[];
+  /** Id of the view the playground renders, scoped to the system. */
+  viewId: string;
+  /** FQN the rendered view is `view of`. */
+  viewOf: string;
+}
+
+export function buildC4Spec(sys: SystemIR): C4Spec {
+  const sysId = cid(sys.name);
+  const hasBackend = sys.deployables.some((d) => PERSISTENT.has(d.platform));
+  const known = new Set(sys.deployables.map((d) => d.name));
+
+  const children: C4SpecNode[] = sys.deployables.map((d) => ({
+    localId: cid(d.name),
+    kind: "container",
+    title: d.name,
+    technology: d.platform,
+    children: d.moduleNames.map((m) => ({
+      localId: cid(m),
+      kind: "component",
+      title: m,
+      children: [],
+    })),
+  }));
+  if (hasBackend) {
+    children.push({ localId: "db", kind: "database", title: "PostgreSQL", children: [] });
+  }
+
+  const relationships: C4Relationship[] = [];
+  for (const d of sys.deployables) {
+    const from = `${sysId}.${cid(d.name)}`;
+    if (d.targetName && known.has(d.targetName)) {
+      relationships.push({ source: from, target: `${sysId}.${cid(d.targetName)}`, label: "calls" });
+    }
+    if (PERSISTENT.has(d.platform) && hasBackend) {
+      relationships.push({ source: from, target: `${sysId}.db`, label: "reads / writes" });
+    }
+  }
+
+  return {
+    systemTitle: sys.name,
+    root: { localId: sysId, kind: "system", title: sys.name, children },
+    relationships,
+    viewId: "containers",
+    viewOf: sysId,
+  };
+}
+
+/** Serialise the structured projection as pretty JSON with a trailing newline. */
+export function renderC4SpecJson(sys: SystemIR): string {
+  return JSON.stringify(buildC4Spec(sys), null, 2) + "\n";
 }
