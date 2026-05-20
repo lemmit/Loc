@@ -99,20 +99,44 @@ mkdirSync(outDir, { recursive: true });
 
 const manifest = {};
 let done = 0;
+let skipped = 0;
 const concurrency = 8;
 let cursor = 0;
+// Best-effort: retry each tarball, and on persistent failure SKIP it
+// (omit from the manifest) rather than abort.  A skipped package just
+// falls back to the registry at runtime — so a transient download
+// failure can never break the deploy.
+async function fetchWithRetry(url, attempts = 3) {
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      return await fetchTarball(url);
+    } catch (err) {
+      if (i === attempts) throw err;
+      await new Promise((r) => setTimeout(r, 500 * i));
+    }
+  }
+}
 async function worker() {
   while (cursor < plan.length) {
     const pkg = plan[cursor++];
     const key = `${pkg.name}@${pkg.version}`;
     const file = key.replace(/[@/]/g, "_") + ".tgz";
-    const bytes = await fetchTarball(pkg.meta.dist.tarball);
-    writeFileSync(path.join(outDir, file), bytes);
-    manifest[key] = file;
+    try {
+      const bytes = await fetchWithRetry(pkg.meta.dist.tarball);
+      writeFileSync(path.join(outDir, file), bytes);
+      manifest[key] = file;
+    } catch (err) {
+      skipped++;
+      console.warn(`#   skip ${key}: ${err instanceof Error ? err.message : err}`);
+    }
     if (++done % 20 === 0) console.log(`#   ${done}/${plan.length}`);
   }
 }
 await Promise.all(Array.from({ length: concurrency }, worker));
 
 writeFileSync(path.join(outDir, "manifest.json"), JSON.stringify(manifest, null, 0));
-console.log(`# wrote ${plan.length} tarballs + manifest.json to web/public/npm-mirror/`);
+console.log(
+  `# wrote ${Object.keys(manifest).length} tarballs + manifest.json` +
+    (skipped ? ` (${skipped} skipped → registry fallback)` : "") +
+    " to web/public/npm-mirror/",
+);
