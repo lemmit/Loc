@@ -50,6 +50,10 @@
         {
           "qualifiedName": "Sales.Orders.placeOrder",
           "kind": "workflow"
+        },
+        {
+          "qualifiedName": "api",
+          "kind": "deployable"
         }
       ]
     },
@@ -148,6 +152,7 @@
       "Sales.Orders.Order.addLine": "operation",
       "Sales.Orders.Order.confirm": "operation",
       "Sales.Orders.placeOrder": "workflow",
+      "api": "deployable",
       "Catalog.Products.Product": "aggregate",
       "catalogApi": "deployable"
     },
@@ -176,7 +181,7 @@
   "summary": {
     "codeCoverage": {
       "covered": 3,
-      "total": 5
+      "total": 6
     },
     "requirementCoverage": {
       "covered": 4,

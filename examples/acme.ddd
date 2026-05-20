@@ -382,7 +382,8 @@ solution SOL-001 for US-001 {
     entitles [
         Sales.Orders.Order.addLine,
         Sales.Orders.Order.confirm,
-        Sales.Orders.placeOrder
+        Sales.Orders.placeOrder,
+        api
     ]
 }
 

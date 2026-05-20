@@ -15,19 +15,21 @@ flowchart LR
   s5 -->|entitles| c7
   c8{{"Sales.Orders.placeOrder"}}
   s5 -->|entitles| c8
-  s9{{"SOL-002"}}
-  r3 -->|for| s9
-  c10["Catalog.Products.Product"]
-  s9 -->|entitles| c10
-  c11[/"catalogApi"/]
-  s9 -->|entitles| c11
-  t12["TC-001"]
-  t12 -->|verifies| r1
-  t12 -.->|covers| c7
-  t13["TC-002"]
-  t13 -->|verifies| r0
-  t13 -.->|covers| c6
+  c9[/"api"/]
+  s5 -->|entitles| c9
+  s10{{"SOL-002"}}
+  r3 -->|for| s10
+  c11["Catalog.Products.Product"]
+  s10 -->|entitles| c11
+  c12[/"catalogApi"/]
+  s10 -->|entitles| c12
+  t13["TC-001"]
+  t13 -->|verifies| r1
   t13 -.->|covers| c7
-  t14["TC-003"]
-  t14 -->|verifies| r4
-  t14 -.->|covers| c10
+  t14["TC-002"]
+  t14 -->|verifies| r0
+  t14 -.->|covers| c6
+  t14 -.->|covers| c7
+  t15["TC-003"]
+  t15 -->|verifies| r4
+  t15 -.->|covers| c11

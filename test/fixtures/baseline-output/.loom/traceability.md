@@ -26,6 +26,7 @@ Entitles:
 - `Sales.Orders.Order.addLine` (operation)
 - `Sales.Orders.Order.confirm` (operation)
 - `Sales.Orders.placeOrder` (workflow)
+- `api` (deployable)
 
 ### SOL-002 — The catalog is served by the Product aggregate on its own deployable
 for: `US-002`

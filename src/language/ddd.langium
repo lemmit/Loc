@@ -465,8 +465,11 @@ TestCase:
 // Dotted-path datatype rule backing every code cross-reference.  The
 // qualified-name provider in ddd-scope.ts exports each `Targetable`
 // node under the same dotted form (Module.Context.Aggregate.operation).
+// Segments use `LooseName` (not bare `ID`) so a symbol whose name is a
+// reserved word — most commonly a `deployable api { ... }` — is still
+// addressable from `entitles` / `covers`.
 QualifiedName returns string:
-    ID ('.' ID)*;
+    LooseName ('.' LooseName)*;
 
 // The family of code symbols a Solution may `entitle` or a TestCase
 // may `cover`.  Intentionally broad — anything from a whole module
