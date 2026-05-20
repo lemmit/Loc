@@ -11,6 +11,7 @@ import { NodeFileSystem } from "langium/node";
 import { URI } from "langium";
 import { createDddServices } from "../../out/language/ddd-module.js";
 import { generateTypeScript } from "../../out/platform/hono/v4/emit.js";
+import { BACKEND_PINS } from "../../out/platform/hono/v4/pins.js";
 import { makeVfsNpmPlugin } from "../src/engine/npm/esbuild-vfs-plugin.ts";
 import { install } from "../src/engine/npm/install.ts";
 import { NpmInstallBundleEngine } from "../src/engine/npm-install-bundle-engine.ts";
@@ -51,7 +52,7 @@ const text = readFileSync(path.resolve(here, "../../examples/sales.ddd"), "utf8"
 const services = createDddServices(NodeFileSystem);
 const doc = services.shared.workspace.LangiumDocuments.createDocument(URI.parse("inmemory:///main.ddd"), text);
 await services.shared.workspace.DocumentBuilder.build([doc], { validation: true });
-const fileMap = generateTypeScript(doc.parseResult.value);
+const fileMap = generateTypeScript(doc.parseResult.value, BACKEND_PINS);
 const files = [...fileMap].map(([p, content]) => ({ path: p, content, size: content.length }));
 log(`# generated ${files.length} files`);
 
