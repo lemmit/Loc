@@ -1,15 +1,11 @@
 // Engine selection.
 //
-// Default: `npm-install-bundle` — real npm tarballs, no esm.sh, so
-// the drizzle/split-shard bug class (which leaves the esm.sh path
-// broken in production) is gone.  The engine is correctness-complete
-// (backend boots + serves; all four design packs render in-browser)
-// and C1 (local tarball mirror) made install fast.  esm.sh stays as
-// an OPT-OUT fallback — `?engine=esbuild-pglite` or localStorage
-// `loom.engine` — and is deleted once C2 (vendor prebuild) lands the
-// bundle-speed win and the e2e is green.  Unknown ids fall back to
-// the default rather than throwing, so a stale link can't brick the
-// playground.
+// `npm-install-bundle` (real npm tarballs in-browser, prebuilt vendor)
+// is the only engine today, so it's the default.  The `?engine=` /
+// localStorage `loom.engine` override is kept as the selection seam
+// for a future runtime that registers alongside it; unknown ids fall
+// back to the default rather than throwing, so a stale link can't
+// brick the playground.
 
 import { engineRegistry } from "./registry.js";
 

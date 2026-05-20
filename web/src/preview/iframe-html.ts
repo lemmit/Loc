@@ -10,16 +10,14 @@
 // `<base>/sandbox/runtime`).  An inline `fetch` shim installed here
 // intercepts requests under that prefix and forwards them over the
 // `MessagePort` the stub stashed on `window.__LOOM_PORT__`; every
-// other fetch (esm.sh, Tailwind CDN) falls through to the real
-// `fetch`.  This replaces the old Service-Worker interception.
+// other fetch (Tailwind CDN, vendor chunks) falls through to the
+// real `fetch`.  This replaces the old Service-Worker interception.
 //
-// React runtime modules (`react`, `react-dom`, `react/jsx-runtime`,
-// …) are externalised at bundle time and provided via a dynamic
-// `<script type="importmap">` here, so every component shares the
-// same React instance.  Without that, the bundle ends up with
-// multiple React copies and `useRef` returns null at runtime.
-
-import { stackHintsForReactMajor } from "../bundle/stacks.js";
+// When the bundle externalised a prebuilt design-pack vendor, the
+// app's bare imports (`react`, `react-dom`, `@mantine/core`, …) are
+// satisfied by a `<script type="importmap">` pointing at the vendor
+// chunks, so every component shares one React instance.  A
+// self-contained bundle inlines its deps and needs no importmap.
 
 // Inline runtime `fetch` bridge.  Classic script so it runs
 // synchronously during parse — before the bundle module fetches —
@@ -87,9 +85,9 @@ const RUNTIME_FETCH_SHIM = `
 interface MakePreviewArgs {
   js: string;
   css?: string;
-  /** Versions harvested from the generator's package.json.
-   *  Lookups for `react` / `react-dom` decide what the importmap
-   *  pins; if unset, falls back to a known-good 18.x. */
+  /** Versions harvested from the generator's package.json.  Carried
+   *  as bundle metadata (and part of the preview's cache key); the
+   *  importmap itself comes from `vendorImportmap`. */
   versions?: Record<string, string>;
   /** C2: when the bundle externalised a prebuilt design-pack vendor,
    *  this importmap (bare spec → origin-absolute vendor chunk url)
@@ -108,29 +106,6 @@ interface MakePreviewArgs {
    *  unset, the bundle falls back to BrowserRouter's default
    *  (root). */
   sandboxBase?: string;
-}
-
-const REACT_FALLBACK_VERSION = "18.3.1";
-
-function importMap(versions: Record<string, string>): Record<string, string> {
-  const reactVer = versions["react"] ?? REACT_FALLBACK_VERSION;
-  const reactDomVer = versions["react-dom"] ?? reactVer;
-  const stack = stackHintsForReactMajor(versions["react"]);
-  // Stack v2 (React 19): bundler inlines React — no importmap entries.
-  // The bundle is self-contained; emitting `react` / `react-dom`
-  // mappings would only confuse modules that look for a host-supplied
-  // React (we don't have any).
-  if (!stack.externalReactRuntime) {
-    return {};
-  }
-  // Stack v1 (React 18): externalise react/react-dom and let the
-  // importmap satisfy them at iframe load.  esm.sh's v18 build dedupes
-  // through this path because react-dom's transitive `import "react"`
-  // converges on the same wrapper URL that the importmap resolves.
-  return {
-    "react": `https://esm.sh/react@${reactVer}?dev=false`,
-    "react-dom": `https://esm.sh/react-dom@${reactDomVer}${stack.importmapReactDomQuery(reactVer)}`,
-  };
 }
 
 const ESCAPE_END_SCRIPT = (s: string): string => s.replace(/<\/script/gi, "<\\/script");
@@ -253,11 +228,10 @@ tailwind.config = {
 `.trim();
 
 export function makePreviewHtml(args: MakePreviewArgs): string {
-  // C2: a prebuilt-vendor bundle is externalised — every bare import
+  // A prebuilt-vendor bundle is externalised — every bare import
   // (react, @mantine/core, …) resolves through the prebuilt importmap.
-  // Otherwise fall back to the version-derived react/react-dom map for
-  // the self-contained bundle.
-  const map = args.vendorImportmap ?? importMap(args.versions ?? {});
+  // A self-contained bundle inlines its deps, so it needs no importmap.
+  const map = args.vendorImportmap ?? {};
   const importMapJson = JSON.stringify({ imports: map }, null, 2);
   const vendorCssLink = args.vendorCssUrl
     ? `<link rel="stylesheet" href="${args.vendorCssUrl}">`

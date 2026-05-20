@@ -1,12 +1,10 @@
-// esbuild plugin resolving over the installed in-VFS node_modules
-// (Phase B3b) — the npm-in-browser counterpart of plugin.ts's esm.sh
-// resolver.  Generated project files AND installed packages live in
-// one file map; bare specifiers go through the B2 exports-aware
-// resolver, relatives/absolutes probe the map directly.  No esm.sh,
-// so the whole esm.sh-split-shard bug class (drizzle extractUsedTable)
-// cannot occur.
-//
-// Standalone — plugin.ts (the proven esm.sh path) is untouched.
+// esbuild plugin resolving over the installed in-VFS node_modules.
+// Generated project files AND installed packages live in one file
+// map; bare specifiers go through the exports-aware node resolver
+// (node-resolve.ts), relatives/absolutes probe the map directly.
+// Reading each package's own published files (no CDN re-build) is
+// what makes the drizzle `extractUsedTable` split-shard bug class
+// impossible.
 
 import type { Loader, Plugin } from "esbuild-wasm";
 import { resolveBare, type FileSource } from "../node-resolve.js";
@@ -84,7 +82,6 @@ const REACT_RUNTIME_RE = /^(react|react-dom)(\/|$)/;
 // resolve those into JS (tailwindcss/dist/lib.mjs) and fail; instead
 // leave them external so the directive survives into the bundled CSS,
 // where the iframe's `@tailwindcss/browser` compiles it at runtime.
-// Mirrors the esm.sh plugin.
 const TAILWIND_CSS_RE = /^tailwindcss($|\/)|^tw-animate-css$/;
 
 export function makeVfsNpmPlugin(
