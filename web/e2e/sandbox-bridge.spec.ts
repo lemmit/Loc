@@ -40,7 +40,9 @@ test("stub handshake → document.write → fetch shim round-trips over the port
   const result = await page.evaluate(async (docHtml) => {
     return await new Promise<string>((resolve) => {
       const iframe = document.createElement("iframe");
-      iframe.setAttribute("sandbox", "allow-scripts allow-same-origin");
+      // No `sandbox` attribute — mirrors same-origin staging (the
+      // boundary is the origin, not the attribute) and keeps
+      // contentDocument readable for the assertion below.
       iframe.style.cssText = "width:1px;height:1px;border:0";
 
       let port: MessagePort | null = null;

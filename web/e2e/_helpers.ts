@@ -1,25 +1,20 @@
 import { type Page, expect } from "@playwright/test";
 
-// Probe esm.sh from the page context so the test can decide whether
-// to exercise the network-dependent bundler/runtime stages.  Some
-// CI / sandbox environments allow Node-side network but block
-// browser-context cross-origin fetches; instead of failing those
-// runs, we skip the network steps cleanly.
-//
-// The previous probe used `mode: "no-cors"` and checked `r != null`
-// — that returns an opaque Response for *any* server reply (including
-// 503), so the probe came back true even when esm.sh was rejecting
-// requests.  Use a real CORS GET against a tiny known-good URL and
-// check `res.ok`; esm.sh sets `access-control-allow-origin: *` on
-// every response, so CORS works.  AbortController caps the wait
-// when DNS/network is hard-down so the probe doesn't hang the whole
-// test against a 60 s default timeout.
-export async function browserCanReachEsmSh(page: Page): Promise<boolean> {
+// Probe the npm registry from the page context so the test can decide
+// whether to exercise the network-dependent bundle/boot stages.  The
+// playground installs real npm tarballs in-browser, so the registry
+// is the first external dependency; some CI / sandbox environments
+// allow Node-side network but block browser-context cross-origin
+// fetches, in which case we skip the network steps cleanly instead of
+// failing the run.  A real CORS GET against a tiny known-good URL
+// (registry.npmjs.org sets `access-control-allow-origin: *`), with an
+// AbortController cap so the probe can't hang the whole test.
+export async function browserCanReachNetwork(page: Page): Promise<boolean> {
   return page.evaluate(async () => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 5_000);
     try {
-      const res = await fetch("https://esm.sh/react@18.3.1?dev=false", {
+      const res = await fetch("https://registry.npmjs.org/react/latest", {
         signal: controller.signal,
       });
       return res.ok;

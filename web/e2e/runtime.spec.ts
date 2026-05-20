@@ -10,7 +10,7 @@
 
 import { expect, test } from "@playwright/test";
 import {
-  browserCanReachEsmSh,
+  browserCanReachNetwork,
   selectExample,
   waitForPlaygroundReady,
 } from "./_helpers";
@@ -28,7 +28,7 @@ test("editor → generate → bundle → boot → dispatch", async ({ page }) =>
   // the storybook entries were added at the top of the dropdown.
   await selectExample(page, /Sales System/);
 
-  if (!(await browserCanReachEsmSh(page))) {
+  if (!(await browserCanReachNetwork(page))) {
     test.skip(true, "browser cannot reach esm.sh from this environment");
   }
 

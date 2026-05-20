@@ -1,0 +1,31 @@
+%% Loom ER diagram — generated from the IR, do not edit by hand.
+%% System: Acme
+erDiagram
+  Product {
+    guid id PK
+    string sku
+    Money price
+  }
+  Money {
+    decimal amount
+    string currency
+  }
+  Order {
+    guid id PK
+    string customerId
+    OrderStatus status
+    datetime placedAt
+  }
+  OrderLine {
+    Id_Product productId FK
+    int quantity
+  }
+  Customer {
+    guid id PK
+    string username
+    string email
+    int age
+  }
+  Product ||--|| Money : "price"
+  Order ||--o{ OrderLine : "lines"
+  OrderLine }o--|| Product : "productId"

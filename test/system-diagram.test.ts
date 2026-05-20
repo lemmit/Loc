@@ -7,9 +7,15 @@ import { createDddServices } from "../src/language/ddd-module.js";
 import { lowerModel } from "../src/ir/lower.js";
 import { enrichLoomModel } from "../src/ir/enrichments.js";
 import {
+  buildDeploymentDiagram,
   buildDomainDiagram,
+  buildErDiagram,
+  buildSequenceDiagram,
   buildWorkflowDiagram,
+  renderDeploymentDiagram,
   renderDomainDiagram,
+  renderErDiagram,
+  renderSequenceDiagram,
   renderWorkflowDiagram,
 } from "../src/system/mermaid.js";
 import type { Model } from "../src/language/generated/ast.js";
@@ -77,5 +83,58 @@ describe("workflows.mmd", () => {
     expect(rendered).toContain("flowchart TD");
     expect(rendered.endsWith("\n")).toBe(true);
     expect(rendered).toBe(renderWorkflowDiagram(sys));
+  });
+});
+
+describe("er.mmd", () => {
+  it("emits the expected erDiagram for examples/acme.ddd", async () => {
+    const loom = await build("examples/acme.ddd");
+    expect(buildErDiagram(loom.systems[0]!)).toMatchSnapshot();
+  });
+
+  it("declares an entity per aggregate with an id PK", async () => {
+    const sys = (await build("examples/acme.ddd")).systems[0]!;
+    const out = buildErDiagram(sys);
+    expect(out).toContain("erDiagram");
+    for (const m of sys.modules) {
+      for (const c of m.contexts) {
+        for (const a of c.aggregates) {
+          expect(out).toContain(`  ${a.name} {`);
+        }
+      }
+    }
+    expect(out).toContain("id PK");
+    expect(renderErDiagram(sys).endsWith("\n")).toBe(true);
+  });
+});
+
+describe("sequence.mmd", () => {
+  it("emits the expected sequenceDiagram for examples/acme.ddd", async () => {
+    const loom = await build("examples/acme.ddd");
+    expect(buildSequenceDiagram(loom.systems[0]!)).toMatchSnapshot();
+  });
+
+  it("is a deterministic sequenceDiagram with a trailing newline", async () => {
+    const sys = (await build("examples/acme.ddd")).systems[0]!;
+    const rendered = renderSequenceDiagram(sys);
+    expect(rendered).toContain("sequenceDiagram");
+    expect(rendered.endsWith("\n")).toBe(true);
+    expect(rendered).toBe(renderSequenceDiagram(sys));
+  });
+});
+
+describe("deployment.mmd", () => {
+  it("emits the expected flowchart for examples/acme.ddd", async () => {
+    const loom = await build("examples/acme.ddd");
+    expect(buildDeploymentDiagram(loom.systems[0]!)).toMatchSnapshot();
+  });
+
+  it("renders a node per deployable and module", async () => {
+    const sys = (await build("examples/acme.ddd")).systems[0]!;
+    const out = buildDeploymentDiagram(sys);
+    expect(out).toContain("flowchart LR");
+    for (const d of sys.deployables) expect(out).toContain(`${d.name} · ${d.platform}`);
+    for (const m of sys.modules) expect(out).toContain(`📦 ${m.name}`);
+    expect(renderDeploymentDiagram(sys).endsWith("\n")).toBe(true);
   });
 });

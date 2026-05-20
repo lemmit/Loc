@@ -1,19 +1,13 @@
 // ---------------------------------------------------------------------------
-// NpmInstallBundleEngine (Phase B3c) — the npm-in-browser RuntimeEngine.
+// NpmInstallBundleEngine — the npm-in-browser RuntimeEngine.
 //
-// Assembly of the proven B1–B3b parts:
-//   install (real tarballs) → makeVfsNpmPlugin esbuild bundle (real
-//   node_modules, no esm.sh) → boot/dispatch on the SAME PGlite+Hono
-//   runtime client EsbuildPgliteEngine uses (engine-agnostic path).
+//   install (real tarballs) → makeVfsNpmPlugin esbuild-wasm bundle
+//   (real node_modules, no CDN) → boot/dispatch on the PGlite+Hono
+//   runtime client.
 //
-// Registered NON-default and not selected by anything yet — purely
-// additive, app behaviour unchanged.  It becomes selectable once B4
-// wires the browser esbuild-wasm worker builder and proves boot
-// parity (real-pglite postprocess + React externalisation are B4).
-//
-// The esbuild invocation is injected (`EsbuildRun`) so the assembled
-// class is verifiable with node esbuild today; the default runner
-// throws a clear "not wired until B4" until the worker builder lands.
+// The esbuild invocation is injected (`EsbuildRun`): in the browser
+// it's the esbuild-wasm worker (which also owns install + the IDB
+// cache); tests/spikes inject a node-esbuild runner.
 // ---------------------------------------------------------------------------
 
 import { LoomRuntimeClient } from "../runtime/client.js";
@@ -52,9 +46,9 @@ export interface EsbuildRunInput {
   /** Bundle a real file entry by absolute VFS path (React path). */
   entry?: string;
   /** React build: keep react/react-dom external so the iframe
-   *  importmap supplies a single instance — mirrors the esm.sh
-   *  path's externalisation and avoids the dual-React/"Invalid hook
-   *  call" failure that bundling React per-frontend would cause. */
+   *  importmap supplies a single instance — avoids the dual-React /
+   *  "Invalid hook call" failure that bundling React per-frontend
+   *  would cause. */
   externalReactRuntime?: boolean;
 }
 
@@ -170,10 +164,9 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
       ),
     });
     // Apply the npm-pglite postprocess HERE — the runtime worker
-    // boots `hono.code` verbatim, and unlike the esm.sh path (where
-    // bundler.worker post-processes internally) nothing else would.
-    // Failure → a bundle diagnostic, not a thrown rejection that
-    // skips BUNDLE_DONE.
+    // boots `hono.code` verbatim, so nothing else would.  Failure →
+    // a bundle diagnostic, not a thrown rejection that skips
+    // BUNDLE_DONE.
     let hono: BundleResult;
     if (!honoRun.ok) {
       hono = { ok: false, diagnostics: [{ severity: "error", message: honoRun.message }] };
@@ -237,7 +230,7 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
   }
 
   // boot/dispatch/wipe/reset/respawn delegate to the shared
-  // PGlite+Hono runtime client, identical to EsbuildPgliteEngine.
+  // PGlite+Hono runtime client.
   async boot(bundleCode: string, dataDir?: string): Promise<BootResult> {
     const res = await this.rt().boot({ bundleCode, dataDir });
     if (res.ok) this.lastBoot = { bundleCode, dataDir, persistent: res.persistent };
@@ -255,8 +248,8 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
   respawn(): void {
     this.runtime?.respawn();
   }
-  // Same tab-suspension recovery as EsbuildPgliteEngine: re-boot the
-  // retained bundle into a fresh worker; OPFS data reattaches.
+  // Tab-suspension recovery: re-boot the retained bundle into a fresh
+  // worker; OPFS data reattaches.
   async snapshot(): Promise<EngineSnapshot | null> {
     return this.lastBoot?.persistent
       ? { engineId: this.capabilities.id, version: 1, blob: this.lastBoot }
