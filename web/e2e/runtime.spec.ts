@@ -90,7 +90,8 @@ test("editor → generate → bundle → boot → dispatch", async ({ page }) =>
     // posts the synthesized HTML to the SW).  Then a direct fetch
     // to the sandbox URL — same-origin, in-scope — must return the
     // pushed HTML rather than the 503 "bundle first" placeholder.
-    await page.getByTestId("right-pane-tabs").locator("text=Preview").click();
+    // Preview is always mounted in the four-region shell — no tab to click.
+    await expect(page.getByTestId("preview-region")).toBeVisible();
     const result = await page.evaluate(async () => {
       const url = new URL("__loom_sandbox__/", location.href).toString();
       // Up to 10 s for the bundle push round-trip.
@@ -113,7 +114,8 @@ test("editor → generate → bundle → boot → dispatch", async ({ page }) =>
     // The Preview tab is only meaningful when the source has a
     // React deployable.  The default Sales System example does;
     // assertions guard against running on a single-context source.
-    await page.getByTestId("right-pane-tabs").locator("text=Preview").click();
+    // Preview is always mounted in the four-region shell — no tab to click.
+    await expect(page.getByTestId("preview-region")).toBeVisible();
     const iframe = page.frameLocator('[data-testid="preview-iframe"]');
     // Mantine renders into the iframe — wait for any visible heading
     // or the home-page link list the React generator emits.
