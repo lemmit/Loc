@@ -1,7 +1,4 @@
-// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
-
-exports[`domain.mmd > emits the expected classDiagram for examples/acme.ddd 1`] = `
-"%% Loom domain diagram — generated from the IR, do not edit by hand.
+%% Loom domain diagram — generated from the IR, do not edit by hand.
 %% System: Acme
 classDiagram
   direction LR
@@ -82,19 +79,4 @@ classDiagram
   Orders ..> Order : manages
   ActiveOrders ..> Order : reads
   OrderSummary ..> Order : reads
-  Customers ..> Customer : manages"
-`;
-
-exports[`workflows.mmd > emits the expected flowchart for examples/acme.ddd 1`] = `
-"%% Loom workflow diagram — generated from the IR, do not edit by hand.
-%% System: Acme
-flowchart TD
-  subgraph wf_0["Orders · placeOrder(customerId, productId, quantity)"]
-    direction TB
-    w0s0{{"precondition: quantity > 0"}}
-    w0s1["order = Order.create()"]
-    w0s2["order.addLine()"]
-    w0s0 --> w0s1
-    w0s1 --> w0s2
-  end"
-`;
+  Customers ..> Customer : manages

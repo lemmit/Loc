@@ -6,13 +6,18 @@ import { fileURLToPath } from "node:url";
 import { createDddServices } from "../src/language/ddd-module.js";
 import { lowerModel } from "../src/ir/lower.js";
 import { enrichLoomModel } from "../src/ir/enrichments.js";
-import { buildSystemDiagram, renderSystemDiagram } from "../src/system/mermaid.js";
+import {
+  buildDomainDiagram,
+  buildWorkflowDiagram,
+  renderDomainDiagram,
+  renderWorkflowDiagram,
+} from "../src/system/mermaid.js";
 import type { Model } from "../src/language/generated/ast.js";
 
 // ---------------------------------------------------------------------------
-// `<outdir>/.loom/system.mmd` snapshot.  Locks the Mermaid system
-// diagram so generator changes that alter the structural view show up
-// as a diffable snapshot review.
+// `<outdir>/.loom/domain.mmd` + `.loom/workflows.mmd` snapshots.  Lock
+// the Mermaid views so generator changes that alter the structural /
+// workflow-flow projections show up as a diffable snapshot review.
 // ---------------------------------------------------------------------------
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -30,33 +35,47 @@ async function build(file: string) {
   return enrichLoomModel(lowerModel(doc.parseResult.value as Model));
 }
 
-describe("system.mmd", () => {
-  it("emits the expected Mermaid for examples/acme.ddd", async () => {
+describe("domain.mmd", () => {
+  it("emits the expected classDiagram for examples/acme.ddd", async () => {
     const loom = await build("examples/acme.ddd");
-    const sys = loom.systems[0]!;
-    expect(buildSystemDiagram(sys)).toMatchSnapshot();
+    expect(buildDomainDiagram(loom.systems[0]!)).toMatchSnapshot();
+  });
+
+  it("is a deterministic classDiagram with a trailing newline", async () => {
+    const sys = (await build("examples/acme.ddd")).systems[0]!;
+    const rendered = renderDomainDiagram(sys);
+    expect(rendered).toContain("classDiagram");
+    expect(rendered.endsWith("\n")).toBe(true);
+    expect(rendered).toBe(renderDomainDiagram(sys));
+  });
+
+  it("renders a class per aggregate with its operations", async () => {
+    const sys = (await build("examples/acme.ddd")).systems[0]!;
+    const out = buildDomainDiagram(sys);
+    for (const m of sys.modules) {
+      for (const c of m.contexts) {
+        for (const a of c.aggregates) {
+          expect(out).toContain(`class ${a.name} {`);
+          for (const op of a.operations) {
+            expect(out).toContain(`${op.name}(`);
+          }
+        }
+      }
+    }
+  });
+});
+
+describe("workflows.mmd", () => {
+  it("emits the expected flowchart for examples/acme.ddd", async () => {
+    const loom = await build("examples/acme.ddd");
+    expect(buildWorkflowDiagram(loom.systems[0]!)).toMatchSnapshot();
   });
 
   it("is a deterministic flowchart with a trailing newline", async () => {
-    const loom = await build("examples/acme.ddd");
-    const sys = loom.systems[0]!;
-    const rendered = renderSystemDiagram(sys);
-    expect(rendered.startsWith("%% Loom system diagram")).toBe(true);
+    const sys = (await build("examples/acme.ddd")).systems[0]!;
+    const rendered = renderWorkflowDiagram(sys);
     expect(rendered).toContain("flowchart TD");
     expect(rendered.endsWith("\n")).toBe(true);
-    // Stable across runs.
-    expect(rendered).toBe(renderSystemDiagram(sys));
-  });
-
-  it("renders a subgraph per module and a node per deployable", async () => {
-    const loom = await build("examples/acme.ddd");
-    const sys = loom.systems[0]!;
-    const out = buildSystemDiagram(sys);
-    for (const m of sys.modules) {
-      expect(out).toContain(`📦 ${m.name}`);
-    }
-    for (const d of sys.deployables) {
-      expect(out).toContain(`${d.name} · ${d.platform}`);
-    }
+    expect(rendered).toBe(renderWorkflowDiagram(sys));
   });
 });

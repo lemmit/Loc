@@ -13,7 +13,7 @@ import { platformFor } from "../platform/registry.js";
 import { renderE2EFile } from "./e2e-render.js";
 import { renderUIE2EFile } from "./ui-e2e-render.js";
 import { renderWireSpec } from "./wire-spec.js";
-import { renderSystemDiagram } from "./mermaid.js";
+import { renderDomainDiagram, renderWorkflowDiagram } from "./mermaid.js";
 
 // ---------------------------------------------------------------------------
 // System-mode generation.
@@ -71,10 +71,11 @@ function emitSystem(
   // Wire-spec artifact — diffable record of every aggregate / part /
   // value object's canonical wire shape.  See `wire-spec.ts`.
   out.set(".loom/wire-spec.json", renderWireSpec(sys));
-  // Mermaid system-structure diagram — a derived view of the IR
-  // (modules → contexts → aggregates/VOs/events/repos + deployables).
-  // The playground previews it inline; GitHub renders it in fences.
-  out.set(".loom/system.mmd", renderSystemDiagram(sys));
+  // Mermaid views of the IR — a domain class diagram and a per-workflow
+  // call flowchart.  The playground previews them inline; GitHub renders
+  // them in fences.  See `mermaid.ts`.
+  out.set(".loom/domain.mmd", renderDomainDiagram(sys));
+  out.set(".loom/workflows.mmd", renderWorkflowDiagram(sys));
 
   // E2E test scaffolding — emitted only when the system declares
   // `test e2e` blocks.  Lives at the system root so it can run against
