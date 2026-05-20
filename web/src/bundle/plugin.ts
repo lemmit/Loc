@@ -202,3 +202,37 @@ export function resolveInFs(fs: Map<string, string>, candidate: string): string 
   if (fs.has(candidate + "/index.tsx")) return candidate + "/index.tsx";
   return undefined;
 }
+
+// The tsconfig-alias matching rule: given a specifier and one alias
+// entry, produce the candidate target paths (or null when the specifier
+// doesn't match this alias).  Shared by the esbuild VFS plugin (which
+// then resolves each candidate via its own FileSource probe) and by
+// `applyTsconfigAlias` below — one source of truth for the "treat `@/x`
+// as an alias, not a bare package" rule that the shadcn pack relies on.
+export function aliasCandidates(spec: string, a: TsconfigAliasEntry): string[] | null {
+  if (a.wildcard) {
+    if (!spec.startsWith(a.prefix)) return null;
+    const tail = spec.slice(a.prefix.length);
+    return a.targets.map((t) => (t.endsWith("*") ? t.slice(0, -1) + tail : t));
+  }
+  return spec === a.prefix ? a.targets : null;
+}
+
+// Resolve a specifier through tsconfig `paths` aliases against a virtual
+// fs, returning the resolved fs key or null.  The Node-side resolver
+// counterpart to the esbuild plugin's in-build alias step.
+export function applyTsconfigAlias(
+  spec: string,
+  aliases: TsconfigAliasEntry[],
+  fs: Map<string, string>,
+): string | null {
+  for (const a of aliases) {
+    const candidates = aliasCandidates(spec, a);
+    if (!candidates) continue;
+    for (const c of candidates) {
+      const hit = resolveInFs(fs, c);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
