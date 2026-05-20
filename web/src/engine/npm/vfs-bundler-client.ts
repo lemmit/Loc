@@ -118,6 +118,14 @@ export class VfsBundlerClient {
         generatedFiles: input.generatedFiles,
         rootDeps: input.rootDeps,
         externalReactRuntime: input.externalReactRuntime,
+        // Resolve the configured base (relative "./" on GH Pages) to an
+        // absolute url against the main document.  The worker can't do
+        // this — a relative fetch there resolves against the worker's
+        // own assets/ url and misses the deployed vendor/ + npm-mirror/.
+        deployBase: new URL(
+          import.meta.env?.BASE_URL ?? "/",
+          document.baseURI,
+        ).href,
       } satisfies VfsBundleRequest);
     });
   };

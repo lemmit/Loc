@@ -29,6 +29,10 @@ export interface VfsBundleRequest {
   generatedFiles: Map<string, string | Uint8Array>;
   rootDeps: Record<string, string>;
   externalReactRuntime?: boolean;
+  /** Absolute deploy base (origin + base path, trailing slash) the
+   *  main thread resolves from its document url — used for the
+   *  vendor/ and npm-mirror/ fetches (see `deployBase`). */
+  deployBase?: string;
 }
 
 export interface VfsBundleResponse {
@@ -64,30 +68,39 @@ interface VendorManifest {
   css: string | null;
 }
 
+// Absolute deploy base (e.g. https://host/Loc/playground/), passed in
+// by the main thread on every request.  We cannot derive it here:
+// `import.meta.env.BASE_URL` is the configured relative base ("./"), so
+// a relative fetch in this worker resolves against the worker's OWN url
+// (under assets/) and misses the deployed `vendor/` and `npm-mirror/`
+// dirs.  The main thread knows the real document url, so it resolves
+// the base to an absolute url and hands it over.
+let deployBase = "/";
+
 // C2: fetched prebuilt vendor manifest per pack (importmap + css url),
-// with relative urls rewritten origin-absolute so the iframe importmap
-// (whose document lives under <base>/__loom_sandbox__/) resolves them.
-// Missing/404 (dev, or build:vendor not run) → null → the react bundle
-// falls back to the self-contained install+bundle path.
+// with relative urls rewritten absolute (against deployBase) so the
+// iframe importmap (whose document lives on the sandbox origin)
+// resolves them.  Missing/404 (dev, or build:vendor not run) → null →
+// the react bundle falls back to the self-contained install path.
 const vendorPromises = new Map<string, Promise<VendorManifest | null>>();
 function getVendor(pack: string): Promise<VendorManifest | null> {
   let p = vendorPromises.get(pack);
   if (!p) {
     p = (async () => {
       try {
-        const base = (import.meta.env?.BASE_URL ?? "/") + `vendor/${pack}/`;
-        const res = await fetch(base + "importmap.json");
+        const res = await fetch(`${deployBase}vendor/${pack}/importmap.json`);
         if (!res.ok) return null;
         const raw = (await res.json()) as VendorManifest;
-        const root = self.location.origin + (import.meta.env?.BASE_URL ?? "/");
         const imports: Record<string, string> = {};
-        // urls in the manifest are root-relative (`vendor/<pack>/x.js`);
-        // resolve against the origin, not the pack base, so the leading
-        // `vendor/` segment isn't duplicated.
+        // urls in the manifest are web-root-relative (`vendor/<pack>/
+        // x.js`); resolve against the deploy base to absolute urls.
         for (const [spec, url] of Object.entries(raw.imports)) {
-          imports[spec] = new URL(url, root).href;
+          imports[spec] = new URL(url, deployBase).href;
         }
-        return { imports, css: raw.css ? new URL(raw.css, root).href : null };
+        return {
+          imports,
+          css: raw.css ? new URL(raw.css, deployBase).href : null,
+        };
       } catch {
         return null;
       }
@@ -123,7 +136,7 @@ function getMirror(): Promise<Map<string, string>> {
     mirrorPromise = (async () => {
       const map = new Map<string, string>();
       try {
-        const base = (import.meta.env?.BASE_URL ?? "/") + "npm-mirror/";
+        const base = deployBase + "npm-mirror/";
         const res = await fetch(base + "manifest.json");
         if (res.ok) {
           const manifest = (await res.json()) as Record<string, string>;
@@ -185,6 +198,7 @@ const BUILD_COMMON = {
 self.onmessage = async (ev: MessageEvent<VfsBundleRequest>): Promise<void> => {
   const { id, stdinContents, entry, generatedFiles, rootDeps, externalReactRuntime } =
     ev.data;
+  if (ev.data.deployBase) deployBase = ev.data.deployBase;
   try {
     await ensureInit();
     const isReact = !stdinContents && !!entry;
