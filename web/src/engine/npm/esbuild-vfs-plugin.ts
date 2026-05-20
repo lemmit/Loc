@@ -10,6 +10,7 @@
 
 import type { Loader, Plugin } from "esbuild-wasm";
 import { resolveBare, type FileSource } from "../node-resolve.js";
+import type { TsconfigAliasEntry } from "../../bundle/plugin.js";
 
 const NS = "vfs";
 const EMPTY = "vfs-empty";
@@ -81,6 +82,11 @@ export function makeVfsNpmPlugin(
   files: Map<string, string | Uint8Array>,
   nmRoot = "/node_modules",
   externalReact = false,
+  /** tsconfig `paths` aliases (e.g. shadcn's `@/* → src/*`).  Targets
+   *  are absolute VFS paths (harvested against the "/"-keyed map);
+   *  matched before bare-package resolution so `@/components/ui/button`
+   *  resolves to a real file instead of being treated as a package. */
+  aliases: TsconfigAliasEntry[] = [],
 ): Plugin {
   const td = new TextDecoder();
   const asText = (v: string | Uint8Array): string =>
@@ -116,6 +122,24 @@ export function makeVfsNpmPlugin(
           return r
             ? { path: r, namespace: NS }
             : { errors: [{ text: `vfs: cannot resolve ${spec} from ${args.importer || "<entry>"}` }] };
+        }
+        // tsconfig path aliases (`@/...`) before bare resolution.
+        for (const a of aliases) {
+          let candidates: string[] | null = null;
+          if (a.wildcard) {
+            if (!spec.startsWith(a.prefix)) continue;
+            const tail = spec.slice(a.prefix.length);
+            candidates = a.targets.map((t) =>
+              t.endsWith("*") ? t.slice(0, -1) + tail : t,
+            );
+          } else if (spec === a.prefix) {
+            candidates = a.targets;
+          }
+          if (!candidates) continue;
+          for (const c of candidates) {
+            const hit = probe(c, src);
+            if (hit) return { path: hit, namespace: NS };
+          }
         }
         const r = resolveBare(spec, src, nmRoot);
         return r

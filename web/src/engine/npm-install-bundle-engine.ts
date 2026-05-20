@@ -69,27 +69,28 @@ export type EsbuildRun = (
 /** Nearest package.json to the entry → its `dependencies`, plus the
  *  runtime-layer PGlite pin (the bundle entry imports it even though
  *  the generated package.json doesn't). */
-function harvestRootDeps(
+/** Dependencies declared in the nearest package.json to `entry`.
+ *  Each deployable has its own (backend: hono/drizzle/zod; frontend:
+ *  react/mantine/…), so the caller harvests per-bundle to install
+ *  only what that bundle imports — not the union. */
+function harvestDeps(
   files: Map<string, string | Uint8Array>,
-  honoEntry: string,
+  entry: string,
 ): Record<string, string> {
   const td = new TextDecoder();
-  const parts = honoEntry.split("/");
+  const parts = entry.split("/");
   for (let i = parts.length; i > 0; i--) {
     const p = "/" + [...parts.slice(0, i - 1), "package.json"].join("/");
     const raw = files.get(p);
     if (raw == null) continue;
     try {
       const pkg = JSON.parse(typeof raw === "string" ? raw : td.decode(raw));
-      return {
-        ...(pkg.dependencies ?? {}),
-        "@electric-sql/pglite": RUNTIME_VERSIONS["@electric-sql/pglite"],
-      };
+      return { ...(pkg.dependencies ?? {}) };
     } catch {
       /* keep walking up */
     }
   }
-  return { "@electric-sql/pglite": RUNTIME_VERSIONS["@electric-sql/pglite"] };
+  return {};
 }
 
 export class NpmInstallBundleEngine implements RuntimeEngine {
@@ -139,22 +140,20 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
     const generatedFiles = new Map<string, string | Uint8Array>();
     for (const f of input.files) generatedFiles.set("/" + f.path, f.content);
 
-    // System-mode emits a package.json per deployable: the Hono
-    // backend's has hono/drizzle/zod, the React frontend's has
-    // react/react-dom/mantine/etc.  Install the UNION so BOTH builds
-    // resolve (harvesting only the Hono one left the React bundle
-    // unable to find react — caught by the #2 parity spike).
-    const rootDeps = {
-      ...harvestRootDeps(generatedFiles, input.honoEntry),
-      ...(input.reactEntry
-        ? harvestRootDeps(generatedFiles, input.reactEntry)
-        : {}),
+    // Scope the install per bundle: the Hono backend gets its own
+    // deps + the runtime PGlite pin (the entry imports it though the
+    // package.json doesn't); the React frontend gets its own deps.
+    // Installing only what each bundle imports avoids pulling the
+    // whole Mantine tree into the backend install (and vice-versa).
+    const honoDeps = {
+      ...harvestDeps(generatedFiles, input.honoEntry),
+      "@electric-sql/pglite": RUNTIME_VERSIONS["@electric-sql/pglite"],
     };
     const run = this.esbuildRun();
 
     const honoRun = await run({
       generatedFiles,
-      rootDeps,
+      rootDeps: honoDeps,
       stdinContents: makeEntryStdin(
         input.honoEntry,
         schemaPathFor(input.honoEntry),
@@ -196,11 +195,17 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
 
     let react: BundleResult | null = null;
     if (hono.ok && input.reactEntry) {
+      // Bundle the frontend self-contained: react/react-dom come from
+      // the single deduped node_modules, so they're one instance and
+      // need NO importmap.  (Externalising react — the earlier
+      // approach — left a bare `import "react"` the iframe importmap
+      // couldn't resolve: "Failed to resolve module specifier react".
+      // Externalisation only works once C2 ships a prebuilt vendor
+      // target for the importmap to point at.)
       const r = await run({
         generatedFiles,
-        rootDeps,
+        rootDeps: harvestDeps(generatedFiles, input.reactEntry),
         entry: "/" + input.reactEntry,
-        externalReactRuntime: true,
       });
       react = r.ok
         ? {

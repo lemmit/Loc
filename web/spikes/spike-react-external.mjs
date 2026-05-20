@@ -72,29 +72,26 @@ check("hono bundle ok", prepared.hono.ok);
 check("react bundle present + ok", r != null && r.ok);
 if (r && r.ok) {
   check("Mantine CSS extracted (react.css non-empty)", !!r.css && r.css.length > 1000);
-  // React 19 + automatic JSX: the app imports react/jsx-runtime and
-  // react-dom/client (not bare "react"); the external react/* +
-  // react-dom/* globs keep those out of the bundle.
+  // Self-contained: react/react-dom are bundled from the single
+  // deduped node_modules — NO leftover bare `import … from "react"`
+  // that the iframe would need an importmap to resolve.
   check(
-    "react runtime kept EXTERNAL (react / react-dom imports retained)",
-    /from\s*"(react|react-dom)(\/[^"]+)?"/.test(r.code),
+    "no unresolved bare react import (self-contained)",
+    !/\bfrom\s*["'](react|react-dom)(\/[^"']*)?["']/.test(r.code) &&
+      !/\brequire\(\s*["'](react|react-dom)(\/[^"']*)?["']\s*\)/.test(r.code),
   );
+  // React IS bundled in (its reconciler internals are present),
+  // confirming a single in-bundle instance.
   check(
-    "react-dom client kept EXTERNAL",
-    /from\s*"react-dom(\/[^"]+)?"/.test(r.code),
+    "react bundled in (reconciler internals present)",
+    /__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED|react\.development|Symbol\.for\(["']react/.test(
+      r.code,
+    ),
   );
-  // A second bundled React would carry its scheduler/runtime guts; a
-  // properly-externalised bundle does not define them locally.
-  check(
-    "no second React bundled in (no react reconciler internals)",
-    !/__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED/.test(r.code),
-  );
-  check("versions carry react for the importmap", !!r.versions.react);
-  check("versions carry react-dom for the importmap", !!r.versions["react-dom"]);
 }
 
 log("");
 log(ok
-  ? "PASS — npm engine keeps React external on the frontend build (importmap supplies one instance). #2 engine-half verified; only iframe importmap wiring remains for e2e."
+  ? "PASS — npm engine bundles React self-contained (no importmap); Mantine CSS extracted."
   : "FAIL — React not externalised as expected; #2 still a default-flip risk.");
 process.exit(ok ? 0 : 1);

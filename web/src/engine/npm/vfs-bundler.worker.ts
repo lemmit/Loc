@@ -14,6 +14,7 @@
 import * as esbuild from "esbuild-wasm";
 import wasmURL from "esbuild-wasm/esbuild.wasm?url";
 import { makeVfsNpmPlugin } from "./esbuild-vfs-plugin.js";
+import { harvestTsconfigPaths } from "../../bundle/plugin.js";
 import { install } from "./install.js";
 import { IdbInstallCache } from "./install-cache-idb.js";
 
@@ -105,7 +106,19 @@ self.onmessage = async (ev: MessageEvent<VfsBundleRequest>): Promise<void> => {
       // write:false → it comes back in outputFiles, collected below.
       outdir: "/" as const,
       loader: { ".wasm": "binary" as const },
-      plugins: [makeVfsNpmPlugin(files, "/node_modules", !!externalReactRuntime)],
+      plugins: [
+        makeVfsNpmPlugin(
+          files,
+          "/node_modules",
+          !!externalReactRuntime,
+          // tsconfig `@/*` aliases (shadcn etc.); harvested from the
+          // entry's nearest tsconfig.  Backend (stdin) builds have no
+          // entry path and don't use these aliases.
+          entry
+            ? harvestTsconfigPaths(files as unknown as Map<string, string>, entry)
+            : [],
+        ),
+      ],
     };
     const tBundle = performance.now();
     const out = await esbuild.build(
