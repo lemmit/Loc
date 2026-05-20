@@ -169,7 +169,9 @@
       ]
     },
     "execTestsByTestCase": {
-      "TC-001": [],
+      "TC-001": [
+        "confirming an order with no lines is rejected"
+      ],
       "TC-002": [
         "create then confirm an order with one line"
       ],

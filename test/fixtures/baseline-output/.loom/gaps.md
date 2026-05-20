@@ -18,5 +18,5 @@ _none_
 
 ## Test cases without an executable test
 
-- `TC-001` — Confirming an empty order is rejected
+_none_
 
