@@ -155,7 +155,11 @@ async function buildPack({ pack, ddd, css: cssSpecs }) {
   for (const f of jsOut.outputFiles) {
     writeFileSync(path.join(outDir, f.path.split("/").pop()), f.text);
   }
-  const importmap = { imports: {} };
+  // `imports` is a standard importmap (specifier → relative url, made
+  // origin-absolute by the consumer).  `css` is our own sibling field
+  // (the consumer reads this manifest, never injects it verbatim) —
+  // the vendor.css url when the pack ships precompiled CSS, else null.
+  const importmap = { imports: {}, css: null };
   const baseUrl = `vendor/${pack}/`;
   for (const e of entryPoints) {
     const spec = jsSpecs.find((s) => sanitize(s) === e.out);
@@ -165,6 +169,7 @@ async function buildPack({ pack, ddd, css: cssSpecs }) {
   // 5. CSS bundle (pack stylesheets) → vendor.css.
   const cssEntries = cssSpecs.map((spec) => resolveBare(spec, src)).filter(Boolean);
   if (cssEntries.length) {
+    importmap.css = baseUrl + "vendor.css";
     const cssOut = await esbuild.build({
       entryPoints: cssEntries,
       bundle: true,

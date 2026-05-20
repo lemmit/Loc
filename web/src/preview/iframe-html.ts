@@ -91,6 +91,15 @@ interface MakePreviewArgs {
    *  Lookups for `react` / `react-dom` decide what the importmap
    *  pins; if unset, falls back to a known-good 18.x. */
   versions?: Record<string, string>;
+  /** C2: when the bundle externalised a prebuilt design-pack vendor,
+   *  this importmap (bare spec → origin-absolute vendor chunk url)
+   *  supplies react/@mantine/… to the iframe.  When set it REPLACES
+   *  the version-derived react/react-dom map — the externalised app
+   *  bundle resolves every bare import through it.  Absent → the
+   *  bundle is self-contained and the version map applies. */
+  vendorImportmap?: Record<string, string>;
+  /** C2: origin-absolute url of the prebuilt vendor.css to link. */
+  vendorCssUrl?: string;
   /** Basename for the app — the sandbox stub's directory, no trailing
    *  slash, e.g. `/loc/playground/sandbox` on GH Pages.  The
    *  generated `main.tsx` reads this as `window.__LOOM_BASENAME__`
@@ -244,8 +253,15 @@ tailwind.config = {
 `.trim();
 
 export function makePreviewHtml(args: MakePreviewArgs): string {
-  const map = importMap(args.versions ?? {});
+  // C2: a prebuilt-vendor bundle is externalised — every bare import
+  // (react, @mantine/core, …) resolves through the prebuilt importmap.
+  // Otherwise fall back to the version-derived react/react-dom map for
+  // the self-contained bundle.
+  const map = args.vendorImportmap ?? importMap(args.versions ?? {});
   const importMapJson = JSON.stringify({ imports: map }, null, 2);
+  const vendorCssLink = args.vendorCssUrl
+    ? `<link rel="stylesheet" href="${args.vendorCssUrl}">`
+    : "";
   // No `<base href>`: relative URLs resolve against the document's
   // own URL (the stub's path on SANDBOX_ORIGIN).  Inject the globals
   // the bundle reads:
@@ -296,6 +312,7 @@ export function makePreviewHtml(args: MakePreviewArgs): string {
 <script type="importmap">
 ${ESCAPE_END_SCRIPT(importMapJson)}
 </script>
+${vendorCssLink}
 ${tailwindScripts}
 ${styleTagFor(args.css)}
 <style>

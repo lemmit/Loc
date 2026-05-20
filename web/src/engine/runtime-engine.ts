@@ -157,4 +157,9 @@ export interface PreviewMaterial {
   js: string;
   css?: string;
   versions?: Record<string, string>;
+  /** C2: when the bundle externalised a prebuilt design-pack vendor,
+   *  the iframe importmap (bare spec → origin-absolute url) and the
+   *  optional vendor.css url.  Absent → self-contained bundle. */
+  vendorImportmap?: Record<string, string>;
+  vendorCssUrl?: string;
 }
