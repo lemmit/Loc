@@ -98,10 +98,51 @@ uploaded design, generalised to production.
   ship a bootstrap that pulls the bundle over `postMessage`; heavier
   operationally and a worse fit for the static/serverless ethos.
 
-**Recommendation: build A now.** It delivers the security boundary the user
-asked for without a second host and collapses two channels into one. Keep B in
-the back pocket for if/when we need a shareable preview URL or persistent
-sandbox storage.
+**Decision: build B, staged through same-origin via a `SANDBOX_ORIGIN`
+constant.** B is the better target — a real origin keeps `BrowserRouter` and
+clean paths, gives stronger isolation, and makes `event.origin` checks valid
+(opaque frames post as `"null"`). The "needs a second host" cost is deferred,
+not paid up front: see [Staged rollout](#staged-rollout-origin-flip-is-a-config-switch).
+
+We do **not** take A. Its only advantage was zero infra, but the opaque origin
+forces HashRouter and a CSP/inline-stack fight; the staged-B approach gets the
+same zero-infra-today property without either compromise.
+
+### Staged rollout (origin flip is a config switch)
+
+The preview origin is a single build constant, `SANDBOX_ORIGIN`:
+
+| Phase | `SANDBOX_ORIGIN` | Isolation | Ships on Pages? |
+|---|---|---|---|
+| Now (dev) | `http://sandbox.localhost:<port>` *(optional)* or same origin | dev-only | n/a |
+| Now (prod) | **the playground's own origin** | none yet | **yes** |
+| Later | a distinct origin — a free second `*.github.io` site (separate org) or a custom domain | full cross-site | yes |
+
+- The bootstrap is a **single static stub** served from `SANDBOX_ORIGIN`. While
+  same-origin it's just an asset in the existing Pages deploy
+  (`<base>/sandbox.html`); the iframe loads `new URL("sandbox.html",
+  SANDBOX_ORIGIN + base)`.
+- The generated **bundle is delivered over `postMessage`**, never written to the
+  sandbox host — so the stub is fixed and deployed once, and the same mechanism
+  works after the flip (a cross-origin host can't be handed files anyway).
+- Fix the iframe attribute now at `sandbox="allow-scripts allow-same-origin
+  allow-forms"`. It's a **no-op while same-origin** and becomes a **real
+  boundary** the instant `SANDBOX_ORIGIN` differs. The attribute never changes;
+  only the constant does. (`allow-same-origin` is safe in both phases — it
+  refers to the sandbox's *own* origin, not the playground's.)
+- The bridge validates `event.origin === SANDBOX_ORIGIN`, correct in both modes.
+- **`BrowserRouter` is retained throughout** (both origins are real/non-opaque).
+  No router change, no `main.hbs` edits, no HashRouter — that entire branch of
+  the plan is dropped.
+
+**The one caveat:** while `SANDBOX_ORIGIN` equals the playground origin there is
+**no isolation**. Everything ships (bridge, bootstrap, in-browser tests) except
+the security boundary — so the untrusted user-expression feature must not ship
+until `SANDBOX_ORIGIN` points at a distinct origin. That flip is config + a
+one-file deploy, no code change.
+
+Keep A's opaque/HashRouter design documented only as the fallback if a second
+origin is ever truly impossible.
 
 > Note on the uploaded "Comlink + two ports" design: its *technique* is right
 > (MutationObserver `waitForSelector`, dispatch `input`/`change` for
@@ -112,7 +153,7 @@ sandbox storage.
 > no-`allow-same-origin` frame (origin is `"null"`) — authenticate by the
 > transferred port instead.
 
-## Target architecture (Option A)
+## Target architecture (Option B, staged)
 
 ```
 ┌─ Playground (trusted origin) ──────────────────────────────────────┐
@@ -120,18 +161,23 @@ sandbox storage.
 │  worker · Test runner + reporter UI                                 │
 │                                                                     │
 │  PreviewHost                                                        │
-│   • renders <iframe sandbox="allow-scripts" srcdoc=…>               │
-│   • on load: postMessage(init, "*", [port])  ← transfer one port    │
+│   • renders <iframe sandbox="allow-scripts allow-same-origin        │
+│     allow-forms" src=SANDBOX_ORIGIN/sandbox.html>                   │
+│   • on load: postMessage(init, SANDBOX_ORIGIN, [port])  ← one port  │
 │   • owns `port`; routes 3 message kinds to/from workers + driver    │
 └───────────────────────────────┬─────────────────────────────────────┘
                                  │  single MessagePort (capability)
 ┌───────────────────────────────▼─────────────────────────────────────┐
-│  Preview sandbox (opaque origin, CSP-locked)                        │
-│   • bootstrap grabs the port from the init message                  │
+│  Preview sandbox @ SANDBOX_ORIGIN (real origin; CSP-locked)         │
+│   • static stub grabs the port, requests + boots the bundle         │
 │   • installs window.fetch shim → port (API calls)                   │
-│   • mounts the generated app in PREVIEW mode (Hash/Memory router)   │
+│   • mounts the generated app unchanged (BrowserRouter)              │
 │   • exposes a DOM driver (click/fill/waitFor/text/setFiles/shot)    │
 └─────────────────────────────────────────────────────────────────────┘
+
+SANDBOX_ORIGIN = playground origin (now) → distinct origin (later).
+Same-origin now = no isolation yet, but ships on Pages; the flip is
+config + a one-file deploy, no code change.
 ```
 
 ### The bridge protocol (one port, three concerns)
@@ -270,9 +316,13 @@ Swap transport and isolation with the *same* preview behaviour.
   serialises `Request` → `runtime` message and rebuilds the `Response`, and
   forwards `console` + `error`/`unhandledrejection` as `event`s.
 - **Rewrite `web/src/preview/iframe-html.ts`** — inject the bootstrap before the
-  bundle `<script type="module">`; set `window.__LOOM_PREVIEW__ = true` and a
-  sentinel `__LOOM_API_BASE__` the fetch shim keys on; add a CSP `<meta>`
-  (loosened now, tightened in phase 2). Importmap / Tailwind stay for now.
+  bundle `<script type="module">`; set a sentinel `__LOOM_API_BASE__` the fetch
+  shim keys on; add a CSP `<meta>` (loosened now, tightened in phase 2).
+  Importmap / Tailwind stay for now. **No `__LOOM_PREVIEW__` / router flag** —
+  the app keeps `BrowserRouter` (real origin both phases).
+- **New static stub** `web/public/sandbox.html` served from `SANDBOX_ORIGIN`
+  (same origin now). Grabs the port, requests the bundle, mounts it. The iframe
+  `src` is `new URL("sandbox.html", SANDBOX_ORIGIN + base)`.
 - **New `web/src/preview/sandbox-iframe-host.ts`** replacing
   `SwIframePreviewHost` — builds the `srcdoc`, sets the iframe to
   `sandbox="allow-scripts"` + `srcdoc=…`, wires `parent-bridge` to the runtime
@@ -284,15 +334,10 @@ Swap transport and isolation with the *same* preview behaviour.
 - **Delete** `web/public/preview-sw.js`, `web/src/preview/sw-host.ts`,
   `web/src/preview/sw-iframe-host.ts`, and the `registerPreviewSw()` call in
   `web/src/App.tsx`.
-- **Generated router (7 React packs):** `designs/{mantine/v7,mantine/v9,
-  mui/v5,mui/v7,shadcn/v3,shadcn/v4,chakra/v2}/main.hbs` — import both routers
-  and pick `HashRouter` when `window.__LOOM_PREVIEW__`, else `BrowserRouter`.
-  **HashRouter, not Memory** — it writes `location.hash`, which the phase-4
-  driver reads for `goto` / `url()` / `waitForURL`. (`ashPhoenix` is Phoenix,
-  not React — untouched.)
-- **Fixtures/tests:** refresh React baseline + react-build fixtures and any
-  `main`/walker snapshot for the new `main.tsx`; rewrite
-  `web/e2e/runtime.spec.ts` to the srcdoc+port flow; delete
+- **No generated-code change.** `BrowserRouter` is kept; the driver reads/sets
+  `location` on a real origin (`pushState` works). The 7-pack `main.hbs` /
+  HashRouter work is dropped entirely.
+- **Tests:** rewrite `web/e2e/runtime.spec.ts` to the stub+port flow; delete
   `web/e2e/preview-sw.spec.ts`.
 - **Gate:** generate → bundle → boot → interact works on localhost **and** a
   non-root deploy-base build; runtime fetches resolve; no SW registered.
@@ -344,11 +389,10 @@ Swap transport and isolation with the *same* preview behaviour.
 
 ## Risks / open questions
 
-- **Router change touches generated code.** It's behind a global and only
-  affects preview, but it spans 7 pack `main.hbs` templates (+ fixtures).
-  HashRouter is chosen over MemoryRouter because the test driver reads/writes
-  `location.hash` for `goto` / `url()` / `waitForURL`; Memory would hide the URL
-  from the driver entirely.
+- **Isolation lands only at the origin flip.** The same-origin staging phase
+  has no security boundary; the untrusted user-expression feature is gated on
+  pointing `SANDBOX_ORIGIN` at a distinct origin first. Track this so the two
+  don't ship out of order.
 - **CSP vs Tailwind/esm.sh.** Tight `connect-src 'none'` is incompatible with
   the CDN-driven packs as written. Either inline everything (work in the
   bundler) or allowlist specific hosts (weaker, but bounded).
