@@ -1,16 +1,17 @@
 // Synthesise the iframe document for the React preview.
 //
-// The output is pushed to `preview-sw.js`, which serves it when
-// the iframe navigates to `<base>/__loom_sandbox__/`.  Real-origin
-// iframe — postMessage, history, and the URL parser all behave
-// normally with no shims required.
+// The output is handed to the sandbox stub (`public/sandbox/index.html`)
+// over `postMessage` and rendered in place via `document.write`, so the
+// document keeps a real URL on `SANDBOX_ORIGIN` — history/pushState and
+// the URL parser all behave normally, and BrowserRouter is unchanged.
 //
-// Fetches the bundle issues are relative URLs (the bundler's
-// `import.meta.env.VITE_API_BASE_URL` define swaps the
-// generator's `http://localhost:NNNN` baseline for `"runtime"`),
-// so requests resolve to `<base>/__loom_sandbox__/runtime/...` and
-// land in the SW.  The SW forwards them through a MessageChannel
-// to the parent's runtime worker and posts the response back.
+// The generated bundle's API base is `window.__LOOM_API_BASE__`
+// (an absolute path under the stub's directory, e.g.
+// `<base>/sandbox/runtime`).  An inline `fetch` shim installed here
+// intercepts requests under that prefix and forwards them over the
+// `MessagePort` the stub stashed on `window.__LOOM_PORT__`; every
+// other fetch (esm.sh, Tailwind CDN) falls through to the real
+// `fetch`.  This replaces the old Service-Worker interception.
 //
 // React runtime modules (`react`, `react-dom`, `react/jsx-runtime`,
 // …) are externalised at bundle time and provided via a dynamic
@@ -20,6 +21,69 @@
 
 import { stackHintsForReactMajor } from "../bundle/stacks.js";
 
+// Inline runtime `fetch` bridge.  Classic script so it runs
+// synchronously during parse — before the bundle module fetches —
+// and reads the port the stub left on `window.__LOOM_PORT__`.  Kept
+// dependency-free and ES5-ish since it executes inside the generated
+// app's document.
+const RUNTIME_FETCH_SHIM = `
+(function () {
+  var port = window.__LOOM_PORT__;
+  if (!port) return;
+  var nextId = 1;
+  var pending = Object.create(null);
+  port.onmessage = function (ev) {
+    var r = ev.data;
+    if (!r || typeof r.rid !== "number") return;
+    var slot = pending[r.rid];
+    if (!slot) return;
+    delete pending[r.rid];
+    slot(r);
+  };
+  var realFetch = window.fetch ? window.fetch.bind(window) : null;
+  window.fetch = function (input, init) {
+    var apiBase = window.__LOOM_API_BASE__;
+    var req;
+    try { req = new Request(input, init); }
+    catch (e) { return realFetch ? realFetch(input, init) : Promise.reject(e); }
+    var u;
+    try { u = new URL(req.url, document.baseURI); }
+    catch (e) { return realFetch ? realFetch(input, init) : Promise.reject(e); }
+    if (!apiBase || u.pathname.indexOf(apiBase) !== 0) {
+      return realFetch ? realFetch(input, init) : Promise.reject(new Error("fetch unavailable"));
+    }
+    var routePath = u.pathname.slice(apiBase.length) + u.search;
+    if (routePath.charAt(0) !== "/") routePath = "/" + routePath;
+    return req.text().then(function (bodyText) {
+      var headers = {};
+      req.headers.forEach(function (v, k) { headers[k] = v; });
+      var rid = nextId++;
+      return new Promise(function (resolve) {
+        var timer = setTimeout(function () {
+          delete pending[rid];
+          resolve(new Response("Runtime timeout.\\n", { status: 504 }));
+        }, 30000);
+        pending[rid] = function (reply) {
+          clearTimeout(timer);
+          if (reply.ok) {
+            var nullBody = reply.status === 204 || reply.status === 205 || reply.status === 304;
+            resolve(new Response(nullBody ? null : reply.body, {
+              status: reply.status, statusText: reply.statusText, headers: reply.headers
+            }));
+          } else {
+            resolve(new Response((reply.message || "Runtime error") + "\\n", { status: 500 }));
+          }
+        };
+        port.postMessage({
+          kind: "runtime", rid: rid, method: req.method,
+          url: routePath, headers: headers, body: bodyText === "" ? null : bodyText
+        });
+      });
+    });
+  };
+})();
+`.trim();
+
 interface MakePreviewArgs {
   js: string;
   css?: string;
@@ -27,8 +91,8 @@ interface MakePreviewArgs {
    *  Lookups for `react` / `react-dom` decide what the importmap
    *  pins; if unset, falls back to a known-good 18.x. */
   versions?: Record<string, string>;
-  /** Pathname the iframe is served from, no trailing slash —
-   *  e.g. `/loc/playground/__loom_sandbox__` on GH Pages.  The
+  /** Basename for the app — the sandbox stub's directory, no trailing
+   *  slash, e.g. `/loc/playground/sandbox` on GH Pages.  The
    *  generated `main.tsx` reads this as `window.__LOOM_BASENAME__`
    *  and passes it to `<BrowserRouter basename>`, so route
    *  resolution works under the iframe's deploy path.  When
@@ -182,30 +246,28 @@ tailwind.config = {
 export function makePreviewHtml(args: MakePreviewArgs): string {
   const map = importMap(args.versions ?? {});
   const importMapJson = JSON.stringify({ imports: map }, null, 2);
-  // No `<base href>`: relative URLs resolve against the iframe's
-  // own document URL, which is `<base>/__loom_sandbox__/`.  This
-  // is exactly what we want — the bundler's `runtime` API base
-  // resolves to `<sandbox>/runtime/...`, which the SW intercepts.
-  // A `<base href="/">` would have leaked the request out of the
-  // SW scope on deploys with a non-root deploy base (e.g. GH
-  // Pages at `/loc/playground/`).
-  // Inject two globals the bundle reads:
+  // No `<base href>`: relative URLs resolve against the document's
+  // own URL (the stub's path on SANDBOX_ORIGIN).  Inject the globals
+  // the bundle reads:
   //   - __LOOM_BASENAME__: feeds <BrowserRouter basename>, so route
   //     resolution survives the iframe being mounted under a deploy
-  //     subpath (e.g. `/loc/playground/__loom_sandbox__`).
-  //   - __LOOM_API_BASE__: absolute path the generator's
-  //     `config.ts` uses for `API_BASE_URL`.  Must be absolute
-  //     (leading `/`) so fetches don't resolve against the iframe's
-  //     current URL — once the user navigates client-side
-  //     (e.g. to `<sandbox>/products/new`) a relative API base
-  //     would resolve to `<sandbox>/products/runtime/...`, which
-  //     hits the SW SPA fallback (HTML response) and breaks JSON
-  //     parsing in the bundle.
+  //     subpath (e.g. `/loc/playground/sandbox`).
+  //   - __LOOM_API_BASE__: absolute path the generator's `config.ts`
+  //     uses for `API_BASE_URL`.  Must be absolute (leading `/`) so
+  //     fetches don't resolve against the current client-side route;
+  //     the inline fetch shim matches this prefix and forwards those
+  //     requests over the bridge port (everything else passes through
+  //     to the real `fetch`).
   const hostScript =
     args.sandboxBase != null
       ? `<script>` +
         `window.__LOOM_BASENAME__ = ${JSON.stringify(args.sandboxBase)};` +
         `window.__LOOM_API_BASE__ = ${JSON.stringify(args.sandboxBase + "/runtime")};` +
+        // Normalise the start route to the basename root: the stub's
+        // own URL ends in `…/sandbox/index.html`, which BrowserRouter
+        // would otherwise fail to match against the user's routes.
+        // Same-origin replaceState — never hits the network.
+        `try{history.replaceState(null,"",${JSON.stringify(args.sandboxBase + "/")});}catch(e){}` +
         `</script>`
       : "";
   // In-browser Tailwind compiler — only when the bundle's CSS is
@@ -230,6 +292,7 @@ export function makePreviewHtml(args: MakePreviewArgs): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Loom Preview</title>
+<script>${ESCAPE_END_SCRIPT(RUNTIME_FETCH_SHIM)}</script>
 <script type="importmap">
 ${ESCAPE_END_SCRIPT(importMapJson)}
 </script>
