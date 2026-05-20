@@ -11,6 +11,7 @@ import { generateTypeScript } from "../platform/hono/v4/emit.js";
 // backend; the CLI (an entrypoint) supplies that package's pins to
 // the version-agnostic shared emitter (B2.1).
 import { BACKEND_PINS as HONO_V4_PINS } from "../platform/hono/v4/pins.js";
+import { installFsBackendSource } from "../platform/fs-discovery.js";
 import { generateDotnet } from "../generator/dotnet/index.js";
 import { generateSystems } from "../system/index.js";
 import { lowerModel } from "../ir/lower.js";
@@ -339,6 +340,27 @@ async function watchAndRegenerate(target: GenerateTarget, file: string, outDir: 
   // Keep the process alive
   await new Promise(() => {});
 }
+
+// packaging-split P3 slice 3 — install the fs-backed
+// `discoverBackends()` source before any platform resolution.
+// Composes the in-tree default with whatever `@loom/*` backend
+// packages are installed in the project's `node_modules`.  Today
+// (slice 3) this is a no-op for emitted output because the fs
+// source returns the same surface instances as the in-tree
+// default; slice 5 makes the workspace package the true source of
+// code, and this call becomes load-bearing.  Errors during fs walk
+// (missing `node_modules`, permission, malformed manifest) are
+// non-fatal — the function returns whatever it could read, and the
+// composition falls back to the in-tree set.
+await installFsBackendSource(process.cwd()).catch((err) => {
+  // Don't take down the CLI for a discovery hiccup; just leave the
+  // in-tree default active.
+  console.warn(
+    `loom: fs backend discovery skipped (${
+      err instanceof Error ? err.message : String(err)
+    }); using in-tree default.`,
+  );
+});
 
 program.parseAsync(process.argv).catch((err) => {
   console.error(err);
