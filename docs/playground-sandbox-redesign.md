@@ -234,26 +234,121 @@ navigation — the one place the test driver and the router-mode change meet.
 The `RuntimeRequest`/`RuntimeReply` types and the runtime-worker dispatch logic
 **stay**; only their transport changes (port instead of SW).
 
-## Migration phases
+### Lifecycle: no SW means no revival
 
-1. **Bridge + delivery swap (no behaviour change to user):** sandboxed
-   `srcdoc` iframe, transferred port, `runtime` channel, `fetch` shim,
-   preview-mode router global. Delete the SW. Rewrite `web/e2e/runtime.spec.ts`
-   and retire `preview-sw.spec.ts`. Gate: existing preview demos still work.
-2. **CSP + inline-stack default:** lock `connect-src`, default preview to the
-   inline runtime stack, allowlist Tailwind CDN where packs need it.
-3. **API test runner:** `driver`-less, runs `kind:"api"` tests over the
-   `runtime` channel; minimal pass/fail reporter UI.
-4. **UI driver + `page` shim:** implement the closed Playwright subset in the
-   sandbox; alias `@playwright/test`; run `kind:"ui"` specs. Add a guard test
-   asserting the page-object generator only emits the supported `Page` surface.
-5. **(Optional) console/error channel + screenshots** for the reporter.
+The SW revival machinery (`swRevision`, `loom-sw/awake`, re-attach/re-push)
+exists *only* because a Service Worker is event-driven and the browser spins it
+down when idle / kills it under memory pressure. The new transport is a
+`MessagePort` between two **live documents** (parent window ↔ sandboxed iframe);
+neither is spun down behind our back. The PGlite runtime stays in a dedicated
+**Web Worker** owned by the parent — exactly where it is today; the SW was only
+relaying to it. A sandboxed `allow-scripts` frame can't host a SW anyway. So
+this removes a failure class rather than relocating it. The only lifecycle
+events left are parent-driven and deterministic (iframe remount on a new bundle
+→ port handshake re-runs).
+
+## Implementation plan
+
+Phases are independently shippable. Each ends at a gate that must stay green.
+
+### Phase 1 — Bridge + sandbox delivery (no user-visible change)
+
+Swap transport and isolation with the *same* preview behaviour.
+
+- **New `web/src/preview/bridge/protocol.ts`** — message envelopes: `init`
+  (carries the transferred port), and id-keyed `{ kind: "runtime" | "driver" |
+  "event", id, … }`. Move `RuntimeRequest` / `RuntimeReply` here unchanged from
+  `sw-host.ts:97-113`.
+- **New `web/src/preview/bridge/parent-bridge.ts`** — on iframe `load`, create a
+  `MessageChannel` and `iframe.contentWindow.postMessage(init, "*", [port2])`;
+  keep `port1`; id-keyed pending map (the pattern in `sw-host.ts:133-148`).
+  Routes `runtime` → the existing runtime-worker dispatch
+  (`web/src/runtime/client.ts`), surfaces `event` pushes, and (phase 4) issues
+  `driver` calls. Authenticate by the port, **not** origin.
+- **New sandbox bootstrap** (injected as inline script ahead of the bundle) —
+  grabs the port from the first message, installs a `window.fetch` shim that
+  serialises `Request` → `runtime` message and rebuilds the `Response`, and
+  forwards `console` + `error`/`unhandledrejection` as `event`s.
+- **Rewrite `web/src/preview/iframe-html.ts`** — inject the bootstrap before the
+  bundle `<script type="module">`; set `window.__LOOM_PREVIEW__ = true` and a
+  sentinel `__LOOM_API_BASE__` the fetch shim keys on; add a CSP `<meta>`
+  (loosened now, tightened in phase 2). Importmap / Tailwind stay for now.
+- **New `web/src/preview/sandbox-iframe-host.ts`** replacing
+  `SwIframePreviewHost` — builds the `srcdoc`, sets the iframe to
+  `sandbox="allow-scripts"` + `srcdoc=…`, wires `parent-bridge` to the runtime
+  dispatcher. (Keep the `PreviewHost` interface so `Preview.tsx` barely moves.)
+- **Rewrite `web/src/preview/Preview.tsx`** — drop `SW_AVAILABLE`, `swRevision`,
+  `runtimeAttached` gating; render `<iframe sandbox="allow-scripts"
+  srcdoc={html}>`; remount keyed on bundle hash (already done) re-runs the
+  handshake.
+- **Delete** `web/public/preview-sw.js`, `web/src/preview/sw-host.ts`,
+  `web/src/preview/sw-iframe-host.ts`, and the `registerPreviewSw()` call in
+  `web/src/App.tsx`.
+- **Generated router (7 React packs):** `designs/{mantine/v7,mantine/v9,
+  mui/v5,mui/v7,shadcn/v3,shadcn/v4,chakra/v2}/main.hbs` — import both routers
+  and pick `HashRouter` when `window.__LOOM_PREVIEW__`, else `BrowserRouter`.
+  **HashRouter, not Memory** — it writes `location.hash`, which the phase-4
+  driver reads for `goto` / `url()` / `waitForURL`. (`ashPhoenix` is Phoenix,
+  not React — untouched.)
+- **Fixtures/tests:** refresh React baseline + react-build fixtures and any
+  `main`/walker snapshot for the new `main.tsx`; rewrite
+  `web/e2e/runtime.spec.ts` to the srcdoc+port flow; delete
+  `web/e2e/preview-sw.spec.ts`.
+- **Gate:** generate → bundle → boot → interact works on localhost **and** a
+  non-root deploy-base build; runtime fetches resolve; no SW registered.
+
+### Phase 2 — CSP + inline-stack default
+
+- Default preview to the React-19 **inline** stack (`iframe-html.ts:46-51`,
+  `web/src/bundle/stacks.ts`) so runtime deps aren't fetched.
+- CSP builder in `iframe-html.ts`: target `connect-src 'none'`,
+  `script-src 'unsafe-inline'` + an explicit allowlist for the Tailwind CDN
+  hosts the shadcn packs load (`iframe-html.ts:220-226`); `base-uri 'none'`,
+  `form-action 'none'`.
+- **Gate:** app still loads under the locked CSP; an injected
+  `fetch("https://example.com")` from sandbox code is blocked (assert in e2e).
+
+### Phase 3 — API test runner
+
+- **New `web/src/testing/run-api-tests.ts`** — lower the current system (web
+  already imports the toolchain from `../src`), take `system.e2eTests` where
+  `kind === "api"`, and execute each statement against the runtime worker via
+  the `runtime` channel (interpret `TestE2EIR`, or bundle the generated
+  `e2e/*.e2e.test.ts` with `vitest`/`fetch` aliased to shims).
+- Reporter UI panel (pass/fail per test, error detail).
+- **Gate:** `examples/acme.ddd` API tests go green in the playground and match
+  the docker `LOOM_E2E` result.
+
+### Phase 4 — UI driver + `page` shim
+
+- **New `web/src/preview/sandbox-driver.ts`** — implements the closed Playwright
+  subset the page objects use (`getByTestId`, `getByRole`, `locator`, `.click`,
+  `.fill`, `.innerText`, `.count`, `.filter`, `.waitFor`, `goto`, `url`,
+  `waitForURL`, `setInputFiles`) against the live DOM, with `MutationObserver`
+  auto-wait; `fill` dispatches `input`/`change`; `setInputFiles` uses
+  `DataTransfer`; `goto`/`url` go through `location.hash` (HashRouter). Exposed
+  over the `driver` channel.
+- **Parent `page` shim** mapping the Playwright `Page` subset → `driver` RPC.
+- Bundle the generated `*.ui.spec.ts` with **`@playwright/test` aliased** to a
+  shim providing `test` / `expect` + the injected bridged `page` (reuses the
+  esbuild worker + import-alias machinery).
+- **Guard test** asserting `src/generator/react/page-objects-builder.ts` only
+  emits the supported `Page` surface (fails loudly if the generator grows a
+  method the driver doesn't implement).
+- **Gate:** `acme` UI spec passes in the playground.
+
+### Phase 5 — (optional) console + screenshots
+
+- Surface the `event` console/error stream in the reporter; add `screenshot`
+  via `html-to-image` for the driver and a visible result thumbnail.
 
 ## Risks / open questions
 
 - **Router change touches generated code.** It's behind a global and only
-  affects preview, but it is the one non-injected change. Confirm Hash vs Memory
-  (Hash survives reload-in-preview; Memory is simpler but loses deep-link feel).
+  affects preview, but it spans 7 pack `main.hbs` templates (+ fixtures).
+  HashRouter is chosen over MemoryRouter because the test driver reads/writes
+  `location.hash` for `goto` / `url()` / `waitForURL`; Memory would hide the URL
+  from the driver entirely.
 - **CSP vs Tailwind/esm.sh.** Tight `connect-src 'none'` is incompatible with
   the CDN-driven packs as written. Either inline everything (work in the
   bundler) or allowlist specific hosts (weaker, but bounded).
