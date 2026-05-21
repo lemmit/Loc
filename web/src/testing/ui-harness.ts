@@ -35,10 +35,21 @@ export function createUiHarness(): UiHarness {
 export function runUiTests(
   tests: UiTestCase[],
   page: RemotePage,
+  /** Suite name to report — must match the UI `ExecTestRef.suite`
+   *  (`"<System> e2e"`) so results join the verification rollup. */
+  suite = "",
 ): Promise<TestResult[]> {
-  // Reuse the API harness's sequential runner (timing + pass/fail
-  // capture) by binding `page` into each case.
+  // Reuse the API harness's sequential runner (timing + pass/fail +
+  // console capture) by binding `page` into each case, and capture a
+  // best-effort final-state screenshot after each test (proof on pass,
+  // evidence on fail).
   return runTests(
-    tests.map((t) => ({ suite: "", name: t.name, fn: () => t.fn({ page }) })),
+    tests.map((t) => ({ suite, name: t.name, fn: () => t.fn({ page }) })),
+    {
+      afterEach: async (r) => {
+        const shot = await page.screenshot();
+        if (shot) r.screenshot = shot;
+      },
+    },
   );
 }

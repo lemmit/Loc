@@ -30,6 +30,10 @@ export interface TestResult {
   error?: string;
   /** `console.*` output captured during the run (omitted when empty). */
   logs?: ConsoleLine[];
+  /** Final-state screenshot (JPEG data URL) for UI tests — proof on pass,
+   *  debugging evidence on fail.  Omitted for unit/api and on capture
+   *  failure. */
+  screenshot?: string;
 }
 
 export interface Harness {
@@ -260,36 +264,55 @@ function captureConsole(sink: ConsoleLine[]): () => void {
   };
 }
 
+export interface RunTestsOpts {
+  /** Async hook run after each test settles (console already restored).
+   *  May mutate the result — e.g. attach a screenshot.  Thrown errors are
+   *  swallowed so the hook can never affect a test's pass/fail. */
+  afterEach?: (result: TestResult) => Promise<void>;
+}
+
 /** Run registered tests sequentially (the generated suites assume
  *  serial execution against one shared DB), capturing pass/fail and any
  *  `console.*` output the test body produced. */
-export async function runTests(tests: TestCase[]): Promise<TestResult[]> {
+export async function runTests(
+  tests: TestCase[],
+  opts?: RunTestsOpts,
+): Promise<TestResult[]> {
   const results: TestResult[] = [];
   for (const t of tests) {
     const start = now();
     const logs: ConsoleLine[] = [];
     const restore = captureConsole(logs);
+    let result: TestResult;
     try {
       await t.fn();
-      results.push({
+      result = {
         suite: t.suite,
         name: t.name,
         status: "pass",
         durationMs: now() - start,
         ...(logs.length ? { logs } : {}),
-      });
+      };
     } catch (err) {
-      results.push({
+      result = {
         suite: t.suite,
         name: t.name,
         status: "fail",
         durationMs: now() - start,
         error: err instanceof Error ? err.message : String(err),
         ...(logs.length ? { logs } : {}),
-      });
+      };
     } finally {
       restore();
     }
+    if (opts?.afterEach) {
+      try {
+        await opts.afterEach(result);
+      } catch {
+        /* best-effort — never affect pass/fail */
+      }
+    }
+    results.push(result);
   }
   return results;
 }

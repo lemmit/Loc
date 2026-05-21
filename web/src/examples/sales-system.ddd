@@ -32,6 +32,11 @@ requirement AC-002 parent US-001 {
   title: "Lines can only be added while the order is still a draft"
 }
 
+requirement AC-003 parent US-001 {
+  type: AcceptanceCriteria
+  title: "An order can be placed and confirmed end-to-end through the UI"
+}
+
 system SalesSystem {
 
   // Visual identity for the React frontend — design tokens land
@@ -200,7 +205,7 @@ system SalesSystem {
     expect read.lines.length == 1
   }
 
-  test e2e "place and confirm an order through the UI" against webApp {
+  test e2e "place and confirm an order through the UI" against webApp verifies TC-003 {
     let prod = ui.products.create({ sku: "UI-WIDGET", price: { amount: 5.00, currency: "USD" } })
     let cust = ui.customers.create({ name: "UI Buyer", email: "ui@buyer.test" })
     let ord = ui.orders.create({ customerId: cust.id, status: "Draft", placedAt: "2024-01-01T00:00:00Z" })
@@ -232,4 +237,13 @@ testCase TC-001 verifies AC-001 {
 testCase TC-002 verifies AC-002 {
   title: "Adding a line to a confirmed order is rejected"
   covers [ Sales.Sales.Order.addLine ]
+}
+
+testCase TC-003 verifies AC-003 {
+  title: "Place and confirm an order end-to-end via the UI"
+  covers [
+    Sales.Sales.Order.addLine,
+    Sales.Sales.Order.confirm,
+    Sales.Sales.placeOrder
+  ]
 }
