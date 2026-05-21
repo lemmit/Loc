@@ -2,7 +2,7 @@ import type { ComponentType } from "react";
 import { Editor, Frame, useEditor, type SerializedNodes } from "@craftjs/core";
 import { Box, Button, Group, NumberInput, ScrollArea, Select, Stack, Text, TextInput, Textarea, UnstyledButton } from "@mantine/core";
 import { resolver } from "./components";
-import { PRIMITIVES, defaultNode, propFields, type PrimitiveName } from "./model";
+import { PALETTE_PRIMITIVES, defaultNode, propFields, type PrimitiveName } from "./model";
 import { parseDdd } from "../parse";
 
 // A page `body:` admits any expression, so wrapping the field text in a minimal
@@ -83,7 +83,7 @@ function Palette(): JSX.Element {
     <Box style={{ width: 110, minWidth: 110, borderRight: "1px solid var(--mantine-color-dark-4)", padding: 6, overflow: "auto" }}>
       <Text size="xs" tt="uppercase" c="dimmed" mb={6}>Add</Text>
       <Stack gap={4}>
-        {PRIMITIVES.map((name) => (
+        {PALETTE_PRIMITIVES.map((name) => (
           <UnstyledButton
             key={name}
             data-testid={`c4palette-${name}`}

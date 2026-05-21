@@ -128,6 +128,9 @@ describe("page-builder model — primitive coverage", () => {
     'Breadcrumbs(Anchor("Home", to: "/"), Text("Orders"))',
     'KeyValueRow("Total", Text("42"))',
     'KeyValueRow("Total", order.total)',
+    // Phase 3 — Tabs holds editable Tab children, each with a title + body.
+    'Tabs(Tab("Overview", Text("a")), Tab("Details", List(of: Order)))',
+    'Card("Tabs", Tabs(Tab("Overview", Text("Overview tab body"))))',
   ]) {
     it(`round-trips ${bodyExpr}`, () => roundtrips(bodyExpr));
   }
@@ -169,6 +172,17 @@ describe("page-builder model — container-with-props seed shape", () => {
     expect(paper.name).toBe("Paper");
     expect(paper.props.padding).toBe("lg");
     expect(paper.children.map((c) => c.name)).toEqual(["Text"]);
+  });
+
+  it("recognises Tabs with nested editable Tab children", () => {
+    const node = seed('Tabs(Tab("Overview", Text("a")), Tab("Details", List(of: Order)))');
+    expect(node.name).toBe("Tabs");
+    expect(node.children.map((c) => c.name)).toEqual(["Tab", "Tab"]);
+    const [tab1, tab2] = node.children;
+    expect(tab1.props.label).toBe("Overview");
+    expect(tab1.children.map((c) => c.name)).toEqual(["Text"]);
+    expect(tab2.props.label).toBe("Details");
+    expect(tab2.children[0].props.of).toBe("Order");
   });
 
   it("recognises data-bound expr props (not Opaque)", () => {

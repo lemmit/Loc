@@ -54,6 +54,11 @@ const SPECS = {
   Group: { kind: "container" },
   Grid: { kind: "container" },
   Toolbar: { kind: "container" },
+  // Tabs holds Tab children; a Tab carries a leading title then its body
+  // children (same container-with-title shape as Card).  Tab is a sub-primitive
+  // — addable only inside a Tabs, never at top level (see PALETTE_PRIMITIVES).
+  Tabs: { kind: "container" },
+  Tab: { kind: "container", positional: ["label"] },
   // Containers with props: leading positional title / named modifiers, then
   // children.  Recognising them makes their nested elements editable instead
   // of collapsing the whole call into one Opaque blob.
@@ -93,6 +98,12 @@ const SPECS = {
 
 export type PrimitiveName = keyof typeof SPECS | "Opaque";
 export const PRIMITIVES = Object.keys(SPECS) as (keyof typeof SPECS)[];
+
+// Sub-primitives that only make sense nested inside a specific parent (a Tab
+// inside Tabs); excluded from the top-level palette but still resolvable on the
+// canvas and editable when seeded from source.
+const SUB_PRIMITIVES = new Set<string>(["Tab"]);
+export const PALETTE_PRIMITIVES = PRIMITIVES.filter((p) => !SUB_PRIMITIVES.has(p));
 
 // `satisfies` narrows each entry to its literal shape; widen on read so
 // optional positional/named are uniformly accessible.
