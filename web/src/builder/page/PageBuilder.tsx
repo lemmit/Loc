@@ -1,6 +1,6 @@
-import type { ComponentType } from "react";
+import { useEffect, useState, type ComponentType } from "react";
 import { Editor, Frame, useEditor, type SerializedNodes } from "@craftjs/core";
-import { Box, Button, Group, NumberInput, ScrollArea, Select, Stack, Text, TextInput, Textarea, UnstyledButton } from "@mantine/core";
+import { Box, Button, Drawer, Group, NumberInput, ScrollArea, Select, Stack, Text, TextInput, Textarea, UnstyledButton } from "@mantine/core";
 import { resolver } from "./components";
 import { PALETTE_PRIMITIVES, defaultNode, propFields, type PrimitiveName } from "./model";
 import { parseDdd } from "../parse";
@@ -21,46 +21,104 @@ interface PageBuilderProps {
   options: Record<string, string[]>;
   onSelectPage: (name: string) => void;
   onApply: (nodes: SerializedNodes) => void;
+  /** Narrow-viewport layout: full-width canvas with the palette and
+   *  settings panels moved into bottom drawers (mobile). */
+  compact?: boolean;
 }
 
 // Structural page-body editor.  Palette (add) | canvas (arrange/select) |
 // settings (edit props).  "Apply to source" hands the serialized tree back to
 // BuilderPane, which regenerates the `body:` and splices it into `.ddd`.
-export default function PageBuilder({ initialNodes, pages, pageName, options, onSelectPage, onApply }: PageBuilderProps): JSX.Element {
+export default function PageBuilder({ initialNodes, pages, pageName, options, onSelectPage, onApply, compact = false }: PageBuilderProps): JSX.Element {
   return (
     <Editor resolver={resolver} key={pageName}>
-      <Box style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-        <Toolbar pages={pages} pageName={pageName} onSelectPage={onSelectPage} onApply={onApply} />
-        <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
-          <Palette />
-          <ScrollArea style={{ flex: 1, minWidth: 0 }}>
-            <Box style={{ padding: 8 }}>
-              <Frame data={initialNodes} />
-            </Box>
-          </ScrollArea>
-          <SettingsPanel options={options} />
+      {compact ? (
+        <CompactLayout initialNodes={initialNodes} pages={pages} pageName={pageName} options={options} onSelectPage={onSelectPage} onApply={onApply} />
+      ) : (
+        <Box style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+          <Toolbar pages={pages} pageName={pageName} onSelectPage={onSelectPage} onApply={onApply} />
+          <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
+            <Palette />
+            <ScrollArea style={{ flex: 1, minWidth: 0 }}>
+              <Box style={{ padding: 8 }}>
+                <Frame data={initialNodes} />
+              </Box>
+            </ScrollArea>
+            <SettingsPanel options={options} />
+          </Box>
         </Box>
-      </Box>
+      )}
     </Editor>
   );
 }
 
-function Toolbar({ pages, pageName, onSelectPage, onApply }: Pick<PageBuilderProps, "pages" | "pageName" | "onSelectPage" | "onApply">): JSX.Element {
+// Mobile layout: full-width canvas; the palette ("Add") and settings ("Edit")
+// move into bottom drawers reachable from the toolbar.  The settings drawer
+// auto-opens on selection so tap-to-select flows straight into editing.
+function CompactLayout({ initialNodes, pages, pageName, options, onSelectPage, onApply }: Omit<PageBuilderProps, "compact">): JSX.Element {
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const { selectedId } = useEditor((state) => ({ selectedId: [...state.events.selected][0] }));
+
+  useEffect(() => {
+    if (selectedId) setSettingsOpen(true);
+  }, [selectedId]);
+
+  return (
+    <Box style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      <Toolbar
+        pages={pages}
+        pageName={pageName}
+        onSelectPage={onSelectPage}
+        onApply={onApply}
+        compact
+        onOpenPalette={() => setPaletteOpen(true)}
+        onOpenSettings={() => setSettingsOpen(true)}
+      />
+      <ScrollArea style={{ flex: 1, minWidth: 0 }}>
+        <Box style={{ padding: 8 }}>
+          <Frame data={initialNodes} />
+        </Box>
+      </ScrollArea>
+      <Drawer opened={paletteOpen} onClose={() => setPaletteOpen(false)} position="bottom" size="55%" title="Add" data-testid="c4builder-palette-drawer">
+        <PaletteContent onAdded={() => setPaletteOpen(false)} />
+      </Drawer>
+      <Drawer opened={settingsOpen} onClose={() => setSettingsOpen(false)} position="bottom" size="65%" title="Edit" data-testid="c4builder-settings-drawer">
+        <SettingsContent options={options} />
+      </Drawer>
+    </Box>
+  );
+}
+
+function Toolbar({ pages, pageName, onSelectPage, onApply, compact = false, onOpenPalette, onOpenSettings }: Pick<PageBuilderProps, "pages" | "pageName" | "onSelectPage" | "onApply"> & { compact?: boolean; onOpenPalette?: () => void; onOpenSettings?: () => void }): JSX.Element {
   const { query } = useEditor();
+  const apply = (
+    <Button size="xs" data-testid="c4builder-apply" onClick={() => onApply(query.getSerializedNodes())}>
+      Apply to source
+    </Button>
+  );
   return (
     <Group px="xs" py={4} bg="dark.6" gap="xs" justify="space-between" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
       <Select size="xs" data={pages} value={pageName} onChange={(v) => v && onSelectPage(v)} data-testid="c4builder-page-select" allowDeselect={false} />
-      <Button size="xs" data-testid="c4builder-apply" onClick={() => onApply(query.getSerializedNodes())}>
-        Apply to source
-      </Button>
+      {compact ? (
+        <Group gap="xs" wrap="nowrap">
+          <Button size="xs" variant="default" data-testid="c4builder-add" onClick={onOpenPalette}>Add</Button>
+          <Button size="xs" variant="default" data-testid="c4builder-edit" onClick={onOpenSettings}>Edit</Button>
+          {apply}
+        </Group>
+      ) : (
+        apply
+      )}
     </Group>
   );
 }
 
 // Palette: click to add a primitive into the selected container, or the body's
 // top container by default.  (Drag-to-add is a later enhancement — craft's
-// create-connector swallows the click, so click-add is the reliable path.)
-function Palette(): JSX.Element {
+// create-connector swallows the click, so click-add is the reliable path.
+// Click-add is also what makes the palette work on touch, where craft's
+// mouse-driven drag-reorder is unavailable.)
+function PaletteContent({ onAdded }: { onAdded?: () => void }): JSX.Element {
   const { query, actions } = useEditor();
 
   const targetParent = (): string | null => {
@@ -77,28 +135,35 @@ function Palette(): JSX.Element {
     const Comp = resolver[name] as ComponentType<Record<string, unknown>>;
     const tree = query.parseReactElement(<Comp {...defaultNode(name).props} />).toNodeTree();
     actions.addNodeTree(tree, parent);
+    onAdded?.();
   };
 
   return (
+    <Stack gap={4}>
+      {PALETTE_PRIMITIVES.map((name) => (
+        <UnstyledButton
+          key={name}
+          data-testid={`c4palette-${name}`}
+          onClick={() => add(name)}
+          style={{ fontSize: 12, padding: "3px 6px", borderRadius: 4, border: "1px solid var(--mantine-color-dark-4)", background: "var(--mantine-color-dark-6)", cursor: "pointer" }}
+        >
+          {name}
+        </UnstyledButton>
+      ))}
+    </Stack>
+  );
+}
+
+function Palette(): JSX.Element {
+  return (
     <Box style={{ width: 110, minWidth: 110, borderRight: "1px solid var(--mantine-color-dark-4)", padding: 6, overflow: "auto" }}>
       <Text size="xs" tt="uppercase" c="dimmed" mb={6}>Add</Text>
-      <Stack gap={4}>
-        {PALETTE_PRIMITIVES.map((name) => (
-          <UnstyledButton
-            key={name}
-            data-testid={`c4palette-${name}`}
-            onClick={() => add(name)}
-            style={{ fontSize: 12, padding: "3px 6px", borderRadius: 4, border: "1px solid var(--mantine-color-dark-4)", background: "var(--mantine-color-dark-6)", cursor: "pointer" }}
-          >
-            {name}
-          </UnstyledButton>
-        ))}
-      </Stack>
+      <PaletteContent />
     </Box>
   );
 }
 
-function SettingsPanel({ options }: { options: Record<string, string[]> }): JSX.Element {
+function SettingsContent({ options }: { options: Record<string, string[]> }): JSX.Element {
   const { id, name, props, actions } = useEditor((state) => {
     const selected = [...state.events.selected][0];
     const node = selected ? state.nodes[selected] : undefined;
@@ -116,7 +181,7 @@ function SettingsPanel({ options }: { options: Record<string, string[]> }): JSX.
   const fields = name ? propFields(name) : [];
 
   return (
-    <Box style={{ width: 240, minWidth: 240, borderLeft: "1px solid var(--mantine-color-dark-4)", padding: 8, overflow: "auto" }}>
+    <>
       <Group justify="space-between" mb="xs">
         <Text size="xs" tt="uppercase" c="dimmed">{id ? name : "Select a node"}</Text>
         {id && name !== "Root" && (
@@ -159,6 +224,14 @@ function SettingsPanel({ options }: { options: Record<string, string[]> }): JSX.
           <TextInput key={f.key} size="xs" mb="xs" label={f.key} value={String(props[f.key] ?? "")} data-testid={`c4builder-prop-${f.key}`} onChange={(e) => set(f.key, e.currentTarget.value || undefined)} />
         ),
       )}
+    </>
+  );
+}
+
+function SettingsPanel({ options }: { options: Record<string, string[]> }): JSX.Element {
+  return (
+    <Box style={{ width: 240, minWidth: 240, borderLeft: "1px solid var(--mantine-color-dark-4)", padding: 8, overflow: "auto" }}>
+      <SettingsContent options={options} />
     </Box>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Background,
   Controls,
@@ -13,7 +13,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { AstUtils, type AstNode } from "langium";
-import { Box, Button, Checkbox, Group, ScrollArea, Select, Stack, Text, TextInput, Textarea } from "@mantine/core";
+import { Box, Button, Checkbox, Drawer, Group, ScrollArea, Select, Stack, Text, TextInput, Textarea } from "@mantine/core";
 import type { LayoutCtx } from "../../layout/ctx";
 import type { BoundedContext, Model, System } from "../../../../src/language/generated/ast.js";
 import { printStructural } from "../../../../src/language/print/index.js";
@@ -124,6 +124,23 @@ export default function SystemBuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Elem
   );
 }
 
+// The inspector lives beside the canvas on desktop; on a narrow viewport it
+// slides up as a bottom drawer so the graph keeps the full width.
+function InspectorPanel({ compact, opened, onClose, children }: { compact: boolean; opened: boolean; onClose: () => void; children: ReactNode }): JSX.Element {
+  if (compact) {
+    return (
+      <Drawer opened={opened} onClose={onClose} position="bottom" size="75%" title="Model" data-testid="c4system-inspector-drawer">
+        {children}
+      </Drawer>
+    );
+  }
+  return (
+    <Box style={{ width: 280, minWidth: 280, borderLeft: "1px solid var(--mantine-color-dark-4)", padding: 8, display: "flex", flexDirection: "column" }}>
+      {children}
+    </Box>
+  );
+}
+
 function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const [rev, setRev] = useState(0);
   const parsed = useMemo(() => parseDdd(ctx.getSource()), [ctx, rev]);
@@ -137,6 +154,8 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(graph ? toRfNodes(graph) : []);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(graph ? toRfEdges(graph) : []);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const compact = !ctx.isDesktop;
+  const [inspectorOpen, setInspectorOpen] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [renaming, setRenaming] = useState(false);
   const [opName, setOpName] = useState<string | null>(null);
@@ -283,14 +302,14 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
 
   return (
     <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
-      <Box style={{ flex: 1, minWidth: 0 }} data-testid="c4system-canvas">
+      <Box style={{ flex: 1, minWidth: 0, position: "relative" }} data-testid="c4system-canvas">
         <ReactFlow
           nodes={nodes}
           edges={edges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
-          onNodeClick={(_, n) => setSelectedId(n.id)}
-          onPaneClick={() => setSelectedId(null)}
+          onNodeClick={(_, n) => { setSelectedId(n.id); if (compact) setInspectorOpen(true); }}
+          onPaneClick={() => { setSelectedId(null); if (compact) setInspectorOpen(false); }}
           fitView
           minZoom={0.1}
           proOptions={{ hideAttribution: true }}
@@ -298,8 +317,19 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
           <Background />
           <Controls />
         </ReactFlow>
+        {compact && (
+          <Button
+            size="xs"
+            variant="default"
+            data-testid="c4system-open-inspector"
+            onClick={() => setInspectorOpen(true)}
+            style={{ position: "absolute", top: 8, right: 8, zIndex: 5 }}
+          >
+            Inspect / +
+          </Button>
+        )}
       </Box>
-      <Box style={{ width: 280, minWidth: 280, borderLeft: "1px solid var(--mantine-color-dark-4)", padding: 8, display: "flex", flexDirection: "column" }}>
+      <InspectorPanel compact={compact} opened={inspectorOpen} onClose={() => setInspectorOpen(false)}>
         <Group gap="xs" mb="xs">
           <Button size="xs" variant="light" data-testid="c4system-add-module" onClick={addModule}>+ Module</Button>
           <Button size="xs" variant="light" data-testid="c4system-add-aggregate" onClick={addAggregate}>+ Aggregate</Button>
@@ -481,7 +511,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
             </ScrollArea>
           </Stack>
         )}
-      </Box>
+      </InspectorPanel>
     </Box>
   );
 }
