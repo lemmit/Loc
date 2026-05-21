@@ -22,14 +22,7 @@ export type {
   RuntimeEngine,
   RuntimeEngineFactory,
 } from "./runtime-engine.js";
-export { EsbuildPgliteEngine } from "./esbuild-pglite-engine.js";
 export { NpmInstallBundleEngine } from "./npm-install-bundle-engine.js";
-
-export type {
-  PreviewBundle,
-  PreviewHost,
-  PreviewHtmlSynth,
-} from "./preview-host.js";
 
 export type { RestorableVfs } from "./vfs.js";
 

@@ -9,7 +9,8 @@
 // full ctx.  When a pane needs only 2-3 fields you can pass those
 // instead of the whole ctx — see ProblemsPanel for an example.
 
-import type { ReactNode } from "react";
+import type { MutableRefObject, ReactNode } from "react";
+import type { EditorHandle } from "../editor/LoomEditor";
 import type { LoomLspClient } from "../lsp/client";
 import type { LoomBuildClient } from "../build/client";
 import type { RuntimeEngine } from "../engine";
@@ -44,7 +45,17 @@ export type WorkspaceState = ReturnType<typeof useWorkspace>;
  *  can navigate to Preview or Backend on a successful boot — the
  *  Mobile shell consumes activeTab/setActiveTab from here instead of
  *  owning its own state. */
-export type MobileTab = "code" | "files" | "preview" | "problems" | "backend";
+export type MobileTab =
+  | "code"
+  | "preview"
+  | "problems"
+  | "backend"
+  | "tests";
+
+/** Sub-view of the consolidated mobile "Code" tab: the source editor,
+ *  the visual page Builder, the structural Model, or the generated-file
+ *  browser. Persisted by App.tsx; mirrors the desktop center-pane switch. */
+export type MobileCodeView = "source" | "builder" | "model" | "generated";
 
 export interface LayoutCtx {
   isDesktop: boolean;
@@ -54,6 +65,8 @@ export interface LayoutCtx {
   setExampleId: (v: string) => void;
   augmentedExamplesList: LoomExample[];
   initialSource: string;
+  /** The live editor source (reflects unsaved edits); for the Builder. */
+  getSource: () => string;
 
   // Workspace (IDB-backed VFS)
   workspace: WorkspaceState;
@@ -64,9 +77,16 @@ export interface LayoutCtx {
   engine: RuntimeEngine | null;
 
   // Editor wiring
-  onSourceChange: (text: string) => void;
+  /** Canonical-source sink.  `origin` distinguishes edits typed in Monaco
+   *  ("editor") from edits applied by the visual Builder ("builder"); the
+   *  latter are pushed back into the Monaco model + LSP so all surfaces stay
+   *  in sync.  Omitted origin is treated as external (Builder-like). */
+  onSourceChange: (text: string, origin?: "editor" | "builder") => void;
   onDiagnosticsChange: (items: Diagnostic[]) => void;
   scheduleAutoGenerate: () => void;
+  /** Imperative handle to the live Monaco model (set while the editor is
+   *  mounted), so Builder edits reflect into the source tab + LSP immediately. */
+  editorHandleRef: MutableRefObject<EditorHandle | null>;
 
   // Diagnostics + counts
   diagnostics: Diagnostic[];
@@ -82,6 +102,18 @@ export interface LayoutCtx {
   reactBundleStatus: ReactBundleStatus;
   honoBundle: BundleOk | null;
   reactBundle: BundleOk | null;
+  /** Last react bundle that compiled — what the preview iframe renders.
+   *  Retained across the live regenerate cascade (and across a failed
+   *  rebuild) so the preview refreshes in place rather than tearing the
+   *  iframe down.  Null until the first successful React bundle. */
+  previewBundle: BundleOk | null;
+  /** True once the backend has booted at least once — the gate for
+   *  mounting <Preview>.  Stays true across subsequent rebuilds even
+   *  while the boot slot transiently clears. */
+  previewBooted: boolean;
+  /** The newest generate/bundle attempt failed while a good preview is
+   *  still on screen — drives a non-blocking "problem occurred" badge. */
+  previewProblem: boolean;
   ddl: string | null;
   persistent: boolean;
   migrated: boolean;
@@ -117,6 +149,11 @@ export interface LayoutCtx {
   // successful cascade.  Persisted to localStorage by App.tsx.
   activeTab: MobileTab;
   setActiveTab: (t: MobileTab) => void;
+
+  // Sub-view of the consolidated mobile Code tab (source / builder /
+  // model / generated). Persisted by App.tsx.
+  codeView: MobileCodeView;
+  setCodeView: (v: MobileCodeView) => void;
 
   // Share-link feedback
   copied: boolean;

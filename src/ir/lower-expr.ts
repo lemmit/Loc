@@ -682,6 +682,18 @@ export function inferExprType(
     ) {
       return { kind: "primitive", name: "string" };
     }
+    // Aggregate factory: `X.create(...)` yields an `X` entity.  Without
+    // this a `let order = Order.create({...})` binding types as the
+    // string fallback, so subsequent member access (`order.lines`)
+    // loses its element/collection shape — which, e.g., stops
+    // `order.lines.count` from lowering to `.length`.  `X` is a type
+    // name, not a value, so it only resolves here (not via resolveNameRef).
+    if (expr.call && expr.member === "create" && isNameRef(expr.receiver)) {
+      const target = findEntityByName(env, expr.receiver.name);
+      if (target && isAggregate(target)) {
+        return { kind: "entity", name: target.name };
+      }
+    }
     const recvType = inferExprType(expr.receiver, env);
     return memberType(recvType, expr.member, env);
   }

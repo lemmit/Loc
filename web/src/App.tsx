@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { AppShell } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
+import type { EditorHandle } from "./editor/LoomEditor";
 import { LoomLspClient } from "./lsp/client";
 import type { Diagnostic } from "./lsp/protocol";
 import { examples, defaultExample, type LoomExample } from "./examples";
@@ -9,7 +10,6 @@ import type { GenerateOk, GenerateResult, VirtualFile } from "./build/protocol";
 import type { BundleOk } from "./bundle/protocol";
 import { engineRegistry, selectedEngineId, type RuntimeEngine } from "./engine";
 import { emptyDependencySet } from "./engine";
-import { registerPreviewSw } from "./preview/sw-host";
 import { buildTree } from "./preview/file-tree";
 import { useWorkspace } from "./workspace/use-workspace";
 import { buildShareUrl, readHashSource, writeHashSource } from "./util/share";
@@ -32,6 +32,7 @@ import { FooterBar } from "./layout/FooterBar";
 import {
   formatUnsupportedDeployables,
   type LayoutCtx,
+  type MobileCodeView,
   type MobileTab,
   type ReactBundleStatus,
   type UnsupportedDeployable,
@@ -166,12 +167,25 @@ export default function App(): JSX.Element {
   // Bottom-tab navigation state for the mobile shell — lifted here so
   // `runFull` can jump to Preview/Backend after a clean cascade.
   // Persisted across reloads so users land back on their last panel.
-  const [activeTab, setActiveTab] = usePersistedState<MobileTab>(
+  // The slot is typed `MobileTab | "files"` so a value persisted before
+  // the Files tab was folded into Code still type-checks; coerce it to
+  // "code" before handing it to the shell (usePersistedState has no
+  // validator, so the stale value would otherwise select a dead panel).
+  const [activeTabRaw, setActiveTab] = usePersistedState<MobileTab | "files">(
     "loom.mobile.activeTab",
     "code",
   );
+  const activeTab: MobileTab = activeTabRaw === "files" ? "code" : activeTabRaw;
+
+  // Sub-view of the consolidated Code tab — source / builder / model /
+  // generated. Persisted so a reload lands back on the same view.
+  const [codeView, setCodeView] = usePersistedState<MobileCodeView>(
+    "loom.mobile.codeView",
+    "source",
+  );
 
   const sourceRef = useRef<string>(initialSource);
+  const editorHandleRef = useRef<EditorHandle | null>(null);
   const buildClientRef = useRef<LoomBuildClient | null>(null);
   const engineRef = useRef<RuntimeEngine | null>(null);
   const lspClientRef = useRef<LoomLspClient | null>(null);
@@ -207,7 +221,6 @@ export default function App(): JSX.Element {
     buildClientRef.current = build;
     engineRef.current = engine;
     setBuildClientReady(true);
-    void registerPreviewSw();
     return () => {
       buildClientRef.current = null;
       engineRef.current = null;
@@ -295,6 +308,10 @@ export default function App(): JSX.Element {
     dispatch({ type: "RESET" });
     setDiagnostics([]);
     setSelectedPath(null);
+    // Drop the retained preview so the iframe remounts for the new
+    // example instead of hot-swapping the previous app's bundle.
+    setPreviewBundle(null);
+    setPreviewBooted(false);
     void engineRef.current?.reset();
     scheduleAutoGenerate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -317,7 +334,11 @@ export default function App(): JSX.Element {
       if (errorCountRef.current === 0 && !generatingRef.current) {
         void runGenerateRef.current();
       }
-    }, 800);
+      // 5s (was 800ms): the preview now refreshes in place, so the
+      // debounce is the throttle on how often a background refresh
+      // fires — long enough to coalesce a burst of keystrokes into one
+      // rebuild after the user pauses.
+    }, 5000);
   };
   useEffect(() => {
     return () => {
@@ -359,6 +380,27 @@ export default function App(): JSX.Element {
     if (r === null) return { kind: "absent" };
     return r.ok ? { kind: "ok", result: r } : { kind: "fail", result: r };
   })();
+
+  // Last-good preview retention.  The preview now refreshes in place,
+  // so it must stay mounted across the live-mode regenerate cascade —
+  // but GENERATE_START clears the boot slot (so `ddl` blinks null mid-
+  // rebuild) and a failed rebuild yields no react bundle.  Holding the
+  // last successful bundle + a "booted at least once" flag lets the
+  // iframe persist; the new bundle is hot-swapped only when generate +
+  // bundle actually succeed.  A failed rebuild leaves the previous app
+  // on screen and only flips `previewProblem` for a non-blocking badge.
+  const [previewBundle, setPreviewBundle] = useState<BundleOk | null>(null);
+  const [previewBooted, setPreviewBooted] = useState(false);
+  useEffect(() => {
+    if (reactBundle) setPreviewBundle(reactBundle);
+  }, [reactBundle]);
+  useEffect(() => {
+    if (ddl) setPreviewBooted(true);
+  }, [ddl]);
+  const previewProblem =
+    previewBundle != null &&
+    (reactBundleStatus.kind === "fail" ||
+      (generateResult != null && !generateResult.ok));
 
   // The pipeline steps are split into composable `*Step` workers that
   // accept their inputs as parameters and return the freshly computed
@@ -538,7 +580,12 @@ export default function App(): JSX.Element {
   }
 
   const files: VirtualFile[] = generateSuccess?.files ?? [];
-  const tree = useMemo(() => buildTree(files), [files]);
+  // The `.c4.json` sidecar backs the in-browser LikeC4 render of its
+  // `.c4` sibling — kept in `files` for lookup, but hidden from the tree.
+  const tree = useMemo(
+    () => buildTree(files.filter((f) => !f.path.endsWith(".c4.json"))),
+    [files],
+  );
   const selectedFile = useMemo(
     () => files.find((f) => f.path === selectedPath) ?? null,
     [files, selectedPath],
@@ -559,18 +606,24 @@ export default function App(): JSX.Element {
     setExampleId,
     augmentedExamplesList,
     initialSource,
+    getSource: () => sourceRef.current,
     workspace,
     lspClient: lspClientRef.current,
     buildClient: buildClientRef.current,
     engine: engineRef.current,
-    onSourceChange: (text) => {
+    onSourceChange: (text, origin) => {
       sourceRef.current = text;
       scheduleHashSync(text);
       scheduleAutoGenerate();
       workspace.vfs?.write("/workspace/main.ddd", text);
+      // Builder (and any non-editor) edits don't flow through Monaco's own
+      // change path, so push them into the live model — which also re-runs the
+      // LSP — keeping the source tab and Problems panel in sync.
+      if (origin !== "editor") editorHandleRef.current?.setSource(text);
     },
     onDiagnosticsChange: setDiagnostics,
     scheduleAutoGenerate,
+    editorHandleRef,
     diagnostics,
     errorCount,
     warningCount,
@@ -582,6 +635,9 @@ export default function App(): JSX.Element {
     reactBundleStatus,
     honoBundle,
     reactBundle,
+    previewBundle,
+    previewBooted,
+    previewProblem,
     ddl,
     persistent,
     migrated,
@@ -603,6 +659,8 @@ export default function App(): JSX.Element {
     setLiveMode,
     activeTab,
     setActiveTab,
+    codeView,
+    setCodeView,
     copied,
     copyShareLink,
     runGenerate: () => void runGenerate(),

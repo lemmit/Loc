@@ -11,6 +11,7 @@ import type {
   TestStmtIR,
 } from "../ir/loom-ir.js";
 import { camel, plural, snake } from "../util/naming.js";
+import { renderExpectStmt } from "./expect-stmt.js";
 
 // ---------------------------------------------------------------------------
 // E2E test renderer.
@@ -129,7 +130,7 @@ function renderTest(t: TestE2EIR, ctx: RenderCtx): string[] {
 
 function renderE2EStmt(s: TestStmtIR, ctx: RenderCtx): string {
   if (s.kind === "expect") {
-    return `expect(${renderE2EExpr(s.expr, ctx)}).toBe(true);`;
+    return renderExpectStmt(s.expr, (e) => renderE2EExpr(e, ctx));
   }
   if (s.kind === "expect-throws") {
     return `await expect(async () => { ${renderE2EExpr(s.expr, ctx)}; }).rejects.toThrow();`;
@@ -380,17 +381,26 @@ async function __post(url: string, body: unknown): Promise<any> {
     body: JSON.stringify(body ?? {}),
   });
   const text = await r.text();
-  const json = text ? JSON.parse(text) : {};
-  if (!r.ok) throw new Error(\`POST \${url} → \${r.status} \${text}\`);
-  return json;
+  // Check the status BEFORE parsing: a 404 (or any error) often carries a
+  // non-JSON body (e.g. Hono's "404 Not Found"), and parsing it first would
+  // mask the real status behind an opaque "JSON Parse error".
+  if (!r.ok) throw new Error(\`POST \${url} → \${r.status} \${r.statusText}\${text ? ": " + text : ""}\`);
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(\`POST \${url} → \${r.status}: expected JSON, got \${JSON.stringify(text.slice(0, 200))}\`);
+  }
 }
 
 async function __get(url: string): Promise<any> {
   const r = await fetch(url);
   const text = await r.text();
-  const json = text ? JSON.parse(text) : {};
-  if (!r.ok) throw new Error(\`GET \${url} → \${r.status} \${text}\`);
-  return json;
+  if (!r.ok) throw new Error(\`GET \${url} → \${r.status} \${r.statusText}\${text ? ": " + text : ""}\`);
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(\`GET \${url} → \${r.status}: expected JSON, got \${JSON.stringify(text.slice(0, 200))}\`);
+  }
 }
 
 async function __getQuery(url: string, params: Record<string, unknown>): Promise<any> {

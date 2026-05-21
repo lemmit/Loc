@@ -1,12 +1,14 @@
 import type {
   AggregateIR,
   BoundedContextIR,
+  CodeRefKind,
   DeployableIR,
   EntityPartIR,
   FindIR,
   LoomModel,
   RepositoryIR,
   SystemIR,
+  TraceabilityIR,
   TypeIR,
   ValueObjectIR,
   WireField,
@@ -38,6 +40,10 @@ export function enrichLoomModel(loom: LoomModel): LoomModel {
   return {
     systems: loom.systems.map(enrichSystem),
     contexts: loom.contexts.map(enrichContext),
+    requirements: loom.requirements,
+    solutions: loom.solutions,
+    testCases: loom.testCases,
+    traceability: computeTraceability(loom),
   };
 }
 
@@ -224,6 +230,152 @@ function wireFieldsForValueObject(vo: ValueObjectIR): WireField[] {
     out.push({ name: d.name, type: d.type, optional: false, source: "derived" });
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Traceability index (Slice 12) — derived in one pure pass, exactly
+// like wireShape.  Every report generator reads these maps rather than
+// recomputing coverage.
+// ---------------------------------------------------------------------------
+
+/** One executable test (aggregate `test` / system `test e2e`) flattened
+ *  out of the model with its optional `verifies <TestCase>` back-link. */
+interface ExecTest {
+  name: string;
+  /** Runner-reported suite: aggregate name (unit) or `"<System> e2e"`. */
+  suite: string;
+  kind: "unit" | "api" | "ui";
+  verifiesTestCase?: string;
+}
+
+function collectExecTests(loom: LoomModel): ExecTest[] {
+  const out: ExecTest[] = [];
+  // Aggregate `test "..."` blocks → `describe("<agg>")` in the
+  // generated `domain/<agg>.test.ts`, so the runner reports
+  // `suite = agg.name`.
+  const fromContext = (ctx: BoundedContextIR): void => {
+    for (const agg of ctx.aggregates) {
+      for (const t of agg.tests) {
+        out.push({
+          name: t.name,
+          suite: agg.name,
+          kind: "unit",
+          verifiesTestCase: t.verifiesTestCase,
+        });
+      }
+    }
+  };
+  for (const sys of loom.systems) {
+    for (const mod of sys.modules) for (const ctx of mod.contexts) fromContext(ctx);
+    // System `test e2e "..."` → `describe("<System> e2e")`, so the
+    // runner reports `suite = "<sys.name> e2e"`.
+    for (const t of sys.e2eTests) {
+      out.push({
+        name: t.name,
+        suite: `${sys.name} e2e`,
+        kind: t.kind,
+        verifiesTestCase: t.verifiesTestCase,
+      });
+    }
+  }
+  for (const ctx of loom.contexts) fromContext(ctx);
+  return out;
+}
+
+function computeTraceability(loom: LoomModel): TraceabilityIR {
+  const childrenOf: Record<string, string[]> = {};
+  for (const r of loom.requirements) childrenOf[r.id] ??= [];
+  for (const r of loom.requirements) {
+    if (r.parentId) (childrenOf[r.parentId] ??= []).push(r.id);
+  }
+
+  // Transitive descendants of every requirement (id included excluded).
+  const descendantsOf = (id: string): string[] => {
+    const acc: string[] = [];
+    const stack = [...(childrenOf[id] ?? [])];
+    const seen = new Set<string>();
+    while (stack.length) {
+      const cur = stack.pop()!;
+      if (seen.has(cur)) continue; // guard against accidental cycles
+      seen.add(cur);
+      acc.push(cur);
+      stack.push(...(childrenOf[cur] ?? []));
+    }
+    return acc;
+  };
+
+  // TestCases keyed by the requirement they directly verify.
+  const directTests: Record<string, string[]> = {};
+  for (const tc of loom.testCases) {
+    (directTests[tc.verifies] ??= []).push(tc.id);
+  }
+
+  const testsByRequirement: Record<string, string[]> = {};
+  for (const r of loom.requirements) {
+    const ids = new Set<string>(directTests[r.id] ?? []);
+    for (const d of descendantsOf(r.id)) {
+      for (const t of directTests[d] ?? []) ids.add(t);
+    }
+    testsByRequirement[r.id] = [...ids];
+  }
+
+  const solutionByRequirement: Record<string, string | null> = {};
+  for (const r of loom.requirements) solutionByRequirement[r.id] = null;
+  for (const s of loom.solutions) {
+    if (s.forRequirement in solutionByRequirement && solutionByRequirement[s.forRequirement] === null) {
+      solutionByRequirement[s.forRequirement] = s.id;
+    }
+  }
+
+  const codeElements: Record<string, CodeRefKind> = {};
+  for (const s of loom.solutions) for (const c of s.entitles) codeElements[c.qualifiedName] = c.kind;
+  for (const tc of loom.testCases) for (const c of tc.covers) codeElements[c.qualifiedName] = c.kind;
+
+  const testsByCodeElement: Record<string, string[]> = {};
+  for (const tc of loom.testCases) {
+    for (const c of tc.covers) {
+      (testsByCodeElement[c.qualifiedName] ??= []).push(tc.id);
+    }
+  }
+
+  // Executable-test back-links: TestCase id → exec test names, plus a
+  // flat provenance list (suite + kind) for the verification join.
+  const allExecTests = collectExecTests(loom);
+  const execTestsByTestCase: Record<string, string[]> = {};
+  for (const tc of loom.testCases) execTestsByTestCase[tc.id] = [];
+  for (const ex of allExecTests) {
+    if (ex.verifiesTestCase && ex.verifiesTestCase in execTestsByTestCase) {
+      execTestsByTestCase[ex.verifiesTestCase].push(ex.name);
+    }
+  }
+  const execTests = allExecTests.map((ex) => ({
+    name: ex.name,
+    suite: ex.suite,
+    kind: ex.kind,
+    testCaseId: ex.verifiesTestCase ?? null,
+  }));
+
+  // Propagate exec tests to the code elements their TestCase covers.
+  const execTestsByCodeElement: Record<string, string[]> = {};
+  for (const tc of loom.testCases) {
+    const execs = execTestsByTestCase[tc.id] ?? [];
+    if (execs.length === 0) continue;
+    for (const c of tc.covers) {
+      const bucket = (execTestsByCodeElement[c.qualifiedName] ??= []);
+      for (const e of execs) if (!bucket.includes(e)) bucket.push(e);
+    }
+  }
+
+  return {
+    childrenOf,
+    testsByRequirement,
+    solutionByRequirement,
+    codeElements,
+    testsByCodeElement,
+    execTestsByCodeElement,
+    execTestsByTestCase,
+    execTests,
+  };
 }
 
 function idTypeFor(targetName: string): TypeIR {

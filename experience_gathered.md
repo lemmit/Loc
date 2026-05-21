@@ -544,3 +544,50 @@ or not.
   full-output snapshots for sales / banking / inventory / acme
   × every platform, replacing most of the current string-match
   generator tests.
+
+## Traceability artifacts (Slice 12)
+
+- **Keyword stealing is the dominant constraint.**  The first cut made
+  the requirement props (`type`, `status`, `priority`) and the enum-like
+  values (`UserStory`, `Draft`, …) grammar keywords.  That stole
+  `status` (used as a field name in scores of example aggregates) and
+  enum values like `Draft` — 152 tests went red instantly.  Fix: a
+  permissive prop-bag (`RequirementProp: name=RequirementPropKey ':'
+  value=Expression`) with semantic validation in `ddd-validator.ts`,
+  exactly the `ThemeProp` / `PageMenuMeta` pattern.  `RequirementPropKey`
+  admits the *already-existing* keywords (`type`, `title`) explicitly and
+  lets everything else through `ID` — so no new keyword is minted.
+- **Ticket ids need a terminal, not a datatype rule.**  `US-001` cannot
+  be `ID ('-' INT)*`: `INT returns number`, so the datatype rule
+  reassembles `US-001` as `US-1` (leading zeros lost; `US-001` and
+  `US-01` collide).  A dedicated `TRACE_ID` terminal preserves the
+  literal text.  Shape it to *require* a trailing `-<digits>* group so
+  it never captures `price-discount` (ends in letters → stays
+  arithmetic); the only residual collision is `name-<digits>` written
+  with no spaces, which Loom's house style never does.  Declare it
+  before `ID` for longest-match priority.
+- **Qualified-name cross-references = scope work, not grammar work.**
+  `entitles`/`covers` use `[Targetable:QualifiedName]`.  Resolution
+  comes from exporting every `Targetable` under its dotted name in
+  `DddScopeComputation.computeExports` (`qualifiedNameOf` walks
+  containers up to, but excluding, the enclosing `system`).  The default
+  scope provider then resolves the dotted reference text against those
+  exports — no custom `getScope` branch needed.  Lowering reads the
+  `kind` off the resolved node's `$type` and the qualified name off
+  `ref.$refText`, so backends never re-resolve.
+- **The docs are a derived view, like the Mermaid diagrams.**  They live
+  in `src/system/traceability.ts`, are emitted once at the output root
+  (model-global), and read only the precomputed `TraceabilityIR` from
+  `enrichLoomModel` — never recomputing coverage.
+
+## Aggregate factory typing (`X.create(...)`)
+
+- `inferExprType` must special-case `X.create(...)` → `entity X`.  `X` is a
+  *type name*, not a value, so `resolveNameRef` returns `unknown` and a
+  `let o = Order.create({...})` binding would otherwise type as the string
+  fallback.  Operation calls (`o.confirm()`) still render structurally so the
+  bug was invisible there — but `o.lines.count` needs `o.lines` to be an
+  `array` for the renderer to lower `.count` → `.length` (TS) / `.Count`
+  (.NET).  Without the fix it emitted a literal `.count`: a TS type error and
+  a runtime `undefined`.  Repro lives in `test/generator-ts.test.ts`
+  ("lowers collection `.count` on a let-bound aggregate to `.length`").

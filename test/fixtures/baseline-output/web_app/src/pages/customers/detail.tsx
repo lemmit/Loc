@@ -32,9 +32,9 @@ export default function CustomerDetail() {
         { customerById.data && (
           <Card withBorder padding="md">
             <Stack>
-              <KeyValueRow label="Username"><Text>{customerById.data.username}</Text></KeyValueRow>
-              <KeyValueRow label="Email"><Text>{customerById.data.email}</Text></KeyValueRow>
-              <KeyValueRow label="Age"><Text>{customerById.data.age}</Text></KeyValueRow>
+              <KeyValueRow label="Username" data-testid="customers-detail-username"><Text>{customerById.data.username}</Text></KeyValueRow>
+              <KeyValueRow label="Email" data-testid="customers-detail-email"><Text>{customerById.data.email}</Text></KeyValueRow>
+              <KeyValueRow label="Age" data-testid="customers-detail-age"><Text>{customerById.data.age}</Text></KeyValueRow>
             </Stack>
           </Card>
         ) }

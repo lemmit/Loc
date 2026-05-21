@@ -84,14 +84,16 @@ export function PlainValue({ value }: { value: unknown }) {
 export function KeyValueRow({
   label,
   children,
+  "data-testid": testid,
 }: {
   label: string;
   children: ReactNode;
+  "data-testid"?: string;
 }) {
   return (
     <HStack alignItems="flex-start" gap={2}>
       <Text as="span" color="gray.500" fontWeight={500} minW="140px" flexShrink={0}>{label}</Text>
-      <HStack gap={2} flex={1} minW={0} flexWrap="wrap">{children}</HStack>
+      <HStack gap={2} flex={1} minW={0} flexWrap="wrap" data-testid={testid}>{children}</HStack>
     </HStack>
   );
 }

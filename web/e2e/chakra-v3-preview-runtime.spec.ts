@@ -9,7 +9,7 @@
 // sandbox can't reach the CDN (same idiom as `runtime.spec.ts`).
 
 import { expect, test } from "@playwright/test";
-import { browserCanReachEsmSh, waitForPlaygroundReady } from "./_helpers";
+import { browserCanReachNetwork, waitForPlaygroundReady } from "./_helpers";
 
 test("chakra@v3 preview boots without runtime errors", async ({ page }) => {
   const errors: string[] = [];
@@ -35,7 +35,7 @@ test("chakra@v3 preview boots without runtime errors", async ({ page }) => {
     timeout: 30_000,
   });
 
-  if (!(await browserCanReachEsmSh(page))) {
+  if (!(await browserCanReachNetwork(page))) {
     test.skip(
       true,
       "Browser cannot reach esm.sh — Bundle + Preview need network access.  This spec is intended to run on the deployed playground CI step.",
@@ -52,7 +52,8 @@ test("chakra@v3 preview boots without runtime errors", async ({ page }) => {
     timeout: 180_000,
   });
 
-  await page.getByTestId("right-pane-tabs").locator("text=Preview").click();
+  // Preview is always mounted in the four-region shell — no tab to click.
+    await expect(page.getByTestId("preview-region")).toBeVisible();
   const iframe = page.frameLocator('[data-testid="preview-iframe"]');
 
   await expect(iframe.getByText(/Home|Catalog|Sales|Customers/i).first()).toBeVisible({

@@ -111,6 +111,7 @@ export function FilesPane({ ctx }: Props): JSX.Element {
               key={selectedFile.path}
               path={selectedFile.path}
               content={selectedFile.content}
+              files={files}
             />
           ) : (
             <Box p="md">

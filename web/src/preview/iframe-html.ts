@@ -1,34 +1,114 @@
 // Synthesise the iframe document for the React preview.
 //
-// The output is pushed to `preview-sw.js`, which serves it when
-// the iframe navigates to `<base>/__loom_sandbox__/`.  Real-origin
-// iframe — postMessage, history, and the URL parser all behave
-// normally with no shims required.
+// The output is handed to the sandbox stub (`public/sandbox/index.html`)
+// over `postMessage` and rendered in place via `document.write`, so the
+// document keeps a real URL on `SANDBOX_ORIGIN` — history/pushState and
+// the URL parser all behave normally, and BrowserRouter is unchanged.
 //
-// Fetches the bundle issues are relative URLs (the bundler's
-// `import.meta.env.VITE_API_BASE_URL` define swaps the
-// generator's `http://localhost:NNNN` baseline for `"runtime"`),
-// so requests resolve to `<base>/__loom_sandbox__/runtime/...` and
-// land in the SW.  The SW forwards them through a MessageChannel
-// to the parent's runtime worker and posts the response back.
+// The generated bundle's API base is `window.__LOOM_API_BASE__`
+// (an absolute path under the stub's directory, e.g.
+// `<base>/sandbox/runtime`).  An inline `fetch` shim installed here
+// intercepts requests under that prefix and forwards them over the
+// `MessagePort` the stub stashed on `window.__LOOM_PORT__`; every
+// other fetch (Tailwind CDN, vendor chunks) falls through to the
+// real `fetch`.  This replaces the old Service-Worker interception.
 //
-// React runtime modules (`react`, `react-dom`, `react/jsx-runtime`,
-// …) are externalised at bundle time and provided via a dynamic
-// `<script type="importmap">` here, so every component shares the
-// same React instance.  Without that, the bundle ends up with
-// multiple React copies and `useRef` returns null at runtime.
+// When the bundle externalised a prebuilt design-pack vendor, the
+// app's bare imports (`react`, `react-dom`, `@mantine/core`, …) are
+// satisfied by a `<script type="importmap">` pointing at the vendor
+// chunks, so every component shares one React instance.  A
+// self-contained bundle inlines its deps and needs no importmap.
 
-import { stackHintsForReactMajor } from "../bundle/stacks.js";
+// Inline runtime `fetch` bridge.  Classic script so it runs
+// synchronously during parse — before the bundle module fetches —
+// and reads the port the stub left on `window.__LOOM_PORT__`.  Kept
+// dependency-free and ES5-ish since it executes inside the generated
+// app's document.
+const RUNTIME_FETCH_SHIM = `
+(function () {
+  var port = window.__LOOM_PORT__;
+  if (!port) return;
+  var nextId = 1;
+  var pending = Object.create(null);
+  // In-flight runtime-request tracker — the test driver's
+  // waitForLoadState("networkidle") polls this so a post-mutation
+  // react-query refetch lands before the test reads the DOM.
+  var net = window.__LOOM_NET__ || (window.__LOOM_NET__ = { inflight: 0, last: Date.now() });
+  function netStart() { net.inflight++; net.last = Date.now(); }
+  function netEnd() { net.inflight--; net.last = Date.now(); }
+  port.onmessage = function (ev) {
+    var r = ev.data;
+    if (!r || typeof r.rid !== "number") return;
+    var slot = pending[r.rid];
+    if (!slot) return;
+    delete pending[r.rid];
+    slot(r);
+  };
+  var realFetch = window.fetch ? window.fetch.bind(window) : null;
+  window.fetch = function (input, init) {
+    var apiBase = window.__LOOM_API_BASE__;
+    var req;
+    try { req = new Request(input, init); }
+    catch (e) { return realFetch ? realFetch(input, init) : Promise.reject(e); }
+    var u;
+    try { u = new URL(req.url, document.baseURI); }
+    catch (e) { return realFetch ? realFetch(input, init) : Promise.reject(e); }
+    if (!apiBase || u.pathname.indexOf(apiBase) !== 0) {
+      return realFetch ? realFetch(input, init) : Promise.reject(new Error("fetch unavailable"));
+    }
+    var routePath = u.pathname.slice(apiBase.length) + u.search;
+    if (routePath.charAt(0) !== "/") routePath = "/" + routePath;
+    return req.text().then(function (bodyText) {
+      var headers = {};
+      req.headers.forEach(function (v, k) { headers[k] = v; });
+      var rid = nextId++;
+      return new Promise(function (resolve) {
+        netStart();
+        var timer = setTimeout(function () {
+          delete pending[rid];
+          netEnd();
+          resolve(new Response("Runtime timeout.\\n", { status: 504 }));
+        }, 30000);
+        pending[rid] = function (reply) {
+          clearTimeout(timer);
+          netEnd();
+          if (reply.ok) {
+            var nullBody = reply.status === 204 || reply.status === 205 || reply.status === 304;
+            resolve(new Response(nullBody ? null : reply.body, {
+              status: reply.status, statusText: reply.statusText, headers: reply.headers
+            }));
+          } else {
+            resolve(new Response((reply.message || "Runtime error") + "\\n", { status: 500 }));
+          }
+        };
+        port.postMessage({
+          kind: "runtime", rid: rid, method: req.method,
+          url: routePath, headers: headers, body: bodyText === "" ? null : bodyText
+        });
+      });
+    });
+  };
+})();
+`.trim();
 
 interface MakePreviewArgs {
   js: string;
   css?: string;
-  /** Versions harvested from the generator's package.json.
-   *  Lookups for `react` / `react-dom` decide what the importmap
-   *  pins; if unset, falls back to a known-good 18.x. */
+  /** Versions harvested from the generator's package.json.  Carried
+   *  as bundle metadata (and part of the preview's cache key); the
+   *  importmap itself comes from `vendorImportmap`. */
   versions?: Record<string, string>;
-  /** Pathname the iframe is served from, no trailing slash —
-   *  e.g. `/loc/playground/__loom_sandbox__` on GH Pages.  The
+  /** C2: when the bundle externalised a prebuilt design-pack vendor,
+   *  this importmap (bare spec → origin-absolute vendor chunk url)
+   *  supplies react/@mantine/… to the iframe.  When set it REPLACES
+   *  the version-derived react/react-dom map — the externalised app
+   *  bundle resolves every bare import through it.  Absent → the
+   *  bundle is self-contained and the version map applies. */
+  vendorImportmap?: Record<string, string>;
+  /** C2: origin-absolute url of the prebuilt vendor.css to link. */
+  vendorCssUrl?: string;
+  /** Basename for the app — the sandbox stub's directory, no trailing
+   *  slash, e.g. `/loc/playground/sandbox` on GH Pages.  The
    *  generated `main.tsx` reads this as `window.__LOOM_BASENAME__`
    *  and passes it to `<BrowserRouter basename>`, so route
    *  resolution works under the iframe's deploy path.  When
@@ -37,30 +117,108 @@ interface MakePreviewArgs {
   sandboxBase?: string;
 }
 
-const REACT_FALLBACK_VERSION = "18.3.1";
-
-function importMap(versions: Record<string, string>): Record<string, string> {
-  const reactVer = versions["react"] ?? REACT_FALLBACK_VERSION;
-  const reactDomVer = versions["react-dom"] ?? reactVer;
-  const stack = stackHintsForReactMajor(versions["react"]);
-  // Stack v2 (React 19): bundler inlines React — no importmap entries.
-  // The bundle is self-contained; emitting `react` / `react-dom`
-  // mappings would only confuse modules that look for a host-supplied
-  // React (we don't have any).
-  if (!stack.externalReactRuntime) {
-    return {};
-  }
-  // Stack v1 (React 18): externalise react/react-dom and let the
-  // importmap satisfy them at iframe load.  esm.sh's v18 build dedupes
-  // through this path because react-dom's transitive `import "react"`
-  // converges on the same wrapper URL that the importmap resolves.
-  return {
-    "react": `https://esm.sh/react@${reactVer}?dev=false`,
-    "react-dom": `https://esm.sh/react-dom@${reactDomVer}${stack.importmapReactDomQuery(reactVer)}`,
-  };
-}
-
 const ESCAPE_END_SCRIPT = (s: string): string => s.replace(/<\/script/gi, "<\\/script");
+
+// In-place reload controller.  Classic script (runs after the inline
+// fetch shim in <head>, so the bridge port has already been started)
+// that listens on the SAME `window.__LOOM_PORT__` for `loom-reload`
+// messages the parent pushes after a rebuild.  On reload it swaps in
+// the new bundle WITHOUT re-writing the document: the page shell,
+// importmap, CSS link and — crucially — the current route (history)
+// all survive, so the preview feels like an always-on app quietly
+// refreshing rather than a full reload.
+//
+// `loom-reload` carries no `rid`, so the fetch shim's `port.onmessage`
+// (which only handles numeric-rid runtime replies) ignores it; this
+// listener only handles `kind === "reload"`.
+//
+// Note: re-importing the new bundle creates a fresh React root on a
+// fresh `#root` node (avoids React's "createRoot on a container that
+// already has a root" warning).  The previous bundle's root is left
+// detached — component-local state does not survive a reload; only a
+// full Fast-Refresh integration (deliberately out of scope) would
+// preserve it.
+const RELOAD_CONTROLLER = `
+(function () {
+  var port = window.__LOOM_PORT__;
+  if (!port) return;
+  var currentBlobUrl = null;
+  function swapCss(css) {
+    var el = document.getElementById("loom-css");
+    if (!el) {
+      el = document.createElement("style");
+      el.id = "loom-css";
+      document.head.appendChild(el);
+    }
+    el.textContent = css;
+  }
+  function mount(js) {
+    var old = document.getElementById("root");
+    var fresh = document.createElement("div");
+    fresh.id = "root";
+    if (old && old.parentNode) old.parentNode.replaceChild(fresh, old);
+    else document.body.appendChild(fresh);
+    if (currentBlobUrl) { try { URL.revokeObjectURL(currentBlobUrl); } catch (e) {} }
+    var blob = new Blob([js], { type: "text/javascript" });
+    currentBlobUrl = URL.createObjectURL(blob);
+    var s = document.createElement("script");
+    s.type = "module";
+    s.src = currentBlobUrl;
+    document.body.appendChild(s);
+  }
+  port.addEventListener("message", function (ev) {
+    var r = ev.data;
+    if (!r || r.kind !== "reload") return;
+    if (typeof r.css === "string") swapCss(r.css);
+    mount(r.js);
+  });
+})();
+`.trim();
+
+// Content-Security-Policy for the preview document.
+//
+// This is the egress lock the cross-origin sandbox needs once
+// untrusted user expressions run in the preview: it can't phone home.
+// It's harmless (pure hardening) while same-origin, so we always emit
+// it.  After esm.sh was removed the document loads nothing third-party
+// except the Tailwind compiler (shadcn packs only), so the allowlist
+// is small:
+//
+//   - script-src 'self'        vendor chunks + dynamic-import splits
+//                              (served same-origin from deployBase/vendor;
+//                              after the origin flip they must be served
+//                              from SANDBOX_ORIGIN too, where 'self' still
+//                              matches the iframe).
+//     'unsafe-inline'          the shim / hostScript / bundle module +
+//                              the importmap (all inline).
+//     'unsafe-eval'            the Tailwind in-browser JIT (shadcn).
+//     cdn.tailwindcss.com /
+//     cdn.jsdelivr.net         the Tailwind CDN scripts (shadcn v3 / v4).
+//   - style-src 'self' 'unsafe-inline'   vendor.css link + inline <style>
+//                              + Mantine/Tailwind runtime-injected styles.
+//   - img-src / font-src       same-origin + data:/blob: (no web fonts
+//                              from CDNs in the current packs — if one is
+//                              added, widen this).
+//   - connect-src 'none'       THE lock.  The app's only network call is
+//                              its API, which the fetch shim answers over
+//                              the bridge port without touching the
+//                              network; any other fetch/XHR/WebSocket is
+//                              refused.
+//   - base-uri / form-action 'none'   no base-tag hijack, no native form
+//                              navigation out of the sandbox.
+const PREVIEW_CSP = [
+  "default-src 'none'",
+  // `blob:` is needed by the in-place reload controller, which mounts
+  // each rebuilt bundle as a `<script type="module" src=blob:…>` so
+  // the preview refreshes without re-writing the whole document.
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https://cdn.tailwindcss.com https://cdn.jsdelivr.net",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "connect-src 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+].join("; ");
 
 /** Which Tailwind dialect the bundled CSS is written in, or `null`
  *  for non-Tailwind (pre-compiled) CSS like Mantine's.
@@ -90,7 +248,7 @@ function styleTagFor(css?: string): string {
   // a plain `<style>` tag — no JIT needed.
   const flavor = tailwindFlavor(css);
   if (flavor === "v3") {
-    return `<style type="text/tailwindcss">\n${css}\n</style>`;
+    return `<style id="loom-css" type="text/tailwindcss">\n${css}\n</style>`;
   }
   if (flavor === "v4") {
     // `@tailwindcss/browser` resolves `@import "tailwindcss"`
@@ -100,9 +258,9 @@ function styleTagFor(css?: string): string {
     // v3's `tailwindcss-animate`: animation utilities won't run in
     // the preview but render fine in a real `vite build` deploy.
     const v4 = css.replace(/^\s*@import\s+["']tw-animate-css["'];?\s*$/m, "");
-    return `<style type="text/tailwindcss">\n${v4}\n</style>`;
+    return `<style id="loom-css" type="text/tailwindcss">\n${v4}\n</style>`;
   }
-  return `<style>\n${css}\n</style>`;
+  return `<style id="loom-css">\n${css}\n</style>`;
 }
 
 /** Tailwind Play CDN configuration — mirrors `designs/shadcn/tailwind-
@@ -180,32 +338,36 @@ tailwind.config = {
 `.trim();
 
 export function makePreviewHtml(args: MakePreviewArgs): string {
-  const map = importMap(args.versions ?? {});
+  // A prebuilt-vendor bundle is externalised — every bare import
+  // (react, @mantine/core, …) resolves through the prebuilt importmap.
+  // A self-contained bundle inlines its deps, so it needs no importmap.
+  const map = args.vendorImportmap ?? {};
   const importMapJson = JSON.stringify({ imports: map }, null, 2);
-  // No `<base href>`: relative URLs resolve against the iframe's
-  // own document URL, which is `<base>/__loom_sandbox__/`.  This
-  // is exactly what we want — the bundler's `runtime` API base
-  // resolves to `<sandbox>/runtime/...`, which the SW intercepts.
-  // A `<base href="/">` would have leaked the request out of the
-  // SW scope on deploys with a non-root deploy base (e.g. GH
-  // Pages at `/loc/playground/`).
-  // Inject two globals the bundle reads:
+  const vendorCssLink = args.vendorCssUrl
+    ? `<link rel="stylesheet" href="${args.vendorCssUrl}">`
+    : "";
+  // No `<base href>`: relative URLs resolve against the document's
+  // own URL (the stub's path on SANDBOX_ORIGIN).  Inject the globals
+  // the bundle reads:
   //   - __LOOM_BASENAME__: feeds <BrowserRouter basename>, so route
   //     resolution survives the iframe being mounted under a deploy
-  //     subpath (e.g. `/loc/playground/__loom_sandbox__`).
-  //   - __LOOM_API_BASE__: absolute path the generator's
-  //     `config.ts` uses for `API_BASE_URL`.  Must be absolute
-  //     (leading `/`) so fetches don't resolve against the iframe's
-  //     current URL — once the user navigates client-side
-  //     (e.g. to `<sandbox>/products/new`) a relative API base
-  //     would resolve to `<sandbox>/products/runtime/...`, which
-  //     hits the SW SPA fallback (HTML response) and breaks JSON
-  //     parsing in the bundle.
+  //     subpath (e.g. `/loc/playground/sandbox`).
+  //   - __LOOM_API_BASE__: absolute path the generator's `config.ts`
+  //     uses for `API_BASE_URL`.  Must be absolute (leading `/`) so
+  //     fetches don't resolve against the current client-side route;
+  //     the inline fetch shim matches this prefix and forwards those
+  //     requests over the bridge port (everything else passes through
+  //     to the real `fetch`).
   const hostScript =
     args.sandboxBase != null
       ? `<script>` +
         `window.__LOOM_BASENAME__ = ${JSON.stringify(args.sandboxBase)};` +
         `window.__LOOM_API_BASE__ = ${JSON.stringify(args.sandboxBase + "/runtime")};` +
+        // Normalise the start route to the basename root: the stub's
+        // own URL ends in `…/sandbox/index.html`, which BrowserRouter
+        // would otherwise fail to match against the user's routes.
+        // Same-origin replaceState — never hits the network.
+        `try{history.replaceState(null,"",${JSON.stringify(args.sandboxBase + "/")});}catch(e){}` +
         `</script>`
       : "";
   // In-browser Tailwind compiler — only when the bundle's CSS is
@@ -228,11 +390,14 @@ export function makePreviewHtml(args: MakePreviewArgs): string {
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="${PREVIEW_CSP}">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Loom Preview</title>
+<script>${ESCAPE_END_SCRIPT(RUNTIME_FETCH_SHIM)}</script>
 <script type="importmap">
 ${ESCAPE_END_SCRIPT(importMapJson)}
 </script>
+${vendorCssLink}
 ${tailwindScripts}
 ${styleTagFor(args.css)}
 <style>
@@ -256,6 +421,7 @@ ${styleTagFor(args.css)}
 <div id="root"></div>
 ${hostScript}
 <script type="module">${ESCAPE_END_SCRIPT(args.js)}</script>
+<script>${ESCAPE_END_SCRIPT(RELOAD_CONTROLLER)}</script>
 </body>
 </html>`;
 }

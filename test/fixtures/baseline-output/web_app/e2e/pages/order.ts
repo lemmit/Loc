@@ -81,9 +81,9 @@ export class OrderDetailPage {
     return this;
   }
 
-  /** Read a primitive / enum field as displayed text. */
-  async field<K extends keyof OrderResponse>(name: K): Promise<string> {
-    return await this.page.getByTestId(`orders-detail-${String(name)}`).innerText();
+  /** Locator for a primitive / enum field's value cell. */
+  field<K extends keyof OrderResponse>(name: K): Locator {
+    return this.page.getByTestId(`orders-detail-${String(name)}`);
   }
 
   /** Locator for the row of the contained `lines` collection. */
@@ -91,9 +91,9 @@ export class OrderDetailPage {
     return this.page.getByTestId(`orders-detail-lines-row-${id}`);
   }
 
-  /** Count of rows in the contained `lines` table. */
-  async linesCount(): Promise<number> {
-    return await this.page.getByTestId("orders-detail-lines").locator("tbody tr").count();
+  /** Locator for the rows of the contained `lines` table — assert with toHaveCount. */
+  linesRows(): Locator {
+    return this.page.getByTestId("orders-detail-lines").locator("tbody tr");
   }
 
   /** addLine — opens the modal, fills the form, submits. */
@@ -113,6 +113,7 @@ export class OrderDetailPage {
     }
     await this.page.getByTestId("orders-op-addLine-submit").click();
     await this.page.getByTestId("orders-op-addLine-form").waitFor({ state: "detached" });
+    await this.page.waitForLoadState("networkidle");
     return this;
   }
 
@@ -121,6 +122,7 @@ export class OrderDetailPage {
     await this.page.getByTestId("orders-op-confirm").click();
     await this.page.getByTestId("orders-op-confirm-submit").click();
     await this.page.getByTestId("orders-op-confirm-form").waitFor({ state: "detached" });
+    await this.page.waitForLoadState("networkidle");
     return this;
   }
 

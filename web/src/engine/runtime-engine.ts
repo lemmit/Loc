@@ -2,26 +2,20 @@
 // RuntimeEngine — the swappable seam between "the generator produced
 // files" and "a running preview answering requests".
 //
-// Today the playground hard-wires: LoomBundleClient (esbuild-wasm) →
-// LoomRuntimeClient (PGlite + Hono blob-import) → SW preview bridge.
-// That whole chain is ONE engine.  This interface names it so that:
+// Today `NpmInstallBundleEngine` (real npm tarballs in-browser →
+// esbuild-wasm VFS bundle → LoomRuntimeClient PGlite + Hono blob-
+// import → sandbox preview bridge) is the one implementation.  This
+// interface names the seam so that:
 //
-//   - P1 wraps the existing chain as `EsbuildPgliteEngine`, behaviour
-//     identical, with App holding an engine instead of the two raw
-//     worker clients.
 //   - A future FOSS-runtime engine (nodepod / WebContainer / …) is a
 //     second implementation behind the SAME interface — adopted only
 //     if it wins at e2e parity, never a rewrite.
-//   - The tab-suspension fix (P4) replaces the lossy `respawn` path
-//     with `snapshot()` / `restore()` (P1 ships them as stubs).
+//   - Tab-suspension recovery goes through `snapshot()` / `restore()`
+//     rather than the lossy `respawn` path.
 //
 // `generate` (Langium → IR → files) stays OUTSIDE the engine: it is
 // the Loom compiler and is engine-independent.  An engine consumes
 // the generated `VirtualFile[]` plus a `DependencySet`.
-//
-// Return types deliberately reuse the existing worker protocols so
-// the P1 wrapper is thin and lossless and the pipeline reducer /
-// preview consume exactly what they consume today.
 // ---------------------------------------------------------------------------
 
 import type { VirtualFile } from "../build/protocol.js";
@@ -38,7 +32,7 @@ import type { DependencySet, RegistryResolver } from "./dependencies.js";
  *  dependency layer adapt (e.g. relax the package allow-policy when
  *  `npmInstall` is true) without branching on engine id. */
 export interface EngineCapabilities {
-  /** Stable identifier, e.g. `"esbuild-pglite"` / `"nodepod"`. */
+  /** Stable identifier, e.g. `"npm-install-bundle"` / `"nodepod"`. */
   readonly id: string;
   /** True for a real in-VM Node (npm scripts, dev server) rather
    *  than the bundle-and-run simulation. */
@@ -48,7 +42,7 @@ export interface EngineCapabilities {
   readonly npmInstall: boolean;
   readonly database: "pglite" | "none";
   /** How much of the custom-package long tail the engine handles:
-   *  `"common"` = the esm.sh 80%; `"full"` = real install. */
+   *  `"common"` = a CDN-resolver subset; `"full"` = real install. */
   readonly customPackages: "none" | "common" | "full";
 }
 
@@ -150,11 +144,16 @@ export type RuntimeEngineFactory = (
   opts?: RuntimeEngineOptions,
 ) => RuntimeEngine;
 
-/** Frontend assets the `PreviewHost` (P2) renders.  Declared here so
- *  `preview-host.ts` has a stable import; not part of the engine
- *  interface — the preview pulls these off `PreparedBuild.react`. */
+/** Frontend assets the preview renders.  Not part of the engine
+ *  interface — `Preview.tsx` pulls these off `PreparedBuild.react`
+ *  and feeds them to `makePreviewHtml`. */
 export interface PreviewMaterial {
   js: string;
   css?: string;
   versions?: Record<string, string>;
+  /** C2: when the bundle externalised a prebuilt design-pack vendor,
+   *  the iframe importmap (bare spec → origin-absolute url) and the
+   *  optional vendor.css url.  Absent → self-contained bundle. */
+  vendorImportmap?: Record<string, string>;
+  vendorCssUrl?: string;
 }

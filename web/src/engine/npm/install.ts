@@ -24,15 +24,30 @@ export interface InstallResult {
   fileCount: number;
 }
 
-async function extract(pkg: PlannedPackage): Promise<TarEntry[]> {
-  const tgz = await fetchTarball(pkg.meta.dist.tarball);
+async function extract(
+  pkg: PlannedPackage,
+  mirror?: Map<string, string>,
+): Promise<TarEntry[]> {
+  const key = `${pkg.name}@${pkg.version}`;
+  // Prefer the local mirror (same-origin asset) over the registry —
+  // this is what makes a cold install fast and keeps the e2e from
+  // saturating the network with concurrent registry fetches (C1).
+  const url = mirror?.get(key) ?? pkg.meta.dist.tarball;
+  const tgz = await fetchTarball(url);
   return untar(await gunzip(tgz));
 }
 
 export async function install(
   rootDeps: Record<string, string>,
   write: (path: string, data: Uint8Array) => void,
-  opts: { nmRoot?: string; cache?: InstallCache; concurrency?: number } = {},
+  opts: {
+    nmRoot?: string;
+    cache?: InstallCache;
+    concurrency?: number;
+    /** name@version → local tarball URL.  Overrides the registry
+     *  tarball when present (C1 local mirror). */
+    mirror?: Map<string, string>;
+  } = {},
 ): Promise<InstallResult> {
   const nmRoot = opts.nmRoot ?? "/node_modules";
   const concurrency = opts.concurrency ?? 8;
@@ -47,7 +62,7 @@ export async function install(
       const key = `${pkg.name}@${pkg.version}`;
       let entries = opts.cache?.get(key);
       if (!entries) {
-        entries = await extract(pkg);
+        entries = await extract(pkg, opts.mirror);
         opts.cache?.set(key, entries);
       }
       for (const e of entries) {

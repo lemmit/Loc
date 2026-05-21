@@ -10,21 +10,32 @@
     "typecheck": "tsc -b --noEmit",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
-    "e2e:smoke": "tsx scripts/smoke-runtime.mjs"
+    "e2e:smoke": "tsx scripts/smoke-runtime.mjs",
+    "build:npm-mirror": "tsx scripts/build-npm-mirror.mjs",
+    "build:vendor": "tsx scripts/build-vendor.mjs"
   },
   "dependencies": {
+    "@craftjs/core": "^0.2.12",
+    "@likec4/layouts": "^1.56.0",
     "@mantine/core": "^7.13.0",
     "@mantine/hooks": "^7.13.0",
+    "@xyflow/react": "^12.10.2",
     "esbuild-wasm": "^0.28.0",
+    "html-to-image": "^1.11.13",
+    "likec4": "^1.56.0",
+    "mermaid": "^11.15.0",
     "monaco-editor": "^0.52.0",
-    "react": "^18.3.0",
-    "react-dom": "^18.3.0"
+    "react": "^19.0.0",
+    "react-arborist": "^3.7.0",
+    "react-dom": "^19.0.0",
+    "react-resizable-panels": "^4.11.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
-    "@types/react": "^18.3.0",
-    "@types/react-dom": "^18.3.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",
+    "cjs-module-lexer": "^1.4.3",
     "tsx": "^4.21.0",
     "typescript": "~5.7.0",
     "vite": "^5.4.0"

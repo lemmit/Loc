@@ -21,6 +21,16 @@ system Acme {
                 sku: string display
                 price: Money
                 invariant sku.length > 0
+
+                test "money keeps its amount and currency" {
+                    let m = Money(10.5, "USD")
+                    expect m.amount == 10.5
+                    expect m.currency == "USD"
+                }
+
+                test "money rejects a negative amount" {
+                    expectThrows Money(-1.0, "USD")
+                }
             }
 
             repository Products for Product {
