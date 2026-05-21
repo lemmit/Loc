@@ -59,7 +59,6 @@ export type DriverOp =
       state?: "visible" | "attached" | "hidden";
     }
   | { kind: "page"; op: "goto"; arg: string }
-  | { kind: "page"; op: "url" }
   | {
       kind: "page";
       op: "waitForURL";
@@ -81,7 +80,6 @@ export async function executeDriverOp(
 ): Promise<DriverReply> {
   try {
     if (msg.kind === "page") {
-      if (msg.op === "url") return { ok: true, value: page.url() };
       if (msg.op === "goto") {
         await page.goto(msg.arg);
         return { ok: true };

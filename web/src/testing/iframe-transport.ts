@@ -17,6 +17,9 @@ export function makeIframeTransport(
   opts?: { timeout?: number },
 ): DriverTransport {
   return {
+    currentUrl(): string {
+      return iframe.contentWindow?.location.href ?? "";
+    },
     async send(op: DriverOp): Promise<DriverReply> {
       const doc = iframe.contentDocument;
       const win = iframe.contentWindow as
