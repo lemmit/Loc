@@ -37,7 +37,7 @@ export default function OrderSummaryView() {
                 { orderSummaryView.data.map((row, idx) => (
                   <Table.Tr key={ idx }>
                     <Table.Td><RouterLink to={`/orders/${ row.orderId }`}><IdValue id={ row.orderId } /></RouterLink></Table.Td>
-                    <Table.Td><Badge>{ row.status }</Badge></Table.Td>
+                    <Table.Td><Badge tt="none">{ row.status }</Badge></Table.Td>
                     <Table.Td><Text>{row.lineCount}</Text></Table.Td>
                   </Table.Tr>
                 )) }

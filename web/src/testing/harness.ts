@@ -43,9 +43,14 @@ export interface Harness {
 interface Expectation {
   toBe(expected: unknown): void;
   toEqual(expected: unknown): void;
+  toBeGreaterThan(expected: number): void;
+  toBeGreaterThanOrEqual(expected: number): void;
+  toBeLessThan(expected: number): void;
+  toBeLessThanOrEqual(expected: number): void;
   /** Synchronous throw assertion — `expect(() => …).toThrow()`, as the
    *  generated aggregate unit tests emit. */
   toThrow(matcher?: string | RegExp): void;
+  readonly not: { toBe(expected: unknown): void; toEqual(expected: unknown): void };
   readonly rejects: { toThrow(matcher?: string | RegExp): Promise<void> };
 }
 
@@ -99,6 +104,52 @@ export function makeExpect(received: unknown): Expectation {
           `expected ${stringify(received)} to equal ${stringify(expected)}`,
         );
       }
+    },
+    toBeGreaterThan(expected: number): void {
+      if (!((received as number) > expected)) {
+        throw new AssertionError(
+          `expected ${stringify(received)} to be greater than ${stringify(expected)}`,
+        );
+      }
+    },
+    toBeGreaterThanOrEqual(expected: number): void {
+      if (!((received as number) >= expected)) {
+        throw new AssertionError(
+          `expected ${stringify(received)} to be greater than or equal to ${stringify(expected)}`,
+        );
+      }
+    },
+    toBeLessThan(expected: number): void {
+      if (!((received as number) < expected)) {
+        throw new AssertionError(
+          `expected ${stringify(received)} to be less than ${stringify(expected)}`,
+        );
+      }
+    },
+    toBeLessThanOrEqual(expected: number): void {
+      if (!((received as number) <= expected)) {
+        throw new AssertionError(
+          `expected ${stringify(received)} to be less than or equal to ${stringify(expected)}`,
+        );
+      }
+    },
+    get not() {
+      return {
+        toBe(expected: unknown): void {
+          if (received === expected) {
+            throw new AssertionError(
+              `expected ${stringify(received)} not to be ${stringify(expected)}`,
+            );
+          }
+        },
+        toEqual(expected: unknown): void {
+          if (deepEqual(received, expected)) {
+            throw new AssertionError(
+              `expected ${stringify(received)} not to equal ${stringify(expected)}`,
+            );
+          }
+        },
+      };
     },
     toThrow(matcher?: string | RegExp): void {
       if (typeof received !== "function") {

@@ -47,7 +47,7 @@ export default function OrderList() {
                   <Table.Tr key={ row.id } data-testid={ ("orders-row-" + row.id) }>
                     <Table.Td><RouterLink to={`/orders/${ row.id }`}><IdValue id={ row.id } /></RouterLink></Table.Td>
                     <Table.Td><Text>{row.customerId}</Text></Table.Td>
-                    <Table.Td><Badge>{ row.status }</Badge></Table.Td>
+                    <Table.Td><Badge tt="none">{ row.status }</Badge></Table.Td>
                     <Table.Td><DateTimeValue iso={ row.placedAt } /></Table.Td>
                   </Table.Tr>
                 )) }
