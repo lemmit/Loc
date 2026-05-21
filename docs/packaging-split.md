@@ -137,18 +137,19 @@ speaks. Treat it like a plugin ABI.
 | **P0** ✅ | `loom` manifest type + `discoverBackends()`; injectable source; `registry` derives from it. **Byte-identical.** (PR #180) | `npm test` 905 + fixture clean |
 | **P1** ✅ | _Subsumed by P0_ — `resolvePlatformRef`/`backendVersionsForFamily`/`isRegisteredBackendRef` already resolve through `discoverBackends()` (the injectable seam, in-tree manifests). Same surfaces; byte-identical. | as P0 |
 | **P2** ✅ | Split `src/generator/typescript/` along the core↔backend line into `src/platform/hono/v4/`. **P2a** (#181): orchestrator (`generate*` + project assembly + `package.json`/Dockerfile) → `emit.ts`. **P2b**: the five Hono-framework builders (`routes`/`workflow`/`view-routes`/`auth-emit`/`observability`) moved into the package — they were each consumed *only* by the orchestrator (the cross-generator hits were per-generator same-named siblings, not these). `src/generator/typescript/` now holds **only** framework-neutral code: `render-expr`/`render-stmt`, `templates`/`templates.ts`, `zod-refine`, `repository-builder` (drizzle), `extern-builder`. The core↔backend line is physically real; the package imports the neutral library by ordinary import (package → shared). **Byte-identical.** | fixture clean + `LOOM_TS_BUILD` 3/3 + layering test green |
-| **P3** 🟡 | Repo → workspaces. Landed as 5 sub-slices: **s1** ✅ npm `workspaces` + `packages/backend-hono-v4/` shell with real `loom` key (#194); **hotfix** ✅ dropped a `peerDependencies` that 404'd `npm install` (#196); **s2** ✅ removed the unused catch-all `@loom` Vite alias (#195); **s3** ✅ Node-only fs-backed `discoverBackendsFs` + `installFsBackendSource`, composed with the in-tree default, wired into the CLI (#197); **s4** ✅ `packages/core/` (`@loom/core`) shell + `loom.contract` marker (#198). All byte-identical. **s5 (physical source relocation) — sequenced via the VFS source (tasks 1–5), not blocked; independent of the npm-engine track bar one coordination point. See below.** |
+| **P3** 🟡 | Repo → workspaces. Landed as 5 sub-slices: **s1** ✅ npm `workspaces` + `packages/backend-hono-v4/` shell with real `loom` key (#194); **hotfix** ✅ dropped a `peerDependencies` that 404'd `npm install` (#196); **s2** ✅ removed the unused catch-all `@loom` Vite alias (#195); **s3** ✅ Node-only fs-backed `discoverBackendsFs` + `installFsBackendSource`, composed with the in-tree default, wired into the CLI (#197); **s4** ✅ `packages/core/` (`@loom/core`) shell + `loom.contract` marker (#198). All byte-identical. **s5 (physical source relocation) — unblocked: VFS source (tasks 1–5); the npm-engine C-track that the old "block" leaned on has merged (sole engine, esm.sh deleted #220). See below.** |
 | **P4** | Publish (`@loom/*` released independently; backends `peerDependency` `@loom/core`; the `workspace:`-protocol / version-range story this npm can't express in dev). Gated on P3-s5. | e2e against a clean `npm i` |
 
 ### P3 slice 5 — sequenced, not indefinitely blocked (2026-05 re-assessment)
 
 A prep pass for slice 5 corrected the earlier "blocked until the npm engine
 ships" framing. Slice 5 is **unblockable on its own**, via the *VFS source*
-already designed below (*Concrete P3 playground tasks*, tasks 1–5). It does
-**not** wait on the playground engine work (the C1–C5 npm-engine-default
-track). The two share no load-bearing dependency, with **one** narrow
-coordination point (task 4 — below). The reason: there are two distinct
-`node_modules`-shaped things, and only one belongs to the engine track:
+already designed below (*Concrete P3 playground tasks*, tasks 1–5). It never
+needed the playground engine work — and that work (the C0–C5 npm-engine-default
+track) **has since merged anyway** (npm-install-bundle is the sole engine; esm.sh
+engine deleted in #220), so the point is now moot. The two share no load-bearing
+dependency. The reason: there are two distinct `node_modules`-shaped things, and
+only one belonged to the engine track:
 
 - **Toolchain backend packages** (`@loom/backend-hono-v4`) — the generator code
   the playground bundles **at its own build time**. Resolved by a build-time
@@ -162,15 +163,10 @@ lives in **`web/` (the app)**, not in `src/platform/registry.ts` (core). Moving
 the static reference from core → the app *is* the decoupling — the app/CLI
 composes its backends; core stays neutral. That is categorically different from
 the rejected "keep a static import in core" half-step (unblock option 3 below).
+**Import style (locked):** the relocated package imports the publish-shaped
+`@loom/core`, not relative `../../src` — see task 4.
 
-**The one coordination point with the engine track (task 4):** the `@loom/core`
-bare-specifier guard currently has to live in the esm.sh bundler plugin
-(`web/src/bundle/plugin.ts`) so an in-browser-bundled backend resolves
-`@loom/core` to local toolchain source instead of esm.sh. The engine track's
-**C5 deletes that plugin.** Two clean options: (a) add the guard now and the
-engine agent removes it as part of C5, or (b) sequence task 4 to land in the
-post-C5 npm-engine resolution path. Everything else in slice 5 (tasks 1–3, 5 +
-the relocation + CLI/Node fs-discovery + capture script) is independent.
+**Task 4 — `@loom/core` resolution (now a one-liner; the engine track resolved the old hazard).** The npm-engine-default C-track (C0–C5) **has merged** (#203/#207/#208/#209/#211/#213, esm.sh engine deleted in #220). npm-install-bundle is the sole engine; `web/src/bundle/plugin.ts` survived #220 as a *shared-helper* module (the real resolver is now `web/src/engine/npm/esbuild-vfs-plugin.ts`, against in-VFS `node_modules`, no CDN). So the earlier "guard the esm.sh bare-specifier branch" worry is gone. With the relocated backend importing the publish-shaped `@loom/core`, the resolution is just a Vite `resolve.alias: { "@loom/core": "../src" }` (already foreseen at `web/vite.config.ts:53`) so the playground app build maps it to local toolchain source; the npm engine's VFS resolver treats `@loom/*` as local toolchain, never a registry fetch. **Import style decision (locked):** the relocated package imports `@loom/core` (publish-shape), not relative `../../src` — packages ship separately one day, so the source already looks like what's published; no version-pinned dep is declared yet (this npm rejects both `"*"` and `"workspace:*"` — deferred to P4), resolution rides the workspace symlink + the alias.
 
 #### Consumer inventory (relocation mechanics — grep `src/platform/hono/v4`)
 
