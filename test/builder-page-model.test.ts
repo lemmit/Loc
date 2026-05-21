@@ -97,7 +97,53 @@ describe("page-builder model — primitive coverage", () => {
     'Grid(Text("a"), Text("b"), Text("c"))',
     'Toolbar(Button("Save"), Button("Cancel"))',
     'Stack(Heading("Title", level: 2), List(of: Order))',
+    // Containers with props (Phase A): titled/modified containers whose
+    // children must remain editable nodes, not collapse to Opaque.
+    'Card("Summary", Stack(Text("hi")))',
+    'Card(Stack(Text("untitled")))',
+    'Card("Just a title")',
+    'Container(Stack(Text("x")), size: "md")',
+    'Paper(Text("p"), padding: "lg")',
   ]) {
     it(`round-trips ${bodyExpr}`, () => roundtrips(bodyExpr));
   }
+});
+
+describe("page-builder model — container-with-props seed shape", () => {
+  const seed = (bodyExpr: string) => {
+    const doc = `system S { ui U { page P { body: ${bodyExpr} } } }`;
+    const original = parser.parse(doc);
+    expect(original.parserErrors, `fixture must parse:\n${bodyExpr}`).toEqual([]);
+    const body = [...AstUtils.streamAst(original.value)].find((n) => n.$type === "BodyProp") as BodyProp;
+    return seedFromBody(body.expr);
+  };
+
+  it("recognises Card title + nested children (not Opaque)", () => {
+    const node = seed('Card("Summary", Stack(Text("hi")))');
+    expect(node.name).toBe("Card");
+    expect(node.props.title).toBe("Summary");
+    expect(node.children.map((c) => c.name)).toEqual(["Stack"]);
+    const stack = node.children[0];
+    expect(stack.children.map((c) => c.name)).toEqual(["Text"]);
+    expect(stack.children[0].props.text).toBe("hi");
+  });
+
+  it("treats a leading call as content (no title)", () => {
+    const node = seed('Card(Stack(Text("x")))');
+    expect(node.name).toBe("Card");
+    expect(node.props.title).toBeUndefined();
+    expect(node.children.map((c) => c.name)).toEqual(["Stack"]);
+  });
+
+  it("recognises Container/Paper named modifiers + children", () => {
+    const container = seed('Container(Stack(Text("x")), size: "md")');
+    expect(container.name).toBe("Container");
+    expect(container.props.size).toBe("md");
+    expect(container.children.map((c) => c.name)).toEqual(["Stack"]);
+
+    const paper = seed('Paper(Text("p"), padding: "lg")');
+    expect(paper.name).toBe("Paper");
+    expect(paper.props.padding).toBe("lg");
+    expect(paper.children.map((c) => c.name)).toEqual(["Text"]);
+  });
 });

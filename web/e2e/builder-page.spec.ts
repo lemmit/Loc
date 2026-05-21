@@ -58,6 +58,34 @@ test("palette adds a primitive and writes it back to source", async ({ page }) =
 
 
 
+test("recognises Card containers and exposes their nested children", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Components storybook/);
+
+  await page.getByTestId("doc-tab-builder").click();
+  await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
+
+  // Card is now a recognised container-with-title (not an Opaque blob): its
+  // header shows the title and its inner Stack/Text are real, selectable nodes.
+  const card = page.getByTestId("c4node-Card").filter({ hasText: "Stack — vertical stacking" });
+  await expect(card.first()).toBeVisible();
+  // The Card's nested Text is editable, not buried in opaque source.
+  const innerText = page.getByTestId("c4node-Text").filter({ hasText: "Item one" });
+  await expect(innerText.first()).toBeVisible();
+
+  await innerText.first().click();
+  const textInput = page.getByTestId("c4builder-prop-text");
+  await textInput.fill("Nested edit OK");
+  await expect(page.getByTestId("c4builder-canvas")).toContainText("Nested edit OK");
+
+  // Apply round-trips the whole body (Card title + nested tree) and re-seeds.
+  await page.getByTestId("c4builder-apply").click();
+  await expect(page.getByTestId("c4builder-canvas")).toContainText("Nested edit OK");
+  await expect(page.getByTestId("c4node-Card").filter({ hasText: "Stack — vertical stacking" }).first()).toBeVisible();
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+});
+
 test("palette adds a data primitive with a binding dropdown", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);

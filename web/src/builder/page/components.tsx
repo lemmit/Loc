@@ -1,6 +1,6 @@
 import type { ComponentType, ElementType, ReactNode } from "react";
 import { useNode } from "@craftjs/core";
-import { PRIMITIVES, isContainer, type PrimitiveName } from "./model";
+import { PRIMITIVES, isContainer, propFields, type PrimitiveName } from "./model";
 
 // craft.js User Components for the page-builder primitives.  Each renders a
 // lightweight structural stand-in (not the real design-pack output — the canvas
@@ -9,12 +9,13 @@ import { PRIMITIVES, isContainer, type PrimitiveName } from "./model";
 
 type Props = Record<string, string | number | undefined>;
 
-function useBox(): { ref: (el: HTMLElement | null) => void; selected: boolean } {
+function useBox(): { ref: (el: HTMLElement | null) => void; selected: boolean; props: Props } {
   const {
     connectors: { connect, drag },
     selected,
-  } = useNode((state) => ({ selected: state.events.selected }));
-  return { ref: (el) => { if (el) connect(drag(el)); }, selected };
+    props,
+  } = useNode((state) => ({ selected: state.events.selected, props: state.data.props as Props }));
+  return { ref: (el) => { if (el) connect(drag(el)); }, selected, props };
 }
 
 const boxStyle = (selected: boolean): React.CSSProperties => ({
@@ -57,11 +58,18 @@ function renderLeaf(name: PrimitiveName, p: Props): ReactNode {
 }
 
 function makeContainer(name: PrimitiveName): ComponentType<{ children?: ReactNode }> {
+  const propKeys = propFields(name).map((f) => f.key);
   const C = ({ children }: { children?: ReactNode }): JSX.Element => {
-    const { ref, selected } = useBox();
+    const { ref, selected, props } = useBox();
+    const extras = propKeys
+      .map((k) => props[k])
+      .filter((v) => v !== undefined && v !== "")
+      .map(String);
     return (
       <div ref={ref} data-testid={`c4node-${name}`} style={{ ...boxStyle(selected), background: "var(--mantine-color-dark-6)" }}>
-        <div style={{ fontSize: 10, color: "var(--mantine-color-dimmed)", marginBottom: 4 }}>{name}</div>
+        <div style={{ fontSize: 10, color: "var(--mantine-color-dimmed)", marginBottom: 4 }}>
+          {extras.length ? `${name}: ${extras.join(" · ")}` : name}
+        </div>
         <div style={{ display: "flex", flexDirection: name === "Group" || name === "Toolbar" ? "row" : "column", flexWrap: "wrap", gap: 4 }}>
           {children}
         </div>
