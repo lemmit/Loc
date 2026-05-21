@@ -113,6 +113,7 @@ system SalesSystem {
           order.addLine("00000000-0000-0000-0000-000000000002", 2)
           order.confirm()
           expect order.status == Confirmed
+          expect order.lines.count == 1
         }
 
         test "lines cannot be added once the order is confirmed" verifies TC-002 {
