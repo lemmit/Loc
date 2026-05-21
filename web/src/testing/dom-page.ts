@@ -205,7 +205,8 @@ export class DomPage {
     this.timeout = opts.timeout ?? DEFAULT_TIMEOUT_MS;
   }
 
-  private root(): DomLocator {
+  /** Bare page-level locator (rooted at `body`), the start of a chain. */
+  root(): DomLocator {
     return new DomLocator(this.doc, () => [this.doc.body], [], this.timeout);
   }
 
