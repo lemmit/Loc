@@ -50,15 +50,16 @@ text stays the source of truth.
   `SerializedNodes` round-trip via a reserved `__slot` prop. `data:` lambdas
   nest a `Lambda` body child, so a `QueryView(data: rows => Table(…))` is
   editable all the way down.
+- **Arbitrary arg order**: a node records its source arg order (an `order`
+  token list of prop keys + child markers, persisted via a reserved `__order`
+  prop) and `emitBody` replays it, so a positional after a named arg — the
+  common hand-written `Table(rows: x, Column(…), Column(…))` — round-trips
+  instead of falling back to Opaque. Replay is edit-safe: children are pulled in
+  array order, and children/named props added after seed are appended; fresh
+  palette nodes (no recorded order) still emit in canonical order.
 
 ## Open — expression / domain-logic surface
 
-- **Non-canonical arg order** (positional after named) still → Opaque, because
-  re-emitting canonically would reorder the AST args and break the round-trip.
-  This is why a `Table(rows: x, Column(…), Column(…))` (named-before-positional,
-  the common hand-written form) stays Opaque even though Table/Column are
-  modelled — only positional-first (`Table(Column(…), rows: x)`) is recognised.
-  Fixing it needs the model to preserve original positional/named interleaving.
 - **`state := …`** page state declarations / assignments. Not modelled.
 - **Operation forms**: `Form(of:, op:)`, bound to aggregate operations — need op
   pickers wired to the IR (`Form` currently models only `of:`/`creates:`/`testid:`).

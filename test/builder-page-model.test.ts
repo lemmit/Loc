@@ -144,6 +144,12 @@ describe("page-builder model — primitive coverage", () => {
     'QueryView(of: orders, data: rows => Table(Column("ID", o => Text(o.id)), rows: rows))',
     'Table(Column("Name", o => Text(o.name)), rows: orders, rowTestid: r => "row-" + r.id)',
     'Modal(Form(of: Order), trigger: Button("Edit"))',
+    // Non-canonical arg order (a positional after a named arg) must round-trip
+    // by preserving the source ordering, not fall back to Opaque.
+    'Badge(color: "blue", order.status)',
+    'Container(size: "md", Stack(Text("x")))',
+    'Table(rows: orders, Column("ID", o => Text(o.id)), Column("Name", o => Text(o.name)))',
+    'Table(rows: orders, rowTestid: r => "row-" + r.id, Column("ID", o => IdLink(o.id, of: Order)))',
   ]) {
     it(`round-trips ${bodyExpr}`, () => roundtrips(bodyExpr));
   }
@@ -185,6 +191,17 @@ describe("page-builder model — container-with-props seed shape", () => {
     expect(paper.name).toBe("Paper");
     expect(paper.props.padding).toBe("lg");
     expect(paper.children.map((c) => c.name)).toEqual(["Text"]);
+  });
+
+  it("recognises the real Table form (named rows: before positional Columns)", () => {
+    const node = seed('Table(rows: orders, Column("ID", o => Text(o.id)), Column("Name", o => Text(o.name)))');
+    expect(node.name).toBe("Table");
+    expect(node.props.rows).toBe("orders");
+    expect(node.children.map((c) => c.name)).toEqual(["Column", "Column"]);
+    // The named-before-positional ordering is recorded so emit replays it.
+    expect(emitBody(node)).toBe('Table(rows: orders, Column("ID", o => Text(o.id)), Column("Name", o => Text(o.name)))');
+    // And it survives the craft serialization round-trip.
+    expect(emitBody(fromCraft(toCraft(node)))).toBe(emitBody(node));
   });
 
   it("models named-arg child slots and survives the craft round-trip", () => {
