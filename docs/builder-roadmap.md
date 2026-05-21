@@ -141,12 +141,26 @@ Done:
 - **Event wiring** — `event` nodes are wired by deriving `emits` edges from
   `emit` statements in operation/workflow bodies (owner → event). Gated by
   `test/system-model.test.ts`.
+- **Structured expression editor (v1)** — a recursive editor
+  (`web/src/builder/system/expr-model.ts` + `ExpressionEditor.tsx`) that
+  decomposes an expression into an operator tree: binary/unary/paren render
+  operator dropdowns with nested operands, literals get typed inputs, and every
+  other form (names, member access, calls, match, lambda, new) is a
+  reparse-validated `raw` text leaf (recognise-or-raw). Plugged into the
+  single-expression slots — invariants, derived props, function bodies — via one
+  inspector "Expression" picker (`expr-slots.ts`). Gated by
+  `test/system-expr.test.ts` + e2e.
 
 Open:
 
-- **Structured expression editor** — the planned shared layer on top of the
-  statement rows: per-node operator/operand/call pickers instead of free text.
-  Would also serve derived props, invariants, find `where` clauses.
+- **Deeper expression structuring** — calls (add/remove/edit args), member
+  access (receiver + member), and scope-aware **name pickers** (params,
+  properties, enum values) instead of `raw` text leaves; plus structured
+  `match`/`new`/object/lambda. Needs env computation (the validator/IR knows the
+  in-scope names).
+- **Expression editor in more slots** — statement-expression slots
+  (`let`/`:=`/`precondition` values inside bodies) and repository find `where`
+  clauses, reusing the same recursive editor.
 - **Field rename** — needs member-access reference resolution (via the
   type-system / IR) to update `this.field` / view binds safely.
 - **Repository `find` editing** (params + where-clause expressions).
