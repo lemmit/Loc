@@ -32,7 +32,7 @@ export default function ProductDetail() {
         { productById.data && (
           <Card withBorder padding="md">
             <Stack>
-              <KeyValueRow label="Sku"><Text>{productById.data.sku}</Text></KeyValueRow>
+              <KeyValueRow label="Sku" data-testid="products-detail-sku"><Text>{productById.data.sku}</Text></KeyValueRow>
               <KeyValueRow label="Price Amount"><Text>{productById.data.price.amount}</Text></KeyValueRow>
               <KeyValueRow label="Price Currency"><Text>{productById.data.price.currency}</Text></KeyValueRow>
             </Stack>
