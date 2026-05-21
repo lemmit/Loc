@@ -2,7 +2,16 @@ import type { ComponentType } from "react";
 import { Editor, Frame, useEditor, type SerializedNodes } from "@craftjs/core";
 import { Box, Button, Group, NumberInput, ScrollArea, Select, Stack, Text, TextInput, Textarea, UnstyledButton } from "@mantine/core";
 import { resolver } from "./components";
-import { PRIMITIVES, defaultNode, propFields, type PrimitiveName } from "./model";
+import { PALETTE_PRIMITIVES, defaultNode, propFields, type PrimitiveName } from "./model";
+import { parseDdd } from "../parse";
+
+// A page `body:` admits any expression, so wrapping the field text in a minimal
+// page lets the real parser validate an `expr`-kind prop (and the Opaque `raw`
+// source) without linking — the same trick the round-trip tests use.
+function isValidExpr(text: string): boolean {
+  if (text.trim() === "") return false;
+  return parseDdd(`system S { ui U { page P { body: ${text} } } }`).parserErrors.length === 0;
+}
 
 interface PageBuilderProps {
   initialNodes: SerializedNodes;
@@ -62,11 +71,11 @@ function Palette(): JSX.Element {
     return null;
   };
 
-  const add = (name: PrimitiveName): void => {
+  const add = (name: (typeof PALETTE_PRIMITIVES)[number]): void => {
     const parent = targetParent();
     if (!parent) return;
     const Comp = resolver[name] as ComponentType<Record<string, unknown>>;
-    const tree = query.parseReactElement(<Comp {...defaultNode(name as Exclude<PrimitiveName, "Opaque">).props} />).toNodeTree();
+    const tree = query.parseReactElement(<Comp {...defaultNode(name).props} />).toNodeTree();
     actions.addNodeTree(tree, parent);
   };
 
@@ -74,7 +83,7 @@ function Palette(): JSX.Element {
     <Box style={{ width: 110, minWidth: 110, borderRight: "1px solid var(--mantine-color-dark-4)", padding: 6, overflow: "auto" }}>
       <Text size="xs" tt="uppercase" c="dimmed" mb={6}>Add</Text>
       <Stack gap={4}>
-        {PRIMITIVES.map((name) => (
+        {PALETTE_PRIMITIVES.map((name) => (
           <UnstyledButton
             key={name}
             data-testid={`c4palette-${name}`}
@@ -118,8 +127,19 @@ function SettingsPanel({ options }: { options: Record<string, string[]> }): JSX.
       </Group>
       {id && fields.length === 0 && <Text size="xs" c="dimmed">Container — drag children in or use the palette.</Text>}
       {id && fields.map((f) =>
-        f.key === "raw" ? (
-          <Textarea key={f.key} size="xs" label="Source" autosize minRows={2} value={String(props[f.key] ?? "")} onChange={(e) => set(f.key, e.currentTarget.value)} />
+        f.kind === "expr" ? (
+          <Textarea
+            key={f.key}
+            size="xs"
+            mb="xs"
+            label={f.key === "raw" ? "Source" : f.key}
+            autosize
+            minRows={2}
+            value={String(props[f.key] ?? "")}
+            data-testid={`c4builder-prop-${f.key}`}
+            error={props[f.key] != null && props[f.key] !== "" && !isValidExpr(String(props[f.key])) ? "Invalid expression" : undefined}
+            onChange={(e) => set(f.key, e.currentTarget.value || undefined)}
+          />
         ) : f.kind === "ref" ? (
           <Select
             key={f.key}

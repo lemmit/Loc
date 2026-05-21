@@ -3,7 +3,7 @@ import { Box, Text } from "@mantine/core";
 import { AstUtils } from "langium";
 import type { SerializedNodes } from "@craftjs/core";
 import type { LayoutCtx } from "../layout/ctx";
-import type { BodyProp, Page } from "../../../src/language/generated/ast.js";
+import type { BodyProp, Component, Expression, Page } from "../../../src/language/generated/ast.js";
 import { parseDdd } from "./parse";
 import { spliceNode } from "./edit-engine";
 import { seedFromBody, emitBody } from "./page/model";
@@ -17,18 +17,23 @@ import PageBuilder from "./page/PageBuilder";
 // Apply tags the edit as "builder" origin so it's pushed back into the live
 // Monaco model + LSP (source tab and Problems panel reflect it immediately),
 // then re-seeds the canvas so the change persists visibly here too.
-interface PageEntry {
+interface BodyEntry {
   name: string;
-  body: BodyProp;
+  /** The body expression (its CST range is the splice target). */
+  expr: Expression;
 }
 
-function collectPages(ast: unknown): PageEntry[] {
-  const out: PageEntry[] = [];
+// Every editable body: a `page`'s `body:` and a `component`'s `body:` both
+// project a single expression onto the canvas.
+function collectBodies(ast: unknown): BodyEntry[] {
+  const out: BodyEntry[] = [];
   for (const node of AstUtils.streamAst(ast as Parameters<typeof AstUtils.streamAst>[0])) {
-    if (node.$type !== "Page") continue;
-    const page = node as Page;
-    const body = page.props.find((p): p is BodyProp => p.$type === "BodyProp");
-    if (body) out.push({ name: page.name, body });
+    if (node.$type === "Page") {
+      const body = (node as Page).props.find((p): p is BodyProp => p.$type === "BodyProp");
+      if (body) out.push({ name: (node as Page).name, expr: body.expr });
+    } else if (node.$type === "Component") {
+      out.push({ name: (node as Component).name, expr: (node as Component).body });
+    }
   }
   return out;
 }
@@ -46,14 +51,14 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   // Bumped on Apply to re-read the (mutated) source and re-seed the canvas.
   const [rev, setRev] = useState(0);
   const parsed = useMemo(() => parseDdd(ctx.getSource()), [ctx, rev]);
-  const pages = useMemo(() => collectPages(parsed.ast), [parsed]);
+  const pages = useMemo(() => collectBodies(parsed.ast), [parsed]);
   const options = useMemo(() => collectOptions(parsed.ast), [parsed]);
 
   const [pageName, setPageName] = useState<string>("");
   const current = pages.find((p) => p.name === pageName) ?? pages[0];
 
   const initialNodes = useMemo<SerializedNodes | null>(
-    () => (current ? toCraft(seedFromBody(current.body.expr)) : null),
+    () => (current ? toCraft(seedFromBody(current.expr)) : null),
     [current],
   );
 
@@ -61,16 +66,16 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     return <Message>Source has syntax errors — fix them in the editor to use the builder.</Message>;
   }
   if (!current || !initialNodes) {
-    return <Message>No <code>page</code> with a <code>body:</code> found. Add a <code>ui {"{ page { … } }"}</code> block.</Message>;
+    return <Message>No <code>page</code> or <code>component</code> with a <code>body:</code> found. Add a <code>ui {"{ page { … } }"}</code> block.</Message>;
   }
 
   const handleApply = (nodes: SerializedNodes): void => {
     const source = ctx.getSource();
     const fresh = parseDdd(source);
-    const page = collectPages(fresh.ast).find((p) => p.name === current.name);
+    const page = collectBodies(fresh.ast).find((p) => p.name === current.name);
     if (!page) return;
     const emitted = emitBody(fromCraft(nodes));
-    ctx.onSourceChange(spliceNode(source, page.body.expr, emitted), "builder");
+    ctx.onSourceChange(spliceNode(source, page.expr, emitted), "builder");
     setRev((r) => r + 1);
   };
 

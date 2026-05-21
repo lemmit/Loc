@@ -52,6 +52,32 @@ function renderLeaf(name: PrimitiveName, p: Props): ReactNode {
       return <span style={{ color: "var(--mantine-color-teal-4)" }}>⊟ List{p.of ? ` of ${p.of}` : ""}</span>;
     case "Form":
       return <span style={{ color: "var(--mantine-color-teal-4)" }}>▤ Form{p.of ? ` of ${p.of}` : p.creates ? ` creates ${p.creates}` : ""}</span>;
+    case "Stat":
+      return <span><b>{String(p.label || "Stat")}</b>: {String(p.value ?? "")}</span>;
+    case "Money":
+      return <span>{String(p.value ?? "Money")}</span>;
+    case "DateDisplay":
+      return <span style={{ color: "var(--mantine-color-dimmed)" }}>{String(p.value ?? "date")}</span>;
+    case "EnumBadge":
+      return pill(String(p.value || "enum"), "var(--mantine-color-grape-7)");
+    case "IdLink":
+      return <a style={{ color: "var(--mantine-color-blue-4)" }}>{String(p.id ?? "id")}{p.of ? ` → ${p.of}` : ""}</a>;
+    case "Image":
+      return <span style={{ fontStyle: "italic", color: "var(--mantine-color-dimmed)" }}>image{p.src ? ` ${p.src}` : ""}</span>;
+    case "Avatar":
+      return <span style={{ fontStyle: "italic", color: "var(--mantine-color-dimmed)" }}>avatar</span>;
+    case "Loader":
+      return <span style={{ fontStyle: "italic", color: "var(--mantine-color-dimmed)" }}>Loader…</span>;
+    case "Skeleton":
+      return <span style={{ fontStyle: "italic", color: "var(--mantine-color-dimmed)" }}>Skeleton{p.count ? ` ×${p.count}` : ""}</span>;
+    case "Slot":
+      return <span style={{ fontFamily: "monospace" }}>{"{slot}"}</span>;
+    case "Field":
+    case "NumberField":
+    case "PasswordField":
+      return <span>{String(p.label || name)}: <span style={{ display: "inline-block", minWidth: 48, borderBottom: "1px solid var(--mantine-color-dark-3)" }} /></span>;
+    case "Toggle":
+      return <span>◯ {String(p.label || "Toggle")}</span>;
     default:
       return String(name);
   }
@@ -118,8 +144,13 @@ export function Opaque({ raw }: { raw?: string }): JSX.Element {
 }
 Opaque.craft = { displayName: "Opaque" };
 
-// Resolver: Root + Opaque + one component per registered primitive.
+// Resolver: Root + Opaque + one component per registered primitive + the
+// synthetic container nodes (lambda / match), which aren't in the palette but
+// must be resolvable + editable when seeded from source.
 export const resolver: Record<string, ElementType> = { Root, Opaque };
 for (const name of PRIMITIVES) {
   resolver[name] = isContainer(name) ? makeContainer(name) : makeLeaf(name);
+}
+for (const name of ["Lambda", "Match", "MatchArm", "MatchElse"] as const) {
+  resolver[name] = makeContainer(name);
 }
