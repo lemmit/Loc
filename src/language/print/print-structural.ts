@@ -1,0 +1,468 @@
+import type {
+  Aggregate,
+  Api,
+  BindEntry,
+  BoundedContext,
+  Component,
+  Containment,
+  ContextMember,
+  Deployable,
+  DerivedProp,
+  EntityPart,
+  EnumDecl,
+  EventDecl,
+  FindDecl,
+  FunctionDecl,
+  Invariant,
+  MenuBlock,
+  MenuLink,
+  MenuSection,
+  Module,
+  ModuleBinding,
+  Operation,
+  Page,
+  PageProp,
+  Parameter,
+  PermissionsBlock,
+  Property,
+  Repository,
+  Requirement,
+  Scaffold,
+  Solution,
+  StateBlock,
+  Statement,
+  Storage,
+  System,
+  TestBlock,
+  TestCase,
+  TestE2E,
+  TestStatement,
+  ThemeBlock,
+  TypeRef,
+  Ui,
+  UiApiParam,
+  UiHelperImport,
+  UserBlock,
+  ValueObject,
+  View,
+  Workflow,
+} from "../generated/ast.js";
+import type { AstNode } from "langium";
+import { printExpr } from "./print-expr.js";
+import { printStmt } from "./print-stmt.js";
+
+// ---------------------------------------------------------------------------
+// AST → `.ddd` source printer for *structural* constructs — systems, modules,
+// aggregates, value objects, events, repositories, views, workflows,
+// deployables, storages, apis, ui blocks, and the traceability artefacts.
+//
+// Companion to `print-expr.ts` / `print-stmt.ts` (which handle expressions and
+// statement bodies, invoked here for derived props, filters, operation bodies,
+// page bodies, etc.).  The System / Model Builder edits the structural model
+// visually and writes the changed block back over its CST range; this re-emits
+// a structural sub-tree as faithful source.
+//
+// Round-trip contract (gated by test/print-structural-roundtrip.test.ts):
+// printing a node, splicing the text over the node's own CST range, and
+// re-parsing yields a structurally identical AST.  Output is canonically
+// 2-space-indented; only parse-equivalence is guaranteed, not byte identity
+// with the original source.
+// ---------------------------------------------------------------------------
+
+const INDENT = "  ";
+
+function indent(s: string): string {
+  return s
+    .split("\n")
+    .map((l) => (l.length > 0 ? INDENT + l : l))
+    .join("\n");
+}
+
+/** `<header> { <body-items, newline-joined> }`, indented; `<header> {}` empty. */
+function block(header: string, items: string[]): string {
+  if (items.length === 0) return `${header} {}`;
+  return `${header} {\n${indent(items.join("\n"))}\n}`;
+}
+
+/** Like `block`, but the body items are comma-separated (enum values, event
+ *  fields, permission decls — grammar rules that join with `,`). */
+function commaBlock(header: string, items: string[]): string {
+  if (items.length === 0) return `${header} {}`;
+  return `${header} {\n${indent(items.join(",\n"))}\n}`;
+}
+
+function quote(s: string): string {
+  return JSON.stringify(s);
+}
+
+const PLATFORM_KEYWORDS = new Set(["dotnet", "hono", "react", "static", "phoenixLiveView"]);
+const DESIGN_KEYWORDS = new Set(["mantine", "shadcn", "mui", "chakra", "ashPhoenix"]);
+
+/** Platform / DesignPack are `keyword | STRING` rules: print a known keyword
+ *  bare, otherwise re-quote (the value came from the STRING alternative). */
+function enumOrString(value: string, keywords: Set<string>): string {
+  return keywords.has(value) ? value : quote(value);
+}
+
+// ---------------------------------------------------------------------------
+// Entry point
+// ---------------------------------------------------------------------------
+
+/** Print any structural AST node back to `.ddd` source. */
+export function printStructural(node: AstNode): string {
+  switch (node.$type) {
+    case "System": return printSystem(node as System);
+    case "Module": return printModule(node as Module);
+    case "Deployable": return printDeployable(node as Deployable);
+    case "ThemeBlock": return printThemeBlock(node as ThemeBlock);
+    case "UserBlock": return printUserBlock(node as UserBlock);
+    case "TestE2E": return printTestE2E(node as TestE2E);
+    case "Ui": return printUi(node as Ui);
+    case "Api": return printApi(node as Api);
+    case "Storage": return printStorage(node as Storage);
+    case "BoundedContext": return printBoundedContext(node as BoundedContext);
+    case "EnumDecl": return printEnumDecl(node as EnumDecl);
+    case "ValueObject": return printValueObject(node as ValueObject);
+    case "Aggregate": return printAggregate(node as Aggregate);
+    case "EventDecl": return printEventDecl(node as EventDecl);
+    case "Repository": return printRepository(node as Repository);
+    case "Workflow": return printWorkflow(node as Workflow);
+    case "View": return printView(node as View);
+    case "Requirement": return printRequirement(node as Requirement);
+    case "Solution": return printSolution(node as Solution);
+    case "TestCase": return printTestCase(node as TestCase);
+    case "EntityPart": return printEntityPart(node as EntityPart);
+    case "Operation": return printOperation(node as Operation);
+    case "FunctionDecl": return printFunctionDecl(node as FunctionDecl);
+    case "DerivedProp": return printDerivedProp(node as DerivedProp);
+    case "Invariant": return printInvariant(node as Invariant);
+    case "Containment": return printContainment(node as Containment);
+    case "Property": return printProperty(node as Property);
+    case "TestBlock": return printTestBlock(node as TestBlock);
+    case "Page": return printPage(node as Page);
+    case "Component": return printComponent(node as Component);
+    case "StateBlock": return printStateBlock(node as StateBlock);
+    case "Scaffold": return printScaffold(node as Scaffold);
+    case "MenuBlock": return printMenuBlock(node as MenuBlock);
+    case "PermissionsBlock": return printPermissionsBlock(node as PermissionsBlock);
+    case "UiApiParam": return printUiApiParam(node as UiApiParam);
+    case "UiHelperImport": return printUiHelperImport(node as UiHelperImport);
+    case "FindDecl": return printFindDecl(node as FindDecl);
+    default:
+      throw new Error(`printStructural: unhandled node ${node.$type}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// System / deployment shape
+// ---------------------------------------------------------------------------
+
+function printSystem(node: System): string {
+  return block(`system ${node.name}`, node.members.map(printStructural));
+}
+
+function printModule(node: Module): string {
+  // `contexts` and `permissions` are interleaved in source but stored in two
+  // arrays; AST equality is per-array, so textual order between them is free.
+  const items = [
+    ...node.permissions.map(printPermissionsBlock),
+    ...node.contexts.map(printBoundedContext),
+  ];
+  return block(`module ${node.name}`, items);
+}
+
+function printPermissionsBlock(node: PermissionsBlock): string {
+  if (node.decls.length === 0) return "permissions {}";
+  return `permissions {\n${indent(node.decls.map((d) => d.name).join(", "))}\n}`;
+}
+
+function printThemeBlock(node: ThemeBlock): string {
+  return block("theme", node.props.map((p) => `${p.name}: ${quote(p.value)}`));
+}
+
+function printUserBlock(node: UserBlock): string {
+  return block("user", node.fields.map((f) => `${f.name}: ${printTypeRef(f.type)}`));
+}
+
+function printStorage(node: Storage): string {
+  return block(`storage ${node.name}`, [`type: ${node.type}`]);
+}
+
+function printApi(node: Api): string {
+  return `api ${node.name} from ${node.source.$refText}`;
+}
+
+function printDeployable(node: Deployable): string {
+  const items: string[] = [`platform: ${enumOrString(node.platform, PLATFORM_KEYWORDS)}`];
+  if (node.moduleBindings.length > 0) {
+    items.push(`modules: ${node.moduleBindings.map(printModuleBinding).join(", ")}`);
+  }
+  if (node.targets) items.push(`targets: ${node.targets.$refText}`);
+  if (node.serves.length > 0) {
+    items.push(`serves: ${node.serves.map((s) => s.$refText).join(", ")}`);
+  }
+  if (node.uiSugar) {
+    items.push(`ui: ${node.uiSugar.ref.$refText}`);
+  } else if (node.uiCompose) {
+    const binds = node.uiCompose.bindings.map((b) => `${b.name}: ${b.source.$refText}`);
+    items.push(commaBlock(`ui: ${node.uiCompose.ref.$refText}`, binds));
+  } else if (node.uiBlock) {
+    const inner = node.uiBlock.framework ? [`framework: ${node.uiBlock.framework}`] : [];
+    items.push(block(`ui ${node.uiBlock.ref.$refText}`, inner));
+  }
+  if (node.port !== undefined) items.push(`port: ${node.port}`);
+  if (node.auth) items.push(`auth: ${node.auth}`);
+  if (node.design) items.push(`design: ${enumOrString(node.design, DESIGN_KEYWORDS)}`);
+  return block(`deployable ${node.name}`, items);
+}
+
+function printModuleBinding(node: ModuleBinding): string {
+  if (node.storages.length === 0) return node.name.$refText;
+  const roles = node.storages.map((s) => `${s.role}: ${s.storage.$refText}`).join(", ");
+  return `${node.name.$refText} { ${roles} }`;
+}
+
+function printTestE2E(node: TestE2E): string {
+  const verifies = node.verifies ? ` verifies ${node.verifies.$refText}` : "";
+  const header = `test e2e ${quote(node.name)} against ${node.deployable.$refText}${verifies}`;
+  return block(header, node.body.map(printTestStatement));
+}
+
+// ---------------------------------------------------------------------------
+// UI / pages
+// ---------------------------------------------------------------------------
+
+function printUi(node: Ui): string {
+  return block(`ui ${node.name}`, node.members.map(printStructural));
+}
+
+function printUiApiParam(node: UiApiParam): string {
+  return `api ${node.name}: ${node.apiRef.$refText}`;
+}
+
+function printUiHelperImport(node: UiHelperImport): string {
+  return `import helper ${node.name} from ${quote(node.path)}`;
+}
+
+function printPage(node: Page): string {
+  const params = node.params.length > 0 ? `(${node.params.map(printParameter).join(", ")})` : "";
+  return block(`page ${node.name}${params}`, node.props.map(printPageProp));
+}
+
+function printPageProp(node: PageProp): string {
+  switch (node.$type) {
+    case "RouteProp": return `route: ${quote(node.value)}`;
+    case "TitleProp": return `title: ${printExpr(node.value)}`;
+    case "RequiresProp": return `requires ${printExpr(node.expr)}`;
+    case "BodyProp": return `body: ${printExpr(node.expr)}`;
+    case "StateBlock": return printStateBlock(node);
+    case "PageMenuMeta":
+      return commaBlock("menu", node.entries.map((e) => `${e.name}: ${printExpr(e.value)}`));
+    default: {
+      const exhaustive: never = node;
+      throw new Error(`printPageProp: unhandled ${(exhaustive as { $type: string }).$type}`);
+    }
+  }
+}
+
+function printComponent(node: Component): string {
+  const params = node.params.map(printParameter).join(", ");
+  const items = [...node.decls.map(printStateBlock), `body: ${printExpr(node.body)}`];
+  return block(`component ${node.name}(${params})`, items);
+}
+
+function printStateBlock(node: StateBlock): string {
+  return block(
+    "state",
+    node.fields.map((f) => {
+      const init = f.init ? ` = ${printExpr(f.init)}` : "";
+      return `${f.name}: ${printTypeRef(f.type)}${init}`;
+    }),
+  );
+}
+
+function printScaffold(node: Scaffold): string {
+  return `scaffold ${node.selector}: ${node.targets.join(", ")}`;
+}
+
+function printMenuBlock(node: MenuBlock): string {
+  return block("menu", node.sections.map(printMenuSection));
+}
+
+function printMenuSection(node: MenuSection): string {
+  if (node.links.length === 0) return `section ${quote(node.label)} {}`;
+  return `section ${quote(node.label)} {\n${indent(node.links.map(printMenuLink).join(",\n"))}\n}`;
+}
+
+function printMenuLink(node: MenuLink): string {
+  if (node.externalUrl) {
+    return `link ${quote(node.externalLabel!)} -> ${quote(node.externalUrl)}`;
+  }
+  const head = `link ${node.page!.$refText}`;
+  if (node.props.length === 0) return head;
+  const props = node.props.map((p) => `${p.name}: ${printExpr(p.value)}`).join(", ");
+  return `${head} { ${props} }`;
+}
+
+// ---------------------------------------------------------------------------
+// Bounded context + domain members
+// ---------------------------------------------------------------------------
+
+function printBoundedContext(node: BoundedContext): string {
+  return block(`context ${node.name}`, node.members.map((m) => printContextMember(m)));
+}
+
+function printContextMember(node: ContextMember): string {
+  return printStructural(node);
+}
+
+function printEnumDecl(node: EnumDecl): string {
+  return commaBlock(`enum ${node.name}`, node.values.map((v) => v.name));
+}
+
+function printValueObject(node: ValueObject): string {
+  return block(`valueobject ${node.name}`, node.members.map(printStructural));
+}
+
+function printAggregate(node: Aggregate): string {
+  const ids = node.idKind ? ` ids ${node.idKind}` : "";
+  return block(`aggregate ${node.name}${ids}`, node.members.map(printStructural));
+}
+
+function printEntityPart(node: EntityPart): string {
+  return block(`entity ${node.name}`, node.members.map(printStructural));
+}
+
+function printEventDecl(node: EventDecl): string {
+  return commaBlock(`event ${node.name}`, node.fields.map(printProperty));
+}
+
+function printRepository(node: Repository): string {
+  return block(`repository ${node.name} for ${node.aggregate.$refText}`, node.finds.map(printFindDecl));
+}
+
+function printFindDecl(node: FindDecl): string {
+  const params = node.params.map(printParameter).join(", ");
+  const where = node.filter ? ` where ${printExpr(node.filter)}` : "";
+  return `find ${node.name}(${params}): ${printTypeRef(node.returnType)}${where}`;
+}
+
+function printWorkflow(node: Workflow): string {
+  const params = node.params.map(printParameter).join(", ");
+  let head = `workflow ${node.name}(${params})`;
+  if (node.transactional) {
+    head += node.isolation ? ` transactional(${node.isolation})` : " transactional";
+  }
+  return block(head, node.body.map(printStmt));
+}
+
+function printView(node: View): string {
+  // Full form is the only one that carries `bind` entries (grammar requires
+  // ≥1), so a populated `binds` discriminates it from the shorthand.
+  if (node.binds.length > 0) {
+    const items: string[] = node.fields.map(printProperty);
+    items.push(`from ${node.source.$refText}`);
+    if (node.filter) items.push(`where ${printExpr(node.filter)}`);
+    items.push(`bind ${node.binds.map(printBindEntry).join(", ")}`);
+    return block(`view ${node.name}`, items);
+  }
+  return `view ${node.name} = ${node.source.$refText} where ${printExpr(node.filter!)}`;
+}
+
+function printBindEntry(node: BindEntry): string {
+  return `${node.name} = ${printExpr(node.expr)}`;
+}
+
+function printProperty(node: Property): string {
+  const display = node.display ? " display" : "";
+  const check = node.check ? ` check ${printExpr(node.check)}` : "";
+  return `${node.name}: ${printTypeRef(node.type)}${display}${check}`;
+}
+
+function printContainment(node: Containment): string {
+  return `contains ${node.name}: ${node.partType.$refText}${node.collection ? "[]" : ""}`;
+}
+
+function printDerivedProp(node: DerivedProp): string {
+  return `derived ${node.name}: ${printTypeRef(node.type)} = ${printExpr(node.expr)}`;
+}
+
+function printInvariant(node: Invariant): string {
+  const priv = node.serverOnly ? "private " : "";
+  const guard = node.guard ? ` when ${printExpr(node.guard)}` : "";
+  return `${priv}invariant ${printExpr(node.expr)}${guard}`;
+}
+
+function printFunctionDecl(node: FunctionDecl): string {
+  const params = node.params.map(printParameter).join(", ");
+  return `function ${node.name}(${params}): ${printTypeRef(node.returnType)} = ${printExpr(node.body)}`;
+}
+
+function printOperation(node: Operation): string {
+  const priv = node.private ? "private " : "";
+  const params = node.params.map(printParameter).join(", ");
+  const extern = node.extern ? " extern" : "";
+  return block(`${priv}operation ${node.name}(${params})${extern}`, node.body.map(printStmt));
+}
+
+function printTestBlock(node: TestBlock): string {
+  const verifies = node.verifies ? ` verifies ${node.verifies.$refText}` : "";
+  return block(`test ${quote(node.name)}${verifies}`, node.body.map(printTestStatement));
+}
+
+/** TestStatement adds `expect` / `expectThrows` over the ordinary Statement set. */
+function printTestStatement(node: TestStatement): string {
+  if (node.$type === "ExpectStmt") return `expect ${printExpr(node.expr)}`;
+  if (node.$type === "ExpectThrowsStmt") return `expectThrows ${printExpr(node.expr)}`;
+  return printStmt(node as Statement);
+}
+
+// ---------------------------------------------------------------------------
+// Traceability
+// ---------------------------------------------------------------------------
+
+function printRequirement(node: Requirement): string {
+  const parent = node.parent ? ` parent ${node.parent.$refText}` : "";
+  return block(`requirement ${node.name}${parent}`, node.props.map((p) => `${p.name}: ${printExpr(p.value)}`));
+}
+
+function printSolution(node: Solution): string {
+  const items: string[] = [];
+  if (node.title !== undefined) items.push(`title: ${quote(node.title)}`);
+  if (node.entitles.length > 0) {
+    items.push(`entitles [${node.entitles.map((e) => e.$refText).join(", ")}]`);
+  }
+  return block(`solution ${node.name} for ${node.requirement.$refText}`, items);
+}
+
+function printTestCase(node: TestCase): string {
+  const items: string[] = [];
+  if (node.title !== undefined) items.push(`title: ${quote(node.title)}`);
+  if (node.covers.length > 0) {
+    items.push(`covers [${node.covers.map((c) => c.$refText).join(", ")}]`);
+  }
+  return block(`testCase ${node.name} verifies ${node.requirement.$refText}`, items);
+}
+
+// ---------------------------------------------------------------------------
+// Shared
+// ---------------------------------------------------------------------------
+
+function printParameter(node: Parameter): string {
+  return `${node.name}: ${printTypeRef(node.type)}`;
+}
+
+function printTypeRef(node: TypeRef): string {
+  const base = node.base;
+  let s: string;
+  switch (base.$type) {
+    case "PrimitiveType": s = base.name; break;
+    case "IdType": s = `Id<${base.target.$refText}>`; break;
+    case "NamedType": s = base.target.$refText; break;
+    default: {
+      const exhaustive: never = base;
+      throw new Error(`printTypeRef: unhandled base ${(exhaustive as { $type: string }).$type}`);
+    }
+  }
+  return `${s}${node.array ? "[]" : ""}${node.optional ? "?" : ""}`;
+}
