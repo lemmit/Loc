@@ -224,15 +224,16 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
               <Panel minSize="25%">
                 <Box style={{ height: "100%", display: "flex", flexDirection: "column" }}>
                   <MGroup px={4} py={2} bg="dark.6" gap={2} wrap="nowrap" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
-                    <DocTab active={centerView === "source"} onClick={() => setCenterView("source")} testid="doc-tab-source">
-                      main.ddd
-                    </DocTab>
-                    <DocTab active={centerView === "builder"} onClick={() => setCenterView("builder")} testid="doc-tab-builder">
-                      Builder
-                    </DocTab>
-                    <DocTab active={centerView === "model"} onClick={() => setCenterView("model")} testid="doc-tab-model">
-                      Model
-                    </DocTab>
+                    <SegmentedControl
+                      size="xs"
+                      value={centerView === "secondary" ? "" : centerView}
+                      onChange={(v) => setCenterView(v as "source" | "builder" | "model")}
+                      data={[
+                        { value: "source", label: <span data-testid="doc-tab-source">Source</span> },
+                        { value: "builder", label: <span data-testid="doc-tab-builder">Builder</span> },
+                        { value: "model", label: <span data-testid="doc-tab-model">Model</span> },
+                      ]}
+                    />
                     {secondaryDoc && (
                       <DocTab active={centerView === "secondary"} onClick={() => setCenterView("secondary")} testid="doc-tab-file">
                         {secondaryDoc.path}
