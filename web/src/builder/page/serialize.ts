@@ -29,9 +29,14 @@ export function toCraft(root: BuilderNode): SerializedNodes {
       // A node with children must be a craft canvas, even if its primitive is a
       // leaf that only carries named-arg child slots (e.g. QueryView).
       isCanvas: isContainer(node.name) || node.children.length > 0,
-      // Stash the named-arg slot in props (craft preserves props verbatim) so it
-      // survives the serialize round-trip without needing craft linkedNodes.
-      props: node.slot === undefined ? { ...node.props } : { ...node.props, __slot: node.slot },
+      // Stash the named-arg slot and recorded arg order in props (craft
+      // preserves props verbatim) so they survive the serialize round-trip
+      // without needing craft linkedNodes.
+      props: {
+        ...node.props,
+        ...(node.slot === undefined ? {} : { __slot: node.slot }),
+        ...(node.order === undefined ? {} : { __order: JSON.stringify(node.order) }),
+      },
       parent,
       displayName: node.name,
       custom: {},
@@ -54,14 +59,15 @@ type RawNode = {
 function fromNode(nodes: Record<string, RawNode>, id: string): BuilderNode {
   const n = nodes[id];
   const name = (typeof n.type === "string" ? n.type : n.type.resolvedName) as PrimitiveName;
-  // Recover the named-arg slot stashed by `toCraft`; keep it off `props` so it
-  // doesn't leak into emit/settings.
-  const { __slot, ...props } = n.props;
+  // Recover the named-arg slot + arg order stashed by `toCraft`; keep them off
+  // `props` so they don't leak into emit/settings.
+  const { __slot, __order, ...props } = n.props;
   return {
     name,
     props,
     children: (n.nodes ?? []).map((cid) => fromNode(nodes, cid)),
     ...(typeof __slot === "string" ? { slot: __slot } : {}),
+    ...(typeof __order === "string" ? { order: JSON.parse(__order) as string[] } : {}),
   };
 }
 

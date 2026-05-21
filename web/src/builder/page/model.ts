@@ -162,6 +162,10 @@ export interface BuilderNode {
   /** When this node fills a parent's named-arg child slot (e.g. QueryView
    *  `data:`), the arg name; positional children leave it undefined. */
   slot?: string;
+  /** Recorded source arg order, so the exact positional/named interleaving
+   *  round-trips on emit.  Each token is a prop key or `CHILD_TOKEN` ("the next
+   *  child").  Absent on fresh palette nodes, which emit in canonical order. */
+  order?: string[];
 }
 
 export function defaultNode(name: keyof typeof SPECS): BuilderNode {
@@ -200,51 +204,77 @@ function readProp(kind: PropKind, e: Expression): string | number | null {
   return printExpr(e);
 }
 
-/** Pull declared named-child slots out of the named map into slot-tagged
- *  children (mutates `named`, removing the consumed keys). */
-function takeSlotChildren(named: Map<string, Expression>, slots: string[] | undefined): BuilderNode[] {
-  const out: BuilderNode[] = [];
-  for (const key of slots ?? []) {
-    const v = named.get(key);
-    if (v === undefined) continue;
-    named.delete(key);
-    const child = seedFromBody(v);
-    child.slot = key;
-    out.push(child);
-  }
-  return out;
-}
+/** An `order` token is either a prop key (positional or named scalar) or this
+ *  sentinel meaning "the next child, in array order". */
+const CHILD_TOKEN = "";
 
-/** Read declared `name: value` args into typed props; null if any arg is
- *  unknown or mistyped (caller falls back to opaque). */
-function readNamed(named: Map<string, Expression>, spec: PropSpec[] | undefined): Record<string, string | number> | null {
-  const namedSpec = new Map((spec ?? []).map((n) => [n.key, n.kind] as const));
-  const out: Record<string, string | number> = {};
-  for (const [k, v] of named) {
-    const kind = namedSpec.get(k);
-    if (!kind) return null;
-    const value = readProp(kind, v);
-    if (value === null) return null;
-    out[k] = value;
-  }
-  return out;
-}
+// Seed a recognised call into a node, walking args in source order so the exact
+// positional/named interleaving can be replayed on emit (this is what lets
+// non-canonical orderings — a positional after a named arg — round-trip instead
+// of falling back to Opaque).  Returns null if the call doesn't match the spec
+// (caller falls back to Opaque).
+function seedCall(name: keyof typeof SPECS, spec: PrimitiveSpec, args: CallArg[]): BuilderNode | null {
+  const posKeys = posSpecs(spec);
+  const namedSpec = new Map((spec.named ?? []).map((n) => [n.key, n] as const));
+  const namedChildren = new Set(spec.namedChildren ?? []);
+  const isContainerKind = spec.kind === "container";
+  const pureContainer = isContainerKind && posKeys.length === 0 && namedSpec.size === 0 && namedChildren.size === 0;
 
-function partition(args: CallArg[]): { positional: Expression[]; named: Map<string, Expression>; canonical: boolean } {
-  const positional: Expression[] = [];
-  const named = new Map<string, Expression>();
-  let seenNamed = false;
-  let canonical = true;
+  const props: Record<string, string | number> = {};
+  const children: BuilderNode[] = [];
+  const order: string[] = [];
+  let posOrdinal = 0;
+  // Containers peel leading *literal* positionals into declared scalar props;
+  // the first non-literal (or one past the declared props) begins the children.
+  let peeling = isContainerKind && posKeys.length > 0;
+
   for (const a of args) {
     if (a.name) {
-      seenNamed = true;
-      named.set(a.name, a.value);
-    } else {
-      if (seenNamed) canonical = false; // positional after named — can't re-emit faithfully
-      positional.push(a.value);
+      const ns = namedSpec.get(a.name);
+      if (ns) {
+        const v = readProp(ns.kind, a.value);
+        if (v === null) return null;
+        props[a.name] = v;
+        order.push(a.name);
+      } else if (namedChildren.has(a.name)) {
+        const child = seedFromBody(a.value);
+        child.slot = a.name;
+        children.push(child);
+        order.push(CHILD_TOKEN);
+      } else {
+        return null; // unknown named arg
+      }
+      continue;
     }
+    // Positional arg.
+    if (!isContainerKind) {
+      if (posOrdinal >= posKeys.length) return null; // too many positionals
+      const pk = posKeys[posOrdinal++];
+      const v = readProp(pk.kind, a.value);
+      if (v === null) return null;
+      props[pk.key] = v;
+      order.push(pk.key);
+      continue;
+    }
+    if (peeling && posOrdinal < posKeys.length) {
+      const s = asString(a.value);
+      if (s !== null) {
+        props[posKeys[posOrdinal].key] = s;
+        order.push(posKeys[posOrdinal].key);
+        posOrdinal++;
+        continue;
+      }
+      peeling = false;
+    }
+    children.push(seedFromBody(a.value));
+    order.push(CHILD_TOKEN);
   }
-  return { positional, named, canonical };
+  // Leaves must consume exactly their declared positionals.
+  if (!isContainerKind && posOrdinal !== posKeys.length) return null;
+  // `pureContainer` is satisfied implicitly: any named arg would have hit the
+  // unknown-named `return null` above (no named spec, no slots).
+  void pureContainer;
+  return { name: name as PrimitiveName, props, children, order };
 }
 
 export function seedFromBody(expr: Expression): BuilderNode {
@@ -268,53 +298,7 @@ export function seedFromBody(expr: Expression): BuilderNode {
   const name = expr.callee.name;
   if (!(name in SPECS)) return opaque(expr);
   const spec = specOf(name as keyof typeof SPECS);
-  const { positional, named, canonical } = partition(expr.args);
-  if (!canonical) return opaque(expr);
-
-  const posKeys = posSpecs(spec);
-
-  if (spec.kind === "container") {
-    // Pure container (no declared props): every positional is a child; any
-    // named arg is unmodelled → opaque.
-    if (posKeys.length === 0 && (spec.named ?? []).length === 0 && (spec.namedChildren ?? []).length === 0) {
-      if (named.size > 0) return opaque(expr);
-      return { name: name as PrimitiveName, props: {}, children: positional.map(seedFromBody) };
-    }
-    // Container with props: greedily peel leading *literal* positionals into
-    // the declared scalar props (each optional — the first non-literal begins
-    // the children, mirroring the walker's title-vs-content heuristic), then
-    // recurse the remaining positionals as children.
-    const props: Record<string, string | number> = {};
-    let childStart = 0;
-    for (let i = 0; i < posKeys.length && i < positional.length; i++) {
-      const s = asString(positional[i]);
-      if (s === null) break;
-      props[posKeys[i].key] = s;
-      childStart = i + 1;
-    }
-    // Named-arg child slots become slot-tagged children; remaining named args
-    // must all be declared scalars (else the whole node is opaque).
-    const slotChildren = takeSlotChildren(named, spec.namedChildren);
-    const namedProps = readNamed(named, spec.named);
-    if (namedProps === null) return opaque(expr);
-    return {
-      name: name as PrimitiveName,
-      props: { ...props, ...namedProps },
-      children: [...positional.slice(childStart).map(seedFromBody), ...slotChildren],
-    };
-  }
-
-  // leaf — positional args must match exactly by kind; named must be known + typed.
-  if (positional.length !== posKeys.length) return opaque(expr);
-  const props: Record<string, string | number> = {};
-  for (let i = 0; i < posKeys.length; i++) {
-    const v = readProp(posKeys[i].kind, positional[i]);
-    if (v === null) return opaque(expr);
-    props[posKeys[i].key] = v;
-  }
-  const namedProps = readNamed(named, spec.named);
-  if (namedProps === null) return opaque(expr);
-  return { name: name as PrimitiveName, props: { ...props, ...namedProps }, children: [] };
+  return seedCall(name as keyof typeof SPECS, spec, expr.args) ?? opaque(expr);
 }
 
 /** Render one prop value by kind.  `string` re-quotes (the STRING terminal
@@ -335,6 +319,8 @@ function emitNamed(node: BuilderNode, named: PropSpec[] | undefined): string[] {
   return parts;
 }
 
+const emitChild = (c: BuilderNode): string => (c.slot !== undefined ? `${c.slot}: ${emitBody(c)}` : emitBody(c));
+
 export function emitBody(node: BuilderNode): string {
   if (node.name === "Opaque") return String(node.props.raw ?? "");
   // Synthetic nodes reconstruct their bespoke syntax from structure.
@@ -343,23 +329,49 @@ export function emitBody(node: BuilderNode): string {
   if (node.name === "MatchElse") return `else => ${emitBody(node.children[0])}`;
   if (node.name === "Match") return `match {\n  ${node.children.map(emitBody).join(",\n  ")}\n}`;
   const spec = specOf(node.name);
-  if (spec.kind === "container") {
-    // All positionals (declared scalar props, then positional children) precede
-    // named args (scalar props, then named-child slots), so the emitted call
-    // stays canonical (positional-before-named).
-    const parts: string[] = [];
+  const posKindOf = new Map(posSpecs(spec).map((p) => [p.key, p.kind] as const));
+  const namedSpec = new Map((spec.named ?? []).map((n) => [n.key, n] as const));
+  const emitKey = (key: string): string | null => {
+    const v = node.props[key];
+    if (v === undefined || v === "") return null;
+    const pos = posKindOf.get(key);
+    if (pos) return emitProp(pos, v); // positional scalar prop
+    const ns = namedSpec.get(key);
+    return ns ? `${key}: ${emitProp(ns.kind, v)}` : null;
+  };
+
+  const parts: string[] = [];
+  if (node.order) {
+    // Replay the recorded source order; pull children in array order at each
+    // CHILD_TOKEN, then append anything added after seed (extra children, newly
+    // set named props) so live edits still emit validly.
+    let cursor = 0;
+    const emitted = new Set<string>();
+    for (const tok of node.order) {
+      if (tok === CHILD_TOKEN) {
+        if (cursor < node.children.length) parts.push(emitChild(node.children[cursor++]));
+      } else {
+        const part = emitKey(tok);
+        if (part !== null) parts.push(part);
+        emitted.add(tok);
+      }
+    }
+    for (; cursor < node.children.length; cursor++) parts.push(emitChild(node.children[cursor]));
+    for (const n of spec.named ?? []) {
+      if (emitted.has(n.key)) continue;
+      const v = node.props[n.key];
+      if (v !== undefined && v !== "") parts.push(`${n.key}: ${emitProp(n.kind, v)}`);
+    }
+  } else {
+    // Fallback canonical order for nodes built without a recorded order (fresh
+    // palette nodes): positional props, positional children, named, named slots.
     for (const p of posSpecs(spec)) {
       const v = node.props[p.key];
-      if (v === undefined || v === "") continue;
-      parts.push(emitProp(p.kind, v));
+      if (v !== undefined && v !== "") parts.push(emitProp(p.kind, v));
     }
     for (const c of node.children) if (c.slot === undefined) parts.push(emitBody(c));
     parts.push(...emitNamed(node, spec.named));
     for (const c of node.children) if (c.slot !== undefined) parts.push(`${c.slot}: ${emitBody(c)}`);
-    return `${node.name}(${parts.join(", ")})`;
   }
-  const parts: string[] = [];
-  for (const p of posSpecs(spec)) parts.push(emitProp(p.kind, node.props[p.key] ?? ""));
-  parts.push(...emitNamed(node, spec.named));
   return `${node.name}(${parts.join(", ")})`;
 }
