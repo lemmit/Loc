@@ -269,10 +269,12 @@ function expandAggregateDetail(
       continue;
     }
     rows.push(
-      call("KeyValueRow", [
-        lit(humanize(f.name)),
-        cellAccessorFor(f.name, f.type, cellVar),
-      ]),
+      call(
+        "KeyValueRow",
+        [lit(humanize(f.name)), cellAccessorFor(f.name, f.type, cellVar)],
+        undefined,
+        [["testid", lit(`${slug}-detail-${f.name}`)]],
+      ),
     );
   }
 
