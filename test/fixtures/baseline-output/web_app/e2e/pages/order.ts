@@ -113,6 +113,7 @@ export class OrderDetailPage {
     }
     await this.page.getByTestId("orders-op-addLine-submit").click();
     await this.page.getByTestId("orders-op-addLine-form").waitFor({ state: "detached" });
+    await this.page.waitForLoadState("networkidle");
     return this;
   }
 
@@ -121,6 +122,7 @@ export class OrderDetailPage {
     await this.page.getByTestId("orders-op-confirm").click();
     await this.page.getByTestId("orders-op-confirm-submit").click();
     await this.page.getByTestId("orders-op-confirm-form").waitFor({ state: "detached" });
+    await this.page.waitForLoadState("networkidle");
     return this;
   }
 

@@ -176,6 +176,7 @@ export function buildPageObjectModule(
       lines.push(
         `    await this.page.getByTestId("${slug}-op-${op.name}-form").waitFor({ state: "detached" });`,
       );
+      lines.push(`    await this.page.waitForLoadState("networkidle");`);
       lines.push(`    return this;`);
       lines.push(`  }`);
       lines.push("");
@@ -207,6 +208,7 @@ export function buildPageObjectModule(
       lines.push(
         `    await this.page.getByTestId("${slug}-op-${op.name}-form").waitFor({ state: "detached" });`,
       );
+      lines.push(`    await this.page.waitForLoadState("networkidle");`);
       lines.push(`    return this;`);
       lines.push(`  }`);
       lines.push("");

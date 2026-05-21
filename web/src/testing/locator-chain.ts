@@ -60,6 +60,7 @@ export type DriverOp =
     }
   | { kind: "page"; op: "goto"; arg: string }
   | { kind: "page"; op: "screenshot" }
+  | { kind: "page"; op: "waitForIdle"; quietMs?: number }
   | {
       kind: "page";
       op: "waitForURL";
@@ -67,6 +68,13 @@ export type DriverOp =
       isRegex: boolean;
       flags?: string;
     };
+
+/** In-flight runtime-request tracker the preview's fetch shim maintains
+ *  on its own `window` (see `src/preview/iframe-html.ts`). */
+interface LoomNet {
+  inflight: number;
+  last: number;
+}
 
 export type DriverReply =
   | { ok: true; value?: string | number }
@@ -96,6 +104,26 @@ export async function executeDriverOp(
             height: root.clientHeight || undefined,
           })) ?? "";
         return { ok: true, value };
+      }
+      if (msg.op === "waitForIdle") {
+        // Wait until the preview app has had no in-flight runtime request
+        // for `quietMs`, so a post-mutation react-query refetch has landed
+        // before the test reads the DOM.  Best-effort: on overall timeout
+        // we proceed rather than fail (the following assertion is the real
+        // gate).
+        const quiet = msg.quietMs ?? 150;
+        const deadline = Date.now() + (timeout ?? 5000);
+        const sleep = (ms: number): Promise<void> =>
+          new Promise((r) => setTimeout(r, ms));
+        for (;;) {
+          const net = (doc.defaultView as unknown as { __LOOM_NET__?: LoomNet })
+            ?.__LOOM_NET__;
+          const inflight = net?.inflight ?? 0;
+          const idleFor = net ? Date.now() - net.last : quiet;
+          if (inflight <= 0 && idleFor >= quiet) return { ok: true };
+          if (Date.now() >= deadline) return { ok: true };
+          await sleep(25);
+        }
       }
       await page.waitForURL(
         msg.isRegex ? new RegExp(msg.pattern, msg.flags) : msg.pattern,
