@@ -410,6 +410,10 @@ function renderTraceabilityJson(loom: LoomModel): string {
           codeElements: t.codeElements,
           testsByCodeElement: t.testsByCodeElement,
           execTestsByTestCase: t.execTestsByTestCase,
+          // Provenance for the verification join (suite + kind per
+          // executable test) — consumed by `ddd verify` and the
+          // playground's live Definition-of-Done overlay.
+          execTests: t.execTests,
         },
         summary: {
           codeCoverage: { covered: coveredCode.length, total: codeElems.length },

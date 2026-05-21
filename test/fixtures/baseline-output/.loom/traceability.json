@@ -178,7 +178,51 @@
       "TC-003": [
         "create a product, look it up by id"
       ]
-    }
+    },
+    "execTests": [
+      {
+        "name": "confirming an order with no lines is rejected",
+        "suite": "Order",
+        "kind": "unit",
+        "testCaseId": "TC-001"
+      },
+      {
+        "name": "create a product, look it up by id",
+        "suite": "Acme e2e",
+        "kind": "api",
+        "testCaseId": "TC-003"
+      },
+      {
+        "name": "create then confirm an order with one line",
+        "suite": "Acme e2e",
+        "kind": "api",
+        "testCaseId": "TC-002"
+      },
+      {
+        "name": "by_customer query returns matching orders",
+        "suite": "Acme e2e",
+        "kind": "api",
+        "testCaseId": null
+      },
+      {
+        "name": "create then confirm an order via UI",
+        "suite": "Acme e2e",
+        "kind": "ui",
+        "testCaseId": null
+      },
+      {
+        "name": "place an order via the workflow UI",
+        "suite": "Acme e2e",
+        "kind": "ui",
+        "testCaseId": null
+      },
+      {
+        "name": "active orders view renders the rendered rows",
+        "suite": "Acme e2e",
+        "kind": "ui",
+        "testCaseId": null
+      }
+    ]
   },
   "summary": {
     "codeCoverage": {
