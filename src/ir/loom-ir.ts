@@ -444,7 +444,83 @@ export interface TraceabilityIR {
   /** TestCase id → executable-test names backing it (via the test's
    *  `verifies` back-link). */
   execTestsByTestCase: Record<string, string[]>;
+  /** Flat provenance list of every executable test, carrying the
+   *  `suite` + `kind` that identify it in a runner's results.  The
+   *  verification rollup joins results to testCases through this
+   *  (names alone are unique only within an aggregate). */
+  execTests: ExecTestRef[];
 }
+
+/** One executable test located for the verification join.  `suite`
+ *  matches the runner's reported suite EXACTLY: the aggregate name for
+ *  a unit test (`describe("<Aggregate>")`) and `"<System> e2e"` for an
+ *  api/ui e2e test (`describe("<System> e2e")`). */
+export interface ExecTestRef {
+  name: string;
+  suite: string;
+  kind: "unit" | "api" | "ui";
+  /** TestCase id from the test's `verifies` clause, or null. */
+  testCaseId: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Verification (Definition of Done) — the runtime overlay on the
+// traceability graph.  Given test-execution results, `computeVerification`
+// (`src/verify/verification.ts`) rolls each testCase up to a status and
+// each requirement up to a verdict.  Pure: it reads the precomputed
+// `TraceabilityIR` index + a normalized result list, nothing else.
+// ---------------------------------------------------------------------------
+
+/** One executed test, normalized from any runner (the playground
+ *  harness's `TestResult`, a vitest/xUnit/Playwright JSON report, …). */
+export interface TestOutcome {
+  /** Display name — the DSL `test`/`test e2e` string, emitted verbatim
+   *  as `it("…")` / `[Fact(DisplayName="…")]` / `test("…")`. */
+  name: string;
+  status: "pass" | "fail" | "skip";
+  /** Optional disambiguators when a `name` is not unique model-wide
+   *  (unit-test names are unique only within an aggregate). */
+  suite?: string;
+  kind?: string;
+}
+
+export type TestCaseStatus = "VERIFIED" | "FAILING" | "UNVERIFIED";
+
+export type RequirementVerdict =
+  | "VERIFIED"
+  | "FAILING"
+  | "UNTESTED"
+  | "UNVERIFIED";
+
+export interface VerificationIR {
+  version: 1;
+  testCases: Record<
+    string,
+    { status: TestCaseStatus; backing: { name: string; status: string }[] }
+  >;
+  requirements: Record<
+    string,
+    {
+      verdict: RequirementVerdict;
+      testCaseIds: string[];
+      failingTestCaseIds: string[];
+    }
+  >;
+  summary: {
+    verified: number;
+    failing: number;
+    untested: number;
+    unverified: number;
+    total: number;
+  };
+  diagnostics: {
+    /** Result rows that matched no backing executable test. */
+    unknownTests: TestOutcome[];
+    /** TestCase ids referenced by a test's `verifies` that don't exist. */
+    unmappedTestCases: string[];
+  };
+}
+
 
 /** A deployment plan: modules grouping bounded contexts, plus the
  * deployable artefacts that ship subsets of those modules. */
