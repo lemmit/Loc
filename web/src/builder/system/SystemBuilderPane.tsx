@@ -32,6 +32,7 @@ import {
   type BaseSpec,
   type TypeSpec,
 } from "./fields";
+import { currentTarget, isRebindKind, rebindReference, rebindTargets, targetKindOf } from "./rebind";
 
 // Editable structural model graph (React Flow).  Reads the parsed AST into a
 // node/edge graph, renders it, and edits splice the backing AST node's CST
@@ -232,6 +233,12 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     if (next != null) apply(next, true);
   };
 
+  const rebindTo = (target: string | null): void => {
+    if (!selected || !target || !isRebindKind(selected.kind)) return;
+    const next = rebindReference(ctx.getSource(), selected.kind, selected.name, target);
+    if (next != null) apply(next, true);
+  };
+
   return (
     <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
       <Box style={{ flex: 1, minWidth: 0 }} data-testid="c4system-canvas">
@@ -290,6 +297,17 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
                 Rename
               </Button>
             </Group>
+            {isRebindKind(selected.kind) && (
+              <Select
+                size="xs"
+                label={targetKindOf(selected.kind) === "module" ? "Source module" : selected.kind === "view" ? "Source aggregate" : "Target aggregate"}
+                searchable
+                data={rebindTargets(parsed.ast, selected.kind)}
+                value={currentTarget(selected.ast, selected.kind)}
+                data-testid="c4system-rebind"
+                onChange={rebindTo}
+              />
+            )}
             {isFieldKind(selected.kind) && (
               <Stack gap={4} data-testid="c4system-fields">
                 <Group justify="space-between" align="center">

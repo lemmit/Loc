@@ -103,14 +103,25 @@ Done:
   (field-name refs in expressions/views resolve in IR lowering, not as Langium
   cross-references, so they can't be tracked). Gated by
   `test/system-fields.test.ts` + e2e.
+- **Reference rebinding** — for single-reference constructs (repository → its
+  `for` aggregate, api → its `from` module, view → its `from`/`=` aggregate) the
+  inspector shows a Select that rewrites the reference's `$refNode` CST span; the
+  graph edge re-derives on the next parse (`web/src/builder/system/rebind.ts`).
+  Gated by `test/system-rebind.test.ts` + e2e.
 
 Open:
 
+- **Event wiring** — `event` nodes currently have no edges (events aren't
+  referenced declaratively; they're emitted from operation bodies). Wiring
+  emit/handle edges should land together with **operation-body modelling** (when
+  operation bodies become editable/visualised in the modeller), since that's
+  where the emit relationships live.
 - **Field rename** — needs member-access reference resolution (via the
   type-system / IR) to update `this.field` / view binds safely.
 - **Repository `find` editing** (params + where-clause expressions).
-- **Edge creation / rebinding** by dragging connections (e.g. point a repository
-  at a different aggregate, bind a deployable to a module).
+- **Edge rebinding by dragging** connections on the canvas (inspector-Select
+  rebinding already exists — see above); plus multi-valued deployable references
+  (module bindings, `serves`, ui) which the single-Select rebind doesn't cover.
 - **Add** the remaining construct kinds (value object, event, repository, view,
   workflow, deployable, api, storage, ui), and choose the target context/module.
 - **Nested grouping** (module → context → members as React Flow parent nodes)

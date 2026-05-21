@@ -136,3 +136,26 @@ test("adds, retypes, and deletes an aggregate field from the inspector", async (
   await expect.poll(async () => rows.count()).toBe(before);
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
+
+test("rebinds a repository's target aggregate from the inspector", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  // The Customers repository is bound `for Customer`; rebind it to Order.
+  await page.locator('[data-testid="rf__node-repository:Customers"]').click();
+  const rebind = page.getByTestId("c4system-rebind");
+  await expect(rebind).toBeVisible();
+  await expect(rebind).toHaveValue("Customer");
+
+  await rebind.click();
+  await page.getByRole("option", { name: "Order", exact: true }).click();
+
+  // Selection is kept and the inspector reflects the new target; source valid.
+  await expect(page.getByTestId("c4system-rebind")).toHaveValue("Order");
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+});
