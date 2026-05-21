@@ -89,11 +89,15 @@ Done:
   aggregate) and **delete** splice the backing CST range via `edit-engine.ts`
   and write back through origin-tagged `onSourceChange` (Phase B sync). e2e:
   `web/e2e/system-builder.spec.ts`.
+- **Rename** a construct *and every reference to it* (repo `for`, `Id<X>` part
+  types, `from`, deployable bindings). The main-thread parse isn't linked, so
+  rename spins up a throwaway fully-built Langium document and uses
+  `References.findReferences` for the exact CST span of each reference
+  (`web/src/builder/system/rename.ts`). Comments are left intact. Gated by
+  `test/system-rename.test.ts` + e2e.
 
 Open:
 
-- **Rename** a construct (and update all references — repo `for`, `Id<X>`,
-  `from`, deployable bindings — not just the declaration).
 - **Inline field editing** (aggregate properties, event fields, repo finds)
   rather than a read-only source view; reuse the structural printer to reprint
   the changed node from a mutated AST.

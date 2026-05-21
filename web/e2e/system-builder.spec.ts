@@ -52,3 +52,42 @@ test("renders the structural graph and edits write back to source", async ({ pag
   await expect.poll(async () => flowNodes.count()).toBe(before);
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
+
+test("renames a construct (and its references) from the inspector", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+
+  const flowNodes = page.locator(".react-flow__node");
+  await expect.poll(async () => flowNodes.count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  // Select a node fully inside the canvas (see note above re transformed pane).
+  const canvasBox = (await page.getByTestId("c4system-canvas").boundingBox())!;
+  const count = await flowNodes.count();
+  for (let i = 0; i < count; i++) {
+    const b = await flowNodes.nth(i).boundingBox();
+    if (
+      b &&
+      b.x >= canvasBox.x &&
+      b.y >= canvasBox.y &&
+      b.x + b.width <= canvasBox.x + canvasBox.width &&
+      b.y + b.height <= canvasBox.y + canvasBox.height
+    ) {
+      await flowNodes.nth(i).click();
+      break;
+    }
+  }
+  await expect(page.getByTestId("c4system-selected-name")).toBeVisible();
+
+  // Rename it — relies on a full client-side linked build to follow references.
+  const newName = "RenamedNodeXyz";
+  await page.getByTestId("c4system-rename-input").fill(newName);
+  await page.getByTestId("c4system-rename-apply").click();
+
+  // A node with the new name appears and the source stays valid.
+  await expect(page.locator(`[data-testid$=":${newName}"]`)).toHaveCount(1, { timeout: 10_000 });
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+});

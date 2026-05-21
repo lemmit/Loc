@@ -10,13 +10,14 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { AstUtils, type AstNode } from "langium";
-import { Box, Button, Group, ScrollArea, Stack, Text, Textarea } from "@mantine/core";
+import { Box, Button, Group, ScrollArea, Stack, Text, TextInput, Textarea } from "@mantine/core";
 import type { LayoutCtx } from "../../layout/ctx";
 import type { BoundedContext, Model, System } from "../../../../src/language/generated/ast.js";
 import { printStructural } from "../../../../src/language/print/index.js";
 import { parseDdd } from "../parse";
 import { spliceNode, applyEdits } from "../edit-engine";
 import { buildSystemGraph, type GraphNode, type NodeKind } from "./model";
+import { IDENTIFIER, renameConstruct } from "./rename";
 
 // Editable structural model graph (React Flow).  Reads the parsed AST into a
 // node/edge graph, renders it, and edits splice the backing AST node's CST
@@ -69,6 +70,13 @@ export default function SystemBuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Elem
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [nameDraft, setNameDraft] = useState("");
+  const [renaming, setRenaming] = useState(false);
+
+  useEffect(() => {
+    const sel = selectedId;
+    setNameDraft(sel ? sel.slice(sel.indexOf(":") + 1) : "");
+  }, [selectedId]);
 
   useEffect(() => {
     if (!graph) return;
@@ -114,6 +122,19 @@ export default function SystemBuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Elem
     ctx.onSourceChange(next, "builder");
     setSelectedId(null);
     setRev((r) => r + 1);
+  };
+
+  const renameSelected = async (): Promise<void> => {
+    if (!selected) return;
+    const next = nameDraft.trim();
+    if (!IDENTIFIER.test(next) || next === selected.name) return;
+    setRenaming(true);
+    try {
+      const result = await renameConstruct(ctx.getSource(), selected.kind, selected.name, next);
+      if (result != null) apply(result);
+    } finally {
+      setRenaming(false);
+    }
   };
 
   const deleteSelected = (): void => {
@@ -177,6 +198,30 @@ export default function SystemBuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Elem
               </Button>
             </Group>
             <Text size="sm" fw={600} data-testid="c4system-selected-name">{selected.name}</Text>
+            <Group gap={4} align="flex-end" wrap="nowrap">
+              <TextInput
+                size="xs"
+                label="Rename"
+                style={{ flex: 1 }}
+                value={nameDraft}
+                error={nameDraft.trim() && !IDENTIFIER.test(nameDraft.trim()) ? "invalid name" : undefined}
+                data-testid="c4system-rename-input"
+                onChange={(e) => setNameDraft(e.currentTarget.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void renameSelected();
+                }}
+              />
+              <Button
+                size="xs"
+                variant="light"
+                data-testid="c4system-rename-apply"
+                loading={renaming}
+                disabled={!IDENTIFIER.test(nameDraft.trim()) || nameDraft.trim() === selected.name}
+                onClick={() => void renameSelected()}
+              >
+                Rename
+              </Button>
+            </Group>
             <ScrollArea style={{ flex: 1, minHeight: 0 }}>
               <Textarea
                 size="xs"
