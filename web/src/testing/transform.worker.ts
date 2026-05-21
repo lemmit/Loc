@@ -54,6 +54,16 @@ function dirOf(path: string): string {
   return path.slice(0, path.lastIndexOf("/") + 1);
 }
 
+// Node builtins the generated domain code imports (e.g. ids.ts uses
+// `randomUUID` from `node:crypto`).  The browser can't resolve bare
+// `node:*` specifiers, so shim the ones the generators emit onto Web
+// platform equivalents — otherwise the bundled module fails to import.
+const BUILTIN_ALIASES: Record<string, string> = {
+  "node:crypto":
+    "export const randomUUID = () => globalThis.crypto.randomUUID();",
+  crypto: "export const randomUUID = () => globalThis.crypto.randomUUID();",
+};
+
 function normalize(path: string): string {
   const parts: string[] = [];
   for (const seg of path.split("/")) {
@@ -78,8 +88,9 @@ function resolveRelative(
 
 function vfsPlugin(
   files: Record<string, string>,
-  aliases: Record<string, string>,
+  callerAliases: Record<string, string>,
 ): esbuild.Plugin {
+  const aliases = { ...BUILTIN_ALIASES, ...callerAliases };
   return {
     name: "loom-test-vfs",
     setup(build) {
