@@ -15,6 +15,12 @@ export interface TestCase {
   fn: () => void | Promise<void>;
 }
 
+/** One line captured from `console.*` while a test ran. */
+export interface ConsoleLine {
+  level: "log" | "info" | "warn" | "error" | "debug";
+  text: string;
+}
+
 export interface TestResult {
   suite: string;
   name: string;
@@ -22,6 +28,8 @@ export interface TestResult {
   durationMs: number;
   /** Assertion / thrown-error message when `status === "fail"`. */
   error?: string;
+  /** `console.*` output captured during the run (omitted when empty). */
+  logs?: ConsoleLine[];
 }
 
 export interface Harness {
@@ -170,12 +178,46 @@ export function createHarness(): Harness {
 const now = (): number =>
   typeof performance !== "undefined" ? performance.now() : Date.now();
 
+const CONSOLE_LEVELS = ["log", "info", "warn", "error", "debug"] as const;
+
+function formatArg(a: unknown): string {
+  if (typeof a === "string") return a;
+  if (a instanceof Error) return a.stack ?? a.message;
+  try {
+    return JSON.stringify(a) ?? String(a);
+  } catch {
+    return String(a);
+  }
+}
+
+/** Patch `console.*` to tee into `sink` while still forwarding to the
+ *  real console; returns a restore fn.  Lets the runner attach a test's
+ *  own log output to its result for in-panel debugging. */
+function captureConsole(sink: ConsoleLine[]): () => void {
+  const original: Partial<Record<(typeof CONSOLE_LEVELS)[number], typeof console.log>> = {};
+  for (const level of CONSOLE_LEVELS) {
+    original[level] = console[level];
+    console[level] = (...args: unknown[]): void => {
+      sink.push({ level, text: args.map(formatArg).join(" ") });
+      original[level]?.(...args);
+    };
+  }
+  return () => {
+    for (const level of CONSOLE_LEVELS) {
+      if (original[level]) console[level] = original[level]!;
+    }
+  };
+}
+
 /** Run registered tests sequentially (the generated suites assume
- *  serial execution against one shared DB), capturing pass/fail. */
+ *  serial execution against one shared DB), capturing pass/fail and any
+ *  `console.*` output the test body produced. */
 export async function runTests(tests: TestCase[]): Promise<TestResult[]> {
   const results: TestResult[] = [];
   for (const t of tests) {
     const start = now();
+    const logs: ConsoleLine[] = [];
+    const restore = captureConsole(logs);
     try {
       await t.fn();
       results.push({
@@ -183,6 +225,7 @@ export async function runTests(tests: TestCase[]): Promise<TestResult[]> {
         name: t.name,
         status: "pass",
         durationMs: now() - start,
+        ...(logs.length ? { logs } : {}),
       });
     } catch (err) {
       results.push({
@@ -191,7 +234,10 @@ export async function runTests(tests: TestCase[]): Promise<TestResult[]> {
         status: "fail",
         durationMs: now() - start,
         error: err instanceof Error ? err.message : String(err),
+        ...(logs.length ? { logs } : {}),
       });
+    } finally {
+      restore();
     }
   }
   return results;

@@ -452,6 +452,18 @@ function Suite({
                   {r.error}
                 </Code>
               )}
+              {r?.logs && r.logs.length > 0 && (
+                <Code
+                  block
+                  mt={4}
+                  style={{ whiteSpace: "pre-wrap", fontSize: 11 }}
+                  data-testid="test-console"
+                >
+                  {r.logs
+                    .map((l) => (l.level === "log" ? l.text : `[${l.level}] ${l.text}`))
+                    .join("\n")}
+                </Code>
+              )}
             </Box>
           );
         })}
