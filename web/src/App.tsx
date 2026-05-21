@@ -562,6 +562,7 @@ export default function App(): JSX.Element {
     setExampleId,
     augmentedExamplesList,
     initialSource,
+    getSource: () => sourceRef.current,
     workspace,
     lspClient: lspClientRef.current,
     buildClient: buildClientRef.current,

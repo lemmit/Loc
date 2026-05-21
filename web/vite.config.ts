@@ -79,6 +79,8 @@ export default defineConfig({
         manualChunks(id) {
           if (!id.includes("/node_modules/")) return undefined;
           if (id.includes("/node_modules/monaco-editor/")) return "monaco";
+          // craft.js (page builder) — only reached via the lazy Builder tab.
+          if (id.includes("/node_modules/@craftjs/")) return "craftjs";
           // LikeC4 ecosystem (model/react/builder + xyflow + the
           // Graphviz WASM layouter) is only reached via the dynamic
           // import in the `.c4` viewer, so this stays a lazy chunk —

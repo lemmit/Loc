@@ -44,7 +44,13 @@ export type WorkspaceState = ReturnType<typeof useWorkspace>;
  *  can navigate to Preview or Backend on a successful boot — the
  *  Mobile shell consumes activeTab/setActiveTab from here instead of
  *  owning its own state. */
-export type MobileTab = "code" | "files" | "preview" | "problems" | "backend";
+export type MobileTab =
+  | "code"
+  | "files"
+  | "preview"
+  | "problems"
+  | "backend"
+  | "tests";
 
 export interface LayoutCtx {
   isDesktop: boolean;
@@ -54,6 +60,8 @@ export interface LayoutCtx {
   setExampleId: (v: string) => void;
   augmentedExamplesList: LoomExample[];
   initialSource: string;
+  /** The live editor source (reflects unsaved edits); for the Builder. */
+  getSource: () => string;
 
   // Workspace (IDB-backed VFS)
   workspace: WorkspaceState;
