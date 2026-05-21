@@ -10,18 +10,9 @@ test("create then confirm an order via UI", async ({ page }) => {
   const ord = await (async () => {   const __list = await new OrderListPage(page).goto();   const __new = await __list.create();   await __new.fill(({ customerId: "cust-ui", status: "Draft", placedAt: "2024-01-01T00:00" }));   const __detail = await __new.submit();   return { id: __detail.id }; })();
   await new OrderDetailPage(page, ord.id).goto().then((__d) => __d.addLine(({ productId: prod.id, qty: 3 })));
   await new OrderDetailPage(page, ord.id).goto().then((__d) => __d.confirm());
-  const read = await (async () => {
-    const __detail = await new OrderDetailPage(page, ord.id).goto();
-    return {
-      id: __detail.id,
-      customerId: await __detail.field("customerId"),
-      status: await __detail.field("status"),
-      placedAt: await __detail.field("placedAt"),
-      lines: { length: await __detail.linesCount() },
-    };
-  })();
-  expect(read.status).toBe("Confirmed");
-  expect(read.lines.length).toBe(1);
+  const read = await new OrderDetailPage(page, ord.id).goto();
+  await expect(read.field("status")).toHaveText("Confirmed");
+  await expect(read.linesRows()).toHaveCount(1);
 });
 
 test("place an order via the workflow UI", async ({ page }) => {
