@@ -131,6 +131,12 @@ describe("page-builder model — primitive coverage", () => {
     // Phase 3 — Tabs holds editable Tab children, each with a title + body.
     'Tabs(Tab("Overview", Text("a")), Tab("Details", List(of: Order)))',
     'Card("Tabs", Tabs(Tab("Overview", Text("Overview tab body"))))',
+    // Phase 4 — lambdas (expression body) and Table/Column accessors.
+    'Table(rows: orders, Column("ID", o => IdLink(o.id, of: Order)), Column("Status", o => EnumBadge(o.status)))',
+    'Column("Name", o => Text(o.name))',
+    // Phase 5 — match: predicate arms with value children + optional else.
+    'match {\n  step == 0 => Text("first")\n  step == 1 => Text("second")\n}',
+    'match {\n  step == 1 => List(of: Order),\n  else => Empty("loading")\n}',
   ]) {
     it(`round-trips ${bodyExpr}`, () => roundtrips(bodyExpr));
   }
@@ -183,6 +189,33 @@ describe("page-builder model — container-with-props seed shape", () => {
     expect(tab1.children.map((c) => c.name)).toEqual(["Text"]);
     expect(tab2.props.label).toBe("Details");
     expect(tab2.children[0].props.of).toBe("Order");
+  });
+
+  it("models a lambda as param + body child", () => {
+    const node = seed('Column("Status", o => EnumBadge(o.status))');
+    expect(node.name).toBe("Column");
+    expect(node.props.header).toBe("Status");
+    const lambda = node.children[0];
+    expect(lambda.name).toBe("Lambda");
+    expect(lambda.props.param).toBe("o");
+    expect(lambda.children[0].name).toBe("EnumBadge");
+    expect(lambda.children[0].props.value).toBe("o.status");
+  });
+
+  it("keeps a block-bodied lambda Opaque", () => {
+    const node = seed("Column(\"X\", o => { let y = o.id })");
+    expect(node.name).toBe("Column");
+    expect(node.children[0].name).toBe("Opaque");
+  });
+
+  it("models match arms with cond + value children and an else", () => {
+    const node = seed('match {\n  step == 0 => Text("first")\n  else => Empty("none")\n}');
+    expect(node.name).toBe("Match");
+    expect(node.children.map((c) => c.name)).toEqual(["MatchArm", "MatchElse"]);
+    const [arm, els] = node.children;
+    expect(arm.props.cond).toBe("step == 0");
+    expect(arm.children[0].name).toBe("Text");
+    expect(els.children[0].name).toBe("Empty");
   });
 
   it("recognises data-bound expr props (not Opaque)", () => {

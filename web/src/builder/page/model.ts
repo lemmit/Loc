@@ -94,15 +94,36 @@ const SPECS = {
   NumberField: { kind: "leaf", positional: [{ key: "label", kind: "string" }], named: [{ key: "bind", kind: "expr" }] },
   PasswordField: { kind: "leaf", positional: [{ key: "label", kind: "string" }], named: [{ key: "bind", kind: "expr" }] },
   Toggle: { kind: "leaf", positional: [{ key: "label", kind: "string" }], named: [{ key: "bind", kind: "expr" }] },
+  // Table holds Column children (sub-primitive) plus a `rows:` source.  A
+  // Column carries a header then an accessor lambda child.  (Tables that also
+  // pass callback lambdas — `onRowClick:` / `rowTestid:` — still round-trip as
+  // Opaque, since named-arg child slots aren't modelled yet.)
+  Table: { kind: "container", named: [{ key: "rows", kind: "expr" }] },
+  Column: { kind: "container", positional: ["header"] },
 } satisfies Record<string, PrimitiveSpec>;
 
-export type PrimitiveName = keyof typeof SPECS | "Opaque";
+// Synthetic nodes model expression-syntax constructs that aren't CallExpr-
+// shaped — a lambda (`x => …`) and a `match { … }`.  They never appear in the
+// palette, are emitted with bespoke syntax (not `Name(...)`), and hold their
+// parts as ordinary positional children so the existing serialize / craft
+// machinery applies unchanged: a `Match` holds `MatchArm`/`MatchElse` children,
+// each of those holds its one value child, and a `Lambda` holds its body child.
+const SYNTHETIC = {
+  Lambda: { container: true, fields: [{ key: "param", kind: "string" }] },
+  Match: { container: true, fields: [] },
+  MatchArm: { container: true, fields: [{ key: "cond", kind: "expr" }] },
+  MatchElse: { container: true, fields: [] },
+} satisfies Record<string, { container: boolean; fields: PropSpec[] }>;
+type SyntheticName = keyof typeof SYNTHETIC;
+const isSynthetic = (name: string): name is SyntheticName => name in SYNTHETIC;
+
+export type PrimitiveName = keyof typeof SPECS | SyntheticName | "Opaque";
 export const PRIMITIVES = Object.keys(SPECS) as (keyof typeof SPECS)[];
 
 // Sub-primitives that only make sense nested inside a specific parent (a Tab
-// inside Tabs); excluded from the top-level palette but still resolvable on the
-// canvas and editable when seeded from source.
-const SUB_PRIMITIVES = new Set<string>(["Tab"]);
+// inside Tabs, a Column inside Table); excluded from the top-level palette but
+// still resolvable on the canvas and editable when seeded from source.
+const SUB_PRIMITIVES = new Set<string>(["Tab", "Column"]);
 export const PALETTE_PRIMITIVES = PRIMITIVES.filter((p) => !SUB_PRIMITIVES.has(p));
 
 // `satisfies` narrows each entry to its literal shape; widen on read so
@@ -110,6 +131,7 @@ export const PALETTE_PRIMITIVES = PRIMITIVES.filter((p) => !SUB_PRIMITIVES.has(p
 const specOf = (name: keyof typeof SPECS): PrimitiveSpec => SPECS[name];
 
 export function isContainer(name: PrimitiveName): boolean {
+  if (isSynthetic(name)) return SYNTHETIC[name].container;
   return name !== "Opaque" && specOf(name).kind === "container";
 }
 
@@ -117,6 +139,7 @@ export function isContainer(name: PrimitiveName): boolean {
  *  Unknown names (e.g. the synthetic `Root`) have no editable fields. */
 export function propFields(name: string): PropSpec[] {
   if (name === "Opaque") return [{ key: "raw", kind: "expr" }];
+  if (isSynthetic(name)) return SYNTHETIC[name].fields;
   if (!(name in SPECS)) return [];
   const spec = specOf(name as keyof typeof SPECS);
   return [...posSpecs(spec), ...(spec.named ?? [])];
@@ -197,6 +220,22 @@ function partition(args: CallArg[]): { positional: Expression[]; named: Map<stri
 }
 
 export function seedFromBody(expr: Expression): BuilderNode {
+  // Lambda — only single-expression bodies are modelled (the body becomes the
+  // one child canvas); block-statement bodies (`x => { … }`) stay verbatim.
+  if (expr.$type === "Lambda") {
+    if (expr.body === undefined) return opaque(expr);
+    return { name: "Lambda", props: { param: expr.param }, children: [seedFromBody(expr.body)] };
+  }
+  // match — predicate arms (cond + value child) plus an optional else child.
+  if (expr.$type === "MatchExpr") {
+    const children: BuilderNode[] = expr.arms.map((arm) => ({
+      name: "MatchArm" as const,
+      props: { cond: printExpr(arm.cond) },
+      children: [seedFromBody(arm.value)],
+    }));
+    if (expr.elseExpr) children.push({ name: "MatchElse", props: {}, children: [seedFromBody(expr.elseExpr)] });
+    return { name: "Match", props: {}, children };
+  }
   if (expr.$type !== "CallExpr" || expr.callee.$type !== "NameRef") return opaque(expr);
   const name = expr.callee.name;
   if (!(name in SPECS)) return opaque(expr);
@@ -267,6 +306,11 @@ function emitNamed(node: BuilderNode, named: PropSpec[] | undefined): string[] {
 
 export function emitBody(node: BuilderNode): string {
   if (node.name === "Opaque") return String(node.props.raw ?? "");
+  // Synthetic nodes reconstruct their bespoke syntax from structure.
+  if (node.name === "Lambda") return `${node.props.param ?? "x"} => ${emitBody(node.children[0])}`;
+  if (node.name === "MatchArm") return `${node.props.cond ?? "true"} => ${emitBody(node.children[0])}`;
+  if (node.name === "MatchElse") return `else => ${emitBody(node.children[0])}`;
+  if (node.name === "Match") return `match {\n  ${node.children.map(emitBody).join(",\n  ")}\n}`;
   const spec = specOf(node.name);
   if (spec.kind === "container") {
     // All positionals (declared scalar props, then children) precede named

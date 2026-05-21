@@ -71,11 +71,11 @@ function Palette(): JSX.Element {
     return null;
   };
 
-  const add = (name: PrimitiveName): void => {
+  const add = (name: (typeof PALETTE_PRIMITIVES)[number]): void => {
     const parent = targetParent();
     if (!parent) return;
     const Comp = resolver[name] as ComponentType<Record<string, unknown>>;
-    const tree = query.parseReactElement(<Comp {...defaultNode(name as Exclude<PrimitiveName, "Opaque">).props} />).toNodeTree();
+    const tree = query.parseReactElement(<Comp {...defaultNode(name).props} />).toNodeTree();
     actions.addNodeTree(tree, parent);
   };
 

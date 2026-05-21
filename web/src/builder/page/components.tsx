@@ -144,8 +144,13 @@ export function Opaque({ raw }: { raw?: string }): JSX.Element {
 }
 Opaque.craft = { displayName: "Opaque" };
 
-// Resolver: Root + Opaque + one component per registered primitive.
+// Resolver: Root + Opaque + one component per registered primitive + the
+// synthetic container nodes (lambda / match), which aren't in the palette but
+// must be resolvable + editable when seeded from source.
 export const resolver: Record<string, ElementType> = { Root, Opaque };
 for (const name of PRIMITIVES) {
   resolver[name] = isContainer(name) ? makeContainer(name) : makeLeaf(name);
+}
+for (const name of ["Lambda", "Match", "MatchArm", "MatchElse"] as const) {
+  resolver[name] = makeContainer(name);
 }
