@@ -1,6 +1,7 @@
 import { Box, Group, ScrollArea, Stack, Text, UnstyledButton } from "@mantine/core";
 import { ProblemsPanel } from "./ProblemsPanel";
 import { BackendBody, BackendHeader } from "./BackendPanel";
+import { TestsBody } from "./TestsPanel";
 import { formatBytes, modeLabel, type LayoutCtx } from "./ctx";
 
 // Identifiers for the consolidated bottom dock.  The playground used
@@ -13,7 +14,7 @@ import { formatBytes, modeLabel, type LayoutCtx } from "./ctx";
 //
 // A Frontend-log / Tests tab can join later — the `tabs` array below
 // is the single place to register one.
-export type DockTab = "problems" | "generator" | "bundler" | "backend";
+export type DockTab = "problems" | "generator" | "bundler" | "backend" | "tests";
 
 interface Props {
   ctx: LayoutCtx;
@@ -41,6 +42,7 @@ export function DevToolsDock({ ctx, tab, setTab }: Props): JSX.Element {
     { id: "generator", label: "Generator", dot: generatorDot },
     { id: "bundler", label: "Bundler", dot: bundlerDot },
     { id: "backend", label: "Backend", dot: backendDot },
+    { id: "tests", label: "Tests", dot: null },
   ];
 
   return (
@@ -104,6 +106,7 @@ export function DevToolsDock({ ctx, tab, setTab }: Props): JSX.Element {
         {tab === "generator" && <GeneratorBody ctx={ctx} />}
         {tab === "bundler" && <BundlerBody ctx={ctx} />}
         {tab === "backend" && <BackendBody ctx={ctx} />}
+        {tab === "tests" && <TestsBody ctx={ctx} />}
       </Box>
     </Box>
   );
