@@ -243,4 +243,13 @@ test("edits an expression structurally (operator dropdown + leaf)", async ({ pag
   await page.getByRole("option", { name: ">", exact: true }).click();
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
   await expect(op()).toHaveValue(">");
+
+  // Advanced escape hatch: drop to text mode and edit the whole expression.
+  await page.getByTestId("c4expr-mode").getByText("Text").click();
+  const text = page.getByTestId("c4expr-text");
+  await expect(text).toBeVisible();
+  await text.fill("amount >= 1");
+  await text.blur();
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+  await expect(page.getByTestId("c4expr-text")).toHaveValue("amount >= 1");
 });

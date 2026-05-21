@@ -148,8 +148,9 @@ Done:
   other form (names, member access, calls, match, lambda, new) is a
   reparse-validated `raw` text leaf (recognise-or-raw). Plugged into the
   single-expression slots — invariants, derived props, function bodies — via one
-  inspector "Expression" picker (`expr-slots.ts`). Gated by
-  `test/system-expr.test.ts` + e2e.
+  inspector "Expression" picker (`expr-slots.ts`). A **structured⇄text toggle**
+  lets advanced users edit the whole expression as raw text (same
+  reparse-on-commit validation). Gated by `test/system-expr.test.ts` + e2e.
 
 Open:
 

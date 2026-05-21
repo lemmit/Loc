@@ -1,6 +1,8 @@
 import { useState } from "react";
-import { Box, Group, Select, Text, TextInput } from "@mantine/core";
+import { Box, Group, SegmentedControl, Select, Text, TextInput, Textarea } from "@mantine/core";
 import { BINARY_OPS, UNARY_OPS, emitExpr, type EExpr } from "./expr-model";
+
+export type ExprMode = "structured" | "text";
 
 // Recursive structured expression editor. Operator nodes (binary/unary/paren)
 // render dropdowns + nested operands; literals render typed inputs; everything
@@ -79,11 +81,47 @@ export function ExpressionEditor({ node, onChange }: NodeProps): JSX.Element {
   }
 }
 
+// Advanced escape hatch: edit the whole expression as raw text, validated by
+// the same reparse-on-commit path. `seedText` is the verbatim source slice.
+function ExprTextField({ seedText, onCommit }: { seedText: string; onCommit: (text: string) => boolean }): JSX.Element {
+  const [error, setError] = useState(false);
+  return (
+    <Textarea
+      size="xs"
+      autosize
+      minRows={1}
+      defaultValue={seedText}
+      error={error ? "invalid expression" : undefined}
+      data-testid="c4expr-text"
+      styles={{ input: { fontFamily: "monospace", fontSize: 11 } }}
+      onFocus={() => error && setError(false)}
+      onBlur={(e) => {
+        const v = e.currentTarget.value;
+        if (v.trim() !== seedText.trim() && !onCommit(v)) setError(true);
+      }}
+    />
+  );
+}
+
 // Surface wrapper: owns the working tree, commits on discrete change / blur via
 // `onCommit(text)`. A failed commit (unparseable) is flagged and the working
 // tree kept so the user can fix it; on success the parent re-seeds (remount via
-// a rev-keyed mount), which clears the error.
-export function ExprSlotEditor({ seed, onCommit }: { seed: EExpr; onCommit: (text: string) => boolean }): JSX.Element {
+// a rev-keyed mount), which clears the error. A structured⇄text toggle lets
+// advanced users drop to raw text (still reparse-validated); `mode` is held by
+// the parent so it persists across the rev-keyed remount.
+export function ExprSlotEditor({
+  seed,
+  seedText,
+  mode,
+  onMode,
+  onCommit,
+}: {
+  seed: EExpr;
+  seedText: string;
+  mode: ExprMode;
+  onMode: (mode: ExprMode) => void;
+  onCommit: (text: string) => boolean;
+}): JSX.Element {
   const [local, setLocal] = useState(seed);
   const [error, setError] = useState(false);
   const handle = (next: EExpr, commit: boolean): void => {
@@ -92,8 +130,25 @@ export function ExprSlotEditor({ seed, onCommit }: { seed: EExpr; onCommit: (tex
   };
   return (
     <Box data-testid="c4expr">
-      <ExpressionEditor node={local} onChange={handle} />
-      {error && <Text size="xs" c="red">invalid expression</Text>}
+      <SegmentedControl
+        size="xs"
+        mb={4}
+        data={[
+          { label: "Structured", value: "structured" },
+          { label: "Text", value: "text" },
+        ]}
+        value={mode}
+        data-testid="c4expr-mode"
+        onChange={(v) => onMode(v as ExprMode)}
+      />
+      {mode === "text" ? (
+        <ExprTextField seedText={seedText} onCommit={onCommit} />
+      ) : (
+        <>
+          <ExpressionEditor node={local} onChange={handle} />
+          {error && <Text size="xs" c="red">invalid expression</Text>}
+        </>
+      )}
     </Box>
   );
 }
