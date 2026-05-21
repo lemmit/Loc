@@ -99,7 +99,7 @@ describe("message-driven UI driver (parent shim → wire → sandbox executor)",
     // Nothing matches → the sandbox times out → the wire reply is an
     // error → the parent shim throws.
     await expect(page.getByTestId("missing").click()).rejects.toThrow(
-      /no visible element/,
+      /no element matched/,
     );
   });
 });
