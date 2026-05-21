@@ -108,3 +108,96 @@ test("stub handshake → document.write → fetch shim round-trips, CSP blocks e
   // while the arbitrary cross-origin fetch was refused by the CSP.
   expect(result).toBe("BRIDGE:200:pong /ping|ext:BLOCKED");
 });
+
+test("loom-reload swaps the bundle in place — document, window and route survive", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  // First "bundle": stamp a marker on `window` and navigate the app to
+  // a sub-route, then render its content into #root.  If a reload were
+  // to rewrite the document (the old full-remount behaviour) the marker
+  // and the route would be lost.
+  const js1 = `
+    window.__loom_marker__ = "v1";
+    history.pushState(null, "", window.__LOOM_BASENAME__ + "/orders/42");
+    document.getElementById("root").textContent = "ONE";
+  `;
+  // Second "bundle": pushed later over the bridge as a loom-reload.
+  // Renders into the fresh #root the controller installs.
+  const js2 = `document.getElementById("root").textContent = "TWO";`;
+
+  const html = makePreviewHtml({ js: js1, sandboxBase: "/sandbox" });
+
+  const result = await page.evaluate(
+    async ({ docHtml, reloadJs }) => {
+      return await new Promise<{
+        root: string;
+        marker: unknown;
+        path: string;
+      }>((resolve) => {
+        const iframe = document.createElement("iframe");
+        iframe.style.cssText = "width:1px;height:1px;border:0";
+
+        const win = (): Window | null => iframe.contentWindow;
+        const rootText = (): string =>
+          iframe.contentDocument?.getElementById("root")?.textContent ?? "";
+
+        let port: MessagePort | null = null;
+        const onWindowMessage = (e: MessageEvent): void => {
+          if (e.source !== iframe.contentWindow) return;
+          const d = e.data as { type?: string } | undefined;
+          if (d?.type !== "loom-stub-ready") return;
+          window.removeEventListener("message", onWindowMessage);
+          const channel = new MessageChannel();
+          port = channel.port1;
+          // No runtime forwards expected; keep the port alive.
+          port.onmessage = (): void => {};
+          iframe.contentWindow!.postMessage(
+            { type: "loom-init", html: docHtml },
+            location.origin,
+            [channel.port2],
+          );
+
+          // Once the first bundle has rendered, push the reload and wait
+          // for the controller to swap #root to the new bundle.
+          const started = Date.now();
+          const poll = setInterval(() => {
+            if (rootText() === "ONE" && port) {
+              port.postMessage({ kind: "reload", js: reloadJs });
+              port = null; // push once
+            }
+            if (rootText() === "TWO") {
+              clearInterval(poll);
+              resolve({
+                root: rootText(),
+                marker: (win() as unknown as { __loom_marker__?: unknown })
+                  ?.__loom_marker__,
+                path: win()?.location.pathname ?? "",
+              });
+            } else if (Date.now() - started > 8000) {
+              clearInterval(poll);
+              resolve({
+                root: "TIMEOUT:" + rootText(),
+                marker: (win() as unknown as { __loom_marker__?: unknown })
+                  ?.__loom_marker__,
+                path: win()?.location.pathname ?? "",
+              });
+            }
+          }, 50);
+        };
+        window.addEventListener("message", onWindowMessage);
+        iframe.src = "/sandbox/index.html";
+        document.body.appendChild(iframe);
+      });
+    },
+    { docHtml: html, reloadJs: js2 },
+  );
+
+  // #root now shows the reloaded bundle's output…
+  expect(result.root).toBe("TWO");
+  // …the window survived (marker intact → no document rewrite / remount)…
+  expect(result.marker).toBe("v1");
+  // …and the route the user was on is preserved across the reload.
+  expect(result.path).toBe("/sandbox/orders/42");
+});

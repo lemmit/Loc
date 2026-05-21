@@ -195,6 +195,63 @@ const BUILD_COMMON = {
   loader: { ".wasm": "binary" as const },
 };
 
+// Persistent esbuild contexts, one per build "slot" (hono / react-vendor
+// / react-self).  Reusing a context across edits lets esbuild skip
+// re-parsing inputs whose onLoad content is unchanged (the heavy
+// node_modules tree especially) — that's the incremental-rebuild win
+// over a cold `esbuild.build()` each edit.  The VFS plugin closes over
+// the slot's `files` map; we mutate it in place between rebuilds so
+// `rebuild()` re-reads the freshly generated source.
+type FileMap = Map<string, string | Uint8Array>;
+
+interface CtxSlot {
+  ctx: esbuild.BuildContext;
+  files: FileMap;
+  signature: string;
+  /** Vendor path only: externals collected by the recorder plugin on
+   *  the latest rebuild (reset each `onStart`). */
+  externals?: { current: Set<string> };
+}
+
+const ctxCache = new Map<string, CtxSlot>();
+
+/** Replace `target`'s entries with `source`'s, keeping the SAME map
+ *  instance the live esbuild context's plugin closes over. */
+function syncFiles(target: FileMap, source: FileMap): void {
+  target.clear();
+  for (const [k, v] of source) target.set(k, v);
+}
+
+/** Get (or lazily (re)create) the context for `key`.  A changed
+ *  `signature` (entry path, react-external flag, aliases, stdin) means
+ *  the build options baked into the context are stale, so we dispose
+ *  and rebuild it; otherwise the cached context is reused. */
+async function getSlot(
+  key: string,
+  signature: string,
+  makeOptions: (files: FileMap) => {
+    options: esbuild.BuildOptions;
+    externals?: { current: Set<string> };
+  },
+): Promise<CtxSlot> {
+  const existing = ctxCache.get(key);
+  if (existing && existing.signature === signature) return existing;
+  if (existing) {
+    try {
+      await existing.ctx.dispose();
+    } catch {
+      /* disposing a dead context can throw; ignore */
+    }
+    ctxCache.delete(key);
+  }
+  const files: FileMap = new Map();
+  const { options, externals } = makeOptions(files);
+  const ctx = await esbuild.context(options);
+  const slot: CtxSlot = { ctx, files, signature, externals };
+  ctxCache.set(key, slot);
+  return slot;
+}
+
 self.onmessage = async (ev: MessageEvent<VfsBundleRequest>): Promise<void> => {
   const { id, stdinContents, entry, generatedFiles, rootDeps, externalReactRuntime } =
     ev.data;
@@ -217,32 +274,46 @@ self.onmessage = async (ev: MessageEvent<VfsBundleRequest>): Promise<void> => {
       : [];
 
     if (vendor && entry) {
-      const appFiles = new Map(generatedFiles);
-      const externals = new Set<string>();
-      const recorder: esbuild.Plugin = {
-        name: "record-externals",
-        setup(build) {
-          build.onEnd((result) => {
-            for (const o of Object.values(result.metafile?.outputs ?? {})) {
-              for (const imp of o.imports ?? []) {
-                if (imp.external && !imp.path.startsWith(".") && !imp.path.startsWith("/")) {
-                  externals.add(imp.path);
+      const slot = await getSlot(
+        "react-vendor",
+        JSON.stringify([entry, aliases]),
+        (files) => {
+          const externals = { current: new Set<string>() };
+          const recorder: esbuild.Plugin = {
+            name: "record-externals",
+            setup(build) {
+              build.onStart(() => {
+                externals.current = new Set();
+              });
+              build.onEnd((result) => {
+                for (const o of Object.values(result.metafile?.outputs ?? {})) {
+                  for (const imp of o.imports ?? []) {
+                    if (imp.external && !imp.path.startsWith(".") && !imp.path.startsWith("/")) {
+                      externals.current.add(imp.path);
+                    }
+                  }
                 }
-              }
-            }
-          });
+              });
+            },
+          };
+          return {
+            options: {
+              ...BUILD_COMMON,
+              entryPoints: [entry],
+              metafile: true,
+              plugins: [
+                makeVfsNpmPlugin(files, "/node_modules", false, aliases, true),
+                recorder,
+              ],
+            },
+            externals,
+          };
         },
-      };
+      );
+      syncFiles(slot.files, generatedFiles);
       const tBundle = performance.now();
-      const out = await esbuild.build({
-        ...BUILD_COMMON,
-        entryPoints: [entry],
-        metafile: true,
-        plugins: [
-          makeVfsNpmPlugin(appFiles, "/node_modules", false, aliases, true),
-          recorder,
-        ],
-      });
+      const out = await slot.ctx.rebuild();
+      const externals = slot.externals?.current ?? new Set<string>();
       const missing = [...externals].filter(
         (s) => !vendor.imports[s] && !TAILWIND_RE.test(s),
       );
@@ -253,12 +324,12 @@ self.onmessage = async (ev: MessageEvent<VfsBundleRequest>): Promise<void> => {
           `[npm-engine] react: install=0ms bundle=${bundleMs}ms ` +
             `(vendor externalised: ${pack}, ${externals.size} specs)`,
         );
-        const js = out.outputFiles.find((f) => f.path.endsWith(".js"));
-        const css = out.outputFiles.find((f) => f.path.endsWith(".css"));
+        const js = out.outputFiles?.find((f) => f.path.endsWith(".js"));
+        const css = out.outputFiles?.find((f) => f.path.endsWith(".css"));
         self.postMessage({
           id,
           ok: true,
-          code: js?.text ?? out.outputFiles[0]?.text ?? "",
+          code: js?.text ?? out.outputFiles?.[0]?.text ?? "",
           css: css?.text,
           versions: {},
           vendorImportmap: vendor.imports,
@@ -277,35 +348,51 @@ self.onmessage = async (ev: MessageEvent<VfsBundleRequest>): Promise<void> => {
 
     // Self-contained path: install into our own copy of the generated
     // tree (off the main thread; node_modules stays here), then bundle.
-    const files = new Map(generatedFiles);
+    // Distinct slot keys (hono vs react-self) so the backend and the
+    // fallback frontend each keep their own persistent context.
+    const slotKey = stdinContents ? "hono" : "react-self";
+    const slot = await getSlot(
+      slotKey,
+      JSON.stringify([
+        entry ?? null,
+        !!externalReactRuntime,
+        aliases,
+        stdinContents ?? null,
+      ]),
+      (files) => ({
+        options: stdinContents
+          ? {
+              ...BUILD_COMMON,
+              plugins: [
+                makeVfsNpmPlugin(files, "/node_modules", !!externalReactRuntime, aliases),
+              ],
+              stdin: {
+                contents: stdinContents,
+                resolveDir: "/",
+                sourcefile: "__entry__.ts",
+                loader: "ts" as const,
+              },
+            }
+          : {
+              ...BUILD_COMMON,
+              plugins: [
+                makeVfsNpmPlugin(files, "/node_modules", !!externalReactRuntime, aliases),
+              ],
+              entryPoints: [entry as string],
+            },
+      }),
+    );
+    syncFiles(slot.files, generatedFiles);
     const tInstall = performance.now();
     const { versions, fileCount } = await install(
       rootDeps,
-      (p, d) => files.set(p, d),
+      (p, d) => slot.files.set(p, d),
       { cache: await getCache(), mirror: await getMirror() },
     );
     const installMs = Math.round(performance.now() - tInstall);
     const versionRec = Object.fromEntries(versions);
-    const common = {
-      ...BUILD_COMMON,
-      plugins: [
-        makeVfsNpmPlugin(files, "/node_modules", !!externalReactRuntime, aliases),
-      ],
-    };
     const tBundle = performance.now();
-    const out = await esbuild.build(
-      stdinContents
-        ? {
-            ...common,
-            stdin: {
-              contents: stdinContents,
-              resolveDir: "/",
-              sourcefile: "__entry__.ts",
-              loader: "ts",
-            },
-          }
-        : { ...common, entryPoints: [entry as string] },
-    );
+    const out = await slot.ctx.rebuild();
     const bundleMs = Math.round(performance.now() - tBundle);
     // C0 — perf instrumentation: the install-vs-bundle split decides
     // whether the npm-default perf work targets install latency (C1)
@@ -317,12 +404,12 @@ self.onmessage = async (ev: MessageEvent<VfsBundleRequest>): Promise<void> => {
       `[npm-engine] ${kind}: install=${installMs}ms bundle=${bundleMs}ms ` +
         `(${versions.size} pkgs, ${fileCount} files installed)`,
     );
-    const js = out.outputFiles.find((f) => f.path.endsWith(".js"));
-    const css = out.outputFiles.find((f) => f.path.endsWith(".css"));
+    const js = out.outputFiles?.find((f) => f.path.endsWith(".js"));
+    const css = out.outputFiles?.find((f) => f.path.endsWith(".css"));
     self.postMessage({
       id,
       ok: true,
-      code: js?.text ?? out.outputFiles[0]?.text ?? "",
+      code: js?.text ?? out.outputFiles?.[0]?.text ?? "",
       css: css?.text,
       versions: versionRec,
       installMs,

@@ -11,7 +11,9 @@ interface Props {
 // describes the next required step.
 export function PreviewPane({ ctx }: Props): JSX.Element {
   const {
-    reactBundle,
+    previewBundle,
+    previewBooted,
+    previewProblem,
     ddl,
     engine,
     generateSuccess,
@@ -29,16 +31,42 @@ export function PreviewPane({ ctx }: Props): JSX.Element {
       : "This example has no React frontend.  Pick a system-mode example (e.g. Sales System) to use Preview.";
 
   return (
-    <Box style={{ flex: 1, minHeight: 0 }}>
-      {reactBundle && ddl && engine ? (
-        <Preview
-          js={reactBundle.code}
-          css={reactBundle.css}
-          versions={reactBundle.versions}
-          vendorImportmap={reactBundle.vendorImportmap}
-          vendorCssUrl={reactBundle.vendorCssUrl}
-          runtime={engine}
-        />
+    <Box style={{ flex: 1, minHeight: 0, position: "relative" }}>
+      {previewBundle && previewBooted && engine ? (
+        <>
+          <Preview
+            js={previewBundle.code}
+            css={previewBundle.css}
+            versions={previewBundle.versions}
+            vendorImportmap={previewBundle.vendorImportmap}
+            vendorCssUrl={previewBundle.vendorCssUrl}
+            runtime={engine}
+          />
+          {previewProblem && (
+            <Box
+              style={{
+                position: "absolute",
+                top: 8,
+                right: 8,
+                zIndex: 5,
+                pointerEvents: "none",
+              }}
+            >
+              <Text
+                size="xs"
+                fw={600}
+                c="white"
+                bg="red.7"
+                px="xs"
+                py={2}
+                style={{ borderRadius: 4 }}
+                data-testid="preview-stale-badge"
+              >
+                Latest build failed — showing last working preview
+              </Text>
+            </Box>
+          )}
+        </>
       ) : (
         <Box p="md">
           <Text size="sm" c="dimmed">

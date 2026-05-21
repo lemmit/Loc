@@ -98,6 +98,18 @@ export interface LayoutCtx {
   reactBundleStatus: ReactBundleStatus;
   honoBundle: BundleOk | null;
   reactBundle: BundleOk | null;
+  /** Last react bundle that compiled — what the preview iframe renders.
+   *  Retained across the live regenerate cascade (and across a failed
+   *  rebuild) so the preview refreshes in place rather than tearing the
+   *  iframe down.  Null until the first successful React bundle. */
+  previewBundle: BundleOk | null;
+  /** True once the backend has booted at least once — the gate for
+   *  mounting <Preview>.  Stays true across subsequent rebuilds even
+   *  while the boot slot transiently clears. */
+  previewBooted: boolean;
+  /** The newest generate/bundle attempt failed while a good preview is
+   *  still on screen — drives a non-blocking "problem occurred" badge. */
+  previewProblem: boolean;
   ddl: string | null;
   persistent: boolean;
   migrated: boolean;

@@ -295,6 +295,10 @@ export default function App(): JSX.Element {
     dispatch({ type: "RESET" });
     setDiagnostics([]);
     setSelectedPath(null);
+    // Drop the retained preview so the iframe remounts for the new
+    // example instead of hot-swapping the previous app's bundle.
+    setPreviewBundle(null);
+    setPreviewBooted(false);
     void engineRef.current?.reset();
     scheduleAutoGenerate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -317,7 +321,11 @@ export default function App(): JSX.Element {
       if (errorCountRef.current === 0 && !generatingRef.current) {
         void runGenerateRef.current();
       }
-    }, 800);
+      // 5s (was 800ms): the preview now refreshes in place, so the
+      // debounce is the throttle on how often a background refresh
+      // fires — long enough to coalesce a burst of keystrokes into one
+      // rebuild after the user pauses.
+    }, 5000);
   };
   useEffect(() => {
     return () => {
@@ -359,6 +367,27 @@ export default function App(): JSX.Element {
     if (r === null) return { kind: "absent" };
     return r.ok ? { kind: "ok", result: r } : { kind: "fail", result: r };
   })();
+
+  // Last-good preview retention.  The preview now refreshes in place,
+  // so it must stay mounted across the live-mode regenerate cascade —
+  // but GENERATE_START clears the boot slot (so `ddl` blinks null mid-
+  // rebuild) and a failed rebuild yields no react bundle.  Holding the
+  // last successful bundle + a "booted at least once" flag lets the
+  // iframe persist; the new bundle is hot-swapped only when generate +
+  // bundle actually succeed.  A failed rebuild leaves the previous app
+  // on screen and only flips `previewProblem` for a non-blocking badge.
+  const [previewBundle, setPreviewBundle] = useState<BundleOk | null>(null);
+  const [previewBooted, setPreviewBooted] = useState(false);
+  useEffect(() => {
+    if (reactBundle) setPreviewBundle(reactBundle);
+  }, [reactBundle]);
+  useEffect(() => {
+    if (ddl) setPreviewBooted(true);
+  }, [ddl]);
+  const previewProblem =
+    previewBundle != null &&
+    (reactBundleStatus.kind === "fail" ||
+      (generateResult != null && !generateResult.ok));
 
   // The pipeline steps are split into composable `*Step` workers that
   // accept their inputs as parameters and return the freshly computed
@@ -593,6 +622,9 @@ export default function App(): JSX.Element {
     reactBundleStatus,
     honoBundle,
     reactBundle,
+    previewBundle,
+    previewBooted,
+    previewProblem,
     ddl,
     persistent,
     migrated,
