@@ -119,6 +119,62 @@ interface MakePreviewArgs {
 
 const ESCAPE_END_SCRIPT = (s: string): string => s.replace(/<\/script/gi, "<\\/script");
 
+// In-place reload controller.  Classic script (runs after the inline
+// fetch shim in <head>, so the bridge port has already been started)
+// that listens on the SAME `window.__LOOM_PORT__` for `loom-reload`
+// messages the parent pushes after a rebuild.  On reload it swaps in
+// the new bundle WITHOUT re-writing the document: the page shell,
+// importmap, CSS link and — crucially — the current route (history)
+// all survive, so the preview feels like an always-on app quietly
+// refreshing rather than a full reload.
+//
+// `loom-reload` carries no `rid`, so the fetch shim's `port.onmessage`
+// (which only handles numeric-rid runtime replies) ignores it; this
+// listener only handles `kind === "reload"`.
+//
+// Note: re-importing the new bundle creates a fresh React root on a
+// fresh `#root` node (avoids React's "createRoot on a container that
+// already has a root" warning).  The previous bundle's root is left
+// detached — component-local state does not survive a reload; only a
+// full Fast-Refresh integration (deliberately out of scope) would
+// preserve it.
+const RELOAD_CONTROLLER = `
+(function () {
+  var port = window.__LOOM_PORT__;
+  if (!port) return;
+  var currentBlobUrl = null;
+  function swapCss(css) {
+    var el = document.getElementById("loom-css");
+    if (!el) {
+      el = document.createElement("style");
+      el.id = "loom-css";
+      document.head.appendChild(el);
+    }
+    el.textContent = css;
+  }
+  function mount(js) {
+    var old = document.getElementById("root");
+    var fresh = document.createElement("div");
+    fresh.id = "root";
+    if (old && old.parentNode) old.parentNode.replaceChild(fresh, old);
+    else document.body.appendChild(fresh);
+    if (currentBlobUrl) { try { URL.revokeObjectURL(currentBlobUrl); } catch (e) {} }
+    var blob = new Blob([js], { type: "text/javascript" });
+    currentBlobUrl = URL.createObjectURL(blob);
+    var s = document.createElement("script");
+    s.type = "module";
+    s.src = currentBlobUrl;
+    document.body.appendChild(s);
+  }
+  port.addEventListener("message", function (ev) {
+    var r = ev.data;
+    if (!r || r.kind !== "reload") return;
+    if (typeof r.css === "string") swapCss(r.css);
+    mount(r.js);
+  });
+})();
+`.trim();
+
 // Content-Security-Policy for the preview document.
 //
 // This is the egress lock the cross-origin sandbox needs once
@@ -152,7 +208,10 @@ const ESCAPE_END_SCRIPT = (s: string): string => s.replace(/<\/script/gi, "<\\/s
 //                              navigation out of the sandbox.
 const PREVIEW_CSP = [
   "default-src 'none'",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdn.jsdelivr.net",
+  // `blob:` is needed by the in-place reload controller, which mounts
+  // each rebuilt bundle as a `<script type="module" src=blob:…>` so
+  // the preview refreshes without re-writing the whole document.
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https://cdn.tailwindcss.com https://cdn.jsdelivr.net",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
@@ -189,7 +248,7 @@ function styleTagFor(css?: string): string {
   // a plain `<style>` tag — no JIT needed.
   const flavor = tailwindFlavor(css);
   if (flavor === "v3") {
-    return `<style type="text/tailwindcss">\n${css}\n</style>`;
+    return `<style id="loom-css" type="text/tailwindcss">\n${css}\n</style>`;
   }
   if (flavor === "v4") {
     // `@tailwindcss/browser` resolves `@import "tailwindcss"`
@@ -199,9 +258,9 @@ function styleTagFor(css?: string): string {
     // v3's `tailwindcss-animate`: animation utilities won't run in
     // the preview but render fine in a real `vite build` deploy.
     const v4 = css.replace(/^\s*@import\s+["']tw-animate-css["'];?\s*$/m, "");
-    return `<style type="text/tailwindcss">\n${v4}\n</style>`;
+    return `<style id="loom-css" type="text/tailwindcss">\n${v4}\n</style>`;
   }
-  return `<style>\n${css}\n</style>`;
+  return `<style id="loom-css">\n${css}\n</style>`;
 }
 
 /** Tailwind Play CDN configuration — mirrors `designs/shadcn/tailwind-
@@ -362,6 +421,7 @@ ${styleTagFor(args.css)}
 <div id="root"></div>
 ${hostScript}
 <script type="module">${ESCAPE_END_SCRIPT(args.js)}</script>
+<script>${ESCAPE_END_SCRIPT(RELOAD_CONTROLLER)}</script>
 </body>
 </html>`;
 }

@@ -42,7 +42,7 @@ describe("iframe-html — Tailwind v3 path (shadcn@v3)", () => {
   });
 
   it("routes the CSS through the JIT style block", () => {
-    expect(html).toContain('<style type="text/tailwindcss">');
+    expect(html).toContain('<style id="loom-css" type="text/tailwindcss">');
   });
 
   it("does not pull the v4 browser runtime", () => {
@@ -75,7 +75,7 @@ describe("iframe-html — Tailwind v4 path (shadcn@v4)", () => {
   });
 
   it("routes the CSS through the JIT style block", () => {
-    expect(html).toContain('<style type="text/tailwindcss">');
+    expect(html).toContain('<style id="loom-css" type="text/tailwindcss">');
   });
 });
 
@@ -83,7 +83,7 @@ describe("iframe-html — non-Tailwind CSS (Mantine)", () => {
   const html = makePreviewHtml({ js: "/* b */", css: MANTINE_CSS });
 
   it("uses a plain <style> tag and no JIT script", () => {
-    expect(html).toContain("<style>");
+    expect(html).toContain('<style id="loom-css">');
     expect(html).not.toContain('type="text/tailwindcss"');
     // CSP `script-src` names the CDN domain; assert no CDN `<script>` loads.
     expect(html).not.toContain('src="https://cdn.tailwindcss.com"');

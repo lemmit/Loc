@@ -170,39 +170,77 @@ export function Preview({
 
   // Static stub URL on SANDBOX_ORIGIN (computed once).
   const stubUrl = useMemo(() => sandboxStubUrl(), []);
-  // Remount the iframe on every new bundle so the stub reloads and the
-  // ready → init handshake re-runs against a fresh document.  Also the
-  // dependency that re-runs the bridge effect.
-  const bundleKey = fnv1a32(
-    js + "\0" + (css ?? "") + "\0" + JSON.stringify(versions ?? {}) + "\0" + JSON.stringify(vendorImportmap ?? {}) + "\0" + (vendorCssUrl ?? ""),
-  );
 
-  // Synthesise the document and run the bridge handshake for the
-  // current iframe.  The bridge attaches a `loom-stub-ready` listener
-  // immediately; whenever the (re)mounted stub announces itself, it
-  // gets the document + one MessagePort, and runtime requests it
-  // forwards are dispatched to the engine.  Cleanup tears the bridge
-  // down before the next bundle's iframe mounts.
+  // Bundle identity is split in two so ordinary edits refresh the
+  // preview in place instead of remounting the iframe:
+  //  - docKey: the page-shell inputs (importmap / vendor css / pkg
+  //    versions).  A change means the synthesised document itself
+  //    differs, so the iframe must remount and re-handshake.  Rare —
+  //    only when deps or the design-pack vendor change.
+  //  - codeKey: the app bundle (js + css), which is what changes after
+  //    a normal `.ddd` edit.  Pushed into the LIVE iframe as an
+  //    in-place reload (route + shell survive, no white flash).
+  const docKey = fnv1a32(
+    JSON.stringify(versions ?? {}) + "\0" + JSON.stringify(vendorImportmap ?? {}) + "\0" + (vendorCssUrl ?? ""),
+  );
+  const codeKey = fnv1a32((js ?? "") + "\0" + (css ?? ""));
+
+  // Latest preview material, read by the start effect at mount time
+  // without being a dependency — we must NOT re-handshake on every code
+  // edit (that's the reload effect's job).
+  const materialRef = useRef({ js, css, versions, vendorImportmap, vendorCssUrl });
+  materialRef.current = { js, css, versions, vendorImportmap, vendorCssUrl };
+
+  const bridgeRef = useRef<SandboxBridge | null>(null);
+  // codeKey baked into the document the bridge last (re)started with, so
+  // the reload effect skips the bundle that's already mounted.
+  const startedCodeKeyRef = useRef<string | null>(null);
+
+  // Create + start the bridge for the current iframe.  Re-runs only
+  // when the iframe element identity changes (docKey remounts it) or
+  // runtime/stub changes — never on an ordinary code edit.  The bridge
+  // attaches a `loom-stub-ready` listener immediately; when the mounted
+  // stub announces itself it gets the document + one MessagePort, and
+  // forwarded runtime requests are dispatched to the engine.
   useEffect(() => {
     const el = iframeRef.current;
     if (!el) return;
+    const m = materialRef.current;
     const html = makePreviewHtml({
-      js,
-      css,
-      versions,
-      vendorImportmap,
-      vendorCssUrl,
+      js: m.js,
+      css: m.css,
+      versions: m.versions,
+      vendorImportmap: m.vendorImportmap,
+      vendorCssUrl: m.vendorCssUrl,
       sandboxBase: sandboxBasename(stubUrl),
     });
     const bridge = new SandboxBridge(el, SANDBOX_ORIGIN, (req) =>
       runtime.dispatch(req),
     );
+    bridgeRef.current = bridge;
+    startedCodeKeyRef.current = codeKey;
     bridge.start(html);
-    return () => bridge.dispose();
-    // `bundleKey` stands in for js/css/versions (it's their hash); the
-    // iframe also remounts on it, so a fresh stub meets a fresh bridge.
+    return () => {
+      bridge.dispose();
+      bridgeRef.current = null;
+      startedCodeKeyRef.current = null;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bundleKey, runtime, stubUrl]);
+  }, [docKey, runtime, stubUrl]);
+
+  // Code-only rebuilds: hot-swap the bundle into the live preview in
+  // place.  Skips the bundle already baked into the freshly-started
+  // document (startedCodeKeyRef), so the first render after a remount
+  // doesn't double-mount.
+  useEffect(() => {
+    const bridge = bridgeRef.current;
+    if (!bridge) return;
+    if (startedCodeKeyRef.current === codeKey) return;
+    const m = materialRef.current;
+    bridge.pushReload({ js: m.js, css: m.css });
+    startedCodeKeyRef.current = codeKey;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [codeKey]);
 
   return (
     // The whole Preview is the fullscreen target so the toolbar (and
@@ -279,7 +317,7 @@ export function Preview({
             isolated from the parent.  `key` remounts on each new bundle so
             the stub reloads. */}
         <iframe
-          key={bundleKey}
+          key={docKey}
           ref={(el) => {
             iframeRef.current = el;
           }}

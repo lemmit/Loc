@@ -42,10 +42,19 @@ type RuntimeReply =
     }
   | { rid: number; ok: false; message: string };
 
+/** Pushed to the preview's reload controller after a rebuild. */
+interface ReloadPayload {
+  js: string;
+  css?: string;
+}
+
 export class SandboxBridge {
   private port: MessagePort | null = null;
   private readyListener: ((e: MessageEvent) => void) | null = null;
   private disposed = false;
+  /** A reload requested before the handshake completed — flushed once
+   *  the port connects so an edit that lands during boot isn't lost. */
+  private pendingReload: ReloadPayload | null = null;
 
   constructor(
     private readonly iframe: HTMLIFrameElement,
@@ -83,6 +92,23 @@ export class SandboxBridge {
     win.postMessage({ type: "loom-init", html }, this.targetOrigin, [
       channel.port2,
     ]);
+    if (this.pendingReload) {
+      const r = this.pendingReload;
+      this.pendingReload = null;
+      this.port.postMessage({ kind: "reload", js: r.js, css: r.css });
+    }
+  }
+
+  /** Hot-swap the running preview's bundle in place (no iframe remount,
+   *  no document rewrite — the route and page shell survive).  Queued
+   *  if the stub handshake hasn't completed yet. */
+  pushReload(payload: ReloadPayload): void {
+    if (this.disposed) return;
+    if (!this.port) {
+      this.pendingReload = payload;
+      return;
+    }
+    this.port.postMessage({ kind: "reload", js: payload.js, css: payload.css });
   }
 
   private async onRuntimeForward(ev: MessageEvent): Promise<void> {
