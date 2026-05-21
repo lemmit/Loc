@@ -106,6 +106,16 @@ export class RemotePage {
   url(): string {
     return this.transport.currentUrl();
   }
+  /** Playwright parity: page objects call `waitForLoadState("networkidle")`
+   *  after a mutating operation so the read sees the post-refetch UI, not
+   *  react-query's stale previous data.  Real Playwright tracks real
+   *  network; in the playground the app's fetches go over the bridge port,
+   *  so we wait until the iframe's in-flight runtime-request count has been
+   *  zero for a short quiet window.  Other load states are no-ops. */
+  async waitForLoadState(state?: "load" | "domcontentloaded" | "networkidle"): Promise<void> {
+    if (state !== "networkidle") return;
+    await this.transport.send({ kind: "page", op: "waitForIdle" });
+  }
   /** Best-effort screenshot of the current preview as a JPEG data URL.
    *  Returns "" when capture failed (never throws). */
   async screenshot(): Promise<string> {

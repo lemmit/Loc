@@ -30,6 +30,12 @@ const RUNTIME_FETCH_SHIM = `
   if (!port) return;
   var nextId = 1;
   var pending = Object.create(null);
+  // In-flight runtime-request tracker — the test driver's
+  // waitForLoadState("networkidle") polls this so a post-mutation
+  // react-query refetch lands before the test reads the DOM.
+  var net = window.__LOOM_NET__ || (window.__LOOM_NET__ = { inflight: 0, last: Date.now() });
+  function netStart() { net.inflight++; net.last = Date.now(); }
+  function netEnd() { net.inflight--; net.last = Date.now(); }
   port.onmessage = function (ev) {
     var r = ev.data;
     if (!r || typeof r.rid !== "number") return;
@@ -57,12 +63,15 @@ const RUNTIME_FETCH_SHIM = `
       req.headers.forEach(function (v, k) { headers[k] = v; });
       var rid = nextId++;
       return new Promise(function (resolve) {
+        netStart();
         var timer = setTimeout(function () {
           delete pending[rid];
+          netEnd();
           resolve(new Response("Runtime timeout.\\n", { status: 504 }));
         }, 30000);
         pending[rid] = function (reply) {
           clearTimeout(timer);
+          netEnd();
           if (reply.ok) {
             var nullBody = reply.status === 204 || reply.status === 205 || reply.status === 304;
             resolve(new Response(nullBody ? null : reply.body, {
