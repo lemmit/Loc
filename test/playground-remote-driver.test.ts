@@ -18,6 +18,7 @@ function harness(): RemotePage {
   const sandboxPage = new DomPage(document, { basename: "/app", timeout: 1000 });
   // In-process transport stands in for the bridge postMessage hop.
   const transport: DriverTransport = {
+    currentUrl: () => document.defaultView!.location.href,
     send: (op: DriverOp) => executeDriverOp(document, sandboxPage, op, 1000),
   };
   // Parent side: the shim the bundled spec drives.
@@ -88,7 +89,7 @@ describe("message-driven UI driver (parent shim → wire → sandbox executor)",
   it("goto pushes the route, url() reads it back, waitForURL matches a RegExp", async () => {
     const page = harness();
     await page.goto("/orders/new");
-    expect(await page.url()).toContain("/app/orders/new");
+    expect(page.url()).toContain("/app/orders/new");
     await page.waitForURL(/\/orders\/new$/);
   });
 

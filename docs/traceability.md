@@ -120,3 +120,47 @@ reference code across systems).
   parent `UserStory`.
 - **Solution coverage** — the fraction of a solution's `entitles`
   symbols that are covered by some test case.
+
+## Verification — Definition of Done
+
+Coverage says a requirement *has* a test; **verification** says that test
+*passed*. Given the results of actually running the executable tests,
+`computeVerification` (`src/verify/verification.ts`) rolls each test case up to
+a status and each requirement up to a verdict:
+
+| Verdict | Meaning |
+|---|---|
+| `VERIFIED` | every test case for the requirement (and its children) ran and passed |
+| `FAILING` | a backing test failed |
+| `UNVERIFIED` | the requirement has test cases, but their tests didn't all run |
+| `UNTESTED` | no test cases verify the requirement or any child |
+
+The join is by `(suite, name)`: each executable test's name is the DSL string
+emitted verbatim as `it("…")` / `[Fact(DisplayName="…")]` / `test("…")`, and
+its `suite` is the aggregate name (unit tests) or `"<System> e2e"` (e2e tests)
+— so unit-test names that repeat across aggregates still attribute correctly.
+The function is pure and shared by both front-ends below.
+
+### In the playground
+
+The **Tests** panel shows a live **Requirements** rollup: as you run unit /
+API / UI tests, each requirement's verdict badge updates in place. It reads
+`.loom/traceability.json` (which carries an `execTests` provenance list) and
+joins it against the panel's results — no extra step.
+
+### In CI — `ddd verify`
+
+```bash
+ddd verify <file.ddd> --results <results.json> [--out <dir>] [--require-all] [--min <pct>] [--json]
+```
+
+`results.json` is `{ "version": 1, "results": [{ "name": "...", "status": "pass"|"fail"|"skip", "suite": "..." }] }`
+— produced from your runner's JSON report (vitest `--reporter=json`, `dotnet
+test` trx, Playwright JSON). The command writes
+`.loom/verification.{md,json,mmd}` (the `.mmd` is a verdict-colored
+requirements graph) and gates the exit code:
+
+- exit `0` — gate passes;
+- exit `1` — a requirement is `FAILING` (default), or below `--min`, or not all
+  `VERIFIED` under `--require-all`;
+- exit `2` — bad input (parse/validation error, missing or malformed results).

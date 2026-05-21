@@ -242,22 +242,40 @@ function wireFieldsForValueObject(vo: ValueObjectIR): WireField[] {
  *  out of the model with its optional `verifies <TestCase>` back-link. */
 interface ExecTest {
   name: string;
+  /** Runner-reported suite: aggregate name (unit) or `"<System> e2e"`. */
+  suite: string;
+  kind: "unit" | "api" | "ui";
   verifiesTestCase?: string;
 }
 
 function collectExecTests(loom: LoomModel): ExecTest[] {
   const out: ExecTest[] = [];
+  // Aggregate `test "..."` blocks → `describe("<agg>")` in the
+  // generated `domain/<agg>.test.ts`, so the runner reports
+  // `suite = agg.name`.
   const fromContext = (ctx: BoundedContextIR): void => {
     for (const agg of ctx.aggregates) {
       for (const t of agg.tests) {
-        out.push({ name: t.name, verifiesTestCase: t.verifiesTestCase });
+        out.push({
+          name: t.name,
+          suite: agg.name,
+          kind: "unit",
+          verifiesTestCase: t.verifiesTestCase,
+        });
       }
     }
   };
   for (const sys of loom.systems) {
     for (const mod of sys.modules) for (const ctx of mod.contexts) fromContext(ctx);
+    // System `test e2e "..."` → `describe("<System> e2e")`, so the
+    // runner reports `suite = "<sys.name> e2e"`.
     for (const t of sys.e2eTests) {
-      out.push({ name: t.name, verifiesTestCase: t.verifiesTestCase });
+      out.push({
+        name: t.name,
+        suite: `${sys.name} e2e`,
+        kind: t.kind,
+        verifiesTestCase: t.verifiesTestCase,
+      });
     }
   }
   for (const ctx of loom.contexts) fromContext(ctx);
@@ -320,14 +338,22 @@ function computeTraceability(loom: LoomModel): TraceabilityIR {
     }
   }
 
-  // Executable-test back-links: TestCase id → exec test names.
+  // Executable-test back-links: TestCase id → exec test names, plus a
+  // flat provenance list (suite + kind) for the verification join.
+  const allExecTests = collectExecTests(loom);
   const execTestsByTestCase: Record<string, string[]> = {};
   for (const tc of loom.testCases) execTestsByTestCase[tc.id] = [];
-  for (const ex of collectExecTests(loom)) {
+  for (const ex of allExecTests) {
     if (ex.verifiesTestCase && ex.verifiesTestCase in execTestsByTestCase) {
       execTestsByTestCase[ex.verifiesTestCase].push(ex.name);
     }
   }
+  const execTests = allExecTests.map((ex) => ({
+    name: ex.name,
+    suite: ex.suite,
+    kind: ex.kind,
+    testCaseId: ex.verifiesTestCase ?? null,
+  }));
 
   // Propagate exec tests to the code elements their TestCase covers.
   const execTestsByCodeElement: Record<string, string[]> = {};
@@ -348,6 +374,7 @@ function computeTraceability(loom: LoomModel): TraceabilityIR {
     testsByCodeElement,
     execTestsByCodeElement,
     execTestsByTestCase,
+    execTests,
   };
 }
 
