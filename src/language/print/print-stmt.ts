@@ -1,0 +1,43 @@
+import type { LValue, Statement } from "../generated/ast.js";
+import { printExpr, registerStatementPrinter } from "./print-expr.js";
+
+// ---------------------------------------------------------------------------
+// AST → `.ddd` source printer for statements (lambda block bodies, and later
+// operation / workflow bodies).  See `print-expr.ts` for the round-trip
+// rationale.
+// ---------------------------------------------------------------------------
+
+export function printStmt(node: Statement): string {
+  switch (node.$type) {
+    case "PreconditionStmt":
+      return `precondition ${printExpr(node.expr)}`;
+    case "RequiresStmt":
+      return `requires ${printExpr(node.expr)}`;
+    case "LetStmt":
+      return `let ${node.name} = ${printExpr(node.expr)}`;
+    case "EmitStmt": {
+      const fields = node.fields
+        .map((f) => `${f.name}: ${printExpr(f.value)}`)
+        .join(", ");
+      return `emit ${node.event.$refText} {${fields.length > 0 ? ` ${fields} ` : ""}}`;
+    }
+    case "AssignOrCallStmt": {
+      const target = printLValue(node.target);
+      return node.op && node.value
+        ? `${target} ${node.op} ${printExpr(node.value)}`
+        : target;
+    }
+    default: {
+      const exhaustive: never = node;
+      throw new Error(`printStmt: unhandled node ${(exhaustive as { $type: string }).$type}`);
+    }
+  }
+}
+
+function printLValue(lv: LValue): string {
+  const path = [lv.head, ...lv.tail].join(".");
+  return lv.call ? `${path}(${lv.args.map(printExpr).join(", ")})` : path;
+}
+
+// Break the expr↔stmt cycle: print-expr calls back here for lambda blocks.
+registerStatementPrinter((stmt) => printStmt(stmt as Statement));
