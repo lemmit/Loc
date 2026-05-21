@@ -128,21 +128,19 @@ Done:
   row committed on blur; an edit/add is spliced and the whole document re-parsed,
   so only syntactically-valid edits commit (semantic errors surface in the
   Problems panel). Statements show verbatim source, so untouched bodies
-  round-trip byte-for-byte. Gated by `test/system-body.test.ts` + e2e.
+  round-trip byte-for-byte. Statement **reorder** (↑/↓, swap-in-place) and
+  **function bodies** (`FunctionDecl.body` — a single expression, edited inline
+  for aggregates/value objects) are included. Gated by `test/system-body.test.ts`
+  + e2e.
+- **Event wiring** — `event` nodes are wired by deriving `emits` edges from
+  `emit` statements in operation/workflow bodies (owner → event). Gated by
+  `test/system-model.test.ts`.
 
 Open:
 
 - **Structured expression editor** — the planned shared layer on top of the
   statement rows: per-node operator/operand/call pickers instead of free text.
   Would also serve derived props, invariants, find `where` clauses.
-- **Function bodies** (`FunctionDecl.body` is a single `Expression`, not
-  `Statement[]`) and statement **reorder** — small extensions of the body editor.
-
-- **Event wiring** — `event` nodes currently have no edges (events aren't
-  referenced declaratively; they're emitted from operation bodies). Wiring
-  emit/handle edges should land together with **operation-body modelling** (when
-  operation bodies become editable/visualised in the modeller), since that's
-  where the emit relationships live.
 - **Field rename** — needs member-access reference resolution (via the
   type-system / IR) to update `this.field` / view binds safely.
 - **Repository `find` editing** (params + where-clause expressions).

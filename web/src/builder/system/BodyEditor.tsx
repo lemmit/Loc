@@ -7,15 +7,40 @@ import { Button, Group, Stack, Text, Textarea } from "@mantine/core";
 // syntactically-invalid edit is rejected and flagged here).  Semantic errors
 // surface in the Problems panel after a commit lands.
 
+/** Single-expression body editor (for `function … = <expr>`). Commits on blur;
+ *  a syntactically-invalid expression is rejected and flagged. Re-seed by
+ *  keying the element on the source revision. */
+export function FunctionBodyField({ value, onCommit }: { value: string; onCommit: (text: string) => boolean }): JSX.Element {
+  const [error, setError] = useState(false);
+  return (
+    <Textarea
+      size="xs"
+      label="Function body"
+      autosize
+      minRows={1}
+      defaultValue={value}
+      error={error ? "invalid expression" : undefined}
+      data-testid="c4system-fn-body"
+      styles={{ input: { fontFamily: "monospace", fontSize: 11 } }}
+      onFocus={() => error && setError(false)}
+      onBlur={(e) => {
+        const v = e.currentTarget.value;
+        if (v.trim() !== value.trim() && !onCommit(v)) setError(true);
+      }}
+    />
+  );
+}
+
 interface BodyEditorProps {
   statements: string[];
   /** Returns true if the edit was committed (parsed); false → rejected. */
   onEdit: (index: number, text: string) => boolean;
   onDelete: (index: number) => void;
+  onMove: (index: number, dir: -1 | 1) => void;
   onAdd: (text: string) => boolean;
 }
 
-export function BodyEditor({ statements, onEdit, onDelete, onAdd }: BodyEditorProps): JSX.Element {
+export function BodyEditor({ statements, onEdit, onDelete, onMove, onAdd }: BodyEditorProps): JSX.Element {
   const [errorAt, setErrorAt] = useState<number | null>(null);
   const [draftAdd, setDraftAdd] = useState("");
   const [addError, setAddError] = useState(false);
@@ -57,6 +82,12 @@ export function BodyEditor({ statements, onEdit, onDelete, onAdd }: BodyEditorPr
             onFocus={() => errorAt === i && setErrorAt(null)}
             onBlur={(e) => commitEdit(i, s, e.currentTarget.value)}
           />
+          <Button size="compact-xs" variant="subtle" data-testid="c4system-stmt-up" disabled={i === 0} onClick={() => onMove(i, -1)}>
+            ↑
+          </Button>
+          <Button size="compact-xs" variant="subtle" data-testid="c4system-stmt-down" disabled={i === statements.length - 1} onClick={() => onMove(i, 1)}>
+            ↓
+          </Button>
           <Button size="compact-xs" variant="subtle" color="red" data-testid="c4system-stmt-delete" onClick={() => onDelete(i)}>
             ×
           </Button>

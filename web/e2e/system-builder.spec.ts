@@ -203,10 +203,28 @@ test("edits an operation body via the aggregate inspector", async ({ page }) => 
   await expect(page.getByTestId("c4system-body")).toBeVisible();
 
   const rows = page.getByTestId("c4system-stmt-row");
+  const stmts = page.getByTestId("c4system-stmt");
   await expect.poll(async () => rows.count()).toBe(4);
 
+  // Reorder: move the first statement down → first two swap.
+  const r0 = await stmts.nth(0).inputValue();
+  const r1 = await stmts.nth(1).inputValue();
+  await rows.nth(0).getByTestId("c4system-stmt-down").click();
+  await expect.poll(async () => stmts.nth(0).inputValue()).toBe(r1);
+  await expect(stmts.nth(1)).toHaveValue(r0);
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+
+  // Add a statement.
   await page.getByTestId("c4system-stmt-add-input").fill("precondition true");
   await page.getByTestId("c4system-stmt-add").click();
   await expect.poll(async () => rows.count()).toBe(5);
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+
+  // Edit the aggregate's function body (single expression).
+  await page.getByTestId("c4system-fn-pick").click();
+  await page.getByRole("option", { name: "isMutable", exact: true }).click();
+  await expect(page.getByTestId("c4system-fn-body")).toBeVisible();
+  await page.getByTestId("c4system-fn-body").fill("status != Confirmed");
+  await page.getByTestId("c4system-fn-body").blur();
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
