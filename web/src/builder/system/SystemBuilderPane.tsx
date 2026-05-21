@@ -45,7 +45,7 @@ import {
 import { BodyEditor } from "./BodyEditor";
 import { editExprSlot, exprSlotOptions, slotExpr, type ExprSlot } from "./expr-slots";
 import { seedExpr } from "./expr-model";
-import { ExprSlotEditor } from "./ExpressionEditor";
+import { ExprSlotEditor, type ExprMode } from "./ExpressionEditor";
 
 // Editable structural model graph (React Flow).  Reads the parsed AST into a
 // node/edge graph, renders it, and edits splice the backing AST node's CST
@@ -141,12 +141,14 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const [renaming, setRenaming] = useState(false);
   const [opName, setOpName] = useState<string | null>(null);
   const [slotKey, setSlotKey] = useState<string | null>(null);
+  const [exprMode, setExprMode] = useState<ExprMode>("structured");
 
   useEffect(() => {
     const sel = selectedId;
     setNameDraft(sel ? sel.slice(sel.indexOf(":") + 1) : "");
     setOpName(null);
     setSlotKey(null);
+    setExprMode("structured");
   }, [selectedId]);
 
   useEffect(() => {
@@ -448,6 +450,9 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
                       <ExprSlotEditor
                         key={`${selected.id}:${slotKey}:${rev}`}
                         seed={seedExpr(expr)}
+                        seedText={expr.$cstNode?.text ?? ""}
+                        mode={exprMode}
+                        onMode={setExprMode}
                         onCommit={(text) => {
                           const next = editExprSlot(ctx.getSource(), slot as ExprSlot, text);
                           if (next == null) return false;
