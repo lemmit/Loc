@@ -58,6 +58,45 @@ test("palette adds a primitive and writes it back to source", async ({ page }) =
 
 
 
+test("builder Apply syncs the edit into the Monaco source tab + LSP", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Components storybook/);
+
+  await page.getByTestId("doc-tab-builder").click();
+  await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
+
+  // Edit the top heading to a space-free marker (Monaco tokenises on spaces,
+  // so a single contiguous token is reliable to match in `.view-lines`).
+  const heading = page.getByTestId("c4node-Heading").filter({ hasText: "Loom UI Storybook" });
+  await heading.first().click();
+  await page.getByTestId("c4builder-prop-text").fill("EDITEDZZZ");
+  await page.getByTestId("c4builder-apply").click();
+
+  // The canonical source updated → the live Monaco model must now contain the
+  // edit, even though it never went through the editor's own change path.
+  // Monaco virtualises `.view-lines` (only visible lines render), so search the
+  // whole model via the find widget and assert the match count.
+  await page.getByTestId("doc-tab-source").click();
+  const editor = page.locator(".monaco-editor").first();
+  await editor.click();
+  await page.keyboard.press("Control+f");
+  const findInput = page.locator(".find-widget textarea.input, .find-widget input.input").first();
+  await findInput.fill("EDITEDZZZ");
+  await expect(page.locator(".find-widget .matchesCount")).toContainText(/1 of 1/);
+  // LSP re-validated the synced source (no errors introduced).
+  await expect(page.getByText(/^0 errors$/)).toBeVisible();
+
+  // Undo history is preserved (full-range edit, not setValue): one Ctrl+Z in
+  // the editor reverts the Builder edit, so the match disappears.
+  await page.keyboard.press("Escape");
+  await editor.click();
+  await page.keyboard.press("Control+z");
+  await page.keyboard.press("Control+f");
+  await findInput.fill("EDITEDZZZ");
+  await expect(page.locator(".find-widget .matchesCount")).toContainText(/No results/);
+});
+
 test("recognises Card containers and exposes their nested children", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { AppShell } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
+import type { EditorHandle } from "./editor/LoomEditor";
 import { LoomLspClient } from "./lsp/client";
 import type { Diagnostic } from "./lsp/protocol";
 import { examples, defaultExample, type LoomExample } from "./examples";
@@ -171,6 +172,7 @@ export default function App(): JSX.Element {
   );
 
   const sourceRef = useRef<string>(initialSource);
+  const editorHandleRef = useRef<EditorHandle | null>(null);
   const buildClientRef = useRef<LoomBuildClient | null>(null);
   const engineRef = useRef<RuntimeEngine | null>(null);
   const lspClientRef = useRef<LoomLspClient | null>(null);
@@ -567,14 +569,19 @@ export default function App(): JSX.Element {
     lspClient: lspClientRef.current,
     buildClient: buildClientRef.current,
     engine: engineRef.current,
-    onSourceChange: (text) => {
+    onSourceChange: (text, origin) => {
       sourceRef.current = text;
       scheduleHashSync(text);
       scheduleAutoGenerate();
       workspace.vfs?.write("/workspace/main.ddd", text);
+      // Builder (and any non-editor) edits don't flow through Monaco's own
+      // change path, so push them into the live model — which also re-runs the
+      // LSP — keeping the source tab and Problems panel in sync.
+      if (origin !== "editor") editorHandleRef.current?.setSource(text);
     },
     onDiagnosticsChange: setDiagnostics,
     scheduleAutoGenerate,
+    editorHandleRef,
     diagnostics,
     errorCount,
     warningCount,

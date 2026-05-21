@@ -14,9 +14,9 @@ import PageBuilder from "./page/PageBuilder";
 // source, seeds the canvas from a chosen page's `body:`, and on "Apply"
 // regenerates that body and splices it back (preserving everything else).
 //
-// Live Monaco reflection of an applied edit is Phase 3 (two-way sync); for now
-// Apply updates the canonical source (driving generate/preview) and re-seeds
-// the canvas so the change is visible and persists.
+// Apply tags the edit as "builder" origin so it's pushed back into the live
+// Monaco model + LSP (source tab and Problems panel reflect it immediately),
+// then re-seeds the canvas so the change persists visibly here too.
 interface PageEntry {
   name: string;
   body: BodyProp;
@@ -70,7 +70,7 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     const page = collectPages(fresh.ast).find((p) => p.name === current.name);
     if (!page) return;
     const emitted = emitBody(fromCraft(nodes));
-    ctx.onSourceChange(spliceNode(source, page.body.expr, emitted));
+    ctx.onSourceChange(spliceNode(source, page.body.expr, emitted), "builder");
     setRev((r) => r + 1);
   };
 
