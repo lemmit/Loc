@@ -5,7 +5,7 @@
 // `bundle` (esbuild-wasm over the e2e VFS, `@playwright/test` aliased)
 // is injected so the orchestration is testable without the worker.
 
-import { createUiHarness, runUiTests } from "./ui-harness.js";
+import { createUiHarness, runUiTests, type UiTestCase } from "./ui-harness.js";
 import { RemotePage, type DriverTransport } from "./remote-page.js";
 import type { TestResult } from "./harness.js";
 import type { VirtualFile } from "../build/protocol.js";
@@ -42,14 +42,17 @@ interface PwGlobal {
   expect: ReturnType<typeof createUiHarness>["expect"];
 }
 
-export interface RunUiTestsOpts {
+export interface LoadUiSuiteOpts {
   entry: string;
   files: Record<string, string>;
   bundle: UiBundle;
-  transport: DriverTransport;
 }
 
-export async function runUiSuite(opts: RunUiTestsOpts): Promise<TestResult[]> {
+/** Bundle + register the UI suite (run `test(...)` calls, NOT the
+ *  bodies) so cases can be listed and run individually.  The bundled
+ *  module captures `test`/`expect` from `globalThis.__loomPw` at import,
+ *  so it's safe to clear afterwards — the cases keep working. */
+export async function loadUiSuite(opts: LoadUiSuiteOpts): Promise<UiTestCase[]> {
   const js = await opts.bundle(opts.entry, opts.files);
   const harness = createUiHarness();
   const g = globalThis as unknown as { __loomPw?: PwGlobal };
@@ -63,5 +66,14 @@ export async function runUiSuite(opts: RunUiTestsOpts): Promise<TestResult[]> {
     URL.revokeObjectURL(url);
     delete g.__loomPw;
   }
-  return runUiTests(harness.tests, new RemotePage(opts.transport));
+  return harness.tests;
+}
+
+export interface RunUiTestsOpts extends LoadUiSuiteOpts {
+  transport: DriverTransport;
+}
+
+export async function runUiSuite(opts: RunUiTestsOpts): Promise<TestResult[]> {
+  const cases = await loadUiSuite(opts);
+  return runUiTests(cases, new RemotePage(opts.transport));
 }

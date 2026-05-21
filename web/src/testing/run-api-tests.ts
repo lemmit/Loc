@@ -9,7 +9,7 @@
 // `compile` is injected so the orchestration is unit-testable with a
 // plain-JS source and a fake dispatcher.
 
-import { createHarness, runTests, type TestResult } from "./harness.js";
+import { createHarness, runTests, type TestCase, type TestResult } from "./harness.js";
 import { makeDispatchFetch } from "./fetch-dispatch.js";
 import type {
   DispatchResult,
@@ -39,17 +39,15 @@ export interface RunApiTestsOpts {
   dispatch: (req: SerializedRequest) => Promise<DispatchResult>;
 }
 
-export async function runApiTests(
-  opts: RunApiTestsOpts,
-): Promise<TestResult[]> {
+/** Register the suite (run `describe`/`it`, NOT the test bodies) so the
+ *  caller can list and run cases individually.  The returned cases'
+ *  `fn`s close over the dispatch-backed `fetch`, so they're runnable
+ *  on demand via `runTests`. */
+export async function loadApiTests(opts: RunApiTestsOpts): Promise<TestCase[]> {
   const stripped = opts.source.replace(VITEST_IMPORT_RE, "");
   const js = await opts.compile(stripped);
   const harness = createHarness();
   const fetchImpl = makeDispatchFetch(opts.dispatch);
-  // The stripped+transpiled suite has no imports/exports, so it runs
-  // as a plain function body; `describe`/`it` register into `harness`,
-  // `process.env.*` falls back to the generated defaults, and `fetch`
-  // forwards to the runtime.
   const runSuite = new Function(
     "describe",
     "it",
@@ -67,5 +65,11 @@ export async function runApiTests(
   runSuite(harness.describe, harness.it, harness.expect, fetchImpl, {
     env: {},
   });
-  return runTests(harness.tests);
+  return harness.tests;
+}
+
+export async function runApiTests(
+  opts: RunApiTestsOpts,
+): Promise<TestResult[]> {
+  return runTests(await loadApiTests(opts));
 }
