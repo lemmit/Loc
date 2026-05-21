@@ -176,6 +176,40 @@ system SalesSystem {
     ui: WebApp
     port: 3001
   }
+
+  // ---------------------------------------------------------------------------
+  // System e2e tests.  The test kind is implied by the target deployable's
+  // platform: `against api` (Hono) lowers to a vitest + fetch suite;
+  // `against webApp` (React) lowers to Playwright page objects.  Both run
+  // in the playground's Tests tab — the API suite against the booted PGlite
+  // runtime, the UI suite by driving the preview iframe.
+  test e2e "create a product and read it back" against api {
+    let p = api.products.create({ sku: "WIDGET-1", price: { amount: 9.99, currency: "USD" } })
+    let read = api.products.getById(p)
+    expect read.sku == "WIDGET-1"
+  }
+
+  test e2e "create, add a line to, and confirm an order" against api {
+    let prod = api.products.create({ sku: "WIDGET-2", price: { amount: 5.00, currency: "USD" } })
+    let cust = api.customers.create({ name: "Buyer", email: "buyer@acme.test" })
+    let ord = api.orders.create({ customerId: cust.id, status: "Draft", placedAt: "2024-01-01T00:00:00Z" })
+    api.orders.addLine(ord, { productId: prod.id, qty: 3 })
+    api.orders.confirm(ord)
+    let read = api.orders.getById(ord)
+    expect read.status == "Confirmed"
+    expect read.lines.length == 1
+  }
+
+  test e2e "place and confirm an order through the UI" against webApp {
+    let prod = ui.products.create({ sku: "UI-WIDGET", price: { amount: 5.00, currency: "USD" } })
+    let cust = ui.customers.create({ name: "UI Buyer", email: "ui@buyer.test" })
+    let ord = ui.orders.create({ customerId: cust.id, status: "Draft", placedAt: "2024-01-01T00:00:00Z" })
+    ui.orders.addLine(ord, { productId: prod.id, qty: 2 })
+    ui.orders.confirm(ord)
+    let read = ui.orders.getById(ord)
+    expect read.status == "Confirmed"
+    expect read.lines.length == 1
+  }
 }
 
 solution SOL-001 for US-001 {
