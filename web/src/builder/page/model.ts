@@ -25,19 +25,27 @@ interface NamedProp {
 
 interface PrimitiveSpec {
   kind: "container" | "leaf";
-  /** Leaf only: positional string args, in order. */
+  /** Leading positional string args, in order.  Leaves carry only these;
+   *  containers may also declare them — they precede the child args. */
   positional?: string[];
-  /** Leaf only: optional `name: value` args. */
+  /** Optional `name: value` args (both kinds). */
   named?: NamedProp[];
 }
 
-// The closed set the canvas understands.  Containers hold children; leaves
-// carry string/int props.  Everything else round-trips as Opaque.
+// The closed set the canvas understands.  Containers hold children (and may
+// also carry leading scalar props, e.g. a `Card` title); leaves carry only
+// string/int/ref props.  Everything else round-trips as Opaque.
 const SPECS = {
   Stack: { kind: "container" },
   Group: { kind: "container" },
   Grid: { kind: "container" },
   Toolbar: { kind: "container" },
+  // Containers with props: leading positional title / named modifiers, then
+  // children.  Recognising them makes their nested elements editable instead
+  // of collapsing the whole call into one Opaque blob.
+  Card: { kind: "container", positional: ["title"] },
+  Container: { kind: "container", named: [{ key: "size", kind: "string" }] },
+  Paper: { kind: "container", named: [{ key: "padding", kind: "string" }] },
   Heading: { kind: "leaf", positional: ["text"], named: [{ key: "level", kind: "int" }] },
   Text: { kind: "leaf", positional: ["text"] },
   Button: { kind: "leaf", positional: ["label"], named: [{ key: "to", kind: "string" }] },
@@ -99,6 +107,31 @@ function asString(e: Expression): string | null {
   return e.$type === "StringLit" ? e.value : null;
 }
 
+/** Read declared `name: value` args into typed props; null if any arg is
+ *  unknown or mistyped (caller falls back to opaque). */
+function readNamed(named: Map<string, Expression>, spec: NamedProp[] | undefined): Record<string, string | number> | null {
+  const namedSpec = new Map((spec ?? []).map((n) => [n.key, n.kind] as const));
+  const out: Record<string, string | number> = {};
+  for (const [k, v] of named) {
+    const kind = namedSpec.get(k);
+    if (!kind) return null;
+    if (kind === "string") {
+      const s = asString(v);
+      if (s === null) return null;
+      out[k] = s;
+    } else if (kind === "ref") {
+      // Only a bare identifier is modelled; qualified refs (`Sales.Order`)
+      // fall back to opaque.
+      if (v.$type !== "NameRef") return null;
+      out[k] = v.name;
+    } else {
+      if (v.$type !== "IntLit") return null;
+      out[k] = v.value;
+    }
+  }
+  return out;
+}
+
 function partition(args: CallArg[]): { positional: Expression[]; named: Map<string, Expression>; canonical: boolean } {
   const positional: Expression[] = [];
   const named = new Map<string, Expression>();
@@ -124,13 +157,37 @@ export function seedFromBody(expr: Expression): BuilderNode {
   const { positional, named, canonical } = partition(expr.args);
   if (!canonical) return opaque(expr);
 
+  const posKeys = spec.positional ?? [];
+
   if (spec.kind === "container") {
-    if (named.size > 0) return opaque(expr);
-    return { name: name as PrimitiveName, props: {}, children: positional.map(seedFromBody) };
+    // Pure container (no declared props): every positional is a child; any
+    // named arg is unmodelled → opaque.
+    if (posKeys.length === 0 && (spec.named ?? []).length === 0) {
+      if (named.size > 0) return opaque(expr);
+      return { name: name as PrimitiveName, props: {}, children: positional.map(seedFromBody) };
+    }
+    // Container with props: greedily peel leading *literal* positionals into
+    // the declared scalar props (each optional — the first non-literal begins
+    // the children, mirroring the walker's title-vs-content heuristic), then
+    // recurse the remaining positionals as children.
+    const props: Record<string, string | number> = {};
+    let childStart = 0;
+    for (let i = 0; i < posKeys.length && i < positional.length; i++) {
+      const s = asString(positional[i]);
+      if (s === null) break;
+      props[posKeys[i]] = s;
+      childStart = i + 1;
+    }
+    const namedProps = readNamed(named, spec.named);
+    if (namedProps === null) return opaque(expr);
+    return {
+      name: name as PrimitiveName,
+      props: { ...props, ...namedProps },
+      children: positional.slice(childStart).map(seedFromBody),
+    };
   }
 
   // leaf — positional strings must match exactly; named must be known + typed.
-  const posKeys = spec.positional ?? [];
   if (positional.length !== posKeys.length) return opaque(expr);
   const props: Record<string, string | number> = {};
   for (let i = 0; i < posKeys.length; i++) {
@@ -138,40 +195,40 @@ export function seedFromBody(expr: Expression): BuilderNode {
     if (v === null) return opaque(expr);
     props[posKeys[i]] = v;
   }
-  const namedSpec = new Map((spec.named ?? []).map((n) => [n.key, n.kind]));
-  for (const [k, v] of named) {
-    const kind = namedSpec.get(k);
-    if (!kind) return opaque(expr);
-    if (kind === "string") {
-      const s = asString(v);
-      if (s === null) return opaque(expr);
-      props[k] = s;
-    } else if (kind === "ref") {
-      // A binding like `of: Order` — only a bare identifier is modelled;
-      // qualified refs (`Sales.Order`) fall back to opaque.
-      if (v.$type !== "NameRef") return opaque(expr);
-      props[k] = v.name;
-    } else {
-      if (v.$type !== "IntLit") return opaque(expr);
-      props[k] = v.value;
-    }
+  const namedProps = readNamed(named, spec.named);
+  if (namedProps === null) return opaque(expr);
+  return { name: name as PrimitiveName, props: { ...props, ...namedProps }, children: [] };
+}
+
+function emitNamed(node: BuilderNode, named: NamedProp[] | undefined): string[] {
+  const parts: string[] = [];
+  for (const n of named ?? []) {
+    const v = node.props[n.key];
+    if (v === undefined || v === "") continue;
+    const rendered = n.kind === "int" ? String(Number(v)) : n.kind === "ref" ? String(v) : JSON.stringify(String(v));
+    parts.push(`${n.key}: ${rendered}`);
   }
-  return { name: name as PrimitiveName, props, children: [] };
+  return parts;
 }
 
 export function emitBody(node: BuilderNode): string {
   if (node.name === "Opaque") return String(node.props.raw ?? "");
   const spec = specOf(node.name);
   if (spec.kind === "container") {
-    return `${node.name}(${node.children.map(emitBody).join(", ")})`;
+    // All positionals (declared scalar props, then children) precede named
+    // args, so the emitted call stays canonical (positional-before-named).
+    const parts: string[] = [];
+    for (const key of spec.positional ?? []) {
+      const v = node.props[key];
+      if (v === undefined || v === "") continue;
+      parts.push(JSON.stringify(String(v)));
+    }
+    for (const c of node.children) parts.push(emitBody(c));
+    parts.push(...emitNamed(node, spec.named));
+    return `${node.name}(${parts.join(", ")})`;
   }
   const parts: string[] = [];
   for (const key of spec.positional ?? []) parts.push(JSON.stringify(String(node.props[key] ?? "")));
-  for (const n of spec.named ?? []) {
-    const v = node.props[n.key];
-    if (v === undefined || v === "") continue;
-    const rendered = n.kind === "int" ? String(Number(v)) : n.kind === "ref" ? String(v) : JSON.stringify(String(v));
-    parts.push(`${n.key}: ${rendered}`);
-  }
+  parts.push(...emitNamed(node, spec.named));
   return `${node.name}(${parts.join(", ")})`;
 }

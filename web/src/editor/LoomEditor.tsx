@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type MutableRefObject } from "react";
 import * as monaco from "monaco-editor";
 import { installMonacoEnvironment } from "./monaco-env";
 import {
@@ -48,8 +48,19 @@ function diagnosticsToMarkers(items: Diagnostic[]): monaco.editor.IMarkerData[] 
   }));
 }
 
+/** Imperative handle for pushing source into the live editor model from a
+ *  non-editor origin (the visual Builder).  Exposed via `handleRef` so the
+ *  parent can keep Monaco in lock-step with the canonical source. */
+export interface EditorHandle {
+  /** Replace the whole document, preserving undo history.  A full `setValue`
+   *  would wipe the undo stack, so this uses a full-range edit operation. */
+  setSource: (text: string) => void;
+}
+
 export interface LoomEditorProps {
   initialValue: string;
+  /** Populated on mount with an imperative handle; nulled on unmount. */
+  handleRef?: MutableRefObject<EditorHandle | null>;
   /** LSP client owned by the parent.  Lifted out of this component
    *  so the underlying Langium worker survives example switches —
    *  the editor remounts (via `key={exampleId}` in App) but the
@@ -75,6 +86,8 @@ export function LoomEditor(props: LoomEditorProps): JSX.Element {
   const onDiagnosticsRef = useRef(props.onDiagnosticsChange);
   onChangeRef.current = props.onChange;
   onDiagnosticsRef.current = props.onDiagnosticsChange;
+  const handleRef = useRef(props.handleRef);
+  handleRef.current = props.handleRef;
   // Capture once for the create-call; the editor doesn't reflow its
   // options if `isMobile` flips, but the parent re-keys on
   // viewport-class transitions so this is fine in practice.
@@ -141,10 +154,28 @@ export function LoomEditor(props: LoomEditorProps): JSX.Element {
     };
     pushUpdate();
 
+    // Set while we push an external (Builder) edit into the model: the
+    // resulting change event must still reach the LSP, but must NOT re-dispatch
+    // to onChange/onSourceChange — the canonical source is already updated, so
+    // re-dispatching would loop.
+    let suppressDispatch = false;
+
     const changeSub = model.onDidChangeContent(() => {
-      onChangeRef.current?.(model.getValue());
+      if (!suppressDispatch) onChangeRef.current?.(model.getValue());
       pushUpdate();
     });
+
+    if (handleRef.current) {
+      handleRef.current.current = {
+        setSource: (text: string) => {
+          if (model.getValue() === text) return;
+          suppressDispatch = true;
+          // Full-range edit (not setValue) so undo history survives.
+          model.pushEditOperations(null, [{ range: model.getFullModelRange(), text }], () => null);
+          suppressDispatch = false;
+        },
+      };
+    }
 
     const offDiagnostics = client.onDiagnostics((v, items) => {
       // Drop late responses for stale versions to keep markers
@@ -214,6 +245,7 @@ export function LoomEditor(props: LoomEditorProps): JSX.Element {
     });
 
     return () => {
+      if (handleRef.current) handleRef.current.current = null;
       changeSub.dispose();
       hoverProvider.dispose();
       completionProvider.dispose();

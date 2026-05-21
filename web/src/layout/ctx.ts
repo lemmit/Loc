@@ -9,7 +9,8 @@
 // full ctx.  When a pane needs only 2-3 fields you can pass those
 // instead of the whole ctx — see ProblemsPanel for an example.
 
-import type { ReactNode } from "react";
+import type { MutableRefObject, ReactNode } from "react";
+import type { EditorHandle } from "../editor/LoomEditor";
 import type { LoomLspClient } from "../lsp/client";
 import type { LoomBuildClient } from "../build/client";
 import type { RuntimeEngine } from "../engine";
@@ -72,9 +73,16 @@ export interface LayoutCtx {
   engine: RuntimeEngine | null;
 
   // Editor wiring
-  onSourceChange: (text: string) => void;
+  /** Canonical-source sink.  `origin` distinguishes edits typed in Monaco
+   *  ("editor") from edits applied by the visual Builder ("builder"); the
+   *  latter are pushed back into the Monaco model + LSP so all surfaces stay
+   *  in sync.  Omitted origin is treated as external (Builder-like). */
+  onSourceChange: (text: string, origin?: "editor" | "builder") => void;
   onDiagnosticsChange: (items: Diagnostic[]) => void;
   scheduleAutoGenerate: () => void;
+  /** Imperative handle to the live Monaco model (set while the editor is
+   *  mounted), so Builder edits reflect into the source tab + LSP immediately. */
+  editorHandleRef: MutableRefObject<EditorHandle | null>;
 
   // Diagnostics + counts
   diagnostics: Diagnostic[];
