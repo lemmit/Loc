@@ -43,7 +43,7 @@ import {
   type BodyLocator,
 } from "./body";
 import { BodyEditor } from "./BodyEditor";
-import { editExprSlot, exprSlotOptions, slotExpr, type ExprSlot } from "./expr-slots";
+import { editExprSlot, exprSlotOptions, slotExpr, viewSlotOptions, type ExprSlot } from "./expr-slots";
 import { seedExpr } from "./expr-model";
 import { ExprSlotEditor, type ExprMode } from "./ExpressionEditor";
 
@@ -429,9 +429,13 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
                 )}
               </Stack>
             )}
-            {(selected.kind === "aggregate" || selected.kind === "valueobject") &&
-              (() => {
-                const options = exprSlotOptions(selected.ast);
+            {(() => {
+                const options =
+                  selected.kind === "view"
+                    ? viewSlotOptions(selected.ast)
+                    : selected.kind === "aggregate" || selected.kind === "valueobject"
+                      ? exprSlotOptions(selected.ast)
+                      : [];
                 if (options.length === 0) return null;
                 const slot = options.find((o) => o.value === slotKey)?.slot;
                 const expr = slot ? slotExpr(parsed.ast, slot) : null;

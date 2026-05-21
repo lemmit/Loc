@@ -1,12 +1,14 @@
 import { AstUtils, type AstNode } from "langium";
 import type {
   Aggregate,
+  BindEntry,
   DerivedProp,
   Expression,
   FunctionDecl,
   Invariant,
   Model,
   ValueObject,
+  View,
 } from "../../../../src/language/generated/ast.js";
 import { printExpr } from "../../../../src/language/print/index.js";
 import { applyEdits } from "../edit-engine";
@@ -23,7 +25,9 @@ import { listFunctions } from "./body";
 export type ExprSlot =
   | { kind: "function"; owner: string; name: string }
   | { kind: "derived"; owner: string; name: string }
-  | { kind: "invariant"; owner: string; index: number };
+  | { kind: "invariant"; owner: string; index: number }
+  | { kind: "viewFilter"; owner: string }
+  | { kind: "viewBind"; owner: string; name: string };
 
 function membersOf(node: AstNode): readonly AstNode[] {
   if (node.$type === "Aggregate") return (node as Aggregate).members;
@@ -53,7 +57,21 @@ export function listInvariants(node: AstNode): string[] {
     .map((iv) => printExpr((iv as Invariant).expr));
 }
 
+function findView(ast: Model, name: string): View | null {
+  for (const n of AstUtils.streamAst(ast)) {
+    if (n.$type === "View" && (n as View).name === name) return n as View;
+  }
+  return null;
+}
+
 export function slotExpr(ast: Model, slot: ExprSlot): Expression | null {
+  if (slot.kind === "viewFilter") {
+    return findView(ast, slot.owner)?.filter ?? null;
+  }
+  if (slot.kind === "viewBind") {
+    const bind = findView(ast, slot.owner)?.binds.find((b: BindEntry) => b.name === slot.name);
+    return bind ? bind.expr : null;
+  }
   const owner = findOwner(ast, slot.owner);
   if (!owner) return null;
   const members = membersOf(owner);
@@ -90,6 +108,20 @@ export function exprSlotOptions(node: AstNode): SlotOption[] {
   listInvariants(node).forEach((preview, index) => {
     out.push({ value: `inv:${index}`, label: `invariant: ${preview}`, slot: { kind: "invariant", owner, index } });
   });
+  return out;
+}
+
+/** Expression slots on a view: the `where` filter (if any) and each bind. */
+export function viewSlotOptions(node: AstNode): SlotOption[] {
+  if (node.$type !== "View") return [];
+  const view = node as View;
+  const out: SlotOption[] = [];
+  if (view.filter) {
+    out.push({ value: "filter", label: `where: ${printExpr(view.filter)}`, slot: { kind: "viewFilter", owner: view.name } });
+  }
+  for (const b of view.binds) {
+    out.push({ value: `bind:${b.name}`, label: `bind ${b.name}`, slot: { kind: "viewBind", owner: view.name, name: b.name } });
+  }
   return out;
 }
 
