@@ -4,6 +4,8 @@ import { lazy, Suspense, useMemo, useState, type ReactNode } from "react";
 // The visual Builder pulls in craft.js + a main-thread Langium parse; lazily
 // loaded so neither lands in the main chunk until the Builder tab is opened.
 const BuilderPane = lazy(() => import("../builder/BuilderPane"));
+// React Flow + the structural graph land only when the Model tab is opened.
+const SystemBuilderPane = lazy(() => import("../builder/system/SystemBuilderPane"));
 import {
   Group,
   Panel,
@@ -60,7 +62,7 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
   // Center area shows either the editable source (main.ddd) or a
   // read-only view of a file opened from the Explorer.  The editor
   // stays mounted underneath so Monaco keeps its model + undo history.
-  const [centerView, setCenterView] = useState<"source" | "secondary" | "builder">("source");
+  const [centerView, setCenterView] = useState<"source" | "secondary" | "builder" | "model">("source");
   const [secondaryDoc, setSecondaryDoc] = useState<SecondaryDoc | null>(null);
   const [explorerMode, setExplorerMode] = usePersistedState<ExplorerMode>(
     "loom.desktop.explorerMode",
@@ -228,6 +230,9 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
                     <DocTab active={centerView === "builder"} onClick={() => setCenterView("builder")} testid="doc-tab-builder">
                       Builder
                     </DocTab>
+                    <DocTab active={centerView === "model"} onClick={() => setCenterView("model")} testid="doc-tab-model">
+                      Model
+                    </DocTab>
                     {secondaryDoc && (
                       <DocTab active={centerView === "secondary"} onClick={() => setCenterView("secondary")} testid="doc-tab-file">
                         {secondaryDoc.path}
@@ -246,6 +251,13 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
                     <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
                       <Suspense fallback={<Box p="md"><Text size="sm" c="dimmed">Loading builder…</Text></Box>}>
                         <BuilderPane ctx={ctx} />
+                      </Suspense>
+                    </Box>
+                  )}
+                  {centerView === "model" && (
+                    <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
+                      <Suspense fallback={<Box p="md"><Text size="sm" c="dimmed">Loading model…</Text></Box>}>
+                        <SystemBuilderPane ctx={ctx} />
                       </Suspense>
                     </Box>
                   )}

@@ -73,12 +73,35 @@ Not yet modelled (fall back to Opaque). From `STDLIB_LAYOUT_COMPONENTS` in
 - **Continuous text→canvas live sync** (today re-seeds on tab switch, not per
   keystroke) — needs debounce + canvas selection preservation.
 
-## Open — System / Model Builder (separate track, Phase C)
+## System / Model Builder (Phase C)
 
-An editable `@xyflow` node-graph for the structural model (modules, aggregates,
-value objects, events, repositories, deployables, storages, apis, uis +
-relationships). Gated on a new **structural printer** (`src/language/print/
-print-structural.ts`, with a corpus round-trip test) before any canvas work.
-`@xyflow` is already available via the LikeC4 lazy chunk; the read-only LikeC4
-viewer (`web/src/preview/`) is the visual reference. Reuse `web/src/builder/
-edit-engine.ts` (`spliceNode`) to splice edited blocks.
+Done:
+
+- **Structural printer** — `src/language/print/print-structural.ts` (AST→source
+  for systems/modules/aggregates/VOs/events/repositories/views/workflows/
+  deployables/apis/storages/uis/traceability), gated by
+  `test/print-structural-roundtrip.test.ts` over the example corpus.
+- **"Model" tab** — a React Flow (`@xyflow/react`) graph
+  (`web/src/builder/system/`): one node per construct, edges for the clear
+  cross-references (repository→aggregate, api→module, deployable→module/ui/api,
+  view→aggregate). Loads lazily (its own chunk) when the tab is opened.
+- **Editing**: select a node → see its printed source; **add** (module /
+  aggregate) and **delete** splice the backing CST range via `edit-engine.ts`
+  and write back through origin-tagged `onSourceChange` (Phase B sync). e2e:
+  `web/e2e/system-builder.spec.ts`.
+
+Open:
+
+- **Rename** a construct (and update all references — repo `for`, `Id<X>`,
+  `from`, deployable bindings — not just the declaration).
+- **Inline field editing** (aggregate properties, event fields, repo finds)
+  rather than a read-only source view; reuse the structural printer to reprint
+  the changed node from a mutated AST.
+- **Edge creation / rebinding** by dragging connections (e.g. point a repository
+  at a different aggregate, bind a deployable to a module).
+- **Add** the remaining construct kinds (value object, event, repository, view,
+  workflow, deployable, api, storage, ui), and choose the target context/module.
+- **Nested grouping** (module → context → members as React Flow parent nodes)
+  and auto-layout; today it's a deterministic column-per-kind layout.
+- **Persisted positions** (layout is currently derived, not written back).
+- **Mobile** Model tab (desktop-only today).
