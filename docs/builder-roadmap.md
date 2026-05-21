@@ -43,15 +43,22 @@ text stays the source of truth.
   serialize/craft path is unchanged. Block-statement lambda bodies stay Opaque.
 - **Component editing**: the body picker collects both page `body:` and
   `component` `body:` expressions, so reusable components are editable too.
+- **Named-arg child slots**: args whose value is itself a node and that arrive
+  *named* — `QueryView(loading:/error:/empty:/data:)`, `Table(onRowClick:/
+  rowTestid:)` callbacks, `Modal(trigger:)`. Seeded as `slot`-tagged children
+  (flat children, no craft `linkedNodes`); the slot survives craft's
+  `SerializedNodes` round-trip via a reserved `__slot` prop. `data:` lambdas
+  nest a `Lambda` body child, so a `QueryView(data: rows => Table(…))` is
+  editable all the way down.
 
 ## Open — expression / domain-logic surface
 
-- **Named-arg child slots** — args whose value is itself a node and that arrive
-  *named* rather than positional: `QueryView(loading:/error:/empty:/data:)`,
-  `Table(onRowClick:/rowTestid:)` callbacks, `Modal(trigger: Button(…))`. These
-  still force the parent Opaque because craft can't represent named slots without
-  `linkedNodes`, and the flat positional-children model deliberately avoids it.
-  Needs either `linkedNodes`-backed named slots or slot-tagged children.
+- **Non-canonical arg order** (positional after named) still → Opaque, because
+  re-emitting canonically would reorder the AST args and break the round-trip.
+  This is why a `Table(rows: x, Column(…), Column(…))` (named-before-positional,
+  the common hand-written form) stays Opaque even though Table/Column are
+  modelled — only positional-first (`Table(Column(…), rows: x)`) is recognised.
+  Fixing it needs the model to preserve original positional/named interleaving.
 - **`state := …`** page state declarations / assignments. Not modelled.
 - **Operation forms**: `Form(of:, op:)`, bound to aggregate operations — need op
   pickers wired to the IR (`Form` currently models only `of:`/`creates:`/`testid:`).
@@ -62,8 +69,6 @@ text stays the source of truth.
   cond (`ready => …`) as a lambda, so such conds must be comparisons/calls. Emit
   reproduces the original (valid) cond, so round-trip is safe; a UI that *adds* an
   arm must default the cond to a non-bare-ident expression.
-- **Non-canonical arg order** (positional after named) currently → Opaque; could
-  normalise on emit.
 - **`MasterDetail`/`Detail`** primitives, and calls to **user-defined
   components** (`component` defs) — the latter need per-component param signatures
   to map positional args to names.

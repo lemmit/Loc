@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { EmptyFileSystem, AstUtils, type AstNode } from "langium";
 import { createDddServices } from "../src/language/ddd-module.js";
 import { seedFromBody, emitBody } from "../web/src/builder/page/model.js";
+import { toCraft, fromCraft } from "../web/src/builder/page/serialize.js";
 import type { BodyProp } from "../src/language/generated/ast.js";
 
 // ---------------------------------------------------------------------------
@@ -137,6 +138,12 @@ describe("page-builder model — primitive coverage", () => {
     // Phase 5 — match: predicate arms with value children + optional else.
     'match {\n  step == 0 => Text("first")\n  step == 1 => Text("second")\n}',
     'match {\n  step == 1 => List(of: Order),\n  else => Empty("loading")\n}',
+    // Named-arg child slots: QueryView branches, Table callbacks, Modal trigger
+    // are nested editable nodes rather than collapsing the parent to Opaque.
+    'QueryView(of: orders, loading: Skeleton(count: 5), empty: Empty("none"), data: List(of: Order))',
+    'QueryView(of: orders, data: rows => Table(Column("ID", o => Text(o.id)), rows: rows))',
+    'Table(Column("Name", o => Text(o.name)), rows: orders, rowTestid: r => "row-" + r.id)',
+    'Modal(Form(of: Order), trigger: Button("Edit"))',
   ]) {
     it(`round-trips ${bodyExpr}`, () => roundtrips(bodyExpr));
   }
@@ -178,6 +185,23 @@ describe("page-builder model — container-with-props seed shape", () => {
     expect(paper.name).toBe("Paper");
     expect(paper.props.padding).toBe("lg");
     expect(paper.children.map((c) => c.name)).toEqual(["Text"]);
+  });
+
+  it("models named-arg child slots and survives the craft round-trip", () => {
+    const node = seed('QueryView(of: orders, loading: Skeleton(count: 5), data: rows => Table(Column("ID", o => Text(o.id)), rows: rows))');
+    expect(node.name).toBe("QueryView");
+    expect(node.props.of).toBe("orders");
+    const slots = node.children.map((c) => c.slot);
+    expect(slots).toEqual(["loading", "data"]);
+    const data = node.children.find((c) => c.slot === "data")!;
+    expect(data.name).toBe("Lambda");
+    expect(data.children[0].name).toBe("Table");
+
+    // The slot tag must round-trip through craft's SerializedNodes shape, then
+    // re-emit identically.
+    const recovered = fromCraft(toCraft(node));
+    expect(recovered.children.map((c) => c.slot)).toEqual(["loading", "data"]);
+    expect(emitBody(recovered)).toBe(emitBody(node));
   });
 
   it("recognises Tabs with nested editable Tab children", () => {
