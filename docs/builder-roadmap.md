@@ -95,12 +95,20 @@ Done:
   `References.findReferences` for the exact CST span of each reference
   (`web/src/builder/system/rename.ts`). Comments are left intact. Gated by
   `test/system-rename.test.ts` + e2e.
+- **Inline field editing** — for Property-bearing constructs (aggregate / value
+  object / event), the inspector lists each field with an editable type Select +
+  `[]`/`?` checkboxes and a delete control, plus **+ field**. Each op mutates the
+  parsed node's property array, reprints via the structural printer, and splices
+  (`web/src/builder/system/fields.ts`). Field *rename* is deliberately excluded
+  (field-name refs in expressions/views resolve in IR lowering, not as Langium
+  cross-references, so they can't be tracked). Gated by
+  `test/system-fields.test.ts` + e2e.
 
 Open:
 
-- **Inline field editing** (aggregate properties, event fields, repo finds)
-  rather than a read-only source view; reuse the structural printer to reprint
-  the changed node from a mutated AST.
+- **Field rename** — needs member-access reference resolution (via the
+  type-system / IR) to update `this.field` / view binds safely.
+- **Repository `find` editing** (params + where-clause expressions).
 - **Edge creation / rebinding** by dragging connections (e.g. point a repository
   at a different aggregate, bind a deployable to a module).
 - **Add** the remaining construct kinds (value object, event, repository, view,

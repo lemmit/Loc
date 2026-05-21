@@ -3,14 +3,17 @@ import {
   Background,
   Controls,
   ReactFlow,
+  ReactFlowProvider,
   useEdgesState,
+  useNodesInitialized,
   useNodesState,
+  useReactFlow,
   type Edge,
   type Node,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { AstUtils, type AstNode } from "langium";
-import { Box, Button, Group, ScrollArea, Stack, Text, TextInput, Textarea } from "@mantine/core";
+import { Box, Button, Checkbox, Group, ScrollArea, Select, Stack, Text, TextInput, Textarea } from "@mantine/core";
 import type { LayoutCtx } from "../../layout/ctx";
 import type { BoundedContext, Model, System } from "../../../../src/language/generated/ast.js";
 import { printStructural } from "../../../../src/language/print/index.js";
@@ -18,6 +21,17 @@ import { parseDdd } from "../parse";
 import { spliceNode, applyEdits } from "../edit-engine";
 import { buildSystemGraph, type GraphNode, type NodeKind } from "./model";
 import { IDENTIFIER, renameConstruct } from "./rename";
+import {
+  addField,
+  availableTypes,
+  deleteField,
+  freshFieldName,
+  isFieldKind,
+  listFields,
+  retypeField,
+  type BaseSpec,
+  type TypeSpec,
+} from "./fields";
 
 // Editable structural model graph (React Flow).  Reads the parsed AST into a
 // node/edge graph, renders it, and edits splice the backing AST node's CST
@@ -37,6 +51,35 @@ const KIND_COLOR: Record<NodeKind, string> = {
   storage: "var(--mantine-color-gray-7)",
   ui: "var(--mantine-color-violet-7)",
 };
+
+function toRfNodes(graph: ReturnType<typeof buildSystemGraph>): Node[] {
+  return graph.nodes.map((n) => ({
+    id: n.id,
+    position: { x: n.x, y: n.y },
+    data: { label: `${n.kind}\n${n.name}` },
+    style: {
+      background: KIND_COLOR[n.kind],
+      color: "white",
+      border: "1px solid rgba(255,255,255,0.25)",
+      borderRadius: 6,
+      fontSize: 11,
+      width: 150,
+      whiteSpace: "pre-line" as const,
+      textAlign: "center" as const,
+    },
+  }));
+}
+
+function toRfEdges(graph: ReturnType<typeof buildSystemGraph>): Edge[] {
+  return graph.edges.map((e) => ({
+    id: e.id,
+    source: e.source,
+    target: e.target,
+    label: e.label,
+    labelStyle: { fontSize: 9, fill: "var(--mantine-color-dimmed)" },
+    style: { stroke: "var(--mantine-color-dark-2)" },
+  }));
+}
 
 function freshName(ast: Model, kind: NodeKind, base: string): string {
   const taken = new Set<string>();
@@ -60,6 +103,14 @@ function insertIntoBlock(source: string, block: AstNode, text: string): string {
 }
 
 export default function SystemBuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
+  return (
+    <ReactFlowProvider>
+      <SystemBuilderInner ctx={ctx} />
+    </ReactFlowProvider>
+  );
+}
+
+function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const [rev, setRev] = useState(0);
   const parsed = useMemo(() => parseDdd(ctx.getSource()), [ctx, rev]);
   const graph = useMemo(
@@ -67,8 +118,10 @@ export default function SystemBuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Elem
     [parsed],
   );
 
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  // Seed with the first render's nodes/edges (not [] populated by an effect) so
+  // the `fitView` prop actually has something to fit on mount.
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(graph ? toRfNodes(graph) : []);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(graph ? toRfEdges(graph) : []);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [nameDraft, setNameDraft] = useState("");
   const [renaming, setRenaming] = useState(false);
@@ -80,34 +133,25 @@ export default function SystemBuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Elem
 
   useEffect(() => {
     if (!graph) return;
-    setNodes(
-      graph.nodes.map((n) => ({
-        id: n.id,
-        position: { x: n.x, y: n.y },
-        data: { label: `${n.kind}\n${n.name}` },
-        style: {
-          background: KIND_COLOR[n.kind],
-          color: "white",
-          border: "1px solid rgba(255,255,255,0.25)",
-          borderRadius: 6,
-          fontSize: 11,
-          width: 150,
-          whiteSpace: "pre-line",
-          textAlign: "center",
-        },
-      })),
-    );
-    setEdges(
-      graph.edges.map((e) => ({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        label: e.label,
-        labelStyle: { fontSize: 9, fill: "var(--mantine-color-dimmed)" },
-        style: { stroke: "var(--mantine-color-dark-2)" },
-      })),
-    );
+    setNodes(toRfNodes(graph));
+    setEdges(toRfEdges(graph));
   }, [graph, setNodes, setEdges]);
+
+  // `fitView` on the ReactFlow element only fits on mount — but nodes are
+  // populated by the effect above, *after* the first render — so fit once the
+  // nodes have measured dimensions (and again when the graph changes).
+  const rf = useReactFlow();
+  const nodesInitialized = useNodesInitialized();
+  useEffect(() => {
+    if (nodesInitialized && graph) void rf.fitView({ padding: 0.15 });
+  }, [nodesInitialized, graph, rf]);
+
+  const typeOptions = useMemo(() => availableTypes(parsed.ast), [parsed]);
+  const baseByLabel = useMemo(() => {
+    const m = new Map<string, BaseSpec>();
+    for (const o of typeOptions) m.set(o.label, o.base);
+    return m;
+  }, [typeOptions]);
 
   if (parsed.parserErrors.length > 0) {
     return <Message>Source has syntax errors — fix them in the editor to use the model builder.</Message>;
@@ -118,9 +162,9 @@ export default function SystemBuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Elem
 
   const selected = graph.nodes.find((n) => n.id === selectedId) ?? null;
 
-  const apply = (next: string): void => {
+  const apply = (next: string, keepSelection = false): void => {
     ctx.onSourceChange(next, "builder");
-    setSelectedId(null);
+    if (!keepSelection) setSelectedId(null);
     setRev((r) => r + 1);
   };
 
@@ -165,6 +209,29 @@ export default function SystemBuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Elem
     apply(insertIntoBlock(ctx.getSource(), context, text));
   };
 
+  const addFieldTo = (): void => {
+    if (!selected) return;
+    const name = freshFieldName(selected.ast);
+    const next = addField(ctx.getSource(), selected.kind, selected.name, name, {
+      base: { kind: "primitive", name: "string" },
+      array: false,
+      optional: false,
+    });
+    if (next != null) apply(next, true);
+  };
+
+  const setFieldType = (index: number, spec: TypeSpec): void => {
+    if (!selected) return;
+    const next = retypeField(ctx.getSource(), selected.kind, selected.name, index, spec);
+    if (next != null) apply(next, true);
+  };
+
+  const removeField = (index: number): void => {
+    if (!selected) return;
+    const next = deleteField(ctx.getSource(), selected.kind, selected.name, index);
+    if (next != null) apply(next, true);
+  };
+
   return (
     <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
       <Box style={{ flex: 1, minWidth: 0 }} data-testid="c4system-canvas">
@@ -176,6 +243,7 @@ export default function SystemBuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Elem
           onNodeClick={(_, n) => setSelectedId(n.id)}
           onPaneClick={() => setSelectedId(null)}
           fitView
+          minZoom={0.1}
           proOptions={{ hideAttribution: true }}
         >
           <Background />
@@ -222,6 +290,58 @@ export default function SystemBuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Elem
                 Rename
               </Button>
             </Group>
+            {isFieldKind(selected.kind) && (
+              <Stack gap={4} data-testid="c4system-fields">
+                <Group justify="space-between" align="center">
+                  <Text size="xs" tt="uppercase" c="dimmed">Fields</Text>
+                  <Button size="compact-xs" variant="light" data-testid="c4system-field-add" onClick={addFieldTo}>
+                    + field
+                  </Button>
+                </Group>
+                {listFields(selected.ast).map((f, i) => (
+                  <Group key={`${f.name}-${i}`} gap={4} align="center" wrap="nowrap" data-testid="c4system-field-row">
+                    <Text size="xs" style={{ flex: "0 0 70px", overflow: "hidden", textOverflow: "ellipsis" }} title={f.name}>
+                      {f.name}
+                    </Text>
+                    <Select
+                      size="xs"
+                      style={{ flex: 1, minWidth: 0 }}
+                      searchable
+                      data={typeOptions.map((o) => o.label)}
+                      value={f.baseLabel}
+                      data-testid="c4system-field-type"
+                      onChange={(label) => {
+                        const base = label ? baseByLabel.get(label) : undefined;
+                        if (base) setFieldType(i, { base, array: f.array, optional: f.optional });
+                      }}
+                    />
+                    <Checkbox
+                      size="xs"
+                      title="array []"
+                      checked={f.array}
+                      onChange={(e) => setFieldType(i, { base: f.base, array: e.currentTarget.checked, optional: f.optional })}
+                    />
+                    <Text size="xs" c="dimmed">[]</Text>
+                    <Checkbox
+                      size="xs"
+                      title="optional ?"
+                      checked={f.optional}
+                      onChange={(e) => setFieldType(i, { base: f.base, array: f.array, optional: e.currentTarget.checked })}
+                    />
+                    <Text size="xs" c="dimmed">?</Text>
+                    <Button
+                      size="compact-xs"
+                      variant="subtle"
+                      color="red"
+                      data-testid="c4system-field-delete"
+                      onClick={() => removeField(i)}
+                    >
+                      ×
+                    </Button>
+                  </Group>
+                ))}
+              </Stack>
+            )}
             <ScrollArea style={{ flex: 1, minHeight: 0 }}>
               <Textarea
                 size="xs"
