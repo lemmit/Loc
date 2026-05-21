@@ -380,17 +380,26 @@ async function __post(url: string, body: unknown): Promise<any> {
     body: JSON.stringify(body ?? {}),
   });
   const text = await r.text();
-  const json = text ? JSON.parse(text) : {};
-  if (!r.ok) throw new Error(\`POST \${url} → \${r.status} \${text}\`);
-  return json;
+  // Check the status BEFORE parsing: a 404 (or any error) often carries a
+  // non-JSON body (e.g. Hono's "404 Not Found"), and parsing it first would
+  // mask the real status behind an opaque "JSON Parse error".
+  if (!r.ok) throw new Error(\`POST \${url} → \${r.status} \${r.statusText}\${text ? ": " + text : ""}\`);
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(\`POST \${url} → \${r.status}: expected JSON, got \${JSON.stringify(text.slice(0, 200))}\`);
+  }
 }
 
 async function __get(url: string): Promise<any> {
   const r = await fetch(url);
   const text = await r.text();
-  const json = text ? JSON.parse(text) : {};
-  if (!r.ok) throw new Error(\`GET \${url} → \${r.status} \${text}\`);
-  return json;
+  if (!r.ok) throw new Error(\`GET \${url} → \${r.status} \${r.statusText}\${text ? ": " + text : ""}\`);
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(\`GET \${url} → \${r.status}: expected JSON, got \${JSON.stringify(text.slice(0, 200))}\`);
+  }
 }
 
 async function __getQuery(url: string, params: Record<string, unknown>): Promise<any> {
