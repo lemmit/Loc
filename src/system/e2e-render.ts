@@ -11,6 +11,7 @@ import type {
   TestStmtIR,
 } from "../ir/loom-ir.js";
 import { camel, plural, snake } from "../util/naming.js";
+import { renderExpectStmt } from "./expect-stmt.js";
 
 // ---------------------------------------------------------------------------
 // E2E test renderer.
@@ -129,7 +130,7 @@ function renderTest(t: TestE2EIR, ctx: RenderCtx): string[] {
 
 function renderE2EStmt(s: TestStmtIR, ctx: RenderCtx): string {
   if (s.kind === "expect") {
-    return `expect(${renderE2EExpr(s.expr, ctx)}).toBe(true);`;
+    return renderExpectStmt(s.expr, (e) => renderE2EExpr(e, ctx));
   }
   if (s.kind === "expect-throws") {
     return `await expect(async () => { ${renderE2EExpr(s.expr, ctx)}; }).rejects.toThrow();`;

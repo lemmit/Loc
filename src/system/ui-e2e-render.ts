@@ -12,6 +12,7 @@ import type {
   WorkflowIR,
 } from "../ir/loom-ir.js";
 import { camel, plural, snake } from "../util/naming.js";
+import { renderExpectStmt } from "./expect-stmt.js";
 
 // ---------------------------------------------------------------------------
 // UI e2e renderer.
@@ -282,7 +283,7 @@ function renderTest(t: TestE2EIR, ctx: RenderCtx): string[] {
 
 function renderUIStmt(s: TestStmtIR, ctx: RenderCtx): string {
   if (s.kind === "expect") {
-    return `expect(${renderUIExpr(s.expr, ctx)}).toBe(true);`;
+    return renderExpectStmt(s.expr, (e) => renderUIExpr(e, ctx));
   }
   if (s.kind === "expect-throws") {
     return `await expect(async () => { ${renderUIExpr(s.expr, ctx)}; }).rejects.toThrow();`;

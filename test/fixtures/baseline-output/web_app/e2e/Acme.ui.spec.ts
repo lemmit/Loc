@@ -20,8 +20,8 @@ test("create then confirm an order via UI", async ({ page }) => {
       lines: { length: await __detail.linesCount() },
     };
   })();
-  expect(read.status === "Confirmed").toBe(true);
-  expect(read.lines.length === 1).toBe(true);
+  expect(read.status).toBe("Confirmed");
+  expect(read.lines.length).toBe(1);
 });
 
 test("place an order via the workflow UI", async ({ page }) => {
@@ -31,6 +31,6 @@ test("place an order via the workflow UI", async ({ page }) => {
 
 test("active orders view renders the rendered rows", async ({ page }) => {
   const rows = await (async () => {   const __view = await new ActiveOrdersViewPage(page).goto();   return await __view.rows(); })();
-  expect(rows.length >= 0).toBe(true);
+  expect(rows.length).toBeGreaterThanOrEqual(0);
 });
 
