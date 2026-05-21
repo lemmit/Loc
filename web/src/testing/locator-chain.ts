@@ -59,6 +59,7 @@ export type DriverOp =
       state?: "visible" | "attached" | "hidden";
     }
   | { kind: "page"; op: "goto"; arg: string }
+  | { kind: "page"; op: "screenshot" }
   | {
       kind: "page";
       op: "waitForURL";
@@ -83,6 +84,18 @@ export async function executeDriverOp(
       if (msg.op === "goto") {
         await page.goto(msg.arg);
         return { ok: true };
+      }
+      if (msg.op === "screenshot") {
+        // Lazy import so node test contexts that only exercise other ops
+        // don't pull in html-to-image's browser dependencies.
+        const { captureNode } = await import("./screenshot.js");
+        const root = doc.documentElement;
+        const value =
+          (await captureNode(root, {
+            width: root.clientWidth || undefined,
+            height: root.clientHeight || undefined,
+          })) ?? "";
+        return { ok: true, value };
       }
       await page.waitForURL(
         msg.isRegex ? new RegExp(msg.pattern, msg.flags) : msg.pattern,

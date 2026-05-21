@@ -106,6 +106,13 @@ export class RemotePage {
   url(): string {
     return this.transport.currentUrl();
   }
+  /** Best-effort screenshot of the current preview as a JPEG data URL.
+   *  Returns "" when capture failed (never throws). */
+  async screenshot(): Promise<string> {
+    const r = await this.transport.send({ kind: "page", op: "screenshot" });
+    if (!r.ok) return "";
+    return String(r.value ?? "");
+  }
   async waitForURL(matcher: string | RegExp): Promise<void> {
     const op: DriverOp =
       matcher instanceof RegExp

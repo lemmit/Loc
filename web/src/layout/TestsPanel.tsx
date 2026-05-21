@@ -5,7 +5,9 @@ import {
   Button,
   Code,
   Group,
+  Image,
   Loader,
+  Modal,
   ScrollArea,
   Stack,
   Text,
@@ -35,6 +37,7 @@ import type {
 // reads — emitted by `src/system/traceability.ts`.
 interface TraceabilityJson {
   requirements: { id: string; title: string; type: string; parentId?: string }[];
+  testCases: { id: string; verifies: string }[];
   index: {
     testsByRequirement: Record<string, string[]>;
     childrenOf: Record<string, string[]>;
@@ -114,6 +117,7 @@ export function TestsBody({
   const [running, setRunning] = useState<string | null>(null);
 
   const hasAny = unitFiles.length > 0 || !!apiFile || !!uiFile;
+  const hasProofs = Object.values(results).some((r) => r.screenshot);
 
   // Live Definition-of-Done overlay: join the current results onto the
   // requirements graph.  Recomputes as tests run (depends on `results`).
@@ -223,7 +227,11 @@ export function TestsBody({
       if (!iframe) throw new Error("Preview isn't mounted — Bundle + Boot first.");
       if (engine) await engine.wipe();
       const page = new RemotePage(makeIframeTransport(iframe, { timeout: 8000 }));
-      merge("ui", await runUiTests(cases, page));
+      // Report the UI suite name so results join the verification rollup
+      // (UI ExecTestRefs carry `suite: "<System> e2e"`).
+      const uiSuite =
+        traceability?.index.execTests.find((t) => t.kind === "ui")?.suite ?? "";
+      merge("ui", await runUiTests(cases, page, uiSuite));
     });
   };
 
@@ -251,12 +259,27 @@ export function TestsBody({
           {error}
         </Code>
       )}
+      {hasProofs && (
+        <Group px="sm" py={6} justify="flex-end">
+          <Button
+            size="compact-xs"
+            variant="light"
+            onClick={() =>
+              downloadProofReport(traceability, verification, results)
+            }
+            data-testid="btn-download-proofs"
+          >
+            Download proofs
+          </Button>
+        </Group>
+      )}
       <ScrollArea style={{ flex: 1, minHeight: 0 }}>
         <Box px="sm" pb="sm">
           {traceability && verification && (
             <RequirementsRollup
               traceability={traceability}
               verification={verification}
+              results={results}
             />
           )}
           {(unitSuites ?? []).map((s) => (
@@ -316,24 +339,73 @@ export function TestsBody({
   );
 }
 
+// Clickable screenshot thumbnail that enlarges in a modal — the proof /
+// debugging artifact for a UI test.
+function ProofImage({ src, alt }: { src: string; alt: string }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Image
+        src={src}
+        alt={alt}
+        h={64}
+        w="auto"
+        radius="sm"
+        fit="contain"
+        onClick={() => setOpen(true)}
+        data-testid="test-screenshot"
+        style={{
+          cursor: "zoom-in",
+          border: "1px solid var(--mantine-color-gray-3)",
+        }}
+      />
+      <Modal opened={open} onClose={() => setOpen(false)} size="xl" centered title={alt}>
+        <Image src={src} alt={alt} fit="contain" />
+      </Modal>
+    </>
+  );
+}
+
 // Live Definition-of-Done overlay — each requirement's verdict rolled
-// up from the test results, indented by the requirement hierarchy.
+// up from the test results, indented by the requirement hierarchy.  Leaf
+// requirements also show the screenshot proofs from the UI tests whose
+// testCases verify them.
 function RequirementsRollup({
   traceability,
   verification,
+  results,
 }: {
   traceability: TraceabilityJson;
   verification: VerificationIR;
+  results: Record<string, TestResult>;
 }): JSX.Element {
-  const { requirements, index } = traceability;
+  const { requirements, testCases, index } = traceability;
   const byId = new Map(requirements.map((r) => [r.id, r]));
   const roots = requirements.filter((r) => !r.parentId);
   const s = verification.summary;
+
+  // UI-test screenshot proofs for the testCases that directly verify a
+  // requirement (matched back through `execTests` by suite+name).
+  const proofsFor = (reqId: string): { name: string; src: string }[] => {
+    const tcIds = new Set(
+      (testCases ?? []).filter((tc) => tc.verifies === reqId).map((tc) => tc.id),
+    );
+    const out: { name: string; src: string }[] = [];
+    for (const ex of index.execTests) {
+      if (ex.kind !== "ui" || ex.testCaseId == null || !tcIds.has(ex.testCaseId)) {
+        continue;
+      }
+      const src = results[key("ui", ex.name)]?.screenshot;
+      if (src) out.push({ name: ex.name, src });
+    }
+    return out;
+  };
 
   const renderReq = (id: string, depth: number): JSX.Element[] => {
     const r = byId.get(id);
     if (!r) return [];
     const verdict = verification.requirements[id]?.verdict ?? "UNTESTED";
+    const proofs = proofsFor(id);
     const here = (
       <Group
         key={id}
@@ -349,8 +421,22 @@ function RequirementsRollup({
         <Text size="sm" c="dimmed" truncate>{r.title}</Text>
       </Group>
     );
+    const proofRow =
+      proofs.length > 0 ? (
+        <Group
+          key={`${id}-proofs`}
+          gap={6}
+          wrap="wrap"
+          style={{ paddingLeft: depth * 16 + 16 }}
+          data-testid={`req-proofs-${r.id}`}
+        >
+          {proofs.map((p) => (
+            <ProofImage key={p.name} src={p.src} alt={`${r.id}: ${p.name}`} />
+          ))}
+        </Group>
+      ) : null;
     const kids = (index.childrenOf[id] ?? []).flatMap((c) => renderReq(c, depth + 1));
-    return [here, ...kids];
+    return proofRow ? [here, proofRow, ...kids] : [here, ...kids];
   };
 
   return (
@@ -464,10 +550,126 @@ function Suite({
                     .join("\n")}
                 </Code>
               )}
+              {r?.screenshot && (
+                <Box mt={4}>
+                  <ProofImage src={r.screenshot} alt={name} />
+                </Box>
+              )}
             </Box>
           );
         })}
       </Stack>
     </Box>
   );
+}
+
+const escHtml = (s: string): string =>
+  s.replace(
+    /[&<>"]/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!,
+  );
+
+// Build + download a single self-contained HTML proof report: the
+// requirement rollup (verdict + the UI-test screenshots that prove each)
+// and every UI test's final-state screenshot, with a machine-readable
+// manifest embedded as a <script type="application/json">.  Data-URL
+// images are inlined so the file is portable (attach to a PR, open
+// offline).  No zip dependency.
+function downloadProofReport(
+  traceability: TraceabilityJson | null,
+  verification: VerificationIR | null,
+  results: Record<string, TestResult>,
+): void {
+  const sysName =
+    traceability?.index.execTests.find((t) => t.suite)?.suite?.replace(/ e2e$/, "") ??
+    "system";
+
+  const proofsFor = (
+    reqId: string,
+  ): { testCaseId: string; name: string; src: string }[] => {
+    if (!traceability) return [];
+    const tcIds = new Set(
+      (traceability.testCases ?? []).filter((tc) => tc.verifies === reqId).map((tc) => tc.id),
+    );
+    const out: { testCaseId: string; name: string; src: string }[] = [];
+    for (const ex of traceability.index.execTests) {
+      if (ex.kind !== "ui" || ex.testCaseId == null || !tcIds.has(ex.testCaseId)) continue;
+      const src = results[key("ui", ex.name)]?.screenshot;
+      if (src) out.push({ testCaseId: ex.testCaseId, name: ex.name, src });
+    }
+    return out;
+  };
+
+  const reqRows =
+    traceability && verification
+      ? traceability.requirements
+          .map((r) => {
+            const verdict = verification.requirements[r.id]?.verdict ?? "UNTESTED";
+            const imgs = proofsFor(r.id)
+              .map(
+                (p) =>
+                  `<figure><figcaption>${escHtml(p.name)}</figcaption><img src="${p.src}" alt="${escHtml(r.id)}"/></figure>`,
+              )
+              .join("");
+            return `<section class="req"><h3><span class="v ${verdict}">${verdict}</span> ${escHtml(r.id)} — ${escHtml(r.title)}</h3>${imgs}</section>`;
+          })
+          .join("")
+      : "";
+
+  const uiResults = Object.values(results).filter((r) => r.screenshot);
+  const testRows = uiResults
+    .map(
+      (r) =>
+        `<section class="test"><h4>${escHtml(r.name)} <span class="v ${r.status === "pass" ? "VERIFIED" : "FAILING"}">${r.status}</span></h4>${r.error ? `<pre>${escHtml(r.error)}</pre>` : ""}<img src="${r.screenshot}" alt="${escHtml(r.name)}"/></section>`,
+    )
+    .join("");
+
+  const manifest = {
+    system: sysName,
+    generatedAt: new Date().toISOString(),
+    requirements:
+      traceability && verification
+        ? traceability.requirements.map((r) => ({
+            id: r.id,
+            title: r.title,
+            verdict: verification.requirements[r.id]?.verdict ?? "UNTESTED",
+            proofs: proofsFor(r.id).map((p) => ({
+              testCaseId: p.testCaseId,
+              testName: p.name,
+            })),
+          }))
+        : [],
+    tests: uiResults.map((r) => ({ suite: r.suite, name: r.name, status: r.status })),
+  };
+
+  const html = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"/>
+<title>${escHtml(sysName)} — test proofs</title>
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 2rem; color: #1e293b; }
+  h1 { font-size: 1.4rem; } h3 { font-size: 1rem; margin: 1.2rem 0 .4rem; }
+  .v { font-size: .7rem; padding: .1rem .4rem; border-radius: .3rem; color: #fff; }
+  .VERIFIED { background: #16a34a; } .FAILING { background: #dc2626; }
+  .UNTESTED { background: #64748b; } .UNVERIFIED { background: #ca8a04; }
+  figure { display: inline-block; margin: .3rem .6rem .3rem 0; vertical-align: top; }
+  figcaption { font-size: .7rem; color: #64748b; }
+  img { max-width: 480px; border: 1px solid #cbd5e1; border-radius: .3rem; display: block; }
+  pre { background: #f1f5f9; padding: .5rem; border-radius: .3rem; white-space: pre-wrap; font-size: 12px; }
+</style></head><body>
+<h1>${escHtml(sysName)} — test proofs</h1>
+<p>Generated ${escHtml(manifest.generatedAt)}</p>
+<h2>Requirements</h2>${reqRows || "<p>No requirements declared.</p>"}
+<h2>UI test screenshots</h2>${testRows || "<p>No UI screenshots captured.</p>"}
+<script type="application/json" id="loom-proofs">${JSON.stringify(manifest).replace(/</g, "\\u003c")}</script>
+</body></html>`;
+
+  const blob = new Blob([html], { type: "text/html" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${sysName}-proofs.html`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
