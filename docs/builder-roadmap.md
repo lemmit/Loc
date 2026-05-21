@@ -25,53 +25,66 @@ text stays the source of truth.
   Problems panel reflect it immediately. Origin-tagged `onSourceChange` +
   suppress guard prevent an echo loop. The canvas re-seeds from current source on
   tab activation.
+- **`expr` prop kind**: a permissive data-binding prop that accepts any
+  expression (member access, calls, literals, refs) except the structured
+  Lambda/Match slots, stores its printed text verbatim, and re-emits it unquoted.
+  Data-bound display args (`Badge(order.status)`, `Stat("Total", order.total)`)
+  now seed as editable nodes instead of Opaque. Settings panel renders them as a
+  reparse-validated textarea.
+- **Full stdlib primitive coverage**: the remaining `STDLIB_LAYOUT_COMPONENTS`
+  are recognised — `Stat`/`Money`/`DateDisplay`/`EnumBadge`/`IdLink` (expr
+  binding), `Field`/`NumberField`/`PasswordField`/`Toggle` (`bind:`),
+  `Image`/`Avatar`, `Skeleton`/`Loader`/`Slot`, `Breadcrumbs`/`KeyValueRow`,
+  `Tabs` (+ `Tab` sub-primitive), `Table` (+ `Column` sub-primitive).
+- **Lambdas & `match`** (synthetic nodes): a `body: match { … }` seeds editable
+  predicate arms (cond + value child) with an optional `else`; lambda accessors
+  (e.g. a `Column`'s `o => …`) seed as a param + body child. Modelled as ordinary
+  positional-children nodes (`Lambda`/`Match`/`MatchArm`/`MatchElse`) so the
+  serialize/craft path is unchanged. Block-statement lambda bodies stay Opaque.
+- **Component editing**: the body picker collects both page `body:` and
+  `component` `body:` expressions, so reusable components are editable too.
 
-## Open — expression / domain-logic surface (the big gap)
+## Open — expression / domain-logic surface
 
-The expression/statement **printer already exists** (`src/language/print/
-print-expr.ts`, `print-stmt.ts`) and the Opaque fallback uses it, so logic
-*round-trips* — but the canvas has no UI to *edit* it. To make it editable:
-
-- **`match(expr) { case … }`** — conditional UI. Currently Opaque. Needs a node
-  type with editable scrutinee + per-case child canvases.
-- **Lambdas** — e.g. `List(of: X, x => Detail(x.field))`, form field render
-  closures. Currently force the whole call to Opaque. Needs lambda-param scope +
-  a child canvas for the body.
+- **Named-arg child slots** — args whose value is itself a node and that arrive
+  *named* rather than positional: `QueryView(loading:/error:/empty:/data:)`,
+  `Table(onRowClick:/rowTestid:)` callbacks, `Modal(trigger: Button(…))`. These
+  still force the parent Opaque because craft can't represent named slots without
+  `linkedNodes`, and the flat positional-children model deliberately avoids it.
+  Needs either `linkedNodes`-backed named slots or slot-tagged children.
 - **`state := …`** page state declarations / assignments. Not modelled.
-- **Ad-hoc expression-valued args** — a settings field that parses a typed
-  expression (member access, calls, literals) and validates it, instead of only
-  string/int/ref props.
+- **Operation forms**: `Form(of:, op:)`, bound to aggregate operations — need op
+  pickers wired to the IR (`Form` currently models only `of:`/`creates:`/`testid:`).
 - **Richer bindings**: qualified refs (`Sales.Order` — today only bare idents are
-  modelled), repository finds, view sources, enum values, navigation params.
-- **Operation forms**: `Form(of:, op:)`, `Modal(trigger: Button(…), Form(of:, op:))`
-  — bind to aggregate operations; need op pickers wired to the IR.
-- **Non-canonical arg order** currently → Opaque; could normalise on emit.
-
-## Open — primitive coverage
-
-Not yet modelled (fall back to Opaque). From `STDLIB_LAYOUT_COMPONENTS` in
-`src/generator/react/body-walker.ts`:
-
-- Layout/containers: `Tabs` (+ `Tab` sub-primitive), `Breadcrumbs`, `Skeleton`,
-  `Modal`, `MasterDetail`, `Detail`.
-- Display: `Stat`, `Money`, `DateDisplay`, `EnumBadge`, `IdLink`, `Image`,
-  `Avatar`, `Loader`, `KeyValueRow`, `Table` (+ `Column`), `QueryView`.
-- Inputs (inside forms): `Field`, `NumberField`, `PasswordField`, `Toggle`.
-- `Slot`, and calls to **user-defined components** (`component` defs).
+  modelled as `ref`; qualified ones fall to the `expr` text field), repository
+  finds, view sources, enum values, navigation params.
+- **`match` arm cond caveat** — the grammar misparses a *bare-identifier* arm
+  cond (`ready => …`) as a lambda, so such conds must be comparisons/calls. Emit
+  reproduces the original (valid) cond, so round-trip is safe; a UI that *adds* an
+  arm must default the cond to a non-bare-ident expression.
+- **Non-canonical arg order** (positional after named) currently → Opaque; could
+  normalise on emit.
+- **`MasterDetail`/`Detail`** primitives, and calls to **user-defined
+  components** (`component` defs) — the latter need per-component param signatures
+  to map positional args to names.
 
 ## Open — editing UX
 
 - **Drag-to-add** from the palette (today is click-add; craft's create-connector
   swallows the click). **Drag-reorder** across containers needs verification.
-- **Add-child affordance** directly on a selected container (today: palette adds
-  into the selected container).
+- **Add-child / add-arm affordance** directly on a selected container (today:
+  palette adds into the selected container). Synthetic nodes especially need
+  in-canvas controls — "add arm"/"add else" on a `Match`, set a `Lambda`/`Tab`
+  body — since they aren't palette-addable.
 - **Diagnostics inside the Builder** (surface LSP errors/warnings on the canvas).
-- **Inline validation** of the Opaque `raw` source field.
-- **Component / multi-page editing** — edit `component` bodies and switch pages
-  beyond the current page picker.
+  Inline `expr`/Opaque `raw` validation already shows a non-blocking error in the
+  settings panel; the canvas itself doesn't yet flag invalid nodes.
 - **Mobile** Builder tab (desktop-only today).
 - **Continuous text→canvas live sync** (today re-seeds on tab switch, not per
   keystroke) — needs debounce + canvas selection preservation.
+
+Done: **component editing** (the body picker now lists `page` and `component`
+bodies); **inline `expr`/`raw` validation** in the settings panel.
 
 ## System / Model Builder (Phase C)
 
