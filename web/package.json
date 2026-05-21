@@ -19,6 +19,7 @@
     "@likec4/layouts": "^1.56.0",
     "@mantine/core": "^7.13.0",
     "@mantine/hooks": "^7.13.0",
+    "@xyflow/react": "^12.10.2",
     "esbuild-wasm": "^0.28.0",
     "likec4": "^1.56.0",
     "mermaid": "^11.15.0",
