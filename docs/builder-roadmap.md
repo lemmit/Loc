@@ -155,6 +155,10 @@ Done:
   expression through the same Expression picker + editor, so views are editable
   in the modeller (`viewSlotOptions` in `expr-slots.ts`). Gated by
   `test/system-expr.test.ts` + e2e.
+- **Repository find editing** — repository nodes expose each `find` decl's
+  `where` filter through the same picker + editor (`repoSlotOptions`); finds with
+  no `where` are omitted. Gated by `test/system-expr.test.ts` + e2e. (Editing
+  find *params* is still open.)
 
 Open:
 
@@ -164,8 +168,8 @@ Open:
   `match`/`new`/object/lambda. Needs env computation (the validator/IR knows the
   in-scope names).
 - **Expression editor in more slots** — statement-expression slots
-  (`let`/`:=`/`precondition` values inside bodies) and repository find `where`
-  clauses, reusing the same recursive editor (view filters/binds already done).
+  (`let`/`:=`/`precondition` values inside bodies), reusing the same recursive
+  editor (view filters/binds and repository find `where` clauses already done).
 - **Field rename** — needs member-access reference resolution (via the
   type-system / IR) to update `this.field` / view binds safely.
 - **Repository `find` editing** (params + where-clause expressions).

@@ -10,11 +10,12 @@ import {
   editExprSlot,
   listDerived,
   listInvariants,
+  repoSlotOptions,
   slotExpr,
   viewSlotOptions,
   type ExprSlot,
 } from "../web/src/builder/system/expr-slots.js";
-import type { View } from "../src/language/generated/ast.js";
+import type { Repository, View } from "../src/language/generated/ast.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const sales = readFileSync(path.join(here, "..", "examples", "sales.ddd"), "utf8");
@@ -103,5 +104,24 @@ describe("structured expression editor — view slots", () => {
     expect(out).toMatch(/lineCount = lines\.count \+ 1/);
     // Sibling binds untouched.
     expect(out).toMatch(/orderId = id/);
+  });
+});
+
+describe("structured expression editor — repository find slots", () => {
+  it("exposes only finds that declare a where filter", () => {
+    // `byCustomer` has no where; `activeForCustomer` does.
+    const opts = repoSlotOptions(owner<Repository>(parse(sales), "Repository", "Orders"));
+    expect(opts.map((o) => o.value)).toEqual(["find:activeForCustomer"]);
+  });
+
+  it("decomposes a compound find filter into an operator tree", () => {
+    const tree = seedExpr(slotExpr(parse(sales), { kind: "findFilter", owner: "Orders", name: "activeForCustomer" })!);
+    expect(tree.kind).toBe("binary");
+    expect(tree).toMatchObject({ kind: "binary", op: "&&" });
+  });
+
+  it("edits a find's where filter", () => {
+    const out = editExprSlot(sales, { kind: "findFilter", owner: "Orders", name: "activeForCustomer" }, "this.status == Draft")!;
+    expect(out).toMatch(/where this\.status == Draft/);
   });
 });

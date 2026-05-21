@@ -4,9 +4,11 @@ import type {
   BindEntry,
   DerivedProp,
   Expression,
+  FindDecl,
   FunctionDecl,
   Invariant,
   Model,
+  Repository,
   ValueObject,
   View,
 } from "../../../../src/language/generated/ast.js";
@@ -27,7 +29,8 @@ export type ExprSlot =
   | { kind: "derived"; owner: string; name: string }
   | { kind: "invariant"; owner: string; index: number }
   | { kind: "viewFilter"; owner: string }
-  | { kind: "viewBind"; owner: string; name: string };
+  | { kind: "viewBind"; owner: string; name: string }
+  | { kind: "findFilter"; owner: string; name: string };
 
 function membersOf(node: AstNode): readonly AstNode[] {
   if (node.$type === "Aggregate") return (node as Aggregate).members;
@@ -64,6 +67,13 @@ function findView(ast: Model, name: string): View | null {
   return null;
 }
 
+function findRepo(ast: Model, name: string): Repository | null {
+  for (const n of AstUtils.streamAst(ast)) {
+    if (n.$type === "Repository" && (n as Repository).name === name) return n as Repository;
+  }
+  return null;
+}
+
 export function slotExpr(ast: Model, slot: ExprSlot): Expression | null {
   if (slot.kind === "viewFilter") {
     return findView(ast, slot.owner)?.filter ?? null;
@@ -71,6 +81,10 @@ export function slotExpr(ast: Model, slot: ExprSlot): Expression | null {
   if (slot.kind === "viewBind") {
     const bind = findView(ast, slot.owner)?.binds.find((b: BindEntry) => b.name === slot.name);
     return bind ? bind.expr : null;
+  }
+  if (slot.kind === "findFilter") {
+    const find = findRepo(ast, slot.owner)?.finds.find((f: FindDecl) => f.name === slot.name);
+    return find?.filter ?? null;
   }
   const owner = findOwner(ast, slot.owner);
   if (!owner) return null;
@@ -123,6 +137,19 @@ export function viewSlotOptions(node: AstNode): SlotOption[] {
     out.push({ value: `bind:${b.name}`, label: `bind ${b.name}`, slot: { kind: "viewBind", owner: view.name, name: b.name } });
   }
   return out;
+}
+
+/** Expression slots on a repository: each `find` decl's `where` filter. */
+export function repoSlotOptions(node: AstNode): SlotOption[] {
+  if (node.$type !== "Repository") return [];
+  const repo = node as Repository;
+  return repo.finds
+    .filter((f) => f.filter)
+    .map((f) => ({
+      value: `find:${f.name}`,
+      label: `find ${f.name} where: ${printExpr(f.filter!)}`,
+      slot: { kind: "findFilter", owner: repo.name, name: f.name },
+    }));
 }
 
 export function editExprSlot(source: string, slot: ExprSlot, text: string): string | null {
