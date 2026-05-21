@@ -54,7 +54,7 @@ export function DevToolsDock({ ctx, tab, setTab }: Props): JSX.Element {
         gap="xs"
         justify="space-between"
         wrap="nowrap"
-        style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}
+        style={{ flexShrink: 0, borderBottom: "1px solid var(--mantine-color-dark-4)" }}
       >
         <Group gap={2} wrap="nowrap" data-testid="devtools-tabs">
           {tabs.map((t) => (
