@@ -66,6 +66,46 @@ describe("typescript generator", () => {
     expect(tests).toMatch(/expect\(\(\) => \{ new Money\(-1\.0, "USD"\); \}\)\.toThrow\(\)/);
   });
 
+  it("lowers collection `.count` on a let-bound aggregate to `.length`", async () => {
+    // Regression: a `let x = Agg.create(...)` binding must type as the
+    // aggregate so a subsequent `x.coll.count` resolves to an array and
+    // lowers to `.length` (previously the factory call typed as the
+    // string fallback, leaving `.count` un-lowered — a TS type error +
+    // runtime `undefined`).
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(
+      `
+      context Shop {
+        enum OS { Draft, Confirmed }
+        aggregate Order {
+          status: OS
+          contains lines: OrderLine[]
+          function isMutable(): bool = status == Draft
+          operation addLine(qty: int) {
+            precondition isMutable()
+            lines += new OrderLine { quantity: qty }
+          }
+          entity OrderLine { quantity: int  invariant quantity > 0 }
+          test "count on a local lowers to length" {
+            let order = Order.create({ status: Draft })
+            order.addLine(2)
+            expect order.lines.count == 1
+          }
+        }
+        repository Orders for Order { }
+      }
+      `,
+      { validation: true },
+    );
+    expect((doc.diagnostics ?? []).filter((d) => d.severity === 1)).toEqual([]);
+    const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
+    const tests = files.get("domain/order.test.ts")!;
+    expect(tests).toMatch(/order\.lines\.length === 1/);
+    expect(tests).not.toMatch(/order\.lines\.count/);
+  });
+
   it("emits Dockerfile + .dockerignore", async () => {
     const model = await buildModel("examples/sales.ddd");
     const files = generateTypeScript(model, HONO_V4_PINS);

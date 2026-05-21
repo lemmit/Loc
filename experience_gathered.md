@@ -579,3 +579,15 @@ or not.
   in `src/system/traceability.ts`, are emitted once at the output root
   (model-global), and read only the precomputed `TraceabilityIR` from
   `enrichLoomModel` — never recomputing coverage.
+
+## Aggregate factory typing (`X.create(...)`)
+
+- `inferExprType` must special-case `X.create(...)` → `entity X`.  `X` is a
+  *type name*, not a value, so `resolveNameRef` returns `unknown` and a
+  `let o = Order.create({...})` binding would otherwise type as the string
+  fallback.  Operation calls (`o.confirm()`) still render structurally so the
+  bug was invisible there — but `o.lines.count` needs `o.lines` to be an
+  `array` for the renderer to lower `.count` → `.length` (TS) / `.Count`
+  (.NET).  Without the fix it emitted a literal `.count`: a TS type error and
+  a runtime `undefined`.  Repro lives in `test/generator-ts.test.ts`
+  ("lowers collection `.count` on a let-bound aggregate to `.length`").

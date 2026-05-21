@@ -585,6 +585,31 @@ describe("page metamodel — grammar smoke tests (Slice 1)", () => {
     expect(sol?.requirement.ref?.name).toBe("US-001");
   });
 
+  it("resolves a code reference to a deployable whose name is a reserved word", async () => {
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(
+      `
+      requirement US-001 { type: UserStory  title: "x" }
+      system S {
+        module M { context C { aggregate A { operation go() {} } } }
+        deployable api { platform: hono  modules: M }
+      }
+      solution SOL-001 for US-001 { entitles [ M.C.A.go, api ] }
+      `,
+      { validation: true },
+    );
+    expect(
+      (doc.diagnostics ?? []).filter((d) => d.severity === 1).map((d) => d.message),
+    ).toEqual([]);
+    const sol = (doc.parseResult.value as Model).members.find(
+      (m) => m.$type === "Solution",
+    ) as import("../src/language/generated/ast.js").Solution;
+    expect(sol.entitles[1]?.ref?.$type).toBe("Deployable");
+    expect(sol.entitles[1]?.ref?.name).toBe("api");
+  });
+
   it("rejects an unresolved qualified code reference", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);

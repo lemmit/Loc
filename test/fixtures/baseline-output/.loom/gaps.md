@@ -13,9 +13,10 @@ _none_
 ## Referenced code without a covering test
 
 - `Sales.Orders.placeOrder` (workflow)
+- `api` (deployable)
 - `catalogApi` (deployable)
 
 ## Test cases without an executable test
 
-- `TC-001` — Confirming an empty order is rejected
+_none_
 

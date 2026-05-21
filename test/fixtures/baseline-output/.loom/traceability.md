@@ -26,6 +26,7 @@ Entitles:
 - `Sales.Orders.Order.addLine` (operation)
 - `Sales.Orders.Order.confirm` (operation)
 - `Sales.Orders.placeOrder` (workflow)
+- `api` (deployable)
 
 ### SOL-002 — The catalog is served by the Product aggregate on its own deployable
 for: `US-002`
@@ -38,7 +39,7 @@ Entitles:
 
 ### TC-001 — Confirming an empty order is rejected
 verifies: `AC-001`
-executable tests: _none_
+executable tests: "confirming an order with no lines is rejected"
 
 Covers:
 - `Sales.Orders.Order.confirm` (operation)

@@ -50,6 +50,10 @@
         {
           "qualifiedName": "Sales.Orders.placeOrder",
           "kind": "workflow"
+        },
+        {
+          "qualifiedName": "api",
+          "kind": "deployable"
         }
       ]
     },
@@ -148,6 +152,7 @@
       "Sales.Orders.Order.addLine": "operation",
       "Sales.Orders.Order.confirm": "operation",
       "Sales.Orders.placeOrder": "workflow",
+      "api": "deployable",
       "Catalog.Products.Product": "aggregate",
       "catalogApi": "deployable"
     },
@@ -164,7 +169,9 @@
       ]
     },
     "execTestsByTestCase": {
-      "TC-001": [],
+      "TC-001": [
+        "confirming an order with no lines is rejected"
+      ],
       "TC-002": [
         "create then confirm an order with one line"
       ],
@@ -176,7 +183,7 @@
   "summary": {
     "codeCoverage": {
       "covered": 3,
-      "total": 5
+      "total": 6
     },
     "requirementCoverage": {
       "covered": 4,
