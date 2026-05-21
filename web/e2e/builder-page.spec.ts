@@ -33,3 +33,27 @@ test("page builder edits a heading and writes it back to source", async ({ page 
   await expect(page.getByTestId("c4builder-canvas")).toContainText("Storybook EDITED");
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
+
+test("palette adds a primitive and writes it back to source", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Components storybook/);
+
+  await page.getByTestId("doc-tab-builder").click();
+  await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
+
+  // Click the Button chip → a default Button("Button") is added to the body's
+  // top container.  Storybook's own buttons render their own labels, so a node
+  // reading exactly "Button" is the newly added one.
+  const newButton = page.getByTestId("c4node-Button").filter({ hasText: "Button" });
+  await expect(newButton).toHaveCount(0);
+  await page.getByTestId("c4palette-Button").click();
+  await expect(newButton.first()).toBeVisible();
+
+  await page.getByTestId("c4builder-apply").click();
+  await expect(page.getByTestId("c4builder-canvas")).toContainText("Button");
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+});
+
+
+
