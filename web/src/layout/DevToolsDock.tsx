@@ -46,7 +46,7 @@ export function DevToolsDock({ ctx, tab, setTab }: Props): JSX.Element {
   ];
 
   return (
-    <Box style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+    <Box style={{ height: "100%", minHeight: 0, display: "flex", flexDirection: "column" }}>
       <Group
         px="sm"
         py={4}
