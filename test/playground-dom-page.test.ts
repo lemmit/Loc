@@ -112,20 +112,84 @@ describe("DomPage / DomLocator", () => {
     expect(await page.getByTestId("orders-detail").innerText()).toBe("ready");
   });
 
-  it("skips hidden elements when an action requires visibility", async () => {
-    setBody(`
-      <button data-testid="dup" style="display:none">hidden</button>
-      <button data-testid="dup">shown</button>
-    `);
-    const page = new DomPage(document, { timeout: 500 });
-    let clickedText = "";
-    document.querySelectorAll('[data-testid="dup"]').forEach((b) =>
-      b.addEventListener("click", () => {
-        clickedText = b.textContent ?? "";
-      }),
+  it("click auto-waits for a hidden element to become visible", async () => {
+    setBody(
+      `<button data-testid="orders-op-confirm" style="display:none">Confirm</button>`,
     );
-    await page.getByTestId("dup").click();
-    expect(clickedText).toBe("shown");
+    const btn = document.querySelector(
+      '[data-testid="orders-op-confirm"]',
+    ) as HTMLButtonElement;
+    let clicked = 0;
+    btn.addEventListener("click", () => {
+      clicked += 1;
+    });
+    const page = new DomPage(document, { timeout: 1000 });
+    setTimeout(() => {
+      btn.style.display = "";
+    }, 80);
+    await page.getByTestId("orders-op-confirm").click();
+    expect(clicked).toBe(1);
+  });
+
+  it("strict mode: a locator matching >1 elements throws", async () => {
+    // Real Playwright counts ALL matches (visibility-independent) and
+    // refuses to act on an ambiguous locator — no silent first-match.
+    setBody(`
+      <button data-testid="dup">a</button>
+      <button data-testid="dup">b</button>
+    `);
+    const page = new DomPage(document, { timeout: 150 });
+    await expect(page.getByTestId("dup").click()).rejects.toThrow(
+      /resolved to 2 elements/,
+    );
+  });
+
+  it("click waits for a disabled control to become enabled", async () => {
+    setBody(
+      `<button data-testid="orders-op-confirm-submit" disabled>Confirm</button>`,
+    );
+    const btn = document.querySelector(
+      '[data-testid="orders-op-confirm-submit"]',
+    ) as HTMLButtonElement;
+    let clicked = 0;
+    btn.addEventListener("click", () => {
+      clicked += 1;
+    });
+    const page = new DomPage(document, { timeout: 1000 });
+    setTimeout(() => {
+      btn.disabled = false;
+    }, 80);
+    await page.getByTestId("orders-op-confirm-submit").click();
+    expect(clicked).toBe(1);
+  });
+
+  it("times out clicking a permanently disabled control", async () => {
+    setBody(`<button data-testid="dis" disabled>X</button>`);
+    const page = new DomPage(document, { timeout: 150 });
+    await expect(page.getByTestId("dis").click()).rejects.toThrow(
+      /not enabled/,
+    );
+  });
+
+  it("fill rejects a readonly (non-editable) input", async () => {
+    setBody(`<input data-testid="ro" readonly />`);
+    const page = new DomPage(document, { timeout: 150 });
+    await expect(page.getByTestId("ro").fill("x")).rejects.toThrow(
+      /not editable/,
+    );
+  });
+
+  it("fill waits for an input to become editable", async () => {
+    setBody(`<input data-testid="ed" readonly />`);
+    const el = document.querySelector(
+      '[data-testid="ed"]',
+    ) as HTMLInputElement;
+    const page = new DomPage(document, { timeout: 1000 });
+    setTimeout(() => {
+      el.readOnly = false;
+    }, 80);
+    await page.getByTestId("ed").fill("ready");
+    expect(el.value).toBe("ready");
   });
 
   it("goto pushes the basename-prefixed path and url() reflects it", async () => {

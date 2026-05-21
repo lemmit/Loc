@@ -56,6 +56,47 @@ function isVisible(el: Element): boolean {
   return true;
 }
 
+/** Playwright actionability: an element is disabled when it (or an
+ *  enclosing `<fieldset>`) carries the `disabled` property, or it is
+ *  marked `aria-disabled`. */
+function isEnabled(el: Element): boolean {
+  const he = el as HTMLElement & { disabled?: boolean };
+  if (he.disabled === true) return false;
+  if (el.getAttribute("aria-disabled") === "true") return false;
+  if (el.closest("fieldset[disabled]")) return false;
+  return true;
+}
+
+/** Editable = enabled and not read-only — the gate `fill()` waits on. */
+function isEditable(el: Element): boolean {
+  if (!isEnabled(el)) return false;
+  const he = el as HTMLElement & { readOnly?: boolean };
+  if (he.readOnly === true) return false;
+  if (el.getAttribute("aria-readonly") === "true") return false;
+  return true;
+}
+
+/** The Playwright actionability checks a single-element resolution can
+ *  wait on.  (Visibility-independent `stable` and `receives-events`/
+ *  hit-testing are intentionally NOT modelled: they need a real layout
+ *  engine, which happy-dom — where these run in unit tests — lacks.) */
+interface Actionability {
+  visible?: boolean;
+  enabled?: boolean;
+  editable?: boolean;
+}
+
+/** First unmet actionability gate for `el`, or null when all hold.
+ *  Ordered so the message names the most specific failure. */
+function unmetReason(el: Element, checks: Actionability): string | null {
+  if (checks.visible && !isVisible(el)) return "element is not visible";
+  if ((checks.enabled || checks.editable) && !isEnabled(el)) {
+    return "element is not enabled";
+  }
+  if (checks.editable && !isEditable(el)) return "element is not editable";
+  return null;
+}
+
 export class DomLocator {
   constructor(
     private readonly doc: Document,
@@ -125,28 +166,40 @@ export class DomLocator {
     return this.add((roots) => roots.slice(0, 1));
   }
 
-  /** Poll until at least one (optionally visible) match, then return it. */
-  private async resolveOne(requireVisible: boolean): Promise<HTMLElement> {
+  /** Resolve to the single matching element, polling until the requested
+   *  actionability gates hold.  Strict like real Playwright: throws when
+   *  the locator matches more than one element (counting all matches,
+   *  regardless of visibility) — use `.first()` or a more specific
+   *  locator. */
+  private async resolve(checks: Actionability): Promise<HTMLElement> {
     const deadline = Date.now() + this.timeout;
+    let lastReason = "no element matched";
     for (;;) {
       const els = this.matchesNow();
-      const el = requireVisible ? els.find(isVisible) : els[0];
-      if (el) return el as HTMLElement;
-      if (Date.now() >= deadline) {
+      if (els.length > 1) {
         throw new Error(
-          `locator: no ${requireVisible ? "visible " : ""}element matched within ${this.timeout}ms`,
+          `locator: resolved to ${els.length} elements; use .first() or a more specific locator`,
         );
+      }
+      const el = els[0];
+      if (el) {
+        const reason = unmetReason(el, checks);
+        if (!reason) return el as HTMLElement;
+        lastReason = reason;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`locator: ${lastReason} within ${this.timeout}ms`);
       }
       await sleep(POLL_MS);
     }
   }
 
   async click(): Promise<void> {
-    (await this.resolveOne(true)).click();
+    (await this.resolve({ visible: true, enabled: true })).click();
   }
 
   async fill(value: string): Promise<void> {
-    const el = (await this.resolveOne(true)) as
+    const el = (await this.resolve({ visible: true, editable: true })) as
       | HTMLInputElement
       | HTMLTextAreaElement;
     // React tracks the value via an overridden setter; setting `.value`
@@ -162,7 +215,7 @@ export class DomLocator {
   }
 
   async innerText(): Promise<string> {
-    const el = await this.resolveOne(false);
+    const el = await this.resolve({});
     return (el.innerText ?? el.textContent ?? "").trim();
   }
 
@@ -183,7 +236,7 @@ export class DomLocator {
         await sleep(POLL_MS);
       }
     }
-    await this.resolveOne(state === "visible");
+    await this.resolve(state === "visible" ? { visible: true } : {});
   }
 }
 
