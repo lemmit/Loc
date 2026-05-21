@@ -47,11 +47,15 @@ export type WorkspaceState = ReturnType<typeof useWorkspace>;
  *  owning its own state. */
 export type MobileTab =
   | "code"
-  | "files"
   | "preview"
   | "problems"
   | "backend"
   | "tests";
+
+/** Sub-view of the consolidated mobile "Code" tab: the source editor,
+ *  the visual page Builder, the structural Model, or the generated-file
+ *  browser. Persisted by App.tsx; mirrors the desktop center-pane switch. */
+export type MobileCodeView = "source" | "builder" | "model" | "generated";
 
 export interface LayoutCtx {
   isDesktop: boolean;
@@ -145,6 +149,11 @@ export interface LayoutCtx {
   // successful cascade.  Persisted to localStorage by App.tsx.
   activeTab: MobileTab;
   setActiveTab: (t: MobileTab) => void;
+
+  // Sub-view of the consolidated mobile Code tab (source / builder /
+  // model / generated). Persisted by App.tsx.
+  codeView: MobileCodeView;
+  setCodeView: (v: MobileCodeView) => void;
 
   // Share-link feedback
   copied: boolean;

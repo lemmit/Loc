@@ -32,6 +32,7 @@ import { FooterBar } from "./layout/FooterBar";
 import {
   formatUnsupportedDeployables,
   type LayoutCtx,
+  type MobileCodeView,
   type MobileTab,
   type ReactBundleStatus,
   type UnsupportedDeployable,
@@ -166,9 +167,21 @@ export default function App(): JSX.Element {
   // Bottom-tab navigation state for the mobile shell — lifted here so
   // `runFull` can jump to Preview/Backend after a clean cascade.
   // Persisted across reloads so users land back on their last panel.
-  const [activeTab, setActiveTab] = usePersistedState<MobileTab>(
+  // The slot is typed `MobileTab | "files"` so a value persisted before
+  // the Files tab was folded into Code still type-checks; coerce it to
+  // "code" before handing it to the shell (usePersistedState has no
+  // validator, so the stale value would otherwise select a dead panel).
+  const [activeTabRaw, setActiveTab] = usePersistedState<MobileTab | "files">(
     "loom.mobile.activeTab",
     "code",
+  );
+  const activeTab: MobileTab = activeTabRaw === "files" ? "code" : activeTabRaw;
+
+  // Sub-view of the consolidated Code tab — source / builder / model /
+  // generated. Persisted so a reload lands back on the same view.
+  const [codeView, setCodeView] = usePersistedState<MobileCodeView>(
+    "loom.mobile.codeView",
+    "source",
   );
 
   const sourceRef = useRef<string>(initialSource);
@@ -646,6 +659,8 @@ export default function App(): JSX.Element {
     setLiveMode,
     activeTab,
     setActiveTab,
+    codeView,
+    setCodeView,
     copied,
     copyShareLink,
     runGenerate: () => void runGenerate(),

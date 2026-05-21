@@ -88,6 +88,7 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
       options={options}
       onSelectPage={setPageName}
       onApply={handleApply}
+      compact={!ctx.isDesktop}
     />
   );
 }
