@@ -275,3 +275,25 @@ test("edits a view's where filter through the expression editor", async ({ page 
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
   await expect(op()).toHaveValue("!=");
 });
+
+test("edits a repository find's where filter through the expression editor", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Fullstack \.NET \(Banking\)/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  // `find byHolder(...) where this.holder == holder` on the Accounts repository.
+  await page.locator('[data-testid="rf__node-repository:Accounts"]').click();
+  await page.getByTestId("c4system-expr-pick").click();
+  await page.getByRole("option", { name: "find byHolder where: this.holder == holder" }).click();
+
+  const op = () => page.getByTestId("c4expr").getByTestId("c4expr-op");
+  await expect(op()).toHaveValue("==");
+  await op().click();
+  await page.getByRole("option", { name: "!=", exact: true }).click();
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+  await expect(op()).toHaveValue("!=");
+});
