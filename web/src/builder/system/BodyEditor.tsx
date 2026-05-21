@@ -6,30 +6,9 @@ import { Button, Group, Stack, Text, Textarea } from "@mantine/core";
 // blur; the parent splices + re-parses and returns whether it committed (a
 // syntactically-invalid edit is rejected and flagged here).  Semantic errors
 // surface in the Problems panel after a commit lands.
-
-/** Single-expression body editor (for `function … = <expr>`). Commits on blur;
- *  a syntactically-invalid expression is rejected and flagged. Re-seed by
- *  keying the element on the source revision. */
-export function FunctionBodyField({ value, onCommit }: { value: string; onCommit: (text: string) => boolean }): JSX.Element {
-  const [error, setError] = useState(false);
-  return (
-    <Textarea
-      size="xs"
-      label="Function body"
-      autosize
-      minRows={1}
-      defaultValue={value}
-      error={error ? "invalid expression" : undefined}
-      data-testid="c4system-fn-body"
-      styles={{ input: { fontFamily: "monospace", fontSize: 11 } }}
-      onFocus={() => error && setError(false)}
-      onBlur={(e) => {
-        const v = e.currentTarget.value;
-        if (v.trim() !== value.trim() && !onCommit(v)) setError(true);
-      }}
-    />
-  );
-}
+//
+// (Single-expression bodies — `function … = <expr>`, derived props, invariants
+// — are edited by the structured `ExpressionEditor`, not here.)
 
 interface BodyEditorProps {
   statements: string[];

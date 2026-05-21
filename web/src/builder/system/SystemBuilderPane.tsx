@@ -36,16 +36,16 @@ import { currentTarget, isRebindKind, rebindReference, rebindTargets, targetKind
 import {
   addStatement,
   deleteStatement,
-  editFunctionBody,
   editStatement,
-  functionBody,
-  listFunctions,
   listOperations,
   listStatements,
   moveStatement,
   type BodyLocator,
 } from "./body";
-import { BodyEditor, FunctionBodyField } from "./BodyEditor";
+import { BodyEditor } from "./BodyEditor";
+import { editExprSlot, exprSlotOptions, slotExpr, type ExprSlot } from "./expr-slots";
+import { seedExpr } from "./expr-model";
+import { ExprSlotEditor } from "./ExpressionEditor";
 
 // Editable structural model graph (React Flow).  Reads the parsed AST into a
 // node/edge graph, renders it, and edits splice the backing AST node's CST
@@ -140,13 +140,13 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const [nameDraft, setNameDraft] = useState("");
   const [renaming, setRenaming] = useState(false);
   const [opName, setOpName] = useState<string | null>(null);
-  const [fnName, setFnName] = useState<string | null>(null);
+  const [slotKey, setSlotKey] = useState<string | null>(null);
 
   useEffect(() => {
     const sel = selectedId;
     setNameDraft(sel ? sel.slice(sel.indexOf(":") + 1) : "");
     setOpName(null);
-    setFnName(null);
+    setSlotKey(null);
   }, [selectedId]);
 
   useEffect(() => {
@@ -428,31 +428,37 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
               </Stack>
             )}
             {(selected.kind === "aggregate" || selected.kind === "valueobject") &&
-              listFunctions(selected.ast).length > 0 && (
-                <Stack gap={4}>
-                  <Select
-                    size="xs"
-                    label="Function body"
-                    placeholder="pick a function…"
-                    data={listFunctions(selected.ast)}
-                    value={fnName}
-                    data-testid="c4system-fn-pick"
-                    onChange={setFnName}
-                  />
-                  {fnName && (
-                    <FunctionBodyField
-                      key={`${selected.id}:${fnName}:${rev}`}
-                      value={functionBody(parsed.ast, selected.name, fnName) ?? ""}
-                      onCommit={(text) => {
-                        const next = editFunctionBody(ctx.getSource(), selected.name, fnName, text);
-                        if (next == null) return false;
-                        apply(next, true);
-                        return true;
-                      }}
+              (() => {
+                const options = exprSlotOptions(selected.ast);
+                if (options.length === 0) return null;
+                const slot = options.find((o) => o.value === slotKey)?.slot;
+                const expr = slot ? slotExpr(parsed.ast, slot) : null;
+                return (
+                  <Stack gap={4}>
+                    <Select
+                      size="xs"
+                      label="Expression"
+                      placeholder="pick a function / derived / invariant…"
+                      data={options.map((o) => ({ value: o.value, label: o.label }))}
+                      value={slotKey}
+                      data-testid="c4system-expr-pick"
+                      onChange={setSlotKey}
                     />
-                  )}
-                </Stack>
-              )}
+                    {slot && expr && (
+                      <ExprSlotEditor
+                        key={`${selected.id}:${slotKey}:${rev}`}
+                        seed={seedExpr(expr)}
+                        onCommit={(text) => {
+                          const next = editExprSlot(ctx.getSource(), slot as ExprSlot, text);
+                          if (next == null) return false;
+                          apply(next, true);
+                          return true;
+                        }}
+                      />
+                    )}
+                  </Stack>
+                );
+              })()}
             <ScrollArea style={{ flex: 1, minHeight: 0 }}>
               <Textarea
                 size="xs"

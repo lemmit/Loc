@@ -219,12 +219,28 @@ test("edits an operation body via the aggregate inspector", async ({ page }) => 
   await page.getByTestId("c4system-stmt-add").click();
   await expect.poll(async () => rows.count()).toBe(5);
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+});
 
-  // Edit the aggregate's function body (single expression).
-  await page.getByTestId("c4system-fn-pick").click();
-  await page.getByRole("option", { name: "isMutable", exact: true }).click();
-  await expect(page.getByTestId("c4system-fn-body")).toBeVisible();
-  await page.getByTestId("c4system-fn-body").fill("status != Confirmed");
-  await page.getByTestId("c4system-fn-body").blur();
+test("edits an expression structurally (operator dropdown + leaf)", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  // Money's `amount >= 0` invariant decomposes into a structured operator tree.
+  await page.locator('[data-testid="rf__node-valueobject:Money"]').click();
+  await page.getByTestId("c4system-expr-pick").click();
+  await page.getByRole("option", { name: "invariant: amount >= 0" }).click();
+  await expect(page.getByTestId("c4expr")).toBeVisible();
+
+  // Change the operator via the dropdown → committed, re-seeded from source.
+  const op = () => page.getByTestId("c4expr").getByTestId("c4expr-op");
+  await expect(op()).toHaveValue(">=");
+  await op().click();
+  await page.getByRole("option", { name: ">", exact: true }).click();
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+  await expect(op()).toHaveValue(">");
 });
