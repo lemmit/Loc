@@ -1,6 +1,7 @@
-// Main-thread client for the TS-transform worker.  Exposes a single
-// `compile(ts) → js` the API test runner consumes as its `compile`
-// seam.
+// Main-thread client for the esbuild-wasm test worker.
+//   - `compile(ts)`  → type-strip a single file (API runner).
+//   - `buildUi(entry, files)` → bundle the UI spec + page objects with
+//     `@playwright/test` aliased (UI runner).
 
 import type {
   TransformRequest,
@@ -30,12 +31,20 @@ export class TsTransformClient {
     };
   }
 
-  compile(ts: string): Promise<string> {
+  private request(payload: Omit<TransformRequest, "id">): Promise<string> {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
-      this.worker.postMessage({ id, ts } satisfies TransformRequest);
+      this.worker.postMessage({ id, ...payload } as TransformRequest);
     });
+  }
+
+  compile(ts: string): Promise<string> {
+    return this.request({ ts });
+  }
+
+  buildUi(entry: string, files: Record<string, string>): Promise<string> {
+    return this.request({ build: { entry, files } });
   }
 
   dispose(): void {

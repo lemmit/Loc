@@ -67,7 +67,7 @@ function deepEqual(a: unknown, b: unknown): boolean {
   return ak.every((k) => deepEqual(ao[k], bo[k]));
 }
 
-function makeExpect(received: unknown): Expectation {
+export function makeExpect(received: unknown): Expectation {
   return {
     toBe(expected: unknown): void {
       if (received !== expected) {
