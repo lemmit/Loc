@@ -151,6 +151,10 @@ Done:
   inspector "Expression" picker (`expr-slots.ts`). A **structured⇄text toggle**
   lets advanced users edit the whole expression as raw text (same
   reparse-on-commit validation). Gated by `test/system-expr.test.ts` + e2e.
+- **View editing** — view nodes expose their `where` filter and each `bind`
+  expression through the same Expression picker + editor, so views are editable
+  in the modeller (`viewSlotOptions` in `expr-slots.ts`). Gated by
+  `test/system-expr.test.ts` + e2e.
 
 Open:
 
@@ -161,7 +165,7 @@ Open:
   in-scope names).
 - **Expression editor in more slots** — statement-expression slots
   (`let`/`:=`/`precondition` values inside bodies) and repository find `where`
-  clauses, reusing the same recursive editor.
+  clauses, reusing the same recursive editor (view filters/binds already done).
 - **Field rename** — needs member-access reference resolution (via the
   type-system / IR) to update `this.field` / view binds safely.
 - **Repository `find` editing** (params + where-clause expressions).
