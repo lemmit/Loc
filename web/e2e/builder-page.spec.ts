@@ -145,3 +145,30 @@ test("palette adds a data primitive with a binding dropdown", async ({ page }) =
   await expect(page.getByTestId("c4node-Form").first()).toBeVisible();
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
+
+test("renders previously-Opaque primitives (Stat, Tabs) as editable nodes", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Components storybook/);
+
+  await page.getByTestId("doc-tab-builder").click();
+  await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
+
+  // These used to collapse into one Opaque source blob; now each is a real,
+  // selectable node (Stat/Tabs are recognised; a Tab is editable inside Tabs).
+  await expect(page.getByTestId("c4node-Stat").first()).toBeVisible();
+  await expect(page.getByTestId("c4node-Tabs").first()).toBeVisible();
+  await expect(page.getByTestId("c4node-Tab").first()).toBeVisible();
+
+  // Editing a Stat's label round-trips through the source and re-seeds.
+  const stat = page.getByTestId("c4node-Stat").filter({ hasText: "Active users" });
+  await stat.first().click();
+  const labelInput = page.getByTestId("c4builder-prop-label");
+  await expect(labelInput).toHaveValue("Active users");
+  await labelInput.fill("Edited Stat");
+  await expect(page.getByTestId("c4builder-canvas")).toContainText("Edited Stat");
+
+  await page.getByTestId("c4builder-apply").click();
+  await expect(page.getByTestId("c4builder-canvas")).toContainText("Edited Stat");
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+});
