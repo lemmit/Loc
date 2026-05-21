@@ -1,12 +1,21 @@
 // Main-thread client for the esbuild-wasm test worker.
 //   - `compile(ts)`  → type-strip a single file (API runner).
-//   - `buildUi(entry, files)` → bundle the UI spec + page objects with
-//     `@playwright/test` aliased (UI runner).
+//   - `build(entry, files, aliases)` → bundle a generated suite + its
+//     imports, aliasing the framework module (UI / unit runners).
 
 import type {
   TransformRequest,
   TransformResponse,
 } from "./transform.worker.js";
+
+/** esbuild build seam: bundle a suite entry from a file map, aliasing
+ *  the framework module to a shim.  Injected so runners are decoupled
+ *  from the worker. */
+export type EsbuildBuild = (
+  entry: string,
+  files: Record<string, string>,
+  aliases: Record<string, string>,
+) => Promise<string>;
 
 export class TsTransformClient {
   private worker: Worker;
@@ -43,8 +52,14 @@ export class TsTransformClient {
     return this.request({ ts });
   }
 
-  buildUi(entry: string, files: Record<string, string>): Promise<string> {
-    return this.request({ build: { entry, files } });
+  /** Bundle a generated test suite, aliasing the framework module
+   *  (`vitest` / `@playwright/test`) to a globalThis-reading shim. */
+  build(
+    entry: string,
+    files: Record<string, string>,
+    aliases: Record<string, string>,
+  ): Promise<string> {
+    return this.request({ build: { entry, files, aliases } });
   }
 
   dispose(): void {
