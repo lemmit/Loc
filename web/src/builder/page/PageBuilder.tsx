@@ -8,6 +8,8 @@ interface PageBuilderProps {
   initialNodes: SerializedNodes;
   pages: string[];
   pageName: string;
+  /** Typed option sets for `ref` props (e.g. { aggregate: [...] }). */
+  options: Record<string, string[]>;
   onSelectPage: (name: string) => void;
   onApply: (nodes: SerializedNodes) => void;
 }
@@ -15,7 +17,7 @@ interface PageBuilderProps {
 // Structural page-body editor.  Palette (add) | canvas (arrange/select) |
 // settings (edit props).  "Apply to source" hands the serialized tree back to
 // BuilderPane, which regenerates the `body:` and splices it into `.ddd`.
-export default function PageBuilder({ initialNodes, pages, pageName, onSelectPage, onApply }: PageBuilderProps): JSX.Element {
+export default function PageBuilder({ initialNodes, pages, pageName, options, onSelectPage, onApply }: PageBuilderProps): JSX.Element {
   return (
     <Editor resolver={resolver} key={pageName}>
       <Box style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -27,14 +29,14 @@ export default function PageBuilder({ initialNodes, pages, pageName, onSelectPag
               <Frame data={initialNodes} />
             </Box>
           </ScrollArea>
-          <SettingsPanel />
+          <SettingsPanel options={options} />
         </Box>
       </Box>
     </Editor>
   );
 }
 
-function Toolbar({ pages, pageName, onSelectPage, onApply }: Omit<PageBuilderProps, "initialNodes">): JSX.Element {
+function Toolbar({ pages, pageName, onSelectPage, onApply }: Pick<PageBuilderProps, "pages" | "pageName" | "onSelectPage" | "onApply">): JSX.Element {
   const { query } = useEditor();
   return (
     <Group px="xs" py={4} bg="dark.6" gap="xs" justify="space-between" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
@@ -87,7 +89,7 @@ function Palette(): JSX.Element {
   );
 }
 
-function SettingsPanel(): JSX.Element {
+function SettingsPanel({ options }: { options: Record<string, string[]> }): JSX.Element {
   const { id, name, props, actions } = useEditor((state) => {
     const selected = [...state.events.selected][0];
     const node = selected ? state.nodes[selected] : undefined;
@@ -118,6 +120,19 @@ function SettingsPanel(): JSX.Element {
       {id && fields.map((f) =>
         f.key === "raw" ? (
           <Textarea key={f.key} size="xs" label="Source" autosize minRows={2} value={String(props[f.key] ?? "")} onChange={(e) => set(f.key, e.currentTarget.value)} />
+        ) : f.kind === "ref" ? (
+          <Select
+            key={f.key}
+            size="xs"
+            mb="xs"
+            label={f.key}
+            clearable
+            searchable
+            data={[...new Set([...(options[f.options ?? ""] ?? []), props[f.key]].filter(Boolean) as string[])]}
+            value={props[f.key] != null ? String(props[f.key]) : null}
+            data-testid={`c4builder-prop-${f.key}`}
+            onChange={(v) => set(f.key, v || undefined)}
+          />
         ) : f.kind === "int" ? (
           <NumberInput key={f.key} size="xs" mb="xs" label={f.key} min={1} max={6} value={Number(props[f.key] ?? 1)} onChange={(v) => set(f.key, typeof v === "number" ? v : undefined)} />
         ) : (

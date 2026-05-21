@@ -33,11 +33,21 @@ function collectPages(ast: unknown): PageEntry[] {
   return out;
 }
 
+// Typed option sets for `ref` props (drives the binding dropdowns).
+function collectOptions(ast: unknown): Record<string, string[]> {
+  const aggregate = new Set<string>();
+  for (const node of AstUtils.streamAst(ast as Parameters<typeof AstUtils.streamAst>[0])) {
+    if (node.$type === "Aggregate") aggregate.add((node as unknown as { name: string }).name);
+  }
+  return { aggregate: [...aggregate].sort() };
+}
+
 export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   // Bumped on Apply to re-read the (mutated) source and re-seed the canvas.
   const [rev, setRev] = useState(0);
   const parsed = useMemo(() => parseDdd(ctx.getSource()), [ctx, rev]);
   const pages = useMemo(() => collectPages(parsed.ast), [parsed]);
+  const options = useMemo(() => collectOptions(parsed.ast), [parsed]);
 
   const [pageName, setPageName] = useState<string>("");
   const current = pages.find((p) => p.name === pageName) ?? pages[0];
@@ -70,6 +80,7 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
       initialNodes={initialNodes}
       pages={pages.map((p) => p.name)}
       pageName={current.name}
+      options={options}
       onSelectPage={setPageName}
       onApply={handleApply}
     />

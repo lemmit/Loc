@@ -14,11 +14,13 @@ import { printExpr } from "../../../../src/language/print/index.js";
 // nothing outside is touched.
 // ---------------------------------------------------------------------------
 
-export type PropKind = "string" | "int";
+export type PropKind = "string" | "int" | "ref";
 
 interface NamedProp {
   key: string;
   kind: PropKind;
+  /** For `ref` props: which option set populates the dropdown (e.g. "aggregate"). */
+  options?: string;
 }
 
 interface PrimitiveSpec {
@@ -44,6 +46,8 @@ const SPECS = {
   Alert: { kind: "leaf", positional: ["message"], named: [{ key: "color", kind: "string" }] },
   Empty: { kind: "leaf", positional: ["message"] },
   Divider: { kind: "leaf" },
+  List: { kind: "leaf", named: [{ key: "of", kind: "ref", options: "aggregate" }, { key: "testid", kind: "string" }] },
+  Form: { kind: "leaf", named: [{ key: "of", kind: "ref", options: "aggregate" }, { key: "creates", kind: "ref", options: "aggregate" }, { key: "testid", kind: "string" }] },
 } satisfies Record<string, PrimitiveSpec>;
 
 export type PrimitiveName = keyof typeof SPECS | "Opaque";
@@ -59,7 +63,7 @@ export function isContainer(name: PrimitiveName): boolean {
 
 /** Settings/seed field descriptors for a primitive (drives the panel UI).
  *  Unknown names (e.g. the synthetic `Root`) have no editable fields. */
-export function propFields(name: string): { key: string; kind: PropKind }[] {
+export function propFields(name: string): { key: string; kind: PropKind; options?: string }[] {
   if (name === "Opaque") return [{ key: "raw", kind: "string" }];
   if (!(name in SPECS)) return [];
   const spec = specOf(name as keyof typeof SPECS);
@@ -142,6 +146,11 @@ export function seedFromBody(expr: Expression): BuilderNode {
       const s = asString(v);
       if (s === null) return opaque(expr);
       props[k] = s;
+    } else if (kind === "ref") {
+      // A binding like `of: Order` — only a bare identifier is modelled;
+      // qualified refs (`Sales.Order`) fall back to opaque.
+      if (v.$type !== "NameRef") return opaque(expr);
+      props[k] = v.name;
     } else {
       if (v.$type !== "IntLit") return opaque(expr);
       props[k] = v.value;
@@ -161,7 +170,8 @@ export function emitBody(node: BuilderNode): string {
   for (const n of spec.named ?? []) {
     const v = node.props[n.key];
     if (v === undefined || v === "") continue;
-    parts.push(`${n.key}: ${n.kind === "int" ? Number(v) : JSON.stringify(String(v))}`);
+    const rendered = n.kind === "int" ? String(Number(v)) : n.kind === "ref" ? String(v) : JSON.stringify(String(v));
+    parts.push(`${n.key}: ${rendered}`);
   }
   return `${node.name}(${parts.join(", ")})`;
 }

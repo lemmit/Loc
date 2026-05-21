@@ -69,3 +69,35 @@ describe("page-builder model round-trip", () => {
     });
   }
 });
+
+describe("page-builder model — primitive coverage", () => {
+  // Seed → emit → splice → re-parse a body in isolation; assert identical AST.
+  const roundtrips = (bodyExpr: string): void => {
+    const doc = `system S { ui U { page P { body: ${bodyExpr} } } }`;
+    const original = parser.parse(doc);
+    expect(original.parserErrors, `fixture must parse:\n${bodyExpr}`).toEqual([]);
+    const body = [...AstUtils.streamAst(original.value)].find((n) => n.$type === "BodyProp") as BodyProp;
+    const cst = body.expr.$cstNode!;
+    const emitted = emitBody(seedFromBody(body.expr));
+    const spliced = doc.slice(0, cst.offset) + emitted + doc.slice(cst.end);
+    const re = parser.parse(spliced);
+    expect(re.parserErrors, `emitted must parse:\n${emitted}`).toEqual([]);
+    expect(norm(re.value), `emitted must round-trip:\n${emitted}`).toEqual(norm(original.value));
+  };
+
+  for (const bodyExpr of [
+    'List(of: Order)',
+    'Form(of: Order, testid: "orders-new")',
+    'Form(creates: Product)',
+    'Badge("Alpha", color: "blue")',
+    'Alert("Couldn\'t load")',
+    'Anchor("Home", to: "/")',
+    'Divider()',
+    'Empty("Nothing here")',
+    'Grid(Text("a"), Text("b"), Text("c"))',
+    'Toolbar(Button("Save"), Button("Cancel"))',
+    'Stack(Heading("Title", level: 2), List(of: Order))',
+  ]) {
+    it(`round-trips ${bodyExpr}`, () => roundtrips(bodyExpr));
+  }
+});

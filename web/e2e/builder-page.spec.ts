@@ -57,3 +57,24 @@ test("palette adds a primitive and writes it back to source", async ({ page }) =
 
 
 
+
+test("palette adds a data primitive with a binding dropdown", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Components storybook/);
+
+  await page.getByTestId("doc-tab-builder").click();
+  await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
+
+  // Add a Form and select it; its `of:` binding renders as a dropdown.
+  await page.getByTestId("c4palette-Form").click();
+  const formNode = page.getByTestId("c4node-Form").first();
+  await expect(formNode).toBeVisible();
+  await formNode.click();
+  await expect(page.getByTestId("c4builder-prop-of")).toBeVisible();
+
+  // Applying a binding primitive keeps the source valid (re-seeds cleanly).
+  await page.getByTestId("c4builder-apply").click();
+  await expect(page.getByTestId("c4node-Form").first()).toBeVisible();
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+});

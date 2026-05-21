@@ -47,6 +47,10 @@ function renderLeaf(name: PrimitiveName, p: Props): ReactNode {
       return pill(String(p.label || "Button") + (p.to ? ` →${p.to}` : ""), "var(--mantine-color-blue-7)");
     case "Anchor":
       return <a style={{ color: "var(--mantine-color-blue-4)" }}>{String(p.text || "Anchor")}{p.to ? ` →${p.to}` : ""}</a>;
+    case "List":
+      return <span style={{ color: "var(--mantine-color-teal-4)" }}>⊟ List{p.of ? ` of ${p.of}` : ""}</span>;
+    case "Form":
+      return <span style={{ color: "var(--mantine-color-teal-4)" }}>▤ Form{p.of ? ` of ${p.of}` : p.creates ? ` creates ${p.creates}` : ""}</span>;
     default:
       return String(name);
   }
