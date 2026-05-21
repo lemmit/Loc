@@ -108,8 +108,22 @@ Done:
   inspector shows a Select that rewrites the reference's `$refNode` CST span; the
   graph edge re-derives on the next parse (`web/src/builder/system/rebind.ts`).
   Gated by `test/system-rebind.test.ts` + e2e.
+- **Operation & workflow body editing** — a shared statement-list editor
+  (`web/src/builder/system/body.ts` + `BodyEditor.tsx`) for the two `Statement[]`
+  bodies. Workflow nodes edit their body directly; aggregates expose an
+  operation picker → that operation's body. Each statement is an editable text
+  row committed on blur; an edit/add is spliced and the whole document re-parsed,
+  so only syntactically-valid edits commit (semantic errors surface in the
+  Problems panel). Statements show verbatim source, so untouched bodies
+  round-trip byte-for-byte. Gated by `test/system-body.test.ts` + e2e.
 
 Open:
+
+- **Structured expression editor** — the planned shared layer on top of the
+  statement rows: per-node operator/operand/call pickers instead of free text.
+  Would also serve derived props, invariants, find `where` clauses.
+- **Function bodies** (`FunctionDecl.body` is a single `Expression`, not
+  `Statement[]`) and statement **reorder** — small extensions of the body editor.
 
 - **Event wiring** — `event` nodes currently have no edges (events aren't
   referenced declaratively; they're emitted from operation bodies). Wiring

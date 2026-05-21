@@ -33,6 +33,8 @@ import {
   type TypeSpec,
 } from "./fields";
 import { currentTarget, isRebindKind, rebindReference, rebindTargets, targetKindOf } from "./rebind";
+import { addStatement, deleteStatement, editStatement, listOperations, listStatements, type BodyLocator } from "./body";
+import { BodyEditor } from "./BodyEditor";
 
 // Editable structural model graph (React Flow).  Reads the parsed AST into a
 // node/edge graph, renders it, and edits splice the backing AST node's CST
@@ -126,10 +128,12 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [nameDraft, setNameDraft] = useState("");
   const [renaming, setRenaming] = useState(false);
+  const [opName, setOpName] = useState<string | null>(null);
 
   useEffect(() => {
     const sel = selectedId;
     setNameDraft(sel ? sel.slice(sel.indexOf(":") + 1) : "");
+    setOpName(null);
   }, [selectedId]);
 
   useEffect(() => {
@@ -238,6 +242,25 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     const next = rebindReference(ctx.getSource(), selected.kind, selected.name, target);
     if (next != null) apply(next, true);
   };
+
+  const bodyHandlers = (loc: BodyLocator) => ({
+    onEdit: (i: number, text: string): boolean => {
+      const next = editStatement(ctx.getSource(), loc, i, text);
+      if (next == null) return false;
+      apply(next, true);
+      return true;
+    },
+    onDelete: (i: number): void => {
+      const next = deleteStatement(ctx.getSource(), loc, i);
+      if (next != null) apply(next, true);
+    },
+    onAdd: (text: string): boolean => {
+      const next = addStatement(ctx.getSource(), loc, text);
+      if (next == null) return false;
+      apply(next, true);
+      return true;
+    },
+  });
 
   return (
     <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
@@ -358,6 +381,33 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
                     </Button>
                   </Group>
                 ))}
+              </Stack>
+            )}
+            {selected.kind === "workflow" && (
+              <BodyEditor
+                key={`${selected.id}:${rev}`}
+                statements={listStatements(parsed.ast, { kind: "workflow", name: selected.name }) ?? []}
+                {...bodyHandlers({ kind: "workflow", name: selected.name })}
+              />
+            )}
+            {selected.kind === "aggregate" && (
+              <Stack gap={4}>
+                <Select
+                  size="xs"
+                  label="Operation body"
+                  placeholder="pick an operation…"
+                  data={listOperations(selected.ast)}
+                  value={opName}
+                  data-testid="c4system-op-pick"
+                  onChange={setOpName}
+                />
+                {opName && (
+                  <BodyEditor
+                    key={`${selected.id}:${opName}:${rev}`}
+                    statements={listStatements(parsed.ast, { kind: "operation", aggregate: selected.name, op: opName }) ?? []}
+                    {...bodyHandlers({ kind: "operation", aggregate: selected.name, op: opName })}
+                  />
+                )}
               </Stack>
             )}
             <ScrollArea style={{ flex: 1, minHeight: 0 }}>
