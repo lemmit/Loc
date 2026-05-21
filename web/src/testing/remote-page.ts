@@ -10,6 +10,12 @@ import type { ChainNode, DriverOp, DriverReply } from "./locator-chain.js";
 
 export interface DriverTransport {
   send(op: DriverOp): Promise<DriverReply>;
+  /** Current frame URL, read synchronously — Playwright's `page.url()`
+   *  is sync, and page objects use it that way
+   *  (`page.url().split("/")`).  Same-origin transports read the live
+   *  iframe location; a future postMessage transport returns a value
+   *  cached from navigation events. */
+  currentUrl(): string;
 }
 
 export class RemoteLocator {
@@ -95,10 +101,10 @@ export class RemotePage {
     const r = await this.transport.send({ kind: "page", op: "goto", arg: path });
     if (!r.ok) throw new Error(r.message);
   }
-  async url(): Promise<string> {
-    const r = await this.transport.send({ kind: "page", op: "url" });
-    if (!r.ok) throw new Error(r.message);
-    return String(r.value ?? "");
+  /** Synchronous, matching Playwright — page objects call it as
+   *  `this.page.url().split("/")`. */
+  url(): string {
+    return this.transport.currentUrl();
   }
   async waitForURL(matcher: string | RegExp): Promise<void> {
     const op: DriverOp =
