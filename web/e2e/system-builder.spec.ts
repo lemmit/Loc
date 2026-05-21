@@ -159,3 +159,54 @@ test("rebinds a repository's target aggregate from the inspector", async ({ page
   await expect(page.getByTestId("c4system-rebind")).toHaveValue("Order");
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
+
+test("edits a workflow body's statements", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  await page.locator('[data-testid="rf__node-workflow:placeOrder"]').click();
+  await expect(page.getByTestId("c4system-body")).toBeVisible();
+  const rows = page.getByTestId("c4system-stmt-row");
+  await expect.poll(async () => rows.count()).toBeGreaterThan(0);
+  const before = await rows.count();
+
+  // Add a valid statement → row appears, source stays valid.
+  await page.getByTestId("c4system-stmt-add-input").fill("let extra = customer");
+  await page.getByTestId("c4system-stmt-add").click();
+  await expect.poll(async () => rows.count()).toBe(before + 1);
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+
+  // Delete it again.
+  await rows.last().getByTestId("c4system-stmt-delete").click();
+  await expect.poll(async () => rows.count()).toBe(before);
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+});
+
+test("edits an operation body via the aggregate inspector", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  // Select the Order aggregate, pick the `confirm` operation → its body shows.
+  await page.locator('[data-testid="rf__node-aggregate:Order"]').click();
+  await page.getByTestId("c4system-op-pick").click();
+  await page.getByRole("option", { name: "confirm", exact: true }).click();
+  await expect(page.getByTestId("c4system-body")).toBeVisible();
+
+  const rows = page.getByTestId("c4system-stmt-row");
+  await expect.poll(async () => rows.count()).toBe(4);
+
+  await page.getByTestId("c4system-stmt-add-input").fill("precondition true");
+  await page.getByTestId("c4system-stmt-add").click();
+  await expect.poll(async () => rows.count()).toBe(5);
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+});
