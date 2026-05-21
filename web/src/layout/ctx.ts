@@ -54,6 +54,8 @@ export interface LayoutCtx {
   setExampleId: (v: string) => void;
   augmentedExamplesList: LoomExample[];
   initialSource: string;
+  /** The live editor source (reflects unsaved edits); for the Builder. */
+  getSource: () => string;
 
   // Workspace (IDB-backed VFS)
   workspace: WorkspaceState;
