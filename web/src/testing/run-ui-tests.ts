@@ -8,14 +8,11 @@
 import { createUiHarness, runUiTests, type UiTestCase } from "./ui-harness.js";
 import { RemotePage, type DriverTransport } from "./remote-page.js";
 import type { TestResult } from "./harness.js";
+import type { EsbuildBuild } from "./transform-client.js";
 import type { VirtualFile } from "../build/protocol.js";
 
-/** Bundle the e2e spec (+ page objects) into a runnable ESM whose
- *  `@playwright/test` import resolves to `globalThis.__loomPw`. */
-export type UiBundle = (
-  entry: string,
-  files: Record<string, string>,
-) => Promise<string>;
+const PW_SHIM =
+  "export const test = globalThis.__loomPw.test; export const expect = globalThis.__loomPw.expect;";
 
 /** The generated UI spec within a generated file tree, if any. */
 export function findUiTestFile(files: VirtualFile[]): VirtualFile | null {
@@ -45,7 +42,7 @@ interface PwGlobal {
 export interface LoadUiSuiteOpts {
   entry: string;
   files: Record<string, string>;
-  bundle: UiBundle;
+  build: EsbuildBuild;
 }
 
 /** Bundle + register the UI suite (run `test(...)` calls, NOT the
@@ -53,7 +50,9 @@ export interface LoadUiSuiteOpts {
  *  module captures `test`/`expect` from `globalThis.__loomPw` at import,
  *  so it's safe to clear afterwards — the cases keep working. */
 export async function loadUiSuite(opts: LoadUiSuiteOpts): Promise<UiTestCase[]> {
-  const js = await opts.bundle(opts.entry, opts.files);
+  const js = await opts.build(opts.entry, opts.files, {
+    "@playwright/test": PW_SHIM,
+  });
   const harness = createUiHarness();
   const g = globalThis as unknown as { __loomPw?: PwGlobal };
   g.__loomPw = { test: harness.test, expect: harness.expect };

@@ -80,6 +80,18 @@ describe("harness", () => {
     expect(results[0].suite).toBe("Group");
   });
 
+  it("toThrow passes when the call throws synchronously, fails otherwise", async () => {
+    const h = createHarness();
+    h.it("throws", () =>
+      h.expect(() => {
+        throw new Error("boom");
+      }).toThrow(),
+    );
+    h.it("no throw", () => h.expect(() => 1).toThrow());
+    const results = await runTests(h.tests);
+    expect(results.map((r) => r.status)).toEqual(["pass", "fail"]);
+  });
+
   it("rejects.toThrow passes when the call rejects, fails when it resolves", async () => {
     const h = createHarness();
     h.it("throws", async () =>

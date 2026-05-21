@@ -35,7 +35,16 @@ export interface Harness {
 interface Expectation {
   toBe(expected: unknown): void;
   toEqual(expected: unknown): void;
+  /** Synchronous throw assertion — `expect(() => …).toThrow()`, as the
+   *  generated aggregate unit tests emit. */
+  toThrow(matcher?: string | RegExp): void;
   readonly rejects: { toThrow(matcher?: string | RegExp): Promise<void> };
+}
+
+function matchesError(err: unknown, matcher?: string | RegExp): boolean {
+  if (matcher == null) return true;
+  const msg = err instanceof Error ? err.message : String(err);
+  return typeof matcher === "string" ? msg.includes(matcher) : matcher.test(msg);
 }
 
 class AssertionError extends Error {}
@@ -82,6 +91,22 @@ export function makeExpect(received: unknown): Expectation {
           `expected ${stringify(received)} to equal ${stringify(expected)}`,
         );
       }
+    },
+    toThrow(matcher?: string | RegExp): void {
+      if (typeof received !== "function") {
+        throw new AssertionError("toThrow expects a function");
+      }
+      try {
+        (received as () => unknown)();
+      } catch (err) {
+        if (!matchesError(err, matcher)) {
+          throw new AssertionError(
+            `expected the thrown error to match ${String(matcher)}`,
+          );
+        }
+        return;
+      }
+      throw new AssertionError("expected the call to throw, but it did not");
     },
     get rejects() {
       return {

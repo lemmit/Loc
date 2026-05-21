@@ -1,10 +1,11 @@
 // esbuild-wasm worker for the test runner.  Two jobs:
 //   - `transform`: type-strip a single self-contained file (API runner).
-//   - `build`: bundle the generated UI spec + its page objects from an
-//     in-memory file map, aliasing `@playwright/test` to a shim that
-//     reads `globalThis.__loomPw` (UI runner).  `import type` of the
-//     generated api types is dropped by the ts loader, so those need no
-//     resolution; the only value import is `@playwright/test`.
+//   - `build`: bundle a generated test suite + its imports from an
+//     in-memory file map, aliasing the test framework module (`vitest`
+//     for unit suites, `@playwright/test` for UI suites) to a shim that
+//     reads the harness off `globalThis`.  `import type` of generated
+//     api types is dropped by the ts loader, so those need no
+//     resolution.
 //
 // Decoupled, tiny worker; esbuild is initialised once per thread (the
 // wasm bytes are already browser-cached from the project bundler).
@@ -14,7 +15,16 @@ import wasmURL from "esbuild-wasm/esbuild.wasm?url";
 
 export type TransformRequest =
   | { id: number; ts: string }
-  | { id: number; build: { entry: string; files: Record<string, string> } };
+  | {
+      id: number;
+      build: {
+        entry: string;
+        files: Record<string, string>;
+        /** Module specifier → replacement module source (a shim that
+         *  reads the harness off `globalThis`). */
+        aliases: Record<string, string>;
+      };
+    };
 
 export interface TransformResponse {
   id: number;
@@ -39,10 +49,6 @@ function ensureInit(): Promise<void> {
   }
   return initPromise;
 }
-
-const PW = "@playwright/test";
-const PW_SHIM =
-  "export const test = globalThis.__loomPw.test; export const expect = globalThis.__loomPw.expect;";
 
 function dirOf(path: string): string {
   return path.slice(0, path.lastIndexOf("/") + 1);
@@ -70,12 +76,17 @@ function resolveRelative(
   return null;
 }
 
-function vfsPlugin(files: Record<string, string>): esbuild.Plugin {
+function vfsPlugin(
+  files: Record<string, string>,
+  aliases: Record<string, string>,
+): esbuild.Plugin {
   return {
-    name: "loom-ui-vfs",
+    name: "loom-test-vfs",
     setup(build) {
       build.onResolve({ filter: /.*/ }, (args) => {
-        if (args.path === PW) return { path: PW, namespace: "pw" };
+        if (args.path in aliases) {
+          return { path: args.path, namespace: "alias" };
+        }
         if (args.kind === "entry-point") {
           return { path: normalize(args.path), namespace: "vfs" };
         }
@@ -87,8 +98,8 @@ function vfsPlugin(files: Record<string, string>): esbuild.Plugin {
         // are `import type` and dropped) — mark external defensively.
         return { path: args.path, external: true };
       });
-      build.onLoad({ filter: /.*/, namespace: "pw" }, () => ({
-        contents: PW_SHIM,
+      build.onLoad({ filter: /.*/, namespace: "alias" }, (args) => ({
+        contents: aliases[args.path],
         loader: "js",
       }));
       build.onLoad({ filter: /.*/, namespace: "vfs" }, (args) => ({
@@ -109,7 +120,7 @@ self.onmessage = async (ev: MessageEvent<TransformRequest>): Promise<void> => {
         bundle: true,
         format: "esm",
         write: false,
-        plugins: [vfsPlugin(data.build.files)],
+        plugins: [vfsPlugin(data.build.files, data.build.aliases)],
       });
       self.postMessage({
         id: data.id,
