@@ -3,6 +3,7 @@ import type {
   Aggregate,
   Api,
   Deployable,
+  EmitStmt,
   EventDecl,
   Module,
   Repository,
@@ -61,6 +62,18 @@ export interface SystemGraph {
 }
 
 const nodeId = (kind: NodeKind, name: string): string => `${kind}:${name}`;
+
+/** The graph node that owns an `emit` statement — the nearest aggregate or
+ *  workflow ancestor (operations live inside aggregates). */
+function emitterId(node: AstNode): string | null {
+  let cur = node.$container;
+  while (cur) {
+    if (cur.$type === "Aggregate") return nodeId("aggregate", (cur as Aggregate).name);
+    if (cur.$type === "Workflow") return nodeId("workflow", (cur as Workflow).name);
+    cur = cur.$container;
+  }
+  return null;
+}
 
 // Column-per-kind layout — deterministic so re-seeding doesn't jump nodes
 // around; the user can drag from here.  Domain kinds on the left, deployment
@@ -149,6 +162,12 @@ export function buildSystemGraph(ast: AstNode): SystemGraph {
         if (d.targets) addEdge(from, nodeId("deployable", d.targets.$refText), "targets");
         const uiRef = d.uiSugar?.ref ?? d.uiCompose?.ref ?? d.uiBlock?.ref;
         if (uiRef) addEdge(from, nodeId("ui", uiRef.$refText), "ui");
+        break;
+      }
+      case "EmitStmt": {
+        // `emit E { … }` in an operation/workflow body wires its owner → event.
+        const src = emitterId(node);
+        if (src) addEdge(src, nodeId("event", (node as EmitStmt).event.$refText), "emits");
         break;
       }
       default: break;

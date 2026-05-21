@@ -1,5 +1,13 @@
 import { AstUtils, type AstNode } from "langium";
-import type { Aggregate, Model, Operation, Statement, Workflow } from "../../../../src/language/generated/ast.js";
+import type {
+  Aggregate,
+  FunctionDecl,
+  Model,
+  Operation,
+  Statement,
+  ValueObject,
+  Workflow,
+} from "../../../../src/language/generated/ast.js";
 import { applyEdits } from "../edit-engine";
 import { parseDdd } from "../parse";
 
@@ -63,6 +71,47 @@ export function listStatements(ast: Model, loc: BodyLocator): string[] | null {
   return body.statements.map((s) => s.$cstNode?.text ?? "");
 }
 
+// --- function bodies (a single Expression, not Statement[]) ----------------
+
+function membersOf(node: AstNode): readonly AstNode[] {
+  if (node.$type === "Aggregate") return (node as Aggregate).members;
+  if (node.$type === "ValueObject") return (node as ValueObject).members;
+  return [];
+}
+
+/** Function names declared on an aggregate / value object. */
+export function listFunctions(node: AstNode): string[] {
+  return membersOf(node)
+    .filter((m): m is FunctionDecl => m.$type === "FunctionDecl")
+    .map((f) => f.name);
+}
+
+function findFunction(ast: Model, owner: string, fn: string): FunctionDecl | null {
+  for (const n of AstUtils.streamAst(ast)) {
+    if (
+      (n.$type === "Aggregate" || n.$type === "ValueObject") &&
+      (n as Aggregate | ValueObject).name === owner
+    ) {
+      const f = membersOf(n).find(
+        (m): m is FunctionDecl => m.$type === "FunctionDecl" && (m as FunctionDecl).name === fn,
+      );
+      if (f) return f;
+    }
+  }
+  return null;
+}
+
+/** The function's body expression, verbatim from source. */
+export function functionBody(ast: Model, owner: string, fn: string): string | null {
+  return findFunction(ast, owner, fn)?.body.$cstNode?.text ?? null;
+}
+
+export function editFunctionBody(source: string, owner: string, fn: string, text: string): string | null {
+  const cst = findFunction(parseDdd(source).ast, owner, fn)?.body.$cstNode;
+  if (!cst) return null;
+  return ifParses(applyEdits(source, [{ offset: cst.offset, end: cst.end, newText: text.trim() }]));
+}
+
 /** Leading whitespace of the line containing `offset`. */
 function lineIndent(source: string, offset: number): string {
   let start = offset;
@@ -93,6 +142,20 @@ export function deleteStatement(source: string, loc: BodyLocator, index: number)
   while (start > 0 && (source[start - 1] === " " || source[start - 1] === "\t")) start--;
   if (start > 0 && source[start - 1] === "\n") start--;
   return ifParses(applyEdits(source, [{ offset: start, end: cst.end, newText: "" }]));
+}
+
+export function moveStatement(source: string, loc: BodyLocator, index: number, dir: -1 | 1): string | null {
+  const body = resolveBody(parseDdd(source).ast, loc);
+  const a = body?.statements[index]?.$cstNode;
+  const b = body?.statements[index + dir]?.$cstNode;
+  if (!a || !b) return null;
+  // Swap the two statements' source text in place (whitespace between stays).
+  return ifParses(
+    applyEdits(source, [
+      { offset: a.offset, end: a.end, newText: b.text },
+      { offset: b.offset, end: b.end, newText: a.text },
+    ]),
+  );
 }
 
 export function addStatement(source: string, loc: BodyLocator, text: string): string | null {

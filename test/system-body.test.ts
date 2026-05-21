@@ -8,9 +8,13 @@ import type { Aggregate, Model } from "../src/language/generated/ast.js";
 import {
   addStatement,
   deleteStatement,
+  editFunctionBody,
   editStatement,
+  functionBody,
+  listFunctions,
   listOperations,
   listStatements,
+  moveStatement,
   type BodyLocator,
 } from "../web/src/builder/system/body.js";
 
@@ -80,6 +84,27 @@ describe("System builder — operation/workflow body editing", () => {
     const stmts = listStatements(parse(out), confirm)!;
     expect(stmts).toHaveLength(3);
     expect(stmts[0]).toBe("precondition lines.count > 0");
+  });
+
+  it("reorders statements by swapping them in place", () => {
+    const out = moveStatement(sales, confirm, 2, -1)!;
+    expect(listStatements(parse(out), confirm)).toEqual([
+      "precondition isMutable()",
+      "status := Confirmed",
+      "precondition lines.count > 0",
+      "emit OrderConfirmed { order: id, at: now() }",
+    ]);
+    // Can't move past the ends.
+    expect(moveStatement(sales, confirm, 0, -1)).toBeNull();
+  });
+
+  it("lists and edits a function's single-expression body", () => {
+    expect(listFunctions(aggregate(parse(sales), "Order"))).toContain("isMutable");
+    expect(functionBody(parse(sales), "Order", "isMutable")).toBe("status == Draft");
+    const out = editFunctionBody(sales, "Order", "isMutable", "status != Draft")!;
+    expect(functionBody(parse(out), "Order", "isMutable")).toBe("status != Draft");
+    // Invalid expression rejected.
+    expect(editFunctionBody(sales, "Order", "isMutable", "status ==")).toBeNull();
   });
 
   it("returns null for unknown owners / out-of-range indexes", () => {
