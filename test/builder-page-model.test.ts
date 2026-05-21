@@ -90,6 +90,11 @@ describe("page-builder model — primitive coverage", () => {
     'Form(of: Order, testid: "orders-new")',
     'Form(creates: Product)',
     'Badge("Alpha", color: "blue")',
+    // Expression-valued props (the `expr` prop kind): data-bound args must
+    // round-trip verbatim, not collapse the whole call to Opaque.
+    'Badge(order.status)',
+    'Badge(line.total, color: "green")',
+    'Badge(format(amount))',
     'Alert("Couldn\'t load")',
     'Anchor("Home", to: "/")',
     'Divider()',
@@ -145,5 +150,22 @@ describe("page-builder model — container-with-props seed shape", () => {
     expect(paper.name).toBe("Paper");
     expect(paper.props.padding).toBe("lg");
     expect(paper.children.map((c) => c.name)).toEqual(["Text"]);
+  });
+
+  it("recognises data-bound expr props (not Opaque)", () => {
+    const member = seed("Badge(order.status)");
+    expect(member.name).toBe("Badge");
+    expect(member.props.value).toBe("order.status");
+
+    const call = seed("Badge(format(amount), color: \"green\")");
+    expect(call.name).toBe("Badge");
+    expect(call.props.value).toBe("format(amount)");
+    expect(call.props.color).toBe("green");
+
+    // A string literal in an expr slot round-trips through the printer
+    // (re-quoted), still recognised as a Badge rather than Opaque.
+    const lit = seed('Badge("Alpha")');
+    expect(lit.name).toBe("Badge");
+    expect(lit.props.value).toBe('"Alpha"');
   });
 });
