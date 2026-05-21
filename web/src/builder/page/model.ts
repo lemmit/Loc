@@ -39,6 +39,11 @@ interface PrimitiveSpec {
   positional?: PositionalSpec[];
   /** Optional `name: value` args. */
   named?: PropSpec[];
+  /** Named args whose value is itself a node (a primitive call or a lambda),
+   *  edited as a nested canvas rather than a scalar field — e.g. QueryView's
+   *  `data:`/`loading:` branches.  Each seeded child carries `slot: <key>`.
+   *  Implies a container (a node with children must be a craft canvas). */
+  namedChildren?: string[];
 }
 
 /** Normalise positional specs (bare string → `string`-kind prop). */
@@ -94,12 +99,16 @@ const SPECS = {
   NumberField: { kind: "leaf", positional: [{ key: "label", kind: "string" }], named: [{ key: "bind", kind: "expr" }] },
   PasswordField: { kind: "leaf", positional: [{ key: "label", kind: "string" }], named: [{ key: "bind", kind: "expr" }] },
   Toggle: { kind: "leaf", positional: [{ key: "label", kind: "string" }], named: [{ key: "bind", kind: "expr" }] },
-  // Table holds Column children (sub-primitive) plus a `rows:` source.  A
-  // Column carries a header then an accessor lambda child.  (Tables that also
-  // pass callback lambdas — `onRowClick:` / `rowTestid:` — still round-trip as
-  // Opaque, since named-arg child slots aren't modelled yet.)
-  Table: { kind: "container", named: [{ key: "rows", kind: "expr" }] },
+  // Table holds Column children (sub-primitive) plus a `rows:` source and
+  // optional callback lambdas (`onRowClick:` / `rowTestid:`) as named-arg child
+  // slots.  A Column carries a header then an accessor lambda child.
+  Table: { kind: "container", named: [{ key: "rows", kind: "expr" }], namedChildren: ["onRowClick", "rowTestid"] },
   Column: { kind: "container", positional: ["header"] },
+  // QueryView wraps a `of:` query expression and renders one of its
+  // loading/error/empty/data branches — each a nested node (data: is often a
+  // `rows => …` lambda).  Modal pairs a `trigger:` node with its body child.
+  QueryView: { kind: "container", named: [{ key: "of", kind: "expr" }], namedChildren: ["loading", "error", "empty", "data"] },
+  Modal: { kind: "container", namedChildren: ["trigger"] },
 } satisfies Record<string, PrimitiveSpec>;
 
 // Synthetic nodes model expression-syntax constructs that aren't CallExpr-
@@ -120,10 +129,11 @@ const isSynthetic = (name: string): name is SyntheticName => name in SYNTHETIC;
 export type PrimitiveName = keyof typeof SPECS | SyntheticName | "Opaque";
 export const PRIMITIVES = Object.keys(SPECS) as (keyof typeof SPECS)[];
 
-// Sub-primitives that only make sense nested inside a specific parent (a Tab
-// inside Tabs, a Column inside Table); excluded from the top-level palette but
-// still resolvable on the canvas and editable when seeded from source.
-const SUB_PRIMITIVES = new Set<string>(["Tab", "Column"]);
+// Primitives kept out of the top-level palette — sub-primitives that only nest
+// inside a specific parent (Tab in Tabs, Column in Table), and the named-child
+// containers (QueryView/Modal) whose required slots the click-add palette can't
+// populate.  All stay resolvable on the canvas and editable when seeded.
+const SUB_PRIMITIVES = new Set<string>(["Tab", "Column", "QueryView", "Modal"]);
 export const PALETTE_PRIMITIVES = PRIMITIVES.filter((p) => !SUB_PRIMITIVES.has(p));
 
 // `satisfies` narrows each entry to its literal shape; widen on read so
@@ -149,6 +159,9 @@ export interface BuilderNode {
   name: PrimitiveName;
   props: Record<string, string | number | undefined>;
   children: BuilderNode[];
+  /** When this node fills a parent's named-arg child slot (e.g. QueryView
+   *  `data:`), the arg name; positional children leave it undefined. */
+  slot?: string;
 }
 
 export function defaultNode(name: keyof typeof SPECS): BuilderNode {
@@ -185,6 +198,21 @@ function readProp(kind: PropKind, e: Expression): string | number | null {
   if (kind === "ref") return e.$type === "NameRef" ? e.name : null;
   if (e.$type === "Lambda" || e.$type === "MatchExpr") return null;
   return printExpr(e);
+}
+
+/** Pull declared named-child slots out of the named map into slot-tagged
+ *  children (mutates `named`, removing the consumed keys). */
+function takeSlotChildren(named: Map<string, Expression>, slots: string[] | undefined): BuilderNode[] {
+  const out: BuilderNode[] = [];
+  for (const key of slots ?? []) {
+    const v = named.get(key);
+    if (v === undefined) continue;
+    named.delete(key);
+    const child = seedFromBody(v);
+    child.slot = key;
+    out.push(child);
+  }
+  return out;
 }
 
 /** Read declared `name: value` args into typed props; null if any arg is
@@ -248,7 +276,7 @@ export function seedFromBody(expr: Expression): BuilderNode {
   if (spec.kind === "container") {
     // Pure container (no declared props): every positional is a child; any
     // named arg is unmodelled → opaque.
-    if (posKeys.length === 0 && (spec.named ?? []).length === 0) {
+    if (posKeys.length === 0 && (spec.named ?? []).length === 0 && (spec.namedChildren ?? []).length === 0) {
       if (named.size > 0) return opaque(expr);
       return { name: name as PrimitiveName, props: {}, children: positional.map(seedFromBody) };
     }
@@ -264,12 +292,15 @@ export function seedFromBody(expr: Expression): BuilderNode {
       props[posKeys[i].key] = s;
       childStart = i + 1;
     }
+    // Named-arg child slots become slot-tagged children; remaining named args
+    // must all be declared scalars (else the whole node is opaque).
+    const slotChildren = takeSlotChildren(named, spec.namedChildren);
     const namedProps = readNamed(named, spec.named);
     if (namedProps === null) return opaque(expr);
     return {
       name: name as PrimitiveName,
       props: { ...props, ...namedProps },
-      children: positional.slice(childStart).map(seedFromBody),
+      children: [...positional.slice(childStart).map(seedFromBody), ...slotChildren],
     };
   }
 
@@ -313,16 +344,18 @@ export function emitBody(node: BuilderNode): string {
   if (node.name === "Match") return `match {\n  ${node.children.map(emitBody).join(",\n  ")}\n}`;
   const spec = specOf(node.name);
   if (spec.kind === "container") {
-    // All positionals (declared scalar props, then children) precede named
-    // args, so the emitted call stays canonical (positional-before-named).
+    // All positionals (declared scalar props, then positional children) precede
+    // named args (scalar props, then named-child slots), so the emitted call
+    // stays canonical (positional-before-named).
     const parts: string[] = [];
     for (const p of posSpecs(spec)) {
       const v = node.props[p.key];
       if (v === undefined || v === "") continue;
       parts.push(emitProp(p.kind, v));
     }
-    for (const c of node.children) parts.push(emitBody(c));
+    for (const c of node.children) if (c.slot === undefined) parts.push(emitBody(c));
     parts.push(...emitNamed(node, spec.named));
+    for (const c of node.children) if (c.slot !== undefined) parts.push(`${c.slot}: ${emitBody(c)}`);
     return `${node.name}(${parts.join(", ")})`;
   }
   const parts: string[] = [];
