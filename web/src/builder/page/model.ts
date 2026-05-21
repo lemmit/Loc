@@ -70,6 +70,25 @@ const SPECS = {
   Divider: { kind: "leaf" },
   List: { kind: "leaf", named: [{ key: "of", kind: "ref", options: "aggregate" }, { key: "testid", kind: "string" }] },
   Form: { kind: "leaf", named: [{ key: "of", kind: "ref", options: "aggregate" }, { key: "creates", kind: "ref", options: "aggregate" }, { key: "testid", kind: "string" }] },
+  // Layout / no-arg primitives.
+  Breadcrumbs: { kind: "container" },
+  KeyValueRow: { kind: "container", positional: ["label"] },
+  Skeleton: { kind: "leaf", named: [{ key: "count", kind: "int" }] },
+  Loader: { kind: "leaf" },
+  Slot: { kind: "leaf" },
+  Image: { kind: "leaf", named: [{ key: "src", kind: "string" }, { key: "alt", kind: "string" }] },
+  Avatar: { kind: "leaf", named: [{ key: "src", kind: "string" }, { key: "alt", kind: "string" }] },
+  // Data-bound display primitives — value/id args are expressions.
+  Stat: { kind: "leaf", positional: [{ key: "label", kind: "string" }, { key: "value", kind: "expr" }] },
+  Money: { kind: "leaf", positional: [{ key: "value", kind: "expr" }] },
+  DateDisplay: { kind: "leaf", positional: [{ key: "value", kind: "expr" }] },
+  EnumBadge: { kind: "leaf", positional: [{ key: "value", kind: "expr" }] },
+  IdLink: { kind: "leaf", positional: [{ key: "id", kind: "expr" }], named: [{ key: "of", kind: "ref", options: "aggregate" }] },
+  // Form inputs — a label plus a `bind:` expression (usually a state var).
+  Field: { kind: "leaf", positional: [{ key: "label", kind: "string" }], named: [{ key: "bind", kind: "expr" }] },
+  NumberField: { kind: "leaf", positional: [{ key: "label", kind: "string" }], named: [{ key: "bind", kind: "expr" }] },
+  PasswordField: { kind: "leaf", positional: [{ key: "label", kind: "string" }], named: [{ key: "bind", kind: "expr" }] },
+  Toggle: { kind: "leaf", positional: [{ key: "label", kind: "string" }], named: [{ key: "bind", kind: "expr" }] },
 } satisfies Record<string, PrimitiveSpec>;
 
 export type PrimitiveName = keyof typeof SPECS | "Opaque";

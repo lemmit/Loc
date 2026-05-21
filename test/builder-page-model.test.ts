@@ -109,6 +109,25 @@ describe("page-builder model — primitive coverage", () => {
     'Card("Just a title")',
     'Container(Stack(Text("x")), size: "md")',
     'Paper(Text("p"), padding: "lg")',
+    // Phase 2 — remaining stdlib scalar/expr primitives.
+    'Stat("Active users", "1,247")',
+    'Stat("Revenue", order.total)',
+    'Money(line.subtotal)',
+    'DateDisplay(order.placedAt)',
+    'EnumBadge(order.status)',
+    'IdLink(order.id, of: Order)',
+    'Field("Your name", bind: userName)',
+    'NumberField("Quantity", bind: qty)',
+    'PasswordField("Password", bind: secret)',
+    'Toggle("Notifications", bind: notifications)',
+    'Image(src: "/logo.png", alt: "Logo")',
+    'Avatar(alt: "User")',
+    'Skeleton(count: 5)',
+    'Loader()',
+    'Slot()',
+    'Breadcrumbs(Anchor("Home", to: "/"), Text("Orders"))',
+    'KeyValueRow("Total", Text("42"))',
+    'KeyValueRow("Total", order.total)',
   ]) {
     it(`round-trips ${bodyExpr}`, () => roundtrips(bodyExpr));
   }
