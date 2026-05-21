@@ -230,9 +230,10 @@ describe("system / module / deployable", () => {
     expect(ui).toMatch(
       /new OrderDetailPage\(page, ord\.id\)\.goto\(\).+confirm/,
     );
-    // getById eagerly reads each primitive field via field("...").
-    expect(ui).toMatch(/await __detail\.field\("status"\)/);
-    expect(ui).toMatch(/await __detail\.linesCount\(\)/);
+    // getById binds the detail handle; equality assertions lower to
+    // Playwright's web-first matchers (auto-retrying against the DOM).
+    expect(ui).toMatch(/await expect\(read\.field\("status"\)\)\.toHaveText\("Confirmed"\)/);
+    expect(ui).toMatch(/await expect\(read\.linesRows\(\)\)\.toHaveCount\(1\)/);
 
     // The vitest api file does NOT include the UI test (it routes
     // through ui-e2e-render instead).
