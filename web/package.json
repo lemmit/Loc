@@ -15,6 +15,7 @@
     "build:vendor": "tsx scripts/build-vendor.mjs"
   },
   "dependencies": {
+    "@craftjs/core": "^0.2.12",
     "@likec4/layouts": "^1.56.0",
     "@mantine/core": "^7.13.0",
     "@mantine/hooks": "^7.13.0",
