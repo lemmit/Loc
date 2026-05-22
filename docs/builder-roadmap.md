@@ -397,13 +397,25 @@ Done:
   placements); flat column layout remains the default, and search / coverage /
   diagnostics still apply per leaf. Gated by
   `test/system/system-grouped-layout.test.ts` + e2e.
+- **Edge rebinding by dragging** — dragging a (reconnectable) edge's target
+  endpoint onto another node repoints its reference, reusing `rebindReference`.
+  Scoped to the three single, unambiguous cross-ref edges: a repository's `for`
+  aggregate and a `from` source (view→aggregate, api→module); the owner (edge
+  source) is fixed and an incompatible drop / unparseable rewrite is rejected.
+  Pure `isRebindableEdge` / `rebindEdgeTarget` in `edge-rebind.ts`; wired via
+  React Flow `onReconnect` (`reconnectable: "target"` on those edges, off in
+  grouped mode). Gated by `test/system/system-edge-rebind.test.ts`. (The drag
+  *gesture* isn't e2e-covered — hard to script reliably; the rebind logic is.)
 
 Open:
 
-- **Edge rebinding by dragging** connections on the canvas — the drag gesture
-  itself. Rebinding by inspector Select already exists for both single-reference
-  constructs (`rebind.ts`) and multi-valued deployable references — modules /
-  `serves` / ui (`deployable-bindings.ts`).
+- **Drag-rebind for deployable `targets` / `ui`** — these are single refs too,
+  but `ui` is form-sensitive (`setDeployableUi` would convert a compose/block
+  form to sugar), so they stay inspector-only for now.
+- **Multi-valued / derived edges** (`deployable` modules / `serves`, `emits`)
+  are inherently not single-drag rebindable — they stay inspector / statement
+  editors.
+
 Planned — recommended order:
 
 1. ~~**Finish expression/statement structuring**~~ — done: block-body lambdas,
