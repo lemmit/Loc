@@ -23,6 +23,7 @@ import { buildSystemGraph, coverageByNode, matchNodes, nodeDiagnostics, typeLabe
 import type { WireField } from "../../../../src/ir/loom-ir.js";
 import { loadPositions, savePositions, type Pos } from "./positions";
 import { addConstructSource, addModuleSource, firstAggregateName, listContextNames } from "./add";
+import { groupedLayout } from "./grouped-layout";
 import { buildLinkedModel } from "./linked-doc";
 import { lowerModel } from "../../../../src/ir/lower.js";
 import { enrichLoomModel } from "../../../../src/ir/enrichments.js";
@@ -127,6 +128,38 @@ const COVERAGE_COLOR: Record<CoverageStatus, string> = {
   none: "var(--mantine-color-dark-4)",
 };
 
+// One construct (leaf) node, with its kind / coverage colour, diagnostic
+// border + count, and optional containing group (for nested layout).
+function leafRfNode(
+  n: ReturnType<typeof buildSystemGraph>["nodes"][number],
+  diagByNode: Map<string, Diagnostic[]>,
+  coverage: Map<string, CoverageStatus>,
+  overlay: boolean,
+  position: Pos,
+  parentId?: string,
+): Node {
+  const diags = diagByNode.get(n.id);
+  const sev = worstSeverity(diags);
+  const mark = sev ? `\n${sev === "error" ? "✕" : "⚠"} ${diags!.length}` : "";
+  const background = overlay ? COVERAGE_COLOR[coverage.get(n.id) ?? "none"] : KIND_COLOR[n.kind];
+  return {
+    id: n.id,
+    position,
+    ...(parentId ? { parentId, extent: "parent" as const } : {}),
+    data: { label: `${n.kind}\n${n.name}${mark}`, title: diags?.map((d) => d.message).join("\n") },
+    style: {
+      background,
+      color: "white",
+      border: sev ? `2px solid ${SEVERITY_COLOR[sev]}` : "1px solid rgba(255,255,255,0.25)",
+      borderRadius: 6,
+      fontSize: 11,
+      width: 150,
+      whiteSpace: "pre-line" as const,
+      textAlign: "center" as const,
+    },
+  };
+}
+
 function toRfNodes(
   graph: ReturnType<typeof buildSystemGraph>,
   diagByNode: Map<string, Diagnostic[]>,
@@ -134,34 +167,70 @@ function toRfNodes(
   overlay: boolean,
   positions: Map<string, Pos>,
 ): Node[] {
-  return graph.nodes.map((n) => {
-    const diags = diagByNode.get(n.id);
-    const sev = worstSeverity(diags);
-    const mark = sev ? `\n${sev === "error" ? "✕" : "⚠"} ${diags!.length}` : "";
-    const background = overlay ? COVERAGE_COLOR[coverage.get(n.id) ?? "none"] : KIND_COLOR[n.kind];
-    return {
-      id: n.id,
-      position: positions.get(n.id) ?? { x: n.x, y: n.y },
-      data: { label: `${n.kind}\n${n.name}${mark}`, title: diags?.map((d) => d.message).join("\n") },
-      style: {
-        background,
-        color: "white",
-        border: sev ? `2px solid ${SEVERITY_COLOR[sev]}` : "1px solid rgba(255,255,255,0.25)",
-        borderRadius: 6,
-        fontSize: 11,
-        width: 150,
-        whiteSpace: "pre-line" as const,
-        textAlign: "center" as const,
-      },
-    };
-  });
+  return graph.nodes.map((n) =>
+    leafRfNode(n, diagByNode, coverage, overlay, positions.get(n.id) ?? { x: n.x, y: n.y }),
+  );
 }
 
-function toRfEdges(graph: ReturnType<typeof buildSystemGraph>): Edge[] {
+const GROUP_STYLE: Record<"module" | "context", { background: string; border: string }> = {
+  module: { background: "rgba(59,130,246,0.06)", border: "1px solid var(--mantine-color-blue-7)" },
+  context: { background: "rgba(20,184,166,0.07)", border: "1px dashed var(--mantine-color-teal-6)" },
+};
+
+// Nested layout: module / context group containers (parents first, so React
+// Flow sees a parent before its children) then the member leaf nodes positioned
+// inside them. Modules become group containers, so the flat module node is
+// dropped here (its edges are remapped to the group by `groupedEdges`).
+function toGroupedRfNodes(
+  graph: ReturnType<typeof buildSystemGraph>,
+  diagByNode: Map<string, Diagnostic[]>,
+  coverage: Map<string, CoverageStatus>,
+  overlay: boolean,
+  layout: ReturnType<typeof groupedLayout>,
+): Node[] {
+  const out: Node[] = [];
+  for (const kind of ["module", "context"] as const) {
+    for (const g of layout.groups) {
+      if (g.kind !== kind) continue;
+      out.push({
+        id: g.id,
+        position: { x: g.x, y: g.y },
+        ...(g.parentId ? { parentId: g.parentId, extent: "parent" as const } : {}),
+        data: { label: `${g.kind} ${g.name}` },
+        draggable: false,
+        selectable: false,
+        style: {
+          width: g.width,
+          height: g.height,
+          ...GROUP_STYLE[kind],
+          borderRadius: 8,
+          fontSize: 10,
+          fontWeight: 600,
+          color: "var(--mantine-color-dimmed)",
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "flex-start",
+          padding: "3px 6px",
+          textAlign: "left" as const,
+        },
+      });
+    }
+  }
+  for (const n of graph.nodes) {
+    if (n.kind === "module") continue; // modules are group containers in this mode
+    const p = layout.placements.get(n.id);
+    if (p) out.push(leafRfNode(n, diagByNode, coverage, overlay, { x: p.x, y: p.y }, p.parentId ?? undefined));
+  }
+  return out;
+}
+
+function toRfEdges(graph: ReturnType<typeof buildSystemGraph>, grouped = false): Edge[] {
+  // In grouped mode an edge to a module points at that module's group node.
+  const remap = (id: string): string => (grouped && id.startsWith("module:") ? `group:${id}` : id);
   return graph.edges.map((e) => ({
     id: e.id,
-    source: e.source,
-    target: e.target,
+    source: remap(e.source),
+    target: remap(e.target),
     label: e.label,
     labelStyle: { fontSize: 9, fill: "var(--mantine-color-dimmed)" },
     style: { stroke: "var(--mantine-color-dark-2)" },
@@ -249,6 +318,8 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const [preview, setPreview] = useState(false);
   const [pending, setPending] = useState<{ next: string; keepSelection: boolean } | null>(null);
   const [wireShape, setWireShape] = useState<WireField[] | null>(null);
+  const [grouped, setGrouped] = useState(false);
+  const layout = useMemo(() => (grouped && graph ? groupedLayout(graph) : null), [grouped, graph]);
 
   // Search + kind filter → the set of node ids to emphasise. Inactive (empty
   // query and no kinds) matches every node, so nothing dims.
@@ -270,9 +341,14 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
 
   useEffect(() => {
     if (!graph) return;
-    setNodes(toRfNodes(graph, diagByNode, coverage, overlay, positionsRef.current));
-    setEdges(toRfEdges(graph));
-  }, [graph, diagByNode, coverage, overlay, setNodes, setEdges]);
+    if (grouped && layout) {
+      setNodes(toGroupedRfNodes(graph, diagByNode, coverage, overlay, layout));
+      setEdges(toRfEdges(graph, true));
+    } else {
+      setNodes(toRfNodes(graph, diagByNode, coverage, overlay, positionsRef.current));
+      setEdges(toRfEdges(graph));
+    }
+  }, [graph, diagByNode, coverage, overlay, grouped, layout, setNodes, setEdges]);
 
   // Persist hand-dragged positions: track them live, write to storage on drag
   // end (`dragging === false`). Re-applied by `toRfNodes` on every re-seed, so a
@@ -280,16 +356,19 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const handleNodesChange = useCallback<typeof onNodesChange>(
     (changes) => {
       onNodesChange(changes);
+      // Grouped layout is computed (positions are relative to a parent), so it
+      // isn't persisted — only the flat layout's absolute positions are.
+      if (grouped) return;
       let settled = false;
       for (const c of changes) {
-        if (c.type === "position" && c.position) {
+        if (c.type === "position" && c.position && !c.id.startsWith("group:")) {
           positionsRef.current.set(c.id, c.position);
           if (c.dragging === false) settled = true;
         }
       }
       if (settled) savePositions(positionsRef.current);
     },
-    [onNodesChange],
+    [onNodesChange, grouped],
   );
 
   const resetLayout = (): void => {
@@ -353,7 +432,8 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   // Dim non-matching nodes / edges in place (preserving positions) when a search
   // or kind filter is active; an edge stays lit only if both endpoints match.
   useEffect(() => {
-    const lit = (id: string): boolean => !filterActive || matched.has(id);
+    // Group containers (ids prefixed `group:`) are never dimmed.
+    const lit = (id: string): boolean => id.startsWith("group:") || !filterActive || matched.has(id);
     setNodes((ns) => ns.map((n) => ({ ...n, style: { ...n.style, opacity: lit(n.id) ? 1 : 0.2 } })));
     setEdges((es) => es.map((e) => ({ ...e, style: { ...e.style, opacity: !filterActive || (matched.has(e.source) && matched.has(e.target)) ? 1 : 0.1 } })));
   }, [matched, filterActive, setNodes, setEdges]);
@@ -365,7 +445,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const nodesInitialized = useNodesInitialized();
   useEffect(() => {
     if (nodesInitialized && graph) void rf.fitView({ padding: 0.15 });
-  }, [nodesInitialized, graph, rf]);
+  }, [nodesInitialized, graph, grouped, rf]);
 
   const hasAggregate = useMemo(() => !!firstAggregateName(parsed.ast), [parsed]);
   const contextNames = useMemo(() => listContextNames(parsed.ast), [parsed]);
@@ -571,7 +651,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
           edges={edges}
           onNodesChange={handleNodesChange}
           onEdgesChange={onEdgesChange}
-          onNodeClick={(_, n) => { setSelectedId(n.id); if (compact) setInspectorOpen(true); }}
+          onNodeClick={(_, n) => { if (n.id.startsWith("group:")) return; setSelectedId(n.id); if (compact) setInspectorOpen(true); }}
           onPaneClick={() => { setSelectedId(null); if (compact) setInspectorOpen(false); }}
           fitView
           minZoom={0.1}
@@ -627,6 +707,16 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
             onClick={() => setOverlay((o) => !o)}
           >
             Coverage
+          </Button>
+          <Button
+            size="compact-xs"
+            variant={grouped ? "filled" : "default"}
+            color={grouped ? "grape" : undefined}
+            data-testid="c4system-group-toggle"
+            title="Nest constructs inside their module / context"
+            onClick={() => setGrouped((g) => !g)}
+          >
+            Group
           </Button>
           <Button
             size="compact-xs"

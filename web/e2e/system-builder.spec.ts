@@ -355,6 +355,25 @@ test("edits a workflow body's statements", async ({ page }) => {
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
 
+test("nests constructs into module / context groups when Group is on", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  // No group containers in the default flat layout; toggling Group adds them.
+  const groupNodes = page.locator('.react-flow__node[data-id^="group:"]');
+  await expect(groupNodes).toHaveCount(0);
+  await page.getByTestId("c4system-group-toggle").click();
+  await expect.poll(async () => groupNodes.count(), { timeout: 10_000 }).toBeGreaterThan(0);
+  // Toggling off restores the flat layout.
+  await page.getByTestId("c4system-group-toggle").click();
+  await expect(groupNodes).toHaveCount(0);
+});
+
 test("adds a construct into the chosen target context", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);
