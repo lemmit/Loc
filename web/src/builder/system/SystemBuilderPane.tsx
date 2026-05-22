@@ -76,7 +76,7 @@ import {
   deleteStatement,
   editStatement,
   listOperations,
-  listStatements,
+  listStatementViews,
   moveStatement,
   type BodyLocator,
 } from "./body";
@@ -780,7 +780,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
             {selected.kind === "workflow" && (
               <BodyEditor
                 key={`${selected.id}:${rev}`}
-                statements={listStatements(parsed.ast, { kind: "workflow", name: selected.name }) ?? []}
+                statements={listStatementViews(parsed.ast, { kind: "workflow", name: selected.name }) ?? []}
                 {...bodyHandlers({ kind: "workflow", name: selected.name })}
               />
             )}
@@ -798,7 +798,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
                 {opName && (
                   <BodyEditor
                     key={`${selected.id}:${opName}:${rev}`}
-                    statements={listStatements(parsed.ast, { kind: "operation", aggregate: selected.name, op: opName }) ?? []}
+                    statements={listStatementViews(parsed.ast, { kind: "operation", aggregate: selected.name, op: opName }) ?? []}
                     {...bodyHandlers({ kind: "operation", aggregate: selected.name, op: opName })}
                   />
                 )}

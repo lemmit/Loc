@@ -325,14 +325,19 @@ Done:
   (clearing it demotes the arg to positional); clicking an inferred parameter-name
   label on a positional arg promotes it to named (`ArgsEditor` in
   `ExpressionEditor.tsx`). Gated by `test/system-expr.test.ts`.
+- **Structured assignment target** — in the top-level BodyEditor (operation /
+  workflow bodies) an assignment row splits into a dedicated target / op / value
+  (`StmtView` in `body.ts`, `AssignRow` in `BodyEditor.tsx`); other statement
+  kinds keep their single text row. The op is a `:=` / `+=` / `-=` dropdown; the
+  value re-uses the structured Expression picker. Gated by
+  `test/system-body.test.ts` + e2e.
 
 Open:
 
-- **Structured statement non-expression parts** — statement *expressions* are
-  structured today (assignment RHS, `let` values, predicates, `emit` field
-  values, call args), but the assignment *target* (LValue) and a bare-call
-  statement's callee still edit as text rows. (Repointing an `emit` to a
-  different event is already done — see the Emit event picker, above.)
+- **Structured bare-call statements** — a bare-call statement (`x.method(args)`)
+  in the top-level BodyEditor still edits as one verbatim text row; its callee /
+  args aren't split out. (Assignment targets are structured — see above; and
+  repointing an `emit` to a different event is done via the Emit event picker.)
 - **Edge rebinding by dragging** connections on the canvas — the drag gesture
   itself. Rebinding by inspector Select already exists for both single-reference
   constructs (`rebind.ts`) and multi-valued deployable references — modules /
@@ -346,13 +351,9 @@ Open:
 
 Planned — recommended order:
 
-1. **Finish expression/statement structuring** (Track 1, mechanical — each reuses
-   an existing pattern):
-   - ~~Block-body lambda structuring~~ — done (see Done above).
-   - ~~Arg-*name* editing on calls~~ — done (see Done above).
-   - **Structured statement targets** — the assignment *target* (LValue) and a
-     bare-call statement's *callee* in the top-level BodyEditor (operation /
-     workflow bodies) still edit as text rows; the RHS / args are structured.
+1. ~~**Finish expression/statement structuring**~~ — done: block-body lambdas,
+   arg-name editing, and assignment-target structuring (all in Done above). Only
+   structured *bare-call* statements remain (see Open) — low value, deferred.
 2. **Diagnostics on graph nodes** — wire LSP diagnostics onto model nodes (a
    badge / red outline on the offending construct), mirroring the page builder's
    per-node diagnostics via `__range`. Makes a broken system visible on the graph.
