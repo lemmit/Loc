@@ -1395,7 +1395,7 @@ const ACME_UI_E2E_SOURCE = `system AcmeUI {
 
 describe("cross-platform UI parity (test e2e ui against phoenixLiveView)", () => {
   it("emits a Playwright spec for a `test e2e ui` block targeting a phoenix deployable", async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-f3-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-ui-parity-"));
     const file = path.join(dir, "acme-ui.ddd");
     fs.writeFileSync(file, ACME_UI_E2E_SOURCE);
     const services = createDddServices(NodeFileSystem);
@@ -1422,7 +1422,7 @@ describe("cross-platform UI parity (test e2e ui against phoenixLiveView)", () =>
   });
 
   it("emits per-page Playwright page objects under phoenix_app/e2e/pages/", async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-f3-po-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-ui-parity-po-"));
     const file = path.join(dir, "acme-ui.ddd");
     fs.writeFileSync(file, ACME_UI_E2E_SOURCE);
     const services = createDddServices(NodeFileSystem);

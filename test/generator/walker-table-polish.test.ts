@@ -5,10 +5,10 @@
 // reproduce the scaffold List page's table styling + per-row
 // testid namespace.  Scaffold list tables emit
 // `<Table striped highlightOnHover stickyHeader>` and
-// `<Table.Tr data-testid={`<slug>-row-${row.id}`}>`; this slice
-// brings both to the walker.
+// `<Table.Tr data-testid={`<slug>-row-${row.id}`}>`; the walker
+// supports both.
 //
-// What this slice pins:
+// What this test pins:
 //   1. `striped: true` adds `striped` to the root `<Table>` opening tag.
 //   2. `highlight: true` adds `highlightOnHover`.
 //   3. `sticky: true` adds `stickyHeader`.

@@ -8,7 +8,7 @@
 // object→nested Fieldset).  Required-field metadata becomes RHF
 // rules through Zod (zodResolver(Create<Agg>Request)).
 //
-// What this slice pins:
+// What this test pins:
 //   1. The page TSX emits with `useForm` + `zodResolver` + a
 //      `useCreate<Agg>()` mutation hook.
 //   2. Each non-optional aggregate field surfaces in the form.

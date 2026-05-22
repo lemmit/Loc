@@ -6,7 +6,7 @@
 // they cover the typical "container + state-cued content" shape
 // of a list/detail page.
 //
-// What this slice pins:
+// What this test pins:
 //   1. Breadcrumbs(...children, testid?) — wraps each positional
 //      child as a breadcrumb (Mantine renders separators
 //      automatically; shadcn uses a flex row).

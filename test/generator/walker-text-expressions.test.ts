@@ -1,6 +1,6 @@
 // arbitrary expressions in text positions.
 //
-// Before this slice: text-position slots in Heading / Text / Stat
+// Previously: text-position slots in Heading / Text / Stat
 // / Badge / Card-title only accepted string literals or single
 // refs.  Anything richer (string concat, arithmetic) silently
 // fell back to the component default.

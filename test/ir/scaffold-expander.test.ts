@@ -10,7 +10,7 @@
 //      `aggregate-new`) return a non-null `ExprIR` whose top-level
 //      call name + key children match the explicit-DSL shape
 //      from `examples/acme-order-explicit.ddd`.
-//   2. Origin kinds deferred to A10+ (`aggregate-detail`,
+//   2. Origin kinds deferred to later (`aggregate-detail`,
 //      `workflow-form`, `view-list`, `workflows-index`,
 //      `views-index`, `home`) return `null` so the legacy
 //      archetype path stays in use.
