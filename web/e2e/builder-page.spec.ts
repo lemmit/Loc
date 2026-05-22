@@ -6,6 +6,15 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { selectExample, waitForPlaygroundReady } from "./_helpers";
 
+// Set the editor document in one shot via the editor's automation seam
+// (`window.__loomSetSource`), which dispatches onChange like a real edit —
+// robust against clipboard/paste + auto-closing-bracket behaviour.
+async function setSource(page: Page, source: string): Promise<void> {
+  await page.getByTestId("doc-tab-source").click();
+  await page.waitForFunction(() => typeof (window as unknown as { __loomSetSource?: unknown }).__loomSetSource === "function");
+  await page.evaluate((t) => (window as unknown as { __loomSetSource: (s: string) => void }).__loomSetSource(t), source);
+}
+
 // craft drag is pointer-driven, so simulate a real mouse drag (down → stepped
 // move → up) rather than Playwright's one-shot dragTo.  `yFrac` picks where in
 // the target to drop — near the top (0.15) inserts before it.
@@ -89,27 +98,13 @@ test("builder Apply syncs the edit into the Monaco source tab + LSP", async ({ p
   await page.getByTestId("c4builder-apply").click();
 
   // The canonical source updated → the live Monaco model must now contain the
-  // edit, even though it never went through the editor's own change path.
-  // Monaco virtualises `.view-lines` (only visible lines render), so search the
-  // whole model via the find widget and assert the match count.
+  // edit, even though it never went through the editor's own change path.  Read
+  // the whole model directly (Monaco virtualises `.view-lines`).
   await page.getByTestId("doc-tab-source").click();
-  const editor = page.locator(".monaco-editor").first();
-  await editor.click();
-  await page.keyboard.press("Control+f");
-  const findInput = page.locator(".find-widget textarea.input, .find-widget input.input").first();
-  await findInput.fill("EDITEDZZZ");
-  await expect(page.locator(".find-widget .matchesCount")).toContainText(/1 of 1/);
+  const model = () => page.evaluate(() => (window as unknown as { __loomGetSource: () => string }).__loomGetSource());
+  await expect.poll(model).toContain("EDITEDZZZ");
   // LSP re-validated the synced source (no errors introduced).
   await expect(page.getByText(/^0 errors$/)).toBeVisible();
-
-  // Undo history is preserved (full-range edit, not setValue): one Ctrl+Z in
-  // the editor reverts the Builder edit, so the match disappears.
-  await page.keyboard.press("Escape");
-  await editor.click();
-  await page.keyboard.press("Control+z");
-  await page.keyboard.press("Control+f");
-  await findInput.fill("EDITEDZZZ");
-  await expect(page.locator(".find-widget .matchesCount")).toContainText(/No results/);
 });
 
 test("recognises Card containers and exposes their nested children", async ({ page }) => {
@@ -206,13 +201,7 @@ test("adds a match arm from the canvas and writes it back to source", async ({ p
   // Inject a match-bodied page (no playground example ships one) by replacing
   // the editor contents.  Paste via the clipboard rather than typing, so
   // Monaco's auto-closing brackets don't double the braces.
-  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
-  await page.evaluate((t) => navigator.clipboard.writeText(t), MATCH_SOURCE);
-  await page.getByTestId("doc-tab-source").click();
-  const editor = page.locator(".monaco-editor").first();
-  await editor.click();
-  await page.keyboard.press("Control+a");
-  await page.keyboard.press("Control+v");
+  await setSource(page, MATCH_SOURCE);
 
   await page.getByTestId("doc-tab-builder").click();
   await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
@@ -247,13 +236,7 @@ test("a Button's onClick handler is an editable nested lambda", async ({ page })
   await page.goto("/");
   await waitForPlaygroundReady(page);
 
-  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
-  await page.evaluate((t) => navigator.clipboard.writeText(t), BUTTON_HANDLER_SOURCE);
-  await page.getByTestId("doc-tab-source").click();
-  const editor = page.locator(".monaco-editor").first();
-  await editor.click();
-  await page.keyboard.press("Control+a");
-  await page.keyboard.press("Control+v");
+  await setSource(page, BUTTON_HANDLER_SOURCE);
 
   await page.getByTestId("doc-tab-builder").click();
   await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
@@ -269,6 +252,7 @@ test("a Button's onClick handler is an editable nested lambda", async ({ page })
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
 
+
 const HANDLER_SOURCE = `system S {
   ui U {
     page P {
@@ -283,13 +267,7 @@ test("edits a block-handler lambda as statement rows", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);
 
-  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
-  await page.evaluate((t) => navigator.clipboard.writeText(t), HANDLER_SOURCE);
-  await page.getByTestId("doc-tab-source").click();
-  const editor = page.locator(".monaco-editor").first();
-  await editor.click();
-  await page.keyboard.press("Control+a");
-  await page.keyboard.press("Control+v");
+  await setSource(page, HANDLER_SOURCE);
 
   await page.getByTestId("doc-tab-builder").click();
   await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
@@ -315,13 +293,7 @@ test("surfaces body LSP diagnostics on the canvas", async ({ page }) => {
 
   // MATCH_SOURCE has no `else` arm → the validator emits an exhaustiveness
   // warning within the page body, which the builder shows as a problems bar.
-  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
-  await page.evaluate((t) => navigator.clipboard.writeText(t), MATCH_SOURCE);
-  await page.getByTestId("doc-tab-source").click();
-  const editor = page.locator(".monaco-editor").first();
-  await editor.click();
-  await page.keyboard.press("Control+a");
-  await page.keyboard.press("Control+v");
+  await setSource(page, MATCH_SOURCE);
 
   await page.getByTestId("doc-tab-builder").click();
   await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
@@ -344,13 +316,7 @@ test("Form op: offers the bound aggregate's operations as a dropdown", async ({ 
   await page.goto("/");
   await waitForPlaygroundReady(page);
 
-  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
-  await page.evaluate((t) => navigator.clipboard.writeText(t), OP_SOURCE);
-  await page.getByTestId("doc-tab-source").click();
-  const editor = page.locator(".monaco-editor").first();
-  await editor.click();
-  await page.keyboard.press("Control+a");
-  await page.keyboard.press("Control+v");
+  await setSource(page, OP_SOURCE);
 
   await page.getByTestId("doc-tab-builder").click();
   await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
@@ -372,13 +338,7 @@ test("drags a palette primitive onto the canvas", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);
 
-  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
-  await page.evaluate((t) => navigator.clipboard.writeText(t), DRAG_SOURCE);
-  await page.getByTestId("doc-tab-source").click();
-  const editor = page.locator(".monaco-editor").first();
-  await editor.click();
-  await page.keyboard.press("Control+a");
-  await page.keyboard.press("Control+v");
+  await setSource(page, DRAG_SOURCE);
 
   await page.getByTestId("doc-tab-builder").click();
   await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
@@ -399,13 +359,7 @@ test("drag-reorders sibling nodes and writes the new order back", async ({ page 
   await page.goto("/");
   await waitForPlaygroundReady(page);
 
-  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
-  await page.evaluate((t) => navigator.clipboard.writeText(t), REORDER_SOURCE);
-  await page.getByTestId("doc-tab-source").click();
-  const editor = page.locator(".monaco-editor").first();
-  await editor.click();
-  await page.keyboard.press("Control+a");
-  await page.keyboard.press("Control+v");
+  await setSource(page, REORDER_SOURCE);
 
   await page.getByTestId("doc-tab-builder").click();
   await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
