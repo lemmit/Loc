@@ -91,7 +91,7 @@ describe("page-builder model — primitive coverage", () => {
     "List(of: Order)",
     'Form(of: Order, testid: "orders-new")',
     "Form(creates: Product)",
-    "Form(of: Account, op: withdraw)",
+    "Form(account.withdraw)",
     "Form(runs: PlaceOrder)",
     'Badge("Alpha", color: "blue")',
     // Expression-valued props (the `expr` prop kind): data-bound args must
@@ -379,10 +379,9 @@ describe("page-builder model — container-with-props seed shape", () => {
     expect(node.props.of).toBe("Sales.Order");
   });
 
-  it("recognises Form op/runs bindings", () => {
-    const op = seed("Form(of: Account, op: withdraw)");
-    expect(op.props.of).toBe("Account");
-    expect(op.props.op).toBe("withdraw");
+  it("recognises the instance-qualified operation form + runs binding", () => {
+    const op = seed("Form(account.withdraw)");
+    expect(op.props.operation).toBe("account.withdraw");
     expect(seed("Form(runs: PlaceOrder)").props.runs).toBe("PlaceOrder");
   });
 

@@ -176,10 +176,26 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
   // walker uses to resolve cross-component invocations.
   const userComponents = new Map<string, readonly ParamIR[]>();
   for (const c of ui.components) userComponents.set(c.name, c.params);
+  // Page name → declared route, so an `Action`'s `then: navigate(<Page>)`
+  // targets the page's real path (only routable pages are included).
+  const pageRoutes = new Map<string, string>();
+  for (const page of ui.pages) {
+    if (page.route) pageRoutes.set(page.name, page.route);
+  }
   for (const c of ui.components) {
     out.set(
       `src/components/${c.name}.tsx`,
-      renderUserComponentFile(c.name, c.params, c.state, c.body, ctx.pack, userComponents),
+      renderUserComponentFile(
+        c.name,
+        c.params,
+        c.state,
+        c.body,
+        ctx.pack,
+        userComponents,
+        ctx.aggregatesByName,
+        buildBcByAggregate(ctx),
+        pageRoutes,
+      ),
     );
   }
   // Slice A6 — helper names accumulated for walker-eligibility
@@ -227,6 +243,7 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
           srcImportPrefix,
           buildWorkflowsByName(ctx),
           buildBcByWorkflow(ctx),
+          pageRoutes,
         ),
       );
     }

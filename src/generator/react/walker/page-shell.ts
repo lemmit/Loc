@@ -29,6 +29,43 @@ import { emitExpr, walkBodyToTsx } from "../body-walker.js";
 import { idTargetHookVar } from "../form-helpers.js";
 import { renderApiHookImports, renderHelperImports, renderImportLines } from "./import-lines.js";
 import { indentJsx } from "./shared/args.js";
+import type { ActionMutationState } from "../body-walker.js";
+
+/** Map each aggregate-typed param to its aggregate name, so the
+ *  walker can resolve `Action(<param>.<op>)` (the lowering env is
+ *  neutral, so the IR's receiverType is unresolved for page bodies). */
+function aggregateParamTypes(
+  params: readonly ParamIR[],
+  aggregatesByName: ReadonlyMap<string, AggregateIR>,
+): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const p of params) {
+    if (p.type.kind === "entity" && aggregatesByName.has(p.type.name)) {
+      m.set(p.name, p.type.name);
+    }
+  }
+  return m;
+}
+
+/** Function-top mutation-hook declarations + api imports for the
+ *  `Action(<instance>.<op>)` primitives recorded during the walk. */
+function renderActionMutations(
+  actionMutations: readonly ActionMutationState[],
+  srcImportPrefix: string,
+): { imports: string; decls: string } {
+  const importsByModule = new Map<string, Set<string>>();
+  for (const m of actionMutations) {
+    const mod = `${srcImportPrefix}api/${m.aggCamel}`;
+    (importsByModule.get(mod) ?? importsByModule.set(mod, new Set()).get(mod)!).add(m.hookName);
+  }
+  const imports = [...importsByModule.entries()]
+    .map(([mod, names]) => `import { ${[...names].sort().join(", ")} } from "${mod}";\n`)
+    .join("");
+  const decls = actionMutations
+    .map((m) => `  const ${m.localVar} = ${m.hookName}(${m.idExpr});\n`)
+    .join("");
+  return { imports, decls };
+}
 
 /** Render the page-file shell around a walked body — imports +
  *  function component + return.
@@ -85,6 +122,8 @@ export function renderCustomLayoutPage(
   workflowsByName: ReadonlyMap<string, WorkflowIR> = new Map(),
   /** Slice A12 — owning bounded context per workflow. */
   bcByWorkflow: ReadonlyMap<string, BoundedContextIR> = new Map(),
+  /** Page name → route path, for `Action`'s `then: navigate(<Page>)`. */
+  pageRoutes: ReadonlyMap<string, string> = new Map(),
 ): string {
   const paramNames = new Set(params.map((p) => p.name));
   const stateNames = new Set(state.map((s) => s.name));
@@ -98,6 +137,7 @@ export function renderCustomLayoutPage(
     usedUserComponents,
     usedApiHooks,
     formOfs,
+    actionMutations,
     usedHelpers,
   } = walkBodyToTsx(
     body,
@@ -111,6 +151,8 @@ export function renderCustomLayoutPage(
     helperImports,
     workflowsByName,
     bcByWorkflow,
+    aggregateParamTypes(params, aggregatesByName),
+    pageRoutes,
   );
   // Slice 11.12 — render the title expression through emitExpr
   // (sharing the body's tracking state so the shell destructures
@@ -142,6 +184,7 @@ export function renderCustomLayoutPage(
       workflowsByName: new Map(),
       bcByWorkflow: new Map(),
       formOfs: [],
+      actionMutations: [],
       collectedTestids: new Set(),
       helperImports: new Map(),
       usedHelpers: new Set(),
@@ -207,6 +250,7 @@ export function renderCustomLayoutPage(
     },
     { decls: "", moduleScope: "", usesNavigate: false },
   );
+  const actionWiring = renderActionMutations(actionMutations, srcImportPrefix);
   const hasParams = params.length > 0;
   const routerSpecifiers: string[] = [];
   if (hasParams) routerSpecifiers.push("useParams");
@@ -243,9 +287,9 @@ export function renderCustomLayoutPage(
   const navigateLine =
     usesNavigate || form.usesNavigate ? `  const navigate = useNavigate();\n` : "";
   return `// Auto-generated.  Do not edit by hand.
-${reactImport}${reactRouterImport}${mantineImport}${apiHookImports}${helperImportLines}${userComponentImports}${form.moduleScope}
+${reactImport}${reactRouterImport}${mantineImport}${apiHookImports}${actionWiring.imports}${helperImportLines}${userComponentImports}${form.moduleScope}
 export default function ${pageName}() {
-${paramsLine}${navigateLine}${stateLines}${apiHookDecls}${form.decls}${titleEffect}  return (
+${paramsLine}${navigateLine}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${titleEffect}  return (
     ${indentJsx(tsx, "    ")}
   );
 }
@@ -332,7 +376,8 @@ function renderFormOpWiring(
   pack: LoadedPack,
   srcImportPrefix: string,
 ): FormWiring {
-  const { agg, op, idTargets, useController, defaultValuesTs, fieldHtmls } = state;
+  const { agg, op, idTargets, useController, defaultValuesTs, fieldHtmls, idExpr } =
+    state;
   const opPascal = pascal(op.name);
   const tplCtx = {
     aggregateName: agg.name,
@@ -340,6 +385,7 @@ function renderFormOpWiring(
     opName: op.name,
     opPascal,
     opCamel: camel(op.name),
+    idExpr,
     humanOp: humanize(op.name),
     slug: snake(plural(agg.name)),
     srcImportPrefix,
@@ -417,6 +463,12 @@ export function renderUserComponentFile(
   body: ExprIR,
   pack: LoadedPack,
   userComponents: ReadonlyMap<string, readonly ParamIR[]>,
+  /** Aggregates / owning BCs reachable from this UI — needed for
+   *  `Action(<instance>.<op>)` operation + mutation-hook resolution. */
+  aggregatesByName: ReadonlyMap<string, AggregateIR> = new Map(),
+  bcByAggregate: ReadonlyMap<string, BoundedContextIR> = new Map(),
+  /** Page name → route path, for `Action`'s `then: navigate(<Page>)`. */
+  pageRoutes: ReadonlyMap<string, string> = new Map(),
 ): string {
   const paramNames = new Set(params.map((p) => p.name));
   const stateNames = new Set(state.map((s) => s.name));
@@ -429,12 +481,50 @@ export function renderUserComponentFile(
     usesNavigate,
     usedUserComponents,
     usesChildren,
-  } = walkBodyToTsx(body, pack, paramNames, stateNames, userComponents);
+    actionMutations,
+    formOfs,
+  } = walkBodyToTsx(
+    body,
+    pack,
+    paramNames,
+    stateNames,
+    userComponents,
+    [],
+    aggregatesByName,
+    bcByAggregate,
+    [],
+    new Map(),
+    new Map(),
+    aggregateParamTypes(params, aggregatesByName),
+    pageRoutes,
+  );
+  // Components live at `src/components/<Name>.tsx` (one hop to `src/`),
+  // so api imports for Action mutation hooks resolve via `../api/<agg>`.
+  const actionWiring = renderActionMutations(actionMutations, "../");
+  // Form wiring (create / workflow / operation forms) — same as the
+  // page shell: module-scope `<Op>Form` components + function-top hook
+  // decls.  Component files sit one hop from `src/`, so the api/format
+  // imports the wiring emits resolve via `../`.
+  const form = formOfs.reduce<{
+    decls: string;
+    moduleScope: string;
+    usesNavigate: boolean;
+  }>(
+    (acc, state) => {
+      const w = renderFormOfWiring(state, pack, "../");
+      return {
+        decls: acc.decls + w.decls,
+        moduleScope: acc.moduleScope + w.moduleScope,
+        usesNavigate: acc.usesNavigate || w.usesNavigate,
+      };
+    },
+    { decls: "", moduleScope: "", usesNavigate: false },
+  );
   const mantineImport = renderImportLines(imports);
   // Components don't have routes — useNavigate/Link still legal in
   // a component subtree (e.g. Button(to:) inside).
   const routerSpecifiers: string[] = [];
-  if (usesNavigate) routerSpecifiers.push("useNavigate");
+  if (usesNavigate || form.usesNavigate) routerSpecifiers.push("useNavigate");
   if (usesRouterLink) routerSpecifiers.push("Link as RouterLink");
   const reactRouterImport =
     routerSpecifiers.length > 0
@@ -450,26 +540,47 @@ export function renderUserComponentFile(
     .map((n) => `import ${n} from "./${n}";\n`)
     .join("");
   // Props interface — every declared param becomes a typed field;
-  // Slot()-using components also get a `children` field.
-  const propLines = params.map((p) => `  ${p.name}: ${typeRefAsTsString(p)};`);
+  // Slot()-using components also get a `children` field.  An
+  // aggregate-typed param (`order: Order`) gets the aggregate's wire
+  // DTO type (`OrderResponse`, imported from its api module) so member
+  // accesses like `order.id` / `order.customerId` typecheck; other
+  // params fall back to the route-param `string` shape.
+  const dtoImports = new Map<string, string>(); // DTO type → api module
+  const propType = (p: ParamIR): string => {
+    if (p.type.kind === "entity" && aggregatesByName.has(p.type.name)) {
+      dtoImports.set(`${p.type.name}Response`, `../api/${camel(p.type.name)}`);
+      return `${p.type.name}Response`;
+    }
+    return typeRefAsTsString(p);
+  };
+  const propLines = params.map((p) => `  ${p.name}: ${propType(p)};`);
   if (usesChildren) propLines.push(`  children?: ReactNode;`);
-  const propsType =
-    propLines.length > 0 ? `\nexport interface ${name}Props {\n${propLines.join("\n")}\n}\n` : "";
+  const dtoImportLines = [...dtoImports.entries()]
+    .map(([type, mod]) => `import type { ${type} } from "${mod}";\n`)
+    .join("");
+  const propsType = propLines.length > 0
+    ? `\nexport interface ${name}Props {\n${propLines.join("\n")}\n}\n`
+    : "";
   const destructureNames = params.map((p) => p.name);
   if (usesChildren) destructureNames.push("children");
-  const propDestructure =
-    destructureNames.length > 0 ? `{ ${destructureNames.join(", ")} }: ${name}Props` : "";
-  const navigateLine = usesNavigate ? `  const navigate = useNavigate();\n` : "";
-  const stateLines = usesState ? state.map((f) => `  ${renderUseState(f, pack)}\n`).join("") : "";
+  const propDestructure = destructureNames.length > 0
+    ? `{ ${destructureNames.join(", ")} }: ${name}Props`
+    : "";
+  const navigateLine = usesNavigate || form.usesNavigate
+    ? `  const navigate = useNavigate();\n`
+    : "";
+  const stateLines = usesState
+    ? state.map((f) => `  ${renderUseState(f, pack)}\n`).join("")
+    : "";
   // Suppress used-prop warnings — params declared but unused at
   // walker-emit time (e.g. typed pass-through to a child component
   // not yet wired) shouldn't trigger TS lint noise.  We reference
   // them with a `void` block when none made it into `tsx`.
   void usedParams;
   return `// Auto-generated.  Do not edit by hand.
-${reactImport}${reactTypesImport}${reactRouterImport}${mantineImport}${userComponentImports}${propsType}
+${reactImport}${reactTypesImport}${reactRouterImport}${mantineImport}${dtoImportLines}${actionWiring.imports}${userComponentImports}${propsType}${form.moduleScope}
 export default function ${name}(${propDestructure}) {
-${navigateLine}${stateLines}  return (
+${navigateLine}${actionWiring.decls}${form.decls}${stateLines}  return (
     ${indentJsx(tsx, "    ")}
   );
 }
@@ -539,6 +650,7 @@ function renderInitExpr(expr: ExprIR, pack: LoadedPack): string {
     workflowsByName: new Map(),
     bcByWorkflow: new Map(),
     formOfs: [],
+    actionMutations: [],
     collectedTestids: new Set(),
     helperImports: new Map(),
     usedHelpers: new Set(),

@@ -81,6 +81,7 @@ import {
   renderPrimitive,
 } from "./walker/context.js";
 import {
+  emitAction,
   emitButton,
   emitIdLink,
   emitQueryView,
@@ -219,6 +220,28 @@ export interface WalkResult {
    *  "<path>"` line per used helper; declared-but-unused helpers
    *  don't pollute the page TSX. */
   usedHelpers: Set<string>;
+  /** `Action(<instance>.<op>)` mutation wiring.  Each entry tells the
+   *  shell to declare `const <localVar> = <hookName>(<idExpr>)` at
+   *  function top and import the hook from `<prefix>api/<aggCamel>`. */
+  actionMutations: ActionMutationState[];
+}
+
+/** `Action(<instance>.<op>, then?)` — a button bound to an aggregate
+ *  operation invoked on an in-scope instance.  `emitAction` records
+ *  the mutation hook here; both page and component shells declare it
+ *  at function top (the hook must be called at component scope, not
+ *  inside the onClick handler). */
+export interface ActionMutationState {
+  /** Local variable bound to the mutation hook (e.g. `confirmOrder`),
+   *  referenced by the button's onClick. */
+  localVar: string;
+  /** Mutation hook name (e.g. `useConfirmOrder`). */
+  hookName: string;
+  /** camelCase aggregate name — the api module to import from
+   *  (`<prefix>api/<aggCamel>`). */
+  aggCamel: string;
+  /** JS expression for the instance id to mutate (e.g. `order.id`). */
+  idExpr: string;
 }
 
 /** A single auto-injected React Query hook call.  Generated when
@@ -364,6 +387,11 @@ export function walkBodyToTsx(
    *  field preparer needs the BC to resolve enums / value-objects
    *  referenced by workflow params). */
   bcByWorkflow: ReadonlyMap<string, BoundedContextIR> = new Map(),
+  /** In-scope instance variable → aggregate name (current body's
+   *  aggregate-typed params), powering `Action(<instance>.<op>)`. */
+  paramTypes: ReadonlyMap<string, string> = new Map(),
+  /** Page name → route path, for `Action`'s `then: navigate(<Page>)`. */
+  pageRoutes: ReadonlyMap<string, string> = new Map(),
 ): WalkResult {
   const apiParamNames = new Map<string, string>();
   for (const p of apiParams) apiParamNames.set(p.name, p.apiName);
@@ -373,6 +401,8 @@ export function walkBodyToTsx(
     imports: new Map(),
     pack,
     paramNames,
+    paramTypes,
+    pageRoutes,
     usedParams: new Set(),
     usesNavigate: false,
     stateNames,
@@ -390,6 +420,7 @@ export function walkBodyToTsx(
     workflowsByName,
     bcByWorkflow,
     formOfs: [],
+    actionMutations: [],
     collectedTestids: new Set(),
     helperImports: helperNameToPath,
     usedHelpers: new Set(),
@@ -406,6 +437,7 @@ export function walkBodyToTsx(
     usesChildren: ctx.usesChildren,
     usedApiHooks: ctx.usedApiHooks,
     formOfs: ctx.formOfs,
+    actionMutations: ctx.actionMutations,
     collectedTestids: ctx.collectedTestids,
     usedHelpers: ctx.usedHelpers,
   };
@@ -434,6 +466,16 @@ export interface WalkEnv {
   paramNames: ReadonlySet<string>;
   stateNames: ReadonlySet<string>;
   userComponents: ReadonlyMap<string, readonly ParamIR[]>;
+  /** In-scope instance variable name → aggregate name, for the
+   *  current body's params whose declared type is an aggregate (e.g.
+   *  `component OrderPanel(order: Order)` → `order → "Order"`).  Lets
+   *  `Action(order.confirm)` resolve the receiver's aggregate at walk
+   *  time — the IR's `receiverType` is unresolved for page/component
+   *  bodies (lowered with a neutral env). */
+  paramTypes?: ReadonlyMap<string, string>;
+  /** Page name → route path, so an `Action`'s `then: navigate(<Page>,
+   *  …)` effect targets the page's real declared route. */
+  pageRoutes?: ReadonlyMap<string, string>;
   apiParamNames: ReadonlyMap<string, string>;
   /** Slice A2 — lambda params bound in the current sub-walk
    *  (source-side name → emitted JS name).  `Column("ID", o => o.id)`
@@ -484,6 +526,9 @@ export interface Sink {
    *  emit `useForm` + mutation hook + `handleSubmit` wiring at
    *  function top. */
   formOfs: FormOfState[];
+  /** `Action(<instance>.<op>)` mutation wiring (see
+   *  `ActionMutationState`). */
+  actionMutations: ActionMutationState[];
   /** Slice A5 — accumulator for static `testid:` strings the body
    *  emits, used by the walker-side page-object builder. */
   collectedTestids: Set<string>;
@@ -549,13 +594,16 @@ export interface WorkflowFormState extends FormStateBase {
   fields: WorkflowIR["params"];
 }
 
-/** `Form(of: <Agg>, op: <name>)` — an aggregate-operation
- *  invocation form.  Unlike create/workflow forms (one per page,
- *  page-scope `useForm`), op-forms are emitted as module-scope
- *  components (`function <Op>Form`) opened via the Mantine modals
- *  manager, so a Detail page can host several without RHF-local
- *  collisions.  The page scope only declares the mutation hook
- *  (`const <op> = use<Op><Agg>(id ?? "")`) passed in as `mut`. */
+/** `Form(<instance>.<operation>)` — an aggregate-operation
+ *  invocation form.  The operation is referenced through an in-scope
+ *  instance (`order.confirm` for a component param, `data.confirm` for
+ *  a Detail page's loaded record); the receiver's aggregate is
+ *  resolved via `ctx.paramTypes`.  Unlike create/workflow forms (one
+ *  per page, page-scope `useForm`), op-forms are emitted as
+ *  module-scope components (`function <Op>Form`) opened via the
+ *  modals manager, so a Detail page can host several without RHF-local
+ *  collisions.  The page scope declares the mutation hook
+ *  (`const <op> = use<Op><Agg>(<idExpr>)`). */
 export interface OperationFormState extends FormStateBase {
   kind: "operation";
   agg: AggregateIR;
@@ -563,6 +611,11 @@ export interface OperationFormState extends FormStateBase {
   /** Operation params (always required — params have no optional
    *  notion).  Empty ⇒ the form renders a "no parameters" note. */
   fields: OperationIR["params"];
+  /** JS expression for the instance id the mutation targets.
+   *  `<instance>.id` when the instance is a function-top param;
+   *  `id ?? ""` (the route param) when it's a render-lambda binding
+   *  not in scope where the page-top hook is declared. */
+  idExpr: string;
   /** Trigger button surface, read from the enclosing `Modal`'s
    *  `trigger: Button(...)`.  Packs without a modals manager
    *  (shadcn/mui/chakra) render the trigger inside the self-
@@ -706,6 +759,8 @@ function emitComponent(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth:
       return emitText(call, ctx, depth);
     case "Button":
       return emitButton(call, ctx, depth);
+    case "Action":
+      return emitAction(call, ctx, depth);
     case "Card":
       return emitCard(call, ctx, depth);
     case "Modal":

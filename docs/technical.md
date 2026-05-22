@@ -504,7 +504,7 @@ contains*.  Per archetype:
 | --- | --- |
 | `aggregate-list` | `Stack(Breadcrumbs, Toolbar(Heading, Button "New"), QueryView(of: api.Agg.all, …, data: Paper(Table(Column per non-collection field))))` |
 | `aggregate-new` | `Stack(Breadcrumbs, Heading, Card(Form(of: Agg)))` |
-| `aggregate-detail` | `Stack(Breadcrumbs, Heading, QueryView(of: api.Agg.byId(id), single: true, data:` → `Card(Stack(KeyValueRow per scalar field))` **+ one `Modal(trigger: Button, Form(of: Agg, op: <name>))` per public operation + one `Card(Heading, Table)` per `contains` collection (related-entity list)** `))` |
+| `aggregate-detail` | `Stack(Breadcrumbs, Heading, QueryView(of: api.Agg.byId(id), single: true, data:` → `Card(Stack(KeyValueRow per scalar field))` **+ one `Modal(trigger: Button, Form(data.<op>))` per public operation + one `Card(Heading, Table)` per `contains` collection (related-entity list)** `))` |
 | `workflow-form` | `Stack(Breadcrumbs, Heading, Card(Form(runs: wf)))` |
 | `view-list` | `Stack(Heading, QueryView(of: Views.<name>, data: Paper(Table)))` |
 | `home` / `workflows-index` / `views-index` | `Stack(Heading, Stack(Card per aggregate/workflow/view))` |
