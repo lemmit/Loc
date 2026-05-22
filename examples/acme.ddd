@@ -372,8 +372,8 @@ system Acme {
         ui.orders.addLine(ord, { productId: prod.id, qty: 3 })
         ui.orders.confirm(ord)
         let read = ui.orders.getById(ord)
-        expect read.status == "Confirmed"
-        expect read.lines.length == 1
+        expect(read.status).toHaveText("Confirmed")
+        expect(read.lines).toHaveCount(1)
     }
 
     // Slice 18.C — `ui.workflows.<name>(...)` lowers via the

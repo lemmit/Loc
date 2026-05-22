@@ -12,6 +12,7 @@ import type {
   WorkflowIR,
 } from "../ir/loom-ir.js";
 import { lowerFirst, plural, snake, upperFirst } from "../util/naming.js";
+import { intrinsicMatcherSig } from "../language/type-system.js";
 import { renderExpectStmt } from "./expect-stmt.js";
 
 // ---------------------------------------------------------------------------
@@ -276,10 +277,14 @@ function renderTest(t: TestE2EIR, ctx: RenderCtx): string[] {
 
 function renderUIStmt(s: TestStmtIR, ctx: RenderCtx): string {
   if (s.kind === "expect") {
-    // Prefer Playwright's native, auto-retrying web-first matchers when
-    // the assertion is an equality on a detail-handle read — they poll
-    // the live DOM, so they're immune to the post-mutation refetch lag
-    // that a one-shot read snapshot would lose to.
+    // Explicit, typed matchers — `expect(<x>).toHaveText("…")` — are
+    // resolved in the IR (isIntrinsicMatcher) and rendered directly to the
+    // native Playwright matcher. No shape-guessing.
+    const explicit = renderExplicitMatcher(s.expr, ctx);
+    if (explicit) return explicit;
+    // Legacy: infer a web-first matcher from an equality's SHAPE. Retained
+    // alongside the explicit form during the spike; the goal is to delete
+    // this once the explicit surface lands across backends.
     const webFirst = renderWebFirstExpect(s.expr, ctx);
     if (webFirst) return webFirst;
     return renderExpectStmt(s.expr, (e) => renderUIExpr(e, ctx));
@@ -313,6 +318,36 @@ function renderUIStmt(s: TestStmtIR, ctx: RenderCtx): string {
 }
 
 type LiteralIR = Extract<ExprIR, { kind: "literal" }>;
+
+/** Render an explicit, typed matcher call — `expect(<x>).toHaveText("…")`
+ *  — straight to its Playwright form. The matcher (resolved into the IR as
+ *  `isIntrinsicMatcher`) drives the locator kind: `toHaveCount` reads a
+ *  collection (`…Rows()`), the other web-first matchers read a field
+ *  locator (`field("…")`), and `toBe` compares a one-shot value. Returns
+ *  null when the receiver isn't a recognised detail-handle read, so the
+ *  caller can fall back. */
+function renderExplicitMatcher(expr: ExprIR, ctx: RenderCtx): string | null {
+  if (expr.kind !== "method-call" || !expr.isIntrinsicMatcher) return null;
+  const sig = intrinsicMatcherSig(expr.member);
+  if (!sig) return null;
+  const args = expr.args.map((a) => renderUIExpr(a, ctx));
+  // In source `expect(<inner>).toHaveText(…)`, the matcher's receiver is the
+  // parenthesised asserted expression.
+  const inner = expr.receiver.kind === "paren" ? expr.receiver.inner : expr.receiver;
+
+  if (sig.on === "value") {
+    return `expect(${renderUIExpr(inner, ctx)}).${expr.member}(${args.join(", ")});`;
+  }
+
+  // Locator matcher: the inner must be `<detailHandle>.<member>`.
+  const dm = matchDetailField(inner, ctx);
+  if (!dm) return null;
+  const locator =
+    expr.member === "toHaveCount"
+      ? `${dm.handle}.${dm.field}Rows()`
+      : `${dm.handle}.field("${dm.field}")`;
+  return `await expect(${locator}).${expr.member}(${args.join(", ")});`;
+}
 
 /** `<handle>.<field>` where `<handle>` is a detail-handle local — and the
  *  member is a real field, not the page object's own `id` property. */

@@ -1108,6 +1108,12 @@ export type ExprIR =
       args: ExprIR[];
       receiverType: TypeIR;
       isCollectionOp: boolean;
+      /** Set when `member` is a recognised test-assertion matcher
+       *  (`toBe`/`toHaveText`/`toBeVisible`/…) — a built-in "intrinsic"
+       *  the type system knows and each backend lowers to its native test
+       *  library (Playwright/vitest/xUnit/ExUnit).  Resolved here so
+       *  backends switch on the flag rather than re-recognising names. */
+      isIntrinsicMatcher?: boolean;
       /** Optional parallel array: `argNames[i]` is the
        *  source-side `name:` prefix for `args[i]`, or `undefined` for
        *  positional arguments.  Present iff at least one arg was

@@ -463,6 +463,38 @@ export function isCollectionOp(name: string): boolean {
   return COLLECTION_OPS.has(name);
 }
 
+// Canonical test-assertion matcher catalogue — a built-in "intrinsic"
+// library the compiler knows by name (resolved into the IR, then lowered
+// per-backend to Playwright / vitest / xUnit / ExUnit).  `on` records
+// whether the matcher reads a DOM locator (web-first, auto-retrying) or a
+// plain value; `arity` is the fixed positional-argument count for
+// validation. This is the surface declared as DATA — adding a matcher is
+// a table entry plus a per-backend lowering, not a renderer special-case.
+export interface MatcherSig {
+  name: string;
+  arity: number;
+  on: "locator" | "value";
+  /** When this matcher reads a locator, the negated form is `not.<name>`. */
+  negatable: boolean;
+}
+const INTRINSIC_MATCHER_SIGNATURES: ReadonlyArray<MatcherSig> = [
+  { name: "toBe", arity: 1, on: "value", negatable: true },
+  { name: "toHaveText", arity: 1, on: "locator", negatable: true },
+  { name: "toHaveCount", arity: 1, on: "locator", negatable: true },
+  { name: "toBeVisible", arity: 0, on: "locator", negatable: true },
+];
+const INTRINSIC_MATCHERS = new Map(
+  INTRINSIC_MATCHER_SIGNATURES.map((m) => [m.name, m]),
+);
+
+export function isIntrinsicMatcher(name: string): boolean {
+  return INTRINSIC_MATCHERS.has(name);
+}
+
+export function intrinsicMatcherSig(name: string): MatcherSig | undefined {
+  return INTRINSIC_MATCHERS.get(name);
+}
+
 export function lambdaTakesElementOf(t: DddType): DddType {
   if (t.kind === "array") return t.element;
   return T.unknown;

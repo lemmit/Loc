@@ -53,7 +53,7 @@ import {
   isUnaryExpr,
   isValueObject,
 } from "../language/generated/ast.js";
-import { isCollectionOp } from "../language/type-system.js";
+import { isCollectionOp, isIntrinsicMatcher } from "../language/type-system.js";
 import type {
   ExprIR,
   IdValueType,
@@ -498,6 +498,7 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
         args,
         receiverType: recvType,
         isCollectionOp: collectionOp,
+        ...(isIntrinsicMatcher(expr.member) ? { isIntrinsicMatcher: true } : {}),
         ...(argNames.some((n) => n !== undefined) ? { argNames } : {}),
       };
     }

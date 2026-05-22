@@ -16,6 +16,22 @@ describe("validation", () => {
     expect(errors.some((e) => /invariant/i.test(e) && /bool/i.test(e))).toBe(true);
   });
 
+  it("flags wrong-arity intrinsic matcher calls", async () => {
+    // The compiler knows the test-matcher surface, so it enforces arity:
+    // `toHaveText` takes exactly one argument.
+    const { errors } = await parse(`
+      context T {
+        aggregate A {
+          name: string
+          derived bad: bool = name.toHaveText("a", "b")
+        }
+      }
+    `);
+    expect(
+      errors.some((e) => /matcher/i.test(e) && /argument/i.test(e)),
+    ).toBe(true);
+  });
+
   it("flags non-bool preconditions", async () => {
     const { errors } = await parse(`
       context T {
