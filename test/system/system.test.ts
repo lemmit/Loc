@@ -105,7 +105,7 @@ describe("system / module / deployable", () => {
     expect(dotnetProgram).toMatch(/app\.MapGet\("\/health"/);
   });
 
-  describe("slice 16.A — container basics (/ready, SIGTERM, fail-fast)", () => {
+  describe("container basics (/ready, SIGTERM, fail-fast)", () => {
     it("Hono backend gets a /ready route that pings the DB", async () => {
       const model = await buildModel("examples/acme.ddd");
       const { files } = generateSystems(model);

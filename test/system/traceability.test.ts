@@ -31,7 +31,7 @@ const SOURCE = `
   }
 `;
 
-describe("traceability IR (Slice 12)", () => {
+describe("traceability IR", () => {
   it("lowers requirements / solutions / testCases", async () => {
     const loom = await build(SOURCE);
     expect(loom.requirements.map((r) => r.id).sort()).toEqual(["AC-001", "US-001", "US-002"]);
