@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { ActionIcon, Autocomplete, Box, Button, Group, SegmentedControl, Select, Text, TextInput, Textarea } from "@mantine/core";
-import { BINARY_OPS, UNARY_OPS, emitExpr, type ECallArg, type EExpr, type EMatchArm, type EObjField } from "./expr-model";
+import { ASSIGN_OPS, BINARY_OPS, UNARY_OPS, emitExpr, type ECallArg, type EExpr, type EMatchArm, type EObjField, type EStmt } from "./expr-model";
 
 export type ExprMode = "structured" | "text";
 
@@ -35,22 +35,39 @@ interface NodeProps {
 }
 
 // Argument list shared by call (`f(…)`) and member-call (`a.b(…)`) nodes.
-// Edits a single arg's value, removes an arg, or appends a positional one
-// (defaulting to `null` so the result stays parseable until edited). Named args
-// keep their name verbatim; renaming args is out of scope for now.
+// Edits a single arg's value or name, removes an arg, or appends a positional
+// one (defaulting to `null` so the result stays parseable until edited). A named
+// arg's name is editable (clearing it makes the arg positional).
 function ArgsEditor({ args, path, onArgs }: { args: ECallArg[]; path: string; onArgs: (args: ECallArg[], commit: boolean) => void }): JSX.Element {
   // Callee parameter names (type-resolved) to label positional args.
   const paramNames = useContext(ArgLabelsContext).get(path);
+  const setName = (i: number, name: string | undefined, commit: boolean): void =>
+    onArgs(args.map((a, j) => (j === i ? { ...a, name } : a)), commit);
+  // On blur, an emptied name demotes the arg back to positional.
+  const normalizeName = (i: number): void =>
+    onArgs(args.map((a, j) => (j === i && a.name?.trim() === "" ? { ...a, name: undefined } : a)), true);
   return (
     <Group gap={2} wrap="nowrap" align="center">
       <Text size="xs" c="dimmed">(</Text>
       {args.map((arg, i) => (
         <Group key={i} gap={2} wrap="nowrap" align="center">
           {i > 0 && <Text size="xs" c="dimmed">,</Text>}
-          {arg.name ? (
-            <Text size="xs" c="dimmed">{arg.name}:</Text>
+          {arg.name !== undefined ? (
+            <Group gap={0} wrap="nowrap" align="center">
+              <TextInput
+                size="xs"
+                w={64}
+                value={arg.name}
+                data-testid="c4expr-arg-name"
+                aria-label="argument name"
+                styles={{ input: { fontFamily: "monospace", fontSize: 11 } }}
+                onChange={(e) => setName(i, e.currentTarget.value, false)}
+                onBlur={() => normalizeName(i)}
+              />
+              <Text size="xs" c="dimmed">:</Text>
+            </Group>
           ) : paramNames?.[i] ? (
-            <Text size="xs" c="dimmed" data-testid="c4expr-arg-label" title="parameter">{paramNames[i]}:</Text>
+            <Text size="xs" c="dimmed" data-testid="c4expr-arg-label" title="parameter (click to name)" style={{ cursor: "pointer" }} onClick={() => setName(i, paramNames[i], true)}>{paramNames[i]}:</Text>
           ) : null}
           <ExpressionEditor node={arg.value} path={`${path}a${i}`} onChange={(n, c) => onArgs(args.map((a, j) => (j === i ? { ...a, value: n } : a)), c)} />
           <ActionIcon size="xs" variant="subtle" color="gray" data-testid="c4expr-arg-del" aria-label="remove argument" onClick={() => onArgs(args.filter((_, j) => j !== i), true)}>
@@ -96,6 +113,85 @@ function FieldsEditor({ fields, path, onFields }: { fields: EObjField[]; path: s
         <Text size="xs">+</Text>
       </ActionIcon>
       <Text size="xs" c="dimmed">{"}"}</Text>
+    </Group>
+  );
+}
+
+// One statement row of a block-bodied lambda. `let` / assignment structure their
+// value as a nested expression editor (the lambda param + earlier `let` bindings
+// are threaded into its scope); every other statement kind edits as a verbatim
+// text row.
+function StmtRow({ stmt, path, scope, onChange, onDelete, onMoveUp, onMoveDown }: {
+  stmt: EStmt;
+  path: string;
+  scope: string[];
+  onChange: (s: EStmt, commit: boolean) => void;
+  onDelete: () => void;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
+}): JSX.Element {
+  const valueEditor = (value: EExpr, on: (n: EExpr, c: boolean) => void): JSX.Element => (
+    <ExprScopeContext.Provider value={scope}>
+      <ExpressionEditor node={value} path={`${path}v`} onChange={on} />
+    </ExprScopeContext.Provider>
+  );
+  return (
+    <Group gap={2} wrap="nowrap" align="center" data-testid="c4expr-stmt">
+      {stmt.kind === "let" && (
+        <>
+          <Text size="xs" c="dimmed">let</Text>
+          <TextInput
+            size="xs"
+            w={56}
+            value={stmt.name}
+            data-testid="c4expr-stmt-let-name"
+            styles={{ input: { fontFamily: "monospace", fontSize: 11 } }}
+            onChange={(e) => onChange({ ...stmt, name: e.currentTarget.value }, false)}
+            onBlur={() => onChange(stmt, true)}
+          />
+          <Text size="xs" c="dimmed">=</Text>
+          {valueEditor(stmt.value, (n, c) => onChange({ ...stmt, value: n }, c))}
+        </>
+      )}
+      {stmt.kind === "assign" && (
+        <>
+          <TextInput
+            size="xs"
+            w={70}
+            value={stmt.target}
+            data-testid="c4expr-stmt-target"
+            styles={{ input: { fontFamily: "monospace", fontSize: 11 } }}
+            onChange={(e) => onChange({ ...stmt, target: e.currentTarget.value }, false)}
+            onBlur={() => onChange(stmt, true)}
+          />
+          <Select size="xs" w={56} data={ASSIGN_OPS} value={stmt.op} allowDeselect={false} data-testid="c4expr-stmt-op" onChange={(op) => op && onChange({ ...stmt, op }, true)} />
+          {valueEditor(stmt.value, (n, c) => onChange({ ...stmt, value: n }, c))}
+        </>
+      )}
+      {stmt.kind === "raw" && (
+        <TextInput
+          size="xs"
+          style={{ flex: 1 }}
+          value={stmt.src}
+          data-testid="c4expr-stmt-raw"
+          styles={{ input: { fontFamily: "monospace", fontSize: 11 } }}
+          onChange={(e) => onChange({ ...stmt, src: e.currentTarget.value }, false)}
+          onBlur={() => onChange(stmt, true)}
+        />
+      )}
+      {onMoveUp && (
+        <ActionIcon size="xs" variant="subtle" color="gray" data-testid="c4expr-stmt-up" aria-label="move statement up" onClick={onMoveUp}>
+          <Text size="xs">↑</Text>
+        </ActionIcon>
+      )}
+      {onMoveDown && (
+        <ActionIcon size="xs" variant="subtle" color="gray" data-testid="c4expr-stmt-down" aria-label="move statement down" onClick={onMoveDown}>
+          <Text size="xs">↓</Text>
+        </ActionIcon>
+      )}
+      <ActionIcon size="xs" variant="subtle" color="gray" data-testid="c4expr-stmt-del" aria-label="remove statement" onClick={onDelete}>
+        <Text size="xs">×</Text>
+      </ActionIcon>
     </Group>
   );
 }
@@ -197,6 +293,55 @@ export function ExpressionEditor({ node, path, onChange }: NodeProps): JSX.Eleme
           </ExprScopeContext.Provider>
         </Group>
       );
+    case "blockLambda": {
+      const bl = node;
+      const setStmts = (stmts: EStmt[], commit: boolean): void => onChange({ ...bl, stmts }, commit);
+      // Earlier `let` bindings are in scope for a later statement's value.
+      const letNamesBefore = (i: number): string[] => bl.stmts.slice(0, i).flatMap((s) => (s.kind === "let" ? [s.name] : []));
+      const move = (i: number, d: number): void => {
+        const next = bl.stmts.slice();
+        [next[i], next[i + d]] = [next[i + d], next[i]];
+        setStmts(next, true);
+      };
+      return (
+        <Box style={{ border: "1px solid var(--mantine-color-dark-4)", borderRadius: 4, padding: 2 }} data-testid="c4expr-block-lambda">
+          <Group gap={2} wrap="nowrap" align="center">
+            <TextInput
+              size="xs"
+              w={48}
+              value={bl.param}
+              data-testid="c4expr-blocklambda-param"
+              styles={{ input: { fontFamily: "monospace", fontSize: 11 } }}
+              onChange={(e) => onChange({ ...bl, param: e.currentTarget.value }, false)}
+              onBlur={() => onChange(bl, true)}
+            />
+            <Text size="xs" c="dimmed">{"=> {"}</Text>
+          </Group>
+          {bl.stmts.map((s, i) => (
+            <Box key={i} pl={8}>
+              <StmtRow
+                stmt={s}
+                path={`${path}s${i}`}
+                scope={[...candidates, bl.param, ...letNamesBefore(i)]}
+                onChange={(ns, c) => setStmts(bl.stmts.map((x, j) => (j === i ? ns : x)), c)}
+                onDelete={() => setStmts(bl.stmts.filter((_, j) => j !== i), true)}
+                onMoveUp={i > 0 ? () => move(i, -1) : undefined}
+                onMoveDown={i < bl.stmts.length - 1 ? () => move(i, 1) : undefined}
+              />
+            </Box>
+          ))}
+          <Group gap={4} pl={8} mt={2}>
+            <Button size="compact-xs" variant="subtle" color="gray" data-testid="c4expr-stmt-add-let" onClick={() => setStmts([...bl.stmts, { kind: "let", name: "x", value: { kind: "lit", lit: "null", value: "null" } }], true)}>
+              + let
+            </Button>
+            <Button size="compact-xs" variant="subtle" color="gray" data-testid="c4expr-stmt-add-assign" onClick={() => setStmts([...bl.stmts, { kind: "assign", target: bl.param, op: ":=", value: { kind: "lit", lit: "null", value: "null" } }], true)}>
+              + assign
+            </Button>
+          </Group>
+          <Text size="xs" c="dimmed">{"}"}</Text>
+        </Box>
+      );
+    }
     case "ternary":
       return (
         <Group gap={4} wrap="nowrap" align="center" style={{ border: "1px solid var(--mantine-color-dark-4)", borderRadius: 4, padding: 2 }} data-testid="c4expr-ternary">

@@ -19,7 +19,8 @@ import type { BoundedContext, Model, System } from "../../../../src/language/gen
 import { printStructural } from "../../../../src/language/print/index.js";
 import { parseDdd } from "../parse";
 import { spliceNode, applyEdits } from "../edit-engine";
-import { buildSystemGraph, type GraphNode, type NodeKind } from "./model";
+import { buildSystemGraph, nodeDiagnostics, type GraphNode, type NodeKind } from "./model";
+import type { Diagnostic } from "../../lsp/protocol";
 import { IDENTIFIER, renameConstruct, renameMember } from "./rename";
 import {
   addField,
@@ -76,7 +77,7 @@ import {
   deleteStatement,
   editStatement,
   listOperations,
-  listStatements,
+  listStatementViews,
   moveStatement,
   type BodyLocator,
 } from "./body";
@@ -104,22 +105,35 @@ const KIND_COLOR: Record<NodeKind, string> = {
   ui: "var(--mantine-color-violet-7)",
 };
 
-function toRfNodes(graph: ReturnType<typeof buildSystemGraph>): Node[] {
-  return graph.nodes.map((n) => ({
-    id: n.id,
-    position: { x: n.x, y: n.y },
-    data: { label: `${n.kind}\n${n.name}` },
-    style: {
-      background: KIND_COLOR[n.kind],
-      color: "white",
-      border: "1px solid rgba(255,255,255,0.25)",
-      borderRadius: 6,
-      fontSize: 11,
-      width: 150,
-      whiteSpace: "pre-line" as const,
-      textAlign: "center" as const,
-    },
-  }));
+// Worst severity (error beats warning) among a node's diagnostics, or null.
+function worstSeverity(diags: readonly Diagnostic[] | undefined): "error" | "warning" | null {
+  if (!diags || diags.length === 0) return null;
+  return diags.some((d) => d.severity === "error") ? "error" : "warning";
+}
+
+const SEVERITY_COLOR = { error: "var(--mantine-color-red-6)", warning: "var(--mantine-color-yellow-5)" } as const;
+
+function toRfNodes(graph: ReturnType<typeof buildSystemGraph>, diagByNode: Map<string, Diagnostic[]>): Node[] {
+  return graph.nodes.map((n) => {
+    const diags = diagByNode.get(n.id);
+    const sev = worstSeverity(diags);
+    const mark = sev ? `\n${sev === "error" ? "✕" : "⚠"} ${diags!.length}` : "";
+    return {
+      id: n.id,
+      position: { x: n.x, y: n.y },
+      data: { label: `${n.kind}\n${n.name}${mark}`, title: diags?.map((d) => d.message).join("\n") },
+      style: {
+        background: KIND_COLOR[n.kind],
+        color: "white",
+        border: sev ? `2px solid ${SEVERITY_COLOR[sev]}` : "1px solid rgba(255,255,255,0.25)",
+        borderRadius: 6,
+        fontSize: 11,
+        width: 150,
+        whiteSpace: "pre-line" as const,
+        textAlign: "center" as const,
+      },
+    };
+  });
 }
 
 function toRfEdges(graph: ReturnType<typeof buildSystemGraph>): Edge[] {
@@ -265,10 +279,16 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     () => (parsed.parserErrors.length === 0 ? buildSystemGraph(parsed.ast) : null),
     [parsed],
   );
+  // LSP diagnostics attributed to the construct that most tightly contains each,
+  // so a broken aggregate / view / workflow is flagged on its own node.
+  const diagByNode = useMemo(
+    () => (graph ? nodeDiagnostics(graph, ctx.diagnostics) : new Map<string, Diagnostic[]>()),
+    [graph, ctx.diagnostics],
+  );
 
   // Seed with the first render's nodes/edges (not [] populated by an effect) so
   // the `fitView` prop actually has something to fit on mount.
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(graph ? toRfNodes(graph) : []);
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(graph ? toRfNodes(graph, diagByNode) : []);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(graph ? toRfEdges(graph) : []);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const compact = !ctx.isDesktop;
@@ -293,9 +313,9 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
 
   useEffect(() => {
     if (!graph) return;
-    setNodes(toRfNodes(graph));
+    setNodes(toRfNodes(graph, diagByNode));
     setEdges(toRfEdges(graph));
-  }, [graph, setNodes, setEdges]);
+  }, [graph, diagByNode, setNodes, setEdges]);
 
   // `fitView` on the ReactFlow element only fits on mount — but nodes are
   // populated by the effect above, *after* the first render — so fit once the
@@ -780,7 +800,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
             {selected.kind === "workflow" && (
               <BodyEditor
                 key={`${selected.id}:${rev}`}
-                statements={listStatements(parsed.ast, { kind: "workflow", name: selected.name }) ?? []}
+                statements={listStatementViews(parsed.ast, { kind: "workflow", name: selected.name }) ?? []}
                 {...bodyHandlers({ kind: "workflow", name: selected.name })}
               />
             )}
@@ -798,7 +818,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
                 {opName && (
                   <BodyEditor
                     key={`${selected.id}:${opName}:${rev}`}
-                    statements={listStatements(parsed.ast, { kind: "operation", aggregate: selected.name, op: opName }) ?? []}
+                    statements={listStatementViews(parsed.ast, { kind: "operation", aggregate: selected.name, op: opName }) ?? []}
                     {...bodyHandlers({ kind: "operation", aggregate: selected.name, op: opName })}
                   />
                 )}

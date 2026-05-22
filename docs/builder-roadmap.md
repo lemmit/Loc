@@ -237,10 +237,10 @@ Done:
   + member + an add/remove/edit argument list, expression-body lambdas
   (`p => expr`) render an editable param + body (the param is threaded into the
   body's scope suggestions), `new Part { … }` and object literals `{ … }` render
-  an editable partType + a named-field list (add/remove/edit), and everything
-  still unmodelled (block-body lambdas) is a reparse-validated
-  `raw` text leaf (recognise-or-raw). (`match` + ternary were since structured —
-  see below.) Plugged into the
+  an editable partType + a named-field list (add/remove/edit), and anything still
+  unmodelled is a reparse-validated `raw` text leaf (recognise-or-raw). (`match`,
+  ternary, and block-body lambdas were since structured — see below.) Plugged
+  into the
   single-expression slots — invariants, derived props, function bodies — via one
   inspector "Expression" picker (`expr-slots.ts`). A **structured⇄text toggle**
   lets advanced users edit the whole expression as raw text (same
@@ -313,17 +313,38 @@ Done:
   member/arg hints thread through the branches (matching paths in `collectHints`).
   `expr-model.ts` + `ExpressionEditor.tsx` + `expr-slots.ts`; gated by
   `test/system-expr.test.ts` + e2e.
+- **Structured block-body lambdas** — a `p => { … }` lambda seeds editable
+  statement rows (`EStmt` in `expr-model.ts`): `let` and assignment structure
+  their value as a nested expression editor (so member completion / arg labels
+  thread in), every other statement kind (precondition / requires / emit / bare
+  call) keeps its source verbatim. Rows add (`+ let` / `+ assign`, parseable
+  defaults) / delete / reorder; the lambda param and earlier `let` bindings are
+  threaded into each value's scope. `expr-model.ts` + `ExpressionEditor.tsx`;
+  gated by `test/system-expr.test.ts`.
+- **Argument-name editing** — a named call argument's name is an editable input
+  (clearing it demotes the arg to positional); clicking an inferred parameter-name
+  label on a positional arg promotes it to named (`ArgsEditor` in
+  `ExpressionEditor.tsx`). Gated by `test/system-expr.test.ts`.
+- **Structured assignment target** — in the top-level BodyEditor (operation /
+  workflow bodies) an assignment row splits into a dedicated target / op / value
+  (`StmtView` in `body.ts`, `AssignRow` in `BodyEditor.tsx`); other statement
+  kinds keep their single text row. The op is a `:=` / `+=` / `-=` dropdown; the
+  value re-uses the structured Expression picker. Gated by
+  `test/system-body.test.ts` + e2e.
+- **Diagnostics on graph nodes** — LSP diagnostics (`ctx.diagnostics`) are
+  attributed to the construct whose source most tightly contains each (so a
+  problem inside an aggregate marks the aggregate, not its module), and that node
+  renders a red (error) / yellow (warning) outline + a `✕`/`⚠` count, with the
+  messages on the node's `title`. `nodeDiagnostics` in `model.ts` (pure,
+  attribution by CST line span); rendering in `SystemBuilderPane.tsx`. Gated by
+  `test/system-model.test.ts`.
 
 Open:
 
-- **Deeper expression structuring** — block-body lambdas are still `raw` leaves
-  in `expr-model.ts`; and arg-*name* editing on calls (existing named args are
-  preserved verbatim but can't be renamed in the UI).
-- **Structured statement non-expression parts** — statement *expressions* are
-  structured today (assignment RHS, `let` values, predicates, `emit` field
-  values, call args), but the assignment *target* (LValue) and a bare-call
-  statement's callee still edit as text rows. (Repointing an `emit` to a
-  different event is already done — see the Emit event picker, above.)
+- **Structured bare-call statements** — a bare-call statement (`x.method(args)`)
+  in the top-level BodyEditor still edits as one verbatim text row; its callee /
+  args aren't split out. (Assignment targets are structured — see above; and
+  repointing an `emit` to a different event is done via the Emit event picker.)
 - **Edge rebinding by dragging** connections on the canvas — the drag gesture
   itself. Rebinding by inspector Select already exists for both single-reference
   constructs (`rebind.ts`) and multi-valued deployable references — modules /
@@ -334,3 +355,24 @@ Open:
 - **Nested grouping** (module → context → members as React Flow parent nodes)
   and auto-layout; today it's a deterministic column-per-kind layout.
 - **Persisted positions** (layout is currently derived, not written back).
+
+Planned — recommended order:
+
+1. ~~**Finish expression/statement structuring**~~ — done: block-body lambdas,
+   arg-name editing, and assignment-target structuring (all in Done above). Only
+   structured *bare-call* statements remain (see Open) — low value, deferred.
+2. ~~**Diagnostics on graph nodes**~~ — done (see Done above): per-construct
+   error/warning outline + count, attributed by tightest CST containment.
+3. **Search / filter / focus** — jump-to-construct, filter by kind, highlight a
+   node's neighbours; needed once a system outgrows one screen.
+4. **Traceability overlay** — surface the derived requirement / solution /
+   testCase coverage + gaps (`.loom/` reports, `docs/traceability.md`) as a graph
+   heat-overlay: which aggregates lack tests / have unmet requirements. The
+   standout capability a text editor can't offer.
+5. **Apply-diff preview** — show the text diff a graph edit will splice before
+   committing (round-trip trust + safety).
+6. **Wire-shape / DTO preview** on aggregate nodes — render the
+   enrichment-computed `wireShape` field list inline, so the contract is visible.
+
+Layout polish (slot in opportunistically): drag-to-rebind edges, persisted
+positions, auto-layout (dagre/elk) + nested grouping, add target-context picker.

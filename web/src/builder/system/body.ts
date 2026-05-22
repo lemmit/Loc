@@ -71,6 +71,32 @@ export function listStatements(ast: Model, loc: BodyLocator): string[] | null {
   return body.statements.map((s) => s.$cstNode?.text ?? "");
 }
 
+// A statement structured for the body editor: an assignment splits into a
+// dedicated target / op / value (so the target edits as its own control);
+// everything else (bare calls, precondition / requires / let / emit) keeps its
+// verbatim source for a single text row.
+export type StmtView =
+  | { kind: "assign"; target: string; op: string; value: string }
+  | { kind: "other"; src: string };
+
+function stmtView(s: Statement): StmtView {
+  if (s.$type === "AssignOrCallStmt" && s.op && s.value) {
+    return {
+      kind: "assign",
+      target: s.target.$cstNode?.text?.trim() ?? "",
+      op: s.op,
+      value: s.value.$cstNode?.text?.trim() ?? "",
+    };
+  }
+  return { kind: "other", src: s.$cstNode?.text ?? "" };
+}
+
+export function listStatementViews(ast: Model, loc: BodyLocator): StmtView[] | null {
+  const body = resolveBody(ast, loc);
+  if (!body) return null;
+  return body.statements.map(stmtView);
+}
+
 // --- function bodies (a single Expression, not Statement[]) ----------------
 
 function membersOf(node: AstNode): readonly AstNode[] {

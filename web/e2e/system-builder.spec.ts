@@ -387,6 +387,17 @@ test("edits an operation body via the aggregate inspector", async ({ page }) => 
   await page.getByTestId("c4system-stmt-add").click();
   await expect.poll(async () => rows.count()).toBe(5);
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+
+  // The `status := Confirmed` assignment is structured into a dedicated target /
+  // op / value (not a single text row). Edit the target → it splices, re-parses,
+  // and the row re-seeds from source under the new target.
+  const target = page.getByTestId("c4system-stmt-target");
+  await expect(target).toHaveValue("status");
+  await expect(page.getByTestId("c4system-stmt-value")).toHaveValue("Confirmed");
+  await target.fill("placedAt");
+  await target.blur();
+  await expect(page.getByTestId("c4system-stmt-target")).toHaveValue("placedAt");
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
 
 test("edits an expression structurally (operator dropdown + leaf)", async ({ page }) => {

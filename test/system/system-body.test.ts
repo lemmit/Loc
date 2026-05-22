@@ -15,6 +15,7 @@ import {
   listFunctions,
   listOperations,
   listStatements,
+  listStatementViews,
   moveStatement,
 } from "../../web/src/builder/system/body.js";
 
@@ -60,6 +61,16 @@ describe("System builder — operation/workflow body editing", () => {
     expect(wf).toHaveLength(2);
     expect(wf[0]).toBe("let customer = Customers.getById(customerId)");
     expect(wf[1]).toMatch(/^let order = Order\.create\(\{/);
+  });
+
+  it("structures an assignment into target / op / value, others verbatim", () => {
+    const views = listStatementViews(parse(sales), confirm)!;
+    expect(views[0]).toEqual({ kind: "other", src: "precondition isMutable()" });
+    expect(views[2]).toEqual({ kind: "assign", target: "status", op: ":=", value: "Confirmed" });
+    expect(views[3]).toMatchObject({ kind: "other" });
+    // A bare-call workflow statement stays verbatim (no assignment op).
+    const wf = listStatementViews(parse(sales), placeOrder)!;
+    expect(wf[0].kind).toBe("other");
   });
 
   it("edits a statement in place when the result still parses", () => {

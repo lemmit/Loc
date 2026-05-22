@@ -1,22 +1,85 @@
 import { useState } from "react";
-import { Button, Group, Stack, Text, Textarea } from "@mantine/core";
+import { Button, Group, Select, Stack, Text, TextInput, Textarea } from "@mantine/core";
+import { ASSIGN_OPS } from "./expr-model";
+import type { StmtView } from "./body";
 
-// Validated-text statement-list editor, shared by operation and workflow bodies
-// (both `Statement[]`).  Each statement is an editable text row committed on
-// blur; the parent splices + re-parses and returns whether it committed (a
-// syntactically-invalid edit is rejected and flagged here).  Semantic errors
-// surface in the Problems panel after a commit lands.
+// Validated statement-list editor, shared by operation and workflow bodies
+// (both `Statement[]`).  An assignment row splits into a dedicated target / op /
+// value (the target edits as its own control); every other statement is an
+// editable text row.  Each edit is committed on blur; the parent splices +
+// re-parses and returns whether it committed (a syntactically-invalid edit is
+// rejected and flagged here).  Semantic errors surface in the Problems panel
+// after a commit lands.
 //
 // (Single-expression bodies — `function … = <expr>`, derived props, invariants
-// — are edited by the structured `ExpressionEditor`, not here.)
+// — and a statement's *value* expression are edited by the structured
+// `ExpressionEditor`, not here.)
 
 interface BodyEditorProps {
-  statements: string[];
+  statements: StmtView[];
   /** Returns true if the edit was committed (parsed); false → rejected. */
   onEdit: (index: number, text: string) => boolean;
   onDelete: (index: number) => void;
   onMove: (index: number, dir: -1 | 1) => void;
   onAdd: (text: string) => boolean;
+}
+
+const MONO = { input: { fontFamily: "monospace", fontSize: 11 } };
+
+function viewText(v: StmtView): string {
+  return v.kind === "assign" ? `${v.target} ${v.op} ${v.value}` : v.src;
+}
+
+// Assignment row: target / op / value as separate controls. Local draft state so
+// any field can change before the reconstructed statement is committed on blur
+// (or immediately on an op change).
+function AssignRow({ view, error, onCommit, onClearError }: {
+  view: { target: string; op: string; value: string };
+  error: boolean;
+  onCommit: (text: string) => void;
+  onClearError: () => void;
+}): JSX.Element {
+  const [target, setTarget] = useState(view.target);
+  const [op, setOp] = useState(view.op);
+  const [value, setValue] = useState(view.value);
+  const reconstruct = (t: string, o: string, v: string): string => `${t.trim()} ${o} ${v.trim()}`;
+  return (
+    <>
+      <TextInput
+        size="xs"
+        w={96}
+        defaultValue={target}
+        data-testid="c4system-stmt-target"
+        aria-label="assignment target"
+        styles={MONO}
+        onFocus={onClearError}
+        onChange={(e) => setTarget(e.currentTarget.value)}
+        onBlur={() => onCommit(reconstruct(target, op, value))}
+      />
+      <Select
+        size="xs"
+        w={64}
+        data={ASSIGN_OPS}
+        value={op}
+        allowDeselect={false}
+        data-testid="c4system-stmt-op"
+        onChange={(o) => { if (o) { setOp(o); onCommit(reconstruct(target, o, value)); } }}
+      />
+      <Textarea
+        size="xs"
+        autosize
+        minRows={1}
+        style={{ flex: 1, minWidth: 0 }}
+        defaultValue={value}
+        error={error ? "invalid" : undefined}
+        data-testid="c4system-stmt-value"
+        styles={MONO}
+        onFocus={onClearError}
+        onChange={(e) => setValue(e.currentTarget.value)}
+        onBlur={() => onCommit(reconstruct(target, op, value))}
+      />
+    </>
+  );
 }
 
 export function BodyEditor({ statements, onEdit, onDelete, onMove, onAdd }: BodyEditorProps): JSX.Element {
@@ -47,31 +110,43 @@ export function BodyEditor({ statements, onEdit, onDelete, onMove, onAdd }: Body
     <Stack gap={4} data-testid="c4system-body">
       <Text size="xs" tt="uppercase" c="dimmed">Body</Text>
       {statements.length === 0 && <Text size="xs" c="dimmed">No statements.</Text>}
-      {statements.map((s, i) => (
-        <Group key={`${i}-${s}`} gap={4} align="flex-start" wrap="nowrap" data-testid="c4system-stmt-row">
-          <Textarea
-            size="xs"
-            autosize
-            minRows={1}
-            style={{ flex: 1, minWidth: 0 }}
-            defaultValue={s}
-            error={errorAt === i ? "invalid" : undefined}
-            data-testid="c4system-stmt"
-            styles={{ input: { fontFamily: "monospace", fontSize: 11 } }}
-            onFocus={() => errorAt === i && setErrorAt(null)}
-            onBlur={(e) => commitEdit(i, s, e.currentTarget.value)}
-          />
-          <Button size="compact-xs" variant="subtle" data-testid="c4system-stmt-up" disabled={i === 0} onClick={() => onMove(i, -1)}>
-            ↑
-          </Button>
-          <Button size="compact-xs" variant="subtle" data-testid="c4system-stmt-down" disabled={i === statements.length - 1} onClick={() => onMove(i, 1)}>
-            ↓
-          </Button>
-          <Button size="compact-xs" variant="subtle" color="red" data-testid="c4system-stmt-delete" onClick={() => onDelete(i)}>
-            ×
-          </Button>
-        </Group>
-      ))}
+      {statements.map((s, i) => {
+        const original = viewText(s);
+        return (
+          <Group key={`${i}-${original}`} gap={4} align="flex-start" wrap="nowrap" data-testid="c4system-stmt-row">
+            {s.kind === "assign" ? (
+              <AssignRow
+                view={s}
+                error={errorAt === i}
+                onClearError={() => errorAt === i && setErrorAt(null)}
+                onCommit={(text) => commitEdit(i, original, text)}
+              />
+            ) : (
+              <Textarea
+                size="xs"
+                autosize
+                minRows={1}
+                style={{ flex: 1, minWidth: 0 }}
+                defaultValue={s.src}
+                error={errorAt === i ? "invalid" : undefined}
+                data-testid="c4system-stmt"
+                styles={MONO}
+                onFocus={() => errorAt === i && setErrorAt(null)}
+                onBlur={(e) => commitEdit(i, s.src, e.currentTarget.value)}
+              />
+            )}
+            <Button size="compact-xs" variant="subtle" data-testid="c4system-stmt-up" disabled={i === 0} onClick={() => onMove(i, -1)}>
+              ↑
+            </Button>
+            <Button size="compact-xs" variant="subtle" data-testid="c4system-stmt-down" disabled={i === statements.length - 1} onClick={() => onMove(i, 1)}>
+              ↓
+            </Button>
+            <Button size="compact-xs" variant="subtle" color="red" data-testid="c4system-stmt-delete" onClick={() => onDelete(i)}>
+              ×
+            </Button>
+          </Group>
+        );
+      })}
       <Group gap={4} align="flex-start" wrap="nowrap">
         <Textarea
           size="xs"
@@ -82,7 +157,7 @@ export function BodyEditor({ statements, onEdit, onDelete, onMove, onAdd }: Body
           value={draftAdd}
           error={addError ? "invalid" : undefined}
           data-testid="c4system-stmt-add-input"
-          styles={{ input: { fontFamily: "monospace", fontSize: 11 } }}
+          styles={MONO}
           onChange={(e) => {
             setDraftAdd(e.currentTarget.value);
             if (addError) setAddError(false);
