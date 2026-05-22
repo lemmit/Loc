@@ -154,32 +154,9 @@ import { emitFormOf, emitModal } from "./walker/primitives/forms.js";
  *  iterates the map and emits one `import` line per source. */
 export type ImportMap = Map<string, Set<string>>;
 
-/** Render the page's import block from the per-source map.  One
- *  `import { … } from "<from>";` line per source, alphabetically
- *  sorted within each line and sources sorted by `from`.  Empty
- *  map renders as an empty string so callers can splice the
- *  result without a guard. */
-export function renderImportLines(
-  imports: ImportMap,
-  /** Slice C2 — page-relative prefix for paths the pack writes
-   *  with the default `../` shape (which assumes pages live one
-   *  hop under `src/`).  Scaffold-expanded pages live two hops
-   *  under `src/`, so they pass `"../../"` and we rewrite each
-   *  pack-supplied `../X` → `../../X`. */
-  srcImportPrefix: string = "../",
-): string {
-  if (imports.size === 0) return "";
-  const lines = [...imports.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([from, named]) => {
-      const path =
-        srcImportPrefix !== "../" && from.startsWith("../")
-          ? srcImportPrefix + from.slice(3)
-          : from;
-      return `import { ${[...named].sort().join(", ")} } from "${path}";\n`;
-    });
-  return lines.join("");
-}
+// The page-top import-block renderers (renderImportLines,
+// renderApiHookImports, renderHelperImports) live in
+// walker/import-lines.ts.
 
 export interface WalkResult {
   tsx: string;
@@ -1032,33 +1009,6 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
 // Api-hook detection/registration (tryDetectApiHook, registerApiHook,
 // buildHookUse/buildViewHookUse) and renderApiHookImports live in
 // walker/api-hooks.ts; emitExpr/walk call into them.
-
-/** Slice A6 — render `import { … } from "…"` lines for every
- *  UI-declared helper actually used in the body.  Helpers
- *  sharing an import path collapse into one line; paths are
- *  sorted for deterministic output. */
-export function renderHelperImports(
-  usedHelpers: Set<string>,
-  declared: ReadonlyArray<UiHelperImportIR>,
-): string {
-  if (usedHelpers.size === 0) return "";
-  const byPath = new Map<string, Set<string>>();
-  for (const h of declared) {
-    if (!usedHelpers.has(h.name)) continue;
-    let names = byPath.get(h.path);
-    if (!names) {
-      names = new Set();
-      byPath.set(h.path, names);
-    }
-    names.add(h.name);
-  }
-  const lines: string[] = [];
-  for (const [path, names] of [...byPath.entries()].sort()) {
-    const sorted = [...names].sort();
-    lines.push(`import { ${sorted.join(", ")} } from "${path}";\n`);
-  }
-  return lines.join("");
-}
 
 /** Render a `StmtIR` as a TS statement string (with a trailing
  *  semicolon).  v0 supports the subset that matters for click
