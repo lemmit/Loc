@@ -333,6 +333,28 @@ function renderMethodCall(
   return `${recv}.${snake(expr.member)}(${args})`;
 }
 
+/** A call to a user-defined `component` → a fully-qualified HEEx
+ *  function-component invocation.  Positional args bind to the
+ *  component's declared params in order; named args bind by name.
+ *  Values render in template position (refs become `@assign`). */
+function renderUserComponent(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  comp: import("../../ir/loom-ir.js").ComponentIR,
+  ctx: WalkContext,
+): string {
+  const attrs: string[] = [];
+  let pos = 0;
+  for (let i = 0; i < expr.args.length; i++) {
+    const argName = expr.argNames?.[i];
+    const paramName = argName ?? comp.params[pos++]?.name;
+    if (!paramName) continue;
+    const value = renderExpr(expr.args[i]!, { ...ctx, position: "template" });
+    attrs.push(`${snake(paramName)}={${value}}`);
+  }
+  const tag = `${ctx.appModule}Web.Components.UiComponents.${snake(comp.name)}`;
+  return attrs.length > 0 ? `<${tag} ${attrs.join(" ")} />` : `<${tag} />`;
+}
+
 function renderCall(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   // navigate(<Page>, { … }) — Loom's cross-page navigation primitive.
   if (expr.name === "navigate") {
@@ -356,6 +378,10 @@ function renderCall(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): 
   if (expr.name === "IdLink") return renderIdLink(expr, ctx);
   if (expr.name === "DateDisplay") return renderDateDisplay(expr, ctx);
   if (expr.name === "EnumBadge") return renderEnumBadge(expr, ctx);
+  // User-defined `component` invocation → a remote HEEx function
+  // component (`<MyAppWeb.Components.UiComponents.order_panel … />`).
+  const userComp = ctx.ui.components.find((c) => c.name === expr.name);
+  if (userComp) return renderUserComponent(expr, userComp, ctx);
   // Closed primitive library — rendered as HEEx component invocations.
   const prim = closedPrimitive(expr.name);
   if (prim) return renderPrimitive(prim, expr, ctx);
