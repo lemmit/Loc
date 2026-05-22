@@ -274,6 +274,15 @@ function SettingsContent({ options, operations = {} }: { options: Record<string,
     actions.addNodeTree(value, arm.rootNodeId);
   };
 
+  // Add a statement row to the selected block-bodied lambda.
+  const addStmt = (): void => {
+    if (!id) return;
+    const Stmt = resolver.Stmt as ComponentType<Record<string, unknown>>;
+    actions.addNodeTree(query.parseReactElement(<Stmt src="let x = 0" />).toNodeTree(), id);
+  };
+
+  const isBlockLambda = name === "Lambda" && props.__block != null;
+
   const specFields = name ? propFields(name) : [];
   // Surface passthrough props (unmodelled modifiers kept verbatim, e.g.
   // `testid:`/`striped:`) as generic expr fields so they stay editable.
@@ -301,14 +310,33 @@ function SettingsContent({ options, operations = {} }: { options: Record<string,
           )}
         </Group>
       )}
-      {id && fields.length === 0 && name !== "Match" && (
+      {id && isBlockLambda && (
+        <Group gap={4} mb="xs">
+          <Text size="xs" c="dimmed">Handler statements:</Text>
+          <Button size="compact-xs" variant="light" data-testid="c4builder-add-stmt" onClick={addStmt}>+ statement</Button>
+        </Group>
+      )}
+      {id && name === "Stmt" && (
+        <Textarea
+          size="xs"
+          mb="xs"
+          label="Statement"
+          autosize
+          minRows={1}
+          value={String(props.src ?? "")}
+          data-testid="c4builder-prop-src"
+          styles={{ input: { fontFamily: "monospace" } }}
+          onChange={(e) => set("src", e.currentTarget.value)}
+        />
+      )}
+      {id && fields.length === 0 && name !== "Match" && name !== "Stmt" && !isBlockLambda && (
         <Text size="xs" c="dimmed">
           {SINGLE_CHILD_NODES.has(name ?? "")
             ? (childNames.length === 0 ? "Empty — add one child from the palette." : "Holds one child.")
             : "Container — add children from the palette."}
         </Text>
       )}
-      {id && fields.map((f) =>
+      {id && name !== "Stmt" && fields.map((f) =>
         f.kind === "color" ? (
           <Select
             key={f.key}

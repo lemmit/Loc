@@ -218,6 +218,46 @@ test("adds a match arm from the canvas and writes it back to source", async ({ p
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
 
+const HANDLER_SOURCE = `system S {
+  ui U {
+    page P {
+      body: Table(rows: orders, onRowClick: r => {
+        select(r.id)
+      }, Column("ID", o => Text(o.id)))
+    }
+  }
+}`;
+
+test("edits a block-handler lambda as statement rows", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.evaluate((t) => navigator.clipboard.writeText(t), HANDLER_SOURCE);
+  await page.getByTestId("doc-tab-source").click();
+  const editor = page.locator(".monaco-editor").first();
+  await editor.click();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.press("Control+v");
+
+  await page.getByTestId("doc-tab-builder").click();
+  await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
+
+  // The onRowClick block lambda seeds as a Lambda with one editable statement.
+  await expect(page.getByTestId("c4node-Lambda").first()).toBeVisible();
+  await expect(page.getByTestId("c4node-Stmt")).toHaveCount(1);
+  await expect(page.getByTestId("c4node-Stmt").first()).toContainText("select(r.id)");
+
+  // Select the Lambda (its header) and add a statement row.
+  await page.getByTestId("c4node-Lambda").first().click({ position: { x: 8, y: 8 } });
+  await page.getByTestId("c4builder-add-stmt").click();
+  await expect(page.getByTestId("c4node-Stmt")).toHaveCount(2);
+
+  await page.getByTestId("c4builder-apply").click();
+  await expect(page.getByTestId("c4node-Stmt")).toHaveCount(2);
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+});
+
 test("surfaces body LSP diagnostics on the canvas", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);

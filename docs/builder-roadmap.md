@@ -40,7 +40,7 @@ text stays the source of truth.
   predicate arms (cond + value child) with an optional `else`; lambda accessors
   (e.g. a `Column`'s `o => …`) seed as a param + body child. Modelled as ordinary
   positional-children nodes (`Lambda`/`Match`/`MatchArm`/`MatchElse`) so the
-  serialize/craft path is unchanged. Block-statement lambda bodies stay Opaque.
+  serialize/craft path is unchanged.
 - **Component editing**: the body picker collects both page `body:` and
   `component` `body:` expressions, so reusable components are editable too.
 - **Named-arg child slots**: args whose value is itself a node and that arrive
@@ -87,13 +87,19 @@ text stays the source of truth.
   collected from the source (`BuilderPane`); `op:` is contextual via the
   per-aggregate operations map.  A boolean-valued modifier (`striped: true`)
   edits as a switch, and `color:` (Badge/Alert) is a palette dropdown.
+- **Statement-level handler editor**: a block-bodied lambda in a child slot
+  (e.g. a `Table` `onRowClick: r => { … }`) seeds as a `Lambda` node holding one
+  editable `Stmt` row per statement (source kept verbatim); rows are
+  add/edit/delete/reorderable and round-trip. (Event-handler lambdas in
+  *passthrough* position — `Button(onClick:)` — still edit as one raw field; the
+  rows apply where the lambda is a modelled slot.)
 
 ## Open — expression / domain-logic surface
 
-- **Statement-level handler editor** — event-handler / `onSubmit` bodies
-  round-trip and are editable as raw source today; a structured editor for the
-  statements inside (`:=`, `call`, `emit`, `navigate`, `let`) is a separate
-  effort.
+- **Per-statement structure** — statement rows are raw source today; structured
+  editors per statement kind (`:=`, `call`, `emit`, `navigate`, `let`) are a
+  further step. Routing *passthrough* handler lambdas (`Button(onClick:)`) to
+  slots would extend the row editor to them.
 - **`state := …`** page state declarations / assignments. Not modelled.
 - **More typed pickers**: enum-case values (needs the field's enum type) and
   repository finds (op/runs/aggregate/workflow/color/boolean pickers are done;

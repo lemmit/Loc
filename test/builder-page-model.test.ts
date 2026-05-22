@@ -171,6 +171,9 @@ describe("page-builder model — primitive coverage", () => {
     // Detail / MasterDetail primitives.
     'Detail(of: Order, by: id)',
     'MasterDetail(of: Order, scope: Orders.byCustomer(c), detail: o => Stack(Text(o.name)))',
+    // Block-bodied (statement) handler lambdas in a named-child slot.
+    'Table(rows: orders, onRowClick: r => {\n  select(r.id)\n}, Column("ID", o => Text(o.id)))',
+    'Table(rows: orders, onRowClick: r => {\n  let x = r.id\n  select(x)\n}, Column("ID", o => Text(o.id)))',
   ]) {
     it(`round-trips ${bodyExpr}`, () => roundtrips(bodyExpr));
   }
@@ -287,6 +290,18 @@ describe("page-builder model — container-with-props seed shape", () => {
     expect(String(node.props.onClick)).toContain("=>");
   });
 
+  it("models a block-handler lambda slot as editable statement rows", () => {
+    const node = seed('Table(rows: orders, onRowClick: r => {\n  let x = r.id\n  select(x)\n}, Column("ID", o => Text(o.id)))');
+    const handler = node.children.find((c) => c.slot === "onRowClick")!;
+    expect(handler.name).toBe("Lambda");
+    expect(handler.props.param).toBe("r");
+    expect(handler.props.__block).toBe("1");
+    expect(handler.children.map((c) => c.name)).toEqual(["Stmt", "Stmt"]);
+    expect(handler.children.map((c) => c.props.src)).toEqual(["let x = r.id", "select(x)"]);
+    // __block + statement rows survive the craft serialization round-trip.
+    expect(emitBody(fromCraft(toCraft(node)))).toBe(emitBody(node));
+  });
+
   it("recognises a qualified ref binding", () => {
     const node = seed("Form(of: Sales.Order)");
     expect(node.name).toBe("Form");
@@ -364,10 +379,14 @@ describe("page-builder model — container-with-props seed shape", () => {
     expect(lambda.children[0].props.value).toBe("o.status");
   });
 
-  it("keeps a block-bodied lambda Opaque", () => {
+  it("models a block-bodied lambda as a Lambda with statement rows", () => {
     const node = seed("Column(\"X\", o => { let y = o.id })");
     expect(node.name).toBe("Column");
-    expect(node.children[0].name).toBe("Opaque");
+    const lambda = node.children[0];
+    expect(lambda.name).toBe("Lambda");
+    expect(lambda.props.__block).toBe("1");
+    expect(lambda.children.map((c) => c.name)).toEqual(["Stmt"]);
+    expect(lambda.children[0].props.src).toBe("let y = o.id");
   });
 
   it("models match arms with cond + value children and an else", () => {
