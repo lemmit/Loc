@@ -765,3 +765,19 @@ test("previews an edit's source diff before applying when Preview is on", async 
   await expect(page.getByTestId("c4system-preview-modal")).toHaveCount(0);
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
+
+test("shows the selected aggregate's wire shape (DTO field list)", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  // Selecting an aggregate computes + shows its canonical wire shape (async
+  // lower + enrich); the first field is always the id.
+  await page.locator('[data-testid="rf__node-aggregate:Order"]').click();
+  await expect(page.getByTestId("c4system-wireshape")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId("c4system-wire-field").first()).toContainText("id");
+});

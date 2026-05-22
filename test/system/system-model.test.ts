@@ -13,6 +13,8 @@ import {
   coverageByNode,
   matchNodes,
   nodeDiagnostics,
+  typeLabel,
+  wireShapeOf,
 } from "../../web/src/builder/system/model.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -147,5 +149,28 @@ describe("System graph — traceability coverage", () => {
       [...cov.values()].every((s) => s === "covered" || s === "uncovered" || s === "none"),
     ).toBe(true);
     expect([...cov.values()].some((s) => s === "covered")).toBe(true);
+  });
+});
+
+describe("System graph — wire shape (DTO) preview", () => {
+  it("labels IR types compactly", () => {
+    expect(typeLabel({ kind: "primitive", name: "string" })).toBe("string");
+    expect(typeLabel({ kind: "array", element: { kind: "valueobject", name: "Money" } })).toBe(
+      "Money[]",
+    );
+    expect(typeLabel({ kind: "optional", inner: { kind: "enum", name: "Status" } })).toBe("Status?");
+    expect(typeLabel({ kind: "id", targetName: "Order", valueType: "uuid" })).toBe("Id<Order>");
+  });
+
+  it("exposes an aggregate's enrichment-computed wire shape, id first", async () => {
+    const model = await linked(salesSystem);
+    const loom = enrichLoomModel(lowerModel(model));
+    const aggName = buildSystemGraph(model).nodes.find((n) => n.kind === "aggregate")!.name;
+    const ws = wireShapeOf(loom, "aggregate", aggName);
+    expect(ws).not.toBeNull();
+    expect(ws!.length).toBeGreaterThan(0);
+    expect(ws![0].source).toBe("id"); // canonical order starts with the id field
+    // An unknown construct has no wire shape.
+    expect(wireShapeOf(loom, "aggregate", "Nope")).toBeNull();
   });
 });

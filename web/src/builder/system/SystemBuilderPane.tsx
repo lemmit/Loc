@@ -19,7 +19,8 @@ import type { BoundedContext, Model, System } from "../../../../src/language/gen
 import { printStructural } from "../../../../src/language/print/index.js";
 import { parseDdd } from "../parse";
 import { spliceNode, applyEdits, lineDiff } from "../edit-engine";
-import { buildSystemGraph, coverageByNode, matchNodes, nodeDiagnostics, type CoverageStatus, type GraphNode, type NodeKind } from "./model";
+import { buildSystemGraph, coverageByNode, matchNodes, nodeDiagnostics, typeLabel, wireShapeOf, type CoverageStatus, type GraphNode, type NodeKind } from "./model";
+import type { WireField } from "../../../../src/ir/loom-ir.js";
 import { buildLinkedModel } from "./linked-doc";
 import { lowerModel } from "../../../../src/ir/lower.js";
 import { enrichLoomModel } from "../../../../src/ir/enrichments.js";
@@ -323,6 +324,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const [coverage, setCoverage] = useState<Map<string, CoverageStatus>>(new Map());
   const [preview, setPreview] = useState(false);
   const [pending, setPending] = useState<{ next: string; keepSelection: boolean } | null>(null);
+  const [wireShape, setWireShape] = useState<WireField[] | null>(null);
 
   // Search + kind filter → the set of node ids to emphasise. Inactive (empty
   // query and no kinds) matches every node, so nothing dims.
@@ -371,6 +373,33 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
       alive = false;
     };
   }, [overlay, graph, ctx, rev]);
+
+  // Wire shape (canonical DTO field list) of the selected aggregate / value
+  // object — lowered + enriched from the linked model, async + off the render
+  // path (recomputes on selection change + source edits).
+  useEffect(() => {
+    const sep = selectedId?.indexOf(":") ?? -1;
+    const kind = selectedId && sep >= 0 ? selectedId.slice(0, sep) : "";
+    const name = selectedId && sep >= 0 ? selectedId.slice(sep + 1) : "";
+    if (kind !== "aggregate" && kind !== "valueobject") {
+      setWireShape(null);
+      return;
+    }
+    let alive = true;
+    void (async () => {
+      const model = await buildLinkedModel(ctx.getSource());
+      if (!alive || !model) return;
+      try {
+        const loom = enrichLoomModel(lowerModel(model));
+        if (alive) setWireShape(wireShapeOf(loom, kind, name));
+      } catch {
+        if (alive) setWireShape(null);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [selectedId, ctx, rev]);
 
   // Dim non-matching nodes / edges in place (preserving positions) when a search
   // or kind filter is active; an edge stays lit only if both endpoints match.
@@ -793,6 +822,24 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
                     >
                       ×
                     </Button>
+                  </Group>
+                ))}
+              </Stack>
+            )}
+            {wireShape && wireShape.length > 0 && (
+              <Stack gap={2} data-testid="c4system-wireshape">
+                <Text size="xs" tt="uppercase" c="dimmed" title="The canonical JSON-on-the-wire DTO every backend emits">
+                  Wire shape
+                </Text>
+                {wireShape.map((w) => (
+                  <Group key={w.name} gap={6} wrap="nowrap" align="center" data-testid="c4system-wire-field">
+                    <Text size="xs" style={{ fontFamily: "monospace", flex: "0 0 96px", overflow: "hidden", textOverflow: "ellipsis" }} title={w.name}>
+                      {w.name}
+                    </Text>
+                    <Text size="xs" c="dimmed" style={{ fontFamily: "monospace", flex: 1 }}>
+                      {typeLabel(w.type)}{w.optional ? "?" : ""}
+                    </Text>
+                    <Text size="xs" c="dimmed" title="wire field source">{w.source}</Text>
                   </Group>
                 ))}
               </Stack>

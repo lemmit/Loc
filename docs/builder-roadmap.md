@@ -360,6 +360,12 @@ Done:
   (common-prefix/suffix trim → one tight hunk, since builder edits are localised
   splices); the toggle / modal / `DiffView` live in `SystemBuilderPane.tsx`. Gated
   by `test/generator/builder-splice.test.ts` + e2e.
+- **Wire-shape (DTO) preview** — selecting an aggregate / value object shows its
+  enrichment-computed `wireShape` — the canonical JSON-on-the-wire field list
+  every backend's DTO emitter consumes (`id`, then properties, then containments,
+  then derived) — as a `name : type[?] · source` list in the inspector. Lowered +
+  enriched from the linked model off the render path; pure `wireShapeOf` +
+  `typeLabel` in `model.ts`. Gated by `test/system-model.test.ts` + e2e.
 
 Open:
 
@@ -393,8 +399,13 @@ Planned — recommended order:
    enriched `traceability` index.
 5. ~~**Apply-diff preview**~~ — done (see Done above): an opt-in Preview toggle
    stages each edit's source diff in a confirm modal before committing.
-6. **Wire-shape / DTO preview** on aggregate nodes — render the
-   enrichment-computed `wireShape` field list inline, so the contract is visible.
+6. ~~**Wire-shape / DTO preview**~~ — done (see Done above): selecting an
+   aggregate / value object shows its enrichment-computed `wireShape` in the
+   inspector.
+
+All six planned items are now done; the Open list above is the remaining backlog
+(structured bare-call statements, drag-rebind, add target-context picker, nested
+grouping, persisted positions).
 
 Layout polish (slot in opportunistically): drag-to-rebind edges, persisted
 positions, auto-layout (dagre/elk) + nested grouping, add target-context picker.

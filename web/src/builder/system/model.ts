@@ -1,5 +1,5 @@
 import { AstUtils, type AstNode } from "langium";
-import type { TraceabilityIR } from "../../../../src/ir/loom-ir.js";
+import type { LoomModel, TraceabilityIR, TypeIR, WireField } from "../../../../src/ir/loom-ir.js";
 import type {
   Aggregate,
   Api,
@@ -204,6 +204,51 @@ export function nodeDiagnostics<D extends LineRanged>(graph: SystemGraph, diagno
     if (best) (out.get(best.id) ?? out.set(best.id, []).get(best.id)!).push(d);
   }
   return out;
+}
+
+// --- wire-shape (DTO) preview ----------------------------------------------
+
+/** A compact, source-faithful label for an IR type (`Id<Order>`, `Money[]`,
+ *  `string?`), for showing a construct's wire shape in the inspector. */
+export function typeLabel(t: TypeIR): string {
+  switch (t.kind) {
+    case "primitive":
+      return t.name;
+    case "id":
+      return `Id<${t.targetName}>`;
+    case "enum":
+    case "valueobject":
+    case "entity":
+      return t.name;
+    case "array":
+      return `${typeLabel(t.element)}[]`;
+    case "optional":
+      return `${typeLabel(t.inner)}?`;
+  }
+}
+
+// Every wire-shape-bearing construct across explicit systems + legacy
+// top-level contexts.
+function* wireOwners(
+  loom: LoomModel,
+): Generator<{ kind: "aggregate" | "valueobject"; name: string; wireShape?: WireField[] }> {
+  const contexts = [
+    ...loom.contexts,
+    ...loom.systems.flatMap((s) => s.modules.flatMap((m) => m.contexts)),
+  ];
+  for (const c of contexts) {
+    for (const a of c.aggregates) yield { kind: "aggregate", name: a.name, wireShape: a.wireShape };
+    for (const v of c.valueObjects) yield { kind: "valueobject", name: v.name, wireShape: v.wireShape };
+  }
+}
+
+/** The enrichment-computed wire shape (canonical DTO field list) for an
+ *  aggregate / value object by name, or null if it has none. */
+export function wireShapeOf(loom: LoomModel, kind: string, name: string): WireField[] | null {
+  for (const o of wireOwners(loom)) {
+    if (o.kind === kind && o.name === name) return o.wireShape ?? null;
+  }
+  return null;
 }
 
 // --- traceability coverage overlay ----------------------------------------
