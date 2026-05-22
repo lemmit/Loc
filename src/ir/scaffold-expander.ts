@@ -147,7 +147,7 @@ function expandAggregateList(aggregateName: string, ctx: ScaffoldExpandContext):
       lit("ID"),
       lambda(
         cellVar,
-        call("IdLink", [member(ref(cellVar), "id")], undefined, [["of", ref(agg.name)]]),
+        call("IdLink", [member(ref(cellVar), "id")], [["of", ref(agg.name)]]),
       ),
     ]),
   );
@@ -175,21 +175,21 @@ function expandAggregateList(aggregateName: string, ctx: ScaffoldExpandContext):
     [
       // Breadcrumbs
       call("Breadcrumbs", [
-        call("Anchor", [lit("Home")], undefined, [["to", lit("/")]]),
+        call("Anchor", [lit("Home")], [["to", lit("/")]]),
         call("Text", [lit(humanPlural)]),
       ]),
       // Toolbar(Heading, Button)
       call("Toolbar", [
-        call("Heading", [lit(humanPlural)], undefined, [["level", intLit(2)]]),
-        call("Button", [lit(`New ${singular(humanLower)}`)], undefined, [
+        call("Heading", [lit(humanPlural)], [["level", intLit(2)]]),
+        call("Button", [lit(`New ${singular(humanLower)}`)], [
           ["to", lit(`/${slug}/new`)],
           ["testid", lit(`${slug}-list-create`)],
         ]),
       ]),
       // QueryView(of: api.Agg.all, loading, error, empty, data: rows => Paper(Table(...)))
-      call("QueryView", [], undefined, [
+      call("QueryView", [], [
         ["of", member(queryRoot, "all")],
-        ["loading", call("Skeleton", [], undefined, [["count", intLit(5)]])],
+        ["loading", call("Skeleton", [], [["count", intLit(5)]])],
         ["error", call("Alert", [lit(`Couldn't load ${humanLower}`)])],
         ["empty", call("Empty", [lit(`No ${humanLower} yet.`)])],
         [
@@ -197,7 +197,7 @@ function expandAggregateList(aggregateName: string, ctx: ScaffoldExpandContext):
           lambda(
             "rows",
             call("Paper", [
-              call("Table", [...cols], undefined, [
+              call("Table", [...cols], [
                 ["rows", ref("rows")],
                 ["striped", boolLit(true)],
                 ["highlight", boolLit(true)],
@@ -212,7 +212,6 @@ function expandAggregateList(aggregateName: string, ctx: ScaffoldExpandContext):
         ],
       ]),
     ],
-    undefined,
     [["testid", lit(`${slug}-list`)]],
   );
 }
@@ -258,7 +257,6 @@ function expandAggregateDetail(aggregateName: string, ctx: ScaffoldExpandContext
       call(
         "KeyValueRow",
         [lit(humanize(f.name)), cellAccessorFor(f.name, f.type, cellVar)],
-        undefined,
         [["testid", lit(`${slug}-detail-${f.name}`)]],
       ),
     );
@@ -293,8 +291,8 @@ function expandAggregateDetail(aggregateName: string, ctx: ScaffoldExpandContext
           "Card",
           [
             call("Stack", [
-              call("Heading", [lit(humanPart)], undefined, [["level", intLit(4)]]),
-              call("Table", [...cols], undefined, [
+              call("Heading", [lit(humanPart)], [["level", intLit(4)]]),
+              call("Table", [...cols], [
                 ["rows", member(ref(cellVar), c.name)],
                 ["striped", boolLit(true)],
                 ["highlight", boolLit(true)],
@@ -302,7 +300,6 @@ function expandAggregateDetail(aggregateName: string, ctx: ScaffoldExpandContext
               ]),
             ]),
           ],
-          undefined,
           [["testid", lit(`${slug}-detail-${snake(c.name)}`)]],
         ),
       );
@@ -323,11 +320,10 @@ function expandAggregateDetail(aggregateName: string, ctx: ScaffoldExpandContext
           "Card",
           [
             call("Stack", [
-              call("Heading", [lit(humanPart)], undefined, [["level", intLit(4)]]),
+              call("Heading", [lit(humanPart)], [["level", intLit(4)]]),
               call("Stack", singleRows),
             ]),
           ],
-          undefined,
           [["testid", lit(`${slug}-detail-${snake(c.name)}`)]],
         ),
       );
@@ -353,16 +349,15 @@ function expandAggregateDetail(aggregateName: string, ctx: ScaffoldExpandContext
           // carries the aggregate type and id.  On a Detail page the
           // record is a QueryView lambda binding, so the mutation hook
           // falls back to the route `id` (data.id === id here).
-          call("Form", [member(ref(cellVar), op.name)], undefined, [
+          call("Form", [member(ref(cellVar), op.name)], [
             ["testid", lit(`${slug}-op-${op.name}`)],
           ]),
         ],
-        undefined,
         [
           ["title", lit(humanize(op.name))],
           [
             "trigger",
-            call("Button", [lit(humanize(op.name))], undefined, [
+            call("Button", [lit(humanize(op.name))], [
               ["emphasis", lit(i === 0 ? "primary" : "secondary")],
               ["testid", lit(`${slug}-op-${op.name}`)],
             ]),
@@ -384,28 +379,27 @@ function expandAggregateDetail(aggregateName: string, ctx: ScaffoldExpandContext
     [
       // Breadcrumbs(Anchor("Home", to: "/"), Anchor(<Plural>, to: …), Text("Detail"))
       call("Breadcrumbs", [
-        call("Anchor", [lit("Home")], undefined, [["to", lit("/")]]),
-        call("Anchor", [lit(humanPlural)], undefined, [["to", lit(`/${slug}`)]]),
+        call("Anchor", [lit("Home")], [["to", lit("/")]]),
+        call("Anchor", [lit(humanPlural)], [["to", lit(`/${slug}`)]]),
         call("Text", [lit("Detail")]),
       ]),
       // Heading(<HumanAgg> + " detail", level: 2)
-      call("Heading", [lit(`${humanAgg} detail`)], undefined, [["level", intLit(2)]]),
+      call("Heading", [lit(`${humanAgg} detail`)], [["level", intLit(2)]]),
       // QueryView(of: api.Agg.byId(id), single: true, loading, error, empty: not-found, data: data => Card(Stack(...rows)))
-      call("QueryView", [], undefined, [
+      call("QueryView", [], [
         ["of", methodCall(queryRoot, "byId", [ref("id")])],
         ["single", boolLit(true)],
-        ["loading", call("Skeleton", [], undefined, [["count", intLit(3)]])],
+        ["loading", call("Skeleton", [], [["count", intLit(3)]])],
         ["error", call("Alert", [lit(`Couldn't load ${humanAgg.toLowerCase()}`)])],
         [
           "empty",
-          call("Alert", [lit(`No ${humanAgg.toLowerCase()} matches that id.`)], undefined, [
+          call("Alert", [lit(`No ${humanAgg.toLowerCase()} matches that id.`)], [
             ["color", lit("yellow")],
           ]),
         ],
         ["data", lambda(cellVar, dataBody)],
       ]),
     ],
-    undefined,
     [["testid", lit(`${slug}-detail`)]],
   );
 }
@@ -433,7 +427,7 @@ function cellAccessorFor(
 function typedCellFor(receiver: ExprIR, type: import("./loom-ir.js").TypeIR): ExprIR {
   const inner = type.kind === "optional" ? type.inner : type;
   if (inner.kind === "id") {
-    return call("IdLink", [receiver], undefined, [["of", ref(inner.targetName)]]);
+    return call("IdLink", [receiver], [["of", ref(inner.targetName)]]);
   }
   if (inner.kind === "primitive") {
     if (inner.name === "datetime") {
@@ -512,19 +506,18 @@ function expandAggregateNew(aggregateName: string, ctx: ScaffoldExpandContext): 
     "Stack",
     [
       call("Breadcrumbs", [
-        call("Anchor", [lit("Home")], undefined, [["to", lit("/")]]),
-        call("Anchor", [lit(humanPlural)], undefined, [["to", lit(`/${slug}`)]]),
+        call("Anchor", [lit("Home")], [["to", lit("/")]]),
+        call("Anchor", [lit(humanPlural)], [["to", lit(`/${slug}`)]]),
         call("Text", [lit("New")]),
       ]),
-      call("Heading", [lit(`Create ${humanAgg.toLowerCase()}`)], undefined, [["level", intLit(2)]]),
+      call("Heading", [lit(`Create ${humanAgg.toLowerCase()}`)], [["level", intLit(2)]]),
       call("Card", [
-        call("Form", [], undefined, [
+        call("Form", [], [
           ["of", ref(agg.name)],
           ["testid", lit(`${slug}-new`)],
         ]),
       ]),
     ],
-    undefined,
     [["testid", lit(`${slug}-new-page`)]],
   );
 }
@@ -542,19 +535,18 @@ function expandWorkflowForm(workflowName: string, ctx: ScaffoldExpandContext): E
     "Stack",
     [
       call("Breadcrumbs", [
-        call("Anchor", [lit("Home")], undefined, [["to", lit("/")]]),
-        call("Anchor", [lit("Workflows")], undefined, [["to", lit("/workflows")]]),
+        call("Anchor", [lit("Home")], [["to", lit("/")]]),
+        call("Anchor", [lit("Workflows")], [["to", lit("/workflows")]]),
         call("Text", [lit(humanWf)]),
       ]),
-      call("Heading", [lit(humanWf)], undefined, [["level", intLit(2)]]),
+      call("Heading", [lit(humanWf)], [["level", intLit(2)]]),
       call("Card", [
-        call("Form", [], undefined, [
+        call("Form", [], [
           ["runs", ref(wf.name)],
           ["testid", lit(`workflow-${wfSlug}`)],
         ]),
       ]),
     ],
-    undefined,
     [["testid", lit(`workflow-${wfSlug}-page`)]],
   );
 }
@@ -597,12 +589,12 @@ function expandViewList(viewName: string, ctx: ScaffoldExpandContext): ExprIR | 
   return call(
     "Stack",
     [
-      call("Heading", [lit(humanView)], undefined, [["level", intLit(2)]]),
-      call("QueryView", [], undefined, [
+      call("Heading", [lit(humanView)], [["level", intLit(2)]]),
+      call("QueryView", [], [
         // `Views.<name>` is the view-hook reference — walker
         // detects this Pattern C and lifts to `useXxxView()`.
         ["of", member(ref("Views"), view.name)],
-        ["loading", call("Skeleton", [], undefined, [["count", intLit(5)]])],
+        ["loading", call("Skeleton", [], [["count", intLit(5)]])],
         ["error", call("Alert", [lit(`Couldn't load ${humanView.toLowerCase()}`)])],
         ["empty", call("Empty", [lit("No rows.")])],
         [
@@ -610,7 +602,7 @@ function expandViewList(viewName: string, ctx: ScaffoldExpandContext): ExprIR | 
           lambda(
             "rows",
             call("Paper", [
-              call("Table", [...cols], undefined, [
+              call("Table", [...cols], [
                 ["rows", ref("rows")],
                 ["striped", boolLit(true)],
                 ["highlight", boolLit(true)],
@@ -626,7 +618,6 @@ function expandViewList(viewName: string, ctx: ScaffoldExpandContext): ExprIR | 
         ],
       ]),
     ],
-    undefined,
     [["testid", lit(`view-${viewSlug}`)]],
   );
 }
@@ -646,7 +637,7 @@ function expandHome(ctx: ScaffoldExpandContext): ExprIR {
   if (aggCount > 0) {
     cards.push(
       call("Card", [
-        call("Heading", [lit(pluralize(aggCount, "aggregate", "aggregates"))], undefined, [
+        call("Heading", [lit(pluralize(aggCount, "aggregate", "aggregates"))], [
           ["level", intLit(4)],
         ]),
         call("Text", [lit("Manage records of each kind from the sidebar.")]),
@@ -656,31 +647,30 @@ function expandHome(ctx: ScaffoldExpandContext): ExprIR {
   if (wfCount > 0) {
     cards.push(
       call("Card", [
-        call("Heading", [lit(pluralize(wfCount, "workflow", "workflows"))], undefined, [
+        call("Heading", [lit(pluralize(wfCount, "workflow", "workflows"))], [
           ["level", intLit(4)],
         ]),
-        call("Anchor", [lit("Open workflows →")], undefined, [["to", lit("/workflows")]]),
+        call("Anchor", [lit("Open workflows →")], [["to", lit("/workflows")]]),
       ]),
     );
   }
   if (viewCount > 0) {
     cards.push(
       call("Card", [
-        call("Heading", [lit(pluralize(viewCount, "view", "views"))], undefined, [
+        call("Heading", [lit(pluralize(viewCount, "view", "views"))], [
           ["level", intLit(4)],
         ]),
-        call("Anchor", [lit("Open views →")], undefined, [["to", lit("/views")]]),
+        call("Anchor", [lit("Open views →")], [["to", lit("/views")]]),
       ]),
     );
   }
   return call(
     "Stack",
     [
-      call("Heading", [lit("Welcome")], undefined, [["level", intLit(2)]]),
+      call("Heading", [lit("Welcome")], [["level", intLit(2)]]),
       call("Text", [lit("Pick a section from the sidebar to start, or jump straight in below.")]),
       call("Stack", cards),
     ],
-    undefined,
     [["testid", lit("home")]],
   );
 }
@@ -693,13 +683,12 @@ function expandWorkflowsIndex(ctx: ScaffoldExpandContext): ExprIR {
       call(
         "Card",
         [
-          call("Heading", [lit(humanize(wf.name))], undefined, [["level", intLit(4)]]),
-          call("Anchor", [lit("Run →")], undefined, [
+          call("Heading", [lit(humanize(wf.name))], [["level", intLit(4)]]),
+          call("Anchor", [lit("Run →")], [
             ["to", lit(`/workflows/${slug}`)],
             ["testid", lit(`workflow-${slug}-run`)],
           ]),
         ],
-        undefined,
         [["testid", lit(`workflow-card-${slug}`)]],
       ),
     );
@@ -708,14 +697,13 @@ function expandWorkflowsIndex(ctx: ScaffoldExpandContext): ExprIR {
     "Stack",
     [
       call("Breadcrumbs", [
-        call("Anchor", [lit("Home")], undefined, [["to", lit("/")]]),
+        call("Anchor", [lit("Home")], [["to", lit("/")]]),
         call("Text", [lit("Workflows")]),
       ]),
-      call("Heading", [lit("Workflows")], undefined, [["level", intLit(2)]]),
+      call("Heading", [lit("Workflows")], [["level", intLit(2)]]),
       call("Text", [lit("System-level orchestrations.  Pick one to run.")]),
       call("Stack", cards),
     ],
-    undefined,
     [["testid", lit("workflows-index")]],
   );
 }
@@ -728,13 +716,12 @@ function expandViewsIndex(ctx: ScaffoldExpandContext): ExprIR {
       call(
         "Card",
         [
-          call("Heading", [lit(humanize(view.name))], undefined, [["level", intLit(4)]]),
-          call("Anchor", [lit("Open →")], undefined, [
+          call("Heading", [lit(humanize(view.name))], [["level", intLit(4)]]),
+          call("Anchor", [lit("Open →")], [
             ["to", lit(`/views/${slug}`)],
             ["testid", lit(`view-${slug}-open`)],
           ]),
         ],
-        undefined,
         [["testid", lit(`view-card-${slug}`)]],
       ),
     );
@@ -743,14 +730,13 @@ function expandViewsIndex(ctx: ScaffoldExpandContext): ExprIR {
     "Stack",
     [
       call("Breadcrumbs", [
-        call("Anchor", [lit("Home")], undefined, [["to", lit("/")]]),
+        call("Anchor", [lit("Home")], [["to", lit("/")]]),
         call("Text", [lit("Views")]),
       ]),
-      call("Heading", [lit("Views")], undefined, [["level", intLit(2)]]),
+      call("Heading", [lit("Views")], [["level", intLit(2)]]),
       call("Text", [lit("Saved queries.  Open one to inspect rows.")]),
       call("Stack", cards),
     ],
-    undefined,
     [["testid", lit("views-index")]],
   );
 }
@@ -778,10 +764,8 @@ const PLACEHOLDER_TYPE: import("./loom-ir.js").TypeIR = {
 function call(
   name: string,
   positionals: ExprIR[],
-  _ignore: undefined = undefined,
   named: Array<[string, ExprIR]> = [],
 ): ExprIR {
-  void _ignore;
   const args: ExprIR[] = [...positionals];
   const argNames: (string | undefined)[] = positionals.map(() => undefined);
   for (const [n, v] of named) {
@@ -841,7 +825,7 @@ function columnAccessorFor(
   // optionality (empty values surface via per-pack helpers).
   const inner = type.kind === "optional" ? type.inner : type;
   if (inner.kind === "id") {
-    return call("IdLink", [member(ref(rowVar), fieldName)], undefined, [
+    return call("IdLink", [member(ref(rowVar), fieldName)], [
       ["of", ref(inner.targetName)],
     ]);
   }
