@@ -111,9 +111,9 @@ text stays the source of truth.
 
 - **Drag-to-add** from the palette (today is click-add; craft's create-connector
   swallows the click). **Drag-reorder** across containers needs verification.
-- **Diagnostics inside the Builder** (surface LSP errors/warnings on the canvas).
-  Inline `expr`/Opaque `raw` validation already shows a non-blocking error in the
-  settings panel; the canvas itself doesn't yet flag invalid nodes.
+- **Per-node diagnostics** — the body's LSP diagnostics (scoped by source range)
+  now show as a problems bar above the canvas; mapping each diagnostic to the
+  specific node it came from (to highlight it) is still open.
 - **Mobile** Builder tab (desktop-only today).
 - **Continuous text→canvas live sync** (today re-seeds on tab switch, not per
   keystroke) — needs debounce + canvas selection preservation.

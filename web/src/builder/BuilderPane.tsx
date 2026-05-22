@@ -92,6 +92,15 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     [current, components],
   );
 
+  // LSP diagnostics that fall within the current body's source range — surfaced
+  // on the canvas so the builder flags problems without leaving for the
+  // Problems panel.
+  const bodyDiagnostics = useMemo(() => {
+    const r = current?.expr.$cstNode?.range;
+    if (!r) return [];
+    return ctx.diagnostics.filter((d) => d.range.start.line <= r.end.line && d.range.end.line >= r.start.line);
+  }, [ctx.diagnostics, current]);
+
   if (parsed.parserErrors.length > 0) {
     return <Message>Source has syntax errors — fix them in the editor to use the builder.</Message>;
   }
@@ -118,6 +127,7 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
       options={options}
       operations={operations}
       componentNames={componentNames}
+      diagnostics={bodyDiagnostics}
       onSelectPage={setPageName}
       onApply={handleApply}
       compact={!ctx.isDesktop}
