@@ -218,6 +218,26 @@ test("adds a match arm from the canvas and writes it back to source", async ({ p
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
 
+test("surfaces body LSP diagnostics on the canvas", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+
+  // MATCH_SOURCE has no `else` arm → the validator emits an exhaustiveness
+  // warning within the page body, which the builder shows as a problems bar.
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.evaluate((t) => navigator.clipboard.writeText(t), MATCH_SOURCE);
+  await page.getByTestId("doc-tab-source").click();
+  const editor = page.locator(".monaco-editor").first();
+  await editor.click();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.press("Control+v");
+
+  await page.getByTestId("doc-tab-builder").click();
+  await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("c4builder-diagnostics")).toBeVisible();
+  await expect(page.getByTestId("c4builder-diagnostics")).toContainText("else");
+});
+
 const OP_SOURCE = `system S {
   context C {
     aggregate Account { balance: decimal

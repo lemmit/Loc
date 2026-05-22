@@ -8,6 +8,22 @@ const PALETTE = ["blue", "red", "green", "yellow", "grape", "teal", "gray", "ora
 import { resolver, resolverWithComponents } from "./components";
 import { PALETTE_PRIMITIVES, SINGLE_CHILD_NODES, defaultNode, propFields, syntheticDefaultProps, type PrimitiveName } from "./model";
 import { parseDdd } from "../parse";
+import type { Diagnostic } from "../../lsp/protocol";
+
+// A compact problems bar shown above the canvas when the current body has LSP
+// diagnostics, so the builder flags errors/warnings in place.
+function DiagnosticsBar({ diagnostics }: { diagnostics: Diagnostic[] }): JSX.Element | null {
+  if (diagnostics.length === 0) return null;
+  const worst = diagnostics.some((d) => d.severity === "error") ? "error" : "warning";
+  const bg = worst === "error" ? "var(--mantine-color-red-9)" : "var(--mantine-color-yellow-9)";
+  return (
+    <Box data-testid="c4builder-diagnostics" style={{ background: bg, color: "white", padding: "3px 8px", fontSize: 11, maxHeight: 72, overflow: "auto" }}>
+      {diagnostics.map((d, i) => (
+        <div key={i}>{d.severity === "error" ? "✕" : "!"} {d.range.start.line + 1}:{d.range.start.character + 1} — {d.message}</div>
+      ))}
+    </Box>
+  );
+}
 
 // A page `body:` admits any expression, so wrapping the field text in a minimal
 // page lets the real parser validate an `expr`-kind prop (and the Opaque `raw`
@@ -69,6 +85,8 @@ interface PageBuilderProps {
   /** User-defined `component` names in scope, registered in the craft resolver
    *  so calls to them render as editable nodes. */
   componentNames?: string[];
+  /** LSP diagnostics scoped to this body, shown as a problems bar. */
+  diagnostics?: Diagnostic[];
   onSelectPage: (name: string) => void;
   onApply: (nodes: SerializedNodes) => void;
   /** Narrow-viewport layout: full-width canvas with the palette and
@@ -79,15 +97,16 @@ interface PageBuilderProps {
 // Structural page-body editor.  Palette (add) | canvas (arrange/select) |
 // settings (edit props).  "Apply to source" hands the serialized tree back to
 // BuilderPane, which regenerates the `body:` and splices it into `.ddd`.
-export default function PageBuilder({ initialNodes, pages, pageName, options, operations = {}, componentNames = [], onSelectPage, onApply, compact = false }: PageBuilderProps): JSX.Element {
+export default function PageBuilder({ initialNodes, pages, pageName, options, operations = {}, componentNames = [], diagnostics = [], onSelectPage, onApply, compact = false }: PageBuilderProps): JSX.Element {
   const editorResolver = useMemo(() => resolverWithComponents(componentNames), [componentNames]);
   return (
     <Editor resolver={editorResolver} key={pageName}>
       {compact ? (
-        <CompactLayout initialNodes={initialNodes} pages={pages} pageName={pageName} options={options} operations={operations} onSelectPage={onSelectPage} onApply={onApply} />
+        <CompactLayout initialNodes={initialNodes} pages={pages} pageName={pageName} options={options} operations={operations} diagnostics={diagnostics} onSelectPage={onSelectPage} onApply={onApply} />
       ) : (
         <Box style={{ display: "flex", flexDirection: "column", height: "100%" }}>
           <Toolbar pages={pages} pageName={pageName} onSelectPage={onSelectPage} onApply={onApply} />
+          <DiagnosticsBar diagnostics={diagnostics} />
           <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
             <Palette />
             <ScrollArea style={{ flex: 1, minWidth: 0 }}>
@@ -106,7 +125,7 @@ export default function PageBuilder({ initialNodes, pages, pageName, options, op
 // Mobile layout: full-width canvas; the palette ("Add") and settings ("Edit")
 // move into bottom drawers reachable from the toolbar.  The settings drawer
 // auto-opens on selection so tap-to-select flows straight into editing.
-function CompactLayout({ initialNodes, pages, pageName, options, operations = {}, onSelectPage, onApply }: Omit<PageBuilderProps, "compact">): JSX.Element {
+function CompactLayout({ initialNodes, pages, pageName, options, operations = {}, diagnostics = [], onSelectPage, onApply }: Omit<PageBuilderProps, "compact">): JSX.Element {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const { selectedId } = useEditor((state) => ({ selectedId: [...state.events.selected][0] }));
@@ -126,6 +145,7 @@ function CompactLayout({ initialNodes, pages, pageName, options, operations = {}
         onOpenPalette={() => setPaletteOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
       />
+      <DiagnosticsBar diagnostics={diagnostics} />
       <ScrollArea style={{ flex: 1, minWidth: 0 }}>
         <Box style={{ padding: 8 }}>
           <Frame data={initialNodes} />
