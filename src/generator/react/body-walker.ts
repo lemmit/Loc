@@ -124,6 +124,12 @@ import {
   emitStack,
   emitTabs,
 } from "./walker/primitives/layout.js";
+import {
+  emitField,
+  emitNumberField,
+  emitPasswordField,
+  emitToggle,
+} from "./walker/primitives/inputs.js";
 
 /** Per-source named-import map — `from` module → set of named
  *  exports the page needs from it.  Replaces the old single-source
@@ -1485,131 +1491,8 @@ function emitToolbar(
  *  child-text position (shadcn pairs `<Label>...</Label>` next to
  *  the input).  Both come from the same first-positional content
  *  source. */
-function inputLabelForms(
-  call: ExprIR & { kind: "call" },
-  ctx: WalkContext,
-): { labelAttr: string; labelText: string } {
-  const raw = firstPositionalContent(call, ctx) ?? '""';
-  return {
-    labelAttr: unwrapAsAttr(raw),
-    labelText: unwrapTextLiteral(raw),
-  };
-}
-
-function emitField(
-  call: ExprIR & { kind: "call" },
-  ctx: WalkContext,
-  depth: number,
-): string {
-  // Field("Label", bind: <state-field>) — controlled text input
-  // bound to a state field.  `bind:` required; without it the
-  // input falls back to a label-only stub.
-  void depth;
-  const { labelAttr, labelText } = inputLabelForms(call, ctx);
-  const bind = stateBindArg(call, "bind", ctx);
-  const setter = bind !== undefined
-    ? "set" + bind[0]!.toUpperCase() + bind.slice(1)
-    : undefined;
-  return renderPrimitive(ctx, "primitive-field", {
-    labelAttr,
-    labelText,
-    bind,
-    setter,
-    hasBind: bind !== undefined,
-    testidAttr: testidAttr(call, ctx),
-  });
-}
-
-function emitToggle(
-  call: ExprIR & { kind: "call" },
-  ctx: WalkContext,
-  depth: number,
-): string {
-  // Toggle("Label", bind: <bool state>) — controlled bool input.
-  void depth;
-  const { labelAttr, labelText } = inputLabelForms(call, ctx);
-  const bind = stateBindArg(call, "bind", ctx);
-  const setter = bind !== undefined
-    ? "set" + bind[0]!.toUpperCase() + bind.slice(1)
-    : undefined;
-  return renderPrimitive(ctx, "primitive-toggle", {
-    labelAttr,
-    labelText,
-    bind,
-    setter,
-    hasBind: bind !== undefined,
-    testidAttr: testidAttr(call, ctx),
-  });
-}
-
-function emitNumberField(
-  call: ExprIR & { kind: "call" },
-  ctx: WalkContext,
-  depth: number,
-): string {
-  // NumberField("Label", bind: <int|decimal state>) — controlled
-  // number input.  Setter is wrapped with `typeof v === "number"
-  // ? v : 0` so binding stays type-safe across the
-  // string-or-number onChange union.
-  void depth;
-  const { labelAttr, labelText } = inputLabelForms(call, ctx);
-  const bind = stateBindArg(call, "bind", ctx);
-  const setter = bind !== undefined
-    ? "set" + bind[0]!.toUpperCase() + bind.slice(1)
-    : undefined;
-  return renderPrimitive(ctx, "primitive-number-field", {
-    labelAttr,
-    labelText,
-    bind,
-    setter,
-    hasBind: bind !== undefined,
-    testidAttr: testidAttr(call, ctx),
-  });
-}
-
-function emitPasswordField(
-  call: ExprIR & { kind: "call" },
-  ctx: WalkContext,
-  depth: number,
-): string {
-  // PasswordField("Label", bind: <string state>) — visibility-
-  // toggle text input.  Same bind-shape as Field.
-  void depth;
-  const { labelAttr, labelText } = inputLabelForms(call, ctx);
-  const bind = stateBindArg(call, "bind", ctx);
-  const setter = bind !== undefined
-    ? "set" + bind[0]!.toUpperCase() + bind.slice(1)
-    : undefined;
-  return renderPrimitive(ctx, "primitive-password-field", {
-    labelAttr,
-    labelText,
-    bind,
-    setter,
-    hasBind: bind !== undefined,
-    testidAttr: testidAttr(call, ctx),
-  });
-}
-
-/** Slice 11.14 — read a `bind:` named arg as a state-field name.
- *  Returns the field name when the arg is a `ref` to a known
- *  state field (and marks `usesState` on the context); otherwise
- *  undefined.  Drives controlled-input wiring in Field / Toggle. */
-function stateBindArg(
-  call: ExprIR & { kind: "call" },
-  name: string,
-  ctx: WalkContext,
-): string | undefined {
-  const argNames = call.argNames ?? [];
-  for (let i = 0; i < call.args.length; i++) {
-    if (argNames[i] !== name) continue;
-    const a = call.args[i]!;
-    if (a.kind === "ref" && ctx.stateNames.has(a.name)) {
-      ctx.usesState = true;
-      return a.name;
-    }
-  }
-  return undefined;
-}
+// Controlled input primitives (Field, Toggle, NumberField,
+// PasswordField) live in walker/primitives/inputs.ts.
 
 function emitButton(
   call: ExprIR & { kind: "call" },
