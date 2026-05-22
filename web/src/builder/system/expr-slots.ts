@@ -20,7 +20,6 @@ import {
   inAggregate,
   inScopeNames,
   inValueObject,
-  lowerType,
   newEnv,
   withLocal,
   type Env,
@@ -211,7 +210,9 @@ function slotEnv(ast: Model, slot: ExprSlot): Env | null {
   const ctx = ctxNode ? AstUtils.getContainerOfType(ctxNode, isBoundedContext) : undefined;
   const base: Env = ctx ? newEnv(ctx as BoundedContext) : { ctx: undefined, locals: new Map() };
   let env = owner.$type === "ValueObject" ? inValueObject(base, owner as ValueObject) : inAggregate(base, owner as Aggregate);
-  for (const p of params) env = withLocal(env, p.name, "param", lowerType(p.type));
+  // Only the param *names* matter for enumeration; skip `lowerType` (it would
+  // deref `Id<X>` targets, which the main-thread parse can't link).
+  for (const p of params) env = withLocal(env, p.name, "param", { kind: "primitive", name: "string" });
   return env;
 }
 
