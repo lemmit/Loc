@@ -92,7 +92,11 @@ export type DriverOp =
         | "check"
         | "uncheck"
         | "focus"
-        | "blur";
+        | "blur"
+        | "inputValue"
+        | "isVisible"
+        | "isChecked"
+        | "isEnabled";
       chain: ChainNode[];
       timeout?: number;
     }
@@ -138,7 +142,7 @@ export interface NetState {
 }
 
 export type DriverReply =
-  | { ok: true; value?: string | number }
+  | { ok: true; value?: string | number | boolean }
   | { ok: false; message: string };
 
 export interface ExecuteOptions {
@@ -218,6 +222,14 @@ export async function executeDriverOp(
         return { ok: true, value: await loc.innerText({ timeout: msg.timeout }) };
       case "count":
         return { ok: true, value: await loc.count() };
+      case "inputValue":
+        return { ok: true, value: await loc.inputValue({ timeout: msg.timeout }) };
+      case "isVisible":
+        return { ok: true, value: await loc.isVisible() };
+      case "isChecked":
+        return { ok: true, value: await loc.isChecked({ timeout: msg.timeout }) };
+      case "isEnabled":
+        return { ok: true, value: await loc.isEnabled({ timeout: msg.timeout }) };
       case "hover":
         await loc.hover({ timeout: msg.timeout });
         return { ok: true };
