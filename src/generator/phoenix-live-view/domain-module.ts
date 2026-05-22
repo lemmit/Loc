@@ -1,5 +1,5 @@
 import type { BoundedContextIR, EnumIR } from "../../ir/loom-ir.js";
-import { pascal, snake } from "../../util/naming.js";
+import { upperFirst, snake } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Domain module emitter — per `BoundedContextIR` produce:
@@ -33,7 +33,7 @@ export function emitDomainModule(
   appSnake: string,
 ): Map<string, string> {
   const out = new Map<string, string>();
-  const ctxModule = `${appModule}.${pascal(ctx.name)}`;
+  const ctxModule = `${appModule}.${upperFirst(ctx.name)}`;
   const ctxSnake = snake(ctx.name);
 
   // Ash.Domain module.
@@ -59,7 +59,7 @@ function renderDomainModule(ctx: BoundedContextIR, ctxModule: string): string {
 
   for (const agg of ctx.aggregates) {
     const aggSnake = snake(agg.name);
-    const aggModule = `${ctxModule}.${pascal(agg.name)}`;
+    const aggModule = `${ctxModule}.${upperFirst(agg.name)}`;
 
     // Standard CRUD defines.  `get_by: [:id]` makes the read action a
     // singular get that raises `Ash.Error.Query.NotFound` when missing
@@ -93,7 +93,7 @@ function renderDomainModule(ctx: BoundedContextIR, ctxModule: string): string {
     // Entity parts — simpler: only CRUD, no custom finds.
     for (const part of agg.parts) {
       const partSnake = snake(part.name);
-      const partModule = `${ctxModule}.${pascal(part.name)}`;
+      const partModule = `${ctxModule}.${upperFirst(part.name)}`;
       const partDefines = [
         `      define :create_${partSnake}, action: :create`,
         `      define :get_${partSnake},    action: :read, get_by: [:id]`,
@@ -108,7 +108,7 @@ function renderDomainModule(ctx: BoundedContextIR, ctxModule: string): string {
   // Value objects — embedded resources; no code-interface functions needed
   // (they are never loaded independently, only as part of an aggregate).
   for (const vo of ctx.valueObjects) {
-    resourceBlocks.push(`    resource ${ctxModule}.${pascal(vo.name)}`);
+    resourceBlocks.push(`    resource ${ctxModule}.${upperFirst(vo.name)}`);
   }
 
   return `defmodule ${ctxModule} do
@@ -126,7 +126,7 @@ end
 // ---------------------------------------------------------------------------
 
 function renderEnumModule(en: EnumIR, ctxModule: string): string {
-  const moduleName = `${ctxModule}.${pascal(en.name)}`;
+  const moduleName = `${ctxModule}.${upperFirst(en.name)}`;
   const values = en.values.map((v) => `:${snake(v)}`).join(", ");
 
   return `defmodule ${moduleName} do

@@ -53,7 +53,7 @@ import type {
   UiHelperImportIR,
   UiIR,
 } from "../../ir/loom-ir.js";
-import { camel, humanize, pascal, plural, snake } from "../../util/naming.js";
+import { humanize, upperFirst, plural, snake } from "../../util/naming.js";
 
 export type RenderPosition = "template" | "handler";
 
@@ -627,7 +627,7 @@ function renderApiCall(call: ApiCallSite, ctx: WalkContext): string {
   // The api handle resolves to a backend that hosts a `<App>.<Ctx>`
   // module; v0 emits `<AppModule>.<Handle>.<fn>(...)` since the
   // handle name and context name match in acme.ddd (`Sales`).
-  const handle = pascal(call.apiHandle);
+  const handle = upperFirst(call.apiHandle);
   const single = snake(call.aggregateName);
   const args = call.args.map((a) => renderExpr(a, ctx)).join(", ");
   let fn: string;
@@ -1547,9 +1547,9 @@ function elixirAliasForHelper(decl: UiHelperImportIR): string {
     .replace(/^\.\//, "")
     .replace(/^\.\.\//g, "")
     .split("/")
-    .map((seg) => pascal(seg.replace(/[^a-zA-Z0-9]/g, "_")))
+    .map((seg) => upperFirst(seg.replace(/[^a-zA-Z0-9]/g, "_")))
     .join(".");
-  return `  alias ${moduleName}, as: ${pascal(decl.name)}`;
+  return `  alias ${moduleName}, as: ${upperFirst(decl.name)}`;
 }
 
 function indent(s: string, n: number): string {
@@ -1561,5 +1561,3 @@ function indent(s: string, n: number): string {
 }
 
 // Unused-import suppression for re-exports.
-void camel;
-void pascal;

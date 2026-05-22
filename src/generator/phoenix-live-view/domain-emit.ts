@@ -9,7 +9,7 @@ import type {
   InvariantIR,
   OperationIR,
 } from "../../ir/loom-ir.js";
-import { pascal, snake } from "../../util/naming.js";
+import { upperFirst, snake } from "../../util/naming.js";
 import { type RenderCtx, renderAshType, renderExpr } from "./render-expr.js";
 import { renderElixirStatements } from "./render-stmt.js";
 
@@ -26,7 +26,7 @@ export function emitAggregateResources(
   appSnake: string,
 ): Map<string, string> {
   const out = new Map<string, string>();
-  const ctxModule = `${appModule}.${pascal(ctx.name)}`;
+  const ctxModule = `${appModule}.${upperFirst(ctx.name)}`;
   const ctxSnake = snake(ctx.name);
 
   for (const agg of ctx.aggregates) {
@@ -52,7 +52,7 @@ function renderAggregateResource(
   appModule: string,
   ctxModule: string,
 ): string {
-  const moduleName = `${ctxModule}.${pascal(agg.name)}`;
+  const moduleName = `${ctxModule}.${upperFirst(agg.name)}`;
   const tableSnake = snake(plural(agg.name));
   const repoModule = `${appModule}.Repo`;
 
@@ -98,7 +98,7 @@ function renderEntityPartResource(
   appModule: string,
   ctxModule: string,
 ): string {
-  const moduleName = `${ctxModule}.${pascal(part.name)}`;
+  const moduleName = `${ctxModule}.${upperFirst(part.name)}`;
   const tableSnake = snake(plural(part.name));
   const repoModule = `${appModule}.Repo`;
   const parentFk = `${snake(part.parentName)}_id`;
@@ -123,7 +123,7 @@ function renderEntityPartResource(
   end
 
   relationships do
-    belongs_to :${snake(part.parentName)}, ${ctxModule}.${pascal(agg.name)}
+    belongs_to :${snake(part.parentName)}, ${ctxModule}.${upperFirst(agg.name)}
   end
 ${renderValidations(part.invariants, renderCtx, new Set(part.fields.map((f) => f.name)))}
   actions do
@@ -173,7 +173,7 @@ function renderRelationships(contains: ContainmentIR[], ctxModule: string): stri
   if (contains.length === 0) return "";
   const lines = contains.map((c) => {
     const relName = snake(c.name);
-    const destModule = `${ctxModule}.${pascal(c.partName)}`;
+    const destModule = `${ctxModule}.${upperFirst(c.partName)}`;
     if (c.collection) {
       return `    has_many :${relName}, ${destModule}`;
     }

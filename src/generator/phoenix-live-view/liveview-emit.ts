@@ -26,7 +26,7 @@ import type {
   TypeIR,
   UiIR,
 } from "../../ir/loom-ir.js";
-import { camel, pascal, plural, snake } from "../../util/naming.js";
+import { lowerFirst, upperFirst, plural, snake } from "../../util/naming.js";
 import {
   type ActionBinding,
   defaultInitFor,
@@ -70,7 +70,7 @@ export function emitLiveViewPages(args: {
   // `AshPhoenix.Form.for_create(PhoenixApp.Sales.Customer, :create)`.
   const contextModuleByAggName = new Map<string, string>();
   for (const ctx of contexts) {
-    const ctxModule = `${appModule}.${pascal(ctx.name)}`;
+    const ctxModule = `${appModule}.${upperFirst(ctx.name)}`;
     for (const agg of ctx.aggregates) {
       aggregatesByName.set(agg.name, agg);
       contextByAggName.set(agg.name, ctx);
@@ -99,7 +99,7 @@ export function emitLiveViewPages(args: {
 
   for (const page of ui.pages) {
     if (!page.route) continue; // can't emit a router entry without one
-    const liveModule = `${appModule}Web.${pascal(page.name)}Live`;
+    const liveModule = `${appModule}Web.${upperFirst(page.name)}Live`;
     const filePath = `lib/${appName}_web/live/${snake(page.name)}_live.ex`;
     const source = renderLiveView({
       page,
@@ -310,7 +310,7 @@ function renderMount(
       const ctxModule = contextModuleByAggName.get(fb.name);
       if (!ctxModule) continue; // unresolved — validator catches; silent skip
       assigns.push(
-        `      |> assign(:form, AshPhoenix.Form.for_create(${ctxModule}.${pascal(fb.name)}, :create) |> to_form())`,
+        `      |> assign(:form, AshPhoenix.Form.for_create(${ctxModule}.${upperFirst(fb.name)}, :create) |> to_form())`,
       );
       break; // single @form per page
     } else if (fb.kind === "workflow") {
@@ -346,7 +346,7 @@ function renderHandleParams(
 ): string {
   const paramAssigns: string[] = [];
   for (const p of page.params) {
-    paramAssigns.push(`assign(:${snake(p.name)}, params["${camel(p.name)}"])`);
+    paramAssigns.push(`assign(:${snake(p.name)}, params["${lowerFirst(p.name)}"])`);
   }
 
   // QueryView record loading.  The scaffold detail/list page reads
