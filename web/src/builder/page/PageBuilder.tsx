@@ -33,6 +33,13 @@ function isValidExpr(text: string): boolean {
   return parseDdd(`system S { ui U { page P { body: ${text} } } }`).parserErrors.length === 0;
 }
 
+// Validate a verbatim statement row (call / emit / navigate / …) by parsing it
+// inside a handler block — the same no-link wrapping trick as isValidExpr.
+function isValidStmt(text: string): boolean {
+  if (text.trim() === "") return false;
+  return parseDdd(`system S { ui U { page P { body: Button(onClick: e => {\n${text}\n}) } } }`).parserErrors.length === 0;
+}
+
 // If `stored` is a bare string literal (e.g. `"hi"`), return its inner text;
 // otherwise null (it's an expression like `"a" + x`).
 function asLiteralText(stored: string): string | null {
@@ -332,7 +339,14 @@ function SettingsContent({ options, operations = {} }: { options: Record<string,
           <Textarea size="xs" mb="xs" label="value" autosize minRows={1} value={String(props.value ?? "")} data-testid="c4builder-prop-value" styles={{ input: { fontFamily: "monospace" } }} error={props.value && !isValidExpr(String(props.value)) ? "Invalid expression" : undefined} onChange={(e) => set("value", e.currentTarget.value)} />
         </>
       )}
-      {id && name === "Stmt" && props.kind !== "assign" && (
+      {id && name === "Stmt" && props.kind === "let" && (
+        // `let` binding: name / value as separate controls.
+        <>
+          <TextInput size="xs" mb={4} label="name" value={String(props.name ?? "")} data-testid="c4builder-prop-let-name" styles={{ input: { fontFamily: "monospace" } }} onChange={(e) => set("name", e.currentTarget.value)} />
+          <Textarea size="xs" mb="xs" label="value" autosize minRows={1} value={String(props.value ?? "")} data-testid="c4builder-prop-let-value" styles={{ input: { fontFamily: "monospace" } }} error={props.value && !isValidExpr(String(props.value)) ? "Invalid expression" : undefined} onChange={(e) => set("value", e.currentTarget.value)} />
+        </>
+      )}
+      {id && name === "Stmt" && props.kind !== "assign" && props.kind !== "let" && (
         <Textarea
           size="xs"
           mb="xs"
@@ -342,6 +356,7 @@ function SettingsContent({ options, operations = {} }: { options: Record<string,
           value={String(props.src ?? "")}
           data-testid="c4builder-prop-src"
           styles={{ input: { fontFamily: "monospace" } }}
+          error={props.src && !isValidStmt(String(props.src)) ? "Invalid statement" : undefined}
           onChange={(e) => set("src", e.currentTarget.value)}
         />
       )}

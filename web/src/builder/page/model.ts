@@ -353,6 +353,9 @@ function seedStmt(s: Statement): BuilderNode {
   if (s.$type === "AssignOrCallStmt" && s.op && s.value) {
     return { name: "Stmt", props: { kind: "assign", target: s.target.$cstNode?.text?.trim() ?? "", op: s.op, value: s.value.$cstNode?.text?.trim() ?? "", ...ext }, children: [] };
   }
+  if (s.$type === "LetStmt") {
+    return { name: "Stmt", props: { kind: "let", name: s.name, value: s.expr.$cstNode?.text?.trim() ?? "", ...ext }, children: [] };
+  }
   return { name: "Stmt", props: { src: s.$cstNode?.text?.trim() ?? "", ...ext }, children: [] };
 }
 
@@ -424,6 +427,7 @@ export function emitBody(node: BuilderNode): string {
   const body = (n: BuilderNode): string => (n.children[0] ? emitBody(n.children[0]) : "Empty()");
   if (node.name === "Stmt") {
     if (node.props.kind === "assign") return `${node.props.target ?? ""} ${node.props.op ?? ":="} ${node.props.value ?? ""}`;
+    if (node.props.kind === "let") return `let ${node.props.name ?? "x"} = ${node.props.value ?? ""}`;
     return String(node.props.src ?? "");
   }
   if (node.name === "Lambda") {
