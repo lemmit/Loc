@@ -175,7 +175,8 @@ function findOperation(model: Model, agg: string, name: string): Operation {
     if (
       isOperation(node) &&
       node.name === name &&
-      AstUtils.getContainerOfType(node, (n): n is Aggregate => n.$type === "Aggregate")?.name === agg
+      AstUtils.getContainerOfType(node, (n): n is Aggregate => n.$type === "Aggregate")?.name ===
+        agg
     ) {
       return node;
     }
