@@ -1,27 +1,6 @@
-import { NodeFileSystem } from "langium/node";
-import { parseHelper } from "langium/test";
 import { describe, expect, it } from "vitest";
-import { enrichLoomModel } from "../../src/ir/enrichments.js";
-import type { LoomModel } from "../../src/ir/loom-ir.js";
-import { lowerModel } from "../../src/ir/lower.js";
-import { createDddServices } from "../../src/language/ddd-module.js";
-import type { Model } from "../../src/language/generated/ast.js";
 import { generateSystems } from "../../src/system/index.js";
-
-async function parse(source: string): Promise<Model> {
-  const services = createDddServices(NodeFileSystem);
-  const helper = parseHelper(services.Ddd);
-  const doc = await helper(source, { validation: true });
-  const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
-  if (errors.length) {
-    throw new Error("unexpected diagnostics:\n" + errors.map((d) => d.message).join("\n"));
-  }
-  return doc.parseResult.value as Model;
-}
-
-async function build(source: string): Promise<LoomModel> {
-  return enrichLoomModel(lowerModel(await parse(source)));
-}
+import { buildLoomModel as build, parseValid as parse } from "../_helpers/index.js";
 
 const SOURCE = `
   requirement US-001 { type: UserStory  title: "User can log in"  status: InProgress }
