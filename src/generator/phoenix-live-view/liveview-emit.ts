@@ -23,6 +23,7 @@ import type {
   DeployableIR,
   PageIR,
   SystemIR,
+  TypeIR,
   UiIR,
 } from "../../ir/loom-ir.js";
 import { camel, pascal, plural, snake } from "../../util/naming.js";
@@ -103,6 +104,18 @@ export function emitLiveViewPages(args: {
       contextByAggName,
     });
     out.set(`e2e/pages/${snake(page.name)}.ts`, pageObjectSource);
+  }
+
+  // User-defined components → one HEEx function component per
+  // `ui.component`, in a shared `Components.UiComponents` module.
+  // Page bodies invoke them fully-qualified, so no import wiring is
+  // needed.  (Components hosting Form/Action need handler hoisting to
+  // the page LiveView — deferred.)
+  if (ui.components.length > 0) {
+    out.set(
+      `lib/${appName}_web/components/ui_components.ex`,
+      renderUiComponents({ ui, appModule, aggregatesByName }),
+    );
   }
 
   return { files: out, routes };
@@ -400,6 +413,63 @@ function indent(s: string, n: number): string {
     .split("\n")
     .map((line) => (line.length > 0 ? pad + line : line))
     .join("\n");
+}
+
+/** Phoenix `attr` type token for a component param's declared type. */
+function attrType(t: TypeIR): string {
+  switch (t.kind) {
+    case "entity":
+    case "valueobject":
+      return ":map";
+    case "array":
+      return ":list";
+    case "primitive":
+      return t.name === "int" || t.name === "decimal"
+        ? ":integer"
+        : t.name === "bool"
+          ? ":boolean"
+          : ":string";
+    default:
+      return ":any";
+  }
+}
+
+/** Emit `lib/<app>_web/components/ui_components.ex` — one HEEx
+ *  function component (`attr` declarations + `def <name>(assigns)`)
+ *  per `ui.component`.  Each body is walked with the component's
+ *  params/state in scope, so param refs resolve to `@assigns`. */
+function renderUiComponents(args: {
+  ui: UiIR;
+  appModule: string;
+  aggregatesByName: ReadonlyMap<string, AggregateIR>;
+}): string {
+  const { ui, appModule, aggregatesByName } = args;
+  const webModule = `${appModule}Web`;
+  const defs = ui.components.map((c) => {
+    const synthPage = {
+      name: c.name,
+      params: c.params,
+      state: c.state,
+      body: c.body,
+      source: "explicit",
+    } as PageIR;
+    const walked = walkBodyToHeex(c.body, synthPage, ui, appModule, aggregatesByName);
+    const attrLines = c.params
+      .map((p) => `  attr :${snake(p.name)}, ${attrType(p.type)}, required: true`)
+      .join("\n");
+    const attrBlock = attrLines.length > 0 ? `${attrLines}\n` : "";
+    return `${attrBlock}  def ${snake(c.name)}(assigns) do
+    ~H"""
+${indent(walked.heex, 4)}
+    """
+  end`;
+  });
+  return `defmodule ${webModule}.Components.UiComponents do
+  use ${webModule}, :html
+
+${defs.join("\n\n")}
+end
+`;
 }
 
 // Suppress unused-import lints for re-exports.
