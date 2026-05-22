@@ -172,7 +172,7 @@ describe("validation", () => {
     });
 
     it("accepts 'ui:' on a 'platform: dotnet' deployable (fullstack mode)", async () => {
-      // Part B: dotnet flipped from backend-only to dual-mode.  A
+      // dotnet flipped from backend-only to dual-mode.  A
       // dotnet deployable that declares `ui:` becomes a fullstack
       // service that hosts an embedded React SPA from wwwroot/.
       // Backend-only dotnet (no `ui:`) keeps working unchanged.

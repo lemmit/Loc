@@ -34,7 +34,7 @@ import {
 // ---------------------------------------------------------------------------
 
 /** Options for the React generator's secondary entry point — used by
- *  the .NET orchestrator's fullstack branch (Part B) where the React
+ *  the .NET orchestrator's fullstack branch where the React
  *  project becomes a sub-tree of the .NET project and the SPA calls
  *  its host's API on the same origin.
  *    - `apiBaseUrl`: overrides the computed `http://localhost:<port>`
