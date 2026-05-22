@@ -42,6 +42,7 @@ const examples = [
   { ddd: "web/src/examples/inventory-system.ddd", reactDir: "web_app" },
   { ddd: "web/src/examples/provenance-system.ddd", reactDir: "web_app" },
   { ddd: "web/src/examples/sales-system.ddd", reactDir: "web_app" },
+  { ddd: "web/src/examples/storefront-system.ddd", reactDir: "web_app" },
   { ddd: "web/src/examples/storybook-mantine.ddd", reactDir: "web_app" },
   { ddd: "web/src/examples/storybook-shadcn.ddd", reactDir: "web_app" },
   { ddd: "web/src/examples/storybook-components.ddd", reactDir: "web_app" },

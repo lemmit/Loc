@@ -63,6 +63,7 @@ jobs:
           - web/src/examples/inventory-system.ddd
           - web/src/examples/provenance-system.ddd
           - web/src/examples/sales-system.ddd
+          - web/src/examples/storefront-system.ddd
           - web/src/examples/storybook-mantine.ddd
           - web/src/examples/storybook-shadcn.ddd
           - web/src/examples/storybook-components.ddd

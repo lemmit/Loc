@@ -1,0 +1,270 @@
+// Storefront — the flagship showcase domain.  It deliberately fuses
+// the two shapes the older examples demonstrated separately:
+//
+//   • a Sales-style AGGREGATE TREE — `Order` contains `OrderLine`
+//     parts, with a `Money` value-object, a `derived` rollup and an
+//     enum lifecycle (Draft → Confirmed); and
+//   • a Banking-style TRANSACTIONAL SAGA — a `Wallet` aggregate with
+//     a balance invariant, and a `checkout` workflow that debits the
+//     wallet AND creates/confirms the order in one transaction, so an
+//     insufficient balance rolls the whole thing back.
+//
+// This is the Hono + React variant: it boots in the playground's
+// runtime worker (PGlite) and previews the generated React SPA in the
+// iframe.  `storefront-dotnet.ddd` and `storefront-phoenix.ddd` lower
+// the same domain onto .NET (EF Core + Mediator) and Elixir (Ash +
+// Reactor) — pick all three from the dropdown to diff the backends.
+
+// ---------------------------------------------------------------------------
+// Traceability (see docs/traceability.md): requirement ─► solution
+// (entitles code); testCase (verifies + covers); aggregate `test "…"
+// verifies <TC>` is the executable proof.  `ddd generate system` turns
+// the aggregate `test` blocks into runnable vitest specs and emits
+// coverage + gaps reports under `.loom/`.
+// ---------------------------------------------------------------------------
+requirement US-001 {
+  type: UserStory
+  title: "A customer can check out an order paid from their wallet"
+  status: InProgress
+}
+
+requirement AC-001 parent US-001 {
+  type: AcceptanceCriteria
+  title: "An order can only be confirmed when it has at least one line"
+}
+
+requirement AC-002 parent US-001 {
+  type: AcceptanceCriteria
+  title: "A wallet cannot be debited below zero"
+}
+
+requirement AC-003 parent US-001 {
+  type: AcceptanceCriteria
+  title: "Checkout creates a confirmed order and debits the wallet atomically"
+}
+
+system StorefrontSystem {
+
+  // Storefront violet — retail/commerce vibe.
+  theme {
+    primary: "#7c3aed"
+    neutral: "#64748b"
+    radius: "md"
+    fontFamily: "Inter, system-ui, sans-serif"
+  }
+
+  module Storefront {
+    context Storefront {
+
+      enum OrderStatus { Draft, Confirmed, Shipped, Cancelled }
+      enum WalletStatus { Open, Frozen, Closed }
+
+      valueobject Money {
+        amount: decimal
+        currency: string
+        invariant amount >= 0
+        invariant currency.length == 3
+      }
+
+      event OrderConfirmed { order: Id<Order>, at: datetime }
+      event WalletToppedUp { wallet: Id<Wallet>, amount: Money, at: datetime }
+      event WalletDebited { wallet: Id<Wallet>, amount: Money, at: datetime }
+
+      aggregate Customer {
+        name: string display
+        email: string
+        invariant email.length > 0
+      }
+
+      aggregate Product {
+        sku: string display
+        price: Money
+        invariant sku.length > 0
+      }
+
+      // Banking-style aggregate: a balance with a non-negative
+      // invariant and deposit/withdraw-shaped operations.
+      aggregate Wallet {
+        ownerId: Id<Customer>
+        status: WalletStatus
+        balance: Money
+        openedAt: datetime
+        closedAt: datetime?
+
+        function isMutable(): bool = status == Open
+
+        invariant balance.amount >= 0
+
+        operation topUp(amount: Money) {
+          precondition isMutable()
+          precondition amount.amount > 0
+          balance := Money(balance.amount + amount.amount, balance.currency)
+          emit WalletToppedUp { wallet: id, amount: amount, at: now() }
+        }
+
+        operation debit(amount: Money) {
+          precondition isMutable()
+          precondition amount.amount > 0
+          precondition balance.amount >= amount.amount
+          balance := Money(balance.amount - amount.amount, balance.currency)
+          emit WalletDebited { wallet: id, amount: amount, at: now() }
+        }
+
+        operation freeze(reason: string) {
+          precondition status == Open
+          status := Frozen
+        }
+      }
+
+      // Sales-style aggregate tree: an Order contains OrderLine parts.
+      aggregate Order {
+        customerId: Id<Customer>
+        status: OrderStatus
+        placedAt: datetime
+        contains lines: OrderLine[]
+
+        derived lineCount: int = lines.count
+
+        invariant lines.count > 0 when status == Confirmed
+
+        function isMutable(): bool = status == Draft
+
+        operation addLine(productId: Id<Product>, unitPrice: Money, qty: int) {
+          precondition isMutable()
+          precondition qty > 0
+          lines += new OrderLine {
+            productId: productId,
+            unitPrice: unitPrice,
+            quantity: qty
+          }
+        }
+
+        operation confirm() {
+          precondition isMutable()
+          precondition lines.count > 0
+          status := Confirmed
+          emit OrderConfirmed { order: id, at: now() }
+        }
+
+        entity OrderLine {
+          productId: Id<Product>
+          unitPrice: Money
+          quantity: int
+          invariant quantity > 0
+        }
+
+        test "adding a line then confirming yields a confirmed order" verifies TC-001 {
+          let order = Order.create({
+            customerId: "00000000-0000-0000-0000-000000000001",
+            status: Draft,
+            placedAt: "2024-01-01T00:00:00Z"
+          })
+          order.addLine("00000000-0000-0000-0000-000000000002", Money(5.00, "USD"), 2)
+          order.confirm()
+          expect order.status == Confirmed
+          expect order.lines.count == 1
+        }
+
+        test "lines cannot be added once the order is confirmed" verifies TC-001 {
+          let order = Order.create({
+            customerId: "00000000-0000-0000-0000-000000000001",
+            status: Draft,
+            placedAt: "2024-01-01T00:00:00Z"
+          })
+          order.addLine("00000000-0000-0000-0000-000000000002", Money(5.00, "USD"), 2)
+          order.confirm()
+          expectThrows order.addLine("00000000-0000-0000-0000-000000000002", Money(5.00, "USD"), 1)
+        }
+      }
+
+      repository Customers for Customer {
+        find byEmail(email: string): Customer? where this.email == email
+      }
+      repository Products for Product { }
+      repository Wallets for Wallet {
+        find byOwner(owner: Id<Customer>): Wallet[] where this.ownerId == owner
+        find openByOwner(owner: Id<Customer>): Wallet[]
+          where this.ownerId == owner && this.status == Open
+      }
+      repository Orders for Order { }
+
+      // The saga: create + confirm the order AND debit the wallet in
+      // one transaction.  If the wallet lacks the funds, `debit`'s
+      // precondition throws and the order creation rolls back too.
+      // Invoke via POST /workflows/checkout with body
+      //   { customerId, walletId, productId, unitPrice: { amount, currency }, qty }
+      workflow checkout(
+        customerId: Id<Customer>,
+        walletId: Id<Wallet>,
+        productId: Id<Product>,
+        unitPrice: Money,
+        qty: int
+      ) transactional {
+        precondition qty > 0
+        let wallet = Wallets.getById(walletId)
+        let order = Order.create({
+          customerId: customerId,
+          status: Draft,
+          placedAt: now()
+        })
+        order.addLine(productId, unitPrice, qty)
+        order.confirm()
+        wallet.debit(unitPrice)
+      }
+    }
+  }
+
+  ui WebApp {
+    scaffold modules: Storefront
+  }
+
+  deployable api { platform: hono, modules: Storefront, port: 3000 }
+  deployable webApp { platform: react, targets: api, ui: WebApp, port: 3001 }
+
+  // System e2e tests.  `against api` (Hono) lowers to vitest + fetch.
+  test e2e "create a product and read it back" against api {
+    let p = api.products.create({ sku: "WIDGET-1", price: { amount: 9.99, currency: "USD" } })
+    let read = api.products.getById(p)
+    expect read.sku == "WIDGET-1"
+  }
+
+  test e2e "top up a wallet then check out an order" against api verifies TC-002 {
+    let cust = api.customers.create({ name: "Buyer", email: "buyer@acme.test" })
+    let prod = api.products.create({ sku: "WIDGET-2", price: { amount: 5.00, currency: "USD" } })
+    let wallet = api.wallets.create({
+      ownerId: cust.id,
+      status: "Open",
+      balance: { amount: 0.0, currency: "USD" },
+      openedAt: "2024-01-01T00:00:00Z"
+    })
+    api.wallets.topUp(wallet, { amount: { amount: 50.0, currency: "USD" } })
+    let read = api.wallets.getById(wallet)
+    expect read.balance.amount == 50.0
+  }
+}
+
+solution SOL-001 for US-001 {
+  title: "Checkout orchestrates the Order tree and the Wallet balance in one transaction"
+  entitles [
+    Storefront.Storefront.Order.addLine,
+    Storefront.Storefront.Order.confirm,
+    Storefront.Storefront.Wallet.debit,
+    Storefront.Storefront.checkout
+  ]
+}
+
+testCase TC-001 verifies AC-001 {
+  title: "Add a line then confirm the order"
+  covers [
+    Storefront.Storefront.Order.addLine,
+    Storefront.Storefront.Order.confirm
+  ]
+}
+
+testCase TC-002 verifies AC-002 {
+  title: "A wallet top-up and debit keep the balance non-negative"
+  covers [
+    Storefront.Storefront.Wallet.topUp,
+    Storefront.Storefront.Wallet.debit
+  ]
+}

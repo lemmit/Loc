@@ -12,6 +12,14 @@ For language syntax see [`language.md`](language.md); for architecture
 see [`technical.md`](technical.md); for CLI / Docker / Playwright
 workflow see [`tools.md`](tools.md).
 
+To see one identical domain lowered onto every backend, pick the
+**Storefront** trio from the playground dropdown — `storefront-system`
+(Hono + React), `storefront-dotnet` (.NET + embedded SPA), and
+`storefront-phoenix` (Elixir/Ash + LiveView). All three share the same
+aggregate tree (`Order` → `OrderLine` + `Money`), `Wallet` aggregate,
+and transactional `checkout` saga, so diffing their output is the
+fastest way to read this matrix concretely.
+
 ---
 
 ## Cross-platform feature matrix
