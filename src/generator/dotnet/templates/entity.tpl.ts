@@ -1,7 +1,7 @@
 import type { AggregateIR, EntityPartIR } from "../../../ir/loom-ir.js";
 import { operationUsesCurrentUser } from "../../../ir/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
-import { upperFirst, plural } from "../../../util/naming.js";
+import { plural, upperFirst } from "../../../util/naming.js";
 import { csNewIdValue, renderCsExpr, renderCsType } from "../render-expr.js";
 import { renderCsStatements } from "../render-stmt.js";
 

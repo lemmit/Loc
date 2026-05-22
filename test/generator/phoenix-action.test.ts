@@ -58,9 +58,7 @@ async function build(): Promise<Map<string, string>> {
   const file = path.join(dir, "mini.ddd");
   fs.writeFileSync(file, SOURCE);
   const services = createDddServices(NodeFileSystem);
-  const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
-    URI.file(file),
-  );
+  const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(URI.file(file));
   await services.shared.workspace.DocumentBuilder.build([doc], { validation: true });
   const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
   if (errors.length > 0) {

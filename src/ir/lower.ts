@@ -246,9 +246,7 @@ const REQUIREMENT_STATUSES: ReadonlySet<string> = new Set<RequirementStatus>([
  *  quoted titles to a StringLit; priorities to an IntLit.  Returns the
  *  raw string / number, or undefined for shapes we don't recognise
  *  (the validator reports those). */
-function requirementPropValue(
-  expr: Expression | undefined,
-): string | number | undefined {
+function requirementPropValue(expr: Expression | undefined): string | number | undefined {
   if (!expr) return undefined;
   switch (expr.$type) {
     case "NameRef":
@@ -305,9 +303,7 @@ function lowerTestCase(t: TestCase): TestCaseIR {
   };
 }
 
-function lowerCodeRefs(
-  refs: readonly Reference<Targetable>[],
-): CodeRefIR[] {
+function lowerCodeRefs(refs: readonly Reference<Targetable>[]): CodeRefIR[] {
   const out: CodeRefIR[] = [];
   for (const ref of refs) {
     const node = ref.ref;
@@ -459,9 +455,7 @@ function lowerSystem(sys: System): SystemIR {
   // components, scaffolds, and the optional menu block are each turned
   // into their literal IR shape (no scaffold expansion, no body type
   // inference yet — those come later in the pipeline).
-  const uis = sys.members
-    .filter((m): m is Ui => m.$type === "Ui")
-    .map((u) => lowerUi(u));
+  const uis = sys.members.filter((m): m is Ui => m.$type === "Ui").map((u) => lowerUi(u));
   // Api declarations — system-level peers to module / ui / deployable.
   const apis = sys.members
     .filter((m): m is Api => m.$type === "Api")
@@ -473,10 +467,12 @@ function lowerSystem(sys: System): SystemIR {
     );
   const storages = sys.members
     .filter((m): m is Storage => m.$type === "Storage")
-    .map((s): StorageIR => ({
-      name: s.name,
-      type: s.type as StorageKind,
-    }));
+    .map(
+      (s): StorageIR => ({
+        name: s.name,
+        type: s.type as StorageKind,
+      }),
+    );
   const built: SystemIR = {
     name: sys.name,
     modules,
@@ -604,9 +600,7 @@ function pluralSnake(s: string): string {
   return snake + "s";
 }
 
-function lowerTheme(
-  block: ThemeBlock,
-): ThemeIR {
+function lowerTheme(block: ThemeBlock): ThemeIR {
   const out: ThemeIR = {};
   for (const p of block.props) {
     const value = p.value;
@@ -638,11 +632,7 @@ function lowerTheme(
   return out;
 }
 
-function lowerE2E(
-  block: TestE2E,
-  env: Env,
-  kind: "api" | "ui",
-): TestE2EIR {
+function lowerE2E(block: TestE2E, env: Env, kind: "api" | "ui"): TestE2EIR {
   const inner = block.body;
   let curEnv = env;
   const statements: TestStmtIR[] = [];
@@ -883,10 +873,7 @@ function lowerPage(p: Page): PageIR {
  *  <View>)`, the standalone Home / WorkflowsIndex / ViewsIndex
  *  sentinels), returns the matching origin.  Otherwise returns
  *  `undefined` — the page is treated as user-explicit. */
-function inferScaffoldOrigin(
-  page: Page,
-  body: ExprIR | undefined,
-): ScaffoldOriginIR | undefined {
+function inferScaffoldOrigin(page: Page, body: ExprIR | undefined): ScaffoldOriginIR | undefined {
   if (!body || body.kind !== "call") return undefined;
   const callName = body.name;
   const argNames = body.argNames ?? [];
@@ -969,10 +956,7 @@ function lowerComponent(c: Component): ComponentIR {
   return { name: c.name, params, state, body };
 }
 
-function lowerStateField(
-  f: StateField,
-  env: Env,
-): StateFieldIR {
+function lowerStateField(f: StateField, env: Env): StateFieldIR {
   return {
     name: f.name,
     type: lowerType(f.type),
@@ -1402,10 +1386,7 @@ function lowerDerived(d: DerivedProp, env: Env): DerivedIR {
   };
 }
 
-function lowerInvariant(
-  i: Invariant,
-  env: Env,
-): InvariantIR {
+function lowerInvariant(i: Invariant, env: Env): InvariantIR {
   return {
     expr: lowerExpr(i.expr, env),
     guard: i.guard ? lowerExpr(i.guard, env) : undefined,
@@ -1421,10 +1402,7 @@ function lowerInvariant(
  *  clause on a Property.  Inline-check sugar — the synthesised
  *  invariant appears in the parent's `invariants` list so the existing
  *  wire-validator + domain-floor pipelines pick it up uniformly. */
-function lowerPropertyChecks(
-  props: Property[],
-  env: Env,
-): InvariantIR[] {
+function lowerPropertyChecks(props: Property[], env: Env): InvariantIR[] {
   const out: InvariantIR[] = [];
   for (const p of props) {
     if (!p.check) continue;

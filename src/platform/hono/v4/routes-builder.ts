@@ -18,7 +18,7 @@ import type {
   ValueObjectIR,
 } from "../../../ir/loom-ir.js";
 import { findUsesCurrentUser, operationUsesCurrentUser } from "../../../ir/loom-ir.js";
-import { lowerFirst, upperFirst, plural, snake } from "../../../util/naming.js";
+import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Hono routes file with OpenAPI annotations.
@@ -279,7 +279,9 @@ function emitOperationRoute(agg: AggregateIR, op: OperationIR, ctx: BoundedConte
   out.push(`    operationId: "${lowerFirst(op.name)}${agg.name}",`);
   out.push(`    request: {`);
   out.push(`      params: z.object({ id: z.string() }),`);
-  out.push(`      body: { content: { "application/json": { schema: ${upperFirst(op.name)}Request } } },`);
+  out.push(
+    `      body: { content: { "application/json": { schema: ${upperFirst(op.name)}Request } } },`,
+  );
   out.push(`    },`);
   out.push(`    responses: {`);
   out.push(`      204: { description: "No content" },`);
@@ -545,7 +547,6 @@ function collectUsedEnums(
   }
   return ctx.enums.filter((e) => used.has(e.name));
 }
-
 
 // ---------------------------------------------------------------------------
 // `z.object({...}).openapi("Name").refine(...)` emitter.

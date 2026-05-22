@@ -6,7 +6,7 @@ import type {
   FieldIR,
 } from "../../../ir/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
-import { upperFirst, plural, snake } from "../../../util/naming.js";
+import { plural, snake, upperFirst } from "../../../util/naming.js";
 
 // AppDbContext + per-aggregate IEntityTypeConfiguration<T>.  The
 // configuration walks each aggregate's fields/contains and emits the

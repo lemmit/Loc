@@ -111,8 +111,8 @@ describe("computeVerification", () => {
       { name: "create works", suite: "Alpha", status: "pass" },
       { name: "create works", suite: "Beta", status: "fail" },
     ]);
-    expect(v.requirements["R1"].verdict).toBe("VERIFIED");
-    expect(v.requirements["R2"].verdict).toBe("FAILING");
+    expect(v.requirements.R1.verdict).toBe("VERIFIED");
+    expect(v.requirements.R2.verdict).toBe("FAILING");
   });
 
   it("reports results that match no declared test, and is deterministic", async () => {

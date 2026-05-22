@@ -5,6 +5,7 @@ import {
   packFormatForBuiltin,
   parseBuiltinDesignRef,
 } from "../generator/_packs/builtin-formats.js";
+import type { Platform } from "../ir/loom-ir.js";
 import {
   backendVersionsForFamily,
   isRegisteredBackendRef,
@@ -62,7 +63,6 @@ import {
   type UiHelperImport,
   type ValueObject,
 } from "./generated/ast.js";
-import type { Platform } from "../ir/loom-ir.js";
 import {
   type DddType,
   type Env,
@@ -108,9 +108,7 @@ export class DddValidator {
         this.checkContext(m, accept);
       } else if (m.$type === "System") {
         const deployables = m.members.filter((sm) => sm.$type === "Deployable");
-        const themeBlocks = m.members.filter(
-          (sm) => sm.$type === "ThemeBlock",
-        ) as ThemeBlock[];
+        const themeBlocks = m.members.filter((sm) => sm.$type === "ThemeBlock") as ThemeBlock[];
         if (themeBlocks.length > 1) {
           for (const tb of themeBlocks.slice(1)) {
             accept(
@@ -125,9 +123,7 @@ export class DddValidator {
         // ui checks can see siblings (name uniqueness across uis), and
         // so per-deployable checks can cross-reference the system's
         // ui inventory.
-        const uis = m.members.filter(
-          (sm) => sm.$type === "Ui",
-        ) as Ui[];
+        const uis = m.members.filter((sm) => sm.$type === "Ui") as Ui[];
         const uiNamesSeen = new Map<string, Ui>();
         for (const ui of uis) {
           const prior = uiNamesSeen.get(ui.name);
@@ -147,9 +143,7 @@ export class DddValidator {
         // Api declaration checks.
         //   - Names unique within the system (`api SalesApi from …` declared twice).
         //   - Source module cross-ref must resolve.
-        const apis = m.members.filter(
-          (sm) => sm.$type === "Api",
-        ) as Api[];
+        const apis = m.members.filter((sm) => sm.$type === "Api") as Api[];
         const apiNamesSeen = new Map<string, Api>();
         for (const api of apis) {
           const prior = apiNamesSeen.get(api.name);
@@ -176,9 +170,7 @@ export class DddValidator {
         //   - Type is one of the v0 enum values (parser ensures shape;
         //     this is a structural sanity-check + future hook for
         //     cross-platform constraints).
-        const storages = m.members.filter(
-          (sm) => sm.$type === "Storage",
-        ) as Storage[];
+        const storages = m.members.filter((sm) => sm.$type === "Storage") as Storage[];
         const storageNamesSeen = new Map<string, Storage>();
         for (const s of storages) {
           const prior = storageNamesSeen.get(s.name);
@@ -199,17 +191,9 @@ export class DddValidator {
           } else if (sm.$type === "BoundedContext") {
             this.checkContext(sm, accept);
           } else if (sm.$type === "Deployable") {
-            this.checkDeployable(
-              sm as Deployable,
-              deployables as Deployable[],
-              accept,
-            );
+            this.checkDeployable(sm as Deployable, deployables as Deployable[], accept);
           } else if (sm.$type === "Ui") {
-            this.checkUi(
-              sm as Ui,
-              m as System,
-              accept,
-            );
+            this.checkUi(sm as Ui, m as System, accept);
           }
         }
       }
@@ -219,17 +203,12 @@ export class DddValidator {
   /** Validate `requirement` traceability artifacts: the `type`,
    *  `title`, `status` and `priority` keys, and that each declared
    *  `type`/`status` is one of the known enum values. */
-  private checkTraceability(
-    model: Model,
-    accept: ValidationAcceptor,
-  ): void {
+  private checkTraceability(model: Model, accept: ValidationAcceptor): void {
     const ALLOWED_KEYS = new Set(["type", "title", "status", "priority"]);
     const TYPES = new Set(["UserStory", "UseCase", "AcceptanceCriteria", "BusinessReq"]);
     const STATUSES = new Set(["Draft", "Approved", "InProgress", "Done"]);
 
-    const requirements = model.members.filter(
-      (m): m is Requirement => m.$type === "Requirement",
-    );
+    const requirements = model.members.filter((m): m is Requirement => m.$type === "Requirement");
 
     for (const req of requirements) {
       const seen = new Set<string>();
@@ -334,10 +313,7 @@ export class DddValidator {
    *  intentionally — the validator runs before generation and
    *  the cross-module import would inflate the language-server
    *  bundle. */
-  private checkUiHelperImports(
-    model: Model,
-    accept: ValidationAcceptor,
-  ): void {
+  private checkUiHelperImports(model: Model, accept: ValidationAcceptor): void {
     const STDLIB_PRIMITIVES = new Set<string>([
       "Stack",
       "Group",
@@ -381,9 +357,7 @@ export class DddValidator {
     for (const member of model.members) {
       if (member.$type !== "System") continue;
       const sys = member as System;
-      const uis = sys.members.filter(
-        (sm) => sm.$type === "Ui",
-      ) as Ui[];
+      const uis = sys.members.filter((sm) => sm.$type === "Ui") as Ui[];
       for (const ui of uis) {
         const seen = new Map<string, UiHelperImport>();
         for (const um of ui.members) {
@@ -410,10 +384,7 @@ export class DddValidator {
     }
   }
 
-  private checkTheme(
-    block: ThemeBlock,
-    accept: ValidationAcceptor,
-  ): void {
+  private checkTheme(block: ThemeBlock, accept: ValidationAcceptor): void {
     const knownNames = new Set(["primary", "neutral", "radius", "fontFamily"]);
     const knownRadius = new Set(["none", "sm", "md", "lg", "xl"]);
     // Hex colors: #RGB, #RRGGBB, or #RRGGBBAA.  Everything else
@@ -466,11 +437,7 @@ export class DddValidator {
     }
   }
 
-  private checkDeployable(
-    d: Deployable,
-    siblings: Deployable[],
-    accept: ValidationAcceptor,
-  ): void {
+  private checkDeployable(d: Deployable, siblings: Deployable[], accept: ValidationAcceptor): void {
     // Page-metamodel UI binding rules (3, 4).
     // Rule 3: only platforms that mount a UI admit `ui:` — `react`,
     //         `static`, and `phoenixLiveView` (fullstack Ash + Phoenix).
@@ -595,10 +562,7 @@ export class DddValidator {
    *    - anything else (`"frobnicator"`, a typo'd quoted platform)
    *      → unknown-platform error (the grammar enum used to reject
    *      these; the STRING alternative no longer does). */
-  private checkDeployablePlatform(
-    d: Deployable,
-    accept: ValidationAcceptor,
-  ): void {
+  private checkDeployablePlatform(d: Deployable, accept: ValidationAcceptor): void {
     const raw = d.platform;
     if (raw == null) return;
     const parsed = parseBuiltinPlatformRef(raw);
@@ -704,10 +668,7 @@ export class DddValidator {
    *      bare `modules: Sales` deployables keep working).  Bare
    *      list still defaults to "no explicit storage; use generator
    *      defaults". */
-  private checkDeployableModuleStorages(
-    d: Deployable,
-    accept: ValidationAcceptor,
-  ): void {
+  private checkDeployableModuleStorages(d: Deployable, accept: ValidationAcceptor): void {
     const isBackend = platformOwnsBackend(d.platform);
     for (const mb of d.moduleBindings ?? []) {
       const block = mb.storages ?? [];
@@ -758,10 +719,7 @@ export class DddValidator {
    *      have no api surface to serve.
    *    - Each api ref must resolve.
    *    - No duplicate api names within one deployable's serves list. */
-  private checkDeployableServes(
-    d: Deployable,
-    accept: ValidationAcceptor,
-  ): void {
+  private checkDeployableServes(d: Deployable, accept: ValidationAcceptor): void {
     if (!d.serves || d.serves.length === 0) return;
     if (!platformOwnsBackend(d.platform)) {
       accept(
@@ -808,10 +766,7 @@ export class DddValidator {
    *    - No duplicate param bindings.
    *    - Every UI api param must have a matching binding (no
    *      param left unbound). */
-  private checkDeployableUiCompose(
-    d: Deployable,
-    accept: ValidationAcceptor,
-  ): void {
+  private checkDeployableUiCompose(d: Deployable, accept: ValidationAcceptor): void {
     const ui = d.uiSugar?.ref?.ref ?? d.uiCompose?.ref?.ref ?? d.uiBlock?.ref?.ref;
     if (!ui) return;
 
@@ -907,10 +862,7 @@ export class DddValidator {
     }
   }
 
-  private checkContext(
-    ctx: BoundedContext,
-    accept: ValidationAcceptor,
-  ): void {
+  private checkContext(ctx: BoundedContext, accept: ValidationAcceptor): void {
     for (const member of ctx.members) {
       if (isAggregate(member)) this.checkAggregate(member, accept);
       else if (isValueObject(member)) this.checkValueObject(member, accept);
@@ -1026,10 +978,7 @@ export class DddValidator {
     }
   }
 
-  private checkMatchExpressions(
-    model: Model,
-    accept: ValidationAcceptor,
-  ): void {
+  private checkMatchExpressions(model: Model, accept: ValidationAcceptor): void {
     for (const node of AstUtils.streamAllContents(model)) {
       if (node.$type !== "MatchExpr") continue;
       const m = node as MatchExpr;
@@ -1057,10 +1006,7 @@ export class DddValidator {
     }
   }
 
-  private checkMatchesCalls(
-    model: Model,
-    accept: ValidationAcceptor,
-  ): void {
+  private checkMatchesCalls(model: Model, accept: ValidationAcceptor): void {
     for (const node of AstUtils.streamAllContents(model)) {
       if (node.$type !== "MemberAccess") continue;
       const ma = node as MemberAccess;
@@ -1361,12 +1307,7 @@ export class DddValidator {
     }
   }
 
-  private lvalueType(
-    lv: LValue,
-    agg: Aggregate,
-    env: Env,
-    accept: ValidationAcceptor,
-  ): DddType {
+  private lvalueType(lv: LValue, agg: Aggregate, env: Env, accept: ValidationAcceptor): DddType {
     // Resolve the head: a parameter, let-binding, or an aggregate property.
     const headSym = env.resolve(lv.head);
     let cur: DddType;
@@ -1481,11 +1422,7 @@ export class DddValidator {
   // shape lives in the page emitter (closed-stdlib spec table).
   // ---------------------------------------------------------------------------
 
-  private checkUi(
-    ui: Ui,
-    sys: System,
-    accept: ValidationAcceptor,
-  ): void {
+  private checkUi(ui: Ui, sys: System, accept: ValidationAcceptor): void {
     // Page name uniqueness within the ui (Rule 7).  Override-by-name
     // is the SAME mechanism — the explicit page must displace exactly
     // one scaffolded page; multiple explicit pages with the same name
@@ -1551,11 +1488,7 @@ export class DddValidator {
     }
   }
 
-  private checkScaffold(
-    s: Scaffold,
-    sys: System,
-    accept: ValidationAcceptor,
-  ): void {
+  private checkScaffold(s: Scaffold, sys: System, accept: ValidationAcceptor): void {
     // Rule 5 — selector targets must resolve to declarations of the
     // matching kind anywhere in the system.  The deployable-targets-
     // chain reachability check is left to the scaffold expander where
@@ -1622,11 +1555,7 @@ export class DddValidator {
     }
   }
 
-  private checkPage(
-    p: Page,
-    ui: Ui,
-    accept: ValidationAcceptor,
-  ): void {
+  private checkPage(p: Page, ui: Ui, accept: ValidationAcceptor): void {
     void ui;
     // Validate api body refs first so each chain ref
     // gets a precise diagnostic with source-location ranges.
@@ -1670,19 +1599,13 @@ export class DddValidator {
     }
   }
 
-  private checkMenuBlock(
-    block: MenuBlock,
-    ui: Ui,
-    accept: ValidationAcceptor,
-  ): void {
+  private checkMenuBlock(block: MenuBlock, ui: Ui, accept: ValidationAcceptor): void {
     // Rule 8 — every page-link in a menu block must reference a page
     // in the SAME ui.  The grammar's `[Page:ID]` cross-reference
     // resolves globally; we additionally check the resolved page's
     // container.
     const pagesInThisUi = new Set(
-      ui.members
-        .filter((m) => m.$type === "Page")
-        .map((m) => (m as Page).name),
+      ui.members.filter((m) => m.$type === "Page").map((m) => (m as Page).name),
     );
     for (const section of block.sections) {
       for (const link of section.links) {
@@ -1722,11 +1645,7 @@ export class DddValidator {
    *      repository find)
    *  Diagnostics emit at the source-level node so the editor
    *  underlines the exact wrong segment. */
-  private checkApiBodyRefs(
-    p: Page,
-    ui: Ui,
-    accept: ValidationAcceptor,
-  ): void {
+  private checkApiBodyRefs(p: Page, ui: Ui, accept: ValidationAcceptor): void {
     // Build the param-name → resolved Api map for this UI.
     const apiByParam = new Map<string, Api>();
     for (const m of ui.members) {
@@ -1783,10 +1702,7 @@ export class DddValidator {
 }
 
 /** Find an Aggregate by name across the contexts of a Module. */
-function findAggregateInModule(
-  mod: Module,
-  name: string,
-): Aggregate | undefined {
+function findAggregateInModule(mod: Module, name: string): Aggregate | undefined {
   for (const ctx of mod.contexts ?? []) {
     for (const am of ctx.members ?? []) {
       if (am.$type === "Aggregate" && am.name === name) return am;

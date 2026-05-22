@@ -6,7 +6,7 @@ import type {
   TypeIR,
 } from "../../ir/loom-ir.js";
 import { findUsesCurrentUser, operationUsesCurrentUser } from "../../ir/loom-ir.js";
-import { upperFirst, plural } from "../../util/naming.js";
+import { plural, upperFirst } from "../../util/naming.js";
 import {
   aggregateResponseParams,
   csIdValueClrType,
@@ -417,7 +417,9 @@ function emitFindQueriesAndHandlers(
         ns,
         aggName: agg.name,
         queryName: `${upperFirst(find.name)}Query`,
-        queryParams: find.params.map((p) => `${renderCsType(p.type)} ${upperFirst(p.name)}`).join(", "),
+        queryParams: find.params
+          .map((p) => `${renderCsType(p.type)} ${upperFirst(p.name)}`)
+          .join(", "),
         returnType: queryReturn,
       }),
     );

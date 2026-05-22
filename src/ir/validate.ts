@@ -509,7 +509,7 @@ function firstUnknownColumnRef(e: ExprIR, agg: AggregateIR, ctx: BoundedContextI
         const voName =
           e.receiver.memberType.kind === "valueobject" ? e.receiver.memberType.name : "";
         const vo = ctx.valueObjects.find((v) => v.name === voName);
-        if (vo && vo.fields.some((f) => f.name === e.member)) return null;
+        if (vo?.fields.some((f) => f.name === e.member)) return null;
         return `'this.${(e.receiver as { member: string }).member}.${e.member}'`;
       }
       return null;

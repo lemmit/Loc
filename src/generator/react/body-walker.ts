@@ -53,33 +53,13 @@ import type {
   ExprIR,
   OperationIR,
   ParamIR,
-  StateFieldIR,
   StmtIR,
-  TypeIR,
   UiApiParamIR,
   UiHelperImportIR,
   WorkflowIR,
 } from "../../ir/loom-ir.js";
-import { lowerFirst, humanize, upperFirst, plural, snake } from "../../util/naming.js";
-import type { ImportSpec, LoadedPack } from "../_packs/loader.js";
-import { routerPackageForStack } from "../_packs/stack-runtime.js";
-import {
-  idTargetHookVar,
-  idTargetsInFields,
-  initialValuesTs,
-  needsController,
-} from "./form-helpers.js";
-import { prepareFormFieldVM } from "./templating/preparers/form-fields.js";
-import { renderFormField } from "./templating/render.js";
-import type { FormFieldVM } from "./templating/view-models.js";
+import type { LoadedPack } from "../_packs/loader.js";
 import { registerApiHook, tryDetectApiHook } from "./walker/api-hooks.js";
-import {
-  addImport,
-  addImportsForPrimitive,
-  addMantineImport,
-  registerFormFieldImports,
-  renderPrimitive,
-} from "./walker/context.js";
 import {
   emitAction,
   emitButton,
@@ -127,21 +107,7 @@ import {
   emitMoney,
   emitText,
 } from "./walker/primitives/text.js";
-import {
-  boolNamed,
-  describeReceiver,
-  escapeJsxText,
-  firstPositionalText,
-  indentJsx,
-  lambdaArg,
-  namedArgValue,
-  numericNamed,
-  positionalArgs,
-  slugify,
-  stringNamed,
-  unwrapAsAttr,
-  unwrapTextLiteral,
-} from "./walker/shared/args.js";
+import { describeReceiver, escapeJsxText, positionalArgs } from "./walker/shared/args.js";
 
 /** Per-source named-import map — `from` module → set of named
  *  exports the page needs from it.  Replaces the old single-source

@@ -53,7 +53,7 @@ import type {
   UiHelperImportIR,
   UiIR,
 } from "../../ir/loom-ir.js";
-import { humanize, upperFirst, plural, snake } from "../../util/naming.js";
+import { humanize, plural, snake, upperFirst } from "../../util/naming.js";
 
 export type RenderPosition = "template" | "handler";
 
@@ -771,15 +771,12 @@ function renderModal(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext):
   // (`Form(data.confirm)`); the receiver names the instance (whose
   // aggregate is resolved via `instanceTypes`) and the member is the
   // operation.
-  const opRefNode = formChild
-    ? formChild.args.find((_, i) => !formChild.argNames?.[i])
-    : undefined;
+  const opRefNode = formChild ? formChild.args.find((_, i) => !formChild.argNames?.[i]) : undefined;
   const instanceName =
     opRefNode?.kind === "member" && opRefNode.receiver.kind === "ref"
       ? opRefNode.receiver.name
       : undefined;
-  const opName =
-    opRefNode?.kind === "member" ? opRefNode.member : undefined;
+  const opName = opRefNode?.kind === "member" ? opRefNode.member : undefined;
   const ofName = instanceName ? ctx.instanceTypes?.get(instanceName) : undefined;
   if (!formChild || !ofName || !opName) {
     return `<!-- malformed Modal: expected trigger: Button + Form(<instance>.<operation>) -->`;
@@ -1099,8 +1096,7 @@ function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkConte
         const remapping = new Map<string, string>([[dataVar, assignName]]);
         // Type the data binding so a nested instance-qualified op-form
         // (`Form(data.confirm)`) resolves the aggregate it operates on.
-        const recordAgg =
-          isSingle && ofArgNode ? resolveQueryAggregate(ofArgNode) : undefined;
+        const recordAgg = isSingle && ofArgNode ? resolveQueryAggregate(ofArgNode) : undefined;
         const innerCtx: WalkContext = {
           ...ctx,
           varRemapping: remapping,

@@ -4,7 +4,6 @@ import {
   type CompletionAcceptor,
   type CompletionContext,
   DefaultCompletionProvider,
-  type LangiumServices,
   type NextFeature,
 } from "langium/lsp";
 import { CompletionItemKind } from "vscode-languageserver";
@@ -56,10 +55,6 @@ import {
 // ---------------------------------------------------------------------------
 
 export class DddCompletionProvider extends DefaultCompletionProvider {
-  constructor(services: LangiumServices) {
-    super(services);
-  }
-
   protected override completionFor(
     context: CompletionContext,
     next: NextFeature,

@@ -1,5 +1,5 @@
 import type { BoundedContextIR, TypeIR, ViewIR } from "../../ir/loom-ir.js";
-import { lowerFirst, upperFirst, plural, snake } from "../../util/naming.js";
+import { lowerFirst, snake, upperFirst } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // View API module + Playwright page object emission.
@@ -50,7 +50,9 @@ export function buildViewsApiModule(contexts: BoundedContextIR[]): string {
     if (!view.output) shorthandSources.add(view.aggregateName);
   }
   for (const aggName of [...shorthandSources].sort()) {
-    lines.push(`import { ${aggName}Response, ${aggName}ListResponse } from "./${lowerFirst(aggName)}";`);
+    lines.push(
+      `import { ${aggName}Response, ${aggName}ListResponse } from "./${lowerFirst(aggName)}";`,
+    );
   }
   // Full-form views may reference enum / VO schemas on their fields.
   const enumDeps = collectEnumDeps(views);
@@ -68,13 +70,19 @@ export function buildViewsApiModule(contexts: BoundedContextIR[]): string {
         lines.push(`  ${f.name}: ${zodForResponse(f.type, f.optional)},`);
       }
       lines.push(`});`);
-      lines.push(`export type ${upperFirst(view.name)}Row = z.infer<typeof ${upperFirst(view.name)}Row>;`);
-      lines.push(`export const ${upperFirst(view.name)}Response = z.array(${upperFirst(view.name)}Row);`);
+      lines.push(
+        `export type ${upperFirst(view.name)}Row = z.infer<typeof ${upperFirst(view.name)}Row>;`,
+      );
+      lines.push(
+        `export const ${upperFirst(view.name)}Response = z.array(${upperFirst(view.name)}Row);`,
+      );
       lines.push(
         `export type ${upperFirst(view.name)}Response = z.infer<typeof ${upperFirst(view.name)}Response>;`,
       );
     } else {
-      lines.push(`export const ${upperFirst(view.name)}Response = ${view.aggregateName}ListResponse;`);
+      lines.push(
+        `export const ${upperFirst(view.name)}Response = ${view.aggregateName}ListResponse;`,
+      );
       lines.push(
         `export type ${upperFirst(view.name)}Response = z.infer<typeof ${upperFirst(view.name)}Response>;`,
       );
@@ -246,7 +254,6 @@ function collectColumnNames(view: ViewIR, ctx: BoundedContextIR): string[] {
 function unwrapOpt(t: TypeIR): TypeIR {
   return t.kind === "optional" ? t.inner : t;
 }
-
 
 function zodForResponse(t: TypeIR, optional: boolean): string {
   const z = zodForResponseInner(t);

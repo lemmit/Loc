@@ -6,7 +6,7 @@ import {
   singleFieldShape,
 } from "../../ir/invariant-classify.js";
 import type { AggregateIR, ExprIR, InvariantIR, OperationIR } from "../../ir/loom-ir.js";
-import { upperFirst, plural } from "../../util/naming.js";
+import { plural, upperFirst } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Per-command FluentValidation `AbstractValidator<TCommand>` emission.

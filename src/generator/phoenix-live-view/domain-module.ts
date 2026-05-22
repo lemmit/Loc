@@ -1,5 +1,5 @@
 import type { BoundedContextIR, EnumIR } from "../../ir/loom-ir.js";
-import { upperFirst, snake } from "../../util/naming.js";
+import { snake, upperFirst } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Domain module emitter — per `BoundedContextIR` produce:

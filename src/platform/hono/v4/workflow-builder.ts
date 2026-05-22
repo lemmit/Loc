@@ -7,7 +7,7 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../../../ir/loom-ir.js";
-import { lowerFirst, upperFirst, snake } from "../../../util/naming.js";
+import { lowerFirst, snake, upperFirst } from "../../../util/naming.js";
 import { emitWireSchema, wireToDomainExpr, zodFor } from "./routes-builder.js";
 
 // ---------------------------------------------------------------------------
@@ -272,7 +272,9 @@ function renderStmt(
     }
     case "repo-let": {
       const args = st.args.map(renderArg).join(", ");
-      return [`${indent}const ${st.name} = await ${lowerFirst(st.repoName)}.${st.method}(${args});`];
+      return [
+        `${indent}const ${st.name} = await ${lowerFirst(st.repoName)}.${st.method}(${args});`,
+      ];
     }
     case "op-call": {
       const args = st.args.map(renderArg).join(", ");
@@ -326,7 +328,6 @@ function lookupOp(
   return ctx.aggregates.find((a) => a.name === aggName)?.operations.find((o) => o.name === opName);
 }
 
-
 function renderExprWithParams(e: ExprIR, paramExprs: Map<string, string>): string {
   // Workflow params are local consts now; ExprIR `ref` nodes for them
   // already carry refKind="param" and the bare name.  renderTsExpr
@@ -365,7 +366,6 @@ function pgIsolationLevel(level: import("../../../ir/loom-ir.js").IsolationLevel
       return "serializable";
   }
 }
-
 
 /** Value objects referenced by any workflow's parameters.  Same
  *  shape as `routes-builder.collectUsedValueObjects` but scoped to

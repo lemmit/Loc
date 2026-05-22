@@ -1,5 +1,5 @@
 import type { AggregateIR, BoundedContextIR, TypeIR } from "../../ir/loom-ir.js";
-import { lowerFirst, upperFirst, plural, snake } from "../../util/naming.js";
+import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { unwrapOpt } from "./form-helpers.js";
 
 // ---------------------------------------------------------------------------
@@ -30,7 +30,9 @@ export function buildPageObjectModule(agg: AggregateIR, ctx: BoundedContextIR): 
   const reqTypes: string[] = [`Create${agg.name}Request`];
   for (const op of ops) reqTypes.push(`${upperFirst(op.name)}Request`);
   reqTypes.push(`${agg.name}Response`);
-  lines.push(`import type { ${reqTypes.join(", ")} } from "../../src/api/${lowerFirst(agg.name)}";`);
+  lines.push(
+    `import type { ${reqTypes.join(", ")} } from "../../src/api/${lowerFirst(agg.name)}";`,
+  );
   lines.push("");
 
   // ---------------------------------------------------------------------
@@ -270,4 +272,3 @@ export function fillBlock(
   lines.push(`}`);
   return lines;
 }
-

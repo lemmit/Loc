@@ -19,7 +19,7 @@ import { plural, snake } from "../../util/naming.js";
 const BASE_TIMESTAMP = 20260101000000;
 
 export function emitMigrations(
-  appName: string,
+  _appName: string,
   contexts: BoundedContextIR[],
   appModule: string,
   out: Map<string, string>,

@@ -1,7 +1,7 @@
 import type { AggregateIR, ParamIR, RepositoryIR } from "../../../ir/loom-ir.js";
 import { findUsesCurrentUser } from "../../../ir/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
-import { upperFirst, plural } from "../../../util/naming.js";
+import { plural, upperFirst } from "../../../util/naming.js";
 import { renderCsType } from "../render-expr.js";
 
 // Repository interface (Domain layer) + EF-backed implementation

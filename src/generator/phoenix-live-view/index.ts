@@ -1,5 +1,5 @@
 import type { BoundedContextIR, DeployableIR, SystemIR } from "../../ir/loom-ir.js";
-import { upperFirst, plural, snake } from "../../util/naming.js";
+import { plural, snake, upperFirst } from "../../util/naming.js";
 import { type ApiRoute, emitApiControllers } from "./api-emit.js";
 import { emitAuth } from "./auth-emit.js";
 import { emitAggregateResources } from "./domain-emit.js";
@@ -606,7 +606,7 @@ end
 `;
 }
 
-function renderApplication(appName: string, appModule: string): string {
+function renderApplication(_appName: string, appModule: string): string {
   return `# Auto-generated.
 defmodule ${appModule}.Application do
   use Application
@@ -632,7 +632,7 @@ end
 `;
 }
 
-function renderWebModule(appName: string, appModule: string): string {
+function renderWebModule(_appName: string, appModule: string): string {
   const webModule = `${appModule}Web`;
   return `# Auto-generated.
 defmodule ${webModule} do
@@ -1287,7 +1287,7 @@ end
 `;
 }
 
-function renderLayouts(appName: string, appModule: string): string {
+function renderLayouts(_appName: string, appModule: string): string {
   const webModule = `${appModule}Web`;
   return `# Auto-generated.
 defmodule ${webModule}.Layouts do
@@ -1465,4 +1465,3 @@ function toModulePrefix(snakeName: string): string {
     .map((s) => s[0]!.toUpperCase() + s.slice(1))
     .join("");
 }
-

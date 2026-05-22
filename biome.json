@@ -37,23 +37,12 @@
         "noNonNullAssertion": "off",
         "useTemplate": "off"
       },
-      "correctness": {
-        "noUnusedImports": "warn",
-        "noUnusedVariables": "warn",
-        "noUnusedFunctionParameters": "warn"
-      },
       "suspicious": {
         "noFallthroughSwitchClause": "warn",
         "noAssignInExpressions": "warn",
         "useIterableCallbackReturn": "warn",
         "noThenProperty": "warn",
-        "noSelfCompare": "warn",
-        "noConfusingVoidType": "warn"
-      },
-      "complexity": {
-        "useLiteralKeys": "warn",
-        "noUselessConstructor": "warn",
-        "useOptionalChain": "warn"
+        "noSelfCompare": "warn"
       },
       "performance": {
         "noAccumulatingSpread": "warn"

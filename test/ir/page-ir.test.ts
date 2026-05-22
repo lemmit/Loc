@@ -9,7 +9,6 @@
 // are handled separately; the per-target generator consumes the
 // page IR.  These tests cover only what lowering produces.
 
-import { URI } from "langium";
 import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
 import type { ExprIR, LoomModel, PageIR, UiIR } from "../../src/ir/loom-ir.js";
@@ -311,7 +310,7 @@ describe("page metamodel — IR shape", () => {
   it("lowers a single-expression lambda with `body` set, no `block`", async () => {
     // Existing v22 form — verifies regression: lambdas keep producing
     // the body field that prior renderers depend on.
-    const loom = await buildLoom(`
+    const _loom = await buildLoom(`
       system Acme {
         module M {
           context C {

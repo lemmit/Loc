@@ -11,7 +11,7 @@ import type {
   ViewIR,
   WorkflowIR,
 } from "../ir/loom-ir.js";
-import { lowerFirst, upperFirst, plural, snake } from "../util/naming.js";
+import { lowerFirst, plural, snake, upperFirst } from "../util/naming.js";
 import { renderExpectStmt } from "./expect-stmt.js";
 
 // ---------------------------------------------------------------------------
@@ -637,4 +637,3 @@ function findAggregateBySlug(slug: string, contexts: BoundedContextIR[]): Aggreg
   }
   return undefined;
 }
-

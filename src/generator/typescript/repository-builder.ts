@@ -9,8 +9,7 @@ import type {
   TypeIR,
 } from "../../ir/loom-ir.js";
 import { findUsesCurrentUser, viewUsesCurrentUser } from "../../ir/loom-ir.js";
-import { lowerFirst, upperFirst, plural } from "../../util/naming.js";
-import { renderTsExpr } from "./render-expr.js";
+import { lowerFirst, plural, upperFirst } from "../../util/naming.js";
 import { valueObjectColumnNames } from "./templates.js";
 
 // ---------------------------------------------------------------------------
@@ -520,7 +519,6 @@ function projectionObject(
 ): string {
   return `{ ${entries.map((e) => `${e.fieldName}: ${e.expr}`).join(", ")} }`;
 }
-
 
 // ---------------------------------------------------------------------------
 // Find queries — convention-based equality predicates

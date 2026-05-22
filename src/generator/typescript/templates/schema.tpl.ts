@@ -3,7 +3,6 @@ import type {
   BoundedContextIR,
   ExprIR,
   FieldIR,
-  FindIR,
   TypeIR,
 } from "../../../ir/loom-ir.js";
 import { lines as joinLines } from "../../../util/code-builder.js";
