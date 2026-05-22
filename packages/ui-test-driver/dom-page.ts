@@ -535,6 +535,31 @@ export class DomLocator {
     return Promise.resolve(this.matchesNow().length);
   }
 
+  /** Value of a resolved input/select/textarea. */
+  async inputValue(opts?: { timeout?: number }): Promise<string> {
+    const el = (await this.resolve({}, opts?.timeout)) as
+      | HTMLInputElement
+      | HTMLSelectElement
+      | HTMLTextAreaElement;
+    return el.value ?? "";
+  }
+
+  /** Whether the (first) matched element is present and visible — does
+   *  NOT auto-wait, like Playwright's `isVisible()`. */
+  isVisible(): Promise<boolean> {
+    const el = this.matchesNow()[0];
+    return Promise.resolve(!!el && isVisible(el));
+  }
+
+  async isChecked(opts?: { timeout?: number }): Promise<boolean> {
+    const el = (await this.resolve({}, opts?.timeout)) as HTMLInputElement;
+    return el.checked === true;
+  }
+
+  async isEnabled(opts?: { timeout?: number }): Promise<boolean> {
+    return isEnabled(await this.resolve({}, opts?.timeout));
+  }
+
   async waitFor(opts?: {
     state?: "visible" | "attached" | "hidden";
     timeout?: number;
