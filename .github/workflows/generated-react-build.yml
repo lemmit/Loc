@@ -59,6 +59,7 @@ jobs:
       matrix:
         example:
           - examples/acme.ddd
+          - examples/showcase.ddd
           - web/src/examples/banking-system.ddd
           - web/src/examples/inventory-system.ddd
           - web/src/examples/provenance-system.ddd
