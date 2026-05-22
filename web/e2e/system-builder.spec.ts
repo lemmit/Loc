@@ -158,6 +158,29 @@ test("renames a field (and its usages) from the inspector", async ({ page }) => 
   await expect(names.nth(0)).toHaveValue("customerId");
 });
 
+test("adds value object / event / workflow / repository / view constructs", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  const nodes = page.locator(".react-flow__node");
+  await expect.poll(async () => nodes.count(), { timeout: 10_000 }).toBeGreaterThan(3);
+  const before = await nodes.count();
+
+  for (const kind of ["valueobject", "event", "workflow", "repository", "view"]) {
+    await page.getByTestId(`c4system-add-${kind}`).click();
+  }
+
+  // Each add inserts a minimal valid construct → five new graph nodes, no errors.
+  await expect.poll(async () => nodes.count(), { timeout: 10_000 }).toBe(before + 5);
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+  for (const id of ["valueobject:ValueObject1", "event:Event1", "workflow:Workflow1", "repository:Repository1", "view:View1"]) {
+    await expect(page.locator(`[data-testid="rf__node-${id}"]`)).toBeVisible();
+  }
+});
+
 test("edits a repository find's parameters", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);

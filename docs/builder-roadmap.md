@@ -134,9 +134,12 @@ Done:
   (`web/src/builder/system/`): one node per construct, edges for the clear
   cross-references (repository→aggregate, api→module, deployable→module/ui/api,
   view→aggregate). Loads lazily (its own chunk) when the tab is opened.
-- **Editing**: select a node → see its printed source; **add** (module /
-  aggregate) and **delete** splice the backing CST range via `edit-engine.ts`
-  and write back through origin-tagged `onSourceChange` (Phase B sync). e2e:
+- **Editing**: select a node → see its printed source; **add** and **delete**
+  splice the backing CST range via `edit-engine.ts` and write back through
+  origin-tagged `onSourceChange` (Phase B sync). Add covers module + every
+  context-level domain construct (aggregate / value object / event / workflow,
+  and repository / view — gated on an aggregate to reference) from minimal valid
+  templates (`constructTemplate`), parse-guarded before applying. e2e:
   `web/e2e/system-builder.spec.ts`.
 - **Rename** a construct *and every reference to it* (repo `for`, `Id<X>` part
   types, `from`, deployable bindings). The main-thread parse isn't linked, so

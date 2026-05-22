@@ -128,6 +128,48 @@ function insertIntoBlock(source: string, block: AstNode, text: string): string {
   return applyEdits(source, [{ offset: at, end: at, newText: text }]);
 }
 
+const CONSTRUCT_BASE: Partial<Record<NodeKind, string>> = {
+  aggregate: "Aggregate",
+  valueobject: "ValueObject",
+  event: "Event",
+  repository: "Repository",
+  view: "View",
+  workflow: "Workflow",
+};
+
+function firstAggregateName(ast: Model): string | undefined {
+  for (const n of AstUtils.streamAst(ast)) {
+    if (n.$type === "Aggregate") return (n as { name?: string }).name;
+  }
+  return undefined;
+}
+
+// Minimal-but-valid source for a freshly added construct (inserted into a
+// bounded context). Repository / view reference the first aggregate; null when
+// none exists (the add is skipped).
+function constructTemplate(kind: NodeKind, name: string, ast: Model): string | null {
+  switch (kind) {
+    case "aggregate":
+      return `\n    aggregate ${name} {\n    }\n`;
+    case "valueobject":
+      return `\n    valueobject ${name} {\n      value: string\n    }\n`;
+    case "event":
+      return `\n    event ${name} {\n    }\n`;
+    case "workflow":
+      return `\n    workflow ${name}() {\n    }\n`;
+    case "repository": {
+      const agg = firstAggregateName(ast);
+      return agg ? `\n    repository ${name} for ${agg} {\n    }\n` : null;
+    }
+    case "view": {
+      const agg = firstAggregateName(ast);
+      return agg ? `\n    view ${name} = ${agg} where true\n` : null;
+    }
+    default:
+      return null;
+  }
+}
+
 export default function SystemBuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   return (
     <ReactFlowProvider>
@@ -218,6 +260,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     if (nodesInitialized && graph) void rf.fitView({ padding: 0.15 });
   }, [nodesInitialized, graph, rf]);
 
+  const hasAggregate = useMemo(() => !!firstAggregateName(parsed.ast), [parsed]);
   const typeOptions = useMemo(() => availableTypes(parsed.ast), [parsed]);
   const baseByLabel = useMemo(() => {
     const m = new Map<string, BaseSpec>();
@@ -278,15 +321,21 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     apply(insertIntoBlock(ctx.getSource(), system, text));
   };
 
-  const addAggregate = (): void => {
+  // Add a context-level construct (aggregate / value object / event / repository
+  // / view / workflow) into the first bounded context, from a minimal valid
+  // template. Repository / view need an aggregate to reference, so they're
+  // gated on one existing. The result is parse-guarded before it's applied.
+  const addConstruct = (kind: NodeKind): void => {
     const fresh = parseDdd(ctx.getSource());
     const context = [...AstUtils.streamAst(fresh.ast)].find(
       (n): n is BoundedContext => n.$type === "BoundedContext",
     );
     if (!context) return;
-    const name = freshName(fresh.ast, "aggregate", "Aggregate");
-    const text = `\n    aggregate ${name} {\n    }\n`;
-    apply(insertIntoBlock(ctx.getSource(), context, text));
+    const name = freshName(fresh.ast, kind, CONSTRUCT_BASE[kind] ?? "Node");
+    const text = constructTemplate(kind, name, fresh.ast);
+    if (!text) return;
+    const next = insertIntoBlock(ctx.getSource(), context, text);
+    if (parseDdd(next).parserErrors.length === 0) apply(next);
   };
 
   const addFieldTo = (): void => {
@@ -397,9 +446,14 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         )}
       </Box>
       <InspectorPanel compact={compact} opened={inspectorOpen} onClose={() => setInspectorOpen(false)}>
-        <Group gap="xs" mb="xs">
-          <Button size="xs" variant="light" data-testid="c4system-add-module" onClick={addModule}>+ Module</Button>
-          <Button size="xs" variant="light" data-testid="c4system-add-aggregate" onClick={addAggregate}>+ Aggregate</Button>
+        <Group gap={4} mb="xs">
+          <Button size="compact-xs" variant="light" data-testid="c4system-add-module" onClick={addModule}>+ Module</Button>
+          <Button size="compact-xs" variant="light" data-testid="c4system-add-aggregate" onClick={() => addConstruct("aggregate")}>+ Aggregate</Button>
+          <Button size="compact-xs" variant="light" data-testid="c4system-add-valueobject" onClick={() => addConstruct("valueobject")}>+ Value object</Button>
+          <Button size="compact-xs" variant="light" data-testid="c4system-add-event" onClick={() => addConstruct("event")}>+ Event</Button>
+          <Button size="compact-xs" variant="light" data-testid="c4system-add-workflow" onClick={() => addConstruct("workflow")}>+ Workflow</Button>
+          <Button size="compact-xs" variant="light" data-testid="c4system-add-repository" disabled={!hasAggregate} onClick={() => addConstruct("repository")}>+ Repository</Button>
+          <Button size="compact-xs" variant="light" data-testid="c4system-add-view" disabled={!hasAggregate} onClick={() => addConstruct("view")}>+ View</Button>
         </Group>
         {!selected ? (
           <Text size="xs" c="dimmed">Select a node to inspect it, or add a construct.</Text>
