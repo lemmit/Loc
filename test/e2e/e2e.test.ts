@@ -250,11 +250,15 @@ interface OpenApiSpec {
  * line up `properties`'s keys.  Doesn't recurse into nested schemas
  * (`price` shows up once; the cross-check on its sub-fields runs as
  * a separate pass when needed).
+ *
+ * Co-located provenance (`<field>_provenance`) is a TS/Hono-only wire
+ * extension — only the TS backend persists lineage — so it's excluded
+ * here; it would otherwise read as a Hono-only field and trip the diff.
  */
 function fieldSet(spec: OpenApiSpec, schemaName: string): Set<string> {
   const schema = spec.components?.schemas?.[schemaName];
   if (!schema?.properties) return new Set();
-  return new Set(Object.keys(schema.properties));
+  return new Set(Object.keys(schema.properties).filter((k) => !k.endsWith("_provenance")));
 }
 
 async function fetchSpec(url: string): Promise<OpenApiSpec> {

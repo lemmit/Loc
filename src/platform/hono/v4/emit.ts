@@ -26,7 +26,7 @@ import type {
   SystemIR,
 } from "../../../ir/loom-ir.js";
 import { lowerModel } from "../../../ir/lower.js";
-import { contextsHaveProvSite } from "../../../ir/prov-id.js";
+import { contextsHaveProvenancedField } from "../../../ir/prov-id.js";
 import type { Model } from "../../../language/generated/ast.js";
 import { lowerFirst } from "../../../util/naming.js";
 // Hono-framework builders now live in this package (P2b) — siblings.
@@ -73,46 +73,22 @@ export class ExternHandlerError extends Error {
 }
 `;
 
-/** Runtime provenance SDK — emitted only when the model declares at least
- *  one `provenanced` field that is actually written.  v1 is an append-only
- *  in-memory trace sink; each provenanced write calls `recordTrace(...)`
- *  referencing the compile-time rule snapshot in `.loom/loomsnap.json`. */
+/** Provenance lineage types — emitted only when the model declares at
+ *  least one `provenanced` field that is actually written.  Each
+ *  provenanced write builds a `ProvLineage` referencing the compile-time
+ *  rule snapshot in `.loom/loomsnap.json`; it is stored co-located on the
+ *  aggregate row (the `<field>_provenance` jsonb column) and appended to
+ *  the `provenance_records` history table inside the operation's save
+ *  transaction (see routes-builder). */
 const PROVENANCE_TS = `// Auto-generated.
-import { randomUUID } from "node:crypto";
-
 export interface ProvInput { path: string; value: unknown; }
 
-export interface TraceRecord {
-  traceId: string;
+export interface ProvLineage {
   /** Points at the per-write-site rule snapshot in \`.loom/loomsnap.json\`. */
   snapshotId: string;
   target: { type: string; field: string };
   inputs: ProvInput[];
   computedValue: unknown;
-  at: string;
-}
-
-const __traces: TraceRecord[] = [];
-
-export function recordTrace(
-  snapshotId: string,
-  target: { type: string; field: string },
-  inputs: ProvInput[],
-  computedValue: unknown,
-): void {
-  __traces.push({
-    traceId: randomUUID(),
-    snapshotId,
-    target,
-    inputs,
-    computedValue,
-    at: new Date().toISOString(),
-  });
-}
-
-/** Drains the in-memory trace buffer (test/inspection hook). */
-export function __drainTraces(): TraceRecord[] {
-  return __traces.splice(0);
 }
 `;
 
@@ -149,10 +125,17 @@ export function generateTypeScriptForContexts(
   const out = new Map<string, string>();
   const authRequired = !!(system?.deployable.auth?.required && system.sys.user);
   // Emission is forced by presence: any written `provenanced` field turns
-  // on the trace SDK + per-site `recordTrace` calls.  Threaded as a flag
-  // (rather than read off presence at each call site) so a future
-  // build-level switch can force emission for other consumers.
-  const emitProvenance = contextsHaveProvSite(contexts);
+  // on the lineage types + co-located `<field>_provenance` columns + the
+  // `provenance_records` history table.  Threaded as a flag (rather than
+  // read off presence at each call site) so a future build-level switch
+  // can force emission for other consumers.
+  const emitProvenance = contextsHaveProvenancedField(contexts);
+  // Emission is forced by presence: any `audited` operation turns on the
+  // audit SDK + per-route `recordAudit` calls.  Threaded as a flag (like
+  // emitProvenance) so a future build-level switch can force emission.
+  const emitAudit = contexts.some((c) =>
+    c.aggregates.some((a) => a.operations.some((o) => o.audited)),
+  );
 
   // Multi-context Hono deployables (e.g. acme's catalogWeb spanning
   // Catalog + CustomerMgmt) need the shared domain files to UNION
@@ -178,7 +161,7 @@ export function generateTypeScriptForContexts(
   out.set("domain/events.ts", renderEvents(merged));
   out.set("domain/errors.ts", ERRORS_TS);
   if (emitProvenance) out.set("domain/provenance.ts", PROVENANCE_TS);
-  out.set("db/schema.ts", renderSchema(merged));
+  out.set("db/schema.ts", renderSchema(merged, { audit: emitAudit, provenance: emitProvenance }));
   if (merged.workflows.length > 0) {
     const aggsByName = new Map(merged.aggregates.map((a) => [a.name, a] as const));
     out.set("http/workflows.ts", buildWorkflowsFile(merged, aggsByName));
@@ -200,7 +183,10 @@ export function generateTypeScriptForContexts(
         `db/repositories/${lowerFirst(agg.name)}-repository.ts`,
         buildRepositoryFile(agg, repo, ctx),
       );
-      out.set(`http/${lowerFirst(agg.name)}.routes.ts`, buildRoutesFile(agg, repo, ctx));
+      out.set(
+        `http/${lowerFirst(agg.name)}.routes.ts`,
+        buildRoutesFile(agg, repo, ctx, emitAudit, emitProvenance),
+      );
       if (agg.operations.some((o) => o.extern)) {
         out.set(`domain/${lowerFirst(agg.name)}-extern.ts`, buildExternHandlersFile(agg, ctx));
       }

@@ -463,7 +463,11 @@ function printOperation(node: Operation): string {
   const priv = node.private ? "private " : "";
   const params = node.params.map(printParameter).join(", ");
   const extern = node.extern ? " extern" : "";
-  return block(`${priv}operation ${node.name}(${params})${extern}`, node.body.map(printStmt));
+  const audited = node.audited ? " audited" : "";
+  return block(
+    `${priv}operation ${node.name}(${params})${extern}${audited}`,
+    node.body.map(printStmt),
+  );
 }
 
 function printTestBlock(node: TestBlock): string {
