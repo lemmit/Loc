@@ -463,7 +463,7 @@ export class DddValidator {
         accept(
           "error",
           `Framework '${framework}' does not match platform '${d.platform}' (expected '${expected}'). Drop the framework override or align it with the platform.`,
-          { node: d.uiBlock, property: "framework" },
+          { node: d.uiBlock, property: "framework", code: "loom.framework-mismatch", data: { expected } },
         );
       }
     }
@@ -909,7 +909,7 @@ export class DddValidator {
           accept(
             "error",
             `Display field '${m.name}' on aggregate '${agg.name}' must have type 'string'.`,
-            { node: m, property: "display" },
+            { node: m, property: "display", code: "loom.display-not-string" },
           );
         }
       }

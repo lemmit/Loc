@@ -1,0 +1,86 @@
+{
+  "name": "ddd",
+  "scopeName": "source.ddd",
+  "fileTypes": [".ddd"],
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#declaration-keywords" },
+    { "include": "#control-keywords" },
+    { "include": "#modifiers" },
+    { "include": "#constants" },
+    { "include": "#primitive-types" },
+    { "include": "#id-type" },
+    { "include": "#type-names" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.block.ddd",
+          "begin": "/\\*",
+          "end": "\\*/"
+        },
+        {
+          "name": "comment.line.double-slash.ddd",
+          "begin": "//",
+          "end": "(?=$)"
+        }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.ddd",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.ddd",
+          "match": "\\\\(x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|u\\{[0-9A-Fa-f]+\\}|.)"
+        }
+      ]
+    },
+    "numbers": {
+      "name": "constant.numeric.ddd",
+      "match": "\\b[0-9]+(\\.[0-9]+)?\\b"
+    },
+    "declaration-keywords": {
+      "name": "keyword.declaration.ddd",
+      "match": "\\b(system|module|context|aggregate|entity|valueobject|enum|event|repository|workflow|view|deployable|ui|api|storage|theme|user|requirement|solution|testCase|operation|function|derived|invariant|contains|find|scaffold|component|page|menu|import|permissions|state|link)\\b"
+    },
+    "control-keywords": {
+      "name": "keyword.control.ddd",
+      "match": "\\b(precondition|requires|let|emit|match|when|where|else|new|for|from|against|test|e2e|expect|expectThrows|covers|verifies|entitles|serves|targets|modules|aggregates|contexts|events|views|workflows)\\b"
+    },
+    "modifiers": {
+      "name": "storage.modifier.ddd",
+      "match": "\\b(private|extern|display|required|primary|transactional|readCommitted|readUncommitted|repeatableRead|serializable|cache|search|bi)\\b"
+    },
+    "constants": {
+      "name": "constant.language.ddd",
+      "match": "\\b(true|false|null|now|this|id|ids|type|platform|port|route|title|section|role|design|framework|body|parent|helper|bind)\\b"
+    },
+    "primitive-types": {
+      "name": "support.type.primitive.ddd",
+      "match": "\\b(int|long|decimal|string|bool|datetime|guid)\\b"
+    },
+    "id-type": {
+      "match": "\\b(Id)\\s*(<)\\s*([A-Z][A-Za-z0-9_]*)\\s*(>)",
+      "captures": {
+        "1": { "name": "support.type.id.ddd" },
+        "2": { "name": "punctuation.definition.generic.begin.ddd" },
+        "3": { "name": "entity.name.type.ddd" },
+        "4": { "name": "punctuation.definition.generic.end.ddd" }
+      }
+    },
+    "type-names": {
+      "name": "entity.name.type.ddd",
+      "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
+    },
+    "operators": {
+      "name": "keyword.operator.ddd",
+      "match": ":=|\\+=|-=|==|!=|<=|>=|&&|\\|\\||[-+*/%<>!?]"
+    }
+  }
+}
