@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Background,
   Controls,
@@ -21,6 +21,7 @@ import { parseDdd } from "../parse";
 import { spliceNode, applyEdits, lineDiff } from "../edit-engine";
 import { buildSystemGraph, coverageByNode, matchNodes, nodeDiagnostics, typeLabel, wireShapeOf, type CoverageStatus, type GraphNode, type NodeKind } from "./model";
 import type { WireField } from "../../../../src/ir/loom-ir.js";
+import { loadPositions, savePositions, type Pos } from "./positions";
 import { buildLinkedModel } from "./linked-doc";
 import { lowerModel } from "../../../../src/ir/lower.js";
 import { enrichLoomModel } from "../../../../src/ir/enrichments.js";
@@ -130,6 +131,7 @@ function toRfNodes(
   diagByNode: Map<string, Diagnostic[]>,
   coverage: Map<string, CoverageStatus>,
   overlay: boolean,
+  positions: Map<string, Pos>,
 ): Node[] {
   return graph.nodes.map((n) => {
     const diags = diagByNode.get(n.id);
@@ -138,7 +140,7 @@ function toRfNodes(
     const background = overlay ? COVERAGE_COLOR[coverage.get(n.id) ?? "none"] : KIND_COLOR[n.kind];
     return {
       id: n.id,
-      position: { x: n.x, y: n.y },
+      position: positions.get(n.id) ?? { x: n.x, y: n.y },
       data: { label: `${n.kind}\n${n.name}${mark}`, title: diags?.map((d) => d.message).join("\n") },
       style: {
         background,
@@ -306,7 +308,8 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
 
   // Seed with the first render's nodes/edges (not [] populated by an effect) so
   // the `fitView` prop actually has something to fit on mount.
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(graph ? toRfNodes(graph, diagByNode, new Map(), false) : []);
+  const positionsRef = useRef<Map<string, Pos>>(loadPositions());
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(graph ? toRfNodes(graph, diagByNode, new Map(), false, positionsRef.current) : []);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(graph ? toRfEdges(graph) : []);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const compact = !ctx.isDesktop;
@@ -346,9 +349,34 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
 
   useEffect(() => {
     if (!graph) return;
-    setNodes(toRfNodes(graph, diagByNode, coverage, overlay));
+    setNodes(toRfNodes(graph, diagByNode, coverage, overlay, positionsRef.current));
     setEdges(toRfEdges(graph));
   }, [graph, diagByNode, coverage, overlay, setNodes, setEdges]);
+
+  // Persist hand-dragged positions: track them live, write to storage on drag
+  // end (`dragging === false`). Re-applied by `toRfNodes` on every re-seed, so a
+  // source edit or reload no longer resets the user's arrangement.
+  const handleNodesChange = useCallback<typeof onNodesChange>(
+    (changes) => {
+      onNodesChange(changes);
+      let settled = false;
+      for (const c of changes) {
+        if (c.type === "position" && c.position) {
+          positionsRef.current.set(c.id, c.position);
+          if (c.dragging === false) settled = true;
+        }
+      }
+      if (settled) savePositions(positionsRef.current);
+    },
+    [onNodesChange],
+  );
+
+  const resetLayout = (): void => {
+    positionsRef.current = new Map();
+    savePositions(positionsRef.current);
+    if (graph) setNodes(toRfNodes(graph, diagByNode, coverage, overlay, positionsRef.current));
+    void rf.fitView({ padding: 0.15 });
+  };
 
   // Coverage overlay: lower + enrich the *linked* model (cross-refs resolved so
   // `entitles`/`covers` land) and map the traceability index onto graph nodes.
@@ -621,7 +649,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         <ReactFlow
           nodes={nodes}
           edges={edges}
-          onNodesChange={onNodesChange}
+          onNodesChange={handleNodesChange}
           onEdgesChange={onEdgesChange}
           onNodeClick={(_, n) => { setSelectedId(n.id); if (compact) setInspectorOpen(true); }}
           onPaneClick={() => { setSelectedId(null); if (compact) setInspectorOpen(false); }}
@@ -689,6 +717,15 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
             onClick={() => setPreview((p) => !p)}
           >
             Preview
+          </Button>
+          <Button
+            size="compact-xs"
+            variant="default"
+            data-testid="c4system-reset-layout"
+            title="Discard hand-dragged positions and restore the derived layout"
+            onClick={resetLayout}
+          >
+            Reset layout
           </Button>
           {overlay && (
             <Group gap={8} wrap="nowrap" data-testid="c4system-coverage-legend">

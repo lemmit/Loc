@@ -781,3 +781,40 @@ test("shows the selected aggregate's wire shape (DTO field list)", async ({ page
   await expect(page.getByTestId("c4system-wireshape")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId("c4system-wire-field").first()).toContainText("id");
 });
+
+test("persists hand-dragged node positions across a reload, and Reset clears them", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  const node = page.locator('[data-testid="rf__node-aggregate:Order"]');
+  // A node's CSS transform is in flow coordinates (pan/zoom lives on the
+  // viewport), so it's a stable identity to compare across reload + fitView.
+  const transform = () => node.evaluate((el) => (el as HTMLElement).style.transform);
+  const derived = await transform();
+
+  // Drag the node by a screen delta; its transform should change and persist.
+  const box = (await node.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 160, box.y + box.height / 2 + 90, { steps: 10 });
+  await page.mouse.up();
+  await expect.poll(transform).not.toBe(derived);
+  const dragged = await transform();
+
+  await page.reload();
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(transform, { timeout: 10_000 }).toBe(dragged);
+
+  // Reset layout discards the saved position → back to the derived layout.
+  await page.getByTestId("c4system-reset-layout").click();
+  await expect.poll(transform).toBe(derived);
+});
