@@ -172,3 +172,48 @@ test("renders previously-Opaque primitives (Stat, Tabs) as editable nodes", asyn
   await expect(page.getByTestId("c4builder-canvas")).toContainText("Edited Stat");
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
+
+const MATCH_SOURCE = `system S {
+  ui U {
+    page P {
+      body: match {
+        1 == 1 => Text("zero")
+        2 == 2 => Text("one")
+      }
+    }
+  }
+}`;
+
+test("adds a match arm from the canvas and writes it back to source", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+
+  // Inject a match-bodied page (no playground example ships one) by replacing
+  // the editor contents.  Paste via the clipboard rather than typing, so
+  // Monaco's auto-closing brackets don't double the braces.
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.evaluate((t) => navigator.clipboard.writeText(t), MATCH_SOURCE);
+  await page.getByTestId("doc-tab-source").click();
+  const editor = page.locator(".monaco-editor").first();
+  await editor.click();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.press("Control+v");
+
+  await page.getByTestId("doc-tab-builder").click();
+  await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
+
+  // The body seeds as a Match with two editable arms.
+  await expect(page.getByTestId("c4node-Match").first()).toBeVisible();
+  await expect(page.getByTestId("c4node-MatchArm")).toHaveCount(2);
+
+  // Select the Match itself (click its header area, not an inner arm) and add
+  // an arm via the dedicated control (arms aren't palette primitives).
+  await page.getByTestId("c4node-Match").first().click({ position: { x: 8, y: 8 } });
+  await page.getByTestId("c4builder-add-arm").click();
+  await expect(page.getByTestId("c4node-MatchArm")).toHaveCount(3);
+
+  // Apply round-trips the whole match (now three arms) and stays valid.
+  await page.getByTestId("c4builder-apply").click();
+  await expect(page.getByTestId("c4node-MatchArm")).toHaveCount(3);
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+});

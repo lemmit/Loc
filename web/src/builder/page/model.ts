@@ -20,7 +20,13 @@ import { printExpr } from "../../../../src/language/print/index.js";
 // sub-expression's printed text verbatim and re-emits it unquoted, so
 // data-bound args (`Stat("Total", order.total)`) stop collapsing the whole
 // call to Opaque.
-export type PropKind = "string" | "int" | "ref" | "expr";
+//
+// `text` is content that is *usually* a string literal but may be any
+// expression (`Text("Hello, " + name)`).  It stores/emits exactly like `expr`
+// (verbatim printed text); the difference is purely the settings UI, which
+// shows a plain text box for a bare string literal and the raw expression
+// otherwise.
+export type PropKind = "string" | "int" | "ref" | "expr" | "text";
 
 interface PropSpec {
   key: string;
@@ -70,13 +76,13 @@ const SPECS = {
   Card: { kind: "container", positional: ["title"] },
   Container: { kind: "container", named: [{ key: "size", kind: "string" }] },
   Paper: { kind: "container", named: [{ key: "padding", kind: "string" }] },
-  Heading: { kind: "leaf", positional: ["text"], named: [{ key: "level", kind: "int" }] },
-  Text: { kind: "leaf", positional: ["text"] },
-  Button: { kind: "leaf", positional: ["label"], named: [{ key: "to", kind: "string" }] },
-  Anchor: { kind: "leaf", positional: ["text"], named: [{ key: "to", kind: "string" }] },
+  Heading: { kind: "leaf", positional: [{ key: "text", kind: "text" }], named: [{ key: "level", kind: "int" }] },
+  Text: { kind: "leaf", positional: [{ key: "text", kind: "text" }] },
+  Button: { kind: "leaf", positional: [{ key: "label", kind: "text" }], named: [{ key: "to", kind: "string" }] },
+  Anchor: { kind: "leaf", positional: [{ key: "text", kind: "text" }], named: [{ key: "to", kind: "string" }] },
   Badge: { kind: "leaf", positional: [{ key: "value", kind: "expr" }], named: [{ key: "color", kind: "string" }] },
-  Alert: { kind: "leaf", positional: ["message"], named: [{ key: "color", kind: "string" }] },
-  Empty: { kind: "leaf", positional: ["message"] },
+  Alert: { kind: "leaf", positional: [{ key: "message", kind: "text" }], named: [{ key: "color", kind: "string" }] },
+  Empty: { kind: "leaf", positional: [{ key: "message", kind: "text" }] },
   Divider: { kind: "leaf" },
   List: { kind: "leaf", named: [{ key: "of", kind: "ref", options: "aggregate" }, { key: "testid", kind: "string" }] },
   Form: { kind: "leaf", named: [{ key: "of", kind: "ref", options: "aggregate" }, { key: "creates", kind: "ref", options: "aggregate" }, { key: "testid", kind: "string" }] },
@@ -125,6 +131,19 @@ const SYNTHETIC = {
 } satisfies Record<string, { container: boolean; fields: PropSpec[] }>;
 type SyntheticName = keyof typeof SYNTHETIC;
 const isSynthetic = (name: string): name is SyntheticName => name in SYNTHETIC;
+
+// Single-child slots (a lambda body, a match arm/else value) hold exactly one
+// child; the canvas must not let a second be added.
+export const SINGLE_CHILD_NODES = new Set<string>(["Lambda", "MatchArm", "MatchElse"]);
+
+/** Default props for a freshly-added synthetic node (so the canvas can build a
+ *  fresh match arm / else).  `cond` defaults to `true` — a bare identifier
+ *  would be misparsed as a lambda. */
+export function syntheticDefaultProps(name: string): Record<string, string> {
+  if (name === "MatchArm") return { cond: "true" };
+  if (name === "Lambda") return { param: "x" };
+  return {};
+}
 
 export type PrimitiveName = keyof typeof SPECS | SyntheticName | "Opaque";
 export const PRIMITIVES = Object.keys(SPECS) as (keyof typeof SPECS)[];
@@ -178,7 +197,9 @@ export function defaultNode(name: keyof typeof SPECS): BuilderNode {
   posSpecs(specOf(name)).forEach((p, i) => {
     const base = i === 0 ? name : p.key.charAt(0).toUpperCase() + p.key.slice(1);
     if (p.kind === "string") props[p.key] = base;
-    else if (p.kind === "expr") props[p.key] = JSON.stringify(base);
+    // `expr`/`text` placeholders are stored quoted so a fresh node emits a
+    // string literal (verbatim emit would otherwise produce a bare identifier).
+    else if (p.kind === "expr" || p.kind === "text") props[p.key] = JSON.stringify(base);
   });
   return { name, props, children: [] };
 }
@@ -218,7 +239,6 @@ function seedCall(name: keyof typeof SPECS, spec: PrimitiveSpec, args: CallArg[]
   const namedSpec = new Map((spec.named ?? []).map((n) => [n.key, n] as const));
   const namedChildren = new Set(spec.namedChildren ?? []);
   const isContainerKind = spec.kind === "container";
-  const pureContainer = isContainerKind && posKeys.length === 0 && namedSpec.size === 0 && namedChildren.size === 0;
 
   const props: Record<string, string | number> = {};
   const children: BuilderNode[] = [];
@@ -242,7 +262,15 @@ function seedCall(name: keyof typeof SPECS, spec: PrimitiveSpec, args: CallArg[]
         children.push(child);
         order.push(CHILD_TOKEN);
       } else {
-        return null; // unknown named arg
+        // Unknown named arg → keep it as a passthrough prop (preserved verbatim,
+        // editable as a generic expr field) rather than collapsing the whole
+        // node to Opaque.  This is what lets the many optional modifiers a
+        // primitive accepts (`testid:`, `striped:`, `gap:`, …) round-trip.  A
+        // lambda/match value still forces Opaque (it's domain logic).
+        const v = readProp("expr", a.value);
+        if (v === null) return null;
+        props[a.name] = v;
+        order.push(a.name);
       }
       continue;
     }
@@ -269,11 +297,8 @@ function seedCall(name: keyof typeof SPECS, spec: PrimitiveSpec, args: CallArg[]
     children.push(seedFromBody(a.value));
     order.push(CHILD_TOKEN);
   }
-  // Leaves must consume exactly their declared positionals.
-  if (!isContainerKind && posOrdinal !== posKeys.length) return null;
-  // `pureContainer` is satisfied implicitly: any named arg would have hit the
-  // unknown-named `return null` above (no named spec, no slots).
-  void pureContainer;
+  // Declared leaf positionals are optional from the right: a call may supply
+  // fewer (e.g. `Empty()`), but not more — the in-loop guard rejects extras.
   return { name: name as PrimitiveName, props, children, order };
 }
 
@@ -305,7 +330,8 @@ export function seedFromBody(expr: Expression): BuilderNode {
  *  strips delimiters); `int` numifies; `ref`/`expr` emit verbatim. */
 function emitProp(kind: PropKind, v: string | number): string {
   if (kind === "int") return String(Number(v));
-  if (kind === "ref" || kind === "expr") return String(v);
+  // `ref`/`expr`/`text` are stored as already-printed source — emit verbatim.
+  if (kind === "ref" || kind === "expr" || kind === "text") return String(v);
   return JSON.stringify(String(v));
 }
 
@@ -323,11 +349,19 @@ const emitChild = (c: BuilderNode): string => (c.slot !== undefined ? `${c.slot}
 
 export function emitBody(node: BuilderNode): string {
   if (node.name === "Opaque") return String(node.props.raw ?? "");
-  // Synthetic nodes reconstruct their bespoke syntax from structure.
-  if (node.name === "Lambda") return `${node.props.param ?? "x"} => ${emitBody(node.children[0])}`;
-  if (node.name === "MatchArm") return `${node.props.cond ?? "true"} => ${emitBody(node.children[0])}`;
-  if (node.name === "MatchElse") return `else => ${emitBody(node.children[0])}`;
-  if (node.name === "Match") return `match {\n  ${node.children.map(emitBody).join(",\n  ")}\n}`;
+  // Synthetic nodes reconstruct their bespoke syntax from structure.  An
+  // as-yet-unfilled single-child slot emits an `Empty()` placeholder so the
+  // source stays parseable while it's being built up in the canvas.
+  const body = (n: BuilderNode): string => (n.children[0] ? emitBody(n.children[0]) : "Empty()");
+  if (node.name === "Lambda") return `${node.props.param ?? "x"} => ${body(node)}`;
+  if (node.name === "MatchArm") return `${node.props.cond ?? "true"} => ${body(node)}`;
+  if (node.name === "MatchElse") return `else => ${body(node)}`;
+  if (node.name === "Match") {
+    // `else` must come last; keep at most one (the grammar allows a single else).
+    const arms = node.children.filter((c) => c.name !== "MatchElse");
+    const els = node.children.filter((c) => c.name === "MatchElse").slice(0, 1);
+    return `match {\n  ${[...arms, ...els].map(emitBody).join(",\n  ")}\n}`;
+  }
   const spec = specOf(node.name);
   const posKindOf = new Map(posSpecs(spec).map((p) => [p.key, p.kind] as const));
   const namedSpec = new Map((spec.named ?? []).map((n) => [n.key, n] as const));
@@ -337,7 +371,9 @@ export function emitBody(node: BuilderNode): string {
     const pos = posKindOf.get(key);
     if (pos) return emitProp(pos, v); // positional scalar prop
     const ns = namedSpec.get(key);
-    return ns ? `${key}: ${emitProp(ns.kind, v)}` : null;
+    if (ns) return `${key}: ${emitProp(ns.kind, v)}`;
+    // Passthrough named prop (an unmodelled modifier kept verbatim).
+    return `${key}: ${String(v)}`;
   };
 
   const parts: string[] = [];

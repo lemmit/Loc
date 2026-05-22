@@ -2,7 +2,7 @@ import { useEffect, useState, type ComponentType } from "react";
 import { Editor, Frame, useEditor, type SerializedNodes } from "@craftjs/core";
 import { Box, Button, Drawer, Group, NumberInput, ScrollArea, Select, Stack, Text, TextInput, Textarea, UnstyledButton } from "@mantine/core";
 import { resolver } from "./components";
-import { PALETTE_PRIMITIVES, defaultNode, propFields, type PrimitiveName } from "./model";
+import { PALETTE_PRIMITIVES, SINGLE_CHILD_NODES, defaultNode, propFields, syntheticDefaultProps, type PrimitiveName } from "./model";
 import { parseDdd } from "../parse";
 
 // A page `body:` admits any expression, so wrapping the field text in a minimal
@@ -11,6 +11,46 @@ import { parseDdd } from "../parse";
 function isValidExpr(text: string): boolean {
   if (text.trim() === "") return false;
   return parseDdd(`system S { ui U { page P { body: ${text} } } }`).parserErrors.length === 0;
+}
+
+// If `stored` is a bare string literal (e.g. `"hi"`), return its inner text;
+// otherwise null (it's an expression like `"a" + x`).
+function asLiteralText(stored: string): string | null {
+  try {
+    const parsed = JSON.parse(stored);
+    return typeof parsed === "string" && JSON.stringify(parsed) === stored ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+// A `text`-kind field: a plain text box for a string literal (re-quoting on
+// change), or the raw expression when the content is dynamic (`Text(a + b)`).
+function TextField({ label, value, onChange }: { label: string; value: string; onChange: (v: string | undefined) => void }): JSX.Element {
+  const literal = asLiteralText(value);
+  if (literal !== null || value === "") {
+    return (
+      <TextInput
+        size="xs"
+        mb="xs"
+        label={label}
+        value={literal ?? ""}
+        data-testid={`c4builder-prop-${label}`}
+        onChange={(e) => onChange(e.currentTarget.value === "" ? undefined : JSON.stringify(e.currentTarget.value))}
+      />
+    );
+  }
+  return (
+    <TextInput
+      size="xs"
+      mb="xs"
+      label={`${label} (expr)`}
+      value={value}
+      data-testid={`c4builder-prop-${label}`}
+      error={isValidExpr(value) ? undefined : "Invalid expression"}
+      onChange={(e) => onChange(e.currentTarget.value || undefined)}
+    />
+  );
 }
 
 interface PageBuilderProps {
@@ -121,11 +161,23 @@ function Toolbar({ pages, pageName, onSelectPage, onApply, compact = false, onOp
 function PaletteContent({ onAdded }: { onAdded?: () => void }): JSX.Element {
   const { query, actions } = useEditor();
 
+  // A node can host a freshly-added primitive if it's a canvas that isn't a
+  // Match (whose children must be arms — use "+ arm") and isn't an already-full
+  // single-child slot (a lambda body / match value holds exactly one child).
+  const canHost = (nodeId: string): boolean => {
+    const node = query.node(nodeId);
+    if (!node.isCanvas()) return false;
+    const dn = node.get().data.displayName;
+    if (dn === "Match") return false;
+    if (SINGLE_CHILD_NODES.has(dn) && node.get().data.nodes.length >= 1) return false;
+    return true;
+  };
+
   const targetParent = (): string | null => {
     const selected = query.getEvent("selected").first();
-    if (selected && query.node(selected).isCanvas()) return selected;
+    if (selected && canHost(selected)) return selected;
     const top = query.node("ROOT").get().data.nodes[0];
-    if (top && query.node(top).isCanvas()) return top;
+    if (top && canHost(top)) return top;
     return null;
   };
 
@@ -164,13 +216,14 @@ function Palette(): JSX.Element {
 }
 
 function SettingsContent({ options }: { options: Record<string, string[]> }): JSX.Element {
-  const { id, name, props, actions } = useEditor((state) => {
+  const { id, name, props, childNames, actions, query } = useEditor((state) => {
     const selected = [...state.events.selected][0];
     const node = selected ? state.nodes[selected] : undefined;
     return {
       id: selected,
       name: node?.data.displayName,
       props: (node?.data.props ?? {}) as Record<string, string | number | undefined>,
+      childNames: (node?.data.nodes ?? []).map((cid) => state.nodes[cid]?.data.displayName),
     };
   });
 
@@ -178,7 +231,26 @@ function SettingsContent({ options }: { options: Record<string, string[]> }): JS
     if (id) actions.setProp(id, (p: Record<string, unknown>) => { p[key] = value; });
   };
 
-  const fields = name ? propFields(name) : [];
+  // Add a synthetic match arm / else (with a default value child) into the
+  // selected Match.  Arms aren't palette primitives, so they need this control.
+  const addArm = (kind: "MatchArm" | "MatchElse"): void => {
+    if (!id) return;
+    const Arm = resolver[kind] as ComponentType<Record<string, unknown>>;
+    const arm = query.parseReactElement(<Arm {...syntheticDefaultProps(kind)} />).toNodeTree();
+    actions.addNodeTree(arm, id);
+    const Value = resolver.Text as ComponentType<Record<string, unknown>>;
+    const value = query.parseReactElement(<Value {...defaultNode("Text").props} />).toNodeTree();
+    actions.addNodeTree(value, arm.rootNodeId);
+  };
+
+  const specFields = name ? propFields(name) : [];
+  // Surface passthrough props (unmodelled modifiers kept verbatim, e.g.
+  // `testid:`/`striped:`) as generic expr fields so they stay editable.
+  const known = new Set(specFields.map((f) => f.key));
+  const extraFields = Object.keys(props)
+    .filter((k) => !known.has(k) && !k.startsWith("__"))
+    .map((k) => ({ key: k, kind: "expr" as const }));
+  const fields = [...specFields, ...extraFields];
 
   return (
     <>
@@ -190,9 +262,25 @@ function SettingsContent({ options }: { options: Record<string, string[]> }): JS
           </Button>
         )}
       </Group>
-      {id && fields.length === 0 && <Text size="xs" c="dimmed">Container — drag children in or use the palette.</Text>}
+      {id && name === "Match" && (
+        <Group gap={4} mb="xs">
+          <Button size="compact-xs" variant="light" data-testid="c4builder-add-arm" onClick={() => addArm("MatchArm")}>+ arm</Button>
+          {!childNames.includes("MatchElse") && (
+            <Button size="compact-xs" variant="light" data-testid="c4builder-add-else" onClick={() => addArm("MatchElse")}>+ else</Button>
+          )}
+        </Group>
+      )}
+      {id && fields.length === 0 && name !== "Match" && (
+        <Text size="xs" c="dimmed">
+          {SINGLE_CHILD_NODES.has(name ?? "")
+            ? (childNames.length === 0 ? "Empty — add one child from the palette." : "Holds one child.")
+            : "Container — add children from the palette."}
+        </Text>
+      )}
       {id && fields.map((f) =>
-        f.kind === "expr" ? (
+        f.kind === "text" ? (
+          <TextField key={f.key} label={f.key} value={String(props[f.key] ?? "")} onChange={(v) => set(f.key, v)} />
+        ) : f.kind === "expr" ? (
           <Textarea
             key={f.key}
             size="xs"
