@@ -94,13 +94,19 @@ text stays the source of truth.
   add/edit/delete/reorderable and round-trip. An **assignment** statement
   (`target := value`, `+=`, `-=`) is structured into target / op / value
   controls; other statements keep their verbatim source row.
+- **Page state editing**: a "State (N)" popover in the page-builder toolbar lists
+  the selected page's `state {}` fields (`web/src/builder/page/StatePanel.tsx`)
+  and adds / deletes / retypes / sets-default them, splicing the block via the
+  structural printer (`web/src/builder/page/state-fields.ts`, reusing the Model
+  builder's `fields.ts` TypeRef helpers). Creates a `state {}` if the page has
+  none. Rename is excluded (state-field names are referenced in the body via IR
+  lowering, not as Langium cross-references).
 
 ## Open — expression / domain-logic surface
 
 - **Per-statement structure** — assignments are structured (target/op/value);
   the remaining statement kinds (`call`, `emit`, `navigate`, `let`) still edit
   as a raw source row — structured editors for them are a further step.
-- **`state := …`** page state declarations / assignments. Not modelled.
 - **More typed pickers**: enum-case values (needs the field's enum type) and
   repository finds (op/runs/aggregate/workflow/color/boolean pickers are done;
   qualified refs already round-trip).

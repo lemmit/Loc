@@ -374,3 +374,37 @@ test("drag-reorders sibling nodes and writes the new order back", async ({ page 
   await expect(page.getByTestId("c4node-Text").first()).toContainText("second");
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
+
+const STATE_SOURCE = `system S {
+  ui U {
+    page P {
+      state { step: int = 0 }
+      body: Form(of: Order)
+    }
+  }
+}`;
+
+test("edits a page's state fields from the State panel", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await setSource(page, STATE_SOURCE);
+
+  await page.getByTestId("doc-tab-builder").click();
+  await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
+
+  // Open the State popover — the page has one field ("step").
+  await page.getByTestId("c4state-toggle").click();
+  await expect(page.getByTestId("c4state-field")).toHaveCount(1);
+
+  const model = () => page.evaluate(() => (window as unknown as { __loomGetSource: () => string }).__loomGetSource());
+
+  // Add a field → the source gains it (and the panel now shows two).
+  await page.getByTestId("c4state-add").click();
+  await expect.poll(model).toContain("field1");
+  await expect(page.getByTestId("c4state-field")).toHaveCount(2);
+
+  // Delete the original "step" field → gone from the source, page still valid.
+  await page.getByTestId("c4state-delete").first().click();
+  await expect.poll(model).not.toContain("step");
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+});
