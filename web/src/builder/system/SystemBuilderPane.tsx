@@ -135,18 +135,26 @@ const CONSTRUCT_BASE: Partial<Record<NodeKind, string>> = {
   repository: "Repository",
   view: "View",
   workflow: "Workflow",
+  api: "Api",
+  storage: "Storage",
+  ui: "Ui",
+  deployable: "Deployable",
 };
 
-function firstAggregateName(ast: Model): string | undefined {
+// Infra constructs live at system scope; domain constructs live in a context.
+const INFRA_KINDS = new Set<NodeKind>(["api", "storage", "ui", "deployable"]);
+
+function firstNodeName(ast: Model, type: string): string | undefined {
   for (const n of AstUtils.streamAst(ast)) {
-    if (n.$type === "Aggregate") return (n as { name?: string }).name;
+    if (n.$type === type) return (n as { name?: string }).name;
   }
   return undefined;
 }
+const firstAggregateName = (ast: Model): string | undefined => firstNodeName(ast, "Aggregate");
 
-// Minimal-but-valid source for a freshly added construct (inserted into a
-// bounded context). Repository / view reference the first aggregate; null when
-// none exists (the add is skipped).
+// Minimal-but-valid source for a freshly added construct. Constructs that
+// require a reference (repository/view → an aggregate, api → a module) return
+// null when none exists, so the add is skipped.
 function constructTemplate(kind: NodeKind, name: string, ast: Model): string | null {
   switch (kind) {
     case "aggregate":
@@ -164,6 +172,16 @@ function constructTemplate(kind: NodeKind, name: string, ast: Model): string | n
     case "view": {
       const agg = firstAggregateName(ast);
       return agg ? `\n    view ${name} = ${agg} where true\n` : null;
+    }
+    case "storage":
+      return `\n  storage ${name} {\n    type: postgres\n  }\n`;
+    case "ui":
+      return `\n  ui ${name} {\n  }\n`;
+    case "deployable":
+      return `\n  deployable ${name} {\n    platform: hono\n  }\n`;
+    case "api": {
+      const mod = firstNodeName(ast, "Module");
+      return mod ? `\n  api ${name} from ${mod}\n` : null;
     }
     default:
       return null;
@@ -261,6 +279,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   }, [nodesInitialized, graph, rf]);
 
   const hasAggregate = useMemo(() => !!firstAggregateName(parsed.ast), [parsed]);
+  const hasModule = useMemo(() => !!firstNodeName(parsed.ast, "Module"), [parsed]);
   const typeOptions = useMemo(() => availableTypes(parsed.ast), [parsed]);
   const baseByLabel = useMemo(() => {
     const m = new Map<string, BaseSpec>();
@@ -327,14 +346,14 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   // gated on one existing. The result is parse-guarded before it's applied.
   const addConstruct = (kind: NodeKind): void => {
     const fresh = parseDdd(ctx.getSource());
-    const context = [...AstUtils.streamAst(fresh.ast)].find(
-      (n): n is BoundedContext => n.$type === "BoundedContext",
-    );
-    if (!context) return;
+    const container: AstNode | undefined = INFRA_KINDS.has(kind)
+      ? fresh.ast.members.find((m): m is System => m.$type === "System")
+      : [...AstUtils.streamAst(fresh.ast)].find((n): n is BoundedContext => n.$type === "BoundedContext");
+    if (!container) return;
     const name = freshName(fresh.ast, kind, CONSTRUCT_BASE[kind] ?? "Node");
     const text = constructTemplate(kind, name, fresh.ast);
     if (!text) return;
-    const next = insertIntoBlock(ctx.getSource(), context, text);
+    const next = insertIntoBlock(ctx.getSource(), container, text);
     if (parseDdd(next).parserErrors.length === 0) apply(next);
   };
 
@@ -454,6 +473,10 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
           <Button size="compact-xs" variant="light" data-testid="c4system-add-workflow" onClick={() => addConstruct("workflow")}>+ Workflow</Button>
           <Button size="compact-xs" variant="light" data-testid="c4system-add-repository" disabled={!hasAggregate} onClick={() => addConstruct("repository")}>+ Repository</Button>
           <Button size="compact-xs" variant="light" data-testid="c4system-add-view" disabled={!hasAggregate} onClick={() => addConstruct("view")}>+ View</Button>
+          <Button size="compact-xs" variant="default" data-testid="c4system-add-storage" onClick={() => addConstruct("storage")}>+ Storage</Button>
+          <Button size="compact-xs" variant="default" data-testid="c4system-add-ui" onClick={() => addConstruct("ui")}>+ UI</Button>
+          <Button size="compact-xs" variant="default" data-testid="c4system-add-deployable" onClick={() => addConstruct("deployable")}>+ Deployable</Button>
+          <Button size="compact-xs" variant="default" data-testid="c4system-add-api" disabled={!hasModule} onClick={() => addConstruct("api")}>+ API</Button>
         </Group>
         {!selected ? (
           <Text size="xs" c="dimmed">Select a node to inspect it, or add a construct.</Text>

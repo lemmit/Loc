@@ -158,7 +158,7 @@ test("renames a field (and its usages) from the inspector", async ({ page }) => 
   await expect(names.nth(0)).toHaveValue("customerId");
 });
 
-test("adds value object / event / workflow / repository / view constructs", async ({ page }) => {
+test("adds every domain + infra construct kind from the palette", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);
   await selectExample(page, /Sales System/);
@@ -169,14 +169,18 @@ test("adds value object / event / workflow / repository / view constructs", asyn
   await expect.poll(async () => nodes.count(), { timeout: 10_000 }).toBeGreaterThan(3);
   const before = await nodes.count();
 
-  for (const kind of ["valueobject", "event", "workflow", "repository", "view"]) {
+  const kinds = ["valueobject", "event", "workflow", "repository", "view", "storage", "ui", "deployable", "api"];
+  for (const kind of kinds) {
     await page.getByTestId(`c4system-add-${kind}`).click();
   }
 
-  // Each add inserts a minimal valid construct → five new graph nodes, no errors.
-  await expect.poll(async () => nodes.count(), { timeout: 10_000 }).toBe(before + 5);
+  // Each add inserts a minimal valid construct → one new graph node each, no errors.
+  await expect.poll(async () => nodes.count(), { timeout: 10_000 }).toBe(before + kinds.length);
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
-  for (const id of ["valueobject:ValueObject1", "event:Event1", "workflow:Workflow1", "repository:Repository1", "view:View1"]) {
+  for (const id of [
+    "valueobject:ValueObject1", "event:Event1", "workflow:Workflow1", "repository:Repository1", "view:View1",
+    "storage:Storage1", "ui:Ui1", "deployable:Deployable1", "api:Api1",
+  ]) {
     await expect(page.locator(`[data-testid="rf__node-${id}"]`)).toBeVisible();
   }
 });
