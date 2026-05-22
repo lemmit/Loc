@@ -11,6 +11,8 @@ on:
       - 'langium-config.json'
       - 'vitest.config.ts'
       - 'biome.json'
+      - 'biome.generated.json'
+      - 'designs/**'
       - '.github/workflows/test.yml'
   pull_request:
     paths:
@@ -21,6 +23,8 @@ on:
       - 'langium-config.json'
       - 'vitest.config.ts'
       - 'biome.json'
+      - 'biome.generated.json'
+      - 'designs/**'
       - '.github/workflows/test.yml'
 
 permissions:
@@ -49,6 +53,9 @@ jobs:
 
       - name: Test with coverage
         run: npm run test:coverage
+
+      - name: Generated-code Biome gate
+        run: npm run test:biome-gen
 
       - name: Coverage summary
         if: always()
