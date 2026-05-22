@@ -820,10 +820,10 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         {compact && (
           <Button
             size="xs"
-            variant="default"
+            variant="filled"
             data-testid="c4system-open-inspector"
             onClick={() => setInspectorOpen(true)}
-            style={{ position: "absolute", top: 8, right: 8, zIndex: 5 }}
+            style={{ position: "absolute", bottom: 12, right: 12, zIndex: 6, boxShadow: "0 2px 6px rgba(0,0,0,0.3)" }}
           >
             Inspect / +
           </Button>
