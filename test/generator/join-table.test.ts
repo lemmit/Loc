@@ -23,7 +23,7 @@ const SRC = `
 `;
 
 describe("reference-collection join tables (TS/Hono)", () => {
-  it("emits a join table per Id<T>[] field with a composite PK, off the owner row", async () => {
+  it("emits a join table per Id<T>[] field with a composite PK + ordinal, off the owner row", async () => {
     const model = await parseValid(SRC);
     const schema = generateHono(model).get("db/schema.ts")!;
     expect(schema).toMatch(/pgTable\("trainer_party"/);
@@ -31,6 +31,8 @@ describe("reference-collection join tables (TS/Hono)", () => {
     expect(schema).toMatch(
       /primaryKey\(\{ columns: \[table\.trainerId, table\.pokemonId\] \}\)/,
     );
+    // ordinal column carries the collection's order across a round-trip
+    expect(schema).toMatch(/ordinal: integer\("ordinal"\)\.notNull\(\)/);
     // The owner table must NOT carry the reference-collection columns.
     const trainersTable = schema.slice(
       schema.indexOf('pgTable("trainers"'),
@@ -40,17 +42,21 @@ describe("reference-collection join tables (TS/Hono)", () => {
     expect(trainersTable).not.toMatch(/caught/);
   });
 
-  it("hydrates from the join table on load and diff-syncs rows on save", async () => {
+  it("hydrates from the join table in ordinal order and diff-syncs rows on save", async () => {
     const model = await parseValid(SRC);
     const repo = generateHono(model).get("db/repositories/trainer-repository.ts")!;
-    // load: select target ids for the owner, brand them back
+    // load: select target ids for the owner, ordered by ordinal, branded back
     expect(repo).toMatch(
-      /from\(schema\.trainerParty\)\.where\(eq\(schema\.trainerParty\.trainerId, id\)\)/,
+      /from\(schema\.trainerParty\)\.where\(eq\(schema\.trainerParty\.trainerId, id\)\)\.orderBy\(schema\.trainerParty\.ordinal\)/,
     );
     expect(repo).toMatch(/Ids\.PokemonId\(r\.t\)/);
-    // save: delete removed pairs, insert current (idempotent)
+    // save: delete removed pairs, then upsert current rows carrying their
+    // position so reorders persist
     expect(repo).toMatch(/__toDeleteParty/);
-    expect(repo).toMatch(/onConflictDoNothing\(\)/);
+    expect(repo).toMatch(/ordinal: __i/);
+    expect(repo).toMatch(
+      /onConflictDoUpdate\(\{ target: \[schema\.trainerParty\.trainerId, schema\.trainerParty\.pokemonId\], set: \{ ordinal: __i \} \}\)/,
+    );
   });
 
   it("lowers this.<refColl>.contains(param) to a join-table subquery", async () => {

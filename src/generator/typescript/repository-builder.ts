@@ -40,7 +40,7 @@ function associationMapLines(agg: AggregateIR, dbExpr: string, indent: string): 
     const rows = `${assoc.fieldName}JoinRows`;
     const map = `${assoc.fieldName}ByOwner`;
     out.push(
-      `${indent}const ${rows} = await ${dbExpr}.select({ o: schema.${joinConst}.${ownerCol}, t: schema.${joinConst}.${targetCol} }).from(schema.${joinConst}).where(inArray(schema.${joinConst}.${ownerCol}, __ids));`,
+      `${indent}const ${rows} = await ${dbExpr}.select({ o: schema.${joinConst}.${ownerCol}, t: schema.${joinConst}.${targetCol} }).from(schema.${joinConst}).where(inArray(schema.${joinConst}.${ownerCol}, __ids)).orderBy(schema.${joinConst}.${ownerCol}, schema.${joinConst}.ordinal);`,
     );
     out.push(`${indent}const ${map} = new Map<string, Ids.${assoc.targetAgg}Id[]>();`);
     out.push(`${indent}for (const r of ${rows}) {`);
@@ -380,7 +380,7 @@ function findByIdMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
     const ownerCol = joinColumnName(assoc.ownerFk);
     const targetCol = joinColumnName(assoc.targetFk);
     lines.push(
-      `      const ${assoc.fieldName}Rows = await tx.select({ t: schema.${joinConst}.${targetCol} }).from(schema.${joinConst}).where(eq(schema.${joinConst}.${ownerCol}, id));`,
+      `      const ${assoc.fieldName}Rows = await tx.select({ t: schema.${joinConst}.${targetCol} }).from(schema.${joinConst}).where(eq(schema.${joinConst}.${ownerCol}, id)).orderBy(schema.${joinConst}.ordinal);`,
     );
     lines.push(
       `      const ${assoc.fieldName} = ${assoc.fieldName}Rows.map((r) => Ids.${assoc.targetAgg}Id(r.t));`,
@@ -525,9 +525,12 @@ function saveMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
       `      const __existing${cap} = await tx.select({ t: schema.${joinConst}.${targetCol} }).from(schema.${joinConst}).where(eq(schema.${joinConst}.${ownerCol}, aggregate.id));`,
     );
     lines.push(`      const __existingIds${cap} = new Set(__existing${cap}.map((r) => r.t));`);
+    // Ordered: keep the field's array order so the round-trip is stable;
+    // the ordinal column carries the position and is updated on reorder.
     lines.push(
-      `      const __currentIds${cap} = new Set(aggregate.${assoc.fieldName}.map((x) => x as string));`,
+      `      const __current${cap} = aggregate.${assoc.fieldName}.map((x) => x as string);`,
     );
+    lines.push(`      const __currentIds${cap} = new Set(__current${cap});`);
     lines.push(
       `      const __toDelete${cap} = [...__existingIds${cap}].filter((t) => !__currentIds${cap}.has(t));`,
     );
@@ -536,9 +539,12 @@ function saveMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
       `        await tx.delete(schema.${joinConst}).where(and(eq(schema.${joinConst}.${ownerCol}, aggregate.id), inArray(schema.${joinConst}.${targetCol}, __toDelete${cap})));`,
     );
     lines.push(`      }`);
-    lines.push(`      for (const __t of __currentIds${cap}) {`);
+    lines.push(`      for (let __i = 0; __i < __current${cap}.length; __i++) {`);
     lines.push(
-      `        await tx.insert(schema.${joinConst}).values({ ${ownerCol}: aggregate.id as string, ${targetCol}: __t }).onConflictDoNothing();`,
+      `        const __row = { ${ownerCol}: aggregate.id as string, ${targetCol}: __current${cap}[__i]!, ordinal: __i };`,
+    );
+    lines.push(
+      `        await tx.insert(schema.${joinConst}).values(__row).onConflictDoUpdate({ target: [schema.${joinConst}.${ownerCol}, schema.${joinConst}.${targetCol}], set: { ordinal: __i } });`,
     );
     lines.push(`      }`);
   }

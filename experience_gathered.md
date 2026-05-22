@@ -622,9 +622,12 @@ or not.
   `(owner_fk, target_fk)` makes that idempotent).  Load batches the join
   rows into a `Map<ownerId, targetId[]>` and brands them back to
   `Ids.<Target>Id`.
-- **A join table is a SET — order is not preserved.**  `party[0]` is not
-  guaranteed to come back first.  If slot order ever matters, add an
-  `ordinal` column and `ORDER BY` on load.  Conscious omission for now.
+- **Order is preserved via an `ordinal` column.**  The collection is a
+  list, not a bag — `party[0]` must round-trip as the lead.  Each join
+  row carries its position; save upserts with `onConflictDoUpdate(set:
+  {ordinal})` so reorders persist, load `ORDER BY ordinal`.  The
+  composite PK stays `(owner_fk, target_fk)` (a target appears once per
+  owner); ordinal is positional, not part of identity.
 - **Only `primaryKey` import is conditional.**  Adding `primaryKey` to the
   Drizzle import line unconditionally drifted every existing schema's
   byte-for-byte fixture.  Gate the import on "context has ≥1 join table"

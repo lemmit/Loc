@@ -68,8 +68,9 @@ export function renderSchema(ctx: BoundedContextIR): string {
 }
 
 /** A many-to-many join table for an `Id<T>[]` reference collection.
- * Two FK columns, a composite primary key (so each (owner, target)
- * pair is unique and `onConflictDoNothing` is idempotent), and an
+ * Two FK columns + an `ordinal` position so the collection's order
+ * survives a round-trip, a composite primary key over (owner, target)
+ * (so each pair is unique and the save upsert is idempotent), and an
  * index on the target FK for the reverse membership query. */
 function emitJoinTable(assoc: AssociationIR): string {
   const tableConst = joinTableConstName(assoc);
@@ -79,6 +80,7 @@ function emitJoinTable(assoc: AssociationIR): string {
   lines.push(`export const ${tableConst} = pgTable("${assoc.joinTable}", {`);
   lines.push(`  ${ownerKey}: text("${assoc.ownerFk}").notNull(),`);
   lines.push(`  ${targetKey}: text("${assoc.targetFk}").notNull(),`);
+  lines.push(`  ordinal: integer("ordinal").notNull(),`);
   lines.push(`}, (table) => ({`);
   lines.push(
     `  ${tableConst}Pk: primaryKey({ columns: [table.${ownerKey}, table.${targetKey}] }),`,
