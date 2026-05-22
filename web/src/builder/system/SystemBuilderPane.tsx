@@ -1100,6 +1100,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
                   <BodyEditor
                     key={`${selected.id}:${opName}:${rev}`}
                     statements={listStatementViews(parsed.ast, { kind: "operation", aggregate: selected.name, op: opName }) ?? []}
+                    targets={listFields(selected.ast).map((f) => f.name)}
                     {...bodyHandlers({ kind: "operation", aggregate: selected.name, op: opName })}
                   />
                 )}

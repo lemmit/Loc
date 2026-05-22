@@ -1,15 +1,15 @@
 import { useState } from "react";
-import { Button, Group, Select, Stack, Text, TextInput, Textarea } from "@mantine/core";
+import { Autocomplete, Button, Group, Select, Stack, Text, TextInput, Textarea } from "@mantine/core";
 import { ASSIGN_OPS } from "./expr-model";
 import type { StmtView } from "./body";
 
 // Validated statement-list editor, shared by operation and workflow bodies
 // (both `Statement[]`).  An assignment row splits into a dedicated target / op /
-// value (the target edits as its own control); every other statement is an
-// editable text row.  Each edit is committed on blur; the parent splices +
-// re-parses and returns whether it committed (a syntactically-invalid edit is
-// rejected and flagged here).  Semantic errors surface in the Problems panel
-// after a commit lands.
+// value (the target is an Autocomplete over the owner's assignable properties);
+// every other statement is an editable text row.  Each edit is committed on
+// blur; the parent splices + re-parses and returns whether it committed (a
+// syntactically-invalid edit is rejected and flagged here).  Semantic errors
+// surface in the Problems panel after a commit lands.
 //
 // (Single-expression bodies — `function … = <expr>`, derived props, invariants
 // — and a statement's *value* expression are edited by the structured
@@ -17,6 +17,8 @@ import type { StmtView } from "./body";
 
 interface BodyEditorProps {
   statements: StmtView[];
+  /** Assignable property names of the owner, for the target Autocomplete. */
+  targets?: string[];
   /** Returns true if the edit was committed (parsed); false → rejected. */
   onEdit: (index: number, text: string) => boolean;
   onDelete: (index: number) => void;
@@ -99,8 +101,9 @@ function CallRow({ view, error, onCommit, onClearError }: {
 // Assignment row: target / op / value as separate controls. Local draft state so
 // any field can change before the reconstructed statement is committed on blur
 // (or immediately on an op change).
-function AssignRow({ view, error, onCommit, onClearError }: {
+function AssignRow({ view, targets, error, onCommit, onClearError }: {
   view: { target: string; op: string; value: string };
+  targets: string[];
   error: boolean;
   onCommit: (text: string) => void;
   onClearError: () => void;
@@ -111,15 +114,16 @@ function AssignRow({ view, error, onCommit, onClearError }: {
   const reconstruct = (t: string, o: string, v: string): string => `${t.trim()} ${o} ${v.trim()}`;
   return (
     <>
-      <TextInput
+      <Autocomplete
         size="xs"
         w={96}
+        data={targets}
         defaultValue={target}
         data-testid="c4system-stmt-target"
         aria-label="assignment target"
         styles={MONO}
         onFocus={onClearError}
-        onChange={(e) => setTarget(e.currentTarget.value)}
+        onChange={(v) => setTarget(v)}
         onBlur={() => onCommit(reconstruct(target, op, value))}
       />
       <Select
@@ -148,7 +152,7 @@ function AssignRow({ view, error, onCommit, onClearError }: {
   );
 }
 
-export function BodyEditor({ statements, onEdit, onDelete, onMove, onAdd }: BodyEditorProps): JSX.Element {
+export function BodyEditor({ statements, targets = [], onEdit, onDelete, onMove, onAdd }: BodyEditorProps): JSX.Element {
   const [errorAt, setErrorAt] = useState<number | null>(null);
   const [draftAdd, setDraftAdd] = useState("");
   const [addError, setAddError] = useState(false);
@@ -183,6 +187,7 @@ export function BodyEditor({ statements, onEdit, onDelete, onMove, onAdd }: Body
             {s.kind === "assign" ? (
               <AssignRow
                 view={s}
+                targets={targets}
                 error={errorAt === i}
                 onClearError={() => errorAt === i && setErrorAt(null)}
                 onCommit={(text) => commitEdit(i, original, text)}
