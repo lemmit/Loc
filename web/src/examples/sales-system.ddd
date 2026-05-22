@@ -117,8 +117,8 @@ system SalesSystem {
           })
           order.addLine("00000000-0000-0000-0000-000000000002", 2)
           order.confirm()
-          expect order.status == Confirmed
-          expect order.lines.count == 1
+          expect(order.status).toBe(Confirmed)
+          expect(order.lines.count).toBe(1)
         }
 
         test "lines cannot be added once the order is confirmed" verifies TC-002 {
@@ -191,7 +191,7 @@ system SalesSystem {
   test e2e "create a product and read it back" against api {
     let p = api.products.create({ sku: "WIDGET-1", price: { amount: 9.99, currency: "USD" } })
     let read = api.products.getById(p)
-    expect read.sku == "WIDGET-1"
+    expect(read.sku).toBe("WIDGET-1")
   }
 
   test e2e "create, add a line to, and confirm an order" against api {
@@ -201,8 +201,8 @@ system SalesSystem {
     api.orders.addLine(ord, { productId: prod.id, qty: 3 })
     api.orders.confirm(ord)
     let read = api.orders.getById(ord)
-    expect read.status == "Confirmed"
-    expect read.lines.length == 1
+    expect(read.status).toBe("Confirmed")
+    expect(read.lines.length).toBe(1)
   }
 
   test e2e "place and confirm an order through the UI" against webApp verifies TC-003 {
@@ -212,8 +212,8 @@ system SalesSystem {
     ui.orders.addLine(ord, { productId: prod.id, qty: 2 })
     ui.orders.confirm(ord)
     let read = ui.orders.getById(ord)
-    expect read.status == "Confirmed"
-    expect read.lines.length == 1
+    expect(read.status).toBe("Confirmed")
+    expect(read.lines.length).toBe(1)
   }
 }
 

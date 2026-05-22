@@ -479,6 +479,10 @@ export interface MatcherSig {
 }
 const INTRINSIC_MATCHER_SIGNATURES: ReadonlyArray<MatcherSig> = [
   { name: "toBe", arity: 1, on: "value", negatable: true },
+  { name: "toBeGreaterThan", arity: 1, on: "value", negatable: true },
+  { name: "toBeGreaterThanOrEqual", arity: 1, on: "value", negatable: true },
+  { name: "toBeLessThan", arity: 1, on: "value", negatable: true },
+  { name: "toBeLessThanOrEqual", arity: 1, on: "value", negatable: true },
   { name: "toHaveText", arity: 1, on: "locator", negatable: true },
   { name: "toHaveCount", arity: 1, on: "locator", negatable: true },
   { name: "toBeVisible", arity: 0, on: "locator", negatable: true },

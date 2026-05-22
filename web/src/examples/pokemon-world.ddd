@@ -277,8 +277,8 @@ system PokemonWorld {
         api.trainers.catchPokemon(t, { pokemon: pk.id })
         api.trainers.addToParty(t, { pokemon: pk.id })
         let read = api.trainers.getById(t)
-        expect read.party.length == 1
-        expect read.caught.length == 1
+        expect(read.party.length).toBe(1)
+        expect(read.caught.length).toBe(1)
     }
 
     test e2e "a pokemon gains experience and levels up" against api {
@@ -289,8 +289,8 @@ system PokemonWorld {
         api.pokemons.gainExperience(pk, { amount: 600 })
         api.pokemons.levelUp(pk)
         let read = api.pokemons.getById(pk)
-        expect read.level == 6
-        expect read.experience == 0
+        expect(read.level).toBe(6)
+        expect(read.experience).toBe(0)
     }
 
     test e2e "run a battle through to a winner" against api {
@@ -318,7 +318,7 @@ system PokemonWorld {
         api.battles.recordRound(b, { attacker: p1.id, damage: 25 })
         api.battles.declareChallengerWinner(b)
         let read = api.battles.getById(b)
-        expect read.status == "ChallengerWon"
-        expect read.rounds.length == 1
+        expect(read.status).toBe("ChallengerWon")
+        expect(read.rounds.length).toBe(1)
     }
 }

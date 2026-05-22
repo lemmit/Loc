@@ -338,7 +338,7 @@ system Acme {
     test e2e "create a product, look it up by id" against api verifies TC-003 {
         let p = api.products.create({ sku: "WIDGET-1", price: { amount: 9.99, currency: "USD" } })
         let read = api.products.getById(p)
-        expect read.sku == "WIDGET-1"
+        expect(read.sku).toBe("WIDGET-1")
     }
 
     test e2e "create then confirm an order with one line" against api verifies TC-002 {
@@ -347,14 +347,14 @@ system Acme {
         api.orders.addLine(ord, { productId: prod.id, qty: 3 })
         api.orders.confirm(ord)
         let read = api.orders.getById(ord)
-        expect read.status == "Confirmed"
-        expect read.lines.length == 1
+        expect(read.status).toBe("Confirmed")
+        expect(read.lines.length).toBe(1)
     }
 
     test e2e "by_customer query returns matching orders" against api {
         let ord = api.orders.create({ customerId: "cust-002", status: "Draft", placedAt: "2024-01-02T00:00:00Z" })
         let list = api.orders.byCustomer({ customerId: "cust-002" })
-        expect list.length >= 1
+        expect(list.length).toBeGreaterThanOrEqual(1)
     }
 
     // ------------------------------------------------------------------
@@ -386,7 +386,7 @@ system Acme {
 
     test e2e "active orders view renders the rendered rows" against webApp {
         let rows = ui.views.activeOrders()
-        expect rows.length >= 0
+        expect(rows.length).toBeGreaterThanOrEqual(0)
     }
 }
 

@@ -279,14 +279,10 @@ function renderUIStmt(s: TestStmtIR, ctx: RenderCtx): string {
   if (s.kind === "expect") {
     // Explicit, typed matchers — `expect(<x>).toHaveText("…")` — are
     // resolved in the IR (isIntrinsicMatcher) and rendered directly to the
-    // native Playwright matcher. No shape-guessing.
+    // native Playwright matcher. Anything else (bare bool expr) falls
+    // through to the shared `expect(<x>).toBe(true)` form.
     const explicit = renderExplicitMatcher(s.expr, ctx);
     if (explicit) return explicit;
-    // Legacy: infer a web-first matcher from an equality's SHAPE. Retained
-    // alongside the explicit form during the spike; the goal is to delete
-    // this once the explicit surface lands across backends.
-    const webFirst = renderWebFirstExpect(s.expr, ctx);
-    if (webFirst) return webFirst;
     return renderExpectStmt(s.expr, (e) => renderUIExpr(e, ctx));
   }
   if (s.kind === "expect-throws") {
@@ -317,7 +313,6 @@ function renderUIStmt(s: TestStmtIR, ctx: RenderCtx): string {
   );
 }
 
-type LiteralIR = Extract<ExprIR, { kind: "literal" }>;
 
 /** Render an explicit, typed matcher call — `expect(<x>).toHaveText("…")`
  *  — straight to its Playwright form. The matcher (resolved into the IR as
@@ -369,37 +364,6 @@ function matchDetailCollectionLength(
   if (inner.kind !== "member" || inner.receiver.kind !== "ref") return null;
   if (!ctx.detailHandles.has(inner.receiver.name)) return null;
   return { handle: inner.receiver.name, collection: inner.member };
-}
-
-function literalSide(a: ExprIR, b: ExprIR): { readSide: ExprIR; lit: LiteralIR } | null {
-  if (b.kind === "literal") return { readSide: a, lit: b };
-  if (a.kind === "literal") return { readSide: b, lit: a };
-  return null;
-}
-
-/** Lower an equality assertion on a detail-handle read to a native
- *  web-first matcher (`toHaveText` / `toHaveCount`, retrying), or null
- *  when the assertion isn't of that shape (caller falls back to the
- *  one-shot generic form). */
-function renderWebFirstExpect(expr: ExprIR, ctx: RenderCtx): string | null {
-  const e = expr.kind === "paren" ? expr.inner : expr;
-  if (e.kind !== "binary" || (e.op !== "==" && e.op !== "!=")) return null;
-  const sides = literalSide(e.left, e.right);
-  if (!sides) return null;
-  const not = e.op === "!=";
-
-  const coll = matchDetailCollectionLength(sides.readSide, ctx);
-  if (coll && sides.lit.lit === "int") {
-    const matcher = not ? "not.toHaveCount" : "toHaveCount";
-    return `await expect(${coll.handle}.${coll.collection}Rows()).${matcher}(${sides.lit.value});`;
-  }
-
-  const fld = matchDetailField(sides.readSide, ctx);
-  if (fld && sides.lit.lit === "string") {
-    const matcher = not ? "not.toHaveText" : "toHaveText";
-    return `await expect(${fld.handle}.field("${fld.field}")).${matcher}(${JSON.stringify(sides.lit.value)});`;
-  }
-  return null;
 }
 
 // ---------------------------------------------------------------------------
