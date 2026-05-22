@@ -37,7 +37,7 @@ function verify(loom: LoomModel, results: TestOutcome[]) {
   );
 }
 
-describe("computeVerification (Slice 13)", () => {
+describe("computeVerification", () => {
   it("indexes executable tests with the runner's exact suite names", async () => {
     const loom = await build(SOURCE);
     const refs = loom.traceability!.execTests;

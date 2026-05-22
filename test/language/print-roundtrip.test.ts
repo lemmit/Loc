@@ -8,7 +8,7 @@ import { printExpr } from "../../src/language/print/index.js";
 import { parseRawResult } from "../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
-// Round-trip safety net for the `.ddd` expression printer (Builders, Phase 0).
+// Round-trip safety net for the `.ddd` expression printer (Builders).
 //
 // For every expression in the example corpus: print it, splice the printed
 // text back over its own CST range, re-parse the whole document, and assert

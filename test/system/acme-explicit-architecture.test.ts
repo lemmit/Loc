@@ -1,7 +1,7 @@
 // Regression test for the explicit-architecture migration of
 // `examples/acme.ddd`.
 //
-// Before slices 11.24–11.27, acme.ddd was a one-line `scaffold
+// Earlier, acme.ddd was a one-line `scaffold
 // modules: …` UI with bare `modules:` deployables.  After
 // migration, the file declares api contracts, storage instances,
 // UI api parameters, backend `serves:` lists, per-module storage

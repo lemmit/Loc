@@ -32,7 +32,7 @@ const stacksDir = path.join(repoRoot, "stacks");
 
 /** Seed a MemoryVfs from the on-disk `designs/` tree, mirroring what
  *  `seedBuiltinPacks` does in the worker via `import.meta.glob`.
- *  Phase 0 of pack versioning: packs live two levels deep at
+ *  Packs live two levels deep at
  *  `designs/<family>/<version>/...`, so the walk now nests one more
  *  level than it did pre-versioning. */
 function hydrateBuiltinDesigns(vfs: MemoryVfs): void {

@@ -6,7 +6,7 @@ import { IdbVfs } from "../../web/src/vfs/idb-vfs.js";
 // ---------------------------------------------------------------------------
 // IdbVfs — IndexedDB-backed decorator over MemoryVfs.  Persistence
 // is best-effort: reads/writes still work when IDB is unavailable
-// (Phase 3 verification: hostile-storage fallback).  These tests
+// (hostile-storage fallback verification).  These tests
 // cover the round-trip + the debounced-flush contract the worker
 // rehydrate flow will rely on.
 // ---------------------------------------------------------------------------

@@ -170,7 +170,7 @@ describe("spike — AST-to-AST scaffold expansion", () => {
     // they get picked up by the default ScopeComputation.
     //
     // We don't test cross-reference resolution end-to-end here
-    // because the current grammar (post-Slice 6) uses
+    // because the current grammar uses
     // `MenuLink.pageName=LooseName` — bare strings, no cross-ref.
     // This test just confirms the AST-side prerequisite: the
     // synthesised pages are reachable via the standard ui.members
