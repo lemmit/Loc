@@ -358,7 +358,7 @@ describe("page metamodel — IR shape", () => {
   });
 
   it("attaches uiName + uiFramework to deployable IR (sugar form)", async () => {
-    // Fullstack dotnet (Part B): `ui:` on a dotnet deployable defaults
+    // Fullstack dotnet: `ui:` on a dotnet deployable defaults
     // the framework to `react` — the embedded SPA renders against the
     // React generator, with output landing under ClientApp/ of the
     // .NET project.  Backend-only dotnet (no `ui:`) leaves both

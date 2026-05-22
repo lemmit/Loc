@@ -1,4 +1,4 @@
-// Spike — AST-to-AST scaffold expansion (Pass 1).
+// Spike — AST-to-AST scaffold expansion.
 //
 // Goal: prove that synthesising `Page` AST nodes at
 // `DocumentState.Parsed` makes them visible to Langium's linker /
