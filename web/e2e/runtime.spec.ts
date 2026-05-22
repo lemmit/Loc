@@ -1,9 +1,10 @@
 // Full pipeline E2E: Bundle → Boot → dispatch HTTP requests against
 // the in-browser Hono backend.  Requires real internet because the
-// bundler fetches ~150 modules from esm.sh and the runtime worker
-// fetches PGlite's WASM + .data from jsdelivr.
+// in-browser npm install fetches ~150 module tarballs from the npm
+// registry and the runtime worker fetches PGlite's WASM + .data from
+// jsdelivr.
 //
-// The spec self-skips if the test browser can't reach esm.sh —
+// The spec self-skips if the test browser can't reach the npm registry —
 // some sandbox environments allow Node-side network but block
 // browser-context cross-origin fetches.  GitHub Pages deploys and
 // any normal dev box pass this probe trivially.
@@ -29,7 +30,7 @@ test("editor → generate → bundle → boot → dispatch", async ({ page }) =>
   await selectExample(page, /Sales System/);
 
   if (!(await browserCanReachNetwork(page))) {
-    test.skip(true, "browser cannot reach esm.sh from this environment");
+    test.skip(true, "browser cannot reach the npm registry from this environment");
   }
 
   await test.step("Generate", async () => {
@@ -132,7 +133,7 @@ test("editor → generate → bundle → boot → dispatch", async ({ page }) =>
   });
 
   // Final guard: surface any uncaught console errors that escaped
-  // (Monaco workers, PGlite WASM loader, etc.).  Allow esm.sh
+  // (Monaco workers, PGlite WASM loader, etc.).  Allow npm registry
   // transient 503s the bundler retries through, and PGlite's
   // direct-eval warnings that have no functional impact.
   const fatal = consoleErrors.filter(
