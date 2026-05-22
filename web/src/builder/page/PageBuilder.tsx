@@ -346,7 +346,36 @@ function SettingsContent({ options, operations = {} }: { options: Record<string,
           <Textarea size="xs" mb="xs" label="value" autosize minRows={1} value={String(props.value ?? "")} data-testid="c4builder-prop-let-value" styles={{ input: { fontFamily: "monospace" } }} error={props.value && !isValidExpr(String(props.value)) ? "Invalid expression" : undefined} onChange={(e) => set("value", e.currentTarget.value)} />
         </>
       )}
-      {id && name === "Stmt" && props.kind !== "assign" && props.kind !== "let" && (
+      {id && name === "Stmt" && props.kind === "navigate" && (
+        // navigate(<page>, { …params }): a target-page picker + params object.
+        <>
+          <Select
+            size="xs"
+            mb={4}
+            label="to"
+            clearable
+            searchable
+            data={[...new Set([...(options.page ?? []), props.to].filter(Boolean) as string[])]}
+            value={props.to != null ? String(props.to) : null}
+            data-testid="c4builder-prop-nav-to"
+            onChange={(v) => set("to", v || undefined)}
+          />
+          <Textarea
+            size="xs"
+            mb="xs"
+            label="params"
+            autosize
+            minRows={1}
+            placeholder="{ key: value }"
+            value={String(props.params ?? "")}
+            data-testid="c4builder-prop-nav-params"
+            styles={{ input: { fontFamily: "monospace" } }}
+            error={props.params && !isValidExpr(String(props.params)) ? "Invalid expression" : undefined}
+            onChange={(e) => set("params", e.currentTarget.value || undefined)}
+          />
+        </>
+      )}
+      {id && name === "Stmt" && props.kind !== "assign" && props.kind !== "let" && props.kind !== "navigate" && (
         <Textarea
           size="xs"
           mb="xs"

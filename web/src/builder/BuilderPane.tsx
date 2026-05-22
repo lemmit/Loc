@@ -48,12 +48,14 @@ function collectOptions(ast: unknown): Record<string, string[]> {
   const aggregate = new Set<string>();
   const workflow = new Set<string>();
   const view = new Set<string>();
+  const page = new Set<string>();
   for (const node of AstUtils.streamAst(ast as Parameters<typeof AstUtils.streamAst>[0])) {
     if (node.$type === "Aggregate") aggregate.add((node as unknown as { name: string }).name);
     else if (node.$type === "Workflow") workflow.add((node as unknown as { name: string }).name);
     else if (node.$type === "View") view.add((node as unknown as { name: string }).name);
+    else if (node.$type === "Page") page.add((node as unknown as { name: string }).name);
   }
-  return { aggregate: [...aggregate].sort(), workflow: [...workflow].sort(), view: [...view].sort() };
+  return { aggregate: [...aggregate].sort(), workflow: [...workflow].sort(), view: [...view].sort(), page: [...page].sort() };
 }
 
 // Operation names per aggregate — drives the contextual `op:` dropdown on a Form
