@@ -46,12 +46,11 @@ import type { LoadedPack } from "../_packs/loader.js";
 import { buildPageObjectModule } from "./page-objects-builder.js";
 import { buildWorkflowPageObject } from "./workflow-builder.js";
 import { buildViewPageObject } from "./view-builder.js";
+import { isWalkableLayoutBody, walkBodyToTsx } from "./body-walker.js";
 import {
-  isWalkableLayoutBody,
   renderCustomLayoutPage,
   renderUserComponentFile,
-  walkBodyToTsx,
-} from "./body-walker.js";
+} from "./walker/page-shell.js";
 import { buildWalkerPageObject } from "./walker-page-objects.js";
 
 /** Inputs the page emitter needs in addition to the page IR.  Kept as
