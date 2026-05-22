@@ -1,6 +1,6 @@
 import type { AggregateIR, RepositoryIR } from "../../../ir/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
-import { pascal, plural, snake } from "../../../util/naming.js";
+import { upperFirst, plural, snake } from "../../../util/naming.js";
 
 // ASP.NET Core controller emission.  One controller per aggregate root,
 // dispatching every endpoint through Mediator (`ISender`).  The
@@ -37,7 +37,7 @@ export function renderController(
   ns: string,
   shape: ControllerShape,
 ): string {
-  const className = `${plural(pascal(agg.name))}Controller`;
+  const className = `${plural(upperFirst(agg.name))}Controller`;
   const route = `${shape.routePrefix ?? ""}${snake(plural(agg.name))}`;
 
   const createBody = renderCmdConstructorBody(shape.createCmdArgs, "            ");
@@ -47,9 +47,9 @@ export function renderController(
     const cmdBody = renderCmdConstructorBody(cmdArgs, "            ");
     return [
       `    [HttpPost("{id}/${snake(op.name)}")]`,
-      `    public async Task<IActionResult> ${pascal(op.name)}([FromRoute] ${shape.idClrType} id, [FromBody] ${pascal(op.name)}Request request)`,
+      `    public async Task<IActionResult> ${upperFirst(op.name)}([FromRoute] ${shape.idClrType} id, [FromBody] ${upperFirst(op.name)}Request request)`,
       "    {",
-      `        var cmd = new ${pascal(op.name)}Command(`,
+      `        var cmd = new ${upperFirst(op.name)}Command(`,
       ...cmdBody,
       "        );",
       "        await _mediator.Send(cmd);",
@@ -74,9 +74,9 @@ export function renderController(
         : "        return Ok(result);";
     return [
       `    [HttpGet${f.isRoot ? "" : `("${snake(f.name)}")`}]`,
-      `    public async Task<ActionResult<${responseType}>> ${pascal(f.name)}(${f.queryRouteParams})`,
+      `    public async Task<ActionResult<${responseType}>> ${upperFirst(f.name)}(${f.queryRouteParams})`,
       "    {",
-      `        var result = await _mediator.Send(new ${pascal(f.name)}Query(${f.queryConstructorArgs}));`,
+      `        var result = await _mediator.Send(new ${upperFirst(f.name)}Query(${f.queryConstructorArgs}));`,
       returnLine,
       "    }",
       "",

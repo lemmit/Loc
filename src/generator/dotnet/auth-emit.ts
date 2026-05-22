@@ -1,5 +1,5 @@
 import type { SystemIR, UserIR } from "../../ir/loom-ir.js";
-import { pascal } from "../../util/naming.js";
+import { upperFirst } from "../../util/naming.js";
 import { renderCsType } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -35,7 +35,7 @@ function renderUserRecord(user: UserIR, ns: string): string {
       const t = f.optional
         ? renderCsType({ kind: "optional", inner: f.type })
         : renderCsType(f.type);
-      return `${t} ${pascal(f.name)}`;
+      return `${t} ${upperFirst(f.name)}`;
     })
     .join(", ");
   return `// Auto-generated.

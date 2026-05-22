@@ -1,5 +1,5 @@
 import type { BinOp, ExprIR, TypeIR } from "../../ir/loom-ir.js";
-import { pascal } from "../../util/naming.js";
+import { upperFirst } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Expression renderer for the .NET / C# backend.
@@ -52,7 +52,7 @@ export function renderCsExpr(e: ExprIR, ctx: CsRenderContext = DEFAULT): string 
     case "object":
       // Bare object literals only appear in e2e contexts; in operation
       // bodies this branch is unreachable (the validator rejects them).
-      return `new { ${e.fields.map((f) => `${pascal(f.name)} = ${renderCsExpr(f.value, ctx)}`).join(", ")} }`;
+      return `new { ${e.fields.map((f) => `${upperFirst(f.name)} = ${renderCsExpr(f.value, ctx)}`).join(", ")} }`;
     case "paren":
       return `(${renderCsExpr(e.inner, ctx)})`;
     case "unary":
@@ -94,9 +94,9 @@ function renderRef(e: Extract<ExprIR, { kind: "ref" }>, ctx: CsRenderContext): s
     case "this-prop":
     case "this-vo-prop":
     case "this-derived":
-      return `${ctx.thisName}.${pascal(e.name)}`;
+      return `${ctx.thisName}.${upperFirst(e.name)}`;
     case "helper-fn":
-      return `${ctx.thisName}.${pascal(e.name)}`;
+      return `${ctx.thisName}.${upperFirst(e.name)}`;
     case "enum-value":
       return `${e.enumName}.${e.name}`;
     case "current-user":
@@ -121,7 +121,7 @@ function renderMember(e: Extract<ExprIR, { kind: "member" }>, ctx: CsRenderConte
   ) {
     return `${recv}.Length`;
   }
-  return `${recv}.${pascal(e.member)}`;
+  return `${recv}.${upperFirst(e.member)}`;
 }
 
 function renderMethodCall(
@@ -145,7 +145,7 @@ function renderMethodCall(
   ) {
     return `System.Text.RegularExpressions.Regex.IsMatch(${recv}, ${args[0]})`;
   }
-  return `${recv}.${pascal(e.member)}(${args.join(", ")})`;
+  return `${recv}.${upperFirst(e.member)}(${args.join(", ")})`;
 }
 
 function renderCollectionOp(recv: string, name: string, args: string[]): string {
@@ -169,7 +169,7 @@ function renderCollectionOp(recv: string, name: string, args: string[]): string 
     case "firstOrNull":
       return `${recv}.FirstOrDefault()`;
     default:
-      return `${recv}.${pascal(name)}(${args.join(", ")})`;
+      return `${recv}.${upperFirst(name)}(${args.join(", ")})`;
   }
 }
 
@@ -177,12 +177,12 @@ function renderCall(e: Extract<ExprIR, { kind: "call" }>, ctx: CsRenderContext):
   const args = e.args.map((a) => renderCsExpr(a, ctx)).join(", ");
   switch (e.callKind) {
     case "value-object-ctor":
-      return `new ${pascal(e.name)}(${args})`;
+      return `new ${upperFirst(e.name)}(${args})`;
     case "function":
     case "private-operation":
-      return `${ctx.thisName}.${pascal(e.name)}(${args})`;
+      return `${ctx.thisName}.${upperFirst(e.name)}(${args})`;
     case "free":
-      return `${pascal(e.name)}(${args})`;
+      return `${upperFirst(e.name)}(${args})`;
   }
 }
 
@@ -190,7 +190,7 @@ function renderNew(e: Extract<ExprIR, { kind: "new" }>, ctx: CsRenderContext): s
   const inits = [
     `Id = ${e.partName}Id.New()`,
     `ParentId = ${ctx.thisName}.Id`,
-    ...e.fields.map((f) => `${pascal(f.name)} = ${renderCsExpr(f.value, ctx)}`),
+    ...e.fields.map((f) => `${upperFirst(f.name)} = ${renderCsExpr(f.value, ctx)}`),
   ];
   return `${e.partName}._Create(new ${e.partName}.State { ${inits.join(", ")} })`;
 }

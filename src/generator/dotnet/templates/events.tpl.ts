@@ -1,5 +1,5 @@
 import type { EventIR } from "../../../ir/loom-ir.js";
-import { pascal } from "../../../util/naming.js";
+import { upperFirst } from "../../../util/naming.js";
 import { renderCsType } from "../render-expr.js";
 
 // One sealed record per event, plus the empty IDomainEvent marker
@@ -7,7 +7,7 @@ import { renderCsType } from "../render-expr.js";
 // PascalCase.
 
 export function renderEvent(e: EventIR, ns: string): string {
-  const params = e.fields.map((f) => `${renderCsType(f.type)} ${pascal(f.name)}`).join(", ");
+  const params = e.fields.map((f) => `${renderCsType(f.type)} ${upperFirst(f.name)}`).join(", ");
   return `// Auto-generated.
 using ${ns}.Domain.Ids;
 

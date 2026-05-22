@@ -6,7 +6,7 @@ import {
   singleFieldShape,
 } from "../../ir/invariant-classify.js";
 import type { AggregateIR, ExprIR, InvariantIR, OperationIR } from "../../ir/loom-ir.js";
-import { pascal, plural } from "../../util/naming.js";
+import { upperFirst, plural } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Per-command FluentValidation `AbstractValidator<TCommand>` emission.
@@ -76,7 +76,7 @@ export function renderOperationValidator(
   return renderValidatorFile({
     ns,
     aggName: agg.name,
-    commandName: `${pascal(op.name)}Command`,
+    commandName: `${upperFirst(op.name)}Command`,
     invariants: preconditions,
     available: new Set(op.params.map((p) => p.name)),
   });
@@ -109,7 +109,7 @@ function renderValidatorFile(args: {
     }
   }
   for (const [field, patterns] of chainsByField) {
-    let line = `        RuleFor(x => x.${pascal(field)})`;
+    let line = `        RuleFor(x => x.${upperFirst(field)})`;
     for (const p of patterns) line += chainSingleFieldFluent(p);
     ruleLines.push(`${line};`);
   }
@@ -120,7 +120,7 @@ function renderValidatorFile(args: {
       : predicate;
     const path = pickErrorPath(inv);
     const message = csStringLiteral(`Invariant violated: ${inv.source}`);
-    const nameClause = path ? `\n            .WithName("${pascal(path)}")` : "";
+    const nameClause = path ? `\n            .WithName("${upperFirst(path)}")` : "";
     ruleLines.push(
       `        RuleFor(x => x).Must(x => ${guarded})${nameClause}\n            .WithMessage(${message});`,
     );
@@ -215,7 +215,7 @@ function renderFluentPredicate(e: ExprIR): string {
       if (e.body) return `${e.param} => ${renderFluentPredicate(e.body)}`;
       return `false /* UNRENDERABLE:lambda-block */`;
     case "object":
-      return `new { ${e.fields.map((f) => `${pascal(f.name)} = ${renderFluentPredicate(f.value)}`).join(", ")} }`;
+      return `new { ${e.fields.map((f) => `${upperFirst(f.name)} = ${renderFluentPredicate(f.value)}`).join(", ")} }`;
     case "this":
     case "id":
     case "call":
@@ -243,7 +243,7 @@ function renderRef(e: Extract<ExprIR, { kind: "ref" }>): string {
     case "param":
     case "this-prop":
     case "this-vo-prop":
-      return `x.${pascal(e.name)}`;
+      return `x.${upperFirst(e.name)}`;
     case "let":
     case "lambda":
       return e.name;
@@ -266,7 +266,7 @@ function renderMember(e: Extract<ExprIR, { kind: "member" }>): string {
   ) {
     return `${recv}.Length`;
   }
-  return `${recv}.${pascal(e.member)}`;
+  return `${recv}.${upperFirst(e.member)}`;
 }
 
 function renderMethodCall(e: Extract<ExprIR, { kind: "method-call" }>): string {
@@ -300,10 +300,10 @@ function renderMethodCall(e: Extract<ExprIR, { kind: "method-call" }>): string {
       case "firstOrNull":
         return `(${recv}).FirstOrDefault()`;
       default:
-        return `(${recv}).${pascal(e.member)}(${args.join(", ")})`;
+        return `(${recv}).${upperFirst(e.member)}(${args.join(", ")})`;
     }
   }
-  return `${recv}.${pascal(e.member)}(${args.join(", ")})`;
+  return `${recv}.${upperFirst(e.member)}(${args.join(", ")})`;
 }
 
 function csStringLiteral(s: string): string {

@@ -6,7 +6,7 @@ import type {
   FieldIR,
 } from "../../../ir/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
-import { pascal, plural, snake } from "../../../util/naming.js";
+import { upperFirst, plural, snake } from "../../../util/naming.js";
 
 // AppDbContext + per-aggregate IEntityTypeConfiguration<T>.  The
 // configuration walks each aggregate's fields/contains and emits the
@@ -15,7 +15,7 @@ import { pascal, plural, snake } from "../../../util/naming.js";
 export function renderDbContext(ctx: BoundedContextIR, ns: string): string {
   const aggUsings = ctx.aggregates.map((a) => `using ${ns}.Domain.${plural(a.name)};`);
   const dbSets = ctx.aggregates.map(
-    (a) => `    public DbSet<${a.name}> ${plural(pascal(a.name))} => Set<${a.name}>();`,
+    (a) => `    public DbSet<${a.name}> ${plural(upperFirst(a.name))} => Set<${a.name}>();`,
   );
   const applyConfigs = ctx.aggregates.map(
     (a) => `        modelBuilder.ApplyConfiguration(new Configurations.${a.name}Configuration());`,
@@ -131,7 +131,7 @@ function collectColumnRefs(e: ExprIR, out: Set<string>): void {
 }
 
 /** EF Core's HasIndex takes a property selector — column names map
- * to PascalCase property names (matching the `pascal(...)` casing
+ * to PascalCase property names (matching the `upperFirst(...)` casing
  * applied when the property is emitted on the entity class). */
 function pascalCol(name: string, _agg: AggregateIR): string {
   return name.length === 0 ? name : name[0]!.toUpperCase() + name.slice(1);
@@ -140,21 +140,21 @@ function pascalCol(name: string, _agg: AggregateIR): string {
 function fieldConfigLines(f: FieldIR, indent: string, builder: string): string[] {
   if (f.type.kind === "id") {
     return [
-      `${indent}${builder}.Property(x => x.${pascal(f.name)}).HasConversion(v => v.Value, v => new ${f.type.targetName}Id(v));`,
+      `${indent}${builder}.Property(x => x.${upperFirst(f.name)}).HasConversion(v => v.Value, v => new ${f.type.targetName}Id(v));`,
     ];
   }
   if (f.type.kind === "enum") {
-    return [`${indent}${builder}.Property(x => x.${pascal(f.name)}).HasConversion<string>();`];
+    return [`${indent}${builder}.Property(x => x.${upperFirst(f.name)}).HasConversion<string>();`];
   }
   if (f.type.kind === "valueobject") {
-    return [`${indent}${builder}.OwnsOne<${f.type.name}>(x => x.${pascal(f.name)});`];
+    return [`${indent}${builder}.OwnsOne<${f.type.name}>(x => x.${upperFirst(f.name)});`];
   }
   return [];
 }
 
 function containmentConfigLines(c: ContainmentIR, agg: AggregateIR): string[] {
   if (!c.collection) {
-    return [`        b.OwnsOne<${c.partName}>(x => x.${pascal(c.name)});`];
+    return [`        b.OwnsOne<${c.partName}>(x => x.${upperFirst(c.name)});`];
   }
   const part = agg.parts.find((p) => p.name === c.partName);
   const partFields = part?.fields ?? [];
@@ -162,7 +162,7 @@ function containmentConfigLines(c: ContainmentIR, agg: AggregateIR): string[] {
   return [
     "        // Ignore the public read-accessor and tell EF to map the",
     "        // private backing field instead.",
-    `        b.Ignore(x => x.${pascal(c.name)});`,
+    `        b.Ignore(x => x.${upperFirst(c.name)});`,
     `        b.OwnsMany<${c.partName}>("_${c.name}", o => {`,
     `            o.ToTable("${snake(plural(c.partName))}");`,
     '            o.WithOwner().HasForeignKey("ParentId");',
