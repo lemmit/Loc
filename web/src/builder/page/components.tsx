@@ -168,3 +168,13 @@ for (const name of PRIMITIVES) {
 for (const name of ["Lambda", "Match", "MatchArm", "MatchElse"] as const) {
   resolver[name] = makeContainer(name);
 }
+
+// Build a resolver that also knows the current source's user-defined
+// `component` calls (each rendered as a container box labelled with its name).
+// craft resolves nodes by their exact `resolvedName`, so the dynamic component
+// names must be registered before the canvas seeds.
+export function resolverWithComponents(componentNames: readonly string[]): Record<string, ElementType> {
+  const r: Record<string, ElementType> = { ...resolver };
+  for (const name of componentNames) if (!r[name]) r[name] = makeContainer(name as PrimitiveName);
+  return r;
+}

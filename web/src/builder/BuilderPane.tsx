@@ -47,19 +47,31 @@ function collectOptions(ast: unknown): Record<string, string[]> {
   return { aggregate: [...aggregate].sort() };
 }
 
+// Names of user-defined `component`s in scope — a call to one is recognised as
+// an editable node rather than Opaque source.
+function collectComponents(ast: unknown): Set<string> {
+  const out = new Set<string>();
+  for (const node of AstUtils.streamAst(ast as Parameters<typeof AstUtils.streamAst>[0])) {
+    if (node.$type === "Component") out.add((node as Component).name);
+  }
+  return out;
+}
+
 export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   // Bumped on Apply to re-read the (mutated) source and re-seed the canvas.
   const [rev, setRev] = useState(0);
   const parsed = useMemo(() => parseDdd(ctx.getSource()), [ctx, rev]);
   const pages = useMemo(() => collectBodies(parsed.ast), [parsed]);
   const options = useMemo(() => collectOptions(parsed.ast), [parsed]);
+  const components = useMemo(() => collectComponents(parsed.ast), [parsed]);
+  const componentNames = useMemo(() => [...components].sort(), [components]);
 
   const [pageName, setPageName] = useState<string>("");
   const current = pages.find((p) => p.name === pageName) ?? pages[0];
 
   const initialNodes = useMemo<SerializedNodes | null>(
-    () => (current ? toCraft(seedFromBody(current.expr)) : null),
-    [current],
+    () => (current ? toCraft(seedFromBody(current.expr, components)) : null),
+    [current, components],
   );
 
   if (parsed.parserErrors.length > 0) {
@@ -86,6 +98,7 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
       pages={pages.map((p) => p.name)}
       pageName={current.name}
       options={options}
+      componentNames={componentNames}
       onSelectPage={setPageName}
       onApply={handleApply}
       compact={!ctx.isDesktop}

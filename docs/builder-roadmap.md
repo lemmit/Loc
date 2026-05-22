@@ -75,6 +75,12 @@ text stays the source of truth.
   handler editable as raw source — instead of forcing Opaque; and a `ref` slot
   accepts a qualified ref (`Form(of: Sales.Order)`), surfaced as the current
   value in its dropdown.
+- **`Detail` / `MasterDetail` + user-component calls**: `Detail(of:, by:)` and
+  `MasterDetail(of:, …, detail: o => …)` are recognised; and a call to a
+  user-defined `component` (collected from the source, registered in the craft
+  resolver) is modelled as a container whose positional args become children, so
+  it's editable rather than Opaque. A non-component value call (`format(x)`)
+  stays an expression.
 
 ## Open — expression / domain-logic surface
 
@@ -91,9 +97,10 @@ text stays the source of truth.
   cond (`ready => …`) as a lambda, so such conds must be comparisons/calls. Emit
   reproduces the original (valid) cond, so round-trip is safe; the "+ arm"
   control defaults the cond to `true` (a non-bare-ident expression).
-- **`MasterDetail`/`Detail`** primitives, and calls to **user-defined
-  components** (`component` defs) — the latter need per-component param signatures
-  to map positional args to names.
+- **Component arg labels** — a user-component call's positional args render as
+  anonymous children today; mapping them to the component's declared param names
+  (a labelled field per param) would read better but needs the param signature
+  threaded into the settings panel.
 
 ## Open — editing UX
 
