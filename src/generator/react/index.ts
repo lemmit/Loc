@@ -94,7 +94,7 @@ export function generateReactForContexts(
   //
   // Without a `ui:` binding (legacy/back-compat), fall through to
   // the per-aggregate / per-workflow / per-view loops directly.
-  // Slices 8/9 finalise the migration and delete the fallback.
+  // A later change finalises the migration and deletes the fallback.
   const ui = deployable.uiName ? sys.uis.find((u) => u.name === deployable.uiName) : undefined;
 
   // Per-aggregate api modules — always emitted; 1:1 with the
@@ -165,7 +165,7 @@ export function generateReactForContexts(
   // Workflows / Views grouping below.  When the ui has no menu
   // block (or no ui binding at all), `sidebarOverride` is
   // `undefined` and the AppShell preparer falls back to its legacy
-  // hardcoded shape — byte-identical to main's pre-Slice-6 output.
+  // hardcoded shape — byte-identical to the original sidebar output.
   const sidebarOverride = ui ? deriveSidebarFromUi(ui) : undefined;
 
   // Explicit pages with non-conventional names need
