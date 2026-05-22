@@ -214,6 +214,20 @@ describe("DomPage / DomLocator", () => {
     );
   });
 
+  it("click fires the pointer/mouse sequence, not just a click", async () => {
+    setBody(`<button data-testid="b">go</button>`);
+    const btn = document.querySelector('[data-testid="b"]') as HTMLButtonElement;
+    const seen: string[] = [];
+    for (const t of ["pointerdown", "mousedown", "mouseup", "click"]) {
+      btn.addEventListener(t, () => seen.push(t));
+    }
+    const page = new DomPage(document, { timeout: 200 });
+    await page.getByTestId("b").click();
+    // A component bound to mousedown reacts (the old el.click() path missed it).
+    expect(seen).toContain("mousedown");
+    expect(seen).toContain("click");
+  });
+
   it("getByRole matches native elements via implicit roles", async () => {
     setBody(`
       <button>Save</button>

@@ -165,6 +165,42 @@ function unmetReason(el: Element, checks: Actionability): string | null {
   return null;
 }
 
+/** Dispatch a Playwright-like click: scroll into view, then the
+ *  pointer/mouse event sequence (so components bound to pointerdown/
+ *  mousedown react), then `el.click()` to fire the click event and run
+ *  the default action (submit/navigate/toggle).  Event constructors that
+ *  the environment lacks (e.g. PointerEvent under happy-dom) are skipped;
+ *  `el.click()` always runs, so behaviour degrades gracefully. */
+function dispatchClick(el: HTMLElement): void {
+  try {
+    (el as unknown as { scrollIntoView?: (o?: unknown) => void }).scrollIntoView?.(
+      { block: "center" },
+    );
+  } catch {
+    /* no layout engine (happy-dom) — ignore */
+  }
+  const win = el.ownerDocument?.defaultView;
+  const init: MouseEventInit = { bubbles: true, cancelable: true, composed: true };
+  const fire = (
+    Ctor: (new (type: string, init: MouseEventInit) => Event) | undefined,
+    type: string,
+  ): void => {
+    if (typeof Ctor === "function") el.dispatchEvent(new Ctor(type, init));
+  };
+  const Pointer = win?.PointerEvent as
+    | (new (type: string, init: MouseEventInit) => Event)
+    | undefined;
+  const Mouse = win?.MouseEvent as
+    | (new (type: string, init: MouseEventInit) => Event)
+    | undefined;
+  fire(Pointer, "pointerover");
+  fire(Pointer, "pointerdown");
+  fire(Mouse, "mousedown");
+  fire(Pointer, "pointerup");
+  fire(Mouse, "mouseup");
+  el.click();
+}
+
 export class DomLocator {
   constructor(
     private readonly doc: Document,
@@ -293,7 +329,7 @@ export class DomLocator {
   }
 
   async click(opts?: { timeout?: number }): Promise<void> {
-    (await this.resolve({ visible: true, enabled: true }, opts?.timeout)).click();
+    dispatchClick(await this.resolve({ visible: true, enabled: true }, opts?.timeout));
   }
 
   async fill(value: string, opts?: { timeout?: number }): Promise<void> {
