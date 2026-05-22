@@ -24,11 +24,14 @@ interface BodyEditorProps {
   onDelete: (index: number) => void;
   onMove: (index: number, dir: -1 | 1) => void;
   onAdd: (text: string) => boolean;
-  /** Inline structured editor for assignment `index`'s value — rendered in
-   *  place of the text field while that row is expanded; null when collapsed. */
-  renderValueEditor?: (index: number) => ReactNode;
-  /** Toggle the inline structured value editor for assignment `index`. */
-  onToggleValueEditor?: (index: number) => void;
+  /** Whether statement `index` (optionally its `field`-th sub-expression) has an
+   *  editable expression — i.e. should offer the inline structured `ƒx` editor. */
+  hasValueEditor?: (index: number, field?: number) => boolean;
+  /** Inline structured editor for a statement's expression — rendered in place
+   *  of the text field while that row is expanded; null when collapsed. */
+  renderValueEditor?: (index: number, field?: number) => ReactNode;
+  /** Toggle the inline structured editor for a statement's expression. */
+  onToggleValueEditor?: (index: number, field?: number) => void;
 }
 
 const MONO = { input: { fontFamily: "monospace", fontSize: 11 } };
@@ -179,7 +182,58 @@ function AssignRow({ view, targets, valueEditor, onToggleEditor, error, onCommit
   );
 }
 
-export function BodyEditor({ statements, targets = [], onEdit, onDelete, onMove, onAdd, renderValueEditor, onToggleValueEditor }: BodyEditorProps): JSX.Element {
+// A single-text statement row (precondition / requires / let / emit / …). When
+// the statement has an editable expression, the `ƒx` toggle swaps the text for
+// the inline structured editor — which edits just the expression, leaving the
+// keyword (and a `let` binding's name) untouched in source.
+function OtherRow({ src, valueEditor, onToggleEditor, error, onCommit, onClearError }: {
+  src: string;
+  valueEditor: ReactNode;
+  onToggleEditor?: () => void;
+  error: boolean;
+  onCommit: (text: string) => void;
+  onClearError: () => void;
+}): JSX.Element {
+  const structured = valueEditor != null;
+  return (
+    <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
+      <Group gap={4} wrap="nowrap" align="flex-start">
+        {structured ? (
+          <Text size="xs" c="dimmed" style={{ fontFamily: "monospace", paddingTop: 4 }}>
+            {src.trimStart().split(/\s+/)[0]}
+          </Text>
+        ) : (
+          <Textarea
+            size="xs"
+            autosize
+            minRows={1}
+            style={{ flex: 1, minWidth: 0 }}
+            defaultValue={src}
+            error={error ? "invalid" : undefined}
+            data-testid="c4system-stmt"
+            styles={MONO}
+            onFocus={onClearError}
+            onBlur={(e) => onCommit(e.currentTarget.value)}
+          />
+        )}
+        {onToggleEditor && (
+          <Button
+            size="compact-xs"
+            variant={structured ? "filled" : "subtle"}
+            data-testid="c4system-stmt-structured"
+            title="edit the expression structurally"
+            onClick={onToggleEditor}
+          >
+            ƒx
+          </Button>
+        )}
+      </Group>
+      {structured && valueEditor}
+    </Stack>
+  );
+}
+
+export function BodyEditor({ statements, targets = [], onEdit, onDelete, onMove, onAdd, hasValueEditor, renderValueEditor, onToggleValueEditor }: BodyEditorProps): JSX.Element {
   const [errorAt, setErrorAt] = useState<number | null>(null);
   const [draftAdd, setDraftAdd] = useState("");
   const [addError, setAddError] = useState(false);
@@ -229,17 +283,13 @@ export function BodyEditor({ statements, targets = [], onEdit, onDelete, onMove,
                 onCommit={(text) => commitEdit(i, original, text)}
               />
             ) : (
-              <Textarea
-                size="xs"
-                autosize
-                minRows={1}
-                style={{ flex: 1, minWidth: 0 }}
-                defaultValue={s.src}
-                error={errorAt === i ? "invalid" : undefined}
-                data-testid="c4system-stmt"
-                styles={MONO}
-                onFocus={() => errorAt === i && setErrorAt(null)}
-                onBlur={(e) => commitEdit(i, s.src, e.currentTarget.value)}
+              <OtherRow
+                src={s.src}
+                valueEditor={hasValueEditor?.(i) ? (renderValueEditor?.(i) ?? null) : null}
+                onToggleEditor={hasValueEditor?.(i) && onToggleValueEditor ? () => onToggleValueEditor(i) : undefined}
+                error={errorAt === i}
+                onClearError={() => errorAt === i && setErrorAt(null)}
+                onCommit={(text) => commitEdit(i, s.src, text)}
               />
             )}
             <Button size="compact-xs" variant="subtle" data-testid="c4system-stmt-up" disabled={i === 0} onClick={() => onMove(i, -1)}>
