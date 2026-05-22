@@ -29,7 +29,7 @@ export function DevToolsDock({ ctx, tab, setTab }: Props): JSX.Element {
 
   const tabs: { id: DockTab; label: string; dot: DotColour }[] = [
     { id: "output", label: "Output", dot: outputAggregateDot(ctx) },
-    { id: "backend", label: "Backend", dot: backendDot },
+    { id: "backend", label: "Runtime", dot: backendDot },
     { id: "tests", label: "Tests", dot: null },
   ];
 

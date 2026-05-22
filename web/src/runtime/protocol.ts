@@ -79,6 +79,25 @@ export interface DispatchFail {
 
 export type DispatchResult = DispatchOk | DispatchFail;
 
+export interface QueryOk {
+  ok: true;
+  /** Column names in result order, taken from PGlite's `fields`.
+   *  Present even when `rows` is empty so a zero-row SELECT still
+   *  renders its header. */
+  fields: string[];
+  rows: Array<Record<string, unknown>>;
+  /** Rows affected by an INSERT/UPDATE/DELETE.  0 for SELECT. */
+  affectedRows: number;
+  durationMs: number;
+}
+
+export interface QueryFail {
+  ok: false;
+  message: string;
+}
+
+export type QueryResult = QueryOk | QueryFail;
+
 export interface WipeResult {
   ok: boolean;
   /** Best-effort error message when `ok === false`.  The runtime
@@ -91,12 +110,13 @@ export interface WipeResult {
 export type RuntimeRpcRequest =
   | { id: number; method: "boot"; params: BootRequest }
   | { id: number; method: "dispatch"; params: SerializedRequest }
+  | { id: number; method: "query"; params: { sql: string } }
   | { id: number; method: "reset"; params: Record<string, never> }
   | { id: number; method: "wipe"; params: Record<string, never> };
 
 export interface RuntimeRpcResponse {
   id: number;
-  result?: BootResult | DispatchResult | WipeResult | { ok: true };
+  result?: BootResult | DispatchResult | QueryResult | WipeResult | { ok: true };
   error?: { message: string };
   /** `console.*` (and any thrown stack) captured in the worker while
    *  this RPC ran — surfaced as the playground's "Backend" log stream.

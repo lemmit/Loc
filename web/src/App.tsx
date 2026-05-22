@@ -10,6 +10,7 @@ import type { GenerateOk, GenerateResult, VirtualFile } from "./build/protocol";
 import type { BundleOk } from "./bundle/protocol";
 import { engineRegistry, selectedEngineId, type RuntimeEngine } from "./engine";
 import { emptyDependencySet } from "./engine";
+import type { QueryResult } from "./runtime/protocol";
 import {
   CUSTOM_ENDPOINT,
   buildConcretePath,
@@ -714,6 +715,14 @@ export default function App(): JSX.Element {
     setReqBody(generateExampleBody(selectedEndpoint.requestSchema, openApiSpec));
   }
 
+  async function runQuery(sql: string): Promise<QueryResult> {
+    const engine = engineRef.current;
+    if (!engine || ddl === null) {
+      return { ok: false, message: "Runtime not booted — boot first." };
+    }
+    return engine.query(sql);
+  }
+
   const files: VirtualFile[] = generateSuccess?.files ?? [];
   // The `.c4.json` sidecar backs the in-browser LikeC4 render of its
   // `.c4` sibling — kept in `files` for lookup, but hidden from the tree.
@@ -799,6 +808,7 @@ export default function App(): JSX.Element {
     queryParamValues,
     setQueryParam,
     runGenerateExample,
+    runQuery,
     liveMode,
     setLiveMode,
     activeTab,

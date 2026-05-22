@@ -21,7 +21,7 @@ import type { LoomExample } from "../examples";
 import type { TreeFolder } from "../preview/file-tree";
 import type { useWorkspace } from "../workspace/use-workspace";
 import type { PipelineState } from "../pipeline/state";
-import type { DispatchResult } from "../runtime/protocol";
+import type { DispatchResult, QueryResult } from "../runtime/protocol";
 import type { ApiEndpoint } from "../backend/openapi";
 import type { TestResult } from "../testing/harness";
 import type { OutputStream } from "./OutputPanel";
@@ -184,6 +184,8 @@ export interface LayoutCtx {
   setQueryParam: (name: string, value: string) => void;
   /** Regenerate the request body from the selected endpoint's schema. */
   runGenerateExample: () => void;
+  /** Run one SQL statement against the booted DB (Database console). */
+  runQuery: (sql: string) => Promise<QueryResult>;
 
   // Live mode
   liveMode: boolean;
