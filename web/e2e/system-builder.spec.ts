@@ -709,3 +709,21 @@ test("structures ternary and match expressions in the editor", async ({ page }) 
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
   await expect.poll(model).toContain("true => null");
 });
+
+test("searches and kind-filters the model graph", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  // A name search reveals a match count and enables Focus; clearing it hides them.
+  await page.getByTestId("c4system-search").fill("Order");
+  await expect(page.getByTestId("c4system-match-count")).toBeVisible();
+  await expect(page.getByTestId("c4system-focus")).toBeEnabled();
+  await page.getByTestId("c4system-focus").click();
+  await page.getByTestId("c4system-search").fill("");
+  await expect(page.getByTestId("c4system-match-count")).toHaveCount(0);
+});

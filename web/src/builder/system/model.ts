@@ -204,3 +204,19 @@ export function nodeDiagnostics<D extends LineRanged>(graph: SystemGraph, diagno
   }
   return out;
 }
+
+/** Node ids matching a search query (case-insensitive substring over name +
+ *  kind) and a kind filter. An empty query ignores text; an empty `kinds`
+ *  ignores kind — so no query and no kinds matches every node (filter inactive).
+ */
+export function matchNodes(graph: SystemGraph, query: string, kinds: readonly NodeKind[]): Set<string> {
+  const q = query.trim().toLowerCase();
+  const kindSet = kinds.length ? new Set<NodeKind>(kinds) : null;
+  const out = new Set<string>();
+  for (const n of graph.nodes) {
+    if (kindSet && !kindSet.has(n.kind)) continue;
+    if (q && !n.name.toLowerCase().includes(q) && !n.kind.toLowerCase().includes(q)) continue;
+    out.add(n.id);
+  }
+  return out;
+}
