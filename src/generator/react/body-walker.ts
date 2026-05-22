@@ -72,6 +72,21 @@ import {
 import { prepareFormFieldVM } from "./templating/preparers/form-fields.js";
 import { renderFormField } from "./templating/render.js";
 import type { FormFieldVM } from "./templating/view-models.js";
+import {
+  boolNamed,
+  describeReceiver,
+  escapeJsxText,
+  firstPositionalText,
+  indentJsx,
+  lambdaArg,
+  namedArgValue,
+  numericNamed,
+  positionalArgs,
+  slugify,
+  stringNamed,
+  unwrapAsAttr,
+  unwrapTextLiteral,
+} from "./walker/shared/args.js";
 
 /** Per-source named-import map — `from` module → set of named
  *  exports the page needs from it.  Replaces the old single-source
@@ -866,13 +881,6 @@ function emitTabs(
  *  attributes.  Lowercases, strips non-alphanumerics down to
  *  hyphens, collapses runs.  Maps `"User Settings"` → `"user-
  *  settings"`. */
-function slugify(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
 /** Slice A2 — Table primitive.
  *
  *  Surface:
@@ -994,19 +1002,6 @@ function emitTable(
  *  `striped:` / `highlight:` / `sticky:` style toggles where any
  *  truthy value flips the prop on.  Returns `false` when the arg
  *  is missing so the template can read it as a boolean directly. */
-function boolNamed(
-  call: ExprIR & { kind: "call" },
-  name: string,
-): boolean {
-  const argNames = call.argNames ?? [];
-  for (let i = 0; i < call.args.length; i++) {
-    if (argNames[i] !== name) continue;
-    const a = call.args[i]!;
-    if (a.kind === "literal" && a.lit === "bool") return a.value === "true";
-  }
-  return false;
-}
-
 /** Slice A2 — emit one `Column("Header", <accessor>)` into a
  *  template-friendly shape: a header string + a per-cell TSX
  *  fragment.  Accessor lambda bodies that are primitive calls
@@ -1052,22 +1047,6 @@ function emitColumn(
     cellJsx,
     key,
   };
-}
-
-/** Slice A2 — return the value-expression of a named arg (e.g.
- *  the `<expr>` in `rows: <expr>`).  Undefined when the named arg
- *  is missing.  Distinct from `stringNamed` (string literals only)
- *  and `numericNamed` (number literals only): this keeps any
- *  expression IR for the caller to render as JS. */
-function namedArgValue(
-  call: ExprIR & { kind: "call" },
-  name: string,
-): ExprIR | undefined {
-  const argNames = call.argNames ?? [];
-  for (let i = 0; i < call.args.length; i++) {
-    if (argNames[i] === name) return call.args[i];
-  }
-  return undefined;
 }
 
 /** Slice A13 — propagate boolean / object flags written on a
@@ -1909,14 +1888,6 @@ function stateBindArg(
   return undefined;
 }
 
-/** Slice 11.14 — render a renderTextContent() result as a JSX
- *  attribute value.  Quoted strings stay quoted; JSX-expression
- *  values (already brace-wrapped) stay brace-wrapped. */
-function unwrapAsAttr(s: string): string {
-  if (s.length >= 2 && s.startsWith("{") && s.endsWith("}")) return s;
-  return s; // already a quoted string literal — JSX accepts it
-}
-
 function emitHeading(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,
@@ -2003,23 +1974,6 @@ function anyNamedArgExpr(
   for (let i = 0; i < call.args.length; i++) {
     if (argNames[i] !== name) continue;
     return emitExpr(call.args[i]!, ctx);
-  }
-  return undefined;
-}
-
-/** Slice 11.7 — extract a lambda-shaped named arg from a call.
- *  Returns the lambda IR sub-node (its `param`/`body`/`block`
- *  fields) so callers can emit the handler.  Returns undefined
- *  when the named arg is missing or isn't a lambda. */
-function lambdaArg(
-  call: ExprIR & { kind: "call" },
-  name: string,
-): (ExprIR & { kind: "lambda" }) | undefined {
-  const argNames = call.argNames ?? [];
-  for (let i = 0; i < call.args.length; i++) {
-    if (argNames[i] !== name) continue;
-    const a = call.args[i]!;
-    if (a.kind === "lambda") return a;
   }
   return undefined;
 }
@@ -2334,12 +2288,6 @@ function renderHelperImports(
     lines.push(`import { ${sorted.join(", ")} } from "${path}";\n`);
   }
   return lines.join("");
-}
-
-function describeReceiver(expr: ExprIR): string {
-  if (expr.kind === "ref") return expr.name;
-  if (expr.kind === "method-call") return `${describeReceiver(expr.receiver)}.${expr.member}`;
-  return `<expr>`;
 }
 
 /** Render a `StmtIR` as a TS statement string (with a trailing
@@ -2926,29 +2874,12 @@ function attrValue(expr: ExprIR, ctx: WalkContext): string {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function positionalArgs(call: ExprIR & { kind: "call" }): ExprIR[] {
-  const argNames = call.argNames ?? [];
-  const out: ExprIR[] = [];
-  for (let i = 0; i < call.args.length; i++) {
-    if (argNames[i] === undefined) out.push(call.args[i]!);
-  }
-  return out;
-}
-
 function positionalChildren(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,
   depth: number,
 ): string[] {
   return positionalArgs(call).map((a) => walk(a, ctx, depth));
-}
-
-function firstPositionalText(call: ExprIR & { kind: "call" }): string | undefined {
-  const positionals = positionalArgs(call);
-  const first = positionals[0];
-  if (!first) return undefined;
-  if (first.kind === "literal" && first.lit === "string") return first.value;
-  return undefined;
 }
 
 /** Slice 11.4 — return the JSX-render shape of the first
@@ -3006,53 +2937,6 @@ function renderTextContent(
     return undefined;
   }
   return `{${emitExpr(expr, ctx)}}`;
-}
-
-/** Slice 11.4 helper — `firstPositionalContent` returns either a
- *  `"quoted string"` or a `{paramRef}` JSX expression.  Components
- *  embedding the result in JSX text need quoted strings unwrapped
- *  to bare text; JSX expressions stay verbatim. */
-function unwrapTextLiteral(s: string): string {
-  if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) {
-    return escapeJsxText(JSON.parse(s) as string);
-  }
-  return s;
-}
-
-function stringNamed(
-  call: ExprIR & { kind: "call" },
-  name: string,
-): string | undefined {
-  const argNames = call.argNames ?? [];
-  for (let i = 0; i < call.args.length; i++) {
-    if (argNames[i] !== name) continue;
-    const a = call.args[i]!;
-    if (a.kind === "literal" && a.lit === "string") return a.value;
-  }
-  return undefined;
-}
-
-function numericNamed(
-  call: ExprIR & { kind: "call" },
-  name: string,
-): number | undefined {
-  const argNames = call.argNames ?? [];
-  for (let i = 0; i < call.args.length; i++) {
-    if (argNames[i] !== name) continue;
-    const a = call.args[i]!;
-    if (a.kind === "literal" && a.lit === "int") {
-      const n = Number(a.value);
-      return Number.isFinite(n) ? n : undefined;
-    }
-  }
-  return undefined;
-}
-
-function escapeJsxText(s: string): string {
-  // Replace `{` and `}` (which JSX would interpret as expression
-  // delimiters) with their HTML entity equivalents.  Apostrophes /
-  // quotes are fine inside JSX text.
-  return s.replace(/\{/g, "&#123;").replace(/\}/g, "&#125;");
 }
 
 /** Render the page-file shell around a walked body — imports +
@@ -3645,14 +3529,4 @@ function zeroValueForType(type: TypeIR): string {
 function typeRefAsTsString(p: ParamIR): string {
   void p;
   return "string";
-}
-
-/** Indent every line of a JSX fragment by a given prefix.  First
- *  line is left as-is (the surrounding template provides its
- *  prefix). */
-function indentJsx(tsx: string, prefix: string): string {
-  const lines = tsx.split("\n");
-  return lines
-    .map((l, i) => (i === 0 ? l : prefix + l))
-    .join("\n");
 }
