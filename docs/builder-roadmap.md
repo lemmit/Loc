@@ -422,6 +422,13 @@ Done:
   React Flow `onReconnect` (`reconnectable: "target"` on those edges, off in
   grouped mode). Gated by `test/system/system-edge-rebind.test.ts`. (The drag
   *gesture* isn't e2e-covered — hard to script reliably; the rebind logic is.)
+- **Mobile layout pass** — on a compact viewport the inspector is a bottom
+  drawer opened via the "Inspect / +" button, which used to sit top-right and
+  collide with the canvas overlay toolbar (search / toggles wrap full-width on a
+  phone). Moved it to a bottom-right floating button (filled + shadow), clear of
+  the overlay and thumb-reachable. Gated by `web/e2e/mobile-model-builder.spec.ts`
+  (a 390×844 viewport asserting the FAB sits below the overlay and opens the
+  drawer) — the first phone-viewport e2e for the builder.
 
 Open:
 
