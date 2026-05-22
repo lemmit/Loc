@@ -913,7 +913,8 @@ async function buildAcmeLiveViewModel(): Promise<Model> {
   const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
   if (errors.length > 0) {
     throw new Error(
-      `OpenAPI parity fixture validation errors:\n` + errors.map((e) => `  ${e.message}`).join("\n"),
+      `OpenAPI parity fixture validation errors:\n` +
+        errors.map((e) => `  ${e.message}`).join("\n"),
     );
   }
   return doc.parseResult.value as Model;

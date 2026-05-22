@@ -9,7 +9,7 @@
 // resolves fine; the type imports below are erased.
 
 import type { ExprIR } from "../../../ir/loom-ir.js";
-import { lowerFirst, upperFirst, plural } from "../../../util/naming.js";
+import { lowerFirst, plural, upperFirst } from "../../../util/naming.js";
 import type { ApiHookUse, WalkContext } from "../body-walker.js";
 import { emitExpr } from "../body-walker.js";
 

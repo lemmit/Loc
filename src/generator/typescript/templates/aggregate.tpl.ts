@@ -193,7 +193,7 @@ function renderEntity(e: EntityShape, emitProvenance = false): string {
   // file imports the User type from auth/.  Per-op signatures still
   // get the parameter conditionally so a non-auth op stays
   // un-burdened with a User param.
-  const anyOpUsesCurrentUser = e.operations.some(operationUsesCurrentUser);
+  const _anyOpUsesCurrentUser = e.operations.some(operationUsesCurrentUser);
   for (const op of e.operations) {
     const visibility = op.visibility === "public" ? "public" : "private";
     const usesUser = operationUsesCurrentUser(op);

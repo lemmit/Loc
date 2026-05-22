@@ -1,5 +1,5 @@
 import { type AstNode, CstUtils, type LangiumDocument, type MaybePromise } from "langium";
-import { DefaultRenameProvider, type LangiumServices } from "langium/lsp";
+import { DefaultRenameProvider } from "langium/lsp";
 import {
   type Position,
   type Range,
@@ -21,10 +21,6 @@ import { collectMemberUsages, isRenameableMember, memberDeclAt } from "./member-
 // ---------------------------------------------------------------------------
 
 export class DddRenameProvider extends DefaultRenameProvider {
-  constructor(services: LangiumServices) {
-    super(services);
-  }
-
   override async rename(
     document: LangiumDocument,
     params: RenameParams,

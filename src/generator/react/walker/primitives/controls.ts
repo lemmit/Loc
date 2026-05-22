@@ -4,7 +4,7 @@
 // lookups, so they pull the core walk/expr/stmt helpers.
 
 import type { ExprIR } from "../../../../ir/loom-ir.js";
-import { lowerFirst, humanize, upperFirst, plural, snake } from "../../../../util/naming.js";
+import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../../util/naming.js";
 import type { WalkContext } from "../../body-walker.js";
 import {
   emitExpr,
@@ -117,11 +117,7 @@ export function emitAction(
 ): string {
   void depth;
   const opRef = positionalArgs(call)[0];
-  if (
-    !opRef ||
-    opRef.kind !== "member" ||
-    opRef.receiver.kind !== "ref"
-  ) {
+  if (!opRef || opRef.kind !== "member" || opRef.receiver.kind !== "ref") {
     return `{/* Action: first argument must be <instance>.<operation> (e.g. order.confirm) */}`;
   }
   const instanceName = opRef.receiver.name;
@@ -134,9 +130,7 @@ export function emitAction(
   if (!agg) {
     return `{/* Action(${instanceName}.${opName}): aggregate ${aggName} not found */}`;
   }
-  const op = agg.operations.find(
-    (o) => o.name === opName && o.visibility === "public",
-  );
+  const op = agg.operations.find((o) => o.name === opName && o.visibility === "public");
   if (!op) {
     return `{/* Action(${instanceName}.${opName}): no public operation '${opName}' on ${agg.name} */}`;
   }
@@ -228,17 +222,9 @@ function emitLambdaBody(lam: ExprIR & { kind: "lambda" }, ctx: WalkContext): str
  *  (a method-call whose receiver names the aggregate) or `<Agg>.byId`
  *  with no api handle.  Returns the aggregate name when it's known to
  *  this UI, else undefined. */
-function singleAggregateOfQuery(
-  ofArg: ExprIR,
-  ctx: WalkContext,
-): string | undefined {
+function singleAggregateOfQuery(ofArg: ExprIR, ctx: WalkContext): string | undefined {
   const recv = ofArg.kind === "method-call" ? ofArg.receiver : ofArg;
-  const name =
-    recv.kind === "member"
-      ? recv.member
-      : recv.kind === "ref"
-        ? recv.name
-        : undefined;
+  const name = recv.kind === "member" ? recv.member : recv.kind === "ref" ? recv.name : undefined;
   return name && ctx.aggregatesByName.has(name) ? name : undefined;
 }
 

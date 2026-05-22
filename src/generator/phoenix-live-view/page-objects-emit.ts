@@ -26,7 +26,7 @@
 // ---------------------------------------------------------------------------
 
 import type { AggregateIR, BoundedContextIR, PageIR, TypeIR } from "../../ir/loom-ir.js";
-import { lowerFirst, upperFirst, plural, snake } from "../../util/naming.js";
+import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { fillBlock } from "../react/page-objects-builder.js";
 
 export interface BuildPlaywrightPageObjectArgs {

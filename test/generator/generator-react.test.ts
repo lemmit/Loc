@@ -40,10 +40,10 @@ describe("react generator", () => {
 
     // Deps include the libraries the generator hooks against.
     const pkg = JSON.parse(files.get("web_app/package.json")!);
-    expect(pkg.dependencies["react"]).toBeTruthy();
+    expect(pkg.dependencies.react).toBeTruthy();
     expect(pkg.dependencies["@tanstack/react-query"]).toBeTruthy();
     expect(pkg.dependencies["@mantine/core"]).toBeTruthy();
-    expect(pkg.dependencies["zod"]).toBeTruthy();
+    expect(pkg.dependencies.zod).toBeTruthy();
     expect(pkg.dependencies["react-hook-form"]).toBeTruthy();
     expect(pkg.dependencies["@hookform/resolvers"]).toBeTruthy();
     expect(pkg.dependencies["@mantine/form"]).toBeFalsy();

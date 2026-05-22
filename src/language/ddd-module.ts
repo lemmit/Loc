@@ -45,7 +45,7 @@ export const DddModule: Module<DddServices, PartialLangiumServices & DddAddedSer
     ReferencesProvider: (services: LangiumServices) => new DddReferencesProvider(services),
     RenameProvider: (services: LangiumServices) => new DddRenameProvider(services),
     SemanticTokenProvider: (services: LangiumServices) => new DddSemanticTokenProvider(services),
-    SignatureHelp: (services: LangiumServices) => new DddSignatureHelpProvider(services),
+    SignatureHelp: () => new DddSignatureHelpProvider(),
     CodeActionProvider: () => new DddCodeActionProvider(),
   },
 };

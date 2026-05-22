@@ -1,5 +1,5 @@
 import type { PathIR, StmtIR } from "../../ir/loom-ir.js";
-import { upperFirst, snake } from "../../util/naming.js";
+import { snake, upperFirst } from "../../util/naming.js";
 import { type RenderCtx, renderExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------

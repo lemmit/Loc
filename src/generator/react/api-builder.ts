@@ -11,7 +11,7 @@ import type {
   TypeIR,
   ValueObjectIR,
 } from "../../ir/loom-ir.js";
-import { upperFirst, plural, snake } from "../../util/naming.js";
+import { plural, snake, upperFirst } from "../../util/naming.js";
 import {
   chainSingleFieldNative,
   refineClauseFor,
@@ -70,7 +70,9 @@ export function buildApiModule(
         new Set(op.params.map((p) => p.name)),
       ),
     );
-    lines.push(`export type ${upperFirst(op.name)}Request = z.infer<typeof ${upperFirst(op.name)}Request>;`);
+    lines.push(
+      `export type ${upperFirst(op.name)}Request = z.infer<typeof ${upperFirst(op.name)}Request>;`,
+    );
   }
   lines.push("");
 
@@ -83,7 +85,9 @@ export function buildApiModule(
         lines.push(`  ${p.name}: ${zodForRequest(p.type)},`);
       }
       lines.push(`});`);
-      lines.push(`export type ${upperFirst(find.name)}Query = z.infer<typeof ${upperFirst(find.name)}Query>;`);
+      lines.push(
+        `export type ${upperFirst(find.name)}Query = z.infer<typeof ${upperFirst(find.name)}Query>;`,
+      );
     }
   }
   lines.push("");
@@ -428,4 +432,3 @@ function collectEnums(
   }
   return ctx.enums.filter((e) => used.has(e.name));
 }
-

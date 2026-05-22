@@ -52,9 +52,7 @@ async function build(): Promise<Map<string, string>> {
   const file = path.join(dir, "mini.ddd");
   fs.writeFileSync(file, SOURCE);
   const services = createDddServices(NodeFileSystem);
-  const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
-    URI.file(file),
-  );
+  const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(URI.file(file));
   await services.shared.workspace.DocumentBuilder.build([doc], { validation: true });
   const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
   if (errors.length > 0) {
@@ -66,9 +64,7 @@ async function build(): Promise<Map<string, string>> {
 describe("Phoenix user-component rendering", () => {
   it("emits a UiComponents module with one function component per ui.component", async () => {
     const files = await build();
-    const mod = files.get(
-      "phoenix_app/lib/phoenix_app_web/components/ui_components.ex",
-    );
+    const mod = files.get("phoenix_app/lib/phoenix_app_web/components/ui_components.ex");
     expect(mod, "ui_components.ex is generated").toBeDefined();
     expect(mod!).toMatch(/defmodule PhoenixAppWeb\.Components\.UiComponents do/);
     expect(mod!).toMatch(/use PhoenixAppWeb, :html/);
@@ -83,8 +79,6 @@ describe("Phoenix user-component rendering", () => {
     const files = await build();
     const live = files.get("phoenix_app/lib/phoenix_app_web/live/home_live.ex");
     expect(live, "home_live.ex is generated").toBeDefined();
-    expect(live!).toMatch(
-      /<PhoenixAppWeb\.Components\.UiComponents\.greeting label=\{[^}]*\} \/>/,
-    );
+    expect(live!).toMatch(/<PhoenixAppWeb\.Components\.UiComponents\.greeting label=\{[^}]*\} \/>/);
   });
 });

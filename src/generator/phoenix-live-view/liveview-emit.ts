@@ -26,7 +26,7 @@ import type {
   TypeIR,
   UiIR,
 } from "../../ir/loom-ir.js";
-import { lowerFirst, upperFirst, plural, snake } from "../../util/naming.js";
+import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import {
   type ActionBinding,
   defaultInitFor,
@@ -214,7 +214,15 @@ function buildActionHandlers(
 }
 
 function renderLiveView(a: RenderArgs): string {
-  const { page, liveModule, appModule, ui, aggregatesByName, contextModuleByAggName, componentInfo } = a;
+  const {
+    page,
+    liveModule,
+    appModule,
+    ui,
+    aggregatesByName,
+    contextModuleByAggName,
+    componentInfo,
+  } = a;
   const webModule = `${appModule}Web`;
 
   // All pages — scaffold and custom — route through the HEEx walker.

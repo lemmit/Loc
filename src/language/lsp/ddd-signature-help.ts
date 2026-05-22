@@ -1,5 +1,5 @@
 import { type AstNode, CstUtils, type LangiumDocument, type MaybePromise } from "langium";
-import type { LangiumServices, SignatureHelpProvider } from "langium/lsp";
+import type { SignatureHelpProvider } from "langium/lsp";
 import type {
   SignatureHelp,
   SignatureHelpOptions,
@@ -24,8 +24,6 @@ import { buildSignature } from "./render-signature.js";
 // ---------------------------------------------------------------------------
 
 export class DddSignatureHelpProvider implements SignatureHelpProvider {
-  constructor(_services: LangiumServices) {}
-
   get signatureHelpOptions(): SignatureHelpOptions {
     return { triggerCharacters: ["(", ","], retriggerCharacters: [","] };
   }

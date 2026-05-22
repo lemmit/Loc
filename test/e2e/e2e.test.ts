@@ -253,7 +253,7 @@ interface OpenApiSpec {
  */
 function fieldSet(spec: OpenApiSpec, schemaName: string): Set<string> {
   const schema = spec.components?.schemas?.[schemaName];
-  if (!schema || !schema.properties) return new Set();
+  if (!schema?.properties) return new Set();
   return new Set(Object.keys(schema.properties));
 }
 

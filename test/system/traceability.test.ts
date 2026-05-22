@@ -71,8 +71,8 @@ describe("traceability IR", () => {
 
     // Code coverage — `start` is covered, `AuthApi` is entitled-but-untested.
     expect(t.testsByCodeElement["Identity.Auth.LoginSession.start"]).toEqual(["TC-001"]);
-    expect(t.testsByCodeElement["AuthApi"]).toBeUndefined();
-    expect(t.codeElements["AuthApi"]).toBe("deployable");
+    expect(t.testsByCodeElement.AuthApi).toBeUndefined();
+    expect(t.codeElements.AuthApi).toBe("deployable");
 
     // Executable-test back-link reaches the covered code element.
     expect(t.execTestsByTestCase["TC-001"]).toEqual(["start works"]);

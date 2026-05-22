@@ -1,19 +1,13 @@
 import type { AggregateIR, BoundedContextIR, DeployableIR, SystemIR } from "../../ir/loom-ir.js";
-import { lowerFirst, upperFirst, plural, snake } from "../../util/naming.js";
+import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import { buildApiModule } from "./api-builder.js";
 import { deriveSidebarFromUi } from "./menu-emitter.js";
-import { buildPageObjectModule } from "./page-objects-builder.js";
 import { deriveExtraRoutesFromUi, emitPageObjectsForUi, emitPagesForUi } from "./pages-emitter.js";
 import { renderAppShell, renderMain, renderShellFile, renderTheme } from "./templating/render.js";
-import { allViews, buildViewPageObject, buildViewsApiModule, hasAnyView } from "./view-builder.js";
-import {
-  allWorkflows,
-  buildWorkflowPageObject,
-  buildWorkflowsApiModule,
-  hasAnyWorkflow,
-} from "./workflow-builder.js";
+import { allViews, buildViewsApiModule, hasAnyView } from "./view-builder.js";
+import { allWorkflows, buildWorkflowsApiModule, hasAnyWorkflow } from "./workflow-builder.js";
 
 // ---------------------------------------------------------------------------
 // React + React Query + Zod + Mantine generator.
@@ -353,4 +347,3 @@ const E2E_TSCONFIG_JSON =
     null,
     2,
   ) + "\n";
-

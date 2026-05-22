@@ -4,7 +4,6 @@ import type {
   DeployableIR,
   LoomModel,
   ModuleIR,
-  Platform,
   SystemIR,
 } from "../ir/loom-ir.js";
 import { lowerModel } from "../ir/lower.js";

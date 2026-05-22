@@ -7,18 +7,14 @@ import type {
   EntityPart,
   EnumDecl,
   Expression,
-  FindDecl,
   FunctionDecl,
   Lambda,
   MemberAccess,
   Operation,
   Parameter,
   Repository,
-  Statement,
   TypeRef,
   ValueObject,
-  View,
-  Workflow,
 } from "./generated/ast.js";
 import {
   isAggregate,
@@ -45,7 +41,6 @@ import {
   isNowExpr,
   isNullLit,
   isOperation,
-  isParameter,
   isParenExpr,
   isPrimitiveType,
   isProperty,
@@ -158,7 +153,7 @@ export function isAssignable(value: DddType, target: DddType): boolean {
 // ---------------------------------------------------------------------------
 
 export function resolveTypeRef(ref: TypeRef | undefined): DddType {
-  if (!ref || !ref.base) return T.unknown;
+  if (!ref?.base) return T.unknown;
   let resolved = resolveBase(ref.base);
   if (ref.array) resolved = T.array(resolved);
   if (ref.optional) resolved = T.opt(resolved);

@@ -1,7 +1,7 @@
 import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
 import type { AggregateIR, BoundedContextIR, ExprIR, TypeIR, ViewIR } from "../../../ir/loom-ir.js";
 import { viewUsesCurrentUser } from "../../../ir/loom-ir.js";
-import { lowerFirst, upperFirst, plural, snake } from "../../../util/naming.js";
+import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Hono view routes emission.
@@ -19,7 +19,6 @@ import { lowerFirst, upperFirst, plural, snake } from "../../../util/naming.js";
 // in `http/index.ts`.  Matches the workflow / aggregate route
 // pattern: typed Zod schemas, OpenAPI annotations, on-error filter.
 // ---------------------------------------------------------------------------
-
 
 export function buildViewsRoutesFile(
   ctx: BoundedContextIR,

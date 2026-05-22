@@ -1,6 +1,6 @@
 import type { AggregateIR, RepositoryIR } from "../../../ir/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
-import { upperFirst, plural, snake } from "../../../util/naming.js";
+import { plural, snake, upperFirst } from "../../../util/naming.js";
 
 // ASP.NET Core controller emission.  One controller per aggregate root,
 // dispatching every endpoint through Mediator (`ISender`).  The

@@ -1,5 +1,5 @@
 import type { BinOp, ExprIR, TypeIR } from "../../ir/loom-ir.js";
-import { upperFirst, snake } from "../../util/naming.js";
+import { snake, upperFirst } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Expression renderer for the Phoenix LiveView / Elixir backend.
@@ -151,7 +151,7 @@ function renderMethodCall(e: Extract<ExprIR, { kind: "method-call" }>, ctx: Rend
   return `${recv}.${snake(e.member)}(${args.join(", ")})`;
 }
 
-function renderCollectionOp(recv: string, name: string, args: string[], ctx: RenderCtx): string {
+function renderCollectionOp(recv: string, name: string, args: string[], _ctx: RenderCtx): string {
   switch (name) {
     case "count":
       return `Enum.count(${recv})`;

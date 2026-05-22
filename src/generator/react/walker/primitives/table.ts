@@ -78,7 +78,7 @@ export function emitTable(
   // dynamic ids interpolate (`orders-row-${row.id}`).
   const rowTestidLam = lambdaArg(call, "rowTestid");
   let rowTestidJs: string | undefined;
-  if (rowTestidLam && rowTestidLam.body) {
+  if (rowTestidLam?.body) {
     const childCtx: WalkContext = {
       ...ctx,
       lambdaParams: extendLambdaParams(ctx, rowTestidLam.param, rowVar),

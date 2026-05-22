@@ -6,7 +6,7 @@
 // so it must share the same sink and live alongside the form emitters.
 
 import type { AggregateIR, BoundedContextIR, ExprIR, TypeIR } from "../../../../ir/loom-ir.js";
-import { lowerFirst, humanize, upperFirst, plural, snake } from "../../../../util/naming.js";
+import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../../util/naming.js";
 import type { WalkContext } from "../../body-walker.js";
 import {
   emitExpr,
@@ -241,7 +241,12 @@ function emitFormOfAggregate(
   // components (Stack/Button/Group on Mantine, equivalents elsewhere).
   addImportsForPrimitive(ctx, "primitive-form-of");
   const prepared = prepareFormFields(ctx, fields, fields, bc, testidNamespace);
-  addImport(ctx, `../api/${lowerFirst(agg.name)}`, `Create${agg.name}Request`, `useCreate${agg.name}`);
+  addImport(
+    ctx,
+    `../api/${lowerFirst(agg.name)}`,
+    `Create${agg.name}Request`,
+    `useCreate${agg.name}`,
+  );
   ctx.collectedTestids.add(`${testidNamespace}-submit`);
   const onSubmitJs = emitFormOnSubmit(ctx, call, prepared.idTargets, "create");
   ctx.formOfs.push({
@@ -341,8 +346,7 @@ function emitFormOfOperation(
   ctx: WalkContext,
   opRef: ExprIR & { kind: "member" },
 ): string {
-  const instanceName =
-    opRef.receiver.kind === "ref" ? opRef.receiver.name : undefined;
+  const instanceName = opRef.receiver.kind === "ref" ? opRef.receiver.name : undefined;
   const opName = opRef.member;
   const aggName = instanceName ? ctx.paramTypes?.get(instanceName) : undefined;
   if (!instanceName || !aggName) {
@@ -425,8 +429,7 @@ export function emitModal(
   // The op-form references the operation through an instance
   // (`Form(data.confirm)`); the operation name is the member.
   const opRef = positionalArgs(formChild)[0];
-  const opName =
-    opRef && opRef.kind === "member" ? opRef.member : undefined;
+  const opName = opRef && opRef.kind === "member" ? opRef.member : undefined;
   if (!opName) {
     return `{/* Modal: child Form must be Form(<instance>.<operation>) */}`;
   }
