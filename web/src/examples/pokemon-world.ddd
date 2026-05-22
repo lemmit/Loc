@@ -10,10 +10,10 @@
 system PokemonWorld {
 
     theme {
-        primary: "#ef4444"
-        neutral: "#475569"
-        radius: "lg"
-        fontFamily: "Inter, system-ui, sans-serif"
+        primary: "#ef5350"
+        neutral: "#2a3a5e"
+        radius: "xl"
+        fontFamily: "Nunito, system-ui, sans-serif"
     }
 
     // ──────────────────────────────────────────────────────────────
