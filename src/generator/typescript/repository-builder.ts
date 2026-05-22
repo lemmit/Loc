@@ -1,6 +1,7 @@
 import { wireShapeFor } from "../../ir/enrichments.js";
 import type {
   AggregateIR,
+  AssociationIR,
   BoundedContextIR,
   EntityPartIR,
   FieldIR,
@@ -10,7 +11,45 @@ import type {
 } from "../../ir/loom-ir.js";
 import { findUsesCurrentUser, viewUsesCurrentUser } from "../../ir/loom-ir.js";
 import { lowerFirst, plural, upperFirst } from "../../util/naming.js";
-import { valueObjectColumnNames } from "./templates.js";
+import { joinColumnName, joinTableConstName, valueObjectColumnNames } from "./templates.js";
+
+/** Associations (`Id<T>[]` reference collections) declared on an
+ * aggregate, persisted as many-to-many join tables.  Empty when none. */
+function associationsOf(agg: AggregateIR): AssociationIR[] {
+  return agg.associations ?? [];
+}
+
+/** True for a field type that is a collection of references
+ * (`Id<T>[]`) — persisted via a join table, not a column. */
+function isRefCollection(t: TypeIR): boolean {
+  return t.kind === "array" && t.element.kind === "id";
+}
+
+/** Bulk-load lines for every association into `<field>ByOwner`
+ * maps keyed by the owner id.  Assumes a `__ids: string[]` of owner
+ * ids is in scope.  Used by the array-returning load paths
+ * (`findManyByIds`, array `find`s); `findById` loads singular lists
+ * inline instead. */
+function associationMapLines(agg: AggregateIR, dbExpr: string, indent: string): string[] {
+  const out: string[] = [];
+  for (const assoc of associationsOf(agg)) {
+    const joinConst = joinTableConstName(assoc);
+    const ownerCol = joinColumnName(assoc.ownerFk);
+    const targetCol = joinColumnName(assoc.targetFk);
+    const rows = `${assoc.fieldName}JoinRows`;
+    const map = `${assoc.fieldName}ByOwner`;
+    out.push(
+      `${indent}const ${rows} = await ${dbExpr}.select({ o: schema.${joinConst}.${ownerCol}, t: schema.${joinConst}.${targetCol} }).from(schema.${joinConst}).where(inArray(schema.${joinConst}.${ownerCol}, __ids)).orderBy(schema.${joinConst}.${ownerCol}, schema.${joinConst}.ordinal);`,
+    );
+    out.push(`${indent}const ${map} = new Map<string, Ids.${assoc.targetAgg}Id[]>();`);
+    out.push(`${indent}for (const r of ${rows}) {`);
+    out.push(`${indent}  const list = ${map}.get(r.o) ?? [];`);
+    out.push(`${indent}  list.push(Ids.${assoc.targetAgg}Id(r.t));`);
+    out.push(`${indent}  ${map}.set(r.o, list);`);
+    out.push(`${indent}}`);
+  }
+  return out;
+}
 
 // ---------------------------------------------------------------------------
 // Generates the TypeScript repository file for an aggregate.
@@ -246,7 +285,10 @@ function wireProjectionValue(
     return `{ ${fields} }`;
   }
   if (t.kind === "array") {
-    return `${expr}.map((__a: never) => (${wireProjectionValue("__a", t.element, ctx, false)}))`;
+    // `__a` is contextually typed by `.map` over the element type;
+    // an explicit annotation would fight strict-mode inference for
+    // branded `Id<T>` element arrays.
+    return `${expr}.map((__a) => (${wireProjectionValue("__a", t.element, ctx, false)}))`;
   }
   if (t.kind === "entity") return expr;
   return expr;
@@ -270,8 +312,10 @@ function findManyByIdsMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] 
   const eagerContains = agg.contains
     .map((c) => ({ c, part: agg.parts.find((p) => p.name === c.partName) }))
     .filter((x): x is { c: typeof x.c; part: EntityPartIR } => !!x.part);
-  if (eagerContains.length > 0) {
+  if (eagerContains.length > 0 || associationsOf(agg).length > 0) {
     lines.push(`    const __ids = rootRows.map((r) => r.id);`);
+  }
+  if (eagerContains.length > 0) {
     for (const { c, part } of eagerContains) {
       const childTable = lowerFirst(plural(part.name));
       lines.push(
@@ -295,6 +339,7 @@ function findManyByIdsMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] 
       }
     }
   }
+  lines.push(...associationMapLines(agg, "this.db", "    "));
   lines.push(`    return rootRows.map((root) => ${hydrateRootForFindAllExpr(agg, "root", ctx)});`);
   lines.push(`  }`);
   return lines;
@@ -333,6 +378,19 @@ function findByIdMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
     }
   }
 
+  // Load reference collections (`Id<T>[]`) from their join tables.
+  for (const assoc of associationsOf(agg)) {
+    const joinConst = joinTableConstName(assoc);
+    const ownerCol = joinColumnName(assoc.ownerFk);
+    const targetCol = joinColumnName(assoc.targetFk);
+    lines.push(
+      `      const ${assoc.fieldName}Rows = await tx.select({ t: schema.${joinConst}.${targetCol} }).from(schema.${joinConst}).where(eq(schema.${joinConst}.${ownerCol}, id)).orderBy(schema.${joinConst}.ordinal);`,
+    );
+    lines.push(
+      `      const ${assoc.fieldName} = ${assoc.fieldName}Rows.map((r) => Ids.${assoc.targetAgg}Id(r.t));`,
+    );
+  }
+
   // Hydrate root
   lines.push(`      return ${hydrateRootExpr(agg, "root", ctx)};`);
   lines.push(`    });`);
@@ -344,7 +402,12 @@ function hydrateRootExpr(agg: AggregateIR, rowVar: string, ctx: BoundedContextIR
   const fields: string[] = [];
   fields.push(`id: Ids.${agg.name}Id(${rowVar}.id)`);
   for (const f of agg.fields) {
-    fields.push(`${f.name}: ${hydrateFieldExpr(f, rowVar, ctx)}`);
+    if (isRefCollection(f.type)) {
+      // Loaded into a local const from the join table (see findByIdMethod).
+      fields.push(`${f.name}`);
+    } else {
+      fields.push(`${f.name}: ${hydrateFieldExpr(f, rowVar, ctx)}`);
+    }
   }
   fields.push(...provHydrateEntries(agg.fields, rowVar));
   for (const c of agg.contains) {
@@ -464,6 +527,42 @@ function saveMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
     );
     lines.push(`      }`);
   }
+  // Diff-sync each reference collection's join table: delete pairs the
+  // aggregate no longer holds, insert the new ones (idempotent via the
+  // composite PK).
+  for (const assoc of associationsOf(agg)) {
+    const joinConst = joinTableConstName(assoc);
+    const ownerCol = joinColumnName(assoc.ownerFk);
+    const targetCol = joinColumnName(assoc.targetFk);
+    const cap = upperFirst(assoc.fieldName);
+    lines.push("");
+    lines.push(
+      `      const __existing${cap} = await tx.select({ t: schema.${joinConst}.${targetCol} }).from(schema.${joinConst}).where(eq(schema.${joinConst}.${ownerCol}, aggregate.id));`,
+    );
+    lines.push(`      const __existingIds${cap} = new Set(__existing${cap}.map((r) => r.t));`);
+    // Ordered: keep the field's array order so the round-trip is stable;
+    // the ordinal column carries the position and is updated on reorder.
+    lines.push(
+      `      const __current${cap} = aggregate.${assoc.fieldName}.map((x) => x as string);`,
+    );
+    lines.push(`      const __currentIds${cap} = new Set(__current${cap});`);
+    lines.push(
+      `      const __toDelete${cap} = [...__existingIds${cap}].filter((t) => !__currentIds${cap}.has(t));`,
+    );
+    lines.push(`      if (__toDelete${cap}.length > 0) {`);
+    lines.push(
+      `        await tx.delete(schema.${joinConst}).where(and(eq(schema.${joinConst}.${ownerCol}, aggregate.id), inArray(schema.${joinConst}.${targetCol}, __toDelete${cap})));`,
+    );
+    lines.push(`      }`);
+    lines.push(`      for (let __i = 0; __i < __current${cap}.length; __i++) {`);
+    lines.push(
+      `        const __row = { ${ownerCol}: aggregate.id as string, ${targetCol}: __current${cap}[__i]!, ordinal: __i };`,
+    );
+    lines.push(
+      `        await tx.insert(schema.${joinConst}).values(__row).onConflictDoUpdate({ target: [schema.${joinConst}.${ownerCol}, schema.${joinConst}.${targetCol}], set: { ordinal: __i } });`,
+    );
+    lines.push(`      }`);
+  }
   lines.push(`    });`);
   lines.push("");
   lines.push(`    for (const event of aggregate.pullEvents()) {`);
@@ -476,7 +575,10 @@ function saveMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
 function rootProjection(agg: AggregateIR, varExpr: string, ctx: BoundedContextIR): string {
   return projectionObject(varExpr, [
     { fieldName: "id", expr: `${varExpr}.id as string` },
-    ...agg.fields.flatMap((f) => projectFieldEntries(f, varExpr, ctx)),
+    // Reference collections live in join tables, not on the root row.
+    ...agg.fields
+      .filter((f) => !isRefCollection(f.type))
+      .flatMap((f) => projectFieldEntries(f, varExpr, ctx)),
     ...provColumnEntries(agg.fields, varExpr),
   ]);
 }
@@ -621,8 +723,10 @@ function findQueryMethod(agg: AggregateIR, find: FindIR, ctx: BoundedContextIR):
     const eagerContains = agg.contains
       .map((c) => ({ c, part: agg.parts.find((p) => p.name === c.partName) }))
       .filter((x): x is { c: typeof x.c; part: EntityPartIR } => !!x.part);
-    if (eagerContains.length > 0) {
+    if (eagerContains.length > 0 || associationsOf(agg).length > 0) {
       lines.push(`    const __ids = rootRows.map((r) => r.id);`);
+    }
+    if (eagerContains.length > 0) {
       for (const { c, part } of eagerContains) {
         const childTable = lowerFirst(plural(part.name));
         lines.push(
@@ -649,6 +753,7 @@ function findQueryMethod(agg: AggregateIR, find: FindIR, ctx: BoundedContextIR):
         }
       }
     }
+    lines.push(...associationMapLines(agg, "this.db", "    "));
     lines.push(
       `    return rootRows.map((root) => ${hydrateRootForFindAllExpr(agg, "root", ctx)});`,
     );
@@ -690,7 +795,11 @@ function hydrateRootForFindAllExpr(
   const fields: string[] = [];
   fields.push(`id: Ids.${agg.name}Id(${rowVar}.id)`);
   for (const f of agg.fields) {
-    fields.push(`${f.name}: ${hydrateFieldExpr(f, rowVar, ctx)}`);
+    if (isRefCollection(f.type)) {
+      fields.push(`${f.name}: ${f.name}ByOwner.get(${rowVar}.id) ?? []`);
+    } else {
+      fields.push(`${f.name}: ${hydrateFieldExpr(f, rowVar, ctx)}`);
+    }
   }
   fields.push(...provHydrateEntries(agg.fields, rowVar));
   for (const c of agg.contains) {
@@ -817,6 +926,38 @@ function lowerToDrizzle(
       ops.add("not");
       return `not(${inner})`;
     }
+    // `this.<refColl>.contains(x)` — membership over a reference
+    // collection.  Lowers to a subquery over the field's join table:
+    // the owner row is matched iff a (owner, target=x) pair exists.
+    if (
+      e.kind === "method-call" &&
+      e.member === "contains" &&
+      e.receiverType.kind === "array" &&
+      e.receiverType.element.kind === "id" &&
+      e.args.length === 1
+    ) {
+      const fieldName = refCollectionFieldName(e.receiver);
+      const owner = ctx.aggregates.find((a) => lowerFirst(plural(a.name)) === tableName);
+      const assoc = owner
+        ? associationsOf(owner).find((x) => x.fieldName === fieldName)
+        : undefined;
+      const arg = renderValue(e.args[0]!);
+      if (!assoc || arg === null) return null;
+      const joinConst = joinTableConstName(assoc);
+      const ownerCol = joinColumnName(assoc.ownerFk);
+      const targetCol = joinColumnName(assoc.targetFk);
+      ops.add("inArray");
+      ops.add("eq");
+      return `inArray(schema.${tableName}.id, this.db.select({ id: schema.${joinConst}.${ownerCol} }).from(schema.${joinConst}).where(eq(schema.${joinConst}.${targetCol}, ${arg})))`;
+    }
+    return null;
+  }
+
+  /** Field name behind a `this.<field>` receiver, or null. */
+  function refCollectionFieldName(e: import("../../ir/loom-ir.js").ExprIR): string | null {
+    if (e.kind === "paren") return refCollectionFieldName(e.inner);
+    if (e.kind === "member" && e.receiver.kind === "this") return e.member;
+    if (e.kind === "ref" && e.refKind === "this-prop") return e.name;
     return null;
   }
 

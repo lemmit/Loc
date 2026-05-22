@@ -63,6 +63,29 @@ export interface ContainmentIR {
   collection: boolean;
 }
 
+/** A many-to-many association derived from an aggregate field whose
+ * type is a collection of references to another aggregate
+ * (`field: Id<Target>[]`).  Populated by `enrichLoomModel`; backends
+ * that persist relationally emit a join table from this rather than
+ * re-deriving it.  See `src/ir/enrichments.ts`. */
+export interface AssociationIR {
+  /** The owning aggregate's field name (`party`). */
+  fieldName: string;
+  /** The aggregate that declares the field (`Trainer`). */
+  ownerAgg: string;
+  /** The referenced aggregate (`Pokemon`). */
+  targetAgg: string;
+  /** The id value type of the target reference. */
+  valueType: IdValueType;
+  /** Join-table name, `snake(owner)_snake(field)` — distinct per
+   * field even when several fields target the same aggregate. */
+  joinTable: string;
+  /** FK column pointing at the owner row, `snake(owner)_id`. */
+  ownerFk: string;
+  /** FK column pointing at the target row, `snake(target)_id`. */
+  targetFk: string;
+}
+
 export interface DerivedIR {
   name: string;
   type: TypeIR;
@@ -158,6 +181,10 @@ export interface AggregateIR {
   /** Canonical JSON-on-the-wire field list.  Populated by
    * `enrichLoomModel`. */
   wireShape?: WireField[];
+  /** Many-to-many associations derived from `Id<Target>[]` fields.
+   * Populated by `enrichLoomModel`; one entry per reference-collection
+   * field.  Empty array when the aggregate has none. */
+  associations?: AssociationIR[];
 }
 
 export interface TestIR {

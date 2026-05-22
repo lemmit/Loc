@@ -1,5 +1,6 @@
 import type {
   AggregateIR,
+  AssociationIR,
   BoundedContextIR,
   ExprIR,
   FieldIR,
@@ -30,6 +31,10 @@ export function renderSchema(
     for (const part of agg.parts) {
       tables.push(emitTable(part.name, part.fields, agg.name, ctx, new Set()));
     }
+    // Many-to-many join tables for `Id<T>[]` reference collections.
+    for (const assoc of agg.associations ?? []) {
+      tables.push(emitJoinTable(assoc));
+    }
   }
   if (opts.audit) tables.push(AUDIT_TABLE);
   if (opts.provenance) tables.push(PROVENANCE_TABLE);
@@ -37,17 +42,79 @@ export function renderSchema(
     (e) =>
       `export const ${lowerFirst(e.name)}Enum = pgEnum("${snake(e.name)}", [${e.values.map((v) => `"${v}"`).join(", ")}]);`,
   );
+  // `primaryKey` is only needed when the context has at least one
+  // reference-collection join table; `jsonb` only when audit/provenance
+  // tables are emitted.  Keeping each out otherwise leaves every
+  // unaffected schema's import line byte-identical.
+  const hasJoinTables = ctx.aggregates.some((a) => (a.associations ?? []).length > 0);
   const needsJsonb = opts.audit || opts.provenance;
+  const imports = [
+    "pgTable",
+    "text",
+    "integer",
+    "bigint",
+    "numeric",
+    "boolean",
+    "timestamp",
+    "pgEnum",
+    "uuid",
+    "index",
+    ...(hasJoinTables ? ["primaryKey"] : []),
+    ...(needsJsonb ? ["jsonb"] : []),
+  ].join(", ");
   return (
     joinLines(
       "// Auto-generated.",
-      `import { pgTable, text, integer, bigint, numeric, boolean, timestamp, pgEnum, uuid, index${needsJsonb ? ", jsonb" : ""} } from "drizzle-orm/pg-core";`,
+      `import { ${imports} } from "drizzle-orm/pg-core";`,
       "",
       ...enumLines,
       "",
       tables.join("\n\n"),
     ) + "\n"
   );
+}
+
+/** A many-to-many join table for an `Id<T>[]` reference collection.
+ * Two FK columns + an `ordinal` position so the collection's order
+ * survives a round-trip, a composite primary key over (owner, target)
+ * (so each pair is unique and the save upsert is idempotent), and an
+ * index on the target FK for the reverse membership query. */
+function emitJoinTable(assoc: AssociationIR): string {
+  const tableConst = joinTableConstName(assoc);
+  const ownerKey = joinColumnName(assoc.ownerFk);
+  const targetKey = joinColumnName(assoc.targetFk);
+  const lines: string[] = [];
+  lines.push(`export const ${tableConst} = pgTable("${assoc.joinTable}", {`);
+  lines.push(`  ${ownerKey}: text("${assoc.ownerFk}").notNull(),`);
+  lines.push(`  ${targetKey}: text("${assoc.targetFk}").notNull(),`);
+  lines.push(`  ordinal: integer("ordinal").notNull(),`);
+  lines.push(`}, (table) => ({`);
+  lines.push(
+    `  ${tableConst}Pk: primaryKey({ columns: [table.${ownerKey}, table.${targetKey}] }),`,
+  );
+  lines.push(
+    `  ${tableConst}TargetIdx: index("${assoc.joinTable}_${assoc.targetFk}_idx").on(table.${targetKey}),`,
+  );
+  lines.push(`}));`);
+  return lines.join("\n");
+}
+
+/** Drizzle `const` name for a join table — `trainer_party` →
+ * `trainerParty`.  Shared with the repository builder so both refer to
+ * the same `schema.<const>`. */
+export function joinTableConstName(assoc: AssociationIR): string {
+  return lowerFirst(camelizeSnake(assoc.joinTable));
+}
+
+/** Drizzle column-property key for a join FK — `pokemon_id` →
+ * `pokemonId`.  The SQL column name stays snake_case. */
+export function joinColumnName(fk: string): string {
+  return camelizeSnake(fk);
+}
+
+/** `trainer_party` → `trainerParty`; `pokemon_id` → `pokemonId`. */
+function camelizeSnake(s: string): string {
+  return s.replace(/_([a-z0-9])/g, (_m, c: string) => c.toUpperCase());
 }
 
 // Audit-log table.  Emitted only when the model declares at least one
@@ -264,6 +331,10 @@ function drizzleColumnLinesForName(
     case "entity":
       return [`${fieldName}: text("${colName}")${not},`];
     case "array":
+      // Collections of references (`Id<T>[]`) are persisted as a
+      // many-to-many join table (emitted separately in renderSchema),
+      // so they contribute no column on the owning table.
+      if (inner.element.kind === "id") return [];
       return [`${fieldName}: text("${colName}")${not}, // arrays not supported as inline columns`];
     case "optional":
       return drizzleColumnLinesForName(fieldName, inner.inner, true, ctx);
