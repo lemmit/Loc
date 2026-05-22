@@ -11,7 +11,7 @@ import type {
   ViewIR,
   WorkflowIR,
 } from "../ir/loom-ir.js";
-import { camel, plural, snake } from "../util/naming.js";
+import { camel, pascal, plural, snake } from "../util/naming.js";
 import { renderExpectStmt } from "./expect-stmt.js";
 
 // ---------------------------------------------------------------------------
@@ -74,15 +74,15 @@ export function renderUIE2EFile(
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import { test, expect } from "@playwright/test";`);
   for (const a of aggregates) {
-    const cap = upper(a.name);
+    const cap = pascal(a.name);
     lines.push(`import { ${cap}ListPage, ${cap}DetailPage } from "./pages/${camel(a.name)}";`);
   }
   for (const wf of workflows) {
-    const cap = upper(wf.name);
+    const cap = pascal(wf.name);
     lines.push(`import { ${cap}WorkflowPage } from "./pages/workflows/${snake(wf.name)}";`);
   }
   for (const v of views) {
-    const cap = upper(v.name);
+    const cap = pascal(v.name);
     lines.push(`import { ${cap}ViewPage } from "./pages/views/${snake(v.name)}";`);
   }
   lines.push("");
@@ -510,7 +510,7 @@ function renderWorkflowCall(
         `Available workflows: ${known || "(none)"}.`,
     );
   }
-  const cap = upper(wf.name);
+  const cap = pascal(wf.name);
   const body = call.args[0] ? renderUIExpr(call.args[0], ctx) : "{}";
   return `await new ${cap}WorkflowPage(page).run(${body})`;
 }
@@ -528,7 +528,7 @@ function renderViewCall(call: { viewName: string; args: ExprIR[] }, ctx: RenderC
         `Available views: ${known || "(none)"}.`,
     );
   }
-  const cap = upper(view.name);
+  const cap = pascal(view.name);
   // Returns the row list — wrap so the binding (`let rows = ...`)
   // resolves to the array, not the Promise.
   return [
@@ -554,7 +554,7 @@ function renderAggregateCall(
         `Available aggregates: ${known || "(none)"}.`,
     );
   }
-  const cap = upper(agg.name);
+  const cap = pascal(agg.name);
 
   if (call.method === "create") {
     // ListPage.goto → create → fill → submit.  Returns
@@ -608,7 +608,7 @@ function renderOperationCall(
       `ui e2e: ui.${snake(plural(agg.name))}.${op.name}(target, body?) requires a target argument`,
     );
   }
-  const cap = upper(agg.name);
+  const cap = pascal(agg.name);
   const idExpr = renderIdArg(args[0], ctx);
   const body = args.length >= 2 ? renderUIExpr(args[1], ctx) : "{}";
   if (op.params.length === 0) {
@@ -638,6 +638,3 @@ function findAggregateBySlug(slug: string, contexts: BoundedContextIR[]): Aggreg
   return undefined;
 }
 
-function upper(s: string): string {
-  return s[0]!.toUpperCase() + s.slice(1);
-}

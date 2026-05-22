@@ -1,5 +1,5 @@
 import type { BoundedContextIR, TypeIR, ViewIR } from "../../ir/loom-ir.js";
-import { camel, plural, snake } from "../../util/naming.js";
+import { camel, pascal, plural, snake } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // View API module + Playwright page object emission.
@@ -64,29 +64,29 @@ export function buildViewsApiModule(contexts: BoundedContextIR[]): string {
   for (const { view } of views) {
     const slug = snake(view.name);
     if (view.output) {
-      lines.push(`export const ${cap(view.name)}Row = z.object({`);
+      lines.push(`export const ${pascal(view.name)}Row = z.object({`);
       for (const f of view.output.fields) {
         lines.push(`  ${f.name}: ${zodForResponse(f.type, f.optional)},`);
       }
       lines.push(`});`);
-      lines.push(`export type ${cap(view.name)}Row = z.infer<typeof ${cap(view.name)}Row>;`);
-      lines.push(`export const ${cap(view.name)}Response = z.array(${cap(view.name)}Row);`);
+      lines.push(`export type ${pascal(view.name)}Row = z.infer<typeof ${pascal(view.name)}Row>;`);
+      lines.push(`export const ${pascal(view.name)}Response = z.array(${pascal(view.name)}Row);`);
       lines.push(
-        `export type ${cap(view.name)}Response = z.infer<typeof ${cap(view.name)}Response>;`,
+        `export type ${pascal(view.name)}Response = z.infer<typeof ${pascal(view.name)}Response>;`,
       );
     } else {
-      lines.push(`export const ${cap(view.name)}Response = ${view.aggregateName}ListResponse;`);
+      lines.push(`export const ${pascal(view.name)}Response = ${view.aggregateName}ListResponse;`);
       lines.push(
-        `export type ${cap(view.name)}Response = z.infer<typeof ${cap(view.name)}Response>;`,
+        `export type ${pascal(view.name)}Response = z.infer<typeof ${pascal(view.name)}Response>;`,
       );
     }
     lines.push("");
-    lines.push(`export function use${cap(view.name)}View() {`);
+    lines.push(`export function use${pascal(view.name)}View() {`);
     lines.push(`  return useQuery({`);
     lines.push(`    queryKey: ["views", "${slug}"],`);
     lines.push(`    queryFn: async () => {`);
     lines.push(`      const r = await api.get(\`/views/${slug}\`);`);
-    lines.push(`      return ${cap(view.name)}Response.parse(r);`);
+    lines.push(`      return ${pascal(view.name)}Response.parse(r);`);
     lines.push(`    },`);
     lines.push(`  });`);
     lines.push(`}`);
@@ -182,14 +182,14 @@ function findFirstAggregateWith(
 
 export function buildViewPageObject(view: ViewIR, ctx: BoundedContextIR): string {
   const slug = snake(view.name);
-  const className = `${cap(view.name)}ViewPage`;
+  const className = `${pascal(view.name)}ViewPage`;
   const cols = collectColumnNames(view, ctx);
   const rowFields = cols.map((c) => `  ${c}: string;`).join("\n");
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import type { Page } from "@playwright/test";`);
   lines.push("");
-  lines.push(`export interface ${cap(view.name)}RowText {`);
+  lines.push(`export interface ${pascal(view.name)}RowText {`);
   lines.push(rowFields);
   lines.push(`}`);
   lines.push("");
@@ -203,8 +203,8 @@ export function buildViewPageObject(view: ViewIR, ctx: BoundedContextIR): string
   lines.push(`    return this;`);
   lines.push(`  }`);
   lines.push("");
-  lines.push(`  async rows(): Promise<${cap(view.name)}RowText[]> {`);
-  lines.push(`    const out: ${cap(view.name)}RowText[] = [];`);
+  lines.push(`  async rows(): Promise<${pascal(view.name)}RowText[]> {`);
+  lines.push(`    const out: ${pascal(view.name)}RowText[] = [];`);
   lines.push(`    for (let i = 0; i < 1000; i++) {`);
   lines.push(`      const row = this.page.getByTestId(\`view-${slug}-row-\${i}\`);`);
   lines.push(`      if ((await row.count()) === 0) break;`);
@@ -248,9 +248,6 @@ function unwrapOpt(t: TypeIR): TypeIR {
   return t.kind === "optional" ? t.inner : t;
 }
 
-function cap(s: string): string {
-  return s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
-}
 
 function zodForResponse(t: TypeIR, optional: boolean): string {
   const z = zodForResponseInner(t);

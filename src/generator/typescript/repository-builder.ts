@@ -9,7 +9,7 @@ import type {
   TypeIR,
 } from "../../ir/loom-ir.js";
 import { findUsesCurrentUser, viewUsesCurrentUser } from "../../ir/loom-ir.js";
-import { camel, plural } from "../../util/naming.js";
+import { camel, pascal, plural } from "../../util/naming.js";
 import { renderTsExpr } from "./render-expr.js";
 import { valueObjectColumnNames } from "./templates.js";
 
@@ -426,20 +426,20 @@ function saveMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
     const childTable = camel(plural(part.name));
     lines.push("");
     lines.push(
-      `      const __existing${cap(c.name)} = await tx.select({ id: schema.${childTable}.id }).from(schema.${childTable}).where(eq(schema.${childTable}.parentId, aggregate.id));`,
+      `      const __existing${pascal(c.name)} = await tx.select({ id: schema.${childTable}.id }).from(schema.${childTable}).where(eq(schema.${childTable}.parentId, aggregate.id));`,
     );
     lines.push(
-      `      const __existingIds${cap(c.name)} = new Set(__existing${cap(c.name)}.map((r) => r.id));`,
+      `      const __existingIds${pascal(c.name)} = new Set(__existing${pascal(c.name)}.map((r) => r.id));`,
     );
     lines.push(
-      `      const __currentIds${cap(c.name)} = new Set(aggregate.${c.name}.map((e) => e.id as string));`,
+      `      const __currentIds${pascal(c.name)} = new Set(aggregate.${c.name}.map((e) => e.id as string));`,
     );
     lines.push(
-      `      const __toDelete${cap(c.name)} = [...__existingIds${cap(c.name)}].filter((id) => !__currentIds${cap(c.name)}.has(id));`,
+      `      const __toDelete${pascal(c.name)} = [...__existingIds${pascal(c.name)}].filter((id) => !__currentIds${pascal(c.name)}.has(id));`,
     );
-    lines.push(`      if (__toDelete${cap(c.name)}.length > 0) {`);
+    lines.push(`      if (__toDelete${pascal(c.name)}.length > 0) {`);
     lines.push(
-      `        await tx.delete(schema.${childTable}).where(and(eq(schema.${childTable}.parentId, aggregate.id), inArray(schema.${childTable}.id, __toDelete${cap(c.name)})));`,
+      `        await tx.delete(schema.${childTable}).where(and(eq(schema.${childTable}.parentId, aggregate.id), inArray(schema.${childTable}.id, __toDelete${pascal(c.name)})));`,
     );
     lines.push(`      }`);
     lines.push(`      for (const child of aggregate.${c.name}) {`);
@@ -521,9 +521,6 @@ function projectionObject(
   return `{ ${entries.map((e) => `${e.fieldName}: ${e.expr}`).join(", ")} }`;
 }
 
-function cap(s: string): string {
-  return s[0]!.toUpperCase() + s.slice(1);
-}
 
 // ---------------------------------------------------------------------------
 // Find queries — convention-based equality predicates

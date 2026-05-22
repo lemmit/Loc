@@ -1,5 +1,5 @@
 import type { AggregateIR, BoundedContextIR, DeployableIR, SystemIR } from "../../ir/loom-ir.js";
-import { camel, plural, snake } from "../../util/naming.js";
+import { camel, pascal, plural, snake } from "../../util/naming.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import { buildApiModule } from "./api-builder.js";
@@ -276,12 +276,12 @@ function smokeSpec(aggregates: AggregateIR[]): string {
   // page loads.  Users add per-aggregate scenarios using the page
   // objects under e2e/pages/.
   const imports = aggregates
-    .map((a) => `import { ${upper(a.name)}ListPage } from "./pages/${camel(a.name)}";`)
+    .map((a) => `import { ${pascal(a.name)}ListPage } from "./pages/${camel(a.name)}";`)
     .join("\n");
   const cases = aggregates
     .map(
       (a) =>
-        `test("${snake(plural(a.name))} list loads", async ({ page }) => {\n  const p = await new ${upper(a.name)}ListPage(page).goto();\n  await expect(p.page).toHaveURL(/${snake(plural(a.name))}$/);\n});`,
+        `test("${snake(plural(a.name))} list loads", async ({ page }) => {\n  const p = await new ${pascal(a.name)}ListPage(page).goto();\n  await expect(p.page).toHaveURL(/${snake(plural(a.name))}$/);\n});`,
     )
     .join("\n\n");
   return `// Auto-generated smoke spec.
@@ -354,6 +354,3 @@ const E2E_TSCONFIG_JSON =
     2,
   ) + "\n";
 
-function upper(s: string): string {
-  return s[0]!.toUpperCase() + s.slice(1);
-}

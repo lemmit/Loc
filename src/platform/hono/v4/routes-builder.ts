@@ -18,7 +18,7 @@ import type {
   ValueObjectIR,
 } from "../../../ir/loom-ir.js";
 import { findUsesCurrentUser, operationUsesCurrentUser } from "../../../ir/loom-ir.js";
-import { camel, plural, snake } from "../../../util/naming.js";
+import { camel, pascal, plural, snake } from "../../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Hono routes file with OpenAPI annotations.
@@ -110,8 +110,8 @@ export function buildRoutesFile(
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
     lines.push(
       ...emitWireSchema(
-        `const ${cap(op.name)}Request`,
-        `${cap(op.name)}Request`,
+        `const ${pascal(op.name)}Request`,
+        `${pascal(op.name)}Request`,
         op.params.map((p) => ({ name: p.name, base: zodFor(p.type) })),
         preconditionsAsInvariants(op),
         new Set(op.params.map((p) => p.name)),
@@ -122,11 +122,11 @@ export function buildRoutesFile(
 
   if (repo) {
     for (const find of repo.finds) {
-      lines.push(`const ${cap(find.name)}Query = z.object({`);
+      lines.push(`const ${pascal(find.name)}Query = z.object({`);
       for (const p of find.params) {
         lines.push(`  ${p.name}: ${zodFor(p.type)},`);
       }
-      lines.push(`}).openapi("${cap(find.name)}Query");`);
+      lines.push(`}).openapi("${pascal(find.name)}Query");`);
     }
   }
 
@@ -279,7 +279,7 @@ function emitOperationRoute(agg: AggregateIR, op: OperationIR, ctx: BoundedConte
   out.push(`    operationId: "${camel(op.name)}${agg.name}",`);
   out.push(`    request: {`);
   out.push(`      params: z.object({ id: z.string() }),`);
-  out.push(`      body: { content: { "application/json": { schema: ${cap(op.name)}Request } } },`);
+  out.push(`      body: { content: { "application/json": { schema: ${pascal(op.name)}Request } } },`);
   out.push(`    },`);
   out.push(`    responses: {`);
   out.push(`      204: { description: "No content" },`);
@@ -312,10 +312,10 @@ function emitOperationRoute(agg: AggregateIR, op: OperationIR, ctx: BoundedConte
     // unchanged so 400 / 403 / 404 still apply when a user handler
     // raises one deliberately.
     const handlerKey = `${camel(op.name)}${agg.name}`;
-    out.push(`    aggregate.check${cap(op.name)}(${callArgs});`);
+    out.push(`    aggregate.check${pascal(op.name)}(${callArgs});`);
     out.push(`    const handler = externHandlers.${handlerKey};`);
     out.push(
-      `    if (!handler) throw new Error("Missing extern handler for ${handlerKey}. Register one via register${cap(op.name)}${agg.name}Handler(...) before app.listen().");`,
+      `    if (!handler) throw new Error("Missing extern handler for ${handlerKey}. Register one via register${pascal(op.name)}${agg.name}Handler(...) before app.listen().");`,
     );
     out.push(`    try {`);
     out.push(`      await handler(aggregate, body);`);
@@ -350,7 +350,7 @@ function emitFindRoute(agg: AggregateIR, find: FindIR, ctx: BoundedContextIR): s
   out.push(`    tags: ["${aggSlug}"],`);
   out.push(`    operationId: "${camel(find.name)}${agg.name}",`);
   if (find.params.length > 0) {
-    out.push(`    request: { query: ${cap(find.name)}Query },`);
+    out.push(`    request: { query: ${pascal(find.name)}Query },`);
   }
   out.push(`    responses: {`);
   out.push(
@@ -546,9 +546,6 @@ function collectUsedEnums(
   return ctx.enums.filter((e) => used.has(e.name));
 }
 
-function cap(s: string): string {
-  return s[0]!.toUpperCase() + s.slice(1);
-}
 
 // ---------------------------------------------------------------------------
 // `z.object({...}).openapi("Name").refine(...)` emitter.

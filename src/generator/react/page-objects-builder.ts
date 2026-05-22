@@ -1,5 +1,5 @@
 import type { AggregateIR, BoundedContextIR, TypeIR } from "../../ir/loom-ir.js";
-import { camel, plural, snake } from "../../util/naming.js";
+import { camel, pascal, plural, snake } from "../../util/naming.js";
 import { unwrapOpt } from "./form-helpers.js";
 
 // ---------------------------------------------------------------------------
@@ -19,7 +19,7 @@ import { unwrapOpt } from "./form-helpers.js";
 
 export function buildPageObjectModule(agg: AggregateIR, ctx: BoundedContextIR): string {
   const slug = snake(plural(agg.name));
-  const aggCap = upper(agg.name);
+  const aggCap = pascal(agg.name);
   const ops = agg.operations.filter((o) => o.visibility === "public");
   const required = agg.fields.filter((f) => !f.optional);
 
@@ -28,7 +28,7 @@ export function buildPageObjectModule(agg: AggregateIR, ctx: BoundedContextIR): 
   lines.push(`import type { Page, Locator } from "@playwright/test";`);
   lines.push(`import { expect } from "@playwright/test";`);
   const reqTypes: string[] = [`Create${agg.name}Request`];
-  for (const op of ops) reqTypes.push(`${upper(op.name)}Request`);
+  for (const op of ops) reqTypes.push(`${pascal(op.name)}Request`);
   reqTypes.push(`${agg.name}Response`);
   lines.push(`import type { ${reqTypes.join(", ")} } from "../../src/api/${camel(agg.name)}";`);
   lines.push("");
@@ -142,7 +142,7 @@ export function buildPageObjectModule(agg: AggregateIR, ctx: BoundedContextIR): 
   }
   // Per-operation method.
   for (const op of ops) {
-    const opCap = upper(op.name);
+    const opCap = pascal(op.name);
     if (op.params.length === 0) {
       lines.push(`  /** ${op.name} (no parameters). */`);
       lines.push(`  async ${camel(op.name)}(): Promise<this> {`);
@@ -271,6 +271,3 @@ export function fillBlock(
   return lines;
 }
 
-function upper(s: string): string {
-  return s[0]!.toUpperCase() + s.slice(1);
-}
