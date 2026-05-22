@@ -27,6 +27,8 @@ interface BodyEditorProps {
   /** Whether statement `index` (optionally its `field`-th sub-expression) has an
    *  editable expression — i.e. should offer the inline structured `ƒx` editor. */
   hasValueEditor?: (index: number, field?: number) => boolean;
+  /** In-scope names for a bare call's head (receiver) Autocomplete at `index`. */
+  headCandidates?: (index: number) => string[];
   /** Inline structured editor for a statement's expression — rendered in place
    *  of the text field while that row is expanded; null when collapsed. */
   renderValueEditor?: (index: number, field?: number) => ReactNode;
@@ -48,8 +50,9 @@ function viewText(v: StmtView): string {
 // dropped). Args are controlled so add / delete stay correct. Each argument also
 // offers a `ƒx` toggle that swaps its text field for the inline structured
 // editor (which edits just that argument's expression).
-function CallRow({ view, error, onCommit, onClearError, renderArgEditor, onToggleArg }: {
+function CallRow({ view, headCandidates, error, onCommit, onClearError, renderArgEditor, onToggleArg }: {
   view: { head: string; args: string[] };
+  headCandidates: string[];
   error: boolean;
   onCommit: (text: string) => void;
   onClearError: () => void;
@@ -63,16 +66,17 @@ function CallRow({ view, error, onCommit, onClearError, renderArgEditor, onToggl
   return (
     <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
       <Group gap={4} wrap="nowrap" align="center">
-        <TextInput
+        <Autocomplete
           size="xs"
           style={{ flex: 1, minWidth: 0 }}
+          data={headCandidates}
           defaultValue={head}
           error={error ? "invalid" : undefined}
           data-testid="c4system-call-head"
           aria-label="call target"
           styles={MONO}
           onFocus={onClearError}
-          onChange={(e) => setHead(e.currentTarget.value)}
+          onChange={(v) => setHead(v)}
           onBlur={() => onCommit(reconstruct(head, args))}
         />
         <Button size="compact-xs" variant="subtle" data-testid="c4system-call-arg-add" onClick={() => setArgs((p) => [...p, ""])}>
@@ -351,7 +355,7 @@ function OtherRow({ src, valueEditor, onToggleEditor, error, onCommit, onClearEr
   );
 }
 
-export function BodyEditor({ statements, targets = [], onEdit, onDelete, onMove, onAdd, hasValueEditor, renderValueEditor, onToggleValueEditor }: BodyEditorProps): JSX.Element {
+export function BodyEditor({ statements, targets = [], onEdit, onDelete, onMove, onAdd, hasValueEditor, headCandidates, renderValueEditor, onToggleValueEditor }: BodyEditorProps): JSX.Element {
   const [errorAt, setErrorAt] = useState<number | null>(null);
   const [draftAdd, setDraftAdd] = useState("");
   const [addError, setAddError] = useState(false);
@@ -396,6 +400,7 @@ export function BodyEditor({ statements, targets = [], onEdit, onDelete, onMove,
             ) : s.kind === "call" ? (
               <CallRow
                 view={s}
+                headCandidates={headCandidates?.(i) ?? []}
                 error={errorAt === i}
                 onClearError={() => errorAt === i && setErrorAt(null)}
                 onCommit={(text) => commitEdit(i, original, text)}

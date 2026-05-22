@@ -411,6 +411,11 @@ test("structures a bare-call workflow statement into head + args", async ({ page
   await expect(head).toBeVisible();
   await expect(head).toHaveValue("order.addLine");
   await expect(page.getByTestId("c4system-call-arg")).not.toHaveCount(0);
+
+  // The head is an Autocomplete over in-scope names: clearing it offers the
+  // receiver `order` (a let-bound earlier in the workflow) as a suggestion.
+  await head.fill("");
+  await expect(page.getByRole("option", { name: "order", exact: true })).toBeVisible({ timeout: 5_000 });
 });
 
 test("edits an operation body via the aggregate inspector", async ({ page }) => {
