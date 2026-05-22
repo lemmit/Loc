@@ -21,10 +21,6 @@ export {
 } from "./locator-chain.js";
 export { DomPage, DomLocator, type DomPageOptions } from "./dom-page.js";
 export {
-  makeIframeTransport,
-  type IframeTransportOptions,
-} from "./iframe-transport.js";
-export {
   makePostMessageTransport,
   type PostMessageTransportOptions,
   type DriverRequest,
