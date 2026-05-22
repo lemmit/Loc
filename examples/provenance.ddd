@@ -1,0 +1,57 @@
+// Provenance demo — the `provenanced` stored-field modifier.
+//
+// Mark a stored field `provenanced` and every assignment to it
+// (`:=`/`+=`/`-=`) becomes an immutable per-write-site rule snapshot.
+// The generated Hono backend records a runtime trace on each write
+// (see `domain/provenance.ts` + the `recordTrace(...)` calls in
+// `domain/order.ts`), and the explicit capture step
+//
+//     ddd snapshot examples/provenance.ddd -o out
+//
+// writes the rule snapshots to `out/.loom/snapshots/<ts>-<guid>.loomsnap.json`.
+// Each snapshot holds the RHS expression structure (text + resolved AST)
+// and a content-addressed `snapshotId` that the trace records reference,
+// so an `order.total` can be explained long after it was computed.
+//
+// Backend-only (Hono). Provenance is a TypeScript/Hono v1 feature; other
+// backends parse the keyword but emit no trace code.
+
+system OrderingSystem {
+
+  module Ordering {
+    context Ordering {
+
+      aggregate Order ids guid {
+        reference: string display
+        quantity: int
+        unitPrice: int
+        discount: int
+
+        // The canonical "why is this 128.40?" field.  Two operations
+        // below write it, so the capture produces two distinct rule
+        // snapshots — one per write-site.
+        total: int provenanced
+
+        operation reprice(qty: int, price: int) {
+          precondition qty > 0
+          precondition price >= 0
+          quantity := qty
+          unitPrice := price
+          total := qty * price - discount
+        }
+
+        operation applyDiscount(amount: int) {
+          precondition amount >= 0
+          discount := amount
+          total := quantity * unitPrice - amount
+        }
+      }
+
+      repository Orders for Order {
+        find byReference(reference: string): Order? where this.reference == reference
+      }
+    }
+  }
+
+  deployable api { platform: hono, modules: Ordering, port: 3000 }
+}
