@@ -36,7 +36,7 @@ export default function ActiveOrdersView() {
                 { activeOrdersView.data.map((row, idx) => (
                   <Table.Tr key={ idx }>
                     <Table.Td><Text>{row.customerId}</Text></Table.Td>
-                    <Table.Td><Badge>{ row.status }</Badge></Table.Td>
+                    <Table.Td><Badge tt="none">{ row.status }</Badge></Table.Td>
                     <Table.Td><DateTimeValue iso={ row.placedAt } /></Table.Td>
                   </Table.Tr>
                 )) }

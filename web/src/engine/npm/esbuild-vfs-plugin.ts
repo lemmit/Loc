@@ -1,18 +1,19 @@
-// esbuild plugin resolving over the installed in-VFS node_modules
-// (Phase B3b) — the npm-in-browser counterpart of plugin.ts's esm.sh
-// resolver.  Generated project files AND installed packages live in
-// one file map; bare specifiers go through the B2 exports-aware
-// resolver, relatives/absolutes probe the map directly.  No esm.sh,
-// so the whole esm.sh-split-shard bug class (drizzle extractUsedTable)
-// cannot occur.
-//
-// Standalone — plugin.ts (the proven esm.sh path) is untouched.
+// esbuild plugin resolving over the installed in-VFS node_modules.
+// Generated project files AND installed packages live in one file
+// map; bare specifiers go through the exports-aware node resolver
+// (node-resolve.ts), relatives/absolutes probe the map directly.
+// Reading each package's own published files (no CDN re-build) is
+// what makes the drizzle `extractUsedTable` split-shard bug class
+// impossible.
 
 import type { Loader, Plugin } from "esbuild-wasm";
 import { resolveBare, type FileSource } from "../node-resolve.js";
+import type { TsconfigAliasEntry } from "../../bundle/plugin.js";
+import { aliasCandidates } from "../../bundle/plugin.js";
 
 const NS = "vfs";
 const EMPTY = "vfs-empty";
+const EMPTY_CSS = "vfs-empty-css";
 
 // Node builtins the curated backend may reference in branches the
 // browser/PGlite path never takes (the `pg` driver tree etc.).
@@ -77,10 +78,28 @@ function probe(base: string, src: FileSource): string | null {
  *  alone silently bundles a second React. */
 const REACT_RUNTIME_RE = /^(react|react-dom)(\/|$)/;
 
+// shadcn globals.css does `@import "tailwindcss"` (+ optionally
+// `@import "tw-animate-css"`).  esbuild's CSS loader would try to
+// resolve those into JS (tailwindcss/dist/lib.mjs) and fail; instead
+// leave them external so the directive survives into the bundled CSS,
+// where the iframe's `@tailwindcss/browser` compiles it at runtime.
+const TAILWIND_CSS_RE = /^tailwindcss($|\/)|^tw-animate-css$/;
+
 export function makeVfsNpmPlugin(
   files: Map<string, string | Uint8Array>,
   nmRoot = "/node_modules",
   externalReact = false,
+  /** tsconfig `paths` aliases (e.g. shadcn's `@/* → src/*`).  Targets
+   *  are absolute VFS paths (harvested against the "/"-keyed map);
+   *  matched before bare-package resolution so `@/components/ui/button`
+   *  resolves to a real file instead of being treated as a package. */
+  aliases: TsconfigAliasEntry[] = [],
+  /** C2: externalise the whole vendor (every bare specifier left
+   *  after aliases) so esbuild bundles ONLY the generated app —
+   *  the prebuilt vendor + iframe importmap supply the rest.  Bare
+   *  CSS imports (e.g. `@mantine/core/styles.css`) become empty
+   *  stubs since the prebuilt vendor.css covers them. */
+  externalizeVendor = false,
 ): Plugin {
   const td = new TextDecoder();
   const asText = (v: string | Uint8Array): string =>
@@ -98,6 +117,11 @@ export function makeVfsNpmPlugin(
     setup(build) {
       build.onResolve({ filter: /.*/ }, (args) => {
         const spec = args.path;
+        if (TAILWIND_CSS_RE.test(spec)) {
+          // Keep `@import "tailwindcss"` in the output CSS for the
+          // iframe's Tailwind browser runtime to compile.
+          return { path: spec, external: true };
+        }
         if (externalReact && REACT_RUNTIME_RE.test(spec)) {
           return { path: spec, external: true };
         }
@@ -117,11 +141,33 @@ export function makeVfsNpmPlugin(
             ? { path: r, namespace: NS }
             : { errors: [{ text: `vfs: cannot resolve ${spec} from ${args.importer || "<entry>"}` }] };
         }
+        // tsconfig path aliases (`@/...`) before bare resolution.
+        for (const a of aliases) {
+          const candidates = aliasCandidates(spec, a);
+          if (!candidates) continue;
+          for (const c of candidates) {
+            const hit = probe(c, src);
+            if (hit) return { path: hit, namespace: NS };
+          }
+        }
         const r = resolveBare(spec, src, nmRoot);
-        return r
-          ? { path: r, namespace: NS }
-          : { errors: [{ text: `vfs: bare "${spec}" not in installed node_modules` }] };
+        if (r) return { path: r, namespace: NS };
+        // Vendor-externalise: a bare specifier with no app-side
+        // resolution is vendor — externalise it (JS) or stub it
+        // (CSS, covered by the prebuilt vendor.css).  esbuild then
+        // bundles only the app; the iframe importmap resolves these.
+        if (externalizeVendor) {
+          return spec.endsWith(".css")
+            ? { path: spec, namespace: EMPTY_CSS }
+            : { path: spec, external: true };
+        }
+        return { errors: [{ text: `vfs: bare "${spec}" not in installed node_modules` }] };
       });
+
+      build.onLoad({ filter: /.*/, namespace: EMPTY_CSS }, () => ({
+        contents: "",
+        loader: "css",
+      }));
 
       build.onLoad({ filter: /.*/, namespace: EMPTY }, (args) => {
         const name = args.path.replace(/^node:/, "").split("/")[0];

@@ -1,0 +1,35 @@
+flowchart LR
+  r0["US-001: A customer can place an order"]
+  r1["AC-001: An order can only be confirmed when it has at least one line"]
+  r2["AC-002: Lines can only be added while the order is a draft"]
+  r3["US-002: A user can browse the product catalog"]
+  r4["AC-003: Products are uniquely identified by SKU"]
+  r0 --> r1
+  r0 --> r2
+  r3 --> r4
+  s5{{"SOL-001"}}
+  r0 -->|for| s5
+  c6(["Sales.Orders.Order.addLine"])
+  s5 -->|entitles| c6
+  c7(["Sales.Orders.Order.confirm"])
+  s5 -->|entitles| c7
+  c8{{"Sales.Orders.placeOrder"}}
+  s5 -->|entitles| c8
+  c9[/"api"/]
+  s5 -->|entitles| c9
+  s10{{"SOL-002"}}
+  r3 -->|for| s10
+  c11["Catalog.Products.Product"]
+  s10 -->|entitles| c11
+  c12[/"catalogApi"/]
+  s10 -->|entitles| c12
+  t13["TC-001"]
+  t13 -->|verifies| r1
+  t13 -.->|covers| c7
+  t14["TC-002"]
+  t14 -->|verifies| r0
+  t14 -.->|covers| c6
+  t14 -.->|covers| c7
+  t15["TC-003"]
+  t15 -->|verifies| r4
+  t15 -.->|covers| c11

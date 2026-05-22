@@ -1,7 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ActionIcon, Box, Group, Text, Tooltip } from "@mantine/core";
 import type { RuntimeDispatcher } from "../engine";
-import { SwIframePreviewHost } from "./sw-iframe-host";
+import { SandboxBridge } from "./bridge/parent-bridge";
+import {
+  SANDBOX_ORIGIN,
+  SANDBOX_SAME_ORIGIN,
+  sandboxBasename,
+  sandboxStubUrl,
+} from "./sandbox-origin";
+import { makePreviewHtml } from "./iframe-html";
 import { fnv1a32 } from "../util/hash";
 
 interface PreviewProps {
@@ -13,23 +20,16 @@ interface PreviewProps {
    *  Drives the iframe's importmap so React/React-DOM resolve to
    *  the same esm.sh URL the bundle was compiled against. */
   versions?: Record<string, string>;
-  /** Live runtime dispatcher (the RuntimeEngine).  In-iframe fetches
-   *  against the sandbox runtime path are forwarded through the SW
-   *  to this. */
+  /** C2: when the bundle externalised a prebuilt design-pack vendor,
+   *  the iframe importmap (bare spec → origin-absolute url) + optional
+   *  vendor.css url.  Absent → self-contained bundle (no vendor map). */
+  vendorImportmap?: Record<string, string>;
+  vendorCssUrl?: string;
+  /** Live runtime dispatcher (the RuntimeEngine).  The preview's
+   *  in-iframe `fetch` shim forwards API requests over the sandbox
+   *  bridge to this. */
   runtime: RuntimeDispatcher;
 }
-
-// Preview requires Service Worker support to serve the iframe
-// from the sandbox URL.  Modern browsers all support SW over
-// secure contexts (HTTPS, localhost); the playground's only hard
-// requirement is therefore HTTPS or localhost.  When SW is
-// unavailable we render an explanatory error instead of a broken
-// iframe.
-const SW_AVAILABLE =
-  typeof navigator !== "undefined" &&
-  "serviceWorker" in navigator &&
-  typeof window !== "undefined" &&
-  window.isSecureContext === true;
 
 // Fullscreen target — wraps the iframe (not the header bar) so the
 // generated app fills the actual screen edge-to-edge when expanded.
@@ -91,12 +91,16 @@ function MinimizeIcon({ size = 14 }: { size?: number }): JSX.Element {
   );
 }
 
-export function Preview({ js, css, versions, runtime }: PreviewProps): JSX.Element {
+export function Preview({
+  js,
+  css,
+  versions,
+  vendorImportmap,
+  vendorCssUrl,
+  runtime,
+}: PreviewProps): JSX.Element {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const fullscreenTargetRef = useRef<HTMLDivElement | null>(null);
-  const hostRef = useRef<SwIframePreviewHost | null>(null);
-  if (hostRef.current === null) hostRef.current = new SwIframePreviewHost();
-  const host = hostRef.current;
   const [isFullscreen, setIsFullscreen] = useState(false);
   // CSS-based fallback for platforms where `Element.requestFullscreen`
   // is unsupported or rejects.  iOS Safari (and every iOS browser,
@@ -164,96 +168,79 @@ export function Preview({ js, css, versions, runtime }: PreviewProps): JSX.Eleme
     setPseudoFullscreen(true);
   };
 
-  // Wire the SW's runtime bridge to the in-process runtime worker.
-  // The SW forwards `<sandbox>/runtime/*` fetches through the
-  // MessageChannel; we translate each into a runtime.dispatch()
-  // call and post back the response.  Re-attach when the runtime
-  // client identity changes (App.tsx replaces the client on
-  // re-mount); the cleanup closes the port so the SW falls back
-  // to 502 until the next attach completes.
-  const [runtimeAttached, setRuntimeAttached] = useState(false);
-  // Bumped whenever the SW posts a `loom-sw/awake` message —
-  // either right after activation or as a recovery signal when its
-  // module-level state was cleared by a browser-imposed kill.
-  // Mobile Safari and desktop browsers under memory pressure
-  // terminate idle Service Workers; on revival, `currentBundle`
-  // and `runtimePort` reset to null and every sandbox fetch comes
-  // back 502/503 until the parent re-initialises.  Including this
-  // counter in the attach + push effect deps forces both to re-run.
-  const [swRevision, setSwRevision] = useState(0);
+  // Static stub URL on SANDBOX_ORIGIN (computed once).
+  const stubUrl = useMemo(() => sandboxStubUrl(), []);
 
-  useEffect(() => {
-    if (!SW_AVAILABLE) return;
-    const onMessage = (event: MessageEvent): void => {
-      const data = event.data as { type?: string } | undefined;
-      if (data?.type === "loom-sw/awake") {
-        setSwRevision((r) => r + 1);
-      }
-    };
-    navigator.serviceWorker.addEventListener("message", onMessage);
-    return () => navigator.serviceWorker.removeEventListener("message", onMessage);
-  }, []);
+  // Bundle identity is split in two so ordinary edits refresh the
+  // preview in place instead of remounting the iframe:
+  //  - docKey: the page-shell inputs (importmap / vendor css / pkg
+  //    versions).  A change means the synthesised document itself
+  //    differs, so the iframe must remount and re-handshake.  Rare —
+  //    only when deps or the design-pack vendor change.
+  //  - codeKey: the app bundle (js + css), which is what changes after
+  //    a normal `.ddd` edit.  Pushed into the LIVE iframe as an
+  //    in-place reload (route + shell survive, no white flash).
+  const docKey = fnv1a32(
+    JSON.stringify(versions ?? {}) + "\0" + JSON.stringify(vendorImportmap ?? {}) + "\0" + (vendorCssUrl ?? ""),
+  );
+  const codeKey = fnv1a32((js ?? "") + "\0" + (css ?? ""));
 
+  // Latest preview material, read by the start effect at mount time
+  // without being a dependency — we must NOT re-handshake on every code
+  // edit (that's the reload effect's job).
+  const materialRef = useRef({ js, css, versions, vendorImportmap, vendorCssUrl });
+  materialRef.current = { js, css, versions, vendorImportmap, vendorCssUrl };
+
+  const bridgeRef = useRef<SandboxBridge | null>(null);
+  // codeKey baked into the document the bridge last (re)started with, so
+  // the reload effect skips the bundle that's already mounted.
+  const startedCodeKeyRef = useRef<string | null>(null);
+
+  // Create + start the bridge for the current iframe.  Re-runs only
+  // when the iframe element identity changes (docKey remounts it) or
+  // runtime/stub changes — never on an ordinary code edit.  The bridge
+  // attaches a `loom-stub-ready` listener immediately; when the mounted
+  // stub announces itself it gets the document + one MessagePort, and
+  // forwarded runtime requests are dispatched to the engine.
   useEffect(() => {
-    if (!SW_AVAILABLE) return;
-    let dispose: (() => void) | undefined;
-    let cancelled = false;
-    void (async () => {
-      const detach = await host.attachRuntime((r) => runtime.dispatch(r));
-      if (cancelled) {
-        detach?.();
-        return;
-      }
-      dispose = detach ?? undefined;
-      setRuntimeAttached(true);
-    })();
+    const el = iframeRef.current;
+    if (!el) return;
+    const m = materialRef.current;
+    const html = makePreviewHtml({
+      js: m.js,
+      css: m.css,
+      versions: m.versions,
+      vendorImportmap: m.vendorImportmap,
+      vendorCssUrl: m.vendorCssUrl,
+      sandboxBase: sandboxBasename(stubUrl),
+    });
+    const bridge = new SandboxBridge(el, SANDBOX_ORIGIN, (req) =>
+      runtime.dispatch(req),
+    );
+    bridgeRef.current = bridge;
+    startedCodeKeyRef.current = codeKey;
+    bridge.start(html);
     return () => {
-      cancelled = true;
-      setRuntimeAttached(false);
-      dispose?.();
+      bridge.dispose();
+      bridgeRef.current = null;
+      startedCodeKeyRef.current = null;
     };
-  }, [runtime, swRevision]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docKey, runtime, stubUrl]);
 
-  // Build the document and push it to the SW.  Once both the
-  // bundle is pushed AND the runtime port is attached we set
-  // `pushedHash` so the iframe renders.  Gating on `runtimeAttached`
-  // makes sure the bundle's first fetch can't outrun the runtime
-  // bridge — otherwise the user would briefly see a 502 from the
-  // SW.  `pushedHash` doubles as the iframe `key` so each new
-  // bundle remounts the iframe (real navigation, not bfcache).
-  const [pushedHash, setPushedHash] = useState<string | null>(null);
+  // Code-only rebuilds: hot-swap the bundle into the live preview in
+  // place.  Skips the bundle already baked into the freshly-started
+  // document (startedCodeKeyRef), so the first render after a remount
+  // doesn't double-mount.
   useEffect(() => {
-    if (!SW_AVAILABLE) return;
-    if (!runtimeAttached) return;
-    let cancelled = false;
-    // Compute the basename the bundle's BrowserRouter should use.
-    // The iframe loads at `<deploy>/__loom_sandbox__/`; routes
-    // emitted by the generator are rooted at `/` (e.g. `/customers`),
-    // so we tell react-router that the iframe URL pathname *is* the
-    // base.  The injected `window.__LOOM_BASENAME__` is read by the
-    // generated `main.tsx`.  Without this, BrowserRouter would
-    // try to match `/loc/playground/__loom_sandbox__/` against
-    // user routes (no match → "Not found"), and link clicks would
-    // pushState to `/customers`, leaking out of SW scope and
-    // breaking subsequent runtime fetches.
-    const { html, bundle } = host.synthHtml({ js, css, versions });
-    void (async () => {
-      try {
-        await host.setBundle(bundle);
-        if (cancelled) return;
-        setPushedHash(fnv1a32(html));
-      } catch {
-        // SW push failed — `pushedHash` stays at the prior value
-        // (or null on first failure).  The next bundle's effect
-        // will retry.
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // swRevision is included so a Service-Worker revival (which
-    // wipes `currentBundle` in the SW) re-pushes the latest bundle.
-  }, [js, css, versions, runtimeAttached, swRevision]);
+    const bridge = bridgeRef.current;
+    if (!bridge) return;
+    if (startedCodeKeyRef.current === codeKey) return;
+    const m = materialRef.current;
+    bridge.pushReload({ js: m.js, css: m.css });
+    startedCodeKeyRef.current = codeKey;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [codeKey]);
 
   return (
     // The whole Preview is the fullscreen target so the toolbar (and
@@ -285,7 +272,12 @@ export function Preview({ js, css, versions, runtime }: PreviewProps): JSX.Eleme
           : {}),
       }}
     >
-      <Box px="sm" py={4} bg="dark.6" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
+      <Box
+        px="sm"
+        py={4}
+        bg="dark.6"
+        style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}
+      >
         <Group justify="space-between" wrap="nowrap" gap="xs">
           <Text size="xs" fw={600} tt="uppercase" c="dimmed">
             Preview — generated React app, fetches routed to PGlite
@@ -311,44 +303,34 @@ export function Preview({ js, css, versions, runtime }: PreviewProps): JSX.Eleme
           </Tooltip>
         </Group>
       </Box>
-      <Box
-        style={{ flex: 1, minHeight: 0, background: "white" }}
-      >
-        {!SW_AVAILABLE ? (
-          // No SW available — the preview iframe needs the SW to
-          // serve the bundle and bridge runtime fetches.  Surface
-          // a clear message instead of a broken iframe.  In
-          // practice this only happens on insecure-context dev
-          // setups (HTTP, file://) since modern browsers ship SW
-          // over HTTPS / localhost.
-          <Box p="md">
-            <Text size="sm" c="dimmed">
-              Preview requires Service Worker support over a secure context
-              (HTTPS or localhost).
-            </Text>
-          </Box>
-        ) : (
-          // `key` remounts on each new bundle so the browser
-          // re-navigates rather than serving the same URL from
-          // bfcache.  Render only after `pushedHash` is set;
-          // before that the SW would answer with its 503 "bundle
-          // first" placeholder.  No `sandbox` attribute: the SW
-          // response runs in our origin and we want it to share
-          // postMessage + history with the parent unencumbered.
-          pushedHash !== null && (
-            <iframe
-              key={pushedHash}
-              ref={(el) => {
-                iframeRef.current = el;
-                host.bindIframe(el);
-              }}
-              src={host.url()}
-              style={{ width: "100%", height: "100%", border: "none" }}
-              title="Loom-generated app"
-              data-testid="preview-iframe"
-            />
-          )
-        )}
+      <Box style={{ flex: 1, minHeight: 0, background: "white" }}>
+        {/* Iframe served from SANDBOX_ORIGIN.  Isolation comes from the
+            ORIGIN, not the sandbox attribute: while same-origin (staging)
+            there is no boundary, so we omit `sandbox` entirely — a
+            `sandbox` with both `allow-scripts` and `allow-same-origin`
+            would only emit the browser's "can escape its sandboxing"
+            warning while providing nothing (escaping lands on the parent
+            origin, which is where we already are).  Once SANDBOX_ORIGIN is
+            a distinct origin the attribute is applied as defence-in-depth
+            (blocks top-navigation / popups); its "can escape" caveat is
+            then benign — escape means the sandbox's OWN origin, already
+            isolated from the parent.  `key` remounts on each new bundle so
+            the stub reloads. */}
+        <iframe
+          key={docKey}
+          ref={(el) => {
+            iframeRef.current = el;
+          }}
+          src={stubUrl}
+          sandbox={
+            SANDBOX_SAME_ORIGIN
+              ? undefined
+              : "allow-scripts allow-same-origin allow-forms"
+          }
+          style={{ width: "100%", height: "100%", border: "none" }}
+          title="Loom-generated app"
+          data-testid="preview-iframe"
+        />
       </Box>
     </Box>
   );

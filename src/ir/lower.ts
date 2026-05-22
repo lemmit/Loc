@@ -41,8 +41,11 @@ import {
   isRequiresStmt,
   isProperty,
   isRepository,
+  isRequirement,
+  isSolution,
   isSystem,
   isTestBlock,
+  isTestCase,
   isTestE2E,
   isThemeBlock,
   isUserBlock,
@@ -76,8 +79,15 @@ import type {
   ParamIR,
   PermissionDeclIR,
   Platform,
+  CodeRefIR,
+  CodeRefKind,
   RepositoryIR,
+  RequirementIR,
+  RequirementStatus,
+  RequirementType,
   ScaffoldIR,
+  SolutionIR,
+  TestCaseIR,
   ScaffoldOriginIR,
   ScaffoldSelector,
   StateFieldIR,
@@ -171,14 +181,150 @@ function qualifyPlatform(raw: string | undefined): {
 export function lowerModel(model: Model): LoomModel {
   const systems: SystemIR[] = [];
   const looseContexts: BoundedContextIR[] = [];
+  const requirements: RequirementIR[] = [];
+  const solutions: SolutionIR[] = [];
+  const testCases: TestCaseIR[] = [];
   for (const m of model.members) {
     if (isSystem(m)) systems.push(lowerSystem(m));
     // Top-level loose contexts (legacy single-deployable mode) have
     // no enclosing system, so no user block ever applies — the env's
     // `currentUser` resolution falls through to ordinary lookup.
     else if (isBoundedContext(m)) looseContexts.push(lowerContext(m));
+    else if (isRequirement(m)) requirements.push(lowerRequirement(m));
+    else if (isSolution(m)) solutions.push(lowerSolution(m));
+    else if (isTestCase(m)) testCases.push(lowerTestCase(m));
   }
-  return { systems, contexts: looseContexts };
+  return { systems, contexts: looseContexts, requirements, solutions, testCases };
+}
+
+// ---------------------------------------------------------------------------
+// Traceability lowering (Slice 12)
+// ---------------------------------------------------------------------------
+
+const REQUIREMENT_TYPES: ReadonlySet<string> = new Set<RequirementType>([
+  "UserStory",
+  "UseCase",
+  "AcceptanceCriteria",
+  "BusinessReq",
+]);
+const REQUIREMENT_STATUSES: ReadonlySet<string> = new Set<RequirementStatus>([
+  "Draft",
+  "Approved",
+  "InProgress",
+  "Done",
+]);
+
+/** Reads a scalar value out of a requirement prop-bag entry.  Bare
+ *  identifiers (`UserStory`) lower to a NameRef whose `.name` we want;
+ *  quoted titles to a StringLit; priorities to an IntLit.  Returns the
+ *  raw string / number, or undefined for shapes we don't recognise
+ *  (the validator reports those). */
+function requirementPropValue(
+  expr: import("../language/generated/ast.js").Expression | undefined,
+): string | number | undefined {
+  if (!expr) return undefined;
+  switch (expr.$type) {
+    case "NameRef":
+      return (expr as { name: string }).name;
+    case "StringLit":
+      return (expr as { value: string }).value;
+    case "IntLit":
+      return (expr as { value: number }).value;
+    default:
+      return undefined;
+  }
+}
+
+function lowerRequirement(
+  r: import("../language/generated/ast.js").Requirement,
+): RequirementIR {
+  let type: RequirementType = "UserStory";
+  let title = "";
+  let status: RequirementStatus | undefined;
+  let priority: number | undefined;
+  for (const p of r.props) {
+    const v = requirementPropValue(p.value);
+    switch (p.name) {
+      case "type":
+        if (typeof v === "string" && REQUIREMENT_TYPES.has(v)) type = v as RequirementType;
+        break;
+      case "title":
+        if (typeof v === "string") title = v;
+        break;
+      case "status":
+        if (typeof v === "string" && REQUIREMENT_STATUSES.has(v)) status = v as RequirementStatus;
+        break;
+      case "priority":
+        if (typeof v === "number") priority = v;
+        break;
+    }
+  }
+  return { id: r.name, type, title, status, priority, parentId: r.parent?.ref?.name };
+}
+
+function lowerSolution(
+  s: import("../language/generated/ast.js").Solution,
+): SolutionIR {
+  return {
+    id: s.name,
+    forRequirement: s.requirement?.ref?.name ?? "",
+    title: s.title ?? "",
+    entitles: lowerCodeRefs(s.entitles),
+  };
+}
+
+function lowerTestCase(
+  t: import("../language/generated/ast.js").TestCase,
+): TestCaseIR {
+  return {
+    id: t.name,
+    verifies: t.requirement?.ref?.name ?? "",
+    title: t.title ?? "",
+    covers: lowerCodeRefs(t.covers),
+  };
+}
+
+function lowerCodeRefs(
+  refs: readonly import("langium").Reference<
+    import("../language/generated/ast.js").Targetable
+  >[],
+): CodeRefIR[] {
+  const out: CodeRefIR[] = [];
+  for (const ref of refs) {
+    const node = ref.ref;
+    if (!node) continue; // unresolved — reported by the linker/validator
+    out.push({ qualifiedName: ref.$refText, kind: codeRefKindOf(node) });
+  }
+  return out;
+}
+
+function codeRefKindOf(
+  node: import("../language/generated/ast.js").Targetable,
+): CodeRefKind {
+  switch (node.$type) {
+    case "Module":
+      return "module";
+    case "BoundedContext":
+      return "context";
+    case "Aggregate":
+      return "aggregate";
+    case "Operation":
+      return "operation";
+    case "ValueObject":
+      return "valueobject";
+    case "EventDecl":
+      return "event";
+    case "Repository":
+      return "repository";
+    case "Workflow":
+      return "workflow";
+    case "View":
+      return "view";
+    case "Deployable":
+      return "deployable";
+    case "Api":
+      return "api";
+  }
 }
 
 function lowerSystem(sys: import("../language/generated/ast.js").System): SystemIR {
@@ -509,6 +655,7 @@ function lowerE2E(
     kind,
     deployableName: block.deployable?.ref?.name ?? "",
     statements,
+    verifiesTestCase: block.verifies?.ref?.name,
   };
 }
 
@@ -1016,7 +1163,7 @@ function lowerTest(
       inner = r.envAfter;
     }
   }
-  return { name: block.name, statements };
+  return { name: block.name, statements, verifiesTestCase: block.verifies?.ref?.name };
 }
 
 function lowerEntityPart(

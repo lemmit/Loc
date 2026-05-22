@@ -1,0 +1,54 @@
+// Loom architecture model (LikeC4) — generated from the IR, do not edit by hand.
+// System: Acme
+
+specification {
+  element system
+  element container
+  element component
+  element database
+}
+
+model {
+  Acme = system 'Acme' {
+    description 'Loom-generated system'
+    api = container 'api' {
+      technology 'dotnet'
+      Catalog = component 'Catalog'
+      Sales = component 'Sales'
+      CustomerMgmt = component 'CustomerMgmt'
+    }
+    catalogWeb = container 'catalogWeb' {
+      technology 'hono'
+      Catalog = component 'Catalog'
+      CustomerMgmt = component 'CustomerMgmt'
+    }
+    catalogApi = container 'catalogApi' {
+      technology 'dotnet'
+      Catalog = component 'Catalog'
+      CustomerMgmt = component 'CustomerMgmt'
+    }
+    webApp = container 'webApp' {
+      technology 'static'
+      Catalog = component 'Catalog'
+      Sales = component 'Sales'
+      CustomerMgmt = component 'CustomerMgmt'
+    }
+    db = database 'PostgreSQL'
+
+    api -> db 'reads / writes'
+    catalogWeb -> db 'reads / writes'
+    catalogApi -> db 'reads / writes'
+    webApp -> api 'calls'
+  }
+}
+
+views {
+  view index {
+    title 'Acme — landscape'
+    include *
+  }
+  view of Acme {
+    title 'Acme — containers'
+    include *
+  }
+}

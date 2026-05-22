@@ -129,17 +129,19 @@ export function buildPageObjectModule(
   lines.push(`    return this;`);
   lines.push(`  }`);
   lines.push("");
-  // Per-field reader.
-  lines.push(`  /** Read a primitive / enum field as displayed text. */`);
+  // Per-field reader — returns the value element as a Locator so callers
+  // assert with web-first matchers (`expect(field(...)).toHaveText(...)`),
+  // which retry against the live DOM.
+  lines.push(`  /** Locator for a primitive / enum field's value cell. */`);
   lines.push(
-    `  async field<K extends keyof ${agg.name}Response>(name: K): Promise<string> {`,
+    `  field<K extends keyof ${agg.name}Response>(name: K): Locator {`,
   );
   lines.push(
-    `    return await this.page.getByTestId(\`${slug}-detail-\${String(name)}\`).innerText();`,
+    `    return this.page.getByTestId(\`${slug}-detail-\${String(name)}\`);`,
   );
   lines.push(`  }`);
   lines.push("");
-  // Per-contained-collection reader.
+  // Per-contained-collection locators.
   for (const c of agg.contains) {
     if (!c.collection) continue;
     const part = agg.parts.find((p) => p.name === c.partName);
@@ -153,10 +155,12 @@ export function buildPageObjectModule(
     );
     lines.push(`  }`);
     lines.push("");
-    lines.push(`  /** Count of rows in the contained \`${c.name}\` table. */`);
-    lines.push(`  async ${c.name}Count(): Promise<number> {`);
     lines.push(
-      `    return await this.page.getByTestId("${slug}-detail-${c.name}").locator("tbody tr").count();`,
+      `  /** Locator for the rows of the contained \`${c.name}\` table — assert with toHaveCount. */`,
+    );
+    lines.push(`  ${c.name}Rows(): Locator {`);
+    lines.push(
+      `    return this.page.getByTestId("${slug}-detail-${c.name}").locator("tbody tr");`,
     );
     lines.push(`  }`);
     lines.push("");
@@ -176,6 +180,7 @@ export function buildPageObjectModule(
       lines.push(
         `    await this.page.getByTestId("${slug}-op-${op.name}-form").waitFor({ state: "detached" });`,
       );
+      lines.push(`    await this.page.waitForLoadState("networkidle");`);
       lines.push(`    return this;`);
       lines.push(`  }`);
       lines.push("");
@@ -207,6 +212,7 @@ export function buildPageObjectModule(
       lines.push(
         `    await this.page.getByTestId("${slug}-op-${op.name}-form").waitFor({ state: "detached" });`,
       );
+      lines.push(`    await this.page.waitForLoadState("networkidle");`);
       lines.push(`    return this;`);
       lines.push(`  }`);
       lines.push("");

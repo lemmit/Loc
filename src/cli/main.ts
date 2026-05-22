@@ -11,11 +11,19 @@ import { generateTypeScript } from "../platform/hono/v4/emit.js";
 // backend; the CLI (an entrypoint) supplies that package's pins to
 // the version-agnostic shared emitter (B2.1).
 import { BACKEND_PINS as HONO_V4_PINS } from "../platform/hono/v4/pins.js";
+import { installFsBackendSource } from "../platform/fs-discovery.js";
 import { generateDotnet } from "../generator/dotnet/index.js";
 import { generateSystems } from "../system/index.js";
 import { lowerModel } from "../ir/lower.js";
 import { enrichLoomModel } from "../ir/enrichments.js";
 import { validateLoomModel } from "../ir/validate.js";
+import { computeVerification } from "../verify/verification.js";
+import {
+  renderVerificationJson,
+  renderVerificationMd,
+  renderVerdictGraph,
+} from "../verify/render.js";
+import type { TestOutcome } from "../ir/loom-ir.js";
 
 interface ParseResult {
   model: Model;
@@ -253,6 +261,95 @@ function fileContentMatches(absPath: string, content: string): boolean {
   }
 }
 
+interface VerifyOptions {
+  results: string;
+  out?: string;
+  requireAll?: boolean;
+  min?: string;
+  json?: boolean;
+}
+
+/** `ddd verify` — join a test-results file onto the requirements graph,
+ *  emit the verification artifacts, and gate the exit code. */
+async function runVerify(file: string, options: VerifyOptions): Promise<void> {
+  const result = await parseFile(file);
+  if (result.errorCount > 0) {
+    printDiagnostics(result);
+    process.exit(2);
+  }
+  const loom = enrichLoomModel(lowerModel(result.model));
+  const loomErrors = validateLoomModel(loom).filter((d) => d.severity === "error");
+  if (loomErrors.length > 0) {
+    for (const d of loomErrors) console.error(`${d.source} error: ${d.message}`);
+    process.exit(2);
+  }
+  if (loom.requirements.length === 0) {
+    console.error(`No \`requirement\` declarations in ${file} — nothing to verify.`);
+    process.exit(2);
+  }
+
+  // Read + validate the results file.
+  if (!fs.existsSync(options.results)) {
+    console.error(`Results file not found: ${options.results}`);
+    process.exit(2);
+  }
+  let outcomes: TestOutcome[];
+  try {
+    const parsed = JSON.parse(fs.readFileSync(options.results, "utf8")) as {
+      results?: TestOutcome[];
+    };
+    if (!Array.isArray(parsed.results)) {
+      throw new Error('expected a top-level "results" array');
+    }
+    outcomes = parsed.results;
+  } catch (err) {
+    console.error(
+      `Could not parse results file: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    process.exit(2);
+  }
+
+  const verification = computeVerification(
+    loom.traceability!,
+    loom.requirements.map((r) => r.id),
+    outcomes,
+  );
+
+  // Emit artifacts.
+  const outDir = path.join(path.resolve(options.out ?? path.dirname(file)), ".loom");
+  if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+  fs.writeFileSync(path.join(outDir, "verification.json"), renderVerificationJson(verification));
+  fs.writeFileSync(path.join(outDir, "verification.md"), renderVerificationMd(loom, verification));
+  fs.writeFileSync(path.join(outDir, "verification.mmd"), renderVerdictGraph(loom, verification));
+
+  const s = verification.summary;
+  console.log(
+    `Verified ${s.verified}/${s.total} requirements ` +
+      `(${s.failing} failing, ${s.unverified} unverified, ${s.untested} untested).`,
+  );
+  if (options.json) console.log(renderVerificationJson(verification));
+
+  // Gate.
+  let failed = s.failing > 0;
+  let reason = failed ? `${s.failing} requirement(s) failing` : "";
+  if (options.requireAll && s.verified < s.total) {
+    failed = true;
+    reason = `${s.total - s.verified} requirement(s) not verified (--require-all)`;
+  }
+  if (options.min !== undefined) {
+    const minPct = Number(options.min);
+    const actual = s.total === 0 ? 100 : (s.verified / s.total) * 100;
+    if (actual < minPct) {
+      failed = true;
+      reason = `verified ${actual.toFixed(0)}% < --min ${minPct}%`;
+    }
+  }
+  if (failed) {
+    console.error(`Verification gate failed: ${reason}.`);
+    process.exit(1);
+  }
+}
+
 const program = new Command();
 program.name("ddd").description("DDD DSL CLI").version("0.1.0");
 
@@ -303,6 +400,20 @@ generate
     },
   );
 
+program
+  .command("verify <file>")
+  .description(
+    "Join a test-results JSON onto the requirements graph, write .loom/verification.* and gate the exit code.",
+  )
+  .requiredOption("--results <file>", "JSON file: { version, results: [{ name, status, suite? }] }")
+  .option("--out <dir>", "output directory for .loom/ artifacts (default: the .ddd file's dir)")
+  .option("--require-all", "fail unless every requirement is VERIFIED")
+  .option("--min <pct>", "fail if the verified percentage is below <pct>")
+  .option("--json", "also print verification.json to stdout")
+  .action(async (file: string, options: VerifyOptions) => {
+    await runVerify(file, options);
+  });
+
 async function watchAndRegenerate(target: GenerateTarget, file: string, outDir: string) {
   console.log(`Watching ${file} for changes…`);
   let timer: NodeJS.Timeout | null = null;
@@ -339,6 +450,27 @@ async function watchAndRegenerate(target: GenerateTarget, file: string, outDir: 
   // Keep the process alive
   await new Promise(() => {});
 }
+
+// packaging-split P3 slice 3 — install the fs-backed
+// `discoverBackends()` source before any platform resolution.
+// Composes the in-tree default with whatever `@loom/*` backend
+// packages are installed in the project's `node_modules`.  Today
+// (slice 3) this is a no-op for emitted output because the fs
+// source returns the same surface instances as the in-tree
+// default; slice 5 makes the workspace package the true source of
+// code, and this call becomes load-bearing.  Errors during fs walk
+// (missing `node_modules`, permission, malformed manifest) are
+// non-fatal — the function returns whatever it could read, and the
+// composition falls back to the in-tree set.
+await installFsBackendSource(process.cwd()).catch((err) => {
+  // Don't take down the CLI for a discovery hiccup; just leave the
+  // in-tree default active.
+  console.warn(
+    `loom: fs backend discovery skipped (${
+      err instanceof Error ? err.message : String(err)
+    }); using in-tree default.`,
+  );
+});
 
 program.parseAsync(process.argv).catch((err) => {
   console.error(err);

@@ -1,0 +1,310 @@
+import { createContext, useContext, useEffect, useState } from "react";
+import { ActionIcon, Autocomplete, Box, Group, SegmentedControl, Select, Text, TextInput, Textarea } from "@mantine/core";
+import { BINARY_OPS, UNARY_OPS, emitExpr, type ECallArg, type EExpr, type EObjField } from "./expr-model";
+
+export type ExprMode = "structured" | "text";
+
+// In-scope bare names for the expression being edited (params, properties,
+// derived props, enum values…). Threaded to every `raw` leaf so they offer
+// scope-aware suggestions while staying free-text.
+const ExprScopeContext = createContext<string[]>([]);
+
+// Type-directed member-name candidates per member node, keyed by the canonical
+// structural path (see `memberCandidates` in expr-slots.ts). Computed against a
+// linked document (async), so it's empty until that resolves — member inputs
+// stay free-text either way.
+const MemberCandidatesContext = createContext<Map<string, string[]>>(new Map());
+
+// Recursive structured expression editor. Operator nodes (binary/unary/paren)
+// render dropdowns + nested operands; literals render typed inputs; everything
+// else is a `raw` text leaf. `onChange(next, commit)` bubbles the full updated
+// subtree up: live edits pass commit=false; discrete changes (operator/bool
+// select) and text-leaf blur pass commit=true so the surface splices + re-parses.
+
+interface NodeProps {
+  node: EExpr;
+  /** Canonical structural path of this node (root is ""), used to look up
+   *  type-directed member candidates. See `memberCandidates` in expr-slots.ts. */
+  path: string;
+  onChange: (next: EExpr, commit: boolean) => void;
+}
+
+// Argument list shared by call (`f(…)`) and member-call (`a.b(…)`) nodes.
+// Edits a single arg's value, removes an arg, or appends a positional one
+// (defaulting to `null` so the result stays parseable until edited). Named args
+// keep their name verbatim; renaming args is out of scope for now.
+function ArgsEditor({ args, path, onArgs }: { args: ECallArg[]; path: string; onArgs: (args: ECallArg[], commit: boolean) => void }): JSX.Element {
+  return (
+    <Group gap={2} wrap="nowrap" align="center">
+      <Text size="xs" c="dimmed">(</Text>
+      {args.map((arg, i) => (
+        <Group key={i} gap={2} wrap="nowrap" align="center">
+          {i > 0 && <Text size="xs" c="dimmed">,</Text>}
+          {arg.name && <Text size="xs" c="dimmed">{arg.name}:</Text>}
+          <ExpressionEditor node={arg.value} path={`${path}a${i}`} onChange={(n, c) => onArgs(args.map((a, j) => (j === i ? { ...a, value: n } : a)), c)} />
+          <ActionIcon size="xs" variant="subtle" color="gray" data-testid="c4expr-arg-del" aria-label="remove argument" onClick={() => onArgs(args.filter((_, j) => j !== i), true)}>
+            <Text size="xs">×</Text>
+          </ActionIcon>
+        </Group>
+      ))}
+      <ActionIcon size="xs" variant="subtle" color="gray" data-testid="c4expr-arg-add" aria-label="add argument" onClick={() => onArgs([...args, { value: { kind: "lit", lit: "null", value: "null" } }], true)}>
+        <Text size="xs">+</Text>
+      </ActionIcon>
+      <Text size="xs" c="dimmed">)</Text>
+    </Group>
+  );
+}
+
+// Named-field list for `new Part { … }` and object literals `{ … }`. Edits a
+// field's name or value, removes a field, or appends one (defaulting to
+// `field: null` so the result stays parseable until edited).
+function FieldsEditor({ fields, path, onFields }: { fields: EObjField[]; path: string; onFields: (fields: EObjField[], commit: boolean) => void }): JSX.Element {
+  return (
+    <Group gap={2} wrap="nowrap" align="center">
+      <Text size="xs" c="dimmed">{"{"}</Text>
+      {fields.map((field, i) => (
+        <Group key={i} gap={2} wrap="nowrap" align="center">
+          {i > 0 && <Text size="xs" c="dimmed">,</Text>}
+          <TextInput
+            size="xs"
+            w={80}
+            value={field.name}
+            data-testid="c4expr-field-name"
+            styles={{ input: { fontFamily: "monospace", fontSize: 11 } }}
+            onChange={(e) => onFields(fields.map((f, j) => (j === i ? { ...f, name: e.currentTarget.value } : f)), false)}
+            onBlur={() => onFields(fields, true)}
+          />
+          <Text size="xs" c="dimmed">:</Text>
+          <ExpressionEditor node={field.value} path={`${path}f${i}`} onChange={(n, c) => onFields(fields.map((f, j) => (j === i ? { ...f, value: n } : f)), c)} />
+          <ActionIcon size="xs" variant="subtle" color="gray" data-testid="c4expr-field-del" aria-label="remove field" onClick={() => onFields(fields.filter((_, j) => j !== i), true)}>
+            <Text size="xs">×</Text>
+          </ActionIcon>
+        </Group>
+      ))}
+      <ActionIcon size="xs" variant="subtle" color="gray" data-testid="c4expr-field-add" aria-label="add field" onClick={() => onFields([...fields, { name: "field", value: { kind: "lit", lit: "null", value: "null" } }], true)}>
+        <Text size="xs">+</Text>
+      </ActionIcon>
+      <Text size="xs" c="dimmed">{"}"}</Text>
+    </Group>
+  );
+}
+
+export function ExpressionEditor({ node, path, onChange }: NodeProps): JSX.Element {
+  const candidates = useContext(ExprScopeContext);
+  const memberMap = useContext(MemberCandidatesContext);
+  switch (node.kind) {
+    case "binary":
+      return (
+        <Group gap={4} wrap="nowrap" align="center" style={{ border: "1px solid var(--mantine-color-dark-4)", borderRadius: 4, padding: 2 }}>
+          <ExpressionEditor node={node.left} path={`${path}L`} onChange={(n, c) => onChange({ ...node, left: n }, c)} />
+          <Select
+            size="xs"
+            w={64}
+            data={BINARY_OPS}
+            value={node.op}
+            allowDeselect={false}
+            data-testid="c4expr-op"
+            onChange={(op) => op && onChange({ ...node, op }, true)}
+          />
+          <ExpressionEditor node={node.right} path={`${path}R`} onChange={(n, c) => onChange({ ...node, right: n }, c)} />
+        </Group>
+      );
+    case "unary":
+      return (
+        <Group gap={2} wrap="nowrap" align="center">
+          <Select size="xs" w={48} data={UNARY_OPS} value={node.op} allowDeselect={false} onChange={(op) => op && onChange({ ...node, op }, true)} />
+          <ExpressionEditor node={node.operand} path={`${path}o`} onChange={(n, c) => onChange({ ...node, operand: n }, c)} />
+        </Group>
+      );
+    case "paren":
+      return (
+        <Group gap={2} wrap="nowrap" align="center">
+          <Text size="xs" c="dimmed">(</Text>
+          <ExpressionEditor node={node.inner} path={`${path}i`} onChange={(n, c) => onChange({ ...node, inner: n }, c)} />
+          <Text size="xs" c="dimmed">)</Text>
+        </Group>
+      );
+    case "lit":
+      if (node.lit === "bool") {
+        return (
+          <Select size="xs" w={70} data={["true", "false"]} value={node.value} allowDeselect={false} data-testid="c4expr-lit" onChange={(v) => v && onChange({ ...node, value: v }, true)} />
+        );
+      }
+      if (node.lit === "null") return <Text size="xs" ff="monospace">null</Text>;
+      return (
+        <TextInput
+          size="xs"
+          w={node.lit === "string" ? 120 : 70}
+          value={node.value}
+          data-testid="c4expr-lit"
+          styles={{ input: { fontFamily: "monospace", fontSize: 11 } }}
+          onChange={(e) => onChange({ ...node, value: e.currentTarget.value }, false)}
+          onBlur={() => onChange(node, true)}
+        />
+      );
+    case "call":
+      return (
+        <Group gap={1} wrap="nowrap" align="center" style={{ border: "1px solid var(--mantine-color-dark-4)", borderRadius: 4, padding: 2 }}>
+          <ExpressionEditor node={node.callee} path={`${path}c`} onChange={(n, c) => onChange({ ...node, callee: n }, c)} />
+          <ArgsEditor args={node.args} path={path} onArgs={(args, c) => onChange({ ...node, args }, c)} />
+        </Group>
+      );
+    case "member":
+      return (
+        <Group gap={1} wrap="nowrap" align="center">
+          <ExpressionEditor node={node.receiver} path={`${path}r`} onChange={(n, c) => onChange({ ...node, receiver: n }, c)} />
+          <Text size="xs" c="dimmed">.</Text>
+          <Autocomplete
+            size="xs"
+            w={90}
+            value={node.member}
+            data={memberMap.get(path) ?? []}
+            data-testid="c4expr-member"
+            styles={{ input: { fontFamily: "monospace", fontSize: 11 } }}
+            onChange={(v) => onChange({ ...node, member: v }, false)}
+            onBlur={() => onChange(node, true)}
+          />
+          {node.call && <ArgsEditor args={node.args} path={path} onArgs={(args, c) => onChange({ ...node, args }, c)} />}
+        </Group>
+      );
+    case "lambda":
+      return (
+        <Group gap={2} wrap="nowrap" align="center">
+          <TextInput
+            size="xs"
+            w={48}
+            value={node.param}
+            data-testid="c4expr-lambda-param"
+            styles={{ input: { fontFamily: "monospace", fontSize: 11 } }}
+            onChange={(e) => onChange({ ...node, param: e.currentTarget.value }, false)}
+            onBlur={() => onChange(node, true)}
+          />
+          <Text size="xs" c="dimmed">{"=>"}</Text>
+          {/* The lambda param is in scope for its body. */}
+          <ExprScopeContext.Provider value={[...candidates, node.param]}>
+            <ExpressionEditor node={node.body} path={`${path}b`} onChange={(n, c) => onChange({ ...node, body: n }, c)} />
+          </ExprScopeContext.Provider>
+        </Group>
+      );
+    case "new":
+      return (
+        <Group gap={2} wrap="nowrap" align="center" style={{ border: "1px solid var(--mantine-color-dark-4)", borderRadius: 4, padding: 2 }}>
+          <Text size="xs" c="dimmed">new</Text>
+          <TextInput
+            size="xs"
+            w={90}
+            value={node.partType}
+            data-testid="c4expr-new-type"
+            styles={{ input: { fontFamily: "monospace", fontSize: 11 } }}
+            onChange={(e) => onChange({ ...node, partType: e.currentTarget.value }, false)}
+            onBlur={() => onChange(node, true)}
+          />
+          <FieldsEditor fields={node.fields} path={path} onFields={(fields, c) => onChange({ ...node, fields }, c)} />
+        </Group>
+      );
+    case "object":
+      return <FieldsEditor fields={node.fields} path={path} onFields={(fields, c) => onChange({ ...node, fields }, c)} />;
+    case "raw":
+      return (
+        <Autocomplete
+          size="xs"
+          w={150}
+          value={node.text}
+          data={candidates}
+          data-testid="c4expr-raw"
+          styles={{ input: { fontFamily: "monospace", fontSize: 11 } }}
+          onChange={(v) => onChange({ ...node, text: v }, false)}
+          onBlur={() => onChange(node, true)}
+        />
+      );
+  }
+}
+
+// Advanced escape hatch: edit the whole expression as raw text, validated by
+// the same reparse-on-commit path. `seedText` is the verbatim source slice.
+function ExprTextField({ seedText, onCommit }: { seedText: string; onCommit: (text: string) => boolean }): JSX.Element {
+  const [error, setError] = useState(false);
+  return (
+    <Textarea
+      size="xs"
+      autosize
+      minRows={1}
+      defaultValue={seedText}
+      error={error ? "invalid expression" : undefined}
+      data-testid="c4expr-text"
+      styles={{ input: { fontFamily: "monospace", fontSize: 11 } }}
+      onFocus={() => error && setError(false)}
+      onBlur={(e) => {
+        const v = e.currentTarget.value;
+        if (v.trim() !== seedText.trim() && !onCommit(v)) setError(true);
+      }}
+    />
+  );
+}
+
+// Surface wrapper: owns the working tree, commits on discrete change / blur via
+// `onCommit(text)`. A failed commit (unparseable) is flagged and the working
+// tree kept so the user can fix it; on success the parent re-seeds (remount via
+// a rev-keyed mount), which clears the error. A structured⇄text toggle lets
+// advanced users drop to raw text (still reparse-validated); `mode` is held by
+// the parent so it persists across the rev-keyed remount.
+export function ExprSlotEditor({
+  seed,
+  seedText,
+  candidates,
+  loadMembers,
+  mode,
+  onMode,
+  onCommit,
+}: {
+  seed: EExpr;
+  seedText: string;
+  candidates: string[];
+  /** Resolves type-directed member-name candidates per node path. Async (builds a
+   *  linked document); run once on mount — the parent re-keys this component per
+   *  slot/revision, so a fresh slot or a commit remounts and recomputes. */
+  loadMembers: () => Promise<Map<string, string[]>>;
+  mode: ExprMode;
+  onMode: (mode: ExprMode) => void;
+  onCommit: (text: string) => boolean;
+}): JSX.Element {
+  const [local, setLocal] = useState(seed);
+  const [error, setError] = useState(false);
+  const [memberMap, setMemberMap] = useState<Map<string, string[]>>(new Map());
+  const handle = (next: EExpr, commit: boolean): void => {
+    setLocal(next);
+    if (commit && !onCommit(emitExpr(next))) setError(true);
+  };
+  useEffect(() => {
+    let alive = true;
+    void loadMembers().then((m) => { if (alive) setMemberMap(m); });
+    return () => { alive = false; };
+    // Run once per mount; the rev/slot-keyed remount drives recomputation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return (
+    <Box data-testid="c4expr">
+      <SegmentedControl
+        size="xs"
+        mb={4}
+        data={[
+          { label: "Structured", value: "structured" },
+          { label: "Text", value: "text" },
+        ]}
+        value={mode}
+        data-testid="c4expr-mode"
+        onChange={(v) => onMode(v as ExprMode)}
+      />
+      {mode === "text" ? (
+        <ExprTextField seedText={seedText} onCommit={onCommit} />
+      ) : (
+        <ExprScopeContext.Provider value={candidates}>
+          <MemberCandidatesContext.Provider value={memberMap}>
+            <ExpressionEditor node={local} path="" onChange={handle} />
+            {error && <Text size="xs" c="red">invalid expression</Text>}
+          </MemberCandidatesContext.Provider>
+        </ExprScopeContext.Provider>
+      )}
+    </Box>
+  );
+}

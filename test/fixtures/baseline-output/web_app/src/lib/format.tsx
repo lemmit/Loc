@@ -109,14 +109,16 @@ export function PlainValue({ value }: { value: unknown }) {
 export function KeyValueRow({
   label,
   children,
+  "data-testid": testid,
 }: {
   label: string;
   children: ReactNode;
+  "data-testid"?: string;
 }) {
   return (
     <Group wrap="nowrap" align="flex-start" gap="md">
       <Text component="span" c="dimmed" fw={500} miw={140}>{label}</Text>
-      <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>{children}</Stack>
+      <Stack gap={2} data-testid={testid} style={{ flex: 1, minWidth: 0 }}>{children}</Stack>
     </Group>
   );
 }

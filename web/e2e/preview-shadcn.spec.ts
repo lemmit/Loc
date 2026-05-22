@@ -17,7 +17,7 @@
 
 import { expect, test } from "@playwright/test";
 import {
-  browserCanReachEsmSh,
+  browserCanReachNetwork,
   selectExample,
   waitForPlaygroundReady,
 } from "./_helpers";
@@ -74,7 +74,7 @@ test("editor → shadcn-design system → preview boots", async ({ page }) => {
     await expect(page.getByText(/generated \d+ file\(s\)/)).toBeVisible({ timeout: 60_000 });
   });
 
-  if (!(await browserCanReachEsmSh(page))) {
+  if (!(await browserCanReachNetwork(page))) {
     test.skip(true, "browser cannot reach esm.sh — Bundle/Boot/Preview steps need network");
   }
 
@@ -93,7 +93,8 @@ test("editor → shadcn-design system → preview boots", async ({ page }) => {
   });
 
   await test.step("Preview renders shadcn output", async () => {
-    await page.getByTestId("right-pane-tabs").locator("text=Preview").click();
+    // Preview is always mounted in the four-region shell — no tab to click.
+    await expect(page.getByTestId("preview-region")).toBeVisible();
     const iframe = page.frameLocator('[data-testid="preview-iframe"]');
     // First wait for the iframe to render anything — link copy is
     // shared between packs (both emit "Products"/"Orders"/"Home"

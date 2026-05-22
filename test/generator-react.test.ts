@@ -181,10 +181,12 @@ describe("react generator", () => {
     // One method per public op.
     expect(orderPo).toMatch(/async addLine\(input: AddLineRequest\)/);
     expect(orderPo).toMatch(/async confirm\(\): Promise<this>/);
-    // Master-detail helper for the contained collection.
-    expect(orderPo).toMatch(/async linesCount\(\): Promise<number>/);
-    // Field reader is typed off the response shape.
-    expect(orderPo).toMatch(/field<K extends keyof OrderResponse>/);
+    // Locator helper for the contained collection's rows (assert via
+    // toHaveCount).
+    expect(orderPo).toMatch(/linesRows\(\): Locator/);
+    // Field accessor returns a Locator (web-first assertions), typed off
+    // the response shape.
+    expect(orderPo).toMatch(/field<K extends keyof OrderResponse>\(name: K\): Locator/);
   });
 
   it("emits playwright.config.ts and a smoke spec under e2e/", async () => {

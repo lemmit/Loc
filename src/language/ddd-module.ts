@@ -15,6 +15,11 @@ import { DddHoverProvider } from "./lsp/ddd-hover.js";
 import { DddNodeKindProvider } from "./lsp/ddd-node-kind.js";
 import { DddDefinitionProvider } from "./lsp/ddd-definition.js";
 import { DddCompletionProvider } from "./lsp/ddd-completion.js";
+import { DddReferencesProvider } from "./lsp/ddd-references.js";
+import { DddRenameProvider } from "./lsp/ddd-rename.js";
+import { DddSemanticTokenProvider } from "./lsp/ddd-semantic-tokens.js";
+import { DddSignatureHelpProvider } from "./lsp/ddd-signature-help.js";
+import { DddCodeActionProvider } from "./lsp/ddd-code-actions.js";
 import { registerScaffoldAstExpander } from "./ddd-scaffold-ast-expander.js";
 
 export type DddAddedServices = {
@@ -37,6 +42,11 @@ export const DddModule: Module<DddServices, PartialLangiumServices & DddAddedSer
     HoverProvider: (services: LangiumServices) => new DddHoverProvider(services),
     DefinitionProvider: (services: LangiumServices) => new DddDefinitionProvider(services),
     CompletionProvider: (services: LangiumServices) => new DddCompletionProvider(services),
+    ReferencesProvider: (services: LangiumServices) => new DddReferencesProvider(services),
+    RenameProvider: (services: LangiumServices) => new DddRenameProvider(services),
+    SemanticTokenProvider: (services: LangiumServices) => new DddSemanticTokenProvider(services),
+    SignatureHelp: (services: LangiumServices) => new DddSignatureHelpProvider(services),
+    CodeActionProvider: () => new DddCodeActionProvider(),
   },
 };
 

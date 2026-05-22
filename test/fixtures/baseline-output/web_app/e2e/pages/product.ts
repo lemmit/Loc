@@ -77,9 +77,9 @@ export class ProductDetailPage {
     return this;
   }
 
-  /** Read a primitive / enum field as displayed text. */
-  async field<K extends keyof ProductResponse>(name: K): Promise<string> {
-    return await this.page.getByTestId(`products-detail-${String(name)}`).innerText();
+  /** Locator for a primitive / enum field's value cell. */
+  field<K extends keyof ProductResponse>(name: K): Locator {
+    return this.page.getByTestId(`products-detail-${String(name)}`);
   }
 
 }

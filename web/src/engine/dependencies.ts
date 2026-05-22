@@ -32,8 +32,7 @@ export type DependencyResolution =
 export interface DependencySpec {
   /** Bare package name, e.g. `lucide-react` or `@scope/pkg`. */
   name: string;
-  /** Semver range.  Engines that do real installs honour it; the
-   *  esm.sh path pins the resolved URL to it. */
+  /** Semver range, honoured by the install/resolution. */
   range: string;
   resolution: DependencyResolution;
 }

@@ -1,0 +1,248 @@
+import { AstUtils, type AstNode } from "langium";
+import type {
+  Aggregate,
+  EnumDecl,
+  EventDecl,
+  Model,
+  Property,
+  TypeRef,
+  ValueObject,
+} from "../../../../src/language/generated/ast.js";
+import { printStructural } from "../../../../src/language/print/index.js";
+import { parseDdd } from "../parse";
+import { spliceNode } from "../edit-engine";
+import type { NodeKind } from "./model";
+
+// ---------------------------------------------------------------------------
+// Inline field editing for the Model builder's Property-bearing constructs
+// (aggregate / value object / event).  Each op re-parses the current source,
+// finds the construct, mutates its property list in memory, reprints the whole
+// construct with the structural printer, and splices it over the construct's
+// CST range — the same parse → mutate → reprint → splice path add/delete/rename
+// use.  TypeRef/Property literals are hand-built (no linking / `$container`
+// needed): the printer reads only `$type` / `name` / `target.$refText` /
+// `array` / `optional`.
+//
+// Field *rename* is intentionally out of scope — field-name references in
+// expressions/views are resolved during IR lowering, not as Langium
+// cross-references, so they can't be safely tracked here.
+// ---------------------------------------------------------------------------
+
+export type PrimitiveName =
+  | "bool"
+  | "datetime"
+  | "decimal"
+  | "guid"
+  | "int"
+  | "long"
+  | "string";
+
+export const PRIMITIVES: PrimitiveName[] = [
+  "string",
+  "int",
+  "long",
+  "decimal",
+  "bool",
+  "datetime",
+  "guid",
+];
+
+export type BaseSpec =
+  | { kind: "primitive"; name: PrimitiveName }
+  | { kind: "id"; target: string }
+  | { kind: "named"; target: string };
+
+export interface TypeSpec {
+  base: BaseSpec;
+  array: boolean;
+  optional: boolean;
+}
+
+export interface FieldInfo {
+  name: string;
+  base: BaseSpec;
+  baseLabel: string;
+  array: boolean;
+  optional: boolean;
+}
+
+export interface TypeOption {
+  label: string;
+  base: BaseSpec;
+}
+
+const FIELD_KINDS: NodeKind[] = ["aggregate", "valueobject", "event"];
+export const isFieldKind = (kind: NodeKind): boolean => FIELD_KINDS.includes(kind);
+
+const KIND_TO_TYPE: Partial<Record<NodeKind, string>> = {
+  aggregate: "Aggregate",
+  valueobject: "ValueObject",
+  event: "EventDecl",
+};
+
+function findConstruct(ast: Model, kind: NodeKind, name: string): AstNode | null {
+  const wantType = KIND_TO_TYPE[kind];
+  if (!wantType) return null;
+  for (const n of AstUtils.streamAst(ast)) {
+    if (n.$type === wantType && (n as { name?: unknown }).name === name) return n;
+  }
+  return null;
+}
+
+/** The property nodes of a construct, paired with where they live so we can
+ *  mutate the backing array.  Events keep them in `fields`; aggregates and
+ *  value objects keep them in `members` interleaved with other member kinds. */
+function propertyList(node: AstNode): { list: Property[]; container: Property[] } {
+  if (node.$type === "EventDecl") {
+    const fields = (node as EventDecl).fields;
+    return { list: fields, container: fields };
+  }
+  const members = (node as Aggregate | ValueObject).members as AstNode[];
+  const list = members.filter((m): m is Property => m.$type === "Property");
+  return { list, container: members as unknown as Property[] };
+}
+
+export function baseLabel(base: BaseSpec): string {
+  switch (base.kind) {
+    case "primitive":
+      return base.name;
+    case "id":
+      return `Id<${base.target}>`;
+    case "named":
+      return base.target;
+  }
+}
+
+function baseSpecOf(type: TypeRef): BaseSpec {
+  const base = type.base;
+  switch (base.$type) {
+    case "PrimitiveType":
+      return { kind: "primitive", name: base.name };
+    case "IdType":
+      return { kind: "id", target: base.target.$refText };
+    case "NamedType":
+      return { kind: "named", target: base.target.$refText };
+    default:
+      return { kind: "named", target: "" };
+  }
+}
+
+function buildTypeRef(spec: TypeSpec): TypeRef {
+  let base: unknown;
+  switch (spec.base.kind) {
+    case "primitive":
+      base = { $type: "PrimitiveType", name: spec.base.name };
+      break;
+    case "id":
+      base = { $type: "IdType", target: { $refText: spec.base.target } };
+      break;
+    case "named":
+      base = { $type: "NamedType", target: { $refText: spec.base.target } };
+      break;
+  }
+  return { $type: "TypeRef", base, array: spec.array, optional: spec.optional } as unknown as TypeRef;
+}
+
+function buildProperty(name: string, spec: TypeSpec): Property {
+  return {
+    $type: "Property",
+    name,
+    type: buildTypeRef(spec),
+    display: false,
+  } as unknown as Property;
+}
+
+// --- read helpers (for the inspector UI) -----------------------------------
+
+export function listFields(node: AstNode): FieldInfo[] {
+  return propertyList(node).list.map((p) => {
+    const base = baseSpecOf(p.type);
+    return { name: p.name, base, baseLabel: baseLabel(base), array: p.type.array, optional: p.type.optional };
+  });
+}
+
+/** Type options for the Select: the primitives, plus `Id<Agg>` for each
+ *  aggregate and a named type for each value object / enum. */
+export function availableTypes(ast: Model): TypeOption[] {
+  const out: TypeOption[] = PRIMITIVES.map((name) => ({ label: name, base: { kind: "primitive", name } }));
+  const seen = new Set(out.map((o) => o.label));
+  const add = (opt: TypeOption): void => {
+    if (!seen.has(opt.label)) {
+      seen.add(opt.label);
+      out.push(opt);
+    }
+  };
+  for (const n of AstUtils.streamAst(ast)) {
+    if (n.$type === "Aggregate") {
+      const name = (n as Aggregate).name;
+      add({ label: `Id<${name}>`, base: { kind: "id", target: name } });
+    } else if (n.$type === "ValueObject") {
+      const name = (n as ValueObject).name;
+      add({ label: name, base: { kind: "named", target: name } });
+    } else if (n.$type === "EnumDecl") {
+      const name = (n as EnumDecl).name;
+      add({ label: name, base: { kind: "named", target: name } });
+    }
+  }
+  return out;
+}
+
+// --- mutating ops (parse → mutate → reprint → splice) ----------------------
+
+function commit(source: string, kind: NodeKind, name: string, mutate: (node: AstNode) => boolean): string | null {
+  const fresh = parseDdd(source);
+  if (fresh.parserErrors.length > 0) return null;
+  const node = findConstruct(fresh.ast, kind, name);
+  if (!node) return null;
+  if (!mutate(node)) return null;
+  return spliceNode(source, node, printStructural(node));
+}
+
+export function addField(
+  source: string,
+  kind: NodeKind,
+  name: string,
+  fieldName: string,
+  type: TypeSpec,
+): string | null {
+  return commit(source, kind, name, (node) => {
+    propertyList(node).container.push(buildProperty(fieldName, type));
+    return true;
+  });
+}
+
+export function deleteField(source: string, kind: NodeKind, name: string, index: number): string | null {
+  return commit(source, kind, name, (node) => {
+    const { list, container } = propertyList(node);
+    const target = list[index];
+    if (!target) return false;
+    const at = container.indexOf(target);
+    if (at < 0) return false;
+    container.splice(at, 1);
+    return true;
+  });
+}
+
+export function retypeField(
+  source: string,
+  kind: NodeKind,
+  name: string,
+  index: number,
+  type: TypeSpec,
+): string | null {
+  return commit(source, kind, name, (node) => {
+    const target = propertyList(node).list[index];
+    if (!target) return false;
+    target.type = buildTypeRef(type);
+    return true;
+  });
+}
+
+/** A field name not already used by the construct's fields. */
+export function freshFieldName(node: AstNode): string {
+  const taken = new Set(propertyList(node).list.map((p) => p.name));
+  for (let i = 1; ; i++) {
+    const candidate = `field${i}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+}

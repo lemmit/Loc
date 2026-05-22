@@ -1,0 +1,11 @@
+%% Loom workflow diagram — generated from the IR, do not edit by hand.
+%% System: Acme
+flowchart TD
+  subgraph wf_0["Orders · placeOrder(customerId, productId, quantity)"]
+    direction TB
+    w0s0{{"precondition: quantity > 0"}}
+    w0s1["order = Order.create()"]
+    w0s2["order.addLine()"]
+    w0s0 --> w0s1
+    w0s1 --> w0s2
+  end

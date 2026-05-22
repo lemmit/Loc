@@ -108,8 +108,13 @@ export class LoomRuntimeClient {
    *  silent next-request failure.
    *
    *  Pending RPCs are rejected with a labelled error; callers that
-   *  care can retry. */
-  respawn(): void {
+   *  care can retry.
+   *
+   *  `silent` skips the `onRespawn` callback — used by the engine's
+   *  `restore()` recovery path, which respawns the worker and
+   *  immediately re-boots, so the parent must NOT be told the
+   *  runtime was "lost". */
+  respawn(silent = false): void {
     if (this.disposed) return;
     try {
       this.worker.terminate();
@@ -121,7 +126,7 @@ export class LoomRuntimeClient {
     }
     this.pending.clear();
     this.spawn();
-    this.onRespawn?.();
+    if (!silent) this.onRespawn?.();
   }
 
   dispose(): void {

@@ -2,10 +2,10 @@
 // Engine registry — the single place that knows which RuntimeEngine
 // implementations exist and which is the default.
 //
-// P0: empty.  P1 registers `esbuild-pglite` (the proven default).  A
-// future spike registers `nodepod` behind a flag for A/B at e2e
-// parity.  Selection is config, never hard-wired at call sites — that
-// is what makes the runtime swap reversible.
+// Today `npm-install-bundle` (real npm tarballs in-browser) is the
+// only registered engine.  The seam stays so a future runtime
+// (nodepod / WebContainer / …) can register behind a flag for A/B at
+// e2e parity — selection is config, never hard-wired at call sites.
 // ---------------------------------------------------------------------------
 
 import type {

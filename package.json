@@ -1,6 +1,9 @@
 {
   "name": "loc-ddd-dsl",
   "version": "0.1.0",
+  "workspaces": [
+    "packages/*"
+  ],
   "description": "Langium-based DDD DSL with TypeScript (Hono + Drizzle) and .NET (ASP.NET Core + EF Core) code generators",
   "license": "FSL-1.1-Apache-2.0",
   "type": "module",
@@ -38,6 +41,7 @@
   "devDependencies": {
     "@types/node": "~22.10.0",
     "fake-indexeddb": "^6.2.5",
+    "happy-dom": "^20.9.0",
     "langium-cli": "~3.3.0",
     "typescript": "~5.7.0",
     "vitest": "~2.1.0"

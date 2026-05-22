@@ -12,6 +12,7 @@ import type {
   WorkflowIR,
 } from "../ir/loom-ir.js";
 import { camel, plural, snake } from "../util/naming.js";
+import { renderExpectStmt } from "./expect-stmt.js";
 
 // ---------------------------------------------------------------------------
 // UI e2e renderer.
@@ -42,6 +43,11 @@ interface RenderCtx {
   contexts: BoundedContextIR[];
   /** Locals introduced by `let`. */
   locals: Set<string>;
+  /** Locals bound to a `ui.<agg>.getById(...)` result — i.e. a navigated
+   *  detail page-object handle.  Member access on these lowers to
+   *  locator-based reads (`.field("x")` / `.<coll>Rows()`) and equality
+   *  assertions on them lower to web-first matchers. */
+  detailHandles: Set<string>;
 }
 
 export function renderUIE2EFile(
@@ -91,6 +97,7 @@ export function renderUIE2EFile(
       deployable: reactDeployable,
       contexts,
       locals: new Set(),
+      detailHandles: new Set(),
     };
     lines.push(...renderTest(t, ctx));
     lines.push("");
@@ -282,13 +289,25 @@ function renderTest(t: TestE2EIR, ctx: RenderCtx): string[] {
 
 function renderUIStmt(s: TestStmtIR, ctx: RenderCtx): string {
   if (s.kind === "expect") {
-    return `expect(${renderUIExpr(s.expr, ctx)}).toBe(true);`;
+    // Prefer Playwright's native, auto-retrying web-first matchers when
+    // the assertion is an equality on a detail-handle read — they poll
+    // the live DOM, so they're immune to the post-mutation refetch lag
+    // that a one-shot read snapshot would lose to.
+    const webFirst = renderWebFirstExpect(s.expr, ctx);
+    if (webFirst) return webFirst;
+    return renderExpectStmt(s.expr, (e) => renderUIExpr(e, ctx));
   }
   if (s.kind === "expect-throws") {
     return `await expect(async () => { ${renderUIExpr(s.expr, ctx)}; }).rejects.toThrow();`;
   }
   if (s.kind === "let") {
     ctx.locals.add(s.name);
+    // A `let read = ui.<agg>.getById(...)` binds a navigated detail
+    // handle — track it so member reads / assertions lower to locators.
+    const call = matchUiCall(s.expr);
+    if (call && call.kind === "aggregate" && call.method === "getById") {
+      ctx.detailHandles.add(s.name);
+    }
     return `const ${s.name} = ${renderUIExpr(s.expr, ctx)};`;
   }
   if (s.kind === "expression") {
@@ -298,6 +317,67 @@ function renderUIStmt(s: TestStmtIR, ctx: RenderCtx): string {
     return `${renderUIExpr({ kind: "call", callKind: "free", name: s.name, args: s.args }, ctx)};`;
   }
   return `// unsupported in ui e2e: ${s.kind}`;
+}
+
+type LiteralIR = Extract<ExprIR, { kind: "literal" }>;
+
+/** `<handle>.<field>` where `<handle>` is a detail-handle local — and the
+ *  member is a real field, not the page object's own `id` property. */
+function matchDetailField(
+  e: ExprIR,
+  ctx: RenderCtx,
+): { handle: string; field: string } | null {
+  if (e.kind !== "member" || e.member === "id") return null;
+  if (e.receiver.kind !== "ref" || !ctx.detailHandles.has(e.receiver.name)) {
+    return null;
+  }
+  return { handle: e.receiver.name, field: e.member };
+}
+
+/** `<handle>.<collection>.length` on a detail-handle local. */
+function matchDetailCollectionLength(
+  e: ExprIR,
+  ctx: RenderCtx,
+): { handle: string; collection: string } | null {
+  if (e.kind !== "member" || e.member !== "length") return null;
+  const inner = e.receiver;
+  if (inner.kind !== "member" || inner.receiver.kind !== "ref") return null;
+  if (!ctx.detailHandles.has(inner.receiver.name)) return null;
+  return { handle: inner.receiver.name, collection: inner.member };
+}
+
+function literalSide(
+  a: ExprIR,
+  b: ExprIR,
+): { readSide: ExprIR; lit: LiteralIR } | null {
+  if (b.kind === "literal") return { readSide: a, lit: b };
+  if (a.kind === "literal") return { readSide: b, lit: a };
+  return null;
+}
+
+/** Lower an equality assertion on a detail-handle read to a native
+ *  web-first matcher (`toHaveText` / `toHaveCount`, retrying), or null
+ *  when the assertion isn't of that shape (caller falls back to the
+ *  one-shot generic form). */
+function renderWebFirstExpect(expr: ExprIR, ctx: RenderCtx): string | null {
+  const e = expr.kind === "paren" ? expr.inner : expr;
+  if (e.kind !== "binary" || (e.op !== "==" && e.op !== "!=")) return null;
+  const sides = literalSide(e.left, e.right);
+  if (!sides) return null;
+  const not = e.op === "!=";
+
+  const coll = matchDetailCollectionLength(sides.readSide, ctx);
+  if (coll && sides.lit.lit === "int") {
+    const matcher = not ? "not.toHaveCount" : "toHaveCount";
+    return `await expect(${coll.handle}.${coll.collection}Rows()).${matcher}(${sides.lit.value});`;
+  }
+
+  const fld = matchDetailField(sides.readSide, ctx);
+  if (fld && sides.lit.lit === "string") {
+    const matcher = not ? "not.toHaveText" : "toHaveText";
+    return `await expect(${fld.handle}.field("${fld.field}")).${matcher}(${JSON.stringify(sides.lit.value)});`;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -335,8 +415,17 @@ function renderUIExpr(e: ExprIR, ctx: RenderCtx): string {
       // case.
       if (e.body) return `(${e.param}) => ${renderUIExpr(e.body, ctx)}`;
       return `(${e.param}) => { /* block-body lambdas not supported in UI e2e tests */ }`;
-    case "member":
+    case "member": {
+      // Detail-handle reads used as plain values (the one-shot fallback,
+      // for assertions web-first can't express — e.g. `<`/`>=`).  The
+      // common `==` / `!=` cases are upgraded to web-first in
+      // renderUIStmt; this keeps everything else total and honest.
+      const coll = matchDetailCollectionLength(e, ctx);
+      if (coll) return `(await ${coll.handle}.${coll.collection}Rows().count())`;
+      const fld = matchDetailField(e, ctx);
+      if (fld) return `(await ${fld.handle}.field("${fld.field}").innerText())`;
       return `${renderUIExpr(e.receiver, ctx)}.${e.member}`;
+    }
     case "method-call": {
       const recv = renderUIExpr(e.receiver, ctx);
       const args = e.args.map((a) => renderUIExpr(a, ctx));
@@ -507,29 +596,12 @@ function renderAggregateCall(
       );
     }
     const idExpr = renderIdArg(call.args[0], ctx);
-    // Eagerly fetch every primitive / enum / VO field so callers can
-    // do `read.status == "Confirmed"` directly, plus a `length`-typed
-    // accessor per contained collection so `read.lines.length` works.
-    const fieldReads = agg.fields
-      .filter((f) => isReadable(f.type.kind))
-      .map((f) => `    ${f.name}: await __detail.field("${f.name}"),`)
-      .join("\n");
-    const containmentReads = agg.contains
-      .filter((c) => c.collection)
-      .map((c) => `    ${c.name}: { length: await __detail.${c.name}Count() },`)
-      .join("\n");
-    return [
-      "await (async () => {",
-      `  const __detail = await new ${cap}DetailPage(page, ${idExpr}).goto();`,
-      "  return {",
-      "    id: __detail.id,",
-      fieldReads,
-      containmentReads,
-      "  };",
-      "})()",
-    ]
-      .filter((l) => l.trim().length > 0)
-      .join("\n");
+    // Bind to the navigated detail page-object handle (NOT an eager
+    // snapshot).  Member reads (`read.status`, `read.lines.length`) and
+    // equality assertions lower against this handle's live locators —
+    // web-first where possible — so the read retries against the DOM
+    // exactly like real Playwright (see renderUIStmt / member handling).
+    return `await new ${cap}DetailPage(page, ${idExpr}).goto()`;
   }
   const op = agg.operations.find(
     (o) => o.visibility === "public" && o.name === call.method,
@@ -585,15 +657,6 @@ function findAggregateBySlug(
     }
   }
   return undefined;
-}
-
-function isReadable(kind: string): boolean {
-  // Page-object `field()` reader is sized for primitive-shaped data
-  // (string, enum, datetime as ISO).  Skip nested entities / arrays
-  // — those need different accessors.
-  return (
-    kind === "primitive" || kind === "id" || kind === "enum" || kind === "valueobject"
-  );
 }
 
 function upper(s: string): string {

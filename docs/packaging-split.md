@@ -137,8 +137,24 @@ speaks. Treat it like a plugin ABI.
 | **P0** ✅ | `loom` manifest type + `discoverBackends()`; injectable source; `registry` derives from it. **Byte-identical.** (PR #180) | `npm test` 905 + fixture clean |
 | **P1** ✅ | _Subsumed by P0_ — `resolvePlatformRef`/`backendVersionsForFamily`/`isRegisteredBackendRef` already resolve through `discoverBackends()` (the injectable seam, in-tree manifests). Same surfaces; byte-identical. | as P0 |
 | **P2** ✅ | Split `src/generator/typescript/` along the core↔backend line into `src/platform/hono/v4/`. **P2a** (#181): orchestrator (`generate*` + project assembly + `package.json`/Dockerfile) → `emit.ts`. **P2b**: the five Hono-framework builders (`routes`/`workflow`/`view-routes`/`auth-emit`/`observability`) moved into the package — they were each consumed *only* by the orchestrator (the cross-generator hits were per-generator same-named siblings, not these). `src/generator/typescript/` now holds **only** framework-neutral code: `render-expr`/`render-stmt`, `templates`/`templates.ts`, `zod-refine`, `repository-builder` (drizzle), `extern-builder`. The core↔backend line is physically real; the package imports the neutral library by ordinary import (package → shared). **Byte-identical.** | fixture clean + `LOOM_TS_BUILD` 3/3 + layering test green |
-| **P3** | Repo → workspaces: `packages/{core,cli,backend-hono-v4,…}`. Wire `@loom/core` `exports`; backends `peerDependency` it; manifests become real package.json `loom` keys. fs resolver reads the project closure; **playground gets the VFS-backed source** (see *Playground discovery (P3)*). CLI = `@loom/cli`. Output unchanged. | full suite + `LOOM_TS_BUILD` + from-registry install smoke + deployed `playground-e2e` |
-| **P4** | Publish. Backends versioned/released independently; `@loom/cli` install docs. | e2e against a clean `npm i` |
+| **P3** 🟡 | Repo → workspaces. Landed as 5 sub-slices: **s1** ✅ npm `workspaces` + `packages/backend-hono-v4/` shell with real `loom` key (#194); **hotfix** ✅ dropped a `peerDependencies` that 404'd `npm install` (#196); **s2** ✅ removed the unused catch-all `@loom` Vite alias (#195); **s3** ✅ Node-only fs-backed `discoverBackendsFs` + `installFsBackendSource`, composed with the in-tree default, wired into the CLI (#197); **s4** ✅ `packages/core/` (`@loom/core`) shell + `loom.contract` marker (#198). All byte-identical. **s5 (physical source relocation) — BLOCKED, see below.** |
+| **P4** | Publish (`@loom/*` released independently; backends `peerDependency` `@loom/core`; the `workspace:`-protocol / version-range story this npm can't express in dev). Gated on P3-s5. | e2e against a clean `npm i` |
+
+### P3 slice 5 is blocked (do not attempt the relocation yet)
+
+Slice 5 was to `git mv src/platform/hono/v4/* → packages/backend-hono-v4/src/` and drop the in-tree static backend entry so the workspace package becomes the *runtime* source (fs-discovery `import(pkg)`). **It cannot land cleanly yet.** Verified facts on `main`:
+
+- `src/platform/registry.ts` **statically imports** the backend surfaces (`honoPlatform`, …) into its in-tree set (`inTreeBackends`). That static import is what every *synchronous, non-CLI* caller resolves through.
+- **Only the CLI** installs the fs source (`src/cli/main.ts` → `installFsBackendSource`). The **playground build worker** (`web/src/build/build.worker.ts` → `generateSystems`) and the **fixture/capture script** (`scripts/capture-baseline-fixture.mjs`) call the generator **directly with no fs-discovery**, and the browser can't run `node:fs` discovery at all.
+
+So removing hono from the static set breaks: browser previews (`platform: hono` unresolvable), the fixture script, and any direct-API caller — **not byte-identical.** The intermediate "move source but keep a static import from `packages/`" re-creates the exact `core → backend` static coupling the discovery seam exists to *eliminate* (B2.1 + the manifest seam) — relocation for its own sake, not progress.
+
+**Unblock path** (any one):
+1. A **browser-capable, build-time backend discovery** that seeds the in-repo backend packages + their `loom` manifests into the playground worker (the design doc's original "VFS source"), so the generator resolves built-ins without `node:fs` and without a static registry import. NOTE: this is *generator-side* discovery and runs **before** the npm engine populates its VFS — it cannot reuse the #185 npm-engine VFS, which only holds the *generated project's* runtime deps.
+2. The npm engine becoming default **and** carrying generator-package discovery — larger, and orthogonal to the #184–#187 track's current scope.
+3. Accept a permanent static "built-ins" import (only third-party backends discovered via fs) — but that abandons the core↔backend decoupling that motivated the split.
+
+Until one lands, **P3 stops at slice 4.** Slices 1–4 are the durable foundation: the workspace exists, `@loom/backend-hono-v4` + `@loom/core` are real package-shaped targets with `loom` keys, fs-discovery works for third-party backends, and nothing's output changed. The relocation + publish resume once browser-side generator discovery exists.
 
 P0–P2 are pure machinery in the existing repo (the proven Phase-0
 pattern: land the seam with zero output change). The architectural

@@ -5,6 +5,38 @@
 // deployable as its own project alongside a docker-compose.yml that
 // wires them together with a shared postgres.
 
+// Traceability artifacts (see docs/traceability.md).  Requirements sit
+// above the model; solutions/testCases below reference code symbols by
+// qualified name.  `ddd generate system` emits the coverage + gaps
+// reports under `.loom/`.
+requirement US-001 {
+    type: UserStory
+    title: "A customer can place an order"
+    status: InProgress
+    priority: 1
+}
+
+requirement AC-001 parent US-001 {
+    type: AcceptanceCriteria
+    title: "An order can only be confirmed when it has at least one line"
+}
+
+requirement AC-002 parent US-001 {
+    type: AcceptanceCriteria
+    title: "Lines can only be added while the order is a draft"
+}
+
+requirement US-002 {
+    type: UserStory
+    title: "A user can browse the product catalog"
+    status: Approved
+}
+
+requirement AC-003 parent US-002 {
+    type: AcceptanceCriteria
+    title: "Products are uniquely identified by SKU"
+}
+
 system Acme {
 
     // System-wide visual identity — design tokens consumed by every
@@ -76,6 +108,19 @@ system Acme {
                     productId: Id<Product>
                     quantity: int
                     invariant quantity > 0
+                }
+
+                // Aggregate-level unit test (the e2e tests further down
+                // exercise the same behaviour through HTTP).  Linked to
+                // TC-001 via `verifies`, so the traceability report shows
+                // both a unit and an e2e test backing the test case.
+                test "confirming an order with no lines is rejected" verifies TC-001 {
+                    let order = Order.create({
+                        customerId: "cust-001",
+                        status: Draft,
+                        placedAt: "2024-01-01T00:00:00Z"
+                    })
+                    expectThrows order.confirm()
                 }
             }
 
@@ -290,13 +335,13 @@ system Acme {
     // typed fetch + JSON.
     // ------------------------------------------------------------------
 
-    test e2e "create a product, look it up by id" against api {
+    test e2e "create a product, look it up by id" against api verifies TC-003 {
         let p = api.products.create({ sku: "WIDGET-1", price: { amount: 9.99, currency: "USD" } })
         let read = api.products.getById(p)
         expect read.sku == "WIDGET-1"
     }
 
-    test e2e "create then confirm an order with one line" against api {
+    test e2e "create then confirm an order with one line" against api verifies TC-002 {
         let prod = api.products.create({ sku: "WIDGET-2", price: { amount: 5.00, currency: "USD" } })
         let ord = api.orders.create({ customerId: "cust-001", status: "Draft", placedAt: "2024-01-01T00:00:00Z" })
         api.orders.addLine(ord, { productId: prod.id, qty: 3 })
@@ -343,4 +388,40 @@ system Acme {
         let rows = ui.views.activeOrders()
         expect rows.length >= 0
     }
+}
+
+solution SOL-001 for US-001 {
+    title: "Ordering is driven by the Order aggregate and the placeOrder workflow"
+    entitles [
+        Sales.Orders.Order.addLine,
+        Sales.Orders.Order.confirm,
+        Sales.Orders.placeOrder,
+        api
+    ]
+}
+
+solution SOL-002 for US-002 {
+    title: "The catalog is served by the Product aggregate on its own deployable"
+    entitles [
+        Catalog.Products.Product,
+        catalogApi
+    ]
+}
+
+testCase TC-001 verifies AC-001 {
+    title: "Confirming an empty order is rejected"
+    covers [ Sales.Orders.Order.confirm ]
+}
+
+testCase TC-002 verifies US-001 {
+    title: "Add a line then confirm the order"
+    covers [
+        Sales.Orders.Order.addLine,
+        Sales.Orders.Order.confirm
+    ]
+}
+
+testCase TC-003 verifies AC-003 {
+    title: "Create a product and look it up by SKU"
+    covers [ Catalog.Products.Product ]
 }

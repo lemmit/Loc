@@ -13,6 +13,15 @@ import { platformFor } from "../platform/registry.js";
 import { renderE2EFile } from "./e2e-render.js";
 import { renderUIE2EFile } from "./ui-e2e-render.js";
 import { renderWireSpec } from "./wire-spec.js";
+import {
+  renderDeploymentDiagram,
+  renderDomainDiagram,
+  renderErDiagram,
+  renderSequenceDiagram,
+  renderWorkflowDiagram,
+} from "./mermaid.js";
+import { renderC4Model, renderC4SpecJson } from "./likec4.js";
+import { renderTraceabilityArtifacts } from "./traceability.js";
 
 // ---------------------------------------------------------------------------
 // System-mode generation.
@@ -47,6 +56,13 @@ export function generateSystems(model: Model): SystemEmission {
   for (const sys of loom.systems) {
     emitSystem(sys, loom, out);
   }
+  // Traceability artifacts (Slice 12) — model-global (requirements may
+  // reference code across systems), so emitted once at the output root
+  // rather than per system.  No-op when the source declares no
+  // requirement / solution / testCase.
+  for (const [path, content] of renderTraceabilityArtifacts(loom)) {
+    out.set(path, content);
+  }
   return { files: out };
 }
 
@@ -70,6 +86,21 @@ function emitSystem(
   // Wire-spec artifact — diffable record of every aggregate / part /
   // value object's canonical wire shape.  See `wire-spec.ts`.
   out.set(".loom/wire-spec.json", renderWireSpec(sys));
+  // Mermaid views of the IR — a domain class diagram and a per-workflow
+  // call flowchart.  The playground previews them inline; GitHub renders
+  // them in fences.  See `mermaid.ts`.
+  out.set(".loom/domain.mmd", renderDomainDiagram(sys));
+  out.set(".loom/workflows.mmd", renderWorkflowDiagram(sys));
+  out.set(".loom/er.mmd", renderErDiagram(sys));
+  out.set(".loom/sequence.mmd", renderSequenceDiagram(sys));
+  out.set(".loom/deployment.mmd", renderDeploymentDiagram(sys));
+  // LikeC4 architecture model (https://likec4.dev) — opens in the
+  // LikeC4 CLI / VS Code extension.  See `likec4.ts`.  The sibling
+  // `.c4.json` is the same model as structured data, which the playground
+  // rebuilds (it can't run the Langium parser in-browser) to render the
+  // diagram; hidden from the playground's file tree.
+  out.set(".loom/architecture.c4", renderC4Model(sys));
+  out.set(".loom/architecture.c4.json", renderC4SpecJson(sys));
 
   // E2E test scaffolding — emitted only when the system declares
   // `test e2e` blocks.  Lives at the system root so it can run against

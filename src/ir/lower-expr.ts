@@ -138,6 +138,43 @@ export function inValueObject(env: Env, vo: ValueObject): Env {
   return { ...env, valueObject: vo, aggregate: undefined, part: undefined };
 }
 
+export interface ScopeCandidate {
+  name: string;
+  kind: "current-user" | "param" | "let" | "lambda" | "property" | "derived" | "helper-fn" | "enum-value";
+}
+
+/** Enumerate the names resolvable as a bare `NameRef` in `env` — the
+ *  enumeration counterpart to `resolveNameRef` below.  Drives scope-aware name
+ *  suggestions in tooling (the web model builder's expression editor) so the
+ *  in-scope rules live in one place.  Order follows resolution precedence
+ *  (currentUser → locals → properties/containments/derived/helpers → enum
+ *  values); the first occurrence of a name wins, mirroring shadowing. */
+export function inScopeNames(env: Env): ScopeCandidate[] {
+  const out: ScopeCandidate[] = [];
+  const seen = new Set<string>();
+  const add = (name: string, kind: ScopeCandidate["kind"]): void => {
+    if (seen.has(name)) return;
+    seen.add(name);
+    out.push({ name, kind });
+  };
+  if (env.user) add("currentUser", "current-user");
+  for (const [name, info] of env.locals) add(name, info.kind);
+  const owner = env.part ?? env.aggregate ?? env.valueObject;
+  if (owner) {
+    for (const m of owner.members) {
+      if (isProperty(m) || isContainment(m)) add(m.name, "property");
+      else if (isDerivedProp(m)) add(m.name, "derived");
+      else if (isFunctionDecl(m)) add(m.name, "helper-fn");
+    }
+  }
+  if (env.ctx) {
+    for (const m of env.ctx.members) {
+      if (isEnumDecl(m)) for (const v of m.values) add(v.name, "enum-value");
+    }
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -681,6 +718,18 @@ export function inferExprType(
       env.modulePermissions
     ) {
       return { kind: "primitive", name: "string" };
+    }
+    // Aggregate factory: `X.create(...)` yields an `X` entity.  Without
+    // this a `let order = Order.create({...})` binding types as the
+    // string fallback, so subsequent member access (`order.lines`)
+    // loses its element/collection shape — which, e.g., stops
+    // `order.lines.count` from lowering to `.length`.  `X` is a type
+    // name, not a value, so it only resolves here (not via resolveNameRef).
+    if (expr.call && expr.member === "create" && isNameRef(expr.receiver)) {
+      const target = findEntityByName(env, expr.receiver.name);
+      if (target && isAggregate(target)) {
+        return { kind: "entity", name: target.name };
+      }
     }
     const recvType = inferExprType(expr.receiver, env);
     return memberType(recvType, expr.member, env);

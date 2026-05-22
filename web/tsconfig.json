@@ -16,7 +16,11 @@
     "allowImportingTsExtensions": true,
     "noEmit": true,
     "useDefineForClassFields": true,
-    "types": ["vite/client"]
+    "types": ["vite/client"],
+    "baseUrl": ".",
+    "paths": {
+      "monaco-editor": ["./node_modules/@codingame/monaco-vscode-editor-api"]
+    }
   },
   "include": ["src", "../src", "vite.config.ts"],
   "exclude": ["node_modules", "dist", "../src/cli", "../src/language/main.ts"]

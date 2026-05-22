@@ -6,13 +6,17 @@ import type {
   EntityPart,
   EnumDecl,
   Expression,
+  FindDecl,
   FunctionDecl,
   Lambda,
   Operation,
   Parameter,
+  Repository,
   Statement,
   TypeRef,
   ValueObject,
+  View,
+  Workflow,
 } from "./generated/ast.js";
 import {
   isAggregate,
@@ -22,6 +26,7 @@ import {
   isDecLit,
   isEntityPart,
   isEnumDecl,
+  isFindDecl,
   isFunctionDecl,
   isIdRef,
   isIdType,
@@ -43,6 +48,8 @@ import {
   isThisRef,
   isUnaryExpr,
   isValueObject,
+  isView,
+  isWorkflow,
   isContainment,
   isDerivedProp,
   isLetStmt,
@@ -345,16 +352,19 @@ function lookupValueObjectMember(target: ValueObject, name: string): DddType {
   return T.unknown;
 }
 
-const COLLECTION_OPS = new Set([
-  "count",
-  "sum",
-  "all",
-  "any",
-  "where",
-  "first",
-  "firstOrNull",
-  "contains",
-]);
+// Canonical collection-op catalogue — the single source for both the
+// membership check (`isCollectionOp`) and member enumeration (`membersOfType`).
+const COLLECTION_OP_SIGNATURES: ReadonlyArray<{ name: string; signature: string }> = [
+  { name: "count", signature: "int" },
+  { name: "sum", signature: "(λ): decimal" },
+  { name: "all", signature: "(λ): bool" },
+  { name: "any", signature: "(λ): bool" },
+  { name: "where", signature: "(λ): T[]" },
+  { name: "first", signature: "T" },
+  { name: "firstOrNull", signature: "T?" },
+  { name: "contains", signature: "bool" },
+];
+const COLLECTION_OPS = new Set(COLLECTION_OP_SIGNATURES.map((o) => o.name));
 
 function collectionOpType(
   recv: { kind: "array"; element: DddType },
@@ -607,11 +617,22 @@ export function findOperation(
 // ---------------------------------------------------------------------------
 
 export function envForNode(node: AstNode): Env {
-  const agg = AstUtils.getContainerOfType(node, isAggregate);
   const part = AstUtils.getContainerOfType(node, isEntityPart);
   const vo = AstUtils.getContainerOfType(node, isValueObject);
   const fn = AstUtils.getContainerOfType(node, isFunctionDecl);
   const op = AstUtils.getContainerOfType(node, isOperation);
+  const find = AstUtils.getContainerOfType(node, isFindDecl);
+  const view = AstUtils.getContainerOfType(node, isView);
+  const wf = AstUtils.getContainerOfType(node, isWorkflow);
+
+  // The `this`/root aggregate: an enclosing aggregate container, else the
+  // repository's `for` aggregate (find filters) or the view's `from` aggregate
+  // (view filters / binds) — both reached through a cross-reference, not
+  // containment.  Workflows orchestrate across aggregates and have no `this`.
+  const agg =
+    AstUtils.getContainerOfType(node, isAggregate) ??
+    (find ? (find.$container as Repository | undefined)?.aggregate?.ref : undefined) ??
+    (view ? view.source?.ref : undefined);
 
   const bindings = new Map<string, { type: DddType; origin: AstNode }>();
 
@@ -625,13 +646,27 @@ export function envForNode(node: AstNode): Env {
     }
   }
 
-  // 2. Function / operation parameter bindings.
-  const params = fn?.params ?? op?.params ?? [];
+  // 2. Function / operation / find / workflow parameter bindings.
+  const params = fn?.params ?? op?.params ?? find?.params ?? wf?.params ?? [];
   for (const p of params) bindings.set(p.name, { type: paramType(p), origin: p });
 
-  // 3. let-bindings from preceding statements in the enclosing operation.
-  if (op) {
-    for (const [name, b] of collectLetBindings(op.body)) bindings.set(name, b);
+  // 3. let-bindings from preceding statements in the enclosing operation / workflow.
+  const bodyOwner = op ?? wf;
+  if (bodyOwner) {
+    for (const [name, b] of collectLetBindings(bodyOwner.body)) bindings.set(name, b);
+  }
+
+  // 4. Lambda params — a lambda used as a collection-op arg binds its param to
+  //    the receiver collection's element type (`xs.all(x => …)` ⇒ x : element).
+  //    Walk innermost→outermost so a nested lambda's param wins on a clash.
+  for (
+    let lam = AstUtils.getContainerOfType(node, isLambda);
+    lam;
+    lam = AstUtils.getContainerOfType(lam.$container, isLambda)
+  ) {
+    if (bindings.has(lam.param)) continue;
+    const elem = lambdaParamElementType(lam);
+    if (elem) bindings.set(lam.param, { type: elem, origin: lam });
   }
 
   return makeEnv(undefined, bindings, {
@@ -639,6 +674,17 @@ export function envForNode(node: AstNode): Env {
     part: part ?? undefined,
     valueObject: vo ?? undefined,
   });
+}
+
+/** Element type bound to a collection-op lambda's param (`xs.all(p => …)` ⇒ the
+ *  element type of `xs`), or undefined when the lambda isn't a collection-op arg. */
+function lambdaParamElementType(lam: Lambda): DddType | undefined {
+  const ma = lam.$container?.$container; // Lambda → CallArg → MemberAccess
+  if (ma && isMemberAccess(ma) && isCollectionOp(ma.member) && ma.receiver) {
+    const recvType = typeOf(ma.receiver, envForNode(ma.receiver));
+    if (recvType.kind === "array") return recvType.element;
+  }
+  return undefined;
 }
 
 function addEntityMembers(
@@ -706,6 +752,68 @@ export function iterateEntityMembers(
     }
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Member enumeration — the single source of truth for "what `.member` names
+// are valid on a value of type `t`".  Consumed by the LSP completion provider
+// (`ddd-completion.ts`) and the web Model-builder's structured expression
+// editor, so member completion behaves identically in VS Code and the
+// playground.  This is the enumeration counterpart of the member-access typing
+// in `typeOf` — keep the two in step.
+// ---------------------------------------------------------------------------
+
+export interface MemberCompletion {
+  name: string;
+  kind: "field" | "method" | "enum-value";
+  /** Short type/signature hint for the completion popup. */
+  detail?: string;
+}
+
+function entityMemberCompletions(
+  ref: Aggregate | EntityPart | ValueObject,
+  withId: boolean,
+): MemberCompletion[] {
+  const out: MemberCompletion[] = [];
+  // Aggregates / entity parts expose the magic `id` accessor; value objects don't.
+  if (withId) out.push({ name: "id", kind: "field", detail: `Id<${ref.name}>` });
+  for (const m of iterateEntityMembers(ref)) {
+    out.push({
+      name: m.name,
+      kind: m.kind === "function" || m.kind === "operation" ? "method" : "field",
+      detail: typeToString(m.type),
+    });
+  }
+  return out;
+}
+
+export function membersOfType(t: DddType): MemberCompletion[] {
+  switch (t.kind) {
+    case "array":
+      return COLLECTION_OP_SIGNATURES.map((op) => ({
+        name: op.name,
+        kind: "method",
+        detail: `collection op: ${op.signature}`,
+      }));
+    case "aggregate":
+    case "entity":
+      return entityMemberCompletions(t.ref, true);
+    case "valueobject":
+      return entityMemberCompletions(t.ref, false);
+    case "id":
+      // `Id<X>.member` follows the typed reference into X's schema.
+      return entityMemberCompletions(t.target, true);
+    case "optional":
+      // Member access transparently unwraps an optional (the validator
+      // enforces the null-guard separately).
+      return membersOfType(t.inner);
+    case "primitive":
+      return t.name === "string" ? [{ name: "length", kind: "field", detail: "int" }] : [];
+    case "enum":
+      return t.ref.values.map((v) => ({ name: v.name, kind: "enum-value", detail: t.ref.name }));
+    default:
+      return [];
+  }
 }
 
 // ---------------------------------------------------------------------------

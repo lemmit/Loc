@@ -1,7 +1,8 @@
 // Build-time script: copy the parent project's compiled `out/` tree
 // (the LSP server + CLI) into ./server/ so the extension can resolve
 // it via `context.asAbsolutePath("server/main.js")` at runtime.  Also
-// copies the TextMate grammar from ../syntaxes/ into ./syntaxes/.
+// copies the hand-maintained TextMate grammar from ./grammars/ into the
+// gitignored ./syntaxes/ build output the manifest points at.
 //
 // Run after `tsc -p .` in the extension directory.
 
@@ -16,7 +17,7 @@ const extRoot = path.resolve(here, "..");
 const sourceOut = path.join(repoRoot, "out");
 const targetServer = path.join(extRoot, "server");
 
-const sourceGrammar = path.join(repoRoot, "syntaxes", "ddd.tmLanguage.json");
+const sourceGrammar = path.join(extRoot, "grammars", "ddd.tmLanguage.json");
 const targetGrammar = path.join(extRoot, "syntaxes", "ddd.tmLanguage.json");
 
 await rm(targetServer, { recursive: true, force: true });
@@ -49,8 +50,8 @@ await writeFile(
   "utf8",
 );
 
-// Refresh the bundled grammar so a regenerated TextMate file is
-// picked up without a manual copy step.
+// Refresh the bundled grammar so an edited TextMate file is picked up
+// without a manual copy step.
 await mkdir(path.join(extRoot, "syntaxes"), { recursive: true });
 console.log(`copying ${sourceGrammar} → ${targetGrammar}`);
 await copyFile(sourceGrammar, targetGrammar);
