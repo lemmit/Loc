@@ -388,6 +388,15 @@ Done:
   `add.ts` (`addConstructSource` / `addModuleSource` / `listContextNames` /
   `listModuleNames`), extracted out of the pane. Gated by
   `test/system/system-add.test.ts` + e2e.
+- **Nested grouping + layout** — an opt-in **Group** toggle renders modules and
+  bounded contexts as React Flow parent ("group") nodes, with member constructs
+  laid out in a grid inside their context (modules become containers, so the flat
+  module node is dropped and its edges remap to the group); infra / orphan
+  constructs sit in a row beneath. The layout is a pure, deterministic
+  `groupedLayout` in `grouped-layout.ts` (group boxes + parent-relative
+  placements); flat column layout remains the default, and search / coverage /
+  diagnostics still apply per leaf. Gated by
+  `test/system/system-grouped-layout.test.ts` + e2e.
 
 Open:
 
@@ -395,9 +404,6 @@ Open:
   itself. Rebinding by inspector Select already exists for both single-reference
   constructs (`rebind.ts`) and multi-valued deployable references — modules /
   `serves` / ui (`deployable-bindings.ts`).
-- **Nested grouping** (module → context → members as React Flow parent nodes)
-  and auto-layout; today it's a deterministic column-per-kind layout.
-
 Planned — recommended order:
 
 1. ~~**Finish expression/statement structuring**~~ — done: block-body lambdas,
