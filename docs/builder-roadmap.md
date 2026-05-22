@@ -90,14 +90,16 @@ text stays the source of truth.
   edits as a switch, and `color:` (Badge/Alert) is a palette dropdown.
 - **Statement-level handler editor**: a block-bodied lambda (any named-arg
   handler — `Button(onClick:)`, form `onSubmit`, `Table(onRowClick:)`) seeds as a
-  `Lambda` node holding one editable `Stmt` row per statement (source kept
-  verbatim); rows are add/edit/delete/reorderable and round-trip.
+  `Lambda` node holding one editable `Stmt` row per statement; rows are
+  add/edit/delete/reorderable and round-trip. An **assignment** statement
+  (`target := value`, `+=`, `-=`) is structured into target / op / value
+  controls; other statements keep their verbatim source row.
 
 ## Open — expression / domain-logic surface
 
-- **Per-statement structure** — statement rows are raw source today; structured
-  editors per statement kind (`:=`, `call`, `emit`, `navigate`, `let`) are a
-  further step.
+- **Per-statement structure** — assignments are structured (target/op/value);
+  the remaining statement kinds (`call`, `emit`, `navigate`, `let`) still edit
+  as a raw source row — structured editors for them are a further step.
 - **`state := …`** page state declarations / assignments. Not modelled.
 - **More typed pickers**: enum-case values (needs the field's enum type) and
   repository finds (op/runs/aggregate/workflow/color/boolean pickers are done;
