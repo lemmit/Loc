@@ -116,7 +116,7 @@ export function TestsBody({
   const [uiCases, setUiCases] = useState<UiTestCase[] | null>(null);
   const [discovering, setDiscovering] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [results, setResults] = useState<Record<string, TestResult>>({});
+  const { testResults: results, setTestResults: setResults } = ctx;
   const [running, setRunning] = useState<string | null>(null);
 
   const hasAny = unitFiles.length > 0 || !!apiFile || !!uiFile;

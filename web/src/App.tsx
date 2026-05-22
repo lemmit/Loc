@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { AppShell } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
 import type { EditorHandle } from "./editor/LoomEditor";
@@ -46,6 +46,16 @@ import {
   type UnsupportedDeployable,
   type UnsupportedPlatform,
 } from "./layout/ctx";
+import type { OutputStream } from "./layout/OutputPanel";
+import type { TestResult } from "./testing/harness";
+import type { LogLine } from "./util/log-line";
+
+// Cap on the live console buffers (Backend / App streams) so a chatty
+// handler or render loop can't grow them without bound; we keep the
+// most-recent lines.
+const LOG_CAP = 1000;
+const capLog = (lines: LogLine[]): LogLine[] =>
+  lines.length > LOG_CAP ? lines.slice(-LOG_CAP) : lines;
 
 /** Per-deployable summary derived from the generated file tree.
  *  The playground only knows how to bundle + boot Hono backends and
@@ -184,11 +194,19 @@ export default function App(): JSX.Element {
   // the Files tab was folded into Code still type-checks; coerce it to
   // "code" before handing it to the shell (usePersistedState has no
   // validator, so the stale value would otherwise select a dead panel).
-  const [activeTabRaw, setActiveTab] = usePersistedState<MobileTab | "files">(
+  const [activeTabRaw, setActiveTab] = usePersistedState<MobileTab | "files" | "problems">(
     "loom.mobile.activeTab",
     "code",
   );
-  const activeTab: MobileTab = activeTabRaw === "files" ? "code" : activeTabRaw;
+  // Coerce values persisted before the layout changed: "files" predates
+  // folding Files into Code; "problems" predates folding the Problems
+  // tab into the consolidated Output panel.
+  const activeTab: MobileTab =
+    activeTabRaw === "files"
+      ? "code"
+      : activeTabRaw === "problems"
+        ? "output"
+        : activeTabRaw;
 
   // Sub-view of the consolidated Code tab — source / builder / model /
   // generated. Persisted so a reload lands back on the same view.
@@ -196,6 +214,29 @@ export default function App(): JSX.Element {
     "loom.mobile.codeView",
     "source",
   );
+
+  // Test runner results, lifted here so the Output panel's Tests stream
+  // can read them independently of the (sometimes-unmounted) Tests tab.
+  const [testResults, setTestResults] = useState<Record<string, TestResult>>({});
+
+  // Which stream the consolidated Output panel shows.  Persisted across
+  // reloads; both shells read it off the ctx.
+  const [outputStream, setOutputStream] = usePersistedState<OutputStream>(
+    "loom.outputStream",
+    "problems",
+  );
+
+  // Live console streams for the Output panel — the backend (Hono
+  // runtime worker) console + stack traces, and the preview app's
+  // console + uncaught errors.  Capped so a chatty handler / app can't
+  // grow these without bound; cleared when the source changes.
+  const [backendLog, setBackendLog] = useState<LogLine[]>([]);
+  const [appLog, setAppLog] = useState<LogLine[]>([]);
+  const appendAppLog = useCallback((line: LogLine): void => {
+    setAppLog((prev) => capLog([...prev, line]));
+  }, []);
+  const clearBackendLog = useCallback(() => setBackendLog([]), []);
+  const clearAppLog = useCallback(() => setAppLog([]), []);
 
   const sourceRef = useRef<string>(initialSource);
   const editorHandleRef = useRef<EditorHandle | null>(null);
@@ -230,6 +271,9 @@ export default function App(): JSX.Element {
     // `useReducer` is stable, so closing over it here is safe.
     const engine = engineRegistry.create(selectedEngineId(), {
       onLost: () => dispatch({ type: "RUNTIME_LOST" }),
+      // Backend (Hono runtime) console + stack traces, captured per RPC
+      // in the worker — feeds the Output panel's "Backend" stream.
+      onLog: (lines) => setBackendLog((prev) => capLog([...prev, ...lines])),
     });
     buildClientRef.current = build;
     engineRef.current = engine;
@@ -325,6 +369,10 @@ export default function App(): JSX.Element {
     // example instead of hot-swapping the previous app's bundle.
     setPreviewBundle(null);
     setPreviewBooted(false);
+    // The live log streams belong to the previous example's runtime —
+    // clear them so stale backend/app output doesn't bleed across.
+    setBackendLog([]);
+    setAppLog([]);
     void engineRef.current?.reset();
     scheduleAutoGenerate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -757,6 +805,15 @@ export default function App(): JSX.Element {
     setActiveTab,
     codeView,
     setCodeView,
+    testResults,
+    setTestResults,
+    outputStream,
+    setOutputStream,
+    backendLog,
+    appLog,
+    appendAppLog,
+    clearBackendLog,
+    clearAppLog,
     copied,
     copyShareLink,
     runGenerate: () => void runGenerate(),

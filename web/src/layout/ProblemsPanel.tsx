@@ -1,4 +1,4 @@
-import { Badge, Group, ScrollArea, Stack, Text } from "@mantine/core";
+import { Badge, Group, Stack, Text } from "@mantine/core";
 import type { Diagnostic } from "../lsp/protocol";
 
 interface Props {
@@ -41,15 +41,5 @@ export function ProblemsPanel({ items }: Props): JSX.Element {
         );
       })}
     </Stack>
-  );
-}
-
-// Convenience: the shell tends to wrap ProblemsPanel in a ScrollArea
-// + a flex-1 box.  Exposing this here keeps the shell code tidy.
-export function ProblemsPanelScrollable({ items }: Props): JSX.Element {
-  return (
-    <ScrollArea style={{ flex: 1, minHeight: 0 }}>
-      <ProblemsPanel items={items} />
-    </ScrollArea>
   );
 }

@@ -11,6 +11,7 @@ import {
 import { makePreviewHtml } from "./iframe-html";
 import { setActiveDriverPort } from "./active-driver-port";
 import { fnv1a32 } from "../util/hash";
+import type { LogLine } from "../util/log-line";
 
 interface PreviewProps {
   /** React bundle JS — output of `bundle.worker.ts` for kind: "react". */
@@ -30,6 +31,9 @@ interface PreviewProps {
    *  in-iframe `fetch` shim forwards API requests over the sandbox
    *  bridge to this. */
   runtime: RuntimeDispatcher;
+  /** Sink for the preview app's `console.*` + uncaught errors,
+   *  forwarded over the sandbox bridge — feeds the "App" log stream. */
+  onAppLog?: (line: LogLine) => void;
 }
 
 // Fullscreen target — wraps the iframe (not the header bar) so the
@@ -99,8 +103,13 @@ export function Preview({
   vendorImportmap,
   vendorCssUrl,
   runtime,
+  onAppLog,
 }: PreviewProps): JSX.Element {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  // Held in a ref so a changing callback identity never re-triggers the
+  // bridge handshake effect (its deps are deliberately narrow).
+  const onAppLogRef = useRef(onAppLog);
+  onAppLogRef.current = onAppLog;
   const fullscreenTargetRef = useRef<HTMLDivElement | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   // CSS-based fallback for platforms where `Element.requestFullscreen`
@@ -227,6 +236,7 @@ export function Preview({
       SANDBOX_ORIGIN,
       (req) => runtime.dispatch(req),
       setActiveDriverPort,
+      (line) => onAppLogRef.current?.(line),
     );
     bridgeRef.current = bridge;
     startedCodeKeyRef.current = codeKey;

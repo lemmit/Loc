@@ -1,5 +1,8 @@
 // Runtime-worker protocol.
 //
+import type { LogLine } from "../util/log-line.js";
+
+//
 // The runtime worker is long-lived: once booted it holds a PGlite
 // instance, the bootstrapped Hono `app`, and the DDL that built the
 // schema.  Each `dispatch` request transports a serialised
@@ -95,4 +98,8 @@ export interface RuntimeRpcResponse {
   id: number;
   result?: BootResult | DispatchResult | WipeResult | { ok: true };
   error?: { message: string };
+  /** `console.*` (and any thrown stack) captured in the worker while
+   *  this RPC ran — surfaced as the playground's "Backend" log stream.
+   *  Omitted when nothing was logged. */
+  logs?: LogLine[];
 }

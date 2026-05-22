@@ -27,6 +27,7 @@ import type {
   WipeResult,
 } from "../runtime/protocol.js";
 import type { DependencySet, RegistryResolver } from "./dependencies.js";
+import type { LogLine } from "../util/log-line.js";
 
 /** Static description of what an engine can do.  Lets the UI and the
  *  dependency layer adapt (e.g. relax the package allow-policy when
@@ -96,6 +97,11 @@ export interface RuntimeEngineOptions {
    *  private-package support ignore it and reject `custom-private`
    *  specs with a clear diagnostic. */
   registryResolver?: RegistryResolver;
+  /** Fired with `console.*` / stack lines captured in the backend
+   *  runtime while serving a boot / dispatch — drives the "Backend"
+   *  log stream in the Output panel.  Engines without a hosted backend
+   *  ignore it. */
+  onLog?: (lines: LogLine[]) => void;
 }
 
 export interface RuntimeEngine extends RuntimeDispatcher {

@@ -19,6 +19,7 @@ import type {
   DispatchResult,
   SerializedRequest,
 } from "../../runtime/protocol.js";
+import type { LogLine } from "../../util/log-line.js";
 
 /** Runtime request the stub forwards (one per intercepted `fetch`). */
 interface RuntimeForward {
@@ -28,6 +29,13 @@ interface RuntimeForward {
   url: string;
   headers: Record<string, string>;
   body: string | null;
+}
+
+/** Console / uncaught-error line the preview's console bridge forwards. */
+interface AppLogForward {
+  kind: "console" | "error";
+  level: LogLine["level"];
+  text: string;
 }
 
 /** Reply posted back over the port for a `RuntimeForward`. */
@@ -66,6 +74,9 @@ export class SandboxBridge {
      *  and with null on dispose — so the UI test runner can drive the
      *  sandbox-hosted executor over the same channel. */
     private readonly onPort?: (port: MessagePort | null) => void,
+    /** Notified for each `console.*` / uncaught-error line the preview's
+     *  console bridge forwards — feeds the Output panel's "App" stream. */
+    private readonly onAppLog?: (line: LogLine) => void,
   ) {}
 
   /** The parent-side port, available after the handshake; null before
@@ -123,7 +134,15 @@ export class SandboxBridge {
   }
 
   private async onRuntimeForward(ev: MessageEvent): Promise<void> {
-    const m = ev.data as RuntimeForward | undefined;
+    const data = ev.data as
+      | RuntimeForward
+      | AppLogForward
+      | undefined;
+    if (data && (data.kind === "console" || data.kind === "error")) {
+      this.onAppLog?.({ level: data.level, text: data.text });
+      return;
+    }
+    const m = data as RuntimeForward | undefined;
     if (!m || m.kind !== "runtime" || typeof m.rid !== "number") return;
     let reply: RuntimeReply;
     try {
