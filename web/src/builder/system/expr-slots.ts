@@ -1,18 +1,30 @@
 import { AstUtils, type AstNode } from "langium";
-import type {
-  Aggregate,
-  BindEntry,
-  DerivedProp,
-  Expression,
-  FindDecl,
-  FunctionDecl,
-  Invariant,
-  Model,
-  Repository,
-  ValueObject,
-  View,
+import {
+  isBoundedContext,
+  type Aggregate,
+  type BindEntry,
+  type BoundedContext,
+  type DerivedProp,
+  type Expression,
+  type FindDecl,
+  type FunctionDecl,
+  type Invariant,
+  type Model,
+  type Parameter,
+  type Repository,
+  type ValueObject,
+  type View,
 } from "../../../../src/language/generated/ast.js";
 import { printExpr } from "../../../../src/language/print/index.js";
+import {
+  inAggregate,
+  inScopeNames,
+  inValueObject,
+  lowerType,
+  newEnv,
+  withLocal,
+  type Env,
+} from "../../../../src/ir/lower-expr.js";
 import { applyEdits } from "../edit-engine";
 import { parseDdd } from "../parse";
 import { listFunctions } from "./body";
@@ -157,4 +169,55 @@ export function editExprSlot(source: string, slot: ExprSlot, text: string): stri
   if (!cst) return null;
   const next = applyEdits(source, [{ offset: cst.offset, end: cst.end, newText: text.trim() }]);
   return parseDdd(next).parserErrors.length === 0 ? next : null;
+}
+
+function findAgg(ast: Model, name: string | undefined): Aggregate | null {
+  if (!name) return null;
+  for (const n of AstUtils.streamAst(ast)) {
+    if (n.$type === "Aggregate" && (n as Aggregate).name === name) return n as Aggregate;
+  }
+  return null;
+}
+
+// Build the IR name-resolution environment for a slot's expression, mirroring
+// how `lower.ts` sets up each construct (aggregate/VO members, view filters on
+// the source aggregate, find filters on the repo's aggregate + param locals).
+// The IR's own builders (`newEnv`/`inAggregate`/`withLocal`) and rules
+// (`inScopeNames`) are reused so scope knowledge stays in one place.
+function slotEnv(ast: Model, slot: ExprSlot): Env | null {
+  let owner: AstNode | null = null;
+  let params: Parameter[] = [];
+  let ctxNode: AstNode | null = null;
+
+  if (slot.kind === "viewFilter" || slot.kind === "viewBind") {
+    const view = findView(ast, slot.owner);
+    owner = findAgg(ast, view?.source?.$refText);
+    ctxNode = view;
+  } else if (slot.kind === "findFilter") {
+    const repo = findRepo(ast, slot.owner);
+    owner = findAgg(ast, repo?.aggregate?.$refText);
+    params = repo?.finds.find((f) => f.name === slot.name)?.params ?? [];
+    ctxNode = repo;
+  } else {
+    owner = findOwner(ast, slot.owner);
+    ctxNode = owner;
+    if (slot.kind === "function") {
+      const fn = owner ? membersOf(owner).find((m): m is FunctionDecl => m.$type === "FunctionDecl" && (m as FunctionDecl).name === slot.name) : undefined;
+      params = (fn as FunctionDecl | undefined)?.params ?? [];
+    }
+  }
+  if (!owner) return null;
+
+  const ctx = ctxNode ? AstUtils.getContainerOfType(ctxNode, isBoundedContext) : undefined;
+  const base: Env = ctx ? newEnv(ctx as BoundedContext) : { ctx: undefined, locals: new Map() };
+  let env = owner.$type === "ValueObject" ? inValueObject(base, owner as ValueObject) : inAggregate(base, owner as Aggregate);
+  for (const p of params) env = withLocal(env, p.name, "param", lowerType(p.type));
+  return env;
+}
+
+/** In-scope bare names for a slot's expression — drives the editor's name
+ *  suggestions. Member-access chains (`a.b`) are out of scope for now. */
+export function slotCandidates(ast: Model, slot: ExprSlot): string[] {
+  const env = slotEnv(ast, slot);
+  return env ? inScopeNames(env).map((c) => c.name) : [];
 }

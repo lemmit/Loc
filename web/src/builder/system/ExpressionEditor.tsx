@@ -1,8 +1,13 @@
-import { useState } from "react";
-import { Box, Group, SegmentedControl, Select, Text, TextInput, Textarea } from "@mantine/core";
+import { createContext, useContext, useState } from "react";
+import { Autocomplete, Box, Group, SegmentedControl, Select, Text, TextInput, Textarea } from "@mantine/core";
 import { BINARY_OPS, UNARY_OPS, emitExpr, type EExpr } from "./expr-model";
 
 export type ExprMode = "structured" | "text";
+
+// In-scope bare names for the expression being edited (params, properties,
+// derived props, enum values…). Threaded to every `raw` leaf so they offer
+// scope-aware suggestions while staying free-text.
+const ExprScopeContext = createContext<string[]>([]);
 
 // Recursive structured expression editor. Operator nodes (binary/unary/paren)
 // render dropdowns + nested operands; literals render typed inputs; everything
@@ -16,6 +21,7 @@ interface NodeProps {
 }
 
 export function ExpressionEditor({ node, onChange }: NodeProps): JSX.Element {
+  const candidates = useContext(ExprScopeContext);
   switch (node.kind) {
     case "binary":
       return (
@@ -68,13 +74,14 @@ export function ExpressionEditor({ node, onChange }: NodeProps): JSX.Element {
       );
     case "raw":
       return (
-        <TextInput
+        <Autocomplete
           size="xs"
           w={150}
           value={node.text}
+          data={candidates}
           data-testid="c4expr-raw"
           styles={{ input: { fontFamily: "monospace", fontSize: 11 } }}
-          onChange={(e) => onChange({ ...node, text: e.currentTarget.value }, false)}
+          onChange={(v) => onChange({ ...node, text: v }, false)}
           onBlur={() => onChange(node, true)}
         />
       );
@@ -112,12 +119,14 @@ function ExprTextField({ seedText, onCommit }: { seedText: string; onCommit: (te
 export function ExprSlotEditor({
   seed,
   seedText,
+  candidates,
   mode,
   onMode,
   onCommit,
 }: {
   seed: EExpr;
   seedText: string;
+  candidates: string[];
   mode: ExprMode;
   onMode: (mode: ExprMode) => void;
   onCommit: (text: string) => boolean;
@@ -144,10 +153,10 @@ export function ExprSlotEditor({
       {mode === "text" ? (
         <ExprTextField seedText={seedText} onCommit={onCommit} />
       ) : (
-        <>
+        <ExprScopeContext.Provider value={candidates}>
           <ExpressionEditor node={local} onChange={handle} />
           {error && <Text size="xs" c="red">invalid expression</Text>}
-        </>
+        </ExprScopeContext.Provider>
       )}
     </Box>
   );

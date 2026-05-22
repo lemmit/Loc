@@ -11,6 +11,7 @@ import {
   listDerived,
   listInvariants,
   repoSlotOptions,
+  slotCandidates,
   slotExpr,
   viewSlotOptions,
   type ExprSlot,
@@ -123,5 +124,29 @@ describe("structured expression editor — repository find slots", () => {
   it("edits a find's where filter", () => {
     const out = editExprSlot(sales, { kind: "findFilter", owner: "Orders", name: "activeForCustomer" }, "this.status == Draft")!;
     expect(out).toMatch(/where this\.status == Draft/);
+  });
+});
+
+describe("structured expression editor — scope-aware name candidates", () => {
+  const names = (slot: ExprSlot): string[] => slotCandidates(parse(sales), slot);
+
+  it("offers the owning value object's properties + enum values", () => {
+    const c = names({ kind: "invariant", owner: "Money", index: 0 });
+    expect(c).toEqual(expect.arrayContaining(["amount", "currency", "Draft", "Confirmed"]));
+  });
+
+  it("offers aggregate properties, derived props, helpers and enum values", () => {
+    const c = names({ kind: "function", owner: "Order", name: "isMutable" });
+    expect(c).toEqual(expect.arrayContaining(["status", "lines", "total", "isMutable", "Draft"]));
+  });
+
+  it("offers the view source aggregate's names", () => {
+    const c = names({ kind: "viewFilter", owner: "ActiveOrders" });
+    expect(c).toEqual(expect.arrayContaining(["status", "Confirmed"]));
+  });
+
+  it("offers find params alongside the aggregate's names", () => {
+    const c = names({ kind: "findFilter", owner: "Orders", name: "activeForCustomer" });
+    expect(c).toEqual(expect.arrayContaining(["forCustomer", "status"]));
   });
 });
