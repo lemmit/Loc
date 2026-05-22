@@ -13,7 +13,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { AstUtils, type AstNode } from "langium";
-import { Box, Button, Checkbox, Drawer, Group, NumberInput, ScrollArea, Select, Stack, Text, TextInput, Textarea } from "@mantine/core";
+import { Box, Button, Checkbox, Drawer, Group, MultiSelect, NumberInput, ScrollArea, Select, Stack, Text, TextInput, Textarea } from "@mantine/core";
 import type { LayoutCtx } from "../../layout/ctx";
 import type { BoundedContext, Model, System } from "../../../../src/language/generated/ast.js";
 import { printStructural } from "../../../../src/language/print/index.js";
@@ -54,6 +54,21 @@ import {
   setStorageType,
   storageType,
 } from "./infra-props";
+import {
+  apiNames,
+  deployableModules,
+  deployableNames,
+  deployableServes,
+  deployableTargets,
+  deployableUi,
+  moduleNames,
+  setDeployableModules,
+  setDeployableServes,
+  setDeployableTargets,
+  setDeployableUi,
+  uiKind,
+  uiNames,
+} from "./deployable-bindings";
 import { currentTarget, isRebindKind, rebindReference, rebindTargets, targetKindOf } from "./rebind";
 import {
   addStatement,
@@ -433,6 +448,15 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     if (next != null) apply(next, true);
   };
 
+  // Deployable composition bindings.
+  const bindDeployable = (next: string | null): void => {
+    if (next != null) apply(next, true);
+  };
+  const setModules = (mods: string[]): void => { if (selected) bindDeployable(setDeployableModules(ctx.getSource(), selected.name, mods)); };
+  const setServes = (apis: string[]): void => { if (selected) bindDeployable(setDeployableServes(ctx.getSource(), selected.name, apis)); };
+  const setTargets = (t: string | null): void => { if (selected) bindDeployable(setDeployableTargets(ctx.getSource(), selected.name, t)); };
+  const setUi = (u: string | null): void => { if (selected) bindDeployable(setDeployableUi(ctx.getSource(), selected.name, u)); };
+
   const rebindTo = (target: string | null): void => {
     if (!selected || !target || !isRebindKind(selected.kind)) return;
     const next = rebindReference(ctx.getSource(), selected.kind, selected.name, target);
@@ -706,6 +730,42 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
                     onChange={(v) => setPort(typeof v === "number" ? v : undefined)}
                   />
                 </Group>
+                <MultiSelect
+                  size="xs"
+                  label="modules"
+                  data={moduleNames(parsed.ast)}
+                  value={deployableModules(selected.ast)}
+                  data-testid="c4system-deployable-modules"
+                  onChange={setModules}
+                />
+                <MultiSelect
+                  size="xs"
+                  label="serves"
+                  data={apiNames(parsed.ast)}
+                  value={deployableServes(selected.ast)}
+                  data-testid="c4system-deployable-serves"
+                  onChange={setServes}
+                />
+                <Select
+                  size="xs"
+                  label="targets"
+                  clearable
+                  data={deployableNames(parsed.ast).filter((n) => n !== selected.name)}
+                  value={deployableTargets(selected.ast)}
+                  data-testid="c4system-deployable-targets"
+                  onChange={setTargets}
+                />
+                {uiKind(selected.ast) !== "compose" && uiKind(selected.ast) !== "block" && (
+                  <Select
+                    size="xs"
+                    label="ui"
+                    clearable
+                    data={uiNames(parsed.ast)}
+                    value={deployableUi(selected.ast)}
+                    data-testid="c4system-deployable-ui"
+                    onChange={setUi}
+                  />
+                )}
               </Stack>
             )}
             {selected.kind === "workflow" && (

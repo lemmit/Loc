@@ -176,6 +176,14 @@ Done:
   a `deployable` node's `platform` (hono / dotnet / react / static /
   phoenixLiveView) and `port` (`web/src/builder/system/infra-props.ts`; parse →
   mutate → reprint → splice). Gated by `test/system-infra-props.test.ts` + e2e.
+- **Deployable composition bindings** — the deployable inspector edits its
+  `modules` and `serves` (multi-selects) and `targets` and sugar `ui` (selects),
+  by mutating the binding arrays / refs and reprinting
+  (`web/src/builder/system/deployable-bindings.ts`). Editing the module set
+  **preserves per-module storage maps** for retained modules; the advanced
+  `ui: W { … }` compose / legacy block forms are detected (`uiKind`) and the ui
+  picker is hidden so they're never clobbered. Gated by
+  `test/system-deployable-bindings.test.ts` + e2e.
 - **Operation & workflow body editing** — a shared statement-list editor
   (`web/src/builder/system/body.ts` + `BodyEditor.tsx`) for the two `Statement[]`
   bodies. Workflow nodes edit their body directly; aggregates expose an
