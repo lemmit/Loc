@@ -1,5 +1,5 @@
 import { allPlatforms, platformFor } from "../platform/registry.js";
-import { camel, plural, snake } from "../util/naming.js";
+import { lowerFirst, plural, snake } from "../util/naming.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -789,10 +789,10 @@ function checkMagicCall(
   if (aggregateSlug === "workflows") {
     const wf = contexts
       .flatMap((c) => c.workflows)
-      .find((w) => camel(w.name) === method || snake(w.name) === method);
+      .find((w) => lowerFirst(w.name) === method || snake(w.name) === method);
     if (!wf) {
       const known = contexts
-        .flatMap((c) => c.workflows.map((w) => camel(w.name)))
+        .flatMap((c) => c.workflows.map((w) => lowerFirst(w.name)))
         .sort()
         .join(", ");
       diags.push({
@@ -808,10 +808,10 @@ function checkMagicCall(
   if (aggregateSlug === "views") {
     const view = contexts
       .flatMap((c) => c.views)
-      .find((v) => camel(v.name) === method || snake(v.name) === method);
+      .find((v) => lowerFirst(v.name) === method || snake(v.name) === method);
     if (!view) {
       const known = contexts
-        .flatMap((c) => c.views.map((v) => camel(v.name)))
+        .flatMap((c) => c.views.map((v) => lowerFirst(v.name)))
         .sort()
         .join(", ");
       diags.push({
@@ -875,9 +875,9 @@ function collectContexts(
 function findAggregateBySlug(slug: string, contexts: BoundedContextIR[]): AggregateIR | undefined {
   for (const c of contexts) {
     for (const a of c.aggregates) {
-      if (camel(a.name) === slug) return a;
+      if (lowerFirst(a.name) === slug) return a;
       if (snake(plural(a.name)) === slug) return a;
-      if (camel(plural(a.name)) === slug) return a;
+      if (lowerFirst(plural(a.name)) === slug) return a;
     }
   }
   return undefined;

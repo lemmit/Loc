@@ -10,7 +10,7 @@ import type {
   TestE2EIR,
   TestStmtIR,
 } from "../ir/loom-ir.js";
-import { camel, plural, snake } from "../util/naming.js";
+import { lowerFirst, plural, snake } from "../util/naming.js";
 import { renderExpectStmt } from "./expect-stmt.js";
 
 // ---------------------------------------------------------------------------
@@ -331,9 +331,9 @@ function renderIdArg(arg: ExprIR, ctx: RenderCtx): string {
 function findAggregateBySlug(slug: string, contexts: BoundedContextIR[]): AggregateIR | undefined {
   for (const c of contexts) {
     for (const a of c.aggregates) {
-      if (camel(a.name) === slug) return a;
+      if (lowerFirst(a.name) === slug) return a;
       if (snake(plural(a.name)) === slug) return a;
-      if (camel(plural(a.name)) === slug) return a;
+      if (lowerFirst(plural(a.name)) === slug) return a;
     }
   }
   return undefined;
