@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
+import { Center, Loader, Stack, Text } from "@mantine/core";
 import * as monaco from "monaco-editor";
 import type { LoomLspClient } from "../lsp/client";
 import type { Diagnostic } from "../lsp/protocol";
@@ -52,20 +53,25 @@ export function LoomEditor(props: LoomEditorProps): JSX.Element {
   const handleRef = useRef(props.handleRef);
   handleRef.current = props.handleRef;
   const isMobileRef = useRef(props.isMobile ?? false);
-  const [ready, setReady] = useState(false);
+  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
 
   useEffect(() => {
     let disposed = false;
-    void clientRef.current.ready().then(() => {
-      if (!disposed) setReady(true);
-    });
+    clientRef.current.ready().then(
+      () => {
+        if (!disposed) setStatus("ready");
+      },
+      () => {
+        if (!disposed) setStatus("error");
+      },
+    );
     return () => {
       disposed = true;
     };
   }, []);
 
   useEffect(() => {
-    if (!ready || !containerRef.current) return;
+    if (status !== "ready" || !containerRef.current) return;
     const isMobile = isMobileRef.current;
 
     // Reuse the model across remounts so the LSP document stays attached;
@@ -134,7 +140,31 @@ export function LoomEditor(props: LoomEditorProps): JSX.Element {
       // Keep the model alive: the language client stays attached to it
       // across example-switch remounts.
     };
-  }, [ready]);
+  }, [status]);
+
+  if (status !== "ready") {
+    return (
+      <Center style={{ height: "100%", width: "100%" }}>
+        {status === "error" ? (
+          <Stack align="center" gap="xs">
+            <Text c="red" fw={600}>
+              Failed to start the language server.
+            </Text>
+            <Text c="dimmed" size="sm">
+              Try reloading the page.
+            </Text>
+          </Stack>
+        ) : (
+          <Stack align="center" gap="sm">
+            <Loader />
+            <Text c="dimmed" size="sm">
+              Starting editor…
+            </Text>
+          </Stack>
+        )}
+      </Center>
+    );
+  }
 
   return <div ref={containerRef} style={{ height: "100%", width: "100%" }} />;
 }
