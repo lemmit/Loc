@@ -312,6 +312,8 @@ test("surfaces body LSP diagnostics on the canvas", async ({ page }) => {
   await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
   await expect(page.getByTestId("c4builder-diagnostics")).toBeVisible();
   await expect(page.getByTestId("c4builder-diagnostics")).toContainText("else");
+  // The offending node (the match) is also outlined in place.
+  await expect(page.locator('[data-testid="c4node-Match"][data-diag="1"]')).toBeVisible();
 });
 
 const OP_SOURCE = `system S {

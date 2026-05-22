@@ -180,14 +180,12 @@ describe("page-builder model — primitive coverage", () => {
 });
 
 describe("page-builder model — user-defined component calls", () => {
-  const seedWith = (bodyExpr: string, comps: string[]) => {
+  const seedWith = (bodyExpr: string, comps: Record<string, string[]>) => {
     const doc = `system S { ui U { page P { body: ${bodyExpr} } } }`;
     const original = parser.parse(doc);
     expect(original.parserErrors, `fixture must parse:\n${bodyExpr}`).toEqual([]);
     const body = [...AstUtils.streamAst(original.value)].find((n) => n.$type === "BodyProp") as BodyProp;
-    const node = seedFromBody(body.expr, new Set(comps));
-    // emit → splice → reparse → identical AST (emit treats unknown names as
-    // containers, so it needs no component set).
+    const node = seedFromBody(body.expr, new Map(Object.entries(comps)));
     const cst = body.expr.$cstNode!;
     const spliced = doc.slice(0, cst.offset) + emitBody(node) + doc.slice(cst.end);
     const re = parser.parse(spliced);
@@ -196,26 +194,26 @@ describe("page-builder model — user-defined component calls", () => {
     return node;
   };
 
-  it("recognises a component call (positional args become children)", () => {
-    const node = seedWith("OrderPanel(order)", ["OrderPanel"]);
+  it("recognises a component call (positional args → param-named props)", () => {
+    const node = seedWith("OrderPanel(order)", { OrderPanel: ["panelOrder"] });
     expect(node.name).toBe("OrderPanel");
-    expect(node.children).toHaveLength(1);
-    expect(node.children[0].name).toBe("Opaque");
+    expect(node.props.panelOrder).toBe("order");
   });
 
   it("keeps a non-component call (a value function) Opaque", () => {
     // `format` isn't a component, so it stays a value expression, not a node.
-    const node = seedWith("Text(format(amount))", ["OrderPanel"]);
+    const node = seedWith("Text(format(amount))", { OrderPanel: ["order"] });
     expect(node.name).toBe("Text");
     expect(node.props.text).toBe("format(amount)");
   });
 
   it("recognises a component nested in a MasterDetail detail lambda", () => {
-    const node = seedWith("MasterDetail(of: Order, detail: o => OrderPanel(o))", ["OrderPanel"]);
+    const node = seedWith("MasterDetail(of: Order, detail: o => OrderPanel(o))", { OrderPanel: ["order"] });
     expect(node.name).toBe("MasterDetail");
     const detail = node.children.find((c) => c.slot === "detail")!;
     expect(detail.name).toBe("Lambda");
     expect(detail.children[0].name).toBe("OrderPanel");
+    expect(detail.children[0].props.order).toBe("o");
   });
 });
 

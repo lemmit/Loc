@@ -252,7 +252,7 @@ const CHILD_TOKEN = "";
 // non-canonical orderings — a positional after a named arg — round-trip instead
 // of falling back to Opaque).  Returns null if the call doesn't match the spec
 // (caller falls back to Opaque).
-function seedCall(name: string, spec: PrimitiveSpec, args: CallArg[], components: ReadonlySet<string>): BuilderNode | null {
+function seedCall(name: string, spec: PrimitiveSpec, args: CallArg[], components: ReadonlyMap<string, readonly string[]>): BuilderNode | null {
   const posKeys = posSpecs(spec);
   const namedSpec = new Map((spec.named ?? []).map((n) => [n.key, n] as const));
   const namedChildren = new Set(spec.namedChildren ?? []);
@@ -326,10 +326,25 @@ function seedCall(name: string, spec: PrimitiveSpec, args: CallArg[], components
   return { name: name as PrimitiveName, props, children, order };
 }
 
+/** A node's source range, stashed so diagnostics can be mapped back to the node
+ *  they came from.  Encoded `startLine,startChar,endLine,endChar`. */
+function rangeStr(node: { $cstNode?: { range: { start: { line: number; character: number }; end: { line: number; character: number } } } }): string | undefined {
+  const r = node.$cstNode?.range;
+  return r ? `${r.start.line},${r.start.character},${r.end.line},${r.end.character}` : undefined;
+}
+
 /** Seed a page-body expression into a builder node.  `components` is the set of
  *  user-defined `component` names in scope; a call to one is recognised as a
- *  node (its positional args become children) rather than falling to Opaque. */
-export function seedFromBody(expr: Expression, components: ReadonlySet<string> = EMPTY_COMPONENTS): BuilderNode {
+ *  node (its positional args become children) rather than falling to Opaque.
+ *  Records each node's source range (`__range`) for diagnostic mapping. */
+export function seedFromBody(expr: Expression, components: ReadonlyMap<string, readonly string[]> = EMPTY_COMPONENTS): BuilderNode {
+  const node = seedNode(expr, components);
+  const range = rangeStr(expr);
+  if (range) node.props.__range = range;
+  return node;
+}
+
+function seedNode(expr: Expression, components: ReadonlyMap<string, readonly string[]>): BuilderNode {
   // Lambda — an expression body becomes the one child canvas; a block body
   // (`x => { … }`) becomes a list of editable `Stmt` rows (each statement's
   // source kept verbatim).
@@ -338,7 +353,7 @@ export function seedFromBody(expr: Expression, components: ReadonlySet<string> =
     return {
       name: "Lambda",
       props: { param: expr.param, __block: "1" },
-      children: expr.stmts.map((s) => ({ name: "Stmt" as const, props: { src: s.$cstNode?.text?.trim() ?? "" }, children: [] })),
+      children: expr.stmts.map((s) => ({ name: "Stmt" as const, props: { src: s.$cstNode?.text?.trim() ?? "", ...(rangeStr(s) ? { __range: rangeStr(s) } : {}) }, children: [] })),
     };
   }
   // match — predicate arms (cond + value child) plus an optional else child.
@@ -353,14 +368,20 @@ export function seedFromBody(expr: Expression, components: ReadonlySet<string> =
   }
   if (expr.$type !== "CallExpr" || expr.callee.$type !== "NameRef") return opaque(expr);
   const name = expr.callee.name;
-  // A registered primitive, or a user-defined component call (recognised as a
-  // container whose positional args are children).
-  const spec: PrimitiveSpec | undefined = name in SPECS ? specOf(name as keyof typeof SPECS) : components.has(name) ? { kind: "container" } : undefined;
-  if (!spec) return opaque(expr);
-  return seedCall(name, spec, expr.args, components) ?? opaque(expr);
+  if (name in SPECS) return seedCall(name, specOf(name as keyof typeof SPECS), expr.args, components) ?? opaque(expr);
+  // A user-defined `component` call: model its positional args as props keyed by
+  // the declared param names (so they edit as labelled fields), with `__params`
+  // recording which keys emit positionally.
+  const params = components.get(name);
+  if (!params) return opaque(expr);
+  const spec: PrimitiveSpec = { kind: "leaf", positional: params.map((p) => ({ key: p, kind: "text" as const })) };
+  const node = seedCall(name, spec, expr.args, components);
+  if (!node) return opaque(expr);
+  node.props.__params = JSON.stringify(params);
+  return node;
 }
 
-const EMPTY_COMPONENTS: ReadonlySet<string> = new Set();
+const EMPTY_COMPONENTS: ReadonlyMap<string, readonly string[]> = new Map();
 
 /** Render one prop value by kind.  `string` re-quotes (the STRING terminal
  *  strips delimiters); `int` numifies; `ref`/`expr` emit verbatim. */
@@ -405,16 +426,18 @@ export function emitBody(node: BuilderNode): string {
     const els = node.children.filter((c) => c.name === "MatchElse").slice(0, 1);
     return `match {\n  ${[...arms, ...els].map(emitBody).join(",\n  ")}\n}`;
   }
-  // SPECS primitive, or a user-defined component call (a container whose
-  // positional args are children).
+  // SPECS primitive, or a user-defined component call (positional args are
+  // param-keyed props recorded in `__params`).
   const spec: PrimitiveSpec = node.name in SPECS ? specOf(node.name as keyof typeof SPECS) : { kind: "container" };
   const posKindOf = new Map(posSpecs(spec).map((p) => [p.key, p.kind] as const));
   const namedSpec = new Map((spec.named ?? []).map((n) => [n.key, n] as const));
+  const params: ReadonlySet<string> = node.props.__params ? new Set(JSON.parse(String(node.props.__params)) as string[]) : new Set();
   const emitKey = (key: string): string | null => {
     const v = node.props[key];
     if (v === undefined || v === "") return null;
     const pos = posKindOf.get(key);
     if (pos) return emitProp(pos, v); // positional scalar prop
+    if (params.has(key)) return String(v); // component positional param — bare
     const ns = namedSpec.get(key);
     if (ns) return `${key}: ${emitProp(ns.kind, v)}`;
     // Passthrough named prop (an unmodelled modifier kept verbatim).
