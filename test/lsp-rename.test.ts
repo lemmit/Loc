@@ -91,4 +91,20 @@ describe("RenameProvider — member access", () => {
     expect(result).toContain("this.ownerKey");
     expect(result).not.toContain("customerId");
   });
+
+  it("renames a property used as an assignment target", async () => {
+    const result = await renameAt(
+      `context Sales {
+  enum Status { Open, Closed }
+  aggregate Order {
+    <|>status: Status
+    operation close() { status := Closed }
+  }
+}`,
+      "state",
+    );
+    expect(result).toContain("state: Status");
+    expect(result).toContain("state := Closed");
+    expect(result).not.toMatch(/\bstatus\b/);
+  });
 });

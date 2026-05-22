@@ -1,6 +1,10 @@
 import { AstUtils, type AstNode } from "langium";
+import { collectMemberUsages, isRenameableMember } from "../../../../src/language/lsp/member-refs.js";
+import { iterateEntityMembers } from "../../../../src/language/type-system.js";
+import type { Aggregate, EntityPart, ValueObject } from "../../../../src/language/generated/ast.js";
 import { applyEdits, type TextEdit } from "../edit-engine";
 import { buildLinkedDocument } from "./linked-doc";
+import { parseDdd } from "../parse";
 import type { NodeKind } from "./model";
 
 // Rename a structural construct *and every reference to it*.
@@ -76,4 +80,55 @@ export async function renameConstruct(
   });
 
   return applyEdits(source, unique);
+}
+
+// Rename a *field* (property / containment / derived / function) on an
+// aggregate or value object — and every usage of it. Field names are plain
+// string tokens in expressions (`this.field`, `x.field`, view binds, find
+// filters), not Langium cross-references, so we reuse the language server's
+// shared `member-refs` resolver — the same one its Rename/References providers
+// use — which finds usages by type (honouring scope + local-binding shadowing),
+// never by text. Returns the new source, or null if it can't rename safely.
+export async function renameMember(
+  source: string,
+  ownerKind: NodeKind,
+  ownerName: string,
+  fieldName: string,
+  newName: string,
+): Promise<string | null> {
+  if (ownerKind !== "aggregate" && ownerKind !== "valueobject") return null;
+  const linked = await buildLinkedDocument(source, "memory:///loom-rename.ddd");
+  if (!linked) return null;
+  const { model, services, doc } = linked;
+
+  const wantType = KIND_TO_TYPE[ownerKind];
+  let owner: Aggregate | EntityPart | ValueObject | undefined;
+  for (const n of AstUtils.streamAst(model)) {
+    if (n.$type === wantType && (n as { name?: unknown }).name === ownerName) {
+      owner = n as Aggregate | ValueObject;
+      break;
+    }
+  }
+  if (!owner) return null;
+
+  const decl = iterateEntityMembers(owner).find((m) => m.name === fieldName)?.node;
+  if (!decl || !isRenameableMember(decl)) return null;
+
+  const edits: TextEdit[] = [];
+  const push = (offset: number, end: number): void => {
+    if (source.slice(offset, end) === fieldName) edits.push({ offset, end, newText: newName });
+  };
+  const nameNode = services.references.NameProvider.getNameNode(decl);
+  if (nameNode) push(nameNode.offset, nameNode.end);
+  for (const cst of collectMemberUsages(doc, decl)) push(cst.offset, cst.end);
+
+  const seen = new Set<string>();
+  const unique = edits.filter((e) => {
+    const key = `${e.offset}:${e.end}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const next = applyEdits(source, unique);
+  return parseDdd(next).parserErrors.length === 0 ? next : null;
 }

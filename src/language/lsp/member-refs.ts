@@ -22,6 +22,7 @@ import {
   isFunctionDecl,
   isLambda,
   isLetStmt,
+  isLValue,
   isMemberAccess,
   isNameRef,
   isOperation,
@@ -29,11 +30,12 @@ import {
   isWorkflow,
   type Aggregate,
   type EntityPart,
+  type LValue,
   type MemberAccess,
   type NameRef,
   type ValueObject,
 } from "../generated/ast.js";
-import { envForNode, iterateEntityMembers, stepIntoNode, typeOf } from "../type-system.js";
+import { envForNode, iterateEntityMembers, stepInto, stepIntoNode, typeOf, type DddType } from "../type-system.js";
 
 type EntityLike = Aggregate | EntityPart | ValueObject;
 
@@ -73,15 +75,17 @@ export function memberDeclAt(cstNode: CstNode): AstNode | undefined {
   return undefined;
 }
 
-/** Resolve a bare `NameRef` to the `this`-member declaration it names, if any
- *  (and it isn't shadowed by a closer param / let / lambda binding). */
+/** Resolve a bare `NameRef` to the member declaration it names, if any. Uses
+ *  the same `envForNode` the type system uses, so it sees members reachable in
+ *  every expression position — aggregate/VO bodies, and the source aggregate of
+ *  view filters/binds and repository find filters (where the aggregate comes
+ *  through a cross-reference, not containment) — and a closer param / let /
+ *  lambda binding correctly shadows the member (env precedence). */
 function nameRefDecl(nr: NameRef): AstNode | undefined {
   const name = nr.name;
   if (typeof name !== "string") return undefined;
-  if (localShadows(nr, name)) return undefined;
-  const owner = nearestEntity(nr);
-  if (!owner) return undefined;
-  return iterateEntityMembers(owner).find((m) => m.name === name)?.node;
+  const sym = envForNode(nr).resolve(name);
+  return sym && isRenameableMember(sym.origin) ? sym.origin : undefined;
 }
 
 function nearestEntity(node: AstNode): EntityLike | undefined {
@@ -109,6 +113,34 @@ function localShadows(node: AstNode, name: string): boolean {
   return false;
 }
 
+/** A bare `this`-member assignment target rooted at the enclosing entity:
+ *  `status := …`, `lines += …`, `a.b := …`. Heads are always member names
+ *  (the grammar's LValueIdent has no `this` prefix). Walks head + tail through
+ *  the type system, collecting the segment tokens that resolve to `target`. */
+function collectLValueUsages(lv: LValue, target: AstNode, out: CstNode[]): void {
+  const owner = nearestEntity(lv);
+  if (!owner) return;
+  const head = lv.head;
+  if (localShadows(lv, head)) return; // head is a local binding, not a member
+  const info = iterateEntityMembers(owner).find((m) => m.name === head);
+  if (!info) return;
+  if (info.node === target) pushCst(memberNameCstOf(lv, "head"), out);
+  let cur: DddType = info.type;
+  const tailCsts = GrammarUtils.findNodesForProperty(lv.$cstNode, "tail");
+  lv.tail.forEach((seg, i) => {
+    if (stepIntoNode(cur, seg) === target) pushCst(tailCsts[i], out);
+    cur = stepInto(cur, seg);
+  });
+}
+
+function memberNameCstOf(lv: LValue, prop: "head"): CstNode | undefined {
+  return GrammarUtils.findNodeForProperty(lv.$cstNode, prop);
+}
+
+function pushCst(cst: CstNode | undefined, out: CstNode[]): void {
+  if (cst) out.push(cst);
+}
+
 /** Every usage-site token in `doc` whose member resolves to `target`. */
 export function collectMemberUsages(doc: LangiumDocument, target: AstNode): CstNode[] {
   const root = doc.parseResult?.value;
@@ -126,6 +158,8 @@ export function collectMemberUsages(doc: LangiumDocument, target: AstNode): CstN
         const cst = nameRefCst(node);
         if (cst) out.push(cst);
       }
+    } else if (isLValue(node)) {
+      collectLValueUsages(node, target, out);
     }
   }
   return out;

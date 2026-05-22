@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { renameConstruct } from "../web/src/builder/system/rename.js";
+import { renameConstruct, renameMember } from "../web/src/builder/system/rename.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const sales = readFileSync(path.join(here, "..", "examples", "sales.ddd"), "utf8");
@@ -45,5 +45,32 @@ describe("System builder — rename with reference updates", () => {
 
   it("returns null for a construct that does not exist", async () => {
     expect(await renameConstruct(sales, "aggregate", "Nope", "X")).toBeNull();
+  });
+});
+
+describe("System builder — field (member) rename", () => {
+  it("renames a field and every usage by type, not text", async () => {
+    // Order.status is used in an invariant guard, a function body, an
+    // assignment target (`status := Confirmed`), and view filters/binds.
+    const out = (await renameMember(sales, "aggregate", "Order", "status", "orderStatus"))!;
+    expect(out).toMatch(/orderStatus: OrderStatus/); // declaration
+    expect(out).toMatch(/when orderStatus == Confirmed/); // invariant guard (this-member)
+    expect(out).toMatch(/= orderStatus == Draft/); // function body
+    expect(out).toMatch(/orderStatus := Confirmed/); // assignment target (LValue)
+    expect(out).toMatch(/where orderStatus == Confirmed/); // view filter
+    // The view *output* field and bind name are NOT this-member usages — only
+    // the bind value is. So `status = orderStatus` keeps its left side.
+    expect(out).toMatch(/status = orderStatus/);
+  });
+
+  it("renames a derived prop used through Id<X> follow paths", async () => {
+    const out = (await renameMember(sales, "aggregate", "Order", "total", "grandTotal"))!;
+    expect(out).toMatch(/derived grandTotal: Money/);
+  });
+
+  it("refuses unknown fields, non-entity kinds, and bad targets", async () => {
+    expect(await renameMember(sales, "aggregate", "Order", "nope", "x")).toBeNull();
+    expect(await renameMember(sales, "event", "OrderConfirmed", "order", "x")).toBeNull();
+    expect(await renameMember(sales, "aggregate", "Nope", "status", "x")).toBeNull();
   });
 });

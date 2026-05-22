@@ -148,10 +148,18 @@ Done:
   object / event), the inspector lists each field with an editable type Select +
   `[]`/`?` checkboxes and a delete control, plus **+ field**. Each op mutates the
   parsed node's property array, reprints via the structural printer, and splices
-  (`web/src/builder/system/fields.ts`). Field *rename* is deliberately excluded
-  (field-name refs in expressions/views resolve in IR lowering, not as Langium
-  cross-references, so they can't be tracked). Gated by
-  `test/system-fields.test.ts` + e2e.
+  (`web/src/builder/system/fields.ts`). Gated by `test/system-fields.test.ts` + e2e.
+- **Field rename** — aggregate / value-object field names are editable inline and
+  rename **every usage** (`this.field`, bare this-refs, `x.field` member access,
+  `field :=` assignment targets, view filters/binds, find filters). Field names
+  are plain string tokens, not Langium cross-references, so this reuses the
+  language server's shared `member-refs` resolver — the same one the LSP
+  Rename/References providers use — which finds usages by *type* (honouring scope
+  + local-binding shadowing), never by text (`renameMember` in
+  `web/src/builder/system/rename.ts`). As part of this, the shared resolver was
+  completed to cover assignment-target (`LValue`) usages and to resolve bare
+  this-members in view/find contexts via `envForNode` — improving the LSP rename
+  too. Gated by `test/system-rename.test.ts` + `test/lsp-rename.test.ts` + e2e.
 - **Reference rebinding** — for single-reference constructs (repository → its
   `for` aggregate, api → its `from` module, view → its `from`/`=` aggregate) the
   inspector shows a Select that rewrites the reference's `$refNode` CST span; the
@@ -236,8 +244,6 @@ Open:
   structured statement *targets* (assignment LValue / `emit` event picker) +
   bare-call statements — the statement *expressions* are structured today, but
   these non-expression parts stay text-row.
-- **Field rename** — needs member-access reference resolution (via the
-  type-system / IR) to update `this.field` / view binds safely.
 - **Repository `find` editing** (params + where-clause expressions).
 - **Edge rebinding by dragging** connections on the canvas (inspector-Select
   rebinding already exists — see above); plus multi-valued deployable references
