@@ -1,21 +1,42 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { EmptyFileSystem } from "langium";
+import { EmptyFileSystem, URI } from "langium";
 import { describe, expect, it } from "vitest";
+import { enrichLoomModel } from "../../src/ir/enrichments.js";
+import type { TraceabilityIR } from "../../src/ir/loom-ir.js";
+import { lowerModel } from "../../src/ir/lower.js";
 import { createDddServices } from "../../src/language/ddd-module.js";
 import type { Model } from "../../src/language/generated/ast.js";
 import {
   buildSystemGraph,
+  coverageByNode,
   matchNodes,
   nodeDiagnostics,
 } from "../../web/src/builder/system/model.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const sales = readFileSync(path.join(here, "..", "..", "examples", "sales.ddd"), "utf8");
+const salesSystem = readFileSync(
+  path.join(here, "..", "..", "web", "src", "examples", "sales-system.ddd"),
+  "utf8",
+);
 
 const parser = createDddServices(EmptyFileSystem).Ddd.parser.LangiumParser;
 const parse = (t: string): Model => parser.parse(t).value as Model;
+
+// A fully-linked model (cross-refs resolved), mirroring the builder's
+// `buildLinkedModel` so `entitles`/`covers` lower correctly.
+async function linked(src: string): Promise<Model> {
+  const shared = createDddServices(EmptyFileSystem).shared;
+  const doc = shared.workspace.LangiumDocumentFactory.fromString(
+    src,
+    URI.parse("memory:///cov.ddd"),
+  );
+  shared.workspace.LangiumDocuments.addDocument(doc);
+  await shared.workspace.DocumentBuilder.build([doc], { validation: false });
+  return doc.parseResult.value as Model;
+}
 
 describe("System graph — emit edges from operation bodies", () => {
   it("wires an aggregate to every event it emits", () => {
@@ -92,5 +113,39 @@ describe("System graph — search / kind filter", () => {
     expect(aggsWithO).toContain("aggregate:Order");
     // A repository (different kind) is excluded by the aggregate-only filter.
     expect([...aggsWithO].some((id) => id.startsWith("repository:"))).toBe(false);
+  });
+});
+
+describe("System graph — traceability coverage", () => {
+  it("classifies nodes covered / uncovered / none from the traceability index", () => {
+    const graph = buildSystemGraph(parse(sales));
+    const trace: Pick<TraceabilityIR, "codeElements" | "testsByCodeElement"> = {
+      codeElements: {
+        "Sales.Order": "aggregate",
+        "Sales.Order.confirm": "operation",
+        "Sales.Customer": "aggregate",
+      },
+      testsByCodeElement: {
+        // An operation under Order is covered → Order rolls up to covered.
+        "Sales.Order.confirm": ["TC-1"],
+      },
+    };
+    const cov = coverageByNode(graph, trace);
+    expect(cov.get("aggregate:Order")).toBe("covered");
+    expect(cov.get("aggregate:Customer")).toBe("uncovered"); // referenced, untested
+    expect(cov.get("aggregate:Product")).toBe("none"); // not referenced at all
+  });
+
+  it("runs the real lower → enrich → coverage path on a system with traceability", async () => {
+    const model = await linked(salesSystem);
+    const loom = enrichLoomModel(lowerModel(model));
+    expect(loom.traceability).toBeDefined();
+    const cov = coverageByNode(buildSystemGraph(model), loom.traceability!);
+    // Every node gets one of the three statuses, and the system declares enough
+    // testCases that at least one construct is covered.
+    expect(
+      [...cov.values()].every((s) => s === "covered" || s === "uncovered" || s === "none"),
+    ).toBe(true);
+    expect([...cov.values()].some((s) => s === "covered")).toBe(true);
   });
 });

@@ -19,7 +19,10 @@ import type { BoundedContext, Model, System } from "../../../../src/language/gen
 import { printStructural } from "../../../../src/language/print/index.js";
 import { parseDdd } from "../parse";
 import { spliceNode, applyEdits } from "../edit-engine";
-import { buildSystemGraph, matchNodes, nodeDiagnostics, type GraphNode, type NodeKind } from "./model";
+import { buildSystemGraph, coverageByNode, matchNodes, nodeDiagnostics, type CoverageStatus, type GraphNode, type NodeKind } from "./model";
+import { buildLinkedModel } from "./linked-doc";
+import { lowerModel } from "../../../../src/ir/lower.js";
+import { enrichLoomModel } from "../../../../src/ir/enrichments.js";
 import type { Diagnostic } from "../../lsp/protocol";
 import { IDENTIFIER, renameConstruct, renameMember } from "./rename";
 import {
@@ -113,17 +116,31 @@ function worstSeverity(diags: readonly Diagnostic[] | undefined): "error" | "war
 
 const SEVERITY_COLOR = { error: "var(--mantine-color-red-6)", warning: "var(--mantine-color-yellow-5)" } as const;
 
-function toRfNodes(graph: ReturnType<typeof buildSystemGraph>, diagByNode: Map<string, Diagnostic[]>): Node[] {
+// Coverage-overlay background tints (replace the kind colour while the overlay
+// is on, turning the graph into a tested / untested / unreferenced heatmap).
+const COVERAGE_COLOR: Record<CoverageStatus, string> = {
+  covered: "var(--mantine-color-green-8)",
+  uncovered: "var(--mantine-color-red-8)",
+  none: "var(--mantine-color-dark-4)",
+};
+
+function toRfNodes(
+  graph: ReturnType<typeof buildSystemGraph>,
+  diagByNode: Map<string, Diagnostic[]>,
+  coverage: Map<string, CoverageStatus>,
+  overlay: boolean,
+): Node[] {
   return graph.nodes.map((n) => {
     const diags = diagByNode.get(n.id);
     const sev = worstSeverity(diags);
     const mark = sev ? `\n${sev === "error" ? "✕" : "⚠"} ${diags!.length}` : "";
+    const background = overlay ? COVERAGE_COLOR[coverage.get(n.id) ?? "none"] : KIND_COLOR[n.kind];
     return {
       id: n.id,
       position: { x: n.x, y: n.y },
       data: { label: `${n.kind}\n${n.name}${mark}`, title: diags?.map((d) => d.message).join("\n") },
       style: {
-        background: KIND_COLOR[n.kind],
+        background,
         color: "white",
         border: sev ? `2px solid ${SEVERITY_COLOR[sev]}` : "1px solid rgba(255,255,255,0.25)",
         borderRadius: 6,
@@ -288,7 +305,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
 
   // Seed with the first render's nodes/edges (not [] populated by an effect) so
   // the `fitView` prop actually has something to fit on mount.
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(graph ? toRfNodes(graph, diagByNode) : []);
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(graph ? toRfNodes(graph, diagByNode, new Map(), false) : []);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(graph ? toRfEdges(graph) : []);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const compact = !ctx.isDesktop;
@@ -302,6 +319,8 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const [emitKey, setEmitKey] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [kindFilter, setKindFilter] = useState<NodeKind[]>([]);
+  const [overlay, setOverlay] = useState(false);
+  const [coverage, setCoverage] = useState<Map<string, CoverageStatus>>(new Map());
 
   // Search + kind filter → the set of node ids to emphasise. Inactive (empty
   // query and no kinds) matches every node, so nothing dims.
@@ -323,9 +342,33 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
 
   useEffect(() => {
     if (!graph) return;
-    setNodes(toRfNodes(graph, diagByNode));
+    setNodes(toRfNodes(graph, diagByNode, coverage, overlay));
     setEdges(toRfEdges(graph));
-  }, [graph, diagByNode, setNodes, setEdges]);
+  }, [graph, diagByNode, coverage, overlay, setNodes, setEdges]);
+
+  // Coverage overlay: lower + enrich the *linked* model (cross-refs resolved so
+  // `entitles`/`covers` land) and map the traceability index onto graph nodes.
+  // Async + off the render path; only runs while the overlay is on.
+  useEffect(() => {
+    if (!overlay) {
+      setCoverage(new Map());
+      return;
+    }
+    let alive = true;
+    void (async () => {
+      const model = await buildLinkedModel(ctx.getSource());
+      if (!alive || !model || !graph) return;
+      try {
+        const loom = enrichLoomModel(lowerModel(model));
+        if (alive && loom.traceability) setCoverage(coverageByNode(graph, loom.traceability));
+      } catch {
+        if (alive) setCoverage(new Map());
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [overlay, graph, ctx, rev]);
 
   // Dim non-matching nodes / edges in place (preserving positions) when a search
   // or kind filter is active; an edge stays lit only if both endpoints match.
@@ -588,6 +631,22 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
                 Focus
               </Button>
             </>
+          )}
+          <Button
+            size="compact-xs"
+            variant={overlay ? "filled" : "default"}
+            color={overlay ? "teal" : undefined}
+            data-testid="c4system-coverage-toggle"
+            onClick={() => setOverlay((o) => !o)}
+          >
+            Coverage
+          </Button>
+          {overlay && (
+            <Group gap={8} wrap="nowrap" data-testid="c4system-coverage-legend">
+              <Text size="xs" c="green.6">■ tested</Text>
+              <Text size="xs" c="red.6">■ untested</Text>
+              <Text size="xs" c="dimmed">■ n/a</Text>
+            </Group>
           )}
         </Group>
         {compact && (

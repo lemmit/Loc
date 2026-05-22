@@ -727,3 +727,21 @@ test("searches and kind-filters the model graph", async ({ page }) => {
   await page.getByTestId("c4system-search").fill("");
   await expect(page.getByTestId("c4system-match-count")).toHaveCount(0);
 });
+
+test("toggles the traceability coverage overlay", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  // Coverage overlay off by default; toggling it on reveals the tested/untested
+  // legend (the linked model is lowered + enriched async to compute coverage).
+  await expect(page.getByTestId("c4system-coverage-legend")).toHaveCount(0);
+  await page.getByTestId("c4system-coverage-toggle").click();
+  await expect(page.getByTestId("c4system-coverage-legend")).toBeVisible();
+  await page.getByTestId("c4system-coverage-toggle").click();
+  await expect(page.getByTestId("c4system-coverage-legend")).toHaveCount(0);
+});
