@@ -6,7 +6,10 @@
 // is injected so the orchestration is testable without the worker.
 
 import { createUiHarness, runUiTests, type UiTestCase } from "./ui-harness.js";
-import { RemotePage, type DriverTransport } from "./remote-page.js";
+import {
+  RemotePage,
+  type DriverTransport,
+} from "../../../packages/ui-test-driver/index";
 import type { TestResult } from "./harness.js";
 import type { EsbuildBuild } from "./transform-client.js";
 import type { VirtualFile } from "../build/protocol.js";

@@ -9,9 +9,13 @@
 // patterns the generated page objects emit.
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { DomPage } from "../web/src/testing/dom-page.js";
-import { executeDriverOp, type DriverOp } from "../web/src/testing/locator-chain.js";
-import { RemotePage, type DriverTransport } from "../web/src/testing/remote-page.js";
+import {
+  DomPage,
+  executeDriverOp,
+  RemotePage,
+  type DriverOp,
+  type DriverTransport,
+} from "../packages/ui-test-driver/index.js";
 
 function harness(): RemotePage {
   // Sandbox side: a DomPage bound to the test document.
@@ -19,7 +23,8 @@ function harness(): RemotePage {
   // In-process transport stands in for the bridge postMessage hop.
   const transport: DriverTransport = {
     currentUrl: () => document.defaultView!.location.href,
-    send: (op: DriverOp) => executeDriverOp(document, sandboxPage, op, 1000),
+    send: (op: DriverOp) =>
+      executeDriverOp(document, sandboxPage, op, { timeout: 1000 }),
   };
   // Parent side: the shim the bundled spec drives.
   return new RemotePage(transport);

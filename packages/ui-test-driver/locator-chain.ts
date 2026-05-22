@@ -69,9 +69,10 @@ export type DriverOp =
       flags?: string;
     };
 
-/** In-flight runtime-request tracker the preview's fetch shim maintains
- *  on its own `window` (see `src/preview/iframe-html.ts`). */
-interface LoomNet {
+/** In-flight runtime-request tracker the host maintains on the sandbox
+ *  `window` (the preview's fetch shim).  Supplied to `executeDriverOp` via
+ *  `ExecuteOptions.getNetState` so this package names no host global. */
+export interface NetState {
   inflight: number;
   last: number;
 }
@@ -80,13 +81,22 @@ export type DriverReply =
   | { ok: true; value?: string | number }
   | { ok: false; message: string };
 
+export interface ExecuteOptions {
+  timeout?: number;
+  /** Host-supplied accessor for in-flight network state, used by the
+   *  `waitForIdle` page op to wait for network quiescence after a mutation.
+   *  Omit to skip the wait (it then resolves immediately). */
+  getNetState?: (doc: Document) => NetState | undefined;
+}
+
 /** Execute one driver op against the live document (sandbox side). */
 export async function executeDriverOp(
   doc: Document,
   page: DomPage,
   msg: DriverOp,
-  timeout?: number,
+  opts?: ExecuteOptions,
 ): Promise<DriverReply> {
+  const timeout = opts?.timeout;
   try {
     if (msg.kind === "page") {
       if (msg.op === "goto") {
@@ -116,8 +126,7 @@ export async function executeDriverOp(
         const sleep = (ms: number): Promise<void> =>
           new Promise((r) => setTimeout(r, ms));
         for (;;) {
-          const net = (doc.defaultView as unknown as { __LOOM_NET__?: LoomNet })
-            ?.__LOOM_NET__;
+          const net = opts?.getNetState?.(doc);
           const inflight = net?.inflight ?? 0;
           const idleFor = net ? Date.now() - net.last : quiet;
           if (inflight <= 0 && idleFor >= quiet) return { ok: true };

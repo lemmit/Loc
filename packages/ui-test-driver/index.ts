@@ -1,0 +1,27 @@
+// @loom/ui-test-driver — public API barrel.
+//
+// A framework-neutral, in-browser UI test driver that implements a closed
+// subset of the Playwright `Page`/`Locator` surface.  The parent-side shim
+// (RemotePage/RemoteLocator) holds no DOM — it reifies each locator into a
+// serialisable ChainNode[] and ships leaf ops over a DriverTransport; the
+// sandbox-side executor (executeDriverOp + DomPage/DomLocator) resolves the
+// chain against the live document and acts.  The host injects environment
+// accessors (basename, in-flight network state) so this package carries no
+// application-specific coupling.
+
+export { RemotePage, RemoteLocator, type DriverTransport } from "./remote-page.js";
+export {
+  type ChainNode,
+  type DriverOp,
+  type DriverReply,
+  type ExecuteOptions,
+  type NetState,
+  resolveChain,
+  executeDriverOp,
+} from "./locator-chain.js";
+export { DomPage, DomLocator, type DomPageOptions } from "./dom-page.js";
+export {
+  makeIframeTransport,
+  type IframeTransportOptions,
+} from "./iframe-transport.js";
+export { captureNode, type CaptureOpts } from "./screenshot.js";

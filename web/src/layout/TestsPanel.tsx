@@ -21,10 +21,12 @@ import {
   loadUnitSuite,
   unitSuiteFiles,
 } from "../testing/run-unit-tests";
-import { makeIframeTransport } from "../testing/iframe-transport";
+import {
+  makeIframeTransport,
+  RemotePage,
+} from "../../../packages/ui-test-driver/index";
 import { runTests, type TestCase, type TestResult } from "../testing/harness";
 import { runUiTests, type UiTestCase } from "../testing/ui-harness";
-import { RemotePage } from "../testing/remote-page";
 import { computeVerification } from "../../../src/verify/verification.js";
 import type {
   ExecTestRef,
@@ -226,7 +228,19 @@ export function TestsBody({
       );
       if (!iframe) throw new Error("Preview isn't mounted — Bundle + Boot first.");
       if (engine) await engine.wipe();
-      const page = new RemotePage(makeIframeTransport(iframe, { timeout: 8000 }));
+      const page = new RemotePage(
+        makeIframeTransport(iframe, {
+          timeout: 8000,
+          getBasename: (w) =>
+            (w as { __LOOM_BASENAME__?: string }).__LOOM_BASENAME__ ?? "",
+          getNetState: (d) =>
+            (
+              d.defaultView as {
+                __LOOM_NET__?: { inflight: number; last: number };
+              }
+            )?.__LOOM_NET__,
+        }),
+      );
       // Report the UI suite name so results join the verification rollup
       // (UI ExecTestRefs carry `suite: "<System> e2e"`).
       const uiSuite =

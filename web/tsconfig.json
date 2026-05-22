@@ -22,6 +22,6 @@
       "monaco-editor": ["./node_modules/@codingame/monaco-vscode-editor-api"]
     }
   },
-  "include": ["src", "../src", "vite.config.ts"],
+  "include": ["src", "../src", "../packages/ui-test-driver", "vite.config.ts"],
   "exclude": ["node_modules", "dist", "../src/cli", "../src/language/main.ts"]
 }

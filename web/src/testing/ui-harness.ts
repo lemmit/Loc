@@ -12,7 +12,10 @@
 // not lost to a one-shot read.
 
 import { makeExpect, runTests, type TestResult } from "./harness.js";
-import { RemoteLocator, type RemotePage } from "./remote-page.js";
+import {
+  RemoteLocator,
+  type RemotePage,
+} from "../../../packages/ui-test-driver/index";
 
 export interface UiTestCase {
   name: string;
