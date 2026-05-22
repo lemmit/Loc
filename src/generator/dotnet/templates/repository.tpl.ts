@@ -1,7 +1,7 @@
 import type { AggregateIR, ParamIR, RepositoryIR } from "../../../ir/loom-ir.js";
 import { findUsesCurrentUser } from "../../../ir/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
-import { pascal, plural } from "../../../util/naming.js";
+import { upperFirst, plural } from "../../../util/naming.js";
 import { renderCsType } from "../render-expr.js";
 
 // Repository interface (Domain layer) + EF-backed implementation
@@ -20,7 +20,7 @@ export function renderRepositoryInterface(
   const anyFindUsesUser = finds.some(findUsesCurrentUser);
   const findLines = finds.map((f) => {
     const usesUser = findUsesCurrentUser(f);
-    return `    System.Threading.Tasks.Task<${renderCsType(f.returnType)}> ${pascal(f.name)}(${renderParamsWithCt(f.params, usesUser)});`;
+    return `    System.Threading.Tasks.Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParamsWithCt(f.params, usesUser)});`;
   });
   return (
     lines(
@@ -53,14 +53,14 @@ export function renderRepositoryImpl(
 ): string {
   const finds = repo?.finds ?? [];
   const anyFindUsesUser = finds.some(findUsesCurrentUser);
-  const setName = plural(pascal(agg.name));
+  const setName = plural(upperFirst(agg.name));
   const findMethodLines = finds.flatMap((f) => {
     const body = findBodies.find((b) => b.name === f.name);
     const filter = body?.filterClause ?? "";
     const projection = body?.projectionClause ?? ".ToListAsync(ct)";
     const usesUser = findUsesCurrentUser(f);
     return [
-      `    public async Task<${renderCsType(f.returnType)}> ${pascal(f.name)}(${renderParamsWithCt(f.params, usesUser)})`,
+      `    public async Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParamsWithCt(f.params, usesUser)})`,
       "    {",
       `        return await _db.${setName}${filter}${projection};`,
       "    }",

@@ -1,5 +1,5 @@
 import type { AggregateIR, FindIR, RepositoryIR, TypeIR } from "../../ir/loom-ir.js";
-import { pascal } from "../../util/naming.js";
+import { upperFirst } from "../../util/naming.js";
 import { renderCsExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -39,7 +39,7 @@ function filterClauseFor(find: FindIR, agg: AggregateIR): string {
       (f) => f.name === p.name || `${f.name.replace(/Id$/, "")}Id` === p.name,
     );
     if (matchedField) {
-      conditions.push(`x.${pascal(matchedField.name)} == ${p.name}`);
+      conditions.push(`x.${upperFirst(matchedField.name)} == ${p.name}`);
     }
   }
   if (conditions.length === 0) return "";

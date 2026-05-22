@@ -1,5 +1,5 @@
 import type { PathIR, StmtIR } from "../../ir/loom-ir.js";
-import { pascal } from "../../util/naming.js";
+import { upperFirst } from "../../util/naming.js";
 import { renderCsExpr } from "./render-expr.js";
 
 const INDENT = "        ";
@@ -25,12 +25,12 @@ function renderCsStatement(s: StmtIR): string {
     case "remove":
       return `${INDENT}${renderPrivatePath(s.target)}.Remove(${renderCsExpr(s.value)});`;
     case "emit": {
-      const args = s.fields.map((f) => `${pascal(f.name)}: ${renderCsExpr(f.value)}`).join(", ");
+      const args = s.fields.map((f) => `${upperFirst(f.name)}: ${renderCsExpr(f.value)}`).join(", ");
       return `${INDENT}_domainEvents.Add(new ${s.eventName}(${args}));`;
     }
     case "call": {
       const args = s.args.map((a) => renderCsExpr(a)).join(", ");
-      return `${INDENT}this.${pascal(s.name)}(${args});`;
+      return `${INDENT}this.${upperFirst(s.name)}(${args});`;
     }
     case "expression":
       return `${INDENT}${renderCsExpr(s.expr)};`;
@@ -38,12 +38,12 @@ function renderCsStatement(s: StmtIR): string {
 }
 
 function renderPath(p: PathIR): string {
-  return p.segments.map((s) => pascal(s)).join(".");
+  return p.segments.map((s) => upperFirst(s)).join(".");
 }
 
 // For collection mutation we go via the private backing field.
 function renderPrivatePath(p: PathIR): string {
   if (p.segments.length === 0) return "this";
   const [head, ...tail] = p.segments;
-  return `_${head}${tail.map((t) => `.${pascal(t)}`).join("")}`;
+  return `_${head}${tail.map((t) => `.${upperFirst(t)}`).join("")}`;
 }
