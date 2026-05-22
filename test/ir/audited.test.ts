@@ -116,33 +116,46 @@ describe("audited — IR lowering", () => {
 });
 
 describe("audited — TypeScript emission", () => {
-  it("emits the audit SDK and records an audit at the route", async () => {
+  it("adds the audit_records table and writes a row transactionally with the save", async () => {
     const { model } = await parseModel(SYSTEM());
     const files = generateSystems(model).files;
-    expect(files.has("api/domain/audit.ts")).toBe(true);
+
+    // DB-only: the audit log is a Drizzle table, not an in-memory SDK file.
+    expect(files.has("api/domain/audit.ts")).toBe(false);
+    const schema = files.get("api/db/schema.ts")!;
+    expect(schema).toContain('export const auditRecords = pgTable("audit_records"');
+    expect(schema).toContain('jsonb("before")');
+
     const routes = files.get("api/http/cart.routes.ts")!;
-    expect(routes).toContain('import { recordAudit } from "../domain/audit";');
-    expect(routes).toContain("recordAudit({");
+    // The save and the audit insert share one transaction (atomic).
+    expect(routes).toContain("await db.transaction(async (tx) => {");
+    expect(routes).toContain("const repoTx = new CartRepository(tx, events);");
+    expect(routes).toContain("await repoTx.save(aggregate);");
+    expect(routes).toContain("await tx.insert(schema.auditRecords).values({");
     expect(routes).toContain('operationId: "cancelCart",');
     expect(routes).toContain('action: "cancel",');
-    expect(routes).toContain('target: { type: "Cart", id },');
-    expect(routes).toContain("const __before = repo.toWire(aggregate);");
-    expect(routes).toContain("const __after = repo.toWire(aggregate);");
+    expect(routes).toContain('targetType: "Cart",');
+    expect(routes).toContain("targetId: id,");
+    expect(routes).toContain("const __before = repoTx.toWire(aggregate);");
+    expect(routes).toContain("const __after = repoTx.toWire(aggregate);");
   });
 
   it("instruments only the audited operation, not the plain one", async () => {
     const { model } = await parseModel(SYSTEM());
     const routes = generateSystems(model).files.get("api/http/cart.routes.ts")!;
-    // Exactly one recordAudit call site (cancel), none for touch.
-    expect(routes.match(/recordAudit\(\{/g)).toHaveLength(1);
+    // Exactly one audit insert site (cancel); touch is uninstrumented.
+    expect(routes.match(/tx\.insert\(schema\.auditRecords\)/g)).toHaveLength(1);
   });
 
-  it("emits nothing when no operation is audited (toggle off)", async () => {
-    const src = SYSTEM().replace("operation cancel(reason: int) audited {", "operation cancel(reason: int) {");
+  it("emits no audit table or transaction when no operation is audited (toggle off)", async () => {
+    const src = SYSTEM().replace(
+      "operation cancel(reason: int) audited {",
+      "operation cancel(reason: int) {",
+    );
     const { model } = await parseModel(src);
     const files = generateSystems(model).files;
-    expect(files.has("api/domain/audit.ts")).toBe(false);
-    expect(files.get("api/http/cart.routes.ts")).not.toContain("recordAudit");
+    expect(files.get("api/db/schema.ts")).not.toContain("auditRecords");
+    expect(files.get("api/http/cart.routes.ts")).not.toContain("tx.insert(schema.auditRecords)");
   });
 });
 
@@ -151,8 +164,9 @@ describe("audited — other-backend no-crash safety", () => {
     const { model, errors } = await parseModel(SYSTEM("", "dotnet"));
     expect(errors).toEqual([]);
     const files = generateSystems(model).files;
+    // No TS audit artefacts leak into the .NET output.
     expect([...files.keys()].some((p) => p.endsWith("/domain/audit.ts"))).toBe(false);
-    expect([...files.keys()].some((p) => /recordAudit/.test(files.get(p)!))).toBe(false);
+    expect([...files.keys()].some((p) => /auditRecords/.test(files.get(p)!))).toBe(false);
   });
 });
 

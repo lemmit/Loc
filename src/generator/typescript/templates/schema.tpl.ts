@@ -20,7 +20,7 @@ import { camel, plural, snake } from "../../../util/naming.js";
 // `where this.<col>` clause or by a convention-based parameter
 // match.  Without these, common reads degrade to sequential scans
 // once the table has more than a few hundred rows.
-export function renderSchema(ctx: BoundedContextIR): string {
+export function renderSchema(ctx: BoundedContextIR, opts: { audit?: boolean } = {}): string {
   const tables: string[] = [];
   for (const agg of ctx.aggregates) {
     const indexed = indexedColumnsFor(agg, ctx);
@@ -29,6 +29,7 @@ export function renderSchema(ctx: BoundedContextIR): string {
       tables.push(emitTable(part.name, part.fields, agg.name, ctx, new Set()));
     }
   }
+  if (opts.audit) tables.push(AUDIT_TABLE);
   const enumLines = ctx.enums.map(
     (e) =>
       `export const ${camel(e.name)}Enum = pgEnum("${snake(e.name)}", [${e.values.map((v) => `"${v}"`).join(", ")}]);`,
@@ -36,7 +37,7 @@ export function renderSchema(ctx: BoundedContextIR): string {
   return (
     joinLines(
       "// Auto-generated.",
-      'import { pgTable, text, integer, bigint, numeric, boolean, timestamp, pgEnum, uuid, index } from "drizzle-orm/pg-core";',
+      `import { pgTable, text, integer, bigint, numeric, boolean, timestamp, pgEnum, uuid, index${opts.audit ? ", jsonb" : ""} } from "drizzle-orm/pg-core";`,
       "",
       ...enumLines,
       "",
@@ -44,6 +45,24 @@ export function renderSchema(ctx: BoundedContextIR): string {
     ) + "\n"
   );
 }
+
+// Audit-log table.  Emitted only when the model declares at least one
+// `audited` operation.  One row per successful audited invocation, written
+// in the same transaction as the operation's aggregate save (atomic — the
+// row and the state change commit or roll back together).  See
+// `docs/proposals/audit-and-logging.md`.
+const AUDIT_TABLE = `export const auditRecords = pgTable("audit_records", {
+  auditId: text("audit_id").primaryKey(),
+  operationId: text("operation_id").notNull(),
+  action: text("action").notNull(),
+  targetType: text("target_type").notNull(),
+  targetId: text("target_id").notNull(),
+  actor: jsonb("actor"),
+  before: jsonb("before").notNull(),
+  after: jsonb("after").notNull(),
+  at: timestamp("at", { withTimezone: true }).notNull(),
+  status: text("status").notNull(),
+}, (t) => [index("audit_records_target_idx").on(t.targetType, t.targetId)]);`;
 
 /** Field names on the aggregate root that should be indexed so the
  * generated finds don't run sequential scans.  Walks every find: if

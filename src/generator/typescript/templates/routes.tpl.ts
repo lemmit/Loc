@@ -16,10 +16,15 @@ export function renderHttpIndex(
     `import { ${camel(a.name)}Routes } from "./${camel(a.name)}.routes";`,
     `import { ${a.name}Repository } from "../db/repositories/${camel(a.name)}-repository";`,
   ]);
-  const aggregateRoutes = ctx.aggregates.map(
-    (a) =>
-      `  app.route("/${snake(plural(a.name))}", ${camel(a.name)}Routes(new ${a.name}Repository(db, events)));`,
-  );
+  const aggregateRoutes = ctx.aggregates.map((a) => {
+    // Aggregates with an audited public operation also receive `db` +
+    // `events` so the audited route can run its save + audit insert in one
+    // transaction (matches the audited router signature in routes-builder).
+    const hasAudit = a.operations.some((o) => o.audited && o.visibility === "public");
+    const repoArg = `new ${a.name}Repository(db, events)`;
+    const args = hasAudit ? `${repoArg}, db, events` : repoArg;
+    return `  app.route("/${snake(plural(a.name))}", ${camel(a.name)}Routes(${args}));`;
+  });
   const externAggs = ctx.aggregates.filter((a) => a.operations.some((o) => o.extern));
   const externImports = externAggs.map(
     (a) =>

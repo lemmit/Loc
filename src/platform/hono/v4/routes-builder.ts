@@ -67,7 +67,14 @@ export function buildRoutesFile(
     lines.push(`import { externHandlers } from "../domain/${camel(agg.name)}-extern";`);
   }
   if (fileHasAudit) {
-    lines.push(`import { recordAudit } from "../domain/audit";`);
+    // Audited operations write one audit row per successful invocation,
+    // inside the same transaction as the aggregate save.  Needs the
+    // schema table (runtime value), a UUID, and the db/events types for
+    // the transactional repo (mirrors the workflow routes' imports).
+    lines.push(`import { randomUUID } from "node:crypto";`);
+    lines.push(`import * as schema from "../db/schema";`);
+    lines.push(`import { type DomainEventDispatcher } from "../domain/events";`);
+    lines.push(`import type { NodePgDatabase } from "drizzle-orm/node-postgres";`);
   }
 
   // Schemas — value objects, enums, then per-DTO request / response
@@ -159,10 +166,12 @@ export function buildRoutesFile(
   lines.push(`const ErrorResponse = z.object({ error: z.string() }).openapi("ErrorResponse");`);
   lines.push("");
 
-  // The router.
-  lines.push(
-    `export function ${camel(agg.name)}Routes(repo: ${agg.name}Repository): OpenAPIHono {`,
-  );
+  // The router.  Audited aggregates also receive `db` + `events` so an
+  // audited operation can run its save + audit insert in one transaction.
+  const routerParams = fileHasAudit
+    ? `repo: ${agg.name}Repository, db: NodePgDatabase<typeof schema>, events: DomainEventDispatcher`
+    : `repo: ${agg.name}Repository`;
+  lines.push(`export function ${camel(agg.name)}Routes(${routerParams}): OpenAPIHono {`);
   lines.push(`  const app = new OpenAPIHono();`);
   lines.push("");
 
@@ -316,57 +325,71 @@ function emitOperationRoute(
   if (usesUser) {
     out.push(`    const currentUser = c.get("currentUser") as import("../auth/user-types").User;`);
   }
-  out.push(`    const aggregate = await repo.getById(Ids.${agg.name}Id(id));`);
-  if (audit) {
-    // Actor = the inbound currentUser claim if present, else null.  Read
-    // via the untyped-key bridge (the sub-router's OpenAPIHono has no
-    // typed Variables block) so this compiles whether or not the
-    // deployable mounts auth — `auth/user-types` may not exist here.
-    out.push(
-      `    const __actor = (c as unknown as { get(k: "currentUser"): unknown }).get("currentUser") ?? null;`,
-    );
-    out.push(`    const __before = repo.toWire(aggregate);`);
-  }
   const baseCallArgs = op.params.map((p) => wireToDomainExpr(`body.${p.name}`, p.type, ctx));
   const callArgs = (usesUser ? [...baseCallArgs, "currentUser"] : baseCallArgs).join(", ");
-  if (op.extern) {
-    // Extern: run preconditions on the aggregate, dispatch to the
-    // user-registered handler, then run invariants and save.  The
-    // handler call is wrapped so any non-domain throw becomes an
-    // ExternHandlerError naming the op + aggregate (see
-    // app.onError below for the 500 mapping).  Domain-layer errors
-    // (DomainError, ForbiddenError, AggregateNotFoundError) re-throw
-    // unchanged so 400 / 403 / 404 still apply when a user handler
-    // raises one deliberately.
-    const handlerKey = `${camel(op.name)}${agg.name}`;
-    out.push(`    aggregate.check${cap(op.name)}(${callArgs});`);
-    out.push(`    const handler = externHandlers.${handlerKey};`);
-    out.push(
-      `    if (!handler) throw new Error("Missing extern handler for ${handlerKey}. Register one via register${cap(op.name)}${agg.name}Handler(...) before app.listen().");`,
-    );
-    out.push(`    try {`);
-    out.push(`      await handler(aggregate, body);`);
-    out.push(`    } catch (err) {`);
-    out.push(`      if (err instanceof DomainError) throw err;`);
-    out.push(`      if (err instanceof ForbiddenError) throw err;`);
-    out.push(`      if (err instanceof AggregateNotFoundError) throw err;`);
-    out.push(`      throw new ExternHandlerError("${op.name}", "${agg.name}", err);`);
-    out.push(`    }`);
-    out.push(`    aggregate.assertInvariants();`);
+
+  // The mutation block — extern dispatch or the direct method call —
+  // operates on `aggregate` and is independent of which repo loaded it,
+  // so it's shared verbatim between the plain and transactional paths.
+  const mutation = (pad: string): string[] => {
+    if (op.extern) {
+      // Extern: run preconditions, dispatch to the user-registered
+      // handler, then run invariants.  The handler call is wrapped so any
+      // non-domain throw becomes an ExternHandlerError naming the op +
+      // aggregate (see app.onError below for the 500 mapping).  Domain
+      // errors re-throw unchanged so 400 / 403 / 404 still apply.
+      const handlerKey = `${camel(op.name)}${agg.name}`;
+      return [
+        `${pad}aggregate.check${cap(op.name)}(${callArgs});`,
+        `${pad}const handler = externHandlers.${handlerKey};`,
+        `${pad}if (!handler) throw new Error("Missing extern handler for ${handlerKey}. Register one via register${cap(op.name)}${agg.name}Handler(...) before app.listen().");`,
+        `${pad}try {`,
+        `${pad}  await handler(aggregate, body);`,
+        `${pad}} catch (err) {`,
+        `${pad}  if (err instanceof DomainError) throw err;`,
+        `${pad}  if (err instanceof ForbiddenError) throw err;`,
+        `${pad}  if (err instanceof AggregateNotFoundError) throw err;`,
+        `${pad}  throw new ExternHandlerError("${op.name}", "${agg.name}", err);`,
+        `${pad}}`,
+        `${pad}aggregate.assertInvariants();`,
+      ];
+    }
+    return [`${pad}aggregate.${camel(op.name)}(${callArgs});`];
+  };
+
+  if (!audit) {
+    out.push(`    const aggregate = await repo.getById(Ids.${agg.name}Id(id));`);
+    out.push(...mutation("    "));
+    out.push(`    await repo.save(aggregate);`);
   } else {
-    out.push(`    aggregate.${camel(op.name)}(${callArgs});`);
-  }
-  out.push(`    await repo.save(aggregate);`);
-  if (audit) {
-    out.push(`    const __after = repo.toWire(aggregate);`);
-    out.push(`    recordAudit({`);
-    out.push(`      operationId: "${camel(op.name)}${agg.name}",`);
-    out.push(`      action: "${op.name}",`);
-    out.push(`      target: { type: "${agg.name}", id },`);
-    out.push(`      actor: __actor,`);
-    out.push(`      before: __before,`);
-    out.push(`      after: __after,`);
-    out.push(`      status: "ok",`);
+    // Audited: load, mutate, save, and write the audit row in ONE
+    // transaction (built on `db`, mirroring the workflow routes) so the
+    // state change and its audit record commit or roll back atomically.
+    // Actor = the typed currentUser if the body already reads it, else
+    // the inbound claim via the untyped-key bridge (null when no auth).
+    const actorExpr = usesUser
+      ? "currentUser"
+      : `(c as unknown as { get(k: "currentUser"): unknown }).get("currentUser") ?? null`;
+    out.push(`    const __actor = ${actorExpr};`);
+    out.push(`    await db.transaction(async (tx) => {`);
+    out.push(`      const repoTx = new ${agg.name}Repository(tx, events);`);
+    out.push(`      const aggregate = await repoTx.getById(Ids.${agg.name}Id(id));`);
+    out.push(`      const __before = repoTx.toWire(aggregate);`);
+    out.push(...mutation("      "));
+    out.push(`      await repoTx.save(aggregate);`);
+    out.push(`      const __after = repoTx.toWire(aggregate);`);
+    out.push(`      await tx.insert(schema.auditRecords).values({`);
+    out.push(`        auditId: randomUUID(),`);
+    out.push(`        operationId: "${camel(op.name)}${agg.name}",`);
+    out.push(`        action: "${op.name}",`);
+    out.push(`        targetType: "${agg.name}",`);
+    out.push(`        targetId: id,`);
+    out.push(`        actor: __actor,`);
+    out.push(`        before: __before,`);
+    out.push(`        after: __after,`);
+    out.push(`        at: new Date(),`);
+    out.push(`        status: "ok",`);
+    out.push(`      });`);
     out.push(`    });`);
   }
   out.push(`    return c.body(null, 204);`);
