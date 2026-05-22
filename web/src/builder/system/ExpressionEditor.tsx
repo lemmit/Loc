@@ -1,6 +1,6 @@
 import { createContext, useContext, useState } from "react";
 import { ActionIcon, Autocomplete, Box, Group, SegmentedControl, Select, Text, TextInput, Textarea } from "@mantine/core";
-import { BINARY_OPS, UNARY_OPS, emitExpr, type ECallArg, type EExpr } from "./expr-model";
+import { BINARY_OPS, UNARY_OPS, emitExpr, type ECallArg, type EExpr, type EObjField } from "./expr-model";
 
 export type ExprMode = "structured" | "text";
 
@@ -42,6 +42,40 @@ function ArgsEditor({ args, onArgs }: { args: ECallArg[]; onArgs: (args: ECallAr
         <Text size="xs">+</Text>
       </ActionIcon>
       <Text size="xs" c="dimmed">)</Text>
+    </Group>
+  );
+}
+
+// Named-field list for `new Part { … }` and object literals `{ … }`. Edits a
+// field's name or value, removes a field, or appends one (defaulting to
+// `field: null` so the result stays parseable until edited).
+function FieldsEditor({ fields, onFields }: { fields: EObjField[]; onFields: (fields: EObjField[], commit: boolean) => void }): JSX.Element {
+  return (
+    <Group gap={2} wrap="nowrap" align="center">
+      <Text size="xs" c="dimmed">{"{"}</Text>
+      {fields.map((field, i) => (
+        <Group key={i} gap={2} wrap="nowrap" align="center">
+          {i > 0 && <Text size="xs" c="dimmed">,</Text>}
+          <TextInput
+            size="xs"
+            w={80}
+            value={field.name}
+            data-testid="c4expr-field-name"
+            styles={{ input: { fontFamily: "monospace", fontSize: 11 } }}
+            onChange={(e) => onFields(fields.map((f, j) => (j === i ? { ...f, name: e.currentTarget.value } : f)), false)}
+            onBlur={() => onFields(fields, true)}
+          />
+          <Text size="xs" c="dimmed">:</Text>
+          <ExpressionEditor node={field.value} onChange={(n, c) => onFields(fields.map((f, j) => (j === i ? { ...f, value: n } : f)), c)} />
+          <ActionIcon size="xs" variant="subtle" color="gray" data-testid="c4expr-field-del" aria-label="remove field" onClick={() => onFields(fields.filter((_, j) => j !== i), true)}>
+            <Text size="xs">×</Text>
+          </ActionIcon>
+        </Group>
+      ))}
+      <ActionIcon size="xs" variant="subtle" color="gray" data-testid="c4expr-field-add" aria-label="add field" onClick={() => onFields([...fields, { name: "field", value: { kind: "lit", lit: "null", value: "null" } }], true)}>
+        <Text size="xs">+</Text>
+      </ActionIcon>
+      <Text size="xs" c="dimmed">{"}"}</Text>
     </Group>
   );
 }
@@ -141,6 +175,24 @@ export function ExpressionEditor({ node, onChange }: NodeProps): JSX.Element {
           </ExprScopeContext.Provider>
         </Group>
       );
+    case "new":
+      return (
+        <Group gap={2} wrap="nowrap" align="center" style={{ border: "1px solid var(--mantine-color-dark-4)", borderRadius: 4, padding: 2 }}>
+          <Text size="xs" c="dimmed">new</Text>
+          <TextInput
+            size="xs"
+            w={90}
+            value={node.partType}
+            data-testid="c4expr-new-type"
+            styles={{ input: { fontFamily: "monospace", fontSize: 11 } }}
+            onChange={(e) => onChange({ ...node, partType: e.currentTarget.value }, false)}
+            onBlur={() => onChange(node, true)}
+          />
+          <FieldsEditor fields={node.fields} onFields={(fields, c) => onChange({ ...node, fields }, c)} />
+        </Group>
+      );
+    case "object":
+      return <FieldsEditor fields={node.fields} onFields={(fields, c) => onChange({ ...node, fields }, c)} />;
     case "raw":
       return (
         <Autocomplete
