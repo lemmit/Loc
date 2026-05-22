@@ -444,20 +444,30 @@ export function walkBodyToTsx(
   };
 }
 
-interface WalkContext {
-  imports: ImportMap;
+// The walk context is split into two halves so the input/output
+// boundary is type-enforced:
+//
+//   - `WalkEnv`  — read-only lookups threaded top-down. Lambda
+//     sub-scopes override `lambdaParams`/`shellLocals` by spreading
+//     a fresh env; the rest is shared by reference.
+//   - `Sink`     — mutable accumulators the emitters write into and
+//     the page shell reads after the walk (imports, used-flags,
+//     formOfs, collected testids, …). Always shared by reference;
+//     never spread/copied, or writes made inside a sub-walk would be
+//     silently dropped.
+//
+// Per-primitive emitter modules take `(env: WalkEnv, sink: Sink)` so
+// each one advertises exactly what it reads vs. writes. The shared
+// core still threads a single `WalkContext` (= `WalkEnv & Sink`),
+// which is structurally assignable to either half.
+
+/** Read-only lookups threaded through the walk. */
+export interface WalkEnv {
   pack: LoadedPack;
   paramNames: ReadonlySet<string>;
-  usedParams: Set<string>;
-  usesNavigate: boolean;
   stateNames: ReadonlySet<string>;
-  usesState: boolean;
-  usesRouterLink: boolean;
   userComponents: ReadonlyMap<string, readonly ParamIR[]>;
-  usedUserComponents: Set<string>;
-  usesChildren: boolean;
   apiParamNames: ReadonlyMap<string, string>;
-  usedApiHooks: Map<string, ApiHookUse>;
   /** Slice A2 — lambda params bound in the current sub-walk
    *  (source-side name → emitted JS name).  `Column("ID", o => o.id)`
    *  walks the accessor body with `o → "row"`; refs to `o` resolve
@@ -482,6 +492,24 @@ interface WalkContext {
   workflowsByName: ReadonlyMap<string, WorkflowIR>;
   /** Slice A12 — owning bounded context per workflow. */
   bcByWorkflow: ReadonlyMap<string, BoundedContextIR>;
+  /** Slice A6 — UI helper-import lookup (name → import path).
+   *  Populated by `walkBodyToTsx` from the UI's `helperImports`
+   *  parameter; consulted by `emitComponent`'s fallthrough so
+   *  body calls to a helper name emit as plain JS calls. */
+  helperImports: ReadonlyMap<string, string>;
+}
+
+/** Mutable accumulators written during the walk; read by the page
+ *  shell afterwards.  Always shared by reference. */
+export interface Sink {
+  imports: ImportMap;
+  usedParams: Set<string>;
+  usesNavigate: boolean;
+  usesState: boolean;
+  usesRouterLink: boolean;
+  usedUserComponents: Set<string>;
+  usesChildren: boolean;
+  usedApiHooks: Map<string, ApiHookUse>;
   /** Slice A4/A12 — when `Form(of: <Agg>)` or `Form(runs: <wf>)`
    *  is walked, the emitter records the metadata the shell needs
    *  (aggregate or workflow, BC, optional user-supplied
@@ -492,16 +520,15 @@ interface WalkContext {
   /** Slice A5 — accumulator for static `testid:` strings the body
    *  emits, used by the walker-side page-object builder. */
   collectedTestids: Set<string>;
-  /** Slice A6 — UI helper-import lookup (name → import path).
-   *  Populated by `walkBodyToTsx` from the UI's `helperImports`
-   *  parameter; consulted by `emitComponent`'s fallthrough so
-   *  body calls to a helper name emit as plain JS calls. */
-  helperImports: ReadonlyMap<string, string>;
   /** Slice A6 — names of helpers the body actually called.  The
    *  shell emits one import line per used helper; declared-but-
    *  unused helpers don't pollute the page TSX. */
   usedHelpers: Set<string>;
 }
+
+/** The combined context the shared core threads. Structurally
+ *  assignable to both `WalkEnv` and `Sink`. */
+export interface WalkContext extends WalkEnv, Sink {}
 
 /** Slice A4 / A12 — RHF wiring requirements recorded by `emitFormOf`,
  *  consumed by the page shell to splice the `useForm` declaration +
