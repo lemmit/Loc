@@ -1,12 +1,12 @@
-// Slice 11.9 — compound assignment ergonomics in onClick lambdas.
+// compound assignment ergonomics in onClick lambdas.
 //
 //   count += 1                → setCount(count + 1)
 //   count -= 1                → setCount(count - 1)
 //
 // Both lower to the IR's `kind: "add"` / `kind: "remove"` shape
 // (the same kinds collection mutations use; for scalar state
-// they're compound additions / subtractions).  Slice 11.7 emitted
-// the long form `count := count + 1`; this slice adds the
+// they're compound additions / subtractions).  The walker previously emitted
+// the long form `count := count + 1`; the
 // counter-style sugar so click handlers read more naturally.
 
 import { describe, expect, it } from "vitest";
@@ -14,7 +14,7 @@ import { generateSystemFiles } from "../_helpers/index.js";
 
 const buildAndGenerate = generateSystemFiles;
 
-describe("Slice 11.9 — += / -= in onClick mutations", () => {
+describe("+= / -= in onClick mutations", () => {
   it("count += 1 lowers to setCount(count + 1)", async () => {
     const files = await buildAndGenerate(`
       system S {

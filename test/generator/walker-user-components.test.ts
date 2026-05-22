@@ -1,4 +1,4 @@
-// Slice 11.18 — User-defined components.  ComponentIR finally has
+// User-defined components.  ComponentIR finally has
 // output: each `component <Name>(p: T) { body: ... }` declaration
 // emits as `src/components/<Name>.tsx` with a typed Props
 // interface, and walker pages can invoke them as JSX elements
@@ -9,7 +9,7 @@ import { generateSystemFiles } from "../_helpers/index.js";
 
 const buildAndGenerate = generateSystemFiles;
 
-describe("Slice 11.18 — user-defined components", () => {
+describe("user-defined components", () => {
   it("component declaration emits a tsx file with typed Props", async () => {
     const files = await buildAndGenerate(`
       system S {

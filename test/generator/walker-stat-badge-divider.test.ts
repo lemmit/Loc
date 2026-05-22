@@ -1,4 +1,4 @@
-// Slice 11.6 — three more v0 layout primitives in the body
+// three more v0 layout primitives in the body
 // walker: Stat (label + value headline card), Badge, Divider.
 //
 // Stat composes two stacked Mantine Texts (dimmed label + bold
@@ -11,7 +11,7 @@ import { generateSystemFiles } from "../_helpers/index.js";
 
 const buildAndGenerate = generateSystemFiles;
 
-describe("Slice 11.6 — Stat / Badge / Divider in walker stdlib", () => {
+describe("Stat / Badge / Divider in walker stdlib", () => {
   it("Stat(label, value) emits a two-line stack with dimmed label + bold value", async () => {
     const files = await buildAndGenerate(`
       system S {

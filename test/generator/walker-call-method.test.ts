@@ -1,4 +1,4 @@
-// Slice 11.23 — function & method calls in walker expressions
+// function & method calls in walker expressions
 // and statements (with v0 caveat for method calls).
 //
 // onClick lambdas can invoke FREE functions that the user
@@ -10,7 +10,7 @@
 // METHOD calls (`Orders.create(draft)`) need a hooks-binding
 // mechanism the walker doesn't yet provide — so v0 emits a
 // visible TODO placeholder, NOT runtime-broken code like
-// `undefined.create(draft)`.  Forthcoming Slice 11.24+ will
+// `undefined.create(draft)`.  A later change will
 // resolve aggregate / workflow / view method calls into auto-
 // emitted React Query hook calls.
 //
@@ -26,7 +26,7 @@ import { generateSystemFiles } from "../_helpers/index.js";
 
 const buildAndGenerate = generateSystemFiles;
 
-describe("Slice 11.23 — function + method calls in walker bodies", () => {
+describe("function + method calls in walker bodies", () => {
   it("bare function-call statement in onClick lambda emits as a JS call", async () => {
     const files = await buildAndGenerate(`
       system S {

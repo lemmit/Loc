@@ -1,4 +1,4 @@
-// Slice 11.14 — Field + Toggle with `bind:` two-way state binding.
+// Field + Toggle with `bind:` two-way state binding.
 // Closes the interactive-page loop in the walker stdlib: read
 // state via Text, mutate state via Button, BIND state via
 // Field / Toggle.
@@ -27,7 +27,7 @@ import { generateSystemFiles } from "../_helpers/index.js";
 
 const buildAndGenerate = generateSystemFiles;
 
-describe("Slice 11.14 — Field + Toggle with bind: state binding", () => {
+describe("Field + Toggle with bind: state binding", () => {
   it("Field('Label', bind: name) wires controlled TextInput to state", async () => {
     const files = await buildAndGenerate(`
       system S {

@@ -1,4 +1,4 @@
-// Slice 11.20 — NumberField + Loader primitives.
+// NumberField + Loader primitives.
 //
 //   NumberField("Quantity", bind: qty)
 //     → <NumberInput value={qty} onChange={(v) => setQty(...)} />
@@ -11,7 +11,7 @@ import { generateSystemFiles } from "../_helpers/index.js";
 
 const buildAndGenerate = generateSystemFiles;
 
-describe("Slice 11.20 — NumberField + Loader primitives", () => {
+describe("NumberField + Loader primitives", () => {
   it("NumberField('Qty', bind: qty) wires controlled NumberInput", async () => {
     const files = await buildAndGenerate(`
       system S {

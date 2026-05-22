@@ -1,4 +1,4 @@
-// Slice 11.13 — Toolbar + Empty primitives in walker stdlib.
+// Toolbar + Empty primitives in walker stdlib.
 //
 //   Toolbar(Heading("Orders"), Button("Add", to: "/orders/new"))
 //     → Mantine <Group justify="space-between"> push apart layout
@@ -11,7 +11,7 @@ import { generateSystemFiles } from "../_helpers/index.js";
 
 const buildAndGenerate = generateSystemFiles;
 
-describe("Slice 11.13 — Toolbar + Empty in walker stdlib", () => {
+describe("Toolbar + Empty in walker stdlib", () => {
   it('Toolbar(...) emits Mantine <Group justify="space-between">', async () => {
     const files = await buildAndGenerate(`
       system S {

@@ -1,4 +1,4 @@
-// Slice 11.17 — ternary conditional rendering in walker bodies.
+// ternary conditional rendering in walker bodies.
 //
 // Surface:
 //   state { loading: bool = false }
@@ -21,7 +21,7 @@ import { generateSystemFiles } from "../_helpers/index.js";
 
 const buildAndGenerate = generateSystemFiles;
 
-describe("Slice 11.17 — ternary conditional rendering in walker pages", () => {
+describe("ternary conditional rendering in walker pages", () => {
   it("top-level ternary body renders as function-return conditional", async () => {
     const files = await buildAndGenerate(`
       system S {

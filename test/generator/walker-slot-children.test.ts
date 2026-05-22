@@ -1,4 +1,4 @@
-// Slice 11.19 — Slot() + children prop for user components.
+// Slot() + children prop for user components.
 // Components with `Slot()` in their body get a typed `children`
 // prop and accept extra positional args from the caller as JSX
 // children.  Closes the composition loop: components can wrap
@@ -9,7 +9,7 @@ import { generateSystemFiles } from "../_helpers/index.js";
 
 const buildAndGenerate = generateSystemFiles;
 
-describe("Slice 11.19 — Slot + children prop", () => {
+describe("Slot + children prop", () => {
   it("component with Slot() emits children prop in Props interface", async () => {
     const files = await buildAndGenerate(`
       system S {
