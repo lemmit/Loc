@@ -1,21 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { NodeFileSystem } from "langium/node";
-import { parseHelper } from "langium/test";
-import { createDddServices } from "../src/language/ddd-module.js";
-import { lowerModel } from "../src/ir/lower.js";
-import { enrichLoomModel } from "../src/ir/enrichments.js";
 import { computeVerification } from "../src/verify/verification.js";
-import type { LoomModel, TestOutcome } from "../src/ir/loom-ir.js";
-import type { Model } from "../src/language/generated/ast.js";
-
-async function build(source: string): Promise<LoomModel> {
-  const services = createDddServices(NodeFileSystem);
-  const helper = parseHelper(services.Ddd);
-  const doc = await helper(source, { validation: true });
-  const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
-  if (errors.length) throw new Error(errors.map((d) => d.message).join("\n"));
-  return enrichLoomModel(lowerModel(doc.parseResult.value as Model));
-}
+import type { TestOutcome } from "../src/ir/loom-ir.js";
+import { buildLoomModel as build } from "./_helpers/index.js";
 
 // US-001 ─ parent of ─ AC-001 (verified by TC-001, backed by a unit test
 // on the LoginSession aggregate) and AC-002 (verified by TC-002, backed by

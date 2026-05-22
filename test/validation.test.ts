@@ -1,49 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { NodeFileSystem } from "langium/node";
-import { URI } from "langium";
-import { createDddServices } from "../src/language/ddd-module.js";
+import { parseString } from "./_helpers/index.js";
 
-async function parseSource(source: string): Promise<{ errors: string[]; warnings: string[] }> {
-  const services = createDddServices(NodeFileSystem);
-  const docs = services.shared.workspace.LangiumDocuments;
-  const doc = await docs.getOrCreateDocument(URI.parse(`file:///inmem-${Math.random().toString(36).slice(2)}.ddd`));
-  doc.textDocument = {
-    uri: doc.textDocument.uri,
-    languageId: "ddd",
-    version: 1,
-    getText: () => source,
-    positionAt: () => ({ line: 0, character: 0 }),
-    offsetAt: () => 0,
-    lineCount: source.split("\n").length,
-  } as never;
-  // Force re-build by rebuilding from text
-  await services.shared.workspace.DocumentBuilder.build([doc], { validation: true });
-  const errors: string[] = [];
-  const warnings: string[] = [];
-  for (const d of doc.diagnostics ?? []) {
-    if (d.severity === 1) errors.push(d.message);
-    else if (d.severity === 2) warnings.push(d.message);
-  }
-  return { errors, warnings };
-}
-
-// Convenience: parse from a string by writing to a temp file (URI.parse on
-// in-memory text isn't picked up by the Langium document builder in the
-// standard config — use the langium/test parseHelper instead).
-import { parseHelper } from "langium/test";
-
-async function parse(source: string) {
-  const services = createDddServices(NodeFileSystem);
-  const helper = parseHelper(services.Ddd);
-  const doc = await helper(source, { validation: true });
-  const diags = doc.diagnostics ?? [];
-  return {
-    errors: diags.filter((d) => d.severity === 1).map((d) => d.message),
-    warnings: diags.filter((d) => d.severity === 2).map((d) => d.message),
-  };
-}
-
-void parseSource; // keep helper around; use `parse` below
+const parse = (source: string) => parseString(source);
 
 describe("validation", () => {
   it("flags non-bool invariants", async () => {
@@ -697,18 +655,13 @@ describe("validation", () => {
 });
 
 describe("Loom IR validation (post-lowering)", async () => {
-  const { lowerModel } = await import("../src/ir/lower.js");
-  const { enrichLoomModel } = await import("../src/ir/enrichments.js");
   const { validateLoomModel } = await import("../src/ir/validate.js");
-  const { parseHelper } = await import("langium/test");
-  const { createDddServices } = await import("../src/language/ddd-module.js");
+  const { toLoomModel, parseString } = await import("./_helpers/index.js");
 
+  // Note: does NOT assert parse validity — these tests feed deliberately
+  // invalid sources and assert on IR-level validateLoomModel diagnostics.
   async function loomFrom(src: string) {
-    const services = createDddServices(NodeFileSystem);
-    const helper = parseHelper(services.Ddd);
-    const doc = await helper(src, { validation: true });
-    const model = doc.parseResult.value as import("../src/language/generated/ast.js").Model;
-    return enrichLoomModel(lowerModel(model));
+    return toLoomModel((await parseString(src)).model);
   }
 
   it("rejects api.<unknown> in test e2e", async () => {

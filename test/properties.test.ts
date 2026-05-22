@@ -1,10 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { NodeFileSystem } from "langium/node";
-import { URI } from "langium";
-import * as path from "node:path";
-import { fileURLToPath } from "node:url";
-import { createDddServices } from "../src/language/ddd-module.js";
-import { lowerModel } from "../src/ir/lower.js";
 import { enrichLoomModel } from "../src/ir/enrichments.js";
 import { validateLoomModel } from "../src/ir/validate.js";
 import { buildWireSpec } from "../src/system/wire-spec.js";
@@ -16,7 +10,7 @@ import type {
   ValueObjectIR,
 } from "../src/ir/loom-ir.js";
 import { allAggregates, allContexts } from "../src/ir/loom-ir.js";
-import type { Model } from "../src/language/generated/ast.js";
+import { loadExampleModel, toLoomModel } from "./_helpers/index.js";
 
 // ---------------------------------------------------------------------------
 // IR-transformation properties.  Every assertion here is an *invariant*
@@ -24,9 +18,6 @@ import type { Model } from "../src/language/generated/ast.js";
 // them fail, the failure points at a structural bug rather than at a
 // content typo.
 // ---------------------------------------------------------------------------
-
-const here = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(here, "..");
 
 const EXAMPLES = [
   "examples/sales.ddd",
@@ -36,15 +27,7 @@ const EXAMPLES = [
 ];
 
 async function buildEnriched(file: string): Promise<LoomModel> {
-  const services = createDddServices(NodeFileSystem);
-  const doc =
-    await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
-      URI.file(path.join(repoRoot, file)),
-    );
-  await services.shared.workspace.DocumentBuilder.build([doc], {
-    validation: true,
-  });
-  return enrichLoomModel(lowerModel(doc.parseResult.value as Model));
+  return toLoomModel(await loadExampleModel(file));
 }
 
 function allParts(loom: LoomModel): EntityPartIR[] {
