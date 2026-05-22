@@ -29,7 +29,7 @@
 //   - `view-list`          — needs view IR introspection
 //   - `home` / index pages — needs domain navigation primitives
 
-import { camel, humanize, plural, snake } from "../util/naming.js";
+import { humanize, plural, snake } from "../util/naming.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -877,4 +877,3 @@ function singular(humanLower: string): string {
 // Suppress unused-import lints when the module's helpers shrink
 // during a refactor.  Each helper is referenced above; the unused
 // suppressions below keep the import block minimal.
-void camel;

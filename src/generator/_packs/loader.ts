@@ -19,7 +19,7 @@
 // ---------------------------------------------------------------------------
 
 import Handlebars from "handlebars";
-import { camel, humanize, pascal, plural, snake } from "../../util/naming.js";
+import { lowerFirst, humanize, upperFirst, plural, snake } from "../../util/naming.js";
 
 /** Output format the pack's templates produce.  `tsx` is the v0
  *  React/Mantine/shadcn case (Handlebars over .hbs files yielding
@@ -152,8 +152,8 @@ export function registerHelpersOnce(): void {
   if (helpersRegistered) return;
   helpersRegistered = true;
   Handlebars.registerHelper("humanize", (s: unknown) => humanize(String(s)));
-  Handlebars.registerHelper("camel", (s: unknown) => camel(String(s)));
-  Handlebars.registerHelper("pascal", (s: unknown) => pascal(String(s)));
+  Handlebars.registerHelper("camel", (s: unknown) => lowerFirst(String(s)));
+  Handlebars.registerHelper("pascal", (s: unknown) => upperFirst(String(s)));
   Handlebars.registerHelper("plural", (s: unknown) => plural(String(s)));
   Handlebars.registerHelper("snake", (s: unknown) => snake(String(s)));
   // Strict equality helper — Handlebars's built-in {{#if}} can't

@@ -11,7 +11,7 @@ import type {
   ViewIR,
   WorkflowIR,
 } from "../ir/loom-ir.js";
-import { camel, pascal, plural, snake } from "../util/naming.js";
+import { lowerFirst, upperFirst, plural, snake } from "../util/naming.js";
 import { renderExpectStmt } from "./expect-stmt.js";
 
 // ---------------------------------------------------------------------------
@@ -74,15 +74,15 @@ export function renderUIE2EFile(
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import { test, expect } from "@playwright/test";`);
   for (const a of aggregates) {
-    const cap = pascal(a.name);
-    lines.push(`import { ${cap}ListPage, ${cap}DetailPage } from "./pages/${camel(a.name)}";`);
+    const cap = upperFirst(a.name);
+    lines.push(`import { ${cap}ListPage, ${cap}DetailPage } from "./pages/${lowerFirst(a.name)}";`);
   }
   for (const wf of workflows) {
-    const cap = pascal(wf.name);
+    const cap = upperFirst(wf.name);
     lines.push(`import { ${cap}WorkflowPage } from "./pages/workflows/${snake(wf.name)}";`);
   }
   for (const v of views) {
-    const cap = pascal(v.name);
+    const cap = upperFirst(v.name);
     lines.push(`import { ${cap}ViewPage } from "./pages/views/${snake(v.name)}";`);
   }
   lines.push("");
@@ -242,7 +242,7 @@ function walkAllExprs(tests: TestE2EIR[], visit: (e: ExprIR) => void): void {
 function findWorkflowByName(name: string, contexts: BoundedContextIR[]): WorkflowIR | undefined {
   for (const c of contexts) {
     for (const w of c.workflows) {
-      if (camel(w.name) === name) return w;
+      if (lowerFirst(w.name) === name) return w;
       if (snake(w.name) === name) return w;
     }
   }
@@ -252,7 +252,7 @@ function findWorkflowByName(name: string, contexts: BoundedContextIR[]): Workflo
 function findViewByName(name: string, contexts: BoundedContextIR[]): ViewIR | undefined {
   for (const c of contexts) {
     for (const v of c.views) {
-      if (camel(v.name) === name) return v;
+      if (lowerFirst(v.name) === name) return v;
       if (snake(v.name) === name) return v;
     }
   }
@@ -502,7 +502,7 @@ function renderWorkflowCall(
   const wf = findWorkflowByName(call.workflowName, ctx.contexts);
   if (!wf) {
     const known = ctx.contexts
-      .flatMap((c) => c.workflows.map((w) => camel(w.name)))
+      .flatMap((c) => c.workflows.map((w) => lowerFirst(w.name)))
       .sort()
       .join(", ");
     throw new Error(
@@ -510,7 +510,7 @@ function renderWorkflowCall(
         `Available workflows: ${known || "(none)"}.`,
     );
   }
-  const cap = pascal(wf.name);
+  const cap = upperFirst(wf.name);
   const body = call.args[0] ? renderUIExpr(call.args[0], ctx) : "{}";
   return `await new ${cap}WorkflowPage(page).run(${body})`;
 }
@@ -520,7 +520,7 @@ function renderViewCall(call: { viewName: string; args: ExprIR[] }, ctx: RenderC
   const view = findViewByName(call.viewName, ctx.contexts);
   if (!view) {
     const known = ctx.contexts
-      .flatMap((c) => c.views.map((v) => camel(v.name)))
+      .flatMap((c) => c.views.map((v) => lowerFirst(v.name)))
       .sort()
       .join(", ");
     throw new Error(
@@ -528,7 +528,7 @@ function renderViewCall(call: { viewName: string; args: ExprIR[] }, ctx: RenderC
         `Available views: ${known || "(none)"}.`,
     );
   }
-  const cap = pascal(view.name);
+  const cap = upperFirst(view.name);
   // Returns the row list — wrap so the binding (`let rows = ...`)
   // resolves to the array, not the Promise.
   return [
@@ -554,7 +554,7 @@ function renderAggregateCall(
         `Available aggregates: ${known || "(none)"}.`,
     );
   }
-  const cap = pascal(agg.name);
+  const cap = upperFirst(agg.name);
 
   if (call.method === "create") {
     // ListPage.goto → create → fill → submit.  Returns
@@ -608,13 +608,13 @@ function renderOperationCall(
       `ui e2e: ui.${snake(plural(agg.name))}.${op.name}(target, body?) requires a target argument`,
     );
   }
-  const cap = pascal(agg.name);
+  const cap = upperFirst(agg.name);
   const idExpr = renderIdArg(args[0], ctx);
   const body = args.length >= 2 ? renderUIExpr(args[1], ctx) : "{}";
   if (op.params.length === 0) {
-    return `await new ${cap}DetailPage(page, ${idExpr}).goto().then((__d) => __d.${camel(op.name)}())`;
+    return `await new ${cap}DetailPage(page, ${idExpr}).goto().then((__d) => __d.${lowerFirst(op.name)}())`;
   }
-  return `await new ${cap}DetailPage(page, ${idExpr}).goto().then((__d) => __d.${camel(op.name)}(${body}))`;
+  return `await new ${cap}DetailPage(page, ${idExpr}).goto().then((__d) => __d.${lowerFirst(op.name)}(${body}))`;
 }
 
 function renderIdArg(arg: ExprIR, ctx: RenderCtx): string {
@@ -630,9 +630,9 @@ function renderIdArg(arg: ExprIR, ctx: RenderCtx): string {
 function findAggregateBySlug(slug: string, contexts: BoundedContextIR[]): AggregateIR | undefined {
   for (const c of contexts) {
     for (const a of c.aggregates) {
-      if (camel(a.name) === slug) return a;
+      if (lowerFirst(a.name) === slug) return a;
       if (snake(plural(a.name)) === slug) return a;
-      if (camel(plural(a.name)) === slug) return a;
+      if (lowerFirst(plural(a.name)) === slug) return a;
     }
   }
   return undefined;
