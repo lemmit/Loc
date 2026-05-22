@@ -1,0 +1,64 @@
+// Provenance System — demonstrates the `provenanced` stored-field
+// modifier inside a full Hono + React system so it previews in the
+// playground.
+//
+// `total` is marked `provenanced`: every assignment to it becomes a
+// per-write-site rule snapshot.  The generated Hono backend emits a
+// `domain/provenance.ts` runtime SDK and a `recordTrace(...)` call after
+// each write; the playground's "Snapshot" action (and the CLI
+// `ddd snapshot`) captures the rule snapshots to
+// `.loom/snapshots/<ts>-<guid>.loomsnap.json`.
+//
+// Provenance is a TypeScript/Hono feature — the React frontend below is
+// unaffected (it only consumes the wire shape), so the Preview pane
+// renders the usual scaffolded CRUD while the backend records lineage.
+
+system OrderingSystem {
+
+  // Invoice-y indigo for the demo.
+  theme {
+    primary: "#6366f1"
+    radius: "md"
+  }
+
+  module Ordering {
+    context Ordering {
+
+      aggregate Order ids guid {
+        reference: string display
+        quantity: int
+        unitPrice: int
+        discount: int
+
+        // Two operations write `total`, so a capture yields two
+        // distinct rule snapshots — one per write-site.
+        total: int provenanced
+
+        operation reprice(qty: int, price: int) {
+          precondition qty > 0
+          precondition price >= 0
+          quantity := qty
+          unitPrice := price
+          total := qty * price - discount
+        }
+
+        operation applyDiscount(amount: int) {
+          precondition amount >= 0
+          discount := amount
+          total := quantity * unitPrice - amount
+        }
+      }
+
+      repository Orders for Order {
+        find byReference(reference: string): Order? where this.reference == reference
+      }
+    }
+  }
+
+  ui WebApp {
+    scaffold modules: Ordering
+  }
+
+  deployable api { platform: hono, modules: Ordering, port: 3000 }
+  deployable webApp { platform: react, targets: api, ui: WebApp, port: 3001 }
+}

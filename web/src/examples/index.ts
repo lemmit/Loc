@@ -7,6 +7,7 @@ import bankingSource from "./banking.ddd?raw";
 import bankingSystemSource from "./banking-system.ddd?raw";
 import inventorySource from "./inventory.ddd?raw";
 import inventorySystemSource from "./inventory-system.ddd?raw";
+import provenanceSystemSource from "./provenance-system.ddd?raw";
 import acmeSource from "./acme.ddd?raw";
 import storybookMantineSource from "./storybook-mantine.ddd?raw";
 import storybookMantineV9Source from "./storybook-mantine-v9.ddd?raw";
@@ -133,6 +134,13 @@ export const examples: LoomExample[] = [
     source: inventorySystemSource,
     blurb:
       "Nested parts, guid ids, non-transactional `recordReservation` workflow.",
+  },
+  {
+    id: "provenance-system",
+    label: "Provenance System (Hono + React)",
+    source: provenanceSystemSource,
+    blurb:
+      "`provenanced` field: each write to `order.total` is captured as a rule snapshot; the Hono backend records a runtime trace per write.",
   },
   {
     id: "sales",
