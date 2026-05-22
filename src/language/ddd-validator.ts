@@ -195,17 +195,9 @@ export class DddValidator {
     }
   }
 
-  /** Slice A6 — `import helper <name> from "<path>"` at the UI
-   *  level.  Validate two invariants:
-   *   1. Helper names don't shadow any walker stdlib primitive
-   *      (else a typo would silently divert a body call like
-   *      `Stack(...)` from the primitive to the helper).
-   *   2. No duplicate helper names within the same UI.
-   *
-   *  The stdlib set is duplicated here from `body-walker.ts`
-   *  intentionally — the validator runs before generation and
-   *  the cross-module import would inflate the language-server
-   *  bundle. */
+  /** Validate `requirement` traceability artifacts: the `type`,
+   *  `title`, `status` and `priority` keys, and that each declared
+   *  `type`/`status` is one of the known enum values. */
   private checkTraceability(
     model: import("./generated/ast.js").Model,
     accept: ValidationAcceptor,
@@ -310,6 +302,17 @@ export class DddValidator {
     }
   }
 
+  /** Slice A6 — `import helper <name> from "<path>"` at the UI
+   *  level.  Validate two invariants:
+   *   1. Helper names don't shadow any walker stdlib primitive
+   *      (else a typo would silently divert a body call like
+   *      `Stack(...)` from the primitive to the helper).
+   *   2. No duplicate helper names within the same UI.
+   *
+   *  The stdlib set is duplicated here from `body-walker.ts`
+   *  intentionally — the validator runs before generation and
+   *  the cross-module import would inflate the language-server
+   *  bundle. */
   private checkUiHelperImports(
     model: import("./generated/ast.js").Model,
     accept: ValidationAcceptor,
