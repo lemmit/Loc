@@ -1,176 +1,207 @@
 # Value provenance — `provenanced`
 
-> Status: proposal. Not in `ddd.langium`.
+> Status: **implemented (TypeScript/Hono v1)**. The keyword is in
+> `ddd.langium`; lowering, emission, the `ddd snapshot` capture command,
+> and the playground hook all ship. The original sketch attached
+> provenance to `derived` computed values; the implemented design instead
+> attaches it to **stored fields, instrumented per write-site**. The
+> derived-value variant, the `.provenance`/`.explain()` accessors, the
+> Explain service, and non-TS backends are **deferred** (see *Deferred*).
 
 ## Problem
 
-A computed business value — the canonical example is `order.total` —
-should be able to answer *"why is this 128.40?"* long after it was
-computed, even after the code that produced it has changed. Finance,
-pricing, billing, and compliance domains need every derived number to
-carry a reviewable record of the inputs, the rule, and the moment that
-produced it. Loom should make this a first-class language property, not
-a hand-rolled logging side-effect.
+A business value — the canonical example is `order.total` — should be
+able to answer *"why is this 128.40, and what produced it?"* long after
+the fact, even after the code that produced it has changed. Finance,
+pricing, billing, and compliance domains need a reviewable record of the
+inputs, the rule, and the moment of each write. Loom makes this a
+first-class language property, not a hand-rolled logging side-effect.
 
 ## Design principles (settled in the source threads)
 
-1. **The user marks intent; the compiler infers the rest.** The author
-   writes one keyword. The dependency graph is recovered from the
-   expression AST — the user never restates inputs (`derived from: …`
-   was considered and rejected), and never writes version numbers
-   (`rule X v7` was rejected). Rule identity is derived from the
-   published artefact (git commit + source path + span).
+1. **The user marks intent; the compiler does the rest.** The author
+   writes one keyword on a field. Every assignment to that field is
+   instrumented automatically — the user never restates inputs
+   (`derived from: …` rejected) and never writes version numbers
+   (`rule X v7` rejected).
 2. **Structure ≠ values.** Two artefacts, produced at two different
    times:
-   - a **rule snapshot** — emitted at compile/publish time, holds the
-     expression *structure* (AST) and its source anchor, **no runtime
-     values**;
-   - a **trace record** — emitted at runtime when the value is
-     computed, holds the actual leaf values.
-   "Explain" zips the two together.
-3. **Reference, don't copy.** A trace points at a git
-   `commitHash` + `sourcePath` + `sourceSpan`; it never embeds source.
-4. **Link, don't inline.** When a provenanced value is itself an input
-   to another provenanced value, the downstream trace stores a
-   *pointer* (`sourceTraceId`) to the upstream trace, not a nested
-   copy. This is what stops a `YearlyReport → 12×Monthly → 30×Daily`
-   tree from exploding. (Aligns with W3C PROV-LINKS.)
-5. **Historical truth survives code change.** An old trace still
-   explains a past value even if the rule was later edited or deleted.
-   Live code is needed only to *recompute*, never to *explain*.
+   - a **rule snapshot** — captured at publish time, holds the
+     assignment's RHS expression *structure* (text + resolved IR AST)
+     and its source anchor, **no runtime values**;
+   - a **trace record** — emitted at runtime on each write, holds the
+     actual leaf values + the computed result.
+   A future "Explain" zips the two together.
+3. **Reference, don't copy.** A trace points at a `snapshotId`; the
+   snapshot points at a source path + span (and the capture's git
+   commit). Traces never embed source.
+4. **Per write-site, not per value.** The unit of provenance is an
+   **assignment statement** (`:=`/`+=`/`-=`) whose target is a
+   provenanced field — not a computed `derived` member. Each such site
+   is its own immutable rule snapshot; a field's "current provenance" is
+   whichever write last produced its value. This is the decisive
+   departure from the original derived-value sketch.
+5. **Historical truth survives code change.** Snapshots are captured as
+   an immutable, append-only history (one file per capture). An old
+   trace still explains a past value even if the rule was later edited;
+   live code is needed only to *recompute*, never to *explain*.
 
 ## Surface
 
-Provenance attaches to a **computed value**. In Loom that is a
-`derived` member (value objects, aggregates, entity parts), so the
-keyword rides on `derived` exactly the way `display` rides on a
-property. No separate input list, no version, no policy block:
+`provenanced` is a trailing modifier on a **stored `Property`**, exactly
+the way `display` rides on a property. It is **not** allowed on
+`derived` (the grammar omits it there, so that is a parse error):
 
 ```ddd
-context Orders {
-  aggregate Order {
-    contains lines: OrderLine[]
-    discount: Money
-    taxRate: decimal
+context Sales {
+  aggregate Cart {
+    label: string display
+    total: int provenanced        // every write to `total` is instrumented
+    discount: int
 
-    // One keyword. The compiler reads the expression and recovers the
-    // lineage: lines[].quantity, lines[].price, discount, taxRate.
-    derived total: Money provenanced =
-      lines.sum(l => l.quantity * l.price) - discount + (subtotal * taxRate)
-
-    derived subtotal: Money = lines.sum(l => l.quantity * l.price)
+    operation applyTotal(base: int, qty: int) {
+      total := base * qty - discount      // ← a per-site rule snapshot
+    }
+    operation bump(extra: int) {
+      total := total + extra              // ← a second, distinct snapshot
+    }
   }
 }
 ```
 
-Reading the attached metadata uses ordinary member access on the
-provenanced value — two reserved accessors:
+Each `:=` above becomes a rule snapshot; at runtime each write records a
+trace referencing that snapshot, with leaf inputs (`base`, `qty`,
+`discount`; or `total`, `extra`) captured **before** the mutation so a
+self-referential write records the value actually used.
 
-```ddd
-// inside an expression body / test:
-let why = order.total.provenance     // structured lineage view
-let text = order.total.explain()     // rendered human explanation
-```
-
-### Why `derived … provenanced` rather than `@provenanced`
-
-The source conversation sketched `@provenanced(level="full")`, but
-Loom has no `@`-annotation surface. Its idiom for "modifier on a
-declaration" is a bare keyword (`private invariant`, `display`,
-`private operation`, `transactional`). `provenanced` as a trailing
-modifier on `derived` is the consistent Loom rendering. An optional
-granularity argument mirrors `transactional(serializable)`:
-
-```ddd
-derived total: Money provenanced = …                  // default: full lineage
-derived total: Money provenanced(values) = …          // record leaf values only
-derived total: Money provenanced(operations) = …      // record the rule path only
-```
+A validator **warning** flags a `provenanced` field that no operation
+ever writes (suppressed when the aggregate has an `extern` operation,
+whose body the compiler can't see and which may be the writer).
 
 ## Language additions
 
 | Addition | Form | Notes |
 |---|---|---|
-| `provenanced` modifier | `DerivedProp` gains `(provenanced?='provenanced' ('(' grain=ProvGrain ')')?)` after the type | `ProvGrain returns string: 'values' \| 'operations'` |
-| `.provenance` accessor | reserved member on a provenanced value | yields the structured lineage view type |
-| `.explain()` accessor | reserved zero-arg call on a provenanced value | yields a rendered `string` |
+| `provenanced` modifier | `Property` gains `(provenanced?='provenanced')?` after `type` (and after `display`, before `check`) | Stored fields only; **not** on `DerivedProp`. |
 
-Explicitly **not** added: `derived from:` input lists, `using` / `by`
-/ `at` clauses, `trace id`, `rule … v7` version syntax. All were
-considered and rejected in favour of compiler inference.
+Explicitly **not** added (this version): a granularity argument
+(`provenanced(values)`), `derived from:` input lists, `trace id` /
+`rule … v7` syntax, and the `.provenance` / `.explain()` accessors.
 
 ## Lowering & generation
 
 ```
-.ddd source ──► IR (derived prop flagged provenanced, dependency
-                    graph already resolved by lower-expr.ts)
-            ──► compile/publish: emit rule snapshot artefact
-            ──► runtime: emit trace record on each computation
-            ──► Explain service zips snapshot⊕trace
+.ddd source ──► IR  (FieldIR.provenanced; each assign/add/remove StmtIR
+                     whose target resolves to a provenanced field carries
+                     a ProvSite snapshot — resolved during lowering, which
+                     is the last layer holding the AST/source span)
+            ──► generate (TS/Hono): emit runtime SDK + a recordTrace(...)
+                     call after each provenanced write
+            ──► `ddd snapshot` (explicit prebuild step): capture the rule
+                     snapshots into an immutable, dated history file
+            ──► (future) Explain service zips snapshot ⊕ trace
 ```
 
-**Rule snapshot** (compile-time, one per provenanced rule; suggested
-extension `.loomsnap.json`, sibling to the existing `.loom/wire-spec.json`
-contract artefact):
+**Snapshot identity (`snapshotId`)** is **content-addressed**: a hash of
+the target (`Type.field`) + the RHS expression text. A rule that changes
+gets a new id; an unchanged rule keeps its id across builds and captures,
+so different code versions reference different snapshots *only where the
+rule actually changed*. (Easiest scheme that satisfies the requirement;
+can later be swapped for an AST-canonical or capture-versioned id without
+touching call sites — see `src/ir/prov-id.ts`.) The git commit is
+**not** part of the id; it is stamped once into the capture envelope.
 
+**Capture is an explicit prebuild step**, not auto-emitted on
+`generate` — analogous to `dotnet ef migrations add`. Run it deliberately
+when rules change:
+
+```bash
+ddd snapshot <file.ddd> -o <out>
 ```
+
+It writes one immutable file per system under
+`<out>/.loom/snapshots/<UTC-timestamp>-<guid>.loomsnap.json`, never
+overwriting a prior capture. The same capture is available in the
+**playground** via the build-worker `snapshot` RPC
+(`web/src/build/build.worker.ts` → `client.snapshot(text)`). Built by
+`src/system/loomsnap.ts`.
+
+**Snapshot file** (`*.loomsnap.json`):
+
+```jsonc
 {
-  "snapshotId", "ruleId",
-  "commitHash", "repo", "source": { "path", "span": {start,end} },
-  "publishedAt", "kind": "derived-field",
-  "target": { "type": "Order", "field": "total", "valueType": "Money" },
-  "expression": { "text", "ast" },     // structure only — NO values
-  "dependencies": [ resolved symbol paths ],
-  "bindings": [ resolved symbolIds ]
+  "captureId": "<guid>",
+  "system": "ProvSystem",
+  "commitHash": "<git HEAD or 'uncommitted'>",
+  "capturedAt": "<ISO timestamp>",
+  "snapshots": {
+    "31c95d9a": {                              // = snapshotId, content-addressed
+      "kind": "write-site",
+      "target": { "type": "Cart", "field": "total", "valueType": "int" },
+      "expression": { "text": "base * qty - discount", "ast": { /* resolved ExprIR */ } },
+      "source": { "path": "…/prov.ddd", "span": { "start": 268, "end": 298 } }
+    }
+  }
 }
 ```
 
-**Trace record** (runtime, one per computed value):
+**Runtime SDK** — the generated Hono project gets a `domain/provenance.ts`
+emitting an append-only in-memory trace sink (v1). Each provenanced write
+compiles to:
 
+```ts
+const __prov_1 = [{ path: "base", value: base }, { path: "qty", value: qty },
+                  { path: "discount", value: this._discount }];   // inputs pre-mutation
+this._total = base * qty - this._discount;
+recordTrace("31c95d9a", { type: "Cart", field: "total" }, __prov_1, this._total);
 ```
-{
-  "traceId", "ruleSnapshotId", "computedValue",
-  "inputs": [
-    { "path", "value" },                 // raw/external leaf
-    { "path", "sourceTraceId" }          // provenanced upstream → pointer
-  ]
-}
-```
 
-**Explain** loads the trace (values) + snapshot (AST), walks the AST
-injecting recorded leaf values, and renders. Three read modes:
+**Emission is forced by presence**: any *written* provenanced field turns
+on the SDK file + `recordTrace` calls (and qualifies the system for
+capture). When absent, nothing is emitted and the build pays nothing. The
+toggle is threaded as a flag (`emitProvenance`) rather than read off
+presence at each site, so a future build-level switch can force emission
+for other consumers (audit/logging) — see
+[`execution-context.md`](./execution-context.md).
 
-| Mode | Uses | Answers |
-|---|---|---|
-| Explain | stored trace + snapshot | "what produced this value, as of when" |
-| Recompute | current code | "what would the value be today" |
-| Audit-compare | old trace vs current rule | "did the rule change since" |
+**Scope:** TypeScript/Hono only. The grammar/IR additions are
+backend-neutral, so .NET / React / Phoenix lower the keyword without
+crashing but emit no trace code.
 
-The IR already carries fully-resolved `refKind` / `receiverType` /
-`memberType` on every expression node (see `src/ir/loom-ir.ts`), so
-the dependency graph and snapshot AST are a projection of existing IR —
-no re-resolution. Per-platform support is a runtime SDK + an
-append-only trace store; a language-neutral canonical JSON contract
-(snapshot / trace / input-binding) plus thin per-backend SDKs is the
-recommended path, with optional W3C PROV (PROV-N / PROV-JSON) export.
+## Deferred
+
+- **Derived-value provenance.** The original sketch attached
+  `provenanced` to a `derived` member and recovered the dependency graph
+  from its expression. Superseded by the per-write-site model; could
+  return as a complementary surface later.
+- **`.provenance` / `.explain()` accessors** and the **Explain /
+  Recompute / Audit-compare** read service that zips snapshot ⊕ trace.
+- **Granularity argument** (`provenanced(values|operations)`).
+- **Upstream linking** (`sourceTraceId` pointers between provenanced
+  values) and the W3C PROV (PROV-N / PROV-JSON) export.
+- **Other backends** (.NET / Phoenix runtime SDKs) and a durable
+  (non-in-memory) trace store.
 
 ## Open questions
 
-- Final spelling of `.provenance` / `.explain()` (member vs reserved
-  collection-op).
-- Snapshot granularity: per-rule (chosen for v1) vs per-module rollup
-  (optimisation later).
-- "Business-significant" boundary: one trace per meaningful snapshot,
-  not per micro-op — the precise rule is convention for now.
-- Report/SQL-aggregation provenance (query snapshot + dataset
-  reference + optional row drill-down) is a natural extension flagged
-  as a storage-explosion risk; no surface proposed yet.
+- Nested write paths (`this.line.qty := …` into a value object / part).
+  v1 instruments **direct** aggregate fields only; nested targets carry
+  no snapshot yet.
+- Collision semantics: two byte-identical RHS expressions writing the
+  same field share a `snapshotId` (by content-addressing). Desirable as
+  dedup, but worth confirming against the "per-site" mental model.
+- Report/SQL-aggregation provenance (query snapshot + dataset reference
+  + optional row drill-down) — flagged as a storage-explosion risk; no
+  surface proposed yet.
 
 ## Relationship to other aspects
 
-- Provenance, audit, and logging all consume the **same call-context
-  backbone** — see [`execution-context.md`](./execution-context.md).
+- Provenance, audit, and logging are intended to consume the **same
+  call-context backbone** — see
+  [`execution-context.md`](./execution-context.md). The `emitProvenance`
+  flag is the first instance of the build-level emission switch that doc
+  describes.
 - The [load-spec layer](./load-specifications.md) is designed to feed
   provenance: the repository load trace records *what shape was
   requested*, the evaluation trace records *what paths were actually
-  used*, so Explain can show both.
+  used*.
