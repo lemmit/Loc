@@ -530,7 +530,12 @@ or not.
   child WHERE parent_id = …)` from the Drizzle backend.  Not
   a small change — needs the IR walker, the validator, and the
   Drizzle lowerer all to agree on which queryable shapes are
-  legal.
+  legal.  *Partially landed:* the membership form
+  `this.<refColl>.contains(param)` over an `Id<T>[]` reference
+  collection is now queryable (see the join-table note below) —
+  it lowers to `inArray(root.id, SELECT ownerFk FROM joinTable
+  WHERE targetFk = param)`.  The general containment-count case
+  is still deferred.
 - **More platforms.**  The `PlatformSurface` contract makes
   Spring Boot / FastAPI / Angular tractable, but each is its
   own real project.  Out of scope for v2.
@@ -591,3 +596,45 @@ or not.
   (.NET).  Without the fix it emitted a literal `.count`: a TS type error and
   a runtime `undefined`.  Repro lives in `test/generator-ts.test.ts`
   ("lowers collection `.count` on a let-bound aggregate to `.length`").
+
+## Reference-collection join tables (`field: Id<T>[]`)
+
+- **A collection of references is a different beast from a containment.**
+  `contains lines: OrderLine[]` is parts that live and die with the parent
+  (child table, `parent_id` FK).  `party: Id<Pokemon>[]` is a set of
+  references to *another aggregate* that outlives any one parent — so it
+  lowers to a **many-to-many join table**, not a child table.  The
+  distinction is already in the IR: containments are `ContainmentIR`,
+  reference collections are a `FieldIR` whose type is
+  `{kind:"array", element:{kind:"id", targetName}}`.
+- **Derive the association once, in enrichment.**  `enrichAggregate`
+  populates `agg.associations` (join-table name, owner/target FK column
+  names, snake-cased) the same way it populates `wireShape`.  Every
+  emitter reads that — schema, repository load, repository save, query
+  lowering — so nothing re-derives FK names.  `joinTable =
+  snake(owner)_snake(field)` (not `_target`) so two fields pointing at the
+  same aggregate (`party` + `caught` → `trainer_party`, `trainer_caught`)
+  don't collide.  Self-reference (`Id<Self>[]`) collapses both FKs to one
+  name — disambiguate to `owner_id`/`target_id`.
+- **Persistence mirrors the containment diff-sync exactly.**  Save selects
+  existing target ids for the owner, deletes the removed pairs, then
+  `insert(...).onConflictDoNothing()` the current set (composite PK
+  `(owner_fk, target_fk)` makes that idempotent).  Load batches the join
+  rows into a `Map<ownerId, targetId[]>` and brands them back to
+  `Ids.<Target>Id`.
+- **A join table is a SET — order is not preserved.**  `party[0]` is not
+  guaranteed to come back first.  If slot order ever matters, add an
+  `ordinal` column and `ORDER BY` on load.  Conscious omission for now.
+- **Only `primaryKey` import is conditional.**  Adding `primaryKey` to the
+  Drizzle import line unconditionally drifted every existing schema's
+  byte-for-byte fixture.  Gate the import on "context has ≥1 join table"
+  to keep unaffected schemas identical — the baseline fixtures are a
+  tripwire worth respecting.
+- **`(__a: never)` in `toWire`'s array branch was latent debt.**  No prior
+  example had a populated plain-array property, so the array projection
+  path was never type-checked.  The first reference collection through
+  `repository.toWire` exposed it (`PokemonId[]` not assignable to
+  `(__a: never) =>`).  Dropping the annotation lets `.map` contextually
+  type the param.  Reinforces the "always type-check the generated
+  output" rule — and that `as never`-style placeholders are debt that
+  bites the moment a new shape reaches them.

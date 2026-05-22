@@ -1,5 +1,7 @@
+import { snake } from "../util/naming.js";
 import type {
   AggregateIR,
+  AssociationIR,
   BoundedContextIR,
   CodeRefKind,
   DeployableIR,
@@ -104,7 +106,38 @@ function enrichAggregate(agg: AggregateIR): AggregateIR {
     ...agg,
     parts,
     wireShape: wireFieldsForAggregate(agg),
+    associations: associationsForAggregate(agg),
   };
+}
+
+/** Derive a join-table association for every field whose type is a
+ * collection of references to another aggregate (`field: Id<T>[]`).
+ * Containment collections never reach here — they are `ContainmentIR`,
+ * not `FieldIR`. */
+function associationsForAggregate(agg: AggregateIR): AssociationIR[] {
+  const out: AssociationIR[] = [];
+  for (const f of agg.fields) {
+    if (f.type.kind !== "array" || f.type.element.kind !== "id") continue;
+    const target = f.type.element;
+    let ownerFk = `${snake(agg.name)}_id`;
+    let targetFk = `${snake(target.targetName)}_id`;
+    // Self-referential collection (`Id<Self>[]`): both FKs would
+    // collapse to the same column name.  Disambiguate generically.
+    if (ownerFk === targetFk) {
+      ownerFk = "owner_id";
+      targetFk = "target_id";
+    }
+    out.push({
+      fieldName: f.name,
+      ownerAgg: agg.name,
+      targetAgg: target.targetName,
+      valueType: target.valueType,
+      joinTable: `${snake(agg.name)}_${snake(f.name)}`,
+      ownerFk,
+      targetFk,
+    });
+  }
+  return out;
 }
 
 function enrichPart(part: EntityPartIR): EntityPartIR {

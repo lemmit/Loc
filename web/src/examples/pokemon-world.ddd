@@ -142,6 +142,8 @@ system PokemonWorld {
             repository Trainers for Trainer {
                 find byName(name: string): Trainer? where this.name == name
                 find byRank(rank: TrainerRank): Trainer[] where this.rank == rank
+                find holdingInParty(pokemon: Id<Pokemon>): Trainer[]
+                    where this.party.contains(pokemon)
             }
         }
     }
