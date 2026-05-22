@@ -28,11 +28,11 @@ import type {
 } from "../body-walker.js";
 import {
   emitExpr,
-  renderApiHookImports,
   renderHelperImports,
   renderImportLines,
   walkBodyToTsx,
 } from "../body-walker.js";
+import { renderApiHookImports } from "./api-hooks.js";
 import { indentJsx } from "./shared/args.js";
 
 /** Render the page-file shell around a walked body — imports +

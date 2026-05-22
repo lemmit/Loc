@@ -94,6 +94,7 @@ import {
   registerFormFieldImports,
   renderPrimitive,
 } from "./walker/context.js";
+import { registerApiHook, tryDetectApiHook } from "./walker/api-hooks.js";
 import {
   emitAlert,
   emitBadge,
@@ -1028,133 +1029,9 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
  *  member access on the local hook variable — handled by the
  *  default member-access / method-call paths after this helper
  *  has rewritten the deepest 3-segment chain. */
-function tryDetectApiHook(expr: ExprIR, ctx: WalkContext): ApiHookUse | null {
-  // Pattern A: member(member(ref:apiParam, agg), op)
-  if (expr.kind === "member" && expr.receiver.kind === "member") {
-    const inner = expr.receiver;
-    if (inner.receiver.kind === "ref" && ctx.apiParamNames.has(inner.receiver.name)) {
-      return buildHookUse(inner.member, expr.member, [], ctx);
-    }
-  }
-  // Pattern B: method-call(member(ref:apiParam, agg), op, args)
-  if (expr.kind === "method-call" && expr.receiver.kind === "member") {
-    const inner = expr.receiver;
-    if (inner.receiver.kind === "ref" && ctx.apiParamNames.has(inner.receiver.name)) {
-      return buildHookUse(inner.member, expr.member, expr.args, ctx);
-    }
-  }
-  // Slice A13 — Pattern C: member(ref:"Views", viewName) lifts to
-  // `useXxxView()` from `../api/views`.
-  if (expr.kind === "member" && expr.receiver.kind === "ref" && expr.receiver.name === "Views") {
-    return buildViewHookUse(expr.member);
-  }
-  // Slice D1 — Pattern D: member(ref:<Aggregate>, op) without an
-  // api param prefix lifts to the same hook Pattern A produces.
-  // Lets UIs without a `api X: Y` binding still get auto-injected
-  // hooks (e.g. legacy `scaffold modules: M` deployables that
-  // never declared api params).
-  if (expr.kind === "member" && expr.receiver.kind === "ref"
-      && ctx.aggregatesByName.has(expr.receiver.name)) {
-    return buildHookUse(expr.receiver.name, expr.member, [], ctx);
-  }
-  // Slice D1 — Pattern E: same as D but with method-call args
-  // (parameterised forms like `Account.byId(id)`).
-  if (expr.kind === "method-call" && expr.receiver.kind === "ref"
-      && ctx.aggregatesByName.has(expr.receiver.name)) {
-    return buildHookUse(expr.receiver.name, expr.member, expr.args, ctx);
-  }
-  return null;
-}
-
-/** Slice A13 — `useXxxView()` hook injection.  View hooks live in
- *  the shared `../api/views.ts` module; the local var name is
- *  `<viewCamel>View` (e.g. `activeOrdersView`). */
-function buildViewHookUse(viewName: string): ApiHookUse {
-  const viewPascal = pascal(viewName);
-  return {
-    varName: `${camel(viewName)}View`,
-    hookName: `use${viewPascal}View`,
-    importFrom: "../api/views",
-    argsRendered: [],
-  };
-}
-
-/** Build the ApiHookUse for a detected `<aggregate>.<op>(args?)`
- *  reference.  Naming convention matches the existing scaffold
- *  output (see `webApp/src/api/<aggregate>.ts`):
- *    `<agg>.all`    → useAll<Plural>
- *    `<agg>.byId`   → use<Single>ById  (parameterized)
- *    `<agg>.create` → useCreate<Single>
- *    `<agg>.update` → useUpdate<Single>
- *    `<agg>.delete` → useDelete<Single>
- *    `<agg>.<find>` → use<FindPascal><Single>  (custom finder)
- *
- *  The local var name is `<aggCamel><OpPascal>` — deterministic,
- *  visible in the generated file, never invented by the user. */
-function buildHookUse(
-  aggregate: string,
-  op: string,
-  args: ExprIR[],
-  ctx: WalkContext,
-): ApiHookUse {
-  const aggSingle = pascal(aggregate);
-  const aggPlural = plural(aggSingle);
-  let hookName: string;
-  if (op === "all") hookName = `useAll${aggPlural}`;
-  else if (op === "byId") hookName = `use${aggSingle}ById`;
-  else if (op === "create") hookName = `useCreate${aggSingle}`;
-  else if (op === "update") hookName = `useUpdate${aggSingle}`;
-  else if (op === "delete") hookName = `useDelete${aggSingle}`;
-  else hookName = `use${pascal(op)}${aggSingle}`;
-  const varName = `${camel(aggSingle)}${pascal(op)}`;
-  const importFrom = `../api/${camel(aggSingle)}`;
-  // Render args via the main ctx so refs to params/state propagate
-  // (param refs add to `usedParams` → the shell destructures them
-  // from `useParams`; state refs are an error since the hook lives
-  // before useState in the function body).
-  const argsRendered = args.map((a) => emitExpr(a, ctx));
-  return { varName, hookName, importFrom, argsRendered };
-}
-
-/** Register a detected hook usage on the walker context.  De-dupes
- *  by var name — if the same `<param>.<aggregate>.<op>` appears
- *  twice in the body, only one declaration is emitted at page-top. */
-function registerApiHook(hook: ApiHookUse, ctx: WalkContext): void {
-  if (!ctx.usedApiHooks.has(hook.varName)) {
-    ctx.usedApiHooks.set(hook.varName, hook);
-  }
-}
-
-/** Group api-hook imports by source file so multiple ops on one
- *  aggregate (e.g. `useAllCustomers` + `useCreateCustomer`) collapse
- *  to a single import line — matches the existing scaffold output
- *  shape (one api/<aggregate>.ts per aggregate, exporting all
- *  hooks). */
-export function renderApiHookImports(
-  usedApiHooks: Map<string, ApiHookUse>,
-  /** Slice C2 — see `renderImportLines` for prefix semantics. */
-  srcImportPrefix: string = "../",
-): string {
-  const byPath = new Map<string, Set<string>>();
-  for (const h of usedApiHooks.values()) {
-    let names = byPath.get(h.importFrom);
-    if (!names) {
-      names = new Set();
-      byPath.set(h.importFrom, names);
-    }
-    names.add(h.hookName);
-  }
-  const lines: string[] = [];
-  for (const [path, names] of [...byPath.entries()].sort()) {
-    const sorted = [...names].sort();
-    const rewritten =
-      srcImportPrefix !== "../" && path.startsWith("../")
-        ? srcImportPrefix + path.slice(3)
-        : path;
-    lines.push(`import { ${sorted.join(", ")} } from "${rewritten}";\n`);
-  }
-  return lines.join("");
-}
+// Api-hook detection/registration (tryDetectApiHook, registerApiHook,
+// buildHookUse/buildViewHookUse) and renderApiHookImports live in
+// walker/api-hooks.ts; emitExpr/walk call into them.
 
 /** Slice A6 — render `import { … } from "…"` lines for every
  *  UI-declared helper actually used in the body.  Helpers
