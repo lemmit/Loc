@@ -68,7 +68,15 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
     "loom.desktop.explorerMode",
     "generated",
   );
-  const [dockTab, setDockTab] = usePersistedState<DockTab>("loom.desktop.dockTab", "problems");
+  // Coerce tab values persisted before Problems/Generator/Bundler were
+  // folded into the consolidated Output panel.
+  const [dockTabRaw, setDockTab] = usePersistedState<
+    DockTab | "problems" | "generator" | "bundler"
+  >("loom.desktop.dockTab", "output");
+  const dockTab: DockTab =
+    dockTabRaw === "problems" || dockTabRaw === "generator" || dockTabRaw === "bundler"
+      ? "output"
+      : dockTabRaw;
 
   const workspaceNodes = useWorkspaceFiles(workspace.vfs);
   // main.ddd is the user's source; surface it even before the first

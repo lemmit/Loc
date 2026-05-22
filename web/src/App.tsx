@@ -46,6 +46,8 @@ import {
   type UnsupportedDeployable,
   type UnsupportedPlatform,
 } from "./layout/ctx";
+import type { OutputStream } from "./layout/OutputPanel";
+import type { TestResult } from "./testing/harness";
 
 /** Per-deployable summary derived from the generated file tree.
  *  The playground only knows how to bundle + boot Hono backends and
@@ -184,17 +186,36 @@ export default function App(): JSX.Element {
   // the Files tab was folded into Code still type-checks; coerce it to
   // "code" before handing it to the shell (usePersistedState has no
   // validator, so the stale value would otherwise select a dead panel).
-  const [activeTabRaw, setActiveTab] = usePersistedState<MobileTab | "files">(
+  const [activeTabRaw, setActiveTab] = usePersistedState<MobileTab | "files" | "problems">(
     "loom.mobile.activeTab",
     "code",
   );
-  const activeTab: MobileTab = activeTabRaw === "files" ? "code" : activeTabRaw;
+  // Coerce values persisted before the layout changed: "files" predates
+  // folding Files into Code; "problems" predates folding the Problems
+  // tab into the consolidated Output panel.
+  const activeTab: MobileTab =
+    activeTabRaw === "files"
+      ? "code"
+      : activeTabRaw === "problems"
+        ? "output"
+        : activeTabRaw;
 
   // Sub-view of the consolidated Code tab — source / builder / model /
   // generated. Persisted so a reload lands back on the same view.
   const [codeView, setCodeView] = usePersistedState<MobileCodeView>(
     "loom.mobile.codeView",
     "source",
+  );
+
+  // Test runner results, lifted here so the Output panel's Tests stream
+  // can read them independently of the (sometimes-unmounted) Tests tab.
+  const [testResults, setTestResults] = useState<Record<string, TestResult>>({});
+
+  // Which stream the consolidated Output panel shows.  Persisted across
+  // reloads; both shells read it off the ctx.
+  const [outputStream, setOutputStream] = usePersistedState<OutputStream>(
+    "loom.outputStream",
+    "problems",
   );
 
   const sourceRef = useRef<string>(initialSource);
@@ -757,6 +778,10 @@ export default function App(): JSX.Element {
     setActiveTab,
     codeView,
     setCodeView,
+    testResults,
+    setTestResults,
+    outputStream,
+    setOutputStream,
     copied,
     copyShareLink,
     runGenerate: () => void runGenerate(),
