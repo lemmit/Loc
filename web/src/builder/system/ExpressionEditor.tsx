@@ -10,10 +10,15 @@ export type ExprMode = "structured" | "text";
 const ExprScopeContext = createContext<string[]>([]);
 
 // Type-directed member-name candidates per member node, keyed by the canonical
-// structural path (see `memberCandidates` in expr-slots.ts). Computed against a
+// structural path (see `exprHints` in expr-slots.ts). Computed against a
 // linked document (async), so it's empty until that resolves — member inputs
 // stay free-text either way.
 const MemberCandidatesContext = createContext<Map<string, string[]>>(new Map());
+
+// Callee parameter names per call / member-call node (same path key), to label
+// the positional argument slots (`amount:`, `currency:`). Empty until the async
+// linked build resolves.
+const ArgLabelsContext = createContext<Map<string, string[]>>(new Map());
 
 // Recursive structured expression editor. Operator nodes (binary/unary/paren)
 // render dropdowns + nested operands; literals render typed inputs; everything
@@ -34,13 +39,19 @@ interface NodeProps {
 // (defaulting to `null` so the result stays parseable until edited). Named args
 // keep their name verbatim; renaming args is out of scope for now.
 function ArgsEditor({ args, path, onArgs }: { args: ECallArg[]; path: string; onArgs: (args: ECallArg[], commit: boolean) => void }): JSX.Element {
+  // Callee parameter names (type-resolved) to label positional args.
+  const paramNames = useContext(ArgLabelsContext).get(path);
   return (
     <Group gap={2} wrap="nowrap" align="center">
       <Text size="xs" c="dimmed">(</Text>
       {args.map((arg, i) => (
         <Group key={i} gap={2} wrap="nowrap" align="center">
           {i > 0 && <Text size="xs" c="dimmed">,</Text>}
-          {arg.name && <Text size="xs" c="dimmed">{arg.name}:</Text>}
+          {arg.name ? (
+            <Text size="xs" c="dimmed">{arg.name}:</Text>
+          ) : paramNames?.[i] ? (
+            <Text size="xs" c="dimmed" data-testid="c4expr-arg-label" title="parameter">{paramNames[i]}:</Text>
+          ) : null}
           <ExpressionEditor node={arg.value} path={`${path}a${i}`} onChange={(n, c) => onArgs(args.map((a, j) => (j === i ? { ...a, value: n } : a)), c)} />
           <ActionIcon size="xs" variant="subtle" color="gray" data-testid="c4expr-arg-del" aria-label="remove argument" onClick={() => onArgs(args.filter((_, j) => j !== i), true)}>
             <Text size="xs">×</Text>
@@ -252,7 +263,7 @@ export function ExprSlotEditor({
   seed,
   seedText,
   candidates,
-  loadMembers,
+  loadHints,
   mode,
   onMode,
   onCommit,
@@ -260,10 +271,11 @@ export function ExprSlotEditor({
   seed: EExpr;
   seedText: string;
   candidates: string[];
-  /** Resolves type-directed member-name candidates per node path. Async (builds a
-   *  linked document); run once on mount — the parent re-keys this component per
-   *  slot/revision, so a fresh slot or a commit remounts and recomputes. */
-  loadMembers: () => Promise<Map<string, string[]>>;
+  /** Resolves type-directed hints (member candidates + call arg labels) per node
+   *  path. Async (builds a linked document); run once on mount — the parent
+   *  re-keys this component per slot/revision, so a fresh slot or a commit
+   *  remounts and recomputes. */
+  loadHints: () => Promise<{ members: Map<string, string[]>; argLabels: Map<string, string[]> }>;
   mode: ExprMode;
   onMode: (mode: ExprMode) => void;
   onCommit: (text: string) => boolean;
@@ -271,13 +283,18 @@ export function ExprSlotEditor({
   const [local, setLocal] = useState(seed);
   const [error, setError] = useState(false);
   const [memberMap, setMemberMap] = useState<Map<string, string[]>>(new Map());
+  const [argLabels, setArgLabels] = useState<Map<string, string[]>>(new Map());
   const handle = (next: EExpr, commit: boolean): void => {
     setLocal(next);
     if (commit && !onCommit(emitExpr(next))) setError(true);
   };
   useEffect(() => {
     let alive = true;
-    void loadMembers().then((m) => { if (alive) setMemberMap(m); });
+    void loadHints().then((h) => {
+      if (!alive) return;
+      setMemberMap(h.members);
+      setArgLabels(h.argLabels);
+    });
     return () => { alive = false; };
     // Run once per mount; the rev/slot-keyed remount drives recomputation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -300,8 +317,10 @@ export function ExprSlotEditor({
       ) : (
         <ExprScopeContext.Provider value={candidates}>
           <MemberCandidatesContext.Provider value={memberMap}>
-            <ExpressionEditor node={local} path="" onChange={handle} />
-            {error && <Text size="xs" c="red">invalid expression</Text>}
+            <ArgLabelsContext.Provider value={argLabels}>
+              <ExpressionEditor node={local} path="" onChange={handle} />
+              {error && <Text size="xs" c="red">invalid expression</Text>}
+            </ArgLabelsContext.Provider>
           </MemberCandidatesContext.Provider>
         </ExprScopeContext.Provider>
       )}

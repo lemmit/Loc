@@ -223,6 +223,15 @@ Done:
   from rename.ts) + `memberCandidates` (a path-keyed map threaded into the
   editor by structural path). Gated by `test/type-system-members.test.ts`,
   `test/system-expr.test.ts` + e2e.
+- **Call argument labels (signature help)** — positional call / member-call
+  arguments are labelled with the callee's parameter names (`amount:`,
+  `currency:`), resolved by type. The single source is `calleeSignature` in
+  `src/language/type-system.ts` — a function/operation's params or a value-object
+  constructor's properties — **shared with the LSP signature-help provider**
+  (`ddd-signature-help.ts` delegates to it, and so gained VO-constructor
+  signatures). Labels ride the same async path-keyed hint map as member
+  completion (`exprHints` in `expr-slots.ts`). Gated by
+  `test/lsp-signature-help.test.ts`, `test/system-expr.test.ts` + e2e.
 - **Statement expressions in operation & workflow bodies** — the same
   "Expression" picker lists each aggregate operation's *and workflow's*
   statement expressions as `stmtExpr` / `wfStmt` slots: `precondition` /
