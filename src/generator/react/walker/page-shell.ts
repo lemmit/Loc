@@ -26,13 +26,12 @@ import type {
   WalkContext,
   WorkflowFormState,
 } from "../body-walker.js";
+import { emitExpr, walkBodyToTsx } from "../body-walker.js";
 import {
-  emitExpr,
+  renderApiHookImports,
   renderHelperImports,
   renderImportLines,
-  walkBodyToTsx,
-} from "../body-walker.js";
-import { renderApiHookImports } from "./api-hooks.js";
+} from "./import-lines.js";
 import { indentJsx } from "./shared/args.js";
 
 /** Render the page-file shell around a walked body — imports +
