@@ -237,10 +237,10 @@ Done:
   + member + an add/remove/edit argument list, expression-body lambdas
   (`p => expr`) render an editable param + body (the param is threaded into the
   body's scope suggestions), `new Part { … }` and object literals `{ … }` render
-  an editable partType + a named-field list (add/remove/edit), and everything
-  still unmodelled (block-body lambdas) is a reparse-validated
-  `raw` text leaf (recognise-or-raw). (`match` + ternary were since structured —
-  see below.) Plugged into the
+  an editable partType + a named-field list (add/remove/edit), and anything still
+  unmodelled is a reparse-validated `raw` text leaf (recognise-or-raw). (`match`,
+  ternary, and block-body lambdas were since structured — see below.) Plugged
+  into the
   single-expression slots — invariants, derived props, function bodies — via one
   inspector "Expression" picker (`expr-slots.ts`). A **structured⇄text toggle**
   lets advanced users edit the whole expression as raw text (same
@@ -313,12 +313,19 @@ Done:
   member/arg hints thread through the branches (matching paths in `collectHints`).
   `expr-model.ts` + `ExpressionEditor.tsx` + `expr-slots.ts`; gated by
   `test/system-expr.test.ts` + e2e.
+- **Structured block-body lambdas** — a `p => { … }` lambda seeds editable
+  statement rows (`EStmt` in `expr-model.ts`): `let` and assignment structure
+  their value as a nested expression editor (so member completion / arg labels
+  thread in), every other statement kind (precondition / requires / emit / bare
+  call) keeps its source verbatim. Rows add (`+ let` / `+ assign`, parseable
+  defaults) / delete / reorder; the lambda param and earlier `let` bindings are
+  threaded into each value's scope. `expr-model.ts` + `ExpressionEditor.tsx`;
+  gated by `test/system-expr.test.ts`.
 
 Open:
 
-- **Deeper expression structuring** — block-body lambdas are still `raw` leaves
-  in `expr-model.ts`; and arg-*name* editing on calls (existing named args are
-  preserved verbatim but can't be renamed in the UI).
+- **Deeper expression structuring** — arg-*name* editing on calls (existing named
+  args are preserved verbatim but can't be renamed in the UI).
 - **Structured statement non-expression parts** — statement *expressions* are
   structured today (assignment RHS, `let` values, predicates, `emit` field
   values, call args), but the assignment *target* (LValue) and a bare-call
@@ -339,8 +346,7 @@ Planned — recommended order:
 
 1. **Finish expression/statement structuring** (Track 1, mechanical — each reuses
    an existing pattern):
-   - **Block-body lambda structuring** — currently a `raw` leaf in
-     `expr-model.ts`; reuse the page builder's statement-row `Lambda` editor.
+   - ~~Block-body lambda structuring~~ — done (see Done above).
    - **Structured statement targets** — the assignment *target* (LValue) and a
      bare-call statement's *callee* (the RHS / args are already structured).
    - **Arg-*name* editing on calls** — existing named args are preserved verbatim

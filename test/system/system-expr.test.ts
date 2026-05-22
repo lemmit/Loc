@@ -104,6 +104,23 @@ describe("structured expression editor — model", () => {
     expect(emitExpr(tree)).toBe('qty > 0 ? "yes" : "no"');
   });
 
+  it("structures block-body lambdas (statement rows; let/assign values)", () => {
+    const src = `system S { context C { aggregate Order { qty: int
+      derived doubled: int = items.map(i => {
+        let d = i
+        i := d
+      }) } } }`;
+    const tree = seedExpr(slotExpr(parse(src), { kind: "derived", owner: "Order", name: "doubled" })!);
+    if (tree.kind !== "member") throw new Error("expected a member call");
+    const lam = tree.args[0].value;
+    if (lam.kind !== "blockLambda") throw new Error("expected a block lambda");
+    expect(lam.param).toBe("i");
+    expect(lam.stmts).toHaveLength(2);
+    expect(lam.stmts[0]).toMatchObject({ kind: "let", name: "d", value: { kind: "raw", text: "i" } });
+    expect(lam.stmts[1]).toMatchObject({ kind: "assign", target: "i", op: ":=", value: { kind: "raw", text: "d" } });
+    expect(emitExpr(tree)).toBe("items.map(i => {\n  let d = i\n  i := d\n})");
+  });
+
   it("structures match expressions (arms + optional else)", () => {
     // Arm conds must not end in a bare identifier (the grammar would read
     // `X => …` as a lambda) — `qty > 0` ends in a literal, so it's safe.
