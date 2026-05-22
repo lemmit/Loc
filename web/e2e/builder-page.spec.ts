@@ -440,3 +440,34 @@ test("structures a `let` statement into name / value controls", async ({ page })
   await expect.poll(model).toContain("let sum = 1 + 2");
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
+
+const ENUM_STATE_SOURCE = `system S {
+  context C {
+    enum OrderStatus { New, Shipped }
+  }
+  ui U {
+    page P {
+      state { status: OrderStatus }
+      body: Text("hi")
+    }
+  }
+}`;
+
+test("offers enum cases as the default for an enum-typed state field", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await setSource(page, ENUM_STATE_SOURCE);
+
+  await page.getByTestId("doc-tab-builder").click();
+  await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
+
+  // Open the State panel — the enum-typed field's default is a case dropdown.
+  await page.getByTestId("c4state-toggle").click();
+  await expect(page.getByTestId("c4state-field")).toHaveCount(1);
+  await page.getByTestId("c4state-prop-default").click();
+  await page.getByRole("option", { name: "Shipped" }).click();
+
+  const model = () => page.evaluate(() => (window as unknown as { __loomGetSource: () => string }).__loomGetSource());
+  await expect.poll(model).toContain("status: OrderStatus = Shipped");
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+});

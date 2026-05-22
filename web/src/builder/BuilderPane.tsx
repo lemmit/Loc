@@ -3,7 +3,7 @@ import { Box, Group, Text } from "@mantine/core";
 import { AstUtils } from "langium";
 import type { SerializedNodes } from "@craftjs/core";
 import type { LayoutCtx } from "../layout/ctx";
-import type { BodyProp, Component, Expression, Page } from "../../../src/language/generated/ast.js";
+import type { BodyProp, Component, EnumDecl, Expression, Page } from "../../../src/language/generated/ast.js";
 import { parseDdd } from "./parse";
 import { spliceNode } from "./edit-engine";
 import { seedFromBody, emitBody, type BuilderNode } from "./page/model";
@@ -82,9 +82,20 @@ function collectComponents(ast: unknown): Map<string, string[]> {
   return out;
 }
 
-// Mark each builder node that *owns* a diagnostic (the deepest node whose
-// recorded source range — `__range` — contains it) with a `__diag` message, so
-// the canvas can outline the offending node.
+// Enum cases per enum name — drives the enum-case dropdown for an enum-typed
+// state field's default in the State panel.
+function collectEnums(ast: unknown): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const node of AstUtils.streamAst(ast as Parameters<typeof AstUtils.streamAst>[0])) {
+    if (node.$type === "EnumDecl") {
+      const e = node as EnumDecl;
+      out.set(e.name, e.values.map((v) => v.name));
+    }
+  }
+  return out;
+}
+
+
 function annotateDiagnostics(tree: BuilderNode, diagnostics: readonly { range: { start: { line: number; character: number }; end: { line: number; character: number } }; message: string }[]): void {
   const after = (al: number, ac: number, bl: number, bc: number): boolean => al > bl || (al === bl && ac >= bc);
   const ownerOf = (node: BuilderNode, dStart: { line: number; character: number }, dEnd: { line: number; character: number }): BuilderNode | null => {
@@ -114,6 +125,7 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const components = useMemo(() => collectComponents(parsed.ast), [parsed]);
   const componentNames = useMemo(() => [...components.keys()].sort(), [components]);
   const stateTypes = useMemo(() => availableTypes(parsed.ast), [parsed]);
+  const enumCases = useMemo(() => collectEnums(parsed.ast), [parsed]);
 
   // Apply a source-level state edit (splice) and re-seed, like handleApply.
   const applyState = (next: string | null): void => {
@@ -165,7 +177,7 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     <Box style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       {ctx.isDesktop && current.page && (
         <Group px="xs" py={4} bg="dark.7" gap="xs" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
-          <StatePanel page={current.page} getSource={() => ctx.getSource()} types={stateTypes} onApply={applyState} />
+          <StatePanel page={current.page} getSource={() => ctx.getSource()} types={stateTypes} enumCases={enumCases} onApply={applyState} />
         </Group>
       )}
       <Box style={{ flex: 1, minHeight: 0 }}>
