@@ -9,6 +9,7 @@ import {
   sandboxStubUrl,
 } from "./sandbox-origin";
 import { makePreviewHtml } from "./iframe-html";
+import { setActiveDriverPort } from "./active-driver-port";
 import { fnv1a32 } from "../util/hash";
 
 interface PreviewProps {
@@ -221,8 +222,11 @@ export function Preview({
       sandboxBase: sandboxBasename(stubUrl),
       driverUrl,
     });
-    const bridge = new SandboxBridge(el, SANDBOX_ORIGIN, (req) =>
-      runtime.dispatch(req),
+    const bridge = new SandboxBridge(
+      el,
+      SANDBOX_ORIGIN,
+      (req) => runtime.dispatch(req),
+      setActiveDriverPort,
     );
     bridgeRef.current = bridge;
     startedCodeKeyRef.current = codeKey;

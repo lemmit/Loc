@@ -22,9 +22,10 @@ import {
   unitSuiteFiles,
 } from "../testing/run-unit-tests";
 import {
-  makeIframeTransport,
+  makePostMessageTransport,
   RemotePage,
 } from "../../../packages/ui-test-driver/index";
+import { getActiveDriverPort } from "../preview/active-driver-port";
 import { runTests, type TestCase, type TestResult } from "../testing/harness";
 import { runUiTests, type UiTestCase } from "../testing/ui-harness";
 import { computeVerification } from "../../../src/verify/verification.js";
@@ -223,23 +224,13 @@ export function TestsBody({
   };
   const runUi = (cases: UiTestCase[], busyKey: string): void => {
     void guard(busyKey, async () => {
-      const iframe = document.querySelector<HTMLIFrameElement>(
-        'iframe[data-testid="preview-iframe"]',
-      );
-      if (!iframe) throw new Error("Preview isn't mounted — Bundle + Boot first.");
+      const port = getActiveDriverPort();
+      if (!port) {
+        throw new Error("Preview isn't booted — Bundle + Boot first.");
+      }
       if (engine) await engine.wipe();
       const page = new RemotePage(
-        makeIframeTransport(iframe, {
-          timeout: 8000,
-          getBasename: (w) =>
-            (w as { __LOOM_BASENAME__?: string }).__LOOM_BASENAME__ ?? "",
-          getNetState: (d) =>
-            (
-              d.defaultView as {
-                __LOOM_NET__?: { inflight: number; last: number };
-              }
-            )?.__LOOM_NET__,
-        }),
+        makePostMessageTransport(port, { timeout: 8000 }),
       );
       // Report the UI suite name so results join the verification rollup
       // (UI ExecTestRefs carry `suite: "<System> e2e"`).
