@@ -171,6 +171,11 @@ Done:
   inspector shows a Select that rewrites the reference's `$refNode` CST span; the
   graph edge re-derives on the next parse (`web/src/builder/system/rebind.ts`).
   Gated by `test/system-rebind.test.ts` + e2e.
+- **Infra construct properties** — the inspector edits the scalar slots of the
+  infra constructs: a `storage` node's `type` (postgres / mysql / … dropdown) and
+  a `deployable` node's `platform` (hono / dotnet / react / static /
+  phoenixLiveView) and `port` (`web/src/builder/system/infra-props.ts`; parse →
+  mutate → reprint → splice). Gated by `test/system-infra-props.test.ts` + e2e.
 - **Operation & workflow body editing** — a shared statement-list editor
   (`web/src/builder/system/body.ts` + `BodyEditor.tsx`) for the two `Statement[]`
   bodies. Workflow nodes edit their body directly; aggregates expose an
