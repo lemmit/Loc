@@ -28,6 +28,7 @@ import type {
 } from "../../ir/loom-ir.js";
 import { camel, pascal, plural, snake } from "../../util/naming.js";
 import {
+  type ActionBinding,
   defaultInitFor,
   type HandleEventClause,
   renderRequiresGuard,
@@ -77,6 +78,25 @@ export function emitLiveViewPages(args: {
     }
   }
 
+  // Walk each user component once to capture its `Action` bindings +
+  // nested component usage, so each page can hoist the handlers for the
+  // components it renders (function components are stateless).
+  const componentInfo = new Map<string, ComponentActionInfo>();
+  for (const c of ui.components) {
+    const synthPage = {
+      name: c.name,
+      params: c.params,
+      state: c.state,
+      body: c.body,
+      source: "explicit",
+    } as PageIR;
+    const w = walkBodyToHeex(c.body, synthPage, ui, appModule, aggregatesByName);
+    componentInfo.set(c.name, {
+      actionBindings: w.actionBindings,
+      usedComponents: w.usedComponents,
+    });
+  }
+
   for (const page of ui.pages) {
     if (!page.route) continue; // can't emit a router entry without one
     const liveModule = `${appModule}Web.${pascal(page.name)}Live`;
@@ -89,6 +109,7 @@ export function emitLiveViewPages(args: {
       ui,
       aggregatesByName,
       contextModuleByAggName,
+      componentInfo,
     });
     out.set(filePath, source);
     routes.push({ route: page.route, liveModule });
@@ -132,10 +153,68 @@ interface RenderArgs {
    *  keyed by aggregate PascalCase name.  Used to build the Ash
    *  `for_create(<Ctx>.<Agg>, :create)` call in mount/3. */
   contextModuleByAggName: ReadonlyMap<string, string>;
+  /** Per-component action bindings + nested component usage, so a page
+   *  LiveView can hoist the `handle_event` clauses for `Action`s inside
+   *  the (stateless) components it renders. */
+  componentInfo: ReadonlyMap<string, ComponentActionInfo>;
+}
+
+interface ComponentActionInfo {
+  actionBindings: readonly ActionBinding[];
+  usedComponents: readonly string[];
+}
+
+/** Transitive closure: every `ActionBinding` reachable from a page —
+ *  its own body's bindings plus those of every component it renders
+ *  (recursively).  Deduped by event name. */
+function gatherActionBindings(
+  seedBindings: readonly ActionBinding[],
+  seedComponents: readonly string[],
+  componentInfo: ReadonlyMap<string, ComponentActionInfo>,
+): ActionBinding[] {
+  const byEvent = new Map<string, ActionBinding>();
+  for (const b of seedBindings) if (!byEvent.has(b.eventName)) byEvent.set(b.eventName, b);
+  const seen = new Set<string>();
+  const queue = [...seedComponents];
+  while (queue.length > 0) {
+    const name = queue.shift()!;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const info = componentInfo.get(name);
+    if (!info) continue;
+    for (const b of info.actionBindings) {
+      if (!byEvent.has(b.eventName)) byEvent.set(b.eventName, b);
+    }
+    queue.push(...info.usedComponents);
+  }
+  return [...byEvent.values()];
+}
+
+/** A hoisted `Action` `handle_event` clause: load the instance by id,
+ *  invoke the Ash action via the code interface, flash + optional
+ *  navigate. */
+function buildActionHandlers(
+  bindings: readonly ActionBinding[],
+  contextModuleByAggName: ReadonlyMap<string, string>,
+): HandleEventClause[] {
+  return bindings.map((b) => {
+    const ctxModule = contextModuleByAggName.get(b.agg);
+    const aggSnake = snake(b.agg);
+    const navPipe = b.thenRoute ? ` |> push_navigate(to: ~p"${b.thenRoute}")` : "";
+    return {
+      name: b.eventName,
+      paramsPattern: `%{"id" => id}`,
+      body: [
+        `    record = ${ctxModule}.get_${aggSnake}!(id)`,
+        `    ${ctxModule}.${b.eventName}!(record)`,
+        `    {:noreply, socket |> put_flash(:info, "${b.opHuman} succeeded")${navPipe}}`,
+      ],
+    };
+  });
 }
 
 function renderLiveView(a: RenderArgs): string {
-  const { page, liveModule, appModule, ui, aggregatesByName, contextModuleByAggName } = a;
+  const { page, liveModule, appModule, ui, aggregatesByName, contextModuleByAggName, componentInfo } = a;
   const webModule = `${appModule}Web`;
 
   // All pages — scaffold and custom — route through the HEEx walker.
@@ -159,8 +238,14 @@ function renderLiveView(a: RenderArgs): string {
     contextModuleByAggName,
   );
   const detailBaseRoute = page.route ? page.route.replace(/\/:[^/]+$/, "") : null;
+  // Hoist `Action(...)` handlers from the page body + every component
+  // the page renders (transitively) into this page's LiveView.
+  const actionHandlers = buildActionHandlers(
+    gatherActionBindings(walked.actionBindings, walked.usedComponents, componentInfo),
+    contextModuleByAggName,
+  );
   const handleEventClauses =
-    renderHandleEventClauses(handlers) +
+    renderHandleEventClauses([...handlers, ...actionHandlers]) +
     renderOperationEventClauses(walked.formBindings, detailBaseRoute);
   const aliasBlock = aliasLines.length > 0 ? aliasLines.join("\n") + "\n" : "";
 

@@ -87,6 +87,30 @@ export interface WalkResult {
    *  `@items` (list) via the aggregate's Ash code-interface.
    *  Empty when the page has no QueryView. */
   queryBindings: QueryBinding[];
+  /** Action bindings discovered inside the body — one per
+   *  `Action(<instance>.<op>)`.  Each yields a `handle_event` clause
+   *  in the *host page's* LiveView (a component is a stateless function
+   *  component, so its actions are hoisted to every page that uses it). */
+  actionBindings: ActionBinding[];
+  /** Names of user `component`s invoked in the body, so the LiveView
+   *  emitter can hoist their action handlers transitively. */
+  usedComponents: string[];
+}
+
+/** `Action(<instance>.<operation>)` → a `<.button phx-click=…>` plus a
+ *  hoisted `handle_event` that loads the instance and invokes the Ash
+ *  action. */
+export interface ActionBinding {
+  /** Owning aggregate, PascalCase. */
+  agg: string;
+  /** Operation name, snake_case (the Ash `update :<op>` action). */
+  op: string;
+  /** Human-readable operation label for the flash message. */
+  opHuman: string;
+  /** `phx-click` event name (`<op>_<agg>`); also the code-interface fn. */
+  eventName: string;
+  /** Optional `then: navigate(<Page>)` target route. */
+  thenRoute?: string;
 }
 
 export interface FormBinding {
@@ -143,6 +167,10 @@ export interface WalkContext {
   usedHelpers: Set<string>;
   /** Accumulated handle_event clauses. */
   handlers: HandleEventClause[];
+  /** Accumulated `Action(...)` bindings (hoisted to the host LiveView). */
+  actionBindings: ActionBinding[];
+  /** Names of user components invoked while walking this body. */
+  usedComponents: Set<string>;
   /** Current rendering position — see RenderPosition. */
   position: RenderPosition;
   /** Optional variable remappings — maps a source ref name to the LiveView
@@ -167,6 +195,16 @@ export function walkBodyToHeex(
   aggregatesByName: ReadonlyMap<string, AggregateIR> = new Map(),
 ): WalkResult {
   const stateNames = new Set<string>(page.state.map((f) => snake(f.name)));
+  // Seed instance types from aggregate-typed params so `Action(p.op)` /
+  // `Form(p.op)` resolve the operation's aggregate.  A component param
+  // `order: Order` → `order → "Order"`; QueryView extends this for its
+  // single-record `data:` lambda.
+  const instanceTypes = new Map<string, string>();
+  for (const p of page.params) {
+    if (p.type.kind === "entity" && aggregatesByName.has(p.type.name)) {
+      instanceTypes.set(p.name, p.type.name);
+    }
+  }
   const ctx: WalkContext = {
     appModule,
     aggregatesByName,
@@ -177,7 +215,10 @@ export function walkBodyToHeex(
     stateNames,
     usedHelpers: new Set(),
     handlers: [],
+    actionBindings: [],
+    usedComponents: new Set(),
     position: "template",
+    instanceTypes,
   };
 
   const heex = body ? renderExpr(body, ctx) : `<!-- empty body -->`;
@@ -195,6 +236,8 @@ export function walkBodyToHeex(
     aliasLines,
     formBindings: ctx.formBindings,
     queryBindings: ctx.queryBindings,
+    actionBindings: ctx.actionBindings,
+    usedComponents: [...ctx.usedComponents],
   };
 }
 
@@ -342,6 +385,7 @@ function renderUserComponent(
   comp: import("../../ir/loom-ir.js").ComponentIR,
   ctx: WalkContext,
 ): string {
+  ctx.usedComponents.add(comp.name);
   const attrs: string[] = [];
   let pos = 0;
   for (let i = 0; i < expr.args.length; i++) {
@@ -353,6 +397,53 @@ function renderUserComponent(
   }
   const tag = `${ctx.appModule}Web.Components.UiComponents.${snake(comp.name)}`;
   return attrs.length > 0 ? `<${tag} ${attrs.join(" ")} />` : `<${tag} />`;
+}
+
+/** `Action(<instance>.<operation>, then?)` → a `<.button phx-click=…>`
+ *  whose event loads the instance by id and invokes the Ash action.
+ *  The operation is referenced through an in-scope aggregate instance
+ *  (a component param or a QueryView record), resolved via
+ *  `instanceTypes`.  The handler is recorded as an `ActionBinding` and
+ *  hoisted to the host page's LiveView by the emitter. */
+function renderAction(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  const opRef = expr.args.find((_, i) => !expr.argNames?.[i]);
+  if (!opRef || opRef.kind !== "member" || opRef.receiver.kind !== "ref") {
+    return `<!-- Action: expected <instance>.<operation> -->`;
+  }
+  const instanceName = opRef.receiver.name;
+  const opName = opRef.member;
+  const aggName = ctx.instanceTypes?.get(instanceName);
+  if (!aggName) {
+    return `<!-- Action(${instanceName}.${opName}): '${instanceName}' is not an in-scope aggregate instance -->`;
+  }
+  const agg = ctx.aggregatesByName.get(aggName);
+  const op = agg?.operations.find((o) => o.name === opName && o.visibility === "public");
+  if (!op) {
+    return `<!-- Action(${instanceName}.${opName}): no public operation '${opName}' on ${aggName} -->`;
+  }
+  const eventName = `${snake(opName)}_${snake(aggName)}`;
+  const idExpr = `${renderExpr(opRef.receiver, { ...ctx, position: "template" })}.id`;
+  // `then: navigate(<Page>)` → push_navigate route (snake convention,
+  // matching renderNavigate / the scaffold router).
+  let thenRoute: string | undefined;
+  for (let i = 0; i < expr.args.length; i++) {
+    if (expr.argNames?.[i] !== "then") continue;
+    const eff = expr.args[i]!;
+    if (eff.kind === "call" && eff.name === "navigate") {
+      const target = eff.args[0];
+      if (target && target.kind === "ref") thenRoute = `/${snake(target.name)}`;
+    }
+  }
+  if (!ctx.actionBindings.some((b) => b.eventName === eventName)) {
+    ctx.actionBindings.push({
+      agg: aggName,
+      op: snake(opName),
+      opHuman: humanize(opName),
+      eventName,
+      thenRoute,
+    });
+  }
+  return `<.button phx-click="${eventName}" phx-value-id={${idExpr}}>${humanize(opName)}</.button>`;
 }
 
 function renderCall(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
@@ -378,6 +469,7 @@ function renderCall(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): 
   if (expr.name === "IdLink") return renderIdLink(expr, ctx);
   if (expr.name === "DateDisplay") return renderDateDisplay(expr, ctx);
   if (expr.name === "EnumBadge") return renderEnumBadge(expr, ctx);
+  if (expr.name === "Action") return renderAction(expr, ctx);
   // User-defined `component` invocation → a remote HEEx function
   // component (`<MyAppWeb.Components.UiComponents.order_panel … />`).
   const userComp = ctx.ui.components.find((c) => c.name === expr.name);
@@ -1189,8 +1281,6 @@ function closedPrimitive(name: string): PrimitiveSpec | null {
       return { tag: ".badge", takesChildren: true };
     case "Button":
       return { tag: ".button", takesChildren: true };
-    case "Action":
-      return { tag: ".button", takesChildren: true };
     // --- scaffold expander primitives ---
     case "Paper":
       return { tag: "div", staticAttrs: ["class"], takesChildren: true };
@@ -1402,6 +1492,8 @@ export function renderRequiresGuard(page: PageIR, ui: UiIR, appModule: string): 
     stateNames: new Set(page.state.map((f) => snake(f.name))),
     usedHelpers: new Set(),
     handlers: [],
+    actionBindings: [],
+    usedComponents: new Set(),
     position: "handler",
   };
   return renderExpr(page.requires, ctx);
