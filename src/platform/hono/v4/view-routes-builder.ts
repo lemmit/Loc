@@ -1,7 +1,7 @@
 import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
 import type { AggregateIR, BoundedContextIR, ExprIR, TypeIR, ViewIR } from "../../../ir/loom-ir.js";
 import { viewUsesCurrentUser } from "../../../ir/loom-ir.js";
-import { camel, pascal, plural, snake } from "../../../util/naming.js";
+import { lowerFirst, upperFirst, plural, snake } from "../../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Hono view routes emission.
@@ -54,11 +54,11 @@ export function buildViewsRoutesFile(
   const sourceAggs = new Set(ctx.views.map((v) => v.aggregateName));
   for (const aggName of aggsTouched) {
     lines.push(
-      `import { ${aggName}Repository } from "../db/repositories/${camel(aggName)}-repository";`,
+      `import { ${aggName}Repository } from "../db/repositories/${lowerFirst(aggName)}-repository";`,
     );
     if (sourceAggs.has(aggName)) {
       lines.push(
-        `import { ${aggName}Response, ${aggName}ListResponse } from "./${camel(aggName)}.routes";`,
+        `import { ${aggName}Response, ${aggName}ListResponse } from "./${lowerFirst(aggName)}.routes";`,
       );
     }
   }
@@ -76,13 +76,13 @@ export function buildViewsRoutesFile(
   const enumValues = new Map(ctx.enums.map((e) => [e.name, e.values] as const));
   for (const view of ctx.views) {
     if (!view.output) continue;
-    lines.push(`const ${pascal(view.name)}Row = z.object({`);
+    lines.push(`const ${upperFirst(view.name)}Row = z.object({`);
     for (const f of view.output.fields) {
       lines.push(`  ${f.name}: ${zodForRow(f.type, enumValues)},`);
     }
-    lines.push(`}).openapi("${pascal(view.name)}Row");`);
+    lines.push(`}).openapi("${upperFirst(view.name)}Row");`);
     lines.push(
-      `const ${pascal(view.name)}Response = z.array(${pascal(view.name)}Row).openapi("${pascal(view.name)}Response");`,
+      `const ${upperFirst(view.name)}Response = z.array(${upperFirst(view.name)}Row).openapi("${upperFirst(view.name)}Response");`,
     );
   }
   if (ctx.views.some((v) => v.output)) lines.push("");
@@ -134,7 +134,7 @@ function emitViewRoute(
   const out: string[] = [];
   const aggSlug = snake(plural(view.aggregateName));
   const responseSchema = view.output
-    ? `${pascal(view.name)}Response`
+    ? `${upperFirst(view.name)}Response`
     : `${view.aggregateName}ListResponse`;
   // Views whose filter / binds reference currentUser
   // thread the request's user through to the repository's
@@ -146,7 +146,7 @@ function emitViewRoute(
   out.push(`    method: "get",`);
   out.push(`    path: "/${snake(view.name)}",`);
   out.push(`    tags: ["views", "${aggSlug}"],`);
-  out.push(`    operationId: "${camel(view.name)}View",`);
+  out.push(`    operationId: "${lowerFirst(view.name)}View",`);
   out.push(`    responses: {`);
   out.push(
     `      200: { description: "OK", content: { "application/json": { schema: ${responseSchema} } } },`,
@@ -161,7 +161,7 @@ function emitViewRoute(
   }
   out.push(`    const repo = new ${view.aggregateName}Repository(db, events);`);
   const repoCallArgs = usesUser ? "currentUser" : "";
-  out.push(`    const rows = await repo.${camel(view.name)}(${repoCallArgs});`);
+  out.push(`    const rows = await repo.${lowerFirst(view.name)}(${repoCallArgs});`);
   if (view.output) {
     // Bulk-load every foreign aggregate referenced by `Id<X>`
     // follows in the bind expressions.  Auxiliaries arrive in
@@ -171,7 +171,7 @@ function emitViewRoute(
     // projection mirrors the same path.
     const pathToMap = new Map<string, { mapVar: string; aggName: string }>();
     for (const aux of view.output.auxiliaries) {
-      const repoVar = `${camel(aux.aggName)}Repo`;
+      const repoVar = `${lowerFirst(aux.aggName)}Repo`;
       const mapVar = aux.mapVar;
       out.push(`    const ${repoVar} = new ${aux.aggName}Repository(db, events);`);
       const idsSource = idsSourceForAux(aux, pathToMap);
@@ -185,7 +185,7 @@ function emitViewRoute(
       .join(",\n");
     out.push(`    const projected = rows.map((r) => ({\n${projectedFields},\n    }));`);
     out.push(
-      `    return httpCtx.json(projected as z.infer<typeof ${pascal(view.name)}Response>, 200);`,
+      `    return httpCtx.json(projected as z.infer<typeof ${upperFirst(view.name)}Response>, 200);`,
     );
   } else {
     out.push(

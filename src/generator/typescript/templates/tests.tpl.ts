@@ -1,5 +1,5 @@
 import type { AggregateIR, BoundedContextIR, TestIR, TestStmtIR } from "../../../ir/loom-ir.js";
-import { camel } from "../../../util/naming.js";
+import { lowerFirst } from "../../../util/naming.js";
 import { renderTsExpr } from "../render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -21,7 +21,7 @@ export function renderTestsFile(agg: AggregateIR, ctx: BoundedContextIR): string
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import { describe, it, expect } from "vitest";`);
   lines.push(
-    `import { ${agg.name}${agg.parts.length > 0 ? ", " + agg.parts.map((p) => p.name).join(", ") : ""} } from "./${camel(agg.name)}";`,
+    `import { ${agg.name}${agg.parts.length > 0 ? ", " + agg.parts.map((p) => p.name).join(", ") : ""} } from "./${lowerFirst(agg.name)}";`,
   );
   const voNames = ctx.valueObjects.map((v) => v.name);
   if (voNames.length > 0) {
