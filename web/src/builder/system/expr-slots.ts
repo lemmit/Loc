@@ -2,9 +2,11 @@ import { AstUtils, type AstNode } from "langium";
 import {
   isBoundedContext,
   type Aggregate,
+  type AssignOrCallStmt,
   type BindEntry,
   type BoundedContext,
   type DerivedProp,
+  type EmitStmt,
   type Expression,
   type FindDecl,
   type FunctionDecl,
@@ -55,8 +57,8 @@ export type ExprSlot =
   | { kind: "viewFilter"; owner: string }
   | { kind: "viewBind"; owner: string; name: string }
   | { kind: "findFilter"; owner: string; name: string }
-  | { kind: "stmtExpr"; owner: string; op: string; index: number }
-  | { kind: "wfStmt"; owner: string; index: number };
+  | { kind: "stmtExpr"; owner: string; op: string; index: number; field?: number }
+  | { kind: "wfStmt"; owner: string; index: number; field?: number };
 
 function membersOf(node: AstNode): readonly AstNode[] {
   if (node.$type === "Aggregate") return (node as Aggregate).members;
@@ -91,20 +93,60 @@ function findOperation(owner: AstNode | null, name: string): Operation | null {
   return (membersOf(owner).find((m): m is Operation => m.$type === "Operation" && (m as Operation).name === name) as Operation | undefined) ?? null;
 }
 
-/** The single editable expression of a statement, or null for kinds that don't
- *  carry one (emit / bare calls / assignments — deferred). */
-function stmtExprOf(stmt: Statement): Expression | null {
+// The editable expression a statement slot points at: the predicate of a
+// precondition/requires, a `let` value, an assignment's right-hand value, or
+// (with `field`) an emit field's value. Bare calls have no single value expr.
+function stmtSlotExpr(stmt: Statement, field?: number): Expression | null {
   if (stmt.$type === "PreconditionStmt" || stmt.$type === "RequiresStmt" || stmt.$type === "LetStmt") {
     return (stmt as { expr: Expression }).expr;
+  }
+  if (stmt.$type === "AssignOrCallStmt") {
+    return (stmt as AssignOrCallStmt).value ?? null;
+  }
+  if (stmt.$type === "EmitStmt" && field !== undefined) {
+    return (stmt as EmitStmt).fields[field]?.value ?? null;
   }
   return null;
 }
 
-/** Picker label prefix for a single-expression statement. */
-function stmtPrefix(stmt: Statement): string {
-  if (stmt.$type === "LetStmt") return `let ${(stmt as { name: string }).name} = `;
-  if (stmt.$type === "RequiresStmt") return "requires ";
-  return "precondition ";
+/** Picker label for a non-emit single-expression statement. */
+function stmtLabel(stmt: Statement, expr: Expression): string {
+  if (stmt.$type === "LetStmt") return `let ${(stmt as { name: string }).name} = ${printExpr(expr)}`;
+  if (stmt.$type === "RequiresStmt") return `requires ${printExpr(expr)}`;
+  if (stmt.$type === "PreconditionStmt") return `precondition ${printExpr(expr)}`;
+  if (stmt.$type === "AssignOrCallStmt") {
+    const a = stmt as AssignOrCallStmt;
+    return `${a.target?.$cstNode?.text ?? ""} ${a.op ?? "="} ${printExpr(expr)}`;
+  }
+  return printExpr(expr);
+}
+
+// Push one option per editable expression in a statement body — precondition /
+// requires / let / assignment value (one each), and one per emit field. Shared
+// by operations (stmtExpr slots) and workflows (wfStmt slots) via the slot/value
+// factories.
+function pushStatementOptions(
+  out: SlotOption[],
+  body: readonly Statement[],
+  labelPrefix: string,
+  mkSlot: (index: number, field?: number) => ExprSlot,
+  mkValue: (index: number, field?: number) => string,
+): void {
+  body.forEach((stmt, index) => {
+    if (stmt.$type === "EmitStmt") {
+      const emit = stmt as EmitStmt;
+      // `$refText` is the event name without triggering a linker deref (the
+      // playground parse is unlinked).
+      const ev = emit.event?.$refText ?? "event";
+      emit.fields.forEach((f, field) => {
+        out.push({ value: mkValue(index, field), label: `${labelPrefix}emit ${ev}.${f.name} = ${printExpr(f.value)}`, slot: mkSlot(index, field) });
+      });
+      return;
+    }
+    const expr = stmtSlotExpr(stmt);
+    if (!expr) return;
+    out.push({ value: mkValue(index), label: `${labelPrefix}${stmtLabel(stmt, expr)}`, slot: mkSlot(index) });
+  });
 }
 
 function findWorkflow(ast: Model, name: string): Workflow | null {
@@ -143,11 +185,11 @@ export function slotExpr(ast: Model, slot: ExprSlot): Expression | null {
   if (slot.kind === "stmtExpr") {
     const op = findOperation(findOwner(ast, slot.owner), slot.op);
     const stmt = op?.body[slot.index];
-    return stmt ? stmtExprOf(stmt) : null;
+    return stmt ? stmtSlotExpr(stmt, slot.field) : null;
   }
   if (slot.kind === "wfStmt") {
     const stmt = findWorkflow(ast, slot.owner)?.body[slot.index];
-    return stmt ? stmtExprOf(stmt) : null;
+    return stmt ? stmtSlotExpr(stmt, slot.field) : null;
   }
   const owner = findOwner(ast, slot.owner);
   if (!owner) return null;
@@ -189,26 +231,30 @@ export function exprSlotOptions(node: AstNode): SlotOption[] {
   for (const m of membersOf(node)) {
     if (m.$type !== "Operation") continue;
     const op = m as Operation;
-    op.body.forEach((stmt, index) => {
-      const expr = stmtExprOf(stmt);
-      if (!expr) return;
-      out.push({ value: `stmt:${op.name}:${index}`, label: `${op.name}: ${stmtPrefix(stmt)}${printExpr(expr)}`, slot: { kind: "stmtExpr", owner, op: op.name, index } });
-    });
+    pushStatementOptions(
+      out,
+      op.body,
+      `${op.name}: `,
+      (index, field) => ({ kind: "stmtExpr", owner, op: op.name, index, ...(field !== undefined ? { field } : {}) }),
+      (index, field) => (field !== undefined ? `stmt:${op.name}:${index}:${field}` : `stmt:${op.name}:${index}`),
+    );
   }
   return out;
 }
 
-/** Single-expression statements (precondition / requires / let) in a workflow
- *  body. Assignments / calls / `emit` carry no single expression. */
+/** Editable statement expressions in a workflow body — precondition / requires /
+ *  let / assignment value / emit field values. */
 export function workflowSlotOptions(node: AstNode): SlotOption[] {
   if (node.$type !== "Workflow") return [];
   const wf = node as Workflow;
   const out: SlotOption[] = [];
-  wf.body.forEach((stmt, index) => {
-    const expr = stmtExprOf(stmt);
-    if (!expr) return;
-    out.push({ value: `wf:${index}`, label: `${stmtPrefix(stmt)}${printExpr(expr)}`, slot: { kind: "wfStmt", owner: wf.name, index } });
-  });
+  pushStatementOptions(
+    out,
+    wf.body,
+    "",
+    (index, field) => ({ kind: "wfStmt", owner: wf.name, index, ...(field !== undefined ? { field } : {}) }),
+    (index, field) => (field !== undefined ? `wf:${index}:${field}` : `wf:${index}`),
+  );
   return out;
 }
 
