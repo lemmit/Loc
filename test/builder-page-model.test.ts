@@ -288,7 +288,17 @@ describe("page-builder model — container-with-props seed shape", () => {
     const handler = node.children.find((c) => c.slot === "onClick")!;
     expect(handler.name).toBe("Lambda");
     expect(handler.props.__block).toBe("1");
-    expect(handler.children.map((c) => c.props.src)).toEqual(["count := count + 1"]);
+    // The assignment statement is modelled with structured target/op/value.
+    const stmt = handler.children[0];
+    expect(stmt.name).toBe("Stmt");
+    expect(stmt.props).toMatchObject({ kind: "assign", target: "count", op: ":=", value: "count + 1" });
+  });
+
+  it("structures an assignment statement but keeps other statements raw", () => {
+    const node = seed('Table(rows: r, onRowClick: x => {\n  draft.id := x.id\n  refresh()\n}, Column("ID", o => Text(o.id)))');
+    const lambda = node.children.find((c) => c.slot === "onRowClick")!;
+    expect(lambda.children[0].props).toMatchObject({ kind: "assign", target: "draft.id", value: "x.id" });
+    expect(lambda.children[1].props.src).toBe("refresh()");
   });
 
   it("models a block-handler lambda slot as editable statement rows", () => {

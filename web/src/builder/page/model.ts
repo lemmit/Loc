@@ -1,4 +1,4 @@
-import type { CallArg, Expression } from "../../../../src/language/generated/ast.js";
+import type { CallArg, Expression, Statement } from "../../../../src/language/generated/ast.js";
 import { printExpr } from "../../../../src/language/print/index.js";
 
 // ---------------------------------------------------------------------------
@@ -344,6 +344,18 @@ export function seedFromBody(expr: Expression, components: ReadonlyMap<string, r
   return node;
 }
 
+// Seed one statement of a block-bodied lambda.  An assignment (`target op
+// value`) is modelled with structured target/op/value fields so it edits as
+// three controls; every other statement keeps its source verbatim in `src`.
+function seedStmt(s: Statement): BuilderNode {
+  const range = rangeStr(s);
+  const ext = range ? { __range: range } : {};
+  if (s.$type === "AssignOrCallStmt" && s.op && s.value) {
+    return { name: "Stmt", props: { kind: "assign", target: s.target.$cstNode?.text?.trim() ?? "", op: s.op, value: s.value.$cstNode?.text?.trim() ?? "", ...ext }, children: [] };
+  }
+  return { name: "Stmt", props: { src: s.$cstNode?.text?.trim() ?? "", ...ext }, children: [] };
+}
+
 function seedNode(expr: Expression, components: ReadonlyMap<string, readonly string[]>): BuilderNode {
   // Lambda — an expression body becomes the one child canvas; a block body
   // (`x => { … }`) becomes a list of editable `Stmt` rows (each statement's
@@ -353,7 +365,7 @@ function seedNode(expr: Expression, components: ReadonlyMap<string, readonly str
     return {
       name: "Lambda",
       props: { param: expr.param, __block: "1" },
-      children: expr.stmts.map((s) => ({ name: "Stmt" as const, props: { src: s.$cstNode?.text?.trim() ?? "", ...(rangeStr(s) ? { __range: rangeStr(s) } : {}) }, children: [] })),
+      children: expr.stmts.map(seedStmt),
     };
   }
   // match — predicate arms (cond + value child) plus an optional else child.
@@ -410,10 +422,13 @@ export function emitBody(node: BuilderNode): string {
   // as-yet-unfilled single-child slot emits an `Empty()` placeholder so the
   // source stays parseable while it's being built up in the canvas.
   const body = (n: BuilderNode): string => (n.children[0] ? emitBody(n.children[0]) : "Empty()");
-  if (node.name === "Stmt") return String(node.props.src ?? "");
+  if (node.name === "Stmt") {
+    if (node.props.kind === "assign") return `${node.props.target ?? ""} ${node.props.op ?? ":="} ${node.props.value ?? ""}`;
+    return String(node.props.src ?? "");
+  }
   if (node.name === "Lambda") {
     if (node.props.__block) {
-      const stmts = node.children.map((c) => String(c.props.src ?? "")).filter((s) => s !== "");
+      const stmts = node.children.map(emitBody).filter((s) => s.trim() !== "");
       return `${node.props.param ?? "x"} => {\n  ${stmts.join("\n  ")}\n}`;
     }
     return `${node.props.param ?? "x"} => ${body(node)}`;

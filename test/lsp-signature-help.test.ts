@@ -46,4 +46,16 @@ describe("SignatureHelpProvider", () => {
     expect(help?.signatures[0].label).toBe("tax(amount: decimal): decimal");
     expect(help?.activeParameter).toBe(0);
   });
+
+  it("shows a value-object constructor's properties as parameters", async () => {
+    const help = await sigAt(`
+      context Sales {
+        valueobject Money { amount: decimal currency: string }
+        aggregate Order {
+          derived total: Money = Money(0.0, <|>"USD")
+        }
+      }`);
+    expect(help?.signatures[0].label).toBe("Money(amount: decimal, currency: string)");
+    expect(help?.activeParameter).toBe(1);
+  });
 });

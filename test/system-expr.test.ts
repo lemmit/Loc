@@ -11,6 +11,7 @@ import {
   exprSlotOptions,
   listDerived,
   listInvariants,
+  exprHints,
   memberCandidates,
   repoSlotOptions,
   slotCandidates,
@@ -291,5 +292,11 @@ describe("structured expression editor — type-directed member candidates", () 
   it("returns an empty map for an expression with no member access", async () => {
     const m = await memberCandidates(sales, { kind: "invariant", owner: "Money", index: 0 });
     expect(m.size).toBe(0);
+  });
+
+  it("labels positional call arguments with the callee's parameter names", async () => {
+    // derived total = Money(lines.sum(l => l.subtotal.amount), "USD")
+    const h = await exprHints(sales, { kind: "derived", owner: "Order", name: "total" });
+    expect(h.argLabels.get("")).toEqual(["amount", "currency"]); // Money(amount, currency)
   });
 });

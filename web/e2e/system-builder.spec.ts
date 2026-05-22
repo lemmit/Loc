@@ -158,6 +158,60 @@ test("renames a field (and its usages) from the inspector", async ({ page }) => 
   await expect(names.nth(0)).toHaveValue("customerId");
 });
 
+test("adds every domain + infra construct kind from the palette", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  const nodes = page.locator(".react-flow__node");
+  await expect.poll(async () => nodes.count(), { timeout: 10_000 }).toBeGreaterThan(3);
+  const before = await nodes.count();
+
+  const kinds = ["valueobject", "event", "workflow", "repository", "view", "storage", "ui", "deployable", "api"];
+  for (const kind of kinds) {
+    await page.getByTestId(`c4system-add-${kind}`).click();
+  }
+
+  // Each add inserts a minimal valid construct → one new graph node each, no errors.
+  await expect.poll(async () => nodes.count(), { timeout: 10_000 }).toBe(before + kinds.length);
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+  for (const id of [
+    "valueobject:ValueObject1", "event:Event1", "workflow:Workflow1", "repository:Repository1", "view:View1",
+    "storage:Storage1", "ui:Ui1", "deployable:Deployable1", "api:Api1",
+  ]) {
+    await expect(page.locator(`[data-testid="rf__node-${id}"]`)).toBeVisible();
+  }
+});
+
+test("edits a repository find's parameters", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Fullstack \.NET \(Banking\)/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  // Accounts.byHolder(holder: Id<Customer>) — pick it and edit its params.
+  await page.locator('[data-testid="rf__node-repository:Accounts"]').click();
+  await page.getByTestId("c4system-find-pick").click();
+  await page.getByRole("option", { name: "byHolder", exact: true }).click();
+
+  const rows = page.getByTestId("c4system-param-row");
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first().getByTestId("c4system-field-name")).toHaveValue("holder");
+
+  await page.getByTestId("c4system-param-add").click();
+  await expect(page.getByTestId("c4system-param-row")).toHaveCount(2);
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+
+  await page.getByTestId("c4system-param-row").last().getByTestId("c4system-param-delete").click();
+  await expect(page.getByTestId("c4system-param-row")).toHaveCount(1);
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+});
+
 test("rebinds a repository's target aggregate from the inspector", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);
@@ -415,6 +469,10 @@ test("edits an assignment value inside an operation body", async ({ page }) => {
   await page.locator('[data-testid="rf__node-aggregate:Account"]').click();
   await page.getByTestId("c4system-expr-pick").click();
   await page.getByRole("option", { name: "deposit: balance := Money" }).click();
+
+  // The `Money(…)` call's positional args are labelled with the VO ctor's
+  // parameter names (type-resolved, async via the linked build).
+  await expect(page.getByTestId("c4expr").getByTestId("c4expr-arg-label").first()).toHaveText("amount:", { timeout: 10_000 });
 
   const op = () => page.getByTestId("c4expr").getByTestId("c4expr-op");
   await expect(op()).toHaveValue("+");

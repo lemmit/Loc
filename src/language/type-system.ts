@@ -3,12 +3,14 @@ import { AstUtils } from "langium";
 import type {
   Aggregate,
   BaseType,
+  CallExpr,
   EntityPart,
   EnumDecl,
   Expression,
   FindDecl,
   FunctionDecl,
   Lambda,
+  MemberAccess,
   Operation,
   Parameter,
   Repository,
@@ -22,6 +24,7 @@ import {
   isAggregate,
   isBinaryExpr,
   isBoolLit,
+  isBoundedContext,
   isCallExpr,
   isDecLit,
   isEntityPart,
@@ -838,6 +841,46 @@ export function stepIntoNode(t: DddType, name: string): AstNode | undefined {
       if (isDerivedProp(m) && m.name === name) return m;
       if (isFunctionDecl(m) && m.name === name) return m;
     }
+  }
+  return undefined;
+}
+
+export interface CalleeSignature {
+  name: string;
+  params: ReadonlyArray<{ name: string; type: TypeRef }>;
+  ret?: TypeRef;
+}
+
+/** Resolve a call's callee to its parameter signature — a function / operation
+ *  (its params) or a value-object constructor (its declared properties,
+ *  positional). Shared by the LSP signature-help provider and the Model
+ *  builder's structured editor. Undefined when the callee can't be resolved. */
+export function calleeSignature(call: CallExpr | MemberAccess): CalleeSignature | undefined {
+  if (isMemberAccess(call)) {
+    if (!call.call) return undefined;
+    const decl = stepIntoNode(typeOf(call.receiver, envForNode(call)), call.member);
+    if (decl && (isFunctionDecl(decl) || isOperation(decl))) {
+      return { name: call.member, params: decl.params, ret: isFunctionDecl(decl) ? decl.returnType : undefined };
+    }
+    return undefined;
+  }
+  const callee = call.callee;
+  if (!isNameRef(callee)) return undefined;
+  // Function / operation on the enclosing entity.
+  const owner =
+    AstUtils.getContainerOfType(call, isAggregate) ??
+    AstUtils.getContainerOfType(call, isEntityPart) ??
+    AstUtils.getContainerOfType(call, isValueObject);
+  for (const m of owner?.members ?? []) {
+    if ((isFunctionDecl(m) || isOperation(m)) && m.name === callee.name) {
+      return { name: m.name, params: m.params, ret: isFunctionDecl(m) ? m.returnType : undefined };
+    }
+  }
+  // Value-object constructor: its properties, positional.
+  const ctx = AstUtils.getContainerOfType(call, isBoundedContext);
+  const vo = ctx?.members.find((m): m is ValueObject => isValueObject(m) && m.name === callee.name);
+  if (vo) {
+    return { name: vo.name, params: vo.members.filter(isProperty).map((p) => ({ name: p.name, type: p.type })) };
   }
   return undefined;
 }

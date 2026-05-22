@@ -90,14 +90,16 @@ text stays the source of truth.
   edits as a switch, and `color:` (Badge/Alert) is a palette dropdown.
 - **Statement-level handler editor**: a block-bodied lambda (any named-arg
   handler — `Button(onClick:)`, form `onSubmit`, `Table(onRowClick:)`) seeds as a
-  `Lambda` node holding one editable `Stmt` row per statement (source kept
-  verbatim); rows are add/edit/delete/reorderable and round-trip.
+  `Lambda` node holding one editable `Stmt` row per statement; rows are
+  add/edit/delete/reorderable and round-trip. An **assignment** statement
+  (`target := value`, `+=`, `-=`) is structured into target / op / value
+  controls; other statements keep their verbatim source row.
 
 ## Open — expression / domain-logic surface
 
-- **Per-statement structure** — statement rows are raw source today; structured
-  editors per statement kind (`:=`, `call`, `emit`, `navigate`, `let`) are a
-  further step.
+- **Per-statement structure** — assignments are structured (target/op/value);
+  the remaining statement kinds (`call`, `emit`, `navigate`, `let`) still edit
+  as a raw source row — structured editors for them are a further step.
 - **`state := …`** page state declarations / assignments. Not modelled.
 - **More typed pickers**: enum-case values (needs the field's enum type) and
   repository finds (op/runs/aggregate/workflow/color/boolean pickers are done;
@@ -134,10 +136,14 @@ Done:
   (`web/src/builder/system/`): one node per construct, edges for the clear
   cross-references (repository→aggregate, api→module, deployable→module/ui/api,
   view→aggregate). Loads lazily (its own chunk) when the tab is opened.
-- **Editing**: select a node → see its printed source; **add** (module /
-  aggregate) and **delete** splice the backing CST range via `edit-engine.ts`
-  and write back through origin-tagged `onSourceChange` (Phase B sync). e2e:
-  `web/e2e/system-builder.spec.ts`.
+- **Editing**: select a node → see its printed source; **add** and **delete**
+  splice the backing CST range via `edit-engine.ts` and write back through
+  origin-tagged `onSourceChange` (Phase B sync). Add covers **every** node kind
+  from minimal valid templates (`constructTemplate`), parse-guarded before
+  applying: module + context-level domain constructs (aggregate / value object /
+  event / workflow, and repository / view — gated on an aggregate) into the first
+  context, and system-level infra (storage / ui / deployable, and api — gated on a
+  module) into the system. e2e: `web/e2e/system-builder.spec.ts`.
 - **Rename** a construct *and every reference to it* (repo `for`, `Id<X>` part
   types, `from`, deployable bindings). The main-thread parse isn't linked, so
   rename spins up a throwaway fully-built Langium document and uses
@@ -199,9 +205,13 @@ Done:
   in the modeller (`viewSlotOptions` in `expr-slots.ts`). Gated by
   `test/system-expr.test.ts` + e2e.
 - **Repository find editing** — repository nodes expose each `find` decl's
-  `where` filter through the same picker + editor (`repoSlotOptions`); finds with
-  no `where` are omitted. Gated by `test/system-expr.test.ts` + e2e. (Editing
-  find *params* is still open.)
+  `where` filter through the Expression picker (`repoSlotOptions`), and a **Finds**
+  section to edit each find's **return type** and **parameters** (add / delete /
+  retype / rename), mirroring field editing (`find-params.ts`: parse → mutate →
+  reprint the repository → splice). A param rename also rewrites its bare-`NameRef`
+  usages in that find's own filter (the param shadows any same-named member there),
+  so it's safe without the cross-document member resolver. Gated by
+  `test/system-expr.test.ts`, `test/system-find-params.test.ts` + e2e.
 - **Scope-aware name suggestions** — every `raw` leaf in the expression editor
   is an autocomplete fed the in-scope bare names (params, properties, derived
   props, helpers, enum values). The scope rules live in the IR: `inScopeNames`
@@ -223,6 +233,15 @@ Done:
   from rename.ts) + `memberCandidates` (a path-keyed map threaded into the
   editor by structural path). Gated by `test/type-system-members.test.ts`,
   `test/system-expr.test.ts` + e2e.
+- **Call argument labels (signature help)** — positional call / member-call
+  arguments are labelled with the callee's parameter names (`amount:`,
+  `currency:`), resolved by type. The single source is `calleeSignature` in
+  `src/language/type-system.ts` — a function/operation's params or a value-object
+  constructor's properties — **shared with the LSP signature-help provider**
+  (`ddd-signature-help.ts` delegates to it, and so gained VO-constructor
+  signatures). Labels ride the same async path-keyed hint map as member
+  completion (`exprHints` in `expr-slots.ts`). Gated by
+  `test/lsp-signature-help.test.ts`, `test/system-expr.test.ts` + e2e.
 - **Statement expressions in operation & workflow bodies** — the same
   "Expression" picker lists each aggregate operation's *and workflow's*
   statement expressions as `stmtExpr` / `wfStmt` slots: `precondition` /
@@ -244,7 +263,6 @@ Open:
   structured statement *targets* (assignment LValue / `emit` event picker) +
   bare-call statements — the statement *expressions* are structured today, but
   these non-expression parts stay text-row.
-- **Repository `find` editing** (params + where-clause expressions).
 - **Edge rebinding by dragging** connections on the canvas (inspector-Select
   rebinding already exists — see above); plus multi-valued deployable references
   (module bindings, `serves`, ui) which the single-Select rebind doesn't cover.

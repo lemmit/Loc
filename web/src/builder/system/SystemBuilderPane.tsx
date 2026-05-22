@@ -24,6 +24,7 @@ import { IDENTIFIER, renameConstruct, renameMember } from "./rename";
 import {
   addField,
   availableTypes,
+  baseLabel,
   deleteField,
   freshFieldName,
   isFieldKind,
@@ -32,6 +33,17 @@ import {
   type BaseSpec,
   type TypeSpec,
 } from "./fields";
+import {
+  addFindParam,
+  deleteFindParam,
+  findReturnSpec,
+  freshParamName,
+  listFindParams,
+  listFinds,
+  renameFindParam,
+  retypeFindParam,
+  setFindReturnType,
+} from "./find-params";
 import { currentTarget, isRebindKind, rebindReference, rebindTargets, targetKindOf } from "./rebind";
 import {
   addStatement,
@@ -43,7 +55,7 @@ import {
   type BodyLocator,
 } from "./body";
 import { BodyEditor } from "./BodyEditor";
-import { editExprSlot, exprSlotOptions, memberCandidates, repoSlotOptions, slotCandidates, slotExpr, viewSlotOptions, workflowSlotOptions, type ExprSlot } from "./expr-slots";
+import { editExprSlot, exprHints, exprSlotOptions, repoSlotOptions, slotCandidates, slotExpr, viewSlotOptions, workflowSlotOptions, type ExprSlot } from "./expr-slots";
 import { seedExpr } from "./expr-model";
 import { ExprSlotEditor, type ExprMode } from "./ExpressionEditor";
 
@@ -116,6 +128,66 @@ function insertIntoBlock(source: string, block: AstNode, text: string): string {
   return applyEdits(source, [{ offset: at, end: at, newText: text }]);
 }
 
+const CONSTRUCT_BASE: Partial<Record<NodeKind, string>> = {
+  aggregate: "Aggregate",
+  valueobject: "ValueObject",
+  event: "Event",
+  repository: "Repository",
+  view: "View",
+  workflow: "Workflow",
+  api: "Api",
+  storage: "Storage",
+  ui: "Ui",
+  deployable: "Deployable",
+};
+
+// Infra constructs live at system scope; domain constructs live in a context.
+const INFRA_KINDS = new Set<NodeKind>(["api", "storage", "ui", "deployable"]);
+
+function firstNodeName(ast: Model, type: string): string | undefined {
+  for (const n of AstUtils.streamAst(ast)) {
+    if (n.$type === type) return (n as { name?: string }).name;
+  }
+  return undefined;
+}
+const firstAggregateName = (ast: Model): string | undefined => firstNodeName(ast, "Aggregate");
+
+// Minimal-but-valid source for a freshly added construct. Constructs that
+// require a reference (repository/view → an aggregate, api → a module) return
+// null when none exists, so the add is skipped.
+function constructTemplate(kind: NodeKind, name: string, ast: Model): string | null {
+  switch (kind) {
+    case "aggregate":
+      return `\n    aggregate ${name} {\n    }\n`;
+    case "valueobject":
+      return `\n    valueobject ${name} {\n      value: string\n    }\n`;
+    case "event":
+      return `\n    event ${name} {\n    }\n`;
+    case "workflow":
+      return `\n    workflow ${name}() {\n    }\n`;
+    case "repository": {
+      const agg = firstAggregateName(ast);
+      return agg ? `\n    repository ${name} for ${agg} {\n    }\n` : null;
+    }
+    case "view": {
+      const agg = firstAggregateName(ast);
+      return agg ? `\n    view ${name} = ${agg} where true\n` : null;
+    }
+    case "storage":
+      return `\n  storage ${name} {\n    type: postgres\n  }\n`;
+    case "ui":
+      return `\n  ui ${name} {\n  }\n`;
+    case "deployable":
+      return `\n  deployable ${name} {\n    platform: hono\n  }\n`;
+    case "api": {
+      const mod = firstNodeName(ast, "Module");
+      return mod ? `\n  api ${name} from ${mod}\n` : null;
+    }
+    default:
+      return null;
+  }
+}
+
 export default function SystemBuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   return (
     <ReactFlowProvider>
@@ -180,6 +252,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const [opName, setOpName] = useState<string | null>(null);
   const [slotKey, setSlotKey] = useState<string | null>(null);
   const [exprMode, setExprMode] = useState<ExprMode>("structured");
+  const [findName, setFindName] = useState<string | null>(null);
 
   useEffect(() => {
     const sel = selectedId;
@@ -187,6 +260,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     setOpName(null);
     setSlotKey(null);
     setExprMode("structured");
+    setFindName(null);
   }, [selectedId]);
 
   useEffect(() => {
@@ -204,6 +278,8 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     if (nodesInitialized && graph) void rf.fitView({ padding: 0.15 });
   }, [nodesInitialized, graph, rf]);
 
+  const hasAggregate = useMemo(() => !!firstAggregateName(parsed.ast), [parsed]);
+  const hasModule = useMemo(() => !!firstNodeName(parsed.ast, "Module"), [parsed]);
   const typeOptions = useMemo(() => availableTypes(parsed.ast), [parsed]);
   const baseByLabel = useMemo(() => {
     const m = new Map<string, BaseSpec>();
@@ -264,15 +340,21 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     apply(insertIntoBlock(ctx.getSource(), system, text));
   };
 
-  const addAggregate = (): void => {
+  // Add a context-level construct (aggregate / value object / event / repository
+  // / view / workflow) into the first bounded context, from a minimal valid
+  // template. Repository / view need an aggregate to reference, so they're
+  // gated on one existing. The result is parse-guarded before it's applied.
+  const addConstruct = (kind: NodeKind): void => {
     const fresh = parseDdd(ctx.getSource());
-    const context = [...AstUtils.streamAst(fresh.ast)].find(
-      (n): n is BoundedContext => n.$type === "BoundedContext",
-    );
-    if (!context) return;
-    const name = freshName(fresh.ast, "aggregate", "Aggregate");
-    const text = `\n    aggregate ${name} {\n    }\n`;
-    apply(insertIntoBlock(ctx.getSource(), context, text));
+    const container: AstNode | undefined = INFRA_KINDS.has(kind)
+      ? fresh.ast.members.find((m): m is System => m.$type === "System")
+      : [...AstUtils.streamAst(fresh.ast)].find((n): n is BoundedContext => n.$type === "BoundedContext");
+    if (!container) return;
+    const name = freshName(fresh.ast, kind, CONSTRUCT_BASE[kind] ?? "Node");
+    const text = constructTemplate(kind, name, fresh.ast);
+    if (!text) return;
+    const next = insertIntoBlock(ctx.getSource(), container, text);
+    if (parseDdd(next).parserErrors.length === 0) apply(next);
   };
 
   const addFieldTo = (): void => {
@@ -296,6 +378,32 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     if (!selected) return;
     const next = deleteField(ctx.getSource(), selected.kind, selected.name, index);
     if (next != null) apply(next, true);
+  };
+
+  // Repository find params (only when a find is picked).
+  const applyFind = (next: string | null): void => {
+    if (next != null) apply(next, true);
+  };
+  const addParamTo = (): void => {
+    if (!selected || !findName) return;
+    const name = freshParamName(parsed.ast, selected.name, findName);
+    applyFind(addFindParam(ctx.getSource(), selected.name, findName, name, { base: { kind: "primitive", name: "string" }, array: false, optional: false }));
+  };
+  const setParamType = (index: number, spec: TypeSpec): void => {
+    if (!selected || !findName) return;
+    applyFind(retypeFindParam(ctx.getSource(), selected.name, findName, index, spec));
+  };
+  const removeParam = (index: number): void => {
+    if (!selected || !findName) return;
+    applyFind(deleteFindParam(ctx.getSource(), selected.name, findName, index));
+  };
+  const renameParam = (index: number, next: string): void => {
+    if (!selected || !findName) return;
+    applyFind(renameFindParam(ctx.getSource(), selected.name, findName, index, next));
+  };
+  const setReturn = (spec: TypeSpec): void => {
+    if (!selected || !findName) return;
+    applyFind(setFindReturnType(ctx.getSource(), selected.name, findName, spec));
   };
 
   const rebindTo = (target: string | null): void => {
@@ -357,9 +465,18 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         )}
       </Box>
       <InspectorPanel compact={compact} opened={inspectorOpen} onClose={() => setInspectorOpen(false)}>
-        <Group gap="xs" mb="xs">
-          <Button size="xs" variant="light" data-testid="c4system-add-module" onClick={addModule}>+ Module</Button>
-          <Button size="xs" variant="light" data-testid="c4system-add-aggregate" onClick={addAggregate}>+ Aggregate</Button>
+        <Group gap={4} mb="xs">
+          <Button size="compact-xs" variant="light" data-testid="c4system-add-module" onClick={addModule}>+ Module</Button>
+          <Button size="compact-xs" variant="light" data-testid="c4system-add-aggregate" onClick={() => addConstruct("aggregate")}>+ Aggregate</Button>
+          <Button size="compact-xs" variant="light" data-testid="c4system-add-valueobject" onClick={() => addConstruct("valueobject")}>+ Value object</Button>
+          <Button size="compact-xs" variant="light" data-testid="c4system-add-event" onClick={() => addConstruct("event")}>+ Event</Button>
+          <Button size="compact-xs" variant="light" data-testid="c4system-add-workflow" onClick={() => addConstruct("workflow")}>+ Workflow</Button>
+          <Button size="compact-xs" variant="light" data-testid="c4system-add-repository" disabled={!hasAggregate} onClick={() => addConstruct("repository")}>+ Repository</Button>
+          <Button size="compact-xs" variant="light" data-testid="c4system-add-view" disabled={!hasAggregate} onClick={() => addConstruct("view")}>+ View</Button>
+          <Button size="compact-xs" variant="default" data-testid="c4system-add-storage" onClick={() => addConstruct("storage")}>+ Storage</Button>
+          <Button size="compact-xs" variant="default" data-testid="c4system-add-ui" onClick={() => addConstruct("ui")}>+ UI</Button>
+          <Button size="compact-xs" variant="default" data-testid="c4system-add-deployable" onClick={() => addConstruct("deployable")}>+ Deployable</Button>
+          <Button size="compact-xs" variant="default" data-testid="c4system-add-api" disabled={!hasModule} onClick={() => addConstruct("api")}>+ API</Button>
         </Group>
         {!selected ? (
           <Text size="xs" c="dimmed">Select a node to inspect it, or add a construct.</Text>
@@ -463,6 +580,66 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
                 ))}
               </Stack>
             )}
+            {selected.kind === "repository" && listFinds(selected.ast).length > 0 && (
+              <Stack gap={4} data-testid="c4system-finds">
+                <Text size="xs" tt="uppercase" c="dimmed">Finds</Text>
+                <Select
+                  size="xs"
+                  placeholder="pick a find…"
+                  data={listFinds(selected.ast)}
+                  value={findName}
+                  data-testid="c4system-find-pick"
+                  onChange={setFindName}
+                />
+                {findName && (() => {
+                  const ret = findReturnSpec(parsed.ast, selected.name, findName);
+                  const params = listFindParams(parsed.ast, selected.name, findName);
+                  return (
+                    <Stack gap={4}>
+                      {ret && (
+                        <Group gap={4} align="center" wrap="nowrap">
+                          <Text size="xs" style={{ flex: "0 0 56px" }} c="dimmed">returns</Text>
+                          <Select
+                            size="xs"
+                            style={{ flex: 1, minWidth: 0 }}
+                            searchable
+                            data={typeOptions.map((o) => o.label)}
+                            value={baseLabel(ret.base)}
+                            data-testid="c4system-find-return"
+                            onChange={(label) => { const base = label ? baseByLabel.get(label) : undefined; if (base) setReturn({ base, array: ret.array, optional: ret.optional }); }}
+                          />
+                          <Checkbox size="xs" title="array []" checked={ret.array} onChange={(e) => setReturn({ base: ret.base, array: e.currentTarget.checked, optional: ret.optional })} />
+                          <Text size="xs" c="dimmed">[]</Text>
+                        </Group>
+                      )}
+                      <Group justify="space-between" align="center">
+                        <Text size="xs" c="dimmed">params</Text>
+                        <Button size="compact-xs" variant="light" data-testid="c4system-param-add" onClick={addParamTo}>+ param</Button>
+                      </Group>
+                      {params.map((p, i) => (
+                        <Group key={`${p.name}-${i}`} gap={4} align="center" wrap="nowrap" data-testid="c4system-param-row">
+                          <FieldNameInput name={p.name} onRename={(next) => renameParam(i, next)} />
+                          <Select
+                            size="xs"
+                            style={{ flex: 1, minWidth: 0 }}
+                            searchable
+                            data={typeOptions.map((o) => o.label)}
+                            value={p.baseLabel}
+                            data-testid="c4system-param-type"
+                            onChange={(label) => { const base = label ? baseByLabel.get(label) : undefined; if (base) setParamType(i, { base, array: p.array, optional: p.optional }); }}
+                          />
+                          <Checkbox size="xs" title="array []" checked={p.array} onChange={(e) => setParamType(i, { base: p.base, array: e.currentTarget.checked, optional: p.optional })} />
+                          <Text size="xs" c="dimmed">[]</Text>
+                          <Checkbox size="xs" title="optional ?" checked={p.optional} onChange={(e) => setParamType(i, { base: p.base, array: p.array, optional: e.currentTarget.checked })} />
+                          <Text size="xs" c="dimmed">?</Text>
+                          <Button size="compact-xs" variant="subtle" color="red" data-testid="c4system-param-delete" onClick={() => removeParam(i)}>×</Button>
+                        </Group>
+                      ))}
+                    </Stack>
+                  );
+                })()}
+              </Stack>
+            )}
             {selected.kind === "workflow" && (
               <BodyEditor
                 key={`${selected.id}:${rev}`}
@@ -521,7 +698,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
                         seed={seedExpr(expr)}
                         seedText={expr.$cstNode?.text ?? ""}
                         candidates={slotCandidates(parsed.ast, slot as ExprSlot)}
-                        loadMembers={() => memberCandidates(ctx.getSource(), slot as ExprSlot)}
+                        loadHints={() => exprHints(ctx.getSource(), slot as ExprSlot)}
                         mode={exprMode}
                         onMode={setExprMode}
                         onCommit={(text) => {
