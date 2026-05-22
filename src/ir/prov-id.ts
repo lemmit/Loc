@@ -43,6 +43,13 @@ export function stmtHasProv(s: StmtIR): s is ProvStmt {
   return (s.kind === "assign" || s.kind === "add" || s.kind === "remove") && s.prov !== undefined;
 }
 
+/** An operation carries provenance iff any of its statements is an
+ *  instrumented write-site.  Drives the per-aggregate "needs a save +
+ *  provenance-flush transaction" decision in the routes layer. */
+export function opHasProvSite(op: { statements: StmtIR[] }): boolean {
+  return op.statements.some(stmtHasProv);
+}
+
 /** True iff any aggregate operation in the system contains an
  *  instrumented provenanced write-site.  Drives emission of the runtime
  *  SDK + the `.loomsnap.json` artefact. */
@@ -69,6 +76,29 @@ export function contextsHaveProvSite(
       for (const op of agg.operations) {
         if (op.statements.some(stmtHasProv)) return true;
       }
+    }
+  }
+  return false;
+}
+
+/** True iff any aggregate (root or part) declares a `provenanced` field.
+ *  Drives the persistence *machinery* — the lineage types, co-located
+ *  `<field>_provenance` columns, repo projections, and wire DTO — which
+ *  follows the field's existence, not whether it is ever written.  (The
+ *  per-write *instrumentation* — the trace buffer, history flush, and
+ *  snapshot capture — stays keyed on write-sites; see `stmtHasProv`.) */
+export function contextsHaveProvenancedField(
+  contexts: {
+    aggregates: {
+      fields: { provenanced?: boolean }[];
+      parts: { fields: { provenanced?: boolean }[] }[];
+    }[];
+  }[],
+): boolean {
+  for (const ctx of contexts) {
+    for (const agg of ctx.aggregates) {
+      if (agg.fields.some((f) => f.provenanced)) return true;
+      if (agg.parts.some((p) => p.fields.some((f) => f.provenanced))) return true;
     }
   }
   return false;

@@ -1,5 +1,6 @@
 import type {
   AggregateIR,
+  AssociationIR,
   BoundedContextIR,
   ExprIR,
   FieldIR,
@@ -19,7 +20,10 @@ import { lowerFirst, plural, snake } from "../../../util/naming.js";
 // `where this.<col>` clause or by a convention-based parameter
 // match.  Without these, common reads degrade to sequential scans
 // once the table has more than a few hundred rows.
-export function renderSchema(ctx: BoundedContextIR): string {
+export function renderSchema(
+  ctx: BoundedContextIR,
+  opts: { audit?: boolean; provenance?: boolean } = {},
+): string {
   const tables: string[] = [];
   for (const agg of ctx.aggregates) {
     const indexed = indexedColumnsFor(agg, ctx);
@@ -27,15 +31,41 @@ export function renderSchema(ctx: BoundedContextIR): string {
     for (const part of agg.parts) {
       tables.push(emitTable(part.name, part.fields, agg.name, ctx, new Set()));
     }
+    // Many-to-many join tables for `Id<T>[]` reference collections.
+    for (const assoc of agg.associations ?? []) {
+      tables.push(emitJoinTable(assoc));
+    }
   }
+  if (opts.audit) tables.push(AUDIT_TABLE);
+  if (opts.provenance) tables.push(PROVENANCE_TABLE);
   const enumLines = ctx.enums.map(
     (e) =>
       `export const ${lowerFirst(e.name)}Enum = pgEnum("${snake(e.name)}", [${e.values.map((v) => `"${v}"`).join(", ")}]);`,
   );
+  // `primaryKey` is only needed when the context has at least one
+  // reference-collection join table; `jsonb` only when audit/provenance
+  // tables are emitted.  Keeping each out otherwise leaves every
+  // unaffected schema's import line byte-identical.
+  const hasJoinTables = ctx.aggregates.some((a) => (a.associations ?? []).length > 0);
+  const needsJsonb = opts.audit || opts.provenance;
+  const imports = [
+    "pgTable",
+    "text",
+    "integer",
+    "bigint",
+    "numeric",
+    "boolean",
+    "timestamp",
+    "pgEnum",
+    "uuid",
+    "index",
+    ...(hasJoinTables ? ["primaryKey"] : []),
+    ...(needsJsonb ? ["jsonb"] : []),
+  ].join(", ");
   return (
     joinLines(
       "// Auto-generated.",
-      'import { pgTable, text, integer, bigint, numeric, boolean, timestamp, pgEnum, uuid, index } from "drizzle-orm/pg-core";',
+      `import { ${imports} } from "drizzle-orm/pg-core";`,
       "",
       ...enumLines,
       "",
@@ -43,6 +73,83 @@ export function renderSchema(ctx: BoundedContextIR): string {
     ) + "\n"
   );
 }
+
+/** A many-to-many join table for an `Id<T>[]` reference collection.
+ * Two FK columns + an `ordinal` position so the collection's order
+ * survives a round-trip, a composite primary key over (owner, target)
+ * (so each pair is unique and the save upsert is idempotent), and an
+ * index on the target FK for the reverse membership query. */
+function emitJoinTable(assoc: AssociationIR): string {
+  const tableConst = joinTableConstName(assoc);
+  const ownerKey = joinColumnName(assoc.ownerFk);
+  const targetKey = joinColumnName(assoc.targetFk);
+  const lines: string[] = [];
+  lines.push(`export const ${tableConst} = pgTable("${assoc.joinTable}", {`);
+  lines.push(`  ${ownerKey}: text("${assoc.ownerFk}").notNull(),`);
+  lines.push(`  ${targetKey}: text("${assoc.targetFk}").notNull(),`);
+  lines.push(`  ordinal: integer("ordinal").notNull(),`);
+  lines.push(`}, (table) => ({`);
+  lines.push(
+    `  ${tableConst}Pk: primaryKey({ columns: [table.${ownerKey}, table.${targetKey}] }),`,
+  );
+  lines.push(
+    `  ${tableConst}TargetIdx: index("${assoc.joinTable}_${assoc.targetFk}_idx").on(table.${targetKey}),`,
+  );
+  lines.push(`}));`);
+  return lines.join("\n");
+}
+
+/** Drizzle `const` name for a join table — `trainer_party` →
+ * `trainerParty`.  Shared with the repository builder so both refer to
+ * the same `schema.<const>`. */
+export function joinTableConstName(assoc: AssociationIR): string {
+  return lowerFirst(camelizeSnake(assoc.joinTable));
+}
+
+/** Drizzle column-property key for a join FK — `pokemon_id` →
+ * `pokemonId`.  The SQL column name stays snake_case. */
+export function joinColumnName(fk: string): string {
+  return camelizeSnake(fk);
+}
+
+/** `trainer_party` → `trainerParty`; `pokemon_id` → `pokemonId`. */
+function camelizeSnake(s: string): string {
+  return s.replace(/_([a-z0-9])/g, (_m, c: string) => c.toUpperCase());
+}
+
+// Audit-log table.  Emitted only when the model declares at least one
+// `audited` operation.  One row per successful audited invocation, written
+// in the same transaction as the operation's aggregate save (atomic — the
+// row and the state change commit or roll back together).  See
+// `docs/proposals/audit-and-logging.md`.
+const AUDIT_TABLE = `export const auditRecords = pgTable("audit_records", {
+  auditId: text("audit_id").primaryKey(),
+  operationId: text("operation_id").notNull(),
+  action: text("action").notNull(),
+  targetType: text("target_type").notNull(),
+  targetId: text("target_id").notNull(),
+  actor: jsonb("actor"),
+  before: jsonb("before").notNull(),
+  after: jsonb("after").notNull(),
+  at: timestamp("at", { withTimezone: true }).notNull(),
+  status: text("status").notNull(),
+}, (t) => [index("audit_records_target_idx").on(t.targetType, t.targetId)]);`;
+
+// Provenance history table.  Emitted only when the model declares at least
+// one written `provenanced` field.  One append-only row per provenanced
+// write, inserted in the same transaction as the operation's aggregate
+// save (atomic).  The current lineage is *also* stored co-located on the
+// aggregate row's `<field>_provenance` jsonb column; this table is the
+// full per-write history.
+const PROVENANCE_TABLE = `export const provenanceRecords = pgTable("provenance_records", {
+  traceId: text("trace_id").primaryKey(),
+  snapshotId: text("snapshot_id").notNull(),
+  targetType: text("target_type").notNull(),
+  field: text("field").notNull(),
+  inputs: jsonb("inputs").notNull(),
+  computedValue: jsonb("computed_value"),
+  at: timestamp("at", { withTimezone: true }).notNull(),
+}, (t) => [index("provenance_records_target_idx").on(t.targetType, t.field)]);`;
 
 /** Field names on the aggregate root that should be indexed so the
  * generated finds don't run sequential scans.  Walks every find: if
@@ -116,6 +223,15 @@ function emitTable(
   }
   for (const f of fields) {
     lines.push(...drizzleColumnLines(f, ctx).map((s) => `  ${s}`));
+  }
+  // Co-located provenance: a `<field>_provenance` jsonb column holding the
+  // current lineage for each provenanced field.  Typed (via `$type`) as
+  // the ProvLineage shape so save/hydrate/toWire round-trip without casts.
+  for (const f of fields) {
+    if (!f.provenanced) continue;
+    lines.push(
+      `  ${f.name}_provenance: jsonb("${snake(f.name)}_provenance").$type<import("../domain/provenance").ProvLineage>(),`,
+    );
   }
   // Index callback — Drizzle's pgTable accepts a second arg
   // `(table) => ({ idxName: index(...).on(table.col) })`.  We emit
@@ -215,6 +331,10 @@ function drizzleColumnLinesForName(
     case "entity":
       return [`${fieldName}: text("${colName}")${not},`];
     case "array":
+      // Collections of references (`Id<T>[]`) are persisted as a
+      // many-to-many join table (emitted separately in renderSchema),
+      // so they contribute no column on the owning table.
+      if (inner.element.kind === "id") return [];
       return [`${fieldName}: text("${colName}")${not}, // arrays not supported as inline columns`];
     case "optional":
       return drizzleColumnLinesForName(fieldName, inner.inner, true, ctx);

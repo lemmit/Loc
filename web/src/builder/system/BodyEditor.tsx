@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { Autocomplete, Button, Group, Select, Stack, Text, TextInput, Textarea } from "@mantine/core";
+import { Autocomplete, Box, Button, Group, Select, Stack, Text, TextInput, Textarea } from "@mantine/core";
 import { ASSIGN_OPS } from "./expr-model";
 import type { StmtView } from "./body";
 
@@ -24,11 +24,16 @@ interface BodyEditorProps {
   onDelete: (index: number) => void;
   onMove: (index: number, dir: -1 | 1) => void;
   onAdd: (text: string) => boolean;
-  /** Inline structured editor for assignment `index`'s value — rendered in
-   *  place of the text field while that row is expanded; null when collapsed. */
-  renderValueEditor?: (index: number) => ReactNode;
-  /** Toggle the inline structured value editor for assignment `index`. */
-  onToggleValueEditor?: (index: number) => void;
+  /** Whether statement `index` (optionally its `field`-th sub-expression) has an
+   *  editable expression — i.e. should offer the inline structured `ƒx` editor. */
+  hasValueEditor?: (index: number, field?: number) => boolean;
+  /** In-scope names for a bare call's head (receiver) Autocomplete at `index`. */
+  headCandidates?: (index: number) => string[];
+  /** Inline structured editor for a statement's expression — rendered in place
+   *  of the text field while that row is expanded; null when collapsed. */
+  renderValueEditor?: (index: number, field?: number) => ReactNode;
+  /** Toggle the inline structured editor for a statement's expression. */
+  onToggleValueEditor?: (index: number, field?: number) => void;
 }
 
 const MONO = { input: { fontFamily: "monospace", fontSize: 11 } };
@@ -36,17 +41,23 @@ const MONO = { input: { fontFamily: "monospace", fontSize: 11 } };
 function viewText(v: StmtView): string {
   if (v.kind === "assign") return `${v.target} ${v.op} ${v.value}`;
   if (v.kind === "call") return `${v.head}(${v.args.join(", ")})`;
+  if (v.kind === "emit") return `emit ${v.event} { ${v.fields.map((f) => `${f.name}: ${f.value}`).join(", ")} }`;
   return v.src;
 }
 
 // Bare-call row: a call head (`recv.method`) plus one editable input per
 // argument, with add / delete. Reconstructs `head(a, b, …)` (empty args
-// dropped). Args are controlled so add / delete stay correct.
-function CallRow({ view, error, onCommit, onClearError }: {
+// dropped). Args are controlled so add / delete stay correct. Each argument also
+// offers a `ƒx` toggle that swaps its text field for the inline structured
+// editor (which edits just that argument's expression).
+function CallRow({ view, headCandidates, error, onCommit, onClearError, renderArgEditor, onToggleArg }: {
   view: { head: string; args: string[] };
+  headCandidates: string[];
   error: boolean;
   onCommit: (text: string) => void;
   onClearError: () => void;
+  renderArgEditor?: (argIndex: number) => ReactNode;
+  onToggleArg?: (argIndex: number) => void;
 }): JSX.Element {
   const [head, setHead] = useState(view.head);
   const [args, setArgs] = useState<string[]>(view.args);
@@ -55,50 +66,70 @@ function CallRow({ view, error, onCommit, onClearError }: {
   return (
     <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
       <Group gap={4} wrap="nowrap" align="center">
-        <TextInput
+        <Autocomplete
           size="xs"
           style={{ flex: 1, minWidth: 0 }}
+          data={headCandidates}
           defaultValue={head}
           error={error ? "invalid" : undefined}
           data-testid="c4system-call-head"
           aria-label="call target"
           styles={MONO}
           onFocus={onClearError}
-          onChange={(e) => setHead(e.currentTarget.value)}
+          onChange={(v) => setHead(v)}
           onBlur={() => onCommit(reconstruct(head, args))}
         />
         <Button size="compact-xs" variant="subtle" data-testid="c4system-call-arg-add" onClick={() => setArgs((p) => [...p, ""])}>
           + arg
         </Button>
       </Group>
-      {args.map((arg, i) => (
-        <Group key={i} gap={4} wrap="nowrap" align="center" style={{ paddingLeft: 12 }}>
-          <TextInput
-            size="xs"
-            style={{ flex: 1, minWidth: 0 }}
-            value={arg}
-            data-testid="c4system-call-arg"
-            aria-label={`argument ${i + 1}`}
-            styles={MONO}
-            onFocus={onClearError}
-            onChange={(e) => setArgs((prev) => prev.map((x, j) => (j === i ? e.currentTarget.value : x)))}
-            onBlur={() => onCommit(reconstruct(head, args))}
-          />
-          <Button
-            size="compact-xs"
-            variant="subtle"
-            color="red"
-            data-testid="c4system-call-arg-del"
-            onClick={() => {
-              const next = args.filter((_, j) => j !== i);
-              setArgs(next);
-              onCommit(reconstruct(head, next));
-            }}
-          >
-            ×
-          </Button>
-        </Group>
-      ))}
+      {args.map((arg, i) => {
+        const argEditor = renderArgEditor?.(i) ?? null;
+        const structured = argEditor != null;
+        return (
+          <Group key={i} gap={4} wrap="nowrap" align="flex-start" style={{ paddingLeft: 12 }}>
+            {structured ? (
+              <Box style={{ flex: 1, minWidth: 0 }}>{argEditor}</Box>
+            ) : (
+              <TextInput
+                size="xs"
+                style={{ flex: 1, minWidth: 0 }}
+                value={arg}
+                data-testid="c4system-call-arg"
+                aria-label={`argument ${i + 1}`}
+                styles={MONO}
+                onFocus={onClearError}
+                onChange={(e) => setArgs((prev) => prev.map((x, j) => (j === i ? e.currentTarget.value : x)))}
+                onBlur={() => onCommit(reconstruct(head, args))}
+              />
+            )}
+            {onToggleArg && (
+              <Button
+                size="compact-xs"
+                variant={structured ? "filled" : "subtle"}
+                data-testid="c4system-call-arg-structured"
+                title="edit the argument structurally"
+                onClick={() => onToggleArg(i)}
+              >
+                ƒx
+              </Button>
+            )}
+            <Button
+              size="compact-xs"
+              variant="subtle"
+              color="red"
+              data-testid="c4system-call-arg-del"
+              onClick={() => {
+                const next = args.filter((_, j) => j !== i);
+                setArgs(next);
+                onCommit(reconstruct(head, next));
+              }}
+            >
+              ×
+            </Button>
+          </Group>
+        );
+      })}
     </Stack>
   );
 }
@@ -179,7 +210,152 @@ function AssignRow({ view, targets, valueEditor, onToggleEditor, error, onCommit
   );
 }
 
-export function BodyEditor({ statements, targets = [], onEdit, onDelete, onMove, onAdd, renderValueEditor, onToggleValueEditor }: BodyEditorProps): JSX.Element {
+// Emit row: the event (a label — repoint via the inspector's Emits picker) plus
+// one `name: value` row per field, with add / delete. Each field value is a text
+// input with a `ƒx` toggle to the inline structured editor (which edits just
+// that field's value expression). Reconstructs `emit Event { a: x, b: y }`.
+function EmitRow({ view, error, onCommit, onClearError, renderFieldEditor, onToggleField }: {
+  view: { event: string; fields: { name: string; value: string }[] };
+  error: boolean;
+  onCommit: (text: string) => void;
+  onClearError: () => void;
+  renderFieldEditor?: (fieldIndex: number) => ReactNode;
+  onToggleField?: (fieldIndex: number) => void;
+}): JSX.Element {
+  const [fields, setFields] = useState(view.fields);
+  const reconstruct = (fs: { name: string; value: string }[]): string => {
+    const body = fs
+      .filter((f) => f.name.trim() !== "" && f.value.trim() !== "")
+      .map((f) => `${f.name.trim()}: ${f.value.trim()}`)
+      .join(", ");
+    return `emit ${view.event} {${body ? ` ${body} ` : ""}}`;
+  };
+  const setField = (i: number, patch: Partial<{ name: string; value: string }>): void =>
+    setFields((prev) => prev.map((f, j) => (j === i ? { ...f, ...patch } : f)));
+  return (
+    <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
+      <Group gap={4} wrap="nowrap" align="center">
+        <Text size="xs" c="dimmed" style={{ fontFamily: "monospace" }}>emit {view.event}</Text>
+        <Button size="compact-xs" variant="subtle" data-testid="c4system-emit-field-add" onClick={() => setFields((p) => [...p, { name: "", value: "" }])}>
+          + field
+        </Button>
+      </Group>
+      {fields.map((f, i) => {
+        const editor = renderFieldEditor?.(i) ?? null;
+        const structured = editor != null;
+        return (
+          <Group key={i} gap={4} wrap="nowrap" align="flex-start" style={{ paddingLeft: 12 }}>
+            <TextInput
+              size="xs"
+              w={84}
+              value={f.name}
+              data-testid="c4system-emit-field-name"
+              aria-label={`field ${i + 1} name`}
+              styles={MONO}
+              onFocus={onClearError}
+              onChange={(e) => setField(i, { name: e.currentTarget.value })}
+              onBlur={() => onCommit(reconstruct(fields))}
+            />
+            <Text size="xs" c="dimmed" style={{ paddingTop: 4 }}>:</Text>
+            {structured ? (
+              <Box style={{ flex: 1, minWidth: 0 }}>{editor}</Box>
+            ) : (
+              <TextInput
+                size="xs"
+                style={{ flex: 1, minWidth: 0 }}
+                value={f.value}
+                error={error ? "invalid" : undefined}
+                data-testid="c4system-emit-field-value"
+                aria-label={`field ${i + 1} value`}
+                styles={MONO}
+                onFocus={onClearError}
+                onChange={(e) => setField(i, { value: e.currentTarget.value })}
+                onBlur={() => onCommit(reconstruct(fields))}
+              />
+            )}
+            {onToggleField && (
+              <Button
+                size="compact-xs"
+                variant={structured ? "filled" : "subtle"}
+                data-testid="c4system-emit-field-structured"
+                title="edit the field value structurally"
+                onClick={() => onToggleField(i)}
+              >
+                ƒx
+              </Button>
+            )}
+            <Button
+              size="compact-xs"
+              variant="subtle"
+              color="red"
+              data-testid="c4system-emit-field-del"
+              onClick={() => {
+                const next = fields.filter((_, j) => j !== i);
+                setFields(next);
+                onCommit(reconstruct(next));
+              }}
+            >
+              ×
+            </Button>
+          </Group>
+        );
+      })}
+    </Stack>
+  );
+}
+
+// A single-text statement row (precondition / requires / let / …). When the
+// statement has an editable expression, the `ƒx` toggle swaps the text for the
+// inline structured editor — which edits just the expression, leaving the
+// keyword (and a `let` binding's name) untouched in source.
+function OtherRow({ src, valueEditor, onToggleEditor, error, onCommit, onClearError }: {
+  src: string;
+  valueEditor: ReactNode;
+  onToggleEditor?: () => void;
+  error: boolean;
+  onCommit: (text: string) => void;
+  onClearError: () => void;
+}): JSX.Element {
+  const structured = valueEditor != null;
+  return (
+    <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
+      <Group gap={4} wrap="nowrap" align="flex-start">
+        {structured ? (
+          <Text size="xs" c="dimmed" style={{ fontFamily: "monospace", paddingTop: 4 }}>
+            {src.trimStart().split(/\s+/)[0]}
+          </Text>
+        ) : (
+          <Textarea
+            size="xs"
+            autosize
+            minRows={1}
+            style={{ flex: 1, minWidth: 0 }}
+            defaultValue={src}
+            error={error ? "invalid" : undefined}
+            data-testid="c4system-stmt"
+            styles={MONO}
+            onFocus={onClearError}
+            onBlur={(e) => onCommit(e.currentTarget.value)}
+          />
+        )}
+        {onToggleEditor && (
+          <Button
+            size="compact-xs"
+            variant={structured ? "filled" : "subtle"}
+            data-testid="c4system-stmt-structured"
+            title="edit the expression structurally"
+            onClick={onToggleEditor}
+          >
+            ƒx
+          </Button>
+        )}
+      </Group>
+      {structured && valueEditor}
+    </Stack>
+  );
+}
+
+export function BodyEditor({ statements, targets = [], onEdit, onDelete, onMove, onAdd, hasValueEditor, headCandidates, renderValueEditor, onToggleValueEditor }: BodyEditorProps): JSX.Element {
   const [errorAt, setErrorAt] = useState<number | null>(null);
   const [draftAdd, setDraftAdd] = useState("");
   const [addError, setAddError] = useState(false);
@@ -224,22 +400,30 @@ export function BodyEditor({ statements, targets = [], onEdit, onDelete, onMove,
             ) : s.kind === "call" ? (
               <CallRow
                 view={s}
+                headCandidates={headCandidates?.(i) ?? []}
                 error={errorAt === i}
                 onClearError={() => errorAt === i && setErrorAt(null)}
                 onCommit={(text) => commitEdit(i, original, text)}
+                renderArgEditor={(a) => (hasValueEditor?.(i, a) ? (renderValueEditor?.(i, a) ?? null) : null)}
+                onToggleArg={onToggleValueEditor ? (a) => onToggleValueEditor(i, a) : undefined}
+              />
+            ) : s.kind === "emit" ? (
+              <EmitRow
+                view={s}
+                error={errorAt === i}
+                onClearError={() => errorAt === i && setErrorAt(null)}
+                onCommit={(text) => commitEdit(i, original, text)}
+                renderFieldEditor={(f) => (hasValueEditor?.(i, f) ? (renderValueEditor?.(i, f) ?? null) : null)}
+                onToggleField={onToggleValueEditor ? (f) => onToggleValueEditor(i, f) : undefined}
               />
             ) : (
-              <Textarea
-                size="xs"
-                autosize
-                minRows={1}
-                style={{ flex: 1, minWidth: 0 }}
-                defaultValue={s.src}
-                error={errorAt === i ? "invalid" : undefined}
-                data-testid="c4system-stmt"
-                styles={MONO}
-                onFocus={() => errorAt === i && setErrorAt(null)}
-                onBlur={(e) => commitEdit(i, s.src, e.currentTarget.value)}
+              <OtherRow
+                src={s.src}
+                valueEditor={hasValueEditor?.(i) ? (renderValueEditor?.(i) ?? null) : null}
+                onToggleEditor={hasValueEditor?.(i) && onToggleValueEditor ? () => onToggleValueEditor(i) : undefined}
+                error={errorAt === i}
+                onClearError={() => errorAt === i && setErrorAt(null)}
+                onCommit={(text) => commitEdit(i, s.src, text)}
               />
             )}
             <Button size="compact-xs" variant="subtle" data-testid="c4system-stmt-up" disabled={i === 0} onClick={() => onMove(i, -1)}>

@@ -63,6 +63,29 @@ export interface ContainmentIR {
   collection: boolean;
 }
 
+/** A many-to-many association derived from an aggregate field whose
+ * type is a collection of references to another aggregate
+ * (`field: Id<Target>[]`).  Populated by `enrichLoomModel`; backends
+ * that persist relationally emit a join table from this rather than
+ * re-deriving it.  See `src/ir/enrichments.ts`. */
+export interface AssociationIR {
+  /** The owning aggregate's field name (`party`). */
+  fieldName: string;
+  /** The aggregate that declares the field (`Trainer`). */
+  ownerAgg: string;
+  /** The referenced aggregate (`Pokemon`). */
+  targetAgg: string;
+  /** The id value type of the target reference. */
+  valueType: IdValueType;
+  /** Join-table name, `snake(owner)_snake(field)` — distinct per
+   * field even when several fields target the same aggregate. */
+  joinTable: string;
+  /** FK column pointing at the owner row, `snake(owner)_id`. */
+  ownerFk: string;
+  /** FK column pointing at the target row, `snake(target)_id`. */
+  targetFk: string;
+}
+
 export interface DerivedIR {
   name: string;
   type: TypeIR;
@@ -101,6 +124,12 @@ export interface OperationIR {
    * itself does NOT get a method body for an extern operation;
    * the user owns the business decision. */
   extern: boolean;
+  /** When true, every HTTP invocation of this operation appends an
+   * audit record (who/what/when + before/after wire snapshot) to the
+   * generated Hono project's in-memory audit sink.  Inert on private
+   * operations (no route) and on non-TS backends (no audit emission).
+   * See `docs/proposals/audit-and-logging.md`. */
+  audited: boolean;
 }
 
 export interface EntityPartIR {
@@ -152,6 +181,10 @@ export interface AggregateIR {
   /** Canonical JSON-on-the-wire field list.  Populated by
    * `enrichLoomModel`. */
   wireShape?: WireField[];
+  /** Many-to-many associations derived from `Id<Target>[]` fields.
+   * Populated by `enrichLoomModel`; one entry per reference-collection
+   * field.  Empty array when the aggregate has none. */
+  associations?: AssociationIR[];
 }
 
 export interface TestIR {

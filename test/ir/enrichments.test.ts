@@ -69,3 +69,39 @@ describe("enrichment — auto findAll", () => {
     }
   });
 });
+
+describe("enrichment — associations (Id<T>[] join tables)", () => {
+  const ASSOC_SRC = `
+    context Roster {
+      aggregate Pokemon { species: string }
+      aggregate Trainer {
+        name: string
+        party: Id<Pokemon>[]
+        caught: Id<Pokemon>[]
+      }
+      repository Trainers for Trainer { }
+    }
+  `;
+
+  it("derives one association per Id<T>[] field with snake-cased join metadata", async () => {
+    const loom = await buildLoomModel(ASSOC_SRC);
+    const trainer = allAggregates(loom).find((a) => a.name === "Trainer")!;
+    expect(trainer.associations?.map((a) => a.joinTable)).toEqual([
+      "trainer_party",
+      "trainer_caught",
+    ]);
+    const party = trainer.associations!.find((a) => a.fieldName === "party")!;
+    expect(party).toMatchObject({
+      ownerAgg: "Trainer",
+      targetAgg: "Pokemon",
+      ownerFk: "trainer_id",
+      targetFk: "pokemon_id",
+    });
+  });
+
+  it("leaves associations empty for aggregates without reference collections", async () => {
+    const loom = await buildLoomModel(ASSOC_SRC);
+    const pokemon = allAggregates(loom).find((a) => a.name === "Pokemon")!;
+    expect(pokemon.associations).toEqual([]);
+  });
+});

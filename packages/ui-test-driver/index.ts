@@ -27,6 +27,12 @@ export {
   type DriverResponse,
 } from "./postmessage-transport.js";
 export { serveDriverOps, type ServeDriverOptions } from "./serve-driver.js";
+export {
+  createLocatorMatchers,
+  type LocatorAssertions,
+  type AssertableLocator,
+  type AssertionOptions,
+} from "./locator-assertions.js";
 // `captureNode` is intentionally NOT re-exported here: that would make
 // importing this barrel eagerly load `html-to-image`. Screenshot capture
 // is reached lazily by the "screenshot" driver op, or explicitly via the

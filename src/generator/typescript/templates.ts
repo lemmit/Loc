@@ -6,6 +6,11 @@ export { renderAggregate } from "./templates/aggregate.tpl.js";
 export { renderEvents } from "./templates/events.tpl.js";
 export { renderIds } from "./templates/ids.tpl.js";
 export { renderHttpIndex } from "./templates/routes.tpl.js";
-export { renderSchema, valueObjectColumnNames } from "./templates/schema.tpl.js";
+export {
+  renderSchema,
+  valueObjectColumnNames,
+  joinTableConstName,
+  joinColumnName,
+} from "./templates/schema.tpl.js";
 export { renderTestsFile } from "./templates/tests.tpl.js";
 export { renderEnumsAndValueObjects } from "./templates/value-objects.tpl.js";

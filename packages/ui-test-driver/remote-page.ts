@@ -42,6 +42,21 @@ export class RemoteLocator {
   ): RemoteLocator {
     return this.extend({ k: "getByRole", role, name: opts?.name, exact: opts?.exact });
   }
+  getByText(text: string, opts?: { exact?: boolean }): RemoteLocator {
+    return this.extend({ k: "getByText", text, exact: opts?.exact });
+  }
+  getByLabel(text: string, opts?: { exact?: boolean }): RemoteLocator {
+    return this.extend({ k: "getByLabel", text, exact: opts?.exact });
+  }
+  getByPlaceholder(text: string, opts?: { exact?: boolean }): RemoteLocator {
+    return this.extend({ k: "getByPlaceholder", text, exact: opts?.exact });
+  }
+  getByTitle(text: string, opts?: { exact?: boolean }): RemoteLocator {
+    return this.extend({ k: "getByTitle", text, exact: opts?.exact });
+  }
+  getByAltText(text: string, opts?: { exact?: boolean }): RemoteLocator {
+    return this.extend({ k: "getByAltText", text, exact: opts?.exact });
+  }
   locator(selector: string): RemoteLocator {
     return this.extend({ k: "locator", selector });
   }
@@ -51,8 +66,16 @@ export class RemoteLocator {
   first(): RemoteLocator {
     return this.extend({ k: "first" });
   }
+  last(): RemoteLocator {
+    return this.extend({ k: "last" });
+  }
+  nth(index: number): RemoteLocator {
+    return this.extend({ k: "nth", index });
+  }
 
-  private async run(op: DriverOp): Promise<string | number | undefined> {
+  private async run(
+    op: DriverOp,
+  ): Promise<string | number | boolean | undefined> {
     const r = await this.transport.send(op);
     if (!r.ok) throw new Error(r.message);
     return r.value;
@@ -88,6 +111,41 @@ export class RemoteLocator {
   async count(): Promise<number> {
     return Number((await this.run({ kind: "locator", op: "count", chain: this.chain })) ?? 0);
   }
+  async inputValue(opts?: { timeout?: number }): Promise<string> {
+    return String(
+      (await this.run({
+        kind: "locator",
+        op: "inputValue",
+        chain: this.chain,
+        timeout: opts?.timeout,
+      })) ?? "",
+    );
+  }
+  async isVisible(): Promise<boolean> {
+    return Boolean(
+      await this.run({ kind: "locator", op: "isVisible", chain: this.chain }),
+    );
+  }
+  async isChecked(opts?: { timeout?: number }): Promise<boolean> {
+    return Boolean(
+      await this.run({
+        kind: "locator",
+        op: "isChecked",
+        chain: this.chain,
+        timeout: opts?.timeout,
+      }),
+    );
+  }
+  async isEnabled(opts?: { timeout?: number }): Promise<boolean> {
+    return Boolean(
+      await this.run({
+        kind: "locator",
+        op: "isEnabled",
+        chain: this.chain,
+        timeout: opts?.timeout,
+      }),
+    );
+  }
   async waitFor(opts?: {
     state?: "visible" | "attached" | "hidden";
     timeout?: number;
@@ -97,6 +155,51 @@ export class RemoteLocator {
       op: "waitFor",
       chain: this.chain,
       state: opts?.state,
+      timeout: opts?.timeout,
+    });
+  }
+  private async act(
+    op: "hover" | "dblclick" | "clear" | "check" | "uncheck" | "focus" | "blur",
+    opts?: { timeout?: number },
+  ): Promise<void> {
+    await this.run({ kind: "locator", op, chain: this.chain, timeout: opts?.timeout });
+  }
+  async hover(opts?: { timeout?: number }): Promise<void> {
+    await this.act("hover", opts);
+  }
+  async dblclick(opts?: { timeout?: number }): Promise<void> {
+    await this.act("dblclick", opts);
+  }
+  async clear(opts?: { timeout?: number }): Promise<void> {
+    await this.act("clear", opts);
+  }
+  async check(opts?: { timeout?: number }): Promise<void> {
+    await this.act("check", opts);
+  }
+  async uncheck(opts?: { timeout?: number }): Promise<void> {
+    await this.act("uncheck", opts);
+  }
+  async focus(opts?: { timeout?: number }): Promise<void> {
+    await this.act("focus", opts);
+  }
+  async blur(opts?: { timeout?: number }): Promise<void> {
+    await this.act("blur", opts);
+  }
+  async press(key: string, opts?: { timeout?: number }): Promise<void> {
+    await this.run({
+      kind: "locator",
+      op: "press",
+      chain: this.chain,
+      key,
+      timeout: opts?.timeout,
+    });
+  }
+  async selectOption(value: string, opts?: { timeout?: number }): Promise<void> {
+    await this.run({
+      kind: "locator",
+      op: "selectOption",
+      chain: this.chain,
+      value,
       timeout: opts?.timeout,
     });
   }
@@ -111,6 +214,31 @@ export class RemotePage {
   getByRole(role: string, opts?: { name?: string; exact?: boolean }): RemoteLocator {
     return new RemoteLocator(this.transport, [
       { k: "getByRole", role, name: opts?.name, exact: opts?.exact },
+    ]);
+  }
+  getByText(text: string, opts?: { exact?: boolean }): RemoteLocator {
+    return new RemoteLocator(this.transport, [
+      { k: "getByText", text, exact: opts?.exact },
+    ]);
+  }
+  getByLabel(text: string, opts?: { exact?: boolean }): RemoteLocator {
+    return new RemoteLocator(this.transport, [
+      { k: "getByLabel", text, exact: opts?.exact },
+    ]);
+  }
+  getByPlaceholder(text: string, opts?: { exact?: boolean }): RemoteLocator {
+    return new RemoteLocator(this.transport, [
+      { k: "getByPlaceholder", text, exact: opts?.exact },
+    ]);
+  }
+  getByTitle(text: string, opts?: { exact?: boolean }): RemoteLocator {
+    return new RemoteLocator(this.transport, [
+      { k: "getByTitle", text, exact: opts?.exact },
+    ]);
+  }
+  getByAltText(text: string, opts?: { exact?: boolean }): RemoteLocator {
+    return new RemoteLocator(this.transport, [
+      { k: "getByAltText", text, exact: opts?.exact },
     ]);
   }
   locator(selector: string): RemoteLocator {

@@ -20,7 +20,7 @@ interface PreviewProps {
   css?: string;
   /** Pkg → semver map harvested from the generator's package.json.
    *  Drives the iframe's importmap so React/React-DOM resolve to
-   *  the same esm.sh URL the bundle was compiled against. */
+   *  the same version the bundle was compiled against. */
   versions?: Record<string, string>;
   /** C2: when the bundle externalised a prebuilt design-pack vendor,
    *  the iframe importmap (bare spec → origin-absolute url) + optional

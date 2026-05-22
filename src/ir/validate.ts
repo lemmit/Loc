@@ -514,6 +514,11 @@ function firstUnknownColumnRef(e: ExprIR, agg: AggregateIR, ctx: BoundedContextI
       }
       return null;
     }
+    case "method-call":
+      // Membership query (`this.<refColl>.contains(x)`) — verify the
+      // collection field itself exists; the argument is a parameter,
+      // not a column.
+      return firstUnknownColumnRef(e.receiver, agg, ctx);
     default:
       return null;
   }
@@ -631,6 +636,20 @@ function firstNonQueryableNode(e: ExprIR): string | null {
       if (e.receiver.kind === "ref" && e.receiver.refKind === "current-user") return null;
       return "member access not rooted at 'this' or beyond a flattened value object";
     case "method-call":
+      // Membership over a reference collection — `this.<refColl>.contains(x)`
+      // — is the one collection op we admit: it lowers to an EXISTS-style
+      // subquery against the field's join table.  Everything else
+      // (`.count`, `.any`, `.where`, …) still needs richer SQL we don't
+      // emit, so stays rejected.
+      if (
+        e.member === "contains" &&
+        e.receiverType.kind === "array" &&
+        e.receiverType.element.kind === "id" &&
+        isColumnRef(e.receiver) &&
+        e.args.length === 1
+      ) {
+        return firstNonQueryableNode(e.args[0]!);
+      }
       return `collection op '.${e.member}'`;
     case "lambda":
       return "lambda";
