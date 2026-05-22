@@ -20,7 +20,7 @@ import { printStructural } from "../../../../src/language/print/index.js";
 import { parseDdd } from "../parse";
 import { spliceNode, applyEdits } from "../edit-engine";
 import { buildSystemGraph, type GraphNode, type NodeKind } from "./model";
-import { IDENTIFIER, renameConstruct } from "./rename";
+import { IDENTIFIER, renameConstruct, renameMember } from "./rename";
 import {
   addField,
   availableTypes,
@@ -124,6 +124,25 @@ export default function SystemBuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Elem
   );
 }
 
+// Editable field name (aggregate / value-object fields). Commits a reference-
+// aware rename on blur / Enter; remounts (re-seeding the draft) once the rename
+// lands and the field list re-renders under its new key.
+function FieldNameInput({ name, onRename }: { name: string; onRename: (next: string) => void }): JSX.Element {
+  const [draft, setDraft] = useState(name);
+  return (
+    <TextInput
+      size="xs"
+      style={{ flex: "0 0 70px" }}
+      value={draft}
+      data-testid="c4system-field-name"
+      styles={{ input: { fontFamily: "monospace", fontSize: 11 } }}
+      onChange={(e) => setDraft(e.currentTarget.value)}
+      onBlur={() => { if (draft.trim() !== name) onRename(draft); }}
+      onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+    />
+  );
+}
+
 // The inspector lives beside the canvas on desktop; on a narrow viewport it
 // slides up as a bottom drawer so the graph keeps the full width.
 function InspectorPanel({ compact, opened, onClose, children }: { compact: boolean; opened: boolean; onClose: () => void; children: ReactNode }): JSX.Element {
@@ -205,6 +224,14 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     ctx.onSourceChange(next, "builder");
     if (!keepSelection) setSelectedId(null);
     setRev((r) => r + 1);
+  };
+
+  const renameField = async (oldName: string, rawNext: string): Promise<void> => {
+    if (!selected) return;
+    const next = rawNext.trim();
+    if (!IDENTIFIER.test(next) || next === oldName) return;
+    const result = await renameMember(ctx.getSource(), selected.kind, selected.name, oldName, next);
+    if (result != null) apply(result, true);
   };
 
   const renameSelected = async (): Promise<void> => {
@@ -390,9 +417,13 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
                 </Group>
                 {listFields(selected.ast).map((f, i) => (
                   <Group key={`${f.name}-${i}`} gap={4} align="center" wrap="nowrap" data-testid="c4system-field-row">
-                    <Text size="xs" style={{ flex: "0 0 70px", overflow: "hidden", textOverflow: "ellipsis" }} title={f.name}>
-                      {f.name}
-                    </Text>
+                    {selected.kind === "event" ? (
+                      <Text size="xs" style={{ flex: "0 0 70px", overflow: "hidden", textOverflow: "ellipsis" }} title={f.name}>
+                        {f.name}
+                      </Text>
+                    ) : (
+                      <FieldNameInput name={f.name} onRename={(next) => void renameField(f.name, next)} />
+                    )}
                     <Select
                       size="xs"
                       style={{ flex: 1, minWidth: 0 }}

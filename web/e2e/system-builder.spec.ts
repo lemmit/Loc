@@ -137,6 +137,27 @@ test("adds, retypes, and deletes an aggregate field from the inspector", async (
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
 
+test("renames a field (and its usages) from the inspector", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  // Order.status — used in an invariant guard, `isMutable`, and `status :=`.
+  await page.locator('[data-testid="rf__node-aggregate:Order"]').click();
+  const names = page.getByTestId("c4system-field-name");
+  await expect(names.nth(1)).toHaveValue("status");
+  await names.nth(1).fill("state");
+  await names.nth(1).blur();
+  // Reference-aware rename runs async (linked build) then re-renders the field.
+  await expect(page.getByTestId("c4system-field-name").nth(1)).toHaveValue("state", { timeout: 10_000 });
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+  await expect(names.nth(0)).toHaveValue("customerId");
+});
+
 test("rebinds a repository's target aggregate from the inspector", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);
