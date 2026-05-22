@@ -45,6 +45,7 @@ const examples = [
   { ddd: "web/src/examples/storybook-mantine.ddd", reactDir: "web_app" },
   { ddd: "web/src/examples/storybook-shadcn.ddd", reactDir: "web_app" },
   { ddd: "web/src/examples/storybook-components.ddd", reactDir: "web_app" },
+  { ddd: "web/src/examples/action-showcase.ddd", reactDir: "web_app" },
 ] as const;
 
 /** Inject `design: "<family>@<version>"` into the `deployable webApp
