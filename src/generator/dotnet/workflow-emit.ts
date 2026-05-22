@@ -181,10 +181,10 @@ function renderHandler(
       "        var _workflowEvents = new System.Collections.Generic.List<IDomainEvent>();",
     );
   }
-  // Substitute parameter references: cmd.<PascalName>.  Inside lowerExpr-produced ExprIR,
-  // params resolve as `name` refs which renderCsExpr would render as bare identifiers.
-  // We need them to print as `cmd.PascalName`.  Easiest: pre-rename via expression walk.
-  // The simpler path is renaming at render time using a name-set + a tiny custom env.
+  // Workflow params resolve to bare-identifier `name` refs in the ExprIR, but
+  // in a command handler they must print as `cmd.<PascalName>`.
+  // renderExprWithCmdParams rewrites those refs at render time, keyed by the
+  // workflow's param-name set.
   const paramNames = new Set(wf.params.map((p) => p.name));
   const renderArg = (e: import("../../ir/loom-ir.js").ExprIR): string => {
     return renderExprWithCmdParams(e, paramNames);
