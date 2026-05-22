@@ -1,52 +1,27 @@
 // Auto-generated.
 import { createMiddleware } from "hono/factory";
 import { randomUUID } from "node:crypto";
+import { baseLogger, type RequestLogger } from "./log";
 
-/** Module augmentation could expose a strongly-typed Variables key,
- *  but the generated route handlers / onError chains use `c.get`
- *  with a runtime cast — keeps this file dependency-free for any
- *  consumer (workflows, views, per-aggregate routers). */
 export const REQUEST_ID_HEADER = "X-Request-Id";
 
-export interface RequestStartLog {
-  ts: string;
-  level: "info";
-  event: "request_start";
-  request_id: string;
-  method: string;
-  path: string;
-}
-
-export interface RequestEndLog {
-  ts: string;
-  level: "info";
-  event: "request_end";
-  request_id: string;
-  method: string;
-  path: string;
-  status: number;
-  duration_ms: number;
-}
-
 /** Per-request middleware.  Mounts before any business route in
- *  http/index.ts so every downstream handler + onError sees the id. */
+ *  http/index.ts so every downstream handler + onError sees both the
+ *  id and the bound child logger. */
 export const requestIdMiddleware = createMiddleware<{
-  Variables: { requestId: string };
+  Variables: { requestId: string; log: RequestLogger };
 }>(async (c, next) => {
   const inbound = c.req.header(REQUEST_ID_HEADER);
   const requestId = inbound && inbound.length > 0 ? inbound : randomUUID();
   c.set("requestId", requestId);
 
+  // Per-request child logger — every line emitted via `c.get("log")`
+  // downstream auto-includes `request_id` (pino child binding).
+  const log = baseLogger.child({ request_id: requestId });
+  c.set("log", log);
+
   const url = new URL(c.req.url);
-  const startLog: RequestStartLog = {
-    ts: new Date().toISOString(),
-    level: "info",
-    event: "request_start",
-    request_id: requestId,
-    method: c.req.method,
-    path: url.pathname,
-  };
-  console.log(JSON.stringify(startLog));
+  log.info({ event: "request_start", method: c.req.method, path: url.pathname });
 
   const startedAt = Date.now();
   try {
@@ -65,16 +40,12 @@ export const requestIdMiddleware = createMiddleware<{
     } catch {
       /* best-effort: headers are read-only on some runtimes */
     }
-    const endLog: RequestEndLog = {
-      ts: new Date().toISOString(),
-      level: "info",
+    log.info({
       event: "request_end",
-      request_id: requestId,
       method: c.req.method,
       path: url.pathname,
       status: c.res.status,
       duration_ms: Date.now() - startedAt,
-    };
-    console.log(JSON.stringify(endLog));
+    });
   }
 });
