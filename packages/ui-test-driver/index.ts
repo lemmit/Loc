@@ -24,4 +24,14 @@ export {
   makeIframeTransport,
   type IframeTransportOptions,
 } from "./iframe-transport.js";
-export { captureNode, type CaptureOpts } from "./screenshot.js";
+export {
+  makePostMessageTransport,
+  type PostMessageTransportOptions,
+  type DriverRequest,
+  type DriverResponse,
+} from "./postmessage-transport.js";
+export { serveDriverOps, type ServeDriverOptions } from "./serve-driver.js";
+// `captureNode` is intentionally NOT re-exported here: that would make
+// importing this barrel eagerly load `html-to-image`. Screenshot capture
+// is reached lazily by the "screenshot" driver op, or explicitly via the
+// "@loom/ui-test-driver/screenshot" subpath export.

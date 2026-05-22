@@ -36,9 +36,77 @@ function dedupe(els: Element[]): Element[] {
   return out;
 }
 
-function accessibleName(el: Element): string {
-  return (el.getAttribute("aria-label") ?? el.textContent ?? "").trim();
+/** Text of the `<label>` associated with a form control, via `for=` or
+ *  by wrapping. */
+function associatedLabelText(el: Element): string {
+  const doc = el.ownerDocument;
+  const id = el.getAttribute("id");
+  if (id && doc) {
+    const lbl = doc.querySelector(`label[for=${JSON.stringify(id)}]`);
+    const t = lbl?.textContent?.trim();
+    if (t) return t;
+  }
+  const wrapping = el.closest("label");
+  const t = wrapping?.textContent?.trim();
+  return t ?? "";
 }
+
+/** A pragmatic subset of the ARIA accessible-name algorithm — enough to
+ *  match `getByRole(role, { name })` against real markup.  Precedence:
+ *  aria-labelledby → aria-label → associated <label> → alt → textContent
+ *  → title → placeholder.  (Not the full spec — no recursive subtree name
+ *  computation — but covers the common cases.) */
+function accessibleName(el: Element): string {
+  const doc = el.ownerDocument;
+  const labelledby = el.getAttribute("aria-labelledby");
+  if (labelledby && doc) {
+    const text = labelledby
+      .split(/\s+/)
+      .map((id) => doc.getElementById(id)?.textContent?.trim() ?? "")
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+    if (text) return text;
+  }
+  const ariaLabel = el.getAttribute("aria-label")?.trim();
+  if (ariaLabel) return ariaLabel;
+
+  const label = associatedLabelText(el);
+  if (label) return label;
+
+  const alt = el.getAttribute("alt")?.trim();
+  if (alt) return alt;
+
+  const text = el.textContent?.trim();
+  if (text) return text;
+
+  const title = el.getAttribute("title")?.trim();
+  if (title) return title;
+
+  const placeholder = el.getAttribute("placeholder")?.trim();
+  return placeholder ?? "";
+}
+
+/** Native-element → implicit ARIA role selectors.  An element with an
+ *  explicit `role=` attribute uses that instead, so implicit matches are
+ *  filtered to elements WITHOUT a `role` attribute (see getByRole). */
+const IMPLICIT_ROLE_SELECTORS: Record<string, string> = {
+  button:
+    "button, input[type=button], input[type=submit], input[type=reset], input[type=image]",
+  link: "a[href], area[href]",
+  heading: "h1, h2, h3, h4, h5, h6",
+  textbox:
+    "input:not([type]), input[type=text], input[type=search], input[type=email], input[type=url], input[type=tel], textarea",
+  checkbox: "input[type=checkbox]",
+  radio: "input[type=radio]",
+  combobox: "select",
+  img: "img",
+  list: "ul, ol",
+  listitem: "li",
+  table: "table",
+  row: "tr",
+  cell: "td",
+};
 
 function matchesName(el: Element, name: string, exact: boolean): boolean {
   const acc = accessibleName(el);
@@ -97,21 +165,65 @@ function unmetReason(el: Element, checks: Actionability): string | null {
   return null;
 }
 
+/** Dispatch a Playwright-like click: scroll into view, then the
+ *  pointer/mouse event sequence (so components bound to pointerdown/
+ *  mousedown react), then `el.click()` to fire the click event and run
+ *  the default action (submit/navigate/toggle).  Event constructors that
+ *  the environment lacks (e.g. PointerEvent under happy-dom) are skipped;
+ *  `el.click()` always runs, so behaviour degrades gracefully. */
+function dispatchClick(el: HTMLElement): void {
+  try {
+    (el as unknown as { scrollIntoView?: (o?: unknown) => void }).scrollIntoView?.(
+      { block: "center" },
+    );
+  } catch {
+    /* no layout engine (happy-dom) — ignore */
+  }
+  const win = el.ownerDocument?.defaultView;
+  const init: MouseEventInit = { bubbles: true, cancelable: true, composed: true };
+  const fire = (
+    Ctor: (new (type: string, init: MouseEventInit) => Event) | undefined,
+    type: string,
+  ): void => {
+    if (typeof Ctor === "function") el.dispatchEvent(new Ctor(type, init));
+  };
+  const Pointer = win?.PointerEvent as
+    | (new (type: string, init: MouseEventInit) => Event)
+    | undefined;
+  const Mouse = win?.MouseEvent as
+    | (new (type: string, init: MouseEventInit) => Event)
+    | undefined;
+  fire(Pointer, "pointerover");
+  fire(Pointer, "pointerdown");
+  fire(Mouse, "mousedown");
+  fire(Pointer, "pointerup");
+  fire(Mouse, "mouseup");
+  el.click();
+}
+
 export class DomLocator {
   constructor(
     private readonly doc: Document,
     private readonly rootProvider: () => Element[],
     private readonly steps: Step[],
     private readonly timeout: number,
+    private readonly descr: string[] = [],
   ) {}
 
-  private add(step: Step): DomLocator {
+  private add(step: Step, fragment: string): DomLocator {
     return new DomLocator(
       this.doc,
       this.rootProvider,
       [...this.steps, step],
       this.timeout,
+      [...this.descr, fragment],
     );
+  }
+
+  /** Human-readable rendering of this locator's chain, for error
+   *  messages (e.g. `getByTestId("save") » getByRole("button")`). */
+  describe(): string {
+    return this.descr.length ? this.descr.join(" » ") : "<page>";
   }
 
   /** Apply this locator's steps starting from arbitrary roots — used
@@ -130,14 +242,17 @@ export class DomLocator {
 
   getByTestId(id: string): DomLocator {
     const sel = `[data-testid=${JSON.stringify(id)}]`;
-    return this.add((roots) =>
-      dedupe(roots.flatMap((r) => Array.from(r.querySelectorAll(sel)))),
+    return this.add(
+      (roots) => dedupe(roots.flatMap((r) => Array.from(r.querySelectorAll(sel)))),
+      `getByTestId(${JSON.stringify(id)})`,
     );
   }
 
   locator(selector: string): DomLocator {
-    return this.add((roots) =>
-      dedupe(roots.flatMap((r) => Array.from(r.querySelectorAll(selector)))),
+    return this.add(
+      (roots) =>
+        dedupe(roots.flatMap((r) => Array.from(r.querySelectorAll(selector)))),
+      `locator(${JSON.stringify(selector)})`,
     );
   }
 
@@ -145,25 +260,39 @@ export class DomLocator {
     role: string,
     opts?: { name?: string; exact?: boolean },
   ): DomLocator {
-    const sel = `[role=${JSON.stringify(role)}]`;
+    const explicitSel = `[role=${JSON.stringify(role)}]`;
+    const implicitSel = IMPLICIT_ROLE_SELECTORS[role];
+    const nameDescr =
+      opts?.name == null
+        ? ""
+        : `, { name: ${JSON.stringify(opts.name)}${opts.exact ? ", exact: true" : ""} }`;
     return this.add((roots) => {
-      const els = dedupe(
-        roots.flatMap((r) => Array.from(r.querySelectorAll(sel))),
+      const explicit = roots.flatMap((r) =>
+        Array.from(r.querySelectorAll(explicitSel)),
       );
+      // Native elements carry the role implicitly — but only when they
+      // don't override it with an explicit `role=` (e.g. <button role="tab">).
+      const implicit = implicitSel
+        ? roots
+            .flatMap((r) => Array.from(r.querySelectorAll(implicitSel)))
+            .filter((el) => !el.hasAttribute("role"))
+        : [];
+      const els = dedupe([...explicit, ...implicit]);
       if (opts?.name == null) return els;
       return els.filter((el) => matchesName(el, opts.name!, opts.exact ?? false));
-    });
+    }, `getByRole(${JSON.stringify(role)}${nameDescr})`);
   }
 
   filter(opts: { has: DomLocator }): DomLocator {
     const has = opts.has;
-    return this.add((roots) =>
-      roots.filter((el) => has.matchesFrom([el]).length > 0),
+    return this.add(
+      (roots) => roots.filter((el) => has.matchesFrom([el]).length > 0),
+      `filter({ has: ${has.describe()} })`,
     );
   }
 
   first(): DomLocator {
-    return this.add((roots) => roots.slice(0, 1));
+    return this.add((roots) => roots.slice(0, 1), "first()");
   }
 
   /** Resolve to the single matching element, polling until the requested
@@ -171,14 +300,17 @@ export class DomLocator {
    *  the locator matches more than one element (counting all matches,
    *  regardless of visibility) — use `.first()` or a more specific
    *  locator. */
-  private async resolve(checks: Actionability): Promise<HTMLElement> {
-    const deadline = Date.now() + this.timeout;
+  private async resolve(
+    checks: Actionability,
+    timeout = this.timeout,
+  ): Promise<HTMLElement> {
+    const deadline = Date.now() + timeout;
     let lastReason = "no element matched";
     for (;;) {
       const els = this.matchesNow();
       if (els.length > 1) {
         throw new Error(
-          `locator: resolved to ${els.length} elements; use .first() or a more specific locator`,
+          `locator(${this.describe()}): resolved to ${els.length} elements; use .first() or a more specific locator`,
         );
       }
       const el = els[0];
@@ -188,20 +320,23 @@ export class DomLocator {
         lastReason = reason;
       }
       if (Date.now() >= deadline) {
-        throw new Error(`locator: ${lastReason} within ${this.timeout}ms`);
+        throw new Error(
+          `locator(${this.describe()}): ${lastReason} within ${timeout}ms`,
+        );
       }
       await sleep(POLL_MS);
     }
   }
 
-  async click(): Promise<void> {
-    (await this.resolve({ visible: true, enabled: true })).click();
+  async click(opts?: { timeout?: number }): Promise<void> {
+    dispatchClick(await this.resolve({ visible: true, enabled: true }, opts?.timeout));
   }
 
-  async fill(value: string): Promise<void> {
-    const el = (await this.resolve({ visible: true, editable: true })) as
-      | HTMLInputElement
-      | HTMLTextAreaElement;
+  async fill(value: string, opts?: { timeout?: number }): Promise<void> {
+    const el = (await this.resolve(
+      { visible: true, editable: true },
+      opts?.timeout,
+    )) as HTMLInputElement | HTMLTextAreaElement;
     // React tracks the value via an overridden setter; setting `.value`
     // directly bypasses its change detection.  Call the native setter
     // on the prototype, then fire input/change so controlled components
@@ -214,8 +349,8 @@ export class DomLocator {
     el.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
-  async innerText(): Promise<string> {
-    const el = await this.resolve({});
+  async innerText(opts?: { timeout?: number }): Promise<string> {
+    const el = await this.resolve({}, opts?.timeout);
     return (el.innerText ?? el.textContent ?? "").trim();
   }
 
@@ -224,19 +359,25 @@ export class DomLocator {
     return Promise.resolve(this.matchesNow().length);
   }
 
-  async waitFor(opts?: { state?: "visible" | "attached" | "hidden" }): Promise<void> {
+  async waitFor(opts?: {
+    state?: "visible" | "attached" | "hidden";
+    timeout?: number;
+  }): Promise<void> {
     const state = opts?.state ?? "visible";
+    const timeout = opts?.timeout ?? this.timeout;
     if (state === "hidden") {
-      const deadline = Date.now() + this.timeout;
+      const deadline = Date.now() + timeout;
       for (;;) {
         if (!this.matchesNow().some(isVisible)) return;
         if (Date.now() >= deadline) {
-          throw new Error(`locator: still visible after ${this.timeout}ms`);
+          throw new Error(
+            `locator(${this.describe()}): still visible after ${timeout}ms`,
+          );
         }
         await sleep(POLL_MS);
       }
     }
-    await this.resolve(state === "visible" ? { visible: true } : {});
+    await this.resolve(state === "visible" ? { visible: true } : {}, timeout);
   }
 }
 
@@ -300,10 +441,13 @@ export class DomPage {
     await sleep(0);
   }
 
-  async waitForURL(matcher: RegExp | string): Promise<void> {
+  async waitForURL(
+    matcher: RegExp | string,
+    opts?: { timeout?: number },
+  ): Promise<void> {
     const test = (u: string): boolean =>
       typeof matcher === "string" ? u.includes(matcher) : matcher.test(u);
-    const deadline = Date.now() + this.timeout;
+    const deadline = Date.now() + (opts?.timeout ?? this.timeout);
     for (;;) {
       if (test(this.url())) return;
       if (Date.now() >= deadline) {

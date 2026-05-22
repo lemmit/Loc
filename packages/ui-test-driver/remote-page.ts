@@ -58,26 +58,46 @@ export class RemoteLocator {
     return r.value;
   }
 
-  async click(): Promise<void> {
-    await this.run({ kind: "locator", op: "click", chain: this.chain });
+  async click(opts?: { timeout?: number }): Promise<void> {
+    await this.run({
+      kind: "locator",
+      op: "click",
+      chain: this.chain,
+      timeout: opts?.timeout,
+    });
   }
-  async fill(value: string): Promise<void> {
-    await this.run({ kind: "locator", op: "fill", chain: this.chain, value });
+  async fill(value: string, opts?: { timeout?: number }): Promise<void> {
+    await this.run({
+      kind: "locator",
+      op: "fill",
+      chain: this.chain,
+      value,
+      timeout: opts?.timeout,
+    });
   }
-  async innerText(): Promise<string> {
-    return String((await this.run({ kind: "locator", op: "innerText", chain: this.chain })) ?? "");
+  async innerText(opts?: { timeout?: number }): Promise<string> {
+    return String(
+      (await this.run({
+        kind: "locator",
+        op: "innerText",
+        chain: this.chain,
+        timeout: opts?.timeout,
+      })) ?? "",
+    );
   }
   async count(): Promise<number> {
     return Number((await this.run({ kind: "locator", op: "count", chain: this.chain })) ?? 0);
   }
   async waitFor(opts?: {
     state?: "visible" | "attached" | "hidden";
+    timeout?: number;
   }): Promise<void> {
     await this.run({
       kind: "locator",
       op: "waitFor",
       chain: this.chain,
       state: opts?.state,
+      timeout: opts?.timeout,
     });
   }
 }
@@ -123,7 +143,10 @@ export class RemotePage {
     if (!r.ok) return "";
     return String(r.value ?? "");
   }
-  async waitForURL(matcher: string | RegExp): Promise<void> {
+  async waitForURL(
+    matcher: string | RegExp,
+    opts?: { timeout?: number },
+  ): Promise<void> {
     const op: DriverOp =
       matcher instanceof RegExp
         ? {
@@ -132,8 +155,15 @@ export class RemotePage {
             pattern: matcher.source,
             isRegex: true,
             flags: matcher.flags,
+            timeout: opts?.timeout,
           }
-        : { kind: "page", op: "waitForURL", pattern: matcher, isRegex: false };
+        : {
+            kind: "page",
+            op: "waitForURL",
+            pattern: matcher,
+            isRegex: false,
+            timeout: opts?.timeout,
+          };
     const r = await this.transport.send(op);
     if (!r.ok) throw new Error(r.message);
   }
