@@ -139,7 +139,7 @@ Inside an aggregate or an `entity` part:
 
 | Form | Notes |
 | --- | --- |
-| `name: TypeRef` | Property. |
+| `name: TypeRef [display] [provenanced] [check Expr]` | Property, with optional modifiers (in this order). `display` marks the human-readable label field; `provenanced` records assignment lineage (below); `check Expr` is a per-field validation predicate. |
 | `contains name: PartName[]` | Containment of a part declared within the same aggregate; collection. |
 | `contains name: PartName` | Containment, single. |
 | `derived name: TypeRef = Expression` | Computed read-only property. |
@@ -155,6 +155,43 @@ Inside an aggregate or an `entity` part:
 
 Entity parts may declare any of the above except `operation` and `test`
 (those live on the root).
+
+#### Provenanced fields
+
+Mark a stored field `provenanced` to capture the lineage of every value it
+holds:
+
+```
+aggregate Order ids guid {
+  total: int provenanced
+  operation reprice(qty: int, price: int) {
+    total := qty * price - discount   // write-site #1
+  }
+  operation applyDiscount(amount: int) {
+    total := quantity * unitPrice - amount   // write-site #2
+  }
+}
+```
+
+Each distinct assignment site (`:=`, `+=`, `-=`) to a provenanced field is a
+**rule snapshot** — the RHS expression captured both as source text and as the
+resolved IR. Snapshots are content-addressed by a `snapshotId`; identical
+expressions at different sites collapse to one snapshot.
+
+The capture is an explicit, separate step from code generation:
+
+```
+ddd snapshot path/to/system.ddd -o out
+# → out/.loom/snapshots/<ts>-<guid>.loomsnap.json  (one entry per write-site)
+```
+
+The TypeScript/Hono backend additionally emits a `domain/provenance.ts`
+runtime SDK and a `recordTrace(...)` call after each write, so a value can be
+traced back to the snapshot that produced it at runtime. Provenance is a
+TypeScript/Hono feature; other backends parse the keyword but emit no trace
+code. See `examples/provenance.ddd` for a runnable backend example and the
+`Provenance System` playground example for the same domain as a Hono + React
+system.
 
 ### Type references
 

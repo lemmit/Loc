@@ -40,6 +40,7 @@ const examples = [
   { ddd: "examples/acme.ddd", reactDir: "web_app" },
   { ddd: "web/src/examples/banking-system.ddd", reactDir: "web_app" },
   { ddd: "web/src/examples/inventory-system.ddd", reactDir: "web_app" },
+  { ddd: "web/src/examples/provenance-system.ddd", reactDir: "web_app" },
   { ddd: "web/src/examples/sales-system.ddd", reactDir: "web_app" },
   { ddd: "web/src/examples/storybook-mantine.ddd", reactDir: "web_app" },
   { ddd: "web/src/examples/storybook-shadcn.ddd", reactDir: "web_app" },
