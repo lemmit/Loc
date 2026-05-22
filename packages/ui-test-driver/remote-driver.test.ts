@@ -15,7 +15,7 @@ import {
   RemotePage,
   type DriverOp,
   type DriverTransport,
-} from "../packages/ui-test-driver/index.js";
+} from "./index.js";
 
 function harness(): RemotePage {
   // Sandbox side: a DomPage bound to the test document.

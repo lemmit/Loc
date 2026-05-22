@@ -2,7 +2,7 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    include: ["test/**/*.test.ts"],
+    include: ["test/**/*.test.ts", "packages/**/*.test.ts"],
     // test/fixtures/baseline-output/ is a snapshot of the legacy
     // generator's emitted file tree (regression fixture for the
     // page-metamodel migration; see scripts/capture-baseline-fixture.mjs).

@@ -9,7 +9,7 @@
 // dance, getByRole name/exact, auto-wait, and goto/url.
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { DomPage } from "../packages/ui-test-driver/index.js";
+import { DomPage } from "./index.js";
 
 function setBody(html: string): void {
   document.body.innerHTML = html;
@@ -202,12 +202,12 @@ describe("DomPage / DomLocator", () => {
   it("captureNode is off the barrel but reachable via the subpath", async () => {
     // Keeping it off the barrel means importing the package doesn't eagerly
     // pull in html-to-image; it's still reachable explicitly.
-    const barrel = (await import("../packages/ui-test-driver/index.js")) as Record<
+    const barrel = (await import("./index.js")) as Record<
       string,
       unknown
     >;
     expect(barrel.captureNode).toBeUndefined();
-    const screenshot = await import("../packages/ui-test-driver/screenshot.js");
+    const screenshot = await import("./screenshot.js");
     expect(typeof screenshot.captureNode).toBe("function");
   });
 
