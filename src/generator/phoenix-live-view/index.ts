@@ -346,6 +346,16 @@ function renderDomainModule(
         );
       }
     }
+    // Operation actions (`update :<op>`) get a code-interface define so a
+    // one-click `Action(<instance>.<op>)` can invoke them directly
+    // (`<Ctx>.<op>_<agg>!(record)`).  Op params become positional args.
+    for (const op of agg.operations.filter((o) => o.visibility === "public")) {
+      const argsList = op.params.map((p) => `:${snake(p.name)}`).join(", ");
+      const argsClause = argsList ? `, args: [${argsList}]` : "";
+      defines.push(
+        `      define :${snake(op.name)}_${snake(agg.name)}, action: :${snake(op.name)}${argsClause}`,
+      );
+    }
     resourceBlocks.push(`    resource ${r} do\n${defines.join("\n")}\n    end`);
   }
 
