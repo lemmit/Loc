@@ -683,9 +683,9 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         </ReactFlow>
         <Group
           gap={4}
-          wrap="nowrap"
+          wrap="wrap"
           align="center"
-          style={{ position: "absolute", top: 8, left: 8, zIndex: 5, background: "var(--mantine-color-body)", borderRadius: 6, padding: 4, boxShadow: "0 1px 4px rgba(0,0,0,0.2)" }}
+          style={{ position: "absolute", top: 8, left: 8, maxWidth: "calc(100% - 16px)", zIndex: 5, background: "var(--mantine-color-body)", borderRadius: 6, padding: 4, boxShadow: "0 1px 4px rgba(0,0,0,0.2)" }}
         >
           <TextInput
             size="xs"
