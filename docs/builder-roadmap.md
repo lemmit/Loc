@@ -116,6 +116,14 @@ text stays the source of truth.
 - **Per-statement structure** — assignment and `let` are structured; bare
   calls / `navigate(…)` keep a validated single-row editor (a call is one
   expression, so structuring buys little beyond the validation now in place).
+- **Structured `navigate(…)`** (TODO) — `navigate(<Page>, { …params })` is a
+  first-class UI navigation primitive (page bodies + event-handler lambdas, e.g.
+  `Action(confirm, then: navigate(OrderConsole, { customerId: order.customerId }))`;
+  lowers to React `useNavigate()` / Phoenix `push_navigate`). A structured editor
+  would offer a **target-page picker** + an editable **params object** instead of
+  the verbatim/validated row. It's an ordinary call (no `NavigateStmt` in the
+  grammar), so this is the call-arg structuring pattern applied page-side;
+  `examples/sales-ui.ddd` is a ready fixture.
 - **More typed pickers**: enum-case values are offered for state-field defaults;
   enum-valued *expressions elsewhere* (assignment values, `match` conds) still
   edit as free text (would need per-position type inference).
