@@ -2,11 +2,14 @@ import * as path from "node:path";
 import { AstUtils, type LangiumDocument, URI } from "langium";
 import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
+import { STDLIB_LAYOUT_COMPONENTS } from "../../src/generator/react/body-walker.js";
+import { enrichLoomModel } from "../../src/ir/enrichments.js";
+import { lowerModel } from "../../src/ir/lower.js";
+import { validateLoomModel } from "../../src/ir/validate.js";
 import { createDddServices } from "../../src/language/ddd-module.js";
 import { type Model, reflection } from "../../src/language/generated/ast.js";
-import { STDLIB_LAYOUT_COMPONENTS } from "../../src/generator/react/body-walker.js";
-import { extractErrors } from "../_helpers/parse.js";
 import { repoRoot } from "../_helpers/examples.js";
+import { extractErrors } from "../_helpers/parse.js";
 
 // ---------------------------------------------------------------------------
 // Conformance completeness guard for `examples/showcase.ddd`.
@@ -95,6 +98,20 @@ describe("conformance: showcase.ddd completeness", () => {
     const doc = await buildShowcase();
     const errors = extractErrors(doc.diagnostics);
     expect(errors, `validation errors in ${SHOWCASE}:\n${errors.join("\n")}`).toEqual([]);
+  });
+
+  // Langium validation (above) does not catch IR-level rules that
+  // `generate system` enforces (extern-body shape, required create fields,
+  // nullable finds in workflows, e2e target resolution).  Run the same
+  // lower → enrich → validate pipeline the CLI runs so an ungenerable
+  // fixture can't pass the guard.
+  it(`lowers and IR-validates ${SHOWCASE} with no errors (generation gate)`, async () => {
+    const doc = await buildShowcase();
+    const loom = enrichLoomModel(lowerModel(doc.parseResult.value));
+    const errors = validateLoomModel(loom)
+      .filter((d) => d.severity === "error")
+      .map((d) => `${d.source}: ${d.message}`);
+    expect(errors, `IR-level errors in ${SHOWCASE} (these block \`generate system\`)`).toEqual([]);
   });
 
   it("reports AST-node-kind coverage", async () => {

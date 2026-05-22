@@ -79,7 +79,7 @@ system DevPlatform {
                 active: bool
                 sequence: long
                 externalId: guid
-                tags: string[]
+                tags: string[]?
                 budget: decimal
                 createdAt: datetime
                 contains pipelines: Pipeline[]
@@ -105,7 +105,7 @@ system DevPlatform {
                 function badge(): string = !active ? "off" : "on"
 
                 operation rename(newName: string) {
-                    requires tags.contains(permissions.manageProjects)
+                    requires currentUser.role == "admin"
                     precondition newName.length > 0
                     name := newName
                 }
@@ -122,9 +122,11 @@ system DevPlatform {
                     pipelines += new Pipeline { label: label, runCount: 0 }
                 }
 
-                // extern operation — body present, no domain logic emitted.
+                // extern operation — the user-supplied handler owns the
+                // logic; the .ddd body may only carry preconditions (gates
+                // that run before the handler).
                 operation syncFromVcs() extern {
-                    sequence := sequence + 1
+                    precondition active == true
                 }
 
                 // private operation
@@ -167,6 +169,7 @@ system DevPlatform {
                     active: true,
                     sequence: 0,
                     externalId: "00000000-0000-0000-0000-000000000000",
+                    budget: 0.0,
                     createdAt: now()
                 })
                 proj.addPipeline("default")
@@ -230,7 +233,8 @@ system DevPlatform {
             // Transactional workflow with explicit isolation level.
             workflow promoteToProduction(buildId: Id<Build>) transactional(serializable) {
                 requires currentUser.role == "admin"
-                let b = Builds.bySha("deadbeef")
+                let b = Builds.getById(buildId)
+                b.promote("production")
             }
         }
     }
@@ -493,8 +497,10 @@ system DevPlatform {
         expect read.name == "Atlas"
     }
 
-    test e2e "register a project via workflow" against honoApi {
-        api.workflows.registerProject({ name: "Nimbus", visibility: "Internal" })
+    test e2e "create and read a build" against honoApi {
+        let b = api.builds.create({ commitSha: "abc1234", buildState: "Passed", startedAt: "2024-01-01T00:00:00Z" })
+        let read = api.builds.getById(b)
+        expect read.commitSha == "abc1234"
     }
 
     test e2e "browse projects via the console UI" against consoleWeb {
