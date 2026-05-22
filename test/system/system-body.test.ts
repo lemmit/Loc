@@ -73,6 +73,18 @@ describe("System builder — operation/workflow body editing", () => {
     expect(wf[0].kind).toBe("other");
   });
 
+  it("structures a bare call into head + args (incl. a head-only call)", () => {
+    const src = `context C {
+  workflow doIt(x: int) {
+    order.addLine(productId, qty)
+    cancel()
+  }
+}`;
+    const views = listStatementViews(parse(src), { kind: "workflow", name: "doIt" })!;
+    expect(views[0]).toEqual({ kind: "call", head: "order.addLine", args: ["productId", "qty"] });
+    expect(views[1]).toEqual({ kind: "call", head: "cancel", args: [] });
+  });
+
   it("edits a statement in place when the result still parses", () => {
     const out = editStatement(sales, confirm, 2, "status := Draft")!;
     expect(out).toMatch(/status := Draft/);
