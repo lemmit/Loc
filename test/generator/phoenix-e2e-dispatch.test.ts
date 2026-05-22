@@ -10,7 +10,7 @@ import type { Model } from "../../src/language/generated/ast.js";
 import { generateSystems } from "../../src/system/index.js";
 
 // ---------------------------------------------------------------------------
-// Batch F2 — verify that the e2e renderer dispatches to `phoenixLiveView`
+// verify that the e2e renderer dispatches to `phoenixLiveView`
 // deployables and emits `/api/…` prefixed URL paths (Phoenix routes all
 // its HTTP API inside `scope "/api"`).
 //
@@ -84,7 +84,7 @@ async function buildFixture(): Promise<Model> {
   return doc.parseResult.value as Model;
 }
 
-describe("Batch F2 — e2e dispatch to phoenixLiveView", () => {
+describe("e2e dispatch to phoenixLiveView", () => {
   it("emits e2e/<system>.e2e.test.ts for a phoenixLiveView deployable", async () => {
     const model = await buildFixture();
     const { files } = generateSystems(model);

@@ -11,10 +11,10 @@ import {
 } from "../../src/platform/registry.js";
 
 // ---------------------------------------------------------------------------
-// packaging-split P0 (docs/packaging-split.md) — backends resolve
+// Backend discovery (docs/packaging-split.md) — backends resolve
 // through an injectable *discovery* seam keyed by their manifest,
 // not a hardcoded map.  In-tree it is byte-identical (same surface
-// instances); the seam is what the playground (P1) backs with a
+// instances); the seam is what the playground backs with a
 // VFS impl instead of fs/node_modules.
 // ---------------------------------------------------------------------------
 

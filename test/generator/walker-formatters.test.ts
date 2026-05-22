@@ -1,4 +1,4 @@
-// Slice A3 — formatter primitives in walker stdlib.
+// formatter primitives in walker stdlib.
 //
 // Money / DateDisplay / EnumBadge / IdLink lower to per-pack
 // runtime helpers (`MoneyValue`, `DateTimeValue`, `Badge`, plus
@@ -48,7 +48,7 @@ async function emit(body: string): Promise<string> {
   return tsx;
 }
 
-describe("Slice A3 — formatter primitives", () => {
+describe("formatter primitives", () => {
   it("Money(123.45) emits <MoneyValue value={123.45} /> with the format helper imported", async () => {
     const tsx = await emit(`Money(123.45)`);
     expect(tsx).toMatch(/<MoneyValue value=\{ 123\.45 \}/);

@@ -151,7 +151,7 @@ describe("page metamodel — IR shape", () => {
     const page = uiByName(loom, "WebApp").pages.find(
       (p): p is PageIR => p.name === "CustomerDetail",
     )!;
-    // Slice D1 — the scaffold expander rewrites `Detail(of:, by:)`
+    // The scaffold expander rewrites `Detail(of:, by:)`
     // bodies into walker-stdlib compositions.  The page now carries
     // the expanded `Stack(Breadcrumbs, Heading, QueryView, …)` body
     // instead of the original `Detail(of:, by:)`.  Params survive
