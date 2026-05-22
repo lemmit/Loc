@@ -57,9 +57,7 @@ export function enrichLoomModel(loom: LoomModel): LoomModel {
  * helper centralises the assumption + throws a structured error if
  * an unenriched IR ever reaches a downstream layer (which would
  * indicate a missed `enrichLoomModel(lowerModel(model))` call). */
-export function wireShapeFor(
-  entity: AggregateIR | EntityPartIR | ValueObjectIR,
-): WireField[] {
+export function wireShapeFor(entity: AggregateIR | EntityPartIR | ValueObjectIR): WireField[] {
   if (!entity.wireShape) {
     throw new Error(
       `internal: wireShape not populated on '${entity.name}' — ` +
@@ -121,10 +119,7 @@ function enrichValueObject(vo: ValueObjectIR): ValueObjectIR {
 /** Every aggregate gets a repository with an implicit `find all():
  * T[]` query, mirroring how `findById` is implicit.  If the user
  * already declared a `find all(...)` of any shape, theirs wins. */
-function ensureFindAll(
-  aggregates: AggregateIR[],
-  existing: RepositoryIR[],
-): RepositoryIR[] {
+function ensureFindAll(aggregates: AggregateIR[], existing: RepositoryIR[]): RepositoryIR[] {
   const out = existing.map((r) => ({ ...r, finds: [...r.finds] }));
   for (const agg of aggregates) {
     let repo = out.find((r) => r.aggregateName === agg.name);
@@ -322,14 +317,19 @@ function computeTraceability(loom: LoomModel): TraceabilityIR {
   const solutionByRequirement: Record<string, string | null> = {};
   for (const r of loom.requirements) solutionByRequirement[r.id] = null;
   for (const s of loom.solutions) {
-    if (s.forRequirement in solutionByRequirement && solutionByRequirement[s.forRequirement] === null) {
+    if (
+      s.forRequirement in solutionByRequirement &&
+      solutionByRequirement[s.forRequirement] === null
+    ) {
       solutionByRequirement[s.forRequirement] = s.id;
     }
   }
 
   const codeElements: Record<string, CodeRefKind> = {};
-  for (const s of loom.solutions) for (const c of s.entitles) codeElements[c.qualifiedName] = c.kind;
-  for (const tc of loom.testCases) for (const c of tc.covers) codeElements[c.qualifiedName] = c.kind;
+  for (const s of loom.solutions)
+    for (const c of s.entitles) codeElements[c.qualifiedName] = c.kind;
+  for (const tc of loom.testCases)
+    for (const c of tc.covers) codeElements[c.qualifiedName] = c.kind;
 
   const testsByCodeElement: Record<string, string[]> = {};
   for (const tc of loom.testCases) {

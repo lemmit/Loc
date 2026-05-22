@@ -1,5 +1,3 @@
-import type { Model } from "../language/generated/ast.js";
-import { lowerModel } from "../ir/lower.js";
 import { enrichLoomModel } from "../ir/enrichments.js";
 import type {
   BoundedContextIR,
@@ -9,10 +7,11 @@ import type {
   Platform,
   SystemIR,
 } from "../ir/loom-ir.js";
+import { lowerModel } from "../ir/lower.js";
+import type { Model } from "../language/generated/ast.js";
 import { platformFor } from "../platform/registry.js";
 import { renderE2EFile } from "./e2e-render.js";
-import { renderUIE2EFile } from "./ui-e2e-render.js";
-import { renderWireSpec } from "./wire-spec.js";
+import { renderC4Model, renderC4SpecJson } from "./likec4.js";
 import {
   renderDeploymentDiagram,
   renderDomainDiagram,
@@ -20,8 +19,9 @@ import {
   renderSequenceDiagram,
   renderWorkflowDiagram,
 } from "./mermaid.js";
-import { renderC4Model, renderC4SpecJson } from "./likec4.js";
 import { renderTraceabilityArtifacts } from "./traceability.js";
+import { renderUIE2EFile } from "./ui-e2e-render.js";
+import { renderWireSpec } from "./wire-spec.js";
 
 // ---------------------------------------------------------------------------
 // System-mode generation.
@@ -66,11 +66,7 @@ export function generateSystems(model: Model): SystemEmission {
   return { files: out };
 }
 
-function emitSystem(
-  sys: SystemIR,
-  _loom: LoomModel,
-  out: Map<string, string>,
-): void {
+function emitSystem(sys: SystemIR, _loom: LoomModel, out: Map<string, string>): void {
   // Pre-compute a module-name → contexts lookup so a deployable can
   // collect its slice quickly.
   const modulesByName = new Map<string, ModuleIR>();
@@ -205,9 +201,7 @@ function emitDeployable(
 /** A docker-compose-safe slug: lowercase, no characters outside the
  * conservative `[a-z0-9_]` set. */
 function serviceSlug(name: string): string {
-  return name
-    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
-    .toLowerCase();
+  return name.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
 }
 
 // ---------------------------------------------------------------------------

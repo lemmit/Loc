@@ -1,17 +1,12 @@
-import { type CodeActionProvider } from "langium/lsp";
+import { AstUtils, CstUtils, type LangiumDocument, type MaybePromise } from "langium";
+import type { CodeActionProvider } from "langium/lsp";
 import {
-  AstUtils,
-  CstUtils,
-  type LangiumDocument,
-  type MaybePromise,
-} from "langium";
-import {
-  CodeActionKind,
-  TextEdit,
   type CodeAction,
+  CodeActionKind,
   type CodeActionParams,
   type Command,
   type Diagnostic,
+  TextEdit,
 } from "vscode-languageserver";
 import { isProperty } from "../generated/ast.js";
 

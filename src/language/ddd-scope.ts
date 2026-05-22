@@ -1,27 +1,27 @@
 import {
+  type AstNode,
+  type AstNodeDescription,
   AstUtils,
-  Cancellation,
+  type Cancellation,
   DefaultScopeComputation,
   DefaultScopeProvider,
   EMPTY_SCOPE,
-  type AstNode,
-  type AstNodeDescription,
   type LangiumCoreServices,
   type LangiumDocument,
   type ReferenceInfo,
   type Scope,
 } from "langium";
 import {
+  type Aggregate,
+  type EntityPart,
   isAggregate,
-  isEntityPart,
   isContainment,
+  isEntityPart,
   isEnumDecl,
   isModel,
   isSystem,
   isTargetable,
   isValueObject,
-  type Aggregate,
-  type EntityPart,
   type Model,
 } from "./generated/ast.js";
 
@@ -68,12 +68,7 @@ export class DddScopeComputation extends DefaultScopeComputation {
     const exports: AstNodeDescription[] = [];
     for (const node of AstUtils.streamAllContents(document.parseResult.value)) {
       if (cancelToken && cancelToken.isCancellationRequested) break;
-      if (
-        isAggregate(node) ||
-        isEntityPart(node) ||
-        isValueObject(node) ||
-        isEnumDecl(node)
-      ) {
+      if (isAggregate(node) || isEntityPart(node) || isValueObject(node) || isEnumDecl(node)) {
         const name = this.nameProvider.getName(node);
         if (name) {
           exports.push(this.descriptions.createDescription(node, name, document));
@@ -101,11 +96,7 @@ export class DddScopeComputation extends DefaultScopeComputation {
     const defaults = await super.computeExports(document, cancelToken);
     for (const d of defaults) {
       // Avoid duplicating the named-decl exports we just emitted.
-      if (
-        !exports.some(
-          (e) => e.name === d.name && e.path === d.path,
-        )
-      ) {
+      if (!exports.some((e) => e.name === d.name && e.path === d.path)) {
         exports.push(d);
       }
     }
@@ -171,6 +162,8 @@ export function getModel(node: AstNode | undefined): Model | undefined {
   return undefined;
 }
 
-export function isContainmentRef(node: AstNode | undefined): node is import("./generated/ast.js").Containment {
+export function isContainmentRef(
+  node: AstNode | undefined,
+): node is import("./generated/ast.js").Containment {
   return !!node && isContainment(node);
 }

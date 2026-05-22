@@ -15,11 +15,11 @@
 //      <IdValue id=… /></RouterLink> with the path derived from
 //      pluralized + snake-cased aggregate name.
 
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
-import { generateSystems } from "../src/system/index.js";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
+import { generateSystems } from "../src/system/index.js";
 
 async function buildAndGenerate(src: string): Promise<Map<string, string>> {
   const services = createDddServices(NodeFileSystem);
@@ -53,10 +53,7 @@ function pageWithBody(body: string): string {
 async function emit(body: string): Promise<string> {
   const files = await buildAndGenerate(pageWithBody(body));
   const tsx = files.get("web/src/pages/p.tsx");
-  if (!tsx)
-    throw new Error(
-      `expected web/src/pages/p.tsx; got: ${[...files.keys()].join(", ")}`,
-    );
+  if (!tsx) throw new Error(`expected web/src/pages/p.tsx; got: ${[...files.keys()].join(", ")}`);
   return tsx;
 }
 
@@ -67,7 +64,7 @@ describe("Slice A3 — formatter primitives", () => {
     expect(tsx).toMatch(/import \{[^}]*\bMoneyValue\b[^}]*\} from "\.\.\/lib\/format"/);
   });
 
-  it("Money(value, currency: \"EUR\", decimals: 0) threads currency + decimals", async () => {
+  it('Money(value, currency: "EUR", decimals: 0) threads currency + decimals', async () => {
     const tsx = await emit(`Money(100, currency: "EUR", decimals: 0)`);
     expect(tsx).toMatch(/<MoneyValue value=\{ 100 \} currency="EUR" decimals=\{ 0 \}/);
   });

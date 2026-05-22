@@ -1,9 +1,9 @@
-import { describe, it, expect } from "vitest";
 import { execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Generator regression test for the React frontend: for each example
@@ -92,12 +92,12 @@ interface PackSpec {
 const PACKS: readonly PackSpec[] = [
   { family: "mantine", version: "v7" },
   { family: "mantine", version: "v9" },
-  { family: "shadcn",  version: "v3" },
-  { family: "shadcn",  version: "v4" },
-  { family: "mui",     version: "v5" },
-  { family: "mui",     version: "v7" },
-  { family: "chakra",  version: "v2" },
-  { family: "chakra",  version: "v3" },
+  { family: "shadcn", version: "v3" },
+  { family: "shadcn", version: "v4" },
+  { family: "mui", version: "v5" },
+  { family: "mui", version: "v7" },
+  { family: "chakra", version: "v2" },
+  { family: "chakra", version: "v3" },
 ];
 
 function packId(p: PackSpec): string {
@@ -110,9 +110,7 @@ interface Case {
   pack: PackSpec;
 }
 
-const allCases: Case[] = examples.flatMap((e) =>
-  PACKS.map((pack) => ({ ...e, pack })),
-);
+const allCases: Case[] = examples.flatMap((e) => PACKS.map((pack) => ({ ...e, pack })));
 
 /** Filter to the case named by
  *  `LOOM_REACT_BUILD_CASE=<ddd>:<family>@<version>`, or return every
@@ -133,10 +131,12 @@ function selectCases(): Case[] {
 
 const cases = ENABLED ? selectCases() : [];
 
-describe.skipIf(!ENABLED)("generated React TSX compiles + bundles under strict tsc + vite build", () => {
-  it.each(cases.map((c) => ({ ...c, packLabel: packId(c.pack) })))(
-    "$ddd × $packLabel → $reactDir type-checks and bundles",
-    ({ ddd, reactDir, pack }) => {
+describe.skipIf(!ENABLED)(
+  "generated React TSX compiles + bundles under strict tsc + vite build",
+  () => {
+    it.each(
+      cases.map((c) => ({ ...c, packLabel: packId(c.pack) })),
+    )("$ddd × $packLabel → $reactDir type-checks and bundles", ({ ddd, reactDir, pack }) => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-react-tsc-"));
       try {
         // Always materialise a mutated copy with `design: <pack>` set
@@ -195,7 +195,6 @@ describe.skipIf(!ENABLED)("generated React TSX compiles + bundles under strict t
           /* ignore */
         }
       }
-    },
-    420_000,
-  );
-});
+    }, 420_000);
+  },
+);

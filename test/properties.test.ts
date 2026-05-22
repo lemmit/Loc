@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../src/ir/enrichments.js";
-import { validateLoomModel } from "../src/ir/validate.js";
-import { buildWireSpec } from "../src/system/wire-spec.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -10,6 +8,8 @@ import type {
   ValueObjectIR,
 } from "../src/ir/loom-ir.js";
 import { allAggregates, allContexts } from "../src/ir/loom-ir.js";
+import { validateLoomModel } from "../src/ir/validate.js";
+import { buildWireSpec } from "../src/system/wire-spec.js";
 import { loadExampleModel, toLoomModel } from "./_helpers/index.js";
 
 // ---------------------------------------------------------------------------
@@ -52,9 +52,7 @@ describe("IR invariants — every example", () => {
         for (const a of allAggregates(loom)) {
           expect(a.wireShape, `${a.name}.wireShape`).toBeDefined();
           expect(a.wireShape![0]!.name, `${a.name} first field name`).toBe("id");
-          expect(a.wireShape![0]!.source, `${a.name} first field source`).toBe(
-            "id",
-          );
+          expect(a.wireShape![0]!.source, `${a.name} first field source`).toBe("id");
         }
       });
 
@@ -80,9 +78,7 @@ describe("IR invariants — every example", () => {
         const loom = await buildEnriched(example);
         for (const ctx of allContexts(loom)) {
           for (const agg of ctx.aggregates) {
-            const repo = ctx.repositories.find(
-              (r) => r.aggregateName === agg.name,
-            );
+            const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
             expect(repo, `${agg.name} repository`).toBeDefined();
             expect(repo!.finds[0]!.name).toBe("all");
             expect(repo!.finds[0]!.params).toEqual([]);
@@ -103,9 +99,7 @@ describe("IR invariants — every example", () => {
             if (d.platform !== "react") continue;
             const target = sys.deployables.find((t) => t.name === d.targetName);
             expect(target, `${d.name} → ${d.targetName}`).toBeDefined();
-            expect([...d.moduleNames].sort()).toEqual(
-              [...target!.moduleNames].sort(),
-            );
+            expect([...d.moduleNames].sort()).toEqual([...target!.moduleNames].sort());
           }
         }
       });

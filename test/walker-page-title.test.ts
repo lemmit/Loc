@@ -4,11 +4,11 @@
 // is auto-derived from the title expression's refs so React's
 // exhaustive-deps lint stays clean.
 
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
-import { generateSystems } from "../src/system/index.js";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
+import { generateSystems } from "../src/system/index.js";
 
 async function buildAndGenerate(src: string): Promise<Map<string, string>> {
   const services = createDddServices(NodeFileSystem);
@@ -42,9 +42,7 @@ describe("Slice 11.12 — page title via useEffect(document.title)", () => {
     const content = files.get("web/src/pages/home.tsx")!;
     expect(content).toBeDefined();
     expect(content).toMatch(/import \{ useEffect \} from "react";/);
-    expect(content).toMatch(
-      /useEffect\(\(\) => \{ document\.title = "Acme — Home"; \}, \[\]\);/,
-    );
+    expect(content).toMatch(/useEffect\(\(\) => \{ document\.title = "Acme — Home"; \}, \[\]\);/);
   });
 
   it("title interpolating a route param adds it to deps + destructures it", async () => {
@@ -97,12 +95,8 @@ describe("Slice 11.12 — page title via useEffect(document.title)", () => {
     `);
     const content = files.get("web/src/pages/counter.tsx")!;
     // useState + useEffect deduped on a single React import line.
-    expect(content).toMatch(
-      /import \{ useState, useEffect \} from "react";/,
-    );
-    expect(content).toMatch(
-      /const \[count, setCount\] = useState<number>\(0\);/,
-    );
+    expect(content).toMatch(/import \{ useState, useEffect \} from "react";/);
+    expect(content).toMatch(/const \[count, setCount\] = useState<number>\(0\);/);
     // Effect deps include the state field referenced in the title.
     expect(content).toMatch(
       /useEffect\(\(\) => \{ document\.title = \("Count: " \+ count\); \}, \[count\]\);/,
@@ -132,9 +126,7 @@ describe("Slice 11.12 — page title via useEffect(document.title)", () => {
     `);
     const content = files.get("web/src/pages/hybrid.tsx")!;
     // n + slug — deps array sorted.
-    expect(content).toMatch(
-      /useEffect\(\(\) => \{ document\.title = .+; \}, \[n, slug\]\);/,
-    );
+    expect(content).toMatch(/useEffect\(\(\) => \{ document\.title = .+; \}, \[n, slug\]\);/);
     // Both names made it into the appropriate destructures.
     expect(content).toMatch(/const \{ slug \} = useParams/);
     expect(content).toMatch(/const \[n, setN\] = useState/);

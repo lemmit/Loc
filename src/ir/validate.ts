@@ -1,3 +1,5 @@
+import { allPlatforms, platformFor } from "../platform/registry.js";
+import { camel, plural, snake } from "../util/naming.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -11,8 +13,6 @@ import type {
   TypeIR,
 } from "./loom-ir.js";
 import { allContexts, findUsesCurrentUser } from "./loom-ir.js";
-import { allPlatforms, platformFor } from "../platform/registry.js";
-import { camel, plural, snake } from "../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Loom IR validator — semantic checks that need the full IR (not just
@@ -101,10 +101,7 @@ function unionReservedFindNames(): Set<string> {
   return out;
 }
 
-function validateFindNameCollisions(
-  ctx: BoundedContextIR,
-  diags: LoomDiagnostic[],
-): void {
+function validateFindNameCollisions(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
   const reserved = unionReservedFindNames();
   for (const repo of ctx.repositories) {
     const seen = new Set<string>();
@@ -121,8 +118,7 @@ function validateFindNameCollisions(
       if (seen.has(find.name)) {
         diags.push({
           severity: "error",
-          message:
-            `repository '${repo.name}' declares find '${find.name}' more than once.`,
+          message: `repository '${repo.name}' declares find '${find.name}' more than once.`,
           source: `${ctx.name}/${repo.name}.${find.name}`,
         });
       }
@@ -151,10 +147,7 @@ function validateFindNameCollisions(
 // or unresolved `free` call (those need an aggregate instance).
 // ---------------------------------------------------------------------------
 
-function validateAggregateTestBodies(
-  ctx: BoundedContextIR,
-  diags: LoomDiagnostic[],
-): void {
+function validateAggregateTestBodies(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
   for (const agg of ctx.aggregates) {
     for (const test of agg.tests) {
       for (const stmt of test.statements) {
@@ -220,10 +213,7 @@ function invalidTestStmt(s: TestStmtIR): string | null {
 //      legible.
 // ---------------------------------------------------------------------------
 
-function validateExternOperations(
-  ctx: BoundedContextIR,
-  diags: LoomDiagnostic[],
-): void {
+function validateExternOperations(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
   for (const agg of ctx.aggregates) {
     for (const op of agg.operations) {
       if (!op.extern) continue;
@@ -271,10 +261,7 @@ function validateExternOperations(
 // just a string/uuid and doesn't depend on a display label.
 // ---------------------------------------------------------------------------
 
-function validateReactIdReferences(
-  sys: SystemIR,
-  diags: LoomDiagnostic[],
-): void {
+function validateReactIdReferences(sys: SystemIR, diags: LoomDiagnostic[]): void {
   // Build an aggregate registry across the whole system so we can
   // look up display fields regardless of which module declares the
   // target aggregate.
@@ -314,14 +301,7 @@ function validateReactIdReferences(
       if (!agg) continue;
       // Aggregate root fields.
       for (const f of agg.fields) {
-        checkIdReference(
-          f.type,
-          `${aggName}.${f.name}`,
-          d.name,
-          allAggregates,
-          mounted,
-          diags,
-        );
+        checkIdReference(f.type, `${aggName}.${f.name}`, d.name, allAggregates, mounted, diags);
       }
       // Operation parameters.
       for (const op of agg.operations) {
@@ -377,8 +357,7 @@ function checkIdReference(
   if (!agg) {
     diags.push({
       severity: "error",
-      message:
-        `UI-mounting deployable '${deployableName}': '${source}' references Id<${target}>, but no aggregate '${target}' is declared in the system.`,
+      message: `UI-mounting deployable '${deployableName}': '${source}' references Id<${target}>, but no aggregate '${target}' is declared in the system.`,
       source: `${deployableName}/${source}`,
     });
     return;
@@ -425,10 +404,7 @@ function unwrap(t: TypeIR): TypeIR {
 // user at the supported subset.
 // ---------------------------------------------------------------------------
 
-function validateQueryableWheres(
-  ctx: BoundedContextIR,
-  diags: LoomDiagnostic[],
-): void {
+function validateQueryableWheres(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
   for (const repo of ctx.repositories) {
     const agg = ctx.aggregates.find((a) => a.name === repo.aggregateName);
     for (const find of repo.finds) {
@@ -487,11 +463,7 @@ function validateQueryableWheres(
  * `this.<X>` member access whose `<X>` doesn't correspond to a real
  * aggregate field.  Returns null if every column reference resolves
  * cleanly. */
-function firstUnknownColumnRef(
-  e: ExprIR,
-  agg: AggregateIR,
-  ctx: BoundedContextIR,
-): string | null {
+function firstUnknownColumnRef(e: ExprIR, agg: AggregateIR, ctx: BoundedContextIR): string | null {
   switch (e.kind) {
     case "literal":
     case "this":
@@ -503,10 +475,7 @@ function firstUnknownColumnRef(
     case "unary":
       return firstUnknownColumnRef(e.operand, agg, ctx);
     case "binary":
-      return (
-        firstUnknownColumnRef(e.left, agg, ctx) ??
-        firstUnknownColumnRef(e.right, agg, ctx)
-      );
+      return firstUnknownColumnRef(e.left, agg, ctx) ?? firstUnknownColumnRef(e.right, agg, ctx);
     case "member": {
       // `this.X` — direct column.  Verify X is on the aggregate.
       if (e.receiver.kind === "this") {
@@ -532,16 +501,13 @@ function firstUnknownColumnRef(
         e.receiver.memberType.kind === "valueobject"
       ) {
         const voField = agg.fields.find(
-          (f) =>
-            f.name === (e.receiver as { member: string }).member,
+          (f) => f.name === (e.receiver as { member: string }).member,
         );
         if (!voField) {
           return `'this.${(e.receiver as { member: string }).member}'`;
         }
         const voName =
-          e.receiver.memberType.kind === "valueobject"
-            ? e.receiver.memberType.name
-            : "";
+          e.receiver.memberType.kind === "valueobject" ? e.receiver.memberType.name : "";
         const vo = ctx.valueObjects.find((v) => v.name === voName);
         if (vo && vo.fields.some((f) => f.name === e.member)) return null;
         return `'this.${(e.receiver as { member: string }).member}.${e.member}'`;
@@ -575,11 +541,7 @@ function isColumnRef(e: ExprIR): boolean {
   if (e.kind === "paren") return isColumnRef(e.inner);
   if (e.kind === "ref" && e.refKind === "this-prop") return true;
   if (e.kind === "member" && e.receiver.kind === "this") return true;
-  if (
-    e.kind === "member" &&
-    e.receiver.kind === "member" &&
-    e.receiver.receiver.kind === "this"
-  )
+  if (e.kind === "member" && e.receiver.kind === "member" && e.receiver.receiver.kind === "this")
     return true;
   return false;
 }
@@ -587,13 +549,8 @@ function isColumnRef(e: ExprIR): boolean {
 function describeColumnRef(e: ExprIR): string {
   if (e.kind === "paren") return describeColumnRef(e.inner);
   if (e.kind === "ref" && e.refKind === "this-prop") return `'this.${e.name}'`;
-  if (e.kind === "member" && e.receiver.kind === "this")
-    return `'this.${e.member}'`;
-  if (
-    e.kind === "member" &&
-    e.receiver.kind === "member" &&
-    e.receiver.receiver.kind === "this"
-  )
+  if (e.kind === "member" && e.receiver.kind === "this") return `'this.${e.member}'`;
+  if (e.kind === "member" && e.receiver.kind === "member" && e.receiver.receiver.kind === "this")
     return `'this.${e.receiver.member}.${e.member}'`;
   return "<column>";
 }
@@ -645,9 +602,7 @@ function firstNonQueryableNode(e: ExprIR): string | null {
         case ">=":
         case "&&":
         case "||":
-          return (
-            firstNonQueryableNode(e.left) ?? firstNonQueryableNode(e.right)
-          );
+          return firstNonQueryableNode(e.left) ?? firstNonQueryableNode(e.right);
         default:
           return `arithmetic '${e.op}'`;
       }
@@ -673,11 +628,7 @@ function firstNonQueryableNode(e: ExprIR): string | null {
         e.receiver.memberType.kind === "valueobject"
       )
         return null;
-      if (
-        e.receiver.kind === "ref" &&
-        e.receiver.refKind === "current-user"
-      )
-        return null;
+      if (e.receiver.kind === "ref" && e.receiver.refKind === "current-user") return null;
       return "member access not rooted at 'this' or beyond a flattened value object";
     case "method-call":
       return `collection op '.${e.member}'`;
@@ -761,10 +712,7 @@ function unsupportedE2EStmtKind(s: TestStmtIR): string | null {
   }
 }
 
-function walkStmt(
-  s: TestStmtIR,
-  visit: (e: ExprIR) => void,
-): void {
+function walkStmt(s: TestStmtIR, visit: (e: ExprIR) => void): void {
   if (
     s.kind === "expect" ||
     s.kind === "expect-throws" ||
@@ -839,9 +787,9 @@ function checkMagicCall(
   // against `api` for symmetry — backend-side dispatchers can pick
   // them up later.
   if (aggregateSlug === "workflows") {
-    const wf = contexts.flatMap((c) => c.workflows).find(
-      (w) => camel(w.name) === method || snake(w.name) === method,
-    );
+    const wf = contexts
+      .flatMap((c) => c.workflows)
+      .find((w) => camel(w.name) === method || snake(w.name) === method);
     if (!wf) {
       const known = contexts
         .flatMap((c) => c.workflows.map((w) => camel(w.name)))
@@ -858,9 +806,9 @@ function checkMagicCall(
     return;
   }
   if (aggregateSlug === "views") {
-    const view = contexts.flatMap((c) => c.views).find(
-      (v) => camel(v.name) === method || snake(v.name) === method,
-    );
+    const view = contexts
+      .flatMap((c) => c.views)
+      .find((v) => camel(v.name) === method || snake(v.name) === method);
     if (!view) {
       const known = contexts
         .flatMap((c) => c.views.map((v) => camel(v.name)))
@@ -892,21 +840,15 @@ function checkMagicCall(
     return;
   }
   if (method === "create" || method === "getById") return;
-  const isPublicOp = agg.operations.some(
-    (o) => o.visibility === "public" && o.name === method,
-  );
+  const isPublicOp = agg.operations.some((o) => o.visibility === "public" && o.name === method);
   if (isPublicOp) return;
   // Find queries — search every context's repositories for one
   // serving this aggregate.
-  const repo = contexts
-    .flatMap((c) => c.repositories)
-    .find((r) => r.aggregateName === agg.name);
+  const repo = contexts.flatMap((c) => c.repositories).find((r) => r.aggregateName === agg.name);
   const isFind = (repo?.finds ?? []).some((f) => f.name === method);
   if (isFind) return;
 
-  const ops = agg.operations
-    .filter((o) => o.visibility === "public")
-    .map((o) => o.name);
+  const ops = agg.operations.filter((o) => o.visibility === "public").map((o) => o.name);
   const finds = (repo?.finds ?? []).map((f) => f.name);
   const knownVerbs = ["create", "getById", ...ops, ...finds];
   diags.push({
@@ -930,10 +872,7 @@ function collectContexts(
   return out;
 }
 
-function findAggregateBySlug(
-  slug: string,
-  contexts: BoundedContextIR[],
-): AggregateIR | undefined {
+function findAggregateBySlug(slug: string, contexts: BoundedContextIR[]): AggregateIR | undefined {
   for (const c of contexts) {
     for (const a of c.aggregates) {
       if (camel(a.name) === slug) return a;
@@ -962,10 +901,7 @@ function findAggregateBySlug(
 // bindings all surface as errors here.
 // ---------------------------------------------------------------------------
 
-function validateWorkflows(
-  ctx: BoundedContextIR,
-  diags: LoomDiagnostic[],
-): void {
+function validateWorkflows(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
   // Reserved-name guard: workflows share the context namespace with
   // aggregates, value objects, enums, events, repositories.
   const namesUsed = new Map<string, string>();
@@ -1009,9 +945,7 @@ function validateWorkflowBody(
   diags: LoomDiagnostic[],
 ): void {
   const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
-  const reposByName = new Map(
-    ctx.repositories.map((r) => [r.name, r] as const),
-  );
+  const reposByName = new Map(ctx.repositories.map((r) => [r.name, r] as const));
   const eventsByName = new Map(ctx.events.map((e) => [e.name, e] as const));
   const bindingAgg = new Map<string, string>(); // bindingName -> aggName
   let mutated = false;
@@ -1024,10 +958,7 @@ function validateWorkflowBody(
         // need the AST node to re-check here.  Trust the lowered IR
         // and emit a warning if the expression looks degenerate
         // (kind === "ref" with refKind "unknown").
-        if (
-          st.expr.kind === "ref" &&
-          st.expr.refKind === "unknown"
-        ) {
+        if (st.expr.kind === "ref" && st.expr.refKind === "unknown") {
           diags.push({
             severity: "error",
             message: `workflow '${wf.name}': ${st.kind} references unknown name '${st.expr.name}'.`,
@@ -1113,10 +1044,7 @@ function validateWorkflowBody(
           });
           break;
         }
-        if (
-          st.method !== "getById" &&
-          !repo.finds.some((f) => f.name === st.method)
-        ) {
+        if (st.method !== "getById" && !repo.finds.some((f) => f.name === st.method)) {
           diags.push({
             severity: "error",
             message: `workflow '${wf.name}': repository '${st.repoName}' has no method '${st.method}'.  Available: getById, ${repo.finds.map((f) => f.name).join(", ") || "(no declared finds)"}.`,
@@ -1262,10 +1190,7 @@ function validateWorkflowBody(
 // existing query semantics rather than introducing new ones.
 // ---------------------------------------------------------------------------
 
-function validateViews(
-  ctx: BoundedContextIR,
-  diags: LoomDiagnostic[],
-): void {
+function validateViews(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
   // Same name-set the workflow validator builds.
   const namesUsed = new Map<string, string>();
   for (const a of ctx.aggregates) namesUsed.set(a.name, "aggregate");
@@ -1319,8 +1244,7 @@ function validateViews(
       if (unknown) {
         diags.push({
           severity: "error",
-          message:
-            `view '${view.name}': where-clause references unknown field ${unknown} on aggregate '${agg.name}'.`,
+          message: `view '${view.name}': where-clause references unknown field ${unknown} on aggregate '${agg.name}'.`,
           source: `${ctx.name}/${view.name}`,
         });
       }
@@ -1429,10 +1353,7 @@ function validateAuth(sys: SystemIR, diags: LoomDiagnostic[]): void {
  *  properties, function bodies, view filters, and repository find
  *  filters; flag any `current-user` ref found there.  Uses the
  *  existing `walkExpr` helper. */
-function validateCurrentUserScope(
-  ctx: BoundedContextIR,
-  diags: LoomDiagnostic[],
-): void {
+function validateCurrentUserScope(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
   const flag = (location: string, expr: ExprIR | undefined): void => {
     if (!expr) return;
     walkExpr(expr, (e) => {
@@ -1517,10 +1438,7 @@ function validatePermissions(sys: SystemIR, diags: LoomDiagnostic[]): void {
   }
 }
 
-function validatePermissionRefs(
-  ctx: BoundedContextIR,
-  diags: LoomDiagnostic[],
-): void {
+function validatePermissionRefs(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
   const flag = (location: string, expr: ExprIR | undefined): void => {
     if (!expr) return;
     walkExpr(expr, (e) => {

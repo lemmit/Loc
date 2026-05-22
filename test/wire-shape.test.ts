@@ -1,10 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { NodeFileSystem } from "langium/node";
-import { URI } from "langium";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createDddServices } from "../src/language/ddd-module.js";
-import { lowerModel } from "../src/ir/lower.js";
+import { URI } from "langium";
+import { NodeFileSystem } from "langium/node";
+import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../src/ir/enrichments.js";
 import type {
   AggregateIR,
@@ -13,6 +11,8 @@ import type {
   ValueObjectIR,
   WireField,
 } from "../src/ir/loom-ir.js";
+import { lowerModel } from "../src/ir/lower.js";
+import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -20,10 +20,9 @@ const repoRoot = path.resolve(here, "..");
 
 async function buildEnrichedModel(file: string): Promise<LoomModel> {
   const services = createDddServices(NodeFileSystem);
-  const doc =
-    await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
-      URI.file(path.join(repoRoot, file)),
-    );
+  const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
+    URI.file(path.join(repoRoot, file)),
+  );
   await services.shared.workspace.DocumentBuilder.build([doc], {
     validation: true,
   });
@@ -91,12 +90,7 @@ describe("enrichLoomModel — wire-shape derivation", () => {
     const sourceOrder = order.wireShape!.map((f) => f.source);
     // Each source category appears in a contiguous block; once we
     // leave a category we never return to it.
-    const expected: WireField["source"][] = [
-      "id",
-      "property",
-      "containment",
-      "derived",
-    ];
+    const expected: WireField["source"][] = ["id", "property", "containment", "derived"];
     let cursor = 0;
     for (const s of sourceOrder) {
       while (cursor < expected.length && s !== expected[cursor]) cursor++;
@@ -158,9 +152,7 @@ describe("enrichLoomModel — frontend `targets:` module inheritance", () => {
     // resilient through the platform rename.
     const loom = await buildEnrichedModel("examples/acme.ddd");
     const sys = loom.systems[0]!;
-    const web = sys.deployables.find(
-      (d) => d.platform === "react" || d.platform === "static",
-    );
+    const web = sys.deployables.find((d) => d.platform === "react" || d.platform === "static");
     expect(web).toBeDefined();
     const target = sys.deployables.find((d) => d.name === web!.targetName);
     expect(target).toBeDefined();

@@ -16,11 +16,11 @@
 // Nested ternaries (as a child of Stack/Group/etc) brace-wrap into
 // JSX-expression form: `{cond ? <A /> : <B />}`.
 
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
-import { generateSystems } from "../src/system/index.js";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
+import { generateSystems } from "../src/system/index.js";
 
 async function buildAndGenerate(src: string): Promise<Map<string, string>> {
   const services = createDddServices(NodeFileSystem);
@@ -55,9 +55,7 @@ describe("Slice 11.17 — ternary conditional rendering in walker pages", () => 
     expect(content).toBeDefined();
     // Cond + parens-wrapped branches.
     expect(content).toMatch(/loading \? \(/);
-    expect(content).toMatch(
-      /<Center mih=\{200\}><Text c="dimmed">Loading\.\.\.<\/Text><\/Center>/,
-    );
+    expect(content).toMatch(/<Center mih=\{200\}><Text c="dimmed">Loading\.\.\.<\/Text><\/Center>/);
     expect(content).toMatch(/\) : \(/);
     expect(content).toMatch(/<Stack>/);
     expect(content).toMatch(/<Title order=\{2\}>Done<\/Title>/);

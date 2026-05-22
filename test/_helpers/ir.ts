@@ -1,12 +1,11 @@
-import { lowerModel } from "../../src/ir/lower.js";
 import { enrichLoomModel } from "../../src/ir/enrichments.js";
 import type { LoomModel } from "../../src/ir/loom-ir.js";
+import { lowerModel } from "../../src/ir/lower.js";
 import type { Model } from "../../src/language/generated/ast.js";
 import { parseValid } from "./parse.js";
 
 /** Lower + enrich an already-parsed AST Model into the canonical Loom IR. */
-export const toLoomModel = (model: Model): LoomModel =>
-  enrichLoomModel(lowerModel(model));
+export const toLoomModel = (model: Model): LoomModel => enrichLoomModel(lowerModel(model));
 
 /**
  * Parse a `.ddd` string, assert it validates, then lower + enrich to IR.

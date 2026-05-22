@@ -25,11 +25,11 @@
 //      preparer, so any future Zod-rules / Controller / register
 //      tweak in the scaffold path automatically applies here.
 
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
-import { generateSystems } from "../src/system/index.js";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
+import { generateSystems } from "../src/system/index.js";
 
 async function buildAndGenerate(src: string): Promise<Map<string, string>> {
   const services = createDddServices(NodeFileSystem);
@@ -68,9 +68,7 @@ describe("Slice A4 — Form(of: <Aggregate>) auto-dispatch", () => {
     expect(tsx).toBeDefined();
     expect(tsx).toMatch(/import \{[^}]*useForm[^}]*\} from "react-hook-form"/);
     expect(tsx).toMatch(/import \{ zodResolver \} from "@hookform\/resolvers\/zod"/);
-    expect(tsx).toMatch(
-      /import \{ CreateOrderRequest, useCreateOrder \} from "\.\.\/api\/order"/,
-    );
+    expect(tsx).toMatch(/import \{ CreateOrderRequest, useCreateOrder \} from "\.\.\/api\/order"/);
     expect(tsx).toMatch(/const create = useCreateOrder\(\)/);
     expect(tsx).toMatch(/useForm<CreateOrderRequest>/);
     expect(tsx).toMatch(/resolver: zodResolver\(CreateOrderRequest\)/);
@@ -80,14 +78,10 @@ describe("Slice A4 — Form(of: <Aggregate>) auto-dispatch", () => {
     const files = await buildAndGenerate(baseOrderSystem(`Form(of: Order)`));
     const tsx = files.get("web/src/pages/create_order.tsx")!;
     // string → TextInput with register("customerId")
-    expect(tsx).toMatch(
-      /<TextInput[^>]*\{\.\.\.register\("customerId"\)\}/,
-    );
+    expect(tsx).toMatch(/<TextInput[^>]*\{\.\.\.register\("customerId"\)\}/);
     // int → NumberInput inside Controller (RHF requirement for non-
     // string inputs)
-    expect(tsx).toMatch(
-      /<Controller[\s\S]*name="quantity"[\s\S]*<NumberInput/,
-    );
+    expect(tsx).toMatch(/<Controller[\s\S]*name="quantity"[\s\S]*<NumberInput/);
   });
 
   it("excludes optional fields from the create form (scaffold-parity rule)", async () => {
@@ -142,9 +136,7 @@ describe("Slice A4 — Form(of: <Aggregate>) auto-dispatch", () => {
     `);
     const tsx = files.get("web/src/pages/create_order.tsx")!;
     expect(tsx).toBeDefined();
-    expect(tsx).toMatch(
-      /import \{ useAllCustomers \} from "\.\.\/api\/customer"/,
-    );
+    expect(tsx).toMatch(/import \{ useAllCustomers \} from "\.\.\/api\/customer"/);
     expect(tsx).toMatch(/const __customers = useAllCustomers\(\)/);
     // Field is a Select with options from the hook.
     expect(tsx).toMatch(/<Select[\s\S]*data=\{\(__customers\.data/);
@@ -154,14 +146,10 @@ describe("Slice A4 — Form(of: <Aggregate>) auto-dispatch", () => {
     const files = await buildAndGenerate(baseOrderSystem(`Form(of: Order)`));
     const tsx = files.get("web/src/pages/create_order.tsx")!;
     expect(tsx).toMatch(/await create\.mutateAsync\(vals\)/);
-    expect(tsx).toMatch(
-      /notifications\.show\(\{ color: "green", message: "Order created" \}\)/,
-    );
+    expect(tsx).toMatch(/notifications\.show\(\{ color: "green", message: "Order created" \}\)/);
     expect(tsx).toMatch(/navigate\(`\/orders\/\$\{out\.id\}`\)/);
     // Default flow needs the notifications import too.
-    expect(tsx).toMatch(
-      /import \{ notifications \} from "@mantine\/notifications"/,
-    );
+    expect(tsx).toMatch(/import \{ notifications \} from "@mantine\/notifications"/);
   });
 
   it("explicit onSubmit: lambda overrides the default flow and skips the notify import", async () => {
@@ -176,9 +164,7 @@ describe("Slice A4 — Form(of: <Aggregate>) auto-dispatch", () => {
   });
 
   it("testid: on the Form replaces the auto-derived per-field testid namespace", async () => {
-    const files = await buildAndGenerate(
-      baseOrderSystem(`Form(of: Order, testid: "place-order")`),
-    );
+    const files = await buildAndGenerate(baseOrderSystem(`Form(of: Order, testid: "place-order")`));
     const tsx = files.get("web/src/pages/create_order.tsx")!;
     expect(tsx).toBeDefined();
     expect(tsx).toMatch(/data-testid="place-order-input-customerId"/);

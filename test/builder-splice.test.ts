@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { AstUtils, type AstNode } from "langium";
+import { type AstNode, AstUtils } from "langium";
+import { describe, expect, it } from "vitest";
+import { applyEdits, nodeEditRange, spliceNode } from "../web/src/builder/edit-engine.js";
 import { parseDdd } from "../web/src/builder/parse.js";
-import { applyEdits, spliceNode, nodeEditRange } from "../web/src/builder/edit-engine.js";
 
 // ---------------------------------------------------------------------------
 // CST edit-engine acceptance tests (Builders, Phase 0).  Proves the engine
@@ -34,7 +34,10 @@ describe("builder edit-engine", () => {
   });
 
   it("locality: editing one node's value changes only its span", () => {
-    const title = find(SRC, (n) => n.$type === "StringLit" && (n as { value: string }).value === "Welcome");
+    const title = find(
+      SRC,
+      (n) => n.$type === "StringLit" && (n as { value: string }).value === "Welcome",
+    );
     const out = spliceNode(SRC, title, '"Hi"');
 
     expect(out).toBe(SRC.replace('"Welcome"', '"Hi"'));

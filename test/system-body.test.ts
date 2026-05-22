@@ -1,12 +1,13 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
 import { EmptyFileSystem } from "langium";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Aggregate, Model } from "../src/language/generated/ast.js";
 import {
   addStatement,
+  type BodyLocator,
   deleteStatement,
   editFunctionBody,
   editStatement,
@@ -15,7 +16,6 @@ import {
   listOperations,
   listStatements,
   moveStatement,
-  type BodyLocator,
 } from "../web/src/builder/system/body.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -24,14 +24,17 @@ const sales = readFileSync(path.join(here, "..", "examples", "sales.ddd"), "utf8
 const parser = createDddServices(EmptyFileSystem).Ddd.parser.LangiumParser;
 const parse = (t: string): Model => parser.parse(t).value as Model;
 function aggregate(m: Model, name: string): Aggregate {
-  for (const n of walk(m)) if (n.$type === "Aggregate" && (n as Aggregate).name === name) return n as Aggregate;
+  for (const n of walk(m))
+    if (n.$type === "Aggregate" && (n as Aggregate).name === name) return n as Aggregate;
   throw new Error(`no aggregate ${name}`);
 }
 function* walk(node: { $type: string }): Generator<{ $type: string }> {
   yield node;
   for (const v of Object.values(node)) {
-    if (Array.isArray(v)) for (const c of v) if (c && typeof c === "object" && "$type" in c) yield* walk(c);
-    else if (v && typeof v === "object" && "$type" in v) yield* walk(v as { $type: string });
+    if (Array.isArray(v))
+      for (const c of v)
+        if (c && typeof c === "object" && "$type" in c) yield* walk(c);
+        else if (v && typeof v === "object" && "$type" in v) yield* walk(v as { $type: string });
   }
 }
 
@@ -108,7 +111,9 @@ describe("System builder — operation/workflow body editing", () => {
   });
 
   it("returns null for unknown owners / out-of-range indexes", () => {
-    expect(listStatements(parse(sales), { kind: "operation", aggregate: "Order", op: "nope" })).toBeNull();
+    expect(
+      listStatements(parse(sales), { kind: "operation", aggregate: "Order", op: "nope" }),
+    ).toBeNull();
     expect(editStatement(sales, confirm, 99, "status := Draft")).toBeNull();
     expect(addStatement(sales, { kind: "workflow", name: "nope" }, "let x = 1")).toBeNull();
   });

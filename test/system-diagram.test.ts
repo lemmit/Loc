@@ -1,11 +1,12 @@
-import { describe, expect, it } from "vitest";
-import { NodeFileSystem } from "langium/node";
-import { URI } from "langium";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createDddServices } from "../src/language/ddd-module.js";
-import { lowerModel } from "../src/ir/lower.js";
+import { URI } from "langium";
+import { NodeFileSystem } from "langium/node";
+import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../src/ir/enrichments.js";
+import { lowerModel } from "../src/ir/lower.js";
+import { createDddServices } from "../src/language/ddd-module.js";
+import type { Model } from "../src/language/generated/ast.js";
 import {
   buildDeploymentDiagram,
   buildDomainDiagram,
@@ -18,7 +19,6 @@ import {
   renderSequenceDiagram,
   renderWorkflowDiagram,
 } from "../src/system/mermaid.js";
-import type { Model } from "../src/language/generated/ast.js";
 
 // ---------------------------------------------------------------------------
 // `<outdir>/.loom/domain.mmd` + `.loom/workflows.mmd` snapshots.  Lock
@@ -31,10 +31,9 @@ const repoRoot = path.resolve(here, "..");
 
 async function build(file: string) {
   const services = createDddServices(NodeFileSystem);
-  const doc =
-    await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
-      URI.file(path.join(repoRoot, file)),
-    );
+  const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
+    URI.file(path.join(repoRoot, file)),
+  );
   await services.shared.workspace.DocumentBuilder.build([doc], {
     validation: true,
   });

@@ -34,19 +34,16 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-
+import type { LoomBackendManifest } from "./manifest.js";
 import type { DiscoveredBackend } from "./registry.js";
 import { defaultBuiltInBackends, setBackendSource } from "./registry.js";
-import type { LoomBackendManifest } from "./manifest.js";
 
 interface RawPackageJson {
   name?: string;
   loom?: unknown;
 }
 
-async function readPackageJsonSafe(
-  dir: string,
-): Promise<RawPackageJson | null> {
+async function readPackageJsonSafe(dir: string): Promise<RawPackageJson | null> {
   try {
     const raw = await fs.readFile(path.join(dir, "package.json"), "utf8");
     return JSON.parse(raw) as RawPackageJson;
@@ -83,9 +80,7 @@ function asBackendManifest(loom: unknown): LoomBackendManifest | null {
  *  (scoped `@x/y`).  Hidden entries (`.bin`, `.package-lock.json`)
  *  are skipped.  Missing `node_modules` yields nothing (e.g. a
  *  fresh checkout before `npm install`). */
-async function* walkInstalledPackages(
-  nodeModules: string,
-): AsyncGenerator<string> {
+async function* walkInstalledPackages(nodeModules: string): AsyncGenerator<string> {
   let entries: string[];
   try {
     entries = await fs.readdir(nodeModules);
@@ -116,9 +111,7 @@ async function* walkInstalledPackages(
  *  emit a `DiscoveredBackend` for each one declaring
  *  `loom.kind === "backend"` in its `package.json`.  See module
  *  header for slice 3 surface-resolution policy. */
-export async function discoverBackendsFs(
-  rootDir: string,
-): Promise<DiscoveredBackend[]> {
+export async function discoverBackendsFs(rootDir: string): Promise<DiscoveredBackend[]> {
   const inTree = defaultBuiltInBackends();
   const out: DiscoveredBackend[] = [];
   const nm = path.join(rootDir, "node_modules");
@@ -129,8 +122,7 @@ export async function discoverBackendsFs(
     if (!manifest) continue;
     const match = inTree.find(
       (b) =>
-        b.manifest.family === manifest.family &&
-        b.manifest.loomVersion === manifest.loomVersion,
+        b.manifest.family === manifest.family && b.manifest.loomVersion === manifest.loomVersion,
     );
     if (!match) {
       // Discovered manifest with no matching in-tree code yet.

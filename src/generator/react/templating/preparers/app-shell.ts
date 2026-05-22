@@ -14,13 +14,7 @@
 
 import type { AggregateIR, ViewIR, WorkflowIR } from "../../../../ir/loom-ir.js";
 import { humanize, plural, snake } from "../../../../util/naming.js";
-import type {
-  AppShellVM,
-  ImportVM,
-  NavEntryVM,
-  NavSectionVM,
-  RouteVM,
-} from "../view-models.js";
+import type { AppShellVM, ImportVM, NavEntryVM, NavSectionVM, RouteVM } from "../view-models.js";
 
 function pascal(s: string): string {
   return s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);

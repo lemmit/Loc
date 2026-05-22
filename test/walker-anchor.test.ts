@@ -8,11 +8,11 @@
 // Without `to:` falls through to a bare <Anchor> (no href —
 // visible no-op).
 
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
-import { generateSystems } from "../src/system/index.js";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
+import { generateSystems } from "../src/system/index.js";
 
 async function buildAndGenerate(src: string): Promise<Map<string, string>> {
   const services = createDddServices(NodeFileSystem);
@@ -49,9 +49,7 @@ describe("Slice 11.15 — Anchor primitive", () => {
     expect(content).toBeDefined();
     expect(content).toMatch(/import \{ Link as RouterLink \} from "react-router";/);
     expect(content).toMatch(/import \{ Anchor, Stack, Title \} from "@mantine\/core";/);
-    expect(content).toMatch(
-      /<Anchor component=\{RouterLink\} to="\/orders">View orders<\/Anchor>/,
-    );
+    expect(content).toMatch(/<Anchor component=\{RouterLink\} to="\/orders">View orders<\/Anchor>/);
   });
 
   it("Anchor without to: emits a bare <Anchor> (no RouterLink import)", async () => {
@@ -126,9 +124,7 @@ describe("Slice 11.15 — Anchor primitive", () => {
     `);
     const content = files.get("web/src/pages/home.tsx")!;
     // Single import line with both useNavigate (for Button) and Link (for Anchor).
-    expect(content).toMatch(
-      /import \{ useNavigate, Link as RouterLink \} from "react-router";/,
-    );
+    expect(content).toMatch(/import \{ useNavigate, Link as RouterLink \} from "react-router";/);
     expect(content).toMatch(/<Anchor component=\{RouterLink\} to="\/settings">/);
     expect(content).toMatch(/<Button onClick=\{\(\) => navigate\("\/logout"\)\}>/);
   });

@@ -1,12 +1,12 @@
-import { describe, it, expect } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { EmptyFileSystem, AstUtils, type AstNode } from "langium";
+import { type AstNode, AstUtils, EmptyFileSystem } from "langium";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
-import { seedFromBody, emitBody, type BuilderNode } from "../web/src/builder/page/model.js";
-import { toCraft, fromCraft } from "../web/src/builder/page/serialize.js";
 import type { BodyProp } from "../src/language/generated/ast.js";
+import { type BuilderNode, emitBody, seedFromBody } from "../web/src/builder/page/model.js";
+import { fromCraft, toCraft } from "../web/src/builder/page/serialize.js";
 
 // ---------------------------------------------------------------------------
 // Page-builder data-layer round-trip (Builders, Phase 1).  For every page
@@ -77,7 +77,9 @@ describe("page-builder model — primitive coverage", () => {
     const doc = `system S { ui U { page P { body: ${bodyExpr} } } }`;
     const original = parser.parse(doc);
     expect(original.parserErrors, `fixture must parse:\n${bodyExpr}`).toEqual([]);
-    const body = [...AstUtils.streamAst(original.value)].find((n) => n.$type === "BodyProp") as BodyProp;
+    const body = [...AstUtils.streamAst(original.value)].find(
+      (n) => n.$type === "BodyProp",
+    ) as BodyProp;
     const cst = body.expr.$cstNode!;
     const emitted = emitBody(seedFromBody(body.expr));
     const spliced = doc.slice(0, cst.offset) + emitted + doc.slice(cst.end);
@@ -87,20 +89,20 @@ describe("page-builder model — primitive coverage", () => {
   };
 
   for (const bodyExpr of [
-    'List(of: Order)',
+    "List(of: Order)",
     'Form(of: Order, testid: "orders-new")',
-    'Form(creates: Product)',
-    'Form(of: Account, op: withdraw)',
-    'Form(runs: PlaceOrder)',
+    "Form(creates: Product)",
+    "Form(of: Account, op: withdraw)",
+    "Form(runs: PlaceOrder)",
     'Badge("Alpha", color: "blue")',
     // Expression-valued props (the `expr` prop kind): data-bound args must
     // round-trip verbatim, not collapse the whole call to Opaque.
-    'Badge(order.status)',
+    "Badge(order.status)",
     'Badge(line.total, color: "green")',
-    'Badge(format(amount))',
+    "Badge(format(amount))",
     'Alert("Couldn\'t load")',
     'Anchor("Home", to: "/")',
-    'Divider()',
+    "Divider()",
     'Empty("Nothing here")',
     'Grid(Text("a"), Text("b"), Text("c"))',
     'Toolbar(Button("Save"), Button("Cancel"))',
@@ -115,19 +117,19 @@ describe("page-builder model — primitive coverage", () => {
     // Phase 2 — remaining stdlib scalar/expr primitives.
     'Stat("Active users", "1,247")',
     'Stat("Revenue", order.total)',
-    'Money(line.subtotal)',
-    'DateDisplay(order.placedAt)',
-    'EnumBadge(order.status)',
-    'IdLink(order.id, of: Order)',
+    "Money(line.subtotal)",
+    "DateDisplay(order.placedAt)",
+    "EnumBadge(order.status)",
+    "IdLink(order.id, of: Order)",
     'Field("Your name", bind: userName)',
     'NumberField("Quantity", bind: qty)',
     'PasswordField("Password", bind: secret)',
     'Toggle("Notifications", bind: notifications)',
     'Image(src: "/logo.png", alt: "Logo")',
     'Avatar(alt: "User")',
-    'Skeleton(count: 5)',
-    'Loader()',
-    'Slot()',
+    "Skeleton(count: 5)",
+    "Loader()",
+    "Slot()",
     'Breadcrumbs(Anchor("Home", to: "/"), Text("Orders"))',
     'KeyValueRow("Total", Text("42"))',
     'KeyValueRow("Total", order.total)',
@@ -154,23 +156,23 @@ describe("page-builder model — primitive coverage", () => {
     'Table(rows: orders, rowTestid: r => "row-" + r.id, Column("ID", o => IdLink(o.id, of: Order)))',
     // Passthrough modifiers (unmodelled named args) and optional positionals
     // must round-trip rather than collapse the node to Opaque.
-    'Empty()',
+    "Empty()",
     'Stack(Text("x"), testid: "panel")',
     'Toolbar(Heading("Orders", level: 2), testid: "bar")',
     'Table(Column("ID", o => Text(o.id)), rows: orders, striped: true, sticky: true)',
     // Text content that is an expression (not a bare string literal).
     'Text("Hello, " + userName)',
-    'Heading(pageTitle, level: 1)',
+    "Heading(pageTitle, level: 1)",
     // Event-handler lambdas keep the carrying primitive recognised (the handler
     // round-trips as a passthrough prop).
     'Button("Save", onClick: e => save())',
     'Button("Increment", onClick: e => { count := count + 1 })',
     // Qualified refs in a `ref` slot.
-    'Form(of: Sales.Order)',
-    'IdLink(o.id, of: Catalog.Product)',
+    "Form(of: Sales.Order)",
+    "IdLink(o.id, of: Catalog.Product)",
     // Detail / MasterDetail primitives.
-    'Detail(of: Order, by: id)',
-    'MasterDetail(of: Order, scope: Orders.byCustomer(c), detail: o => Stack(Text(o.name)))',
+    "Detail(of: Order, by: id)",
+    "MasterDetail(of: Order, scope: Orders.byCustomer(c), detail: o => Stack(Text(o.name)))",
     // Block-bodied (statement) handler lambdas in a named-child slot.
     'Table(rows: orders, onRowClick: r => {\n  select(r.id)\n}, Column("ID", o => Text(o.id)))',
     'Table(rows: orders, onRowClick: r => {\n  let x = r.id\n  select(x)\n}, Column("ID", o => Text(o.id)))',
@@ -184,7 +186,9 @@ describe("page-builder model — user-defined component calls", () => {
     const doc = `system S { ui U { page P { body: ${bodyExpr} } } }`;
     const original = parser.parse(doc);
     expect(original.parserErrors, `fixture must parse:\n${bodyExpr}`).toEqual([]);
-    const body = [...AstUtils.streamAst(original.value)].find((n) => n.$type === "BodyProp") as BodyProp;
+    const body = [...AstUtils.streamAst(original.value)].find(
+      (n) => n.$type === "BodyProp",
+    ) as BodyProp;
     const node = seedFromBody(body.expr, new Map(Object.entries(comps)));
     const cst = body.expr.$cstNode!;
     const spliced = doc.slice(0, cst.offset) + emitBody(node) + doc.slice(cst.end);
@@ -208,7 +212,9 @@ describe("page-builder model — user-defined component calls", () => {
   });
 
   it("recognises a component nested in a MasterDetail detail lambda", () => {
-    const node = seedWith("MasterDetail(of: Order, detail: o => OrderPanel(o))", { OrderPanel: ["order"] });
+    const node = seedWith("MasterDetail(of: Order, detail: o => OrderPanel(o))", {
+      OrderPanel: ["order"],
+    });
     expect(node.name).toBe("MasterDetail");
     const detail = node.children.find((c) => c.slot === "detail")!;
     expect(detail.name).toBe("Lambda");
@@ -222,7 +228,9 @@ describe("page-builder model — container-with-props seed shape", () => {
     const doc = `system S { ui U { page P { body: ${bodyExpr} } } }`;
     const original = parser.parse(doc);
     expect(original.parserErrors, `fixture must parse:\n${bodyExpr}`).toEqual([]);
-    const body = [...AstUtils.streamAst(original.value)].find((n) => n.$type === "BodyProp") as BodyProp;
+    const body = [...AstUtils.streamAst(original.value)].find(
+      (n) => n.$type === "BodyProp",
+    ) as BodyProp;
     return seedFromBody(body.expr);
   };
 
@@ -257,12 +265,16 @@ describe("page-builder model — container-with-props seed shape", () => {
   });
 
   it("recognises the real Table form (named rows: before positional Columns)", () => {
-    const node = seed('Table(rows: orders, Column("ID", o => Text(o.id)), Column("Name", o => Text(o.name)))');
+    const node = seed(
+      'Table(rows: orders, Column("ID", o => Text(o.id)), Column("Name", o => Text(o.name)))',
+    );
     expect(node.name).toBe("Table");
     expect(node.props.rows).toBe("orders");
     expect(node.children.map((c) => c.name)).toEqual(["Column", "Column"]);
     // The named-before-positional ordering is recorded so emit replays it.
-    expect(emitBody(node)).toBe('Table(rows: orders, Column("ID", o => Text(o.id)), Column("Name", o => Text(o.name)))');
+    expect(emitBody(node)).toBe(
+      'Table(rows: orders, Column("ID", o => Text(o.id)), Column("Name", o => Text(o.name)))',
+    );
     // And it survives the craft serialization round-trip.
     expect(emitBody(fromCraft(toCraft(node)))).toBe(emitBody(node));
   });
@@ -291,20 +303,37 @@ describe("page-builder model — container-with-props seed shape", () => {
     // The assignment statement is modelled with structured target/op/value.
     const stmt = handler.children[0];
     expect(stmt.name).toBe("Stmt");
-    expect(stmt.props).toMatchObject({ kind: "assign", target: "count", op: ":=", value: "count + 1" });
+    expect(stmt.props).toMatchObject({
+      kind: "assign",
+      target: "count",
+      op: ":=",
+      value: "count + 1",
+    });
   });
 
   it("structures an assignment statement but keeps other statements raw", () => {
-    const node = seed('Table(rows: r, onRowClick: x => {\n  draft.id := x.id\n  refresh()\n}, Column("ID", o => Text(o.id)))');
+    const node = seed(
+      'Table(rows: r, onRowClick: x => {\n  draft.id := x.id\n  refresh()\n}, Column("ID", o => Text(o.id)))',
+    );
     const lambda = node.children.find((c) => c.slot === "onRowClick")!;
-    expect(lambda.children[0].props).toMatchObject({ kind: "assign", target: "draft.id", value: "x.id" });
+    expect(lambda.children[0].props).toMatchObject({
+      kind: "assign",
+      target: "draft.id",
+      value: "x.id",
+    });
     expect(lambda.children[1].props.src).toBe("refresh()");
   });
 
   it("structures a navigate(...) statement into target page + params", () => {
-    const node = seed('Button("Go", onClick: e => {\n  navigate(OrderConsole, draft.customerId)\n})');
+    const node = seed(
+      'Button("Go", onClick: e => {\n  navigate(OrderConsole, draft.customerId)\n})',
+    );
     const handler = node.children.find((c) => c.slot === "onClick")!;
-    expect(handler.children[0].props).toMatchObject({ kind: "navigate", to: "OrderConsole", params: "draft.customerId" });
+    expect(handler.children[0].props).toMatchObject({
+      kind: "navigate",
+      to: "OrderConsole",
+      params: "draft.customerId",
+    });
     expect(emitBody(fromCraft(toCraft(node)))).toBe(emitBody(node));
   });
 
@@ -316,15 +345,23 @@ describe("page-builder model — container-with-props seed shape", () => {
   });
 
   it("structures `let` and keeps a bare call verbatim, both round-tripping", () => {
-    const node = seed('Button("Go", onClick: e => {\n  let total = order.total + 1\n  refresh(order)\n})');
+    const node = seed(
+      'Button("Go", onClick: e => {\n  let total = order.total + 1\n  refresh(order)\n})',
+    );
     const handler = node.children.find((c) => c.slot === "onClick")!;
-    expect(handler.children[0].props).toMatchObject({ kind: "let", name: "total", value: "order.total + 1" });
+    expect(handler.children[0].props).toMatchObject({
+      kind: "let",
+      name: "total",
+      value: "order.total + 1",
+    });
     expect(handler.children[1].props.src).toBe("refresh(order)");
     expect(emitBody(fromCraft(toCraft(node)))).toBe(emitBody(node));
   });
 
   it("models a block-handler lambda slot as editable statement rows", () => {
-    const node = seed('Table(rows: orders, onRowClick: r => {\n  let x = r.id\n  select(x)\n}, Column("ID", o => Text(o.id)))');
+    const node = seed(
+      'Table(rows: orders, onRowClick: r => {\n  let x = r.id\n  select(x)\n}, Column("ID", o => Text(o.id)))',
+    );
     const handler = node.children.find((c) => c.slot === "onRowClick")!;
     expect(handler.name).toBe("Lambda");
     expect(handler.props.param).toBe("r");
@@ -365,8 +402,16 @@ describe("page-builder model — container-with-props seed shape", () => {
       name: "Match",
       props: {},
       children: [
-        { name: "MatchElse", props: {}, children: [{ name: "Empty", props: { message: "n" }, children: [] }] },
-        { name: "MatchArm", props: { cond: "1 == 1" }, children: [{ name: "Text", props: { text: "a" }, children: [] }] },
+        {
+          name: "MatchElse",
+          props: {},
+          children: [{ name: "Empty", props: { message: "n" }, children: [] }],
+        },
+        {
+          name: "MatchArm",
+          props: { cond: "1 == 1" },
+          children: [{ name: "Text", props: { text: "a" }, children: [] }],
+        },
       ],
     };
     const out = emitBody(node);
@@ -376,7 +421,9 @@ describe("page-builder model — container-with-props seed shape", () => {
   });
 
   it("models named-arg child slots and survives the craft round-trip", () => {
-    const node = seed('QueryView(of: orders, loading: Skeleton(count: 5), data: rows => Table(Column("ID", o => Text(o.id)), rows: rows))');
+    const node = seed(
+      'QueryView(of: orders, loading: Skeleton(count: 5), data: rows => Table(Column("ID", o => Text(o.id)), rows: rows))',
+    );
     expect(node.name).toBe("QueryView");
     expect(node.props.of).toBe("orders");
     const slots = node.children.map((c) => c.slot);
@@ -415,7 +462,7 @@ describe("page-builder model — container-with-props seed shape", () => {
   });
 
   it("models a block-bodied lambda as a Lambda with statement rows", () => {
-    const node = seed("Column(\"X\", o => { let y = o.id })");
+    const node = seed('Column("X", o => { let y = o.id })');
     expect(node.name).toBe("Column");
     const lambda = node.children[0];
     expect(lambda.name).toBe("Lambda");
@@ -439,7 +486,7 @@ describe("page-builder model — container-with-props seed shape", () => {
     expect(member.name).toBe("Badge");
     expect(member.props.value).toBe("order.status");
 
-    const call = seed("Badge(format(amount), color: \"green\")");
+    const call = seed('Badge(format(amount), color: "green")');
     expect(call.name).toBe("Badge");
     expect(call.props.value).toBe("format(amount)");
     expect(call.props.color).toBe("green");

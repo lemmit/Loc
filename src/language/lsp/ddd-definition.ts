@@ -1,13 +1,6 @@
+import { AstUtils, type CstNode, type MaybePromise } from "langium";
 import { DefaultDefinitionProvider, type LangiumServices } from "langium/lsp";
-import {
-  AstUtils,
-  type CstNode,
-  type MaybePromise,
-} from "langium";
-import {
-  LocationLink,
-  type DefinitionParams,
-} from "vscode-languageserver";
+import { type DefinitionParams, LocationLink } from "vscode-languageserver";
 import { isMemberAccess } from "../generated/ast.js";
 import { envForNode, stepIntoNode, typeOf } from "../type-system.js";
 

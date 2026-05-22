@@ -1,9 +1,4 @@
-import type {
-  AggregateIR,
-  BoundedContextIR,
-  TypeIR,
-  WorkflowIR,
-} from "../../ir/loom-ir.js";
+import type { AggregateIR, BoundedContextIR, TypeIR, WorkflowIR } from "../../ir/loom-ir.js";
 import { camel, plural, snake } from "../../util/naming.js";
 import { fillBlock } from "./page-objects-builder.js";
 
@@ -46,9 +41,7 @@ export function allWorkflows(
 // deployable.  One file at `src/api/workflows.ts` aggregating them all.
 // ---------------------------------------------------------------------------
 
-export function buildWorkflowsApiModule(
-  contexts: BoundedContextIR[],
-): string {
+export function buildWorkflowsApiModule(contexts: BoundedContextIR[]): string {
   const workflows = allWorkflows(contexts);
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
@@ -58,9 +51,7 @@ export function buildWorkflowsApiModule(
   const enumDeps = collectEnumDeps(workflows);
   const voDeps = collectValueObjectDeps(workflows);
   for (const dep of [...enumDeps, ...voDeps]) {
-    lines.push(
-      `import { ${dep.schemaName} } from "./${camel(dep.fromAggregate)}";`,
-    );
+    lines.push(`import { ${dep.schemaName} } from "./${camel(dep.fromAggregate)}";`);
   }
   lines.push("");
 
@@ -70,16 +61,12 @@ export function buildWorkflowsApiModule(
       lines.push(`  ${p.name}: ${zodForRequest(p.type)},`);
     }
     lines.push(`});`);
-    lines.push(
-      `export type ${cap(wf.name)}Request = z.infer<typeof ${cap(wf.name)}Request>;`,
-    );
+    lines.push(`export type ${cap(wf.name)}Request = z.infer<typeof ${cap(wf.name)}Request>;`);
     lines.push("");
     lines.push(`export function use${cap(wf.name)}Workflow() {`);
     lines.push(`  return useMutation({`);
     lines.push(`    mutationFn: async (input: ${cap(wf.name)}Request) => {`);
-    lines.push(
-      `      await api.post(\`/workflows/${snake(wf.name)}\`, input);`,
-    );
+    lines.push(`      await api.post(\`/workflows/${snake(wf.name)}\`, input);`);
     lines.push(`    },`);
     lines.push(`  });`);
     lines.push(`}`);
@@ -94,9 +81,7 @@ interface SchemaDep {
   schemaName: string;
 }
 
-function collectEnumDeps(
-  workflows: Array<{ wf: WorkflowIR; ctx: BoundedContextIR }>,
-): SchemaDep[] {
+function collectEnumDeps(workflows: Array<{ wf: WorkflowIR; ctx: BoundedContextIR }>): SchemaDep[] {
   const out = new Map<string, SchemaDep>();
   for (const { wf, ctx } of workflows) {
     for (const p of wf.params) {
@@ -138,10 +123,7 @@ function collectValueObjectDeps(
   return [...out.values()];
 }
 
-function findFirstAggregateUsingEnum(
-  ctx: BoundedContextIR,
-  enumName: string,
-): string | undefined {
+function findFirstAggregateUsingEnum(ctx: BoundedContextIR, enumName: string): string | undefined {
   for (const a of ctx.aggregates) {
     let used = false;
     const visit = (t: TypeIR): void => {
@@ -184,19 +166,14 @@ function walkType(t: TypeIR, visit: (t: TypeIR) => void): void {
 // Playwright page object emission — one class per workflow.
 // ---------------------------------------------------------------------------
 
-export function buildWorkflowPageObject(
-  wf: WorkflowIR,
-  ctx: BoundedContextIR,
-): string {
+export function buildWorkflowPageObject(wf: WorkflowIR, ctx: BoundedContextIR): string {
   const slug = snake(wf.name);
   const className = `${cap(wf.name)}WorkflowPage`;
   const requestType = `${cap(wf.name)}Request`;
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import type { Page } from "@playwright/test";`);
-  lines.push(
-    `import type { ${requestType} } from "../../../src/api/workflows";`,
-  );
+  lines.push(`import type { ${requestType} } from "../../../src/api/workflows";`);
   lines.push("");
   lines.push(`export class ${className} {`);
   lines.push(`  static readonly url = "/workflows/${slug}";`);
@@ -210,22 +187,14 @@ export function buildWorkflowPageObject(
   lines.push("");
   lines.push(`  async fill(input: Partial<${requestType}>): Promise<this> {`);
   for (const p of wf.params) {
-    const fillLines = fillBlock(
-      "input",
-      p.name,
-      p.type,
-      ctx,
-      `workflow-${slug}-input-${p.name}`,
-    );
+    const fillLines = fillBlock("input", p.name, p.type, ctx, `workflow-${slug}-input-${p.name}`);
     for (const l of fillLines) lines.push(`    ${l}`);
   }
   lines.push(`    return this;`);
   lines.push(`  }`);
   lines.push("");
   lines.push(`  async submit(): Promise<void> {`);
-  lines.push(
-    `    await this.page.getByTestId("workflow-${slug}-submit").click();`,
-  );
+  lines.push(`    await this.page.getByTestId("workflow-${slug}-submit").click();`);
   lines.push(`    await this.page.waitForURL(/\\/workflows$/);`);
   lines.push(`  }`);
   lines.push("");

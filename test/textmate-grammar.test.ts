@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Guards the hand-maintained TextMate grammar: it must exist, parse, declare
@@ -13,9 +13,23 @@ const grammarPath = fileURLToPath(
 );
 
 const CORE_KEYWORDS = [
-  "system", "module", "context", "aggregate", "entity", "valueobject",
-  "enum", "event", "repository", "workflow", "view", "deployable",
-  "ui", "api", "storage", "operation", "function",
+  "system",
+  "module",
+  "context",
+  "aggregate",
+  "entity",
+  "valueobject",
+  "enum",
+  "event",
+  "repository",
+  "workflow",
+  "view",
+  "deployable",
+  "ui",
+  "api",
+  "storage",
+  "operation",
+  "function",
 ];
 
 describe("TextMate grammar", () => {

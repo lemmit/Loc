@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { beforeAll, describe, expect, it } from "vitest";
 import { AstUtils, EmptyFileSystem, URI } from "langium";
+import { beforeAll, describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type {
   Aggregate,
@@ -11,7 +11,7 @@ import type {
   Model,
   ValueObject,
 } from "../src/language/generated/ast.js";
-import { membersOfType, type DddType } from "../src/language/type-system.js";
+import { type DddType, membersOfType } from "../src/language/type-system.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const sales = readFileSync(path.join(here, "..", "examples", "sales.ddd"), "utf8");
@@ -47,7 +47,15 @@ describe("type-system — membersOfType (single source for member completion)", 
   it("aggregate → id + properties / containments / derived / helpers", () => {
     const order = find<Aggregate>("Aggregate", "Order");
     expect(names({ kind: "aggregate", ref: order })).toEqual(
-      expect.arrayContaining(["id", "customerId", "status", "placedAt", "lines", "total", "isMutable"]),
+      expect.arrayContaining([
+        "id",
+        "customerId",
+        "status",
+        "placedAt",
+        "lines",
+        "total",
+        "isMutable",
+      ]),
     );
   });
 
@@ -59,7 +67,14 @@ describe("type-system — membersOfType (single source for member completion)", 
   it("array → the collection ops", () => {
     const money = find<ValueObject>("ValueObject", "Money");
     expect(names({ kind: "array", element: { kind: "valueobject", ref: money } })).toEqual([
-      "count", "sum", "all", "any", "where", "first", "firstOrNull", "contains",
+      "count",
+      "sum",
+      "all",
+      "any",
+      "where",
+      "first",
+      "firstOrNull",
+      "contains",
     ]);
   });
 
@@ -70,7 +85,12 @@ describe("type-system — membersOfType (single source for member completion)", 
 
   it("enum → its values", () => {
     const status = find<EnumDecl>("EnumDecl", "OrderStatus");
-    expect(names({ kind: "enum", ref: status })).toEqual(["Draft", "Confirmed", "Shipped", "Cancelled"]);
+    expect(names({ kind: "enum", ref: status })).toEqual([
+      "Draft",
+      "Confirmed",
+      "Shipped",
+      "Cancelled",
+    ]);
   });
 
   it("Id<X> → unwraps to the target's members (closes the LSP gap)", () => {
@@ -82,7 +102,10 @@ describe("type-system — membersOfType (single source for member completion)", 
 
   it("optional → unwraps the inner type", () => {
     const money = find<ValueObject>("ValueObject", "Money");
-    expect(names({ kind: "optional", inner: { kind: "valueobject", ref: money } })).toEqual(["amount", "currency"]);
+    expect(names({ kind: "optional", inner: { kind: "valueobject", ref: money } })).toEqual([
+      "amount",
+      "currency",
+    ]);
   });
 
   it("entity part → its members", () => {

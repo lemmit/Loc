@@ -17,11 +17,11 @@
 //      each row.
 //   5. Tables without these props emit identically to A2 output.
 
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
-import { generateSystems } from "../src/system/index.js";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
+import { generateSystems } from "../src/system/index.js";
 
 async function buildAndGenerate(src: string): Promise<Map<string, string>> {
   const services = createDddServices(NodeFileSystem);
@@ -55,9 +55,7 @@ const ordersTableBody = (tableBody: string) => `
 describe("Slice A9 — Table polish props", () => {
   it("striped: true adds `striped` to the <Table> opening tag", async () => {
     const files = await buildAndGenerate(
-      ordersTableBody(
-        `Table(rows: Sales.Order.all, striped: true, Column("ID", o => o.id))`,
-      ),
+      ordersTableBody(`Table(rows: Sales.Order.all, striped: true, Column("ID", o => o.id))`),
     );
     const tsx = files.get("web/src/pages/orders_list.tsx")!;
     expect(tsx).toMatch(/<Table[^>]*\bstriped\b/);
@@ -67,9 +65,7 @@ describe("Slice A9 — Table polish props", () => {
 
   it("highlight: true adds `highlightOnHover`", async () => {
     const files = await buildAndGenerate(
-      ordersTableBody(
-        `Table(rows: Sales.Order.all, highlight: true, Column("ID", o => o.id))`,
-      ),
+      ordersTableBody(`Table(rows: Sales.Order.all, highlight: true, Column("ID", o => o.id))`),
     );
     const tsx = files.get("web/src/pages/orders_list.tsx")!;
     expect(tsx).toMatch(/<Table[^>]*\bhighlightOnHover\b/);
@@ -77,9 +73,7 @@ describe("Slice A9 — Table polish props", () => {
 
   it("sticky: true adds `stickyHeader`", async () => {
     const files = await buildAndGenerate(
-      ordersTableBody(
-        `Table(rows: Sales.Order.all, sticky: true, Column("ID", o => o.id))`,
-      ),
+      ordersTableBody(`Table(rows: Sales.Order.all, sticky: true, Column("ID", o => o.id))`),
     );
     const tsx = files.get("web/src/pages/orders_list.tsx")!;
     expect(tsx).toMatch(/<Table[^>]*\bstickyHeader\b/);
@@ -95,7 +89,7 @@ describe("Slice A9 — Table polish props", () => {
     expect(tsx).toMatch(/<Table striped highlightOnHover stickyHeader>/);
   });
 
-  it("rowTestid: r => \"prefix-\" + r.id emits data-testid={…} on each <Table.Tr>", async () => {
+  it('rowTestid: r => "prefix-" + r.id emits data-testid={…} on each <Table.Tr>', async () => {
     const files = await buildAndGenerate(
       ordersTableBody(
         `Table(
@@ -124,16 +118,12 @@ describe("Slice A9 — Table polish props", () => {
     );
     const tsx = files.get("web/src/pages/orders_list.tsx")!;
     // Both attrs land on the same opening tag.
-    expect(tsx).toMatch(
-      /<Table\.Tr[^>]*\bdata-testid=\{[^>]*\bonClick=\{/,
-    );
+    expect(tsx).toMatch(/<Table\.Tr[^>]*\bdata-testid=\{[^>]*\bonClick=\{/);
   });
 
   it("Table without style props still emits the A2 baseline shape", async () => {
     const files = await buildAndGenerate(
-      ordersTableBody(
-        `Table(rows: Sales.Order.all, Column("ID", o => o.id))`,
-      ),
+      ordersTableBody(`Table(rows: Sales.Order.all, Column("ID", o => o.id))`),
     );
     const tsx = files.get("web/src/pages/orders_list.tsx")!;
     // No extra style props on <Table>; just the open tag.

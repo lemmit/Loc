@@ -1,8 +1,5 @@
-import { describe, it, expect } from "vitest";
-import {
-  initialPipelineState,
-  pipelineReducer,
-} from "../web/src/pipeline/reducer.js";
+import { describe, expect, it } from "vitest";
+import { initialPipelineState, pipelineReducer } from "../web/src/pipeline/reducer.js";
 
 // ---------------------------------------------------------------------------
 // Pipeline reducer — invariants the playground UI depends on.

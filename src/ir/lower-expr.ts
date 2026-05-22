@@ -33,8 +33,8 @@ import {
   isLetStmt,
   isMatchExpr,
   isMemberAccess,
-  isNameRef,
   isNamedType,
+  isNameRef,
   isNewExpr,
   isNowExpr,
   isNullLit,
@@ -42,9 +42,9 @@ import {
   isOperation,
   isParenExpr,
   isPreconditionStmt,
-  isRequiresStmt,
   isPrimitiveType,
   isProperty,
+  isRequiresStmt,
   isStringLit,
   isTernaryExpr,
   isThisRef,
@@ -140,7 +140,15 @@ export function inValueObject(env: Env, vo: ValueObject): Env {
 
 export interface ScopeCandidate {
   name: string;
-  kind: "current-user" | "param" | "let" | "lambda" | "property" | "derived" | "helper-fn" | "enum-value";
+  kind:
+    | "current-user"
+    | "param"
+    | "let"
+    | "lambda"
+    | "property"
+    | "derived"
+    | "helper-fn"
+    | "enum-value";
 }
 
 /** Enumerate the names resolvable as a bare `NameRef` in `env` — the
@@ -220,10 +228,7 @@ function lowerBase(t: TypeRef): TypeIR {
 // Statements
 // ---------------------------------------------------------------------------
 
-export function lowerStatement(
-  stmt: Statement,
-  env: Env,
-): { stmt: StmtIR; envAfter: Env } {
+export function lowerStatement(stmt: Statement, env: Env): { stmt: StmtIR; envAfter: Env } {
   if (isPreconditionStmt(stmt)) {
     return {
       stmt: {
@@ -276,9 +281,7 @@ export function lowerStatement(
       if (lv.call && lv.tail.length === 0) {
         const fn = findFunctionInEnv(env, lv.head);
         const args = (lv.args ?? []).map((a) => lowerExpr(a, env));
-        const target: "function" | "private-operation" = fn
-          ? "function"
-          : "private-operation";
+        const target: "function" | "private-operation" = fn ? "function" : "private-operation";
         return {
           stmt: { kind: "call", target, name: lv.head, args },
           envAfter: env,
@@ -326,8 +329,7 @@ export function lowerStatement(
     }
     if (stmt.op === "+=" || stmt.op === "-=") {
       const targetType = pathType(path, env);
-      const elementType =
-        targetType.kind === "array" ? targetType.element : targetType;
+      const elementType = targetType.kind === "array" ? targetType.element : targetType;
       return {
         stmt: {
           kind: stmt.op === "+=" ? "add" : "remove",
@@ -640,10 +642,7 @@ function resolveCallKind(
 // Type inference for expressions (best-effort, used to inform IR nodes)
 // ---------------------------------------------------------------------------
 
-export function inferExprType(
-  expr: Expression | undefined,
-  env: Env,
-): TypeIR {
+export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
   if (!expr) return { kind: "primitive", name: "string" };
   if (isStringLit(expr)) return { kind: "primitive", name: "string" };
   if (isIntLit(expr)) return { kind: "primitive", name: "int" };
@@ -771,11 +770,7 @@ function memberType(t: TypeIR, name: string, env: Env): TypeIR {
   // bounded-context registry.  Unknown members fall through to the
   // string fallback; the validator will surface the broken reference
   // with a friendlier message.
-  if (
-    t.kind === "entity" &&
-    t.name === USER_SHAPE_NAME &&
-    env.user
-  ) {
+  if (t.kind === "entity" && t.name === USER_SHAPE_NAME && env.user) {
     const f = env.user.fields.find((f) => f.name === name);
     if (f) return f.optional ? { kind: "optional", inner: f.type } : f.type;
     return { kind: "primitive", name: "string" };
@@ -853,10 +848,7 @@ function memberOnValueObject(vo: ValueObject, name: string): TypeIR {
   return { kind: "primitive", name: "string" };
 }
 
-function findEntityByName(
-  env: Env,
-  name: string,
-): Aggregate | EntityPart | undefined {
+function findEntityByName(env: Env, name: string): Aggregate | EntityPart | undefined {
   if (!env.ctx) return undefined;
   for (const m of env.ctx.members) {
     if (isAggregate(m)) {
@@ -877,10 +869,7 @@ function findValueObjectByName(env: Env, name: string): ValueObject | undefined 
   return undefined;
 }
 
-export function findFunctionInEnv(
-  env: Env,
-  name: string,
-): FunctionDecl | undefined {
+export function findFunctionInEnv(env: Env, name: string): FunctionDecl | undefined {
   const owners: Array<Aggregate | EntityPart | ValueObject | undefined> = [
     env.part,
     env.aggregate,
@@ -895,10 +884,7 @@ export function findFunctionInEnv(
   return undefined;
 }
 
-export function findOperationInEnv(
-  env: Env,
-  name: string,
-): Operation | undefined {
+export function findOperationInEnv(env: Env, name: string): Operation | undefined {
   if (!env.aggregate) return undefined;
   for (const m of env.aggregate.members) {
     if (isOperation(m) && m.name === name) return m;
@@ -931,11 +917,7 @@ function stepInto(t: TypeIR, name: string, env: Env): TypeIR {
   // consistent with the read side.  In practice paths never actually
   // step into currentUser because it's read-only, but the symmetric
   // case keeps the two functions in sync.
-  if (
-    t.kind === "entity" &&
-    t.name === USER_SHAPE_NAME &&
-    env.user
-  ) {
+  if (t.kind === "entity" && t.name === USER_SHAPE_NAME && env.user) {
     const f = env.user.fields.find((f) => f.name === name);
     if (f) return f.optional ? { kind: "optional", inner: f.type } : f.type;
     return { kind: "primitive", name: "string" };

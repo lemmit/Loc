@@ -1,3 +1,4 @@
+import { wireShapeFor } from "../../ir/enrichments.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -6,7 +7,6 @@ import type {
   TypeIR,
   ValueObjectIR,
 } from "../../ir/loom-ir.js";
-import { wireShapeFor } from "../../ir/enrichments.js";
 import { pascal } from "../../util/naming.js";
 import { renderCsType } from "./render-expr.js";
 
@@ -33,11 +33,7 @@ import { renderCsType } from "./render-expr.js";
  * `dir` selects the suffix for nested DTOs: `Request` for inputs,
  * `Response` for outputs.
  */
-export function wireType(
-  t: TypeIR,
-  ctx: BoundedContextIR,
-  dir: "request" | "response",
-): string {
+export function wireType(t: TypeIR, ctx: BoundedContextIR, dir: "request" | "response"): string {
   void ctx;
   switch (t.kind) {
     case "primitive":
@@ -63,11 +59,7 @@ export function wireType(
 }
 
 /** Map a wire-shaped expression to a domain-typed argument for a command. */
-export function wireToCommandArgument(
-  expr: string,
-  t: TypeIR,
-  ctx: BoundedContextIR,
-): string {
+export function wireToCommandArgument(expr: string, t: TypeIR, ctx: BoundedContextIR): string {
   switch (t.kind) {
     case "primitive":
       if (t.name === "datetime") {
@@ -85,9 +77,7 @@ export function wireToCommandArgument(
       const vo = ctx.valueObjects.find((v) => v.name === t.name);
       if (!vo) return expr;
       const args = vo.fields
-        .map((f) =>
-          wireToCommandArgument(`${expr}.${pascal(f.name)}`, f.type, ctx),
-        )
+        .map((f) => wireToCommandArgument(`${expr}.${pascal(f.name)}`, f.type, ctx))
         .join(", ");
       return `new ${t.name}(${args})`;
     }
@@ -101,11 +91,7 @@ export function wireToCommandArgument(
 }
 
 /** Project a domain expression to its wire-shape Response. */
-export function projectToResponse(
-  domainExpr: string,
-  t: TypeIR,
-  ctx: BoundedContextIR,
-): string {
+export function projectToResponse(domainExpr: string, t: TypeIR, ctx: BoundedContextIR): string {
   switch (t.kind) {
     case "primitive":
       if (t.name === "datetime") {
@@ -122,9 +108,7 @@ export function projectToResponse(
       const vo = ctx.valueObjects.find((v) => v.name === t.name);
       if (!vo) return domainExpr;
       const args = vo.fields
-        .map((f) =>
-          projectToResponse(`${domainExpr}.${pascal(f.name)}`, f.type, ctx),
-        )
+        .map((f) => projectToResponse(`${domainExpr}.${pascal(f.name)}`, f.type, ctx))
         .join(", ");
       return `new ${t.name}Response(${args})`;
     }
@@ -133,9 +117,7 @@ export function projectToResponse(
         ctx.aggregates
           .flatMap((a) => a.parts.map((p) => ({ part: p, agg: a })))
           .find((x) => x.part.name === t.name) ??
-        ctx.aggregates
-          .map((a) => ({ part: a, agg: a }))
-          .find((x) => x.part.name === t.name);
+        ctx.aggregates.map((a) => ({ part: a, agg: a })).find((x) => x.part.name === t.name);
       if (!part) return domainExpr;
       return projectEntityExpr(domainExpr, part.part, ctx);
     }
@@ -153,11 +135,7 @@ export function projectToResponse(
  *  they nest into request DTOs.  Used by extern dispatch (auto
  *  Mediator handler + workflow op-call) to construct an
  *  `<Op>Request` from the surrounding domain values. */
-export function domainToRequestExpr(
-  domainExpr: string,
-  t: TypeIR,
-  ctx: BoundedContextIR,
-): string {
+export function domainToRequestExpr(domainExpr: string, t: TypeIR, ctx: BoundedContextIR): string {
   switch (t.kind) {
     case "primitive":
       if (t.name === "datetime") {
@@ -172,9 +150,7 @@ export function domainToRequestExpr(
       const vo = ctx.valueObjects.find((v) => v.name === t.name);
       if (!vo) return domainExpr;
       const args = vo.fields
-        .map((f) =>
-          domainToRequestExpr(`${domainExpr}.${pascal(f.name)}`, f.type, ctx),
-        )
+        .map((f) => domainToRequestExpr(`${domainExpr}.${pascal(f.name)}`, f.type, ctx))
         .join(", ");
       return `new ${t.name}Request(${args})`;
     }
@@ -214,32 +190,21 @@ export function projectEntityExpr(
           : projectEntityExpr(accessor, part, ctx),
       );
     } else {
-      args.push(
-        projectToResponse(`${domainExpr}.${pascal(wf.name)}`, wf.type, ctx),
-      );
+      args.push(projectToResponse(`${domainExpr}.${pascal(wf.name)}`, wf.type, ctx));
     }
   }
   return `new ${entity.name}Response(${args.join(", ")})`;
 }
 
-export function aggregateResponseParams(
-  agg: AggregateIR,
-  ctx: BoundedContextIR,
-): string {
+export function aggregateResponseParams(agg: AggregateIR, ctx: BoundedContextIR): string {
   return responseRecordParams(agg, ctx);
 }
 
-export function entityResponseParams(
-  part: EntityPartIR,
-  ctx: BoundedContextIR,
-): string {
+export function entityResponseParams(part: EntityPartIR, ctx: BoundedContextIR): string {
   return responseRecordParams(part, ctx);
 }
 
-function responseRecordParams(
-  ent: AggregateIR | EntityPartIR,
-  ctx: BoundedContextIR,
-): string {
+function responseRecordParams(ent: AggregateIR | EntityPartIR, ctx: BoundedContextIR): string {
   const fields = wireShapeFor(ent);
   const idValueType = isPart(ent) ? ent.parentIdValueType : ent.idValueType;
   const parts: string[] = [];
@@ -253,9 +218,7 @@ function responseRecordParams(
   return parts.join(", ");
 }
 
-function isPart(
-  ent: AggregateIR | EntityPartIR,
-): ent is EntityPartIR {
+function isPart(ent: AggregateIR | EntityPartIR): ent is EntityPartIR {
   // EntityPartIR carries `parentName`; AggregateIR doesn't.
   return "parentName" in ent;
 }
@@ -267,10 +230,7 @@ function containmentPartName(t: TypeIR): string | undefined {
 }
 
 /** Set of value objects reachable from an aggregate's surface. */
-export function valueObjectsUsedBy(
-  agg: AggregateIR,
-  ctx: BoundedContextIR,
-): ValueObjectIR[] {
+export function valueObjectsUsedBy(agg: AggregateIR, ctx: BoundedContextIR): ValueObjectIR[] {
   const used = new Set<string>();
   const visit = (t: TypeIR) => {
     if (t.kind === "valueobject") used.add(t.name);

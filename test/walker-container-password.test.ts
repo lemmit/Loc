@@ -7,11 +7,11 @@
 //     → <PasswordInput value={pwd} onChange={...} />
 //       (Mantine's toggleable-visibility password input)
 
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
-import { generateSystems } from "../src/system/index.js";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
+import { generateSystems } from "../src/system/index.js";
 
 async function buildAndGenerate(src: string): Promise<Map<string, string>> {
   const services = createDddServices(NodeFileSystem);
@@ -43,9 +43,7 @@ describe("Slice 11.22 — Container + PasswordField primitives", () => {
     `);
     const content = files.get("web/src/pages/home.tsx")!;
     expect(content).toBeDefined();
-    expect(content).toMatch(
-      /import \{ Container, Stack, Text, Title \} from "@mantine\/core";/,
-    );
+    expect(content).toMatch(/import \{ Container, Stack, Text, Title \} from "@mantine\/core";/);
     expect(content).toMatch(/<Container>/);
     expect(content).toMatch(/<Stack>/);
     expect(content).toMatch(/<\/Container>/);

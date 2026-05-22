@@ -4,11 +4,8 @@
 // exercised live.)
 
 import { describe, expect, it } from "vitest";
-import {
-  findUnitTestFiles,
-  unitSuiteFiles,
-} from "../web/src/testing/run-unit-tests.js";
 import type { VirtualFile } from "../web/src/build/protocol.js";
+import { findUnitTestFiles, unitSuiteFiles } from "../web/src/testing/run-unit-tests.js";
 
 const f = (path: string, content = ""): VirtualFile => ({
   path,

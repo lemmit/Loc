@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { compilePack } from "../src/generator/_packs/loader.js";
 
 // ---------------------------------------------------------------------------
@@ -19,20 +19,16 @@ describe("template partial composition", () => {
       version: "0.0.0",
       emits: {
         "primitive-button": "primitive-button.hbs",
-        "outer": "outer.hbs",
+        outer: "outer.hbs",
       },
     } as const;
     const sources = {
-      "primitive-button":
-        '<Button onClick={{expr onClick}}>{{{label}}}</Button>',
-      "outer":
-        '<div>{{> primitive-button label="Click me" onClick="() => doThing()"}}</div>',
+      "primitive-button": "<Button onClick={{expr onClick}}>{{{label}}}</Button>",
+      outer: '<div>{{> primitive-button label="Click me" onClick="() => doThing()"}}</div>',
     };
     const pack = compilePack("/fixture", manifest, sources, (f) => `/fixture/${f}`);
     const out = pack.render("outer", {});
-    expect(out).toBe(
-      '<div><Button onClick={() => doThing()}>Click me</Button></div>',
-    );
+    expect(out).toBe("<div><Button onClick={() => doThing()}>Click me</Button></div>");
   });
 
   it("partials inherit the calling context unless overridden", () => {
@@ -40,13 +36,13 @@ describe("template partial composition", () => {
       name: "fixture",
       version: "0.0.0",
       emits: {
-        "greeting": "greeting.hbs",
-        "outer": "outer.hbs",
+        greeting: "greeting.hbs",
+        outer: "outer.hbs",
       },
     } as const;
     const sources = {
-      "greeting": "Hello {{name}}",
-      "outer": "{{> greeting}}, {{name}}!",
+      greeting: "Hello {{name}}",
+      outer: "{{> greeting}}, {{name}}!",
     };
     const pack = compilePack("/fixture", manifest, sources, (f) => `/fixture/${f}`);
     const out = pack.render("outer", { name: "World" });
@@ -58,13 +54,13 @@ describe("template partial composition", () => {
       name: "fixture",
       version: "0.0.0",
       emits: {
-        "greeting": "greeting.hbs",
-        "outer": "outer.hbs",
+        greeting: "greeting.hbs",
+        outer: "outer.hbs",
       },
     } as const;
     const sources = {
-      "greeting": "Hi {{name}}",
-      "outer": '{{> greeting name="Alice"}} and {{> greeting name="Bob"}}',
+      greeting: "Hi {{name}}",
+      outer: '{{> greeting name="Alice"}} and {{> greeting name="Bob"}}',
     };
     const pack = compilePack("/fixture", manifest, sources, (f) => `/fixture/${f}`);
     expect(pack.render("outer", {})).toBe("Hi Alice and Hi Bob");

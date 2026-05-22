@@ -12,10 +12,11 @@
 // drifts; the fixture is only useful as long as it matches).
 //
 // Run:  node scripts/capture-baseline-fixture.mjs
-import path from "node:path";
+
 import fs from "node:fs";
-import { URI } from "vscode-uri";
+import path from "node:path";
 import { NodeFileSystem } from "langium/node";
+import { URI } from "vscode-uri";
 import { createDddServices } from "../out/language/ddd-module.js";
 import { generateSystems } from "../out/system/index.js";
 

@@ -1,9 +1,4 @@
-import type {
-  AggregateIR,
-  FindIR,
-  RepositoryIR,
-  TypeIR,
-} from "../../ir/loom-ir.js";
+import type { AggregateIR, FindIR, RepositoryIR, TypeIR } from "../../ir/loom-ir.js";
 import { pascal } from "../../util/naming.js";
 import { renderCsExpr } from "./render-expr.js";
 

@@ -1,15 +1,8 @@
-import type {
-  AggregateIR,
-  EntityPartIR,
-} from "../../../ir/loom-ir.js";
+import type { AggregateIR, EntityPartIR } from "../../../ir/loom-ir.js";
 import { operationUsesCurrentUser } from "../../../ir/loom-ir.js";
-import { pascal, plural } from "../../../util/naming.js";
 import { lines } from "../../../util/code-builder.js";
-import {
-  csNewIdValue,
-  renderCsExpr,
-  renderCsType,
-} from "../render-expr.js";
+import { pascal, plural } from "../../../util/naming.js";
+import { csNewIdValue, renderCsExpr, renderCsType } from "../render-expr.js";
 import { renderCsStatements } from "../render-stmt.js";
 
 // ---------------------------------------------------------------------------
@@ -56,9 +49,7 @@ export function renderEntity(
   }
   for (const c of entity.contains) {
     if (c.collection) {
-      propLines.push(
-        `    private readonly List<${c.partName}> _${c.name} = new();`,
-      );
+      propLines.push(`    private readonly List<${c.partName}> _${c.name} = new();`);
       propLines.push(
         `    public IReadOnlyList<${c.partName}> ${pascal(c.name)} => _${c.name}.AsReadOnly();`,
       );
@@ -88,13 +79,10 @@ export function renderEntity(
   ctorLines.push("    }");
 
   const derivedLines = entity.derived.map(
-    (d) =>
-      `    public ${renderCsType(d.type)} ${pascal(d.name)} => ${renderCsExpr(d.expr)};`,
+    (d) => `    public ${renderCsType(d.type)} ${pascal(d.name)} => ${renderCsExpr(d.expr)};`,
   );
   const fnLines = entity.functions.map((fn) => {
-    const params = fn.params
-      .map((p) => `${renderCsType(p.type)} ${p.name}`)
-      .join(", ");
+    const params = fn.params.map((p) => `${renderCsType(p.type)} ${p.name}`).join(", ");
     return `    private ${renderCsType(fn.returnType)} ${pascal(fn.name)}(${params}) => ${renderCsExpr(fn.body)};`;
   });
 
@@ -107,9 +95,7 @@ export function renderEntity(
   for (const op of operations) {
     const usesUser = operationUsesCurrentUser(op);
     const userParam = usesUser ? "User currentUser" : "";
-    const baseParams = op.params
-      .map((p) => `${renderCsType(p.type)} ${p.name}`)
-      .join(", ");
+    const baseParams = op.params.map((p) => `${renderCsType(p.type)} ${p.name}`).join(", ");
     const params = [baseParams, userParam].filter(Boolean).join(", ");
     if (op.extern) {
       // Extern op: emit a `Check<Pascal>` that runs preconditions only.
@@ -188,9 +174,7 @@ export function renderEntity(
   createInternalLines.push("        e.Id = s.Id;");
   if (!isRoot) createInternalLines.push("        e.ParentId = s.ParentId;");
   for (const f of entity.fields) {
-    createInternalLines.push(
-      `        e.${pascal(f.name)} = s.${pascal(f.name)};`,
-    );
+    createInternalLines.push(`        e.${pascal(f.name)} = s.${pascal(f.name)};`);
   }
   createInternalLines.push("        e.AssertInvariants();");
   createInternalLines.push("        return e;");
@@ -204,9 +188,7 @@ export function renderEntity(
         "    {",
         `        var e = new ${entity.name}();`,
         `        e.Id = new ${entity.name}Id(${csNewIdValue(idValueType)});`,
-        ...requiredFields.map(
-          (f) => `        e.${pascal(f.name)} = ${f.name};`,
-        ),
+        ...requiredFields.map((f) => `        e.${pascal(f.name)} = ${f.name};`),
         "        e.AssertInvariants();",
         "        return e;",
         "    }",

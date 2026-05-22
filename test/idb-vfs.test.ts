@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, beforeAll } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import "fake-indexeddb/auto";
 
 import { IdbVfs } from "../web/src/vfs/idb-vfs.js";

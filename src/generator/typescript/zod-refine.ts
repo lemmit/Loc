@@ -1,11 +1,11 @@
-import type { BinOp, ExprIR, InvariantIR } from "../../ir/loom-ir.js";
 import {
+  type ClassifyContext,
   classifyForWire,
   pickErrorPath,
-  singleFieldShape,
-  type ClassifyContext,
   type SingleFieldPattern,
+  singleFieldShape,
 } from "../../ir/invariant-classify.js";
+import type { BinOp, ExprIR, InvariantIR } from "../../ir/loom-ir.js";
 
 // ---------------------------------------------------------------------------
 // Zod-refine renderer for wire-boundary validators (frontend forms +
@@ -29,10 +29,7 @@ import {
 /** Chain idiomatic native zod methods onto a base inner schema for a
  *  recognised single-field pattern.  Caller picks the base
  *  (`z.string()`, `z.number()`, etc.); we just chain. */
-export function chainSingleFieldNative(
-  inner: string,
-  pattern: SingleFieldPattern,
-): string {
+export function chainSingleFieldNative(inner: string, pattern: SingleFieldPattern): string {
   switch (pattern.kind) {
     case "min":
       return `${inner}.min(${pattern.n})`;
@@ -79,16 +76,11 @@ export function takeSingleFieldChain(
  *  request body, etc.).  Single-field-shape invariants are ALSO
  *  filtered out here so they aren't double-applied; the schema
  *  emitter consumes them via `takeSingleFieldChain` first. */
-export function refineClauseFor(
-  inv: InvariantIR,
-  ctx: ClassifyContext,
-): string | null {
+export function refineClauseFor(inv: InvariantIR, ctx: ClassifyContext): string | null {
   if (!classifyForWire(inv, ctx)) return null;
   if (takeSingleFieldChain(inv, ctx)) return null;
   const body = renderRefineExpr(inv.expr);
-  const guarded = inv.guard
-    ? `!(${renderRefineExpr(inv.guard)}) || (${body})`
-    : body;
+  const guarded = inv.guard ? `!(${renderRefineExpr(inv.guard)}) || (${body})` : body;
   const message = JSON.stringify(`Invariant violated: ${inv.source}`);
   const path = pickErrorPath(inv);
   const opts = path
@@ -181,9 +173,7 @@ function renderMember(e: Extract<ExprIR, { kind: "member" }>): string {
   return `${recv}.${e.member}`;
 }
 
-function renderMethodCall(
-  e: Extract<ExprIR, { kind: "method-call" }>,
-): string {
+function renderMethodCall(e: Extract<ExprIR, { kind: "method-call" }>): string {
   const recv = renderRefineExpr(e.receiver);
   const args = e.args.map(renderRefineExpr);
   if (e.isCollectionOp) {
@@ -203,11 +193,7 @@ function renderMethodCall(
   return `${recv}.${e.member}(${args.join(", ")})`;
 }
 
-function renderCollectionOp(
-  recv: string,
-  name: string,
-  args: string[],
-): string {
+function renderCollectionOp(recv: string, name: string, args: string[]): string {
   switch (name) {
     case "count":
       return `${recv}.length`;

@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
 import { parseHelper } from "langium/test";
+import { describe, expect, it } from "vitest";
 import { lowerModel } from "../src/ir/lower.js";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
@@ -36,24 +36,20 @@ describe("B1 — platform pin grammar + validation", () => {
     expect(errors).toEqual([]);
   });
 
-  it("accepts a registered pin `platform: \"hono@v4\"`", async () => {
+  it('accepts a registered pin `platform: "hono@v4"`', async () => {
     const { errors } = await parse(sys(`"hono@v4"`));
     expect(errors).toEqual([]);
   });
 
   it("rejects an unregistered version with an available-list error", async () => {
     const { errors } = await parse(sys(`"hono@v9"`));
-    expect(errors.some((e) => /no version 'v9' of backend 'hono'/.test(e))).toBe(
-      true,
-    );
+    expect(errors.some((e) => /no version 'v9' of backend 'hono'/.test(e))).toBe(true);
     expect(errors.some((e) => /'hono@v4'/.test(e))).toBe(true);
   });
 
   it("rejects an unknown platform name (STRING no longer a free pass)", async () => {
     const { errors } = await parse(sys(`"frobnicator"`));
-    expect(
-      errors.some((e) => /Unknown platform 'frobnicator'/.test(e)),
-    ).toBe(true);
+    expect(errors.some((e) => /Unknown platform 'frobnicator'/.test(e))).toBe(true);
   });
 
   it("still accepts a quoted frontend keyword", async () => {

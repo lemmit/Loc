@@ -11,10 +11,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   DomPage,
-  executeDriverOp,
-  RemotePage,
   type DriverOp,
   type DriverTransport,
+  executeDriverOp,
+  RemotePage,
 } from "../packages/ui-test-driver/index.js";
 
 function harness(): RemotePage {
@@ -23,8 +23,7 @@ function harness(): RemotePage {
   // In-process transport stands in for the bridge postMessage hop.
   const transport: DriverTransport = {
     currentUrl: () => document.defaultView!.location.href,
-    send: (op: DriverOp) =>
-      executeDriverOp(document, sandboxPage, op, { timeout: 1000 }),
+    send: (op: DriverOp) => executeDriverOp(document, sandboxPage, op, { timeout: 1000 }),
   };
   // Parent side: the shim the bundled spec drives.
   return new RemotePage(transport);
@@ -45,20 +44,16 @@ describe("message-driven UI driver (parent shim → wire → sandbox executor)",
       '[data-testid="orders-new-input-customerId"]',
     ) as HTMLInputElement;
     let submitted = false;
-    document
-      .querySelector('[data-testid="orders-new-submit"]')!
-      .addEventListener("click", () => {
-        submitted = true;
-      });
+    document.querySelector('[data-testid="orders-new-submit"]')!.addEventListener("click", () => {
+      submitted = true;
+    });
 
     const page = harness();
     await page.getByTestId("orders-new-input-customerId").fill("cust-001");
     expect(input.value).toBe("cust-001");
     await page.getByTestId("orders-new-submit").click();
     expect(submitted).toBe(true);
-    expect(await page.getByTestId("orders-detail-status").innerText()).toBe(
-      "Confirmed",
-    );
+    expect(await page.getByTestId("orders-detail-status").innerText()).toBe("Confirmed");
   });
 
   it("serialises the listbox filter({has})+getByRole chain and clicks the option", async () => {
@@ -86,9 +81,7 @@ describe("message-driven UI driver (parent shim → wire → sandbox executor)",
       <table data-testid="orders-detail-lines"><tbody><tr></tr><tr></tr></tbody></table>
     `;
     const page = harness();
-    expect(
-      await page.getByTestId("orders-detail-lines").locator("tbody tr").count(),
-    ).toBe(2);
+    expect(await page.getByTestId("orders-detail-lines").locator("tbody tr").count()).toBe(2);
   });
 
   it("goto pushes the route, url() reads it back, waitForURL matches a RegExp", async () => {
@@ -103,8 +96,6 @@ describe("message-driven UI driver (parent shim → wire → sandbox executor)",
     const page = harness();
     // Nothing matches → the sandbox times out → the wire reply is an
     // error → the parent shim throws.
-    await expect(page.getByTestId("missing").click()).rejects.toThrow(
-      /no element matched/,
-    );
+    await expect(page.getByTestId("missing").click()).rejects.toThrow(/no element matched/);
   });
 });

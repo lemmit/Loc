@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import {
   BUILTIN_PLATFORM_LATEST,
@@ -22,9 +22,7 @@ describe("parseBuiltinPlatformRef", () => {
       qualified: "hono@v4",
     });
     expect(parseBuiltinPlatformRef("dotnet")?.qualified).toBe("dotnet@v8");
-    expect(parseBuiltinPlatformRef("phoenixLiveView")?.qualified).toBe(
-      "phoenixLiveView@v1",
-    );
+    expect(parseBuiltinPlatformRef("phoenixLiveView")?.qualified).toBe("phoenixLiveView@v1");
   });
 
   it("parses an explicit family@version pin", () => {
@@ -52,9 +50,7 @@ describe("platformFor — byte-identity guarantee", () => {
     // is unchanged.
     expect(platformFor("hono")).toBe(platformFor("hono@v4" as never));
     expect(platformFor("dotnet")).toBe(platformFor("dotnet@v8" as never));
-    expect(platformFor("phoenixLiveView")).toBe(
-      platformFor("phoenixLiveView@v1" as never),
-    );
+    expect(platformFor("phoenixLiveView")).toBe(platformFor("phoenixLiveView@v1" as never));
   });
 
   it("frontend platforms resolve straight through (single-version)", () => {

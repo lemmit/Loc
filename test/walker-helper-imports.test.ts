@@ -20,11 +20,11 @@
 // primitives (Stack / Form / Heading / etc.) so a typo never
 // silently overrides the primitive.
 
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
-import { generateSystems } from "../src/system/index.js";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
+import { generateSystems } from "../src/system/index.js";
 
 async function parse(src: string): Promise<{
   files: Map<string, string>;
@@ -57,9 +57,7 @@ describe("Slice A6 — UI-level helper imports", () => {
     expect(diagnostics.filter((d) => d.severity === 1)).toHaveLength(0);
     const tsx = files.get("web/src/pages/x.tsx")!;
     expect(tsx).toBeDefined();
-    expect(tsx).toMatch(
-      /import \{ formatPrice \} from "\.\/helpers\/price";/,
-    );
+    expect(tsx).toMatch(/import \{ formatPrice \} from "\.\/helpers\/price";/);
     // Body emits a plain JS call wrapped as a JSX expression.
     expect(tsx).toMatch(/<Text>\{formatPrice\(99\)\}<\/Text>/);
   });
@@ -106,9 +104,7 @@ describe("Slice A6 — UI-level helper imports", () => {
       }
     `);
     const tsx = files.get("web/src/pages/x.tsx")!;
-    expect(tsx).toMatch(
-      /import \{ formatPrice, formatQuantity \} from "\.\/helpers\/format";/,
-    );
+    expect(tsx).toMatch(/import \{ formatPrice, formatQuantity \} from "\.\/helpers\/format";/);
     // Should NOT have two separate import lines.
     const matches = tsx.match(/from "\.\/helpers\/format"/g) ?? [];
     expect(matches).toHaveLength(1);
@@ -130,9 +126,7 @@ describe("Slice A6 — UI-level helper imports", () => {
       }
     `);
     const tsx = files.get("web/src/pages/x.tsx")!;
-    expect(tsx).toMatch(
-      /import \{ RenderBanner \} from "\.\/helpers\/banner";/,
-    );
+    expect(tsx).toMatch(/import \{ RenderBanner \} from "\.\/helpers\/banner";/);
     // Top-level body emits the call inside a JSX-child brace.
     expect(tsx).toMatch(/\{RenderBanner\("hi"\)\}/);
   });
@@ -167,8 +161,6 @@ describe("Slice A6 — UI-level helper imports", () => {
       }
     `);
     const errors = diagnostics.filter((d) => d.severity === 1);
-    expect(
-      errors.some((e) => /Duplicate helper import 'formatPrice'/.test(e.message)),
-    ).toBe(true);
+    expect(errors.some((e) => /Duplicate helper import 'formatPrice'/.test(e.message))).toBe(true);
   });
 });

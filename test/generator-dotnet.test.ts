@@ -1,10 +1,10 @@
-import { describe, expect, it } from "vitest";
-import { NodeFileSystem } from "langium/node";
-import { URI } from "langium";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createDddServices } from "../src/language/ddd-module.js";
+import { URI } from "langium";
+import { NodeFileSystem } from "langium/node";
+import { describe, expect, it } from "vitest";
 import { generateDotnet } from "../src/generator/dotnet/index.js";
+import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -213,7 +213,8 @@ describe(".NET generator", () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
-    const doc = await helper(`
+    const doc = await helper(
+      `
       context Sales {
         enum OrderStatus { Draft, Confirmed }
         aggregate Order {
@@ -226,7 +227,9 @@ describe(".NET generator", () => {
         }
         repository Orders for Order { }
       }
-    `, { validation: true });
+    `,
+      { validation: true },
+    );
     const files = generateDotnet(doc.parseResult.value as Model);
 
     // 1. The user-implementable handler interface lives under
@@ -283,7 +286,9 @@ describe(".NET generator", () => {
       expect(common).toMatch(/public string OpName \{ get; \}/);
       expect(common).toMatch(/public string AggName \{ get; \}/);
       // Message embeds both names + the inner exception's message.
-      expect(common).toMatch(/Extern handler '\{opName\}' on '\{aggName\}' threw: \{inner\.Message\}/);
+      expect(common).toMatch(
+        /Extern handler '\{opName\}' on '\{aggName\}' threw: \{inner\.Message\}/,
+      );
     });
 
     it("DomainExceptionFilter maps ExternHandlerException to a 500 with the descriptive envelope", async () => {
@@ -317,7 +322,8 @@ describe(".NET generator", () => {
       const { parseHelper } = await import("langium/test");
       const services = createDddServices(NodeFileSystem);
       const helper = parseHelper(services.Ddd);
-      const doc = await helper(`
+      const doc = await helper(
+        `
         context Sales {
           enum OrderStatus { Draft, Confirmed }
           aggregate Order {
@@ -330,7 +336,9 @@ describe(".NET generator", () => {
           }
           repository Orders for Order { }
         }
-      `, { validation: true });
+      `,
+        { validation: true },
+      );
       const files = generateDotnet(doc.parseResult.value as Model);
       const handler = files.get("Application/Orders/Commands/ConfirmHandler.cs")!;
       // Try/catch wraps the user call.
@@ -346,9 +354,7 @@ describe(".NET generator", () => {
       expect(handler).toMatch(/catch \(System\.OperationCanceledException\) \{ throw; \}/);
       // Any other exception wraps as ExternHandlerException with
       // the op + agg names baked in.
-      expect(handler).toMatch(
-        /throw new ExternHandlerException\("confirm", "Order", ex\);/,
-      );
+      expect(handler).toMatch(/throw new ExternHandlerException\("confirm", "Order", ex\);/);
     });
   });
 
@@ -356,7 +362,8 @@ describe(".NET generator", () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
-    const doc = await helper(`
+    const doc = await helper(
+      `
       context Sales {
         enum OrderStatus { Draft, Confirmed }
         aggregate Customer {
@@ -387,16 +394,22 @@ describe(".NET generator", () => {
           emit OrderPlaced { order: order.id, at: placedAt }
         }
       }
-    `, { validation: true });
+    `,
+      { validation: true },
+    );
     const files = generateDotnet(doc.parseResult.value as Model);
 
     // Request DTO uses wire types (Guid for Id<X>, string for datetime).
     const req = files.get("Application/Workflows/PlaceOrderRequest.cs")!;
-    expect(req).toMatch(/public sealed record PlaceOrderRequest\(Guid CustomerId, decimal Amount, string PlacedAt\)/);
+    expect(req).toMatch(
+      /public sealed record PlaceOrderRequest\(Guid CustomerId, decimal Amount, string PlacedAt\)/,
+    );
 
     // Command uses domain types (CustomerId, DateTime).
     const cmd = files.get("Application/Workflows/PlaceOrderCommand.cs")!;
-    expect(cmd).toMatch(/public sealed record PlaceOrderCommand\(CustomerId CustomerId, decimal Amount, DateTime PlacedAt\)/);
+    expect(cmd).toMatch(
+      /public sealed record PlaceOrderCommand\(CustomerId CustomerId, decimal Amount, DateTime PlacedAt\)/,
+    );
 
     // Handler injects both repositories + event dispatcher; statement
     // ordering preserved; saves at exit; event drain after saves.
@@ -405,9 +418,13 @@ describe(".NET generator", () => {
     expect(handler).toMatch(/private readonly IOrderRepository _orders;/);
     expect(handler).toMatch(/private readonly IDomainEventDispatcher _events;/);
     expect(handler).toMatch(/if \(!\(cmd\.Amount > 0\)\) throw new DomainException/);
-    expect(handler).toMatch(/var customer = await _customers\.GetByIdAsync\(cmd\.CustomerId, ct\);/);
+    expect(handler).toMatch(
+      /var customer = await _customers\.GetByIdAsync\(cmd\.CustomerId, ct\);/,
+    );
     expect(handler).toMatch(/customer\.DeductCredit\(cmd\.Amount\);/);
-    expect(handler).toMatch(/var order = Order\.Create\(CustomerId: cmd\.CustomerId, Status: OrderStatus\.Draft/);
+    expect(handler).toMatch(
+      /var order = Order\.Create\(CustomerId: cmd\.CustomerId, Status: OrderStatus\.Draft/,
+    );
     expect(handler).toMatch(/_workflowEvents\.Add\(new OrderPlaced\(/);
     // Saves ordered: customer first (declared first), then order.
     const saveCustIdx = handler.indexOf("await _customers.SaveAsync(customer");
@@ -424,7 +441,9 @@ describe(".NET generator", () => {
     const ctrl = files.get("Api/SalesWorkflowsController.cs")!;
     expect(ctrl).toMatch(/\[Route\("workflows"\)\]/);
     expect(ctrl).toMatch(/\[HttpPost\("place_order"\)\]/);
-    expect(ctrl).toMatch(/public async Task<IActionResult> PlaceOrder\(\[FromBody\] PlaceOrderRequest request\)/);
+    expect(ctrl).toMatch(
+      /public async Task<IActionResult> PlaceOrder\(\[FromBody\] PlaceOrderRequest request\)/,
+    );
     expect(ctrl).toMatch(/new PlaceOrderCommand\(\s*new CustomerId\(request\.CustomerId\)/);
   });
 
@@ -432,7 +451,8 @@ describe(".NET generator", () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
-    const doc = await helper(`
+    const doc = await helper(
+      `
       context T {
         aggregate Customer {
           name: string display
@@ -449,11 +469,15 @@ describe(".NET generator", () => {
           c.addCredit(amount)
         }
       }
-    `, { validation: true });
+    `,
+      { validation: true },
+    );
     const files = generateDotnet(doc.parseResult.value as Model);
     const handler = files.get("Application/Workflows/TopUpHandler.cs")!;
     expect(handler).toMatch(/private readonly T\.Infrastructure\.Persistence\.AppDbContext _db;/);
-    expect(handler).toMatch(/await using var tx = await _db\.Database\.BeginTransactionAsync\(ct\);/);
+    expect(handler).toMatch(
+      /await using var tx = await _db\.Database\.BeginTransactionAsync\(ct\);/,
+    );
     expect(handler).toMatch(/await tx\.CommitAsync\(ct\);/);
     expect(handler).toMatch(/await tx\.RollbackAsync\(ct\);/);
     // Save inside the try block, before commit.
@@ -467,7 +491,8 @@ describe(".NET generator", () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
-    const doc = await helper(`
+    const doc = await helper(
+      `
       context Sales {
         enum OrderStatus { Draft, Confirmed }
         aggregate Order {
@@ -477,7 +502,9 @@ describe(".NET generator", () => {
         repository Orders for Order { }
         view ActiveOrders = Order where status == Confirmed
       }
-    `, { validation: true });
+    `,
+      { validation: true },
+    );
     const files = generateDotnet(doc.parseResult.value as Model);
 
     // 1. Query record (parameterless, returns IReadOnlyList<OrderResponse>).
@@ -500,7 +527,9 @@ describe(".NET generator", () => {
     expect(iface).toMatch(/Task<List<Order>> ActiveOrders\(/);
     const impl = files.get("Infrastructure/Repositories/OrderRepository.cs")!;
     expect(impl).toMatch(/public async Task<List<Order>> ActiveOrders\(/);
-    expect(impl).toMatch(/_db\.Orders\.Where\(x => x\.Status == OrderStatus\.Confirmed\)\.ToListAsync\(ct\)/);
+    expect(impl).toMatch(
+      /_db\.Orders\.Where\(x => x\.Status == OrderStatus\.Confirmed\)\.ToListAsync\(ct\)/,
+    );
 
     // 4. Controller exposes GET /views/active_orders.
     const ctrl = files.get("Api/SalesViewsController.cs")!;
@@ -513,7 +542,8 @@ describe(".NET generator", () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
-    const doc = await helper(`
+    const doc = await helper(
+      `
       context Sales {
         enum OrderStatus { Draft, Confirmed }
         aggregate Order {
@@ -531,7 +561,9 @@ describe(".NET generator", () => {
           bind orderId = id, status = status, lineCount = lines.count
         }
       }
-    `, { validation: true });
+    `,
+      { validation: true },
+    );
     const files = generateDotnet(doc.parseResult.value as Model);
 
     // Wire-typed Row record (Id<Order> → Guid, enum → string, int → int).
@@ -556,7 +588,8 @@ describe(".NET generator", () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
-    const doc = await helper(`
+    const doc = await helper(
+      `
       context Sales {
         enum OrderStatus { Draft, Confirmed }
         aggregate Customer { name: string display, email: string }
@@ -575,7 +608,9 @@ describe(".NET generator", () => {
           bind orderId = id, customerName = customerId.name, customerEmail = customerId.email, status = status
         }
       }
-    `, { validation: true });
+    `,
+      { validation: true },
+    );
     const files = generateDotnet(doc.parseResult.value as Model);
 
     // Handler injects both repos.
@@ -597,16 +632,15 @@ describe(".NET generator", () => {
       /Task<System\.Collections\.Generic\.IReadOnlyList<Customer>> FindManyByIdsAsync/,
     );
     const impl = files.get("Infrastructure/Repositories/CustomerRepository.cs")!;
-    expect(impl).toMatch(
-      /_db\.Customers\.Where\(x => ids\.Contains\(x\.Id\)\)\.ToListAsync\(ct\)/,
-    );
+    expect(impl).toMatch(/_db\.Customers\.Where\(x => ids\.Contains\(x\.Id\)\)\.ToListAsync\(ct\)/);
   });
 
   it("workflow op-call to a parameterless extern emits the dispatch dance", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
-    const doc = await helper(`
+    const doc = await helper(
+      `
       context Sales {
         enum OrderStatus { Draft, Confirmed }
         aggregate Order {
@@ -621,11 +655,11 @@ describe(".NET generator", () => {
           order.confirm()
         }
       }
-    `, { validation: true });
+    `,
+      { validation: true },
+    );
     const files = generateDotnet(doc.parseResult.value as Model);
-    const handler = files.get(
-      "Application/Workflows/PlaceAndConfirmHandler.cs",
-    )!;
+    const handler = files.get("Application/Workflows/PlaceAndConfirmHandler.cs")!;
 
     // IConfirmOrderHandler is injected.
     expect(handler).toMatch(/private readonly IConfirmOrderHandler _confirmOrderHandler;/);
@@ -647,7 +681,8 @@ describe(".NET generator", () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
-    const doc = await helper(`
+    const doc = await helper(
+      `
       context Sales {
         valueobject Money {
           amount: decimal
@@ -665,7 +700,9 @@ describe(".NET generator", () => {
         }
         repository Orders for Order { }
       }
-    `, { validation: true });
+    `,
+      { validation: true },
+    );
     const files = generateDotnet(doc.parseResult.value as Model);
     const handler = files.get("Application/Orders/Commands/AddLineHandler.cs")!;
     expect(handler).toMatch(
@@ -677,7 +714,8 @@ describe(".NET generator", () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
-    const doc = await helper(`
+    const doc = await helper(
+      `
       context Sales {
         aggregate Order {
           customerId: string
@@ -694,7 +732,9 @@ describe(".NET generator", () => {
           order.deduct(amount)
         }
       }
-    `, { validation: true });
+    `,
+      { validation: true },
+    );
     const files = generateDotnet(doc.parseResult.value as Model);
     const handler = files.get("Application/Workflows/ChargeOrderHandler.cs")!;
     expect(handler).toMatch(/order\.CheckDeduct\(cmd\.Amount\);/);
@@ -708,7 +748,8 @@ describe(".NET generator", () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
-    const doc = await helper(`
+    const doc = await helper(
+      `
       context Sales {
         enum OrderStatus { Draft, Confirmed }
         aggregate Region { name: string display, countryCode: string }
@@ -725,7 +766,9 @@ describe(".NET generator", () => {
                regionName = customerId.regionId.name
         }
       }
-    `, { validation: true });
+    `,
+      { validation: true },
+    );
     const handler = generateDotnet(doc.parseResult.value as Model).get(
       "Application/Views/OrdersWithRegionHandler.cs",
     )!;
@@ -742,16 +785,15 @@ describe(".NET generator", () => {
       /var regionByCustomerId = \(await _regionRepo\.FindManyByIdsAsync\(customerById\.Values\.Select\(__a => __a\.RegionId\)\.ToList\(\), ct\)\)\.ToDictionary\(__a => __a\.Id\);/,
     );
     // Projection walks the chain.
-    expect(handler).toMatch(
-      /regionByCustomerId\[customerById\[d\.CustomerId\]\.RegionId\]\.Name/,
-    );
+    expect(handler).toMatch(/regionByCustomerId\[customerById\[d\.CustomerId\]\.RegionId\]\.Name/);
   });
 
   it("emits explicit IsolationLevel for transactional(level) workflows", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
-    const doc = await helper(`
+    const doc = await helper(
+      `
       context T {
         aggregate Customer {
           name: string display
@@ -783,7 +825,9 @@ describe(".NET generator", () => {
           c.addCredit(amount)
         }
       }
-    `, { validation: true });
+    `,
+      { validation: true },
+    );
     const files = generateDotnet(doc.parseResult.value as Model);
     expect(files.get("Application/Workflows/SerHandler.cs")!).toMatch(
       /BeginTransactionAsync\(System\.Data\.IsolationLevel\.Serializable, ct\)/,
@@ -827,9 +871,7 @@ describe(".NET generator", () => {
       const doc = await helper(src, { validation: true });
       const { lowerModel } = await import("../src/ir/lower.js");
       const { enrichLoomModel } = await import("../src/ir/enrichments.js");
-      const { generateDotnetForContexts } = await import(
-        "../src/generator/dotnet/index.js"
-      );
+      const { generateDotnetForContexts } = await import("../src/generator/dotnet/index.js");
       const loom = enrichLoomModel(lowerModel(doc.parseResult.value as Model));
       const sys = loom.systems[0]!;
       const dep = sys.deployables.find((d) => d.platform === "dotnet")!;
@@ -931,9 +973,7 @@ describe(".NET generator", () => {
       // Body references currentUser.Role pascal-cased.
       expect(order).toMatch(/currentUser\.Role/);
       // Handler injects accessor and passes _currentUser.User.
-      const handler = files.get(
-        "Application/Orders/Commands/CancelHandler.cs",
-      )!;
+      const handler = files.get("Application/Orders/Commands/CancelHandler.cs")!;
       expect(handler).toMatch(/ICurrentUserAccessor _currentUser/);
       expect(handler).toMatch(/aggregate\.Cancel\(_currentUser\.User\)/);
     });
@@ -988,9 +1028,7 @@ describe(".NET generator", () => {
       const files = await emitForAuthSystem(SRC_FILTER_AUTH);
       const handler = files.get("Application/Orders/Queries/MineHandler.cs")!;
       expect(handler).toMatch(/ICurrentUserAccessor _currentUser/);
-      expect(handler).toMatch(
-        /_repo\.Mine\(_currentUser\.User, ct\)/,
-      );
+      expect(handler).toMatch(/_repo\.Mine\(_currentUser\.User, ct\)/);
     });
 
     it("view handler injects ICurrentUserAccessor when the view filter uses currentUser", async () => {
@@ -1036,9 +1074,7 @@ describe(".NET generator", () => {
       const order = files.get("Domain/Orders/Order.cs")!;
       expect(order).toMatch(/throw new ForbiddenException\(/);
       // The `precondition` 400-mapping path stays distinct.
-      expect(order).not.toMatch(
-        /throw new DomainException\([^)]*Forbidden/,
-      );
+      expect(order).not.toMatch(/throw new DomainException\([^)]*Forbidden/);
     });
 
     it("DomainExceptionFilter maps ForbiddenException to 403", async () => {
@@ -1080,9 +1116,7 @@ describe(".NET generator", () => {
       // sales.ddd Order.addLine: `precondition qty > 0` (int qty).
       // The `isMutable()` precondition references a helper-fn — non-
       // translatable, so it doesn't appear here.
-      const addLine = files.get(
-        "Application/Orders/Commands/AddLineCommandValidator.cs",
-      )!;
+      const addLine = files.get("Application/Orders/Commands/AddLineCommandValidator.cs")!;
       expect(addLine).toMatch(/RuleFor\(x => x\.Qty\)\.GreaterThanOrEqualTo\(1\)/);
       // No rule for `isMutable()` — domain-only.
       expect(addLine).not.toMatch(/IsMutable/);
@@ -1093,9 +1127,7 @@ describe(".NET generator", () => {
       const files = generateDotnet(model);
       // Order.confirm() has only server-only preconditions
       // (`isMutable()` + `lines.count > 0`) — no validator file.
-      expect(
-        files.has("Application/Orders/Commands/ConfirmCommandValidator.cs"),
-      ).toBe(false);
+      expect(files.has("Application/Orders/Commands/ConfirmCommandValidator.cs")).toBe(false);
     });
 
     it("does NOT emit a validator for invariants referencing aggregate state", async () => {
@@ -1105,9 +1137,7 @@ describe(".NET generator", () => {
       // `lines.count > 0 when status == Confirmed` — non-
       // translatable.  Product (in sales.ddd) has no invariants
       // either.  CreateOrder has no validator file.
-      expect(
-        files.has("Application/Orders/Commands/CreateOrderCommandValidator.cs"),
-      ).toBe(false);
+      expect(files.has("Application/Orders/Commands/CreateOrderCommandValidator.cs")).toBe(false);
     });
 
     it("emits the generic ValidationBehavior pipeline class", async () => {
@@ -1137,9 +1167,7 @@ describe(".NET generator", () => {
       const files = generateDotnet(model);
       const csprojKey = [...files.keys()].find((k) => k.endsWith(".csproj"))!;
       const csproj = files.get(csprojKey)!;
-      expect(csproj).toMatch(
-        /<PackageReference Include="FluentValidation" Version="11\.10\.0"/,
-      );
+      expect(csproj).toMatch(/<PackageReference Include="FluentValidation" Version="11\.10\.0"/);
       expect(csproj).toMatch(
         /<PackageReference Include="FluentValidation\.DependencyInjectionExtensions"/,
       );
@@ -1154,9 +1182,7 @@ describe(".NET generator", () => {
       // structured `failures` array.
       expect(filter).toMatch(/error = "Validation failed"/);
       expect(filter).toMatch(/failures = fv\.Errors/);
-      expect(filter).toMatch(
-        /new \{ field = e\.PropertyName, message = e\.ErrorMessage \}/,
-      );
+      expect(filter).toMatch(/new \{ field = e\.PropertyName, message = e\.ErrorMessage \}/);
     });
 
     it("skips the FluentValidation gate entirely when no aggregate has wire-translatable invariants", async () => {
@@ -1177,9 +1203,7 @@ describe(".NET generator", () => {
       );
       const files = generateDotnet(doc.parseResult.value as Model);
       // No validator files.
-      expect(
-        [...files.keys()].some((k) => k.endsWith("CommandValidator.cs")),
-      ).toBe(false);
+      expect([...files.keys()].some((k) => k.endsWith("CommandValidator.cs"))).toBe(false);
       // No ValidationBehavior either.
       expect(files.has("Application/Common/ValidationBehavior.cs")).toBe(false);
       // csproj omits FluentValidation refs.
@@ -1190,9 +1214,7 @@ describe(".NET generator", () => {
         /FluentValidation\.ValidationException/,
       );
       // Program.cs doesn't register the pipeline.
-      expect(files.get("Program.cs")!).not.toMatch(
-        /AddValidatorsFromAssembly/,
-      );
+      expect(files.get("Program.cs")!).not.toMatch(/AddValidatorsFromAssembly/);
     });
 
     it("absorbs `string.matches(literal)` as `RuleFor(x => x.F).Matches(...)` (slice 21.C)", async () => {
@@ -1212,12 +1234,8 @@ describe(".NET generator", () => {
         { validation: true },
       );
       const files = generateDotnet(doc.parseResult.value as Model);
-      const v = files.get(
-        "Application/Users/Commands/CreateUserCommandValidator.cs",
-      )!;
-      expect(v).toMatch(
-        /RuleFor\(x => x\.Email\)\.Matches\("\^\[\^@\]\+@\.\+\$"\)/,
-      );
+      const v = files.get("Application/Users/Commands/CreateUserCommandValidator.cs")!;
+      expect(v).toMatch(/RuleFor\(x => x\.Email\)\.Matches\("\^\[\^@\]\+@\.\+\$"\)/);
     });
 
     it("renders `matches` in domain code as `Regex.IsMatch` (slice 21.C)", async () => {
@@ -1263,9 +1281,7 @@ describe(".NET generator", () => {
       const files = generateDotnet(doc.parseResult.value as Model);
       // No validator file for CreateUserCommand — the only rule is
       // server-only and the single-field gate filters it out.
-      expect(
-        files.has("Application/Users/Commands/CreateUserCommandValidator.cs"),
-      ).toBe(false);
+      expect(files.has("Application/Users/Commands/CreateUserCommandValidator.cs")).toBe(false);
       // But the domain `AssertInvariants` still enforces it.
       const userClass = files.get("Domain/Users/User.cs")!;
       expect(userClass).toMatch(/this\.Username\.Length >= 3/);
@@ -1293,9 +1309,7 @@ describe(".NET generator", () => {
         "Application/Reservations/Commands/CreateReservationCommandValidator.cs",
       )!;
       // Cross-field rule lowers to a Must predicate.
-      expect(v).toMatch(
-        /RuleFor\(x => x\)\.Must\(x => x\.FromTime < x\.ToTime\)/,
-      );
+      expect(v).toMatch(/RuleFor\(x => x\)\.Must\(x => x\.FromTime < x\.ToTime\)/);
       // Field-path attribution.
       expect(v).toMatch(/\.WithName\("FromTime"\)/);
       expect(v).toMatch(/\.WithMessage\("Invariant violated:[^"]+"\)/);

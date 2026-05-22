@@ -1,16 +1,12 @@
-import { describe, it, expect, afterEach } from "vitest";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-
+import { afterEach, describe, expect, it } from "vitest";
+import { discoverBackendsFs, installFsBackendSource } from "../src/platform/fs-discovery.js";
 import {
   defaultBuiltInBackends,
   discoverBackends,
   resetBackendSource,
 } from "../src/platform/registry.js";
-import {
-  discoverBackendsFs,
-  installFsBackendSource,
-} from "../src/platform/fs-discovery.js";
 
 // ---------------------------------------------------------------------------
 // packaging-split P3 slice 3 — fs-backed `discoverBackends()` source.
@@ -32,10 +28,7 @@ import {
 // returns the same files) rather than reference equality.
 // ---------------------------------------------------------------------------
 
-const repoRoot = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "..",
-);
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 afterEach(() => resetBackendSource());
 
@@ -58,9 +51,7 @@ describe("fs-discovery — workspace symlink discovery", () => {
     // is unaffected by the source swap.
     const fs = await discoverBackendsFs(repoRoot);
     const fsHono = fs.find((b) => b.manifest.family === "hono")!;
-    const inTreeHono = defaultBuiltInBackends().find(
-      (b) => b.manifest.family === "hono",
-    )!;
+    const inTreeHono = defaultBuiltInBackends().find((b) => b.manifest.family === "hono")!;
     expect(fsHono.surface).toBe(inTreeHono.surface);
   });
 
@@ -82,9 +73,7 @@ describe("installFsBackendSource — composition with in-tree default", () => {
   it("merges fs + in-tree so backends without a workspace package still resolve", async () => {
     await installFsBackendSource(repoRoot);
     const set = discoverBackends();
-    const families = set.map(
-      (b) => `${b.manifest.family}@${b.manifest.loomVersion}`,
-    );
+    const families = set.map((b) => `${b.manifest.family}@${b.manifest.loomVersion}`);
     // dotnet@v8 and phoenixLiveView@v1 have no workspace package yet,
     // but they MUST still appear via the in-tree fallback — otherwise
     // resolution silently breaks for `platform: dotnet` etc.

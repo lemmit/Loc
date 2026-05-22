@@ -5,11 +5,11 @@
 // v0 Grid gives every column span="auto" — Mantine fills equally.
 // A per-child span knob lands with a future per-arg config slice.
 
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
-import { generateSystems } from "../src/system/index.js";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
+import { generateSystems } from "../src/system/index.js";
 
 async function buildAndGenerate(src: string): Promise<Map<string, string>> {
   const services = createDddServices(NodeFileSystem);
@@ -45,9 +45,7 @@ describe("Slice 11.8 — Group + Grid in walker stdlib", () => {
     `);
     const content = files.get("web/src/pages/toolbar.tsx")!;
     expect(content).toBeDefined();
-    expect(content).toMatch(
-      /import \{ Badge, Button, Group, Title \} from "@mantine\/core";/,
-    );
+    expect(content).toMatch(/import \{ Badge, Button, Group, Title \} from "@mantine\/core";/);
     expect(content).toMatch(/<Group>/);
     expect(content).toMatch(/<Title order=\{2\}>Title<\/Title>/);
     expect(content).toMatch(/<Badge>Live<\/Badge>/);
@@ -78,7 +76,7 @@ describe("Slice 11.8 — Group + Grid in walker stdlib", () => {
     expect(content).toMatch(/<Group \/>/);
   });
 
-  it("Grid(...children) wraps each child in <Grid.Col span=\"auto\">", async () => {
+  it('Grid(...children) wraps each child in <Grid.Col span="auto">', async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }

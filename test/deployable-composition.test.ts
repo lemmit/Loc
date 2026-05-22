@@ -10,9 +10,9 @@
 //
 // Validator catches every misalignment in the chain.
 
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
 import { parseHelper } from "langium/test";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 
 async function parse(source: string) {
@@ -68,9 +68,9 @@ describe("Slice 11.26 — deployable composition (serves + ui-compose)", () => {
           }
         }
       `);
-      expect(errors.some((e) =>
-        /'serves:' is only valid on a backend deployable/.test(e),
-      )).toBe(true);
+      expect(errors.some((e) => /'serves:' is only valid on a backend deployable/.test(e))).toBe(
+        true,
+      );
     });
 
     it("flags duplicate api in serves list", async () => {
@@ -85,9 +85,7 @@ describe("Slice 11.26 — deployable composition (serves + ui-compose)", () => {
           }
         }
       `);
-      expect(errors.some((e) =>
-        /lists api 'SalesApi' more than once/.test(e),
-      )).toBe(true);
+      expect(errors.some((e) => /lists api 'SalesApi' more than once/.test(e))).toBe(true);
     });
   });
 
@@ -138,9 +136,7 @@ describe("Slice 11.26 — deployable composition (serves + ui-compose)", () => {
           }
         }
       `);
-      expect(errors.some((e) =>
-        /'salesApi' does not 'serves: SalesApi'/.test(e),
-      )).toBe(true);
+      expect(errors.some((e) => /'salesApi' does not 'serves: SalesApi'/.test(e))).toBe(true);
     });
 
     it("flags binding name that doesn't match any UI param", async () => {
@@ -165,9 +161,13 @@ describe("Slice 11.26 — deployable composition (serves + ui-compose)", () => {
           }
         }
       `);
-      expect(errors.some((e) =>
-        /binds parameter 'Misspelled' on ui 'WebApp' but the ui declares no 'api Misspelled: <Api>' parameter/.test(e),
-      )).toBe(true);
+      expect(
+        errors.some((e) =>
+          /binds parameter 'Misspelled' on ui 'WebApp' but the ui declares no 'api Misspelled: <Api>' parameter/.test(
+            e,
+          ),
+        ),
+      ).toBe(true);
     });
 
     it("flags missing binding for a declared UI param", async () => {
@@ -193,9 +193,13 @@ describe("Slice 11.26 — deployable composition (serves + ui-compose)", () => {
         }
       `);
       // Sugar form `ui: WebApp` without bindings → error since UI has params.
-      expect(errors.some((e) =>
-        /deploys ui 'WebApp' which declares api parameters; supply bindings via 'ui: WebApp \{ Sales:/.test(e),
-      )).toBe(true);
+      expect(
+        errors.some((e) =>
+          /deploys ui 'WebApp' which declares api parameters; supply bindings via 'ui: WebApp \{ Sales:/.test(
+            e,
+          ),
+        ),
+      ).toBe(true);
     });
 
     it("flags missing binding when only some params are bound", async () => {
@@ -230,9 +234,11 @@ describe("Slice 11.26 — deployable composition (serves + ui-compose)", () => {
           }
         }
       `);
-      expect(errors.some((e) =>
-        /missing a binding for ui parameter 'Mktg: MktgApi' on ui 'WebApp'/.test(e),
-      )).toBe(true);
+      expect(
+        errors.some((e) =>
+          /missing a binding for ui parameter 'Mktg: MktgApi' on ui 'WebApp'/.test(e),
+        ),
+      ).toBe(true);
     });
 
     it("flags duplicate param binding", async () => {
@@ -257,9 +263,7 @@ describe("Slice 11.26 — deployable composition (serves + ui-compose)", () => {
           }
         }
       `);
-      expect(errors.some((e) =>
-        /binds ui parameter 'Sales' more than once/.test(e),
-      )).toBe(true);
+      expect(errors.some((e) => /binds ui parameter 'Sales' more than once/.test(e))).toBe(true);
     });
 
     it("two params from two different backends — fully bound", async () => {

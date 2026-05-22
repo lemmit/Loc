@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
 import { EmptyFileSystem } from "langium";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
 import { eventNames, listEmits, setEmitEvent } from "../web/src/builder/system/emit-event.js";
@@ -15,8 +15,10 @@ function aggregate(name: string): { $type: string } {
   for (const n of (function* walk(x: { $type: string }): Generator<{ $type: string }> {
     yield x;
     for (const v of Object.values(x)) {
-      if (Array.isArray(v)) for (const c of v) if (c && typeof c === "object" && "$type" in c) yield* walk(c);
-      else if (v && typeof v === "object" && "$type" in v) yield* walk(v as { $type: string });
+      if (Array.isArray(v))
+        for (const c of v)
+          if (c && typeof c === "object" && "$type" in c) yield* walk(c);
+          else if (v && typeof v === "object" && "$type" in v) yield* walk(v as { $type: string });
     }
   })(parse(sales))) {
     if (n.$type === "Aggregate" && (n as { name?: string }).name === name) return n;
@@ -33,7 +35,9 @@ describe("System builder — emit event", () => {
   });
 
   it("lists declared events", () => {
-    expect(eventNames(parse(sales))).toEqual(expect.arrayContaining(["LineAdded", "OrderConfirmed"]));
+    expect(eventNames(parse(sales))).toEqual(
+      expect.arrayContaining(["LineAdded", "OrderConfirmed"]),
+    );
   });
 
   it("repoints an emit at a different event, keeping the field block", () => {

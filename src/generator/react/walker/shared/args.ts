@@ -14,10 +14,7 @@ export function slugify(s: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-export function boolNamed(
-  call: ExprIR & { kind: "call" },
-  name: string,
-): boolean {
+export function boolNamed(call: ExprIR & { kind: "call" }, name: string): boolean {
   const argNames = call.argNames ?? [];
   for (let i = 0; i < call.args.length; i++) {
     if (argNames[i] !== name) continue;
@@ -32,10 +29,7 @@ export function boolNamed(
  *  is missing.  Distinct from `stringNamed` (string literals only)
  *  and `numericNamed` (number literals only): this keeps any
  *  expression IR for the caller to render as JS. */
-export function namedArgValue(
-  call: ExprIR & { kind: "call" },
-  name: string,
-): ExprIR | undefined {
+export function namedArgValue(call: ExprIR & { kind: "call" }, name: string): ExprIR | undefined {
   const argNames = call.argNames ?? [];
   for (let i = 0; i < call.args.length; i++) {
     if (argNames[i] === name) return call.args[i];
@@ -102,10 +96,7 @@ export function unwrapTextLiteral(s: string): string {
   return s;
 }
 
-export function stringNamed(
-  call: ExprIR & { kind: "call" },
-  name: string,
-): string | undefined {
+export function stringNamed(call: ExprIR & { kind: "call" }, name: string): string | undefined {
   const argNames = call.argNames ?? [];
   for (let i = 0; i < call.args.length; i++) {
     if (argNames[i] !== name) continue;
@@ -115,10 +106,7 @@ export function stringNamed(
   return undefined;
 }
 
-export function numericNamed(
-  call: ExprIR & { kind: "call" },
-  name: string,
-): number | undefined {
+export function numericNamed(call: ExprIR & { kind: "call" }, name: string): number | undefined {
   const argNames = call.argNames ?? [];
   for (let i = 0; i < call.args.length; i++) {
     if (argNames[i] !== name) continue;
@@ -143,7 +131,5 @@ export function escapeJsxText(s: string): string {
  *  prefix). */
 export function indentJsx(tsx: string, prefix: string): string {
   const lines = tsx.split("\n");
-  return lines
-    .map((l, i) => (i === 0 ? l : prefix + l))
-    .join("\n");
+  return lines.map((l, i) => (i === 0 ? l : prefix + l)).join("\n");
 }

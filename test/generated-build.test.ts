@@ -1,9 +1,9 @@
-import { describe, it, expect } from "vitest";
 import { execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Generator regression test: emit each example, install deps, run
@@ -29,45 +29,39 @@ describe.skipIf(!ENABLED)(
       "examples/sales.ddd",
       "examples/banking.ddd",
       "examples/inventory.ddd",
-    ])(
-      "%s — `ddd generate ts` output type-checks + tsup-bundles",
-      (example) => {
-        const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-"));
+    ])("%s — `ddd generate ts` output type-checks + tsup-bundles", (example) => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-"));
+      try {
+        execSync(`node ${cli} generate ts ${example} -o ${outDir}`, {
+          stdio: "inherit",
+          cwd: repoRoot,
+        });
+        execSync(`npm install --silent --no-audit --no-fund`, {
+          cwd: outDir,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        // Type-check (tsup is build-only with `dts: false`).
+        execSync(`npx tsc --noEmit`, {
+          cwd: outDir,
+          stdio: "inherit",
+          timeout: 60_000,
+        });
+        // Build the production bundle.
+        execSync(`npm run build`, {
+          cwd: outDir,
+          stdio: "inherit",
+          timeout: 60_000,
+        });
+        // Bundle exists where the Dockerfile expects it.
+        expect(fs.existsSync(path.join(outDir, "dist", "index.js"))).toBe(true);
+      } finally {
         try {
-          execSync(`node ${cli} generate ts ${example} -o ${outDir}`, {
-            stdio: "inherit",
-            cwd: repoRoot,
-          });
-          execSync(`npm install --silent --no-audit --no-fund`, {
-            cwd: outDir,
-            stdio: "inherit",
-            timeout: 180_000,
-          });
-          // Type-check (tsup is build-only with `dts: false`).
-          execSync(`npx tsc --noEmit`, {
-            cwd: outDir,
-            stdio: "inherit",
-            timeout: 60_000,
-          });
-          // Build the production bundle.
-          execSync(`npm run build`, {
-            cwd: outDir,
-            stdio: "inherit",
-            timeout: 60_000,
-          });
-          // Bundle exists where the Dockerfile expects it.
-          expect(fs.existsSync(path.join(outDir, "dist", "index.js"))).toBe(
-            true,
-          );
-        } finally {
-          try {
-            fs.rmSync(outDir, { recursive: true, force: true });
-          } catch {
-            /* ignore */
-          }
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
         }
-      },
-      300_000,
-    );
+      }
+    }, 300_000);
   },
 );

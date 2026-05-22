@@ -19,11 +19,11 @@
 //      inside the branch.
 //   4. Plain (non-lambda) `data:` bodies render unchanged.
 
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
-import { generateSystems } from "../src/system/index.js";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
+import { generateSystems } from "../src/system/index.js";
 
 async function buildAndGenerate(src: string): Promise<Map<string, string>> {
   const services = createDddServices(NodeFileSystem);
@@ -88,9 +88,7 @@ describe("Slice A8 — QueryView macro", () => {
     const tsx = files.get("web/src/pages/orders_list.tsx")!;
     // The loading branch ends up wrapped in the conditional guard;
     // assert the Skeleton stack is present inside it.
-    expect(tsx).toMatch(
-      /orderAll\.isLoading && \([\s\S]*?Array\.from\(\{ length: 5 \}\)/,
-    );
+    expect(tsx).toMatch(/orderAll\.isLoading && \([\s\S]*?Array\.from\(\{ length: 5 \}\)/);
   });
 
   it("data: lambda rebinds its param to the query's `.data` inside the branch", async () => {
@@ -148,8 +146,6 @@ describe("Slice A8 — QueryView macro", () => {
       )`),
     );
     const tsx = files.get("web/src/pages/orders_list.tsx")!;
-    expect(tsx).toMatch(
-      /\{\/\* QueryView: missing 'of:' query expression \*\/\}/,
-    );
+    expect(tsx).toMatch(/\{\/\* QueryView: missing 'of:' query expression \*\/\}/);
   });
 });

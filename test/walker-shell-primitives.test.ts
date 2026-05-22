@@ -19,17 +19,18 @@
 //   5. All four accept the standard `testid:` named arg and
 //      thread it to the rendered root element.
 
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
-import { generateSystems } from "../src/system/index.js";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
+import { generateSystems } from "../src/system/index.js";
 
 async function emit(body: string): Promise<string> {
   const services = createDddServices(NodeFileSystem);
   const { parseHelper } = await import("langium/test");
   const helper = parseHelper(services.Ddd);
-  const doc = await helper(`
+  const doc = await helper(
+    `
     system S {
       module M { context C { } }
       ui WebApp {
@@ -38,7 +39,9 @@ async function emit(body: string): Promise<string> {
       deployable api { platform: hono, modules: M, port: 3000 }
       deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
     }
-  `, { validation: true });
+  `,
+    { validation: true },
+  );
   const files = generateSystems(doc.parseResult.value as Model).files;
   const tsx = files.get("web/src/pages/p.tsx");
   if (!tsx) throw new Error(`MISSING; keys = ${[...files.keys()].join(", ")}`);
@@ -59,9 +62,7 @@ describe("Slice A7 — shell primitives", () => {
   });
 
   it("Breadcrumbs testid lands on the root element", async () => {
-    const tsx = await emit(
-      `Breadcrumbs(Text("X"), testid: "page-crumbs")`,
-    );
+    const tsx = await emit(`Breadcrumbs(Text("X"), testid: "page-crumbs")`);
     expect(tsx).toMatch(/<Breadcrumbs[^>]*\bdata-testid="page-crumbs"/);
   });
 
@@ -112,10 +113,8 @@ describe("Slice A7 — shell primitives", () => {
     expect(tsx).toMatch(/<Alert color="red" variant="light">Couldn't load<\/Alert>/);
   });
 
-  it("Alert(message, color: \"yellow\", title: \"Heads up\") threads both", async () => {
-    const tsx = await emit(
-      `Alert("Disk almost full", color: "yellow", title: "Heads up")`,
-    );
+  it('Alert(message, color: "yellow", title: "Heads up") threads both', async () => {
+    const tsx = await emit(`Alert("Disk almost full", color: "yellow", title: "Heads up")`);
     expect(tsx).toMatch(
       /<Alert color="yellow"[^>]*title="Heads up"[^>]*>Disk almost full<\/Alert>/,
     );

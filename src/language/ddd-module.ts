@@ -1,26 +1,26 @@
-import { type Module, inject } from "langium";
+import { inject, type Module } from "langium";
 import {
+  createDefaultModule,
+  createDefaultSharedModule,
   type DefaultSharedModuleContext,
   type LangiumServices,
   type LangiumSharedServices,
   type PartialLangiumServices,
   type PartialLangiumSharedServices,
-  createDefaultModule,
-  createDefaultSharedModule,
 } from "langium/lsp";
-import { DddGeneratedModule, DddGeneratedSharedModule } from "./generated/module.js";
-import { DddValidator, registerValidationChecks } from "./ddd-validator.js";
+import { registerScaffoldAstExpander } from "./ddd-scaffold-ast-expander.js";
 import { DddScopeComputation, DddScopeProvider } from "./ddd-scope.js";
+import { DddValidator, registerValidationChecks } from "./ddd-validator.js";
+import { DddGeneratedModule, DddGeneratedSharedModule } from "./generated/module.js";
+import { DddCodeActionProvider } from "./lsp/ddd-code-actions.js";
+import { DddCompletionProvider } from "./lsp/ddd-completion.js";
+import { DddDefinitionProvider } from "./lsp/ddd-definition.js";
 import { DddHoverProvider } from "./lsp/ddd-hover.js";
 import { DddNodeKindProvider } from "./lsp/ddd-node-kind.js";
-import { DddDefinitionProvider } from "./lsp/ddd-definition.js";
-import { DddCompletionProvider } from "./lsp/ddd-completion.js";
 import { DddReferencesProvider } from "./lsp/ddd-references.js";
 import { DddRenameProvider } from "./lsp/ddd-rename.js";
 import { DddSemanticTokenProvider } from "./lsp/ddd-semantic-tokens.js";
 import { DddSignatureHelpProvider } from "./lsp/ddd-signature-help.js";
-import { DddCodeActionProvider } from "./lsp/ddd-code-actions.js";
-import { registerScaffoldAstExpander } from "./ddd-scaffold-ast-expander.js";
 
 export type DddAddedServices = {
   validation: {

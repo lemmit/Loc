@@ -23,11 +23,9 @@ describe("DomPage / DomLocator", () => {
   it("getByTestId + click fires a real click", async () => {
     setBody(`<button data-testid="orders-new-submit">Save</button>`);
     let clicked = 0;
-    document
-      .querySelector('[data-testid="orders-new-submit"]')!
-      .addEventListener("click", () => {
-        clicked += 1;
-      });
+    document.querySelector('[data-testid="orders-new-submit"]')!.addEventListener("click", () => {
+      clicked += 1;
+    });
     const page = new DomPage(document);
     await page.getByTestId("orders-new-submit").click();
     expect(clicked).toBe(1);
@@ -55,13 +53,8 @@ describe("DomPage / DomLocator", () => {
       </table>
     `);
     const page = new DomPage(document);
-    expect(await page.getByTestId("orders-detail-status").innerText()).toBe(
-      "Confirmed",
-    );
-    const count = await page
-      .getByTestId("orders-detail-lines")
-      .locator("tbody tr")
-      .count();
+    expect(await page.getByTestId("orders-detail-status").innerText()).toBe("Confirmed");
+    const count = await page.getByTestId("orders-detail-lines").locator("tbody tr").count();
     expect(count).toBe(3);
   });
 
@@ -92,20 +85,15 @@ describe("DomPage / DomLocator", () => {
       <div role="option">Confirmed Later</div>
     `);
     const page = new DomPage(document);
-    expect(
-      await page.getByRole("option", { name: "Confirmed", exact: false }).count(),
-    ).toBe(2);
-    expect(
-      await page.getByRole("option", { name: "Confirmed", exact: true }).count(),
-    ).toBe(1);
+    expect(await page.getByRole("option", { name: "Confirmed", exact: false }).count()).toBe(2);
+    expect(await page.getByRole("option", { name: "Confirmed", exact: true }).count()).toBe(1);
   });
 
   it("auto-waits for an element that appears asynchronously", async () => {
     setBody(`<div id="host"></div>`);
     const page = new DomPage(document, { timeout: 1000 });
     setTimeout(() => {
-      document.getElementById("host")!.innerHTML =
-        `<div data-testid="orders-detail">ready</div>`;
+      document.getElementById("host")!.innerHTML = `<div data-testid="orders-detail">ready</div>`;
     }, 80);
     // Resolves once the element shows up — would throw on timeout.
     await page.getByTestId("orders-detail").waitFor();
@@ -113,12 +101,8 @@ describe("DomPage / DomLocator", () => {
   });
 
   it("click auto-waits for a hidden element to become visible", async () => {
-    setBody(
-      `<button data-testid="orders-op-confirm" style="display:none">Confirm</button>`,
-    );
-    const btn = document.querySelector(
-      '[data-testid="orders-op-confirm"]',
-    ) as HTMLButtonElement;
+    setBody(`<button data-testid="orders-op-confirm" style="display:none">Confirm</button>`);
+    const btn = document.querySelector('[data-testid="orders-op-confirm"]') as HTMLButtonElement;
     let clicked = 0;
     btn.addEventListener("click", () => {
       clicked += 1;
@@ -139,15 +123,11 @@ describe("DomPage / DomLocator", () => {
       <button data-testid="dup">b</button>
     `);
     const page = new DomPage(document, { timeout: 150 });
-    await expect(page.getByTestId("dup").click()).rejects.toThrow(
-      /resolved to 2 elements/,
-    );
+    await expect(page.getByTestId("dup").click()).rejects.toThrow(/resolved to 2 elements/);
   });
 
   it("click waits for a disabled control to become enabled", async () => {
-    setBody(
-      `<button data-testid="orders-op-confirm-submit" disabled>Confirm</button>`,
-    );
+    setBody(`<button data-testid="orders-op-confirm-submit" disabled>Confirm</button>`);
     const btn = document.querySelector(
       '[data-testid="orders-op-confirm-submit"]',
     ) as HTMLButtonElement;
@@ -166,24 +146,18 @@ describe("DomPage / DomLocator", () => {
   it("times out clicking a permanently disabled control", async () => {
     setBody(`<button data-testid="dis" disabled>X</button>`);
     const page = new DomPage(document, { timeout: 150 });
-    await expect(page.getByTestId("dis").click()).rejects.toThrow(
-      /not enabled/,
-    );
+    await expect(page.getByTestId("dis").click()).rejects.toThrow(/not enabled/);
   });
 
   it("fill rejects a readonly (non-editable) input", async () => {
     setBody(`<input data-testid="ro" readonly />`);
     const page = new DomPage(document, { timeout: 150 });
-    await expect(page.getByTestId("ro").fill("x")).rejects.toThrow(
-      /not editable/,
-    );
+    await expect(page.getByTestId("ro").fill("x")).rejects.toThrow(/not editable/);
   });
 
   it("fill waits for an input to become editable", async () => {
     setBody(`<input data-testid="ed" readonly />`);
-    const el = document.querySelector(
-      '[data-testid="ed"]',
-    ) as HTMLInputElement;
+    const el = document.querySelector('[data-testid="ed"]') as HTMLInputElement;
     const page = new DomPage(document, { timeout: 1000 });
     setTimeout(() => {
       el.readOnly = false;

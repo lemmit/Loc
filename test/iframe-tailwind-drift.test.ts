@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Drift guard: the playground's iframe-html.ts injects a Tailwind
@@ -60,10 +60,7 @@ describe("iframe TAILWIND_PLAY_CONFIG ↔ shadcn pack tailwind-config drift guar
     path.join(repoRoot, "designs/shadcn/v3/tailwind-config.hbs"),
     "utf-8",
   );
-  const iframe = fs.readFileSync(
-    path.join(repoRoot, "web/src/preview/iframe-html.ts"),
-    "utf-8",
-  );
+  const iframe = fs.readFileSync(path.join(repoRoot, "web/src/preview/iframe-html.ts"), "utf-8");
 
   it.each([
     ["container", /\bcontainer:\s*/],

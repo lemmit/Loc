@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
 import { NodeFileSystem } from "langium/node";
 import { validationHelper } from "langium/test";
+import { describe, expect, it } from "vitest";
 import type { CodeAction, TextEdit } from "vscode-languageserver";
 import { createDddServices } from "../src/language/ddd-module.js";
 
@@ -22,7 +22,10 @@ async function fix(text: string, title: string): Promise<string> {
     context: { diagnostics: result.diagnostics },
   })) as CodeAction[];
   const action = actions.find((a) => a.title === title);
-  if (!action) throw new Error(`no code action titled "${title}"; got: ${actions.map((a) => a.title).join(", ")}`);
+  if (!action)
+    throw new Error(
+      `no code action titled "${title}"; got: ${actions.map((a) => a.title).join(", ")}`,
+    );
   const edits = action.edit?.changes?.[document.textDocument.uri] ?? [];
   return applyEdits(text, edits, document.textDocument.offsetAt.bind(document.textDocument));
 }

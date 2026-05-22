@@ -16,16 +16,12 @@ export function printStmt(node: Statement): string {
     case "LetStmt":
       return `let ${node.name} = ${printExpr(node.expr)}`;
     case "EmitStmt": {
-      const fields = node.fields
-        .map((f) => `${f.name}: ${printExpr(f.value)}`)
-        .join(", ");
+      const fields = node.fields.map((f) => `${f.name}: ${printExpr(f.value)}`).join(", ");
       return `emit ${node.event.$refText} {${fields.length > 0 ? ` ${fields} ` : ""}}`;
     }
     case "AssignOrCallStmt": {
       const target = printLValue(node.target);
-      return node.op && node.value
-        ? `${target} ${node.op} ${printExpr(node.value)}`
-        : target;
+      return node.op && node.value ? `${target} ${node.op} ${printExpr(node.value)}` : target;
     }
     default: {
       const exhaustive: never = node;

@@ -7,11 +7,11 @@
 // slots.  Missing attrs are simply omitted — Mantine renders its
 // built-in fallback (placeholder image / user-icon).
 
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
-import { generateSystems } from "../src/system/index.js";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
+import { generateSystems } from "../src/system/index.js";
 
 async function buildAndGenerate(src: string): Promise<Map<string, string>> {
   const services = createDddServices(NodeFileSystem);
@@ -44,9 +44,7 @@ describe("Slice 11.16 — Image + Avatar in walker stdlib", () => {
     const content = files.get("web/src/pages/home.tsx")!;
     expect(content).toBeDefined();
     expect(content).toMatch(/import \{ Image \} from "@mantine\/core";/);
-    expect(content).toMatch(
-      /<Image src="\/logo\.png" alt="Acme" \/>/,
-    );
+    expect(content).toMatch(/<Image src="\/logo\.png" alt="Acme" \/>/);
   });
 
   it("Avatar(src, alt) emits Mantine <Avatar> with both attrs", async () => {
@@ -146,9 +144,7 @@ describe("Slice 11.16 — Image + Avatar in walker stdlib", () => {
       }
     `);
     const content = files.get("web/src/pages/header.tsx")!;
-    expect(content).toMatch(
-      /import \{ Avatar, Group, Image \} from "@mantine\/core";/,
-    );
+    expect(content).toMatch(/import \{ Avatar, Group, Image \} from "@mantine\/core";/);
     expect(content).toMatch(/<Group justify="space-between">/);
     expect(content).toMatch(/<Image src="\/logo\.png"/);
     expect(content).toMatch(/<Avatar src="\/u\.png"/);

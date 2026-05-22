@@ -1,8 +1,4 @@
-import type {
-  BoundedContextIR,
-  TypeIR,
-  ViewIR,
-} from "../../ir/loom-ir.js";
+import type { BoundedContextIR, TypeIR, ViewIR } from "../../ir/loom-ir.js";
 import { camel, plural, snake } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
@@ -55,17 +51,13 @@ export function buildViewsApiModule(contexts: BoundedContextIR[]): string {
     if (!view.output) shorthandSources.add(view.aggregateName);
   }
   for (const aggName of [...shorthandSources].sort()) {
-    lines.push(
-      `import { ${aggName}Response, ${aggName}ListResponse } from "./${camel(aggName)}";`,
-    );
+    lines.push(`import { ${aggName}Response, ${aggName}ListResponse } from "./${camel(aggName)}";`);
   }
   // Full-form views may reference enum / VO schemas on their fields.
   const enumDeps = collectEnumDeps(views);
   const voDeps = collectVoDeps(views);
   for (const dep of [...enumDeps, ...voDeps]) {
-    lines.push(
-      `import { ${dep.schemaName} } from "./${camel(dep.fromAggregate)}";`,
-    );
+    lines.push(`import { ${dep.schemaName} } from "./${camel(dep.fromAggregate)}";`);
   }
   lines.push("");
 
@@ -77,19 +69,13 @@ export function buildViewsApiModule(contexts: BoundedContextIR[]): string {
         lines.push(`  ${f.name}: ${zodForResponse(f.type, f.optional)},`);
       }
       lines.push(`});`);
-      lines.push(
-        `export type ${cap(view.name)}Row = z.infer<typeof ${cap(view.name)}Row>;`,
-      );
-      lines.push(
-        `export const ${cap(view.name)}Response = z.array(${cap(view.name)}Row);`,
-      );
+      lines.push(`export type ${cap(view.name)}Row = z.infer<typeof ${cap(view.name)}Row>;`);
+      lines.push(`export const ${cap(view.name)}Response = z.array(${cap(view.name)}Row);`);
       lines.push(
         `export type ${cap(view.name)}Response = z.infer<typeof ${cap(view.name)}Response>;`,
       );
     } else {
-      lines.push(
-        `export const ${cap(view.name)}Response = ${view.aggregateName}ListResponse;`,
-      );
+      lines.push(`export const ${cap(view.name)}Response = ${view.aggregateName}ListResponse;`);
       lines.push(
         `export type ${cap(view.name)}Response = z.infer<typeof ${cap(view.name)}Response>;`,
       );
@@ -115,17 +101,16 @@ interface SchemaDep {
   schemaName: string;
 }
 
-function collectEnumDeps(
-  views: Array<{ view: ViewIR; ctx: BoundedContextIR }>,
-): SchemaDep[] {
+function collectEnumDeps(views: Array<{ view: ViewIR; ctx: BoundedContextIR }>): SchemaDep[] {
   const out = new Map<string, SchemaDep>();
   for (const { view, ctx } of views) {
     if (!view.output) continue;
     for (const f of view.output.fields) {
       walkType(f.type, (t) => {
         if (t.kind === "enum") {
-          const owner = findFirstAggregateWith(ctx, (typ) =>
-            typ.kind === "enum" && typ.name === t.name,
+          const owner = findFirstAggregateWith(
+            ctx,
+            (typ) => typ.kind === "enum" && typ.name === t.name,
           );
           if (owner && !out.has(t.name)) {
             out.set(t.name, {
@@ -140,17 +125,16 @@ function collectEnumDeps(
   return [...out.values()];
 }
 
-function collectVoDeps(
-  views: Array<{ view: ViewIR; ctx: BoundedContextIR }>,
-): SchemaDep[] {
+function collectVoDeps(views: Array<{ view: ViewIR; ctx: BoundedContextIR }>): SchemaDep[] {
   const out = new Map<string, SchemaDep>();
   for (const { view, ctx } of views) {
     if (!view.output) continue;
     for (const f of view.output.fields) {
       walkType(f.type, (t) => {
         if (t.kind === "valueobject") {
-          const owner = findFirstAggregateWith(ctx, (typ) =>
-            typ.kind === "valueobject" && typ.name === t.name,
+          const owner = findFirstAggregateWith(
+            ctx,
+            (typ) => typ.kind === "valueobject" && typ.name === t.name,
           );
           if (owner && !out.has(t.name)) {
             out.set(t.name, {
@@ -196,10 +180,7 @@ function findFirstAggregateWith(
 // Playwright page object — one class per view.
 // ---------------------------------------------------------------------------
 
-export function buildViewPageObject(
-  view: ViewIR,
-  ctx: BoundedContextIR,
-): string {
+export function buildViewPageObject(view: ViewIR, ctx: BoundedContextIR): string {
   const slug = snake(view.name);
   const className = `${cap(view.name)}ViewPage`;
   const cols = collectColumnNames(view, ctx);
@@ -225,9 +206,7 @@ export function buildViewPageObject(
   lines.push(`  async rows(): Promise<${cap(view.name)}RowText[]> {`);
   lines.push(`    const out: ${cap(view.name)}RowText[] = [];`);
   lines.push(`    for (let i = 0; i < 1000; i++) {`);
-  lines.push(
-    `      const row = this.page.getByTestId(\`view-${slug}-row-\${i}\`);`,
-  );
+  lines.push(`      const row = this.page.getByTestId(\`view-${slug}-row-\${i}\`);`);
   lines.push(`      if ((await row.count()) === 0) break;`);
   for (const c of cols) {
     lines.push(
@@ -254,11 +233,7 @@ function collectColumnNames(view: ViewIR, ctx: BoundedContextIR): string[] {
   const cols = ["id"];
   for (const f of agg.fields) {
     const inner = unwrapOpt(f.type);
-    if (
-      inner.kind === "primitive" ||
-      inner.kind === "enum" ||
-      inner.kind === "id"
-    ) {
+    if (inner.kind === "primitive" || inner.kind === "enum" || inner.kind === "id") {
       cols.push(f.name);
     }
   }

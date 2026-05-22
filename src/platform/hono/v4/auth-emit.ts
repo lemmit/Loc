@@ -1,6 +1,6 @@
+import { renderTsType } from "../../../generator/typescript/render-expr.js";
 import type { SystemIR, UserIR } from "../../../ir/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
-import { renderTsType } from "../../../generator/typescript/render-expr.js";
 
 // ---------------------------------------------------------------------------
 // Hono-side auth scaffolding emitted per deployable when `auth: required`.
@@ -18,10 +18,7 @@ import { renderTsType } from "../../../generator/typescript/render-expr.js";
 // list mirrors the .NET side: /health, /openapi.json, /swagger.
 // ---------------------------------------------------------------------------
 
-export function emitAuthFiles(
-  sys: SystemIR,
-  out: Map<string, string>,
-): void {
+export function emitAuthFiles(sys: SystemIR, out: Map<string, string>): void {
   if (!sys.user) return;
   out.set("auth/user-types.ts", renderUserTypes(sys.user));
   out.set("auth/verifier.ts", renderVerifier());
@@ -36,9 +33,7 @@ function renderUserTypes(user: UserIR): string {
     // FieldIR.optional is already encoded via the type when the source
     // wrote `T?`.  For simplicity we surface the raw declared type and
     // let renderTsType handle `optional` / `array`.
-    const t = f.optional
-      ? renderTsType({ kind: "optional", inner: f.type })
-      : renderTsType(f.type);
+    const t = f.optional ? renderTsType({ kind: "optional", inner: f.type }) : renderTsType(f.type);
     return `  ${f.name}: ${t};`;
   });
   return (

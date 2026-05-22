@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
 import { NodeFileSystem } from "langium/node";
 import { parseDocument } from "langium/test";
+import { describe, expect, it } from "vitest";
 import type { TextEdit } from "vscode-languageserver";
 import { createDddServices } from "../src/language/ddd-module.js";
 

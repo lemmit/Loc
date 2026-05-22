@@ -20,10 +20,6 @@
 // drift sweep in CI; this file pins the contract programmatically).
 
 import { describe, expect, it } from "vitest";
-import {
-  buildExpandContext,
-  expandScaffoldToExplicitBody,
-} from "../src/ir/scaffold-expander.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -32,6 +28,7 @@ import type {
   SystemIR,
   UiIR,
 } from "../src/ir/loom-ir.js";
+import { buildExpandContext, expandScaffoldToExplicitBody } from "../src/ir/scaffold-expander.js";
 
 function makeOrderAggregate(): AggregateIR {
   return {
@@ -67,9 +64,7 @@ function makeOrdersBC(): BoundedContextIR {
   return {
     name: "Orders",
     aggregates: [makeOrderAggregate()],
-    enums: [
-      { name: "OrderStatus", values: ["Draft", "Confirmed", "Shipped"] },
-    ],
+    enums: [{ name: "OrderStatus", values: ["Draft", "Confirmed", "Shipped"] }],
     valueObjects: [],
     repositories: [],
     workflows: [],
@@ -334,15 +329,9 @@ describe("Slice C1 — scaffold expander dispatch", () => {
   });
 
   it("workflows-index / views-index / home all expand to Stack(...) bodies", () => {
-    expect(
-      expandScaffoldToExplicitBody({ kind: "workflows-index" }, ctx)?.kind,
-    ).toBe("call");
-    expect(
-      expandScaffoldToExplicitBody({ kind: "views-index" }, ctx)?.kind,
-    ).toBe("call");
-    expect(expandScaffoldToExplicitBody({ kind: "home" }, ctx)?.kind).toBe(
-      "call",
-    );
+    expect(expandScaffoldToExplicitBody({ kind: "workflows-index" }, ctx)?.kind).toBe("call");
+    expect(expandScaffoldToExplicitBody({ kind: "views-index" }, ctx)?.kind).toBe("call");
+    expect(expandScaffoldToExplicitBody({ kind: "home" }, ctx)?.kind).toBe("call");
   });
 
   it("returns null when the aggregate isn't in the context map", () => {

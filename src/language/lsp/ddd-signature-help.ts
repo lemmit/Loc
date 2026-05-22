@@ -1,20 +1,15 @@
-import { type LangiumServices, type SignatureHelpProvider } from "langium/lsp";
-import {
-  CstUtils,
-  type AstNode,
-  type LangiumDocument,
-  type MaybePromise,
-} from "langium";
+import { type AstNode, CstUtils, type LangiumDocument, type MaybePromise } from "langium";
+import type { LangiumServices, SignatureHelpProvider } from "langium/lsp";
 import type {
   SignatureHelp,
   SignatureHelpOptions,
   SignatureHelpParams,
 } from "vscode-languageserver";
 import {
-  isCallExpr,
-  isMemberAccess,
   type CallArg,
   type CallExpr,
+  isCallExpr,
+  isMemberAccess,
   type MemberAccess,
 } from "../generated/ast.js";
 import { calleeSignature } from "../type-system.js";

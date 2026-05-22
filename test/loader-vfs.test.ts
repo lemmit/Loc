@@ -1,11 +1,10 @@
-import { describe, it, expect, beforeAll } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-
-import { MemoryVfs } from "../web/src/vfs/memory-vfs.js";
-import { setWorkerVfs } from "../web/src/build/worker-vfs.js";
+import { beforeAll, describe, expect, it } from "vitest";
 import { loadPack, resolvePackDir } from "../web/src/build/loader-vfs.js";
+import { setWorkerVfs } from "../web/src/build/worker-vfs.js";
+import { MemoryVfs } from "../web/src/vfs/memory-vfs.js";
 
 // ---------------------------------------------------------------------------
 // `loader-vfs.ts` is the browser fs-adapter analogue of `loader-fs.ts`.
@@ -105,9 +104,7 @@ describe("resolvePackDir: paths", () => {
   });
 
   it("anchors relative paths to referenceDir", () => {
-    expect(resolvePackDir("./design/foo", "/workspace/sub")).toBe(
-      "/workspace/sub/design/foo",
-    );
+    expect(resolvePackDir("./design/foo", "/workspace/sub")).toBe("/workspace/sub/design/foo");
   });
 
   it("defaults referenceDir to /workspace", () => {
@@ -115,9 +112,7 @@ describe("resolvePackDir: paths", () => {
   });
 
   it("collapses `..` in relative paths", () => {
-    expect(resolvePackDir("../packs/foo", "/workspace/sub/sub2")).toBe(
-      "/workspace/sub/packs/foo",
-    );
+    expect(resolvePackDir("../packs/foo", "/workspace/sub/sub2")).toBe("/workspace/sub/packs/foo");
   });
 
   it("rejects user-pack names that collide with built-ins (built-ins win)", () => {

@@ -16,11 +16,11 @@
 // referencing `{count}`, and the onClick lambda emitting
 // `setCount(count + 1)`.
 
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
-import { generateSystems } from "../src/system/index.js";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
+import { generateSystems } from "../src/system/index.js";
 
 async function buildAndGenerate(src: string): Promise<Map<string, string>> {
   const services = createDddServices(NodeFileSystem);
@@ -59,9 +59,7 @@ describe("Slice 11.7 — state + onClick mutations in walker pages", () => {
     expect(content).toBeDefined();
     // useState import + per-field declaration.
     expect(content).toMatch(/import \{ useState \} from "react";/);
-    expect(content).toMatch(
-      /const \[count, setCount\] = useState<number>\(0\);/,
-    );
+    expect(content).toMatch(/const \[count, setCount\] = useState<number>\(0\);/);
     // Body refs render as JSX expressions.
     expect(content).toMatch(/<Text>\{count\}<\/Text>/);
     // onClick lambda block lowers `count := count + 1` →
@@ -123,9 +121,7 @@ describe("Slice 11.7 — state + onClick mutations in walker pages", () => {
       }
     `);
     const content = files.get("web/src/pages/greet.tsx")!;
-    expect(content).toMatch(
-      /const \[who, setWho\] = useState<string>\(""\);/,
-    );
+    expect(content).toMatch(/const \[who, setWho\] = useState<string>\(""\);/);
     expect(content).toMatch(/setWho\("world"\);/);
   });
 
@@ -153,9 +149,7 @@ describe("Slice 11.7 — state + onClick mutations in walker pages", () => {
       }
     `);
     const content = files.get("web/src/pages/toggle.tsx")!;
-    expect(content).toMatch(
-      /const \[open, setOpen\] = useState<boolean>\(true\);/,
-    );
+    expect(content).toMatch(/const \[open, setOpen\] = useState<boolean>\(true\);/);
     expect(content).toMatch(/setOpen\(false\);/);
   });
 

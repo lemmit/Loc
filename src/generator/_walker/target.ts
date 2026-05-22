@@ -129,7 +129,10 @@ export interface WalkerTarget {
    *  Elixir `alias Path.To.Module` / `import Path.To.Module` lines.
    *  `decls` is the UI-level import declarations; `used` is the
    *  subset the walker actually encountered. */
-  renderHelperImports(used: ReadonlySet<string>, decls: ReadonlyArray<{ name: string; path: string }>): string[];
+  renderHelperImports(
+    used: ReadonlySet<string>,
+    decls: ReadonlyArray<{ name: string; path: string }>,
+  ): string[];
 
   // --- Match expression seam ----------------------------------------------
 
@@ -138,7 +141,10 @@ export interface WalkerTarget {
    *  is the `else` branch's pre-rendered value, or undefined.
    *  TSX returns chained ternary (`a ? b : c ? d : fallback`);
    *  HEEx returns a `<%= cond do … end %>` block. */
-  renderMatch(arms: ReadonlyArray<{ predicate: string; value: string }>, elseArm: string | undefined): string;
+  renderMatch(
+    arms: ReadonlyArray<{ predicate: string; value: string }>,
+    elseArm: string | undefined,
+  ): string;
 
   // --- Navigation seam ----------------------------------------------------
 
@@ -149,7 +155,10 @@ export interface WalkerTarget {
    *  into the route.  `routeTemplate` is the target page's route
    *  with `:param` placeholders; `args` is the rendered argument
    *  map. */
-  renderNavigate(routeTemplate: string, args: ReadonlyArray<{ name: string; value: string }>): string;
+  renderNavigate(
+    routeTemplate: string,
+    args: ReadonlyArray<{ name: string; value: string }>,
+  ): string;
 
   // --- Type-default seam --------------------------------------------------
 

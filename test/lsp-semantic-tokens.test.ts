@@ -1,6 +1,6 @@
-import { describe, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
-import { highlightHelper, expectSemanticToken } from "langium/test";
+import { expectSemanticToken, highlightHelper } from "langium/test";
+import { describe, it } from "vitest";
 import { SemanticTokenTypes } from "vscode-languageserver";
 import { createDddServices } from "../src/language/ddd-module.js";
 

@@ -1,8 +1,4 @@
-import type {
-  CallArg,
-  Expression,
-  MemberAccess,
-} from "../generated/ast.js";
+import type { CallArg, Expression, MemberAccess } from "../generated/ast.js";
 
 // ---------------------------------------------------------------------------
 // AST → `.ddd` source printer for expressions.
@@ -85,9 +81,7 @@ function printArgs(args: CallArg[]): string {
     .join(", ");
 }
 
-function printObjectFields(
-  fields: { name: string; value: Expression }[],
-): string {
+function printObjectFields(fields: { name: string; value: Expression }[]): string {
   if (fields.length === 0) return "";
   const inner = fields.map((f) => `${f.name}: ${printExpr(f.value)}`).join(", ");
   return ` ${inner} `;

@@ -9,14 +9,14 @@
 // (byte-equivalence guarantee, exercised separately by
 // `test/page-emitter-equivalence.test.ts`).
 
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
-import { lowerModel } from "../src/ir/lower.js";
-import { enrichLoomModel } from "../src/ir/enrichments.js";
+import { describe, expect, it } from "vitest";
 import { deriveSidebarFromUi } from "../src/generator/react/menu-emitter.js";
+import { enrichLoomModel } from "../src/ir/enrichments.js";
+import type { LoomModel, UiIR } from "../src/ir/loom-ir.js";
+import { lowerModel } from "../src/ir/lower.js";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
-import type { LoomModel, UiIR } from "../src/ir/loom-ir.js";
 
 async function buildLoom(src: string): Promise<LoomModel> {
   const { parseHelper } = await import("langium/test");
@@ -79,7 +79,7 @@ describe("menu emitter (Slice 6)", () => {
     expect(sales.entries).toHaveLength(2);
     expect(sales.entries[0]!.to).toBe("/orders");
     expect(sales.entries[0]!.testId).toBe("nav-orders");
-    expect(sales.entries[0]!.activeArgs).toBe("\"/orders\"");
+    expect(sales.entries[0]!.activeArgs).toBe('"/orders"');
     expect(sales.entries[1]!.to).toBe("/orders/:id");
     // Aggregate-detail testid suffix matches the menu emitter's
     // contract (`nav-<plural>-detail`).

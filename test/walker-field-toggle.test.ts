@@ -22,11 +22,11 @@
 //              checked={active}
 //              onChange={(e) => setActive(e.currentTarget.checked)} />
 
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
-import { generateSystems } from "../src/system/index.js";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
+import { generateSystems } from "../src/system/index.js";
 
 async function buildAndGenerate(src: string): Promise<Map<string, string>> {
   const services = createDddServices(NodeFileSystem);
@@ -61,9 +61,7 @@ describe("Slice 11.14 — Field + Toggle with bind: state binding", () => {
     expect(content).toBeDefined();
     expect(content).toMatch(/import \{ TextInput \} from "@mantine\/core";/);
     // useState declaration emitted (bind: triggered usesState).
-    expect(content).toMatch(
-      /const \[name, setName\] = useState<string>\(""\);/,
-    );
+    expect(content).toMatch(/const \[name, setName\] = useState<string>\(""\);/);
     expect(content).toMatch(
       /<TextInput label="Your name" value=\{name\} onChange=\{\(e\) => setName\(e\.currentTarget\.value\)\} \/>/,
     );
@@ -91,9 +89,7 @@ describe("Slice 11.14 — Field + Toggle with bind: state binding", () => {
     `);
     const content = files.get("web/src/pages/pref.tsx")!;
     expect(content).toMatch(/import \{ Switch \} from "@mantine\/core";/);
-    expect(content).toMatch(
-      /const \[active, setActive\] = useState<boolean>\(false\);/,
-    );
+    expect(content).toMatch(/const \[active, setActive\] = useState<boolean>\(false\);/);
     expect(content).toMatch(
       /<Switch label="Active" checked=\{active\} onChange=\{\(e\) => setActive\(e\.currentTarget\.checked\)\} \/>/,
     );
@@ -194,8 +190,6 @@ describe("Slice 11.14 — Field + Toggle with bind: state binding", () => {
     `);
     const content = files.get("web/src/pages/x.tsx")!;
     // Label slot accepts binary op as JSX expr.
-    expect(content).toMatch(
-      /<TextInput label=\{\(kind \+ ":"\)\} value=\{v\}/,
-    );
+    expect(content).toMatch(/<TextInput label=\{\(kind \+ ":"\)\} value=\{v\}/);
   });
 });

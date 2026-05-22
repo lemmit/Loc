@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Backend-packages layering invariant (B2.1, see
@@ -17,10 +17,7 @@ import { fileURLToPath } from "node:url";
 // and foreclose a future per-backend packaging split.
 // ---------------------------------------------------------------------------
 
-const repoRoot = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "..",
-);
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const generatorDir = path.join(repoRoot, "src", "generator");
 
 function tsFiles(dir: string): string[] {

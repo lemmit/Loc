@@ -31,9 +31,7 @@ export type RouterPackage = "react-router" | "react-router-dom";
 /** The npm package name to import React Router APIs from for the
  *  given stack id.  `undefined` (custom packs without a stack) and
  *  every pre-v3 stack resolve to `react-router-dom`. */
-export function routerPackageForStack(
-  stackId: string | undefined,
-): RouterPackage {
+export function routerPackageForStack(stackId: string | undefined): RouterPackage {
   return stackId !== undefined && ROUTER_V7_STACKS.has(stackId)
     ? "react-router"
     : "react-router-dom";

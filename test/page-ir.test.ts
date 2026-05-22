@@ -9,13 +9,13 @@
 // land in Slice 3; the per-target generator (Slice 5) consumes the
 // page IR.  These tests cover only what Slice 2 produces.
 
-import { describe, expect, it } from "vitest";
-import { NodeFileSystem } from "langium/node";
 import { URI } from "langium";
+import { NodeFileSystem } from "langium/node";
+import { describe, expect, it } from "vitest";
+import type { ExprIR, LoomModel, PageIR, UiIR } from "../src/ir/loom-ir.js";
 import { lowerModel } from "../src/ir/lower.js";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
-import type { ExprIR, LoomModel, PageIR, UiIR } from "../src/ir/loom-ir.js";
 
 async function buildLoom(src: string): Promise<LoomModel> {
   const { parseHelper } = await import("langium/test");
@@ -87,9 +87,7 @@ describe("page metamodel — IR shape (Slice 2)", () => {
       }
     `);
     const ui = uiByName(loom, "WebApp");
-    expect(ui.scaffolds).toEqual([
-      { selector: "modules", targets: ["M"] },
-    ]);
+    expect(ui.scaffolds).toEqual([{ selector: "modules", targets: ["M"] }]);
     // Pages were synthesised at AST time — by the time lowering
     // runs, they're already on the ui's members.
     const pageNames = ui.pages.map((p) => p.name).sort();
@@ -132,10 +130,7 @@ describe("page metamodel — IR shape (Slice 2)", () => {
       expect(page.body.args).toHaveLength(1);
       expect(page.body.argNames).toEqual(["of"]);
     }
-    expect(page.menuMeta?.entries.map((e) => e.name)).toEqual([
-      "section",
-      "label",
-    ]);
+    expect(page.menuMeta?.entries.map((e) => e.name)).toEqual(["section", "label"]);
   });
 
   it("lowers a page with parameters (typed) — including `id` as a param name", async () => {
@@ -237,9 +232,7 @@ describe("page metamodel — IR shape (Slice 2)", () => {
     expect(main!.label).toBe("Main");
     expect(main!.links).toHaveLength(2);
     expect(main!.links[0]).toMatchObject({ kind: "page", pageName: "Home" });
-    expect((main!.links[0] as { props: { name: string }[] }).props[0]!.name).toBe(
-      "label",
-    );
+    expect((main!.links[0] as { props: { name: string }[] }).props[0]!.name).toBe("label");
     expect(main!.links[1]).toMatchObject({ kind: "page", pageName: "Reports" });
     expect(ext!.links[0]).toMatchObject({
       kind: "external",

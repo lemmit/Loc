@@ -1,5 +1,5 @@
-import type { ComposeServiceShape, PlatformSurface } from "./surface.js";
 import { generatePhoenixLiveViewProject } from "../generator/phoenix-live-view/index.js";
+import type { ComposeServiceShape, PlatformSurface } from "./surface.js";
 
 // ---------------------------------------------------------------------------
 // Phoenix LiveView platform — fullstack Elixir/Ash deployable.

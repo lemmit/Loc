@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
 import { EmptyFileSystem } from "langium";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
 import {
@@ -24,8 +24,10 @@ function deployable(name: string): { $type: string } {
   for (const n of (function* walk(x: { $type: string }): Generator<{ $type: string }> {
     yield x;
     for (const v of Object.values(x)) {
-      if (Array.isArray(v)) for (const c of v) if (c && typeof c === "object" && "$type" in c) yield* walk(c);
-      else if (v && typeof v === "object" && "$type" in v) yield* walk(v as { $type: string });
+      if (Array.isArray(v))
+        for (const c of v)
+          if (c && typeof c === "object" && "$type" in c) yield* walk(c);
+          else if (v && typeof v === "object" && "$type" in v) yield* walk(v as { $type: string });
     }
   })(m)) {
     if (n.$type === "Deployable" && (n as { name?: string }).name === name) return n;
@@ -49,7 +51,9 @@ describe("System builder — deployable bindings", () => {
     expect(out).toMatch(/CustomerMgmt\s*\{ primary: primarySql \}/);
     expect(out).toMatch(/Sales/);
     // Removing down to one keeps its storage map.
-    expect(setDeployableModules(acme, "catalogWeb", ["Catalog"])).toMatch(/modules: Catalog \{ primary: primarySql \}/);
+    expect(setDeployableModules(acme, "catalogWeb", ["Catalog"])).toMatch(
+      /modules: Catalog \{ primary: primarySql \}/,
+    );
   });
 
   it("edits serves and targets", () => {

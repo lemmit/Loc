@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { makePreviewHtml } from "../web/src/preview/iframe-html.js";
 
@@ -64,11 +64,11 @@ describe("iframe-html — Tailwind v4 path (shadcn@v4)", () => {
     expect(html).not.toMatch(/tailwind\.config\s*=/);
   });
 
-  it("keeps `@import \"tailwindcss\"` for the browser runtime to resolve", () => {
+  it('keeps `@import "tailwindcss"` for the browser runtime to resolve', () => {
     expect(html).toContain('@import "tailwindcss"');
   });
 
-  it("strips the unresolvable `@import \"tw-animate-css\"`", () => {
+  it('strips the unresolvable `@import "tw-animate-css"`', () => {
     // `@tailwindcss/browser` can't fetch the bare third-party
     // specifier — leaving it in errors the whole compile.
     expect(html).not.toContain("tw-animate-css");

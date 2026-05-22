@@ -22,19 +22,12 @@ import { renderCsType } from "./render-expr.js";
 // expressions that gate command entry against currentUser claims.
 // ---------------------------------------------------------------------------
 
-export function emitAuthFiles(
-  sys: SystemIR,
-  ns: string,
-  out: Map<string, string>,
-): void {
+export function emitAuthFiles(sys: SystemIR, ns: string, out: Map<string, string>): void {
   if (!sys.user) return;
   out.set("Auth/User.cs", renderUserRecord(sys.user, ns));
   out.set("Auth/IUserVerifier.cs", renderVerifierInterface(ns));
   out.set("Auth/ICurrentUserAccessor.cs", renderAccessorInterface(ns));
-  out.set(
-    "Auth/HttpContextCurrentUserAccessor.cs",
-    renderAccessorImpl(ns),
-  );
+  out.set("Auth/HttpContextCurrentUserAccessor.cs", renderAccessorImpl(ns));
   out.set("Auth/UserMiddleware.cs", renderMiddleware(ns));
 }
 

@@ -1,8 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { NodeFileSystem } from "langium/node";
-import { URI } from "langium";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { URI } from "langium";
+import { NodeFileSystem } from "langium/node";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
 
@@ -61,11 +61,9 @@ describe("parsing & validation of examples", () => {
       `,
       { validation: true },
     );
-    expect(
-      (doc.diagnostics ?? [])
-        .filter((d) => d.severity === 1)
-        .map((d) => d.message),
-    ).toEqual([]);
+    expect((doc.diagnostics ?? []).filter((d) => d.severity === 1).map((d) => d.message)).toEqual(
+      [],
+    );
     const ctx = (doc.parseResult.value as Model).members[0] as
       | import("../src/language/generated/ast.js").BoundedContext
       | undefined;
@@ -108,11 +106,9 @@ describe("parsing & validation of examples", () => {
       `,
       { validation: true },
     );
-    expect(
-      (doc.diagnostics ?? [])
-        .filter((d) => d.severity === 1)
-        .map((d) => d.message),
-    ).toEqual([]);
+    expect((doc.diagnostics ?? []).filter((d) => d.severity === 1).map((d) => d.message)).toEqual(
+      [],
+    );
     const ctx = (doc.parseResult.value as Model).members[0] as
       | import("../src/language/generated/ast.js").BoundedContext
       | undefined;
@@ -153,11 +149,9 @@ describe("parsing & validation of examples", () => {
       `,
       { validation: true },
     );
-    expect(
-      (doc.diagnostics ?? [])
-        .filter((d) => d.severity === 1)
-        .map((d) => d.message),
-    ).toEqual([]);
+    expect((doc.diagnostics ?? []).filter((d) => d.severity === 1).map((d) => d.message)).toEqual(
+      [],
+    );
     const sys = (doc.parseResult.value as Model).members[0] as
       | import("../src/language/generated/ast.js").System
       | undefined;
@@ -165,11 +159,7 @@ describe("parsing & validation of examples", () => {
       | import("../src/language/generated/ast.js").UserBlock
       | undefined;
     expect(userBlock).toBeDefined();
-    expect(userBlock!.fields.map((f) => f.name)).toEqual([
-      "id",
-      "role",
-      "tenantId",
-    ]);
+    expect(userBlock!.fields.map((f) => f.name)).toEqual(["id", "role", "tenantId"]);
     const api = sys!.members.find(
       (m): m is import("../src/language/generated/ast.js").Deployable =>
         m.$type === "Deployable" && m.name === "api",
@@ -204,11 +194,9 @@ describe("parsing & validation of examples", () => {
       `,
       { validation: true },
     );
-    expect(
-      (doc.diagnostics ?? [])
-        .filter((d) => d.severity === 1)
-        .map((d) => d.message),
-    ).toEqual([]);
+    expect((doc.diagnostics ?? []).filter((d) => d.severity === 1).map((d) => d.message)).toEqual(
+      [],
+    );
   });
 
   it("parses per-module `permissions { ... }` blocks", async () => {
@@ -236,11 +224,9 @@ describe("parsing & validation of examples", () => {
       `,
       { validation: true },
     );
-    expect(
-      (doc.diagnostics ?? [])
-        .filter((d) => d.severity === 1)
-        .map((d) => d.message),
-    ).toEqual([]);
+    expect((doc.diagnostics ?? []).filter((d) => d.severity === 1).map((d) => d.message)).toEqual(
+      [],
+    );
     const sys = (doc.parseResult.value as Model).members[0] as
       | import("../src/language/generated/ast.js").System
       | undefined;
@@ -270,9 +256,7 @@ describe("parsing & validation of examples", () => {
 // See docs/page-metamodel.md and /root/.claude/plans/yes-make-full-plan-tingly-sunbeam.md.
 // ---------------------------------------------------------------------------
 
-async function parseSnippet(
-  src: string,
-): Promise<{ errors: string[]; model: Model }> {
+async function parseSnippet(src: string): Promise<{ errors: string[]; model: Model }> {
   // Slice 1 is grammar-only — no IR / validator support for the new
   // constructs yet.  We disable validation so these tests fail iff
   // the parser rejects the input (which is what we're testing).  The
@@ -569,11 +553,9 @@ describe("page metamodel — grammar smoke tests (Slice 1)", () => {
       `,
       { validation: true },
     );
-    expect(
-      (doc.diagnostics ?? [])
-        .filter((d) => d.severity === 1)
-        .map((d) => d.message),
-    ).toEqual([]);
+    expect((doc.diagnostics ?? []).filter((d) => d.severity === 1).map((d) => d.message)).toEqual(
+      [],
+    );
 
     const members = (doc.parseResult.value as Model).members;
     const sol = members.find((m) => m.$type === "Solution") as
@@ -600,9 +582,9 @@ describe("page metamodel — grammar smoke tests (Slice 1)", () => {
       `,
       { validation: true },
     );
-    expect(
-      (doc.diagnostics ?? []).filter((d) => d.severity === 1).map((d) => d.message),
-    ).toEqual([]);
+    expect((doc.diagnostics ?? []).filter((d) => d.severity === 1).map((d) => d.message)).toEqual(
+      [],
+    );
     const sol = (doc.parseResult.value as Model).members.find(
       (m) => m.$type === "Solution",
     ) as import("../src/language/generated/ast.js").Solution;
@@ -626,9 +608,7 @@ describe("page metamodel — grammar smoke tests (Slice 1)", () => {
       `,
       { validation: true },
     );
-    const messages = (doc.diagnostics ?? [])
-      .filter((d) => d.severity === 1)
-      .map((d) => d.message);
+    const messages = (doc.diagnostics ?? []).filter((d) => d.severity === 1).map((d) => d.message);
     expect(messages.some((m) => m.includes("nonexistent"))).toBe(true);
   });
 });

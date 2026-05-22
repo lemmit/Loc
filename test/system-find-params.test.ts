@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
 import { EmptyFileSystem } from "langium";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
 import {
@@ -24,8 +24,10 @@ function repo(m: Model): import("../src/language/generated/ast.js").Repository {
   for (const n of (function* walk(x: { $type: string }): Generator<{ $type: string }> {
     yield x;
     for (const v of Object.values(x)) {
-      if (Array.isArray(v)) for (const c of v) if (c && typeof c === "object" && "$type" in c) yield* walk(c);
-      else if (v && typeof v === "object" && "$type" in v) yield* walk(v as { $type: string });
+      if (Array.isArray(v))
+        for (const c of v)
+          if (c && typeof c === "object" && "$type" in c) yield* walk(c);
+          else if (v && typeof v === "object" && "$type" in v) yield* walk(v as { $type: string });
     }
   })(m)) {
     if (n.$type === "Repository" && (n as { name?: string }).name === "Orders") return n as never;
@@ -37,18 +39,40 @@ describe("System builder — repository find params", () => {
   it("lists finds and their params", () => {
     expect(listFinds(repo(parse(sales)))).toEqual(["byCustomer", "activeForCustomer"]);
     const params = listFindParams(parse(sales), "Orders", "activeForCustomer");
-    expect(params).toEqual([{ name: "forCustomer", base: { kind: "id", target: "Customer" }, baseLabel: "Id<Customer>", array: false, optional: false }]);
+    expect(params).toEqual([
+      {
+        name: "forCustomer",
+        base: { kind: "id", target: "Customer" },
+        baseLabel: "Id<Customer>",
+        array: false,
+        optional: false,
+      },
+    ]);
   });
 
   it("reads the return type", () => {
-    expect(findReturnSpec(parse(sales), "Orders", "byCustomer")).toEqual({ base: { kind: "named", target: "Order" }, array: true, optional: false });
+    expect(findReturnSpec(parse(sales), "Orders", "byCustomer")).toEqual({
+      base: { kind: "named", target: "Order" },
+      array: true,
+      optional: false,
+    });
   });
 
   it("adds, retypes, and deletes a param", () => {
-    expect(addFindParam(sales, "Orders", "byCustomer", "since", { base: { kind: "primitive", name: "datetime" }, array: false, optional: false }))
-      .toMatch(/find byCustomer\(customerId: Id<Customer>, since: datetime\)/);
-    expect(retypeFindParam(sales, "Orders", "byCustomer", 0, { base: { kind: "primitive", name: "string" }, array: false, optional: false }))
-      .toMatch(/find byCustomer\(customerId: string\)/);
+    expect(
+      addFindParam(sales, "Orders", "byCustomer", "since", {
+        base: { kind: "primitive", name: "datetime" },
+        array: false,
+        optional: false,
+      }),
+    ).toMatch(/find byCustomer\(customerId: Id<Customer>, since: datetime\)/);
+    expect(
+      retypeFindParam(sales, "Orders", "byCustomer", 0, {
+        base: { kind: "primitive", name: "string" },
+        array: false,
+        optional: false,
+      }),
+    ).toMatch(/find byCustomer\(customerId: string\)/);
     expect(deleteFindParam(sales, "Orders", "byCustomer", 0)).toMatch(/find byCustomer\(\)/);
   });
 
@@ -59,8 +83,13 @@ describe("System builder — repository find params", () => {
   });
 
   it("edits the return type", () => {
-    expect(setFindReturnType(sales, "Orders", "byCustomer", { base: { kind: "named", target: "Order" }, array: false, optional: false }))
-      .toMatch(/find byCustomer\(customerId: Id<Customer>\): Order\b/);
+    expect(
+      setFindReturnType(sales, "Orders", "byCustomer", {
+        base: { kind: "named", target: "Order" },
+        array: false,
+        optional: false,
+      }),
+    ).toMatch(/find byCustomer\(customerId: Id<Customer>\): Order\b/);
   });
 
   it("returns null for unknown repo / find / index", () => {

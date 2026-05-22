@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
 import { NodeFileSystem } from "langium/node";
 import { expectHover } from "langium/test";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 
 // ---------------------------------------------------------------------------

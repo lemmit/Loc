@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { describe, expect, it } from "vitest";
 
 import { loadPack, resolvePackDir } from "../src/generator/_packs/loader-fs.js";
 
@@ -14,10 +14,7 @@ import { loadPack, resolvePackDir } from "../src/generator/_packs/loader-fs.js";
 // shellFiles produce a clear error, glob captures expand correctly).
 // ---------------------------------------------------------------------------
 
-function makePack(
-  manifest: object,
-  files: Record<string, string>,
-): string {
+function makePack(manifest: object, files: Record<string, string>): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-pack-"));
   fs.writeFileSync(path.join(dir, "pack.json"), JSON.stringify(manifest));
   for (const [name, body] of Object.entries(files)) {

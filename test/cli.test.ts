@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest";
 import { execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");
@@ -37,11 +37,7 @@ describe("CLI", () => {
 
   it("`.loomignore` filters paths from the write set", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "loom-pin-"));
-    fs.writeFileSync(
-      path.join(tmp, ".loomignore"),
-      "package.json\n/index.ts\n",
-      "utf8",
-    );
+    fs.writeFileSync(path.join(tmp, ".loomignore"), "package.json\n/index.ts\n", "utf8");
     const result = runCli(["generate", "ts", example, "-o", tmp]);
     expect(result.status).toBe(0);
     expect(result.stdout).toMatch(/skipped \(\.loomignore\): 2/);

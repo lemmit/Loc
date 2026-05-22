@@ -1,16 +1,16 @@
-import { describe, expect, it } from "vitest";
-import { NodeFileSystem } from "langium/node";
-import { URI } from "langium";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createDddServices } from "../src/language/ddd-module.js";
-import { generateSystems } from "../src/system/index.js";
-import type { Model } from "../src/language/generated/ast.js";
+import { URI } from "langium";
+import { NodeFileSystem } from "langium/node";
+import { describe, expect, it } from "vitest";
 import { emitApiControllers } from "../src/generator/phoenix-live-view/api-emit.js";
 import { emitAggregateResources } from "../src/generator/phoenix-live-view/domain-emit.js";
 import type { BoundedContextIR, DeployableIR, SystemIR } from "../src/ir/loom-ir.js";
+import { createDddServices } from "../src/language/ddd-module.js";
+import type { Model } from "../src/language/generated/ast.js";
+import { generateSystems } from "../src/system/index.js";
 
 // ---------------------------------------------------------------------------
 // Phase 9 — phoenixLiveView pipeline integration test.
@@ -70,18 +70,14 @@ async function buildFixture(): Promise<Model> {
   const file = path.join(dir, "mini.ddd");
   fs.writeFileSync(file, FIXTURE_SOURCE);
   const services = createDddServices(NodeFileSystem);
-  const doc =
-    await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
-      URI.file(file),
-    );
+  const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(URI.file(file));
   await services.shared.workspace.DocumentBuilder.build([doc], {
     validation: true,
   });
   const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
   if (errors.length > 0) {
     throw new Error(
-      `Validation errors in fixture:\n` +
-        errors.map((e) => `  ${e.message}`).join("\n"),
+      `Validation errors in fixture:\n` + errors.map((e) => `  ${e.message}`).join("\n"),
     );
   }
   return doc.parseResult.value as Model;
@@ -157,16 +153,14 @@ describe("phoenixLiveView pipeline (Phases 1-8)", () => {
     // the CoreComponents module must define `modal` + the JS helpers.
     const model = await buildFixture();
     const { files } = generateSystems(model);
-    const detail = files.get(
-      "phoenix_app/lib/phoenix_app_web/live/customer_detail_live.ex",
-    )!;
+    const detail = files.get("phoenix_app/lib/phoenix_app_web/live/customer_detail_live.ex")!;
     expect(detail, "detail LiveView is emitted").toBeDefined();
 
     // (a) record load + idiomatic not-found/error mapping.
+    expect(detail).toMatch(/record = PhoenixApp\.Sales\.get_customer!\(socket\.assigns\.id\)/);
     expect(detail).toMatch(
-      /record = PhoenixApp\.Sales\.get_customer!\(socket\.assigns\.id\)/,
+      /rescue\n\s*Ash\.Error\.Query\.NotFound -> assign\(socket, :data, :not_found\)/,
     );
-    expect(detail).toMatch(/rescue\n\s*Ash\.Error\.Query\.NotFound -> assign\(socket, :data, :not_found\)/);
     expect(detail).toMatch(/Ash\.Error\.Invalid -> assign\(socket, :data, :error\)/);
 
     // (b) operation form bound to the loaded record.
@@ -181,12 +175,16 @@ describe("phoenixLiveView pipeline (Phases 1-8)", () => {
     expect(detail).toMatch(
       /def handle_event\("submit_adjust_credit", %\{"adjust_credit" => params\}, socket\)/,
     );
-    expect(detail).toMatch(/AshPhoenix\.Form\.submit\(socket\.assigns\.adjust_credit_form, params: params\)/);
+    expect(detail).toMatch(
+      /AshPhoenix\.Form\.submit\(socket\.assigns\.adjust_credit_form, params: params\)/,
+    );
 
     // (d) modal + trigger in the rendered HEEx.
     expect(detail).toMatch(/<\.modal id="customer-op-adjust_credit-modal">/);
     expect(detail).toMatch(/show_modal\("customer-op-adjust_credit-modal"\)/);
-    expect(detail).toMatch(/<\.simple_form for=\{@adjust_credit_form\} phx-change="validate_adjust_credit" phx-submit="submit_adjust_credit">/);
+    expect(detail).toMatch(
+      /<\.simple_form for=\{@adjust_credit_form\} phx-change="validate_adjust_credit" phx-submit="submit_adjust_credit">/,
+    );
 
     // 4-way cond now distinguishes not-found (empty) from error.
     expect(detail).toMatch(/<% @data == :not_found -> %>/);
@@ -200,9 +198,7 @@ describe("phoenixLiveView pipeline (Phases 1-8)", () => {
     expect(detail).toMatch(/@data\.credit_limit\.currency/);
 
     // CoreComponents gains the modal component + JS helpers.
-    const core = files.get(
-      "phoenix_app/lib/phoenix_app_web/components/core_components.ex",
-    )!;
+    const core = files.get("phoenix_app/lib/phoenix_app_web/components/core_components.ex")!;
     expect(core).toMatch(/alias Phoenix\.LiveView\.JS/);
     expect(core).toMatch(/def modal\(assigns\) do/);
     expect(core).toMatch(/def show_modal\(js \\\\ %JS\{\}, id\)/);
@@ -241,17 +237,14 @@ describe("phoenixLiveView pipeline (Phases 1-8)", () => {
     const file = path.join(dir, "bad.ddd");
     fs.writeFileSync(file, src);
     const services = createDddServices(NodeFileSystem);
-    const doc =
-      await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
-        URI.file(file),
-      );
+    const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
+      URI.file(file),
+    );
     await services.shared.workspace.DocumentBuilder.build([doc], {
       validation: true,
     });
     const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
-    expect(
-      errors.some((e) => /'targets:'/.test(e.message)),
-    ).toBe(true);
+    expect(errors.some((e) => /'targets:'/.test(e.message))).toBe(true);
   });
 
   it("rejects platform: phoenixLiveView paired with framework: react", async () => {
@@ -259,23 +252,22 @@ describe("phoenixLiveView pipeline (Phases 1-8)", () => {
     const file = path.join(dir, "fw.ddd");
     fs.writeFileSync(
       file,
-      FIXTURE_SOURCE.replace(
-        "ui: SalesAdmin,",
-        `ui SalesAdmin { framework: react }`,
-      ).replace("port: 4000", ""),
+      FIXTURE_SOURCE.replace("ui: SalesAdmin,", `ui SalesAdmin { framework: react }`).replace(
+        "port: 4000",
+        "",
+      ),
     );
     const services = createDddServices(NodeFileSystem);
-    const doc =
-      await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
-        URI.file(file),
-      );
+    const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
+      URI.file(file),
+    );
     await services.shared.workspace.DocumentBuilder.build([doc], {
       validation: true,
     });
     const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
     expect(
-      errors.some(
-        (e) => /Framework 'react' does not match platform 'phoenixLiveView'/.test(e.message),
+      errors.some((e) =>
+        /Framework 'react' does not match platform 'phoenixLiveView'/.test(e.message),
       ),
     ).toBe(true);
   });
@@ -624,7 +616,11 @@ describe("E4 — JWT auth emission (auth-emit unit)", () => {
       user: {
         fields: [
           { name: "id", type: { kind: "primitive", name: "guid" }, optional: false },
-          { name: "permissions", type: { kind: "array", element: { kind: "primitive", name: "string" } }, optional: false },
+          {
+            name: "permissions",
+            type: { kind: "array", element: { kind: "primitive", name: "string" } },
+            optional: false,
+          },
           { name: "email", type: { kind: "primitive", name: "string" }, optional: false },
         ],
       },
@@ -695,18 +691,16 @@ describe("E4 — router wiring (orchestrator integration)", () => {
     const file = path.join(dir, "auth.ddd");
     fs.writeFileSync(file, AUTH_FIXTURE);
     const services = createDddServices(NodeFileSystem);
-    const doc =
-      await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
-        URI.file(file),
-      );
+    const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
+      URI.file(file),
+    );
     await services.shared.workspace.DocumentBuilder.build([doc], {
       validation: true,
     });
     const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
     if (errors.length > 0) {
       throw new Error(
-        `E4 fixture validation errors:\n` +
-          errors.map((e) => `  ${e.message}`).join("\n"),
+        `E4 fixture validation errors:\n` + errors.map((e) => `  ${e.message}`).join("\n"),
       );
     }
     return doc.parseResult.value as Model;
@@ -755,9 +749,7 @@ describe("E4 — router wiring (orchestrator integration)", () => {
 
 describe.skip("Batch C integration (parent wires emitters)", () => {
   it("renderThemeCss produces a :root block with CSS custom properties", async () => {
-    const { renderThemeCss } = await import(
-      "../src/generator/phoenix-live-view/theme-emit.js"
-    );
+    const { renderThemeCss } = await import("../src/generator/phoenix-live-view/theme-emit.js");
     const css = renderThemeCss(undefined);
     expect(css).toMatch(/:root\s*\{/);
     expect(css).toMatch(/--color-brand-6:/);
@@ -789,9 +781,7 @@ describe.skip("Batch C integration (parent wires emitters)", () => {
     const { renderWorkflowFormHeex } = await import(
       "../src/generator/phoenix-live-view/extra-archetype-emit.js"
     );
-    const { loadPack, resolvePackDir } = await import(
-      "../src/generator/_packs/loader-fs.js"
-    );
+    const { loadPack, resolvePackDir } = await import("../src/generator/_packs/loader-fs.js");
     const pack = loadPack(resolvePackDir("ashPhoenix"));
     const ctx = {
       name: "Sales",
@@ -800,7 +790,9 @@ describe.skip("Batch C integration (parent wires emitters)", () => {
       events: [],
       aggregates: [],
       repositories: [],
-      workflows: [{ name: "placeOrder", params: [], transactional: false, statements: [], savesAtExit: [] }],
+      workflows: [
+        { name: "placeOrder", params: [], transactional: false, statements: [], savesAtExit: [] },
+      ],
       views: [],
     };
     const heex = renderWorkflowFormHeex({
@@ -855,8 +847,8 @@ describe.skip("Batch C integration (parent wires emitters)", () => {
 // `platform: phoenixLiveView`.
 // ---------------------------------------------------------------------------
 
-import { lowerModel } from "../src/ir/lower.js";
 import { enrichLoomModel } from "../src/ir/enrichments.js";
+import { lowerModel } from "../src/ir/lower.js";
 import { buildWireSpec } from "../src/system/wire-spec.js";
 
 const ACME_LIVEVIEW_SOURCE = `system AcmeLV {
@@ -914,18 +906,14 @@ async function buildAcmeLiveViewModel(): Promise<Model> {
   const file = path.join(dir, "acme-lv.ddd");
   fs.writeFileSync(file, ACME_LIVEVIEW_SOURCE);
   const services = createDddServices(NodeFileSystem);
-  const doc =
-    await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
-      URI.file(file),
-    );
+  const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(URI.file(file));
   await services.shared.workspace.DocumentBuilder.build([doc], {
     validation: true,
   });
   const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
   if (errors.length > 0) {
     throw new Error(
-      `D3 fixture validation errors:\n` +
-        errors.map((e) => `  ${e.message}`).join("\n"),
+      `D3 fixture validation errors:\n` + errors.map((e) => `  ${e.message}`).join("\n"),
     );
   }
   return doc.parseResult.value as Model;
@@ -935,14 +923,10 @@ describe("D3 — cross-platform OpenAPI parity (phoenix vs wire-spec.json)", () 
   it("Phoenix OpenAPI spec module exists when deployable serves an api", async () => {
     const model = await buildAcmeLiveViewModel();
     const { files } = generateSystems(model);
-    expect(
-      files.has("phoenix_app/lib/phoenix_app_web/api/sales_api_spec.ex"),
-    ).toBe(true);
-    expect(
-      files.has(
-        "phoenix_app/lib/phoenix_app_web/controllers/openapi_controller.ex",
-      ),
-    ).toBe(true);
+    expect(files.has("phoenix_app/lib/phoenix_app_web/api/sales_api_spec.ex")).toBe(true);
+    expect(files.has("phoenix_app/lib/phoenix_app_web/controllers/openapi_controller.ex")).toBe(
+      true,
+    );
     // The router must wire GET /api/openapi.json so clients can fetch it.
     const router = files.get("phoenix_app/lib/phoenix_app_web/router.ex")!;
     expect(router).toMatch(/get\s+"\/openapi\.json",\s*OpenapiController/);
@@ -998,9 +982,7 @@ describe("D3 — cross-platform OpenAPI parity (phoenix vs wire-spec.json)", () 
   it("Workflow + view endpoints surface in the Phoenix OpenAPI paths object", async () => {
     const model = await buildAcmeLiveViewModel();
     const { files } = generateSystems(model);
-    const spec = files.get(
-      "phoenix_app/lib/phoenix_app_web/api/sales_api_spec.ex",
-    )!;
+    const spec = files.get("phoenix_app/lib/phoenix_app_web/api/sales_api_spec.ex")!;
     // placeOrder workflow → POST /workflows/place_order
     expect(spec).toMatch(/"\/workflows\/place_order"/);
     expect(spec).toMatch(/PlaceOrderRequest/);
@@ -1012,9 +994,7 @@ describe("D3 — cross-platform OpenAPI parity (phoenix vs wire-spec.json)", () 
   it("Aggregate CRUD endpoints surface in the paths object", async () => {
     const model = await buildAcmeLiveViewModel();
     const { files } = generateSystems(model);
-    const spec = files.get(
-      "phoenix_app/lib/phoenix_app_web/api/sales_api_spec.ex",
-    )!;
+    const spec = files.get("phoenix_app/lib/phoenix_app_web/api/sales_api_spec.ex")!;
     // GET /aggregates/customers (list) + GET /aggregates/customers/:id (read)
     expect(spec).toMatch(/\/aggregates\/customers/);
     expect(spec).toMatch(/\/aggregates\/orders/);
@@ -1056,9 +1036,7 @@ describe("E6 — full-form view bind projection (view-emit unit)", () => {
       {
         name: "Order",
         idValueType: "guid",
-        fields: [
-          { name: "status", type: { kind: "enum", name: "OrderStatus" }, optional: false },
-        ],
+        fields: [{ name: "status", type: { kind: "enum", name: "OrderStatus" }, optional: false }],
         contains: [],
         derived: [],
         invariants: [],
@@ -1256,7 +1234,7 @@ describe("E2 — Ash 3.x code_interface shape (domain-module unit)", () => {
     expect(domainEx).toMatch(/define :destroy_customer, action: :destroy/);
 
     // MUST NOT emit a top-level `code_interface do` block (Ash 2.x).
-    expect(domainEx).not.toMatch(/^  code_interface do/m);
+    expect(domainEx).not.toMatch(/^ {2}code_interface do/m);
 
     // MUST NOT use the Ash 2.x `define_for` directive.
     expect(domainEx).not.toMatch(/define_for/);
@@ -1421,18 +1399,16 @@ describe("F3 — cross-platform UI parity (test e2e ui against phoenixLiveView)"
     const file = path.join(dir, "acme-ui.ddd");
     fs.writeFileSync(file, ACME_UI_E2E_SOURCE);
     const services = createDddServices(NodeFileSystem);
-    const doc =
-      await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
-        URI.file(file),
-      );
+    const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
+      URI.file(file),
+    );
     await services.shared.workspace.DocumentBuilder.build([doc], {
       validation: true,
     });
     const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
     if (errors.length > 0) {
       throw new Error(
-        `F3 fixture validation errors:\n` +
-          errors.map((e) => `  ${e.message}`).join("\n"),
+        `F3 fixture validation errors:\n` + errors.map((e) => `  ${e.message}`).join("\n"),
       );
     }
     const model = doc.parseResult.value as Model;
@@ -1450,10 +1426,9 @@ describe("F3 — cross-platform UI parity (test e2e ui against phoenixLiveView)"
     const file = path.join(dir, "acme-ui.ddd");
     fs.writeFileSync(file, ACME_UI_E2E_SOURCE);
     const services = createDddServices(NodeFileSystem);
-    const doc =
-      await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
-        URI.file(file),
-      );
+    const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
+      URI.file(file),
+    );
     await services.shared.workspace.DocumentBuilder.build([doc], {
       validation: true,
     });
@@ -1507,10 +1482,7 @@ async function buildFormFixture() {
   const file = path.join(dir, "form-fix.ddd");
   fs.writeFileSync(file, FORM_FIXTURE);
   const services = createDddServices(NodeFileSystem);
-  const doc =
-    await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
-      URI.file(file),
-    );
+  const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(URI.file(file));
   await services.shared.workspace.DocumentBuilder.build([doc], {
     validation: true,
   });
@@ -1522,9 +1494,7 @@ async function buildFormFixture() {
 describe("scaffold-form regression — Form(of:Agg) resolves fields + mount assigns @form", () => {
   it("emits one <.input> per aggregate field (id excluded), not a single _placeholder", async () => {
     const files = await buildFormFixture();
-    const customerNew = files.get(
-      "phoenix_app/lib/phoenix_app_web/live/customer_new_live.ex",
-    )!;
+    const customerNew = files.get("phoenix_app/lib/phoenix_app_web/live/customer_new_live.ex")!;
     expect(customerNew).toBeDefined();
     expect(customerNew).not.toMatch(/@form\[:_placeholder\]/);
     expect(customerNew).toMatch(/@form\[:name\].*?label="Name"/);
@@ -1534,19 +1504,13 @@ describe("scaffold-form regression — Form(of:Agg) resolves fields + mount assi
 
   it("emits type=number step=0.01 for decimal fields", async () => {
     const files = await buildFormFixture();
-    const orderNew = files.get(
-      "phoenix_app/lib/phoenix_app_web/live/order_new_live.ex",
-    )!;
-    expect(orderNew).toMatch(
-      /@form\[:total\].*?type="number".*?step="0\.01"/,
-    );
+    const orderNew = files.get("phoenix_app/lib/phoenix_app_web/live/order_new_live.ex")!;
+    expect(orderNew).toMatch(/@form\[:total\].*?type="number".*?step="0\.01"/);
   });
 
   it("mount/3 assigns @form via AshPhoenix.Form.for_create(<Ctx>.<Agg>, :create)", async () => {
     const files = await buildFormFixture();
-    const customerNew = files.get(
-      "phoenix_app/lib/phoenix_app_web/live/customer_new_live.ex",
-    )!;
+    const customerNew = files.get("phoenix_app/lib/phoenix_app_web/live/customer_new_live.ex")!;
     expect(customerNew).toMatch(
       /assign\(:form, AshPhoenix\.Form\.for_create\(PhoenixApp\.Sales\.Customer, :create\) \|> to_form\(\)\)/,
     );
@@ -1555,9 +1519,7 @@ describe("scaffold-form regression — Form(of:Agg) resolves fields + mount assi
   it("pages with no form do not gain a stray @form assign", async () => {
     const files = await buildFormFixture();
     // The list page has no form binding — its mount stub must stay empty.
-    const customerList = files.get(
-      "phoenix_app/lib/phoenix_app_web/live/customer_list_live.ex",
-    )!;
+    const customerList = files.get("phoenix_app/lib/phoenix_app_web/live/customer_list_live.ex")!;
     expect(customerList).toBeDefined();
     expect(customerList).not.toMatch(/AshPhoenix\.Form\.for_create/);
   });
@@ -1713,11 +1675,21 @@ describe("AggregatesController emission (api-emit unit)", () => {
       appName: "phoenix_app",
       appModule: "PhoenixApp",
     });
-    const listRoute = apiRoutes.find((r) => r.path === "/aggregates/customers" && r.method === "get");
-    const createRoute = apiRoutes.find((r) => r.path === "/aggregates/customers" && r.method === "post");
-    const getRoute = apiRoutes.find((r) => r.path === "/aggregates/customers/:id" && r.method === "get");
-    const updateRoute = apiRoutes.find((r) => r.path === "/aggregates/customers/:id" && r.method === "patch");
-    const destroyRoute = apiRoutes.find((r) => r.path === "/aggregates/customers/:id" && r.method === "delete");
+    const listRoute = apiRoutes.find(
+      (r) => r.path === "/aggregates/customers" && r.method === "get",
+    );
+    const createRoute = apiRoutes.find(
+      (r) => r.path === "/aggregates/customers" && r.method === "post",
+    );
+    const getRoute = apiRoutes.find(
+      (r) => r.path === "/aggregates/customers/:id" && r.method === "get",
+    );
+    const updateRoute = apiRoutes.find(
+      (r) => r.path === "/aggregates/customers/:id" && r.method === "patch",
+    );
+    const destroyRoute = apiRoutes.find(
+      (r) => r.path === "/aggregates/customers/:id" && r.method === "delete",
+    );
 
     expect(listRoute).toBeDefined();
     expect(listRoute?.action).toBe(":list_customers");
@@ -1748,17 +1720,27 @@ describe("AggregatesController router integration (orchestrator)", () => {
     const router = files.get("phoenix_app/lib/phoenix_app_web/router.ex")!;
     // List and create on collection path
     expect(router).toMatch(/get "\/aggregates\/customers", AggregatesController, :list_customers/);
-    expect(router).toMatch(/post "\/aggregates\/customers", AggregatesController, :create_customer/);
+    expect(router).toMatch(
+      /post "\/aggregates\/customers", AggregatesController, :create_customer/,
+    );
     // Get, update, destroy on member path
-    expect(router).toMatch(/get "\/aggregates\/customers\/:id", AggregatesController, :get_customer/);
-    expect(router).toMatch(/patch "\/aggregates\/customers\/:id", AggregatesController, :update_customer/);
-    expect(router).toMatch(/delete "\/aggregates\/customers\/:id", AggregatesController, :destroy_customer/);
+    expect(router).toMatch(
+      /get "\/aggregates\/customers\/:id", AggregatesController, :get_customer/,
+    );
+    expect(router).toMatch(
+      /patch "\/aggregates\/customers\/:id", AggregatesController, :update_customer/,
+    );
+    expect(router).toMatch(
+      /delete "\/aggregates\/customers\/:id", AggregatesController, :destroy_customer/,
+    );
   });
 
   it("aggregates_controller.ex is in the generated file map when deployable serves an api", async () => {
     const model = await buildFixture();
     const { files } = generateSystems(model);
-    expect(files.has("phoenix_app/lib/phoenix_app_web/controllers/aggregates_controller.ex")).toBe(true);
+    expect(files.has("phoenix_app/lib/phoenix_app_web/controllers/aggregates_controller.ex")).toBe(
+      true,
+    );
   });
 });
 
@@ -1798,7 +1780,9 @@ describe("@derive Jason.Encoder emission (domain-emit unit)", () => {
     const files = emitAggregateResources(ctx, "PhoenixApp", "phoenix_app");
     const customerEx = files.get("lib/phoenix_app/sales/customer.ex")!;
     expect(customerEx).toBeDefined();
-    expect(customerEx).toMatch(/@derive \{Jason\.Encoder, only: \[:id, :name, :email, :inserted_at, :updated_at\]\}/);
+    expect(customerEx).toMatch(
+      /@derive \{Jason\.Encoder, only: \[:id, :name, :email, :inserted_at, :updated_at\]\}/,
+    );
   });
 
   it("@derive includes :id and timestamps in correct positions", () => {
@@ -1831,7 +1815,9 @@ describe("@derive Jason.Encoder emission (domain-emit unit)", () => {
     const files = emitAggregateResources(ctx, "PhoenixApp", "phoenix_app");
     const orderEx = files.get("lib/phoenix_app/sales/order.ex")!;
     expect(orderEx).toBeDefined();
-    expect(orderEx).toMatch(/@derive \{Jason\.Encoder, only: \[:id, :total, :inserted_at, :updated_at\]\}/);
+    expect(orderEx).toMatch(
+      /@derive \{Jason\.Encoder, only: \[:id, :total, :inserted_at, :updated_at\]\}/,
+    );
   });
 
   it("@derive is placed before use Ash.Resource in the module", () => {
@@ -1844,9 +1830,7 @@ describe("@derive Jason.Encoder emission (domain-emit unit)", () => {
         {
           name: "Customer",
           idValueType: "guid",
-          fields: [
-            { name: "name", type: { kind: "primitive", name: "string" }, optional: false },
-          ],
+          fields: [{ name: "name", type: { kind: "primitive", name: "string" }, optional: false }],
           contains: [],
           derived: [],
           invariants: [],
@@ -1891,33 +1875,24 @@ describe("@derive Jason.Encoder emission (domain-emit unit)", () => {
 describe("Ash 3.x compile-correctness regressions", () => {
   it("aggregate resource has :update in defaults so domain :update define resolves", async () => {
     const files = await buildFormFixture();
-    const customer = files.get(
-      "phoenix_app/lib/phoenix_app/sales/customer.ex",
-    )!;
+    const customer = files.get("phoenix_app/lib/phoenix_app/sales/customer.ex")!;
     expect(customer).toMatch(/defaults \[:read, :update, :destroy\]/);
   });
 
   it("domain update/destroy defines use get_by: [:id], not args: [:id]", async () => {
     const files = await buildFormFixture();
     const domain = files.get("phoenix_app/lib/phoenix_app/sales.ex")!;
-    expect(domain).toMatch(
-      /define :update_customer, action: :update, get_by: \[:id\]/,
-    );
-    expect(domain).toMatch(
-      /define :destroy_customer, action: :destroy, get_by: \[:id\]/,
-    );
+    expect(domain).toMatch(/define :update_customer, action: :update, get_by: \[:id\]/);
+    expect(domain).toMatch(/define :destroy_customer, action: :destroy, get_by: \[:id\]/);
     expect(domain).not.toMatch(/args: \[:id\]/);
   });
 
   it("does not emit redundant :all action / :all_X define (the :read default covers it)", async () => {
     const files = await buildFormFixture();
-    const customer = files.get(
-      "phoenix_app/lib/phoenix_app/sales/customer.ex",
-    )!;
+    const customer = files.get("phoenix_app/lib/phoenix_app/sales/customer.ex")!;
     const domain = files.get("phoenix_app/lib/phoenix_app/sales.ex")!;
     expect(customer).not.toMatch(/read :all do/);
     expect(domain).not.toMatch(/define :all_customer/);
     expect(domain).not.toMatch(/action: :all\b/);
   });
 });
-

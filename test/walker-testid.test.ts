@@ -15,11 +15,11 @@
 //   4. Pages without `testid:` emit no `data-testid` for the
 //      primitive — i.e. the convention is opt-in, no drift.
 
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
-import { generateSystems } from "../src/system/index.js";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
+import { generateSystems } from "../src/system/index.js";
 
 async function buildAndGenerate(src: string): Promise<Map<string, string>> {
   const services = createDddServices(NodeFileSystem);
@@ -53,15 +53,12 @@ function pageWithBody(body: string): string {
 async function emit(body: string): Promise<string> {
   const files = await buildAndGenerate(pageWithBody(body));
   const tsx = files.get("web/src/pages/p.tsx");
-  if (!tsx)
-    throw new Error(
-      `expected web/src/pages/p.tsx; got: ${[...files.keys()].join(", ")}`,
-    );
+  if (!tsx) throw new Error(`expected web/src/pages/p.tsx; got: ${[...files.keys()].join(", ")}`);
   return tsx;
 }
 
 describe("Slice A1 — testid: named-arg convention on every primitive", () => {
-  it("Stack: string literal lands as data-testid=\"…\" on the root <Stack>", async () => {
+  it('Stack: string literal lands as data-testid="…" on the root <Stack>', async () => {
     const tsx = await emit(`Stack(testid: "main")`);
     expect(tsx).toMatch(/<Stack[^>]*\bdata-testid="main"/);
   });
@@ -86,7 +83,7 @@ describe("Slice A1 — testid: named-arg convention on every primitive", () => {
     expect(tsx).toMatch(/<Container[^>]*\bdata-testid="ct"/);
   });
 
-  it("Toolbar: testid lands on the root <Group justify=\"space-between\">", async () => {
+  it('Toolbar: testid lands on the root <Group justify="space-between">', async () => {
     const tsx = await emit(`Toolbar(testid: "tb")`);
     expect(tsx).toMatch(/<Group [^>]*\bdata-testid="tb"/);
   });

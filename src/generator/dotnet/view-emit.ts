@@ -1,9 +1,4 @@
-import type {
-  AggregateIR,
-  BoundedContextIR,
-  ExprIR,
-  ViewIR,
-} from "../../ir/loom-ir.js";
+import type { AggregateIR, BoundedContextIR, ExprIR, ViewIR } from "../../ir/loom-ir.js";
 import { viewUsesCurrentUser } from "../../ir/loom-ir.js";
 import { camel, pascal, plural, snake } from "../../util/naming.js";
 import { projectEntityExpr, projectToResponse, wireType } from "./dto-mapping.js";
@@ -42,24 +37,12 @@ export function emitViews(
     const agg = aggsByName.get(view.aggregateName);
     if (!agg) continue; // validator already errored
     if (view.output) {
-      out.set(
-        `Application/Views/${pascal(view.name)}Row.cs`,
-        renderRowRecord(view, ctx, ns),
-      );
+      out.set(`Application/Views/${pascal(view.name)}Row.cs`, renderRowRecord(view, ctx, ns));
     }
-    out.set(
-      `Application/Views/${pascal(view.name)}Query.cs`,
-      renderQuery(view, agg, ns),
-    );
-    out.set(
-      `Application/Views/${pascal(view.name)}Handler.cs`,
-      renderHandler(view, agg, ctx, ns),
-    );
+    out.set(`Application/Views/${pascal(view.name)}Query.cs`, renderQuery(view, agg, ns));
+    out.set(`Application/Views/${pascal(view.name)}Handler.cs`, renderHandler(view, agg, ctx, ns));
   }
-  out.set(
-    `Api/${ctx.name}ViewsController.cs`,
-    renderController(ctx, ns, options?.routePrefix),
-  );
+  out.set(`Api/${ctx.name}ViewsController.cs`, renderController(ctx, ns, options?.routePrefix));
 }
 
 /** The view's response row type — `<Agg>Response` for the shorthand
@@ -68,13 +51,9 @@ function responseRecordName(view: ViewIR, agg: AggregateIR): string {
   return view.output ? `${pascal(view.name)}Row` : `${agg.name}Response`;
 }
 
-function renderRowRecord(
-  view: ViewIR,
-  ctx: BoundedContextIR,
-  ns: string,
-): string {
-  const fields = view.output!.fields
-    .map((f) => `${wireType(f.type, ctx, "response")} ${pascal(f.name)}`)
+function renderRowRecord(view: ViewIR, ctx: BoundedContextIR, ns: string): string {
+  const fields = view
+    .output!.fields.map((f) => `${wireType(f.type, ctx, "response")} ${pascal(f.name)}`)
     .join(", ");
   return `// Auto-generated.
 using ${ns}.Domain.ValueObjects;
@@ -102,12 +81,7 @@ public sealed record ${pascal(view.name)}Query() : IQuery<System.Collections.Gen
 `;
 }
 
-function renderHandler(
-  view: ViewIR,
-  agg: AggregateIR,
-  ctx: BoundedContextIR,
-  ns: string,
-): string {
+function renderHandler(view: ViewIR, agg: AggregateIR, ctx: BoundedContextIR, ns: string): string {
   const queryName = `${pascal(view.name)}Query`;
   const handlerName = `${pascal(view.name)}Handler`;
   const responseRecord = responseRecordName(view, agg);
@@ -126,9 +100,7 @@ function renderHandler(
   const pathToMap = new Map<string, { mapVar: string; aggName: string }>();
   // Repo fields + ctor injection — deduped per aggregate (the same
   // aggregate may appear on multiple paths).
-  const fields: string[] = [
-    `    private readonly I${agg.name}Repository _repo;`,
-  ];
+  const fields: string[] = [`    private readonly I${agg.name}Repository _repo;`];
   const ctorParams: string[] = [`I${agg.name}Repository repo`];
   const ctorAssigns: string[] = [`_repo = repo`];
   if (usesUser) {
@@ -287,11 +259,7 @@ function csIdsSourceForAux(
   return `${prev.mapVar}.Values.Select(__a => __a.${pascal(finalField)}).ToList()`;
 }
 
-function renderController(
-  ctx: BoundedContextIR,
-  ns: string,
-  routePrefix?: string,
-): string {
+function renderController(ctx: BoundedContextIR, ns: string, routePrefix?: string): string {
   const className = `${ctx.name}ViewsController`;
   const route = `${routePrefix ?? ""}views`;
   const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
@@ -341,4 +309,3 @@ ${blocks.join("\n")}
 }
 `;
 }
-

@@ -1,9 +1,4 @@
-import type {
-  BoundedContextIR,
-  DeployableIR,
-  Platform,
-  SystemIR,
-} from "../ir/loom-ir.js";
+import type { BoundedContextIR, DeployableIR, Platform, SystemIR } from "../ir/loom-ir.js";
 
 // ---------------------------------------------------------------------------
 // Platform surface contract.

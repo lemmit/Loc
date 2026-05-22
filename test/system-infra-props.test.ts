@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
 import { EmptyFileSystem } from "langium";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
 import {
@@ -22,8 +22,10 @@ function node(type: string, name: string): { $type: string } {
   for (const n of (function* walk(x: { $type: string }): Generator<{ $type: string }> {
     yield x;
     for (const v of Object.values(x)) {
-      if (Array.isArray(v)) for (const c of v) if (c && typeof c === "object" && "$type" in c) yield* walk(c);
-      else if (v && typeof v === "object" && "$type" in v) yield* walk(v as { $type: string });
+      if (Array.isArray(v))
+        for (const c of v)
+          if (c && typeof c === "object" && "$type" in c) yield* walk(c);
+          else if (v && typeof v === "object" && "$type" in v) yield* walk(v as { $type: string });
     }
   })(m)) {
     if (n.$type === type && (n as { name?: string }).name === name) return n;
@@ -34,7 +36,9 @@ function node(type: string, name: string): { $type: string } {
 describe("System builder — infra construct properties", () => {
   it("reads and sets a storage type", () => {
     expect(storageType(node("Storage", "primarySql"))).toBe("postgres");
-    expect(setStorageType(acme, "primarySql", "redis")).toMatch(/storage primarySql \{\s*type: redis\s*\}/);
+    expect(setStorageType(acme, "primarySql", "redis")).toMatch(
+      /storage primarySql \{\s*type: redis\s*\}/,
+    );
   });
 
   it("reads and sets a deployable platform (preserving the rest)", () => {

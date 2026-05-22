@@ -26,7 +26,9 @@ import {
   isBoolLit,
   isBoundedContext,
   isCallExpr,
+  isContainment,
   isDecLit,
+  isDerivedProp,
   isEntityPart,
   isEnumDecl,
   isFindDecl,
@@ -35,9 +37,10 @@ import {
   isIdType,
   isIntLit,
   isLambda,
+  isLetStmt,
   isMemberAccess,
-  isNameRef,
   isNamedType,
+  isNameRef,
   isNewExpr,
   isNowExpr,
   isNullLit,
@@ -53,9 +56,6 @@ import {
   isValueObject,
   isView,
   isWorkflow,
-  isContainment,
-  isDerivedProp,
-  isLetStmt,
 } from "./generated/ast.js";
 
 // ---------------------------------------------------------------------------
@@ -296,9 +296,7 @@ function typeOfMemberAccess(expr: import("./generated/ast.js").MemberAccess, env
         if (isLambda(argExpr) && argExpr.body) {
           const lambdaEnv: Env = makeEnv(
             env,
-            new Map([
-              [argExpr.param, { type: recvType.element, origin: argExpr }],
-            ]),
+            new Map([[argExpr.param, { type: recvType.element, origin: argExpr }]]),
           );
           const _bodyType = typeOf(argExpr.body, lambdaEnv);
           void _bodyType;
@@ -387,9 +385,7 @@ function collectionOpType(
       if (lambdaArg && isLambda(lambdaArg) && lambdaArg.body) {
         const lambdaEnv = makeEnv(
           env,
-          new Map([
-            [lambdaArg.param, { type: recv.element, origin: lambdaArg }],
-          ]),
+          new Map([[lambdaArg.param, { type: recv.element, origin: lambdaArg }]]),
         );
         return typeOf(lambdaArg.body, lambdaEnv);
       }
@@ -431,7 +427,10 @@ function typeOfCall(expr: import("./generated/ast.js").CallExpr, env: Env): DddT
   return T.unknown;
 }
 
-function lookupFunctionInScope(name: string, env: Env): import("./generated/ast.js").FunctionDecl | undefined {
+function lookupFunctionInScope(
+  name: string,
+  env: Env,
+): import("./generated/ast.js").FunctionDecl | undefined {
   const scopes: Array<Aggregate | EntityPart | ValueObject | undefined> = [
     env.part,
     env.aggregate,
@@ -446,15 +445,14 @@ function lookupFunctionInScope(name: string, env: Env): import("./generated/ast.
   return undefined;
 }
 
-function lookupValueObjectByName(
-  name: string,
-  env: Env,
-): ValueObject | undefined {
+function lookupValueObjectByName(name: string, env: Env): ValueObject | undefined {
   // Walk up to bounded context and search value objects.  The
   // generated AST types make `members` an opaque list with mixed
   // member shapes, so we go through `unknown` to apply the structural
   // narrowing the cast below cements.
-  let cur: AstNode | undefined = (env.aggregate ?? env.part ?? env.valueObject) as AstNode | undefined;
+  let cur: AstNode | undefined = (env.aggregate ?? env.part ?? env.valueObject) as
+    | AstNode
+    | undefined;
   while (cur && cur.$type !== "BoundedContext") cur = cur.$container;
   if (!cur) return undefined;
   const ctxMembers = (cur as unknown as { members: AstNode[] }).members;
@@ -523,7 +521,9 @@ export function makeEnv(
   };
 }
 
-export function collectLetBindings(stmts: import("./generated/ast.js").Statement[]): Map<string, { type: DddType; origin: AstNode }> {
+export function collectLetBindings(
+  stmts: import("./generated/ast.js").Statement[],
+): Map<string, { type: DddType; origin: AstNode }> {
   const m = new Map<string, { type: DddType; origin: AstNode }>();
   for (const s of stmts) {
     if (isLetStmt(s)) {
@@ -580,20 +580,14 @@ export function stepInto(t: DddType, name: string): DddType {
   return T.unknown;
 }
 
-export function findFunction(
-  agg: Aggregate,
-  name: string,
-): FunctionDecl | undefined {
+export function findFunction(agg: Aggregate, name: string): FunctionDecl | undefined {
   for (const m of agg.members) {
     if (isFunctionDecl(m) && m.name === name) return m;
   }
   return undefined;
 }
 
-export function findOperation(
-  agg: Aggregate,
-  name: string,
-): Operation | undefined {
+export function findOperation(agg: Aggregate, name: string): Operation | undefined {
   for (const m of agg.members) {
     if (isOperation(m) && m.name === name) return m;
   }
@@ -860,7 +854,11 @@ export function calleeSignature(call: CallExpr | MemberAccess): CalleeSignature 
     if (!call.call) return undefined;
     const decl = stepIntoNode(typeOf(call.receiver, envForNode(call)), call.member);
     if (decl && (isFunctionDecl(decl) || isOperation(decl))) {
-      return { name: call.member, params: decl.params, ret: isFunctionDecl(decl) ? decl.returnType : undefined };
+      return {
+        name: call.member,
+        params: decl.params,
+        ret: isFunctionDecl(decl) ? decl.returnType : undefined,
+      };
     }
     return undefined;
   }
@@ -880,7 +878,10 @@ export function calleeSignature(call: CallExpr | MemberAccess): CalleeSignature 
   const ctx = AstUtils.getContainerOfType(call, isBoundedContext);
   const vo = ctx?.members.find((m): m is ValueObject => isValueObject(m) && m.name === callee.name);
   if (vo) {
-    return { name: vo.name, params: vo.members.filter(isProperty).map((p) => ({ name: p.name, type: p.type })) };
+    return {
+      name: vo.name,
+      params: vo.members.filter(isProperty).map((p) => ({ name: p.name, type: p.type })),
+    };
   }
   return undefined;
 }

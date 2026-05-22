@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { compilePack } from "../src/generator/_packs/loader.js";
 
 // ---------------------------------------------------------------------------
@@ -83,8 +83,7 @@ describe("shared template layer", () => {
         emits: { "primitive-button": "primitive-button.hbs" },
       },
       {
-        "primitive-button":
-          '<button className="btn btn-primary">{{label}}</button>',
+        "primitive-button": '<button className="btn btn-primary">{{label}}</button>',
       },
       (f) => `/s/${f}`,
       sharedTemplates,
@@ -95,13 +94,9 @@ describe("shared template layer", () => {
   });
 
   it("renderable via pack.render even when not in pack's emits", () => {
-    const pack = compilePack(
-      "/p",
-      { ...baseManifest, emits: {} },
-      {},
-      (f) => `/p/${f}`,
-      { "shared-only": "Shared content" },
-    );
+    const pack = compilePack("/p", { ...baseManifest, emits: {} }, {}, (f) => `/p/${f}`, {
+      "shared-only": "Shared content",
+    });
     expect(pack.render("shared-only", {})).toBe("Shared content");
   });
 });

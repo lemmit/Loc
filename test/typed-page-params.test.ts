@@ -11,11 +11,11 @@
 // and the React component is fully wired to its route param at
 // render time.
 
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
-import { generateSystems } from "../src/system/index.js";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
+import { generateSystems } from "../src/system/index.js";
 
 async function buildAndGenerate(src: string): Promise<Map<string, string>> {
   const services = createDddServices(NodeFileSystem);
@@ -48,12 +48,8 @@ describe("Slice 11.4 — typed page parameters in walker-rendered pages", () => 
     const content = files.get("web/src/pages/hello.tsx")!;
     expect(content).toBeDefined();
     // useParams import + typed generic + destructure of `name`.
-    expect(content).toMatch(
-      /import \{ useParams \} from "react-router";/,
-    );
-    expect(content).toMatch(
-      /const \{ name \} = useParams<\{ name: string \}>\(\);/,
-    );
+    expect(content).toMatch(/import \{ useParams \} from "react-router";/);
+    expect(content).toMatch(/const \{ name \} = useParams<\{ name: string \}>\(\);/);
     // Heading(name) → <Title order={2}>{name}</Title> (JSX expr, not text).
     expect(content).toMatch(/<Title order=\{2\}>\{name\}<\/Title>/);
   });
@@ -85,9 +81,7 @@ describe("Slice 11.4 — typed page parameters in walker-rendered pages", () => 
     const content = files.get("web/src/pages/greet.tsx")!;
     // Type generic includes BOTH params (typed shape stays
     // intact regardless of usage).
-    expect(content).toMatch(
-      /useParams<\{ name: string; customerId: string \}>/,
-    );
+    expect(content).toMatch(/useParams<\{ name: string; customerId: string \}>/);
     // Destructure only the params actually referenced — `name`
     // was used, `customerId` wasn't, so only `name` is pulled out.
     expect(content).toMatch(/const \{ name \} = useParams/);

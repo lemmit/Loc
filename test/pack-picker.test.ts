@@ -1,10 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import {
+  type PickedPack,
   packToVfsEntries,
   pickPackFromFileList,
   validatePickedPack,
-  type PickedPack,
 } from "../web/src/workspace/pack-picker.js";
 
 // ---------------------------------------------------------------------------
@@ -16,14 +16,15 @@ import {
 /** Shape-compatible mock for the `<input webkitdirectory>` FileList,
  *  used by `pickPackFromFileList`.  We only need `length`, indexer,
  *  `webkitRelativePath`, and `text()`. */
-function fakeFileList(
-  files: ReadonlyArray<{ relativePath: string; content: string }>,
-): FileList {
+function fakeFileList(files: ReadonlyArray<{ relativePath: string; content: string }>): FileList {
   const arr = files.map(({ relativePath, content }) => ({
     webkitRelativePath: relativePath,
     text: () => Promise.resolve(content),
   }));
-  return Object.assign(arr, { length: arr.length, item: (i: number) => arr[i] }) as unknown as FileList;
+  return Object.assign(arr, {
+    length: arr.length,
+    item: (i: number) => arr[i],
+  }) as unknown as FileList;
 }
 
 describe("pickPackFromFileList", () => {
@@ -82,10 +83,12 @@ describe("validatePickedPack", () => {
   });
 
   it("rejects built-in pack names (mantine / shadcn)", () => {
-    expect(() => validatePickedPack({ name: "mantine", files: [["pack.json", "{}"]] }))
-      .toThrow(/built-in pack name/);
-    expect(() => validatePickedPack({ name: "shadcn", files: [["pack.json", "{}"]] }))
-      .toThrow(/built-in pack name/);
+    expect(() => validatePickedPack({ name: "mantine", files: [["pack.json", "{}"]] })).toThrow(
+      /built-in pack name/,
+    );
+    expect(() => validatePickedPack({ name: "shadcn", files: [["pack.json", "{}"]] })).toThrow(
+      /built-in pack name/,
+    );
   });
 
   it("accepts a valid pack", () => {

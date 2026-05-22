@@ -1,12 +1,12 @@
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
 import { parseHelper } from "langium/test";
-import { createDddServices } from "../src/language/ddd-module.js";
-import { lowerModel } from "../src/ir/lower.js";
+import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../src/ir/enrichments.js";
-import { generateSystems } from "../src/system/index.js";
 import type { LoomModel } from "../src/ir/loom-ir.js";
+import { lowerModel } from "../src/ir/lower.js";
+import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
+import { generateSystems } from "../src/system/index.js";
 
 async function parse(source: string): Promise<Model> {
   const services = createDddServices(NodeFileSystem);
@@ -135,7 +135,9 @@ describe("traceability IR (Slice 12)", () => {
 
   it("emits no traceability artifacts when none are declared", async () => {
     const { files } = generateSystems(
-      await parse(`system S { module M { context C { aggregate A { name: string } repository As for A {} } } deployable D { platform: hono  modules: M } }`),
+      await parse(
+        `system S { module M { context C { aggregate A { name: string } repository As for A {} } } deployable D { platform: hono  modules: M } }`,
+      ),
     );
     expect([...files.keys()].some((k) => k.startsWith(".loom/traceability"))).toBe(false);
     expect(files.has(".loom/coverage.md")).toBe(false);

@@ -16,9 +16,9 @@
 //     port: 3000
 //   }
 
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
 import { parseHelper } from "langium/test";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 
 async function parse(source: string) {
@@ -152,9 +152,7 @@ describe("Slice 11.27 — storage declarations + module-storage map", () => {
           }
         }
       `);
-      expect(errors.some((e) =>
-        /must include a 'primary: <storage>' binding/.test(e),
-      )).toBe(true);
+      expect(errors.some((e) => /must include a 'primary: <storage>' binding/.test(e))).toBe(true);
     });
 
     it("flags duplicate role within one module block", async () => {
@@ -171,9 +169,7 @@ describe("Slice 11.27 — storage declarations + module-storage map", () => {
           }
         }
       `);
-      expect(errors.some((e) =>
-        /binds role 'primary' more than once/.test(e),
-      )).toBe(true);
+      expect(errors.some((e) => /binds role 'primary' more than once/.test(e))).toBe(true);
     });
 
     it("flags storage ref that doesn't resolve", async () => {
@@ -188,9 +184,9 @@ describe("Slice 11.27 — storage declarations + module-storage map", () => {
           }
         }
       `);
-      expect(errors.some((e) =>
-        /references undeclared storage 'noSuchStorage'/.test(e),
-      )).toBe(true);
+      expect(errors.some((e) => /references undeclared storage 'noSuchStorage'/.test(e))).toBe(
+        true,
+      );
     });
 
     it("flags brace-block on a frontend deployable", async () => {
@@ -214,9 +210,9 @@ describe("Slice 11.27 — storage declarations + module-storage map", () => {
           }
         }
       `);
-      expect(errors.some((e) =>
-        /storage block is only valid on a backend deployable/.test(e),
-      )).toBe(true);
+      expect(
+        errors.some((e) => /storage block is only valid on a backend deployable/.test(e)),
+      ).toBe(true);
     });
 
     it("multi-module deployable with separate storage allocations", async () => {

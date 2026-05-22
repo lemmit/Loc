@@ -20,15 +20,15 @@
 // `node scripts/capture-baseline-fixture.mjs` to refresh the
 // fixture, review the diff, and commit it).
 
-import { describe, expect, it } from "vitest";
-import { NodeFileSystem } from "langium/node";
-import { URI } from "langium";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { generateSystems } from "../src/system/index.js";
+import { URI } from "langium";
+import { NodeFileSystem } from "langium/node";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
+import { generateSystems } from "../src/system/index.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");
@@ -37,9 +37,7 @@ const fixtureRoot = path.join(repoRoot, "test/fixtures/baseline-output");
 async function buildAcme(): Promise<Model> {
   const services = createDddServices(NodeFileSystem);
   const docs = services.shared.workspace.LangiumDocuments;
-  const doc = await docs.getOrCreateDocument(
-    URI.file(path.join(repoRoot, "examples/acme.ddd")),
-  );
+  const doc = await docs.getOrCreateDocument(URI.file(path.join(repoRoot, "examples/acme.ddd")));
   await services.shared.workspace.DocumentBuilder.build([doc], {
     validation: true,
   });
@@ -102,15 +100,9 @@ describe("Slice 5 byte-equivalence — page emitter vs legacy direct walk", () =
     expect([...files.keys()]).toContain("web_app/e2e/pages/order.ts");
     expect([...files.keys()]).toContain("web_app/e2e/pages/customer.ts");
     expect([...files.keys()]).toContain("web_app/e2e/pages/product.ts");
-    expect([...files.keys()]).toContain(
-      "web_app/e2e/pages/workflows/place_order.ts",
-    );
-    expect([...files.keys()]).toContain(
-      "web_app/e2e/pages/views/active_orders.ts",
-    );
-    expect([...files.keys()]).toContain(
-      "web_app/e2e/pages/views/order_summary.ts",
-    );
+    expect([...files.keys()]).toContain("web_app/e2e/pages/workflows/place_order.ts");
+    expect([...files.keys()]).toContain("web_app/e2e/pages/views/active_orders.ts");
+    expect([...files.keys()]).toContain("web_app/e2e/pages/views/order_summary.ts");
   });
 
   it("the new page-IR path is the active one (acme's webApp has uiName populated)", async () => {

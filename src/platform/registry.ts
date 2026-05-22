@@ -1,12 +1,10 @@
 import type { Platform } from "../ir/loom-ir.js";
-import type { PlatformSurface } from "./surface.js";
-import type { LoomBackendManifest } from "./manifest.js";
 import dotnetPlatform from "./dotnet.js";
-import honoPlatform, {
-  loomManifest as honoV4Manifest,
-} from "./hono/v4/index.js";
-import reactPlatform from "./react.js";
+import honoPlatform, { loomManifest as honoV4Manifest } from "./hono/v4/index.js";
+import type { LoomBackendManifest } from "./manifest.js";
 import phoenixLiveViewPlatform from "./phoenix-live-view.js";
+import reactPlatform from "./react.js";
+import type { PlatformSurface } from "./surface.js";
 
 // ---------------------------------------------------------------------------
 // Single source of truth for which platforms exist + how the system
@@ -157,14 +155,11 @@ export interface ParsedBuiltinPlatformRef {
  *  `family@version` → that pin; frontend / unknown → `null`.
  *  Pure; exported so B1's validator + lowering share one
  *  resolution authority. */
-export function parseBuiltinPlatformRef(
-  s: string,
-): ParsedBuiltinPlatformRef | null {
+export function parseBuiltinPlatformRef(s: string): ParsedBuiltinPlatformRef | null {
   const at = s.indexOf("@");
   const family = (at === -1 ? s : s.slice(0, at)) as BackendFamily;
   if (!(family in BUILTIN_PLATFORM_LATEST)) return null;
-  const version =
-    at === -1 ? BUILTIN_PLATFORM_LATEST[family] : s.slice(at + 1);
+  const version = at === -1 ? BUILTIN_PLATFORM_LATEST[family] : s.slice(at + 1);
   return { family, version, qualified: `${family}@${version}` };
 }
 

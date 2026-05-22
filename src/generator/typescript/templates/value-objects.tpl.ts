@@ -1,11 +1,7 @@
-import type {
-  BoundedContextIR,
-  EnumIR,
-  ValueObjectIR,
-} from "../../../ir/loom-ir.js";
+import type { BoundedContextIR, EnumIR, ValueObjectIR } from "../../../ir/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
-import { renderTsExpr, renderTsType } from "../render-expr.js";
 import { camel } from "../../../util/naming.js";
+import { renderTsExpr, renderTsType } from "../render-expr.js";
 
 // ---------------------------------------------------------------------------
 // Enums + value objects emitted into one file.  Enums become
@@ -26,9 +22,7 @@ export function renderEnumsAndValueObjects(ctx: BoundedContextIR): string {
 }
 
 function renderEnum(e: EnumIR): string[] {
-  const valueLines = e.values.map(
-    (v, i) => `  ${v}: "${v}"${i < e.values.length - 1 ? "," : ""}`,
-  );
+  const valueLines = e.values.map((v, i) => `  ${v}: "${v}"${i < e.values.length - 1 ? "," : ""}`);
   const unionLiteral = e.values.map((v) => `"${v}"`).join(" | ");
   return [
     `export const ${e.name} = {`,
@@ -51,13 +45,10 @@ function renderValueObject(v: ValueObjectIR): string[] {
     return `    ${check} throw new Error(${JSON.stringify(`Invariant violated: ${inv.source}`)});`;
   });
   const derived = v.derived.map(
-    (d) =>
-      `  get ${d.name}(): ${renderTsType(d.type)} { return ${renderTsExpr(d.expr)}; }`,
+    (d) => `  get ${d.name}(): ${renderTsType(d.type)} { return ${renderTsExpr(d.expr)}; }`,
   );
   const fns = v.functions.map((fn) => {
-    const params = fn.params
-      .map((p) => `${p.name}: ${renderTsType(p.type)}`)
-      .join(", ");
+    const params = fn.params.map((p) => `${p.name}: ${renderTsType(p.type)}`).join(", ");
     return `  private ${camel(fn.name)}(${params}): ${renderTsType(fn.returnType)} { return ${renderTsExpr(fn.body)}; }`;
   });
   return [

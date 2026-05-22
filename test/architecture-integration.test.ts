@@ -8,12 +8,12 @@
 // slice (11.24 / 11.25 / 11.26 / 11.27) breaks, this file catches
 // it.
 
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
 import { parseHelper } from "langium/test";
-import { generateSystems } from "../src/system/index.js";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
+import { generateSystems } from "../src/system/index.js";
 
 const ACME_EXPLICIT = `
 system Acme {
@@ -103,14 +103,13 @@ async function build(source: string) {
   const services = createDddServices(NodeFileSystem);
   const helper = parseHelper(services.Ddd);
   const doc = await helper(source, { validation: true });
-  const errors = (doc.diagnostics ?? [])
-    .filter((d) => d.severity === 1)
-    .map((d) => d.message);
+  const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1).map((d) => d.message);
   return {
     errors,
-    files: errors.length === 0
-      ? generateSystems(doc.parseResult.value as Model).files
-      : new Map<string, string>(),
+    files:
+      errors.length === 0
+        ? generateSystems(doc.parseResult.value as Model).files
+        : new Map<string, string>(),
   };
 }
 
@@ -133,9 +132,7 @@ describe("Architecture integration — full Acme example", () => {
     const { files } = await build(ACME_EXPLICIT);
     const newPage = files.get("web_app/src/pages/customer_new.tsx")!;
     expect(newPage).toBeDefined();
-    expect(newPage).toMatch(
-      /import \{ useCreateCustomer \} from "\.\.\/api\/customer";/,
-    );
+    expect(newPage).toMatch(/import \{ useCreateCustomer \} from "\.\.\/api\/customer";/);
     expect(newPage).toMatch(/const customerCreate = useCreateCustomer\(\);/);
     // disabled wired to .isPending
     expect(newPage).toMatch(/disabled=\{customerCreate\.isPending\}/);
@@ -147,12 +144,8 @@ describe("Architecture integration — full Acme example", () => {
     const { files } = await build(ACME_EXPLICIT);
     const lookup = files.get("web_app/src/pages/lookup.tsx")!;
     expect(lookup).toBeDefined();
-    expect(lookup).toMatch(
-      /import \{ useByEmailCustomer \} from "\.\.\/api\/customer";/,
-    );
-    expect(lookup).toMatch(
-      /const customerByEmail = useByEmailCustomer\(email\);/,
-    );
+    expect(lookup).toMatch(/import \{ useByEmailCustomer \} from "\.\.\/api\/customer";/);
+    expect(lookup).toMatch(/const customerByEmail = useByEmailCustomer\(email\);/);
     // route param destructured from useParams above the hook.
     expect(lookup).toMatch(/const \{ email \} = useParams<\{ email: string \}>\(\);/);
   });
@@ -163,20 +156,15 @@ describe("Architecture integration — full Acme example", () => {
       "ui: WebApp { Sales: salesApi }",
     );
     const { errors } = await build(broken);
-    expect(errors.some((e) =>
-      /missing a binding for ui parameter 'Mktg: MarketingApi'/.test(e),
-    )).toBe(true);
+    expect(
+      errors.some((e) => /missing a binding for ui parameter 'Mktg: MarketingApi'/.test(e)),
+    ).toBe(true);
   });
 
   it("rejects shape if backend doesn't serve a bound UI param's api", async () => {
-    const broken = ACME_EXPLICIT.replace(
-      "serves: MarketingApi\n    port: 3001",
-      "port: 3001",
-    );
+    const broken = ACME_EXPLICIT.replace("serves: MarketingApi\n    port: 3001", "port: 3001");
     const { errors } = await build(broken);
-    expect(errors.some((e) =>
-      /'mktgApi' does not 'serves: MarketingApi'/.test(e),
-    )).toBe(true);
+    expect(errors.some((e) => /'mktgApi' does not 'serves: MarketingApi'/.test(e))).toBe(true);
   });
 
   it("rejects shape if a backend's primary storage is missing", async () => {
@@ -185,8 +173,6 @@ describe("Architecture integration — full Acme example", () => {
       "modules: Sales { cache: hotCache, bi: warehouse }",
     );
     const { errors } = await build(broken);
-    expect(errors.some((e) =>
-      /must include a 'primary: <storage>' binding/.test(e),
-    )).toBe(true);
+    expect(errors.some((e) => /must include a 'primary: <storage>' binding/.test(e))).toBe(true);
   });
 });

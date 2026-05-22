@@ -1,6 +1,6 @@
 import type { BoundedContextIR } from "../../../ir/loom-ir.js";
-import { camel, plural, snake } from "../../../util/naming.js";
 import { lines } from "../../../util/code-builder.js";
+import { camel, plural, snake } from "../../../util/naming.js";
 
 // The per-aggregate routes file is built procedurally in
 // `routes-builder.ts` because the OpenAPI annotations push it past
@@ -20,30 +20,20 @@ export function renderHttpIndex(
     (a) =>
       `  app.route("/${snake(plural(a.name))}", ${camel(a.name)}Routes(new ${a.name}Repository(db, events)));`,
   );
-  const externAggs = ctx.aggregates.filter((a) =>
-    a.operations.some((o) => o.extern),
-  );
+  const externAggs = ctx.aggregates.filter((a) => a.operations.some((o) => o.extern));
   const externImports = externAggs.map(
     (a) =>
       `import { verify${a.name}ExternHandlersRegistered } from "../domain/${camel(a.name)}-extern";`,
   );
-  const externVerifyBody = externAggs.map(
-    (a) => `  verify${a.name}ExternHandlersRegistered();`,
-  );
+  const externVerifyBody = externAggs.map((a) => `  verify${a.name}ExternHandlersRegistered();`);
   const hasWorkflows = ctx.workflows.length > 0;
-  const workflowImport = hasWorkflows
-    ? `import { workflowsRoutes } from "./workflows";`
-    : null;
+  const workflowImport = hasWorkflows ? `import { workflowsRoutes } from "./workflows";` : null;
   const workflowMount = hasWorkflows
     ? `  app.route("/workflows", workflowsRoutes(db, events));`
     : null;
   const hasViews = ctx.views.length > 0;
-  const viewImport = hasViews
-    ? `import { viewsRoutes } from "./views";`
-    : null;
-  const viewMount = hasViews
-    ? `  app.route("/views", viewsRoutes(db, events));`
-    : null;
+  const viewImport = hasViews ? `import { viewsRoutes } from "./views";` : null;
+  const viewMount = hasViews ? `  app.route("/views", viewsRoutes(db, events));` : null;
   // Auth wiring — when the deployable opts in via `auth: required`,
   // we import the middleware + verifier registry, assert at startup
   // that the user supplied a verifier, and mount the middleware
@@ -51,9 +41,7 @@ export function renderHttpIndex(
   const authImport = authRequired
     ? `import { authMiddleware } from "../auth/middleware";\nimport { assertUserVerifierRegistered } from "../auth/verifier";`
     : null;
-  const authVerifyAssert = authRequired
-    ? "  assertUserVerifierRegistered();"
-    : null;
+  const authVerifyAssert = authRequired ? "  assertUserVerifierRegistered();" : null;
   const authMount = authRequired ? '  app.use("*", authMiddleware);' : null;
   return (
     lines(

@@ -1,5 +1,5 @@
-import { lines } from "../util/code-builder.js";
 import type { DeployableIR, SystemIR } from "../ir/loom-ir.js";
+import { lines } from "../util/code-builder.js";
 
 // ---------------------------------------------------------------------------
 // `<system>/.loom/architecture.c4` artifact — a LikeC4 model derived

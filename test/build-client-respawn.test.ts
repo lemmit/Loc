@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // Worker is mocked at module-load time via globalThis stubbing —
 // the LoomBuildClient does `new Worker(new URL(..., import.meta.url))`,
@@ -121,8 +121,8 @@ describe("LoomBuildClient.respawn", () => {
     });
     expect(callCount).toBe(1);
     expect(
-      (FakeWorker.messages[0].message as { params: { entries: Array<{ content: string }> } })
-        .params.entries[0].content,
+      (FakeWorker.messages[0].message as { params: { entries: Array<{ content: string }> } }).params
+        .entries[0].content,
     ).toBe("v1");
 
     // Inject a respawn — re-import so we get the same client back.
@@ -136,9 +136,7 @@ describe("LoomBuildClient.respawn", () => {
     const client = new LoomBuildClient({
       seedWorkspace: () => {
         revision++;
-        const entries = [
-          { path: "/workspace/main.ddd", content: `rev-${revision}` },
-        ];
+        const entries = [{ path: "/workspace/main.ddd", content: `rev-${revision}` }];
         seedSnapshots.push(entries.map((e) => e.content));
         return entries;
       },
@@ -149,8 +147,7 @@ describe("LoomBuildClient.respawn", () => {
     // The new worker (index 1) received the rev-2 seed; the old
     // worker (index 0) only saw rev-1.
     const seedMessages = FakeWorker.messages.filter(
-      (m) =>
-        (m.message as { method: string }).method === "vfs.write",
+      (m) => (m.message as { method: string }).method === "vfs.write",
     );
     expect(seedMessages.map((m) => m.workerId)).toEqual([0, 1]);
   });

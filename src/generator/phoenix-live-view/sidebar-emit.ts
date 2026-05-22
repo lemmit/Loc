@@ -39,7 +39,7 @@ export function renderSidebarComponent(args: RenderSidebarComponentArgs): string
 
   lines.push(`# Auto-generated.`);
   lines.push(`defmodule ${webModule}.Components.Sidebar do`);
-  lines.push(`  @moduledoc """`)
+  lines.push(`  @moduledoc """`);
   lines.push(`  Application sidebar navigation component for ${appName}.`);
   lines.push(`  """`);
   lines.push(`  use ${webModule}, :html`);
@@ -56,7 +56,9 @@ export function renderSidebarComponent(args: RenderSidebarComponentArgs): string
     if (navSections.length > 1 && section.label) {
       const escapedLabel = escapeHeex(section.label);
       lines.push(`        <li class="pt-4 first:pt-0">`);
-      lines.push(`          <h3 class="px-2 pb-1 text-xs font-semibold uppercase tracking-wider text-gray-400">`);
+      lines.push(
+        `          <h3 class="px-2 pb-1 text-xs font-semibold uppercase tracking-wider text-gray-400">`,
+      );
       lines.push(`            ${escapedLabel}`);
       lines.push(`          </h3>`);
       lines.push(`          <ul class="space-y-0.5">`);
@@ -88,10 +90,7 @@ export function renderSidebarComponent(args: RenderSidebarComponentArgs): string
 // ---------------------------------------------------------------------------
 
 /** Render a single nav link <li> at the given indent level. */
-function renderNavEntry(
-  entry: NavSectionVM["entries"][number],
-  indentSpaces: number,
-): string[] {
+function renderNavEntry(entry: NavSectionVM["entries"][number], indentSpaces: number): string[] {
   const pad = " ".repeat(indentSpaces);
   const label = escapeHeex(entry.label);
   const testId = escapeHeex(entry.testId);

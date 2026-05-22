@@ -1,6 +1,6 @@
+import type { Diagnostic, LangiumDocument } from "langium";
 import { NodeFileSystem } from "langium/node";
 import { parseHelper } from "langium/test";
-import type { Diagnostic, LangiumDocument } from "langium";
 import { createDddServices } from "../../src/language/ddd-module.js";
 import type { Model } from "../../src/language/generated/ast.js";
 

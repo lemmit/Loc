@@ -44,10 +44,7 @@ export interface ClassifyContext {
  *  (Zod refine on the frontend / Hono route, FluentValidation rule
  *  on .NET) for the given context.  Server-only invariants always
  *  return false. */
-export function classifyForWire(
-  inv: InvariantIR,
-  ctx: ClassifyContext,
-): boolean {
+export function classifyForWire(inv: InvariantIR, ctx: ClassifyContext): boolean {
   if (inv.scope === "server-only") return false;
   if (!exprIsTranslatable(inv.expr, ctx)) return false;
   if (inv.guard && !exprIsTranslatable(inv.guard, ctx)) return false;
@@ -137,10 +134,7 @@ function exprIsTranslatable(
     case "unary":
       return exprIsTranslatable(e.operand, ctx, scope);
     case "binary":
-      return (
-        exprIsTranslatable(e.left, ctx, scope) &&
-        exprIsTranslatable(e.right, ctx, scope)
-      );
+      return exprIsTranslatable(e.left, ctx, scope) && exprIsTranslatable(e.right, ctx, scope);
     case "ternary":
       return (
         exprIsTranslatable(e.cond, ctx, scope) &&
@@ -154,11 +148,9 @@ function exprIsTranslatable(
       return (
         e.arms.every(
           (arm) =>
-            exprIsTranslatable(arm.cond, ctx, scope) &&
-            exprIsTranslatable(arm.value, ctx, scope),
+            exprIsTranslatable(arm.cond, ctx, scope) && exprIsTranslatable(arm.value, ctx, scope),
         ) &&
-        (e.otherwise === undefined ||
-          exprIsTranslatable(e.otherwise, ctx, scope))
+        (e.otherwise === undefined || exprIsTranslatable(e.otherwise, ctx, scope))
       );
   }
 }
@@ -168,14 +160,14 @@ function exprIsTranslatable(
 // ---------------------------------------------------------------------------
 
 export type SingleFieldPattern =
-  | { kind: "min"; n: number }              // f >= N (numeric)
-  | { kind: "max"; n: number }              // f <= N (numeric)
+  | { kind: "min"; n: number } // f >= N (numeric)
+  | { kind: "max"; n: number } // f <= N (numeric)
   | { kind: "between"; lo: number; hi: number } // f >= N && f <= M
-  | { kind: "len-min"; n: number }          // f.length >= N
-  | { kind: "len-max"; n: number }          // f.length <= N
-  | { kind: "len-eq"; n: number }           // f.length == N
+  | { kind: "len-min"; n: number } // f.length >= N
+  | { kind: "len-max"; n: number } // f.length <= N
+  | { kind: "len-eq"; n: number } // f.length == N
   | { kind: "len-range"; lo: number; hi: number } // f.length >= N && f.length <= M
-  | { kind: "regex"; pattern: string };     // f.matches("…")
+  | { kind: "regex"; pattern: string }; // f.matches("…")
 
 /** Detect the recognised "single-field" invariant shapes that map to
  *  idiomatic native chain calls (`z.number().min(N)`,
@@ -189,9 +181,7 @@ export function singleFieldShape(
   return matchSingleField(inv.expr);
 }
 
-function matchSingleField(
-  e: ExprIR,
-): { field: string; pattern: SingleFieldPattern } | null {
+function matchSingleField(e: ExprIR): { field: string; pattern: SingleFieldPattern } | null {
   if (e.kind === "paren") return matchSingleField(e.inner);
 
   // `<field>.matches("literal")` → regex pattern.
@@ -295,11 +285,7 @@ function lengthFieldRef(e: ExprIR): string | null {
   if (e.kind !== "member" || e.member !== "length") return null;
   const recv = e.receiver;
   if (recv.kind !== "ref") return null;
-  if (
-    recv.refKind === "this-prop" ||
-    recv.refKind === "this-vo-prop" ||
-    recv.refKind === "param"
-  ) {
+  if (recv.refKind === "this-prop" || recv.refKind === "this-vo-prop" || recv.refKind === "param") {
     return recv.name;
   }
   return null;
@@ -309,20 +295,14 @@ function lengthFieldRef(e: ExprIR): string | null {
  *  pattern.  String-typed receiver only; argument must be a string
  *  literal (the parser-time validator already enforces the latter
  *  for the `matches` operator). */
-function matchesCall(
-  e: ExprIR,
-): { field: string; pattern: SingleFieldPattern } | null {
+function matchesCall(e: ExprIR): { field: string; pattern: SingleFieldPattern } | null {
   if (e.kind !== "method-call" || e.member !== "matches") return null;
   if (e.args.length !== 1) return null;
   const arg = e.args[0]!;
   if (arg.kind !== "literal" || arg.lit !== "string") return null;
   const recv = e.receiver;
   if (recv.kind !== "ref") return null;
-  if (
-    recv.refKind !== "this-prop" &&
-    recv.refKind !== "this-vo-prop" &&
-    recv.refKind !== "param"
-  ) {
+  if (recv.refKind !== "this-prop" && recv.refKind !== "this-vo-prop" && recv.refKind !== "param") {
     return null;
   }
   return { field: recv.name, pattern: { kind: "regex", pattern: arg.value } };
@@ -332,11 +312,7 @@ function matchesCall(
  *  body field (this-prop, this-vo-prop, or operation param). */
 function numericFieldRef(e: ExprIR): string | null {
   if (e.kind !== "ref") return null;
-  if (
-    e.refKind === "this-prop" ||
-    e.refKind === "this-vo-prop" ||
-    e.refKind === "param"
-  ) {
+  if (e.refKind === "this-prop" || e.refKind === "this-vo-prop" || e.refKind === "param") {
     return e.name;
   }
   return null;
@@ -362,11 +338,7 @@ export function pickErrorPath(inv: InvariantIR): string | null {
 function firstFieldRef(e: ExprIR): string | null {
   switch (e.kind) {
     case "ref":
-      if (
-        e.refKind === "this-prop" ||
-        e.refKind === "this-vo-prop" ||
-        e.refKind === "param"
-      ) {
+      if (e.refKind === "this-prop" || e.refKind === "this-vo-prop" || e.refKind === "param") {
         return e.name;
       }
       return null;
@@ -384,16 +356,9 @@ function firstFieldRef(e: ExprIR): string | null {
     case "paren":
       return firstFieldRef(e.inner);
     case "ternary":
-      return (
-        firstFieldRef(e.cond) ??
-        firstFieldRef(e.then) ??
-        firstFieldRef(e.otherwise)
-      );
+      return firstFieldRef(e.cond) ?? firstFieldRef(e.then) ?? firstFieldRef(e.otherwise);
     case "call":
-      return e.args.reduce<string | null>(
-        (acc, a) => acc ?? firstFieldRef(a),
-        null,
-      );
+      return e.args.reduce<string | null>((acc, a) => acc ?? firstFieldRef(a), null);
     case "lambda":
       // Slice 2: lambda body is now optional.  Block-body lambdas
       // appear only in event handlers (page metamodel), never in
@@ -402,10 +367,7 @@ function firstFieldRef(e: ExprIR): string | null {
       return null;
     case "new":
     case "object":
-      return e.fields.reduce<string | null>(
-        (acc, f) => acc ?? firstFieldRef(f.value),
-        null,
-      );
+      return e.fields.reduce<string | null>((acc, f) => acc ?? firstFieldRef(f.value), null);
     case "match":
       // First arm (cond, then value), then the `else` branch — same
       // left-to-right walk semantics as `ternary`.

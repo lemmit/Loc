@@ -11,15 +11,15 @@
 // This test pins the migrated shape so a future regression in
 // any layer surfaces immediately.
 
-import { describe, expect, it } from "vitest";
-import { NodeFileSystem } from "langium/node";
-import { parseHelper } from "langium/test";
-import { createDddServices } from "../src/language/ddd-module.js";
-import type { Model } from "../src/language/generated/ast.js";
-import { lowerModel } from "../src/ir/lower.js";
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { NodeFileSystem } from "langium/node";
+import { parseHelper } from "langium/test";
+import { describe, expect, it } from "vitest";
+import { lowerModel } from "../src/ir/lower.js";
+import { createDddServices } from "../src/language/ddd-module.js";
+import type { Model } from "../src/language/generated/ast.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const ACME_PATH = path.resolve(here, "..", "examples", "acme.ddd");
@@ -29,9 +29,7 @@ async function build() {
   const helper = parseHelper(services.Ddd);
   const src = readFileSync(ACME_PATH, "utf8");
   const doc = await helper(src, { validation: true });
-  const errors = (doc.diagnostics ?? [])
-    .filter((d) => d.severity === 1)
-    .map((d) => d.message);
+  const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1).map((d) => d.message);
   return { doc, errors };
 }
 
@@ -61,9 +59,7 @@ describe("examples/acme.ddd — explicit architecture migration", () => {
   it("declares the primarySql storage", async () => {
     const { doc } = await build();
     const sys = lowerModel(doc.parseResult.value as Model).systems[0]!;
-    expect(sys.storages.map((s) => `${s.name}:${s.type}`)).toEqual([
-      "primarySql:postgres",
-    ]);
+    expect(sys.storages.map((s) => `${s.name}:${s.type}`)).toEqual(["primarySql:postgres"]);
   });
 
   it("WebApp declares all three UI api parameters", async () => {
@@ -84,11 +80,7 @@ describe("examples/acme.ddd — explicit architecture migration", () => {
     const sys = lowerModel(doc.parseResult.value as Model).systems[0]!;
     const api = sys.deployables.find((d) => d.name === "api")!;
     expect(api).toBeDefined();
-    expect(api.serves.sort()).toEqual([
-      "CatalogApi",
-      "CustomerMgmtApi",
-      "SalesApi",
-    ]);
+    expect(api.serves.sort()).toEqual(["CatalogApi", "CustomerMgmtApi", "SalesApi"]);
     // Each module's primary storage is primarySql.
     for (const mb of api.moduleBindings) {
       const primary = mb.storages.find((s) => s.role === "primary");
@@ -104,10 +96,6 @@ describe("examples/acme.ddd — explicit architecture migration", () => {
     const bindings = webApp.uiBindings
       .map((b) => `${b.paramName}->${b.sourceDeployableName}`)
       .sort();
-    expect(bindings).toEqual([
-      "Catalog->api",
-      "CustomerMgmt->api",
-      "Sales->api",
-    ]);
+    expect(bindings).toEqual(["Catalog->api", "CustomerMgmt->api", "Sales->api"]);
   });
 });

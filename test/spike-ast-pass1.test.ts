@@ -17,8 +17,8 @@
 //      cross-references inside synthesised pages; just `name`
 //      and `$type`.  That's enough for indexing + resolution.
 
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model, Page, Ui } from "../src/language/generated/ast.js";
 
@@ -34,18 +34,14 @@ async function parseFresh(src: string): Promise<{
   const doc = await helper(src, { validation: true });
   return {
     model: doc.parseResult.value as Model,
-    errors: (doc.diagnostics ?? [])
-      .filter((d) => d.severity === 1)
-      .map((d) => d.message),
+    errors: (doc.diagnostics ?? []).filter((d) => d.severity === 1).map((d) => d.message),
   };
 }
 
 function uiOf(model: Model, name: string): Ui {
   const sys = (model.members ?? []).find((m) => m.$type === "System");
   if (!sys || sys.$type !== "System") throw new Error("no system");
-  const ui = (sys.members ?? []).find(
-    (m): m is Ui => m.$type === "Ui" && m.name === name,
-  );
+  const ui = (sys.members ?? []).find((m): m is Ui => m.$type === "Ui" && m.name === name);
   if (!ui) throw new Error(`ui '${name}' not found`);
   return ui;
 }
@@ -195,9 +191,7 @@ describe("spike — AST-to-AST scaffold expansion", () => {
     expect(errors).toEqual([]);
     const ui = uiOf(model, "WebApp");
     // Each synthesised page has the right $container + parent name.
-    const pages = (ui.members ?? []).filter(
-      (m): m is Page => m.$type === "Page",
-    );
+    const pages = (ui.members ?? []).filter((m): m is Page => m.$type === "Page");
     for (const p of pages) {
       expect(p.$container).toBe(ui);
       expect(p.$containerProperty).toBe("members");

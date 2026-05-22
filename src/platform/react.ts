@@ -16,12 +16,7 @@ const reactPlatform: PlatformSurface = {
   composeService({ deployable, sys }): ComposeServiceShape {
     const target = sys.deployables.find((t) => t.name === deployable.targetName);
     return {
-      env: [
-        [
-          "VITE_API_BASE_URL",
-          `http://localhost:${target?.port ?? 8080}`,
-        ],
-      ],
+      env: [["VITE_API_BASE_URL", `http://localhost:${target?.port ?? 8080}`]],
       dependsOnDb: false,
       healthPath: "/",
       internalPort: 3000,

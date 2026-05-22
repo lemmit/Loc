@@ -1,8 +1,8 @@
+import { generateDotnet } from "../../src/generator/dotnet/index.js";
+import type { Model } from "../../src/language/generated/ast.js";
 import { generateTypeScript } from "../../src/platform/hono/v4/emit.js";
 import { BACKEND_PINS as HONO_V4_PINS } from "../../src/platform/hono/v4/pins.js";
-import { generateDotnet } from "../../src/generator/dotnet/index.js";
 import { generateSystems } from "../../src/system/index.js";
-import type { Model } from "../../src/language/generated/ast.js";
 
 export { HONO_V4_PINS };
 
@@ -11,7 +11,5 @@ export const generateHono = (model: Model): Map<string, string> =>
   generateTypeScript(model, HONO_V4_PINS);
 
 /** Re-exported for symmetry — generates the single .NET project file map. */
-export { generateDotnet };
-
 /** Re-exported — full multi-deployable system emission orchestrator. */
-export { generateSystems };
+export { generateDotnet, generateSystems };

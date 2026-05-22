@@ -123,9 +123,7 @@ export function renderQueryHandler(args: {
     "_repo = repo",
     ...deps.map((d) => `${d.field} = ${d.field.replace(/^_/, "")}`),
   ].join("; ");
-  const extraUsings = (args.extraUsings ?? [])
-    .map((u) => `using ${u};`)
-    .join("\n");
+  const extraUsings = (args.extraUsings ?? []).map((u) => `using ${u};`).join("\n");
   return `// Auto-generated.
 using System.Linq;
 using System.Threading;

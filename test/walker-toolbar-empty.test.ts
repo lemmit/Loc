@@ -6,11 +6,11 @@
 //   Empty("No orders yet")
 //     → centered dimmed-text empty-state placeholder
 
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
-import { generateSystems } from "../src/system/index.js";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
+import { generateSystems } from "../src/system/index.js";
 
 async function buildAndGenerate(src: string): Promise<Map<string, string>> {
   const services = createDddServices(NodeFileSystem);
@@ -21,7 +21,7 @@ async function buildAndGenerate(src: string): Promise<Map<string, string>> {
 }
 
 describe("Slice 11.13 — Toolbar + Empty in walker stdlib", () => {
-  it("Toolbar(...) emits Mantine <Group justify=\"space-between\">", async () => {
+  it('Toolbar(...) emits Mantine <Group justify="space-between">', async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
@@ -46,9 +46,7 @@ describe("Slice 11.13 — Toolbar + Empty in walker stdlib", () => {
     const content = files.get("web/src/pages/orders.tsx")!;
     expect(content).toBeDefined();
     // Toolbar imports through Group (no separate Toolbar specifier).
-    expect(content).toMatch(
-      /import \{ Button, Group, Title \} from "@mantine\/core";/,
-    );
+    expect(content).toMatch(/import \{ Button, Group, Title \} from "@mantine\/core";/);
     expect(content).toMatch(/<Group justify="space-between">/);
     expect(content).toMatch(/<Title order=\{2\}>Orders<\/Title>/);
     expect(content).toMatch(
@@ -79,7 +77,7 @@ describe("Slice 11.13 — Toolbar + Empty in walker stdlib", () => {
     expect(content).toMatch(/<Group justify="space-between" \/>/);
   });
 
-  it("Empty(\"No orders yet\") emits centered dimmed-text placeholder", async () => {
+  it('Empty("No orders yet") emits centered dimmed-text placeholder', async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
@@ -100,9 +98,7 @@ describe("Slice 11.13 — Toolbar + Empty in walker stdlib", () => {
     `);
     const content = files.get("web/src/pages/list.tsx")!;
     expect(content).toMatch(/import \{ Center, Text \} from "@mantine\/core";/);
-    expect(content).toMatch(
-      /<Center mih=\{200\}><Text c="dimmed">No orders yet<\/Text><\/Center>/,
-    );
+    expect(content).toMatch(/<Center mih=\{200\}><Text c="dimmed">No orders yet<\/Text><\/Center>/);
   });
 
   it("Empty() with no message falls back to default", async () => {
@@ -125,9 +121,7 @@ describe("Slice 11.13 — Toolbar + Empty in walker stdlib", () => {
       }
     `);
     const content = files.get("web/src/pages/x.tsx")!;
-    expect(content).toMatch(
-      /<Center mih=\{200\}><Text c="dimmed">No results\.<\/Text><\/Center>/,
-    );
+    expect(content).toMatch(/<Center mih=\{200\}><Text c="dimmed">No results\.<\/Text><\/Center>/);
   });
 
   it("Empty accepts a binary-op message (state interpolation)", async () => {
@@ -151,9 +145,7 @@ describe("Slice 11.13 — Toolbar + Empty in walker stdlib", () => {
       }
     `);
     const content = files.get("web/src/pages/x.tsx")!;
-    expect(content).toMatch(
-      /<Text c="dimmed">\{\(\("No " \+ kind\) \+ " here"\)\}<\/Text>/,
-    );
+    expect(content).toMatch(/<Text c="dimmed">\{\(\("No " \+ kind\) \+ " here"\)\}<\/Text>/);
     expect(content).toMatch(/const \[kind, setKind\]/);
   });
 });

@@ -5,17 +5,18 @@
 // each aggregate field in the detail-page card body, matching the
 // scaffold renderer's KeyValueRow + per-cell formatter shape.
 
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
-import { generateSystems } from "../src/system/index.js";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
+import { generateSystems } from "../src/system/index.js";
 
 async function emit(body: string): Promise<string> {
   const services = createDddServices(NodeFileSystem);
   const { parseHelper } = await import("langium/test");
   const helper = parseHelper(services.Ddd);
-  const doc = await helper(`
+  const doc = await helper(
+    `
     system S {
       module M { context C { } }
       ui WebApp {
@@ -24,7 +25,9 @@ async function emit(body: string): Promise<string> {
       deployable api { platform: hono, modules: M, port: 3000 }
       deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
     }
-  `, { validation: true });
+  `,
+    { validation: true },
+  );
   const files = generateSystems(doc.parseResult.value as Model).files;
   const tsx = files.get("web/src/pages/p.tsx");
   if (!tsx) throw new Error(`MISSING; keys = ${[...files.keys()].join(", ")}`);
@@ -32,26 +35,20 @@ async function emit(body: string): Promise<string> {
 }
 
 describe("Slice A10 — KeyValueRow primitive", () => {
-  it("emits <KeyValueRow label=\"…\">child</KeyValueRow> with the runtime helper imported", async () => {
+  it('emits <KeyValueRow label="…">child</KeyValueRow> with the runtime helper imported', async () => {
     const tsx = await emit(`KeyValueRow("Status", Text("active"))`);
     expect(tsx).toMatch(/import \{[^}]*\bKeyValueRow\b[^}]*\} from "\.\.\/lib\/format"/);
-    expect(tsx).toMatch(
-      /<KeyValueRow label="Status"><Text>active<\/Text><\/KeyValueRow>/,
-    );
+    expect(tsx).toMatch(/<KeyValueRow label="Status"><Text>active<\/Text><\/KeyValueRow>/);
   });
 
   it("testid: lands on the root <KeyValueRow>", async () => {
-    const tsx = await emit(
-      `KeyValueRow("Status", Text("active"), testid: "row-status")`,
-    );
+    const tsx = await emit(`KeyValueRow("Status", Text("active"), testid: "row-status")`);
     expect(tsx).toMatch(/<KeyValueRow [^>]*\bdata-testid="row-status"/);
   });
 
   it("missing value emits a visible placeholder, no crash", async () => {
     const tsx = await emit(`KeyValueRow("Status")`);
-    expect(tsx).toMatch(
-      /<KeyValueRow label="Status">\{\/\* missing value \*\/\}<\/KeyValueRow>/,
-    );
+    expect(tsx).toMatch(/<KeyValueRow label="Status">\{\/\* missing value \*\/\}<\/KeyValueRow>/);
   });
 
   it("composes inside a Stack of detail rows", async () => {

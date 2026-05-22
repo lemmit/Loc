@@ -41,11 +41,7 @@ import type { FormFieldVM } from "./view-models.js";
 /** Render any pack-level "shell file" (project scaffolding outside
  *  the page-emission path).  Pack manifest's `emits` map names the
  *  template; `context` is passed verbatim to Handlebars. */
-export function renderShellFile(
-  name: string,
-  context: unknown,
-  pack: LoadedPack,
-): string {
+export function renderShellFile(name: string, context: unknown, pack: LoadedPack): string {
   return pack.render(name, context);
 }
 
@@ -66,14 +62,7 @@ export function renderAppShell(
   pack: LoadedPack,
 ): string {
   return pack.render("app-shell", {
-    ...prepareAppShellVM(
-      aggs,
-      workflows,
-      views,
-      systemName,
-      sidebarOverride,
-      extraRoutes,
-    ),
+    ...prepareAppShellVM(aggs, workflows, views, systemName, sidebarOverride, extraRoutes),
     // Router 7 (stack v3) renamed the package react-router-dom →
     // react-router; library mode keeps the v6 API so only the
     // import specifier changes.  Pre-v3 stacks resolve to
@@ -97,9 +86,7 @@ export function renderMain(pack: LoadedPack): string {
  *  `field-input-valueobject.hbs` Fieldset reads). */
 export function renderFormField(vm: FormFieldVM, pack: LoadedPack): string {
   if (vm.template === "field-input-valueobject") {
-    const innerHtml = (vm.children ?? [])
-      .map((child) => renderFormField(child, pack))
-      .join("\n");
+    const innerHtml = (vm.children ?? []).map((child) => renderFormField(child, pack)).join("\n");
     return pack.render(vm.template, { ...vm, innerHtml });
   }
   return pack.render(vm.template, vm);

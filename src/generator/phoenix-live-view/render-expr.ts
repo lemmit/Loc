@@ -1,5 +1,5 @@
 import type { BinOp, ExprIR, TypeIR } from "../../ir/loom-ir.js";
-import { snake, pascal } from "../../util/naming.js";
+import { pascal, snake } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Expression renderer for the Phoenix LiveView / Elixir backend.
@@ -83,10 +83,7 @@ function renderLiteral(lit: string, value: string): string {
 // References
 // ---------------------------------------------------------------------------
 
-function renderRef(
-  e: Extract<ExprIR, { kind: "ref" }>,
-  ctx: RenderCtx,
-): string {
+function renderRef(e: Extract<ExprIR, { kind: "ref" }>, ctx: RenderCtx): string {
   switch (e.refKind) {
     case "param":
     case "let":
@@ -112,10 +109,7 @@ function renderRef(
 // Member access
 // ---------------------------------------------------------------------------
 
-function renderMember(
-  e: Extract<ExprIR, { kind: "member" }>,
-  ctx: RenderCtx,
-): string {
+function renderMember(e: Extract<ExprIR, { kind: "member" }>, ctx: RenderCtx): string {
   const recv = renderExpr(e.receiver, ctx);
   // Array/list length shorthand → Elixir `length(list)` or `Enum.count`
   if (e.receiverType.kind === "array" && e.member === "count") {
@@ -135,10 +129,7 @@ function renderMember(
 // Method calls
 // ---------------------------------------------------------------------------
 
-function renderMethodCall(
-  e: Extract<ExprIR, { kind: "method-call" }>,
-  ctx: RenderCtx,
-): string {
+function renderMethodCall(e: Extract<ExprIR, { kind: "method-call" }>, ctx: RenderCtx): string {
   const recv = renderExpr(e.receiver, ctx);
   const args = e.args.map((a) => renderExpr(a, ctx));
   if (e.isCollectionOp) {
@@ -154,26 +145,18 @@ function renderMethodCall(
     // Strip surrounding quotes from the pattern string arg if present,
     // then embed as a sigil.
     const raw = e.args[0];
-    const pat =
-      raw?.kind === "literal" && raw.lit === "string" ? raw.value : args[0]!;
+    const pat = raw?.kind === "literal" && raw.lit === "string" ? raw.value : args[0]!;
     return `Regex.match?(~r/${pat}/, ${recv})`;
   }
   return `${recv}.${snake(e.member)}(${args.join(", ")})`;
 }
 
-function renderCollectionOp(
-  recv: string,
-  name: string,
-  args: string[],
-  ctx: RenderCtx,
-): string {
+function renderCollectionOp(recv: string, name: string, args: string[], ctx: RenderCtx): string {
   switch (name) {
     case "count":
       return `Enum.count(${recv})`;
     case "sum":
-      return args.length === 1
-        ? `Enum.sum(Enum.map(${recv}, ${args[0]}))`
-        : `Enum.sum(${recv})`;
+      return args.length === 1 ? `Enum.sum(Enum.map(${recv}, ${args[0]}))` : `Enum.sum(${recv})`;
     case "all":
       return `Enum.all?(${recv}, ${args[0] ?? "fn _ -> true end"})`;
     case "any":
@@ -195,10 +178,7 @@ function renderCollectionOp(
 // Calls
 // ---------------------------------------------------------------------------
 
-function renderCall(
-  e: Extract<ExprIR, { kind: "call" }>,
-  ctx: RenderCtx,
-): string {
+function renderCall(e: Extract<ExprIR, { kind: "call" }>, ctx: RenderCtx): string {
   const args = e.args.map((a) => renderExpr(a, ctx)).join(", ");
   switch (e.callKind) {
     case "value-object-ctor":
@@ -216,13 +196,8 @@ function renderCall(
 // New (entity part constructor)
 // ---------------------------------------------------------------------------
 
-function renderNew(
-  e: Extract<ExprIR, { kind: "new" }>,
-  ctx: RenderCtx,
-): string {
-  const fields = e.fields
-    .map((f) => `${snake(f.name)}: ${renderExpr(f.value, ctx)}`)
-    .join(", ");
+function renderNew(e: Extract<ExprIR, { kind: "new" }>, ctx: RenderCtx): string {
+  const fields = e.fields.map((f) => `${snake(f.name)}: ${renderExpr(f.value, ctx)}`).join(", ");
   return `%${ctx.contextModule}.${pascal(e.partName)}{${fields}}`;
 }
 
@@ -230,11 +205,7 @@ function renderNew(
 // Unary
 // ---------------------------------------------------------------------------
 
-function renderUnary(
-  op: "-" | "!",
-  operand: ExprIR,
-  ctx: RenderCtx,
-): string {
+function renderUnary(op: "-" | "!", operand: ExprIR, ctx: RenderCtx): string {
   const inner = renderExpr(operand, ctx);
   if (op === "!") return `not ${inner}`;
   return `-${inner}`;
@@ -247,21 +218,33 @@ function renderUnary(
 // Operator mapping from IR BinOp → Elixir.
 function elixirOp(op: BinOp, leftIsString: boolean): string {
   switch (op) {
-    case "&&": return "and";
-    case "||": return "or";
-    case "==": return "==";
-    case "!=": return "!=";
+    case "&&":
+      return "and";
+    case "||":
+      return "or";
+    case "==":
+      return "==";
+    case "!=":
+      return "!=";
     case "+":
       // String concatenation uses `<>` in Elixir.
       return leftIsString ? "<>" : "+";
-    case "-": return "-";
-    case "*": return "*";
-    case "/": return "/";
-    case "%": return "rem";
-    case "<": return "<";
-    case "<=": return "<=";
-    case ">": return ">";
-    case ">=": return ">=";
+    case "-":
+      return "-";
+    case "*":
+      return "*";
+    case "/":
+      return "/";
+    case "%":
+      return "rem";
+    case "<":
+      return "<";
+    case "<=":
+      return "<=";
+    case ">":
+      return ">";
+    case ">=":
+      return ">=";
   }
 }
 
@@ -275,12 +258,7 @@ function isStringType(e: ExprIR): boolean {
   return false;
 }
 
-function renderBinary(
-  op: BinOp,
-  left: ExprIR,
-  right: ExprIR,
-  ctx: RenderCtx,
-): string {
+function renderBinary(op: BinOp, left: ExprIR, right: ExprIR, ctx: RenderCtx): string {
   const l = renderExpr(left, ctx);
   const r = renderExpr(right, ctx);
   const elOp = elixirOp(op, isStringType(left));
@@ -303,9 +281,7 @@ function renderMatch(
   const clauses = arms
     .map((a) => `    ${renderExpr(a.cond, ctx)} -> ${renderExpr(a.value, ctx)}`)
     .join("\n");
-  const fallthrough = otherwise
-    ? `    true -> ${renderExpr(otherwise, ctx)}`
-    : `    true -> nil`;
+  const fallthrough = otherwise ? `    true -> ${renderExpr(otherwise, ctx)}` : `    true -> nil`;
   return `cond do\n${clauses}\n${fallthrough}\n  end`;
 }
 
@@ -317,15 +293,22 @@ export function renderAshType(t: TypeIR, contextModule: string): string {
   switch (t.kind) {
     case "primitive":
       switch (t.name) {
-        case "int": return ":integer";
-        case "long": return ":integer";
-        case "decimal": return ":decimal";
-        case "string": return ":string";
-        case "bool": return ":boolean";
-        case "datetime": return ":utc_datetime";
-        case "guid": return ":uuid";
+        case "int":
+          return ":integer";
+        case "long":
+          return ":integer";
+        case "decimal":
+          return ":decimal";
+        case "string":
+          return ":string";
+        case "bool":
+          return ":boolean";
+        case "datetime":
+          return ":utc_datetime";
+        case "guid":
+          return ":uuid";
       }
-      /* eslint-disable-next-line no-fallthrough */
+    /* eslint-disable-next-line no-fallthrough */
     case "id":
       return ":uuid";
     case "enum":

@@ -1,11 +1,11 @@
-import { describe, it, expect } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { EmptyFileSystem, AstUtils, type AstNode } from "langium";
+import { type AstNode, AstUtils, EmptyFileSystem } from "langium";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
-import { printExpr } from "../src/language/print/index.js";
 import type { Expression } from "../src/language/generated/ast.js";
+import { printExpr } from "../src/language/print/index.js";
 
 // ---------------------------------------------------------------------------
 // Round-trip safety net for the `.ddd` expression printer (Builders, Phase 0).
@@ -22,9 +22,24 @@ const repoRoot = path.resolve(here, "..");
 const parser = createDddServices(EmptyFileSystem).Ddd.parser.LangiumParser;
 
 const EXPR_TYPES = new Set<string>([
-  "MatchExpr", "TernaryExpr", "BinaryExpr", "UnaryExpr", "MemberAccess",
-  "CallExpr", "Lambda", "NewExpr", "ObjectLit", "ParenExpr", "StringLit",
-  "IntLit", "DecLit", "BoolLit", "NullLit", "NowExpr", "ThisRef", "IdRef",
+  "MatchExpr",
+  "TernaryExpr",
+  "BinaryExpr",
+  "UnaryExpr",
+  "MemberAccess",
+  "CallExpr",
+  "Lambda",
+  "NewExpr",
+  "ObjectLit",
+  "ParenExpr",
+  "StringLit",
+  "IntLit",
+  "DecLit",
+  "BoolLit",
+  "NullLit",
+  "NowExpr",
+  "ThisRef",
+  "IdRef",
   "NameRef",
 ]);
 const isExpr = (n: AstNode): n is Expression => EXPR_TYPES.has(n.$type);

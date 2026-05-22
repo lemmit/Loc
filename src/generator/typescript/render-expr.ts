@@ -80,7 +80,10 @@ export function renderTsExpr(e: ExprIR, ctx: TsRenderContext = DEFAULT): string 
   }
 }
 
-function renderLiteral(lit: ExprIR & { kind: "literal" }["lit" extends never ? never : never] | string, value: string): string {
+function renderLiteral(
+  lit: (ExprIR & { kind: "literal" }["lit" extends never ? never : never]) | string,
+  value: string,
+): string {
   if (lit === "string") return JSON.stringify(value);
   if (lit === "now") return "new Date()";
   if (lit === "null") return "null";
@@ -105,9 +108,7 @@ function renderRef(e: Extract<ExprIR, { kind: "ref" }>, ctx: TsRenderContext): s
     case "this-derived":
       return fromOutside ? `${ctx.thisName}.${e.name}` : `this.${e.name}`;
     case "helper-fn":
-      return fromOutside
-        ? `${ctx.thisName}.${camel(e.name)}`
-        : `this.${camel(e.name)}`;
+      return fromOutside ? `${ctx.thisName}.${camel(e.name)}` : `this.${camel(e.name)}`;
     case "enum-value":
       return `${e.enumName}.${e.name}`;
     case "current-user":
@@ -129,7 +130,10 @@ function renderMember(e: Extract<ExprIR, { kind: "member" }>, ctx: TsRenderConte
   return `${recv}.${e.member}`;
 }
 
-function renderMethodCall(e: Extract<ExprIR, { kind: "method-call" }>, ctx: TsRenderContext): string {
+function renderMethodCall(
+  e: Extract<ExprIR, { kind: "method-call" }>,
+  ctx: TsRenderContext,
+): string {
   const recv = renderTsExpr(e.receiver, ctx);
   const args = e.args.map((a) => renderTsExpr(a, ctx));
   if (e.isCollectionOp) {
@@ -205,8 +209,7 @@ function renderNew(e: Extract<ExprIR, { kind: "new" }>, ctx: TsRenderContext): s
 
 function renderBinary(op: BinOp, left: ExprIR, right: ExprIR, ctx: TsRenderContext): string {
   // Equality comparisons in TS: prefer === / !==
-  const opPrint =
-    op === "==" ? "===" : op === "!=" ? "!==" : op;
+  const opPrint = op === "==" ? "===" : op === "!=" ? "!==" : op;
   return `${renderTsExpr(left, ctx)} ${opPrint} ${renderTsExpr(right, ctx)}`;
 }
 

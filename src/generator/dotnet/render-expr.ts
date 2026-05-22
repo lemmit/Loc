@@ -111,10 +111,7 @@ function renderRef(e: Extract<ExprIR, { kind: "ref" }>, ctx: CsRenderContext): s
   }
 }
 
-function renderMember(
-  e: Extract<ExprIR, { kind: "member" }>,
-  ctx: CsRenderContext,
-): string {
+function renderMember(e: Extract<ExprIR, { kind: "member" }>, ctx: CsRenderContext): string {
   const recv = renderCsExpr(e.receiver, ctx);
   if (e.receiverType.kind === "array" && e.member === "count") return `${recv}.Count`;
   if (
@@ -176,10 +173,7 @@ function renderCollectionOp(recv: string, name: string, args: string[]): string 
   }
 }
 
-function renderCall(
-  e: Extract<ExprIR, { kind: "call" }>,
-  ctx: CsRenderContext,
-): string {
+function renderCall(e: Extract<ExprIR, { kind: "call" }>, ctx: CsRenderContext): string {
   const args = e.args.map((a) => renderCsExpr(a, ctx)).join(", ");
   switch (e.callKind) {
     case "value-object-ctor":
@@ -192,10 +186,7 @@ function renderCall(
   }
 }
 
-function renderNew(
-  e: Extract<ExprIR, { kind: "new" }>,
-  ctx: CsRenderContext,
-): string {
+function renderNew(e: Extract<ExprIR, { kind: "new" }>, ctx: CsRenderContext): string {
   const inits = [
     `Id = ${e.partName}Id.New()`,
     `ParentId = ${ctx.thisName}.Id`,
@@ -204,12 +195,7 @@ function renderNew(
   return `${e.partName}._Create(new ${e.partName}.State { ${inits.join(", ")} })`;
 }
 
-function renderBinary(
-  op: BinOp,
-  left: ExprIR,
-  right: ExprIR,
-  ctx: CsRenderContext,
-): string {
+function renderBinary(op: BinOp, left: ExprIR, right: ExprIR, ctx: CsRenderContext): string {
   return `${renderCsExpr(left, ctx)} ${op} ${renderCsExpr(right, ctx)}`;
 }
 

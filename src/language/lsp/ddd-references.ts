@@ -1,10 +1,5 @@
+import { type AstNode, CstUtils, type LangiumDocument, type MaybePromise } from "langium";
 import { DefaultReferencesProvider, type LangiumServices } from "langium/lsp";
-import {
-  CstUtils,
-  type AstNode,
-  type LangiumDocument,
-  type MaybePromise,
-} from "langium";
 import { Location, type Position, type ReferenceParams } from "vscode-languageserver";
 import { collectMemberUsages, memberDeclAt } from "./member-refs.js";
 
@@ -44,7 +39,11 @@ export class DddReferencesProvider extends DefaultReferencesProvider {
     const rootCst = document.parseResult?.value?.$cstNode;
     if (!rootCst) return undefined;
     const offset = document.textDocument.offsetAt(position);
-    const leaf = CstUtils.findDeclarationNodeAtOffset(rootCst, offset, this.grammarConfig.nameRegexp);
+    const leaf = CstUtils.findDeclarationNodeAtOffset(
+      rootCst,
+      offset,
+      this.grammarConfig.nameRegexp,
+    );
     if (!leaf) return undefined;
     const declared = this.references.findDeclaration(leaf);
     if (declared && declared.$type !== "MemberAccess") return declared;

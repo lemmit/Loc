@@ -6,11 +6,11 @@
 // and Divider map to their Mantine namesakes.  Divider takes an
 // optional `label:` named arg.
 
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
-import { generateSystems } from "../src/system/index.js";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
+import { generateSystems } from "../src/system/index.js";
 
 async function buildAndGenerate(src: string): Promise<Map<string, string>> {
   const services = createDddServices(NodeFileSystem);
@@ -42,9 +42,7 @@ describe("Slice 11.6 — Stat / Badge / Divider in walker stdlib", () => {
     `);
     const content = files.get("web/src/pages/dashboard.tsx")!;
     expect(content).toBeDefined();
-    expect(content).toMatch(
-      /import \{ Stack, Text \} from "@mantine\/core";/,
-    );
+    expect(content).toMatch(/import \{ Stack, Text \} from "@mantine\/core";/);
     expect(content).toMatch(/<Text size="sm" c="dimmed">Active orders<\/Text>/);
     expect(content).toMatch(/<Text fw=\{700\} size="xl">47<\/Text>/);
   });
@@ -75,7 +73,7 @@ describe("Slice 11.6 — Stat / Badge / Divider in walker stdlib", () => {
     expect(content).toMatch(/const \{ label, value \} = useParams/);
   });
 
-  it("Badge(\"label\") emits Mantine Badge", async () => {
+  it('Badge("label") emits Mantine Badge', async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
@@ -123,7 +121,7 @@ describe("Slice 11.6 — Stat / Badge / Divider in walker stdlib", () => {
     expect(content).toMatch(/<Divider \/>/);
   });
 
-  it("Divider(label: \"Section\") emits labelled inline divider", async () => {
+  it('Divider(label: "Section") emits labelled inline divider', async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
@@ -143,9 +141,7 @@ describe("Slice 11.6 — Stat / Badge / Divider in walker stdlib", () => {
       }
     `);
     const content = files.get("web/src/pages/home.tsx")!;
-    expect(content).toMatch(
-      /<Divider label="Section break" labelPosition="center" \/>/,
-    );
+    expect(content).toMatch(/<Divider label="Section break" labelPosition="center" \/>/);
   });
 
   it("Stack composes Stat / Badge / Divider together cleanly", async () => {

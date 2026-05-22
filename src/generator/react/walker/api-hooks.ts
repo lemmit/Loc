@@ -13,10 +13,7 @@ import { camel, pascal, plural } from "../../../util/naming.js";
 import type { ApiHookUse, WalkContext } from "../body-walker.js";
 import { emitExpr } from "../body-walker.js";
 
-export function tryDetectApiHook(
-  expr: ExprIR,
-  ctx: WalkContext,
-): ApiHookUse | null {
+export function tryDetectApiHook(expr: ExprIR, ctx: WalkContext): ApiHookUse | null {
   // Pattern A: member(member(ref:apiParam, agg), op)
   if (expr.kind === "member" && expr.receiver.kind === "member") {
     const inner = expr.receiver;
@@ -41,14 +38,20 @@ export function tryDetectApiHook(
   // Lets UIs without a `api X: Y` binding still get auto-injected
   // hooks (e.g. legacy `scaffold modules: M` deployables that
   // never declared api params).
-  if (expr.kind === "member" && expr.receiver.kind === "ref"
-      && ctx.aggregatesByName.has(expr.receiver.name)) {
+  if (
+    expr.kind === "member" &&
+    expr.receiver.kind === "ref" &&
+    ctx.aggregatesByName.has(expr.receiver.name)
+  ) {
     return buildHookUse(expr.receiver.name, expr.member, [], ctx);
   }
   // Slice D1 — Pattern E: same as D but with method-call args
   // (parameterised forms like `Account.byId(id)`).
-  if (expr.kind === "method-call" && expr.receiver.kind === "ref"
-      && ctx.aggregatesByName.has(expr.receiver.name)) {
+  if (
+    expr.kind === "method-call" &&
+    expr.receiver.kind === "ref" &&
+    ctx.aggregatesByName.has(expr.receiver.name)
+  ) {
     return buildHookUse(expr.receiver.name, expr.member, expr.args, ctx);
   }
   return null;
@@ -79,12 +82,7 @@ function buildViewHookUse(viewName: string): ApiHookUse {
  *
  *  The local var name is `<aggCamel><OpPascal>` — deterministic,
  *  visible in the generated file, never invented by the user. */
-function buildHookUse(
-  aggregate: string,
-  op: string,
-  args: ExprIR[],
-  ctx: WalkContext,
-): ApiHookUse {
+function buildHookUse(aggregate: string, op: string, args: ExprIR[], ctx: WalkContext): ApiHookUse {
   const aggSingle = pascal(aggregate);
   const aggPlural = plural(aggSingle);
   let hookName: string;
@@ -136,9 +134,7 @@ export function renderApiHookImports(
   for (const [path, names] of [...byPath.entries()].sort()) {
     const sorted = [...names].sort();
     const rewritten =
-      srcImportPrefix !== "../" && path.startsWith("../")
-        ? srcImportPrefix + path.slice(3)
-        : path;
+      srcImportPrefix !== "../" && path.startsWith("../") ? srcImportPrefix + path.slice(3) : path;
     lines.push(`import { ${sorted.join(", ")} } from "${rewritten}";\n`);
   }
   return lines.join("");

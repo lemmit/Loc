@@ -17,11 +17,11 @@
 //   5. Scaffold-archetype bodies (List/Detail/Form) STILL go
 //      through the scaffold dispatch path, not the walker.
 
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
-import { generateSystems } from "../src/system/index.js";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
+import { generateSystems } from "../src/system/index.js";
 
 async function buildAndGenerate(src: string): Promise<Map<string, string>> {
   const services = createDddServices(NodeFileSystem);
@@ -54,9 +54,7 @@ describe("Slice 11.3 — recursive layout walker", () => {
     expect([...files.keys()]).toContain("web/src/pages/welcome.tsx");
     const content = files.get("web/src/pages/welcome.tsx")!;
     // Mantine imports for the components used.
-    expect(content).toMatch(
-      /import \{ Stack, Text, Title \} from "@mantine\/core";/,
-    );
+    expect(content).toMatch(/import \{ Stack, Text, Title \} from "@mantine\/core";/);
     // Function component named after the page.
     expect(content).toMatch(/export default function Welcome\(\)/);
     // JSX shape: Stack > Title order={2} + Text.
@@ -113,7 +111,7 @@ describe("Slice 11.3 — recursive layout walker", () => {
     expect(content).toMatch(/<Title order=\{1\}>Big<\/Title>/);
   });
 
-  it("nested composition: Card(\"Stats\", Stack(Text(\"a\"), Text(\"b\")))", async () => {
+  it('nested composition: Card("Stats", Stack(Text("a"), Text("b")))', async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { computeVerification } from "../src/verify/verification.js";
 import type { TestOutcome } from "../src/ir/loom-ir.js";
+import { computeVerification } from "../src/verify/verification.js";
 import { buildLoomModel as build } from "./_helpers/index.js";
 
 // US-001 ─ parent of ─ AC-001 (verified by TC-001, backed by a unit test
@@ -43,7 +43,12 @@ describe("computeVerification (Slice 13)", () => {
     const refs = loom.traceability!.execTests;
     expect(refs).toEqual(
       expect.arrayContaining([
-        { name: "valid credentials are accepted", suite: "LoginSession", kind: "unit", testCaseId: "TC-001" },
+        {
+          name: "valid credentials are accepted",
+          suite: "LoginSession",
+          kind: "unit",
+          testCaseId: "TC-001",
+        },
         { name: "session can be started", suite: "Shop e2e", kind: "api", testCaseId: "TC-002" },
       ]),
     );

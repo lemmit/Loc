@@ -142,9 +142,7 @@ describe("validation", () => {
         deployable webB { platform: react, targets: webA, port: 3002 }
       }
     `);
-    expect(errors.some((e) => /frontend/i.test(e) && /target/i.test(e))).toBe(
-      true,
-    );
+    expect(errors.some((e) => /frontend/i.test(e) && /target/i.test(e))).toBe(true);
   });
 
   // ---------------------------------------------------------------------------
@@ -159,9 +157,7 @@ describe("validation", () => {
           ui WebApp { }
         }
       `);
-      expect(errors.some((e) => /Duplicate ui block 'WebApp'/.test(e))).toBe(
-        true,
-      );
+      expect(errors.some((e) => /Duplicate ui block 'WebApp'/.test(e))).toBe(true);
     });
 
     it("rejects 'ui:' on a 'platform: hono' deployable", async () => {
@@ -172,9 +168,7 @@ describe("validation", () => {
           deployable api { platform: hono, modules: M, ui: WebApp, port: 3000 }
         }
       `);
-      expect(
-        errors.some((e) => /'ui:' binding is only valid/.test(e)),
-      ).toBe(true);
+      expect(errors.some((e) => /'ui:' binding is only valid/.test(e))).toBe(true);
     });
 
     it("accepts 'ui:' on a 'platform: dotnet' deployable (fullstack mode)", async () => {
@@ -200,11 +194,7 @@ describe("validation", () => {
           deployable web { platform: static, targets: api, port: 3001 }
         }
       `);
-      expect(
-        errors.some(
-          (e) => /Static deployable 'web' must declare a 'ui:'/.test(e),
-        ),
-      ).toBe(true);
+      expect(errors.some((e) => /Static deployable 'web' must declare a 'ui:'/.test(e))).toBe(true);
     });
 
     it("accepts a 'platform: static' deployable with a 'ui:' binding", async () => {
@@ -261,11 +251,7 @@ describe("validation", () => {
           }
         }
       `);
-      expect(
-        errors.some(
-          (e) => /no module 'NotAModule' is declared/.test(e),
-        ),
-      ).toBe(true);
+      expect(errors.some((e) => /no module 'NotAModule' is declared/.test(e))).toBe(true);
     });
 
     it("rejects a scaffold target of the wrong kind (aggregate listed as module)", async () => {
@@ -282,9 +268,7 @@ describe("validation", () => {
           }
         }
       `);
-      expect(
-        errors.some((e) => /no module 'Order' is declared/.test(e)),
-      ).toBe(true);
+      expect(errors.some((e) => /no module 'Order' is declared/.test(e))).toBe(true);
     });
 
     it("rejects the same target listed twice within one scaffold directive", async () => {
@@ -296,9 +280,7 @@ describe("validation", () => {
           }
         }
       `);
-      expect(errors.some((e) => /lists 'Order' more than once/.test(e))).toBe(
-        true,
-      );
+      expect(errors.some((e) => /lists 'Order' more than once/.test(e))).toBe(true);
     });
 
     it("accepts well-formed scaffold directives (modules / aggregates / views)", async () => {
@@ -332,9 +314,7 @@ describe("validation", () => {
           }
         }
       `);
-      expect(
-        errors.some((e) => /Duplicate page 'X' in ui 'WebApp'/.test(e)),
-      ).toBe(true);
+      expect(errors.some((e) => /Duplicate page 'X' in ui 'WebApp'/.test(e))).toBe(true);
     });
 
     it("rejects more than one ui-level menu block per ui", async () => {
@@ -347,9 +327,7 @@ describe("validation", () => {
           }
         }
       `);
-      expect(
-        errors.some((e) => /more than one 'menu \{ \.\.\. \}' block/.test(e)),
-      ).toBe(true);
+      expect(errors.some((e) => /more than one 'menu \{ \.\.\. \}' block/.test(e))).toBe(true);
     });
 
     it("rejects more than one body / route / title / requires on a single page", async () => {
@@ -368,8 +346,7 @@ describe("validation", () => {
       expect(
         errors.some(
           (e) =>
-            /declares more than one 'route'/.test(e) ||
-            /declares more than one 'body'/.test(e),
+            /declares more than one 'route'/.test(e) || /declares more than one 'body'/.test(e),
         ),
       ).toBe(true);
     });
@@ -386,9 +363,7 @@ describe("validation", () => {
           }
         }
       `);
-      expect(
-        errors.some((e) => /Unknown menu metadata key 'sectionx'/.test(e)),
-      ).toBe(true);
+      expect(errors.some((e) => /Unknown menu metadata key 'sectionx'/.test(e))).toBe(true);
     });
 
     it("accepts the recognised menu metadata keys (section / label / order / hidden)", async () => {
@@ -427,11 +402,9 @@ describe("validation", () => {
           }
         }
       `);
-      expect(
-        errors.some((e) =>
-          /Could not resolve reference to Page named 'Home'/.test(e),
-        ),
-      ).toBe(true);
+      expect(errors.some((e) => /Could not resolve reference to Page named 'Home'/.test(e))).toBe(
+        true,
+      );
     });
 
     it("rejects unknown menu-link property names", async () => {
@@ -447,9 +420,7 @@ describe("validation", () => {
           }
         }
       `);
-      expect(
-        errors.some((e) => /Unknown menu link property 'foo'/.test(e)),
-      ).toBe(true);
+      expect(errors.some((e) => /Unknown menu link property 'foo'/.test(e))).toBe(true);
     });
 
     it("rejects an empty 'match { }' expression", async () => {
@@ -479,9 +450,7 @@ describe("validation", () => {
         }
       `);
       expect(errors).toEqual([]);
-      expect(
-        warnings.some((w) => /no 'else' arm/.test(w)),
-      ).toBe(true);
+      expect(warnings.some((w) => /no 'else' arm/.test(w))).toBe(true);
     });
 
     it("accepts an exhaustive 'match' with else", async () => {
@@ -523,7 +492,9 @@ describe("validation", () => {
         }
       `);
       expect(
-        errors.some((e) => /Design pack 'ashPhoenix' is a heex pack but framework 'react' renders tsx/.test(e)),
+        errors.some((e) =>
+          /Design pack 'ashPhoenix' is a heex pack but framework 'react' renders tsx/.test(e),
+        ),
       ).toBe(true);
     });
 
@@ -542,7 +513,9 @@ describe("validation", () => {
         }
       `);
       expect(
-        errors.some((e) => /Design pack 'shadcn' is a tsx pack but framework 'phoenixLiveView' renders heex/.test(e)),
+        errors.some((e) =>
+          /Design pack 'shadcn' is a tsx pack but framework 'phoenixLiveView' renders heex/.test(e),
+        ),
       ).toBe(true);
     });
 
@@ -581,11 +554,13 @@ describe("validation", () => {
       `);
       expect(errors).toEqual([]);
       expect(
-        warnings.some((w) => /Custom design pack '\.\/my-custom-pack'.*not checked at parse time/.test(w)),
+        warnings.some((w) =>
+          /Custom design pack '\.\/my-custom-pack'.*not checked at parse time/.test(w),
+        ),
       ).toBe(true);
     });
 
-    it("accepts a pinned built-in version (`design: \"mantine@v7\"`)", async () => {
+    it('accepts a pinned built-in version (`design: "mantine@v7"`)', async () => {
       // Phase 0 of pack versioning: explicit pin works alongside
       // the bareword form.  Validates `parseBuiltinDesignRef` is
       // wired into Rule 14 — pinned form resolves to the same
@@ -627,9 +602,10 @@ describe("validation", () => {
         }
       `);
       expect(
-        errors.some((e) =>
-          /no version 'v999' of pack family 'mantine'/.test(e) &&
-          /Available: 'mantine@v7'/.test(e),
+        errors.some(
+          (e) =>
+            /no version 'v999' of pack family 'mantine'/.test(e) &&
+            /Available: 'mantine@v7'/.test(e),
         ),
       ).toBe(true);
     });
@@ -648,7 +624,9 @@ describe("validation", () => {
       `);
       expect(errors).toEqual([]);
       expect(
-        warnings.some((w) => /Design pack 'shadcn' set on deployable 'api'.*has no UI mount.*ignored/.test(w)),
+        warnings.some((w) =>
+          /Design pack 'shadcn' set on deployable 'api'.*has no UI mount.*ignored/.test(w),
+        ),
       ).toBe(true);
     });
   });
@@ -677,9 +655,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     const diags = validateLoomModel(loom);
     expect(
       diags.some(
-        (d) =>
-          d.severity === "error" &&
-          /unknown aggregate 'api\.unknown'/.test(d.message),
+        (d) => d.severity === "error" && /unknown aggregate 'api\.unknown'/.test(d.message),
       ),
     ).toBe(true);
   });
@@ -697,9 +673,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     const diags = validateLoomModel(loom);
     expect(
       diags.some(
-        (d) =>
-          d.severity === "error" &&
-          /unknown method 'api\.orders\.frobnicate'/.test(d.message),
+        (d) => d.severity === "error" && /unknown method 'api\.orders\.frobnicate'/.test(d.message),
       ),
     ).toBe(true);
   });
@@ -735,9 +709,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     const diags = validateLoomModel(loom);
     expect(
       diags.some(
-        (d) =>
-          d.severity === "error" &&
-          /not supported in an e2e test body/.test(d.message),
+        (d) => d.severity === "error" && /not supported in an e2e test body/.test(d.message),
       ),
     ).toBe(true);
   });
@@ -784,8 +756,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     expect(
       diags.some(
         (d) =>
-          d.severity === "error" &&
-          /find 'anyBig': where-clause is not queryable/.test(d.message),
+          d.severity === "error" && /find 'anyBig': where-clause is not queryable/.test(d.message),
       ),
       JSON.stringify(diags),
     ).toBe(true);
@@ -850,9 +821,7 @@ describe("Loom IR validation (post-lowering)", async () => {
       diags.some(
         (d) =>
           d.severity === "error" &&
-          /test 'bad mutation': 'status := \.\.\.' mutates state\./.test(
-            d.message,
-          ),
+          /test 'bad mutation': 'status := \.\.\.' mutates state\./.test(d.message),
       ),
       JSON.stringify(diags),
     ).toBe(true);
@@ -903,8 +872,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     expect(
       diags.some(
         (d) =>
-          d.severity === "error" &&
-          /'extern' isn't valid on a private operation/.test(d.message),
+          d.severity === "error" && /'extern' isn't valid on a private operation/.test(d.message),
       ),
       JSON.stringify(diags),
     ).toBe(true);
@@ -1023,8 +991,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     expect(
       diags.some(
         (d) =>
-          d.severity === "error" &&
-          /references unknown field 'this\.unknownField'/.test(d.message),
+          d.severity === "error" && /references unknown field 'this\.unknownField'/.test(d.message),
       ),
       JSON.stringify(diags),
     ).toBe(true);
@@ -1107,9 +1074,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     const diags = validateLoomModel(loom);
     expect(
       diags.some(
-        (d) =>
-          d.severity === "error" &&
-          /field 'b' has no bind expression/.test(d.message),
+        (d) => d.severity === "error" && /field 'b' has no bind expression/.test(d.message),
       ),
       JSON.stringify(diags),
     ).toBe(true);
@@ -1131,8 +1096,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     expect(
       diags.some(
         (d) =>
-          d.severity === "error" &&
-          /bind 'ghost' has no matching declared field/.test(d.message),
+          d.severity === "error" && /bind 'ghost' has no matching declared field/.test(d.message),
       ),
       JSON.stringify(diags),
     ).toBe(true);
@@ -1153,9 +1117,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     const diags = validateLoomModel(loom);
     expect(
       diags.some(
-        (d) =>
-          d.severity === "error" &&
-          /field 'a' is bound more than once/.test(d.message),
+        (d) => d.severity === "error" && /field 'a' is bound more than once/.test(d.message),
       ),
       JSON.stringify(diags),
     ).toBe(true);
@@ -1241,11 +1203,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     `);
     const diags = validateLoomModel(loom);
     expect(
-      diags.some(
-        (d) =>
-          d.severity === "error" &&
-          /'Customer\.secret' is private/.test(d.message),
-      ),
+      diags.some((d) => d.severity === "error" && /'Customer\.secret' is private/.test(d.message)),
       JSON.stringify(diags),
     ).toBe(true);
   });
@@ -1323,11 +1281,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     `);
     const diags = validateLoomModel(loom);
     expect(
-      diags.some(
-        (d) =>
-          d.severity === "error" &&
-          /missing required field 'email'/.test(d.message),
-      ),
+      diags.some((d) => d.severity === "error" && /missing required field 'email'/.test(d.message)),
       JSON.stringify(diags),
     ).toBe(true);
   });
@@ -1352,9 +1306,7 @@ describe("Loom IR validation (post-lowering)", async () => {
       diags.some(
         (d) =>
           d.severity === "error" &&
-          /returns an array; v1 supports only single non-nullable aggregates/.test(
-            d.message,
-          ),
+          /returns an array; v1 supports only single non-nullable aggregates/.test(d.message),
       ),
       JSON.stringify(diags),
     ).toBe(true);
@@ -1372,11 +1324,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     `);
     const diags = validateLoomModel(loom);
     expect(
-      diags.some(
-        (d) =>
-          d.severity === "error" &&
-          /emit refers to unknown event/.test(d.message),
-      ),
+      diags.some((d) => d.severity === "error" && /emit refers to unknown event/.test(d.message)),
       JSON.stringify(diags),
     ).toBe(true);
   });
@@ -1416,11 +1364,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     // aggregate".  Either rejection mechanism is fine for the user;
     // the test asserts the diagnostic exists in some recognisable form.
     expect(
-      diags.some(
-        (d) =>
-          d.severity === "error" &&
-          /is not an aggregate in context/.test(d.message),
-      ),
+      diags.some((d) => d.severity === "error" && /is not an aggregate in context/.test(d.message)),
       JSON.stringify(diags),
     ).toBe(true);
   });
@@ -1440,11 +1384,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     `);
     const diags = validateLoomModel(loom);
     expect(
-      diags.some(
-        (d) =>
-          d.severity === "error" &&
-          /where-clause is not queryable/.test(d.message),
-      ),
+      diags.some((d) => d.severity === "error" && /where-clause is not queryable/.test(d.message)),
       JSON.stringify(diags),
     ).toBe(true);
   });
@@ -1462,11 +1402,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     `);
     const diags = validateLoomModel(loom);
     expect(
-      diags.some(
-        (d) =>
-          d.severity === "error" &&
-          /references unknown field/.test(d.message),
-      ),
+      diags.some((d) => d.severity === "error" && /references unknown field/.test(d.message)),
       JSON.stringify(diags),
     ).toBe(true);
   });
@@ -1482,9 +1418,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     const diags = validateLoomModel(loom);
     expect(
       diags.some(
-        (d) =>
-          d.severity === "error" &&
-          /view 'Order' collides with the aggregate/.test(d.message),
+        (d) => d.severity === "error" && /view 'Order' collides with the aggregate/.test(d.message),
       ),
       JSON.stringify(diags),
     ).toBe(true);
@@ -1532,9 +1466,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     const diags = validateLoomModel(loom);
     expect(
       diags.some(
-        (d) =>
-          d.severity === "error" &&
-          /isn't a recognised workflow form/.test(d.message),
+        (d) => d.severity === "error" && /isn't a recognised workflow form/.test(d.message),
       ),
       JSON.stringify(diags),
     ).toBe(true);
@@ -1608,9 +1540,7 @@ describe("Loom IR validation (post-lowering)", async () => {
         deployable api { platform: dotnet, modules: M, port: 8080, auth: required }
       }
     `);
-    const errors = validateLoomModel(loom).filter(
-      (d) => d.severity === "error",
-    );
+    const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
     expect(errors).toEqual([]);
   });
 
@@ -1648,8 +1578,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     expect(
       diags.some(
         (d) =>
-          d.severity === "error" &&
-          /user block declares field 'id' more than once/.test(d.message),
+          d.severity === "error" && /user block declares field 'id' more than once/.test(d.message),
       ),
       JSON.stringify(diags),
     ).toBe(true);
@@ -1675,9 +1604,7 @@ describe("Loom IR validation (post-lowering)", async () => {
       diags.some(
         (d) =>
           d.severity === "error" &&
-          /currentUser is only available in per-request handlers/.test(
-            d.message,
-          ),
+          /currentUser is only available in per-request handlers/.test(d.message),
       ),
       JSON.stringify(diags),
     ).toBe(true);
@@ -1703,9 +1630,7 @@ describe("Loom IR validation (post-lowering)", async () => {
       diags.some(
         (d) =>
           d.severity === "error" &&
-          /currentUser is only available in per-request handlers/.test(
-            d.message,
-          ),
+          /currentUser is only available in per-request handlers/.test(d.message),
       ),
       JSON.stringify(diags),
     ).toBe(true);
@@ -1729,9 +1654,7 @@ describe("Loom IR validation (post-lowering)", async () => {
         }
       }
     `);
-    const errors = validateLoomModel(loom).filter(
-      (d) => d.severity === "error",
-    );
+    const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
     expect(errors, JSON.stringify(errors)).toEqual([]);
   });
 
@@ -1749,9 +1672,7 @@ describe("Loom IR validation (post-lowering)", async () => {
         }
       }
     `);
-    const errors = validateLoomModel(loom).filter(
-      (d) => d.severity === "error",
-    );
+    const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
     expect(errors, JSON.stringify(errors)).toEqual([]);
   });
 
@@ -1768,9 +1689,7 @@ describe("Loom IR validation (post-lowering)", async () => {
         }
       }
     `);
-    const errors = validateLoomModel(loom).filter(
-      (d) => d.severity === "error",
-    );
+    const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
     expect(errors, JSON.stringify(errors)).toEqual([]);
   });
 
@@ -1802,9 +1721,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     const diags = validateLoomModel(loom);
     expect(
       diags.some(
-        (d) =>
-          d.severity === "error" &&
-          /references a currentUser-bound find/.test(d.message),
+        (d) => d.severity === "error" && /references a currentUser-bound find/.test(d.message),
       ),
       JSON.stringify(diags),
     ).toBe(true);
@@ -1841,8 +1758,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     // Walk the operation IR and assert the permissions ref turned
     // into the runtime-string literal.  This is the contract every
     // backend renders against.
-    const op = loom.systems[0]!.modules[0]!.contexts[0]!.aggregates[0]!
-      .operations[0]!;
+    const op = loom.systems[0]!.modules[0]!.contexts[0]!.aggregates[0]!.operations[0]!;
     const pre = op.statements.find((s) => s.kind === "precondition");
     const json = JSON.stringify(pre);
     expect(json).toContain('"value":"sales.ordersCancel"');
@@ -1881,9 +1797,7 @@ describe("Loom IR validation (post-lowering)", async () => {
       diags.some(
         (d) =>
           d.severity === "error" &&
-          /permissions\.ordersDelete: no permission named 'ordersDelete'/.test(
-            d.message,
-          ),
+          /permissions\.ordersDelete: no permission named 'ordersDelete'/.test(d.message),
       ),
       JSON.stringify(diags),
     ).toBe(true);
@@ -1909,9 +1823,7 @@ describe("Loom IR validation (post-lowering)", async () => {
       diags.some(
         (d) =>
           d.severity === "error" &&
-          /permission 'ordersConfirm' is declared more than once/.test(
-            d.message,
-          ),
+          /permission 'ordersConfirm' is declared more than once/.test(d.message),
       ),
       JSON.stringify(diags),
     ).toBe(true);
@@ -1943,9 +1855,7 @@ describe("Loom IR validation (post-lowering)", async () => {
       diags.some(
         (d) =>
           d.severity === "error" &&
-          /permissions\.anything: no permission named 'anything'/.test(
-            d.message,
-          ),
+          /permissions\.anything: no permission named 'anything'/.test(d.message),
       ),
       JSON.stringify(diags),
     ).toBe(true);
@@ -1979,9 +1889,7 @@ describe("Loom IR validation (post-lowering)", async () => {
           repository As for A { }
         }
       `);
-      expect(
-        errors.some((e) => /'matches' argument must be a string literal/.test(e)),
-      ).toBe(true);
+      expect(errors.some((e) => /'matches' argument must be a string literal/.test(e))).toBe(true);
     });
 
     it("rejects a `matches` pattern that doesn't compile as a regex", async () => {
@@ -1994,9 +1902,7 @@ describe("Loom IR validation (post-lowering)", async () => {
           repository As for A { }
         }
       `);
-      expect(
-        errors.some((e) => /not a valid regular expression/.test(e)),
-      ).toBe(true);
+      expect(errors.some((e) => /not a valid regular expression/.test(e))).toBe(true);
     });
 
     it("accepts a property with a bool `check` clause", async () => {
@@ -2020,13 +1926,7 @@ describe("Loom IR validation (post-lowering)", async () => {
           repository As for A { }
         }
       `);
-      expect(
-        errors.some(
-          (e) =>
-            /Property check on 'n'/.test(e) &&
-            /bool/.test(e),
-        ),
-      ).toBe(true);
+      expect(errors.some((e) => /Property check on 'n'/.test(e) && /bool/.test(e))).toBe(true);
     });
 
     it("accepts `private invariant` (server-only opt-out)", async () => {

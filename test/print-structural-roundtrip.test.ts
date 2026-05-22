@@ -1,11 +1,11 @@
-import { describe, it, expect } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { EmptyFileSystem } from "langium";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
-import { printStructural } from "../src/language/print/index.js";
 import type { Model } from "../src/language/generated/ast.js";
+import { printStructural } from "../src/language/print/index.js";
 
 // ---------------------------------------------------------------------------
 // Round-trip safety net for the structural `.ddd` printer (System/Model

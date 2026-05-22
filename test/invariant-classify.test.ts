@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { classifyForWire, pickErrorPath, singleFieldShape } from "../src/ir/invariant-classify.js";
 import type { ExprIR, InvariantIR } from "../src/ir/loom-ir.js";
-import {
-  classifyForWire,
-  pickErrorPath,
-  singleFieldShape,
-} from "../src/ir/invariant-classify.js";
 
 // ---------------------------------------------------------------------------
 // Pure-function tests for the slice 21.A classifier.  No file system, no
@@ -56,9 +52,7 @@ describe("classifyForWire", () => {
       left: refField("amount"),
       right: litInt(0),
     });
-    expect(
-      classifyForWire(i, { available: new Set(["amount"]) }),
-    ).toBe(true);
+    expect(classifyForWire(i, { available: new Set(["amount"]) })).toBe(true);
   });
 
   it("rejects when an invariant references something outside `available`", () => {
@@ -77,9 +71,7 @@ describe("classifyForWire", () => {
       name: "isMutable",
       refKind: "helper-fn",
     };
-    expect(classifyForWire(inv(helperRef), { available: new Set() })).toBe(
-      false,
-    );
+    expect(classifyForWire(inv(helperRef), { available: new Set() })).toBe(false);
 
     const userRef: ExprIR = {
       kind: "ref",
@@ -94,9 +86,7 @@ describe("classifyForWire", () => {
       refKind: "this-derived",
       type: IntT,
     };
-    expect(
-      classifyForWire(inv(derivedRef), { available: new Set(["total"]) }),
-    ).toBe(false);
+    expect(classifyForWire(inv(derivedRef), { available: new Set(["total"]) })).toBe(false);
   });
 
   it("rejects @server-only invariants even when the body would translate", () => {
@@ -109,9 +99,7 @@ describe("classifyForWire", () => {
       }),
       scope: "server-only",
     };
-    expect(
-      classifyForWire(i, { available: new Set(["amount"]) }),
-    ).toBe(false);
+    expect(classifyForWire(i, { available: new Set(["amount"]) })).toBe(false);
   });
 
   it("threads through paren / unary / ternary / binary / lambda", () => {
@@ -126,9 +114,7 @@ describe("classifyForWire", () => {
         available: new Set(["x", "y"]),
       }),
     ).toBe(true);
-    expect(
-      classifyForWire(inv(guard), { available: new Set(["x"]) }),
-    ).toBe(false);
+    expect(classifyForWire(inv(guard), { available: new Set(["x"]) })).toBe(false);
 
     // Lambda introduces a fresh scope.
     const lambda: ExprIR = {
@@ -150,9 +136,7 @@ describe("classifyForWire", () => {
         },
       ],
     };
-    expect(
-      classifyForWire(inv(lambda), { available: new Set(["xs"]) }),
-    ).toBe(true);
+    expect(classifyForWire(inv(lambda), { available: new Set(["xs"]) })).toBe(true);
   });
 });
 
@@ -275,9 +259,7 @@ describe("singleFieldShape", () => {
         type: StrT,
       },
       member: "matches",
-      args: [
-        { kind: "ref", name: "userPattern", refKind: "param", type: StrT },
-      ],
+      args: [{ kind: "ref", name: "userPattern", refKind: "param", type: StrT }],
       receiverType: StrT,
       isCollectionOp: false,
     });

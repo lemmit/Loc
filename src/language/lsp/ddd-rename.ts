@@ -1,16 +1,11 @@
+import { type AstNode, CstUtils, type LangiumDocument, type MaybePromise } from "langium";
 import { DefaultRenameProvider, type LangiumServices } from "langium/lsp";
 import {
-  CstUtils,
-  type AstNode,
-  type LangiumDocument,
-  type MaybePromise,
-} from "langium";
-import {
-  TextEdit,
   type Position,
   type Range,
   type RenameParams,
   type TextDocumentPositionParams,
+  TextEdit,
   type WorkspaceEdit,
 } from "vscode-languageserver";
 import { collectMemberUsages, isRenameableMember, memberDeclAt } from "./member-refs.js";

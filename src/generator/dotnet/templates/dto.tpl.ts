@@ -29,9 +29,7 @@ function renderDtoFile(
   },
   group: "Requests" | "Responses",
 ): string {
-  const recs = args.records
-    .map((r) => `public sealed record ${r.name}(${r.params});\n\n`)
-    .join("");
+  const recs = args.records.map((r) => `public sealed record ${r.name}(${r.params});\n\n`).join("");
   return `// Auto-generated.
 using System;
 using System.Collections.Generic;

@@ -1,4 +1,3 @@
-import { lines } from "../util/code-builder.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -16,6 +15,7 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../ir/loom-ir.js";
+import { lines } from "../util/code-builder.js";
 
 // ---------------------------------------------------------------------------
 // Mermaid artifacts derived from the Loom IR — the same source of truth
@@ -135,7 +135,9 @@ export function buildDomainDiagram(sys: SystemIR): string {
         }
       }
       for (const r of c.repositories) {
-        const finds = r.finds.map((f) => `+${f.name}(${params(f.params)}) ${typeName(f.returnType)}`);
+        const finds = r.finds.map(
+          (f) => `+${f.name}(${params(f.params)}) ${typeName(f.returnType)}`,
+        );
         classes.push(...classBlock(r.name, "repository", finds));
         rel(`  ${r.name} ..> ${r.aggregateName} : manages`);
       }
@@ -190,16 +192,15 @@ function simpleClass(name: string, stereo: string, fields: FieldIR[]): string[] 
 }
 
 function enumClass(name: string, values: string[]): string[] {
-  return classBlock(name, "enumeration", values.map((v) => `+${v}`));
+  return classBlock(
+    name,
+    "enumeration",
+    values.map((v) => `+${v}`),
+  );
 }
 
 function classBlock(name: string, stereo: string, members: string[]): string[] {
-  return [
-    `  class ${name} {`,
-    `    <<${stereo}>>`,
-    ...members.map((m) => `    ${m}`),
-    `  }`,
-  ];
+  return [`  class ${name} {`, `    <<${stereo}>>`, ...members.map((m) => `    ${m}`), `  }`];
 }
 
 const fieldMember = (f: FieldIR): string =>
@@ -373,13 +374,17 @@ export function buildErDiagram(sys: SystemIR): string {
       for (const a of c.aggregates) {
         entities.push(...erEntity(a.name, [`${a.idValueType} id PK`, ...a.fields.map(erAttr)]));
         for (const con of a.contains) {
-          rel(`  ${a.name} ${con.collection ? "||--o{" : "||--||"} ${con.partName} : "${con.name}"`);
+          rel(
+            `  ${a.name} ${con.collection ? "||--o{" : "||--||"} ${con.partName} : "${con.name}"`,
+          );
         }
         erFieldRels(a.name, a.fields, c);
         for (const p of a.parts) {
           entities.push(...erEntity(p.name, p.fields.map(erAttr)));
           for (const con of p.contains) {
-            rel(`  ${p.name} ${con.collection ? "||--o{" : "||--||"} ${con.partName} : "${con.name}"`);
+            rel(
+              `  ${p.name} ${con.collection ? "||--o{" : "||--||"} ${con.partName} : "${con.name}"`,
+            );
           }
           erFieldRels(p.name, p.fields, c);
         }
@@ -490,7 +495,8 @@ export function buildDeploymentDiagram(sys: SystemIR): string {
     `  subgraph deployables["🚀 Deployables"]`,
     `    direction TB`,
     ...sys.deployables.map(
-      (d: DeployableIR) => `    ${nid("deploy", d.name)}{{"${label(`${d.name} · ${d.platform}`)}"}}`,
+      (d: DeployableIR) =>
+        `    ${nid("deploy", d.name)}{{"${label(`${d.name} · ${d.platform}`)}"}}`,
     ),
     `  end`,
   ];
@@ -498,7 +504,8 @@ export function buildDeploymentDiagram(sys: SystemIR): string {
   const edges: string[] = [];
   const known = new Set(sys.deployables.map((d) => d.name));
   for (const d of sys.deployables) {
-    for (const mod of d.moduleNames) edges.push(`  ${nid("deploy", d.name)} --> ${nid("mod", mod)}`);
+    for (const mod of d.moduleNames)
+      edges.push(`  ${nid("deploy", d.name)} --> ${nid("mod", mod)}`);
     if (d.targetName && known.has(d.targetName)) {
       edges.push(`  ${nid("deploy", d.name)} -.->|calls| ${nid("deploy", d.targetName)}`);
     }

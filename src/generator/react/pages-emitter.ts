@@ -43,15 +43,12 @@ import type {
 } from "../../ir/loom-ir.js";
 import { camel, snake } from "../../util/naming.js";
 import type { LoadedPack } from "../_packs/loader.js";
-import { buildPageObjectModule } from "./page-objects-builder.js";
-import { buildWorkflowPageObject } from "./workflow-builder.js";
-import { buildViewPageObject } from "./view-builder.js";
 import { isWalkableLayoutBody, walkBodyToTsx } from "./body-walker.js";
-import {
-  renderCustomLayoutPage,
-  renderUserComponentFile,
-} from "./walker/page-shell.js";
+import { buildPageObjectModule } from "./page-objects-builder.js";
+import { buildViewPageObject } from "./view-builder.js";
+import { renderCustomLayoutPage, renderUserComponentFile } from "./walker/page-shell.js";
 import { buildWalkerPageObject } from "./walker-page-objects.js";
+import { buildWorkflowPageObject } from "./workflow-builder.js";
 
 /** Inputs the page emitter needs in addition to the page IR.  Kept as
  *  a struct so additions (theme overrides, design-pack picks, sidebar
@@ -98,9 +95,7 @@ function computeSrcImportPrefix(emitPath: string): string {
  *  walker can resolve enum / value-object types declared alongside
  *  the aggregate.  Built from `ctx.contextsByName` once per emit
  *  so the walker doesn't repeatedly scan all contexts. */
-function buildBcByAggregate(
-  ctx: PageEmitContext,
-): Map<string, BoundedContextIR> {
+function buildBcByAggregate(ctx: PageEmitContext): Map<string, BoundedContextIR> {
   const out = new Map<string, BoundedContextIR>();
   for (const bc of ctx.contextsByName.values()) {
     for (const agg of bc.aggregates) out.set(agg.name, bc);
@@ -113,10 +108,7 @@ function buildBcByAggregate(
 function buildWorkflowsByName(
   ctx: PageEmitContext,
 ): Map<string, import("../../ir/loom-ir.js").WorkflowIR> {
-  const out = new Map<
-    string,
-    import("../../ir/loom-ir.js").WorkflowIR
-  >();
+  const out = new Map<string, import("../../ir/loom-ir.js").WorkflowIR>();
   for (const bc of ctx.contextsByName.values()) {
     for (const wf of bc.workflows) out.set(wf.name, wf);
   }
@@ -124,9 +116,7 @@ function buildWorkflowsByName(
 }
 
 /** Slice A12 — derived map: workflow name → owning bounded context. */
-function buildBcByWorkflow(
-  ctx: PageEmitContext,
-): Map<string, BoundedContextIR> {
+function buildBcByWorkflow(ctx: PageEmitContext): Map<string, BoundedContextIR> {
   const out = new Map<string, BoundedContextIR>();
   for (const bc of ctx.contextsByName.values()) {
     for (const wf of bc.workflows) out.set(wf.name, bc);
@@ -178,10 +168,7 @@ export function deriveExtraRoutesFromUi(
   return out;
 }
 
-export function emitPagesForUi(
-  ui: UiIR,
-  ctx: PageEmitContext,
-): Map<string, string> {
+export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, string> {
   const out = new Map<string, string>();
 
   // Slice 11.18 — emit one `src/components/<Name>.tsx` per
@@ -242,7 +229,6 @@ export function emitPagesForUi(
           buildBcByWorkflow(ctx),
         ),
       );
-      continue;
     }
     // Bodies the v0 dispatcher doesn't recognise are silently
     // skipped (e.g. user-defined components composed of stdlib
@@ -250,7 +236,6 @@ export function emitPagesForUi(
   }
   return out;
 }
-
 
 // camel is exported for legacy file paths (e2e/pages/<camel>.ts) that
 // still live in index.ts; re-exported here so the page-objects
@@ -278,10 +263,7 @@ export { camel };
 // is purely structural: page-IR drives iteration, builders unchanged.
 // ---------------------------------------------------------------------------
 
-export function emitPageObjectsForUi(
-  ui: UiIR,
-  ctx: PageEmitContext,
-): Map<string, string> {
+export function emitPageObjectsForUi(ui: UiIR, ctx: PageEmitContext): Map<string, string> {
   const out = new Map<string, string>();
   const seenAggregates = new Set<string>();
   const seenWorkflows = new Set<string>();
@@ -315,10 +297,7 @@ export function emitPageObjectsForUi(
           }
         }
         if (!agg || !ctxIR) break;
-        out.set(
-          `e2e/pages/${camel(agg.name)}.ts`,
-          buildPageObjectModule(agg, ctxIR),
-        );
+        out.set(`e2e/pages/${camel(agg.name)}.ts`, buildPageObjectModule(agg, ctxIR));
         break;
       }
       case "workflow-form": {
@@ -329,14 +308,15 @@ export function emitPageObjectsForUi(
         if (!wf) {
           for (const c of ctx.contextsByName.values()) {
             const found = c.workflows.find((w) => w.name === origin.workflowName);
-            if (found) { ctxIR = c; wf = found; break; }
+            if (found) {
+              ctxIR = c;
+              wf = found;
+              break;
+            }
           }
         }
         if (!ctxIR || !wf) break;
-        out.set(
-          `e2e/pages/workflows/${snake(wf.name)}.ts`,
-          buildWorkflowPageObject(wf, ctxIR),
-        );
+        out.set(`e2e/pages/workflows/${snake(wf.name)}.ts`, buildWorkflowPageObject(wf, ctxIR));
         break;
       }
       case "view-list": {
@@ -347,14 +327,15 @@ export function emitPageObjectsForUi(
         if (!view) {
           for (const c of ctx.contextsByName.values()) {
             const found = c.views.find((v) => v.name === origin.viewName);
-            if (found) { ctxIR = c; view = found; break; }
+            if (found) {
+              ctxIR = c;
+              view = found;
+              break;
+            }
           }
         }
         if (!ctxIR || !view) break;
-        out.set(
-          `e2e/pages/views/${snake(view.name)}.ts`,
-          buildViewPageObject(view, ctxIR),
-        );
+        out.set(`e2e/pages/views/${snake(view.name)}.ts`, buildViewPageObject(view, ctxIR));
         break;
       }
       // Index pages and Home don't produce page objects (no
@@ -420,9 +401,7 @@ export function emitPageObjectsForUi(
  *  `emitPagesForUi` builds it.  `isWalkableLayoutBody` calls this
  *  to decide whether a body composed of user components is
  *  walker-eligible. */
-function buildUserComponentsMap(
-  ui: UiIR,
-): Map<string, readonly ParamIR[]> {
+function buildUserComponentsMap(ui: UiIR): Map<string, readonly ParamIR[]> {
   const map = new Map<string, readonly ParamIR[]>();
   for (const c of ui.components) map.set(c.name, c.params);
   return map;

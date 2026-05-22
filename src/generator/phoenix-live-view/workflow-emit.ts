@@ -1,11 +1,6 @@
-import type {
-  BoundedContextIR,
-  ParamIR,
-  WorkflowIR,
-  WorkflowStmtIR,
-} from "../../ir/loom-ir.js";
+import type { BoundedContextIR, ParamIR, WorkflowIR, WorkflowStmtIR } from "../../ir/loom-ir.js";
 import { pascal, snake } from "../../util/naming.js";
-import { renderExpr, type RenderCtx } from "./render-expr.js";
+import { type RenderCtx, renderExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
 // Workflow emission for Phoenix LiveView / Ash.
@@ -60,9 +55,7 @@ function renderWorkflow(
 
   const params = wf.params.map((p) => snake(p.name));
   const paramPattern =
-    params.length === 0
-      ? "_args"
-      : `%{${params.map((p) => `${p}: ${p}`).join(", ")}}`;
+    params.length === 0 ? "_args" : `%{${params.map((p) => `${p}: ${p}`).join(", ")}}`;
 
   const bodyLines = renderWorkflowBody(wf, ctx, renderCtx, contextModule, appModule);
 
@@ -119,10 +112,7 @@ ${validateArgsSection}end
 // returned so no dead code is emitted.
 // ---------------------------------------------------------------------------
 
-type PrecondOrRequires = Extract<
-  WorkflowStmtIR,
-  { kind: "precondition" | "requires" }
->;
+type PrecondOrRequires = Extract<WorkflowStmtIR, { kind: "precondition" | "requires" }>;
 
 function renderValidateArgsFunction(
   _wfName: string,
@@ -142,13 +132,9 @@ function renderValidateArgsFunction(
     const exprStr = renderExpr(stmt.expr, { ...renderCtx, thisName: "args" });
     if (stmt.kind === "precondition") {
       const msg = JSON.stringify(`Precondition failed: ${stmt.source}`);
-      guardLines.push(
-        `    if not (${exprStr}), do: throw({:error, ${msg}})`,
-      );
+      guardLines.push(`    if not (${exprStr}), do: throw({:error, ${msg}})`);
     } else {
-      guardLines.push(
-        `    if not (${exprStr}), do: throw({:error, :forbidden})`,
-      );
+      guardLines.push(`    if not (${exprStr}), do: throw({:error, :forbidden})`);
     }
   }
   void paramKeys; // available for future extension (matches-on-param-type)
@@ -195,9 +181,8 @@ function renderWorkflowBody(
   const hasPreconditions = wf.statements.some(
     (s) => s.kind === "precondition" || s.kind === "requires",
   );
-  const paramPattern = wf.params.length > 0
-    ? `%{${wf.params.map((p) => `${snake(p.name)}: _`).join(", ")}}`
-    : "_args";
+  const paramPattern =
+    wf.params.length > 0 ? `%{${wf.params.map((p) => `${snake(p.name)}: _`).join(", ")}}` : "_args";
   void paramPattern;
   if (hasPreconditions && wf.params.length > 0) {
     // Use the arg map pattern that run/1 destructures.
@@ -230,18 +215,22 @@ function renderWorkflowStmt(
   switch (st.kind) {
     case "precondition": {
       const expr = renderExpr(st.expr, renderCtx);
-      return [{
-        kind: "precondition",
-        text: `    unless ${expr}, do: throw({:error, ${JSON.stringify(`Precondition failed: ${st.source}`)}})`,
-      }];
+      return [
+        {
+          kind: "precondition",
+          text: `    unless ${expr}, do: throw({:error, ${JSON.stringify(`Precondition failed: ${st.source}`)}})`,
+        },
+      ];
     }
 
     case "requires": {
       const expr = renderExpr(st.expr, renderCtx);
-      return [{
-        kind: "requires",
-        text: `    unless ${expr}, do: throw({:error, :forbidden})`,
-      }];
+      return [
+        {
+          kind: "requires",
+          text: `    unless ${expr}, do: throw({:error, :forbidden})`,
+        },
+      ];
     }
 
     case "factory-let": {
@@ -250,11 +239,13 @@ function renderWorkflowStmt(
         .join(", ");
       const action = `create_${snake(st.aggName)}`;
       const call = `${contextModule}.${action}(%{${fields}})`;
-      return [{
-        kind: "with-clause",
-        text: `      {:ok, ${snake(st.name)}} <- ${call}`,
-        bindName: snake(st.name),
-      }];
+      return [
+        {
+          kind: "with-clause",
+          text: `      {:ok, ${snake(st.name)}} <- ${call}`,
+          bindName: snake(st.name),
+        },
+      ];
     }
 
     case "repo-let": {
@@ -263,11 +254,13 @@ function renderWorkflowStmt(
       const call = argList
         ? `${contextModule}.${action}(${argList})`
         : `${contextModule}.${action}()`;
-      return [{
-        kind: "with-clause",
-        text: `      {:ok, ${snake(st.name)}} <- ${call}`,
-        bindName: snake(st.name),
-      }];
+      return [
+        {
+          kind: "with-clause",
+          text: `      {:ok, ${snake(st.name)}} <- ${call}`,
+          bindName: snake(st.name),
+        },
+      ];
     }
 
     case "op-call": {
@@ -277,10 +270,12 @@ function renderWorkflowStmt(
       const call = argList
         ? `${contextModule}.${action}(${callTarget}, %{${argList}})`
         : `${contextModule}.${action}(${callTarget})`;
-      return [{
-        kind: "with-clause",
-        text: `      {:ok, _} <- ${call}`,
-      }];
+      return [
+        {
+          kind: "with-clause",
+          text: `      {:ok, _} <- ${call}`,
+        },
+      ];
     }
 
     case "emit": {
@@ -288,19 +283,23 @@ function renderWorkflowStmt(
         .map((f) => `${snake(f.name)}: ${renderExpr(f.value, renderCtx)}`)
         .join(", ");
       const eventModule = `${contextModule}.Events.${pascal(st.eventName)}`;
-      return [{
-        kind: "emit",
-        text: `      Phoenix.PubSub.broadcast(${renderCtx.contextModule.split(".")[0]}.PubSub, "events", %${eventModule}{${fields}})`,
-      }];
+      return [
+        {
+          kind: "emit",
+          text: `      Phoenix.PubSub.broadcast(${renderCtx.contextModule.split(".")[0]}.PubSub, "events", %${eventModule}{${fields}})`,
+        },
+      ];
     }
 
     case "expr-let": {
       const val = renderExpr(st.expr, renderCtx);
-      return [{
-        kind: "expr",
-        text: `    ${snake(st.name)} = ${val}`,
-        bindName: snake(st.name),
-      }];
+      return [
+        {
+          kind: "expr",
+          text: `    ${snake(st.name)} = ${val}`,
+          bindName: snake(st.name),
+        },
+      ];
     }
   }
 }
@@ -321,7 +320,12 @@ function renderWorkflowStmt(
 // is the safe default.
 // ---------------------------------------------------------------------------
 
-function renderTransactionalBody(lines: WorkflowBodyLine[], _appModule: string, wf: WorkflowIR, contextModule: string): string {
+function renderTransactionalBody(
+  lines: WorkflowBodyLine[],
+  _appModule: string,
+  wf: WorkflowIR,
+  contextModule: string,
+): string {
   // Separate preconditions (run before transaction) from the body
   const preconds = lines.filter((l) => l.kind === "precondition" || l.kind === "requires");
   const body = lines.filter((l) => l.kind !== "precondition" && l.kind !== "requires");
@@ -346,9 +350,8 @@ function renderTransactionalBody(lines: WorkflowBodyLine[], _appModule: string, 
     txBody = `      with\n${withBody} do\n        {:ok, ${returnVal}}\n      end`;
   }
 
-  const emitSection = emitLines.length > 0
-    ? "\n" + emitLines.map((l) => "    " + l.text.trimStart()).join("\n")
-    : "";
+  const emitSection =
+    emitLines.length > 0 ? "\n" + emitLines.map((l) => "    " + l.text.trimStart()).join("\n") : "";
 
   // isolation_level is an opts keyword in Ash 3.x (third positional arg).
   const isolationOptLine = wf.isolation
@@ -392,18 +395,21 @@ function renderSequentialBody(lines: WorkflowBodyLine[]): string {
     bodySection = `    with\n${withBody} do\n      {:ok, ${returnVal}}\n    end`;
   }
 
-  const emitSection = emitLines.length > 0
-    ? "\n" + emitLines.map((l) => "    " + l.text.trimStart()).join("\n")
-    : "";
+  const emitSection =
+    emitLines.length > 0 ? "\n" + emitLines.map((l) => "    " + l.text.trimStart()).join("\n") : "";
 
   return `${precondSection ? precondSection + "\n" : ""}${bodySection}${emitSection}`;
 }
 
 function elixirIsolationLevel(level: import("../../ir/loom-ir.js").IsolationLevel): string {
   switch (level) {
-    case "readUncommitted": return "read_uncommitted";
-    case "readCommitted": return "read_committed";
-    case "repeatableRead": return "repeatable_read";
-    case "serializable": return "serializable";
+    case "readUncommitted":
+      return "read_uncommitted";
+    case "readCommitted":
+      return "read_committed";
+    case "repeatableRead":
+      return "repeatable_read";
+    case "serializable":
+      return "serializable";
   }
 }

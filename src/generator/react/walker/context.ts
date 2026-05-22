@@ -6,18 +6,14 @@
 // reuse them without dragging the rest of the walker.
 
 import type { ImportSpec } from "../../_packs/loader.js";
-import type { FormFieldVM } from "../templating/view-models.js";
 import type { ImportMap, WalkContext } from "../body-walker.js";
+import type { FormFieldVM } from "../templating/view-models.js";
 
 export type { ImportMap };
 
 /** Append a named-import to the walker's per-source import map.
  *  Idempotent — duplicate names dedupe inside the Set per source. */
-export function addImport(
-  ctx: WalkContext,
-  from: string,
-  ...names: string[]
-): void {
+export function addImport(ctx: WalkContext, from: string, ...names: string[]): void {
   let s = ctx.imports.get(from);
   if (!s) {
     s = new Set();
@@ -54,10 +50,7 @@ export function addImportsForPrimitive(ctx: WalkContext, name: string): void {
  *  template directly (e.g. shadcn's `field-input-id-select`
  *  imports `Select`, `SelectTrigger`, … from
  *  `@/components/ui/select`). */
-export function registerFormFieldImports(
-  ctx: WalkContext,
-  vm: FormFieldVM,
-): void {
+export function registerFormFieldImports(ctx: WalkContext, vm: FormFieldVM): void {
   addImportsForPrimitive(ctx, vm.template);
   if (vm.children) {
     for (const c of vm.children) registerFormFieldImports(ctx, c);
@@ -72,11 +65,7 @@ export function registerFormFieldImports(
  *  template emitting whatever module-free JSX it wants
  *  (e.g. shadcn's primitives that emit only `<div className=…>`
  *  need no imports). */
-export function renderPrimitive(
-  ctx: WalkContext,
-  name: string,
-  templateCtx: unknown,
-): string {
+export function renderPrimitive(ctx: WalkContext, name: string, templateCtx: unknown): string {
   const specs: ImportSpec[] = ctx.pack.manifest.imports?.[name] ?? [];
   for (const spec of specs) addImport(ctx, spec.from, ...spec.named);
   return ctx.pack.render(name, templateCtx);

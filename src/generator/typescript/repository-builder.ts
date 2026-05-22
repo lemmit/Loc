@@ -1,3 +1,4 @@
+import { wireShapeFor } from "../../ir/enrichments.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -7,11 +8,7 @@ import type {
   RepositoryIR,
   TypeIR,
 } from "../../ir/loom-ir.js";
-import {
-  findUsesCurrentUser,
-  viewUsesCurrentUser,
-} from "../../ir/loom-ir.js";
-import { wireShapeFor } from "../../ir/enrichments.js";
+import { findUsesCurrentUser, viewUsesCurrentUser } from "../../ir/loom-ir.js";
 import { camel, plural } from "../../util/naming.js";
 import { renderTsExpr } from "./render-expr.js";
 import { valueObjectColumnNames } from "./templates.js";
@@ -40,9 +37,7 @@ export function buildRepositoryFile(
 ): string {
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
-  lines.push(
-    `import type { NodePgDatabase } from "drizzle-orm/node-postgres";`,
-  );
+  lines.push(`import type { NodePgDatabase } from "drizzle-orm/node-postgres";`);
   // Walk every find's filter to figure out which Drizzle operators
   // we'll need.  Default operators (eq / and / inArray) are always
   // pulled in; the lowering may add ne / gt / gte / lt / lte / or /
@@ -55,16 +50,16 @@ export function buildRepositoryFile(
     .filter((v) => v.aggregateName === agg.name && v.filter)
     .map((v) => v.filter!);
   const allFilters = [
-    ...(repo?.finds ?? []).map((f) => f.filter).filter((x): x is import("../../ir/loom-ir.js").ExprIR => !!x),
+    ...(repo?.finds ?? [])
+      .map((f) => f.filter)
+      .filter((x): x is import("../../ir/loom-ir.js").ExprIR => !!x),
     ...viewFilters,
   ];
   for (const f of allFilters) {
     const lowered = lowerToDrizzle(f, camel(plural(agg.name)), ctx);
     if (lowered) for (const op of lowered.ops) drizzleOps.add(op);
   }
-  lines.push(
-    `import { ${[...drizzleOps].sort().join(", ")} } from "drizzle-orm";`,
-  );
+  lines.push(`import { ${[...drizzleOps].sort().join(", ")} } from "drizzle-orm";`);
   lines.push(`import * as schema from "../schema";`);
   // Slice 1C: if any find or matching view filter references
   // currentUser, the per-method signature gains a `currentUser: User`
@@ -73,38 +68,26 @@ export function buildRepositoryFile(
   // compiles even when the verifier hook isn't wired yet.
   const repoUsesUser =
     (repo?.finds ?? []).some(findUsesCurrentUser) ||
-    ctx.views
-      .filter((v) => v.aggregateName === agg.name)
-      .some(viewUsesCurrentUser);
+    ctx.views.filter((v) => v.aggregateName === agg.name).some(viewUsesCurrentUser);
   if (repoUsesUser) {
     lines.push(`import type { User } from "../../auth/user-types";`);
   }
   // Imports for domain types
   const partNames = agg.parts.map((p) => p.name);
   const domainImports = [agg.name, ...partNames].join(", ");
-  lines.push(
-    `import { ${domainImports} } from "../../domain/${camel(agg.name)}";`,
-  );
+  lines.push(`import { ${domainImports} } from "../../domain/${camel(agg.name)}";`);
   const valueObjectsUsed = collectValueObjects(agg, ctx);
   const enumsUsed = collectEnums(agg, ctx);
   const voOrEnumImports = [...valueObjectsUsed, ...enumsUsed];
   if (voOrEnumImports.length > 0) {
-    lines.push(
-      `import { ${voOrEnumImports.join(", ")} } from "../../domain/value-objects";`,
-    );
+    lines.push(`import { ${voOrEnumImports.join(", ")} } from "../../domain/value-objects";`);
   }
   lines.push(`import * as Ids from "../../domain/ids";`);
-  lines.push(
-    `import { AggregateNotFoundError } from "../../domain/errors";`,
-  );
-  lines.push(
-    `import type { DomainEventDispatcher } from "../../domain/events";`,
-  );
+  lines.push(`import { AggregateNotFoundError } from "../../domain/errors";`);
+  lines.push(`import type { DomainEventDispatcher } from "../../domain/events";`);
   lines.push("");
   lines.push(`type Db = NodePgDatabase<typeof schema>;`);
-  lines.push(
-    `type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];`,
-  );
+  lines.push(`type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];`);
   lines.push("");
 
   lines.push(`export class ${agg.name}Repository {`);
@@ -121,9 +104,7 @@ export function buildRepositoryFile(
   // getById
   lines.push(`  async getById(id: Ids.${agg.name}Id): Promise<${agg.name}> {`);
   lines.push(`    const found = await this.findById(id);`);
-  lines.push(
-    `    if (!found) throw new AggregateNotFoundError(\`${agg.name} \${id} not found\`);`,
-  );
+  lines.push(`    if (!found) throw new AggregateNotFoundError(\`${agg.name} \${id} not found\`);`);
   lines.push(`    return found;`);
   lines.push(`  }`);
   lines.push("");
@@ -209,18 +190,14 @@ function wireProjectionEntity(
           : wf.type.kind === "entity"
             ? wf.type.name
             : "";
-      const partIR = ctx.aggregates
-        .flatMap((a) => a.parts)
-        .find((p) => p.name === partName);
+      const partIR = ctx.aggregates.flatMap((a) => a.parts).find((p) => p.name === partName);
       if (!partIR) continue;
       if (wf.type.kind === "array") {
         parts.push(
           `${wf.name}: ${varExpr}.${wf.name}.map((__e: ${partIR.name}) => (${wireProjectionEntity(partIR, "__e", ctx)}))`,
         );
       } else {
-        parts.push(
-          `${wf.name}: ${wireProjectionEntity(partIR, `${varExpr}.${wf.name}`, ctx)}`,
-        );
+        parts.push(`${wf.name}: ${wireProjectionEntity(partIR, `${varExpr}.${wf.name}`, ctx)}`);
       }
       continue;
     }
@@ -257,10 +234,7 @@ function wireProjectionValue(
     const vo = ctx.valueObjects.find((v) => v.name === t.name);
     if (!vo) return expr;
     const fields = vo.fields
-      .map(
-        (vf) =>
-          `${vf.name}: ${wireProjectionValue(`${expr}.${vf.name}`, vf.type, ctx, false)}`,
-      )
+      .map((vf) => `${vf.name}: ${wireProjectionValue(`${expr}.${vf.name}`, vf.type, ctx, false)}`)
       .join(", ");
     if (optional) {
       return `(${expr} == null ? null : { ${fields} })`;
@@ -278,15 +252,10 @@ function wireProjectionValue(
 // findById — load root, load each part collection, hydrate
 // ---------------------------------------------------------------------------
 
-function findManyByIdsMethod(
-  agg: AggregateIR,
-  ctx: BoundedContextIR,
-): string[] {
+function findManyByIdsMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
   const lines: string[] = [];
   const tableName = camel(plural(agg.name));
-  lines.push(
-    `  async findManyByIds(ids: Ids.${agg.name}Id[]): Promise<${agg.name}[]> {`,
-  );
+  lines.push(`  async findManyByIds(ids: Ids.${agg.name}Id[]): Promise<${agg.name}[]> {`);
   lines.push(`    if (ids.length === 0) return [];`);
   lines.push(
     `    const rootRows = await this.db.select().from(schema.${tableName}).where(inArray(schema.${tableName}.id, ids));`,
@@ -305,22 +274,14 @@ function findManyByIdsMethod(
         `    const ${c.name}Rows = await this.db.select().from(schema.${childTable}).where(inArray(schema.${childTable}.parentId, __ids));`,
       );
       if (c.collection) {
-        lines.push(
-          `    const ${c.name}ByParent = new Map<string, ${part.name}[]>();`,
-        );
+        lines.push(`    const ${c.name}ByParent = new Map<string, ${part.name}[]>();`);
         lines.push(`    for (const r of ${c.name}Rows) {`);
-        lines.push(
-          `      const list = ${c.name}ByParent.get(r.parentId) ?? [];`,
-        );
-        lines.push(
-          `      list.push(${hydrateEntityExpr(part, "r", agg, ctx)});`,
-        );
+        lines.push(`      const list = ${c.name}ByParent.get(r.parentId) ?? [];`);
+        lines.push(`      list.push(${hydrateEntityExpr(part, "r", agg, ctx)});`);
         lines.push(`      ${c.name}ByParent.set(r.parentId, list);`);
         lines.push(`    }`);
       } else {
-        lines.push(
-          `    const ${c.name}ByParent = new Map<string, ${part.name}>();`,
-        );
+        lines.push(`    const ${c.name}ByParent = new Map<string, ${part.name}>();`);
         lines.push(`    for (const r of ${c.name}Rows) {`);
         lines.push(`      if (${c.name}ByParent.has(r.parentId)) continue;`);
         lines.push(
@@ -330,9 +291,7 @@ function findManyByIdsMethod(
       }
     }
   }
-  lines.push(
-    `    return rootRows.map((root) => ${hydrateRootForFindAllExpr(agg, "root", ctx)});`,
-  );
+  lines.push(`    return rootRows.map((root) => ${hydrateRootForFindAllExpr(agg, "root", ctx)});`);
   lines.push(`  }`);
   return lines;
 }
@@ -340,9 +299,7 @@ function findManyByIdsMethod(
 function findByIdMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
   const lines: string[] = [];
   const tableName = camel(plural(agg.name));
-  lines.push(
-    `  async findById(id: Ids.${agg.name}Id): Promise<${agg.name} | null> {`,
-  );
+  lines.push(`  async findById(id: Ids.${agg.name}Id): Promise<${agg.name} | null> {`);
   lines.push(`    return await this.db.transaction(async (tx) => {`);
   lines.push(
     `      const rootRows = await tx.select().from(schema.${tableName}).where(eq(schema.${tableName}.id, id));`,
@@ -379,11 +336,7 @@ function findByIdMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
   return lines;
 }
 
-function hydrateRootExpr(
-  agg: AggregateIR,
-  rowVar: string,
-  ctx: BoundedContextIR,
-): string {
+function hydrateRootExpr(agg: AggregateIR, rowVar: string, ctx: BoundedContextIR): string {
   const fields: string[] = [];
   fields.push(`id: Ids.${agg.name}Id(${rowVar}.id)`);
   for (const f of agg.fields) {
@@ -410,11 +363,7 @@ function hydrateEntityExpr(
   return `${part.name}._create({ ${fields.join(", ")} })`;
 }
 
-function hydrateFieldExpr(
-  f: FieldIR,
-  rowVar: string,
-  ctx: BoundedContextIR,
-): string {
+function hydrateFieldExpr(f: FieldIR, rowVar: string, ctx: BoundedContextIR): string {
   return hydrateValueExpr(f.name, f.type, rowVar, ctx, f.optional);
 }
 
@@ -466,9 +415,7 @@ function saveMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
   const tableName = camel(plural(agg.name));
   lines.push(`  async save(aggregate: ${agg.name}): Promise<void> {`);
   lines.push(`    await this.db.transaction(async (tx) => {`);
-  lines.push(
-    `      const rootRow = ${rootProjection(agg, "aggregate", ctx)};`,
-  );
+  lines.push(`      const rootRow = ${rootProjection(agg, "aggregate", ctx)};`);
   lines.push(
     `      await tx.insert(schema.${tableName}).values(rootRow).onConflictDoUpdate({ target: schema.${tableName}.id, set: rootRow });`,
   );
@@ -490,17 +437,13 @@ function saveMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
     lines.push(
       `      const __toDelete${cap(c.name)} = [...__existingIds${cap(c.name)}].filter((id) => !__currentIds${cap(c.name)}.has(id));`,
     );
-    lines.push(
-      `      if (__toDelete${cap(c.name)}.length > 0) {`,
-    );
+    lines.push(`      if (__toDelete${cap(c.name)}.length > 0) {`);
     lines.push(
       `        await tx.delete(schema.${childTable}).where(and(eq(schema.${childTable}.parentId, aggregate.id), inArray(schema.${childTable}.id, __toDelete${cap(c.name)})));`,
     );
     lines.push(`      }`);
     lines.push(`      for (const child of aggregate.${c.name}) {`);
-    lines.push(
-      `        const childRow = ${entityProjection(part, "child", ctx)};`,
-    );
+    lines.push(`        const childRow = ${entityProjection(part, "child", ctx)};`);
     lines.push(
       `        await tx.insert(schema.${childTable}).values(childRow).onConflictDoUpdate({ target: schema.${childTable}.id, set: childRow });`,
     );
@@ -515,26 +458,18 @@ function saveMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
   return lines;
 }
 
-function rootProjection(
-  agg: AggregateIR,
-  varExpr: string,
-  ctx: BoundedContextIR,
-): string {
+function rootProjection(agg: AggregateIR, varExpr: string, ctx: BoundedContextIR): string {
   return projectionObject(varExpr, [
     { fieldName: "id", expr: `${varExpr}.id as string` },
-    ...agg.fields.map((f) => projectFieldEntries(f, varExpr, ctx)).flat(),
+    ...agg.fields.flatMap((f) => projectFieldEntries(f, varExpr, ctx)),
   ]);
 }
 
-function entityProjection(
-  part: EntityPartIR,
-  varExpr: string,
-  ctx: BoundedContextIR,
-): string {
+function entityProjection(part: EntityPartIR, varExpr: string, ctx: BoundedContextIR): string {
   return projectionObject(varExpr, [
     { fieldName: "id", expr: `${varExpr}.id as string` },
     { fieldName: "parentId", expr: `${varExpr}.parentId as string` },
-    ...part.fields.map((f) => projectFieldEntries(f, varExpr, ctx)).flat(),
+    ...part.fields.flatMap((f) => projectFieldEntries(f, varExpr, ctx)),
   ]);
 }
 
@@ -594,11 +529,7 @@ function cap(s: string): string {
 // Find queries — convention-based equality predicates
 // ---------------------------------------------------------------------------
 
-function findQueryMethod(
-  agg: AggregateIR,
-  find: FindIR,
-  ctx: BoundedContextIR,
-): string[] {
+function findQueryMethod(agg: AggregateIR, find: FindIR, ctx: BoundedContextIR): string[] {
   const lines: string[] = [];
   const tableName = camel(plural(agg.name));
   // Slice 1C: when the find's `where` references currentUser, the
@@ -607,12 +538,8 @@ function findQueryMethod(
   // workflow handlers thread the user from `c.get("currentUser")`
   // into the call.
   const usesUser = findUsesCurrentUser(find);
-  const baseParams = find.params.map(
-    (p) => `${p.name}: ${tsTypeForReturn(p.type)}`,
-  );
-  const params = (
-    usesUser ? [...baseParams, "currentUser: User"] : baseParams
-  ).join(", ");
+  const baseParams = find.params.map((p) => `${p.name}: ${tsTypeForReturn(p.type)}`);
+  const params = (usesUser ? [...baseParams, "currentUser: User"] : baseParams).join(", ");
   let whereClause: string;
   if (find.filter) {
     // The IR validator (Layer ②) rejects any `where` clause that
@@ -643,9 +570,7 @@ function findQueryMethod(
         // the cast hid type safety (a column rename desyncing from a
         // find name produced bad runtime SQL with no compile error)
         // and is gone now.
-        conditions.push(
-          `eq(schema.${tableName}.${matched.name}, ${p.name})`,
-        );
+        conditions.push(`eq(schema.${tableName}.${matched.name}, ${p.name})`);
       }
     }
     whereClause =
@@ -655,9 +580,7 @@ function findQueryMethod(
   }
 
   if (find.returnType.kind === "array") {
-    lines.push(
-      `  async ${find.name}(${params}): Promise<${agg.name}[]> {`,
-    );
+    lines.push(`  async ${find.name}(${params}): Promise<${agg.name}[]> {`);
     lines.push(
       `    const rootRows = await this.db.select().from(schema.${tableName})${whereClause};`,
     );
@@ -681,25 +604,17 @@ function findQueryMethod(
           `    const ${c.name}Rows = await this.db.select().from(schema.${childTable}).where(inArray(schema.${childTable}.parentId, __ids));`,
         );
         if (c.collection) {
-          lines.push(
-            `    const ${c.name}ByParent = new Map<string, ${part.name}[]>();`,
-          );
+          lines.push(`    const ${c.name}ByParent = new Map<string, ${part.name}[]>();`);
           lines.push(`    for (const r of ${c.name}Rows) {`);
-          lines.push(
-            `      const list = ${c.name}ByParent.get(r.parentId) ?? [];`,
-          );
-          lines.push(
-            `      list.push(${hydrateEntityExpr(part, "r", agg, ctx)});`,
-          );
+          lines.push(`      const list = ${c.name}ByParent.get(r.parentId) ?? [];`);
+          lines.push(`      list.push(${hydrateEntityExpr(part, "r", agg, ctx)});`);
           lines.push(`      ${c.name}ByParent.set(r.parentId, list);`);
           lines.push(`    }`);
         } else {
           // Singular containment: at most one row per parent (DB
           // doesn't enforce that, but the aggregate boundary does).
           // First-row-wins on duplicates.
-          lines.push(
-            `    const ${c.name}ByParent = new Map<string, ${part.name}>();`,
-          );
+          lines.push(`    const ${c.name}ByParent = new Map<string, ${part.name}>();`);
           lines.push(`    for (const r of ${c.name}Rows) {`);
           lines.push(`      if (${c.name}ByParent.has(r.parentId)) continue;`);
           lines.push(
@@ -718,13 +633,9 @@ function findQueryMethod(
 
   // Optional / single result variants
   if (find.returnType.kind === "optional") {
-    lines.push(
-      `  async ${find.name}(${params}): Promise<${agg.name} | null> {`,
-    );
+    lines.push(`  async ${find.name}(${params}): Promise<${agg.name} | null> {`);
   } else {
-    lines.push(
-      `  async ${find.name}(${params}): Promise<${agg.name}> {`,
-    );
+    lines.push(`  async ${find.name}(${params}): Promise<${agg.name}> {`);
   }
   lines.push(
     `    const rootRows = await this.db.select().from(schema.${tableName})${whereClause}.limit(1);`,
@@ -732,11 +643,11 @@ function findQueryMethod(
   if (find.returnType.kind === "optional") {
     lines.push(`    if (rootRows.length === 0) return null;`);
   } else {
-    lines.push(
-      `    if (rootRows.length === 0) throw new AggregateNotFoundError("not found");`,
-    );
+    lines.push(`    if (rootRows.length === 0) throw new AggregateNotFoundError("not found");`);
   }
-  lines.push(`    return await this.findById(rootRows[0]!.id as Ids.${agg.name}Id) as ${agg.name}${find.returnType.kind === "optional" ? " | null" : ""};`);
+  lines.push(
+    `    return await this.findById(rootRows[0]!.id as Ids.${agg.name}Id) as ${agg.name}${find.returnType.kind === "optional" ? " | null" : ""};`,
+  );
   lines.push(`  }`);
   return lines;
 }
@@ -867,12 +778,9 @@ function lowerToDrizzle(
       }
       const drizzleFn = COMPARE_OP_TO_DRIZZLE[e.op];
       if (!drizzleFn) return null;
-      const colExpr =
-        renderColumnRef(e.left) ?? renderColumnRef(e.right);
+      const colExpr = renderColumnRef(e.left) ?? renderColumnRef(e.right);
       const valueExpr =
-        renderColumnRef(e.left) === null
-          ? renderValue(e.left)
-          : renderValue(e.right);
+        renderColumnRef(e.left) === null ? renderValue(e.left) : renderValue(e.right);
       if (colExpr === null || valueExpr === null) return null;
       ops.add(drizzleFn);
       return `${drizzleFn}(${colExpr}, ${valueExpr})`;
@@ -936,11 +844,7 @@ function lowerToDrizzle(
       // class of type errors (a where-clause referencing a renamed
       // column or a parameter with the wrong type compiled silently),
       // so the cast is gone.
-      if (
-        e.refKind === "param" ||
-        e.refKind === "let" ||
-        e.refKind === "lambda"
-      ) {
+      if (e.refKind === "param" || e.refKind === "let" || e.refKind === "lambda") {
         return e.name;
       }
       // Enum value: render as the literal string.  EF / Drizzle store
@@ -954,11 +858,7 @@ function lowerToDrizzle(
     // emits a plain JS member access against it.  Drizzle infers
     // the column-side branded type and the User field's plain type
     // is structurally assignable.
-    if (
-      e.kind === "member" &&
-      e.receiver.kind === "ref" &&
-      e.receiver.refKind === "current-user"
-    ) {
+    if (e.kind === "member" && e.receiver.kind === "ref" && e.receiver.refKind === "current-user") {
       return `currentUser.${e.member}`;
     }
     void ctx;

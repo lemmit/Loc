@@ -21,11 +21,11 @@
 //   body: Text("doubled: " + double(count))
 //     → <Text>{("doubled: " + double(count))}</Text>
 
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
-import { generateSystems } from "../src/system/index.js";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
+import { generateSystems } from "../src/system/index.js";
 
 async function buildAndGenerate(src: string): Promise<Map<string, string>> {
   const services = createDddServices(NodeFileSystem);
@@ -56,9 +56,7 @@ describe("Slice 11.23 — function + method calls in walker bodies", () => {
       }
     `);
     const content = files.get("web/src/pages/x.tsx")!;
-    expect(content).toMatch(
-      /<Button onClick=\{\(\) => \{ saveOrder\(\); \}\}>Save<\/Button>/,
-    );
+    expect(content).toMatch(/<Button onClick=\{\(\) => \{ saveOrder\(\); \}\}>Save<\/Button>/);
   });
 
   it("function-call expression in let RHS emits inline", async () => {
@@ -143,9 +141,7 @@ describe("Slice 11.23 — function + method calls in walker bodies", () => {
       }
     `);
     const content = files.get("web/src/pages/x.tsx")!;
-    expect(content).toMatch(
-      /<Text>\{\("doubled: " \+ double\(count\)\)\}<\/Text>/,
-    );
+    expect(content).toMatch(/<Text>\{\("doubled: " \+ double\(count\)\)\}<\/Text>/);
   });
 
   it("method call with multiple args + state ref still emits placeholder", async () => {
@@ -172,9 +168,7 @@ describe("Slice 11.23 — function + method calls in walker bodies", () => {
       }
     `);
     const content = files.get("web/src/pages/x.tsx")!;
-    expect(content).toMatch(
-      /TODO: method-call mixer\.combine\(a, b, "extra"\)/,
-    );
+    expect(content).toMatch(/TODO: method-call mixer\.combine\(a, b, "extra"\)/);
     expect(content).not.toMatch(/undefined\.combine\(/);
   });
 });

@@ -4,11 +4,11 @@
 // `const navigate = useNavigate()` so the generated onClick lambda
 // resolves at render time.
 
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
-import { generateSystems } from "../src/system/index.js";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
+import { generateSystems } from "../src/system/index.js";
 
 async function buildAndGenerate(src: string): Promise<Map<string, string>> {
   const services = createDddServices(NodeFileSystem);
@@ -41,9 +41,7 @@ describe("Slice 11.5 — Button(to:) navigation in walker-rendered pages", () =>
     const content = files.get("web/src/pages/home.tsx")!;
     expect(content).toBeDefined();
     // useNavigate import + hook call.
-    expect(content).toMatch(
-      /import \{ useNavigate \} from "react-router";/,
-    );
+    expect(content).toMatch(/import \{ useNavigate \} from "react-router";/);
     expect(content).toMatch(/const navigate = useNavigate\(\);/);
     // Button onClick lambda navigates to the literal path.
     expect(content).toMatch(
@@ -78,9 +76,7 @@ describe("Slice 11.5 — Button(to:) navigation in walker-rendered pages", () =>
     const matches = content.match(/const navigate = useNavigate\(\);/g) ?? [];
     expect(matches).toHaveLength(1);
     // Both buttons emit their onClick.
-    expect(content).toMatch(
-      /<Button onClick=\{\(\) => navigate\("\/orders"\)\}>Orders<\/Button>/,
-    );
+    expect(content).toMatch(/<Button onClick=\{\(\) => navigate\("\/orders"\)\}>Orders<\/Button>/);
     expect(content).toMatch(
       /<Button onClick=\{\(\) => navigate\("\/settings"\)\}>Settings<\/Button>/,
     );
@@ -133,14 +129,10 @@ describe("Slice 11.5 — Button(to:) navigation in walker-rendered pages", () =>
     const content = files.get("web/src/pages/detail.tsx")!;
     // Single combined import line (specifier order: useParams first,
     // useNavigate second, matches the shell logic).
-    expect(content).toMatch(
-      /import \{ useParams, useNavigate \} from "react-router";/,
-    );
+    expect(content).toMatch(/import \{ useParams, useNavigate \} from "react-router";/);
     expect(content).toMatch(/const \{ slug \} = useParams<\{ slug: string \}>\(\);/);
     expect(content).toMatch(/const navigate = useNavigate\(\);/);
-    expect(content).toMatch(
-      /<Button onClick=\{\(\) => navigate\("\/"\)\}>Back<\/Button>/,
-    );
+    expect(content).toMatch(/<Button onClick=\{\(\) => navigate\("\/"\)\}>Back<\/Button>/);
   });
 
   it("Button(to: <param-ref>) interpolates the param via template literal", async () => {
@@ -164,9 +156,7 @@ describe("Slice 11.5 — Button(to:) navigation in walker-rendered pages", () =>
     `);
     const content = files.get("web/src/pages/home.tsx")!;
     // Template literal interpolating the route param at render time.
-    expect(content).toMatch(
-      /<Button onClick=\{\(\) => navigate\(`\$\{slug\}`\)\}>Open<\/Button>/,
-    );
+    expect(content).toMatch(/<Button onClick=\{\(\) => navigate\(`\$\{slug\}`\)\}>Open<\/Button>/);
     // Param consumed by the Button to: arg → destructured in shell.
     expect(content).toMatch(/const \{ slug \} = useParams/);
   });

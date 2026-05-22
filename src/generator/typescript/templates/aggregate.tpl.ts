@@ -10,8 +10,8 @@ import type {
   OperationIR,
 } from "../../../ir/loom-ir.js";
 import { operationUsesCurrentUser } from "../../../ir/loom-ir.js";
-import { camel } from "../../../util/naming.js";
 import { lines } from "../../../util/code-builder.js";
+import { camel } from "../../../util/naming.js";
 import { renderTsExpr, renderTsType } from "../render-expr.js";
 import { renderTsStatements } from "../render-stmt.js";
 
@@ -36,10 +36,7 @@ interface EntityShape {
   operations: OperationIR[];
 }
 
-export function renderAggregate(
-  agg: AggregateIR,
-  ctx: BoundedContextIR,
-): string {
+export function renderAggregate(agg: AggregateIR, ctx: BoundedContextIR): string {
   const valueObjectAliases = ctx.valueObjects.map((v) => v.name);
   const enumAliases = ctx.enums.map((e) => e.name);
   const partsRendered = agg.parts.map((p) => renderEntity(partShape(p, agg)));
@@ -65,9 +62,7 @@ export function renderAggregate(
       'import { DomainError, ForbiddenError } from "./errors";',
       usesUser ? 'import type { User } from "../auth/user-types";' : null,
       "",
-      partsRendered.length > 0
-        ? partsRendered.map((p) => p + "\n").join("\n")
-        : "",
+      partsRendered.length > 0 ? partsRendered.map((p) => p + "\n").join("\n") : "",
       rootRendered,
     ) + "\n\n"
   );
@@ -155,30 +150,20 @@ function renderEntity(e: EntityShape): string {
   const getters: string[] = [];
   getters.push(`  get id(): Ids.${e.name}Id { return this._id; }`);
   if (!e.isRoot) {
-    getters.push(
-      `  get parentId(): Ids.${e.rootName}Id { return this._parentId; }`,
-    );
+    getters.push(`  get parentId(): Ids.${e.rootName}Id { return this._parentId; }`);
   }
   for (const f of e.fields) {
-    getters.push(
-      `  get ${f.name}(): ${renderTsType(f.type)} { return this._${f.name}; }`,
-    );
+    getters.push(`  get ${f.name}(): ${renderTsType(f.type)} { return this._${f.name}; }`);
   }
   for (const c of e.contains) {
-    getters.push(
-      `  get ${c.name}(): ${containsGetterType(c)} { return this._${c.name}; }`,
-    );
+    getters.push(`  get ${c.name}(): ${containsGetterType(c)} { return this._${c.name}; }`);
   }
   for (const d of e.derived) {
-    getters.push(
-      `  get ${d.name}(): ${renderTsType(d.type)} { return ${renderTsExpr(d.expr)}; }`,
-    );
+    getters.push(`  get ${d.name}(): ${renderTsType(d.type)} { return ${renderTsExpr(d.expr)}; }`);
   }
 
   const fns = e.functions.map((fn) => {
-    const params = fn.params
-      .map((p) => `${p.name}: ${renderTsType(p.type)}`)
-      .join(", ");
+    const params = fn.params.map((p) => `${p.name}: ${renderTsType(p.type)}`).join(", ");
     return `  private ${camel(fn.name)}(${params}): ${renderTsType(fn.returnType)} { return ${renderTsExpr(fn.body)}; }`;
   });
 
@@ -188,17 +173,11 @@ function renderEntity(e: EntityShape): string {
   const externMutators: string[] = [];
   if (hasExtern) {
     for (const f of e.fields) {
-      externMutators.push(
-        `  set ${f.name}(v: ${renderTsType(f.type)}) { this._${f.name} = v; }`,
-      );
+      externMutators.push(`  set ${f.name}(v: ${renderTsType(f.type)}) { this._${f.name} = v; }`);
     }
     if (e.isRoot) {
-      externMutators.push(
-        "  raiseEvent(ev: Events.DomainEvent): void { this._events.push(ev); }",
-      );
-      externMutators.push(
-        "  assertInvariants(): void { this._assertInvariants(); }",
-      );
+      externMutators.push("  raiseEvent(ev: Events.DomainEvent): void { this._events.push(ev); }");
+      externMutators.push("  assertInvariants(): void { this._assertInvariants(); }");
     }
   }
 
@@ -211,9 +190,7 @@ function renderEntity(e: EntityShape): string {
   for (const op of e.operations) {
     const visibility = op.visibility === "public" ? "public" : "private";
     const usesUser = operationUsesCurrentUser(op);
-    const baseParams = op.params
-      .map((p) => `${p.name}: ${renderTsType(p.type)}`)
-      .join(", ");
+    const baseParams = op.params.map((p) => `${p.name}: ${renderTsType(p.type)}`).join(", ");
     const userParam = usesUser ? "currentUser: User" : "";
     const params = [baseParams, userParam].filter(Boolean).join(", ");
     if (op.extern) {
@@ -253,12 +230,8 @@ function renderEntity(e: EntityShape): string {
           .join("; ")} }): ${e.name} {`,
         `    return new ${e.name}({`,
         `      id: Ids.new${e.name}Id(),`,
-        ...e.fields.map(
-          (f) => `      ${f.name}: ${f.optional ? "null" : `input.${f.name}`},`,
-        ),
-        ...e.contains.map(
-          (c) => `      ${c.name}: ${c.collection ? "[]" : "null"},`,
-        ),
+        ...e.fields.map((f) => `      ${f.name}: ${f.optional ? "null" : `input.${f.name}`},`),
+        ...e.contains.map((c) => `      ${c.name}: ${c.collection ? "[]" : "null"},`),
         "    });",
         "  }",
       ]

@@ -1,12 +1,12 @@
-import { describe, it, expect } from "vitest";
-import { NodeFileSystem } from "langium/node";
-import { URI } from "langium";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { URI } from "langium";
+import { NodeFileSystem } from "langium/node";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
+import type { Model } from "../src/language/generated/ast.js";
 import { generateSystems } from "../src/system/index.js";
 import { makePreviewHtml } from "../web/src/preview/iframe-html.js";
-import type { Model } from "../src/language/generated/ast.js";
 
 // ---------------------------------------------------------------------------
 // Mobile UX regressions:
@@ -33,10 +33,9 @@ const repoRoot = path.resolve(here, "..");
 
 async function buildModel(file: string): Promise<Model> {
   const services = createDddServices(NodeFileSystem);
-  const doc =
-    await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
-      URI.file(path.join(repoRoot, file)),
-    );
+  const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
+    URI.file(path.join(repoRoot, file)),
+  );
   await services.shared.workspace.DocumentBuilder.build([doc], {
     validation: true,
   });

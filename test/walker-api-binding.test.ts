@@ -22,11 +22,11 @@
 //   <agg>.<finder>     → use<Finder><Single>       (custom)
 // Variable name: `<aggCamel><OpPascal>`.
 
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
-import { generateSystems } from "../src/system/index.js";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
+import { generateSystems } from "../src/system/index.js";
 
 async function buildAndGenerate(src: string): Promise<Map<string, string>> {
   const services = createDddServices(NodeFileSystem);
@@ -64,9 +64,7 @@ describe("Slice 11.24 — api binding + walker hook injection", () => {
     const content = files.get("web/src/pages/list.tsx")!;
     expect(content).toBeDefined();
     // Hook import + page-top declaration deterministic.
-    expect(content).toMatch(
-      /import \{ useAllCustomers \} from "\.\.\/api\/customer";/,
-    );
+    expect(content).toMatch(/import \{ useAllCustomers \} from "\.\.\/api\/customer";/);
     expect(content).toMatch(/const customerAll = useAllCustomers\(\);/);
     // Body ref rewritten to local var.
     expect(content).toMatch(/<Text>\{customerAll\.isLoading\}<\/Text>/);
@@ -100,9 +98,7 @@ describe("Slice 11.24 — api binding + walker hook injection", () => {
       }
     `);
     const content = files.get("web/src/pages/new.tsx")!;
-    expect(content).toMatch(
-      /import \{ useCreateCustomer \} from "\.\.\/api\/customer";/,
-    );
+    expect(content).toMatch(/import \{ useCreateCustomer \} from "\.\.\/api\/customer";/);
     expect(content).toMatch(/const customerCreate = useCreateCustomer\(\);/);
     // Body onClick uses the local var's `.mutate(...)`.
     expect(content).toMatch(/customerCreate\.mutate\(/);
@@ -133,9 +129,7 @@ describe("Slice 11.24 — api binding + walker hook injection", () => {
       }
     `);
     const content = files.get("web/src/pages/detail.tsx")!;
-    expect(content).toMatch(
-      /import \{ useCustomerById \} from "\.\.\/api\/customer";/,
-    );
+    expect(content).toMatch(/import \{ useCustomerById \} from "\.\.\/api\/customer";/);
     // Hook arg passed through at decl time; the param is in scope from useParams above.
     expect(content).toMatch(/const customerById = useCustomerById\(slug\);/);
     expect(content).toMatch(/<Text>\{customerById\.isLoading\}<\/Text>/);
@@ -237,12 +231,8 @@ describe("Slice 11.24 — api binding + walker hook injection", () => {
       }
     `);
     const content = files.get("web/src/pages/lookup.tsx")!;
-    expect(content).toMatch(
-      /import \{ useByEmailCustomer \} from "\.\.\/api\/customer";/,
-    );
-    expect(content).toMatch(
-      /const customerByEmail = useByEmailCustomer\(email\);/,
-    );
+    expect(content).toMatch(/import \{ useByEmailCustomer \} from "\.\.\/api\/customer";/);
+    expect(content).toMatch(/const customerByEmail = useByEmailCustomer\(email\);/);
   });
 
   it("UI without api parameters: existing behaviour unchanged (no hook injection)", async () => {

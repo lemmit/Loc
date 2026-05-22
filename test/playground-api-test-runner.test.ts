@@ -8,17 +8,11 @@
 // Browser-only seams (esbuild-wasm transpile, the reporter UI) are not
 // exercised here; `compile` is injected as a passthrough.
 
-import { describe, it, expect } from "vitest";
-import {
-  createHarness,
-  runTests,
-} from "../web/src/testing/harness.js";
+import { describe, expect, it } from "vitest";
+import type { DispatchResult, SerializedRequest } from "../web/src/runtime/protocol.js";
 import { makeDispatchFetch } from "../web/src/testing/fetch-dispatch.js";
-import { runApiTests, findApiTestFile } from "../web/src/testing/run-api-tests.js";
-import type {
-  DispatchResult,
-  SerializedRequest,
-} from "../web/src/runtime/protocol.js";
+import { createHarness, runTests } from "../web/src/testing/harness.js";
+import { findApiTestFile, runApiTests } from "../web/src/testing/run-api-tests.js";
 
 // A tiny in-memory backend standing in for the booted runtime worker.
 function fakeBackend(): (req: SerializedRequest) => Promise<DispatchResult> {
@@ -83,9 +77,11 @@ describe("harness", () => {
   it("toThrow passes when the call throws synchronously, fails otherwise", async () => {
     const h = createHarness();
     h.it("throws", () =>
-      h.expect(() => {
-        throw new Error("boom");
-      }).toThrow(),
+      h
+        .expect(() => {
+          throw new Error("boom");
+        })
+        .toThrow(),
     );
     h.it("no throw", () => h.expect(() => 1).toThrow());
     const results = await runTests(h.tests);
@@ -95,13 +91,13 @@ describe("harness", () => {
   it("rejects.toThrow passes when the call rejects, fails when it resolves", async () => {
     const h = createHarness();
     h.it("throws", async () =>
-      h.expect(async () => {
-        throw new Error("boom");
-      }).rejects.toThrow(),
+      h
+        .expect(async () => {
+          throw new Error("boom");
+        })
+        .rejects.toThrow(),
     );
-    h.it("resolves", async () =>
-      h.expect(async () => 42).rejects.toThrow(),
-    );
+    h.it("resolves", async () => h.expect(async () => 42).rejects.toThrow());
     const results = await runTests(h.tests);
     expect(results.map((r) => r.status)).toEqual(["pass", "fail"]);
   });

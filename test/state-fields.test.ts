@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
 import { EmptyFileSystem } from "langium";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model, Page, StateBlock } from "../src/language/generated/ast.js";
 import {
@@ -18,15 +18,19 @@ const parses = (t: string): boolean => parser.parse(t).parserErrors.length === 0
 function* walk(node: { $type: string }): Generator<{ $type: string }> {
   yield node;
   for (const v of Object.values(node)) {
-    if (Array.isArray(v)) for (const c of v) if (c && typeof c === "object" && "$type" in c) yield* walk(c);
-    else if (v && typeof v === "object" && "$type" in v) yield* walk(v as { $type: string });
+    if (Array.isArray(v))
+      for (const c of v)
+        if (c && typeof c === "object" && "$type" in c) yield* walk(c);
+        else if (v && typeof v === "object" && "$type" in v) yield* walk(v as { $type: string });
   }
 }
 const findPage = (m: Model, name: string): Page => {
-  for (const n of walk(m)) if (n.$type === "Page" && (n as { name?: string }).name === name) return n as unknown as Page;
+  for (const n of walk(m))
+    if (n.$type === "Page" && (n as { name?: string }).name === name) return n as unknown as Page;
   throw new Error(`page not found: ${name}`);
 };
-const stateBlock = (page: Page): StateBlock | undefined => page.props.find((p) => p.$type === "StateBlock") as StateBlock | undefined;
+const stateBlock = (page: Page): StateBlock | undefined =>
+  page.props.find((p) => p.$type === "StateBlock") as StateBlock | undefined;
 
 const WITH_STATE = `system S { ui U { page P {
   state { step: int = 0 }
@@ -84,6 +88,12 @@ describe("Page builder — state field editing", () => {
   it("returns null for an unknown page or out-of-range index", () => {
     expect(addStateField(WITH_STATE, "Nope")).toBeNull();
     expect(deleteStateField(WITH_STATE, "P", 9)).toBeNull();
-    expect(retypeStateField(WITH_STATE, "P", 9, { base: { kind: "primitive", name: "int" }, array: false, optional: false })).toBeNull();
+    expect(
+      retypeStateField(WITH_STATE, "P", 9, {
+        base: { kind: "primitive", name: "int" },
+        array: false,
+        optional: false,
+      }),
+    ).toBeNull();
   });
 });

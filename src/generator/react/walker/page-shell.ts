@@ -16,22 +16,17 @@ import type {
   UiHelperImportIR,
   WorkflowIR,
 } from "../../../ir/loom-ir.js";
+import { camel, humanize, pascal, plural, snake } from "../../../util/naming.js";
 import type { LoadedPack } from "../../_packs/loader.js";
 import { routerPackageForStack } from "../../_packs/stack-runtime.js";
-import { camel, humanize, pascal, plural, snake } from "../../../util/naming.js";
-import { idTargetHookVar } from "../form-helpers.js";
 import type {
   FormOfState,
   OperationFormState,
   WalkContext,
   WorkflowFormState,
 } from "../body-walker.js";
-import {
-  emitExpr,
-  renderHelperImports,
-  renderImportLines,
-  walkBodyToTsx,
-} from "../body-walker.js";
+import { emitExpr, renderHelperImports, renderImportLines, walkBodyToTsx } from "../body-walker.js";
+import { idTargetHookVar } from "../form-helpers.js";
 import { renderApiHookImports } from "./api-hooks.js";
 import { indentJsx } from "./shared/args.js";
 
@@ -157,9 +152,7 @@ export function renderCustomLayoutPage(
     usesStateForTitle = titleCtx.usesState && !usesState;
     const refs = new Set<string>();
     collectExprRefs(title, refs);
-    const deps = [...refs]
-      .filter((n) => paramNames.has(n) || stateNames.has(n))
-      .sort();
+    const deps = [...refs].filter((n) => paramNames.has(n) || stateNames.has(n)).sort();
     titleEffect = `  useEffect(() => { document.title = ${titleExpr}; }, [${deps.join(", ")}]);\n`;
     usesEffect = true;
   }
@@ -219,9 +212,10 @@ export function renderCustomLayoutPage(
   if (hasParams) routerSpecifiers.push("useParams");
   if (usesNavigate || form.usesNavigate) routerSpecifiers.push("useNavigate");
   if (usesRouterLink) routerSpecifiers.push("Link as RouterLink");
-  const reactRouterImport = routerSpecifiers.length > 0
-    ? `import { ${routerSpecifiers.join(", ")} } from "${routerPackageForStack(pack.manifest.stack)}";\n`
-    : "";
+  const reactRouterImport =
+    routerSpecifiers.length > 0
+      ? `import { ${routerSpecifiers.join(", ")} } from "${routerPackageForStack(pack.manifest.stack)}";\n`
+      : "";
   // Slice 11.7 — emit the `useState` hook + per-field declaration
   // when any state ref or `:=` mutation surfaced during the walk.
   // Pages that DECLARE state but never reference it from the body
@@ -231,9 +225,8 @@ export function renderCustomLayoutPage(
   const reactSpecifiers: string[] = [];
   if (effectiveUsesState) reactSpecifiers.push("useState");
   if (usesEffect) reactSpecifiers.push("useEffect");
-  const reactImport = reactSpecifiers.length > 0
-    ? `import { ${reactSpecifiers.join(", ")} } from "react";\n`
-    : "";
+  const reactImport =
+    reactSpecifiers.length > 0 ? `import { ${reactSpecifiers.join(", ")} } from "react";\n` : "";
   const stateLines = effectiveUsesState
     ? state.map((f) => `  ${renderUseState(f, pack)}\n`).join("")
     : "";
@@ -241,14 +234,14 @@ export function renderCustomLayoutPage(
     ? `<{ ${params.map((p) => `${p.name}: ${typeRefAsTsString(p)}`).join("; ")} }>`
     : "";
   const used = [...usedParams].sort();
-  const paramsLine = used.length > 0
-    ? `  const { ${used.join(", ")} } = useParams${paramsType}();\n`
-    : hasParams
-      ? `  useParams${paramsType}();\n`
-      : "";
-  const navigateLine = usesNavigate || form.usesNavigate
-    ? `  const navigate = useNavigate();\n`
-    : "";
+  const paramsLine =
+    used.length > 0
+      ? `  const { ${used.join(", ")} } = useParams${paramsType}();\n`
+      : hasParams
+        ? `  useParams${paramsType}();\n`
+        : "";
+  const navigateLine =
+    usesNavigate || form.usesNavigate ? `  const navigate = useNavigate();\n` : "";
   return `// Auto-generated.  Do not edit by hand.
 ${reactImport}${reactRouterImport}${mantineImport}${apiHookImports}${helperImportLines}${userComponentImports}${form.moduleScope}
 export default function ${pageName}() {
@@ -339,8 +332,7 @@ function renderFormOpWiring(
   pack: LoadedPack,
   srcImportPrefix: string,
 ): FormWiring {
-  const { agg, op, idTargets, useController, defaultValuesTs, fieldHtmls } =
-    state;
+  const { agg, op, idTargets, useController, defaultValuesTs, fieldHtmls } = state;
   const opPascal = pascal(op.name);
   const tplCtx = {
     aggregateName: agg.name,
@@ -371,9 +363,7 @@ function renderFormOpWiring(
   const moduleScope = pack.render("form-op-module", tplCtx);
   return {
     decls: decls.endsWith("\n") ? decls : decls + "\n",
-    moduleScope: moduleScope.endsWith("\n")
-      ? moduleScope
-      : moduleScope + "\n",
+    moduleScope: moduleScope.endsWith("\n") ? moduleScope : moduleScope + "\n",
     usesNavigate: false,
   };
 }
@@ -446,42 +436,31 @@ export function renderUserComponentFile(
   const routerSpecifiers: string[] = [];
   if (usesNavigate) routerSpecifiers.push("useNavigate");
   if (usesRouterLink) routerSpecifiers.push("Link as RouterLink");
-  const reactRouterImport = routerSpecifiers.length > 0
-    ? `import { ${routerSpecifiers.join(", ")} } from "${routerPackageForStack(pack.manifest.stack)}";\n`
-    : "";
-  const reactImport = usesState
-    ? `import { useState } from "react";\n`
-    : "";
+  const reactRouterImport =
+    routerSpecifiers.length > 0
+      ? `import { ${routerSpecifiers.join(", ")} } from "${routerPackageForStack(pack.manifest.stack)}";\n`
+      : "";
+  const reactImport = usesState ? `import { useState } from "react";\n` : "";
   // Slice 11.19 — components that reference Slot() get a
   // `children` prop on top of their declared params.  React's
   // type is imported lazily.
-  const reactTypesImport = usesChildren
-    ? `import type { ReactNode } from "react";\n`
-    : "";
+  const reactTypesImport = usesChildren ? `import type { ReactNode } from "react";\n` : "";
   const userComponentImports = [...usedUserComponents]
     .sort()
     .map((n) => `import ${n} from "./${n}";\n`)
     .join("");
   // Props interface — every declared param becomes a typed field;
   // Slot()-using components also get a `children` field.
-  const propLines = params.map(
-    (p) => `  ${p.name}: ${typeRefAsTsString(p)};`,
-  );
+  const propLines = params.map((p) => `  ${p.name}: ${typeRefAsTsString(p)};`);
   if (usesChildren) propLines.push(`  children?: ReactNode;`);
-  const propsType = propLines.length > 0
-    ? `\nexport interface ${name}Props {\n${propLines.join("\n")}\n}\n`
-    : "";
+  const propsType =
+    propLines.length > 0 ? `\nexport interface ${name}Props {\n${propLines.join("\n")}\n}\n` : "";
   const destructureNames = params.map((p) => p.name);
   if (usesChildren) destructureNames.push("children");
-  const propDestructure = destructureNames.length > 0
-    ? `{ ${destructureNames.join(", ")} }: ${name}Props`
-    : "";
-  const navigateLine = usesNavigate
-    ? `  const navigate = useNavigate();\n`
-    : "";
-  const stateLines = usesState
-    ? state.map((f) => `  ${renderUseState(f, pack)}\n`).join("")
-    : "";
+  const propDestructure =
+    destructureNames.length > 0 ? `{ ${destructureNames.join(", ")} }: ${name}Props` : "";
+  const navigateLine = usesNavigate ? `  const navigate = useNavigate();\n` : "";
+  const stateLines = usesState ? state.map((f) => `  ${renderUseState(f, pack)}\n`).join("") : "";
   // Suppress used-prop warnings — params declared but unused at
   // walker-emit time (e.g. typed pass-through to a child component
   // not yet wired) shouldn't trigger TS lint noise.  We reference
@@ -527,9 +506,8 @@ function collectExprRefs(expr: ExprIR, out: Set<string>): void {
 function renderUseState(field: StateFieldIR, pack: LoadedPack): string {
   const setter = "set" + field.name[0]!.toUpperCase() + field.name.slice(1);
   const tsType = stateTypeAsTsString(field.type);
-  const init = field.init !== undefined
-    ? renderInitExpr(field.init, pack)
-    : zeroValueForType(field.type);
+  const init =
+    field.init !== undefined ? renderInitExpr(field.init, pack) : zeroValueForType(field.type);
   return `const [${field.name}, ${setter}] = useState<${tsType}>(${init});`;
 }
 

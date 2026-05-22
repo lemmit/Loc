@@ -1,25 +1,17 @@
-import type {
-  BoundedContextIR,
-  DeployableIR,
-  SystemIR,
-} from "../../ir/loom-ir.js";
-import { pascal, snake, plural } from "../../util/naming.js";
-import { emitWorkflows } from "./workflow-emit.js";
-import { emitViews } from "./view-emit.js";
-import { emitMigrations } from "./migrations-emit.js";
-import {
-  buildFindActions,
-  findRepoFor,
-  mergeViewFindsForAgg,
-} from "./repository-emit.js";
-import { renderAshType, renderExpr } from "./render-expr.js";
-import { emitLiveViewPages, type LiveRoute } from "./liveview-emit.js";
-import { emitApiControllers, type ApiRoute } from "./api-emit.js";
-import { emitOpenApiSpec } from "./openapi-emit.js";
+import type { BoundedContextIR, DeployableIR, SystemIR } from "../../ir/loom-ir.js";
+import { pascal, plural, snake } from "../../util/naming.js";
+import { type ApiRoute, emitApiControllers } from "./api-emit.js";
 import { emitAuth } from "./auth-emit.js";
+import { emitAggregateResources } from "./domain-emit.js";
+import { emitLiveViewPages, type LiveRoute } from "./liveview-emit.js";
+import { emitMigrations } from "./migrations-emit.js";
+import { emitOpenApiSpec } from "./openapi-emit.js";
+import { renderAshType, renderExpr } from "./render-expr.js";
+import { buildFindActions, findRepoFor, mergeViewFindsForAgg } from "./repository-emit.js";
 import { renderSidebarComponent } from "./sidebar-emit.js";
 import { renderThemeCss } from "./theme-emit.js";
-import { emitAggregateResources } from "./domain-emit.js";
+import { emitViews } from "./view-emit.js";
+import { emitWorkflows } from "./workflow-emit.js";
 
 // ---------------------------------------------------------------------------
 // Phoenix LiveView / Ash generator orchestrator.
@@ -150,7 +142,17 @@ export function generatePhoenixLiveViewProject(
   out.set(`priv/static/assets/theme.css`, renderThemeCss(sys.theme));
 
   // --- Shell files ----------------------------------------------------------
-  emitShellFiles(appName, appModule, deployable, sys, contexts, liveRoutes, apiRoutes, authEnabled, out);
+  emitShellFiles(
+    appName,
+    appModule,
+    deployable,
+    sys,
+    contexts,
+    liveRoutes,
+    apiRoutes,
+    authEnabled,
+    out,
+  );
 
   return out;
 }
@@ -218,7 +220,7 @@ function emitContext(
     out.set(
       path,
       existing.replace(
-        /(  actions do\n)/,
+        /( {2}actions do\n)/,
         `$1${customFinds.map((s) => "    " + s).join("\n")}\n\n`,
       ),
     );
@@ -278,9 +280,7 @@ function renderAggregateModule(
 
   // Actions — defaults + custom finds
   const defaultActions = `    defaults [:read, :create, :update, :destroy]`;
-  const customActionBlock = customFinds.length > 0
-    ? "\n" + customFinds.join("\n\n")
-    : "";
+  const customActionBlock = customFinds.length > 0 ? "\n" + customFinds.join("\n\n") : "";
 
   return `# Auto-generated.
 defmodule ${moduleName} do
@@ -357,10 +357,7 @@ end
 // Enum module
 // ---------------------------------------------------------------------------
 
-function renderEnumModule(
-  en: import("../../ir/loom-ir.js").EnumIR,
-  contextModule: string,
-): string {
+function renderEnumModule(en: import("../../ir/loom-ir.js").EnumIR, contextModule: string): string {
   const moduleName = `${contextModule}.${pascal(en.name)}`;
   const values = en.values.map((v) => `  :${snake(v)}`).join(",\n");
   return `# Auto-generated.
@@ -547,10 +544,7 @@ function emitShellFiles(
   // Standard Phoenix 1.7 generators ship a much richer module; we
   // emit just the empty wrapper for now since LiveView pages
   // reference components by full module path.
-  out.set(
-    `lib/${appName}_web/components/core_components.ex`,
-    renderCoreComponents(appModule),
-  );
+  out.set(`lib/${appName}_web/components/core_components.ex`, renderCoreComponents(appModule));
 
   // lib/<app>_web/components/layouts.ex
   out.set(`lib/${appName}_web/components/layouts.ex`, renderLayouts(appName, appModule));
@@ -946,7 +940,7 @@ ${inner}
     end`;
   } else {
     const flatLines = liveLines
-      ? liveLines.replace(/^      /gm, "    ")
+      ? liveLines.replace(/^ {6}/gm, "    ")
       : `    # No pages declared in this deployable's ui: block.`;
     liveScopeBody = `\n${flatLines}`;
   }
@@ -957,12 +951,10 @@ ${inner}
   const rootApiRoutes = apiRoutes.filter((r) => r.path.startsWith("!root:"));
   const scopedApiRoutes = apiRoutes.filter((r) => !r.path.startsWith("!root:"));
   const scopedLines = scopedApiRoutes
-    .map(
-      (r) =>
-        `    ${r.method} ${JSON.stringify(r.path)}, ${r.controller}, ${r.action}`,
-    )
+    .map((r) => `    ${r.method} ${JSON.stringify(r.path)}, ${r.controller}, ${r.action}`)
     .join("\n");
-  const scopedBody = scopedLines || `    # No API routes — backend has no workflows / views or 'serves:' is empty.`;
+  const scopedBody =
+    scopedLines || `    # No API routes — backend has no workflows / views or 'serves:' is empty.`;
   const rootLines = rootApiRoutes
     .map((r) => {
       const path = r.path.slice("!root:".length);
@@ -1471,19 +1463,13 @@ function renderAppLayout(): string {
 `;
 }
 
-function renderConfigExs(
-  appName: string,
-  appModule: string,
-  contexts: BoundedContextIR[],
-): string {
+function renderConfigExs(appName: string, appModule: string, contexts: BoundedContextIR[]): string {
   // Ash 3.x requires every domain to be registered here; without it
   // `mix compile --warnings-as-errors` rejects with
   // "Domain <Mod> is not present in :ash_domains".  Domains are
   // \`<appModule>.<PascalContextName>\` (matching what
   // emitAggregateResources emits as the resource's :domain).
-  const ashDomains = contexts
-    .map((ctx) => `${appModule}.${pascal(ctx.name)}`)
-    .join(", ");
+  const ashDomains = contexts.map((ctx) => `${appModule}.${pascal(ctx.name)}`).join(", ");
   return `# Auto-generated.
 import Config
 
@@ -1495,7 +1481,7 @@ config :${appName},
 
 config :phoenix, :json_library, Jason
 
-import_config "\#{config_env()}.exs"
+import_config "#{config_env()}.exs"
 `;
 }
 
@@ -1607,10 +1593,14 @@ function toModulePrefix(snakeName: string): string {
 
 function idAshType(idValueType: string): string {
   switch (idValueType) {
-    case "int": return ":integer";
-    case "long": return ":integer";
-    case "string": return ":string";
-    default: return ":uuid";
+    case "int":
+      return ":integer";
+    case "long":
+      return ":integer";
+    case "string":
+      return ":string";
+    default:
+      return ":uuid";
   }
 }
 

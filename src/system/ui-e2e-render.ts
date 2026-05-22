@@ -75,21 +75,15 @@ export function renderUIE2EFile(
   lines.push(`import { test, expect } from "@playwright/test";`);
   for (const a of aggregates) {
     const cap = upper(a.name);
-    lines.push(
-      `import { ${cap}ListPage, ${cap}DetailPage } from "./pages/${camel(a.name)}";`,
-    );
+    lines.push(`import { ${cap}ListPage, ${cap}DetailPage } from "./pages/${camel(a.name)}";`);
   }
   for (const wf of workflows) {
     const cap = upper(wf.name);
-    lines.push(
-      `import { ${cap}WorkflowPage } from "./pages/workflows/${snake(wf.name)}";`,
-    );
+    lines.push(`import { ${cap}WorkflowPage } from "./pages/workflows/${snake(wf.name)}";`);
   }
   for (const v of views) {
     const cap = upper(v.name);
-    lines.push(
-      `import { ${cap}ViewPage } from "./pages/views/${snake(v.name)}";`,
-    );
+    lines.push(`import { ${cap}ViewPage } from "./pages/views/${snake(v.name)}";`);
   }
   lines.push("");
   for (const t of uiTests) {
@@ -129,7 +123,12 @@ function collectReferencedAggregates(
   return out;
 
   function walkStmt(s: TestStmtIR): void {
-    if (s.kind === "expect" || s.kind === "expect-throws" || s.kind === "let" || s.kind === "expression") {
+    if (
+      s.kind === "expect" ||
+      s.kind === "expect-throws" ||
+      s.kind === "let" ||
+      s.kind === "expression"
+    ) {
       walkExpr(s.expr);
     }
   }
@@ -185,10 +184,7 @@ function collectReferencedWorkflows(
   return out;
 }
 
-function collectReferencedViews(
-  tests: TestE2EIR[],
-  contexts: BoundedContextIR[],
-): ViewIR[] {
+function collectReferencedViews(tests: TestE2EIR[], contexts: BoundedContextIR[]): ViewIR[] {
   const seen = new Set<string>();
   const out: ViewIR[] = [];
   walkAllExprs(tests, (e) => {
@@ -204,10 +200,7 @@ function collectReferencedViews(
   return out;
 }
 
-function walkAllExprs(
-  tests: TestE2EIR[],
-  visit: (e: ExprIR) => void,
-): void {
+function walkAllExprs(tests: TestE2EIR[], visit: (e: ExprIR) => void): void {
   const walk = (e: ExprIR | undefined): void => {
     if (!e) return;
     visit(e);
@@ -246,10 +239,7 @@ function walkAllExprs(
   }
 }
 
-function findWorkflowByName(
-  name: string,
-  contexts: BoundedContextIR[],
-): WorkflowIR | undefined {
+function findWorkflowByName(name: string, contexts: BoundedContextIR[]): WorkflowIR | undefined {
   for (const c of contexts) {
     for (const w of c.workflows) {
       if (camel(w.name) === name) return w;
@@ -259,10 +249,7 @@ function findWorkflowByName(
   return undefined;
 }
 
-function findViewByName(
-  name: string,
-  contexts: BoundedContextIR[],
-): ViewIR | undefined {
+function findViewByName(name: string, contexts: BoundedContextIR[]): ViewIR | undefined {
   for (const c of contexts) {
     for (const v of c.views) {
       if (camel(v.name) === name) return v;
@@ -329,10 +316,7 @@ type LiteralIR = Extract<ExprIR, { kind: "literal" }>;
 
 /** `<handle>.<field>` where `<handle>` is a detail-handle local — and the
  *  member is a real field, not the page object's own `id` property. */
-function matchDetailField(
-  e: ExprIR,
-  ctx: RenderCtx,
-): { handle: string; field: string } | null {
+function matchDetailField(e: ExprIR, ctx: RenderCtx): { handle: string; field: string } | null {
   if (e.kind !== "member" || e.member === "id") return null;
   if (e.receiver.kind !== "ref" || !ctx.detailHandles.has(e.receiver.name)) {
     return null;
@@ -352,10 +336,7 @@ function matchDetailCollectionLength(
   return { handle: inner.receiver.name, collection: inner.member };
 }
 
-function literalSide(
-  a: ExprIR,
-  b: ExprIR,
-): { readSide: ExprIR; lit: LiteralIR } | null {
+function literalSide(a: ExprIR, b: ExprIR): { readSide: ExprIR; lit: LiteralIR } | null {
   if (b.kind === "literal") return { readSide: a, lit: b };
   if (a.kind === "literal") return { readSide: b, lit: a };
   return null;
@@ -534,10 +515,7 @@ function renderWorkflowCall(
   return `await new ${cap}WorkflowPage(page).run(${body})`;
 }
 
-function renderViewCall(
-  call: { viewName: string; args: ExprIR[] },
-  ctx: RenderCtx,
-): string {
+function renderViewCall(call: { viewName: string; args: ExprIR[] }, ctx: RenderCtx): string {
   void call.args; // views take no args at the call site (parameterless reads)
   const view = findViewByName(call.viewName, ctx.contexts);
   if (!view) {
@@ -609,9 +587,7 @@ function renderAggregateCall(
     // exactly like real Playwright (see renderUIStmt / member handling).
     return `await new ${cap}DetailPage(page, ${idExpr}).goto()`;
   }
-  const op = agg.operations.find(
-    (o) => o.visibility === "public" && o.name === call.method,
-  );
+  const op = agg.operations.find((o) => o.visibility === "public" && o.name === call.method);
   if (op) return renderOperationCall(op, agg, call.args, ctx);
 
   const ops = agg.operations.filter((o) => o.visibility === "public").map((o) => o.name);
@@ -651,10 +627,7 @@ function renderIdArg(arg: ExprIR, ctx: RenderCtx): string {
   return rendered;
 }
 
-function findAggregateBySlug(
-  slug: string,
-  contexts: BoundedContextIR[],
-): AggregateIR | undefined {
+function findAggregateBySlug(slug: string, contexts: BoundedContextIR[]): AggregateIR | undefined {
   for (const c of contexts) {
     for (const a of c.aggregates) {
       if (camel(a.name) === slug) return a;

@@ -1,24 +1,7 @@
-import { AstNodeHoverProvider } from "langium/lsp";
 import type { AstNode, MaybePromise } from "langium";
+import { AstNodeHoverProvider } from "langium/lsp";
 import type { Hover } from "vscode-languageserver";
 import {
-  isAggregate,
-  isContainment,
-  isDerivedProp,
-  isEntityPart,
-  isEnumDecl,
-  isEnumValue,
-  isEventDecl,
-  isExpression,
-  isFunctionDecl,
-  isIdRef,
-  isInvariant,
-  isOperation,
-  isParameter,
-  isProperty,
-  isRepository,
-  isFindDecl,
-  isValueObject,
   type Aggregate,
   type Containment,
   type DerivedProp,
@@ -29,6 +12,23 @@ import {
   type FindDecl,
   type FunctionDecl,
   type Invariant,
+  isAggregate,
+  isContainment,
+  isDerivedProp,
+  isEntityPart,
+  isEnumDecl,
+  isEnumValue,
+  isEventDecl,
+  isExpression,
+  isFindDecl,
+  isFunctionDecl,
+  isIdRef,
+  isInvariant,
+  isOperation,
+  isParameter,
+  isProperty,
+  isRepository,
+  isValueObject,
   type Operation,
   type Parameter,
   type Property,
@@ -62,9 +62,7 @@ import {
 // ---------------------------------------------------------------------------
 
 export class DddHoverProvider extends AstNodeHoverProvider {
-  protected getAstNodeHoverContent(
-    node: AstNode,
-  ): MaybePromise<Hover | undefined> {
+  protected getAstNodeHoverContent(node: AstNode): MaybePromise<Hover | undefined> {
     const content = this.contentFor(node);
     if (!content) return undefined;
     return {
@@ -194,11 +192,15 @@ function memberCounts(target: Aggregate | EntityPart | ValueObject): string {
   const buckets = { property: 0, containment: 0, derived: 0, function: 0, operation: 0 };
   for (const m of members) buckets[m.kind]++;
   const parts: string[] = [];
-  if (buckets.property) parts.push(`${buckets.property} propert${buckets.property === 1 ? "y" : "ies"}`);
-  if (buckets.containment) parts.push(`${buckets.containment} contain${buckets.containment === 1 ? "ment" : "ments"}`);
+  if (buckets.property)
+    parts.push(`${buckets.property} propert${buckets.property === 1 ? "y" : "ies"}`);
+  if (buckets.containment)
+    parts.push(`${buckets.containment} contain${buckets.containment === 1 ? "ment" : "ments"}`);
   if (buckets.derived) parts.push(`${buckets.derived} derived`);
-  if (buckets.function) parts.push(`${buckets.function} function${buckets.function === 1 ? "" : "s"}`);
-  if (buckets.operation) parts.push(`${buckets.operation} operation${buckets.operation === 1 ? "" : "s"}`);
+  if (buckets.function)
+    parts.push(`${buckets.function} function${buckets.function === 1 ? "" : "s"}`);
+  if (buckets.operation)
+    parts.push(`${buckets.operation} operation${buckets.operation === 1 ? "" : "s"}`);
   return parts.length > 0 ? parts.join(", ") : "_(empty)_";
 }
 

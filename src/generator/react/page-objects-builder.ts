@@ -1,8 +1,4 @@
-import type {
-  AggregateIR,
-  BoundedContextIR,
-  TypeIR,
-} from "../../ir/loom-ir.js";
+import type { AggregateIR, BoundedContextIR, TypeIR } from "../../ir/loom-ir.js";
 import { camel, plural, snake } from "../../util/naming.js";
 import { unwrapOpt } from "./form-helpers.js";
 
@@ -21,10 +17,7 @@ import { unwrapOpt } from "./form-helpers.js";
 // returns `OrderResponse["status"]`.
 // ---------------------------------------------------------------------------
 
-export function buildPageObjectModule(
-  agg: AggregateIR,
-  ctx: BoundedContextIR,
-): string {
+export function buildPageObjectModule(agg: AggregateIR, ctx: BoundedContextIR): string {
   const slug = snake(plural(agg.name));
   const aggCap = upper(agg.name);
   const ops = agg.operations.filter((o) => o.visibility === "public");
@@ -37,9 +30,7 @@ export function buildPageObjectModule(
   const reqTypes: string[] = [`Create${agg.name}Request`];
   for (const op of ops) reqTypes.push(`${upper(op.name)}Request`);
   reqTypes.push(`${agg.name}Response`);
-  lines.push(
-    `import type { ${reqTypes.join(", ")} } from "../../src/api/${camel(agg.name)}";`,
-  );
+  lines.push(`import type { ${reqTypes.join(", ")} } from "../../src/api/${camel(agg.name)}";`);
   lines.push("");
 
   // ---------------------------------------------------------------------
@@ -65,12 +56,8 @@ export function buildPageObjectModule(
   lines.push(`  }`);
   lines.push("");
   lines.push(`  async open(id: string): Promise<${aggCap}DetailPage> {`);
-  lines.push(
-    `    await this.page.getByTestId(\`${slug}-row-\${id}-link\`).click();`,
-  );
-  lines.push(
-    `    await this.page.waitForURL(new RegExp(\`/${slug}/\${id}$\`));`,
-  );
+  lines.push(`    await this.page.getByTestId(\`${slug}-row-\${id}-link\`).click();`);
+  lines.push(`    await this.page.waitForURL(new RegExp(\`/${slug}/\${id}$\`));`);
   lines.push(`    return new ${aggCap}DetailPage(this.page, id);`);
   lines.push(`  }`);
   lines.push("");
@@ -119,9 +106,7 @@ export function buildPageObjectModule(
   // Detail page
   // ---------------------------------------------------------------------
   lines.push(`export class ${aggCap}DetailPage {`);
-  lines.push(
-    `  constructor(public readonly page: Page, public readonly id: string) {}`,
-  );
+  lines.push(`  constructor(public readonly page: Page, public readonly id: string) {}`);
   lines.push("");
   lines.push(`  async goto(): Promise<this> {`);
   lines.push(`    await this.page.goto(\`/${slug}/\${this.id}\`);`);
@@ -133,12 +118,8 @@ export function buildPageObjectModule(
   // assert with web-first matchers (`expect(field(...)).toHaveText(...)`),
   // which retry against the live DOM.
   lines.push(`  /** Locator for a primitive / enum field's value cell. */`);
-  lines.push(
-    `  field<K extends keyof ${agg.name}Response>(name: K): Locator {`,
-  );
-  lines.push(
-    `    return this.page.getByTestId(\`${slug}-detail-\${String(name)}\`);`,
-  );
+  lines.push(`  field<K extends keyof ${agg.name}Response>(name: K): Locator {`);
+  lines.push(`    return this.page.getByTestId(\`${slug}-detail-\${String(name)}\`);`);
   lines.push(`  }`);
   lines.push("");
   // Per-contained-collection locators.
@@ -146,22 +127,16 @@ export function buildPageObjectModule(
     if (!c.collection) continue;
     const part = agg.parts.find((p) => p.name === c.partName);
     if (!part) continue;
-    lines.push(
-      `  /** Locator for the row of the contained \`${c.name}\` collection. */`,
-    );
+    lines.push(`  /** Locator for the row of the contained \`${c.name}\` collection. */`);
     lines.push(`  ${c.name}Row(id: string): Locator {`);
-    lines.push(
-      `    return this.page.getByTestId(\`${slug}-detail-${c.name}-row-\${id}\`);`,
-    );
+    lines.push(`    return this.page.getByTestId(\`${slug}-detail-${c.name}-row-\${id}\`);`);
     lines.push(`  }`);
     lines.push("");
     lines.push(
       `  /** Locator for the rows of the contained \`${c.name}\` table — assert with toHaveCount. */`,
     );
     lines.push(`  ${c.name}Rows(): Locator {`);
-    lines.push(
-      `    return this.page.getByTestId("${slug}-detail-${c.name}").locator("tbody tr");`,
-    );
+    lines.push(`    return this.page.getByTestId("${slug}-detail-${c.name}").locator("tbody tr");`);
     lines.push(`  }`);
     lines.push("");
   }
@@ -171,12 +146,8 @@ export function buildPageObjectModule(
     if (op.params.length === 0) {
       lines.push(`  /** ${op.name} (no parameters). */`);
       lines.push(`  async ${camel(op.name)}(): Promise<this> {`);
-      lines.push(
-        `    await this.page.getByTestId("${slug}-op-${op.name}").click();`,
-      );
-      lines.push(
-        `    await this.page.getByTestId("${slug}-op-${op.name}-submit").click();`,
-      );
+      lines.push(`    await this.page.getByTestId("${slug}-op-${op.name}").click();`);
+      lines.push(`    await this.page.getByTestId("${slug}-op-${op.name}-submit").click();`);
       lines.push(
         `    await this.page.getByTestId("${slug}-op-${op.name}-form").waitFor({ state: "detached" });`,
       );
@@ -186,29 +157,17 @@ export function buildPageObjectModule(
       lines.push("");
     } else {
       lines.push(`  /** ${op.name} — opens the modal, fills the form, submits. */`);
-      lines.push(
-        `  async ${camel(op.name)}(input: ${opCap}Request): Promise<this> {`,
-      );
-      lines.push(
-        `    await this.page.getByTestId("${slug}-op-${op.name}").click();`,
-      );
-      lines.push(
-        `    await this.page.getByTestId("${slug}-op-${op.name}-form").waitFor();`,
-      );
+      lines.push(`  async ${camel(op.name)}(input: ${opCap}Request): Promise<this> {`);
+      lines.push(`    await this.page.getByTestId("${slug}-op-${op.name}").click();`);
+      lines.push(`    await this.page.getByTestId("${slug}-op-${op.name}-form").waitFor();`);
       for (const p of op.params) {
         lines.push(
-          ...fillBlock(
-            "input",
-            p.name,
-            p.type,
-            ctx,
-            `${slug}-op-${op.name}-input-${p.name}`,
-          ).map((l) => `    ${l}`),
+          ...fillBlock("input", p.name, p.type, ctx, `${slug}-op-${op.name}-input-${p.name}`).map(
+            (l) => `    ${l}`,
+          ),
         );
       }
-      lines.push(
-        `    await this.page.getByTestId("${slug}-op-${op.name}-submit").click();`,
-      );
+      lines.push(`    await this.page.getByTestId("${slug}-op-${op.name}-submit").click();`);
       lines.push(
         `    await this.page.getByTestId("${slug}-op-${op.name}-form").waitFor({ state: "detached" });`,
       );
@@ -248,13 +207,7 @@ export function fillBlock(
     if (vo) {
       lines.push(`if (${accessor} !== undefined) {`);
       for (const vf of vo.fields) {
-        const sub = fillBlock(
-          `${accessor}!`,
-          vf.name,
-          vf.type,
-          ctx,
-          `${testId}-${vf.name}`,
-        );
+        const sub = fillBlock(`${accessor}!`, vf.name, vf.type, ctx, `${testId}-${vf.name}`);
         for (const l of sub) lines.push(`  ${l}`);
       }
       lines.push(`}`);
@@ -276,17 +229,9 @@ export function fillBlock(
       // strip the timezone marker — the backend treats unmarked
       // datetime values as UTC, so the round-trip is correct as long
       // as the test source uses `Z` consistently.
-      lines.push(
-        `  await this.page.getByTestId("${testId}").fill(${accessor}!.slice(0, 19));`,
-      );
-    } else if (
-      inner.name === "int" ||
-      inner.name === "long" ||
-      inner.name === "decimal"
-    ) {
-      lines.push(
-        `  await this.page.getByTestId("${testId}").fill(String(${accessor}));`,
-      );
+      lines.push(`  await this.page.getByTestId("${testId}").fill(${accessor}!.slice(0, 19));`);
+    } else if (inner.name === "int" || inner.name === "long" || inner.name === "decimal") {
+      lines.push(`  await this.page.getByTestId("${testId}").fill(String(${accessor}));`);
     } else {
       lines.push(`  await this.page.getByTestId("${testId}").fill(${accessor}!);`);
     }
@@ -299,9 +244,7 @@ export function fillBlock(
     // were given.
     lines.push(`  {`);
     lines.push(`    await this.page.getByTestId("${testId}").click();`);
-    lines.push(
-      `    const __opt = this.page.getByTestId(\`${testId}-option-\${${accessor}!}\`);`,
-    );
+    lines.push(`    const __opt = this.page.getByTestId(\`${testId}-option-\${${accessor}!}\`);`);
     lines.push(`    await __opt.waitFor({ state: "visible" });`);
     lines.push(`    await __opt.click();`);
     lines.push(`  }`);

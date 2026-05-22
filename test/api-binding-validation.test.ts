@@ -9,9 +9,9 @@
 //   3. Body ref: chain `<paramName>.<aggregate>.<op>` rooted at a
 //      declared param must resolve to a real aggregate + op.
 
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
 import { parseHelper } from "langium/test";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 
 async function parse(source: string) {
@@ -46,7 +46,9 @@ describe("Slice 11.25 — api binding validator", () => {
           deployable api { platform: hono, port: 3000 }
         }
       `);
-      expect(errors.some((e) => /api 'Foo' references undeclared module 'MissingModule'/.test(e))).toBe(true);
+      expect(
+        errors.some((e) => /api 'Foo' references undeclared module 'MissingModule'/.test(e)),
+      ).toBe(true);
     });
 
     it("accepts a valid api declaration", async () => {
@@ -76,7 +78,9 @@ describe("Slice 11.25 — api binding validator", () => {
           deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
         }
       `);
-      expect(errors.some((e) => /declares api parameter 'Sales' more than once/.test(e))).toBe(true);
+      expect(errors.some((e) => /declares api parameter 'Sales' more than once/.test(e))).toBe(
+        true,
+      );
     });
 
     it("flags ui parameter referencing an undeclared api", async () => {
@@ -114,9 +118,9 @@ describe("Slice 11.25 — api binding validator", () => {
           deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
         }
       `);
-      expect(errors.some((e) =>
-        /Aggregate 'NoSuchAggregate' not found in api 'SalesApi'/.test(e),
-      )).toBe(true);
+      expect(
+        errors.some((e) => /Aggregate 'NoSuchAggregate' not found in api 'SalesApi'/.test(e)),
+      ).toBe(true);
     });
 
     it("flags an unknown operation on a real aggregate", async () => {
@@ -137,9 +141,9 @@ describe("Slice 11.25 — api binding validator", () => {
           deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
         }
       `);
-      expect(errors.some((e) =>
-        /Operation 'allll' is not declared on aggregate 'Customer'/.test(e),
-      )).toBe(true);
+      expect(
+        errors.some((e) => /Operation 'allll' is not declared on aggregate 'Customer'/.test(e)),
+      ).toBe(true);
       // Suggestion lists the available ops.
       expect(errors.some((e) => /all, byId, create/.test(e))).toBe(true);
     });

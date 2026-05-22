@@ -1,8 +1,5 @@
-import { describe, it, expect } from "vitest";
-import {
-  applyTsconfigAlias,
-  harvestTsconfigPaths,
-} from "../web/src/bundle/plugin.js";
+import { describe, expect, it } from "vitest";
+import { applyTsconfigAlias, harvestTsconfigPaths } from "../web/src/bundle/plugin.js";
 
 // ---------------------------------------------------------------------------
 // `harvestTsconfigPaths` + `applyTsconfigAlias` — the bundler's path-
@@ -116,9 +113,7 @@ describe("applyTsconfigAlias", () => {
   it("rewrites @/lib/utils to the .ts file (no extension on the spec)", () => {
     const fs = makeShadcnLikeFs();
     const aliases = harvestTsconfigPaths(fs, "web_app/src/main.tsx");
-    expect(applyTsconfigAlias("@/lib/utils", aliases, fs)).toBe(
-      "web_app/src/lib/utils.ts",
-    );
+    expect(applyTsconfigAlias("@/lib/utils", aliases, fs)).toBe("web_app/src/lib/utils.ts");
   });
 
   it("falls through (returns null) when the aliased target isn't in fs", () => {

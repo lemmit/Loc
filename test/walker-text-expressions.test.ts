@@ -9,11 +9,11 @@
 // wrapped in `{...}` JSX expression brackets.  Calls are still
 // child components (walked recursively, never emitted as text).
 
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
-import { generateSystems } from "../src/system/index.js";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
 import type { Model } from "../src/language/generated/ast.js";
+import { generateSystems } from "../src/system/index.js";
 
 async function buildAndGenerate(src: string): Promise<Map<string, string>> {
   const services = createDddServices(NodeFileSystem);
@@ -46,9 +46,7 @@ describe("Slice 11.10 — expressions in text positions", () => {
     const content = files.get("web/src/pages/greet.tsx")!;
     expect(content).toBeDefined();
     // Binary op rendered as a JSX expression — both operands resolved.
-    expect(content).toMatch(
-      /<Title order=\{2\}>\{\("Hello, " \+ name\)\}<\/Title>/,
-    );
+    expect(content).toMatch(/<Title order=\{2\}>\{\("Hello, " \+ name\)\}<\/Title>/);
     // Param consumed → destructured in shell.
     expect(content).toMatch(/const \{ name \} = useParams/);
   });
@@ -106,12 +104,8 @@ describe("Slice 11.10 — expressions in text positions", () => {
       }
     `);
     const content = files.get("web/src/pages/dashboard.tsx")!;
-    expect(content).toMatch(
-      /<Text size="sm" c="dimmed">\{\("Active: " \+ count\)\}<\/Text>/,
-    );
-    expect(content).toMatch(
-      /<Text fw=\{700\} size="xl">\{\(total - count\)\}<\/Text>/,
-    );
+    expect(content).toMatch(/<Text size="sm" c="dimmed">\{\("Active: " \+ count\)\}<\/Text>/);
+    expect(content).toMatch(/<Text fw=\{700\} size="xl">\{\(total - count\)\}<\/Text>/);
   });
 
   it("Card title accepts a binary-op expression", async () => {
@@ -135,9 +129,7 @@ describe("Slice 11.10 — expressions in text positions", () => {
     `);
     const content = files.get("web/src/pages/user_card.tsx")!;
     // Card title slot picks up the binary op (not the inner Text).
-    expect(content).toMatch(
-      /<Title order=\{3\}>\{\("Profile: " \+ name\)\}<\/Title>/,
-    );
+    expect(content).toMatch(/<Title order=\{3\}>\{\("Profile: " \+ name\)\}<\/Title>/);
     // Inner Text is the content child.
     expect(content).toMatch(/<Text>hello<\/Text>/);
   });

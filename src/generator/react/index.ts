@@ -1,38 +1,19 @@
-import type {
-  AggregateIR,
-  BoundedContextIR,
-  DeployableIR,
-  SystemIR,
-} from "../../ir/loom-ir.js";
-import { camel, snake, plural } from "../../util/naming.js";
+import type { AggregateIR, BoundedContextIR, DeployableIR, SystemIR } from "../../ir/loom-ir.js";
+import { camel, plural, snake } from "../../util/naming.js";
+import type { LoadedPack } from "../_packs/loader.js";
+import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import { buildApiModule } from "./api-builder.js";
+import { deriveSidebarFromUi } from "./menu-emitter.js";
 import { buildPageObjectModule } from "./page-objects-builder.js";
+import { deriveExtraRoutesFromUi, emitPageObjectsForUi, emitPagesForUi } from "./pages-emitter.js";
+import { renderAppShell, renderMain, renderShellFile, renderTheme } from "./templating/render.js";
+import { allViews, buildViewPageObject, buildViewsApiModule, hasAnyView } from "./view-builder.js";
 import {
   allWorkflows,
   buildWorkflowPageObject,
   buildWorkflowsApiModule,
   hasAnyWorkflow,
 } from "./workflow-builder.js";
-import {
-  allViews,
-  buildViewPageObject,
-  buildViewsApiModule,
-  hasAnyView,
-} from "./view-builder.js";
-import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
-import type { LoadedPack } from "../_packs/loader.js";
-import {
-  renderAppShell,
-  renderMain,
-  renderShellFile,
-  renderTheme,
-} from "./templating/render.js";
-import {
-  emitPagesForUi,
-  emitPageObjectsForUi,
-  deriveExtraRoutesFromUi,
-} from "./pages-emitter.js";
-import { deriveSidebarFromUi } from "./menu-emitter.js";
 
 // ---------------------------------------------------------------------------
 // React + React Query + Zod + Mantine generator.
@@ -81,8 +62,7 @@ export function generateReactForContexts(
   const target = sys.deployables.find((d) => d.name === deployable.targetName);
   // Standalone react picks the target deployable's port; fullstack
   // dotnet overrides with `"/api"` for same-origin SPA fetches.
-  const apiBaseUrl =
-    options.apiBaseUrl ?? `http://localhost:${target?.port ?? 8080}`;
+  const apiBaseUrl = options.apiBaseUrl ?? `http://localhost:${target?.port ?? 8080}`;
 
   // Per-aggregate api modules + pages.
   const aggregates: Array<{ agg: AggregateIR; ctx: BoundedContextIR }> = [];
@@ -115,9 +95,7 @@ export function generateReactForContexts(
   // Without a `ui:` binding (legacy/back-compat), fall through to
   // the per-aggregate / per-workflow / per-view loops directly.
   // Slices 8/9 finalise the migration and delete the fallback.
-  const ui = deployable.uiName
-    ? sys.uis.find((u) => u.name === deployable.uiName)
-    : undefined;
+  const ui = deployable.uiName ? sys.uis.find((u) => u.name === deployable.uiName) : undefined;
 
   // Per-aggregate api modules — always emitted; 1:1 with the
   // aggregate inventory.  The Playwright page object emission moves
@@ -172,10 +150,7 @@ export function generateReactForContexts(
   out.set("e2e/tsconfig.json", E2E_TSCONFIG_JSON);
 
   out.set("src/api/client.ts", renderShellFile("api-client", {}, pack));
-  out.set(
-    "src/api/config.ts",
-    renderShellFile("api-config", { apiBaseUrl }, pack),
-  );
+  out.set("src/api/config.ts", renderShellFile("api-config", { apiBaseUrl }, pack));
   out.set("src/lib/format.tsx", renderShellFile("format-helpers", {}, pack));
   // Theme — every generated app gets a tasteful baseline (indigo
   // primary, medium radius, Inter font) so the bare-Mantine
@@ -301,10 +276,7 @@ function smokeSpec(aggregates: AggregateIR[]): string {
   // page loads.  Users add per-aggregate scenarios using the page
   // objects under e2e/pages/.
   const imports = aggregates
-    .map(
-      (a) =>
-        `import { ${upper(a.name)}ListPage } from "./pages/${camel(a.name)}";`,
-    )
+    .map((a) => `import { ${upper(a.name)}ListPage } from "./pages/${camel(a.name)}";`)
     .join("\n");
   const cases = aggregates
     .map(

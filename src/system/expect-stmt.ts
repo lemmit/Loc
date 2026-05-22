@@ -12,10 +12,7 @@ import type { ExprIR } from "../ir/loom-ir.js";
 
 /** Render one `expect <expr>` to an assertion statement (no trailing
  *  newline).  `render` lowers a sub-expression to target source. */
-export function renderExpectStmt(
-  expr: ExprIR,
-  render: (e: ExprIR) => string,
-): string {
+export function renderExpectStmt(expr: ExprIR, render: (e: ExprIR) => string): string {
   // Unwrap a single layer of parens so `expect (a == b)` is recognised.
   const e = expr.kind === "paren" ? expr.inner : expr;
   if (e.kind === "binary") {

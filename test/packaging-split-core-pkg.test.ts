@@ -1,10 +1,9 @@
-import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-
-import { PLATFORM_SURFACE_CONTRACT } from "../src/platform/manifest.js";
+import { afterEach, describe, expect, it } from "vitest";
 import { discoverBackendsFs } from "../src/platform/fs-discovery.js";
+import { PLATFORM_SURFACE_CONTRACT } from "../src/platform/manifest.js";
 import { resetBackendSource } from "../src/platform/registry.js";
 
 // ---------------------------------------------------------------------------
@@ -20,19 +19,13 @@ import { resetBackendSource } from "../src/platform/registry.js";
 // backend.
 // ---------------------------------------------------------------------------
 
-const repoRoot = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "..",
-);
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 afterEach(() => resetBackendSource());
 
 describe("@loom/core package", () => {
   const corePkg = JSON.parse(
-    fs.readFileSync(
-      path.join(repoRoot, "packages", "core", "package.json"),
-      "utf8",
-    ),
+    fs.readFileSync(path.join(repoRoot, "packages", "core", "package.json"), "utf8"),
   );
 
   it("is named @loom/core with a core-kind loom marker", () => {
@@ -48,16 +41,15 @@ describe("@loom/core package", () => {
 
   it("backend hono@v4's `loom.core` range is satisfied by the contract major", () => {
     const honoPkg = JSON.parse(
-      fs.readFileSync(
-        path.join(repoRoot, "packages", "backend-hono-v4", "package.json"),
-        "utf8",
-      ),
+      fs.readFileSync(path.join(repoRoot, "packages", "backend-hono-v4", "package.json"), "utf8"),
     );
     // `^1.0.0` ⊇ `1.0.0` — assert majors match (a full semver-satisfies
     // check is deferred to publish tooling; majors are the contract
     // boundary).
     const wantMajor = PLATFORM_SURFACE_CONTRACT.split(".")[0];
-    const haveMajor = String(honoPkg.loom.core).replace(/^[^\d]*/, "").split(".")[0];
+    const haveMajor = String(honoPkg.loom.core)
+      .replace(/^[^\d]*/, "")
+      .split(".")[0];
     expect(haveMajor).toBe(wantMajor);
   });
 });
@@ -67,9 +59,7 @@ describe("fs discovery ignores the @loom/core package", () => {
     const backends = await discoverBackendsFs(repoRoot);
     // `@loom/core`'s loom.kind is "core", not "backend" → must be
     // skipped by the backend walk.
-    expect(backends.some((b) => (b.manifest.family as string) === "core")).toBe(
-      false,
-    );
+    expect(backends.some((b) => (b.manifest.family as string) === "core")).toBe(false);
     // sanity: the real backend is still found.
     expect(backends.some((b) => b.manifest.family === "hono")).toBe(true);
   });

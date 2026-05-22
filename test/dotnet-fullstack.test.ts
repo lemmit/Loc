@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest";
 import { NodeFileSystem } from "langium/node";
 import { parseHelper } from "langium/test";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
-import { generateSystems } from "../src/system/index.js";
 import type { Model } from "../src/language/generated/ast.js";
+import { generateSystems } from "../src/system/index.js";
 
 // ---------------------------------------------------------------------------
 // Part B — fullstack `platform: dotnet, ui: WebApp` mode.

@@ -1,21 +1,20 @@
-import { describe, expect, it } from "vitest";
-import { NodeFileSystem } from "langium/node";
-import { URI } from "langium";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { URI } from "langium";
+import { NodeFileSystem } from "langium/node";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
-import { generateSystems } from "../src/system/index.js";
 import type { Model } from "../src/language/generated/ast.js";
+import { generateSystems } from "../src/system/index.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");
 
 async function buildModel(file: string): Promise<Model> {
   const services = createDddServices(NodeFileSystem);
-  const doc =
-    await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
-      URI.file(path.join(repoRoot, file)),
-    );
+  const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
+    URI.file(path.join(repoRoot, file)),
+  );
   await services.shared.workspace.DocumentBuilder.build([doc], {
     validation: true,
   });
@@ -125,7 +124,6 @@ describe("react generator", () => {
     expect(files.get("web_app/e2e/pages/_helpers.ts")).toBeFalsy();
   });
 
-
   it("Phase 3: page object clicks the testid'd option for Id<X> params", async () => {
     const model = await buildModel("examples/acme.ddd");
     const { files } = generateSystems(model);
@@ -134,11 +132,8 @@ describe("react generator", () => {
       /getByTestId\(`orders-op-addLine-input-productId-option-\$\{input\.productId!\}`\)/,
     );
     // Old `.fill()` against the input is gone for Id<X> fields.
-    expect(orderPo).not.toMatch(
-      /getByTestId\("orders-op-addLine-input-productId"\)\.fill/,
-    );
+    expect(orderPo).not.toMatch(/getByTestId\("orders-op-addLine-input-productId"\)\.fill/);
   });
-
 
   it("API base URL is baked from the target deployable's port", async () => {
     const model = await buildModel("examples/acme.ddd");
@@ -147,9 +142,6 @@ describe("react generator", () => {
     // `webApp` targets `api` which is on port 8080.
     expect(config).toMatch(/http:\/\/localhost:8080/);
   });
-
-
-
 
   it("value-object fieldsets render as filled-variant grouped sub-forms", async () => {
     const model = await buildModel("examples/acme.ddd");
@@ -163,9 +155,6 @@ describe("react generator", () => {
     // Children render inside a <Stack gap="sm">.
     expect(productNew).toMatch(/<Stack gap="sm">/);
   });
-
-
-
 
   it("emits Playwright page-object classes per aggregate under e2e/pages/", async () => {
     const model = await buildModel("examples/acme.ddd");
@@ -227,8 +216,7 @@ describe("react generator", () => {
     expect(compose).toMatch(/VITE_API_BASE_URL/);
     // The webApp section should not declare a DATABASE_URL or
     // ConnectionStrings__Default.
-    const webAppBlock =
-      compose.match(/web_app:[\s\S]*?(?=\n\s*\w[\w_]*:|$)/)![0];
+    const webAppBlock = compose.match(/web_app:[\s\S]*?(?=\n\s*\w[\w_]*:|$)/)![0];
     expect(webAppBlock).not.toMatch(/DATABASE_URL/);
     expect(webAppBlock).not.toMatch(/ConnectionStrings__Default/);
     // No CREATE DATABASE for the frontend.
@@ -259,15 +247,9 @@ describe("react generator", () => {
       const { files } = generateSystems(model);
       const app = files.get("web_app/src/App.tsx")!;
       // Section headers (Mantine Divider with label).
-      expect(app).toMatch(
-        /<Divider my="xs" label="Aggregates" labelPosition="left" \/>/,
-      );
-      expect(app).toMatch(
-        /<Divider my="xs" label="Workflows" labelPosition="left" \/>/,
-      );
-      expect(app).toMatch(
-        /<Divider my="xs" label="Views" labelPosition="left" \/>/,
-      );
+      expect(app).toMatch(/<Divider my="xs" label="Aggregates" labelPosition="left" \/>/);
+      expect(app).toMatch(/<Divider my="xs" label="Workflows" labelPosition="left" \/>/);
+      expect(app).toMatch(/<Divider my="xs" label="Views" labelPosition="left" \/>/);
       // Per-aggregate NavLink with active prop wired through useLocation.
       expect(app).toMatch(
         /<NavLink component=\{RouterLink\} to="\/orders" label="Orders" active=\{isActive\("\/orders"\)\}/,
@@ -287,7 +269,8 @@ describe("react generator", () => {
       const services = createDddServices(NodeFileSystem);
       const helper = parseHelper(services.Ddd);
       // Single aggregate, no workflows, no views.
-      const doc = await helper(`
+      const doc = await helper(
+        `
         system Plain {
           module M {
             context C {
@@ -298,7 +281,9 @@ describe("react generator", () => {
           deployable api { platform: hono, modules: M, port: 3000 }
           deployable web { platform: react, targets: api, port: 3001 }
         }
-      `, { validation: true });
+      `,
+        { validation: true },
+      );
       const { files } = generateSystems(doc.parseResult.value as Model);
       const app = files.get("web/src/App.tsx")!;
       expect(app).toMatch(/<Divider my="xs" label="Aggregates"/);
@@ -308,9 +293,6 @@ describe("react generator", () => {
       expect(app).not.toMatch(/data-testid="nav-workflows"/);
       expect(app).not.toMatch(/data-testid="nav-views"/);
     });
-
-
-
   });
 
   it("App.tsx wraps Routes in an error boundary and registers a 404 catch-all", async () => {
@@ -356,7 +338,8 @@ describe("react generator", () => {
       const { parseHelper } = await import("langium/test");
       const services = createDddServices(NodeFileSystem);
       const helper = parseHelper(services.Ddd);
-      const doc = await helper(`
+      const doc = await helper(
+        `
         system Untheme {
           module M {
             context C {
@@ -367,7 +350,9 @@ describe("react generator", () => {
           deployable api { platform: dotnet, modules: M, port: 8080 }
           deployable web { platform: react, targets: api, port: 3001 }
         }
-      `, { validation: true });
+      `,
+        { validation: true },
+      );
       const model = doc.parseResult.value as Model;
       const { files } = generateSystems(model);
       // Every generated React app ships with a baseline theme so it
@@ -389,75 +374,77 @@ describe("react generator", () => {
       const services = createDddServices(NodeFileSystem);
       const { parseHelper } = await import("langium/test");
       const helper = parseHelper(services.Ddd);
-      const doc = await helper(`
+      const doc = await helper(
+        `
         system Bad {
           theme {
             primary: "#ff0000"
             wholeKitchenSink: "#00ff00"
           }
         }
-      `, { validation: true });
+      `,
+        { validation: true },
+      );
       const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
-      expect(
-        errors.some((e) =>
-          /unknown theme property 'wholeKitchenSink'/.test(e.message),
-        ),
-      ).toBe(true);
+      expect(errors.some((e) => /unknown theme property 'wholeKitchenSink'/.test(e.message))).toBe(
+        true,
+      );
     });
 
     it("validator rejects duplicate theme property names", async () => {
       const services = createDddServices(NodeFileSystem);
       const { parseHelper } = await import("langium/test");
       const helper = parseHelper(services.Ddd);
-      const doc = await helper(`
+      const doc = await helper(
+        `
         system Bad {
           theme {
             primary: "#ff0000"
             primary: "#00ff00"
           }
         }
-      `, { validation: true });
+      `,
+        { validation: true },
+      );
       const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
-      expect(
-        errors.some((e) => /declared more than once/.test(e.message)),
-      ).toBe(true);
+      expect(errors.some((e) => /declared more than once/.test(e.message))).toBe(true);
     });
 
     it("validator rejects non-hex color values", async () => {
       const services = createDddServices(NodeFileSystem);
       const { parseHelper } = await import("langium/test");
       const helper = parseHelper(services.Ddd);
-      const doc = await helper(`
+      const doc = await helper(
+        `
         system Bad {
           theme {
             primary: "blue"
           }
         }
-      `, { validation: true });
+      `,
+        { validation: true },
+      );
       const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
-      expect(
-        errors.some((e) =>
-          /must be a CSS hex color/.test(e.message),
-        ),
-      ).toBe(true);
+      expect(errors.some((e) => /must be a CSS hex color/.test(e.message))).toBe(true);
     });
 
     it("validator rejects radius values outside the enum", async () => {
       const services = createDddServices(NodeFileSystem);
       const { parseHelper } = await import("langium/test");
       const helper = parseHelper(services.Ddd);
-      const doc = await helper(`
+      const doc = await helper(
+        `
         system Bad {
           theme {
             radius: "huge"
           }
         }
-      `, { validation: true });
+      `,
+        { validation: true },
+      );
       const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
       expect(
-        errors.some((e) =>
-          /must be one of none \| sm \| md \| lg \| xl/.test(e.message),
-        ),
+        errors.some((e) => /must be one of none \| sm \| md \| lg \| xl/.test(e.message)),
       ).toBe(true);
     });
 
@@ -465,16 +452,19 @@ describe("react generator", () => {
       const services = createDddServices(NodeFileSystem);
       const { parseHelper } = await import("langium/test");
       const helper = parseHelper(services.Ddd);
-      const doc = await helper(`
+      const doc = await helper(
+        `
         system Bad {
           theme { primary: "#ff0000" }
           theme { primary: "#00ff00" }
         }
-      `, { validation: true });
+      `,
+        { validation: true },
+      );
       const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
-      expect(
-        errors.some((e) => /more than one 'theme \{ \.\.\. \}' block/.test(e.message)),
-      ).toBe(true);
+      expect(errors.some((e) => /more than one 'theme \{ \.\.\. \}' block/.test(e.message))).toBe(
+        true,
+      );
     });
   });
 
@@ -488,14 +478,11 @@ describe("react generator", () => {
       expect(api).toMatch(/customerId: z\.string\(\)/);
       expect(api).toMatch(/productId: z\.string\(\)/);
       expect(api).toMatch(/quantity: z\.number\(\)\.int\(\)/);
-      expect(api).toMatch(
-        /export type PlaceOrderRequest = z\.infer<typeof PlaceOrderRequest>/,
-      );
+      expect(api).toMatch(/export type PlaceOrderRequest = z\.infer<typeof PlaceOrderRequest>/);
       // Mutation hook posts to the backend's /workflows/<slug> route.
       expect(api).toMatch(/export function usePlaceOrderWorkflow\(\)/);
       expect(api).toMatch(/api\.post\(`\/workflows\/place_order`, input\)/);
     });
-
 
     it("emits a per-workflow form page with typed inputs reusing the v4 form helpers", async () => {
       const model = await buildModel("examples/acme.ddd");
@@ -508,17 +495,15 @@ describe("react generator", () => {
       // String param → TextInput; Id<X> → Select with target's display field;
       // int → NumberInput with allowDecimal={false}.
       expect(page).toMatch(/<TextInput label="Customer Id"/);
-      expect(page).toMatch(
-        /<Select label="Product Id"[\s\S]+?__products\.data/,
-      );
+      expect(page).toMatch(/<Select label="Product Id"[\s\S]+?__products\.data/);
       expect(page).toMatch(/<NumberInput label="Quantity"[\s\S]+?allowDecimal=\{false\}/);
       // useAllProducts pulled in for the Id<Product> Select.
-      expect(page).toMatch(
-        /import \{ useAllProducts \} from "\.\.\/\.\.\/api\/product"/,
-      );
+      expect(page).toMatch(/import \{ useAllProducts \} from "\.\.\/\.\.\/api\/product"/);
       // Submit button + success/error toast.
       expect(page).toMatch(/data-testid="workflow-place_order-submit"/);
-      expect(page).toMatch(/notifications\.show\(\{ color: "green", message: "Place Order completed" \}\)/);
+      expect(page).toMatch(
+        /notifications\.show\(\{ color: "green", message: "Place Order completed" \}\)/,
+      );
       // After success navigate back to the index.
       expect(page).toMatch(/navigate\("\/workflows"\)/);
     });
@@ -528,16 +513,10 @@ describe("react generator", () => {
       const { files } = generateSystems(model);
       const app = files.get("web_app/src/App.tsx")!;
       // Index + per-workflow imports.
-      expect(app).toMatch(
-        /import WorkflowsIndex from "\.\/pages\/workflows\/index"/,
-      );
-      expect(app).toMatch(
-        /import PlaceOrderWorkflowPage from "\.\/pages\/workflows\/place_order"/,
-      );
+      expect(app).toMatch(/import WorkflowsIndex from "\.\/pages\/workflows\/index"/);
+      expect(app).toMatch(/import PlaceOrderWorkflowPage from "\.\/pages\/workflows\/place_order"/);
       // Routes — index + per-workflow.
-      expect(app).toMatch(
-        /<Route path="\/workflows" element=\{<WorkflowsIndex \/>\} \/>/,
-      );
+      expect(app).toMatch(/<Route path="\/workflows" element=\{<WorkflowsIndex \/>\} \/>/);
       expect(app).toMatch(
         /<Route path="\/workflows\/place_order" element=\{<PlaceOrderWorkflowPage \/>\} \/>/,
       );
@@ -550,7 +529,6 @@ describe("react generator", () => {
         /<NavLink component=\{RouterLink\} to="\/workflows\/place_order" label="Place Order"[\s\S]*?data-testid="nav-workflow-place_order"/,
       );
     });
-
   });
 
   describe("slice 18.B — view list pages", () => {
@@ -559,9 +537,7 @@ describe("react generator", () => {
       const { files } = generateSystems(model);
       const api = files.get("web_app/src/api/views.ts")!;
       // Shorthand view reuses the source aggregate's list response.
-      expect(api).toMatch(
-        /export const ActiveOrdersResponse = OrderListResponse;/,
-      );
+      expect(api).toMatch(/export const ActiveOrdersResponse = OrderListResponse;/);
       expect(api).toMatch(/export function useActiveOrdersView\(\)/);
       expect(api).toMatch(/api\.get\(`\/views\/active_orders`\)/);
       // Full-form view emits its own row + array schemas.
@@ -569,30 +545,18 @@ describe("react generator", () => {
       expect(api).toMatch(/orderId: z\.string\(\)/);
       expect(api).toMatch(/status: OrderStatusSchema/);
       expect(api).toMatch(/lineCount: z\.number\(\)\.int\(\)/);
-      expect(api).toMatch(
-        /export const OrderSummaryResponse = z\.array\(OrderSummaryRow\);/,
-      );
+      expect(api).toMatch(/export const OrderSummaryResponse = z\.array\(OrderSummaryRow\);/);
       expect(api).toMatch(/export function useOrderSummaryView\(\)/);
     });
-
-
 
     it("App.tsx registers /views + /views/<slug> routes and sidebar entry", async () => {
       const model = await buildModel("examples/acme.ddd");
       const { files } = generateSystems(model);
       const app = files.get("web_app/src/App.tsx")!;
-      expect(app).toMatch(
-        /import ViewsIndex from "\.\/pages\/views\/index"/,
-      );
-      expect(app).toMatch(
-        /import ActiveOrdersViewPage from "\.\/pages\/views\/active_orders"/,
-      );
-      expect(app).toMatch(
-        /import OrderSummaryViewPage from "\.\/pages\/views\/order_summary"/,
-      );
-      expect(app).toMatch(
-        /<Route path="\/views" element=\{<ViewsIndex \/>\} \/>/,
-      );
+      expect(app).toMatch(/import ViewsIndex from "\.\/pages\/views\/index"/);
+      expect(app).toMatch(/import ActiveOrdersViewPage from "\.\/pages\/views\/active_orders"/);
+      expect(app).toMatch(/import OrderSummaryViewPage from "\.\/pages\/views\/order_summary"/);
+      expect(app).toMatch(/<Route path="\/views" element=\{<ViewsIndex \/>\} \/>/);
       expect(app).toMatch(
         /<Route path="\/views\/active_orders" element=\{<ActiveOrdersViewPage \/>\} \/>/,
       );
@@ -603,7 +567,6 @@ describe("react generator", () => {
         /<NavLink component=\{RouterLink\} to="\/views\/active_orders" label="Active Orders"[\s\S]*?data-testid="nav-view-active_orders"/,
       );
     });
-
   });
 
   describe("slice 18.C — DSL e2e for ui.workflows.* + ui.views.*", () => {
@@ -613,9 +576,7 @@ describe("react generator", () => {
       const po = files.get("web_app/e2e/pages/workflows/place_order.ts")!;
       expect(po).toMatch(/export class PlaceOrderWorkflowPage/);
       // Typed `fill` accepting Partial<PlaceOrderRequest>.
-      expect(po).toMatch(
-        /async fill\(input: Partial<PlaceOrderRequest>\): Promise<this>/,
-      );
+      expect(po).toMatch(/async fill\(input: Partial<PlaceOrderRequest>\): Promise<this>/);
       // Drives inputs via the same testid prefix the form page uses.
       expect(po).toMatch(/workflow-place_order-input-customerId/);
       expect(po).toMatch(/workflow-place_order-input-productId/);
@@ -637,9 +598,7 @@ describe("react generator", () => {
       expect(po).toMatch(/orderId: string;/);
       expect(po).toMatch(/lineCount: string;/);
       // rows() walks indexed testids until break.
-      expect(po).toMatch(
-        /async rows\(\): Promise<OrderSummaryRowText\[\]>/,
-      );
+      expect(po).toMatch(/async rows\(\): Promise<OrderSummaryRowText\[\]>/);
       expect(po).toMatch(/view-order_summary-row-\$\{i\}-orderId/);
     });
 
@@ -652,9 +611,7 @@ describe("react generator", () => {
         /import \{ PlaceOrderWorkflowPage \} from "\.\/pages\/workflows\/place_order"/,
       );
       // The workflow call lowers to `await new <Cap>WorkflowPage(page).run({...})`.
-      expect(ui).toMatch(
-        /await new PlaceOrderWorkflowPage\(page\)\.run\(/,
-      );
+      expect(ui).toMatch(/await new PlaceOrderWorkflowPage\(page\)\.run\(/);
     });
 
     it("UI spec lowers ui.views.<name>() to the generated page object's rows()", async () => {
@@ -666,9 +623,7 @@ describe("react generator", () => {
       );
       // The view call lowers to a goto + rows() pair, wrapped so the
       // let-binding resolves to the array (not a Promise).
-      expect(ui).toMatch(
-        /new ActiveOrdersViewPage\(page\)\.goto\(\)/,
-      );
+      expect(ui).toMatch(/new ActiveOrdersViewPage\(page\)\.goto\(\)/);
       expect(ui).toMatch(/await __view\.rows\(\)/);
     });
 
@@ -679,7 +634,8 @@ describe("react generator", () => {
       const { validateLoomModel } = await import("../src/ir/validate.js");
       const services = createDddServices(NodeFileSystem);
       const helper = parseHelper(services.Ddd);
-      const doc = await helper(`
+      const doc = await helper(
+        `
         system Demo {
           module M {
             context C {
@@ -693,7 +649,9 @@ describe("react generator", () => {
             ui.workflows.doesNotExist({})
           }
         }
-      `, { validation: true });
+      `,
+        { validation: true },
+      );
       const loom = enrichLoomModel(lowerModel(doc.parseResult.value as Model));
       const diags = validateLoomModel(loom);
       expect(
@@ -712,7 +670,8 @@ describe("react generator", () => {
       const { validateLoomModel } = await import("../src/ir/validate.js");
       const services = createDddServices(NodeFileSystem);
       const helper = parseHelper(services.Ddd);
-      const doc = await helper(`
+      const doc = await helper(
+        `
         system Demo {
           module M {
             context C {
@@ -726,14 +685,14 @@ describe("react generator", () => {
             let r = ui.views.doesNotExist()
           }
         }
-      `, { validation: true });
+      `,
+        { validation: true },
+      );
       const loom = enrichLoomModel(lowerModel(doc.parseResult.value as Model));
       const diags = validateLoomModel(loom);
       expect(
         diags.some(
-          (d) =>
-            d.severity === "error" &&
-            /unknown view 'ui\.views\.doesNotExist'/.test(d.message),
+          (d) => d.severity === "error" && /unknown view 'ui\.views\.doesNotExist'/.test(d.message),
         ),
       ).toBe(true);
     });
@@ -795,9 +754,7 @@ describe("react generator", () => {
       expect(createBlock[1]).toBe("");
       // ConfirmRequest is empty: `isMutable()` + `lines.count > 0`
       // are both non-translatable → no params, no refines.
-      expect(orderApi).toMatch(
-        /export const ConfirmRequest = z\.object\(\{\s*\}\);/,
-      );
+      expect(orderApi).toMatch(/export const ConfirmRequest = z\.object\(\{\s*\}\);/);
     });
 
     it("RHF still binds zodResolver to the refined CreateProductRequest schema", async () => {
@@ -895,7 +852,9 @@ describe("react generator", () => {
       const { files } = generateSystems(doc.parseResult.value as Model);
       const userApi = files.get("web/src/api/user.ts")!;
       // The private invariant must NOT contribute a min(3) chain or a refine.
-      expect(userApi).toMatch(/CreateUserRequest = z\.object\(\{\s*username: z\.string\(\),\s*\}\);/);
+      expect(userApi).toMatch(
+        /CreateUserRequest = z\.object\(\{\s*username: z\.string\(\),\s*\}\);/,
+      );
       expect(userApi).not.toMatch(/\.min\(3\)/);
       expect(userApi).not.toMatch(/\.refine\(/);
     });

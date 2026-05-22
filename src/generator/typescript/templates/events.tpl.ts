@@ -1,8 +1,4 @@
-import type {
-  BoundedContextIR,
-  EventIR,
-  TypeIR,
-} from "../../../ir/loom-ir.js";
+import type { BoundedContextIR, EventIR, TypeIR } from "../../../ir/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { renderTsType } from "../render-expr.js";
 
@@ -29,12 +25,8 @@ export function renderEvents(ctx: BoundedContextIR): string {
     lines(
       "// Auto-generated.",
       'import type * as Ids from "./ids";',
-      voList.length > 0
-        ? `import type { ${voList.join(", ")} } from "./value-objects";`
-        : null,
-      enumList.length > 0
-        ? `import type { ${enumList.join(", ")} } from "./value-objects";`
-        : null,
+      voList.length > 0 ? `import type { ${voList.join(", ")} } from "./value-objects";` : null,
+      enumList.length > 0 ? `import type { ${enumList.join(", ")} } from "./value-objects";` : null,
       ...ctx.events.flatMap(renderEvent),
       ctx.events.length > 0
         ? `export type DomainEvent = ${ctx.events.map((e) => e.name).join(" | ")};`

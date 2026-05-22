@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
 
 import { routerPackageForStack } from "../src/generator/_packs/stack-runtime.js";
 
@@ -16,10 +16,7 @@ import { routerPackageForStack } from "../src/generator/_packs/stack-runtime.js"
 // pre-v3 packs stay byte-identical.
 // ---------------------------------------------------------------------------
 
-const repoRoot = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "..",
-);
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("routerPackageForStack", () => {
   it("maps stack v3 → react-router (Router 7 package rename)", () => {
@@ -41,10 +38,7 @@ describe("stacks/v3 partials", () => {
   const v3 = path.join(repoRoot, "stacks", "v3");
 
   it("ships the React 19 + Router 7 + Zod 4 dependency set", () => {
-    const deps = fs.readFileSync(
-      path.join(v3, "stack-package-deps.hbs"),
-      "utf-8",
-    );
+    const deps = fs.readFileSync(path.join(v3, "stack-package-deps.hbs"), "utf-8");
     // Router 7: the renamed package, NOT react-router-dom.
     expect(deps).toMatch(/"react-router":\s*"\^7\./);
     expect(deps).not.toContain("react-router-dom");
@@ -56,17 +50,12 @@ describe("stacks/v3 partials", () => {
   });
 
   it("has no trailing newline (spliced as a package.json partial)", () => {
-    const deps = fs.readFileSync(
-      path.join(v3, "stack-package-deps.hbs"),
-      "utf-8",
-    );
+    const deps = fs.readFileSync(path.join(v3, "stack-package-deps.hbs"), "utf-8");
     expect(deps.endsWith("\n")).toBe(false);
   });
 
   it("declares stack id v3 in stack.json", () => {
-    const meta = JSON.parse(
-      fs.readFileSync(path.join(v3, "stack.json"), "utf-8"),
-    );
+    const meta = JSON.parse(fs.readFileSync(path.join(v3, "stack.json"), "utf-8"));
     expect(meta.id).toBe("v3");
   });
 });

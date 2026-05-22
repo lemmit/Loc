@@ -1,15 +1,14 @@
-import { describe, it, expect, afterEach } from "vitest";
-
-import {
-  discoverBackends,
-  setBackendSource,
-  resetBackendSource,
-  platformFor,
-  backendVersionsForFamily,
-  isRegisteredBackendRef,
-  type DiscoveredBackend,
-} from "../src/platform/registry.js";
+import { afterEach, describe, expect, it } from "vitest";
 import { PLATFORM_SURFACE_CONTRACT } from "../src/platform/manifest.js";
+import {
+  backendVersionsForFamily,
+  type DiscoveredBackend,
+  discoverBackends,
+  isRegisteredBackendRef,
+  platformFor,
+  resetBackendSource,
+  setBackendSource,
+} from "../src/platform/registry.js";
 
 // ---------------------------------------------------------------------------
 // packaging-split P0 (docs/packaging-split.md) — backends resolve
@@ -29,9 +28,7 @@ describe("manifest contract", () => {
 
 describe("in-tree discovery (default source)", () => {
   it("discovers hono@v4 with a real co-located manifest", () => {
-    const hono = discoverBackends().find(
-      (b) => b.manifest.family === "hono",
-    );
+    const hono = discoverBackends().find((b) => b.manifest.family === "hono");
     expect(hono?.manifest).toMatchObject({
       kind: "backend",
       family: "hono",

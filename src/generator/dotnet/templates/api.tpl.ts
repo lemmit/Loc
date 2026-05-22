@@ -1,6 +1,6 @@
 import type { AggregateIR, RepositoryIR } from "../../../ir/loom-ir.js";
-import { pascal, plural, snake } from "../../../util/naming.js";
 import { lines } from "../../../util/code-builder.js";
+import { pascal, plural, snake } from "../../../util/naming.js";
 
 // ASP.NET Core controller emission.  One controller per aggregate root,
 // dispatching every endpoint through Mediator (`ISender`).  The
@@ -118,7 +118,7 @@ export function renderController(
       `        return CreatedAtAction(nameof(GetById), new { id = id.Value }, new Create${agg.name}Response(id.Value));`,
       "    }",
       "",
-      "    [HttpGet(\"{id}\")]",
+      '    [HttpGet("{id}")]',
       `    public async Task<ActionResult<${agg.name}Response>> GetById([FromRoute] ${shape.idClrType} id)`,
       "    {",
       `        var response = await _mediator.Send(new Get${agg.name}ByIdQuery(new ${agg.name}Id(id)));`,
@@ -133,15 +133,10 @@ export function renderController(
 }
 
 function renderCmdConstructorBody(args: string[], indent: string): string[] {
-  return args.map(
-    (a, i) => `${indent}${a}${i < args.length - 1 ? "," : ""}`,
-  );
+  return args.map((a, i) => `${indent}${a}${i < args.length - 1 ? "," : ""}`);
 }
 
-export function renderExceptionFilter(
-  ns: string,
-  options?: { usesValidators?: boolean },
-): string {
+export function renderExceptionFilter(ns: string, options?: { usesValidators?: boolean }): string {
   const usesValidators = !!options?.usesValidators;
   return `// Auto-generated.${usesValidators ? "\nusing System.Linq;" : ""}
 using Microsoft.AspNetCore.Mvc;

@@ -1,12 +1,12 @@
-import { describe, expect, it } from "vitest";
-import { NodeFileSystem } from "langium/node";
-import { URI } from "langium";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { URI } from "langium";
+import { NodeFileSystem } from "langium/node";
+import { describe, expect, it } from "vitest";
 import { createDddServices } from "../src/language/ddd-module.js";
+import type { Model } from "../src/language/generated/ast.js";
 import { generateTypeScript } from "../src/platform/hono/v4/emit.js";
 import { BACKEND_PINS as HONO_V4_PINS } from "../src/platform/hono/v4/pins.js";
-import type { Model } from "../src/language/generated/ast.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");
@@ -54,7 +54,9 @@ describe("typescript generator", () => {
     const model = await buildModel("examples/sales.ddd");
     const files = generateTypeScript(model, HONO_V4_PINS);
     const order = files.get("domain/order.ts")!;
-    expect(order).toMatch(/OrderLine\._create\(\{ id: Ids\.newOrderLineId\(\), parentId: this\._id/);
+    expect(order).toMatch(
+      /OrderLine\._create\(\{ id: Ids\.newOrderLineId\(\), parentId: this\._id/,
+    );
   });
 
   it("emits a vitest test file when `test` blocks are declared", async () => {
@@ -268,7 +270,8 @@ describe("typescript generator", () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
-    const doc = await helper(`
+    const doc = await helper(
+      `
       context T {
         aggregate Order {
           sku: string display
@@ -276,7 +279,9 @@ describe("typescript generator", () => {
           entity Address { street: string }
         }
       }
-    `, { validation: true });
+    `,
+      { validation: true },
+    );
     const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
     const repo = files.get("db/repositories/order-repository.ts")!;
     // The `all()` method now eagerly loads `shipping` via inArray +
@@ -294,7 +299,8 @@ describe("typescript generator", () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
-    const doc = await helper(`
+    const doc = await helper(
+      `
       context Sales {
         enum OrderStatus { Draft, Confirmed }
         aggregate Order {
@@ -307,7 +313,9 @@ describe("typescript generator", () => {
         }
         repository Orders for Order { }
       }
-    `, { validation: true });
+    `,
+      { validation: true },
+    );
     const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
 
     // 1. Per-aggregate extern handler module.
@@ -361,7 +369,8 @@ describe("typescript generator", () => {
       const { parseHelper } = await import("langium/test");
       const services = createDddServices(NodeFileSystem);
       const helper = parseHelper(services.Ddd);
-      const doc = await helper(`
+      const doc = await helper(
+        `
         context Sales {
           enum OrderStatus { Draft, Confirmed }
           aggregate Order {
@@ -374,7 +383,9 @@ describe("typescript generator", () => {
           }
           repository Orders for Order { }
         }
-      `, { validation: true });
+      `,
+        { validation: true },
+      );
       const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
       const routes = files.get("http/order.routes.ts")!;
       // Imports the new error type.
@@ -388,9 +399,7 @@ describe("typescript generator", () => {
       expect(routes).toMatch(/if \(err instanceof ForbiddenError\) throw err;/);
       expect(routes).toMatch(/if \(err instanceof AggregateNotFoundError\) throw err;/);
       // Anything else wraps as ExternHandlerError with op + agg names.
-      expect(routes).toMatch(
-        /throw new ExternHandlerError\("confirm", "Order", err\);/,
-      );
+      expect(routes).toMatch(/throw new ExternHandlerError\("confirm", "Order", err\);/);
       // onError checks ExternHandlerError before the generic 500.
       expect(routes).toMatch(/if \(err instanceof ExternHandlerError\)/);
       // Generic 500 fallback survives unchanged for unknown errors.
@@ -416,7 +425,8 @@ describe("typescript generator", () => {
       const { parseHelper } = await import("langium/test");
       const services = createDddServices(NodeFileSystem);
       const helper = parseHelper(services.Ddd);
-      const doc = await helper(`
+      const doc = await helper(
+        `
         context Sales {
           enum OrderStatus { Draft, Confirmed }
           aggregate Order {
@@ -431,7 +441,9 @@ describe("typescript generator", () => {
             order.confirm()
           }
         }
-      `, { validation: true });
+      `,
+        { validation: true },
+      );
       const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
       const wf = files.get("http/workflows.ts")!;
       // Same import line as the per-aggregate router.
@@ -440,9 +452,7 @@ describe("typescript generator", () => {
       );
       // Try/catch around the workflow's handler invocation.
       expect(wf).toMatch(/try \{\s+await __handler\(order/);
-      expect(wf).toMatch(
-        /throw new ExternHandlerError\("confirm", "Order", err\);/,
-      );
+      expect(wf).toMatch(/throw new ExternHandlerError\("confirm", "Order", err\);/);
       // onError chain knows about ExternHandlerError.
       expect(wf).toMatch(/if \(err instanceof ExternHandlerError\)/);
     });
@@ -451,7 +461,8 @@ describe("typescript generator", () => {
       const { parseHelper } = await import("langium/test");
       const services = createDddServices(NodeFileSystem);
       const helper = parseHelper(services.Ddd);
-      const doc = await helper(`
+      const doc = await helper(
+        `
         context Sales {
           enum OrderStatus { Draft, Confirmed }
           aggregate Order {
@@ -462,15 +473,15 @@ describe("typescript generator", () => {
           }
           repository Orders for Order { }
         }
-      `, { validation: true });
+      `,
+        { validation: true },
+      );
       const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
       const extern = files.get("domain/order-extern.ts")!;
       // User handler code can import ExternHandlerError straight
       // from the per-aggregate file rather than reaching for
       // domain/errors.js itself.
-      expect(extern).toMatch(
-        /export \{ ExternHandlerError \} from "\.\/errors"/,
-      );
+      expect(extern).toMatch(/export \{ ExternHandlerError \} from "\.\/errors"/);
     });
   });
 
@@ -478,7 +489,8 @@ describe("typescript generator", () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
-    const doc = await helper(`
+    const doc = await helper(
+      `
       context Sales {
         enum OrderStatus { Draft, Confirmed }
         aggregate Customer {
@@ -509,13 +521,17 @@ describe("typescript generator", () => {
           emit OrderPlaced { order: order.id, at: placedAt }
         }
       }
-    `, { validation: true });
+    `,
+      { validation: true },
+    );
     const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
     const wf = files.get("http/workflows.ts")!;
 
     // Imports + Zod schema for params.
     expect(wf).toMatch(/import \{ Customer \} from "..\/domain\/customer"/);
-    expect(wf).toMatch(/import \{ CustomerRepository \} from "..\/db\/repositories\/customer-repository"/);
+    expect(wf).toMatch(
+      /import \{ CustomerRepository \} from "..\/db\/repositories\/customer-repository"/,
+    );
     expect(wf).toMatch(/PlaceOrderRequest = z\.object\(\{[\s\S]+?customerId: z\.string\(\)/);
 
     // Body wires repos on `db`, runs precondition, calls op, factory,
@@ -525,8 +541,12 @@ describe("typescript generator", () => {
     expect(wf).toMatch(/if \(!\(amount > 0\)\) throw new DomainError/);
     expect(wf).toMatch(/const customer = await customers\.getById\(customerId\);/);
     expect(wf).toMatch(/customer\.deductCredit\(amount\);/);
-    expect(wf).toMatch(/const order = Order\.create\(\{ customerId: customerId, status: OrderStatus\.Draft, placedAt: placedAt \}\);/);
-    expect(wf).toMatch(/workflowEvents\.push\(\{ type: "OrderPlaced", order: order\.id, at: placedAt \}\);/);
+    expect(wf).toMatch(
+      /const order = Order\.create\(\{ customerId: customerId, status: OrderStatus\.Draft, placedAt: placedAt \}\);/,
+    );
+    expect(wf).toMatch(
+      /workflowEvents\.push\(\{ type: "OrderPlaced", order: order\.id, at: placedAt \}\);/,
+    );
     expect(wf).toMatch(/await customers\.save\(customer\);/);
     expect(wf).toMatch(/await orders\.save\(order\);/);
     expect(wf).toMatch(/for \(const ev of workflowEvents\) await events\.dispatch\(ev\);/);
@@ -543,7 +563,8 @@ describe("typescript generator", () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
-    const doc = await helper(`
+    const doc = await helper(
+      `
       context T {
         aggregate Customer {
           name: string display
@@ -560,7 +581,9 @@ describe("typescript generator", () => {
           target.addCredit(amount)
         }
       }
-    `, { validation: true });
+    `,
+      { validation: true },
+    );
     const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
     const wf = files.get("http/workflows.ts")!;
     expect(wf).toMatch(/await db\.transaction\(async \(tx\) => \{/);
@@ -577,7 +600,8 @@ describe("typescript generator", () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
-    const doc = await helper(`
+    const doc = await helper(
+      `
       context Sales {
         enum OrderStatus { Draft, Confirmed }
         aggregate Order {
@@ -587,15 +611,15 @@ describe("typescript generator", () => {
         repository Orders for Order { }
         view ActiveOrders = Order where status == Confirmed
       }
-    `, { validation: true });
+    `,
+      { validation: true },
+    );
     const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
 
     // 1. http/views.ts mounts the route; reuses the aggregate's
     //    list response schema for OpenAPI symmetry.
     const views = files.get("http/views.ts")!;
-    expect(views).toMatch(
-      /import \{ OrderResponse, OrderListResponse \} from "\.\/order\.routes"/,
-    );
+    expect(views).toMatch(/import \{ OrderResponse, OrderListResponse \} from "\.\/order\.routes"/);
     expect(views).toMatch(/path: "\/active_orders"/);
     expect(views).toMatch(/operationId: "activeOrdersView"/);
     expect(views).toMatch(/schema: OrderListResponse/);
@@ -624,7 +648,8 @@ describe("typescript generator", () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
-    const doc = await helper(`
+    const doc = await helper(
+      `
       context Sales {
         enum OrderStatus { Draft, Confirmed }
         aggregate Order {
@@ -642,7 +667,9 @@ describe("typescript generator", () => {
           bind orderId = id, status = status, lineCount = lines.count
         }
       }
-    `, { validation: true });
+    `,
+      { validation: true },
+    );
     const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
     const views = files.get("http/views.ts")!;
 
@@ -650,9 +677,7 @@ describe("typescript generator", () => {
     expect(views).toMatch(
       /const OrderSummaryRow = z\.object\(\{[\s\S]+?orderId: z\.string\(\),[\s\S]+?status: z\.enum\(\["Draft", "Confirmed"\]\),[\s\S]+?lineCount: z\.number\(\)\.int\(\),[\s\S]+?\}\)/,
     );
-    expect(views).toMatch(
-      /const OrderSummaryResponse = z\.array\(OrderSummaryRow\)/,
-    );
+    expect(views).toMatch(/const OrderSummaryResponse = z\.array\(OrderSummaryRow\)/);
 
     // Route uses the custom response schema.
     expect(views).toMatch(/schema: OrderSummaryResponse/);
@@ -661,16 +686,15 @@ describe("typescript generator", () => {
     expect(views).toMatch(/orderId: r\.id/);
     expect(views).toMatch(/status: r\.status/);
     expect(views).toMatch(/lineCount: r\.lines\.length/);
-    expect(views).toMatch(
-      /projected as z\.infer<typeof OrderSummaryResponse>/,
-    );
+    expect(views).toMatch(/projected as z\.infer<typeof OrderSummaryResponse>/);
   });
 
   it("rewrites Id<X> follow refs to bulk-load + map lookups (slice 3)", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
-    const doc = await helper(`
+    const doc = await helper(
+      `
       context Sales {
         enum OrderStatus { Draft, Confirmed }
         aggregate Customer { name: string display, email: string }
@@ -689,7 +713,9 @@ describe("typescript generator", () => {
           bind orderId = id, customerName = customerId.name, customerEmail = customerId.email, status = status
         }
       }
-    `, { validation: true });
+    `,
+      { validation: true },
+    );
     const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
     const views = files.get("http/views.ts")!;
 
@@ -711,16 +737,15 @@ describe("typescript generator", () => {
     expect(customerRepo).toMatch(
       /async findManyByIds\(ids: Ids\.CustomerId\[\]\): Promise<Customer\[\]>/,
     );
-    expect(customerRepo).toMatch(
-      /\.where\(inArray\(schema\.customers\.id, ids\)\)/,
-    );
+    expect(customerRepo).toMatch(/\.where\(inArray\(schema\.customers\.id, ids\)\)/);
   });
 
   it("workflow op-call to a parameterless extern emits the dispatch dance", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
-    const doc = await helper(`
+    const doc = await helper(
+      `
       context Sales {
         enum OrderStatus { Draft, Confirmed }
         aggregate Order {
@@ -735,7 +760,9 @@ describe("typescript generator", () => {
           order.confirm()
         }
       }
-    `, { validation: true });
+    `,
+      { validation: true },
+    );
     const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
     const wf = files.get("http/workflows.ts")!;
 
@@ -756,7 +783,8 @@ describe("typescript generator", () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
-    const doc = await helper(`
+    const doc = await helper(
+      `
       context Sales {
         aggregate Order {
           customerId: string
@@ -773,8 +801,12 @@ describe("typescript generator", () => {
           order.deduct(amount)
         }
       }
-    `, { validation: true });
-    const wf = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS).get("http/workflows.ts")!;
+    `,
+      { validation: true },
+    );
+    const wf = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS).get(
+      "http/workflows.ts",
+    )!;
     expect(wf).toMatch(/order\.checkDeduct\(amount\);/);
     expect(wf).toMatch(/await __handler\(order, \{ amount: amount \}\);/);
   });
@@ -783,7 +815,8 @@ describe("typescript generator", () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
-    const doc = await helper(`
+    const doc = await helper(
+      `
       context Sales {
         enum OrderStatus { Draft, Confirmed }
         aggregate Region { name: string display, countryCode: string }
@@ -802,7 +835,9 @@ describe("typescript generator", () => {
                countryCode = customerId.regionId.countryCode
         }
       }
-    `, { validation: true });
+    `,
+      { validation: true },
+    );
     const wf = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS).get(
       "http/views.ts",
     )!;
@@ -836,7 +871,8 @@ describe("typescript generator", () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
-    const doc = await helper(`
+    const doc = await helper(
+      `
       context Banking {
         enum AccountStatus { Open, Frozen, Closed }
         valueobject Money {
@@ -870,8 +906,12 @@ describe("typescript generator", () => {
           to.deposit(amount)
         }
       }
-    `, { validation: true });
-    const wf = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS).get("http/workflows.ts")!;
+    `,
+      { validation: true },
+    );
+    const wf = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS).get(
+      "http/workflows.ts",
+    )!;
     // The Money schema is declared as a local const, with the
     // openapi("Money") tag so it appears in /openapi.json.  Invariant
     // refinements stay outside the openapi name (see emitWireSchema).
@@ -895,7 +935,8 @@ describe("typescript generator", () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
-    const doc = await helper(`
+    const doc = await helper(
+      `
       context T {
         aggregate Customer {
           name: string display
@@ -927,8 +968,12 @@ describe("typescript generator", () => {
           c.addCredit(amount)
         }
       }
-    `, { validation: true });
-    const wf = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS).get("http/workflows.ts")!;
+    `,
+      { validation: true },
+    );
+    const wf = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS).get(
+      "http/workflows.ts",
+    )!;
     expect(wf).toMatch(/\}, \{ isolationLevel: "serializable" \}\);/);
     expect(wf).toMatch(/\}, \{ isolationLevel: "repeatable read" \}\);/);
     expect(wf).toMatch(/\}, \{ isolationLevel: "read uncommitted" \}\);/);
@@ -950,7 +995,9 @@ describe("typescript generator", () => {
     const files = generateTypeScript(model, HONO_V4_PINS);
     const schema = files.get("db/schema.ts")!;
     expect(schema).toMatch(/import \{[^}]*\bindex\b[^}]*\} from "drizzle-orm\/pg-core"/);
-    expect(schema).toMatch(/orderCustomerIdIdx: index\("orders_customer_id_idx"\)\.on\(table\.customerId\)/);
+    expect(schema).toMatch(
+      /orderCustomerIdIdx: index\("orders_customer_id_idx"\)\.on\(table\.customerId\)/,
+    );
     expect(schema).toMatch(/orderStatusIdx: index\("orders_status_idx"\)\.on\(table\.status\)/);
     expect(schema).toMatch(
       /orderLineParentIdIdx: index\("order_lines_parent_id_idx"\)\.on\(table\.parentId\)/,
@@ -969,9 +1016,7 @@ describe("typescript generator", () => {
       const doc = await helper(src, { validation: true });
       const { lowerModel } = await import("../src/ir/lower.js");
       const { enrichLoomModel } = await import("../src/ir/enrichments.js");
-      const { generateTypeScriptForContexts } = await import(
-        "../src/platform/hono/v4/emit.js"
-      );
+      const { generateTypeScriptForContexts } = await import("../src/platform/hono/v4/emit.js");
       const loom = enrichLoomModel(lowerModel(doc.parseResult.value as Model));
       const sys = loom.systems[0]!;
       const dep = sys.deployables.find((d) => d.platform === "hono")!;
@@ -1102,20 +1147,18 @@ describe("typescript generator", () => {
     it("repository find with currentUser filter gains a User parameter and imports the type", async () => {
       const files = await emitForAuthSystem(SRC_FILTER_AUTH);
       const repo = files.get("db/repositories/order-repository.ts")!;
-      expect(repo).toMatch(
-        /import type \{ User \} from "\.\.\/\.\.\/auth\/user-types";/,
-      );
+      expect(repo).toMatch(/import type \{ User \} from "\.\.\/\.\.\/auth\/user-types";/);
       expect(repo).toMatch(/async mine\([^)]*currentUser: User[^)]*\)/);
     });
 
-    it("find route reads c.get(\"currentUser\") and threads it into the repo call", async () => {
+    it('find route reads c.get("currentUser") and threads it into the repo call', async () => {
       const files = await emitForAuthSystem(SRC_FILTER_AUTH);
       const route = files.get("http/order.routes.ts")!;
       expect(route).toMatch(/c\.get\("currentUser"\)/);
       expect(route).toMatch(/repo\.mine\(currentUser\)/);
     });
 
-    it("view route reads c.get(\"currentUser\") and threads it into the repo call", async () => {
+    it('view route reads c.get("currentUser") and threads it into the repo call', async () => {
       const files = await emitForAuthSystem(SRC_FILTER_AUTH);
       const views = files.get("http/views.ts")!;
       expect(views).toMatch(/httpCtx\.get\("currentUser"\)/);
@@ -1157,9 +1200,7 @@ describe("typescript generator", () => {
       const files = await emitForAuthSystem(SRC_REQUIRES);
       const order = files.get("domain/order.ts")!;
       expect(order).toMatch(/throw new ForbiddenError\(/);
-      expect(order).toMatch(
-        /import \{ DomainError, ForbiddenError \} from "\.\/errors";/,
-      );
+      expect(order).toMatch(/import \{ DomainError, ForbiddenError \} from "\.\/errors";/);
     });
 
     it("errors.ts exports ForbiddenError", async () => {
@@ -1288,9 +1329,7 @@ describe("typescript generator", () => {
       );
       const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
       const userClass = files.get("domain/user.ts")!;
-      expect(userClass).toMatch(
-        /new RegExp\("\^\[\^@\]\+@\.\+\$"\)\.test\(this\._email\)/,
-      );
+      expect(userClass).toMatch(/new RegExp\("\^\[\^@\]\+@\.\+\$"\)\.test\(this\._email\)/);
     });
 
     it("emits cross-field invariants as `.refine()` with field-path attribution", async () => {

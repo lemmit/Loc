@@ -4,13 +4,13 @@
 // `src/system/traceability.ts`.  Consumed by `ddd verify`.
 // ---------------------------------------------------------------------------
 
-import { lines } from "../util/code-builder.js";
 import type {
   LoomModel,
   RequirementIR,
   RequirementVerdict,
   VerificationIR,
 } from "../ir/loom-ir.js";
+import { lines } from "../util/code-builder.js";
 
 const GLYPH: Record<RequirementVerdict, string> = {
   VERIFIED: "✅",
@@ -87,7 +87,12 @@ export function renderVerificationMd(loom: LoomModel, v: VerificationIR): string
       "## Diagnostics",
       "",
       diag.unknownTests.length
-        ? ["Results matching no declared test:", ...diag.unknownTests.map((t) => `- ${t.suite ? `${t.suite} › ` : ""}${t.name} (${t.status})`)]
+        ? [
+            "Results matching no declared test:",
+            ...diag.unknownTests.map(
+              (t) => `- ${t.suite ? `${t.suite} › ` : ""}${t.name} (${t.status})`,
+            ),
+          ]
         : "_No unknown results._",
     ) + "\n"
   );

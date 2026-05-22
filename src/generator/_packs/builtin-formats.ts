@@ -24,14 +24,14 @@
 // ---------------------------------------------------------------------------
 
 export const BUILTIN_PACK_FORMATS = {
-  "mantine@v7":    "tsx",
-  "mantine@v9":    "tsx",
-  "chakra@v2":     "tsx",
-  "chakra@v3":     "tsx",
-  "mui@v5":        "tsx",
-  "mui@v7":        "tsx",
-  "shadcn@v3":     "tsx",
-  "shadcn@v4":     "tsx",
+  "mantine@v7": "tsx",
+  "mantine@v9": "tsx",
+  "chakra@v2": "tsx",
+  "chakra@v3": "tsx",
+  "mui@v5": "tsx",
+  "mui@v7": "tsx",
+  "shadcn@v3": "tsx",
+  "shadcn@v4": "tsx",
   "ashPhoenix@v3": "heex",
 } as const satisfies Record<string, "tsx" | "heex">;
 
@@ -50,7 +50,7 @@ export const BUILTIN_PACK_LATEST = {
   // loadable via the explicit pin `design: "mantine@v7"` for projects
   // that want React 18.  This flip was paired with refreshing
   // `test/fixtures/baseline-output/` (acme.ddd uses the bareword).
-  mantine:    "v9",
+  mantine: "v9",
   // chakra promoted to v3 (Chakra UI 3 / React 19, stack v2) and mui
   // to v7 (Material UI 7) once their pinned packs proved out via the
   // tsc + vite-build shards and runtime-gate e2e specs.  Bareword
@@ -59,8 +59,8 @@ export const BUILTIN_PACK_LATEST = {
   // `design: "chakra@v2"` / `design: "mui@v5"`.  acme.ddd (the
   // baseline fixture source) has no `design:` slot so it tracks
   // mantine — these flips don't touch test/fixtures/baseline-output/.
-  chakra:     "v3",
-  mui:        "v7",
+  chakra: "v3",
+  mui: "v7",
   // shadcn promoted to v4 (Tailwind 4 CSS-first / React 19, stack
   // v2).  The blocker — the in-browser playground only knew the
   // Tailwind 3 Play CDN — was cleared: `iframe-html.ts`'s
@@ -70,7 +70,7 @@ export const BUILTIN_PACK_LATEST = {
   // shadcn@v4; the Tailwind-3 pack stays loadable via the explicit
   // pin `design: "shadcn@v3"`.  acme.ddd has no `design:` slot so
   // this doesn't touch test/fixtures/baseline-output/.
-  shadcn:     "v4",
+  shadcn: "v4",
   ashPhoenix: "v3",
 } as const satisfies Record<string, string>;
 
@@ -105,16 +105,13 @@ export interface ParsedBuiltinDesignRef {
  *    "./design/foo"   → null                                                              // custom pack
  *    "frobnicator"    → null                                                              // unknown family
  */
-export function parseBuiltinDesignRef(
-  s: string,
-): ParsedBuiltinDesignRef | null {
+export function parseBuiltinDesignRef(s: string): ParsedBuiltinDesignRef | null {
   // Custom path — leave to the loader's reference-dir resolution.
   if (s.startsWith(".") || s.startsWith("/")) return null;
   const at = s.indexOf("@");
   const family = (at === -1 ? s : s.slice(0, at)) as BuiltinPackFamily;
   if (!(family in BUILTIN_PACK_LATEST)) return null;
-  const version =
-    at === -1 ? BUILTIN_PACK_LATEST[family] : s.slice(at + 1);
+  const version = at === -1 ? BUILTIN_PACK_LATEST[family] : s.slice(at + 1);
   return { family, version, qualified: `${family}@${version}` };
 }
 
@@ -123,22 +120,16 @@ export function parseBuiltinDesignRef(
  *  version.  Used by the validator to cross-check a deployable's
  *  `design:` against its framework's expected pack format, and to
  *  emit "no such version" errors. */
-export function packFormatForBuiltin(
-  name: string,
-): "tsx" | "heex" | undefined {
+export function packFormatForBuiltin(name: string): "tsx" | "heex" | undefined {
   const parsed = parseBuiltinDesignRef(name);
   if (!parsed) return undefined;
-  return (BUILTIN_PACK_FORMATS as Record<string, "tsx" | "heex">)[
-    parsed.qualified
-  ];
+  return (BUILTIN_PACK_FORMATS as Record<string, "tsx" | "heex">)[parsed.qualified];
 }
 
 /** Every version registered for a given built-in family.  Used by
  *  the validator's "unknown version" error to list the available
  *  pins for a family the user typo'd a version of. */
-export function builtinVersionsForFamily(
-  family: BuiltinPackFamily,
-): string[] {
+export function builtinVersionsForFamily(family: BuiltinPackFamily): string[] {
   const prefix = `${family}@`;
   return Object.keys(BUILTIN_PACK_FORMATS)
     .filter((k) => k.startsWith(prefix))
