@@ -416,6 +416,10 @@ test("edits an assignment value inside an operation body", async ({ page }) => {
   await page.getByTestId("c4system-expr-pick").click();
   await page.getByRole("option", { name: "deposit: balance := Money" }).click();
 
+  // The `Money(…)` call's positional args are labelled with the VO ctor's
+  // parameter names (type-resolved, async via the linked build).
+  await expect(page.getByTestId("c4expr").getByTestId("c4expr-arg-label").first()).toHaveText("amount:", { timeout: 10_000 });
+
   const op = () => page.getByTestId("c4expr").getByTestId("c4expr-op");
   await expect(op()).toHaveValue("+");
   await op().click();

@@ -37,7 +37,7 @@ import {
   withLocal,
   type Env,
 } from "../../../../src/ir/lower-expr.js";
-import { envForNode, membersOfType, typeOf } from "../../../../src/language/type-system.js";
+import { calleeSignature, envForNode, membersOfType, typeOf } from "../../../../src/language/type-system.js";
 import { applyEdits } from "../edit-engine";
 import { buildLinkedModel } from "./linked-doc";
 import { parseDdd } from "../parse";
@@ -392,49 +392,64 @@ export function slotCandidates(ast: Model, slot: ExprSlot): string[] {
 // collection element type — so completion works inside `xs.all(x => x.…)`.
 // ---------------------------------------------------------------------------
 
-function collectMembers(node: Expression, path: string, out: Map<string, string[]>): void {
+/** Type-directed hints for an expression, keyed by canonical structural path:
+ *  `members` — member-name candidates at each member node; `argLabels` — the
+ *  callee's parameter names at each call / member-call node (for labelling
+ *  positional argument slots). */
+export interface ExprHints {
+  members: Map<string, string[]>;
+  argLabels: Map<string, string[]>;
+}
+
+function collectHints(node: Expression, path: string, h: ExprHints): void {
   switch (node.$type) {
     case "MemberAccess": {
       const ma = node as MemberAccess;
       if (ma.receiver) {
-        const t = typeOf(ma.receiver, envForNode(ma.receiver));
-        out.set(path, membersOfType(t).map((m) => m.name));
-        collectMembers(ma.receiver, `${path}r`, out);
+        h.members.set(path, membersOfType(typeOf(ma.receiver, envForNode(ma.receiver))).map((m) => m.name));
+        collectHints(ma.receiver, `${path}r`, h);
       }
-      ma.args.forEach((a, i) => collectMembers(a.value, `${path}a${i}`, out));
+      if (ma.call) setArgLabels(ma, path, h);
+      ma.args.forEach((a, i) => collectHints(a.value, `${path}a${i}`, h));
+      break;
+    }
+    case "CallExpr": {
+      const c = node as CallExpr;
+      setArgLabels(c, path, h);
+      collectHints(c.callee, `${path}c`, h);
+      c.args.forEach((a, i) => collectHints(a.value, `${path}a${i}`, h));
       break;
     }
     case "BinaryExpr": {
       const b = node as BinaryExpr;
-      collectMembers(b.left, `${path}L`, out);
-      collectMembers(b.right, `${path}R`, out);
+      collectHints(b.left, `${path}L`, h);
+      collectHints(b.right, `${path}R`, h);
       break;
     }
     case "UnaryExpr":
-      collectMembers((node as UnaryExpr).operand, `${path}o`, out);
+      collectHints((node as UnaryExpr).operand, `${path}o`, h);
       break;
     case "ParenExpr":
-      collectMembers((node as ParenExpr).inner, `${path}i`, out);
+      collectHints((node as ParenExpr).inner, `${path}i`, h);
       break;
-    case "CallExpr": {
-      const c = node as CallExpr;
-      collectMembers(c.callee, `${path}c`, out);
-      c.args.forEach((a, i) => collectMembers(a.value, `${path}a${i}`, out));
-      break;
-    }
     case "Lambda": {
       const l = node as Lambda;
-      if (l.body) collectMembers(l.body, `${path}b`, out);
+      if (l.body) collectHints(l.body, `${path}b`, h);
       break;
     }
     case "NewExpr":
-      (node as NewExpr).fields.forEach((f, i) => collectMembers(f.value, `${path}f${i}`, out));
+      (node as NewExpr).fields.forEach((f, i) => collectHints(f.value, `${path}f${i}`, h));
       break;
     case "ObjectLit":
-      (node as ObjectLit).fields.forEach((f, i) => collectMembers(f.value, `${path}f${i}`, out));
+      (node as ObjectLit).fields.forEach((f, i) => collectHints(f.value, `${path}f${i}`, h));
       break;
     // Other forms are opaque leaves (names, literals, ternary, match, …).
   }
+}
+
+function setArgLabels(call: CallExpr | MemberAccess, path: string, h: ExprHints): void {
+  const sig = calleeSignature(call);
+  if (sig) h.argLabels.set(path, sig.params.map((p) => p.name));
 }
 
 // Size-1 cache of the linked model by source text — switching between slots of
@@ -446,13 +461,18 @@ function linkedModelFor(source: string): Promise<Model | null> {
   return linkedCache.model;
 }
 
-/** Per-member-node member-name candidates for a slot's expression, keyed by the
- *  canonical structural path. Async — builds a linked document so types resolve. */
-export async function memberCandidates(source: string, slot: ExprSlot): Promise<Map<string, string[]>> {
+/** Type-directed hints (member candidates + call arg labels) for a slot's
+ *  expression. Async — builds a linked document so types/refs resolve. */
+export async function exprHints(source: string, slot: ExprSlot): Promise<ExprHints> {
+  const h: ExprHints = { members: new Map(), argLabels: new Map() };
   const model = await linkedModelFor(source);
-  const out = new Map<string, string[]>();
-  if (!model) return out;
+  if (!model) return h;
   const expr = slotExpr(model, slot);
-  if (expr) collectMembers(expr, "", out);
-  return out;
+  if (expr) collectHints(expr, "", h);
+  return h;
+}
+
+/** Per-member-node member-name candidates (the `members` half of `exprHints`). */
+export async function memberCandidates(source: string, slot: ExprSlot): Promise<Map<string, string[]>> {
+  return (await exprHints(source, slot)).members;
 }
