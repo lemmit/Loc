@@ -139,12 +139,20 @@ export function generateReactForContexts(
   }
 
   out.set("e2e/smoke.spec.ts", smokeSpec(aggregates.map((a) => a.agg)));
+  out.set("e2e/fixtures.ts", E2E_FIXTURES_TS);
   out.set("e2e/playwright.config.ts", PLAYWRIGHT_CONFIG_TS);
   out.set("e2e/package.json", E2E_PACKAGE_JSON);
   out.set("e2e/tsconfig.json", E2E_TSCONFIG_JSON);
 
   out.set("src/api/client.ts", renderShellFile("api-client", {}, pack));
   out.set("src/api/config.ts", renderShellFile("api-config", { apiBaseUrl }, pack));
+  // Frontend observability: a namespaced loglevel logger + a top-level
+  // error boundary.  Both are pack-agnostic shared shell files; main.tsx
+  // (per pack) mounts the boundary and the api client logs through the
+  // logger.  Output flows through console.* so the playground App-log
+  // stream and Playwright console capture pick it up.
+  out.set("src/logger.ts", renderShellFile("logger", {}, pack));
+  out.set("src/ErrorBoundary.tsx", renderShellFile("error-boundary", {}, pack));
   out.set("src/lib/format.tsx", renderShellFile("format-helpers", {}, pack));
   // Theme — every generated app gets a tasteful baseline (indigo
   // primary, medium radius, Inter font) so the bare-Mantine
@@ -279,12 +287,43 @@ function smokeSpec(aggregates: AggregateIR[]): string {
     )
     .join("\n\n");
   return `// Auto-generated smoke spec.
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 ${imports}
 
 ${cases}
 `;
 }
+
+// Playwright fixture: auto-capture the browser console + uncaught page
+// errors and, when a test does not pass, attach them to the report so a
+// failure carries the app's own output (not just a screenshot).  Generated
+// specs import { test, expect } from "./fixtures" instead of from
+// "@playwright/test" so every test gets this for free.
+export const E2E_FIXTURES_TS = `// Auto-generated.
+import { test as base, expect } from "@playwright/test";
+
+export const test = base.extend<{ _consoleCapture: void }>({
+  _consoleCapture: [
+    async ({ page }, use, testInfo) => {
+      const lines: string[] = [];
+      page.on("console", (msg) => lines.push(\`[\${msg.type()}] \${msg.text()}\`));
+      page.on("pageerror", (err) =>
+        lines.push(\`[pageerror] \${err.stack ?? err.message}\`),
+      );
+      await use();
+      if (testInfo.status !== testInfo.expectedStatus && lines.length > 0) {
+        await testInfo.attach("console-logs", {
+          body: lines.join("\\n"),
+          contentType: "text/plain",
+        });
+      }
+    },
+    { auto: true },
+  ],
+});
+
+export { expect };
+`;
 
 const PLAYWRIGHT_CONFIG_TS = `// Auto-generated.
 import { defineConfig, devices } from "@playwright/test";
@@ -298,7 +337,11 @@ export default defineConfig({
   reporter: [["list"]],
   use: {
     baseURL: process.env.E2E_BASE_URL ?? "http://localhost:3001",
-    trace: "on-first-retry",
+    // Keep the full trace (console + network + DOM snapshots) and a
+    // screenshot on every failure so a red test is debuggable from the
+    // report alone, alongside the console-logs attachment from fixtures.ts.
+    trace: "retain-on-failure",
+    screenshot: "only-on-failure",
   },
   projects: [
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },

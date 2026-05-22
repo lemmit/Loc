@@ -7,6 +7,7 @@ import { BrowserRouter } from "{{routerPackage}}";
 import { ChakraProvider } from "@chakra-ui/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { system } from "./theme";
 import { Toaster } from "./lib/toaster";
 
@@ -21,6 +22,7 @@ const basename =
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
+    <ErrorBoundary>
     <QueryClientProvider client={queryClient}>
       <ChakraProvider value={system}>
         <BrowserRouter basename={basename}>
@@ -29,5 +31,6 @@ createRoot(document.getElementById("root")!).render(
         <Toaster />
       </ChakraProvider>
     </QueryClientProvider>
+    </ErrorBoundary>
   </React.StrictMode>,
 );
