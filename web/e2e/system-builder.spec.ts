@@ -355,6 +355,24 @@ test("edits a workflow body's statements", async ({ page }) => {
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
 
+test("structures a bare-call workflow statement into head + args", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  await page.locator('[data-testid="rf__node-workflow:placeOrder"]').click();
+  await expect(page.getByTestId("c4system-body")).toBeVisible();
+  // `order.addLine(productId, qty)` is a bare call → head + per-arg controls.
+  const head = page.getByTestId("c4system-call-head").first();
+  await expect(head).toBeVisible();
+  await expect(head).toHaveValue("order.addLine");
+  await expect(page.getByTestId("c4system-call-arg")).not.toHaveCount(0);
+});
+
 test("edits an operation body via the aggregate inspector", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);

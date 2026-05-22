@@ -374,12 +374,15 @@ Done:
   persistence + re-apply wire through `SystemBuilderPane.tsx`. Gated by
   `test/system/system-positions.test.ts` + e2e.
 
+- **Structured bare-call statements** — a bare call (`recv.method(args)`, an
+  `LValue` with a trailing call and no mutation suffix) in the BodyEditor splits
+  into a head (`recv.method`) plus one editable input per argument, with add /
+  delete, reconstructing `head(a, b, …)` on commit (empty args dropped). The new
+  `call` `StmtView` + detection live in `body.ts`; `CallRow` in `BodyEditor.tsx`.
+  Gated by `test/system/system-body.test.ts` + e2e.
+
 Open:
 
-- **Structured bare-call statements** — a bare-call statement (`x.method(args)`)
-  in the top-level BodyEditor still edits as one verbatim text row; its callee /
-  args aren't split out. (Assignment targets are structured — see above; and
-  repointing an `emit` to a different event is done via the Emit event picker.)
 - **Edge rebinding by dragging** connections on the canvas — the drag gesture
   itself. Rebinding by inspector Select already exists for both single-reference
   constructs (`rebind.ts`) and multi-valued deployable references — modules /

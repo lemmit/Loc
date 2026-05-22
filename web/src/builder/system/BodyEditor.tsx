@@ -27,7 +27,73 @@ interface BodyEditorProps {
 const MONO = { input: { fontFamily: "monospace", fontSize: 11 } };
 
 function viewText(v: StmtView): string {
-  return v.kind === "assign" ? `${v.target} ${v.op} ${v.value}` : v.src;
+  if (v.kind === "assign") return `${v.target} ${v.op} ${v.value}`;
+  if (v.kind === "call") return `${v.head}(${v.args.join(", ")})`;
+  return v.src;
+}
+
+// Bare-call row: a call head (`recv.method`) plus one editable input per
+// argument, with add / delete. Reconstructs `head(a, b, …)` (empty args
+// dropped). Args are controlled so add / delete stay correct.
+function CallRow({ view, error, onCommit, onClearError }: {
+  view: { head: string; args: string[] };
+  error: boolean;
+  onCommit: (text: string) => void;
+  onClearError: () => void;
+}): JSX.Element {
+  const [head, setHead] = useState(view.head);
+  const [args, setArgs] = useState<string[]>(view.args);
+  const reconstruct = (h: string, a: string[]): string =>
+    `${h.trim()}(${a.map((x) => x.trim()).filter((x) => x !== "").join(", ")})`;
+  return (
+    <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
+      <Group gap={4} wrap="nowrap" align="center">
+        <TextInput
+          size="xs"
+          style={{ flex: 1, minWidth: 0 }}
+          defaultValue={head}
+          error={error ? "invalid" : undefined}
+          data-testid="c4system-call-head"
+          aria-label="call target"
+          styles={MONO}
+          onFocus={onClearError}
+          onChange={(e) => setHead(e.currentTarget.value)}
+          onBlur={() => onCommit(reconstruct(head, args))}
+        />
+        <Button size="compact-xs" variant="subtle" data-testid="c4system-call-arg-add" onClick={() => setArgs((p) => [...p, ""])}>
+          + arg
+        </Button>
+      </Group>
+      {args.map((arg, i) => (
+        <Group key={i} gap={4} wrap="nowrap" align="center" style={{ paddingLeft: 12 }}>
+          <TextInput
+            size="xs"
+            style={{ flex: 1, minWidth: 0 }}
+            value={arg}
+            data-testid="c4system-call-arg"
+            aria-label={`argument ${i + 1}`}
+            styles={MONO}
+            onFocus={onClearError}
+            onChange={(e) => setArgs((prev) => prev.map((x, j) => (j === i ? e.currentTarget.value : x)))}
+            onBlur={() => onCommit(reconstruct(head, args))}
+          />
+          <Button
+            size="compact-xs"
+            variant="subtle"
+            color="red"
+            data-testid="c4system-call-arg-del"
+            onClick={() => {
+              const next = args.filter((_, j) => j !== i);
+              setArgs(next);
+              onCommit(reconstruct(head, next));
+            }}
+          >
+            ×
+          </Button>
+        </Group>
+      ))}
+    </Stack>
+  );
 }
 
 // Assignment row: target / op / value as separate controls. Local draft state so
@@ -116,6 +182,13 @@ export function BodyEditor({ statements, onEdit, onDelete, onMove, onAdd }: Body
           <Group key={`${i}-${original}`} gap={4} align="flex-start" wrap="nowrap" data-testid="c4system-stmt-row">
             {s.kind === "assign" ? (
               <AssignRow
+                view={s}
+                error={errorAt === i}
+                onClearError={() => errorAt === i && setErrorAt(null)}
+                onCommit={(text) => commitEdit(i, original, text)}
+              />
+            ) : s.kind === "call" ? (
+              <CallRow
                 view={s}
                 error={errorAt === i}
                 onClearError={() => errorAt === i && setErrorAt(null)}
