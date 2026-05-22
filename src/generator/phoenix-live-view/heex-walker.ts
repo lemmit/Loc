@@ -1293,18 +1293,17 @@ function renderAttrValue(arg: ExprIR, ctx: WalkContext, isStatic: boolean): stri
 // Lambda hoisting → handle_event clauses.
 // ---------------------------------------------------------------------------
 
-let handlerCounter = 0;
-
 function hoistLambdaToHandler(arg: ExprIR, ctx: WalkContext): string {
   if (arg.kind !== "lambda") {
     // Not a lambda — try to lower as expression in handler context.
     // Caller will get back something it can put in `phx-click="…"`.
     return "noop";
   }
-  // Generate a stable event name.  We use a counter for now;
-  // collision-free across one page's walk.
-  handlerCounter += 1;
-  const eventName = `event_${handlerCounter}`;
+  // Event name is scoped to this page's walk: each hoist pushes exactly one
+  // handler onto ctx.handlers (shared by reference across nested renders), so
+  // its length gives a per-page sequence that resets for the next page and is
+  // deterministic regardless of how many pages were walked before.
+  const eventName = `event_${ctx.handlers.length + 1}`;
   // Lambda body — either single-expression or block.
   const bodyLines: string[] = [];
   bodyLines.push(`    socket =`);
