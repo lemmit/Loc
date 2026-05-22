@@ -111,12 +111,8 @@ function anyNamedArgExpr(
   name: string,
   ctx: WalkContext,
 ): string | undefined {
-  const argNames = call.argNames ?? [];
-  for (let i = 0; i < call.args.length; i++) {
-    if (argNames[i] !== name) continue;
-    return emitExpr(call.args[i]!, ctx);
-  }
-  return undefined;
+  const arg = namedArgValue(call, name);
+  return arg !== undefined ? emitExpr(arg, ctx) : undefined;
 }
 
 /** Render a Lambda IR as a TS arrow function suitable for an event
