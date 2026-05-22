@@ -8,6 +8,7 @@ import {
   useNodesInitialized,
   useNodesState,
   useReactFlow,
+  type Connection,
   type Edge,
   type Node,
 } from "@xyflow/react";
@@ -24,6 +25,7 @@ import type { WireField } from "../../../../src/ir/loom-ir.js";
 import { loadPositions, savePositions, type Pos } from "./positions";
 import { addConstructSource, addModuleSource, firstAggregateName, listContextNames } from "./add";
 import { groupedLayout } from "./grouped-layout";
+import { isRebindableEdge, rebindEdgeTarget } from "./edge-rebind";
 import { buildLinkedModel } from "./linked-doc";
 import { lowerModel } from "../../../../src/ir/lower.js";
 import { enrichLoomModel } from "../../../../src/ir/enrichments.js";
@@ -227,14 +229,22 @@ function toGroupedRfNodes(
 function toRfEdges(graph: ReturnType<typeof buildSystemGraph>, grouped = false): Edge[] {
   // In grouped mode an edge to a module points at that module's group node.
   const remap = (id: string): string => (grouped && id.startsWith("module:") ? `group:${id}` : id);
-  return graph.edges.map((e) => ({
-    id: e.id,
-    source: remap(e.source),
-    target: remap(e.target),
-    label: e.label,
-    labelStyle: { fontSize: 9, fill: "var(--mantine-color-dimmed)" },
-    style: { stroke: "var(--mantine-color-dark-2)" },
-  }));
+  return graph.edges.map((e) => {
+    const ownerKind = e.source.slice(0, e.source.indexOf(":"));
+    // Single cross-ref edges can be repointed by dragging their target endpoint;
+    // disabled in grouped mode (endpoints may be group containers).
+    const reconnectable: "target" | false =
+      !grouped && isRebindableEdge(ownerKind, e.label) ? "target" : false;
+    return {
+      id: e.id,
+      source: remap(e.source),
+      target: remap(e.target),
+      label: e.label,
+      reconnectable,
+      labelStyle: { fontSize: 9, fill: "var(--mantine-color-dimmed)" },
+      style: { stroke: "var(--mantine-color-dark-2)" },
+    };
+  });
 }
 
 
@@ -620,6 +630,16 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     if (next != null) apply(next, true);
   };
 
+  // Dragging a (reconnectable) edge's target endpoint onto another node repoints
+  // its reference. The owner (edge source) is fixed — only the target moves; an
+  // incompatible drop or unparseable rewrite is rejected (edges stay as derived).
+  const onReconnect = (oldEdge: Edge, conn: Connection): void => {
+    if (!conn.target || conn.source !== oldEdge.source) return;
+    const label = typeof oldEdge.label === "string" ? oldEdge.label : "";
+    const next = rebindEdgeTarget(ctx.getSource(), label, oldEdge.source, conn.target);
+    if (next != null) apply(next, true);
+  };
+
   const bodyHandlers = (loc: BodyLocator) => ({
     onEdit: (i: number, text: string): boolean => {
       const next = editStatement(ctx.getSource(), loc, i, text);
@@ -651,6 +671,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
           edges={edges}
           onNodesChange={handleNodesChange}
           onEdgesChange={onEdgesChange}
+          onReconnect={onReconnect}
           onNodeClick={(_, n) => { if (n.id.startsWith("group:")) return; setSelectedId(n.id); if (compact) setInspectorOpen(true); }}
           onPaneClick={() => { setSelectedId(null); if (compact) setInspectorOpen(false); }}
           fitView
