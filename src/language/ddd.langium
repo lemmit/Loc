@@ -608,7 +608,7 @@ BindEntry:
 // ---------------------------------------------------------------------------
 
 Property:
-    name=ID ':' type=TypeRef (display?='display')? ('check' check=Expression)?;
+    name=ID ':' type=TypeRef (display?='display')? (provenanced?='provenanced')? ('check' check=Expression)?;
 
 Containment:
     'contains' name=ID ':' partType=[EntityPart:ID] (collection?='[]')?;

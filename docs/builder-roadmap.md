@@ -110,6 +110,11 @@ text stays the source of truth.
   default renders as a dropdown of the enum's cases (collected from the source by
   `BuilderPane`; the current value is always selectable so a hand-written default
   isn't clobbered) instead of a free-text input.
+- **Mobile Builder + Model tabs**: both builders have a narrow-viewport layout —
+  full-width canvas, palette/settings (page) and inspector (model) move into
+  bottom drawers, reached via the consolidated Code tab's SegmentedControl
+  (`PageBuilder.tsx` / `SystemBuilderPane.tsx`, `ctx.isDesktop`). Gated by
+  `web/e2e/mobile-builder.spec.ts`.
 
 ## Open — expression / domain-logic surface
 
@@ -138,7 +143,6 @@ text stays the source of truth.
 
 ## Open — editing UX
 
-- **Mobile** Builder tab (desktop-only today).
 - **Continuous text→canvas live sync** (today re-seeds on tab switch, not per
   keystroke) — needs debounce + canvas selection preservation.
 
@@ -234,8 +238,9 @@ Done:
   (`p => expr`) render an editable param + body (the param is threaded into the
   body's scope suggestions), `new Part { … }` and object literals `{ … }` render
   an editable partType + a named-field list (add/remove/edit), and everything
-  still unmodelled (`match`, ternary, block-body lambdas) is a reparse-validated
-  `raw` text leaf (recognise-or-raw). Plugged into the
+  still unmodelled (block-body lambdas) is a reparse-validated
+  `raw` text leaf (recognise-or-raw). (`match` + ternary were since structured —
+  see below.) Plugged into the
   single-expression slots — invariants, derived props, function bodies — via one
   inspector "Expression" picker (`expr-slots.ts`). A **structured⇄text toggle**
   lets advanced users edit the whole expression as raw text (same
@@ -311,18 +316,21 @@ Done:
 
 Open:
 
-- **Deeper expression structuring** — block-body lambdas are still `raw`
-  leaves; arg-*name* editing on calls (existing named args are preserved
-  verbatim but can't be renamed in the UI); and structured statement *targets*
-  (assignment LValue / `emit` event picker) + bare-call statements — the
-  statement *expressions* are structured today, but these non-expression parts
-  stay text-row.
-- **Edge rebinding by dragging** connections on the canvas (inspector-Select
-  rebinding already exists — see above); plus multi-valued deployable references
-  (module bindings, `serves`, ui) which the single-Select rebind doesn't cover.
-- **Add** the remaining construct kinds (value object, event, repository, view,
-  workflow, deployable, api, storage, ui), and choose the target context/module.
+- **Deeper expression structuring** — block-body lambdas are still `raw` leaves
+  in `expr-model.ts`; and arg-*name* editing on calls (existing named args are
+  preserved verbatim but can't be renamed in the UI).
+- **Structured statement non-expression parts** — statement *expressions* are
+  structured today (assignment RHS, `let` values, predicates, `emit` field
+  values, call args), but the assignment *target* (LValue) and a bare-call
+  statement's callee still edit as text rows. (Repointing an `emit` to a
+  different event is already done — see the Emit event picker, above.)
+- **Edge rebinding by dragging** connections on the canvas — the drag gesture
+  itself. Rebinding by inspector Select already exists for both single-reference
+  constructs (`rebind.ts`) and multi-valued deployable references — modules /
+  `serves` / ui (`deployable-bindings.ts`).
+- **Add: target context/module picker** — add covers every construct kind
+  (`constructTemplate`, see Editing above) but drops the new node into the first
+  context (domain kinds) / first module (api); no UI yet to pick which.
 - **Nested grouping** (module → context → members as React Flow parent nodes)
   and auto-layout; today it's a deterministic column-per-kind layout.
 - **Persisted positions** (layout is currently derived, not written back).
-- **Mobile** Model tab (desktop-only today).

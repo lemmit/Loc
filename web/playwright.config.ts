@@ -27,11 +27,17 @@ export default defineConfig({
   // developer is iterating on a single spec.  Tests use isolated
   // browser contexts so per-worker IDB / cookies don't collide.
   workers: process.env.CI ? 2 : 1,
-  // `list` everywhere: when the job is time-capped mid-run the
+  // `list` is the live signal: when the job is time-capped mid-run the
   // `github` reporter emits nothing until the end, giving zero
   // diagnostic signal.  `list` prints per-spec ok/✘/timing live so a
   // capped run still tells us which specs are slow vs stuck.
-  reporter: [["list"]],
+  //
+  // `html` is the post-mortem artifact.  It writes playwright-report/
+  // (with the retained traces embedded) — exactly the path the CI
+  // workflow uploads on failure.  Without it that upload step finds
+  // nothing, so a failed run shipped zero diagnostics; `open: "never"`
+  // stops it spawning a browser in CI.
+  reporter: [["list"], ["html", { open: "never" }]],
   use: {
     baseURL: "http://127.0.0.1:4173",
     headless: true,

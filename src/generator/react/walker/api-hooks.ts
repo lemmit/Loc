@@ -110,32 +110,3 @@ export function registerApiHook(hook: ApiHookUse, ctx: WalkContext): void {
     ctx.usedApiHooks.set(hook.varName, hook);
   }
 }
-
-/** Group api-hook imports by source file so multiple ops on one
- *  aggregate (e.g. `useAllCustomers` + `useCreateCustomer`) collapse
- *  to a single import line — matches the existing scaffold output
- *  shape (one api/<aggregate>.ts per aggregate, exporting all
- *  hooks). */
-export function renderApiHookImports(
-  usedApiHooks: Map<string, ApiHookUse>,
-  /** Slice C2 — see `renderImportLines` for prefix semantics. */
-  srcImportPrefix: string = "../",
-): string {
-  const byPath = new Map<string, Set<string>>();
-  for (const h of usedApiHooks.values()) {
-    let names = byPath.get(h.importFrom);
-    if (!names) {
-      names = new Set();
-      byPath.set(h.importFrom, names);
-    }
-    names.add(h.hookName);
-  }
-  const lines: string[] = [];
-  for (const [path, names] of [...byPath.entries()].sort()) {
-    const sorted = [...names].sort();
-    const rewritten =
-      srcImportPrefix !== "../" && path.startsWith("../") ? srcImportPrefix + path.slice(3) : path;
-    lines.push(`import { ${sorted.join(", ")} } from "${rewritten}";\n`);
-  }
-  return lines.join("");
-}

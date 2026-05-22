@@ -1349,6 +1349,7 @@ function lowerField(p: Property): FieldIR {
     type: lowerType(p.type),
     optional: !!p.type?.optional,
     display: !!p.display,
+    provenanced: !!p.provenanced,
   };
 }
 

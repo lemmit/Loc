@@ -10,6 +10,7 @@ import type {
   OperationIR,
 } from "../../../ir/loom-ir.js";
 import { operationUsesCurrentUser } from "../../../ir/loom-ir.js";
+import { stmtHasProv } from "../../../ir/prov-id.js";
 import { lines } from "../../../util/code-builder.js";
 import { camel } from "../../../util/naming.js";
 import { renderTsExpr, renderTsType } from "../render-expr.js";
@@ -36,11 +37,16 @@ interface EntityShape {
   operations: OperationIR[];
 }
 
-export function renderAggregate(agg: AggregateIR, ctx: BoundedContextIR): string {
+export function renderAggregate(
+  agg: AggregateIR,
+  ctx: BoundedContextIR,
+  emitProvenance = false,
+): string {
   const valueObjectAliases = ctx.valueObjects.map((v) => v.name);
   const enumAliases = ctx.enums.map((e) => e.name);
-  const partsRendered = agg.parts.map((p) => renderEntity(partShape(p, agg)));
-  const rootRendered = renderEntity(rootShape(agg));
+  const hasProv = emitProvenance && agg.operations.some((op) => op.statements.some(stmtHasProv));
+  const partsRendered = agg.parts.map((p) => renderEntity(partShape(p, agg), emitProvenance));
+  const rootRendered = renderEntity(rootShape(agg), emitProvenance);
   // When any aggregate op references `currentUser` we pull the User
   // type from the auth/ package so the operation's `currentUser:
   // User` parameter typechecks.  Files emitted under deployables
@@ -60,6 +66,7 @@ export function renderAggregate(agg: AggregateIR, ctx: BoundedContextIR): string
         : null,
       'import type * as Events from "./events";',
       'import { DomainError, ForbiddenError } from "./errors";',
+      hasProv ? 'import { recordTrace } from "./provenance";' : null,
       usesUser ? 'import type { User } from "../auth/user-types";' : null,
       "",
       partsRendered.length > 0 ? partsRendered.map((p) => p + "\n").join("\n") : "",
@@ -95,7 +102,7 @@ function partShape(p: EntityPartIR, root: AggregateIR): EntityShape {
   };
 }
 
-function renderEntity(e: EntityShape): string {
+function renderEntity(e: EntityShape, emitProvenance = false): string {
   const containsType = (c: ContainmentIR): string =>
     `${c.partName}${c.collection ? "[]" : " | null"}`;
   const containsGetterType = (c: ContainmentIR): string =>
@@ -201,14 +208,14 @@ function renderEntity(e: EntityShape): string {
       // business decision.
       const checkName = `check${op.name[0]!.toUpperCase()}${op.name.slice(1)}`;
       ops.push(`  ${checkName}(${params}): void {`);
-      const body = renderTsStatements(op.statements);
+      const body = renderTsStatements(op.statements, emitProvenance);
       if (body.length > 0) ops.push(body);
       ops.push("  }");
       ops.push("");
       continue;
     }
     ops.push(`  ${visibility} ${camel(op.name)}(${params}): void {`);
-    const body = renderTsStatements(op.statements);
+    const body = renderTsStatements(op.statements, emitProvenance);
     if (body.length > 0) ops.push(body);
     ops.push("    this._assertInvariants();");
     ops.push("  }");

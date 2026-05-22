@@ -27,6 +27,7 @@ import type {
   SystemIR,
 } from "../../../ir/loom-ir.js";
 import { lowerModel } from "../../../ir/lower.js";
+import { contextsHaveProvSite } from "../../../ir/prov-id.js";
 import type { Model } from "../../../language/generated/ast.js";
 import { camel } from "../../../util/naming.js";
 // Hono-framework builders now live in this package (P2b) — siblings.
@@ -73,6 +74,49 @@ export class ExternHandlerError extends Error {
 }
 `;
 
+/** Runtime provenance SDK — emitted only when the model declares at least
+ *  one `provenanced` field that is actually written.  v1 is an append-only
+ *  in-memory trace sink; each provenanced write calls `recordTrace(...)`
+ *  referencing the compile-time rule snapshot in `.loom/loomsnap.json`. */
+const PROVENANCE_TS = `// Auto-generated.
+import { randomUUID } from "node:crypto";
+
+export interface ProvInput { path: string; value: unknown; }
+
+export interface TraceRecord {
+  traceId: string;
+  /** Points at the per-write-site rule snapshot in \`.loom/loomsnap.json\`. */
+  snapshotId: string;
+  target: { type: string; field: string };
+  inputs: ProvInput[];
+  computedValue: unknown;
+  at: string;
+}
+
+const __traces: TraceRecord[] = [];
+
+export function recordTrace(
+  snapshotId: string,
+  target: { type: string; field: string },
+  inputs: ProvInput[],
+  computedValue: unknown,
+): void {
+  __traces.push({
+    traceId: randomUUID(),
+    snapshotId,
+    target,
+    inputs,
+    computedValue,
+    at: new Date().toISOString(),
+  });
+}
+
+/** Drains the in-memory trace buffer (test/inspection hook). */
+export function __drainTraces(): TraceRecord[] {
+  return __traces.splice(0);
+}
+`;
+
 /**
  * Legacy entry: lowers the whole model and emits one project from all
  * top-level bounded contexts.  Used by `ddd generate ts <file> -o <dir>`.
@@ -105,6 +149,11 @@ export function generateTypeScriptForContexts(
 ): Map<string, string> {
   const out = new Map<string, string>();
   const authRequired = !!(system?.deployable.auth?.required && system.sys.user);
+  // Emission is forced by presence: any written `provenanced` field turns
+  // on the trace SDK + per-site `recordTrace` calls.  Threaded as a flag
+  // (rather than read off presence at each call site) so a future
+  // build-level switch can force emission for other consumers.
+  const emitProvenance = contextsHaveProvSite(contexts);
 
   // Multi-context Hono deployables (e.g. acme's catalogWeb spanning
   // Catalog + CustomerMgmt) need the shared domain files to UNION
@@ -129,6 +178,7 @@ export function generateTypeScriptForContexts(
   out.set("domain/value-objects.ts", renderEnumsAndValueObjects(merged));
   out.set("domain/events.ts", renderEvents(merged));
   out.set("domain/errors.ts", ERRORS_TS);
+  if (emitProvenance) out.set("domain/provenance.ts", PROVENANCE_TS);
   out.set("db/schema.ts", renderSchema(merged));
   if (merged.workflows.length > 0) {
     const aggsByName = new Map(merged.aggregates.map((a) => [a.name, a] as const));
@@ -146,7 +196,7 @@ export function generateTypeScriptForContexts(
   for (const ctx of contexts) {
     for (const agg of ctx.aggregates) {
       const repo = findRepoFor(ctx, agg.name);
-      out.set(`domain/${camel(agg.name)}.ts`, renderAggregate(agg, ctx));
+      out.set(`domain/${camel(agg.name)}.ts`, renderAggregate(agg, ctx, emitProvenance));
       out.set(
         `db/repositories/${camel(agg.name)}-repository.ts`,
         buildRepositoryFile(agg, repo, ctx),

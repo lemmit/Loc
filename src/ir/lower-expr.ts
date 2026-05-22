@@ -1,4 +1,5 @@
 import type { AstNode } from "langium";
+import { AstUtils } from "langium";
 import type {
   Aggregate,
   AggregateMember,
@@ -9,6 +10,7 @@ import type {
   FunctionDecl,
   LValue,
   Operation,
+  Property,
   Statement,
   TypeRef,
   ValueObject,
@@ -57,11 +59,13 @@ import type {
   IdValueType,
   PathIR,
   PermissionDeclIR,
+  ProvSite,
   StmtIR,
   TypeIR,
   UserIR,
 } from "./loom-ir.js";
 import { lit } from "./loom-ir.js";
+import { snapshotIdFor } from "./prov-id.js";
 
 /** Synthetic entity name used to type the `currentUser` magic
  *  identifier.  Member access on the user shape resolves through
@@ -320,10 +324,11 @@ export function lowerStatement(stmt: Statement, env: Env): { stmt: StmtIR; envAf
     }
     const path: PathIR = { segments: [lv.head, ...lv.tail] };
     const value = lowerExpr(stmt.value, env);
+    const prov = provSiteFor(path, stmt.value, stmt, env);
     if (stmt.op === ":=") {
       const targetType = pathType(path, env);
       return {
-        stmt: { kind: "assign", target: path, value, targetType },
+        stmt: { kind: "assign", target: path, value, targetType, prov },
         envAfter: env,
       };
     }
@@ -336,6 +341,7 @@ export function lowerStatement(stmt: Statement, env: Env): { stmt: StmtIR; envAf
           target: path,
           value,
           elementType,
+          prov,
         },
         envAfter: env,
       };
@@ -895,6 +901,47 @@ export function findOperationInEnv(env: Env, name: string): Operation | undefine
 // ---------------------------------------------------------------------------
 // Path typing — for assign/add/remove statements
 // ---------------------------------------------------------------------------
+
+/** Resolve the terminal stored `Property` a write path targets, for
+ *  provenance instrumentation.  v1 handles direct fields on the enclosing
+ *  aggregate (`field := …`, `field += …`); nested paths into value
+ *  objects / parts are not instrumented yet and return undefined. */
+function resolveProvenancedProperty(
+  path: PathIR,
+  env: Env,
+): { prop: Property; type: string } | undefined {
+  if (path.segments.length !== 1 || !env.aggregate) return undefined;
+  const name = path.segments[0]!;
+  for (const m of env.aggregate.members) {
+    if (isProperty(m) && m.name === name) {
+      return m.provenanced ? { prop: m, type: env.aggregate.name } : undefined;
+    }
+  }
+  return undefined;
+}
+
+/** Build the per-site snapshot metadata for an instrumented write, or
+ *  undefined when the target is not a provenanced field. */
+function provSiteFor(
+  path: PathIR,
+  valueNode: Expression | undefined,
+  stmt: AstNode,
+  env: Env,
+): ProvSite | undefined {
+  const hit = resolveProvenancedProperty(path, env);
+  if (!hit) return undefined;
+  const cst = (stmt as { $cstNode?: { offset: number; length: number } }).$cstNode;
+  const start = cst?.offset ?? 0;
+  const span = { start, end: start + (cst?.length ?? 0) };
+  const docPath = AstUtils.getDocument(stmt).uri.path;
+  const exprText = cstText(valueNode);
+  return {
+    snapshotId: snapshotIdFor({ type: hit.type, field: hit.prop.name, exprText }),
+    target: { type: hit.type, field: hit.prop.name },
+    exprText,
+    source: { path: docPath, span },
+  };
+}
 
 function pathType(path: PathIR, env: Env): TypeIR {
   if (path.segments.length === 0) return { kind: "primitive", name: "string" };
