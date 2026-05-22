@@ -72,7 +72,10 @@ export function renderUIE2EFile(
 
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
-  lines.push(`import { test, expect } from "@playwright/test";`);
+  // `./fixtures` re-exports Playwright's `test`/`expect` with an auto
+  // console-capture fixture that attaches the browser console + page
+  // errors to the report on failure.
+  lines.push(`import { test, expect } from "./fixtures";`);
   for (const a of aggregates) {
     const cap = upperFirst(a.name);
     lines.push(`import { ${cap}ListPage, ${cap}DetailPage } from "./pages/${lowerFirst(a.name)}";`);

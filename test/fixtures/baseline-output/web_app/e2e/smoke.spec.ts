@@ -1,5 +1,5 @@
 // Auto-generated smoke spec.
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { ProductListPage } from "./pages/product";
 import { OrderListPage } from "./pages/order";
 import { CustomerListPage } from "./pages/customer";

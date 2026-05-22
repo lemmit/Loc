@@ -9,6 +9,7 @@ import type {
 import { lowerModel } from "../ir/lower.js";
 import type { Model } from "../language/generated/ast.js";
 import { platformFor } from "../platform/registry.js";
+import { E2E_FIXTURES_TS } from "../generator/react/index.js";
 import { renderE2EFile } from "./e2e-render.js";
 import { renderC4Model, renderC4SpecJson } from "./likec4.js";
 import {
@@ -125,6 +126,11 @@ function emitSystem(sys: SystemIR, _loom: LoomModel, out: Map<string, string>): 
     if (uiSpec) {
       const slug = serviceSlug(d.name);
       out.set(`${slug}/e2e/${sys.name}.ui.spec.ts`, uiSpec);
+      // Co-locate the console-capture fixture the spec imports
+      // (`./fixtures`).  The React generator already emits this for
+      // react deployables; emitting it here covers non-react UI mounts
+      // (e.g. phoenixLiveView) so the import resolves everywhere.
+      out.set(`${slug}/e2e/fixtures.ts`, E2E_FIXTURES_TS);
     }
   }
 }
