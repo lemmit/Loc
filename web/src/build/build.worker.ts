@@ -6,6 +6,7 @@ import { lowerModel } from "../../../src/ir/lower.js";
 import { enrichLoomModel } from "../../../src/ir/enrichments.js";
 import { validateLoomModel } from "../../../src/ir/validate.js";
 import { generateSystems } from "../../../src/system/index.js";
+import { captureSnapshots } from "../../../src/system/loomsnap.js";
 // P2a moved the TS orchestrator into the hono@v4 package; the
 // playground legacy single-context build targets the default Hono
 // backend and supplies that package's pins (B2.1).
@@ -19,6 +20,7 @@ import type {
   BuildRpcRequest,
   BuildRpcResponse,
   GenerateResult,
+  SnapshotResult,
   VirtualFile,
 } from "./protocol.js";
 
@@ -168,6 +170,35 @@ async function handleGenerate(text: string): Promise<GenerateResult> {
   };
 }
 
+/** Provenance-snapshot capture — the playground's equivalent of the CLI
+ *  `ddd snapshot` prebuild step.  Returns the immutable timestamped+GUID
+ *  snapshot files; empty `files` when no written `provenanced` field. */
+async function handleSnapshot(text: string): Promise<SnapshotResult> {
+  const parsed = await parse(text);
+  if (!parsed.model) return { ok: false, diagnostics: parsed.diagnostics };
+  let loom;
+  try {
+    loom = enrichLoomModel(lowerModel(parsed.model));
+  } catch (err) {
+    return {
+      ok: false,
+      diagnostics: [
+        ...parsed.diagnostics,
+        {
+          severity: "error",
+          message: `Lowering failed: ${err instanceof Error ? err.message : String(err)}`,
+          source: "loom-ir",
+        },
+      ],
+    };
+  }
+  return {
+    ok: true,
+    files: filesFromMap(captureSnapshots(loom)),
+    diagnostics: parsed.diagnostics,
+  };
+}
+
 /** Resolve `generate`'s source: inline `text` (legacy) or VFS-read
  *  via `entryPath` (Phase 2+).  Exactly one form must be set. */
 function resolveGenerateSource(params: { text?: string; entryPath?: string }): string {
@@ -199,6 +230,11 @@ self.onmessage = async (ev: MessageEvent<BuildRpcRequest>) => {
       case "generate": {
         const text = resolveGenerateSource(req.params);
         response.result = await handleGenerate(text);
+        break;
+      }
+      case "snapshot": {
+        const text = resolveGenerateSource(req.params);
+        response.result = await handleSnapshot(text);
         break;
       }
       case "vfs.write": {

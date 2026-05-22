@@ -58,6 +58,10 @@ export interface FieldIR {
    * validator).  Used by the React generator to pick the option label
    * for `Id<X>` Selects pointing at this aggregate. */
   display?: boolean;
+  /** True iff the source declared this property with the `provenanced`
+   * modifier.  Every assignment statement (`:=`/`+=`/`-=`) targeting such
+   * a field becomes a per-site rule snapshot; see `ProvSite`. */
+  provenanced?: boolean;
 }
 
 export interface ContainmentIR {
@@ -991,9 +995,9 @@ export type StmtIR =
   | { kind: "precondition"; expr: ExprIR; source: string }
   | { kind: "requires"; expr: ExprIR; source: string }
   | { kind: "let"; name: string; expr: ExprIR; type: TypeIR }
-  | { kind: "assign"; target: PathIR; value: ExprIR; targetType: TypeIR }
-  | { kind: "add"; target: PathIR; value: ExprIR; elementType: TypeIR }
-  | { kind: "remove"; target: PathIR; value: ExprIR; elementType: TypeIR }
+  | { kind: "assign"; target: PathIR; value: ExprIR; targetType: TypeIR; prov?: ProvSite }
+  | { kind: "add"; target: PathIR; value: ExprIR; elementType: TypeIR; prov?: ProvSite }
+  | { kind: "remove"; target: PathIR; value: ExprIR; elementType: TypeIR; prov?: ProvSite }
   | {
       kind: "emit";
       eventName: string;
@@ -1021,6 +1025,24 @@ export type StmtIR =
  */
 export interface PathIR {
   segments: string[];
+}
+
+/**
+ * Per-write-site provenance metadata, attached to an `assign`/`add`/`remove`
+ * statement whose target resolves to a `provenanced` stored field.  Each
+ * site is its own immutable rule snapshot: the RHS expression structure
+ * (`exprText` + the lowered `value` ExprIR) anchored at a source span.
+ * The runtime trace records which write produced the field's current value
+ * and points back at `snapshotId`.
+ */
+export interface ProvSite {
+  /** Stable hash of source path + target + span (commit-independent). */
+  snapshotId: string;
+  /** Resolved aggregate type + field name this write targets. */
+  target: { type: string; field: string };
+  /** Source text of the RHS expression (structure, no runtime values). */
+  exprText: string;
+  source: { path: string; span: { start: number; end: number } };
 }
 
 // ---------------------------------------------------------------------------

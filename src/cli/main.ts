@@ -14,6 +14,8 @@ import { BACKEND_PINS as HONO_V4_PINS } from "../platform/hono/v4/pins.js";
 import { installFsBackendSource } from "../platform/fs-discovery.js";
 import { generateDotnet } from "../generator/dotnet/index.js";
 import { generateSystems } from "../system/index.js";
+import { captureSnapshots } from "../system/loomsnap.js";
+import { execFileSync } from "node:child_process";
 import { lowerModel } from "../ir/lower.js";
 import { enrichLoomModel } from "../ir/enrichments.js";
 import { validateLoomModel } from "../ir/validate.js";
@@ -249,6 +251,73 @@ async function runGenerate(
   return { hadError: false, written, unchanged, skippedByIgnore };
 }
 
+/** Resolve the current git commit (short) for the snapshot envelope, or
+ *  undefined when not in a repo / git unavailable. */
+function gitCommitHash(): string | undefined {
+  try {
+    return execFileSync("git", ["rev-parse", "HEAD"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * `ddd snapshot` — the explicit provenance-capture prebuild step.  Lowers
+ * the model and writes one immutable, timestamped + GUID-named snapshot
+ * file per system under `<out>/.loom/snapshots/`.  Analogous to
+ * `dotnet ef migrations add`: run it deliberately when rules change so the
+ * deployed runtime's trace records can be explained against a captured
+ * version of the code.
+ */
+async function runSnapshot(
+  file: string,
+  outDir: string,
+  options: { dryRun?: boolean } = {},
+): Promise<RunResult> {
+  const result = await parseFile(file);
+  if (result.errorCount > 0) {
+    printDiagnostics(result);
+    process.exit(1);
+  }
+  const loom = enrichLoomModel(lowerModel(result.model));
+  const loomDiags = validateLoomModel(loom);
+  const loomErrors = loomDiags.filter((d) => d.severity === "error");
+  if (loomErrors.length > 0) {
+    for (const d of loomDiags) console.error(`${d.source} ${d.severity}: ${d.message}`);
+    process.exit(1);
+  }
+
+  const commit = gitCommitHash();
+  if (commit) process.env.LOOM_COMMIT_HASH = commit;
+  const files = captureSnapshots(loom);
+  if (files.size === 0) {
+    console.log(
+      `No written \`provenanced\` field found in ${file}; nothing to capture.`,
+    );
+    return { hadError: false, written: 0 };
+  }
+
+  let written = 0;
+  for (const [relPath, content] of files) {
+    if (options.dryRun) {
+      console.log(`  write  ${relPath}  (${(Buffer.byteLength(content, "utf8") / 1024).toFixed(1)} KB)`);
+      written++;
+      continue;
+    }
+    const full = path.join(outDir, relPath);
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, content, "utf8");
+    written++;
+  }
+  console.log(
+    `${options.dryRun ? "Would capture" : "Captured"} ${written} snapshot file(s) in ${path.join(outDir, ".loom/snapshots")}`,
+  );
+  return { hadError: false, written };
+}
+
 /** True iff the file at `absPath` exists and its bytes match `content`
  * exactly.  Used to skip writes that would produce identical output. */
 function fileContentMatches(absPath: string, content: string): boolean {
@@ -412,6 +481,17 @@ program
   .option("--json", "also print verification.json to stdout")
   .action(async (file: string, options: VerifyOptions) => {
     await runVerify(file, options);
+  });
+
+program
+  .command("snapshot <file>")
+  .description(
+    "Capture provenance rule snapshots for every written `provenanced` field — one immutable timestamped+GUID file per system under <out>/.loom/snapshots/. Run as an explicit prebuild step when rules change.",
+  )
+  .requiredOption("-o, --out <dir>", "output directory")
+  .option("--dry-run", "list snapshot files that would be captured, write nothing")
+  .action(async (file: string, options: { out: string; dryRun?: boolean }) => {
+    await runSnapshot(file, options.out, { dryRun: options.dryRun });
   });
 
 async function watchAndRegenerate(target: GenerateTarget, file: string, outDir: string) {
