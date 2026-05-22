@@ -7,6 +7,7 @@ import type {
   SerializedRequest,
   WipeResult,
 } from "./protocol.js";
+import type { LogLine } from "../util/log-line.js";
 
 export interface LoomRuntimeClientOptions {
   /** Optional callback fired every time `respawn` terminates the
@@ -17,6 +18,10 @@ export interface LoomRuntimeClientOptions {
    *  in the UI: the booted PGlite database belongs to the old
    *  worker and can't be recovered. */
   onRespawn?: () => void;
+  /** Fired with the `console.*` / stack lines the worker captured
+   *  while running an RPC (boot / dispatch / …) — drives the
+   *  playground's "Backend" log stream. */
+  onLog?: (lines: LogLine[]) => void;
 }
 
 export class LoomRuntimeClient {
@@ -27,10 +32,12 @@ export class LoomRuntimeClient {
     { resolve: (v: unknown) => void; reject: (e: Error) => void }
   >();
   private readonly onRespawn?: () => void;
+  private readonly onLog?: (lines: LogLine[]) => void;
   private disposed = false;
 
   constructor(opts: LoomRuntimeClientOptions = {}) {
     this.onRespawn = opts.onRespawn;
+    this.onLog = opts.onLog;
     this.spawn();
   }
 
@@ -43,6 +50,7 @@ export class LoomRuntimeClient {
     });
     this.worker.onmessage = (ev: MessageEvent<RuntimeRpcResponse>) => {
       const msg = ev.data;
+      if (msg.logs && msg.logs.length > 0) this.onLog?.(msg.logs);
       const slot = this.pending.get(msg.id);
       if (!slot) return;
       this.pending.delete(msg.id);

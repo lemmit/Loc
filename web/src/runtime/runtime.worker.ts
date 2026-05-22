@@ -2,6 +2,7 @@
 import { synthDDL } from "./ddl";
 import { pgliteAssetUrl } from "../bundle/plugin.js";
 import { fnv1a32 } from "../util/hash.js";
+import { formatLogArg, LOG_LEVELS, type LogLine } from "../util/log-line.js";
 import type {
   BootResult,
   DispatchResult,
@@ -12,6 +13,27 @@ import type {
 } from "./protocol.js";
 
 declare const self: DedicatedWorkerGlobalScope;
+
+// Tee `console.*` into `sink` (while still writing through to the real
+// console for DevTools) for the duration of one RPC.  This is how the
+// generated Hono handlers' logs — which run inside this worker via
+// `app.fetch` — reach the playground's "Backend" log stream.  Returns a
+// restore fn the caller invokes in a `finally`.
+function captureConsole(sink: LogLine[]): () => void {
+  const original: Partial<Record<LogLine["level"], (...a: unknown[]) => void>> = {};
+  for (const level of LOG_LEVELS) {
+    original[level] = console[level] as (...a: unknown[]) => void;
+    console[level] = (...args: unknown[]): void => {
+      sink.push({ level, text: args.map(formatLogArg).join(" ") });
+      original[level]!(...args);
+    };
+  }
+  return () => {
+    for (const level of LOG_LEVELS) {
+      console[level] = original[level]!;
+    }
+  };
+}
 
 // PGlite's normal boot path computes WASM/data URLs relative to its
 // own `import.meta.url` and fetches them at runtime.  When the
@@ -381,6 +403,8 @@ async function wipe(): Promise<{ ok: boolean; message?: string }> {
 self.onmessage = async (ev: MessageEvent<RuntimeRpcRequest>) => {
   const req = ev.data;
   const response: RuntimeRpcResponse = { id: req.id };
+  const logs: LogLine[] = [];
+  const restore = captureConsole(logs);
   try {
     switch (req.method) {
       case "boot":
@@ -401,9 +425,18 @@ self.onmessage = async (ev: MessageEvent<RuntimeRpcRequest>) => {
         };
     }
   } catch (err) {
+    // Surface the stack in the Backend log stream — the RPC error
+    // message itself only carries `err.message`.
+    logs.push({
+      level: "error",
+      text: err instanceof Error ? (err.stack ?? err.message) : String(err),
+    });
     response.error = {
       message: err instanceof Error ? err.message : String(err),
     };
+  } finally {
+    restore();
   }
+  if (logs.length > 0) response.logs = logs;
   self.postMessage(response);
 };

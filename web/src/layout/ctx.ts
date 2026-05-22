@@ -25,6 +25,7 @@ import type { DispatchResult } from "../runtime/protocol";
 import type { ApiEndpoint } from "../backend/openapi";
 import type { TestResult } from "../testing/harness";
 import type { OutputStream } from "./OutputPanel";
+import type { LogLine } from "../util/log-line";
 
 export type ReactBundleStatus =
   | { kind: "pending" }
@@ -135,6 +136,18 @@ export interface LayoutCtx {
   // both shells and persisted by App.tsx.
   outputStream: OutputStream;
   setOutputStream: (s: OutputStream) => void;
+
+  // Live console streams for the Output panel.  `backendLog` is the
+  // Hono runtime worker's captured console + stack traces (per RPC);
+  // `appLog` is the preview app's console + uncaught errors, forwarded
+  // over the sandbox bridge.  Both are capped + cleared on example
+  // switch by App.tsx.
+  backendLog: LogLine[];
+  appLog: LogLine[];
+  /** Append one preview-app log line (handed to <Preview onAppLog>). */
+  appendAppLog: (line: LogLine) => void;
+  clearBackendLog: () => void;
+  clearAppLog: () => void;
 
   // Files
   files: VirtualFile[];

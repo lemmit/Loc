@@ -1,14 +1,23 @@
-import { Badge, Box, Code, Group, ScrollArea, Select, Stack, Text } from "@mantine/core";
+import { Badge, Box, Button, Code, Group, ScrollArea, Select, Stack, Text } from "@mantine/core";
 import { ProblemsPanel } from "./ProblemsPanel";
 import { formatBytes, modeLabel, type LayoutCtx } from "./ctx";
+import type { LogLine } from "../util/log-line";
 
-// The playground used to scatter read-only status across three sibling
-// dock tabs — LSP diagnostics, generator output, bundle errors — so a
-// red dot could be hiding in any of them.  This panel gathers them
-// behind a single stream Select (the VS Code "Output" idiom) and adds
-// the test runner's captured console logs as a fourth stream, so the
-// interactive Tests tab isn't the only place its output appears.
-export type OutputStream = "problems" | "generator" | "bundler" | "tests";
+// The playground used to scatter read-only status across sibling dock
+// tabs — LSP diagnostics, generator output, bundle errors — so a red dot
+// could be hiding in any of them.  This panel gathers them behind a
+// single stream Select (the VS Code "Output" idiom), and adds the live
+// log streams that previously only reached the browser DevTools console:
+// the test runner's captured output, the backend (Hono runtime)
+// console + stack traces, and the preview app's console + uncaught
+// errors.
+export type OutputStream =
+  | "problems"
+  | "generator"
+  | "bundler"
+  | "backend"
+  | "app"
+  | "tests";
 
 type DotColour = "red" | "yellow" | "green" | "gray" | null;
 
@@ -16,6 +25,8 @@ const STREAMS: { value: OutputStream; label: string }[] = [
   { value: "problems", label: "Problems" },
   { value: "generator", label: "Generator" },
   { value: "bundler", label: "Bundler" },
+  { value: "backend", label: "Backend logs" },
+  { value: "app", label: "App logs" },
   { value: "tests", label: "Tests" },
 ];
 
@@ -33,6 +44,10 @@ export function streamDot(ctx: LayoutCtx, stream: OutputStream): DotColour {
         (ctx.reactBundleResult != null && !ctx.reactBundleResult.ok);
       return failed ? "red" : null;
     }
+    case "backend":
+      return ctx.backendLog.some((l) => l.level === "error") ? "red" : null;
+    case "app":
+      return ctx.appLog.some((l) => l.level === "error") ? "red" : null;
     case "tests":
       return Object.values(ctx.testResults).some((r) => r.status === "fail")
         ? "red"
@@ -98,6 +113,16 @@ export function OutputPanel({ ctx, stream, setStream }: Props): JSX.Element {
             );
           }}
         />
+        {stream === "backend" && ctx.backendLog.length > 0 && (
+          <Button size="compact-xs" variant="subtle" color="gray" onClick={ctx.clearBackendLog} data-testid="output-clear-backend">
+            Clear
+          </Button>
+        )}
+        {stream === "app" && ctx.appLog.length > 0 && (
+          <Button size="compact-xs" variant="subtle" color="gray" onClick={ctx.clearAppLog} data-testid="output-clear-app">
+            Clear
+          </Button>
+        )}
       </Group>
 
       <Box style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
@@ -108,9 +133,62 @@ export function OutputPanel({ ctx, stream, setStream }: Props): JSX.Element {
         )}
         {stream === "generator" && <GeneratorBody ctx={ctx} />}
         {stream === "bundler" && <BundlerBody ctx={ctx} />}
+        {stream === "backend" && (
+          <LogView
+            lines={ctx.backendLog}
+            empty="No backend logs yet — boot the backend and hit an endpoint."
+            testid="output-backend-log"
+          />
+        )}
+        {stream === "app" && (
+          <LogView
+            lines={ctx.appLog}
+            empty="No app logs yet — open the Preview and interact with the generated app."
+            testid="output-app-log"
+          />
+        )}
         {stream === "tests" && <TestsLog ctx={ctx} />}
       </Box>
     </Box>
+  );
+}
+
+// Shared monospace log renderer for the live console streams (backend
+// runtime + preview app).  One line per captured `console.*` call, tinted
+// by level; errors carry their stack in `text`, so `pre-wrap` keeps it
+// readable.
+function LogView({
+  lines,
+  empty,
+  testid,
+}: {
+  lines: LogLine[];
+  empty: string;
+  testid: string;
+}): JSX.Element {
+  if (lines.length === 0) {
+    return (
+      <Text c="dimmed" size="sm" p="sm">
+        {empty}
+      </Text>
+    );
+  }
+  return (
+    <ScrollArea style={{ flex: 1, minHeight: 0 }}>
+      <Stack gap={0} p="xs" data-testid={testid}>
+        {lines.map((l, i) => (
+          <Text
+            key={i}
+            size="xs"
+            ff="monospace"
+            c={l.level === "error" ? "red" : l.level === "warn" ? "yellow" : l.level === "debug" ? "dimmed" : undefined}
+            style={{ whiteSpace: "pre-wrap" }}
+          >
+            {l.level === "log" || l.level === "info" ? l.text : `[${l.level}] ${l.text}`}
+          </Text>
+        ))}
+      </Stack>
+    </ScrollArea>
   );
 }
 
