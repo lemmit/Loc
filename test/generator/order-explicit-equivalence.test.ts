@@ -31,28 +31,16 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
-import { createDddServices } from "../../src/language/ddd-module.js";
-import type { Model } from "../../src/language/generated/ast.js";
 import { generateSystems } from "../../src/system/index.js";
+import { parseValid } from "../_helpers/index.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..");
 
 async function generateFromFile(file: string): Promise<Map<string, string>> {
-  const services = createDddServices(NodeFileSystem);
-  const { parseHelper } = await import("langium/test");
-  const helper = parseHelper(services.Ddd);
   const src = readFileSync(resolve(repoRoot, file), "utf8");
-  const doc = await helper(src, { validation: true });
-  const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
-  if (errors.length > 0) {
-    throw new Error(
-      `Parse/validate errors in ${file}:\n${errors.map((e) => "  " + e.message).join("\n")}`,
-    );
-  }
-  return generateSystems(doc.parseResult.value as Model).files;
+  return generateSystems(await parseValid(src)).files;
 }
 
 /** Extract every `data-testid="..."` literal from a TSX string. */

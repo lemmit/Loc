@@ -1,9 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { EmptyFileSystem } from "langium";
 import { describe, expect, it } from "vitest";
-import { createDddServices } from "../../src/language/ddd-module.js";
 import type {
   Aggregate,
   EventDecl,
@@ -20,12 +18,11 @@ import {
   retypeField,
   type TypeSpec,
 } from "../../web/src/builder/system/fields.js";
+import { parseRaw as parse } from "../_helpers/index.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const sales = readFileSync(path.join(here, "..", "..", "examples", "sales.ddd"), "utf8");
 
-const parser = createDddServices(EmptyFileSystem).Ddd.parser.LangiumParser;
-const parse = (text: string): Model => parser.parse(text).value as Model;
 const find = <T>(m: Model, type: string, name: string): T => {
   for (const n of [...walk(m)])
     if (n.$type === type && (n as { name?: string }).name === name) return n as T;

@@ -1,12 +1,12 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { type AstNode, AstUtils, EmptyFileSystem } from "langium";
+import { type AstNode, AstUtils } from "langium";
 import { describe, expect, it } from "vitest";
-import { createDddServices } from "../../src/language/ddd-module.js";
 import type { BodyProp } from "../../src/language/generated/ast.js";
 import { type BuilderNode, emitBody, seedFromBody } from "../../web/src/builder/page/model.js";
 import { fromCraft, toCraft } from "../../web/src/builder/page/serialize.js";
+import { parseRawResult } from "../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
 // Page-builder data-layer round-trip (Builders, Phase 1).  For every page
@@ -17,7 +17,6 @@ import { fromCraft, toCraft } from "../../web/src/builder/page/serialize.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..", "..");
-const parser = createDddServices(EmptyFileSystem).Ddd.parser.LangiumParser;
 
 function norm(v: unknown): unknown {
   if (Array.isArray(v)) return v.map(norm);
@@ -47,7 +46,7 @@ describe("page-builder model round-trip", () => {
   for (const file of collectDddFiles()) {
     const rel = path.relative(repoRoot, file);
     const text = fs.readFileSync(file, "utf8");
-    const original = parser.parse(text);
+    const original = parseRawResult(text);
     if (original.parserErrors.length > 0) continue; // fragments handled elsewhere
 
     const bodies: BodyProp[] = [];
@@ -63,7 +62,7 @@ describe("page-builder model round-trip", () => {
         if (!cst) continue;
         const emitted = emitBody(seedFromBody(body.expr));
         const spliced = text.slice(0, cst.offset) + emitted + text.slice(cst.end);
-        const re = parser.parse(spliced);
+        const re = parseRawResult(spliced);
         expect(re.parserErrors, `emitted body must parse:\n${emitted}`).toEqual([]);
         expect(norm(re.value), `emitted body must round-trip:\n${emitted}`).toEqual(normOrig);
       }
@@ -75,7 +74,7 @@ describe("page-builder model — primitive coverage", () => {
   // Seed → emit → splice → re-parse a body in isolation; assert identical AST.
   const roundtrips = (bodyExpr: string): void => {
     const doc = `system S { ui U { page P { body: ${bodyExpr} } } }`;
-    const original = parser.parse(doc);
+    const original = parseRawResult(doc);
     expect(original.parserErrors, `fixture must parse:\n${bodyExpr}`).toEqual([]);
     const body = [...AstUtils.streamAst(original.value)].find(
       (n) => n.$type === "BodyProp",
@@ -83,7 +82,7 @@ describe("page-builder model — primitive coverage", () => {
     const cst = body.expr.$cstNode!;
     const emitted = emitBody(seedFromBody(body.expr));
     const spliced = doc.slice(0, cst.offset) + emitted + doc.slice(cst.end);
-    const re = parser.parse(spliced);
+    const re = parseRawResult(spliced);
     expect(re.parserErrors, `emitted must parse:\n${emitted}`).toEqual([]);
     expect(norm(re.value), `emitted must round-trip:\n${emitted}`).toEqual(norm(original.value));
   };
@@ -184,7 +183,7 @@ describe("page-builder model — primitive coverage", () => {
 describe("page-builder model — user-defined component calls", () => {
   const seedWith = (bodyExpr: string, comps: Record<string, string[]>) => {
     const doc = `system S { ui U { page P { body: ${bodyExpr} } } }`;
-    const original = parser.parse(doc);
+    const original = parseRawResult(doc);
     expect(original.parserErrors, `fixture must parse:\n${bodyExpr}`).toEqual([]);
     const body = [...AstUtils.streamAst(original.value)].find(
       (n) => n.$type === "BodyProp",
@@ -192,7 +191,7 @@ describe("page-builder model — user-defined component calls", () => {
     const node = seedFromBody(body.expr, new Map(Object.entries(comps)));
     const cst = body.expr.$cstNode!;
     const spliced = doc.slice(0, cst.offset) + emitBody(node) + doc.slice(cst.end);
-    const re = parser.parse(spliced);
+    const re = parseRawResult(spliced);
     expect(re.parserErrors, `emitted must parse:\n${emitBody(node)}`).toEqual([]);
     expect(norm(re.value)).toEqual(norm(original.value));
     return node;
@@ -226,7 +225,7 @@ describe("page-builder model — user-defined component calls", () => {
 describe("page-builder model — container-with-props seed shape", () => {
   const seed = (bodyExpr: string) => {
     const doc = `system S { ui U { page P { body: ${bodyExpr} } } }`;
-    const original = parser.parse(doc);
+    const original = parseRawResult(doc);
     expect(original.parserErrors, `fixture must parse:\n${bodyExpr}`).toEqual([]);
     const body = [...AstUtils.streamAst(original.value)].find(
       (n) => n.$type === "BodyProp",
@@ -417,7 +416,9 @@ describe("page-builder model — container-with-props seed shape", () => {
     const out = emitBody(node);
     expect(out.indexOf("else =>")).toBeGreaterThan(out.indexOf("1 == 1 =>"));
     // And it re-parses cleanly.
-    expect(parser.parse(`system S { ui U { page P { body: ${out} } } }`).parserErrors).toEqual([]);
+    expect(parseRawResult(`system S { ui U { page P { body: ${out} } } }`).parserErrors).toEqual(
+      [],
+    );
   });
 
   it("models named-arg child slots and survives the craft round-trip", () => {

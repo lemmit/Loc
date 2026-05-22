@@ -5,18 +5,11 @@
 // each aggregate field in the detail-page card body, matching the
 // scaffold renderer's KeyValueRow + per-cell formatter shape.
 
-import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
-import { createDddServices } from "../../src/language/ddd-module.js";
-import type { Model } from "../../src/language/generated/ast.js";
-import { generateSystems } from "../../src/system/index.js";
+import { generateSystemFiles } from "../_helpers/index.js";
 
 async function emit(body: string): Promise<string> {
-  const services = createDddServices(NodeFileSystem);
-  const { parseHelper } = await import("langium/test");
-  const helper = parseHelper(services.Ddd);
-  const doc = await helper(
-    `
+  const files = await generateSystemFiles(`
     system S {
       module M { context C { } }
       ui WebApp {
@@ -25,10 +18,7 @@ async function emit(body: string): Promise<string> {
       deployable api { platform: hono, modules: M, port: 3000 }
       deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
     }
-  `,
-    { validation: true },
-  );
-  const files = generateSystems(doc.parseResult.value as Model).files;
+  `);
   const tsx = files.get("web/src/pages/p.tsx");
   if (!tsx) throw new Error(`MISSING; keys = ${[...files.keys()].join(", ")}`);
   return tsx;

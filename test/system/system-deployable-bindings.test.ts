@@ -1,10 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { EmptyFileSystem } from "langium";
 import { describe, expect, it } from "vitest";
-import { createDddServices } from "../../src/language/ddd-module.js";
-import type { Model } from "../../src/language/generated/ast.js";
 import {
   deployableModules,
   deployableServes,
@@ -15,12 +12,12 @@ import {
   setDeployableUi,
   uiKind,
 } from "../../web/src/builder/system/deployable-bindings.js";
+import { parseRaw } from "../_helpers/index.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const acme = readFileSync(path.join(here, "..", "..", "examples", "acme.ddd"), "utf8");
-const parser = createDddServices(EmptyFileSystem).Ddd.parser.LangiumParser;
 function deployable(name: string): { $type: string } {
-  const m = parser.parse(acme).value as Model;
+  const m = parseRaw(acme);
   for (const n of (function* walk(x: { $type: string }): Generator<{ $type: string }> {
     yield x;
     for (const v of Object.values(x)) {

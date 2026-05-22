@@ -1,4 +1,4 @@
-import type { Diagnostic, LangiumDocument } from "langium";
+import { type Diagnostic, EmptyFileSystem, type LangiumDocument } from "langium";
 import { NodeFileSystem } from "langium/node";
 import { parseHelper } from "langium/test";
 import { createDddServices } from "../../src/language/ddd-module.js";
@@ -55,3 +55,22 @@ export async function parseValid(source: string): Promise<Model> {
   }
   return model;
 }
+
+// Lazily-built standalone parser for the link-free, synchronous AST path
+// (no document builder, no validation, no cross-reference linking). The
+// LangiumParser is stateless across calls, so a single shared instance is safe.
+let _rawParser: ReturnType<typeof createDddServices>["Ddd"]["parser"]["LangiumParser"] | undefined;
+const rawParser = () => {
+  _rawParser ??= createDddServices(EmptyFileSystem).Ddd.parser.LangiumParser;
+  return _rawParser;
+};
+
+/** Synchronous, link-free parse to a raw AST Model (no validation/linking). */
+export const parseRaw = (text: string): Model => rawParser().parse(text).value as Model;
+
+/** True when `text` parses with no parser (syntax) errors. */
+export const parseRawOk = (text: string): boolean =>
+  rawParser().parse(text).parserErrors.length === 0;
+
+/** Full link-free parse result (carries `.value` and `.parserErrors`). */
+export const parseRawResult = (text: string) => rawParser().parse(text);
