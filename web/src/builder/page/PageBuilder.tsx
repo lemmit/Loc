@@ -1,7 +1,7 @@
-import { useEffect, useState, type ComponentType } from "react";
+import { useEffect, useMemo, useState, type ComponentType } from "react";
 import { Editor, Frame, useEditor, type SerializedNodes } from "@craftjs/core";
 import { Box, Button, Drawer, Group, NumberInput, ScrollArea, Select, Stack, Text, TextInput, Textarea, UnstyledButton } from "@mantine/core";
-import { resolver } from "./components";
+import { resolver, resolverWithComponents } from "./components";
 import { PALETTE_PRIMITIVES, SINGLE_CHILD_NODES, defaultNode, propFields, syntheticDefaultProps, type PrimitiveName } from "./model";
 import { parseDdd } from "../parse";
 
@@ -59,6 +59,9 @@ interface PageBuilderProps {
   pageName: string;
   /** Typed option sets for `ref` props (e.g. { aggregate: [...] }). */
   options: Record<string, string[]>;
+  /** User-defined `component` names in scope, registered in the craft resolver
+   *  so calls to them render as editable nodes. */
+  componentNames?: string[];
   onSelectPage: (name: string) => void;
   onApply: (nodes: SerializedNodes) => void;
   /** Narrow-viewport layout: full-width canvas with the palette and
@@ -69,9 +72,10 @@ interface PageBuilderProps {
 // Structural page-body editor.  Palette (add) | canvas (arrange/select) |
 // settings (edit props).  "Apply to source" hands the serialized tree back to
 // BuilderPane, which regenerates the `body:` and splices it into `.ddd`.
-export default function PageBuilder({ initialNodes, pages, pageName, options, onSelectPage, onApply, compact = false }: PageBuilderProps): JSX.Element {
+export default function PageBuilder({ initialNodes, pages, pageName, options, componentNames = [], onSelectPage, onApply, compact = false }: PageBuilderProps): JSX.Element {
+  const editorResolver = useMemo(() => resolverWithComponents(componentNames), [componentNames]);
   return (
-    <Editor resolver={resolver} key={pageName}>
+    <Editor resolver={editorResolver} key={pageName}>
       {compact ? (
         <CompactLayout initialNodes={initialNodes} pages={pages} pageName={pageName} options={options} onSelectPage={onSelectPage} onApply={onApply} />
       ) : (

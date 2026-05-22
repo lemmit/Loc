@@ -115,6 +115,11 @@ const SPECS = {
   // `rows => …` lambda).  Modal pairs a `trigger:` node with its body child.
   QueryView: { kind: "container", named: [{ key: "of", kind: "expr" }], namedChildren: ["loading", "error", "empty", "data"] },
   Modal: { kind: "container", namedChildren: ["trigger"] },
+  // Detail renders one aggregate instance (`of:` + a `by:` key); MasterDetail
+  // pairs a list with a `detail:` panel lambda (a named child).  `scope:` /
+  // `actions:` and other modifiers ride along as passthrough props.
+  Detail: { kind: "leaf", named: [{ key: "of", kind: "ref", options: "aggregate" }, { key: "by", kind: "expr" }] },
+  MasterDetail: { kind: "container", named: [{ key: "of", kind: "ref", options: "aggregate" }], namedChildren: ["detail"] },
 } satisfies Record<string, PrimitiveSpec>;
 
 // Synthetic nodes model expression-syntax constructs that aren't CallExpr-
@@ -161,7 +166,11 @@ const specOf = (name: keyof typeof SPECS): PrimitiveSpec => SPECS[name];
 
 export function isContainer(name: PrimitiveName): boolean {
   if (isSynthetic(name)) return SYNTHETIC[name].container;
-  return name !== "Opaque" && specOf(name).kind === "container";
+  // Unknown names (user-defined `component` calls) are container-like: their
+  // positional args are modelled as children.
+  if (name === "Opaque") return false;
+  if (!(name in SPECS)) return true;
+  return specOf(name).kind === "container";
 }
 
 /** Settings/seed field descriptors for a primitive (drives the panel UI).
@@ -234,7 +243,7 @@ const CHILD_TOKEN = "";
 // non-canonical orderings — a positional after a named arg — round-trip instead
 // of falling back to Opaque).  Returns null if the call doesn't match the spec
 // (caller falls back to Opaque).
-function seedCall(name: keyof typeof SPECS, spec: PrimitiveSpec, args: CallArg[]): BuilderNode | null {
+function seedCall(name: string, spec: PrimitiveSpec, args: CallArg[], components: ReadonlySet<string>): BuilderNode | null {
   const posKeys = posSpecs(spec);
   const namedSpec = new Map((spec.named ?? []).map((n) => [n.key, n] as const));
   const namedChildren = new Set(spec.namedChildren ?? []);
@@ -257,7 +266,7 @@ function seedCall(name: keyof typeof SPECS, spec: PrimitiveSpec, args: CallArg[]
         props[a.name] = v;
         order.push(a.name);
       } else if (namedChildren.has(a.name)) {
-        const child = seedFromBody(a.value);
+        const child = seedFromBody(a.value, components);
         child.slot = a.name;
         children.push(child);
         order.push(CHILD_TOKEN);
@@ -293,7 +302,7 @@ function seedCall(name: keyof typeof SPECS, spec: PrimitiveSpec, args: CallArg[]
       }
       peeling = false;
     }
-    children.push(seedFromBody(a.value));
+    children.push(seedFromBody(a.value, components));
     order.push(CHILD_TOKEN);
   }
   // Declared leaf positionals are optional from the right: a call may supply
@@ -301,29 +310,36 @@ function seedCall(name: keyof typeof SPECS, spec: PrimitiveSpec, args: CallArg[]
   return { name: name as PrimitiveName, props, children, order };
 }
 
-export function seedFromBody(expr: Expression): BuilderNode {
+/** Seed a page-body expression into a builder node.  `components` is the set of
+ *  user-defined `component` names in scope; a call to one is recognised as a
+ *  node (its positional args become children) rather than falling to Opaque. */
+export function seedFromBody(expr: Expression, components: ReadonlySet<string> = EMPTY_COMPONENTS): BuilderNode {
   // Lambda — only single-expression bodies are modelled (the body becomes the
   // one child canvas); block-statement bodies (`x => { … }`) stay verbatim.
   if (expr.$type === "Lambda") {
     if (expr.body === undefined) return opaque(expr);
-    return { name: "Lambda", props: { param: expr.param }, children: [seedFromBody(expr.body)] };
+    return { name: "Lambda", props: { param: expr.param }, children: [seedFromBody(expr.body, components)] };
   }
   // match — predicate arms (cond + value child) plus an optional else child.
   if (expr.$type === "MatchExpr") {
     const children: BuilderNode[] = expr.arms.map((arm) => ({
       name: "MatchArm" as const,
       props: { cond: printExpr(arm.cond) },
-      children: [seedFromBody(arm.value)],
+      children: [seedFromBody(arm.value, components)],
     }));
-    if (expr.elseExpr) children.push({ name: "MatchElse", props: {}, children: [seedFromBody(expr.elseExpr)] });
+    if (expr.elseExpr) children.push({ name: "MatchElse", props: {}, children: [seedFromBody(expr.elseExpr, components)] });
     return { name: "Match", props: {}, children };
   }
   if (expr.$type !== "CallExpr" || expr.callee.$type !== "NameRef") return opaque(expr);
   const name = expr.callee.name;
-  if (!(name in SPECS)) return opaque(expr);
-  const spec = specOf(name as keyof typeof SPECS);
-  return seedCall(name as keyof typeof SPECS, spec, expr.args) ?? opaque(expr);
+  // A registered primitive, or a user-defined component call (recognised as a
+  // container whose positional args are children).
+  const spec: PrimitiveSpec | undefined = name in SPECS ? specOf(name as keyof typeof SPECS) : components.has(name) ? { kind: "container" } : undefined;
+  if (!spec) return opaque(expr);
+  return seedCall(name, spec, expr.args, components) ?? opaque(expr);
 }
+
+const EMPTY_COMPONENTS: ReadonlySet<string> = new Set();
 
 /** Render one prop value by kind.  `string` re-quotes (the STRING terminal
  *  strips delimiters); `int` numifies; `ref`/`expr` emit verbatim. */
@@ -361,7 +377,9 @@ export function emitBody(node: BuilderNode): string {
     const els = node.children.filter((c) => c.name === "MatchElse").slice(0, 1);
     return `match {\n  ${[...arms, ...els].map(emitBody).join(",\n  ")}\n}`;
   }
-  const spec = specOf(node.name);
+  // SPECS primitive, or a user-defined component call (a container whose
+  // positional args are children).
+  const spec: PrimitiveSpec = node.name in SPECS ? specOf(node.name as keyof typeof SPECS) : { kind: "container" };
   const posKindOf = new Map(posSpecs(spec).map((p) => [p.key, p.kind] as const));
   const namedSpec = new Map((spec.named ?? []).map((n) => [n.key, n] as const));
   const emitKey = (key: string): string | null => {
