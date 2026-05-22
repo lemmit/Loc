@@ -714,6 +714,27 @@ test("expands a bare-call argument into the inline structured editor (ƒx)", asy
   await expect(page.getByTestId("c4expr")).toBeVisible({ timeout: 10_000 });
 });
 
+test("expands an emit field value into the inline structured editor (ƒx)", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  // Order.confirm ends with `emit OrderConfirmed { order: id, at: now() }` — each
+  // field is name + value (text) with a ƒx toggle to the structured editor.
+  await page.locator('[data-testid="rf__node-aggregate:Order"]').click();
+  await page.getByTestId("c4system-op-pick").click();
+  await page.getByRole("option", { name: "confirm", exact: true }).click();
+  await expect(page.getByTestId("c4system-body")).toBeVisible();
+  await expect(page.getByTestId("c4system-emit-field-name").first()).toBeVisible();
+  await expect(page.getByTestId("c4system-emit-field-value").first()).toBeVisible();
+  await page.getByTestId("c4system-emit-field-structured").first().click();
+  await expect(page.getByTestId("c4expr")).toBeVisible({ timeout: 10_000 });
+});
+
 test("offers type-directed member-name suggestions", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);
