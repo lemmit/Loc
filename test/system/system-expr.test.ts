@@ -110,14 +110,25 @@ describe("structured expression editor — model", () => {
         let d = i
         i := d
       }) } } }`;
-    const tree = seedExpr(slotExpr(parse(src), { kind: "derived", owner: "Order", name: "doubled" })!);
+    const tree = seedExpr(
+      slotExpr(parse(src), { kind: "derived", owner: "Order", name: "doubled" })!,
+    );
     if (tree.kind !== "member") throw new Error("expected a member call");
     const lam = tree.args[0].value;
     if (lam.kind !== "blockLambda") throw new Error("expected a block lambda");
     expect(lam.param).toBe("i");
     expect(lam.stmts).toHaveLength(2);
-    expect(lam.stmts[0]).toMatchObject({ kind: "let", name: "d", value: { kind: "raw", text: "i" } });
-    expect(lam.stmts[1]).toMatchObject({ kind: "assign", target: "i", op: ":=", value: { kind: "raw", text: "d" } });
+    expect(lam.stmts[0]).toMatchObject({
+      kind: "let",
+      name: "d",
+      value: { kind: "raw", text: "i" },
+    });
+    expect(lam.stmts[1]).toMatchObject({
+      kind: "assign",
+      target: "i",
+      op: ":=",
+      value: { kind: "raw", text: "d" },
+    });
     expect(emitExpr(tree)).toBe("items.map(i => {\n  let d = i\n  i := d\n})");
   });
 
