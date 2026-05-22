@@ -38,7 +38,16 @@ export function buildRoutesFile(
   agg: AggregateIR,
   repo: RepositoryIR | undefined,
   ctx: BoundedContextIR,
+  emitAudit = false,
 ): string {
+  // An audited public operation instruments its route handler with a
+  // `recordAudit(...)` call; the SDK file (`domain/audit.ts`) is only
+  // emitted when some operation is audited, so the import is gated on the
+  // same presence to keep "auditing off pays nothing".
+  const auditOps = emitAudit
+    ? agg.operations.filter((o) => o.audited && o.visibility === "public")
+    : [];
+  const fileHasAudit = auditOps.length > 0;
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";`);
@@ -56,6 +65,9 @@ export function buildRoutesFile(
   // there are no extern ops; the runtime ref is gated below.
   if (agg.operations.some((o) => o.extern)) {
     lines.push(`import { externHandlers } from "../domain/${camel(agg.name)}-extern";`);
+  }
+  if (fileHasAudit) {
+    lines.push(`import { recordAudit } from "../domain/audit";`);
   }
 
   // Schemas — value objects, enums, then per-DTO request / response
@@ -218,7 +230,7 @@ export function buildRoutesFile(
 
   // Operations.
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
-    lines.push(...emitOperationRoute(agg, op, ctx).map((l) => `  ${l}`));
+    lines.push(...emitOperationRoute(agg, op, ctx, auditOps.includes(op)).map((l) => `  ${l}`));
     lines.push("");
   }
 
@@ -267,7 +279,12 @@ export function buildRoutesFile(
   return lines.join("\n") + "\n";
 }
 
-function emitOperationRoute(agg: AggregateIR, op: OperationIR, ctx: BoundedContextIR): string[] {
+function emitOperationRoute(
+  agg: AggregateIR,
+  op: OperationIR,
+  ctx: BoundedContextIR,
+  audit: boolean,
+): string[] {
   const aggSlug = snake(plural(agg.name));
   const opSnake = snake(op.name);
   const out: string[] = [];
@@ -300,6 +317,16 @@ function emitOperationRoute(agg: AggregateIR, op: OperationIR, ctx: BoundedConte
     out.push(`    const currentUser = c.get("currentUser") as import("../auth/user-types").User;`);
   }
   out.push(`    const aggregate = await repo.getById(Ids.${agg.name}Id(id));`);
+  if (audit) {
+    // Actor = the inbound currentUser claim if present, else null.  Read
+    // via the untyped-key bridge (the sub-router's OpenAPIHono has no
+    // typed Variables block) so this compiles whether or not the
+    // deployable mounts auth — `auth/user-types` may not exist here.
+    out.push(
+      `    const __actor = (c as unknown as { get(k: "currentUser"): unknown }).get("currentUser") ?? null;`,
+    );
+    out.push(`    const __before = repo.toWire(aggregate);`);
+  }
   const baseCallArgs = op.params.map((p) => wireToDomainExpr(`body.${p.name}`, p.type, ctx));
   const callArgs = (usesUser ? [...baseCallArgs, "currentUser"] : baseCallArgs).join(", ");
   if (op.extern) {
@@ -330,6 +357,18 @@ function emitOperationRoute(agg: AggregateIR, op: OperationIR, ctx: BoundedConte
     out.push(`    aggregate.${camel(op.name)}(${callArgs});`);
   }
   out.push(`    await repo.save(aggregate);`);
+  if (audit) {
+    out.push(`    const __after = repo.toWire(aggregate);`);
+    out.push(`    recordAudit({`);
+    out.push(`      operationId: "${camel(op.name)}${agg.name}",`);
+    out.push(`      action: "${op.name}",`);
+    out.push(`      target: { type: "${agg.name}", id },`);
+    out.push(`      actor: __actor,`);
+    out.push(`      before: __before,`);
+    out.push(`      after: __after,`);
+    out.push(`      status: "ok",`);
+    out.push(`    });`);
+  }
   out.push(`    return c.body(null, 204);`);
   out.push(`  },`);
   out.push(`);`);

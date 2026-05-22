@@ -228,6 +228,7 @@ describe("Slice C1 — scaffold expander dispatch", () => {
         params: [],
         statements: [],
         extern: false,
+        audited: false,
       },
       {
         name: "addLine",
@@ -235,6 +236,7 @@ describe("Slice C1 — scaffold expander dispatch", () => {
         params: [{ name: "qty", type: { kind: "primitive", name: "int" } }],
         statements: [],
         extern: false,
+        audited: false,
       },
       {
         name: "recalc",
@@ -242,6 +244,7 @@ describe("Slice C1 — scaffold expander dispatch", () => {
         params: [],
         statements: [],
         extern: false,
+        audited: false,
       },
     ];
     const ctxOps = buildExpandContext(sysWithOps, makeUi());

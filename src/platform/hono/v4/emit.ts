@@ -117,6 +117,47 @@ export function __drainTraces(): TraceRecord[] {
 }
 `;
 
+/** Runtime audit SDK — emitted only when the model declares at least one
+ *  `audited` operation.  v1 is an append-only in-memory sink; each HTTP
+ *  invocation of an audited operation calls `recordAudit(...)` with the
+ *  actor (the inbound `currentUser` claim, or null when the deployable has
+ *  no `auth: required`), the operation identity, and the before/after wire
+ *  snapshot of the targeted aggregate.  Records are standalone — there is
+ *  no cross-request correlationId in v1 (the execution-context backbone is
+ *  deferred).  See `docs/proposals/audit-and-logging.md`. */
+const AUDIT_TS = `// Auto-generated.
+import { randomUUID } from "node:crypto";
+
+export interface AuditRecord {
+  auditId: string;
+  /** OpenAPI operationId of the invoked action (e.g. \`cancelOrder\`). */
+  operationId: string;
+  /** The operation's declared name (e.g. \`cancel\`). */
+  action: string;
+  target: { type: string; id: string };
+  /** The full inbound \`currentUser\` claim, or null when auth is off. */
+  actor: unknown | null;
+  /** Aggregate wire snapshot taken before the operation ran. */
+  before: unknown;
+  /** Aggregate wire snapshot taken after the operation ran. */
+  after: unknown;
+  at: string;
+  /** v1 records the success path only; failed invocations are not captured. */
+  status: "ok";
+}
+
+const __audits: AuditRecord[] = [];
+
+export function recordAudit(rec: Omit<AuditRecord, "auditId" | "at">): void {
+  __audits.push({ ...rec, auditId: randomUUID(), at: new Date().toISOString() });
+}
+
+/** Drains the in-memory audit buffer (test/inspection hook). */
+export function __drainAudits(): AuditRecord[] {
+  return __audits.splice(0);
+}
+`;
+
 /**
  * Legacy entry: lowers the whole model and emits one project from all
  * top-level bounded contexts.  Used by `ddd generate ts <file> -o <dir>`.
@@ -154,6 +195,12 @@ export function generateTypeScriptForContexts(
   // (rather than read off presence at each call site) so a future
   // build-level switch can force emission for other consumers.
   const emitProvenance = contextsHaveProvSite(contexts);
+  // Emission is forced by presence: any `audited` operation turns on the
+  // audit SDK + per-route `recordAudit` calls.  Threaded as a flag (like
+  // emitProvenance) so a future build-level switch can force emission.
+  const emitAudit = contexts.some((c) =>
+    c.aggregates.some((a) => a.operations.some((o) => o.audited)),
+  );
 
   // Multi-context Hono deployables (e.g. acme's catalogWeb spanning
   // Catalog + CustomerMgmt) need the shared domain files to UNION
@@ -179,6 +226,7 @@ export function generateTypeScriptForContexts(
   out.set("domain/events.ts", renderEvents(merged));
   out.set("domain/errors.ts", ERRORS_TS);
   if (emitProvenance) out.set("domain/provenance.ts", PROVENANCE_TS);
+  if (emitAudit) out.set("domain/audit.ts", AUDIT_TS);
   out.set("db/schema.ts", renderSchema(merged));
   if (merged.workflows.length > 0) {
     const aggsByName = new Map(merged.aggregates.map((a) => [a.name, a] as const));
@@ -201,7 +249,7 @@ export function generateTypeScriptForContexts(
         `db/repositories/${camel(agg.name)}-repository.ts`,
         buildRepositoryFile(agg, repo, ctx),
       );
-      out.set(`http/${camel(agg.name)}.routes.ts`, buildRoutesFile(agg, repo, ctx));
+      out.set(`http/${camel(agg.name)}.routes.ts`, buildRoutesFile(agg, repo, ctx, emitAudit));
       if (agg.operations.some((o) => o.extern)) {
         out.set(`domain/${camel(agg.name)}-extern.ts`, buildExternHandlersFile(agg, ctx));
       }

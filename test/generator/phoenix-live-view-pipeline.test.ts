@@ -475,6 +475,7 @@ describe("D1 — Ash validate clause emission (domain-emit unit)", () => {
               },
             ],
             extern: false,
+            audited: false,
           },
         ],
         parts: [],

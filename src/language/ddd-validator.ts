@@ -1159,6 +1159,16 @@ export class DddValidator {
   }
 
   private checkOperation(op: Operation, agg: Aggregate, accept: ValidationAcceptor) {
+    // `audited` instruments the operation's HTTP route handler; a private
+    // operation has no route, so the modifier produces no audit record.
+    if (op.audited && op.private) {
+      accept(
+        "warning",
+        `'audited' has no effect on private operation '${op.name}' — it has no HTTP entry point, so no audit record is produced.`,
+        { node: op, property: "audited" },
+      );
+    }
+
     // Build env with parameters and walk body
     const bindings = new Map<string, { type: DddType; origin: AstNode }>();
     for (const p of op.params) bindings.set(p.name, { type: paramType(p), origin: p });
