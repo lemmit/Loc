@@ -187,13 +187,14 @@ Done:
   layer (`slotCandidates`/`slotEnv` in `expr-slots.ts`) reuses the IR's `Env`
   builders to construct the per-slot env exactly as `lower.ts` does — so the
   rules aren't forked. Gated by `test/system-expr.test.ts` + e2e.
-- **Statement expressions in operation bodies** — the same "Expression" picker
-  also lists each aggregate operation's `precondition` / `requires` / `let`
-  expressions (`stmtExpr` slots), so domain-logic expressions are editable with
-  the structured editor, not just the BodyEditor's text rows. Candidates include
-  the operation's params and earlier `let` bindings. (Assignments / `emit` —
-  multi-part statements — stay text-row only.) Gated by
-  `test/system-expr.test.ts` + e2e.
+- **Statement expressions in operation & workflow bodies** — the same
+  "Expression" picker lists each aggregate operation's *and workflow's*
+  `precondition` / `requires` / `let` expressions (`stmtExpr` / `wfStmt` slots),
+  so domain-logic expressions are editable with the structured editor, not just
+  the BodyEditor's text rows. Candidates include params and earlier `let`
+  bindings (operations also see the aggregate's members; workflows have no
+  `this`). (Assignments / `emit` — multi-part statements — stay text-row only.)
+  Gated by `test/system-expr.test.ts` + e2e.
 
 Open:
 
@@ -202,10 +203,13 @@ Open:
   `.member` after a receiver — needs the type system, not just the flat name set
   that drives bare-name suggestions today); and arg-*name* editing on calls
   (existing named args are preserved verbatim but can't be renamed in the UI).
-- **Assignment / emit statements** — `:=` assignments and `emit` field values in
-  operation bodies (multi-part, so not single-expression slots) — and workflow
-  bodies — are still text-row only; the structured editor reaches single-expr
-  statements (precondition/requires/let) on aggregate operations today.
+- **Assignment / emit statements** — `:=` assignments and `emit` field values
+  (multi-part, so not single-expression slots) in operation and workflow bodies
+  are still text-row only; the structured editor reaches single-expr statements
+  (precondition/requires/let) on both today.
+- **`new` / object literals** — structured object construction (`new Part { … }`,
+  `{ … }`); the seed/emit model is the next step. Mostly appears in assignments /
+  `emit` / `test` blocks today, so a reachable slot (the above) unlocks a UI for it.
 - **Field rename** — needs member-access reference resolution (via the
   type-system / IR) to update `this.field` / view binds safely.
 - **Repository `find` editing** (params + where-clause expressions).
