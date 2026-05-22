@@ -1,4 +1,4 @@
-// Phoenix `Action` (Stage 2): `Action(<instance>.<op>, then?)` inside a
+// Phoenix `Action`: `Action(<instance>.<op>, then?)` inside a
 // (stateless) function component emits a `<.button phx-click=…>` whose
 // handler is hoisted to every host page's LiveView — load the instance
 // via the Ash code interface, invoke the action, flash + navigate.
