@@ -10,8 +10,10 @@ import {
   type FunctionDecl,
   type Invariant,
   type Model,
+  type Operation,
   type Parameter,
   type Repository,
+  type Statement,
   type ValueObject,
   type View,
 } from "../../../../src/language/generated/ast.js";
@@ -41,7 +43,8 @@ export type ExprSlot =
   | { kind: "invariant"; owner: string; index: number }
   | { kind: "viewFilter"; owner: string }
   | { kind: "viewBind"; owner: string; name: string }
-  | { kind: "findFilter"; owner: string; name: string };
+  | { kind: "findFilter"; owner: string; name: string }
+  | { kind: "stmtExpr"; owner: string; op: string; index: number };
 
 function membersOf(node: AstNode): readonly AstNode[] {
   if (node.$type === "Aggregate") return (node as Aggregate).members;
@@ -71,6 +74,20 @@ export function listInvariants(node: AstNode): string[] {
     .map((iv) => printExpr((iv as Invariant).expr));
 }
 
+function findOperation(owner: AstNode | null, name: string): Operation | null {
+  if (!owner) return null;
+  return (membersOf(owner).find((m): m is Operation => m.$type === "Operation" && (m as Operation).name === name) as Operation | undefined) ?? null;
+}
+
+/** The single editable expression of a statement, or null for kinds that don't
+ *  carry one (emit / bare calls / assignments — deferred). */
+function stmtExprOf(stmt: Statement): Expression | null {
+  if (stmt.$type === "PreconditionStmt" || stmt.$type === "RequiresStmt" || stmt.$type === "LetStmt") {
+    return (stmt as { expr: Expression }).expr;
+  }
+  return null;
+}
+
 function findView(ast: Model, name: string): View | null {
   for (const n of AstUtils.streamAst(ast)) {
     if (n.$type === "View" && (n as View).name === name) return n as View;
@@ -97,6 +114,11 @@ export function slotExpr(ast: Model, slot: ExprSlot): Expression | null {
     const find = findRepo(ast, slot.owner)?.finds.find((f: FindDecl) => f.name === slot.name);
     return find?.filter ?? null;
   }
+  if (slot.kind === "stmtExpr") {
+    const op = findOperation(findOwner(ast, slot.owner), slot.op);
+    const stmt = op?.body[slot.index];
+    return stmt ? stmtExprOf(stmt) : null;
+  }
   const owner = findOwner(ast, slot.owner);
   if (!owner) return null;
   const members = membersOf(owner);
@@ -119,7 +141,8 @@ export interface SlotOption {
 }
 
 /** All single-expression slots on an aggregate / value object, for one picker:
- *  functions, derived props, and invariants. */
+ *  functions, derived props, invariants, and operation-body statement
+ *  expressions (precondition / requires / let). */
 export function exprSlotOptions(node: AstNode): SlotOption[] {
   const owner = (node as { name?: string }).name;
   if (!owner) return [];
@@ -133,6 +156,16 @@ export function exprSlotOptions(node: AstNode): SlotOption[] {
   listInvariants(node).forEach((preview, index) => {
     out.push({ value: `inv:${index}`, label: `invariant: ${preview}`, slot: { kind: "invariant", owner, index } });
   });
+  for (const m of membersOf(node)) {
+    if (m.$type !== "Operation") continue;
+    const op = m as Operation;
+    op.body.forEach((stmt, index) => {
+      const expr = stmtExprOf(stmt);
+      if (!expr) return;
+      const prefix = stmt.$type === "LetStmt" ? `let ${(stmt as { name: string }).name} = ` : stmt.$type === "RequiresStmt" ? "requires " : "precondition ";
+      out.push({ value: `stmt:${op.name}:${index}`, label: `${op.name}: ${prefix}${printExpr(expr)}`, slot: { kind: "stmtExpr", owner, op: op.name, index } });
+    });
+  }
   return out;
 }
 
@@ -186,6 +219,7 @@ function findAgg(ast: Model, name: string | undefined): Aggregate | null {
 function slotEnv(ast: Model, slot: ExprSlot): Env | null {
   let owner: AstNode | null = null;
   let params: Parameter[] = [];
+  let lets: string[] = [];
   let ctxNode: AstNode | null = null;
 
   if (slot.kind === "viewFilter" || slot.kind === "viewBind") {
@@ -203,6 +237,13 @@ function slotEnv(ast: Model, slot: ExprSlot): Env | null {
     if (slot.kind === "function") {
       const fn = owner ? membersOf(owner).find((m): m is FunctionDecl => m.$type === "FunctionDecl" && (m as FunctionDecl).name === slot.name) : undefined;
       params = (fn as FunctionDecl | undefined)?.params ?? [];
+    } else if (slot.kind === "stmtExpr") {
+      const op = findOperation(owner, slot.op);
+      params = op?.params ?? [];
+      // `let`s declared earlier in the body are in scope for this statement.
+      lets = (op?.body.slice(0, slot.index) ?? [])
+        .filter((s) => s.$type === "LetStmt")
+        .map((s) => (s as { name: string }).name);
     }
   }
   if (!owner) return null;
@@ -210,9 +251,10 @@ function slotEnv(ast: Model, slot: ExprSlot): Env | null {
   const ctx = ctxNode ? AstUtils.getContainerOfType(ctxNode, isBoundedContext) : undefined;
   const base: Env = ctx ? newEnv(ctx as BoundedContext) : { ctx: undefined, locals: new Map() };
   let env = owner.$type === "ValueObject" ? inValueObject(base, owner as ValueObject) : inAggregate(base, owner as Aggregate);
-  // Only the param *names* matter for enumeration; skip `lowerType` (it would
-  // deref `Id<X>` targets, which the main-thread parse can't link).
+  // Only the names matter for enumeration; skip `lowerType` (it would deref
+  // `Id<X>` targets, which the main-thread parse can't link).
   for (const p of params) env = withLocal(env, p.name, "param", { kind: "primitive", name: "string" });
+  for (const name of lets) env = withLocal(env, name, "let", { kind: "primitive", name: "string" });
   return env;
 }
 

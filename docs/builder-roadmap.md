@@ -187,6 +187,13 @@ Done:
   layer (`slotCandidates`/`slotEnv` in `expr-slots.ts`) reuses the IR's `Env`
   builders to construct the per-slot env exactly as `lower.ts` does — so the
   rules aren't forked. Gated by `test/system-expr.test.ts` + e2e.
+- **Statement expressions in operation bodies** — the same "Expression" picker
+  also lists each aggregate operation's `precondition` / `requires` / `let`
+  expressions (`stmtExpr` slots), so domain-logic expressions are editable with
+  the structured editor, not just the BodyEditor's text rows. Candidates include
+  the operation's params and earlier `let` bindings. (Assignments / `emit` —
+  multi-part statements — stay text-row only.) Gated by
+  `test/system-expr.test.ts` + e2e.
 
 Open:
 
@@ -195,9 +202,10 @@ Open:
   `.member` after a receiver — needs the type system, not just the flat name set
   that drives bare-name suggestions today); and arg-*name* editing on calls
   (existing named args are preserved verbatim but can't be renamed in the UI).
-- **Expression editor in more slots** — statement-expression slots
-  (`let`/`:=`/`precondition` values inside bodies), reusing the same recursive
-  editor (view filters/binds and repository find `where` clauses already done).
+- **Assignment / emit statements** — `:=` assignments and `emit` field values in
+  operation bodies (multi-part, so not single-expression slots) — and workflow
+  bodies — are still text-row only; the structured editor reaches single-expr
+  statements (precondition/requires/let) on aggregate operations today.
 - **Field rename** — needs member-access reference resolution (via the
   type-system / IR) to update `this.field` / view binds safely.
 - **Repository `find` editing** (params + where-clause expressions).
