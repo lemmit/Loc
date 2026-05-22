@@ -1,5 +1,5 @@
 import type { BinOp, ExprIR, LiteralKind, TypeIR } from "../../ir/loom-ir.js";
-import { camel } from "../../util/naming.js";
+import { lowerFirst } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Expression renderer for the TypeScript backend.
@@ -105,7 +105,7 @@ function renderRef(e: Extract<ExprIR, { kind: "ref" }>, ctx: TsRenderContext): s
     case "this-derived":
       return fromOutside ? `${ctx.thisName}.${e.name}` : `this.${e.name}`;
     case "helper-fn":
-      return fromOutside ? `${ctx.thisName}.${camel(e.name)}` : `this.${camel(e.name)}`;
+      return fromOutside ? `${ctx.thisName}.${lowerFirst(e.name)}` : `this.${lowerFirst(e.name)}`;
     case "enum-value":
       return `${e.enumName}.${e.name}`;
     case "current-user":
@@ -187,8 +187,8 @@ function renderCall(e: Extract<ExprIR, { kind: "call" }>, ctx: TsRenderContext):
     case "function":
     case "private-operation":
       return fromOutside
-        ? `${ctx.thisName}.${camel(e.name)}(${args})`
-        : `this.${camel(e.name)}(${args})`;
+        ? `${ctx.thisName}.${lowerFirst(e.name)}(${args})`
+        : `this.${lowerFirst(e.name)}(${args})`;
     case "free":
       return `${e.name}(${args})`;
   }

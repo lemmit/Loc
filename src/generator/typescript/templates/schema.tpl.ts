@@ -7,7 +7,7 @@ import type {
   TypeIR,
 } from "../../../ir/loom-ir.js";
 import { lines as joinLines } from "../../../util/code-builder.js";
-import { camel, plural, snake } from "../../../util/naming.js";
+import { lowerFirst, plural, snake } from "../../../util/naming.js";
 
 // All-procedural Drizzle schema emission.  Column generation has too
 // much per-field branching to express cleanly in any template engine,
@@ -31,7 +31,7 @@ export function renderSchema(ctx: BoundedContextIR): string {
   }
   const enumLines = ctx.enums.map(
     (e) =>
-      `export const ${camel(e.name)}Enum = pgEnum("${snake(e.name)}", [${e.values.map((v) => `"${v}"`).join(", ")}]);`,
+      `export const ${lowerFirst(e.name)}Enum = pgEnum("${snake(e.name)}", [${e.values.map((v) => `"${v}"`).join(", ")}]);`,
   );
   return (
     joinLines(
@@ -110,7 +110,7 @@ function emitTable(
 ): string {
   const tableName = snake(plural(name));
   const lines: string[] = [];
-  lines.push(`export const ${camel(plural(name))} = pgTable("${tableName}", {`);
+  lines.push(`export const ${lowerFirst(plural(name))} = pgTable("${tableName}", {`);
   lines.push(`  id: text("id").primaryKey(),`);
   if (parentName) {
     lines.push(`  parentId: text("${snake(parentName)}_id").notNull(),`);
@@ -125,12 +125,12 @@ function emitTable(
   const indexEntries: string[] = [];
   if (parentName) {
     indexEntries.push(
-      `    ${camel(name)}ParentIdIdx: index("${tableName}_parent_id_idx").on(table.parentId),`,
+      `    ${lowerFirst(name)}ParentIdIdx: index("${tableName}_parent_id_idx").on(table.parentId),`,
     );
   }
   for (const col of indexedColumns) {
     indexEntries.push(
-      `    ${camel(name)}${pascalize(col)}Idx: index("${tableName}_${snake(col)}_idx").on(table.${col}),`,
+      `    ${lowerFirst(name)}${pascalize(col)}Idx: index("${tableName}_${snake(col)}_idx").on(table.${col}),`,
     );
   }
   if (indexEntries.length === 0) {
@@ -201,7 +201,7 @@ function drizzleColumnLinesForName(
     case "id":
       return [`${fieldName}: text("${colName}")${not},`];
     case "enum":
-      return [`${fieldName}: ${camel(inner.name)}Enum("${colName}")${not},`];
+      return [`${fieldName}: ${lowerFirst(inner.name)}Enum("${colName}")${not},`];
     case "valueobject": {
       const vo = ctx.valueObjects.find((v) => v.name === inner.name);
       if (!vo) return [`${fieldName}: text("${colName}")${not},`];
