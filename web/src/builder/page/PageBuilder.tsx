@@ -190,7 +190,7 @@ function Toolbar({ pages, pageName, onSelectPage, onApply, compact = false, onOp
 // Click-add is also what makes the palette work on touch, where craft's
 // mouse-driven drag-reorder is unavailable.)
 function PaletteContent({ onAdded }: { onAdded?: () => void }): JSX.Element {
-  const { query, actions } = useEditor();
+  const { query, actions, connectors } = useEditor();
 
   // A node can host a freshly-added primitive if it's a canvas that isn't a
   // Match (whose children must be arms — use "+ arm") and isn't an already-full
@@ -223,16 +223,24 @@ function PaletteContent({ onAdded }: { onAdded?: () => void }): JSX.Element {
 
   return (
     <Stack gap={4}>
-      {PALETTE_PRIMITIVES.map((name) => (
-        <UnstyledButton
-          key={name}
-          data-testid={`c4palette-${name}`}
-          onClick={() => add(name)}
-          style={{ fontSize: 12, padding: "3px 6px", borderRadius: 4, border: "1px solid var(--mantine-color-dark-4)", background: "var(--mantine-color-dark-6)", cursor: "pointer" }}
-        >
-          {name}
-        </UnstyledButton>
-      ))}
+      {PALETTE_PRIMITIVES.map((name) => {
+        const Comp = resolver[name] as ComponentType<Record<string, unknown>>;
+        return (
+          <UnstyledButton
+            key={name}
+            data-testid={`c4palette-${name}`}
+            // Drag onto a canvas to create the node there; click still adds it to
+            // the selected/top container (the reliable, touch-friendly path).
+            ref={(dom: HTMLButtonElement | null) => {
+              if (dom) connectors.create(dom, <Comp {...defaultNode(name).props} />);
+            }}
+            onClick={() => add(name)}
+            style={{ fontSize: 12, padding: "3px 6px", borderRadius: 4, border: "1px solid var(--mantine-color-dark-4)", background: "var(--mantine-color-dark-6)", cursor: "grab" }}
+          >
+            {name}
+          </UnstyledButton>
+        );
+      })}
     </Stack>
   );
 }
