@@ -62,7 +62,17 @@ export class SandboxBridge {
     private readonly dispatch: (
       req: SerializedRequest,
     ) => Promise<DispatchResult>,
+    /** Notified with the parent-side port once the handshake completes,
+     *  and with null on dispose — so the UI test runner can drive the
+     *  sandbox-hosted executor over the same channel. */
+    private readonly onPort?: (port: MessagePort | null) => void,
   ) {}
+
+  /** The parent-side port, available after the handshake; null before
+   *  connect or after dispose. */
+  getPort(): MessagePort | null {
+    return this.port;
+  }
 
   /** Begin the handshake: listen for the stub's `loom-stub-ready`,
    *  then post the document + a transferred port.  Idempotent per
@@ -92,6 +102,7 @@ export class SandboxBridge {
     win.postMessage({ type: "loom-init", html }, this.targetOrigin, [
       channel.port2,
     ]);
+    this.onPort?.(this.port);
     if (this.pendingReload) {
       const r = this.pendingReload;
       this.pendingReload = null;
@@ -150,5 +161,6 @@ export class SandboxBridge {
     }
     this.port?.close();
     this.port = null;
+    this.onPort?.(null);
   }
 }

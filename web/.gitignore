@@ -8,3 +8,7 @@ playwright-report/
 public/npm-mirror/
 
 public/vendor/
+
+# Prebuilt sandbox UI-test driver (emitted by scripts/build-sandbox-driver.mjs).
+public/sandbox/driver.js
+public/sandbox/driver-*.js
