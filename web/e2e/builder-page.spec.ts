@@ -217,3 +217,38 @@ test("adds a match arm from the canvas and writes it back to source", async ({ p
   await expect(page.getByTestId("c4node-MatchArm")).toHaveCount(3);
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
+
+const OP_SOURCE = `system S {
+  context C {
+    aggregate Account { balance: decimal
+      operation deposit(n: decimal) { }
+      operation withdraw(n: decimal) { } }
+  }
+  ui U { page P { body: Form(of: Account) } }
+}`;
+
+test("Form op: offers the bound aggregate's operations as a dropdown", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.evaluate((t) => navigator.clipboard.writeText(t), OP_SOURCE);
+  await page.getByTestId("doc-tab-source").click();
+  const editor = page.locator(".monaco-editor").first();
+  await editor.click();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.press("Control+v");
+
+  await page.getByTestId("doc-tab-builder").click();
+  await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
+
+  // Select the Form; its `op:` dropdown is populated from Account's operations.
+  await page.getByTestId("c4node-Form").first().click();
+  await page.getByTestId("c4builder-prop-op").click();
+  await expect(page.getByRole("option", { name: "deposit" })).toBeVisible();
+  await page.getByRole("option", { name: "withdraw" }).click();
+
+  await page.getByTestId("c4builder-apply").click();
+  await expect(page.getByTestId("c4builder-canvas")).toContainText("Form");
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+});

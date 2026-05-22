@@ -85,7 +85,9 @@ const SPECS = {
   Empty: { kind: "leaf", positional: [{ key: "message", kind: "text" }] },
   Divider: { kind: "leaf" },
   List: { kind: "leaf", named: [{ key: "of", kind: "ref", options: "aggregate" }, { key: "testid", kind: "string" }] },
-  Form: { kind: "leaf", named: [{ key: "of", kind: "ref", options: "aggregate" }, { key: "creates", kind: "ref", options: "aggregate" }, { key: "testid", kind: "string" }] },
+  // `op:` binds to an operation of the `of:` aggregate (a contextual dropdown);
+  // `runs:` binds to a workflow.
+  Form: { kind: "leaf", named: [{ key: "of", kind: "ref", options: "aggregate" }, { key: "creates", kind: "ref", options: "aggregate" }, { key: "op", kind: "ref", options: "operation" }, { key: "runs", kind: "ref", options: "workflow" }, { key: "testid", kind: "string" }] },
   // Layout / no-arg primitives.
   Breadcrumbs: { kind: "container" },
   KeyValueRow: { kind: "container", positional: ["label"] },

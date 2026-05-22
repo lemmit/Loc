@@ -81,6 +81,11 @@ text stays the source of truth.
   resolver) is modelled as a container whose positional args become children, so
   it's editable rather than Opaque. A non-component value call (`format(x)`)
   stays an expression.
+- **Typed binding pickers**: `Form(op:)` is a dropdown of the bound `of:`
+  aggregate's operations (contextual — it follows the selected `of:`);
+  `Form(runs:)` lists workflows. Aggregate/workflow/view option sets are
+  collected from the source (`BuilderPane`); `op:` is contextual via the
+  per-aggregate operations map.
 
 ## Open — expression / domain-logic surface
 
@@ -89,10 +94,9 @@ text stays the source of truth.
   statements inside (`:=`, `call`, `emit`, `navigate`, `let`) is a separate
   effort.
 - **`state := …`** page state declarations / assignments. Not modelled.
-- **Operation forms**: `Form(of:, op:)`, bound to aggregate operations — need op
-  pickers wired to the IR (`Form` currently models only `of:`/`creates:`/`testid:`).
-- **Richer bindings**: typed pickers for repository finds, view sources, enum
-  values, and navigation params (qualified refs already round-trip).
+- **More typed pickers**: enum-case values (needs the field's enum type),
+  repository finds, and navigation params (op/runs/aggregate/workflow pickers
+  are done; qualified refs already round-trip).
 - **`match` arm cond caveat** — the grammar misparses a *bare-identifier* arm
   cond (`ready => …`) as a lambda, so such conds must be comparisons/calls. Emit
   reproduces the original (valid) cond, so round-trip is safe; the "+ arm"
