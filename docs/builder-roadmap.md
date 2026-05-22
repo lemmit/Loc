@@ -57,9 +57,25 @@ text stays the source of truth.
   instead of falling back to Opaque. Replay is edit-safe: children are pulled in
   array order, and children/named props added after seed are appended; fresh
   palette nodes (no recorded order) still emit in canonical order.
+- **Passthrough modifiers + optional args**: an unmodelled named arg
+  (`testid:`/`striped:`/`gap:`/…) is kept as a verbatim passthrough prop —
+  editable as a generic expr field, surfaced in the settings panel — instead of
+  collapsing the node to Opaque; and declared positionals are optional from the
+  right (`Empty()` is recognised). Only a lambda/match-valued unknown arg (real
+  domain logic, e.g. `Button(onClick: e => { … })`) still forces Opaque.
+- **Expression-valued text**: text content (`Heading`/`Text`/`Button`/`Anchor`/
+  `Alert`/`Empty`) is a `text` kind — a plain text box for a string literal,
+  the raw expression otherwise — so `Text("Hello, " + name)` is editable rather
+  than Opaque.
+- **In-canvas add-arm / add-child**: a selected `Match` shows "+ arm"/"+ else"
+  controls (arms aren't palette primitives); the palette won't drop a raw
+  primitive into a Match or an already-full single-child slot.
 
 ## Open — expression / domain-logic surface
 
+- **Block-body event handlers** — `Button(onClick: e => { … })`, form `onSubmit`
+  closures: multi-statement lambdas stay Opaque (genuine imperative logic). A
+  statement-level editor would be a separate effort.
 - **`state := …`** page state declarations / assignments. Not modelled.
 - **Operation forms**: `Form(of:, op:)`, bound to aggregate operations — need op
   pickers wired to the IR (`Form` currently models only `of:`/`creates:`/`testid:`).
@@ -68,8 +84,8 @@ text stays the source of truth.
   finds, view sources, enum values, navigation params.
 - **`match` arm cond caveat** — the grammar misparses a *bare-identifier* arm
   cond (`ready => …`) as a lambda, so such conds must be comparisons/calls. Emit
-  reproduces the original (valid) cond, so round-trip is safe; a UI that *adds* an
-  arm must default the cond to a non-bare-ident expression.
+  reproduces the original (valid) cond, so round-trip is safe; the "+ arm"
+  control defaults the cond to `true` (a non-bare-ident expression).
 - **`MasterDetail`/`Detail`** primitives, and calls to **user-defined
   components** (`component` defs) — the latter need per-component param signatures
   to map positional args to names.
@@ -78,10 +94,6 @@ text stays the source of truth.
 
 - **Drag-to-add** from the palette (today is click-add; craft's create-connector
   swallows the click). **Drag-reorder** across containers needs verification.
-- **Add-child / add-arm affordance** directly on a selected container (today:
-  palette adds into the selected container). Synthetic nodes especially need
-  in-canvas controls — "add arm"/"add else" on a `Match`, set a `Lambda`/`Tab`
-  body — since they aren't palette-addable.
 - **Diagnostics inside the Builder** (surface LSP errors/warnings on the canvas).
   Inline `expr`/Opaque `raw` validation already shows a non-blocking error in the
   settings panel; the canvas itself doesn't yet flag invalid nodes.

@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { EmptyFileSystem, AstUtils, type AstNode } from "langium";
 import { createDddServices } from "../src/language/ddd-module.js";
-import { seedFromBody, emitBody } from "../web/src/builder/page/model.js";
+import { seedFromBody, emitBody, type BuilderNode } from "../web/src/builder/page/model.js";
 import { toCraft, fromCraft } from "../web/src/builder/page/serialize.js";
 import type { BodyProp } from "../src/language/generated/ast.js";
 
@@ -150,6 +150,15 @@ describe("page-builder model — primitive coverage", () => {
     'Container(size: "md", Stack(Text("x")))',
     'Table(rows: orders, Column("ID", o => Text(o.id)), Column("Name", o => Text(o.name)))',
     'Table(rows: orders, rowTestid: r => "row-" + r.id, Column("ID", o => IdLink(o.id, of: Order)))',
+    // Passthrough modifiers (unmodelled named args) and optional positionals
+    // must round-trip rather than collapse the node to Opaque.
+    'Empty()',
+    'Stack(Text("x"), testid: "panel")',
+    'Toolbar(Heading("Orders", level: 2), testid: "bar")',
+    'Table(Column("ID", o => Text(o.id)), rows: orders, striped: true, sticky: true)',
+    // Text content that is an expression (not a bare string literal).
+    'Text("Hello, " + userName)',
+    'Heading(pageTitle, level: 1)',
   ]) {
     it(`round-trips ${bodyExpr}`, () => roundtrips(bodyExpr));
   }
@@ -171,7 +180,8 @@ describe("page-builder model — container-with-props seed shape", () => {
     expect(node.children.map((c) => c.name)).toEqual(["Stack"]);
     const stack = node.children[0];
     expect(stack.children.map((c) => c.name)).toEqual(["Text"]);
-    expect(stack.children[0].props.text).toBe("hi");
+    // `text`-kind content stores the source expression form (a quoted literal).
+    expect(stack.children[0].props.text).toBe('"hi"');
   });
 
   it("treats a leading call as content (no title)", () => {
@@ -202,6 +212,45 @@ describe("page-builder model — container-with-props seed shape", () => {
     expect(emitBody(node)).toBe('Table(rows: orders, Column("ID", o => Text(o.id)), Column("Name", o => Text(o.name)))');
     // And it survives the craft serialization round-trip.
     expect(emitBody(fromCraft(toCraft(node)))).toBe(emitBody(node));
+  });
+
+  it("keeps unmodelled named modifiers as passthrough props (not Opaque)", () => {
+    const node = seed('Stack(Text("x"), testid: "panel")');
+    expect(node.name).toBe("Stack");
+    expect(node.props.testid).toBe('"panel"');
+    expect(node.children.map((c) => c.name)).toEqual(["Text"]);
+    expect(emitBody(node)).toBe('Stack(Text("x"), testid: "panel")');
+  });
+
+  it("recognises expression-valued text content (not Opaque)", () => {
+    const node = seed('Text("Hello, " + userName)');
+    expect(node.name).toBe("Text");
+    expect(node.props.text).toBe('"Hello, " + userName');
+  });
+
+  it("recognises a call with optional positionals omitted", () => {
+    expect(seed("Empty()").name).toBe("Empty");
+    expect(seed("Heading()").name).toBe("Heading");
+  });
+
+  it("emits an as-yet-empty single-child slot as a placeholder", () => {
+    const lambda: BuilderNode = { name: "Lambda", props: { param: "x" }, children: [] };
+    expect(emitBody(lambda)).toBe("x => Empty()");
+  });
+
+  it("emits a match else last regardless of child order", () => {
+    const node: BuilderNode = {
+      name: "Match",
+      props: {},
+      children: [
+        { name: "MatchElse", props: {}, children: [{ name: "Empty", props: { message: "n" }, children: [] }] },
+        { name: "MatchArm", props: { cond: "1 == 1" }, children: [{ name: "Text", props: { text: "a" }, children: [] }] },
+      ],
+    };
+    const out = emitBody(node);
+    expect(out.indexOf("else =>")).toBeGreaterThan(out.indexOf("1 == 1 =>"));
+    // And it re-parses cleanly.
+    expect(parser.parse(`system S { ui U { page P { body: ${out} } } }`).parserErrors).toEqual([]);
   });
 
   it("models named-arg child slots and survives the craft round-trip", () => {
