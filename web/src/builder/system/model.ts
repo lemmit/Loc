@@ -176,3 +176,31 @@ export function buildSystemGraph(ast: AstNode): SystemGraph {
 
   return { nodes, edges };
 }
+
+// A diagnostic's line span overlaps a node's, attributed to the *tightest*
+// containing node — see `nodeDiagnostics`.
+interface LineRanged {
+  range: { start: { line: number }; end: { line: number } };
+}
+
+/** Attribute each diagnostic to the graph node whose source most tightly
+ *  contains it (smallest line span), so a problem inside an aggregate marks the
+ *  aggregate — not also its enclosing module. Diagnostics outside every node's
+ *  span (e.g. system-level) are dropped (they still show in the Problems panel).
+ *  Coordinates are 0-based LSP lines, shared by CST ranges and diagnostics. */
+export function nodeDiagnostics<D extends LineRanged>(graph: SystemGraph, diagnostics: readonly D[]): Map<string, D[]> {
+  const spans = graph.nodes.flatMap((n) => {
+    const r = n.ast.$cstNode?.range;
+    return r ? [{ id: n.id, start: r.start.line, end: r.end.line, size: r.end.line - r.start.line }] : [];
+  });
+  const out = new Map<string, D[]>();
+  for (const d of diagnostics) {
+    let best: { id: string; size: number } | null = null;
+    for (const s of spans) {
+      if (d.range.start.line < s.start || d.range.start.line > s.end) continue;
+      if (!best || s.size < best.size) best = { id: s.id, size: s.size };
+    }
+    if (best) (out.get(best.id) ?? out.set(best.id, []).get(best.id)!).push(d);
+  }
+  return out;
+}

@@ -5,7 +5,7 @@ import { EmptyFileSystem } from "langium";
 import { describe, expect, it } from "vitest";
 import { createDddServices } from "../../src/language/ddd-module.js";
 import type { Model } from "../../src/language/generated/ast.js";
-import { buildSystemGraph } from "../../web/src/builder/system/model.js";
+import { buildSystemGraph, nodeDiagnostics } from "../../web/src/builder/system/model.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const sales = readFileSync(path.join(here, "..", "..", "examples", "sales.ddd"), "utf8");
@@ -30,5 +30,38 @@ describe("System graph — emit edges from operation bodies", () => {
     const { edges } = buildSystemGraph(parse(sales));
     const lineAdded = edges.filter((e) => e.label === "emits" && e.target === "event:LineAdded");
     expect(lineAdded).toHaveLength(1);
+  });
+});
+
+describe("System graph — diagnostics attribution", () => {
+  const nested = `system S {
+  module M {
+    context C {
+      aggregate Order {
+        qty: int
+        invariant qty > 0
+      }
+    }
+  }
+}`;
+  const diagAt = (line: number, severity: "error" | "warning" = "error") => ({
+    range: { start: { line }, end: { line } },
+    severity,
+    message: `at ${line}`,
+  });
+
+  it("attributes a diagnostic to the tightest containing node, not its ancestors", () => {
+    const graph = buildSystemGraph(parse(nested));
+    const order = graph.nodes.find((n) => n.id === "aggregate:Order")!;
+    const inside = order.ast.$cstNode!.range.start.line + 1; // the `qty: int` line
+    const map = nodeDiagnostics(graph, [diagAt(inside)]);
+    expect([...map.keys()]).toEqual(["aggregate:Order"]);
+    expect(map.get("aggregate:Order")).toHaveLength(1);
+  });
+
+  it("drops a diagnostic that falls outside every node's span", () => {
+    const graph = buildSystemGraph(parse(nested));
+    const map = nodeDiagnostics(graph, [diagAt(0)]); // the `system S {` line
+    expect(map.size).toBe(0);
   });
 });

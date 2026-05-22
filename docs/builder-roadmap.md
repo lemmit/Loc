@@ -331,6 +331,13 @@ Done:
   kinds keep their single text row. The op is a `:=` / `+=` / `-=` dropdown; the
   value re-uses the structured Expression picker. Gated by
   `test/system-body.test.ts` + e2e.
+- **Diagnostics on graph nodes** — LSP diagnostics (`ctx.diagnostics`) are
+  attributed to the construct whose source most tightly contains each (so a
+  problem inside an aggregate marks the aggregate, not its module), and that node
+  renders a red (error) / yellow (warning) outline + a `✕`/`⚠` count, with the
+  messages on the node's `title`. `nodeDiagnostics` in `model.ts` (pure,
+  attribution by CST line span); rendering in `SystemBuilderPane.tsx`. Gated by
+  `test/system-model.test.ts`.
 
 Open:
 
@@ -354,9 +361,8 @@ Planned — recommended order:
 1. ~~**Finish expression/statement structuring**~~ — done: block-body lambdas,
    arg-name editing, and assignment-target structuring (all in Done above). Only
    structured *bare-call* statements remain (see Open) — low value, deferred.
-2. **Diagnostics on graph nodes** — wire LSP diagnostics onto model nodes (a
-   badge / red outline on the offending construct), mirroring the page builder's
-   per-node diagnostics via `__range`. Makes a broken system visible on the graph.
+2. ~~**Diagnostics on graph nodes**~~ — done (see Done above): per-construct
+   error/warning outline + count, attributed by tightest CST containment.
 3. **Search / filter / focus** — jump-to-construct, filter by kind, highlight a
    node's neighbours; needed once a system outgrows one screen.
 4. **Traceability overlay** — surface the derived requirement / solution /
