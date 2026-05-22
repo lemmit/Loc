@@ -200,6 +200,111 @@ need a compiled artifact.")
 
 ---
 
+### P3 slice 5 — build-graph design (FOR REVIEW, not yet implemented)
+
+Making `@loom/backend-hono-v4` the *real* runtime source (not a never-executed
+identity shell) forces a build-graph decision. This section is the design to
+ratify before any `git mv`.
+
+#### The hard constraint
+
+npm's `"exports"` subpath targets **cannot escape their own package directory**
+(`../` targets throw `ERR_INVALID_PACKAGE_TARGET`). So `@loom/core/ir` cannot
+map straight to the repo's top-level `out/ir/…`. `@loom/core` must contain (or
+re-export through a package name) the JS its `exports` map points at. Today's
+build is a single `tsc -b` with `rootDir: src` → `out/`, `include:
+["src/**/*"]`; it never compiles `packages/`, and the package shells are pure
+identity (never imported at runtime). That ends here.
+
+#### Decisions already locked (this turn)
+
+- `generator/typescript/` is a **shared TS-emission layer** (future
+  nestjs/nextjs backends will use it), so it does **not** move into the hono
+  package and is **not** "neutral core." For now it rides a
+  **`@loom/core/generator-ts` subpath**; a dedicated `@loom/generator-ts`
+  package is deferred until a second TS backend exists.
+- Backend imports are **publish-shape `@loom/core/*` subpaths**, not relative
+  `../../src` (packages ship separately eventually).
+- **Subpaths, not a bloated `@loom/core` root export** — the root entry stays
+  the curated browser-safe API; internals come via explicit subpaths.
+
+#### Target package build graph
+
+Three compiled units, wired as composite TS project references from a root
+solution tsconfig:
+
+```
+loc-ddd-dsl (root)   rootDir src → out/   ← unchanged toolchain build
+   │  adds an `exports` map exposing its own out/: ./ir, ./util/*, ./surface,
+   │  ./manifest, ./generator-ts  (root CAN export its own out/ — in-package)
+   ▼
+@loom/core           packages/core/   tsconfig→ dist/   (composite)
+   │  thin re-export shells; subpaths re-export the root package by name:
+   │    core/ir.ts        → export * from "loc-ddd-dsl/ir"
+   │    core/generator-ts → export * from "loc-ddd-dsl/generator-ts"
+   │    core/surface,manifest,util  likewise
+   │  package.json exports: { ".": …, "./ir": "./dist/ir.js", "./generator-ts":
+   │    "./dist/generator-ts.js", "./surface": …, "./manifest": …, "./util/*" }
+   ▼
+@loom/backend-hono-v4  packages/backend-hono-v4/{src,…}  tsconfig→ dist/ (composite)
+      the relocated platform/hono/v4 source; imports @loom/core/* only;
+      package.json exports { ".": "./dist/index.js", "./pins": "./dist/pins.js" }
+```
+
+Why route core's subpaths *through the root package name* (`loc-ddd-dsl/ir`)
+rather than relative `../../src`: the exports-can't-escape rule. The root
+package legally exports its own `out/`; `@loom/core` (a sibling package) re-exports
+those by package specifier, and its own `exports` map points only at its own
+`dist/`. No `../` escape anywhere. The hono package never names `loc-ddd-dsl`
+— only `@loom/core/*` — so the publish-shape boundary is clean.
+
+#### The 3-context resolution matrix (the subtle part)
+
+The same `@loom/core/ir` specifier is resolved by three different runtimes; each
+must land on a working artifact:
+
+| Context | Resolves via | Must hit | Mechanism |
+| --- | --- | --- | --- |
+| Compiled CLI (`bin/cli.js`→`out/`), capture script | Node `exports` | `dist/*.js` | default `exports` condition |
+| Test suite (vitest, transforms `.ts`) | vite/vitest resolve | `*.ts` source | a **`"source"` export condition** + `resolve.conditions:["source",…]` in `vitest.config.ts` (and the root `exports` gets a `source` branch → `./src/ir/…ts`) |
+| Playground (`web/`, Vite) | vite resolve | `.ts` source | same `"source"` condition added to `web/vite.config.ts`; **plus** the `@loom/core` Vite alias / condition so the npm-engine VFS resolver treats `@loom/*` as local toolchain, never a registry fetch |
+
+The `"source"` condition is the linchpin: published consumers and the compiled
+CLI get `dist/`; in-repo dev (vitest + Vite) gets `.ts`, so there's no
+build-before-test ordering trap and HMR still works. Without it, tests would
+import stale/absent `dist/`.
+
+#### Build-order & the existing gates
+
+- Root solution tsconfig references `packages/core` then `packages/backend-hono-v4`;
+  `npm run build` becomes `tsc -b` over the solution (core → backend → … after
+  the root lib). `prepare` unchanged otherwise.
+- **Byte-identity is unaffected by toolchain layout** — the fixture diff is over
+  *generated project output*, not where the compiler emits its own JS. This is
+  the key freedom: the build graph can be reshaped freely as long as
+  `generateSystems` emits identical files.
+- Gates per the standing pipeline: fixture byte-identical, `npm test`,
+  `LOOM_TS_BUILD`, `cd web && tsc -b`. The browser path (playground discovery)
+  is PR B, gated on deployed `playground-e2e`.
+
+#### Open questions for review
+
+1. **`"source"` condition naming** — `"source"` vs `"development"` (Vite adds
+   `development` by default; reusing it avoids a `vitest.config.ts` change but is
+   less explicit). Recommend explicit `"source"`.
+2. **Root `exports` field** — adding one *restricts* `loc-ddd-dsl` deep imports
+   to the listed subpaths. Relative importers (web `../../../src`, tests
+   `../src`) are unaffected (they don't go through the package name), but any
+   future deep import of `loc-ddd-dsl/<unlisted>` would break. Acceptable?
+3. **Scope of PR A** — land all three build units + root `exports` + the
+   `source` condition + the hono relocation in one PR, or split the build-infra
+   (root exports + core dist + conditions, no behaviour change) from the hono
+   relocation (drops the static `inTreeBackends` entry)? Recommend splitting:
+   build-infra first (provably byte-identical, no discovery change), relocation
+   second.
+
+---
+
 #### Original blocked-state notes (conclusion superseded by the re-assessment above)
 
 Slice 5 was to `git mv src/platform/hono/v4/* → packages/backend-hono-v4/src/` and drop the in-tree static backend entry so the workspace package becomes the *runtime* source (fs-discovery `import(pkg)`). The facts below remain accurate; what the re-assessment revises is the **conclusion** ("P3 stops at slice 4") — the VFS source (tasks 1–5) is the unblock and it does not wait on the engine track. Verified facts on `main`:
