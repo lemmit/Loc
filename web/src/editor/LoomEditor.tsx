@@ -122,6 +122,13 @@ export function LoomEditor(props: LoomEditorProps): JSX.Element {
       };
     }
 
+    // Automation seam: lets e2e set/read the document text directly (set
+    // dispatches onChange like a normal edit), without depending on clipboard,
+    // paste, or the find widget.  Harmless in production.
+    const automation = window as unknown as { __loomSetSource?: (t: string) => void; __loomGetSource?: () => string };
+    automation.__loomSetSource = (text: string) => model.setValue(text);
+    automation.__loomGetSource = () => model.getValue();
+
     const emitDiagnostics = (): void => {
       onDiagnosticsRef.current?.(
         markersToDiagnostics(monaco.editor.getModelMarkers({ resource: MODEL_URI })),
@@ -134,6 +141,8 @@ export function LoomEditor(props: LoomEditorProps): JSX.Element {
 
     return () => {
       if (handleRef.current) handleRef.current.current = null;
+      delete (window as unknown as { __loomSetSource?: unknown }).__loomSetSource;
+      delete (window as unknown as { __loomGetSource?: unknown }).__loomGetSource;
       changeSub.dispose();
       markerSub.dispose();
       editor.dispose();
