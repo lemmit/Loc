@@ -338,6 +338,12 @@ Done:
   messages on the node's `title`. `nodeDiagnostics` in `model.ts` (pure,
   attribution by CST line span); rendering in `SystemBuilderPane.tsx`. Gated by
   `test/system-model.test.ts`.
+- **Search / filter / focus** — a canvas-overlay search box (case-insensitive
+  substring over name + kind) and a kind multi-select dim non-matching nodes /
+  edges in place (positions preserved), with a match count and a **Focus** button
+  that `fitView`s to the matches. Pure `matchNodes` in `model.ts`; UI +
+  in-place-opacity effect in `SystemBuilderPane.tsx`. Gated by
+  `test/system-model.test.ts` + e2e.
 
 Open:
 
@@ -363,8 +369,9 @@ Planned — recommended order:
    structured *bare-call* statements remain (see Open) — low value, deferred.
 2. ~~**Diagnostics on graph nodes**~~ — done (see Done above): per-construct
    error/warning outline + count, attributed by tightest CST containment.
-3. **Search / filter / focus** — jump-to-construct, filter by kind, highlight a
-   node's neighbours; needed once a system outgrows one screen.
+3. ~~**Search / filter / focus**~~ — done (see Done above): search box + kind
+   filter dim non-matches, with a Focus button. Neighbour-highlight on selection
+   is the remaining nice-to-have.
 4. **Traceability overlay** — surface the derived requirement / solution /
    testCase coverage + gaps (`.loom/` reports, `docs/traceability.md`) as a graph
    heat-overlay: which aggregates lack tests / have unmet requirements. The

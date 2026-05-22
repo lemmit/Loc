@@ -19,7 +19,7 @@ import type { BoundedContext, Model, System } from "../../../../src/language/gen
 import { printStructural } from "../../../../src/language/print/index.js";
 import { parseDdd } from "../parse";
 import { spliceNode, applyEdits } from "../edit-engine";
-import { buildSystemGraph, nodeDiagnostics, type GraphNode, type NodeKind } from "./model";
+import { buildSystemGraph, matchNodes, nodeDiagnostics, type GraphNode, type NodeKind } from "./model";
 import type { Diagnostic } from "../../lsp/protocol";
 import { IDENTIFIER, renameConstruct, renameMember } from "./rename";
 import {
@@ -300,6 +300,16 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const [exprMode, setExprMode] = useState<ExprMode>("structured");
   const [findName, setFindName] = useState<string | null>(null);
   const [emitKey, setEmitKey] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [kindFilter, setKindFilter] = useState<NodeKind[]>([]);
+
+  // Search + kind filter → the set of node ids to emphasise. Inactive (empty
+  // query and no kinds) matches every node, so nothing dims.
+  const filterActive = query.trim() !== "" || kindFilter.length > 0;
+  const matched = useMemo(
+    () => (graph ? matchNodes(graph, query, kindFilter) : new Set<string>()),
+    [graph, query, kindFilter],
+  );
 
   useEffect(() => {
     const sel = selectedId;
@@ -316,6 +326,14 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     setNodes(toRfNodes(graph, diagByNode));
     setEdges(toRfEdges(graph));
   }, [graph, diagByNode, setNodes, setEdges]);
+
+  // Dim non-matching nodes / edges in place (preserving positions) when a search
+  // or kind filter is active; an edge stays lit only if both endpoints match.
+  useEffect(() => {
+    const lit = (id: string): boolean => !filterActive || matched.has(id);
+    setNodes((ns) => ns.map((n) => ({ ...n, style: { ...n.style, opacity: lit(n.id) ? 1 : 0.2 } })));
+    setEdges((es) => es.map((e) => ({ ...e, style: { ...e.style, opacity: !filterActive || (matched.has(e.source) && matched.has(e.target)) ? 1 : 0.1 } })));
+  }, [matched, filterActive, setNodes, setEdges]);
 
   // `fitView` on the ReactFlow element only fits on mount — but nodes are
   // populated by the effect above, *after* the first render — so fit once the
@@ -532,6 +550,46 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
           <Background />
           <Controls />
         </ReactFlow>
+        <Group
+          gap={4}
+          wrap="nowrap"
+          align="center"
+          style={{ position: "absolute", top: 8, left: 8, zIndex: 5, background: "var(--mantine-color-body)", borderRadius: 6, padding: 4, boxShadow: "0 1px 4px rgba(0,0,0,0.2)" }}
+        >
+          <TextInput
+            size="xs"
+            w={140}
+            placeholder="search…"
+            value={query}
+            data-testid="c4system-search"
+            aria-label="search constructs"
+            onChange={(e) => setQuery(e.currentTarget.value)}
+          />
+          <MultiSelect
+            size="xs"
+            w={150}
+            placeholder={kindFilter.length ? undefined : "all kinds"}
+            data={[...new Set(graph.nodes.map((n) => n.kind))]}
+            value={kindFilter}
+            data-testid="c4system-kind-filter"
+            clearable
+            onChange={(v) => setKindFilter(v as NodeKind[])}
+          />
+          {filterActive && (
+            <>
+              <Text size="xs" c="dimmed" data-testid="c4system-match-count">{matched.size}</Text>
+              <Button
+                size="compact-xs"
+                variant="default"
+                data-testid="c4system-focus"
+                disabled={matched.size === 0}
+                onClick={() => void rf.fitView({ nodes: [...matched].map((id) => ({ id })), padding: 0.2, duration: 300 })}
+              >
+                Focus
+              </Button>
+            </>
+          )}
+        </Group>
         {compact && (
           <Button
             size="xs"

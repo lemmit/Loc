@@ -5,7 +5,11 @@ import { EmptyFileSystem } from "langium";
 import { describe, expect, it } from "vitest";
 import { createDddServices } from "../../src/language/ddd-module.js";
 import type { Model } from "../../src/language/generated/ast.js";
-import { buildSystemGraph, nodeDiagnostics } from "../../web/src/builder/system/model.js";
+import {
+  buildSystemGraph,
+  matchNodes,
+  nodeDiagnostics,
+} from "../../web/src/builder/system/model.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const sales = readFileSync(path.join(here, "..", "..", "examples", "sales.ddd"), "utf8");
@@ -63,5 +67,30 @@ describe("System graph — diagnostics attribution", () => {
     const graph = buildSystemGraph(parse(nested));
     const map = nodeDiagnostics(graph, [diagAt(0)]); // the `system S {` line
     expect(map.size).toBe(0);
+  });
+});
+
+describe("System graph — search / kind filter", () => {
+  it("matches every node when query and kinds are both empty", () => {
+    const graph = buildSystemGraph(parse(sales));
+    expect(matchNodes(graph, "", []).size).toBe(graph.nodes.length);
+  });
+
+  it("matches by case-insensitive name or kind substring", () => {
+    const graph = buildSystemGraph(parse(sales));
+    expect(matchNodes(graph, "order", [])).toContain("aggregate:Order");
+    // The kind token is searchable too.
+    const events = matchNodes(graph, "event", []);
+    expect([...events].every((id) => id.startsWith("event:"))).toBe(true);
+    expect(events.size).toBeGreaterThan(0);
+  });
+
+  it("filters by kind, intersecting with the query", () => {
+    const graph = buildSystemGraph(parse(sales));
+    const aggsWithO = matchNodes(graph, "o", ["aggregate"]);
+    expect([...aggsWithO].every((id) => id.startsWith("aggregate:"))).toBe(true);
+    expect(aggsWithO).toContain("aggregate:Order");
+    // A repository (different kind) is excluded by the aggregate-only filter.
+    expect([...aggsWithO].some((id) => id.startsWith("repository:"))).toBe(false);
   });
 });
