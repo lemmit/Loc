@@ -156,9 +156,11 @@ Done:
 - **Structured expression editor (v1)** — a recursive editor
   (`web/src/builder/system/expr-model.ts` + `ExpressionEditor.tsx`) that
   decomposes an expression into an operator tree: binary/unary/paren render
-  operator dropdowns with nested operands, literals get typed inputs, and every
-  other form (names, member access, calls, match, lambda, new) is a
-  reparse-validated `raw` text leaf (recognise-or-raw). Plugged into the
+  operator dropdowns with nested operands, literals get typed inputs, calls
+  (`f(a, b)`) and member access (`a.b`, `a.b(c)`) render editable callee/receiver
+  + member + an add/remove/edit argument list, and everything still unmodelled
+  (lambdas, `match`, `new`, ternary, object literals) is a reparse-validated
+  `raw` text leaf (recognise-or-raw). Plugged into the
   single-expression slots — invariants, derived props, function bodies — via one
   inspector "Expression" picker (`expr-slots.ts`). A **structured⇄text toggle**
   lets advanced users edit the whole expression as raw text (same
@@ -181,10 +183,11 @@ Done:
 
 Open:
 
-- **Deeper expression structuring** — structured calls (add/remove/edit args),
-  member access (receiver + member with chained `a.b.c` completion — needs the
-  type system, not just the flat name set), and structured
-  `match`/`new`/object/lambda, instead of `raw` text leaves.
+- **Deeper expression structuring** — structured `match`/`new`/object
+  literals/lambda (still `raw` leaves); **member-name completion** (suggesting
+  `.member` after a receiver — needs the type system, not just the flat name set
+  that drives bare-name suggestions today); and arg-*name* editing on calls
+  (existing named args are preserved verbatim but can't be renamed in the UI).
 - **Expression editor in more slots** — statement-expression slots
   (`let`/`:=`/`precondition` values inside bodies), reusing the same recursive
   editor (view filters/binds and repository find `where` clauses already done).

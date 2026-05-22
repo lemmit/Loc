@@ -48,12 +48,27 @@ describe("structured expression editor — model", () => {
     expect(emitExpr(tree)).toBe("amount >= 0");
   });
 
-  it("treats non-operator forms (calls, member access) as raw leaves", () => {
-    const expr = slotExpr(parse(sales), { kind: "derived", owner: "Order", name: "total" })!;
-    const tree = seedExpr(expr);
-    expect(tree.kind).toBe("raw");
-    // Round-trips verbatim through the printer.
-    expect(emitExpr(tree)).toMatch(/^Money\(/);
+  it("structures calls (callee + args), keeping lambdas as raw leaves", () => {
+    // derived total = Money(lines.sum(l => l.subtotal.amount), "USD")
+    const tree = seedExpr(slotExpr(parse(sales), { kind: "derived", owner: "Order", name: "total" })!);
+    if (tree.kind !== "call") throw new Error("expected a call");
+    expect(tree.callee).toMatchObject({ kind: "raw", text: "Money" });
+    expect(tree.args).toHaveLength(2);
+    expect(tree.args[0].value).toMatchObject({ kind: "member", member: "sum", call: true });
+    expect(tree.args[1].value).toMatchObject({ kind: "lit", lit: "string", value: "USD" });
+    expect(emitExpr(tree)).toBe('Money(lines.sum(l => l.subtotal.amount), "USD")');
+  });
+
+  it("structures member access (receiver + member)", () => {
+    // find activeForCustomer where this.customerId == forCustomer && this.status == Draft
+    const tree = seedExpr(slotExpr(parse(sales), { kind: "findFilter", owner: "Orders", name: "activeForCustomer" })!);
+    if (tree.kind !== "binary") throw new Error("expected a binary");
+    expect(tree.left).toMatchObject({
+      kind: "binary",
+      op: "==",
+      left: { kind: "member", member: "customerId", call: false, receiver: { kind: "raw", text: "this" } },
+    });
+    expect(emitExpr(tree)).toBe("this.customerId == forCustomer && this.status == Draft");
   });
 
   it("lists invariants (by predicate) and derived props (by name)", () => {

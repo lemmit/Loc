@@ -1,6 +1,6 @@
 import { createContext, useContext, useState } from "react";
-import { Autocomplete, Box, Group, SegmentedControl, Select, Text, TextInput, Textarea } from "@mantine/core";
-import { BINARY_OPS, UNARY_OPS, emitExpr, type EExpr } from "./expr-model";
+import { ActionIcon, Autocomplete, Box, Group, SegmentedControl, Select, Text, TextInput, Textarea } from "@mantine/core";
+import { BINARY_OPS, UNARY_OPS, emitExpr, type ECallArg, type EExpr } from "./expr-model";
 
 export type ExprMode = "structured" | "text";
 
@@ -18,6 +18,32 @@ const ExprScopeContext = createContext<string[]>([]);
 interface NodeProps {
   node: EExpr;
   onChange: (next: EExpr, commit: boolean) => void;
+}
+
+// Argument list shared by call (`f(…)`) and member-call (`a.b(…)`) nodes.
+// Edits a single arg's value, removes an arg, or appends a positional one
+// (defaulting to `null` so the result stays parseable until edited). Named args
+// keep their name verbatim; renaming args is out of scope for now.
+function ArgsEditor({ args, onArgs }: { args: ECallArg[]; onArgs: (args: ECallArg[], commit: boolean) => void }): JSX.Element {
+  return (
+    <Group gap={2} wrap="nowrap" align="center">
+      <Text size="xs" c="dimmed">(</Text>
+      {args.map((arg, i) => (
+        <Group key={i} gap={2} wrap="nowrap" align="center">
+          {i > 0 && <Text size="xs" c="dimmed">,</Text>}
+          {arg.name && <Text size="xs" c="dimmed">{arg.name}:</Text>}
+          <ExpressionEditor node={arg.value} onChange={(n, c) => onArgs(args.map((a, j) => (j === i ? { ...a, value: n } : a)), c)} />
+          <ActionIcon size="xs" variant="subtle" color="gray" data-testid="c4expr-arg-del" aria-label="remove argument" onClick={() => onArgs(args.filter((_, j) => j !== i), true)}>
+            <Text size="xs">×</Text>
+          </ActionIcon>
+        </Group>
+      ))}
+      <ActionIcon size="xs" variant="subtle" color="gray" data-testid="c4expr-arg-add" aria-label="add argument" onClick={() => onArgs([...args, { value: { kind: "lit", lit: "null", value: "null" } }], true)}>
+        <Text size="xs">+</Text>
+      </ActionIcon>
+      <Text size="xs" c="dimmed">)</Text>
+    </Group>
+  );
 }
 
 export function ExpressionEditor({ node, onChange }: NodeProps): JSX.Element {
@@ -71,6 +97,30 @@ export function ExpressionEditor({ node, onChange }: NodeProps): JSX.Element {
           onChange={(e) => onChange({ ...node, value: e.currentTarget.value }, false)}
           onBlur={() => onChange(node, true)}
         />
+      );
+    case "call":
+      return (
+        <Group gap={1} wrap="nowrap" align="center" style={{ border: "1px solid var(--mantine-color-dark-4)", borderRadius: 4, padding: 2 }}>
+          <ExpressionEditor node={node.callee} onChange={(n, c) => onChange({ ...node, callee: n }, c)} />
+          <ArgsEditor args={node.args} onArgs={(args, c) => onChange({ ...node, args }, c)} />
+        </Group>
+      );
+    case "member":
+      return (
+        <Group gap={1} wrap="nowrap" align="center">
+          <ExpressionEditor node={node.receiver} onChange={(n, c) => onChange({ ...node, receiver: n }, c)} />
+          <Text size="xs" c="dimmed">.</Text>
+          <TextInput
+            size="xs"
+            w={90}
+            value={node.member}
+            data-testid="c4expr-member"
+            styles={{ input: { fontFamily: "monospace", fontSize: 11 } }}
+            onChange={(e) => onChange({ ...node, member: e.currentTarget.value }, false)}
+            onBlur={() => onChange(node, true)}
+          />
+          {node.call && <ArgsEditor args={node.args} onArgs={(args, c) => onChange({ ...node, args }, c)} />}
+        </Group>
       );
     case "raw":
       return (
