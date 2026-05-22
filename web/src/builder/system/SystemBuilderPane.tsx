@@ -13,12 +13,12 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { AstUtils, type AstNode } from "langium";
-import { Box, Button, Checkbox, Drawer, Group, MultiSelect, NumberInput, ScrollArea, Select, Stack, Text, TextInput, Textarea } from "@mantine/core";
+import { Box, Button, Checkbox, Drawer, Group, Modal, MultiSelect, NumberInput, ScrollArea, Select, Stack, Text, TextInput, Textarea } from "@mantine/core";
 import type { LayoutCtx } from "../../layout/ctx";
 import type { BoundedContext, Model, System } from "../../../../src/language/generated/ast.js";
 import { printStructural } from "../../../../src/language/print/index.js";
 import { parseDdd } from "../parse";
-import { spliceNode, applyEdits } from "../edit-engine";
+import { spliceNode, applyEdits, lineDiff } from "../edit-engine";
 import { buildSystemGraph, coverageByNode, matchNodes, nodeDiagnostics, type CoverageStatus, type GraphNode, type NodeKind } from "./model";
 import { buildLinkedModel } from "./linked-doc";
 import { lowerModel } from "../../../../src/ir/lower.js";
@@ -321,6 +321,8 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const [kindFilter, setKindFilter] = useState<NodeKind[]>([]);
   const [overlay, setOverlay] = useState(false);
   const [coverage, setCoverage] = useState<Map<string, CoverageStatus>>(new Map());
+  const [preview, setPreview] = useState(false);
+  const [pending, setPending] = useState<{ next: string; keepSelection: boolean } | null>(null);
 
   // Search + kind filter → the set of node ids to emphasise. Inactive (empty
   // query and no kinds) matches every node, so nothing dims.
@@ -405,10 +407,18 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
 
   const selected = graph.nodes.find((n) => n.id === selectedId) ?? null;
 
-  const apply = (next: string, keepSelection = false): void => {
+  const commit = (next: string, keepSelection: boolean): void => {
     ctx.onSourceChange(next, "builder");
     if (!keepSelection) setSelectedId(null);
     setRev((r) => r + 1);
+  };
+
+  // In preview mode an edit is staged (showing its source diff) until confirmed,
+  // instead of committing live. A no-op edit (text unchanged) always passes
+  // through. `apply` is the single choke point every editing handler routes to.
+  const apply = (next: string, keepSelection = false): void => {
+    if (preview && next !== ctx.getSource()) setPending({ next, keepSelection });
+    else commit(next, keepSelection);
   };
 
   const renameField = async (oldName: string, rawNext: string): Promise<void> => {
@@ -640,6 +650,16 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
             onClick={() => setOverlay((o) => !o)}
           >
             Coverage
+          </Button>
+          <Button
+            size="compact-xs"
+            variant={preview ? "filled" : "default"}
+            color={preview ? "blue" : undefined}
+            data-testid="c4system-preview-toggle"
+            title="Preview each edit's source diff before applying"
+            onClick={() => setPreview((p) => !p)}
+          >
+            Preview
           </Button>
           {overlay && (
             <Group gap={8} wrap="nowrap" data-testid="c4system-coverage-legend">
@@ -1026,7 +1046,53 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
           </Stack>
         )}
       </InspectorPanel>
+      <Modal
+        opened={pending !== null}
+        onClose={() => setPending(null)}
+        title="Preview edit"
+        size="lg"
+        data-testid="c4system-preview-modal"
+      >
+        {pending && <DiffView diff={lineDiff(ctx.getSource(), pending.next)} />}
+        <Group justify="flex-end" mt="md">
+          <Button size="xs" variant="default" data-testid="c4system-preview-cancel" onClick={() => setPending(null)}>
+            Cancel
+          </Button>
+          <Button
+            size="xs"
+            data-testid="c4system-preview-apply"
+            onClick={() => {
+              if (pending) commit(pending.next, pending.keepSelection);
+              setPending(null);
+            }}
+          >
+            Apply
+          </Button>
+        </Group>
+      </Modal>
     </Box>
+  );
+}
+
+// A compact unified diff of a staged edit: removed lines (red, `-`) then added
+// lines (green, `+`), anchored at the changed line. Edits are localised splices,
+// so the hunk is small.
+function DiffView({ diff }: { diff: ReturnType<typeof lineDiff> }): JSX.Element {
+  if (diff.removed.length === 0 && diff.added.length === 0) {
+    return <Text size="xs" c="dimmed">No change.</Text>;
+  }
+  return (
+    <ScrollArea.Autosize mah={360}>
+      <Box style={{ fontFamily: "monospace", fontSize: 11, whiteSpace: "pre" }} data-testid="c4system-preview-diff">
+        <Text size="xs" c="dimmed">@@ line {diff.atLine + 1} @@</Text>
+        {diff.removed.map((l, i) => (
+          <Box key={`r${i}`} style={{ background: "var(--mantine-color-red-9)", color: "var(--mantine-color-red-1)" }}>{`- ${l}`}</Box>
+        ))}
+        {diff.added.map((l, i) => (
+          <Box key={`a${i}`} style={{ background: "var(--mantine-color-green-9)", color: "var(--mantine-color-green-1)" }}>{`+ ${l}`}</Box>
+        ))}
+      </Box>
+    </ScrollArea.Autosize>
   );
 }
 

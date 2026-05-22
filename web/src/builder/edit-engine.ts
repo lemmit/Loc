@@ -48,6 +48,29 @@ export function nodeEditRange(
   return { offset, end: cst.end };
 }
 
+export interface DiffHunk {
+  /** 0-based line index where the change begins (after the common prefix). */
+  atLine: number;
+  /** Lines removed (present in `before`, gone in `after`). */
+  removed: string[];
+  /** Lines added (present in `after`, new vs `before`). */
+  added: string[];
+}
+
+// Line-level diff of two source strings as a single contiguous hunk. Builder
+// edits are localised CST splices, so trimming the common leading + trailing
+// lines yields a tight, accurate before→after hunk (no full LCS needed). An
+// empty hunk (`removed` and `added` both empty) means the strings are equal.
+export function lineDiff(before: string, after: string): DiffHunk {
+  const b = before.split("\n");
+  const a = after.split("\n");
+  let p = 0;
+  while (p < b.length && p < a.length && b[p] === a[p]) p++;
+  let s = 0;
+  while (s < b.length - p && s < a.length - p && b[b.length - 1 - s] === a[a.length - 1 - s]) s++;
+  return { atLine: p, removed: b.slice(p, b.length - s), added: a.slice(p, a.length - s) };
+}
+
 // Replace the source text of `node` with `newText` (regenerate-and-splice).
 // `node` must come from parsing `source`.
 export function spliceNode(

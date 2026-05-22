@@ -745,3 +745,23 @@ test("toggles the traceability coverage overlay", async ({ page }) => {
   await page.getByTestId("c4system-coverage-toggle").click();
   await expect(page.getByTestId("c4system-coverage-legend")).toHaveCount(0);
 });
+
+test("previews an edit's source diff before applying when Preview is on", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  // With Preview on, an edit (add a module) stages its diff in a modal instead
+  // of committing live; Apply commits it and closes the modal.
+  await page.getByTestId("c4system-preview-toggle").click();
+  await page.getByTestId("c4system-add-module").click();
+  await expect(page.getByTestId("c4system-preview-modal")).toBeVisible();
+  await expect(page.getByTestId("c4system-preview-diff")).toBeVisible();
+  await page.getByTestId("c4system-preview-apply").click();
+  await expect(page.getByTestId("c4system-preview-modal")).toHaveCount(0);
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+});

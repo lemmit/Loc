@@ -1,6 +1,11 @@
 import { type AstNode, AstUtils } from "langium";
 import { describe, expect, it } from "vitest";
-import { applyEdits, nodeEditRange, spliceNode } from "../../web/src/builder/edit-engine.js";
+import {
+  applyEdits,
+  lineDiff,
+  nodeEditRange,
+  spliceNode,
+} from "../../web/src/builder/edit-engine.js";
 import { parseDdd } from "../../web/src/builder/parse.js";
 
 // ---------------------------------------------------------------------------
@@ -64,5 +69,22 @@ describe("builder edit-engine", () => {
     expect(out).not.toContain("// page comment");
     // The unrelated ui-level comment is still preserved.
     expect(out).toContain("// top-of-ui comment");
+  });
+});
+
+describe("lineDiff — preview hunk", () => {
+  it("isolates a single changed line as a tight hunk", () => {
+    const before = "a\nb\nc\nd";
+    const after = "a\nB\nc\nd";
+    expect(lineDiff(before, after)).toEqual({ atLine: 1, removed: ["b"], added: ["B"] });
+  });
+
+  it("reports an empty hunk for identical sources", () => {
+    expect(lineDiff("x\ny", "x\ny")).toEqual({ atLine: 2, removed: [], added: [] });
+  });
+
+  it("captures pure insertions and deletions", () => {
+    expect(lineDiff("a\nc", "a\nb\nc")).toEqual({ atLine: 1, removed: [], added: ["b"] });
+    expect(lineDiff("a\nb\nc", "a\nc")).toEqual({ atLine: 1, removed: ["b"], added: [] });
   });
 });
