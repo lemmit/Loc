@@ -210,6 +210,9 @@ export interface LayoutCtx {
   runGenerate: () => void;
   runBundle: () => void;
   runBoot: () => void;
+  /** Re-boot with the persistent DB's stored data dropped first — the
+   *  recovery path when a boot keeps failing on stale persisted data. */
+  runResetData: () => void;
   runWipe: () => void;
   runDispatch: () => void;
   /** Full pipeline cascade — Generate → Bundle → Boot.  On a clean

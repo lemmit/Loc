@@ -114,8 +114,14 @@ export interface RuntimeEngine extends RuntimeDispatcher {
 
   /** Bring the backend up from prepared bundle code.  `dataDir`
    *  follows the existing PGlite convention (`:memory:` /
-   *  `opfs-ahp://…`); engines without a DB ignore it. */
-  boot(bundleCode: string, dataDir?: string): Promise<BootResult>;
+   *  `opfs-ahp://…`); engines without a DB ignore it.  `opts.fresh`
+   *  drops the persistent DB's stored data before applying schema —
+   *  the recovery path for a boot that keeps failing on stale data. */
+  boot(
+    bundleCode: string,
+    dataDir?: string,
+    opts?: { fresh?: boolean },
+  ): Promise<BootResult>;
 
   /** Serve one backend HTTP request against the booted instance. */
   dispatch(req: SerializedRequest): Promise<DispatchResult>;

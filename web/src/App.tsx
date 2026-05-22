@@ -551,7 +551,10 @@ export default function App(): JSX.Element {
     setApiEndpoints([]);
   }
 
-  async function runBootStep(hono: BundleOk): Promise<boolean> {
+  async function runBootStep(
+    hono: BundleOk,
+    opts?: { fresh?: boolean },
+  ): Promise<boolean> {
     const engine = engineRef.current;
     if (!engine) return false;
     dispatch({ type: "BOOT_START" });
@@ -565,7 +568,7 @@ export default function App(): JSX.Element {
     try {
       const sourceHash = fnv1a32(sourceRef.current);
       const dataDir = `opfs-ahp://loom-${sourceHash}`;
-      const res = await engine.boot(hono.code, dataDir);
+      const res = await engine.boot(hono.code, dataDir, { fresh: opts?.fresh });
       if (res.ok) {
         dispatch({
           type: "BOOT_OK",
@@ -617,6 +620,15 @@ export default function App(): JSX.Element {
   async function runBoot(): Promise<void> {
     if (!honoBundle) return;
     await runBootStep(honoBundle);
+  }
+
+  // Recovery for a boot that keeps failing on stale persisted data:
+  // re-boot with `fresh`, which drops the OPFS island's schemas before
+  // applying DDL.  The normal Reset can't help here — it needs a booted
+  // instance, which the failing boot never produces.
+  async function runResetData(): Promise<void> {
+    if (!honoBundle) return;
+    await runBootStep(honoBundle, { fresh: true });
   }
 
   // Full cascade — the mobile "Run" primary action.  Generates,
@@ -829,6 +841,7 @@ export default function App(): JSX.Element {
     runGenerate: () => void runGenerate(),
     runBundle: () => void runBundle(),
     runBoot: () => void runBoot(),
+    runResetData: () => void runResetData(),
     runWipe: () => void runWipe(),
     runDispatch: () => void runDispatch(),
     runFull: () => void runFull(),
