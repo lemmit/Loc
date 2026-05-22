@@ -185,6 +185,26 @@ test("adds every domain + infra construct kind from the palette", async ({ page 
   }
 });
 
+test("edits a deployable's composition bindings", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Acme/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  // catalogWeb: modules Catalog + CustomerMgmt — add Sales via the multi-select.
+  await page.locator('[data-testid="rf__node-deployable:catalogWeb"]').click();
+  // Mantine's MultiSelect wrapper intercepts the input click — force it open.
+  await page.getByTestId("c4system-deployable-modules").click({ force: true });
+  await page.getByRole("option", { name: "Sales", exact: true }).click();
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+  // The targets select reads the existing binding (sanity that bindings render).
+  await page.locator('[data-testid="rf__node-deployable:webApp"]').click();
+  await expect(page.getByTestId("c4system-deployable-targets")).toHaveValue("api");
+});
+
 test("edits infra construct properties (deployable platform, storage type)", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);
