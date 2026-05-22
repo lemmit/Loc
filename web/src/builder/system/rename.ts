@@ -1,7 +1,6 @@
-import { AstUtils, EmptyFileSystem, URI, type AstNode } from "langium";
-import { createDddServices } from "../../../../src/language/ddd-module.js";
-import type { Model } from "../../../../src/language/generated/ast.js";
+import { AstUtils, type AstNode } from "langium";
 import { applyEdits, type TextEdit } from "../edit-engine";
+import { buildLinkedDocument } from "./linked-doc";
 import type { NodeKind } from "./model";
 
 // Rename a structural construct *and every reference to it*.
@@ -36,17 +35,9 @@ export async function renameConstruct(
   oldName: string,
   newName: string,
 ): Promise<string | null> {
-  const services = createDddServices(EmptyFileSystem).Ddd;
-  const shared = services.shared;
-  const uri = URI.parse("memory:///loom-rename.ddd");
-
-  const docs = shared.workspace.LangiumDocuments;
-  if (docs.hasDocument(uri)) await docs.deleteDocument(uri);
-  const doc = shared.workspace.LangiumDocumentFactory.fromString(source, uri);
-  docs.addDocument(doc);
-  await shared.workspace.DocumentBuilder.build([doc], { validation: false });
-
-  const model = doc.parseResult.value as Model;
+  const linked = await buildLinkedDocument(source, "memory:///loom-rename.ddd");
+  if (!linked) return null;
+  const { model, services, uri } = linked;
   const wantType = KIND_TO_TYPE[kind];
   let target: AstNode | undefined;
   for (const n of AstUtils.streamAst(model)) {

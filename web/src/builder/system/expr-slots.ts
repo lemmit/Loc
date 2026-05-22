@@ -13,7 +13,15 @@ import {
   type Operation,
   type Parameter,
   type Repository,
+  type BinaryExpr,
+  type CallExpr,
+  type Lambda,
+  type MemberAccess,
+  type NewExpr,
+  type ObjectLit,
+  type ParenExpr,
   type Statement,
+  type UnaryExpr,
   type ValueObject,
   type View,
   type Workflow,
@@ -27,7 +35,9 @@ import {
   withLocal,
   type Env,
 } from "../../../../src/ir/lower-expr.js";
+import { envForNode, membersOfType, typeOf } from "../../../../src/language/type-system.js";
 import { applyEdits } from "../edit-engine";
+import { buildLinkedModel } from "./linked-doc";
 import { parseDdd } from "../parse";
 import { listFunctions } from "./body";
 
@@ -312,4 +322,91 @@ function slotEnv(ast: Model, slot: ExprSlot): Env | null {
 export function slotCandidates(ast: Model, slot: ExprSlot): string[] {
   const env = slotEnv(ast, slot);
   return env ? inScopeNames(env).map((c) => c.name) : [];
+}
+
+// ---------------------------------------------------------------------------
+// Type-directed member-name completion.
+//
+// Canonical structural path scheme — identical to the one ExpressionEditor.tsx
+// threads while rendering, so a member node at path P reads the candidates
+// stored here under P.  Each child appends a segment to its parent's path:
+//   binary  → left "L",  right "R"
+//   unary   → operand "o"
+//   paren   → inner "i"
+//   member  → receiver "r",  args "a{i}"
+//   call    → callee "c",    args "a{i}"
+//   lambda  → body "b"
+//   new/obj → fields "f{i}"
+// Leaves (names, literals, ternary, match, block-body lambdas) have no
+// children — they mirror the editor's `raw`/`lit` leaves.
+//
+// Member resolution needs resolved cross-references, so this runs against a
+// freshly *linked* document (async).  `envForNode` builds the correct env at
+// each receiver — including binding an enclosing lambda's param to the
+// collection element type — so completion works inside `xs.all(x => x.…)`.
+// ---------------------------------------------------------------------------
+
+function collectMembers(node: Expression, path: string, out: Map<string, string[]>): void {
+  switch (node.$type) {
+    case "MemberAccess": {
+      const ma = node as MemberAccess;
+      if (ma.receiver) {
+        const t = typeOf(ma.receiver, envForNode(ma.receiver));
+        out.set(path, membersOfType(t).map((m) => m.name));
+        collectMembers(ma.receiver, `${path}r`, out);
+      }
+      ma.args.forEach((a, i) => collectMembers(a.value, `${path}a${i}`, out));
+      break;
+    }
+    case "BinaryExpr": {
+      const b = node as BinaryExpr;
+      collectMembers(b.left, `${path}L`, out);
+      collectMembers(b.right, `${path}R`, out);
+      break;
+    }
+    case "UnaryExpr":
+      collectMembers((node as UnaryExpr).operand, `${path}o`, out);
+      break;
+    case "ParenExpr":
+      collectMembers((node as ParenExpr).inner, `${path}i`, out);
+      break;
+    case "CallExpr": {
+      const c = node as CallExpr;
+      collectMembers(c.callee, `${path}c`, out);
+      c.args.forEach((a, i) => collectMembers(a.value, `${path}a${i}`, out));
+      break;
+    }
+    case "Lambda": {
+      const l = node as Lambda;
+      if (l.body) collectMembers(l.body, `${path}b`, out);
+      break;
+    }
+    case "NewExpr":
+      (node as NewExpr).fields.forEach((f, i) => collectMembers(f.value, `${path}f${i}`, out));
+      break;
+    case "ObjectLit":
+      (node as ObjectLit).fields.forEach((f, i) => collectMembers(f.value, `${path}f${i}`, out));
+      break;
+    // Other forms are opaque leaves (names, literals, ternary, match, …).
+  }
+}
+
+// Size-1 cache of the linked model by source text — switching between slots of
+// the same construct reuses one linked build; a commit changes the source and
+// rebuilds.
+let linkedCache: { source: string; model: Promise<Model | null> } | null = null;
+function linkedModelFor(source: string): Promise<Model | null> {
+  if (linkedCache?.source !== source) linkedCache = { source, model: buildLinkedModel(source) };
+  return linkedCache.model;
+}
+
+/** Per-member-node member-name candidates for a slot's expression, keyed by the
+ *  canonical structural path. Async — builds a linked document so types resolve. */
+export async function memberCandidates(source: string, slot: ExprSlot): Promise<Map<string, string[]>> {
+  const model = await linkedModelFor(source);
+  const out = new Map<string, string[]>();
+  if (!model) return out;
+  const expr = slotExpr(model, slot);
+  if (expr) collectMembers(expr, "", out);
+  return out;
 }

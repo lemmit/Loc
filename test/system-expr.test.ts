@@ -11,6 +11,7 @@ import {
   exprSlotOptions,
   listDerived,
   listInvariants,
+  memberCandidates,
   repoSlotOptions,
   slotCandidates,
   slotExpr,
@@ -240,5 +241,28 @@ describe("structured expression editor — scope-aware name candidates", () => {
   it("offers find params alongside the aggregate's names", () => {
     const c = names({ kind: "findFilter", owner: "Orders", name: "activeForCustomer" });
     expect(c).toEqual(expect.arrayContaining(["forCustomer", "status"]));
+  });
+});
+
+describe("structured expression editor — type-directed member candidates", () => {
+  it("types member receivers, including through a collection-op lambda", async () => {
+    // derived total = Money(lines.sum(l => l.subtotal.amount), "USD")
+    const m = await memberCandidates(sales, { kind: "derived", owner: "Order", name: "total" });
+    // `lines` (containment) is an array → collection ops.
+    expect(m.get("a0")).toEqual(expect.arrayContaining(["count", "sum", "all"]));
+    // Inside the lambda: `l` binds to OrderLine, `l.subtotal` is Money.
+    expect(m.get("a0a0br")).toEqual(expect.arrayContaining(["subtotal", "quantity", "id"]));
+    expect(m.get("a0a0b")).toEqual(["amount", "currency"]);
+  });
+
+  it("types a `this`-rooted receiver in a find filter", async () => {
+    // activeForCustomer where this.customerId == forCustomer && this.status == Draft
+    const m = await memberCandidates(sales, { kind: "findFilter", owner: "Orders", name: "activeForCustomer" });
+    expect(m.get("LL")).toEqual(expect.arrayContaining(["customerId", "status", "id"]));
+  });
+
+  it("returns an empty map for an expression with no member access", async () => {
+    const m = await memberCandidates(sales, { kind: "invariant", owner: "Money", index: 0 });
+    expect(m.size).toBe(0);
   });
 });
