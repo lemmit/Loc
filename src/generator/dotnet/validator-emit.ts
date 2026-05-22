@@ -11,7 +11,7 @@ import { upperFirst, plural } from "../../util/naming.js";
 // ---------------------------------------------------------------------------
 // Per-command FluentValidation `AbstractValidator<TCommand>` emission.
 //
-// Slice 21.B's wire-boundary validator on the .NET side.  The Mediator
+// Wire-boundary validator on the .NET side.  The Mediator
 // pipeline behavior (registered once in Program.cs) resolves
 // `IEnumerable<IValidator<TCommand>>` from DI and runs each before
 // the matching handler executes.  Failures throw

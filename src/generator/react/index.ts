@@ -86,11 +86,11 @@ export function generateReactForContexts(
   const pack = loadPack(resolvePackDir(design));
 
   // Page metamodel routing.  When the deployable declares
-  // a `ui:` binding, the React generator walks `ui.pages` (post-
-  // Slice-4 expansion) via `emitPagesForUi`, which dispatches per
+  // a `ui:` binding, the React generator walks `ui.pages` (after
+  // scaffold expansion) via `emitPagesForUi`, which dispatches per
   // `scaffoldOrigin` to the SAME `renderXxx` functions invoked
   // below for the legacy direct walk.  Byte-for-byte equivalent in
-  // the bulk-scaffold case (the acceptance gate of Slice 5).
+  // the bulk-scaffold case.
   //
   // Without a `ui:` binding (legacy/back-compat), fall through to
   // the per-aggregate / per-workflow / per-view loops directly.
@@ -191,8 +191,8 @@ export function generateReactForContexts(
   // Home is always synthesised by the scaffold expander
   // when a `ui:` binding is present.  Deployables without `ui:`
   // emit no Home page (no scaffold archetype renderer left to fall
-  // back to); D2 will tighten the validator to require a `ui:`
-  // binding for any react deployable.
+  // back to); a future change tightens the validator to require a
+  // `ui:` binding for any react deployable.
 
   out.set("package.json", renderShellFile("package-json", {}, pack));
   out.set("tsconfig.json", renderShellFile("tsconfig", {}, pack));

@@ -572,7 +572,7 @@ function firstNonQueryableNode(e: ExprIR): string | null {
       // becomes `tableName.col`, `enum-value` becomes a literal
       // string, `this-vo-prop` is a column flattened by Drizzle
       // (handled via member access).  `current-user` is a
-      // closure-captured value (slice 1C); the renderer threads a
+      // closure-captured value; the renderer threads a
       // `currentUser` parameter through the repo method and the
       // ref / its member accesses become plain JS / C# value
       // references.
@@ -617,7 +617,7 @@ function firstNonQueryableNode(e: ExprIR): string | null {
       // Allowed member-access shapes:
       //   - `this.col`               — direct column
       //   - `this.vo.sub`            — value-object's flattened column
-      //   - `currentUser.<field>`    — slice 1C row-level filter; the
+      //   - `currentUser.<field>`    — row-level filter; the
       //                                renderer threads a `currentUser`
       //                                parameter so the access becomes
       //                                a plain JS / C# value reference.
@@ -783,9 +783,8 @@ function checkMagicCall(
   // or saved queries (views).  `<magicId>.workflows.<name>(...)`
   // resolves to a workflow; `<magicId>.views.<name>(...)` to a view.
   // Only `ui` invocations of these are wired up to the React UI
-  // generator today (slice 18.C); the same reserved slugs validate
-  // against `api` for symmetry — backend-side dispatchers can pick
-  // them up later.
+  // generator today; the same reserved slugs validate against `api`
+  // for symmetry — backend-side dispatchers can pick them up later.
   if (aggregateSlug === "workflows") {
     const wf = contexts
       .flatMap((c) => c.workflows)
@@ -1295,7 +1294,7 @@ function validateViews(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
 }
 
 // ---------------------------------------------------------------------------
-// Auth validation (slice 1A).
+// Auth validation.
 //
 // Two responsibilities:
 //
@@ -1307,13 +1306,12 @@ function validateViews(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
 //
 //   2. `currentUser` scope: the magic identifier resolves to a typed
 //      ref via `lower-expr.ts:resolveNameRef` whenever the system
-//      declares a user block.  Slice 1A lets bodies USE
-//      `currentUser` in operations / workflows / view binds /
-//      aggregate test bodies; everywhere else (invariants, derived
-//      properties, function bodies, view filters, repository find
-//      filters) the reference is rejected with a friendly message
-//      pointing at the slice scope.  Where-clause integration is
-//      slice 1C; gated entry checks are slice 2.
+//      declares a user block.  Bodies may USE `currentUser` in
+//      operations / workflows / view binds / aggregate test bodies,
+//      plus repository find / view where filters; everywhere else
+//      (invariants, derived properties, function bodies) the reference
+//      is rejected with a friendly message pointing at where it is
+//      allowed.
 // ---------------------------------------------------------------------------
 
 function validateAuth(sys: SystemIR, diags: LoomDiagnostic[]): void {
@@ -1387,13 +1385,13 @@ function validateCurrentUserScope(ctx: BoundedContextIR, diags: LoomDiagnostic[]
     for (const fn of vo.functions) flag(`${vo.name}.function[${fn.name}]`, fn.body);
   }
   // Repository find filters and view filters DO get to use currentUser
-  // (slice 1C — row-level visibility); the renderer threads the user
-  // through as a closure-captured parameter.  Workflow / operation /
-  // test / view-bind bodies were never in this rejection set.
+  // (row-level visibility); the renderer threads the user through as a
+  // closure-captured parameter.  Workflow / operation / test /
+  // view-bind bodies were never in this rejection set.
 }
 
 // ---------------------------------------------------------------------------
-// Permissions validation (slice 1B).
+// Permissions validation.
 //
 // Two passes:
 //

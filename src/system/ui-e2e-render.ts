@@ -459,8 +459,8 @@ function renderLiteral(lit: string, value: string): string {
 //
 // The first two reserve `workflows` and `views` as the slug names;
 // the validator should already reject an aggregate declared with
-// either of those names (reservation list extension is part of this
-// slice if it isn't there already).
+// either of those names (the reservation list should be extended to
+// cover them if it doesn't already).
 // ---------------------------------------------------------------------------
 
 type UiCallShape =

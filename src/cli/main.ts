@@ -16,7 +16,7 @@ import { installFsBackendSource } from "../platform/fs-discovery.js";
 import { generateTypeScript } from "../platform/hono/v4/emit.js";
 // Legacy single-context `generate ts` targets the default Hono
 // backend; the CLI (an entrypoint) supplies that package's pins to
-// the version-agnostic shared emitter (B2.1).
+// the version-agnostic shared emitter.
 import { BACKEND_PINS as HONO_V4_PINS } from "../platform/hono/v4/pins.js";
 import { generateSystems } from "../system/index.js";
 import { captureSnapshots } from "../system/loomsnap.js";
@@ -525,14 +525,13 @@ async function watchAndRegenerate(target: GenerateTarget, file: string, outDir: 
   await new Promise(() => {});
 }
 
-// packaging-split P3 slice 3 — install the fs-backed
-// `discoverBackends()` source before any platform resolution.
-// Composes the in-tree default with whatever `@loom/*` backend
-// packages are installed in the project's `node_modules`.  Today
-// (slice 3) this is a no-op for emitted output because the fs
-// source returns the same surface instances as the in-tree
-// default; slice 5 makes the workspace package the true source of
-// code, and this call becomes load-bearing.  Errors during fs walk
+// Install the fs-backed `discoverBackends()` source before any
+// platform resolution.  Composes the in-tree default with whatever
+// `@loom/*` backend packages are installed in the project's
+// `node_modules`.  Today this is a no-op for emitted output because
+// the fs source returns the same surface instances as the in-tree
+// default; once the workspace package becomes the true source of
+// code, this call becomes load-bearing.  Errors during fs walk
 // (missing `node_modules`, permission, malformed manifest) are
 // non-fatal — the function returns whatever it could read, and the
 // composition falls back to the in-tree set.

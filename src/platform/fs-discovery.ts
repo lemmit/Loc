@@ -1,6 +1,5 @@
 // ---------------------------------------------------------------------------
-// fs-backed `discoverBackends()` source (packaging-split P3 slice 3,
-// see docs/packaging-split.md + the plan file).
+// fs-backed `discoverBackends()` source (see docs/packaging-split.md).
 //
 // Node-only.  Walks the consuming project's `node_modules` shallowly
 // for `package.json` entries whose `loom.kind === "backend"`, and
@@ -110,7 +109,7 @@ async function* walkInstalledPackages(nodeModules: string): AsyncGenerator<strin
 /** Read every installed package under `<rootDir>/node_modules` and
  *  emit a `DiscoveredBackend` for each one declaring
  *  `loom.kind === "backend"` in its `package.json`.  See module
- *  header for slice 3 surface-resolution policy. */
+ *  header for the surface-resolution policy. */
 export async function discoverBackendsFs(rootDir: string): Promise<DiscoveredBackend[]> {
   const inTree = defaultBuiltInBackends();
   const out: DiscoveredBackend[] = [];

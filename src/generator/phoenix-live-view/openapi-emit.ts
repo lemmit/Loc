@@ -22,7 +22,7 @@ import type { ApiRoute } from "./api-emit.js";
 //   lib/<app>_web/api/schemas/<name>.ex      — per request/response schema module
 //   lib/<app>_web/controllers/openapi_controller.ex — JSON spec controller
 //
-// Schema naming convention (mirrors wire-spec.json for D3 parity test):
+// Schema naming convention (mirrors wire-spec.json for the parity test):
 //   Aggregate response:        <Agg>Response
 //   Aggregate list response:   <Agg>ListResponse
 //   Entity part response:      <Part>Response

@@ -4,8 +4,7 @@ import { lowerFirst, upperFirst, plural, snake } from "../../util/naming.js";
 // ---------------------------------------------------------------------------
 // View API module + Playwright page object emission.
 //
-// The page-side emission (views index, per-view table page) moved
-// out of this file in Phase 1.6 — see
+// The page-side emission (views index, per-view table page) lives in
 // src/generator/react/templating/preparers/view-{table,s-index}.ts.
 // What remains here is two emission paths that aren't pack-shaped:
 //

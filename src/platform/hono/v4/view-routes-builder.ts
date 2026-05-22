@@ -36,7 +36,7 @@ export function buildViewsRoutesFile(
   lines.push(`import type { NodePgDatabase } from "drizzle-orm/node-postgres";`);
   lines.push(`import type * as schema from "../db/schema";`);
   // Source aggregates + repo imports per view, plus any foreign
-  // aggregates referenced via `Id<X>` follow auxiliaries (slice 3).
+  // aggregates referenced via `Id<X>` follow auxiliaries.
   const aggsTouched = new Set<string>();
   for (const v of ctx.views) {
     aggsTouched.add(v.aggregateName);

@@ -2,11 +2,11 @@
 // hono@v4 — dependency pins (the version-owned "templating" slice of
 // the backend package; see docs/backend-packages.md).
 //
-// Backend-packages B2 moved this out of
-// `src/generator/typescript/index.ts` so the *package version* owns
+// These pins live here, rather than in
+// `src/generator/typescript/index.ts`, so the *package version* owns
 // its dep set.  The TypeScript/Hono emitter is the shared library
 // the package drives; it imports these pins.  When `hono@v5` forks
-// (B3) it ships its own `pins.ts` and the emitter is parameterised
+// it ships its own `pins.ts` and the emitter is parameterised
 // on the active version's pins instead of importing v4's directly.
 //
 // All values are within-major / within-0.x.  zod 3→4

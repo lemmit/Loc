@@ -6,13 +6,11 @@
 // `LOOM_SCAFFOLD_EXPAND=1` is set, `lowerSystem` post-processes
 // every page whose `scaffoldOrigin` is recognised, replacing the
 // page's `body: List(of: …)` (or similar) with the expanded form.
-// The React emitter then routes through the walker (Slice 11.3 +
-// the Phase A primitive expansion) instead of through the legacy
-// archetype path.
+// The React emitter then routes through the walker instead of through
+// the legacy archetype path.
 //
-// This slice is purely additive — flag default off, baseline
-// fixture unchanged.  Slice C2 flips the default and re-baselines
-// the fixture; D1 deletes the archetype path entirely.
+// This pass is purely additive — with the flag off, baseline fixtures
+// are unchanged.
 //
 // What's covered today:
 //   - `aggregate-list`     → Stack + Breadcrumbs + Toolbar + QueryView
@@ -156,7 +154,8 @@ function expandAggregateList(aggregateName: string, ctx: ScaffoldExpandContext):
     // single cell (they're a struct, not a scalar).  Scaffold's
     // archetype renderer flattens them into one column per leaf
     // field; replicating that here needs more primitive surface
-    // (FlatColumns?) than B1 provides.  Skip for now — the column
+    // (FlatColumns?) than the current primitives provide.  Skip for
+    // now — the column
     // surface is a v0 superset of what's strictly required for
     // tsc-clean output.
     const inner = f.type.kind === "optional" ? f.type.inner : f.type;
@@ -859,8 +858,8 @@ function findApiHandleFor(agg: AggregateIR, ctx: ScaffoldExpandContext): string 
   // path is responsible for plumbing those; here we delegate to
   // a heuristic: the FIRST api param wins.  The acme-order-
   // explicit.ddd shape uses exactly one param per UI, which is
-  // the realistic case for v0 — multi-api UIs land in a future
-  // slice when the validator can prove which api owns which agg.
+  // the realistic case for v0 — multi-api UIs are handled later,
+  // once the validator can prove which api owns which agg.
   const first = ctx.ui.apiParams[0];
   return first?.name ?? null;
 }

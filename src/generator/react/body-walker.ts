@@ -37,7 +37,7 @@
 //   - Nested arrays as children (e.g. `items: [...]`).  Spec syntax
 //     is positional-only at this layer.
 //   - Per-pack rendering.  v0 hardcodes Mantine output; a future
-//     slice opens this through the template-pack layer (one
+//     change opens this through the template-pack layer (one
 //     stdlib emitter per pack).
 //
 // What this module exports:
@@ -519,7 +519,7 @@ export interface Sink {
   usedUserComponents: Set<string>;
   usesChildren: boolean;
   usedApiHooks: Map<string, ApiHookUse>;
-  /** Slice A4/A12 — when `Form(of: <Agg>)` or `Form(runs: <wf>)`
+  /** When `Form(of: <Agg>)` or `Form(runs: <wf>)`
    *  is walked, the emitter records the metadata the shell needs
    *  (aggregate or workflow, BC, optional user-supplied
    *  `onSubmit:` lambda body, redirect path) so the shell can
@@ -542,7 +542,7 @@ export interface Sink {
  *  assignable to both `WalkEnv` and `Sink`. */
 export interface WalkContext extends WalkEnv, Sink {}
 
-/** Slice A4 / A12 — RHF wiring requirements recorded by `emitFormOf`,
+/** RHF wiring requirements recorded by `emitFormOf`,
  *  consumed by the page shell to splice the `useForm` declaration +
  *  request type + mutation hook + per-field `useAll<TargetX>` hooks
  *  at the top of the function body.
@@ -874,8 +874,8 @@ export function extendLambdaParams(
  *  Detail-page TITLES use the display field — that's where it
  *  belongs.
  *
- *  Slice A4 plumbs aggregates through to the walker; we now use
- *  that to validate `of:` at emit time — an unresolvable aggregate
+ *  Aggregates are plumbed through to the walker; we use that to
+ *  validate `of:` at emit time — an unresolvable aggregate
  *  surfaces as a visible TSX comment rather than a silent
  *  mistakenly-pluralised path. */
 // Interactive control primitives (Button, IdLink, QueryView,
@@ -1012,14 +1012,14 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // onSubmit lambda).  Emit the plain `recv.member(args)`
       // form when the receiver resolves cleanly (param / state /
       // lambda param / shell local).  Receivers that emit as the
-      // `/* unresolved: X */ undefined` sentinel keep the
-      // pre-existing Slice 11.23 TODO placeholder — emitting
-      // `undefined.<method>(...)` would be runtime-broken code.
+      // `/* unresolved: X */ undefined` sentinel keep a visible TODO
+      // placeholder — emitting `undefined.<method>(...)` would be
+      // runtime-broken code.
       const recv = emitExpr(expr.receiver, ctx);
       const argsRendered = expr.args.map((a) => emitExpr(a, ctx)).join(", ");
       if (recv.includes("/* unresolved:")) {
         const receiverDesc = describeReceiver(expr.receiver);
-        return `/* TODO: method-call ${receiverDesc}.${expr.member}(${argsRendered}) — needs hooks {} binding (Slice 11.24+) */ undefined`;
+        return `/* TODO: method-call ${receiverDesc}.${expr.member}(${argsRendered}) — needs hooks {} binding */ undefined`;
       }
       return `${recv}.${expr.member}(${argsRendered})`;
     }
@@ -1156,7 +1156,7 @@ export function stringOrRefArgValue(
  *  `''` when no `testid:` was supplied.  Templates splice via
  *  `{{{testidAttr}}}` inside the root element.
  *
- *  Slice A5 — string-literal testids also accumulate on
+ *  String-literal testids also accumulate on
  *  `ctx.collectedTestids` so the walker-side page-object emitter
  *  can expose each one as a typed `Locator` getter in the
  *  generated `e2e/pages/<page-snake>.ts` class. */

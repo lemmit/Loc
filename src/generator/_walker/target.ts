@@ -11,7 +11,7 @@
 //
 //   1. State reads/writes — `step` vs `@step` vs `socket.assigns.step`
 //   2. State mutation — `setStep(x)` vs `assign(socket, :step, x)`
-//   3. API call lowering — Slice 11.24's React-Query hook hoisting
+//   3. API call lowering — React-Query hook hoisting
 //      vs LiveView's direct context-function call
 //   4. Helper imports — `import { fn } from "..."` vs Elixir `alias`
 //   5. `match { ... }` — chained ternary vs HEEx `<%= case ... %>`
@@ -24,19 +24,19 @@
 // each of the seams above; the rest (pack dispatch, attribute
 // formatting, lambda traversal) stays in the shared walker.
 //
-// PHASE 5 STATUS: this module DEFINES the contract.  The TSX walker
+// CURRENT STATE: this module DEFINES the contract.  The TSX walker
 // (src/generator/react/body-walker.ts) currently inlines its own
 // implementations of these seams — the byte-identical-output gate
-// keeps that path unchanged.  Subsequent phases:
+// keeps that path unchanged.  Remaining work:
 //
-//   - Phase 7 implements `heexTarget` for Phoenix LiveView module
-//     emission, which validates this interface against a real second
-//     consumer before the React walker is refactored to delegate to
+//   - implement `heexTarget` for Phoenix LiveView module emission,
+//     which validates this interface against a real second consumer
+//     before the React walker is refactored to delegate to
 //     `tsxTarget`.
-//   - A follow-up cleanup (post Phase 7) extracts the React walker's
-//     inline seams into `tsxTarget` and switches `body-walker.ts` to
-//     consume the abstract `WalkerTarget`.  Acceptance gate is still
-//     byte-identical TSX output against the existing fixture suite.
+//   - a follow-up cleanup extracts the React walker's inline seams
+//     into `tsxTarget` and switches `body-walker.ts` to consume the
+//     abstract `WalkerTarget`.  Acceptance gate is still byte-identical
+//     TSX output against the existing fixture suite.
 // ---------------------------------------------------------------------------
 
 import type { ExprIR, StateFieldIR, TypeIR } from "../../ir/loom-ir.js";
@@ -56,7 +56,7 @@ export interface StateRef {
   name: string;
 }
 
-/** A single API call site detected by the walker — Slice 11.24's
+/** A single API call site detected by the walker — the
  *  `Sales.Customer.create.mutate(args)` shape.  Carries the
  *  resolved api-handle / aggregate / op so the target can produce
  *  framework-correct output:

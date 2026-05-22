@@ -72,7 +72,7 @@ export function emitTable(
   const keyExpr = keyExprArg ?? `${rowVar}.id`;
 
   // `rowTestid:` lambda computes a per-row testid.
-  // The lambda's source-side param rebinds to `row` (Slice A2's
+  // The lambda's source-side param rebinds to `row` (the
   // lambdaParams scope) so user code reads `row.id` cleanly.
   // The expression body emits inside a TS template literal so
   // dynamic ids interpolate (`orders-row-${row.id}`).

@@ -85,8 +85,8 @@ export function firstPositionalText(call: ExprIR & { kind: "call" }): string | u
   return undefined;
 }
 
-/** Slice 11.4 helper — `firstPositionalContent` returns either a
- *  `"quoted string"` or a `{paramRef}` JSX expression.  Components
+/** `firstPositionalContent` returns either a `"quoted string"` or a
+ *  `{paramRef}` JSX expression.  Components
  *  embedding the result in JSX text need quoted strings unwrapped
  *  to bare text; JSX expressions stay verbatim. */
 export function unwrapTextLiteral(s: string): string {

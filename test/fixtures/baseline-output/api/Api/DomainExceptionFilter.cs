@@ -31,7 +31,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         // string when no Activity is active (e.g. middleware errors
         // before the pipeline starts).
         var trace_id = System.Diagnostics.Activity.Current?.TraceId.ToString() ?? "";
-        // Slice 21.B FluentValidation arm — runs FIRST because
+        // FluentValidation arm — runs FIRST because
         // validation failures are the most common 400 cause.  The
         // envelope extends the existing { error, trace_id } shape
         // with a structured `failures` array carrying field +

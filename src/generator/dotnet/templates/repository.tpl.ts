@@ -6,8 +6,8 @@ import { renderCsType } from "../render-expr.js";
 
 // Repository interface (Domain layer) + EF-backed implementation
 // (Infrastructure layer).  Both surfaces own a `GetByIdAsync` /
-// `SaveAsync` plus one method per DSL `find`.  Slice 1C: a find
-// whose `where` references `currentUser` gets a trailing
+// `SaveAsync` plus one method per DSL `find`.  A find whose `where`
+// references `currentUser` gets a trailing
 // `User currentUser` parameter that the closure-captured filter
 // expression reads from.
 
