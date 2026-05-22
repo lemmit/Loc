@@ -101,12 +101,17 @@ text stays the source of truth.
   builder's `fields.ts` TypeRef helpers). Creates a `state {}` if the page has
   none. Rename is excluded (state-field names are referenced in the body via IR
   lowering, not as Langium cross-references).
+- **Structured `let` + validated statement rows**: a `let x = …` handler
+  statement seeds as a structured row (name / reparse-validated value), and the
+  verbatim fallback row (bare calls / `navigate(…)` / anything unmodelled) now
+  reparse-validates and flags an "Invalid statement". (`emit` isn't a page-handler
+  statement — it's domain-side, edited in the system/workflow builder.)
 
 ## Open — expression / domain-logic surface
 
-- **Per-statement structure** — assignments are structured (target/op/value);
-  the remaining statement kinds (`call`, `emit`, `navigate`, `let`) still edit
-  as a raw source row — structured editors for them are a further step.
+- **Per-statement structure** — assignment and `let` are structured; bare
+  calls / `navigate(…)` keep a validated single-row editor (a call is one
+  expression, so structuring buys little beyond the validation now in place).
 - **More typed pickers**: enum-case values (needs the field's enum type) and
   repository finds (op/runs/aggregate/workflow/color/boolean pickers are done;
   qualified refs already round-trip).

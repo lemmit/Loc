@@ -301,6 +301,14 @@ describe("page-builder model — container-with-props seed shape", () => {
     expect(lambda.children[1].props.src).toBe("refresh()");
   });
 
+  it("structures `let` and keeps a bare call verbatim, both round-tripping", () => {
+    const node = seed('Button("Go", onClick: e => {\n  let total = order.total + 1\n  navigate(Home)\n})');
+    const handler = node.children.find((c) => c.slot === "onClick")!;
+    expect(handler.children[0].props).toMatchObject({ kind: "let", name: "total", value: "order.total + 1" });
+    expect(handler.children[1].props.src).toBe("navigate(Home)");
+    expect(emitBody(fromCraft(toCraft(node)))).toBe(emitBody(node));
+  });
+
   it("models a block-handler lambda slot as editable statement rows", () => {
     const node = seed('Table(rows: orders, onRowClick: r => {\n  let x = r.id\n  select(x)\n}, Column("ID", o => Text(o.id)))');
     const handler = node.children.find((c) => c.slot === "onRowClick")!;
@@ -308,7 +316,9 @@ describe("page-builder model — container-with-props seed shape", () => {
     expect(handler.props.param).toBe("r");
     expect(handler.props.__block).toBe("1");
     expect(handler.children.map((c) => c.name)).toEqual(["Stmt", "Stmt"]);
-    expect(handler.children.map((c) => c.props.src)).toEqual(["let x = r.id", "select(x)"]);
+    // `let` is structured (name / value); the bare call stays a verbatim src row.
+    expect(handler.children[0].props).toMatchObject({ kind: "let", name: "x", value: "r.id" });
+    expect(handler.children[1].props.src).toBe("select(x)");
     // __block + statement rows survive the craft serialization round-trip.
     expect(emitBody(fromCraft(toCraft(node)))).toBe(emitBody(node));
   });
@@ -397,7 +407,7 @@ describe("page-builder model — container-with-props seed shape", () => {
     expect(lambda.name).toBe("Lambda");
     expect(lambda.props.__block).toBe("1");
     expect(lambda.children.map((c) => c.name)).toEqual(["Stmt"]);
-    expect(lambda.children[0].props.src).toBe("let y = o.id");
+    expect(lambda.children[0].props).toMatchObject({ kind: "let", name: "y", value: "o.id" });
   });
 
   it("models match arms with cond + value children and an else", () => {

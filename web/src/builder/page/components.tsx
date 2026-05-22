@@ -96,8 +96,13 @@ function renderLeaf(name: PrimitiveName, p: Props): ReactNode {
       return <span>{disp(p.label) || name}: <span style={{ display: "inline-block", minWidth: 48, borderBottom: "1px solid var(--mantine-color-dark-3)" }} /></span>;
     case "Toggle":
       return <span>◯ {disp(p.label) || "Toggle"}</span>;
-    case "Stmt":
-      return <span style={{ fontFamily: "monospace", fontSize: 11 }}>{String(p.src || "…")}</span>;
+    case "Stmt": {
+      const text =
+        p.kind === "assign" ? `${p.target ?? ""} ${p.op ?? ":="} ${p.value ?? ""}` :
+        p.kind === "let" ? `let ${p.name ?? ""} = ${p.value ?? ""}` :
+        String(p.src || "…");
+      return <span style={{ fontFamily: "monospace", fontSize: 11 }}>{text}</span>;
+    }
     default:
       return String(name);
   }

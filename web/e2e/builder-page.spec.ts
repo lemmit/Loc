@@ -408,3 +408,35 @@ test("edits a page's state fields from the State panel", async ({ page }) => {
   await expect.poll(model).not.toContain("step");
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
+
+const LET_SOURCE = `system S {
+  ui U {
+    page P {
+      body: Button("Go", onClick: e => {
+        let total = 1 + 2
+      })
+    }
+  }
+}`;
+
+test("structures a `let` statement into name / value controls", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await setSource(page, LET_SOURCE);
+
+  await page.getByTestId("doc-tab-builder").click();
+  await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
+
+  // The `let` statement seeds as a structured row (not a verbatim src box).
+  await expect(page.getByTestId("c4node-Stmt").first()).toContainText("let total = 1 + 2");
+
+  // Select it → name / value controls; rename the binding and apply.
+  await page.getByTestId("c4node-Stmt").first().click();
+  await expect(page.getByTestId("c4builder-prop-let-name")).toHaveValue("total");
+  await page.getByTestId("c4builder-prop-let-name").fill("sum");
+
+  await page.getByTestId("c4builder-apply").click();
+  const model = () => page.evaluate(() => (window as unknown as { __loomGetSource: () => string }).__loomGetSource());
+  await expect.poll(model).toContain("let sum = 1 + 2");
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+});
