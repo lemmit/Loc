@@ -328,9 +328,14 @@ Done:
 - **Structured assignment target** — in the top-level BodyEditor (operation /
   workflow bodies) an assignment row splits into a dedicated target / op / value
   (`StmtView` in `body.ts`, `AssignRow` in `BodyEditor.tsx`); other statement
-  kinds keep their single text row. The op is a `:=` / `+=` / `-=` dropdown; the
-  value re-uses the structured Expression picker. Gated by
-  `test/system-body.test.ts` + e2e.
+  kinds keep their single text row. The op is a `:=` / `+=` / `-=` dropdown.
+  - **Typed target + inline structured value** — the target is now an
+    `Autocomplete` over the owning aggregate's assignable property names (still
+    accepts a dotted path, so it's non-lossy); and a per-row `ƒx` toggle expands
+    the value into the same structured `ExprSlotEditor` the Expression picker
+    uses, bound to that statement's value slot (`stmtExpr` / `wfStmt`) — keyed by
+    `rev` so it re-seeds on commit, with the open row held in the pane so it
+    survives. Gated by `test/system-body.test.ts` + e2e.
 - **Diagnostics on graph nodes** — LSP diagnostics (`ctx.diagnostics`) are
   attributed to the construct whose source most tightly contains each (so a
   problem inside an aggregate marks the aggregate, not its module), and that node

@@ -321,6 +321,9 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const [exprMode, setExprMode] = useState<ExprMode>("structured");
   const [findName, setFindName] = useState<string | null>(null);
   const [emitKey, setEmitKey] = useState<string | null>(null);
+  // Which body assignment's value is currently expanded into the inline
+  // structured editor (`<body-key>:<index>`), or null when all are collapsed.
+  const [structuredKey, setStructuredKey] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [kindFilter, setKindFilter] = useState<NodeKind[]>([]);
   const [overlay, setOverlay] = useState(false);
@@ -347,6 +350,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     setExprMode("structured");
     setFindName(null);
     setEmitKey(null);
+    setStructuredKey(null);
   }, [selectedId]);
 
   useEffect(() => {
@@ -662,6 +666,48 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
       return true;
     },
   });
+
+  // Inline structured editor for a body assignment's value: a per-row `ƒx`
+  // toggle expands the same `ExprSlotEditor` the Expression picker uses, bound
+  // to that statement's value slot. Keyed by `rev` so it re-seeds on commit;
+  // the open row is held in `structuredKey` so it survives the re-seed.
+  const valueEditorProps = (loc: BodyLocator) => {
+    const keyFor = (index: number): string =>
+      `${loc.kind === "operation" ? `${loc.aggregate}.${loc.op}` : loc.name}:${index}`;
+    const slotFor = (index: number): ExprSlot =>
+      loc.kind === "operation"
+        ? { kind: "stmtExpr", owner: loc.aggregate, op: loc.op, index }
+        : { kind: "wfStmt", owner: loc.name, index };
+    return {
+      onToggleValueEditor: (index: number): void => {
+        const k = keyFor(index);
+        setStructuredKey((cur) => (cur === k ? null : k));
+      },
+      renderValueEditor: (index: number): ReactNode => {
+        if (structuredKey !== keyFor(index)) return null;
+        const slot = slotFor(index);
+        const expr = slotExpr(parsed.ast, slot);
+        if (!expr) return null;
+        return (
+          <ExprSlotEditor
+            key={`${keyFor(index)}:${rev}`}
+            seed={seedExpr(expr)}
+            seedText={expr.$cstNode?.text ?? ""}
+            candidates={slotCandidates(parsed.ast, slot)}
+            loadHints={() => exprHints(ctx.getSource(), slot)}
+            mode={exprMode}
+            onMode={setExprMode}
+            onCommit={(text) => {
+              const next = editExprSlot(ctx.getSource(), slot, text);
+              if (next == null) return false;
+              apply(next, true);
+              return true;
+            }}
+          />
+        );
+      },
+    };
+  };
 
   return (
     <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
@@ -1083,6 +1129,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
                 key={`${selected.id}:${rev}`}
                 statements={listStatementViews(parsed.ast, { kind: "workflow", name: selected.name }) ?? []}
                 {...bodyHandlers({ kind: "workflow", name: selected.name })}
+                {...valueEditorProps({ kind: "workflow", name: selected.name })}
               />
             )}
             {selected.kind === "aggregate" && (
@@ -1100,7 +1147,9 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
                   <BodyEditor
                     key={`${selected.id}:${opName}:${rev}`}
                     statements={listStatementViews(parsed.ast, { kind: "operation", aggregate: selected.name, op: opName }) ?? []}
+                    targets={listFields(selected.ast).map((f) => f.name)}
                     {...bodyHandlers({ kind: "operation", aggregate: selected.name, op: opName })}
+                    {...valueEditorProps({ kind: "operation", aggregate: selected.name, op: opName })}
                   />
                 )}
               </Stack>

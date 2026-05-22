@@ -644,6 +644,31 @@ test("edits an assignment value inside an operation body", async ({ page }) => {
   await expect(op()).toHaveValue("-");
 });
 
+test("expands an assignment value into the inline structured editor (ƒx)", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Fullstack \.NET \(Banking\)/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  // Account.deposit's body has `balance := Money(…)`. Open it in the body editor.
+  await page.locator('[data-testid="rf__node-aggregate:Account"]').click();
+  await page.getByTestId("c4system-op-pick").click();
+  await page.getByRole("option", { name: "deposit", exact: true }).click();
+  await expect(page.getByTestId("c4system-body")).toBeVisible();
+
+  // The assign row shows a text value plus the ƒx toggle; expanding it swaps the
+  // text field for the inline structured expression editor.
+  const fx = page.getByTestId("c4system-stmt-structured").first();
+  await expect(fx).toBeVisible();
+  await expect(page.getByTestId("c4system-stmt-value").first()).toBeVisible();
+  await fx.click();
+  await expect(page.getByTestId("c4expr")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId("c4system-stmt-value")).toHaveCount(0);
+});
+
 test("offers type-directed member-name suggestions", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);
