@@ -6,7 +6,7 @@
 // / `{ q.data && q.data.length === 0 && ... }` / `{ q.data &&
 // q.data.length > 0 && ... }`) into one declarative primitive.
 //
-// What this slice pins:
+// What this test pins:
 //   1. The `of:` query expression flows through the walker's hook
 //      detection so `Sales.Order.all` lifts to a `useAllOrders()`
 //      hook decl + import and the four branches reference the

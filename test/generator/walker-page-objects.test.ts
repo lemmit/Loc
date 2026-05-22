@@ -6,7 +6,7 @@
 // class per page, exposing a typed `Locator` getter per static
 // `testid:` literal.
 //
-// What this slice pins:
+// What this test pins:
 //   1. Static routes ("/welcome") emit `static readonly url = …`
 //      + a parameterless `goto()` method.
 //   2. Parameterised routes ("/orders/:orderId") emit

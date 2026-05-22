@@ -26,7 +26,7 @@
 //
 // Spillover: OrderDetail page parity needs aggregate operations
 // (`addLine`, `confirm` modals) + KeyValueRow primitive — deferred
-// to A10+.  This slice ships List + New parity only.
+// to later archetypes.  This test covers List + New parity only.
 
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
