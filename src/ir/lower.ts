@@ -1614,7 +1614,7 @@ function lowerWorkflowStatement(
       // The let binding's local type is the unwrapped aggregate
       // (validator rejects array/optional repo-lets).  Use the
       // declared return type so the validator can flag misuse.
-      const localType: TypeIR = returnType.kind === "entity" ? returnType : returnType;
+      const localType: TypeIR = returnType;
       return {
         stmt: {
           kind: "repo-let",

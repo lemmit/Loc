@@ -88,8 +88,7 @@ function enrichSystem(sys: SystemIR): SystemIR {
   // any caller that constructs a `LoomModel` outside the standard
   // `parseHelper` / `DocumentBuilder` pipeline (it just returns
   // the existing pages unchanged).
-  const enrichedSys: SystemIR = { ...sys, modules, deployables };
-  return { ...enrichedSys };
+  return { ...sys, modules, deployables };
 }
 
 function enrichContext(ctx: BoundedContextIR): BoundedContextIR {
