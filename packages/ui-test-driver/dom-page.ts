@@ -187,8 +187,11 @@ export class DomLocator {
    *  the locator matches more than one element (counting all matches,
    *  regardless of visibility) — use `.first()` or a more specific
    *  locator. */
-  private async resolve(checks: Actionability): Promise<HTMLElement> {
-    const deadline = Date.now() + this.timeout;
+  private async resolve(
+    checks: Actionability,
+    timeout = this.timeout,
+  ): Promise<HTMLElement> {
+    const deadline = Date.now() + timeout;
     let lastReason = "no element matched";
     for (;;) {
       const els = this.matchesNow();
@@ -205,21 +208,22 @@ export class DomLocator {
       }
       if (Date.now() >= deadline) {
         throw new Error(
-          `locator(${this.describe()}): ${lastReason} within ${this.timeout}ms`,
+          `locator(${this.describe()}): ${lastReason} within ${timeout}ms`,
         );
       }
       await sleep(POLL_MS);
     }
   }
 
-  async click(): Promise<void> {
-    (await this.resolve({ visible: true, enabled: true })).click();
+  async click(opts?: { timeout?: number }): Promise<void> {
+    (await this.resolve({ visible: true, enabled: true }, opts?.timeout)).click();
   }
 
-  async fill(value: string): Promise<void> {
-    const el = (await this.resolve({ visible: true, editable: true })) as
-      | HTMLInputElement
-      | HTMLTextAreaElement;
+  async fill(value: string, opts?: { timeout?: number }): Promise<void> {
+    const el = (await this.resolve(
+      { visible: true, editable: true },
+      opts?.timeout,
+    )) as HTMLInputElement | HTMLTextAreaElement;
     // React tracks the value via an overridden setter; setting `.value`
     // directly bypasses its change detection.  Call the native setter
     // on the prototype, then fire input/change so controlled components
@@ -232,8 +236,8 @@ export class DomLocator {
     el.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
-  async innerText(): Promise<string> {
-    const el = await this.resolve({});
+  async innerText(opts?: { timeout?: number }): Promise<string> {
+    const el = await this.resolve({}, opts?.timeout);
     return (el.innerText ?? el.textContent ?? "").trim();
   }
 
@@ -242,21 +246,25 @@ export class DomLocator {
     return Promise.resolve(this.matchesNow().length);
   }
 
-  async waitFor(opts?: { state?: "visible" | "attached" | "hidden" }): Promise<void> {
+  async waitFor(opts?: {
+    state?: "visible" | "attached" | "hidden";
+    timeout?: number;
+  }): Promise<void> {
     const state = opts?.state ?? "visible";
+    const timeout = opts?.timeout ?? this.timeout;
     if (state === "hidden") {
-      const deadline = Date.now() + this.timeout;
+      const deadline = Date.now() + timeout;
       for (;;) {
         if (!this.matchesNow().some(isVisible)) return;
         if (Date.now() >= deadline) {
           throw new Error(
-            `locator(${this.describe()}): still visible after ${this.timeout}ms`,
+            `locator(${this.describe()}): still visible after ${timeout}ms`,
           );
         }
         await sleep(POLL_MS);
       }
     }
-    await this.resolve(state === "visible" ? { visible: true } : {});
+    await this.resolve(state === "visible" ? { visible: true } : {}, timeout);
   }
 }
 
@@ -320,10 +328,13 @@ export class DomPage {
     await sleep(0);
   }
 
-  async waitForURL(matcher: RegExp | string): Promise<void> {
+  async waitForURL(
+    matcher: RegExp | string,
+    opts?: { timeout?: number },
+  ): Promise<void> {
     const test = (u: string): boolean =>
       typeof matcher === "string" ? u.includes(matcher) : matcher.test(u);
-    const deadline = Date.now() + this.timeout;
+    const deadline = Date.now() + (opts?.timeout ?? this.timeout);
     for (;;) {
       if (test(this.url())) return;
       if (Date.now() >= deadline) {

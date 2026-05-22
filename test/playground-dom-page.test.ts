@@ -214,6 +214,17 @@ describe("DomPage / DomLocator", () => {
     );
   });
 
+  it("per-call timeout overrides the page default", async () => {
+    setBody(`<div></div>`);
+    // Page default is long; a tight per-call timeout must win and fail fast.
+    const page = new DomPage(document, { timeout: 10_000 });
+    const started = Date.now();
+    await expect(
+      page.getByTestId("never").click({ timeout: 80 }),
+    ).rejects.toThrow(/within 80ms/);
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+
   it("strict-mode error names the ambiguous locator", async () => {
     setBody(`
       <button data-testid="dup">a</button>

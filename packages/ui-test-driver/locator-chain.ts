@@ -48,15 +48,29 @@ export function resolveChain(
   return loc;
 }
 
-/** Leaf operations a parent locator/page issues over the bridge. */
+/** Leaf operations a parent locator/page issues over the bridge.
+ *  `timeout` (optional) is the per-call override; when absent the
+ *  executor's default (ExecuteOptions.timeout) applies. */
 export type DriverOp =
-  | { kind: "locator"; op: "click" | "innerText" | "count"; chain: ChainNode[] }
-  | { kind: "locator"; op: "fill"; chain: ChainNode[]; value: string }
+  | {
+      kind: "locator";
+      op: "click" | "innerText" | "count";
+      chain: ChainNode[];
+      timeout?: number;
+    }
+  | {
+      kind: "locator";
+      op: "fill";
+      chain: ChainNode[];
+      value: string;
+      timeout?: number;
+    }
   | {
       kind: "locator";
       op: "waitFor";
       chain: ChainNode[];
       state?: "visible" | "attached" | "hidden";
+      timeout?: number;
     }
   | { kind: "page"; op: "goto"; arg: string }
   | { kind: "page"; op: "screenshot" }
@@ -67,6 +81,7 @@ export type DriverOp =
       pattern: string;
       isRegex: boolean;
       flags?: string;
+      timeout?: number;
     };
 
 /** In-flight runtime-request tracker the host maintains on the sandbox
@@ -136,23 +151,24 @@ export async function executeDriverOp(
       }
       await page.waitForURL(
         msg.isRegex ? new RegExp(msg.pattern, msg.flags) : msg.pattern,
+        { timeout: msg.timeout },
       );
       return { ok: true };
     }
     const loc = resolveChain(doc, msg.chain, timeout);
     switch (msg.op) {
       case "click":
-        await loc.click();
+        await loc.click({ timeout: msg.timeout });
         return { ok: true };
       case "fill":
-        await loc.fill(msg.value);
+        await loc.fill(msg.value, { timeout: msg.timeout });
         return { ok: true };
       case "innerText":
-        return { ok: true, value: await loc.innerText() };
+        return { ok: true, value: await loc.innerText({ timeout: msg.timeout }) };
       case "count":
         return { ok: true, value: await loc.count() };
       case "waitFor":
-        await loc.waitFor({ state: msg.state });
+        await loc.waitFor({ state: msg.state, timeout: msg.timeout });
         return { ok: true };
     }
   } catch (err) {
