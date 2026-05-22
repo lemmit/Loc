@@ -14,11 +14,6 @@ export function lowerFirst(input: string): string {
   return input[0]!.toLowerCase() + input.slice(1);
 }
 
-/** @deprecated misleading name — use {@link upperFirst}. */
-export const pascal = upperFirst;
-/** @deprecated misleading name — use {@link lowerFirst}. */
-export const camel = lowerFirst;
-
 export function snake(input: string): string {
   return input
     .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
