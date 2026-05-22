@@ -6,7 +6,7 @@ import type { LayoutCtx } from "../layout/ctx";
 import type { BodyProp, Component, Expression, Page } from "../../../src/language/generated/ast.js";
 import { parseDdd } from "./parse";
 import { spliceNode } from "./edit-engine";
-import { seedFromBody, emitBody } from "./page/model";
+import { seedFromBody, emitBody, type BuilderNode } from "./page/model";
 import { toCraft, fromCraft } from "./page/serialize";
 import PageBuilder from "./page/PageBuilder";
 
@@ -64,14 +64,40 @@ function collectOperations(ast: unknown): Record<string, string[]> {
   return out;
 }
 
-// Names of user-defined `component`s in scope — a call to one is recognised as
-// an editable node rather than Opaque source.
-function collectComponents(ast: unknown): Set<string> {
-  const out = new Set<string>();
+// User-defined `component`s in scope, mapped to their declared param names — a
+// call to one is recognised as an editable node (positional args become props
+// labelled by param name) rather than Opaque source.
+function collectComponents(ast: unknown): Map<string, string[]> {
+  const out = new Map<string, string[]>();
   for (const node of AstUtils.streamAst(ast as Parameters<typeof AstUtils.streamAst>[0])) {
-    if (node.$type === "Component") out.add((node as Component).name);
+    if (node.$type === "Component") {
+      const c = node as Component;
+      out.set(c.name, c.params.map((p) => p.name));
+    }
   }
   return out;
+}
+
+// Mark each builder node that *owns* a diagnostic (the deepest node whose
+// recorded source range — `__range` — contains it) with a `__diag` message, so
+// the canvas can outline the offending node.
+function annotateDiagnostics(tree: BuilderNode, diagnostics: readonly { range: { start: { line: number; character: number }; end: { line: number; character: number } }; message: string }[]): void {
+  const after = (al: number, ac: number, bl: number, bc: number): boolean => al > bl || (al === bl && ac >= bc);
+  const ownerOf = (node: BuilderNode, dStart: { line: number; character: number }, dEnd: { line: number; character: number }): BuilderNode | null => {
+    const raw = node.props.__range;
+    if (typeof raw !== "string") {
+      for (const c of node.children) { const o = ownerOf(c, dStart, dEnd); if (o) return o; }
+      return null;
+    }
+    const [sl, sc, el, ec] = raw.split(",").map(Number);
+    if (!(after(dStart.line, dStart.character, sl, sc) && after(el, ec, dEnd.line, dEnd.character))) return null;
+    for (const c of node.children) { const o = ownerOf(c, dStart, dEnd); if (o) return o; }
+    return node;
+  };
+  for (const d of diagnostics) {
+    const owner = ownerOf(tree, d.range.start, d.range.end);
+    if (owner) owner.props.__diag = owner.props.__diag ? `${owner.props.__diag}; ${d.message}` : d.message;
+  }
 }
 
 export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
@@ -82,15 +108,10 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const options = useMemo(() => collectOptions(parsed.ast), [parsed]);
   const operations = useMemo(() => collectOperations(parsed.ast), [parsed]);
   const components = useMemo(() => collectComponents(parsed.ast), [parsed]);
-  const componentNames = useMemo(() => [...components].sort(), [components]);
+  const componentNames = useMemo(() => [...components.keys()].sort(), [components]);
 
   const [pageName, setPageName] = useState<string>("");
   const current = pages.find((p) => p.name === pageName) ?? pages[0];
-
-  const initialNodes = useMemo<SerializedNodes | null>(
-    () => (current ? toCraft(seedFromBody(current.expr, components)) : null),
-    [current, components],
-  );
 
   // LSP diagnostics that fall within the current body's source range — surfaced
   // on the canvas so the builder flags problems without leaving for the
@@ -100,6 +121,16 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     if (!r) return [];
     return ctx.diagnostics.filter((d) => d.range.start.line <= r.end.line && d.range.end.line >= r.start.line);
   }, [ctx.diagnostics, current]);
+
+  const initialNodes = useMemo<SerializedNodes | null>(
+    () => {
+      if (!current) return null;
+      const tree = seedFromBody(current.expr, components);
+      annotateDiagnostics(tree, bodyDiagnostics);
+      return toCraft(tree);
+    },
+    [current, components, bodyDiagnostics],
+  );
 
   if (parsed.parserErrors.length > 0) {
     return <Message>Source has syntax errors — fix them in the editor to use the builder.</Message>;

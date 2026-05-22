@@ -18,8 +18,12 @@ function useBox(): { ref: (el: HTMLElement | null) => void; selected: boolean; p
   return { ref: (el) => { if (el) connect(drag(el)); }, selected, props };
 }
 
-const boxStyle = (selected: boolean): React.CSSProperties => ({
-  outline: selected ? "2px solid var(--mantine-color-blue-5)" : "1px dashed var(--mantine-color-dark-3)",
+const boxStyle = (selected: boolean, errored = false): React.CSSProperties => ({
+  outline: errored
+    ? "2px solid var(--mantine-color-red-6)"
+    : selected
+      ? "2px solid var(--mantine-color-blue-5)"
+      : "1px dashed var(--mantine-color-dark-3)",
   borderRadius: 4,
   padding: 6,
   margin: 2,
@@ -107,8 +111,9 @@ function makeContainer(name: PrimitiveName): ComponentType<{ children?: ReactNod
       .map((k) => props[k])
       .filter((v) => v !== undefined && v !== "")
       .map(String);
+    const diag = props.__diag ? String(props.__diag) : undefined;
     return (
-      <div ref={ref} data-testid={`c4node-${name}`} style={{ ...boxStyle(selected), background: "var(--mantine-color-dark-6)" }}>
+      <div ref={ref} data-testid={`c4node-${name}`} title={diag} data-diag={diag ? "1" : undefined} style={{ ...boxStyle(selected, diag != null), background: "var(--mantine-color-dark-6)" }}>
         <div style={{ fontSize: 10, color: "var(--mantine-color-dimmed)", marginBottom: 4 }}>
           {extras.length ? `${name}: ${extras.join(" · ")}` : name}
         </div>
@@ -131,8 +136,9 @@ function makeLeaf(name: PrimitiveName): ComponentType<Props> {
   // leaf's own content.
   const C = ({ children, ...props }: Props & { children?: ReactNode }): JSX.Element => {
     const { ref, selected } = useBox();
+    const diag = props.__diag ? String(props.__diag) : undefined;
     return (
-      <div ref={ref} data-testid={`c4node-${name}`} style={boxStyle(selected)}>
+      <div ref={ref} data-testid={`c4node-${name}`} title={diag} data-diag={diag ? "1" : undefined} style={boxStyle(selected, diag != null)}>
         {renderLeaf(name, props as Props)}
         {children}
       </div>
@@ -156,9 +162,10 @@ export function Root({ children }: { children?: ReactNode }): JSX.Element {
 Root.craft = { displayName: "Root" };
 
 export function Opaque({ raw }: { raw?: string }): JSX.Element {
-  const { ref, selected } = useBox();
+  const { ref, selected, props } = useBox();
+  const diag = props.__diag ? String(props.__diag) : undefined;
   return (
-    <div ref={ref} data-testid="c4node-Opaque" style={{ ...boxStyle(selected), fontFamily: "monospace", fontSize: 11, color: "var(--mantine-color-dimmed)", whiteSpace: "pre-wrap" }}>
+    <div ref={ref} data-testid="c4node-Opaque" title={diag} data-diag={diag ? "1" : undefined} style={{ ...boxStyle(selected, diag != null), fontFamily: "monospace", fontSize: 11, color: "var(--mantine-color-dimmed)", whiteSpace: "pre-wrap" }}>
       {raw || "…"}
     </div>
   );

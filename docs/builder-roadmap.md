@@ -78,10 +78,10 @@ text stays the source of truth.
   current value in its dropdown.
 - **`Detail` / `MasterDetail` + user-component calls**: `Detail(of:, by:)` and
   `MasterDetail(of:, …, detail: o => …)` are recognised; and a call to a
-  user-defined `component` (collected from the source, registered in the craft
-  resolver) is modelled as a container whose positional args become children, so
-  it's editable rather than Opaque. A non-component value call (`format(x)`)
-  stays an expression.
+  user-defined `component` (collected from the source with its param names,
+  registered in the craft resolver) is recognised, its positional args modelled
+  as props **labelled by the declared param name**. A non-component value call
+  (`format(x)`) stays an expression.
 - **Typed binding pickers**: `Form(op:)` is a dropdown of the bound `of:`
   aggregate's operations (contextual — it follows the selected `of:`);
   `Form(runs:)` lists workflows. Aggregate/workflow/view option sets are
@@ -106,24 +106,19 @@ text stays the source of truth.
   cond (`ready => …`) as a lambda, so such conds must be comparisons/calls. Emit
   reproduces the original (valid) cond, so round-trip is safe; the "+ arm"
   control defaults the cond to `true` (a non-bare-ident expression).
-- **Component arg labels** — a user-component call's positional args render as
-  anonymous children today; mapping them to the component's declared param names
-  (a labelled field per param) would read better but needs the param signature
-  threaded into the settings panel.
 
 ## Open — editing UX
 
 - **Drag-to-add** from the palette (today is click-add; craft's create-connector
   swallows the click). **Drag-reorder** across containers needs verification.
-- **Per-node diagnostics** — the body's LSP diagnostics (scoped by source range)
-  now show as a problems bar above the canvas; mapping each diagnostic to the
-  specific node it came from (to highlight it) is still open.
 - **Mobile** Builder tab (desktop-only today).
 - **Continuous text→canvas live sync** (today re-seeds on tab switch, not per
   keystroke) — needs debounce + canvas selection preservation.
 
 Done: **component editing** (the body picker now lists `page` and `component`
-bodies); **inline `expr`/`raw` validation** in the settings panel.
+bodies); **inline `expr`/`raw` validation** in the settings panel; **diagnostics**
+(a problems bar above the canvas *and* a red outline + tooltip on the specific
+node each diagnostic came from, via each node's recorded `__range`).
 
 ## System / Model Builder (Phase C)
 
