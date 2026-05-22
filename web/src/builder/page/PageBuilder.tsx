@@ -324,7 +324,15 @@ function SettingsContent({ options, operations = {} }: { options: Record<string,
           <Button size="compact-xs" variant="light" data-testid="c4builder-add-stmt" onClick={addStmt}>+ statement</Button>
         </Group>
       )}
-      {id && name === "Stmt" && (
+      {id && name === "Stmt" && props.kind === "assign" && (
+        // Assignment statement: target / op / value as separate controls.
+        <>
+          <TextInput size="xs" mb={4} label="target" value={String(props.target ?? "")} data-testid="c4builder-prop-target" styles={{ input: { fontFamily: "monospace" } }} onChange={(e) => set("target", e.currentTarget.value)} />
+          <Select size="xs" mb={4} label="op" data={[":=", "+=", "-="]} value={String(props.op ?? ":=")} allowDeselect={false} data-testid="c4builder-prop-op-assign" onChange={(v) => v && set("op", v)} />
+          <Textarea size="xs" mb="xs" label="value" autosize minRows={1} value={String(props.value ?? "")} data-testid="c4builder-prop-value" styles={{ input: { fontFamily: "monospace" } }} error={props.value && !isValidExpr(String(props.value)) ? "Invalid expression" : undefined} onChange={(e) => set("value", e.currentTarget.value)} />
+        </>
+      )}
+      {id && name === "Stmt" && props.kind !== "assign" && (
         <Textarea
           size="xs"
           mb="xs"

@@ -269,6 +269,7 @@ test("a Button's onClick handler is an editable nested lambda", async ({ page })
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
 
+
 const HANDLER_SOURCE = `system S {
   ui U {
     page P {
