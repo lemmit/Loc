@@ -185,6 +185,35 @@ test("adds every domain + infra construct kind from the palette", async ({ page 
   }
 });
 
+test("edits infra construct properties (deployable platform, storage type)", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  // Deployable: change webApp's platform react → static.
+  await page.locator('[data-testid="rf__node-deployable:webApp"]').click();
+  const platform = page.getByTestId("c4system-deployable-platform");
+  await expect(platform).toHaveValue("react");
+  await platform.click();
+  await page.getByRole("option", { name: "static", exact: true }).click();
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+  await expect(page.getByTestId("c4system-deployable-platform")).toHaveValue("static");
+
+  // Storage: add one, then change its type.
+  await page.getByTestId("c4system-add-storage").click();
+  await page.locator('[data-testid="rf__node-storage:Storage1"]').click();
+  const stype = page.getByTestId("c4system-storage-type");
+  await expect(stype).toHaveValue("postgres");
+  await stype.click();
+  await page.getByRole("option", { name: "redis", exact: true }).click();
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+  await expect(page.getByTestId("c4system-storage-type")).toHaveValue("redis");
+});
+
 test("edits a repository find's parameters", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);

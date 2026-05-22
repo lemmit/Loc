@@ -13,7 +13,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { AstUtils, type AstNode } from "langium";
-import { Box, Button, Checkbox, Drawer, Group, ScrollArea, Select, Stack, Text, TextInput, Textarea } from "@mantine/core";
+import { Box, Button, Checkbox, Drawer, Group, NumberInput, ScrollArea, Select, Stack, Text, TextInput, Textarea } from "@mantine/core";
 import type { LayoutCtx } from "../../layout/ctx";
 import type { BoundedContext, Model, System } from "../../../../src/language/generated/ast.js";
 import { printStructural } from "../../../../src/language/print/index.js";
@@ -44,6 +44,16 @@ import {
   retypeFindParam,
   setFindReturnType,
 } from "./find-params";
+import {
+  PLATFORMS,
+  STORAGE_TYPES,
+  deployablePlatform,
+  deployablePort,
+  setDeployablePlatform,
+  setDeployablePort,
+  setStorageType,
+  storageType,
+} from "./infra-props";
 import { currentTarget, isRebindKind, rebindReference, rebindTargets, targetKindOf } from "./rebind";
 import {
   addStatement,
@@ -406,6 +416,23 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     applyFind(setFindReturnType(ctx.getSource(), selected.name, findName, spec));
   };
 
+  // Infra construct scalar properties.
+  const setStorage = (type: string): void => {
+    if (!selected) return;
+    const next = setStorageType(ctx.getSource(), selected.name, type);
+    if (next != null) apply(next, true);
+  };
+  const setPlatform = (platform: string): void => {
+    if (!selected) return;
+    const next = setDeployablePlatform(ctx.getSource(), selected.name, platform);
+    if (next != null) apply(next, true);
+  };
+  const setPort = (port: number | undefined): void => {
+    if (!selected) return;
+    const next = setDeployablePort(ctx.getSource(), selected.name, port);
+    if (next != null) apply(next, true);
+  };
+
   const rebindTo = (target: string | null): void => {
     if (!selected || !target || !isRebindKind(selected.kind)) return;
     const next = rebindReference(ctx.getSource(), selected.kind, selected.name, target);
@@ -638,6 +665,47 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
                     </Stack>
                   );
                 })()}
+              </Stack>
+            )}
+            {selected.kind === "storage" && (
+              <Group gap={4} align="center" wrap="nowrap" data-testid="c4system-storage">
+                <Text size="xs" style={{ flex: "0 0 48px" }} c="dimmed">type</Text>
+                <Select
+                  size="xs"
+                  style={{ flex: 1, minWidth: 0 }}
+                  searchable
+                  data={STORAGE_TYPES}
+                  value={storageType(selected.ast) ?? null}
+                  data-testid="c4system-storage-type"
+                  onChange={(v) => v && setStorage(v)}
+                />
+              </Group>
+            )}
+            {selected.kind === "deployable" && (
+              <Stack gap={4} data-testid="c4system-deployable">
+                <Group gap={4} align="center" wrap="nowrap">
+                  <Text size="xs" style={{ flex: "0 0 56px" }} c="dimmed">platform</Text>
+                  <Select
+                    size="xs"
+                    style={{ flex: 1, minWidth: 0 }}
+                    data={PLATFORMS}
+                    value={deployablePlatform(selected.ast) ?? null}
+                    data-testid="c4system-deployable-platform"
+                    onChange={(v) => v && setPlatform(v)}
+                  />
+                </Group>
+                <Group gap={4} align="center" wrap="nowrap">
+                  <Text size="xs" style={{ flex: "0 0 56px" }} c="dimmed">port</Text>
+                  <NumberInput
+                    size="xs"
+                    style={{ flex: 1, minWidth: 0 }}
+                    value={deployablePort(selected.ast) ?? ""}
+                    data-testid="c4system-deployable-port"
+                    hideControls
+                    allowDecimal={false}
+                    onChange={(v) => setPort(typeof v === "number" ? v : undefined)}
+                  />
+                </Group>
               </Stack>
             )}
             {selected.kind === "workflow" && (
