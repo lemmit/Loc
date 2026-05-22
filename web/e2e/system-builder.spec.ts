@@ -646,3 +646,55 @@ test("edits a repository find's where filter through the expression editor", asy
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
   await expect(op()).toHaveValue("!=");
 });
+
+// Inject source via the playground's test seam, like builder-page.spec.ts.
+async function setSource(page: import("@playwright/test").Page, source: string): Promise<void> {
+  await page.waitForFunction(() => typeof (window as unknown as { __loomSetSource?: unknown }).__loomSetSource === "function");
+  await page.evaluate((t) => (window as unknown as { __loomSetSource: (s: string) => void }).__loomSetSource(t), source);
+}
+
+const EXPR_SOURCE = `system S {
+  context C {
+    aggregate Order {
+      qty: int
+      derived tag: string = qty > 0 ? "yes" : "no"
+      derived bucket: string = match {
+        qty > 0 => "pos"
+        else => "neg"
+      }
+    }
+  }
+}`;
+
+test("structures ternary and match expressions in the editor", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await setSource(page, EXPR_SOURCE);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await page.locator('[data-testid="rf__node-aggregate:Order"]').click();
+
+  // Ternary: `qty > 0 ? "yes" : "no"` renders as a ternary with a nested binary
+  // cond. Change the cond operator and confirm it commits back to source.
+  await page.getByTestId("c4system-expr-pick").click();
+  await page.getByRole("option", { name: "derived tag" }).click();
+  await expect(page.getByTestId("c4expr-ternary")).toBeVisible();
+  const op = page.getByTestId("c4expr").getByTestId("c4expr-op");
+  await expect(op).toHaveValue(">");
+  await op.click();
+  await page.getByRole("option", { name: ">=", exact: true }).click();
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+  const model = () => page.evaluate(() => (window as unknown as { __loomGetSource: () => string }).__loomGetSource());
+  await expect.poll(model).toContain('qty >= 0 ? "yes" : "no"');
+
+  // Match: `match { qty > 0 => "pos" else => "neg" }` renders structured; add an
+  // arm and confirm the new (parseable) arm lands in source.
+  await page.getByTestId("c4system-expr-pick").click();
+  await page.getByRole("option", { name: "derived bucket" }).click();
+  await expect(page.getByTestId("c4expr-match")).toBeVisible();
+  await expect(page.getByTestId("c4expr-arm-del")).toHaveCount(1);
+  await page.getByTestId("c4expr-arm-add").click();
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+  await expect.poll(model).toContain("true => null");
+});

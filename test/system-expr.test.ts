@@ -76,6 +76,37 @@ describe("structured expression editor — model", () => {
     expect(emitExpr(tree)).toBe('Money(lines.sum(l => l.subtotal.amount), "USD")');
   });
 
+  it("structures ternary expressions (cond / then / else)", () => {
+    const src = `system S { context C { aggregate Order { qty: int
+      derived label: string = qty > 0 ? "yes" : "no" } } }`;
+    const tree = seedExpr(slotExpr(parse(src), { kind: "derived", owner: "Order", name: "label" })!);
+    expect(tree).toMatchObject({
+      kind: "ternary",
+      cond: { kind: "binary", op: ">" },
+      then: { kind: "lit", lit: "string", value: "yes" },
+      else: { kind: "lit", lit: "string", value: "no" },
+    });
+    expect(emitExpr(tree)).toBe('qty > 0 ? "yes" : "no"');
+  });
+
+  it("structures match expressions (arms + optional else)", () => {
+    // Arm conds must not end in a bare identifier (the grammar would read
+    // `X => …` as a lambda) — `qty > 0` ends in a literal, so it's safe.
+    const src = `system S { context C {
+      aggregate Order { qty: int
+        derived label: string = match {
+          qty > 0 => "open"
+          else => "closed"
+        } } } }`;
+    const tree = seedExpr(slotExpr(parse(src), { kind: "derived", owner: "Order", name: "label" })!);
+    if (tree.kind !== "match") throw new Error("expected a match");
+    expect(tree.arms).toHaveLength(1);
+    expect(tree.arms[0].cond).toMatchObject({ kind: "binary", op: ">" });
+    expect(tree.arms[0].value).toMatchObject({ kind: "lit", lit: "string", value: "open" });
+    expect(tree.else).toMatchObject({ kind: "lit", lit: "string", value: "closed" });
+    expect(emitExpr(tree)).toBe('match {\nqty > 0 => "open"\nelse => "closed"\n}');
+  });
+
   it("structures object literals (named fields)", () => {
     // placeOrder: let order = Order.create({ customerId: …, status: Draft, placedAt: … })
     const tree = seedExpr(slotExpr(parse(sales), { kind: "wfStmt", owner: "placeOrder", index: 1 })!);
@@ -315,6 +346,20 @@ describe("structured expression editor — type-directed member candidates", () 
   it("returns an empty map for an expression with no member access", async () => {
     const m = await memberCandidates(sales, { kind: "invariant", owner: "Money", index: 0 });
     expect(m.size).toBe(0);
+  });
+
+  it("keys member candidates through ternary and match branches (paths align with the editor)", async () => {
+    const src = `system S { context C {
+      enum Status { Open, Closed }
+      aggregate Order { qty: int  status: Status
+        derived t: Status = qty > 0 ? this.status : status
+        derived m: Status = match { qty > 0 => this.status else => status } } } }`;
+    // ternary `then` branch is `this.status` → member node at path "?t".
+    const tern = await memberCandidates(src, { kind: "derived", owner: "Order", name: "t" });
+    expect(tern.get("?t")).toEqual(expect.arrayContaining(["qty", "status"]));
+    // match arm 0 value is `this.status` → member node at path "m0v".
+    const mt = await memberCandidates(src, { kind: "derived", owner: "Order", name: "m" });
+    expect(mt.get("m0v")).toEqual(expect.arrayContaining(["qty", "status"]));
   });
 
   it("labels positional call arguments with the callee's parameter names", async () => {

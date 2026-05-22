@@ -296,15 +296,23 @@ Done:
   token in place (field values preserved), like reference rebinding
   (`web/src/builder/system/emit-event.ts`). Gated by
   `test/system-emit-event.test.ts` + e2e.
+- **Structured `match` + ternary** — `cond ? then : else` renders as three
+  nested editors; `match { … }` renders its arms (cond `=>` value) with
+  add/remove-arm and add/remove-else controls, the new arm defaulting to a safe
+  `true => null` (a bare-identifier arm cond would misparse as a lambda). Both
+  decompose recursively like the rest of the editor and the type-directed
+  member/arg hints thread through the branches (matching paths in `collectHints`).
+  `expr-model.ts` + `ExpressionEditor.tsx` + `expr-slots.ts`; gated by
+  `test/system-expr.test.ts` + e2e.
 
 Open:
 
-- **Deeper expression structuring** — structured `match` and ternary, and
-  block-body lambdas (still `raw` leaves); arg-*name* editing on calls (existing
-  named args are preserved verbatim but can't be renamed in the UI); and
-  structured statement *targets* (assignment LValue / `emit` event picker) +
-  bare-call statements — the statement *expressions* are structured today, but
-  these non-expression parts stay text-row.
+- **Deeper expression structuring** — block-body lambdas are still `raw`
+  leaves; arg-*name* editing on calls (existing named args are preserved
+  verbatim but can't be renamed in the UI); and structured statement *targets*
+  (assignment LValue / `emit` event picker) + bare-call statements — the
+  statement *expressions* are structured today, but these non-expression parts
+  stay text-row.
 - **Edge rebinding by dragging** connections on the canvas (inspector-Select
   rebinding already exists — see above); plus multi-valued deployable references
   (module bindings, `serves`, ui) which the single-Select rebind doesn't cover.

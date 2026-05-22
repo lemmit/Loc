@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { ActionIcon, Autocomplete, Box, Group, SegmentedControl, Select, Text, TextInput, Textarea } from "@mantine/core";
-import { BINARY_OPS, UNARY_OPS, emitExpr, type ECallArg, type EExpr, type EObjField } from "./expr-model";
+import { ActionIcon, Autocomplete, Box, Button, Group, SegmentedControl, Select, Text, TextInput, Textarea } from "@mantine/core";
+import { BINARY_OPS, UNARY_OPS, emitExpr, type ECallArg, type EExpr, type EMatchArm, type EObjField } from "./expr-model";
 
 export type ExprMode = "structured" | "text";
 
@@ -197,6 +197,54 @@ export function ExpressionEditor({ node, path, onChange }: NodeProps): JSX.Eleme
           </ExprScopeContext.Provider>
         </Group>
       );
+    case "ternary":
+      return (
+        <Group gap={4} wrap="nowrap" align="center" style={{ border: "1px solid var(--mantine-color-dark-4)", borderRadius: 4, padding: 2 }} data-testid="c4expr-ternary">
+          <ExpressionEditor node={node.cond} path={`${path}?c`} onChange={(n, c) => onChange({ ...node, cond: n }, c)} />
+          <Text size="xs" c="dimmed">?</Text>
+          <ExpressionEditor node={node.then} path={`${path}?t`} onChange={(n, c) => onChange({ ...node, then: n }, c)} />
+          <Text size="xs" c="dimmed">:</Text>
+          <ExpressionEditor node={node.else} path={`${path}?e`} onChange={(n, c) => onChange({ ...node, else: n }, c)} />
+        </Group>
+      );
+    case "match": {
+      const m = node;
+      const setArm = (i: number, arm: EMatchArm, commit: boolean): void => onChange({ ...m, arms: m.arms.map((a, j) => (j === i ? arm : a)), }, commit);
+      return (
+        <Box style={{ border: "1px solid var(--mantine-color-dark-4)", borderRadius: 4, padding: 2 }} data-testid="c4expr-match">
+          <Text size="xs" c="dimmed">match</Text>
+          {m.arms.map((arm, i) => (
+            <Group key={i} gap={4} wrap="nowrap" align="center" pl={8}>
+              <ExpressionEditor node={arm.cond} path={`${path}m${i}c`} onChange={(n, c) => setArm(i, { ...arm, cond: n }, c)} />
+              <Text size="xs" c="dimmed">{"=>"}</Text>
+              <ExpressionEditor node={arm.value} path={`${path}m${i}v`} onChange={(n, c) => setArm(i, { ...arm, value: n }, c)} />
+              <ActionIcon size="xs" variant="subtle" color="gray" data-testid="c4expr-arm-del" aria-label="remove arm" onClick={() => onChange({ ...m, arms: m.arms.filter((_, j) => j !== i) }, true)}>
+                <Text size="xs">×</Text>
+              </ActionIcon>
+            </Group>
+          ))}
+          {m.else !== undefined && (
+            <Group gap={4} wrap="nowrap" align="center" pl={8}>
+              <Text size="xs" c="dimmed">else {"=>"}</Text>
+              <ExpressionEditor node={m.else} path={`${path}me`} onChange={(n, c) => onChange({ ...m, else: n }, c)} />
+              <ActionIcon size="xs" variant="subtle" color="gray" data-testid="c4expr-else-del" aria-label="remove else" onClick={() => onChange({ ...m, else: undefined }, true)}>
+                <Text size="xs">×</Text>
+              </ActionIcon>
+            </Group>
+          )}
+          <Group gap={4} pl={8} mt={2}>
+            <Button size="compact-xs" variant="subtle" color="gray" data-testid="c4expr-arm-add" onClick={() => onChange({ ...m, arms: [...m.arms, { cond: { kind: "lit", lit: "bool", value: "true" }, value: { kind: "lit", lit: "null", value: "null" } }] }, true)}>
+              + arm
+            </Button>
+            {m.else === undefined && (
+              <Button size="compact-xs" variant="subtle" color="gray" data-testid="c4expr-else-add" onClick={() => onChange({ ...m, else: { kind: "lit", lit: "null", value: "null" } }, true)}>
+                + else
+              </Button>
+            )}
+          </Group>
+        </Box>
+      );
+    }
     case "new":
       return (
         <Group gap={2} wrap="nowrap" align="center" style={{ border: "1px solid var(--mantine-color-dark-4)", borderRadius: 4, padding: 2 }}>

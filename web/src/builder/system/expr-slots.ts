@@ -18,11 +18,13 @@ import {
   type BinaryExpr,
   type CallExpr,
   type Lambda,
+  type MatchExpr,
   type MemberAccess,
   type NewExpr,
   type ObjectLit,
   type ParenExpr,
   type Statement,
+  type TernaryExpr,
   type UnaryExpr,
   type ValueObject,
   type View,
@@ -458,13 +460,29 @@ function collectHints(node: Expression, path: string, h: ExprHints): void {
       if (l.body) collectHints(l.body, `${path}b`, h);
       break;
     }
+    case "TernaryExpr": {
+      const t = node as TernaryExpr;
+      collectHints(t.condition, `${path}?c`, h);
+      collectHints(t.thenExpr, `${path}?t`, h);
+      collectHints(t.elseExpr, `${path}?e`, h);
+      break;
+    }
+    case "MatchExpr": {
+      const m = node as MatchExpr;
+      m.arms.forEach((a, i) => {
+        collectHints(a.cond, `${path}m${i}c`, h);
+        collectHints(a.value, `${path}m${i}v`, h);
+      });
+      if (m.elseExpr) collectHints(m.elseExpr, `${path}me`, h);
+      break;
+    }
     case "NewExpr":
       (node as NewExpr).fields.forEach((f, i) => collectHints(f.value, `${path}f${i}`, h));
       break;
     case "ObjectLit":
       (node as ObjectLit).fields.forEach((f, i) => collectHints(f.value, `${path}f${i}`, h));
       break;
-    // Other forms are opaque leaves (names, literals, ternary, match, …).
+    // Other forms are opaque leaves (names, literals, …).
   }
 }
 
