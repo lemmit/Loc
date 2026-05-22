@@ -106,15 +106,19 @@ text stays the source of truth.
   verbatim fallback row (bare calls / `navigate(…)` / anything unmodelled) now
   reparse-validates and flags an "Invalid statement". (`emit` isn't a page-handler
   statement — it's domain-side, edited in the system/workflow builder.)
+- **Enum-case default picker**: in the State panel, an enum-typed state field's
+  default renders as a dropdown of the enum's cases (collected from the source by
+  `BuilderPane`; the current value is always selectable so a hand-written default
+  isn't clobbered) instead of a free-text input.
 
 ## Open — expression / domain-logic surface
 
 - **Per-statement structure** — assignment and `let` are structured; bare
   calls / `navigate(…)` keep a validated single-row editor (a call is one
   expression, so structuring buys little beyond the validation now in place).
-- **More typed pickers**: enum-case values (needs the field's enum type) and
-  repository finds (op/runs/aggregate/workflow/color/boolean pickers are done;
-  qualified refs already round-trip).
+- **More typed pickers**: enum-case values are offered for state-field defaults;
+  enum-valued *expressions elsewhere* (assignment values, `match` conds) still
+  edit as free text (would need per-position type inference).
 - **`match` arm cond caveat** — the grammar misparses a *bare-identifier* arm
   cond (`ready => …`) as a lambda, so such conds must be comparisons/calls. Emit
   reproduces the original (valid) cond, so round-trip is safe; the "+ arm"

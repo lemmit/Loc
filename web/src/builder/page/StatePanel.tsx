@@ -14,10 +14,12 @@ interface Props {
   page: Page;
   getSource: () => string;
   types: TypeOption[];
+  /** Enum name → its case names, for the enum-case default dropdown. */
+  enumCases: ReadonlyMap<string, string[]>;
   onApply: (next: string | null) => void;
 }
 
-export default function StatePanel({ page, getSource, types, onApply }: Props): JSX.Element {
+export default function StatePanel({ page, getSource, types, enumCases, onApply }: Props): JSX.Element {
   const fields = listStateFields(page);
   return (
     <Popover position="bottom-start" withArrow shadow="md" trapFocus>
@@ -28,7 +30,7 @@ export default function StatePanel({ page, getSource, types, onApply }: Props): 
         <Text size="xs" tt="uppercase" c="dimmed" mb={6}>Page state</Text>
         {fields.length === 0 && <Text size="xs" c="dimmed" mb="xs">No state fields.</Text>}
         {fields.map((f, i) => (
-          <StateFieldRow key={`${i}:${f.name}`} field={f} index={i} pageName={page.name} getSource={getSource} types={types} onApply={onApply} />
+          <StateFieldRow key={`${i}:${f.name}`} field={f} index={i} pageName={page.name} getSource={getSource} types={types} enumCases={enumCases} onApply={onApply} />
         ))}
         <Button size="compact-xs" variant="light" mt={4} data-testid="c4state-add" onClick={() => onApply(addStateField(getSource(), page.name))}>
           + field
@@ -38,16 +40,21 @@ export default function StatePanel({ page, getSource, types, onApply }: Props): 
   );
 }
 
-function StateFieldRow({ field, index, pageName, getSource, types, onApply }: {
+function StateFieldRow({ field, index, pageName, getSource, types, enumCases, onApply }: {
   field: StateFieldInfo;
   index: number;
   pageName: string;
   getSource: () => string;
   types: TypeOption[];
+  enumCases: ReadonlyMap<string, string[]>;
   onApply: (next: string | null) => void;
 }): JSX.Element {
   const [def, setDef] = useState(field.init ?? "");
   const retype = (spec: TypeSpec): void => onApply(retypeStateField(getSource(), pageName, index, spec));
+  // An enum-typed field's default is one of the enum's cases — offer them as a
+  // dropdown (the current value is always selectable so a hand-written default
+  // is never clobbered); other fields keep the free-text input.
+  const cases = field.base.kind === "named" ? enumCases.get(field.base.target) : undefined;
   return (
     <Group gap={4} mb={4} wrap="nowrap" data-testid="c4state-field">
       <Text size="xs" style={{ width: 64, fontFamily: "monospace" }} truncate>{field.name}</Text>
@@ -62,15 +69,29 @@ function StateFieldRow({ field, index, pageName, getSource, types, onApply }: {
       />
       <Checkbox size="xs" label="[]" checked={field.array} onChange={(e) => retype({ base: field.base, array: e.currentTarget.checked, optional: field.optional })} />
       <Checkbox size="xs" label="?" checked={field.optional} onChange={(e) => retype({ base: field.base, array: field.array, optional: e.currentTarget.checked })} />
-      <TextInput
-        size="xs"
-        w={68}
-        placeholder="default"
-        value={def}
-        data-testid="c4state-prop-default"
-        onChange={(e) => setDef(e.currentTarget.value)}
-        onBlur={() => { if (def !== (field.init ?? "")) onApply(setStateDefault(getSource(), pageName, index, def)); }}
-      />
+      {cases ? (
+        <Select
+          size="xs"
+          w={96}
+          clearable
+          searchable
+          placeholder="default"
+          data={[...new Set([...cases, field.init].filter((c): c is string => !!c))]}
+          value={field.init ?? null}
+          data-testid="c4state-prop-default"
+          onChange={(v) => onApply(setStateDefault(getSource(), pageName, index, v ?? ""))}
+        />
+      ) : (
+        <TextInput
+          size="xs"
+          w={68}
+          placeholder="default"
+          value={def}
+          data-testid="c4state-prop-default"
+          onChange={(e) => setDef(e.currentTarget.value)}
+          onBlur={() => { if (def !== (field.init ?? "")) onApply(setStateDefault(getSource(), pageName, index, def)); }}
+        />
+      )}
       <UnstyledButton data-testid="c4state-delete" onClick={() => onApply(deleteStateField(getSource(), pageName, index))} style={{ color: "var(--mantine-color-red-5)", fontSize: 12 }}>
         ✕
       </UnstyledButton>
