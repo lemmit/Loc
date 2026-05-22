@@ -100,6 +100,7 @@ function renderLeaf(name: PrimitiveName, p: Props): ReactNode {
       const text =
         p.kind === "assign" ? `${p.target ?? ""} ${p.op ?? ":="} ${p.value ?? ""}` :
         p.kind === "let" ? `let ${p.name ?? ""} = ${p.value ?? ""}` :
+        p.kind === "navigate" ? `navigate(${p.to ?? ""})` :
         String(p.src || "…");
       return <span style={{ fontFamily: "monospace", fontSize: 11 }}>{text}</span>;
     }

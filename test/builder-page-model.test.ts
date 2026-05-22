@@ -301,11 +301,25 @@ describe("page-builder model — container-with-props seed shape", () => {
     expect(lambda.children[1].props.src).toBe("refresh()");
   });
 
+  it("structures a navigate(...) statement into target page + params", () => {
+    const node = seed('Button("Go", onClick: e => {\n  navigate(OrderConsole, draft.customerId)\n})');
+    const handler = node.children.find((c) => c.slot === "onClick")!;
+    expect(handler.children[0].props).toMatchObject({ kind: "navigate", to: "OrderConsole", params: "draft.customerId" });
+    expect(emitBody(fromCraft(toCraft(node)))).toBe(emitBody(node));
+  });
+
+  it("structures navigate without params", () => {
+    const node = seed('Button("Go", onClick: e => {\n  navigate(Home)\n})');
+    const handler = node.children.find((c) => c.slot === "onClick")!;
+    expect(handler.children[0].props).toMatchObject({ kind: "navigate", to: "Home", params: "" });
+    expect(emitBody(node)).toContain("navigate(Home)");
+  });
+
   it("structures `let` and keeps a bare call verbatim, both round-tripping", () => {
-    const node = seed('Button("Go", onClick: e => {\n  let total = order.total + 1\n  navigate(Home)\n})');
+    const node = seed('Button("Go", onClick: e => {\n  let total = order.total + 1\n  refresh(order)\n})');
     const handler = node.children.find((c) => c.slot === "onClick")!;
     expect(handler.children[0].props).toMatchObject({ kind: "let", name: "total", value: "order.total + 1" });
-    expect(handler.children[1].props.src).toBe("navigate(Home)");
+    expect(handler.children[1].props.src).toBe("refresh(order)");
     expect(emitBody(fromCraft(toCraft(node)))).toBe(emitBody(node));
   });
 

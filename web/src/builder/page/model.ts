@@ -356,6 +356,22 @@ function seedStmt(s: Statement): BuilderNode {
   if (s.$type === "LetStmt") {
     return { name: "Stmt", props: { kind: "let", name: s.name, value: s.expr.$cstNode?.text?.trim() ?? "", ...ext }, children: [] };
   }
+  // `navigate(<page>, { …params })` — a bare call to the UI navigation
+  // primitive: structure it into a target-page picker + a params object so the
+  // page is editable from a dropdown rather than a verbatim row.
+  if (s.$type === "AssignOrCallStmt" && !s.op && s.target.call && s.target.head === "navigate" && s.target.tail.length === 0) {
+    const to = s.target.args[0];
+    return {
+      name: "Stmt",
+      props: {
+        kind: "navigate",
+        to: to ? (to.$type === "NameRef" ? to.name : printExpr(to)) : "",
+        params: s.target.args[1] ? printExpr(s.target.args[1]) : "",
+        ...ext,
+      },
+      children: [],
+    };
+  }
   return { name: "Stmt", props: { src: s.$cstNode?.text?.trim() ?? "", ...ext }, children: [] };
 }
 
@@ -428,6 +444,11 @@ export function emitBody(node: BuilderNode): string {
   if (node.name === "Stmt") {
     if (node.props.kind === "assign") return `${node.props.target ?? ""} ${node.props.op ?? ":="} ${node.props.value ?? ""}`;
     if (node.props.kind === "let") return `let ${node.props.name ?? "x"} = ${node.props.value ?? ""}`;
+    if (node.props.kind === "navigate") {
+      const to = String(node.props.to ?? "");
+      const params = node.props.params ? String(node.props.params) : "";
+      return params ? `navigate(${to}, ${params})` : `navigate(${to})`;
+    }
     return String(node.props.src ?? "");
   }
   if (node.name === "Lambda") {

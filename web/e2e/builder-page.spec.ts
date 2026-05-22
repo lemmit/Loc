@@ -471,3 +471,41 @@ test("offers enum cases as the default for an enum-typed state field", async ({ 
   await expect.poll(model).toContain("status: OrderStatus = Shipped");
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
+
+const NAV_SOURCE = `system S {
+  ui U {
+    page Home { body: Text("home") }
+    page Console { body: Text("console") }
+    page Orders {
+      body: Button("Go", onClick: e => {
+        navigate(Home)
+      })
+    }
+  }
+}`;
+
+test("structures a navigate() statement with a target-page picker", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await setSource(page, NAV_SOURCE);
+
+  await page.getByTestId("doc-tab-builder").click();
+  await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
+  // Builder opens the first page (Home); switch to Orders which has the handler.
+  await page.getByTestId("c4builder-page-select").click();
+  await page.getByRole("option", { name: "Orders" }).click();
+
+  // The navigate statement seeds as a structured row.
+  await expect(page.getByTestId("c4node-Stmt").first()).toContainText("navigate(Home)");
+
+  // Select it → a target-page dropdown (current value "Home"); repoint to Console.
+  await page.getByTestId("c4node-Stmt").first().click();
+  await expect(page.getByTestId("c4builder-prop-nav-to")).toHaveValue("Home");
+  await page.getByTestId("c4builder-prop-nav-to").click();
+  await page.getByRole("option", { name: "Console", exact: true }).click();
+
+  await page.getByTestId("c4builder-apply").click();
+  const model = () => page.evaluate(() => (window as unknown as { __loomGetSource: () => string }).__loomGetSource());
+  await expect.poll(model).toContain("navigate(Console)");
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+});
