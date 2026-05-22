@@ -61,8 +61,7 @@ text stays the source of truth.
   (`testid:`/`striped:`/`gap:`/…) is kept as a verbatim passthrough prop —
   editable as a generic expr field, surfaced in the settings panel — instead of
   collapsing the node to Opaque; and declared positionals are optional from the
-  right (`Empty()` is recognised). Only a lambda/match-valued unknown arg (real
-  domain logic, e.g. `Button(onClick: e => { … })`) still forces Opaque.
+  right (`Empty()` is recognised). See also event-handler lambdas, below.
 - **Expression-valued text**: text content (`Heading`/`Text`/`Button`/`Anchor`/
   `Alert`/`Empty`) is a `text` kind — a plain text box for a string literal,
   the raw expression otherwise — so `Text("Hello, " + name)` is editable rather
@@ -70,18 +69,24 @@ text stays the source of truth.
 - **In-canvas add-arm / add-child**: a selected `Match` shows "+ arm"/"+ else"
   controls (arms aren't palette primitives); the palette won't drop a raw
   primitive into a Match or an already-full single-child slot.
+- **Event-handler lambdas + qualified refs**: an unknown named arg whose value
+  is a lambda (`Button(onClick: e => { … })`, form `onSubmit`) is kept as a
+  verbatim passthrough prop — the carrying primitive stays recognised, the
+  handler editable as raw source — instead of forcing Opaque; and a `ref` slot
+  accepts a qualified ref (`Form(of: Sales.Order)`), surfaced as the current
+  value in its dropdown.
 
 ## Open — expression / domain-logic surface
 
-- **Block-body event handlers** — `Button(onClick: e => { … })`, form `onSubmit`
-  closures: multi-statement lambdas stay Opaque (genuine imperative logic). A
-  statement-level editor would be a separate effort.
+- **Statement-level handler editor** — event-handler / `onSubmit` bodies
+  round-trip and are editable as raw source today; a structured editor for the
+  statements inside (`:=`, `call`, `emit`, `navigate`, `let`) is a separate
+  effort.
 - **`state := …`** page state declarations / assignments. Not modelled.
 - **Operation forms**: `Form(of:, op:)`, bound to aggregate operations — need op
   pickers wired to the IR (`Form` currently models only `of:`/`creates:`/`testid:`).
-- **Richer bindings**: qualified refs (`Sales.Order` — today only bare idents are
-  modelled as `ref`; qualified ones fall to the `expr` text field), repository
-  finds, view sources, enum values, navigation params.
+- **Richer bindings**: typed pickers for repository finds, view sources, enum
+  values, and navigation params (qualified refs already round-trip).
 - **`match` arm cond caveat** — the grammar misparses a *bare-identifier* arm
   cond (`ready => …`) as a lambda, so such conds must be comparisons/calls. Emit
   reproduces the original (valid) cond, so round-trip is safe; the "+ arm"
