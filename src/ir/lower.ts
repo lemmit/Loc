@@ -226,7 +226,7 @@ export function lowerModel(model: Model): LoomModel {
 }
 
 // ---------------------------------------------------------------------------
-// Traceability lowering (Slice 12)
+// Traceability lowering
 // ---------------------------------------------------------------------------
 
 const REQUIREMENT_TYPES: ReadonlySet<string> = new Set<RequirementType>([
@@ -453,7 +453,7 @@ function lowerSystem(sys: System): SystemIR {
       e2eTests.push(lowerE2E(b, e2eEnv, "api"));
     }
   }
-  // Slice 2 — page metamodel.  `ui { ... }` blocks are SystemMembers;
+  // Page metamodel.  `ui { ... }` blocks are SystemMembers;
   // lower each into a UiIR and attach to the system.  Order
   // preserves source order so Slice 4's scaffold expander emits
   // pages in a stable sequence.  Lowering is shallow at this layer:
@@ -489,7 +489,7 @@ function lowerSystem(sys: System): SystemIR {
     apis,
     storages,
   };
-  // Slice D1 — scaffold expander always runs.  Every page with a
+  // Scaffold expander always runs.  Every page with a
   // recognised `scaffoldOrigin` gets `body` rewritten to a
   // walker-stdlib composition; the React emitter then routes
   // through the walker (Phase A primitives).  The legacy archetype
@@ -503,7 +503,7 @@ function lowerSystem(sys: System): SystemIR {
   return built;
 }
 
-/** Slice C1 — in-place rewrite of every UI's pages.  When the
+/** In-place rewrite of every UI's pages.  When the
  *  expander handles a page's `scaffoldOrigin`, swap `body` with
  *  the synthesised walker-stdlib expression and clear the
  *  `scaffoldOrigin` discriminator so the React emitter dispatches
@@ -521,7 +521,7 @@ function expandScaffoldPages(sys: SystemIR): void {
       // shape across the C2 default flip.
       page.emitPath = conventionalEmitPath(page.scaffoldOrigin, ctx);
       page.body = expanded;
-      // Slice A11 — detail-page expansion references `id` as a
+      // Detail-page expansion references `id` as a
       // route param (`Sales.Order.byId(id)`).  The scaffold AST
       // expander synthesises detail pages with `route:
       // "/<plural>/:id"` but no declarative `params` block, so
@@ -703,12 +703,12 @@ function lowerDeployable(d: Deployable): DeployableIR {
         : platform === "dotnet" && uiName
           ? qualifyDesign(d.design, "mantine")
           : undefined;
-  // Slice 2: page-metamodel UI binding.  The grammar accepts two
+  // Page-metamodel UI binding.  The grammar accepts two
   // surface forms — `ui: WebApp` (sugar) and `ui WebApp { framework: react }`
   // (full block).  Both lower to the same `uiName` + optional
   // `uiFramework` here.  `uiName` is computed above so the `design`
   // default can branch on it for dual-mode platforms (fullstack
-  // dotnet).  Validator (Slice 3) enforces that the referenced ui
+  // dotnet).  Validator enforces that the referenced ui
   // exists, the platform supports a UI mount, and the framework value
   // is one of the v0-allowed alternatives.
   // Explicit `framework: …` in the full block wins; otherwise default
@@ -724,7 +724,7 @@ function lowerDeployable(d: Deployable): DeployableIR {
           ? "react"
           : undefined
       : undefined);
-  // Slice 11.26 — explicit api composition.
+  // Explicit api composition.
   const serves = (d.serves ?? []).map((r) => r.ref?.name ?? "").filter(Boolean);
   const uiBindings = (d.uiCompose?.bindings ?? []).map(
     (b): UiParamBindingIR => ({
@@ -732,7 +732,7 @@ function lowerDeployable(d: Deployable): DeployableIR {
       sourceDeployableName: b.source?.ref?.name ?? "",
     }),
   );
-  // Slice 11.27 — per-module storage bindings.
+  // Per-module storage bindings.
   const moduleBindings = (d.moduleBindings ?? []).map(
     (b): ModuleBindingIR => ({
       moduleName: b.name?.ref?.name ?? "",
@@ -777,9 +777,9 @@ function defaultPort(platform: Platform | undefined): number {
 //     through the existing expression engine (`lowerExpr`); type
 //     resolution falls out from the same `Env`.
 //   - Scaffold directives stay as literal `ScaffoldIR` carrying their
-//     selector + targets.  The expander (Slice 4) walks the system's
+//     selector + targets.  The expander walks the system's
 //     domain IR to synthesise concrete pages from each directive.
-//   - Validator obligations (Slice 3) catch the rest: ui-name
+//   - Validator obligations catch the rest: ui-name
 //     uniqueness, deployable-references-existing-ui, scaffold target
 //     resolution, etc.
 // ---------------------------------------------------------------------------
@@ -803,7 +803,7 @@ function lowerUi(ui: Ui): UiIR {
     } else if (m.$type === "UiHelperImport") {
       helperImports.push({ name: m.name, path: m.path });
     } else if (m.$type === "MenuBlock") {
-      // First menu block wins.  Validator (Slice 3) flags a duplicate
+      // First menu block wins.  Validator flags a duplicate
       // `menu { ... }` block at ui scope as an error.
       if (!menu) menu = lowerMenuBlock(m);
     }
@@ -834,7 +834,7 @@ function lowerPage(p: Page): PageIR {
   let menuMeta: MenuMetaIR | undefined;
   const state: StateFieldIR[] = [];
   // A neutral env is fine for Slice 2 — the page-IR expression nodes
-  // will get richer when the validator (Slice 3) and emitter (Slice 5)
+  // will get richer when the validator and emitter
   // wire in the page-scoped scope.
   const env: Env = { locals: new Map(), user: undefined };
   for (const prop of p.props) {
@@ -845,7 +845,7 @@ function lowerPage(p: Page): PageIR {
     else if (prop.$type === "StateBlock") {
       for (const f of prop.fields) state.push(lowerStateField(f, env));
     } else if (prop.$type === "PageMenuMeta") {
-      // Last block wins — validator (Slice 3) flags repeated menu
+      // Last block wins — validator flags repeated menu
       // metadata blocks on a single page.
       menuMeta = {
         entries: prop.entries.map((e) => ({
@@ -855,7 +855,7 @@ function lowerPage(p: Page): PageIR {
       };
     }
   }
-  // Slice 10 — Pass-1 AST-to-AST scaffold expansion populates
+  // Pass-1 AST-to-AST scaffold expansion populates
   // synthesised pages with body expressions like
   // `List(of: Order)` / `Form(creates: T)` / etc.  We infer the
   // page's `scaffoldOrigin` discriminator and `source` from the
@@ -994,7 +994,7 @@ function lowerMenuBlock(m: MenuBlock): MenuBlockIR {
     sections: m.sections.map((sec) => ({
       label: sec.label,
       links: sec.links.map((l): MenuLinkIR => {
-        // Slice 10: page links use a real Langium cross-reference.
+        // Page links use a real Langium cross-reference.
         // Scaffold-synthesised pages are first-class AST nodes by
         // link time, so `[Page:LooseName]` resolves through the
         // standard linker.  We carry the resolved page's name into
@@ -1300,7 +1300,7 @@ function collectIdFollows(
       for (const a of expr.args) collectIdFollows(a, out);
       return;
     case "lambda":
-      // Slice 2: lambda body is now optional — single-expression form
+      // Lambda body is now optional — single-expression form
       // sets `body`, block-body form sets `block`.  Block bodies don't
       // contribute Id-follow paths in v0 (they only appear in event
       // handlers, not in `bind`/`derived`/filter expressions where this
@@ -1308,7 +1308,7 @@ function collectIdFollows(
       if (expr.body) collectIdFollows(expr.body, out);
       return;
     case "match":
-      // Slice 2: recurse through every arm condition + value plus the
+      // Recurse through every arm condition + value plus the
       // `else` branch.  Match expressions can appear inside view
       // `bind` exprs and `derived` bodies; their Id-follow members
       // must still surface for the bulk-load auxiliary planner.
@@ -1411,7 +1411,7 @@ function lowerInvariant(
     expr: lowerExpr(i.expr, env),
     guard: i.guard ? lowerExpr(i.guard, env) : undefined,
     source: cstText(i.expr),
-    // Slice 21.C — `private invariant ...` opts out of the wire
+    // `private invariant ...` opts out of the wire
     // layers (frontend Zod, Hono routes, FluentValidation).  The
     // domain-layer `AssertInvariants()` floor still enforces it.
     scope: i.serverOnly ? "server-only" : undefined,
@@ -1744,7 +1744,7 @@ function matchFactoryCall(
   if (!aggsByName.has(recv.name)) return undefined;
   if (expr.args.length !== 1) return undefined;
   const argWrap = expr.args[0];
-  // Slice 1.5: factory calls take a single object literal positional
+  // Factory calls take a single object literal positional
   // arg.  Reject the named-arg form here; the caller falls through
   // to a generic call lowering rather than the factory shape.
   if (!argWrap || argWrap.name) return undefined;
@@ -1771,7 +1771,7 @@ function matchRepoCall(
   if (!isNameRef(recv)) return undefined;
   const repo = reposByName.get(recv.name);
   if (!repo) return undefined;
-  // Slice 1.5: peel CallArg wrappers — repo finds are positional.
+  // Peel CallArg wrappers — repo finds are positional.
   return {
     repo,
     method: expr.member,

@@ -77,7 +77,7 @@ export function generateReactForContexts(
   const aggregatesByName = new Map<string, AggregateIR>();
   for (const { agg } of aggregates) aggregatesByName.set(agg.name, agg);
 
-  // Phase 0: route list-page emission through the new template-pack
+  // Route list-page emission through the new template-pack
   // layer.  `deployable.design` is fully qualified by the lowering
   // pass (e.g. "mantine@v7"); the `??` default is defensive against
   // programmatic IR construction that bypasses lowering and matches
@@ -85,7 +85,7 @@ export function generateReactForContexts(
   const design = deployable.design ?? "mantine@v7";
   const pack = loadPack(resolvePackDir(design));
 
-  // Slice 5 — page metamodel routing.  When the deployable declares
+  // Page metamodel routing.  When the deployable declares
   // a `ui:` binding, the React generator walks `ui.pages` (post-
   // Slice-4 expansion) via `emitPagesForUi`, which dispatches per
   // `scaffoldOrigin` to the SAME `renderXxx` functions invoked
@@ -99,7 +99,7 @@ export function generateReactForContexts(
 
   // Per-aggregate api modules — always emitted; 1:1 with the
   // aggregate inventory.  The Playwright page object emission moves
-  // into the `if (ui)` branch below (Slice 7) so page-IR-routed
+  // into the `if (ui)` branch below so page-IR-routed
   // deployables walk the same source for both pages and page
   // objects.
   for (const { agg, ctx } of aggregates) {
@@ -111,7 +111,7 @@ export function generateReactForContexts(
   const views = allViews(contexts);
 
   if (ui) {
-    // Slice D1 — single codegen path: every `src/pages/...` file
+    // Single codegen path: every `src/pages/...` file
     // (scaffold-derived OR explicit) routes through `emitPagesForUi`
     // → walker.  The legacy archetype renderers (`renderListPage`,
     // `renderNewPage`, `renderDetailPage`, etc.) are deleted.
@@ -160,7 +160,7 @@ export function generateReactForContexts(
   // main.tsx always wires `<MantineProvider theme={theme}>`.
   out.set("src/theme.ts", renderTheme(sys.theme, pack));
   out.set("src/main.tsx", renderMain(pack));
-  // Slice 6: when the ui block declares an explicit `menu { … }`,
+  // When the ui block declares an explicit `menu { … }`,
   // its derived sidebar overrides the hardcoded Aggregates /
   // Workflows / Views grouping below.  When the ui has no menu
   // block (or no ui binding at all), `sidebarOverride` is
@@ -168,7 +168,7 @@ export function generateReactForContexts(
   // hardcoded shape — byte-identical to main's pre-Slice-6 output.
   const sidebarOverride = ui ? deriveSidebarFromUi(ui) : undefined;
 
-  // Slice 11.1 — explicit pages with non-conventional names need
+  // Explicit pages with non-conventional names need
   // to register their import + route in App.tsx so React Router
   // can mount them.  Pages that override a scaffolded shape at the
   // conventional name keep the conventional path and are routed
@@ -188,7 +188,7 @@ export function generateReactForContexts(
       pack,
     ),
   );
-  // Slice D1 — Home is always synthesised by the scaffold expander
+  // Home is always synthesised by the scaffold expander
   // when a `ui:` binding is present.  Deployables without `ui:`
   // emit no Home page (no scaffold archetype renderer left to fall
   // back to); D2 will tighten the validator to require a `ui:`

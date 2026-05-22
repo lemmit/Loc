@@ -18,8 +18,6 @@ import { renderCsType } from "./render-expr.js";
 //
 // The user supplies a class implementing `IUserVerifier`; the project
 // fails fast at startup if no verifier is registered (Program.cs check).
-// Slice 1A ships this plumbing only — slice 2 will add `requires`
-// expressions that gate command entry against currentUser claims.
 // ---------------------------------------------------------------------------
 
 export function emitAuthFiles(sys: SystemIR, ns: string, out: Map<string, string>): void {

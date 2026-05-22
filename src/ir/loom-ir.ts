@@ -159,7 +159,7 @@ export interface AggregateIR {
 export interface TestIR {
   name: string;
   statements: TestStmtIR[];
-  /** Traceability back-link (Slice 12): the `verifies <TC-id>` clause
+  /** Traceability back-link: the `verifies <TC-id>` clause
    *  naming the TestCase this executable test realises.  Undefined when
    *  the test declares no link.  Enrichment uses it to mark a TestCase
    *  as backed by an executable test. */
@@ -341,7 +341,7 @@ export interface LoomModel {
    * picked by the user.
    */
   contexts: BoundedContextIR[];
-  /** Traceability artifacts (Slice 12) — model-wide, since a Solution
+  /** Traceability artifacts — model-wide, since a Solution
    *  or TestCase may reference code across modules and systems. */
   requirements: RequirementIR[];
   solutions: SolutionIR[];
@@ -353,7 +353,7 @@ export interface LoomModel {
 }
 
 // ---------------------------------------------------------------------------
-// Traceability (Slice 12)
+// Traceability
 // ---------------------------------------------------------------------------
 
 export type RequirementType = "UserStory" | "UseCase" | "AcceptanceCriteria" | "BusinessReq";
@@ -526,7 +526,7 @@ export interface SystemIR {
    *  emitter translates the framework-agnostic tokens into Mantine /
    *  shadcn / etc. theming knobs. */
   theme?: ThemeIR;
-  /** UI declarations at system scope (Slice 2).  Each is referenced by
+  /** UI declarations at system scope.  Each is referenced by
    *  zero-or-more deployables via `DeployableIR.uiName`.  Empty when
    *  the system declares no `ui { ... }` blocks.  Order preserves
    *  source order (matters for stable scaffold expansion in Slice 4). */
@@ -608,19 +608,18 @@ export interface TestE2EIR {
   kind: "api" | "ui";
   deployableName: string;
   statements: TestStmtIR[];
-  /** Traceability back-link (Slice 12) — see `TestIR.verifiesTestCase`. */
+  /** Traceability back-link — see `TestIR.verifiesTestCase`. */
   verifiesTestCase?: string;
 }
 
 // ---------------------------------------------------------------------------
-// Page metamodel (Slice 2)
+// Page metamodel
 //
-// Mirrors the grammar productions added in Slice 1.  Every IR node here
-// is a one-to-one lowering of a `Ui` / `Page` / `Component` / `Scaffold`
-// / `MenuBlock` AST.  Scaffolds are NOT expanded at this layer — they
+// Mirrors the grammar's `Ui` / `Page` / `Component` / `Scaffold` /
+// `MenuBlock` productions — every IR node here is a one-to-one lowering
+// of those ASTs.  Scaffolds are NOT expanded at this layer — they
 // stay as literal `ScaffoldIR` directives until the scaffold expander
-// runs (Slice 4).  Validator obligations land in Slice 3 and the page
-// emitter in Slice 5.
+// runs.
 //
 // Designed so a future LiveView / Blazor backend can consume the same
 // IR — mutations (`:=`), navigations, and component invocations are
@@ -643,7 +642,7 @@ export interface UiIR {
    *  declares.  Composition is supplied by the deployable that
    *  deploys this UI. */
   apiParams: UiApiParamIR[];
-  /** Slice A6 — user-authored TS helpers brought into the walker
+  /** User-authored TS helpers brought into the walker
    *  stdlib via `import helper <name> from "<path>"`.  Body refs to
    *  `<name>(...)` emit a TS `import { <name> } from "<path>"` at
    *  the top of the generated page TSX. */
@@ -697,10 +696,10 @@ export interface PageIR {
   /** Single body expression.  Conditional rendering uses `match` in
    *  the expression engine, not a guarded-declaration form. */
   body?: ExprIR;
-  /** Per-page menu metadata.  Read by the menu emitter (Slice 6) when
+  /** Per-page menu metadata.  Read by the menu emitter when
    *  no explicit ui-level menu block is declared. */
   menuMeta?: MenuMetaIR;
-  /** Provenance discriminator (Slice 4): `"explicit"` for pages
+  /** Provenance discriminator: `"explicit"` for pages
    *  written in source; `"scaffold"` for pages synthesised by the
    *  expander.  Slice 5's emitter uses this to fast-path the legacy
    *  per-aggregate / per-workflow / per-view builders for the bulk-
@@ -712,7 +711,7 @@ export interface PageIR {
    *  context the legacy generator's per-aggregate / per-workflow /
    *  per-view loop received. */
   scaffoldOrigin?: ScaffoldOriginIR;
-  /** Slice C1 — explicit emit path override for walker-rendered
+  /** Explicit emit path override for walker-rendered
    *  pages.  When set, the page-emitter writes the rendered TSX to
    *  this path instead of the default `src/pages/<page-snake>.tsx`.
    *  Populated by `expandScaffoldToExplicitBody` so a scaffold-
@@ -720,7 +719,7 @@ export interface PageIR {
    *  (`src/pages/<plural>/list.tsx` for `aggregate-list`, etc.) —
    *  preserves URL/file shape across the C2 default flip. */
   emitPath?: string;
-  /** Slice C2 — true when the scaffold expander rewrote `body`
+  /** True when the scaffold expander rewrote `body`
    *  from the original archetype call (e.g. `List(of: …)`) to a
    *  walker-stdlib composition.  `scaffoldOrigin` is intentionally
    *  preserved on these pages so the per-aggregate page-object
@@ -774,7 +773,7 @@ export interface ScaffoldIR {
 
 export type ScaffoldSelector = "modules" | "contexts" | "aggregates" | "workflows" | "views";
 
-/** Per-page sidebar metadata.  Bare entries — validator (Slice 3)
+/** Per-page sidebar metadata.  Bare entries — validator
  *  enforces the allowed key names (`section` / `label` / `order` /
  *  `hidden`).  Same shape as `ThemeIR`'s entries: bare key + typed
  *  value, with the validator policing the surface. */
@@ -834,8 +833,7 @@ export interface PermissionDeclIR {
 
 // `static` is the page-metamodel's UI-only deployable kind: builds a
 // Vite bundle and serves it via a small static-asset host (nginx in
-// the v0 emitter).  Coexists with `react` until Slice 8 swaps them
-// out — keeps every existing test/example green during the rollout.
+// the v0 emitter).  Shares the `react` platform surface.
 //
 // `phoenixLiveView` is the fullstack Elixir/Ash + Phoenix LiveView
 // platform: a single deployable serves an Ash-derived API AND mounts
@@ -903,7 +901,7 @@ export interface DeployableIR {
   /** Name of the `ui { ... }` SystemMember this deployable serves
    *  (Slice 1 grammar; Slice 2 IR).  Set when the source declares
    *  either `ui: <Name>` (sugar) or `ui <Name> { framework: ... }`
-   *  (full block).  Validator (Slice 3) ensures the referenced ui
+   *  (full block).  Validator ensures the referenced ui
    *  exists, the deployable's platform supports a UI mount, and the
    *  framework value is one of the v0-allowed alternatives.  Empty
    *  string is never produced — undefined ⇒ no UI binding. */
@@ -913,19 +911,19 @@ export interface DeployableIR {
    *  Future LiveView / Blazor backends extend this enum without
    *  breaking the deployable IR. */
   uiFramework?: string;
-  /** Slice 11.26 — apis this backend deployable serves.  Each
+  /** Apis this backend deployable serves.  Each
    *  entry references an `Api` declared at system scope.  Empty
    *  for frontend deployables and for backends that haven't yet
    *  migrated to the explicit composition syntax. */
   serves: string[];
-  /** Slice 11.26 — UI api parameter bindings for frontend
+  /** UI api parameter bindings for frontend
    *  deployables.  Each entry binds a UI parameter (declared as
    *  `api <Name>: <Api>` in the ui block) to the backend
    *  deployable that supplies it (which must `serves:` the
    *  param's contract).  Empty for backend deployables and for
    *  frontends whose UI declares no api parameters. */
   uiBindings: UiParamBindingIR[];
-  /** Slice 11.27 — per-module storage bindings on a backend
+  /** Per-module storage bindings on a backend
    *  deployable.  Each entry corresponds to one `modules:` entry
    *  with an optional brace block (`Sales { primary: pg, cache:
    *  redis }`).  Bare-list form (`modules: Sales, Marketing`)
@@ -943,7 +941,7 @@ export interface UiParamBindingIR {
   sourceDeployableName: string;
 }
 
-/** Slice 11.27 — per-module storage bindings on a backend
+/** Per-module storage bindings on a backend
  *  deployable.  Each entry binds a module's role-keyed storage
  *  slot to a system-scope storage declaration. */
 export interface ModuleBindingIR {
@@ -1079,7 +1077,7 @@ export type ExprIR =
       args: ExprIR[];
       receiverType: TypeIR;
       isCollectionOp: boolean;
-      /** Optional parallel array (Slice 1.5): `argNames[i]` is the
+      /** Optional parallel array: `argNames[i]` is the
        *  source-side `name:` prefix for `args[i]`, or `undefined` for
        *  positional arguments.  Present iff at least one arg was
        *  written with a name; absent for fully-positional calls (the
@@ -1102,7 +1100,7 @@ export type ExprIR =
       body?: ExprIR;
       /** Block-body form (Slice 1 grammar): `x => { stmt; stmt; … }`.
        *  Reuses the existing `StmtIR` rule so `let`, `:=`, calls,
-       *  emits, etc. are admissible.  React emitter (Slice 5) lowers
+       *  emits, etc. are admissible.  React emitter lowers
        *  state mutations against `state {}` fields to `setX(...)`. */
       block?: StmtIR[];
     }
@@ -1125,7 +1123,7 @@ export type ExprIR =
    * matches, `otherwise` (when present) is the fallthrough.  Lives
    * in the expression engine so it can appear anywhere an expression
    * is allowed (page bodies, `derived` properties, view binds,
-   * filter lambdas, function bodies).  Validator (Slice 3) may warn
+   * filter lambdas, function bodies).  Validator may warn
    * on non-exhaustive matches that lack `otherwise`.
    */
   | {

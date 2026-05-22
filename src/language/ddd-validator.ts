@@ -82,23 +82,23 @@ import {
 export class DddValidator {
   // Entry: full model walk
   check(model: Model, accept: ValidationAcceptor): void {
-    // Slice 21.C — validate every `string.matches(regex)` call's
+    // Validate every `string.matches(regex)` call's
     // argument is a string literal that compiles as a RegExp.
     // Walks the entire AST so the rule applies in invariants,
     // preconditions, derived bodies, function bodies, and guards
     // alike — anywhere the operator can appear.
     this.checkMatchesCalls(model, accept);
-    // Slice 3 — match expressions: warn on a missing `else` arm.
+    // Match expressions: warn on a missing `else` arm.
     // Type-checking arm conditions is best-effort here (the lowering's
     // type system is the source of truth); structural checks run
     // unconditionally.
     this.checkMatchExpressions(model, accept);
-    // Slice A6 — `import helper <name> from "..."` declarations.
+    // `import helper <name> from "..."` declarations.
     // Reject names that shadow walker stdlib primitives so a typo
     // never silently overrides Stack / Form / etc.  Also flag
     // duplicate helper names within the same UI.
     this.checkUiHelperImports(model, accept);
-    // Slice 12 — traceability artifacts.  The grammar admits a
+    // Traceability artifacts.  The grammar admits a
     // permissive requirement prop-bag and any code cross-reference;
     // semantic constraints (allowed keys / enum values / required
     // props / parent acyclicity) are enforced here.
@@ -121,7 +121,7 @@ export class DddValidator {
           }
         }
         for (const tb of themeBlocks) this.checkTheme(tb, accept);
-        // Slice 3 — page metamodel.  Collect ui blocks first so per-
+        // Page metamodel.  Collect ui blocks first so per-
         // ui checks can see siblings (name uniqueness across uis), and
         // so per-deployable checks can cross-reference the system's
         // ui inventory.
@@ -144,7 +144,7 @@ export class DddValidator {
           }
         }
 
-        // Slice 11.25 — Api declaration checks.
+        // Api declaration checks.
         //   - Names unique within the system (`api SalesApi from …` declared twice).
         //   - Source module cross-ref must resolve.
         const apis = m.members.filter(
@@ -171,7 +171,7 @@ export class DddValidator {
           }
         }
 
-        // Slice 11.27 — Storage declaration checks.
+        // Storage declaration checks.
         //   - Names unique within the system.
         //   - Type is one of the v0 enum values (parser ensures shape;
         //     this is a structural sanity-check + future hook for
@@ -323,7 +323,7 @@ export class DddValidator {
     }
   }
 
-  /** Slice A6 — `import helper <name> from "<path>"` at the UI
+  /** `import helper <name> from "<path>"` at the UI
    *  level.  Validate two invariants:
    *   1. Helper names don't shadow any walker stdlib primitive
    *      (else a typo would silently divert a body call like
@@ -471,7 +471,7 @@ export class DddValidator {
     siblings: Deployable[],
     accept: ValidationAcceptor,
   ): void {
-    // Slice 3 — page-metamodel UI binding rules (3, 4).
+    // Page-metamodel UI binding rules (3, 4).
     // Rule 3: only platforms that mount a UI admit `ui:` — `react`,
     //         `static`, and `phoenixLiveView` (fullstack Ash + Phoenix).
     // Rule 4: every `static` deployable must declare `ui:` (otherwise
@@ -564,7 +564,7 @@ export class DddValidator {
       }
     }
 
-    // Slice 11.26 — explicit api composition checks.
+    // Explicit api composition checks.
     this.checkDeployableServes(d, accept);
     this.checkDeployableUiCompose(d, accept);
     this.checkDeployableModuleStorages(d, accept);
@@ -692,7 +692,7 @@ export class DddValidator {
     }
   }
 
-  /** Slice 11.27 — `modules: <M> { primary: <Storage>, ... }`
+  /** `modules: <M> { primary: <Storage>, ... }`
    *  per-module storage map validations.
    *    - Each storage ref must resolve.
    *    - No duplicate role within one module's brace block.
@@ -752,7 +752,7 @@ export class DddValidator {
     }
   }
 
-  /** Slice 11.26 — `serves:` validations.
+  /** `serves:` validations.
    *    - Only valid on platforms that own a backend (dotnet, hono,
    *      phoenixLiveView).  Frontend-only platforms (react, static)
    *      have no api surface to serve.
@@ -794,7 +794,7 @@ export class DddValidator {
     }
   }
 
-  /** Slice 11.26 — `ui: WebApp { Sales: salesApi, ... }` compose-block
+  /** `ui: WebApp { Sales: salesApi, ... }` compose-block
    *  validations.  Each binding maps a UI api parameter (declared as
    *  `api Sales: SalesApi` in the ui block) to a backend deployable
    *  that supplies its contract.  The rule applies to any deployable
@@ -1073,7 +1073,7 @@ export class DddValidator {
         });
         continue;
       }
-      // Slice 1.5: call args are CallArg wrappers carrying an
+      // Call args are CallArg wrappers carrying an
       // optional `name:` prefix; reach for `.value` to inspect the
       // expression itself.  `string.matches(<regex>)` is a single-
       // positional-arg method-call, so `name` should be absent.
@@ -1518,7 +1518,7 @@ export class DddValidator {
       }
     }
 
-    // Slice 11.25 — UI api parameter checks.
+    // UI api parameter checks.
     //   - Param names unique within the ui (`api Sales: …` declared twice).
     //   - apiRef cross-ref must resolve (handled by Langium linker; the
     //     refRoot returns undefined when the target isn't found, so the
@@ -1629,7 +1629,7 @@ export class DddValidator {
     accept: ValidationAcceptor,
   ): void {
     void ui;
-    // Slice 11.25 — validate api body refs first so each chain ref
+    // Validate api body refs first so each chain ref
     // gets a precise diagnostic with source-location ranges.
     this.checkApiBodyRefs(p, ui, accept);
     // Property uniqueness (Rule 9 part) — at most one each of route,
@@ -1687,7 +1687,7 @@ export class DddValidator {
     );
     for (const section of block.sections) {
       for (const link of section.links) {
-        // Slice 10: page links use a Langium cross-reference now
+        // Page links use a Langium cross-reference now
         // that scaffold expansion runs at the AST level.  The
         // linker reports unresolved refs natively
         // ("Could not resolve reference to Page named 'X'") — no
@@ -1715,7 +1715,7 @@ export class DddValidator {
     }
   }
 
-  /** Slice 11.25 — validate `<paramName>.<aggregate>.<op>` body
+  /** Validate `<paramName>.<aggregate>.<op>` body
    *  ref chains in a page.  Each chain must:
    *    - root at a declared UiApiParam in the page's UI
    *    - reference a real aggregate in the api's source module

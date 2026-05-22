@@ -44,7 +44,7 @@ export function emitFormOf(
   ctx: WalkContext,
   depth: number,
 ): string {
-  // Slice A12 — `Form` dispatches on which named arg is present:
+  // `Form` dispatches on which named arg is present:
   //   `of:  <Aggregate>` → create-form for the aggregate
   //   `runs: <workflow>` → workflow-run form
   // The two share rendering (same per-field preparer + same outer
@@ -266,7 +266,7 @@ function emitFormOfAggregate(
   });
 }
 
-/** Slice A12 — `Form(runs: <wf>)` walker variant.  Same per-field
+/** `Form(runs: <wf>)` walker variant.  Same per-field
  *  preparer + same outer <form> JSX as the aggregate form, but
  *  the shell wires a workflow request type + mutation hook + a
  *  default redirect to `/workflows`. */

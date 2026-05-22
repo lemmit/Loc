@@ -20,7 +20,7 @@ function pascal(s: string): string {
   return s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
 }
 
-/** Slice 11.1 — extra Routes / imports for explicit pages with
+/** Extra Routes / imports for explicit pages with
  *  non-conventional routes.  Each entry is a flat record because
  *  the AppShell preparer doesn't pull in the page-IR module. */
 export interface ExtraPageRoute {
@@ -39,13 +39,13 @@ export function prepareAppShellVM(
   workflows: WorkflowIR[],
   views: ViewIR[],
   systemName: string,
-  /** Slice 6 — when the deployable's `ui:` block declares an explicit
+  /** When the deployable's `ui:` block declares an explicit
    *  `menu { … }`, the caller derives `navSections` from that block
    *  (via `deriveSidebarFromUi`) and passes them here.  When
    *  undefined the legacy hardcoded grouping (Aggregates / Workflows /
    *  Views) is used — byte-equivalent to main's pre-Slice-6 output. */
   sidebarOverride?: NavSectionVM[],
-  /** Slice 11.1 — explicit pages with non-conventional names emit
+  /** Explicit pages with non-conventional names emit
    *  at `src/pages/<name-snake>.tsx`.  The caller hands their
    *  import + route shape so App.tsx can import & route them
    *  alongside the conventional aggregate/workflow/view set.
@@ -102,7 +102,7 @@ export function prepareAppShellVM(
     }
   }
 
-  // Slice 11.1 — explicit pages with non-conventional names.
+  // Explicit pages with non-conventional names.
   // Mounted AFTER the conventional set so React Router matches
   // the conventional routes first when a user-supplied custom
   // route happens to start with `/orders` etc.  The preparer

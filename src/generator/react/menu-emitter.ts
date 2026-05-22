@@ -1,4 +1,4 @@
-// Slice 6 — menu emitter.
+// Menu emitter.
 //
 // Builds the App.tsx sidebar's `navSections` array from a `ui` block.
 // Two surface forms (per spec §11):
@@ -50,7 +50,7 @@ export function deriveSidebarFromUi(ui: UiIR): NavSectionVM[] | undefined {
       }),
     );
   }
-  // Slice 11.21 — fallback driver: per-page `menuMeta` blocks on
+  // Fallback driver: per-page `menuMeta` blocks on
   // EXPLICIT pages.  When no `ui.menu` is declared, walker-rendered
   // pages (and any other source-declared pages) with `menu {
   // section: "X" }` metadata group by section into a sidebar.

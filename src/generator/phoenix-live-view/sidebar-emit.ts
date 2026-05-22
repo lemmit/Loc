@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Batch C — Phoenix sidebar component emitter.
+// Phoenix sidebar component emitter.
 //
 // Exports `renderSidebarComponent`, which produces an Elixir source file
 // for `lib/<app>_web/components/sidebar.ex` — a Phoenix.Component function

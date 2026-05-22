@@ -28,12 +28,12 @@ export function tryDetectApiHook(expr: ExprIR, ctx: WalkContext): ApiHookUse | n
       return buildHookUse(inner.member, expr.member, expr.args, ctx);
     }
   }
-  // Slice A13 — Pattern C: member(ref:"Views", viewName) lifts to
+  // Pattern C: member(ref:"Views", viewName) lifts to
   // `useXxxView()` from `../api/views`.
   if (expr.kind === "member" && expr.receiver.kind === "ref" && expr.receiver.name === "Views") {
     return buildViewHookUse(expr.member);
   }
-  // Slice D1 — Pattern D: member(ref:<Aggregate>, op) without an
+  // Pattern D: member(ref:<Aggregate>, op) without an
   // api param prefix lifts to the same hook Pattern A produces.
   // Lets UIs without a `api X: Y` binding still get auto-injected
   // hooks (e.g. legacy `scaffold modules: M` deployables that
@@ -45,7 +45,7 @@ export function tryDetectApiHook(expr: ExprIR, ctx: WalkContext): ApiHookUse | n
   ) {
     return buildHookUse(expr.receiver.name, expr.member, [], ctx);
   }
-  // Slice D1 — Pattern E: same as D but with method-call args
+  // Pattern E: same as D but with method-call args
   // (parameterised forms like `Account.byId(id)`).
   if (
     expr.kind === "method-call" &&
@@ -57,7 +57,7 @@ export function tryDetectApiHook(expr: ExprIR, ctx: WalkContext): ApiHookUse | n
   return null;
 }
 
-/** Slice A13 — `useXxxView()` hook injection.  View hooks live in
+/** `useXxxView()` hook injection.  View hooks live in
  *  the shared `../api/views.ts` module; the local var name is
  *  `<viewCamel>View` (e.g. `activeOrdersView`). */
 function buildViewHookUse(viewName: string): ApiHookUse {

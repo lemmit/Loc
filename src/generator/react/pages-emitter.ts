@@ -1,4 +1,4 @@
-// Slice 5 — page emitter.
+// Page emitter.
 //
 // Walks `ui.pages` (post-Slice-4 expansion: explicit pages + scaffold
 // rewrites + shared Home / WorkflowsIndex / ViewsIndex) and emits one
@@ -69,7 +69,7 @@ export interface PageEmitContext {
   pack: LoadedPack;
 }
 
-/** Slice C2 — compute the relative-path prefix from a page's emit
+/** Compute the relative-path prefix from a page's emit
  *  path back to the `src/` root.  Used by the walker shell to
  *  rewrite per-pack `../api/X` and `../lib/format` imports so they
  *  resolve correctly regardless of how deep the page lives.
@@ -90,7 +90,7 @@ function computeSrcImportPrefix(emitPath: string): string {
   return "../".repeat(Math.max(dirCount, 1));
 }
 
-/** Slice A4 — derived map: aggregate name → owning bounded context.
+/** Derived map: aggregate name → owning bounded context.
  *  Required by `Form(of: <Agg>)` and `IdLink(of: <Agg>)` so the
  *  walker can resolve enum / value-object types declared alongside
  *  the aggregate.  Built from `ctx.contextsByName` once per emit
@@ -103,7 +103,7 @@ function buildBcByAggregate(ctx: PageEmitContext): Map<string, BoundedContextIR>
   return out;
 }
 
-/** Slice A12 — derived map: workflow name → workflow IR.  Powers
+/** Derived map: workflow name → workflow IR.  Powers
  *  `Form(runs: <wf>)` field dispatch in the walker. */
 function buildWorkflowsByName(
   ctx: PageEmitContext,
@@ -115,7 +115,7 @@ function buildWorkflowsByName(
   return out;
 }
 
-/** Slice A12 — derived map: workflow name → owning bounded context. */
+/** Derived map: workflow name → owning bounded context. */
 function buildBcByWorkflow(ctx: PageEmitContext): Map<string, BoundedContextIR> {
   const out = new Map<string, BoundedContextIR>();
   for (const bc of ctx.contextsByName.values()) {
@@ -127,7 +127,7 @@ function buildBcByWorkflow(ctx: PageEmitContext): Map<string, BoundedContextIR> 
 /** Emit `src/pages/<route>.tsx` per page in `ui.pages`.  Returns just
  *  the page-file map; api modules / page objects / shell files stay
  *  in `index.ts`. */
-/** Slice 11.1 — collect the AppShell `extraRoutes` for non-
+/** Collect the AppShell `extraRoutes` for non-
  *  conventional explicit pages.  Each one declared in the source
  *  with a body the dispatcher can recognise contributes one
  *  Route + import; conventional overrides (page name matches the
@@ -138,16 +138,16 @@ export function deriveExtraRoutesFromUi(
   ui: UiIR,
 ): import("./templating/preparers/app-shell.js").ExtraPageRoute[] {
   const out: import("./templating/preparers/app-shell.js").ExtraPageRoute[] = [];
-  // Slice 11.18 — same name→params map the page emitter builds, so
+  // Same name→params map the page emitter builds, so
   // route derivation recognises pages whose body is a user-component
   // invocation.
   const userComponents = new Map<string, readonly ParamIR[]>();
   for (const c of ui.components) userComponents.set(c.name, c.params);
-  // Slice A6 — helper names are also a walker-eligibility signal.
+  // Helper names are also a walker-eligibility signal.
   const helperNames = new Set(ui.helperImports.map((h) => h.name));
   for (const page of ui.pages) {
     if (!page.route) continue;
-    // Slice D1 — scaffold-conventional pages keep their AppShell-
+    // Scaffold-conventional pages keep their AppShell-
     // managed routes (handled by the per-aggregate / per-workflow
     // / per-view loop in `prepareAppShellVM`); only EXPLICIT
     // user-written pages contribute extra routes here.  An
@@ -171,7 +171,7 @@ export function deriveExtraRoutesFromUi(
 export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, string> {
   const out = new Map<string, string>();
 
-  // Slice 11.18 — emit one `src/components/<Name>.tsx` per
+  // Emit one `src/components/<Name>.tsx` per
   // user-defined component, and build a name→params map the
   // walker uses to resolve cross-component invocations.
   const userComponents = new Map<string, readonly ParamIR[]>();
@@ -198,14 +198,14 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
       ),
     );
   }
-  // Slice A6 — helper names accumulated for walker-eligibility
+  // Helper names accumulated for walker-eligibility
   // checks (`isWalkableLayoutBody`).  Same `ui.helperImports`
   // array is threaded to the per-page render call below.
   const helperNames = new Set(ui.helperImports.map((h) => h.name));
 
   for (const page of ui.pages) {
-    // Slice 11 — every page (scaffold OR explicit) routes through
-    // Slice D1 — every page (scaffold OR explicit) routes through
+    // Every page (scaffold OR explicit) routes through
+    // Every page (scaffold OR explicit) routes through
     // the walker.  Scaffold-synthesised pages had their bodies
     // rewritten in `lowerSystem`'s `expandScaffoldPages` pass, so
     // by the time we're here the body is always walker-eligible.
@@ -213,13 +213,13 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
     // per-aggregate page-object emitter (later in this file) still
     // fires the rich `e2e/pages/<agg>.ts` helper classes.
     if (isWalkableLayoutBody(page.body, userComponents, helperNames)) {
-      // Slice C1 — `page.emitPath` overrides the default
+      // `page.emitPath` overrides the default
       // `src/pages/<page-snake>.tsx` location.  Set by the
       // scaffold expander to land rewritten pages at their
       // conventional archetype path (`src/pages/<plural>/<arch>.tsx`)
       // so URL/file shape stays stable across the C2 default flip.
       const emitPath = page.emitPath ?? `src/pages/${snake(page.name)}.tsx`;
-      // Slice C2 — relative-path prefix from the emitted TSX back
+      // Relative-path prefix from the emitted TSX back
       // to `src/`.  Default-located walker pages (`src/pages/<x>.tsx`)
       // need 1 hop (`"../"`); scaffold-expanded pages at
       // `src/pages/<plural>/<arch>.tsx` need 2 hops (`"../../"`).
@@ -260,7 +260,7 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
 export { camel };
 
 // ---------------------------------------------------------------------------
-// Slice 7 — Playwright page-object emission walked from `ui.pages`.
+// Playwright page-object emission walked from `ui.pages`.
 //
 // Each scaffold-synthesised page contributes to its archetype's
 // page-object file:
@@ -287,7 +287,7 @@ export function emitPageObjectsForUi(ui: UiIR, ctx: PageEmitContext): Map<string
   const seenViews = new Set<string>();
 
   for (const page of ui.pages) {
-    // Slice D1 — only scaffold-origin pages dispatch to the
+    // Only scaffold-origin pages dispatch to the
     // per-aggregate / per-workflow / per-view page-object
     // builders.  Explicit pages (no `scaffoldOrigin`) get the
     // walker-side per-page page-object emitted later.
@@ -364,7 +364,7 @@ export function emitPageObjectsForUi(ui: UiIR, ctx: PageEmitContext): Map<string
         break;
     }
   }
-  // Slice A5 — walker-emitted pages (those whose bodies are
+  // Walker-emitted pages (those whose bodies are
   // recognised by `isWalkableLayoutBody` but NOT by the scaffold
   // dispatcher) get a parallel page-object emission: one class
   // per page, exposing every static `testid:` literal the walker
@@ -414,7 +414,7 @@ export function emitPageObjectsForUi(ui: UiIR, ctx: PageEmitContext): Map<string
   return out;
 }
 
-/** Slice A5 — UI's component-name → ParamIR map, mirroring how
+/** UI's component-name → ParamIR map, mirroring how
  *  `emitPagesForUi` builds it.  `isWalkableLayoutBody` calls this
  *  to decide whether a body composed of user components is
  *  walker-eligible. */

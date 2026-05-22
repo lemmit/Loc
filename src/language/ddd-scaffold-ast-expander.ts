@@ -1,4 +1,4 @@
-// Pass 1 — AST-to-AST scaffold expansion.
+// AST-to-AST scaffold expansion.
 //
 // Runs as a `DocumentState.IndexedContent` listener on the shared
 // `DocumentBuilder`.  By the time it fires, the document has been

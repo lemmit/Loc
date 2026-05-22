@@ -387,7 +387,7 @@ function renderExprWithCmdParams(
       return { ...e, args: e.args.map(rewrite) };
     }
     if (e.kind === "lambda") {
-      // Slice 2: lambda body is optional (block-body lambdas land for
+      // Lambda body is optional (block-body lambdas land for
       // page event handlers).  .NET workflow lowering doesn't see
       // block bodies — those are React-emitter territory — but stay
       // total: pass through unchanged when block is set.

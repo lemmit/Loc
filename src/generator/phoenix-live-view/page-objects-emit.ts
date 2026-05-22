@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Batch C — Phoenix LiveView Playwright page-object emitter.
+// Phoenix LiveView Playwright page-object emitter.
 //
 // Exports `buildPlaywrightPageObject`, which emits TypeScript content for
 // `e2e/pages/<page-snake>.ts` — a Playwright page-object class for one

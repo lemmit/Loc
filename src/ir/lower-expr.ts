@@ -394,7 +394,7 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
   }
   if (isLambda(expr)) {
     const inner = withLocal(env, expr.param, "lambda", { kind: "primitive", name: "string" });
-    // Slice 2: lambdas can carry either a single expression body
+    // Lambdas can carry either a single expression body
     // (`x => expr`, the only v22 form) OR a brace-block of statements
     // (`x => { stmt; stmt; … }`, new for page event handlers).  The
     // grammar rule sets `body` xor `stmts`; we mirror that in the IR.
@@ -483,7 +483,7 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
     const recv = lowerExpr(expr.receiver, env);
     const recvType = inferExprType(expr.receiver, env);
     if (expr.call) {
-      // Slice 1.5: call args are `CallArg` nodes wrapping an
+      // Call args are `CallArg` nodes wrapping an
       // Expression with an optional `name:` prefix.  Lower the value
       // and capture the parallel name list; downstream consumers
       // that don't care about names see the unchanged `args`

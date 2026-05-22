@@ -74,7 +74,7 @@ export class DddScopeComputation extends DefaultScopeComputation {
           exports.push(this.descriptions.createDescription(node, name, document));
         }
       }
-      // Traceability code references (Slice 12): every `Targetable`
+      // Traceability code references: every `Targetable`
       // (module / context / aggregate / operation / value-object /
       // event / repository / workflow / view / deployable / api) is
       // exported under its qualified dotted name so a Solution's

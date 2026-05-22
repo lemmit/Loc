@@ -43,7 +43,7 @@ export function emitIdLink(
   if (!aggName) {
     return `{/* IdLink: missing 'of:' aggregate ref */}`;
   }
-  // When aggregate IR is in scope (Slice A4), prefer the official
+  // When aggregate IR is in scope, prefer the official
   // aggregate's plural-snake slug over our local pluralisation
   // pass — `agg.name` is canonical (already validated) and any
   // future irregular-plural rules live with the IR.  When the
@@ -67,7 +67,7 @@ export function emitButton(
 ): string {
   const label = firstPositionalContent(call, ctx) ?? '"Button"';
   void depth;
-  // Slice 11.7 — `onClick:` lambda named arg wires the button to
+  // `onClick:` lambda named arg wires the button to
   // a multi-statement event handler.  Takes priority over `to:` if
   // both are written.
   const onClick = lambdaArg(call, "onClick");
@@ -75,7 +75,7 @@ export function emitButton(
   if (onClick && (onClick.block || onClick.body)) {
     onClickHandler = emitLambdaBody(onClick, ctx);
   } else {
-    // Slice 11.5 — `to:` named arg wires the button to a React
+    // `to:` named arg wires the button to a React
     // Router navigate call.  Accepts either a string-literal path
     // or a route-param ref.
     const to = stringOrRefArgValue(call, "to", ctx);
@@ -84,7 +84,7 @@ export function emitButton(
       onClickHandler = `() => navigate(${to})`;
     }
   }
-  // Slice 11.29 — `disabled:` and `loading:` named args.  Both
+  // `disabled:` and `loading:` named args.  Both
   // accept any expression (typically a hook accessor like
   // `Sales.Customer.create.isPending` — emitExpr triggers hook
   // injection so the local hook var is available at page-top).
@@ -193,7 +193,7 @@ function emitActionThen(then: ExprIR, ctx: WalkContext): string {
   return emitExpr(then, ctx);
 }
 
-/** Slice 11.29 — render any named arg's value through emitExpr.
+/** Render any named arg's value through emitExpr.
  *  Used for boolean prop pass-through (`disabled:`, `loading:`)
  *  where the value is an arbitrary expression — refs, hook
  *  accessors, binary ops are all admissible. */
@@ -265,7 +265,7 @@ export function emitQueryView(
   const error = namedArgValue(call, "error");
   const empty = namedArgValue(call, "empty");
   const data = namedArgValue(call, "data");
-  // Slice A11 — `single: true` flips QueryView to single-record
+  // `single: true` flips QueryView to single-record
   // semantics (byId queries return `T | undefined`, not `T[]`).
   // The `empty` branch fires when `data === undefined` after
   // loading completes; `data` branch fires when `data` is truthy.
@@ -322,20 +322,20 @@ export function emitUserComponent(
   ctx: WalkContext,
   depth: number,
 ): string {
-  // Slice 11.18 — invoke a user-defined component as a JSX element.
+  // Invoke a user-defined component as a JSX element.
   // Positional args map to the component's declared param names by
   // position; named args use their `name:` prefix verbatim.  String
   // literals render as quoted attrs (`name="Alice"`); refs / binary
   // ops / non-string literals emit through emitExpr inside `{...}`.
   //
-  // Slice 11.19 — positional args BEYOND the component's declared
+  // Positional args BEYOND the component's declared
   // param count are JSX children — wrapped between the open and
   // close tags so the component receives them via the `children`
   // prop.  Named args still go to props regardless of position.
   const params = ctx.userComponents.get(call.name) ?? [];
   ctx.usedUserComponents.add(call.name);
   const argNames = call.argNames ?? [];
-  // Slice 11.19 — collect names already filled by named args so
+  // Collect names already filled by named args so
   // positional args don't clobber them when looking up the next
   // free param slot.
   const filledByName = new Set<string>();
@@ -377,7 +377,7 @@ export function emitUserComponent(
   return `${open}>\n${indent}${childTsx}\n${closeIndent}</${call.name}>`;
 }
 
-/** Slice 11.18 — render an ExprIR as a JSX attribute value.
+/** Render an ExprIR as a JSX attribute value.
  *  String literals → `"text"` (quoted attr); everything else →
  *  `{<emitExpr>}` (brace-wrapped JS expression). */
 function attrValue(expr: ExprIR, ctx: WalkContext): string {

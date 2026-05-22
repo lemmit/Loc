@@ -85,42 +85,42 @@ export function renderCustomLayoutPage(
   pack: LoadedPack,
   params: ParamIR[] = [],
   state: StateFieldIR[] = [],
-  /** Slice 11.12 — page-level `title:` expression.  Renders into a
+  /** Page-level `title:` expression.  Renders into a
    *  `useEffect` that sets `document.title` on mount and whenever
    *  any referenced param/state changes (deps array auto-derived
    *  from the title expression's refs). */
   title: ExprIR | undefined = undefined,
-  /** Slice 11.18 — user-defined components in scope, so calls to
+  /** User-defined components in scope, so calls to
    *  them in the body emit as `<Name prop={…} />` instead of
    *  unknown-component placeholders. */
   userComponents: ReadonlyMap<string, readonly ParamIR[]> = new Map(),
-  /** Slice 11.24 — UI api parameters.  Body refs of the form
+  /** UI api parameters.  Body refs of the form
    *  `<paramName>.<aggregate>.<op>` become hook calls injected at
    *  page-top by the walker. */
   apiParams: ReadonlyArray<UiApiParamIR> = [],
-  /** Slice A4 — aggregates reachable from this UI's deployable.
+  /** Aggregates reachable from this UI's deployable.
    *  Required for `Form(of: <Agg>)` field dispatch and
    *  `IdLink(of: <Agg>)` display-field resolution. */
   aggregatesByName: ReadonlyMap<string, AggregateIR> = new Map(),
-  /** Slice A4 — owning bounded context per aggregate (drives
+  /** Owning bounded context per aggregate (drives
    *  enum / value-object resolution inside the form-field
    *  preparer). */
   bcByAggregate: ReadonlyMap<string, BoundedContextIR> = new Map(),
-  /** Slice A6 — user-authored helper imports.  Body refs whose
+  /** User-authored helper imports.  Body refs whose
    *  call name matches a helper emit as plain JS calls; the shell
    *  adds `import { <name> } from "<path>"` for each USED helper. */
   helperImports: ReadonlyArray<UiHelperImportIR> = [],
-  /** Slice C2 — relative-path prefix from the emitted page TSX
+  /** Relative-path prefix from the emitted page TSX
    *  back to the `src/` root.  Defaults to `"../"` for pages at
    *  `src/pages/<name>.tsx` (1 hop).  Scaffold-expanded pages live
    *  at `src/pages/<plural>/<arch>.tsx` (2 hops) so the caller
    *  passes `"../../"`.  Used to resolve api-hook + format-helper
    *  imports the shell emits at function-top. */
   srcImportPrefix: string = "../",
-  /** Slice A12 — workflows reachable from this UI's deployable.
+  /** Workflows reachable from this UI's deployable.
    *  Required for `Form(runs: <wf>)` field dispatch. */
   workflowsByName: ReadonlyMap<string, WorkflowIR> = new Map(),
-  /** Slice A12 — owning bounded context per workflow. */
+  /** Owning bounded context per workflow. */
   bcByWorkflow: ReadonlyMap<string, BoundedContextIR> = new Map(),
   /** Page name → route path, for `Action`'s `then: navigate(<Page>)`. */
   pageRoutes: ReadonlyMap<string, string> = new Map(),
@@ -154,7 +154,7 @@ export function renderCustomLayoutPage(
     aggregateParamTypes(params, aggregatesByName),
     pageRoutes,
   );
-  // Slice 11.12 — render the title expression through emitExpr
+  // Render the title expression through emitExpr
   // (sharing the body's tracking state so the shell destructures
   // any param/state the title references).  Compute the deps
   // array from the title's referenced names so the effect re-runs
@@ -202,28 +202,28 @@ export function renderCustomLayoutPage(
   const effectiveUsesState = usesState || usesStateForTitle;
 
   const mantineImport = renderImportLines(imports, srcImportPrefix);
-  // Slice 11.18 — one default-import line per user component
+  // One default-import line per user component
   // referenced in the body, sorted alphabetically.
   const userComponentImports = [...usedUserComponents]
     .sort()
     .map((name) => `import ${name} from "${srcImportPrefix}components/${name}";\n`)
     .join("");
-  // Slice 11.24 — api hook imports, grouped per `from` path so
+  // Api hook imports, grouped per `from` path so
   // multiple ops on the same aggregate dedupe to one import line
   // (matching the existing scaffold output's per-aggregate api file).
   const apiHookImports = renderApiHookImports(usedApiHooks, srcImportPrefix);
-  // Slice A6 — `import { <name> } from "<path>"` per UI-declared
+  // `import { <name> } from "<path>"` per UI-declared
   // helper actually referenced in the body.  Lines grouped per
   // path so two helpers from the same module dedupe to one
   // import line; paths sorted for deterministic output.
   const helperImportLines = renderHelperImports(usedHelpers, helperImports);
-  // Slice 11.24 — api hook declarations, emitted at page-top right
+  // Api hook declarations, emitted at page-top right
   // before the JSX return.  Each unique `<param>.<aggregate>.<op>`
   // becomes one `const <var> = use<Op><Aggregate>(args?);` line.
   const apiHookDecls = [...usedApiHooks.values()]
     .map((h) => `  const ${h.varName} = ${h.hookName}(${h.argsRendered.join(", ")});\n`)
     .join("");
-  // Slice A4 — RHF wiring when the body included `Form(of:)` /
+  // RHF wiring when the body included `Form(of:)` /
   // `Form(runs:)` / `Form(of:, op:)` primitives.  Emits the
   // mutation-hook import, per-Id<X> target `useAllX()` hooks, the
   // `useForm` declaration, and the `react-hook-form` import.  A
@@ -260,12 +260,12 @@ export function renderCustomLayoutPage(
     routerSpecifiers.length > 0
       ? `import { ${routerSpecifiers.join(", ")} } from "${routerPackageForStack(pack.manifest.stack)}";\n`
       : "";
-  // Slice 11.7 — emit the `useState` hook + per-field declaration
+  // Emit the `useState` hook + per-field declaration
   // when any state ref or `:=` mutation surfaced during the walk.
   // Pages that DECLARE state but never reference it from the body
   // skip the import so unused-var warnings stay quiet (parallel to
   // how `usedParams` shapes the useParams destructure).
-  // Slice 11.12 — `useEffect` joins the same React import line.
+  // `useEffect` joins the same React import line.
   const reactSpecifiers: string[] = [];
   if (effectiveUsesState) reactSpecifiers.push("useState");
   if (usesEffect) reactSpecifiers.push("useEffect");
@@ -296,7 +296,7 @@ ${paramsLine}${navigateLine}${stateLines}${apiHookDecls}${actionWiring.decls}${f
 `;
 }
 
-/** Slice A4 — assemble the RHF + create-mutation wiring around a
+/** Assemble the RHF + create-mutation wiring around a
  *  `Form(of: <Agg>)` body emission.  Rendered through per-pack
  *  templates (`form-of-imports.hbs` + `form-of-decls.hbs`) so the
  *  pack controls exactly which packages it imports and how it
@@ -327,7 +327,7 @@ type FormWiring = {
 function renderFormOfWiring(
   state: FormOfState,
   pack: LoadedPack,
-  /** Slice C2 — see `renderImportLines` for prefix semantics. */
+  /** See `renderImportLines` for prefix semantics. */
   srcImportPrefix: string = "../",
 ): FormWiring {
   if (state.kind === "workflow") {
@@ -414,7 +414,7 @@ function renderFormOpWiring(
   };
 }
 
-/** Slice A12 — workflow-form variant of renderFormOfWiring.  Same
+/** Workflow-form variant of renderFormOfWiring.  Same
  *  RHF wiring, but the request type / mutation hook / import
  *  source come from the workflow surface (`<Wf>Request`,
  *  `use<Wf>Workflow`, `../api/workflows`) instead of the
@@ -449,7 +449,7 @@ function renderFormRunsWiring(
   };
 }
 
-/** Slice 11.18 — render one ComponentIR as a `.tsx` file: typed
+/** Render one ComponentIR as a `.tsx` file: typed
  *  Props interface, default-export function component, useState
  *  declarations from the component's own state, body walked
  *  through the same machinery as page bodies.  Components don't
@@ -531,7 +531,7 @@ export function renderUserComponentFile(
       ? `import { ${routerSpecifiers.join(", ")} } from "${routerPackageForStack(pack.manifest.stack)}";\n`
       : "";
   const reactImport = usesState ? `import { useState } from "react";\n` : "";
-  // Slice 11.19 — components that reference Slot() get a
+  // Components that reference Slot() get a
   // `children` prop on top of their declared params.  React's
   // type is imported lazily.
   const reactTypesImport = usesChildren ? `import type { ReactNode } from "react";\n` : "";
@@ -587,7 +587,7 @@ ${navigateLine}${actionWiring.decls}${form.decls}${stateLines}  return (
 `;
 }
 
-/** Slice 11.12 — collect every name referenced in an expression
+/** Collect every name referenced in an expression
  *  (via `ref` nodes), used to derive the deps array for the
  *  title's `useEffect`.  Walks binary / unary / call subtrees. */
 function collectExprRefs(expr: ExprIR, out: Set<string>): void {
@@ -610,7 +610,7 @@ function collectExprRefs(expr: ExprIR, out: Set<string>): void {
   }
 }
 
-/** Slice 11.7 — render one `state {}` field as a React `useState`
+/** Render one `state {}` field as a React `useState`
  *  declaration: `const [name, setName] = useState<T>(init);`.  Init
  *  comes from the field's optional `=` initializer; absent
  *  initializers fall back to the type's zero value. */

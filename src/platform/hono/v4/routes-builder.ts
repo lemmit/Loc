@@ -367,7 +367,7 @@ function emitFindRoute(agg: AggregateIR, find: FindIR, ctx: BoundedContextIR): s
   if (find.params.length > 0) {
     out.push(`    const params = c.req.valid("query");`);
   }
-  // Slice 1C: when the find's where clause references currentUser,
+  // When the find's where clause references currentUser,
   // the repository method gains a trailing `currentUser: User`
   // parameter.  Read it from the request scope where the auth
   // middleware stashed it earlier in the pipeline.

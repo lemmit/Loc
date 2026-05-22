@@ -61,7 +61,7 @@ export function buildRepositoryFile(
   }
   lines.push(`import { ${[...drizzleOps].sort().join(", ")} } from "drizzle-orm";`);
   lines.push(`import * as schema from "../schema";`);
-  // Slice 1C: if any find or matching view filter references
+  // If any find or matching view filter references
   // currentUser, the per-method signature gains a `currentUser: User`
   // parameter that the closure-captured Drizzle predicate reads.
   // Pull the User type in as a type-only import so the file
@@ -529,7 +529,7 @@ function projectionObject(
 function findQueryMethod(agg: AggregateIR, find: FindIR, ctx: BoundedContextIR): string[] {
   const lines: string[] = [];
   const tableName = camel(plural(agg.name));
-  // Slice 1C: when the find's `where` references currentUser, the
+  // When the find's `where` references currentUser, the
   // method gains a trailing `currentUser: User` parameter that the
   // closure-captured Drizzle predicate reads from.  Hono routes /
   // workflow handlers thread the user from `c.get("currentUser")`

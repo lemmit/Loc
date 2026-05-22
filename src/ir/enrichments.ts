@@ -78,7 +78,7 @@ function enrichSystem(sys: SystemIR): SystemIR {
   // Done after module enrichment so frontends see the same enriched
   // contexts every other consumer sees.
   const deployables = enrichDeployables(sys.deployables);
-  // Pass 1 (Slice 10) — scaffold expansion now runs at the AST
+  // Scaffold expansion now runs at the AST
   // level via `src/language/ddd-scaffold-ast-expander.ts` (a
   // `DocumentState.IndexedContent` hook on the shared
   // DocumentBuilder).  By the time lowering runs, every page is
@@ -144,7 +144,7 @@ function ensureFindAll(aggregates: AggregateIR[], existing: RepositoryIR[]): Rep
  * rejects that case). */
 function enrichDeployables(deployables: DeployableIR[]): DeployableIR[] {
   return deployables.map((d) => {
-    // Slice 8: `static` deployables share the legacy `react` module-
+    // `static` deployables share the legacy `react` module-
     // inheritance behaviour — they're frontend deployables that
     // serve a built bundle and need to know about every context the
     // target backend exposes (so the page-IR emitter has every
@@ -227,7 +227,7 @@ function wireFieldsForValueObject(vo: ValueObjectIR): WireField[] {
 }
 
 // ---------------------------------------------------------------------------
-// Traceability index (Slice 12) — derived in one pure pass, exactly
+// Traceability index — derived in one pure pass, exactly
 // like wireShape.  Every report generator reads these maps rather than
 // recomputing coverage.
 // ---------------------------------------------------------------------------

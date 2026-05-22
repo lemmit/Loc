@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Phase 7 — LiveView module emission per page.
+// LiveView module emission per page.
 //
 // For each `PageIR` declared by the deployable's `ui:` block, emit:
 //   - lib/<app>_web/live/<page_snake>_live.ex — a Phoenix LiveView module

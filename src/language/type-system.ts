@@ -288,7 +288,7 @@ function typeOfMemberAccess(expr: import("./generated/ast.js").MemberAccess, env
   if (recvType.kind === "array") {
     if (expr.call) {
       for (const arg of expr.args) {
-        // Slice 1.5: call args wrap an Expression in a `CallArg`
+        // Call args wrap an Expression in a `CallArg`
         // node carrying an optional `name:` prefix.  Look at the
         // wrapped value, not the wrapper itself, when checking for
         // Lambda shape.

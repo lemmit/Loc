@@ -72,7 +72,7 @@ export function generatePhoenixLiveViewProject(
   // --- Migrations -----------------------------------------------------------
   emitMigrations(appName, contexts, appModule, out);
 
-  // --- LiveView pages (Phase 7) --------------------------------------------
+  // --- LiveView pages --------------------------------------------
   // Per PageIR in the deployable's `ui:` block: one
   // lib/<app>_web/live/<page>_live.ex module + a router entry the
   // shell renderer splices into router.ex.
@@ -85,7 +85,7 @@ export function generatePhoenixLiveViewProject(
   });
   for (const [path, content] of liveFiles) out.set(path, content);
 
-  // --- API controllers (Batch A) -------------------------------------------
+  // --- API controllers -------------------------------------------
   // Workflows / Views / Health controllers + their router entries.
   // Workflows / Views are only emitted when `serves:` is populated;
   // Health is always emitted (router references it unconditionally).
@@ -98,7 +98,7 @@ export function generatePhoenixLiveViewProject(
   });
   for (const [path, content] of apiFiles) out.set(path, content);
 
-  // --- OpenAPI spec (Batch D2) ----------------------------------------------
+  // --- OpenAPI spec ----------------------------------------------
   // Emits <Api>Spec module, per-aggregate/workflow/view schema modules,
   // OpenapiController, and a GET /api/openapi.json route entry.
   const { files: openApiFiles, routes: openApiRoutes } = emitOpenApiSpec({
@@ -111,7 +111,7 @@ export function generatePhoenixLiveViewProject(
   for (const [path, content] of openApiFiles) out.set(path, content);
   const apiRoutes = [...baseApiRoutes, ...openApiRoutes];
 
-  // --- Auth modules (Batch E4) ----------------------------------------------
+  // --- Auth modules ----------------------------------------------
   // Emits Auth plug + LiveAuth on_mount when deployable.auth?.required.
   const { files: authFiles, enabled: authEnabled } = emitAuth({
     sys,
@@ -121,7 +121,7 @@ export function generatePhoenixLiveViewProject(
   });
   for (const [path, content] of authFiles) out.set(path, content);
 
-  // --- Sidebar component (Batch C) -----------------------------------------
+  // --- Sidebar component -----------------------------------------
   // Emitted when the deployable mounts a `ui:` — derived from
   // MenuBlockIR or per-page menuMeta, identical structure to the
   // React generator's sidebar.
@@ -135,7 +135,7 @@ export function generatePhoenixLiveViewProject(
     }
   }
 
-  // --- Theme CSS (Batch C) -------------------------------------------------
+  // --- Theme CSS -------------------------------------------------
   // System-level `theme { primary: ..., neutral: ..., radius: ... }`
   // tokens lower to CSS custom properties consumable from any
   // generated layout.  Always emit (empty theme produces a stub).
