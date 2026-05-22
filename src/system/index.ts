@@ -1,3 +1,4 @@
+import { E2E_FIXTURES_TS } from "../generator/react/index.js";
 import { enrichLoomModel } from "../ir/enrichments.js";
 import type {
   BoundedContextIR,
@@ -9,7 +10,6 @@ import type {
 import { lowerModel } from "../ir/lower.js";
 import type { Model } from "../language/generated/ast.js";
 import { platformFor } from "../platform/registry.js";
-import { E2E_FIXTURES_TS } from "../generator/react/index.js";
 import { renderE2EFile } from "./e2e-render.js";
 import { renderC4Model, renderC4SpecJson } from "./likec4.js";
 import {
