@@ -539,10 +539,3 @@ function humanize(s: string): string {
     .filter(Boolean);
   return parts.map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join(" ");
 }
-
-// ---------------------------------------------------------------------------
-// Test hooks
-// ---------------------------------------------------------------------------
-
-export const __spike__expandScaffoldsInModel = expandScaffoldsInModel;
-export const __spike__buildSystemInventory = buildSystemInventory;
