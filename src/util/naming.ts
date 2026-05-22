@@ -1,12 +1,23 @@
-export function pascal(input: string): string {
+/** Uppercase the first character only — the rest is left untouched.
+ *  Intended for identifiers that are already camelCase / PascalCase
+ *  (`"addLine" → "AddLine"`), NOT a full case converter: a snake_case
+ *  input keeps its underscores (`"add_line" → "Add_line"`). */
+export function upperFirst(input: string): string {
   if (!input) return input;
   return input[0]!.toUpperCase() + input.slice(1);
 }
 
-export function camel(input: string): string {
+/** Lowercase the first character only — the rest is left untouched.
+ *  See {@link upperFirst}: input is assumed already camel/Pascal. */
+export function lowerFirst(input: string): string {
   if (!input) return input;
   return input[0]!.toLowerCase() + input.slice(1);
 }
+
+/** @deprecated misleading name — use {@link upperFirst}. */
+export const pascal = upperFirst;
+/** @deprecated misleading name — use {@link lowerFirst}. */
+export const camel = lowerFirst;
 
 export function snake(input: string): string {
   return input
