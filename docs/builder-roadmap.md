@@ -70,11 +70,12 @@ text stays the source of truth.
   controls (arms aren't palette primitives); the palette won't drop a raw
   primitive into a Match or an already-full single-child slot.
 - **Event-handler lambdas + qualified refs**: an unknown named arg whose value
-  is a lambda (`Button(onClick: e => { … })`, form `onSubmit`) is kept as a
-  verbatim passthrough prop — the carrying primitive stays recognised, the
-  handler editable as raw source — instead of forcing Opaque; and a `ref` slot
-  accepts a qualified ref (`Form(of: Sales.Order)`), surfaced as the current
-  value in its dropdown.
+  is a lambda (`Button(onClick: e => { … })`, form `onSubmit`) becomes an
+  editable slot child — a `Lambda` node (with the statement-row editor for block
+  bodies), rendered nested inside the carrying primitive (leaves render their
+  slot children too) — instead of a raw passthrough string or Opaque; and a
+  `ref` slot accepts a qualified ref (`Form(of: Sales.Order)`), surfaced as the
+  current value in its dropdown.
 - **`Detail` / `MasterDetail` + user-component calls**: `Detail(of:, by:)` and
   `MasterDetail(of:, …, detail: o => …)` are recognised; and a call to a
   user-defined `component` (collected from the source, registered in the craft
@@ -87,19 +88,16 @@ text stays the source of truth.
   collected from the source (`BuilderPane`); `op:` is contextual via the
   per-aggregate operations map.  A boolean-valued modifier (`striped: true`)
   edits as a switch, and `color:` (Badge/Alert) is a palette dropdown.
-- **Statement-level handler editor**: a block-bodied lambda in a child slot
-  (e.g. a `Table` `onRowClick: r => { … }`) seeds as a `Lambda` node holding one
-  editable `Stmt` row per statement (source kept verbatim); rows are
-  add/edit/delete/reorderable and round-trip. (Event-handler lambdas in
-  *passthrough* position — `Button(onClick:)` — still edit as one raw field; the
-  rows apply where the lambda is a modelled slot.)
+- **Statement-level handler editor**: a block-bodied lambda (any named-arg
+  handler — `Button(onClick:)`, form `onSubmit`, `Table(onRowClick:)`) seeds as a
+  `Lambda` node holding one editable `Stmt` row per statement (source kept
+  verbatim); rows are add/edit/delete/reorderable and round-trip.
 
 ## Open — expression / domain-logic surface
 
 - **Per-statement structure** — statement rows are raw source today; structured
   editors per statement kind (`:=`, `call`, `emit`, `navigate`, `let`) are a
-  further step. Routing *passthrough* handler lambdas (`Button(onClick:)`) to
-  slots would extend the row editor to them.
+  further step.
 - **`state := …`** page state declarations / assignments. Not modelled.
 - **More typed pickers**: enum-case values (needs the field's enum type) and
   repository finds (op/runs/aggregate/workflow/color/boolean pickers are done;

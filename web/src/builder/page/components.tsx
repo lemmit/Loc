@@ -125,11 +125,16 @@ function makeContainer(name: PrimitiveName): ComponentType<{ children?: ReactNod
 }
 
 function makeLeaf(name: PrimitiveName): ComponentType<Props> {
-  const C = (props: Props): JSX.Element => {
+  // A leaf may still carry slot children — e.g. an event-handler lambda
+  // (`Button(onClick: e => …)`).  craft passes those as React `children` when the
+  // node is a canvas (it is, once it has children), so render them below the
+  // leaf's own content.
+  const C = ({ children, ...props }: Props & { children?: ReactNode }): JSX.Element => {
     const { ref, selected } = useBox();
     return (
       <div ref={ref} data-testid={`c4node-${name}`} style={boxStyle(selected)}>
-        {renderLeaf(name, props)}
+        {renderLeaf(name, props as Props)}
+        {children}
       </div>
     );
   };
