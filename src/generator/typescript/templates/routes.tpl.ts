@@ -1,4 +1,5 @@
 import type { BoundedContextIR } from "../../../ir/loom-ir.js";
+import { opHasProvSite } from "../../../ir/prov-id.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake } from "../../../util/naming.js";
 
@@ -16,10 +17,18 @@ export function renderHttpIndex(
     `import { ${lowerFirst(a.name)}Routes } from "./${lowerFirst(a.name)}.routes";`,
     `import { ${a.name}Repository } from "../db/repositories/${lowerFirst(a.name)}-repository";`,
   ]);
-  const aggregateRoutes = ctx.aggregates.map(
-    (a) =>
-      `  app.route("/${snake(plural(a.name))}", ${lowerFirst(a.name)}Routes(new ${a.name}Repository(db, events)));`,
-  );
+  const aggregateRoutes = ctx.aggregates.map((a) => {
+    // Aggregates with an audited OR provenanced public operation also
+    // receive `db` + `events` so the route can run its save + audit insert +
+    // provenance flush in one transaction (matches the transactional router
+    // signature in routes-builder).
+    const needsTx = a.operations.some(
+      (o) => o.visibility === "public" && (o.audited || opHasProvSite(o)),
+    );
+    const repoArg = `new ${a.name}Repository(db, events)`;
+    const args = needsTx ? `${repoArg}, db, events` : repoArg;
+    return `  app.route("/${snake(plural(a.name))}", ${lowerFirst(a.name)}Routes(${args}));`;
+  });
   const externAggs = ctx.aggregates.filter((a) => a.operations.some((o) => o.extern));
   const externImports = externAggs.map(
     (a) =>

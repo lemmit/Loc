@@ -101,6 +101,12 @@ export interface OperationIR {
    * itself does NOT get a method body for an extern operation;
    * the user owns the business decision. */
   extern: boolean;
+  /** When true, every HTTP invocation of this operation appends an
+   * audit record (who/what/when + before/after wire snapshot) to the
+   * generated Hono project's in-memory audit sink.  Inert on private
+   * operations (no route) and on non-TS backends (no audit emission).
+   * See `docs/proposals/audit-and-logging.md`. */
+  audited: boolean;
 }
 
 export interface EntityPartIR {

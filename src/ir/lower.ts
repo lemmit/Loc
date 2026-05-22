@@ -1452,6 +1452,7 @@ function lowerOperation(op: Operation, env: Env): OperationIR {
     params,
     statements: stmts,
     extern: !!op.extern,
+    audited: !!op.audited,
   };
 }
 
