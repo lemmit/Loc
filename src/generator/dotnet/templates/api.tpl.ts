@@ -172,7 +172,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         var trace_id = System.Diagnostics.Activity.Current?.TraceId.ToString() ?? "";${
           usesValidators
             ? `
-        // Slice 21.B FluentValidation arm — runs FIRST because
+        // FluentValidation arm — runs FIRST because
         // validation failures are the most common 400 cause.  The
         // envelope extends the existing { error, trace_id } shape
         // with a structured \`failures\` array carrying field +

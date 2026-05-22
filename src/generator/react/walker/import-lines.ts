@@ -13,8 +13,8 @@ const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0
 /** Render `import { … } from "<path>";` lines from a path→names map.
  *  Names are sorted within each line; sources are sorted by
  *  `comparePaths`.  When `srcImportPrefix` is non-default, paths
- *  written with the default `../` shape are rewritten to it (Slice C2 —
- *  scaffold-expanded pages live deeper under `src/`).  An empty map
+ *  written with the default `../` shape are rewritten to it
+ *  (scaffold-expanded pages live deeper under `src/`).  An empty map
  *  renders as `""` so callers can splice without a guard. */
 function groupedImportLines(
   byPath: Map<string, ReadonlySet<string>>,

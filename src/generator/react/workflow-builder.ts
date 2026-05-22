@@ -5,8 +5,7 @@ import { fillBlock } from "./page-objects-builder.js";
 // ---------------------------------------------------------------------------
 // Workflow API module + Playwright page object emission.
 //
-// The page-side emission (workflows index, per-workflow form) moved
-// out of this file in Phase 1.5 — see
+// The page-side emission (workflows index, per-workflow form) lives in
 // src/generator/react/templating/preparers/workflow-{index,form}.ts.
 // What remains here is two emission paths that aren't pack-shaped:
 //

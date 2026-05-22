@@ -417,8 +417,8 @@ export class DddValidator {
     const knownNames = new Set(["primary", "neutral", "radius", "fontFamily"]);
     const knownRadius = new Set(["none", "sm", "md", "lg", "xl"]);
     // Hex colors: #RGB, #RRGGBB, or #RRGGBBAA.  Everything else
-    // ("blue" / "rgb(...)" / "var(--brand)") routes through a future
-    // slice if a user asks; rejecting here keeps the surface tight
+    // ("blue" / "rgb(...)" / "var(--brand)") can be supported later
+    // if a user asks; rejecting here keeps the surface tight
     // and the Mantine shade-ramp generator simple.
     const hexColor = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
     const seen = new Set<string>();
@@ -584,9 +584,9 @@ export class DddValidator {
    *    3. `design:` set on a deployable with no UI mount and on a
    *       platform that doesn't render UI either → warning that the
    *       value is dropped at lowering and has no effect. */
-  /** Backend-packages B1 — validate the `platform:` value now that
-   *  the grammar admits an arbitrary STRING (for `family@version`
-   *  pins).  Mirrors `checkDeployableDesignPack`'s version error:
+  /** Validate the `platform:` value now that the grammar admits an
+   *  arbitrary STRING (for `family@version` pins).  Mirrors
+   *  `checkDeployableDesignPack`'s version error:
    *
    *    - backend bareword (`hono`) / frontend keyword
    *      (`react`/`static`) → always fine.
@@ -649,8 +649,8 @@ export class DddValidator {
     }
     const framework = explicitFramework ?? expectedFrameworkFor(d.platform, hasUiBinding);
     const expectedFormat = expectedPackFormatFor(framework);
-    // Phase 0 of pack-versioning: parse the slot value into
-    // {family, version, qualified}.  Bareword (`mantine`) and pinned
+    // Parse the slot value into {family, version, qualified}.
+    // Bareword (`mantine`) and pinned
     // (`mantine@v7`) forms both produce a parsed ref pointing at a
     // built-in family; custom paths (`./design/foo`) parse to null and
     // fall through to Case 2.  Distinguishing "known family, unknown
@@ -1468,9 +1468,8 @@ export class DddValidator {
   }
 
   // ---------------------------------------------------------------------------
-  // Page metamodel — Slice 3 validator obligations.
+  // Page metamodel validator obligations.
   //
-  // Per the plan at /root/.claude/plans/yes-make-full-plan-tingly-sunbeam.md.
   // Walks each `ui` SystemMember and emits diagnostics for malformed
   // pages, scaffold directives, menus, and the references between
   // them.  Cross-cutting rules (uniqueness across uis, deployable.ui
@@ -1479,7 +1478,7 @@ export class DddValidator {
   //
   // These checks are intentionally syntactic / cross-reference; deeper
   // type analysis on body expressions and component-stdlib parameter
-  // shape lives in Slice 5 (page emitter + closed-stdlib spec table).
+  // shape lives in the page emitter (closed-stdlib spec table).
   // ---------------------------------------------------------------------------
 
   private checkUi(
@@ -1559,7 +1558,7 @@ export class DddValidator {
   ): void {
     // Rule 5 — selector targets must resolve to declarations of the
     // matching kind anywhere in the system.  The deployable-targets-
-    // chain reachability check is left to Slice 4's expander where
+    // chain reachability check is left to the scaffold expander where
     // we already need to walk reachability for page generation.
 
     // Build per-kind name sets from the system's domain IR.
@@ -1611,7 +1610,7 @@ export class DddValidator {
       }
       // Rule 6 (light) — same name listed twice in one directive.
       // Cross-directive double-scaffolding (same module, different
-      // granularity) is detected by Slice 4's expander when it
+      // granularity) is detected by the scaffold expander when it
       // collapses scaffold output to a page-name map.
       if (seenWithinDirective.has(t)) {
         accept("error", `'scaffold ${s.selector}: ...' lists '${t}' more than once.`, {

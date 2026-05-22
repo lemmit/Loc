@@ -617,7 +617,7 @@ function isApiHandle(name: string, ctx: WalkContext): boolean {
 }
 
 function renderApiCall(call: ApiCallSite, ctx: WalkContext): string {
-  // Phase 3B's code-interface convention:
+  // Code-interface convention:
   //   .create  → create_<single>!(args)
   //   .update  → update_<single>!(record, args)
   //   .delete  → destroy_<single>!(record)
@@ -661,7 +661,7 @@ function renderApiCall(call: ApiCallSite, ctx: WalkContext): string {
 function renderNavigate(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   // navigate(<Page>, { customerId: x }) — first arg is the page
   // reference, second is the params object.
-  // Phase 3B's router uses `live "<route>", <Page>Live`; we lower to
+  // The router uses `live "<route>", <Page>Live`; we lower to
   // `push_navigate(socket, to: ~p"<route>")`.  Param substitution into
   // `:param` placeholders happens via Phoenix's `~p` sigil.
   const target = expr.args[0];

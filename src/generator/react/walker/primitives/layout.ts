@@ -54,7 +54,7 @@ export function emitGrid(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
   // Each child wraps in a per-pack column container (Mantine's
   // <Grid.Col span="auto">; shadcn's plain `<div>` since gap is
   // on the parent).  v0 gives every column equal weight; a future
-  // slice can read a `span:` named arg per child.
+  // change can read a `span:` named arg per child.
   const children = positionalChildren(call, ctx, depth + 2);
   const colIndent = "  ".repeat(depth + 1);
   const childIndent = "  ".repeat(depth + 2);

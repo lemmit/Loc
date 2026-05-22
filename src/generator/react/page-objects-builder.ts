@@ -187,8 +187,8 @@ export function buildPageObjectModule(agg: AggregateIR, ctx: BoundedContextIR): 
 // fillBlock — emit the lines that fill one input from `input.<path>`,
 // branching on type so dates, numbers, selects, switches each take the
 // right Playwright action.  Exported so the workflow + view page
-// objects (slice 18.C) drive their own forms with the same per-type
-// interaction conventions instead of forking the logic.
+// objects drive their own forms with the same per-type interaction
+// conventions instead of forking the logic.
 // ---------------------------------------------------------------------------
 
 export function fillBlock(

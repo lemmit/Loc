@@ -159,8 +159,8 @@ import {
 
 /** Fold a bareword built-in family or pinned `family@version`
  *  reference (or `undefined`) into the fully-qualified form the rest
- *  of the toolchain stores.  Phase 0 of pack versioning: lowering
- *  resolves the toolchain default for bareword built-ins so that
+ *  of the toolchain stores.  Lowering resolves the toolchain default
+ *  for bareword built-ins so that
  *  every downstream consumer (generator dispatch, build matrix,
  *  snapshot tests) sees an unambiguous `family@version` string and
  *  doesn't need its own copy of the resolution logic.  Custom paths
@@ -175,16 +175,15 @@ function qualifyDesign(raw: string | undefined, fallback: BuiltinPackFamily): st
   return parsed ? parsed.qualified : value;
 }
 
-/** Backend-packages B1 — split a `platform:` value into the family
- *  (the closed `Platform` union every consumer branches on) and the
- *  fully-qualified ref (`family@version`, mirrors `qualifyDesign`).
- *  Bareword backend → family + `family@latest`.  Backend pin
- *  (`hono@v4`) → family + the pin verbatim.  Frontend / unknown
- *  (`react`, `static`) → value for both (no version axis here).
- *  Byte-identical for every existing source: `family` equals the
- *  pre-B1 bareword, so all `platform === "…"` logic is unchanged;
- *  `platformRef` is additive (dispatch still keys on `platform`
- *  until B3). */
+/** Split a `platform:` value into the family (the closed `Platform`
+ *  union every consumer branches on) and the fully-qualified ref
+ *  (`family@version`, mirrors `qualifyDesign`).  Bareword backend →
+ *  family + `family@latest`.  Backend pin (`hono@v4`) → family + the
+ *  pin verbatim.  Frontend / unknown (`react`, `static`) → value for
+ *  both (no version axis here).  Byte-identical for every existing
+ *  source: `family` equals the bareword, so all `platform === "…"`
+ *  logic is unchanged; `platformRef` is additive (dispatch still keys
+ *  on `platform` for now). */
 function qualifyPlatform(raw: string | undefined): {
   family: Platform;
   ref: string;
@@ -423,7 +422,7 @@ function lowerSystem(sys: System): SystemIR {
   // would mostly be `unknown` anyway because e2e tests don't sit
   // inside a bounded context.  The `user` field carries the system's
   // user block down so that e2e bodies could reference `currentUser`
-  // if we extend slice 1A in the future; the slice 1A validator
+  // if auth handling is extended in the future; the auth validator
   // doesn't surface diagnostics from e2e because tests aren't user
   // input received by the system at runtime.
   const e2eEnv: Env = { locals: new Map(), user };
@@ -436,7 +435,7 @@ function lowerSystem(sys: System): SystemIR {
     const targetName = b.deployable?.ref?.name ?? "";
     const target = deployables.find((d) => d.name === targetName);
     const targetPlatform = target?.platform;
-    // Slice 8 + F3: kind dispatch.
+    // Test-kind dispatch.
     //   - `react` / `static` are frontend-only → only `ui` (Playwright).
     //   - `dotnet` / `hono` are backend-only → only `api` (vitest+fetch).
     //   - `phoenixLiveView` is fullstack — emit BOTH a UI spec (driven
@@ -455,11 +454,11 @@ function lowerSystem(sys: System): SystemIR {
   }
   // Page metamodel.  `ui { ... }` blocks are SystemMembers;
   // lower each into a UiIR and attach to the system.  Order
-  // preserves source order so Slice 4's scaffold expander emits
-  // pages in a stable sequence.  Lowering is shallow at this layer:
-  // pages, components, scaffolds, and the optional menu block are
-  // each turned into their literal IR shape (no scaffold expansion,
-  // no body type inference yet — those come in later slices).
+  // preserves source order so the scaffold expander emits pages in a
+  // stable sequence.  Lowering is shallow at this layer: pages,
+  // components, scaffolds, and the optional menu block are each turned
+  // into their literal IR shape (no scaffold expansion, no body type
+  // inference yet — those come later in the pipeline).
   const uis = sys.members
     .filter((m): m is Ui => m.$type === "Ui")
     .map((u) => lowerUi(u));
@@ -492,8 +491,8 @@ function lowerSystem(sys: System): SystemIR {
   // Scaffold expander always runs.  Every page with a
   // recognised `scaffoldOrigin` gets `body` rewritten to a
   // walker-stdlib composition; the React emitter then routes
-  // through the walker (Phase A primitives).  The legacy archetype
-  // path (renderers/preparers/templates) was deleted in D1 — this
+  // through the walker.  The legacy archetype path
+  // (renderers/preparers/templates) has been deleted — this
   // branch is the only generator path now.  `scaffoldOrigin` is
   // intentionally preserved on each rewritten page so the
   // per-aggregate page-object emitter still produces the rich
@@ -518,7 +517,7 @@ function expandScaffoldPages(sys: SystemIR): void {
       // Compute the conventional emit path so the rewritten page
       // lands at `src/pages/<plural>/<arch>.tsx` (matches what the
       // scaffold renderer would have used).  Preserves URL/file
-      // shape across the C2 default flip.
+      // shape when scaffold expansion becomes the default.
       page.emitPath = conventionalEmitPath(page.scaffoldOrigin, ctx);
       page.body = expanded;
       // Detail-page expansion references `id` as a
@@ -543,7 +542,7 @@ function expandScaffoldPages(sys: SystemIR): void {
       // rich domain methods: fill, submit, expectRow…) while the
       // page-emitter detects `expandedFromScaffold` and routes
       // through the walker instead of the archetype renderer.
-      // Without this, the C2 flip would lose ~80 lines of e2e
+      // Without this, the default flip would lose ~80 lines of e2e
       // helper code per aggregate.
       page.expandedFromScaffold = true;
     }
@@ -679,7 +678,7 @@ function lowerE2E(
 
 function lowerDeployable(d: Deployable): DeployableIR {
   const { family: platform, ref: platformRef } = qualifyPlatform(d.platform);
-  // `auth: required` is the only AuthMode in slice 1A.  Future modes
+  // `auth: required` is currently the only AuthMode.  Future modes
   // (`optional` / `forbidden`) would extend this branch.
   const auth = d.auth === "required" ? { required: true } : undefined;
   // `design` defaults only on platforms that actually render UI in
@@ -768,7 +767,7 @@ function defaultPort(platform: Platform | undefined): number {
 }
 
 // ---------------------------------------------------------------------------
-// Page metamodel — Slice 2 lowering.
+// Page metamodel lowering.
 //
 // Each `ui { ... }` SystemMember lowers to a `UiIR` carrying its
 // pages, components, scaffold directives, and an optional menu block
@@ -833,7 +832,7 @@ function lowerPage(p: Page): PageIR {
   let body: ExprIR | undefined;
   let menuMeta: MenuMetaIR | undefined;
   const state: StateFieldIR[] = [];
-  // A neutral env is fine for Slice 2 — the page-IR expression nodes
+  // A neutral env is fine here — the page-IR expression nodes
   // will get richer when the validator and emitter
   // wire in the page-scoped scope.
   const env: Env = { locals: new Map(), user: undefined };
@@ -1198,8 +1197,8 @@ function lowerRepository(
       // `this`-rooted refs so the filter can reference them by name.
       // `user` is threaded so `currentUser` resolves to a typed ref —
       // the validator (`validateAuth`) then rejects any current-user
-      // reference inside a where filter, since slice 1A doesn't
-      // support row-level filtering by user (slice 1C).
+      // reference inside a where filter, since row-level filtering by
+      // user is not supported there.
       let env = newEnv(repo.$container as BoundedContext, user, modulePermissions);
       if (aggRoot) env = inAggregate(env, aggRoot);
       for (const p of f.params) {
@@ -1419,9 +1418,9 @@ function lowerInvariant(
 }
 
 /** Synthesise an InvariantIR from an inline `field: T check <expr>`
- *  clause on a Property.  Slice 21.C sugar — the synthesised invariant
- *  appears in the parent's `invariants` list so the existing wire-
- *  validator + domain-floor pipelines pick it up uniformly. */
+ *  clause on a Property.  Inline-check sugar — the synthesised
+ *  invariant appears in the parent's `invariants` list so the existing
+ *  wire-validator + domain-floor pipelines pick it up uniformly. */
 function lowerPropertyChecks(
   props: Property[],
   env: Env,

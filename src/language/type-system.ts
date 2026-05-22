@@ -314,7 +314,7 @@ function typeOfMemberAccess(expr: import("./generated/ast.js").MemberAccess, env
   }
   if (recvType.kind === "primitive" && recvType.name === "string") {
     if (memberName === "length") return T.prim("int");
-    // `string.matches(regex)` — slice 21.C operator.  Returns bool;
+    // `string.matches(regex)` operator.  Returns bool;
     // argument is a string literal (the validator enforces that
     // separately so a non-literal arg becomes a clear diagnostic
     // rather than `unknown`).
@@ -378,8 +378,8 @@ function collectionOpType(
       return T.prim("int");
     case "sum": {
       // sum returns the lambda's body type when one is given;
-      // otherwise the element type itself.  Slice 1.5: args are
-      // CallArg wrappers — peek through `.value`.
+      // otherwise the element type itself.  Args are CallArg
+      // wrappers — peek through `.value`.
       const callArg = expr.args[0];
       const lambdaArg = callArg?.value;
       if (lambdaArg && isLambda(lambdaArg) && lambdaArg.body) {

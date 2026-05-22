@@ -110,8 +110,8 @@ export function buildRepositoryFile(
   lines.push("");
 
   // findManyByIds — bulk loader used by views that follow `Id<X>`
-  // references in bind expressions (slice 3).  Same hydration path
-  // as the array-return finds; filter is a single `inArray`.
+  // references in bind expressions.  Same hydration path as the
+  // array-return finds; filter is a single `inArray`.
   lines.push(...findManyByIdsMethod(agg, ctx));
   lines.push("");
 
@@ -850,7 +850,7 @@ function lowerToDrizzle(
         return JSON.stringify(e.name);
       }
     }
-    // `currentUser.<field>` — slice 1C row-level filter.  The repo
+    // `currentUser.<field>` — row-level filter.  The repo
     // method receives a `currentUser: User` parameter; the renderer
     // emits a plain JS member access against it.  Drizzle infers
     // the column-side branded type and the User field's plain type

@@ -70,8 +70,8 @@ function renderActionMutations(
 /** Render the page-file shell around a walked body — imports +
  *  function component + return.
  *
- *  Slice 11.4 — when the page has typed route params, the walker
- *  is given their names.  If the body referenced any of them
+ *  When the page has typed route params, the walker is given their
+ *  names.  If the body referenced any of them
  *  (`Heading(name)`, `Text(customerId)`), the shell adds a
  *  `useParams<{ name: string, customerId: string }>()` hook and
  *  destructures the names so the JSX expressions resolve at
@@ -706,11 +706,11 @@ function zeroValueForType(type: TypeIR): string {
 }
 
 /** Render a `ParamIR` (route param) as the TS type the
- *  `useParams<{...}>()` generic should declare for it.  Slice 11.4
- *  v0 — every route param is `string` at the React-Router level;
- *  the original Loom type intent (e.g. `Id<Order>`) is preserved
- *  in the IR but doesn't affect the typed-useParams shape today.
- *  A future slice can layer `z.coerce` or similar at the page-
+ *  `useParams<{...}>()` generic should declare for it.  Every route
+ *  param is `string` at the React-Router level; the original Loom
+ *  type intent (e.g. `Id<Order>`) is preserved in the IR but doesn't
+ *  affect the typed-useParams shape today.
+ *  A future change can layer `z.coerce` or similar at the page-
  *  shell to convert to the declared types. */
 function typeRefAsTsString(p: ParamIR): string {
   void p;

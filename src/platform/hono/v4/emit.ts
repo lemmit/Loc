@@ -1,12 +1,11 @@
-// packaging-split P2 — this orchestrator (project assembly: which
-// files, framework wiring, package.json/Dockerfile) is
-// backend-specific, so it lives in the hono@v4 *package* and drives
-// the shared neutral emitter library under
-// `src/generator/typescript/` by ordinary import (package → shared,
-// the B2.1 invariant).  Subsequent P2 slices move the remaining
-// Hono-framework builders (routes/workflow/view/auth/observability)
-// in here too, leaving only the framework-neutral helpers
-// (render-expr/stmt, templates, zod-refine) in core.
+// This orchestrator (project assembly: which files, framework wiring,
+// package.json/Dockerfile) is backend-specific, so it lives in the
+// hono@v4 *package* and drives the shared neutral emitter library
+// under `src/generator/typescript/` by ordinary import (package →
+// shared).  Over time the remaining Hono-framework builders
+// (routes/workflow/view/auth/observability) move in here too, leaving
+// only the framework-neutral helpers (render-expr/stmt, templates,
+// zod-refine) in core.
 
 import { buildExternHandlersFile } from "../../../generator/typescript/extern-builder.js";
 import { buildRepositoryFile } from "../../../generator/typescript/repository-builder.js";
@@ -231,8 +230,8 @@ function findRepoFor(ctx: BoundedContextIR, name: string): RepositoryIR | undefi
   return ctx.repositories.find((r) => r.aggregateName === name);
 }
 
-// Backend-packages B2.1 — the shared TypeScript/Hono emitter is
-// version-agnostic.  Dep pins are owned by the active backend
+// The shared TypeScript/Hono emitter is version-agnostic.  Dep pins
+// are owned by the active backend
 // *package* (`src/platform/hono/<vN>/pins.ts`) and threaded in as a
 // parameter; the emitter never imports a package (no shared→package
 // edge), so it stays usable by any backend version and a future

@@ -1,13 +1,13 @@
 // Page emitter.
 //
-// Walks `ui.pages` (post-Slice-4 expansion: explicit pages + scaffold
+// Walks `ui.pages` (after scaffold expansion: explicit pages + scaffold
 // rewrites + shared Home / WorkflowsIndex / ViewsIndex) and emits one
 // TSX file per page, dispatching by `scaffoldOrigin.kind` to the
 // existing per-archetype builders.  This is the byte-equivalence
 // layer for the bulk-scaffold case — every legacy direct-walk
 // invocation routes through here.
 //
-// What this slice does:
+// What this emitter does:
 // - Replaces the per-aggregate / per-workflow / per-view PAGE
 //   emission loops in `src/generator/react/index.ts` with one call
 //   to `emitPagesForUi`.
@@ -16,20 +16,19 @@
 //   `buildWorkflowsIndexPage`, `buildViewsIndexPage`, `homeTsx`)
 //   verbatim — byte-equivalence comes for free.
 //
-// What this slice intentionally doesn't touch:
+// What this emitter intentionally doesn't touch:
 // - Per-aggregate api modules (`src/api/<agg>.ts`) — emitted by
 //   `index.ts` via the existing aggregate iteration.
 // - Per-aggregate / per-workflow / per-view Playwright page objects
-//   under `e2e/pages/` — Slice 7 reroutes those to walk the page IR.
+//   under `e2e/pages/` — a follow-up reroutes those to walk the page IR.
 // - Project shell (App.tsx, main.tsx, vite.config.ts, package.json,
 //   theme, smoke spec) — orthogonal to the page metamodel.
 //
-// What this slice intentionally doesn't yet handle:
+// What this emitter intentionally doesn't yet handle:
 // - Explicit pages (`source: "explicit"`).  The closed-stdlib
-//   component emitter is part of Slice 6's broader page-emitter
-//   work; for v0 the bulk-scaffold case has no explicit pages, so
-//   they are silently skipped here and an explicit follow-up will
-//   wire them in.
+//   component emitter is part of the broader page-emitter work; the
+//   bulk-scaffold case has no explicit pages, so they are silently
+//   skipped here and a follow-up will wire them in.
 
 import type {
   AggregateIR,
@@ -63,9 +62,8 @@ export interface PageEmitContext {
   /** Map context name → `BoundedContextIR` for fast `scaffoldOrigin`
    *  → ctx lookup. */
   contextsByName: Map<string, BoundedContextIR>;
-  /** Loaded design pack (Phase 0 template-pack work).  Used by the
-   *  list-page renderer; other archetypes use the legacy procedural
-   *  builders. */
+  /** Loaded design pack.  Used by the list-page renderer; other
+   *  archetypes use the legacy procedural builders. */
   pack: LoadedPack;
 }
 
@@ -217,7 +215,8 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
       // `src/pages/<page-snake>.tsx` location.  Set by the
       // scaffold expander to land rewritten pages at their
       // conventional archetype path (`src/pages/<plural>/<arch>.tsx`)
-      // so URL/file shape stays stable across the C2 default flip.
+      // so URL/file shape stays stable when scaffold expansion becomes
+      // the default.
       const emitPath = page.emitPath ?? `src/pages/${snake(page.name)}.tsx`;
       // Relative-path prefix from the emitted TSX back
       // to `src/`.  Default-located walker pages (`src/pages/<x>.tsx`)
@@ -249,7 +248,7 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
     }
     // Bodies the v0 dispatcher doesn't recognise are silently
     // skipped (e.g. user-defined components composed of stdlib
-    // bits).  Future slice expands the walker's component table.
+    // bits).  A future change expands the walker's component table.
   }
   return out;
 }
@@ -300,7 +299,7 @@ export function emitPageObjectsForUi(ui: UiIR, ctx: PageEmitContext): Map<string
         const agg = ctx.aggregatesByName.get(origin.aggregateName);
         let ctxIR = ctx.contextsByName.get(origin.contextName);
         if (!ctxIR && agg) {
-          // Slice 10 fallback: AST expander leaves `contextName: ""`.
+          // Fallback: AST expander leaves `contextName: ""`.
           for (const c of ctx.contextsByName.values()) {
             if (c.aggregates.some((a) => a.name === agg.name)) {
               ctxIR = c;

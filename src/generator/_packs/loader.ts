@@ -41,7 +41,7 @@ export interface PackManifest {
    *  "ashPhoenix".  Used in error messages; resolution is by
    *  directory layout, not by this field. */
   name: string;
-  /** Pack version — **load-bearing after Phase 0 of pack versioning.**
+  /** Pack version — **load-bearing.**
    *  Built-in packs ship at `designs/<family>/<vNN>/`; this field
    *  must equal the parent directory's `vNN` segment (e.g. `"v7"`
    *  for `designs/mantine/v7/pack.json`).  Loaders cross-check at
@@ -53,8 +53,8 @@ export interface PackManifest {
   version: string;
   /** Stack identifier — names the cross-cutting framework baseline
    *  (React / react-router / zod / Vite / TS versions) the pack
-   *  ships against.  Phase 0.5: `"v1"` = React 18 family, `"v2"` =
-   *  React 19 family.  The loader resolves to `<repo>/stacks/<id>/`
+   *  ships against.  `"v1"` = React 18 family, `"v2"` = React 19
+   *  family.  The loader resolves to `<repo>/stacks/<id>/`
    *  and registers every `.hbs` it finds there as a Handlebars
    *  partial, so pack templates can pull in cross-cutting
    *  fragments via `{{> stack-package-deps}}` and friends.  Omit
