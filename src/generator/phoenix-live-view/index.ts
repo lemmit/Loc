@@ -666,7 +666,9 @@ ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \\
     HEX_CACERTS_PATH=/etc/ssl/certs/ca-certificates.crt
 RUN mix local.hex --force && mix local.rebar --force
 ENV MIX_ENV="prod"
-COPY mix.exs mix.lock ./
+# The generator emits mix.exs but no mix.lock (deps aren't pinned at
+# generation time), so mix deps.get resolves and writes the lock here.
+COPY mix.exs ./
 RUN mix deps.get --only $MIX_ENV
 RUN mkdir config
 COPY config/config.exs config/$MIX_ENV.exs config/
