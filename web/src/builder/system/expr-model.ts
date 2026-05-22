@@ -28,6 +28,11 @@ export interface EObjField {
   value: EExpr;
 }
 
+export interface EMatchArm {
+  cond: EExpr;
+  value: EExpr;
+}
+
 export type EExpr =
   | { kind: "binary"; op: string; left: EExpr; right: EExpr }
   | { kind: "unary"; op: string; operand: EExpr }
@@ -36,6 +41,8 @@ export type EExpr =
   | { kind: "call"; callee: EExpr; args: ECallArg[] }
   | { kind: "member"; receiver: EExpr; member: string; call: boolean; args: ECallArg[] }
   | { kind: "lambda"; param: string; body: EExpr }
+  | { kind: "ternary"; cond: EExpr; then: EExpr; else: EExpr }
+  | { kind: "match"; arms: EMatchArm[]; else?: EExpr }
   | { kind: "new"; partType: string; fields: EObjField[] }
   | { kind: "object"; fields: EObjField[] }
   | { kind: "raw"; text: string };
@@ -76,6 +83,14 @@ export function seedExpr(node: Expression): EExpr {
       // Expression-body lambdas structure (`p => expr`); block-body lambdas
       // (`p => { … }` — imperative statements) stay raw.
       return node.body ? { kind: "lambda", param: node.param, body: seedExpr(node.body) } : { kind: "raw", text: printExpr(node) };
+    case "TernaryExpr":
+      return { kind: "ternary", cond: seedExpr(node.condition), then: seedExpr(node.thenExpr), else: seedExpr(node.elseExpr) };
+    case "MatchExpr":
+      return {
+        kind: "match",
+        arms: node.arms.map((a) => ({ cond: seedExpr(a.cond), value: seedExpr(a.value) })),
+        else: node.elseExpr ? seedExpr(node.elseExpr) : undefined,
+      };
     case "NewExpr":
       return { kind: "new", partType: node.partType.$refText, fields: node.fields.map(seedField) };
     case "ObjectLit":
@@ -122,6 +137,14 @@ export function emitExpr(e: EExpr): string {
     }
     case "lambda":
       return `${e.param} => ${emitExpr(e.body)}`;
+    case "ternary":
+      return `${emitExpr(e.cond)} ? ${emitExpr(e.then)} : ${emitExpr(e.else)}`;
+    case "match": {
+      // Mirrors printMatch: arms newline-joined, optional `else` last.
+      const arms = e.arms.map((a) => `${emitExpr(a.cond)} => ${emitExpr(a.value)}`);
+      if (e.else !== undefined) arms.push(`else => ${emitExpr(e.else)}`);
+      return `match {\n${arms.join("\n")}\n}`;
+    }
     case "new":
       return `new ${e.partType} {${emitFields(e.fields)}}`;
     case "object":
