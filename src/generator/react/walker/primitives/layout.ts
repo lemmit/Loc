@@ -1,16 +1,23 @@
-// Layout primitives: Stack, Group, Grid, Container, Tabs. Each renders
-// a per-pack container and recurses into positional children (Tabs into
-// each Tab's body) via the shared walk helpers.
+// Layout / surface primitives: Stack, Group, Grid, Container, Tabs,
+// Toolbar, Card. Each renders a per-pack container and recurses into
+// positional children (Tabs into each Tab's body, Card into its body)
+// via the shared walk helpers.
 
 import type { ExprIR } from "../../../../ir/loom-ir.js";
 import type { WalkContext } from "../../body-walker.js";
-import { positionalChildren, testidAttr, walk } from "../../body-walker.js";
+import {
+  positionalChildren,
+  renderTextContent,
+  testidAttr,
+  walk,
+} from "../../body-walker.js";
 import { renderPrimitive } from "../context.js";
 import {
   escapeJsxText,
   positionalArgs,
   slugify,
   stringNamed,
+  unwrapTextLiteral,
 } from "../shared/args.js";
 
 export function emitStack(
@@ -136,6 +143,59 @@ export function emitTabs(
     indent: "  ".repeat(depth + 1),
     innerIndent: "  ".repeat(depth + 2),
     closeIndent: "  ".repeat(depth),
+    testidAttr: testidAttr(call, ctx),
+  });
+}
+
+export function emitToolbar(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  // Toolbar(...children) — same children-as-positionals contract
+  // as Group, but with space-between justification (canonical
+  // page-header layout: left-aligned + right-aligned cluster).
+  const children = positionalChildren(call, ctx, depth + 1);
+  const indent = "  ".repeat(depth + 1);
+  const closeIndent = "  ".repeat(depth);
+  return renderPrimitive(ctx, "primitive-toolbar", {
+    hasChildren: children.length > 0,
+    childrenBlock: children.join(`\n${indent}`),
+    indent,
+    closeIndent,
+    testidAttr: testidAttr(call, ctx),
+  });
+}
+
+export function emitCard(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  depth: number,
+): string {
+  // Card("title", content) — first positional title (anything not
+  // a call counts as title); second positional is the body.
+  // Slice 11.10: `Card(child)` (single non-text-like positional)
+  // renders a card with no heading.
+  const positionals = positionalArgs(call);
+  const titleArg = positionals[0];
+  const titleIsTextLike =
+    titleArg !== undefined && titleArg.kind !== "call";
+  const contentExpr: ExprIR | undefined = titleIsTextLike
+    ? positionals[1]
+    : positionals[0];
+  const indent = "  ".repeat(depth + 1);
+  const closeIndent = "  ".repeat(depth);
+  const titleText = titleIsTextLike && titleArg
+    ? unwrapTextLiteral(renderTextContent(titleArg, ctx) ?? '""')
+    : undefined;
+  const contentJsx = contentExpr ? walk(contentExpr, ctx, depth + 1) : undefined;
+  return renderPrimitive(ctx, "primitive-card", {
+    hasTitle: titleText !== undefined,
+    titleText,
+    hasContent: contentJsx !== undefined,
+    contentJsx,
+    indent,
+    closeIndent,
     testidAttr: testidAttr(call, ctx),
   });
 }

@@ -118,11 +118,13 @@ import {
   emitText,
 } from "./walker/primitives/text.js";
 import {
+  emitCard,
   emitContainer,
   emitGrid,
   emitGroup,
   emitStack,
   emitTabs,
+  emitToolbar,
 } from "./walker/primitives/layout.js";
 import {
   emitField,
@@ -883,32 +885,9 @@ export function extendLambdaParams(
 // The Form family (Form(of:)/Form(runs:)/Form(of:,op:)) and the Modal
 // that hosts an operation form live in walker/primitives/forms.ts.
 
-function emitToolbar(
-  call: ExprIR & { kind: "call" },
-  ctx: WalkContext,
-  depth: number,
-): string {
-  // Toolbar(...children) — same children-as-positionals contract
-  // as Group, but with space-between justification (canonical
-  // page-header layout: left-aligned + right-aligned cluster).
-  const children = positionalChildren(call, ctx, depth + 1);
-  const indent = "  ".repeat(depth + 1);
-  const closeIndent = "  ".repeat(depth);
-  return renderPrimitive(ctx, "primitive-toolbar", {
-    hasChildren: children.length > 0,
-    childrenBlock: children.join(`\n${indent}`),
-    indent,
-    closeIndent,
-    testidAttr: testidAttr(call, ctx),
-  });
-}
+// Layout / surface primitives (Stack, Group, Grid, Container, Tabs,
+// Toolbar, Card) live in walker/primitives/layout.ts.
 
-/** Build the dual label representations input primitives need:
- *  `labelAttr` for an `label="..."` JSX attribute (Mantine's
- *  TextInput/Switch take label this way) and `labelText` for a
- *  child-text position (shadcn pairs `<Label>...</Label>` next to
- *  the input).  Both come from the same first-positional content
- *  source. */
 // Controlled input primitives (Field, Toggle, NumberField,
 // PasswordField) live in walker/primitives/inputs.ts.
 
@@ -1335,47 +1314,6 @@ export function testidAttr(
   return "";
 }
 
-function emitCard(
-  call: ExprIR & { kind: "call" },
-  ctx: WalkContext,
-  depth: number,
-): string {
-  // Card("title", content) — first positional title (anything not
-  // a call counts as title); second positional is the body.
-  // Slice 11.10: `Card(child)` (single non-text-like positional)
-  // renders a card with no heading.
-  const positionals = positionalArgs(call);
-  const titleArg = positionals[0];
-  const titleIsTextLike =
-    titleArg !== undefined && titleArg.kind !== "call";
-  const contentExpr: ExprIR | undefined = titleIsTextLike
-    ? positionals[1]
-    : positionals[0];
-  const indent = "  ".repeat(depth + 1);
-  const closeIndent = "  ".repeat(depth);
-  const titleText = titleIsTextLike && titleArg
-    ? unwrapTextLiteral(renderTextContent(titleArg, ctx) ?? '""')
-    : undefined;
-  const contentJsx = contentExpr ? walk(contentExpr, ctx, depth + 1) : undefined;
-  return renderPrimitive(ctx, "primitive-card", {
-    hasTitle: titleText !== undefined,
-    titleText,
-    hasContent: contentJsx !== undefined,
-    contentJsx,
-    indent,
-    closeIndent,
-    testidAttr: testidAttr(call, ctx),
-  });
-}
-
-/** `Modal(trigger: Button(...), title: "…", Form(of: A, op: x))`
- *  — a button that opens a modal hosting an operation form.  For
- *  the Mantine packs the modal chrome is the `@mantine/modals`
- *  manager (`modals.open`), so this primitive emits only the
- *  trigger button wired to the module-scope `open<Op>Modal`
- *  opener; walking the `Form(of:, op:)` child records the
- *  OperationFormState the shell turns into that opener + the
- *  `<Op>Form` component + the page-scope mutation hook. */
 // Leaf display primitives (Stat, Badge, Slot, Divider, Breadcrumbs,
 // Paper, Skeleton, Alert) live in walker/primitives/display.ts.
 
