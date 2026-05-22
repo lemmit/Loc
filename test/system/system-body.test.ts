@@ -60,14 +60,25 @@ describe("System builder — operation/workflow body editing", () => {
     expect(wf[1]).toMatch(/^let order = Order\.create\(\{/);
   });
 
-  it("structures an assignment into target / op / value, others verbatim", () => {
+  it("structures an assignment into target / op / value, preconditions verbatim", () => {
     const views = listStatementViews(parse(sales), confirm)!;
     expect(views[0]).toEqual({ kind: "other", src: "precondition isMutable()" });
     expect(views[2]).toEqual({ kind: "assign", target: "status", op: ":=", value: "Confirmed" });
-    expect(views[3]).toMatchObject({ kind: "other" });
-    // A bare-call workflow statement stays verbatim (no assignment op).
+    // A `let` workflow statement stays a single-expression text row.
     const wf = listStatementViews(parse(sales), placeOrder)!;
     expect(wf[0].kind).toBe("other");
+  });
+
+  it("structures an emit statement into its event + named fields", () => {
+    const views = listStatementViews(parse(sales), confirm)!;
+    expect(views[3]).toEqual({
+      kind: "emit",
+      event: "OrderConfirmed",
+      fields: [
+        { name: "order", value: "id" },
+        { name: "at", value: "now()" },
+      ],
+    });
   });
 
   it("structures a bare call into head + args (incl. a head-only call)", () => {
