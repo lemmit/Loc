@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Box, Text } from "@mantine/core";
+import { Box, Group, Text } from "@mantine/core";
 import { AstUtils } from "langium";
 import type { SerializedNodes } from "@craftjs/core";
 import type { LayoutCtx } from "../layout/ctx";
@@ -8,7 +8,9 @@ import { parseDdd } from "./parse";
 import { spliceNode } from "./edit-engine";
 import { seedFromBody, emitBody, type BuilderNode } from "./page/model";
 import { toCraft, fromCraft } from "./page/serialize";
+import { availableTypes } from "./system/fields";
 import PageBuilder from "./page/PageBuilder";
+import StatePanel from "./page/StatePanel";
 
 // Bridges the craft.js page builder to the `.ddd` source: parses the current
 // source, seeds the canvas from a chosen page's `body:`, and on "Apply"
@@ -21,6 +23,8 @@ interface BodyEntry {
   name: string;
   /** The body expression (its CST range is the splice target). */
   expr: Expression;
+  /** The owning `Page` (absent for `component` bodies) — drives the state editor. */
+  page?: Page;
 }
 
 // Every editable body: a `page`'s `body:` and a `component`'s `body:` both
@@ -30,7 +34,7 @@ function collectBodies(ast: unknown): BodyEntry[] {
   for (const node of AstUtils.streamAst(ast as Parameters<typeof AstUtils.streamAst>[0])) {
     if (node.$type === "Page") {
       const body = (node as Page).props.find((p): p is BodyProp => p.$type === "BodyProp");
-      if (body) out.push({ name: (node as Page).name, expr: body.expr });
+      if (body) out.push({ name: (node as Page).name, expr: body.expr, page: node as Page });
     } else if (node.$type === "Component") {
       out.push({ name: (node as Component).name, expr: (node as Component).body });
     }
@@ -109,6 +113,14 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const operations = useMemo(() => collectOperations(parsed.ast), [parsed]);
   const components = useMemo(() => collectComponents(parsed.ast), [parsed]);
   const componentNames = useMemo(() => [...components.keys()].sort(), [components]);
+  const stateTypes = useMemo(() => availableTypes(parsed.ast), [parsed]);
+
+  // Apply a source-level state edit (splice) and re-seed, like handleApply.
+  const applyState = (next: string | null): void => {
+    if (next == null) return;
+    ctx.onSourceChange(next, "builder");
+    setRev((r) => r + 1);
+  };
 
   const [pageName, setPageName] = useState<string>("");
   const current = pages.find((p) => p.name === pageName) ?? pages[0];
@@ -150,19 +162,28 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   };
 
   return (
-    <PageBuilder
-      key={`${current.name}:${rev}`}
-      initialNodes={initialNodes}
-      pages={pages.map((p) => p.name)}
-      pageName={current.name}
-      options={options}
-      operations={operations}
-      componentNames={componentNames}
-      diagnostics={bodyDiagnostics}
-      onSelectPage={setPageName}
-      onApply={handleApply}
-      compact={!ctx.isDesktop}
-    />
+    <Box style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      {ctx.isDesktop && current.page && (
+        <Group px="xs" py={4} bg="dark.7" gap="xs" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
+          <StatePanel page={current.page} getSource={() => ctx.getSource()} types={stateTypes} onApply={applyState} />
+        </Group>
+      )}
+      <Box style={{ flex: 1, minHeight: 0 }}>
+        <PageBuilder
+          key={`${current.name}:${rev}`}
+          initialNodes={initialNodes}
+          pages={pages.map((p) => p.name)}
+          pageName={current.name}
+          options={options}
+          operations={operations}
+          componentNames={componentNames}
+          diagnostics={bodyDiagnostics}
+          onSelectPage={setPageName}
+          onApply={handleApply}
+          compact={!ctx.isDesktop}
+        />
+      </Box>
+    </Box>
   );
 }
 
