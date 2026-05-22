@@ -355,6 +355,27 @@ test("edits a workflow body's statements", async ({ page }) => {
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
 
+test("adds a construct into the chosen target context", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  // Acme is a multi-context system, so the add-target picker shows.
+  await selectExample(page, /Acme/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  const picker = page.getByTestId("c4system-add-context");
+  await expect(picker).toBeVisible();
+  await picker.click();
+  await page.getByRole("option", { name: "Orders", exact: true }).click();
+
+  const before = await page.locator(".react-flow__node").count();
+  await page.getByTestId("c4system-add-aggregate").click();
+  await expect.poll(async () => page.locator(".react-flow__node").count()).toBe(before + 1);
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+});
+
 test("structures a bare-call workflow statement into head + args", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);

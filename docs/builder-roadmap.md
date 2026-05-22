@@ -380,6 +380,14 @@ Done:
   delete, reconstructing `head(a, b, …)` on commit (empty args dropped). The new
   `call` `StmtView` + detection live in `body.ts`; `CallRow` in `BodyEditor.tsx`.
   Gated by `test/system/system-body.test.ts` + e2e.
+- **Add target context / module picker** — when a system has more than one
+  bounded context (or module), the add toolbar shows an "Add into" picker so a
+  new domain construct lands in the chosen context (and `api` references the
+  chosen module), instead of always the first; repository / view reference an
+  aggregate from that same context. The add path is now a pure, parse-guarded
+  `add.ts` (`addConstructSource` / `addModuleSource` / `listContextNames` /
+  `listModuleNames`), extracted out of the pane. Gated by
+  `test/system/system-add.test.ts` + e2e.
 
 Open:
 
@@ -387,9 +395,6 @@ Open:
   itself. Rebinding by inspector Select already exists for both single-reference
   constructs (`rebind.ts`) and multi-valued deployable references — modules /
   `serves` / ui (`deployable-bindings.ts`).
-- **Add: target context/module picker** — add covers every construct kind
-  (`constructTemplate`, see Editing above) but drops the new node into the first
-  context (domain kinds) / first module (api); no UI yet to pick which.
 - **Nested grouping** (module → context → members as React Flow parent nodes)
   and auto-layout; today it's a deterministic column-per-kind layout.
 

@@ -15,13 +15,14 @@ import "@xyflow/react/dist/style.css";
 import { AstUtils, type AstNode } from "langium";
 import { Box, Button, Checkbox, Drawer, Group, Modal, MultiSelect, NumberInput, ScrollArea, Select, Stack, Text, TextInput, Textarea } from "@mantine/core";
 import type { LayoutCtx } from "../../layout/ctx";
-import type { BoundedContext, Model, System } from "../../../../src/language/generated/ast.js";
+import type { Model } from "../../../../src/language/generated/ast.js";
 import { printStructural } from "../../../../src/language/print/index.js";
 import { parseDdd } from "../parse";
-import { spliceNode, applyEdits, lineDiff } from "../edit-engine";
+import { spliceNode, lineDiff } from "../edit-engine";
 import { buildSystemGraph, coverageByNode, matchNodes, nodeDiagnostics, typeLabel, wireShapeOf, type CoverageStatus, type GraphNode, type NodeKind } from "./model";
 import type { WireField } from "../../../../src/ir/loom-ir.js";
 import { loadPositions, savePositions, type Pos } from "./positions";
+import { addConstructSource, addModuleSource, firstAggregateName, listContextNames } from "./add";
 import { buildLinkedModel } from "./linked-doc";
 import { lowerModel } from "../../../../src/ir/lower.js";
 import { enrichLoomModel } from "../../../../src/ir/enrichments.js";
@@ -167,86 +168,6 @@ function toRfEdges(graph: ReturnType<typeof buildSystemGraph>): Edge[] {
   }));
 }
 
-function freshName(ast: Model, kind: NodeKind, base: string): string {
-  const taken = new Set<string>();
-  for (const n of AstUtils.streamAst(ast)) {
-    const name = (n as { name?: unknown }).name;
-    if (typeof name === "string") taken.add(name);
-  }
-  for (let i = 1; ; i++) {
-    const candidate = `${base}${i}`;
-    if (!taken.has(candidate)) return candidate;
-  }
-}
-
-/** Insert `text` just before the closing brace of `block` (i.e. as its last
- *  child).  `block` must come from parsing `source`. */
-function insertIntoBlock(source: string, block: AstNode, text: string): string {
-  const cst = block.$cstNode;
-  if (!cst) throw new Error("insertIntoBlock: node has no CST");
-  const at = cst.end - 1; // before the trailing `}`
-  return applyEdits(source, [{ offset: at, end: at, newText: text }]);
-}
-
-const CONSTRUCT_BASE: Partial<Record<NodeKind, string>> = {
-  aggregate: "Aggregate",
-  valueobject: "ValueObject",
-  event: "Event",
-  repository: "Repository",
-  view: "View",
-  workflow: "Workflow",
-  api: "Api",
-  storage: "Storage",
-  ui: "Ui",
-  deployable: "Deployable",
-};
-
-// Infra constructs live at system scope; domain constructs live in a context.
-const INFRA_KINDS = new Set<NodeKind>(["api", "storage", "ui", "deployable"]);
-
-function firstNodeName(ast: Model, type: string): string | undefined {
-  for (const n of AstUtils.streamAst(ast)) {
-    if (n.$type === type) return (n as { name?: string }).name;
-  }
-  return undefined;
-}
-const firstAggregateName = (ast: Model): string | undefined => firstNodeName(ast, "Aggregate");
-
-// Minimal-but-valid source for a freshly added construct. Constructs that
-// require a reference (repository/view → an aggregate, api → a module) return
-// null when none exists, so the add is skipped.
-function constructTemplate(kind: NodeKind, name: string, ast: Model): string | null {
-  switch (kind) {
-    case "aggregate":
-      return `\n    aggregate ${name} {\n    }\n`;
-    case "valueobject":
-      return `\n    valueobject ${name} {\n      value: string\n    }\n`;
-    case "event":
-      return `\n    event ${name} {\n    }\n`;
-    case "workflow":
-      return `\n    workflow ${name}() {\n    }\n`;
-    case "repository": {
-      const agg = firstAggregateName(ast);
-      return agg ? `\n    repository ${name} for ${agg} {\n    }\n` : null;
-    }
-    case "view": {
-      const agg = firstAggregateName(ast);
-      return agg ? `\n    view ${name} = ${agg} where true\n` : null;
-    }
-    case "storage":
-      return `\n  storage ${name} {\n    type: postgres\n  }\n`;
-    case "ui":
-      return `\n  ui ${name} {\n  }\n`;
-    case "deployable":
-      return `\n  deployable ${name} {\n    platform: hono\n  }\n`;
-    case "api": {
-      const mod = firstNodeName(ast, "Module");
-      return mod ? `\n  api ${name} from ${mod}\n` : null;
-    }
-    default:
-      return null;
-  }
-}
 
 export default function SystemBuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   return (
@@ -447,7 +368,17 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   }, [nodesInitialized, graph, rf]);
 
   const hasAggregate = useMemo(() => !!firstAggregateName(parsed.ast), [parsed]);
-  const hasModule = useMemo(() => !!firstNodeName(parsed.ast, "Module"), [parsed]);
+  const contextNames = useMemo(() => listContextNames(parsed.ast), [parsed]);
+  const moduleNameList = useMemo(() => moduleNames(parsed.ast), [parsed]);
+  const hasModule = moduleNameList.length > 0;
+  // Add-target picks; null means "first" (the default). Clear a stale pick when
+  // the named context / module no longer exists after an edit.
+  const [addContext, setAddContext] = useState<string | null>(null);
+  const [addModuleName, setAddModuleName] = useState<string | null>(null);
+  useEffect(() => {
+    if (addContext && !contextNames.includes(addContext)) setAddContext(null);
+    if (addModuleName && !moduleNameList.includes(addModuleName)) setAddModuleName(null);
+  }, [contextNames, moduleNameList, addContext, addModuleName]);
   const typeOptions = useMemo(() => availableTypes(parsed.ast), [parsed]);
   const baseByLabel = useMemo(() => {
     const m = new Map<string, BaseSpec>();
@@ -508,29 +439,18 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   };
 
   const addModule = (): void => {
-    const fresh = parseDdd(ctx.getSource());
-    const system = fresh.ast.members.find((m): m is System => m.$type === "System");
-    if (!system) return;
-    const name = freshName(fresh.ast, "module", "Module");
-    const text = `\n  module ${name} {\n    context ${name}Ctx {\n    }\n  }\n`;
-    apply(insertIntoBlock(ctx.getSource(), system, text));
+    const next = addModuleSource(ctx.getSource());
+    if (next != null) apply(next);
   };
 
-  // Add a context-level construct (aggregate / value object / event / repository
-  // / view / workflow) into the first bounded context, from a minimal valid
-  // template. Repository / view need an aggregate to reference, so they're
-  // gated on one existing. The result is parse-guarded before it's applied.
+  // Add a construct into the chosen target context (domain kinds) / module (api),
+  // defaulting to the first when none is picked. Parse-guarded inside `add.ts`.
   const addConstruct = (kind: NodeKind): void => {
-    const fresh = parseDdd(ctx.getSource());
-    const container: AstNode | undefined = INFRA_KINDS.has(kind)
-      ? fresh.ast.members.find((m): m is System => m.$type === "System")
-      : [...AstUtils.streamAst(fresh.ast)].find((n): n is BoundedContext => n.$type === "BoundedContext");
-    if (!container) return;
-    const name = freshName(fresh.ast, kind, CONSTRUCT_BASE[kind] ?? "Node");
-    const text = constructTemplate(kind, name, fresh.ast);
-    if (!text) return;
-    const next = insertIntoBlock(ctx.getSource(), container, text);
-    if (parseDdd(next).parserErrors.length === 0) apply(next);
+    const next = addConstructSource(ctx.getSource(), kind, {
+      context: addContext ?? undefined,
+      module: addModuleName ?? undefined,
+    });
+    if (next != null) apply(next);
   };
 
   const addFieldTo = (): void => {
@@ -748,6 +668,35 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         )}
       </Box>
       <InspectorPanel compact={compact} opened={inspectorOpen} onClose={() => setInspectorOpen(false)}>
+        {(contextNames.length > 1 || moduleNameList.length > 1) && (
+          <Group gap={4} mb={4} wrap="nowrap" align="center">
+            <Text size="xs" c="dimmed">Add into</Text>
+            {contextNames.length > 1 && (
+              <Select
+                size="xs"
+                w={140}
+                data={contextNames}
+                value={addContext ?? contextNames[0]}
+                allowDeselect={false}
+                data-testid="c4system-add-context"
+                aria-label="target context"
+                onChange={setAddContext}
+              />
+            )}
+            {moduleNameList.length > 1 && (
+              <Select
+                size="xs"
+                w={120}
+                data={moduleNameList}
+                value={addModuleName ?? moduleNameList[0]}
+                allowDeselect={false}
+                data-testid="c4system-add-module-target"
+                aria-label="api source module"
+                onChange={setAddModuleName}
+              />
+            )}
+          </Group>
+        )}
         <Group gap={4} mb="xs">
           <Button size="compact-xs" variant="light" data-testid="c4system-add-module" onClick={addModule}>+ Module</Button>
           <Button size="compact-xs" variant="light" data-testid="c4system-add-aggregate" onClick={() => addConstruct("aggregate")}>+ Aggregate</Button>
