@@ -75,6 +75,26 @@ interface PgliteHandle {
   close?: () => Promise<void>;
 }
 
+// PGlite/Postgres can reject with a plain object (a serialized
+// protocol error: `{ message, severity, code, … }`) rather than an
+// `Error`.  The naive `String(err)` then prints "[object Object]",
+// hiding the only useful detail.  Dig out a real message, falling
+// back to a JSON dump so nothing is ever swallowed.
+function errText(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  if (err && typeof err === "object") {
+    const msg = (err as { message?: unknown }).message;
+    if (typeof msg === "string" && msg.length > 0) return msg;
+    try {
+      return JSON.stringify(err);
+    } catch {
+      /* circular / non-serialisable — fall through */
+    }
+  }
+  return String(err);
+}
+
 let cachedPgliteWasm: WebAssembly.Module | null = null;
 let cachedInitdbWasm: WebAssembly.Module | null = null;
 let cachedFsBundle: Blob | null = null;
@@ -149,7 +169,11 @@ async function tearDownState(): Promise<void> {
   state = null;
 }
 
-async function boot(bundleCode: string, dataDir?: string): Promise<BootResult> {
+async function boot(
+  bundleCode: string,
+  dataDir?: string,
+  fresh = false,
+): Promise<BootResult> {
   const start = performance.now();
   // Tear down a previous boot if present (close PGlite + revoke its
   // bundle URL).
@@ -164,7 +188,7 @@ async function boot(bundleCode: string, dataDir?: string): Promise<BootResult> {
     URL.revokeObjectURL(url);
     return {
       ok: false,
-      message: `Bundle import failed: ${err instanceof Error ? err.message : String(err)}`,
+      message: `Bundle import failed: ${errText(err)}`,
     };
   }
   // Keep the blob URL alive for the lifetime of the module — some
@@ -197,8 +221,28 @@ async function boot(bundleCode: string, dataDir?: string): Promise<BootResult> {
   } catch (err) {
     return {
       ok: false,
-      message: `PGlite boot failed: ${err instanceof Error ? err.message : String(err)}`,
+      message: `PGlite boot failed: ${errText(err)}`,
     };
+  }
+
+  // Recovery path: a persistent island whose stored data is
+  // incompatible with the current schema can fail every boot, and the
+  // normal Reset is unreachable without a booted instance.  `fresh`
+  // wipes both the user schema and our bookkeeping schema here — after
+  // PGlite has opened cleanly but before any DDL — so the subsequent
+  // apply starts from a blank database.
+  if (fresh) {
+    try {
+      await pglite.exec(
+        "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public; " +
+          "DROP SCHEMA IF EXISTS __loom CASCADE;",
+      );
+    } catch (err) {
+      return {
+        ok: false,
+        message: `Reset of stored data failed: ${errText(err)}`,
+      };
+    }
   }
 
   let ddl: string;
@@ -211,7 +255,7 @@ async function boot(bundleCode: string, dataDir?: string): Promise<BootResult> {
   } catch (err) {
     return {
       ok: false,
-      message: `DDL synth failed: ${err instanceof Error ? err.message : String(err)}`,
+      message: `DDL synth failed: ${errText(err)}`,
     };
   }
 
@@ -221,7 +265,7 @@ async function boot(bundleCode: string, dataDir?: string): Promise<BootResult> {
   } catch (err) {
     return {
       ok: false,
-      message: `DDL execution failed: ${err instanceof Error ? err.message : String(err)}\n--- DDL ---\n${ddl}`,
+      message: `DDL execution failed: ${errText(err)}\n--- DDL ---\n${ddl}`,
     };
   }
 
@@ -232,7 +276,7 @@ async function boot(bundleCode: string, dataDir?: string): Promise<BootResult> {
   } catch (err) {
     return {
       ok: false,
-      message: `createApp failed: ${err instanceof Error ? err.message : String(err)}`,
+      message: `createApp failed: ${errText(err)}`,
     };
   }
 
@@ -364,7 +408,7 @@ async function dispatch(req: SerializedRequest): Promise<DispatchResult> {
   } catch (err) {
     return {
       ok: false,
-      message: err instanceof Error ? err.message : String(err),
+      message: errText(err),
     };
   }
 }
@@ -397,7 +441,7 @@ async function query(sql: string): Promise<QueryResult> {
   } catch (err) {
     return {
       ok: false,
-      message: err instanceof Error ? err.message : String(err),
+      message: errText(err),
     };
   } finally {
     if (timeoutId !== null) clearTimeout(timeoutId);
@@ -435,7 +479,7 @@ async function wipe(): Promise<{ ok: boolean; message?: string }> {
   } catch (err) {
     return {
       ok: false,
-      message: err instanceof Error ? err.message : String(err),
+      message: errText(err),
     };
   }
 }
@@ -448,7 +492,11 @@ self.onmessage = async (ev: MessageEvent<RuntimeRpcRequest>) => {
   try {
     switch (req.method) {
       case "boot":
-        response.result = await boot(req.params.bundleCode, req.params.dataDir);
+        response.result = await boot(
+          req.params.bundleCode,
+          req.params.dataDir,
+          req.params.fresh,
+        );
         break;
       case "dispatch":
         response.result = await dispatch(req.params);
@@ -475,7 +523,7 @@ self.onmessage = async (ev: MessageEvent<RuntimeRpcRequest>) => {
       text: err instanceof Error ? (err.stack ?? err.message) : String(err),
     });
     response.error = {
-      message: err instanceof Error ? err.message : String(err),
+      message: errText(err),
     };
   } finally {
     restore();

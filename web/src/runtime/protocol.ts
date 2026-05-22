@@ -37,6 +37,12 @@ export interface BootRequest {
    *  `opfs-ahp://loom-<source-hash>`) give each `.ddd` its own
    *  data island. */
   dataDir?: string;
+  /** Recovery escape hatch: drop the persistent DB's `public` +
+   *  `__loom` schemas right after opening PGlite, before applying
+   *  DDL.  Lets the user recover from a boot that fails on stale /
+   *  incompatible persisted data — the normal Reset needs a booted
+   *  instance, which a failing boot never produces. */
+  fresh?: boolean;
 }
 
 export interface BootOk {

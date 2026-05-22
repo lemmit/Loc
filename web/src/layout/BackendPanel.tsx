@@ -71,6 +71,7 @@ export function BackendBody({ ctx }: Props): JSX.Element {
     honoBundle,
     runDispatch,
     runWipe,
+    runResetData,
     runQuery,
     apiEndpoints,
     selectedOpId,
@@ -109,9 +110,28 @@ export function BackendBody({ ctx }: Props): JSX.Element {
   return (
     <Box style={{ flex: 1, minHeight: 0, overflow: "auto" }} p="xs">
       {bootErrorMessage && (
-        <Code block c="red" mb="xs" style={{ whiteSpace: "pre-wrap", fontSize: 11 }}>
-          {bootErrorMessage}
-        </Code>
+        <Stack gap={6} mb="xs">
+          <Code block c="red" style={{ whiteSpace: "pre-wrap", fontSize: 11 }} data-testid="boot-error">
+            {bootErrorMessage}
+          </Code>
+          {honoBundle && (
+            <Group gap={6} align="center">
+              <Button
+                size="xs"
+                variant="default"
+                color="red"
+                onClick={runResetData}
+                loading={pipeline.booting}
+                data-testid="btn-reset-data"
+              >
+                Clear stored data &amp; retry
+              </Button>
+              <Text size="xs" c="dimmed">
+                If the boot fails on stale persisted data, this drops the saved database and reboots clean.
+              </Text>
+            </Group>
+          )}
+        </Stack>
       )}
       {ddl ? (
         <Stack gap={8}>

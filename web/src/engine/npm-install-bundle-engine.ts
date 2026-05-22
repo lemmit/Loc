@@ -238,8 +238,12 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
 
   // boot/dispatch/wipe/reset/respawn delegate to the shared
   // PGlite+Hono runtime client.
-  async boot(bundleCode: string, dataDir?: string): Promise<BootResult> {
-    const res = await this.rt().boot({ bundleCode, dataDir });
+  async boot(
+    bundleCode: string,
+    dataDir?: string,
+    opts?: { fresh?: boolean },
+  ): Promise<BootResult> {
+    const res = await this.rt().boot({ bundleCode, dataDir, fresh: opts?.fresh });
     if (res.ok) this.lastBoot = { bundleCode, dataDir, persistent: res.persistent };
     return res;
   }
