@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState, type ComponentType } from "react";
 import { Editor, Frame, useEditor, type SerializedNodes } from "@craftjs/core";
-import { Box, Button, Drawer, Group, NumberInput, ScrollArea, Select, Stack, Text, TextInput, Textarea, UnstyledButton } from "@mantine/core";
+import { Box, Button, Drawer, Group, NumberInput, ScrollArea, Select, Stack, Switch, Text, TextInput, Textarea, UnstyledButton } from "@mantine/core";
+
+// Mantine palette names offered in the `color`-kind dropdown (the current value
+// is always included too, so custom colours round-trip).
+const PALETTE = ["blue", "red", "green", "yellow", "grape", "teal", "gray", "orange", "cyan", "pink", "violet", "indigo", "lime"];
 import { resolver, resolverWithComponents } from "./components";
 import { PALETTE_PRIMITIVES, SINGLE_CHILD_NODES, defaultNode, propFields, syntheticDefaultProps, type PrimitiveName } from "./model";
 import { parseDdd } from "../parse";
@@ -285,8 +289,32 @@ function SettingsContent({ options, operations = {} }: { options: Record<string,
         </Text>
       )}
       {id && fields.map((f) =>
-        f.kind === "text" ? (
+        f.kind === "color" ? (
+          <Select
+            key={f.key}
+            size="xs"
+            mb="xs"
+            label={f.key}
+            clearable
+            searchable
+            data={[...new Set([...PALETTE, props[f.key]].filter(Boolean) as string[])]}
+            value={props[f.key] != null ? String(props[f.key]) : null}
+            data-testid={`c4builder-prop-${f.key}`}
+            onChange={(v) => set(f.key, v || undefined)}
+          />
+        ) : f.kind === "text" ? (
           <TextField key={f.key} label={f.key} value={String(props[f.key] ?? "")} onChange={(v) => set(f.key, v)} />
+        ) : f.kind === "expr" && (props[f.key] === "true" || props[f.key] === "false") ? (
+          // A boolean-valued modifier (e.g. `striped: true`) edits as a switch.
+          <Switch
+            key={f.key}
+            size="xs"
+            mb="xs"
+            label={f.key}
+            checked={props[f.key] === "true"}
+            data-testid={`c4builder-prop-${f.key}`}
+            onChange={(e) => set(f.key, e.currentTarget.checked ? "true" : "false")}
+          />
         ) : f.kind === "expr" ? (
           <Textarea
             key={f.key}
