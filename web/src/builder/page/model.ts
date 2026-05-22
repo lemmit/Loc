@@ -279,13 +279,20 @@ function seedCall(name: string, spec: PrimitiveSpec, args: CallArg[], components
         child.slot = a.name;
         children.push(child);
         order.push(CHILD_TOKEN);
+      } else if (a.value.$type === "Lambda" || a.value.$type === "MatchExpr") {
+        // An unknown named arg whose value is a lambda/match (e.g. an event
+        // handler `onClick: e => { … }`) becomes a slot child — an editable
+        // Lambda/Match node (with the statement-row editor for block bodies) —
+        // rather than a raw passthrough string.
+        const child = seedFromBody(a.value, components);
+        child.slot = a.name;
+        children.push(child);
+        order.push(CHILD_TOKEN);
       } else {
-        // Unknown named arg → keep it as a passthrough prop (preserved verbatim,
-        // editable as a generic expr field) rather than collapsing the whole
-        // node to Opaque.  This is what lets the many optional modifiers a
-        // primitive accepts (`testid:`, `striped:`, `gap:`, …) round-trip — and
-        // an event-handler lambda (`onClick: e => { … }`) keeps the carrying
-        // primitive recognised, with the handler editable as raw source.
+        // Any other unknown named arg → keep it as a passthrough prop (preserved
+        // verbatim, editable as a generic expr field) rather than collapsing the
+        // whole node to Opaque.  Lets the many optional modifiers a primitive
+        // accepts (`testid:`, `striped:`, `gap:`, …) round-trip.
         props[a.name] = printExpr(a.value);
         order.push(a.name);
       }

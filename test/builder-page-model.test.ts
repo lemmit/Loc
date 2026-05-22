@@ -283,11 +283,14 @@ describe("page-builder model — container-with-props seed shape", () => {
     expect(node.props.text).toBe('"Hello, " + userName');
   });
 
-  it("keeps an event-handler lambda as a passthrough prop (not Opaque)", () => {
+  it("models an event-handler lambda as an editable slot child", () => {
     const node = seed('Button("Increment", onClick: e => { count := count + 1 })');
     expect(node.name).toBe("Button");
     expect(node.props.label).toBe('"Increment"');
-    expect(String(node.props.onClick)).toContain("=>");
+    const handler = node.children.find((c) => c.slot === "onClick")!;
+    expect(handler.name).toBe("Lambda");
+    expect(handler.props.__block).toBe("1");
+    expect(handler.children.map((c) => c.props.src)).toEqual(["count := count + 1"]);
   });
 
   it("models a block-handler lambda slot as editable statement rows", () => {

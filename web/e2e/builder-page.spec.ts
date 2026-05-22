@@ -218,6 +218,42 @@ test("adds a match arm from the canvas and writes it back to source", async ({ p
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
 
+const BUTTON_HANDLER_SOURCE = `system S {
+  ui U {
+    page P {
+      body: Button("Save", onClick: e => {
+        save(e)
+      })
+    }
+  }
+}`;
+
+test("a Button's onClick handler is an editable nested lambda", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.evaluate((t) => navigator.clipboard.writeText(t), BUTTON_HANDLER_SOURCE);
+  await page.getByTestId("doc-tab-source").click();
+  const editor = page.locator(".monaco-editor").first();
+  await editor.click();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.press("Control+v");
+
+  await page.getByTestId("doc-tab-builder").click();
+  await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
+
+  // The Button is recognised; its onClick handler renders as a nested Lambda
+  // with an editable statement row (not a raw passthrough string).
+  await expect(page.getByTestId("c4node-Button").first()).toBeVisible();
+  await expect(page.getByTestId("c4node-Lambda").first()).toBeVisible();
+  await expect(page.getByTestId("c4node-Stmt").first()).toContainText("save(e)");
+
+  await page.getByTestId("c4builder-apply").click();
+  await expect(page.getByTestId("c4node-Stmt").first()).toContainText("save(e)");
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+});
+
 const HANDLER_SOURCE = `system S {
   ui U {
     page P {
