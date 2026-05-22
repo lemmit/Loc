@@ -144,7 +144,7 @@ export function MobileShell({ ctx }: Props): JSX.Element {
             <Box>Output</Box>
           </Indicator>
         </Tabs.Tab>
-        <Tabs.Tab value="backend" data-testid="mobile-tab-backend">Backend</Tabs.Tab>
+        <Tabs.Tab value="backend" data-testid="mobile-tab-backend">Runtime</Tabs.Tab>
         <Tabs.Tab value="tests" data-testid="mobile-tab-tests">Tests</Tabs.Tab>
       </Tabs.List>
     </Tabs>

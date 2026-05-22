@@ -14,6 +14,7 @@ import { LoomRuntimeClient } from "../runtime/client.js";
 import type {
   BootResult,
   DispatchResult,
+  QueryResult,
   SerializedRequest,
   WipeResult,
 } from "../runtime/protocol.js";
@@ -244,6 +245,9 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
   }
   dispatch(req: SerializedRequest): Promise<DispatchResult> {
     return this.rt().dispatch(req);
+  }
+  query(sql: string): Promise<QueryResult> {
+    return this.rt().query(sql);
   }
   wipe(): Promise<WipeResult> {
     return this.rt().wipe();

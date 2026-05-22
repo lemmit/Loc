@@ -2,6 +2,7 @@ import type {
   BootRequest,
   BootResult,
   DispatchResult,
+  QueryResult,
   RuntimeRpcRequest,
   RuntimeRpcResponse,
   SerializedRequest,
@@ -81,6 +82,14 @@ export class LoomRuntimeClient {
     return this.send<DispatchResult>({
       method: "dispatch",
       params: req,
+    });
+  }
+
+  /** Run one SQL statement against the booted PGlite (Database console). */
+  query(sql: string): Promise<QueryResult> {
+    return this.send<QueryResult>({
+      method: "query",
+      params: { sql },
     });
   }
 

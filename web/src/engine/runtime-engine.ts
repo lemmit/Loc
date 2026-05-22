@@ -23,6 +23,7 @@ import type { BundleResult } from "../bundle/protocol.js";
 import type {
   BootResult,
   DispatchResult,
+  QueryResult,
   SerializedRequest,
   WipeResult,
 } from "../runtime/protocol.js";
@@ -118,6 +119,10 @@ export interface RuntimeEngine extends RuntimeDispatcher {
 
   /** Serve one backend HTTP request against the booted instance. */
   dispatch(req: SerializedRequest): Promise<DispatchResult>;
+
+  /** Run one SQL statement against the booted database (Database
+   *  console).  Engines without a DB reject with a clear message. */
+  query(sql: string): Promise<QueryResult>;
 
   /** Drop user data, re-apply idempotent schema. */
   wipe(): Promise<WipeResult>;

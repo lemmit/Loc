@@ -6,6 +6,7 @@ import { formatLogArg, LOG_LEVELS, type LogLine } from "../util/log-line.js";
 import type {
   BootResult,
   DispatchResult,
+  QueryResult,
   RuntimeRpcRequest,
   RuntimeRpcResponse,
   SerializedRequest,
@@ -66,7 +67,11 @@ interface PgliteHandle {
   query: (
     sql: string,
     params?: unknown[],
-  ) => Promise<{ rows: Array<Record<string, unknown>> }>;
+  ) => Promise<{
+    rows: Array<Record<string, unknown>>;
+    fields?: Array<{ name: string; dataTypeID: number }>;
+    affectedRows?: number;
+  }>;
   close?: () => Promise<void>;
 }
 
@@ -364,6 +369,41 @@ async function dispatch(req: SerializedRequest): Promise<DispatchResult> {
   }
 }
 
+// Run an arbitrary SQL statement against the booted PGlite for the
+// Database console.  Single-statement (PGlite's `query` runs one
+// parameterless statement) — enough for SELECT browsing and ad-hoc
+// INSERT/UPDATE/DELETE.  The same timeout race as `dispatch` guards
+// against a runaway query wedging the worker.
+async function query(sql: string): Promise<QueryResult> {
+  if (!state) {
+    return { ok: false, message: "Runtime not booted — boot first." };
+  }
+  const start = performance.now();
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  try {
+    const timeoutPromise = new Promise<never>((_resolve, reject) => {
+      timeoutId = setTimeout(() => {
+        reject(new Error(`query timed out after ${DEFAULT_DISPATCH_TIMEOUT_MS} ms`));
+      }, DEFAULT_DISPATCH_TIMEOUT_MS);
+    });
+    const res = await Promise.race([state.pglite.query(sql), timeoutPromise]);
+    return {
+      ok: true,
+      fields: (res.fields ?? []).map((f) => f.name),
+      rows: res.rows ?? [],
+      affectedRows: res.affectedRows ?? 0,
+      durationMs: Math.round(performance.now() - start),
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      message: err instanceof Error ? err.message : String(err),
+    };
+  } finally {
+    if (timeoutId !== null) clearTimeout(timeoutId);
+  }
+}
+
 async function reset(): Promise<{ ok: true }> {
   await tearDownState();
   return { ok: true };
@@ -412,6 +452,9 @@ self.onmessage = async (ev: MessageEvent<RuntimeRpcRequest>) => {
         break;
       case "dispatch":
         response.result = await dispatch(req.params);
+        break;
+      case "query":
+        response.result = await query(req.params.sql);
         break;
       case "reset":
         response.result = await reset();
