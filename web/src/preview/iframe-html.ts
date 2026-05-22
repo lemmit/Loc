@@ -39,6 +39,11 @@ const RUNTIME_FETCH_SHIM = `
   port.onmessage = function (ev) {
     var r = ev.data;
     if (!r || typeof r.rid !== "number") return;
+    // The port multiplexes other channels (driver ops are tagged
+    // kind:"driver", reload kind:"reload").  Fetch replies carry no kind;
+    // ignore tagged messages so a driver request's rid — a separate
+    // counter — can't collide with an in-flight fetch's pending slot.
+    if (r.kind) return;
     var slot = pending[r.rid];
     if (!slot) return;
     delete pending[r.rid];

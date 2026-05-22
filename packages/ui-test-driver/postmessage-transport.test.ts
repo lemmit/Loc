@@ -63,6 +63,33 @@ describe("postMessage transport ↔ serveDriverOps over a MessageChannel", () =>
     ).rejects.toThrow(/locator\(getByTestId\("missing"\)\): no element matched/);
   });
 
+  it("ignores kind-tagged messages that share a rid (no runtime-channel cross-talk)", async () => {
+    // The driver shares the port with the runtime fetch bridge, whose
+    // forwards are tagged kind:"runtime" and use an independent rid
+    // counter. A colliding rid must NOT resolve a pending driver op.
+    const channel = new MessageChannel();
+    const transport = makePostMessageTransport(channel.port1, {
+      timeout: 2000,
+    });
+    // First op → rid 1.
+    const pending = transport.send({
+      kind: "locator",
+      op: "innerText",
+      chain: [{ k: "getByTestId", id: "x" }],
+    });
+    let settled = false;
+    void pending.then(() => {
+      settled = true;
+    });
+    // A runtime forward with the SAME rid arrives — must be ignored.
+    channel.port2.postMessage({ rid: 1, kind: "runtime", method: "GET", url: "/x" });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(settled).toBe(false);
+    // The genuine (untagged) driver reply resolves it.
+    channel.port2.postMessage({ rid: 1, ok: true, value: "real" });
+    expect(await pending).toEqual({ ok: true, value: "real" });
+  });
+
   it("reports the sandbox URL through the cached currentUrl()", async () => {
     const channel = new MessageChannel();
     serveDriverOps(channel.port2, document, { timeout: 500 });
