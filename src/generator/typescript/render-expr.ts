@@ -1,4 +1,4 @@
-import type { BinOp, ExprIR, TypeIR } from "../../ir/loom-ir.js";
+import type { BinOp, ExprIR, LiteralKind, TypeIR } from "../../ir/loom-ir.js";
 import { camel } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
@@ -80,10 +80,7 @@ export function renderTsExpr(e: ExprIR, ctx: TsRenderContext = DEFAULT): string 
   }
 }
 
-function renderLiteral(
-  lit: (ExprIR & { kind: "literal" }["lit" extends never ? never : never]) | string,
-  value: string,
-): string {
+function renderLiteral(lit: LiteralKind, value: string): string {
   if (lit === "string") return JSON.stringify(value);
   if (lit === "now") return "new Date()";
   if (lit === "null") return "null";
