@@ -20,22 +20,16 @@
 // primitives (Stack / Form / Heading / etc.) so a typo never
 // silently overrides the primitive.
 
-import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
-import { createDddServices } from "../../src/language/ddd-module.js";
-import type { Model } from "../../src/language/generated/ast.js";
 import { generateSystems } from "../../src/system/index.js";
+import { parseString } from "../_helpers/index.js";
 
 async function parse(src: string): Promise<{
   files: Map<string, string>;
   diagnostics: ReadonlyArray<{ severity?: number; message: string }>;
 }> {
-  const services = createDddServices(NodeFileSystem);
-  const { parseHelper } = await import("langium/test");
-  const helper = parseHelper(services.Ddd);
-  const doc = await helper(src, { validation: true });
-  const files = generateSystems(doc.parseResult.value as Model).files;
-  return { files, diagnostics: doc.diagnostics ?? [] };
+  const { model, diagnostics } = await parseString(src);
+  return { files: generateSystems(model).files, diagnostics };
 }
 
 describe("Slice A6 — UI-level helper imports", () => {

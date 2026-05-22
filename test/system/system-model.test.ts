@@ -16,6 +16,7 @@ import {
   typeLabel,
   wireShapeOf,
 } from "../../web/src/builder/system/model.js";
+import { parseRaw as parse } from "../_helpers/index.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const sales = readFileSync(path.join(here, "..", "..", "examples", "sales.ddd"), "utf8");
@@ -23,9 +24,6 @@ const salesSystem = readFileSync(
   path.join(here, "..", "..", "web", "src", "examples", "sales-system.ddd"),
   "utf8",
 );
-
-const parser = createDddServices(EmptyFileSystem).Ddd.parser.LangiumParser;
-const parse = (t: string): Model => parser.parse(t).value as Model;
 
 // A fully-linked model (cross-refs resolved), mirroring the builder's
 // `buildLinkedModel` so `entitles`/`covers` lower correctly.
@@ -158,7 +156,9 @@ describe("System graph — wire shape (DTO) preview", () => {
     expect(typeLabel({ kind: "array", element: { kind: "valueobject", name: "Money" } })).toBe(
       "Money[]",
     );
-    expect(typeLabel({ kind: "optional", inner: { kind: "enum", name: "Status" } })).toBe("Status?");
+    expect(typeLabel({ kind: "optional", inner: { kind: "enum", name: "Status" } })).toBe(
+      "Status?",
+    );
     expect(typeLabel({ kind: "id", targetName: "Order", valueType: "uuid" })).toBe("Id<Order>");
   });
 

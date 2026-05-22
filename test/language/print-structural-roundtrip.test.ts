@@ -1,11 +1,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { EmptyFileSystem } from "langium";
 import { describe, expect, it } from "vitest";
-import { createDddServices } from "../../src/language/ddd-module.js";
 import type { Model } from "../../src/language/generated/ast.js";
 import { printStructural } from "../../src/language/print/index.js";
+import { parseRawResult } from "../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
 // Round-trip safety net for the structural `.ddd` printer (System/Model
@@ -20,7 +19,6 @@ import { printStructural } from "../../src/language/print/index.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..", "..");
-const parser = createDddServices(EmptyFileSystem).Ddd.parser.LangiumParser;
 
 // Comparable projection of an AST: keep `$type`, own non-`$` fields, and
 // references as `{ $ref }`; drop positions / containers / documents.
@@ -52,7 +50,7 @@ describe("print-structural round-trip", () => {
   for (const file of collectDddFiles()) {
     const rel = path.relative(repoRoot, file);
     const text = fs.readFileSync(file, "utf8");
-    const original = parser.parse(text);
+    const original = parseRawResult(text);
 
     if (original.parserErrors.length > 0) {
       it.skip(`round-trips every top-level member in ${rel} (fragment — not a complete model)`, () => {});
@@ -67,7 +65,7 @@ describe("print-structural round-trip", () => {
         if (!cst) continue;
         const printed = printStructural(member);
         const spliced = text.slice(0, cst.offset) + printed + text.slice(cst.end);
-        const re = parser.parse(spliced);
+        const re = parseRawResult(spliced);
         expect(re.parserErrors, `printed member must parse:\n${printed}`).toEqual([]);
         expect(norm(re.value), `printed member must round-trip:\n${printed}`).toEqual(normOrig);
       }

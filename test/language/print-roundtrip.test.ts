@@ -1,11 +1,11 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { type AstNode, AstUtils, EmptyFileSystem } from "langium";
+import { type AstNode, AstUtils } from "langium";
 import { describe, expect, it } from "vitest";
-import { createDddServices } from "../../src/language/ddd-module.js";
 import type { Expression } from "../../src/language/generated/ast.js";
 import { printExpr } from "../../src/language/print/index.js";
+import { parseRawResult } from "../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
 // Round-trip safety net for the `.ddd` expression printer (Builders, Phase 0).
@@ -19,7 +19,6 @@ import { printExpr } from "../../src/language/print/index.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..", "..");
-const parser = createDddServices(EmptyFileSystem).Ddd.parser.LangiumParser;
 
 const EXPR_TYPES = new Set<string>([
   "MatchExpr",
@@ -83,7 +82,7 @@ describe("print-expr round-trip", () => {
   for (const file of collectDddFiles()) {
     const rel = path.relative(repoRoot, file);
     const text = fs.readFileSync(file, "utf8");
-    const original = parser.parse(text);
+    const original = parseRawResult(text);
 
     // Some examples are doc fragments (e.g. a bare top-level `ui` block) that
     // aren't complete `Model`s; they aren't valid pipeline input, so skip
@@ -106,7 +105,7 @@ describe("print-expr round-trip", () => {
         if (!cst) continue;
         const printed = printExpr(expr);
         const spliced = text.slice(0, cst.offset) + printed + text.slice(cst.end);
-        const re = parser.parse(spliced);
+        const re = parseRawResult(spliced);
         expect(re.parserErrors, `printed expression must parse:\n${printed}`).toEqual([]);
         expect(norm(re.value), `printed expression must round-trip:\n${printed}`).toEqual(normOrig);
       }

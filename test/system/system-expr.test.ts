@@ -1,9 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { EmptyFileSystem } from "langium";
 import { describe, expect, it } from "vitest";
-import { createDddServices } from "../../src/language/ddd-module.js";
 import type {
   Aggregate,
   Model,
@@ -27,12 +25,11 @@ import {
   viewSlotOptions,
   workflowSlotOptions,
 } from "../../web/src/builder/system/expr-slots.js";
+import { parseRaw as parse } from "../_helpers/index.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const sales = readFileSync(path.join(here, "..", "..", "examples", "sales.ddd"), "utf8");
 
-const parser = createDddServices(EmptyFileSystem).Ddd.parser.LangiumParser;
-const parse = (t: string): Model => parser.parse(t).value as Model;
 function owner<T>(m: Model, type: string, name: string): T {
   for (const n of walk(m))
     if (n.$type === type && (n as { name?: string }).name === name) return n as T;

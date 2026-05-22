@@ -1,9 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { EmptyFileSystem } from "langium";
 import { describe, expect, it } from "vitest";
-import { createDddServices } from "../../src/language/ddd-module.js";
 import type { AstNode, Model } from "../../src/language/generated/ast.js";
 import {
   currentTarget,
@@ -11,14 +9,13 @@ import {
   rebindReference,
   rebindTargets,
 } from "../../web/src/builder/system/rebind.js";
+import { parseRaw as parse } from "../_helpers/index.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const read = (rel: string): string => readFileSync(path.join(here, "..", "..", rel), "utf8");
 const sales = read("examples/sales.ddd");
 const acme = read("examples/acme.ddd");
 
-const parser = createDddServices(EmptyFileSystem).Ddd.parser.LangiumParser;
-const parse = (t: string): Model => parser.parse(t).value as Model;
 function find(m: Model, type: string, name: string): AstNode {
   for (const n of walk(m))
     if (n.$type === type && (n as { name?: string }).name === name) return n as AstNode;
