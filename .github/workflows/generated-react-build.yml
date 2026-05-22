@@ -22,7 +22,7 @@ on:
       - 'vite/**'
       - 'api/**'
       - 'docker/**'
-      - 'test/generated-react-build.test.ts'
+      - 'test/e2e/generated-react-build.test.ts'
       - 'package.json'
       - 'package-lock.json'
       - 'langium-config.json'
@@ -37,7 +37,7 @@ on:
       - 'vite/**'
       - 'api/**'
       - 'docker/**'
-      - 'test/generated-react-build.test.ts'
+      - 'test/e2e/generated-react-build.test.ts'
       - 'package.json'
       - 'package-lock.json'
       - 'langium-config.json'
@@ -95,4 +95,4 @@ jobs:
       - name: Run tsc-react shard
         env:
           LOOM_REACT_BUILD_CASE: ${{ matrix.example }}:${{ matrix.pack }}
-        run: npx vitest run test/generated-react-build.test.ts
+        run: npx vitest run test/e2e/generated-react-build.test.ts

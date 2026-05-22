@@ -12,7 +12,7 @@
       "scripts/**/*.mjs",
       "!src/language/generated",
       "!test/fixtures",
-      "!test/__snapshots__",
+      "!**/__snapshots__",
       "!**/*.d.ts"
     ]
   },

@@ -1,0 +1,138 @@
+import { NodeFileSystem } from "langium/node";
+import { expectHover } from "langium/test";
+import { describe, expect, it } from "vitest";
+import { createDddServices } from "../../src/language/ddd-module.js";
+
+// ---------------------------------------------------------------------------
+// Hover-provider tests.  Each test places `<|>` markers in a small `.ddd`
+// fixture and asserts the hover bubble's content (matched as a regex).
+// ---------------------------------------------------------------------------
+
+const services = createDddServices(NodeFileSystem).Ddd;
+const expectHoverFor = expectHover(services);
+
+describe("DddHoverProvider", () => {
+  it("hovers an aggregate header with idKind + member counts", async () => {
+    await expectHoverFor({
+      text: `
+        context Sales {
+          aggregate <|>Order ids guid {
+            customerId: string
+          }
+        }`,
+      index: 0,
+      hover: /aggregate Order ids guid[\s\S]*1 propert/,
+    });
+  });
+
+  it("hovers a property and shows its type", async () => {
+    await expectHoverFor({
+      text: `
+        context Sales {
+          aggregate Order {
+            <|>customerId: string
+          }
+        }`,
+      index: 0,
+      hover: /customerId: string/,
+    });
+  });
+
+  it("hovers a containment and shows the part with collection marker", async () => {
+    await expectHoverFor({
+      text: `
+        context Sales {
+          aggregate Order {
+            entity OrderLine {
+              qty: int
+            }
+            contains <|>lines: OrderLine[]
+          }
+        }`,
+      index: 0,
+      hover: /contains lines: OrderLine\[\]/,
+    });
+  });
+
+  it("hovers a value-object name with property count", async () => {
+    await expectHoverFor({
+      text: `
+        context Sales {
+          valueobject <|>Money {
+            amount: decimal
+            currency: string
+          }
+        }`,
+      index: 0,
+      hover: /valueobject Money[\s\S]*2 properties/,
+    });
+  });
+
+  it("hovers an enum and lists its values", async () => {
+    await expectHoverFor({
+      text: `
+        context Sales {
+          enum <|>Status { Open, Closed }
+        }`,
+      index: 0,
+      hover: /enum Status[\s\S]*Open, Closed/,
+    });
+  });
+
+  it("hovers a cross-reference target via Id<X>", async () => {
+    // The cursor sits on the cross-reference target identifier `Order`
+    // inside `Id<Order>`.  AstNodeHoverProvider resolves the ref to the
+    // Aggregate declaration, so we get the aggregate hover content.
+    await expectHoverFor({
+      text: `
+        context Sales {
+          aggregate Order {
+            customerId: string
+          }
+          aggregate Customer {
+            primaryOrder: Id<<|>Order>
+          }
+        }`,
+      index: 0,
+      hover: /aggregate Order/,
+    });
+  });
+
+  it("hovers an entity-part declaration with enclosing aggregate", async () => {
+    await expectHoverFor({
+      text: `
+        context Sales {
+          aggregate Order {
+            entity <|>OrderLine {
+              qty: int
+            }
+            contains lines: OrderLine[]
+          }
+        }`,
+      index: 0,
+      hover: /entity OrderLine in Order/,
+    });
+  });
+
+  it("hovers a function declaration with signature", async () => {
+    await expectHoverFor({
+      text: `
+        context Sales {
+          aggregate Order {
+            qty: int
+            function double(): int = qty * 2
+            function <|>doubled(): int = qty * 2
+          }
+        }`,
+      index: 0,
+      hover: /function doubled\(\): int/,
+    });
+  });
+});
+
+// Sanity-check: services factory completes without throwing.
+describe("DddServices wiring", () => {
+  it("registers HoverProvider", () => {
+    expect(services.lsp.HoverProvider).toBeDefined();
+  });
+});

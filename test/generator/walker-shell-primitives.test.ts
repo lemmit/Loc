@@ -1,0 +1,127 @@
+// Slice A7 — shell primitives (Breadcrumbs / Paper / Skeleton / Alert).
+//
+// Page-chrome primitives that the scaffold archetype path
+// composes inline; the walker now exposes them so explicit pages
+// can compose the same chrome by hand.  Together with Phase A1-A6
+// they cover the typical "container + state-cued content" shape
+// of a list/detail page.
+//
+// What this slice pins:
+//   1. Breadcrumbs(...children, testid?) — wraps each positional
+//      child as a breadcrumb (Mantine renders separators
+//      automatically; shadcn uses a flex row).
+//   2. Paper(...children, padding?, testid?) — surface container
+//      with consistent padding + border + subtle shadow.
+//   3. Skeleton(height?, count?, testid?) — loading placeholder.
+//      `count > 1` emits a stacked group of placeholders.
+//   4. Alert(message, color?, title?, testid?) — error / info
+//      callout.
+//   5. All four accept the standard `testid:` named arg and
+//      thread it to the rendered root element.
+
+import { NodeFileSystem } from "langium/node";
+import { describe, expect, it } from "vitest";
+import { createDddServices } from "../../src/language/ddd-module.js";
+import type { Model } from "../../src/language/generated/ast.js";
+import { generateSystems } from "../../src/system/index.js";
+
+async function emit(body: string): Promise<string> {
+  const services = createDddServices(NodeFileSystem);
+  const { parseHelper } = await import("langium/test");
+  const helper = parseHelper(services.Ddd);
+  const doc = await helper(
+    `
+    system S {
+      module M { context C { } }
+      ui WebApp {
+        page P { route: "/p"  body: ${body} }
+      }
+      deployable api { platform: hono, modules: M, port: 3000 }
+      deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
+    }
+  `,
+    { validation: true },
+  );
+  const files = generateSystems(doc.parseResult.value as Model).files;
+  const tsx = files.get("web/src/pages/p.tsx");
+  if (!tsx) throw new Error(`MISSING; keys = ${[...files.keys()].join(", ")}`);
+  return tsx;
+}
+
+describe("Slice A7 — shell primitives", () => {
+  it("Breadcrumbs(Anchor, Anchor, Text) emits a Mantine <Breadcrumbs>", async () => {
+    const tsx = await emit(
+      `Breadcrumbs(Anchor("Home", to: "/"), Anchor("Orders", to: "/orders"), Text("Detail"))`,
+    );
+    expect(tsx).toMatch(/import \{[^}]*\bBreadcrumbs\b/);
+    expect(tsx).toMatch(/<Breadcrumbs>/);
+    expect(tsx).toMatch(/<Anchor[^>]*to="\/"/);
+    expect(tsx).toMatch(/<Anchor[^>]*to="\/orders"/);
+    expect(tsx).toMatch(/<Text>Detail<\/Text>/);
+    expect(tsx).toMatch(/<\/Breadcrumbs>/);
+  });
+
+  it("Breadcrumbs testid lands on the root element", async () => {
+    const tsx = await emit(`Breadcrumbs(Text("X"), testid: "page-crumbs")`);
+    expect(tsx).toMatch(/<Breadcrumbs[^>]*\bdata-testid="page-crumbs"/);
+  });
+
+  it("Paper(...children) wraps in a Mantine <Paper> with default padding", async () => {
+    const tsx = await emit(`Paper(Text("body"))`);
+    expect(tsx).toMatch(/import \{[^}]*\bPaper\b/);
+    expect(tsx).toMatch(/<Paper p="md">/);
+    expect(tsx).toMatch(/<Text>body<\/Text>/);
+  });
+
+  it("Paper padding: overrides the default", async () => {
+    const tsx = await emit(`Paper(Text("x"), padding: "lg")`);
+    expect(tsx).toMatch(/<Paper p="lg">/);
+  });
+
+  it("Paper testid lands on the root", async () => {
+    const tsx = await emit(`Paper(Text("x"), testid: "shell")`);
+    expect(tsx).toMatch(/<Paper [^>]*\bdata-testid="shell"/);
+  });
+
+  it("Skeleton() emits a single Mantine <Skeleton> at default height", async () => {
+    const tsx = await emit(`Skeleton()`);
+    expect(tsx).toMatch(/import \{[^}]*\bSkeleton\b/);
+    expect(tsx).toMatch(/<Skeleton height=\{ 28 \} radius="sm" \/>/);
+  });
+
+  it("Skeleton(count: 5) emits a stacked group of skeleton lines", async () => {
+    const tsx = await emit(`Skeleton(count: 5)`);
+    expect(tsx).toMatch(/<Stack gap="xs">/);
+    expect(tsx).toMatch(/Array\.from\(\{ length: 5 \}\)\.map/);
+    expect(tsx).toMatch(/<Skeleton key=\{i\} height=\{ 28 \} radius="sm" \/>/);
+  });
+
+  it("Skeleton(height: 60, count: 3) honours both args", async () => {
+    const tsx = await emit(`Skeleton(height: 60, count: 3)`);
+    expect(tsx).toMatch(/Array\.from\(\{ length: 3 \}\)/);
+    expect(tsx).toMatch(/<Skeleton key=\{i\} height=\{ 60 \}/);
+  });
+
+  it("Skeleton testid lands on the root", async () => {
+    const tsx = await emit(`Skeleton(testid: "loading")`);
+    expect(tsx).toMatch(/<Skeleton[^>]*\bdata-testid="loading"/);
+  });
+
+  it("Alert(message) emits a default-color alert", async () => {
+    const tsx = await emit(`Alert("Couldn't load")`);
+    expect(tsx).toMatch(/import \{[^}]*\bAlert\b/);
+    expect(tsx).toMatch(/<Alert color="red" variant="light">Couldn't load<\/Alert>/);
+  });
+
+  it('Alert(message, color: "yellow", title: "Heads up") threads both', async () => {
+    const tsx = await emit(`Alert("Disk almost full", color: "yellow", title: "Heads up")`);
+    expect(tsx).toMatch(
+      /<Alert color="yellow"[^>]*title="Heads up"[^>]*>Disk almost full<\/Alert>/,
+    );
+  });
+
+  it("Alert testid lands on the root", async () => {
+    const tsx = await emit(`Alert("err", testid: "load-error")`);
+    expect(tsx).toMatch(/<Alert[^>]*\bdata-testid="load-error"/);
+  });
+});
