@@ -158,6 +158,33 @@ test("renames a field (and its usages) from the inspector", async ({ page }) => 
   await expect(names.nth(0)).toHaveValue("customerId");
 });
 
+test("edits a repository find's parameters", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Fullstack \.NET \(Banking\)/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  // Accounts.byHolder(holder: Id<Customer>) — pick it and edit its params.
+  await page.locator('[data-testid="rf__node-repository:Accounts"]').click();
+  await page.getByTestId("c4system-find-pick").click();
+  await page.getByRole("option", { name: "byHolder", exact: true }).click();
+
+  const rows = page.getByTestId("c4system-param-row");
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first().getByTestId("c4system-field-name")).toHaveValue("holder");
+
+  await page.getByTestId("c4system-param-add").click();
+  await expect(page.getByTestId("c4system-param-row")).toHaveCount(2);
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+
+  await page.getByTestId("c4system-param-row").last().getByTestId("c4system-param-delete").click();
+  await expect(page.getByTestId("c4system-param-row")).toHaveCount(1);
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+});
+
 test("rebinds a repository's target aggregate from the inspector", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);

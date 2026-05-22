@@ -113,7 +113,7 @@ export function baseLabel(base: BaseSpec): string {
   }
 }
 
-function baseSpecOf(type: TypeRef): BaseSpec {
+export function baseSpecOf(type: TypeRef): BaseSpec {
   const base = type.base;
   switch (base.$type) {
     case "PrimitiveType":
@@ -127,7 +127,7 @@ function baseSpecOf(type: TypeRef): BaseSpec {
   }
 }
 
-function buildTypeRef(spec: TypeSpec): TypeRef {
+export function buildTypeRef(spec: TypeSpec): TypeRef {
   let base: unknown;
   switch (spec.base.kind) {
     case "primitive":

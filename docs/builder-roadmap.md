@@ -199,9 +199,13 @@ Done:
   in the modeller (`viewSlotOptions` in `expr-slots.ts`). Gated by
   `test/system-expr.test.ts` + e2e.
 - **Repository find editing** — repository nodes expose each `find` decl's
-  `where` filter through the same picker + editor (`repoSlotOptions`); finds with
-  no `where` are omitted. Gated by `test/system-expr.test.ts` + e2e. (Editing
-  find *params* is still open.)
+  `where` filter through the Expression picker (`repoSlotOptions`), and a **Finds**
+  section to edit each find's **return type** and **parameters** (add / delete /
+  retype / rename), mirroring field editing (`find-params.ts`: parse → mutate →
+  reprint the repository → splice). A param rename also rewrites its bare-`NameRef`
+  usages in that find's own filter (the param shadows any same-named member there),
+  so it's safe without the cross-document member resolver. Gated by
+  `test/system-expr.test.ts`, `test/system-find-params.test.ts` + e2e.
 - **Scope-aware name suggestions** — every `raw` leaf in the expression editor
   is an autocomplete fed the in-scope bare names (params, properties, derived
   props, helpers, enum values). The scope rules live in the IR: `inScopeNames`
@@ -253,7 +257,6 @@ Open:
   structured statement *targets* (assignment LValue / `emit` event picker) +
   bare-call statements — the statement *expressions* are structured today, but
   these non-expression parts stay text-row.
-- **Repository `find` editing** (params + where-clause expressions).
 - **Edge rebinding by dragging** connections on the canvas (inspector-Select
   rebinding already exists — see above); plus multi-valued deployable references
   (module bindings, `serves`, ui) which the single-Select rebind doesn't cover.
