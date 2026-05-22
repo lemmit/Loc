@@ -307,7 +307,7 @@ function SettingsContent({ options }: { options: Record<string, string[]> }): JS
             onChange={(v) => set(f.key, v || undefined)}
           />
         ) : f.kind === "int" ? (
-          <NumberInput key={f.key} size="xs" mb="xs" label={f.key} min={1} max={6} value={Number(props[f.key] ?? 1)} onChange={(v) => set(f.key, typeof v === "number" ? v : undefined)} />
+          <NumberInput key={f.key} size="xs" mb="xs" label={f.key} min={0} value={Number(props[f.key] ?? 1)} onChange={(v) => set(f.key, typeof v === "number" ? v : undefined)} />
         ) : (
           <TextInput key={f.key} size="xs" mb="xs" label={f.key} value={String(props[f.key] ?? "")} data-testid={`c4builder-prop-${f.key}`} onChange={(e) => set(f.key, e.currentTarget.value || undefined)} />
         ),

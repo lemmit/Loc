@@ -30,38 +30,52 @@ const pill = (text: string, bg: string): JSX.Element => (
   <span style={{ display: "inline-block", padding: "2px 10px", borderRadius: 4, background: bg, color: "white" }}>{text}</span>
 );
 
+// Display a stored prop value on the canvas: unquote a bare string literal
+// (props store the source form, e.g. `"hi"`), show an expression as-is.
+function disp(v: string | number | undefined): string {
+  if (v === undefined) return "";
+  const s = String(v);
+  try {
+    const parsed = JSON.parse(s);
+    if (typeof parsed === "string" && JSON.stringify(parsed) === s) return parsed;
+  } catch {
+    /* not a string literal — show verbatim */
+  }
+  return s;
+}
+
 function renderLeaf(name: PrimitiveName, p: Props): ReactNode {
   switch (name) {
     case "Divider":
       return <div style={{ borderTop: "1px solid var(--mantine-color-dark-3)", height: 0 }} />;
     case "Heading":
-      return <span style={{ fontWeight: 700, fontSize: 22 - (Number(p.level ?? 2) - 1) * 2 }}>{String(p.text || "Heading")}</span>;
+      return <span style={{ fontWeight: 700, fontSize: 22 - (Number(p.level ?? 2) - 1) * 2 }}>{disp(p.text) || "Heading"}</span>;
     case "Text":
-      return <span>{String(p.text || "Text")}</span>;
+      return <span>{disp(p.text) || "Text"}</span>;
     case "Empty":
-      return <span style={{ fontStyle: "italic", color: "var(--mantine-color-dimmed)" }}>{String(p.message || "Empty")}</span>;
+      return <span style={{ fontStyle: "italic", color: "var(--mantine-color-dimmed)" }}>{disp(p.message) || "Empty"}</span>;
     case "Alert":
-      return <div style={{ padding: "4px 8px", borderRadius: 4, background: "var(--mantine-color-red-9)", color: "white" }}>{String(p.message || "Alert")}</div>;
+      return <div style={{ padding: "4px 8px", borderRadius: 4, background: "var(--mantine-color-red-9)", color: "white" }}>{disp(p.message) || "Alert"}</div>;
     case "Badge":
-      return pill(String(p.value || "Badge"), "var(--mantine-color-grape-7)");
+      return pill(disp(p.value) || "Badge", "var(--mantine-color-grape-7)");
     case "Button":
-      return pill(String(p.label || "Button") + (p.to ? ` →${p.to}` : ""), "var(--mantine-color-blue-7)");
+      return pill((disp(p.label) || "Button") + (p.to ? ` →${disp(p.to)}` : ""), "var(--mantine-color-blue-7)");
     case "Anchor":
-      return <a style={{ color: "var(--mantine-color-blue-4)" }}>{String(p.text || "Anchor")}{p.to ? ` →${p.to}` : ""}</a>;
+      return <a style={{ color: "var(--mantine-color-blue-4)" }}>{disp(p.text) || "Anchor"}{p.to ? ` →${disp(p.to)}` : ""}</a>;
     case "List":
       return <span style={{ color: "var(--mantine-color-teal-4)" }}>⊟ List{p.of ? ` of ${p.of}` : ""}</span>;
     case "Form":
       return <span style={{ color: "var(--mantine-color-teal-4)" }}>▤ Form{p.of ? ` of ${p.of}` : p.creates ? ` creates ${p.creates}` : ""}</span>;
     case "Stat":
-      return <span><b>{String(p.label || "Stat")}</b>: {String(p.value ?? "")}</span>;
+      return <span><b>{disp(p.label) || "Stat"}</b>: {disp(p.value)}</span>;
     case "Money":
-      return <span>{String(p.value ?? "Money")}</span>;
+      return <span>{disp(p.value) || "Money"}</span>;
     case "DateDisplay":
-      return <span style={{ color: "var(--mantine-color-dimmed)" }}>{String(p.value ?? "date")}</span>;
+      return <span style={{ color: "var(--mantine-color-dimmed)" }}>{disp(p.value) || "date"}</span>;
     case "EnumBadge":
-      return pill(String(p.value || "enum"), "var(--mantine-color-grape-7)");
+      return pill(disp(p.value) || "enum", "var(--mantine-color-grape-7)");
     case "IdLink":
-      return <a style={{ color: "var(--mantine-color-blue-4)" }}>{String(p.id ?? "id")}{p.of ? ` → ${p.of}` : ""}</a>;
+      return <a style={{ color: "var(--mantine-color-blue-4)" }}>{disp(p.id) || "id"}{p.of ? ` → ${disp(p.of)}` : ""}</a>;
     case "Image":
       return <span style={{ fontStyle: "italic", color: "var(--mantine-color-dimmed)" }}>image{p.src ? ` ${p.src}` : ""}</span>;
     case "Avatar":
@@ -75,9 +89,9 @@ function renderLeaf(name: PrimitiveName, p: Props): ReactNode {
     case "Field":
     case "NumberField":
     case "PasswordField":
-      return <span>{String(p.label || name)}: <span style={{ display: "inline-block", minWidth: 48, borderBottom: "1px solid var(--mantine-color-dark-3)" }} /></span>;
+      return <span>{disp(p.label) || name}: <span style={{ display: "inline-block", minWidth: 48, borderBottom: "1px solid var(--mantine-color-dark-3)" }} /></span>;
     case "Toggle":
-      return <span>◯ {String(p.label || "Toggle")}</span>;
+      return <span>◯ {disp(p.label) || "Toggle"}</span>;
     default:
       return String(name);
   }
