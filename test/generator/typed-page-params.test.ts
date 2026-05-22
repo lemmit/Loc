@@ -1,4 +1,4 @@
-// Slice 11.4 — typed page parameters threaded into walker-rendered
+// typed page parameters threaded into walker-rendered
 // pages.  When a page declares route params:
 //
 //   page Hello(name: string) {
@@ -16,7 +16,7 @@ import { generateSystemFiles } from "../_helpers/index.js";
 
 const buildAndGenerate = generateSystemFiles;
 
-describe("Slice 11.4 — typed page parameters in walker-rendered pages", () => {
+describe("typed page parameters in walker-rendered pages", () => {
   it("emits useParams + destructure when a param is referenced", async () => {
     const files = await buildAndGenerate(`
       system S {

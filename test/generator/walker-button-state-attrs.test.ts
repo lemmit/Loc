@@ -1,4 +1,4 @@
-// Slice 11.29 — Button accepts `disabled:` and `loading:` named
+// Button accepts `disabled:` and `loading:` named
 // args.  Closes the gap that forced architecture-integration test
 // to remove `disabled: customerCreate.isPending` from its assertions.
 //
@@ -23,7 +23,7 @@ const SCAFFOLD = `
   storage pg { type: postgres }
 `;
 
-describe("Slice 11.29 — Button disabled: + loading: named args", () => {
+describe("Button disabled: + loading: named args", () => {
   it("Button(disabled: <bool-state>) emits the disabled attr", async () => {
     const files = await buildAndGenerate(`
       system S {

@@ -13,9 +13,9 @@ import type { Model } from "../../src/language/generated/ast.js";
 import { generateSystems } from "../../src/system/index.js";
 
 // ---------------------------------------------------------------------------
-// Phase 9 — phoenixLiveView pipeline integration test.
+// phoenixLiveView pipeline integration test.
 //
-// Exercises the full Phase 1 → Phase 8 path on a minimal source:
+// Exercises the full pipeline on a minimal source:
 //   parse → validate → lower → emitProject → composeService → docker-compose
 // for a deployable that picks the new `phoenixLiveView` platform.
 //
@@ -104,7 +104,7 @@ describe("phoenixLiveView pipeline (Phases 1-8)", () => {
     const compose = files.get("docker-compose.yml")!;
     // Service stanza for the deployable, hyphenated by the slug helper.
     expect(compose).toMatch(/phoenix_app:/);
-    // Phoenix port 4000 published; Phase 2 platform contract.
+    // Phoenix port 4000 published; platform contract.
     expect(compose).toMatch(/4000:4000/);
     // depends_on db with healthcheck wait — `needsDb: true` on the
     // platform; orchestrator picks it up via PlatformSurface.
@@ -397,7 +397,7 @@ describe("emitApiControllers (api-emit unit)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Batch D1 — Slice 21 validation lowering onto Ash action `validate` clauses.
+// Validation lowering onto Ash action `validate` clauses.
 //
 // These tests call `emitAggregateResources` directly so they are not coupled
 // to the index.ts orchestrator path, verifying the domain-emit.ts target
@@ -1362,7 +1362,7 @@ describe("E3 — Ash.transaction/2 domain-list form (workflow-emit unit)", () =>
 //
 // `test e2e ui "…" against <deployable>` blocks lower against any
 // deployable that mounts a UI — react / static (frontend-only) AND
-// phoenixLiveView (fullstack).  `PlatformSurface.mountsUi` (Phase 2)
+// phoenixLiveView (fullstack).  `PlatformSurface.mountsUi`
 // gates this; assert the orchestrator emits an identically-shaped
 // Playwright spec regardless of which platform hosts the UI.
 // ---------------------------------------------------------------------------

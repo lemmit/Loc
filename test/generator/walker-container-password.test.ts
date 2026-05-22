@@ -1,4 +1,4 @@
-// Slice 11.22 — Container + PasswordField primitives.
+// Container + PasswordField primitives.
 //
 //   Container(...children)            → max-width centred wrapper
 //   Container(..., size: "sm")        → constrained max-width
@@ -12,7 +12,7 @@ import { generateSystemFiles } from "../_helpers/index.js";
 
 const buildAndGenerate = generateSystemFiles;
 
-describe("Slice 11.22 — Container + PasswordField primitives", () => {
+describe("Container + PasswordField primitives", () => {
   it("Container(...children) emits Mantine <Container> wrapper", async () => {
     const files = await buildAndGenerate(`
       system S {

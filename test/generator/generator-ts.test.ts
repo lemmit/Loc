@@ -119,7 +119,7 @@ describe("typescript generator", () => {
     expect(dockerignore).toMatch(/node_modules/);
   });
 
-  describe("slice 16.A — container basics", () => {
+  describe("container basics", () => {
     it("http/index.ts mounts /ready that pings the DB and returns 503 on failure", async () => {
       const model = await buildModel("examples/sales.ddd");
       const files = generateTypeScript(model, HONO_V4_PINS);
@@ -153,7 +153,7 @@ describe("typescript generator", () => {
     });
   });
 
-  describe("slice 16.C — request observability", () => {
+  describe("request observability", () => {
     it("emits obs/request-id.ts with the correlation-id middleware", async () => {
       const model = await buildModel("examples/sales.ddd");
       const files = generateTypeScript(model, HONO_V4_PINS);
@@ -351,7 +351,7 @@ describe("typescript generator", () => {
     expect(httpIndex).toMatch(/verifyOrderExternHandlersRegistered/);
   });
 
-  describe("slice 16.B — extern handler exception envelope", () => {
+  describe("extern handler exception envelope", () => {
     it("domain/errors.ts exports ExternHandlerError", async () => {
       const model = await buildModel("examples/sales.ddd");
       const files = generateTypeScript(model, HONO_V4_PINS);
@@ -403,7 +403,7 @@ describe("typescript generator", () => {
       // onError checks ExternHandlerError before the generic 500.
       expect(routes).toMatch(/if \(err instanceof ExternHandlerError\)/);
       // Generic 500 fallback survives unchanged for unknown errors.
-      // Slice 16.C threads trace_id alongside the existing error
+      // trace_id is threaded alongside the existing error
       // field, so the envelope shape is `{ error, trace_id }`.
       expect(routes).toMatch(/return c\.json\(\{ error: "internal", trace_id \}, 500\)/);
     });
@@ -689,7 +689,7 @@ describe("typescript generator", () => {
     expect(views).toMatch(/projected as z\.infer<typeof OrderSummaryResponse>/);
   });
 
-  it("rewrites Id<X> follow refs to bulk-load + map lookups (slice 3)", async () => {
+  it("rewrites Id<X> follow refs to bulk-load + map lookups", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
@@ -1005,10 +1005,10 @@ describe("typescript generator", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Slice 1A — auth scaffolding
+  // auth scaffolding
   // -------------------------------------------------------------------------
 
-  describe("auth scaffolding (slice 1A)", () => {
+  describe("auth scaffolding", () => {
     async function emitForAuthSystem(src: string): Promise<Map<string, string>> {
       const { parseHelper } = await import("langium/test");
       const services = createDddServices(NodeFileSystem);
@@ -1114,7 +1114,7 @@ describe("typescript generator", () => {
     });
 
     // -----------------------------------------------------------------------
-    // Slice 1C — currentUser inside find / view filters
+    // currentUser inside find / view filters
     // -----------------------------------------------------------------------
 
     const SRC_FILTER_AUTH = `
@@ -1166,7 +1166,7 @@ describe("typescript generator", () => {
     });
 
     // -----------------------------------------------------------------------
-    // Slice 2 — `requires` clauses
+    // `requires` clauses
     // -----------------------------------------------------------------------
 
     const SRC_REQUIRES = `
@@ -1212,7 +1212,7 @@ describe("typescript generator", () => {
     it("http/<aggregate>.routes.ts maps ForbiddenError to 403 in app.onError", async () => {
       const files = await emitForAuthSystem(SRC_REQUIRES);
       const route = files.get("http/order.routes.ts")!;
-      // Slice 16.C threads trace_id alongside the existing error
+      // trace_id is threaded alongside the existing error
       // field, so the envelope shape is `{ error, trace_id }`.
       expect(route).toMatch(
         /if \(err instanceof ForbiddenError\) return c\.json\(\{ error: err\.message, trace_id \}, 403\);/,
@@ -1221,9 +1221,9 @@ describe("typescript generator", () => {
   });
 
   // -------------------------------------------------------------------
-  // Slice 21.A — wire-boundary validation on Hono routes.
+  // wire-boundary validation on Hono routes.
   // -------------------------------------------------------------------
-  describe("invariants on the wire (slice 21.A — Hono Zod refines)", () => {
+  describe("invariants on the wire (Hono Zod refines)", () => {
     it("absorbs single-field invariants on a value-object schema into idiomatic native chains", async () => {
       const model = await buildModel("examples/sales.ddd");
       const files = generateTypeScript(model, HONO_V4_PINS);
@@ -1288,7 +1288,7 @@ describe("typescript generator", () => {
       );
     });
 
-    it("absorbs `string.matches(literal)` as `z.string().regex(/.../)` on Hono routes (slice 21.C)", async () => {
+    it("absorbs `string.matches(literal)` as `z.string().regex(/.../)` on Hono routes", async () => {
       const { parseHelper } = await import("langium/test");
       const services = createDddServices(NodeFileSystem);
       const helper = parseHelper(services.Ddd);
@@ -1311,7 +1311,7 @@ describe("typescript generator", () => {
       );
     });
 
-    it("renders `matches` in domain code as `new RegExp(...).test(...)` (slice 21.C)", async () => {
+    it("renders `matches` in domain code as `new RegExp(...).test(...)`", async () => {
       const { parseHelper } = await import("langium/test");
       const services = createDddServices(NodeFileSystem);
       const helper = parseHelper(services.Ddd);

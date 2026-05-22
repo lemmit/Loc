@@ -9,7 +9,7 @@ import { fromCraft, toCraft } from "../../web/src/builder/page/serialize.js";
 import { parseRawResult } from "../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
-// Page-builder data-layer round-trip (Builders, Phase 1).  For every page
+// Page-builder data-layer round-trip (Builders).  For every page
 // `body:` in the corpus: seed the builder tree, emit it back, splice over the
 // body's CST range, re-parse, and assert an identical AST.  Recognize-or-opaque
 // must lose nothing.
@@ -113,7 +113,7 @@ describe("page-builder model — primitive coverage", () => {
     'Card("Just a title")',
     'Container(Stack(Text("x")), size: "md")',
     'Paper(Text("p"), padding: "lg")',
-    // Phase 2 — remaining stdlib scalar/expr primitives.
+    // remaining stdlib scalar/expr primitives.
     'Stat("Active users", "1,247")',
     'Stat("Revenue", order.total)',
     "Money(line.subtotal)",
@@ -132,13 +132,13 @@ describe("page-builder model — primitive coverage", () => {
     'Breadcrumbs(Anchor("Home", to: "/"), Text("Orders"))',
     'KeyValueRow("Total", Text("42"))',
     'KeyValueRow("Total", order.total)',
-    // Phase 3 — Tabs holds editable Tab children, each with a title + body.
+    // Tabs holds editable Tab children, each with a title + body.
     'Tabs(Tab("Overview", Text("a")), Tab("Details", List(of: Order)))',
     'Card("Tabs", Tabs(Tab("Overview", Text("Overview tab body"))))',
-    // Phase 4 — lambdas (expression body) and Table/Column accessors.
+    // lambdas (expression body) and Table/Column accessors.
     'Table(rows: orders, Column("ID", o => IdLink(o.id, of: Order)), Column("Status", o => EnumBadge(o.status)))',
     'Column("Name", o => Text(o.name))',
-    // Phase 5 — match: predicate arms with value children + optional else.
+    // match: predicate arms with value children + optional else.
     'match {\n  step == 0 => Text("first")\n  step == 1 => Text("second")\n}',
     'match {\n  step == 1 => List(of: Order),\n  else => Empty("loading")\n}',
     // Named-arg child slots: QueryView branches, Table callbacks, Modal trigger

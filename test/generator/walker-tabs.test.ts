@@ -1,4 +1,4 @@
-// Slice 11.11 — Tabs primitive in walker stdlib.
+// Tabs primitive in walker stdlib.
 //
 // Surface:
 //
@@ -27,7 +27,7 @@ import { generateSystemFiles } from "../_helpers/index.js";
 
 const buildAndGenerate = generateSystemFiles;
 
-describe("Slice 11.11 — Tabs in walker stdlib", () => {
+describe("Tabs in walker stdlib", () => {
   it("emits Mantine Tabs with List + Panels and slugged values", async () => {
     const files = await buildAndGenerate(`
       system S {

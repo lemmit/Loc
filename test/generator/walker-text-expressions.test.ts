@@ -1,4 +1,4 @@
-// Slice 11.10 — arbitrary expressions in text positions.
+// arbitrary expressions in text positions.
 //
 // Before this slice: text-position slots in Heading / Text / Stat
 // / Badge / Card-title only accepted string literals or single
@@ -14,7 +14,7 @@ import { generateSystemFiles } from "../_helpers/index.js";
 
 const buildAndGenerate = generateSystemFiles;
 
-describe("Slice 11.10 — expressions in text positions", () => {
+describe("expressions in text positions", () => {
   it('Heading("Hello, " + name) emits the binary op as a JSX expr', async () => {
     const files = await buildAndGenerate(`
       system S {

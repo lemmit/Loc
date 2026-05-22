@@ -97,14 +97,14 @@ describe("react generator", () => {
     expect(newOrder).toMatch(/zodResolver\(CreateOrderRequest\)/);
     expect(newOrder).toMatch(/notifications\.show/);
     expect(newOrder).toMatch(/useCreateOrder/);
-    // Phase 1: no @mantine/form / mantine-form-zod-resolver, no `as never` cast.
+    // No @mantine/form / mantine-form-zod-resolver, no `as never` cast.
     expect(newOrder).not.toMatch(/@mantine\/form/);
     expect(newOrder).not.toMatch(/mantine-form-zod-resolver/);
     expect(newOrder).not.toMatch(/as never/);
   });
 
-  it("Phase 2: datetime fields use native input with second precision", async () => {
-    // Phase 2 originally swapped to Mantine's <DateTimePicker> via
+  it("datetime fields use native input with second precision", async () => {
+    // This originally swapped to Mantine's <DateTimePicker> via
     // Controller, but Mantine's picker renders as a button (not a
     // typeable input) and resists Playwright's `.fill()` even with
     // valueFormat pinned.  Walked back to native datetime-local; we
@@ -124,7 +124,7 @@ describe("react generator", () => {
     expect(files.get("web_app/e2e/pages/_helpers.ts")).toBeFalsy();
   });
 
-  it("Phase 3: page object clicks the testid'd option for Id<X> params", async () => {
+  it("page object clicks the testid'd option for Id<X> params", async () => {
     const model = await buildModel("examples/acme.ddd");
     const { files } = generateSystems(model);
     const orderPo = files.get("web_app/e2e/pages/order.ts")!;
@@ -224,7 +224,7 @@ describe("react generator", () => {
     expect(dbInit).not.toMatch(/CREATE DATABASE web_app/);
   });
 
-  describe("slice 20 — AppShell.Navbar + NavLink sidebar redesign", () => {
+  describe("AppShell.Navbar + NavLink sidebar redesign", () => {
     it("App.tsx mounts AppShell.Navbar with Burger toggle + grouped NavLinks", async () => {
       const model = await buildModel("examples/acme.ddd");
       const { files } = generateSystems(model);
@@ -308,7 +308,7 @@ describe("react generator", () => {
     expect(app).toMatch(/<Route path="\*" element={<NotFound \/>} \/>/);
   });
 
-  describe("slice 19 — design tokens (theme block → Mantine theme)", () => {
+  describe("design tokens (theme block → Mantine theme)", () => {
     it("emits src/theme.ts with shade ramps + wires MantineProvider when theme is declared", async () => {
       const model = await buildModel("examples/acme.ddd");
       const { files } = generateSystems(model);
@@ -468,7 +468,7 @@ describe("react generator", () => {
     });
   });
 
-  describe("slice 18.A — workflow form pages", () => {
+  describe("workflow form pages", () => {
     it("emits an api/workflows.ts module with one Zod schema + mutation hook per workflow", async () => {
       const model = await buildModel("examples/acme.ddd");
       const { files } = generateSystems(model);
@@ -521,7 +521,7 @@ describe("react generator", () => {
         /<Route path="\/workflows\/place_order" element=\{<PlaceOrderWorkflowPage \/>\} \/>/,
       );
       // Sidebar entry — "All workflows" parent NavLink + one
-      // NavLink per workflow (slice 20 navbar redesign).
+      // NavLink per workflow (navbar redesign).
       expect(app).toMatch(
         /<NavLink component=\{RouterLink\} to="\/workflows" label="All workflows"[\s\S]*?data-testid="nav-workflows"/,
       );
@@ -531,7 +531,7 @@ describe("react generator", () => {
     });
   });
 
-  describe("slice 18.B — view list pages", () => {
+  describe("view list pages", () => {
     it("emits an api/views.ts module with a query hook per view", async () => {
       const model = await buildModel("examples/acme.ddd");
       const { files } = generateSystems(model);
@@ -569,7 +569,7 @@ describe("react generator", () => {
     });
   });
 
-  describe("slice 18.C — DSL e2e for ui.workflows.* + ui.views.*", () => {
+  describe("DSL e2e for ui.workflows.* + ui.views.*", () => {
     it("emits a Playwright page object per workflow", async () => {
       const model = await buildModel("examples/acme.ddd");
       const { files } = generateSystems(model);
@@ -699,9 +699,9 @@ describe("react generator", () => {
   });
 
   // -------------------------------------------------------------------
-  // Slice 21.A — wire-boundary validation on the React side.
+  // wire-boundary validation on the React side.
   // -------------------------------------------------------------------
-  describe("invariants on the wire (slice 21.A — React Zod refines)", () => {
+  describe("invariants on the wire (React Zod refines)", () => {
     it("absorbs single-field VO invariants into idiomatic native chains on <VO>Schema", async () => {
       const model = await buildModel("examples/acme.ddd");
       const { files } = generateSystems(model);
@@ -761,16 +761,16 @@ describe("react generator", () => {
       const model = await buildModel("examples/acme.ddd");
       const { files } = generateSystems(model);
       const newProduct = files.get("web_app/src/pages/products/new.tsx")!;
-      // Existing slice 17 contract — refines compose into the same
+      // Existing contract — refines compose into the same
       // schema name, so the form keeps working.
       expect(newProduct).toMatch(/zodResolver\(CreateProductRequest\)/);
     });
   });
 
   // -------------------------------------------------------------------
-  // Slice 21.C — DSL extensions on the React side.
+  // DSL extensions on the React side.
   // -------------------------------------------------------------------
-  describe("DSL extensions (slice 21.C)", () => {
+  describe("DSL extensions", () => {
     it("absorbs `string.matches(literal)` as `z.string().regex(/.../)`", async () => {
       const { parseHelper } = await import("langium/test");
       const services = createDddServices(NodeFileSystem);
