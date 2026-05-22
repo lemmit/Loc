@@ -141,15 +141,47 @@ describe("provenanced — IR lowering", () => {
 });
 
 describe("provenanced — TypeScript emission", () => {
-  it("emits the runtime SDK, imports it, and records a trace at the write-site", async () => {
+  it("emits the lineage types and the co-located backing field + history buffer", async () => {
     const { model } = await parseModel(SYSTEM(""));
     const files = generateSystems(model).files;
     expect(files.has("api/domain/provenance.ts")).toBe(true);
+    expect(files.get("api/domain/provenance.ts")!).toContain("export interface ProvLineage");
     const cart = files.get("api/domain/cart.ts")!;
-    expect(cart).toContain('import { recordTrace } from "./provenance";');
-    expect(cart).toContain("recordTrace(");
-    // inputs captured before the mutation
+    expect(cart).toContain('import { type ProvLineage } from "./provenance";');
+    // co-located backing field + getter + history buffer + drain
+    expect(cart).toContain("private _total_provenance: ProvLineage | null;");
+    expect(cart).toContain("get total_provenance(): ProvLineage | null");
+    expect(cart).toContain("private __provTraces: ProvLineage[] = [];");
+    expect(cart).toContain("__drainProv(): ProvLineage[]");
+    // inputs captured before the mutation, then both sinks fed
     expect(cart).toMatch(/const __prov_\d+ = \[.*\];\n\s*this\._total =/);
+    expect(cart).toMatch(/this\._total_provenance = __lin_\d+;/);
+    expect(cart).toMatch(/this\.__provTraces\.push\(__lin_\d+\);/);
+  });
+
+  it("persists the co-located column and the history table in the schema", async () => {
+    const { model } = await parseModel(SYSTEM(""));
+    const files = generateSystems(model).files;
+    const schema = files.get("api/db/schema.ts")!;
+    expect(schema).toContain(", jsonb }");
+    expect(schema).toContain('total_provenance: jsonb("total_provenance").$type<');
+    expect(schema).toContain('export const provenanceRecords = pgTable("provenance_records"');
+  });
+
+  it("flushes the history transactionally and rides the lineage on the wire", async () => {
+    const { model } = await parseModel(SYSTEM(""));
+    const files = generateSystems(model).files;
+    const routes = files.get("api/http/cart.routes.ts")!;
+    expect(routes).toContain("await db.transaction(async (tx) => {");
+    expect(routes).toContain("for (const __t of aggregate.__drainProv())");
+    expect(routes).toContain("tx.insert(schema.provenanceRecords).values({");
+    // co-located lineage is part of the response DTO, via the shared schema
+    expect(routes).toContain("const ProvenanceLineage = z.object({");
+    expect(routes).toContain("total_provenance: ProvenanceLineage.nullable(),");
+    // toWire serialises the backing field
+    const repo = files.get("api/db/repositories/cart-repository.ts")!;
+    expect(repo).toContain("total_provenance: root.total_provenance");
+    expect(repo).toContain("total_provenance: aggregate.total_provenance");
   });
 
   it("emits nothing when no field is provenanced (toggle off)", async () => {
@@ -157,7 +189,9 @@ describe("provenanced — TypeScript emission", () => {
     const { model } = await parseModel(src);
     const files = generateSystems(model).files;
     expect(files.has("api/domain/provenance.ts")).toBe(false);
-    expect(files.get("api/domain/cart.ts")).not.toContain("recordTrace");
+    expect(files.get("api/domain/cart.ts")).not.toContain("ProvLineage");
+    expect(files.get("api/db/schema.ts")).not.toContain("provenance_records");
+    expect(files.get("api/http/cart.routes.ts")).not.toContain("__drainProv");
   });
 
   it("does not auto-emit a snapshot artefact on generate", async () => {
@@ -168,7 +202,7 @@ describe("provenanced — TypeScript emission", () => {
 });
 
 describe("provenanced — snapshot capture", () => {
-  it("captures one timestamped+GUID file whose ids match the generated recordTrace", async () => {
+  it("captures one timestamped+GUID file whose ids match the generated lineage", async () => {
     const { model } = await parseModel(SYSTEM(""));
     const loom = enrichLoomModel(lowerModel(model));
     const snaps = captureSnapshots(loom);
@@ -180,7 +214,7 @@ describe("provenanced — snapshot capture", () => {
     // the write-site's snapshotId appears both in the artefact and in code.
     const id = Object.keys(doc.snapshots)[0]!;
     const gen = generateSystems(model).files.get("api/domain/cart.ts")!;
-    expect(gen).toContain(`recordTrace(${JSON.stringify(id)}`);
+    expect(gen).toContain(`snapshotId: ${JSON.stringify(id)}`);
     expect(doc.snapshots[id].expression.text).toBe("base * qty - discount");
   });
 

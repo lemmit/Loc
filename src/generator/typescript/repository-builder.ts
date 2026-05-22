@@ -207,6 +207,11 @@ function wireProjectionEntity(
       `${wf.name}: ${wireProjectionValue(`${varExpr}.${wf.name}`, wf.type, ctx, wf.optional)}`,
     );
   }
+  // Co-located provenance rides the wire DTO so any GET surfaces the
+  // current lineage inline (the field's own value still emits above).
+  for (const f of ent.fields.filter((f) => f.provenanced)) {
+    parts.push(`${f.name}_provenance: ${varExpr}.${f.name}_provenance`);
+  }
   return `{ ${parts.join(", ")} }`;
 }
 
@@ -342,10 +347,20 @@ function hydrateRootExpr(agg: AggregateIR, rowVar: string, ctx: BoundedContextIR
   for (const f of agg.fields) {
     fields.push(`${f.name}: ${hydrateFieldExpr(f, rowVar, ctx)}`);
   }
+  fields.push(...provHydrateEntries(agg.fields, rowVar));
   for (const c of agg.contains) {
     fields.push(`${c.name}`);
   }
   return `${agg.name}._create({ ${fields.join(", ")} })`;
+}
+
+// Restore the co-located lineage so a fresh load (and any subsequent GET)
+// surfaces it — without this the lineage would vanish after the request
+// that wrote it.  The column is `$type`d ProvLineage, so no cast needed.
+function provHydrateEntries(fields: FieldIR[], rowVar: string): string[] {
+  return fields
+    .filter((f) => f.provenanced)
+    .map((f) => `${f.name}_provenance: ${rowVar}.${f.name}_provenance ?? null`);
 }
 
 function hydrateEntityExpr(
@@ -360,6 +375,7 @@ function hydrateEntityExpr(
   for (const f of part.fields) {
     fields.push(`${f.name}: ${hydrateFieldExpr(f, rowVar, ctx)}`);
   }
+  fields.push(...provHydrateEntries(part.fields, rowVar));
   return `${part.name}._create({ ${fields.join(", ")} })`;
 }
 
@@ -462,6 +478,7 @@ function rootProjection(agg: AggregateIR, varExpr: string, ctx: BoundedContextIR
   return projectionObject(varExpr, [
     { fieldName: "id", expr: `${varExpr}.id as string` },
     ...agg.fields.flatMap((f) => projectFieldEntries(f, varExpr, ctx)),
+    ...provColumnEntries(agg.fields, varExpr),
   ]);
 }
 
@@ -470,7 +487,20 @@ function entityProjection(part: EntityPartIR, varExpr: string, ctx: BoundedConte
     { fieldName: "id", expr: `${varExpr}.id as string` },
     { fieldName: "parentId", expr: `${varExpr}.parentId as string` },
     ...part.fields.flatMap((f) => projectFieldEntries(f, varExpr, ctx)),
+    ...provColumnEntries(part.fields, varExpr),
   ]);
+}
+
+// Co-located provenance sidecar: the `<field>_provenance` column reads
+// straight off the domain getter (typed `ProvLineage | null`), so save
+// and the `$type`d jsonb column line up without a cast.
+function provColumnEntries(
+  fields: FieldIR[],
+  varExpr: string,
+): { fieldName: string; expr: string }[] {
+  return fields
+    .filter((f) => f.provenanced)
+    .map((f) => ({ fieldName: `${f.name}_provenance`, expr: `${varExpr}.${f.name}_provenance` }));
 }
 
 function projectFieldEntries(
@@ -667,6 +697,7 @@ function hydrateRootForFindAllExpr(
   for (const f of agg.fields) {
     fields.push(`${f.name}: ${hydrateFieldExpr(f, rowVar, ctx)}`);
   }
+  fields.push(...provHydrateEntries(agg.fields, rowVar));
   for (const c of agg.contains) {
     if (c.collection) {
       fields.push(`${c.name}: ${c.name}ByParent.get(${rowVar}.id) ?? []`);

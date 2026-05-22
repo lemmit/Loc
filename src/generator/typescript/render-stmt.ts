@@ -4,7 +4,8 @@ import { renderTsExpr } from "./render-expr.js";
 const INDENT = "    ";
 
 /** When `emitProvenance` is true, instrumented write-sites (statements
- *  carrying a `prov` snapshot) get a `recordTrace(...)` line appended. */
+ *  carrying a `prov` snapshot) build a `ProvLineage` and route it to the
+ *  co-located backing field + the `__provTraces` history buffer. */
 export function renderTsStatements(stmts: StmtIR[], emitProvenance = false): string {
   return stmts.map((s, i) => renderTsStatement(s, emitProvenance, i)).join("\n");
 }
@@ -48,8 +49,12 @@ function renderTsStatement(s: StmtIR, emitProvenance: boolean, index = 0): strin
 
 /** Wrap a provenanced write with trace capture: snapshot the leaf inputs
  *  *before* the mutation (so self-referential writes like `x := x + n`
- *  record the pre-write value), perform the write, then record the trace
- *  pointing at the rule snapshot with the post-write computed value. */
+ *  record the pre-write value), perform the write, then build the lineage
+ *  (rule snapshot + leaf inputs + post-write computed value) and route it
+ *  to both sinks — the co-located `_<field>_provenance` backing field
+ *  (current lineage, persisted on the row) and the per-instance
+ *  `__provTraces` buffer (drained into the history table by the route
+ *  handler inside the save transaction). */
 function withTrace(
   base: string,
   prov: ProvSite | undefined,
@@ -64,11 +69,15 @@ function withTrace(
     .map((l) => `{ path: ${JSON.stringify(l.path)}, value: ${l.value} }`)
     .join(", ");
   const tmp = `__prov_${index}`;
+  const lin = `__lin_${index}`;
   const computed = renderPath(target);
+  const field = prov.target.field;
   return [
     `${INDENT}const ${tmp} = [${inputs}];`,
     base,
-    `${INDENT}recordTrace(${JSON.stringify(prov.snapshotId)}, ${targetLit}, ${tmp}, ${computed});`,
+    `${INDENT}const ${lin}: ProvLineage = { snapshotId: ${JSON.stringify(prov.snapshotId)}, target: ${targetLit}, inputs: ${tmp}, computedValue: ${computed} };`,
+    `${INDENT}this._${field}_provenance = ${lin};`,
+    `${INDENT}this.__provTraces.push(${lin});`,
   ].join("\n");
 }
 

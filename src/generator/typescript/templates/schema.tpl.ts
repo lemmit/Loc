@@ -20,7 +20,10 @@ import { camel, plural, snake } from "../../../util/naming.js";
 // `where this.<col>` clause or by a convention-based parameter
 // match.  Without these, common reads degrade to sequential scans
 // once the table has more than a few hundred rows.
-export function renderSchema(ctx: BoundedContextIR, opts: { audit?: boolean } = {}): string {
+export function renderSchema(
+  ctx: BoundedContextIR,
+  opts: { audit?: boolean; provenance?: boolean } = {},
+): string {
   const tables: string[] = [];
   for (const agg of ctx.aggregates) {
     const indexed = indexedColumnsFor(agg, ctx);
@@ -30,14 +33,16 @@ export function renderSchema(ctx: BoundedContextIR, opts: { audit?: boolean } = 
     }
   }
   if (opts.audit) tables.push(AUDIT_TABLE);
+  if (opts.provenance) tables.push(PROVENANCE_TABLE);
   const enumLines = ctx.enums.map(
     (e) =>
       `export const ${camel(e.name)}Enum = pgEnum("${snake(e.name)}", [${e.values.map((v) => `"${v}"`).join(", ")}]);`,
   );
+  const needsJsonb = opts.audit || opts.provenance;
   return (
     joinLines(
       "// Auto-generated.",
-      `import { pgTable, text, integer, bigint, numeric, boolean, timestamp, pgEnum, uuid, index${opts.audit ? ", jsonb" : ""} } from "drizzle-orm/pg-core";`,
+      `import { pgTable, text, integer, bigint, numeric, boolean, timestamp, pgEnum, uuid, index${needsJsonb ? ", jsonb" : ""} } from "drizzle-orm/pg-core";`,
       "",
       ...enumLines,
       "",
@@ -63,6 +68,22 @@ const AUDIT_TABLE = `export const auditRecords = pgTable("audit_records", {
   at: timestamp("at", { withTimezone: true }).notNull(),
   status: text("status").notNull(),
 }, (t) => [index("audit_records_target_idx").on(t.targetType, t.targetId)]);`;
+
+// Provenance history table.  Emitted only when the model declares at least
+// one written `provenanced` field.  One append-only row per provenanced
+// write, inserted in the same transaction as the operation's aggregate
+// save (atomic).  The current lineage is *also* stored co-located on the
+// aggregate row's `<field>_provenance` jsonb column; this table is the
+// full per-write history.
+const PROVENANCE_TABLE = `export const provenanceRecords = pgTable("provenance_records", {
+  traceId: text("trace_id").primaryKey(),
+  snapshotId: text("snapshot_id").notNull(),
+  targetType: text("target_type").notNull(),
+  field: text("field").notNull(),
+  inputs: jsonb("inputs").notNull(),
+  computedValue: jsonb("computed_value"),
+  at: timestamp("at", { withTimezone: true }).notNull(),
+}, (t) => [index("provenance_records_target_idx").on(t.targetType, t.field)]);`;
 
 /** Field names on the aggregate root that should be indexed so the
  * generated finds don't run sequential scans.  Walks every find: if
@@ -136,6 +157,15 @@ function emitTable(
   }
   for (const f of fields) {
     lines.push(...drizzleColumnLines(f, ctx).map((s) => `  ${s}`));
+  }
+  // Co-located provenance: a `<field>_provenance` jsonb column holding the
+  // current lineage for each provenanced field.  Typed (via `$type`) as
+  // the ProvLineage shape so save/hydrate/toWire round-trip without casts.
+  for (const f of fields) {
+    if (!f.provenanced) continue;
+    lines.push(
+      `  ${f.name}_provenance: jsonb("${snake(f.name)}_provenance").$type<import("../domain/provenance").ProvLineage>(),`,
+    );
   }
   // Index callback — Drizzle's pgTable accepts a second arg
   // `(table) => ({ idxName: index(...).on(table.col) })`.  We emit
