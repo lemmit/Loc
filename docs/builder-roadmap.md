@@ -321,11 +321,13 @@ Done:
   defaults) / delete / reorder; the lambda param and earlier `let` bindings are
   threaded into each value's scope. `expr-model.ts` + `ExpressionEditor.tsx`;
   gated by `test/system-expr.test.ts`.
+- **Argument-name editing** — a named call argument's name is an editable input
+  (clearing it demotes the arg to positional); clicking an inferred parameter-name
+  label on a positional arg promotes it to named (`ArgsEditor` in
+  `ExpressionEditor.tsx`). Gated by `test/system-expr.test.ts`.
 
 Open:
 
-- **Deeper expression structuring** — arg-*name* editing on calls (existing named
-  args are preserved verbatim but can't be renamed in the UI).
 - **Structured statement non-expression parts** — statement *expressions* are
   structured today (assignment RHS, `let` values, predicates, `emit` field
   values, call args), but the assignment *target* (LValue) and a bare-call
@@ -347,10 +349,10 @@ Planned — recommended order:
 1. **Finish expression/statement structuring** (Track 1, mechanical — each reuses
    an existing pattern):
    - ~~Block-body lambda structuring~~ — done (see Done above).
+   - ~~Arg-*name* editing on calls~~ — done (see Done above).
    - **Structured statement targets** — the assignment *target* (LValue) and a
-     bare-call statement's *callee* (the RHS / args are already structured).
-   - **Arg-*name* editing on calls** — existing named args are preserved verbatim
-     but can't be renamed in the UI.
+     bare-call statement's *callee* in the top-level BodyEditor (operation /
+     workflow bodies) still edit as text rows; the RHS / args are structured.
 2. **Diagnostics on graph nodes** — wire LSP diagnostics onto model nodes (a
    badge / red outline on the offending construct), mirroring the page builder's
    per-node diagnostics via `__range`. Makes a broken system visible on the graph.

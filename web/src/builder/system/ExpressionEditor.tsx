@@ -35,22 +35,39 @@ interface NodeProps {
 }
 
 // Argument list shared by call (`f(…)`) and member-call (`a.b(…)`) nodes.
-// Edits a single arg's value, removes an arg, or appends a positional one
-// (defaulting to `null` so the result stays parseable until edited). Named args
-// keep their name verbatim; renaming args is out of scope for now.
+// Edits a single arg's value or name, removes an arg, or appends a positional
+// one (defaulting to `null` so the result stays parseable until edited). A named
+// arg's name is editable (clearing it makes the arg positional).
 function ArgsEditor({ args, path, onArgs }: { args: ECallArg[]; path: string; onArgs: (args: ECallArg[], commit: boolean) => void }): JSX.Element {
   // Callee parameter names (type-resolved) to label positional args.
   const paramNames = useContext(ArgLabelsContext).get(path);
+  const setName = (i: number, name: string | undefined, commit: boolean): void =>
+    onArgs(args.map((a, j) => (j === i ? { ...a, name } : a)), commit);
+  // On blur, an emptied name demotes the arg back to positional.
+  const normalizeName = (i: number): void =>
+    onArgs(args.map((a, j) => (j === i && a.name?.trim() === "" ? { ...a, name: undefined } : a)), true);
   return (
     <Group gap={2} wrap="nowrap" align="center">
       <Text size="xs" c="dimmed">(</Text>
       {args.map((arg, i) => (
         <Group key={i} gap={2} wrap="nowrap" align="center">
           {i > 0 && <Text size="xs" c="dimmed">,</Text>}
-          {arg.name ? (
-            <Text size="xs" c="dimmed">{arg.name}:</Text>
+          {arg.name !== undefined ? (
+            <Group gap={0} wrap="nowrap" align="center">
+              <TextInput
+                size="xs"
+                w={64}
+                value={arg.name}
+                data-testid="c4expr-arg-name"
+                aria-label="argument name"
+                styles={{ input: { fontFamily: "monospace", fontSize: 11 } }}
+                onChange={(e) => setName(i, e.currentTarget.value, false)}
+                onBlur={() => normalizeName(i)}
+              />
+              <Text size="xs" c="dimmed">:</Text>
+            </Group>
           ) : paramNames?.[i] ? (
-            <Text size="xs" c="dimmed" data-testid="c4expr-arg-label" title="parameter">{paramNames[i]}:</Text>
+            <Text size="xs" c="dimmed" data-testid="c4expr-arg-label" title="parameter (click to name)" style={{ cursor: "pointer" }} onClick={() => setName(i, paramNames[i], true)}>{paramNames[i]}:</Text>
           ) : null}
           <ExpressionEditor node={arg.value} path={`${path}a${i}`} onChange={(n, c) => onArgs(args.map((a, j) => (j === i ? { ...a, value: n } : a)), c)} />
           <ActionIcon size="xs" variant="subtle" color="gray" data-testid="c4expr-arg-del" aria-label="remove argument" onClick={() => onArgs(args.filter((_, j) => j !== i), true)}>
