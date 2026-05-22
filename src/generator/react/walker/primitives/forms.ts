@@ -5,7 +5,12 @@
 // trigger surface onto the operation state its Form child just pushed,
 // so it must share the same sink and live alongside the form emitters.
 
-import type { ExprIR } from "../../../../ir/loom-ir.js";
+import type {
+  AggregateIR,
+  BoundedContextIR,
+  ExprIR,
+  TypeIR,
+} from "../../../../ir/loom-ir.js";
 import { camel, humanize, pascal, plural, snake } from "../../../../util/naming.js";
 import type { WalkContext } from "../../body-walker.js";
 import {
@@ -63,6 +68,149 @@ export function emitFormOf(
   return emitFormOfAggregate(call, ctx, depth);
 }
 
+interface PreparedForm {
+  idTargets: AggregateIR[];
+  useController: boolean;
+  defaultValuesTs: string;
+  fieldHtmls: string[];
+}
+
+/** Shared field preparation for all three Form variants.  Resolves the
+ *  `Id<X>` targets / `Controller` need / RHF default-values literal,
+ *  prepares each field's view-model (driving its `field-input-*`
+ *  template), and registers the universal RHF imports, the per-idTarget
+ *  `useAll<X>` imports, the per-field template imports, and the per-field
+ *  testids.  Import insertion order is irrelevant (the import block is
+ *  sorted on render), so callers register their variant-specific
+ *  request/hook import separately; the per-field testids are added here
+ *  because that ordering is identical across variants. */
+function prepareFormFields(
+  ctx: WalkContext,
+  fields: { name: string; type: TypeIR }[],
+  fieldsForHelpers: { name: string; type: TypeIR; optional: boolean }[],
+  bc: BoundedContextIR,
+  testidNamespace: string,
+): PreparedForm {
+  const aggregatesByNameMut = new Map(ctx.aggregatesByName);
+  const idTargets = idTargetsInFields(fieldsForHelpers, bc, aggregatesByNameMut);
+  const useController = needsController(fieldsForHelpers, bc, aggregatesByNameMut);
+  const defaultValuesTs = initialValuesTs(fieldsForHelpers, bc);
+  const fieldVMs = fields.map((f) =>
+    prepareFormFieldVM(
+      f.name,
+      f.type,
+      bc,
+      `${testidNamespace}-input-${f.name}`,
+      aggregatesByNameMut,
+    ),
+  );
+  // RHF + zodResolver are universal across all React packs; the
+  // per-idTarget hook paths are dynamic per-aggregate.  Per-field input
+  // components come from each `field-input-*` template's import
+  // declaration in pack.json (recursing into value-object children).
+  addImport(ctx, "react-hook-form", "useForm");
+  if (useController) addImport(ctx, "react-hook-form", "Controller");
+  addImport(ctx, "@hookform/resolvers/zod", "zodResolver");
+  for (const t of idTargets) {
+    addImport(ctx, `../api/${camel(t.name)}`, `useAll${plural(t.name)}`);
+  }
+  for (const vm of fieldVMs) registerFormFieldImports(ctx, vm);
+  const fieldHtmls = fieldVMs.map((vm) => renderFormField(vm, ctx.pack));
+  for (const vm of fieldVMs) ctx.collectedTestids.add(vm.testId);
+  return { idTargets, useController, defaultValuesTs, fieldHtmls };
+}
+
+/** Walk an optional `onSubmit:` lambda into the handler-body string,
+ *  rebinding its source param to `vals` and exposing the form's
+ *  shell-locals (the mutation hook + RHF handles + per-idTarget query
+ *  hooks) so refs resolve.  Returns null when there's no `onSubmit:`
+ *  (callers then emit the pack's default submit body). */
+function emitFormOnSubmit(
+  ctx: WalkContext,
+  call: ExprIR & { kind: "call" },
+  idTargets: AggregateIR[],
+  mutationLocal: string,
+): string | null {
+  const onSubmit = lambdaArg(call, "onSubmit");
+  if (!onSubmit) return null;
+  const shellLocals = new Set<string>([
+    mutationLocal,
+    "register",
+    "handleSubmit",
+    "control",
+    "errors",
+    ...idTargets.map((t) => idTargetHookVar(t)),
+  ]);
+  const childCtx: WalkContext = {
+    ...ctx,
+    lambdaParams: extendLambdaParams(ctx, onSubmit.param, "vals"),
+    shellLocals,
+  };
+  let onSubmitJs: string | null = null;
+  if (onSubmit.body) {
+    onSubmitJs = emitExpr(onSubmit.body, childCtx);
+  } else if (onSubmit.block && onSubmit.block.length > 0) {
+    const stmts = onSubmit.block.map((s) => emitStmt(s, childCtx)).join(" ");
+    onSubmitJs = `{ ${stmts} }`;
+  }
+  propagateChildFlags(ctx, childCtx);
+  return onSubmitJs;
+}
+
+interface FormSubmitConfig {
+  mutationCall: string;
+  successMessage: string;
+  redirectStmt: string;
+  submitPendingExpr: string;
+  submitLabel: string;
+}
+
+/** Shared render for the inline create/run forms (`Form(of:)` and
+ *  `Form(runs:)`): emits the pack's default submit body when no explicit
+ *  `onSubmit:` was given, then renders the `primitive-form-of` shell.
+ *  The op-form variant (`Form(of:, op:)`) does NOT use this — it emits
+ *  no inline JSX; its shell component is rendered from the recorded
+ *  OperationFormState by the page shell. */
+function renderFormOfPrimitive(
+  ctx: WalkContext,
+  call: ExprIR & { kind: "call" },
+  depth: number,
+  testidNamespace: string,
+  fieldHtmls: string[],
+  onSubmitJs: string | null,
+  cfg: FormSubmitConfig,
+): string {
+  // The default submit body references the pack's toast lib
+  // (`notifications.show` on mantine, `toast.success` on shadcn, …);
+  // each pack declares the matching import under
+  // `imports["form-default-onsubmit"]`, registered only when this
+  // branch actually fires.
+  if (onSubmitJs === null) {
+    addImportsForPrimitive(ctx, "form-default-onsubmit");
+  }
+  const submitBody =
+    onSubmitJs !== null
+      ? onSubmitJs
+      : ctx.pack.render("form-default-onsubmit", {
+          mutationCall: cfg.mutationCall,
+          successMessage: cfg.successMessage,
+          redirectStmt: cfg.redirectStmt,
+        });
+  return renderPrimitive(ctx, "primitive-form-of", {
+    fieldHtmls,
+    submitBody,
+    submitTestid: `${testidNamespace}-submit`,
+    submitPendingExpr: cfg.submitPendingExpr,
+    submitLabel: cfg.submitLabel,
+    testidAttr: testidAttr(call, ctx),
+    indent: "  ".repeat(depth + 1),
+    innerIndent: "  ".repeat(depth + 2),
+    deepIndent: "  ".repeat(depth + 3),
+    deeperIndent: "  ".repeat(depth + 4),
+    closeIndent: "  ".repeat(depth),
+  });
+}
+
 function emitFormOfAggregate(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,
@@ -89,121 +237,47 @@ function emitFormOfAggregate(
   // contract REQUIRES; optional fields surface via update-flow
   // operations on the detail page.
   const fields = agg.fields.filter((f) => !f.optional);
-  const aggregatesByNameMut = new Map(ctx.aggregatesByName);
-  const idTargets = idTargetsInFields(fields, bc, aggregatesByNameMut);
-  const useController = needsController(fields, bc, aggregatesByNameMut);
-  const defaultValuesTs = initialValuesTs(fields, bc);
-  const testidArg = stringNamed(call, "testid");
-  const testidNamespace = testidArg ?? `${snake(plural(agg.name))}-new`;
-  const fieldVMs = fields.map((f) =>
-    prepareFormFieldVM(
-      f.name,
-      f.type,
-      bc,
-      `${testidNamespace}-input-${f.name}`,
-      aggregatesByNameMut,
-    ),
-  );
+  const testidNamespace = stringNamed(call, "testid") ?? `${snake(plural(agg.name))}-new`;
   // The pack's `primitive-form-of` imports cover the form-shell
-  // components (Stack/Button/Group on Mantine, equivalents on
-  // other packs).  Per-field input components come from each
-  // `field-input-*` template's import declaration in pack.json
-  // (recursing into value-object children).  All resolve through
-  // `addImportsForPrimitive` so the page's import block is
-  // pack-neutral.
+  // components (Stack/Button/Group on Mantine, equivalents elsewhere).
   addImportsForPrimitive(ctx, "primitive-form-of");
-  // Structured-imports the wiring used to emit raw via
-  // `form-of-imports.hbs`: RHF + zodResolver are universal across
-  // all React packs; the api hook/request + per-idTarget hook
-  // paths are dynamic per-aggregate.  `renderImportLines` dedupes
-  // by module so a page hosting create + op-modal forms doesn't
-  // collide on `useForm`.
-  addImport(ctx, "react-hook-form", "useForm");
-  if (useController) addImport(ctx, "react-hook-form", "Controller");
-  addImport(ctx, "@hookform/resolvers/zod", "zodResolver");
+  const prepared = prepareFormFields(ctx, fields, fields, bc, testidNamespace);
   addImport(
     ctx,
     `../api/${camel(agg.name)}`,
     `Create${agg.name}Request`,
     `useCreate${agg.name}`,
   );
-  for (const t of idTargets) {
-    addImport(ctx, `../api/${camel(t.name)}`, `useAll${plural(t.name)}`);
-  }
-  for (const vm of fieldVMs) registerFormFieldImports(ctx, vm);
-  const fieldHtmls = fieldVMs.map((vm) => renderFormField(vm, ctx.pack));
-  for (const vm of fieldVMs) ctx.collectedTestids.add(vm.testId);
   ctx.collectedTestids.add(`${testidNamespace}-submit`);
-  let onSubmitJs: string | null = null;
-  const onSubmit = lambdaArg(call, "onSubmit");
-  if (onSubmit) {
-    const shellLocals = new Set<string>([
-      "create",
-      "register",
-      "handleSubmit",
-      "control",
-      "errors",
-      ...idTargets.map((t) => idTargetHookVar(t)),
-    ]);
-    const childCtx: WalkContext = {
-      ...ctx,
-      lambdaParams: extendLambdaParams(ctx, onSubmit.param, "vals"),
-      shellLocals,
-    };
-    if (onSubmit.body) {
-      onSubmitJs = emitExpr(onSubmit.body, childCtx);
-    } else if (onSubmit.block && onSubmit.block.length > 0) {
-      const stmts = onSubmit.block
-        .map((s) => emitStmt(s, childCtx))
-        .join(" ");
-      onSubmitJs = `{ ${stmts} }`;
-    }
-    propagateChildFlags(ctx, childCtx);
-  }
+  const onSubmitJs = emitFormOnSubmit(ctx, call, prepared.idTargets, "create");
   ctx.formOfs.push({
     kind: "aggregate",
     agg,
     bc,
     fields,
-    idTargets,
-    useController,
-    defaultValuesTs,
+    idTargets: prepared.idTargets,
+    useController: prepared.useController,
+    defaultValuesTs: prepared.defaultValuesTs,
     testidNamespace,
-    fieldHtmls,
+    fieldHtmls: prepared.fieldHtmls,
     onSubmitJs,
   });
   const slug = snake(plural(agg.name));
-  // Default submit body references the pack's toast lib
-  // (`notifications.show` on mantine, `toast.success` on shadcn,
-  // `enqueueSnackbar` on mui, `toast(...)` on chakra, etc.).
-  // Each pack declares the matching import under
-  // `imports["form-default-onsubmit"]`; addImportsForPrimitive
-  // routes it through the structured import set so the page only
-  // imports it when this branch actually fires.
-  if (onSubmitJs === null) {
-    addImportsForPrimitive(ctx, "form-default-onsubmit");
-  }
-  const submitBody =
-    onSubmitJs !== null
-      ? onSubmitJs
-      : ctx.pack.render("form-default-onsubmit", {
-          mutationCall: "const out = await create.mutateAsync(vals);",
-          successMessage: `${humanize(agg.name)} created`,
-          redirectStmt: `navigate(\`/${slug}/\${out.id}\`)`,
-        });
-  return renderPrimitive(ctx, "primitive-form-of", {
-    fieldHtmls,
-    submitBody,
-    submitTestid: `${testidNamespace}-submit`,
-    submitPendingExpr: "create.isPending",
-    submitLabel: "Create",
-    testidAttr: testidAttr(call, ctx),
-    indent: "  ".repeat(depth + 1),
-    innerIndent: "  ".repeat(depth + 2),
-    deepIndent: "  ".repeat(depth + 3),
-    deeperIndent: "  ".repeat(depth + 4),
-    closeIndent: "  ".repeat(depth),
-  });
+  return renderFormOfPrimitive(
+    ctx,
+    call,
+    depth,
+    testidNamespace,
+    prepared.fieldHtmls,
+    onSubmitJs,
+    {
+      mutationCall: "const out = await create.mutateAsync(vals);",
+      successMessage: `${humanize(agg.name)} created`,
+      redirectStmt: `navigate(\`/${slug}/\${out.id}\`)`,
+      submitPendingExpr: "create.isPending",
+      submitLabel: "Create",
+    },
+  );
 }
 
 /** Slice A12 — `Form(runs: <wf>)` walker variant.  Same per-field
@@ -236,112 +310,45 @@ function emitFormRuns(
   // workflow params are treated as required (matches the scaffold
   // workflow-form builder, which doesn't filter them either).
   const fieldsForHelpers = fields.map((f) => ({ ...f, optional: false }));
-  const aggregatesByNameMut = new Map(ctx.aggregatesByName);
-  const idTargets = idTargetsInFields(fieldsForHelpers, bc, aggregatesByNameMut);
-  const useController = needsController(fieldsForHelpers, bc, aggregatesByNameMut);
-  const defaultValuesTs = initialValuesTs(fieldsForHelpers, bc);
-  const testidArg = stringNamed(call, "testid");
-  const testidNamespace = testidArg ?? `workflow-${snake(workflow.name)}`;
-  const fieldVMs = fields.map((f) =>
-    prepareFormFieldVM(
-      f.name,
-      f.type,
-      bc,
-      `${testidNamespace}-input-${f.name}`,
-      aggregatesByNameMut,
-    ),
-  );
-  // The pack's `primitive-form-of` imports cover the form-shell
-  // components (Stack/Button/Group on Mantine, equivalents on
-  // other packs).  Per-field input components come from each
-  // `field-input-*` template's import declaration in pack.json
-  // (recursing into value-object children).  All resolve through
-  // `addImportsForPrimitive` so the page's import block is
-  // pack-neutral.
+  const testidNamespace = stringNamed(call, "testid") ?? `workflow-${snake(workflow.name)}`;
   addImportsForPrimitive(ctx, "primitive-form-of");
-  // Structured-imports the workflow-form wiring (was raw via
-  // `form-runs-imports.hbs`): RHF + zodResolver universal,
-  // workflow Request/Hook from `../api/workflows`, plus the
-  // dynamic per-idTarget `useAll<X>` paths.
+  const prepared = prepareFormFields(ctx, fields, fieldsForHelpers, bc, testidNamespace);
   const wfPascalForImport = pascal(workflow.name);
-  addImport(ctx, "react-hook-form", "useForm");
-  if (useController) addImport(ctx, "react-hook-form", "Controller");
-  addImport(ctx, "@hookform/resolvers/zod", "zodResolver");
   addImport(
     ctx,
     "../api/workflows",
     `${wfPascalForImport}Request`,
     `use${wfPascalForImport}Workflow`,
   );
-  for (const t of idTargets) {
-    addImport(ctx, `../api/${camel(t.name)}`, `useAll${plural(t.name)}`);
-  }
-  for (const vm of fieldVMs) registerFormFieldImports(ctx, vm);
-  const fieldHtmls = fieldVMs.map((vm) => renderFormField(vm, ctx.pack));
-  for (const vm of fieldVMs) ctx.collectedTestids.add(vm.testId);
   ctx.collectedTestids.add(`${testidNamespace}-submit`);
-  let onSubmitJs: string | null = null;
-  const onSubmit = lambdaArg(call, "onSubmit");
-  if (onSubmit) {
-    const shellLocals = new Set<string>([
-      "run",
-      "register",
-      "handleSubmit",
-      "control",
-      "errors",
-      ...idTargets.map((t) => idTargetHookVar(t)),
-    ]);
-    const childCtx: WalkContext = {
-      ...ctx,
-      lambdaParams: extendLambdaParams(ctx, onSubmit.param, "vals"),
-      shellLocals,
-    };
-    if (onSubmit.body) {
-      onSubmitJs = emitExpr(onSubmit.body, childCtx);
-    } else if (onSubmit.block && onSubmit.block.length > 0) {
-      const stmts = onSubmit.block
-        .map((s) => emitStmt(s, childCtx))
-        .join(" ");
-      onSubmitJs = `{ ${stmts} }`;
-    }
-    propagateChildFlags(ctx, childCtx);
-  }
+  const onSubmitJs = emitFormOnSubmit(ctx, call, prepared.idTargets, "run");
   ctx.formOfs.push({
     kind: "workflow",
     workflow,
     bc,
     fields,
-    idTargets,
-    useController,
-    defaultValuesTs,
+    idTargets: prepared.idTargets,
+    useController: prepared.useController,
+    defaultValuesTs: prepared.defaultValuesTs,
     testidNamespace,
-    fieldHtmls,
+    fieldHtmls: prepared.fieldHtmls,
     onSubmitJs,
   });
-  if (onSubmitJs === null) {
-    addImportsForPrimitive(ctx, "form-default-onsubmit");
-  }
-  const submitBody =
-    onSubmitJs !== null
-      ? onSubmitJs
-      : ctx.pack.render("form-default-onsubmit", {
-          mutationCall: "await run.mutateAsync(vals);",
-          successMessage: `${humanize(workflow.name)} completed`,
-          redirectStmt: `navigate("/workflows")`,
-        });
-  return renderPrimitive(ctx, "primitive-form-of", {
-    fieldHtmls,
-    submitBody,
-    submitTestid: `${testidNamespace}-submit`,
-    submitPendingExpr: "run.isPending",
-    submitLabel: "Run",
-    testidAttr: testidAttr(call, ctx),
-    indent: "  ".repeat(depth + 1),
-    innerIndent: "  ".repeat(depth + 2),
-    deepIndent: "  ".repeat(depth + 3),
-    deeperIndent: "  ".repeat(depth + 4),
-    closeIndent: "  ".repeat(depth),
-  });
+  return renderFormOfPrimitive(
+    ctx,
+    call,
+    depth,
+    testidNamespace,
+    prepared.fieldHtmls,
+    onSubmitJs,
+    {
+      mutationCall: "await run.mutateAsync(vals);",
+      successMessage: `${humanize(workflow.name)} completed`,
+      redirectStmt: `navigate("/workflows")`,
+      submitPendingExpr: "run.isPending",
+      submitLabel: "Run",
+    },
+  );
 }
 
 /** `Form(of: <Agg>, op: <name>)` — records an OperationFormState
@@ -387,48 +394,20 @@ function emitFormOfOperation(
   // exactly as the workflow-form variant does.
   const fields = op.params;
   const fieldsForHelpers = fields.map((f) => ({ ...f, optional: false }));
-  const aggregatesByNameMut = new Map(ctx.aggregatesByName);
-  const idTargets = idTargetsInFields(fieldsForHelpers, bc, aggregatesByNameMut);
-  const useController = needsController(
-    fieldsForHelpers,
-    bc,
-    aggregatesByNameMut,
-  );
-  const defaultValuesTs = initialValuesTs(fieldsForHelpers, bc);
-  const testidArg = stringNamed(call, "testid");
   const testidNamespace =
-    testidArg ?? `${snake(plural(agg.name))}-op-${op.name}`;
-  const fieldVMs = fields.map((f) =>
-    prepareFormFieldVM(
-      f.name,
-      f.type,
-      bc,
-      `${testidNamespace}-input-${f.name}`,
-      aggregatesByNameMut,
-    ),
-  );
-  // Structured-imports the op-form wiring (was raw via
-  // `form-op-imports.hbs`): RHF + zodResolver universal, op
-  // Request/Hook from `../api/<aggCamel>`, plus the per-idTarget
-  // `useAll<X>` paths.  The pack-specific shared (toast lib,
-  // useState/useDisclosure for non-mantine, modals manager for
-  // mantine) ride on `imports["primitive-modal"]` which the
-  // enclosing `emitModal` auto-registers.
-  addImport(ctx, "react-hook-form", "useForm");
-  if (useController) addImport(ctx, "react-hook-form", "Controller");
-  addImport(ctx, "@hookform/resolvers/zod", "zodResolver");
+    stringNamed(call, "testid") ?? `${snake(plural(agg.name))}-op-${op.name}`;
+  // Note: unlike the inline forms, the op-form does NOT register
+  // `primitive-form-of` here — the pack-specific shell (toast lib,
+  // useState/useDisclosure, modals manager) rides on
+  // `imports["primitive-modal"]`, which the enclosing `emitModal`
+  // auto-registers.
+  const prepared = prepareFormFields(ctx, fields, fieldsForHelpers, bc, testidNamespace);
   addImport(
     ctx,
     `../api/${camel(agg.name)}`,
     `${pascal(op.name)}Request`,
     `use${pascal(op.name)}${agg.name}`,
   );
-  for (const t of idTargets) {
-    addImport(ctx, `../api/${camel(t.name)}`, `useAll${plural(t.name)}`);
-  }
-  for (const vm of fieldVMs) registerFormFieldImports(ctx, vm);
-  const fieldHtmls = fieldVMs.map((vm) => renderFormField(vm, ctx.pack));
-  for (const vm of fieldVMs) ctx.collectedTestids.add(vm.testId);
   ctx.collectedTestids.add(testidNamespace);
   ctx.collectedTestids.add(`${testidNamespace}-form`);
   ctx.collectedTestids.add(`${testidNamespace}-submit`);
@@ -438,11 +417,11 @@ function emitFormOfOperation(
     op,
     bc,
     fields,
-    idTargets,
-    useController,
-    defaultValuesTs,
+    idTargets: prepared.idTargets,
+    useController: prepared.useController,
+    defaultValuesTs: prepared.defaultValuesTs,
     testidNamespace,
-    fieldHtmls,
+    fieldHtmls: prepared.fieldHtmls,
     onSubmitJs: null,
     // Defaults — the enclosing Modal overrides from its trigger.
     triggerLabel: humanize(op.name),
