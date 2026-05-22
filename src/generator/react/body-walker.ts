@@ -104,6 +104,19 @@ import {
   emitSlot,
   emitStat,
 } from "./walker/primitives/display.js";
+import {
+  emitAnchor,
+  emitAvatar,
+  emitDateDisplay,
+  emitEmpty,
+  emitEnumBadge,
+  emitHeading,
+  emitImage,
+  emitKeyValueRow,
+  emitLoader,
+  emitMoney,
+  emitText,
+} from "./walker/primitives/text.js";
 
 /** Per-source named-import map — `from` module → set of named
  *  exports the page needs from it.  Replaces the old single-source
@@ -563,7 +576,7 @@ export interface OperationFormState extends FormStateBase {
   triggerPrimary: boolean;
 }
 
-function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
+export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
   // Slice 11.24 — api hook injection (JSX-child position).
   // Detect `<param>.<aggregate>.<op>` rooted at a UiApiParam.
   // In JSX-child position, the local hook var is brace-wrapped.
@@ -1070,68 +1083,9 @@ function extendLambdaParams(
  *  with `style: "currency"`).  First positional or `value:` named
  *  arg is the numeric value; `currency:` and `decimals:` are
  *  optional named args. */
-function emitMoney(
-  call: ExprIR & { kind: "call" },
-  ctx: WalkContext,
-  depth: number,
-): string {
-  void depth;
-  const value =
-    namedArgValue(call, "value") ?? positionalArgs(call)[0];
-  const valueExpr = value ? emitExpr(value, ctx) : "0";
-  const currency = stringNamed(call, "currency");
-  const decimals = numericNamed(call, "decimals");
-  return renderPrimitive(ctx, "primitive-money", {
-    valueExpr,
-    hasCurrency: currency !== undefined,
-    currency: currency !== undefined ? JSON.stringify(currency) : "",
-    hasDecimals: decimals !== undefined,
-    decimals: decimals !== undefined ? String(decimals) : "",
-    testidAttr: testidAttr(call, ctx),
-  });
-}
-
-/** Slice A3 — DateDisplay(iso, testid?).  Renders through the
- *  pack's `DateTimeValue` runtime helper (locale-formatted with
- *  the raw ISO surfaced in a tooltip).  Accepts a string or null;
- *  empty values render as the shared dimmed em-dash. */
-function emitDateDisplay(
-  call: ExprIR & { kind: "call" },
-  ctx: WalkContext,
-  depth: number,
-): string {
-  void depth;
-  const value =
-    namedArgValue(call, "value") ?? positionalArgs(call)[0];
-  const valueExpr = value ? emitExpr(value, ctx) : '""';
-  return renderPrimitive(ctx, "primitive-date-display", {
-    valueExpr,
-    testidAttr: testidAttr(call, ctx),
-  });
-}
-
-/** Slice A3 — EnumBadge(value, color?, testid?).  Renders the
- *  per-pack Badge with an optional explicit colour.  Mantine
- *  passes `color={…}`; shadcn maps `color` to the Badge `variant`
- *  prop in the template (so the same DSL surface works on both
- *  packs). */
-function emitEnumBadge(
-  call: ExprIR & { kind: "call" },
-  ctx: WalkContext,
-  depth: number,
-): string {
-  void depth;
-  const value =
-    namedArgValue(call, "value") ?? positionalArgs(call)[0];
-  const valueExpr = value ? emitExpr(value, ctx) : '""';
-  const color = stringNamed(call, "color");
-  return renderPrimitive(ctx, "primitive-enum-badge", {
-    valueExpr,
-    hasColor: color !== undefined,
-    color: color !== undefined ? JSON.stringify(color) : "",
-    testidAttr: testidAttr(call, ctx),
-  });
-}
+// Leaf text & media primitives (Heading, Text, Money, DateDisplay,
+// EnumBadge, Anchor, Image, Avatar, Loader, Empty, KeyValueRow) live
+// in walker/primitives/text.ts.
 
 /** Slice A3 — IdLink(id, of: <Aggregate>, testid?).
  *
@@ -1646,23 +1600,6 @@ function emitToolbar(
   });
 }
 
-function emitEmpty(
-  call: ExprIR & { kind: "call" },
-  ctx: WalkContext,
-  depth: number,
-): string {
-  // Empty("No results yet") — empty-state placeholder.  No
-  // dedicated component on either pack; both compose a centred
-  // dimmed text block.  The first positional is the message;
-  // refs / ops welcome (routes through renderTextContent).
-  const msg = firstPositionalContent(call, ctx) ?? '"No results."';
-  void depth;
-  return renderPrimitive(ctx, "primitive-empty", {
-    text: unwrapTextLiteral(msg),
-    testidAttr: testidAttr(call, ctx),
-  });
-}
-
 /** Build the dual label representations input primitives need:
  *  `labelAttr` for an `label="..."` JSX attribute (Mantine's
  *  TextInput/Switch take label this way) and `labelText` for a
@@ -1774,79 +1711,6 @@ function emitPasswordField(
   });
 }
 
-function emitLoader(
-  call: ExprIR & { kind: "call" },
-  ctx: WalkContext,
-  depth: number,
-): string {
-  // Loader() — spinner.  Optional `size:` string literal.
-  void depth;
-  const size = stringNamed(call, "size");
-  return renderPrimitive(ctx, "primitive-loader", {
-    size,
-    hasSize: size !== undefined,
-    testidAttr: testidAttr(call, ctx),
-  });
-}
-
-function emitAnchor(
-  call: ExprIR & { kind: "call" },
-  ctx: WalkContext,
-  depth: number,
-): string {
-  // Anchor("label", to: "/path") — text-style link.  With `to:`,
-  // routes via React Router's Link; without, falls through to a
-  // bare anchor (no href — visible no-op).
-  void depth;
-  const label = firstPositionalContent(call, ctx) ?? '"link"';
-  const to = stringOrRefArgValue(call, "to", ctx);
-  if (to) ctx.usesRouterLink = true;
-  return renderPrimitive(ctx, "primitive-anchor", {
-    label: unwrapTextLiteral(label),
-    to,
-    hasTo: to !== undefined,
-    testidAttr: testidAttr(call, ctx),
-  });
-}
-
-function emitImage(
-  call: ExprIR & { kind: "call" },
-  ctx: WalkContext,
-  depth: number,
-): string {
-  // Image(src: "...", alt: "...") — packs render a styled image
-  // tag.  Both attrs accept string literals or refs.
-  void depth;
-  const src = stringOrRefArgValue(call, "src", ctx);
-  const alt = stringOrRefArgValue(call, "alt", ctx);
-  return renderPrimitive(ctx, "primitive-image", {
-    src,
-    alt,
-    hasSrc: src !== undefined,
-    hasAlt: alt !== undefined,
-    testidAttr: testidAttr(call, ctx),
-  });
-}
-
-function emitAvatar(
-  call: ExprIR & { kind: "call" },
-  ctx: WalkContext,
-  depth: number,
-): string {
-  // Avatar(src: "...", alt: "...") — packs render a circle-cropped
-  // image.  Without src, packs render their user-icon fallback.
-  void depth;
-  const src = stringOrRefArgValue(call, "src", ctx);
-  const alt = stringOrRefArgValue(call, "alt", ctx);
-  return renderPrimitive(ctx, "primitive-avatar", {
-    src,
-    alt,
-    hasSrc: src !== undefined,
-    hasAlt: alt !== undefined,
-    testidAttr: testidAttr(call, ctx),
-  });
-}
-
 /** Slice 11.14 — read a `bind:` named arg as a state-field name.
  *  Returns the field name when the arg is a `ref` to a known
  *  state field (and marks `usesState` on the context); otherwise
@@ -1866,37 +1730,6 @@ function stateBindArg(
     }
   }
   return undefined;
-}
-
-function emitHeading(
-  call: ExprIR & { kind: "call" },
-  ctx: WalkContext,
-  depth: number,
-): string {
-  // First positional is the heading text — accepts a string
-  // literal OR a ref (e.g. a route-param name).  Optional `level:`
-  // named arg controls the heading rank (1..6, default 2).
-  const text = firstPositionalContent(call, ctx) ?? '"Heading"';
-  const level = numericNamed(call, "level") ?? 2;
-  void depth;
-  return renderPrimitive(ctx, "primitive-heading", {
-    text: unwrapTextLiteral(text),
-    level,
-    testidAttr: testidAttr(call, ctx),
-  });
-}
-
-function emitText(
-  call: ExprIR & { kind: "call" },
-  ctx: WalkContext,
-  depth: number,
-): string {
-  const text = firstPositionalContent(call, ctx) ?? '""';
-  void depth;
-  return renderPrimitive(ctx, "primitive-text", {
-    text: unwrapTextLiteral(text),
-    testidAttr: testidAttr(call, ctx),
-  });
 }
 
 function emitButton(
@@ -1983,7 +1816,7 @@ function emitLambdaBody(
  *  1` → `count + 1`) and lambda expression bodies.  State + param
  *  refs render as bare identifiers (they're in scope via
  *  `useState` / `useParams` destructure). */
-function emitExpr(expr: ExprIR, ctx: WalkContext): string {
+export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
   // Slice 11.24 — api hook injection.  Detect `<param>.<aggregate>.<op>`
   // (with optional method-call args) rooted at a UiApiParam ref.
   // When matched, register a hook usage on the context and return
@@ -2348,7 +2181,7 @@ function unsupportedPageStmt(what: string, why: string): never {
  *  the param at render time (so `to: id` → `` `${id}` ``).  Returns
  *  undefined when the arg isn't present or isn't a recognised
  *  navigation source. */
-function stringOrRefArgValue(
+export function stringOrRefArgValue(
   call: ExprIR & { kind: "call" },
   name: string,
   ctx: WalkContext,
@@ -2609,28 +2442,6 @@ function emitQueryView(
  *  First positional is the label string; second positional is the
  *  child JSX (any walker primitive).  Per-pack runtime helper
  *  `KeyValueRow` does the layout. */
-function emitKeyValueRow(
-  call: ExprIR & { kind: "call" },
-  ctx: WalkContext,
-  depth: number,
-): string {
-  const positionals = positionalArgs(call);
-  const labelArg = positionals[0];
-  const childArg = positionals[1];
-  const labelStr =
-    labelArg && labelArg.kind === "literal" && labelArg.lit === "string"
-      ? labelArg.value
-      : "";
-  const childJsx = childArg
-    ? walk(childArg, ctx, depth + 2)
-    : "{/* missing value */}";
-  return renderPrimitive(ctx, "primitive-key-value-row", {
-    label: escapeJsxText(labelStr),
-    childJsx,
-    testidAttr: testidAttr(call, ctx),
-  });
-}
-
 function emitUserComponent(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,
