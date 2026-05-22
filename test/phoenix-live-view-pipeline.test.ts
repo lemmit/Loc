@@ -747,9 +747,10 @@ describe("E4 — router wiring (orchestrator integration)", () => {
 // ---------------------------------------------------------------------------
 // Batch C — markers for parent integration.
 //
-// These tests will pass once the orchestrator (index.ts) wires the four new
-// emitters.  Kept as .skip() so the build stays green; remove .skip() when
-// the parent integration lands.
+// theme-emit + sidebar-emit have landed, but renderWorkflowFormHeex still
+// needs `extra-archetype-emit.ts` (workflow-form HEEx; today a placeholder in
+// liveview-emit.ts).  Kept as .skip() so the build stays green; remove .skip()
+// once that emitter lands.
 // ---------------------------------------------------------------------------
 
 describe.skip("Batch C integration (parent wires emitters)", () => {

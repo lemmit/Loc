@@ -87,7 +87,7 @@ Every backend has the same shape:
 | File | Role |
 |---|---|
 | `index.ts` | Orchestrator — `generate<Platform>ForContexts(...) → Map<path, content>` |
-| `templates/*.tpl.ts` | Procedural emitters (`render<Thing>(...)`) for regular-shaped fragments — id classes, value-object classes, events, DTOs. **Despite the `.tpl.ts` filename, these are plain TS functions building strings via `lines(...)` from `src/util/code-builder.ts`. There is no Handlebars at runtime since the v2 refactor.** |
+| `templates/*.tpl.ts` | Procedural emitters (`render<Thing>(...)`) for regular-shaped fragments — id classes, value-object classes, events, DTOs. **Despite the `.tpl.ts` filename, these are plain TS functions building strings via `lines(...)` from `src/util/code-builder.ts`. The backend emitters use no Handlebars since the v2 refactor — but Handlebars is still a live runtime dependency for the design-pack rendering layer (`src/generator/_packs/loader.ts` compiles the `.hbs` pack/shared templates under `designs/`, `vite/`, `api/`, `docker/`, `stacks/`).** |
 | `*-builder.ts` | Larger procedural builders for per-aggregate-variable content (Hono routes, repositories, React pages, page-objects). |
 | `render-expr.ts` / `render-stmt.ts` | IR-expression-/IR-statement-to-source renderers. Present on platforms that execute domain logic (TS, .NET, Phoenix LiveView). React skips these — the frontend doesn't run domain logic, only consumes the wire shape. |
 
@@ -120,7 +120,7 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 
 ## Conventions
 
-- **Procedural emission only.** When building generated source, use `lines(...)` (and occasionally `Block`) from `src/util/code-builder.ts`. There is no template engine at runtime. The `.tpl.ts` suffix on emitter files is historical.
+- **Procedural emission only.** When building generated source in the backend emitters, use `lines(...)` (and occasionally `Block`) from `src/util/code-builder.ts`. The backend emitters use no template engine; the `.tpl.ts` suffix on those files is historical. (Handlebars is still used at runtime, but only by the design-pack layer — see the per-platform generator table above.)
 - **Pluralisation and casing** flow through `src/util/naming.ts` (`pascal`, `camel`, `snake`, `plural`). Conservative plural rules: `y → ies`, `s/x/z/ch/sh → +es`, else `+s`. Use these instead of hand-cased strings.
 - **`STRING` terminal strips its delimiters.** Langium gives `StringLit.value` as `USD` (3 chars) for source `"USD"`. Re-quote on emission with `JSON.stringify` or equivalent.
 - **Grammar:** use a discriminator field (`op:`) over `{infer X.field=current}` actions in alternations — the latter generates recursive AST types that fail typecheck. Prefer flat-list rules (`head=ID ('.' tail+=ID)*`) over recursive list rules.

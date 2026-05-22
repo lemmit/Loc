@@ -8,7 +8,7 @@ import { unwrapOpt } from "./form-helpers.js";
 
 // ---------------------------------------------------------------------------
 // Page-object builder — emits Playwright page-object classes per
-// aggregate keyed off the data-testids sprinkled by pages-builder.ts.
+// aggregate keyed off the data-testids sprinkled by pages-emitter.ts.
 //
 // Output shape (per aggregate):
 //
