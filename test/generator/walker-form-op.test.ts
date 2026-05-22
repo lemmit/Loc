@@ -89,3 +89,56 @@ describe("scaffold detail page — operation modals", () => {
     expect(tsx).toMatch(/data-testid="orders-op-confirm-submit"/);
   });
 });
+
+// A hand-authored op-form inside a user component. Unlike the scaffold
+// Detail page (where the record is a QueryView lambda binding, so the
+// mutation falls back to the route id), a component param is an in-scope
+// instance at function-top — so the hook targets `order.id` directly.
+// Exercises the component shell's form wiring (the page shell isn't
+// involved here).
+const COMPONENT_SRC = `
+  system S {
+    module Sales {
+      context Sales {
+        aggregate Order {
+          customerId: string display
+          operation confirm() { }
+        }
+        repository Orders for Order { }
+      }
+    }
+    api SalesApi from Sales
+    ui WebApp {
+      api Sales: SalesApi
+      component OrderPanel(order: Order) {
+        body: Modal(Form(order.confirm), trigger: Button("Confirm"), title: "Confirm")
+      }
+      page Home { route: "/" body: Text("hi") }
+    }
+    deployable api { platform: hono modules: Sales serves: SalesApi port: 3000 }
+    deployable web {
+      platform: static
+      targets: api
+      ui: WebApp { Sales: api }
+      port: 3001
+    }
+  }
+`;
+
+describe("instance-qualified op-form inside a component", () => {
+  it("wires the module-scope form + function-top hook against the instance id", async () => {
+    const files = await buildAndGenerate(COMPONENT_SRC);
+    const tsx = files.get("web/src/components/OrderPanel.tsx");
+    expect(tsx, "OrderPanel component is generated").toBeDefined();
+    // Function-top mutation hook targets the prop instance (`order.id`),
+    // not the route `id ?? ""` the scaffold Detail page falls back to.
+    expect(tsx!).toMatch(/const confirm = useConfirmOrder\(order\.id\)/);
+    // Module-scope form component + opener (the page-shell wiring,
+    // now emitted by the component shell too).
+    expect(tsx!).toMatch(/function ConfirmForm\(/);
+    expect(tsx!).toMatch(/function openConfirmModal\(/);
+    // Trigger button references the (now-defined) opener + hook.
+    expect(tsx!).toMatch(/onClick=\{\(\) => openConfirmModal\(confirm\)\}/);
+    expect(tsx!).toMatch(/await mut\.mutateAsync\(vals\)/);
+  });
+});

@@ -54,12 +54,16 @@ export function emitFormOf(
   // rest.
   const runsArg = namedArgValue(call, "runs");
   if (runsArg) return emitFormRuns(call, ctx, depth, runsArg);
-  // `Form(of: <Agg>, op: <name>)` → operation-invocation form.
-  // Hosted inside a `Modal`; rendered as a module-scope component
-  // (own `useForm`) so multiple op-forms on one detail page don't
-  // collide on RHF locals.
-  const opArg = namedArgValue(call, "op");
-  if (opArg) return emitFormOfOperation(call, ctx, opArg);
+  // `Form(<instance>.<operation>)` → operation-invocation form.
+  // The operation is referenced through an in-scope aggregate
+  // instance (a `member` node with a `ref` receiver), mirroring the
+  // `Action` primitive.  Hosted inside a `Modal`; rendered as a
+  // module-scope component (own `useForm`) so multiple op-forms on one
+  // detail page don't collide on RHF locals.
+  const opRef = positionalArgs(call)[0];
+  if (opRef && opRef.kind === "member" && opRef.receiver.kind === "ref") {
+    return emitFormOfOperation(call, ctx, opRef);
+  }
   return emitFormOfAggregate(call, ctx, depth);
 }
 
@@ -163,7 +167,7 @@ interface FormSubmitConfig {
 /** Shared render for the inline create/run forms (`Form(of:)` and
  *  `Form(runs:)`): emits the pack's default submit body when no explicit
  *  `onSubmit:` was given, then renders the `primitive-form-of` shell.
- *  The op-form variant (`Form(of:, op:)`) does NOT use this — it emits
+ *  The op-form variant (`Form(<instance>.<operation>)`) does NOT use this — it emits
  *  no inline JSX; its shell component is rendered from the recorded
  *  OperationFormState by the page shell. */
 function renderFormOfPrimitive(
@@ -325,43 +329,41 @@ function emitFormRuns(
   });
 }
 
-/** `Form(of: <Agg>, op: <name>)` — records an OperationFormState
+/** `Form(<instance>.<operation>)` — records an OperationFormState
  *  and emits no inline JSX.  The enclosing `Modal` primitive
  *  renders the trigger button; the shell emits the module-scope
  *  `<Op>Form` component + `open<Op>Modal` opener + the page-scope
- *  `const <op> = use<Op><Agg>(id ?? "")` mutation hook from the
+ *  `const <op> = use<Op><Agg>(<idExpr>)` mutation hook from the
  *  recorded state.  Field rendering is byte-identical to
  *  `Form(of:)` (same preparer + `field-input-*` templates). */
 function emitFormOfOperation(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,
-  opArg: ExprIR,
+  opRef: ExprIR & { kind: "member" },
 ): string {
-  const ofArg = namedArgValue(call, "of");
-  const aggName =
-    ofArg && ofArg.kind === "ref"
-      ? ofArg.name
-      : ofArg && ofArg.kind === "literal" && ofArg.lit === "string"
-        ? ofArg.value
-        : undefined;
-  const opName =
-    opArg.kind === "ref"
-      ? opArg.name
-      : opArg.kind === "literal" && opArg.lit === "string"
-        ? opArg.value
-        : undefined;
-  if (!aggName || !opName) {
-    return `{/* Form(of:, op:): missing 'of:' or 'op:' ref */}`;
+  const instanceName =
+    opRef.receiver.kind === "ref" ? opRef.receiver.name : undefined;
+  const opName = opRef.member;
+  const aggName = instanceName ? ctx.paramTypes?.get(instanceName) : undefined;
+  if (!instanceName || !aggName) {
+    return `{/* Form(${instanceName ?? "?"}.${opName}): '${instanceName ?? "?"}' is not an in-scope aggregate instance */}`;
   }
   const agg = ctx.aggregatesByName.get(aggName);
   const bc = ctx.bcByAggregate.get(aggName);
   if (!agg || !bc) {
-    return `{/* Form(of: ${aggName}, op: ${opName}): aggregate not found */}`;
+    return `{/* Form(${instanceName}.${opName}): aggregate ${aggName} not found */}`;
   }
   const op = agg.operations.find((o) => o.name === opName && o.visibility === "public");
   if (!op) {
-    return `{/* Form(of: ${aggName}, op: ${opName}): no public operation */}`;
+    return `{/* Form(${instanceName}.${opName}): no public operation '${opName}' on ${agg.name} */}`;
   }
+  // The mutation hook is declared at function-top.  When the instance
+  // is a function-top param (a component prop), target `<instance>.id`;
+  // when it's a render-lambda binding (a Detail page's `data`, not in
+  // scope at function-top), fall back to the route `id`.
+  const idExpr = ctx.paramNames.has(instanceName)
+    ? `${emitExpr(opRef.receiver, ctx)}.id`
+    : `id ?? ""`;
   // Op params carry no `optional` flag — adapt for form-helpers
   // exactly as the workflow-form variant does.
   const fields = op.params;
@@ -388,6 +390,7 @@ function emitFormOfOperation(
     op,
     bc,
     fields,
+    idExpr,
     idTargets: prepared.idTargets,
     useController: prepared.useController,
     defaultValuesTs: prepared.defaultValuesTs,
@@ -414,20 +417,18 @@ export function emitModal(
   );
   const triggerArg = namedArgValue(call, "trigger");
   if (!formChild || !triggerArg || triggerArg.kind !== "call") {
-    return `{/* Modal: expects trigger: Button(...) and a Form(of:, op:) child */}`;
+    return `{/* Modal: expects trigger: Button(...) and a Form(<instance>.<operation>) child */}`;
   }
   // Walk the form child first — records the OperationFormState
   // (and returns "" — the form has no inline JSX).
   walk(formChild, ctx, depth);
-  const opArg = namedArgValue(formChild, "op");
+  // The op-form references the operation through an instance
+  // (`Form(data.confirm)`); the operation name is the member.
+  const opRef = positionalArgs(formChild)[0];
   const opName =
-    opArg && opArg.kind === "ref"
-      ? opArg.name
-      : opArg && opArg.kind === "literal" && opArg.lit === "string"
-        ? opArg.value
-        : undefined;
+    opRef && opRef.kind === "member" ? opRef.member : undefined;
   if (!opName) {
-    return `{/* Modal: child Form missing op: */}`;
+    return `{/* Modal: child Form must be Form(<instance>.<operation>) */}`;
   }
   const label = unwrapTextLiteral(firstPositionalContent(triggerArg, ctx) ?? '"Action"');
   // Platform-neutral emphasis token from the scaffold-expander

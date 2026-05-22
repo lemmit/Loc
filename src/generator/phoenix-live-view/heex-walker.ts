@@ -149,6 +149,10 @@ export interface WalkContext {
    *  assign name it should resolve to.  Used by QueryView to map lambda
    *  parameter names (e.g. "rows") to their assign names (e.g. "items"). */
   varRemapping?: ReadonlyMap<string, string>;
+  /** In-scope instance variable → aggregate name, for instance-qualified
+   *  operation forms (`Form(data.confirm)`).  Populated when QueryView
+   *  walks its single-record `data:` lambda. */
+  instanceTypes?: ReadonlyMap<string, string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -645,10 +649,22 @@ function renderModal(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext):
   const formChild = positional.find(
     (c): c is Extract<ExprIR, { kind: "call" }> => c.kind === "call" && c.name === "Form",
   );
-  const ofName = formChild ? findPascalArg(formChild, "of") : undefined;
-  const opName = formChild ? findPascalArg(formChild, "op") : undefined;
+  // The op-form references the operation through an in-scope instance
+  // (`Form(data.confirm)`); the receiver names the instance (whose
+  // aggregate is resolved via `instanceTypes`) and the member is the
+  // operation.
+  const opRefNode = formChild
+    ? formChild.args.find((_, i) => !formChild.argNames?.[i])
+    : undefined;
+  const instanceName =
+    opRefNode?.kind === "member" && opRefNode.receiver.kind === "ref"
+      ? opRefNode.receiver.name
+      : undefined;
+  const opName =
+    opRefNode?.kind === "member" ? opRefNode.member : undefined;
+  const ofName = instanceName ? ctx.instanceTypes?.get(instanceName) : undefined;
   if (!formChild || !ofName || !opName) {
-    return `<!-- malformed Modal: expected trigger: Button + Form(of:, op:) -->`;
+    return `<!-- malformed Modal: expected trigger: Button + Form(<instance>.<operation>) -->`;
   }
   const aggSnake = snake(ofName);
   const opSnake = snake(opName);
@@ -705,12 +721,13 @@ function renderModal(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext):
  *  `runs: Wf` (workflow form) also emits a `<.simple_form>` but
  *  tied to the workflow action name. */
 function renderForm(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
-  // `Form(of:, op:)` is the operation-modal form — owned and
-  // rendered by `renderModal` (it consumes its Form child
+  // `Form(<instance>.<operation>)` is the operation-modal form —
+  // owned and rendered by `renderModal` (it consumes its Form child
   // directly).  This guard makes the function total if a stray
   // op-form is ever reached without its Modal wrapper: bail before
   // pushing a bogus `kind:"aggregate"` create binding.
-  if (findPascalArg(expr, "op")) return "";
+  const positional0 = expr.args.find((_, i) => !expr.argNames?.[i]);
+  if (positional0 && positional0.kind === "member") return "";
   let ofTarget = "";
   let runsTarget = "";
   let testid = "";
@@ -962,9 +979,17 @@ function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkConte
         assignName = dataVar === "rows" ? "items" : dataVar;
         // Build a remapping so ref("rows") → @items, ref("data") → @data, etc.
         const remapping = new Map<string, string>([[dataVar, assignName]]);
+        // Type the data binding so a nested instance-qualified op-form
+        // (`Form(data.confirm)`) resolves the aggregate it operates on.
+        const recordAgg =
+          isSingle && ofArgNode ? resolveQueryAggregate(ofArgNode) : undefined;
         const innerCtx: WalkContext = {
           ...ctx,
           varRemapping: remapping,
+          instanceTypes:
+            recordAgg && ctx.aggregatesByName.has(recordAgg)
+              ? new Map([...(ctx.instanceTypes ?? []), [arg.param, recordAgg]])
+              : ctx.instanceTypes,
         };
         if (arg.body) dataHeex = renderChild(arg.body, innerCtx);
       } else {

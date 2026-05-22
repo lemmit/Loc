@@ -348,9 +348,12 @@ function expandAggregateDetail(aggregateName: string, ctx: ScaffoldExpandContext
       call(
         "Modal",
         [
-          call("Form", [], undefined, [
-            ["of", ref(agg.name)],
-            ["op", ref(op.name)],
+          // Instance-qualified operation form: the operation is
+          // referenced through the loaded record (`data.<op>`), which
+          // carries the aggregate type and id.  On a Detail page the
+          // record is a QueryView lambda binding, so the mutation hook
+          // falls back to the route `id` (data.id === id here).
+          call("Form", [member(ref(cellVar), op.name)], undefined, [
             ["testid", lit(`${slug}-op-${op.name}`)],
           ]),
         ],
