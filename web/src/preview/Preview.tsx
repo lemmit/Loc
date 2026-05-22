@@ -170,6 +170,12 @@ export function Preview({
 
   // Static stub URL on SANDBOX_ORIGIN (computed once).
   const stubUrl = useMemo(() => sandboxStubUrl(), []);
+  // The sandbox UI-test driver module, served alongside the stub (so it is
+  // same-origin as the sandbox document in both same- and cross-origin modes).
+  const driverUrl = useMemo(
+    () => new URL("driver.js", stubUrl).toString(),
+    [stubUrl],
+  );
 
   // Bundle identity is split in two so ordinary edits refresh the
   // preview in place instead of remounting the iframe:
@@ -213,6 +219,7 @@ export function Preview({
       vendorImportmap: m.vendorImportmap,
       vendorCssUrl: m.vendorCssUrl,
       sandboxBase: sandboxBasename(stubUrl),
+      driverUrl,
     });
     const bridge = new SandboxBridge(el, SANDBOX_ORIGIN, (req) =>
       runtime.dispatch(req),

@@ -115,6 +115,12 @@ interface MakePreviewArgs {
    *  unset, the bundle falls back to BrowserRouter's default
    *  (root). */
   sandboxBase?: string;
+  /** Origin-absolute url of the prebuilt sandbox UI-test driver module
+   *  (public/sandbox/driver.js). When set, it is loaded as a module so
+   *  serveDriverOps can attach to the bridge port and answer UI test ops
+   *  against the sandbox document. Omitted in contexts that don't run UI
+   *  tests. */
+  driverUrl?: string;
 }
 
 const ESCAPE_END_SCRIPT = (s: string): string => s.replace(/<\/script/gi, "<\\/script");
@@ -422,6 +428,7 @@ ${styleTagFor(args.css)}
 ${hostScript}
 <script type="module">${ESCAPE_END_SCRIPT(args.js)}</script>
 <script>${ESCAPE_END_SCRIPT(RELOAD_CONTROLLER)}</script>
+${args.driverUrl ? `<script type="module" src="${args.driverUrl}"></script>` : ""}
 </body>
 </html>`;
 }
