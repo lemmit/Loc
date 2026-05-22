@@ -171,14 +171,20 @@ Done:
   `where` filter through the same picker + editor (`repoSlotOptions`); finds with
   no `where` are omitted. Gated by `test/system-expr.test.ts` + e2e. (Editing
   find *params* is still open.)
+- **Scope-aware name suggestions** — every `raw` leaf in the expression editor
+  is an autocomplete fed the in-scope bare names (params, properties, derived
+  props, helpers, enum values). The scope rules live in the IR: `inScopeNames`
+  sits next to `Env`/`resolveNameRef` in `src/ir/lower-expr.ts`, and the web
+  layer (`slotCandidates`/`slotEnv` in `expr-slots.ts`) reuses the IR's `Env`
+  builders to construct the per-slot env exactly as `lower.ts` does — so the
+  rules aren't forked. Gated by `test/system-expr.test.ts` + e2e.
 
 Open:
 
-- **Deeper expression structuring** — calls (add/remove/edit args), member
-  access (receiver + member), and scope-aware **name pickers** (params,
-  properties, enum values) instead of `raw` text leaves; plus structured
-  `match`/`new`/object/lambda. Needs env computation (the validator/IR knows the
-  in-scope names).
+- **Deeper expression structuring** — structured calls (add/remove/edit args),
+  member access (receiver + member with chained `a.b.c` completion — needs the
+  type system, not just the flat name set), and structured
+  `match`/`new`/object/lambda, instead of `raw` text leaves.
 - **Expression editor in more slots** — statement-expression slots
   (`let`/`:=`/`precondition` values inside bodies), reusing the same recursive
   editor (view filters/binds and repository find `where` clauses already done).

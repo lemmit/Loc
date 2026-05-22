@@ -276,6 +276,30 @@ test("edits a view's where filter through the expression editor", async ({ page 
   await expect(op()).toHaveValue("!=");
 });
 
+test("offers scope-aware name suggestions in a raw leaf", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  await page.locator('[data-testid="rf__node-valueobject:Money"]').click();
+  await page.getByTestId("c4system-expr-pick").click();
+  await page.getByRole("option", { name: "invariant: amount >= 0" }).click();
+
+  // The `amount` operand is a raw leaf; its autocomplete is fed Money's own
+  // properties (`amount`, `currency`) — pick the sibling property.
+  const raw = page.getByTestId("c4expr").getByTestId("c4expr-raw");
+  await expect(raw).toHaveValue("amount");
+  await raw.fill("curr");
+  await page.getByRole("option", { name: "currency", exact: true }).click();
+  await raw.blur();
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+  await expect(page.getByTestId("c4expr").getByTestId("c4expr-raw")).toHaveValue("currency");
+});
+
 test("edits a repository find's where filter through the expression editor", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);

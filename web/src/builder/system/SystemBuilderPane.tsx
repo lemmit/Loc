@@ -43,7 +43,7 @@ import {
   type BodyLocator,
 } from "./body";
 import { BodyEditor } from "./BodyEditor";
-import { editExprSlot, exprSlotOptions, repoSlotOptions, slotExpr, viewSlotOptions, type ExprSlot } from "./expr-slots";
+import { editExprSlot, exprSlotOptions, repoSlotOptions, slotCandidates, slotExpr, viewSlotOptions, type ExprSlot } from "./expr-slots";
 import { seedExpr } from "./expr-model";
 import { ExprSlotEditor, type ExprMode } from "./ExpressionEditor";
 
@@ -487,6 +487,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
                         key={`${selected.id}:${slotKey}:${rev}`}
                         seed={seedExpr(expr)}
                         seedText={expr.$cstNode?.text ?? ""}
+                        candidates={slotCandidates(parsed.ast, slot as ExprSlot)}
                         mode={exprMode}
                         onMode={setExprMode}
                         onCommit={(text) => {
