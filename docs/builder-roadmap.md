@@ -366,6 +366,13 @@ Done:
   then derived) — as a `name : type[?] · source` list in the inspector. Lowered +
   enriched from the linked model off the render path; pure `wireShapeOf` +
   `typeLabel` in `model.ts`. Gated by `test/system-model.test.ts` + e2e.
+- **Persisted node positions** — hand-dragged positions are saved to
+  localStorage (keyed by `<kind>:<name>` node id) and re-applied on every
+  re-seed, so a source edit or reload no longer resets the user's arrangement; a
+  **Reset layout** button discards them back to the derived column layout.
+  Serialize/parse is pure (`positions.ts`, malformed entries dropped); drag-end
+  persistence + re-apply wire through `SystemBuilderPane.tsx`. Gated by
+  `test/system/system-positions.test.ts` + e2e.
 
 Open:
 
@@ -382,7 +389,6 @@ Open:
   context (domain kinds) / first module (api); no UI yet to pick which.
 - **Nested grouping** (module → context → members as React Flow parent nodes)
   and auto-layout; today it's a deterministic column-per-kind layout.
-- **Persisted positions** (layout is currently derived, not written back).
 
 Planned — recommended order:
 
