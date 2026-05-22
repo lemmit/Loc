@@ -2,6 +2,7 @@ import type {
   BuildRpcRequest,
   BuildRpcResponse,
   GenerateResult,
+  SnapshotResult,
   VfsEntry,
   VfsDeleteResult,
   VfsListResult,
@@ -14,6 +15,7 @@ import type {
  *  the union across every wrapper method below. */
 type AnyResult =
   | GenerateResult
+  | SnapshotResult
   | VfsWriteResult
   | VfsDeleteResult
   | VfsListResult
@@ -117,6 +119,18 @@ export class LoomBuildClient {
    *  through `await` preserves ordering without a separate barrier. */
   generateFromPath(entryPath: string): Promise<GenerateResult> {
     return this.call("generate", { entryPath }) as Promise<GenerateResult>;
+  }
+
+  /** Capture provenance rule snapshots — the playground equivalent of the
+   *  CLI `ddd snapshot` prebuild step.  Resolves with the immutable
+   *  timestamped+GUID snapshot files (empty when no `provenanced` field is
+   *  written). */
+  snapshot(text: string): Promise<SnapshotResult> {
+    return this.call("snapshot", { text }) as Promise<SnapshotResult>;
+  }
+
+  snapshotFromPath(entryPath: string): Promise<SnapshotResult> {
+    return this.call("snapshot", { entryPath }) as Promise<SnapshotResult>;
   }
 
   /** Push one or more files into the worker's VFS.  Returns the

@@ -913,7 +913,40 @@ export class DddValidator {
           );
         }
       }
+      const hasExtern = agg.members.some((x) => isOperation(x) && x.extern);
+      if (
+        isProperty(m) &&
+        m.provenanced &&
+        !hasExtern &&
+        !this.fieldIsWritten(agg, m.name)
+      ) {
+        // A provenanced field that no operation ever assigns produces no
+        // trace records.  Warn (not error), and only when the aggregate has
+        // no `extern` operation — an extern handler has no visible body and
+        // may legitimately be the writer.
+        accept(
+          "warning",
+          `Provenanced field '${m.name}' on aggregate '${agg.name}' is never written; no trace records will be produced.`,
+          { node: m, property: "provenanced", code: "loom.provenanced-never-written" },
+        );
+      }
     }
+  }
+
+  /** True iff some `:=`/`+=`/`-=` in this aggregate targets `field`
+   *  directly (matches the v1 instrumentation scope — direct fields). */
+  private fieldIsWritten(agg: Aggregate, field: string): boolean {
+    for (const node of AstUtils.streamAllContents(agg)) {
+      if (
+        isAssignOrCallStmt(node) &&
+        node.op &&
+        node.target?.head === field &&
+        (node.target.tail?.length ?? 0) === 0
+      ) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private checkEntityPart(part: EntityPart, agg: Aggregate, accept: ValidationAcceptor) {

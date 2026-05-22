@@ -40,6 +40,23 @@ export interface GenerateFail {
 
 export type GenerateResult = GenerateOk | GenerateFail;
 
+/** Result of a provenance-snapshot capture (the playground's equivalent
+ *  of the CLI `ddd snapshot` prebuild step).  `files` are immutable
+ *  timestamped+GUID `.loom/snapshots/*.loomsnap.json` entries; empty when
+ *  the source declares no written `provenanced` field. */
+export interface SnapshotOk {
+  ok: true;
+  files: VirtualFile[];
+  diagnostics: BuildDiagnostic[];
+}
+
+export interface SnapshotFail {
+  ok: false;
+  diagnostics: BuildDiagnostic[];
+}
+
+export type SnapshotResult = SnapshotOk | SnapshotFail;
+
 /** A single VFS entry shipped over the wire — the worker writes
  *  `content` at `path` into its local MemoryVfs. */
 export interface VfsEntry {
@@ -87,6 +104,7 @@ export interface GenerateParams {
 
 export type BuildRpcRequest =
   | { id: number; method: "generate"; params: GenerateParams }
+  | { id: number; method: "snapshot"; params: GenerateParams }
   | { id: number; method: "vfs.write"; params: { entries: VfsEntry[] } }
   | { id: number; method: "vfs.delete"; params: { paths: string[] } }
   | { id: number; method: "vfs.list"; params: { prefix: string } }
@@ -96,6 +114,7 @@ export interface BuildRpcResponse {
   id: number;
   result?:
     | GenerateResult
+    | SnapshotResult
     | VfsWriteResult
     | VfsDeleteResult
     | VfsListResult
