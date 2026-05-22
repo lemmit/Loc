@@ -22,6 +22,7 @@ import type { TreeFolder } from "../preview/file-tree";
 import type { useWorkspace } from "../workspace/use-workspace";
 import type { PipelineState } from "../pipeline/state";
 import type { DispatchResult } from "../runtime/protocol";
+import type { ApiEndpoint } from "../backend/openapi";
 
 export type ReactBundleStatus =
   | { kind: "pending" }
@@ -139,6 +140,22 @@ export interface LayoutCtx {
   setReqPath: (v: string) => void;
   reqBody: string;
   setReqBody: (v: string) => void;
+
+  // Spec-driven endpoint console — populated from the booted backend's
+  // `/openapi.json`.  Empty when the spec couldn't be fetched/parsed, in
+  // which case the panel falls back to the bare manual form above.
+  apiEndpoints: ApiEndpoint[];
+  /** Selected operationId, the CUSTOM_ENDPOINT sentinel, or null. */
+  selectedOpId: string | null;
+  /** Resolved endpoint for `selectedOpId` (null for Custom / none). */
+  selectedEndpoint: ApiEndpoint | null;
+  runSelectEndpoint: (opId: string) => void;
+  pathParamValues: Record<string, string>;
+  setPathParam: (name: string, value: string) => void;
+  queryParamValues: Record<string, string>;
+  setQueryParam: (name: string, value: string) => void;
+  /** Regenerate the request body from the selected endpoint's schema. */
+  runGenerateExample: () => void;
 
   // Live mode
   liveMode: boolean;

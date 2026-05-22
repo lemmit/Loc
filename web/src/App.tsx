@@ -10,6 +10,14 @@ import type { GenerateOk, GenerateResult, VirtualFile } from "./build/protocol";
 import type { BundleOk } from "./bundle/protocol";
 import { engineRegistry, selectedEngineId, type RuntimeEngine } from "./engine";
 import { emptyDependencySet } from "./engine";
+import {
+  CUSTOM_ENDPOINT,
+  buildConcretePath,
+  generateExampleBody,
+  parseOpenApi,
+  type ApiEndpoint,
+  type OpenApiDoc,
+} from "./backend/openapi";
 import { buildTree } from "./preview/file-tree";
 import { useWorkspace } from "./workspace/use-workspace";
 import { buildShareUrl, readHashSource, writeHashSource } from "./util/share";
@@ -160,6 +168,11 @@ export default function App(): JSX.Element {
   const [reqMethod, setReqMethod] = useState<string>("GET");
   const [reqPath, setReqPath] = useState<string>("/products");
   const [reqBody, setReqBody] = useState<string>("");
+  const [openApiSpec, setOpenApiSpec] = useState<OpenApiDoc | null>(null);
+  const [apiEndpoints, setApiEndpoints] = useState<ApiEndpoint[]>([]);
+  const [selectedOpId, setSelectedOpId] = useState<string | null>(null);
+  const [pathParamValues, setPathParamValues] = useState<Record<string, string>>({});
+  const [queryParamValues, setQueryParamValues] = useState<Record<string, string>>({});
   const [copied, setCopied] = useState(false);
   const [liveMode, setLiveMode] = useState(false);
   const liveModeRef = useRef(liveMode);
@@ -465,10 +478,41 @@ export default function App(): JSX.Element {
     return { hono: honoRes, react: reactRes };
   }
 
+  // Best-effort: fetch the booted backend's OpenAPI document and turn it
+  // into the endpoint list that drives the Backend console's picker.  On
+  // any failure we clear the spec so the panel falls back to manual mode.
+  async function loadOpenApiSpec(engine: RuntimeEngine): Promise<void> {
+    try {
+      const res = await engine.dispatch({
+        url: "http://localhost/openapi.json",
+        method: "GET",
+        headers: {},
+        body: null,
+      });
+      if (res.ok && res.response.status < 400 && res.response.body) {
+        const doc = JSON.parse(res.response.body) as OpenApiDoc;
+        setOpenApiSpec(doc);
+        setApiEndpoints(parseOpenApi(doc));
+        return;
+      }
+    } catch {
+      // fall through to manual mode
+    }
+    setOpenApiSpec(null);
+    setApiEndpoints([]);
+  }
+
   async function runBootStep(hono: BundleOk): Promise<boolean> {
     const engine = engineRef.current;
     if (!engine) return false;
     dispatch({ type: "BOOT_START" });
+    // Reset spec-driven state — a fresh boot may serve a different
+    // contract, and a failed (re)boot shouldn't leave stale endpoints.
+    setSelectedOpId(null);
+    setPathParamValues({});
+    setQueryParamValues({});
+    setApiEndpoints([]);
+    setOpenApiSpec(null);
     try {
       const sourceHash = fnv1a32(sourceRef.current);
       const dataDir = `opfs-ahp://loom-${sourceHash}`;
@@ -480,6 +524,7 @@ export default function App(): JSX.Element {
           persistent: res.persistent,
           migrated: res.migrated,
         });
+        await loadOpenApiSpec(engine);
         return true;
       }
       dispatch({ type: "BOOT_FAIL", message: res.message });
@@ -579,6 +624,48 @@ export default function App(): JSX.Element {
     }
   }
 
+  // Spec-driven endpoint console handlers.  Selecting an endpoint pre-fills
+  // the method, the concrete path, and (for write verbs) an example body
+  // sampled from the schema.  Param edits keep `reqPath` in sync so
+  // `runDispatch` stays unchanged — it always sends the concrete `reqPath`.
+  const selectedEndpoint: ApiEndpoint | null =
+    selectedOpId && selectedOpId !== CUSTOM_ENDPOINT
+      ? apiEndpoints.find((e) => e.operationId === selectedOpId) ?? null
+      : null;
+
+  function runSelectEndpoint(opId: string): void {
+    setSelectedOpId(opId);
+    if (opId === CUSTOM_ENDPOINT) return;
+    const ep = apiEndpoints.find((e) => e.operationId === opId);
+    if (!ep) return;
+    const freshPath: Record<string, string> = {};
+    const freshQuery: Record<string, string> = {};
+    setPathParamValues(freshPath);
+    setQueryParamValues(freshQuery);
+    setReqMethod(ep.method);
+    setReqPath(buildConcretePath(ep, freshPath, freshQuery));
+    setReqBody(ep.hasBody && openApiSpec ? generateExampleBody(ep.requestSchema, openApiSpec) : "");
+  }
+
+  function setPathParam(name: string, value: string): void {
+    if (!selectedEndpoint) return;
+    const next = { ...pathParamValues, [name]: value };
+    setPathParamValues(next);
+    setReqPath(buildConcretePath(selectedEndpoint, next, queryParamValues));
+  }
+
+  function setQueryParam(name: string, value: string): void {
+    if (!selectedEndpoint) return;
+    const next = { ...queryParamValues, [name]: value };
+    setQueryParamValues(next);
+    setReqPath(buildConcretePath(selectedEndpoint, pathParamValues, next));
+  }
+
+  function runGenerateExample(): void {
+    if (!selectedEndpoint || !openApiSpec) return;
+    setReqBody(generateExampleBody(selectedEndpoint.requestSchema, openApiSpec));
+  }
+
   const files: VirtualFile[] = generateSuccess?.files ?? [];
   // The `.c4.json` sidecar backs the in-browser LikeC4 render of its
   // `.c4` sibling — kept in `files` for lookup, but hidden from the tree.
@@ -655,6 +742,15 @@ export default function App(): JSX.Element {
     setReqPath,
     reqBody,
     setReqBody,
+    apiEndpoints,
+    selectedOpId,
+    selectedEndpoint,
+    runSelectEndpoint,
+    pathParamValues,
+    setPathParam,
+    queryParamValues,
+    setQueryParam,
+    runGenerateExample,
     liveMode,
     setLiveMode,
     activeTab,
