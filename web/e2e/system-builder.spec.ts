@@ -308,6 +308,28 @@ test("structures a member call and edits its arguments", async ({ page }) => {
   await expect(page.getByTestId("c4expr").getByTestId("c4expr-arg-del")).toHaveCount(1);
 });
 
+test("edits an operation-body statement expression", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  // Order.addLine has `precondition qty > 0` — a statement expression.
+  await page.locator('[data-testid="rf__node-aggregate:Order"]').click();
+  await page.getByTestId("c4system-expr-pick").click();
+  await page.getByRole("option", { name: "addLine: precondition qty > 0" }).click();
+
+  const op = () => page.getByTestId("c4expr").getByTestId("c4expr-op");
+  await expect(op()).toHaveValue(">");
+  await op().click();
+  await page.getByRole("option", { name: ">=", exact: true }).click();
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+  await expect(op()).toHaveValue(">=");
+});
+
 test("offers scope-aware name suggestions in a raw leaf", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);

@@ -8,6 +8,7 @@ import type { Aggregate, Model, ValueObject } from "../src/language/generated/as
 import { emitExpr, seedExpr } from "../web/src/builder/system/expr-model.js";
 import {
   editExprSlot,
+  exprSlotOptions,
   listDerived,
   listInvariants,
   repoSlotOptions,
@@ -133,6 +134,26 @@ describe("structured expression editor — view slots", () => {
     expect(out).toMatch(/lineCount = lines\.count \+ 1/);
     // Sibling binds untouched.
     expect(out).toMatch(/orderId = id/);
+  });
+});
+
+describe("structured expression editor — operation statement slots", () => {
+  it("lists precondition / requires / let expressions across operations", () => {
+    const opts = exprSlotOptions(owner<Aggregate>(parse(sales), "Aggregate", "Order")).filter((o) => o.value.startsWith("stmt:"));
+    // addLine has two preconditions (its `+=` assign and `emit` carry no single expr).
+    expect(opts.map((o) => o.value)).toEqual(expect.arrayContaining(["stmt:addLine:0", "stmt:addLine:1"]));
+    expect(opts.find((o) => o.value === "stmt:addLine:1")?.label).toBe("addLine: precondition qty > 0");
+  });
+
+  it("resolves and edits a statement expression", () => {
+    const expr = slotExpr(parse(sales), { kind: "stmtExpr", owner: "Order", op: "addLine", index: 1 })!;
+    expect(seedExpr(expr)).toMatchObject({ kind: "binary", op: ">", left: { kind: "raw", text: "qty" } });
+    expect(editExprSlot(sales, { kind: "stmtExpr", owner: "Order", op: "addLine", index: 1 }, "qty >= 1")).toMatch(/precondition qty >= 1/);
+  });
+
+  it("offers operation params (and the aggregate's names) as candidates", () => {
+    const c = slotCandidates(parse(sales), { kind: "stmtExpr", owner: "Order", op: "addLine", index: 1 });
+    expect(c).toEqual(expect.arrayContaining(["qty", "productId", "price", "status", "lines"]));
   });
 });
 
