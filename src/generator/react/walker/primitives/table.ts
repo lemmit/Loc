@@ -93,10 +93,15 @@ export function emitTable(
   const rowIndent = "  ".repeat(depth + 3);
   const cellIndent = "  ".repeat(depth + 4);
   const closeIndent = "  ".repeat(depth);
+  // The row lambda only declares the `idx` param when something
+  // actually references it (e.g. a view keying on `keyExpr: "idx"`);
+  // otherwise emit `(row)` so the generated code carries no unused param.
+  const usesIdx = /\bidx\b/.test([keyExpr, rowTestidJs, onRowClickJs].filter(Boolean).join(" "));
   return renderPrimitive(ctx, "primitive-table", {
     rowsExpr,
     rowVar,
     keyExpr,
+    usesIdx,
     columns: cols,
     hasColumns: cols.length > 0,
     hasOnRowClick: onRowClickJs !== undefined,

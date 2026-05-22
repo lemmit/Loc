@@ -30,7 +30,7 @@
       "correctness": {
         "noUnusedImports": "warn",
         "noUnusedVariables": "warn",
-        "noUnusedFunctionParameters": "warn",
+        "noUnusedFunctionParameters": "error",
         "useExhaustiveDependencies": "warn"
       }
     }
