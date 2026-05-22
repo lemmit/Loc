@@ -94,19 +94,27 @@ function findOperation(owner: AstNode | null, name: string): Operation | null {
 }
 
 // The editable expression a statement slot points at: the predicate of a
-// precondition/requires, a `let` value, an assignment's right-hand value, or
-// (with `field`) an emit field's value. Bare calls have no single value expr.
+// precondition/requires, a `let` value, an assignment's right-hand value, an
+// emit field's value (with `field`), or a bare call's argument (with `field`).
 function stmtSlotExpr(stmt: Statement, field?: number): Expression | null {
   if (stmt.$type === "PreconditionStmt" || stmt.$type === "RequiresStmt" || stmt.$type === "LetStmt") {
     return (stmt as { expr: Expression }).expr;
   }
   if (stmt.$type === "AssignOrCallStmt") {
-    return (stmt as AssignOrCallStmt).value ?? null;
+    const a = stmt as AssignOrCallStmt;
+    if (a.value) return a.value; // assignment right-hand value
+    if (field !== undefined) return a.target?.args[field] ?? null; // bare call argument
+    return null;
   }
   if (stmt.$type === "EmitStmt" && field !== undefined) {
     return (stmt as EmitStmt).fields[field]?.value ?? null;
   }
   return null;
+}
+
+/** Dotted name of an LValue target (`order.confirm`, `balance`). */
+function lvalueName(lv: { head: string; tail: string[] }): string {
+  return [lv.head, ...lv.tail].join(".");
 }
 
 /** Picker label for a non-emit single-expression statement. */
@@ -122,9 +130,9 @@ function stmtLabel(stmt: Statement, expr: Expression): string {
 }
 
 // Push one option per editable expression in a statement body — precondition /
-// requires / let / assignment value (one each), and one per emit field. Shared
-// by operations (stmtExpr slots) and workflows (wfStmt slots) via the slot/value
-// factories.
+// requires / let / assignment value (one each), one per emit field, and one per
+// bare-call argument. Shared by operations (stmtExpr slots) and workflows
+// (wfStmt slots) via the slot/value factories.
 function pushStatementOptions(
   out: SlotOption[],
   body: readonly Statement[],
@@ -141,6 +149,19 @@ function pushStatementOptions(
       emit.fields.forEach((f, field) => {
         out.push({ value: mkValue(index, field), label: `${labelPrefix}emit ${ev}.${f.name} = ${printExpr(f.value)}`, slot: mkSlot(index, field) });
       });
+      return;
+    }
+    if (stmt.$type === "AssignOrCallStmt") {
+      const a = stmt as AssignOrCallStmt;
+      if (a.value) {
+        out.push({ value: mkValue(index), label: `${labelPrefix}${stmtLabel(stmt, a.value)}`, slot: mkSlot(index) });
+      } else if (a.target?.call) {
+        // Bare call (`x.method(args)`) — one slot per argument.
+        const name = lvalueName(a.target);
+        a.target.args.forEach((arg, field) => {
+          out.push({ value: mkValue(index, field), label: `${labelPrefix}${name}(…) arg ${field + 1}: ${printExpr(arg)}`, slot: mkSlot(index, field) });
+        });
+      }
       return;
     }
     const expr = stmtSlotExpr(stmt);
