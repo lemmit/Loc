@@ -38,13 +38,30 @@ function collectBodies(ast: unknown): BodyEntry[] {
   return out;
 }
 
-// Typed option sets for `ref` props (drives the binding dropdowns).
+// Typed option sets for `ref` props (drives the binding dropdowns).  `operation`
+// is contextual (depends on a node's sibling `of:`) so it's collected separately.
 function collectOptions(ast: unknown): Record<string, string[]> {
   const aggregate = new Set<string>();
+  const workflow = new Set<string>();
+  const view = new Set<string>();
   for (const node of AstUtils.streamAst(ast as Parameters<typeof AstUtils.streamAst>[0])) {
     if (node.$type === "Aggregate") aggregate.add((node as unknown as { name: string }).name);
+    else if (node.$type === "Workflow") workflow.add((node as unknown as { name: string }).name);
+    else if (node.$type === "View") view.add((node as unknown as { name: string }).name);
   }
-  return { aggregate: [...aggregate].sort() };
+  return { aggregate: [...aggregate].sort(), workflow: [...workflow].sort(), view: [...view].sort() };
+}
+
+// Operation names per aggregate — drives the contextual `op:` dropdown on a Form
+// (its options follow the Form's selected `of:` aggregate).
+function collectOperations(ast: unknown): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const node of AstUtils.streamAst(ast as Parameters<typeof AstUtils.streamAst>[0])) {
+    if (node.$type !== "Operation") continue;
+    const agg = (node as unknown as { $container?: { $type?: string; name?: string } }).$container;
+    if (agg?.$type === "Aggregate" && agg.name) (out[agg.name] ??= []).push((node as unknown as { name: string }).name);
+  }
+  return out;
 }
 
 // Names of user-defined `component`s in scope — a call to one is recognised as
@@ -63,6 +80,7 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const parsed = useMemo(() => parseDdd(ctx.getSource()), [ctx, rev]);
   const pages = useMemo(() => collectBodies(parsed.ast), [parsed]);
   const options = useMemo(() => collectOptions(parsed.ast), [parsed]);
+  const operations = useMemo(() => collectOperations(parsed.ast), [parsed]);
   const components = useMemo(() => collectComponents(parsed.ast), [parsed]);
   const componentNames = useMemo(() => [...components].sort(), [components]);
 
@@ -98,6 +116,7 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
       pages={pages.map((p) => p.name)}
       pageName={current.name}
       options={options}
+      operations={operations}
       componentNames={componentNames}
       onSelectPage={setPageName}
       onApply={handleApply}

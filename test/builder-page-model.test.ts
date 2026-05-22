@@ -90,6 +90,8 @@ describe("page-builder model — primitive coverage", () => {
     'List(of: Order)',
     'Form(of: Order, testid: "orders-new")',
     'Form(creates: Product)',
+    'Form(of: Account, op: withdraw)',
+    'Form(runs: PlaceOrder)',
     'Badge("Alpha", color: "blue")',
     // Expression-valued props (the `expr` prop kind): data-bound args must
     // round-trip verbatim, not collapse the whole call to Opaque.
@@ -289,6 +291,13 @@ describe("page-builder model — container-with-props seed shape", () => {
     const node = seed("Form(of: Sales.Order)");
     expect(node.name).toBe("Form");
     expect(node.props.of).toBe("Sales.Order");
+  });
+
+  it("recognises Form op/runs bindings", () => {
+    const op = seed("Form(of: Account, op: withdraw)");
+    expect(op.props.of).toBe("Account");
+    expect(op.props.op).toBe("withdraw");
+    expect(seed("Form(runs: PlaceOrder)").props.runs).toBe("PlaceOrder");
   });
 
   it("recognises a call with optional positionals omitted", () => {

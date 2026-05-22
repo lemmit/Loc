@@ -59,6 +59,9 @@ interface PageBuilderProps {
   pageName: string;
   /** Typed option sets for `ref` props (e.g. { aggregate: [...] }). */
   options: Record<string, string[]>;
+  /** Operation names per aggregate — the contextual `op:` dropdown follows a
+   *  Form's selected `of:`. */
+  operations?: Record<string, string[]>;
   /** User-defined `component` names in scope, registered in the craft resolver
    *  so calls to them render as editable nodes. */
   componentNames?: string[];
@@ -72,12 +75,12 @@ interface PageBuilderProps {
 // Structural page-body editor.  Palette (add) | canvas (arrange/select) |
 // settings (edit props).  "Apply to source" hands the serialized tree back to
 // BuilderPane, which regenerates the `body:` and splices it into `.ddd`.
-export default function PageBuilder({ initialNodes, pages, pageName, options, componentNames = [], onSelectPage, onApply, compact = false }: PageBuilderProps): JSX.Element {
+export default function PageBuilder({ initialNodes, pages, pageName, options, operations = {}, componentNames = [], onSelectPage, onApply, compact = false }: PageBuilderProps): JSX.Element {
   const editorResolver = useMemo(() => resolverWithComponents(componentNames), [componentNames]);
   return (
     <Editor resolver={editorResolver} key={pageName}>
       {compact ? (
-        <CompactLayout initialNodes={initialNodes} pages={pages} pageName={pageName} options={options} onSelectPage={onSelectPage} onApply={onApply} />
+        <CompactLayout initialNodes={initialNodes} pages={pages} pageName={pageName} options={options} operations={operations} onSelectPage={onSelectPage} onApply={onApply} />
       ) : (
         <Box style={{ display: "flex", flexDirection: "column", height: "100%" }}>
           <Toolbar pages={pages} pageName={pageName} onSelectPage={onSelectPage} onApply={onApply} />
@@ -88,7 +91,7 @@ export default function PageBuilder({ initialNodes, pages, pageName, options, co
                 <Frame data={initialNodes} />
               </Box>
             </ScrollArea>
-            <SettingsPanel options={options} />
+            <SettingsPanel options={options} operations={operations} />
           </Box>
         </Box>
       )}
@@ -99,7 +102,7 @@ export default function PageBuilder({ initialNodes, pages, pageName, options, co
 // Mobile layout: full-width canvas; the palette ("Add") and settings ("Edit")
 // move into bottom drawers reachable from the toolbar.  The settings drawer
 // auto-opens on selection so tap-to-select flows straight into editing.
-function CompactLayout({ initialNodes, pages, pageName, options, onSelectPage, onApply }: Omit<PageBuilderProps, "compact">): JSX.Element {
+function CompactLayout({ initialNodes, pages, pageName, options, operations = {}, onSelectPage, onApply }: Omit<PageBuilderProps, "compact">): JSX.Element {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const { selectedId } = useEditor((state) => ({ selectedId: [...state.events.selected][0] }));
@@ -128,7 +131,7 @@ function CompactLayout({ initialNodes, pages, pageName, options, onSelectPage, o
         <PaletteContent onAdded={() => setPaletteOpen(false)} />
       </Drawer>
       <Drawer opened={settingsOpen} onClose={() => setSettingsOpen(false)} position="bottom" size="65%" title="Edit" data-testid="c4builder-settings-drawer">
-        <SettingsContent options={options} />
+        <SettingsContent options={options} operations={operations} />
       </Drawer>
     </Box>
   );
@@ -219,7 +222,7 @@ function Palette(): JSX.Element {
   );
 }
 
-function SettingsContent({ options }: { options: Record<string, string[]> }): JSX.Element {
+function SettingsContent({ options, operations = {} }: { options: Record<string, string[]>; operations?: Record<string, string[]> }): JSX.Element {
   const { id, name, props, childNames, actions, query } = useEditor((state) => {
     const selected = [...state.events.selected][0];
     const node = selected ? state.nodes[selected] : undefined;
@@ -305,7 +308,12 @@ function SettingsContent({ options }: { options: Record<string, string[]> }): JS
             label={f.key}
             clearable
             searchable
-            data={[...new Set([...(options[f.options ?? ""] ?? []), props[f.key]].filter(Boolean) as string[])]}
+            // `operation` options are contextual: the operations of the node's
+            // sibling `of:` aggregate.  Other ref kinds use a static option set.
+            data={[...new Set([
+              ...(f.options === "operation" ? (operations[String(props.of ?? "")] ?? []) : (options[f.options ?? ""] ?? [])),
+              props[f.key],
+            ].filter(Boolean) as string[])]}
             value={props[f.key] != null ? String(props[f.key]) : null}
             data-testid={`c4builder-prop-${f.key}`}
             onChange={(v) => set(f.key, v || undefined)}
@@ -320,10 +328,10 @@ function SettingsContent({ options }: { options: Record<string, string[]> }): JS
   );
 }
 
-function SettingsPanel({ options }: { options: Record<string, string[]> }): JSX.Element {
+function SettingsPanel({ options, operations = {} }: { options: Record<string, string[]>; operations?: Record<string, string[]> }): JSX.Element {
   return (
     <Box style={{ width: 240, minWidth: 240, borderLeft: "1px solid var(--mantine-color-dark-4)", padding: 8, overflow: "auto" }}>
-      <SettingsContent options={options} />
+      <SettingsContent options={options} operations={operations} />
     </Box>
   );
 }
