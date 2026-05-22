@@ -182,6 +182,33 @@ describe("structured expression editor — operation statement slots", () => {
   });
 });
 
+describe("structured expression editor — assignment & emit statement slots", () => {
+  const order = () => parse(sales);
+
+  it("exposes assignment values and one slot per emit field", () => {
+    const opts = exprSlotOptions(owner<Aggregate>(parse(sales), "Aggregate", "Order"));
+    const byValue = new Map(opts.map((o) => [o.value, o.label]));
+    // addLine: `lines += new OrderLine { … }` (assign) then `emit LineAdded { … }`.
+    expect(byValue.get("stmt:addLine:2")).toBe("addLine: lines += new OrderLine { productId: productId, quantity: qty, unitPrice: price }");
+    expect(byValue.get("stmt:addLine:3:2")).toBe("addLine: emit LineAdded.quantity = qty");
+    // confirm: `status := Confirmed`.
+    expect(byValue.get("stmt:confirm:2")).toBe("confirm: status := Confirmed");
+  });
+
+  it("resolves and edits an assignment value (only the value is spliced)", () => {
+    expect(seedExpr(slotExpr(order(), { kind: "stmtExpr", owner: "Order", op: "addLine", index: 2 })!)).toMatchObject({ kind: "new", partType: "OrderLine" });
+    const out = editExprSlot(sales, { kind: "stmtExpr", owner: "Order", op: "confirm", index: 2 }, "Shipped")!;
+    expect(out).toMatch(/status := Shipped/);
+  });
+
+  it("resolves and edits a single emit field value, leaving siblings intact", () => {
+    expect(seedExpr(slotExpr(order(), { kind: "stmtExpr", owner: "Order", op: "addLine", index: 3, field: 2 })!)).toMatchObject({ kind: "raw", text: "qty" });
+    const out = editExprSlot(sales, { kind: "stmtExpr", owner: "Order", op: "addLine", index: 3, field: 2 }, "qty + 1")!;
+    expect(out).toMatch(/quantity: qty \+ 1/);
+    expect(out).toMatch(/order: id/);
+  });
+});
+
 describe("structured expression editor — workflow statement slots", () => {
   it("lists a workflow's single-expression statements", () => {
     const opts = workflowSlotOptions(owner<Workflow>(parse(sales), "Workflow", "placeOrder"));

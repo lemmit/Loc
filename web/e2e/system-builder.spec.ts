@@ -380,6 +380,29 @@ test("structures an object literal and edits its fields", async ({ page }) => {
   await expect(page.getByTestId("c4expr").getByTestId("c4expr-field-name")).toHaveCount(3);
 });
 
+test("edits an assignment value inside an operation body", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Fullstack \.NET \(Banking\)/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  // Account.deposit: `balance := Money(balance.amount + amount.amount, balance.currency)`
+  // — the assignment value is editable structurally (a call with a `+` inside).
+  await page.locator('[data-testid="rf__node-aggregate:Account"]').click();
+  await page.getByTestId("c4system-expr-pick").click();
+  await page.getByRole("option", { name: "deposit: balance := Money" }).click();
+
+  const op = () => page.getByTestId("c4expr").getByTestId("c4expr-op");
+  await expect(op()).toHaveValue("+");
+  await op().click();
+  await page.getByRole("option", { name: "-", exact: true }).click();
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+  await expect(op()).toHaveValue("-");
+});
+
 test("offers type-directed member-name suggestions", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);

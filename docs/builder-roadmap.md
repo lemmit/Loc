@@ -215,22 +215,25 @@ Done:
   `test/system-expr.test.ts` + e2e.
 - **Statement expressions in operation & workflow bodies** — the same
   "Expression" picker lists each aggregate operation's *and workflow's*
-  `precondition` / `requires` / `let` expressions (`stmtExpr` / `wfStmt` slots),
-  so domain-logic expressions are editable with the structured editor, not just
-  the BodyEditor's text rows. Candidates include params and earlier `let`
-  bindings (operations also see the aggregate's members; workflows have no
-  `this`). (Assignments / `emit` — multi-part statements — stay text-row only.)
-  Gated by `test/system-expr.test.ts` + e2e.
+  statement expressions as `stmtExpr` / `wfStmt` slots: `precondition` /
+  `requires` predicates, `let` values, **assignment right-hand values** (`x :=
+  <value>` — only the value is spliced, target/op preserved), and **each `emit`
+  field value** (addressed by a `field` index). So domain-logic expressions —
+  including `balance := Money(…)` and `emit E { f: <expr> }` — are editable with
+  the structured editor (calls, members, `new`, member completion), not just the
+  BodyEditor's text rows. Candidates include params and earlier `let` bindings
+  (operations also see the aggregate's members; workflows have no `this`). Bare
+  calls and the assignment target / event ref stay text-row only. Gated by
+  `test/system-expr.test.ts` + e2e.
 
 Open:
 
 - **Deeper expression structuring** — structured `match` and ternary, and
-  block-body lambdas (still `raw` leaves); and arg-*name* editing on calls
-  (existing named args are preserved verbatim but can't be renamed in the UI).
-- **Assignment / emit statements** — `:=` assignments and `emit` field values
-  (multi-part, so not single-expression slots) in operation and workflow bodies
-  are still text-row only; the structured editor reaches single-expr statements
-  (precondition/requires/let) on both today.
+  block-body lambdas (still `raw` leaves); arg-*name* editing on calls (existing
+  named args are preserved verbatim but can't be renamed in the UI); and
+  structured statement *targets* (assignment LValue / `emit` event picker) +
+  bare-call statements — the statement *expressions* are structured today, but
+  these non-expression parts stay text-row.
 - **Field rename** — needs member-access reference resolution (via the
   type-system / IR) to update `this.field` / view binds safely.
 - **Repository `find` editing** (params + where-clause expressions).
