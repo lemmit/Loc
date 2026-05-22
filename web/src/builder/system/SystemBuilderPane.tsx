@@ -43,7 +43,7 @@ import {
   type BodyLocator,
 } from "./body";
 import { BodyEditor } from "./BodyEditor";
-import { editExprSlot, exprSlotOptions, repoSlotOptions, slotCandidates, slotExpr, viewSlotOptions, type ExprSlot } from "./expr-slots";
+import { editExprSlot, exprSlotOptions, repoSlotOptions, slotCandidates, slotExpr, viewSlotOptions, workflowSlotOptions, type ExprSlot } from "./expr-slots";
 import { seedExpr } from "./expr-model";
 import { ExprSlotEditor, type ExprMode } from "./ExpressionEditor";
 
@@ -465,9 +465,11 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
                     ? viewSlotOptions(selected.ast)
                     : selected.kind === "repository"
                       ? repoSlotOptions(selected.ast)
-                      : selected.kind === "aggregate" || selected.kind === "valueobject"
-                        ? exprSlotOptions(selected.ast)
-                        : [];
+                      : selected.kind === "workflow"
+                        ? workflowSlotOptions(selected.ast)
+                        : selected.kind === "aggregate" || selected.kind === "valueobject"
+                          ? exprSlotOptions(selected.ast)
+                          : [];
                 if (options.length === 0) return null;
                 const slot = options.find((o) => o.value === slotKey)?.slot;
                 const expr = slot ? slotExpr(parsed.ast, slot) : null;

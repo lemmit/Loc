@@ -330,6 +330,28 @@ test("edits an operation-body statement expression", async ({ page }) => {
   await expect(op()).toHaveValue(">=");
 });
 
+test("edits a workflow-body statement expression", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Banking System \(Hono \+ React\)/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  // transferFunds workflow has `precondition amount.amount > 0`.
+  await page.locator('[data-testid="rf__node-workflow:transferFunds"]').click();
+  await page.getByTestId("c4system-expr-pick").click();
+  await page.getByRole("option", { name: "precondition amount.amount > 0" }).click();
+
+  const op = () => page.getByTestId("c4expr").getByTestId("c4expr-op");
+  await expect(op()).toHaveValue(">");
+  await op().click();
+  await page.getByRole("option", { name: ">=", exact: true }).click();
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+  await expect(op()).toHaveValue(">=");
+});
+
 test("offers scope-aware name suggestions in a raw leaf", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);

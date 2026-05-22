@@ -16,6 +16,7 @@ import {
   type Statement,
   type ValueObject,
   type View,
+  type Workflow,
 } from "../../../../src/language/generated/ast.js";
 import { printExpr } from "../../../../src/language/print/index.js";
 import {
@@ -44,7 +45,8 @@ export type ExprSlot =
   | { kind: "viewFilter"; owner: string }
   | { kind: "viewBind"; owner: string; name: string }
   | { kind: "findFilter"; owner: string; name: string }
-  | { kind: "stmtExpr"; owner: string; op: string; index: number };
+  | { kind: "stmtExpr"; owner: string; op: string; index: number }
+  | { kind: "wfStmt"; owner: string; index: number };
 
 function membersOf(node: AstNode): readonly AstNode[] {
   if (node.$type === "Aggregate") return (node as Aggregate).members;
@@ -88,6 +90,20 @@ function stmtExprOf(stmt: Statement): Expression | null {
   return null;
 }
 
+/** Picker label prefix for a single-expression statement. */
+function stmtPrefix(stmt: Statement): string {
+  if (stmt.$type === "LetStmt") return `let ${(stmt as { name: string }).name} = `;
+  if (stmt.$type === "RequiresStmt") return "requires ";
+  return "precondition ";
+}
+
+function findWorkflow(ast: Model, name: string): Workflow | null {
+  for (const n of AstUtils.streamAst(ast)) {
+    if (n.$type === "Workflow" && (n as Workflow).name === name) return n as Workflow;
+  }
+  return null;
+}
+
 function findView(ast: Model, name: string): View | null {
   for (const n of AstUtils.streamAst(ast)) {
     if (n.$type === "View" && (n as View).name === name) return n as View;
@@ -117,6 +133,10 @@ export function slotExpr(ast: Model, slot: ExprSlot): Expression | null {
   if (slot.kind === "stmtExpr") {
     const op = findOperation(findOwner(ast, slot.owner), slot.op);
     const stmt = op?.body[slot.index];
+    return stmt ? stmtExprOf(stmt) : null;
+  }
+  if (slot.kind === "wfStmt") {
+    const stmt = findWorkflow(ast, slot.owner)?.body[slot.index];
     return stmt ? stmtExprOf(stmt) : null;
   }
   const owner = findOwner(ast, slot.owner);
@@ -162,10 +182,23 @@ export function exprSlotOptions(node: AstNode): SlotOption[] {
     op.body.forEach((stmt, index) => {
       const expr = stmtExprOf(stmt);
       if (!expr) return;
-      const prefix = stmt.$type === "LetStmt" ? `let ${(stmt as { name: string }).name} = ` : stmt.$type === "RequiresStmt" ? "requires " : "precondition ";
-      out.push({ value: `stmt:${op.name}:${index}`, label: `${op.name}: ${prefix}${printExpr(expr)}`, slot: { kind: "stmtExpr", owner, op: op.name, index } });
+      out.push({ value: `stmt:${op.name}:${index}`, label: `${op.name}: ${stmtPrefix(stmt)}${printExpr(expr)}`, slot: { kind: "stmtExpr", owner, op: op.name, index } });
     });
   }
+  return out;
+}
+
+/** Single-expression statements (precondition / requires / let) in a workflow
+ *  body. Assignments / calls / `emit` carry no single expression. */
+export function workflowSlotOptions(node: AstNode): SlotOption[] {
+  if (node.$type !== "Workflow") return [];
+  const wf = node as Workflow;
+  const out: SlotOption[] = [];
+  wf.body.forEach((stmt, index) => {
+    const expr = stmtExprOf(stmt);
+    if (!expr) return;
+    out.push({ value: `wf:${index}`, label: `${stmtPrefix(stmt)}${printExpr(expr)}`, slot: { kind: "wfStmt", owner: wf.name, index } });
+  });
   return out;
 }
 
@@ -216,7 +249,29 @@ function findAgg(ast: Model, name: string | undefined): Aggregate | null {
 // the source aggregate, find filters on the repo's aggregate + param locals).
 // The IR's own builders (`newEnv`/`inAggregate`/`withLocal`) and rules
 // (`inScopeNames`) are reused so scope knowledge stays in one place.
+function withParamsAndLets(env: Env, params: Parameter[], lets: string[]): Env {
+  // Only the names matter for enumeration; skip `lowerType` (it would deref
+  // `Id<X>` targets, which the main-thread parse can't link).
+  let next = env;
+  for (const p of params) next = withLocal(next, p.name, "param", { kind: "primitive", name: "string" });
+  for (const name of lets) next = withLocal(next, name, "let", { kind: "primitive", name: "string" });
+  return next;
+}
+
+const letsBefore = (body: readonly Statement[], index: number): string[] =>
+  body.slice(0, index).filter((s) => s.$type === "LetStmt").map((s) => (s as { name: string }).name);
+
 function slotEnv(ast: Model, slot: ExprSlot): Env | null {
+  // Workflows orchestrate across aggregates — no `this`; bare names resolve to
+  // params / earlier lets / enums only.
+  if (slot.kind === "wfStmt") {
+    const wf = findWorkflow(ast, slot.owner);
+    if (!wf) return null;
+    const ctx = AstUtils.getContainerOfType(wf, isBoundedContext);
+    const base: Env = ctx ? newEnv(ctx) : { ctx: undefined, locals: new Map() };
+    return withParamsAndLets(base, wf.params, letsBefore(wf.body, slot.index));
+  }
+
   let owner: AstNode | null = null;
   let params: Parameter[] = [];
   let lets: string[] = [];
@@ -241,21 +296,15 @@ function slotEnv(ast: Model, slot: ExprSlot): Env | null {
       const op = findOperation(owner, slot.op);
       params = op?.params ?? [];
       // `let`s declared earlier in the body are in scope for this statement.
-      lets = (op?.body.slice(0, slot.index) ?? [])
-        .filter((s) => s.$type === "LetStmt")
-        .map((s) => (s as { name: string }).name);
+      lets = op ? letsBefore(op.body, slot.index) : [];
     }
   }
   if (!owner) return null;
 
   const ctx = ctxNode ? AstUtils.getContainerOfType(ctxNode, isBoundedContext) : undefined;
   const base: Env = ctx ? newEnv(ctx as BoundedContext) : { ctx: undefined, locals: new Map() };
-  let env = owner.$type === "ValueObject" ? inValueObject(base, owner as ValueObject) : inAggregate(base, owner as Aggregate);
-  // Only the names matter for enumeration; skip `lowerType` (it would deref
-  // `Id<X>` targets, which the main-thread parse can't link).
-  for (const p of params) env = withLocal(env, p.name, "param", { kind: "primitive", name: "string" });
-  for (const name of lets) env = withLocal(env, name, "let", { kind: "primitive", name: "string" });
-  return env;
+  const owned = owner.$type === "ValueObject" ? inValueObject(base, owner as ValueObject) : inAggregate(base, owner as Aggregate);
+  return withParamsAndLets(owned, params, lets);
 }
 
 /** In-scope bare names for a slot's expression — drives the editor's name

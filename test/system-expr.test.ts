@@ -15,9 +15,10 @@ import {
   slotCandidates,
   slotExpr,
   viewSlotOptions,
+  workflowSlotOptions,
   type ExprSlot,
 } from "../web/src/builder/system/expr-slots.js";
-import type { Repository, View } from "../src/language/generated/ast.js";
+import type { Repository, View, Workflow } from "../src/language/generated/ast.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const sales = readFileSync(path.join(here, "..", "examples", "sales.ddd"), "utf8");
@@ -154,6 +155,25 @@ describe("structured expression editor — operation statement slots", () => {
   it("offers operation params (and the aggregate's names) as candidates", () => {
     const c = slotCandidates(parse(sales), { kind: "stmtExpr", owner: "Order", op: "addLine", index: 1 });
     expect(c).toEqual(expect.arrayContaining(["qty", "productId", "price", "status", "lines"]));
+  });
+});
+
+describe("structured expression editor — workflow statement slots", () => {
+  it("lists a workflow's single-expression statements", () => {
+    const opts = workflowSlotOptions(owner<Workflow>(parse(sales), "Workflow", "placeOrder"));
+    expect(opts.map((o) => o.value)).toEqual(["wf:0", "wf:1"]);
+    expect(opts[0].label).toBe("let customer = Customers.getById(customerId)");
+  });
+
+  it("resolves and edits a workflow statement expression", () => {
+    const tree = seedExpr(slotExpr(parse(sales), { kind: "wfStmt", owner: "placeOrder", index: 0 })!);
+    expect(tree).toMatchObject({ kind: "member", member: "getById", call: true });
+    expect(editExprSlot(sales, { kind: "wfStmt", owner: "placeOrder", index: 0 }, "Customers.findOne(customerId)")).toMatch(/let customer = Customers\.findOne\(customerId\)/);
+  });
+
+  it("offers workflow params and earlier lets as candidates (no aggregate `this`)", () => {
+    const c = slotCandidates(parse(sales), { kind: "wfStmt", owner: "placeOrder", index: 1 });
+    expect(c).toEqual(expect.arrayContaining(["customerId", "placedAt", "customer", "Draft"]));
   });
 });
 
