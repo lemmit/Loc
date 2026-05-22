@@ -292,7 +292,10 @@ test("structures a member call and edits its arguments", async ({ page }) => {
   await page.getByRole("option", { name: "invariant: transactions.all(t => t.amount.amount > 0)" }).click();
 
   const expr = page.getByTestId("c4expr");
-  await expect(expr.getByTestId("c4expr-member")).toHaveValue("all");
+  // The outer `.all` member (the lambda body adds nested `.amount` members).
+  await expect(expr.getByTestId("c4expr-member").first()).toHaveValue("all");
+  // The lambda arg (`t => …`) structures into a param + body.
+  await expect(expr.getByTestId("c4expr-lambda-param")).toHaveValue("t");
 
   // Append an argument → the call re-parses (a defaulted `null` operand).
   await expr.getByTestId("c4expr-arg-add").click();

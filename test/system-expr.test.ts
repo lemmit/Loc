@@ -59,6 +59,19 @@ describe("structured expression editor — model", () => {
     expect(emitExpr(tree)).toBe('Money(lines.sum(l => l.subtotal.amount), "USD")');
   });
 
+  it("structures expression-body lambdas (param + body)", () => {
+    // derived total = Money(lines.sum(l => l.subtotal.amount), "USD")
+    const tree = seedExpr(slotExpr(parse(sales), { kind: "derived", owner: "Order", name: "total" })!);
+    if (tree.kind !== "call") throw new Error("expected a call");
+    const sum = tree.args[0].value;
+    if (sum.kind !== "member") throw new Error("expected a member call");
+    const lam = sum.args[0].value;
+    expect(lam).toMatchObject({ kind: "lambda", param: "l" });
+    if (lam.kind !== "lambda") throw new Error("expected a lambda");
+    expect(lam.body).toMatchObject({ kind: "member", member: "amount" });
+    expect(emitExpr(tree)).toBe('Money(lines.sum(l => l.subtotal.amount), "USD")');
+  });
+
   it("structures member access (receiver + member)", () => {
     // find activeForCustomer where this.customerId == forCustomer && this.status == Draft
     const tree = seedExpr(slotExpr(parse(sales), { kind: "findFilter", owner: "Orders", name: "activeForCustomer" })!);
