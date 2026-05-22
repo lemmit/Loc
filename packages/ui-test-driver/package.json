@@ -5,8 +5,11 @@
   "type": "module",
   "description": "Framework-neutral, Playwright-subset in-browser UI test driver: parent-side RemotePage shim, serializable locator chains, a DOM-backed Page/Locator engine, and a same-origin iframe transport. Host injects environment accessors; no Loom coupling.",
   "main": "./index.js",
-  "exports": { ".": "./index.js" },
-  "dependencies": {
+  "exports": {
+    ".": "./index.js",
+    "./screenshot": "./screenshot.js"
+  },
+  "optionalDependencies": {
     "html-to-image": "^1.11.13"
   }
 }

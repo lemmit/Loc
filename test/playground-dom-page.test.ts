@@ -199,6 +199,18 @@ describe("DomPage / DomLocator", () => {
     await page.waitForURL(/\/orders\/new$/);
   });
 
+  it("captureNode is off the barrel but reachable via the subpath", async () => {
+    // Keeping it off the barrel means importing the package doesn't eagerly
+    // pull in html-to-image; it's still reachable explicitly.
+    const barrel = (await import("../packages/ui-test-driver/index.js")) as Record<
+      string,
+      unknown
+    >;
+    expect(barrel.captureNode).toBeUndefined();
+    const screenshot = await import("../packages/ui-test-driver/screenshot.js");
+    expect(typeof screenshot.captureNode).toBe("function");
+  });
+
   it("failure messages name the locator that failed", async () => {
     setBody(`<div></div>`);
     const page = new DomPage(document, { timeout: 100 });
