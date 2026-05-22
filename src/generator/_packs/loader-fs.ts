@@ -145,7 +145,7 @@ export function loadPack(packDir: string): LoadedPack {
     sources[logicalName] = fs.readFileSync(filePath, "utf-8");
   }
   const sharedSources = readSharedSources(manifest.format ?? "tsx");
-  // Phase 0.5: stack templates.  When the pack declares
+  // Stack templates.  When the pack declares
   // `stack: "vN"`, pull every `.hbs` from `<repo>/stacks/<vN>/`
   // into the same shared-partials map so pack templates can
   // `{{> stack-package-deps}}` etc.  Stack files are siblings of

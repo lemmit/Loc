@@ -42,7 +42,7 @@ export function emitMoney(
   });
 }
 
-/** Slice A3 — DateDisplay(iso, testid?).  Renders through the
+/** DateDisplay(iso, testid?).  Renders through the
  *  pack's `DateTimeValue` runtime helper (locale-formatted with
  *  the raw ISO surfaced in a tooltip).  Accepts a string or null;
  *  empty values render as the shared dimmed em-dash. */
@@ -60,7 +60,7 @@ export function emitDateDisplay(
   });
 }
 
-/** Slice A3 — EnumBadge(value, color?, testid?).  Renders the
+/** EnumBadge(value, color?, testid?).  Renders the
  *  per-pack Badge with an optional explicit colour.  Mantine
  *  passes `color={…}`; shadcn maps `color` to the Badge `variant`
  *  prop in the template (so the same DSL surface works on both

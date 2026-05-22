@@ -155,7 +155,7 @@ export function emitToolbar(
 export function emitCard(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth: number): string {
   // Card("title", content) — first positional title (anything not
   // a call counts as title); second positional is the body.
-  // Slice 11.10: `Card(child)` (single non-text-like positional)
+  // `Card(child)` (single non-text-like positional)
   // renders a card with no heading.
   const positionals = positionalArgs(call);
   const titleArg = positionals[0];

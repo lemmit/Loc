@@ -396,7 +396,7 @@ function renderUIExpr(e: ExprIR, ctx: RenderCtx): string {
     case "ternary":
       return `${renderUIExpr(e.cond, ctx)} ? ${renderUIExpr(e.then, ctx)} : ${renderUIExpr(e.otherwise, ctx)}`;
     case "lambda":
-      // Slice 2: lambda body is now optional (block-body lambdas were
+      // Lambda body is now optional (block-body lambdas were
       // added for page event handlers).  UI E2E tests don't currently
       // use block-body lambdas — fall back to a stub for the future
       // case.
@@ -425,7 +425,7 @@ function renderUIExpr(e: ExprIR, ctx: RenderCtx): string {
     case "object":
       return `({ ${e.fields.map((f) => `${f.name}: ${renderUIExpr(f.value, ctx)}`).join(", ")} })`;
     case "match": {
-      // Slice 2: lower match to chained ternary.  Same approach as
+      // Lower match to chained ternary.  Same approach as
       // e2e-render.ts; UI tests are unlikely to evaluate match
       // expressions in v0 but staying total avoids a ts-exhaustive
       // gap.

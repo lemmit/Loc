@@ -208,7 +208,7 @@ function renderFluentPredicate(e: ExprIR): string {
     case "ternary":
       return `${renderFluentPredicate(e.cond)} ? ${renderFluentPredicate(e.then)} : ${renderFluentPredicate(e.otherwise)}`;
     case "lambda":
-      // Slice 2: lambda body is now optional.  Wire-boundary refines
+      // Lambda body is now optional.  Wire-boundary refines
       // never see block-body lambdas (`classifyForWire` only admits
       // single-expression predicates), so falling back to the
       // unrenderable placeholder is correct.

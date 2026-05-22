@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // Render orchestrator for the template-pack rendering layer.
 //
-// Slice D1 — the legacy archetype renderers (renderListPage,
+// The legacy archetype renderers (renderListPage,
 // renderDetailPage, renderNewPage, renderViewTablePage,
 // renderWorkflowForm, renderWorkflowsIndex, renderViewsIndex,
 // renderOperationModal, renderPartTable) were deleted.  All page

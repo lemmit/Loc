@@ -1,4 +1,4 @@
-// Slice 11.3 — recursive body walker.
+// Recursive body walker.
 //
 // Walks a page's body `ExprIR` and emits TSX for hand-written
 // custom layouts that don't dispatch to one of the scaffold
@@ -162,23 +162,23 @@ export type ImportMap = Map<string, Set<string>>;
 export interface WalkResult {
   tsx: string;
   imports: ImportMap;
-  /** Slice 11.4 — names of route params the walker actually used
+  /** Names of route params the walker actually used
    *  while emitting (e.g. `Heading(name)` referenced `name`).  The
    *  page-shell generator destructures only the used names from
    *  `useParams()` so unused declarations don't trigger TS warnings. */
   usedParams: Set<string>;
-  /** Slice 11.5 — true when any walked node emitted JSX that
+  /** True when any walked node emitted JSX that
    *  references the `navigate` symbol (e.g. `Button("…", to: …)`).
    *  The page-shell adds `import { useNavigate }` and a
    *  `const navigate = useNavigate();` line when set. */
   usesNavigate: boolean;
-  /** Slice 11.7 — true when any walked node emitted JSX that needs
+  /** True when any walked node emitted JSX that needs
    *  a `useState` hook in scope (state-field refs in the body or
    *  `setX(...)` calls in event handlers).  The shell emits a
    *  `useState` import + per-field `const [x, setX] = useState(...)`
    *  declarations when set. */
   usesState: boolean;
-  /** Slice 11.15 — true when any walked node emitted JSX that
+  /** True when any walked node emitted JSX that
    *  references React Router's `Link` component (e.g.
    *  `Anchor("…", to: …)` → `<Anchor component={RouterLink}>`).
    *  The shell adds `Link as RouterLink` to the existing
@@ -186,28 +186,28 @@ export interface WalkResult {
    *  design packs whose own primitive is named `Link` (MUI,
    *  chakra) without an identifier collision. */
   usesRouterLink: boolean;
-  /** Slice 11.18 — names of user-defined components the walker
+  /** Names of user-defined components the walker
    *  invoked while emitting (e.g. `WelcomeBox("Alice")` →
    *  `<WelcomeBox name="Alice" />`).  The shell emits per-name
    *  imports from `@/components/<Name>`. */
   usedUserComponents: Set<string>;
-  /** Slice 11.19 — true when the walked tree referenced `Slot()`
+  /** True when the walked tree referenced `Slot()`
    *  (the children-prop placeholder).  Component shells with this
    *  set add a `children?: React.ReactNode` prop to their typed
    *  Props interface. */
   usesChildren: boolean;
-  /** Slice 11.24 — collected api-hook usages.  Each unique
+  /** Collected api-hook usages.  Each unique
    *  `<paramName>.<aggregate>.<op>` reference in the body becomes
    *  one entry — the shell emits a `const <varName> = use<Op>()`
    *  declaration at page-top + an import.  Body refs are
    *  rewritten to use the local var. */
   usedApiHooks: Map<string, ApiHookUse>;
-  /** Slice A4 — non-null when the body contained a `Form(of: <Agg>)`
+  /** Non-null when the body contained a `Form(of: <Agg>)`
    *  primitive.  Shell consumes this to emit `useForm` / `Controller`
    *  imports, mutation hook, `defaultValues`, and the `onSubmit`
    *  handler that wraps the form's `<form onSubmit={…}>`. */
   formOfs: FormOfState[];
-  /** Slice A5 — every static `testid:` literal encountered while
+  /** Every static `testid:` literal encountered while
    *  walking the body, plus the synthesised testid bases the walker
    *  generates on the user's behalf (e.g. `<form-namespace>-input-
    *  <field>` for each `Form(of:)` field, `<form-namespace>-submit`
@@ -215,7 +215,7 @@ export interface WalkResult {
    *  reads this set to surface one typed `Locator` getter per
    *  testid in the generated `e2e/pages/<page-snake>.ts` class. */
   collectedTestids: Set<string>;
-  /** Slice A6 — names of UI-declared helpers the body actually
+  /** Names of UI-declared helpers the body actually
    *  invoked.  The shell emits one `import { <name> } from
    *  "<path>"` line per used helper; declared-but-unused helpers
    *  don't pollute the page TSX. */
@@ -315,16 +315,16 @@ export function isWalkableLayoutBody(
   if (!body) return false;
   if (body.kind === "call") {
     if (STDLIB_LAYOUT_COMPONENTS.has(body.name)) return true;
-    // Slice 11.18 — calls to user-defined components are walker-
+    // Calls to user-defined components are walker-
     // eligible too (resolved via the supplied map).
     if (userComponents.has(body.name)) return true;
-    // Slice A6 — a body whose top-level call is a UI-declared
+    // A body whose top-level call is a UI-declared
     // helper is walker-eligible: the helper renders the page's
     // JSX in user land.  Without this, `body: RenderBanner("hi")`
     // would be silently skipped.
     return helperNames.has(body.name);
   }
-  // Slice 11.17 — top-level conditional bodies dispatch through the
+  // Top-level conditional bodies dispatch through the
   // walker as long as either branch is walkable.  Powers patterns
   // like `body: loading ? Empty("…") : Stack(…)`.
   if (body.kind === "ternary") {
@@ -343,47 +343,47 @@ export function walkBodyToTsx(
    *  call `addMantineImport` directly; the pack reference is unused
    *  by them and harmless to thread through. */
   pack: LoadedPack,
-  /** Slice 11.4 — names of the page's route params; refs to these
+  /** Names of the page's route params; refs to these
    *  names emit as `{name}` JSX expressions (resolved by
    *  `useParams()` at render time). */
   paramNames: ReadonlySet<string> = new Set(),
-  /** Slice 11.7 — names of the page's `state {}` fields; refs in
+  /** Names of the page's `state {}` fields; refs in
    *  body position emit as `{name}` JSX expressions (resolved by
    *  `useState` in the shell), and `:=` assignments in event-
    *  handler lambdas lower to the React `setX(...)` setter. */
   stateNames: ReadonlySet<string> = new Set(),
-  /** Slice 11.18 — user-defined components known to this UI.  When
+  /** User-defined components known to this UI.  When
    *  the walker sees a `call` whose name matches a key here, it
    *  emits `<Name prop1={arg1} … />` (mapping positional args to
    *  the component's declared param names) instead of the
    *  "unknown component" placeholder.  Required for cross-component
    *  composition (one component invoking another). */
   userComponents: ReadonlyMap<string, readonly ParamIR[]> = new Map(),
-  /** Slice 11.24 — UI api parameters.  Each entry maps a local
+  /** UI api parameters.  Each entry maps a local
    *  handle (e.g. `Sales`) to an api name (e.g. `SalesApi`).
    *  Body refs of the form `<paramName>.<aggregate>.<op>` get
    *  detected by the walker, hoisted to a hook call at page top,
    *  and rewritten to the local hook variable. */
   apiParams: ReadonlyArray<UiApiParamIR> = [],
-  /** Slice A4 — aggregates reachable from this UI's deployable.
+  /** Aggregates reachable from this UI's deployable.
    *  `Form(of: <Agg>)` and `IdLink(of: <Agg>)` look up the
    *  aggregate's IR here (field list for form dispatch; display-
    *  marked field for IdLink's link text). */
   aggregatesByName: ReadonlyMap<string, AggregateIR> = new Map(),
-  /** Slice A4 — bounded-context map keyed by aggregate name.  The
+  /** Bounded-context map keyed by aggregate name.  The
    *  form-field preparer needs the BC to resolve enum / value-
    *  object types declared alongside the aggregate. */
   bcByAggregate: ReadonlyMap<string, BoundedContextIR> = new Map(),
-  /** Slice A6 — user-authored helper imports declared at the UI
+  /** User-authored helper imports declared at the UI
    *  level via `import helper <name> from "<path>"`.  Body refs
    *  matching one of these names emit as plain JS calls and the
    *  shell adds the matching `import { <name> } from "<path>"`. */
   helperImports: ReadonlyArray<UiHelperImportIR> = [],
-  /** Slice A12 — workflows reachable from this UI's deployable.
+  /** Workflows reachable from this UI's deployable.
    *  `Form(runs: <wf>)` looks up the workflow's IR here (param
    *  list for form dispatch, owning BC for enum resolution). */
   workflowsByName: ReadonlyMap<string, WorkflowIR> = new Map(),
-  /** Slice A12 — owning bounded context per workflow (the form-
+  /** Owning bounded context per workflow (the form-
    *  field preparer needs the BC to resolve enums / value-objects
    *  referenced by workflow params). */
   bcByWorkflow: ReadonlyMap<string, BoundedContextIR> = new Map(),
@@ -477,31 +477,31 @@ export interface WalkEnv {
    *  …)` effect targets the page's real declared route. */
   pageRoutes?: ReadonlyMap<string, string>;
   apiParamNames: ReadonlyMap<string, string>;
-  /** Slice A2 — lambda params bound in the current sub-walk
+  /** Lambda params bound in the current sub-walk
    *  (source-side name → emitted JS name).  `Column("ID", o => o.id)`
    *  walks the accessor body with `o → "row"`; refs to `o` resolve
    *  to the JS identifier `row`.  Outer scope is unaffected. */
   lambdaParams: ReadonlyMap<string, string>;
-  /** Slice A4 — identifiers emitted by the page shell that user-
+  /** Identifiers emitted by the page shell that user-
    *  written sub-expressions can reference (e.g. inside a
    *  `Form(of:, onSubmit:)` lambda, `create` is the mutation hook
    *  declared at function top).  Refs matching a name in this set
    *  emit as the bare identifier — no `unresolved` comment. */
   shellLocals: ReadonlySet<string>;
-  /** Slice A4 — aggregates reachable from this UI's deployable.
+  /** Aggregates reachable from this UI's deployable.
    *  Powers `Form(of: <Agg>)` field dispatch and `IdLink(of: <Agg>)`
    *  display-field resolution. */
   aggregatesByName: ReadonlyMap<string, AggregateIR>;
-  /** Slice A4 — map aggregate name → owning bounded context, so the
+  /** Map aggregate name → owning bounded context, so the
    *  form-field preparer can resolve enums / value-objects declared
    *  in the same context. */
   bcByAggregate: ReadonlyMap<string, BoundedContextIR>;
-  /** Slice A12 — workflows reachable from this UI's deployable.
+  /** Workflows reachable from this UI's deployable.
    *  Powers `Form(runs: <wf>)` field dispatch. */
   workflowsByName: ReadonlyMap<string, WorkflowIR>;
-  /** Slice A12 — owning bounded context per workflow. */
+  /** Owning bounded context per workflow. */
   bcByWorkflow: ReadonlyMap<string, BoundedContextIR>;
-  /** Slice A6 — UI helper-import lookup (name → import path).
+  /** UI helper-import lookup (name → import path).
    *  Populated by `walkBodyToTsx` from the UI's `helperImports`
    *  parameter; consulted by `emitComponent`'s fallthrough so
    *  body calls to a helper name emit as plain JS calls. */
@@ -529,10 +529,10 @@ export interface Sink {
   /** `Action(<instance>.<op>)` mutation wiring (see
    *  `ActionMutationState`). */
   actionMutations: ActionMutationState[];
-  /** Slice A5 — accumulator for static `testid:` strings the body
+  /** Accumulator for static `testid:` strings the body
    *  emits, used by the walker-side page-object builder. */
   collectedTestids: Set<string>;
-  /** Slice A6 — names of helpers the body actually called.  The
+  /** Names of helpers the body actually called.  The
    *  shell emits one import line per used helper; declared-but-
    *  unused helpers don't pollute the page TSX. */
   usedHelpers: Set<string>;
@@ -628,7 +628,7 @@ export interface OperationFormState extends FormStateBase {
 }
 
 export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
-  // Slice 11.24 — api hook injection (JSX-child position).
+  // Api hook injection (JSX-child position).
   // Detect `<param>.<aggregate>.<op>` rooted at a UiApiParam.
   // In JSX-child position, the local hook var is brace-wrapped.
   const hookUse = tryDetectApiHook(expr, ctx);
@@ -648,14 +648,14 @@ export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
       if (expr.lit === "null") return `{null}`;
       return `{${expr.value}}`;
     case "ref":
-      // Slice A2 — refs to a lambda-bound param resolve to its
+      // Refs to a lambda-bound param resolve to its
       // emitted JS name (e.g. `o.id` inside `o => …` walks with
       // `o → "row"`).  Brace-wrap as a JSX child.
       {
         const jsName = ctx.lambdaParams.get(expr.name);
         if (jsName) return `{${jsName}}`;
       }
-      // Slice 11.4 — refs that match a route param name emit as
+      // Refs that match a route param name emit as
       // JSX expressions (`{name}`).  React Router's `useParams()`
       // brings these into scope at render time; the page-shell
       // generator destructures the used names.  Refs that don't
@@ -665,7 +665,7 @@ export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
         ctx.usedParams.add(expr.name);
         return `{${expr.name}}`;
       }
-      // Slice 11.7 — refs that match a state field name emit the
+      // Refs that match a state field name emit the
       // same way; the shell brings them into scope via `useState`.
       if (ctx.stateNames.has(expr.name)) {
         ctx.usesState = true;
@@ -673,7 +673,7 @@ export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
       }
       return `{/* ref: ${expr.name} */}`;
     case "ternary": {
-      // Slice 11.17 — conditional rendering.  `cond ? <A /> : <B />`
+      // Conditional rendering.  `cond ? <A /> : <B />`
       // works as a top-level body (depth 0 — JSX-element inside the
       // function's `return ( … )` parens).  In nested child
       // position, JSX requires brace-wrapping `{ cond ? … : … }`.
@@ -684,7 +684,7 @@ export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
       return depth === 0 ? inner : `{${inner}}`;
     }
     case "member":
-      // Slice A2 — member access in JSX-child position (e.g. an
+      // Member access in JSX-child position (e.g. an
       // accessor lambda body `o => o.id` walks `o.id` as the body
       // of a `<Table.Td>` cell).  Emit as a brace-wrapped JS
       // expression; `emitExpr` resolves the receiver (lambda
@@ -772,13 +772,13 @@ function emitComponent(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth:
     case "Divider":
       return emitDivider(call, ctx, depth);
     default: {
-      // Slice 11.18 — names not in the stdlib dispatch table fall
+      // Names not in the stdlib dispatch table fall
       // through to user-component invocation when they match a
       // registered ComponentIR.
       if (ctx.userComponents.has(call.name)) {
         return emitUserComponent(call, ctx, depth);
       }
-      // Slice A6 — UI-declared helper imports (`import helper
+      // UI-declared helper imports (`import helper
       // <name> from "..."`) emit as plain JS calls in JSX-child
       // position (brace-wrapped).  The shell adds the matching
       // import line once `usedHelpers` is populated.
@@ -795,7 +795,7 @@ function emitComponent(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth:
 // Layout primitives (Stack, Group, Grid, Container, Tabs) live in
 // walker/primitives/layout.ts.
 
-/** Slice A2 — Table primitive.
+/** Table primitive.
  *
  *  Surface:
  *
@@ -817,7 +817,7 @@ function emitComponent(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth:
 // The Table primitive (emitTable + emitColumn) lives in
 // walker/primitives/table.ts.
 
-/** Slice A13 — propagate boolean / object flags written on a
+/** Propagate boolean / object flags written on a
  *  child WalkContext back to the parent.  Maps + Sets share
  *  references through the spread, but primitive flags
  *  (`usesNavigate`, `usesRouterLink`, `usesState`, `usesChildren`)
@@ -836,7 +836,7 @@ export function propagateChildFlags(parent: WalkContext, child: WalkContext): vo
   }
 }
 
-/** Slice A2 — extend the WalkContext.lambdaParams map with a new
+/** Extend the WalkContext.lambdaParams map with a new
  *  binding without mutating the parent map.  Caller spreads the
  *  rest of the context and overrides `lambdaParams` with the
  *  result. */
@@ -850,7 +850,7 @@ export function extendLambdaParams(
   return next;
 }
 
-/** Slice A3 — Money(value, currency?, decimals?, testid?).  Renders
+/** Money(value, currency?, decimals?, testid?).  Renders
  *  through the pack's `MoneyValue` runtime helper (Intl.NumberFormat
  *  with `style: "currency"`).  First positional or `value:` named
  *  arg is the numeric value; `currency:` and `decimals:` are
@@ -859,7 +859,7 @@ export function extendLambdaParams(
 // EnumBadge, Anchor, Image, Avatar, Loader, Empty, KeyValueRow) live
 // in walker/primitives/text.ts.
 
-/** Slice A3 — IdLink(id, of: <Aggregate>, testid?).
+/** IdLink(id, of: <Aggregate>, testid?).
  *
  *  Emits a React-Router `<Link>` to the conventional
  *  `/<plural-snake>/{id}` detail-page route, with the truncated id
@@ -881,7 +881,7 @@ export function extendLambdaParams(
 // Interactive control primitives (Button, IdLink, QueryView,
 // UserComponent) live in walker/primitives/controls.ts.
 
-/** Slice A4 — Form(of: <Aggregate>, onSubmit?: <lambda>, testid?).
+/** Form(of: <Aggregate>, onSubmit?: <lambda>, testid?).
  *
  *  Walker-side counterpart to the scaffold New-page archetype.
  *  Introspects the aggregate's IR field list and emits one input
@@ -920,7 +920,7 @@ export function extendLambdaParams(
  *  refs render as bare identifiers (they're in scope via
  *  `useState` / `useParams` destructure). */
 export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
-  // Slice 11.24 — api hook injection.  Detect `<param>.<aggregate>.<op>`
+  // Api hook injection.  Detect `<param>.<aggregate>.<op>`
   // (with optional method-call args) rooted at a UiApiParam ref.
   // When matched, register a hook usage on the context and return
   // the local hook variable name; the shell emits the
@@ -938,7 +938,7 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // int / decimal / now → emit as numeric literal verbatim.
       return String(expr.value);
     case "ref":
-      // Slice A2 — lambda-bound param refs resolve to their
+      // Lambda-bound param refs resolve to their
       // emitted JS name (e.g. `o → "row"` for column accessors).
       {
         const jsName = ctx.lambdaParams.get(expr.name);
@@ -952,11 +952,11 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
         ctx.usedParams.add(expr.name);
         return expr.name;
       }
-      // Slice A4 — refs to shell-emitted locals (e.g. `create`
+      // Refs to shell-emitted locals (e.g. `create`
       // inside a `Form(of:, onSubmit: v => create.mutateAsync(v))`
       // lambda) resolve as themselves.
       if (ctx.shellLocals.has(expr.name)) return expr.name;
-      // Slice 11.23 — refs to `let` bindings are in scope as JS
+      // Refs to `let` bindings are in scope as JS
       // const declarations earlier in the same lambda body.  The IR
       // already tags these with `refKind: "let"`; emit the bare
       // name so the generated code references the local.
@@ -967,13 +967,13 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
     case "unary":
       return `(${expr.op}${emitExpr(expr.operand, ctx)})`;
     case "call": {
-      // Slice 11.23 — bare function call as a JS expression.  The
+      // Bare function call as a JS expression.  The
       // callee is emitted verbatim — the generated code expects the
       // user to import / declare `<name>` somewhere in their app
       // shell.  Powers patterns like `let n = inc(count)` and the
       // statement form `Button("…", onClick: e => { saveOrder() })`.
       //
-      // Slice A6 — UI-declared helper imports take this path too:
+      // UI-declared helper imports take this path too:
       // tracking `usedHelpers` so the shell emits the matching
       // `import { <name> } from "<path>"` line.
       if (ctx.helperImports.has(expr.name)) {
@@ -985,19 +985,19 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
     case "member": {
       // Plain JS member access: `<recv>.<member>`.  Recursive
       // emit on the receiver — if it was a hook-eligible chain
-      // (Slice 11.24), tryDetectApiHook at the top has already
+      //, tryDetectApiHook at the top has already
       // returned the hook var; we just append `.<member>`.
       return `${emitExpr(expr.receiver, ctx)}.${expr.member}`;
     }
     case "object": {
-      // Slice 11.29 — object literal: `{ name: name, age: 30 }`
+      // Object literal: `{ name: name, age: 30 }`
       // emits as plain JS `{ name: name, age: 30 }`.  Field values
       // recurse through emitExpr (so refs/state/binary ops compose).
       const fields = expr.fields.map((f) => `${f.name}: ${emitExpr(f.value, ctx)}`).join(", ");
       return `{ ${fields} }`;
     }
     case "method-call": {
-      // Slice 11.24 — when the method-call's receiver is a hook
+      // When the method-call's receiver is a hook
       // (detected by tryDetectApiHook on the receiver), emit
       // `<hookVar>.<method>(<args>)` (e.g.
       // `customerCreate.mutate({...})`).
@@ -1007,7 +1007,7 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
         const args = expr.args.map((a) => emitExpr(a, ctx)).join(", ");
         return `${recvHookUse.varName}.${expr.member}(${args})`;
       }
-      // Slice A4 — method calls on plain JS receivers (e.g. a
+      // Method calls on plain JS receivers (e.g. a
       // local `create` mutation hook inside a `Form(of:)` page's
       // onSubmit lambda).  Emit the plain `recv.member(args)`
       // form when the receiver resolves cleanly (param / state /
@@ -1034,7 +1034,7 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
  *  on the receiver since that path emits a noisy
  *  `unresolved` comment for free identifiers — bad inside the
  *  outer placeholder. */
-/** Slice 11.24 — detect `<param>.<aggregate>.<op>(args?)` rooted
+/** Detect `<param>.<aggregate>.<op>(args?)` rooted
  *  at a UiApiParam ref.  Returns an ApiHookUse on match, or null
  *  to fall through to generic expression handling.
  *
@@ -1075,7 +1075,7 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
     }
     case "add":
     case "remove": {
-      // Slice 11.9 — `count += 1` / `count -= 1` lower to
+      // `count += 1` / `count -= 1` lower to
       // `kind: "add"` / `kind: "remove"` in the IR (the same
       // kinds collection-mutations use; for scalar state fields
       // they're compound additions/subtractions).  Walker emits
@@ -1098,7 +1098,7 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
     case "expression":
       return `${emitExpr(stmt.expr, ctx)};`;
     case "call": {
-      // Slice 11.23 — bare function-call statement (the
+      // Bare function-call statement (the
       // statement-grammar `name(args)` form).  Walker emits as a
       // plain `name(args);` line; the generated code expects the
       // user to import / declare `<name>` somewhere in their app
@@ -1123,7 +1123,7 @@ function unsupportedPageStmt(what: string, why: string): never {
   throw new Error(`react: unsupported ${what} in a page event handler — ${why}.`);
 }
 
-/** Slice 11.5 — read a named arg as a navigation target.  String
+/** Read a named arg as a navigation target.  String
  *  literals come back JSON-quoted (`"\"/orders\""`); refs to a
  *  route param come back as a JS template literal that interpolates
  *  the param at render time (so `to: id` → `` `${id}` ``).  Returns
@@ -1149,7 +1149,7 @@ export function stringOrRefArgValue(
   return undefined;
 }
 
-/** Slice A1 — read the `testid:` named arg from any primitive call
+/** Read the `testid:` named arg from any primitive call
  *  and produce a TSX attribute fragment ready to splice into the
  *  template's opening tag.  Returns `' data-testid="..."'` for
  *  string literals, `' data-testid={...}'` for refs/expressions, or
@@ -1182,7 +1182,7 @@ export function testidAttr(call: ExprIR & { kind: "call" }, ctx: WalkContext): s
 // Leaf display primitives (Stat, Badge, Slot, Divider, Breadcrumbs,
 // Paper, Skeleton, Alert) live in walker/primitives/display.ts.
 
-/** Slice A8 — QueryView(of:, loading:, error:, empty:, data:, testid?).
+/** QueryView(of:, loading:, error:, empty:, data:, testid?).
  *
  *  Macro for the canonical "4-arm query state" rendering pattern
  *  the scaffold List page emits inline.  Takes a query
@@ -1228,7 +1228,7 @@ export function positionalChildren(
   return positionalArgs(call).map((a) => walk(a, ctx, depth));
 }
 
-/** Slice 11.4 — return the JSX-render shape of the first
+/** Return the JSX-render shape of the first
  *  positional arg as a TEXT-position content.  Quoted strings
  *  come back as `"text"` (so callers wrap them in {} when needed
  *  or strip the quotes for direct JSX text); refs come back as
@@ -1257,18 +1257,18 @@ export function renderTextContent(expr: ExprIR, ctx: WalkContext): string | unde
       ctx.usesState = true;
       return `{${expr.name}}`;
     }
-    // Slice 11.4 — unresolved ref in text position emits a JSX
+    // Unresolved ref in text position emits a JSX
     // comment so the user sees the unresolved name in the
     // generated file (the page still compiles; the comment makes
     // the gap visible).
     return `{/* ref: ${expr.name} */}`;
   }
-  // Slice 11.10 — anything else (binary op, unary, non-string
+  // Anything else (binary op, unary, non-string
   // literal): emit the JS-expression form wrapped as a JSX
   // expression.  Powers patterns like `Heading("Welcome, " +
   // name)`, `Text(count + 1)`, `Stat("Count", count * step)`.
   //
-  // Slice A6 — UI-declared helper calls also belong in text
+  // UI-declared helper calls also belong in text
   // position; route them through `emitExpr` so they emit as
   // plain JS calls (`{formatPrice(99)}`).  Stdlib-primitive
   // calls still fall through to undefined — those are child

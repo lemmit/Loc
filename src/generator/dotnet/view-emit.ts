@@ -85,12 +85,12 @@ function renderHandler(view: ViewIR, agg: AggregateIR, ctx: BoundedContextIR, ns
   const queryName = `${pascal(view.name)}Query`;
   const handlerName = `${pascal(view.name)}Handler`;
   const responseRecord = responseRecordName(view, agg);
-  // Slice 3: auxiliaries — sourceField → mapVarName (`customerId` →
+  // Auxiliaries — sourceField → mapVarName (`customerId` →
   // `customerById`) — drives DI of foreign repos + bulk loads at
   // handler entry, and rewrites `Id<X>` follow refs in the
   // projection.
   const auxiliaries = view.output?.auxiliaries ?? [];
-  // Slice 1C: when the view's filter / binds reference currentUser,
+  // When the view's filter / binds reference currentUser,
   // the handler injects ICurrentUserAccessor and threads
   // `_currentUser.User` into the repository call.
   const usesUser = viewUsesCurrentUser(view);

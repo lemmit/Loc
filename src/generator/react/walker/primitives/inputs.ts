@@ -20,7 +20,7 @@ function inputLabelForms(
   };
 }
 
-/** Slice 11.14 — read a `bind:` named arg as a state-field name.
+/** Read a `bind:` named arg as a state-field name.
  *  Returns the field name when the arg is a `ref` to a known
  *  state field (and marks `usesState` on the context); otherwise
  *  undefined.  Drives controlled-input wiring in Field / Toggle. */

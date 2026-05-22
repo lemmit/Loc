@@ -46,7 +46,7 @@ export function renderTsExpr(e: ExprIR, ctx: TsRenderContext = DEFAULT): string 
       // rendered with the outer `this` still pointing at the same
       // receiver (lambdas in DSL are pure expressions).
       //
-      // Slice 2: lambda body is now optional (block-body lambdas land
+      // Lambda body is now optional (block-body lambdas land
       // for page event handlers).  TS render contexts shouldn't see
       // block bodies — those are React-emitter territory — but stay
       // total to keep the build happy.
@@ -65,7 +65,7 @@ export function renderTsExpr(e: ExprIR, ctx: TsRenderContext = DEFAULT): string 
     case "ternary":
       return `${renderTsExpr(e.cond, ctx)} ? ${renderTsExpr(e.then, ctx)} : ${renderTsExpr(e.otherwise, ctx)}`;
     case "match": {
-      // Slice 2: lower a match expression to a chained ternary so it
+      // Lower a match expression to a chained ternary so it
       // can appear inside `derived` bodies, view binds, and other
       // TS-rendered expression positions.  Right-fold: each arm
       // wraps the previous tail.

@@ -9,7 +9,7 @@
 // (B3) it ships its own `pins.ts` and the emitter is parameterised
 // on the active version's pins instead of importing v4's directly.
 //
-// All values are within-major / within-0.x (Phase 2.a).  zod 3→4
+// All values are within-major / within-0.x.  zod 3→4
 // and TS 5→6 are majors deferred to the `hono@v5` package, not an
 // in-place bump here.  The `LOOM_TS_BUILD` shard (`tsc --noEmit` +
 // tsup against an emitted Hono project) is the gate that proves

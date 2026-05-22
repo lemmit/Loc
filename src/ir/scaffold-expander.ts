@@ -1,4 +1,4 @@
-// Slice C1 — scaffold expander (dark-launched behind env flag).
+// Scaffold expander (dark-launched behind env flag).
 //
 // Pure function from `(ScaffoldOriginIR, system context) → ExprIR`
 // that synthesises a walker-stdlib body equivalent to what the
@@ -53,10 +53,10 @@ export interface ScaffoldExpandContext {
    *  `Form(of:)` field-type dispatch (enums / value-objects live
    *  in the BC, not on the aggregate). */
   bcByAggregate: ReadonlyMap<string, BoundedContextIR>;
-  /** Slice A12 — workflow by name.  Powers `workflow-form`
+  /** Workflow by name.  Powers `workflow-form`
    *  expander coverage (`Form(runs: <wf>)` field dispatch). */
   workflowsByName: ReadonlyMap<string, import("./loom-ir.js").WorkflowIR>;
-  /** Slice A13 — view by name + per-view shape lookup. */
+  /** View by name + per-view shape lookup. */
   viewsByName: ReadonlyMap<string, import("./loom-ir.js").ViewIR>;
 }
 
@@ -124,7 +124,7 @@ export function expandScaffoldToExplicitBody(
 function expandAggregateList(aggregateName: string, ctx: ScaffoldExpandContext): ExprIR | null {
   const agg = ctx.aggregatesByName.get(aggregateName);
   if (!agg) return null;
-  // Slice D1 — when the UI has an api parameter, route hook
+  // When the UI has an api parameter, route hook
   // detection through `<handle>.<agg>.all` (Pattern A).  When
   // not, drop the handle prefix → `<agg>.all` (Pattern D) so
   // legacy `scaffold modules: M` deployables without explicit
@@ -152,7 +152,7 @@ function expandAggregateList(aggregateName: string, ctx: ScaffoldExpandContext):
     ]),
   );
   for (const f of agg.fields) {
-    // Slice C2 — value-object fields don't render cleanly as a
+    // Value-object fields don't render cleanly as a
     // single cell (they're a struct, not a scalar).  Scaffold's
     // archetype renderer flattens them into one column per leaf
     // field; replicating that here needs more primitive surface
@@ -223,7 +223,7 @@ function expandAggregateList(aggregateName: string, ctx: ScaffoldExpandContext):
 function expandAggregateDetail(aggregateName: string, ctx: ScaffoldExpandContext): ExprIR | null {
   const agg = ctx.aggregatesByName.get(aggregateName);
   if (!agg) return null;
-  // Slice D1 — see expandAggregateList for the no-api-handle
+  // See expandAggregateList for the no-api-handle
   // fallback rationale.
   const apiHandle = findApiHandleFor(agg, ctx);
   const queryRoot = apiHandle ? member(ref(apiHandle), agg.name) : ref(agg.name);
@@ -476,7 +476,7 @@ function valueObjectRows(
   return out;
 }
 
-/** Slice A11 — `methodCall` ExprIR helper.  The detail expander
+/** `methodCall` ExprIR helper.  The detail expander
  *  needs to synthesise `<api>.<Agg>.byId(id)` which is a method
  *  call (vs `<api>.<Agg>.all` which is plain member access).  The
  *  walker's `tryDetectApiHook` recognises this shape and lifts it

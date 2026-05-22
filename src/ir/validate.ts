@@ -47,7 +47,7 @@ export function validateLoomModel(loom: LoomModel): LoomDiagnostic[] {
     validateReactIdReferences(sys, diags);
     validateAuth(sys, diags);
     validatePermissions(sys, diags);
-    // Slice 10 — scaffold expansion now runs at the AST level
+    // Scaffold expansion now runs at the AST level
     // (`src/language/ddd-scaffold-ast-expander.ts`).  Duplicate-page
     // detection happens through Langium's standard scope-walking
     // (every synthesised page is a real AST node, so two scaffolds
@@ -1052,7 +1052,7 @@ function validateWorkflowBody(
           });
           break;
         }
-        // Slice 1C: a workflow can't yet call a find whose where
+        // A workflow can't yet call a find whose where
         // clause references currentUser — the workflow handler
         // doesn't inject ICurrentUserAccessor, and threading the
         // user through saves + ops is its own follow-up.  Surface a
@@ -1412,7 +1412,7 @@ function validateCurrentUserScope(ctx: BoundedContextIR, diags: LoomDiagnostic[]
 
 const UNKNOWN_PERMISSION_SENTINEL = "__unknown_permission__:";
 
-// Slice 10 — `validateScaffoldDoubles` deleted.  Cross-directive
+// `validateScaffoldDoubles` deleted.  Cross-directive
 // double-scaffold detection now happens at the AST level: two
 // scaffold directives producing the same generated page name surface
 // either as a duplicate-symbol error from Langium's linker (when both

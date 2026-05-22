@@ -42,7 +42,7 @@ export function renderCsExpr(e: ExprIR, ctx: CsRenderContext = DEFAULT): string 
       // rendered with the outer `this` still pointing at the same
       // receiver (lambdas in DSL are pure expressions).
       //
-      // Slice 2: lambda body is now optional.  .NET render contexts
+      // Lambda body is now optional.  .NET render contexts
       // shouldn't see block bodies — those are React-emitter territory
       // — but stay total to keep the build happy.
       if (e.body) return `${e.param} => ${renderCsExpr(e.body, ctx)}`;
@@ -62,7 +62,7 @@ export function renderCsExpr(e: ExprIR, ctx: CsRenderContext = DEFAULT): string 
     case "ternary":
       return `${renderCsExpr(e.cond, ctx)} ? ${renderCsExpr(e.then, ctx)} : ${renderCsExpr(e.otherwise, ctx)}`;
     case "match": {
-      // Slice 2: lower a match expression to a chained C# ternary so
+      // Lower a match expression to a chained C# ternary so
       // it can appear inside `derived` bodies, view binds, and other
       // C#-rendered expression positions.  Same right-fold semantics
       // as the TS renderer.

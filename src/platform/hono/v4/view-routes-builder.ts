@@ -136,7 +136,7 @@ function emitViewRoute(
   const responseSchema = view.output
     ? `${pascal(view.name)}Response`
     : `${view.aggregateName}ListResponse`;
-  // Slice 1C: views whose filter / binds reference currentUser
+  // Views whose filter / binds reference currentUser
   // thread the request's user through to the repository's
   // synthesised find method.  The auth middleware stashed it on the
   // Hono context earlier in the pipeline.
