@@ -817,10 +817,11 @@ test("previews an edit's source diff before applying when Preview is on", async 
   // of committing live; Apply commits it and closes the modal.
   await page.getByTestId("c4system-preview-toggle").click();
   await page.getByTestId("c4system-add-module").click();
-  await expect(page.getByTestId("c4system-preview-modal")).toBeVisible();
+  // Assert the modal's content (the diff), not the Mantine modal root — the
+  // root is a zero-box wrapper Playwright never treats as "visible".
   await expect(page.getByTestId("c4system-preview-diff")).toBeVisible();
   await page.getByTestId("c4system-preview-apply").click();
-  await expect(page.getByTestId("c4system-preview-modal")).toHaveCount(0);
+  await expect(page.getByTestId("c4system-preview-diff")).toHaveCount(0);
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
 
