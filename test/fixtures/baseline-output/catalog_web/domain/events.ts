@@ -1,5 +1,4 @@
 // Auto-generated.
-import type * as Ids from "./ids";
 export type DomainEvent = never;
 
 /**
