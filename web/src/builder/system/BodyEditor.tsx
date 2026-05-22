@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { Autocomplete, Button, Group, Select, Stack, Text, TextInput, Textarea } from "@mantine/core";
+import { Autocomplete, Box, Button, Group, Select, Stack, Text, TextInput, Textarea } from "@mantine/core";
 import { ASSIGN_OPS } from "./expr-model";
 import type { StmtView } from "./body";
 
@@ -44,12 +44,16 @@ function viewText(v: StmtView): string {
 
 // Bare-call row: a call head (`recv.method`) plus one editable input per
 // argument, with add / delete. Reconstructs `head(a, b, …)` (empty args
-// dropped). Args are controlled so add / delete stay correct.
-function CallRow({ view, error, onCommit, onClearError }: {
+// dropped). Args are controlled so add / delete stay correct. Each argument also
+// offers a `ƒx` toggle that swaps its text field for the inline structured
+// editor (which edits just that argument's expression).
+function CallRow({ view, error, onCommit, onClearError, renderArgEditor, onToggleArg }: {
   view: { head: string; args: string[] };
   error: boolean;
   onCommit: (text: string) => void;
   onClearError: () => void;
+  renderArgEditor?: (argIndex: number) => ReactNode;
+  onToggleArg?: (argIndex: number) => void;
 }): JSX.Element {
   const [head, setHead] = useState(view.head);
   const [args, setArgs] = useState<string[]>(view.args);
@@ -74,34 +78,53 @@ function CallRow({ view, error, onCommit, onClearError }: {
           + arg
         </Button>
       </Group>
-      {args.map((arg, i) => (
-        <Group key={i} gap={4} wrap="nowrap" align="center" style={{ paddingLeft: 12 }}>
-          <TextInput
-            size="xs"
-            style={{ flex: 1, minWidth: 0 }}
-            value={arg}
-            data-testid="c4system-call-arg"
-            aria-label={`argument ${i + 1}`}
-            styles={MONO}
-            onFocus={onClearError}
-            onChange={(e) => setArgs((prev) => prev.map((x, j) => (j === i ? e.currentTarget.value : x)))}
-            onBlur={() => onCommit(reconstruct(head, args))}
-          />
-          <Button
-            size="compact-xs"
-            variant="subtle"
-            color="red"
-            data-testid="c4system-call-arg-del"
-            onClick={() => {
-              const next = args.filter((_, j) => j !== i);
-              setArgs(next);
-              onCommit(reconstruct(head, next));
-            }}
-          >
-            ×
-          </Button>
-        </Group>
-      ))}
+      {args.map((arg, i) => {
+        const argEditor = renderArgEditor?.(i) ?? null;
+        const structured = argEditor != null;
+        return (
+          <Group key={i} gap={4} wrap="nowrap" align="flex-start" style={{ paddingLeft: 12 }}>
+            {structured ? (
+              <Box style={{ flex: 1, minWidth: 0 }}>{argEditor}</Box>
+            ) : (
+              <TextInput
+                size="xs"
+                style={{ flex: 1, minWidth: 0 }}
+                value={arg}
+                data-testid="c4system-call-arg"
+                aria-label={`argument ${i + 1}`}
+                styles={MONO}
+                onFocus={onClearError}
+                onChange={(e) => setArgs((prev) => prev.map((x, j) => (j === i ? e.currentTarget.value : x)))}
+                onBlur={() => onCommit(reconstruct(head, args))}
+              />
+            )}
+            {onToggleArg && (
+              <Button
+                size="compact-xs"
+                variant={structured ? "filled" : "subtle"}
+                data-testid="c4system-call-arg-structured"
+                title="edit the argument structurally"
+                onClick={() => onToggleArg(i)}
+              >
+                ƒx
+              </Button>
+            )}
+            <Button
+              size="compact-xs"
+              variant="subtle"
+              color="red"
+              data-testid="c4system-call-arg-del"
+              onClick={() => {
+                const next = args.filter((_, j) => j !== i);
+                setArgs(next);
+                onCommit(reconstruct(head, next));
+              }}
+            >
+              ×
+            </Button>
+          </Group>
+        );
+      })}
     </Stack>
   );
 }
@@ -281,6 +304,8 @@ export function BodyEditor({ statements, targets = [], onEdit, onDelete, onMove,
                 error={errorAt === i}
                 onClearError={() => errorAt === i && setErrorAt(null)}
                 onCommit={(text) => commitEdit(i, original, text)}
+                renderArgEditor={(a) => (hasValueEditor?.(i, a) ? (renderValueEditor?.(i, a) ?? null) : null)}
+                onToggleArg={onToggleValueEditor ? (a) => onToggleValueEditor(i, a) : undefined}
               />
             ) : (
               <OtherRow

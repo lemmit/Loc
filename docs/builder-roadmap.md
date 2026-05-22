@@ -334,12 +334,13 @@ Done:
     accepts a dotted path, so it's non-lossy); and a per-row `ƒx` toggle expands
     a statement's expression into the same structured `ExprSlotEditor` the
     Expression picker uses, bound to that statement's slot (`stmtExpr` / `wfStmt`,
-    with an optional `field`). It covers the **assignment value** and the
-    single-expression statements (`precondition` / `requires` / `let`), editing
-    just the expression and leaving the keyword (and a `let` binding's name) in
-    source. Keyed by `rev` so it re-seeds on commit; the open row is held in the
-    pane so it survives. A `hasValueEditor` predicate decides which rows get the
-    toggle. Gated by `test/system-body.test.ts` + e2e.
+    with an optional `field`). It covers every editable body expression — the
+    **assignment value**, the single-expression statements (`precondition` /
+    `requires` / `let`), and each **bare-call argument** (`field` = arg index) —
+    editing just that expression and leaving the keyword (and a `let` binding's
+    name) in source. Keyed by `rev` so it re-seeds on commit; the open row is
+    held in the pane so it survives. A `hasValueEditor` predicate decides which
+    rows / args get the toggle. Gated by `test/system-body.test.ts` + e2e.
 - **Diagnostics on graph nodes** — LSP diagnostics (`ctx.diagnostics`) are
   attributed to the construct whose source most tightly contains each (so a
   problem inside an aggregate marks the aggregate, not its module), and that node
