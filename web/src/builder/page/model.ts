@@ -218,9 +218,9 @@ function asString(e: Expression): string | null {
 function readProp(kind: PropKind, e: Expression): string | number | null {
   if (kind === "string") return asString(e);
   if (kind === "int") return e.$type === "IntLit" ? e.value : null;
-  // Only a bare identifier is modelled; qualified refs (`Sales.Order`) fall
-  // back to opaque.
-  if (kind === "ref") return e.$type === "NameRef" ? e.name : null;
+  // A bare identifier (`Order`) or a qualified ref (`Sales.Order`); both emit
+  // verbatim, and the latter shows up as the current value in the dropdown.
+  if (kind === "ref") return e.$type === "NameRef" ? e.name : e.$type === "MemberAccess" ? printExpr(e) : null;
   if (e.$type === "Lambda" || e.$type === "MatchExpr") return null;
   return printExpr(e);
 }
@@ -265,11 +265,10 @@ function seedCall(name: keyof typeof SPECS, spec: PrimitiveSpec, args: CallArg[]
         // Unknown named arg → keep it as a passthrough prop (preserved verbatim,
         // editable as a generic expr field) rather than collapsing the whole
         // node to Opaque.  This is what lets the many optional modifiers a
-        // primitive accepts (`testid:`, `striped:`, `gap:`, …) round-trip.  A
-        // lambda/match value still forces Opaque (it's domain logic).
-        const v = readProp("expr", a.value);
-        if (v === null) return null;
-        props[a.name] = v;
+        // primitive accepts (`testid:`, `striped:`, `gap:`, …) round-trip — and
+        // an event-handler lambda (`onClick: e => { … }`) keeps the carrying
+        // primitive recognised, with the handler editable as raw source.
+        props[a.name] = printExpr(a.value);
         order.push(a.name);
       }
       continue;

@@ -159,6 +159,13 @@ describe("page-builder model — primitive coverage", () => {
     // Text content that is an expression (not a bare string literal).
     'Text("Hello, " + userName)',
     'Heading(pageTitle, level: 1)',
+    // Event-handler lambdas keep the carrying primitive recognised (the handler
+    // round-trips as a passthrough prop).
+    'Button("Save", onClick: e => save())',
+    'Button("Increment", onClick: e => { count := count + 1 })',
+    // Qualified refs in a `ref` slot.
+    'Form(of: Sales.Order)',
+    'IdLink(o.id, of: Catalog.Product)',
   ]) {
     it(`round-trips ${bodyExpr}`, () => roundtrips(bodyExpr));
   }
@@ -226,6 +233,19 @@ describe("page-builder model — container-with-props seed shape", () => {
     const node = seed('Text("Hello, " + userName)');
     expect(node.name).toBe("Text");
     expect(node.props.text).toBe('"Hello, " + userName');
+  });
+
+  it("keeps an event-handler lambda as a passthrough prop (not Opaque)", () => {
+    const node = seed('Button("Increment", onClick: e => { count := count + 1 })');
+    expect(node.name).toBe("Button");
+    expect(node.props.label).toBe('"Increment"');
+    expect(String(node.props.onClick)).toContain("=>");
+  });
+
+  it("recognises a qualified ref binding", () => {
+    const node = seed("Form(of: Sales.Order)");
+    expect(node.name).toBe("Form");
+    expect(node.props.of).toBe("Sales.Order");
   });
 
   it("recognises a call with optional positionals omitted", () => {
