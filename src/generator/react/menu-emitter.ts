@@ -11,7 +11,7 @@
 //   2. No explicit menu block → returns `undefined`.  Caller falls
 //      back to the hardcoded sidebar in
 //      `prepareAppShellVM(aggregates, workflows, views, …)` —
-//      byte-equivalent to main's pre-Slice-6 output for the bulk-
+//      byte-equivalent to the original sidebar output for the bulk-
 //      scaffold case (the byte-equivalence acceptance gate).
 //
 // What this emitter covers:
