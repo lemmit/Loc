@@ -1,5 +1,5 @@
 import type { AggregateIR, BoundedContextIR, DeployableIR, SystemIR } from "../../ir/loom-ir.js";
-import { camel, pascal, plural, snake } from "../../util/naming.js";
+import { lowerFirst, upperFirst, plural, snake } from "../../util/naming.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import { buildApiModule } from "./api-builder.js";
@@ -104,7 +104,7 @@ export function generateReactForContexts(
   // objects.
   for (const { agg, ctx } of aggregates) {
     const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
-    out.set(`src/api/${camel(agg.name)}.ts`, buildApiModule(agg, repo, ctx));
+    out.set(`src/api/${lowerFirst(agg.name)}.ts`, buildApiModule(agg, repo, ctx));
   }
 
   const workflows = allWorkflows(contexts);
@@ -276,12 +276,12 @@ function smokeSpec(aggregates: AggregateIR[]): string {
   // page loads.  Users add per-aggregate scenarios using the page
   // objects under e2e/pages/.
   const imports = aggregates
-    .map((a) => `import { ${pascal(a.name)}ListPage } from "./pages/${camel(a.name)}";`)
+    .map((a) => `import { ${upperFirst(a.name)}ListPage } from "./pages/${lowerFirst(a.name)}";`)
     .join("\n");
   const cases = aggregates
     .map(
       (a) =>
-        `test("${snake(plural(a.name))} list loads", async ({ page }) => {\n  const p = await new ${pascal(a.name)}ListPage(page).goto();\n  await expect(p.page).toHaveURL(/${snake(plural(a.name))}$/);\n});`,
+        `test("${snake(plural(a.name))} list loads", async ({ page }) => {\n  const p = await new ${upperFirst(a.name)}ListPage(page).goto();\n  await expect(p.page).toHaveURL(/${snake(plural(a.name))}$/);\n});`,
     )
     .join("\n\n");
   return `// Auto-generated smoke spec.

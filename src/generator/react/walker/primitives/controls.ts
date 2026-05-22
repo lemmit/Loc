@@ -4,7 +4,7 @@
 // lookups, so they pull the core walk/expr/stmt helpers.
 
 import type { ExprIR } from "../../../../ir/loom-ir.js";
-import { camel, humanize, pascal, plural, snake } from "../../../../util/naming.js";
+import { lowerFirst, humanize, upperFirst, plural, snake } from "../../../../util/naming.js";
 import type { WalkContext } from "../../body-walker.js";
 import {
   emitExpr,
@@ -142,14 +142,14 @@ export function emitAction(
   }
   // Hoist the mutation hook to function top (React requires hooks at
   // component scope, not inside the onClick handler).
-  const localVar = `${camel(op.name)}${agg.name}`;
-  const hookName = `use${pascal(op.name)}${agg.name}`;
+  const localVar = `${lowerFirst(op.name)}${agg.name}`;
+  const hookName = `use${upperFirst(op.name)}${agg.name}`;
   const idExpr = `${emitExpr(opRef.receiver, ctx)}.id`;
   if (!ctx.actionMutations.some((m) => m.localVar === localVar)) {
     ctx.actionMutations.push({
       localVar,
       hookName,
-      aggCamel: camel(agg.name),
+      aggCamel: lowerFirst(agg.name),
       idExpr,
     });
   }

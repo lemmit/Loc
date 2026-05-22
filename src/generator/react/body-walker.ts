@@ -60,7 +60,7 @@ import type {
   UiHelperImportIR,
   WorkflowIR,
 } from "../../ir/loom-ir.js";
-import { camel, humanize, pascal, plural, snake } from "../../util/naming.js";
+import { lowerFirst, humanize, upperFirst, plural, snake } from "../../util/naming.js";
 import type { ImportSpec, LoadedPack } from "../_packs/loader.js";
 import { routerPackageForStack } from "../_packs/stack-runtime.js";
 import {
