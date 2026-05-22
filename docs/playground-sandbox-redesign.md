@@ -1,6 +1,10 @@
 # Playground preview: sandbox re-platforming
 
-Status: design proposal. No code yet.
+Status: substantially landed. Phases 1–2 (capability-scoped bridge,
+CSP/sandbox boundary) have shipped — see `web/src/preview/sandbox-origin.ts`
+and `web/src/preview/bridge/parent-bridge.ts`; the old service-worker host
+(`preview-sw.js`, `sw-host.ts`, `sandbox-iframe-host.ts`) is gone. The
+cross-origin flip and in-browser test driver remain open.
 
 ## Why this exists
 

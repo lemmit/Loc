@@ -725,7 +725,39 @@ function validateE2ETest(
   const source = `${sys.name}/${test.name}`;
   const magicId = test.kind === "ui" ? "ui" : "api";
   for (const stmt of test.statements) {
+    const badKind = unsupportedE2EStmtKind(stmt);
+    if (badKind) {
+      // Mirror validateAggregateTestBodies: an e2e body only drives the
+      // deployable through `api`/`ui` calls and asserts via expect.  A
+      // domain-mutation / guard statement can't be lowered, and silently
+      // emitting it would ship a green-but-empty test — so reject it here
+      // with a source location instead of leaking a generator fallback.
+      diags.push({
+        severity: "error",
+        message:
+          `e2e test '${test.name}': '${badKind}' is not supported in an e2e test body. ` +
+          `Only expect, expect-throws, let, expression, and ${magicId}.<...> calls are allowed.`,
+        source,
+      });
+      continue;
+    }
     walkStmt(stmt, (e) => checkMagicCall(e, magicId, contexts, source, diags));
+  }
+}
+
+/** Statement kinds an e2e test body cannot lower (domain mutations and
+ *  operation guards have no meaning when driving a deployable over HTTP /
+ *  the browser).  Returns the offending kind, or null when supported. */
+function unsupportedE2EStmtKind(s: TestStmtIR): string | null {
+  switch (s.kind) {
+    case "expect":
+    case "expect-throws":
+    case "let":
+    case "expression":
+    case "call":
+      return null;
+    default:
+      return s.kind;
   }
 }
 
