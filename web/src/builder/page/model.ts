@@ -26,7 +26,10 @@ import { printExpr } from "../../../../src/language/print/index.js";
 // (verbatim printed text); the difference is purely the settings UI, which
 // shows a plain text box for a bare string literal and the raw expression
 // otherwise.
-export type PropKind = "string" | "int" | "ref" | "expr" | "text";
+//
+// `color` is a string-valued prop (stored/emitted exactly like `string`) shown
+// as a palette dropdown.
+export type PropKind = "string" | "int" | "ref" | "expr" | "text" | "color";
 
 interface PropSpec {
   key: string;
@@ -80,8 +83,8 @@ const SPECS = {
   Text: { kind: "leaf", positional: [{ key: "text", kind: "text" }] },
   Button: { kind: "leaf", positional: [{ key: "label", kind: "text" }], named: [{ key: "to", kind: "string" }] },
   Anchor: { kind: "leaf", positional: [{ key: "text", kind: "text" }], named: [{ key: "to", kind: "string" }] },
-  Badge: { kind: "leaf", positional: [{ key: "value", kind: "expr" }], named: [{ key: "color", kind: "string" }] },
-  Alert: { kind: "leaf", positional: [{ key: "message", kind: "text" }], named: [{ key: "color", kind: "string" }] },
+  Badge: { kind: "leaf", positional: [{ key: "value", kind: "expr" }], named: [{ key: "color", kind: "color" }] },
+  Alert: { kind: "leaf", positional: [{ key: "message", kind: "text" }], named: [{ key: "color", kind: "color" }] },
   Empty: { kind: "leaf", positional: [{ key: "message", kind: "text" }] },
   Divider: { kind: "leaf" },
   List: { kind: "leaf", named: [{ key: "of", kind: "ref", options: "aggregate" }, { key: "testid", kind: "string" }] },
@@ -227,7 +230,7 @@ function asString(e: Expression): string | null {
  *  (caller falls back to opaque).  `expr` accepts any expression except the
  *  structured slots (`Lambda`/`MatchExpr`) and stores its printed text. */
 function readProp(kind: PropKind, e: Expression): string | number | null {
-  if (kind === "string") return asString(e);
+  if (kind === "string" || kind === "color") return asString(e);
   if (kind === "int") return e.$type === "IntLit" ? e.value : null;
   // A bare identifier (`Order`) or a qualified ref (`Sales.Order`); both emit
   // verbatim, and the latter shows up as the current value in the dropdown.
