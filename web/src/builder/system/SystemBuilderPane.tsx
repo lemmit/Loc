@@ -24,6 +24,7 @@ import { IDENTIFIER, renameConstruct, renameMember } from "./rename";
 import {
   addField,
   availableTypes,
+  baseLabel,
   deleteField,
   freshFieldName,
   isFieldKind,
@@ -32,6 +33,17 @@ import {
   type BaseSpec,
   type TypeSpec,
 } from "./fields";
+import {
+  addFindParam,
+  deleteFindParam,
+  findReturnSpec,
+  freshParamName,
+  listFindParams,
+  listFinds,
+  renameFindParam,
+  retypeFindParam,
+  setFindReturnType,
+} from "./find-params";
 import { currentTarget, isRebindKind, rebindReference, rebindTargets, targetKindOf } from "./rebind";
 import {
   addStatement,
@@ -180,6 +192,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const [opName, setOpName] = useState<string | null>(null);
   const [slotKey, setSlotKey] = useState<string | null>(null);
   const [exprMode, setExprMode] = useState<ExprMode>("structured");
+  const [findName, setFindName] = useState<string | null>(null);
 
   useEffect(() => {
     const sel = selectedId;
@@ -187,6 +200,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     setOpName(null);
     setSlotKey(null);
     setExprMode("structured");
+    setFindName(null);
   }, [selectedId]);
 
   useEffect(() => {
@@ -296,6 +310,32 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     if (!selected) return;
     const next = deleteField(ctx.getSource(), selected.kind, selected.name, index);
     if (next != null) apply(next, true);
+  };
+
+  // Repository find params (only when a find is picked).
+  const applyFind = (next: string | null): void => {
+    if (next != null) apply(next, true);
+  };
+  const addParamTo = (): void => {
+    if (!selected || !findName) return;
+    const name = freshParamName(parsed.ast, selected.name, findName);
+    applyFind(addFindParam(ctx.getSource(), selected.name, findName, name, { base: { kind: "primitive", name: "string" }, array: false, optional: false }));
+  };
+  const setParamType = (index: number, spec: TypeSpec): void => {
+    if (!selected || !findName) return;
+    applyFind(retypeFindParam(ctx.getSource(), selected.name, findName, index, spec));
+  };
+  const removeParam = (index: number): void => {
+    if (!selected || !findName) return;
+    applyFind(deleteFindParam(ctx.getSource(), selected.name, findName, index));
+  };
+  const renameParam = (index: number, next: string): void => {
+    if (!selected || !findName) return;
+    applyFind(renameFindParam(ctx.getSource(), selected.name, findName, index, next));
+  };
+  const setReturn = (spec: TypeSpec): void => {
+    if (!selected || !findName) return;
+    applyFind(setFindReturnType(ctx.getSource(), selected.name, findName, spec));
   };
 
   const rebindTo = (target: string | null): void => {
@@ -461,6 +501,66 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
                     </Button>
                   </Group>
                 ))}
+              </Stack>
+            )}
+            {selected.kind === "repository" && listFinds(selected.ast).length > 0 && (
+              <Stack gap={4} data-testid="c4system-finds">
+                <Text size="xs" tt="uppercase" c="dimmed">Finds</Text>
+                <Select
+                  size="xs"
+                  placeholder="pick a find…"
+                  data={listFinds(selected.ast)}
+                  value={findName}
+                  data-testid="c4system-find-pick"
+                  onChange={setFindName}
+                />
+                {findName && (() => {
+                  const ret = findReturnSpec(parsed.ast, selected.name, findName);
+                  const params = listFindParams(parsed.ast, selected.name, findName);
+                  return (
+                    <Stack gap={4}>
+                      {ret && (
+                        <Group gap={4} align="center" wrap="nowrap">
+                          <Text size="xs" style={{ flex: "0 0 56px" }} c="dimmed">returns</Text>
+                          <Select
+                            size="xs"
+                            style={{ flex: 1, minWidth: 0 }}
+                            searchable
+                            data={typeOptions.map((o) => o.label)}
+                            value={baseLabel(ret.base)}
+                            data-testid="c4system-find-return"
+                            onChange={(label) => { const base = label ? baseByLabel.get(label) : undefined; if (base) setReturn({ base, array: ret.array, optional: ret.optional }); }}
+                          />
+                          <Checkbox size="xs" title="array []" checked={ret.array} onChange={(e) => setReturn({ base: ret.base, array: e.currentTarget.checked, optional: ret.optional })} />
+                          <Text size="xs" c="dimmed">[]</Text>
+                        </Group>
+                      )}
+                      <Group justify="space-between" align="center">
+                        <Text size="xs" c="dimmed">params</Text>
+                        <Button size="compact-xs" variant="light" data-testid="c4system-param-add" onClick={addParamTo}>+ param</Button>
+                      </Group>
+                      {params.map((p, i) => (
+                        <Group key={`${p.name}-${i}`} gap={4} align="center" wrap="nowrap" data-testid="c4system-param-row">
+                          <FieldNameInput name={p.name} onRename={(next) => renameParam(i, next)} />
+                          <Select
+                            size="xs"
+                            style={{ flex: 1, minWidth: 0 }}
+                            searchable
+                            data={typeOptions.map((o) => o.label)}
+                            value={p.baseLabel}
+                            data-testid="c4system-param-type"
+                            onChange={(label) => { const base = label ? baseByLabel.get(label) : undefined; if (base) setParamType(i, { base, array: p.array, optional: p.optional }); }}
+                          />
+                          <Checkbox size="xs" title="array []" checked={p.array} onChange={(e) => setParamType(i, { base: p.base, array: e.currentTarget.checked, optional: p.optional })} />
+                          <Text size="xs" c="dimmed">[]</Text>
+                          <Checkbox size="xs" title="optional ?" checked={p.optional} onChange={(e) => setParamType(i, { base: p.base, array: p.array, optional: e.currentTarget.checked })} />
+                          <Text size="xs" c="dimmed">?</Text>
+                          <Button size="compact-xs" variant="subtle" color="red" data-testid="c4system-param-delete" onClick={() => removeParam(i)}>×</Button>
+                        </Group>
+                      ))}
+                    </Stack>
+                  );
+                })()}
               </Stack>
             )}
             {selected.kind === "workflow" && (
