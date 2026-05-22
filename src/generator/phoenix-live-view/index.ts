@@ -6,7 +6,7 @@ import { emitAggregateResources } from "./domain-emit.js";
 import { emitLiveViewPages, type LiveRoute } from "./liveview-emit.js";
 import { emitMigrations } from "./migrations-emit.js";
 import { emitOpenApiSpec } from "./openapi-emit.js";
-import { renderAshType, renderExpr } from "./render-expr.js";
+import { renderAshType } from "./render-expr.js";
 import { buildFindActions, findRepoFor, mergeViewFindsForAgg } from "./repository-emit.js";
 import { renderSidebarComponent } from "./sidebar-emit.js";
 import { renderThemeCss } from "./theme-emit.js";
@@ -188,10 +188,9 @@ function emitContext(
     out.set(path, renderEventModule(ev, contextModule));
   }
 
-  // Aggregates — Ash.Resource modules (D1: validations from operation
-  // preconditions / aggregate invariants lower through emitAggregateResources
-  // which has the validate-clause emission; this replaces the orchestrator's
-  // older renderAggregateModule path).
+  // Aggregates — Ash.Resource modules. Validations (operation preconditions
+  // / aggregate invariants) and validate-clause emission are produced by
+  // emitAggregateResources.
   const allResources: string[] = [];
   const aggFiles = emitAggregateResources(ctx, appModule, appName);
   for (const [path, content] of aggFiles) out.set(path, content);
@@ -229,128 +228,6 @@ function emitContext(
   // Domain module per context
   const domainPath = `lib/${appName}/${ctxSnake}.ex`;
   out.set(domainPath, renderDomainModule(ctx, contextModule, allResources));
-}
-
-// ---------------------------------------------------------------------------
-// Ash.Resource rendering (aggregate)
-// ---------------------------------------------------------------------------
-
-function renderAggregateModule(
-  agg: import("../../ir/loom-ir.js").AggregateIR,
-  _ctx: BoundedContextIR,
-  contextModule: string,
-  customFinds: string[],
-): string {
-  const moduleName = `${contextModule}.${pascal(agg.name)}`;
-  const tableName = plural(snake(agg.name));
-  const idType = idAshType(agg.idValueType);
-
-  // Attributes
-  const attrLines = agg.fields.map((f) => {
-    const ashType = renderAshType(f.type, contextModule);
-    const opts = f.optional ? "allow_nil?: true" : "allow_nil?: false";
-    return `    attribute :${snake(f.name)}, ${ashType}, ${opts}`;
-  });
-
-  // Relationships (containments)
-  const relLines = agg.contains.map((c) => {
-    const partModule = `${contextModule}.${pascal(c.partName)}`;
-    if (c.collection) {
-      return `    has_many :${snake(c.name)}, ${partModule}`;
-    }
-    return `    has_one :${snake(c.name)}, ${partModule}`;
-  });
-
-  // Calculations (derived fields)
-  const calcLines = agg.derived.map((d) => {
-    const ashType = renderAshType(d.type, contextModule);
-    return `    calculate :${snake(d.name)}, ${ashType}, expr(${renderAshExprInline(d.expr, contextModule)})`;
-  });
-
-  // Validations (invariants)
-  const validationLines = agg.invariants.map((inv) => {
-    const exprStr = renderAshExprInline(inv.expr, contextModule);
-    if (inv.guard) {
-      const guardStr = renderAshExprInline(inv.guard, contextModule);
-      return `    validate attribute_does_not_equal(:_placeholder, nil) do\n      where [${exprStr}]\n      message "Invariant: ${inv.source.replace(/"/g, "'")}"\n    end`;
-    }
-    void exprStr;
-    return `    # invariant: ${inv.source}`;
-  });
-
-  // Actions — defaults + custom finds
-  const defaultActions = `    defaults [:read, :create, :update, :destroy]`;
-  const customActionBlock = customFinds.length > 0 ? "\n" + customFinds.join("\n\n") : "";
-
-  return `# Auto-generated.
-defmodule ${moduleName} do
-  use Ash.Resource,
-    otp_app: :${snake(contextModule.split(".")[0] ?? "app")},
-    domain: ${contextModule},
-    data_layer: AshPostgres.DataLayer
-
-  postgres do
-    table "${tableName}"
-    repo ${contextModule.split(".")[0]}.Repo
-  end
-
-  attributes do
-    uuid_primary_key :id
-${attrLines.join("\n")}
-  end
-${relLines.length > 0 ? "\n  relationships do\n" + relLines.join("\n") + "\n  end\n" : ""}${calcLines.length > 0 ? "\n  calculations do\n" + calcLines.join("\n") + "\n  end\n" : ""}${validationLines.length > 0 ? "\n  validations do\n" + validationLines.join("\n") + "\n  end\n" : ""}
-  actions do
-${defaultActions}${customActionBlock}
-  end
-end
-`;
-}
-
-// ---------------------------------------------------------------------------
-// Ash.Resource rendering (entity part / child)
-// ---------------------------------------------------------------------------
-
-function renderPartModule(
-  part: import("../../ir/loom-ir.js").EntityPartIR,
-  parentAgg: import("../../ir/loom-ir.js").AggregateIR,
-  contextModule: string,
-): string {
-  const moduleName = `${contextModule}.${pascal(part.name)}`;
-  const tableName = plural(snake(part.name));
-  const parentModule = `${contextModule}.${pascal(parentAgg.name)}`;
-
-  const attrLines = part.fields.map((f) => {
-    const ashType = renderAshType(f.type, contextModule);
-    const opts = f.optional ? "allow_nil?: true" : "allow_nil?: false";
-    return `    attribute :${snake(f.name)}, ${ashType}, ${opts}`;
-  });
-
-  return `# Auto-generated.
-defmodule ${moduleName} do
-  use Ash.Resource,
-    otp_app: :${snake(contextModule.split(".")[0] ?? "app")},
-    domain: ${contextModule},
-    data_layer: AshPostgres.DataLayer
-
-  postgres do
-    table "${tableName}"
-    repo ${contextModule.split(".")[0]}.Repo
-  end
-
-  attributes do
-    uuid_primary_key :id
-${attrLines.join("\n")}
-  end
-
-  relationships do
-    belongs_to :${snake(parentAgg.name)}, ${parentModule}, allow_nil?: false
-  end
-
-  actions do
-    defaults [:read, :create, :update, :destroy]
-  end
-end
-`;
 }
 
 // ---------------------------------------------------------------------------
@@ -481,18 +358,6 @@ ${resourceBlocks.join("\n")}
   end
 end
 `;
-}
-
-// ---------------------------------------------------------------------------
-// Inline Elixir expression rendering (for Ash expr/filter contexts)
-// Delegates to the Phase 3A render-expr module.
-// ---------------------------------------------------------------------------
-
-function renderAshExprInline(
-  expr: import("../../ir/loom-ir.js").ExprIR,
-  contextModule: string,
-): string {
-  return renderExpr(expr, { thisName: "record", contextModule });
 }
 
 // ---------------------------------------------------------------------------
@@ -1591,19 +1456,3 @@ function toModulePrefix(snakeName: string): string {
     .join("");
 }
 
-function idAshType(idValueType: string): string {
-  switch (idValueType) {
-    case "int":
-      return ":integer";
-    case "long":
-      return ":integer";
-    case "string":
-      return ":string";
-    default:
-      return ":uuid";
-  }
-}
-
-// suppress unused warning — used in inline require above
-void plural;
-void idAshType;
