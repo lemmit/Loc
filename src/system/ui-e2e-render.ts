@@ -316,7 +316,13 @@ function renderUIStmt(s: TestStmtIR, ctx: RenderCtx): string {
   if (s.kind === "call") {
     return `${renderUIExpr({ kind: "call", callKind: "free", name: s.name, args: s.args }, ctx)};`;
   }
-  return `// unsupported in ui e2e: ${s.kind}`;
+  // Fail generation loudly rather than emitting a comment: a silently dropped
+  // statement would ship a green-but-empty Playwright spec.  Only expect /
+  // expect-throws / let / expression / call are valid in a ui e2e test body.
+  throw new Error(
+    `ui e2e: unsupported statement '${s.kind}' in a ui test body — ` +
+      `only expect, expect-throws, let, expression, and call are supported.`,
+  );
 }
 
 type LiteralIR = Extract<ExprIR, { kind: "literal" }>;

@@ -137,4 +137,32 @@ describe("Slice 11.9 — += / -= in onClick mutations", () => {
       /<Button onClick=\{\(\) => \{ setA\(a \+ 1\); setB\(b - 1\); setC\(99\); \}\}>Mix<\/Button>/,
     );
   });
+
+  it("fails loud on an unlowerable multi-segment assignment (no silent drop)", async () => {
+    // A handler statement the walker can't lower used to emit a
+    // `/* unsupported assign */` comment — compiling fine but silently
+    // doing nothing at runtime (a dead button).  It must now throw.
+    const build = buildAndGenerate(`
+      system S {
+        module M { context C { } }
+        ui WebApp {
+          page P {
+            route: "/p"
+            state { draft: int = 0 }
+            body:  Button("x", onClick: e => { draft.note := 1 })
+          }
+        }
+        deployable api { platform: hono, modules: M, port: 3000 }
+        deployable web {
+          platform: static
+          targets: api
+          ui: WebApp
+          port: 3001
+        }
+      }
+    `);
+    await expect(build).rejects.toThrow(
+      /unsupported assignment to 'draft\.note' in a page event handler/,
+    );
+  });
 });

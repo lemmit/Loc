@@ -2357,7 +2357,10 @@ function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
         const setter = "set" + name[0]!.toUpperCase() + name.slice(1);
         return `${setter}(${emitExpr(stmt.value, ctx)});`;
       }
-      return `/* unsupported assign: ${seg.join(".")} */`;
+      return unsupportedPageStmt(
+        `assignment to '${seg.join(".")}'`,
+        "the React backend only mutates single-segment page-state fields",
+      );
     }
     case "add":
     case "remove": {
@@ -2374,7 +2377,10 @@ function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
         const op = stmt.kind === "add" ? "+" : "-";
         return `${setter}(${name} ${op} ${emitExpr(stmt.value, ctx)});`;
       }
-      return `/* unsupported ${stmt.kind === "add" ? "+=" : "-="}: ${seg.join(".")} */`;
+      return unsupportedPageStmt(
+        `'${stmt.kind === "add" ? "+=" : "-="}' on '${seg.join(".")}'`,
+        "the React backend only mutates single-segment page-state fields",
+      );
     }
     case "let":
       return `const ${stmt.name} = ${emitExpr(stmt.expr, ctx)};`;
@@ -2390,8 +2396,22 @@ function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
       return `${stmt.name}(${args});`;
     }
     default:
-      return `/* unsupported stmt: ${stmt.kind} */`;
+      return unsupportedPageStmt(
+        `statement '${stmt.kind}'`,
+        "it has no meaning in a React page event handler",
+      );
   }
+}
+
+/** A page event-handler statement the React walker can't lower.  We throw
+ *  rather than emit a `/* unsupported *\/` comment: the old comment compiled
+ *  fine but silently dropped the statement at runtime (e.g. a button whose
+ *  handler does nothing).  Failing generation surfaces the gap loudly — see
+ *  the same rationale in src/ir/validate.ts (test-body fallbacks). */
+function unsupportedPageStmt(what: string, why: string): never {
+  throw new Error(
+    `react: unsupported ${what} in a page event handler — ${why}.`,
+  );
 }
 
 /** Slice 11.5 — read a named arg as a navigation target.  String

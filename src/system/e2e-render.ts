@@ -145,7 +145,14 @@ function renderE2EStmt(s: TestStmtIR, ctx: RenderCtx): string {
   if (s.kind === "call") {
     return `${renderE2EExpr({ kind: "call", callKind: "free", name: s.name, args: s.args }, ctx)};`;
   }
-  return `// unsupported in e2e: ${s.kind}`;
+  // A test statement we can't lower must fail generation loudly: silently
+  // emitting a comment would drop the assertion and ship a green-but-empty
+  // test.  Only expect / expect-throws / let / expression / call are valid in
+  // an e2e api test body.
+  throw new Error(
+    `e2e: unsupported statement '${s.kind}' in an api test body — ` +
+      `only expect, expect-throws, let, expression, and call are supported.`,
+  );
 }
 
 // ---------------------------------------------------------------------------

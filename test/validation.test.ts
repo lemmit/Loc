@@ -769,6 +769,26 @@ describe("Loom IR validation (post-lowering)", async () => {
     expect(errors).toEqual([]);
   });
 
+  it("rejects a mutation statement in a test e2e body", async () => {
+    const loom = await loomFrom(`
+      system S {
+        module M { context T { aggregate Order { x: int } } }
+        deployable api { platform: hono, modules: M, port: 3000 }
+        test e2e "mutating body" against api {
+          x := 1
+        }
+      }
+    `);
+    const diags = validateLoomModel(loom);
+    expect(
+      diags.some(
+        (d) =>
+          d.severity === "error" &&
+          /not supported in an e2e test body/.test(d.message),
+      ),
+    ).toBe(true);
+  });
+
   it("rejects find with non-queryable where (collection op)", async () => {
     const loom = await loomFrom(`
       context T {
