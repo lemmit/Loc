@@ -61,7 +61,6 @@ import {
   type PageMenuMeta,
   type RouteProp,
   type Scaffold,
-  type StateBlock,
   type Ui,
   type View,
   type Workflow,
@@ -403,9 +402,9 @@ function makePage(input: PageInput): Page {
   // Wire prop $containers back to the page.
   for (let i = 0; i < props.length; i++) {
     const p = props[i] as unknown as Record<string, unknown>;
-    p["$container"] = page;
-    p["$containerProperty"] = "props";
-    p["$containerIndex"] = i;
+    p.$container = page;
+    p.$containerProperty = "props";
+    p.$containerIndex = i;
   }
   return page;
 }
@@ -504,9 +503,9 @@ function attachToUi(page: Page, ui: Ui): void {
 
 function setContainer(child: unknown, parent: object, property: string, index?: number): void {
   const c = child as Record<string, unknown>;
-  c["$container"] = parent;
-  c["$containerProperty"] = property;
-  if (index !== undefined) c["$containerIndex"] = index;
+  c.$container = parent;
+  c.$containerProperty = property;
+  if (index !== undefined) c.$containerIndex = index;
 }
 
 // ---------------------------------------------------------------------------

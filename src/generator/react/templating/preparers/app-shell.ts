@@ -43,7 +43,7 @@ export function prepareAppShellVM(
    *  `menu { … }`, the caller derives `navSections` from that block
    *  (via `deriveSidebarFromUi`) and passes them here.  When
    *  undefined the legacy hardcoded grouping (Aggregates / Workflows /
-   *  Views) is used — byte-equivalent to main's pre-Slice-6 output. */
+   *  Views) is used — byte-equivalent to the original sidebar output. */
   sidebarOverride?: NavSectionVM[],
   /** Explicit pages with non-conventional names emit
    *  at `src/pages/<name-snake>.tsx`.  The caller hands their

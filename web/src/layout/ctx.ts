@@ -21,8 +21,11 @@ import type { LoomExample } from "../examples";
 import type { TreeFolder } from "../preview/file-tree";
 import type { useWorkspace } from "../workspace/use-workspace";
 import type { PipelineState } from "../pipeline/state";
-import type { DispatchResult } from "../runtime/protocol";
+import type { DispatchResult, QueryResult } from "../runtime/protocol";
 import type { ApiEndpoint } from "../backend/openapi";
+import type { TestResult } from "../testing/harness";
+import type { OutputStream } from "./OutputPanel";
+import type { LogLine } from "../util/log-line";
 
 export type ReactBundleStatus =
   | { kind: "pending" }
@@ -49,7 +52,7 @@ export type WorkspaceState = ReturnType<typeof useWorkspace>;
 export type MobileTab =
   | "code"
   | "preview"
-  | "problems"
+  | "output"
   | "backend"
   | "tests";
 
@@ -121,6 +124,31 @@ export interface LayoutCtx {
   bootErrorMessage: string | null;
   dispatchSlot: DispatchResult | null;
 
+  // Test runner results — lifted out of TestsPanel so the Output
+  // panel's "Tests" stream can render the captured console logs even
+  // while the interactive Tests tab is unmounted.
+  testResults: Record<string, TestResult>;
+  setTestResults: (
+    v: Record<string, TestResult> | ((prev: Record<string, TestResult>) => Record<string, TestResult>),
+  ) => void;
+
+  // Which stream the consolidated Output panel is showing.  Shared by
+  // both shells and persisted by App.tsx.
+  outputStream: OutputStream;
+  setOutputStream: (s: OutputStream) => void;
+
+  // Live console streams for the Output panel.  `backendLog` is the
+  // Hono runtime worker's captured console + stack traces (per RPC);
+  // `appLog` is the preview app's console + uncaught errors, forwarded
+  // over the sandbox bridge.  Both are capped + cleared on example
+  // switch by App.tsx.
+  backendLog: LogLine[];
+  appLog: LogLine[];
+  /** Append one preview-app log line (handed to <Preview onAppLog>). */
+  appendAppLog: (line: LogLine) => void;
+  clearBackendLog: () => void;
+  clearAppLog: () => void;
+
   // Files
   files: VirtualFile[];
   tree: TreeFolder;
@@ -156,6 +184,8 @@ export interface LayoutCtx {
   setQueryParam: (name: string, value: string) => void;
   /** Regenerate the request body from the selected endpoint's schema. */
   runGenerateExample: () => void;
+  /** Run one SQL statement against the booted DB (Database console). */
+  runQuery: (sql: string) => Promise<QueryResult>;
 
   // Live mode
   liveMode: boolean;
@@ -180,6 +210,9 @@ export interface LayoutCtx {
   runGenerate: () => void;
   runBundle: () => void;
   runBoot: () => void;
+  /** Re-boot with the persistent DB's stored data dropped first — the
+   *  recovery path when a boot keeps failing on stale persisted data. */
+  runResetData: () => void;
   runWipe: () => void;
   runDispatch: () => void;
   /** Full pipeline cascade — Generate → Bundle → Boot.  On a clean

@@ -45,6 +45,7 @@ const examples = [
   { ddd: "web/src/examples/storybook-mantine.ddd", reactDir: "web_app" },
   { ddd: "web/src/examples/storybook-shadcn.ddd", reactDir: "web_app" },
   { ddd: "web/src/examples/storybook-components.ddd", reactDir: "web_app" },
+  { ddd: "web/src/examples/action-showcase.ddd", reactDir: "web_app" },
 ] as const;
 
 /** Inject `design: "<family>@<version>"` into the `deployable webApp
@@ -55,7 +56,7 @@ const examples = [
  *  storybook examples already declare one), the slot is rewritten in
  *  place rather than duplicated.
  *
- *  Phase 0 of pack versioning: writes the pinned `family@version`
+ *  Writes the pinned `family@version`
  *  quoted form so each shard tests a specific pack version, not
  *  "whatever BUILTIN_PACK_LATEST resolves to today".  Pre-existing
  *  bareword slots and pinned slots both get rewritten in place. */
@@ -85,9 +86,9 @@ interface PackSpec {
   version: string;
 }
 
-/** The matrix of `family@version` shards the test sweeps.  Phase 0
+/** The matrix of `family@version` shards the test sweeps.  Today it
  *  ships one version per family — the same set that existed before
- *  versioning, now explicitly pinned.  Phase 1.X PRs (mantine@v9,
+ *  versioning, now explicitly pinned.  Later additions (mantine@v9,
  *  chakra@v3, …) append entries here; the matrix grows
  *  multiplicatively without other code edits. */
 const PACKS: readonly PackSpec[] = [

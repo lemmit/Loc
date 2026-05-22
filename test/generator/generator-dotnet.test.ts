@@ -97,7 +97,7 @@ describe(".NET generator", () => {
     expect(program).toMatch(/JsonNamingPolicy\.CamelCase/);
   });
 
-  describe("slice 16.A — container basics", () => {
+  describe("container basics", () => {
     it("Program.cs fails fast on missing connection string", async () => {
       const model = await buildModel("examples/sales.ddd");
       const files = generateDotnet(model);
@@ -135,7 +135,7 @@ describe(".NET generator", () => {
     });
   });
 
-  describe("slice 16.C — request observability", () => {
+  describe("request observability", () => {
     it("Program.cs configures structured JSON logging + HTTP request logging", async () => {
       const model = await buildModel("examples/sales.ddd");
       const files = generateDotnet(model);
@@ -277,7 +277,7 @@ describe(".NET generator", () => {
     expect(csproj).toMatch(/<PackageReference Include="Scrutor"/);
   });
 
-  describe("slice 16.B — extern handler exception envelope", () => {
+  describe("extern handler exception envelope", () => {
     it("Domain.Common declares ExternHandlerException with op + agg fields", async () => {
       const model = await buildModel("examples/sales.ddd");
       const files = generateDotnet(model);
@@ -584,7 +584,7 @@ describe(".NET generator", () => {
     );
   });
 
-  it("rewrites Id<X> follow refs to FindManyByIdsAsync + dictionary lookups (slice 3)", async () => {
+  it("rewrites Id<X> follow refs to FindManyByIdsAsync + dictionary lookups", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
@@ -860,10 +860,10 @@ describe(".NET generator", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Slice 1A — auth scaffolding
+  // auth scaffolding
   // -------------------------------------------------------------------------
 
-  describe("auth scaffolding (slice 1A)", () => {
+  describe("auth scaffolding", () => {
     async function emitForAuthSystem(src: string): Promise<Map<string, string>> {
       const { parseHelper } = await import("langium/test");
       const services = createDddServices(NodeFileSystem);
@@ -979,7 +979,7 @@ describe(".NET generator", () => {
     });
 
     // -----------------------------------------------------------------------
-    // Slice 1C — currentUser inside find / view filters
+    // currentUser inside find / view filters
     // -----------------------------------------------------------------------
 
     const SRC_FILTER_AUTH = `
@@ -1039,7 +1039,7 @@ describe(".NET generator", () => {
     });
 
     // -----------------------------------------------------------------------
-    // Slice 2 — `requires` clauses
+    // `requires` clauses
     // -----------------------------------------------------------------------
 
     const SRC_REQUIRES = `
@@ -1092,9 +1092,9 @@ describe(".NET generator", () => {
   });
 
   // -------------------------------------------------------------------
-  // Slice 21.B — wire-boundary validation on the .NET side.
+  // wire-boundary validation on the .NET side.
   // -------------------------------------------------------------------
-  describe("FluentValidation pipeline (slice 21.B)", () => {
+  describe("FluentValidation pipeline", () => {
     it("emits an AbstractValidator per command with single-field invariants", async () => {
       const model = await buildModel("examples/sales.ddd");
       const files = generateDotnet(model);
@@ -1217,7 +1217,7 @@ describe(".NET generator", () => {
       expect(files.get("Program.cs")!).not.toMatch(/AddValidatorsFromAssembly/);
     });
 
-    it("absorbs `string.matches(literal)` as `RuleFor(x => x.F).Matches(...)` (slice 21.C)", async () => {
+    it("absorbs `string.matches(literal)` as `RuleFor(x => x.F).Matches(...)`", async () => {
       const { parseHelper } = await import("langium/test");
       const services = createDddServices(NodeFileSystem);
       const helper = parseHelper(services.Ddd);
@@ -1238,7 +1238,7 @@ describe(".NET generator", () => {
       expect(v).toMatch(/RuleFor\(x => x\.Email\)\.Matches\("\^\[\^@\]\+@\.\+\$"\)/);
     });
 
-    it("renders `matches` in domain code as `Regex.IsMatch` (slice 21.C)", async () => {
+    it("renders `matches` in domain code as `Regex.IsMatch`", async () => {
       const { parseHelper } = await import("langium/test");
       const services = createDddServices(NodeFileSystem);
       const helper = parseHelper(services.Ddd);
@@ -1262,7 +1262,7 @@ describe(".NET generator", () => {
       );
     });
 
-    it("`private invariant` is skipped from FluentValidation but stays in domain (slice 21.C)", async () => {
+    it("`private invariant` is skipped from FluentValidation but stays in domain", async () => {
       const { parseHelper } = await import("langium/test");
       const services = createDddServices(NodeFileSystem);
       const helper = parseHelper(services.Ddd);

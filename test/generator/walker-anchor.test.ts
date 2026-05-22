@@ -1,4 +1,4 @@
-// Slice 11.15 — Anchor (text-style link) primitive.
+// Anchor (text-style link) primitive.
 //
 //   Anchor("View orders", to: "/orders")
 //     → Mantine <Anchor component={RouterLink} to="/orders">…</Anchor>
@@ -22,7 +22,7 @@ async function buildAndGenerate(src: string): Promise<Map<string, string>> {
   return generateSystems(doc.parseResult.value as Model).files;
 }
 
-describe("Slice 11.15 — Anchor primitive", () => {
+describe("Anchor primitive", () => {
   it('Anchor("label", to: "/path") emits <Anchor component={RouterLink} to=...>', async () => {
     const files = await buildAndGenerate(`
       system S {

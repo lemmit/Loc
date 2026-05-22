@@ -10,8 +10,7 @@ import type {
   TypeIR,
 } from "../../ir/loom-ir.js";
 import { findUsesCurrentUser, viewUsesCurrentUser } from "../../ir/loom-ir.js";
-import { lowerFirst, upperFirst, plural } from "../../util/naming.js";
-import { renderTsExpr } from "./render-expr.js";
+import { lowerFirst, plural, upperFirst } from "../../util/naming.js";
 import { joinColumnName, joinTableConstName, valueObjectColumnNames } from "./templates.js";
 
 /** Associations (`Id<T>[]` reference collections) declared on an
@@ -622,7 +621,6 @@ function projectionObject(
 ): string {
   return `{ ${entries.map((e) => `${e.fieldName}: ${e.expr}`).join(", ")} }`;
 }
-
 
 // ---------------------------------------------------------------------------
 // Find queries — convention-based equality predicates

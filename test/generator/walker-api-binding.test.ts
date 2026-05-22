@@ -1,4 +1,4 @@
-// Slice 11.24 — `api X from Module` declaration + UI `api X: Y`
+// `api X from Module` declaration + UI `api X: Y`
 // parameter + walker auto-injection of React Query hooks per
 // body reference of the form `<paramName>.<aggregate>.<op>`.
 //
@@ -27,7 +27,7 @@ import { generateSystemFiles } from "../_helpers/index.js";
 
 const buildAndGenerate = generateSystemFiles;
 
-describe("Slice 11.24 — api binding + walker hook injection", () => {
+describe("api binding + walker hook injection", () => {
   it("UI `api X: Y` parameter + body ref injects useAllAggregates hook at page top", async () => {
     const files = await buildAndGenerate(`
       system S {

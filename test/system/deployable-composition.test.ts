@@ -1,4 +1,4 @@
-// Slice 11.26 — deployable composition: backend `serves:` +
+// deployable composition: backend `serves:` +
 // frontend `ui: WebApp { Param: backend }` compose-block.
 //
 // Closes the explicit binding loop:
@@ -36,7 +36,7 @@ const SALES_DOMAIN = `
   api SalesApi from Sales
 `;
 
-describe("Slice 11.26 — deployable composition (serves + ui-compose)", () => {
+describe("deployable composition (serves + ui-compose)", () => {
   describe("serves:", () => {
     it("backend can serve a declared api", async () => {
       const { errors } = await parse(`

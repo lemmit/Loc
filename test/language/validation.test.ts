@@ -146,10 +146,10 @@ describe("validation", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Page metamodel — Slice 3 validator obligations.
+  // Page metamodel validator obligations.
   // ---------------------------------------------------------------------------
 
-  describe("page metamodel (Slice 3)", () => {
+  describe("page metamodel", () => {
     it("rejects duplicate ui block names within a system", async () => {
       const { errors } = await parse(`
         system S {
@@ -172,7 +172,7 @@ describe("validation", () => {
     });
 
     it("accepts 'ui:' on a 'platform: dotnet' deployable (fullstack mode)", async () => {
-      // Part B: dotnet flipped from backend-only to dual-mode.  A
+      // dotnet flipped from backend-only to dual-mode.  A
       // dotnet deployable that declares `ui:` becomes a fullstack
       // service that hosts an embedded React SPA from wwwroot/.
       // Backend-only dotnet (no `ui:`) keeps working unchanged.
@@ -383,7 +383,7 @@ describe("validation", () => {
     });
 
     it("rejects a menu link to a page declared in a different ui", async () => {
-      // Slice 10 — page links are real Langium cross-references
+      // page links are real Langium cross-references
       // again now that scaffold expansion runs at the AST level
       // and synthesised pages are first-class AST nodes.  Cross-
       // ui resolution fails through Langium's standard linker
@@ -561,7 +561,7 @@ describe("validation", () => {
     });
 
     it('accepts a pinned built-in version (`design: "mantine@v7"`)', async () => {
-      // Phase 0 of pack versioning: explicit pin works alongside
+      // Pack versioning: explicit pin works alongside
       // the bareword form.  Validates `parseBuiltinDesignRef` is
       // wired into Rule 14 — pinned form resolves to the same
       // {family, format} as the bareword.
@@ -1473,7 +1473,7 @@ describe("Loom IR validation (post-lowering)", async () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Slice 2 — `requires` clauses
+  // `requires` clauses
   // ---------------------------------------------------------------------------
 
   it("rejects a non-bool `requires` expression", async () => {
@@ -1518,7 +1518,7 @@ describe("Loom IR validation (post-lowering)", async () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Slice 1A — auth + currentUser plumbing
+  // auth + currentUser plumbing
   // ---------------------------------------------------------------------------
 
   it("accepts an auth-required deployable when the system has a user block", async () => {
@@ -1658,7 +1658,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     expect(errors, JSON.stringify(errors)).toEqual([]);
   });
 
-  it("accepts currentUser inside a repository find filter (slice 1C)", async () => {
+  it("accepts currentUser inside a repository find filter", async () => {
     const loom = await loomFrom(`
       system Acme {
         user { id: string }
@@ -1676,7 +1676,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     expect(errors, JSON.stringify(errors)).toEqual([]);
   });
 
-  it("accepts currentUser inside a view where filter (slice 1C)", async () => {
+  it("accepts currentUser inside a view where filter", async () => {
     const loom = await loomFrom(`
       system Acme {
         user { id: string, customerId: string }
@@ -1693,7 +1693,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     expect(errors, JSON.stringify(errors)).toEqual([]);
   });
 
-  it("rejects workflow calls to a currentUser-bound find (slice 1C deferred)", async () => {
+  it("rejects workflow calls to a currentUser-bound find", async () => {
     const loom = await loomFrom(`
       system Acme {
         user { id: string, customerId: string }
@@ -1728,7 +1728,7 @@ describe("Loom IR validation (post-lowering)", async () => {
   });
 
   // -------------------------------------------------------------------------
-  // Slice 1B — per-module `permissions { ... }`
+  // per-module `permissions { ... }`
   // -------------------------------------------------------------------------
 
   it("lowers permissions.X to its '<module>.<name>' runtime string", async () => {
@@ -1862,9 +1862,9 @@ describe("Loom IR validation (post-lowering)", async () => {
   });
 
   // -------------------------------------------------------------------
-  // Slice 21.C — DSL extensions: matches / check / private invariant.
+  // DSL extensions: matches / check / private invariant.
   // -------------------------------------------------------------------
-  describe("slice 21.C — DSL extensions", () => {
+  describe("DSL extensions", () => {
     it("accepts a valid `string.matches(literal)` invariant", async () => {
       const { errors } = await parse(`
         context T {
@@ -1943,7 +1943,7 @@ describe("Loom IR validation (post-lowering)", async () => {
     });
   });
 
-  describe("traceability (Slice 12)", () => {
+  describe("traceability", () => {
     it("accepts a well-formed requirement / solution / testCase", async () => {
       const { errors } = await parse(`
         requirement US-001 { type: UserStory  title: "Login"  status: InProgress  priority: 1 }

@@ -19,7 +19,7 @@
 // ---------------------------------------------------------------------------
 
 import Handlebars from "handlebars";
-import { lowerFirst, humanize, upperFirst, plural, snake } from "../../util/naming.js";
+import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 
 /** Output format the pack's templates produce.  `tsx` is the v0
  *  React/Mantine/shadcn case (Handlebars over .hbs files yielding

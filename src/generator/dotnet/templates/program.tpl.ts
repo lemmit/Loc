@@ -1,5 +1,5 @@
 import type { BoundedContextIR } from "../../../ir/loom-ir.js";
-import { upperFirst, plural } from "../../../util/naming.js";
+import { plural, upperFirst } from "../../../util/naming.js";
 
 // Program.cs hosting + DI registration, plus the project + Dockerfile +
 // .dockerignore boilerplate.  Pure substitution templates — no

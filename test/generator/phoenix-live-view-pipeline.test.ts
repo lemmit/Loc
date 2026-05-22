@@ -13,9 +13,9 @@ import type { Model } from "../../src/language/generated/ast.js";
 import { generateSystems } from "../../src/system/index.js";
 
 // ---------------------------------------------------------------------------
-// Phase 9 — phoenixLiveView pipeline integration test.
+// phoenixLiveView pipeline integration test.
 //
-// Exercises the full Phase 1 → Phase 8 path on a minimal source:
+// Exercises the full pipeline on a minimal source:
 //   parse → validate → lower → emitProject → composeService → docker-compose
 // for a deployable that picks the new `phoenixLiveView` platform.
 //
@@ -83,7 +83,7 @@ async function buildFixture(): Promise<Model> {
   return doc.parseResult.value as Model;
 }
 
-describe("phoenixLiveView pipeline (Phases 1-8)", () => {
+describe("phoenixLiveView pipeline", () => {
   it("validates a deployable that mounts ui: AND serves: an api", async () => {
     // Validation success is the assertion — buildFixture() throws on errors.
     const model = await buildFixture();
@@ -104,7 +104,7 @@ describe("phoenixLiveView pipeline (Phases 1-8)", () => {
     const compose = files.get("docker-compose.yml")!;
     // Service stanza for the deployable, hyphenated by the slug helper.
     expect(compose).toMatch(/phoenix_app:/);
-    // Phoenix port 4000 published; Phase 2 platform contract.
+    // Phoenix port 4000 published; platform contract.
     expect(compose).toMatch(/4000:4000/);
     // depends_on db with healthcheck wait — `needsDb: true` on the
     // platform; orchestrator picks it up via PlatformSurface.
@@ -397,14 +397,14 @@ describe("emitApiControllers (api-emit unit)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Batch D1 — Slice 21 validation lowering onto Ash action `validate` clauses.
+// Validation lowering onto Ash action `validate` clauses.
 //
 // These tests call `emitAggregateResources` directly so they are not coupled
 // to the index.ts orchestrator path, verifying the domain-emit.ts target
 // independently (as the task specification requires).
 // ---------------------------------------------------------------------------
 
-describe("D1 — Ash validate clause emission (domain-emit unit)", () => {
+describe("Ash validate clause emission (domain-emit unit)", () => {
   /** Minimal bounded context with one aggregate carrying:
    *  - an aggregate invariant (`email.length > 0`)
    *  - one public operation with a precondition (`minTotal >= 0`) */
@@ -518,7 +518,7 @@ describe("D1 — Ash validate clause emission (domain-emit unit)", () => {
 void repoRoot;
 
 // ---------------------------------------------------------------------------
-// Batch E4 — JWT auth module emission.
+// JWT auth module emission.
 //
 // Asserts that `lib/<app>_web/auth.ex` and `lib/<app>_web/live_auth.ex`
 // are emitted when the phoenixApp deployable carries `auth: required`.
@@ -528,7 +528,7 @@ void repoRoot;
 
 import { emitAuth } from "../../src/generator/phoenix-live-view/auth-emit.js";
 
-describe("E4 — JWT auth emission (auth-emit unit)", () => {
+describe("JWT auth emission (auth-emit unit)", () => {
   const baseDeployable: DeployableIR = {
     name: "phoenixApp",
     platform: "phoenixLiveView",
@@ -656,7 +656,7 @@ describe("E4 — JWT auth emission (auth-emit unit)", () => {
   });
 });
 
-describe("E4 — router wiring (orchestrator integration)", () => {
+describe("router wiring (orchestrator integration)", () => {
   const AUTH_FIXTURE = `system MiniAuth {
   module Sales {
     context Sales {
@@ -687,7 +687,7 @@ describe("E4 — router wiring (orchestrator integration)", () => {
 `;
 
   async function buildAuthFixture(): Promise<Model> {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-e4-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-jwt-auth-"));
     const file = path.join(dir, "auth.ddd");
     fs.writeFileSync(file, AUTH_FIXTURE);
     const services = createDddServices(NodeFileSystem);
@@ -700,7 +700,7 @@ describe("E4 — router wiring (orchestrator integration)", () => {
     const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
     if (errors.length > 0) {
       throw new Error(
-        `E4 fixture validation errors:\n` + errors.map((e) => `  ${e.message}`).join("\n"),
+        `JWT auth fixture validation errors:\n` + errors.map((e) => `  ${e.message}`).join("\n"),
       );
     }
     return doc.parseResult.value as Model;
@@ -739,7 +739,7 @@ describe("E4 — router wiring (orchestrator integration)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Batch C — markers for parent integration.
+// Markers for parent integration.
 //
 // theme-emit + sidebar-emit have landed, but renderWorkflowFormHeex still
 // needs `extra-archetype-emit.ts` (workflow-form HEEx; today a placeholder in
@@ -747,7 +747,7 @@ describe("E4 — router wiring (orchestrator integration)", () => {
 // once that emitter lands.
 // ---------------------------------------------------------------------------
 
-describe.skip("Batch C integration (parent wires emitters)", () => {
+describe.skip("integration (parent wires emitters)", () => {
   it("renderThemeCss produces a :root block with CSS custom properties", async () => {
     const { renderThemeCss } = await import("../../src/generator/phoenix-live-view/theme-emit.js");
     const css = renderThemeCss(undefined);
@@ -832,7 +832,7 @@ describe.skip("Batch C integration (parent wires emitters)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Batch D3 — cross-platform OpenAPI parity.
+// Cross-platform OpenAPI parity.
 //
 // `buildWireSpec(sys)` is Loom's canonical IR-derived wire contract.  All
 // three backends (hono, dotnet, phoenixLiveView) MUST expose those same
@@ -902,7 +902,7 @@ const ACME_LIVEVIEW_SOURCE = `system AcmeLV {
 `;
 
 async function buildAcmeLiveViewModel(): Promise<Model> {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-d3-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-openapi-parity-"));
   const file = path.join(dir, "acme-lv.ddd");
   fs.writeFileSync(file, ACME_LIVEVIEW_SOURCE);
   const services = createDddServices(NodeFileSystem);
@@ -913,13 +913,14 @@ async function buildAcmeLiveViewModel(): Promise<Model> {
   const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
   if (errors.length > 0) {
     throw new Error(
-      `D3 fixture validation errors:\n` + errors.map((e) => `  ${e.message}`).join("\n"),
+      `OpenAPI parity fixture validation errors:\n` +
+        errors.map((e) => `  ${e.message}`).join("\n"),
     );
   }
   return doc.parseResult.value as Model;
 }
 
-describe("D3 — cross-platform OpenAPI parity (phoenix vs wire-spec.json)", () => {
+describe("cross-platform OpenAPI parity (phoenix vs wire-spec.json)", () => {
   it("Phoenix OpenAPI spec module exists when deployable serves an api", async () => {
     const model = await buildAcmeLiveViewModel();
     const { files } = generateSystems(model);
@@ -1011,7 +1012,7 @@ describe("D3 — cross-platform OpenAPI parity (phoenix vs wire-spec.json)", () 
 });
 
 // ---------------------------------------------------------------------------
-// Batch E6 — Full-form view bind projection.
+// Full-form view bind projection.
 //
 // Exercises `emitViews` directly with a synthetic `OrderSummary` view IR
 // (matching the shape that `lowerView` produces for the acme.ddd definition)
@@ -1025,7 +1026,7 @@ describe("D3 — cross-platform OpenAPI parity (phoenix vs wire-spec.json)", () 
 import { emitViews } from "../../src/generator/phoenix-live-view/view-emit.js";
 import type { ExprIR } from "../../src/ir/loom-ir.js";
 
-describe("E6 — full-form view bind projection (view-emit unit)", () => {
+describe("full-form view bind projection (view-emit unit)", () => {
   // Synthetic ViewIR for `view OrderSummary { orderId status lineCount from Order … bind … }`
   const orderSummaryCtx: BoundedContextIR = {
     name: "Sales",
@@ -1171,7 +1172,7 @@ describe("E6 — full-form view bind projection (view-emit unit)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// E2 — Ash 3.x `code_interface` shape inside `resource ... do` blocks.
+// Ash 3.x `code_interface` shape inside `resource ... do` blocks.
 //
 // `emitDomainModule` in domain-module.ts must emit `define` calls INSIDE
 // `resource <Module> do ... end` blocks (Ash 3.x), not in a separate
@@ -1180,7 +1181,7 @@ describe("E6 — full-form view bind projection (view-emit unit)", () => {
 
 import { emitDomainModule } from "../../src/generator/phoenix-live-view/domain-module.js";
 
-describe("E2 — Ash 3.x code_interface shape (domain-module unit)", () => {
+describe("Ash 3.x code_interface shape (domain-module unit)", () => {
   const salesCtxE2: BoundedContextIR = {
     name: "Sales",
     enums: [],
@@ -1276,7 +1277,7 @@ describe("E2 — Ash 3.x code_interface shape (domain-module unit)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// E3 — Ash.transaction/2 passes a domain list, not an Ecto Repo.
+// Ash.transaction/2 passes a domain list, not an Ecto Repo.
 //
 // `emitWorkflows` in workflow-emit.ts must produce
 //   Ash.transaction([<ContextModule>], fn -> ... end)
@@ -1286,7 +1287,7 @@ describe("E2 — Ash 3.x code_interface shape (domain-module unit)", () => {
 
 import { emitWorkflows } from "../../src/generator/phoenix-live-view/workflow-emit.js";
 
-describe("E3 — Ash.transaction/2 domain-list form (workflow-emit unit)", () => {
+describe("Ash.transaction/2 domain-list form (workflow-emit unit)", () => {
   const transactionalCtx: BoundedContextIR = {
     name: "Sales",
     enums: [],
@@ -1358,11 +1359,11 @@ describe("E3 — Ash.transaction/2 domain-list form (workflow-emit unit)", () =>
 });
 
 // ---------------------------------------------------------------------------
-// Batch F3 — cross-platform UI parity.
+// cross-platform UI parity.
 //
 // `test e2e ui "…" against <deployable>` blocks lower against any
 // deployable that mounts a UI — react / static (frontend-only) AND
-// phoenixLiveView (fullstack).  `PlatformSurface.mountsUi` (Phase 2)
+// phoenixLiveView (fullstack).  `PlatformSurface.mountsUi`
 // gates this; assert the orchestrator emits an identically-shaped
 // Playwright spec regardless of which platform hosts the UI.
 // ---------------------------------------------------------------------------
@@ -1393,9 +1394,9 @@ const ACME_UI_E2E_SOURCE = `system AcmeUI {
 }
 `;
 
-describe("F3 — cross-platform UI parity (test e2e ui against phoenixLiveView)", () => {
+describe("cross-platform UI parity (test e2e ui against phoenixLiveView)", () => {
   it("emits a Playwright spec for a `test e2e ui` block targeting a phoenix deployable", async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-f3-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-ui-parity-"));
     const file = path.join(dir, "acme-ui.ddd");
     fs.writeFileSync(file, ACME_UI_E2E_SOURCE);
     const services = createDddServices(NodeFileSystem);
@@ -1408,7 +1409,7 @@ describe("F3 — cross-platform UI parity (test e2e ui against phoenixLiveView)"
     const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
     if (errors.length > 0) {
       throw new Error(
-        `F3 fixture validation errors:\n` + errors.map((e) => `  ${e.message}`).join("\n"),
+        `UI parity fixture validation errors:\n` + errors.map((e) => `  ${e.message}`).join("\n"),
       );
     }
     const model = doc.parseResult.value as Model;
@@ -1422,7 +1423,7 @@ describe("F3 — cross-platform UI parity (test e2e ui against phoenixLiveView)"
   });
 
   it("emits per-page Playwright page objects under phoenix_app/e2e/pages/", async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-f3-po-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-ui-parity-po-"));
     const file = path.join(dir, "acme-ui.ddd");
     fs.writeFileSync(file, ACME_UI_E2E_SOURCE);
     const services = createDddServices(NodeFileSystem);

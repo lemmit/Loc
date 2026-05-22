@@ -21,7 +21,7 @@
 //   - all other origin kinds return `null` so the legacy path
 //     stays in use.
 //
-// Spillover (A10+):
+// Spillover:
 //   - `aggregate-detail`   — needs operations / modals / KeyValueRow
 //   - `workflow-form`      — needs workflow IR introspection
 //   - `view-list`          — needs view IR introspection
@@ -143,10 +143,7 @@ function expandAggregateList(aggregateName: string, ctx: ScaffoldExpandContext):
   cols.push(
     call("Column", [
       lit("ID"),
-      lambda(
-        cellVar,
-        call("IdLink", [member(ref(cellVar), "id")], [["of", ref(agg.name)]]),
-      ),
+      lambda(cellVar, call("IdLink", [member(ref(cellVar), "id")], [["of", ref(agg.name)]])),
     ]),
   );
   for (const f of agg.fields) {
@@ -180,36 +177,48 @@ function expandAggregateList(aggregateName: string, ctx: ScaffoldExpandContext):
       // Toolbar(Heading, Button)
       call("Toolbar", [
         call("Heading", [lit(humanPlural)], [["level", intLit(2)]]),
-        call("Button", [lit(`New ${singular(humanLower)}`)], [
-          ["to", lit(`/${slug}/new`)],
-          ["testid", lit(`${slug}-list-create`)],
-        ]),
+        call(
+          "Button",
+          [lit(`New ${singular(humanLower)}`)],
+          [
+            ["to", lit(`/${slug}/new`)],
+            ["testid", lit(`${slug}-list-create`)],
+          ],
+        ),
       ]),
       // QueryView(of: api.Agg.all, loading, error, empty, data: rows => Paper(Table(...)))
-      call("QueryView", [], [
-        ["of", member(queryRoot, "all")],
-        ["loading", call("Skeleton", [], [["count", intLit(5)]])],
-        ["error", call("Alert", [lit(`Couldn't load ${humanLower}`)])],
-        ["empty", call("Empty", [lit(`No ${humanLower} yet.`)])],
+      call(
+        "QueryView",
+        [],
         [
-          "data",
-          lambda(
-            "rows",
-            call("Paper", [
-              call("Table", [...cols], [
-                ["rows", ref("rows")],
-                ["striped", boolLit(true)],
-                ["highlight", boolLit(true)],
-                ["sticky", boolLit(true)],
-                [
-                  "rowTestid",
-                  lambda(rowVar, binary(lit(`${slug}-row-`), "+", member(ref(rowVar), "id"))),
-                ],
+          ["of", member(queryRoot, "all")],
+          ["loading", call("Skeleton", [], [["count", intLit(5)]])],
+          ["error", call("Alert", [lit(`Couldn't load ${humanLower}`)])],
+          ["empty", call("Empty", [lit(`No ${humanLower} yet.`)])],
+          [
+            "data",
+            lambda(
+              "rows",
+              call("Paper", [
+                call(
+                  "Table",
+                  [...cols],
+                  [
+                    ["rows", ref("rows")],
+                    ["striped", boolLit(true)],
+                    ["highlight", boolLit(true)],
+                    ["sticky", boolLit(true)],
+                    [
+                      "rowTestid",
+                      lambda(rowVar, binary(lit(`${slug}-row-`), "+", member(ref(rowVar), "id"))),
+                    ],
+                  ],
+                ),
               ]),
-            ]),
-          ),
+            ),
+          ],
         ],
-      ]),
+      ),
     ],
     [["testid", lit(`${slug}-list`)]],
   );
@@ -291,12 +300,16 @@ function expandAggregateDetail(aggregateName: string, ctx: ScaffoldExpandContext
           [
             call("Stack", [
               call("Heading", [lit(humanPart)], [["level", intLit(4)]]),
-              call("Table", [...cols], [
-                ["rows", member(ref(cellVar), c.name)],
-                ["striped", boolLit(true)],
-                ["highlight", boolLit(true)],
-                ["keyExpr", lit("idx")],
-              ]),
+              call(
+                "Table",
+                [...cols],
+                [
+                  ["rows", member(ref(cellVar), c.name)],
+                  ["striped", boolLit(true)],
+                  ["highlight", boolLit(true)],
+                  ["keyExpr", lit("idx")],
+                ],
+              ),
             ]),
           ],
           [["testid", lit(`${slug}-detail-${snake(c.name)}`)]],
@@ -348,18 +361,20 @@ function expandAggregateDetail(aggregateName: string, ctx: ScaffoldExpandContext
           // carries the aggregate type and id.  On a Detail page the
           // record is a QueryView lambda binding, so the mutation hook
           // falls back to the route `id` (data.id === id here).
-          call("Form", [member(ref(cellVar), op.name)], [
-            ["testid", lit(`${slug}-op-${op.name}`)],
-          ]),
+          call("Form", [member(ref(cellVar), op.name)], [["testid", lit(`${slug}-op-${op.name}`)]]),
         ],
         [
           ["title", lit(humanize(op.name))],
           [
             "trigger",
-            call("Button", [lit(humanize(op.name))], [
-              ["emphasis", lit(i === 0 ? "primary" : "secondary")],
-              ["testid", lit(`${slug}-op-${op.name}`)],
-            ]),
+            call(
+              "Button",
+              [lit(humanize(op.name))],
+              [
+                ["emphasis", lit(i === 0 ? "primary" : "secondary")],
+                ["testid", lit(`${slug}-op-${op.name}`)],
+              ],
+            ),
           ],
         ],
       ),
@@ -385,19 +400,25 @@ function expandAggregateDetail(aggregateName: string, ctx: ScaffoldExpandContext
       // Heading(<HumanAgg> + " detail", level: 2)
       call("Heading", [lit(`${humanAgg} detail`)], [["level", intLit(2)]]),
       // QueryView(of: api.Agg.byId(id), single: true, loading, error, empty: not-found, data: data => Card(Stack(...rows)))
-      call("QueryView", [], [
-        ["of", methodCall(queryRoot, "byId", [ref("id")])],
-        ["single", boolLit(true)],
-        ["loading", call("Skeleton", [], [["count", intLit(3)]])],
-        ["error", call("Alert", [lit(`Couldn't load ${humanAgg.toLowerCase()}`)])],
+      call(
+        "QueryView",
+        [],
         [
-          "empty",
-          call("Alert", [lit(`No ${humanAgg.toLowerCase()} matches that id.`)], [
-            ["color", lit("yellow")],
-          ]),
+          ["of", methodCall(queryRoot, "byId", [ref("id")])],
+          ["single", boolLit(true)],
+          ["loading", call("Skeleton", [], [["count", intLit(3)]])],
+          ["error", call("Alert", [lit(`Couldn't load ${humanAgg.toLowerCase()}`)])],
+          [
+            "empty",
+            call(
+              "Alert",
+              [lit(`No ${humanAgg.toLowerCase()} matches that id.`)],
+              [["color", lit("yellow")]],
+            ),
+          ],
+          ["data", lambda(cellVar, dataBody)],
         ],
-        ["data", lambda(cellVar, dataBody)],
-      ]),
+      ),
     ],
     [["testid", lit(`${slug}-detail`)]],
   );
@@ -511,10 +532,14 @@ function expandAggregateNew(aggregateName: string, ctx: ScaffoldExpandContext): 
       ]),
       call("Heading", [lit(`Create ${humanAgg.toLowerCase()}`)], [["level", intLit(2)]]),
       call("Card", [
-        call("Form", [], [
-          ["of", ref(agg.name)],
-          ["testid", lit(`${slug}-new`)],
-        ]),
+        call(
+          "Form",
+          [],
+          [
+            ["of", ref(agg.name)],
+            ["testid", lit(`${slug}-new`)],
+          ],
+        ),
       ]),
     ],
     [["testid", lit(`${slug}-new-page`)]],
@@ -540,10 +565,14 @@ function expandWorkflowForm(workflowName: string, ctx: ScaffoldExpandContext): E
       ]),
       call("Heading", [lit(humanWf)], [["level", intLit(2)]]),
       call("Card", [
-        call("Form", [], [
-          ["runs", ref(wf.name)],
-          ["testid", lit(`workflow-${wfSlug}`)],
-        ]),
+        call(
+          "Form",
+          [],
+          [
+            ["runs", ref(wf.name)],
+            ["testid", lit(`workflow-${wfSlug}`)],
+          ],
+        ),
       ]),
     ],
     [["testid", lit(`workflow-${wfSlug}-page`)]],
@@ -589,33 +618,41 @@ function expandViewList(viewName: string, ctx: ScaffoldExpandContext): ExprIR | 
     "Stack",
     [
       call("Heading", [lit(humanView)], [["level", intLit(2)]]),
-      call("QueryView", [], [
-        // `Views.<name>` is the view-hook reference — walker
-        // detects this Pattern C and lifts to `useXxxView()`.
-        ["of", member(ref("Views"), view.name)],
-        ["loading", call("Skeleton", [], [["count", intLit(5)]])],
-        ["error", call("Alert", [lit(`Couldn't load ${humanView.toLowerCase()}`)])],
-        ["empty", call("Empty", [lit("No rows.")])],
+      call(
+        "QueryView",
+        [],
         [
-          "data",
-          lambda(
-            "rows",
-            call("Paper", [
-              call("Table", [...cols], [
-                ["rows", ref("rows")],
-                ["striped", boolLit(true)],
-                ["highlight", boolLit(true)],
-                ["sticky", boolLit(true)],
-                // Custom-output views don't have a stable `id`
-                // field on row, so key by index.  Shorthand views
-                // do have `id` (rows are aggregate responses) but
-                // index-by-key still works correctly there.
-                ["keyExpr", lit("idx")],
+          // `Views.<name>` is the view-hook reference — walker
+          // detects this Pattern C and lifts to `useXxxView()`.
+          ["of", member(ref("Views"), view.name)],
+          ["loading", call("Skeleton", [], [["count", intLit(5)]])],
+          ["error", call("Alert", [lit(`Couldn't load ${humanView.toLowerCase()}`)])],
+          ["empty", call("Empty", [lit("No rows.")])],
+          [
+            "data",
+            lambda(
+              "rows",
+              call("Paper", [
+                call(
+                  "Table",
+                  [...cols],
+                  [
+                    ["rows", ref("rows")],
+                    ["striped", boolLit(true)],
+                    ["highlight", boolLit(true)],
+                    ["sticky", boolLit(true)],
+                    // Custom-output views don't have a stable `id`
+                    // field on row, so key by index.  Shorthand views
+                    // do have `id` (rows are aggregate responses) but
+                    // index-by-key still works correctly there.
+                    ["keyExpr", lit("idx")],
+                  ],
+                ),
               ]),
-            ]),
-          ),
+            ),
+          ],
         ],
-      ]),
+      ),
     ],
     [["testid", lit(`view-${viewSlug}`)]],
   );
@@ -636,9 +673,11 @@ function expandHome(ctx: ScaffoldExpandContext): ExprIR {
   if (aggCount > 0) {
     cards.push(
       call("Card", [
-        call("Heading", [lit(pluralize(aggCount, "aggregate", "aggregates"))], [
-          ["level", intLit(4)],
-        ]),
+        call(
+          "Heading",
+          [lit(pluralize(aggCount, "aggregate", "aggregates"))],
+          [["level", intLit(4)]],
+        ),
         call("Text", [lit("Manage records of each kind from the sidebar.")]),
       ]),
     );
@@ -646,9 +685,7 @@ function expandHome(ctx: ScaffoldExpandContext): ExprIR {
   if (wfCount > 0) {
     cards.push(
       call("Card", [
-        call("Heading", [lit(pluralize(wfCount, "workflow", "workflows"))], [
-          ["level", intLit(4)],
-        ]),
+        call("Heading", [lit(pluralize(wfCount, "workflow", "workflows"))], [["level", intLit(4)]]),
         call("Anchor", [lit("Open workflows →")], [["to", lit("/workflows")]]),
       ]),
     );
@@ -656,9 +693,7 @@ function expandHome(ctx: ScaffoldExpandContext): ExprIR {
   if (viewCount > 0) {
     cards.push(
       call("Card", [
-        call("Heading", [lit(pluralize(viewCount, "view", "views"))], [
-          ["level", intLit(4)],
-        ]),
+        call("Heading", [lit(pluralize(viewCount, "view", "views"))], [["level", intLit(4)]]),
         call("Anchor", [lit("Open views →")], [["to", lit("/views")]]),
       ]),
     );
@@ -683,10 +718,14 @@ function expandWorkflowsIndex(ctx: ScaffoldExpandContext): ExprIR {
         "Card",
         [
           call("Heading", [lit(humanize(wf.name))], [["level", intLit(4)]]),
-          call("Anchor", [lit("Run →")], [
-            ["to", lit(`/workflows/${slug}`)],
-            ["testid", lit(`workflow-${slug}-run`)],
-          ]),
+          call(
+            "Anchor",
+            [lit("Run →")],
+            [
+              ["to", lit(`/workflows/${slug}`)],
+              ["testid", lit(`workflow-${slug}-run`)],
+            ],
+          ),
         ],
         [["testid", lit(`workflow-card-${slug}`)]],
       ),
@@ -716,10 +755,14 @@ function expandViewsIndex(ctx: ScaffoldExpandContext): ExprIR {
         "Card",
         [
           call("Heading", [lit(humanize(view.name))], [["level", intLit(4)]]),
-          call("Anchor", [lit("Open →")], [
-            ["to", lit(`/views/${slug}`)],
-            ["testid", lit(`view-${slug}-open`)],
-          ]),
+          call(
+            "Anchor",
+            [lit("Open →")],
+            [
+              ["to", lit(`/views/${slug}`)],
+              ["testid", lit(`view-${slug}-open`)],
+            ],
+          ),
         ],
         [["testid", lit(`view-card-${slug}`)]],
       ),
@@ -760,11 +803,7 @@ const PLACEHOLDER_TYPE: import("./loom-ir.js").TypeIR = {
   name: "string",
 };
 
-function call(
-  name: string,
-  positionals: ExprIR[],
-  named: Array<[string, ExprIR]> = [],
-): ExprIR {
+function call(name: string, positionals: ExprIR[], named: Array<[string, ExprIR]> = []): ExprIR {
   const args: ExprIR[] = [...positionals];
   const argNames: (string | undefined)[] = positionals.map(() => undefined);
   for (const [n, v] of named) {
@@ -824,9 +863,7 @@ function columnAccessorFor(
   // optionality (empty values surface via per-pack helpers).
   const inner = type.kind === "optional" ? type.inner : type;
   if (inner.kind === "id") {
-    return call("IdLink", [member(ref(rowVar), fieldName)], [
-      ["of", ref(inner.targetName)],
-    ]);
+    return call("IdLink", [member(ref(rowVar), fieldName)], [["of", ref(inner.targetName)]]);
   }
   if (inner.kind === "primitive") {
     if (inner.name === "datetime") {

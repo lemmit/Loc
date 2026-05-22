@@ -33,8 +33,8 @@ test("mobile Run kicks the pipeline and surfaces files", async ({ page }) => {
   await expect(run).toBeEnabled();
 
   // Switch off the default Code tab so we can prove Run navigated.
-  await page.getByTestId("mobile-tab-problems").click();
-  await expect(page.getByTestId("mobile-tab-problems")).toHaveAttribute("aria-selected", "true");
+  await page.getByTestId("mobile-tab-output").click();
+  await expect(page.getByTestId("mobile-tab-output")).toHaveAttribute("aria-selected", "true");
 
   await run.click();
   // Generate step has already run on this source via auto-Generate,

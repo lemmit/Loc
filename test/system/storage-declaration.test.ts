@@ -1,4 +1,4 @@
-// Slice 11.27 — storage declarations + per-module storage map on
+// storage declarations + per-module storage map on
 // backend deployables.
 //
 //   storage primarySql  { type: postgres }
@@ -42,7 +42,7 @@ const SALES_DOMAIN = `
   api SalesApi from Sales
 `;
 
-describe("Slice 11.27 — storage declarations + module-storage map", () => {
+describe("storage declarations + module-storage map", () => {
   describe("storage declaration", () => {
     it("accepts a postgres storage", async () => {
       const { errors } = await parse(`

@@ -26,7 +26,7 @@ import type {
   TypeIR,
   UiIR,
 } from "../../ir/loom-ir.js";
-import { lowerFirst, upperFirst, plural, snake } from "../../util/naming.js";
+import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import {
   type ActionBinding,
   defaultInitFor,
@@ -114,7 +114,7 @@ export function emitLiveViewPages(args: {
     out.set(filePath, source);
     routes.push({ route: page.route, liveModule });
 
-    // Playwright page object — Batch C emission.  Mirrors the React
+    // Playwright page object emission.  Mirrors the React
     // generator's per-page `e2e/pages/<page>.ts` so `test e2e ui`
     // blocks (src/system/ui-e2e-render.ts) drive the Phoenix
     // deployable identically to a React one.
@@ -214,7 +214,15 @@ function buildActionHandlers(
 }
 
 function renderLiveView(a: RenderArgs): string {
-  const { page, liveModule, appModule, ui, aggregatesByName, contextModuleByAggName, componentInfo } = a;
+  const {
+    page,
+    liveModule,
+    appModule,
+    ui,
+    aggregatesByName,
+    contextModuleByAggName,
+    componentInfo,
+  } = a;
   const webModule = `${appModule}Web`;
 
   // All pages — scaffold and custom — route through the HEEx walker.

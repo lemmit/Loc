@@ -1,19 +1,13 @@
 import type { AggregateIR, BoundedContextIR, DeployableIR, SystemIR } from "../../ir/loom-ir.js";
-import { lowerFirst, upperFirst, plural, snake } from "../../util/naming.js";
+import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import { buildApiModule } from "./api-builder.js";
 import { deriveSidebarFromUi } from "./menu-emitter.js";
-import { buildPageObjectModule } from "./page-objects-builder.js";
 import { deriveExtraRoutesFromUi, emitPageObjectsForUi, emitPagesForUi } from "./pages-emitter.js";
 import { renderAppShell, renderMain, renderShellFile, renderTheme } from "./templating/render.js";
-import { allViews, buildViewPageObject, buildViewsApiModule, hasAnyView } from "./view-builder.js";
-import {
-  allWorkflows,
-  buildWorkflowPageObject,
-  buildWorkflowsApiModule,
-  hasAnyWorkflow,
-} from "./workflow-builder.js";
+import { allViews, buildViewsApiModule, hasAnyView } from "./view-builder.js";
+import { allWorkflows, buildWorkflowsApiModule, hasAnyWorkflow } from "./workflow-builder.js";
 
 // ---------------------------------------------------------------------------
 // React + React Query + Zod + Mantine generator.
@@ -34,7 +28,7 @@ import {
 // ---------------------------------------------------------------------------
 
 /** Options for the React generator's secondary entry point — used by
- *  the .NET orchestrator's fullstack branch (Part B) where the React
+ *  the .NET orchestrator's fullstack branch where the React
  *  project becomes a sub-tree of the .NET project and the SPA calls
  *  its host's API on the same origin.
  *    - `apiBaseUrl`: overrides the computed `http://localhost:<port>`
@@ -94,7 +88,7 @@ export function generateReactForContexts(
   //
   // Without a `ui:` binding (legacy/back-compat), fall through to
   // the per-aggregate / per-workflow / per-view loops directly.
-  // Slices 8/9 finalise the migration and delete the fallback.
+  // A later change finalises the migration and deletes the fallback.
   const ui = deployable.uiName ? sys.uis.find((u) => u.name === deployable.uiName) : undefined;
 
   // Per-aggregate api modules — always emitted; 1:1 with the
@@ -165,7 +159,7 @@ export function generateReactForContexts(
   // Workflows / Views grouping below.  When the ui has no menu
   // block (or no ui binding at all), `sidebarOverride` is
   // `undefined` and the AppShell preparer falls back to its legacy
-  // hardcoded shape — byte-identical to main's pre-Slice-6 output.
+  // hardcoded shape — byte-identical to the original sidebar output.
   const sidebarOverride = ui ? deriveSidebarFromUi(ui) : undefined;
 
   // Explicit pages with non-conventional names need
@@ -353,4 +347,3 @@ const E2E_TSCONFIG_JSON =
     null,
     2,
   ) + "\n";
-

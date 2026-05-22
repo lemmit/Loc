@@ -1,5 +1,5 @@
 import type { BoundedContextIR, DeployableIR, SystemIR } from "../../ir/loom-ir.js";
-import { upperFirst, plural, snake } from "../../util/naming.js";
+import { plural, snake, upperFirst } from "../../util/naming.js";
 import { type ApiRoute, emitApiControllers } from "./api-emit.js";
 import { emitAuth } from "./auth-emit.js";
 import { emitAggregateResources } from "./domain-emit.js";
@@ -303,7 +303,7 @@ function renderDomainModule(
   contextModule: string,
   resources: string[],
 ): string {
-  // E2 — Ash 3.x: `define` calls live INSIDE the `resource ... do`
+  // Ash 3.x: `define` calls live INSIDE the `resource ... do`
   // block, NOT in a separate top-level `code_interface do` block
   // (that was Ash 2.x; removed in 3.0).
   const resourceBlocks: string[] = [];
@@ -606,7 +606,7 @@ end
 `;
 }
 
-function renderApplication(appName: string, appModule: string): string {
+function renderApplication(_appName: string, appModule: string): string {
   return `# Auto-generated.
 defmodule ${appModule}.Application do
   use Application
@@ -632,7 +632,7 @@ end
 `;
 }
 
-function renderWebModule(appName: string, appModule: string): string {
+function renderWebModule(_appName: string, appModule: string): string {
   const webModule = `${appModule}Web`;
   return `# Auto-generated.
 defmodule ${webModule} do
@@ -820,7 +820,7 @@ ${inner}
     liveScopeBody = `\n${flatLines}`;
   }
 
-  // API routes — Batch A's emitApiControllers returns:
+  // API routes — emitApiControllers returns:
   //   - paths prefixed with `!root:` → outside `/api` scope (health / ready)
   //   - bare paths → inside `scope "/api"`
   const rootApiRoutes = apiRoutes.filter((r) => r.path.startsWith("!root:"));
@@ -1287,7 +1287,7 @@ end
 `;
 }
 
-function renderLayouts(appName: string, appModule: string): string {
+function renderLayouts(_appName: string, appModule: string): string {
   const webModule = `${appModule}Web`;
   return `# Auto-generated.
 defmodule ${webModule}.Layouts do
@@ -1465,4 +1465,3 @@ function toModulePrefix(snakeName: string): string {
     .map((s) => s[0]!.toUpperCase() + s.slice(1))
     .join("");
 }
-

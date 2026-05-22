@@ -1,9 +1,11 @@
+import { useState } from "react";
 import {
   Badge,
   Box,
   Button,
   Code,
   Group,
+  SegmentedControl,
   Select,
   Stack,
   Text,
@@ -11,62 +13,29 @@ import {
 } from "@mantine/core";
 import type { LayoutCtx } from "./ctx";
 import { JsonBodyEditor } from "../backend/JsonBodyEditor";
+import { SqlConsole } from "../backend/SqlConsole";
 import { CUSTOM_ENDPOINT, groupEndpointsByTag } from "../backend/openapi";
 
 interface Props {
   ctx: LayoutCtx;
 }
 
-// The right-aligned cluster on the Backend panel header — booted/
-// offline + persistence + migration badges, Reset DB, Boot/Reboot.
+// The right-aligned cluster on the Runtime panel header — booted/
+// offline status + Boot/Reboot, the lifecycle gate for both the API
+// and Database sub-views.  The DB-specific controls (persistence,
+// schema-migration, Reset) moved into the Database sub-view body, where
+// there's room to explain what each one means.
 // Lifted out so both shells can reuse it: desktop renders it inside
-// a Group beside the "Backend" label, mobile renders it in a banner
+// a Group beside the "Runtime" label, mobile renders it in a banner
 // above the form body (Mantine Tabs.List only holds the labels).
 export function BackendHeader({ ctx }: Props): JSX.Element {
-  const { pipeline, ddl, persistent, migrated, honoBundle, runBoot, runWipe } = ctx;
+  const { pipeline, ddl, honoBundle, runBoot } = ctx;
   return (
     <Group gap="xs" wrap="wrap" justify="flex-end">
       {ddl ? (
         <Badge size="xs" color="green" variant="light" data-testid="backend-status">booted</Badge>
       ) : (
         <Badge size="xs" color="gray" variant="light" data-testid="backend-status">offline</Badge>
-      )}
-      {ddl && (
-        <Badge
-          size="xs"
-          color={persistent ? "blue" : "gray"}
-          variant="light"
-          title={
-            persistent
-              ? "Rows survive page reload — PGlite is OPFS-backed, keyed by source hash."
-              : "Browser refused OPFS storage — rows live in memory and are wiped on reload."
-          }
-          data-testid="persistence-status"
-        >
-          {persistent ? "persisted" : "in-memory"}
-        </Badge>
-      )}
-      {ddl && migrated && (
-        <Badge
-          size="xs"
-          color="orange"
-          variant="light"
-          title="Schema changed since the previous boot — DROP SCHEMA + re-applied DDL.  Pre-existing rows were dropped."
-          data-testid="migrated-status"
-        >
-          schema migrated
-        </Badge>
-      )}
-      {ddl && (
-        <Button
-          size="xs"
-          variant="default"
-          onClick={runWipe}
-          title="Drop every row in the booted PGlite and re-apply the schema."
-          data-testid="btn-wipe"
-        >
-          Reset DB
-        </Button>
       )}
       <Button
         size="xs"
@@ -89,6 +58,8 @@ export function BackendBody({ ctx }: Props): JSX.Element {
     isDesktop,
     pipeline,
     ddl,
+    persistent,
+    migrated,
     bootErrorMessage,
     reqMethod,
     setReqMethod,
@@ -99,6 +70,9 @@ export function BackendBody({ ctx }: Props): JSX.Element {
     dispatchSlot,
     honoBundle,
     runDispatch,
+    runWipe,
+    runResetData,
+    runQuery,
     apiEndpoints,
     selectedOpId,
     selectedEndpoint,
@@ -109,6 +83,10 @@ export function BackendBody({ ctx }: Props): JSX.Element {
     setQueryParam,
     runGenerateExample,
   } = ctx;
+
+  // Which sub-view of the Runtime tab is showing — the API console or
+  // the Database console.  Local UI state; not worth persisting.
+  const [subview, setSubview] = useState<"api" | "db">("api");
 
   // iOS Safari auto-zooms on input focus when the input's font is
   // < 16 px.  Bumping mobile to 16 px keeps zoom away without
@@ -132,12 +110,52 @@ export function BackendBody({ ctx }: Props): JSX.Element {
   return (
     <Box style={{ flex: 1, minHeight: 0, overflow: "auto" }} p="xs">
       {bootErrorMessage && (
-        <Code block c="red" mb="xs" style={{ whiteSpace: "pre-wrap", fontSize: 11 }}>
-          {bootErrorMessage}
-        </Code>
+        <Stack gap={6} mb="xs">
+          <Code block c="red" style={{ whiteSpace: "pre-wrap", fontSize: 11 }} data-testid="boot-error">
+            {bootErrorMessage}
+          </Code>
+          {honoBundle && (
+            <Group gap={6} align="center">
+              <Button
+                size="xs"
+                variant="default"
+                color="red"
+                onClick={runResetData}
+                loading={pipeline.booting}
+                data-testid="btn-reset-data"
+              >
+                Clear stored data &amp; retry
+              </Button>
+              <Text size="xs" c="dimmed">
+                If the boot fails on stale persisted data, this drops the saved database and reboots clean.
+              </Text>
+            </Group>
+          )}
+        </Stack>
       )}
       {ddl ? (
-        <Stack gap={6}>
+        <Stack gap={8}>
+          <SegmentedControl
+            size="xs"
+            fullWidth
+            value={subview}
+            onChange={(v) => setSubview(v as "api" | "db")}
+            data={[
+              { label: "API", value: "api" },
+              { label: "Database", value: "db" },
+            ]}
+            data-testid="runtime-subview"
+          />
+          {subview === "db" ? (
+            <DatabaseView
+              persistent={persistent}
+              migrated={migrated}
+              runWipe={runWipe}
+              runQuery={runQuery}
+              isDesktop={isDesktop}
+            />
+          ) : (
+          <Stack gap={6}>
           {endpointData.length > 0 && (
             <Select
               size="xs"
@@ -277,14 +295,84 @@ export function BackendBody({ ctx }: Props): JSX.Element {
               </Code>
             )
           )}
+          </Stack>
+          )}
         </Stack>
       ) : (
         <Text size="xs" c="dimmed">
           {honoBundle
             ? "Click Boot to spin up PGlite + the generated Hono app."
-            : "Generate and Bundle first to enable the backend."}
+            : "Generate and Bundle first to enable the runtime."}
         </Text>
       )}
     </Box>
+  );
+}
+
+interface DatabaseViewProps {
+  persistent: boolean;
+  migrated: boolean;
+  runWipe: () => void;
+  runQuery: LayoutCtx["runQuery"];
+  isDesktop: boolean;
+}
+
+// The Database sub-view: a plain-language account of where the data
+// lives, the ad-hoc SQL console, and a clearly-explained Reset.
+function DatabaseView({
+  persistent,
+  migrated,
+  runWipe,
+  runQuery,
+  isDesktop,
+}: DatabaseViewProps): JSX.Element {
+  return (
+    <Stack gap="md">
+      <Stack gap={4}>
+        <Group gap={6}>
+          <Badge
+            size="xs"
+            color={persistent ? "blue" : "gray"}
+            variant="light"
+            data-testid="persistence-status"
+          >
+            {persistent ? "persisted" : "in-memory"}
+          </Badge>
+          {migrated && (
+            <Badge size="xs" color="orange" variant="light" data-testid="migrated-status">
+              schema migrated
+            </Badge>
+          )}
+        </Group>
+        <Text size="xs" c="dimmed">
+          {persistent
+            ? "Rows are saved in your browser (OPFS), keyed by the source hash — they survive a page reload."
+            : "Your browser refused persistent storage, so rows live in memory and are wiped on reload."}
+        </Text>
+        {migrated && (
+          <Text size="xs" c="dimmed">
+            The schema changed since the last boot, so the database was dropped and recreated — earlier rows were cleared.
+          </Text>
+        )}
+      </Stack>
+
+      <SqlConsole runQuery={runQuery} isDesktop={isDesktop} />
+
+      <Stack gap={4}>
+        <Button
+          size="xs"
+          variant="default"
+          color="red"
+          onClick={runWipe}
+          style={{ alignSelf: "flex-start" }}
+          data-testid="btn-wipe"
+        >
+          Reset database
+        </Button>
+        <Text size="xs" c="dimmed">
+          Drops every row and re-applies the schema. The table structure stays — only your data is cleared.
+        </Text>
+      </Stack>
+    </Stack>
   );
 }

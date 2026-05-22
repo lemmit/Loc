@@ -244,7 +244,7 @@ describe("parsing & validation of examples", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Page metamodel — grammar smoke tests (Slice 1).
+// Page metamodel — grammar smoke tests.
 //
 // The page metamodel adds six declaration-level keywords (`ui`, `page`,
 // `component`, `scaffold`, `state`, `menu`) and two expression-level
@@ -253,15 +253,15 @@ describe("parsing & validation of examples", () => {
 // new constructs and that the existing identifier surface (especially
 // the e2e `ui.workflows.<name>(...)` accessor) keeps parsing.
 //
-// See docs/page-metamodel.md and /root/.claude/plans/yes-make-full-plan-tingly-sunbeam.md.
+// See docs/page-metamodel.md.
 // ---------------------------------------------------------------------------
 
 async function parseSnippet(src: string): Promise<{ errors: string[]; model: Model }> {
-  // Slice 1 is grammar-only — no IR / validator support for the new
+  // This is grammar-only — no IR / validator support for the new
   // constructs yet.  We disable validation so these tests fail iff
   // the parser rejects the input (which is what we're testing).  The
   // validator's view of the new constructs is exercised separately
-  // in Slice 3.
+  // separately.
   const { parseHelper } = await import("langium/test");
   const services = createDddServices(NodeFileSystem);
   const helper = parseHelper(services.Ddd);
@@ -274,7 +274,7 @@ async function parseSnippet(src: string): Promise<{ errors: string[]; model: Mod
   };
 }
 
-describe("page metamodel — grammar smoke tests (Slice 1)", () => {
+describe("page metamodel — grammar smoke tests", () => {
   it("parses an empty `ui` block as a SystemMember", async () => {
     const { errors } = await parseSnippet(`
       system Acme {
@@ -445,10 +445,10 @@ describe("page metamodel — grammar smoke tests (Slice 1)", () => {
     expect(errors).toEqual([]);
   });
 
-  it("accepts an empty `match { }` at the grammar level — Slice 3 validator will reject", async () => {
+  it("accepts an empty `match { }` at the grammar level — validator will reject", async () => {
     // Empty match bodies are structurally parseable (both arms and
     // `else` are grammatically optional) but semantically useless —
-    // the validator pass in Slice 3 will warn / error on a match
+    // the validator pass will warn / error on a match
     // with no arms and no `else`.  Keeping the grammar permissive is
     // the right split: parse-shape vs reachability-of-arms.
     const { errors } = await parseSnippet(`
@@ -463,7 +463,7 @@ describe("page metamodel — grammar smoke tests (Slice 1)", () => {
 
   it("keeps `ui.workflows.<name>(...)` parseable as an LValue in e2e tests", async () => {
     // Critical regression: `ui` and `workflows` are keywords introduced
-    // by Slice 1 but must remain admissible as soft member-access names
+    // by the grammar but must remain admissible as soft member-access names
     // so the existing e2e test surface keeps parsing.
     const { errors } = await parseSnippet(`
       system Acme {

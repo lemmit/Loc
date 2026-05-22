@@ -1,4 +1,4 @@
-// Slice 11.16 — Image + Avatar primitives in walker stdlib.
+// Image + Avatar primitives in walker stdlib.
 //
 //   Image(src: "/logo.png", alt: "Acme")   → Mantine <Image src=… alt=… />
 //   Avatar(src: "/u.png",   alt: "User")   → Mantine <Avatar src=… alt=… />
@@ -12,7 +12,7 @@ import { generateSystemFiles } from "../_helpers/index.js";
 
 const buildAndGenerate = generateSystemFiles;
 
-describe("Slice 11.16 — Image + Avatar in walker stdlib", () => {
+describe("Image + Avatar in walker stdlib", () => {
   it("Image(src, alt) emits Mantine <Image> with both attrs", async () => {
     const files = await buildAndGenerate(`
       system S {

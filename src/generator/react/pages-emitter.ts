@@ -37,8 +37,6 @@ import type {
   ParamIR,
   SystemIR,
   UiIR,
-  ViewIR,
-  WorkflowIR,
 } from "../../ir/loom-ir.js";
 import { lowerFirst, snake } from "../../util/naming.js";
 import type { LoadedPack } from "../_packs/loader.js";

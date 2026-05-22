@@ -11,7 +11,7 @@ import type {
   ValueObjectIR,
   WireField,
 } from "../../ir/loom-ir.js";
-import { upperFirst, plural, snake } from "../../util/naming.js";
+import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { ApiRoute } from "./api-emit.js";
 
 // ---------------------------------------------------------------------------
@@ -588,7 +588,7 @@ end
 // OpenAPI controller renderer
 // ---------------------------------------------------------------------------
 
-function renderOpenapiController(appModule: string, webModule: string, apiPascal: string): string {
+function renderOpenapiController(_appModule: string, webModule: string, apiPascal: string): string {
   const specModule = `${webModule}.Api.${apiPascal}Spec`;
   return `# Auto-generated.
 defmodule ${webModule}.OpenapiController do

@@ -1,4 +1,4 @@
-// Slice 11.8 — two more layout primitives in the body walker:
+// two more layout primitives in the body walker:
 // Group (horizontal flex row, mirror of Stack) and Grid (column-
 // based responsive grid, each child wrapped in <Grid.Col>).
 //
@@ -10,7 +10,7 @@ import { generateSystemFiles } from "../_helpers/index.js";
 
 const buildAndGenerate = generateSystemFiles;
 
-describe("Slice 11.8 — Group + Grid in walker stdlib", () => {
+describe("Group + Grid in walker stdlib", () => {
   it("Group(...children) emits Mantine <Group> with positional children", async () => {
     const files = await buildAndGenerate(`
       system S {

@@ -1,15 +1,14 @@
-// Slice 2 — page-metamodel IR.
+// page-metamodel IR.
 //
 // These tests pin the AST → IR lowering for `ui` SystemMembers,
 // pages, components, scaffold directives, the optional menu block,
 // `match` expressions, and block-body lambdas.
 //
-// Slice 2 is intentionally shallow: scaffold directives stay as
-// literal `ScaffoldIR` (Slice 4 expands them); validator obligations
-// land in Slice 3; the per-target generator (Slice 5) consumes the
-// page IR.  These tests cover only what Slice 2 produces.
+// Lowering here is intentionally shallow: scaffold directives stay as
+// literal `ScaffoldIR` (the expander expands them); validator obligations
+// are handled separately; the per-target generator consumes the
+// page IR.  These tests cover only what lowering produces.
 
-import { URI } from "langium";
 import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
 import type { ExprIR, LoomModel, PageIR, UiIR } from "../../src/ir/loom-ir.js";
@@ -22,7 +21,7 @@ async function buildLoom(src: string): Promise<LoomModel> {
   const services = createDddServices(NodeFileSystem);
   const helper = parseHelper(services.Ddd);
   // Validation off for IR shape tests — most of these systems have
-  // dangling references the validator (Slice 3) will object to.
+  // dangling references the validator will object to.
   const doc = await helper(src, { validation: false });
   return lowerModel(doc.parseResult.value as Model);
 }
@@ -37,7 +36,7 @@ function uiByName(loom: LoomModel, name: string): UiIR {
   return ui;
 }
 
-describe("page metamodel — IR shape (Slice 2)", () => {
+describe("page metamodel — IR shape", () => {
   it("attaches `uis` to SystemIR (empty when none declared)", async () => {
     const loom = await buildLoom(`
       system Acme {
@@ -72,7 +71,7 @@ describe("page metamodel — IR shape (Slice 2)", () => {
   });
 
   it("lowers `scaffold modules: …` as a literal directive (also kept on UiIR)", async () => {
-    // Slice 10 — scaffold expansion now happens at the AST layer.
+    // scaffold expansion now happens at the AST layer.
     // The lowering still records the original scaffold directives
     // on `ui.scaffolds` for tooling that wants to inspect what the
     // user wrote (debugging, codegen heuristics).  The synthesised
@@ -97,7 +96,7 @@ describe("page metamodel — IR shape (Slice 2)", () => {
   });
 
   it("lowers a `page` with route/title/requires/state/body/menu meta", async () => {
-    // Slice 1.5: CallExpr accepts named-arg syntax (`List(of: Order)`)
+    // CallExpr accepts named-arg syntax (`List(of: Order)`)
     // and PageMenuMeta accepts soft-keyword keys (`section:`,
     // `label:`) — both via the `LooseName` rule.
     const loom = await buildLoom(`
@@ -134,7 +133,7 @@ describe("page metamodel — IR shape (Slice 2)", () => {
   });
 
   it("lowers a page with parameters (typed) — including `id` as a param name", async () => {
-    // Slice 1.5: `Parameter.name` uses `LooseName`, so `id` no
+    // `Parameter.name` uses `LooseName`, so `id` no
     // longer collides with the IdRef magic-identifier keyword and
     // can be used as a route-param name.
     const loom = await buildLoom(`
@@ -151,7 +150,7 @@ describe("page metamodel — IR shape (Slice 2)", () => {
     const page = uiByName(loom, "WebApp").pages.find(
       (p): p is PageIR => p.name === "CustomerDetail",
     )!;
-    // Slice D1 — the scaffold expander rewrites `Detail(of:, by:)`
+    // The scaffold expander rewrites `Detail(of:, by:)`
     // bodies into walker-stdlib compositions.  The page now carries
     // the expanded `Stack(Breadcrumbs, Heading, QueryView, …)` body
     // instead of the original `Detail(of:, by:)`.  Params survive
@@ -242,7 +241,7 @@ describe("page metamodel — IR shape (Slice 2)", () => {
   });
 
   it("lowers `match { … }` to a kind:'match' ExprIR with arms + otherwise", async () => {
-    // Slice 1.5: named-arg call surface in arm values no longer
+    // named-arg call surface in arm values no longer
     // breaks parsing.
     const loom = await buildLoom(`
       system Acme {
@@ -269,8 +268,8 @@ describe("page metamodel — IR shape (Slice 2)", () => {
   });
 
   it("lowers `match` with no arms and no else as an empty match expression", async () => {
-    // Grammar accepts `match { }`; Slice 3 validator will warn /
-    // error.  Slice 2 still produces a valid IR shape.
+    // Grammar accepts `match { }`; the validator will warn /
+    // error.  Lowering still produces a valid IR shape.
     const loom = await buildLoom(`
       system Acme {
         ui WebApp { page X { route: "/x", body: match { } } }
@@ -311,7 +310,7 @@ describe("page metamodel — IR shape (Slice 2)", () => {
   it("lowers a single-expression lambda with `body` set, no `block`", async () => {
     // Existing v22 form — verifies regression: lambdas keep producing
     // the body field that prior renderers depend on.
-    const loom = await buildLoom(`
+    const _loom = await buildLoom(`
       system Acme {
         module M {
           context C {
@@ -358,7 +357,7 @@ describe("page metamodel — IR shape (Slice 2)", () => {
   });
 
   it("attaches uiName + uiFramework to deployable IR (sugar form)", async () => {
-    // Fullstack dotnet (Part B): `ui:` on a dotnet deployable defaults
+    // Fullstack dotnet: `ui:` on a dotnet deployable defaults
     // the framework to `react` — the embedded SPA renders against the
     // React generator, with output landing under ClientApp/ of the
     // .NET project.  Backend-only dotnet (no `ui:`) leaves both
@@ -397,7 +396,7 @@ describe("page metamodel — IR shape (Slice 2)", () => {
     expect(dep.uiFramework).toBe("react");
   });
 
-  it("preserves positional vs named-arg distinction in CallExpr (Slice 1.5)", async () => {
+  it("preserves positional vs named-arg distinction in CallExpr", async () => {
     // Mixed positional + named — argNames is populated only when at
     // least one arg is named; a fully-positional call leaves
     // argNames undefined for IR compactness.
@@ -458,7 +457,7 @@ describe("page metamodel — IR shape (Slice 2)", () => {
     expect(link!.props.map((p) => p.name)).toEqual(["label"]);
   });
 
-  it("Platform enum accepts 'static' (Slice 1 grammar / Slice 2 IR)", async () => {
+  it("Platform enum accepts 'static'", async () => {
     const loom = await buildLoom(`
       system Acme {
         module M { context C { } }

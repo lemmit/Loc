@@ -24,6 +24,7 @@ import dotnetBackendSource from "./dotnet-backend.ddd?raw";
 import dotnetBankingSource from "./dotnet-banking.ddd?raw";
 import phoenixFullstackSource from "./phoenix-fullstack.ddd?raw";
 import phoenixBankingSource from "./phoenix-banking.ddd?raw";
+import actionShowcaseSource from "./action-showcase.ddd?raw";
 
 export interface LoomExample {
   id: string;
@@ -53,6 +54,13 @@ export const examples: LoomExample[] = [
     source: storybookComponentsSource,
     blurb:
       "Single long page exercising every page-metamodel primitive — layout, display, input, action — no aggregates.",
+  },
+  {
+    id: "action-showcase",
+    label: "Action showcase (operation buttons + forms)",
+    source: actionShowcaseSource,
+    blurb:
+      "Hand-authored Action(order.confirm) buttons in a component, plus scaffold operation forms — the instance-qualified operation surface end-to-end.",
   },
   {
     id: "storybook-mantine",

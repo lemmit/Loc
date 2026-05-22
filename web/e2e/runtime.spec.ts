@@ -97,6 +97,18 @@ test("editor → generate → bundle → boot → dispatch", async ({ page }) =>
     expect(parsed[0].price.currency).toBe("USD");
   });
 
+  await test.step("Database console runs SQL against PGlite", async () => {
+    // Switch the Runtime tab to its Database sub-view and run the
+    // built-in "List tables" query — exercises the query() RPC end to
+    // end. The table_name column header is schema-independent, so it's
+    // a stable assertion regardless of the example's aggregates.
+    await page.getByTestId("runtime-subview").getByText("Database").click();
+    await page.getByTestId("btn-list-tables").click();
+    const result = page.getByTestId("sql-result");
+    await expect(result).toBeVisible({ timeout: 30_000 });
+    await expect(result).toContainText("table_name");
+  });
+
   await test.step("Preview loads the React app via the sandbox bridge", async () => {
     // The Preview tab is only meaningful when the source has a
     // React deployable.  The default Sales System example does;

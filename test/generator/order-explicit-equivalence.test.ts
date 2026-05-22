@@ -1,4 +1,4 @@
-// Slice B1 — explicit Order DSL ↔ scaffold Order DSL equivalence.
+// Explicit Order DSL ↔ scaffold Order DSL equivalence.
 //
 // Pins the platform-completeness contract that motivated the
 // scaffold-unroll: a skilled user CAN hand-write the same pages
@@ -26,7 +26,7 @@
 //
 // Spillover: OrderDetail page parity needs aggregate operations
 // (`addLine`, `confirm` modals) + KeyValueRow primitive — deferred
-// to A10+.  This slice ships List + New parity only.
+// to later archetypes.  This test covers List + New parity only.
 
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -54,7 +54,7 @@ function extractTestids(tsx: string): Set<string> {
   return out;
 }
 
-describe("Slice B1 — explicit Order DSL ↔ scaffold Order equivalence", () => {
+describe("explicit Order DSL ↔ scaffold Order equivalence", () => {
   it("both pipelines emit src/pages/orders/list.tsx", async () => {
     const explicit = await generateFromFile("examples/acme-order-explicit.ddd");
     // Scaffold output is captured by the baseline fixture; reuse

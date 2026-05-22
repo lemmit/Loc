@@ -31,7 +31,7 @@ const SOURCE = `
   }
 `;
 
-describe("traceability IR (Slice 12)", () => {
+describe("traceability IR", () => {
   it("lowers requirements / solutions / testCases", async () => {
     const loom = await build(SOURCE);
     expect(loom.requirements.map((r) => r.id).sort()).toEqual(["AC-001", "US-001", "US-002"]);
@@ -71,8 +71,8 @@ describe("traceability IR (Slice 12)", () => {
 
     // Code coverage — `start` is covered, `AuthApi` is entitled-but-untested.
     expect(t.testsByCodeElement["Identity.Auth.LoginSession.start"]).toEqual(["TC-001"]);
-    expect(t.testsByCodeElement["AuthApi"]).toBeUndefined();
-    expect(t.codeElements["AuthApi"]).toBe("deployable");
+    expect(t.testsByCodeElement.AuthApi).toBeUndefined();
+    expect(t.codeElements.AuthApi).toBe("deployable");
 
     // Executable-test back-link reaches the covered code element.
     expect(t.execTestsByTestCase["TC-001"]).toEqual(["start works"]);

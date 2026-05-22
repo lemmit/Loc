@@ -1,4 +1,4 @@
-// Slice A8 — QueryView macro for the canonical 4-arm query state
+// QueryView macro for the canonical 4-arm query state
 //   loading / error / empty / data
 //
 // Macro that captures the rendering pattern the scaffold List page
@@ -6,7 +6,7 @@
 // / `{ q.data && q.data.length === 0 && ... }` / `{ q.data &&
 // q.data.length > 0 && ... }`) into one declarative primitive.
 //
-// What this slice pins:
+// What this test pins:
 //   1. The `of:` query expression flows through the walker's hook
 //      detection so `Sales.Order.all` lifts to a `useAllOrders()`
 //      hook decl + import and the four branches reference the
@@ -45,7 +45,7 @@ const ordersListBody = (queryViewBody: string) => `
   }
 `;
 
-describe("Slice A8 — QueryView macro", () => {
+describe("QueryView macro", () => {
   it("auto-injects the hook for `of:` and references it in all four branches", async () => {
     const files = await buildAndGenerate(
       ordersListBody(`QueryView(
@@ -102,7 +102,7 @@ describe("Slice A8 — QueryView macro", () => {
       /orderAll\.data && orderAll\.data\.length > 0 && \([\s\S]*orderAll\.data\.map\(\(row, idx\) => \(/,
     );
     // Inner Column accessors still work — `o.status` resolves to
-    // `row.status` (Slice A2's lambda-param scope).
+    // `row.status` (the lambda-param scope).
     expect(tsx).toMatch(/<Table\.Td>\{row\.id\}<\/Table\.Td>/);
     expect(tsx).toMatch(/<Table\.Td><Badge[^>]*>\{row\.status\}<\/Badge><\/Table\.Td>/);
   });

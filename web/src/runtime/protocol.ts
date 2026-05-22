@@ -1,5 +1,8 @@
 // Runtime-worker protocol.
 //
+import type { LogLine } from "../util/log-line.js";
+
+//
 // The runtime worker is long-lived: once booted it holds a PGlite
 // instance, the bootstrapped Hono `app`, and the DDL that built the
 // schema.  Each `dispatch` request transports a serialised
@@ -34,6 +37,12 @@ export interface BootRequest {
    *  `opfs-ahp://loom-<source-hash>`) give each `.ddd` its own
    *  data island. */
   dataDir?: string;
+  /** Recovery escape hatch: drop the persistent DB's `public` +
+   *  `__loom` schemas right after opening PGlite, before applying
+   *  DDL.  Lets the user recover from a boot that fails on stale /
+   *  incompatible persisted data — the normal Reset needs a booted
+   *  instance, which a failing boot never produces. */
+  fresh?: boolean;
 }
 
 export interface BootOk {
@@ -76,6 +85,25 @@ export interface DispatchFail {
 
 export type DispatchResult = DispatchOk | DispatchFail;
 
+export interface QueryOk {
+  ok: true;
+  /** Column names in result order, taken from PGlite's `fields`.
+   *  Present even when `rows` is empty so a zero-row SELECT still
+   *  renders its header. */
+  fields: string[];
+  rows: Array<Record<string, unknown>>;
+  /** Rows affected by an INSERT/UPDATE/DELETE.  0 for SELECT. */
+  affectedRows: number;
+  durationMs: number;
+}
+
+export interface QueryFail {
+  ok: false;
+  message: string;
+}
+
+export type QueryResult = QueryOk | QueryFail;
+
 export interface WipeResult {
   ok: boolean;
   /** Best-effort error message when `ok === false`.  The runtime
@@ -88,11 +116,16 @@ export interface WipeResult {
 export type RuntimeRpcRequest =
   | { id: number; method: "boot"; params: BootRequest }
   | { id: number; method: "dispatch"; params: SerializedRequest }
+  | { id: number; method: "query"; params: { sql: string } }
   | { id: number; method: "reset"; params: Record<string, never> }
   | { id: number; method: "wipe"; params: Record<string, never> };
 
 export interface RuntimeRpcResponse {
   id: number;
-  result?: BootResult | DispatchResult | WipeResult | { ok: true };
+  result?: BootResult | DispatchResult | QueryResult | WipeResult | { ok: true };
   error?: { message: string };
+  /** `console.*` (and any thrown stack) captured in the worker while
+   *  this RPC ran — surfaced as the playground's "Backend" log stream.
+   *  Omitted when nothing was logged. */
+  logs?: LogLine[];
 }

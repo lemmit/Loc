@@ -1,4 +1,4 @@
-// Slice 11.7 — state {} fields + onClick lambda mutations.
+// state {} fields + onClick lambda mutations.
 // First interactive walker primitive: a click counter renders end
 // to end without a single line of TS hand-written.
 //
@@ -21,7 +21,7 @@ import { generateSystemFiles } from "../_helpers/index.js";
 
 const buildAndGenerate = generateSystemFiles;
 
-describe("Slice 11.7 — state + onClick mutations in walker pages", () => {
+describe("state + onClick mutations in walker pages", () => {
   it("click counter — useState + state ref + setX in onClick handler", async () => {
     const files = await buildAndGenerate(`
       system S {

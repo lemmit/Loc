@@ -39,6 +39,11 @@ const RUNTIME_FETCH_SHIM = `
   port.onmessage = function (ev) {
     var r = ev.data;
     if (!r || typeof r.rid !== "number") return;
+    // The port multiplexes other channels (driver ops are tagged
+    // kind:"driver", reload kind:"reload").  Fetch replies carry no kind;
+    // ignore tagged messages so a driver request's rid — a separate
+    // counter — can't collide with an in-flight fetch's pending slot.
+    if (r.kind) return;
     var slot = pending[r.rid];
     if (!slot) return;
     delete pending[r.rid];
@@ -88,6 +93,49 @@ const RUNTIME_FETCH_SHIM = `
       });
     });
   };
+})();
+`.trim();
+
+// Console + error bridge.  Classic script so it runs synchronously in
+// <head> before the bundle module evaluates — patches `console.*` and
+// installs uncaught-error / unhandled-rejection listeners, forwarding
+// each over the SAME `window.__LOOM_PORT__` the fetch shim uses (as
+// `{ kind: "console" | "error", level, text }`).  The parent bridge
+// pipes these into the playground's "App" log stream so the generated
+// frontend's logs and crashes are visible without opening DevTools on
+// the (cross-origin) sandbox.  Dependency-free / ES5-ish like the other
+// inline scripts.
+const CONSOLE_BRIDGE = `
+(function () {
+  var port = window.__LOOM_PORT__;
+  if (!port) return;
+  function fmt(a) {
+    if (typeof a === "string") return a;
+    if (a instanceof Error) return a.stack || a.message;
+    try { return JSON.stringify(a); } catch (e) { return String(a); }
+  }
+  var levels = ["log", "info", "warn", "error", "debug"];
+  for (var i = 0; i < levels.length; i++) {
+    (function (level) {
+      var original = console[level];
+      console[level] = function () {
+        var args = Array.prototype.slice.call(arguments);
+        try {
+          port.postMessage({ kind: "console", level: level, text: args.map(fmt).join(" ") });
+        } catch (e) {}
+        if (original) original.apply(console, args);
+      };
+    })(levels[i]);
+  }
+  window.addEventListener("error", function (e) {
+    var text = (e.error && e.error.stack) || e.message || "Uncaught error";
+    try { port.postMessage({ kind: "error", level: "error", text: text }); } catch (err) {}
+  });
+  window.addEventListener("unhandledrejection", function (e) {
+    var r = e.reason;
+    var text = "Unhandled rejection: " + ((r && r.stack) || (r && r.message) || String(r));
+    try { port.postMessage({ kind: "error", level: "error", text: text }); } catch (err) {}
+  });
 })();
 `.trim();
 
@@ -400,6 +448,7 @@ export function makePreviewHtml(args: MakePreviewArgs): string {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Loom Preview</title>
 <script>${ESCAPE_END_SCRIPT(RUNTIME_FETCH_SHIM)}</script>
+<script>${ESCAPE_END_SCRIPT(CONSOLE_BRIDGE)}</script>
 <script type="importmap">
 ${ESCAPE_END_SCRIPT(importMapJson)}
 </script>

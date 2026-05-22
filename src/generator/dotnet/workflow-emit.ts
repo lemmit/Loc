@@ -4,7 +4,7 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../../ir/loom-ir.js";
-import { upperFirst, plural, snake } from "../../util/naming.js";
+import { plural, snake, upperFirst } from "../../util/naming.js";
 import {
   csIdValueClrType,
   domainToRequestExpr,
@@ -44,7 +44,10 @@ export function emitWorkflows(
 
   for (const wf of ctx.workflows) {
     const usage = analyseWorkflow(wf, aggsByName);
-    out.set(`Application/Workflows/${upperFirst(wf.name)}Request.cs`, renderRequestDto(wf, ctx, ns));
+    out.set(
+      `Application/Workflows/${upperFirst(wf.name)}Request.cs`,
+      renderRequestDto(wf, ctx, ns),
+    );
     out.set(`Application/Workflows/${upperFirst(wf.name)}Command.cs`, renderCommand(wf, ns));
     out.set(
       `Application/Workflows/${upperFirst(wf.name)}Handler.cs`,
@@ -288,7 +291,6 @@ function csIsolationLevel(level: import("../../ir/loom-ir.js").IsolationLevel): 
       return "Serializable";
   }
 }
-
 
 function renderStatement(
   st: WorkflowStmtIR,

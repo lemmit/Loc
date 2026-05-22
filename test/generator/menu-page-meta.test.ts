@@ -1,4 +1,4 @@
-// Slice 11.21 — per-page menuMeta drives the sidebar when no
+// per-page menuMeta drives the sidebar when no
 // explicit `ui.menu { … }` block is declared.
 //
 //   page Reports {
@@ -15,7 +15,7 @@ import { generateSystemFiles } from "../_helpers/index.js";
 
 const buildAndGenerate = generateSystemFiles;
 
-describe("Slice 11.21 — per-page menuMeta drives the sidebar", () => {
+describe("per-page menuMeta drives the sidebar", () => {
   it("walker page with menuMeta lands in App.tsx sidebar nav", async () => {
     const files = await buildAndGenerate(`
       system S {

@@ -1,5 +1,5 @@
 import type { BoundedContextIR, DeployableIR, SystemIR } from "../../ir/loom-ir.js";
-import { upperFirst, plural, snake } from "../../util/naming.js";
+import { plural, snake, upperFirst } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // API controller emission for Phoenix LiveView / Ash.
@@ -262,7 +262,7 @@ function renderWorkflowAction(
 
   return `  @doc "POST /api/workflows/${wfSnake}"
   def ${wfSnake}(conn, params) do
-    # E5 — currentUser threading.  When the deployable has
+    # currentUser threading.  When the deployable has
     # \`auth: required\`, the Auth plug populates
     # \`conn.assigns.current_user\` from the JWT.  We pass it as the
     # second positional arg to run/2; workflows that don't reference
@@ -323,7 +323,7 @@ function renderViewAction(
 
   return `  @doc "GET /api/views/${viewSnake}"
   def ${viewSnake}(conn, _params) do
-    # E5 — currentUser available to views via run/1 first arg.
+    # currentUser available to views via run/1 first arg.
     # Views that don't reference currentUser ignore it (default value).
     current_user = Map.get(conn.assigns, :current_user)
     case ${viewModule}.run(current_user) do

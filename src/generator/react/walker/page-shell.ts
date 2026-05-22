@@ -16,10 +16,11 @@ import type {
   UiHelperImportIR,
   WorkflowIR,
 } from "../../../ir/loom-ir.js";
-import { lowerFirst, humanize, upperFirst, plural, snake } from "../../../util/naming.js";
+import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import type { LoadedPack } from "../../_packs/loader.js";
 import { routerPackageForStack } from "../../_packs/stack-runtime.js";
 import type {
+  ActionMutationState,
   FormOfState,
   OperationFormState,
   WalkContext,
@@ -29,7 +30,6 @@ import { emitExpr, walkBodyToTsx } from "../body-walker.js";
 import { idTargetHookVar } from "../form-helpers.js";
 import { renderApiHookImports, renderHelperImports, renderImportLines } from "./import-lines.js";
 import { indentJsx } from "./shared/args.js";
-import type { ActionMutationState } from "../body-walker.js";
 
 /** Map each aggregate-typed param to its aggregate name, so the
  *  walker can resolve `Action(<param>.<op>)` (the lowering env is
@@ -376,8 +376,7 @@ function renderFormOpWiring(
   pack: LoadedPack,
   srcImportPrefix: string,
 ): FormWiring {
-  const { agg, op, idTargets, useController, defaultValuesTs, fieldHtmls, idExpr } =
-    state;
+  const { agg, op, idTargets, useController, defaultValuesTs, fieldHtmls, idExpr } = state;
   const opPascal = upperFirst(op.name);
   const tplCtx = {
     aggregateName: agg.name,
@@ -558,20 +557,15 @@ export function renderUserComponentFile(
   const dtoImportLines = [...dtoImports.entries()]
     .map(([type, mod]) => `import type { ${type} } from "${mod}";\n`)
     .join("");
-  const propsType = propLines.length > 0
-    ? `\nexport interface ${name}Props {\n${propLines.join("\n")}\n}\n`
-    : "";
+  const propsType =
+    propLines.length > 0 ? `\nexport interface ${name}Props {\n${propLines.join("\n")}\n}\n` : "";
   const destructureNames = params.map((p) => p.name);
   if (usesChildren) destructureNames.push("children");
-  const propDestructure = destructureNames.length > 0
-    ? `{ ${destructureNames.join(", ")} }: ${name}Props`
-    : "";
-  const navigateLine = usesNavigate || form.usesNavigate
-    ? `  const navigate = useNavigate();\n`
-    : "";
-  const stateLines = usesState
-    ? state.map((f) => `  ${renderUseState(f, pack)}\n`).join("")
-    : "";
+  const propDestructure =
+    destructureNames.length > 0 ? `{ ${destructureNames.join(", ")} }: ${name}Props` : "";
+  const navigateLine =
+    usesNavigate || form.usesNavigate ? `  const navigate = useNavigate();\n` : "";
+  const stateLines = usesState ? state.map((f) => `  ${renderUseState(f, pack)}\n`).join("") : "";
   // Suppress used-prop warnings — params declared but unused at
   // walker-emit time (e.g. typed pass-through to a child component
   // not yet wired) shouldn't trigger TS lint noise.  We reference

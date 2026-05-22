@@ -9,7 +9,7 @@ import {
 import { parseDdd } from "../../web/src/builder/parse.js";
 
 // ---------------------------------------------------------------------------
-// CST edit-engine acceptance tests (Builders, Phase 0).  Proves the engine
+// CST edit-engine acceptance tests (Builders).  Proves the engine
 // preserves everything outside the edited span — the guarantee the whole
 // text-first/CST-edit approach rests on.
 // ---------------------------------------------------------------------------

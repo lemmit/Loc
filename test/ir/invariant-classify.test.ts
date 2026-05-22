@@ -7,7 +7,7 @@ import {
 import type { ExprIR, InvariantIR } from "../../src/ir/loom-ir.js";
 
 // ---------------------------------------------------------------------------
-// Pure-function tests for the slice 21.A classifier.  No file system, no
+// Pure-function tests for the wire-invariant classifier.  No file system, no
 // Langium roundtrip — these constructors mirror what the lowering pass
 // emits and let us cover edge cases without authoring a `.ddd` per case.
 // ---------------------------------------------------------------------------
@@ -230,7 +230,7 @@ describe("singleFieldShape", () => {
     expect(singleFieldShape(i)).toBeNull();
   });
 
-  it("recognises `f.matches(literal)` as the regex pattern (slice 21.C)", () => {
+  it("recognises `f.matches(literal)` as the regex pattern", () => {
     const i = inv({
       kind: "method-call",
       receiver: {

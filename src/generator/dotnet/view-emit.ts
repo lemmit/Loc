@@ -1,6 +1,6 @@
 import type { AggregateIR, BoundedContextIR, ExprIR, ViewIR } from "../../ir/loom-ir.js";
 import { viewUsesCurrentUser } from "../../ir/loom-ir.js";
-import { lowerFirst, upperFirst, plural, snake } from "../../util/naming.js";
+import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { projectEntityExpr, projectToResponse, wireType } from "./dto-mapping.js";
 import { renderCsExpr } from "./render-expr.js";
 
@@ -40,7 +40,10 @@ export function emitViews(
       out.set(`Application/Views/${upperFirst(view.name)}Row.cs`, renderRowRecord(view, ctx, ns));
     }
     out.set(`Application/Views/${upperFirst(view.name)}Query.cs`, renderQuery(view, agg, ns));
-    out.set(`Application/Views/${upperFirst(view.name)}Handler.cs`, renderHandler(view, agg, ctx, ns));
+    out.set(
+      `Application/Views/${upperFirst(view.name)}Handler.cs`,
+      renderHandler(view, agg, ctx, ns),
+    );
   }
   out.set(`Api/${ctx.name}ViewsController.cs`, renderController(ctx, ns, options?.routePrefix));
 }

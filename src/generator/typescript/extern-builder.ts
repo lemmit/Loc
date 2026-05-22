@@ -17,7 +17,6 @@ import { lowerFirst, upperFirst } from "../../util/naming.js";
 // looks up the handler from `externHandlers` and dispatches.
 // ---------------------------------------------------------------------------
 
-
 export function buildExternHandlersFile(agg: AggregateIR, ctx: BoundedContextIR): string {
   const externOps = agg.operations.filter((o) => o.extern);
   if (externOps.length === 0) return "";
@@ -61,7 +60,9 @@ export function buildExternHandlersFile(agg: AggregateIR, ctx: BoundedContextIR)
 
   lines.push("interface ExternHandlerRegistry {");
   for (const op of externOps) {
-    lines.push(`  ${lowerFirst(op.name)}${agg.name}: ${upperFirst(op.name)}${agg.name}Handler | null;`);
+    lines.push(
+      `  ${lowerFirst(op.name)}${agg.name}: ${upperFirst(op.name)}${agg.name}Handler | null;`,
+    );
   }
   lines.push("}");
   lines.push("");

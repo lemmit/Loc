@@ -1,12 +1,12 @@
-// Slice A7 — shell primitives (Breadcrumbs / Paper / Skeleton / Alert).
+// shell primitives (Breadcrumbs / Paper / Skeleton / Alert).
 //
 // Page-chrome primitives that the scaffold archetype path
 // composes inline; the walker now exposes them so explicit pages
-// can compose the same chrome by hand.  Together with Phase A1-A6
+// can compose the same chrome by hand.  Together with the other walker primitives
 // they cover the typical "container + state-cued content" shape
 // of a list/detail page.
 //
-// What this slice pins:
+// What this test pins:
 //   1. Breadcrumbs(...children, testid?) — wraps each positional
 //      child as a breadcrumb (Mantine renders separators
 //      automatically; shadcn uses a flex row).
@@ -38,7 +38,7 @@ async function emit(body: string): Promise<string> {
   return tsx;
 }
 
-describe("Slice A7 — shell primitives", () => {
+describe("shell primitives", () => {
   it("Breadcrumbs(Anchor, Anchor, Text) emits a Mantine <Breadcrumbs>", async () => {
     const tsx = await emit(
       `Breadcrumbs(Anchor("Home", to: "/"), Anchor("Orders", to: "/orders"), Text("Detail"))`,

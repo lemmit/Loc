@@ -1,4 +1,4 @@
-// Phoenix `Action` (Stage 2): `Action(<instance>.<op>, then?)` inside a
+// Phoenix `Action`: `Action(<instance>.<op>, then?)` inside a
 // (stateless) function component emits a `<.button phx-click=…>` whose
 // handler is hoisted to every host page's LiveView — load the instance
 // via the Ash code interface, invoke the action, flash + navigate.
@@ -58,9 +58,7 @@ async function build(): Promise<Map<string, string>> {
   const file = path.join(dir, "mini.ddd");
   fs.writeFileSync(file, SOURCE);
   const services = createDddServices(NodeFileSystem);
-  const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
-    URI.file(file),
-  );
+  const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(URI.file(file));
   await services.shared.workspace.DocumentBuilder.build([doc], { validation: true });
   const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
   if (errors.length > 0) {

@@ -1,5 +1,5 @@
 import type { BoundedContextIR, ParamIR, WorkflowIR, WorkflowStmtIR } from "../../ir/loom-ir.js";
-import { upperFirst, snake } from "../../util/naming.js";
+import { snake, upperFirst } from "../../util/naming.js";
 import { type RenderCtx, renderExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -85,7 +85,7 @@ defmodule ${moduleName} do
 
   alias ${contextModule}
 
-  # E5 — currentUser threading.  Controllers pass
+  # currentUser threading.  Controllers pass
   # \`conn.assigns.current_user\` as the second positional arg; LiveView
   # callers pass \`socket.assigns.current_user\`.  Workflows that don't
   # reference currentUser ignore the param (default = nil).

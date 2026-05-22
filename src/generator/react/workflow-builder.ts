@@ -1,5 +1,5 @@
-import type { AggregateIR, BoundedContextIR, TypeIR, WorkflowIR } from "../../ir/loom-ir.js";
-import { lowerFirst, upperFirst, plural, snake } from "../../util/naming.js";
+import type { BoundedContextIR, TypeIR, WorkflowIR } from "../../ir/loom-ir.js";
+import { lowerFirst, snake, upperFirst } from "../../util/naming.js";
 import { fillBlock } from "./page-objects-builder.js";
 
 // ---------------------------------------------------------------------------
@@ -60,7 +60,9 @@ export function buildWorkflowsApiModule(contexts: BoundedContextIR[]): string {
       lines.push(`  ${p.name}: ${zodForRequest(p.type)},`);
     }
     lines.push(`});`);
-    lines.push(`export type ${upperFirst(wf.name)}Request = z.infer<typeof ${upperFirst(wf.name)}Request>;`);
+    lines.push(
+      `export type ${upperFirst(wf.name)}Request = z.infer<typeof ${upperFirst(wf.name)}Request>;`,
+    );
     lines.push("");
     lines.push(`export function use${upperFirst(wf.name)}Workflow() {`);
     lines.push(`  return useMutation({`);
@@ -209,7 +211,6 @@ export function buildWorkflowPageObject(wf: WorkflowIR, ctx: BoundedContextIR): 
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
-
 
 function zodForRequest(t: TypeIR): string {
   switch (t.kind) {
