@@ -25,8 +25,8 @@
 // timing.
 //
 // No network needed — the spec stops at Generate and asserts
-// "generated N files".  Bundle/Boot/Preview would require esm.sh
-// (covered by `runtime.spec.ts` and `preview-shadcn.spec.ts`);
+// "generated N files".  Bundle/Boot/Preview would require the npm
+// registry (covered by `runtime.spec.ts` and `preview-shadcn.spec.ts`);
 // custom-pack semantics live entirely in the worker, before the
 // network-required steps.
 

@@ -11,9 +11,9 @@
 // build worker imports the React generator which transitively
 // imports the loader; if the bundled-template glob breaks, Generate
 // throws inside the worker).  Bundle/Boot/Preview cover PR #48's
-// surface (Tailwind Play CDN injection) and require esm.sh +
-// jsdelivr — those steps self-skip when the browser can't reach
-// esm.sh, just like runtime.spec.ts.
+// surface (Tailwind Play CDN injection) and require the npm registry +
+// jsdelivr — those steps self-skip when the browser can't reach the
+// npm registry, just like runtime.spec.ts.
 
 import { expect, test } from "@playwright/test";
 import {
@@ -75,7 +75,7 @@ test("editor → shadcn-design system → preview boots", async ({ page }) => {
   });
 
   if (!(await browserCanReachNetwork(page))) {
-    test.skip(true, "browser cannot reach esm.sh — Bundle/Boot/Preview steps need network");
+    test.skip(true, "browser cannot reach the npm registry — Bundle/Boot/Preview steps need network");
   }
 
   await test.step("Bundle", async () => {

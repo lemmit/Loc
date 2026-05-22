@@ -20,9 +20,9 @@ Runs in any CI / sandbox.  Useful as a fast regression check.
 ## `runtime.spec.ts` — full pipeline (requires network)
 
 - Generate → Bundle (Hono + React) → Boot → `GET /products` → `POST /products` → `GET /products` → switch to **Preview** tab and assert the iframe-hosted React app rendered the home page.
-- The bundler fetches ~150 modules from `esm.sh` per kind (Hono + React); the runtime fetches PGlite's WASM + `.data` from `jsdelivr`.  Cold first run is ~30 s.
+- The in-browser npm install fetches ~150 module tarballs from the npm registry (same-origin `npm-mirror/` when prebuilt) per kind (Hono + React); the runtime fetches PGlite's WASM + `.data` from `jsdelivr`.  Cold first run is ~30 s.
 - Iframe `fetch()` calls to `http://localhost:*` are intercepted by the in-iframe shim and routed through `postMessage` to the parent, which dispatches them through the runtime worker — proving end-to-end React → Hono → PGlite under the same origin.
-- The spec self-skips if the test browser can't reach `esm.sh` (some sandboxes block browser-context cross-origin fetches even when Node-side network works).
+- The spec self-skips if the test browser can't reach the npm registry (some sandboxes block browser-context cross-origin fetches even when Node-side network works).
 
 Runs cleanly on a developer laptop and on GitHub Actions.
 

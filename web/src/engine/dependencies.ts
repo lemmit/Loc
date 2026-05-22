@@ -9,8 +9,8 @@
 //
 //   - verified        curated, version-pinned, known-good (one-click).
 //   - custom-public    arbitrary public npm; resolved via the engine's
-//                       public resolver (today: esm.sh) with peer-dep
-//                       singletons auto-externalised.
+//                       public resolver (today: the npm registry, real
+//                       tarballs) with peer-dep singletons auto-externalised.
 //   - custom-vendored  user-supplied source/tarball written straight
 //                       into the VFS — private packages with ZERO
 //                       backend.  Available as soon as P6 lands.
