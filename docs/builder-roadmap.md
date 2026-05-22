@@ -353,6 +353,13 @@ Done:
   if referenced but untested, *none* if no artifact references it. Gated by
   `test/system-model.test.ts` (incl. a real lower→enrich→coverage pass over
   `sales-system.ddd`) + e2e.
+- **Apply-diff preview** — an opt-in **Preview** toggle: while on, every edit is
+  staged in a modal showing its source diff (removed / added lines) and commits
+  only on confirm, instead of applying live (off by default, preserving the live
+  feel). A no-op edit passes straight through. Pure `lineDiff` in `edit-engine.ts`
+  (common-prefix/suffix trim → one tight hunk, since builder edits are localised
+  splices); the toggle / modal / `DiffView` live in `SystemBuilderPane.tsx`. Gated
+  by `test/generator/builder-splice.test.ts` + e2e.
 
 Open:
 
@@ -384,8 +391,8 @@ Planned — recommended order:
 4. ~~**Traceability overlay**~~ — done (see Done above): a Coverage toggle
    recolours the graph into a tested / untested / unreferenced heatmap from the
    enriched `traceability` index.
-5. **Apply-diff preview** — show the text diff a graph edit will splice before
-   committing (round-trip trust + safety).
+5. ~~**Apply-diff preview**~~ — done (see Done above): an opt-in Preview toggle
+   stages each edit's source diff in a confirm modal before committing.
 6. **Wire-shape / DTO preview** on aggregate nodes — render the
    enrichment-computed `wireShape` field list inline, so the contract is visible.
 
