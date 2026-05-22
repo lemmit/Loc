@@ -16,19 +16,10 @@
 // Nested ternaries (as a child of Stack/Group/etc) brace-wrap into
 // JSX-expression form: `{cond ? <A /> : <B />}`.
 
-import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
-import { createDddServices } from "../../src/language/ddd-module.js";
-import type { Model } from "../../src/language/generated/ast.js";
-import { generateSystems } from "../../src/system/index.js";
+import { generateSystemFiles } from "../_helpers/index.js";
 
-async function buildAndGenerate(src: string): Promise<Map<string, string>> {
-  const services = createDddServices(NodeFileSystem);
-  const { parseHelper } = await import("langium/test");
-  const helper = parseHelper(services.Ddd);
-  const doc = await helper(src, { validation: true });
-  return generateSystems(doc.parseResult.value as Model).files;
-}
+const buildAndGenerate = generateSystemFiles;
 
 describe("Slice 11.17 — ternary conditional rendering in walker pages", () => {
   it("top-level ternary body renders as function-return conditional", async () => {
