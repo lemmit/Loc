@@ -47,14 +47,29 @@ export interface SystemEmission {
   files: Map<string, string>;
 }
 
-export function generateSystems(model: Model): SystemEmission {
+export interface SystemGenerateOptions {
+  /** Emit the `.loom/wire-spec.json` contract artifact.  Defaults to
+   * `true` for in-process callers (tests, fixtures, the playground), so
+   * the artifact stays available where it's already relied on.  The CLI
+   * defaults it off and exposes it behind `--wire-spec`: nothing reads
+   * the emitted file at runtime — it's a diffable wire-contract review
+   * aid, kept opt-in until per-backend offline OpenAPI emission can
+   * supersede it as the cross-generator contract check. */
+  emitWireSpec?: boolean;
+}
+
+export function generateSystems(
+  model: Model,
+  options: SystemGenerateOptions = {},
+): SystemEmission {
+  const emitWireSpec = options.emitWireSpec ?? true;
   // Lowering produces a faithful AST projection; enrichment populates
   // wireShape, the implicit `findAll` find, and react `moduleNames`
   // inheritance.  See src/ir/enrichments.ts.
   const loom = enrichLoomModel(lowerModel(model));
   const out = new Map<string, string>();
   for (const sys of loom.systems) {
-    emitSystem(sys, loom, out);
+    emitSystem(sys, loom, out, emitWireSpec);
   }
   // Traceability artifacts (Slice 12) — model-global (requirements may
   // reference code across systems), so emitted once at the output root
@@ -66,7 +81,12 @@ export function generateSystems(model: Model): SystemEmission {
   return { files: out };
 }
 
-function emitSystem(sys: SystemIR, _loom: LoomModel, out: Map<string, string>): void {
+function emitSystem(
+  sys: SystemIR,
+  _loom: LoomModel,
+  out: Map<string, string>,
+  emitWireSpec: boolean,
+): void {
   // Pre-compute a module-name → contexts lookup so a deployable can
   // collect its slice quickly.
   const modulesByName = new Map<string, ModuleIR>();
@@ -80,8 +100,12 @@ function emitSystem(sys: SystemIR, _loom: LoomModel, out: Map<string, string>): 
   out.set("docker-compose.yml", renderDockerCompose(sys));
   out.set("db-init/00-create-databases.sql", renderDbInit(sys));
   // Wire-spec artifact — diffable record of every aggregate / part /
-  // value object's canonical wire shape.  See `wire-spec.ts`.
-  out.set(".loom/wire-spec.json", renderWireSpec(sys));
+  // value object's canonical wire shape.  See `wire-spec.ts`.  Opt-in:
+  // nothing consumes the emitted file at runtime, so the CLI gates it
+  // behind `--wire-spec`.
+  if (emitWireSpec) {
+    out.set(".loom/wire-spec.json", renderWireSpec(sys));
+  }
   // Mermaid views of the IR — a domain class diagram and a per-workflow
   // call flowchart.  The playground previews them inline; GitHub renders
   // them in fences.  See `mermaid.ts`.

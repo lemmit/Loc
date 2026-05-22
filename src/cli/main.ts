@@ -141,6 +141,10 @@ interface RunOptions {
    * of calling `process.exit`.  Used by watch mode so a typo in the
    * `.ddd` source doesn't tear down the watcher. */
   continueOnError?: boolean;
+  /** `system` target only: emit `.loom/wire-spec.json`.  Off by default
+   * in the CLI (opt-in via `--wire-spec`); nothing reads the file at
+   * runtime, it's a diffable wire-contract review aid. */
+  wireSpec?: boolean;
 }
 
 interface RunResult {
@@ -190,7 +194,7 @@ async function runGenerate(
 
   let files: Map<string, string>;
   if (target === "system") {
-    files = generateSystems(result.model).files;
+    files = generateSystems(result.model, { emitWireSpec: options.wireSpec === true }).files;
     if (files.size === 0) {
       console.error(
         `No \`system\` block declared in ${file}.  Use \`generate ts\` or \`generate dotnet\` for legacy single-deployable sources.`,
@@ -458,10 +462,24 @@ generate
   .requiredOption("-o, --out <dir>", "output directory")
   .option("-w, --watch", "re-run on changes to <file>")
   .option("--dry-run", "list paths that would be written / skipped, write nothing")
-  .action(async (file: string, options: { out: string; watch?: boolean; dryRun?: boolean }) => {
-    await runGenerate("system", file, options.out, { dryRun: options.dryRun });
-    if (options.watch) await watchAndRegenerate("system", file, options.out);
-  });
+  .option(
+    "--wire-spec",
+    "also emit .loom/wire-spec.json (diffable wire-contract artifact; off by default)",
+  )
+  .action(
+    async (
+      file: string,
+      options: { out: string; watch?: boolean; dryRun?: boolean; wireSpec?: boolean },
+    ) => {
+      await runGenerate("system", file, options.out, {
+        dryRun: options.dryRun,
+        wireSpec: options.wireSpec,
+      });
+      if (options.watch) {
+        await watchAndRegenerate("system", file, options.out, { wireSpec: options.wireSpec });
+      }
+    },
+  );
 
 program
   .command("verify <file>")
@@ -488,7 +506,12 @@ program
     await runSnapshot(file, options.out, { dryRun: options.dryRun });
   });
 
-async function watchAndRegenerate(target: GenerateTarget, file: string, outDir: string) {
+async function watchAndRegenerate(
+  target: GenerateTarget,
+  file: string,
+  outDir: string,
+  extraOptions: Partial<RunOptions> = {},
+) {
   console.log(`Watching ${file} for changes…`);
   let timer: NodeJS.Timeout | null = null;
   let inFlight = false;
@@ -503,7 +526,7 @@ async function watchAndRegenerate(target: GenerateTarget, file: string, outDir: 
     }
     inFlight = true;
     try {
-      await runGenerate(target, file, outDir, { continueOnError: true });
+      await runGenerate(target, file, outDir, { continueOnError: true, ...extraOptions });
     } catch (err) {
       // Defensive — runGenerate is supposed to capture its own
       // errors when continueOnError is set, but a renderer throwing
