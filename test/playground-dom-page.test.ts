@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 //
 // DOM-level unit tests for the Playwright-subset locator engine
-// (web/src/testing/dom-page.ts) — the engine the playground's UI test
+// (packages/ui-test-driver/dom-page.ts) — the engine the playground's UI test
 // runner uses to drive the generated page objects against the live
 // app.  Exercises the exact shapes the generator emits: getByTestId +
 // click/fill/innerText, locator("tbody tr").count(), the
@@ -9,7 +9,7 @@
 // dance, getByRole name/exact, auto-wait, and goto/url.
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { DomPage } from "../web/src/testing/dom-page.js";
+import { DomPage } from "../packages/ui-test-driver/index.js";
 
 function setBody(html: string): void {
   document.body.innerHTML = html;
