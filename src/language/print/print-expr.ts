@@ -99,5 +99,9 @@ function printLambda(node: Extract<Expression, { $type: "Lambda" }>): string {
 function printMatch(node: Extract<Expression, { $type: "MatchExpr" }>): string {
   const arms = node.arms.map((arm) => `${printExpr(arm.cond)} => ${printExpr(arm.value)}`);
   if (node.elseExpr) arms.push(`else => ${printExpr(node.elseExpr)}`);
-  return `match {\n${arms.join("\n")}\n}`;
+  // Comma-separate arms: without separators a match-arm value expression
+  // greedily consumes the next arm's condition (e.g. `... + name` followed
+  // by `(visibility == ...)` parses as a call), so the printed form would
+  // not round-trip.  The grammar accepts an optional comma between arms.
+  return `match {\n${arms.join(",\n")}\n}`;
 }

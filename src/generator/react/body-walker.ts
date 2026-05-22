@@ -244,8 +244,11 @@ export interface ApiHookUse {
 
 /** Component names the walker recognises.  Used by the page
  *  emitter to fast-fail dispatch when a body is neither a scaffold
- *  archetype nor a layout primitive — those pages stay silent. */
-const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
+ *  archetype nor a layout primitive — those pages stay silent.
+ *  Exported so the conformance completeness guard
+ *  (`test/conformance/showcase-completeness.test.ts`) can assert the
+ *  showcase fixture exercises every walker primitive. */
+export const STDLIB_LAYOUT_COMPONENTS = new Set<string>([
   "Stack",
   "Group",
   "Grid",
