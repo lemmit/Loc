@@ -4,10 +4,7 @@
     {
       "id": "ddd",
       "grammar": "src/language/ddd.langium",
-      "fileExtensions": [".ddd"],
-      "textMate": {
-        "out": "syntaxes/ddd.tmLanguage.json"
-      }
+      "fileExtensions": [".ddd"]
     }
   ],
   "out": "src/language/generated"

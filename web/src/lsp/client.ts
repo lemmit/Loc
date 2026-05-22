@@ -1,86 +1,52 @@
-import type {
-  CompletionItem,
-  DefinitionLocation,
-  Diagnostic,
-  HoverResult,
-  Position,
-  RpcNotification,
-  RpcRequest,
-  RpcResponse,
-} from "./protocol.js";
+import { MonacoLanguageClient } from "monaco-languageclient";
+import { BrowserMessageReader, BrowserMessageWriter } from "vscode-languageserver-protocol/browser.js";
+import { CloseAction, ErrorAction } from "vscode-languageclient/browser.js";
+import { initLoomServices } from "../editor/loom-services";
 
-type DiagnosticsListener = (version: number, items: Diagnostic[]) => void;
-
+// Owns the playground's language session: boots the vscode-api services,
+// spins up the Langium LSP server in a worker, and connects a
+// MonacoLanguageClient to it.  Every LSP capability registered in
+// `src/language/ddd-module.ts` flows over this connection — the editor only
+// has to create a `ddd` model.  Lifetime is parent-owned (App), so the
+// worker survives editor remounts on example switches.
 export class LoomLspClient {
-  private worker: Worker;
-  private nextId = 1;
-  private pending = new Map<
-    number,
-    { resolve: (v: unknown) => void; reject: (e: Error) => void }
-  >();
-  private diagnosticsListeners: DiagnosticsListener[] = [];
+  private worker?: Worker;
+  private client?: MonacoLanguageClient;
+  private readonly startup: Promise<void>;
 
   constructor() {
-    this.worker = new Worker(new URL("./lsp.worker.ts", import.meta.url), {
+    this.startup = this.boot();
+  }
+
+  /** Resolves once services + client are ready; editors await this. */
+  ready(): Promise<void> {
+    return this.startup;
+  }
+
+  private async boot(): Promise<void> {
+    await initLoomServices();
+    this.worker = new Worker(new URL("./ddd-server.worker.ts", import.meta.url), {
       type: "module",
+      name: "loom-lsp",
     });
-    this.worker.onmessage = (ev: MessageEvent<RpcResponse | RpcNotification>) => {
-      const msg = ev.data;
-      if ("id" in msg) {
-        const slot = this.pending.get(msg.id);
-        if (!slot) return;
-        this.pending.delete(msg.id);
-        if (msg.error) slot.reject(new Error(msg.error.message));
-        else slot.resolve(msg.result);
-        return;
-      }
-      if (msg.method === "diagnostics") {
-        for (const fn of this.diagnosticsListeners) {
-          fn(msg.params.version, msg.params.items);
-        }
-      }
-    };
-  }
-
-  onDiagnostics(fn: DiagnosticsListener): () => void {
-    this.diagnosticsListeners.push(fn);
-    return () => {
-      this.diagnosticsListeners = this.diagnosticsListeners.filter((x) => x !== fn);
-    };
-  }
-
-  private request<T>(method: RpcRequest["method"], params: RpcRequest["params"]): Promise<T> {
-    const id = this.nextId++;
-    return new Promise<T>((resolve, reject) => {
-      this.pending.set(id, {
-        resolve: (v) => resolve(v as T),
-        reject,
-      });
-      this.worker.postMessage({ id, method, params } satisfies RpcRequest);
+    const reader = new BrowserMessageReader(this.worker);
+    const writer = new BrowserMessageWriter(this.worker);
+    this.client = new MonacoLanguageClient({
+      name: "Loom Language Server",
+      clientOptions: {
+        documentSelector: ["ddd"],
+        errorHandler: {
+          error: () => ({ action: ErrorAction.Continue }),
+          closed: () => ({ action: CloseAction.DoNotRestart }),
+        },
+      },
+      messageTransports: { reader, writer },
     });
-  }
-
-  update(text: string, version: number): Promise<void> {
-    return this.request<void>("update", { text, version });
-  }
-
-  hover(position: Position): Promise<HoverResult> {
-    return this.request<HoverResult>("hover", { position });
-  }
-
-  completion(position: Position): Promise<{ items: CompletionItem[] }> {
-    return this.request<{ items: CompletionItem[] }>("completion", { position });
-  }
-
-  definition(position: Position): Promise<DefinitionLocation[]> {
-    return this.request<DefinitionLocation[]>("definition", { position });
+    await this.client.start();
   }
 
   dispose(): void {
-    this.worker.terminate();
-    for (const slot of this.pending.values()) {
-      slot.reject(new Error("LSP client disposed"));
-    }
-    this.pending.clear();
+    void this.client?.dispose();
+    this.worker?.terminate();
   }
 }

@@ -22,6 +22,23 @@ const loomLoaderShim = (): Plugin => ({
   },
 });
 
+// Rollup's bundle-time resolver doesn't apply @codingame/monaco-vscode-api's
+// `"./vscode/*" -> "./vscode/src/*.js"` exports-pattern, so deep imports like
+// `.../vscode/vs/base/browser/cssValue` fail to resolve.  Node's resolver
+// honours the pattern, so delegate every `@codingame/...` deep import to it.
+const codingameExportsResolve = (): Plugin => ({
+  name: "codingame-exports-resolve",
+  enforce: "pre",
+  resolveId(source) {
+    if (!source.startsWith("@codingame/")) return null;
+    try {
+      return fileURLToPath(import.meta.resolve(source));
+    } catch {
+      return null;
+    }
+  },
+});
+
 // The web app imports the Loom toolchain straight from `../src` — the
 // language services, IR lowering, and generators are pure TS with no
 // Node-only APIs (the only Node seams are in `src/cli/` and
@@ -41,7 +58,19 @@ export default defineConfig({
   // on GitHub Pages; relative URLs let the same artifact run from
   // a sub-path or the root of any host.
   base: "./",
-  plugins: [loomLoaderShim(), react()],
+  plugins: [codingameExportsResolve(), loomLoaderShim(), react()],
+  // The playground speaks real LSP via monaco-languageclient +
+  // @codingame/monaco-vscode-api.  That stack ships its own monaco build
+  // (`@codingame/monaco-vscode-editor-api`); alias the bare `monaco-editor`
+  // specifier onto it so the whole app shares ONE monaco instance — two
+  // copies would mean the editor and the language client target different
+  // module registries and silently no-op.
+  resolve: {
+    alias: {
+      "monaco-editor": "@codingame/monaco-vscode-editor-api",
+    },
+    dedupe: ["@codingame/monaco-vscode-editor-api", "vscode"],
+  },
   // `resolve.alias` previously claimed the whole `@loom/*` namespace
   // as a path alias to `../src`, but nothing in the repo ever imported
   // through it (`grep -rn 'from "@loom/'` is empty).  Removing it
@@ -78,7 +107,16 @@ export default defineConfig({
         // deploy because the vendor chunks stay cached.
         manualChunks(id) {
           if (!id.includes("/node_modules/")) return undefined;
-          if (id.includes("/node_modules/monaco-editor/")) return "monaco";
+          if (
+            id.includes("/node_modules/monaco-editor/") ||
+            id.includes("/node_modules/@codingame/monaco-vscode-") ||
+            id.includes("/node_modules/monaco-languageclient/") ||
+            id.includes("/node_modules/vscode-languageclient/") ||
+            id.includes("/node_modules/vscode-languageserver-protocol/") ||
+            id.includes("/node_modules/vscode-jsonrpc/")
+          ) {
+            return "monaco";
+          }
           // craft.js (page builder) — only reached via the lazy Builder tab.
           if (id.includes("/node_modules/@craftjs/")) return "craftjs";
           // LikeC4 ecosystem (model/react/builder + xyflow + the
@@ -127,8 +165,13 @@ export default defineConfig({
     plugins: () => [loomLoaderShim()],
   },
   optimizeDeps: {
-    // Monaco ships ESM that Vite scans fine; pre-bundle it to avoid a
-    // long cold start on first edit.
-    include: ["monaco-editor"],
+    // The vscode-api packages use `new URL(import.meta.url)` worker refs and
+    // top-level await that esbuild's dep pre-bundler mangles; exclude them so
+    // Vite serves them as real ESM (the documented monaco-vscode-api setup).
+    exclude: [
+      "@codingame/monaco-vscode-editor-api",
+      "monaco-languageclient",
+      "vscode",
+    ],
   },
 });
