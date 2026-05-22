@@ -344,6 +344,15 @@ Done:
   that `fitView`s to the matches. Pure `matchNodes` in `model.ts`; UI +
   in-place-opacity effect in `SystemBuilderPane.tsx`. Gated by
   `test/system-model.test.ts` + e2e.
+- **Traceability coverage overlay** — a **Coverage** toggle recolours the graph
+  into a tested / untested / unreferenced heatmap. The linked model is lowered +
+  enriched (`lowerModel` → `enrichLoomModel`) off the render path, and its
+  `traceability` index maps onto nodes via pure `coverageByNode` in `model.ts`: a
+  construct is *covered* if it (or, for an aggregate, an operation under it) is
+  referenced by a `solution`/`testCase` and has a covering testCase, *uncovered*
+  if referenced but untested, *none* if no artifact references it. Gated by
+  `test/system-model.test.ts` (incl. a real lower→enrich→coverage pass over
+  `sales-system.ddd`) + e2e.
 
 Open:
 
@@ -372,10 +381,9 @@ Planned — recommended order:
 3. ~~**Search / filter / focus**~~ — done (see Done above): search box + kind
    filter dim non-matches, with a Focus button. Neighbour-highlight on selection
    is the remaining nice-to-have.
-4. **Traceability overlay** — surface the derived requirement / solution /
-   testCase coverage + gaps (`.loom/` reports, `docs/traceability.md`) as a graph
-   heat-overlay: which aggregates lack tests / have unmet requirements. The
-   standout capability a text editor can't offer.
+4. ~~**Traceability overlay**~~ — done (see Done above): a Coverage toggle
+   recolours the graph into a tested / untested / unreferenced heatmap from the
+   enriched `traceability` index.
 5. **Apply-diff preview** — show the text diff a graph edit will splice before
    committing (round-trip trust + safety).
 6. **Wire-shape / DTO preview** on aggregate nodes — render the

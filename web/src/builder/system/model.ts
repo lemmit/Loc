@@ -1,4 +1,5 @@
 import { AstUtils, type AstNode } from "langium";
+import type { TraceabilityIR } from "../../../../src/ir/loom-ir.js";
 import type {
   Aggregate,
   Api,
@@ -201,6 +202,58 @@ export function nodeDiagnostics<D extends LineRanged>(graph: SystemGraph, diagno
       if (!best || s.size < best.size) best = { id: s.id, size: s.size };
     }
     if (best) (out.get(best.id) ?? out.set(best.id, []).get(best.id)!).push(d);
+  }
+  return out;
+}
+
+// --- traceability coverage overlay ----------------------------------------
+
+export type CoverageStatus = "covered" | "uncovered" | "none";
+
+// Graph node kind → the CodeRefKind used in traceability qualified names.
+// storage / ui aren't `Targetable`, so they never carry coverage.
+const NODE_KIND_TO_REF: Partial<Record<NodeKind, string>> = {
+  module: "module",
+  aggregate: "aggregate",
+  valueobject: "valueobject",
+  event: "event",
+  repository: "repository",
+  view: "view",
+  workflow: "workflow",
+  deployable: "deployable",
+  api: "api",
+};
+
+const lastSegment = (qn: string): string => qn.slice(qn.lastIndexOf(".") + 1);
+
+/** Per-node coverage status from the traceability index: `covered` if the
+ *  construct (or, for an aggregate, any operation under it) is referenced by a
+ *  `solution`/`testCase` *and* has ≥1 covering testCase; `uncovered` if
+ *  referenced but with no test; `none` if no artifact references it at all. */
+export function coverageByNode(
+  graph: SystemGraph,
+  trace: Pick<TraceabilityIR, "codeElements" | "testsByCodeElement">,
+): Map<string, CoverageStatus> {
+  const tested = (qn: string): boolean => (trace.testsByCodeElement[qn] ?? []).length > 0;
+  const out = new Map<string, CoverageStatus>();
+  for (const node of graph.nodes) {
+    const refKind = NODE_KIND_TO_REF[node.kind];
+    if (!refKind) {
+      out.set(node.id, "none");
+      continue;
+    }
+    const owned = Object.entries(trace.codeElements)
+      .filter(([qn, kind]) => {
+        if (kind === refKind && lastSegment(qn) === node.name) return true;
+        // An operation declared under this aggregate (`…Aggregate.op`).
+        if (kind === "operation" && node.kind === "aggregate") {
+          const parts = qn.split(".");
+          return parts.length >= 2 && parts[parts.length - 2] === node.name;
+        }
+        return false;
+      })
+      .map(([qn]) => qn);
+    out.set(node.id, owned.length === 0 ? "none" : owned.some(tested) ? "covered" : "uncovered");
   }
   return out;
 }
