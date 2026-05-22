@@ -70,6 +70,7 @@ import {
   findOperation,
   isAssignable,
   lookupRootMember,
+  intrinsicMatcherSig,
   makeEnv,
   paramType,
   resolveTypeRef,
@@ -88,6 +89,9 @@ export class DddValidator {
     // preconditions, derived bodies, function bodies, and guards
     // alike — anywhere the operator can appear.
     this.checkMatchesCalls(model, accept);
+    // Test-assertion matchers (`toBe`/`toHaveText`/…) are a known builtin
+    // surface — enforce their fixed argument arity.
+    this.checkMatcherArity(model, accept);
     // Match expressions: warn on a missing `else` arm.
     // Type-checking arm conditions is best-effort here (the lowering's
     // type system is the source of truth); structural checks run
@@ -1001,6 +1005,25 @@ export class DddValidator {
           "warning",
           `'match' expression has no 'else' arm — when no arm matches, the expression is undefined.  Add 'else => …' for exhaustive coverage.`,
           { node: m },
+        );
+      }
+    }
+  }
+
+  /** The compiler knows the intrinsic test-matcher surface, so it can
+   *  enforce it: each matcher takes a fixed number of positional args. */
+  private checkMatcherArity(model: Model, accept: ValidationAcceptor): void {
+    for (const node of AstUtils.streamAllContents(model)) {
+      if (node.$type !== "MemberAccess") continue;
+      const ma = node as MemberAccess;
+      if (!ma.call) continue;
+      const sig = intrinsicMatcherSig(ma.member);
+      if (!sig) continue;
+      if (ma.args.length !== sig.arity) {
+        accept(
+          "error",
+          `matcher '${ma.member}' takes ${sig.arity} argument(s), got ${ma.args.length}.`,
+          { node: ma, property: "args" },
         );
       }
     }
