@@ -1,11 +1,8 @@
 // Vite's `?raw` suffix gives us the file's text content as a string.
 // Adding more examples is just another `?raw` import + an entry in
 // the array below.
-import salesSource from "./sales.ddd?raw";
 import salesSystemSource from "./sales-system.ddd?raw";
-import bankingSource from "./banking.ddd?raw";
 import bankingSystemSource from "./banking-system.ddd?raw";
-import inventorySource from "./inventory.ddd?raw";
 import inventorySystemSource from "./inventory-system.ddd?raw";
 import provenanceSystemSource from "./provenance-system.ddd?raw";
 import pokemonWorldSource from "./pokemon-world.ddd?raw";
@@ -157,24 +154,6 @@ export const examples: LoomExample[] = [
     source: provenanceSystemSource,
     blurb:
       "`provenanced` field: each write to `order.total` is captured as a rule snapshot; the Hono backend records a runtime trace per write.",
-  },
-  {
-    id: "sales",
-    label: "Sales (single context)",
-    source: salesSource,
-    blurb: "Bare-context generator: Hono backend only — no Preview.",
-  },
-  {
-    id: "banking",
-    label: "Banking (single context)",
-    source: bankingSource,
-    blurb: "Bare-context generator: Hono backend only — no Preview.",
-  },
-  {
-    id: "inventory",
-    label: "Inventory (single context)",
-    source: inventorySource,
-    blurb: "Bare-context generator: Hono backend only — no Preview.",
   },
   {
     id: "acme",
