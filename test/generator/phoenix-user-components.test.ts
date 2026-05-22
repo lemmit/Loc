@@ -1,4 +1,4 @@
-// Phoenix user-component rendering (Stage 1): each `ui.component`
+// Phoenix user-component rendering: each `ui.component`
 // becomes a HEEx function component in a shared `Components.UiComponents`
 // module, and page bodies invoke them fully-qualified (no import wiring).
 // Display-only components for now — Form/Action inside a component need

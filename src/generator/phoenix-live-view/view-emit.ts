@@ -78,7 +78,7 @@ defmodule ${moduleName} do
   require Ash.Query
 
   @doc "Execute the view query and return results."
-  # E5 — currentUser threading.  Controllers pass
+  # currentUser threading.  Controllers pass
   # \`conn.assigns.current_user\` here; views that don't reference
   # currentUser ignore it (default = nil).
   def run(current_user \\\\ nil) do

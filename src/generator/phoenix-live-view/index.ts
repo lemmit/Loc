@@ -303,7 +303,7 @@ function renderDomainModule(
   contextModule: string,
   resources: string[],
 ): string {
-  // E2 — Ash 3.x: `define` calls live INSIDE the `resource ... do`
+  // Ash 3.x: `define` calls live INSIDE the `resource ... do`
   // block, NOT in a separate top-level `code_interface do` block
   // (that was Ash 2.x; removed in 3.0).
   const resourceBlocks: string[] = [];

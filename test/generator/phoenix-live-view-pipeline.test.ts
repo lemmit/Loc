@@ -528,7 +528,7 @@ void repoRoot;
 
 import { emitAuth } from "../../src/generator/phoenix-live-view/auth-emit.js";
 
-describe("E4 — JWT auth emission (auth-emit unit)", () => {
+describe("JWT auth emission (auth-emit unit)", () => {
   const baseDeployable: DeployableIR = {
     name: "phoenixApp",
     platform: "phoenixLiveView",
@@ -656,7 +656,7 @@ describe("E4 — JWT auth emission (auth-emit unit)", () => {
   });
 });
 
-describe("E4 — router wiring (orchestrator integration)", () => {
+describe("router wiring (orchestrator integration)", () => {
   const AUTH_FIXTURE = `system MiniAuth {
   module Sales {
     context Sales {
@@ -687,7 +687,7 @@ describe("E4 — router wiring (orchestrator integration)", () => {
 `;
 
   async function buildAuthFixture(): Promise<Model> {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-e4-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-jwt-auth-"));
     const file = path.join(dir, "auth.ddd");
     fs.writeFileSync(file, AUTH_FIXTURE);
     const services = createDddServices(NodeFileSystem);
@@ -700,7 +700,7 @@ describe("E4 — router wiring (orchestrator integration)", () => {
     const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
     if (errors.length > 0) {
       throw new Error(
-        `E4 fixture validation errors:\n` + errors.map((e) => `  ${e.message}`).join("\n"),
+        `JWT auth fixture validation errors:\n` + errors.map((e) => `  ${e.message}`).join("\n"),
       );
     }
     return doc.parseResult.value as Model;
@@ -1025,7 +1025,7 @@ describe("cross-platform OpenAPI parity (phoenix vs wire-spec.json)", () => {
 import { emitViews } from "../../src/generator/phoenix-live-view/view-emit.js";
 import type { ExprIR } from "../../src/ir/loom-ir.js";
 
-describe("E6 — full-form view bind projection (view-emit unit)", () => {
+describe("full-form view bind projection (view-emit unit)", () => {
   // Synthetic ViewIR for `view OrderSummary { orderId status lineCount from Order … bind … }`
   const orderSummaryCtx: BoundedContextIR = {
     name: "Sales",
@@ -1171,7 +1171,7 @@ describe("E6 — full-form view bind projection (view-emit unit)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// E2 — Ash 3.x `code_interface` shape inside `resource ... do` blocks.
+// Ash 3.x `code_interface` shape inside `resource ... do` blocks.
 //
 // `emitDomainModule` in domain-module.ts must emit `define` calls INSIDE
 // `resource <Module> do ... end` blocks (Ash 3.x), not in a separate
@@ -1180,7 +1180,7 @@ describe("E6 — full-form view bind projection (view-emit unit)", () => {
 
 import { emitDomainModule } from "../../src/generator/phoenix-live-view/domain-module.js";
 
-describe("E2 — Ash 3.x code_interface shape (domain-module unit)", () => {
+describe("Ash 3.x code_interface shape (domain-module unit)", () => {
   const salesCtxE2: BoundedContextIR = {
     name: "Sales",
     enums: [],
@@ -1276,7 +1276,7 @@ describe("E2 — Ash 3.x code_interface shape (domain-module unit)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// E3 — Ash.transaction/2 passes a domain list, not an Ecto Repo.
+// Ash.transaction/2 passes a domain list, not an Ecto Repo.
 //
 // `emitWorkflows` in workflow-emit.ts must produce
 //   Ash.transaction([<ContextModule>], fn -> ... end)
@@ -1286,7 +1286,7 @@ describe("E2 — Ash 3.x code_interface shape (domain-module unit)", () => {
 
 import { emitWorkflows } from "../../src/generator/phoenix-live-view/workflow-emit.js";
 
-describe("E3 — Ash.transaction/2 domain-list form (workflow-emit unit)", () => {
+describe("Ash.transaction/2 domain-list form (workflow-emit unit)", () => {
   const transactionalCtx: BoundedContextIR = {
     name: "Sales",
     enums: [],

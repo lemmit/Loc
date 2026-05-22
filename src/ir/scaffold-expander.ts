@@ -21,7 +21,7 @@
 //   - all other origin kinds return `null` so the legacy path
 //     stays in use.
 //
-// Spillover (A10+):
+// Spillover:
 //   - `aggregate-detail`   — needs operations / modals / KeyValueRow
 //   - `workflow-form`      — needs workflow IR introspection
 //   - `view-list`          — needs view IR introspection
