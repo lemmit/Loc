@@ -113,6 +113,46 @@ function matchesName(el: Element, name: string, exact: boolean): boolean {
   return exact ? acc === name : acc.includes(name);
 }
 
+/** Collapse runs of whitespace and trim — Playwright normalises text and
+ *  accessible names this way before matching. */
+function normText(s: string | null | undefined): string {
+  return (s ?? "").replace(/\s+/g, " ").trim();
+}
+
+function textMatches(
+  value: string | null | undefined,
+  query: string,
+  exact: boolean,
+): boolean {
+  const v = normText(value);
+  return exact ? v === query : v.includes(query);
+}
+
+/** Set a form-control property through its native prototype setter (which
+ *  React overrides to track value), then fire input/change so controlled
+ *  components react — the same trick `fill` uses, generalised to `value`
+ *  and `checked`. */
+function setNativeProp(el: Element, prop: "value" | "checked", value: unknown): void {
+  const proto = Object.getPrototypeOf(el) as object;
+  const setter = Object.getOwnPropertyDescriptor(proto, prop)?.set;
+  if (setter) setter.call(el, value);
+  else (el as unknown as Record<string, unknown>)[prop] = value;
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+  el.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+/** Fire a bubbling, cancelable UIEvent of the given constructor/type if the
+ *  environment provides the constructor (happy-dom lacks some). */
+function fireEvent(
+  el: Element,
+  Ctor: (new (type: string, init: EventInit) => Event) | undefined,
+  type: string,
+): void {
+  if (typeof Ctor === "function") {
+    el.dispatchEvent(new Ctor(type, { bubbles: true, cancelable: true }));
+  }
+}
+
 function isVisible(el: Element): boolean {
   const he = el as HTMLElement;
   if (he.hidden) return false;
@@ -295,6 +335,84 @@ export class DomLocator {
     return this.add((roots) => roots.slice(0, 1), "first()");
   }
 
+  last(): DomLocator {
+    return this.add((roots) => roots.slice(-1), "last()");
+  }
+
+  nth(index: number): DomLocator {
+    return this.add(
+      (roots) => {
+        const i = index < 0 ? roots.length + index : index;
+        const el = roots[i];
+        return el ? [el] : [];
+      },
+      `nth(${index})`,
+    );
+  }
+
+  /** Match by visible text — the innermost element whose normalised text
+   *  matches (so a button's text resolves the button, not its ancestors). */
+  getByText(text: string, opts?: { exact?: boolean }): DomLocator {
+    const exact = opts?.exact ?? false;
+    return this.add((roots) => {
+      const all = dedupe(
+        roots.flatMap((r) => Array.from(r.querySelectorAll("*"))),
+      );
+      const hits = all.filter((el) => textMatches(el.textContent, text, exact));
+      // Keep only the innermost matches (drop a hit that contains another hit).
+      return hits.filter((el) => !hits.some((o) => o !== el && el.contains(o)));
+    }, `getByText(${JSON.stringify(text)}${exact ? ", { exact: true }" : ""})`);
+  }
+
+  /** Match a form control by its associated `<label>` text (`for=` or wrapping). */
+  getByLabel(text: string, opts?: { exact?: boolean }): DomLocator {
+    const exact = opts?.exact ?? false;
+    return this.add((roots) => {
+      const out: Element[] = [];
+      for (const root of roots) {
+        for (const lbl of Array.from(root.querySelectorAll("label"))) {
+          if (!textMatches(lbl.textContent, text, exact)) continue;
+          const forId = lbl.getAttribute("for");
+          const ctrl = forId
+            ? lbl.ownerDocument?.getElementById(forId)
+            : lbl.querySelector("input, select, textarea");
+          if (ctrl) out.push(ctrl);
+        }
+      }
+      return dedupe(out);
+    }, `getByLabel(${JSON.stringify(text)}${exact ? ", { exact: true }" : ""})`);
+  }
+
+  getByPlaceholder(text: string, opts?: { exact?: boolean }): DomLocator {
+    return this.byAttr("placeholder", text, opts, "getByPlaceholder");
+  }
+
+  getByTitle(text: string, opts?: { exact?: boolean }): DomLocator {
+    return this.byAttr("title", text, opts, "getByTitle");
+  }
+
+  getByAltText(text: string, opts?: { exact?: boolean }): DomLocator {
+    return this.byAttr("alt", text, opts, "getByAltText");
+  }
+
+  /** Shared resolver for the attribute-text getters. */
+  private byAttr(
+    attr: string,
+    text: string,
+    opts: { exact?: boolean } | undefined,
+    label: string,
+  ): DomLocator {
+    const exact = opts?.exact ?? false;
+    const sel = `[${attr}]`;
+    return this.add(
+      (roots) =>
+        dedupe(
+          roots.flatMap((r) => Array.from(r.querySelectorAll(sel))),
+        ).filter((el) => textMatches(el.getAttribute(attr), text, exact)),
+      `${label}(${JSON.stringify(text)}${exact ? ", { exact: true }" : ""})`,
+    );
+  }
+
   /** Resolve to the single matching element, polling until the requested
    *  actionability gates hold.  Strict like real Playwright: throws when
    *  the locator matches more than one element (counting all matches,
@@ -333,20 +451,78 @@ export class DomLocator {
   }
 
   async fill(value: string, opts?: { timeout?: number }): Promise<void> {
+    const el = await this.resolve({ visible: true, editable: true }, opts?.timeout);
+    setNativeProp(el, "value", value);
+  }
+
+  /** Playwright's `clear()` = `fill("")`. */
+  async clear(opts?: { timeout?: number }): Promise<void> {
+    await this.fill("", opts);
+  }
+
+  async hover(opts?: { timeout?: number }): Promise<void> {
+    const el = await this.resolve({ visible: true }, opts?.timeout);
+    const win = el.ownerDocument?.defaultView;
+    const P = win?.PointerEvent as
+      | (new (t: string, i: EventInit) => Event)
+      | undefined;
+    const M = win?.MouseEvent as
+      | (new (t: string, i: EventInit) => Event)
+      | undefined;
+    fireEvent(el, P, "pointerover");
+    fireEvent(el, M, "mouseover");
+    fireEvent(el, P, "pointermove");
+    fireEvent(el, M, "mousemove");
+  }
+
+  async dblclick(opts?: { timeout?: number }): Promise<void> {
+    const el = await this.resolve({ visible: true, enabled: true }, opts?.timeout);
+    dispatchClick(el);
+    dispatchClick(el);
+    const M = el.ownerDocument?.defaultView?.MouseEvent as
+      | (new (t: string, i: EventInit) => Event)
+      | undefined;
+    fireEvent(el, M, "dblclick");
+  }
+
+  async press(key: string, opts?: { timeout?: number }): Promise<void> {
+    const el = await this.resolve({ visible: true }, opts?.timeout);
+    el.focus?.();
+    const K = el.ownerDocument?.defaultView?.KeyboardEvent;
+    if (typeof K === "function") {
+      for (const type of ["keydown", "keypress", "keyup"]) {
+        el.dispatchEvent(new K(type, { key, bubbles: true, cancelable: true }));
+      }
+    }
+  }
+
+  async check(opts?: { timeout?: number }): Promise<void> {
     const el = (await this.resolve(
-      { visible: true, editable: true },
+      { visible: true, enabled: true },
       opts?.timeout,
-    )) as HTMLInputElement | HTMLTextAreaElement;
-    // React tracks the value via an overridden setter; setting `.value`
-    // directly bypasses its change detection.  Call the native setter
-    // on the prototype, then fire input/change so controlled components
-    // update.
-    const proto = Object.getPrototypeOf(el) as object;
-    const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
-    if (setter) setter.call(el, value);
-    else el.value = value;
-    el.dispatchEvent(new Event("input", { bubbles: true }));
-    el.dispatchEvent(new Event("change", { bubbles: true }));
+    )) as HTMLInputElement;
+    if (!el.checked) setNativeProp(el, "checked", true);
+  }
+
+  async uncheck(opts?: { timeout?: number }): Promise<void> {
+    const el = (await this.resolve(
+      { visible: true, enabled: true },
+      opts?.timeout,
+    )) as HTMLInputElement;
+    if (el.checked) setNativeProp(el, "checked", false);
+  }
+
+  async selectOption(value: string, opts?: { timeout?: number }): Promise<void> {
+    const el = await this.resolve({ visible: true, enabled: true }, opts?.timeout);
+    setNativeProp(el, "value", value);
+  }
+
+  async focus(opts?: { timeout?: number }): Promise<void> {
+    (await this.resolve({ visible: true }, opts?.timeout)).focus?.();
+  }
+
+  async blur(opts?: { timeout?: number }): Promise<void> {
+    (await this.resolve({}, opts?.timeout)).blur?.();
   }
 
   async innerText(opts?: { timeout?: number }): Promise<string> {
@@ -414,6 +590,26 @@ export class DomPage {
 
   locator(selector: string): DomLocator {
     return this.root().locator(selector);
+  }
+
+  getByText(text: string, opts?: { exact?: boolean }): DomLocator {
+    return this.root().getByText(text, opts);
+  }
+
+  getByLabel(text: string, opts?: { exact?: boolean }): DomLocator {
+    return this.root().getByLabel(text, opts);
+  }
+
+  getByPlaceholder(text: string, opts?: { exact?: boolean }): DomLocator {
+    return this.root().getByPlaceholder(text, opts);
+  }
+
+  getByTitle(text: string, opts?: { exact?: boolean }): DomLocator {
+    return this.root().getByTitle(text, opts);
+  }
+
+  getByAltText(text: string, opts?: { exact?: boolean }): DomLocator {
+    return this.root().getByAltText(text, opts);
   }
 
   url(): string {
