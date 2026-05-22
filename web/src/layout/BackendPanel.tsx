@@ -7,10 +7,11 @@ import {
   Select,
   Stack,
   Text,
-  Textarea,
   TextInput,
 } from "@mantine/core";
 import type { LayoutCtx } from "./ctx";
+import { JsonBodyEditor } from "../backend/JsonBodyEditor";
+import { CUSTOM_ENDPOINT, groupEndpointsByTag } from "../backend/openapi";
 
 interface Props {
   ctx: LayoutCtx;
@@ -98,12 +99,35 @@ export function BackendBody({ ctx }: Props): JSX.Element {
     dispatchSlot,
     honoBundle,
     runDispatch,
+    apiEndpoints,
+    selectedOpId,
+    selectedEndpoint,
+    runSelectEndpoint,
+    pathParamValues,
+    setPathParam,
+    queryParamValues,
+    setQueryParam,
+    runGenerateExample,
   } = ctx;
 
   // iOS Safari auto-zooms on input focus when the input's font is
   // < 16 px.  Bumping mobile to 16 px keeps zoom away without
   // forcing the desktop UI to look gigantic.
   const mobileInputStyles = isDesktop ? undefined : { input: { fontSize: 16 } };
+
+  // Grouped picker data — a "Custom request" escape hatch first, then
+  // every discovered endpoint grouped by aggregate.  Empty when the spec
+  // couldn't be loaded, in which case the picker is hidden entirely.
+  const endpointData =
+    apiEndpoints.length > 0
+      ? [
+          { group: "Manual", items: [{ value: CUSTOM_ENDPOINT, label: "Custom request" }] },
+          ...groupEndpointsByTag(apiEndpoints),
+        ]
+      : [];
+
+  const showBody =
+    reqMethod === "POST" || reqMethod === "PUT" || reqMethod === "PATCH";
 
   return (
     <Box style={{ flex: 1, minHeight: 0, overflow: "auto" }} p="xs">
@@ -114,6 +138,20 @@ export function BackendBody({ ctx }: Props): JSX.Element {
       )}
       {ddl ? (
         <Stack gap={6}>
+          {endpointData.length > 0 && (
+            <Select
+              size="xs"
+              searchable
+              value={selectedOpId}
+              onChange={(v) => v && runSelectEndpoint(v)}
+              data={endpointData}
+              placeholder="Pick an endpoint…"
+              nothingFoundMessage="No match"
+              w="100%"
+              styles={mobileInputStyles}
+              data-testid="req-endpoint"
+            />
+          )}
           <Group gap={6} wrap="wrap">
             <Select
               size="xs"
@@ -144,23 +182,61 @@ export function BackendBody({ ctx }: Props): JSX.Element {
               Send
             </Button>
           </Group>
-          {(reqMethod === "POST" || reqMethod === "PUT" || reqMethod === "PATCH") && (
-            <Textarea
-              size="xs"
-              value={reqBody}
-              onChange={(e) => setReqBody(e.currentTarget.value)}
-              placeholder='{"sku": "W-1", "price": {"amount": 5, "currency": "USD"}}'
-              autosize
-              minRows={2}
-              maxRows={isDesktop ? 4 : 6}
-              styles={{
-                input: {
-                  fontFamily: "var(--mantine-font-family-monospace)",
-                  fontSize: isDesktop ? 11 : 16,
-                },
-              }}
-              data-testid="req-body"
-            />
+          {selectedEndpoint && selectedEndpoint.pathParams.length > 0 && (
+            <Group gap={6} wrap="wrap">
+              {selectedEndpoint.pathParams.map((name) => (
+                <TextInput
+                  key={name}
+                  size="xs"
+                  label={name}
+                  value={pathParamValues[name] ?? ""}
+                  onChange={(e) => setPathParam(name, e.currentTarget.value)}
+                  placeholder={name}
+                  style={{ flex: isDesktop ? 1 : "1 1 100%" }}
+                  styles={mobileInputStyles}
+                  data-testid={`req-pathparam-${name}`}
+                />
+              ))}
+            </Group>
+          )}
+          {selectedEndpoint && selectedEndpoint.queryParams.length > 0 && (
+            <Group gap={6} wrap="wrap">
+              {selectedEndpoint.queryParams.map((q) => (
+                <TextInput
+                  key={q.name}
+                  size="xs"
+                  label={q.required ? `${q.name} *` : q.name}
+                  value={queryParamValues[q.name] ?? ""}
+                  onChange={(e) => setQueryParam(q.name, e.currentTarget.value)}
+                  placeholder={q.name}
+                  style={{ flex: isDesktop ? 1 : "1 1 100%" }}
+                  styles={mobileInputStyles}
+                  data-testid={`req-queryparam-${q.name}`}
+                />
+              ))}
+            </Group>
+          )}
+          {showBody && (
+            <Stack gap={4}>
+              <Group justify="space-between" align="center">
+                <Text size="xs" c="dimmed">Request body</Text>
+                {selectedEndpoint?.requestSchema && (
+                  <Button
+                    size="compact-xs"
+                    variant="subtle"
+                    onClick={runGenerateExample}
+                    data-testid="btn-gen-example"
+                  >
+                    Generate example
+                  </Button>
+                )}
+              </Group>
+              <JsonBodyEditor
+                value={reqBody}
+                onChange={setReqBody}
+                isDesktop={isDesktop}
+              />
+            </Stack>
           )}
           {dispatchSlot && (
             dispatchSlot.ok ? (

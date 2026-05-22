@@ -57,12 +57,25 @@ test("editor → generate → bundle → boot → dispatch", async ({ page }) =>
     await expect(page.getByTestId("resp-body")).toHaveText(/^\[\]$/);
   });
 
+  await test.step("Endpoint picker discovers the OpenAPI contract", async () => {
+    // The picker is populated from the booted backend's /openapi.json.
+    // Selecting the create operation flips method → POST and reveals
+    // the body editor with a Generate-example affordance.
+    await page.getByTestId("req-endpoint").click();
+    await page.getByRole("option", { name: "POST /products", exact: true }).click();
+    await expect(page.getByTestId("req-method")).toContainText("POST");
+    await expect(page.getByTestId("btn-gen-example")).toBeVisible();
+  });
+
   await test.step("POST /products → 201", async () => {
-    await page.getByTestId("req-method").click();
-    await page.getByRole("option", { name: "POST" }).click();
+    // req-body is now a Monaco editor (a div, not a textarea), so we
+    // set its content via select-all + insertText — keyboard.type would
+    // trip Monaco's auto-closing brackets/quotes and double them up.
     const body = page.getByTestId("req-body");
     await expect(body).toBeVisible();
-    await body.fill(
+    await body.click();
+    await page.keyboard.press("ControlOrMeta+A");
+    await page.keyboard.insertText(
       JSON.stringify({ sku: "PW-1", price: { amount: 9.99, currency: "USD" } }),
     );
     await page.getByTestId("btn-send").click();
