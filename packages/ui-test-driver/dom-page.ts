@@ -103,15 +103,23 @@ export class DomLocator {
     private readonly rootProvider: () => Element[],
     private readonly steps: Step[],
     private readonly timeout: number,
+    private readonly descr: string[] = [],
   ) {}
 
-  private add(step: Step): DomLocator {
+  private add(step: Step, fragment: string): DomLocator {
     return new DomLocator(
       this.doc,
       this.rootProvider,
       [...this.steps, step],
       this.timeout,
+      [...this.descr, fragment],
     );
+  }
+
+  /** Human-readable rendering of this locator's chain, for error
+   *  messages (e.g. `getByTestId("save") » getByRole("button")`). */
+  describe(): string {
+    return this.descr.length ? this.descr.join(" » ") : "<page>";
   }
 
   /** Apply this locator's steps starting from arbitrary roots — used
@@ -130,14 +138,17 @@ export class DomLocator {
 
   getByTestId(id: string): DomLocator {
     const sel = `[data-testid=${JSON.stringify(id)}]`;
-    return this.add((roots) =>
-      dedupe(roots.flatMap((r) => Array.from(r.querySelectorAll(sel)))),
+    return this.add(
+      (roots) => dedupe(roots.flatMap((r) => Array.from(r.querySelectorAll(sel)))),
+      `getByTestId(${JSON.stringify(id)})`,
     );
   }
 
   locator(selector: string): DomLocator {
-    return this.add((roots) =>
-      dedupe(roots.flatMap((r) => Array.from(r.querySelectorAll(selector)))),
+    return this.add(
+      (roots) =>
+        dedupe(roots.flatMap((r) => Array.from(r.querySelectorAll(selector)))),
+      `locator(${JSON.stringify(selector)})`,
     );
   }
 
@@ -146,24 +157,29 @@ export class DomLocator {
     opts?: { name?: string; exact?: boolean },
   ): DomLocator {
     const sel = `[role=${JSON.stringify(role)}]`;
+    const nameDescr =
+      opts?.name == null
+        ? ""
+        : `, { name: ${JSON.stringify(opts.name)}${opts.exact ? ", exact: true" : ""} }`;
     return this.add((roots) => {
       const els = dedupe(
         roots.flatMap((r) => Array.from(r.querySelectorAll(sel))),
       );
       if (opts?.name == null) return els;
       return els.filter((el) => matchesName(el, opts.name!, opts.exact ?? false));
-    });
+    }, `getByRole(${JSON.stringify(role)}${nameDescr})`);
   }
 
   filter(opts: { has: DomLocator }): DomLocator {
     const has = opts.has;
-    return this.add((roots) =>
-      roots.filter((el) => has.matchesFrom([el]).length > 0),
+    return this.add(
+      (roots) => roots.filter((el) => has.matchesFrom([el]).length > 0),
+      `filter({ has: ${has.describe()} })`,
     );
   }
 
   first(): DomLocator {
-    return this.add((roots) => roots.slice(0, 1));
+    return this.add((roots) => roots.slice(0, 1), "first()");
   }
 
   /** Resolve to the single matching element, polling until the requested
@@ -178,7 +194,7 @@ export class DomLocator {
       const els = this.matchesNow();
       if (els.length > 1) {
         throw new Error(
-          `locator: resolved to ${els.length} elements; use .first() or a more specific locator`,
+          `locator(${this.describe()}): resolved to ${els.length} elements; use .first() or a more specific locator`,
         );
       }
       const el = els[0];
@@ -188,7 +204,9 @@ export class DomLocator {
         lastReason = reason;
       }
       if (Date.now() >= deadline) {
-        throw new Error(`locator: ${lastReason} within ${this.timeout}ms`);
+        throw new Error(
+          `locator(${this.describe()}): ${lastReason} within ${this.timeout}ms`,
+        );
       }
       await sleep(POLL_MS);
     }
@@ -231,7 +249,9 @@ export class DomLocator {
       for (;;) {
         if (!this.matchesNow().some(isVisible)) return;
         if (Date.now() >= deadline) {
-          throw new Error(`locator: still visible after ${this.timeout}ms`);
+          throw new Error(
+            `locator(${this.describe()}): still visible after ${this.timeout}ms`,
+          );
         }
         await sleep(POLL_MS);
       }

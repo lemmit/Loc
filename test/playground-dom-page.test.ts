@@ -198,4 +198,30 @@ describe("DomPage / DomLocator", () => {
     expect(page.url()).toContain("/loc/playground/sandbox/orders/new");
     await page.waitForURL(/\/orders\/new$/);
   });
+
+  it("failure messages name the locator that failed", async () => {
+    setBody(`<div></div>`);
+    const page = new DomPage(document, { timeout: 100 });
+    // Missing element → the error names the full chain, not a bare "locator:".
+    await expect(
+      page
+        .getByTestId("orders-table")
+        .locator("tbody tr")
+        .first()
+        .click(),
+    ).rejects.toThrow(
+      /locator\(getByTestId\("orders-table"\) » locator\("tbody tr"\) » first\(\)\)/,
+    );
+  });
+
+  it("strict-mode error names the ambiguous locator", async () => {
+    setBody(`
+      <button data-testid="dup">a</button>
+      <button data-testid="dup">b</button>
+    `);
+    const page = new DomPage(document, { timeout: 100 });
+    await expect(page.getByTestId("dup").click()).rejects.toThrow(
+      /locator\(getByTestId\("dup"\)\): resolved to 2 elements/,
+    );
+  });
 });
