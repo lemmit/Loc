@@ -11,7 +11,7 @@ import type {
   ValueObjectIR,
   WireField,
 } from "../../ir/loom-ir.js";
-import { pascal, plural, snake } from "../../util/naming.js";
+import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { ApiRoute } from "./api-emit.js";
 
 // ---------------------------------------------------------------------------
@@ -22,7 +22,7 @@ import type { ApiRoute } from "./api-emit.js";
 //   lib/<app>_web/api/schemas/<name>.ex      — per request/response schema module
 //   lib/<app>_web/controllers/openapi_controller.ex — JSON spec controller
 //
-// Schema naming convention (mirrors wire-spec.json for D3 parity test):
+// Schema naming convention (mirrors wire-spec.json for the parity test):
 //   Aggregate response:        <Agg>Response
 //   Aggregate list response:   <Agg>ListResponse
 //   Entity part response:      <Part>Response
@@ -83,7 +83,7 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
   // Use the first serves entry as the spec name.
   const apiName = deployable.serves[0]!;
   const apiSnake = snake(apiName);
-  const apiPascal = pascal(apiName);
+  const apiPascal = upperFirst(apiName);
 
   const specPath = `lib/${appName}_web/api/${apiSnake}_spec.ex`;
   files.set(
@@ -199,7 +199,7 @@ function renderApiSpec(
   // Workflow paths: POST /workflows/<slug>
   for (const { wf } of allWorkflows) {
     const slug = snake(wf.name);
-    const reqMod = `${schemasModule}.${pascal(wf.name)}Request`;
+    const reqMod = `${schemasModule}.${upperFirst(wf.name)}Request`;
     pathEntries.push(`      "/workflows/${slug}" => %OpenApiSpex.PathItem{
         post: %OpenApiSpex.Operation{
           summary: "Run ${wf.name} workflow",
@@ -224,7 +224,7 @@ function renderApiSpec(
   // View paths: GET /views/<slug>
   for (const { view } of allViews) {
     const slug = snake(view.name);
-    const respMod = `${schemasModule}.${pascal(view.name)}Response`;
+    const respMod = `${schemasModule}.${upperFirst(view.name)}Response`;
     pathEntries.push(`      "/views/${slug}" => %OpenApiSpex.PathItem{
         get: %OpenApiSpex.Operation{
           summary: "Query ${view.name} view",
@@ -495,7 +495,7 @@ function renderOperationRequestSchema(
   op: import("../../ir/loom-ir.js").OperationIR,
   webModule: string,
 ): string {
-  const schemaName = `${pascal(op.name)}Request`;
+  const schemaName = `${upperFirst(op.name)}Request`;
   const moduleName = `${webModule}.Api.Schemas.${schemaName}`;
   const fields: Array<{ name: string; type: TypeIR; optional: boolean }> = op.params.map(
     (p: ParamIR) => ({
@@ -512,7 +512,7 @@ function renderWorkflowRequestSchema(
   wf: import("../../ir/loom-ir.js").WorkflowIR,
   webModule: string,
 ): string {
-  const schemaName = `${pascal(wf.name)}Request`;
+  const schemaName = `${upperFirst(wf.name)}Request`;
   const moduleName = `${webModule}.Api.Schemas.${schemaName}`;
   const fields: Array<{ name: string; type: TypeIR; optional: boolean }> = wf.params.map(
     (p: ParamIR) => ({
@@ -529,7 +529,7 @@ function renderViewResponseSchema(
   ctx: BoundedContextIR,
   webModule: string,
 ): string {
-  const schemaName = `${pascal(view.name)}Response`;
+  const schemaName = `${upperFirst(view.name)}Response`;
   const moduleName = `${webModule}.Api.Schemas.${schemaName}`;
 
   let fields: Array<{ name: string; type: TypeIR; optional: boolean }>;
@@ -588,7 +588,7 @@ end
 // OpenAPI controller renderer
 // ---------------------------------------------------------------------------
 
-function renderOpenapiController(appModule: string, webModule: string, apiPascal: string): string {
+function renderOpenapiController(_appModule: string, webModule: string, apiPascal: string): string {
   const specModule = `${webModule}.Api.${apiPascal}Spec`;
   return `# Auto-generated.
 defmodule ${webModule}.OpenapiController do

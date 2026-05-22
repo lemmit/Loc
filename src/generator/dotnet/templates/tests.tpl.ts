@@ -1,5 +1,5 @@
 import type { AggregateIR, BoundedContextIR, TestIR, TestStmtIR } from "../../../ir/loom-ir.js";
-import { pascal } from "../../../util/naming.js";
+import { upperFirst } from "../../../util/naming.js";
 import { renderCsExpr } from "../render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -26,13 +26,13 @@ export function renderTestsFile(
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push("using System;");
   lines.push("using Xunit;");
-  lines.push(`using ${ns}.Domain.${pascal(plural(agg.name))};`);
+  lines.push(`using ${ns}.Domain.${upperFirst(plural(agg.name))};`);
   lines.push(`using ${ns}.Domain.Common;`);
   lines.push(`using ${ns}.Domain.ValueObjects;`);
   lines.push(`using ${ns}.Domain.Enums;`);
   lines.push(`using ${ns}.Domain.Ids;`);
   lines.push("");
-  lines.push(`namespace ${ns}.Tests.${pascal(plural(agg.name))};`);
+  lines.push(`namespace ${ns}.Tests.${upperFirst(plural(agg.name))};`);
   lines.push("");
   lines.push(`public sealed class ${agg.name}Tests`);
   lines.push("{");
@@ -51,7 +51,7 @@ function plural(s: string): string {
 }
 
 function renderTest(t: TestIR): string[] {
-  const methodName = pascal(t.name.replace(/[^A-Za-z0-9]+/g, "_")) || "Test";
+  const methodName = upperFirst(t.name.replace(/[^A-Za-z0-9]+/g, "_")) || "Test";
   const out: string[] = [];
   out.push(`[Fact(DisplayName = ${JSON.stringify(t.name)})]`);
   out.push(`public void ${methodName}()`);
@@ -79,7 +79,7 @@ function renderTestStmt(s: TestStmtIR): string {
   }
   if (s.kind === "call") {
     const args = s.args.map((a) => renderCsExpr(a)).join(", ");
-    return `    ${pascal(s.name)}(${args});`;
+    return `    ${upperFirst(s.name)}(${args});`;
   }
   if (s.kind === "expression") {
     return `    ${renderCsExpr(s.expr)};`;

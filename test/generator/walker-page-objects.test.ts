@@ -1,4 +1,4 @@
-// Slice A5 — walker-side Playwright page-object emitter.
+// walker-side Playwright page-object emitter.
 //
 // Parallel to `page-objects-builder.ts` (scaffold archetypes get
 // `<Agg>ListPage` / `<Agg>NewPage` / `<Agg>DetailPage`).  This
@@ -6,7 +6,7 @@
 // class per page, exposing a typed `Locator` getter per static
 // `testid:` literal.
 //
-// What this slice pins:
+// What this test pins:
 //   1. Static routes ("/welcome") emit `static readonly url = …`
 //      + a parameterless `goto()` method.
 //   2. Parameterised routes ("/orders/:orderId") emit
@@ -22,21 +22,12 @@
 //      `e2e/pages/<page-snake>.ts`; scaffold output at
 //      `e2e/pages/<aggregate-camel>.ts`.  No accidental overlap.
 
-import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
-import { createDddServices } from "../../src/language/ddd-module.js";
-import type { Model } from "../../src/language/generated/ast.js";
-import { generateSystems } from "../../src/system/index.js";
+import { generateSystemFiles } from "../_helpers/index.js";
 
-async function buildAndGenerate(src: string): Promise<Map<string, string>> {
-  const services = createDddServices(NodeFileSystem);
-  const { parseHelper } = await import("langium/test");
-  const helper = parseHelper(services.Ddd);
-  const doc = await helper(src, { validation: true });
-  return generateSystems(doc.parseResult.value as Model).files;
-}
+const buildAndGenerate = generateSystemFiles;
 
-describe("Slice A5 — walker-side e2e page-object emitter", () => {
+describe("walker-side e2e page-object emitter", () => {
   it("emits e2e/pages/<page-snake>.ts for a walker-eligible explicit page", async () => {
     const files = await buildAndGenerate(`
       system S {

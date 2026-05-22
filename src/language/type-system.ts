@@ -7,18 +7,14 @@ import type {
   EntityPart,
   EnumDecl,
   Expression,
-  FindDecl,
   FunctionDecl,
   Lambda,
   MemberAccess,
   Operation,
   Parameter,
   Repository,
-  Statement,
   TypeRef,
   ValueObject,
-  View,
-  Workflow,
 } from "./generated/ast.js";
 import {
   isAggregate,
@@ -45,7 +41,6 @@ import {
   isNowExpr,
   isNullLit,
   isOperation,
-  isParameter,
   isParenExpr,
   isPrimitiveType,
   isProperty,
@@ -158,7 +153,7 @@ export function isAssignable(value: DddType, target: DddType): boolean {
 // ---------------------------------------------------------------------------
 
 export function resolveTypeRef(ref: TypeRef | undefined): DddType {
-  if (!ref || !ref.base) return T.unknown;
+  if (!ref?.base) return T.unknown;
   let resolved = resolveBase(ref.base);
   if (ref.array) resolved = T.array(resolved);
   if (ref.optional) resolved = T.opt(resolved);
@@ -288,7 +283,7 @@ function typeOfMemberAccess(expr: import("./generated/ast.js").MemberAccess, env
   if (recvType.kind === "array") {
     if (expr.call) {
       for (const arg of expr.args) {
-        // Slice 1.5: call args wrap an Expression in a `CallArg`
+        // Call args wrap an Expression in a `CallArg`
         // node carrying an optional `name:` prefix.  Look at the
         // wrapped value, not the wrapper itself, when checking for
         // Lambda shape.
@@ -314,7 +309,7 @@ function typeOfMemberAccess(expr: import("./generated/ast.js").MemberAccess, env
   }
   if (recvType.kind === "primitive" && recvType.name === "string") {
     if (memberName === "length") return T.prim("int");
-    // `string.matches(regex)` — slice 21.C operator.  Returns bool;
+    // `string.matches(regex)` operator.  Returns bool;
     // argument is a string literal (the validator enforces that
     // separately so a non-literal arg becomes a clear diagnostic
     // rather than `unknown`).
@@ -378,8 +373,8 @@ function collectionOpType(
       return T.prim("int");
     case "sum": {
       // sum returns the lambda's body type when one is given;
-      // otherwise the element type itself.  Slice 1.5: args are
-      // CallArg wrappers — peek through `.value`.
+      // otherwise the element type itself.  Args are CallArg
+      // wrappers — peek through `.value`.
       const callArg = expr.args[0];
       const lambdaArg = callArg?.value;
       if (lambdaArg && isLambda(lambdaArg) && lambdaArg.body) {

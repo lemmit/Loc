@@ -1,4 +1,4 @@
-// Slice 11.6 — three more v0 layout primitives in the body
+// three more v0 layout primitives in the body
 // walker: Stat (label + value headline card), Badge, Divider.
 //
 // Stat composes two stacked Mantine Texts (dimmed label + bold
@@ -6,21 +6,12 @@
 // and Divider map to their Mantine namesakes.  Divider takes an
 // optional `label:` named arg.
 
-import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
-import { createDddServices } from "../../src/language/ddd-module.js";
-import type { Model } from "../../src/language/generated/ast.js";
-import { generateSystems } from "../../src/system/index.js";
+import { generateSystemFiles } from "../_helpers/index.js";
 
-async function buildAndGenerate(src: string): Promise<Map<string, string>> {
-  const services = createDddServices(NodeFileSystem);
-  const { parseHelper } = await import("langium/test");
-  const helper = parseHelper(services.Ddd);
-  const doc = await helper(src, { validation: true });
-  return generateSystems(doc.parseResult.value as Model).files;
-}
+const buildAndGenerate = generateSystemFiles;
 
-describe("Slice 11.6 — Stat / Badge / Divider in walker stdlib", () => {
+describe("Stat / Badge / Divider in walker stdlib", () => {
   it("Stat(label, value) emits a two-line stack with dimmed label + bold value", async () => {
     const files = await buildAndGenerate(`
       system S {

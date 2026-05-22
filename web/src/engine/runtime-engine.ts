@@ -23,10 +23,12 @@ import type { BundleResult } from "../bundle/protocol.js";
 import type {
   BootResult,
   DispatchResult,
+  QueryResult,
   SerializedRequest,
   WipeResult,
 } from "../runtime/protocol.js";
 import type { DependencySet, RegistryResolver } from "./dependencies.js";
+import type { LogLine } from "../util/log-line.js";
 
 /** Static description of what an engine can do.  Lets the UI and the
  *  dependency layer adapt (e.g. relax the package allow-policy when
@@ -96,6 +98,11 @@ export interface RuntimeEngineOptions {
    *  private-package support ignore it and reject `custom-private`
    *  specs with a clear diagnostic. */
   registryResolver?: RegistryResolver;
+  /** Fired with `console.*` / stack lines captured in the backend
+   *  runtime while serving a boot / dispatch — drives the "Backend"
+   *  log stream in the Output panel.  Engines without a hosted backend
+   *  ignore it. */
+  onLog?: (lines: LogLine[]) => void;
 }
 
 export interface RuntimeEngine extends RuntimeDispatcher {
@@ -107,11 +114,21 @@ export interface RuntimeEngine extends RuntimeDispatcher {
 
   /** Bring the backend up from prepared bundle code.  `dataDir`
    *  follows the existing PGlite convention (`:memory:` /
-   *  `opfs-ahp://…`); engines without a DB ignore it. */
-  boot(bundleCode: string, dataDir?: string): Promise<BootResult>;
+   *  `opfs-ahp://…`); engines without a DB ignore it.  `opts.fresh`
+   *  drops the persistent DB's stored data before applying schema —
+   *  the recovery path for a boot that keeps failing on stale data. */
+  boot(
+    bundleCode: string,
+    dataDir?: string,
+    opts?: { fresh?: boolean },
+  ): Promise<BootResult>;
 
   /** Serve one backend HTTP request against the booted instance. */
   dispatch(req: SerializedRequest): Promise<DispatchResult>;
+
+  /** Run one SQL statement against the booted database (Database
+   *  console).  Engines without a DB reject with a clear message. */
+  query(sql: string): Promise<QueryResult>;
 
   /** Drop user data, re-apply idempotent schema. */
   wipe(): Promise<WipeResult>;

@@ -31,6 +31,16 @@ import type {
 /** The slice of the traceability index the rollup needs. */
 export type VerificationIndex = Pick<TraceabilityIR, "execTests" | "testsByRequirement">;
 
+/** Append `value` to the array stored at `key`, creating it if absent. */
+function pushInto<K, V>(map: Map<K, V[]>, key: K, value: V): void {
+  let arr = map.get(key);
+  if (!arr) {
+    arr = [];
+    map.set(key, arr);
+  }
+  arr.push(value);
+}
+
 /** Pick the result for one executable test.  Prefer an exact
  *  (suite, name) match; fall back to a unique name-only match when the
  *  result carries no suite.  Returns the chosen outcome, or undefined
@@ -64,7 +74,7 @@ export function computeVerification(
 ): VerificationIR {
   const byName = new Map<string, TestOutcome[]>();
   for (const r of results) {
-    (byName.get(r.name) ?? byName.set(r.name, []).get(r.name)!).push(r);
+    pushInto(byName, r.name, r);
   }
 
   // Group executable tests by the testCase they verify.  `testCaseId`
@@ -74,10 +84,7 @@ export function computeVerification(
   const refsByTestCase = new Map<string, ExecTestRef[]>();
   for (const ref of index.execTests) {
     if (ref.testCaseId == null) continue; // unlinked test — not part of any verdict
-    (
-      refsByTestCase.get(ref.testCaseId) ??
-      refsByTestCase.set(ref.testCaseId, []).get(ref.testCaseId)!
-    ).push(ref);
+    pushInto(refsByTestCase, ref.testCaseId, ref);
   }
 
   const consumed = new Set<TestOutcome>();
@@ -88,7 +95,7 @@ export function computeVerification(
     const refs = refsByTestCase.get(tcId)!;
     const backing: { name: string; status: string }[] = [];
     let anyFail = false;
-    let anyNotPassed = false; // missing or skip
+    let anyNotPassed = false; // any non-pass: missing, skip, or fail
 
     for (const ref of refs) {
       const outcome = outcomeFor(ref, byName);

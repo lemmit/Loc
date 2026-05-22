@@ -12,7 +12,7 @@ import type {
 import { operationUsesCurrentUser } from "../../../ir/loom-ir.js";
 import { stmtHasProv } from "../../../ir/prov-id.js";
 import { lines } from "../../../util/code-builder.js";
-import { camel } from "../../../util/naming.js";
+import { lowerFirst } from "../../../util/naming.js";
 import { renderTsExpr, renderTsType } from "../render-expr.js";
 import { renderTsStatements } from "../render-stmt.js";
 
@@ -199,7 +199,7 @@ function renderEntity(e: EntityShape, emitProvenance = false): string {
 
   const fns = e.functions.map((fn) => {
     const params = fn.params.map((p) => `${p.name}: ${renderTsType(p.type)}`).join(", ");
-    return `  private ${camel(fn.name)}(${params}): ${renderTsType(fn.returnType)} { return ${renderTsExpr(fn.body)}; }`;
+    return `  private ${lowerFirst(fn.name)}(${params}): ${renderTsType(fn.returnType)} { return ${renderTsExpr(fn.body)}; }`;
   });
 
   // For extern: setters per declared property, plus `raiseEvent` on the
@@ -221,7 +221,7 @@ function renderEntity(e: EntityShape, emitProvenance = false): string {
   // file imports the User type from auth/.  Per-op signatures still
   // get the parameter conditionally so a non-auth op stays
   // un-burdened with a User param.
-  const anyOpUsesCurrentUser = e.operations.some(operationUsesCurrentUser);
+  const _anyOpUsesCurrentUser = e.operations.some(operationUsesCurrentUser);
   for (const op of e.operations) {
     const visibility = op.visibility === "public" ? "public" : "private";
     const usesUser = operationUsesCurrentUser(op);
@@ -242,7 +242,7 @@ function renderEntity(e: EntityShape, emitProvenance = false): string {
       ops.push("");
       continue;
     }
-    ops.push(`  ${visibility} ${camel(op.name)}(${params}): void {`);
+    ops.push(`  ${visibility} ${lowerFirst(op.name)}(${params}): void {`);
     const body = renderTsStatements(op.statements, emitProvenance);
     if (body.length > 0) ops.push(body);
     ops.push("    this._assertInvariants();");

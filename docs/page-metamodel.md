@@ -263,7 +263,7 @@ Reuses the existing `Statement` rule (covers `let`, `:=`, calls, `emit`).
 | `Action(operation, then?)`, `Button(label, on?)` | Action primitives. |
 | `Money`, `DateDisplay`, `EnumBadge`, `IdLink` | Formatter primitives. |
 | `Table`, `Column` | Tabular display (data lambda accessors). |
-| `Form(of: <Agg>)`, `Form(runs: <wf>)` | RHF-bound form auto-dispatched off the aggregate / workflow IR. |
+| `Form(of: <Agg>)`, `Form(runs: <wf>)`, `Form(<instance>.<operation>)` | RHF-bound form auto-dispatched off the aggregate / workflow / operation IR. The operation form references the op through an in-scope aggregate instance (like `Action`). |
 | `QueryView(of:, loading:, error:, empty:, data:, single?:)` | 4-arm query-state branching (collection or single-record). |
 
 The set is closed in v0. **Removed from earlier drafts:** `Wizard`, `Stage`,
@@ -300,7 +300,7 @@ contract per page:
 |---|---|
 | `<Agg>List` | Breadcrumbs · Toolbar (heading + "New" button) · `QueryView(of: api.<Agg>.all)` → `Table` with one `Column` per **non-collection** scalar field (`IdLink` / `EnumBadge` / `DateDisplay` / text by type), per-row testid. |
 | `<Agg>New` | Breadcrumbs · heading · `Card(Form(of: <Agg>))` — RHF + Zod + `useCreate<Agg>`, one input per required field. |
-| `<Agg>Detail` | Breadcrumbs · heading · `QueryView(of: api.<Agg>.byId(id), single: true)` whose data card holds **three** sections: ① `KeyValueRow` per scalar field; ② one **operation control** per `public operation` — a button that opens a `Modal` hosting an auto-generated `Form(of: <Agg>, op: <name>)` bound to the `use<Op><Agg>` mutation hook (params dispatched by the same type rules as `Form(of:)`); ③ one **related-entity list** per `contains` collection — a titled `Card(Table)` over `data.<containment>` with a `Column` per part field. |
+| `<Agg>Detail` | Breadcrumbs · heading · `QueryView(of: api.<Agg>.byId(id), single: true)` whose data card holds **three** sections: ① `KeyValueRow` per scalar field; ② one **operation control** per `public operation` — a button that opens a `Modal` hosting an auto-generated `Form(data.<operation>)` (the operation referenced through the loaded record) bound to the `use<Op><Agg>` mutation hook (params dispatched by the same type rules as `Form(of:)`); ③ one **related-entity list** per `contains` collection — a titled `Card(Table)` over `data.<containment>` with a `Column` per part field. |
 | `<Workflow>Workflow` | Breadcrumbs · heading · `Card(Form(runs: <wf>))`. |
 | `<View>View` | Heading · `QueryView(of: Views.<name>)` → `Table`. |
 

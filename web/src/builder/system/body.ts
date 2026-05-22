@@ -72,11 +72,12 @@ export function listStatements(ast: Model, loc: BodyLocator): string[] | null {
 }
 
 // A statement structured for the body editor: an assignment splits into a
-// dedicated target / op / value (so the target edits as its own control);
-// everything else (bare calls, precondition / requires / let / emit) keeps its
-// verbatim source for a single text row.
+// dedicated target / op / value; a bare call (`recv.method(args)`) splits into a
+// head (`recv.method`) + editable args; everything else (precondition / requires
+// / let / emit) keeps its verbatim source for a single text row.
 export type StmtView =
   | { kind: "assign"; target: string; op: string; value: string }
+  | { kind: "call"; head: string; args: string[] }
   | { kind: "other"; src: string };
 
 function stmtView(s: Statement): StmtView {
@@ -86,6 +87,15 @@ function stmtView(s: Statement): StmtView {
       target: s.target.$cstNode?.text?.trim() ?? "",
       op: s.op,
       value: s.value.$cstNode?.text?.trim() ?? "",
+    };
+  }
+  // Bare call: an LValue with a trailing call (`order.addLine(productId, qty)`),
+  // no mutation suffix. The LValue carries the dotted head/tail + arg list.
+  if (s.$type === "AssignOrCallStmt" && !s.op && !s.value && s.target.call) {
+    return {
+      kind: "call",
+      head: [s.target.head, ...s.target.tail].join("."),
+      args: s.target.args.map((a) => a.$cstNode?.text?.trim() ?? ""),
     };
   }
   return { kind: "other", src: s.$cstNode?.text ?? "" };

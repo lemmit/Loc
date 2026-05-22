@@ -1,29 +1,20 @@
-// Slice 11.9 — compound assignment ergonomics in onClick lambdas.
+// compound assignment ergonomics in onClick lambdas.
 //
 //   count += 1                → setCount(count + 1)
 //   count -= 1                → setCount(count - 1)
 //
 // Both lower to the IR's `kind: "add"` / `kind: "remove"` shape
 // (the same kinds collection mutations use; for scalar state
-// they're compound additions / subtractions).  Slice 11.7 emitted
-// the long form `count := count + 1`; this slice adds the
+// they're compound additions / subtractions).  The walker previously emitted
+// the long form `count := count + 1`; the
 // counter-style sugar so click handlers read more naturally.
 
-import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
-import { createDddServices } from "../../src/language/ddd-module.js";
-import type { Model } from "../../src/language/generated/ast.js";
-import { generateSystems } from "../../src/system/index.js";
+import { generateSystemFiles } from "../_helpers/index.js";
 
-async function buildAndGenerate(src: string): Promise<Map<string, string>> {
-  const services = createDddServices(NodeFileSystem);
-  const { parseHelper } = await import("langium/test");
-  const helper = parseHelper(services.Ddd);
-  const doc = await helper(src, { validation: true });
-  return generateSystems(doc.parseResult.value as Model).files;
-}
+const buildAndGenerate = generateSystemFiles;
 
-describe("Slice 11.9 — += / -= in onClick mutations", () => {
+describe("+= / -= in onClick mutations", () => {
   it("count += 1 lowers to setCount(count + 1)", async () => {
     const files = await buildAndGenerate(`
       system S {

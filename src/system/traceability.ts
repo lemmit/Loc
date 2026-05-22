@@ -2,7 +2,7 @@ import type { CodeRefKind, LoomModel, RequirementIR, TraceabilityIR } from "../i
 import { type LinesPart, lines } from "../util/code-builder.js";
 
 // ---------------------------------------------------------------------------
-// Traceability documentation (Slice 12) — derived views over the
+// Traceability documentation — derived views over the
 // requirement / solution / testCase artifacts and the precomputed
 // `TraceabilityIR` index (`src/ir/enrichments.ts`).  Same status as
 // the Mermaid diagrams and wire-spec: pure derivations, not contracts.

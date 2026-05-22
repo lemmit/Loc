@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { AppShell } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
 import type { EditorHandle } from "./editor/LoomEditor";
@@ -10,6 +10,15 @@ import type { GenerateOk, GenerateResult, VirtualFile } from "./build/protocol";
 import type { BundleOk } from "./bundle/protocol";
 import { engineRegistry, selectedEngineId, type RuntimeEngine } from "./engine";
 import { emptyDependencySet } from "./engine";
+import type { QueryResult } from "./runtime/protocol";
+import {
+  CUSTOM_ENDPOINT,
+  buildConcretePath,
+  generateExampleBody,
+  parseOpenApi,
+  type ApiEndpoint,
+  type OpenApiDoc,
+} from "./backend/openapi";
 import { buildTree } from "./preview/file-tree";
 import { useWorkspace } from "./workspace/use-workspace";
 import { buildShareUrl, readHashSource, writeHashSource } from "./util/share";
@@ -38,6 +47,16 @@ import {
   type UnsupportedDeployable,
   type UnsupportedPlatform,
 } from "./layout/ctx";
+import type { OutputStream } from "./layout/OutputPanel";
+import type { TestResult } from "./testing/harness";
+import type { LogLine } from "./util/log-line";
+
+// Cap on the live console buffers (Backend / App streams) so a chatty
+// handler or render loop can't grow them without bound; we keep the
+// most-recent lines.
+const LOG_CAP = 1000;
+const capLog = (lines: LogLine[]): LogLine[] =>
+  lines.length > LOG_CAP ? lines.slice(-LOG_CAP) : lines;
 
 /** Per-deployable summary derived from the generated file tree.
  *  The playground only knows how to bundle + boot Hono backends and
@@ -160,6 +179,11 @@ export default function App(): JSX.Element {
   const [reqMethod, setReqMethod] = useState<string>("GET");
   const [reqPath, setReqPath] = useState<string>("/products");
   const [reqBody, setReqBody] = useState<string>("");
+  const [openApiSpec, setOpenApiSpec] = useState<OpenApiDoc | null>(null);
+  const [apiEndpoints, setApiEndpoints] = useState<ApiEndpoint[]>([]);
+  const [selectedOpId, setSelectedOpId] = useState<string | null>(null);
+  const [pathParamValues, setPathParamValues] = useState<Record<string, string>>({});
+  const [queryParamValues, setQueryParamValues] = useState<Record<string, string>>({});
   const [copied, setCopied] = useState(false);
   const [liveMode, setLiveMode] = useState(false);
   const liveModeRef = useRef(liveMode);
@@ -171,11 +195,19 @@ export default function App(): JSX.Element {
   // the Files tab was folded into Code still type-checks; coerce it to
   // "code" before handing it to the shell (usePersistedState has no
   // validator, so the stale value would otherwise select a dead panel).
-  const [activeTabRaw, setActiveTab] = usePersistedState<MobileTab | "files">(
+  const [activeTabRaw, setActiveTab] = usePersistedState<MobileTab | "files" | "problems">(
     "loom.mobile.activeTab",
     "code",
   );
-  const activeTab: MobileTab = activeTabRaw === "files" ? "code" : activeTabRaw;
+  // Coerce values persisted before the layout changed: "files" predates
+  // folding Files into Code; "problems" predates folding the Problems
+  // tab into the consolidated Output panel.
+  const activeTab: MobileTab =
+    activeTabRaw === "files"
+      ? "code"
+      : activeTabRaw === "problems"
+        ? "output"
+        : activeTabRaw;
 
   // Sub-view of the consolidated Code tab — source / builder / model /
   // generated. Persisted so a reload lands back on the same view.
@@ -183,6 +215,29 @@ export default function App(): JSX.Element {
     "loom.mobile.codeView",
     "source",
   );
+
+  // Test runner results, lifted here so the Output panel's Tests stream
+  // can read them independently of the (sometimes-unmounted) Tests tab.
+  const [testResults, setTestResults] = useState<Record<string, TestResult>>({});
+
+  // Which stream the consolidated Output panel shows.  Persisted across
+  // reloads; both shells read it off the ctx.
+  const [outputStream, setOutputStream] = usePersistedState<OutputStream>(
+    "loom.outputStream",
+    "problems",
+  );
+
+  // Live console streams for the Output panel — the backend (Hono
+  // runtime worker) console + stack traces, and the preview app's
+  // console + uncaught errors.  Capped so a chatty handler / app can't
+  // grow these without bound; cleared when the source changes.
+  const [backendLog, setBackendLog] = useState<LogLine[]>([]);
+  const [appLog, setAppLog] = useState<LogLine[]>([]);
+  const appendAppLog = useCallback((line: LogLine): void => {
+    setAppLog((prev) => capLog([...prev, line]));
+  }, []);
+  const clearBackendLog = useCallback(() => setBackendLog([]), []);
+  const clearAppLog = useCallback(() => setAppLog([]), []);
 
   const sourceRef = useRef<string>(initialSource);
   const editorHandleRef = useRef<EditorHandle | null>(null);
@@ -217,6 +272,9 @@ export default function App(): JSX.Element {
     // `useReducer` is stable, so closing over it here is safe.
     const engine = engineRegistry.create(selectedEngineId(), {
       onLost: () => dispatch({ type: "RUNTIME_LOST" }),
+      // Backend (Hono runtime) console + stack traces, captured per RPC
+      // in the worker — feeds the Output panel's "Backend" stream.
+      onLog: (lines) => setBackendLog((prev) => capLog([...prev, ...lines])),
     });
     buildClientRef.current = build;
     engineRef.current = engine;
@@ -312,6 +370,10 @@ export default function App(): JSX.Element {
     // example instead of hot-swapping the previous app's bundle.
     setPreviewBundle(null);
     setPreviewBooted(false);
+    // The live log streams belong to the previous example's runtime —
+    // clear them so stale backend/app output doesn't bleed across.
+    setBackendLog([]);
+    setAppLog([]);
     void engineRef.current?.reset();
     scheduleAutoGenerate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -465,14 +527,48 @@ export default function App(): JSX.Element {
     return { hono: honoRes, react: reactRes };
   }
 
-  async function runBootStep(hono: BundleOk): Promise<boolean> {
+  // Best-effort: fetch the booted backend's OpenAPI document and turn it
+  // into the endpoint list that drives the Backend console's picker.  On
+  // any failure we clear the spec so the panel falls back to manual mode.
+  async function loadOpenApiSpec(engine: RuntimeEngine): Promise<void> {
+    try {
+      const res = await engine.dispatch({
+        url: "http://localhost/openapi.json",
+        method: "GET",
+        headers: {},
+        body: null,
+      });
+      if (res.ok && res.response.status < 400 && res.response.body) {
+        const doc = JSON.parse(res.response.body) as OpenApiDoc;
+        setOpenApiSpec(doc);
+        setApiEndpoints(parseOpenApi(doc));
+        return;
+      }
+    } catch {
+      // fall through to manual mode
+    }
+    setOpenApiSpec(null);
+    setApiEndpoints([]);
+  }
+
+  async function runBootStep(
+    hono: BundleOk,
+    opts?: { fresh?: boolean },
+  ): Promise<boolean> {
     const engine = engineRef.current;
     if (!engine) return false;
     dispatch({ type: "BOOT_START" });
+    // Reset spec-driven state — a fresh boot may serve a different
+    // contract, and a failed (re)boot shouldn't leave stale endpoints.
+    setSelectedOpId(null);
+    setPathParamValues({});
+    setQueryParamValues({});
+    setApiEndpoints([]);
+    setOpenApiSpec(null);
     try {
       const sourceHash = fnv1a32(sourceRef.current);
       const dataDir = `opfs-ahp://loom-${sourceHash}`;
-      const res = await engine.boot(hono.code, dataDir);
+      const res = await engine.boot(hono.code, dataDir, { fresh: opts?.fresh });
       if (res.ok) {
         dispatch({
           type: "BOOT_OK",
@@ -480,6 +576,7 @@ export default function App(): JSX.Element {
           persistent: res.persistent,
           migrated: res.migrated,
         });
+        await loadOpenApiSpec(engine);
         return true;
       }
       dispatch({ type: "BOOT_FAIL", message: res.message });
@@ -523,6 +620,15 @@ export default function App(): JSX.Element {
   async function runBoot(): Promise<void> {
     if (!honoBundle) return;
     await runBootStep(honoBundle);
+  }
+
+  // Recovery for a boot that keeps failing on stale persisted data:
+  // re-boot with `fresh`, which drops the OPFS island's schemas before
+  // applying DDL.  The normal Reset can't help here — it needs a booted
+  // instance, which the failing boot never produces.
+  async function runResetData(): Promise<void> {
+    if (!honoBundle) return;
+    await runBootStep(honoBundle, { fresh: true });
   }
 
   // Full cascade — the mobile "Run" primary action.  Generates,
@@ -577,6 +683,56 @@ export default function App(): JSX.Element {
         },
       });
     }
+  }
+
+  // Spec-driven endpoint console handlers.  Selecting an endpoint pre-fills
+  // the method, the concrete path, and (for write verbs) an example body
+  // sampled from the schema.  Param edits keep `reqPath` in sync so
+  // `runDispatch` stays unchanged — it always sends the concrete `reqPath`.
+  const selectedEndpoint: ApiEndpoint | null =
+    selectedOpId && selectedOpId !== CUSTOM_ENDPOINT
+      ? apiEndpoints.find((e) => e.operationId === selectedOpId) ?? null
+      : null;
+
+  function runSelectEndpoint(opId: string): void {
+    setSelectedOpId(opId);
+    if (opId === CUSTOM_ENDPOINT) return;
+    const ep = apiEndpoints.find((e) => e.operationId === opId);
+    if (!ep) return;
+    const freshPath: Record<string, string> = {};
+    const freshQuery: Record<string, string> = {};
+    setPathParamValues(freshPath);
+    setQueryParamValues(freshQuery);
+    setReqMethod(ep.method);
+    setReqPath(buildConcretePath(ep, freshPath, freshQuery));
+    setReqBody(ep.hasBody && openApiSpec ? generateExampleBody(ep.requestSchema, openApiSpec) : "");
+  }
+
+  function setPathParam(name: string, value: string): void {
+    if (!selectedEndpoint) return;
+    const next = { ...pathParamValues, [name]: value };
+    setPathParamValues(next);
+    setReqPath(buildConcretePath(selectedEndpoint, next, queryParamValues));
+  }
+
+  function setQueryParam(name: string, value: string): void {
+    if (!selectedEndpoint) return;
+    const next = { ...queryParamValues, [name]: value };
+    setQueryParamValues(next);
+    setReqPath(buildConcretePath(selectedEndpoint, pathParamValues, next));
+  }
+
+  function runGenerateExample(): void {
+    if (!selectedEndpoint || !openApiSpec) return;
+    setReqBody(generateExampleBody(selectedEndpoint.requestSchema, openApiSpec));
+  }
+
+  async function runQuery(sql: string): Promise<QueryResult> {
+    const engine = engineRef.current;
+    if (!engine || ddl === null) {
+      return { ok: false, message: "Runtime not booted — boot first." };
+    }
+    return engine.query(sql);
   }
 
   const files: VirtualFile[] = generateSuccess?.files ?? [];
@@ -655,17 +811,37 @@ export default function App(): JSX.Element {
     setReqPath,
     reqBody,
     setReqBody,
+    apiEndpoints,
+    selectedOpId,
+    selectedEndpoint,
+    runSelectEndpoint,
+    pathParamValues,
+    setPathParam,
+    queryParamValues,
+    setQueryParam,
+    runGenerateExample,
+    runQuery,
     liveMode,
     setLiveMode,
     activeTab,
     setActiveTab,
     codeView,
     setCodeView,
+    testResults,
+    setTestResults,
+    outputStream,
+    setOutputStream,
+    backendLog,
+    appLog,
+    appendAppLog,
+    clearBackendLog,
+    clearAppLog,
     copied,
     copyShareLink,
     runGenerate: () => void runGenerate(),
     runBundle: () => void runBundle(),
     runBoot: () => void runBoot(),
+    runResetData: () => void runResetData(),
     runWipe: () => void runWipe(),
     runDispatch: () => void runDispatch(),
     runFull: () => void runFull(),

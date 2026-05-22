@@ -1,5 +1,5 @@
 import type { AggregateIR, BoundedContextIR, TypeIR } from "../../ir/loom-ir.js";
-import { camel, plural } from "../../util/naming.js";
+import { lowerFirst, plural } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // React form helpers — Mantine input rendering on top of `react-hook-form`,
@@ -100,7 +100,7 @@ export function idTargetsInFields(
 /** Local-variable name for the `useAll<X>()` query inside a form
  * component.  e.g. Product → `__products`. */
 export function idTargetHookVar(target: AggregateIR): string {
-  return `__${camel(plural(target.name))}`;
+  return `__${lowerFirst(plural(target.name))}`;
 }
 
 /**

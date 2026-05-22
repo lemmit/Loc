@@ -9,8 +9,7 @@ import type {
   TypeIR,
 } from "../../ir/loom-ir.js";
 import { findUsesCurrentUser, viewUsesCurrentUser } from "../../ir/loom-ir.js";
-import { camel, plural } from "../../util/naming.js";
-import { renderTsExpr } from "./render-expr.js";
+import { lowerFirst, plural, upperFirst } from "../../util/naming.js";
 import { valueObjectColumnNames } from "./templates.js";
 
 // ---------------------------------------------------------------------------
@@ -56,12 +55,12 @@ export function buildRepositoryFile(
     ...viewFilters,
   ];
   for (const f of allFilters) {
-    const lowered = lowerToDrizzle(f, camel(plural(agg.name)), ctx);
+    const lowered = lowerToDrizzle(f, lowerFirst(plural(agg.name)), ctx);
     if (lowered) for (const op of lowered.ops) drizzleOps.add(op);
   }
   lines.push(`import { ${[...drizzleOps].sort().join(", ")} } from "drizzle-orm";`);
   lines.push(`import * as schema from "../schema";`);
-  // Slice 1C: if any find or matching view filter references
+  // If any find or matching view filter references
   // currentUser, the per-method signature gains a `currentUser: User`
   // parameter that the closure-captured Drizzle predicate reads.
   // Pull the User type in as a type-only import so the file
@@ -75,7 +74,7 @@ export function buildRepositoryFile(
   // Imports for domain types
   const partNames = agg.parts.map((p) => p.name);
   const domainImports = [agg.name, ...partNames].join(", ");
-  lines.push(`import { ${domainImports} } from "../../domain/${camel(agg.name)}";`);
+  lines.push(`import { ${domainImports} } from "../../domain/${lowerFirst(agg.name)}";`);
   const valueObjectsUsed = collectValueObjects(agg, ctx);
   const enumsUsed = collectEnums(agg, ctx);
   const voOrEnumImports = [...valueObjectsUsed, ...enumsUsed];
@@ -110,8 +109,8 @@ export function buildRepositoryFile(
   lines.push("");
 
   // findManyByIds — bulk loader used by views that follow `Id<X>`
-  // references in bind expressions (slice 3).  Same hydration path
-  // as the array-return finds; filter is a single `inArray`.
+  // references in bind expressions.  Same hydration path as the
+  // array-return finds; filter is a single `inArray`.
   lines.push(...findManyByIdsMethod(agg, ctx));
   lines.push("");
 
@@ -133,7 +132,7 @@ export function buildRepositoryFile(
   // checks + the existing bulk hydration all work for free.
   for (const view of ctx.views.filter((v) => v.aggregateName === agg.name)) {
     const synthesised: FindIR = {
-      name: camel(view.name),
+      name: lowerFirst(view.name),
       params: [],
       returnType: { kind: "array", element: { kind: "entity", name: agg.name } },
       filter: view.filter,
@@ -259,7 +258,7 @@ function wireProjectionValue(
 
 function findManyByIdsMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
   const lines: string[] = [];
-  const tableName = camel(plural(agg.name));
+  const tableName = lowerFirst(plural(agg.name));
   lines.push(`  async findManyByIds(ids: Ids.${agg.name}Id[]): Promise<${agg.name}[]> {`);
   lines.push(`    if (ids.length === 0) return [];`);
   lines.push(
@@ -274,7 +273,7 @@ function findManyByIdsMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] 
   if (eagerContains.length > 0) {
     lines.push(`    const __ids = rootRows.map((r) => r.id);`);
     for (const { c, part } of eagerContains) {
-      const childTable = camel(plural(part.name));
+      const childTable = lowerFirst(plural(part.name));
       lines.push(
         `    const ${c.name}Rows = await this.db.select().from(schema.${childTable}).where(inArray(schema.${childTable}.parentId, __ids));`,
       );
@@ -303,7 +302,7 @@ function findManyByIdsMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] 
 
 function findByIdMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
   const lines: string[] = [];
-  const tableName = camel(plural(agg.name));
+  const tableName = lowerFirst(plural(agg.name));
   lines.push(`  async findById(id: Ids.${agg.name}Id): Promise<${agg.name} | null> {`);
   lines.push(`    return await this.db.transaction(async (tx) => {`);
   lines.push(
@@ -316,7 +315,7 @@ function findByIdMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
   for (const c of agg.contains) {
     const part = agg.parts.find((p) => p.name === c.partName);
     if (!part) continue;
-    const childTable = camel(plural(part.name));
+    const childTable = lowerFirst(plural(part.name));
     if (c.collection) {
       lines.push(
         `      const ${c.name}Rows = await tx.select().from(schema.${childTable}).where(eq(schema.${childTable}.parentId, id));`,
@@ -428,7 +427,7 @@ function primitiveColumnRead(expr: string, t: TypeIR): string {
 
 function saveMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
   const lines: string[] = [];
-  const tableName = camel(plural(agg.name));
+  const tableName = lowerFirst(plural(agg.name));
   lines.push(`  async save(aggregate: ${agg.name}): Promise<void> {`);
   lines.push(`    await this.db.transaction(async (tx) => {`);
   lines.push(`      const rootRow = ${rootProjection(agg, "aggregate", ctx)};`);
@@ -439,23 +438,23 @@ function saveMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
     if (!c.collection) continue;
     const part = agg.parts.find((p) => p.name === c.partName);
     if (!part) continue;
-    const childTable = camel(plural(part.name));
+    const childTable = lowerFirst(plural(part.name));
     lines.push("");
     lines.push(
-      `      const __existing${cap(c.name)} = await tx.select({ id: schema.${childTable}.id }).from(schema.${childTable}).where(eq(schema.${childTable}.parentId, aggregate.id));`,
+      `      const __existing${upperFirst(c.name)} = await tx.select({ id: schema.${childTable}.id }).from(schema.${childTable}).where(eq(schema.${childTable}.parentId, aggregate.id));`,
     );
     lines.push(
-      `      const __existingIds${cap(c.name)} = new Set(__existing${cap(c.name)}.map((r) => r.id));`,
+      `      const __existingIds${upperFirst(c.name)} = new Set(__existing${upperFirst(c.name)}.map((r) => r.id));`,
     );
     lines.push(
-      `      const __currentIds${cap(c.name)} = new Set(aggregate.${c.name}.map((e) => e.id as string));`,
+      `      const __currentIds${upperFirst(c.name)} = new Set(aggregate.${c.name}.map((e) => e.id as string));`,
     );
     lines.push(
-      `      const __toDelete${cap(c.name)} = [...__existingIds${cap(c.name)}].filter((id) => !__currentIds${cap(c.name)}.has(id));`,
+      `      const __toDelete${upperFirst(c.name)} = [...__existingIds${upperFirst(c.name)}].filter((id) => !__currentIds${upperFirst(c.name)}.has(id));`,
     );
-    lines.push(`      if (__toDelete${cap(c.name)}.length > 0) {`);
+    lines.push(`      if (__toDelete${upperFirst(c.name)}.length > 0) {`);
     lines.push(
-      `        await tx.delete(schema.${childTable}).where(and(eq(schema.${childTable}.parentId, aggregate.id), inArray(schema.${childTable}.id, __toDelete${cap(c.name)})));`,
+      `        await tx.delete(schema.${childTable}).where(and(eq(schema.${childTable}.parentId, aggregate.id), inArray(schema.${childTable}.id, __toDelete${upperFirst(c.name)})));`,
     );
     lines.push(`      }`);
     lines.push(`      for (const child of aggregate.${c.name}) {`);
@@ -551,18 +550,14 @@ function projectionObject(
   return `{ ${entries.map((e) => `${e.fieldName}: ${e.expr}`).join(", ")} }`;
 }
 
-function cap(s: string): string {
-  return s[0]!.toUpperCase() + s.slice(1);
-}
-
 // ---------------------------------------------------------------------------
 // Find queries — convention-based equality predicates
 // ---------------------------------------------------------------------------
 
 function findQueryMethod(agg: AggregateIR, find: FindIR, ctx: BoundedContextIR): string[] {
   const lines: string[] = [];
-  const tableName = camel(plural(agg.name));
-  // Slice 1C: when the find's `where` references currentUser, the
+  const tableName = lowerFirst(plural(agg.name));
+  // When the find's `where` references currentUser, the
   // method gains a trailing `currentUser: User` parameter that the
   // closure-captured Drizzle predicate reads from.  Hono routes /
   // workflow handlers thread the user from `c.get("currentUser")`
@@ -629,7 +624,7 @@ function findQueryMethod(agg: AggregateIR, find: FindIR, ctx: BoundedContextIR):
     if (eagerContains.length > 0) {
       lines.push(`    const __ids = rootRows.map((r) => r.id);`);
       for (const { c, part } of eagerContains) {
-        const childTable = camel(plural(part.name));
+        const childTable = lowerFirst(plural(part.name));
         lines.push(
           `    const ${c.name}Rows = await this.db.select().from(schema.${childTable}).where(inArray(schema.${childTable}.parentId, __ids));`,
         );
@@ -884,7 +879,7 @@ function lowerToDrizzle(
         return JSON.stringify(e.name);
       }
     }
-    // `currentUser.<field>` — slice 1C row-level filter.  The repo
+    // `currentUser.<field>` — row-level filter.  The repo
     // method receives a `currentUser: User` parameter; the renderer
     // emits a plain JS member access against it.  Drizzle infers
     // the column-side branded type and the User field's plain type

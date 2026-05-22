@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Phase 7 — LiveView module emission per page.
+// LiveView module emission per page.
 //
 // For each `PageIR` declared by the deployable's `ui:` block, emit:
 //   - lib/<app>_web/live/<page_snake>_live.ex — a Phoenix LiveView module
@@ -23,10 +23,12 @@ import type {
   DeployableIR,
   PageIR,
   SystemIR,
+  TypeIR,
   UiIR,
 } from "../../ir/loom-ir.js";
-import { camel, pascal, plural, snake } from "../../util/naming.js";
+import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import {
+  type ActionBinding,
   defaultInitFor,
   type HandleEventClause,
   renderRequiresGuard,
@@ -68,7 +70,7 @@ export function emitLiveViewPages(args: {
   // `AshPhoenix.Form.for_create(PhoenixApp.Sales.Customer, :create)`.
   const contextModuleByAggName = new Map<string, string>();
   for (const ctx of contexts) {
-    const ctxModule = `${appModule}.${pascal(ctx.name)}`;
+    const ctxModule = `${appModule}.${upperFirst(ctx.name)}`;
     for (const agg of ctx.aggregates) {
       aggregatesByName.set(agg.name, agg);
       contextByAggName.set(agg.name, ctx);
@@ -76,9 +78,28 @@ export function emitLiveViewPages(args: {
     }
   }
 
+  // Walk each user component once to capture its `Action` bindings +
+  // nested component usage, so each page can hoist the handlers for the
+  // components it renders (function components are stateless).
+  const componentInfo = new Map<string, ComponentActionInfo>();
+  for (const c of ui.components) {
+    const synthPage = {
+      name: c.name,
+      params: c.params,
+      state: c.state,
+      body: c.body,
+      source: "explicit",
+    } as PageIR;
+    const w = walkBodyToHeex(c.body, synthPage, ui, appModule, aggregatesByName);
+    componentInfo.set(c.name, {
+      actionBindings: w.actionBindings,
+      usedComponents: w.usedComponents,
+    });
+  }
+
   for (const page of ui.pages) {
     if (!page.route) continue; // can't emit a router entry without one
-    const liveModule = `${appModule}Web.${pascal(page.name)}Live`;
+    const liveModule = `${appModule}Web.${upperFirst(page.name)}Live`;
     const filePath = `lib/${appName}_web/live/${snake(page.name)}_live.ex`;
     const source = renderLiveView({
       page,
@@ -88,11 +109,12 @@ export function emitLiveViewPages(args: {
       ui,
       aggregatesByName,
       contextModuleByAggName,
+      componentInfo,
     });
     out.set(filePath, source);
     routes.push({ route: page.route, liveModule });
 
-    // Playwright page object — Batch C emission.  Mirrors the React
+    // Playwright page object emission.  Mirrors the React
     // generator's per-page `e2e/pages/<page>.ts` so `test e2e ui`
     // blocks (src/system/ui-e2e-render.ts) drive the Phoenix
     // deployable identically to a React one.
@@ -103,6 +125,18 @@ export function emitLiveViewPages(args: {
       contextByAggName,
     });
     out.set(`e2e/pages/${snake(page.name)}.ts`, pageObjectSource);
+  }
+
+  // User-defined components → one HEEx function component per
+  // `ui.component`, in a shared `Components.UiComponents` module.
+  // Page bodies invoke them fully-qualified, so no import wiring is
+  // needed.  (Components hosting Form/Action need handler hoisting to
+  // the page LiveView — deferred.)
+  if (ui.components.length > 0) {
+    out.set(
+      `lib/${appName}_web/components/ui_components.ex`,
+      renderUiComponents({ ui, appModule, aggregatesByName }),
+    );
   }
 
   return { files: out, routes };
@@ -119,10 +153,76 @@ interface RenderArgs {
    *  keyed by aggregate PascalCase name.  Used to build the Ash
    *  `for_create(<Ctx>.<Agg>, :create)` call in mount/3. */
   contextModuleByAggName: ReadonlyMap<string, string>;
+  /** Per-component action bindings + nested component usage, so a page
+   *  LiveView can hoist the `handle_event` clauses for `Action`s inside
+   *  the (stateless) components it renders. */
+  componentInfo: ReadonlyMap<string, ComponentActionInfo>;
+}
+
+interface ComponentActionInfo {
+  actionBindings: readonly ActionBinding[];
+  usedComponents: readonly string[];
+}
+
+/** Transitive closure: every `ActionBinding` reachable from a page —
+ *  its own body's bindings plus those of every component it renders
+ *  (recursively).  Deduped by event name. */
+function gatherActionBindings(
+  seedBindings: readonly ActionBinding[],
+  seedComponents: readonly string[],
+  componentInfo: ReadonlyMap<string, ComponentActionInfo>,
+): ActionBinding[] {
+  const byEvent = new Map<string, ActionBinding>();
+  for (const b of seedBindings) if (!byEvent.has(b.eventName)) byEvent.set(b.eventName, b);
+  const seen = new Set<string>();
+  const queue = [...seedComponents];
+  while (queue.length > 0) {
+    const name = queue.shift()!;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const info = componentInfo.get(name);
+    if (!info) continue;
+    for (const b of info.actionBindings) {
+      if (!byEvent.has(b.eventName)) byEvent.set(b.eventName, b);
+    }
+    queue.push(...info.usedComponents);
+  }
+  return [...byEvent.values()];
+}
+
+/** A hoisted `Action` `handle_event` clause: load the instance by id,
+ *  invoke the Ash action via the code interface, flash + optional
+ *  navigate. */
+function buildActionHandlers(
+  bindings: readonly ActionBinding[],
+  contextModuleByAggName: ReadonlyMap<string, string>,
+): HandleEventClause[] {
+  return bindings.map((b) => {
+    const ctxModule = contextModuleByAggName.get(b.agg);
+    const aggSnake = snake(b.agg);
+    const navPipe = b.thenRoute ? ` |> push_navigate(to: ~p"${b.thenRoute}")` : "";
+    return {
+      name: b.eventName,
+      paramsPattern: `%{"id" => id}`,
+      body: [
+        `    record = ${ctxModule}.get_${aggSnake}!(id)`,
+        `    ${ctxModule}.${b.eventName}!(record)`,
+        `    {:noreply, socket |> put_flash(:info, "${b.opHuman} succeeded")${navPipe}}`,
+      ],
+    };
+  });
 }
 
 function renderLiveView(a: RenderArgs): string {
-  const { page, liveModule, appModule, ui, aggregatesByName, contextModuleByAggName } = a;
+  const {
+    page,
+    liveModule,
+    appModule,
+    ui,
+    aggregatesByName,
+    contextModuleByAggName,
+    componentInfo,
+  } = a;
   const webModule = `${appModule}Web`;
 
   // All pages — scaffold and custom — route through the HEEx walker.
@@ -146,8 +246,14 @@ function renderLiveView(a: RenderArgs): string {
     contextModuleByAggName,
   );
   const detailBaseRoute = page.route ? page.route.replace(/\/:[^/]+$/, "") : null;
+  // Hoist `Action(...)` handlers from the page body + every component
+  // the page renders (transitively) into this page's LiveView.
+  const actionHandlers = buildActionHandlers(
+    gatherActionBindings(walked.actionBindings, walked.usedComponents, componentInfo),
+    contextModuleByAggName,
+  );
   const handleEventClauses =
-    renderHandleEventClauses(handlers) +
+    renderHandleEventClauses([...handlers, ...actionHandlers]) +
     renderOperationEventClauses(walked.formBindings, detailBaseRoute);
   const aliasBlock = aliasLines.length > 0 ? aliasLines.join("\n") + "\n" : "";
 
@@ -212,7 +318,7 @@ function renderMount(
       const ctxModule = contextModuleByAggName.get(fb.name);
       if (!ctxModule) continue; // unresolved — validator catches; silent skip
       assigns.push(
-        `      |> assign(:form, AshPhoenix.Form.for_create(${ctxModule}.${pascal(fb.name)}, :create) |> to_form())`,
+        `      |> assign(:form, AshPhoenix.Form.for_create(${ctxModule}.${upperFirst(fb.name)}, :create) |> to_form())`,
       );
       break; // single @form per page
     } else if (fb.kind === "workflow") {
@@ -248,7 +354,7 @@ function renderHandleParams(
 ): string {
   const paramAssigns: string[] = [];
   for (const p of page.params) {
-    paramAssigns.push(`assign(:${snake(p.name)}, params["${camel(p.name)}"])`);
+    paramAssigns.push(`assign(:${snake(p.name)}, params["${lowerFirst(p.name)}"])`);
   }
 
   // QueryView record loading.  The scaffold detail/list page reads
@@ -400,6 +506,63 @@ function indent(s: string, n: number): string {
     .split("\n")
     .map((line) => (line.length > 0 ? pad + line : line))
     .join("\n");
+}
+
+/** Phoenix `attr` type token for a component param's declared type. */
+function attrType(t: TypeIR): string {
+  switch (t.kind) {
+    case "entity":
+    case "valueobject":
+      return ":map";
+    case "array":
+      return ":list";
+    case "primitive":
+      return t.name === "int" || t.name === "decimal"
+        ? ":integer"
+        : t.name === "bool"
+          ? ":boolean"
+          : ":string";
+    default:
+      return ":any";
+  }
+}
+
+/** Emit `lib/<app>_web/components/ui_components.ex` — one HEEx
+ *  function component (`attr` declarations + `def <name>(assigns)`)
+ *  per `ui.component`.  Each body is walked with the component's
+ *  params/state in scope, so param refs resolve to `@assigns`. */
+function renderUiComponents(args: {
+  ui: UiIR;
+  appModule: string;
+  aggregatesByName: ReadonlyMap<string, AggregateIR>;
+}): string {
+  const { ui, appModule, aggregatesByName } = args;
+  const webModule = `${appModule}Web`;
+  const defs = ui.components.map((c) => {
+    const synthPage = {
+      name: c.name,
+      params: c.params,
+      state: c.state,
+      body: c.body,
+      source: "explicit",
+    } as PageIR;
+    const walked = walkBodyToHeex(c.body, synthPage, ui, appModule, aggregatesByName);
+    const attrLines = c.params
+      .map((p) => `  attr :${snake(p.name)}, ${attrType(p.type)}, required: true`)
+      .join("\n");
+    const attrBlock = attrLines.length > 0 ? `${attrLines}\n` : "";
+    return `${attrBlock}  def ${snake(c.name)}(assigns) do
+    ~H"""
+${indent(walked.heex, 4)}
+    """
+  end`;
+  });
+  return `defmodule ${webModule}.Components.UiComponents do
+  use ${webModule}, :html
+
+${defs.join("\n\n")}
+end
+`;
 }
 
 // Suppress unused-import lints for re-exports.

@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { camel, humanize, indent, pascal, plural, snake } from "../../src/util/naming.js";
+import { humanize, indent, lowerFirst, plural, snake, upperFirst } from "../../src/util/naming.js";
 
-describe("naming — pascal / camel", () => {
+describe("naming — upperFirst / lowerFirst", () => {
   it("upper/lower-cases only the first character, leaving the rest intact", () => {
-    expect(pascal("order")).toBe("Order");
-    expect(pascal("orderLine")).toBe("OrderLine");
-    expect(camel("Order")).toBe("order");
-    expect(camel("OrderLine")).toBe("orderLine");
+    expect(upperFirst("order")).toBe("Order");
+    expect(upperFirst("orderLine")).toBe("OrderLine");
+    expect(lowerFirst("Order")).toBe("order");
+    expect(lowerFirst("OrderLine")).toBe("orderLine");
   });
 
   it("returns the empty string unchanged", () => {
-    expect(pascal("")).toBe("");
-    expect(camel("")).toBe("");
+    expect(upperFirst("")).toBe("");
+    expect(lowerFirst("")).toBe("");
   });
 });
 

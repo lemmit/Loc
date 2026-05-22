@@ -7,7 +7,7 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../../../ir/loom-ir.js";
-import { camel, snake } from "../../../util/naming.js";
+import { lowerFirst, snake, upperFirst } from "../../../util/naming.js";
 import { emitWireSchema, wireToDomainExpr, zodFor } from "./routes-builder.js";
 
 // ---------------------------------------------------------------------------
@@ -60,9 +60,9 @@ export function buildWorkflowsFile(
     }
   }
   for (const aggName of aggsTouched) {
-    lines.push(`import { ${aggName} } from "../domain/${camel(aggName)}";`);
+    lines.push(`import { ${aggName} } from "../domain/${lowerFirst(aggName)}";`);
     lines.push(
-      `import { ${aggName}Repository } from "../db/repositories/${camel(aggName)}-repository";`,
+      `import { ${aggName}Repository } from "../db/repositories/${lowerFirst(aggName)}-repository";`,
     );
   }
   // Per-aggregate extern handler registry import — only when at least
@@ -77,7 +77,7 @@ export function buildWorkflowsFile(
   }
   for (const aggName of externAggs) {
     lines.push(
-      `import { externHandlers as ${camel(aggName)}ExternHandlers } from "../domain/${camel(aggName)}-extern";`,
+      `import { externHandlers as ${lowerFirst(aggName)}ExternHandlers } from "../domain/${lowerFirst(aggName)}-extern";`,
     );
   }
   // Value object + enum imports.  Enums are runtime-imported so
@@ -123,11 +123,11 @@ export function buildWorkflowsFile(
 
   // Per-workflow request schema.
   for (const wf of ctx.workflows) {
-    lines.push(`const ${capitalize(wf.name)}Request = z.object({`);
+    lines.push(`const ${upperFirst(wf.name)}Request = z.object({`);
     for (const p of wf.params) {
       lines.push(`  ${p.name}: ${zodFor(p.type)},`);
     }
-    lines.push(`}).openapi("${capitalize(wf.name)}Request");`);
+    lines.push(`}).openapi("${upperFirst(wf.name)}Request");`);
   }
   lines.push("");
 
@@ -174,14 +174,14 @@ function emitWorkflowRoute(
   aggsByName: Map<string, AggregateIR>,
 ): string[] {
   void aggsByName;
-  const reqName = `${capitalize(wf.name)}Request`;
+  const reqName = `${upperFirst(wf.name)}Request`;
   const out: string[] = [];
   out.push(`app.openapi(`);
   out.push(`  createRoute({`);
   out.push(`    method: "post",`);
   out.push(`    path: "/${snake(wf.name)}",`);
   out.push(`    tags: ["workflows"],`);
-  out.push(`    operationId: "${camel(wf.name)}Workflow",`);
+  out.push(`    operationId: "${lowerFirst(wf.name)}Workflow",`);
   out.push(`    request: {`);
   out.push(`      body: { content: { "application/json": { schema: ${reqName} } } },`);
   out.push(`    },`);
@@ -214,24 +214,24 @@ function emitWorkflowRoute(
     const txOpts = wf.isolation ? `, { isolationLevel: "${pgIsolationLevel(wf.isolation)}" }` : ``;
     out.push(`    await db.transaction(async (tx) => {${""}`);
     for (const r of reposNeeded) {
-      out.push(`      const ${camel(r.repoName)} = new ${r.aggName}Repository(tx, events);`);
+      out.push(`      const ${lowerFirst(r.repoName)} = new ${r.aggName}Repository(tx, events);`);
     }
     for (const st of wf.statements) {
       out.push(...renderStmt(st, paramExprs, "      ", ctx));
     }
     for (const save of wf.savesAtExit) {
-      out.push(`      await ${camel(save.repoName)}.save(${save.name});`);
+      out.push(`      await ${lowerFirst(save.repoName)}.save(${save.name});`);
     }
     out.push(`    }${txOpts});`);
   } else {
     for (const r of reposNeeded) {
-      out.push(`    const ${camel(r.repoName)} = new ${r.aggName}Repository(db, events);`);
+      out.push(`    const ${lowerFirst(r.repoName)} = new ${r.aggName}Repository(db, events);`);
     }
     for (const st of wf.statements) {
       out.push(...renderStmt(st, paramExprs, "    ", ctx));
     }
     for (const save of wf.savesAtExit) {
-      out.push(`    await ${camel(save.repoName)}.save(${save.name});`);
+      out.push(`    await ${lowerFirst(save.repoName)}.save(${save.name});`);
     }
   }
   if (hasEmit) {
@@ -272,7 +272,9 @@ function renderStmt(
     }
     case "repo-let": {
       const args = st.args.map(renderArg).join(", ");
-      return [`${indent}const ${st.name} = await ${camel(st.repoName)}.${st.method}(${args});`];
+      return [
+        `${indent}const ${st.name} = await ${lowerFirst(st.repoName)}.${st.method}(${args});`,
+      ];
     }
     case "op-call": {
       const args = st.args.map(renderArg).join(", ");
@@ -287,9 +289,9 @@ function renderStmt(
         // wrapped so any non-domain throw becomes an
         // ExternHandlerError; domain errors raised by the user
         // handler bubble unchanged.
-        const handlerKey = `${camel(st.op)}${st.aggName}`;
-        const checkName = `check${cap(st.op)}`;
-        const externAlias = `${camel(st.aggName)}ExternHandlers`;
+        const handlerKey = `${lowerFirst(st.op)}${st.aggName}`;
+        const checkName = `check${upperFirst(st.op)}`;
+        const externAlias = `${lowerFirst(st.aggName)}ExternHandlers`;
         const reqLiteral =
           op.params.length === 0
             ? `{} as Record<string, never>`
@@ -311,7 +313,7 @@ function renderStmt(
           `${indent}${st.target}.assertInvariants();`,
         ];
       }
-      return [`${indent}${st.target}.${camel(st.op)}(${args});`];
+      return [`${indent}${st.target}.${lowerFirst(st.op)}(${args});`];
     }
     case "expr-let":
       return [`${indent}const ${st.name} = ${renderArg(st.expr)};`];
@@ -325,8 +327,6 @@ function lookupOp(
 ): import("../../../ir/loom-ir.js").OperationIR | undefined {
   return ctx.aggregates.find((a) => a.name === aggName)?.operations.find((o) => o.name === opName);
 }
-
-const cap = (s: string): string => (s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1));
 
 function renderExprWithParams(e: ExprIR, paramExprs: Map<string, string>): string {
   // Workflow params are local consts now; ExprIR `ref` nodes for them
@@ -365,10 +365,6 @@ function pgIsolationLevel(level: import("../../../ir/loom-ir.js").IsolationLevel
     case "serializable":
       return "serializable";
   }
-}
-
-function capitalize(s: string): string {
-  return s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
 }
 
 /** Value objects referenced by any workflow's parameters.  Same

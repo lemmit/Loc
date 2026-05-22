@@ -1,4 +1,4 @@
-// Slice 11.14 — Field + Toggle with `bind:` two-way state binding.
+// Field + Toggle with `bind:` two-way state binding.
 // Closes the interactive-page loop in the walker stdlib: read
 // state via Text, mutate state via Button, BIND state via
 // Field / Toggle.
@@ -22,21 +22,12 @@
 //              checked={active}
 //              onChange={(e) => setActive(e.currentTarget.checked)} />
 
-import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
-import { createDddServices } from "../../src/language/ddd-module.js";
-import type { Model } from "../../src/language/generated/ast.js";
-import { generateSystems } from "../../src/system/index.js";
+import { generateSystemFiles } from "../_helpers/index.js";
 
-async function buildAndGenerate(src: string): Promise<Map<string, string>> {
-  const services = createDddServices(NodeFileSystem);
-  const { parseHelper } = await import("langium/test");
-  const helper = parseHelper(services.Ddd);
-  const doc = await helper(src, { validation: true });
-  return generateSystems(doc.parseResult.value as Model).files;
-}
+const buildAndGenerate = generateSystemFiles;
 
-describe("Slice 11.14 — Field + Toggle with bind: state binding", () => {
+describe("Field + Toggle with bind: state binding", () => {
   it("Field('Label', bind: name) wires controlled TextInput to state", async () => {
     const files = await buildAndGenerate(`
       system S {

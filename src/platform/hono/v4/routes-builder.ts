@@ -19,7 +19,7 @@ import type {
 } from "../../../ir/loom-ir.js";
 import { findUsesCurrentUser, operationUsesCurrentUser } from "../../../ir/loom-ir.js";
 import { opHasProvSite } from "../../../ir/prov-id.js";
-import { camel, plural, snake } from "../../../util/naming.js";
+import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Hono routes file with OpenAPI annotations.
@@ -73,9 +73,9 @@ export function buildRoutesFile(
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";`);
-  lines.push(`import { ${agg.name} } from "../domain/${camel(agg.name)}";`);
+  lines.push(`import { ${agg.name} } from "../domain/${lowerFirst(agg.name)}";`);
   lines.push(
-    `import { ${agg.name}Repository } from "../db/repositories/${camel(agg.name)}-repository";`,
+    `import { ${agg.name}Repository } from "../db/repositories/${lowerFirst(agg.name)}-repository";`,
   );
   lines.push(`import * as Ids from "../domain/ids";`);
   lines.push(
@@ -86,7 +86,7 @@ export function buildRoutesFile(
   // it has none.  Type-only import keeps the route file fine when
   // there are no extern ops; the runtime ref is gated below.
   if (agg.operations.some((o) => o.extern)) {
-    lines.push(`import { externHandlers } from "../domain/${camel(agg.name)}-extern";`);
+    lines.push(`import { externHandlers } from "../domain/${lowerFirst(agg.name)}-extern";`);
   }
   if (needsTx) {
     // Audited / provenanced operations write extra rows per successful
@@ -151,8 +151,8 @@ export function buildRoutesFile(
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
     lines.push(
       ...emitWireSchema(
-        `const ${cap(op.name)}Request`,
-        `${cap(op.name)}Request`,
+        `const ${upperFirst(op.name)}Request`,
+        `${upperFirst(op.name)}Request`,
         op.params.map((p) => ({ name: p.name, base: zodFor(p.type) })),
         preconditionsAsInvariants(op),
         new Set(op.params.map((p) => p.name)),
@@ -163,11 +163,11 @@ export function buildRoutesFile(
 
   if (repo) {
     for (const find of repo.finds) {
-      lines.push(`const ${cap(find.name)}Query = z.object({`);
+      lines.push(`const ${upperFirst(find.name)}Query = z.object({`);
       for (const p of find.params) {
         lines.push(`  ${p.name}: ${zodFor(p.type)},`);
       }
-      lines.push(`}).openapi("${cap(find.name)}Query");`);
+      lines.push(`}).openapi("${upperFirst(find.name)}Query");`);
     }
   }
 
@@ -205,7 +205,7 @@ export function buildRoutesFile(
   const routerParams = needsTx
     ? `repo: ${agg.name}Repository, db: NodePgDatabase<typeof schema>, events: DomainEventDispatcher`
     : `repo: ${agg.name}Repository`;
-  lines.push(`export function ${camel(agg.name)}Routes(${routerParams}): OpenAPIHono {`);
+  lines.push(`export function ${lowerFirst(agg.name)}Routes(${routerParams}): OpenAPIHono {`);
   lines.push(`  const app = new OpenAPIHono();`);
   lines.push("");
 
@@ -341,10 +341,12 @@ function emitOperationRoute(
   out.push(`    method: "post",`);
   out.push(`    path: "/{id}/${opSnake}",`);
   out.push(`    tags: ["${aggSlug}"],`);
-  out.push(`    operationId: "${camel(op.name)}${agg.name}",`);
+  out.push(`    operationId: "${lowerFirst(op.name)}${agg.name}",`);
   out.push(`    request: {`);
   out.push(`      params: z.object({ id: z.string() }),`);
-  out.push(`      body: { content: { "application/json": { schema: ${cap(op.name)}Request } } },`);
+  out.push(
+    `      body: { content: { "application/json": { schema: ${upperFirst(op.name)}Request } } },`,
+  );
   out.push(`    },`);
   out.push(`    responses: {`);
   out.push(`      204: { description: "No content" },`);
@@ -377,11 +379,11 @@ function emitOperationRoute(
       // non-domain throw becomes an ExternHandlerError naming the op +
       // aggregate (see app.onError below for the 500 mapping).  Domain
       // errors re-throw unchanged so 400 / 403 / 404 still apply.
-      const handlerKey = `${camel(op.name)}${agg.name}`;
+      const handlerKey = `${lowerFirst(op.name)}${agg.name}`;
       return [
-        `${pad}aggregate.check${cap(op.name)}(${callArgs});`,
+        `${pad}aggregate.check${upperFirst(op.name)}(${callArgs});`,
         `${pad}const handler = externHandlers.${handlerKey};`,
-        `${pad}if (!handler) throw new Error("Missing extern handler for ${handlerKey}. Register one via register${cap(op.name)}${agg.name}Handler(...) before app.listen().");`,
+        `${pad}if (!handler) throw new Error("Missing extern handler for ${handlerKey}. Register one via register${upperFirst(op.name)}${agg.name}Handler(...) before app.listen().");`,
         `${pad}try {`,
         `${pad}  await handler(aggregate, body);`,
         `${pad}} catch (err) {`,
@@ -393,7 +395,7 @@ function emitOperationRoute(
         `${pad}aggregate.assertInvariants();`,
       ];
     }
-    return [`${pad}aggregate.${camel(op.name)}(${callArgs});`];
+    return [`${pad}aggregate.${lowerFirst(op.name)}(${callArgs});`];
   };
 
   if (!audit && !prov) {
@@ -423,7 +425,7 @@ function emitOperationRoute(
       out.push(`      const __after = repoTx.toWire(aggregate);`);
       out.push(`      await tx.insert(schema.auditRecords).values({`);
       out.push(`        auditId: randomUUID(),`);
-      out.push(`        operationId: "${camel(op.name)}${agg.name}",`);
+      out.push(`        operationId: "${lowerFirst(op.name)}${agg.name}",`);
       out.push(`        action: "${op.name}",`);
       out.push(`        targetType: "${agg.name}",`);
       out.push(`        targetId: id,`);
@@ -469,9 +471,9 @@ function emitFindRoute(agg: AggregateIR, find: FindIR, ctx: BoundedContextIR): s
   out.push(`    method: "get",`);
   out.push(`    path: "${path}",`);
   out.push(`    tags: ["${aggSlug}"],`);
-  out.push(`    operationId: "${camel(find.name)}${agg.name}",`);
+  out.push(`    operationId: "${lowerFirst(find.name)}${agg.name}",`);
   if (find.params.length > 0) {
-    out.push(`    request: { query: ${cap(find.name)}Query },`);
+    out.push(`    request: { query: ${upperFirst(find.name)}Query },`);
   }
   out.push(`    responses: {`);
   out.push(
@@ -488,7 +490,7 @@ function emitFindRoute(agg: AggregateIR, find: FindIR, ctx: BoundedContextIR): s
   if (find.params.length > 0) {
     out.push(`    const params = c.req.valid("query");`);
   }
-  // Slice 1C: when the find's where clause references currentUser,
+  // When the find's where clause references currentUser,
   // the repository method gains a trailing `currentUser: User`
   // parameter.  Read it from the request scope where the auth
   // middleware stashed it earlier in the pipeline.
@@ -670,10 +672,6 @@ function collectUsedEnums(
     for (const d of part.derived) visit(d.type);
   }
   return ctx.enums.filter((e) => used.has(e.name));
-}
-
-function cap(s: string): string {
-  return s[0]!.toUpperCase() + s.slice(1);
 }
 
 // ---------------------------------------------------------------------------

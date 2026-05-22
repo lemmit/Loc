@@ -16,11 +16,11 @@ import type { AggregateIR, ViewIR, WorkflowIR } from "../../../../ir/loom-ir.js"
 import { humanize, plural, snake } from "../../../../util/naming.js";
 import type { AppShellVM, ImportVM, NavEntryVM, NavSectionVM, RouteVM } from "../view-models.js";
 
-function pascal(s: string): string {
+function upperFirst(s: string): string {
   return s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
 }
 
-/** Slice 11.1 — extra Routes / imports for explicit pages with
+/** Extra Routes / imports for explicit pages with
  *  non-conventional routes.  Each entry is a flat record because
  *  the AppShell preparer doesn't pull in the page-IR module. */
 export interface ExtraPageRoute {
@@ -39,13 +39,13 @@ export function prepareAppShellVM(
   workflows: WorkflowIR[],
   views: ViewIR[],
   systemName: string,
-  /** Slice 6 — when the deployable's `ui:` block declares an explicit
+  /** When the deployable's `ui:` block declares an explicit
    *  `menu { … }`, the caller derives `navSections` from that block
    *  (via `deriveSidebarFromUi`) and passes them here.  When
    *  undefined the legacy hardcoded grouping (Aggregates / Workflows /
-   *  Views) is used — byte-equivalent to main's pre-Slice-6 output. */
+   *  Views) is used — byte-equivalent to the original sidebar output. */
   sidebarOverride?: NavSectionVM[],
-  /** Slice 11.1 — explicit pages with non-conventional names emit
+  /** Explicit pages with non-conventional names emit
    *  at `src/pages/<name-snake>.tsx`.  The caller hands their
    *  import + route shape so App.tsx can import & route them
    *  alongside the conventional aggregate/workflow/view set.
@@ -69,7 +69,7 @@ export function prepareAppShellVM(
   // Per-aggregate pages.
   for (const agg of aggregates) {
     const slug = snake(plural(agg.name));
-    const cap = pascal(agg.name);
+    const cap = upperFirst(agg.name);
     imports.push({ specifier: `${cap}List`, from: `./pages/${slug}/list` });
     imports.push({ specifier: `${cap}New`, from: `./pages/${slug}/new` });
     imports.push({ specifier: `${cap}Detail`, from: `./pages/${slug}/detail` });
@@ -84,7 +84,7 @@ export function prepareAppShellVM(
     routes.push({ path: "/workflows", elementJsx: "<WorkflowsIndex />" });
     for (const wf of workflows) {
       const slug = snake(wf.name);
-      const cap = `${pascal(wf.name)}WorkflowPage`;
+      const cap = `${upperFirst(wf.name)}WorkflowPage`;
       imports.push({ specifier: cap, from: `./pages/workflows/${slug}` });
       routes.push({ path: `/workflows/${slug}`, elementJsx: `<${cap} />` });
     }
@@ -96,13 +96,13 @@ export function prepareAppShellVM(
     routes.push({ path: "/views", elementJsx: "<ViewsIndex />" });
     for (const view of views) {
       const slug = snake(view.name);
-      const cap = `${pascal(view.name)}ViewPage`;
+      const cap = `${upperFirst(view.name)}ViewPage`;
       imports.push({ specifier: cap, from: `./pages/views/${slug}` });
       routes.push({ path: `/views/${slug}`, elementJsx: `<${cap} />` });
     }
   }
 
-  // Slice 11.1 — explicit pages with non-conventional names.
+  // Explicit pages with non-conventional names.
   // Mounted AFTER the conventional set so React Router matches
   // the conventional routes first when a user-supplied custom
   // route happens to start with `/orders` etc.  The preparer

@@ -1,15 +1,15 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { type AstNode, AstUtils, EmptyFileSystem } from "langium";
+import { type AstNode, AstUtils } from "langium";
 import { describe, expect, it } from "vitest";
-import { createDddServices } from "../../src/language/ddd-module.js";
 import type { BodyProp } from "../../src/language/generated/ast.js";
 import { type BuilderNode, emitBody, seedFromBody } from "../../web/src/builder/page/model.js";
 import { fromCraft, toCraft } from "../../web/src/builder/page/serialize.js";
+import { parseRawResult } from "../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
-// Page-builder data-layer round-trip (Builders, Phase 1).  For every page
+// Page-builder data-layer round-trip (Builders).  For every page
 // `body:` in the corpus: seed the builder tree, emit it back, splice over the
 // body's CST range, re-parse, and assert an identical AST.  Recognize-or-opaque
 // must lose nothing.
@@ -17,7 +17,6 @@ import { fromCraft, toCraft } from "../../web/src/builder/page/serialize.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..", "..");
-const parser = createDddServices(EmptyFileSystem).Ddd.parser.LangiumParser;
 
 function norm(v: unknown): unknown {
   if (Array.isArray(v)) return v.map(norm);
@@ -47,7 +46,7 @@ describe("page-builder model round-trip", () => {
   for (const file of collectDddFiles()) {
     const rel = path.relative(repoRoot, file);
     const text = fs.readFileSync(file, "utf8");
-    const original = parser.parse(text);
+    const original = parseRawResult(text);
     if (original.parserErrors.length > 0) continue; // fragments handled elsewhere
 
     const bodies: BodyProp[] = [];
@@ -63,7 +62,7 @@ describe("page-builder model round-trip", () => {
         if (!cst) continue;
         const emitted = emitBody(seedFromBody(body.expr));
         const spliced = text.slice(0, cst.offset) + emitted + text.slice(cst.end);
-        const re = parser.parse(spliced);
+        const re = parseRawResult(spliced);
         expect(re.parserErrors, `emitted body must parse:\n${emitted}`).toEqual([]);
         expect(norm(re.value), `emitted body must round-trip:\n${emitted}`).toEqual(normOrig);
       }
@@ -75,7 +74,7 @@ describe("page-builder model — primitive coverage", () => {
   // Seed → emit → splice → re-parse a body in isolation; assert identical AST.
   const roundtrips = (bodyExpr: string): void => {
     const doc = `system S { ui U { page P { body: ${bodyExpr} } } }`;
-    const original = parser.parse(doc);
+    const original = parseRawResult(doc);
     expect(original.parserErrors, `fixture must parse:\n${bodyExpr}`).toEqual([]);
     const body = [...AstUtils.streamAst(original.value)].find(
       (n) => n.$type === "BodyProp",
@@ -83,7 +82,7 @@ describe("page-builder model — primitive coverage", () => {
     const cst = body.expr.$cstNode!;
     const emitted = emitBody(seedFromBody(body.expr));
     const spliced = doc.slice(0, cst.offset) + emitted + doc.slice(cst.end);
-    const re = parser.parse(spliced);
+    const re = parseRawResult(spliced);
     expect(re.parserErrors, `emitted must parse:\n${emitted}`).toEqual([]);
     expect(norm(re.value), `emitted must round-trip:\n${emitted}`).toEqual(norm(original.value));
   };
@@ -92,7 +91,7 @@ describe("page-builder model — primitive coverage", () => {
     "List(of: Order)",
     'Form(of: Order, testid: "orders-new")',
     "Form(creates: Product)",
-    "Form(of: Account, op: withdraw)",
+    "Form(account.withdraw)",
     "Form(runs: PlaceOrder)",
     'Badge("Alpha", color: "blue")',
     // Expression-valued props (the `expr` prop kind): data-bound args must
@@ -107,14 +106,14 @@ describe("page-builder model — primitive coverage", () => {
     'Grid(Text("a"), Text("b"), Text("c"))',
     'Toolbar(Button("Save"), Button("Cancel"))',
     'Stack(Heading("Title", level: 2), List(of: Order))',
-    // Containers with props (Phase A): titled/modified containers whose
+    // Containers with props: titled/modified containers whose
     // children must remain editable nodes, not collapse to Opaque.
     'Card("Summary", Stack(Text("hi")))',
     'Card(Stack(Text("untitled")))',
     'Card("Just a title")',
     'Container(Stack(Text("x")), size: "md")',
     'Paper(Text("p"), padding: "lg")',
-    // Phase 2 — remaining stdlib scalar/expr primitives.
+    // remaining stdlib scalar/expr primitives.
     'Stat("Active users", "1,247")',
     'Stat("Revenue", order.total)',
     "Money(line.subtotal)",
@@ -133,13 +132,13 @@ describe("page-builder model — primitive coverage", () => {
     'Breadcrumbs(Anchor("Home", to: "/"), Text("Orders"))',
     'KeyValueRow("Total", Text("42"))',
     'KeyValueRow("Total", order.total)',
-    // Phase 3 — Tabs holds editable Tab children, each with a title + body.
+    // Tabs holds editable Tab children, each with a title + body.
     'Tabs(Tab("Overview", Text("a")), Tab("Details", List(of: Order)))',
     'Card("Tabs", Tabs(Tab("Overview", Text("Overview tab body"))))',
-    // Phase 4 — lambdas (expression body) and Table/Column accessors.
+    // lambdas (expression body) and Table/Column accessors.
     'Table(rows: orders, Column("ID", o => IdLink(o.id, of: Order)), Column("Status", o => EnumBadge(o.status)))',
     'Column("Name", o => Text(o.name))',
-    // Phase 5 — match: predicate arms with value children + optional else.
+    // match: predicate arms with value children + optional else.
     'match {\n  step == 0 => Text("first")\n  step == 1 => Text("second")\n}',
     'match {\n  step == 1 => List(of: Order),\n  else => Empty("loading")\n}',
     // Named-arg child slots: QueryView branches, Table callbacks, Modal trigger
@@ -184,7 +183,7 @@ describe("page-builder model — primitive coverage", () => {
 describe("page-builder model — user-defined component calls", () => {
   const seedWith = (bodyExpr: string, comps: Record<string, string[]>) => {
     const doc = `system S { ui U { page P { body: ${bodyExpr} } } }`;
-    const original = parser.parse(doc);
+    const original = parseRawResult(doc);
     expect(original.parserErrors, `fixture must parse:\n${bodyExpr}`).toEqual([]);
     const body = [...AstUtils.streamAst(original.value)].find(
       (n) => n.$type === "BodyProp",
@@ -192,7 +191,7 @@ describe("page-builder model — user-defined component calls", () => {
     const node = seedFromBody(body.expr, new Map(Object.entries(comps)));
     const cst = body.expr.$cstNode!;
     const spliced = doc.slice(0, cst.offset) + emitBody(node) + doc.slice(cst.end);
-    const re = parser.parse(spliced);
+    const re = parseRawResult(spliced);
     expect(re.parserErrors, `emitted must parse:\n${emitBody(node)}`).toEqual([]);
     expect(norm(re.value)).toEqual(norm(original.value));
     return node;
@@ -226,7 +225,7 @@ describe("page-builder model — user-defined component calls", () => {
 describe("page-builder model — container-with-props seed shape", () => {
   const seed = (bodyExpr: string) => {
     const doc = `system S { ui U { page P { body: ${bodyExpr} } } }`;
-    const original = parser.parse(doc);
+    const original = parseRawResult(doc);
     expect(original.parserErrors, `fixture must parse:\n${bodyExpr}`).toEqual([]);
     const body = [...AstUtils.streamAst(original.value)].find(
       (n) => n.$type === "BodyProp",
@@ -380,10 +379,9 @@ describe("page-builder model — container-with-props seed shape", () => {
     expect(node.props.of).toBe("Sales.Order");
   });
 
-  it("recognises Form op/runs bindings", () => {
-    const op = seed("Form(of: Account, op: withdraw)");
-    expect(op.props.of).toBe("Account");
-    expect(op.props.op).toBe("withdraw");
+  it("recognises the instance-qualified operation form + runs binding", () => {
+    const op = seed("Form(account.withdraw)");
+    expect(op.props.operation).toBe("account.withdraw");
     expect(seed("Form(runs: PlaceOrder)").props.runs).toBe("PlaceOrder");
   });
 
@@ -417,7 +415,9 @@ describe("page-builder model — container-with-props seed shape", () => {
     const out = emitBody(node);
     expect(out.indexOf("else =>")).toBeGreaterThan(out.indexOf("1 == 1 =>"));
     // And it re-parses cleanly.
-    expect(parser.parse(`system S { ui U { page P { body: ${out} } } }`).parserErrors).toEqual([]);
+    expect(parseRawResult(`system S { ui U { page P { body: ${out} } } }`).parserErrors).toEqual(
+      [],
+    );
   });
 
   it("models named-arg child slots and survives the craft round-trip", () => {

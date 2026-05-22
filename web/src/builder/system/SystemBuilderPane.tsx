@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Background,
   Controls,
@@ -8,6 +8,7 @@ import {
   useNodesInitialized,
   useNodesState,
   useReactFlow,
+  type Connection,
   type Edge,
   type Node,
 } from "@xyflow/react";
@@ -15,12 +16,16 @@ import "@xyflow/react/dist/style.css";
 import { AstUtils, type AstNode } from "langium";
 import { Box, Button, Checkbox, Drawer, Group, Modal, MultiSelect, NumberInput, ScrollArea, Select, Stack, Text, TextInput, Textarea } from "@mantine/core";
 import type { LayoutCtx } from "../../layout/ctx";
-import type { BoundedContext, Model, System } from "../../../../src/language/generated/ast.js";
+import type { Model } from "../../../../src/language/generated/ast.js";
 import { printStructural } from "../../../../src/language/print/index.js";
 import { parseDdd } from "../parse";
-import { spliceNode, applyEdits, lineDiff } from "../edit-engine";
+import { spliceNode, lineDiff } from "../edit-engine";
 import { buildSystemGraph, coverageByNode, matchNodes, nodeDiagnostics, typeLabel, wireShapeOf, type CoverageStatus, type GraphNode, type NodeKind } from "./model";
 import type { WireField } from "../../../../src/ir/loom-ir.js";
+import { loadPositions, savePositions, type Pos } from "./positions";
+import { addConstructSource, addModuleSource, firstAggregateName, listContextNames } from "./add";
+import { groupedLayout } from "./grouped-layout";
+import { isRebindableEdge, rebindEdgeTarget } from "./edge-rebind";
 import { buildLinkedModel } from "./linked-doc";
 import { lowerModel } from "../../../../src/ir/lower.js";
 import { enrichLoomModel } from "../../../../src/ir/enrichments.js";
@@ -125,126 +130,123 @@ const COVERAGE_COLOR: Record<CoverageStatus, string> = {
   none: "var(--mantine-color-dark-4)",
 };
 
+// One construct (leaf) node, with its kind / coverage colour, diagnostic
+// border + count, and optional containing group (for nested layout).
+function leafRfNode(
+  n: ReturnType<typeof buildSystemGraph>["nodes"][number],
+  diagByNode: Map<string, Diagnostic[]>,
+  coverage: Map<string, CoverageStatus>,
+  overlay: boolean,
+  position: Pos,
+  parentId?: string,
+): Node {
+  const diags = diagByNode.get(n.id);
+  const sev = worstSeverity(diags);
+  const mark = sev ? `\n${sev === "error" ? "✕" : "⚠"} ${diags!.length}` : "";
+  const background = overlay ? COVERAGE_COLOR[coverage.get(n.id) ?? "none"] : KIND_COLOR[n.kind];
+  return {
+    id: n.id,
+    position,
+    ...(parentId ? { parentId, extent: "parent" as const } : {}),
+    data: { label: `${n.kind}\n${n.name}${mark}`, title: diags?.map((d) => d.message).join("\n") },
+    style: {
+      background,
+      color: "white",
+      border: sev ? `2px solid ${SEVERITY_COLOR[sev]}` : "1px solid rgba(255,255,255,0.25)",
+      borderRadius: 6,
+      fontSize: 11,
+      width: 150,
+      whiteSpace: "pre-line" as const,
+      textAlign: "center" as const,
+    },
+  };
+}
+
 function toRfNodes(
   graph: ReturnType<typeof buildSystemGraph>,
   diagByNode: Map<string, Diagnostic[]>,
   coverage: Map<string, CoverageStatus>,
   overlay: boolean,
+  positions: Map<string, Pos>,
 ): Node[] {
-  return graph.nodes.map((n) => {
-    const diags = diagByNode.get(n.id);
-    const sev = worstSeverity(diags);
-    const mark = sev ? `\n${sev === "error" ? "✕" : "⚠"} ${diags!.length}` : "";
-    const background = overlay ? COVERAGE_COLOR[coverage.get(n.id) ?? "none"] : KIND_COLOR[n.kind];
+  return graph.nodes.map((n) =>
+    leafRfNode(n, diagByNode, coverage, overlay, positions.get(n.id) ?? { x: n.x, y: n.y }),
+  );
+}
+
+const GROUP_STYLE: Record<"module" | "context", { background: string; border: string }> = {
+  module: { background: "rgba(59,130,246,0.06)", border: "1px solid var(--mantine-color-blue-7)" },
+  context: { background: "rgba(20,184,166,0.07)", border: "1px dashed var(--mantine-color-teal-6)" },
+};
+
+// Nested layout: module / context group containers (parents first, so React
+// Flow sees a parent before its children) then the member leaf nodes positioned
+// inside them. Modules become group containers, so the flat module node is
+// dropped here (its edges are remapped to the group by `groupedEdges`).
+function toGroupedRfNodes(
+  graph: ReturnType<typeof buildSystemGraph>,
+  diagByNode: Map<string, Diagnostic[]>,
+  coverage: Map<string, CoverageStatus>,
+  overlay: boolean,
+  layout: ReturnType<typeof groupedLayout>,
+): Node[] {
+  const out: Node[] = [];
+  for (const kind of ["module", "context"] as const) {
+    for (const g of layout.groups) {
+      if (g.kind !== kind) continue;
+      out.push({
+        id: g.id,
+        position: { x: g.x, y: g.y },
+        ...(g.parentId ? { parentId: g.parentId, extent: "parent" as const } : {}),
+        data: { label: `${g.kind} ${g.name}` },
+        draggable: false,
+        selectable: false,
+        style: {
+          width: g.width,
+          height: g.height,
+          ...GROUP_STYLE[kind],
+          borderRadius: 8,
+          fontSize: 10,
+          fontWeight: 600,
+          color: "var(--mantine-color-dimmed)",
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "flex-start",
+          padding: "3px 6px",
+          textAlign: "left" as const,
+        },
+      });
+    }
+  }
+  for (const n of graph.nodes) {
+    if (n.kind === "module") continue; // modules are group containers in this mode
+    const p = layout.placements.get(n.id);
+    if (p) out.push(leafRfNode(n, diagByNode, coverage, overlay, { x: p.x, y: p.y }, p.parentId ?? undefined));
+  }
+  return out;
+}
+
+function toRfEdges(graph: ReturnType<typeof buildSystemGraph>, grouped = false): Edge[] {
+  // In grouped mode an edge to a module points at that module's group node.
+  const remap = (id: string): string => (grouped && id.startsWith("module:") ? `group:${id}` : id);
+  return graph.edges.map((e) => {
+    const ownerKind = e.source.slice(0, e.source.indexOf(":"));
+    // Single cross-ref edges can be repointed by dragging their target endpoint;
+    // disabled in grouped mode (endpoints may be group containers).
+    const reconnectable: "target" | false =
+      !grouped && isRebindableEdge(ownerKind, e.label) ? "target" : false;
     return {
-      id: n.id,
-      position: { x: n.x, y: n.y },
-      data: { label: `${n.kind}\n${n.name}${mark}`, title: diags?.map((d) => d.message).join("\n") },
-      style: {
-        background,
-        color: "white",
-        border: sev ? `2px solid ${SEVERITY_COLOR[sev]}` : "1px solid rgba(255,255,255,0.25)",
-        borderRadius: 6,
-        fontSize: 11,
-        width: 150,
-        whiteSpace: "pre-line" as const,
-        textAlign: "center" as const,
-      },
+      id: e.id,
+      source: remap(e.source),
+      target: remap(e.target),
+      label: e.label,
+      reconnectable,
+      labelStyle: { fontSize: 9, fill: "var(--mantine-color-dimmed)" },
+      style: { stroke: "var(--mantine-color-dark-2)" },
     };
   });
 }
 
-function toRfEdges(graph: ReturnType<typeof buildSystemGraph>): Edge[] {
-  return graph.edges.map((e) => ({
-    id: e.id,
-    source: e.source,
-    target: e.target,
-    label: e.label,
-    labelStyle: { fontSize: 9, fill: "var(--mantine-color-dimmed)" },
-    style: { stroke: "var(--mantine-color-dark-2)" },
-  }));
-}
-
-function freshName(ast: Model, kind: NodeKind, base: string): string {
-  const taken = new Set<string>();
-  for (const n of AstUtils.streamAst(ast)) {
-    const name = (n as { name?: unknown }).name;
-    if (typeof name === "string") taken.add(name);
-  }
-  for (let i = 1; ; i++) {
-    const candidate = `${base}${i}`;
-    if (!taken.has(candidate)) return candidate;
-  }
-}
-
-/** Insert `text` just before the closing brace of `block` (i.e. as its last
- *  child).  `block` must come from parsing `source`. */
-function insertIntoBlock(source: string, block: AstNode, text: string): string {
-  const cst = block.$cstNode;
-  if (!cst) throw new Error("insertIntoBlock: node has no CST");
-  const at = cst.end - 1; // before the trailing `}`
-  return applyEdits(source, [{ offset: at, end: at, newText: text }]);
-}
-
-const CONSTRUCT_BASE: Partial<Record<NodeKind, string>> = {
-  aggregate: "Aggregate",
-  valueobject: "ValueObject",
-  event: "Event",
-  repository: "Repository",
-  view: "View",
-  workflow: "Workflow",
-  api: "Api",
-  storage: "Storage",
-  ui: "Ui",
-  deployable: "Deployable",
-};
-
-// Infra constructs live at system scope; domain constructs live in a context.
-const INFRA_KINDS = new Set<NodeKind>(["api", "storage", "ui", "deployable"]);
-
-function firstNodeName(ast: Model, type: string): string | undefined {
-  for (const n of AstUtils.streamAst(ast)) {
-    if (n.$type === type) return (n as { name?: string }).name;
-  }
-  return undefined;
-}
-const firstAggregateName = (ast: Model): string | undefined => firstNodeName(ast, "Aggregate");
-
-// Minimal-but-valid source for a freshly added construct. Constructs that
-// require a reference (repository/view → an aggregate, api → a module) return
-// null when none exists, so the add is skipped.
-function constructTemplate(kind: NodeKind, name: string, ast: Model): string | null {
-  switch (kind) {
-    case "aggregate":
-      return `\n    aggregate ${name} {\n    }\n`;
-    case "valueobject":
-      return `\n    valueobject ${name} {\n      value: string\n    }\n`;
-    case "event":
-      return `\n    event ${name} {\n    }\n`;
-    case "workflow":
-      return `\n    workflow ${name}() {\n    }\n`;
-    case "repository": {
-      const agg = firstAggregateName(ast);
-      return agg ? `\n    repository ${name} for ${agg} {\n    }\n` : null;
-    }
-    case "view": {
-      const agg = firstAggregateName(ast);
-      return agg ? `\n    view ${name} = ${agg} where true\n` : null;
-    }
-    case "storage":
-      return `\n  storage ${name} {\n    type: postgres\n  }\n`;
-    case "ui":
-      return `\n  ui ${name} {\n  }\n`;
-    case "deployable":
-      return `\n  deployable ${name} {\n    platform: hono\n  }\n`;
-    case "api": {
-      const mod = firstNodeName(ast, "Module");
-      return mod ? `\n  api ${name} from ${mod}\n` : null;
-    }
-    default:
-      return null;
-  }
-}
 
 export default function SystemBuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   return (
@@ -306,7 +308,8 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
 
   // Seed with the first render's nodes/edges (not [] populated by an effect) so
   // the `fitView` prop actually has something to fit on mount.
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(graph ? toRfNodes(graph, diagByNode, new Map(), false) : []);
+  const positionsRef = useRef<Map<string, Pos>>(loadPositions());
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(graph ? toRfNodes(graph, diagByNode, new Map(), false, positionsRef.current) : []);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(graph ? toRfEdges(graph) : []);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const compact = !ctx.isDesktop;
@@ -318,6 +321,9 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const [exprMode, setExprMode] = useState<ExprMode>("structured");
   const [findName, setFindName] = useState<string | null>(null);
   const [emitKey, setEmitKey] = useState<string | null>(null);
+  // Which body assignment's value is currently expanded into the inline
+  // structured editor (`<body-key>:<index>`), or null when all are collapsed.
+  const [structuredKey, setStructuredKey] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [kindFilter, setKindFilter] = useState<NodeKind[]>([]);
   const [overlay, setOverlay] = useState(false);
@@ -325,6 +331,8 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const [preview, setPreview] = useState(false);
   const [pending, setPending] = useState<{ next: string; keepSelection: boolean } | null>(null);
   const [wireShape, setWireShape] = useState<WireField[] | null>(null);
+  const [grouped, setGrouped] = useState(false);
+  const layout = useMemo(() => (grouped && graph ? groupedLayout(graph) : null), [grouped, graph]);
 
   // Search + kind filter → the set of node ids to emphasise. Inactive (empty
   // query and no kinds) matches every node, so nothing dims.
@@ -342,13 +350,47 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     setExprMode("structured");
     setFindName(null);
     setEmitKey(null);
+    setStructuredKey(null);
   }, [selectedId]);
 
   useEffect(() => {
     if (!graph) return;
-    setNodes(toRfNodes(graph, diagByNode, coverage, overlay));
-    setEdges(toRfEdges(graph));
-  }, [graph, diagByNode, coverage, overlay, setNodes, setEdges]);
+    if (grouped && layout) {
+      setNodes(toGroupedRfNodes(graph, diagByNode, coverage, overlay, layout));
+      setEdges(toRfEdges(graph, true));
+    } else {
+      setNodes(toRfNodes(graph, diagByNode, coverage, overlay, positionsRef.current));
+      setEdges(toRfEdges(graph));
+    }
+  }, [graph, diagByNode, coverage, overlay, grouped, layout, setNodes, setEdges]);
+
+  // Persist hand-dragged positions: track them live, write to storage on drag
+  // end (`dragging === false`). Re-applied by `toRfNodes` on every re-seed, so a
+  // source edit or reload no longer resets the user's arrangement.
+  const handleNodesChange = useCallback<typeof onNodesChange>(
+    (changes) => {
+      onNodesChange(changes);
+      // Grouped layout is computed (positions are relative to a parent), so it
+      // isn't persisted — only the flat layout's absolute positions are.
+      if (grouped) return;
+      let settled = false;
+      for (const c of changes) {
+        if (c.type === "position" && c.position && !c.id.startsWith("group:")) {
+          positionsRef.current.set(c.id, c.position);
+          if (c.dragging === false) settled = true;
+        }
+      }
+      if (settled) savePositions(positionsRef.current);
+    },
+    [onNodesChange, grouped],
+  );
+
+  const resetLayout = (): void => {
+    positionsRef.current = new Map();
+    savePositions(positionsRef.current);
+    if (graph) setNodes(toRfNodes(graph, diagByNode, coverage, overlay, positionsRef.current));
+    void rf.fitView({ padding: 0.15 });
+  };
 
   // Coverage overlay: lower + enrich the *linked* model (cross-refs resolved so
   // `entitles`/`covers` land) and map the traceability index onto graph nodes.
@@ -404,7 +446,8 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   // Dim non-matching nodes / edges in place (preserving positions) when a search
   // or kind filter is active; an edge stays lit only if both endpoints match.
   useEffect(() => {
-    const lit = (id: string): boolean => !filterActive || matched.has(id);
+    // Group containers (ids prefixed `group:`) are never dimmed.
+    const lit = (id: string): boolean => id.startsWith("group:") || !filterActive || matched.has(id);
     setNodes((ns) => ns.map((n) => ({ ...n, style: { ...n.style, opacity: lit(n.id) ? 1 : 0.2 } })));
     setEdges((es) => es.map((e) => ({ ...e, style: { ...e.style, opacity: !filterActive || (matched.has(e.source) && matched.has(e.target)) ? 1 : 0.1 } })));
   }, [matched, filterActive, setNodes, setEdges]);
@@ -416,10 +459,20 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const nodesInitialized = useNodesInitialized();
   useEffect(() => {
     if (nodesInitialized && graph) void rf.fitView({ padding: 0.15 });
-  }, [nodesInitialized, graph, rf]);
+  }, [nodesInitialized, graph, grouped, rf]);
 
   const hasAggregate = useMemo(() => !!firstAggregateName(parsed.ast), [parsed]);
-  const hasModule = useMemo(() => !!firstNodeName(parsed.ast, "Module"), [parsed]);
+  const contextNames = useMemo(() => listContextNames(parsed.ast), [parsed]);
+  const moduleNameList = useMemo(() => moduleNames(parsed.ast), [parsed]);
+  const hasModule = moduleNameList.length > 0;
+  // Add-target picks; null means "first" (the default). Clear a stale pick when
+  // the named context / module no longer exists after an edit.
+  const [addContext, setAddContext] = useState<string | null>(null);
+  const [addModuleName, setAddModuleName] = useState<string | null>(null);
+  useEffect(() => {
+    if (addContext && !contextNames.includes(addContext)) setAddContext(null);
+    if (addModuleName && !moduleNameList.includes(addModuleName)) setAddModuleName(null);
+  }, [contextNames, moduleNameList, addContext, addModuleName]);
   const typeOptions = useMemo(() => availableTypes(parsed.ast), [parsed]);
   const baseByLabel = useMemo(() => {
     const m = new Map<string, BaseSpec>();
@@ -480,29 +533,18 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   };
 
   const addModule = (): void => {
-    const fresh = parseDdd(ctx.getSource());
-    const system = fresh.ast.members.find((m): m is System => m.$type === "System");
-    if (!system) return;
-    const name = freshName(fresh.ast, "module", "Module");
-    const text = `\n  module ${name} {\n    context ${name}Ctx {\n    }\n  }\n`;
-    apply(insertIntoBlock(ctx.getSource(), system, text));
+    const next = addModuleSource(ctx.getSource());
+    if (next != null) apply(next);
   };
 
-  // Add a context-level construct (aggregate / value object / event / repository
-  // / view / workflow) into the first bounded context, from a minimal valid
-  // template. Repository / view need an aggregate to reference, so they're
-  // gated on one existing. The result is parse-guarded before it's applied.
+  // Add a construct into the chosen target context (domain kinds) / module (api),
+  // defaulting to the first when none is picked. Parse-guarded inside `add.ts`.
   const addConstruct = (kind: NodeKind): void => {
-    const fresh = parseDdd(ctx.getSource());
-    const container: AstNode | undefined = INFRA_KINDS.has(kind)
-      ? fresh.ast.members.find((m): m is System => m.$type === "System")
-      : [...AstUtils.streamAst(fresh.ast)].find((n): n is BoundedContext => n.$type === "BoundedContext");
-    if (!container) return;
-    const name = freshName(fresh.ast, kind, CONSTRUCT_BASE[kind] ?? "Node");
-    const text = constructTemplate(kind, name, fresh.ast);
-    if (!text) return;
-    const next = insertIntoBlock(ctx.getSource(), container, text);
-    if (parseDdd(next).parserErrors.length === 0) apply(next);
+    const next = addConstructSource(ctx.getSource(), kind, {
+      context: addContext ?? undefined,
+      module: addModuleName ?? undefined,
+    });
+    if (next != null) apply(next);
   };
 
   const addFieldTo = (): void => {
@@ -592,6 +634,16 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     if (next != null) apply(next, true);
   };
 
+  // Dragging a (reconnectable) edge's target endpoint onto another node repoints
+  // its reference. The owner (edge source) is fixed — only the target moves; an
+  // incompatible drop or unparseable rewrite is rejected (edges stay as derived).
+  const onReconnect = (oldEdge: Edge, conn: Connection): void => {
+    if (!conn.target || conn.source !== oldEdge.source) return;
+    const label = typeof oldEdge.label === "string" ? oldEdge.label : "";
+    const next = rebindEdgeTarget(ctx.getSource(), label, oldEdge.source, conn.target);
+    if (next != null) apply(next, true);
+  };
+
   const bodyHandlers = (loc: BodyLocator) => ({
     onEdit: (i: number, text: string): boolean => {
       const next = editStatement(ctx.getSource(), loc, i, text);
@@ -615,15 +667,58 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     },
   });
 
+  // Inline structured editor for a body assignment's value: a per-row `ƒx`
+  // toggle expands the same `ExprSlotEditor` the Expression picker uses, bound
+  // to that statement's value slot. Keyed by `rev` so it re-seeds on commit;
+  // the open row is held in `structuredKey` so it survives the re-seed.
+  const valueEditorProps = (loc: BodyLocator) => {
+    const keyFor = (index: number): string =>
+      `${loc.kind === "operation" ? `${loc.aggregate}.${loc.op}` : loc.name}:${index}`;
+    const slotFor = (index: number): ExprSlot =>
+      loc.kind === "operation"
+        ? { kind: "stmtExpr", owner: loc.aggregate, op: loc.op, index }
+        : { kind: "wfStmt", owner: loc.name, index };
+    return {
+      onToggleValueEditor: (index: number): void => {
+        const k = keyFor(index);
+        setStructuredKey((cur) => (cur === k ? null : k));
+      },
+      renderValueEditor: (index: number): ReactNode => {
+        if (structuredKey !== keyFor(index)) return null;
+        const slot = slotFor(index);
+        const expr = slotExpr(parsed.ast, slot);
+        if (!expr) return null;
+        return (
+          <ExprSlotEditor
+            key={`${keyFor(index)}:${rev}`}
+            seed={seedExpr(expr)}
+            seedText={expr.$cstNode?.text ?? ""}
+            candidates={slotCandidates(parsed.ast, slot)}
+            loadHints={() => exprHints(ctx.getSource(), slot)}
+            mode={exprMode}
+            onMode={setExprMode}
+            onCommit={(text) => {
+              const next = editExprSlot(ctx.getSource(), slot, text);
+              if (next == null) return false;
+              apply(next, true);
+              return true;
+            }}
+          />
+        );
+      },
+    };
+  };
+
   return (
     <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
       <Box style={{ flex: 1, minWidth: 0, position: "relative" }} data-testid="c4system-canvas">
         <ReactFlow
           nodes={nodes}
           edges={edges}
-          onNodesChange={onNodesChange}
+          onNodesChange={handleNodesChange}
           onEdgesChange={onEdgesChange}
-          onNodeClick={(_, n) => { setSelectedId(n.id); if (compact) setInspectorOpen(true); }}
+          onReconnect={onReconnect}
+          onNodeClick={(_, n) => { if (n.id.startsWith("group:")) return; setSelectedId(n.id); if (compact) setInspectorOpen(true); }}
           onPaneClick={() => { setSelectedId(null); if (compact) setInspectorOpen(false); }}
           fitView
           minZoom={0.1}
@@ -634,9 +729,9 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         </ReactFlow>
         <Group
           gap={4}
-          wrap="nowrap"
+          wrap="wrap"
           align="center"
-          style={{ position: "absolute", top: 8, left: 8, zIndex: 5, background: "var(--mantine-color-body)", borderRadius: 6, padding: 4, boxShadow: "0 1px 4px rgba(0,0,0,0.2)" }}
+          style={{ position: "absolute", top: 8, left: 8, maxWidth: "calc(100% - 16px)", zIndex: 5, background: "var(--mantine-color-body)", borderRadius: 6, padding: 4, boxShadow: "0 1px 4px rgba(0,0,0,0.2)" }}
         >
           <TextInput
             size="xs"
@@ -682,6 +777,16 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
           </Button>
           <Button
             size="compact-xs"
+            variant={grouped ? "filled" : "default"}
+            color={grouped ? "grape" : undefined}
+            data-testid="c4system-group-toggle"
+            title="Nest constructs inside their module / context"
+            onClick={() => setGrouped((g) => !g)}
+          >
+            Group
+          </Button>
+          <Button
+            size="compact-xs"
             variant={preview ? "filled" : "default"}
             color={preview ? "blue" : undefined}
             data-testid="c4system-preview-toggle"
@@ -689,6 +794,15 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
             onClick={() => setPreview((p) => !p)}
           >
             Preview
+          </Button>
+          <Button
+            size="compact-xs"
+            variant="default"
+            data-testid="c4system-reset-layout"
+            title="Discard hand-dragged positions and restore the derived layout"
+            onClick={resetLayout}
+          >
+            Reset layout
           </Button>
           {overlay && (
             <Group gap={8} wrap="nowrap" data-testid="c4system-coverage-legend">
@@ -711,6 +825,35 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         )}
       </Box>
       <InspectorPanel compact={compact} opened={inspectorOpen} onClose={() => setInspectorOpen(false)}>
+        {(contextNames.length > 1 || moduleNameList.length > 1) && (
+          <Group gap={4} mb={4} wrap="nowrap" align="center">
+            <Text size="xs" c="dimmed">Add into</Text>
+            {contextNames.length > 1 && (
+              <Select
+                size="xs"
+                w={140}
+                data={contextNames}
+                value={addContext ?? contextNames[0]}
+                allowDeselect={false}
+                data-testid="c4system-add-context"
+                aria-label="target context"
+                onChange={setAddContext}
+              />
+            )}
+            {moduleNameList.length > 1 && (
+              <Select
+                size="xs"
+                w={120}
+                data={moduleNameList}
+                value={addModuleName ?? moduleNameList[0]}
+                allowDeselect={false}
+                data-testid="c4system-add-module-target"
+                aria-label="api source module"
+                onChange={setAddModuleName}
+              />
+            )}
+          </Group>
+        )}
         <Group gap={4} mb="xs">
           <Button size="compact-xs" variant="light" data-testid="c4system-add-module" onClick={addModule}>+ Module</Button>
           <Button size="compact-xs" variant="light" data-testid="c4system-add-aggregate" onClick={() => addConstruct("aggregate")}>+ Aggregate</Button>
@@ -986,6 +1129,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
                 key={`${selected.id}:${rev}`}
                 statements={listStatementViews(parsed.ast, { kind: "workflow", name: selected.name }) ?? []}
                 {...bodyHandlers({ kind: "workflow", name: selected.name })}
+                {...valueEditorProps({ kind: "workflow", name: selected.name })}
               />
             )}
             {selected.kind === "aggregate" && (
@@ -1003,7 +1147,9 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
                   <BodyEditor
                     key={`${selected.id}:${opName}:${rev}`}
                     statements={listStatementViews(parsed.ast, { kind: "operation", aggregate: selected.name, op: opName }) ?? []}
+                    targets={listFields(selected.ast).map((f) => f.name)}
                     {...bodyHandlers({ kind: "operation", aggregate: selected.name, op: opName })}
+                    {...valueEditorProps({ kind: "operation", aggregate: selected.name, op: opName })}
                   />
                 )}
               </Stack>

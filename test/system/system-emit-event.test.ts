@@ -1,16 +1,12 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { EmptyFileSystem } from "langium";
 import { describe, expect, it } from "vitest";
-import { createDddServices } from "../../src/language/ddd-module.js";
-import type { Model } from "../../src/language/generated/ast.js";
 import { eventNames, listEmits, setEmitEvent } from "../../web/src/builder/system/emit-event.js";
+import { parseRaw as parse } from "../_helpers/index.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const sales = readFileSync(path.join(here, "..", "..", "examples", "sales.ddd"), "utf8");
-const parser = createDddServices(EmptyFileSystem).Ddd.parser.LangiumParser;
-const parse = (t: string): Model => parser.parse(t).value as Model;
 function aggregate(name: string): { $type: string } {
   for (const n of (function* walk(x: { $type: string }): Generator<{ $type: string }> {
     yield x;

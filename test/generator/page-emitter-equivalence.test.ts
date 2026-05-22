@@ -1,4 +1,4 @@
-// Slice 5 — byte-equivalence acceptance gate.
+// byte-equivalence acceptance gate.
 //
 // The page-IR-walking emitter (`src/generator/react/pages-emitter.ts`)
 // must produce output that is byte-for-byte identical to the legacy
@@ -15,7 +15,7 @@
 // - The shared Home / WorkflowsIndex / ViewsIndex pages emit at
 //   the same paths with the same content.
 //
-// When this test fails: either the Slice 5 dispatch broke an
+// When this test fails: either the page-emitter dispatch broke an
 // invariant, or the underlying builder changed (legitimate — re-run
 // `node scripts/capture-baseline-fixture.mjs` to refresh the
 // fixture, review the diff, and commit it).
@@ -54,7 +54,7 @@ function listFixtureFiles(dir: string, prefix = ""): string[] {
   return out;
 }
 
-describe("Slice 5 byte-equivalence — page emitter vs legacy direct walk", () => {
+describe("byte-equivalence — page emitter vs legacy direct walk", () => {
   it("emits the same file set as the baseline fixture (paths only)", async () => {
     const model = await buildAcme();
     const { files } = generateSystems(model);
@@ -86,7 +86,7 @@ describe("Slice 5 byte-equivalence — page emitter vs legacy direct walk", () =
     expect(mismatches, "files that drifted from the baseline fixture").toEqual([]);
   });
 
-  it("page objects emit through `emitPageObjectsForUi` when ui is set (Slice 7)", async () => {
+  it("page objects emit through `emitPageObjectsForUi` when ui is set", async () => {
     // Defence-in-depth: if a refactor accidentally re-routes the
     // page-object emission back through the legacy aggregate /
     // workflow / view loops, the byte-equivalence test would still

@@ -6,7 +6,7 @@
 // so it must share the same sink and live alongside the form emitters.
 
 import type { AggregateIR, BoundedContextIR, ExprIR, TypeIR } from "../../../../ir/loom-ir.js";
-import { camel, humanize, pascal, plural, snake } from "../../../../util/naming.js";
+import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../../util/naming.js";
 import type { WalkContext } from "../../body-walker.js";
 import {
   emitExpr,
@@ -44,7 +44,7 @@ export function emitFormOf(
   ctx: WalkContext,
   depth: number,
 ): string {
-  // Slice A12 — `Form` dispatches on which named arg is present:
+  // `Form` dispatches on which named arg is present:
   //   `of:  <Aggregate>` → create-form for the aggregate
   //   `runs: <workflow>` → workflow-run form
   // The two share rendering (same per-field preparer + same outer
@@ -54,12 +54,16 @@ export function emitFormOf(
   // rest.
   const runsArg = namedArgValue(call, "runs");
   if (runsArg) return emitFormRuns(call, ctx, depth, runsArg);
-  // `Form(of: <Agg>, op: <name>)` → operation-invocation form.
-  // Hosted inside a `Modal`; rendered as a module-scope component
-  // (own `useForm`) so multiple op-forms on one detail page don't
-  // collide on RHF locals.
-  const opArg = namedArgValue(call, "op");
-  if (opArg) return emitFormOfOperation(call, ctx, opArg);
+  // `Form(<instance>.<operation>)` → operation-invocation form.
+  // The operation is referenced through an in-scope aggregate
+  // instance (a `member` node with a `ref` receiver), mirroring the
+  // `Action` primitive.  Hosted inside a `Modal`; rendered as a
+  // module-scope component (own `useForm`) so multiple op-forms on one
+  // detail page don't collide on RHF locals.
+  const opRef = positionalArgs(call)[0];
+  if (opRef && opRef.kind === "member" && opRef.receiver.kind === "ref") {
+    return emitFormOfOperation(call, ctx, opRef);
+  }
   return emitFormOfAggregate(call, ctx, depth);
 }
 
@@ -107,7 +111,7 @@ function prepareFormFields(
   if (useController) addImport(ctx, "react-hook-form", "Controller");
   addImport(ctx, "@hookform/resolvers/zod", "zodResolver");
   for (const t of idTargets) {
-    addImport(ctx, `../api/${camel(t.name)}`, `useAll${plural(t.name)}`);
+    addImport(ctx, `../api/${lowerFirst(t.name)}`, `useAll${plural(t.name)}`);
   }
   for (const vm of fieldVMs) registerFormFieldImports(ctx, vm);
   const fieldHtmls = fieldVMs.map((vm) => renderFormField(vm, ctx.pack));
@@ -163,7 +167,7 @@ interface FormSubmitConfig {
 /** Shared render for the inline create/run forms (`Form(of:)` and
  *  `Form(runs:)`): emits the pack's default submit body when no explicit
  *  `onSubmit:` was given, then renders the `primitive-form-of` shell.
- *  The op-form variant (`Form(of:, op:)`) does NOT use this — it emits
+ *  The op-form variant (`Form(<instance>.<operation>)`) does NOT use this — it emits
  *  no inline JSX; its shell component is rendered from the recorded
  *  OperationFormState by the page shell. */
 function renderFormOfPrimitive(
@@ -237,7 +241,12 @@ function emitFormOfAggregate(
   // components (Stack/Button/Group on Mantine, equivalents elsewhere).
   addImportsForPrimitive(ctx, "primitive-form-of");
   const prepared = prepareFormFields(ctx, fields, fields, bc, testidNamespace);
-  addImport(ctx, `../api/${camel(agg.name)}`, `Create${agg.name}Request`, `useCreate${agg.name}`);
+  addImport(
+    ctx,
+    `../api/${lowerFirst(agg.name)}`,
+    `Create${agg.name}Request`,
+    `useCreate${agg.name}`,
+  );
   ctx.collectedTestids.add(`${testidNamespace}-submit`);
   const onSubmitJs = emitFormOnSubmit(ctx, call, prepared.idTargets, "create");
   ctx.formOfs.push({
@@ -262,7 +271,7 @@ function emitFormOfAggregate(
   });
 }
 
-/** Slice A12 — `Form(runs: <wf>)` walker variant.  Same per-field
+/** `Form(runs: <wf>)` walker variant.  Same per-field
  *  preparer + same outer <form> JSX as the aggregate form, but
  *  the shell wires a workflow request type + mutation hook + a
  *  default redirect to `/workflows`. */
@@ -295,7 +304,7 @@ function emitFormRuns(
   const testidNamespace = stringNamed(call, "testid") ?? `workflow-${snake(workflow.name)}`;
   addImportsForPrimitive(ctx, "primitive-form-of");
   const prepared = prepareFormFields(ctx, fields, fieldsForHelpers, bc, testidNamespace);
-  const wfPascalForImport = pascal(workflow.name);
+  const wfPascalForImport = upperFirst(workflow.name);
   addImport(
     ctx,
     "../api/workflows",
@@ -325,43 +334,40 @@ function emitFormRuns(
   });
 }
 
-/** `Form(of: <Agg>, op: <name>)` — records an OperationFormState
+/** `Form(<instance>.<operation>)` — records an OperationFormState
  *  and emits no inline JSX.  The enclosing `Modal` primitive
  *  renders the trigger button; the shell emits the module-scope
  *  `<Op>Form` component + `open<Op>Modal` opener + the page-scope
- *  `const <op> = use<Op><Agg>(id ?? "")` mutation hook from the
+ *  `const <op> = use<Op><Agg>(<idExpr>)` mutation hook from the
  *  recorded state.  Field rendering is byte-identical to
  *  `Form(of:)` (same preparer + `field-input-*` templates). */
 function emitFormOfOperation(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,
-  opArg: ExprIR,
+  opRef: ExprIR & { kind: "member" },
 ): string {
-  const ofArg = namedArgValue(call, "of");
-  const aggName =
-    ofArg && ofArg.kind === "ref"
-      ? ofArg.name
-      : ofArg && ofArg.kind === "literal" && ofArg.lit === "string"
-        ? ofArg.value
-        : undefined;
-  const opName =
-    opArg.kind === "ref"
-      ? opArg.name
-      : opArg.kind === "literal" && opArg.lit === "string"
-        ? opArg.value
-        : undefined;
-  if (!aggName || !opName) {
-    return `{/* Form(of:, op:): missing 'of:' or 'op:' ref */}`;
+  const instanceName = opRef.receiver.kind === "ref" ? opRef.receiver.name : undefined;
+  const opName = opRef.member;
+  const aggName = instanceName ? ctx.paramTypes?.get(instanceName) : undefined;
+  if (!instanceName || !aggName) {
+    return `{/* Form(${instanceName ?? "?"}.${opName}): '${instanceName ?? "?"}' is not an in-scope aggregate instance */}`;
   }
   const agg = ctx.aggregatesByName.get(aggName);
   const bc = ctx.bcByAggregate.get(aggName);
   if (!agg || !bc) {
-    return `{/* Form(of: ${aggName}, op: ${opName}): aggregate not found */}`;
+    return `{/* Form(${instanceName}.${opName}): aggregate ${aggName} not found */}`;
   }
   const op = agg.operations.find((o) => o.name === opName && o.visibility === "public");
   if (!op) {
-    return `{/* Form(of: ${aggName}, op: ${opName}): no public operation */}`;
+    return `{/* Form(${instanceName}.${opName}): no public operation '${opName}' on ${agg.name} */}`;
   }
+  // The mutation hook is declared at function-top.  When the instance
+  // is a function-top param (a component prop), target `<instance>.id`;
+  // when it's a render-lambda binding (a Detail page's `data`, not in
+  // scope at function-top), fall back to the route `id`.
+  const idExpr = ctx.paramNames.has(instanceName)
+    ? `${emitExpr(opRef.receiver, ctx)}.id`
+    : `id ?? ""`;
   // Op params carry no `optional` flag — adapt for form-helpers
   // exactly as the workflow-form variant does.
   const fields = op.params;
@@ -375,9 +381,9 @@ function emitFormOfOperation(
   const prepared = prepareFormFields(ctx, fields, fieldsForHelpers, bc, testidNamespace);
   addImport(
     ctx,
-    `../api/${camel(agg.name)}`,
-    `${pascal(op.name)}Request`,
-    `use${pascal(op.name)}${agg.name}`,
+    `../api/${lowerFirst(agg.name)}`,
+    `${upperFirst(op.name)}Request`,
+    `use${upperFirst(op.name)}${agg.name}`,
   );
   ctx.collectedTestids.add(testidNamespace);
   ctx.collectedTestids.add(`${testidNamespace}-form`);
@@ -388,6 +394,7 @@ function emitFormOfOperation(
     op,
     bc,
     fields,
+    idExpr,
     idTargets: prepared.idTargets,
     useController: prepared.useController,
     defaultValuesTs: prepared.defaultValuesTs,
@@ -414,20 +421,17 @@ export function emitModal(
   );
   const triggerArg = namedArgValue(call, "trigger");
   if (!formChild || !triggerArg || triggerArg.kind !== "call") {
-    return `{/* Modal: expects trigger: Button(...) and a Form(of:, op:) child */}`;
+    return `{/* Modal: expects trigger: Button(...) and a Form(<instance>.<operation>) child */}`;
   }
   // Walk the form child first — records the OperationFormState
   // (and returns "" — the form has no inline JSX).
   walk(formChild, ctx, depth);
-  const opArg = namedArgValue(formChild, "op");
-  const opName =
-    opArg && opArg.kind === "ref"
-      ? opArg.name
-      : opArg && opArg.kind === "literal" && opArg.lit === "string"
-        ? opArg.value
-        : undefined;
+  // The op-form references the operation through an instance
+  // (`Form(data.confirm)`); the operation name is the member.
+  const opRef = positionalArgs(formChild)[0];
+  const opName = opRef && opRef.kind === "member" ? opRef.member : undefined;
   if (!opName) {
-    return `{/* Modal: child Form missing op: */}`;
+    return `{/* Modal: child Form must be Form(<instance>.<operation>) */}`;
   }
   const label = unwrapTextLiteral(firstPositionalContent(triggerArg, ctx) ?? '"Action"');
   // Platform-neutral emphasis token from the scaffold-expander
@@ -450,8 +454,8 @@ export function emitModal(
   return renderPrimitive(ctx, "primitive-modal", {
     label,
     emphasisPrimary: triggerPrimary,
-    opPascal: pascal(opName),
-    opCamel: camel(opName),
+    opPascal: upperFirst(opName),
+    opCamel: lowerFirst(opName),
     testidAttr: testidAttr(triggerArg, ctx),
   });
 }

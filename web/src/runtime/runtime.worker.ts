@@ -2,9 +2,11 @@
 import { synthDDL } from "./ddl";
 import { pgliteAssetUrl } from "../bundle/plugin.js";
 import { fnv1a32 } from "../util/hash.js";
+import { formatLogArg, LOG_LEVELS, type LogLine } from "../util/log-line.js";
 import type {
   BootResult,
   DispatchResult,
+  QueryResult,
   RuntimeRpcRequest,
   RuntimeRpcResponse,
   SerializedRequest,
@@ -12,6 +14,27 @@ import type {
 } from "./protocol.js";
 
 declare const self: DedicatedWorkerGlobalScope;
+
+// Tee `console.*` into `sink` (while still writing through to the real
+// console for DevTools) for the duration of one RPC.  This is how the
+// generated Hono handlers' logs — which run inside this worker via
+// `app.fetch` — reach the playground's "Backend" log stream.  Returns a
+// restore fn the caller invokes in a `finally`.
+function captureConsole(sink: LogLine[]): () => void {
+  const original: Partial<Record<LogLine["level"], (...a: unknown[]) => void>> = {};
+  for (const level of LOG_LEVELS) {
+    original[level] = console[level] as (...a: unknown[]) => void;
+    console[level] = (...args: unknown[]): void => {
+      sink.push({ level, text: args.map(formatLogArg).join(" ") });
+      original[level]!(...args);
+    };
+  }
+  return () => {
+    for (const level of LOG_LEVELS) {
+      console[level] = original[level]!;
+    }
+  };
+}
 
 // PGlite's normal boot path computes WASM/data URLs relative to its
 // own `import.meta.url` and fetches them at runtime.  When the
@@ -44,8 +67,32 @@ interface PgliteHandle {
   query: (
     sql: string,
     params?: unknown[],
-  ) => Promise<{ rows: Array<Record<string, unknown>> }>;
+  ) => Promise<{
+    rows: Array<Record<string, unknown>>;
+    fields?: Array<{ name: string; dataTypeID: number }>;
+    affectedRows?: number;
+  }>;
   close?: () => Promise<void>;
+}
+
+// PGlite/Postgres can reject with a plain object (a serialized
+// protocol error: `{ message, severity, code, … }`) rather than an
+// `Error`.  The naive `String(err)` then prints "[object Object]",
+// hiding the only useful detail.  Dig out a real message, falling
+// back to a JSON dump so nothing is ever swallowed.
+function errText(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  if (err && typeof err === "object") {
+    const msg = (err as { message?: unknown }).message;
+    if (typeof msg === "string" && msg.length > 0) return msg;
+    try {
+      return JSON.stringify(err);
+    } catch {
+      /* circular / non-serialisable — fall through */
+    }
+  }
+  return String(err);
 }
 
 let cachedPgliteWasm: WebAssembly.Module | null = null;
@@ -122,7 +169,11 @@ async function tearDownState(): Promise<void> {
   state = null;
 }
 
-async function boot(bundleCode: string, dataDir?: string): Promise<BootResult> {
+async function boot(
+  bundleCode: string,
+  dataDir?: string,
+  fresh = false,
+): Promise<BootResult> {
   const start = performance.now();
   // Tear down a previous boot if present (close PGlite + revoke its
   // bundle URL).
@@ -137,7 +188,7 @@ async function boot(bundleCode: string, dataDir?: string): Promise<BootResult> {
     URL.revokeObjectURL(url);
     return {
       ok: false,
-      message: `Bundle import failed: ${err instanceof Error ? err.message : String(err)}`,
+      message: `Bundle import failed: ${errText(err)}`,
     };
   }
   // Keep the blob URL alive for the lifetime of the module — some
@@ -170,8 +221,28 @@ async function boot(bundleCode: string, dataDir?: string): Promise<BootResult> {
   } catch (err) {
     return {
       ok: false,
-      message: `PGlite boot failed: ${err instanceof Error ? err.message : String(err)}`,
+      message: `PGlite boot failed: ${errText(err)}`,
     };
+  }
+
+  // Recovery path: a persistent island whose stored data is
+  // incompatible with the current schema can fail every boot, and the
+  // normal Reset is unreachable without a booted instance.  `fresh`
+  // wipes both the user schema and our bookkeeping schema here — after
+  // PGlite has opened cleanly but before any DDL — so the subsequent
+  // apply starts from a blank database.
+  if (fresh) {
+    try {
+      await pglite.exec(
+        "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public; " +
+          "DROP SCHEMA IF EXISTS __loom CASCADE;",
+      );
+    } catch (err) {
+      return {
+        ok: false,
+        message: `Reset of stored data failed: ${errText(err)}`,
+      };
+    }
   }
 
   let ddl: string;
@@ -184,7 +255,7 @@ async function boot(bundleCode: string, dataDir?: string): Promise<BootResult> {
   } catch (err) {
     return {
       ok: false,
-      message: `DDL synth failed: ${err instanceof Error ? err.message : String(err)}`,
+      message: `DDL synth failed: ${errText(err)}`,
     };
   }
 
@@ -194,7 +265,7 @@ async function boot(bundleCode: string, dataDir?: string): Promise<BootResult> {
   } catch (err) {
     return {
       ok: false,
-      message: `DDL execution failed: ${err instanceof Error ? err.message : String(err)}\n--- DDL ---\n${ddl}`,
+      message: `DDL execution failed: ${errText(err)}\n--- DDL ---\n${ddl}`,
     };
   }
 
@@ -205,7 +276,7 @@ async function boot(bundleCode: string, dataDir?: string): Promise<BootResult> {
   } catch (err) {
     return {
       ok: false,
-      message: `createApp failed: ${err instanceof Error ? err.message : String(err)}`,
+      message: `createApp failed: ${errText(err)}`,
     };
   }
 
@@ -337,8 +408,43 @@ async function dispatch(req: SerializedRequest): Promise<DispatchResult> {
   } catch (err) {
     return {
       ok: false,
-      message: err instanceof Error ? err.message : String(err),
+      message: errText(err),
     };
+  }
+}
+
+// Run an arbitrary SQL statement against the booted PGlite for the
+// Database console.  Single-statement (PGlite's `query` runs one
+// parameterless statement) — enough for SELECT browsing and ad-hoc
+// INSERT/UPDATE/DELETE.  The same timeout race as `dispatch` guards
+// against a runaway query wedging the worker.
+async function query(sql: string): Promise<QueryResult> {
+  if (!state) {
+    return { ok: false, message: "Runtime not booted — boot first." };
+  }
+  const start = performance.now();
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  try {
+    const timeoutPromise = new Promise<never>((_resolve, reject) => {
+      timeoutId = setTimeout(() => {
+        reject(new Error(`query timed out after ${DEFAULT_DISPATCH_TIMEOUT_MS} ms`));
+      }, DEFAULT_DISPATCH_TIMEOUT_MS);
+    });
+    const res = await Promise.race([state.pglite.query(sql), timeoutPromise]);
+    return {
+      ok: true,
+      fields: (res.fields ?? []).map((f) => f.name),
+      rows: res.rows ?? [],
+      affectedRows: res.affectedRows ?? 0,
+      durationMs: Math.round(performance.now() - start),
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      message: errText(err),
+    };
+  } finally {
+    if (timeoutId !== null) clearTimeout(timeoutId);
   }
 }
 
@@ -373,7 +479,7 @@ async function wipe(): Promise<{ ok: boolean; message?: string }> {
   } catch (err) {
     return {
       ok: false,
-      message: err instanceof Error ? err.message : String(err),
+      message: errText(err),
     };
   }
 }
@@ -381,13 +487,22 @@ async function wipe(): Promise<{ ok: boolean; message?: string }> {
 self.onmessage = async (ev: MessageEvent<RuntimeRpcRequest>) => {
   const req = ev.data;
   const response: RuntimeRpcResponse = { id: req.id };
+  const logs: LogLine[] = [];
+  const restore = captureConsole(logs);
   try {
     switch (req.method) {
       case "boot":
-        response.result = await boot(req.params.bundleCode, req.params.dataDir);
+        response.result = await boot(
+          req.params.bundleCode,
+          req.params.dataDir,
+          req.params.fresh,
+        );
         break;
       case "dispatch":
         response.result = await dispatch(req.params);
+        break;
+      case "query":
+        response.result = await query(req.params.sql);
         break;
       case "reset":
         response.result = await reset();
@@ -401,9 +516,18 @@ self.onmessage = async (ev: MessageEvent<RuntimeRpcRequest>) => {
         };
     }
   } catch (err) {
+    // Surface the stack in the Backend log stream — the RPC error
+    // message itself only carries `err.message`.
+    logs.push({
+      level: "error",
+      text: err instanceof Error ? (err.stack ?? err.message) : String(err),
+    });
     response.error = {
-      message: err instanceof Error ? err.message : String(err),
+      message: errText(err),
     };
+  } finally {
+    restore();
   }
+  if (logs.length > 0) response.logs = logs;
   self.postMessage(response);
 };

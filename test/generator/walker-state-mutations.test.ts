@@ -1,4 +1,4 @@
-// Slice 11.7 — state {} fields + onClick lambda mutations.
+// state {} fields + onClick lambda mutations.
 // First interactive walker primitive: a click counter renders end
 // to end without a single line of TS hand-written.
 //
@@ -16,21 +16,12 @@
 // referencing `{count}`, and the onClick lambda emitting
 // `setCount(count + 1)`.
 
-import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
-import { createDddServices } from "../../src/language/ddd-module.js";
-import type { Model } from "../../src/language/generated/ast.js";
-import { generateSystems } from "../../src/system/index.js";
+import { generateSystemFiles } from "../_helpers/index.js";
 
-async function buildAndGenerate(src: string): Promise<Map<string, string>> {
-  const services = createDddServices(NodeFileSystem);
-  const { parseHelper } = await import("langium/test");
-  const helper = parseHelper(services.Ddd);
-  const doc = await helper(src, { validation: true });
-  return generateSystems(doc.parseResult.value as Model).files;
-}
+const buildAndGenerate = generateSystemFiles;
 
-describe("Slice 11.7 — state + onClick mutations in walker pages", () => {
+describe("state + onClick mutations in walker pages", () => {
   it("click counter — useState + state ref + setX in onClick handler", async () => {
     const files = await buildAndGenerate(`
       system S {

@@ -1,6 +1,6 @@
 import type { BoundedContextIR, EnumIR, ValueObjectIR } from "../../../ir/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
-import { camel } from "../../../util/naming.js";
+import { lowerFirst } from "../../../util/naming.js";
 import { renderTsExpr, renderTsType } from "../render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -49,7 +49,7 @@ function renderValueObject(v: ValueObjectIR): string[] {
   );
   const fns = v.functions.map((fn) => {
     const params = fn.params.map((p) => `${p.name}: ${renderTsType(p.type)}`).join(", ");
-    return `  private ${camel(fn.name)}(${params}): ${renderTsType(fn.returnType)} { return ${renderTsExpr(fn.body)}; }`;
+    return `  private ${lowerFirst(fn.name)}(${params}): ${renderTsType(fn.returnType)} { return ${renderTsExpr(fn.body)}; }`;
   });
   return [
     `export class ${v.name} {`,

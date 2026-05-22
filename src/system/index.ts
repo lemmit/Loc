@@ -4,7 +4,6 @@ import type {
   DeployableIR,
   LoomModel,
   ModuleIR,
-  Platform,
   SystemIR,
 } from "../ir/loom-ir.js";
 import { lowerModel } from "../ir/lower.js";
@@ -56,7 +55,7 @@ export function generateSystems(model: Model): SystemEmission {
   for (const sys of loom.systems) {
     emitSystem(sys, loom, out);
   }
-  // Traceability artifacts (Slice 12) — model-global (requirements may
+  // Traceability artifacts — model-global (requirements may
   // reference code across systems), so emitted once at the output root
   // rather than per system.  No-op when the source declares no
   // requirement / solution / testCase.

@@ -41,6 +41,7 @@ export function PreviewPane({ ctx }: Props): JSX.Element {
             vendorImportmap={previewBundle.vendorImportmap}
             vendorCssUrl={previewBundle.vendorCssUrl}
             runtime={engine}
+            onAppLog={ctx.appendAppLog}
           />
           {previewProblem && (
             <Box

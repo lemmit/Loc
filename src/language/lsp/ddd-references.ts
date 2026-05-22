@@ -1,5 +1,5 @@
 import { type AstNode, CstUtils, type LangiumDocument, type MaybePromise } from "langium";
-import { DefaultReferencesProvider, type LangiumServices } from "langium/lsp";
+import { DefaultReferencesProvider } from "langium/lsp";
 import { Location, type Position, type ReferenceParams } from "vscode-languageserver";
 import { collectMemberUsages, memberDeclAt } from "./member-refs.js";
 
@@ -12,10 +12,6 @@ import { collectMemberUsages, memberDeclAt } from "./member-refs.js";
 // ---------------------------------------------------------------------------
 
 export class DddReferencesProvider extends DefaultReferencesProvider {
-  constructor(services: LangiumServices) {
-    super(services);
-  }
-
   override findReferences(
     document: LangiumDocument,
     params: ReferenceParams,

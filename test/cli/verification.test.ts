@@ -37,7 +37,7 @@ function verify(loom: LoomModel, results: TestOutcome[]) {
   );
 }
 
-describe("computeVerification (Slice 13)", () => {
+describe("computeVerification", () => {
   it("indexes executable tests with the runner's exact suite names", async () => {
     const loom = await build(SOURCE);
     const refs = loom.traceability!.execTests;
@@ -111,8 +111,8 @@ describe("computeVerification (Slice 13)", () => {
       { name: "create works", suite: "Alpha", status: "pass" },
       { name: "create works", suite: "Beta", status: "fail" },
     ]);
-    expect(v.requirements["R1"].verdict).toBe("VERIFIED");
-    expect(v.requirements["R2"].verdict).toBe("FAILING");
+    expect(v.requirements.R1.verdict).toBe("VERIFIED");
+    expect(v.requirements.R2.verdict).toBe("FAILING");
   });
 
   it("reports results that match no declared test, and is deterministic", async () => {

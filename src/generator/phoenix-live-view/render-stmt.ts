@@ -1,5 +1,5 @@
 import type { PathIR, StmtIR } from "../../ir/loom-ir.js";
-import { pascal, snake } from "../../util/naming.js";
+import { snake, upperFirst } from "../../util/naming.js";
 import { type RenderCtx, renderExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -60,7 +60,7 @@ function renderElixirStatement(s: StmtIR, ctx: RenderCtx, changesetVar: string):
       const fields = s.fields
         .map((f) => `${snake(f.name)}: ${renderExpr(f.value, ctx)}`)
         .join(", ");
-      const moduleName = pascal(s.eventName);
+      const moduleName = upperFirst(s.eventName);
       return `${INDENT}Phoenix.PubSub.broadcast(${ctx.contextModule}.PubSub, "events", %${ctx.contextModule}.Events.${moduleName}{${fields}})`;
     }
 
@@ -75,8 +75,8 @@ function renderElixirStatement(s: StmtIR, ctx: RenderCtx, changesetVar: string):
 }
 
 function renderPath(p: PathIR): string {
-  // All paths root from `this`; emit snake_case segments joined with `.`
-  // for nested access.  For attribute/relationship we only need the
-  // first segment as the Ash field atom.
-  return p.segments.map(snake).join(".");
+  // The attribute/relationship Ash atom is the head segment. (A dotted
+  // join would emit an invalid atom like `:address.city`; Ash addresses
+  // nested fields differently, so only the head is used here.)
+  return snake(p.segments[0] ?? "");
 }

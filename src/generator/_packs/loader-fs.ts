@@ -117,7 +117,7 @@ export function loadPack(packDir: string): LoadedPack {
       `loader: pack at ${packDir} has no \`emits\` map in pack.json.  Add { emits: { "page-list": "page-list.hbs", ... } }.`,
     );
   }
-  // Phase 0 pack-versioning cross-check: when a pack lives under the
+  // Pack-versioning cross-check: when a pack lives under the
   // built-in `designs/<family>/<vNN>/` tree, the parent dir name is
   // load-bearing — it's what `design: family@vNN` resolves to.  A
   // mismatch with `manifest.version` means a copy-paste fork left the
@@ -145,7 +145,7 @@ export function loadPack(packDir: string): LoadedPack {
     sources[logicalName] = fs.readFileSync(filePath, "utf-8");
   }
   const sharedSources = readSharedSources(manifest.format ?? "tsx");
-  // Phase 0.5: stack templates.  When the pack declares
+  // Stack templates.  When the pack declares
   // `stack: "vN"`, pull every `.hbs` from `<repo>/stacks/<vN>/`
   // into the same shared-partials map so pack templates can
   // `{{> stack-package-deps}}` etc.  Stack files are siblings of

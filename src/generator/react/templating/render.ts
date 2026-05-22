@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // Render orchestrator for the template-pack rendering layer.
 //
-// Slice D1 — the legacy archetype renderers (renderListPage,
+// The legacy archetype renderers (renderListPage,
 // renderDetailPage, renderNewPage, renderViewTablePage,
 // renderWorkflowForm, renderWorkflowsIndex, renderViewsIndex,
 // renderOperationModal, renderPartTable) were deleted.  All page
@@ -93,6 +93,6 @@ export function renderFormField(vm: FormFieldVM, pack: LoadedPack): string {
 }
 
 // BoundedContextIR is re-exported below for callers that import
-// it via this module — preserves the pre-D1 import surface even
+// it via this module — preserves the original import surface even
 // though render.ts no longer needs it directly.
 export type { BoundedContextIR };

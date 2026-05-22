@@ -1,35 +1,26 @@
-// Slice A9 — Table polish (`striped` / `highlight` / `sticky` /
+// Table polish (`striped` / `highlight` / `sticky` /
 //   `rowTestid:` props).
 //
 // Round out the `Table` primitive surface so the explicit DSL can
 // reproduce the scaffold List page's table styling + per-row
 // testid namespace.  Scaffold list tables emit
 // `<Table striped highlightOnHover stickyHeader>` and
-// `<Table.Tr data-testid={`<slug>-row-${row.id}`}>`; this slice
-// brings both to the walker.
+// `<Table.Tr data-testid={`<slug>-row-${row.id}`}>`; the walker
+// supports both.
 //
-// What this slice pins:
+// What this test pins:
 //   1. `striped: true` adds `striped` to the root `<Table>` opening tag.
 //   2. `highlight: true` adds `highlightOnHover`.
 //   3. `sticky: true` adds `stickyHeader`.
-//   4. `rowTestid: r => <expr>` lifts `r → row` (Slice A2's
+//   4. `rowTestid: r => <expr>` lifts `r → row` (the
 //      lambdaParams scope) and emits `data-testid={<expr>}` on
 //      each row.
-//   5. Tables without these props emit identically to A2 output.
+//   5. Tables without these props emit identically to the baseline output.
 
-import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
-import { createDddServices } from "../../src/language/ddd-module.js";
-import type { Model } from "../../src/language/generated/ast.js";
-import { generateSystems } from "../../src/system/index.js";
+import { generateSystemFiles } from "../_helpers/index.js";
 
-async function buildAndGenerate(src: string): Promise<Map<string, string>> {
-  const services = createDddServices(NodeFileSystem);
-  const { parseHelper } = await import("langium/test");
-  const helper = parseHelper(services.Ddd);
-  const doc = await helper(src, { validation: true });
-  return generateSystems(doc.parseResult.value as Model).files;
-}
+const buildAndGenerate = generateSystemFiles;
 
 const ordersTableBody = (tableBody: string) => `
   system S {
@@ -52,7 +43,7 @@ const ordersTableBody = (tableBody: string) => `
   }
 `;
 
-describe("Slice A9 — Table polish props", () => {
+describe("Table polish props", () => {
   it("striped: true adds `striped` to the <Table> opening tag", async () => {
     const files = await buildAndGenerate(
       ordersTableBody(`Table(rows: Sales.Order.all, striped: true, Column("ID", o => o.id))`),
@@ -121,7 +112,7 @@ describe("Slice A9 — Table polish props", () => {
     expect(tsx).toMatch(/<Table\.Tr[^>]*\bdata-testid=\{[^>]*\bonClick=\{/);
   });
 
-  it("Table without style props still emits the A2 baseline shape", async () => {
+  it("Table without style props still emits the baseline shape", async () => {
     const files = await buildAndGenerate(
       ordersTableBody(`Table(rows: Sales.Order.all, Column("ID", o => o.id))`),
     );

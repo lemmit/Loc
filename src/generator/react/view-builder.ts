@@ -1,11 +1,10 @@
 import type { BoundedContextIR, TypeIR, ViewIR } from "../../ir/loom-ir.js";
-import { camel, plural, snake } from "../../util/naming.js";
+import { lowerFirst, snake, upperFirst } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // View API module + Playwright page object emission.
 //
-// The page-side emission (views index, per-view table page) moved
-// out of this file in Phase 1.6 — see
+// The page-side emission (views index, per-view table page) lives in
 // src/generator/react/templating/preparers/view-{table,s-index}.ts.
 // What remains here is two emission paths that aren't pack-shaped:
 //
@@ -51,42 +50,50 @@ export function buildViewsApiModule(contexts: BoundedContextIR[]): string {
     if (!view.output) shorthandSources.add(view.aggregateName);
   }
   for (const aggName of [...shorthandSources].sort()) {
-    lines.push(`import { ${aggName}Response, ${aggName}ListResponse } from "./${camel(aggName)}";`);
+    lines.push(
+      `import { ${aggName}Response, ${aggName}ListResponse } from "./${lowerFirst(aggName)}";`,
+    );
   }
   // Full-form views may reference enum / VO schemas on their fields.
   const enumDeps = collectEnumDeps(views);
   const voDeps = collectVoDeps(views);
   for (const dep of [...enumDeps, ...voDeps]) {
-    lines.push(`import { ${dep.schemaName} } from "./${camel(dep.fromAggregate)}";`);
+    lines.push(`import { ${dep.schemaName} } from "./${lowerFirst(dep.fromAggregate)}";`);
   }
   lines.push("");
 
   for (const { view } of views) {
     const slug = snake(view.name);
     if (view.output) {
-      lines.push(`export const ${cap(view.name)}Row = z.object({`);
+      lines.push(`export const ${upperFirst(view.name)}Row = z.object({`);
       for (const f of view.output.fields) {
         lines.push(`  ${f.name}: ${zodForResponse(f.type, f.optional)},`);
       }
       lines.push(`});`);
-      lines.push(`export type ${cap(view.name)}Row = z.infer<typeof ${cap(view.name)}Row>;`);
-      lines.push(`export const ${cap(view.name)}Response = z.array(${cap(view.name)}Row);`);
       lines.push(
-        `export type ${cap(view.name)}Response = z.infer<typeof ${cap(view.name)}Response>;`,
+        `export type ${upperFirst(view.name)}Row = z.infer<typeof ${upperFirst(view.name)}Row>;`,
+      );
+      lines.push(
+        `export const ${upperFirst(view.name)}Response = z.array(${upperFirst(view.name)}Row);`,
+      );
+      lines.push(
+        `export type ${upperFirst(view.name)}Response = z.infer<typeof ${upperFirst(view.name)}Response>;`,
       );
     } else {
-      lines.push(`export const ${cap(view.name)}Response = ${view.aggregateName}ListResponse;`);
       lines.push(
-        `export type ${cap(view.name)}Response = z.infer<typeof ${cap(view.name)}Response>;`,
+        `export const ${upperFirst(view.name)}Response = ${view.aggregateName}ListResponse;`,
+      );
+      lines.push(
+        `export type ${upperFirst(view.name)}Response = z.infer<typeof ${upperFirst(view.name)}Response>;`,
       );
     }
     lines.push("");
-    lines.push(`export function use${cap(view.name)}View() {`);
+    lines.push(`export function use${upperFirst(view.name)}View() {`);
     lines.push(`  return useQuery({`);
     lines.push(`    queryKey: ["views", "${slug}"],`);
     lines.push(`    queryFn: async () => {`);
     lines.push(`      const r = await api.get(\`/views/${slug}\`);`);
-    lines.push(`      return ${cap(view.name)}Response.parse(r);`);
+    lines.push(`      return ${upperFirst(view.name)}Response.parse(r);`);
     lines.push(`    },`);
     lines.push(`  });`);
     lines.push(`}`);
@@ -182,14 +189,14 @@ function findFirstAggregateWith(
 
 export function buildViewPageObject(view: ViewIR, ctx: BoundedContextIR): string {
   const slug = snake(view.name);
-  const className = `${cap(view.name)}ViewPage`;
+  const className = `${upperFirst(view.name)}ViewPage`;
   const cols = collectColumnNames(view, ctx);
   const rowFields = cols.map((c) => `  ${c}: string;`).join("\n");
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import type { Page } from "@playwright/test";`);
   lines.push("");
-  lines.push(`export interface ${cap(view.name)}RowText {`);
+  lines.push(`export interface ${upperFirst(view.name)}RowText {`);
   lines.push(rowFields);
   lines.push(`}`);
   lines.push("");
@@ -203,17 +210,17 @@ export function buildViewPageObject(view: ViewIR, ctx: BoundedContextIR): string
   lines.push(`    return this;`);
   lines.push(`  }`);
   lines.push("");
-  lines.push(`  async rows(): Promise<${cap(view.name)}RowText[]> {`);
-  lines.push(`    const out: ${cap(view.name)}RowText[] = [];`);
+  lines.push(`  async rows(): Promise<${upperFirst(view.name)}RowText[]> {`);
+  lines.push(`    const out: ${upperFirst(view.name)}RowText[] = [];`);
   lines.push(`    for (let i = 0; i < 1000; i++) {`);
   lines.push(`      const row = this.page.getByTestId(\`view-${slug}-row-\${i}\`);`);
   lines.push(`      if ((await row.count()) === 0) break;`);
   for (const c of cols) {
     lines.push(
-      `      const ${camel("c_" + c)} = await this.page.getByTestId(\`view-${slug}-row-\${i}-${c}\`).innerText();`,
+      `      const ${lowerFirst("c_" + c)} = await this.page.getByTestId(\`view-${slug}-row-\${i}-${c}\`).innerText();`,
     );
   }
-  const rowLiteral = cols.map((c) => `${c}: ${camel("c_" + c)}`).join(", ");
+  const rowLiteral = cols.map((c) => `${c}: ${lowerFirst("c_" + c)}`).join(", ");
   lines.push(`      out.push({ ${rowLiteral} });`);
   lines.push(`    }`);
   lines.push(`    return out;`);
@@ -246,10 +253,6 @@ function collectColumnNames(view: ViewIR, ctx: BoundedContextIR): string[] {
 
 function unwrapOpt(t: TypeIR): TypeIR {
   return t.kind === "optional" ? t.inner : t;
-}
-
-function cap(s: string): string {
-  return s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
 }
 
 function zodForResponse(t: TypeIR, optional: boolean): string {

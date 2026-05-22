@@ -54,7 +54,7 @@ export function emitTable(
     propagateChildFlags(ctx, childCtx);
   }
 
-  // Slice A9 — boolean style props matching Mantine's `<Table>`
+  // Boolean style props matching Mantine's `<Table>`
   // surface.  shadcn templates ignore the props (their <Table> has
   // built-in striping); reading them here keeps the DSL pack-
   // agnostic.
@@ -62,7 +62,7 @@ export function emitTable(
   const highlight = boolNamed(call, "highlight");
   const sticky = boolNamed(call, "sticky");
 
-  // Slice A13 — `keyExpr:` named arg overrides the default
+  // `keyExpr:` named arg overrides the default
   // `row.id` key.  Views with custom output (no `id` field on the
   // row type) supply `keyExpr: "idx"` (or similar) so the
   // `<Table.Tr key=…>` doesn't reference a non-existent field.
@@ -71,14 +71,14 @@ export function emitTable(
   const keyExprArg = stringNamed(call, "keyExpr");
   const keyExpr = keyExprArg ?? `${rowVar}.id`;
 
-  // Slice A9 — `rowTestid:` lambda computes a per-row testid.
-  // The lambda's source-side param rebinds to `row` (Slice A2's
+  // `rowTestid:` lambda computes a per-row testid.
+  // The lambda's source-side param rebinds to `row` (the
   // lambdaParams scope) so user code reads `row.id` cleanly.
   // The expression body emits inside a TS template literal so
   // dynamic ids interpolate (`orders-row-${row.id}`).
   const rowTestidLam = lambdaArg(call, "rowTestid");
   let rowTestidJs: string | undefined;
-  if (rowTestidLam && rowTestidLam.body) {
+  if (rowTestidLam?.body) {
     const childCtx: WalkContext = {
       ...ctx,
       lambdaParams: extendLambdaParams(ctx, rowTestidLam.param, rowVar),
@@ -117,7 +117,7 @@ export function emitTable(
   });
 }
 
-/** Slice A2 — emit one `Column("Header", <accessor>)` into a
+/** Emit one `Column("Header", <accessor>)` into a
  *  template-friendly shape: a header string + a per-cell TSX
  *  fragment.  Accessor lambda bodies that are primitive calls
  *  walk through the regular emitter (yields JSX); expression

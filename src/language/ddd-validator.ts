@@ -5,6 +5,7 @@ import {
   packFormatForBuiltin,
   parseBuiltinDesignRef,
 } from "../generator/_packs/builtin-formats.js";
+import type { Platform } from "../ir/loom-ir.js";
 import {
   backendVersionsForFamily,
   isRegisteredBackendRef,
@@ -14,9 +15,12 @@ import {
 import type { DddServices } from "./ddd-module.js";
 import {
   type Aggregate,
+  type Api,
   type AssignOrCallStmt,
+  type BoundedContext,
   type Containment,
   type DddAstType,
+  type Deployable,
   type DerivedProp,
   type EmitStmt,
   type EntityPart,
@@ -37,9 +41,26 @@ import {
   isProperty,
   isRequiresStmt,
   isValueObject,
+  type LValue,
+  type MatchExpr,
+  type MemberAccess,
+  type MenuBlock,
+  type Model,
+  type Module,
+  type NameRef,
   type Operation,
+  type Page,
   type Property,
+  type Requirement,
+  type Scaffold,
   type Statement,
+  type Storage,
+  type StringLit,
+  type System,
+  type ThemeBlock,
+  type Ui,
+  type UiApiParam,
+  type UiHelperImport,
   type ValueObject,
 } from "./generated/ast.js";
 import {
@@ -60,24 +81,24 @@ import {
 
 export class DddValidator {
   // Entry: full model walk
-  check(model: import("./generated/ast.js").Model, accept: ValidationAcceptor): void {
-    // Slice 21.C — validate every `string.matches(regex)` call's
+  check(model: Model, accept: ValidationAcceptor): void {
+    // Validate every `string.matches(regex)` call's
     // argument is a string literal that compiles as a RegExp.
     // Walks the entire AST so the rule applies in invariants,
     // preconditions, derived bodies, function bodies, and guards
     // alike — anywhere the operator can appear.
     this.checkMatchesCalls(model, accept);
-    // Slice 3 — match expressions: warn on a missing `else` arm.
+    // Match expressions: warn on a missing `else` arm.
     // Type-checking arm conditions is best-effort here (the lowering's
     // type system is the source of truth); structural checks run
     // unconditionally.
     this.checkMatchExpressions(model, accept);
-    // Slice A6 — `import helper <name> from "..."` declarations.
+    // `import helper <name> from "..."` declarations.
     // Reject names that shadow walker stdlib primitives so a typo
     // never silently overrides Stack / Form / etc.  Also flag
     // duplicate helper names within the same UI.
     this.checkUiHelperImports(model, accept);
-    // Slice 12 — traceability artifacts.  The grammar admits a
+    // Traceability artifacts.  The grammar admits a
     // permissive requirement prop-bag and any code cross-reference;
     // semantic constraints (allowed keys / enum values / required
     // props / parent acyclicity) are enforced here.
@@ -87,9 +108,7 @@ export class DddValidator {
         this.checkContext(m, accept);
       } else if (m.$type === "System") {
         const deployables = m.members.filter((sm) => sm.$type === "Deployable");
-        const themeBlocks = m.members.filter(
-          (sm) => sm.$type === "ThemeBlock",
-        ) as import("./generated/ast.js").ThemeBlock[];
+        const themeBlocks = m.members.filter((sm) => sm.$type === "ThemeBlock") as ThemeBlock[];
         if (themeBlocks.length > 1) {
           for (const tb of themeBlocks.slice(1)) {
             accept(
@@ -100,14 +119,12 @@ export class DddValidator {
           }
         }
         for (const tb of themeBlocks) this.checkTheme(tb, accept);
-        // Slice 3 — page metamodel.  Collect ui blocks first so per-
+        // Page metamodel.  Collect ui blocks first so per-
         // ui checks can see siblings (name uniqueness across uis), and
         // so per-deployable checks can cross-reference the system's
         // ui inventory.
-        const uis = m.members.filter(
-          (sm) => sm.$type === "Ui",
-        ) as import("./generated/ast.js").Ui[];
-        const uiNamesSeen = new Map<string, import("./generated/ast.js").Ui>();
+        const uis = m.members.filter((sm) => sm.$type === "Ui") as Ui[];
+        const uiNamesSeen = new Map<string, Ui>();
         for (const ui of uis) {
           const prior = uiNamesSeen.get(ui.name);
           if (prior) {
@@ -123,13 +140,11 @@ export class DddValidator {
           }
         }
 
-        // Slice 11.25 — Api declaration checks.
+        // Api declaration checks.
         //   - Names unique within the system (`api SalesApi from …` declared twice).
         //   - Source module cross-ref must resolve.
-        const apis = m.members.filter(
-          (sm) => sm.$type === "Api",
-        ) as import("./generated/ast.js").Api[];
-        const apiNamesSeen = new Map<string, import("./generated/ast.js").Api>();
+        const apis = m.members.filter((sm) => sm.$type === "Api") as Api[];
+        const apiNamesSeen = new Map<string, Api>();
         for (const api of apis) {
           const prior = apiNamesSeen.get(api.name);
           if (prior) {
@@ -150,15 +165,13 @@ export class DddValidator {
           }
         }
 
-        // Slice 11.27 — Storage declaration checks.
+        // Storage declaration checks.
         //   - Names unique within the system.
         //   - Type is one of the v0 enum values (parser ensures shape;
         //     this is a structural sanity-check + future hook for
         //     cross-platform constraints).
-        const storages = m.members.filter(
-          (sm) => sm.$type === "Storage",
-        ) as import("./generated/ast.js").Storage[];
-        const storageNamesSeen = new Map<string, import("./generated/ast.js").Storage>();
+        const storages = m.members.filter((sm) => sm.$type === "Storage") as Storage[];
+        const storageNamesSeen = new Map<string, Storage>();
         for (const s of storages) {
           const prior = storageNamesSeen.get(s.name);
           if (prior) {
@@ -178,45 +191,24 @@ export class DddValidator {
           } else if (sm.$type === "BoundedContext") {
             this.checkContext(sm, accept);
           } else if (sm.$type === "Deployable") {
-            this.checkDeployable(
-              sm as import("./generated/ast.js").Deployable,
-              deployables as import("./generated/ast.js").Deployable[],
-              accept,
-            );
+            this.checkDeployable(sm as Deployable, deployables as Deployable[], accept);
           } else if (sm.$type === "Ui") {
-            this.checkUi(
-              sm as import("./generated/ast.js").Ui,
-              m as import("./generated/ast.js").System,
-              accept,
-            );
+            this.checkUi(sm as Ui, m as System, accept);
           }
         }
       }
     }
   }
 
-  /** Slice A6 — `import helper <name> from "<path>"` at the UI
-   *  level.  Validate two invariants:
-   *   1. Helper names don't shadow any walker stdlib primitive
-   *      (else a typo would silently divert a body call like
-   *      `Stack(...)` from the primitive to the helper).
-   *   2. No duplicate helper names within the same UI.
-   *
-   *  The stdlib set is duplicated here from `body-walker.ts`
-   *  intentionally — the validator runs before generation and
-   *  the cross-module import would inflate the language-server
-   *  bundle. */
-  private checkTraceability(
-    model: import("./generated/ast.js").Model,
-    accept: ValidationAcceptor,
-  ): void {
+  /** Validate `requirement` traceability artifacts: the `type`,
+   *  `title`, `status` and `priority` keys, and that each declared
+   *  `type`/`status` is one of the known enum values. */
+  private checkTraceability(model: Model, accept: ValidationAcceptor): void {
     const ALLOWED_KEYS = new Set(["type", "title", "status", "priority"]);
     const TYPES = new Set(["UserStory", "UseCase", "AcceptanceCriteria", "BusinessReq"]);
     const STATUSES = new Set(["Draft", "Approved", "InProgress", "Done"]);
 
-    const requirements = model.members.filter(
-      (m): m is import("./generated/ast.js").Requirement => m.$type === "Requirement",
-    );
+    const requirements = model.members.filter((m): m is Requirement => m.$type === "Requirement");
 
     for (const req of requirements) {
       const seen = new Set<string>();
@@ -310,10 +302,18 @@ export class DddValidator {
     }
   }
 
-  private checkUiHelperImports(
-    model: import("./generated/ast.js").Model,
-    accept: ValidationAcceptor,
-  ): void {
+  /** `import helper <name> from "<path>"` at the UI
+   *  level.  Validate two invariants:
+   *   1. Helper names don't shadow any walker stdlib primitive
+   *      (else a typo would silently divert a body call like
+   *      `Stack(...)` from the primitive to the helper).
+   *   2. No duplicate helper names within the same UI.
+   *
+   *  The stdlib set is duplicated here from `body-walker.ts`
+   *  intentionally — the validator runs before generation and
+   *  the cross-module import would inflate the language-server
+   *  bundle. */
+  private checkUiHelperImports(model: Model, accept: ValidationAcceptor): void {
     const STDLIB_PRIMITIVES = new Set<string>([
       "Stack",
       "Group",
@@ -356,15 +356,13 @@ export class DddValidator {
     ]);
     for (const member of model.members) {
       if (member.$type !== "System") continue;
-      const sys = member as import("./generated/ast.js").System;
-      const uis = sys.members.filter(
-        (sm) => sm.$type === "Ui",
-      ) as import("./generated/ast.js").Ui[];
+      const sys = member as System;
+      const uis = sys.members.filter((sm) => sm.$type === "Ui") as Ui[];
       for (const ui of uis) {
-        const seen = new Map<string, import("./generated/ast.js").UiHelperImport>();
+        const seen = new Map<string, UiHelperImport>();
         for (const um of ui.members) {
           if (um.$type !== "UiHelperImport") continue;
-          const h = um as import("./generated/ast.js").UiHelperImport;
+          const h = um as UiHelperImport;
           if (STDLIB_PRIMITIVES.has(h.name)) {
             accept(
               "error",
@@ -386,15 +384,12 @@ export class DddValidator {
     }
   }
 
-  private checkTheme(
-    block: import("./generated/ast.js").ThemeBlock,
-    accept: ValidationAcceptor,
-  ): void {
+  private checkTheme(block: ThemeBlock, accept: ValidationAcceptor): void {
     const knownNames = new Set(["primary", "neutral", "radius", "fontFamily"]);
     const knownRadius = new Set(["none", "sm", "md", "lg", "xl"]);
     // Hex colors: #RGB, #RRGGBB, or #RRGGBBAA.  Everything else
-    // ("blue" / "rgb(...)" / "var(--brand)") routes through a future
-    // slice if a user asks; rejecting here keeps the surface tight
+    // ("blue" / "rgb(...)" / "var(--brand)") can be supported later
+    // if a user asks; rejecting here keeps the surface tight
     // and the Mantine shade-ramp generator simple.
     const hexColor = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
     const seen = new Set<string>();
@@ -442,12 +437,8 @@ export class DddValidator {
     }
   }
 
-  private checkDeployable(
-    d: import("./generated/ast.js").Deployable,
-    siblings: import("./generated/ast.js").Deployable[],
-    accept: ValidationAcceptor,
-  ): void {
-    // Slice 3 — page-metamodel UI binding rules (3, 4).
+  private checkDeployable(d: Deployable, siblings: Deployable[], accept: ValidationAcceptor): void {
+    // Page-metamodel UI binding rules (3, 4).
     // Rule 3: only platforms that mount a UI admit `ui:` — `react`,
     //         `static`, and `phoenixLiveView` (fullstack Ash + Phoenix).
     // Rule 4: every `static` deployable must declare `ui:` (otherwise
@@ -540,7 +531,7 @@ export class DddValidator {
       }
     }
 
-    // Slice 11.26 — explicit api composition checks.
+    // Explicit api composition checks.
     this.checkDeployableServes(d, accept);
     this.checkDeployableUiCompose(d, accept);
     this.checkDeployableModuleStorages(d, accept);
@@ -560,9 +551,9 @@ export class DddValidator {
    *    3. `design:` set on a deployable with no UI mount and on a
    *       platform that doesn't render UI either → warning that the
    *       value is dropped at lowering and has no effect. */
-  /** Backend-packages B1 — validate the `platform:` value now that
-   *  the grammar admits an arbitrary STRING (for `family@version`
-   *  pins).  Mirrors `checkDeployableDesignPack`'s version error:
+  /** Validate the `platform:` value now that the grammar admits an
+   *  arbitrary STRING (for `family@version` pins).  Mirrors
+   *  `checkDeployableDesignPack`'s version error:
    *
    *    - backend bareword (`hono`) / frontend keyword
    *      (`react`/`static`) → always fine.
@@ -571,10 +562,7 @@ export class DddValidator {
    *    - anything else (`"frobnicator"`, a typo'd quoted platform)
    *      → unknown-platform error (the grammar enum used to reject
    *      these; the STRING alternative no longer does). */
-  private checkDeployablePlatform(
-    d: import("./generated/ast.js").Deployable,
-    accept: ValidationAcceptor,
-  ): void {
+  private checkDeployablePlatform(d: Deployable, accept: ValidationAcceptor): void {
     const raw = d.platform;
     if (raw == null) return;
     const parsed = parseBuiltinPlatformRef(raw);
@@ -604,7 +592,7 @@ export class DddValidator {
   }
 
   private checkDeployableDesignPack(
-    d: import("./generated/ast.js").Deployable,
+    d: Deployable,
     hasUiBinding: boolean,
     explicitFramework: string | undefined,
     accept: ValidationAcceptor,
@@ -625,8 +613,8 @@ export class DddValidator {
     }
     const framework = explicitFramework ?? expectedFrameworkFor(d.platform, hasUiBinding);
     const expectedFormat = expectedPackFormatFor(framework);
-    // Phase 0 of pack-versioning: parse the slot value into
-    // {family, version, qualified}.  Bareword (`mantine`) and pinned
+    // Parse the slot value into {family, version, qualified}.
+    // Bareword (`mantine`) and pinned
     // (`mantine@v7`) forms both produce a parsed ref pointing at a
     // built-in family; custom paths (`./design/foo`) parse to null and
     // fall through to Case 2.  Distinguishing "known family, unknown
@@ -668,7 +656,7 @@ export class DddValidator {
     }
   }
 
-  /** Slice 11.27 — `modules: <M> { primary: <Storage>, ... }`
+  /** `modules: <M> { primary: <Storage>, ... }`
    *  per-module storage map validations.
    *    - Each storage ref must resolve.
    *    - No duplicate role within one module's brace block.
@@ -680,10 +668,7 @@ export class DddValidator {
    *      bare `modules: Sales` deployables keep working).  Bare
    *      list still defaults to "no explicit storage; use generator
    *      defaults". */
-  private checkDeployableModuleStorages(
-    d: import("./generated/ast.js").Deployable,
-    accept: ValidationAcceptor,
-  ): void {
+  private checkDeployableModuleStorages(d: Deployable, accept: ValidationAcceptor): void {
     const isBackend = platformOwnsBackend(d.platform);
     for (const mb of d.moduleBindings ?? []) {
       const block = mb.storages ?? [];
@@ -728,16 +713,13 @@ export class DddValidator {
     }
   }
 
-  /** Slice 11.26 — `serves:` validations.
+  /** `serves:` validations.
    *    - Only valid on platforms that own a backend (dotnet, hono,
    *      phoenixLiveView).  Frontend-only platforms (react, static)
    *      have no api surface to serve.
    *    - Each api ref must resolve.
    *    - No duplicate api names within one deployable's serves list. */
-  private checkDeployableServes(
-    d: import("./generated/ast.js").Deployable,
-    accept: ValidationAcceptor,
-  ): void {
+  private checkDeployableServes(d: Deployable, accept: ValidationAcceptor): void {
     if (!d.serves || d.serves.length === 0) return;
     if (!platformOwnsBackend(d.platform)) {
       accept(
@@ -770,7 +752,7 @@ export class DddValidator {
     }
   }
 
-  /** Slice 11.26 — `ui: WebApp { Sales: salesApi, ... }` compose-block
+  /** `ui: WebApp { Sales: salesApi, ... }` compose-block
    *  validations.  Each binding maps a UI api parameter (declared as
    *  `api Sales: SalesApi` in the ui block) to a backend deployable
    *  that supplies its contract.  The rule applies to any deployable
@@ -784,10 +766,7 @@ export class DddValidator {
    *    - No duplicate param bindings.
    *    - Every UI api param must have a matching binding (no
    *      param left unbound). */
-  private checkDeployableUiCompose(
-    d: import("./generated/ast.js").Deployable,
-    accept: ValidationAcceptor,
-  ): void {
+  private checkDeployableUiCompose(d: Deployable, accept: ValidationAcceptor): void {
     const ui = d.uiSugar?.ref?.ref ?? d.uiCompose?.ref?.ref ?? d.uiBlock?.ref?.ref;
     if (!ui) return;
 
@@ -883,10 +862,7 @@ export class DddValidator {
     }
   }
 
-  private checkContext(
-    ctx: import("./generated/ast.js").BoundedContext,
-    accept: ValidationAcceptor,
-  ): void {
+  private checkContext(ctx: BoundedContext, accept: ValidationAcceptor): void {
     for (const member of ctx.members) {
       if (isAggregate(member)) this.checkAggregate(member, accept);
       else if (isValueObject(member)) this.checkValueObject(member, accept);
@@ -1002,13 +978,10 @@ export class DddValidator {
     }
   }
 
-  private checkMatchExpressions(
-    model: import("./generated/ast.js").Model,
-    accept: ValidationAcceptor,
-  ): void {
+  private checkMatchExpressions(model: Model, accept: ValidationAcceptor): void {
     for (const node of AstUtils.streamAllContents(model)) {
       if (node.$type !== "MatchExpr") continue;
-      const m = node as import("./generated/ast.js").MatchExpr;
+      const m = node as MatchExpr;
       // Empty match (no arms, no else) is structurally meaningless —
       // grammar permits it, validator rejects.
       if (m.arms.length === 0 && !m.elseExpr) {
@@ -1033,13 +1006,10 @@ export class DddValidator {
     }
   }
 
-  private checkMatchesCalls(
-    model: import("./generated/ast.js").Model,
-    accept: ValidationAcceptor,
-  ): void {
+  private checkMatchesCalls(model: Model, accept: ValidationAcceptor): void {
     for (const node of AstUtils.streamAllContents(model)) {
       if (node.$type !== "MemberAccess") continue;
-      const ma = node as import("./generated/ast.js").MemberAccess;
+      const ma = node as MemberAccess;
       if (ma.member !== "matches" || !ma.call) continue;
       // `matches` always takes exactly one string-literal argument.
       if (ma.args.length !== 1) {
@@ -1049,7 +1019,7 @@ export class DddValidator {
         });
         continue;
       }
-      // Slice 1.5: call args are CallArg wrappers carrying an
+      // Call args are CallArg wrappers carrying an
       // optional `name:` prefix; reach for `.value` to inspect the
       // expression itself.  `string.matches(<regex>)` is a single-
       // positional-arg method-call, so `name` should be absent.
@@ -1071,7 +1041,7 @@ export class DddValidator {
         );
         continue;
       }
-      const raw = (arg as import("./generated/ast.js").StringLit).value as string;
+      const raw = (arg as StringLit).value as string;
       // The grammar's STRING terminal carries the surrounding quotes.
       const pattern = raw.startsWith('"') ? JSON.parse(raw) : raw;
       try {
@@ -1347,12 +1317,7 @@ export class DddValidator {
     }
   }
 
-  private lvalueType(
-    lv: import("./generated/ast.js").LValue,
-    agg: Aggregate,
-    env: Env,
-    accept: ValidationAcceptor,
-  ): DddType {
+  private lvalueType(lv: LValue, agg: Aggregate, env: Env, accept: ValidationAcceptor): DddType {
     // Resolve the head: a parameter, let-binding, or an aggregate property.
     const headSym = env.resolve(lv.head);
     let cur: DddType;
@@ -1426,7 +1391,7 @@ export class DddValidator {
    * type reachable via the path so far.  Derived members are computed
    * from state and cannot be assigned to.
    */
-  private lvalueIsDerived(lv: import("./generated/ast.js").LValue, agg: Aggregate): boolean {
+  private lvalueIsDerived(lv: LValue, agg: Aggregate): boolean {
     if (lv.tail.length === 0) {
       // Direct head reference — check root members
       for (const m of agg.members) {
@@ -1454,9 +1419,8 @@ export class DddValidator {
   }
 
   // ---------------------------------------------------------------------------
-  // Page metamodel — Slice 3 validator obligations.
+  // Page metamodel validator obligations.
   //
-  // Per the plan at /root/.claude/plans/yes-make-full-plan-tingly-sunbeam.md.
   // Walks each `ui` SystemMember and emits diagnostics for malformed
   // pages, scaffold directives, menus, and the references between
   // them.  Cross-cutting rules (uniqueness across uis, deployable.ui
@@ -1465,19 +1429,15 @@ export class DddValidator {
   //
   // These checks are intentionally syntactic / cross-reference; deeper
   // type analysis on body expressions and component-stdlib parameter
-  // shape lives in Slice 5 (page emitter + closed-stdlib spec table).
+  // shape lives in the page emitter (closed-stdlib spec table).
   // ---------------------------------------------------------------------------
 
-  private checkUi(
-    ui: import("./generated/ast.js").Ui,
-    sys: import("./generated/ast.js").System,
-    accept: ValidationAcceptor,
-  ): void {
+  private checkUi(ui: Ui, sys: System, accept: ValidationAcceptor): void {
     // Page name uniqueness within the ui (Rule 7).  Override-by-name
     // is the SAME mechanism — the explicit page must displace exactly
     // one scaffolded page; multiple explicit pages with the same name
     // are still an error.
-    const pageNamesSeen = new Map<string, import("./generated/ast.js").Page>();
+    const pageNamesSeen = new Map<string, Page>();
     for (const m of ui.members) {
       if (m.$type !== "Page") continue;
       const prior = pageNamesSeen.get(m.name);
@@ -1504,12 +1464,12 @@ export class DddValidator {
       }
     }
 
-    // Slice 11.25 — UI api parameter checks.
+    // UI api parameter checks.
     //   - Param names unique within the ui (`api Sales: …` declared twice).
     //   - apiRef cross-ref must resolve (handled by Langium linker; the
     //     refRoot returns undefined when the target isn't found, so the
     //     check below catches it explicitly with a clearer message).
-    const apiParamSeen = new Map<string, import("./generated/ast.js").UiApiParam>();
+    const apiParamSeen = new Map<string, UiApiParam>();
     for (const m of ui.members) {
       if (m.$type !== "UiApiParam") continue;
       const prior = apiParamSeen.get(m.name);
@@ -1538,14 +1498,10 @@ export class DddValidator {
     }
   }
 
-  private checkScaffold(
-    s: import("./generated/ast.js").Scaffold,
-    sys: import("./generated/ast.js").System,
-    accept: ValidationAcceptor,
-  ): void {
+  private checkScaffold(s: Scaffold, sys: System, accept: ValidationAcceptor): void {
     // Rule 5 — selector targets must resolve to declarations of the
     // matching kind anywhere in the system.  The deployable-targets-
-    // chain reachability check is left to Slice 4's expander where
+    // chain reachability check is left to the scaffold expander where
     // we already need to walk reachability for page generation.
 
     // Build per-kind name sets from the system's domain IR.
@@ -1597,7 +1553,7 @@ export class DddValidator {
       }
       // Rule 6 (light) — same name listed twice in one directive.
       // Cross-directive double-scaffolding (same module, different
-      // granularity) is detected by Slice 4's expander when it
+      // granularity) is detected by the scaffold expander when it
       // collapses scaffold output to a page-name map.
       if (seenWithinDirective.has(t)) {
         accept("error", `'scaffold ${s.selector}: ...' lists '${t}' more than once.`, {
@@ -1609,13 +1565,9 @@ export class DddValidator {
     }
   }
 
-  private checkPage(
-    p: import("./generated/ast.js").Page,
-    ui: import("./generated/ast.js").Ui,
-    accept: ValidationAcceptor,
-  ): void {
+  private checkPage(p: Page, ui: Ui, accept: ValidationAcceptor): void {
     void ui;
-    // Slice 11.25 — validate api body refs first so each chain ref
+    // Validate api body refs first so each chain ref
     // gets a precise diagnostic with source-location ranges.
     this.checkApiBodyRefs(p, ui, accept);
     // Property uniqueness (Rule 9 part) — at most one each of route,
@@ -1657,23 +1609,17 @@ export class DddValidator {
     }
   }
 
-  private checkMenuBlock(
-    block: import("./generated/ast.js").MenuBlock,
-    ui: import("./generated/ast.js").Ui,
-    accept: ValidationAcceptor,
-  ): void {
+  private checkMenuBlock(block: MenuBlock, ui: Ui, accept: ValidationAcceptor): void {
     // Rule 8 — every page-link in a menu block must reference a page
     // in the SAME ui.  The grammar's `[Page:ID]` cross-reference
     // resolves globally; we additionally check the resolved page's
     // container.
     const pagesInThisUi = new Set(
-      ui.members
-        .filter((m) => m.$type === "Page")
-        .map((m) => (m as import("./generated/ast.js").Page).name),
+      ui.members.filter((m) => m.$type === "Page").map((m) => (m as Page).name),
     );
     for (const section of block.sections) {
       for (const link of section.links) {
-        // Slice 10: page links use a Langium cross-reference now
+        // Page links use a Langium cross-reference now
         // that scaffold expansion runs at the AST level.  The
         // linker reports unresolved refs natively
         // ("Could not resolve reference to Page named 'X'") — no
@@ -1701,7 +1647,7 @@ export class DddValidator {
     }
   }
 
-  /** Slice 11.25 — validate `<paramName>.<aggregate>.<op>` body
+  /** Validate `<paramName>.<aggregate>.<op>` body
    *  ref chains in a page.  Each chain must:
    *    - root at a declared UiApiParam in the page's UI
    *    - reference a real aggregate in the api's source module
@@ -1709,13 +1655,9 @@ export class DddValidator {
    *      repository find)
    *  Diagnostics emit at the source-level node so the editor
    *  underlines the exact wrong segment. */
-  private checkApiBodyRefs(
-    p: import("./generated/ast.js").Page,
-    ui: import("./generated/ast.js").Ui,
-    accept: ValidationAcceptor,
-  ): void {
+  private checkApiBodyRefs(p: Page, ui: Ui, accept: ValidationAcceptor): void {
     // Build the param-name → resolved Api map for this UI.
-    const apiByParam = new Map<string, import("./generated/ast.js").Api>();
+    const apiByParam = new Map<string, Api>();
     for (const m of ui.members) {
       if (m.$type !== "UiApiParam") continue;
       const apiNode = m.apiRef?.ref;
@@ -1727,15 +1669,15 @@ export class DddValidator {
     // state inits — anything that can mention a body-ref chain).
     for (const node of AstUtils.streamAllContents(p)) {
       if (node.$type !== "MemberAccess") continue;
-      const ma = node as import("./generated/ast.js").MemberAccess;
+      const ma = node as MemberAccess;
       // We're looking for the OUTER `.<op>` of a 3-segment chain,
       // whose receiver is itself `<paramName>.<aggregate>`.
       // Skip non-three-segment chains (the deeper member or
       // outer .data accessors aren't the ones being validated).
       if (ma.receiver?.$type !== "MemberAccess") continue;
-      const inner = ma.receiver as import("./generated/ast.js").MemberAccess;
+      const inner = ma.receiver as MemberAccess;
       if (inner.receiver?.$type !== "NameRef") continue;
-      const root = inner.receiver as import("./generated/ast.js").NameRef;
+      const root = inner.receiver as NameRef;
       const rootName = root.name as string;
       if (!apiByParam.has(rootName)) continue; // not an api binding ref
 
@@ -1770,10 +1712,7 @@ export class DddValidator {
 }
 
 /** Find an Aggregate by name across the contexts of a Module. */
-function findAggregateInModule(
-  mod: import("./generated/ast.js").Module,
-  name: string,
-): import("./generated/ast.js").Aggregate | undefined {
+function findAggregateInModule(mod: Module, name: string): Aggregate | undefined {
   for (const ctx of mod.contexts ?? []) {
     for (const am of ctx.members ?? []) {
       if (am.$type === "Aggregate" && am.name === name) return am;
@@ -1788,7 +1727,7 @@ function findAggregateInModule(
  *  aggregates), declared as `repository <Name> for <Aggregate>`,
  *  so we walk the aggregate's container context to find ones
  *  pointing at this aggregate. */
-function listValidApiOperations(agg: import("./generated/ast.js").Aggregate): string[] {
+function listValidApiOperations(agg: Aggregate): string[] {
   const ops = new Set<string>(["all", "byId", "create", "update", "delete"]);
   const ctx = agg.$container;
   if (ctx?.$type === "BoundedContext") {
@@ -1801,7 +1740,7 @@ function listValidApiOperations(agg: import("./generated/ast.js").Aggregate): st
   return [...ops].sort();
 }
 
-function isValidApiOperation(agg: import("./generated/ast.js").Aggregate, op: string): boolean {
+function isValidApiOperation(agg: Aggregate, op: string): boolean {
   return listValidApiOperations(agg).includes(op);
 }
 
@@ -1841,7 +1780,7 @@ function singular(selector: string): string {
   }
 }
 
-function pathString(lv: import("./generated/ast.js").LValue): string {
+function pathString(lv: LValue): string {
   return [lv.head, ...lv.tail].join(".");
 }
 
@@ -1864,7 +1803,7 @@ function platformMountsUi(platform: string | undefined): boolean {
   // safe because the grammar enum and the registry stay in lockstep
   // (registry barfs at boot if a platform is missing).
   try {
-    return platformFor(platform as import("../ir/loom-ir.js").Platform).mountsUi;
+    return platformFor(platform as Platform).mountsUi;
   } catch {
     return false;
   }

@@ -1,5 +1,5 @@
 import type { AggregateIR, BoundedContextIR, TypeIR } from "../../ir/loom-ir.js";
-import { camel } from "../../util/naming.js";
+import { lowerFirst, upperFirst } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Per-aggregate extern handler registry.
@@ -17,8 +17,6 @@ import { camel } from "../../util/naming.js";
 // looks up the handler from `externHandlers` and dispatches.
 // ---------------------------------------------------------------------------
 
-const cap = (s: string): string => (s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1));
-
 export function buildExternHandlersFile(agg: AggregateIR, ctx: BoundedContextIR): string {
   const externOps = agg.operations.filter((o) => o.extern);
   if (externOps.length === 0) return "";
@@ -26,7 +24,7 @@ export function buildExternHandlersFile(agg: AggregateIR, ctx: BoundedContextIR)
 
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
-  lines.push(`import type { ${agg.name} } from "./${camel(agg.name)}";`);
+  lines.push(`import type { ${agg.name} } from "./${lowerFirst(agg.name)}";`);
   if (usedVOs.length > 0) {
     lines.push(`import type { ${usedVOs.join(", ")} } from "./value-objects";`);
   }
@@ -42,10 +40,10 @@ export function buildExternHandlersFile(agg: AggregateIR, ctx: BoundedContextIR)
   // Zod schema (decimals → number, datetimes → Date, ids → string).
   for (const op of externOps) {
     if (op.params.length === 0) {
-      lines.push(`export type ${cap(op.name)}${agg.name}Request = Record<string, never>;`);
+      lines.push(`export type ${upperFirst(op.name)}${agg.name}Request = Record<string, never>;`);
       continue;
     }
-    lines.push(`export interface ${cap(op.name)}${agg.name}Request {`);
+    lines.push(`export interface ${upperFirst(op.name)}${agg.name}Request {`);
     for (const p of op.params) {
       lines.push(`  ${p.name}: ${wireTsType(p.type)};`);
     }
@@ -55,39 +53,41 @@ export function buildExternHandlersFile(agg: AggregateIR, ctx: BoundedContextIR)
 
   for (const op of externOps) {
     lines.push(
-      `export type ${cap(op.name)}${agg.name}Handler = (aggregate: ${agg.name}, request: ${cap(op.name)}${agg.name}Request) => Promise<void>;`,
+      `export type ${upperFirst(op.name)}${agg.name}Handler = (aggregate: ${agg.name}, request: ${upperFirst(op.name)}${agg.name}Request) => Promise<void>;`,
     );
   }
   lines.push("");
 
   lines.push("interface ExternHandlerRegistry {");
   for (const op of externOps) {
-    lines.push(`  ${camel(op.name)}${agg.name}: ${cap(op.name)}${agg.name}Handler | null;`);
+    lines.push(
+      `  ${lowerFirst(op.name)}${agg.name}: ${upperFirst(op.name)}${agg.name}Handler | null;`,
+    );
   }
   lines.push("}");
   lines.push("");
 
   lines.push("export const externHandlers: ExternHandlerRegistry = {");
   for (const op of externOps) {
-    lines.push(`  ${camel(op.name)}${agg.name}: null,`);
+    lines.push(`  ${lowerFirst(op.name)}${agg.name}: null,`);
   }
   lines.push("};");
   lines.push("");
 
   for (const op of externOps) {
     lines.push(
-      `export function register${cap(op.name)}${agg.name}Handler(fn: ${cap(op.name)}${agg.name}Handler): void {`,
+      `export function register${upperFirst(op.name)}${agg.name}Handler(fn: ${upperFirst(op.name)}${agg.name}Handler): void {`,
     );
-    lines.push(`  externHandlers.${camel(op.name)}${agg.name} = fn;`);
+    lines.push(`  externHandlers.${lowerFirst(op.name)}${agg.name} = fn;`);
     lines.push("}");
   }
   lines.push("");
 
   lines.push(`export function verify${agg.name}ExternHandlersRegistered(): void {`);
   for (const op of externOps) {
-    lines.push(`  if (externHandlers.${camel(op.name)}${agg.name} === null) {`);
+    lines.push(`  if (externHandlers.${lowerFirst(op.name)}${agg.name} === null) {`);
     lines.push(
-      `    throw new Error("Missing extern handler for '${op.name}' on aggregate '${agg.name}'. Call register${cap(op.name)}${agg.name}Handler(...) before app.listen().");`,
+      `    throw new Error("Missing extern handler for '${op.name}' on aggregate '${agg.name}'. Call register${upperFirst(op.name)}${agg.name}Handler(...) before app.listen().");`,
     );
     lines.push("  }");
   }

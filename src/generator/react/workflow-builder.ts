@@ -1,12 +1,11 @@
-import type { AggregateIR, BoundedContextIR, TypeIR, WorkflowIR } from "../../ir/loom-ir.js";
-import { camel, plural, snake } from "../../util/naming.js";
+import type { BoundedContextIR, TypeIR, WorkflowIR } from "../../ir/loom-ir.js";
+import { lowerFirst, snake, upperFirst } from "../../util/naming.js";
 import { fillBlock } from "./page-objects-builder.js";
 
 // ---------------------------------------------------------------------------
 // Workflow API module + Playwright page object emission.
 //
-// The page-side emission (workflows index, per-workflow form) moved
-// out of this file in Phase 1.5 — see
+// The page-side emission (workflows index, per-workflow form) lives in
 // src/generator/react/templating/preparers/workflow-{index,form}.ts.
 // What remains here is two emission paths that aren't pack-shaped:
 //
@@ -51,21 +50,23 @@ export function buildWorkflowsApiModule(contexts: BoundedContextIR[]): string {
   const enumDeps = collectEnumDeps(workflows);
   const voDeps = collectValueObjectDeps(workflows);
   for (const dep of [...enumDeps, ...voDeps]) {
-    lines.push(`import { ${dep.schemaName} } from "./${camel(dep.fromAggregate)}";`);
+    lines.push(`import { ${dep.schemaName} } from "./${lowerFirst(dep.fromAggregate)}";`);
   }
   lines.push("");
 
   for (const { wf } of workflows) {
-    lines.push(`export const ${cap(wf.name)}Request = z.object({`);
+    lines.push(`export const ${upperFirst(wf.name)}Request = z.object({`);
     for (const p of wf.params) {
       lines.push(`  ${p.name}: ${zodForRequest(p.type)},`);
     }
     lines.push(`});`);
-    lines.push(`export type ${cap(wf.name)}Request = z.infer<typeof ${cap(wf.name)}Request>;`);
+    lines.push(
+      `export type ${upperFirst(wf.name)}Request = z.infer<typeof ${upperFirst(wf.name)}Request>;`,
+    );
     lines.push("");
-    lines.push(`export function use${cap(wf.name)}Workflow() {`);
+    lines.push(`export function use${upperFirst(wf.name)}Workflow() {`);
     lines.push(`  return useMutation({`);
-    lines.push(`    mutationFn: async (input: ${cap(wf.name)}Request) => {`);
+    lines.push(`    mutationFn: async (input: ${upperFirst(wf.name)}Request) => {`);
     lines.push(`      await api.post(\`/workflows/${snake(wf.name)}\`, input);`);
     lines.push(`    },`);
     lines.push(`  });`);
@@ -168,8 +169,8 @@ function walkType(t: TypeIR, visit: (t: TypeIR) => void): void {
 
 export function buildWorkflowPageObject(wf: WorkflowIR, ctx: BoundedContextIR): string {
   const slug = snake(wf.name);
-  const className = `${cap(wf.name)}WorkflowPage`;
-  const requestType = `${cap(wf.name)}Request`;
+  const className = `${upperFirst(wf.name)}WorkflowPage`;
+  const requestType = `${upperFirst(wf.name)}Request`;
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import type { Page } from "@playwright/test";`);
@@ -210,10 +211,6 @@ export function buildWorkflowPageObject(wf: WorkflowIR, ctx: BoundedContextIR): 
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
-
-function cap(s: string): string {
-  return s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
-}
 
 function zodForRequest(t: TypeIR): string {
   switch (t.kind) {

@@ -7,9 +7,9 @@ import { PLATFORM_SURFACE_CONTRACT } from "../../src/platform/manifest.js";
 import { resetBackendSource } from "../../src/platform/registry.js";
 
 // ---------------------------------------------------------------------------
-// packaging-split P3 slice 4 — the `@loom/core` workspace package.
+// The `@loom/core` workspace package.
 //
-// Slice 4 introduces `packages/core/` as the published-shape home of
+// `packages/core/` is the published-shape home of
 // the toolchain's public API (a thin re-export of `src/` today).  It
 // carries the `PlatformSurface` contract version so backend packages
 // can declare which contract they speak (their `loom.core` range).

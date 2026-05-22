@@ -144,7 +144,7 @@ function emitProjectFromContexts(
     views: contexts.flatMap((c) => c.views),
   };
   out.set("Infrastructure/Persistence/AppDbContext.cs", renderDbContext(merged, ns));
-  // Slice 21.B FluentValidation pipeline — emit the generic
+  // FluentValidation pipeline — emit the generic
   // ValidationBehavior + the csproj package ref + the
   // Program.cs registrations only when at least one aggregate
   // has wire-translatable invariants / preconditions.  Computed
@@ -152,7 +152,7 @@ function emitProjectFromContexts(
   // arm is gated on the same flag.
   const usesValidators = merged.aggregates.some(hasAnyWireValidator);
   out.set("Api/DomainExceptionFilter.cs", renderExceptionFilter(ns, { usesValidators }));
-  // Slice 1A auth files — emitted only when the deployable opts in
+  // Auth files — emitted only when the deployable opts in
   // via `auth: required` AND the system declares a user block (the
   // validator already rejects the half-state).  When emitted, the
   // Program.cs adopts the middleware mount + DI registrations.

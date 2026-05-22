@@ -57,12 +57,25 @@ test("editor → generate → bundle → boot → dispatch", async ({ page }) =>
     await expect(page.getByTestId("resp-body")).toHaveText(/^\[\]$/);
   });
 
+  await test.step("Endpoint picker discovers the OpenAPI contract", async () => {
+    // The picker is populated from the booted backend's /openapi.json.
+    // Selecting the create operation flips method → POST and reveals
+    // the body editor with a Generate-example affordance.
+    await page.getByTestId("req-endpoint").click();
+    await page.getByRole("option", { name: "POST /products", exact: true }).click();
+    await expect(page.getByTestId("req-method")).toContainText("POST");
+    await expect(page.getByTestId("btn-gen-example")).toBeVisible();
+  });
+
   await test.step("POST /products → 201", async () => {
-    await page.getByTestId("req-method").click();
-    await page.getByRole("option", { name: "POST" }).click();
+    // req-body is now a Monaco editor (a div, not a textarea), so we
+    // set its content via select-all + insertText — keyboard.type would
+    // trip Monaco's auto-closing brackets/quotes and double them up.
     const body = page.getByTestId("req-body");
     await expect(body).toBeVisible();
-    await body.fill(
+    await body.click();
+    await page.keyboard.press("ControlOrMeta+A");
+    await page.keyboard.insertText(
       JSON.stringify({ sku: "PW-1", price: { amount: 9.99, currency: "USD" } }),
     );
     await page.getByTestId("btn-send").click();
@@ -82,6 +95,18 @@ test("editor → generate → bundle → boot → dispatch", async ({ page }) =>
     expect(parsed[0].sku).toBe("PW-1");
     expect(parsed[0].price.amount).toBe(9.99);
     expect(parsed[0].price.currency).toBe("USD");
+  });
+
+  await test.step("Database console runs SQL against PGlite", async () => {
+    // Switch the Runtime tab to its Database sub-view and run the
+    // built-in "List tables" query — exercises the query() RPC end to
+    // end. The table_name column header is schema-independent, so it's
+    // a stable assertion regardless of the example's aggregates.
+    await page.getByTestId("runtime-subview").getByText("Database").click();
+    await page.getByTestId("btn-list-tables").click();
+    const result = page.getByTestId("sql-result");
+    await expect(result).toBeVisible({ timeout: 30_000 });
+    await expect(result).toContainText("table_name");
   });
 
   await test.step("Preview loads the React app via the sandbox bridge", async () => {

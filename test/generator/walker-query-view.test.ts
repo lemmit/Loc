@@ -1,4 +1,4 @@
-// Slice A8 — QueryView macro for the canonical 4-arm query state
+// QueryView macro for the canonical 4-arm query state
 //   loading / error / empty / data
 //
 // Macro that captures the rendering pattern the scaffold List page
@@ -6,7 +6,7 @@
 // / `{ q.data && q.data.length === 0 && ... }` / `{ q.data &&
 // q.data.length > 0 && ... }`) into one declarative primitive.
 //
-// What this slice pins:
+// What this test pins:
 //   1. The `of:` query expression flows through the walker's hook
 //      detection so `Sales.Order.all` lifts to a `useAllOrders()`
 //      hook decl + import and the four branches reference the
@@ -19,19 +19,10 @@
 //      inside the branch.
 //   4. Plain (non-lambda) `data:` bodies render unchanged.
 
-import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
-import { createDddServices } from "../../src/language/ddd-module.js";
-import type { Model } from "../../src/language/generated/ast.js";
-import { generateSystems } from "../../src/system/index.js";
+import { generateSystemFiles } from "../_helpers/index.js";
 
-async function buildAndGenerate(src: string): Promise<Map<string, string>> {
-  const services = createDddServices(NodeFileSystem);
-  const { parseHelper } = await import("langium/test");
-  const helper = parseHelper(services.Ddd);
-  const doc = await helper(src, { validation: true });
-  return generateSystems(doc.parseResult.value as Model).files;
-}
+const buildAndGenerate = generateSystemFiles;
 
 const ordersListBody = (queryViewBody: string) => `
   system S {
@@ -54,7 +45,7 @@ const ordersListBody = (queryViewBody: string) => `
   }
 `;
 
-describe("Slice A8 — QueryView macro", () => {
+describe("QueryView macro", () => {
   it("auto-injects the hook for `of:` and references it in all four branches", async () => {
     const files = await buildAndGenerate(
       ordersListBody(`QueryView(
@@ -111,7 +102,7 @@ describe("Slice A8 — QueryView macro", () => {
       /orderAll\.data && orderAll\.data\.length > 0 && \([\s\S]*orderAll\.data\.map\(\(row, idx\) => \(/,
     );
     // Inner Column accessors still work — `o.status` resolves to
-    // `row.status` (Slice A2's lambda-param scope).
+    // `row.status` (the lambda-param scope).
     expect(tsx).toMatch(/<Table\.Td>\{row\.id\}<\/Table\.Td>/);
     expect(tsx).toMatch(/<Table\.Td><Badge[^>]*>\{row\.status\}<\/Badge><\/Table\.Td>/);
   });

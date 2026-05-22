@@ -6,7 +6,6 @@ import {
   DefaultScopeComputation,
   DefaultScopeProvider,
   EMPTY_SCOPE,
-  type LangiumCoreServices,
   type LangiumDocument,
   type ReferenceInfo,
   type Scope,
@@ -34,10 +33,6 @@ import {
  * context — and across modules / systems via the custom export below).
  */
 export class DddScopeProvider extends DefaultScopeProvider {
-  constructor(services: LangiumCoreServices) {
-    super(services);
-  }
-
   override getScope(context: ReferenceInfo): Scope {
     if (context.container.$type === "Containment" && context.property === "partType") {
       const aggregate = enclosingAggregate(context.container);
@@ -67,14 +62,14 @@ export class DddScopeComputation extends DefaultScopeComputation {
   ): Promise<AstNodeDescription[]> {
     const exports: AstNodeDescription[] = [];
     for (const node of AstUtils.streamAllContents(document.parseResult.value)) {
-      if (cancelToken && cancelToken.isCancellationRequested) break;
+      if (cancelToken?.isCancellationRequested) break;
       if (isAggregate(node) || isEntityPart(node) || isValueObject(node) || isEnumDecl(node)) {
         const name = this.nameProvider.getName(node);
         if (name) {
           exports.push(this.descriptions.createDescription(node, name, document));
         }
       }
-      // Traceability code references (Slice 12): every `Targetable`
+      // Traceability code references: every `Targetable`
       // (module / context / aggregate / operation / value-object /
       // event / repository / workflow / view / deployable / api) is
       // exported under its qualified dotted name so a Solution's

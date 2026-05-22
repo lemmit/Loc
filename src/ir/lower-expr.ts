@@ -394,7 +394,7 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
   }
   if (isLambda(expr)) {
     const inner = withLocal(env, expr.param, "lambda", { kind: "primitive", name: "string" });
-    // Slice 2: lambdas can carry either a single expression body
+    // Lambdas can carry either a single expression body
     // (`x => expr`, the only v22 form) OR a brace-block of statements
     // (`x => { stmt; stmt; … }`, new for page event handlers).  The
     // grammar rule sets `body` xor `stmts`; we mirror that in the IR.
@@ -423,10 +423,10 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
     };
   }
   if (isMatchExpr(expr)) {
-    // Predicate-arms expression — Slice 2 lowering is mechanical:
-    // each arm becomes a `{ cond, value }` pair, the optional
-    // `else => expr` becomes the `otherwise` slot.  Type unification
-    // across arms / soundness checks land in Slice 3 (validator).
+    // Predicate-arms expression — lowering is mechanical: each arm
+    // becomes a `{ cond, value }` pair, the optional `else => expr`
+    // becomes the `otherwise` slot.  Type unification across arms /
+    // soundness checks are left to the validator.
     return {
       kind: "match",
       arms: expr.arms.map((arm) => ({
@@ -483,7 +483,7 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
     const recv = lowerExpr(expr.receiver, env);
     const recvType = inferExprType(expr.receiver, env);
     if (expr.call) {
-      // Slice 1.5: call args are `CallArg` nodes wrapping an
+      // Call args are `CallArg` nodes wrapping an
       // Expression with an optional `name:` prefix.  Lower the value
       // and capture the parallel name list; downstream consumers
       // that don't care about names see the unchanged `args`
@@ -700,8 +700,8 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
   if (isMatchExpr(expr)) {
     // Match expressions return one arm's value (or the `else`).
     // Same posture as ternary — inspect the first arm's value type;
-    // soundness across arms is a Slice 3 validator concern (warn /
-    // error if arms disagree).
+    // soundness across arms is a validator concern (warn / error if
+    // arms disagree).
     if (expr.arms.length > 0) return inferExprType(expr.arms[0]!.value, env);
     if (expr.elseExpr) return inferExprType(expr.elseExpr, env);
     // Empty match — degenerate, falls back to a string-typed

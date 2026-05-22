@@ -1,4 +1,4 @@
-// Slice A3 — formatter primitives in walker stdlib.
+// formatter primitives in walker stdlib.
 //
 // Money / DateDisplay / EnumBadge / IdLink lower to per-pack
 // runtime helpers (`MoneyValue`, `DateTimeValue`, `Badge`, plus
@@ -15,19 +15,10 @@
 //      <IdValue id=… /></RouterLink> with the path derived from
 //      pluralized + snake-cased aggregate name.
 
-import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
-import { createDddServices } from "../../src/language/ddd-module.js";
-import type { Model } from "../../src/language/generated/ast.js";
-import { generateSystems } from "../../src/system/index.js";
+import { generateSystemFiles } from "../_helpers/index.js";
 
-async function buildAndGenerate(src: string): Promise<Map<string, string>> {
-  const services = createDddServices(NodeFileSystem);
-  const { parseHelper } = await import("langium/test");
-  const helper = parseHelper(services.Ddd);
-  const doc = await helper(src, { validation: true });
-  return generateSystems(doc.parseResult.value as Model).files;
-}
+const buildAndGenerate = generateSystemFiles;
 
 function pageWithBody(body: string): string {
   return `
@@ -57,7 +48,7 @@ async function emit(body: string): Promise<string> {
   return tsx;
 }
 
-describe("Slice A3 — formatter primitives", () => {
+describe("formatter primitives", () => {
   it("Money(123.45) emits <MoneyValue value={123.45} /> with the format helper imported", async () => {
     const tsx = await emit(`Money(123.45)`);
     expect(tsx).toMatch(/<MoneyValue value=\{ 123\.45 \}/);

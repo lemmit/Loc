@@ -1,6 +1,4 @@
-import { EmptyFileSystem } from "langium";
 import { describe, expect, it } from "vitest";
-import { createDddServices } from "../../src/language/ddd-module.js";
 import type { Model, Page, StateBlock } from "../../src/language/generated/ast.js";
 import {
   addStateField,
@@ -10,10 +8,7 @@ import {
   setStateDefault,
 } from "../../web/src/builder/page/state-fields.js";
 import type { TypeSpec } from "../../web/src/builder/system/fields.js";
-
-const parser = createDddServices(EmptyFileSystem).Ddd.parser.LangiumParser;
-const parse = (t: string): Model => parser.parse(t).value as Model;
-const parses = (t: string): boolean => parser.parse(t).parserErrors.length === 0;
+import { parseRaw as parse, parseRawOk as parses } from "../_helpers/index.js";
 
 function* walk(node: { $type: string }): Generator<{ $type: string }> {
   yield node;

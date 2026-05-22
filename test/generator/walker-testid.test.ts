@@ -1,10 +1,10 @@
-// Slice A1 — `testid:` named-arg convention on every walker primitive.
+// `testid:` named-arg convention on every walker primitive.
 //
 // Every body primitive in `src/generator/react/body-walker.ts`
 // reads a `testid:` named arg and threads it through to the
 // template's `data-testid` attribute on the primitive's root
 // element.  This is the foundation for walker-side e2e page-object
-// emission (A5) and for the explicit `Order` aggregate rewrite (B1).
+// emission and for the explicit `Order` aggregate rewrite.
 //
 // What this pins:
 //   1. A string-literal `testid: "x"` lands as `data-testid="x"`.
@@ -15,19 +15,10 @@
 //   4. Pages without `testid:` emit no `data-testid` for the
 //      primitive — i.e. the convention is opt-in, no drift.
 
-import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
-import { createDddServices } from "../../src/language/ddd-module.js";
-import type { Model } from "../../src/language/generated/ast.js";
-import { generateSystems } from "../../src/system/index.js";
+import { generateSystemFiles } from "../_helpers/index.js";
 
-async function buildAndGenerate(src: string): Promise<Map<string, string>> {
-  const services = createDddServices(NodeFileSystem);
-  const { parseHelper } = await import("langium/test");
-  const helper = parseHelper(services.Ddd);
-  const doc = await helper(src, { validation: true });
-  return generateSystems(doc.parseResult.value as Model).files;
-}
+const buildAndGenerate = generateSystemFiles;
 
 function pageWithBody(body: string): string {
   return `
@@ -57,7 +48,7 @@ async function emit(body: string): Promise<string> {
   return tsx;
 }
 
-describe("Slice A1 — testid: named-arg convention on every primitive", () => {
+describe("testid: named-arg convention on every primitive", () => {
   it('Stack: string literal lands as data-testid="…" on the root <Stack>', async () => {
     const tsx = await emit(`Stack(testid: "main")`);
     expect(tsx).toMatch(/<Stack[^>]*\bdata-testid="main"/);

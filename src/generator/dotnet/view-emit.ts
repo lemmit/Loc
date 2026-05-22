@@ -1,6 +1,6 @@
 import type { AggregateIR, BoundedContextIR, ExprIR, ViewIR } from "../../ir/loom-ir.js";
 import { viewUsesCurrentUser } from "../../ir/loom-ir.js";
-import { camel, pascal, plural, snake } from "../../util/naming.js";
+import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { projectEntityExpr, projectToResponse, wireType } from "./dto-mapping.js";
 import { renderCsExpr } from "./render-expr.js";
 
@@ -37,10 +37,13 @@ export function emitViews(
     const agg = aggsByName.get(view.aggregateName);
     if (!agg) continue; // validator already errored
     if (view.output) {
-      out.set(`Application/Views/${pascal(view.name)}Row.cs`, renderRowRecord(view, ctx, ns));
+      out.set(`Application/Views/${upperFirst(view.name)}Row.cs`, renderRowRecord(view, ctx, ns));
     }
-    out.set(`Application/Views/${pascal(view.name)}Query.cs`, renderQuery(view, agg, ns));
-    out.set(`Application/Views/${pascal(view.name)}Handler.cs`, renderHandler(view, agg, ctx, ns));
+    out.set(`Application/Views/${upperFirst(view.name)}Query.cs`, renderQuery(view, agg, ns));
+    out.set(
+      `Application/Views/${upperFirst(view.name)}Handler.cs`,
+      renderHandler(view, agg, ctx, ns),
+    );
   }
   out.set(`Api/${ctx.name}ViewsController.cs`, renderController(ctx, ns, options?.routePrefix));
 }
@@ -48,12 +51,12 @@ export function emitViews(
 /** The view's response row type — `<Agg>Response` for the shorthand
  *  form, `<View>Row` for the full form. */
 function responseRecordName(view: ViewIR, agg: AggregateIR): string {
-  return view.output ? `${pascal(view.name)}Row` : `${agg.name}Response`;
+  return view.output ? `${upperFirst(view.name)}Row` : `${agg.name}Response`;
 }
 
 function renderRowRecord(view: ViewIR, ctx: BoundedContextIR, ns: string): string {
   const fields = view
-    .output!.fields.map((f) => `${wireType(f.type, ctx, "response")} ${pascal(f.name)}`)
+    .output!.fields.map((f) => `${wireType(f.type, ctx, "response")} ${upperFirst(f.name)}`)
     .join(", ");
   return `// Auto-generated.
 using ${ns}.Domain.ValueObjects;
@@ -61,7 +64,7 @@ using ${ns}.Domain.Enums;
 
 namespace ${ns}.Application.Views;
 
-public sealed record ${pascal(view.name)}Row(${fields});
+public sealed record ${upperFirst(view.name)}Row(${fields});
 `;
 }
 
@@ -77,20 +80,20 @@ function renderQuery(view: ViewIR, agg: AggregateIR, ns: string): string {
 using Mediator;
 ${usingResponse}namespace ${ns}.Application.Views;
 
-public sealed record ${pascal(view.name)}Query() : IQuery<System.Collections.Generic.IReadOnlyList<${responseRecord}>>;
+public sealed record ${upperFirst(view.name)}Query() : IQuery<System.Collections.Generic.IReadOnlyList<${responseRecord}>>;
 `;
 }
 
 function renderHandler(view: ViewIR, agg: AggregateIR, ctx: BoundedContextIR, ns: string): string {
-  const queryName = `${pascal(view.name)}Query`;
-  const handlerName = `${pascal(view.name)}Handler`;
+  const queryName = `${upperFirst(view.name)}Query`;
+  const handlerName = `${upperFirst(view.name)}Handler`;
   const responseRecord = responseRecordName(view, agg);
-  // Slice 3: auxiliaries — sourceField → mapVarName (`customerId` →
+  // Auxiliaries — sourceField → mapVarName (`customerId` →
   // `customerById`) — drives DI of foreign repos + bulk loads at
   // handler entry, and rewrites `Id<X>` follow refs in the
   // projection.
   const auxiliaries = view.output?.auxiliaries ?? [];
-  // Slice 1C: when the view's filter / binds reference currentUser,
+  // When the view's filter / binds reference currentUser,
   // the handler injects ICurrentUserAccessor and threads
   // `_currentUser.User` into the repository call.
   const usesUser = viewUsesCurrentUser(view);
@@ -112,7 +115,7 @@ function renderHandler(view: ViewIR, agg: AggregateIR, ctx: BoundedContextIR, ns
   for (const aux of auxiliaries) {
     if (seenAggs.has(aux.aggName)) continue;
     seenAggs.add(aux.aggName);
-    const fieldName = `_${camel(aux.aggName)}Repo`;
+    const fieldName = `_${lowerFirst(aux.aggName)}Repo`;
     fields.push(`    private readonly I${aux.aggName}Repository ${fieldName};`);
     ctorParams.push(`I${aux.aggName}Repository ${fieldName.replace(/^_/, "")}`);
     ctorAssigns.push(`${fieldName} = ${fieldName.replace(/^_/, "")}`);
@@ -127,7 +130,7 @@ function renderHandler(view: ViewIR, agg: AggregateIR, ctx: BoundedContextIR, ns
   // Bulk-load lines — one per auxiliary path, in dependency order.
   const auxLines: string[] = [];
   for (const aux of auxiliaries) {
-    const repoField = `_${camel(aux.aggName)}Repo`;
+    const repoField = `_${lowerFirst(aux.aggName)}Repo`;
     const mapVar = aux.mapVar;
     const idsExpr = csIdsSourceForAux(aux, pathToMap);
     auxLines.push(
@@ -168,7 +171,7 @@ ${ctor}
 
     public async ValueTask<System.Collections.Generic.IReadOnlyList<${responseRecord}>> Handle(${queryName} q, CancellationToken ct)
     {
-        var domain = await _repo.${pascal(view.name)}(${repoCallArgs});
+        var domain = await _repo.${upperFirst(view.name)}(${repoCallArgs});
 ${auxLines.join("\n")}${auxLines.length > 0 ? "\n" : ""}        return domain.Select(d => ${projection}).ToList();
     }
 }
@@ -185,7 +188,7 @@ function projectFullForm(
     const rendered = renderBindWithFollowsCs(bind.expr, "d", pathToMap);
     return projectToResponse(rendered, f.type, ctx);
   });
-  return `new ${pascal(view.name)}Row(${args.join(", ")})`;
+  return `new ${upperFirst(view.name)}Row(${args.join(", ")})`;
 }
 
 /** Render a bind expression with chained `Id<X>` follow rewriting
@@ -204,7 +207,7 @@ function renderBindWithFollowsCs(
       const map = pathToMap.get(path.join("."));
       if (map) {
         const inner = renderIdReceiverCs(expr.receiver, thisName, pathToMap);
-        return `${map.mapVar}[${inner}].${pascal(expr.member)}`;
+        return `${map.mapVar}[${inner}].${upperFirst(expr.member)}`;
       }
     }
   }
@@ -217,7 +220,7 @@ function renderIdReceiverCs(
   pathToMap: Map<string, { mapVar: string; aggName: string }>,
 ): string {
   if (expr.kind === "ref") {
-    return `${thisName}.${pascal(expr.name)}`;
+    return `${thisName}.${upperFirst(expr.name)}`;
   }
   if (expr.kind === "member" && expr.receiverType.kind === "id") {
     const path = idFollowPathCs(expr.receiver);
@@ -225,7 +228,7 @@ function renderIdReceiverCs(
       const map = pathToMap.get(path.join("."));
       if (map) {
         const inner = renderIdReceiverCs(expr.receiver, thisName, pathToMap);
-        return `${map.mapVar}[${inner}].${pascal(expr.member)}`;
+        return `${map.mapVar}[${inner}].${upperFirst(expr.member)}`;
       }
     }
   }
@@ -250,13 +253,13 @@ function csIdsSourceForAux(
   pathToMap: Map<string, { mapVar: string; aggName: string }>,
 ): string {
   if (aux.path.length === 1) {
-    return `domain.Select(d => d.${pascal(aux.path[0]!)}).ToList()`;
+    return `domain.Select(d => d.${upperFirst(aux.path[0]!)}).ToList()`;
   }
   const prevPath = aux.path.slice(0, -1).join(".");
   const prev = pathToMap.get(prevPath);
   if (!prev) return `new System.Collections.Generic.List<object>()`;
   const finalField = aux.path[aux.path.length - 1]!;
-  return `${prev.mapVar}.Values.Select(__a => __a.${pascal(finalField)}).ToList()`;
+  return `${prev.mapVar}.Values.Select(__a => __a.${upperFirst(finalField)}).ToList()`;
 }
 
 function renderController(ctx: BoundedContextIR, ns: string, routePrefix?: string): string {
@@ -271,9 +274,9 @@ function renderController(ctx: BoundedContextIR, ns: string, routePrefix?: strin
     const responseType = `System.Collections.Generic.IReadOnlyList<${recordName}>`;
     blocks.push(
       `    [HttpGet("${snake(view.name)}")]\n` +
-        `    public async Task<ActionResult<${responseType}>> ${pascal(view.name)}()\n` +
+        `    public async Task<ActionResult<${responseType}>> ${upperFirst(view.name)}()\n` +
         `    {\n` +
-        `        var result = await _mediator.Send(new ${pascal(view.name)}Query());\n` +
+        `        var result = await _mediator.Send(new ${upperFirst(view.name)}Query());\n` +
         `        return Ok(result);\n` +
         `    }\n`,
     );

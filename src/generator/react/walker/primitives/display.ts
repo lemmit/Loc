@@ -60,7 +60,7 @@ export function emitBadge(
 }
 
 export function emitSlot(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth: number): string {
-  // Slice 11.19 — children-prop placeholder.  `Slot()` inside a
+  // Children-prop placeholder.  `Slot()` inside a
   // component's body emits `{children}`, the React idiom for
   // rendering whatever JSX the parent passed in.  Marks usesChildren
   // on the context so the shell adds `children?: React.ReactNode`
@@ -87,7 +87,7 @@ export function emitDivider(
   });
 }
 
-/** Slice A7 — Breadcrumbs(...children, testid?).  Wraps a chain of
+/** Breadcrumbs(...children, testid?).  Wraps a chain of
  *  positional children (Anchor / Text / arbitrary primitives) in
  *  the per-pack breadcrumbs container.  Mantine's `<Breadcrumbs>`
  *  inserts separators automatically; shadcn renders a flex row
@@ -109,7 +109,7 @@ export function emitBreadcrumbs(
   });
 }
 
-/** Slice A7 — Paper(...children, padding?, testid?).  Per-pack
+/** Paper(...children, padding?, testid?).  Per-pack
  *  surface container with consistent padding + subtle shadow.
  *  Composable wrapper for tables, cards, alerts.  Defaults to
  *  `p="md"` (Mantine) / equivalent shadcn class set. */
@@ -133,7 +133,7 @@ export function emitPaper(
   });
 }
 
-/** Slice A7 — Skeleton(height?, count?, testid?).  Per-pack
+/** Skeleton(height?, count?, testid?).  Per-pack
  *  loading-placeholder block.  When `count:` > 1, emits a stacked
  *  group of `count` skeleton lines (matching the scaffold's
  *  loading-state convention).  `height:` defaults to 28px. */
@@ -153,7 +153,7 @@ export function emitSkeleton(
   });
 }
 
-/** Slice A7 — Alert(message, color?, title?, testid?).  Per-pack
+/** Alert(message, color?, title?, testid?).  Per-pack
  *  callout for error / info / warning states.  `color:` accepts
  *  the per-pack semantic palette ("red"/"green"/"yellow"/"blue").
  *  `title:` is optional; without it, packs render the message

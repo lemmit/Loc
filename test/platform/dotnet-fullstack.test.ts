@@ -6,7 +6,7 @@ import type { Model } from "../../src/language/generated/ast.js";
 import { generateSystems } from "../../src/system/index.js";
 
 // ---------------------------------------------------------------------------
-// Part B — fullstack `platform: dotnet, ui: WebApp` mode.
+// Fullstack `platform: dotnet, ui: WebApp` mode.
 //
 // A single .NET deployable that BOTH serves an API AND hosts a React
 // SPA from wwwroot/.  Mirrors the proven phoenixLiveView fullstack

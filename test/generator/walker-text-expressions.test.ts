@@ -1,6 +1,6 @@
-// Slice 11.10 — arbitrary expressions in text positions.
+// arbitrary expressions in text positions.
 //
-// Before this slice: text-position slots in Heading / Text / Stat
+// Previously: text-position slots in Heading / Text / Stat
 // / Badge / Card-title only accepted string literals or single
 // refs.  Anything richer (string concat, arithmetic) silently
 // fell back to the component default.
@@ -9,21 +9,12 @@
 // wrapped in `{...}` JSX expression brackets.  Calls are still
 // child components (walked recursively, never emitted as text).
 
-import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
-import { createDddServices } from "../../src/language/ddd-module.js";
-import type { Model } from "../../src/language/generated/ast.js";
-import { generateSystems } from "../../src/system/index.js";
+import { generateSystemFiles } from "../_helpers/index.js";
 
-async function buildAndGenerate(src: string): Promise<Map<string, string>> {
-  const services = createDddServices(NodeFileSystem);
-  const { parseHelper } = await import("langium/test");
-  const helper = parseHelper(services.Ddd);
-  const doc = await helper(src, { validation: true });
-  return generateSystems(doc.parseResult.value as Model).files;
-}
+const buildAndGenerate = generateSystemFiles;
 
-describe("Slice 11.10 — expressions in text positions", () => {
+describe("expressions in text positions", () => {
   it('Heading("Hello, " + name) emits the binary op as a JSX expr', async () => {
     const files = await buildAndGenerate(`
       system S {

@@ -1,12 +1,12 @@
-// Slice A7 — shell primitives (Breadcrumbs / Paper / Skeleton / Alert).
+// shell primitives (Breadcrumbs / Paper / Skeleton / Alert).
 //
 // Page-chrome primitives that the scaffold archetype path
 // composes inline; the walker now exposes them so explicit pages
-// can compose the same chrome by hand.  Together with Phase A1-A6
+// can compose the same chrome by hand.  Together with the other walker primitives
 // they cover the typical "container + state-cued content" shape
 // of a list/detail page.
 //
-// What this slice pins:
+// What this test pins:
 //   1. Breadcrumbs(...children, testid?) — wraps each positional
 //      child as a breadcrumb (Mantine renders separators
 //      automatically; shadcn uses a flex row).
@@ -19,18 +19,11 @@
 //   5. All four accept the standard `testid:` named arg and
 //      thread it to the rendered root element.
 
-import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
-import { createDddServices } from "../../src/language/ddd-module.js";
-import type { Model } from "../../src/language/generated/ast.js";
-import { generateSystems } from "../../src/system/index.js";
+import { generateSystemFiles } from "../_helpers/index.js";
 
 async function emit(body: string): Promise<string> {
-  const services = createDddServices(NodeFileSystem);
-  const { parseHelper } = await import("langium/test");
-  const helper = parseHelper(services.Ddd);
-  const doc = await helper(
-    `
+  const files = await generateSystemFiles(`
     system S {
       module M { context C { } }
       ui WebApp {
@@ -39,16 +32,13 @@ async function emit(body: string): Promise<string> {
       deployable api { platform: hono, modules: M, port: 3000 }
       deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
     }
-  `,
-    { validation: true },
-  );
-  const files = generateSystems(doc.parseResult.value as Model).files;
+  `);
   const tsx = files.get("web/src/pages/p.tsx");
   if (!tsx) throw new Error(`MISSING; keys = ${[...files.keys()].join(", ")}`);
   return tsx;
 }
 
-describe("Slice A7 — shell primitives", () => {
+describe("shell primitives", () => {
   it("Breadcrumbs(Anchor, Anchor, Text) emits a Mantine <Breadcrumbs>", async () => {
     const tsx = await emit(
       `Breadcrumbs(Anchor("Home", to: "/"), Anchor("Orders", to: "/orders"), Text("Detail"))`,

@@ -1,5 +1,5 @@
 import { allPlatforms, platformFor } from "../platform/registry.js";
-import { camel, plural, snake } from "../util/naming.js";
+import { lowerFirst, plural, snake } from "../util/naming.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -47,7 +47,7 @@ export function validateLoomModel(loom: LoomModel): LoomDiagnostic[] {
     validateReactIdReferences(sys, diags);
     validateAuth(sys, diags);
     validatePermissions(sys, diags);
-    // Slice 10 — scaffold expansion now runs at the AST level
+    // Scaffold expansion now runs at the AST level
     // (`src/language/ddd-scaffold-ast-expander.ts`).  Duplicate-page
     // detection happens through Langium's standard scope-walking
     // (every synthesised page is a real AST node, so two scaffolds
@@ -509,7 +509,7 @@ function firstUnknownColumnRef(e: ExprIR, agg: AggregateIR, ctx: BoundedContextI
         const voName =
           e.receiver.memberType.kind === "valueobject" ? e.receiver.memberType.name : "";
         const vo = ctx.valueObjects.find((v) => v.name === voName);
-        if (vo && vo.fields.some((f) => f.name === e.member)) return null;
+        if (vo?.fields.some((f) => f.name === e.member)) return null;
         return `'this.${(e.receiver as { member: string }).member}.${e.member}'`;
       }
       return null;
@@ -572,7 +572,7 @@ function firstNonQueryableNode(e: ExprIR): string | null {
       // becomes `tableName.col`, `enum-value` becomes a literal
       // string, `this-vo-prop` is a column flattened by Drizzle
       // (handled via member access).  `current-user` is a
-      // closure-captured value (slice 1C); the renderer threads a
+      // closure-captured value; the renderer threads a
       // `currentUser` parameter through the repo method and the
       // ref / its member accesses become plain JS / C# value
       // references.
@@ -617,7 +617,7 @@ function firstNonQueryableNode(e: ExprIR): string | null {
       // Allowed member-access shapes:
       //   - `this.col`               — direct column
       //   - `this.vo.sub`            — value-object's flattened column
-      //   - `currentUser.<field>`    — slice 1C row-level filter; the
+      //   - `currentUser.<field>`    — row-level filter; the
       //                                renderer threads a `currentUser`
       //                                parameter so the access becomes
       //                                a plain JS / C# value reference.
@@ -783,16 +783,15 @@ function checkMagicCall(
   // or saved queries (views).  `<magicId>.workflows.<name>(...)`
   // resolves to a workflow; `<magicId>.views.<name>(...)` to a view.
   // Only `ui` invocations of these are wired up to the React UI
-  // generator today (slice 18.C); the same reserved slugs validate
-  // against `api` for symmetry — backend-side dispatchers can pick
-  // them up later.
+  // generator today; the same reserved slugs validate against `api`
+  // for symmetry — backend-side dispatchers can pick them up later.
   if (aggregateSlug === "workflows") {
     const wf = contexts
       .flatMap((c) => c.workflows)
-      .find((w) => camel(w.name) === method || snake(w.name) === method);
+      .find((w) => lowerFirst(w.name) === method || snake(w.name) === method);
     if (!wf) {
       const known = contexts
-        .flatMap((c) => c.workflows.map((w) => camel(w.name)))
+        .flatMap((c) => c.workflows.map((w) => lowerFirst(w.name)))
         .sort()
         .join(", ");
       diags.push({
@@ -808,10 +807,10 @@ function checkMagicCall(
   if (aggregateSlug === "views") {
     const view = contexts
       .flatMap((c) => c.views)
-      .find((v) => camel(v.name) === method || snake(v.name) === method);
+      .find((v) => lowerFirst(v.name) === method || snake(v.name) === method);
     if (!view) {
       const known = contexts
-        .flatMap((c) => c.views.map((v) => camel(v.name)))
+        .flatMap((c) => c.views.map((v) => lowerFirst(v.name)))
         .sort()
         .join(", ");
       diags.push({
@@ -875,9 +874,9 @@ function collectContexts(
 function findAggregateBySlug(slug: string, contexts: BoundedContextIR[]): AggregateIR | undefined {
   for (const c of contexts) {
     for (const a of c.aggregates) {
-      if (camel(a.name) === slug) return a;
+      if (lowerFirst(a.name) === slug) return a;
       if (snake(plural(a.name)) === slug) return a;
-      if (camel(plural(a.name)) === slug) return a;
+      if (lowerFirst(plural(a.name)) === slug) return a;
     }
   }
   return undefined;
@@ -1052,7 +1051,7 @@ function validateWorkflowBody(
           });
           break;
         }
-        // Slice 1C: a workflow can't yet call a find whose where
+        // A workflow can't yet call a find whose where
         // clause references currentUser — the workflow handler
         // doesn't inject ICurrentUserAccessor, and threading the
         // user through saves + ops is its own follow-up.  Surface a
@@ -1295,7 +1294,7 @@ function validateViews(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
 }
 
 // ---------------------------------------------------------------------------
-// Auth validation (slice 1A).
+// Auth validation.
 //
 // Two responsibilities:
 //
@@ -1307,13 +1306,12 @@ function validateViews(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
 //
 //   2. `currentUser` scope: the magic identifier resolves to a typed
 //      ref via `lower-expr.ts:resolveNameRef` whenever the system
-//      declares a user block.  Slice 1A lets bodies USE
-//      `currentUser` in operations / workflows / view binds /
-//      aggregate test bodies; everywhere else (invariants, derived
-//      properties, function bodies, view filters, repository find
-//      filters) the reference is rejected with a friendly message
-//      pointing at the slice scope.  Where-clause integration is
-//      slice 1C; gated entry checks are slice 2.
+//      declares a user block.  Bodies may USE `currentUser` in
+//      operations / workflows / view binds / aggregate test bodies,
+//      plus repository find / view where filters; everywhere else
+//      (invariants, derived properties, function bodies) the reference
+//      is rejected with a friendly message pointing at where it is
+//      allowed.
 // ---------------------------------------------------------------------------
 
 function validateAuth(sys: SystemIR, diags: LoomDiagnostic[]): void {
@@ -1387,13 +1385,13 @@ function validateCurrentUserScope(ctx: BoundedContextIR, diags: LoomDiagnostic[]
     for (const fn of vo.functions) flag(`${vo.name}.function[${fn.name}]`, fn.body);
   }
   // Repository find filters and view filters DO get to use currentUser
-  // (slice 1C — row-level visibility); the renderer threads the user
-  // through as a closure-captured parameter.  Workflow / operation /
-  // test / view-bind bodies were never in this rejection set.
+  // (row-level visibility); the renderer threads the user through as a
+  // closure-captured parameter.  Workflow / operation / test /
+  // view-bind bodies were never in this rejection set.
 }
 
 // ---------------------------------------------------------------------------
-// Permissions validation (slice 1B).
+// Permissions validation.
 //
 // Two passes:
 //
@@ -1412,7 +1410,7 @@ function validateCurrentUserScope(ctx: BoundedContextIR, diags: LoomDiagnostic[]
 
 const UNKNOWN_PERMISSION_SENTINEL = "__unknown_permission__:";
 
-// Slice 10 — `validateScaffoldDoubles` deleted.  Cross-directive
+// `validateScaffoldDoubles` deleted.  Cross-directive
 // double-scaffold detection now happens at the AST level: two
 // scaffold directives producing the same generated page name surface
 // either as a duplicate-symbol error from Langium's linker (when both

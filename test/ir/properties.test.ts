@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrichments.js";
-import type {
-  AggregateIR,
-  BoundedContextIR,
-  EntityPartIR,
-  LoomModel,
-  ValueObjectIR,
-} from "../../src/ir/loom-ir.js";
+import type { EntityPartIR, LoomModel, ValueObjectIR } from "../../src/ir/loom-ir.js";
 import { allAggregates, allContexts } from "../../src/ir/loom-ir.js";
 import { validateLoomModel } from "../../src/ir/validate.js";
 import { buildWireSpec } from "../../src/system/wire-spec.js";

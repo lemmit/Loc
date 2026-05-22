@@ -1,4 +1,4 @@
-// Slice 11.29 — Button accepts `disabled:` and `loading:` named
+// Button accepts `disabled:` and `loading:` named
 // args.  Closes the gap that forced architecture-integration test
 // to remove `disabled: customerCreate.isPending` from its assertions.
 //
@@ -7,19 +7,10 @@
 //     loading:  customer.create.isPending,
 //     onClick:  e => { customer.create.mutate({...}) })
 
-import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
-import { createDddServices } from "../../src/language/ddd-module.js";
-import type { Model } from "../../src/language/generated/ast.js";
-import { generateSystems } from "../../src/system/index.js";
+import { generateSystemFiles } from "../_helpers/index.js";
 
-async function buildAndGenerate(src: string): Promise<Map<string, string>> {
-  const services = createDddServices(NodeFileSystem);
-  const { parseHelper } = await import("langium/test");
-  const helper = parseHelper(services.Ddd);
-  const doc = await helper(src, { validation: true });
-  return generateSystems(doc.parseResult.value as Model).files;
-}
+const buildAndGenerate = generateSystemFiles;
 
 const SCAFFOLD = `
   module Sales {
@@ -32,7 +23,7 @@ const SCAFFOLD = `
   storage pg { type: postgres }
 `;
 
-describe("Slice 11.29 — Button disabled: + loading: named args", () => {
+describe("Button disabled: + loading: named args", () => {
   it("Button(disabled: <bool-state>) emits the disabled attr", async () => {
     const files = await buildAndGenerate(`
       system S {

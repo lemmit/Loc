@@ -1,5 +1,5 @@
 import type { BoundedContextIR } from "../../../ir/loom-ir.js";
-import { pascal, plural } from "../../../util/naming.js";
+import { plural, upperFirst } from "../../../util/naming.js";
 
 // Program.cs hosting + DI registration, plus the project + Dockerfile +
 // .dockerignore boilerplate.  Pure substitution templates — no
@@ -38,7 +38,7 @@ export function renderProgram(
     a.operations
       .filter((o) => o.extern)
       .map((o) => ({
-        ifaceFqn: `${ns}.Application.${plural(a.name)}.Handlers.I${pascal(o.name)}${a.name}Handler`,
+        ifaceFqn: `${ns}.Application.${plural(a.name)}.Handlers.I${upperFirst(o.name)}${a.name}Handler`,
         opName: o.name,
         aggName: a.name,
       })),
@@ -312,7 +312,7 @@ export function renderCsproj(
   // invariant or precondition exists.  AspNetCore meta-package gives
   // `AddValidatorsFromAssembly` + DI integration in one ref.
   const validatorRef = usesValidators
-    ? `\n    <!-- FluentValidation — slice 21.B wire-boundary validators (Mediator pipeline) -->\n    <PackageReference Include="FluentValidation" Version="11.10.0" />\n    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="11.10.0" />`
+    ? `\n    <!-- FluentValidation — wire-boundary validators (Mediator pipeline) -->\n    <PackageReference Include="FluentValidation" Version="11.10.0" />\n    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="11.10.0" />`
     : "";
   return `<!-- Auto-generated. -->
 <Project Sdk="Microsoft.NET.Sdk.Web">

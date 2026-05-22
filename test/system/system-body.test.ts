@@ -1,9 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { EmptyFileSystem } from "langium";
 import { describe, expect, it } from "vitest";
-import { createDddServices } from "../../src/language/ddd-module.js";
 import type { Aggregate, Model } from "../../src/language/generated/ast.js";
 import {
   addStatement,
@@ -18,12 +16,11 @@ import {
   listStatementViews,
   moveStatement,
 } from "../../web/src/builder/system/body.js";
+import { parseRaw as parse } from "../_helpers/index.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const sales = readFileSync(path.join(here, "..", "..", "examples", "sales.ddd"), "utf8");
 
-const parser = createDddServices(EmptyFileSystem).Ddd.parser.LangiumParser;
-const parse = (t: string): Model => parser.parse(t).value as Model;
 function aggregate(m: Model, name: string): Aggregate {
   for (const n of walk(m))
     if (n.$type === "Aggregate" && (n as Aggregate).name === name) return n as Aggregate;
@@ -71,6 +68,18 @@ describe("System builder — operation/workflow body editing", () => {
     // A bare-call workflow statement stays verbatim (no assignment op).
     const wf = listStatementViews(parse(sales), placeOrder)!;
     expect(wf[0].kind).toBe("other");
+  });
+
+  it("structures a bare call into head + args (incl. a head-only call)", () => {
+    const src = `context C {
+  workflow doIt(x: int) {
+    order.addLine(productId, qty)
+    cancel()
+  }
+}`;
+    const views = listStatementViews(parse(src), { kind: "workflow", name: "doIt" })!;
+    expect(views[0]).toEqual({ kind: "call", head: "order.addLine", args: ["productId", "qty"] });
+    expect(views[1]).toEqual({ kind: "call", head: "cancel", args: [] });
   });
 
   it("edits a statement in place when the result still parses", () => {

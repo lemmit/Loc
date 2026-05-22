@@ -77,9 +77,7 @@ export interface InvariantIR {
    *  validators (frontend Zod, Hono routes, FluentValidation) even
    *  when its expression would translate cleanly.  Domain-layer
    *  enforcement via `AssertInvariants()` always runs.  Set by
-   *  the `@server-only` annotation in the DSL (slice 21.C).
-   *  Absent in slice 21.A — the field exists so 21.B / 21.C don't
-   *  break the type. */
+   *  the `@server-only` annotation in the DSL. */
   scope?: "server-only";
 }
 
@@ -165,7 +163,7 @@ export interface AggregateIR {
 export interface TestIR {
   name: string;
   statements: TestStmtIR[];
-  /** Traceability back-link (Slice 12): the `verifies <TC-id>` clause
+  /** Traceability back-link: the `verifies <TC-id>` clause
    *  naming the TestCase this executable test realises.  Undefined when
    *  the test declares no link.  Enrichment uses it to mark a TestCase
    *  as backed by an executable test. */
@@ -237,7 +235,8 @@ export interface BoundedContextIR {
  *
  *  Compiles to a per-view method on the source aggregate's
  *  repository plus a `GET /views/<snake_name>` route on each
- *  backend.  Joined sources / per-view parameters come in slice 3. */
+ *  backend.  Joined sources and per-view parameters are not yet
+ *  supported. */
 export interface ViewIR {
   name: string;
   /** Source aggregate.  Must live in the same context as the
@@ -347,7 +346,7 @@ export interface LoomModel {
    * picked by the user.
    */
   contexts: BoundedContextIR[];
-  /** Traceability artifacts (Slice 12) — model-wide, since a Solution
+  /** Traceability artifacts — model-wide, since a Solution
    *  or TestCase may reference code across modules and systems. */
   requirements: RequirementIR[];
   solutions: SolutionIR[];
@@ -359,7 +358,7 @@ export interface LoomModel {
 }
 
 // ---------------------------------------------------------------------------
-// Traceability (Slice 12)
+// Traceability
 // ---------------------------------------------------------------------------
 
 export type RequirementType = "UserStory" | "UseCase" | "AcceptanceCriteria" | "BusinessReq";
@@ -532,10 +531,10 @@ export interface SystemIR {
    *  emitter translates the framework-agnostic tokens into Mantine /
    *  shadcn / etc. theming knobs. */
   theme?: ThemeIR;
-  /** UI declarations at system scope (Slice 2).  Each is referenced by
+  /** UI declarations at system scope.  Each is referenced by
    *  zero-or-more deployables via `DeployableIR.uiName`.  Empty when
    *  the system declares no `ui { ... }` blocks.  Order preserves
-   *  source order (matters for stable scaffold expansion in Slice 4). */
+   *  source order (matters for stable scaffold expansion). */
   uis: UiIR[];
   /** API declarations at system scope.  Each is a contract derived
    *  from a module's domain — its aggregates, repositories,
@@ -614,19 +613,18 @@ export interface TestE2EIR {
   kind: "api" | "ui";
   deployableName: string;
   statements: TestStmtIR[];
-  /** Traceability back-link (Slice 12) — see `TestIR.verifiesTestCase`. */
+  /** Traceability back-link — see `TestIR.verifiesTestCase`. */
   verifiesTestCase?: string;
 }
 
 // ---------------------------------------------------------------------------
-// Page metamodel (Slice 2)
+// Page metamodel
 //
-// Mirrors the grammar productions added in Slice 1.  Every IR node here
-// is a one-to-one lowering of a `Ui` / `Page` / `Component` / `Scaffold`
-// / `MenuBlock` AST.  Scaffolds are NOT expanded at this layer — they
+// Mirrors the grammar's `Ui` / `Page` / `Component` / `Scaffold` /
+// `MenuBlock` productions — every IR node here is a one-to-one lowering
+// of those ASTs.  Scaffolds are NOT expanded at this layer — they
 // stay as literal `ScaffoldIR` directives until the scaffold expander
-// runs (Slice 4).  Validator obligations land in Slice 3 and the page
-// emitter in Slice 5.
+// runs.
 //
 // Designed so a future LiveView / Blazor backend can consume the same
 // IR — mutations (`:=`), navigations, and component invocations are
@@ -649,7 +647,7 @@ export interface UiIR {
    *  declares.  Composition is supplied by the deployable that
    *  deploys this UI. */
   apiParams: UiApiParamIR[];
-  /** Slice A6 — user-authored TS helpers brought into the walker
+  /** User-authored TS helpers brought into the walker
    *  stdlib via `import helper <name> from "<path>"`.  Body refs to
    *  `<name>(...)` emit a TS `import { <name> } from "<path>"` at
    *  the top of the generated page TSX. */
@@ -690,8 +688,8 @@ export interface PageIR {
   name: string;
   params: ParamIR[];
   /** Path-with-`:params` from `route: "..."`.  Always set for pages
-   *  written in source; pages synthesised by Slice 4's scaffold
-   *  expander populate this from the rewrite rule. */
+   *  written in source; pages synthesised by the scaffold expander
+   *  populate this from the rewrite rule. */
   route?: string;
   /** Optional title expression.  May interpolate state / data refs. */
   title?: ExprIR;
@@ -703,30 +701,31 @@ export interface PageIR {
   /** Single body expression.  Conditional rendering uses `match` in
    *  the expression engine, not a guarded-declaration form. */
   body?: ExprIR;
-  /** Per-page menu metadata.  Read by the menu emitter (Slice 6) when
+  /** Per-page menu metadata.  Read by the menu emitter when
    *  no explicit ui-level menu block is declared. */
   menuMeta?: MenuMetaIR;
-  /** Provenance discriminator (Slice 4): `"explicit"` for pages
+  /** Provenance discriminator: `"explicit"` for pages
    *  written in source; `"scaffold"` for pages synthesised by the
-   *  expander.  Slice 5's emitter uses this to fast-path the legacy
+   *  expander.  The page emitter uses this to fast-path the legacy
    *  per-aggregate / per-workflow / per-view builders for the bulk-
    *  scaffold case (byte-equivalence target). */
   source: "explicit" | "scaffold";
-  /** Slice 4 only sets this for scaffold-synthesised pages.  Carries
-   *  the structural shape of the page so Slice 5's emitter can
-   *  dispatch without re-parsing the body expression.  Same source
-   *  context the legacy generator's per-aggregate / per-workflow /
-   *  per-view loop received. */
+  /** Only set for scaffold-synthesised pages.  Carries the structural
+   *  shape of the page so the page emitter can dispatch without
+   *  re-parsing the body expression.  Same source context the legacy
+   *  generator's per-aggregate / per-workflow / per-view loop
+   *  received. */
   scaffoldOrigin?: ScaffoldOriginIR;
-  /** Slice C1 — explicit emit path override for walker-rendered
+  /** Explicit emit path override for walker-rendered
    *  pages.  When set, the page-emitter writes the rendered TSX to
    *  this path instead of the default `src/pages/<page-snake>.tsx`.
    *  Populated by `expandScaffoldToExplicitBody` so a scaffold-
    *  expanded page lands at the conventional archetype path
    *  (`src/pages/<plural>/list.tsx` for `aggregate-list`, etc.) —
-   *  preserves URL/file shape across the C2 default flip. */
+   *  preserves URL/file shape when scaffold expansion becomes the
+   *  default. */
   emitPath?: string;
-  /** Slice C2 — true when the scaffold expander rewrote `body`
+  /** True when the scaffold expander rewrote `body`
    *  from the original archetype call (e.g. `List(of: …)`) to a
    *  walker-stdlib composition.  `scaffoldOrigin` is intentionally
    *  preserved on these pages so the per-aggregate page-object
@@ -770,9 +769,9 @@ export interface StateFieldIR {
 }
 
 /** A `scaffold <selector>: <targets>` directive — single fixed multi-
- *  page rewrite over a domain selector.  Slice 4's expander turns this
- *  into literal `PageIR` nodes; this IR carries only the source-level
- *  intent. */
+ *  page rewrite over a domain selector.  The scaffold expander turns
+ *  this into literal `PageIR` nodes; this IR carries only the
+ *  source-level intent. */
 export interface ScaffoldIR {
   selector: ScaffoldSelector;
   targets: string[];
@@ -780,7 +779,7 @@ export interface ScaffoldIR {
 
 export type ScaffoldSelector = "modules" | "contexts" | "aggregates" | "workflows" | "views";
 
-/** Per-page sidebar metadata.  Bare entries — validator (Slice 3)
+/** Per-page sidebar metadata.  Bare entries — validator
  *  enforces the allowed key names (`section` / `label` / `order` /
  *  `hidden`).  Same shape as `ThemeIR`'s entries: bare key + typed
  *  value, with the validator policing the surface. */
@@ -840,8 +839,7 @@ export interface PermissionDeclIR {
 
 // `static` is the page-metamodel's UI-only deployable kind: builds a
 // Vite bundle and serves it via a small static-asset host (nginx in
-// the v0 emitter).  Coexists with `react` until Slice 8 swaps them
-// out — keeps every existing test/example green during the rollout.
+// the v0 emitter).  Shares the `react` platform surface.
 //
 // `phoenixLiveView` is the fullstack Elixir/Ash + Phoenix LiveView
 // platform: a single deployable serves an Ash-derived API AND mounts
@@ -856,17 +854,16 @@ export interface DeployableIR {
   /** The platform **family** (`"hono"`, `"dotnet"`, `"react"`, …) —
    *  the closed union every downstream consumer branches on.  A
    *  `family@version` pin in the source is normalised here to its
-   *  family so `platform === "hono"` etc. stay valid (byte-identical
-   *  to pre-backend-packages output). */
+   *  family so `platform === "hono"` etc. stay valid. */
   platform: Platform;
-  /** Backend-packages B1 — the fully-qualified backend ref
-   *  (`"hono@v4"`) after lowering, mirroring `design?`.  Bareword
-   *  `platform: hono` resolves through `BUILTIN_PLATFORM_LATEST`;
-   *  a pin (`platform: "hono@v4"`) flows through as written.  For
-   *  frontend platforms (`react`/`static`) this equals `platform`
-   *  (they version via the design/stack axis, not here).  The
-   *  system orchestrator's dispatch stays on `platform` in B1; B3
-   *  switches it to this field once a family has >1 version. */
+  /** The fully-qualified backend ref (`"hono@v4"`) after lowering,
+   *  mirroring `design?`.  Bareword `platform: hono` resolves through
+   *  `BUILTIN_PLATFORM_LATEST`; a pin (`platform: "hono@v4"`) flows
+   *  through as written.  For frontend platforms (`react`/`static`)
+   *  this equals `platform` (they version via the design/stack axis,
+   *  not here).  The system orchestrator's dispatch stays on
+   *  `platform` for now; it switches to this field once a family has
+   *  >1 version. */
   platformRef: string;
   /** Names of modules included in this deployable.  For react frontends,
    * inherited from the targeted backend deployable. */
@@ -885,15 +882,14 @@ export interface DeployableIR {
    *  (or "static"/"dotnet" with a UI mount, or "phoenixLiveView");
    *  ignored otherwise.
    *
-   *  **Phase 0 of pack versioning:** after lowering this field is
-   *  always fully qualified (`family@version`, e.g. `"mantine@v7"`)
-   *  for built-in packs.  The bareword DSL form `design: mantine`
-   *  resolves through `BUILTIN_PACK_LATEST` during lowering, so
-   *  downstream consumers (generator dispatch at
-   *  `src/generator/react/index.ts:106`, the build-matrix CI test,
-   *  snapshot fixtures) see an unambiguous string and don't need to
-   *  re-resolve the toolchain default.  Custom paths flow through
-   *  verbatim.
+   *  After lowering this field is always fully qualified
+   *  (`family@version`, e.g. `"mantine@v7"`) for built-in packs.  The
+   *  bareword DSL form `design: mantine` resolves through
+   *  `BUILTIN_PACK_LATEST` during lowering, so downstream consumers
+   *  (generator dispatch in `src/generator/react/index.ts`, the
+   *  build-matrix CI test, snapshot fixtures) see an unambiguous
+   *  string and don't need to re-resolve the toolchain default.
+   *  Custom paths flow through verbatim.
    *
    *  Named `design` rather than `ui` because the test DSL already
    *  uses `ui.workflows.X(...)` as a member-access namespace; making
@@ -906,10 +902,10 @@ export interface DeployableIR {
    *  hook the user implements; deployables without this stay open
    *  (existing behaviour). */
   auth?: { required: boolean };
-  /** Name of the `ui { ... }` SystemMember this deployable serves
-   *  (Slice 1 grammar; Slice 2 IR).  Set when the source declares
+  /** Name of the `ui { ... }` SystemMember this deployable serves.
+   *  Set when the source declares
    *  either `ui: <Name>` (sugar) or `ui <Name> { framework: ... }`
-   *  (full block).  Validator (Slice 3) ensures the referenced ui
+   *  (full block).  Validator ensures the referenced ui
    *  exists, the deployable's platform supports a UI mount, and the
    *  framework value is one of the v0-allowed alternatives.  Empty
    *  string is never produced — undefined ⇒ no UI binding. */
@@ -919,19 +915,19 @@ export interface DeployableIR {
    *  Future LiveView / Blazor backends extend this enum without
    *  breaking the deployable IR. */
   uiFramework?: string;
-  /** Slice 11.26 — apis this backend deployable serves.  Each
+  /** Apis this backend deployable serves.  Each
    *  entry references an `Api` declared at system scope.  Empty
    *  for frontend deployables and for backends that haven't yet
    *  migrated to the explicit composition syntax. */
   serves: string[];
-  /** Slice 11.26 — UI api parameter bindings for frontend
+  /** UI api parameter bindings for frontend
    *  deployables.  Each entry binds a UI parameter (declared as
    *  `api <Name>: <Api>` in the ui block) to the backend
    *  deployable that supplies it (which must `serves:` the
    *  param's contract).  Empty for backend deployables and for
    *  frontends whose UI declares no api parameters. */
   uiBindings: UiParamBindingIR[];
-  /** Slice 11.27 — per-module storage bindings on a backend
+  /** Per-module storage bindings on a backend
    *  deployable.  Each entry corresponds to one `modules:` entry
    *  with an optional brace block (`Sales { primary: pg, cache:
    *  redis }`).  Bare-list form (`modules: Sales, Marketing`)
@@ -949,7 +945,7 @@ export interface UiParamBindingIR {
   sourceDeployableName: string;
 }
 
-/** Slice 11.27 — per-module storage bindings on a backend
+/** Per-module storage bindings on a backend
  *  deployable.  Each entry binds a module's role-keyed storage
  *  slot to a system-scope storage declaration. */
 export interface ModuleBindingIR {
@@ -1085,7 +1081,7 @@ export type ExprIR =
       args: ExprIR[];
       receiverType: TypeIR;
       isCollectionOp: boolean;
-      /** Optional parallel array (Slice 1.5): `argNames[i]` is the
+      /** Optional parallel array: `argNames[i]` is the
        *  source-side `name:` prefix for `args[i]`, or `undefined` for
        *  positional arguments.  Present iff at least one arg was
        *  written with a name; absent for fully-positional calls (the
@@ -1106,9 +1102,9 @@ export type ExprIR =
       /** Single-expression form: `x => expr`.  Mutually exclusive with
        *  `block`.  Existing v22 lambdas always populate this. */
       body?: ExprIR;
-      /** Block-body form (Slice 1 grammar): `x => { stmt; stmt; … }`.
+      /** Block-body form: `x => { stmt; stmt; … }`.
        *  Reuses the existing `StmtIR` rule so `let`, `:=`, calls,
-       *  emits, etc. are admissible.  React emitter (Slice 5) lowers
+       *  emits, etc. are admissible.  React emitter lowers
        *  state mutations against `state {}` fields to `setX(...)`. */
       block?: StmtIR[];
     }
@@ -1126,12 +1122,12 @@ export type ExprIR =
   | { kind: "binary"; op: BinOp; left: ExprIR; right: ExprIR }
   | { kind: "ternary"; cond: ExprIR; then: ExprIR; otherwise: ExprIR }
   /**
-   * Predicate-arms expression (Slice 1 grammar) — first arm whose
+   * Predicate-arms expression — first arm whose
    * `cond` evaluates to `true` returns its `value`; if no arm
    * matches, `otherwise` (when present) is the fallthrough.  Lives
    * in the expression engine so it can appear anywhere an expression
    * is allowed (page bodies, `derived` properties, view binds,
-   * filter lambdas, function bodies).  Validator (Slice 3) may warn
+   * filter lambdas, function bodies).  Validator may warn
    * on non-exhaustive matches that lack `otherwise`.
    */
   | {
@@ -1225,9 +1221,9 @@ export function operationUsesCurrentUser(op: OperationIR): boolean {
 }
 
 /** True when the find's `where` filter references `currentUser`.
- *  Slice 1C: such finds gain a `currentUser: User` parameter on the
- *  generated repository method, threaded through CQRS handler /
- *  Hono route call sites. */
+ *  Such finds gain a `currentUser: User` parameter on the generated
+ *  repository method, threaded through CQRS handler / Hono route call
+ *  sites. */
 export function findUsesCurrentUser(find: FindIR): boolean {
   return exprUsesCurrentUser(find.filter);
 }

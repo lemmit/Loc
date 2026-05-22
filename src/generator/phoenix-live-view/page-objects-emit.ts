@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Batch C — Phoenix LiveView Playwright page-object emitter.
+// Phoenix LiveView Playwright page-object emitter.
 //
 // Exports `buildPlaywrightPageObject`, which emits TypeScript content for
 // `e2e/pages/<page-snake>.ts` — a Playwright page-object class for one
@@ -26,7 +26,7 @@
 // ---------------------------------------------------------------------------
 
 import type { AggregateIR, BoundedContextIR, PageIR, TypeIR } from "../../ir/loom-ir.js";
-import { camel, pascal, plural, snake } from "../../util/naming.js";
+import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { fillBlock } from "../react/page-objects-builder.js";
 
 export interface BuildPlaywrightPageObjectArgs {
@@ -101,8 +101,8 @@ function buildAggregateListPageObject(
   _ctx: BoundedContextIR,
 ): string {
   const slug = snake(plural(agg.name));
-  const aggPascal = pascal(agg.name);
-  const className = `${pascal(page.name)}Page`;
+  const aggPascal = upperFirst(agg.name);
+  const className = `${upperFirst(page.name)}Page`;
   const route = page.route ?? `/${slug}`;
 
   const lines: string[] = [];
@@ -190,7 +190,7 @@ function buildAggregateListPageObject(
   lines.push(`  }`);
   const ops = agg.operations.filter((o) => o.visibility === "public");
   for (const op of ops) {
-    const opCamel = camel(op.name);
+    const opCamel = lowerFirst(op.name);
     if (op.params.length === 0) {
       lines.push(``);
       lines.push(`  async ${opCamel}(): Promise<this> {`);
@@ -240,8 +240,8 @@ function buildAggregateNewPageObject(
   ctx: BoundedContextIR,
 ): string {
   const slug = snake(plural(agg.name));
-  const aggPascal = pascal(agg.name);
-  const className = `${pascal(page.name)}Page`;
+  const aggPascal = upperFirst(agg.name);
+  const className = `${upperFirst(page.name)}Page`;
   const route = page.route ?? `/${slug}/new`;
   const required = agg.fields.filter((f) => !f.optional);
 
@@ -304,7 +304,7 @@ function buildAggregateDetailPageObject(
   ctx: BoundedContextIR,
 ): string {
   const slug = snake(plural(agg.name));
-  const className = `${pascal(page.name)}Page`;
+  const className = `${upperFirst(page.name)}Page`;
   const ops = agg.operations.filter((o) => o.visibility === "public");
 
   const lines: string[] = [];
@@ -328,7 +328,7 @@ function buildAggregateDetailPageObject(
   lines.push(`    return await this.page.getByTestId(\`${slug}-detail-\${name}\`).innerText();`);
   lines.push(`  }`);
   for (const op of ops) {
-    const opCamel = camel(op.name);
+    const opCamel = lowerFirst(op.name);
     if (op.params.length === 0) {
       lines.push(``);
       lines.push(`  async ${opCamel}(): Promise<this> {`);
@@ -378,7 +378,7 @@ function buildWorkflowFormPageObject(
   ctx: BoundedContextIR,
 ): string {
   const slug = snake(wf.name);
-  const className = `${pascal(page.name)}Page`;
+  const className = `${upperFirst(page.name)}Page`;
   const route = page.route ?? `/workflows/${slug}`;
 
   const lines: string[] = [];
@@ -419,7 +419,7 @@ function buildWorkflowFormPageObject(
 
 function buildViewListPageObject(page: PageIR, view: import("../../ir/loom-ir.js").ViewIR): string {
   const slug = snake(view.name);
-  const className = `${pascal(page.name)}Page`;
+  const className = `${upperFirst(page.name)}Page`;
   const route = page.route ?? `/views/${slug}`;
 
   const lines: string[] = [];
@@ -454,7 +454,7 @@ function buildViewListPageObject(page: PageIR, view: import("../../ir/loom-ir.js
 // ---------------------------------------------------------------------------
 
 function buildWorkflowsIndexPageObject(page: PageIR): string {
-  const className = `${pascal(page.name)}Page`;
+  const className = `${upperFirst(page.name)}Page`;
   const route = page.route ?? "/workflows";
 
   const lines: string[] = [];
@@ -489,7 +489,7 @@ function buildWorkflowsIndexPageObject(page: PageIR): string {
 // ---------------------------------------------------------------------------
 
 function buildViewsIndexPageObject(page: PageIR): string {
-  const className = `${pascal(page.name)}Page`;
+  const className = `${upperFirst(page.name)}Page`;
   const route = page.route ?? "/views";
 
   const lines: string[] = [];
@@ -524,7 +524,7 @@ function buildViewsIndexPageObject(page: PageIR): string {
 // ---------------------------------------------------------------------------
 
 function buildHomePageObject(page: PageIR): string {
-  const className = `${pascal(page.name)}Page`;
+  const className = `${upperFirst(page.name)}Page`;
   const route = page.route ?? "/";
 
   const lines: string[] = [];
@@ -564,7 +564,7 @@ function buildHomePageObject(page: PageIR): string {
 
 function buildGenericPageObject(page: PageIR): string {
   const hasParams = page.params.length > 0;
-  const className = `${pascal(page.name)}Page`;
+  const className = `${upperFirst(page.name)}Page`;
   const route = page.route ?? "/";
 
   const lines: string[] = [];
@@ -611,7 +611,7 @@ function buildGenericPageObject(page: PageIR): string {
 // ---------------------------------------------------------------------------
 
 function buildFallback(page: PageIR): string {
-  const className = `${pascal(page.name)}Page`;
+  const className = `${upperFirst(page.name)}Page`;
   const route = page.route ?? "/";
 
   const lines: string[] = [];
@@ -658,7 +658,6 @@ function escapeTemplate(s: string): string {
 }
 
 // Keep import used.
-void (camel as typeof camel);
 void (plural as typeof plural);
 
 // Suppress TypeIR import lint — used only in fillBlock call sites via the

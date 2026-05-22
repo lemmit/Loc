@@ -1,4 +1,4 @@
-// Slice A4 — `Form(of: <Aggregate>)` walker-side auto-dispatch.
+// `Form(of: <Aggregate>)` walker-side auto-dispatch.
 //
 // Walker introspects an aggregate's IR field list and emits one
 // RHF-bound input per non-optional field, dispatching by type
@@ -8,7 +8,7 @@
 // object→nested Fieldset).  Required-field metadata becomes RHF
 // rules through Zod (zodResolver(Create<Agg>Request)).
 //
-// What this slice pins:
+// What this test pins:
 //   1. The page TSX emits with `useForm` + `zodResolver` + a
 //      `useCreate<Agg>()` mutation hook.
 //   2. Each non-optional aggregate field surfaces in the form.
@@ -25,19 +25,10 @@
 //      preparer, so any future Zod-rules / Controller / register
 //      tweak in the scaffold path automatically applies here.
 
-import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
-import { createDddServices } from "../../src/language/ddd-module.js";
-import type { Model } from "../../src/language/generated/ast.js";
-import { generateSystems } from "../../src/system/index.js";
+import { generateSystemFiles } from "../_helpers/index.js";
 
-async function buildAndGenerate(src: string): Promise<Map<string, string>> {
-  const services = createDddServices(NodeFileSystem);
-  const { parseHelper } = await import("langium/test");
-  const helper = parseHelper(services.Ddd);
-  const doc = await helper(src, { validation: true });
-  return generateSystems(doc.parseResult.value as Model).files;
-}
+const buildAndGenerate = generateSystemFiles;
 
 const baseOrderSystem = (body: string) => `
   system S {
@@ -61,7 +52,7 @@ const baseOrderSystem = (body: string) => `
   }
 `;
 
-describe("Slice A4 — Form(of: <Aggregate>) auto-dispatch", () => {
+describe("Form(of: <Aggregate>) auto-dispatch", () => {
   it("emits useForm + zodResolver + useCreate<Agg> mutation hook", async () => {
     const files = await buildAndGenerate(baseOrderSystem(`Form(of: Order)`));
     const tsx = files.get("web/src/pages/create_order.tsx")!;

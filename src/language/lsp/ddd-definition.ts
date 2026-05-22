@@ -1,5 +1,5 @@
 import { AstUtils, type CstNode, type MaybePromise } from "langium";
-import { DefaultDefinitionProvider, type LangiumServices } from "langium/lsp";
+import { DefaultDefinitionProvider } from "langium/lsp";
 import { type DefinitionParams, LocationLink } from "vscode-languageserver";
 import { isMemberAccess } from "../generated/ast.js";
 import { envForNode, stepIntoNode, typeOf } from "../type-system.js";
@@ -17,10 +17,6 @@ import { envForNode, stepIntoNode, typeOf } from "../type-system.js";
 // ---------------------------------------------------------------------------
 
 export class DddDefinitionProvider extends DefaultDefinitionProvider {
-  constructor(services: LangiumServices) {
-    super(services);
-  }
-
   protected override collectLocationLinks(
     sourceCstNode: CstNode,
     params: DefinitionParams,

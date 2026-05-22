@@ -8,6 +8,7 @@ import bankingSystemSource from "./banking-system.ddd?raw";
 import inventorySource from "./inventory.ddd?raw";
 import inventorySystemSource from "./inventory-system.ddd?raw";
 import provenanceSystemSource from "./provenance-system.ddd?raw";
+import pokemonWorldSource from "./pokemon-world.ddd?raw";
 import acmeSource from "./acme.ddd?raw";
 import storybookMantineSource from "./storybook-mantine.ddd?raw";
 import storybookMantineV9Source from "./storybook-mantine-v9.ddd?raw";
@@ -23,6 +24,7 @@ import dotnetBackendSource from "./dotnet-backend.ddd?raw";
 import dotnetBankingSource from "./dotnet-banking.ddd?raw";
 import phoenixFullstackSource from "./phoenix-fullstack.ddd?raw";
 import phoenixBankingSource from "./phoenix-banking.ddd?raw";
+import actionShowcaseSource from "./action-showcase.ddd?raw";
 
 export interface LoomExample {
   id: string;
@@ -52,6 +54,13 @@ export const examples: LoomExample[] = [
     source: storybookComponentsSource,
     blurb:
       "Single long page exercising every page-metamodel primitive — layout, display, input, action — no aggregates.",
+  },
+  {
+    id: "action-showcase",
+    label: "Action showcase (operation buttons + forms)",
+    source: actionShowcaseSource,
+    blurb:
+      "Hand-authored Action(order.confirm) buttons in a component, plus scaffold operation forms — the instance-qualified operation surface end-to-end.",
   },
   {
     id: "storybook-mantine",
@@ -113,6 +122,13 @@ export const examples: LoomExample[] = [
     source: storybookChakraV3Source,
     blurb:
       "The Chakra storybook pinned to the Chakra UI v3 pack (compound components, createSystem theme).",
+  },
+  {
+    id: "pokemon-world",
+    label: "Pokémon World (Hono + React)",
+    source: pokemonWorldSource,
+    blurb:
+      "Four aggregates across two modules — levels/evolution, party management with a 6-slot limit, and a battle lifecycle with rounds. Ternary HP-clamp, Id<X> party lists, e2e tests.",
   },
   {
     id: "sales-system",

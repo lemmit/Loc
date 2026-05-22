@@ -355,6 +355,64 @@ test("edits a workflow body's statements", async ({ page }) => {
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
 
+test("nests constructs into module / context groups when Group is on", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  // No group containers in the default flat layout; toggling Group adds them.
+  const groupNodes = page.locator('.react-flow__node[data-id^="group:"]');
+  await expect(groupNodes).toHaveCount(0);
+  await page.getByTestId("c4system-group-toggle").click();
+  await expect.poll(async () => groupNodes.count(), { timeout: 10_000 }).toBeGreaterThan(0);
+  // Toggling off restores the flat layout.
+  await page.getByTestId("c4system-group-toggle").click();
+  await expect(groupNodes).toHaveCount(0);
+});
+
+test("adds a construct into the chosen target context", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  // Acme is a multi-context system, so the add-target picker shows.
+  await selectExample(page, /Acme/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  const picker = page.getByTestId("c4system-add-context");
+  await expect(picker).toBeVisible();
+  await picker.click();
+  await page.getByRole("option", { name: "Orders", exact: true }).click();
+
+  const before = await page.locator(".react-flow__node").count();
+  await page.getByTestId("c4system-add-aggregate").click();
+  await expect.poll(async () => page.locator(".react-flow__node").count()).toBe(before + 1);
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+});
+
+test("structures a bare-call workflow statement into head + args", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  await page.locator('[data-testid="rf__node-workflow:placeOrder"]').click();
+  await expect(page.getByTestId("c4system-body")).toBeVisible();
+  // `order.addLine(productId, qty)` is a bare call → head + per-arg controls.
+  const head = page.getByTestId("c4system-call-head").first();
+  await expect(head).toBeVisible();
+  await expect(head).toHaveValue("order.addLine");
+  await expect(page.getByTestId("c4system-call-arg")).not.toHaveCount(0);
+});
+
 test("edits an operation body via the aggregate inspector", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);
@@ -586,6 +644,31 @@ test("edits an assignment value inside an operation body", async ({ page }) => {
   await expect(op()).toHaveValue("-");
 });
 
+test("expands an assignment value into the inline structured editor (ƒx)", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Fullstack \.NET \(Banking\)/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  // Account.deposit's body has `balance := Money(…)`. Open it in the body editor.
+  await page.locator('[data-testid="rf__node-aggregate:Account"]').click();
+  await page.getByTestId("c4system-op-pick").click();
+  await page.getByRole("option", { name: "deposit", exact: true }).click();
+  await expect(page.getByTestId("c4system-body")).toBeVisible();
+
+  // The assign row shows a text value plus the ƒx toggle; expanding it swaps the
+  // text field for the inline structured expression editor.
+  const fx = page.getByTestId("c4system-stmt-structured").first();
+  await expect(fx).toBeVisible();
+  await expect(page.getByTestId("c4system-stmt-value").first()).toBeVisible();
+  await fx.click();
+  await expect(page.getByTestId("c4expr")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId("c4system-stmt-value")).toHaveCount(0);
+});
+
 test("offers type-directed member-name suggestions", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);
@@ -759,10 +842,11 @@ test("previews an edit's source diff before applying when Preview is on", async 
   // of committing live; Apply commits it and closes the modal.
   await page.getByTestId("c4system-preview-toggle").click();
   await page.getByTestId("c4system-add-module").click();
-  await expect(page.getByTestId("c4system-preview-modal")).toBeVisible();
+  // Assert the modal's content (the diff), not the Mantine modal root — the
+  // root is a zero-box wrapper Playwright never treats as "visible".
   await expect(page.getByTestId("c4system-preview-diff")).toBeVisible();
   await page.getByTestId("c4system-preview-apply").click();
-  await expect(page.getByTestId("c4system-preview-modal")).toHaveCount(0);
+  await expect(page.getByTestId("c4system-preview-diff")).toHaveCount(0);
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
 
@@ -780,4 +864,41 @@ test("shows the selected aggregate's wire shape (DTO field list)", async ({ page
   await page.locator('[data-testid="rf__node-aggregate:Order"]').click();
   await expect(page.getByTestId("c4system-wireshape")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId("c4system-wire-field").first()).toContainText("id");
+});
+
+test("persists hand-dragged node positions across a reload, and Reset clears them", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  const node = page.locator('[data-testid="rf__node-aggregate:Order"]');
+  // A node's CSS transform is in flow coordinates (pan/zoom lives on the
+  // viewport), so it's a stable identity to compare across reload + fitView.
+  const transform = () => node.evaluate((el) => (el as HTMLElement).style.transform);
+  const derived = await transform();
+
+  // Drag the node by a screen delta; its transform should change and persist.
+  const box = (await node.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 160, box.y + box.height / 2 + 90, { steps: 10 });
+  await page.mouse.up();
+  await expect.poll(transform).not.toBe(derived);
+  const dragged = await transform();
+
+  await page.reload();
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(transform, { timeout: 10_000 }).toBe(dragged);
+
+  // Reset layout discards the saved position → back to the derived layout.
+  await page.getByTestId("c4system-reset-layout").click();
+  await expect.poll(transform).toBe(derived);
 });

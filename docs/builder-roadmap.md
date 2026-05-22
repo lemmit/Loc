@@ -328,9 +328,14 @@ Done:
 - **Structured assignment target** — in the top-level BodyEditor (operation /
   workflow bodies) an assignment row splits into a dedicated target / op / value
   (`StmtView` in `body.ts`, `AssignRow` in `BodyEditor.tsx`); other statement
-  kinds keep their single text row. The op is a `:=` / `+=` / `-=` dropdown; the
-  value re-uses the structured Expression picker. Gated by
-  `test/system-body.test.ts` + e2e.
+  kinds keep their single text row. The op is a `:=` / `+=` / `-=` dropdown.
+  - **Typed target + inline structured value** — the target is now an
+    `Autocomplete` over the owning aggregate's assignable property names (still
+    accepts a dotted path, so it's non-lossy); and a per-row `ƒx` toggle expands
+    the value into the same structured `ExprSlotEditor` the Expression picker
+    uses, bound to that statement's value slot (`stmtExpr` / `wfStmt`) — keyed by
+    `rev` so it re-seeds on commit, with the open row held in the pane so it
+    survives. Gated by `test/system-body.test.ts` + e2e.
 - **Diagnostics on graph nodes** — LSP diagnostics (`ctx.diagnostics`) are
   attributed to the construct whose source most tightly contains each (so a
   problem inside an aggregate marks the aggregate, not its module), and that node
@@ -366,23 +371,55 @@ Done:
   then derived) — as a `name : type[?] · source` list in the inspector. Lowered +
   enriched from the linked model off the render path; pure `wireShapeOf` +
   `typeLabel` in `model.ts`. Gated by `test/system-model.test.ts` + e2e.
+- **Persisted node positions** — hand-dragged positions are saved to
+  localStorage (keyed by `<kind>:<name>` node id) and re-applied on every
+  re-seed, so a source edit or reload no longer resets the user's arrangement; a
+  **Reset layout** button discards them back to the derived column layout.
+  Serialize/parse is pure (`positions.ts`, malformed entries dropped); drag-end
+  persistence + re-apply wire through `SystemBuilderPane.tsx`. Gated by
+  `test/system/system-positions.test.ts` + e2e.
+
+- **Structured bare-call statements** — a bare call (`recv.method(args)`, an
+  `LValue` with a trailing call and no mutation suffix) in the BodyEditor splits
+  into a head (`recv.method`) plus one editable input per argument, with add /
+  delete, reconstructing `head(a, b, …)` on commit (empty args dropped). The new
+  `call` `StmtView` + detection live in `body.ts`; `CallRow` in `BodyEditor.tsx`.
+  Gated by `test/system/system-body.test.ts` + e2e.
+- **Add target context / module picker** — when a system has more than one
+  bounded context (or module), the add toolbar shows an "Add into" picker so a
+  new domain construct lands in the chosen context (and `api` references the
+  chosen module), instead of always the first; repository / view reference an
+  aggregate from that same context. The add path is now a pure, parse-guarded
+  `add.ts` (`addConstructSource` / `addModuleSource` / `listContextNames` /
+  `listModuleNames`), extracted out of the pane. Gated by
+  `test/system/system-add.test.ts` + e2e.
+- **Nested grouping + layout** — an opt-in **Group** toggle renders modules and
+  bounded contexts as React Flow parent ("group") nodes, with member constructs
+  laid out in a grid inside their context (modules become containers, so the flat
+  module node is dropped and its edges remap to the group); infra / orphan
+  constructs sit in a row beneath. The layout is a pure, deterministic
+  `groupedLayout` in `grouped-layout.ts` (group boxes + parent-relative
+  placements); flat column layout remains the default, and search / coverage /
+  diagnostics still apply per leaf. Gated by
+  `test/system/system-grouped-layout.test.ts` + e2e.
+- **Edge rebinding by dragging** — dragging a (reconnectable) edge's target
+  endpoint onto another node repoints its reference, reusing `rebindReference`.
+  Scoped to the three single, unambiguous cross-ref edges: a repository's `for`
+  aggregate and a `from` source (view→aggregate, api→module); the owner (edge
+  source) is fixed and an incompatible drop / unparseable rewrite is rejected.
+  Pure `isRebindableEdge` / `rebindEdgeTarget` in `edge-rebind.ts`; wired via
+  React Flow `onReconnect` (`reconnectable: "target"` on those edges, off in
+  grouped mode). Gated by `test/system/system-edge-rebind.test.ts`. (The drag
+  *gesture* isn't e2e-covered — hard to script reliably; the rebind logic is.)
 
 Open:
 
-- **Structured bare-call statements** — a bare-call statement (`x.method(args)`)
-  in the top-level BodyEditor still edits as one verbatim text row; its callee /
-  args aren't split out. (Assignment targets are structured — see above; and
-  repointing an `emit` to a different event is done via the Emit event picker.)
-- **Edge rebinding by dragging** connections on the canvas — the drag gesture
-  itself. Rebinding by inspector Select already exists for both single-reference
-  constructs (`rebind.ts`) and multi-valued deployable references — modules /
-  `serves` / ui (`deployable-bindings.ts`).
-- **Add: target context/module picker** — add covers every construct kind
-  (`constructTemplate`, see Editing above) but drops the new node into the first
-  context (domain kinds) / first module (api); no UI yet to pick which.
-- **Nested grouping** (module → context → members as React Flow parent nodes)
-  and auto-layout; today it's a deterministic column-per-kind layout.
-- **Persisted positions** (layout is currently derived, not written back).
+- **Drag-rebind for deployable `targets` / `ui`** — these are single refs too,
+  but `ui` is form-sensitive (`setDeployableUi` would convert a compose/block
+  form to sugar), so they stay inspector-only for now.
+- **Multi-valued / derived edges** (`deployable` modules / `serves`, `emits`)
+  are inherently not single-drag rebindable — they stay inspector / statement
+  editors.
 
 Planned — recommended order:
 
