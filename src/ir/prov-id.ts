@@ -8,7 +8,7 @@
 // artefact-build time, never per node.
 // ---------------------------------------------------------------------------
 
-import type { ProvSite, SystemIR, StmtIR } from "./loom-ir.js";
+import type { ProvSite, StmtIR, SystemIR } from "./loom-ir.js";
 
 /** FNV-1a 32-bit, rendered as 8 lowercase hex chars.  Deterministic and
  *  pure — adequate for content-addressing source spans, not for crypto. */
@@ -27,11 +27,7 @@ function fnv1a(input: string): string {
  *  different code versions reference different snapshots only where the
  *  rule actually changed.  (Easiest scheme; can later be swapped for a
  *  capture-versioned or AST-canonical id without touching call sites.) */
-export function snapshotIdFor(args: {
-  type: string;
-  field: string;
-  exprText: string;
-}): string {
+export function snapshotIdFor(args: { type: string; field: string; exprText: string }): string {
   const key = `${args.type}.${args.field}::${args.exprText}`;
   return fnv1a(key);
 }
@@ -44,10 +40,7 @@ export type ProvStmt = Extract<StmtIR, { kind: "assign" | "add" | "remove" }> & 
 
 /** A statement carries provenance iff it is an instrumented write-site. */
 export function stmtHasProv(s: StmtIR): s is ProvStmt {
-  return (
-    (s.kind === "assign" || s.kind === "add" || s.kind === "remove") &&
-    s.prov !== undefined
-  );
+  return (s.kind === "assign" || s.kind === "add" || s.kind === "remove") && s.prov !== undefined;
 }
 
 /** True iff any aggregate operation in the system contains an

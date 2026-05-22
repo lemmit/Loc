@@ -1,6 +1,6 @@
 import type { PathIR, StmtIR } from "../../ir/loom-ir.js";
-import { snake, pascal } from "../../util/naming.js";
-import { renderExpr, type RenderCtx } from "./render-expr.js";
+import { pascal, snake } from "../../util/naming.js";
+import { type RenderCtx, renderExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
 // Statement renderer for Phoenix LiveView / Ash operation bodies.
@@ -17,16 +17,10 @@ export function renderElixirStatements(
   ctx: RenderCtx,
   changesetVar = "changeset",
 ): string {
-  return stmts
-    .map((s) => renderElixirStatement(s, ctx, changesetVar))
-    .join("\n");
+  return stmts.map((s) => renderElixirStatement(s, ctx, changesetVar)).join("\n");
 }
 
-function renderElixirStatement(
-  s: StmtIR,
-  ctx: RenderCtx,
-  changesetVar: string,
-): string {
+function renderElixirStatement(s: StmtIR, ctx: RenderCtx, changesetVar: string): string {
   switch (s.kind) {
     case "precondition":
       // Raise a domain error when the precondition fails.

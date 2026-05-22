@@ -28,9 +28,9 @@ import type {
 import { camel, pascal, plural, snake } from "../../util/naming.js";
 import {
   defaultInitFor,
+  type HandleEventClause,
   renderRequiresGuard,
   walkBodyToHeex,
-  type HandleEventClause,
 } from "./heex-walker.js";
 import { buildPlaywrightPageObject } from "./page-objects-emit.js";
 
@@ -131,13 +131,7 @@ function renderLiveView(a: RenderArgs): string {
   // populated with a walker-stdlib ExprIR tree.  The walker produces
   // handle_event clauses and alias lines from helper imports the body
   // actually references.
-  const walked = walkBodyToHeex(
-    page.body,
-    page,
-    ui,
-    appModule,
-    aggregatesByName,
-  );
+  const walked = walkBodyToHeex(page.body, page, ui, appModule, aggregatesByName);
   const heex = walked.heex;
   const handlers: HandleEventClause[] = walked.handlers;
   const aliasLines: string[] = walked.aliasLines;
@@ -151,9 +145,7 @@ function renderLiveView(a: RenderArgs): string {
     walked.formBindings,
     contextModuleByAggName,
   );
-  const detailBaseRoute = page.route
-    ? page.route.replace(/\/:[^/]+$/, "")
-    : null;
+  const detailBaseRoute = page.route ? page.route.replace(/\/:[^/]+$/, "") : null;
   const handleEventClauses =
     renderHandleEventClauses(handlers) +
     renderOperationEventClauses(walked.formBindings, detailBaseRoute);
@@ -192,7 +184,6 @@ ${h.body.join("\n")}
       .join("\n")
   );
 }
-
 
 function renderMount(
   page: PageIR,

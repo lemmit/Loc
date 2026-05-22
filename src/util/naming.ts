@@ -36,9 +36,7 @@ export function humanize(input: string): string {
     .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
     .trim()
     .split(/\s+/);
-  return words
-    .map((w) => (w.length === 0 ? w : w[0]!.toUpperCase() + w.slice(1)))
-    .join(" ");
+  return words.map((w) => (w.length === 0 ? w : w[0]!.toUpperCase() + w.slice(1))).join(" ");
 }
 
 export function indent(text: string, level = 1, unit = "  "): string {

@@ -1,16 +1,11 @@
-import type {
-  AggregateIR,
-  ExprIR,
-  InvariantIR,
-  OperationIR,
-} from "../../ir/loom-ir.js";
 import {
+  type ClassifyContext,
   classifyForWire,
   pickErrorPath,
-  singleFieldShape,
-  type ClassifyContext,
   type SingleFieldPattern,
+  singleFieldShape,
 } from "../../ir/invariant-classify.js";
+import type { AggregateIR, ExprIR, InvariantIR, OperationIR } from "../../ir/loom-ir.js";
 import { pascal, plural } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
@@ -274,9 +269,7 @@ function renderMember(e: Extract<ExprIR, { kind: "member" }>): string {
   return `${recv}.${pascal(e.member)}`;
 }
 
-function renderMethodCall(
-  e: Extract<ExprIR, { kind: "method-call" }>,
-): string {
+function renderMethodCall(e: Extract<ExprIR, { kind: "method-call" }>): string {
   const recv = renderFluentPredicate(e.receiver);
   const args = e.args.map(renderFluentPredicate);
   // `string.matches(literal)` — when it falls through to a

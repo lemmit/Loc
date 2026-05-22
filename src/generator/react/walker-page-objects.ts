@@ -53,9 +53,7 @@ export interface WalkerPageObjectInput {
 /** Emit a Playwright page-object TypeScript module for a walker-
  *  emitted page.  Caller writes the result to
  *  `e2e/pages/<page-snake>.ts`. */
-export function buildWalkerPageObject(
-  input: WalkerPageObjectInput,
-): string {
+export function buildWalkerPageObject(input: WalkerPageObjectInput): string {
   const { pageName, params, route, testids } = input;
   const hasParams = params.length > 0;
   const className = `${pageName}Page`;
@@ -71,9 +69,7 @@ export function buildWalkerPageObject(
   lines.push(`export class ${className} {`);
   if (hasParams) {
     // Parameterised route: `urlFor(...)` interpolates each `:name`.
-    const paramList = params
-      .map((p) => `${p.name}: ${typeRefAsTsString(p)}`)
-      .join(", ");
+    const paramList = params.map((p) => `${p.name}: ${typeRefAsTsString(p)}`).join(", ");
     const urlExpr = routeAsTemplateLiteral(route, params);
     lines.push(`  static urlFor(${paramList}): string {`);
     lines.push(`    return ${urlExpr};`);
@@ -146,10 +142,7 @@ function stripNonIdent(s: string): string {
  *  template literal that interpolates each `:name` segment.  Used
  *  by `urlFor(...)` for parameterised routes.  Non-param segments
  *  pass through verbatim. */
-function routeAsTemplateLiteral(
-  route: string,
-  params: readonly ParamIR[],
-): string {
+function routeAsTemplateLiteral(route: string, params: readonly ParamIR[]): string {
   const paramNames = new Set(params.map((p) => p.name));
   // Split route on `:name` segments and rebuild as a template
   // literal.  Param refs become `${name}`; literal segments stay

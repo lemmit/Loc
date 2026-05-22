@@ -1,3 +1,4 @@
+import { wireShapeFor } from "../../ir/enrichments.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -10,8 +11,7 @@ import type {
   ValueObjectIR,
   WireField,
 } from "../../ir/loom-ir.js";
-import { wireShapeFor } from "../../ir/enrichments.js";
-import { pascal, snake, plural } from "../../util/naming.js";
+import { pascal, plural, snake } from "../../util/naming.js";
 import type { ApiRoute } from "./api-emit.js";
 
 // ---------------------------------------------------------------------------
@@ -66,7 +66,10 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
 
   // Collect all aggregates, workflows, views across all contexts.
   const allAggregates: Array<{ ctx: BoundedContextIR; agg: AggregateIR }> = [];
-  const allWorkflows: Array<{ ctx: BoundedContextIR; wf: import("../../ir/loom-ir.js").WorkflowIR }> = [];
+  const allWorkflows: Array<{
+    ctx: BoundedContextIR;
+    wf: import("../../ir/loom-ir.js").WorkflowIR;
+  }> = [];
   const allViews: Array<{ ctx: BoundedContextIR; view: import("../../ir/loom-ir.js").ViewIR }> = [];
 
   for (const ctx of contexts) {
@@ -99,10 +102,7 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
     for (const vo of ctx.valueObjects) {
       if (emittedVOs.has(vo.name)) continue;
       emittedVOs.add(vo.name);
-      files.set(
-        `${schemaDir}/${snake(vo.name)}.ex`,
-        renderValueObjectSchema(vo, webModule),
-      );
+      files.set(`${schemaDir}/${snake(vo.name)}.ex`, renderValueObjectSchema(vo, webModule));
     }
   }
 
@@ -246,7 +246,8 @@ function renderApiSpec(
     const respMod = `${schemasModule}.${agg.name}Response`;
     const listRespMod = `${schemasModule}.${agg.name}ListResponse`;
     const createReqMod = `${schemasModule}.Create${agg.name}Request`;
-    pathEntries.push(`      "/aggregates/${aggSlug}" => %OpenApiSpex.PathItem{
+    pathEntries.push(
+      `      "/aggregates/${aggSlug}" => %OpenApiSpex.PathItem{
         get: %OpenApiSpex.Operation{
           summary: "List ${agg.name}",
           operationId: "list_${snake(agg.name)}",
@@ -292,12 +293,14 @@ function renderApiSpec(
             404 => %OpenApiSpex.Response{description: "Not found"}
           }
         }
-      }`);
+      }`,
+    );
   }
 
-  const pathsBlock = pathEntries.length > 0
-    ? pathEntries.join(",\n")
-    : "      # No paths — no aggregates, workflows, or views";
+  const pathsBlock =
+    pathEntries.length > 0
+      ? pathEntries.join(",\n")
+      : "      # No paths — no aggregates, workflows, or views";
 
   return `# Auto-generated.
 defmodule ${specModule} do
@@ -403,7 +406,9 @@ function renderProperties(fields: Array<{ name: string; type: TypeIR; optional: 
 }
 
 /** Convert WireField[] to the uniform shape renderProperties expects. */
-function wireFieldsToProps(fields: WireField[]): Array<{ name: string; type: TypeIR; optional: boolean }> {
+function wireFieldsToProps(
+  fields: WireField[],
+): Array<{ name: string; type: TypeIR; optional: boolean }> {
   return fields.map((f) => ({ name: f.name, type: f.type, optional: f.optional }));
 }
 
@@ -413,12 +418,8 @@ function renderSchemaModule(
   fields: Array<{ name: string; type: TypeIR; optional: boolean }>,
 ): string {
   const { propsLines, requiredAtoms } = renderProperties(fields);
-  const propsBlock = propsLines.length > 0
-    ? propsLines.join(",\n")
-    : "      # no properties";
-  const requiredBlock = requiredAtoms.length > 0
-    ? `[${requiredAtoms.join(", ")}]`
-    : "[]";
+  const propsBlock = propsLines.length > 0 ? propsLines.join(",\n") : "      # no properties";
+  const requiredBlock = requiredAtoms.length > 0 ? `[${requiredAtoms.join(", ")}]` : "[]";
 
   return `# Auto-generated.
 defmodule ${moduleName} do
@@ -440,11 +441,13 @@ end
 
 function renderValueObjectSchema(vo: ValueObjectIR, webModule: string): string {
   const moduleName = `${webModule}.Api.Schemas.${vo.name}`;
-  const fields: Array<{ name: string; type: TypeIR; optional: boolean }> = vo.fields.map((f: FieldIR) => ({
-    name: f.name,
-    type: f.type,
-    optional: f.optional,
-  }));
+  const fields: Array<{ name: string; type: TypeIR; optional: boolean }> = vo.fields.map(
+    (f: FieldIR) => ({
+      name: f.name,
+      type: f.type,
+      optional: f.optional,
+    }),
+  );
   return renderSchemaModule(moduleName, vo.name, fields);
 }
 
@@ -494,11 +497,13 @@ function renderOperationRequestSchema(
 ): string {
   const schemaName = `${pascal(op.name)}Request`;
   const moduleName = `${webModule}.Api.Schemas.${schemaName}`;
-  const fields: Array<{ name: string; type: TypeIR; optional: boolean }> = op.params.map((p: ParamIR) => ({
-    name: p.name,
-    type: p.type,
-    optional: false,
-  }));
+  const fields: Array<{ name: string; type: TypeIR; optional: boolean }> = op.params.map(
+    (p: ParamIR) => ({
+      name: p.name,
+      type: p.type,
+      optional: false,
+    }),
+  );
   void agg;
   return renderSchemaModule(moduleName, schemaName, fields);
 }
@@ -509,11 +514,13 @@ function renderWorkflowRequestSchema(
 ): string {
   const schemaName = `${pascal(wf.name)}Request`;
   const moduleName = `${webModule}.Api.Schemas.${schemaName}`;
-  const fields: Array<{ name: string; type: TypeIR; optional: boolean }> = wf.params.map((p: ParamIR) => ({
-    name: p.name,
-    type: p.type,
-    optional: false,
-  }));
+  const fields: Array<{ name: string; type: TypeIR; optional: boolean }> = wf.params.map(
+    (p: ParamIR) => ({
+      name: p.name,
+      type: p.type,
+      optional: false,
+    }),
+  );
   return renderSchemaModule(moduleName, schemaName, fields);
 }
 
@@ -547,12 +554,14 @@ function renderViewResponseSchema(
 
   // View responses are arrays (list queries)
   const itemSchemaLines = renderProperties(fields);
-  const propsBlock = itemSchemaLines.propsLines.length > 0
-    ? itemSchemaLines.propsLines.join(",\n")
-    : "      # no properties";
-  const requiredBlock = itemSchemaLines.requiredAtoms.length > 0
-    ? `[${itemSchemaLines.requiredAtoms.join(", ")}]`
-    : "[]";
+  const propsBlock =
+    itemSchemaLines.propsLines.length > 0
+      ? itemSchemaLines.propsLines.join(",\n")
+      : "      # no properties";
+  const requiredBlock =
+    itemSchemaLines.requiredAtoms.length > 0
+      ? `[${itemSchemaLines.requiredAtoms.join(", ")}]`
+      : "[]";
 
   return `# Auto-generated.
 defmodule ${moduleName} do

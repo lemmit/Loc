@@ -50,9 +50,7 @@ export class DddNodeKindProvider extends DefaultNodeKindProvider {
     }
   }
 
-  override getCompletionItemKind(
-    node: AstNode | AstNodeDescription,
-  ): CompletionItemKind {
+  override getCompletionItemKind(node: AstNode | AstNodeDescription): CompletionItemKind {
     switch (typeOf(node)) {
       case "Aggregate":
       case "EntityPart":

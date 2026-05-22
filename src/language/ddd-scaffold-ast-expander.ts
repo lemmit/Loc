@@ -39,19 +39,19 @@
 // pages take `id: Id<T>` from the aggregate, not from a synthesised
 // `Parameter` node).  Adding them is mechanical when needed.
 
-import { DocumentState } from "langium";
 import type { LangiumDocument } from "langium";
+import { DocumentState } from "langium";
 import type { LangiumSharedServices } from "langium/lsp";
 import {
-  isModule,
-  isSystem,
-  isUi,
   type Aggregate,
   type BodyProp,
   type BoundedContext,
   type CallArg,
   type CallExpr,
   type Expression,
+  isModule,
+  isSystem,
+  isUi,
   type LiteralExpr,
   type MenuMetaEntry,
   type Model,
@@ -71,17 +71,12 @@ import {
 // Service registration
 // ---------------------------------------------------------------------------
 
-export function registerScaffoldAstExpander(
-  shared: LangiumSharedServices,
-): void {
-  shared.workspace.DocumentBuilder.onDocumentPhase(
-    DocumentState.IndexedContent,
-    async (doc) => {
-      const root = doc.parseResult.value as Model | undefined;
-      if (!root) return;
-      expandScaffoldsInModel(root, doc);
-    },
-  );
+export function registerScaffoldAstExpander(shared: LangiumSharedServices): void {
+  shared.workspace.DocumentBuilder.onDocumentPhase(DocumentState.IndexedContent, async (doc) => {
+    const root = doc.parseResult.value as Model | undefined;
+    if (!root) return;
+    expandScaffoldsInModel(root, doc);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -108,9 +103,7 @@ interface SystemInventory {
   viewByName: Map<string, View>;
 }
 
-function buildSystemInventory(
-  sys: import("./generated/ast.js").System,
-): SystemInventory {
+function buildSystemInventory(sys: import("./generated/ast.js").System): SystemInventory {
   const inv: SystemInventory = {
     modulesByName: new Map(),
     contextsByName: new Map(),
@@ -121,8 +114,10 @@ function buildSystemInventory(
   const visitContext = (ctx: BoundedContext) => {
     inv.contextsByName.set(ctx.name, ctx);
     for (const cm of ctx.members ?? []) {
-      if (cm.$type === "Aggregate") inv.aggregateByName.set((cm as Aggregate).name, cm as Aggregate);
-      else if (cm.$type === "Workflow") inv.workflowByName.set((cm as Workflow).name, cm as Workflow);
+      if (cm.$type === "Aggregate")
+        inv.aggregateByName.set((cm as Aggregate).name, cm as Aggregate);
+      else if (cm.$type === "Workflow")
+        inv.workflowByName.set((cm as Workflow).name, cm as Workflow);
       else if (cm.$type === "View") inv.viewByName.set((cm as View).name, cm as View);
     }
   };
@@ -201,11 +196,7 @@ function expandUi(
     synthesised.push(synthesiseWorkflowsIndexPage());
     synthesisedNames.add("WorkflowsIndex");
   }
-  if (
-    anyView &&
-    !explicitPageNames.has("ViewsIndex") &&
-    !synthesisedNames.has("ViewsIndex")
-  ) {
+  if (anyView && !explicitPageNames.has("ViewsIndex") && !synthesisedNames.has("ViewsIndex")) {
     synthesised.push(synthesiseViewsIndexPage());
     synthesisedNames.add("ViewsIndex");
   }
@@ -215,11 +206,7 @@ function expandUi(
   for (const page of synthesised) attachToUi(page, ui);
 }
 
-function expandOne(
-  sc: Scaffold,
-  target: string,
-  inv: SystemInventory,
-): Page[] {
+function expandOne(sc: Scaffold, target: string, inv: SystemInventory): Page[] {
   switch (sc.selector) {
     case "modules": {
       const m = inv.modulesByName.get(target);
@@ -440,10 +427,7 @@ function makeBodyProp(expr: CallExpr): BodyProp {
   return bp;
 }
 
-function callExpr(
-  name: string,
-  named: { name?: string; value: Expression }[],
-): CallExpr {
+function callExpr(name: string, named: { name?: string; value: Expression }[]): CallExpr {
   const callee = nameRefExpr(name);
   const args: CallArg[] = named.map((n) => {
     const arg: CallArg = {
@@ -487,9 +471,7 @@ function boolLit(value: boolean): LiteralExpr {
   } as unknown as LiteralExpr;
 }
 
-function makeMenuMeta(
-  entries: [string, Expression][],
-): PageMenuMeta {
+function makeMenuMeta(entries: [string, Expression][]): PageMenuMeta {
   const meta: PageMenuMeta = {
     $type: "PageMenuMeta",
     entries: [],
@@ -520,12 +502,7 @@ function attachToUi(page: Page, ui: Ui): void {
   ui.members.push(page);
 }
 
-function setContainer(
-  child: unknown,
-  parent: object,
-  property: string,
-  index?: number,
-): void {
+function setContainer(child: unknown, parent: object, property: string, index?: number): void {
   const c = child as Record<string, unknown>;
   c["$container"] = parent;
   c["$containerProperty"] = property;

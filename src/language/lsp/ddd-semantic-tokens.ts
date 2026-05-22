@@ -1,5 +1,5 @@
-import { AbstractSemanticTokenProvider, type SemanticTokenAcceptor } from "langium/lsp";
 import type { AstNode } from "langium";
+import { AbstractSemanticTokenProvider, type SemanticTokenAcceptor } from "langium/lsp";
 import { SemanticTokenTypes } from "vscode-languageserver";
 import {
   isAggregate,
@@ -12,8 +12,8 @@ import {
   isFunctionDecl,
   isIdType,
   isMemberAccess,
-  isNameRef,
   isNamedType,
+  isNameRef,
   isOperation,
   isParameter,
   isProperty,

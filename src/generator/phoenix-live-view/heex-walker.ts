@@ -49,9 +49,9 @@ import type {
   ExprIR,
   PageIR,
   StmtIR,
-  UiIR,
-  UiHelperImportIR,
   TypeIR,
+  UiHelperImportIR,
+  UiIR,
 } from "../../ir/loom-ir.js";
 import { camel, humanize, pascal, plural, snake } from "../../util/naming.js";
 
@@ -261,18 +261,13 @@ function renderLiteral(kind: string, value: string): string {
   }
 }
 
-function renderRef(
-  expr: Extract<ExprIR, { kind: "ref" }>,
-  ctx: WalkContext,
-): string {
+function renderRef(expr: Extract<ExprIR, { kind: "ref" }>, ctx: WalkContext): string {
   // Variable remapping — QueryView maps lambda params (e.g. "rows") to
   // their LiveView assign names (e.g. "items").  Check this first.
   if (ctx.varRemapping) {
     const remapped = ctx.varRemapping.get(snake(expr.name));
     if (remapped !== undefined) {
-      return ctx.position === "template"
-        ? `@${remapped}`
-        : `socket.assigns.${remapped}`;
+      return ctx.position === "template" ? `@${remapped}` : `socket.assigns.${remapped}`;
     }
   }
   // State field — position-dependent.
@@ -295,9 +290,7 @@ function renderRef(
     case "enum-value":
       return `:${snake(expr.name)}`;
     case "current-user":
-      return ctx.position === "template"
-        ? `@current_user`
-        : `socket.assigns.current_user`;
+      return ctx.position === "template" ? `@current_user` : `socket.assigns.current_user`;
     case "helper-fn":
       ctx.usedHelpers.add(expr.name);
       return snake(expr.name);
@@ -306,20 +299,13 @@ function renderRef(
   }
 }
 
-function renderMember(
-  expr: Extract<ExprIR, { kind: "member" }>,
-  ctx: WalkContext,
-): string {
+function renderMember(expr: Extract<ExprIR, { kind: "member" }>, ctx: WalkContext): string {
   // Map well-known property accesses to their Elixir analogs.
   if (expr.member === "length" || expr.member === "count") {
     return `Enum.count(${renderExpr(expr.receiver, ctx)})`;
   }
-  if (
-    expr.receiver.kind === "ref" &&
-    expr.receiver.refKind === "current-user"
-  ) {
-    const cu =
-      ctx.position === "template" ? "@current_user" : "socket.assigns.current_user";
+  if (expr.receiver.kind === "ref" && expr.receiver.refKind === "current-user") {
+    const cu = ctx.position === "template" ? "@current_user" : "socket.assigns.current_user";
     return `${cu}.${snake(expr.member)}`;
   }
   return `${renderExpr(expr.receiver, ctx)}.${snake(expr.member)}`;
@@ -343,10 +329,7 @@ function renderMethodCall(
   return `${recv}.${snake(expr.member)}(${args})`;
 }
 
-function renderCall(
-  expr: Extract<ExprIR, { kind: "call" }>,
-  ctx: WalkContext,
-): string {
+function renderCall(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   // navigate(<Page>, { … }) — Loom's cross-page navigation primitive.
   if (expr.name === "navigate") {
     return renderNavigate(expr, ctx);
@@ -382,10 +365,7 @@ function renderCall(
   return `${snake(expr.name)}(${args})`;
 }
 
-function renderBinary(
-  expr: Extract<ExprIR, { kind: "binary" }>,
-  ctx: WalkContext,
-): string {
+function renderBinary(expr: Extract<ExprIR, { kind: "binary" }>, ctx: WalkContext): string {
   const l = renderExpr(expr.left, ctx);
   const r = renderExpr(expr.right, ctx);
   // String concatenation: Elixir uses `<>`.  Detect by left operand
@@ -409,30 +389,20 @@ function isStringLit(e: ExprIR): boolean {
   return e.kind === "literal" && e.lit === "string";
 }
 
-function renderMatch(
-  expr: Extract<ExprIR, { kind: "match" }>,
-  ctx: WalkContext,
-): string {
+function renderMatch(expr: Extract<ExprIR, { kind: "match" }>, ctx: WalkContext): string {
   // `match { p => v; … else => f }` → Elixir `cond do … end`.
   // Wrapping in `<%= … %>` is the caller's job when the match appears
   // in template position; in handler position, just the bare cond.
   const arms = expr.arms
     .map((a) => `      ${renderExpr(a.cond, ctx)} -> ${renderExpr(a.value, ctx)}`)
     .join("\n");
-  const elseArm = expr.otherwise
-    ? `\n      true -> ${renderExpr(expr.otherwise, ctx)}`
-    : "";
+  const elseArm = expr.otherwise ? `\n      true -> ${renderExpr(expr.otherwise, ctx)}` : "";
   const cond = `cond do\n${arms}${elseArm}\n    end`;
   return ctx.position === "template" ? `<%= ${cond} %>` : cond;
 }
 
-function renderObjectLiteral(
-  expr: Extract<ExprIR, { kind: "object" }>,
-  ctx: WalkContext,
-): string {
-  const fields = expr.fields
-    .map((f) => `${snake(f.name)}: ${renderExpr(f.value, ctx)}`)
-    .join(", ");
+function renderObjectLiteral(expr: Extract<ExprIR, { kind: "object" }>, ctx: WalkContext): string {
+  const fields = expr.fields.map((f) => `${snake(f.name)}: ${renderExpr(f.value, ctx)}`).join(", ");
   return `%{${fields}}`;
 }
 
@@ -566,10 +536,7 @@ function renderApiCall(call: ApiCallSite, ctx: WalkContext): string {
 // Navigation + toast.
 // ---------------------------------------------------------------------------
 
-function renderNavigate(
-  expr: Extract<ExprIR, { kind: "call" }>,
-  ctx: WalkContext,
-): string {
+function renderNavigate(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   // navigate(<Page>, { customerId: x }) — first arg is the page
   // reference, second is the params object.
   // Phase 3B's router uses `live "<route>", <Page>Live`; we lower to
@@ -596,10 +563,7 @@ function renderNavigate(
   return `push_navigate(socket, to: ~p"${route}")`;
 }
 
-function renderToast(
-  expr: Extract<ExprIR, { kind: "call" }>,
-  ctx: WalkContext,
-): string {
+function renderToast(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   const msg = expr.args[0] ? renderExpr(expr.args[0], ctx) : `""`;
   return `put_flash(socket, :info, ${msg})`;
 }
@@ -613,10 +577,7 @@ function renderToast(
 /** `Breadcrumbs(items...)` → `<nav aria-label="breadcrumb">` with
  *  a list of spans/links.  Positional children are each an Anchor
  *  (link) or Text (current page) from the scaffold expander. */
-function renderBreadcrumbs(
-  expr: Extract<ExprIR, { kind: "call" }>,
-  ctx: WalkContext,
-): string {
+function renderBreadcrumbs(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   const items = expr.args.map((a) => renderChild(a, ctx));
   const itemsHeex = items
     .map((item, i) =>
@@ -631,10 +592,7 @@ function renderBreadcrumbs(
 /** `Anchor("label", to: "/path")` → `<.link navigate={~p"/path"}>label</.link>`
  *  Falls back to `<a href="...">` when not an internal route literal.
  *  `testid:` becomes `data-testid`. */
-function renderAnchor(
-  expr: Extract<ExprIR, { kind: "call" }>,
-  ctx: WalkContext,
-): string {
+function renderAnchor(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let label = "";
   let to = "";
   let testid = "";
@@ -647,7 +605,8 @@ function renderAnchor(
     } else if (name === "to") {
       to = arg.kind === "literal" ? arg.value : renderExpr(arg, { ...ctx, position: "template" });
     } else if (name === "testid") {
-      testid = arg.kind === "literal" ? arg.value : renderExpr(arg, { ...ctx, position: "template" });
+      testid =
+        arg.kind === "literal" ? arg.value : renderExpr(arg, { ...ctx, position: "template" });
     }
   }
   label = positional[0] ? renderInTemplate(positional[0], ctx) : "";
@@ -667,10 +626,7 @@ function renderAnchor(
  *  handle_event clauses.  The `Form(of:, op:)` child is consumed
  *  here (never visited by renderChild) — mirrors the React
  *  walker's `emitModal`. */
-function renderModal(
-  expr: Extract<ExprIR, { kind: "call" }>,
-  ctx: WalkContext,
-): string {
+function renderModal(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let title = "";
   let triggerExpr: ExprIR | undefined;
   const positional: ExprIR[] = [];
@@ -679,9 +635,7 @@ function renderModal(
     const arg = expr.args[i]!;
     if (name === "title") {
       title =
-        arg.kind === "literal"
-          ? arg.value
-          : renderExpr(arg, { ...ctx, position: "template" });
+        arg.kind === "literal" ? arg.value : renderExpr(arg, { ...ctx, position: "template" });
     } else if (name === "trigger") {
       triggerExpr = arg;
     } else if (!name) {
@@ -689,8 +643,7 @@ function renderModal(
     }
   }
   const formChild = positional.find(
-    (c): c is Extract<ExprIR, { kind: "call" }> =>
-      c.kind === "call" && c.name === "Form",
+    (c): c is Extract<ExprIR, { kind: "call" }> => c.kind === "call" && c.name === "Form",
   );
   const ofName = formChild ? findPascalArg(formChild, "of") : undefined;
   const opName = formChild ? findPascalArg(formChild, "op") : undefined;
@@ -704,9 +657,7 @@ function renderModal(
 
   const agg = ctx.aggregatesByName.get(ofName);
   const op = agg?.operations.find((o) => o.name === opName);
-  const params = op
-    ? op.params.map((p) => ({ name: p.name, type: p.type }))
-    : [];
+  const params = op ? op.params.map((p) => ({ name: p.name, type: p.type })) : [];
 
   ctx.formBindings.push({
     kind: "operation",
@@ -719,11 +670,7 @@ function renderModal(
   // Trigger button surface from the `trigger: Button(...)` arg.
   let label = humanize(opName);
   let testid = "";
-  if (
-    triggerExpr &&
-    triggerExpr.kind === "call" &&
-    triggerExpr.name === "Button"
-  ) {
+  if (triggerExpr && triggerExpr.kind === "call" && triggerExpr.name === "Button") {
     for (let i = 0; i < triggerExpr.args.length; i++) {
       const n = triggerExpr.argNames?.[i];
       const a = triggerExpr.args[i]!;
@@ -736,9 +683,7 @@ function renderModal(
 
   const inputs =
     params.length > 0
-      ? params.map(
-          (p) => `    ${renderFieldInputForField(p, formAssign)}`,
-        )
+      ? params.map((p) => `    ${renderFieldInputForField(p, formAssign)}`)
       : [`    <%!-- ${opSnake} has no parameters --%>`];
 
   return [
@@ -759,10 +704,7 @@ function renderModal(
  *  inputs derived from the aggregate/workflow args.
  *  `runs: Wf` (workflow form) also emits a `<.simple_form>` but
  *  tied to the workflow action name. */
-function renderForm(
-  expr: Extract<ExprIR, { kind: "call" }>,
-  ctx: WalkContext,
-): string {
+function renderForm(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   // `Form(of:, op:)` is the operation-modal form — owned and
   // rendered by `renderModal` (it consumes its Form child
   // directly).  This guard makes the function total if a stray
@@ -776,18 +718,17 @@ function renderForm(
     const name = expr.argNames?.[i];
     const arg = expr.args[i]!;
     if (name === "of") {
-      ofTarget = arg.kind === "ref" ? snake(arg.name) : renderExpr(arg, { ...ctx, position: "template" });
+      ofTarget =
+        arg.kind === "ref" ? snake(arg.name) : renderExpr(arg, { ...ctx, position: "template" });
     } else if (name === "runs") {
-      runsTarget = arg.kind === "ref" ? snake(arg.name) : renderExpr(arg, { ...ctx, position: "template" });
+      runsTarget =
+        arg.kind === "ref" ? snake(arg.name) : renderExpr(arg, { ...ctx, position: "template" });
     } else if (name === "testid") {
-      testid = arg.kind === "literal" ? arg.value : renderExpr(arg, { ...ctx, position: "template" });
+      testid =
+        arg.kind === "literal" ? arg.value : renderExpr(arg, { ...ctx, position: "template" });
     }
   }
-  const submitEvent = ofTarget
-    ? `save_${ofTarget}`
-    : runsTarget
-      ? `run_${runsTarget}`
-      : "submit";
+  const submitEvent = ofTarget ? `save_${ofTarget}` : runsTarget ? `run_${runsTarget}` : "submit";
   const testidAttr = testid ? ` data-testid="${testid}"` : "";
   // Register a form binding so the LiveView emitter can assign @form
   // in mount/3.  We track the PascalCase name; emitter handles
@@ -853,15 +794,11 @@ function findPascalArg(
  *  Id<T> references fall through to a text input for now — a proper
  *  select-with-options requires loading T's list at mount time and
  *  is out of scope here (see follow-up plan §Form-of-Id). */
-function renderFieldInputForField(
-  f: { name: string; type: TypeIR },
-  formAssign = "form",
-): string {
+function renderFieldInputForField(f: { name: string; type: TypeIR }, formAssign = "form"): string {
   const fieldName = snake(f.name);
   const label = humanize(f.name);
   const inputType = htmlInputTypeForIRType(f.type);
-  const isDecimal =
-    f.type.kind === "primitive" && f.type.name === "decimal";
+  const isDecimal = f.type.kind === "primitive" && f.type.name === "decimal";
   const extraAttrs = isDecimal ? ` step="0.01"` : "";
   return `<.input field={@${formAssign}[:${fieldName}]} type="${inputType}" label="${label}"${extraAttrs} />`;
 }
@@ -890,10 +827,7 @@ function htmlInputTypeForIRType(t: TypeIR): string {
 
 /** `Table(Column(...), ..., rows: ref("rows"), ...)` →
  *  `<.table id="..." rows={@rows}>` with `<:col :let={row}>` slots. */
-function renderTable(
-  expr: Extract<ExprIR, { kind: "call" }>,
-  ctx: WalkContext,
-): string {
+function renderTable(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let rowsExpr = "@items";
   let testid = "";
   const cols: ExprIR[] = [];
@@ -906,7 +840,8 @@ function renderTable(
     } else if (name === "rows") {
       rowsExpr = renderExpr(arg, { ...ctx, position: "template" });
     } else if (name === "testid") {
-      testid = arg.kind === "literal" ? arg.value : renderExpr(arg, { ...ctx, position: "template" });
+      testid =
+        arg.kind === "literal" ? arg.value : renderExpr(arg, { ...ctx, position: "template" });
     }
     // striped / highlight / sticky / rowTestid / keyExpr — ignored in HEEx
     // (these are Mantine-specific props; CoreComponents.table doesn't use them)
@@ -924,10 +859,7 @@ function renderTable(
  *  `<:col :let={row} label="...">...</:col>` slot.  Called only from
  *  `renderTable` — never registered as a top-level primitive because
  *  Column nodes are always children of Table in the expander output. */
-function renderTableColumn(
-  expr: ExprIR,
-  ctx: WalkContext,
-): string {
+function renderTableColumn(expr: ExprIR, ctx: WalkContext): string {
   if (expr.kind !== "call" || expr.name !== "Column") {
     // Unexpected shape — emit a stub slot.
     return `<:col :let={_row} label="Column">${renderChild(expr, ctx)}</:col>`;
@@ -937,9 +869,7 @@ function renderTableColumn(
   let label = "Column";
   let cellHeex = "<%= row %>";
   const labelArg = expr.args.find((_, i) => !expr.argNames?.[i]);
-  const lambdaArg = expr.args.find(
-    (a, i) => !expr.argNames?.[i] && a.kind === "lambda",
-  );
+  const lambdaArg = expr.args.find((a, i) => !expr.argNames?.[i] && a.kind === "lambda");
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   if (positionals[0]) {
     label =
@@ -962,10 +892,7 @@ function renderTableColumn(
 
 /** Extract the row variable name from a Column accessor lambda for the
  *  `:let={row}` binding.  Falls back to `"row"` when shape is unexpected. */
-function renderColLetVar(
-  accessor: ExprIR | undefined,
-  _ctx: WalkContext,
-): string {
+function renderColLetVar(accessor: ExprIR | undefined, _ctx: WalkContext): string {
   if (accessor && accessor.kind === "lambda") return snake(accessor.param);
   return "row";
 }
@@ -1002,10 +929,7 @@ function resolveQueryAggregate(arg: ExprIR): string | undefined {
   return undefined;
 }
 
-function renderQueryView(
-  expr: Extract<ExprIR, { kind: "call" }>,
-  ctx: WalkContext,
-): string {
+function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let ofExpr = "";
   let ofArgNode: ExprIR | undefined;
   let loadingHeex = `<div class="animate-pulse">Loading...</div>`;
@@ -1037,9 +961,7 @@ function renderQueryView(
         // Convention: "rows" → @items (list pages), "data" → @data (detail pages)
         assignName = dataVar === "rows" ? "items" : dataVar;
         // Build a remapping so ref("rows") → @items, ref("data") → @data, etc.
-        const remapping = new Map<string, string>([
-          [dataVar, assignName],
-        ]);
+        const remapping = new Map<string, string>([[dataVar, assignName]]);
         const innerCtx: WalkContext = {
           ...ctx,
           varRemapping: remapping,
@@ -1055,9 +977,7 @@ function renderQueryView(
   // Register the query binding so the LiveView emitter loads the
   // record(s) in handle_params (the assign the cond below reads is
   // never populated otherwise — see QueryBinding).
-  const aggName = ofArgNode
-    ? resolveQueryAggregate(ofArgNode)
-    : undefined;
+  const aggName = ofArgNode ? resolveQueryAggregate(ofArgNode) : undefined;
   if (aggName) {
     ctx.queryBindings.push({
       kind: isSingle ? "single" : "list",
@@ -1104,10 +1024,7 @@ function renderQueryView(
 }
 
 /** `KeyValueRow("Label", value_expr)` → `<div class="key-value-row">` */
-function renderKeyValueRow(
-  expr: Extract<ExprIR, { kind: "call" }>,
-  ctx: WalkContext,
-): string {
+function renderKeyValueRow(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   const label =
     positionals[0]?.kind === "literal"
@@ -1120,10 +1037,7 @@ function renderKeyValueRow(
 }
 
 /** `Skeleton(count: N)` → `<div class="animate-pulse">` repeated loading lines. */
-function renderSkeleton(
-  expr: Extract<ExprIR, { kind: "call" }>,
-  _ctx: WalkContext,
-): string {
+function renderSkeleton(expr: Extract<ExprIR, { kind: "call" }>, _ctx: WalkContext): string {
   let count = 3;
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
@@ -1132,17 +1046,15 @@ function renderSkeleton(
       count = parseInt(arg.value, 10) || 3;
     }
   }
-  const lines = Array.from({ length: count }, () =>
-    `  <div class="h-4 bg-gray-200 rounded animate-pulse mb-2"></div>`,
+  const lines = Array.from(
+    { length: count },
+    () => `  <div class="h-4 bg-gray-200 rounded animate-pulse mb-2"></div>`,
   ).join("\n");
   return `<div class="skeleton">\n${lines}\n</div>`;
 }
 
 /** `Alert("message")` → `<div class="alert">` */
-function renderAlert(
-  expr: Extract<ExprIR, { kind: "call" }>,
-  ctx: WalkContext,
-): string {
+function renderAlert(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let color = "red";
   let message = "";
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
@@ -1156,10 +1068,7 @@ function renderAlert(
 }
 
 /** `IdLink(value, of: Aggregate)` → `<.link navigate={...}>value</.link>` */
-function renderIdLink(
-  expr: Extract<ExprIR, { kind: "call" }>,
-  ctx: WalkContext,
-): string {
+function renderIdLink(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let aggName = "";
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   const valueExpr = positionals[0];
@@ -1177,10 +1086,7 @@ function renderIdLink(
 }
 
 /** `DateDisplay(date_expr)` → `<time>` with formatted date. */
-function renderDateDisplay(
-  expr: Extract<ExprIR, { kind: "call" }>,
-  ctx: WalkContext,
-): string {
+function renderDateDisplay(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   const dateExpr = positionals[0];
   if (!dateExpr) return `<time></time>`;
@@ -1189,10 +1095,7 @@ function renderDateDisplay(
 }
 
 /** `EnumBadge(enum_value)` → `<.badge>` with the enum value. */
-function renderEnumBadge(
-  expr: Extract<ExprIR, { kind: "call" }>,
-  ctx: WalkContext,
-): string {
+function renderEnumBadge(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   const val = positionals[0] ? renderInTemplate(positionals[0], ctx) : "";
   return `<span class="badge badge-enum">${val}</span>`;
@@ -1304,9 +1207,7 @@ function renderPrimitive(
     .join("\n");
   const attrs = namedAttrs.length > 0 ? " " + namedAttrs.join(" ") : "";
   if (childrenHeex.length === 0) {
-    return spec.tag.startsWith(".")
-      ? `<${spec.tag}${attrs} />`
-      : `<${spec.tag}${attrs} />`;
+    return spec.tag.startsWith(".") ? `<${spec.tag}${attrs} />` : `<${spec.tag}${attrs} />`;
   }
   return `<${spec.tag}${attrs}>\n${indent(childrenHeex, 2)}\n</${spec.tag}>`;
 }
@@ -1353,11 +1254,7 @@ function renderInTemplate(arg: ExprIR, ctx: WalkContext): string {
   return `<%= ${renderExpr(arg, { ...ctx, position: "template" })} %>`;
 }
 
-function renderAttrValue(
-  arg: ExprIR,
-  ctx: WalkContext,
-  isStatic: boolean,
-): string {
+function renderAttrValue(arg: ExprIR, ctx: WalkContext, isStatic: boolean): string {
   if (arg.kind === "literal" && arg.lit === "string") {
     return JSON.stringify(arg.value);
   }
@@ -1443,11 +1340,7 @@ function renderStmt(stmt: StmtIR, ctx: WalkContext): string {
 /** Render a `requires <pred>` guard for `handle_params/3`.  Returns
  *  null when the page has no guard.  Caller wraps in
  *  `if not (<pred>), do: push_navigate(socket, to: "/")`. */
-export function renderRequiresGuard(
-  page: PageIR,
-  ui: UiIR,
-  appModule: string,
-): string | null {
+export function renderRequiresGuard(page: PageIR, ui: UiIR, appModule: string): string | null {
   if (!page.requires) return null;
   const ctx: WalkContext = {
     appModule,

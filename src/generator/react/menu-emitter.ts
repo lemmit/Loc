@@ -32,8 +32,8 @@
 //   default path on the page-IR.
 
 import type { PageIR, UiIR } from "../../ir/loom-ir.js";
-import type { NavEntryVM, NavSectionVM } from "./templating/view-models.js";
 import { plural, snake } from "../../util/naming.js";
+import type { NavEntryVM, NavSectionVM } from "./templating/view-models.js";
 
 /** Build sidebar `navSections` from a ui's explicit `menu { … }`
  *  block.  Returns `undefined` when the ui has no menu block — the
@@ -41,12 +41,14 @@ import { plural, snake } from "../../util/naming.js";
  *  (byte-equivalence guarantee for the bulk-scaffold case). */
 export function deriveSidebarFromUi(ui: UiIR): NavSectionVM[] | undefined {
   if (ui.menu) {
-    return ui.menu.sections.map((section): NavSectionVM => ({
-      label: section.label,
-      entries: section.links
-        .map((link) => navEntryForLink(link, ui))
-        .filter((e): e is NavEntryVM => e !== undefined),
-    }));
+    return ui.menu.sections.map(
+      (section): NavSectionVM => ({
+        label: section.label,
+        entries: section.links
+          .map((link) => navEntryForLink(link, ui))
+          .filter((e): e is NavEntryVM => e !== undefined),
+      }),
+    );
   }
   // Slice 11.21 — fallback driver: per-page `menuMeta` blocks on
   // EXPLICIT pages.  When no `ui.menu` is declared, walker-rendered
@@ -60,10 +62,7 @@ export function deriveSidebarFromUi(ui: UiIR): NavSectionVM[] | undefined {
   // case; explicit pages opt into this driver by declaring a
   // `menu { … }` block.
   const eligible = ui.pages.filter(
-    (p) =>
-      p.source === "explicit" &&
-      p.menuMeta &&
-      !readMenuMetaBool(p, "hidden"),
+    (p) => p.source === "explicit" && p.menuMeta && !readMenuMetaBool(p, "hidden"),
   );
   if (eligible.length === 0) return undefined;
   // Group pages by section name (default "" if no section declared).
@@ -227,8 +226,7 @@ function readMenuMetaBool(page: PageIR, key: string): boolean | undefined {
 }
 
 function stringPropOf(
-  props: { name: string; value: import("../../ir/loom-ir.js").ExprIR }[]
-    | undefined,
+  props: { name: string; value: import("../../ir/loom-ir.js").ExprIR }[] | undefined,
   key: string,
 ): string | undefined {
   const entry = props?.find((p) => p.name === key);
@@ -238,9 +236,10 @@ function stringPropOf(
 }
 
 function slugifyLabel(label: string): string {
-  return label
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "")
-    || "link";
+  return (
+    label
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "") || "link"
+  );
 }

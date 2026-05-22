@@ -1,31 +1,31 @@
-import { Command } from "commander";
-import ignore from "ignore";
-import { NodeFileSystem } from "langium/node";
-import { URI } from "langium";
+import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { Command } from "commander";
+import ignore from "ignore";
+import { URI } from "langium";
+import { NodeFileSystem } from "langium/node";
+import { generateDotnet } from "../generator/dotnet/index.js";
+import { enrichLoomModel } from "../ir/enrichments.js";
+import type { TestOutcome } from "../ir/loom-ir.js";
+import { lowerModel } from "../ir/lower.js";
+import { validateLoomModel } from "../ir/validate.js";
 import { createDddServices } from "../language/ddd-module.js";
 import type { Model } from "../language/generated/ast.js";
+import { installFsBackendSource } from "../platform/fs-discovery.js";
 import { generateTypeScript } from "../platform/hono/v4/emit.js";
 // Legacy single-context `generate ts` targets the default Hono
 // backend; the CLI (an entrypoint) supplies that package's pins to
 // the version-agnostic shared emitter (B2.1).
 import { BACKEND_PINS as HONO_V4_PINS } from "../platform/hono/v4/pins.js";
-import { installFsBackendSource } from "../platform/fs-discovery.js";
-import { generateDotnet } from "../generator/dotnet/index.js";
 import { generateSystems } from "../system/index.js";
 import { captureSnapshots } from "../system/loomsnap.js";
-import { execFileSync } from "node:child_process";
-import { lowerModel } from "../ir/lower.js";
-import { enrichLoomModel } from "../ir/enrichments.js";
-import { validateLoomModel } from "../ir/validate.js";
-import { computeVerification } from "../verify/verification.js";
 import {
+  renderVerdictGraph,
   renderVerificationJson,
   renderVerificationMd,
-  renderVerdictGraph,
 } from "../verify/render.js";
-import type { TestOutcome } from "../ir/loom-ir.js";
+import { computeVerification } from "../verify/verification.js";
 
 interface ParseResult {
   model: Model;
@@ -294,16 +294,16 @@ async function runSnapshot(
   if (commit) process.env.LOOM_COMMIT_HASH = commit;
   const files = captureSnapshots(loom);
   if (files.size === 0) {
-    console.log(
-      `No written \`provenanced\` field found in ${file}; nothing to capture.`,
-    );
+    console.log(`No written \`provenanced\` field found in ${file}; nothing to capture.`);
     return { hadError: false, written: 0 };
   }
 
   let written = 0;
   for (const [relPath, content] of files) {
     if (options.dryRun) {
-      console.log(`  write  ${relPath}  (${(Buffer.byteLength(content, "utf8") / 1024).toFixed(1)} KB)`);
+      console.log(
+        `  write  ${relPath}  (${(Buffer.byteLength(content, "utf8") / 1024).toFixed(1)} KB)`,
+      );
       written++;
       continue;
     }
@@ -436,24 +436,20 @@ generate
   .requiredOption("-o, --out <dir>", "output directory")
   .option("-w, --watch", "re-run on changes to <file>")
   .option("--dry-run", "list paths that would be written / skipped, write nothing")
-  .action(
-    async (file: string, options: { out: string; watch?: boolean; dryRun?: boolean }) => {
-      await runGenerate("ts", file, options.out, { dryRun: options.dryRun });
-      if (options.watch) await watchAndRegenerate("ts", file, options.out);
-    },
-  );
+  .action(async (file: string, options: { out: string; watch?: boolean; dryRun?: boolean }) => {
+    await runGenerate("ts", file, options.out, { dryRun: options.dryRun });
+    if (options.watch) await watchAndRegenerate("ts", file, options.out);
+  });
 generate
   .command("dotnet <file>")
   .description("Generate .NET (ASP.NET Core + EF Core + Mediator)")
   .requiredOption("-o, --out <dir>", "output directory")
   .option("-w, --watch", "re-run on changes to <file>")
   .option("--dry-run", "list paths that would be written / skipped, write nothing")
-  .action(
-    async (file: string, options: { out: string; watch?: boolean; dryRun?: boolean }) => {
-      await runGenerate("dotnet", file, options.out, { dryRun: options.dryRun });
-      if (options.watch) await watchAndRegenerate("dotnet", file, options.out);
-    },
-  );
+  .action(async (file: string, options: { out: string; watch?: boolean; dryRun?: boolean }) => {
+    await runGenerate("dotnet", file, options.out, { dryRun: options.dryRun });
+    if (options.watch) await watchAndRegenerate("dotnet", file, options.out);
+  });
 generate
   .command("system <file>")
   .description(
@@ -462,12 +458,10 @@ generate
   .requiredOption("-o, --out <dir>", "output directory")
   .option("-w, --watch", "re-run on changes to <file>")
   .option("--dry-run", "list paths that would be written / skipped, write nothing")
-  .action(
-    async (file: string, options: { out: string; watch?: boolean; dryRun?: boolean }) => {
-      await runGenerate("system", file, options.out, { dryRun: options.dryRun });
-      if (options.watch) await watchAndRegenerate("system", file, options.out);
-    },
-  );
+  .action(async (file: string, options: { out: string; watch?: boolean; dryRun?: boolean }) => {
+    await runGenerate("system", file, options.out, { dryRun: options.dryRun });
+    if (options.watch) await watchAndRegenerate("system", file, options.out);
+  });
 
 program
   .command("verify <file>")

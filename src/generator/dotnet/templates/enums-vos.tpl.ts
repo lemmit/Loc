@@ -1,6 +1,6 @@
 import type { EnumIR, ValueObjectIR } from "../../../ir/loom-ir.js";
-import { pascal } from "../../../util/naming.js";
 import { lines } from "../../../util/code-builder.js";
+import { pascal } from "../../../util/naming.js";
 import { renderCsExpr, renderCsType } from "../render-expr.js";
 
 // Enum → C# enum.  Value object → sealed record with explicit
@@ -8,9 +8,7 @@ import { renderCsExpr, renderCsType } from "../render-expr.js";
 // skip the invariant block).
 
 export function renderEnum(e: EnumIR, ns: string): string {
-  const valueLines = e.values.map(
-    (v, i) => `    ${v}${i < e.values.length - 1 ? "," : ""}`,
-  );
+  const valueLines = e.values.map((v, i) => `    ${v}${i < e.values.length - 1 ? "," : ""}`);
   return (
     lines(
       "// Auto-generated.",
@@ -28,29 +26,20 @@ export function renderValueObject(vo: ValueObjectIR, ns: string): string {
   const propLines = vo.fields.map(
     (f) => `    public ${renderCsType(f.type)} ${pascal(f.name)} { get; init; }`,
   );
-  const ctorParams = vo.fields
-    .map((f) => `${renderCsType(f.type)} ${f.name}`)
-    .join(", ");
-  const ctorAssignments = vo.fields.map(
-    (f) => `        ${pascal(f.name)} = ${f.name};`,
-  );
+  const ctorParams = vo.fields.map((f) => `${renderCsType(f.type)} ${f.name}`).join(", ");
+  const ctorAssignments = vo.fields.map((f) => `        ${pascal(f.name)} = ${f.name};`);
   const invariantLines = vo.invariants.map((inv) => {
     const check = inv.guard
       ? `if ((${renderCsExpr(inv.guard)}) && !(${renderCsExpr(inv.expr)}))`
       : `if (!(${renderCsExpr(inv.expr)}))`;
     return `        ${check} throw new DomainException(${JSON.stringify(`Invariant violated: ${inv.source}`)});`;
   });
-  const efCtorAssignments = vo.fields.map(
-    (f) => `        ${pascal(f.name)} = default!;`,
-  );
+  const efCtorAssignments = vo.fields.map((f) => `        ${pascal(f.name)} = default!;`);
   const derivedLines = vo.derived.map(
-    (d) =>
-      `    public ${renderCsType(d.type)} ${pascal(d.name)} => ${renderCsExpr(d.expr)};`,
+    (d) => `    public ${renderCsType(d.type)} ${pascal(d.name)} => ${renderCsExpr(d.expr)};`,
   );
   const fnLines = vo.functions.map((fn) => {
-    const params = fn.params
-      .map((p) => `${renderCsType(p.type)} ${p.name}`)
-      .join(", ");
+    const params = fn.params.map((p) => `${renderCsType(p.type)} ${p.name}`).join(", ");
     return `    private ${renderCsType(fn.returnType)} ${pascal(fn.name)}(${params}) => ${renderCsExpr(fn.body)};`;
   });
 

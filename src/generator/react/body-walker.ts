@@ -47,8 +47,6 @@
 //   - `isWalkableLayoutBody(body)` — predicate the page emitter
 //     uses to decide whether to dispatch to the walker.
 
-import type { ImportSpec, LoadedPack } from "../_packs/loader.js";
-import { routerPackageForStack } from "../_packs/stack-runtime.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -63,6 +61,8 @@ import type {
   WorkflowIR,
 } from "../../ir/loom-ir.js";
 import { camel, humanize, pascal, plural, snake } from "../../util/naming.js";
+import type { ImportSpec, LoadedPack } from "../_packs/loader.js";
+import { routerPackageForStack } from "../_packs/stack-runtime.js";
 import {
   idTargetHookVar,
   idTargetsInFields,
@@ -72,6 +72,60 @@ import {
 import { prepareFormFieldVM } from "./templating/preparers/form-fields.js";
 import { renderFormField } from "./templating/render.js";
 import type { FormFieldVM } from "./templating/view-models.js";
+import { registerApiHook, tryDetectApiHook } from "./walker/api-hooks.js";
+import {
+  addImport,
+  addImportsForPrimitive,
+  addMantineImport,
+  registerFormFieldImports,
+  renderPrimitive,
+} from "./walker/context.js";
+import {
+  emitButton,
+  emitIdLink,
+  emitQueryView,
+  emitUserComponent,
+} from "./walker/primitives/controls.js";
+import {
+  emitAlert,
+  emitBadge,
+  emitBreadcrumbs,
+  emitDivider,
+  emitPaper,
+  emitSkeleton,
+  emitSlot,
+  emitStat,
+} from "./walker/primitives/display.js";
+import { emitFormOf, emitModal } from "./walker/primitives/forms.js";
+import {
+  emitField,
+  emitNumberField,
+  emitPasswordField,
+  emitToggle,
+} from "./walker/primitives/inputs.js";
+import {
+  emitCard,
+  emitContainer,
+  emitGrid,
+  emitGroup,
+  emitStack,
+  emitTabs,
+  emitToolbar,
+} from "./walker/primitives/layout.js";
+import { emitTable } from "./walker/primitives/table.js";
+import {
+  emitAnchor,
+  emitAvatar,
+  emitDateDisplay,
+  emitEmpty,
+  emitEnumBadge,
+  emitHeading,
+  emitImage,
+  emitKeyValueRow,
+  emitLoader,
+  emitMoney,
+  emitText,
+} from "./walker/primitives/text.js";
 import {
   boolNamed,
   describeReceiver,
@@ -87,60 +141,6 @@ import {
   unwrapAsAttr,
   unwrapTextLiteral,
 } from "./walker/shared/args.js";
-import {
-  addImport,
-  addImportsForPrimitive,
-  addMantineImport,
-  registerFormFieldImports,
-  renderPrimitive,
-} from "./walker/context.js";
-import { registerApiHook, tryDetectApiHook } from "./walker/api-hooks.js";
-import {
-  emitAlert,
-  emitBadge,
-  emitBreadcrumbs,
-  emitDivider,
-  emitPaper,
-  emitSkeleton,
-  emitSlot,
-  emitStat,
-} from "./walker/primitives/display.js";
-import {
-  emitAnchor,
-  emitAvatar,
-  emitDateDisplay,
-  emitEmpty,
-  emitEnumBadge,
-  emitHeading,
-  emitImage,
-  emitKeyValueRow,
-  emitLoader,
-  emitMoney,
-  emitText,
-} from "./walker/primitives/text.js";
-import {
-  emitCard,
-  emitContainer,
-  emitGrid,
-  emitGroup,
-  emitStack,
-  emitTabs,
-  emitToolbar,
-} from "./walker/primitives/layout.js";
-import {
-  emitField,
-  emitNumberField,
-  emitPasswordField,
-  emitToggle,
-} from "./walker/primitives/inputs.js";
-import {
-  emitButton,
-  emitIdLink,
-  emitQueryView,
-  emitUserComponent,
-} from "./walker/primitives/controls.js";
-import { emitTable } from "./walker/primitives/table.js";
-import { emitFormOf, emitModal } from "./walker/primitives/forms.js";
 
 /** Per-source named-import map — `from` module → set of named
  *  exports the page needs from it.  Replaces the old single-source
@@ -507,10 +507,7 @@ export interface WalkContext extends WalkEnv, Sink {}
  *  fields (the form is rendered identically); they differ only in
  *  the imports / hook decls / default submit redirect that the
  *  shell emits around the form. */
-export type FormOfState =
-  | AggregateFormState
-  | WorkflowFormState
-  | OperationFormState;
+export type FormOfState = AggregateFormState | WorkflowFormState | OperationFormState;
 
 interface FormStateBase {
   bc: BoundedContextIR;
@@ -645,11 +642,7 @@ export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
   }
 }
 
-function emitComponent(
-  call: ExprIR & { kind: "call" },
-  ctx: WalkContext,
-  depth: number,
-): string {
+function emitComponent(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth: number): string {
   switch (call.name) {
     case "Stack":
       return emitStack(call, ctx, depth);
@@ -778,10 +771,7 @@ function emitComponent(
  *  would set `usesRouterLink: true` on the throwaway child ctx
  *  while the page shell still sees `false` on the parent and
  *  forgets to import `Link`. */
-export function propagateChildFlags(
-  parent: WalkContext,
-  child: WalkContext,
-): void {
+export function propagateChildFlags(parent: WalkContext, child: WalkContext): void {
   if (child.usesNavigate) parent.usesNavigate = true;
   if (child.usesRouterLink) parent.usesRouterLink = true;
   if (child.usesState) parent.usesState = true;
@@ -948,9 +938,7 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // Slice 11.29 — object literal: `{ name: name, age: 30 }`
       // emits as plain JS `{ name: name, age: 30 }`.  Field values
       // recurse through emitExpr (so refs/state/binary ops compose).
-      const fields = expr.fields
-        .map((f) => `${f.name}: ${emitExpr(f.value, ctx)}`)
-        .join(", ");
+      const fields = expr.fields.map((f) => `${f.name}: ${emitExpr(f.value, ctx)}`).join(", ");
       return `{ ${fields} }`;
     }
     case "method-call": {
@@ -1077,9 +1065,7 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
  *  handler does nothing).  Failing generation surfaces the gap loudly — see
  *  the same rationale in src/ir/validate.ts (test-body fallbacks). */
 function unsupportedPageStmt(what: string, why: string): never {
-  throw new Error(
-    `react: unsupported ${what} in a page event handler — ${why}.`,
-  );
+  throw new Error(`react: unsupported ${what} in a page event handler — ${why}.`);
 }
 
 /** Slice 11.5 — read a named arg as a navigation target.  String
@@ -1119,10 +1105,7 @@ export function stringOrRefArgValue(
  *  `ctx.collectedTestids` so the walker-side page-object emitter
  *  can expose each one as a typed `Locator` getter in the
  *  generated `e2e/pages/<page-snake>.ts` class. */
-export function testidAttr(
-  call: ExprIR & { kind: "call" },
-  ctx: WalkContext,
-): string {
+export function testidAttr(call: ExprIR & { kind: "call" }, ctx: WalkContext): string {
   const argNames = call.argNames ?? [];
   for (let i = 0; i < call.args.length; i++) {
     if (argNames[i] !== "testid") continue;
@@ -1206,10 +1189,7 @@ export function firstPositionalContent(
   return renderTextContent(first, ctx);
 }
 
-export function renderTextContent(
-  expr: ExprIR,
-  ctx: WalkContext,
-): string | undefined {
+export function renderTextContent(expr: ExprIR, ctx: WalkContext): string | undefined {
   if (expr.kind === "literal" && expr.lit === "string") {
     return JSON.stringify(expr.value);
   }
@@ -1246,7 +1226,6 @@ export function renderTextContent(
   }
   return `{${emitExpr(expr, ctx)}}`;
 }
-
 
 // The page-file shell (renderCustomLayoutPage, the form-wiring renderers,
 // renderUserComponentFile, and the state/type helpers) lives in

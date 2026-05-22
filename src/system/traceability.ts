@@ -1,10 +1,5 @@
-import { lines, type LinesPart } from "../util/code-builder.js";
-import type {
-  CodeRefKind,
-  LoomModel,
-  RequirementIR,
-  TraceabilityIR,
-} from "../ir/loom-ir.js";
+import type { CodeRefKind, LoomModel, RequirementIR, TraceabilityIR } from "../ir/loom-ir.js";
+import { type LinesPart, lines } from "../util/code-builder.js";
 
 // ---------------------------------------------------------------------------
 // Traceability documentation (Slice 12) — derived views over the
@@ -32,11 +27,7 @@ import type {
 
 /** True iff the model declares any traceability artifact. */
 export function hasTraceability(loom: LoomModel): boolean {
-  return (
-    loom.requirements.length > 0 ||
-    loom.solutions.length > 0 ||
-    loom.testCases.length > 0
-  );
+  return loom.requirements.length > 0 || loom.solutions.length > 0 || loom.testCases.length > 0;
 }
 
 /** path (relative to the output root) → file content. */
@@ -102,7 +93,9 @@ function renderTraceabilityDoc(loom: LoomModel): string {
     const sol = t.solutionByRequirement[r.id];
     if (sol) detail.push(`${indent}  - solution: \`${sol}\``);
     const tests = t.testsByRequirement[r.id] ?? [];
-    detail.push(`${indent}  - tests: ${tests.length ? tests.map((x) => `\`${x}\``).join(", ") : "_none_"}`);
+    detail.push(
+      `${indent}  - tests: ${tests.length ? tests.map((x) => `\`${x}\``).join(", ") : "_none_"}`,
+    );
     const kids = (t.childrenOf[r.id] ?? []).flatMap((c) => renderReq(c, depth + 1));
     return [head, ...detail, ...kids];
   };
@@ -176,13 +169,17 @@ function renderCoverageReport(loom: LoomModel): string {
     const tests = t.testsByRequirement[r.id] ?? [];
     return `| \`${r.id}\` | ${r.type} | ${tests.length} | ${check(tests.length > 0)} |`;
   });
-  const coveredReqs = loom.requirements.filter((r) => (t.testsByRequirement[r.id] ?? []).length > 0);
+  const coveredReqs = loom.requirements.filter(
+    (r) => (t.testsByRequirement[r.id] ?? []).length > 0,
+  );
 
   // Solution coverage — fraction of each solution's entitled code that
   // is covered by at least one test case.
   const solRows = loom.solutions.map((s) => {
     const total = s.entitles.length;
-    const covered = s.entitles.filter((c) => (t.testsByCodeElement[c.qualifiedName] ?? []).length > 0).length;
+    const covered = s.entitles.filter(
+      (c) => (t.testsByCodeElement[c.qualifiedName] ?? []).length > 0,
+    ).length;
     return `| \`${s.id}\` | \`${s.forRequirement}\` | ${covered}/${total} | ${pct(covered, total)} |`;
   });
 
@@ -227,11 +224,15 @@ function renderGapsReport(loom: LoomModel): string {
   const reqsNoSolution = loom.requirements.filter(
     (r) => r.type === "UserStory" && t.solutionByRequirement[r.id] === null,
   );
-  const reqsNoTests = loom.requirements.filter((r) => (t.testsByRequirement[r.id] ?? []).length === 0);
+  const reqsNoTests = loom.requirements.filter(
+    (r) => (t.testsByRequirement[r.id] ?? []).length === 0,
+  );
   const codeNoTests = Object.keys(t.codeElements)
     .filter((q) => (t.testsByCodeElement[q] ?? []).length === 0)
     .sort();
-  const testCasesNoExec = loom.testCases.filter((tc) => (t.execTestsByTestCase[tc.id] ?? []).length === 0);
+  const testCasesNoExec = loom.testCases.filter(
+    (tc) => (t.execTestsByTestCase[tc.id] ?? []).length === 0,
+  );
 
   const section = (title: string, items: string[]): LinesPart => [
     `## ${title}`,
@@ -372,15 +373,18 @@ function renderTraceabilityDiagram(loom: LoomModel): string {
   for (const s of loom.solutions) {
     const sid = `s${nodeSeq++}`;
     body.push(`  ${sid}{{"${esc(s.id)}"}}`);
-    if (reqNodes.has(s.forRequirement)) body.push(`  ${reqNodes.get(s.forRequirement)} -->|for| ${sid}`);
-    for (const c of s.entitles) body.push(`  ${sid} -->|entitles| ${codeNode(c.qualifiedName, c.kind)}`);
+    if (reqNodes.has(s.forRequirement))
+      body.push(`  ${reqNodes.get(s.forRequirement)} -->|for| ${sid}`);
+    for (const c of s.entitles)
+      body.push(`  ${sid} -->|entitles| ${codeNode(c.qualifiedName, c.kind)}`);
   }
 
   for (const tc of loom.testCases) {
     const tid = `t${nodeSeq++}`;
     body.push(`  ${tid}["${esc(tc.id)}"]`);
     if (reqNodes.has(tc.verifies)) body.push(`  ${tid} -->|verifies| ${reqNodes.get(tc.verifies)}`);
-    for (const c of tc.covers) body.push(`  ${tid} -.->|covers| ${codeNode(c.qualifiedName, c.kind)}`);
+    for (const c of tc.covers)
+      body.push(`  ${tid} -.->|covers| ${codeNode(c.qualifiedName, c.kind)}`);
   }
 
   return lines("flowchart LR", body) + "\n";
@@ -394,7 +398,9 @@ function renderTraceabilityJson(loom: LoomModel): string {
   const t = trace(loom);
   const codeElems = Object.keys(t.codeElements);
   const coveredCode = codeElems.filter((q) => (t.testsByCodeElement[q] ?? []).length > 0);
-  const coveredReqs = loom.requirements.filter((r) => (t.testsByRequirement[r.id] ?? []).length > 0);
+  const coveredReqs = loom.requirements.filter(
+    (r) => (t.testsByRequirement[r.id] ?? []).length > 0,
+  );
 
   return (
     JSON.stringify(

@@ -48,15 +48,9 @@ export function emitAuth(args: AuthEmitArgs): AuthEmitResult {
 
   const webModule = `${appModule}Web`;
 
-  files.set(
-    `lib/${appName}_web/auth.ex`,
-    renderAuthPlug(sys.user, webModule),
-  );
+  files.set(`lib/${appName}_web/auth.ex`, renderAuthPlug(sys.user, webModule));
 
-  files.set(
-    `lib/${appName}_web/live_auth.ex`,
-    renderLiveAuth(webModule),
-  );
+  files.set(`lib/${appName}_web/live_auth.ex`, renderLiveAuth(webModule));
 
   return { files, enabled: true };
 }
@@ -140,11 +134,8 @@ function renderBuildUser(user: UserIR | undefined): string {
     const key = snake(f.name);
     // Arrays / optional arrays get a fallback default of [].
     const isArray =
-      f.type.kind === "array" ||
-      (f.type.kind === "optional" && f.type.inner.kind === "array");
-    const rhs = isArray
-      ? `claims["${key}"] || []`
-      : `claims["${key}"]`;
+      f.type.kind === "array" || (f.type.kind === "optional" && f.type.inner.kind === "array");
+    const rhs = isArray ? `claims["${key}"] || []` : `claims["${key}"]`;
     return `      ${key}: ${rhs}`;
   });
 

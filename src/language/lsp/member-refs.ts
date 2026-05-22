@@ -9,14 +9,10 @@
 // provider uses — never textual matching.
 // ---------------------------------------------------------------------------
 
+import { type AstNode, AstUtils, type CstNode, GrammarUtils, type LangiumDocument } from "langium";
 import {
-  AstUtils,
-  GrammarUtils,
-  type AstNode,
-  type CstNode,
-  type LangiumDocument,
-} from "langium";
-import {
+  type Aggregate,
+  type EntityPart,
   isAggregate,
   isEntityPart,
   isFunctionDecl,
@@ -28,14 +24,19 @@ import {
   isOperation,
   isValueObject,
   isWorkflow,
-  type Aggregate,
-  type EntityPart,
   type LValue,
   type MemberAccess,
   type NameRef,
   type ValueObject,
 } from "../generated/ast.js";
-import { envForNode, iterateEntityMembers, stepInto, stepIntoNode, typeOf, type DddType } from "../type-system.js";
+import {
+  type DddType,
+  envForNode,
+  iterateEntityMembers,
+  stepInto,
+  stepIntoNode,
+  typeOf,
+} from "../type-system.js";
 
 type EntityLike = Aggregate | EntityPart | ValueObject;
 
@@ -103,7 +104,10 @@ function localShadows(node: AstNode, name: string): boolean {
   let n: AstNode | undefined = node.$container;
   while (n && !isEntityLike(n)) {
     if (isLambda(n) && n.param === name) return true;
-    if ((isOperation(n) || isFunctionDecl(n) || isWorkflow(n)) && n.params.some((p) => p.name === name)) {
+    if (
+      (isOperation(n) || isFunctionDecl(n) || isWorkflow(n)) &&
+      n.params.some((p) => p.name === name)
+    ) {
       return true;
     }
     const stmts = (n as { stmts?: AstNode[] }).stmts;

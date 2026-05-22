@@ -16,8 +16,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { compilePack, type LoadedPack, type PackManifest } from "./loader.js";
 import { parseBuiltinDesignRef } from "./builtin-formats.js";
+import { compilePack, type LoadedPack, type PackManifest } from "./loader.js";
 
 /** Names of the repo-root template directories that supply
  *  pack-agnostic Handlebars sources, keyed by pack format.  TSX packs
@@ -167,17 +167,8 @@ export function loadPack(packDir: string): LoadedPack {
           `loader: stack ${manifest.stack} partial '${logicalName}' clashes with an existing shared template name.  Rename one.`,
         );
       }
-      sharedSources[logicalName] = fs.readFileSync(
-        path.join(stackDir, file),
-        "utf-8",
-      );
+      sharedSources[logicalName] = fs.readFileSync(path.join(stackDir, file), "utf-8");
     }
   }
-  return compilePack(
-    packDir,
-    manifest,
-    sources,
-    (f) => path.join(packDir, f),
-    sharedSources,
-  );
+  return compilePack(packDir, manifest, sources, (f) => path.join(packDir, f), sharedSources);
 }

@@ -52,9 +52,7 @@ export function emitField(
   void depth;
   const { labelAttr, labelText } = inputLabelForms(call, ctx);
   const bind = stateBindArg(call, "bind", ctx);
-  const setter = bind !== undefined
-    ? "set" + bind[0]!.toUpperCase() + bind.slice(1)
-    : undefined;
+  const setter = bind !== undefined ? "set" + bind[0]!.toUpperCase() + bind.slice(1) : undefined;
   return renderPrimitive(ctx, "primitive-field", {
     labelAttr,
     labelText,
@@ -74,9 +72,7 @@ export function emitToggle(
   void depth;
   const { labelAttr, labelText } = inputLabelForms(call, ctx);
   const bind = stateBindArg(call, "bind", ctx);
-  const setter = bind !== undefined
-    ? "set" + bind[0]!.toUpperCase() + bind.slice(1)
-    : undefined;
+  const setter = bind !== undefined ? "set" + bind[0]!.toUpperCase() + bind.slice(1) : undefined;
   return renderPrimitive(ctx, "primitive-toggle", {
     labelAttr,
     labelText,
@@ -99,9 +95,7 @@ export function emitNumberField(
   void depth;
   const { labelAttr, labelText } = inputLabelForms(call, ctx);
   const bind = stateBindArg(call, "bind", ctx);
-  const setter = bind !== undefined
-    ? "set" + bind[0]!.toUpperCase() + bind.slice(1)
-    : undefined;
+  const setter = bind !== undefined ? "set" + bind[0]!.toUpperCase() + bind.slice(1) : undefined;
   return renderPrimitive(ctx, "primitive-number-field", {
     labelAttr,
     labelText,
@@ -122,9 +116,7 @@ export function emitPasswordField(
   void depth;
   const { labelAttr, labelText } = inputLabelForms(call, ctx);
   const bind = stateBindArg(call, "bind", ctx);
-  const setter = bind !== undefined
-    ? "set" + bind[0]!.toUpperCase() + bind.slice(1)
-    : undefined;
+  const setter = bind !== undefined ? "set" + bind[0]!.toUpperCase() + bind.slice(1) : undefined;
   return renderPrimitive(ctx, "primitive-password-field", {
     labelAttr,
     labelText,

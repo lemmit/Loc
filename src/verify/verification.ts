@@ -29,19 +29,13 @@ import type {
 } from "../ir/loom-ir.js";
 
 /** The slice of the traceability index the rollup needs. */
-export type VerificationIndex = Pick<
-  TraceabilityIR,
-  "execTests" | "testsByRequirement"
->;
+export type VerificationIndex = Pick<TraceabilityIR, "execTests" | "testsByRequirement">;
 
 /** Pick the result for one executable test.  Prefer an exact
  *  (suite, name) match; fall back to a unique name-only match when the
  *  result carries no suite.  Returns the chosen outcome, or undefined
  *  when nothing ran for it. */
-function outcomeFor(
-  ref: ExecTestRef,
-  byName: Map<string, TestOutcome[]>,
-): TestOutcome | undefined {
+function outcomeFor(ref: ExecTestRef, byName: Map<string, TestOutcome[]>): TestOutcome | undefined {
   const named = byName.get(ref.name);
   if (!named || named.length === 0) return undefined;
   const exact = named.filter((r) => r.suite === ref.suite);
@@ -55,11 +49,7 @@ function outcomeFor(
 
 /** Of several runs of one test, the most pessimistic: fail > skip > pass. */
 function worst(rs: TestOutcome[]): TestOutcome {
-  return (
-    rs.find((r) => r.status === "fail") ??
-    rs.find((r) => r.status === "skip") ??
-    rs[0]!
-  );
+  return rs.find((r) => r.status === "fail") ?? rs.find((r) => r.status === "skip") ?? rs[0]!;
 }
 
 /**
@@ -84,8 +74,10 @@ export function computeVerification(
   const refsByTestCase = new Map<string, ExecTestRef[]>();
   for (const ref of index.execTests) {
     if (ref.testCaseId == null) continue; // unlinked test — not part of any verdict
-    (refsByTestCase.get(ref.testCaseId) ??
-      refsByTestCase.set(ref.testCaseId, []).get(ref.testCaseId)!).push(ref);
+    (
+      refsByTestCase.get(ref.testCaseId) ??
+      refsByTestCase.set(ref.testCaseId, []).get(ref.testCaseId)!
+    ).push(ref);
   }
 
   const consumed = new Set<TestOutcome>();
@@ -107,11 +99,7 @@ export function computeVerification(
       backing.push({ name: ref.name, status });
     }
 
-    const status: TestCaseStatus = anyFail
-      ? "FAILING"
-      : anyNotPassed
-        ? "UNVERIFIED"
-        : "VERIFIED";
+    const status: TestCaseStatus = anyFail ? "FAILING" : anyNotPassed ? "UNVERIFIED" : "VERIFIED";
     testCaseStatus.set(tcId, status);
     testCases[tcId] = { status, backing };
   }
@@ -124,9 +112,7 @@ export function computeVerification(
 
   for (const reqId of requirementIds) {
     const tcIds = (index.testsByRequirement[reqId] ?? []).slice().sort();
-    const failingTestCaseIds = tcIds.filter(
-      (id) => testCaseStatus.get(id) === "FAILING",
-    );
+    const failingTestCaseIds = tcIds.filter((id) => testCaseStatus.get(id) === "FAILING");
 
     let verdict: RequirementVerdict;
     if (tcIds.length === 0) {

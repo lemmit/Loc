@@ -46,9 +46,10 @@ export function renderProgram(
   // Only emit the Scrutor scan when at least one aggregate declares
   // an extern op — otherwise the project pulls in a Scrutor reference
   // for nothing.
-  const externScan = externHandlers.length === 0
-    ? ""
-    : `// Extern operation handlers — user implements [ExternHandler]-decorated
+  const externScan =
+    externHandlers.length === 0
+      ? ""
+      : `// Extern operation handlers — user implements [ExternHandler]-decorated
 // classes for each I<Op><Agg>Handler interface in
 // Application/<Aggregate>/Handlers/.  Scrutor picks them up by attribute.
 builder.Services.Scan(s => s
@@ -56,9 +57,10 @@ builder.Services.Scan(s => s
     .AddClasses(c => c.WithAttribute<ExternHandlerAttribute>())
     .AsImplementedInterfaces()
     .WithScopedLifetime());`;
-  const externVerify = externHandlers.length === 0
-    ? ""
-    : `
+  const externVerify =
+    externHandlers.length === 0
+      ? ""
+      : `
 // Verify every extern operation has a registered [ExternHandler].
 // Fails fast at startup so a missing user implementation surfaces here
 // instead of as a 500 on the first request.
@@ -253,7 +255,9 @@ app.UseHttpLogging();
 app.UseCors();
 app.UseSwagger();
 ${authMount}app.MapControllers();
-${hasEmbeddedSpa ? `
+${
+  hasEmbeddedSpa
+    ? `
 // Fullstack mode — host the embedded React SPA from wwwroot/.
 // UseDefaultFiles rewrites GET / to /index.html before UseStaticFiles
 // serves the bundle; MapFallbackToFile catches client-side router
@@ -264,7 +268,9 @@ ${hasEmbeddedSpa ? `
 app.UseDefaultFiles();
 app.UseStaticFiles();
 app.MapFallbackToFile("index.html");
-` : ""}
+`
+    : ""
+}
 // Dev-friendly schema bootstrap: create the schema from the model on
 // first boot.  System-mode compose isolates each deployable to its own
 // database (see db-init/), so EnsureCreated runs cleanly without
@@ -371,10 +377,7 @@ export function renderTestCsproj(ns: string): string {
 `;
 }
 
-export function renderDockerfile(
-  ns: string,
-  options?: { hasEmbeddedSpa?: boolean },
-): string {
+export function renderDockerfile(ns: string, options?: { hasEmbeddedSpa?: boolean }): string {
   if (options?.hasEmbeddedSpa) {
     // Fullstack mode — multi-stage build.  Stage 1 builds the React
     // SPA under ClientApp/, stage 2 builds the .NET project, stage 3

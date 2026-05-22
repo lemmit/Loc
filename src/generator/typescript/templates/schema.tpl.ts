@@ -6,8 +6,8 @@ import type {
   FindIR,
   TypeIR,
 } from "../../../ir/loom-ir.js";
-import { camel, plural, snake } from "../../../util/naming.js";
 import { lines as joinLines } from "../../../util/code-builder.js";
+import { camel, plural, snake } from "../../../util/naming.js";
 
 // All-procedural Drizzle schema emission.  Column generation has too
 // much per-field branching to express cleanly in any template engine,
@@ -50,10 +50,7 @@ export function renderSchema(ctx: BoundedContextIR): string {
  * it has an explicit `where` clause, indexes the column refs;
  * otherwise indexes the column matching each parameter by name
  * (mirrors the convention in `repository-builder.ts:findQueryMethod`). */
-function indexedColumnsFor(
-  agg: AggregateIR,
-  ctx: BoundedContextIR,
-): Set<string> {
+function indexedColumnsFor(agg: AggregateIR, ctx: BoundedContextIR): Set<string> {
   const out = new Set<string>();
   const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
   if (!repo) return out;
@@ -94,10 +91,7 @@ function collectColumnRefs(e: ExprIR, out: Set<string>): void {
     case "member":
       if (e.receiver.kind === "this") {
         out.add(e.member);
-      } else if (
-        e.receiver.kind === "member" &&
-        e.receiver.receiver.kind === "this"
-      ) {
+      } else if (e.receiver.kind === "member" && e.receiver.receiver.kind === "this") {
         // `this.vo.sub` — Drizzle column is `<vo>_<sub>`.
         out.add(`${e.receiver.member}_${e.member}`);
       }
@@ -165,12 +159,9 @@ function drizzleColumnLines(f: FieldIR, ctx: BoundedContextIR): string[] {
     if (vo) {
       const out: string[] = [];
       for (const voField of vo.fields) {
-        out.push(...drizzleColumnLinesForName(
-          `${f.name}_${voField.name}`,
-          voField.type,
-          optional,
-          ctx,
-        ));
+        out.push(
+          ...drizzleColumnLinesForName(`${f.name}_${voField.name}`, voField.type, optional, ctx),
+        );
       }
       return out;
     }
@@ -216,12 +207,9 @@ function drizzleColumnLinesForName(
       if (!vo) return [`${fieldName}: text("${colName}")${not},`];
       const out: string[] = [];
       for (const voField of vo.fields) {
-        out.push(...drizzleColumnLinesForName(
-          `${fieldName}_${voField.name}`,
-          voField.type,
-          opt,
-          ctx,
-        ));
+        out.push(
+          ...drizzleColumnLinesForName(`${fieldName}_${voField.name}`, voField.type, opt, ctx),
+        );
       }
       return out;
     }

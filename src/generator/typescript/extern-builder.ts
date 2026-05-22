@@ -1,8 +1,4 @@
-import type {
-  AggregateIR,
-  BoundedContextIR,
-  TypeIR,
-} from "../../ir/loom-ir.js";
+import type { AggregateIR, BoundedContextIR, TypeIR } from "../../ir/loom-ir.js";
 import { camel } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
@@ -21,13 +17,9 @@ import { camel } from "../../util/naming.js";
 // looks up the handler from `externHandlers` and dispatches.
 // ---------------------------------------------------------------------------
 
-const cap = (s: string): string =>
-  s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
+const cap = (s: string): string => (s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1));
 
-export function buildExternHandlersFile(
-  agg: AggregateIR,
-  ctx: BoundedContextIR,
-): string {
+export function buildExternHandlersFile(agg: AggregateIR, ctx: BoundedContextIR): string {
   const externOps = agg.operations.filter((o) => o.extern);
   if (externOps.length === 0) return "";
   const usedVOs = collectVOs(externOps, ctx);
@@ -36,9 +28,7 @@ export function buildExternHandlersFile(
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import type { ${agg.name} } from "./${camel(agg.name)}";`);
   if (usedVOs.length > 0) {
-    lines.push(
-      `import type { ${usedVOs.join(", ")} } from "./value-objects";`,
-    );
+    lines.push(`import type { ${usedVOs.join(", ")} } from "./value-objects";`);
   }
   // Re-export so user-supplied handler code can throw the same
   // typed error the framework wrap would synthesise — useful for
@@ -52,9 +42,7 @@ export function buildExternHandlersFile(
   // Zod schema (decimals → number, datetimes → Date, ids → string).
   for (const op of externOps) {
     if (op.params.length === 0) {
-      lines.push(
-        `export type ${cap(op.name)}${agg.name}Request = Record<string, never>;`,
-      );
+      lines.push(`export type ${cap(op.name)}${agg.name}Request = Record<string, never>;`);
       continue;
     }
     lines.push(`export interface ${cap(op.name)}${agg.name}Request {`);
@@ -74,9 +62,7 @@ export function buildExternHandlersFile(
 
   lines.push("interface ExternHandlerRegistry {");
   for (const op of externOps) {
-    lines.push(
-      `  ${camel(op.name)}${agg.name}: ${cap(op.name)}${agg.name}Handler | null;`,
-    );
+    lines.push(`  ${camel(op.name)}${agg.name}: ${cap(op.name)}${agg.name}Handler | null;`);
   }
   lines.push("}");
   lines.push("");
@@ -97,9 +83,7 @@ export function buildExternHandlersFile(
   }
   lines.push("");
 
-  lines.push(
-    `export function verify${agg.name}ExternHandlersRegistered(): void {`,
-  );
+  lines.push(`export function verify${agg.name}ExternHandlersRegistered(): void {`);
   for (const op of externOps) {
     lines.push(`  if (externHandlers.${camel(op.name)}${agg.name} === null) {`);
     lines.push(
@@ -154,10 +138,7 @@ function wireTsType(t: TypeIR): string {
   }
 }
 
-function collectVOs(
-  ops: AggregateIR["operations"],
-  ctx: BoundedContextIR,
-): string[] {
+function collectVOs(ops: AggregateIR["operations"], ctx: BoundedContextIR): string[] {
   const names = new Set<string>();
   const knownVO = new Set(ctx.valueObjects.map((v) => v.name));
   const knownEnum = new Set(ctx.enums.map((e) => e.name));

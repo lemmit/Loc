@@ -8,8 +8,7 @@ import type { UiHelperImportIR } from "../../../ir/loom-ir.js";
 import type { ApiHookUse, ImportMap } from "../body-walker.js";
 
 /** Code-unit (default `Array.prototype.sort`) string ordering. */
-const byCodeUnit = (a: string, b: string): number =>
-  a < b ? -1 : a > b ? 1 : 0;
+const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /** Render `import { … } from "<path>";` lines from a path→names map.
  *  Names are sorted within each line; sources are sorted by
@@ -23,13 +22,9 @@ function groupedImportLines(
   srcImportPrefix: string,
 ): string {
   const lines: string[] = [];
-  for (const [path, names] of [...byPath.entries()].sort(([a], [b]) =>
-    comparePaths(a, b),
-  )) {
+  for (const [path, names] of [...byPath.entries()].sort(([a], [b]) => comparePaths(a, b))) {
     const rewritten =
-      srcImportPrefix !== "../" && path.startsWith("../")
-        ? srcImportPrefix + path.slice(3)
-        : path;
+      srcImportPrefix !== "../" && path.startsWith("../") ? srcImportPrefix + path.slice(3) : path;
     lines.push(`import { ${[...names].sort().join(", ")} } from "${rewritten}";\n`);
   }
   return lines.join("");

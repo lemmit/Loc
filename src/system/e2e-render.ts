@@ -56,10 +56,7 @@ function apiBasePath(platform: string): string {
   return platform === "phoenixLiveView" ? "/api" : "";
 }
 
-export function renderE2EFile(
-  sys: SystemIR,
-  modulesByName: Map<string, ModuleIR>,
-): string | null {
+export function renderE2EFile(sys: SystemIR, modulesByName: Map<string, ModuleIR>): string | null {
   // UI tests go to a separate Playwright spec via the
   // ui-e2e-render path; the vitest api file only carries api tests.
   const apiTests = sys.e2eTests.filter((t) => t.kind === "api");
@@ -68,9 +65,7 @@ export function renderE2EFile(
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import { describe, it, expect } from "vitest";`);
   lines.push("");
-  lines.push(
-    `// Override per environment; defaults match the docker-compose ports.`,
-  );
+  lines.push(`// Override per environment; defaults match the docker-compose ports.`);
   lines.push(`const ENDPOINTS: Record<string, string> = {`);
   for (const d of sys.deployables) {
     const slug = serviceSlug(d.name);
@@ -278,33 +273,25 @@ function renderApiCall(call: ApiCallShape, ctx: RenderCtx): string {
   }
   if (call.method === "getById") {
     if (args.length < 1) {
-      throw new Error(
-        `e2e: api.${call.aggregateSlug}.getById(id) requires an id argument`,
-      );
+      throw new Error(`e2e: api.${call.aggregateSlug}.getById(id) requires an id argument`);
     }
     const idExpr = renderIdArg(args[0], ctx);
     return `await __get(\`\${base}${prefix}/${slug}/\${${idExpr}}\`)`;
   }
-  const op = agg.operations.find(
-    (o) => o.visibility === "public" && o.name === call.method,
-  );
+  const op = agg.operations.find((o) => o.visibility === "public" && o.name === call.method);
   if (op) return renderOperationCall(op, slug, args, ctx);
 
   const find = findRepoQuery(call.method, agg, ctx);
   if (find) return renderFindCall(find, slug, args, ctx);
 
-  const ops = agg.operations
-    .filter((o) => o.visibility === "public")
-    .map((o) => o.name);
+  const ops = agg.operations.filter((o) => o.visibility === "public").map((o) => o.name);
   const finds = (
-    ctx.contexts
-      .flatMap((c) => c.repositories)
-      .find((r) => r.aggregateName === agg.name)?.finds ?? []
+    ctx.contexts.flatMap((c) => c.repositories).find((r) => r.aggregateName === agg.name)?.finds ??
+    []
   ).map((f) => f.name);
   const known = ["create", "getById", ...ops, ...finds].join(", ");
   throw new Error(
-    `e2e: unknown method 'api.${call.aggregateSlug}.${call.method}'. ` +
-      `Available: ${known}.`,
+    `e2e: unknown method 'api.${call.aggregateSlug}.${call.method}'. ` + `Available: ${known}.`,
   );
 }
 
@@ -315,9 +302,7 @@ function renderOperationCall(
   ctx: RenderCtx,
 ): string {
   if (args.length < 1) {
-    throw new Error(
-      `e2e: api.${slug}.${op.name}(id, body?) requires an id argument`,
-    );
+    throw new Error(`e2e: api.${slug}.${op.name}(id, body?) requires an id argument`);
   }
   const idExpr = renderIdArg(args[0], ctx);
   const body = args.length >= 2 ? renderE2EExpr(args[1], ctx) : "{}";
@@ -326,12 +311,7 @@ function renderOperationCall(
   return `await __post(\`\${base}${prefix}/${slug}/\${${idExpr}}/${opSnake}\`, ${body})`;
 }
 
-function renderFindCall(
-  find: FindIR,
-  slug: string,
-  args: ExprIR[],
-  ctx: RenderCtx,
-): string {
+function renderFindCall(find: FindIR, slug: string, args: ExprIR[], ctx: RenderCtx): string {
   const findSnake = snake(find.name);
   const queryArg = args[0] ? renderE2EExpr(args[0], ctx) : "{}";
   const prefix = ctx.apiBasePath;
@@ -348,10 +328,7 @@ function renderIdArg(arg: ExprIR, ctx: RenderCtx): string {
   return rendered;
 }
 
-function findAggregateBySlug(
-  slug: string,
-  contexts: BoundedContextIR[],
-): AggregateIR | undefined {
+function findAggregateBySlug(slug: string, contexts: BoundedContextIR[]): AggregateIR | undefined {
   for (const c of contexts) {
     for (const a of c.aggregates) {
       if (camel(a.name) === slug) return a;
@@ -362,11 +339,7 @@ function findAggregateBySlug(
   return undefined;
 }
 
-function findRepoQuery(
-  name: string,
-  agg: AggregateIR,
-  ctx: RenderCtx,
-): FindIR | undefined {
+function findRepoQuery(name: string, agg: AggregateIR, ctx: RenderCtx): FindIR | undefined {
   for (const c of ctx.contexts) {
     for (const r of c.repositories) {
       if (r.aggregateName !== agg.name) continue;

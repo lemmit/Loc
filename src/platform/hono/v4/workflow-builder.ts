@@ -1,3 +1,4 @@
+import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -7,7 +8,6 @@ import type {
   WorkflowStmtIR,
 } from "../../../ir/loom-ir.js";
 import { camel, snake } from "../../../util/naming.js";
-import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
 import { emitWireSchema, wireToDomainExpr, zodFor } from "./routes-builder.js";
 
 // ---------------------------------------------------------------------------
@@ -46,9 +46,7 @@ export function buildWorkflowsFile(
   lines.push(
     `import { DomainError, AggregateNotFoundError, ForbiddenError, ExternHandlerError } from "../domain/errors";`,
   );
-  lines.push(
-    `import { type DomainEventDispatcher } from "../domain/events";`,
-  );
+  lines.push(`import { type DomainEventDispatcher } from "../domain/events";`);
   lines.push(`import type * as Events from "../domain/events";`);
   lines.push(`import type { NodePgDatabase } from "drizzle-orm/node-postgres";`);
   lines.push(`import type * as schema from "../db/schema";`);
@@ -62,9 +60,7 @@ export function buildWorkflowsFile(
     }
   }
   for (const aggName of aggsTouched) {
-    lines.push(
-      `import { ${aggName} } from "../domain/${camel(aggName)}";`,
-    );
+    lines.push(`import { ${aggName} } from "../domain/${camel(aggName)}";`);
     lines.push(
       `import { ${aggName}Repository } from "../db/repositories/${camel(aggName)}-repository";`,
     );
@@ -91,9 +87,7 @@ export function buildWorkflowsFile(
   const usedEnums = ctx.enums.map((e) => e.name);
   const valueObjectImport = [...usedVOs, ...usedEnums];
   if (valueObjectImport.length > 0) {
-    lines.push(
-      `import { ${valueObjectImport.join(", ")} } from "../domain/value-objects";`,
-    );
+    lines.push(`import { ${valueObjectImport.join(", ")} } from "../domain/value-objects";`);
   }
   lines.push("");
 
@@ -129,9 +123,7 @@ export function buildWorkflowsFile(
 
   // Per-workflow request schema.
   for (const wf of ctx.workflows) {
-    lines.push(
-      `const ${capitalize(wf.name)}Request = z.object({`,
-    );
+    lines.push(`const ${capitalize(wf.name)}Request = z.object({`);
     for (const p of wf.params) {
       lines.push(`  ${p.name}: ${zodFor(p.type)},`);
     }
@@ -139,9 +131,7 @@ export function buildWorkflowsFile(
   }
   lines.push("");
 
-  lines.push(
-    `export function workflowsRoutes(`,
-  );
+  lines.push(`export function workflowsRoutes(`);
   lines.push(`  db: NodePgDatabase<typeof schema>,`);
   lines.push(`  events: DomainEventDispatcher,`);
   lines.push(`): OpenAPIHono {`);
@@ -193,9 +183,7 @@ function emitWorkflowRoute(
   out.push(`    tags: ["workflows"],`);
   out.push(`    operationId: "${camel(wf.name)}Workflow",`);
   out.push(`    request: {`);
-  out.push(
-    `      body: { content: { "application/json": { schema: ${reqName} } } },`,
-  );
+  out.push(`      body: { content: { "application/json": { schema: ${reqName} } } },`);
   out.push(`    },`);
   out.push(`    responses: {`);
   out.push(`      204: { description: "No content" },`);
@@ -223,9 +211,7 @@ function emitWorkflowRoute(
     out.push(`    const workflowEvents: Events.DomainEvent[] = [];`);
   }
   if (wf.transactional) {
-    const txOpts = wf.isolation
-      ? `, { isolationLevel: "${pgIsolationLevel(wf.isolation)}" }`
-      : ``;
+    const txOpts = wf.isolation ? `, { isolationLevel: "${pgIsolationLevel(wf.isolation)}" }` : ``;
     out.push(`    await db.transaction(async (tx) => {${""}`);
     for (const r of reposNeeded) {
       out.push(`      const ${camel(r.repoName)} = new ${r.aggName}Repository(tx, events);`);
@@ -281,16 +267,12 @@ function renderStmt(
       return [`${indent}workflowEvents.push({ ${fieldList} });`];
     }
     case "factory-let": {
-      const fields = st.fields
-        .map((f) => `${f.name}: ${renderArg(f.value)}`)
-        .join(", ");
+      const fields = st.fields.map((f) => `${f.name}: ${renderArg(f.value)}`).join(", ");
       return [`${indent}const ${st.name} = ${st.aggName}.create({ ${fields} });`];
     }
     case "repo-let": {
       const args = st.args.map(renderArg).join(", ");
-      return [
-        `${indent}const ${st.name} = await ${camel(st.repoName)}.${st.method}(${args});`,
-      ];
+      return [`${indent}const ${st.name} = await ${camel(st.repoName)}.${st.method}(${args});`];
     }
     case "op-call": {
       const args = st.args.map(renderArg).join(", ");
@@ -341,18 +323,12 @@ function lookupOp(
   aggName: string,
   opName: string,
 ): import("../../../ir/loom-ir.js").OperationIR | undefined {
-  return ctx.aggregates
-    .find((a) => a.name === aggName)
-    ?.operations.find((o) => o.name === opName);
+  return ctx.aggregates.find((a) => a.name === aggName)?.operations.find((o) => o.name === opName);
 }
 
-const cap = (s: string): string =>
-  s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
+const cap = (s: string): string => (s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1));
 
-function renderExprWithParams(
-  e: ExprIR,
-  paramExprs: Map<string, string>,
-): string {
+function renderExprWithParams(e: ExprIR, paramExprs: Map<string, string>): string {
   // Workflow params are local consts now; ExprIR `ref` nodes for them
   // already carry refKind="param" and the bare name.  renderTsExpr
   // emits bare names for params, which match the local consts we
@@ -378,9 +354,7 @@ function collectReposForWorkflow(wf: WorkflowIR): {
 
 /** Drizzle-postgres `isolationLevel` enum values are space-cased
  *  lowercase strings.  Map DSL camelCase tokens onto them. */
-function pgIsolationLevel(
-  level: import("../../../ir/loom-ir.js").IsolationLevel,
-): string {
+function pgIsolationLevel(level: import("../../../ir/loom-ir.js").IsolationLevel): string {
   switch (level) {
     case "readUncommitted":
       return "read uncommitted";

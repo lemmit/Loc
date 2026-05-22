@@ -1,11 +1,6 @@
-import type {
-  AggregateIR,
-  BoundedContextIR,
-  ExprIR,
-  ViewIR,
-} from "../../ir/loom-ir.js";
+import type { AggregateIR, BoundedContextIR, ExprIR, ViewIR } from "../../ir/loom-ir.js";
 import { pascal, snake } from "../../util/naming.js";
-import { renderExpr, type RenderCtx } from "./render-expr.js";
+import { type RenderCtx, renderExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
 // View emission for Phoenix LiveView / Ash.

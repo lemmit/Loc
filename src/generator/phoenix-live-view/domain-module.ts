@@ -1,5 +1,5 @@
 import type { BoundedContextIR, EnumIR } from "../../ir/loom-ir.js";
-import { snake, pascal } from "../../util/naming.js";
+import { pascal, snake } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Domain module emitter — per `BoundedContextIR` produce:
@@ -37,17 +37,11 @@ export function emitDomainModule(
   const ctxSnake = snake(ctx.name);
 
   // Ash.Domain module.
-  out.set(
-    `lib/${appSnake}/${ctxSnake}.ex`,
-    renderDomainModule(ctx, ctxModule),
-  );
+  out.set(`lib/${appSnake}/${ctxSnake}.ex`, renderDomainModule(ctx, ctxModule));
 
   // Enum modules.
   for (const en of ctx.enums) {
-    out.set(
-      `lib/${appSnake}/${ctxSnake}/${snake(en.name)}.ex`,
-      renderEnumModule(en, ctxModule),
-    );
+    out.set(`lib/${appSnake}/${ctxSnake}/${snake(en.name)}.ex`, renderEnumModule(en, ctxModule));
   }
 
   return out;
@@ -57,10 +51,7 @@ export function emitDomainModule(
 // Ash.Domain
 // ---------------------------------------------------------------------------
 
-function renderDomainModule(
-  ctx: BoundedContextIR,
-  ctxModule: string,
-): string {
+function renderDomainModule(ctx: BoundedContextIR, ctxModule: string): string {
   // Build `resource <Module> do ... end` blocks for each aggregate (and its
   // entity parts) plus value objects.  Each block nests the Ash 3.x
   // `define` entries that expose code-interface functions on the domain.
@@ -92,16 +83,12 @@ function renderDomainModule(
             `      define :${snake(find.name)}, action: :${snake(find.name)}, args: [${argList}]`,
           );
         } else {
-          defines.push(
-            `      define :${snake(find.name)}, action: :${snake(find.name)}`,
-          );
+          defines.push(`      define :${snake(find.name)}, action: :${snake(find.name)}`);
         }
       }
     }
 
-    resourceBlocks.push(
-      `    resource ${aggModule} do\n${defines.join("\n")}\n    end`,
-    );
+    resourceBlocks.push(`    resource ${aggModule} do\n${defines.join("\n")}\n    end`);
 
     // Entity parts — simpler: only CRUD, no custom finds.
     for (const part of agg.parts) {
@@ -114,9 +101,7 @@ function renderDomainModule(
         `      define :update_${partSnake}, action: :update`,
         `      define :destroy_${partSnake}, action: :destroy`,
       ].join("\n");
-      resourceBlocks.push(
-        `    resource ${partModule} do\n${partDefines}\n    end`,
-      );
+      resourceBlocks.push(`    resource ${partModule} do\n${partDefines}\n    end`);
     }
   }
 

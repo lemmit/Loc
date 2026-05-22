@@ -35,10 +35,7 @@ export function emitTable(
 
   const positionals = positionalArgs(call);
   const cols = positionals
-    .filter(
-      (a): a is ExprIR & { kind: "call" } =>
-        a.kind === "call" && a.name === "Column",
-    )
+    .filter((a): a is ExprIR & { kind: "call" } => a.kind === "call" && a.name === "Column")
     .map((c, i) => emitColumn(c, ctx, i, depth + 3));
 
   const rowVar = "row";
@@ -51,9 +48,7 @@ export function emitTable(
     if (onRowClick.body) {
       onRowClickJs = emitExpr(onRowClick.body, childCtx);
     } else if (onRowClick.block && onRowClick.block.length > 0) {
-      const stmts = onRowClick.block
-        .map((s) => emitStmt(s, childCtx))
-        .join(" ");
+      const stmts = onRowClick.block.map((s) => emitStmt(s, childCtx)).join(" ");
       onRowClickJs = `{ ${stmts} }`;
     }
     propagateChildFlags(ctx, childCtx);

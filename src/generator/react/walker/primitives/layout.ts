@@ -5,12 +5,7 @@
 
 import type { ExprIR } from "../../../../ir/loom-ir.js";
 import type { WalkContext } from "../../body-walker.js";
-import {
-  positionalChildren,
-  renderTextContent,
-  testidAttr,
-  walk,
-} from "../../body-walker.js";
+import { positionalChildren, renderTextContent, testidAttr, walk } from "../../body-walker.js";
 import { renderPrimitive } from "../context.js";
 import {
   escapeJsxText,
@@ -55,11 +50,7 @@ export function emitGroup(
   });
 }
 
-export function emitGrid(
-  call: ExprIR & { kind: "call" },
-  ctx: WalkContext,
-  depth: number,
-): string {
+export function emitGrid(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth: number): string {
   // Each child wraps in a per-pack column container (Mantine's
   // <Grid.Col span="auto">; shadcn's plain `<div>` since gap is
   // on the parent).  v0 gives every column equal weight; a future
@@ -102,11 +93,7 @@ export function emitContainer(
   });
 }
 
-export function emitTabs(
-  call: ExprIR & { kind: "call" },
-  ctx: WalkContext,
-  depth: number,
-): string {
+export function emitTabs(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth: number): string {
   // Tabs(Tab("Overview", body), Tab("Settings", body))
   // Each positional child must be a `Tab(label, body)` call;
   // anything else lands as a placeholder so the page still
@@ -131,9 +118,7 @@ export function emitTabs(
     return {
       value: slugify(labelStr) || `tab-${i + 1}`,
       label: escapeJsxText(labelStr),
-      bodyJsx: bodyArg
-        ? walk(bodyArg, ctx, depth + 2)
-        : "{/* missing tab body */}",
+      bodyJsx: bodyArg ? walk(bodyArg, ctx, depth + 2) : "{/* missing tab body */}",
     };
   });
   return renderPrimitive(ctx, "primitive-tabs", {
@@ -167,27 +152,21 @@ export function emitToolbar(
   });
 }
 
-export function emitCard(
-  call: ExprIR & { kind: "call" },
-  ctx: WalkContext,
-  depth: number,
-): string {
+export function emitCard(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth: number): string {
   // Card("title", content) — first positional title (anything not
   // a call counts as title); second positional is the body.
   // Slice 11.10: `Card(child)` (single non-text-like positional)
   // renders a card with no heading.
   const positionals = positionalArgs(call);
   const titleArg = positionals[0];
-  const titleIsTextLike =
-    titleArg !== undefined && titleArg.kind !== "call";
-  const contentExpr: ExprIR | undefined = titleIsTextLike
-    ? positionals[1]
-    : positionals[0];
+  const titleIsTextLike = titleArg !== undefined && titleArg.kind !== "call";
+  const contentExpr: ExprIR | undefined = titleIsTextLike ? positionals[1] : positionals[0];
   const indent = "  ".repeat(depth + 1);
   const closeIndent = "  ".repeat(depth);
-  const titleText = titleIsTextLike && titleArg
-    ? unwrapTextLiteral(renderTextContent(titleArg, ctx) ?? '""')
-    : undefined;
+  const titleText =
+    titleIsTextLike && titleArg
+      ? unwrapTextLiteral(renderTextContent(titleArg, ctx) ?? '""')
+      : undefined;
   const contentJsx = contentExpr ? walk(contentExpr, ctx, depth + 1) : undefined;
   return renderPrimitive(ctx, "primitive-card", {
     hasTitle: titleText !== undefined,

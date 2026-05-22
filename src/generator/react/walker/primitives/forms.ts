@@ -5,12 +5,7 @@
 // trigger surface onto the operation state its Form child just pushed,
 // so it must share the same sink and live alongside the form emitters.
 
-import type {
-  AggregateIR,
-  BoundedContextIR,
-  ExprIR,
-  TypeIR,
-} from "../../../../ir/loom-ir.js";
+import type { AggregateIR, BoundedContextIR, ExprIR, TypeIR } from "../../../../ir/loom-ir.js";
 import { camel, humanize, pascal, plural, snake } from "../../../../util/naming.js";
 import type { WalkContext } from "../../body-walker.js";
 import {
@@ -242,12 +237,7 @@ function emitFormOfAggregate(
   // components (Stack/Button/Group on Mantine, equivalents elsewhere).
   addImportsForPrimitive(ctx, "primitive-form-of");
   const prepared = prepareFormFields(ctx, fields, fields, bc, testidNamespace);
-  addImport(
-    ctx,
-    `../api/${camel(agg.name)}`,
-    `Create${agg.name}Request`,
-    `useCreate${agg.name}`,
-  );
+  addImport(ctx, `../api/${camel(agg.name)}`, `Create${agg.name}Request`, `useCreate${agg.name}`);
   ctx.collectedTestids.add(`${testidNamespace}-submit`);
   const onSubmitJs = emitFormOnSubmit(ctx, call, prepared.idTargets, "create");
   ctx.formOfs.push({
@@ -263,21 +253,13 @@ function emitFormOfAggregate(
     onSubmitJs,
   });
   const slug = snake(plural(agg.name));
-  return renderFormOfPrimitive(
-    ctx,
-    call,
-    depth,
-    testidNamespace,
-    prepared.fieldHtmls,
-    onSubmitJs,
-    {
-      mutationCall: "const out = await create.mutateAsync(vals);",
-      successMessage: `${humanize(agg.name)} created`,
-      redirectStmt: `navigate(\`/${slug}/\${out.id}\`)`,
-      submitPendingExpr: "create.isPending",
-      submitLabel: "Create",
-    },
-  );
+  return renderFormOfPrimitive(ctx, call, depth, testidNamespace, prepared.fieldHtmls, onSubmitJs, {
+    mutationCall: "const out = await create.mutateAsync(vals);",
+    successMessage: `${humanize(agg.name)} created`,
+    redirectStmt: `navigate(\`/${slug}/\${out.id}\`)`,
+    submitPendingExpr: "create.isPending",
+    submitLabel: "Create",
+  });
 }
 
 /** Slice A12 — `Form(runs: <wf>)` walker variant.  Same per-field
@@ -334,21 +316,13 @@ function emitFormRuns(
     fieldHtmls: prepared.fieldHtmls,
     onSubmitJs,
   });
-  return renderFormOfPrimitive(
-    ctx,
-    call,
-    depth,
-    testidNamespace,
-    prepared.fieldHtmls,
-    onSubmitJs,
-    {
-      mutationCall: "await run.mutateAsync(vals);",
-      successMessage: `${humanize(workflow.name)} completed`,
-      redirectStmt: `navigate("/workflows")`,
-      submitPendingExpr: "run.isPending",
-      submitLabel: "Run",
-    },
-  );
+  return renderFormOfPrimitive(ctx, call, depth, testidNamespace, prepared.fieldHtmls, onSubmitJs, {
+    mutationCall: "await run.mutateAsync(vals);",
+    successMessage: `${humanize(workflow.name)} completed`,
+    redirectStmt: `navigate("/workflows")`,
+    submitPendingExpr: "run.isPending",
+    submitLabel: "Run",
+  });
 }
 
 /** `Form(of: <Agg>, op: <name>)` — records an OperationFormState
@@ -384,9 +358,7 @@ function emitFormOfOperation(
   if (!agg || !bc) {
     return `{/* Form(of: ${aggName}, op: ${opName}): aggregate not found */}`;
   }
-  const op = agg.operations.find(
-    (o) => o.name === opName && o.visibility === "public",
-  );
+  const op = agg.operations.find((o) => o.name === opName && o.visibility === "public");
   if (!op) {
     return `{/* Form(of: ${aggName}, op: ${opName}): no public operation */}`;
   }
@@ -394,8 +366,7 @@ function emitFormOfOperation(
   // exactly as the workflow-form variant does.
   const fields = op.params;
   const fieldsForHelpers = fields.map((f) => ({ ...f, optional: false }));
-  const testidNamespace =
-    stringNamed(call, "testid") ?? `${snake(plural(agg.name))}-op-${op.name}`;
+  const testidNamespace = stringNamed(call, "testid") ?? `${snake(plural(agg.name))}-op-${op.name}`;
   // Note: unlike the inline forms, the op-form does NOT register
   // `primitive-form-of` here — the pack-specific shell (toast lib,
   // useState/useDisclosure, modals manager) rides on
@@ -439,15 +410,10 @@ export function emitModal(
 ): string {
   const positionals = positionalArgs(call);
   const formChild = positionals.find(
-    (a): a is ExprIR & { kind: "call" } =>
-      a.kind === "call" && a.name === "Form",
+    (a): a is ExprIR & { kind: "call" } => a.kind === "call" && a.name === "Form",
   );
   const triggerArg = namedArgValue(call, "trigger");
-  if (
-    !formChild ||
-    !triggerArg ||
-    triggerArg.kind !== "call"
-  ) {
+  if (!formChild || !triggerArg || triggerArg.kind !== "call") {
     return `{/* Modal: expects trigger: Button(...) and a Form(of:, op:) child */}`;
   }
   // Walk the form child first — records the OperationFormState
@@ -463,9 +429,7 @@ export function emitModal(
   if (!opName) {
     return `{/* Modal: child Form missing op: */}`;
   }
-  const label = unwrapTextLiteral(
-    firstPositionalContent(triggerArg, ctx) ?? '"Action"',
-  );
+  const label = unwrapTextLiteral(firstPositionalContent(triggerArg, ctx) ?? '"Action"');
   // Platform-neutral emphasis token from the scaffold-expander
   // (`primary` for the aggregate's first public op, `secondary`
   // for the rest).  Each pack's template maps it to its own button

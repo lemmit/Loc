@@ -1,50 +1,4 @@
-import { AstUtils, type AstNode, type ValidationAcceptor, type ValidationChecks } from "langium";
-import type { DddServices } from "./ddd-module.js";
-import {
-  isAggregate,
-  isAssignOrCallStmt,
-  isContainment,
-  isDerivedProp,
-  isEmitStmt,
-  isEntityPart,
-  isFunctionDecl,
-  isInvariant,
-  isLetStmt,
-  isOperation,
-  isPreconditionStmt,
-  isRequiresStmt,
-  isPrimitiveType,
-  isProperty,
-  isValueObject,
-  type Aggregate,
-  type AssignOrCallStmt,
-  type Containment,
-  type DddAstType,
-  type DerivedProp,
-  type EmitStmt,
-  type EntityPart,
-  type FunctionDecl,
-  type Invariant,
-  type Operation,
-  type Property,
-  type Statement,
-  type ValueObject,
-} from "./generated/ast.js";
-import {
-  findFunction,
-  findOperation,
-  isAssignable,
-  lookupRootMember,
-  makeEnv,
-  paramType,
-  resolveTypeRef,
-  stepInto,
-  T,
-  typeOf,
-  typeToString,
-  type DddType,
-  type Env,
-} from "./type-system.js";
+import { type AstNode, AstUtils, type ValidationAcceptor, type ValidationChecks } from "langium";
 import {
   BUILTIN_PACK_LATEST,
   builtinVersionsForFamily,
@@ -57,6 +11,52 @@ import {
   parseBuiltinPlatformRef,
   platformFor,
 } from "../platform/registry.js";
+import type { DddServices } from "./ddd-module.js";
+import {
+  type Aggregate,
+  type AssignOrCallStmt,
+  type Containment,
+  type DddAstType,
+  type DerivedProp,
+  type EmitStmt,
+  type EntityPart,
+  type FunctionDecl,
+  type Invariant,
+  isAggregate,
+  isAssignOrCallStmt,
+  isContainment,
+  isDerivedProp,
+  isEmitStmt,
+  isEntityPart,
+  isFunctionDecl,
+  isInvariant,
+  isLetStmt,
+  isOperation,
+  isPreconditionStmt,
+  isPrimitiveType,
+  isProperty,
+  isRequiresStmt,
+  isValueObject,
+  type Operation,
+  type Property,
+  type Statement,
+  type ValueObject,
+} from "./generated/ast.js";
+import {
+  type DddType,
+  type Env,
+  findFunction,
+  findOperation,
+  isAssignable,
+  lookupRootMember,
+  makeEnv,
+  paramType,
+  resolveTypeRef,
+  stepInto,
+  T,
+  typeOf,
+  typeToString,
+} from "./type-system.js";
 
 export class DddValidator {
   // Entry: full model walk
@@ -158,10 +158,7 @@ export class DddValidator {
         const storages = m.members.filter(
           (sm) => sm.$type === "Storage",
         ) as import("./generated/ast.js").Storage[];
-        const storageNamesSeen = new Map<
-          string,
-          import("./generated/ast.js").Storage
-        >();
+        const storageNamesSeen = new Map<string, import("./generated/ast.js").Storage>();
         for (const s of storages) {
           const prior = storageNamesSeen.get(s.name);
           if (prior) {
@@ -318,14 +315,44 @@ export class DddValidator {
     accept: ValidationAcceptor,
   ): void {
     const STDLIB_PRIMITIVES = new Set<string>([
-      "Stack", "Group", "Grid", "Container", "Tabs", "Tab", "Toolbar",
-      "Empty", "Field", "NumberField", "PasswordField", "Toggle",
-      "Loader", "Anchor", "Image", "Avatar", "Slot", "Heading", "Text",
-      "Button", "Card", "Stat", "Badge", "Divider", "Table", "Column",
-      "Money", "DateDisplay", "EnumBadge", "IdLink", "Form",
+      "Stack",
+      "Group",
+      "Grid",
+      "Container",
+      "Tabs",
+      "Tab",
+      "Toolbar",
+      "Empty",
+      "Field",
+      "NumberField",
+      "PasswordField",
+      "Toggle",
+      "Loader",
+      "Anchor",
+      "Image",
+      "Avatar",
+      "Slot",
+      "Heading",
+      "Text",
+      "Button",
+      "Card",
+      "Stat",
+      "Badge",
+      "Divider",
+      "Table",
+      "Column",
+      "Money",
+      "DateDisplay",
+      "EnumBadge",
+      "IdLink",
+      "Form",
       // Scaffold-archetype call names also reserved (List / Detail
       // dispatch via inferBodyDispatch).
-      "List", "Detail", "Home", "WorkflowsIndex", "ViewsIndex",
+      "List",
+      "Detail",
+      "Home",
+      "WorkflowsIndex",
+      "ViewsIndex",
     ]);
     for (const member of model.members) {
       if (member.$type !== "System") continue;
@@ -347,11 +374,10 @@ export class DddValidator {
           }
           const prior = seen.get(h.name);
           if (prior) {
-            accept(
-              "error",
-              `Duplicate helper import '${h.name}' in ui '${ui.name}'.`,
-              { node: h, property: "name" },
-            );
+            accept("error", `Duplicate helper import '${h.name}' in ui '${ui.name}'.`, {
+              node: h,
+              property: "name",
+            });
           } else {
             seen.set(h.name, h);
           }
@@ -364,12 +390,7 @@ export class DddValidator {
     block: import("./generated/ast.js").ThemeBlock,
     accept: ValidationAcceptor,
   ): void {
-    const knownNames = new Set([
-      "primary",
-      "neutral",
-      "radius",
-      "fontFamily",
-    ]);
+    const knownNames = new Set(["primary", "neutral", "radius", "fontFamily"]);
     const knownRadius = new Set(["none", "sm", "md", "lg", "xl"]);
     // Hex colors: #RGB, #RRGGBB, or #RRGGBBAA.  Everything else
     // ("blue" / "rgb(...)" / "var(--brand)") routes through a future
@@ -389,11 +410,10 @@ export class DddValidator {
       }
       // (2) Duplicate property name.
       if (seen.has(p.name)) {
-        accept(
-          "error",
-          `theme property '${p.name}' declared more than once.`,
-          { node: p, property: "name" },
-        );
+        accept("error", `theme property '${p.name}' declared more than once.`, {
+          node: p,
+          property: "name",
+        });
         continue;
       }
       seen.add(p.name);
@@ -463,7 +483,12 @@ export class DddValidator {
         accept(
           "error",
           `Framework '${framework}' does not match platform '${d.platform}' (expected '${expected}'). Drop the framework override or align it with the platform.`,
-          { node: d.uiBlock, property: "framework", code: "loom.framework-mismatch", data: { expected } },
+          {
+            node: d.uiBlock,
+            property: "framework",
+            code: "loom.framework-mismatch",
+            data: { expected },
+          },
         );
       }
     }
@@ -836,9 +861,7 @@ export class DddValidator {
         continue;
       }
       const source = b.source.ref;
-      const sourceServes = (source.serves ?? []).some(
-        (r) => r?.$refText === requiredApi,
-      );
+      const sourceServes = (source.serves ?? []).some((r) => r?.$refText === requiredApi);
       if (!sourceServes) {
         accept(
           "error",
@@ -903,8 +926,7 @@ export class DddValidator {
         }
         displayField = m;
         const typeText = m.type?.base;
-        const isString =
-          typeText && isPrimitiveType(typeText) && typeText.name === "string";
+        const isString = typeText && isPrimitiveType(typeText) && typeText.name === "string";
         if (!isString) {
           accept(
             "error",
@@ -914,12 +936,7 @@ export class DddValidator {
         }
       }
       const hasExtern = agg.members.some((x) => isOperation(x) && x.extern);
-      if (
-        isProperty(m) &&
-        m.provenanced &&
-        !hasExtern &&
-        !this.fieldIsWritten(agg, m.name)
-      ) {
+      if (isProperty(m) && m.provenanced && !hasExtern && !this.fieldIsWritten(agg, m.name)) {
         // A provenanced field that no operation ever assigns produces no
         // trace records.  Warn (not error), and only when the aggregate has
         // no `extern` operation — an extern handler has no visible body and
@@ -995,11 +1012,9 @@ export class DddValidator {
       // Empty match (no arms, no else) is structurally meaningless —
       // grammar permits it, validator rejects.
       if (m.arms.length === 0 && !m.elseExpr) {
-        accept(
-          "error",
-          `Empty 'match { }' — must declare at least one arm or an 'else' branch.`,
-          { node: m },
-        );
+        accept("error", `Empty 'match { }' — must declare at least one arm or an 'else' branch.`, {
+          node: m,
+        });
         continue;
       }
       // Warn on non-exhaustive matches (no `else`).  An expression
@@ -1028,11 +1043,10 @@ export class DddValidator {
       if (ma.member !== "matches" || !ma.call) continue;
       // `matches` always takes exactly one string-literal argument.
       if (ma.args.length !== 1) {
-        accept(
-          "error",
-          `'matches' takes exactly one argument (a string-literal regex pattern).`,
-          { node: ma, property: "args" },
-        );
+        accept("error", `'matches' takes exactly one argument (a string-literal regex pattern).`, {
+          node: ma,
+          property: "args",
+        });
         continue;
       }
       // Slice 1.5: call args are CallArg wrappers carrying an
@@ -1057,9 +1071,7 @@ export class DddValidator {
         );
         continue;
       }
-      const raw = (
-        arg as import("./generated/ast.js").StringLit
-      ).value as string;
+      const raw = (arg as import("./generated/ast.js").StringLit).value as string;
       // The grammar's STRING terminal carries the surrounding quotes.
       const pattern = raw.startsWith('"') ? JSON.parse(raw) : raw;
       try {
@@ -1091,11 +1103,10 @@ export class DddValidator {
   private checkInvariant(inv: Invariant, env: Env, accept: ValidationAcceptor) {
     const t = typeOf(inv.expr, env);
     if (t.kind !== "primitive" || t.name !== "bool") {
-      accept(
-        "error",
-        `Invariant must be of type 'bool', got '${typeToString(t)}'.`,
-        { node: inv, property: "expr" },
-      );
+      accept("error", `Invariant must be of type 'bool', got '${typeToString(t)}'.`, {
+        node: inv,
+        property: "expr",
+      });
     }
     if (inv.guard) {
       const g = typeOf(inv.guard, env);
@@ -1112,7 +1123,11 @@ export class DddValidator {
   private checkDerived(d: DerivedProp, env: Env, accept: ValidationAcceptor) {
     const declared = resolveTypeRef(d.type);
     const actual = typeOf(d.expr, env);
-    if (declared.kind !== "unknown" && actual.kind !== "unknown" && !isAssignable(actual, declared)) {
+    if (
+      declared.kind !== "unknown" &&
+      actual.kind !== "unknown" &&
+      !isAssignable(actual, declared)
+    ) {
       accept(
         "error",
         `Derived '${d.name}' has expression of type '${typeToString(actual)}' but declared type is '${typeToString(declared)}'.`,
@@ -1130,7 +1145,11 @@ export class DddValidator {
     const env = part ? this.envForPart(agg, part, fn) : this.envForAggregate(agg, fn);
     const declared = resolveTypeRef(fn.returnType);
     const actual = typeOf(fn.body, env);
-    if (declared.kind !== "unknown" && actual.kind !== "unknown" && !isAssignable(actual, declared)) {
+    if (
+      declared.kind !== "unknown" &&
+      actual.kind !== "unknown" &&
+      !isAssignable(actual, declared)
+    ) {
       accept(
         "error",
         `Function '${fn.name}' returns '${typeToString(actual)}' but is declared to return '${typeToString(declared)}'.`,
@@ -1160,22 +1179,20 @@ export class DddValidator {
     if (isPreconditionStmt(stmt)) {
       const t = typeOf(stmt.expr, env);
       if (t.kind !== "primitive" || t.name !== "bool") {
-        accept(
-          "error",
-          `'precondition' must be of type 'bool', got '${typeToString(t)}'.`,
-          { node: stmt, property: "expr" },
-        );
+        accept("error", `'precondition' must be of type 'bool', got '${typeToString(t)}'.`, {
+          node: stmt,
+          property: "expr",
+        });
       }
       return env;
     }
     if (isRequiresStmt(stmt)) {
       const t = typeOf(stmt.expr, env);
       if (t.kind !== "primitive" || t.name !== "bool") {
-        accept(
-          "error",
-          `'requires' must be of type 'bool', got '${typeToString(t)}'.`,
-          { node: stmt, property: "expr" },
-        );
+        accept("error", `'requires' must be of type 'bool', got '${typeToString(t)}'.`, {
+          node: stmt,
+          property: "expr",
+        });
       }
       return env;
     }
@@ -1212,11 +1229,10 @@ export class DddValidator {
     // Reject assignment to a derived property — derived members are
     // computed from other state and writing to them would silently no-op.
     if (this.lvalueIsDerived(stmt.target, agg)) {
-      accept(
-        "error",
-        `Cannot assign to derived property '${pathString(stmt.target)}'.`,
-        { node: stmt, property: "target" },
-      );
+      accept("error", `Cannot assign to derived property '${pathString(stmt.target)}'.`, {
+        node: stmt,
+        property: "target",
+      });
       return;
     }
     if (stmt.op === ":=") {
@@ -1291,7 +1307,12 @@ export class DddValidator {
     }
   }
 
-  private checkCallStmt(stmt: AssignOrCallStmt, agg: Aggregate, op: Operation, accept: ValidationAcceptor) {
+  private checkCallStmt(
+    stmt: AssignOrCallStmt,
+    agg: Aggregate,
+    op: Operation,
+    accept: ValidationAcceptor,
+  ) {
     const lv = stmt.target;
     if (lv.tail.length === 0 && lv.call) {
       const name = lv.head;
@@ -1304,11 +1325,9 @@ export class DddValidator {
         }
         return;
       }
-      accept(
-        "error",
-        `Cannot resolve call to '${name}' from aggregate '${agg.name}'.`,
-        { node: stmt },
-      );
+      accept("error", `Cannot resolve call to '${name}' from aggregate '${agg.name}'.`, {
+        node: stmt,
+      });
     } else if (!lv.call) {
       accept(
         "error",
@@ -1397,10 +1416,7 @@ export class DddValidator {
    * type reachable via the path so far.  Derived members are computed
    * from state and cannot be assigned to.
    */
-  private lvalueIsDerived(
-    lv: import("./generated/ast.js").LValue,
-    agg: Aggregate,
-  ): boolean {
+  private lvalueIsDerived(lv: import("./generated/ast.js").LValue, agg: Aggregate): boolean {
     if (lv.tail.length === 0) {
       // Direct head reference — check root members
       for (const m of agg.members) {
@@ -1451,10 +1467,7 @@ export class DddValidator {
     // is the SAME mechanism — the explicit page must displace exactly
     // one scaffolded page; multiple explicit pages with the same name
     // are still an error.
-    const pageNamesSeen = new Map<
-      string,
-      import("./generated/ast.js").Page
-    >();
+    const pageNamesSeen = new Map<string, import("./generated/ast.js").Page>();
     for (const m of ui.members) {
       if (m.$type !== "Page") continue;
       const prior = pageNamesSeen.get(m.name);
@@ -1486,19 +1499,15 @@ export class DddValidator {
     //   - apiRef cross-ref must resolve (handled by Langium linker; the
     //     refRoot returns undefined when the target isn't found, so the
     //     check below catches it explicitly with a clearer message).
-    const apiParamSeen = new Map<
-      string,
-      import("./generated/ast.js").UiApiParam
-    >();
+    const apiParamSeen = new Map<string, import("./generated/ast.js").UiApiParam>();
     for (const m of ui.members) {
       if (m.$type !== "UiApiParam") continue;
       const prior = apiParamSeen.get(m.name);
       if (prior) {
-        accept(
-          "error",
-          `ui '${ui.name}' declares api parameter '${m.name}' more than once.`,
-          { node: m, property: "name" },
-        );
+        accept("error", `ui '${ui.name}' declares api parameter '${m.name}' more than once.`, {
+          node: m,
+          property: "name",
+        });
       } else {
         apiParamSeen.set(m.name, m);
       }
@@ -1560,12 +1569,12 @@ export class DddValidator {
       s.selector === "modules"
         ? moduleNames
         : s.selector === "contexts"
-        ? contextNames
-        : s.selector === "aggregates"
-        ? aggregateNames
-        : s.selector === "workflows"
-        ? workflowNames
-        : viewNames;
+          ? contextNames
+          : s.selector === "aggregates"
+            ? aggregateNames
+            : s.selector === "workflows"
+              ? workflowNames
+              : viewNames;
 
     const seenWithinDirective = new Set<string>();
     for (const t of s.targets) {
@@ -1581,11 +1590,10 @@ export class DddValidator {
       // granularity) is detected by Slice 4's expander when it
       // collapses scaffold output to a page-name map.
       if (seenWithinDirective.has(t)) {
-        accept(
-          "error",
-          `'scaffold ${s.selector}: ...' lists '${t}' more than once.`,
-          { node: s, property: "targets" },
-        );
+        accept("error", `'scaffold ${s.selector}: ...' lists '${t}' more than once.`, {
+          node: s,
+          property: "targets",
+        });
       }
       seenWithinDirective.add(t);
     }
@@ -1622,12 +1630,7 @@ export class DddValidator {
     // PageMenuMeta key names — only `section` / `label` / `order` /
     // `hidden` are recognised (parser accepts any LooseName via the
     // soft-keyword rule).
-    const allowedMenuMetaKeys = new Set([
-      "section",
-      "label",
-      "order",
-      "hidden",
-    ]);
+    const allowedMenuMetaKeys = new Set(["section", "label", "order", "hidden"]);
     for (const prop of p.props) {
       if (prop.$type !== "PageMenuMeta") continue;
       for (const entry of prop.entries) {
@@ -1677,9 +1680,9 @@ export class DddValidator {
           if (!allowedLinkKeys.has(prop.name)) {
             accept(
               "error",
-              `Unknown menu link property '${prop.name}'.  Recognised: ${[
-                ...allowedLinkKeys,
-              ].join(", ")}.`,
+              `Unknown menu link property '${prop.name}'.  Recognised: ${[...allowedLinkKeys].join(
+                ", ",
+              )}.`,
               { node: prop, property: "name" },
             );
           }
@@ -1733,9 +1736,7 @@ export class DddValidator {
 
       // Find aggregate in the api's source module.
       const moduleNode = apiNode.source?.ref;
-      const aggregate = moduleNode
-        ? findAggregateInModule(moduleNode, aggregateName)
-        : undefined;
+      const aggregate = moduleNode ? findAggregateInModule(moduleNode, aggregateName) : undefined;
       if (!aggregate) {
         accept(
           "error",
@@ -1777,9 +1778,7 @@ function findAggregateInModule(
  *  aggregates), declared as `repository <Name> for <Aggregate>`,
  *  so we walk the aggregate's container context to find ones
  *  pointing at this aggregate. */
-function listValidApiOperations(
-  agg: import("./generated/ast.js").Aggregate,
-): string[] {
+function listValidApiOperations(agg: import("./generated/ast.js").Aggregate): string[] {
   const ops = new Set<string>(["all", "byId", "create", "update", "delete"]);
   const ctx = agg.$container;
   if (ctx?.$type === "BoundedContext") {
@@ -1792,10 +1791,7 @@ function listValidApiOperations(
   return [...ops].sort();
 }
 
-function isValidApiOperation(
-  agg: import("./generated/ast.js").Aggregate,
-  op: string,
-): boolean {
+function isValidApiOperation(agg: import("./generated/ast.js").Aggregate, op: string): boolean {
   return listValidApiOperations(agg).includes(op);
 }
 
@@ -1888,10 +1884,7 @@ function platformOwnsBackend(platform: string | undefined): boolean {
  *  `ui:` and serves an embedded React SPA when `ui:` is set.  For
  *  always-frontend platforms (`react`/`static`) and always-fullstack
  *  platforms (`phoenixLiveView`) the answer is independent of `hasUi`. */
-function expectedFrameworkFor(
-  platform: string | undefined,
-  hasUi: boolean,
-): string | undefined {
+function expectedFrameworkFor(platform: string | undefined, hasUi: boolean): string | undefined {
   // Normalise a `family@version` pin to its family first so a
   // pinned backend (`"phoenixLiveView@v1"`, `"dotnet@v8"`) maps to
   // the same framework as its bareword.
@@ -1905,9 +1898,7 @@ function expectedFrameworkFor(
 /** Format a given framework's design pack must declare.  Mirrors
  *  `expectedFrameworkFor`; used by Rule 14 to cross-check the
  *  deployable's `design:` against its framework. */
-function expectedPackFormatFor(
-  framework: string | undefined,
-): "tsx" | "heex" | undefined {
+function expectedPackFormatFor(framework: string | undefined): "tsx" | "heex" | undefined {
   if (framework === "react") return "tsx";
   if (framework === "phoenixLiveView") return "heex";
   return undefined;

@@ -1,8 +1,15 @@
+import {
+  chainSingleFieldNative,
+  refineClauseFor,
+  takeSingleFieldChain,
+} from "../../../generator/typescript/zod-refine.js";
+import { wireShapeFor } from "../../../ir/enrichments.js";
+import type { ClassifyContext, SingleFieldPattern } from "../../../ir/invariant-classify.js";
 import type {
   AggregateIR,
   BoundedContextIR,
-  EnumIR,
   EntityPartIR,
+  EnumIR,
   FindIR,
   InvariantIR,
   OperationIR,
@@ -10,20 +17,7 @@ import type {
   TypeIR,
   ValueObjectIR,
 } from "../../../ir/loom-ir.js";
-import {
-  findUsesCurrentUser,
-  operationUsesCurrentUser,
-} from "../../../ir/loom-ir.js";
-import { wireShapeFor } from "../../../ir/enrichments.js";
-import {
-  type ClassifyContext,
-  type SingleFieldPattern,
-} from "../../../ir/invariant-classify.js";
-import {
-  chainSingleFieldNative,
-  refineClauseFor,
-  takeSingleFieldChain,
-} from "../../../generator/typescript/zod-refine.js";
+import { findUsesCurrentUser, operationUsesCurrentUser } from "../../../ir/loom-ir.js";
 import { camel, plural, snake } from "../../../util/naming.js";
 
 // ---------------------------------------------------------------------------
@@ -61,9 +55,7 @@ export function buildRoutesFile(
   // it has none.  Type-only import keeps the route file fine when
   // there are no extern ops; the runtime ref is gated below.
   if (agg.operations.some((o) => o.extern)) {
-    lines.push(
-      `import { externHandlers } from "../domain/${camel(agg.name)}-extern";`,
-    );
+    lines.push(`import { externHandlers } from "../domain/${camel(agg.name)}-extern";`);
   }
 
   // Schemas — value objects, enums, then per-DTO request / response
@@ -110,7 +102,9 @@ export function buildRoutesFile(
       new Set(agg.fields.map((f) => f.name)),
     ),
   );
-  lines.push(`const Create${agg.name}Response = z.object({ id: z.string() }).openapi("Create${agg.name}Response");`);
+  lines.push(
+    `const Create${agg.name}Response = z.object({ id: z.string() }).openapi("Create${agg.name}Response");`,
+  );
   lines.push("");
 
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
@@ -175,9 +169,7 @@ export function buildRoutesFile(
   lines.push(`      responses: {`);
   lines.push(`        201: {`);
   lines.push(`          description: "Created",`);
-  lines.push(
-    `          content: { "application/json": { schema: Create${agg.name}Response } },`,
-  );
+  lines.push(`          content: { "application/json": { schema: Create${agg.name}Response } },`);
   lines.push(`        },`);
   lines.push(`      },`);
   lines.push(`    }),`);
@@ -216,9 +208,7 @@ export function buildRoutesFile(
   lines.push(`    async (c) => {`);
   lines.push(`      const { id } = c.req.valid("param");`);
   lines.push(`      const found = await repo.findById(Ids.${agg.name}Id(id));`);
-  lines.push(
-    `      if (!found) return c.json({ error: "not_found" }, 404);`,
-  );
+  lines.push(`      if (!found) return c.json({ error: "not_found" }, 404);`);
   lines.push(
     `      return c.json(repo.toWire(found) as z.infer<typeof ${agg.name}Response>, 200);`,
   );
@@ -277,11 +267,7 @@ export function buildRoutesFile(
   return lines.join("\n") + "\n";
 }
 
-function emitOperationRoute(
-  agg: AggregateIR,
-  op: OperationIR,
-  ctx: BoundedContextIR,
-): string[] {
+function emitOperationRoute(agg: AggregateIR, op: OperationIR, ctx: BoundedContextIR): string[] {
   const aggSlug = snake(plural(agg.name));
   const opSnake = snake(op.name);
   const out: string[] = [];
@@ -293,9 +279,7 @@ function emitOperationRoute(
   out.push(`    operationId: "${camel(op.name)}${agg.name}",`);
   out.push(`    request: {`);
   out.push(`      params: z.object({ id: z.string() }),`);
-  out.push(
-    `      body: { content: { "application/json": { schema: ${cap(op.name)}Request } } },`,
-  );
+  out.push(`      body: { content: { "application/json": { schema: ${cap(op.name)}Request } } },`);
   out.push(`    },`);
   out.push(`    responses: {`);
   out.push(`      204: { description: "No content" },`);
@@ -313,13 +297,10 @@ function emitOperationRoute(
   // appearing in operation bodies, so this branch is dead.
   const usesUser = operationUsesCurrentUser(op);
   if (usesUser) {
-    out.push(
-      `    const currentUser = c.get("currentUser") as import("../auth/user-types").User;`,
-    );
+    out.push(`    const currentUser = c.get("currentUser") as import("../auth/user-types").User;`);
   }
   out.push(`    const aggregate = await repo.getById(Ids.${agg.name}Id(id));`);
-  const baseCallArgs = op.params
-    .map((p) => wireToDomainExpr(`body.${p.name}`, p.type, ctx));
+  const baseCallArgs = op.params.map((p) => wireToDomainExpr(`body.${p.name}`, p.type, ctx));
   const callArgs = (usesUser ? [...baseCallArgs, "currentUser"] : baseCallArgs).join(", ");
   if (op.extern) {
     // Extern: run preconditions on the aggregate, dispatch to the
@@ -332,9 +313,7 @@ function emitOperationRoute(
     // raises one deliberately.
     const handlerKey = `${camel(op.name)}${agg.name}`;
     out.push(`    aggregate.check${cap(op.name)}(${callArgs});`);
-    out.push(
-      `    const handler = externHandlers.${handlerKey};`,
-    );
+    out.push(`    const handler = externHandlers.${handlerKey};`);
     out.push(
       `    if (!handler) throw new Error("Missing extern handler for ${handlerKey}. Register one via register${cap(op.name)}${agg.name}Handler(...) before app.listen().");`,
     );
@@ -344,9 +323,7 @@ function emitOperationRoute(
     out.push(`      if (err instanceof DomainError) throw err;`);
     out.push(`      if (err instanceof ForbiddenError) throw err;`);
     out.push(`      if (err instanceof AggregateNotFoundError) throw err;`);
-    out.push(
-      `      throw new ExternHandlerError("${op.name}", "${agg.name}", err);`,
-    );
+    out.push(`      throw new ExternHandlerError("${op.name}", "${agg.name}", err);`);
     out.push(`    }`);
     out.push(`    aggregate.assertInvariants();`);
   } else {
@@ -359,11 +336,7 @@ function emitOperationRoute(
   return out;
 }
 
-function emitFindRoute(
-  agg: AggregateIR,
-  find: FindIR,
-  ctx: BoundedContextIR,
-): string[] {
+function emitFindRoute(agg: AggregateIR, find: FindIR, ctx: BoundedContextIR): string[] {
   const aggSlug = snake(plural(agg.name));
   const findSnake = snake(find.name);
   const isList = find.returnType.kind === "array";
@@ -400,13 +373,9 @@ function emitFindRoute(
   // middleware stashed it earlier in the pipeline.
   const usesUser = findUsesCurrentUser(find);
   if (usesUser) {
-    out.push(
-      `    const currentUser = c.get("currentUser") as import("../auth/user-types").User;`,
-    );
+    out.push(`    const currentUser = c.get("currentUser") as import("../auth/user-types").User;`);
   }
-  const baseArgs = find.params.map((p) =>
-    wireToDomainExpr(`params.${p.name}`, p.type, ctx),
-  );
+  const baseArgs = find.params.map((p) => wireToDomainExpr(`params.${p.name}`, p.type, ctx));
   const argList = (usesUser ? [...baseArgs, "currentUser"] : baseArgs).join(", ");
   out.push(`    const result = await repo.${find.name}(${argList});`);
   if (isList) {
@@ -415,13 +384,9 @@ function emitFindRoute(
     );
   } else if (find.returnType.kind === "optional") {
     out.push(`    if (result == null) return c.json({ error: "not_found" }, 404);`);
-    out.push(
-      `    return c.json(repo.toWire(result) as z.infer<typeof ${agg.name}Response>, 200);`,
-    );
+    out.push(`    return c.json(repo.toWire(result) as z.infer<typeof ${agg.name}Response>, 200);`);
   } else {
-    out.push(
-      `    return c.json(repo.toWire(result) as z.infer<typeof ${agg.name}Response>, 200);`,
-    );
+    out.push(`    return c.json(repo.toWire(result) as z.infer<typeof ${agg.name}Response>, 200);`);
   }
   out.push(`  },`);
   out.push(`);`);

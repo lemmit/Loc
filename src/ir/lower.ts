@@ -1,3 +1,7 @@
+import {
+  type BuiltinPackFamily,
+  parseBuiltinDesignRef,
+} from "../generator/_packs/builtin-formats.js";
 import type {
   Aggregate,
   BoundedContext,
@@ -38,10 +42,10 @@ import {
   isOperation,
   isPermissionsBlock,
   isPreconditionStmt,
-  isRequiresStmt,
   isProperty,
   isRepository,
   isRequirement,
+  isRequiresStmt,
   isSolution,
   isSystem,
   isTestBlock,
@@ -53,10 +57,13 @@ import {
   isView,
   isWorkflow,
 } from "../language/generated/ast.js";
+import { parseBuiltinPlatformRef } from "../platform/registry.js";
 import type {
   AggregateIR,
   ApiIR,
   BoundedContextIR,
+  CodeRefIR,
+  CodeRefKind,
   ComponentIR,
   ContainmentIR,
   DeployableIR,
@@ -79,20 +86,18 @@ import type {
   ParamIR,
   PermissionDeclIR,
   Platform,
-  CodeRefIR,
-  CodeRefKind,
   RepositoryIR,
   RequirementIR,
   RequirementStatus,
   RequirementType,
   ScaffoldIR,
-  SolutionIR,
-  TestCaseIR,
   ScaffoldOriginIR,
   ScaffoldSelector,
+  SolutionIR,
   StateFieldIR,
   StmtIR,
   SystemIR,
+  TestCaseIR,
   TestIR,
   TestStmtIR,
   TypeIR,
@@ -105,26 +110,18 @@ import type {
 } from "./loom-ir.js";
 import {
   cstText,
+  type Env,
   inAggregate,
+  inferExprType,
   inPart,
   inValueObject,
-  inferExprType,
   lowerExpr,
   lowerStatement,
   lowerType,
   newEnv,
   withLocal,
-  type Env,
 } from "./lower-expr.js";
-import {
-  buildExpandContext,
-  expandScaffoldToExplicitBody,
-} from "./scaffold-expander.js";
-import {
-  parseBuiltinDesignRef,
-  type BuiltinPackFamily,
-} from "../generator/_packs/builtin-formats.js";
-import { parseBuiltinPlatformRef } from "../platform/registry.js";
+import { buildExpandContext, expandScaffoldToExplicitBody } from "./scaffold-expander.js";
 
 /** Fold a bareword built-in family or pinned `family@version`
  *  reference (or `undefined`) into the fully-qualified form the rest
@@ -134,10 +131,7 @@ import { parseBuiltinPlatformRef } from "../platform/registry.js";
  *  snapshot tests) sees an unambiguous `family@version` string and
  *  doesn't need its own copy of the resolution logic.  Custom paths
  *  pass through verbatim; nothing to qualify there. */
-function qualifyDesign(
-  raw: string | undefined,
-  fallback: BuiltinPackFamily,
-): string {
+function qualifyDesign(raw: string | undefined, fallback: BuiltinPackFamily): string {
   const value = raw ?? fallback;
   const parsed = parseBuiltinDesignRef(value);
   // Built-in family: return the parsed `family@version` (handles both
@@ -235,9 +229,7 @@ function requirementPropValue(
   }
 }
 
-function lowerRequirement(
-  r: import("../language/generated/ast.js").Requirement,
-): RequirementIR {
+function lowerRequirement(r: import("../language/generated/ast.js").Requirement): RequirementIR {
   let type: RequirementType = "UserStory";
   let title = "";
   let status: RequirementStatus | undefined;
@@ -262,9 +254,7 @@ function lowerRequirement(
   return { id: r.name, type, title, status, priority, parentId: r.parent?.ref?.name };
 }
 
-function lowerSolution(
-  s: import("../language/generated/ast.js").Solution,
-): SolutionIR {
+function lowerSolution(s: import("../language/generated/ast.js").Solution): SolutionIR {
   return {
     id: s.name,
     forRequirement: s.requirement?.ref?.name ?? "",
@@ -273,9 +263,7 @@ function lowerSolution(
   };
 }
 
-function lowerTestCase(
-  t: import("../language/generated/ast.js").TestCase,
-): TestCaseIR {
+function lowerTestCase(t: import("../language/generated/ast.js").TestCase): TestCaseIR {
   return {
     id: t.name,
     verifies: t.requirement?.ref?.name ?? "",
@@ -285,9 +273,7 @@ function lowerTestCase(
 }
 
 function lowerCodeRefs(
-  refs: readonly import("langium").Reference<
-    import("../language/generated/ast.js").Targetable
-  >[],
+  refs: readonly import("langium").Reference<import("../language/generated/ast.js").Targetable>[],
 ): CodeRefIR[] {
   const out: CodeRefIR[] = [];
   for (const ref of refs) {
@@ -298,9 +284,7 @@ function lowerCodeRefs(
   return out;
 }
 
-function codeRefKindOf(
-  node: import("../language/generated/ast.js").Targetable,
-): CodeRefKind {
+function codeRefKindOf(node: import("../language/generated/ast.js").Targetable): CodeRefKind {
   switch (node.$type) {
     case "Module":
       return "module";
@@ -339,11 +323,13 @@ function lowerSystem(sys: import("../language/generated/ast.js").System): System
   for (const m of sys.members) {
     if (isUserBlock(m)) {
       user = {
-        fields: m.fields.map((f): FieldIR => ({
-          name: f.name,
-          type: lowerType(f.type),
-          optional: !!f.type?.optional,
-        })),
+        fields: m.fields.map(
+          (f): FieldIR => ({
+            name: f.name,
+            type: lowerType(f.type),
+            optional: !!f.type?.optional,
+          }),
+        ),
       };
     } else if (isThemeBlock(m)) {
       // Theme props are name/value pairs; we lower into a typed
@@ -422,8 +408,7 @@ function lowerSystem(sys: import("../language/generated/ast.js").System): System
     //   - `phoenixLiveView` is fullstack — emit BOTH a UI spec (driven
     //     by Playwright page objects) AND an API spec (driven by
     //     fetch against the deployable's HTTP surface).
-    const isFrontendOnly =
-      targetPlatform === "react" || targetPlatform === "static";
+    const isFrontendOnly = targetPlatform === "react" || targetPlatform === "static";
     const isFullstack = targetPlatform === "phoenixLiveView";
     if (isFrontendOnly) {
       e2eTests.push(lowerE2E(b, e2eEnv, "ui"));
@@ -442,24 +427,19 @@ function lowerSystem(sys: import("../language/generated/ast.js").System): System
   // each turned into their literal IR shape (no scaffold expansion,
   // no body type inference yet — those come in later slices).
   const uis = sys.members
-    .filter(
-      (m): m is import("../language/generated/ast.js").Ui => m.$type === "Ui",
-    )
+    .filter((m): m is import("../language/generated/ast.js").Ui => m.$type === "Ui")
     .map((u) => lowerUi(u));
   // Api declarations — system-level peers to module / ui / deployable.
   const apis = sys.members
-    .filter(
-      (m): m is import("../language/generated/ast.js").Api => m.$type === "Api",
-    )
-    .map((a): ApiIR => ({
-      name: a.name,
-      sourceModule: a.source?.$refText ?? "",
-    }));
+    .filter((m): m is import("../language/generated/ast.js").Api => m.$type === "Api")
+    .map(
+      (a): ApiIR => ({
+        name: a.name,
+        sourceModule: a.source?.$refText ?? "",
+      }),
+    );
   const storages = sys.members
-    .filter(
-      (m): m is import("../language/generated/ast.js").Storage =>
-        m.$type === "Storage",
-    )
+    .filter((m): m is import("../language/generated/ast.js").Storage => m.$type === "Storage")
     .map((s): import("./loom-ir.js").StorageIR => ({
       name: s.name,
       type: s.type as import("./loom-ir.js").StorageKind,
@@ -540,7 +520,11 @@ function conventionalEmitPath(
   origin: import("./loom-ir.js").ScaffoldOriginIR,
   ctx: import("./scaffold-expander.js").ScaffoldExpandContext,
 ): string | undefined {
-  if (origin.kind === "aggregate-list" || origin.kind === "aggregate-new" || origin.kind === "aggregate-detail") {
+  if (
+    origin.kind === "aggregate-list" ||
+    origin.kind === "aggregate-new" ||
+    origin.kind === "aggregate-detail"
+  ) {
     const agg = ctx.aggregatesByName.get(origin.aggregateName);
     if (!agg) return undefined;
     const slug = pluralSnake(agg.name);
@@ -659,9 +643,7 @@ function lowerE2E(
   };
 }
 
-function lowerDeployable(
-  d: import("../language/generated/ast.js").Deployable,
-): DeployableIR {
+function lowerDeployable(d: import("../language/generated/ast.js").Deployable): DeployableIR {
   const { family: platform, ref: platformRef } = qualifyPlatform(d.platform);
   // `auth: required` is the only AuthMode in slice 1A.  Future modes
   // (`optional` / `forbidden`) would extend this branch.
@@ -675,10 +657,10 @@ function lowerDeployable(
   // `ui:`; backend-only dotnet drops the field.  Other platforms
   // (`hono`) silently drop `design:` and the validator already warns.
   const uiName =
-    d.uiSugar?.ref?.ref?.name
-    ?? d.uiCompose?.ref?.ref?.name
-    ?? d.uiBlock?.ref?.ref?.name
-    ?? undefined;
+    d.uiSugar?.ref?.ref?.name ??
+    d.uiCompose?.ref?.ref?.name ??
+    d.uiBlock?.ref?.ref?.name ??
+    undefined;
   const design =
     platform === "react" || platform === "static"
       ? qualifyDesign(d.design, "mantine")
@@ -700,8 +682,8 @@ function lowerDeployable(
   // renders LiveView; react/static render React.  Backends without a
   // `ui:` binding leave this undefined.
   const uiFramework =
-    d.uiBlock?.framework
-    ?? (uiName
+    d.uiBlock?.framework ??
+    (uiName
       ? platform === "phoenixLiveView"
         ? "phoenixLiveView"
         : platform === "react" || platform === "static" || platform === "dotnet"
@@ -709,9 +691,7 @@ function lowerDeployable(
           : undefined
       : undefined);
   // Slice 11.26 — explicit api composition.
-  const serves = (d.serves ?? [])
-    .map((r) => r.ref?.name ?? "")
-    .filter(Boolean);
+  const serves = (d.serves ?? []).map((r) => r.ref?.name ?? "").filter(Boolean);
   const uiBindings = (d.uiCompose?.bindings ?? []).map(
     (b): import("./loom-ir.js").UiParamBindingIR => ({
       paramName: b.name,
@@ -786,11 +766,9 @@ function lowerUi(ui: import("../language/generated/ast.js").Ui): UiIR {
         name: m.name,
         apiName: m.apiRef?.$refText ?? "",
       });
-    }
-    else if (m.$type === "UiHelperImport") {
+    } else if (m.$type === "UiHelperImport") {
       helperImports.push({ name: m.name, path: m.path });
-    }
-    else if (m.$type === "MenuBlock") {
+    } else if (m.$type === "MenuBlock") {
       // First menu block wins.  Validator (Slice 3) flags a duplicate
       // `menu { ... }` block at ui scope as an error.
       if (!menu) menu = lowerMenuBlock(m);
@@ -828,8 +806,7 @@ function lowerPage(p: import("../language/generated/ast.js").Page): PageIR {
   for (const prop of p.props) {
     if (prop.$type === "RouteProp") route = prop.value;
     else if (prop.$type === "TitleProp") title = lowerExpr(prop.value, env);
-    else if (prop.$type === "RequiresProp")
-      requires = lowerExpr(prop.expr, env);
+    else if (prop.$type === "RequiresProp") requires = lowerExpr(prop.expr, env);
     else if (prop.$type === "BodyProp") body = lowerExpr(prop.expr, env);
     else if (prop.$type === "StateBlock") {
       for (const f of prop.fields) state.push(lowerStateField(f, env));
@@ -943,9 +920,7 @@ function inferScaffoldOrigin(
   return undefined;
 }
 
-function lowerComponent(
-  c: import("../language/generated/ast.js").Component,
-): ComponentIR {
+function lowerComponent(c: import("../language/generated/ast.js").Component): ComponentIR {
   const params = c.params.map((param) => ({
     name: param.name,
     type: lowerType(param.type),
@@ -972,18 +947,14 @@ function lowerStateField(
   };
 }
 
-function lowerScaffold(
-  s: import("../language/generated/ast.js").Scaffold,
-): ScaffoldIR {
+function lowerScaffold(s: import("../language/generated/ast.js").Scaffold): ScaffoldIR {
   return {
     selector: s.selector as ScaffoldSelector,
     targets: s.targets.map((t) => t).filter(Boolean),
   };
 }
 
-function lowerMenuBlock(
-  m: import("../language/generated/ast.js").MenuBlock,
-): MenuBlockIR {
+function lowerMenuBlock(m: import("../language/generated/ast.js").MenuBlock): MenuBlockIR {
   const env: Env = { locals: new Map(), user: undefined };
   return {
     sections: m.sections.map((sec) => ({
@@ -1084,9 +1055,7 @@ function lowerValueObject(vo: ValueObject, env: Env): ValueObjectIR {
   return {
     name: vo.name,
     fields: props.map((p) => lowerField(p)),
-    derived: vo.members.filter(isDerivedProp).map((d) =>
-      lowerDerived(d, inner),
-    ),
+    derived: vo.members.filter(isDerivedProp).map((d) => lowerDerived(d, inner)),
     invariants: [
       ...vo.members.filter(isInvariant).map((i) => lowerInvariant(i, inner)),
       ...lowerPropertyChecks(props, inner),
@@ -1138,10 +1107,7 @@ function lowerAggregate(agg: Aggregate, env: Env): AggregateIR {
   };
 }
 
-function lowerTest(
-  block: import("../language/generated/ast.js").TestBlock,
-  env: Env,
-): TestIR {
+function lowerTest(block: import("../language/generated/ast.js").TestBlock, env: Env): TestIR {
   let inner = env;
   const statements: TestStmtIR[] = [];
   for (const s of block.body) {
@@ -1166,11 +1132,7 @@ function lowerTest(
   return { name: block.name, statements, verifiesTestCase: block.verifies?.ref?.name };
 }
 
-function lowerEntityPart(
-  part: EntityPart,
-  agg: Aggregate,
-  outer: Env,
-): EntityPartIR {
+function lowerEntityPart(part: EntityPart, agg: Aggregate, outer: Env): EntityPartIR {
   const inner = inPart(outer, agg, part);
   const props = part.members.filter(isProperty) as Property[];
   return {
@@ -1204,11 +1166,7 @@ function lowerRepository(
       // the validator (`validateAuth`) then rejects any current-user
       // reference inside a where filter, since slice 1A doesn't
       // support row-level filtering by user (slice 1C).
-      let env = newEnv(
-        repo.$container as BoundedContext,
-        user,
-        modulePermissions,
-      );
+      let env = newEnv(repo.$container as BoundedContext, user, modulePermissions);
       if (aggRoot) env = inAggregate(env, aggRoot);
       for (const p of f.params) {
         env = withLocal(env, p.name, "param", lowerType(p.type));
@@ -1254,9 +1212,7 @@ function lowerView(view: View, env: Env): ViewIR {
     for (const b of binds) {
       collectIdFollows(b.expr, auxByKey);
     }
-    const ordered = [...auxByKey.values()].sort(
-      (a, b) => a.path.length - b.path.length,
-    );
+    const ordered = [...auxByKey.values()].sort((a, b) => a.path.length - b.path.length);
     const auxiliaries = ordered.map((a) => ({
       ...a,
       mapVar: mapVarForPath(a.path, a.aggName),
@@ -1397,9 +1353,7 @@ function lowerField(p: Property): FieldIR {
   };
 }
 
-function lowerContainment(
-  c: import("../language/generated/ast.js").Containment,
-): ContainmentIR {
+function lowerContainment(c: import("../language/generated/ast.js").Containment): ContainmentIR {
   return {
     name: c.name,
     partName: c.partType?.ref?.name ?? "Unknown",
@@ -1407,10 +1361,7 @@ function lowerContainment(
   };
 }
 
-function lowerDerived(
-  d: import("../language/generated/ast.js").DerivedProp,
-  env: Env,
-): DerivedIR {
+function lowerDerived(d: import("../language/generated/ast.js").DerivedProp, env: Env): DerivedIR {
   return {
     name: d.name,
     type: lowerType(d.type),
@@ -1511,11 +1462,7 @@ function lowerOperation(op: Operation, env: Env): OperationIR {
 // saves; a repo-let saves only when a later `op-call` targets it.
 // ---------------------------------------------------------------------------
 
-function lowerWorkflow(
-  wf: Workflow,
-  env: Env,
-  ctx: BoundedContext,
-): WorkflowIR {
+function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): WorkflowIR {
   let inner = env;
   const params: ParamIR[] = [];
   for (const p of wf.params) {
@@ -1537,13 +1484,7 @@ function lowerWorkflow(
   const letAggs = new Map<string, { aggName: string; repoName: string }>();
   const statements: WorkflowStmtIR[] = [];
   for (const s of wf.body) {
-    const lowered = lowerWorkflowStatement(
-      s,
-      inner,
-      aggsByName,
-      reposByName,
-      repoForAgg,
-    );
+    const lowered = lowerWorkflowStatement(s, inner, aggsByName, reposByName, repoForAgg);
     statements.push(lowered.stmt);
     inner = lowered.envAfter;
     if (lowered.binding) letAggs.set(lowered.binding.name, lowered.binding);
@@ -1640,8 +1581,7 @@ function lowerWorkflowStatement(
     // factory-let: `Agg.create({fields})`
     const factory = matchFactoryCall(expr, aggsByName);
     if (factory) {
-      const repoName =
-        repoForAgg.get(factory.aggName) ?? plural(factory.aggName);
+      const repoName = repoForAgg.get(factory.aggName) ?? plural(factory.aggName);
       const fields = factory.fields.map((f) => ({
         name: f.name,
         value: lowerExpr(f.value, env),
@@ -1674,8 +1614,7 @@ function lowerWorkflowStatement(
       // The let binding's local type is the unwrapped aggregate
       // (validator rejects array/optional repo-lets).  Use the
       // declared return type so the validator can flag misuse.
-      const localType: TypeIR =
-        returnType.kind === "entity" ? returnType : returnType;
+      const localType: TypeIR = returnType.kind === "entity" ? returnType : returnType;
       return {
         stmt: {
           kind: "repo-let",

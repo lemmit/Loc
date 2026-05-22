@@ -5,23 +5,20 @@ import type {
   ExprIR,
   FieldIR,
 } from "../../../ir/loom-ir.js";
-import { pascal, plural, snake } from "../../../util/naming.js";
 import { lines } from "../../../util/code-builder.js";
+import { pascal, plural, snake } from "../../../util/naming.js";
 
 // AppDbContext + per-aggregate IEntityTypeConfiguration<T>.  The
 // configuration walks each aggregate's fields/contains and emits the
 // matching `HasConversion` / `OwnsOne` / `OwnsMany` calls.
 
 export function renderDbContext(ctx: BoundedContextIR, ns: string): string {
-  const aggUsings = ctx.aggregates.map(
-    (a) => `using ${ns}.Domain.${plural(a.name)};`,
-  );
+  const aggUsings = ctx.aggregates.map((a) => `using ${ns}.Domain.${plural(a.name)};`);
   const dbSets = ctx.aggregates.map(
     (a) => `    public DbSet<${a.name}> ${plural(pascal(a.name))} => Set<${a.name}>();`,
   );
   const applyConfigs = ctx.aggregates.map(
-    (a) =>
-      `        modelBuilder.ApplyConfiguration(new Configurations.${a.name}Configuration());`,
+    (a) => `        modelBuilder.ApplyConfiguration(new Configurations.${a.name}Configuration());`,
   );
   return (
     lines(
@@ -44,15 +41,9 @@ export function renderDbContext(ctx: BoundedContextIR, ns: string): string {
   );
 }
 
-export function renderConfiguration(
-  agg: AggregateIR,
-  ns: string,
-  ctx: BoundedContextIR,
-): string {
+export function renderConfiguration(agg: AggregateIR, ns: string, ctx: BoundedContextIR): string {
   const fieldConfigs = agg.fields.flatMap((f) => fieldConfigLines(f, "        ", "b"));
-  const containmentLines = agg.contains.flatMap((c) =>
-    containmentConfigLines(c, agg),
-  );
+  const containmentLines = agg.contains.flatMap((c) => containmentConfigLines(c, agg));
   // Emit HasIndex for every aggregate-root column referenced by a
   // repository find — same set the Drizzle schema indexes.  Without
   // these, `find byEmail` / `byCustomer` etc. run sequential scans
@@ -93,10 +84,7 @@ export function renderConfiguration(
 /** Aggregate-root columns referenced by any of this aggregate's
  * repository finds — either explicitly via `where this.<col>` or
  * implicitly via convention-based parameter-name matching. */
-function indexedColumnsFor(
-  agg: AggregateIR,
-  ctx: BoundedContextIR,
-): Set<string> {
+function indexedColumnsFor(agg: AggregateIR, ctx: BoundedContextIR): Set<string> {
   const out = new Set<string>();
   const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
   if (!repo) return out;
@@ -149,20 +137,14 @@ function pascalCol(name: string, _agg: AggregateIR): string {
   return name.length === 0 ? name : name[0]!.toUpperCase() + name.slice(1);
 }
 
-function fieldConfigLines(
-  f: FieldIR,
-  indent: string,
-  builder: string,
-): string[] {
+function fieldConfigLines(f: FieldIR, indent: string, builder: string): string[] {
   if (f.type.kind === "id") {
     return [
       `${indent}${builder}.Property(x => x.${pascal(f.name)}).HasConversion(v => v.Value, v => new ${f.type.targetName}Id(v));`,
     ];
   }
   if (f.type.kind === "enum") {
-    return [
-      `${indent}${builder}.Property(x => x.${pascal(f.name)}).HasConversion<string>();`,
-    ];
+    return [`${indent}${builder}.Property(x => x.${pascal(f.name)}).HasConversion<string>();`];
   }
   if (f.type.kind === "valueobject") {
     return [`${indent}${builder}.OwnsOne<${f.type.name}>(x => x.${pascal(f.name)});`];
@@ -170,18 +152,13 @@ function fieldConfigLines(
   return [];
 }
 
-function containmentConfigLines(
-  c: ContainmentIR,
-  agg: AggregateIR,
-): string[] {
+function containmentConfigLines(c: ContainmentIR, agg: AggregateIR): string[] {
   if (!c.collection) {
     return [`        b.OwnsOne<${c.partName}>(x => x.${pascal(c.name)});`];
   }
   const part = agg.parts.find((p) => p.name === c.partName);
   const partFields = part?.fields ?? [];
-  const partFieldLines = partFields.flatMap((f) =>
-    fieldConfigLines(f, "            ", "o"),
-  );
+  const partFieldLines = partFields.flatMap((f) => fieldConfigLines(f, "            ", "o"));
   return [
     "        // Ignore the public read-accessor and tell EF to map the",
     "        // private backing field instead.",

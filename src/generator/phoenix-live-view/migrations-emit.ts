@@ -1,10 +1,5 @@
-import type {
-  AggregateIR,
-  BoundedContextIR,
-  FieldIR,
-  TypeIR,
-} from "../../ir/loom-ir.js";
-import { snake, plural } from "../../util/naming.js";
+import type { AggregateIR, BoundedContextIR, FieldIR, TypeIR } from "../../ir/loom-ir.js";
+import { plural, snake } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Migration emission for Phoenix LiveView / Ash.
@@ -140,13 +135,20 @@ function typeToEctoColumn(t: TypeIR): ColType {
   switch (t.kind) {
     case "primitive":
       switch (t.name) {
-        case "int": return { colType: ":integer", opts: "" };
-        case "long": return { colType: ":bigint", opts: "" };
-        case "decimal": return { colType: ":decimal", opts: "" };
-        case "string": return { colType: ":text", opts: "" };
-        case "bool": return { colType: ":boolean", opts: "" };
-        case "datetime": return { colType: ":utc_datetime", opts: "" };
-        case "guid": return { colType: ":uuid", opts: "" };
+        case "int":
+          return { colType: ":integer", opts: "" };
+        case "long":
+          return { colType: ":bigint", opts: "" };
+        case "decimal":
+          return { colType: ":decimal", opts: "" };
+        case "string":
+          return { colType: ":text", opts: "" };
+        case "bool":
+          return { colType: ":boolean", opts: "" };
+        case "datetime":
+          return { colType: ":utc_datetime", opts: "" };
+        case "guid":
+          return { colType: ":uuid", opts: "" };
       }
     /* eslint-disable-next-line no-fallthrough */
     case "id":
@@ -167,10 +169,14 @@ function typeToEctoColumn(t: TypeIR): ColType {
 
 function idColumnType(idValueType: string): string {
   switch (idValueType) {
-    case "int": return ":integer";
-    case "long": return ":bigint";
-    case "string": return ":string";
-    default: return ":uuid";
+    case "int":
+      return ":integer";
+    case "long":
+      return ":bigint";
+    case "string":
+      return ":string";
+    default:
+      return ":uuid";
   }
 }
 
@@ -179,9 +185,7 @@ function buildIndexes(agg: AggregateIR): string {
   for (const field of agg.fields) {
     if (field.type.kind === "id") {
       const tableName = plural(snake(agg.name));
-      idxLines.push(
-        `    create index(:${tableName}, [:${snake(field.name)}])`,
-      );
+      idxLines.push(`    create index(:${tableName}, [:${snake(field.name)}])`);
     }
   }
   return idxLines.join("\n") + (idxLines.length > 0 ? "\n" : "");

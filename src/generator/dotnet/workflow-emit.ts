@@ -44,23 +44,14 @@ export function emitWorkflows(
 
   for (const wf of ctx.workflows) {
     const usage = analyseWorkflow(wf, aggsByName);
-    out.set(
-      `Application/Workflows/${pascal(wf.name)}Request.cs`,
-      renderRequestDto(wf, ctx, ns),
-    );
-    out.set(
-      `Application/Workflows/${pascal(wf.name)}Command.cs`,
-      renderCommand(wf, ns),
-    );
+    out.set(`Application/Workflows/${pascal(wf.name)}Request.cs`, renderRequestDto(wf, ctx, ns));
+    out.set(`Application/Workflows/${pascal(wf.name)}Command.cs`, renderCommand(wf, ns));
     out.set(
       `Application/Workflows/${pascal(wf.name)}Handler.cs`,
       renderHandler(wf, usage, ns, ctx),
     );
   }
-  out.set(
-    `Api/${ctx.name}WorkflowsController.cs`,
-    renderController(ctx, ns, options?.routePrefix),
-  );
+  out.set(`Api/${ctx.name}WorkflowsController.cs`, renderController(ctx, ns, options?.routePrefix));
 }
 
 // ---------------------------------------------------------------------------
@@ -78,10 +69,7 @@ interface WorkflowUsage {
   externs: Map<string, { aggName: string; opName: string }>;
 }
 
-function analyseWorkflow(
-  wf: WorkflowIR,
-  aggsByName: Map<string, AggregateIR>,
-): WorkflowUsage {
+function analyseWorkflow(wf: WorkflowIR, aggsByName: Map<string, AggregateIR>): WorkflowUsage {
   const repos = new Map<string, string>();
   const externs = new Map<string, { aggName: string; opName: string }>();
   let hasEmit = false;
@@ -109,11 +97,7 @@ function analyseWorkflow(
 // Request DTO — wire-shape parameter record.
 // ---------------------------------------------------------------------------
 
-function renderRequestDto(
-  wf: WorkflowIR,
-  ctx: BoundedContextIR,
-  ns: string,
-): string {
+function renderRequestDto(wf: WorkflowIR, ctx: BoundedContextIR, ns: string): string {
   const params = wf.params
     .map((p) => `${wireType(p.type, ctx, "request")} ${pascal(p.name)}`)
     .join(", ");
@@ -132,9 +116,7 @@ public sealed record ${pascal(wf.name)}Request(${params});
 // ---------------------------------------------------------------------------
 
 function renderCommand(wf: WorkflowIR, ns: string): string {
-  const params = wf.params
-    .map((p) => `${renderCsType(p.type)} ${pascal(p.name)}`)
-    .join(", ");
+  const params = wf.params.map((p) => `${renderCsType(p.type)} ${pascal(p.name)}`).join(", ");
   return `// Auto-generated.
 using Mediator;
 using ${ns}.Domain.Ids;
@@ -195,7 +177,9 @@ function renderHandler(
   // Statement rendering.
   const stmtLines: string[] = [];
   if (usage.hasEmit) {
-    stmtLines.push("        var _workflowEvents = new System.Collections.Generic.List<IDomainEvent>();");
+    stmtLines.push(
+      "        var _workflowEvents = new System.Collections.Generic.List<IDomainEvent>();",
+    );
   }
   // Substitute parameter references: cmd.<PascalName>.  Inside lowerExpr-produced ExprIR,
   // params resolve as `name` refs which renderCsExpr would render as bare identifiers.
@@ -243,9 +227,10 @@ function renderHandler(
   }
   body += "        return Unit.Value;\n";
 
-  const ctor = ctorParamPairs.length === 0
-    ? `    public ${handlerName}() { }`
-    : `    public ${handlerName}(${ctorParamPairs.join(", ")})\n    {\n        ${ctorAssigns.join("; ")};\n    }`;
+  const ctor =
+    ctorParamPairs.length === 0
+      ? `    public ${handlerName}() { }`
+      : `    public ${handlerName}(${ctorParamPairs.join(", ")})\n    {\n        ${ctorAssigns.join("; ")};\n    }`;
 
   // Per-aggregate namespace imports.  Repos/aggregate types live
   // in `Domain.<Plural>`; extern handler interfaces + their request
@@ -255,9 +240,7 @@ function renderHandler(
     ...[...usage.externs.values()].map((e) => e.aggName),
   ]);
   const aggUsings = [
-    ...new Set(
-      [...aggsTouched].map((agg) => `using ${ns}.Domain.${pascalPlural(agg)};`),
-    ),
+    ...new Set([...aggsTouched].map((agg) => `using ${ns}.Domain.${pascalPlural(agg)};`)),
   ];
   const externUsings = [
     ...new Set(
@@ -333,9 +316,7 @@ function renderStatement(
       ];
     }
     case "emit": {
-      const args = st.fields
-        .map((f) => `${pascal(f.name)}: ${renderArg(f.value)}`)
-        .join(", ");
+      const args = st.fields.map((f) => `${pascal(f.name)}: ${renderArg(f.value)}`).join(", ");
       return [`${INDENT}_workflowEvents.Add(new ${st.eventName}(${args}));`];
     }
     case "factory-let": {
@@ -367,9 +348,7 @@ function renderStatement(
         // wraps in `domainToRequestExpr` so Id<X>.Value, enum
         // .ToString(), VO → <VO>Request etc. all line up.
         const requestArgs = op.params
-          .map((p, i) =>
-            domainToRequestExpr(renderArg(st.args[i]!), p.type, ctx),
-          )
+          .map((p, i) => domainToRequestExpr(renderArg(st.args[i]!), p.type, ctx))
           .join(", ");
         return [
           `${INDENT}${st.target}.Check${pascal(st.op)}(${argList});`,
@@ -454,19 +433,13 @@ function renderExprWithCmdParams(
 // Controller — one class per context exposing every workflow as a POST.
 // ---------------------------------------------------------------------------
 
-function renderController(
-  ctx: BoundedContextIR,
-  ns: string,
-  routePrefix?: string,
-): string {
+function renderController(ctx: BoundedContextIR, ns: string, routePrefix?: string): string {
   const className = `${ctx.name}WorkflowsController`;
   const route = `${routePrefix ?? ""}workflows`;
   const blocks: string[] = [];
   for (const wf of ctx.workflows) {
     const cmdArgs = wf.params
-      .map((p) =>
-        wireToCommandArgument(`request.${pascal(p.name)}`, p.type, ctx),
-      )
+      .map((p) => wireToCommandArgument(`request.${pascal(p.name)}`, p.type, ctx))
       .join(",\n            ");
     blocks.push(
       `    [HttpPost("${snake(wf.name)}")]\n` +

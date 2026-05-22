@@ -7,9 +7,7 @@ import { renderCsType } from "../render-expr.js";
 // PascalCase.
 
 export function renderEvent(e: EventIR, ns: string): string {
-  const params = e.fields
-    .map((f) => `${renderCsType(f.type)} ${pascal(f.name)}`)
-    .join(", ");
+  const params = e.fields.map((f) => `${renderCsType(f.type)} ${pascal(f.name)}`).join(", ");
   return `// Auto-generated.
 using ${ns}.Domain.Ids;
 

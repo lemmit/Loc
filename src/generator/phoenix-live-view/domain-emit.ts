@@ -1,3 +1,4 @@
+import { classifyForWire, singleFieldShape } from "../../ir/invariant-classify.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -8,13 +9,9 @@ import type {
   InvariantIR,
   OperationIR,
 } from "../../ir/loom-ir.js";
-import { snake, pascal } from "../../util/naming.js";
-import { renderExpr, renderAshType, type RenderCtx } from "./render-expr.js";
+import { pascal, snake } from "../../util/naming.js";
+import { type RenderCtx, renderAshType, renderExpr } from "./render-expr.js";
 import { renderElixirStatements } from "./render-stmt.js";
-import {
-  classifyForWire,
-  singleFieldShape,
-} from "../../ir/invariant-classify.js";
 
 // ---------------------------------------------------------------------------
 // Ash domain emitter — per `AggregateIR` produce one `Ash.Resource` module.
@@ -62,7 +59,12 @@ function renderAggregateResource(
   const renderCtx: RenderCtx = { thisName: "record", contextModule: ctxModule };
 
   // Build the @derive field list: :id, all declared fields, :inserted_at, :updated_at
-  const deriveFields = [":id", ...agg.fields.map((f) => `:${snake(f.name)}`), ":inserted_at", ":updated_at"].join(", ");
+  const deriveFields = [
+    ":id",
+    ...agg.fields.map((f) => `:${snake(f.name)}`),
+    ":inserted_at",
+    ":updated_at",
+  ].join(", ");
 
   return `defmodule ${moduleName} do
   @derive {Jason.Encoder, only: [${deriveFields}]}
@@ -167,10 +169,7 @@ function renderAttribute(f: FieldIR, ctxModule: string): string {
 // Relationships
 // ---------------------------------------------------------------------------
 
-function renderRelationships(
-  contains: ContainmentIR[],
-  ctxModule: string,
-): string {
+function renderRelationships(contains: ContainmentIR[], ctxModule: string): string {
   if (contains.length === 0) return "";
   const lines = contains.map((c) => {
     const relName = snake(c.name);
@@ -187,10 +186,7 @@ function renderRelationships(
 // Calculations (derived properties)
 // ---------------------------------------------------------------------------
 
-function renderCalculations(
-  derived: DerivedIR[],
-  ctx: RenderCtx,
-): string {
+function renderCalculations(derived: DerivedIR[], ctx: RenderCtx): string {
   if (derived.length === 0) return "";
   const lines = derived.map((d) => {
     const ashType = renderAshType(d.type, ctx.contextModule);
@@ -259,9 +255,7 @@ function renderActions(
       accept [${fieldNames.join(", ")}]
     end`;
 
-  const opActions = ops.map((op) =>
-    renderOperationAction(op, renderCtx, ctxModule),
-  );
+  const opActions = ops.map((op) => renderOperationAction(op, renderCtx, ctxModule));
 
   return `\n  actions do
     defaults [:read, :update, :destroy]
@@ -271,11 +265,7 @@ ${opActions.join("\n")}
   end\n`;
 }
 
-function renderOperationAction(
-  op: OperationIR,
-  ctx: RenderCtx,
-  _ctxModule: string,
-): string {
+function renderOperationAction(op: OperationIR, ctx: RenderCtx, _ctxModule: string): string {
   const args = op.params
     .map((p) => `      argument :${snake(p.name)}, ${renderAshType(p.type, ctx.contextModule)}`)
     .join("\n");
@@ -290,9 +280,7 @@ function renderOperationAction(
   const stmts = renderElixirStatements(nonPrecondStmts, ctx, "changeset");
 
   const argsBlock = op.params.length > 0 ? `\n${args}` : "";
-  const validateBlock = validateLines.length > 0
-    ? `\n${validateLines.join("\n")}`
-    : "";
+  const validateBlock = validateLines.length > 0 ? `\n${validateLines.join("\n")}` : "";
   const changeBlock =
     nonPrecondStmts.length > 0
       ? `\n      change fn changeset, _context ->\n${stmts}\n        changeset\n      end`
@@ -381,7 +369,6 @@ function ashBuiltinValidate(
       return null;
   }
 }
-
 
 // ---------------------------------------------------------------------------
 // Helpers

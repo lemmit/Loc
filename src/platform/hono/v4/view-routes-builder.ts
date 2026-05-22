@@ -1,13 +1,7 @@
-import type {
-  AggregateIR,
-  BoundedContextIR,
-  ExprIR,
-  TypeIR,
-  ViewIR,
-} from "../../../ir/loom-ir.js";
+import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
+import type { AggregateIR, BoundedContextIR, ExprIR, TypeIR, ViewIR } from "../../../ir/loom-ir.js";
 import { viewUsesCurrentUser } from "../../../ir/loom-ir.js";
 import { camel, plural, snake } from "../../../util/naming.js";
-import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
 
 // ---------------------------------------------------------------------------
 // Hono view routes emission.
@@ -26,8 +20,7 @@ import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
 // pattern: typed Zod schemas, OpenAPI annotations, on-error filter.
 // ---------------------------------------------------------------------------
 
-const cap = (s: string): string =>
-  s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
+const cap = (s: string): string => (s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1));
 
 export function buildViewsRoutesFile(
   ctx: BoundedContextIR,
@@ -40,9 +33,7 @@ export function buildViewsRoutesFile(
   lines.push(
     `import { DomainError, AggregateNotFoundError, ForbiddenError, ExternHandlerError } from "../domain/errors";`,
   );
-  lines.push(
-    `import { type DomainEventDispatcher } from "../domain/events";`,
-  );
+  lines.push(`import { type DomainEventDispatcher } from "../domain/events";`);
   lines.push(`import type { NodePgDatabase } from "drizzle-orm/node-postgres";`);
   lines.push(`import type * as schema from "../db/schema";`);
   // Source aggregates + repo imports per view, plus any foreign
@@ -77,9 +68,7 @@ export function buildViewsRoutesFile(
   const vos = ctx.valueObjects.map((v) => v.name);
   const enums = ctx.enums.map((e) => e.name);
   if (vos.length + enums.length > 0) {
-    lines.push(
-      `import { ${[...vos, ...enums].join(", ")} } from "../domain/value-objects";`,
-    );
+    lines.push(`import { ${[...vos, ...enums].join(", ")} } from "../domain/value-objects";`);
   }
   lines.push("");
 
@@ -99,9 +88,7 @@ export function buildViewsRoutesFile(
   }
   if (ctx.views.some((v) => v.output)) lines.push("");
 
-  lines.push(
-    `export function viewsRoutes(`,
-  );
+  lines.push(`export function viewsRoutes(`);
   lines.push(`  db: NodePgDatabase<typeof schema>,`);
   lines.push(`  events: DomainEventDispatcher,`);
   lines.push(`): OpenAPIHono {`);
@@ -187,9 +174,7 @@ function emitViewRoute(
     for (const aux of view.output.auxiliaries) {
       const repoVar = `${camel(aux.aggName)}Repo`;
       const mapVar = aux.mapVar;
-      out.push(
-        `    const ${repoVar} = new ${aux.aggName}Repository(db, events);`,
-      );
+      out.push(`    const ${repoVar} = new ${aux.aggName}Repository(db, events);`);
       const idsSource = idsSourceForAux(aux, pathToMap);
       out.push(
         `    const ${mapVar} = new Map((await ${repoVar}.findManyByIds(${idsSource})).map((__a) => [__a.id as string, __a]));`,
@@ -197,10 +182,7 @@ function emitViewRoute(
       pathToMap.set(aux.path.join("."), { mapVar, aggName: aux.aggName });
     }
     const projectedFields = view.output.binds
-      .map(
-        (b) =>
-          `      ${b.name}: ${renderBindWithFollows(b.expr, "r", pathToMap)}`,
-      )
+      .map((b) => `      ${b.name}: ${renderBindWithFollows(b.expr, "r", pathToMap)}`)
       .join(",\n");
     out.push(`    const projected = rows.map((r) => ({\n${projectedFields},\n    }));`);
     out.push(

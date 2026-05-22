@@ -20,19 +20,15 @@ import {
   unwrapTextLiteral,
 } from "../shared/args.js";
 
-export function emitStat(
-  call: ExprIR & { kind: "call" },
-  ctx: WalkContext,
-  depth: number,
-): string {
+export function emitStat(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth: number): string {
   // Stat(label, value) — small headline-stat card.  No dedicated
   // component on either pack; both compose two stacked text
   // elements (dimmed label + bold value).
   const positionals = positionalArgs(call);
   const labelArg = positionals[0];
   const valueArg = positionals[1];
-  const label = labelArg ? renderTextContent(labelArg, ctx) ?? '""' : '""';
-  const value = valueArg ? renderTextContent(valueArg, ctx) ?? '""' : '""';
+  const label = labelArg ? (renderTextContent(labelArg, ctx) ?? '""') : '""';
+  const value = valueArg ? (renderTextContent(valueArg, ctx) ?? '""') : '""';
   const indent = "  ".repeat(depth + 1);
   const closeIndent = "  ".repeat(depth);
   return renderPrimitive(ctx, "primitive-stat", {
@@ -63,11 +59,7 @@ export function emitBadge(
   });
 }
 
-export function emitSlot(
-  call: ExprIR & { kind: "call" },
-  ctx: WalkContext,
-  depth: number,
-): string {
+export function emitSlot(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth: number): string {
   // Slice 11.19 — children-prop placeholder.  `Slot()` inside a
   // component's body emits `{children}`, the React idiom for
   // rendering whatever JSX the parent passed in.  Marks usesChildren

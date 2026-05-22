@@ -25,12 +25,7 @@
 //   }
 // ---------------------------------------------------------------------------
 
-import type {
-  AggregateIR,
-  BoundedContextIR,
-  PageIR,
-  TypeIR,
-} from "../../ir/loom-ir.js";
+import type { AggregateIR, BoundedContextIR, PageIR, TypeIR } from "../../ir/loom-ir.js";
 import { camel, pascal, plural, snake } from "../../util/naming.js";
 import { fillBlock } from "../react/page-objects-builder.js";
 
@@ -43,9 +38,7 @@ export interface BuildPlaywrightPageObjectArgs {
 
 /** Emit a Playwright page-object TypeScript module for one Phoenix LiveView
  *  page.  Caller writes the result to `e2e/pages/<page-snake>.ts`. */
-export function buildPlaywrightPageObject(
-  args: BuildPlaywrightPageObjectArgs,
-): string {
+export function buildPlaywrightPageObject(args: BuildPlaywrightPageObjectArgs): string {
   const { page, aggregatesByName, contextByAggName } = args;
   const origin = page.scaffoldOrigin;
 
@@ -74,16 +67,16 @@ export function buildPlaywrightPageObject(
       return buildAggregateDetailPageObject(page, agg, ctx);
     }
     case "workflow-form": {
-      const ctx = [...contextByAggName.values()].find(
-        (c) => c.workflows.some((w) => w.name === origin.workflowName),
+      const ctx = [...contextByAggName.values()].find((c) =>
+        c.workflows.some((w) => w.name === origin.workflowName),
       );
       const wf = ctx?.workflows.find((w) => w.name === origin.workflowName);
       if (!wf || !ctx) return buildFallback(page);
       return buildWorkflowFormPageObject(page, wf, ctx);
     }
     case "view-list": {
-      const ctx = [...contextByAggName.values()].find(
-        (c) => c.views.some((v) => v.name === origin.viewName),
+      const ctx = [...contextByAggName.values()].find((c) =>
+        c.views.some((v) => v.name === origin.viewName),
       );
       const view = ctx?.views.find((v) => v.name === origin.viewName);
       if (!view || !ctx) return buildFallback(page);
@@ -203,7 +196,9 @@ function buildAggregateListPageObject(
       lines.push(`  async ${opCamel}(): Promise<this> {`);
       lines.push(`    await this.page.getByTestId("${slug}-op-${op.name}").click();`);
       lines.push(`    await this.page.getByTestId("${slug}-op-${op.name}-submit").click();`);
-      lines.push(`    await this.page.getByTestId("${slug}-op-${op.name}-form").waitFor({ state: "detached" });`);
+      lines.push(
+        `    await this.page.getByTestId("${slug}-op-${op.name}-form").waitFor({ state: "detached" });`,
+      );
       lines.push(`    return this;`);
       lines.push(`  }`);
     } else {
@@ -212,11 +207,19 @@ function buildAggregateListPageObject(
       lines.push(`    await this.page.getByTestId("${slug}-op-${op.name}").click();`);
       lines.push(`    await this.page.getByTestId("${slug}-op-${op.name}-form").waitFor();`);
       for (const p of op.params) {
-        const fillLines = fillBlock("input", p.name, p.type, _ctx, `${slug}-op-${op.name}-input-${p.name}`);
+        const fillLines = fillBlock(
+          "input",
+          p.name,
+          p.type,
+          _ctx,
+          `${slug}-op-${op.name}-input-${p.name}`,
+        );
         for (const l of fillLines) lines.push(`    ${l}`);
       }
       lines.push(`    await this.page.getByTestId("${slug}-op-${op.name}-submit").click();`);
-      lines.push(`    await this.page.getByTestId("${slug}-op-${op.name}-form").waitFor({ state: "detached" });`);
+      lines.push(
+        `    await this.page.getByTestId("${slug}-op-${op.name}-form").waitFor({ state: "detached" });`,
+      );
       lines.push(`    return this;`);
       lines.push(`  }`);
     }
@@ -331,7 +334,9 @@ function buildAggregateDetailPageObject(
       lines.push(`  async ${opCamel}(): Promise<this> {`);
       lines.push(`    await this.page.getByTestId("${slug}-op-${op.name}").click();`);
       lines.push(`    await this.page.getByTestId("${slug}-op-${op.name}-submit").click();`);
-      lines.push(`    await this.page.getByTestId("${slug}-op-${op.name}-form").waitFor({ state: "detached" });`);
+      lines.push(
+        `    await this.page.getByTestId("${slug}-op-${op.name}-form").waitFor({ state: "detached" });`,
+      );
       lines.push(`    return this;`);
       lines.push(`  }`);
     } else {
@@ -340,11 +345,19 @@ function buildAggregateDetailPageObject(
       lines.push(`    await this.page.getByTestId("${slug}-op-${op.name}").click();`);
       lines.push(`    await this.page.getByTestId("${slug}-op-${op.name}-form").waitFor();`);
       for (const p of op.params) {
-        const fillLines = fillBlock("input", p.name, p.type, ctx, `${slug}-op-${op.name}-input-${p.name}`);
+        const fillLines = fillBlock(
+          "input",
+          p.name,
+          p.type,
+          ctx,
+          `${slug}-op-${op.name}-input-${p.name}`,
+        );
         for (const l of fillLines) lines.push(`    ${l}`);
       }
       lines.push(`    await this.page.getByTestId("${slug}-op-${op.name}-submit").click();`);
-      lines.push(`    await this.page.getByTestId("${slug}-op-${op.name}-form").waitFor({ state: "detached" });`);
+      lines.push(
+        `    await this.page.getByTestId("${slug}-op-${op.name}-form").waitFor({ state: "detached" });`,
+      );
       lines.push(`    return this;`);
       lines.push(`  }`);
     }
@@ -404,10 +417,7 @@ function buildWorkflowFormPageObject(
 // View-list page object
 // ---------------------------------------------------------------------------
 
-function buildViewListPageObject(
-  page: PageIR,
-  view: import("../../ir/loom-ir.js").ViewIR,
-): string {
+function buildViewListPageObject(page: PageIR, view: import("../../ir/loom-ir.js").ViewIR): string {
   const slug = snake(view.name);
   const className = `${pascal(page.name)}Page`;
   const route = page.route ?? `/views/${slug}`;
@@ -565,14 +575,19 @@ function buildGenericPageObject(page: PageIR): string {
 
   if (hasParams) {
     const paramList = page.params.map((p) => `${p.name}: string`).join(", ");
-    const urlExpr = routeAsTemplateLiteral(route, page.params.map((p) => p.name));
+    const urlExpr = routeAsTemplateLiteral(
+      route,
+      page.params.map((p) => p.name),
+    );
     lines.push(`  static urlFor(${paramList}): string {`);
     lines.push(`    return ${urlExpr};`);
     lines.push(`  }`);
     lines.push(`  constructor(public readonly page: Page) {}`);
     lines.push(``);
     lines.push(`  async goto(${paramList}): Promise<this> {`);
-    lines.push(`    await this.page.goto(${className}.urlFor(${page.params.map((p) => p.name).join(", ")}));`);
+    lines.push(
+      `    await this.page.goto(${className}.urlFor(${page.params.map((p) => p.name).join(", ")}));`,
+    );
     lines.push(`    return this;`);
     lines.push(`  }`);
   } else {

@@ -121,10 +121,7 @@ function anyNamedArgExpr(
  *  `() => …` keeps the generated code clean (no unused-var
  *  warnings).  Block-body lambdas emit a brace-wrapped sequence of
  *  statements; expression-body lambdas emit a single expression. */
-function emitLambdaBody(
-  lam: ExprIR & { kind: "lambda" },
-  ctx: WalkContext,
-): string {
+function emitLambdaBody(lam: ExprIR & { kind: "lambda" }, ctx: WalkContext): string {
   if (lam.block && lam.block.length > 0) {
     const stmts = lam.block.map((s) => emitStmt(s, ctx)).join(" ");
     return `() => { ${stmts} }`;
@@ -238,10 +235,7 @@ export function emitUserComponent(
     }
     // Advance the cursor past any params that were already filled
     // via a named arg.
-    while (
-      nextParamCursor < params.length &&
-      filledByName.has(params[nextParamCursor]!.name)
-    ) {
+    while (nextParamCursor < params.length && filledByName.has(params[nextParamCursor]!.name)) {
       nextParamCursor += 1;
     }
     const param = params[nextParamCursor];
@@ -254,17 +248,13 @@ export function emitUserComponent(
       childrenExprs.push(arg);
     }
   }
-  const open = attrs.length > 0
-    ? `<${call.name} ${attrs.join(" ")}`
-    : `<${call.name}`;
+  const open = attrs.length > 0 ? `<${call.name} ${attrs.join(" ")}` : `<${call.name}`;
   if (childrenExprs.length === 0) {
     return `${open} />`;
   }
   const indent = "  ".repeat(depth + 1);
   const closeIndent = "  ".repeat(depth);
-  const childTsx = childrenExprs
-    .map((c) => walk(c, ctx, depth + 1))
-    .join(`\n${indent}`);
+  const childTsx = childrenExprs.map((c) => walk(c, ctx, depth + 1)).join(`\n${indent}`);
   return `${open}>\n${indent}${childTsx}\n${closeIndent}</${call.name}>`;
 }
 

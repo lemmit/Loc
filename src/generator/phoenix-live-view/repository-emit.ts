@@ -1,11 +1,6 @@
-import type {
-  AggregateIR,
-  BoundedContextIR,
-  FindIR,
-  RepositoryIR,
-} from "../../ir/loom-ir.js";
-import { pascal, snake, plural } from "../../util/naming.js";
-import { renderExpr, type RenderCtx } from "./render-expr.js";
+import type { AggregateIR, BoundedContextIR, FindIR, RepositoryIR } from "../../ir/loom-ir.js";
+import { pascal, plural, snake } from "../../util/naming.js";
+import { type RenderCtx, renderExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
 // Repository / find emission for Ash.
@@ -41,9 +36,7 @@ export function buildFindActions(
   // redundant; leaving it would also force the domain to keep a
   // duplicate `define :all_X, action: :all` which adds noise without
   // adding behaviour.
-  return repo.finds
-    .filter((f) => f.name !== "all")
-    .map((find) => renderFindAction(find, agg, ctx));
+  return repo.finds.filter((f) => f.name !== "all").map((find) => renderFindAction(find, agg, ctx));
 }
 
 function renderFindAction(find: FindIR, agg: AggregateIR, ctx: RenderCtx): string {
@@ -116,9 +109,7 @@ export function emitFindsSideFile(
   const contextModule = `${appModule}.${pascal(ctx.name)}`;
   const findsCtx: RenderCtx = { thisName: "record", contextModule };
 
-  const actionBlocks = repo.finds.map((find) =>
-    renderFindAction(find, agg, findsCtx),
-  );
+  const actionBlocks = repo.finds.map((find) => renderFindAction(find, agg, findsCtx));
 
   // This file documents the custom finds but is not used in the primary
   // emission path (domain-emit splices find actions inline).
@@ -138,7 +129,14 @@ defmodule ${aggModule}.Finds do
   @doc "Custom find actions (for reference):"
   def actions do
     [
-${actionBlocks.map((b) => b.split("\n").map((l) => "      " + l).join("\n")).join(",\n")}
+${actionBlocks
+  .map((b) =>
+    b
+      .split("\n")
+      .map((l) => "      " + l)
+      .join("\n"),
+  )
+  .join(",\n")}
     ]
   end
 end
@@ -150,10 +148,7 @@ end
 }
 
 /** Find the repository for an aggregate in a context, if declared. */
-export function findRepoFor(
-  ctx: BoundedContextIR,
-  aggName: string,
-): RepositoryIR | undefined {
+export function findRepoFor(ctx: BoundedContextIR, aggName: string): RepositoryIR | undefined {
   return ctx.repositories.find((r) => r.aggregateName === aggName);
 }
 
@@ -189,5 +184,5 @@ export function mergeViewFindsForAgg(
 }
 
 // Re-export for convenience
-export type { RepositoryIR, FindIR };
-export { plural, pascal, snake };
+export type { FindIR, RepositoryIR };
+export { pascal, plural, snake };

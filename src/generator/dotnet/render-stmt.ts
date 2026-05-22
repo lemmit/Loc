@@ -25,9 +25,7 @@ function renderCsStatement(s: StmtIR): string {
     case "remove":
       return `${INDENT}${renderPrivatePath(s.target)}.Remove(${renderCsExpr(s.value)});`;
     case "emit": {
-      const args = s.fields
-        .map((f) => `${pascal(f.name)}: ${renderCsExpr(f.value)}`)
-        .join(", ");
+      const args = s.fields.map((f) => `${pascal(f.name)}: ${renderCsExpr(f.value)}`).join(", ");
       return `${INDENT}_domainEvents.Add(new ${s.eventName}(${args}));`;
     }
     case "call": {

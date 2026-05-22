@@ -5,10 +5,7 @@ import type {
   RepositoryIR,
   TypeIR,
 } from "../../ir/loom-ir.js";
-import {
-  findUsesCurrentUser,
-  operationUsesCurrentUser,
-} from "../../ir/loom-ir.js";
+import { findUsesCurrentUser, operationUsesCurrentUser } from "../../ir/loom-ir.js";
 import { pascal, plural } from "../../util/naming.js";
 import {
   aggregateResponseParams,
@@ -30,10 +27,7 @@ import {
   renderRequestDtos,
   renderResponseDtos,
 } from "./templates.js";
-import {
-  renderCreateValidator,
-  renderOperationValidator,
-} from "./validator-emit.js";
+import { renderCreateValidator, renderOperationValidator } from "./validator-emit.js";
 
 // ---------------------------------------------------------------------------
 // Per-aggregate CQRS file emission.
@@ -247,12 +241,8 @@ function emitOperationCommandsAndHandlers(
     // untouched — no DI changes, no handler-ctor surface widening.
     const usesUser = operationUsesCurrentUser(op);
     const baseCallArgs = op.params.map((p) => `cmd.${pascal(p.name)}`);
-    const callArgs = (
-      usesUser ? [...baseCallArgs, "_currentUser.User"] : baseCallArgs
-    ).join(", ");
-    const userExtraDeps = usesUser
-      ? [{ type: "ICurrentUserAccessor", field: "_currentUser" }]
-      : [];
+    const callArgs = (usesUser ? [...baseCallArgs, "_currentUser.User"] : baseCallArgs).join(", ");
+    const userExtraDeps = usesUser ? [{ type: "ICurrentUserAccessor", field: "_currentUser" }] : [];
     const userExtraUsings = usesUser ? [`${ns}.Auth`] : [];
     if (op.extern) {
       // Emit the user-implementable handler interface alongside the
@@ -266,9 +256,7 @@ function emitOperationCommandsAndHandlers(
       // Without this, a parameterized extern auto handler fails to
       // compile (Cannot convert from <Domain> to <Wire>).
       const reqArgs = op.params
-        .map((p) =>
-          domainToRequestExpr(`cmd.${pascal(p.name)}`, p.type, ctx),
-        )
+        .map((p) => domainToRequestExpr(`cmd.${pascal(p.name)}`, p.type, ctx))
         .join(", ");
       out.set(
         `Application/${aggFolder}/Handlers/${ifaceName}.cs`,
@@ -286,14 +274,8 @@ function emitOperationCommandsAndHandlers(
           aggName: agg.name,
           handlerName: `${pascal(op.name)}Handler`,
           commandName: `${pascal(op.name)}Command`,
-          extraDeps: [
-            { type: ifaceName, field: "_user" },
-            ...userExtraDeps,
-          ],
-          extraUsings: [
-            `${ns}.Application.${plural(agg.name)}.Handlers`,
-            ...userExtraUsings,
-          ],
+          extraDeps: [{ type: ifaceName, field: "_user" }, ...userExtraDeps],
+          extraUsings: [`${ns}.Application.${plural(agg.name)}.Handlers`, ...userExtraUsings],
           // Wrap the user's HandleAsync in try/catch so any
           // non-domain exception rethrows as ExternHandlerException
           // (mapped by DomainExceptionFilter to a descriptive 500).
@@ -435,9 +417,7 @@ function emitFindQueriesAndHandlers(
         ns,
         aggName: agg.name,
         queryName: `${pascal(find.name)}Query`,
-        queryParams: find.params
-          .map((p) => `${renderCsType(p.type)} ${pascal(p.name)}`)
-          .join(", "),
+        queryParams: find.params.map((p) => `${renderCsType(p.type)} ${pascal(p.name)}`).join(", "),
         returnType: queryReturn,
       }),
     );
@@ -450,9 +430,7 @@ function emitFindQueriesAndHandlers(
         queryName: `${pascal(find.name)}Query`,
         returnType: queryReturn,
         body: buildFindHandlerBody(find, agg, ctx, usesUser),
-        extraDeps: usesUser
-          ? [{ type: "ICurrentUserAccessor", field: "_currentUser" }]
-          : [],
+        extraDeps: usesUser ? [{ type: "ICurrentUserAccessor", field: "_currentUser" }] : [],
         extraUsings: usesUser ? [`${ns}.Auth`] : [],
       }),
     );

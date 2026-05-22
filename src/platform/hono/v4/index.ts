@@ -8,9 +8,10 @@
 // touches — no flat-file replacement, the previous version stays
 // loadable.
 // ---------------------------------------------------------------------------
-import { generateTypeScriptForContexts } from "./emit.js";
-import type { ComposeServiceShape, PlatformSurface } from "../../surface.js";
+
 import type { LoomBackendManifest } from "../../manifest.js";
+import type { ComposeServiceShape, PlatformSurface } from "../../surface.js";
+import { generateTypeScriptForContexts } from "./emit.js";
 import { BACKEND_PINS } from "./pins.js";
 
 /** packaging-split P0 — the descriptor the resolver discovers this
@@ -44,9 +45,7 @@ const honoPlatform: PlatformSurface = {
   },
   composeService({ slug }): ComposeServiceShape {
     return {
-      env: [
-        ["DATABASE_URL", `postgres://postgres:postgres@db:5432/${slug}`],
-      ],
+      env: [["DATABASE_URL", `postgres://postgres:postgres@db:5432/${slug}`]],
       dependsOnDb: true,
       // Compose healthcheck → /ready (DB-aware).  Sets the service
       // `healthy` only once the app can reach its DB, so dependent

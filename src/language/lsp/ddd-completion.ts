@@ -1,18 +1,15 @@
+import type { AstNodeDescription, MaybePromise } from "langium";
+import { AstUtils } from "langium";
 import {
-  DefaultCompletionProvider,
   type CompletionAcceptor,
   type CompletionContext,
+  DefaultCompletionProvider,
   type LangiumServices,
   type NextFeature,
 } from "langium/lsp";
-import type {
-  AstNodeDescription,
-  MaybePromise,
-} from "langium";
+import { CompletionItemKind } from "vscode-languageserver";
 import {
-  CompletionItemKind,
-} from "vscode-languageserver";
-import {
+  type EnumDecl,
   isAggregate,
   isBoundedContext,
   isContainment,
@@ -27,17 +24,15 @@ import {
   isOperation,
   isProperty,
   isValueObject,
-  type EnumDecl,
 } from "../generated/ast.js";
-import { AstUtils } from "langium";
 import {
+  type DddType,
   envForNode,
   isCollectionOp,
+  type MemberCompletion,
   membersOfType,
   resolveTypeRef,
   typeOf,
-  type DddType,
-  type MemberCompletion,
 } from "../type-system.js";
 
 // ---------------------------------------------------------------------------
@@ -82,9 +77,7 @@ export class DddCompletionProvider extends DefaultCompletionProvider {
     return super.completionFor(context, next, acceptor);
   }
 
-  protected override createReferenceCompletionItem(
-    nodeDescription: AstNodeDescription,
-  ) {
+  protected override createReferenceCompletionItem(nodeDescription: AstNodeDescription) {
     const item = super.createReferenceCompletionItem(nodeDescription);
     const detail = detailFor(nodeDescription);
     if (detail) {
@@ -95,10 +88,7 @@ export class DddCompletionProvider extends DefaultCompletionProvider {
 
   // -------------------------------------------------------------------------
 
-  private isMemberAccessMemberSlot(
-    context: CompletionContext,
-    next: NextFeature,
-  ): boolean {
+  private isMemberAccessMemberSlot(context: CompletionContext, next: NextFeature): boolean {
     // The most reliable signal: `next.type === "MemberAccess"` AND
     // `next.property === "member"`.  Fall back to inspecting the AST
     // node at the cursor in case Langium produces a more nested
@@ -108,10 +98,7 @@ export class DddCompletionProvider extends DefaultCompletionProvider {
     return !!node && isMemberAccess(node);
   }
 
-  private completeMemberAccess(
-    context: CompletionContext,
-    acceptor: CompletionAcceptor,
-  ): void {
+  private completeMemberAccess(context: CompletionContext, acceptor: CompletionAcceptor): void {
     const node = context.node;
     if (!node || !isMemberAccess(node)) return;
     const receiver = node.receiver;

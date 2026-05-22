@@ -190,11 +190,7 @@ export function emitHeading(
   });
 }
 
-export function emitText(
-  call: ExprIR & { kind: "call" },
-  ctx: WalkContext,
-  depth: number,
-): string {
+export function emitText(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth: number): string {
   const text = firstPositionalContent(call, ctx) ?? '""';
   void depth;
   return renderPrimitive(ctx, "primitive-text", {
@@ -212,12 +208,8 @@ export function emitKeyValueRow(
   const labelArg = positionals[0];
   const childArg = positionals[1];
   const labelStr =
-    labelArg && labelArg.kind === "literal" && labelArg.lit === "string"
-      ? labelArg.value
-      : "";
-  const childJsx = childArg
-    ? walk(childArg, ctx, depth + 2)
-    : "{/* missing value */}";
+    labelArg && labelArg.kind === "literal" && labelArg.lit === "string" ? labelArg.value : "";
+  const childJsx = childArg ? walk(childArg, ctx, depth + 2) : "{/* missing value */}";
   return renderPrimitive(ctx, "primitive-key-value-row", {
     label: escapeJsxText(labelStr),
     childJsx,

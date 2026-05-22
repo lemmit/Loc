@@ -1,8 +1,4 @@
-import type {
-  AggregateIR,
-  BoundedContextIR,
-  TypeIR,
-} from "../../ir/loom-ir.js";
+import type { AggregateIR, BoundedContextIR, TypeIR } from "../../ir/loom-ir.js";
 import { camel, plural } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
@@ -107,7 +103,6 @@ export function idTargetHookVar(target: AggregateIR): string {
   return `__${camel(plural(target.name))}`;
 }
 
-
 /**
  * Render a TS object literal with sensible defaults for each field —
  * passed to `useForm({ defaultValues: … })`.  RHF requires every
@@ -118,9 +113,7 @@ export function initialValuesTs(
   fields: { name: string; type: TypeIR; optional: boolean }[],
   ctx: BoundedContextIR,
 ): string {
-  const entries = fields.map(
-    (f) => `${f.name}: ${initialValueTs(f.type, ctx, f.optional)}`,
-  );
+  const entries = fields.map((f) => `${f.name}: ${initialValueTs(f.type, ctx, f.optional)}`);
   return `{ ${entries.join(", ")} }`;
 }
 
@@ -171,7 +164,5 @@ export function unwrapOpt(t: TypeIR): TypeIR {
 
 export function isPrimitiveLike(t: TypeIR): boolean {
   const inner = unwrapOpt(t);
-  return (
-    inner.kind === "primitive" || inner.kind === "id" || inner.kind === "enum"
-  );
+  return inner.kind === "primitive" || inner.kind === "id" || inner.kind === "enum";
 }

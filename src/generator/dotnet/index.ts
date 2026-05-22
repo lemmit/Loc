@@ -1,22 +1,12 @@
-import type { Model } from "../../language/generated/ast.js";
-import { lowerModel } from "../../ir/lower.js";
 import { enrichLoomModel } from "../../ir/enrichments.js";
-import type {
-  BoundedContextIR,
-  DeployableIR,
-  RepositoryIR,
-  SystemIR,
-} from "../../ir/loom-ir.js";
+import type { BoundedContextIR, DeployableIR, RepositoryIR, SystemIR } from "../../ir/loom-ir.js";
+import { lowerModel } from "../../ir/lower.js";
+import type { Model } from "../../language/generated/ast.js";
 import { plural } from "../../util/naming.js";
+import { generateReactForContexts } from "../react/index.js";
 import { emitAuthFiles } from "./auth-emit.js";
 import { emitCqrs } from "./cqrs-emit.js";
-import { emitWorkflows } from "./workflow-emit.js";
-import { emitViews } from "./view-emit.js";
 import { buildFindBodies } from "./find-emit.js";
-import {
-  hasAnyWireValidator,
-  renderValidationBehavior,
-} from "./validator-emit.js";
 import {
   renderCommon,
   renderConfiguration,
@@ -28,8 +18,8 @@ import {
   renderEnum,
   renderEvent,
   renderExceptionFilter,
-  renderId,
   renderIDomainEvent,
+  renderId,
   renderNoopDispatcher,
   renderProgram,
   renderRepositoryImpl,
@@ -38,7 +28,9 @@ import {
   renderTestsFile,
   renderValueObject,
 } from "./templates.js";
-import { generateReactForContexts } from "../react/index.js";
+import { hasAnyWireValidator, renderValidationBehavior } from "./validator-emit.js";
+import { emitViews } from "./view-emit.js";
+import { emitWorkflows } from "./workflow-emit.js";
 
 // ---------------------------------------------------------------------------
 // .NET backend entry point.
@@ -159,25 +151,17 @@ function emitProjectFromContexts(
   // before the exception filter render so its FluentValidation
   // arm is gated on the same flag.
   const usesValidators = merged.aggregates.some(hasAnyWireValidator);
-  out.set(
-    "Api/DomainExceptionFilter.cs",
-    renderExceptionFilter(ns, { usesValidators }),
-  );
+  out.set("Api/DomainExceptionFilter.cs", renderExceptionFilter(ns, { usesValidators }));
   // Slice 1A auth files — emitted only when the deployable opts in
   // via `auth: required` AND the system declares a user block (the
   // validator already rejects the half-state).  When emitted, the
   // Program.cs adopts the middleware mount + DI registrations.
-  const authRequired = !!(
-    system?.deployable.auth?.required && system.sys.user
-  );
+  const authRequired = !!(system?.deployable.auth?.required && system.sys.user);
   if (authRequired && system?.sys) {
     emitAuthFiles(system.sys, ns, out);
   }
   if (usesValidators) {
-    out.set(
-      "Application/Common/ValidationBehavior.cs",
-      renderValidationBehavior(ns),
-    );
+    out.set("Application/Common/ValidationBehavior.cs", renderValidationBehavior(ns));
   }
   emitProject(merged, ns, out, {
     authRequired,
@@ -193,12 +177,10 @@ function emitProjectFromContexts(
   // certs, e2e suite — the .NET project ships its own equivalents
   // at the root).
   if (hasEmbeddedSpa && system) {
-    const spaFiles = generateReactForContexts(
-      contexts,
-      system.sys,
-      system.deployable,
-      { apiBaseUrl: "/api", pathPrefix: "ClientApp/" },
-    );
+    const spaFiles = generateReactForContexts(contexts, system.sys, system.deployable, {
+      apiBaseUrl: "/api",
+      pathPrefix: "ClientApp/",
+    });
     for (const [path, content] of spaFiles) {
       // The React generator's pack also ships `Dockerfile` /
       // `.dockerignore` / `certs/.gitkeep` at the project root —
@@ -212,18 +194,15 @@ function emitProjectFromContexts(
         path === "ClientApp/.dockerignore" ||
         path === "ClientApp/certs/.gitkeep" ||
         path.startsWith("ClientApp/e2e/")
-      ) continue;
+      )
+        continue;
       out.set(path, content);
     }
     out.set("ClientApp/.gitignore", "node_modules\ndist\n");
   }
 }
 
-function emitContext(
-  ctx: BoundedContextIR,
-  ns: string,
-  out: Map<string, string>,
-): void {
+function emitContext(ctx: BoundedContextIR, ns: string, out: Map<string, string>): void {
   emitIds(ctx, ns, out);
   emitEnums(ctx, ns, out);
   emitValueObjects(ctx, ns, out);
@@ -241,10 +220,7 @@ function emitContext(
   const usesValidators = ctx.aggregates.some(hasAnyWireValidator);
   emitInfrastructure(ctx, ns, out, usesValidators);
   if (usesValidators) {
-    out.set(
-      "Application/Common/ValidationBehavior.cs",
-      renderValidationBehavior(ns),
-    );
+    out.set("Application/Common/ValidationBehavior.cs", renderValidationBehavior(ns));
   }
   emitProject(ctx, ns, out, { usesValidators });
   emitTestProject(ctx, ns, out);
@@ -258,10 +234,7 @@ function emitIds(ctx: BoundedContextIR, ns: string, out: Map<string, string>): v
   for (const agg of ctx.aggregates) {
     out.set(`Domain/Ids/${agg.name}Id.cs`, renderId(agg.name, agg.idValueType, ns));
     for (const part of agg.parts) {
-      out.set(
-        `Domain/Ids/${part.name}Id.cs`,
-        renderId(part.name, agg.idValueType, ns),
-      );
+      out.set(`Domain/Ids/${part.name}Id.cs`, renderId(part.name, agg.idValueType, ns));
     }
   }
 }
@@ -279,11 +252,7 @@ function emitEnums(ctx: BoundedContextIR, ns: string, out: Map<string, string>):
   }
 }
 
-function emitValueObjects(
-  ctx: BoundedContextIR,
-  ns: string,
-  out: Map<string, string>,
-): void {
+function emitValueObjects(ctx: BoundedContextIR, ns: string, out: Map<string, string>): void {
   out.set(
     "Domain/ValueObjects/_namespace.cs",
     `// Auto-generated namespace marker.\nnamespace ${ns}.Domain.ValueObjects;\n`,
@@ -293,11 +262,7 @@ function emitValueObjects(
   }
 }
 
-function emitEvents(
-  ctx: BoundedContextIR,
-  ns: string,
-  out: Map<string, string>,
-): void {
+function emitEvents(ctx: BoundedContextIR, ns: string, out: Map<string, string>): void {
   out.set("Domain/Events/IDomainEvent.cs", renderIDomainEvent(ns));
   for (const ev of ctx.events) {
     out.set(`Domain/Events/${ev.name}.cs`, renderEvent(ev, ns));
@@ -309,10 +274,7 @@ function emitCommon(ns: string, out: Map<string, string>): void {
 }
 
 function emitDispatcher(ns: string, out: Map<string, string>): void {
-  out.set(
-    "Infrastructure/Events/NoopDomainEventDispatcher.cs",
-    renderNoopDispatcher(ns),
-  );
+  out.set("Infrastructure/Events/NoopDomainEventDispatcher.cs", renderNoopDispatcher(ns));
 }
 
 // ---------------------------------------------------------------------------
@@ -330,10 +292,7 @@ function emitAggregate(
   const repo = findRepoFor(ctx, agg.name);
 
   for (const part of agg.parts) {
-    out.set(
-      `Domain/${aggFolder}/${part.name}.cs`,
-      renderEntity(part, false, ns, agg.name),
-    );
+    out.set(`Domain/${aggFolder}/${part.name}.cs`, renderEntity(part, false, ns, agg.name));
   }
   out.set(`Domain/${aggFolder}/${agg.name}.cs`, renderEntity(agg, true, ns, agg.name));
   // Views whose source is this aggregate become parameterless,
@@ -371,10 +330,7 @@ function emitInfrastructure(
   usesValidators: boolean,
 ): void {
   out.set("Infrastructure/Persistence/AppDbContext.cs", renderDbContext(ctx, ns));
-  out.set(
-    "Api/DomainExceptionFilter.cs",
-    renderExceptionFilter(ns, { usesValidators }),
-  );
+  out.set("Api/DomainExceptionFilter.cs", renderExceptionFilter(ns, { usesValidators }));
 }
 
 function emitProject(
@@ -387,9 +343,7 @@ function emitProject(
     hasEmbeddedSpa?: boolean;
   },
 ): void {
-  const hasExtern = ctx.aggregates.some((a) =>
-    a.operations.some((o) => o.extern),
-  );
+  const hasExtern = ctx.aggregates.some((a) => a.operations.some((o) => o.extern));
   const usesValidators = !!options?.usesValidators;
   const hasEmbeddedSpa = !!options?.hasEmbeddedSpa;
   out.set(
@@ -406,11 +360,7 @@ function emitProject(
   out.set("certs/.gitkeep", "");
 }
 
-function emitTestProject(
-  ctx: BoundedContextIR,
-  ns: string,
-  out: Map<string, string>,
-): void {
+function emitTestProject(ctx: BoundedContextIR, ns: string, out: Map<string, string>): void {
   // Only emit a test csproj when at least one aggregate declares a `test`
   // block — otherwise the project would have nothing to compile.
   const anyTests = ctx.aggregates.some((a) => a.tests.length > 0);
@@ -418,10 +368,7 @@ function emitTestProject(
   out.set(`Tests/${ns}.Tests/${ns}.Tests.csproj`, renderTestCsproj(ns));
 }
 
-function findRepoFor(
-  ctx: BoundedContextIR,
-  name: string,
-): RepositoryIR | undefined {
+function findRepoFor(ctx: BoundedContextIR, name: string): RepositoryIR | undefined {
   return ctx.repositories.find((r) => r.aggregateName === name);
 }
 

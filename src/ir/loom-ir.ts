@@ -26,14 +26,7 @@
 
 export type IdValueType = "guid" | "int" | "long" | "string";
 
-export type PrimitiveName =
-  | "int"
-  | "long"
-  | "decimal"
-  | "string"
-  | "bool"
-  | "datetime"
-  | "guid";
+export type PrimitiveName = "int" | "long" | "decimal" | "string" | "bool" | "datetime" | "guid";
 
 export type TypeIR =
   | { kind: "primitive"; name: PrimitiveName }
@@ -363,17 +356,9 @@ export interface LoomModel {
 // Traceability (Slice 12)
 // ---------------------------------------------------------------------------
 
-export type RequirementType =
-  | "UserStory"
-  | "UseCase"
-  | "AcceptanceCriteria"
-  | "BusinessReq";
+export type RequirementType = "UserStory" | "UseCase" | "AcceptanceCriteria" | "BusinessReq";
 
-export type RequirementStatus =
-  | "Draft"
-  | "Approved"
-  | "InProgress"
-  | "Done";
+export type RequirementStatus = "Draft" | "Approved" | "InProgress" | "Done";
 
 export interface RequirementIR {
   id: string;
@@ -490,11 +475,7 @@ export interface TestOutcome {
 
 export type TestCaseStatus = "VERIFIED" | "FAILING" | "UNVERIFIED";
 
-export type RequirementVerdict =
-  | "VERIFIED"
-  | "FAILING"
-  | "UNTESTED"
-  | "UNVERIFIED";
+export type RequirementVerdict = "VERIFIED" | "FAILING" | "UNTESTED" | "UNVERIFIED";
 
 export interface VerificationIR {
   version: 1;
@@ -524,7 +505,6 @@ export interface VerificationIR {
     unmappedTestCases: string[];
   };
 }
-
 
 /** A deployment plan: modules grouping bounded contexts, plus the
  * deployable artefacts that ship subsets of those modules. */
@@ -792,12 +772,7 @@ export interface ScaffoldIR {
   targets: string[];
 }
 
-export type ScaffoldSelector =
-  | "modules"
-  | "contexts"
-  | "aggregates"
-  | "workflows"
-  | "views";
+export type ScaffoldSelector = "modules" | "contexts" | "aggregates" | "workflows" | "views";
 
 /** Per-page sidebar metadata.  Bare entries — validator (Slice 3)
  *  enforces the allowed key names (`section` / `label` / `order` /
@@ -980,12 +955,7 @@ export interface ModuleBindingIR {
   storages: { role: ModuleStorageRole; storageName: string }[];
 }
 
-export type ModuleStorageRole =
-  | "primary"
-  | "cache"
-  | "search"
-  | "events"
-  | "bi";
+export type ModuleStorageRole = "primary" | "cache" | "search" | "events" | "bi";
 
 // ---------------------------------------------------------------------------
 // Statements
@@ -1055,19 +1025,19 @@ export type RefKind =
   | "param"
   | "let"
   | "lambda"
-  | "this-prop"           // entity field (private _name with public getter)
-  | "this-vo-prop"        // value-object public readonly field
+  | "this-prop" // entity field (private _name with public getter)
+  | "this-vo-prop" // value-object public readonly field
   | "this-derived"
   | "helper-fn"
   | "enum-value"
-  | "current-user"        // magic identifier — system's `user` block shape
+  | "current-user" // magic identifier — system's `user` block shape
   | "unknown";
 
 export type CallKind =
-  | "function"            // calls a `function` declared in scope
-  | "value-object-ctor"   // calls a value-object constructor
-  | "private-operation"   // calls a private operation
-  | "free";               // unresolved free call
+  | "function" // calls a `function` declared in scope
+  | "value-object-ctor" // calls a value-object constructor
+  | "private-operation" // calls a private operation
+  | "free"; // unresolved free call
 
 export type BinOp =
   | "+"
@@ -1165,10 +1135,11 @@ export type ExprIR =
     };
 
 // Convenience constructors used by the lowering layer.
-export const lit = (
-  kind: LiteralKind,
-  value: string,
-): ExprIR => ({ kind: "literal", lit: kind, value });
+export const lit = (kind: LiteralKind, value: string): ExprIR => ({
+  kind: "literal",
+  lit: kind,
+  value,
+});
 
 // ---------------------------------------------------------------------------
 // Workspace traversal helpers — dedupe the systems-vs-contexts dual

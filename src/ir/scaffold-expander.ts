@@ -29,6 +29,7 @@
 //   - `view-list`          — needs view IR introspection
 //   - `home` / index pages — needs domain navigation primitives
 
+import { camel, humanize, plural, snake } from "../util/naming.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -37,7 +38,6 @@ import type {
   SystemIR,
   UiIR,
 } from "./loom-ir.js";
-import { camel, humanize, plural, snake } from "../util/naming.js";
 
 /** Inputs for the expander.  Carried as a struct so callers don't
  *  have to thread through the same handful of derived maps every
@@ -62,16 +62,10 @@ export interface ScaffoldExpandContext {
 
 /** Build the expander context from the system + a specific UI.
  *  Used by `lowerSystem`'s post-processing pass and by tests. */
-export function buildExpandContext(
-  sys: SystemIR,
-  ui: UiIR,
-): ScaffoldExpandContext {
+export function buildExpandContext(sys: SystemIR, ui: UiIR): ScaffoldExpandContext {
   const aggregatesByName = new Map<string, AggregateIR>();
   const bcByAggregate = new Map<string, BoundedContextIR>();
-  const workflowsByName = new Map<
-    string,
-    import("./loom-ir.js").WorkflowIR
-  >();
+  const workflowsByName = new Map<string, import("./loom-ir.js").WorkflowIR>();
   const viewsByName = new Map<string, import("./loom-ir.js").ViewIR>();
   for (const m of sys.modules) {
     for (const ctx of m.contexts) {
@@ -127,10 +121,7 @@ export function expandScaffoldToExplicitBody(
 // Aggregate-list expansion
 // ---------------------------------------------------------------------------
 
-function expandAggregateList(
-  aggregateName: string,
-  ctx: ScaffoldExpandContext,
-): ExprIR | null {
+function expandAggregateList(aggregateName: string, ctx: ScaffoldExpandContext): ExprIR | null {
   const agg = ctx.aggregatesByName.get(aggregateName);
   if (!agg) return null;
   // Slice D1 — when the UI has an api parameter, route hook
@@ -154,9 +145,10 @@ function expandAggregateList(
   cols.push(
     call("Column", [
       lit("ID"),
-      lambda(cellVar, call("IdLink", [member(ref(cellVar), "id")], undefined, [
-        ["of", ref(agg.name)],
-      ])),
+      lambda(
+        cellVar,
+        call("IdLink", [member(ref(cellVar), "id")], undefined, [["of", ref(agg.name)]]),
+      ),
     ]),
   );
   for (const f of agg.fields) {
@@ -212,10 +204,7 @@ function expandAggregateList(
                 ["sticky", boolLit(true)],
                 [
                   "rowTestid",
-                  lambda(
-                    rowVar,
-                    binary(lit(`${slug}-row-`), "+", member(ref(rowVar), "id")),
-                  ),
+                  lambda(rowVar, binary(lit(`${slug}-row-`), "+", member(ref(rowVar), "id"))),
                 ],
               ]),
             ]),
@@ -232,10 +221,7 @@ function expandAggregateList(
 // Aggregate-detail expansion
 // ---------------------------------------------------------------------------
 
-function expandAggregateDetail(
-  aggregateName: string,
-  ctx: ScaffoldExpandContext,
-): ExprIR | null {
+function expandAggregateDetail(aggregateName: string, ctx: ScaffoldExpandContext): ExprIR | null {
   const agg = ctx.aggregatesByName.get(aggregateName);
   if (!agg) return null;
   // Slice D1 — see expandAggregateList for the no-api-handle
@@ -307,9 +293,7 @@ function expandAggregateDetail(
           "Card",
           [
             call("Stack", [
-              call("Heading", [lit(humanPart)], undefined, [
-                ["level", intLit(4)],
-              ]),
+              call("Heading", [lit(humanPart)], undefined, [["level", intLit(4)]]),
               call("Table", [...cols], undefined, [
                 ["rows", member(ref(cellVar), c.name)],
                 ["striped", boolLit(true)],
@@ -330,11 +314,7 @@ function expandAggregateDetail(
         singleRows.push(
           call("KeyValueRow", [
             lit(humanize(f.name)),
-            cellAccessorFor(
-              `${c.name}.${f.name}`,
-              f.type,
-              cellVar,
-            ),
+            cellAccessorFor(`${c.name}.${f.name}`, f.type, cellVar),
           ]),
         );
       }
@@ -343,9 +323,7 @@ function expandAggregateDetail(
           "Card",
           [
             call("Stack", [
-              call("Heading", [lit(humanPart)], undefined, [
-                ["level", intLit(4)],
-              ]),
+              call("Heading", [lit(humanPart)], undefined, [["level", intLit(4)]]),
               call("Stack", singleRows),
             ]),
           ],
@@ -396,10 +374,7 @@ function expandAggregateDetail(
   const dataSections: ExprIR[] = [call("Card", [call("Stack", rows)])];
   if (opModals.length > 0) dataSections.push(call("Group", opModals));
   dataSections.push(...relatedCards);
-  const dataBody =
-    dataSections.length > 1
-      ? call("Stack", dataSections)
-      : dataSections[0]!;
+  const dataBody = dataSections.length > 1 ? call("Stack", dataSections) : dataSections[0]!;
 
   return call(
     "Stack",
@@ -407,27 +382,17 @@ function expandAggregateDetail(
       // Breadcrumbs(Anchor("Home", to: "/"), Anchor(<Plural>, to: …), Text("Detail"))
       call("Breadcrumbs", [
         call("Anchor", [lit("Home")], undefined, [["to", lit("/")]]),
-        call("Anchor", [lit(humanPlural)], undefined, [
-          ["to", lit(`/${slug}`)],
-        ]),
+        call("Anchor", [lit(humanPlural)], undefined, [["to", lit(`/${slug}`)]]),
         call("Text", [lit("Detail")]),
       ]),
       // Heading(<HumanAgg> + " detail", level: 2)
-      call("Heading", [lit(`${humanAgg} detail`)], undefined, [
-        ["level", intLit(2)],
-      ]),
+      call("Heading", [lit(`${humanAgg} detail`)], undefined, [["level", intLit(2)]]),
       // QueryView(of: api.Agg.byId(id), single: true, loading, error, empty: not-found, data: data => Card(Stack(...rows)))
       call("QueryView", [], undefined, [
-        [
-          "of",
-          methodCall(queryRoot, "byId", [ref("id")]),
-        ],
+        ["of", methodCall(queryRoot, "byId", [ref("id")])],
         ["single", boolLit(true)],
         ["loading", call("Skeleton", [], undefined, [["count", intLit(3)]])],
-        [
-          "error",
-          call("Alert", [lit(`Couldn't load ${humanAgg.toLowerCase()}`)]),
-        ],
+        ["error", call("Alert", [lit(`Couldn't load ${humanAgg.toLowerCase()}`)])],
         [
           "empty",
           call("Alert", [lit(`No ${humanAgg.toLowerCase()} matches that id.`)], undefined, [
@@ -462,25 +427,16 @@ function cellAccessorFor(
  *  member IR nodes — so React emits `data.shipTo.city` and Phoenix
  *  emits `@data.ship_to.city` correctly (a dotted member string
  *  would mis-snake on the Phoenix HEEx walker). */
-function typedCellFor(
-  receiver: ExprIR,
-  type: import("./loom-ir.js").TypeIR,
-): ExprIR {
+function typedCellFor(receiver: ExprIR, type: import("./loom-ir.js").TypeIR): ExprIR {
   const inner = type.kind === "optional" ? type.inner : type;
   if (inner.kind === "id") {
-    return call("IdLink", [receiver], undefined, [
-      ["of", ref(inner.targetName)],
-    ]);
+    return call("IdLink", [receiver], undefined, [["of", ref(inner.targetName)]]);
   }
   if (inner.kind === "primitive") {
     if (inner.name === "datetime") {
       return call("DateDisplay", [receiver]);
     }
-    if (
-      inner.name === "decimal" ||
-      inner.name === "int" ||
-      inner.name === "long"
-    ) {
+    if (inner.name === "decimal" || inner.name === "int" || inner.name === "long") {
       return call("Text", [receiver]);
     }
   }
@@ -515,14 +471,10 @@ function valueObjectRows(
     const leafReceiver = member(receiver, lf.name);
     const label = `${labelPrefix} ${humanize(lf.name)}`;
     if (li.kind === "valueobject") {
-      out.push(
-        ...valueObjectRows(leafReceiver, label, li.name, ctx, aggregateName),
-      );
+      out.push(...valueObjectRows(leafReceiver, label, li.name, ctx, aggregateName));
       continue;
     }
-    out.push(
-      call("KeyValueRow", [lit(label), typedCellFor(leafReceiver, lf.type)]),
-    );
+    out.push(call("KeyValueRow", [lit(label), typedCellFor(leafReceiver, lf.type)]));
   }
   return out;
 }
@@ -532,11 +484,7 @@ function valueObjectRows(
  *  call (vs `<api>.<Agg>.all` which is plain member access).  The
  *  walker's `tryDetectApiHook` recognises this shape and lifts it
  *  to `useByIdAggregate(id)`. */
-function methodCall(
-  receiver: ExprIR,
-  member: string,
-  args: ExprIR[],
-): ExprIR {
+function methodCall(receiver: ExprIR, member: string, args: ExprIR[]): ExprIR {
   return {
     kind: "method-call",
     receiver,
@@ -551,10 +499,7 @@ function methodCall(
 // Aggregate-new expansion
 // ---------------------------------------------------------------------------
 
-function expandAggregateNew(
-  aggregateName: string,
-  ctx: ScaffoldExpandContext,
-): ExprIR | null {
+function expandAggregateNew(aggregateName: string, ctx: ScaffoldExpandContext): ExprIR | null {
   const agg = ctx.aggregatesByName.get(aggregateName);
   if (!agg) return null;
   const slug = snake(plural(agg.name));
@@ -565,14 +510,10 @@ function expandAggregateNew(
     [
       call("Breadcrumbs", [
         call("Anchor", [lit("Home")], undefined, [["to", lit("/")]]),
-        call("Anchor", [lit(humanPlural)], undefined, [
-          ["to", lit(`/${slug}`)],
-        ]),
+        call("Anchor", [lit(humanPlural)], undefined, [["to", lit(`/${slug}`)]]),
         call("Text", [lit("New")]),
       ]),
-      call("Heading", [lit(`Create ${humanAgg.toLowerCase()}`)], undefined, [
-        ["level", intLit(2)],
-      ]),
+      call("Heading", [lit(`Create ${humanAgg.toLowerCase()}`)], undefined, [["level", intLit(2)]]),
       call("Card", [
         call("Form", [], undefined, [
           ["of", ref(agg.name)],
@@ -589,10 +530,7 @@ function expandAggregateNew(
 // Workflow-form expansion
 // ---------------------------------------------------------------------------
 
-function expandWorkflowForm(
-  workflowName: string,
-  ctx: ScaffoldExpandContext,
-): ExprIR | null {
+function expandWorkflowForm(workflowName: string, ctx: ScaffoldExpandContext): ExprIR | null {
   const wf = ctx.workflowsByName.get(workflowName);
   if (!wf) return null;
   const wfSlug = snake(wf.name);
@@ -602,14 +540,10 @@ function expandWorkflowForm(
     [
       call("Breadcrumbs", [
         call("Anchor", [lit("Home")], undefined, [["to", lit("/")]]),
-        call("Anchor", [lit("Workflows")], undefined, [
-          ["to", lit("/workflows")],
-        ]),
+        call("Anchor", [lit("Workflows")], undefined, [["to", lit("/workflows")]]),
         call("Text", [lit(humanWf)]),
       ]),
-      call("Heading", [lit(humanWf)], undefined, [
-        ["level", intLit(2)],
-      ]),
+      call("Heading", [lit(humanWf)], undefined, [["level", intLit(2)]]),
       call("Card", [
         call("Form", [], undefined, [
           ["runs", ref(wf.name)],
@@ -626,10 +560,7 @@ function expandWorkflowForm(
 // View-list expansion
 // ---------------------------------------------------------------------------
 
-function expandViewList(
-  viewName: string,
-  ctx: ScaffoldExpandContext,
-): ExprIR | null {
+function expandViewList(viewName: string, ctx: ScaffoldExpandContext): ExprIR | null {
   const view = ctx.viewsByName.get(viewName);
   if (!view) return null;
   const humanView = humanize(view.name);
@@ -663,9 +594,7 @@ function expandViewList(
   return call(
     "Stack",
     [
-      call("Heading", [lit(humanView)], undefined, [
-        ["level", intLit(2)],
-      ]),
+      call("Heading", [lit(humanView)], undefined, [["level", intLit(2)]]),
       call("QueryView", [], undefined, [
         // `Views.<name>` is the view-hook reference — walker
         // detects this Pattern C and lifts to `useXxxView()`.
@@ -714,7 +643,9 @@ function expandHome(ctx: ScaffoldExpandContext): ExprIR {
   if (aggCount > 0) {
     cards.push(
       call("Card", [
-        call("Heading", [lit(pluralize(aggCount, "aggregate", "aggregates"))], undefined, [["level", intLit(4)]]),
+        call("Heading", [lit(pluralize(aggCount, "aggregate", "aggregates"))], undefined, [
+          ["level", intLit(4)],
+        ]),
         call("Text", [lit("Manage records of each kind from the sidebar.")]),
       ]),
     );
@@ -722,7 +653,9 @@ function expandHome(ctx: ScaffoldExpandContext): ExprIR {
   if (wfCount > 0) {
     cards.push(
       call("Card", [
-        call("Heading", [lit(pluralize(wfCount, "workflow", "workflows"))], undefined, [["level", intLit(4)]]),
+        call("Heading", [lit(pluralize(wfCount, "workflow", "workflows"))], undefined, [
+          ["level", intLit(4)],
+        ]),
         call("Anchor", [lit("Open workflows →")], undefined, [["to", lit("/workflows")]]),
       ]),
     );
@@ -730,7 +663,9 @@ function expandHome(ctx: ScaffoldExpandContext): ExprIR {
   if (viewCount > 0) {
     cards.push(
       call("Card", [
-        call("Heading", [lit(pluralize(viewCount, "view", "views"))], undefined, [["level", intLit(4)]]),
+        call("Heading", [lit(pluralize(viewCount, "view", "views"))], undefined, [
+          ["level", intLit(4)],
+        ]),
         call("Anchor", [lit("Open views →")], undefined, [["to", lit("/views")]]),
       ]),
     );
@@ -739,9 +674,7 @@ function expandHome(ctx: ScaffoldExpandContext): ExprIR {
     "Stack",
     [
       call("Heading", [lit("Welcome")], undefined, [["level", intLit(2)]]),
-      call("Text", [
-        lit("Pick a section from the sidebar to start, or jump straight in below."),
-      ]),
+      call("Text", [lit("Pick a section from the sidebar to start, or jump straight in below.")]),
       call("Stack", cards),
     ],
     undefined,
@@ -757,9 +690,7 @@ function expandWorkflowsIndex(ctx: ScaffoldExpandContext): ExprIR {
       call(
         "Card",
         [
-          call("Heading", [lit(humanize(wf.name))], undefined, [
-            ["level", intLit(4)],
-          ]),
+          call("Heading", [lit(humanize(wf.name))], undefined, [["level", intLit(4)]]),
           call("Anchor", [lit("Run →")], undefined, [
             ["to", lit(`/workflows/${slug}`)],
             ["testid", lit(`workflow-${slug}-run`)],
@@ -794,9 +725,7 @@ function expandViewsIndex(ctx: ScaffoldExpandContext): ExprIR {
       call(
         "Card",
         [
-          call("Heading", [lit(humanize(view.name))], undefined, [
-            ["level", intLit(4)],
-          ]),
+          call("Heading", [lit(humanize(view.name))], undefined, [["level", intLit(4)]]),
           call("Anchor", [lit("Open →")], undefined, [
             ["to", lit(`/views/${slug}`)],
             ["testid", lit(`view-${slug}-open`)],
@@ -889,11 +818,7 @@ function lambda(param: string, body: ExprIR): ExprIR {
   return { kind: "lambda", param, body };
 }
 
-function binary(
-  left: ExprIR,
-  op: import("./loom-ir.js").BinOp,
-  right: ExprIR,
-): ExprIR {
+function binary(left: ExprIR, op: import("./loom-ir.js").BinOp, right: ExprIR): ExprIR {
   return { kind: "binary", op, left, right };
 }
 
@@ -921,11 +846,7 @@ function columnAccessorFor(
     if (inner.name === "datetime") {
       return call("DateDisplay", [member(ref(rowVar), fieldName)]);
     }
-    if (
-      inner.name === "decimal" ||
-      inner.name === "int" ||
-      inner.name === "long"
-    ) {
+    if (inner.name === "decimal" || inner.name === "int" || inner.name === "long") {
       return call("Text", [member(ref(rowVar), fieldName)]);
     }
   }
@@ -940,10 +861,7 @@ function columnAccessorFor(
  *  aggregate's owning module.  Returns the handle name (used as
  *  the receiver in `<handle>.<Agg>.all` body refs) or `null` when
  *  no matching api param exists. */
-function findApiHandleFor(
-  agg: AggregateIR,
-  ctx: ScaffoldExpandContext,
-): string | null {
+function findApiHandleFor(agg: AggregateIR, ctx: ScaffoldExpandContext): string | null {
   const bc = ctx.bcByAggregate.get(agg.name);
   if (!bc) return null;
   // The bcByAggregate map is keyed by aggregate, but the BC

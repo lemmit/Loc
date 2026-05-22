@@ -10,11 +10,7 @@
 // same placeholder fallback when an Id<X>'s target lacks a display.
 // ---------------------------------------------------------------------------
 
-import type {
-  AggregateIR,
-  BoundedContextIR,
-  TypeIR,
-} from "../../../../ir/loom-ir.js";
+import type { AggregateIR, BoundedContextIR, TypeIR } from "../../../../ir/loom-ir.js";
 import { humanize } from "../../../../util/naming.js";
 import { idTargetHookVar, unwrapOpt } from "../../form-helpers.js";
 import type { FormFieldVM } from "../view-models.js";

@@ -1,9 +1,5 @@
-import type {
-  BoundedContextIR,
-  DeployableIR,
-  SystemIR,
-} from "../../ir/loom-ir.js";
-import { pascal, snake, plural } from "../../util/naming.js";
+import type { BoundedContextIR, DeployableIR, SystemIR } from "../../ir/loom-ir.js";
+import { pascal, plural, snake } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // API controller emission for Phoenix LiveView / Ash.
@@ -83,7 +79,10 @@ export function emitApiControllers(args: ApiEmitArgs): ApiEmitResult {
   const hasServes = deployable.serves.length > 0;
 
   // Collect all workflows and views across all contexts
-  const allWorkflows: Array<{ ctx: BoundedContextIR; wf: import("../../ir/loom-ir.js").WorkflowIR }> = [];
+  const allWorkflows: Array<{
+    ctx: BoundedContextIR;
+    wf: import("../../ir/loom-ir.js").WorkflowIR;
+  }> = [];
   const allViews: Array<{ ctx: BoundedContextIR; view: import("../../ir/loom-ir.js").ViewIR }> = [];
 
   for (const ctx of contexts) {
@@ -129,7 +128,10 @@ export function emitApiControllers(args: ApiEmitArgs): ApiEmitResult {
 
   // --- Aggregates controller ------------------------------------------------
   // Collect all aggregates across all contexts.
-  const allAggregates: Array<{ ctx: BoundedContextIR; agg: import("../../ir/loom-ir.js").AggregateIR }> = [];
+  const allAggregates: Array<{
+    ctx: BoundedContextIR;
+    agg: import("../../ir/loom-ir.js").AggregateIR;
+  }> = [];
   for (const ctx of contexts) {
     for (const agg of ctx.aggregates) {
       allAggregates.push({ ctx, agg });
@@ -256,9 +258,7 @@ function renderWorkflowAction(
 
   // Build the permitted param key list from the workflow's declared params
   const allowedKeys = wf.params.map((p) => `"${snake(p.name)}"`).join(", ");
-  const takeExpr = allowedKeys.length > 0
-    ? `Map.take(params, [${allowedKeys}])`
-    : `%{}`;
+  const takeExpr = allowedKeys.length > 0 ? `Map.take(params, [${allowedKeys}])` : `%{}`;
 
   return `  @doc "POST /api/workflows/${wfSnake}"
   def ${wfSnake}(conn, params) do
@@ -292,9 +292,7 @@ function renderViewsController(
 ): string {
   const webModule = `${appModule}Web`;
 
-  const actions = views
-    .map(({ ctx, view }) => renderViewAction(ctx, view, appModule))
-    .join("\n\n");
+  const actions = views.map(({ ctx, view }) => renderViewAction(ctx, view, appModule)).join("\n\n");
 
   return `# Auto-generated.
 defmodule ${webModule}.ViewsController do

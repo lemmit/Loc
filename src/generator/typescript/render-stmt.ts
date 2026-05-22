@@ -76,7 +76,10 @@ function withTrace(
  *  `this`-props, params and let-bindings (and member-access chains
  *  rooted at them).  Compound nodes recurse; lambdas are skipped (their
  *  bodies reference lambda-local params, not stored leaves). */
-function collectLeaves(e: ExprIR, out: { path: string; value: string }[] = []): { path: string; value: string }[] {
+function collectLeaves(
+  e: ExprIR,
+  out: { path: string; value: string }[] = [],
+): { path: string; value: string }[] {
   switch (e.kind) {
     case "ref":
       if (e.refKind === "this-prop" || e.refKind === "param" || e.refKind === "let") {

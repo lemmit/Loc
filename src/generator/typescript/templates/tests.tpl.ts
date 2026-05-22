@@ -15,15 +15,14 @@ import { renderTsExpr } from "../render-expr.js";
 // it imports the aggregate / parts / value objects directly.
 // ---------------------------------------------------------------------------
 
-export function renderTestsFile(
-  agg: AggregateIR,
-  ctx: BoundedContextIR,
-): string | null {
+export function renderTestsFile(agg: AggregateIR, ctx: BoundedContextIR): string | null {
   if (agg.tests.length === 0) return null;
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import { describe, it, expect } from "vitest";`);
-  lines.push(`import { ${agg.name}${agg.parts.length > 0 ? ", " + agg.parts.map((p) => p.name).join(", ") : ""} } from "./${camel(agg.name)}";`);
+  lines.push(
+    `import { ${agg.name}${agg.parts.length > 0 ? ", " + agg.parts.map((p) => p.name).join(", ") : ""} } from "./${camel(agg.name)}";`,
+  );
   const voNames = ctx.valueObjects.map((v) => v.name);
   if (voNames.length > 0) {
     lines.push(`import { ${voNames.join(", ")} } from "./value-objects";`);

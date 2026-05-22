@@ -7,17 +7,9 @@
 // Hono-framework builders (routes/workflow/view/auth/observability)
 // in here too, leaving only the framework-neutral helpers
 // (render-expr/stmt, templates, zod-refine) in core.
-import type { Model } from "../../../language/generated/ast.js";
-import { lowerModel } from "../../../ir/lower.js";
-import { enrichLoomModel } from "../../../ir/enrichments.js";
-import { contextsHaveProvSite } from "../../../ir/prov-id.js";
-import type {
-  BoundedContextIR,
-  DeployableIR,
-  RepositoryIR,
-  SystemIR,
-} from "../../../ir/loom-ir.js";
-import { camel } from "../../../util/naming.js";
+
+import { buildExternHandlersFile } from "../../../generator/typescript/extern-builder.js";
+import { buildRepositoryFile } from "../../../generator/typescript/repository-builder.js";
 import {
   renderAggregate,
   renderEnumsAndValueObjects,
@@ -27,14 +19,23 @@ import {
   renderSchema,
   renderTestsFile,
 } from "../../../generator/typescript/templates.js";
-import { buildRepositoryFile } from "../../../generator/typescript/repository-builder.js";
-import { buildExternHandlersFile } from "../../../generator/typescript/extern-builder.js";
+import { enrichLoomModel } from "../../../ir/enrichments.js";
+import type {
+  BoundedContextIR,
+  DeployableIR,
+  RepositoryIR,
+  SystemIR,
+} from "../../../ir/loom-ir.js";
+import { lowerModel } from "../../../ir/lower.js";
+import { contextsHaveProvSite } from "../../../ir/prov-id.js";
+import type { Model } from "../../../language/generated/ast.js";
+import { camel } from "../../../util/naming.js";
 // Hono-framework builders now live in this package (P2b) — siblings.
 import { emitAuthFiles } from "./auth-emit.js";
-import { buildRoutesFile } from "./routes-builder.js";
-import { buildWorkflowsFile } from "./workflow-builder.js";
-import { buildViewsRoutesFile } from "./view-routes-builder.js";
 import { emitObservabilityFiles } from "./observability-builder.js";
+import { buildRoutesFile } from "./routes-builder.js";
+import { buildViewsRoutesFile } from "./view-routes-builder.js";
+import { buildWorkflowsFile } from "./workflow-builder.js";
 
 const ERRORS_TS = `// Auto-generated.
 export class DomainError extends Error {
@@ -120,10 +121,7 @@ export function __drainTraces(): TraceRecord[] {
  * Legacy entry: lowers the whole model and emits one project from all
  * top-level bounded contexts.  Used by `ddd generate ts <file> -o <dir>`.
  */
-export function generateTypeScript(
-  model: Model,
-  pins: BackendPins,
-): Map<string, string> {
+export function generateTypeScript(model: Model, pins: BackendPins): Map<string, string> {
   // Lowering produces a faithful AST projection; enrichment populates
   // wireShape, the implicit `findAll` find, and react `moduleNames`
   // inheritance.  Every backend consumes the enriched IR, never the
@@ -150,9 +148,7 @@ export function generateTypeScriptForContexts(
   system?: { deployable: DeployableIR; sys: SystemIR },
 ): Map<string, string> {
   const out = new Map<string, string>();
-  const authRequired = !!(
-    system?.deployable.auth?.required && system.sys.user
-  );
+  const authRequired = !!(system?.deployable.auth?.required && system.sys.user);
   // Emission is forced by presence: any written `provenanced` field turns
   // on the trace SDK + per-site `recordTrace` calls.  Threaded as a flag
   // (rather than read off presence at each call site) so a future
@@ -185,21 +181,14 @@ export function generateTypeScriptForContexts(
   if (emitProvenance) out.set("domain/provenance.ts", PROVENANCE_TS);
   out.set("db/schema.ts", renderSchema(merged));
   if (merged.workflows.length > 0) {
-    const aggsByName = new Map(
-      merged.aggregates.map((a) => [a.name, a] as const),
-    );
+    const aggsByName = new Map(merged.aggregates.map((a) => [a.name, a] as const));
     out.set("http/workflows.ts", buildWorkflowsFile(merged, aggsByName));
   }
   if (merged.views.length > 0) {
-    const aggsByName = new Map(
-      merged.aggregates.map((a) => [a.name, a] as const),
-    );
+    const aggsByName = new Map(merged.aggregates.map((a) => [a.name, a] as const));
     out.set("http/views.ts", buildViewsRoutesFile(merged, aggsByName));
   }
-  out.set(
-    "http/index.ts",
-    renderHttpIndex(merged, { authRequired }),
-  );
+  out.set("http/index.ts", renderHttpIndex(merged, { authRequired }));
 
   // Per-aggregate emission stays per-context — each aggregate file
   // and its repository / routes are emitted in the context that
@@ -212,15 +201,9 @@ export function generateTypeScriptForContexts(
         `db/repositories/${camel(agg.name)}-repository.ts`,
         buildRepositoryFile(agg, repo, ctx),
       );
-      out.set(
-        `http/${camel(agg.name)}.routes.ts`,
-        buildRoutesFile(agg, repo, ctx),
-      );
+      out.set(`http/${camel(agg.name)}.routes.ts`, buildRoutesFile(agg, repo, ctx));
       if (agg.operations.some((o) => o.extern)) {
-        out.set(
-          `domain/${camel(agg.name)}-extern.ts`,
-          buildExternHandlersFile(agg, ctx),
-        );
+        out.set(`domain/${camel(agg.name)}-extern.ts`, buildExternHandlersFile(agg, ctx));
       }
       const testsFile = renderTestsFile(agg, ctx);
       if (testsFile) {
@@ -299,31 +282,32 @@ export default defineConfig({
 });
 `;
 
-const PROJECT_TSCONFIG_JSON = JSON.stringify(
-  {
-    compilerOptions: {
-      // ES2022 is the highest target drizzle-kit's bundled
-      // @esbuild-kit/esm-loader accepts; tsup's own `target: "node24"`
-      // (in tsup.config.ts) is what governs the prod bundle.
-      target: "ES2022",
-      module: "ESNext",
-      moduleResolution: "Bundler",
-      strict: true,
-      esModuleInterop: true,
-      skipLibCheck: true,
-      // tsup handles emit (single bundled `dist/index.js`); tsc is
-      // type-check only via `npm run typecheck`.
-      noEmit: true,
-      // `Bundler` resolution lets relative imports omit the `.js`
-      // extension — esbuild (via tsup at build time, tsx at dev
-      // time, vite-node at test time) resolves them.
+const PROJECT_TSCONFIG_JSON =
+  JSON.stringify(
+    {
+      compilerOptions: {
+        // ES2022 is the highest target drizzle-kit's bundled
+        // @esbuild-kit/esm-loader accepts; tsup's own `target: "node24"`
+        // (in tsup.config.ts) is what governs the prod bundle.
+        target: "ES2022",
+        module: "ESNext",
+        moduleResolution: "Bundler",
+        strict: true,
+        esModuleInterop: true,
+        skipLibCheck: true,
+        // tsup handles emit (single bundled `dist/index.js`); tsc is
+        // type-check only via `npm run typecheck`.
+        noEmit: true,
+        // `Bundler` resolution lets relative imports omit the `.js`
+        // extension — esbuild (via tsup at build time, tsx at dev
+        // time, vite-node at test time) resolves them.
+      },
+      include: ["**/*.ts"],
+      exclude: ["node_modules", "dist"],
     },
-    include: ["**/*.ts"],
-    exclude: ["node_modules", "dist"],
-  },
-  null,
-  2,
-) + "\n";
+    null,
+    2,
+  ) + "\n";
 
 const TSUP_CONFIG = `// Auto-generated.  tsup bundles index.ts → dist/index.js for
 // production.  Externals match runtime deps from package.json so

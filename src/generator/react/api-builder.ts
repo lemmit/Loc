@@ -1,3 +1,5 @@
+import { wireShapeFor } from "../../ir/enrichments.js";
+import type { ClassifyContext, SingleFieldPattern } from "../../ir/invariant-classify.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -9,17 +11,12 @@ import type {
   TypeIR,
   ValueObjectIR,
 } from "../../ir/loom-ir.js";
-import { wireShapeFor } from "../../ir/enrichments.js";
-import {
-  type ClassifyContext,
-  type SingleFieldPattern,
-} from "../../ir/invariant-classify.js";
+import { plural, snake } from "../../util/naming.js";
 import {
   chainSingleFieldNative,
   refineClauseFor,
   takeSingleFieldChain,
 } from "../typescript/zod-refine.js";
-import { plural, snake } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Per-aggregate API module: Zod schemas + React Query hooks.
@@ -38,9 +35,7 @@ export function buildApiModule(
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import { z } from "zod";`);
-  lines.push(
-    `import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";`,
-  );
+  lines.push(`import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";`);
   lines.push(`import { api } from "./client";`);
   lines.push("");
 
@@ -62,9 +57,7 @@ export function buildApiModule(
       new Set(agg.fields.map((f) => f.name)),
     ),
   );
-  lines.push(
-    `export type Create${agg.name}Request = z.infer<typeof Create${agg.name}Request>;`,
-  );
+  lines.push(`export type Create${agg.name}Request = z.infer<typeof Create${agg.name}Request>;`);
   lines.push("");
 
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
@@ -77,9 +70,7 @@ export function buildApiModule(
         new Set(op.params.map((p) => p.name)),
       ),
     );
-    lines.push(
-      `export type ${cap(op.name)}Request = z.infer<typeof ${cap(op.name)}Request>;`,
-    );
+    lines.push(`export type ${cap(op.name)}Request = z.infer<typeof ${cap(op.name)}Request>;`);
   }
   lines.push("");
 
@@ -92,9 +83,7 @@ export function buildApiModule(
         lines.push(`  ${p.name}: ${zodForRequest(p.type)},`);
       }
       lines.push(`});`);
-      lines.push(
-        `export type ${cap(find.name)}Query = z.infer<typeof ${cap(find.name)}Query>;`,
-      );
+      lines.push(`export type ${cap(find.name)}Query = z.infer<typeof ${cap(find.name)}Query>;`);
     }
   }
   lines.push("");
@@ -105,12 +94,8 @@ export function buildApiModule(
     lines.push(...emitResponseSchema(part, ctx, /*isAgg*/ false));
   }
   lines.push(...emitResponseSchema(agg, ctx, /*isAgg*/ true));
-  lines.push(
-    `export const ${agg.name}ListResponse = z.array(${agg.name}Response);`,
-  );
-  lines.push(
-    `export type ${agg.name}ListResponse = z.infer<typeof ${agg.name}ListResponse>;`,
-  );
+  lines.push(`export const ${agg.name}ListResponse = z.array(${agg.name}Response);`);
+  lines.push(`export type ${agg.name}ListResponse = z.infer<typeof ${agg.name}ListResponse>;`);
   lines.push("");
 
   // ---------------------------------------------------------------------
@@ -133,9 +118,7 @@ export function buildApiModule(
   lines.push("");
 
   // use<Agg>ById
-  lines.push(
-    `export function use${agg.name}ById(id: string | undefined) {`,
-  );
+  lines.push(`export function use${agg.name}ById(id: string | undefined) {`);
   lines.push(`  return useQuery({`);
   lines.push(`    queryKey: ${detailKey},`);
   lines.push(`    enabled: !!id,`);
@@ -153,9 +136,7 @@ export function buildApiModule(
   lines.push(`  return useMutation({`);
   lines.push(`    mutationFn: async (input: Create${agg.name}Request) => {`);
   lines.push(`      const r = await api.post(\`/${tag}\`, input);`);
-  lines.push(
-    `      return z.object({ id: z.string() }).parse(r);`,
-  );
+  lines.push(`      return z.object({ id: z.string() }).parse(r);`);
   lines.push(`    },`);
   lines.push(`    onSuccess: () => qc.invalidateQueries({ queryKey: ${aggKey} }),`);
   lines.push(`  });`);
@@ -165,21 +146,13 @@ export function buildApiModule(
   // use<Op><Agg> — one per public operation.
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
     const opSnake = snake(op.name);
-    lines.push(
-      `export function use${cap(op.name)}${agg.name}(id: string) {`,
-    );
+    lines.push(`export function use${cap(op.name)}${agg.name}(id: string) {`);
     lines.push(`  const qc = useQueryClient();`);
     lines.push(`  return useMutation({`);
-    lines.push(
-      `    mutationFn: async (input: ${cap(op.name)}Request) => {`,
-    );
-    lines.push(
-      `      await api.post(\`/${tag}/\${id}/${opSnake}\`, input);`,
-    );
+    lines.push(`    mutationFn: async (input: ${cap(op.name)}Request) => {`);
+    lines.push(`      await api.post(\`/${tag}/\${id}/${opSnake}\`, input);`);
     lines.push(`    },`);
-    lines.push(
-      `    onSuccess: () => {`,
-    );
+    lines.push(`    onSuccess: () => {`);
     lines.push(`      qc.invalidateQueries({ queryKey: ["${tag}", id] });`);
     lines.push(`      qc.invalidateQueries({ queryKey: ${aggKey} });`);
     lines.push(`    },`);
@@ -203,16 +176,12 @@ export function buildApiModule(
         `export function use${cap(find.name)}${agg.name}(query: ${cap(find.name)}Query) {`,
       );
       lines.push(`  return useQuery({`);
-      lines.push(
-        `    queryKey: ["${tag}", "find", "${findSnake}", query],`,
-      );
+      lines.push(`    queryKey: ["${tag}", "find", "${findSnake}", query],`);
       lines.push(`    queryFn: async () => {`);
       lines.push(
         `      const qs = new URLSearchParams(query as Record<string, string>).toString();`,
       );
-      lines.push(
-        `      const r = await api.get(\`/${tag}/${findSnake}\${qs ? "?" + qs : ""}\`);`,
-      );
+      lines.push(`      const r = await api.get(\`/${tag}/${findSnake}\${qs ? "?" + qs : ""}\`);`);
       lines.push(`      return ${responseSchema}.parse(r);`);
       lines.push(`    },`);
       lines.push(`  });`);
@@ -308,7 +277,6 @@ function preconditionsAsInvariants(op: OperationIR): InvariantIR[] {
   }
   return out;
 }
-
 
 function emitResponseSchema(
   ent: AggregateIR | EntityPartIR,

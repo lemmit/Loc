@@ -1,3 +1,4 @@
+import type { AstNode } from "langium";
 import type {
   Aggregate,
   Api,
@@ -47,7 +48,6 @@ import type {
   View,
   Workflow,
 } from "../generated/ast.js";
-import type { AstNode } from "langium";
 import { printExpr } from "./print-expr.js";
 import { printStmt } from "./print-stmt.js";
 
@@ -111,43 +111,80 @@ function enumOrString(value: string, keywords: Set<string>): string {
 /** Print any structural AST node back to `.ddd` source. */
 export function printStructural(node: AstNode): string {
   switch (node.$type) {
-    case "System": return printSystem(node as System);
-    case "Module": return printModule(node as Module);
-    case "Deployable": return printDeployable(node as Deployable);
-    case "ThemeBlock": return printThemeBlock(node as ThemeBlock);
-    case "UserBlock": return printUserBlock(node as UserBlock);
-    case "TestE2E": return printTestE2E(node as TestE2E);
-    case "Ui": return printUi(node as Ui);
-    case "Api": return printApi(node as Api);
-    case "Storage": return printStorage(node as Storage);
-    case "BoundedContext": return printBoundedContext(node as BoundedContext);
-    case "EnumDecl": return printEnumDecl(node as EnumDecl);
-    case "ValueObject": return printValueObject(node as ValueObject);
-    case "Aggregate": return printAggregate(node as Aggregate);
-    case "EventDecl": return printEventDecl(node as EventDecl);
-    case "Repository": return printRepository(node as Repository);
-    case "Workflow": return printWorkflow(node as Workflow);
-    case "View": return printView(node as View);
-    case "Requirement": return printRequirement(node as Requirement);
-    case "Solution": return printSolution(node as Solution);
-    case "TestCase": return printTestCase(node as TestCase);
-    case "EntityPart": return printEntityPart(node as EntityPart);
-    case "Operation": return printOperation(node as Operation);
-    case "FunctionDecl": return printFunctionDecl(node as FunctionDecl);
-    case "DerivedProp": return printDerivedProp(node as DerivedProp);
-    case "Invariant": return printInvariant(node as Invariant);
-    case "Containment": return printContainment(node as Containment);
-    case "Property": return printProperty(node as Property);
-    case "TestBlock": return printTestBlock(node as TestBlock);
-    case "Page": return printPage(node as Page);
-    case "Component": return printComponent(node as Component);
-    case "StateBlock": return printStateBlock(node as StateBlock);
-    case "Scaffold": return printScaffold(node as Scaffold);
-    case "MenuBlock": return printMenuBlock(node as MenuBlock);
-    case "PermissionsBlock": return printPermissionsBlock(node as PermissionsBlock);
-    case "UiApiParam": return printUiApiParam(node as UiApiParam);
-    case "UiHelperImport": return printUiHelperImport(node as UiHelperImport);
-    case "FindDecl": return printFindDecl(node as FindDecl);
+    case "System":
+      return printSystem(node as System);
+    case "Module":
+      return printModule(node as Module);
+    case "Deployable":
+      return printDeployable(node as Deployable);
+    case "ThemeBlock":
+      return printThemeBlock(node as ThemeBlock);
+    case "UserBlock":
+      return printUserBlock(node as UserBlock);
+    case "TestE2E":
+      return printTestE2E(node as TestE2E);
+    case "Ui":
+      return printUi(node as Ui);
+    case "Api":
+      return printApi(node as Api);
+    case "Storage":
+      return printStorage(node as Storage);
+    case "BoundedContext":
+      return printBoundedContext(node as BoundedContext);
+    case "EnumDecl":
+      return printEnumDecl(node as EnumDecl);
+    case "ValueObject":
+      return printValueObject(node as ValueObject);
+    case "Aggregate":
+      return printAggregate(node as Aggregate);
+    case "EventDecl":
+      return printEventDecl(node as EventDecl);
+    case "Repository":
+      return printRepository(node as Repository);
+    case "Workflow":
+      return printWorkflow(node as Workflow);
+    case "View":
+      return printView(node as View);
+    case "Requirement":
+      return printRequirement(node as Requirement);
+    case "Solution":
+      return printSolution(node as Solution);
+    case "TestCase":
+      return printTestCase(node as TestCase);
+    case "EntityPart":
+      return printEntityPart(node as EntityPart);
+    case "Operation":
+      return printOperation(node as Operation);
+    case "FunctionDecl":
+      return printFunctionDecl(node as FunctionDecl);
+    case "DerivedProp":
+      return printDerivedProp(node as DerivedProp);
+    case "Invariant":
+      return printInvariant(node as Invariant);
+    case "Containment":
+      return printContainment(node as Containment);
+    case "Property":
+      return printProperty(node as Property);
+    case "TestBlock":
+      return printTestBlock(node as TestBlock);
+    case "Page":
+      return printPage(node as Page);
+    case "Component":
+      return printComponent(node as Component);
+    case "StateBlock":
+      return printStateBlock(node as StateBlock);
+    case "Scaffold":
+      return printScaffold(node as Scaffold);
+    case "MenuBlock":
+      return printMenuBlock(node as MenuBlock);
+    case "PermissionsBlock":
+      return printPermissionsBlock(node as PermissionsBlock);
+    case "UiApiParam":
+      return printUiApiParam(node as UiApiParam);
+    case "UiHelperImport":
+      return printUiHelperImport(node as UiHelperImport);
+    case "FindDecl":
+      return printFindDecl(node as FindDecl);
     default:
       throw new Error(`printStructural: unhandled node ${node.$type}`);
   }
@@ -177,11 +214,17 @@ function printPermissionsBlock(node: PermissionsBlock): string {
 }
 
 function printThemeBlock(node: ThemeBlock): string {
-  return block("theme", node.props.map((p) => `${p.name}: ${quote(p.value)}`));
+  return block(
+    "theme",
+    node.props.map((p) => `${p.name}: ${quote(p.value)}`),
+  );
 }
 
 function printUserBlock(node: UserBlock): string {
-  return block("user", node.fields.map((f) => `${f.name}: ${printTypeRef(f.type)}`));
+  return block(
+    "user",
+    node.fields.map((f) => `${f.name}: ${printTypeRef(f.type)}`),
+  );
 }
 
 function printStorage(node: Storage): string {
@@ -251,13 +294,21 @@ function printPage(node: Page): string {
 
 function printPageProp(node: PageProp): string {
   switch (node.$type) {
-    case "RouteProp": return `route: ${quote(node.value)}`;
-    case "TitleProp": return `title: ${printExpr(node.value)}`;
-    case "RequiresProp": return `requires ${printExpr(node.expr)}`;
-    case "BodyProp": return `body: ${printExpr(node.expr)}`;
-    case "StateBlock": return printStateBlock(node);
+    case "RouteProp":
+      return `route: ${quote(node.value)}`;
+    case "TitleProp":
+      return `title: ${printExpr(node.value)}`;
+    case "RequiresProp":
+      return `requires ${printExpr(node.expr)}`;
+    case "BodyProp":
+      return `body: ${printExpr(node.expr)}`;
+    case "StateBlock":
+      return printStateBlock(node);
     case "PageMenuMeta":
-      return commaBlock("menu", node.entries.map((e) => `${e.name}: ${printExpr(e.value)}`));
+      return commaBlock(
+        "menu",
+        node.entries.map((e) => `${e.name}: ${printExpr(e.value)}`),
+      );
     default: {
       const exhaustive: never = node;
       throw new Error(`printPageProp: unhandled ${(exhaustive as { $type: string }).$type}`);
@@ -309,7 +360,10 @@ function printMenuLink(node: MenuLink): string {
 // ---------------------------------------------------------------------------
 
 function printBoundedContext(node: BoundedContext): string {
-  return block(`context ${node.name}`, node.members.map((m) => printContextMember(m)));
+  return block(
+    `context ${node.name}`,
+    node.members.map((m) => printContextMember(m)),
+  );
 }
 
 function printContextMember(node: ContextMember): string {
@@ -317,7 +371,10 @@ function printContextMember(node: ContextMember): string {
 }
 
 function printEnumDecl(node: EnumDecl): string {
-  return commaBlock(`enum ${node.name}`, node.values.map((v) => v.name));
+  return commaBlock(
+    `enum ${node.name}`,
+    node.values.map((v) => v.name),
+  );
 }
 
 function printValueObject(node: ValueObject): string {
@@ -338,7 +395,10 @@ function printEventDecl(node: EventDecl): string {
 }
 
 function printRepository(node: Repository): string {
-  return block(`repository ${node.name} for ${node.aggregate.$refText}`, node.finds.map(printFindDecl));
+  return block(
+    `repository ${node.name} for ${node.aggregate.$refText}`,
+    node.finds.map(printFindDecl),
+  );
 }
 
 function printFindDecl(node: FindDecl): string {
@@ -423,7 +483,10 @@ function printTestStatement(node: TestStatement): string {
 
 function printRequirement(node: Requirement): string {
   const parent = node.parent ? ` parent ${node.parent.$refText}` : "";
-  return block(`requirement ${node.name}${parent}`, node.props.map((p) => `${p.name}: ${printExpr(p.value)}`));
+  return block(
+    `requirement ${node.name}${parent}`,
+    node.props.map((p) => `${p.name}: ${printExpr(p.value)}`),
+  );
 }
 
 function printSolution(node: Solution): string {
@@ -456,9 +519,15 @@ function printTypeRef(node: TypeRef): string {
   const base = node.base;
   let s: string;
   switch (base.$type) {
-    case "PrimitiveType": s = base.name; break;
-    case "IdType": s = `Id<${base.target.$refText}>`; break;
-    case "NamedType": s = base.target.$refText; break;
+    case "PrimitiveType":
+      s = base.name;
+      break;
+    case "IdType":
+      s = `Id<${base.target.$refText}>`;
+      break;
+    case "NamedType":
+      s = base.target.$refText;
+      break;
     default: {
       const exhaustive: never = base;
       throw new Error(`printTypeRef: unhandled base ${(exhaustive as { $type: string }).$type}`);
