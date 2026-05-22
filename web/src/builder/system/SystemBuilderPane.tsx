@@ -679,6 +679,9 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         ? { kind: "stmtExpr", owner: loc.aggregate, op: loc.op, index, ...(field !== undefined ? { field } : {}) }
         : { kind: "wfStmt", owner: loc.name, index, ...(field !== undefined ? { field } : {}) };
     return {
+      // In-scope names at a statement position (params + earlier lets + this-
+      // props / context) — receiver suggestions for a bare call's head.
+      headCandidates: (index: number): string[] => slotCandidates(parsed.ast, slotFor(index)),
       hasValueEditor: (index: number, field?: number): boolean =>
         slotExpr(parsed.ast, slotFor(index, field)) != null,
       onToggleValueEditor: (index: number, field?: number): void => {
