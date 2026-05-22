@@ -138,6 +138,10 @@ const SYNTHETIC = {
   Match: { container: true, fields: [] },
   MatchArm: { container: true, fields: [{ key: "cond", kind: "expr" }] },
   MatchElse: { container: true, fields: [] },
+  // A statement inside a block-bodied lambda (`r => { … }`); its source is kept
+  // verbatim and edited as a raw line, so a handler body is a list of editable
+  // statement rows rather than one Opaque blob.
+  Stmt: { container: false, fields: [] },
 } satisfies Record<string, { container: boolean; fields: PropSpec[] }>;
 type SyntheticName = keyof typeof SYNTHETIC;
 const isSynthetic = (name: string): name is SyntheticName => name in SYNTHETIC;
@@ -319,11 +323,16 @@ function seedCall(name: string, spec: PrimitiveSpec, args: CallArg[], components
  *  user-defined `component` names in scope; a call to one is recognised as a
  *  node (its positional args become children) rather than falling to Opaque. */
 export function seedFromBody(expr: Expression, components: ReadonlySet<string> = EMPTY_COMPONENTS): BuilderNode {
-  // Lambda — only single-expression bodies are modelled (the body becomes the
-  // one child canvas); block-statement bodies (`x => { … }`) stay verbatim.
+  // Lambda — an expression body becomes the one child canvas; a block body
+  // (`x => { … }`) becomes a list of editable `Stmt` rows (each statement's
+  // source kept verbatim).
   if (expr.$type === "Lambda") {
-    if (expr.body === undefined) return opaque(expr);
-    return { name: "Lambda", props: { param: expr.param }, children: [seedFromBody(expr.body, components)] };
+    if (expr.body !== undefined) return { name: "Lambda", props: { param: expr.param }, children: [seedFromBody(expr.body, components)] };
+    return {
+      name: "Lambda",
+      props: { param: expr.param, __block: "1" },
+      children: expr.stmts.map((s) => ({ name: "Stmt" as const, props: { src: s.$cstNode?.text?.trim() ?? "" }, children: [] })),
+    };
   }
   // match — predicate arms (cond + value child) plus an optional else child.
   if (expr.$type === "MatchExpr") {
@@ -373,7 +382,14 @@ export function emitBody(node: BuilderNode): string {
   // as-yet-unfilled single-child slot emits an `Empty()` placeholder so the
   // source stays parseable while it's being built up in the canvas.
   const body = (n: BuilderNode): string => (n.children[0] ? emitBody(n.children[0]) : "Empty()");
-  if (node.name === "Lambda") return `${node.props.param ?? "x"} => ${body(node)}`;
+  if (node.name === "Stmt") return String(node.props.src ?? "");
+  if (node.name === "Lambda") {
+    if (node.props.__block) {
+      const stmts = node.children.map((c) => String(c.props.src ?? "")).filter((s) => s !== "");
+      return `${node.props.param ?? "x"} => {\n  ${stmts.join("\n  ")}\n}`;
+    }
+    return `${node.props.param ?? "x"} => ${body(node)}`;
+  }
   if (node.name === "MatchArm") return `${node.props.cond ?? "true"} => ${body(node)}`;
   if (node.name === "MatchElse") return `else => ${body(node)}`;
   if (node.name === "Match") {

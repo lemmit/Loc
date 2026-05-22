@@ -92,6 +92,8 @@ function renderLeaf(name: PrimitiveName, p: Props): ReactNode {
       return <span>{disp(p.label) || name}: <span style={{ display: "inline-block", minWidth: 48, borderBottom: "1px solid var(--mantine-color-dark-3)" }} /></span>;
     case "Toggle":
       return <span>◯ {disp(p.label) || "Toggle"}</span>;
+    case "Stmt":
+      return <span style={{ fontFamily: "monospace", fontSize: 11 }}>{String(p.src || "…")}</span>;
     default:
       return String(name);
   }
@@ -168,6 +170,7 @@ for (const name of PRIMITIVES) {
 for (const name of ["Lambda", "Match", "MatchArm", "MatchElse"] as const) {
   resolver[name] = makeContainer(name);
 }
+resolver.Stmt = makeLeaf("Stmt" as PrimitiveName);
 
 // Build a resolver that also knows the current source's user-defined
 // `component` calls (each rendered as a container box labelled with its name).
