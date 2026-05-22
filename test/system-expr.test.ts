@@ -210,6 +210,29 @@ describe("structured expression editor — assignment & emit statement slots", (
   });
 });
 
+describe("structured expression editor — bare call argument slots", () => {
+  const callSrc = `system S { module M { context C {
+  aggregate Order {
+    operation go(qty: int) {
+      addLine(qty, 5)
+    }
+  }
+}}}`;
+
+  it("exposes one slot per bare-call argument", () => {
+    const opts = exprSlotOptions(owner<Aggregate>(parse(callSrc), "Aggregate", "Order"));
+    const byValue = new Map(opts.map((o) => [o.value, o.label]));
+    expect(byValue.get("stmt:go:0:0")).toBe("go: addLine(…) arg 1: qty");
+    expect(byValue.get("stmt:go:0:1")).toBe("go: addLine(…) arg 2: 5");
+  });
+
+  it("resolves and edits a bare-call argument, leaving siblings intact", () => {
+    expect(seedExpr(slotExpr(parse(callSrc), { kind: "stmtExpr", owner: "Order", op: "go", index: 0, field: 0 })!)).toMatchObject({ kind: "raw", text: "qty" });
+    const out = editExprSlot(callSrc, { kind: "stmtExpr", owner: "Order", op: "go", index: 0, field: 1 }, "10")!;
+    expect(out).toMatch(/addLine\(qty, 10\)/);
+  });
+});
+
 describe("structured expression editor — workflow statement slots", () => {
   it("lists a workflow's single-expression statements", () => {
     const opts = workflowSlotOptions(owner<Workflow>(parse(sales), "Workflow", "placeOrder"));

@@ -276,7 +276,7 @@ Done:
   the structured editor (calls, members, `new`, member completion), not just the
   BodyEditor's text rows. Candidates include params and earlier `let` bindings
   (operations also see the aggregate's members; workflows have no `this`). Bare
-  calls and the assignment target stay text-row only. Gated by
+  **call statements** (`x.method(args)`) expose one slot per argument too. Gated by
   `test/system-expr.test.ts` + e2e.
 - **Emit event picker** — an "Emits" picker on aggregate / workflow nodes lists
   every `emit` statement (across operations / the workflow body) and repoints it

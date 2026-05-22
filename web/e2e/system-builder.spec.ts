@@ -185,6 +185,28 @@ test("adds every domain + infra construct kind from the palette", async ({ page 
   }
 });
 
+test("edits a bare call statement's argument", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /\.NET backend only/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  // placeOrder calls `order.addLine(productId, quantity)` — edit the 2nd arg.
+  await page.locator('[data-testid="rf__node-workflow:placeOrder"]').click();
+  await page.getByTestId("c4system-expr-pick").click();
+  await page.getByRole("option", { name: /order\.addLine\(…\) arg 2: quantity/ }).click();
+
+  const raw = page.getByTestId("c4expr").getByTestId("c4expr-raw");
+  await expect(raw).toHaveValue("quantity");
+  await raw.fill("productId");
+  await raw.blur();
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+  await expect(page.getByTestId("c4expr").getByTestId("c4expr-raw")).toHaveValue("productId");
+});
+
 test("repoints an emit statement at a different event", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);
