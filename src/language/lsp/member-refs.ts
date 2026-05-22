@@ -110,8 +110,11 @@ function localShadows(node: AstNode, name: string): boolean {
     ) {
       return true;
     }
-    const stmts = (n as { stmts?: AstNode[] }).stmts;
-    if (Array.isArray(stmts) && stmts.some((s) => isLetStmt(s) && s.name === name)) return true;
+    // Operation/Workflow bodies are `Statement[]`; a `let` of the same name
+    // shadows the member. (FunctionDecl.body is a single Expression — no lets.)
+    if ((isOperation(n) || isWorkflow(n)) && n.body.some((s) => isLetStmt(s) && s.name === name)) {
+      return true;
+    }
     n = n.$container;
   }
   return false;
