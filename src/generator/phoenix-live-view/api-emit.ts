@@ -1,5 +1,5 @@
 import type { BoundedContextIR, DeployableIR, SystemIR } from "../../ir/loom-ir.js";
-import { pascal, plural, snake } from "../../util/naming.js";
+import { upperFirst, plural, snake } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // API controller emission for Phoenix LiveView / Ash.
@@ -253,8 +253,8 @@ function renderWorkflowAction(
   appModule: string,
 ): string {
   const wfSnake = snake(wf.name);
-  const contextModule = `${appModule}.${pascal(ctx.name)}`;
-  const workflowModule = `${contextModule}.Workflows.${pascal(wf.name)}`;
+  const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
+  const workflowModule = `${contextModule}.Workflows.${upperFirst(wf.name)}`;
 
   // Build the permitted param key list from the workflow's declared params
   const allowedKeys = wf.params.map((p) => `"${snake(p.name)}"`).join(", ");
@@ -315,8 +315,8 @@ function renderViewAction(
   appModule: string,
 ): string {
   const viewSnake = snake(view.name);
-  const contextModule = `${appModule}.${pascal(ctx.name)}`;
-  const viewModule = `${contextModule}.Views.${pascal(view.name)}`;
+  const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
+  const viewModule = `${contextModule}.Views.${upperFirst(view.name)}`;
 
   // Ash internal metadata fields to strip before JSON encoding
   const ashInternalKeys = `~w(__meta__ __struct__ __order__ __lateral_join_source__ calculations aggregates relationships)a`;
@@ -384,7 +384,7 @@ function renderAggregateActions(
 ): string {
   const aggSnake = snake(agg.name);
   const aggPlural = snake(plural(agg.name));
-  const contextModule = `${appModule}.${pascal(ctx.name)}`;
+  const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
 
   return `  @doc "GET /api/aggregates/${aggPlural}"
   def list_${aggPlural}(conn, _params) do

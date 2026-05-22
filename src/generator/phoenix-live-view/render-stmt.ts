@@ -1,5 +1,5 @@
 import type { PathIR, StmtIR } from "../../ir/loom-ir.js";
-import { pascal, snake } from "../../util/naming.js";
+import { upperFirst, snake } from "../../util/naming.js";
 import { type RenderCtx, renderExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -60,7 +60,7 @@ function renderElixirStatement(s: StmtIR, ctx: RenderCtx, changesetVar: string):
       const fields = s.fields
         .map((f) => `${snake(f.name)}: ${renderExpr(f.value, ctx)}`)
         .join(", ");
-      const moduleName = pascal(s.eventName);
+      const moduleName = upperFirst(s.eventName);
       return `${INDENT}Phoenix.PubSub.broadcast(${ctx.contextModule}.PubSub, "events", %${ctx.contextModule}.Events.${moduleName}{${fields}})`;
     }
 

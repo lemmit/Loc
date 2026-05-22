@@ -1,5 +1,5 @@
 import type { BoundedContextIR, DeployableIR, SystemIR } from "../../ir/loom-ir.js";
-import { pascal, plural, snake } from "../../util/naming.js";
+import { upperFirst, plural, snake } from "../../util/naming.js";
 import { type ApiRoute, emitApiControllers } from "./api-emit.js";
 import { emitAuth } from "./auth-emit.js";
 import { emitAggregateResources } from "./domain-emit.js";
@@ -168,7 +168,7 @@ function emitContext(
   out: Map<string, string>,
 ): void {
   const ctxSnake = snake(ctx.name);
-  const contextModule = `${appModule}.${pascal(ctx.name)}`;
+  const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
 
   // Enums — Ash enum types
   for (const en of ctx.enums) {
@@ -195,9 +195,9 @@ function emitContext(
   const aggFiles = emitAggregateResources(ctx, appModule, appName);
   for (const [path, content] of aggFiles) out.set(path, content);
   for (const agg of ctx.aggregates) {
-    allResources.push(`${contextModule}.${pascal(agg.name)}`);
+    allResources.push(`${contextModule}.${upperFirst(agg.name)}`);
     for (const part of agg.parts) {
-      allResources.push(`${contextModule}.${pascal(part.name)}`);
+      allResources.push(`${contextModule}.${upperFirst(part.name)}`);
     }
   }
   // Custom find actions (repository finds + view-derived finds) are
@@ -235,7 +235,7 @@ function emitContext(
 // ---------------------------------------------------------------------------
 
 function renderEnumModule(en: import("../../ir/loom-ir.js").EnumIR, contextModule: string): string {
-  const moduleName = `${contextModule}.${pascal(en.name)}`;
+  const moduleName = `${contextModule}.${upperFirst(en.name)}`;
   const values = en.values.map((v) => `  :${snake(v)}`).join(",\n");
   return `# Auto-generated.
 defmodule ${moduleName} do
@@ -254,7 +254,7 @@ function renderValueObjectModule(
   vo: import("../../ir/loom-ir.js").ValueObjectIR,
   contextModule: string,
 ): string {
-  const moduleName = `${contextModule}.${pascal(vo.name)}`;
+  const moduleName = `${contextModule}.${upperFirst(vo.name)}`;
   const attrLines = vo.fields.map((f) => {
     const ashType = renderAshType(f.type, contextModule);
     const opts = f.optional ? "allow_nil?: true" : "allow_nil?: false";
@@ -280,11 +280,11 @@ function renderEventModule(
   ev: import("../../ir/loom-ir.js").EventIR,
   contextModule: string,
 ): string {
-  const moduleName = `${contextModule}.Events.${pascal(ev.name)}`;
+  const moduleName = `${contextModule}.Events.${upperFirst(ev.name)}`;
   void renderAshType; // used in sibling fns
   return `# Auto-generated.
 defmodule ${moduleName} do
-  @moduledoc "Domain event: ${pascal(ev.name)}"
+  @moduledoc "Domain event: ${upperFirst(ev.name)}"
 
   defstruct ${ev.fields.map((f) => `:${snake(f.name)}`).join(", ")}
   @type t :: %__MODULE__{
@@ -310,13 +310,13 @@ function renderDomainModule(
   const partResources = new Set<string>();
   for (const agg of ctx.aggregates) {
     for (const part of agg.parts) {
-      partResources.add(`${contextModule}.${pascal(part.name)}`);
+      partResources.add(`${contextModule}.${upperFirst(part.name)}`);
     }
   }
   for (const r of resources) {
     const aggName = r.split(".").pop()!;
     // Locate the IR aggregate to enumerate its custom finds.
-    const agg = ctx.aggregates.find((a) => pascal(a.name) === aggName);
+    const agg = ctx.aggregates.find((a) => upperFirst(a.name) === aggName);
     if (!agg) {
       // Entity-part resource (child table) — registered with no
       // code-interface defines; Ash 3.x's `resource X` shorthand.
@@ -1344,7 +1344,7 @@ function renderConfigExs(appName: string, appModule: string, contexts: BoundedCo
   // "Domain <Mod> is not present in :ash_domains".  Domains are
   // \`<appModule>.<PascalContextName>\` (matching what
   // emitAggregateResources emits as the resource's :domain).
-  const ashDomains = contexts.map((ctx) => `${appModule}.${pascal(ctx.name)}`).join(", ");
+  const ashDomains = contexts.map((ctx) => `${appModule}.${upperFirst(ctx.name)}`).join(", ");
   return `# Auto-generated.
 import Config
 

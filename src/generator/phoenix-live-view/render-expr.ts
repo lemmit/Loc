@@ -1,5 +1,5 @@
 import type { BinOp, ExprIR, TypeIR } from "../../ir/loom-ir.js";
-import { pascal, snake } from "../../util/naming.js";
+import { upperFirst, snake } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Expression renderer for the Phoenix LiveView / Elixir backend.
@@ -183,7 +183,7 @@ function renderCall(e: Extract<ExprIR, { kind: "call" }>, ctx: RenderCtx): strin
   switch (e.callKind) {
     case "value-object-ctor":
       // Embedded Ash resource / struct constructor.
-      return `%${ctx.contextModule}.${pascal(e.name)}{${args}}`;
+      return `%${ctx.contextModule}.${upperFirst(e.name)}{${args}}`;
     case "function":
     case "private-operation":
       return `${snake(e.name)}(${ctx.thisName}, ${args})`;
@@ -198,7 +198,7 @@ function renderCall(e: Extract<ExprIR, { kind: "call" }>, ctx: RenderCtx): strin
 
 function renderNew(e: Extract<ExprIR, { kind: "new" }>, ctx: RenderCtx): string {
   const fields = e.fields.map((f) => `${snake(f.name)}: ${renderExpr(f.value, ctx)}`).join(", ");
-  return `%${ctx.contextModule}.${pascal(e.partName)}{${fields}}`;
+  return `%${ctx.contextModule}.${upperFirst(e.partName)}{${fields}}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -312,11 +312,11 @@ export function renderAshType(t: TypeIR, contextModule: string): string {
     case "id":
       return ":uuid";
     case "enum":
-      return `${contextModule}.${pascal(t.name)}`;
+      return `${contextModule}.${upperFirst(t.name)}`;
     case "valueobject":
-      return `${contextModule}.${pascal(t.name)}`;
+      return `${contextModule}.${upperFirst(t.name)}`;
     case "entity":
-      return `${contextModule}.${pascal(t.name)}`;
+      return `${contextModule}.${upperFirst(t.name)}`;
     case "array":
       return `{:array, ${renderAshType(t.element, contextModule)}}`;
     case "optional":

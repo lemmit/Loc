@@ -1,5 +1,5 @@
 import type { BoundedContextIR, ParamIR, WorkflowIR, WorkflowStmtIR } from "../../ir/loom-ir.js";
-import { pascal, snake } from "../../util/naming.js";
+import { upperFirst, snake } from "../../util/naming.js";
 import { type RenderCtx, renderExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -35,7 +35,7 @@ export function emitWorkflows(
 ): void {
   if (ctx.workflows.length === 0) return;
   const ctxSnake = snake(ctx.name);
-  const contextModule = `${appModule}.${pascal(ctx.name)}`;
+  const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
 
   for (const wf of ctx.workflows) {
     const path = `lib/${appName}/${ctxSnake}/workflows/${snake(wf.name)}.ex`;
@@ -50,7 +50,7 @@ function renderWorkflow(
   contextModule: string,
   appModule: string,
 ): string {
-  const moduleName = `${contextModule}.Workflows.${pascal(wf.name)}`;
+  const moduleName = `${contextModule}.Workflows.${upperFirst(wf.name)}`;
   const renderCtx: RenderCtx = { thisName: "record", contextModule };
 
   const params = wf.params.map((p) => snake(p.name));
@@ -81,7 +81,7 @@ function renderWorkflow(
 
   return `# Auto-generated.
 defmodule ${moduleName} do
-  @moduledoc "Workflow: ${pascal(wf.name)}"
+  @moduledoc "Workflow: ${upperFirst(wf.name)}"
 
   alias ${contextModule}
 
@@ -282,7 +282,7 @@ function renderWorkflowStmt(
       const fields = st.fields
         .map((f) => `${snake(f.name)}: ${renderExpr(f.value, renderCtx)}`)
         .join(", ");
-      const eventModule = `${contextModule}.Events.${pascal(st.eventName)}`;
+      const eventModule = `${contextModule}.Events.${upperFirst(st.eventName)}`;
       return [
         {
           kind: "emit",
