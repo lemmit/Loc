@@ -98,12 +98,9 @@ function exprIsTranslatable(
       return exprIsTranslatable(e.receiver, ctx, scope);
     case "method-call": {
       if (!exprIsTranslatable(e.receiver, ctx, scope)) return false;
-      // `String.matches(literal)` / `String.startsWith(literal)` etc.
-      // are fine when the receiver is.  Collection ops introduce a
-      // lambda parameter we track in `scope`.
-      if (e.isCollectionOp) {
-        return e.args.every((a) => exprIsTranslatable(a, ctx, scope));
-      }
+      // `String.matches(literal)` etc. and collection ops (`all`/`any`/…)
+      // are translatable when every arg is. A collection op's predicate is
+      // a lambda — the "lambda" case below adds its parameter to `scope`.
       return e.args.every((a) => exprIsTranslatable(a, ctx, scope));
     }
     case "call":
