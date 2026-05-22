@@ -41,6 +41,12 @@ const ENABLED = process.env.LOOM_E2E === "1";
 // assertion once the backends are reconciled.
 const STRICT_PARITY = process.env.LOOM_E2E_STRICT_PARITY === "1";
 
+// Parity-only mode (per-PR CI tier): build + boot only the three backends
+// and run only the OpenAPI parity check — skip the behavioral DSL suite and
+// the Playwright UI run (and the React frontend builds they need).  The
+// full nightly tier leaves this unset.
+const PARITY_ONLY = process.env.LOOM_E2E_PARITY_ONLY === "1";
+
 function hasDocker(): boolean {
   try {
     execSync("docker ps", { stdio: "ignore" });
@@ -79,11 +85,15 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
   }, 60_000);
 
   it("builds every deployable, brings up the system, and serves /health", async () => {
-    execSync(`docker compose -f ${outDir}/docker-compose.yml build`, {
+    // In parity-only mode (per-PR CI tier) build + boot just the three
+    // backends + their db — the React frontends are slow to build and the
+    // OpenAPI parity check doesn't need them.  The full run builds all.
+    const services = PARITY_ONLY ? " dotnet_api hono_api phoenix_api" : "";
+    execSync(`docker compose -f ${outDir}/docker-compose.yml build${services}`, {
       stdio: "inherit",
       timeout: 600_000,
     });
-    execSync(`docker compose -f ${outDir}/docker-compose.yml up -d`, {
+    execSync(`docker compose -f ${outDir}/docker-compose.yml up -d${services}`, {
       stdio: "inherit",
       timeout: 120_000,
     });
@@ -97,71 +107,79 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
     await pollHealthy("http://localhost:4000/health", 180_000); // phoenixApi
   }, 900_000);
 
-  it("generated DSL-level e2e suite runs against the live system", async () => {
-    const e2eDir = path.join(outDir, "e2e");
-    if (!fs.existsSync(e2eDir)) {
-      // System has no `test e2e` blocks — nothing to verify.
-      return;
-    }
-    // Install vitest in the e2e folder, run the generated suite.
-    execSync(`npm install --silent --no-audit --no-fund`, {
-      cwd: e2eDir,
-      stdio: "inherit",
-      timeout: 180_000,
-    });
-    execSync(`npx vitest run`, {
-      cwd: e2eDir,
-      stdio: "inherit",
-      timeout: 120_000,
-    });
-  }, 600_000);
-
-  it("generated Playwright UI suite runs against the live web_app", async () => {
-    // Find any react deployable that ships a Playwright e2e suite.
-    // The smoke spec is always present; a UI spec is only there
-    // when the system declared `test e2e ... against <react>` blocks.
-    const reactDirs = fs
-      .readdirSync(outDir, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => path.join(outDir, d.name))
-      .filter((p) => fs.existsSync(path.join(p, "e2e", "playwright.config.ts")));
-    if (reactDirs.length === 0) {
-      // No react deployable in this system.
-      return;
-    }
-    for (const dir of reactDirs) {
-      const e2eDir = path.join(dir, "e2e");
-      // The frontend's e2e/ has its own package.json with
-      // @playwright/test as a dev dep — keeping it out of the
-      // runtime image.  Install it here.
+  it.skipIf(PARITY_ONLY)(
+    "generated DSL-level e2e suite runs against the live system",
+    async () => {
+      const e2eDir = path.join(outDir, "e2e");
+      if (!fs.existsSync(e2eDir)) {
+        // System has no `test e2e` blocks — nothing to verify.
+        return;
+      }
+      // Install vitest in the e2e folder, run the generated suite.
       execSync(`npm install --silent --no-audit --no-fund`, {
         cwd: e2eDir,
         stdio: "inherit",
         timeout: 180_000,
       });
-      // Browser binaries — `playwright install --with-deps` would
-      // also pull system packages, but the proxy CA setup in this
-      // sandbox already covers them.  PLAYWRIGHT_BROWSERS_PATH
-      // points at a per-host shared cache so repeat runs skip the
-      // 100 MB download.
-      const env = {
-        ...process.env,
-        PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH ?? "/opt/pw-browsers",
-      };
-      execSync(`npx playwright install chromium`, {
+      execSync(`npx vitest run`, {
         cwd: e2eDir,
         stdio: "inherit",
-        env,
-        timeout: 300_000,
+        timeout: 120_000,
       });
-      execSync(`npx playwright test`, {
-        cwd: e2eDir,
-        stdio: "inherit",
-        env,
-        timeout: 300_000,
-      });
-    }
-  }, 900_000);
+    },
+    600_000,
+  );
+
+  it.skipIf(PARITY_ONLY)(
+    "generated Playwright UI suite runs against the live web_app",
+    async () => {
+      // Find any react deployable that ships a Playwright e2e suite.
+      // The smoke spec is always present; a UI spec is only there
+      // when the system declared `test e2e ... against <react>` blocks.
+      const reactDirs = fs
+        .readdirSync(outDir, { withFileTypes: true })
+        .filter((d) => d.isDirectory())
+        .map((d) => path.join(outDir, d.name))
+        .filter((p) => fs.existsSync(path.join(p, "e2e", "playwright.config.ts")));
+      if (reactDirs.length === 0) {
+        // No react deployable in this system.
+        return;
+      }
+      for (const dir of reactDirs) {
+        const e2eDir = path.join(dir, "e2e");
+        // The frontend's e2e/ has its own package.json with
+        // @playwright/test as a dev dep — keeping it out of the
+        // runtime image.  Install it here.
+        execSync(`npm install --silent --no-audit --no-fund`, {
+          cwd: e2eDir,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        // Browser binaries — `playwright install --with-deps` would
+        // also pull system packages, but the proxy CA setup in this
+        // sandbox already covers them.  PLAYWRIGHT_BROWSERS_PATH
+        // points at a per-host shared cache so repeat runs skip the
+        // 100 MB download.
+        const env = {
+          ...process.env,
+          PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH ?? "/opt/pw-browsers",
+        };
+        execSync(`npx playwright install chromium`, {
+          cwd: e2eDir,
+          stdio: "inherit",
+          env,
+          timeout: 300_000,
+        });
+        execSync(`npx playwright test`, {
+          cwd: e2eDir,
+          stdio: "inherit",
+          env,
+          timeout: 300_000,
+        });
+      }
+    },
+    900_000,
+  );
 
   it("cross-check (3-way): Hono / .NET / Phoenix OpenAPI parity", async () => {
     // All three backends serve the same modules from showcase.ddd, so

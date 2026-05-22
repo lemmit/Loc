@@ -1,0 +1,87 @@
+name: Conformance parity (per-PR)
+
+# Per-PR tier of the cross-generator conformance harness.  Generates
+# examples/showcase.ddd as a system, builds + boots ONLY the three
+# backends (Hono / .NET / Phoenix — the React frontends are slow to
+# build and the OpenAPI parity check doesn't need them), then diffs
+# their OpenAPI specs three ways (ops / response cardinality / shared
+# field sets).
+#
+# Parity is REPORT-ONLY by default (LOOM_E2E_STRICT_PARITY unset): the
+# job logs divergences but stays green, because the backends are known
+# to diverge today (e.g. Phoenix namespaces aggregate CRUD under
+# `/aggregates/<plural>`).  Flip the env to `1` here once the
+# generators are reconciled to make divergence a hard failure.
+#
+# Path-filtered to changes that can affect generated backend output so
+# it doesn't run on docs-only PRs.  Branch protection (repo settings)
+# decides whether this is a required check; the long build time makes
+# it a reasonable non-required gate to start.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/generator/**'
+      - 'src/platform/**'
+      - 'src/system/**'
+      - 'src/ir/**'
+      - 'examples/showcase.ddd'
+      - 'docker/**'
+      - 'test/e2e/e2e.test.ts'
+      - 'test/_helpers/openapi-normalize.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'langium-config.json'
+      - '.github/workflows/conformance-parity.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/generator/**'
+      - 'src/platform/**'
+      - 'src/system/**'
+      - 'src/ir/**'
+      - 'examples/showcase.ddd'
+      - 'docker/**'
+      - 'test/e2e/e2e.test.ts'
+      - 'test/_helpers/openapi-normalize.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'langium-config.json'
+      - '.github/workflows/conformance-parity.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: conformance-parity-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  parity:
+    runs-on: ubuntu-latest
+    # Building three backend images (Hono npm+tsc, .NET restore+publish,
+    # Phoenix mix release) dominates wall time.  Generous cap; the job
+    # boots the stack once and runs a single fast parity assertion.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      # Root install runs the `prepare` lifecycle (langium:generate)
+      # which produces src/language/generated/.
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Build toolchain
+        run: npm run build
+
+      # ubuntu-latest ships Docker + the compose plugin; no setup needed.
+      - name: Run 3-way OpenAPI parity (backends only)
+        env:
+          LOOM_E2E: '1'
+          LOOM_E2E_PARITY_ONLY: '1'
+        run: npx vitest run test/e2e/e2e.test.ts
