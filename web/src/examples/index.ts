@@ -1,6 +1,9 @@
 // Vite's `?raw` suffix gives us the file's text content as a string.
 // Adding more examples is just another `?raw` import + an entry in
 // the array below.
+import storefrontSystemSource from "./storefront-system.ddd?raw";
+import storefrontDotnetSource from "./storefront-dotnet.ddd?raw";
+import storefrontPhoenixSource from "./storefront-phoenix.ddd?raw";
 import salesSystemSource from "./sales-system.ddd?raw";
 import bankingSystemSource from "./banking-system.ddd?raw";
 import inventorySystemSource from "./inventory-system.ddd?raw";
@@ -16,11 +19,7 @@ import storybookMuiV7Source from "./storybook-mui-v7.ddd?raw";
 import storybookChakraSource from "./storybook-chakra.ddd?raw";
 import storybookChakraV3Source from "./storybook-chakra-v3.ddd?raw";
 import storybookComponentsSource from "./storybook-components.ddd?raw";
-import dotnetFullstackSource from "./dotnet-fullstack.ddd?raw";
 import dotnetBackendSource from "./dotnet-backend.ddd?raw";
-import dotnetBankingSource from "./dotnet-banking.ddd?raw";
-import phoenixFullstackSource from "./phoenix-fullstack.ddd?raw";
-import phoenixBankingSource from "./phoenix-banking.ddd?raw";
 import actionShowcaseSource from "./action-showcase.ddd?raw";
 
 export interface LoomExample {
@@ -121,6 +120,13 @@ export const examples: LoomExample[] = [
       "The Chakra storybook pinned to the Chakra UI v3 pack (compound components, createSystem theme).",
   },
   {
+    id: "storefront-system",
+    label: "Storefront (Hono + React)",
+    source: storefrontSystemSource,
+    blurb:
+      "Flagship domain: a Sales-style aggregate tree (Order → OrderLine + Money VO + derived rollup) fused with a Banking-style Wallet, tied together by a transactional `checkout` saga. Diff against the .NET and Phoenix storefronts below.",
+  },
+  {
     id: "pokemon-world",
     label: "Pokémon World (Hono + React)",
     source: pokemonWorldSource,
@@ -163,39 +169,25 @@ export const examples: LoomExample[] = [
       "Modules, multiple deployables, .NET + Hono + React — generator showcase, partial Preview only.",
   },
   {
+    id: "storefront-dotnet",
+    label: "Storefront · fullstack .NET",
+    source: storefrontDotnetSource,
+    blurb:
+      "The Storefront domain on a single .NET deployable (EF Core + Mediator) serving /api/* and a React SPA (shadcn pack) from wwwroot/. Files-only in the playground (.NET doesn't boot in-browser).",
+  },
+  {
+    id: "storefront-phoenix",
+    label: "Storefront · fullstack Phoenix LiveView",
+    source: storefrontPhoenixSource,
+    blurb:
+      "The Storefront domain on Elixir/Ash — aggregates lower to Ash.Resource, the `checkout` saga to a Reactor, views to Ash.Query. Files-only in the playground (BEAM, not Node).",
+  },
+  {
     id: "dotnet-backend",
     label: ".NET backend only (CQRS + EF Core)",
     source: dotnetBackendSource,
     blurb:
       "Pure .NET backend — Mediator commands/queries, per-aggregate controllers, EF Core configurations, FluentValidation pipeline. No UI. Files-only in the playground.",
-  },
-  {
-    id: "dotnet-fullstack",
-    label: "Fullstack .NET (Sales)",
-    source: dotnetFullstackSource,
-    blurb:
-      "Single .NET deployable serving /api/* and a React SPA (Mantine) from wwwroot/. Files-only in the playground (.NET doesn't boot in-browser).",
-  },
-  {
-    id: "dotnet-banking",
-    label: "Fullstack .NET (Banking)",
-    source: dotnetBankingSource,
-    blurb:
-      "Same banking domain as `banking-system.ddd` rendered as fullstack .NET with the shadcn pack. Three-way diff target alongside `phoenix-banking` and `banking-system`.",
-  },
-  {
-    id: "phoenix-fullstack",
-    label: "Fullstack Phoenix LiveView (Sales)",
-    source: phoenixFullstackSource,
-    blurb:
-      "Elixir/Ash + Phoenix LiveView: Ash resources, JSON API, LiveView pages (HEEx), Ecto migrations. Files-only in the playground (Phoenix runs on BEAM, not Node).",
-  },
-  {
-    id: "phoenix-banking",
-    label: "Fullstack Phoenix LiveView (Banking)",
-    source: phoenixBankingSource,
-    blurb:
-      "Same banking domain as `banking-system.ddd` rendered as Elixir/Ash — exercises optional fields, where-filters, and a transactional `transferFunds` Reactor saga.",
   },
 ];
 
