@@ -1,0 +1,75 @@
+// Action showcase — exercises the operation-action surface end-to-end
+// so the React build matrix tsc-validates it:
+//
+//   - a hand-authored `component OrderActions(order: Order)` with
+//     instance-qualified `Action(order.confirm, then: navigate(...))`
+//     buttons, mounted inside a QueryView that loads the record;
+//   - the scaffold-generated Detail page, whose operation forms lower
+//     to the instance-qualified `Form(data.<op>)` surface.
+//
+// Pack-neutral: the matrix injects `design: <pack>` per shard.
+
+system ActionShowcase {
+
+  module Sales {
+    context Sales {
+      aggregate Order {
+        customerId: string display
+        status: string
+        operation confirm() { }
+        operation cancel() { }
+      }
+      repository Orders for Order { }
+    }
+  }
+
+  api SalesApi from Sales
+
+  ui WebApp {
+    api Sales: SalesApi
+
+    // Hand-authored panel: instance-qualified Action buttons bound to
+    // the order's operations.  `order` is a typed aggregate prop, so
+    // each Action wires a `use<Op>Order(order.id)` mutation.
+    component OrderActions(order: Order) {
+      body: Toolbar(
+        Action(order.confirm, then: navigate(Home)),
+        Action(order.cancel)
+      )
+    }
+
+    // Scaffold gives List / New / Detail.  The Detail page hosts the
+    // instance-qualified operation forms (`Form(data.<op>)`).
+    scaffold aggregates: Order
+
+    // Explicit console page: load one order, mount the action panel.
+    page OrderConsole {
+      route: "/console/:id"
+      body: QueryView(
+        of: Sales.Order.byId(id),
+        single: true,
+        loading: Loader(),
+        empty: Empty("Order not found"),
+        data: o => OrderActions(order: o))
+    }
+
+    page Home {
+      route: "/"
+      body: Heading("Action showcase", level: 1)
+    }
+  }
+
+  deployable api {
+    platform: hono
+    modules: Sales
+    serves: SalesApi
+    port: 3000
+  }
+
+  deployable webApp {
+    platform: react
+    targets: api
+    ui: WebApp { Sales: api }
+    port: 3001
+  }
+}
