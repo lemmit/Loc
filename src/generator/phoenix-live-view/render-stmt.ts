@@ -75,8 +75,8 @@ function renderElixirStatement(s: StmtIR, ctx: RenderCtx, changesetVar: string):
 }
 
 function renderPath(p: PathIR): string {
-  // All paths root from `this`; emit snake_case segments joined with `.`
-  // for nested access.  For attribute/relationship we only need the
-  // first segment as the Ash field atom.
-  return p.segments.map(snake).join(".");
+  // The attribute/relationship Ash atom is the head segment. (A dotted
+  // join would emit an invalid atom like `:address.city`; Ash addresses
+  // nested fields differently, so only the head is used here.)
+  return snake(p.segments[0] ?? "");
 }
