@@ -30,6 +30,7 @@ export type EExpr =
   | { kind: "lit"; lit: LitKind; value: string }
   | { kind: "call"; callee: EExpr; args: ECallArg[] }
   | { kind: "member"; receiver: EExpr; member: string; call: boolean; args: ECallArg[] }
+  | { kind: "lambda"; param: string; body: EExpr }
   | { kind: "raw"; text: string };
 
 // BinaryExpr.op covers comparison, logical and arithmetic operators.
@@ -64,6 +65,10 @@ export function seedExpr(node: Expression): EExpr {
         call: !!node.call,
         args: node.args.map(seedArg),
       };
+    case "Lambda":
+      // Expression-body lambdas structure (`p => expr`); block-body lambdas
+      // (`p => { … }` — imperative statements) stay raw.
+      return node.body ? { kind: "lambda", param: node.param, body: seedExpr(node.body) } : { kind: "raw", text: printExpr(node) };
     default:
       return { kind: "raw", text: printExpr(node) };
   }
@@ -94,6 +99,8 @@ export function emitExpr(e: EExpr): string {
       const base = `${emitExpr(e.receiver)}.${e.member}`;
       return e.call ? `${base}(${e.args.map(emitArg).join(", ")})` : base;
     }
+    case "lambda":
+      return `${e.param} => ${emitExpr(e.body)}`;
     case "raw":
       return e.text;
   }

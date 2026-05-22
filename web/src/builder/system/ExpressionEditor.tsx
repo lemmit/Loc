@@ -122,6 +122,25 @@ export function ExpressionEditor({ node, onChange }: NodeProps): JSX.Element {
           {node.call && <ArgsEditor args={node.args} onArgs={(args, c) => onChange({ ...node, args }, c)} />}
         </Group>
       );
+    case "lambda":
+      return (
+        <Group gap={2} wrap="nowrap" align="center">
+          <TextInput
+            size="xs"
+            w={48}
+            value={node.param}
+            data-testid="c4expr-lambda-param"
+            styles={{ input: { fontFamily: "monospace", fontSize: 11 } }}
+            onChange={(e) => onChange({ ...node, param: e.currentTarget.value }, false)}
+            onBlur={() => onChange(node, true)}
+          />
+          <Text size="xs" c="dimmed">{"=>"}</Text>
+          {/* The lambda param is in scope for its body. */}
+          <ExprScopeContext.Provider value={[...candidates, node.param]}>
+            <ExpressionEditor node={node.body} onChange={(n, c) => onChange({ ...node, body: n }, c)} />
+          </ExprScopeContext.Provider>
+        </Group>
+      );
     case "raw":
       return (
         <Autocomplete
