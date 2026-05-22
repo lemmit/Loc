@@ -1,0 +1,177 @@
+// ---------------------------------------------------------------------------
+// Platform-neutral log-event catalog — the single source of truth for every
+// structured log line the generated backends emit.
+//
+// Each entry pins:
+//   - the machine-stable `event` name (the value of the `event` envelope key
+//     on every emitted line),
+//   - its level (= concept, not verbosity tier: see
+//     docs/proposals/observability.md),
+//   - the structured-field names it carries beyond the envelope
+//     (envelope = ts, level, event, request_id — auto-supplied by the
+//     per-request child logger).
+//
+// Per-backend renderers consume this catalog — Hono/pino in
+// `render-hono.ts`; .NET (`ILogger`) and Phoenix (`Logger`) later — so
+// the same event surfaces with the same level + fields on every backend.
+// A log consumer (dashboard, alert, `jq` query) sees one schema.  This
+// is the `wireShape` pattern applied to logs.
+//
+// Stability: treat the catalog like a wire contract — additive changes
+// (new events, new optional fields) are safe; renaming / removing
+// requires a downstream-consumer migration.
+// ---------------------------------------------------------------------------
+
+export type LogLevel = "trace" | "debug" | "info" | "warn" | "error";
+
+export interface LogEvent {
+  /** Machine-stable name; the value of the `event` envelope key. */
+  event: string;
+  level: LogLevel;
+  /** Field names beyond the envelope (ts/level/event/request_id). */
+  fields: readonly string[];
+  /** Trace-only entries that may be injected into domain methods — the
+   *  one level allowed to do so, gated by the generate-time `--trace`
+   *  switch.  Always paired with `level: "trace"`. */
+  domain?: boolean;
+}
+
+export const LogEvents = {
+  // ─── infrastructure ──────────────────────────────────────────────────
+  requestStart: { event: "request_start", level: "info", fields: ["method", "path"] },
+  requestEnd: {
+    event: "request_end",
+    level: "info",
+    fields: ["method", "path", "status", "duration_ms"],
+  },
+  serverStarting: { event: "server_starting", level: "info", fields: ["port", "env"] },
+  serverListening: { event: "server_listening", level: "info", fields: ["port"] },
+  serverShutdown: { event: "server_shutdown", level: "info", fields: ["signal"] },
+  serverDrained: { event: "server_drained", level: "info", fields: [] },
+  dbConnecting: { event: "db_connecting", level: "debug", fields: ["host"] },
+  dbConnected: { event: "db_connected", level: "info", fields: ["host", "pool_size"] },
+  dbDisconnected: { event: "db_disconnected", level: "warn", fields: ["reason"] },
+  dbPoolExhausted: { event: "db_pool_exhausted", level: "warn", fields: ["waiters"] },
+  dbError: { event: "db_error", level: "error", fields: ["error", "query"] },
+  migrationsStarting: { event: "migrations_starting", level: "info", fields: ["count"] },
+  migrationApplied: {
+    event: "migration_applied",
+    level: "info",
+    fields: ["id", "name", "duration_ms"],
+  },
+  migrationsComplete: { event: "migrations_complete", level: "info", fields: ["applied"] },
+  migrationFailed: { event: "migration_failed", level: "error", fields: ["id", "name", "error"] },
+  healthOk: { event: "health_ok", level: "debug", fields: ["checks"] },
+  healthDegraded: { event: "health_degraded", level: "debug", fields: ["checks"] },
+  externHandlersRegistered: {
+    event: "extern_handlers_registered",
+    level: "debug",
+    fields: ["aggregate", "count", "ops"],
+  },
+  authEnabled: { event: "auth_enabled", level: "info", fields: ["required"] },
+
+  // ─── domain — info (business narrative) ──────────────────────────────
+  aggregateCreated: { event: "aggregate_created", level: "info", fields: ["aggregate", "id"] },
+  operationInvoked: {
+    event: "operation_invoked",
+    level: "info",
+    fields: ["aggregate", "op", "id"],
+  },
+  eventDispatched: {
+    // `event_type` rather than `event` so the domain-event type name
+    // doesn't collide with the envelope's `event` key (the log-event
+    // name).  A line for an OrderPlaced dispatch reads:
+    //   { event: "event_dispatched", event_type: "OrderPlaced", … }
+    event: "event_dispatched",
+    level: "info",
+    fields: ["event_type", "aggregate", "id"],
+  },
+  workflowStarted: { event: "workflow_started", level: "info", fields: ["workflow"] },
+  workflowCompleted: { event: "workflow_completed", level: "info", fields: ["workflow"] },
+
+  // ─── domain — warn (client/domain fault, recoverable) ────────────────
+  domainError: {
+    event: "domain_error",
+    level: "warn",
+    fields: ["aggregate", "op", "message", "status"],
+  },
+  forbidden: {
+    event: "forbidden",
+    level: "warn",
+    fields: ["aggregate", "op", "message", "status"],
+  },
+  notFound: { event: "not_found", level: "warn", fields: ["aggregate", "id", "status"] },
+
+  // ─── domain — error (system fault) ───────────────────────────────────
+  externHandlerThrew: {
+    event: "extern_handler_threw",
+    level: "error",
+    fields: ["aggregate", "op", "error"],
+  },
+  internalError: { event: "internal_error", level: "error", fields: ["error", "status"] },
+
+  // ─── domain — debug (mechanism, live prod diagnosis) ─────────────────
+  aggregateLoaded: {
+    event: "aggregate_loaded",
+    level: "debug",
+    fields: ["aggregate", "id", "found"],
+  },
+  repositorySave: {
+    event: "repository_save",
+    level: "debug",
+    fields: ["aggregate", "id", "children"],
+  },
+  findExecuted: {
+    event: "find_executed",
+    level: "debug",
+    fields: ["aggregate", "find", "rows"],
+  },
+  auditRecorded: {
+    event: "audit_recorded",
+    level: "debug",
+    fields: ["action", "target", "actor"],
+  },
+  provenanceRecorded: {
+    event: "provenance_recorded",
+    level: "debug",
+    fields: ["aggregate", "field", "snapshot_id", "count"],
+  },
+
+  // ─── domain — trace (generate-time opt-in via --trace) ───────────────
+  // Seam-level trace (no domain injection):
+  txBegin: { event: "tx_begin", level: "trace", fields: ["aggregate", "id"] },
+  txCommit: { event: "tx_commit", level: "trace", fields: ["aggregate", "id"] },
+  txRollback: { event: "tx_rollback", level: "trace", fields: ["aggregate", "id", "error"] },
+  childSynced: {
+    event: "child_synced",
+    level: "trace",
+    fields: ["parent", "part", "id", "action"],
+  },
+  wireIn: { event: "wire_in", level: "trace", fields: ["keys"] },
+  wireOut: { event: "wire_out", level: "trace", fields: ["keys"] },
+  // Domain-injected trace — only emitted when --trace is on; never present
+  // in the default artefact, keeping the domain layer pure by default.
+  invariantEvaluated: {
+    event: "invariant_evaluated",
+    level: "trace",
+    fields: ["aggregate", "op", "expr", "passed"],
+    domain: true,
+  },
+  preconditionEvaluated: {
+    event: "precondition_evaluated",
+    level: "trace",
+    fields: ["aggregate", "op", "expr", "passed"],
+    domain: true,
+  },
+  valueComputed: {
+    event: "value_computed",
+    level: "trace",
+    fields: ["aggregate", "field", "value"],
+    domain: true,
+  },
+} as const satisfies Record<string, LogEvent>;
+
+/** Lookup key for any catalog entry — used by per-backend renderers so a
+ *  typo at a generator call site is a typecheck error, not a runtime
+ *  missing-event surprise. */
+export type LogEventKey = keyof typeof LogEvents;
