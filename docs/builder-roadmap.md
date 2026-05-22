@@ -271,8 +271,14 @@ Done:
   the structured editor (calls, members, `new`, member completion), not just the
   BodyEditor's text rows. Candidates include params and earlier `let` bindings
   (operations also see the aggregate's members; workflows have no `this`). Bare
-  calls and the assignment target / event ref stay text-row only. Gated by
+  calls and the assignment target stay text-row only. Gated by
   `test/system-expr.test.ts` + e2e.
+- **Emit event picker** — an "Emits" picker on aggregate / workflow nodes lists
+  every `emit` statement (across operations / the workflow body) and repoints it
+  at a different event via a dropdown — rewriting just the event-name cross-ref
+  token in place (field values preserved), like reference rebinding
+  (`web/src/builder/system/emit-event.ts`). Gated by
+  `test/system-emit-event.test.ts` + e2e.
 
 Open:
 
