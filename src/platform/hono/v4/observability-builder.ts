@@ -1,72 +1,83 @@
 // ---------------------------------------------------------------------------
 // Per-deployable observability scaffolding emitted alongside the rest
-// of the Hono backend.  One file:
+// of the Hono backend.  Two files:
 //
+//   obs/log.ts        — base pino logger.  Level from `LOG_LEVEL` env
+//                       (default `info`); structured JSON to stdout.
 //   obs/request-id.ts — tiny middleware that:
 //     1. honours an inbound `X-Request-Id` header (or mints a fresh
 //        UUID when absent),
 //     2. echoes the value back on the response as `X-Request-Id`,
-//     3. emits a JSON `request_start` log line at entry and a
+//     3. binds a per-request child logger (`pino.child({ request_id })`)
+//        onto the Hono context as `log` so every downstream seam emits
+//        correlated lines via `c.get("log").info(...)`,
+//     4. emits a structured `request_start` log line at entry and a
 //        matching `request_end` line at exit (status + duration_ms),
-//     4. stashes the id on the Hono context as `requestId` so
-//        downstream code (per-router app.onError) can include it in
-//        error envelopes.
+//     5. also stashes the bare `requestId` string on the context so the
+//        per-router `app.onError` envelopes can include it in errors.
 //
-// Logging is plain `console.log(JSON.stringify(...))` — matches the
-// existing `console.error` style in the per-router onError handlers
-// and avoids dragging in pino for v1.  Operators who want pino can
-// pin the file in `.loomignore`.
+// Logger choice: pino — levels match our taxonomy (trace/debug/info/
+// warn/error), child loggers are the standard request-context binding
+// mechanism, JSON output keeps the existing playground line-streaming
+// working unchanged, and the level check happens before any field-object
+// construction so suppressed levels cost ~nothing.  See
+// docs/proposals/observability.md.
 // ---------------------------------------------------------------------------
+
+const LOG_TS = `// Auto-generated.
+import { pino, type Logger } from "pino";
+
+/** Base process logger.  Level is read from \`LOG_LEVEL\` (env), default
+ *  \`info\`.  In dev, pipe stdout through \`pino-pretty\` for readable
+ *  output:  \`tsx index.ts | pino-pretty\`.
+ *
+ *  Configuration aligned with the project's log envelope
+ *  (\`{ ts, level, event, request_id, ...fields }\`):
+ *    - \`base: undefined\`     — drop pino's default \`{ pid, hostname }\`
+ *                                fields (noisy; orchestrator already records).
+ *    - \`formatters.level\`     — emit the level *label* (\`"info"\`) rather
+ *                                than pino's default numeric severity.
+ *    - \`timestamp\`            — emit \`"ts":"<ISO>"\` rather than pino's
+ *                                default epoch-ms \`"time"\`. */
+export const baseLogger: Logger = pino({
+  level: process.env.LOG_LEVEL ?? "info",
+  base: undefined,
+  formatters: {
+    level: (label) => ({ level: label }),
+  },
+  timestamp: () => \`,"ts":"\${new Date().toISOString()}"\`,
+});
+
+/** Per-request child logger type — created by the request-id middleware
+ *  with \`baseLogger.child({ request_id })\`, so every line carries the
+ *  correlation id automatically. */
+export type RequestLogger = Logger;
+`;
 
 const REQUEST_ID_TS = `// Auto-generated.
 import { createMiddleware } from "hono/factory";
 import { randomUUID } from "node:crypto";
+import { baseLogger, type RequestLogger } from "./log";
 
-/** Module augmentation could expose a strongly-typed Variables key,
- *  but the generated route handlers / onError chains use \`c.get\`
- *  with a runtime cast — keeps this file dependency-free for any
- *  consumer (workflows, views, per-aggregate routers). */
 export const REQUEST_ID_HEADER = "X-Request-Id";
 
-export interface RequestStartLog {
-  ts: string;
-  level: "info";
-  event: "request_start";
-  request_id: string;
-  method: string;
-  path: string;
-}
-
-export interface RequestEndLog {
-  ts: string;
-  level: "info";
-  event: "request_end";
-  request_id: string;
-  method: string;
-  path: string;
-  status: number;
-  duration_ms: number;
-}
-
 /** Per-request middleware.  Mounts before any business route in
- *  http/index.ts so every downstream handler + onError sees the id. */
+ *  http/index.ts so every downstream handler + onError sees both the
+ *  id and the bound child logger. */
 export const requestIdMiddleware = createMiddleware<{
-  Variables: { requestId: string };
+  Variables: { requestId: string; log: RequestLogger };
 }>(async (c, next) => {
   const inbound = c.req.header(REQUEST_ID_HEADER);
   const requestId = inbound && inbound.length > 0 ? inbound : randomUUID();
   c.set("requestId", requestId);
 
+  // Per-request child logger — every line emitted via \`c.get("log")\`
+  // downstream auto-includes \`request_id\` (pino child binding).
+  const log = baseLogger.child({ request_id: requestId });
+  c.set("log", log);
+
   const url = new URL(c.req.url);
-  const startLog: RequestStartLog = {
-    ts: new Date().toISOString(),
-    level: "info",
-    event: "request_start",
-    request_id: requestId,
-    method: c.req.method,
-    path: url.pathname,
-  };
-  console.log(JSON.stringify(startLog));
+  log.info({ event: "request_start", method: c.req.method, path: url.pathname });
 
   const startedAt = Date.now();
   try {
@@ -85,21 +96,18 @@ export const requestIdMiddleware = createMiddleware<{
     } catch {
       /* best-effort: headers are read-only on some runtimes */
     }
-    const endLog: RequestEndLog = {
-      ts: new Date().toISOString(),
-      level: "info",
+    log.info({
       event: "request_end",
-      request_id: requestId,
       method: c.req.method,
       path: url.pathname,
       status: c.res.status,
       duration_ms: Date.now() - startedAt,
-    };
-    console.log(JSON.stringify(endLog));
+    });
   }
 });
 `;
 
 export function emitObservabilityFiles(out: Map<string, string>): void {
+  out.set("obs/log.ts", LOG_TS);
   out.set("obs/request-id.ts", REQUEST_ID_TS);
 }

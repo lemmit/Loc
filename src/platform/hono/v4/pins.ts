@@ -23,6 +23,7 @@ export const BACKEND_PINS = {
     zod: "^3.24.0",
     "drizzle-orm": "^0.45.0",
     pg: "^8.13.0",
+    pino: "^9.5.0",
   },
   devDependencies: {
     typescript: "^5.7.0",
@@ -31,5 +32,6 @@ export const BACKEND_PINS = {
     vitest: "^2.1.0",
     "drizzle-kit": "^0.30.0",
     "@types/pg": "^8.11.0",
+    "pino-pretty": "^11.3.0",
   },
 } as const;
