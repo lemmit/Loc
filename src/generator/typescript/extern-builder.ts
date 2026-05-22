@@ -1,5 +1,5 @@
 import type { AggregateIR, BoundedContextIR, TypeIR } from "../../ir/loom-ir.js";
-import { camel } from "../../util/naming.js";
+import { camel, pascal } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Per-aggregate extern handler registry.
@@ -17,7 +17,6 @@ import { camel } from "../../util/naming.js";
 // looks up the handler from `externHandlers` and dispatches.
 // ---------------------------------------------------------------------------
 
-const cap = (s: string): string => (s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1));
 
 export function buildExternHandlersFile(agg: AggregateIR, ctx: BoundedContextIR): string {
   const externOps = agg.operations.filter((o) => o.extern);
@@ -42,10 +41,10 @@ export function buildExternHandlersFile(agg: AggregateIR, ctx: BoundedContextIR)
   // Zod schema (decimals → number, datetimes → Date, ids → string).
   for (const op of externOps) {
     if (op.params.length === 0) {
-      lines.push(`export type ${cap(op.name)}${agg.name}Request = Record<string, never>;`);
+      lines.push(`export type ${pascal(op.name)}${agg.name}Request = Record<string, never>;`);
       continue;
     }
-    lines.push(`export interface ${cap(op.name)}${agg.name}Request {`);
+    lines.push(`export interface ${pascal(op.name)}${agg.name}Request {`);
     for (const p of op.params) {
       lines.push(`  ${p.name}: ${wireTsType(p.type)};`);
     }
@@ -55,14 +54,14 @@ export function buildExternHandlersFile(agg: AggregateIR, ctx: BoundedContextIR)
 
   for (const op of externOps) {
     lines.push(
-      `export type ${cap(op.name)}${agg.name}Handler = (aggregate: ${agg.name}, request: ${cap(op.name)}${agg.name}Request) => Promise<void>;`,
+      `export type ${pascal(op.name)}${agg.name}Handler = (aggregate: ${agg.name}, request: ${pascal(op.name)}${agg.name}Request) => Promise<void>;`,
     );
   }
   lines.push("");
 
   lines.push("interface ExternHandlerRegistry {");
   for (const op of externOps) {
-    lines.push(`  ${camel(op.name)}${agg.name}: ${cap(op.name)}${agg.name}Handler | null;`);
+    lines.push(`  ${camel(op.name)}${agg.name}: ${pascal(op.name)}${agg.name}Handler | null;`);
   }
   lines.push("}");
   lines.push("");
@@ -76,7 +75,7 @@ export function buildExternHandlersFile(agg: AggregateIR, ctx: BoundedContextIR)
 
   for (const op of externOps) {
     lines.push(
-      `export function register${cap(op.name)}${agg.name}Handler(fn: ${cap(op.name)}${agg.name}Handler): void {`,
+      `export function register${pascal(op.name)}${agg.name}Handler(fn: ${pascal(op.name)}${agg.name}Handler): void {`,
     );
     lines.push(`  externHandlers.${camel(op.name)}${agg.name} = fn;`);
     lines.push("}");
@@ -87,7 +86,7 @@ export function buildExternHandlersFile(agg: AggregateIR, ctx: BoundedContextIR)
   for (const op of externOps) {
     lines.push(`  if (externHandlers.${camel(op.name)}${agg.name} === null) {`);
     lines.push(
-      `    throw new Error("Missing extern handler for '${op.name}' on aggregate '${agg.name}'. Call register${cap(op.name)}${agg.name}Handler(...) before app.listen().");`,
+      `    throw new Error("Missing extern handler for '${op.name}' on aggregate '${agg.name}'. Call register${pascal(op.name)}${agg.name}Handler(...) before app.listen().");`,
     );
     lines.push("  }");
   }

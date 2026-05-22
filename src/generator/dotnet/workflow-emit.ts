@@ -4,7 +4,7 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../../ir/loom-ir.js";
-import { pascal, snake } from "../../util/naming.js";
+import { pascal, plural, snake } from "../../util/naming.js";
 import {
   csIdValueClrType,
   domainToRequestExpr,
@@ -240,13 +240,13 @@ function renderHandler(
     ...[...usage.externs.values()].map((e) => e.aggName),
   ]);
   const aggUsings = [
-    ...new Set([...aggsTouched].map((agg) => `using ${ns}.Domain.${pascalPlural(agg)};`)),
+    ...new Set([...aggsTouched].map((agg) => `using ${ns}.Domain.${plural(agg)};`)),
   ];
   const externUsings = [
     ...new Set(
       [...usage.externs.values()].flatMap((e) => [
-        `using ${ns}.Application.${pascalPlural(e.aggName)}.Handlers;`,
-        `using ${ns}.Application.${pascalPlural(e.aggName)}.Requests;`,
+        `using ${ns}.Application.${plural(e.aggName)}.Handlers;`,
+        `using ${ns}.Application.${plural(e.aggName)}.Requests;`,
       ]),
     ),
   ];
@@ -289,11 +289,6 @@ function csIsolationLevel(level: import("../../ir/loom-ir.js").IsolationLevel): 
   }
 }
 
-function pascalPlural(s: string): string {
-  if (s.endsWith("y") && !/[aeiou]y$/.test(s)) return s.slice(0, -1) + "ies";
-  if (/(s|x|z|ch|sh)$/.test(s)) return s + "es";
-  return s + "s";
-}
 
 function renderStatement(
   st: WorkflowStmtIR,

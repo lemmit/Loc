@@ -7,7 +7,7 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../../../ir/loom-ir.js";
-import { camel, snake } from "../../../util/naming.js";
+import { camel, pascal, snake } from "../../../util/naming.js";
 import { emitWireSchema, wireToDomainExpr, zodFor } from "./routes-builder.js";
 
 // ---------------------------------------------------------------------------
@@ -123,11 +123,11 @@ export function buildWorkflowsFile(
 
   // Per-workflow request schema.
   for (const wf of ctx.workflows) {
-    lines.push(`const ${capitalize(wf.name)}Request = z.object({`);
+    lines.push(`const ${pascal(wf.name)}Request = z.object({`);
     for (const p of wf.params) {
       lines.push(`  ${p.name}: ${zodFor(p.type)},`);
     }
-    lines.push(`}).openapi("${capitalize(wf.name)}Request");`);
+    lines.push(`}).openapi("${pascal(wf.name)}Request");`);
   }
   lines.push("");
 
@@ -174,7 +174,7 @@ function emitWorkflowRoute(
   aggsByName: Map<string, AggregateIR>,
 ): string[] {
   void aggsByName;
-  const reqName = `${capitalize(wf.name)}Request`;
+  const reqName = `${pascal(wf.name)}Request`;
   const out: string[] = [];
   out.push(`app.openapi(`);
   out.push(`  createRoute({`);
@@ -288,7 +288,7 @@ function renderStmt(
         // ExternHandlerError; domain errors raised by the user
         // handler bubble unchanged.
         const handlerKey = `${camel(st.op)}${st.aggName}`;
-        const checkName = `check${cap(st.op)}`;
+        const checkName = `check${pascal(st.op)}`;
         const externAlias = `${camel(st.aggName)}ExternHandlers`;
         const reqLiteral =
           op.params.length === 0
@@ -326,7 +326,6 @@ function lookupOp(
   return ctx.aggregates.find((a) => a.name === aggName)?.operations.find((o) => o.name === opName);
 }
 
-const cap = (s: string): string => (s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1));
 
 function renderExprWithParams(e: ExprIR, paramExprs: Map<string, string>): string {
   // Workflow params are local consts now; ExprIR `ref` nodes for them
@@ -367,9 +366,6 @@ function pgIsolationLevel(level: import("../../../ir/loom-ir.js").IsolationLevel
   }
 }
 
-function capitalize(s: string): string {
-  return s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
-}
 
 /** Value objects referenced by any workflow's parameters.  Same
  *  shape as `routes-builder.collectUsedValueObjects` but scoped to

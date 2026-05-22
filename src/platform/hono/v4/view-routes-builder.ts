@@ -1,7 +1,7 @@
 import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
 import type { AggregateIR, BoundedContextIR, ExprIR, TypeIR, ViewIR } from "../../../ir/loom-ir.js";
 import { viewUsesCurrentUser } from "../../../ir/loom-ir.js";
-import { camel, plural, snake } from "../../../util/naming.js";
+import { camel, pascal, plural, snake } from "../../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Hono view routes emission.
@@ -20,7 +20,6 @@ import { camel, plural, snake } from "../../../util/naming.js";
 // pattern: typed Zod schemas, OpenAPI annotations, on-error filter.
 // ---------------------------------------------------------------------------
 
-const cap = (s: string): string => (s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1));
 
 export function buildViewsRoutesFile(
   ctx: BoundedContextIR,
@@ -77,13 +76,13 @@ export function buildViewsRoutesFile(
   const enumValues = new Map(ctx.enums.map((e) => [e.name, e.values] as const));
   for (const view of ctx.views) {
     if (!view.output) continue;
-    lines.push(`const ${cap(view.name)}Row = z.object({`);
+    lines.push(`const ${pascal(view.name)}Row = z.object({`);
     for (const f of view.output.fields) {
       lines.push(`  ${f.name}: ${zodForRow(f.type, enumValues)},`);
     }
-    lines.push(`}).openapi("${cap(view.name)}Row");`);
+    lines.push(`}).openapi("${pascal(view.name)}Row");`);
     lines.push(
-      `const ${cap(view.name)}Response = z.array(${cap(view.name)}Row).openapi("${cap(view.name)}Response");`,
+      `const ${pascal(view.name)}Response = z.array(${pascal(view.name)}Row).openapi("${pascal(view.name)}Response");`,
     );
   }
   if (ctx.views.some((v) => v.output)) lines.push("");
@@ -135,7 +134,7 @@ function emitViewRoute(
   const out: string[] = [];
   const aggSlug = snake(plural(view.aggregateName));
   const responseSchema = view.output
-    ? `${cap(view.name)}Response`
+    ? `${pascal(view.name)}Response`
     : `${view.aggregateName}ListResponse`;
   // Slice 1C: views whose filter / binds reference currentUser
   // thread the request's user through to the repository's
@@ -186,7 +185,7 @@ function emitViewRoute(
       .join(",\n");
     out.push(`    const projected = rows.map((r) => ({\n${projectedFields},\n    }));`);
     out.push(
-      `    return httpCtx.json(projected as z.infer<typeof ${cap(view.name)}Response>, 200);`,
+      `    return httpCtx.json(projected as z.infer<typeof ${pascal(view.name)}Response>, 200);`,
     );
   } else {
     out.push(

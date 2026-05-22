@@ -1,5 +1,5 @@
 import type { AggregateIR, BoundedContextIR, TypeIR, WorkflowIR } from "../../ir/loom-ir.js";
-import { camel, plural, snake } from "../../util/naming.js";
+import { camel, pascal, plural, snake } from "../../util/naming.js";
 import { fillBlock } from "./page-objects-builder.js";
 
 // ---------------------------------------------------------------------------
@@ -56,16 +56,16 @@ export function buildWorkflowsApiModule(contexts: BoundedContextIR[]): string {
   lines.push("");
 
   for (const { wf } of workflows) {
-    lines.push(`export const ${cap(wf.name)}Request = z.object({`);
+    lines.push(`export const ${pascal(wf.name)}Request = z.object({`);
     for (const p of wf.params) {
       lines.push(`  ${p.name}: ${zodForRequest(p.type)},`);
     }
     lines.push(`});`);
-    lines.push(`export type ${cap(wf.name)}Request = z.infer<typeof ${cap(wf.name)}Request>;`);
+    lines.push(`export type ${pascal(wf.name)}Request = z.infer<typeof ${pascal(wf.name)}Request>;`);
     lines.push("");
-    lines.push(`export function use${cap(wf.name)}Workflow() {`);
+    lines.push(`export function use${pascal(wf.name)}Workflow() {`);
     lines.push(`  return useMutation({`);
-    lines.push(`    mutationFn: async (input: ${cap(wf.name)}Request) => {`);
+    lines.push(`    mutationFn: async (input: ${pascal(wf.name)}Request) => {`);
     lines.push(`      await api.post(\`/workflows/${snake(wf.name)}\`, input);`);
     lines.push(`    },`);
     lines.push(`  });`);
@@ -168,8 +168,8 @@ function walkType(t: TypeIR, visit: (t: TypeIR) => void): void {
 
 export function buildWorkflowPageObject(wf: WorkflowIR, ctx: BoundedContextIR): string {
   const slug = snake(wf.name);
-  const className = `${cap(wf.name)}WorkflowPage`;
-  const requestType = `${cap(wf.name)}Request`;
+  const className = `${pascal(wf.name)}WorkflowPage`;
+  const requestType = `${pascal(wf.name)}Request`;
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import type { Page } from "@playwright/test";`);
@@ -211,9 +211,6 @@ export function buildWorkflowPageObject(wf: WorkflowIR, ctx: BoundedContextIR): 
 // helpers
 // ---------------------------------------------------------------------------
 
-function cap(s: string): string {
-  return s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
-}
 
 function zodForRequest(t: TypeIR): string {
   switch (t.kind) {
