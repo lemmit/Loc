@@ -69,6 +69,7 @@ import {
   uiKind,
   uiNames,
 } from "./deployable-bindings";
+import { eventNames, listEmits, setEmitEvent } from "./emit-event";
 import { currentTarget, isRebindKind, rebindReference, rebindTargets, targetKindOf } from "./rebind";
 import {
   addStatement,
@@ -278,6 +279,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const [slotKey, setSlotKey] = useState<string | null>(null);
   const [exprMode, setExprMode] = useState<ExprMode>("structured");
   const [findName, setFindName] = useState<string | null>(null);
+  const [emitKey, setEmitKey] = useState<string | null>(null);
 
   useEffect(() => {
     const sel = selectedId;
@@ -286,6 +288,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     setSlotKey(null);
     setExprMode("structured");
     setFindName(null);
+    setEmitKey(null);
   }, [selectedId]);
 
   useEffect(() => {
@@ -429,6 +432,12 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const setReturn = (spec: TypeSpec): void => {
     if (!selected || !findName) return;
     applyFind(setFindReturnType(ctx.getSource(), selected.name, findName, spec));
+  };
+
+  const repointEmit = (op: string | undefined, index: number, event: string): void => {
+    if (!selected) return;
+    const next = setEmitEvent(ctx.getSource(), selected.kind, selected.name, op, index, event);
+    if (next != null) apply(next, true);
   };
 
   // Infra construct scalar properties.
@@ -793,6 +802,32 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
                     {...bodyHandlers({ kind: "operation", aggregate: selected.name, op: opName })}
                   />
                 )}
+              </Stack>
+            )}
+            {(selected.kind === "aggregate" || selected.kind === "workflow") && listEmits(selected.ast).length > 0 && (
+              <Stack gap={4} data-testid="c4system-emits">
+                <Select
+                  size="xs"
+                  label="Emits"
+                  placeholder="pick an emit…"
+                  data={listEmits(selected.ast).map((e) => ({ value: e.value, label: e.label }))}
+                  value={emitKey}
+                  data-testid="c4system-emit-pick"
+                  onChange={setEmitKey}
+                />
+                {emitKey && (() => {
+                  const e = listEmits(selected.ast).find((x) => x.value === emitKey);
+                  return e ? (
+                    <Select
+                      size="xs"
+                      label="event"
+                      data={eventNames(parsed.ast)}
+                      value={e.event}
+                      data-testid="c4system-emit-event"
+                      onChange={(v) => v && repointEmit(e.op, e.index, v)}
+                    />
+                  ) : null;
+                })()}
               </Stack>
             )}
             {(() => {

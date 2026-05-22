@@ -185,6 +185,28 @@ test("adds every domain + infra construct kind from the palette", async ({ page 
   }
 });
 
+test("repoints an emit statement at a different event", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Banking System \(Hono \+ React\)/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  // Account.deposit emits MoneyDeposited — repoint it at AccountFrozen.
+  await page.locator('[data-testid="rf__node-aggregate:Account"]').click();
+  await page.getByTestId("c4system-emit-pick").click();
+  await page.getByRole("option", { name: "deposit: emit MoneyDeposited" }).click();
+
+  const event = page.getByTestId("c4system-emit-event");
+  await expect(event).toHaveValue("MoneyDeposited");
+  await event.click();
+  await page.getByRole("option", { name: "AccountFrozen", exact: true }).click();
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+  await expect(page.getByTestId("c4system-emit-event")).toHaveValue("AccountFrozen");
+});
+
 test("edits a deployable's composition bindings", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);
