@@ -83,7 +83,7 @@ async function buildFixture(): Promise<Model> {
   return doc.parseResult.value as Model;
 }
 
-describe("phoenixLiveView pipeline (Phases 1-8)", () => {
+describe("phoenixLiveView pipeline", () => {
   it("validates a deployable that mounts ui: AND serves: an api", async () => {
     // Validation success is the assertion — buildFixture() throws on errors.
     const model = await buildFixture();
