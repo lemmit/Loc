@@ -109,13 +109,15 @@ text stays the source of truth.
 
 ## Open — editing UX
 
-- **Drag-to-add** from the palette (today is click-add; craft's create-connector
-  swallows the click). **Drag-reorder** across containers needs verification.
 - **Mobile** Builder tab (desktop-only today).
 - **Continuous text→canvas live sync** (today re-seeds on tab switch, not per
   keystroke) — needs debounce + canvas selection preservation.
 
-Done: **component editing** (the body picker now lists `page` and `component`
+Done: **drag-to-add / drag-reorder** — palette items wire craft's `create`
+connector (drag onto a canvas to create; click still adds to the selected/top
+container), and existing nodes drag-reorder across containers (craft's `drag`
+connector); both write the new tree back on Apply.
+Also done: **component editing** (the body picker now lists `page` and `component`
 bodies); **inline `expr`/`raw` validation** in the settings panel; **diagnostics**
 (a problems bar above the canvas *and* a red outline + tooltip on the specific
 node each diagnostic came from, via each node's recorded `__range`).

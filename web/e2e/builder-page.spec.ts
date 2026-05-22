@@ -3,8 +3,23 @@
 // edit round-trips through the `.ddd` source (the builder re-seeds from the
 // rewritten source). Pure client-side — no network.
 
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { selectExample, waitForPlaygroundReady } from "./_helpers";
+
+// craft drag is pointer-driven, so simulate a real mouse drag (down → stepped
+// move → up) rather than Playwright's one-shot dragTo.  `yFrac` picks where in
+// the target to drop — near the top (0.15) inserts before it.
+async function dragOnto(page: Page, source: Locator, target: Locator, yFrac = 0.5): Promise<void> {
+  const s = (await source.boundingBox())!;
+  const t = (await target.boundingBox())!;
+  const tx = t.x + t.width / 2;
+  const ty = t.y + t.height * yFrac;
+  await page.mouse.move(s.x + s.width / 2, s.y + s.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(tx, ty, { steps: 12 });
+  await page.mouse.move(tx, ty + 2, { steps: 4 });
+  await page.mouse.up();
+}
 
 test("page builder edits a heading and writes it back to source", async ({ page }) => {
   await page.goto("/");
@@ -348,5 +363,60 @@ test("Form op: offers the bound aggregate's operations as a dropdown", async ({ 
 
   await page.getByTestId("c4builder-apply").click();
   await expect(page.getByTestId("c4builder-canvas")).toContainText("Form");
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+});
+
+const DRAG_SOURCE = `system S { ui U { page P { body: Stack(Text("a")) } } }`;
+
+test("drags a palette primitive onto the canvas", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.evaluate((t) => navigator.clipboard.writeText(t), DRAG_SOURCE);
+  await page.getByTestId("doc-tab-source").click();
+  const editor = page.locator(".monaco-editor").first();
+  await editor.click();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.press("Control+v");
+
+  await page.getByTestId("doc-tab-builder").click();
+  await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("c4node-Button")).toHaveCount(0);
+
+  // Drag a Button from the palette into the Stack on the canvas.
+  await dragOnto(page, page.getByTestId("c4palette-Button"), page.getByTestId("c4node-Stack").first());
+  await expect(page.getByTestId("c4node-Button").first()).toBeVisible();
+
+  await page.getByTestId("c4builder-apply").click();
+  await expect(page.getByTestId("c4node-Button").first()).toBeVisible();
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+});
+
+const REORDER_SOURCE = `system S { ui U { page P { body: Stack(Text("first"), Text("second")) } } }`;
+
+test("drag-reorders sibling nodes and writes the new order back", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.evaluate((t) => navigator.clipboard.writeText(t), REORDER_SOURCE);
+  await page.getByTestId("doc-tab-source").click();
+  const editor = page.locator(".monaco-editor").first();
+  await editor.click();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.press("Control+v");
+
+  await page.getByTestId("doc-tab-builder").click();
+  await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
+  // Initially "first" precedes "second".
+  await expect(page.getByTestId("c4node-Text").first()).toContainText("first");
+
+  // Drag "second" onto the top of "first" → it lands before it.
+  await dragOnto(page, page.getByTestId("c4node-Text").filter({ hasText: "second" }), page.getByTestId("c4node-Text").filter({ hasText: "first" }), 0.15);
+  await expect(page.getByTestId("c4node-Text").first()).toContainText("second");
+
+  await page.getByTestId("c4builder-apply").click();
+  await expect(page.getByTestId("c4node-Text").first()).toContainText("second");
   await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
 });
