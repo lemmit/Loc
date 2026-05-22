@@ -61,6 +61,7 @@ jobs:
           - examples/acme.ddd
           - web/src/examples/banking-system.ddd
           - web/src/examples/inventory-system.ddd
+          - web/src/examples/provenance-system.ddd
           - web/src/examples/sales-system.ddd
           - web/src/examples/storybook-mantine.ddd
           - web/src/examples/storybook-shadcn.ddd
