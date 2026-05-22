@@ -9,6 +9,7 @@ syntaxes/
 src/language/generated/
 test-output/
 test-results/
+coverage/
 vscode/node_modules/
 vscode/out/
 vscode/server/

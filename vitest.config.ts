@@ -12,5 +12,12 @@ export default defineConfig({
     // not part of this project's own test surface.
     exclude: ["node_modules/**", "test/fixtures/**"],
     testTimeout: 30_000,
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "html", "json-summary"],
+      include: ["src/**"],
+      // src/language/generated/ is langium codegen (gitignored); never our coverage.
+      exclude: ["src/language/generated/**", "**/*.d.ts"],
+    },
   },
 });

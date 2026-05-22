@@ -21,6 +21,7 @@
     "langium:watch": "langium generate --watch",
     "test": "vitest run --exclude '**/e2e.test.ts' --exclude '**/generated-build.test.ts' --exclude '**/generated-react-build.test.ts'",
     "test:watch": "vitest --exclude '**/e2e.test.ts' --exclude '**/generated-build.test.ts' --exclude '**/generated-react-build.test.ts'",
+    "test:coverage": "vitest run --coverage --exclude '**/e2e.test.ts' --exclude '**/generated-build.test.ts' --exclude '**/generated-react-build.test.ts'",
     "test:e2e": "LOOM_E2E=1 vitest run test/e2e.test.ts",
     "test:tsc": "LOOM_TS_BUILD=1 vitest run test/generated-build.test.ts",
     "test:tsc-react": "LOOM_REACT_BUILD=1 vitest run test/generated-react-build.test.ts",
@@ -40,6 +41,7 @@
   },
   "devDependencies": {
     "@types/node": "~22.10.0",
+    "@vitest/coverage-v8": "~2.1.0",
     "fake-indexeddb": "^6.2.5",
     "happy-dom": "^20.9.0",
     "langium-cli": "~3.3.0",
