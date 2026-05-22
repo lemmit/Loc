@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 // ---------------------------------------------------------------------------
-// Backend-packages layering invariant (B2.1, see
+// Backend-package layering invariant (see
 // docs/backend-packages.md).
 //
 //   Edges point one way: package → shared, NEVER shared → package.

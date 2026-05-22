@@ -251,7 +251,7 @@ describe("typescript generator", () => {
     expect(repo).toMatch(
       /\.where\(and\(eq\(schema\.orders\.customerId, forCustomer\), eq\(schema\.orders\.status, "Draft"\)\)\)/,
     );
-    // Slice B: `as never` casts are gone from generated finds.
+    // `as never` casts are gone from generated finds.
     expect(repo).not.toMatch(/as never/);
     // No TODO fallback for this find.
     expect(repo).not.toMatch(/TODO: translate where-clause[\s\S]*activeForCustomer/);

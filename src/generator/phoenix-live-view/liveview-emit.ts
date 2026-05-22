@@ -114,7 +114,7 @@ export function emitLiveViewPages(args: {
     out.set(filePath, source);
     routes.push({ route: page.route, liveModule });
 
-    // Playwright page object — Batch C emission.  Mirrors the React
+    // Playwright page object emission.  Mirrors the React
     // generator's per-page `e2e/pages/<page>.ts` so `test e2e ui`
     // blocks (src/system/ui-e2e-render.ts) drive the Phoenix
     // deployable identically to a React one.

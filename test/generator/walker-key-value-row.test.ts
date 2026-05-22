@@ -1,4 +1,4 @@
-// Slice A10 — KeyValueRow primitive.
+// KeyValueRow primitive.
 //
 // Two-column row that pairs a fixed-width label with a value.
 // Used by the (forthcoming) `aggregate-detail` expander to surface
@@ -24,7 +24,7 @@ async function emit(body: string): Promise<string> {
   return tsx;
 }
 
-describe("Slice A10 — KeyValueRow primitive", () => {
+describe("KeyValueRow primitive", () => {
   it('emits <KeyValueRow label="…">child</KeyValueRow> with the runtime helper imported', async () => {
     const tsx = await emit(`KeyValueRow("Status", Text("active"))`);
     expect(tsx).toMatch(/import \{[^}]*\bKeyValueRow\b[^}]*\} from "\.\.\/lib\/format"/);

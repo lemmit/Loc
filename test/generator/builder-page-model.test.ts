@@ -106,7 +106,7 @@ describe("page-builder model — primitive coverage", () => {
     'Grid(Text("a"), Text("b"), Text("c"))',
     'Toolbar(Button("Save"), Button("Cancel"))',
     'Stack(Heading("Title", level: 2), List(of: Order))',
-    // Containers with props (Phase A): titled/modified containers whose
+    // Containers with props: titled/modified containers whose
     // children must remain editable nodes, not collapse to Opaque.
     'Card("Summary", Stack(Text("hi")))',
     'Card(Stack(Text("untitled")))',

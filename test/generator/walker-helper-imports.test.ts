@@ -1,4 +1,4 @@
-// Slice A6 — UI-level helper imports.
+// UI-level helper imports.
 //
 // New DSL syntax:
 //
@@ -32,7 +32,7 @@ async function parse(src: string): Promise<{
   return { files: generateSystems(model).files, diagnostics };
 }
 
-describe("Slice A6 — UI-level helper imports", () => {
+describe("UI-level helper imports", () => {
   it("emits an import line for a helper actually used in a body", async () => {
     const { files, diagnostics } = await parse(`
       system S {

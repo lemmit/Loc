@@ -1,4 +1,4 @@
-// Slice A2 — Table primitive in walker stdlib.
+// Table primitive in walker stdlib.
 //
 // Surface:
 //
@@ -31,7 +31,7 @@ import { generateSystemFiles } from "../_helpers/index.js";
 
 const buildAndGenerate = generateSystemFiles;
 
-describe("Slice A2 — Table primitive", () => {
+describe("Table primitive", () => {
   it("emits a Mantine table with headers, body map and member-access cells", async () => {
     const files = await buildAndGenerate(`
       system S {

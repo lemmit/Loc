@@ -404,7 +404,7 @@ describe("emitApiControllers (api-emit unit)", () => {
 // independently (as the task specification requires).
 // ---------------------------------------------------------------------------
 
-describe("D1 — Ash validate clause emission (domain-emit unit)", () => {
+describe("Ash validate clause emission (domain-emit unit)", () => {
   /** Minimal bounded context with one aggregate carrying:
    *  - an aggregate invariant (`email.length > 0`)
    *  - one public operation with a precondition (`minTotal >= 0`) */
@@ -518,7 +518,7 @@ describe("D1 — Ash validate clause emission (domain-emit unit)", () => {
 void repoRoot;
 
 // ---------------------------------------------------------------------------
-// Batch E4 — JWT auth module emission.
+// JWT auth module emission.
 //
 // Asserts that `lib/<app>_web/auth.ex` and `lib/<app>_web/live_auth.ex`
 // are emitted when the phoenixApp deployable carries `auth: required`.
@@ -739,7 +739,7 @@ describe("E4 — router wiring (orchestrator integration)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Batch C — markers for parent integration.
+// Markers for parent integration.
 //
 // theme-emit + sidebar-emit have landed, but renderWorkflowFormHeex still
 // needs `extra-archetype-emit.ts` (workflow-form HEEx; today a placeholder in
@@ -747,7 +747,7 @@ describe("E4 — router wiring (orchestrator integration)", () => {
 // once that emitter lands.
 // ---------------------------------------------------------------------------
 
-describe.skip("Batch C integration (parent wires emitters)", () => {
+describe.skip("integration (parent wires emitters)", () => {
   it("renderThemeCss produces a :root block with CSS custom properties", async () => {
     const { renderThemeCss } = await import("../../src/generator/phoenix-live-view/theme-emit.js");
     const css = renderThemeCss(undefined);
@@ -832,7 +832,7 @@ describe.skip("Batch C integration (parent wires emitters)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Batch D3 — cross-platform OpenAPI parity.
+// Cross-platform OpenAPI parity.
 //
 // `buildWireSpec(sys)` is Loom's canonical IR-derived wire contract.  All
 // three backends (hono, dotnet, phoenixLiveView) MUST expose those same
@@ -902,7 +902,7 @@ const ACME_LIVEVIEW_SOURCE = `system AcmeLV {
 `;
 
 async function buildAcmeLiveViewModel(): Promise<Model> {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-d3-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-openapi-parity-"));
   const file = path.join(dir, "acme-lv.ddd");
   fs.writeFileSync(file, ACME_LIVEVIEW_SOURCE);
   const services = createDddServices(NodeFileSystem);
@@ -913,13 +913,13 @@ async function buildAcmeLiveViewModel(): Promise<Model> {
   const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
   if (errors.length > 0) {
     throw new Error(
-      `D3 fixture validation errors:\n` + errors.map((e) => `  ${e.message}`).join("\n"),
+      `OpenAPI parity fixture validation errors:\n` + errors.map((e) => `  ${e.message}`).join("\n"),
     );
   }
   return doc.parseResult.value as Model;
 }
 
-describe("D3 — cross-platform OpenAPI parity (phoenix vs wire-spec.json)", () => {
+describe("cross-platform OpenAPI parity (phoenix vs wire-spec.json)", () => {
   it("Phoenix OpenAPI spec module exists when deployable serves an api", async () => {
     const model = await buildAcmeLiveViewModel();
     const { files } = generateSystems(model);
@@ -1011,7 +1011,7 @@ describe("D3 — cross-platform OpenAPI parity (phoenix vs wire-spec.json)", () 
 });
 
 // ---------------------------------------------------------------------------
-// Batch E6 — Full-form view bind projection.
+// Full-form view bind projection.
 //
 // Exercises `emitViews` directly with a synthetic `OrderSummary` view IR
 // (matching the shape that `lowerView` produces for the acme.ddd definition)
@@ -1358,7 +1358,7 @@ describe("E3 — Ash.transaction/2 domain-list form (workflow-emit unit)", () =>
 });
 
 // ---------------------------------------------------------------------------
-// Batch F3 — cross-platform UI parity.
+// cross-platform UI parity.
 //
 // `test e2e ui "…" against <deployable>` blocks lower against any
 // deployable that mounts a UI — react / static (frontend-only) AND
@@ -1393,7 +1393,7 @@ const ACME_UI_E2E_SOURCE = `system AcmeUI {
 }
 `;
 
-describe("F3 — cross-platform UI parity (test e2e ui against phoenixLiveView)", () => {
+describe("cross-platform UI parity (test e2e ui against phoenixLiveView)", () => {
   it("emits a Playwright spec for a `test e2e ui` block targeting a phoenix deployable", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-f3-"));
     const file = path.join(dir, "acme-ui.ddd");
@@ -1408,7 +1408,7 @@ describe("F3 — cross-platform UI parity (test e2e ui against phoenixLiveView)"
     const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
     if (errors.length > 0) {
       throw new Error(
-        `F3 fixture validation errors:\n` + errors.map((e) => `  ${e.message}`).join("\n"),
+        `UI parity fixture validation errors:\n` + errors.map((e) => `  ${e.message}`).join("\n"),
       );
     }
     const model = doc.parseResult.value as Model;

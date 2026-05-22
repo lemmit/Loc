@@ -7,10 +7,10 @@ import {
 } from "../../src/platform/registry.js";
 
 // ---------------------------------------------------------------------------
-// Backend-packages B0 — the registry resolves backends by
+// The registry resolves backends by
 // family@version with a defaults map, while staying byte-identical:
 // every resolution path must return the SAME surface instance the
-// bareword returned pre-B0 (the guarantee that no generated output
+// bareword returned before (the guarantee that no generated output
 // changes).  See docs/backend-packages.md.
 // ---------------------------------------------------------------------------
 
@@ -45,7 +45,7 @@ describe("parseBuiltinPlatformRef", () => {
 
 describe("platformFor — byte-identity guarantee", () => {
   it("bareword and its default pin resolve to the SAME surface", () => {
-    // The crux of B0: `platform: hono` must yield the exact instance
+    // The crux: `platform: hono` must yield the exact instance
     // it did before the registry generalisation, so emitted output
     // is unchanged.
     expect(platformFor("hono")).toBe(platformFor("hono@v4" as never));

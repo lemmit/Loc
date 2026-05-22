@@ -1,4 +1,4 @@
-// Slice C1 — scaffold expander unit tests.
+// scaffold expander unit tests.
 //
 // `expandScaffoldToExplicitBody(origin, ctx)` is the pure function
 // the IR-level post-processor uses (when `LOOM_SCAFFOLD_EXPAND=1`)
@@ -121,7 +121,7 @@ function findCall(node: ExprIR | undefined, name: string): ExprIR | null {
   return null;
 }
 
-describe("Slice C1 — scaffold expander dispatch", () => {
+describe("scaffold expander dispatch", () => {
   const ctx = buildExpandContext(makeSystem(), makeUi());
 
   it("aggregate-list expands to Stack(Breadcrumbs, Toolbar, QueryView, …)", async () => {
@@ -354,7 +354,7 @@ describe("Slice C1 — scaffold expander dispatch", () => {
   });
 
   it("expands with no-handle fallback when the UI has no api params", () => {
-    // Slice D1 — legacy `scaffold modules: M` deployables that
+    // Legacy `scaffold modules: M` deployables that
     // never declared `api X: Y` parameters still get expansion.
     // The body uses `<Agg>.all` directly (Pattern D in walker)
     // instead of `<handle>.<Agg>.all`.

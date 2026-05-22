@@ -6,7 +6,7 @@ import { createDddServices } from "../../src/language/ddd-module.js";
 import type { Model } from "../../src/language/generated/ast.js";
 
 // ---------------------------------------------------------------------------
-// Backend-packages B1 — the grammar now admits `platform: "hono@v4"`
+// The grammar admits `platform: "hono@v4"`
 // (STRING alternative).  Lowering normalises it to the family
 // (byte-identical `platform`) + a qualified `platformRef`; the
 // validator rejects unknown versions / unknown platforms.  See
@@ -30,7 +30,7 @@ const sys = (platform: string) => `
   }
 `;
 
-describe("B1 — platform pin grammar + validation", () => {
+describe("platform pin grammar + validation", () => {
   it("accepts a bareword backend platform (unchanged)", async () => {
     const { errors } = await parse(sys("hono"));
     expect(errors).toEqual([]);
@@ -65,7 +65,7 @@ describe("B1 — platform pin grammar + validation", () => {
   });
 });
 
-describe("B1 — lowering normalises platform + platformRef", () => {
+describe("lowering normalises platform + platformRef", () => {
   async function lowerDeployable(platform: string) {
     const services = createDddServices(NodeFileSystem);
     const doc = await parseHelper(services.Ddd)(sys(platform), {

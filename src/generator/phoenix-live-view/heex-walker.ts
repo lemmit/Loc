@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// HEEx walker — Batch B core.
+// HEEx walker core.
 //
 // Sibling of src/generator/react/body-walker.ts but emits HEEx for the
 // Phoenix LiveView platform.  Same input (`PageIR.body` expression IR),

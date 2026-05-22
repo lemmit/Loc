@@ -820,7 +820,7 @@ ${inner}
     liveScopeBody = `\n${flatLines}`;
   }
 
-  // API routes — Batch A's emitApiControllers returns:
+  // API routes — emitApiControllers returns:
   //   - paths prefixed with `!root:` → outside `/api` scope (health / ready)
   //   - bare paths → inside `scope "/api"`
   const rootApiRoutes = apiRoutes.filter((r) => r.path.startsWith("!root:"));

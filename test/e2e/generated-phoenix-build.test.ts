@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 // ---------------------------------------------------------------------------
-// Batch F1 — generated Phoenix project compiles against real Ash 3.x.
+// generated Phoenix project compiles against real Ash 3.x.
 //
 // Mirrors `test/generated-build.test.ts` (the TS-build regression):
 // emit a phoenixLiveView deployable from a fixture, then run
@@ -23,7 +23,7 @@ import { describe, expect, it } from "vitest";
 // Network requirement: `mix deps.get` reaches repo.hex.pm.  In a
 // proxy-restricted sandbox the call fails with a TLS handshake
 // error from Erlang's :inets — the Dockerfile bakes proxy CAs via
-// /usr/local/share/ca-certificates/ (see Batch D4), but this test
+// /usr/local/share/ca-certificates/, but this test
 // shells out directly rather than using that Dockerfile, so it
 // requires network access to hex.pm AND a host with passwordless
 // `docker run`.  GitHub-hosted runners satisfy both.
