@@ -109,6 +109,22 @@ jobs:
         working-directory: web
         run: npx playwright install-deps chromium
 
+      # Build the same-origin npm mirror (tarballs + packument metadata)
+      # and the design-pack vendor into web/public/ — the artifacts
+      # pages.yml ships to production.  vite build (run by the Playwright
+      # webServer) copies public/ into dist/, so vite preview serves them
+      # same-origin and the in-browser bundler resolves every dependency
+      # (metadata + tarballs) locally instead of hammering registry.npmjs.org.
+      # Without this the six *-preview specs each pull the full tree over
+      # the network concurrently and time out at the 180s bundle gate.
+      - name: Build npm mirror
+        working-directory: web
+        run: npm run build:npm-mirror
+
+      - name: Build design-pack vendor
+        working-directory: web
+        run: npm run build:vendor
+
       - name: Run Playwright specs
         working-directory: web
         run: npm run e2e

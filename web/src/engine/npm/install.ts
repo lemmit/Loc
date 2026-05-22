@@ -47,11 +47,16 @@ export async function install(
     /** name@version → local tarball URL.  Overrides the registry
      *  tarball when present (C1 local mirror). */
     mirror?: Map<string, string>;
+    /** Base URL of the same-origin packument cache (`<base>/npm-mirror/
+     *  packuments/`).  When set, dependency resolution reads metadata
+     *  from here instead of the registry — so a complete mirror needs
+     *  zero registry round-trips. */
+    packumentMirror?: string;
   } = {},
 ): Promise<InstallResult> {
   const nmRoot = opts.nmRoot ?? "/node_modules";
   const concurrency = opts.concurrency ?? 8;
-  const plan = [...(await planInstall(rootDeps)).values()];
+  const plan = [...(await planInstall(rootDeps, opts.packumentMirror)).values()];
   const versions = new Map<string, string>();
   let fileCount = 0;
 

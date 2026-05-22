@@ -22,6 +22,7 @@ export interface PlannedPackage {
 
 export async function planInstall(
   rootDeps: Record<string, string>,
+  packumentMirror?: string,
 ): Promise<Map<string, PlannedPackage>> {
   const chosen = new Map<string, PlannedPackage>();
   const packuments = new Map<string, Packument>();
@@ -31,7 +32,7 @@ export async function planInstall(
     const [name, range] = queue.shift()!;
     let pack = packuments.get(name);
     if (!pack) {
-      pack = await fetchPackument(name);
+      pack = await fetchPackument(name, packumentMirror);
       packuments.set(name, pack);
     }
     const version = maxSatisfying(Object.keys(pack.versions), range);

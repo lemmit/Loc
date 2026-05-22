@@ -21,7 +21,7 @@ import { generateSystems } from "../../out/system/index.js";
 import { generateTypeScript } from "../../out/platform/hono/v4/emit.js";
 import { BACKEND_PINS } from "../../out/platform/hono/v4/pins.js";
 import { planInstall } from "../src/engine/npm/resolve-tree.ts";
-import { fetchTarball } from "../src/engine/npm/registry.ts";
+import { fetchTarball, fetchPackument, packumentFileName } from "../src/engine/npm/registry.ts";
 import { RUNTIME_VERSIONS } from "../src/bundle/plugin.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -139,4 +139,46 @@ console.log(
   `# wrote ${Object.keys(manifest).length} tarballs + manifest.json` +
     (skipped ? ` (${skipped} skipped → registry fallback)` : "") +
     " to web/public/npm-mirror/",
+);
+
+// Packument mirror: cache each package's (abbreviated) metadata under
+// packuments/ so the in-browser resolver (planInstall → fetchPackument)
+// reads dependency metadata same-origin too.  Without this the bundler
+// still hits registry.npmjs.org once per package for metadata — the
+// residual traffic that saturates the e2e job under concurrency.  Per
+// package best-effort: a miss just falls back to the registry at runtime.
+const packDir = path.join(outDir, "packuments");
+mkdirSync(packDir, { recursive: true });
+const names = [...new Set(plan.map((p) => p.name))];
+let pmDone = 0;
+let pmSkipped = 0;
+let pmCursor = 0;
+async function packumentWithRetry(name, attempts = 3) {
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      return await fetchPackument(name);
+    } catch (err) {
+      if (i === attempts) throw err;
+      await new Promise((r) => setTimeout(r, 500 * i));
+    }
+  }
+}
+async function packumentWorker() {
+  while (pmCursor < names.length) {
+    const name = names[pmCursor++];
+    try {
+      const pack = await packumentWithRetry(name);
+      writeFileSync(path.join(packDir, packumentFileName(name)), JSON.stringify(pack, null, 0));
+    } catch (err) {
+      pmSkipped++;
+      console.warn(`#   skip packument ${name}: ${err instanceof Error ? err.message : err}`);
+    }
+    if (++pmDone % 40 === 0) console.log(`#   packuments ${pmDone}/${names.length}`);
+  }
+}
+await Promise.all(Array.from({ length: concurrency }, packumentWorker));
+console.log(
+  `# wrote ${names.length - pmSkipped} packuments` +
+    (pmSkipped ? ` (${pmSkipped} skipped → registry fallback)` : "") +
+    " to web/public/npm-mirror/packuments/",
 );

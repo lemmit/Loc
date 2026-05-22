@@ -384,10 +384,18 @@ self.onmessage = async (ev: MessageEvent<VfsBundleRequest>): Promise<void> => {
     );
     syncFiles(slot.files, generatedFiles);
     const tInstall = performance.now();
+    const mirror = await getMirror();
     const { versions, fileCount } = await install(
       rootDeps,
       (p, d) => slot.files.set(p, d),
-      { cache: await getCache(), mirror: await getMirror() },
+      {
+        cache: await getCache(),
+        mirror,
+        // Only point resolution at the same-origin packument cache when a
+        // mirror actually shipped — otherwise every metadata fetch would
+        // 404 same-origin before falling back to the registry.
+        packumentMirror: mirror.size ? deployBase + "npm-mirror/packuments/" : undefined,
+      },
     );
     const installMs = Math.round(performance.now() - tInstall);
     const versionRec = Object.fromEntries(versions);
