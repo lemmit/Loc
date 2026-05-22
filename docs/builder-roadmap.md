@@ -172,9 +172,10 @@ Done:
   (`f(a, b)`) and member access (`a.b`, `a.b(c)`) render editable callee/receiver
   + member + an add/remove/edit argument list, expression-body lambdas
   (`p => expr`) render an editable param + body (the param is threaded into the
-  body's scope suggestions), and everything still unmodelled (`match`, `new`,
-  ternary, object literals, block-body lambdas) is a reparse-validated `raw` text
-  leaf (recognise-or-raw). Plugged into the
+  body's scope suggestions), `new Part { … }` and object literals `{ … }` render
+  an editable partType + a named-field list (add/remove/edit), and everything
+  still unmodelled (`match`, ternary, block-body lambdas) is a reparse-validated
+  `raw` text leaf (recognise-or-raw). Plugged into the
   single-expression slots — invariants, derived props, function bodies — via one
   inspector "Expression" picker (`expr-slots.ts`). A **structured⇄text toggle**
   lets advanced users edit the whole expression as raw text (same
@@ -205,8 +206,8 @@ Done:
 
 Open:
 
-- **Deeper expression structuring** — structured `match`/`new`/object literals
-  and block-body lambdas (still `raw` leaves); **member-name completion** (suggesting
+- **Deeper expression structuring** — structured `match` and ternary, and
+  block-body lambdas (still `raw` leaves); **member-name completion** (suggesting
   `.member` after a receiver — needs the type system, not just the flat name set
   that drives bare-name suggestions today); and arg-*name* editing on calls
   (existing named args are preserved verbatim but can't be renamed in the UI).
@@ -214,9 +215,6 @@ Open:
   (multi-part, so not single-expression slots) in operation and workflow bodies
   are still text-row only; the structured editor reaches single-expr statements
   (precondition/requires/let) on both today.
-- **`new` / object literals** — structured object construction (`new Part { … }`,
-  `{ … }`); the seed/emit model is the next step. Mostly appears in assignments /
-  `emit` / `test` blocks today, so a reachable slot (the above) unlocks a UI for it.
 - **Field rename** — needs member-access reference resolution (via the
   type-system / IR) to update `this.field` / view binds safely.
 - **Repository `find` editing** (params + where-clause expressions).

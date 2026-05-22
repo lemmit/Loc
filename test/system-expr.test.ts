@@ -74,6 +74,29 @@ describe("structured expression editor — model", () => {
     expect(emitExpr(tree)).toBe('Money(lines.sum(l => l.subtotal.amount), "USD")');
   });
 
+  it("structures object literals (named fields)", () => {
+    // placeOrder: let order = Order.create({ customerId: …, status: Draft, placedAt: … })
+    const tree = seedExpr(slotExpr(parse(sales), { kind: "wfStmt", owner: "placeOrder", index: 1 })!);
+    if (tree.kind !== "member") throw new Error("expected a member call");
+    const obj = tree.args[0].value;
+    if (obj.kind !== "object") throw new Error("expected an object literal");
+    expect(obj.fields.map((f) => f.name)).toEqual(["customerId", "status", "placedAt"]);
+    expect(obj.fields[1].value).toMatchObject({ kind: "raw", text: "Draft" });
+    expect(emitExpr(tree)).toBe("Order.create({ customerId: customerId, status: Draft, placedAt: placedAt })");
+  });
+
+  it("structures `new` expressions (partType + fields)", () => {
+    // addLine: lines += new OrderLine { productId: productId, quantity: qty, unitPrice: price }
+    const order = owner<Aggregate>(parse(sales), "Aggregate", "Order");
+    const addLine = order.members.find((m) => (m as { name?: string }).name === "addLine") as { body: { $type: string; value?: unknown }[] };
+    const newNode = addLine.body.find((s) => s.$type === "AssignOrCallStmt")!.value;
+    const tree = seedExpr(newNode as never);
+    if (tree.kind !== "new") throw new Error("expected a new expression");
+    expect(tree.partType).toBe("OrderLine");
+    expect(tree.fields.map((f) => f.name)).toEqual(["productId", "quantity", "unitPrice"]);
+    expect(emitExpr(tree)).toBe("new OrderLine { productId: productId, quantity: qty, unitPrice: price }");
+  });
+
   it("structures member access (receiver + member)", () => {
     // find activeForCustomer where this.customerId == forCustomer && this.status == Draft
     const tree = seedExpr(slotExpr(parse(sales), { kind: "findFilter", owner: "Orders", name: "activeForCustomer" })!);

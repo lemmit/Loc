@@ -1,4 +1,4 @@
-import type { CallArg, Expression } from "../../../../src/language/generated/ast.js";
+import type { CallArg, Expression, ObjectFieldInit } from "../../../../src/language/generated/ast.js";
 import { printExpr } from "../../../../src/language/print/index.js";
 
 // ---------------------------------------------------------------------------
@@ -23,6 +23,11 @@ export interface ECallArg {
   value: EExpr;
 }
 
+export interface EObjField {
+  name: string;
+  value: EExpr;
+}
+
 export type EExpr =
   | { kind: "binary"; op: string; left: EExpr; right: EExpr }
   | { kind: "unary"; op: string; operand: EExpr }
@@ -31,6 +36,8 @@ export type EExpr =
   | { kind: "call"; callee: EExpr; args: ECallArg[] }
   | { kind: "member"; receiver: EExpr; member: string; call: boolean; args: ECallArg[] }
   | { kind: "lambda"; param: string; body: EExpr }
+  | { kind: "new"; partType: string; fields: EObjField[] }
+  | { kind: "object"; fields: EObjField[] }
   | { kind: "raw"; text: string };
 
 // BinaryExpr.op covers comparison, logical and arithmetic operators.
@@ -69,6 +76,10 @@ export function seedExpr(node: Expression): EExpr {
       // Expression-body lambdas structure (`p => expr`); block-body lambdas
       // (`p => { … }` — imperative statements) stay raw.
       return node.body ? { kind: "lambda", param: node.param, body: seedExpr(node.body) } : { kind: "raw", text: printExpr(node) };
+    case "NewExpr":
+      return { kind: "new", partType: node.partType.$refText, fields: node.fields.map(seedField) };
+    case "ObjectLit":
+      return { kind: "object", fields: node.fields.map(seedField) };
     default:
       return { kind: "raw", text: printExpr(node) };
   }
@@ -80,6 +91,16 @@ function seedArg(a: CallArg): ECallArg {
 
 function emitArg(a: ECallArg): string {
   return a.name ? `${a.name}: ${emitExpr(a.value)}` : emitExpr(a.value);
+}
+
+function seedField(f: ObjectFieldInit): EObjField {
+  return { name: f.name, value: seedExpr(f.value) };
+}
+
+// Matches `printObjectFields`: empty → "", else surrounded by single spaces.
+function emitFields(fields: EObjField[]): string {
+  if (fields.length === 0) return "";
+  return ` ${fields.map((f) => `${f.name}: ${emitExpr(f.value)}`).join(", ")} `;
 }
 
 export function emitExpr(e: EExpr): string {
@@ -101,6 +122,10 @@ export function emitExpr(e: EExpr): string {
     }
     case "lambda":
       return `${e.param} => ${emitExpr(e.body)}`;
+    case "new":
+      return `new ${e.partType} {${emitFields(e.fields)}}`;
+    case "object":
+      return `{${emitFields(e.fields)}}`;
     case "raw":
       return e.text;
   }

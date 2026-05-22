@@ -352,6 +352,34 @@ test("edits a workflow-body statement expression", async ({ page }) => {
   await expect(op()).toHaveValue(">=");
 });
 
+test("structures an object literal and edits its fields", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /\.NET backend only/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  // placeOrder: let order = Order.create({ customerId: …, status: Draft, placedAt: now() })
+  await page.locator('[data-testid="rf__node-workflow:placeOrder"]').click();
+  await page.getByTestId("c4system-expr-pick").click();
+  await page.getByRole("option", { name: /let order = Order\.create/ }).click();
+
+  const expr = page.getByTestId("c4expr");
+  // The object literal exposes its named fields.
+  await expect(expr.getByTestId("c4expr-field-name").first()).toHaveValue("customerId");
+  await expect(expr.getByTestId("c4expr-field-name")).toHaveCount(3);
+
+  // Append a field → still parses; then remove it.
+  await expr.getByTestId("c4expr-field-add").click();
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+  await expect(page.getByTestId("c4expr").getByTestId("c4expr-field-name")).toHaveCount(4);
+  await page.getByTestId("c4expr").getByTestId("c4expr-field-del").last().click();
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+  await expect(page.getByTestId("c4expr").getByTestId("c4expr-field-name")).toHaveCount(3);
+});
+
 test("offers scope-aware name suggestions in a raw leaf", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);
