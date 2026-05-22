@@ -36,9 +36,77 @@ function dedupe(els: Element[]): Element[] {
   return out;
 }
 
-function accessibleName(el: Element): string {
-  return (el.getAttribute("aria-label") ?? el.textContent ?? "").trim();
+/** Text of the `<label>` associated with a form control, via `for=` or
+ *  by wrapping. */
+function associatedLabelText(el: Element): string {
+  const doc = el.ownerDocument;
+  const id = el.getAttribute("id");
+  if (id && doc) {
+    const lbl = doc.querySelector(`label[for=${JSON.stringify(id)}]`);
+    const t = lbl?.textContent?.trim();
+    if (t) return t;
+  }
+  const wrapping = el.closest("label");
+  const t = wrapping?.textContent?.trim();
+  return t ?? "";
 }
+
+/** A pragmatic subset of the ARIA accessible-name algorithm — enough to
+ *  match `getByRole(role, { name })` against real markup.  Precedence:
+ *  aria-labelledby → aria-label → associated <label> → alt → textContent
+ *  → title → placeholder.  (Not the full spec — no recursive subtree name
+ *  computation — but covers the common cases.) */
+function accessibleName(el: Element): string {
+  const doc = el.ownerDocument;
+  const labelledby = el.getAttribute("aria-labelledby");
+  if (labelledby && doc) {
+    const text = labelledby
+      .split(/\s+/)
+      .map((id) => doc.getElementById(id)?.textContent?.trim() ?? "")
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+    if (text) return text;
+  }
+  const ariaLabel = el.getAttribute("aria-label")?.trim();
+  if (ariaLabel) return ariaLabel;
+
+  const label = associatedLabelText(el);
+  if (label) return label;
+
+  const alt = el.getAttribute("alt")?.trim();
+  if (alt) return alt;
+
+  const text = el.textContent?.trim();
+  if (text) return text;
+
+  const title = el.getAttribute("title")?.trim();
+  if (title) return title;
+
+  const placeholder = el.getAttribute("placeholder")?.trim();
+  return placeholder ?? "";
+}
+
+/** Native-element → implicit ARIA role selectors.  An element with an
+ *  explicit `role=` attribute uses that instead, so implicit matches are
+ *  filtered to elements WITHOUT a `role` attribute (see getByRole). */
+const IMPLICIT_ROLE_SELECTORS: Record<string, string> = {
+  button:
+    "button, input[type=button], input[type=submit], input[type=reset], input[type=image]",
+  link: "a[href], area[href]",
+  heading: "h1, h2, h3, h4, h5, h6",
+  textbox:
+    "input:not([type]), input[type=text], input[type=search], input[type=email], input[type=url], input[type=tel], textarea",
+  checkbox: "input[type=checkbox]",
+  radio: "input[type=radio]",
+  combobox: "select",
+  img: "img",
+  list: "ul, ol",
+  listitem: "li",
+  table: "table",
+  row: "tr",
+  cell: "td",
+};
 
 function matchesName(el: Element, name: string, exact: boolean): boolean {
   const acc = accessibleName(el);
@@ -156,15 +224,24 @@ export class DomLocator {
     role: string,
     opts?: { name?: string; exact?: boolean },
   ): DomLocator {
-    const sel = `[role=${JSON.stringify(role)}]`;
+    const explicitSel = `[role=${JSON.stringify(role)}]`;
+    const implicitSel = IMPLICIT_ROLE_SELECTORS[role];
     const nameDescr =
       opts?.name == null
         ? ""
         : `, { name: ${JSON.stringify(opts.name)}${opts.exact ? ", exact: true" : ""} }`;
     return this.add((roots) => {
-      const els = dedupe(
-        roots.flatMap((r) => Array.from(r.querySelectorAll(sel))),
+      const explicit = roots.flatMap((r) =>
+        Array.from(r.querySelectorAll(explicitSel)),
       );
+      // Native elements carry the role implicitly — but only when they
+      // don't override it with an explicit `role=` (e.g. <button role="tab">).
+      const implicit = implicitSel
+        ? roots
+            .flatMap((r) => Array.from(r.querySelectorAll(implicitSel)))
+            .filter((el) => !el.hasAttribute("role"))
+        : [];
+      const els = dedupe([...explicit, ...implicit]);
       if (opts?.name == null) return els;
       return els.filter((el) => matchesName(el, opts.name!, opts.exact ?? false));
     }, `getByRole(${JSON.stringify(role)}${nameDescr})`);

@@ -214,6 +214,51 @@ describe("DomPage / DomLocator", () => {
     );
   });
 
+  it("getByRole matches native elements via implicit roles", async () => {
+    setBody(`
+      <button>Save</button>
+      <a href="/x">Home</a>
+      <h2>Orders</h2>
+    `);
+    const page = new DomPage(document, { timeout: 200 });
+    expect(await page.getByRole("button", { name: "Save" }).count()).toBe(1);
+    expect(await page.getByRole("link", { name: "Home" }).count()).toBe(1);
+    expect(await page.getByRole("heading", { name: "Orders" }).count()).toBe(1);
+    // Clicking a native button resolves through the implicit role.
+    let clicked = 0;
+    document.querySelector("button")!.addEventListener("click", () => {
+      clicked += 1;
+    });
+    await page.getByRole("button", { name: "Save" }).click();
+    expect(clicked).toBe(1);
+  });
+
+  it("an explicit role overrides the implicit one", async () => {
+    setBody(`<button role="tab">T</button>`);
+    const page = new DomPage(document, { timeout: 100 });
+    // The <button role="tab"> is a tab, not a button.
+    expect(await page.getByRole("button").count()).toBe(0);
+    expect(await page.getByRole("tab").count()).toBe(1);
+  });
+
+  it("accessible name resolves via aria-label, <label>, and aria-labelledby", async () => {
+    setBody(`
+      <button aria-label="Close dialog"><span>x</span></button>
+      <label for="qty">Quantity</label><input id="qty" type="text" />
+      <span id="lbl">Customer</span><input aria-labelledby="lbl" type="text" />
+    `);
+    const page = new DomPage(document, { timeout: 200 });
+    expect(
+      await page.getByRole("button", { name: "Close dialog" }).count(),
+    ).toBe(1);
+    expect(
+      await page.getByRole("textbox", { name: "Quantity" }).count(),
+    ).toBe(1);
+    expect(
+      await page.getByRole("textbox", { name: "Customer" }).count(),
+    ).toBe(1);
+  });
+
   it("per-call timeout overrides the page default", async () => {
     setBody(`<div></div>`);
     // Page default is long; a tight per-call timeout must win and fail fast.
