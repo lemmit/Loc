@@ -334,3 +334,30 @@ Open:
 - **Nested grouping** (module → context → members as React Flow parent nodes)
   and auto-layout; today it's a deterministic column-per-kind layout.
 - **Persisted positions** (layout is currently derived, not written back).
+
+Planned — recommended order:
+
+1. **Finish expression/statement structuring** (Track 1, mechanical — each reuses
+   an existing pattern):
+   - **Block-body lambda structuring** — currently a `raw` leaf in
+     `expr-model.ts`; reuse the page builder's statement-row `Lambda` editor.
+   - **Structured statement targets** — the assignment *target* (LValue) and a
+     bare-call statement's *callee* (the RHS / args are already structured).
+   - **Arg-*name* editing on calls** — existing named args are preserved verbatim
+     but can't be renamed in the UI.
+2. **Diagnostics on graph nodes** — wire LSP diagnostics onto model nodes (a
+   badge / red outline on the offending construct), mirroring the page builder's
+   per-node diagnostics via `__range`. Makes a broken system visible on the graph.
+3. **Search / filter / focus** — jump-to-construct, filter by kind, highlight a
+   node's neighbours; needed once a system outgrows one screen.
+4. **Traceability overlay** — surface the derived requirement / solution /
+   testCase coverage + gaps (`.loom/` reports, `docs/traceability.md`) as a graph
+   heat-overlay: which aggregates lack tests / have unmet requirements. The
+   standout capability a text editor can't offer.
+5. **Apply-diff preview** — show the text diff a graph edit will splice before
+   committing (round-trip trust + safety).
+6. **Wire-shape / DTO preview** on aggregate nodes — render the
+   enrichment-computed `wireShape` field list inline, so the contract is visible.
+
+Layout polish (slot in opportunistically): drag-to-rebind edges, persisted
+positions, auto-layout (dagre/elk) + nested grouping, add target-context picker.
