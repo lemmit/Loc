@@ -1,13 +1,6 @@
-import * as path from "node:path";
-import { fileURLToPath } from "node:url";
-import { URI } from "langium";
-import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
-import { enrichLoomModel } from "../../src/ir/enrichments.js";
-import { lowerModel } from "../../src/ir/lower.js";
-import { createDddServices } from "../../src/language/ddd-module.js";
-import type { Model } from "../../src/language/generated/ast.js";
 import { buildC4Model, renderC4Model } from "../../src/system/likec4.js";
+import { loadExampleModel, toLoomModel } from "../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
 // `<outdir>/.loom/architecture.c4` snapshot.  Locks the LikeC4 model so
@@ -16,18 +9,8 @@ import { buildC4Model, renderC4Model } from "../../src/system/likec4.js";
 // was confirmed manually with `likec4 validate`.)
 // ---------------------------------------------------------------------------
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(here, "..", "..");
-
 async function build(file: string) {
-  const services = createDddServices(NodeFileSystem);
-  const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
-    URI.file(path.join(repoRoot, file)),
-  );
-  await services.shared.workspace.DocumentBuilder.build([doc], {
-    validation: true,
-  });
-  return enrichLoomModel(lowerModel(doc.parseResult.value as Model));
+  return toLoomModel(await loadExampleModel(file));
 }
 
 describe("architecture.c4", () => {

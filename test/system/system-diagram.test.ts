@@ -1,12 +1,4 @@
-import * as path from "node:path";
-import { fileURLToPath } from "node:url";
-import { URI } from "langium";
-import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
-import { enrichLoomModel } from "../../src/ir/enrichments.js";
-import { lowerModel } from "../../src/ir/lower.js";
-import { createDddServices } from "../../src/language/ddd-module.js";
-import type { Model } from "../../src/language/generated/ast.js";
 import {
   buildDeploymentDiagram,
   buildDomainDiagram,
@@ -19,6 +11,7 @@ import {
   renderSequenceDiagram,
   renderWorkflowDiagram,
 } from "../../src/system/mermaid.js";
+import { loadExampleModel, toLoomModel } from "../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
 // `<outdir>/.loom/domain.mmd` + `.loom/workflows.mmd` snapshots.  Lock
@@ -26,18 +19,8 @@ import {
 // workflow-flow projections show up as a diffable snapshot review.
 // ---------------------------------------------------------------------------
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(here, "..", "..");
-
 async function build(file: string) {
-  const services = createDddServices(NodeFileSystem);
-  const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
-    URI.file(path.join(repoRoot, file)),
-  );
-  await services.shared.workspace.DocumentBuilder.build([doc], {
-    validation: true,
-  });
-  return enrichLoomModel(lowerModel(doc.parseResult.value as Model));
+  return toLoomModel(await loadExampleModel(file));
 }
 
 describe("domain.mmd", () => {

@@ -9,21 +9,13 @@
 // (byte-equivalence guarantee, exercised separately by
 // `test/page-emitter-equivalence.test.ts`).
 
-import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
 import { deriveSidebarFromUi } from "../../src/generator/react/menu-emitter.js";
-import { enrichLoomModel } from "../../src/ir/enrichments.js";
 import type { LoomModel, UiIR } from "../../src/ir/loom-ir.js";
-import { lowerModel } from "../../src/ir/lower.js";
-import { createDddServices } from "../../src/language/ddd-module.js";
-import type { Model } from "../../src/language/generated/ast.js";
+import { parseString, toLoomModel } from "../_helpers/index.js";
 
 async function buildLoom(src: string): Promise<LoomModel> {
-  const { parseHelper } = await import("langium/test");
-  const services = createDddServices(NodeFileSystem);
-  const helper = parseHelper(services.Ddd);
-  const doc = await helper(src, { validation: false });
-  return enrichLoomModel(lowerModel(doc.parseResult.value as Model));
+  return toLoomModel((await parseString(src, { validate: false })).model);
 }
 
 function uiOf(loom: LoomModel, name: string): UiIR {
