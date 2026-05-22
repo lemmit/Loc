@@ -672,25 +672,27 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   // to that statement's value slot. Keyed by `rev` so it re-seeds on commit;
   // the open row is held in `structuredKey` so it survives the re-seed.
   const valueEditorProps = (loc: BodyLocator) => {
-    const keyFor = (index: number): string =>
-      `${loc.kind === "operation" ? `${loc.aggregate}.${loc.op}` : loc.name}:${index}`;
-    const slotFor = (index: number): ExprSlot =>
+    const base = loc.kind === "operation" ? `${loc.aggregate}.${loc.op}` : loc.name;
+    const keyFor = (index: number, field?: number): string => `${base}:${index}:${field ?? ""}`;
+    const slotFor = (index: number, field?: number): ExprSlot =>
       loc.kind === "operation"
-        ? { kind: "stmtExpr", owner: loc.aggregate, op: loc.op, index }
-        : { kind: "wfStmt", owner: loc.name, index };
+        ? { kind: "stmtExpr", owner: loc.aggregate, op: loc.op, index, ...(field !== undefined ? { field } : {}) }
+        : { kind: "wfStmt", owner: loc.name, index, ...(field !== undefined ? { field } : {}) };
     return {
-      onToggleValueEditor: (index: number): void => {
-        const k = keyFor(index);
+      hasValueEditor: (index: number, field?: number): boolean =>
+        slotExpr(parsed.ast, slotFor(index, field)) != null,
+      onToggleValueEditor: (index: number, field?: number): void => {
+        const k = keyFor(index, field);
         setStructuredKey((cur) => (cur === k ? null : k));
       },
-      renderValueEditor: (index: number): ReactNode => {
-        if (structuredKey !== keyFor(index)) return null;
-        const slot = slotFor(index);
+      renderValueEditor: (index: number, field?: number): ReactNode => {
+        if (structuredKey !== keyFor(index, field)) return null;
+        const slot = slotFor(index, field);
         const expr = slotExpr(parsed.ast, slot);
         if (!expr) return null;
         return (
           <ExprSlotEditor
-            key={`${keyFor(index)}:${rev}`}
+            key={`${keyFor(index, field)}:${rev}`}
             seed={seedExpr(expr)}
             seedText={expr.$cstNode?.text ?? ""}
             candidates={slotCandidates(parsed.ast, slot)}

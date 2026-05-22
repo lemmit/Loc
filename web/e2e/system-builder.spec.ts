@@ -659,14 +659,59 @@ test("expands an assignment value into the inline structured editor (ƒx)", asyn
   await page.getByRole("option", { name: "deposit", exact: true }).click();
   await expect(page.getByTestId("c4system-body")).toBeVisible();
 
-  // The assign row shows a text value plus the ƒx toggle; expanding it swaps the
-  // text field for the inline structured expression editor.
-  const fx = page.getByTestId("c4system-stmt-structured").first();
-  await expect(fx).toBeVisible();
-  await expect(page.getByTestId("c4system-stmt-value").first()).toBeVisible();
-  await fx.click();
+  // The assign row (the one with the target Autocomplete) shows a text value plus
+  // the ƒx toggle; expanding it swaps the text field for the structured editor.
+  const assignRow = page
+    .getByTestId("c4system-stmt-row")
+    .filter({ has: page.getByTestId("c4system-stmt-target") })
+    .first();
+  await expect(page.getByTestId("c4system-stmt-value")).toBeVisible();
+  await assignRow.getByTestId("c4system-stmt-structured").click();
   await expect(page.getByTestId("c4expr")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId("c4system-stmt-value")).toHaveCount(0);
+});
+
+test("expands a precondition's expression into the inline structured editor (ƒx)", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  await page.locator('[data-testid="rf__node-aggregate:Order"]').click();
+  await page.getByTestId("c4system-op-pick").click();
+  await page.getByRole("option", { name: "confirm", exact: true }).click();
+  await expect(page.getByTestId("c4system-body")).toBeVisible();
+
+  // The first statement (`precondition isMutable()`) is a text row with a ƒx
+  // toggle that expands its expression into the inline structured editor.
+  const row = page.getByTestId("c4system-stmt-row").first();
+  await expect(row.getByTestId("c4system-stmt")).toBeVisible();
+  await row.getByTestId("c4system-stmt-structured").click();
+  await expect(page.getByTestId("c4expr")).toBeVisible({ timeout: 10_000 });
+  await expect(row.getByTestId("c4system-stmt")).toHaveCount(0);
+});
+
+test("expands a bare-call argument into the inline structured editor (ƒx)", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  // placeOrder's `order.addLine(productId, qty)` is a bare call — each argument
+  // is a text field with a ƒx toggle to the inline structured editor.
+  await page.locator('[data-testid="rf__node-workflow:placeOrder"]').click();
+  await expect(page.getByTestId("c4system-body")).toBeVisible();
+  const argFx = page.getByTestId("c4system-call-arg-structured").first();
+  await expect(argFx).toBeVisible();
+  await expect(page.getByTestId("c4system-call-arg").first()).toBeVisible();
+  await argFx.click();
+  await expect(page.getByTestId("c4expr")).toBeVisible({ timeout: 10_000 });
 });
 
 test("offers type-directed member-name suggestions", async ({ page }) => {
