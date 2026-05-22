@@ -32,12 +32,12 @@ import {
 import { AstUtils } from "langium";
 import {
   envForNode,
-  iterateEntityMembers,
   isCollectionOp,
+  membersOfType,
   resolveTypeRef,
   typeOf,
-  typeToString,
   type DddType,
+  type MemberCompletion,
 } from "../type-system.js";
 
 // ---------------------------------------------------------------------------
@@ -59,16 +59,6 @@ import {
 // (which already restricts containment-part lookup to the same
 // aggregate).
 // ---------------------------------------------------------------------------
-
-const COLLECTION_OPS: ReadonlyArray<{ name: string; signature: string }> = [
-  { name: "count", signature: "int" },
-  { name: "sum", signature: "(λ): decimal" },
-  { name: "all", signature: "(λ): bool" },
-  { name: "any", signature: "(λ): bool" },
-  { name: "where", signature: "(λ): T[]" },
-  { name: "first", signature: "T" },
-  { name: "firstOrNull", signature: "T?" },
-];
 
 export class DddCompletionProvider extends DefaultCompletionProvider {
   constructor(services: LangiumServices) {
@@ -156,100 +146,32 @@ export class DddCompletionProvider extends DefaultCompletionProvider {
     context: CompletionContext,
     acceptor: CompletionAcceptor,
   ): void {
-    if (t.kind === "array") {
-      for (const op of COLLECTION_OPS) {
-        acceptor(context, {
-          label: op.name,
-          kind: CompletionItemKind.Method,
-          detail: `collection op: ${op.signature}`,
-        });
-      }
-      return;
-    }
-
-    if (t.kind === "entity" || t.kind === "aggregate") {
-      // Magic `id` accessor — every entity / aggregate has one.
-      const idType = `Id<${t.ref.name}>`;
+    // Single source of truth for "what members does this type have" lives in
+    // `type-system.ts` (`membersOfType`), shared with the web Model builder.
+    for (const m of membersOfType(t)) {
       acceptor(context, {
-        label: "id",
-        kind: CompletionItemKind.Field,
-        detail: idType,
+        label: m.name,
+        kind: completionKindFor(m.kind),
+        detail: m.detail,
       });
-      const members = iterateEntityMembers(t.ref);
-      for (const m of members) {
-        acceptor(context, completionItemForMember(m));
-      }
-      return;
     }
+  }
+}
 
-    if (t.kind === "valueobject") {
-      const members = iterateEntityMembers(t.ref);
-      for (const m of members) {
-        acceptor(context, completionItemForMember(m));
-      }
-      return;
-    }
-
-    if (t.kind === "primitive" && t.name === "string") {
-      acceptor(context, {
-        label: "length",
-        kind: CompletionItemKind.Field,
-        detail: "int",
-      });
-      return;
-    }
-
-    if (t.kind === "enum") {
-      // Enum-value access: `Status.Active`, `Status.Closed`, …
-      for (const v of t.ref.values) {
-        acceptor(context, {
-          label: v.name,
-          kind: CompletionItemKind.EnumMember,
-          detail: t.ref.name,
-        });
-      }
-    }
+function completionKindFor(kind: MemberCompletion["kind"]): CompletionItemKind {
+  switch (kind) {
+    case "method":
+      return CompletionItemKind.Method;
+    case "enum-value":
+      return CompletionItemKind.EnumMember;
+    default:
+      return CompletionItemKind.Field;
   }
 }
 
 // ---------------------------------------------------------------------------
 // Helpers.
 // ---------------------------------------------------------------------------
-
-function completionItemForMember(m: ReturnType<typeof iterateEntityMembers>[number]) {
-  switch (m.kind) {
-    case "property":
-      return {
-        label: m.name,
-        kind: CompletionItemKind.Field,
-        detail: typeToString(m.type),
-      };
-    case "containment":
-      return {
-        label: m.name,
-        kind: CompletionItemKind.Field,
-        detail: typeToString(m.type),
-      };
-    case "derived":
-      return {
-        label: m.name,
-        kind: CompletionItemKind.Property,
-        detail: `derived: ${typeToString(m.type)}`,
-      };
-    case "function":
-      return {
-        label: m.name,
-        kind: CompletionItemKind.Function,
-        detail: `function: ${typeToString(m.type)}`,
-      };
-    case "operation":
-      return {
-        label: m.name,
-        kind: CompletionItemKind.Method,
-        detail: "operation",
-      };
-  }
-}
 
 function findEnumByName(from: import("langium").AstNode, name: string): EnumDecl | undefined {
   const ctx = AstUtils.getContainerOfType(from, isBoundedContext);

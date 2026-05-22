@@ -199,6 +199,20 @@ Done:
   layer (`slotCandidates`/`slotEnv` in `expr-slots.ts`) reuses the IR's `Env`
   builders to construct the per-slot env exactly as `lower.ts` does — so the
   rules aren't forked. Gated by `test/system-expr.test.ts` + e2e.
+- **Type-directed member-name completion** — `receiver.‹member›` inputs are
+  autocompletes fed the receiver's *type's* members (properties / containments /
+  derived / helpers, collection ops on arrays, enum values, `string.length`,
+  `Id<X>`/optional unwrapped). The single source of truth is `membersOfType` in
+  `src/language/type-system.ts`, **shared with the VS Code LSP completion**
+  (`ddd-completion.ts` delegates to it). Receiver types come from the AST type
+  system (`typeOf` + `envForNode`), which also gained collection-op lambda-param
+  binding and find/view/workflow `this`/param context (so member completion +
+  LSP hover/definition/completion now work inside lambdas and in find/view
+  filters). Resolving types needs a *linked* document, so candidates are
+  computed async via `buildLinkedModel` (shared linked-build helper extracted
+  from rename.ts) + `memberCandidates` (a path-keyed map threaded into the
+  editor by structural path). Gated by `test/type-system-members.test.ts`,
+  `test/system-expr.test.ts` + e2e.
 - **Statement expressions in operation & workflow bodies** — the same
   "Expression" picker lists each aggregate operation's *and workflow's*
   `precondition` / `requires` / `let` expressions (`stmtExpr` / `wfStmt` slots),
@@ -211,9 +225,7 @@ Done:
 Open:
 
 - **Deeper expression structuring** — structured `match` and ternary, and
-  block-body lambdas (still `raw` leaves); **member-name completion** (suggesting
-  `.member` after a receiver — needs the type system, not just the flat name set
-  that drives bare-name suggestions today); and arg-*name* editing on calls
+  block-body lambdas (still `raw` leaves); and arg-*name* editing on calls
   (existing named args are preserved verbatim but can't be renamed in the UI).
 - **Assignment / emit statements** — `:=` assignments and `emit` field values
   (multi-part, so not single-expression slots) in operation and workflow bodies

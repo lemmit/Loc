@@ -380,6 +380,32 @@ test("structures an object literal and edits its fields", async ({ page }) => {
   await expect(page.getByTestId("c4expr").getByTestId("c4expr-field-name")).toHaveCount(3);
 });
 
+test("offers type-directed member-name suggestions", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  // Order's `invariant lines.count > 0` — `lines` is a collection, so the member
+  // input on `lines.‹count›` should suggest the collection ops.
+  await page.locator('[data-testid="rf__node-aggregate:Order"]').click();
+  await page.getByTestId("c4system-expr-pick").click();
+  await page.getByRole("option", { name: "invariant: lines.count > 0" }).click();
+
+  const member = page.getByTestId("c4expr").getByTestId("c4expr-member");
+  await expect(member).toHaveValue("count");
+  // Clear and open the autocomplete → type-directed candidates (built async).
+  await member.fill("");
+  await expect(page.getByRole("option", { name: "first", exact: true })).toBeVisible({ timeout: 10_000 });
+  await page.getByRole("option", { name: "first", exact: true }).click();
+  await member.blur();
+  await expect(page.getByText("Source has syntax errors")).toHaveCount(0);
+  await expect(page.getByTestId("c4expr").getByTestId("c4expr-member")).toHaveValue("first");
+});
+
 test("offers scope-aware name suggestions in a raw leaf", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);
