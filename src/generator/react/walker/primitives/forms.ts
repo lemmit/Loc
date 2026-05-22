@@ -6,7 +6,7 @@
 // so it must share the same sink and live alongside the form emitters.
 
 import type { AggregateIR, BoundedContextIR, ExprIR, TypeIR } from "../../../../ir/loom-ir.js";
-import { camel, humanize, pascal, plural, snake } from "../../../../util/naming.js";
+import { lowerFirst, humanize, upperFirst, plural, snake } from "../../../../util/naming.js";
 import type { WalkContext } from "../../body-walker.js";
 import {
   emitExpr,
@@ -111,7 +111,7 @@ function prepareFormFields(
   if (useController) addImport(ctx, "react-hook-form", "Controller");
   addImport(ctx, "@hookform/resolvers/zod", "zodResolver");
   for (const t of idTargets) {
-    addImport(ctx, `../api/${camel(t.name)}`, `useAll${plural(t.name)}`);
+    addImport(ctx, `../api/${lowerFirst(t.name)}`, `useAll${plural(t.name)}`);
   }
   for (const vm of fieldVMs) registerFormFieldImports(ctx, vm);
   const fieldHtmls = fieldVMs.map((vm) => renderFormField(vm, ctx.pack));
@@ -241,7 +241,7 @@ function emitFormOfAggregate(
   // components (Stack/Button/Group on Mantine, equivalents elsewhere).
   addImportsForPrimitive(ctx, "primitive-form-of");
   const prepared = prepareFormFields(ctx, fields, fields, bc, testidNamespace);
-  addImport(ctx, `../api/${camel(agg.name)}`, `Create${agg.name}Request`, `useCreate${agg.name}`);
+  addImport(ctx, `../api/${lowerFirst(agg.name)}`, `Create${agg.name}Request`, `useCreate${agg.name}`);
   ctx.collectedTestids.add(`${testidNamespace}-submit`);
   const onSubmitJs = emitFormOnSubmit(ctx, call, prepared.idTargets, "create");
   ctx.formOfs.push({
@@ -299,7 +299,7 @@ function emitFormRuns(
   const testidNamespace = stringNamed(call, "testid") ?? `workflow-${snake(workflow.name)}`;
   addImportsForPrimitive(ctx, "primitive-form-of");
   const prepared = prepareFormFields(ctx, fields, fieldsForHelpers, bc, testidNamespace);
-  const wfPascalForImport = pascal(workflow.name);
+  const wfPascalForImport = upperFirst(workflow.name);
   addImport(
     ctx,
     "../api/workflows",
@@ -377,9 +377,9 @@ function emitFormOfOperation(
   const prepared = prepareFormFields(ctx, fields, fieldsForHelpers, bc, testidNamespace);
   addImport(
     ctx,
-    `../api/${camel(agg.name)}`,
-    `${pascal(op.name)}Request`,
-    `use${pascal(op.name)}${agg.name}`,
+    `../api/${lowerFirst(agg.name)}`,
+    `${upperFirst(op.name)}Request`,
+    `use${upperFirst(op.name)}${agg.name}`,
   );
   ctx.collectedTestids.add(testidNamespace);
   ctx.collectedTestids.add(`${testidNamespace}-form`);
@@ -451,8 +451,8 @@ export function emitModal(
   return renderPrimitive(ctx, "primitive-modal", {
     label,
     emphasisPrimary: triggerPrimary,
-    opPascal: pascal(opName),
-    opCamel: camel(opName),
+    opPascal: upperFirst(opName),
+    opCamel: lowerFirst(opName),
     testidAttr: testidAttr(triggerArg, ctx),
   });
 }

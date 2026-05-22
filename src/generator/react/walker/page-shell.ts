@@ -16,7 +16,7 @@ import type {
   UiHelperImportIR,
   WorkflowIR,
 } from "../../../ir/loom-ir.js";
-import { camel, humanize, pascal, plural, snake } from "../../../util/naming.js";
+import { lowerFirst, humanize, upperFirst, plural, snake } from "../../../util/naming.js";
 import type { LoadedPack } from "../../_packs/loader.js";
 import { routerPackageForStack } from "../../_packs/stack-runtime.js";
 import type {
@@ -339,7 +339,7 @@ function renderFormOfWiring(
   const { agg, idTargets, useController, defaultValuesTs, onSubmitJs } = state;
   const tplCtx = {
     aggregateName: agg.name,
-    aggregateNameCamel: camel(agg.name),
+    aggregateNameCamel: lowerFirst(agg.name),
     pluralAggregateName: plural(agg.name),
     snakePluralAggregate: snake(plural(agg.name)),
     humanAgg: humanize(agg.name),
@@ -347,7 +347,7 @@ function renderFormOfWiring(
     srcImportPrefix,
     idTargets: idTargets.map((t) => ({
       name: t.name,
-      nameCamel: camel(t.name),
+      nameCamel: lowerFirst(t.name),
       namePlural: plural(t.name),
       hookVar: idTargetHookVar(t),
     })),
@@ -378,20 +378,20 @@ function renderFormOpWiring(
 ): FormWiring {
   const { agg, op, idTargets, useController, defaultValuesTs, fieldHtmls, idExpr } =
     state;
-  const opPascal = pascal(op.name);
+  const opPascal = upperFirst(op.name);
   const tplCtx = {
     aggregateName: agg.name,
-    aggregateNameCamel: camel(agg.name),
+    aggregateNameCamel: lowerFirst(agg.name),
     opName: op.name,
     opPascal,
-    opCamel: camel(op.name),
+    opCamel: lowerFirst(op.name),
     idExpr,
     humanOp: humanize(op.name),
     slug: snake(plural(agg.name)),
     srcImportPrefix,
     idTargets: idTargets.map((t) => ({
       name: t.name,
-      nameCamel: camel(t.name),
+      nameCamel: lowerFirst(t.name),
       namePlural: plural(t.name),
       hookVar: idTargetHookVar(t),
     })),
@@ -425,7 +425,7 @@ function renderFormRunsWiring(
   srcImportPrefix: string,
 ): FormWiring {
   const { workflow, idTargets, useController, defaultValuesTs, onSubmitJs } = state;
-  const wfPascal = pascal(workflow.name);
+  const wfPascal = upperFirst(workflow.name);
   const tplCtx = {
     workflowName: workflow.name,
     workflowPascal: wfPascal,
@@ -433,7 +433,7 @@ function renderFormRunsWiring(
     srcImportPrefix,
     idTargets: idTargets.map((t) => ({
       name: t.name,
-      nameCamel: camel(t.name),
+      nameCamel: lowerFirst(t.name),
       namePlural: plural(t.name),
       hookVar: idTargetHookVar(t),
     })),
@@ -548,7 +548,7 @@ export function renderUserComponentFile(
   const dtoImports = new Map<string, string>(); // DTO type → api module
   const propType = (p: ParamIR): string => {
     if (p.type.kind === "entity" && aggregatesByName.has(p.type.name)) {
-      dtoImports.set(`${p.type.name}Response`, `../api/${camel(p.type.name)}`);
+      dtoImports.set(`${p.type.name}Response`, `../api/${lowerFirst(p.type.name)}`);
       return `${p.type.name}Response`;
     }
     return typeRefAsTsString(p);

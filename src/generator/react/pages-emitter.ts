@@ -41,7 +41,7 @@ import type {
   ViewIR,
   WorkflowIR,
 } from "../../ir/loom-ir.js";
-import { camel, snake } from "../../util/naming.js";
+import { lowerFirst, snake } from "../../util/naming.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { isWalkableLayoutBody, walkBodyToTsx } from "./body-walker.js";
 import { buildPageObjectModule } from "./page-objects-builder.js";
@@ -254,11 +254,6 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
   return out;
 }
 
-// camel is exported for legacy file paths (e2e/pages/<camel>.ts) that
-// still live in index.ts; re-exported here so the page-objects
-// builder can move in Slice 7 without re-importing naming utils.
-export { camel };
-
 // ---------------------------------------------------------------------------
 // Playwright page-object emission walked from `ui.pages`.
 //
@@ -314,7 +309,7 @@ export function emitPageObjectsForUi(ui: UiIR, ctx: PageEmitContext): Map<string
           }
         }
         if (!agg || !ctxIR) break;
-        out.set(`e2e/pages/${camel(agg.name)}.ts`, buildPageObjectModule(agg, ctxIR));
+        out.set(`e2e/pages/${lowerFirst(agg.name)}.ts`, buildPageObjectModule(agg, ctxIR));
         break;
       }
       case "workflow-form": {
