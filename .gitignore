@@ -6,7 +6,6 @@ out/
 .vscode/
 .idea/
 syntaxes/
-src/language/generated/
 test-output/
 test-results/
 coverage/
