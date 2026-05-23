@@ -274,7 +274,7 @@ function aggregateView(ast: Model, name: string): ViewGraph {
 
 const STMT_ROW_H = 130;
 
-function findAggregate(ast: Model, name: string): Aggregate | undefined {
+export function findAggregate(ast: Model, name: string): Aggregate | undefined {
   for (const m of ast.members) {
     if (m.$type === "BoundedContext") {
       for (const cm of (m as BoundedContext).members)

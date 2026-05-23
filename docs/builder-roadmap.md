@@ -476,8 +476,15 @@ Phasing:
   `test/system-v2/view-graph.test.ts` (operation / workflow snapshots) +
   `web/e2e/system-builder-v2.spec.ts` (drill into `Order.confirm`, see stmt
   nodes incl. the `emit`).
-- **Phase 2b** — make the stmt nodes editable inline by embedding the v1 row
-  components (AssignRow / CallRow / EmitRow / OtherRow with the `ƒx` editor).
+- ~~**Phase 2b** — editable stmt nodes (inline rows).~~ Done: v1's
+  `AssignRow` / `CallRow` / `EmitRow` / `OtherRow` are now exported and
+  embedded inside `StmtNode`, with the inline `ƒx` editor wired through the
+  same `slotExpr` / `slotCandidates` / `editExprSlot` / `exprHints` helpers
+  as v1. The pane carries a `rev` counter so each commit re-parses, re-builds
+  the view-graph, and re-binds the per-stmt handlers; switching to a
+  different leaf collapses any open `ƒx`. `.nodrag .nopan` on the node lets
+  inputs / dropdowns work inside the React Flow node. Gated by the v2 e2e
+  (asserts each stmt kind's editor controls are present inside the node).
 - **Phase 3** — in-canvas edits at higher levels (rename, add, delete,
   drag-rebind per view).
 - **Phase 4** — long-tail parity with v1 (fields / finds / deployable bindings
