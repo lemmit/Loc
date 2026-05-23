@@ -782,11 +782,11 @@ export interface PageIR {
    *  re-parsing the body expression.  Same source context the legacy
    *  generator's per-aggregate / per-workflow / per-view loop
    *  received. */
-  scaffoldOrigin?: ScaffoldOriginIR;
+  archetype?: PageArchetypeIR;
   /** Explicit emit path override for walker-rendered
    *  pages.  When set, the page-emitter writes the rendered TSX to
    *  this path instead of the default `src/pages/<page-snake>.tsx`.
-   *  Populated by `expandScaffoldToExplicitBody` so a scaffold-
+   *  Populated by `expandWalkerPrimitive` so a scaffold-
    *  expanded page lands at the conventional archetype path
    *  (`src/pages/<plural>/list.tsx` for `aggregate-list`, etc.) —
    *  preserves URL/file shape when scaffold expansion becomes the
@@ -794,7 +794,7 @@ export interface PageIR {
   emitPath?: string;
   /** True when the scaffold expander rewrote `body`
    *  from the original archetype call (e.g. `List(of: …)`) to a
-   *  walker-stdlib composition.  `scaffoldOrigin` is intentionally
+   *  walker-stdlib composition.  `archetype` is intentionally
    *  preserved on these pages so the per-aggregate page-object
    *  emitter still fires; `expandedFromScaffold` tells the
    *  page-emitter to dispatch the rewritten body through the
@@ -805,7 +805,7 @@ export interface PageIR {
 /** Provenance for a scaffold-synthesised page.  Each kind names the
  *  domain-IR target plus the page archetype within that target's
  *  generated set. */
-export type ScaffoldOriginIR =
+export type PageArchetypeIR =
   | { kind: "aggregate-list"; aggregateName: string; contextName: string }
   | { kind: "aggregate-new"; aggregateName: string; contextName: string }
   | { kind: "aggregate-detail"; aggregateName: string; contextName: string }

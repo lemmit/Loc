@@ -112,7 +112,7 @@ import type {
   RequirementIR,
   RequirementStatus,
   RequirementType,
-  ScaffoldOriginIR,
+  PageArchetypeIR,
   SolutionIR,
   StateFieldIR,
   StmtIR,
@@ -150,9 +150,9 @@ import {
 } from "./lower-expr.js";
 import {
   buildExpandContext,
-  expandScaffoldToExplicitBody,
-  type ScaffoldExpandContext,
-} from "./scaffold-expander.js";
+  expandWalkerPrimitive,
+  type WalkerExpandContext,
+} from "./walker-primitive-expander.js";
 import { capabilitiesFor } from "../language/ddd-macro-expander.js";
 import type { ContextStampIR } from "./loom-ir.js";
 
@@ -484,36 +484,36 @@ function lowerSystem(sys: System): SystemIR {
     storages,
   };
   // Scaffold expander always runs.  Every page with a
-  // recognised `scaffoldOrigin` gets `body` rewritten to a
+  // recognised `archetype` gets `body` rewritten to a
   // walker-stdlib composition; the React emitter then routes
   // through the walker.  The legacy archetype path
   // (renderers/preparers/templates) has been deleted — this
-  // branch is the only generator path now.  `scaffoldOrigin` is
+  // branch is the only generator path now.  `archetype` is
   // intentionally preserved on each rewritten page so the
   // per-aggregate page-object emitter still produces the rich
   // `e2e/pages/<agg>.ts` helper classes (rich domain methods:
   // fill, submit, expectRow).
-  expandScaffoldPages(built);
+  expandWalkerPrimitives(built);
   return built;
 }
 
 /** In-place rewrite of every UI's pages.  When the
- *  expander handles a page's `scaffoldOrigin`, swap `body` with
+ *  expander handles a page's `archetype`, swap `body` with
  *  the synthesised walker-stdlib expression and clear the
- *  `scaffoldOrigin` discriminator so the React emitter dispatches
+ *  `archetype` discriminator so the React emitter dispatches
  *  through the walker path instead of the archetype path. */
-function expandScaffoldPages(sys: SystemIR): void {
+function expandWalkerPrimitives(sys: SystemIR): void {
   for (const ui of sys.uis) {
     const ctx = buildExpandContext(sys, ui);
     for (const page of ui.pages) {
-      if (!page.scaffoldOrigin) continue;
-      const expanded = expandScaffoldToExplicitBody(page.scaffoldOrigin, ctx);
+      if (!page.archetype) continue;
+      const expanded = expandWalkerPrimitive(page.archetype, ctx);
       if (!expanded) continue;
       // Compute the conventional emit path so the rewritten page
       // lands at `src/pages/<plural>/<arch>.tsx` (matches what the
       // scaffold renderer would have used).  Preserves URL/file
       // shape when scaffold expansion becomes the default.
-      page.emitPath = conventionalEmitPath(page.scaffoldOrigin, ctx);
+      page.emitPath = conventionalEmitPath(page.archetype, ctx);
       page.body = expanded;
       // Detail-page expansion references `id` as a
       // route param (`Sales.Order.byId(id)`).  The scaffold AST
@@ -523,7 +523,7 @@ function expandScaffoldPages(sys: SystemIR): void {
       // param.  Synthesise it here so the walker emits
       // `useParams<{id: string}>()` correctly.
       if (
-        page.scaffoldOrigin.kind === "aggregate-detail" &&
+        page.archetype.kind === "aggregate-detail" &&
         !page.params.some((p) => p.name === "id")
       ) {
         page.params.push({
@@ -531,7 +531,7 @@ function expandScaffoldPages(sys: SystemIR): void {
           type: { kind: "primitive", name: "string" },
         });
       }
-      // INTENTIONALLY leave `page.scaffoldOrigin` set — the page-
+      // INTENTIONALLY leave `page.archetype` set — the page-
       // object emitter dispatches on it to keep producing the
       // per-aggregate `e2e/pages/<agg>.ts` classes (with their
       // rich domain methods: fill, submit, expectRow…) while the
@@ -545,8 +545,8 @@ function expandScaffoldPages(sys: SystemIR): void {
 }
 
 function conventionalEmitPath(
-  origin: ScaffoldOriginIR,
-  ctx: ScaffoldExpandContext,
+  origin: PageArchetypeIR,
+  ctx: WalkerExpandContext,
 ): string | undefined {
   if (
     origin.kind === "aggregate-list" ||
@@ -843,10 +843,10 @@ function lowerPage(p: Page): PageIR {
   // Pass-1 AST-to-AST scaffold expansion populates
   // synthesised pages with body expressions like
   // `List(of: Order)` / `Form(creates: T)` / etc.  We infer the
-  // page's `scaffoldOrigin` discriminator and `source` from the
+  // page's `archetype` discriminator and `source` from the
   // body shape so the React emitter dispatches identically
   // whether the page came from source or from the AST expander.
-  const inferred = inferScaffoldOrigin(p, body);
+  const inferred = inferPageArchetype(p, body);
   return {
     name: p.name,
     params,
@@ -857,19 +857,19 @@ function lowerPage(p: Page): PageIR {
     body,
     menuMeta,
     source: inferred ? "scaffold" : "explicit",
-    scaffoldOrigin: inferred,
+    archetype: inferred,
   };
 }
 
 /** Inspect a synthesised page's body to recover the
- *  `scaffoldOrigin` discriminator the legacy IR-level expander
+ *  `archetype` discriminator the legacy IR-level expander
  *  used to set.  When the body matches the synthesiser's
  *  characteristic shape (`List(of: <Agg>)`, `Form(creates: <Agg>)`,
  *  `Detail(of: <Agg>, by: id)`, `Form(runs: <wf>)`, `List(of: view
  *  <View>)`, the standalone Home / WorkflowsIndex / ViewsIndex
  *  sentinels), returns the matching origin.  Otherwise returns
  *  `undefined` — the page is treated as user-explicit. */
-function inferScaffoldOrigin(page: Page, body: ExprIR | undefined): ScaffoldOriginIR | undefined {
+function inferPageArchetype(page: Page, body: ExprIR | undefined): PageArchetypeIR | undefined {
   if (!body || body.kind !== "call") return undefined;
   const callName = body.name;
   const argNames = body.argNames ?? [];

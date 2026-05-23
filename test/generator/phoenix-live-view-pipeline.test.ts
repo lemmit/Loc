@@ -815,7 +815,7 @@ describe.skip("integration (parent wires emitters)", () => {
       params: [],
       state: [],
       source: "scaffold" as const,
-      scaffoldOrigin: { kind: "home" as const },
+      archetype: { kind: "home" as const },
     };
     const ts = buildPlaywrightPageObject({
       page,

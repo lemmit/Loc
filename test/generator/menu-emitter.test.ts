@@ -116,7 +116,7 @@ describe("menu emitter", () => {
     expect(link.testId).toBe("nav-ext-docs");
   });
 
-  it("derives correct testIds + activeArgs per scaffoldOrigin kind", async () => {
+  it("derives correct testIds + activeArgs per archetype kind", async () => {
     const loom = await buildLoom(`
       system S {
         module Sales {
