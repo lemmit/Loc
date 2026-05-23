@@ -186,7 +186,7 @@ Backend stack templates carry the equivalent of `package-json` (or
 currently inlined at:
 
 - `src/generator/typescript/index.ts:204-216`
-- `src/generator/dotnet/templates/program.tpl.ts:325-360`
+- `src/generator/dotnet/emit/program.ts:325-360`
 - `src/generator/phoenix-live-view/index.ts:600`
 
 would move into `stacks/<id>/`. The generator looks up the

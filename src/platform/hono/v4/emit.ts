@@ -17,7 +17,7 @@ import {
   renderIds,
   renderSchema,
   renderTestsFile,
-} from "../../../generator/typescript/templates.js";
+} from "../../../generator/typescript/emit.js";
 import { enrichLoomModel } from "../../../ir/enrichments.js";
 import type {
   BoundedContextIR,

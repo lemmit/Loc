@@ -419,41 +419,38 @@ Each platform has the same module shape (in `src/generator/<platform>/`):
 | File | Role |
 | --- | --- |
 | `index.ts` | Orchestrator — `generate<Platform>ForContexts(contexts, ...) → Map<path, content>`. |
-| `templates/*.tpl.ts` | Procedural emitters (`render<Thing>(...)`) for regular-shaped fragments — id classes, value-object classes, events, common errors, etc.  Despite the `.tpl.ts` filename retained from the v1 layout, every one of these files is now a plain TypeScript function building strings via `lines(...)` from `src/util/code-builder.ts`. |
+| `emit/*.ts` (TS/.NET) or `*-emit.ts` (Phoenix) | Procedural emitters (`render<Thing>(...)`) for regular-shaped fragments — id classes, value-object classes, events, common errors, etc.  Plain TypeScript functions building strings via `lines(...)` from `src/util/code-builder.ts`. |
 | `*-builder.ts` | Procedural builders for content with too much per-aggregate variation to keep small (Hono routes, Hono repositories, React pages, React page-objects). |
 | `render-expr.ts` / `render-stmt.ts` | Recursive `ExprIR → string` / `StmtIR → string` renderers (only on platforms that execute domain logic — TS and .NET, not React). |
 
 ### All-procedural emission
 
 The Loom v2 refactor dropped Handlebars in Phase 4.  Every file is
-now built procedurally on top of two primitives in
+now built procedurally on top of one primitive in
 `src/util/code-builder.ts`:
 
 - `lines(...parts)` — joins strings / arrays / `null` / `undefined`
   / `false` with `\n`, dropping nullish entries.  Used everywhere
   whitespace-controlled emission would have lived in a template.
-- `Block` — a small indenting line buffer.  Available for blocks
-  with non-trivial nesting; current callers all use `lines`.
 
 The platform separation that used to be templated (`templates/*.tpl.ts`
-+ `hb.ts`) is now: each `templates/*.tpl.ts` file is a plain
-TypeScript module exporting `render<Thing>(args)` functions.  No
-runtime parsing, no SafeString escaping, no helper registration —
-the type checker validates every data flow from the IR to the
-rendered string.
++ `hb.ts`) is now: each `emit/*.ts` file is a plain TypeScript
+module exporting `render<Thing>(args)` functions.  No runtime
+parsing, no SafeString escaping, no helper registration — the type
+checker validates every data flow from the IR to the rendered string.
 
 ### Hono backend (`src/generator/typescript/`)
 
 | File | Owns |
 | --- | --- |
 | `index.ts` | Project shell (package.json, tsconfig, vite-style index.ts, Dockerfile, certs/ dir). |
-| `templates/ids.tpl.ts` | Branded id types + smart constructors. |
-| `templates/value-objects.tpl.ts` | Enums + value-object classes. |
-| `templates/events.tpl.ts` | Domain-event union + dispatcher. |
-| `templates/aggregate.tpl.ts` | Aggregate / part class shape. |
-| `templates/schema.tpl.ts` | Drizzle `pgTable` / `pgEnum` declarations. |
-| `templates/routes.tpl.ts` | `http/index.ts` composer (CORS + sub-router mount + `/openapi.json`). |
-| `templates/tests.tpl.ts` | Per-aggregate vitest spec when `test` blocks present. |
+| `emit/ids.ts` | Branded id types + smart constructors. |
+| `emit/value-objects.ts` | Enums + value-object classes. |
+| `emit/events.ts` | Domain-event union + dispatcher. |
+| `emit/aggregate.ts` | Aggregate / part class shape. |
+| `emit/schema.ts` | Drizzle `pgTable` / `pgEnum` declarations. |
+| `emit/routes.ts` | `http/index.ts` composer (CORS + sub-router mount + `/openapi.json`). |
+| `emit/tests.ts` | Per-aggregate vitest spec when `test` blocks present. |
 | `routes-builder.ts` | OpenAPIHono router per aggregate — full Zod schemas via wire-shape, routes for create / get-by-id / find-all / per-op / per-find, domain-error handler. |
 | `repository-builder.ts` | Per-aggregate repository — find-by-id (load + hydrate), get-by-id (throws), save (upsert + diff-sync + dispatch), find-all + user finds (with Drizzle `where`-clause lowering), `toWire` serializer. |
 | `render-expr.ts` / `render-stmt.ts` | IR → idiomatic TS for invariants / preconditions / op bodies. |
@@ -463,18 +460,18 @@ rendered string.
 | File | Owns |
 | --- | --- |
 | `index.ts` | Project shell + per-aggregate emission orchestration. |
-| `templates/ids.tpl.ts` | `record struct OrderId(Guid Value)` + `New()`. |
-| `templates/enums-vos.tpl.ts` | C# enums + value-object records. |
-| `templates/events.tpl.ts` | `IDomainEvent` + per-event records. |
-| `templates/common.tpl.ts` | `DomainException`, `AggregateNotFoundException`, `IDomainEventDispatcher`, `NoopDomainEventDispatcher`. |
-| `templates/entity.tpl.ts` | Aggregate / part class shape. |
-| `templates/repository.tpl.ts` | Repository interface + EF-backed implementation. |
-| `templates/efcore.tpl.ts` | `AppDbContext` + `IEntityTypeConfiguration<T>` per aggregate. |
-| `templates/cqrs.tpl.ts` | Command + Query records, handler scaffolds. |
-| `templates/dto.tpl.ts` | Request + Response record headers (params come from `dto-mapping`). |
-| `templates/api.tpl.ts` | `[ApiController]` + `[Route]` controller per aggregate, plus `DomainExceptionFilter`. |
-| `templates/program.tpl.ts` | Hosting entry: DbContext, Mediator, Swashbuckle, CORS, camelCase JSON, `EnsureCreated`, `/health`. |
-| `templates/tests.tpl.ts` | xUnit project + per-aggregate test class. |
+| `emit/ids.ts` | `record struct OrderId(Guid Value)` + `New()`. |
+| `emit/enums-vos.ts` | C# enums + value-object records. |
+| `emit/events.ts` | `IDomainEvent` + per-event records. |
+| `emit/common.ts` | `DomainException`, `AggregateNotFoundException`, `IDomainEventDispatcher`, `NoopDomainEventDispatcher`. |
+| `emit/entity.ts` | Aggregate / part class shape. |
+| `emit/repository.ts` | Repository interface + EF-backed implementation. |
+| `emit/efcore.ts` | `AppDbContext` + `IEntityTypeConfiguration<T>` per aggregate. |
+| `emit/cqrs.ts` | Command + Query records, handler scaffolds. |
+| `emit/dto.ts` | Request + Response record headers (params come from `dto-mapping`). |
+| `emit/api.ts` | `[ApiController]` + `[Route]` controller per aggregate, plus `DomainExceptionFilter`. |
+| `emit/program.ts` | Hosting entry: DbContext, Mediator, Swashbuckle, CORS, camelCase JSON, `EnsureCreated`, `/health`. |
+| `emit/tests.ts` | xUnit project + per-aggregate test class. |
 | `dto-mapping.ts` | Wire ↔ domain conversion: `wireType`, `wireToCommandArgument`, `projectToResponse`, `projectEntityExpr`, `aggregateResponseParams`, `entityResponseParams`.  Walks `wireFieldsForAggregate` so the DTOs line up with every other backend. |
 | `cqrs-emit.ts` | Per-aggregate orchestration: emits Request / Response DTO files, Command + Handler per public op, Query + Handler per find, controller. |
 | `find-emit.ts` | Repository find-method bodies (LINQ predicate from convention or from a `where` filter). |
@@ -822,8 +819,8 @@ Rough recipe:
    statement / type).
 4. **Renderers** — extend `render-expr.ts` / `render-stmt.ts` for
    each backend that emits domain logic (TS, .NET).
-5. **Templates / builders** — add or extend the relevant
-   `templates/*.tpl.ts` files or `*-builder.ts` modules.
+5. **Emitters / builders** — add or extend the relevant `emit/*.ts`
+   (TS/.NET) or `*-emit.ts` (Phoenix) files, or `*-builder.ts` modules.
 6. **Orchestrator** — wire up new file emission in
    `generator/<backend>/index.ts` if a new file appears.
 7. **Tests** — at least one parsing test, one validator test
@@ -838,8 +835,8 @@ Rough recipe:
 Three precedents in tree:
 
 - `generator/typescript/` — Hono.  Procedural emitters for fixed
-  shapes (`templates/*.tpl.ts`); larger procedural builders
-  (`*-builder.ts`) where per-aggregate variation is high.
+  shapes (`emit/*.ts`); larger procedural builders (`*-builder.ts`)
+  where per-aggregate variation is high.
 - `generator/dotnet/` — .NET.  Same split as Hono; EF Core absorbs
   the per-aggregate diff at runtime so the repository builder is
   smaller than its Hono counterpart.
@@ -859,10 +856,10 @@ The shape:
    (`renderXxxStatements(stmts: StmtIR[]): string`), honouring
    `refKind` / `callKind` / `isCollectionOp` tags.  React skips
    these — the frontend doesn't run domain logic.
-4. Add procedural emitters in `templates/*.tpl.ts` and/or larger
-   `*-builder.ts` files using `src/util/code-builder.ts`'s `lines`
-   helper.  Rule of thumb: small, regularly-shaped emissions go in
-   `templates/`; per-aggregate complexity goes in builders.
+4. Add procedural emitters in `emit/*.ts` (or `*-emit.ts` on Phoenix)
+   and/or larger `*-builder.ts` files using `src/util/code-builder.ts`'s
+   `lines` helper.  Rule of thumb: small, regularly-shaped emissions
+   go in `emit/`; per-aggregate complexity goes in builders.
 5. If the backend serves a wire shape, read `agg.wireShape` /
    `part.wireShape` / `vo.wireShape` directly from the IR — they
    are populated by `enrichLoomModel` in `src/ir/enrichments.ts`,
