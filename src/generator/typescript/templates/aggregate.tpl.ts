@@ -65,6 +65,21 @@ export function renderAggregate(
   // without `auth: required` don't import this — and operations
   // can't reference currentUser there because the validator gates it.
   const usesUser = agg.operations.some(operationUsesCurrentUser);
+  // The errors-module imports are conditional on what the body emits
+  // (see render-stmt.ts and the invariant renderer below):
+  //   DomainError    — invariants (root + parts) and `precondition` statements
+  //   ForbiddenError — `requires` statements (RBAC preconditions)
+  // Keeps the import line free of dead names per Loom's "ok generated code" gate.
+  const usesDomain =
+    agg.invariants.length > 0 ||
+    agg.parts.some((p) => p.invariants.length > 0) ||
+    agg.operations.some((op) => op.statements.some((s) => s.kind === "precondition"));
+  const usesForbidden = agg.operations.some((op) =>
+    op.statements.some((s) => s.kind === "requires"),
+  );
+  const errorsImportList = [usesDomain && "DomainError", usesForbidden && "ForbiddenError"]
+    .filter(Boolean)
+    .join(", ");
 
   return (
     lines(
@@ -77,7 +92,7 @@ export function renderAggregate(
         ? `import { ${enumAliases.join(", ")} } from "./value-objects";`
         : null,
       'import type * as Events from "./events";',
-      'import { DomainError, ForbiddenError } from "./errors";',
+      errorsImportList ? `import { ${errorsImportList} } from "./errors";` : null,
       hasProv ? 'import { type ProvLineage } from "./provenance";' : null,
       hasDomainTrace ? 'import { requestLog } from "../obs/als";' : null,
       usesUser ? 'import type { User } from "../auth/user-types";' : null,
@@ -184,7 +199,13 @@ function renderEntity(e: EntityShape, emitProvenance = false, emitTrace = false)
   for (const c of e.contains) {
     ctorAssignments.push(`    this._${c.name} = state.${c.name};`);
   }
-  ctorAssignments.push("    this._assertInvariants();");
+  // Constructor runs invariants on hydration and on `create`; the op
+  // context isn't meaningful here, so trace-on passes the sentinel
+  // "<init>" so the invariant_evaluated lines for ctor runs are
+  // distinguishable from in-operation evaluations.
+  ctorAssignments.push(
+    emitTrace ? `    this._assertInvariants("<init>");` : "    this._assertInvariants();",
+  );
 
   const getters: string[] = [];
   getters.push(`  get id(): Ids.${e.name}Id { return this._id; }`);
@@ -221,7 +242,11 @@ function renderEntity(e: EntityShape, emitProvenance = false, emitTrace = false)
     }
     if (e.isRoot) {
       externMutators.push("  raiseEvent(ev: Events.DomainEvent): void { this._events.push(ev); }");
-      externMutators.push("  assertInvariants(): void { this._assertInvariants(); }");
+      externMutators.push(
+        emitTrace
+          ? `  assertInvariants(): void { this._assertInvariants("extern"); }`
+          : "  assertInvariants(): void { this._assertInvariants(); }",
+      );
     }
   }
 
@@ -262,16 +287,43 @@ function renderEntity(e: EntityShape, emitProvenance = false, emitTrace = false)
       op: op.name,
     });
     if (body.length > 0) ops.push(body);
-    ops.push("    this._assertInvariants();");
+    ops.push(
+      emitTrace ? `    this._assertInvariants("${op.name}");` : "    this._assertInvariants();",
+    );
     ops.push("  }");
     ops.push("");
   }
 
-  const invariants = e.invariants.map((inv) => {
-    const check = inv.guard
-      ? `if ((${renderTsExpr(inv.guard)}) && !(${renderTsExpr(inv.expr)}))`
-      : `if (!(${renderTsExpr(inv.expr)}))`;
-    return `    ${check} throw new DomainError(${JSON.stringify(`Invariant violated: ${inv.source}`)});`;
+  // When `--trace` is on, each invariant binds its boolean to a temp so
+  // both pass and fail outcomes log before the conditional throw fires
+  // off the same temp.  A guarded invariant logs only when its guard
+  // applies (so an inapplicable invariant doesn't pollute the stream).
+  // Op context comes from the implicit `__op` parameter on the trace-on
+  // signature of `_assertInvariants`.
+  const invariants = e.invariants.map((inv, i) => {
+    const exprSrc = JSON.stringify(`Invariant violated: ${inv.source}`);
+    if (!emitTrace) {
+      const check = inv.guard
+        ? `if ((${renderTsExpr(inv.guard)}) && !(${renderTsExpr(inv.expr)}))`
+        : `if (!(${renderTsExpr(inv.expr)}))`;
+      return `    ${check} throw new DomainError(${exprSrc});`;
+    }
+    const ok = `__inv_${i}_ok`;
+    const traceLine = `requestLog().trace({ event: "invariant_evaluated", aggregate: "${e.name}", op: __op, expr: ${JSON.stringify(inv.source)}, passed: ${ok} });`;
+    if (inv.guard) {
+      return [
+        `    if (${renderTsExpr(inv.guard)}) {`,
+        `      const ${ok} = (${renderTsExpr(inv.expr)});`,
+        `      ${traceLine}`,
+        `      if (!${ok}) throw new DomainError(${exprSrc});`,
+        `    }`,
+      ].join("\n");
+    }
+    return [
+      `    const ${ok} = (${renderTsExpr(inv.expr)});`,
+      `    ${traceLine}`,
+      `    if (!${ok}) throw new DomainError(${exprSrc});`,
+    ].join("\n");
   });
 
   const requiredFields = e.fields.filter((f) => !f.optional);
@@ -327,7 +379,13 @@ function renderEntity(e: EntityShape, emitProvenance = false, emitTrace = false)
     ...ops,
     ...provDrain,
     ...pullEvents,
-    "  private _assertInvariants(): void {",
+    // Under --trace, the helper takes an `__op` string param threaded by
+    // each call site (ctor → "<init>", per-op → op name, extern public
+    // wrapper → "extern") so the invariant_evaluated trace line carries
+    // op context.  Trace off: byte-identical no-arg signature.
+    emitTrace
+      ? "  private _assertInvariants(__op: string): void {"
+      : "  private _assertInvariants(): void {",
     ...invariants,
     "  }",
     "",

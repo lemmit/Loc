@@ -38,6 +38,20 @@ platform.  `generate system` works on sources that declare one or more
     docker-compose.yml     # at the system root
 ```
 
+### Multi-file projects
+
+`generate system` accepts an entry file (conventionally `main.ddd`)
+that may declare per-file `import "./path"` statements at the top.
+The CLI walks the import graph transitively, registers every
+reachable document with the Langium workspace, and produces a single
+project from the merged model.  See
+[`language.md`](language.md#multi-file-projects-import-and-root-level-shared-types)
+for the language surface; the design rationale is in
+[`multi-file-source.md`](multi-file-source.md).
+
+`generate ts` / `generate dotnet` remain single-file: they read just
+the file you point them at, no import-graph walking.
+
 Each deployable's folder name is a lowercase slug derived from the
 deployable's name (e.g. `catalogWeb` → `catalog_web`); inside the
 project the .NET namespace and `.csproj` keep the capitalised form.

@@ -58,6 +58,71 @@ system Acme {
 The two forms can coexist in one file but typically you'd use one or
 the other.
 
+### Multi-file projects: `import` and root-level shared types
+
+A project may be split across multiple `.ddd` files.  An entry file
+(conventionally `main.ddd`) declares per-file path-based imports; the
+project loader walks the import graph transitively from the entry
+file and treats every reachable document as one project.
+
+```ddd
+// main.ddd
+import "./shared/money.ddd"
+import "./orders.ddd"
+
+system Shop {
+    module Sales { context Orders { … } }
+    deployable api { platform: hono, modules: Sales }
+}
+```
+
+```ddd
+// shared/money.ddd — declared at model root, ambient across files.
+valueobject Money {
+    amount: decimal
+    currency: string
+}
+
+enum Currency { USD, EUR, GBP }
+```
+
+```ddd
+// orders.ddd
+context Orders {
+    aggregate Order {
+        total: Money            // root-level Money resolves here
+        currency: Currency
+    }
+}
+```
+
+Rules:
+
+- Imports are relative to the importing file (`"./other.ddd"` is
+  resolved against the directory containing the file with the
+  `import`).
+- The import graph defines the project.  Files nobody imports are not
+  part of the project (no autodiscovery).
+- **Only `valueobject` and `enum` may appear at the model root.**
+  They form an implicit shared kernel — visible from every context as
+  a type, regardless of which file defines them.
+- Aggregates, events, repositories, workflows, and views stay inside
+  a context, as before.
+- Cross-context aggregate references are **not** changed by this
+  feature.  Today's rule applies: `Id<X>` only resolves to an
+  aggregate in the same context.
+- Workspace-level uniqueness: root-level VO / enum names, system
+  names, and context names must each be unique across the whole
+  project.  A context-local VO / enum that shadows a root-level one
+  is a hard error.
+- `generate system <main.ddd>` is the multi-file-aware entry point.
+  Legacy `generate ts` / `generate dotnet` keep their single-file
+  semantics.
+
+See [`tools.md`](tools.md) for the CLI side and
+[`multi-file-source.md`](multi-file-source.md) for the design
+rationale.
+
 ### Inside a `system`
 
 | Form | Purpose |
@@ -132,6 +197,42 @@ The underlying value type defaults to `guid`; override per-aggregate:
 ```
 aggregate Order ids int { … }
 ```
+
+#### Reference collections — `Id<X>[]`
+
+A field typed as a collection of references to another aggregate is a
+**many-to-many** relation:
+
+```
+aggregate Trainer {
+  party:  Id<Pokemon>[]
+  caught: Id<Pokemon>[]
+}
+```
+
+No grammar keyword switches it on — any aggregate field whose type is
+`Id<X>[]` is a reference collection.  Semantically it is an ordered set
+of references: the same target appears at most once per owner, and the
+collection's order is preserved across a persistence round-trip.
+
+Mutate the collection from operations with `+=` / `-=`:
+
+```
+operation addToParty(pokemon: Id<Pokemon>) {
+  precondition party.count < 6
+  party += pokemon
+}
+```
+
+Membership is queryable from a repository `find ... where` (see
+[Repositories](#repositories) below).
+
+Reference collections are **not** the same as containment.
+`contains lines: OrderLine[]` declares entity parts that live and die
+with the parent — a child table joined on `parent_id`.  `Id<X>[]` is a
+list of references to a *different* aggregate that outlives any one
+owner — persisted as a separate join table when the backend supports
+it (see [`docs/generators.md`](generators.md)).
 
 ### Aggregate / entity-part members
 
@@ -264,7 +365,7 @@ When the receiver type is `T[]`:
 | `xs.where(x => expr)` | `T[]` | Filter. |
 | `xs.first` | `T` | First element (assumes non-empty). |
 | `xs.firstOrNull` | `T?` | First or `null`. |
-| `xs.contains(x)` | `bool` | Membership.  Renders to `Array.includes` (TS) / `Enumerable.Contains` (.NET). |
+| `xs.contains(x)` | `bool` | Membership.  Renders to `Array.includes` (TS) / `Enumerable.Contains` (.NET).  Also admitted in repository `where` clauses when `xs` is a `this`-rooted `Id<X>[]` reference collection — see [Repositories](#repositories). |
 
 ### Numeric widening
 
@@ -410,10 +511,22 @@ plus a Mediator query in the .NET backend.
 - **TypeScript**: when no `where` is given, parameters are equality-
   matched against aggregate columns and lowered to a Drizzle
   `where(eq(...))`.  When `where` is given, the IR expression is
-  rendered into a TODO-comment and the user implements the predicate
-  manually (Drizzle has no general lambda → SQL translator).
+  lowered to Drizzle operators (`eq`/`ne`/`lt`/`lte`/`gt`/`gte`/
+  `and`/`or`/`not`/`inArray`) over `this.<col>` and
+  `this.<vo>.<sub>` references, including the membership form
+  `this.<refColl>.contains(param)` against an `Id<X>[]` join table.
+  The queryable-subset validator rejects shapes that don't fit (e.g.
+  `.count`, `.any`, lambdas) with a clear diagnostic.
 - **.NET**: both forms lower to a LINQ `.Where(x => …)` predicate and
   pass through EF Core to SQL.
+
+A repository `where` clause may use `this.<refColl>.contains(param)` to
+query membership over an `Id<X>[]` reference collection — for example,
+`find holdingInParty(pokemon: Id<Pokemon>): Trainer[] where
+this.party.contains(pokemon)`.  The TypeScript backend lowers this to
+an `inArray(...subquery...)` against the field's join table; other
+collection operations (`.count`, `.any`, `.where`, …) remain rejected
+by the queryable-subset validator.
 
 `findById` and `getById` are auto-generated for every aggregate
 (no need to declare them in the repository).  An auto-included

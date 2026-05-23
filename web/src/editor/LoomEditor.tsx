@@ -4,7 +4,26 @@ import * as monaco from "monaco-editor";
 import type { LoomLspClient } from "../lsp/client";
 import type { Diagnostic } from "../lsp/protocol";
 
-const MODEL_URI = monaco.Uri.parse("inmemory:///main.ddd");
+const DEFAULT_ACTIVE_PATH = "/workspace/main.ddd";
+
+/** Map a workspace path (e.g. `/workspace/main.ddd`) to a stable
+ *  Monaco model URI.  Phase 2b1 of the multi-file work parameterises
+ *  this so Phase 2b2 can swap models when the editor's active file
+ *  changes.  The default-path branch preserves the legacy
+ *  `inmemory:///main.ddd` URI string byte-for-byte — any tooling
+ *  that already opened a model under that URI (LSP document
+ *  tracking, the live model created on first mount) keeps matching
+ *  the same model identity across re-renders. */
+function modelUriFor(activePath: string): monaco.Uri {
+  if (activePath === DEFAULT_ACTIVE_PATH) {
+    return monaco.Uri.parse("inmemory:///main.ddd");
+  }
+  // Non-default path: derive a unique URI from the workspace path so
+  // two distinct files get two distinct Monaco models.  Strip leading
+  // slashes so the URI is `inmemory:///workspace/orders.ddd` not
+  // `inmemory:////workspace/orders.ddd`.
+  return monaco.Uri.parse(`inmemory:///${activePath.replace(/^\/+/, "")}`);
+}
 
 function markersToDiagnostics(markers: monaco.editor.IMarker[]): Diagnostic[] {
   return markers.map((m) => ({
@@ -39,6 +58,11 @@ export interface LoomEditorProps {
   isMobile?: boolean;
   onChange?: (value: string) => void;
   onDiagnosticsChange?: (items: Diagnostic[]) => void;
+  /** The workspace path of the file currently being edited.  Drives
+   *  the Monaco model URI so Phase 2b2 can swap files without
+   *  tearing the editor down.  Defaults to `/workspace/main.ddd`
+   *  (today's behaviour, byte-identical Monaco URI). */
+  activePath?: string;
 }
 
 export function LoomEditor(props: LoomEditorProps): JSX.Element {
@@ -53,6 +77,9 @@ export function LoomEditor(props: LoomEditorProps): JSX.Element {
   const handleRef = useRef(props.handleRef);
   handleRef.current = props.handleRef;
   const isMobileRef = useRef(props.isMobile ?? false);
+  // Frozen-at-mount activePath — Phase 2b1 keeps it constant; Phase
+  // 2b2 will lift this to a state-driven model swap.
+  const activePathRef = useRef(props.activePath ?? DEFAULT_ACTIVE_PATH);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
 
   useEffect(() => {
@@ -76,9 +103,10 @@ export function LoomEditor(props: LoomEditorProps): JSX.Element {
 
     // Reuse the model across remounts so the LSP document stays attached;
     // refresh its content to the (possibly new) example source.
+    const modelUri = modelUriFor(activePathRef.current);
     const model =
-      monaco.editor.getModel(MODEL_URI) ??
-      monaco.editor.createModel(initialValueRef.current, "ddd", MODEL_URI);
+      monaco.editor.getModel(modelUri) ??
+      monaco.editor.createModel(initialValueRef.current, "ddd", modelUri);
     if (model.getValue() !== initialValueRef.current) model.setValue(initialValueRef.current);
 
     const editor = monaco.editor.create(containerRef.current, {
@@ -131,11 +159,11 @@ export function LoomEditor(props: LoomEditorProps): JSX.Element {
 
     const emitDiagnostics = (): void => {
       onDiagnosticsRef.current?.(
-        markersToDiagnostics(monaco.editor.getModelMarkers({ resource: MODEL_URI })),
+        markersToDiagnostics(monaco.editor.getModelMarkers({ resource: modelUri })),
       );
     };
     const markerSub = monaco.editor.onDidChangeMarkers((resources) => {
-      if (resources.some((r) => r.toString() === MODEL_URI.toString())) emitDiagnostics();
+      if (resources.some((r) => r.toString() === modelUri.toString())) emitDiagnostics();
     });
     emitDiagnostics();
 

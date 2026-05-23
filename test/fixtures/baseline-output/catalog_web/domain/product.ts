@@ -2,7 +2,7 @@
 import * as Ids from "./ids";
 import { Money } from "./value-objects";
 import type * as Events from "./events";
-import { DomainError, ForbiddenError } from "./errors";
+import { DomainError } from "./errors";
 
 
 export class Product {

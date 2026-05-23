@@ -1,10 +1,21 @@
 grammar Ddd
 
 entry Model:
+    imports+=ImportStmt*
     members+=ModelMember*;
 
+// Multi-file source — import another .ddd file relative to the file
+// containing this statement.  The CLI's project loader walks the
+// import graph transitively from the entry file (main.ddd) and
+// registers every reachable document with Langium's workspace; the
+// rest of the pipeline sees the merged model.  Imports are about
+// file loading, not visibility: every reachable document's symbols
+// share the same global scope.  See docs/multi-file-source.md.
+ImportStmt:
+    'import' path=STRING ';'?;
+
 ModelMember:
-    System | BoundedContext | Requirement | Solution | TestCase;
+    System | BoundedContext | ValueObject | EnumDecl | Requirement | Solution | TestCase;
 
 // ---------------------------------------------------------------------------
 // System / Module / Deployable — the deployment shape.
@@ -608,7 +619,15 @@ BindEntry:
 // ---------------------------------------------------------------------------
 
 Property:
-    name=ID ':' type=TypeRef (display?='display')? (provenanced?='provenanced')? ('check' check=Expression)?;
+    name=ID ':' type=TypeRef (display?='display')? (provenanced?='provenanced')? sensitivity=SensitivityClause? ('check' check=Expression)?;
+
+// Information-flow sensitivity tag(s) on a property.  Tags are bare
+// identifiers, opaque to the compiler — `pii`, `phi`, `cred` are
+// conventional choices but any identifier is accepted.  Multiple tags
+// (`sensitive(pii, audited)`) declare the value carries every listed
+// classification simultaneously.  See `docs/proposals/sensitivity-and-compliance.md`.
+SensitivityClause:
+    'sensitive' '(' tags+=ID (',' tags+=ID)* ')';
 
 Containment:
     'contains' name=ID ':' partType=[EntityPart:ID] (collection?='[]')?;

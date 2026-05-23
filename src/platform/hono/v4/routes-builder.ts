@@ -42,6 +42,7 @@ export function buildRoutesFile(
   ctx: BoundedContextIR,
   emitAudit = false,
   emitProvenance = false,
+  emitTrace = false,
 ): string {
   // An audited public operation instruments its route handler with a
   // `recordAudit(...)` call; the SDK file (`domain/audit.ts`) is only
@@ -76,7 +77,7 @@ export function buildRoutesFile(
   lines.push(`import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";`);
   lines.push(`import { ${agg.name} } from "../domain/${lowerFirst(agg.name)}";`);
   lines.push(
-    `import { ${agg.name}Repository } from "../db/repositories/${lowerFirst(agg.name)}-repository";`,
+    `import type { ${agg.name}Repository } from "../db/repositories/${lowerFirst(agg.name)}-repository";`,
   );
   lines.push(`import * as Ids from "../domain/ids";`);
   lines.push(
@@ -164,6 +165,10 @@ export function buildRoutesFile(
 
   if (repo) {
     for (const find of repo.finds) {
+      // Only emit a Query schema when the find takes parameters — the route
+      // (route emitter, ~line 475) is gated the same way, so an empty
+      // `<Find>Query = z.object({})` would be dead code.
+      if (find.params.length === 0) continue;
       lines.push(`const ${upperFirst(find.name)}Query = z.object({`);
       for (const p of find.params) {
         lines.push(`  ${p.name}: ${zodFor(p.type)},`);
@@ -278,9 +283,14 @@ export function buildRoutesFile(
   // Operations.
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
     lines.push(
-      ...emitOperationRoute(agg, op, ctx, auditOps.includes(op), provOps.includes(op)).map(
-        (l) => `  ${l}`,
-      ),
+      ...emitOperationRoute(
+        agg,
+        op,
+        ctx,
+        auditOps.includes(op),
+        provOps.includes(op),
+        emitTrace,
+      ).map((l) => `  ${l}`),
     );
     lines.push("");
   }
@@ -355,6 +365,7 @@ function emitOperationRoute(
   ctx: BoundedContextIR,
   audit: boolean,
   prov: boolean,
+  emitTrace: boolean,
 ): string[] {
   const aggSlug = snake(plural(agg.name));
   const opSnake = snake(op.name);
@@ -378,6 +389,14 @@ function emitOperationRoute(
   out.push(`  async (c) => {`);
   out.push(`    const { id } = c.req.valid("param");`);
   out.push(`    const body = c.req.valid("json");`);
+  if (emitTrace) {
+    // wire_in (trace) — the validated body's structural shape (keys only;
+    // values aren't logged here to avoid leaking PII in dev streams).
+    // Object.keys is safe because Zod always parses to a plain object.
+    out.push(
+      `    ${renderHonoLogCall("wireIn", "keys: Object.keys(body as Record<string, unknown>)")}`,
+    );
+  }
   // Business-narrative line — what the system was asked to do, before
   // any mutation runs.  Pairs with the audit row / provenance flush
   // emitted later when the op is audited / provenanced.

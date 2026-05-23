@@ -327,13 +327,13 @@ mutator without re-walking the env.
 
 ---
 
-## Layer ④ — IR enrichment (wire-shape, auto-finds, react inheritance)
+## Layer ④ — IR enrichment (wire-shape, auto-finds, associations, react inheritance)
 
 **File**: `src/ir/enrichments.ts`.
 
 After lowering returns a faithful AST projection, `enrichLoomModel(loom)`
 runs a single pure pass that populates everything cross-cutting
-the IR consumers need.  Three derivations, in order:
+the IR consumers need.  Four derivations, in order:
 
 1. **Wire-shape on every aggregate / part / value object.**  The
    canonical, ordered list of fields that appear on the wire for
@@ -366,7 +366,31 @@ the IR consumers need.  Three derivations, in order:
    can rely on every aggregate having an `all()` find without
    defensive checks.
 
-3. **React deployable `moduleNames` ← target deployable's
+3. **Associations on every aggregate.**  One `AssociationIR` per
+   field whose type is a reference collection (`Id<X>[]`), carrying
+   the platform-neutral join-table metadata that relational backends
+   consume:
+
+   ```ts
+   interface AssociationIR {
+     fieldName: string;        // "party"
+     ownerAgg: string;         // "Trainer"
+     targetAgg: string;        // "Pokemon"
+     valueType: IdValueType;   // matches the target's id value type
+     joinTable: string;        // "trainer_party"
+     ownerFk: string;          // "trainer_id"
+     targetFk: string;         // "pokemon_id"
+   }
+   ```
+
+   `joinTable` is `snake(owner)_snake(field)` (distinct per field,
+   even when several fields target the same aggregate); FK names are
+   `snake(agg)_id` and disambiguate to `owner_id` / `target_id` for
+   the self-referential case.  Attached as `agg.associations`.  The
+   TS/Hono schema and repository emitters read this; .NET / Phoenix
+   emitters could too without re-deriving.
+
+4. **React deployable `moduleNames` ← target deployable's
    modules.**  A `react` deployable doesn't list modules; it
    inherits its target backend's module set, propagated here so
    downstream layers see the resolved set.

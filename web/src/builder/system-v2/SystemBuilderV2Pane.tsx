@@ -1,53 +1,591 @@
-// Model builder v2 — Phase 0 (wiring check).
+// Model builder v2 — Phase 1 (drill-down backbone, read-only).
 //
-// A standalone pane next to v1, behind its own tab in both shells. This
-// placeholder confirms the tab + source flow are wired; the real v2 is built
-// up phase-by-phase per docs/builder-roadmap.md (drill-down through system →
-// module → context → aggregate → operation, with operations rendered as a
-// React Flow of statement nodes). v1 stays untouched and shippable.
+// The canvas IS the navigator. Each level shows the children of the current
+// node; a breadcrumb up top tracks the path; clicking a drillable node pushes
+// a step. v1 is unchanged and still ships in the "Model" tab.
 
-import { Box, Stack, Text, Title } from "@mantine/core";
-import { AstUtils } from "langium";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState, Fragment, type ReactNode } from "react";
+import { Box, Button, Group, Text } from "@mantine/core";
+import {
+  Background,
+  Controls,
+  ReactFlow,
+  ReactFlowProvider,
+  useEdgesState,
+  useNodesInitialized,
+  useNodesState,
+  useReactFlow,
+  type Connection,
+  type Edge,
+  type Node,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
 import type { LayoutCtx } from "../../layout/ctx";
 import { parseDdd } from "../parse";
+import {
+  addStatement,
+  deleteStatement,
+  editStatement,
+  listStatementViews,
+  moveStatement,
+  type BodyLocator,
+  type StmtView,
+} from "../system/body";
+import { setEmitEvent } from "../system/emit-event";
+import { deleteField, listFields } from "../system/fields";
+import { seedExpr } from "../system/expr-model";
+import {
+  editExprSlot,
+  exprHints,
+  slotCandidates,
+  slotExpr,
+  type ExprSlot,
+} from "../system/expr-slots";
+import { ExprSlotEditor, type ExprMode } from "../system/ExpressionEditor";
+import { AstUtils, type AstNode } from "langium";
+import { spliceNode } from "../edit-engine";
+import { IDENTIFIER, renameMember } from "../system/rename";
+import AddPalette from "./AddPalette";
+import ConstructNode, { type ConstructNodeData } from "./ConstructNode";
+import { renameByAstType } from "./rename-extra";
+import {
+  apiNames,
+  deployableModules,
+  deployableServes,
+  moduleNames,
+  setDeployableModules,
+  setDeployableServes,
+} from "../system/deployable-bindings";
+import {
+  isRebindableDeployableEdge,
+  rebindDeployableEdgeTarget,
+} from "./deployable-edge-rebind";
+import StmtNode, { type StmtNodeData } from "./StmtNode";
+import { buildViewGraph, findAggregate, type ViewGraph, type ViewKind, type ViewPath } from "./view-graph";
 
-const TOP_LEVEL_KINDS = [
-  "System",
-  "Module",
-  "BoundedContext",
-  "Aggregate",
-  "ValueObject",
-  "EventDecl",
-  "Workflow",
-  "Deployable",
-] as const;
+const KIND_COLOR: Record<ViewKind, string> = {
+  system: "var(--mantine-color-indigo-8)",
+  module: "var(--mantine-color-blue-7)",
+  context: "var(--mantine-color-cyan-8)",
+  aggregate: "var(--mantine-color-teal-7)",
+  operation: "var(--mantine-color-orange-8)",
+  workflow: "var(--mantine-color-orange-8)",
+  valueobject: "var(--mantine-color-cyan-7)",
+  event: "var(--mantine-color-grape-7)",
+  repository: "var(--mantine-color-indigo-7)",
+  find: "var(--mantine-color-indigo-8)",
+  invariant: "var(--mantine-color-yellow-8)",
+  view: "var(--mantine-color-lime-8)",
+  function: "var(--mantine-color-yellow-8)",
+  field: "var(--mantine-color-gray-7)",
+  containment: "var(--mantine-color-teal-8)",
+  api: "var(--mantine-color-pink-7)",
+  storage: "var(--mantine-color-gray-7)",
+  ui: "var(--mantine-color-violet-7)",
+  deployable: "var(--mantine-color-red-8)",
+  // `stmt` is rendered by a custom React Flow node, not styled here; the value
+  // is a placeholder to satisfy the kind union.
+  stmt: "transparent",
+};
+
+function toRfNodes(
+  g: ViewGraph,
+  stmtData: Map<string, Record<string, unknown>>,
+  constructData: Map<string, ConstructNodeData>,
+): Node[] {
+  return g.nodes.map((n) => {
+    if (n.kind === "stmt") {
+      return {
+        id: n.id,
+        type: "stmt",
+        position: { x: n.x, y: n.y },
+        data: stmtData.get(n.id) ?? ({} as Record<string, unknown>),
+        draggable: false,
+        selectable: false,
+      } satisfies Node;
+    }
+    const cdata = constructData.get(n.id);
+    if (cdata) {
+      return {
+        id: n.id,
+        type: "construct",
+        position: { x: n.x, y: n.y },
+        data: cdata as unknown as Record<string, unknown>,
+        draggable: false,
+        selectable: false,
+      } satisfies Node;
+    }
+    // Fallback (shouldn't fire — every non-stmt node should get construct data
+    // — kept for safety).
+    return {
+      id: n.id,
+      position: { x: n.x, y: n.y },
+      data: { label: `${n.kind}\n${n.name}` },
+      style: {
+        background: KIND_COLOR[n.kind],
+        color: "white",
+        border: "1px solid rgba(255,255,255,0.25)",
+        borderRadius: 6,
+        fontSize: 11,
+        width: 160,
+        whiteSpace: "pre-line" as const,
+        textAlign: "center" as const,
+      },
+    };
+  });
+}
+
+const NODE_TYPES = { stmt: StmtNode, construct: ConstructNode } as const;
+
+// ViewKind → AST `$type`. Drives both the on-node delete (splice the matching
+// AST node out of source) and the on-node rename (rewrite the declared name +
+// every reference via Langium's NameProvider). Field and containment aren't
+// here yet — they need v1's `renameMember` (text-token resolver, not a
+// cross-ref). Stmt / root aren't constructs.
+const AST_TYPE_BY_VIEW: Partial<Record<ViewKind, string>> = {
+  system: "System",
+  module: "Module",
+  context: "BoundedContext",
+  aggregate: "Aggregate",
+  operation: "Operation",
+  function: "FunctionDecl",
+  workflow: "Workflow",
+  valueobject: "ValueObject",
+  event: "EventDecl",
+  repository: "Repository",
+  find: "FindDecl",
+  view: "View",
+  api: "Api",
+  storage: "Storage",
+  ui: "Ui",
+  deployable: "Deployable",
+};
+
+/** Derive the `BodyLocator` for the operation / workflow currently in focus
+ *  (the last step of the path), or null otherwise. Operation needs the
+ *  containing aggregate step immediately above it. */
+function leafBodyLocator(path: ViewPath): BodyLocator | null {
+  const last = path[path.length - 1];
+  if (!last) return null;
+  if (last.kind === "workflow") return { kind: "workflow", name: last.name };
+  if (last.kind === "operation") {
+    const agg = path[path.length - 2];
+    if (agg?.kind !== "aggregate") return null;
+    return { kind: "operation", aggregate: agg.name, op: last.name };
+  }
+  return null;
+}
+
+function toRfEdges(g: ViewGraph): Edge[] {
+  return g.edges.map((e) => {
+    const reconnectable: "target" | false = isRebindableDeployableEdge(e.label ?? "") ? "target" : false;
+    return {
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      label: e.label,
+      reconnectable,
+      labelStyle: { fontSize: 9, fill: "var(--mantine-color-dimmed)" },
+      style: { stroke: "var(--mantine-color-dark-2)" },
+    };
+  });
+}
+
+function Breadcrumb({ path, onJump }: { path: ViewPath; onJump: (depth: number) => void }): JSX.Element {
+  return (
+    <Group
+      gap={4}
+      px={8}
+      py={4}
+      bg="dark.7"
+      wrap="wrap"
+      style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}
+      data-testid="c4system-v2-breadcrumb"
+    >
+      <Button
+        size="compact-xs"
+        variant="subtle"
+        data-testid="c4system-v2-crumb-home"
+        onClick={() => onJump(0)}
+      >
+        Model
+      </Button>
+      {path.map((step, i) => (
+        <Fragment key={`${step.kind}:${step.name}:${i}`}>
+          <Text size="xs" c="dimmed">›</Text>
+          <Button
+            size="compact-xs"
+            variant={i === path.length - 1 ? "light" : "subtle"}
+            data-testid={`c4system-v2-crumb-${i}`}
+            onClick={() => onJump(i + 1)}
+          >
+            <Text size="xs" c="dimmed" mr={4}>{step.kind}</Text>
+            {step.name}
+          </Button>
+        </Fragment>
+      ))}
+    </Group>
+  );
+}
+
+function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
+  const [path, setPath] = useState<ViewPath>([]);
+  const [rev, setRev] = useState(0);
+  // Narrow the per-node widths on a phone-width canvas (< 768px → compact),
+  // so StmtNode + the deployable's multi-select panel don't blow past the
+  // edge of the small canvas.
+  const compact = !ctx.isDesktop;
+  // Inline-structured-editor open row, scoped per body locator + statement
+  // index (+ optional field index for emit fields / call args). Mirrors v1.
+  const [structuredKey, setStructuredKey] = useState<string | null>(null);
+  const [exprMode, setExprMode] = useState<ExprMode>("structured");
+  // Re-parse after every commit by depending on `rev` (`apply` bumps it).
+  const parsed = useMemo(() => parseDdd(ctx.getSource()), [ctx, rev]);
+  const graph = useMemo(() => buildViewGraph(parsed.ast, path), [parsed, path]);
+
+  /** Single choke-point for source edits — bump `rev` so the next render
+   *  re-parses, re-builds the view-graph and re-binds the per-stmt data. */
+  const apply = (next: string): void => {
+    ctx.onSourceChange(next, "builder");
+    setRev((r) => r + 1);
+  };
+
+  // When the path's leaf is an operation / workflow, materialise its statement
+  // views + per-statement editor handlers and pass them through the stmt node's
+  // `data`. The pure view-graph already laid out the column; here we layer in
+  // editing.
+  const leafLoc = useMemo(() => leafBodyLocator(path), [path]);
+  useEffect(() => {
+    // Switching to a different operation / workflow / non-leaf collapses any
+    // inline `ƒx` editor that was open in the previous body.
+    setStructuredKey(null);
+  }, [leafLoc]);
+
+  const stmtData = useMemo(() => {
+    const m = new Map<string, Record<string, unknown>>();
+    if (!leafLoc) return m;
+    const views = listStatementViews(parsed.ast, leafLoc) ?? [];
+    // Aggregate field names for the assignment-target Autocomplete; only
+    // meaningful in an operation body, empty for workflows.
+    const targets: string[] =
+      leafLoc.kind === "operation"
+        ? ((): string[] => {
+            const agg = findAggregate(parsed.ast, leafLoc.aggregate);
+            return agg ? listFields(agg).map((f) => f.name) : [];
+          })()
+        : [];
+
+    const base = leafLoc.kind === "operation" ? `${leafLoc.aggregate}.${leafLoc.op}` : leafLoc.name;
+    const keyFor = (index: number, field?: number): string => `${base}:${index}:${field ?? ""}`;
+    const slotFor = (index: number, field?: number): ExprSlot =>
+      leafLoc.kind === "operation"
+        ? {
+            kind: "stmtExpr",
+            owner: leafLoc.aggregate,
+            op: leafLoc.op,
+            index,
+            ...(field !== undefined ? { field } : {}),
+          }
+        : {
+            kind: "wfStmt",
+            owner: leafLoc.name,
+            index,
+            ...(field !== undefined ? { field } : {}),
+          };
+    const renderEditor = (index: number, field?: number): ReactNode => {
+      if (structuredKey !== keyFor(index, field)) return null;
+      const slot = slotFor(index, field);
+      const expr = slotExpr(parsed.ast, slot);
+      if (!expr) return null;
+      return (
+        <ExprSlotEditor
+          key={`${keyFor(index, field)}:${rev}`}
+          seed={seedExpr(expr)}
+          seedText={expr.$cstNode?.text ?? ""}
+          candidates={slotCandidates(parsed.ast, slot)}
+          loadHints={() => exprHints(ctx.getSource(), slot)}
+          mode={exprMode}
+          onMode={setExprMode}
+          onCommit={(text) => {
+            const next = editExprSlot(ctx.getSource(), slot, text);
+            if (next == null) return false;
+            apply(next);
+            return true;
+          }}
+        />
+      );
+    };
+    const toggle = (index: number, field?: number): void => {
+      const k = keyFor(index, field);
+      setStructuredKey((cur) => (cur === k ? null : k));
+    };
+
+    // All declared events in the model — candidates for the emit-row Select.
+    const events: string[] = [];
+    for (const n of AstUtils.streamAst(parsed.ast)) {
+      if (n.$type === "EventDecl") events.push((n as unknown as { name: string }).name);
+    }
+
+    views.forEach((view, i) => {
+      const data: StmtNodeData = {
+        view,
+        compact,
+        targets,
+        headCandidates: slotCandidates(parsed.ast, slotFor(i)),
+        onCommit: (text) => {
+          const next = editStatement(ctx.getSource(), leafLoc, i, text);
+          if (next == null) return false;
+          apply(next);
+          return true;
+        },
+        valueEditor: renderEditor(i),
+        onToggleEditor: () => toggle(i),
+        renderArgEditor: (a) => renderEditor(i, a),
+        onToggleArg: (a) => toggle(i, a),
+        renderFieldEditor: (f) => renderEditor(i, f),
+        onToggleField: (f) => toggle(i, f),
+        events,
+        onRepointEvent:
+          view.kind === "emit"
+            ? (eventName: string) => {
+                const next = setEmitEvent(
+                  ctx.getSource(),
+                  leafLoc.kind === "operation" ? "aggregate" : "workflow",
+                  leafLoc.kind === "operation" ? leafLoc.aggregate : leafLoc.name,
+                  leafLoc.kind === "operation" ? leafLoc.op : undefined,
+                  i,
+                  eventName,
+                );
+                if (next != null) apply(next);
+              }
+            : undefined,
+      };
+      m.set(`stmt:${i}`, data as unknown as Record<string, unknown>);
+    });
+    return m;
+    // `ctx` covers getSource changes (parent re-renders create a fresh ctx).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [parsed, leafLoc, structuredKey, exprMode, rev, compact]);
+
+  /** Per-construct rename + delete handlers, keyed by the node id. Only
+   *  populated for ViewKinds that map to v1's NodeKind (the ones
+   *  `renameConstruct` and `spliceNode` cover); other nodes render as
+   *  read-only constructs without action buttons. */
+  const constructData = useMemo(() => {
+    const m = new Map<string, ConstructNodeData>();
+    const aggOwner = path[path.length - 1];
+    for (const n of graph.nodes) {
+      if (n.kind === "stmt") continue;
+
+      // Invariants are unnamed, so view-graph keys them by index. Delete
+      // requires finding the right Invariant member by index in the aggregate.
+      if (n.kind === "invariant" && aggOwner?.kind === "aggregate") {
+        const aggName = aggOwner.name;
+        const idx = Number(n.id.slice("invariant:".length));
+        const onDelete = (): void => {
+          const agg = findAggregate(parsed.ast, aggName);
+          if (!agg) return;
+          let i = 0;
+          for (const member of agg.members) {
+            if (member.$type === "Invariant") {
+              if (i === idx) {
+                apply(spliceNode(ctx.getSource(), member, ""));
+                return;
+              }
+              i++;
+            }
+          }
+        };
+        m.set(n.id, {
+          kind: n.kind,
+          name: n.name,
+          color: KIND_COLOR[n.kind],
+          drillable: n.drillable,
+          onDelete,
+          compact,
+        });
+        continue;
+      }
+
+      // Aggregate field / containment names are plain text tokens in
+      // expressions (`this.field`, `x.field`, view binds, find filters), not
+      // Langium cross-refs — so they need v1's `renameMember` resolver.
+      // Delete uses `deleteField` (preserves comma / whitespace layout).
+      if ((n.kind === "field" || n.kind === "containment") && aggOwner?.kind === "aggregate") {
+        const aggName = aggOwner.name;
+        const onRename = (next: string): void => {
+          if (!IDENTIFIER.test(next) || next === n.name) return;
+          void renameMember(ctx.getSource(), "aggregate", aggName, n.name, next).then((result) => {
+            if (result != null) apply(result);
+          });
+        };
+        const onDelete =
+          n.kind === "field"
+            ? () => {
+                const agg = findAggregate(parsed.ast, aggName);
+                if (!agg) return;
+                const idx = listFields(agg).findIndex((f) => f.name === n.name);
+                if (idx < 0) return;
+                const next = deleteField(ctx.getSource(), "aggregate", aggName, idx);
+                if (next != null) apply(next);
+              }
+            : undefined;
+        m.set(n.id, {
+          kind: n.kind,
+          name: n.name,
+          color: KIND_COLOR[n.kind],
+          drillable: n.drillable,
+          onRename,
+          onDelete,
+          compact,
+        });
+        continue;
+      }
+
+      const astType = AST_TYPE_BY_VIEW[n.kind];
+      const onRename =
+        astType != null
+          ? (next: string) => {
+              if (!IDENTIFIER.test(next) || next === n.name) return;
+              void renameByAstType(ctx.getSource(), astType, n.name, next).then((result) => {
+                if (result != null) apply(result);
+              });
+            }
+          : undefined;
+      const onDelete =
+        astType != null
+          ? () => {
+              for (const ast of AstUtils.streamAst(parsed.ast)) {
+                if (ast.$type === astType && (ast as { name?: string }).name === n.name) {
+                  apply(spliceNode(ctx.getSource(), ast, ""));
+                  return;
+                }
+              }
+            }
+          : undefined;
+
+      // For deployable nodes, inline multi-selects for the multi-valued
+      // bindings (modules / serves). Single-valued targets / ui are handled by
+      // drag-rebind on the edges (Phase 4d).
+      let multiSelects: ConstructNodeData["multiSelects"];
+      if (n.kind === "deployable") {
+        let dep: AstNode | undefined;
+        for (const node of AstUtils.streamAst(parsed.ast)) {
+          if (node.$type === "Deployable" && (node as { name?: string }).name === n.name) {
+            dep = node;
+            break;
+          }
+        }
+        if (dep) {
+          const depName = n.name;
+          multiSelects = [
+            {
+              label: "modules",
+              data: moduleNames(parsed.ast),
+              value: deployableModules(dep),
+              onChange: (v) => {
+                const next = setDeployableModules(ctx.getSource(), depName, v);
+                if (next != null) apply(next);
+              },
+              testid: "c4system-v2-deployable-modules",
+            },
+            {
+              label: "serves",
+              data: apiNames(parsed.ast),
+              value: deployableServes(dep),
+              onChange: (v) => {
+                const next = setDeployableServes(ctx.getSource(), depName, v);
+                if (next != null) apply(next);
+              },
+              testid: "c4system-v2-deployable-serves",
+            },
+          ];
+        }
+      }
+
+      m.set(n.id, {
+        kind: n.kind,
+        name: n.name,
+        color: KIND_COLOR[n.kind],
+        drillable: n.drillable,
+        onRename,
+        onDelete,
+        multiSelects,
+        compact,
+      });
+    }
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graph, parsed, path, rev, compact]);
+
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(toRfNodes(graph, stmtData, constructData));
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(toRfEdges(graph));
+  useEffect(() => {
+    setNodes(toRfNodes(graph, stmtData, constructData));
+    setEdges(toRfEdges(graph));
+  }, [graph, stmtData, constructData, setNodes, setEdges]);
+
+  const rf = useReactFlow();
+  const nodesInitialized = useNodesInitialized();
+  useEffect(() => {
+    if (nodesInitialized && graph.nodes.length > 0) void rf.fitView({ padding: 0.2 });
+  }, [nodesInitialized, graph, rf]);
+
+  const drill = (id: string): void => {
+    const v = graph.nodes.find((x) => x.id === id);
+    if (!v?.drillable) return;
+    setPath((p) => [...p, { kind: v.kind, name: v.name }]);
+  };
+
+  /** Repoint a deployable's `targets` / `ui` binding by dragging the edge's
+   *  target endpoint to another node. Owner stays fixed; an incompatible drop
+   *  or unparseable rewrite leaves the source untouched. */
+  const onReconnect = (oldEdge: Edge, conn: Connection): void => {
+    if (!conn.target || conn.source !== oldEdge.source) return;
+    const label = typeof oldEdge.label === "string" ? oldEdge.label : "";
+    const next = rebindDeployableEdgeTarget(ctx.getSource(), label, oldEdge.source, conn.target);
+    if (next != null) apply(next);
+  };
+
+  return (
+    <Box style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <Breadcrumb path={path} onJump={(d) => setPath((p) => p.slice(0, d))} />
+      <AddPalette path={path} source={ctx.getSource()} onChange={apply} />
+      <Box style={{ flex: 1, position: "relative", minHeight: 0 }} data-testid="c4system-v2-pane">
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={NODE_TYPES}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onReconnect={onReconnect}
+          onNodeClick={(_, n) => drill(n.id)}
+          fitView
+          minZoom={0.1}
+          proOptions={{ hideAttribution: true }}
+        >
+          <Background />
+          <Controls />
+        </ReactFlow>
+        {graph.nodes.length === 0 && (
+          <Text
+            size="xs"
+            c="dimmed"
+            style={{ position: "absolute", top: 12, left: 12, zIndex: 5 }}
+            data-testid="c4system-v2-empty"
+          >
+            Nothing to show at {graph.title}. Use the breadcrumb to go back.
+          </Text>
+        )}
+      </Box>
+    </Box>
+  );
+}
 
 export default function SystemBuilderV2Pane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
-  const parsed = useMemo(() => parseDdd(ctx.getSource()), [ctx]);
-  const counts = useMemo(() => {
-    const c: Record<string, number> = {};
-    for (const n of AstUtils.streamAst(parsed.ast)) c[n.$type] = (c[n.$type] ?? 0) + 1;
-    return c;
-  }, [parsed]);
   return (
-    <Box style={{ flex: 1, padding: 16, overflow: "auto" }} data-testid="c4system-v2-pane">
-      <Stack gap="xs">
-        <Title order={4}>Model v2 — preview</Title>
-        <Text size="sm" c="dimmed">
-          Phase 0 — wiring check. The visual designer is being rebuilt as a drill-down
-          React Flow (system → module → context → aggregate → operation). v1 still lives
-          in the "Model" tab while v2 is built phase by phase.
-        </Text>
-        <Text size="xs" c="dimmed" mt="md">Top-level constructs in the current source:</Text>
-        <Stack gap={2} style={{ fontFamily: "monospace", fontSize: 12 }}>
-          {TOP_LEVEL_KINDS.map((k) => (
-            <Text key={k} size="xs" data-testid={`c4system-v2-count-${k}`}>
-              {k}: {counts[k] ?? 0}
-            </Text>
-          ))}
-        </Stack>
-      </Stack>
-    </Box>
+    <ReactFlowProvider>
+      <Inner ctx={ctx} />
+    </ReactFlowProvider>
   );
 }

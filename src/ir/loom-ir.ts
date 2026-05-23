@@ -28,14 +28,21 @@ export type IdValueType = "guid" | "int" | "long" | "string";
 
 export type PrimitiveName = "int" | "long" | "decimal" | "string" | "bool" | "datetime" | "guid";
 
+/** Information-flow sensitivity tags carried by a value's type.  See
+ * `docs/proposals/sensitivity-and-compliance.md`.  Mirror of
+ * `SensitivityTags` in `src/language/type-system.ts`; kept as a sorted,
+ * unique `readonly string[]` so the IR remains JSON-serialisable for
+ * `.loom/wire-spec.json`. */
+export type SensitivityTags = readonly string[];
+
 export type TypeIR =
-  | { kind: "primitive"; name: PrimitiveName }
-  | { kind: "id"; targetName: string; valueType: IdValueType }
-  | { kind: "enum"; name: string }
-  | { kind: "valueobject"; name: string }
-  | { kind: "entity"; name: string }
-  | { kind: "array"; element: TypeIR }
-  | { kind: "optional"; inner: TypeIR };
+  | { kind: "primitive"; name: PrimitiveName; sensitivity?: SensitivityTags }
+  | { kind: "id"; targetName: string; valueType: IdValueType; sensitivity?: SensitivityTags }
+  | { kind: "enum"; name: string; sensitivity?: SensitivityTags }
+  | { kind: "valueobject"; name: string; sensitivity?: SensitivityTags }
+  | { kind: "entity"; name: string; sensitivity?: SensitivityTags }
+  | { kind: "array"; element: TypeIR; sensitivity?: SensitivityTags }
+  | { kind: "optional"; inner: TypeIR; sensitivity?: SensitivityTags };
 
 export interface ParamIR {
   name: string;
@@ -55,6 +62,12 @@ export interface FieldIR {
    * modifier.  Every assignment statement (`:=`/`+=`/`-=`) targeting such
    * a field becomes a per-site rule snapshot; see `ProvSite`. */
   provenanced?: boolean;
+  /** Information-flow sensitivity tags declared at the property site via
+   * `sensitive(<tag>, ...)`.  Sorted + deduped; omitted when the field
+   * declared no tags.  Phase 1 only captures the declaration; later
+   * phases wire it through the wire-shape, DTO emitters, and sink
+   * type-checking.  See `docs/proposals/sensitivity-and-compliance.md`. */
+  sensitivity?: SensitivityTags;
 }
 
 export interface ContainmentIR {
@@ -373,6 +386,15 @@ export interface LoomModel {
    * picked by the user.
    */
   contexts: BoundedContextIR[];
+  /** Root-level value objects, declared at the top of any `.ddd` file
+   *  outside any context.  Form the implicit shared kernel: visible
+   *  as a type from every context in the workspace.  Backends emit
+   *  them once into a shared module/namespace each deployable can
+   *  reach.  See `docs/multi-file-source.md`. */
+  rootValueObjects: ValueObjectIR[];
+  /** Root-level enums.  Same visibility / emission rules as
+   *  `rootValueObjects`. */
+  rootEnums: EnumIR[];
   /** Traceability artifacts — model-wide, since a Solution
    *  or TestCase may reference code across modules and systems. */
   requirements: RequirementIR[];
