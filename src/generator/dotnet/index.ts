@@ -6,6 +6,7 @@ import { plural } from "../../util/naming.js";
 import { generateReactForContexts } from "../react/index.js";
 import { emitAuthFiles } from "./auth-emit.js";
 import { emitCqrs } from "./cqrs-emit.js";
+import { renderDomainLog, renderDomainLogBehavior } from "./emit/domain-log.js";
 import { buildFindBodies } from "./find-emit.js";
 import {
   renderCommon,
@@ -173,6 +174,7 @@ function emitProjectFromContexts(
     authRequired,
     usesValidators,
     hasEmbeddedSpa,
+    emitTrace,
   });
   emitTestProject(merged, ns, out);
   // Fullstack mode — generate the React project under ClientApp/.
@@ -233,7 +235,7 @@ function emitContext(
   if (usesValidators) {
     out.set("Application/Common/ValidationBehavior.cs", renderValidationBehavior(ns));
   }
-  emitProject(ctx, ns, out, { usesValidators });
+  emitProject(ctx, ns, out, { usesValidators, emitTrace });
   emitTestProject(ctx, ns, out);
 }
 
@@ -304,9 +306,15 @@ function emitAggregate(
   const repo = findRepoFor(ctx, agg.name);
 
   for (const part of agg.parts) {
-    out.set(`Domain/${aggFolder}/${part.name}.cs`, renderEntity(part, false, ns, agg.name));
+    out.set(
+      `Domain/${aggFolder}/${part.name}.cs`,
+      renderEntity(part, false, ns, agg.name, emitTrace),
+    );
   }
-  out.set(`Domain/${aggFolder}/${agg.name}.cs`, renderEntity(agg, true, ns, agg.name));
+  out.set(
+    `Domain/${aggFolder}/${agg.name}.cs`,
+    renderEntity(agg, true, ns, agg.name, emitTrace),
+  );
   // Views whose source is this aggregate become parameterless,
   // filtered, list-returning finds on the repository.  Synthesised
   // here so all the existing find emission paths (interface,
@@ -324,7 +332,7 @@ function emitAggregate(
     `Infrastructure/Persistence/Configurations/${agg.name}Configuration.cs`,
     renderConfiguration(agg, ns, ctx),
   );
-  emitCqrs(agg, repo, ctx, ns, out, { routePrefix });
+  emitCqrs(agg, repo, ctx, ns, out, { routePrefix, emitTrace });
   const testsFile = renderTestsFile(agg, ctx, ns);
   if (testsFile) {
     out.set(`Tests/${ns}.Tests/${aggFolder}/${agg.name}Tests.cs`, testsFile);
@@ -353,23 +361,33 @@ function emitProject(
     authRequired?: boolean;
     usesValidators?: boolean;
     hasEmbeddedSpa?: boolean;
+    emitTrace?: boolean;
   },
 ): void {
   const hasExtern = ctx.aggregates.some((a) => a.operations.some((o) => o.extern));
   const usesValidators = !!options?.usesValidators;
   const hasEmbeddedSpa = !!options?.hasEmbeddedSpa;
+  const emitTrace = !!options?.emitTrace;
   out.set(
     "Program.cs",
     renderProgram(ctx, ns, {
       authRequired: !!options?.authRequired,
       usesValidators,
       hasEmbeddedSpa,
+      emitTrace,
     }),
   );
   out.set(`${ns}.csproj`, renderCsproj(ns, hasExtern, usesValidators));
   out.set("Dockerfile", renderDockerfile(ns, { hasEmbeddedSpa }));
   out.set(".dockerignore", renderDockerignore());
   out.set("certs/.gitkeep", "");
+  if (emitTrace) {
+    // Domain-layer logger plumbing — emitted only on --trace so the
+    // default artefact stays free of an AsyncLocal accessor + the
+    // pipeline behavior that sets it.
+    out.set("Domain/Common/DomainLog.cs", renderDomainLog(ns));
+    out.set("Application/Common/DomainLogBehavior.cs", renderDomainLogBehavior(ns));
+  }
 }
 
 function emitTestProject(ctx: BoundedContextIR, ns: string, out: Map<string, string>): void {

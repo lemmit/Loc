@@ -958,7 +958,7 @@ function SolutionForm({
         onChange={(e) => setForm({ ...form, title: e.currentTarget.value })}
         data-testid="sol-form-title"
       />
-      <Group grow align="end">
+      <Group align="end" wrap="nowrap" gap={6}>
         <Select
           label="For requirement"
           data={trace.requirements.map((r) => r.name)}
@@ -966,6 +966,7 @@ function SolutionForm({
           onChange={(v) => v && setForm({ ...form, forRequirement: v })}
           allowDeselect={false}
           searchable
+          style={{ flex: 1 }}
           data-testid="sol-form-for"
         />
         <Tooltip label="Open the requirement this solution is for">
@@ -1051,7 +1052,7 @@ function TestCaseForm({
         onChange={(e) => setForm({ ...form, title: e.currentTarget.value })}
         data-testid="tc-form-title"
       />
-      <Group grow align="end">
+      <Group align="end" wrap="nowrap" gap={6}>
         <Select
           label="Verifies"
           data={trace.requirements.map((r) => r.name)}
@@ -1059,6 +1060,7 @@ function TestCaseForm({
           onChange={(v) => v && setForm({ ...form, verifies: v })}
           allowDeselect={false}
           searchable
+          style={{ flex: 1 }}
           data-testid="tc-form-verifies"
         />
         <Tooltip label="Open the requirement this test case verifies">

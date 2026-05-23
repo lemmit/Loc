@@ -313,6 +313,160 @@ describe(".NET generator", () => {
       );
     });
 
+    it("--trace on: emits DomainLog accessor + DomainLogBehavior + domain trace injections", async () => {
+      // Phase 8 .NET domain-trace v1 — mirrors Hono Phase 6.  Aggregate
+      // methods can't take ILogger via constructor (they're POCO
+      // entities, not DI-managed), so the compile-time --trace
+      // switch emits a Domain/Common/DomainLog.cs static accessor
+      // backed by AsyncLocal<ILogger?>, a Mediator pipeline behavior
+      // that sets it per command/query from the request-scoped
+      // logger, and renders trace lines through DomainLog.LogTrace
+      // at the catalog's domain seams (value_computed after every
+      // scalar assign; precondition_evaluated as a bound-temp wrap).
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model, { emitTrace: true });
+
+      // 1. Accessor + behavior emitted.
+      const log = files.get("Domain/Common/DomainLog.cs")!;
+      expect(log).toMatch(/public static class DomainLog/);
+      expect(log).toMatch(/AsyncLocal<ILogger\?>/);
+      expect(log).toMatch(/public static void LogTrace\(string template, params object\[\] args\)/);
+
+      const behavior = files.get("Application/Common/DomainLogBehavior.cs")!;
+      expect(behavior).toMatch(/IPipelineBehavior<TMessage, TResponse>/);
+      expect(behavior).toMatch(/DomainLog\.Current = _log;/);
+      // Restores the previous value on exit so reentrant Send calls
+      // stack cleanly.
+      expect(behavior).toMatch(/var prev = DomainLog\.Current;/);
+      expect(behavior).toMatch(/DomainLog\.Current = prev;/);
+
+      // 2. Program.cs registers the pipeline behavior.
+      const program = files.get("Program.cs")!;
+      expect(program).toMatch(/typeof\(.+\.Application\.Common\.DomainLogBehavior<,>\)/);
+
+      // 3. Aggregate ops get value_computed + precondition_evaluated.
+      const order = files.get("Domain/Orders/Order.cs")!;
+      // precondition_evaluated — bound temp + trace + conditional throw.
+      expect(order).toMatch(/var __pre_\d+_ok = \(/);
+      expect(order).toMatch(
+        /DomainLog\.LogTrace\("\{Event\} aggregate=\{Aggregate\} op=\{Op\} expr=\{Expr\} passed=\{Passed\}", "precondition_evaluated", "Order", "[a-zA-Z]+", "[^"]+", __pre_\d+_ok\);/,
+      );
+      expect(order).toMatch(/if \(!__pre_\d+_ok\) throw new DomainException\(/);
+      // value_computed — appended after each scalar assign (the
+      // Confirm op assigns Status = OrderStatus.Confirmed).
+      expect(order).toMatch(
+        /DomainLog\.LogTrace\("\{Event\} aggregate=\{Aggregate\} field=\{Field\} value=\{Value\}", "value_computed", "Order", "status", Status\);/,
+      );
+    });
+
+    it("--trace off: domain layer stays free of DomainLog accessor + behavior + injections", async () => {
+      // The whole point of the compile-time switch — off path emits
+      // NOTHING domain-trace-related.  No DomainLog.cs, no behavior,
+      // no Program.cs registration, no LogTrace calls in entities.
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model); // no emitTrace
+      expect(files.has("Domain/Common/DomainLog.cs")).toBe(false);
+      expect(files.has("Application/Common/DomainLogBehavior.cs")).toBe(false);
+      const program = files.get("Program.cs")!;
+      expect(program).not.toMatch(/DomainLogBehavior/);
+      const order = files.get("Domain/Orders/Order.cs")!;
+      expect(order).not.toMatch(/DomainLog\./);
+      expect(order).not.toMatch(/__pre_\d+_ok/);
+      expect(order).not.toMatch(/precondition_evaluated/);
+      expect(order).not.toMatch(/value_computed/);
+    });
+
+    it("--trace on: operation routes emit wire_in after [FromBody] binding (lowerCamel param names)", async () => {
+      // Phase 8 .NET wire_in v1 — mirrors Hono Phase 6d.  The catalog's
+      // wire_in event surfaces the parsed request's structural shape
+      // (keys only, no values) right before operation_invoked.  Keys
+      // are the IR field names (lowerCamel), matching the JSON wire
+      // under ASP.NET's default JsonNamingPolicy.CamelCase — so the
+      // SAME `wire_in` event from Hono and .NET joins seamlessly on
+      // the wire-shape key set.
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model, { emitTrace: true });
+      const controller = files.get("Api/OrdersController.cs")!;
+      // sales.ddd's Order has `addLine(productId: Id<Product>, qty:
+      // int, price: Money)` — three lowerCamel param names.
+      expect(controller).toMatch(
+        /_log\.LogTrace\("\{Event\} keys=\{Keys\}", "wire_in", new\[\] \{ "productId", "qty", "price" \}\);/,
+      );
+      // And `confirm()` has zero params — Array.Empty<string>() is
+      // the safe empty form (the implicit `new[] { }` is a compile
+      // error: no element type to infer).
+      expect(controller).toMatch(
+        /_log\.LogTrace\("\{Event\} keys=\{Keys\}", "wire_in", System\.Array\.Empty<string>\(\)\);/,
+      );
+      // wire_in fires BEFORE operation_invoked at every op-route entry —
+      // mirroring the Hono order (shape first, narrative next).
+      const wireInAt = controller.search(/"wire_in"/);
+      const opInvokedAt = controller.search(/"operation_invoked"/);
+      expect(wireInAt).toBeGreaterThan(-1);
+      expect(wireInAt).toBeLessThan(opInvokedAt);
+    });
+
+    it("--trace off: controllers stay free of wire_in lines", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model); // no emitTrace
+      const controller = files.get("Api/OrdersController.cs")!;
+      expect(controller).not.toMatch(/wire_in/);
+      expect(controller).not.toMatch(/System\.Array\.Empty<string>/);
+    });
+
+    it("--trace on: AssertInvariants gains an __op param + emits invariant_evaluated per check", async () => {
+      // Phase 8 .NET invariants v1 — mirrors Hono Phase 6b.  Invariants
+      // run from a shared helper (`AssertInvariants`) that otherwise
+      // has no view of the calling op; under --trace the helper takes
+      // a `string __op` parameter threaded by every call site (ctor /
+      // hydration → "<init>", each public op → its own name), and
+      // each invariant body becomes a bound-temp + LogTrace +
+      // conditional throw triple.
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model, { emitTrace: true });
+      const order = files.get("Domain/Orders/Order.cs")!;
+
+      // Signature carries the __op param with the "<init>" default so
+      // any external caller (extern handlers) can still invoke
+      // AssertInvariants() without args.
+      expect(order).toMatch(/void AssertInvariants\(string __op = "<init>"\)/);
+      // Hydration + Create factory pass "<init>"; each op passes its
+      // own name.
+      expect(order).toMatch(/e\.AssertInvariants\("<init>"\);/);
+      expect(order).toMatch(/AssertInvariants\("confirm"\);/);
+
+      // GUARDED invariant on Order — `lines.count > 0 when status ==
+      // Confirmed`.  Under trace, the const+log+throw triple wraps
+      // INSIDE the guard's if-body so an inapplicable invariant
+      // doesn't pollute the stream.
+      expect(order).toMatch(
+        /if \(this\.Status == OrderStatus\.Confirmed\)[\s\S]+?var __inv_\d+_ok = \(this\.Lines\.Count > 0\);[\s\S]+?DomainLog\.LogTrace\([^)]+"invariant_evaluated", "Order", __op,/,
+      );
+
+      // OrderLine's unguarded invariant `quantity > 0` — straight
+      // triple, no guard wrap.
+      const orderLine = files.get("Domain/Orders/OrderLine.cs")!;
+      expect(orderLine).toMatch(/var __inv_\d+_ok = \(this\.Quantity > 0\);/);
+      expect(orderLine).toMatch(
+        /DomainLog\.LogTrace\([^)]+"invariant_evaluated", "OrderLine", __op, "quantity > 0", __inv_\d+_ok\);/,
+      );
+    });
+
+    it("--trace off: AssertInvariants stays parameterless + emits the original if-throw shape", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model); // no emitTrace
+      const order = files.get("Domain/Orders/Order.cs")!;
+      // No __op, no temp binding, no LogTrace.
+      expect(order).toMatch(/void AssertInvariants\(\)/);
+      expect(order).not.toMatch(/__inv_\d+_ok/);
+      expect(order).not.toMatch(/invariant_evaluated/);
+      expect(order).not.toMatch(/string __op/);
+      // Original guarded-and-throw shape preserved.
+      expect(order).toMatch(
+        /if \(\(this\.Status == OrderStatus\.Confirmed\) && !\(this\.Lines\.Count > 0\)\) throw new DomainException/,
+      );
+    });
+
     it("--trace on: SaveAsync wraps SaveChangesAsync in tx_begin/commit/rollback", async () => {
       // Phase 8 .NET trace v1 — mirrors Hono Phase 6c.  Trace-off keeps
       // the original one-liner shape; trace-on wraps SaveChangesAsync

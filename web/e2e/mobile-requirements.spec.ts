@@ -31,3 +31,22 @@ test("mobile Requirements: tree → detail → back navigation", async ({ page }
   await expect(us001).toBeVisible();
   await expect(page.getByTestId("req-detail-US-001")).not.toBeVisible();
 });
+
+test("mobile Requirements: opening a Solution shows its detail form", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.waitForTimeout(1500);
+
+  await page.getByTestId("mobile-doc-tab-requirements").click();
+  await expect(page.getByTestId("requirements-pane")).toBeVisible({ timeout: 15_000 });
+
+  // Default example (sales-system) declares SOL-001.
+  const sol = page.getByTestId("req-row-sol-SOL-001");
+  await expect(sol).toBeVisible({ timeout: 5_000 });
+  await sol.click();
+  await expect(page.getByTestId("sol-detail-SOL-001")).toBeVisible();
+  // Back returns to the list.
+  await page.getByTestId("req-back-to-list").click();
+  await expect(sol).toBeVisible();
+});

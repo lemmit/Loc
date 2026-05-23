@@ -364,6 +364,79 @@ describe("emitApiControllers (api-emit unit)", () => {
     );
   });
 
+  it("aggregates_controller.ex emits wire_in (debug) on Create + Update when --trace is on", () => {
+    // Phase 8 Phoenix --trace v1 — mirrors Hono Phase 6d / .NET v6.
+    // Only seam available in Phoenix today is the controller's CRUD
+    // actions; Ash resources are declarative so domain trace events
+    // (value_computed / precondition_evaluated / invariant_evaluated)
+    // don't have an imperative seam to thread.  wire_in lands AFTER
+    // params binding using `Map.keys(params)` for runtime
+    // introspection — same identity Hono + .NET emit.  Logger.debug
+    // (Elixir has no `trace`; render-phoenix.ts maps trace → debug).
+    const aggCtx: BoundedContextIR = {
+      ...workflowCtx,
+      aggregates: [
+        {
+          name: "Order",
+          fields: [],
+          parts: [],
+          contains: [],
+          derived: [],
+          invariants: [],
+          functions: [],
+          operations: [],
+          identity: { kind: "guid" },
+        } as unknown as BoundedContextIR["aggregates"][number],
+      ],
+    };
+    const { files } = emitApiControllers({
+      contexts: [aggCtx],
+      deployable: stubDeployable,
+      sys: stubSys,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+      emitTrace: true,
+    });
+    const aggCtrl = files.get("lib/phoenix_app_web/controllers/aggregates_controller.ex")!;
+    // create_order + update_order both emit wire_in immediately
+    // after the `do` line.
+    const wireIns = aggCtrl.match(/Logger\.debug\("wire_in"/g) ?? [];
+    expect(wireIns.length).toBeGreaterThanOrEqual(2);
+    expect(aggCtrl).toMatch(
+      /Logger\.debug\("wire_in", event: "wire_in", keys: Map\.keys\(params\)\)/,
+    );
+  });
+
+  it("aggregates_controller.ex stays free of wire_in when --trace is off", () => {
+    const aggCtx: BoundedContextIR = {
+      ...workflowCtx,
+      aggregates: [
+        {
+          name: "Order",
+          fields: [],
+          parts: [],
+          contains: [],
+          derived: [],
+          invariants: [],
+          functions: [],
+          operations: [],
+          identity: { kind: "guid" },
+        } as unknown as BoundedContextIR["aggregates"][number],
+      ],
+    };
+    const { files } = emitApiControllers({
+      contexts: [aggCtx],
+      deployable: stubDeployable,
+      sys: stubSys,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+      // no emitTrace
+    });
+    const aggCtrl = files.get("lib/phoenix_app_web/controllers/aggregates_controller.ex")!;
+    expect(aggCtrl).not.toMatch(/wire_in/);
+    expect(aggCtrl).not.toMatch(/Map\.keys\(params\)/);
+  });
+
   it("aggregates_controller.ex emits aggregate_created on each Create action via Logger", () => {
     // Phase 8 Phoenix — every per-aggregate Create action emits the
     // catalog's aggregate_created (info) line via Elixir's Logger.
