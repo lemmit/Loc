@@ -105,6 +105,28 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 var app = builder.Build();
+
+// Catalog server-lifecycle events.  Same event names + level Hono and
+// Phoenix emit so a cross-backend dashboard pivots on one identity.
+// A separate logger keeps these lines distinct from per-request
+// middleware lines in the structured stream.
+var lifecycleLog = app.Services.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>()
+    .CreateLogger("Lifecycle");
+var loomPort = builder.Configuration["PORT"]
+    ?? System.Environment.GetEnvironmentVariable("PORT")
+    ?? "8080";
+var loomEnv = app.Environment.EnvironmentName ?? "Production";
+lifecycleLog.LogInformation("{Event} port={Port} env={Env}", "server_starting", loomPort, loomEnv);
+{
+    var lifetime = app.Services.GetRequiredService<Microsoft.Extensions.Hosting.IHostApplicationLifetime>();
+    lifetime.ApplicationStarted.Register(() =>
+        lifecycleLog.LogInformation("{Event} port={Port}", "server_listening", loomPort));
+    lifetime.ApplicationStopping.Register(() =>
+        lifecycleLog.LogInformation("{Event} signal={Signal}", "server_shutdown", "SIGTERM"));
+    lifetime.ApplicationStopped.Register(() =>
+        lifecycleLog.LogInformation("{Event}", "server_drained"));
+}
+
 // Liveness probe — cheap, no I/O.  K8s livenessProbe / docker-compose
 // healthcheck use this to decide "is the process alive?".  A DB blip
 // must NOT mark the pod not-alive (that restarts the container and
@@ -152,16 +174,4 @@ using (var scope = app.Services.CreateScope())
     db.Database.EnsureCreated();
 }
 
-// Graceful shutdown — log the intent so operators see "shutting down"
-// in container logs instead of an abrupt SIGKILL trace.  ASP.NET
-// Core's host already drains in-flight requests + disposes scoped
-// services (including AppDbContext) automatically; this hook is just
-// the visible breadcrumb.
-{
-    var lifetime = app.Services.GetRequiredService<Microsoft.Extensions.Hosting.IHostApplicationLifetime>();
-    var logger = app.Services.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>()
-        .CreateLogger("Shutdown");
-    lifetime.ApplicationStopping.Register(() =>
-        logger.LogInformation("Shutting down — draining in-flight requests."));
-}
 app.Run();
