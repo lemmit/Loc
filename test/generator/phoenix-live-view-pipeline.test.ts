@@ -1418,7 +1418,11 @@ describe("cross-platform UI parity (test e2e ui against phoenixLiveView)", () =>
     const uiSpecPath = "phoenix_app/e2e/AcmeUI.ui.spec.ts";
     expect(files.has(uiSpecPath)).toBe(true);
     const spec = files.get(uiSpecPath)!;
-    expect(spec).toMatch(/@playwright\/test/);
+    // Imports test/expect from the co-located `./fixtures` (re-exports
+    // Playwright + auto console-capture); fixtures.ts is emitted next to
+    // the spec even for non-react (phoenix) UI mounts.
+    expect(spec).toMatch(/from "\.\/fixtures"/);
+    expect(files.has("phoenix_app/e2e/fixtures.ts")).toBe(true);
     expect(spec).toMatch(/test\(/);
     expect(spec).toMatch(/customer/i);
   });

@@ -1,3 +1,4 @@
+import { renderHonoBaseLogCall, renderHonoLogCall } from "../../_obs/render-hono.js";
 import type { BoundedContextIR } from "../../../ir/loom-ir.js";
 import { opHasProvSite } from "../../../ir/prov-id.js";
 import { lines } from "../../../util/code-builder.js";
@@ -34,7 +35,27 @@ export function renderHttpIndex(
     (a) =>
       `import { verify${a.name}ExternHandlersRegistered } from "../domain/${lowerFirst(a.name)}-extern";`,
   );
-  const externVerifyBody = externAggs.map((a) => `  verify${a.name}ExternHandlersRegistered();`);
+  // After verifying registration, emit one `extern_handlers_registered`
+  // line per aggregate so an operator can confirm at boot that every
+  // declared extern op is wired (and read which ones from the line) —
+  // matters for ops debugging where a missing handler used to surface
+  // only on the first request.
+  const externVerifyBody = externAggs.flatMap((a) => {
+    const externOpNames = a.operations
+      .filter((o) => o.extern)
+      .map((o) => `"${o.name}"`)
+      .join(", ");
+    const opsCount = a.operations.filter((o) => o.extern).length;
+    return [
+      `  verify${a.name}ExternHandlersRegistered();`,
+      `  ${renderHonoBaseLogCall("externHandlersRegistered", `aggregate: "${a.name}", count: ${opsCount}, ops: [${externOpNames}]`)}`,
+    ];
+  });
+  // baseLogger is needed at boot for any info/debug line that fires
+  // BEFORE the first request — extern verify, auth enabled, etc.  Gate
+  // the import so plain (no-extern, no-auth) deployables don't pull it in.
+  const needsBaseLogger = externAggs.length > 0 || authRequired;
+  const baseLoggerImport = needsBaseLogger ? `import { baseLogger } from "../obs/log";` : null;
   const hasWorkflows = ctx.workflows.length > 0;
   const workflowImport = hasWorkflows ? `import { workflowsRoutes } from "./workflows";` : null;
   const workflowMount = hasWorkflows
@@ -50,7 +71,12 @@ export function renderHttpIndex(
   const authImport = authRequired
     ? `import { authMiddleware } from "../auth/middleware";\nimport { assertUserVerifierRegistered } from "../auth/verifier";`
     : null;
-  const authVerifyAssert = authRequired ? "  assertUserVerifierRegistered();" : null;
+  // After the verifier assert, emit `auth_enabled` info so every boot's
+  // log stream advertises whether auth is on for this deployable —
+  // useful in mixed environments where the same image runs auth/no-auth.
+  const authVerifyAssert = authRequired
+    ? `  assertUserVerifierRegistered();\n  ${renderHonoBaseLogCall("authEnabled", "required: true")}`
+    : null;
   const authMount = authRequired ? '  app.use("*", authMiddleware);' : null;
   return (
     lines(
@@ -59,6 +85,7 @@ export function renderHttpIndex(
       'import { cors } from "hono/cors";',
       'import { sql } from "drizzle-orm";',
       'import { requestIdMiddleware } from "../obs/request-id";',
+      baseLoggerImport,
       authImport,
       ...aggregateImports,
       ...externImports,
@@ -92,18 +119,27 @@ export function renderHttpIndex(
       "  // Liveness probe — cheap, no I/O.  K8s livenessProbe / docker-compose",
       '  // healthcheck use this to decide "is the process alive?".  A DB blip',
       "  // must NOT mark the pod not-alive (that restarts the container);",
-      "  // DB-touching checks live on /ready instead.",
-      '  app.get("/health", (c) => c.json({ status: "ok" }));',
+      "  // DB-touching checks live on /ready instead.  Emits health_ok",
+      "  // (debug) so probe traffic shows up under LOG_LEVEL=debug — useful",
+      "  // when diagnosing why a load balancer considers the pod down.",
+      '  app.get("/health", (c) => {',
+      `    ${renderHonoLogCall("healthOk", `checks: ["liveness"]`)}`,
+      '    return c.json({ status: "ok" });',
+      "  });",
       "  // Readiness probe — pings the DB.  K8s readinessProbe uses this to",
-      '  // decide "should I send traffic to this pod?".  Returns 503 with a',
-      "  // one-line cause when the DB is unreachable so operators see the",
-      "  // reason in the probe log instead of having to exec into the pod.",
+      '  // decide "should I send traffic to this pod?".  On failure, emits',
+      "  // db_error (error) + health_degraded (debug) so an operator can",
+      "  // pin the cause without exec'ing into the pod; the 503 envelope",
+      "  // still carries the message for the probe log.",
       '  app.get("/ready", async (c) => {',
       "    try {",
       "      await db.execute(sql`select 1`);",
+      `      ${renderHonoLogCall("healthOk", `checks: ["readiness", "db"]`)}`,
       '      return c.json({ status: "ready" });',
       "    } catch (err) {",
       "      const message = err instanceof Error ? err.message : String(err);",
+      `      ${renderHonoLogCall("dbError", "error: message")}`,
+      `      ${renderHonoLogCall("healthDegraded", `checks: ["db"]`)}`,
       '      return c.json({ status: "not_ready", error: message }, 503);',
       "    }",
       "  });",

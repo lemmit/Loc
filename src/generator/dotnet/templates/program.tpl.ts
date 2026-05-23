@@ -369,6 +369,9 @@ export function renderTestCsproj(ns: string): string {
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
+    <!-- AwesomeAssertions: OSS continuation of FluentAssertions; backs the
+         generated Should().Be / BeGreaterThan / etc. test matchers. -->
+    <PackageReference Include="AwesomeAssertions" Version="8.0.0" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../${ns}.csproj" />

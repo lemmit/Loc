@@ -141,6 +141,12 @@ interface RunOptions {
    * of calling `process.exit`.  Used by watch mode so a typo in the
    * `.ddd` source doesn't tear down the watcher. */
   continueOnError?: boolean;
+  /** Compile-time `--trace` switch — when true, the TS generators inject
+   * trace-level domain instrumentation (`value_computed`,
+   * `precondition_evaluated`, etc., via `requestLog().trace(...)`).  Off
+   * by default keeps the artefact lean and the domain layer pure; on
+   * regenerate to diagnose.  See docs/proposals/observability.md. */
+  emitTrace?: boolean;
 }
 
 interface RunResult {
@@ -190,7 +196,7 @@ async function runGenerate(
 
   let files: Map<string, string>;
   if (target === "system") {
-    files = generateSystems(result.model).files;
+    files = generateSystems(result.model, { emitTrace: options.emitTrace }).files;
     if (files.size === 0) {
       console.error(
         `No \`system\` block declared in ${file}.  Use \`generate ts\` or \`generate dotnet\` for legacy single-deployable sources.`,
@@ -199,7 +205,7 @@ async function runGenerate(
       return { hadError: true };
     }
   } else if (target === "ts") {
-    files = generateTypeScript(result.model, HONO_V4_PINS);
+    files = generateTypeScript(result.model, HONO_V4_PINS, { emitTrace: options.emitTrace });
   } else {
     files = generateDotnet(result.model);
   }
@@ -436,10 +442,23 @@ generate
   .requiredOption("-o, --out <dir>", "output directory")
   .option("-w, --watch", "re-run on changes to <file>")
   .option("--dry-run", "list paths that would be written / skipped, write nothing")
-  .action(async (file: string, options: { out: string; watch?: boolean; dryRun?: boolean }) => {
-    await runGenerate("ts", file, options.out, { dryRun: options.dryRun });
-    if (options.watch) await watchAndRegenerate("ts", file, options.out);
-  });
+  .option(
+    "--trace",
+    "emit trace-level domain instrumentation (value_computed, precondition_evaluated, …) — off by default; see docs/proposals/observability.md",
+  )
+  .action(
+    async (
+      file: string,
+      options: { out: string; watch?: boolean; dryRun?: boolean; trace?: boolean },
+    ) => {
+      await runGenerate("ts", file, options.out, {
+        dryRun: options.dryRun,
+        emitTrace: !!options.trace,
+      });
+      if (options.watch)
+        await watchAndRegenerate("ts", file, options.out, { emitTrace: !!options.trace });
+    },
+  );
 generate
   .command("dotnet <file>")
   .description("Generate .NET (ASP.NET Core + EF Core + Mediator)")
@@ -458,10 +477,23 @@ generate
   .requiredOption("-o, --out <dir>", "output directory")
   .option("-w, --watch", "re-run on changes to <file>")
   .option("--dry-run", "list paths that would be written / skipped, write nothing")
-  .action(async (file: string, options: { out: string; watch?: boolean; dryRun?: boolean }) => {
-    await runGenerate("system", file, options.out, { dryRun: options.dryRun });
-    if (options.watch) await watchAndRegenerate("system", file, options.out);
-  });
+  .option(
+    "--trace",
+    "emit trace-level domain instrumentation (value_computed, precondition_evaluated, …) — off by default; see docs/proposals/observability.md",
+  )
+  .action(
+    async (
+      file: string,
+      options: { out: string; watch?: boolean; dryRun?: boolean; trace?: boolean },
+    ) => {
+      await runGenerate("system", file, options.out, {
+        dryRun: options.dryRun,
+        emitTrace: !!options.trace,
+      });
+      if (options.watch)
+        await watchAndRegenerate("system", file, options.out, { emitTrace: !!options.trace });
+    },
+  );
 
 program
   .command("verify <file>")
@@ -488,7 +520,12 @@ program
     await runSnapshot(file, options.out, { dryRun: options.dryRun });
   });
 
-async function watchAndRegenerate(target: GenerateTarget, file: string, outDir: string) {
+async function watchAndRegenerate(
+  target: GenerateTarget,
+  file: string,
+  outDir: string,
+  options: { emitTrace?: boolean } = {},
+) {
   console.log(`Watching ${file} for changes…`);
   let timer: NodeJS.Timeout | null = null;
   let inFlight = false;
@@ -503,7 +540,10 @@ async function watchAndRegenerate(target: GenerateTarget, file: string, outDir: 
     }
     inFlight = true;
     try {
-      await runGenerate(target, file, outDir, { continueOnError: true });
+      await runGenerate(target, file, outDir, {
+        continueOnError: true,
+        emitTrace: options.emitTrace,
+      });
     } catch (err) {
       // Defensive — runGenerate is supposed to capture its own
       // errors when continueOnError is set, but a renderer throwing

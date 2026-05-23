@@ -238,6 +238,14 @@ export default function App(): JSX.Element {
   }, []);
   const clearBackendLog = useCallback(() => setBackendLog([]), []);
   const clearAppLog = useCallback(() => setAppLog([]), []);
+  // Live mirror of appLog so the async UI-test runner can read the
+  // current buffer (React state is stale inside that closure) and slice
+  // the per-test app output for each TestResult.
+  const appLogRef = useRef<LogLine[]>([]);
+  useEffect(() => {
+    appLogRef.current = appLog;
+  }, [appLog]);
+  const getAppLog = useCallback((): LogLine[] => appLogRef.current, []);
 
   const sourceRef = useRef<string>(initialSource);
   const editorHandleRef = useRef<EditorHandle | null>(null);
@@ -834,6 +842,7 @@ export default function App(): JSX.Element {
     backendLog,
     appLog,
     appendAppLog,
+    getAppLog,
     clearBackendLog,
     clearAppLog,
     copied,

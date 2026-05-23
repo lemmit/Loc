@@ -12,15 +12,17 @@ import { renderCsExpr } from "../render-expr.js";
 // ---------------------------------------------------------------------------
 // `test "..." { ... }` DSL → xUnit test class.
 //
-// Each test block becomes a `[Fact]`-decorated method.  Statements use the
-// same renderer as operation bodies, with two extra forms:
+// Each test block becomes a `[Fact]`-decorated method.  Explicit, typed
+// matchers (`expect(x).toBe(y)`, `.toBeGreaterThan(…)`, with optional
+// `.not.`) lower to AwesomeAssertions fluent calls — the OSS continuation of
+// FluentAssertions — so failures name actual and expected operands:
 //
-//   expect <expr>          → xUnit `Assert.True(<expr>)`
-//   expectThrows <call>    → `Assert.Throws<DomainException>(() => <call>)`
+//   expect(m.amount).toBe(10.5m)          → m.Amount.Should().Be(10.5m);
+//   expect(x).toBeGreaterThan(0)          → x.Should().BeGreaterThan(0);
+//   expect(x).not.toBeLessThanOrEqual(0)  → x.Should().NotBeLessThanOrEqualTo(0);
 //
-// The class is colocated with the aggregate's domain folder.  A separate
-// test project file is the consumer's responsibility — these files just
-// need to be referenced from any xUnit test project that targets net8.0.
+// A bare boolean falls back to `Assert.True(<expr>)`; `expectThrows` stays
+// on `Assert.Throws<DomainException>` (xUnit + AwesomeAssertions coexist).
 // ---------------------------------------------------------------------------
 
 export function renderTestsFile(
@@ -33,6 +35,7 @@ export function renderTestsFile(
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push("using System;");
   lines.push("using Xunit;");
+  lines.push("using AwesomeAssertions;");
   lines.push(`using ${ns}.Domain.${upperFirst(plural(agg.name))};`);
   lines.push(`using ${ns}.Domain.Common;`);
   lines.push(`using ${ns}.Domain.ValueObjects;`);
@@ -72,10 +75,10 @@ function renderTest(t: TestIR): string[] {
 }
 
 /** Lower an explicit intrinsic value-matcher (`expect(x).toBe(y)`,
- *  optionally `.not.`) to the equivalent xUnit assertion. Returns null
+ *  optionally `.not.`) to an AwesomeAssertions fluent call. Returns null
  *  when the expression isn't an explicit matcher so the caller falls back
- *  to the operand-hiding `Assert.True`. */
-function renderExplicitMatcherToXUnit(expr: ExprIR): string | null {
+ *  to `Assert.True(<expr>)` for a bare boolean. */
+function renderExplicitMatcherToAwesome(expr: ExprIR): string | null {
   if (expr.kind !== "method-call" || !expr.isIntrinsicMatcher) return null;
   const sig = intrinsicMatcherSig(expr.member);
   if (!sig || sig.on !== "value") return null;
@@ -92,31 +95,19 @@ function renderExplicitMatcherToXUnit(expr: ExprIR): string | null {
   const inner = receiver.kind === "paren" ? receiver.inner : receiver;
   const actual = renderCsExpr(inner);
   const arg = expr.args[0] !== undefined ? renderCsExpr(expr.args[0]) : "";
-  switch (expr.member) {
-    case "toBe":
-      // xUnit: `Assert.Equal(expected, actual)` / `Assert.NotEqual(...)`.
-      return negate
-        ? `Assert.NotEqual(${arg}, ${actual});`
-        : `Assert.Equal(${arg}, ${actual});`;
-    case "toBeGreaterThan":
-      return negate
-        ? `Assert.False(${actual} > ${arg});`
-        : `Assert.True(${actual} > ${arg});`;
-    case "toBeGreaterThanOrEqual":
-      return negate
-        ? `Assert.False(${actual} >= ${arg});`
-        : `Assert.True(${actual} >= ${arg});`;
-    case "toBeLessThan":
-      return negate
-        ? `Assert.False(${actual} < ${arg});`
-        : `Assert.True(${actual} < ${arg});`;
-    case "toBeLessThanOrEqual":
-      return negate
-        ? `Assert.False(${actual} <= ${arg});`
-        : `Assert.True(${actual} <= ${arg});`;
-    default:
-      return null;
-  }
+  // FluentAssertions/AwesomeAssertions verb (post `.Should().`) — `Not`
+  // prefix when negated.
+  const VERBS: Record<string, string> = {
+    toBe: "Be",
+    toBeGreaterThan: "BeGreaterThan",
+    toBeGreaterThanOrEqual: "BeGreaterThanOrEqualTo",
+    toBeLessThan: "BeLessThan",
+    toBeLessThanOrEqual: "BeLessThanOrEqualTo",
+  };
+  const verb = VERBS[expr.member];
+  if (!verb) return null;
+  const method = negate ? `Not${verb}` : verb;
+  return `${actual}.Should().${method}(${arg});`;
 }
 
 function renderTestStmt(s: TestStmtIR): string {
@@ -124,7 +115,7 @@ function renderTestStmt(s: TestStmtIR): string {
   // time we reach the generator, only `expect` / `expect-throws` /
   // `let` / `expression` / pure-function `call` survive.
   if (s.kind === "expect") {
-    const explicit = renderExplicitMatcherToXUnit(s.expr);
+    const explicit = renderExplicitMatcherToAwesome(s.expr);
     if (explicit) return `    ${explicit}`;
     return `    Assert.True(${renderCsExpr(s.expr)});`;
   }

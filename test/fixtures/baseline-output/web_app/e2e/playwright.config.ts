@@ -10,7 +10,11 @@ export default defineConfig({
   reporter: [["list"]],
   use: {
     baseURL: process.env.E2E_BASE_URL ?? "http://localhost:3001",
-    trace: "on-first-retry",
+    // Keep the full trace (console + network + DOM snapshots) and a
+    // screenshot on every failure so a red test is debuggable from the
+    // report alone, alongside the console-logs attachment from fixtures.ts.
+    trace: "retain-on-failure",
+    screenshot: "only-on-failure",
   },
   projects: [
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },

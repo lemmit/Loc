@@ -439,6 +439,60 @@ Open:
   are inherently not single-drag rebindable — they stay inspector / statement
   editors.
 
+## Model builder v2 (drill-down React Flow)
+
+v1 is the existing "Model" tab; v2 is being built in `web/src/builder/system-v2/`
+behind a separate "Model v2" tab in both shells. v1 stays untouched and
+shippable until v2 reaches parity (Phase 4); they coexist meanwhile.
+
+The shape: the canvas is the navigator. You drill down through Loom's hierarchy
+(system → module → context → aggregate → operation) via double-click / a "↳"
+handle, and back up via a breadcrumb. The leaf — an operation or workflow — is
+a vertical React Flow of statement nodes, each embedding the existing inline
+`ƒx` editors from v1. Expression-as-flow stays deferred (wait-and-see; the
+architecture accommodates it later without rework).
+
+Phasing:
+
+- ~~**Phase 0** — skeleton tab + wiring.~~ Done: lazy-loaded
+  `SystemBuilderV2Pane` mounts under "Model v2" in DesktopShell + MobileShell;
+  reads `ctx.getSource()` and shows top-level construct counts as proof of
+  flow. Gated by `web/e2e/system-builder-v2.spec.ts`.
+- ~~**Phase 1** — drill-down backbone (read-only).~~ Done: a pure per-level
+  `buildViewGraph(ast, path)` in `system-v2/view-graph.ts` walks the AST for
+  each level (root / system / module / context / aggregate); the pane wraps it
+  with a clickable breadcrumb and a React Flow whose nodes drill on click for
+  drillable kinds (system / module / context / aggregate / operation /
+  workflow). Empty path = root, clicking the Model crumb pops back. Operation
+  and workflow leaves render as empty placeholders — Phase 2 fills them in.
+  Gated by `test/system-v2/view-graph.test.ts` (per-level unit snapshots) +
+  `web/e2e/system-builder-v2.spec.ts` (drill system → module → context →
+  aggregate, then pop home).
+- ~~**Phase 2a** — operation / workflow flow view (read-only).~~ Done: an
+  operation / workflow leaf renders as a vertical column of `stmt` nodes
+  connected by implicit "next" edges; each node uses a custom `StmtNode`
+  React Flow type, kind-tinted (assign / call / emit / other) with monospace
+  text. Reuses `body.ts`'s `listStatementViews`. Gated by
+  `test/system-v2/view-graph.test.ts` (operation / workflow snapshots) +
+  `web/e2e/system-builder-v2.spec.ts` (drill into `Order.confirm`, see stmt
+  nodes incl. the `emit`).
+- ~~**Phase 2b** — editable stmt nodes (inline rows).~~ Done: v1's
+  `AssignRow` / `CallRow` / `EmitRow` / `OtherRow` are now exported and
+  embedded inside `StmtNode`, with the inline `ƒx` editor wired through the
+  same `slotExpr` / `slotCandidates` / `editExprSlot` / `exprHints` helpers
+  as v1. The pane carries a `rev` counter so each commit re-parses, re-builds
+  the view-graph, and re-binds the per-stmt handlers; switching to a
+  different leaf collapses any open `ƒx`. `.nodrag .nopan` on the node lets
+  inputs / dropdowns work inside the React Flow node. Gated by the v2 e2e
+  (asserts each stmt kind's editor controls are present inside the node).
+- **Phase 3** — in-canvas edits at higher levels (rename, add, delete,
+  drag-rebind per view).
+- **Phase 4** — long-tail parity with v1 (fields / finds / deployable bindings
+  / emit repointing as per-node interactions). Once landed, v1 can be
+  deprecated.
+- **Phase 5** — polish: per-view positions, search / coverage / grouped layout
+  adapted per zoom level, transitions on drill, mobile passes.
+
 Planned — recommended order:
 
 1. ~~**Finish expression/statement structuring**~~ — done: block-body lambdas,

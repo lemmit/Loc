@@ -154,6 +154,230 @@ describe("typescript generator", () => {
   });
 
   describe("request observability", () => {
+    it("emits obs/als.ts wiring the bound child logger into AsyncLocalStorage", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS);
+      const als = files.get("obs/als.ts")!;
+      // Non-HTTP code (repository, dispatcher, domain on --trace) resolves
+      // the request-scoped logger through `requestLog()` which reads from
+      // Node's AsyncLocalStorage — wired by the request-id middleware.
+      expect(als).toMatch(/from "node:async_hooks"/);
+      expect(als).toMatch(
+        /export const requestLogStore = new AsyncLocalStorage<\{ log: RequestLogger \}>/,
+      );
+      // Outside-request fallback to baseLogger so the helper never throws.
+      expect(als).toMatch(/export function requestLog\(\): RequestLogger \{[\s\S]+baseLogger/);
+    });
+
+    it("request-id middleware wraps next() in requestLogStore.run so non-HTTP code resolves the same logger", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS);
+      const reqId = files.get("obs/request-id.ts")!;
+      expect(reqId).toMatch(/import \{ requestLogStore \} from "\.\/als"/);
+      expect(reqId).toMatch(/await requestLogStore\.run\(\{ log \}, async \(\) => \{/);
+    });
+
+    it("--trace off: domain file imports no infra and statements stay byte-identical", async () => {
+      // The whole point of the compile-time switch: when --trace is OFF
+      // (the default) the generated domain file MUST be free of any
+      // observability infra import or instrumentation.  Domain purity by
+      // construction.
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS); // no emitTrace
+      const orderDomain = files.get("domain/order.ts")!;
+      expect(orderDomain).not.toMatch(/from "\.\.\/obs\/als"/);
+      expect(orderDomain).not.toMatch(/requestLog\(\)/);
+      expect(orderDomain).not.toMatch(/event: "value_computed"/);
+      expect(orderDomain).not.toMatch(/event: "precondition_evaluated"/);
+    });
+
+    it("--trace on: _assertInvariants gains an __op param threaded by every call site", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS, { emitTrace: true });
+      const orderDomain = files.get("domain/order.ts")!;
+      // The trace-on signature picks up an __op string param so
+      // invariant_evaluated lines can carry op context — invariants run
+      // from a shared helper that has no direct view of the caller.
+      expect(orderDomain).toMatch(/private _assertInvariants\(__op: string\): void \{/);
+      // Every call site threads its op label.  Ctor → "<init>" sentinel
+      // so the line is distinguishable from in-operation invariants.
+      expect(orderDomain).toMatch(/this\._assertInvariants\("<init>"\);/);
+      // Each public operation passes its own name.  At least the model's
+      // first op should appear (defensive: the example may rename
+      // operations, but at minimum one literal label must be threaded).
+      expect(orderDomain).toMatch(/this\._assertInvariants\("[a-zA-Z][a-zA-Z0-9]*"\);/);
+      // Invariant body: boolean bound, traced, then conditional throw.
+      expect(orderDomain).toMatch(/const __inv_\d+_ok = \(/);
+      expect(orderDomain).toMatch(
+        /requestLog\(\)\.trace\(\{ event: "invariant_evaluated", aggregate: "Order(Line)?", op: __op, expr: "[^"]+", passed: __inv_\d+_ok \}\)/,
+      );
+      expect(orderDomain).toMatch(/if \(!__inv_\d+_ok\) throw new DomainError\(/);
+      // A GUARDED invariant logs ONLY when the guard applies — the
+      // `if (this._status === …) {` body wraps the const+trace+throw
+      // (so an inapplicable invariant doesn't pollute the stream).
+      // sales.ddd's Order has `invariant lines.count > 0 when status == Confirmed`.
+      expect(orderDomain).toMatch(
+        /if \(this\._status === OrderStatus\.Confirmed\) \{\n\s+const __inv_\d+_ok =/,
+      );
+    });
+
+    it("--trace on: operation route emits wire_in after body parse, off keeps no wire_in", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const filesOn = generateTypeScript(model, HONO_V4_PINS, { emitTrace: true });
+      const routesOn = filesOn.get("http/order.routes.ts")!;
+      // wire_in fires AFTER `const body = c.req.valid("json");` so the
+      // validated shape is what's logged.  `keys: Object.keys(body as
+      // Record<string, unknown>)` is the safe runtime read (Zod always
+      // returns a plain object).
+      expect(routesOn).toMatch(/const body = c\.req\.valid\("json"\);[\s\S]+?wire_in/);
+      expect(routesOn).toMatch(
+        /\.get\("log"\)\.trace\(\{ event: "wire_in", keys: Object\.keys\(body as Record<string, unknown>\) \}\)/,
+      );
+
+      // Off: no wire_in lines, no keys-of-body — operation route stays
+      // byte-identical to the pre-Phase-6d shape at the body-parse seam.
+      const filesOff = generateTypeScript(model, HONO_V4_PINS); // no emitTrace
+      const routesOff = filesOff.get("http/order.routes.ts")!;
+      expect(routesOff).not.toMatch(/event: "wire_in"/);
+    });
+
+    it("--trace on: repository wraps findById + save in tx_begin/tx_commit/tx_rollback + child_synced per upsert", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS, { emitTrace: true });
+      const repo = files.get("db/repositories/order-repository.ts")!;
+      // Each of the two transactional methods (findById + save) opens
+      // with tx_begin, wraps the inner body in try { … }, emits tx_commit
+      // on success, and tx_rollback (with the error message) on the
+      // catch path.  Two of each event in the file (one per method).
+      expect(repo.match(/event: "tx_begin"/g)?.length).toBe(2);
+      expect(repo.match(/event: "tx_commit"/g)?.length).toBe(2);
+      expect(repo.match(/event: "tx_rollback"/g)?.length).toBe(2);
+      expect(repo).toMatch(
+        /requestLog\(\)\.trace\(\{ event: "tx_begin", aggregate: "Order", id:/,
+      );
+      expect(repo).toMatch(
+        /requestLog\(\)\.trace\(\{ event: "tx_rollback", .*error: __txErr instanceof Error \? __txErr\.message : String\(__txErr\) \}\)/,
+      );
+      // child_synced per upsert in the save's child loop — action read
+      // from `__existingIds<Cap>` (set before the upsert) so it tags
+      // insert vs update without a second round-trip.
+      expect(repo).toMatch(
+        /const __childAction = __existingIdsLines\.has\(child\.id as string\) \? "update" : "insert";/,
+      );
+      expect(repo).toMatch(
+        /requestLog\(\)\.trace\(\{ event: "child_synced", parent: "Order", part: "OrderLine", id: child\.id as string, action: __childAction \}\)/,
+      );
+    });
+
+    it("--trace off: repository stays free of tx_* + child_synced (no try/catch wrap)", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS); // no emitTrace
+      const repo = files.get("db/repositories/order-repository.ts")!;
+      // No tx_* logs, no try/catch wrapper, no child_synced — body
+      // stays at the original 6-space indent and the existing
+      // `await this.db.transaction(...)` form is unchanged.
+      expect(repo).not.toMatch(/event: "tx_begin"/);
+      expect(repo).not.toMatch(/event: "tx_commit"/);
+      expect(repo).not.toMatch(/event: "tx_rollback"/);
+      expect(repo).not.toMatch(/event: "child_synced"/);
+      expect(repo).not.toMatch(/catch \(__txErr\)/);
+    });
+
+    it("--trace off: invariant emission stays byte-identical to no-trace output", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS); // no emitTrace
+      const orderDomain = files.get("domain/order.ts")!;
+      // No __op param, no invariant_evaluated lines, no __inv_<i>_ok
+      // temps — the trace-off path must produce identical source to
+      // before Phase 6b shipped.
+      expect(orderDomain).toMatch(/private _assertInvariants\(\): void \{/);
+      expect(orderDomain).not.toMatch(/__inv_\d+_ok/);
+      expect(orderDomain).not.toMatch(/event: "invariant_evaluated"/);
+      // Call sites stay no-arg.
+      expect(orderDomain).toMatch(/this\._assertInvariants\(\);/);
+      expect(orderDomain).not.toMatch(/this\._assertInvariants\("/);
+    });
+
+    it("--trace on: domain file injects requestLog import + value_computed + precondition_evaluated", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      // Mirror what the CLI does for `generate ts <ddd> --trace`.
+      const files = generateTypeScript(model, HONO_V4_PINS, { emitTrace: true });
+      const orderDomain = files.get("domain/order.ts")!;
+      // requestLog import — only when --trace is on, so the default
+      // artefact's domain layer never touches an infra import.
+      expect(orderDomain).toMatch(/import \{ requestLog \} from "\.\.\/obs\/als"/);
+      // value_computed after a scalar assign — carries the post-write
+      // value via `this._<field>`, the same path the assignment uses.
+      expect(orderDomain).toMatch(
+        /requestLog\(\)\.trace\(\{ event: "value_computed", aggregate: "Order", field: "[a-z]+", value: this\._[a-z]+ \}\)/,
+      );
+      // precondition_evaluated — boolean bound to a temp so BOTH pass
+      // and fail outcomes log, then the conditional throw fires off the
+      // same temp.
+      expect(orderDomain).toMatch(/const __pre_\d+_ok = \(/);
+      expect(orderDomain).toMatch(
+        /requestLog\(\)\.trace\(\{ event: "precondition_evaluated", aggregate: "Order", op: "[a-zA-Z]+", expr: "[^"]+", passed: __pre_\d+_ok \}\)/,
+      );
+      expect(orderDomain).toMatch(/if \(!__pre_\d+_ok\) throw new DomainError\(/);
+    });
+
+    it("health + ready probes emit health_ok / db_error / health_degraded via the request logger", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS);
+      const httpIndex = files.get("http/index.ts")!;
+      // /health → liveness probe — debug line so probe traffic only
+      // surfaces under LOG_LEVEL=debug, not the default info stream.
+      expect(httpIndex).toMatch(
+        /\.get\("log"\)\.debug\(\{ event: "health_ok", checks: \["liveness"\] \}\)/,
+      );
+      // /ready → success path logs health_ok (readiness, db).
+      expect(httpIndex).toMatch(
+        /\.get\("log"\)\.debug\(\{ event: "health_ok", checks: \["readiness", "db"\] \}\)/,
+      );
+      // /ready → failure path logs BOTH db_error (the underlying cause,
+      // error level so it lands in any sane prod stream) AND
+      // health_degraded (debug, the cumulative probe outcome).
+      expect(httpIndex).toMatch(/\.get\("log"\)\.error\(\{ event: "db_error", error: message \}\)/);
+      expect(httpIndex).toMatch(
+        /\.get\("log"\)\.debug\(\{ event: "health_degraded", checks: \["db"\] \}\)/,
+      );
+    });
+
+    it("repository emits aggregate_loaded / repository_save / find_executed / event_dispatched via requestLog()", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS);
+      const repo = files.get("db/repositories/order-repository.ts")!;
+      // ALS-backed logger import — repository methods have no `c` in scope.
+      expect(repo).toMatch(/import \{ requestLog \} from "\.\.\/\.\.\/obs\/als"/);
+      // findById: both not-found and found paths carry the aggregate_loaded
+      // debug line — `found:false` on the empty branch, `found:true` on the
+      // hydrated branch.
+      expect(repo).toMatch(
+        /requestLog\(\)\.debug\(\{ event: "aggregate_loaded", aggregate: "Order", id: id as string, found: false \}\)/,
+      );
+      expect(repo).toMatch(
+        /requestLog\(\)\.debug\(\{ event: "aggregate_loaded", aggregate: "Order", id: id as string, found: true \}\)/,
+      );
+      // save: one repository_save debug after the transaction commits.
+      expect(repo).toMatch(
+        /requestLog\(\)\.debug\(\{ event: "repository_save", aggregate: "Order", id: aggregate\.id as string \}\)/,
+      );
+      // dispatcher: one event_dispatched info per pulled event.  The
+      // `(event as object).constructor.name` cast handles the corner case
+      // where the aggregate declares no events (pullEvents returns never[]).
+      expect(repo).toMatch(
+        /requestLog\(\)\.info\(\{ event: "event_dispatched", event_type: \(event as object\)\.constructor\.name, aggregate: "Order", id: aggregate\.id as string \}\)/,
+      );
+      // find_executed debug at every find return — including the empty-rows
+      // branch so a no-result query is still observable.
+      expect(repo).toMatch(
+        /requestLog\(\)\.debug\(\{ event: "find_executed", aggregate: "Order", find: "[^"]+", rows: 0 \}\)/,
+      );
+      expect(repo).toMatch(
+        /requestLog\(\)\.debug\(\{ event: "find_executed", aggregate: "Order", find: "[^"]+", rows: __result\.length \}\)/,
+      );
+    });
+
     it("emits obs/log.ts with a configured pino base logger", async () => {
       const model = await buildModel("examples/sales.ddd");
       const files = generateTypeScript(model, HONO_V4_PINS);
@@ -252,6 +476,38 @@ describe("typescript generator", () => {
       expect(routes).toMatch(/error: err\.message, trace_id \}, 400/);
       expect(routes).toMatch(/error: err\.message, trace_id \}, 404/);
       expect(routes).toMatch(/error: "internal", trace_id \}, 500/);
+    });
+
+    it("routes emit catalog log events at the right levels via the bound child logger", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS);
+      const routes = files.get("http/order.routes.ts")!;
+      // Business-narrative info lines from the create + operation seams.
+      // The renderer bridges `c.get("log")` through an untyped cast
+      // (zod-openapi's Env constraint rejects custom Variables) — the
+      // same shape the trace_id read uses.
+      expect(routes).toMatch(
+        /\.get\("log"\)\.info\(\{ event: "aggregate_created", aggregate: "Order", id: created\.id as string \}\)/,
+      );
+      expect(routes).toMatch(
+        /\.get\("log"\)\.info\(\{ event: "operation_invoked", aggregate: "Order", op: "[^"]+", id \}\)/,
+      );
+      // onError: client/domain faults → warn; system faults → error.
+      expect(routes).toMatch(
+        /\.get\("log"\)\.warn\(\{ event: "forbidden", aggregate: "Order", message: err\.message, status: 403 \}\)/,
+      );
+      expect(routes).toMatch(
+        /\.get\("log"\)\.warn\(\{ event: "domain_error", aggregate: "Order", message: err\.message, status: 400 \}\)/,
+      );
+      expect(routes).toMatch(
+        /\.get\("log"\)\.warn\(\{ event: "not_found", aggregate: "Order", status: 404 \}\)/,
+      );
+      expect(routes).toMatch(
+        /\.get\("log"\)\.error\(\{ event: "extern_handler_threw", aggregate: err\.aggName, op: err\.opName, error: err\.message \}\)/,
+      );
+      expect(routes).toMatch(/\.get\("log"\)\.error\(\{ event: "internal_error",/);
+      // Bare console.error retired — pino does the serialization.
+      expect(routes).not.toMatch(/console\.error/);
     });
   });
 
@@ -394,9 +650,16 @@ describe("typescript generator", () => {
     expect(routes).toMatch(/aggregate\.assertInvariants\(\)/);
     expect(routes).not.toMatch(/aggregate\.confirm\(\)/);
 
-    // 5. http/index.ts wires the verify gate at startup.
+    // 5. http/index.ts wires the verify gate at startup AND emits a
+    // structured `extern_handlers_registered` (debug) line per aggregate
+    // — so an operator confirming a deploy can read the catalog of
+    // wired handlers off the startup log instead of grepping source.
     const httpIndex = files.get("http/index.ts")!;
     expect(httpIndex).toMatch(/verifyOrderExternHandlersRegistered/);
+    expect(httpIndex).toMatch(/import \{ baseLogger \} from "\.\.\/obs\/log"/);
+    expect(httpIndex).toMatch(
+      /baseLogger\.debug\(\{ event: "extern_handlers_registered", aggregate: "Order", count: 1, ops: \["confirm"\] \}\)/,
+    );
   });
 
   describe("extern handler exception envelope", () => {
@@ -1141,6 +1404,13 @@ describe("typescript generator", () => {
       const auth = httpIndex.indexOf('app.use("*", authMiddleware)');
       expect(cors).toBeGreaterThan(0);
       expect(auth).toBeGreaterThan(cors);
+      // auth_enabled (info) emitted at boot whenever the verifier
+      // assert clears, so every boot log advertises whether this
+      // deployable expects authenticated requests.
+      expect(httpIndex).toMatch(/import \{ baseLogger \} from "\.\.\/obs\/log"/);
+      expect(httpIndex).toMatch(
+        /baseLogger\.info\(\{ event: "auth_enabled", required: true \}\)/,
+      );
     });
 
     it("middleware bypasses /health, /openapi.json, /swagger", async () => {
@@ -1260,11 +1530,12 @@ describe("typescript generator", () => {
     it("http/<aggregate>.routes.ts maps ForbiddenError to 403 in app.onError", async () => {
       const files = await emitForAuthSystem(SRC_REQUIRES);
       const route = files.get("http/order.routes.ts")!;
-      // trace_id is threaded alongside the existing error
-      // field, so the envelope shape is `{ error, trace_id }`.
-      expect(route).toMatch(
-        /if \(err instanceof ForbiddenError\) return c\.json\(\{ error: err\.message, trace_id \}, 403\);/,
-      );
+      // trace_id is threaded alongside the existing error field, so the
+      // envelope shape is `{ error, trace_id }`.  The onError arm now
+      // logs the catalog event before returning, so the test matches the
+      // 403 response line independently of the surrounding `{ ... }` arm.
+      expect(route).toMatch(/if \(err instanceof ForbiddenError\) \{/);
+      expect(route).toMatch(/return c\.json\(\{ error: err\.message, trace_id \}, 403\);/);
     });
   });
 

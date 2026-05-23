@@ -18,6 +18,7 @@ import {
   type LocatorAssertions,
   type RemotePage,
 } from "../../../packages/ui-test-driver/index";
+import type { LogLine } from "../util/log-line";
 
 export interface UiTestCase {
   name: string;
@@ -63,17 +64,30 @@ export function runUiTests(
   /** Suite name to report — must match the UI `ExecTestRef.suite`
    *  (`"<System> e2e"`) so results join the verification rollup. */
   suite = "",
+  /** Live accessor for the preview app's captured console/error stream.
+   *  When provided, each test's slice (the lines emitted while it ran)
+   *  is attached to its `TestResult.logs` — so a failing UI test reports
+   *  the generated app's own output, not just a screenshot. */
+  getAppLog?: () => LogLine[],
 ): Promise<TestResult[]> {
   // Reuse the API harness's sequential runner (timing + pass/fail +
   // console capture) by binding `page` into each case, and capture a
   // best-effort final-state screenshot after each test (proof on pass,
-  // evidence on fail).
+  // evidence on fail).  Tests run sequentially, so a moving cursor into
+  // the (append-only) app-log buffer slices each test's own output.
+  let cursor = getAppLog ? getAppLog().length : 0;
   return runTests(
     tests.map((t) => ({ suite, name: t.name, fn: () => t.fn({ page }) })),
     {
       afterEach: async (r) => {
         const shot = await page.screenshot();
         if (shot) r.screenshot = shot;
+        if (getAppLog) {
+          const all = getAppLog();
+          const slice = all.slice(cursor);
+          cursor = all.length;
+          if (slice.length > 0) r.logs = [...(r.logs ?? []), ...slice];
+        }
       },
     },
   );
