@@ -558,8 +558,18 @@ Phasing:
   is editable on the canvas — targets / ui by drag (Phase 4d), modules /
   serves by multi-select. Gated by the v2 e2e (the api deployable in Banking
   System exposes both multi-selects on its node).
-- **Phase 4f** — repository finds (filter + params) as a per-find inline
-  editor. With that landed, v1 can be deprecated.
+- ~~**Phase 4f (repository finds as drillable nodes).**~~ Done: repository
+  becomes drillable; the new repository view lists each `FindDecl` as a
+  `find` ViewKind node — same on-node rename / delete (via
+  `renameByAstType("FindDecl")` + spliceNode). Inline filter editing is a
+  follow-up (`findFilter` slot already exists). Gated by
+  `test/system-v2/view-graph.test.ts`.
+- ~~**Phase 5a (mobile pass).**~~ Done: `compact` (= `!ctx.isDesktop`) is
+  threaded into the v2 node data; `StmtNode` shrinks to 320px and the
+  `ConstructNode` multi-select panel to 210px on a phone-width canvas so
+  nothing overflows. Gated by a new
+  `web/e2e/system-builder-v2-mobile.spec.ts` (390×844 viewport drills
+  Sales System → Order → confirm and confirms the statement flow renders).
 - **Phase 5** — polish: per-view positions, search / coverage / grouped layout
   adapted per zoom level, transitions on drill, mobile passes.
 

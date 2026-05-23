@@ -30,6 +30,8 @@ export interface StmtNodeData {
    *  `onRepointEvent` to make the event re-pointable inline. */
   events?: string[];
   onRepointEvent?: (eventName: string) => void;
+  /** Narrow the node for a phone-width canvas (~390px viewport). */
+  compact?: boolean;
 }
 
 const KIND_LABEL: Record<StmtView["kind"], string> = {
@@ -119,7 +121,7 @@ export default function StmtNode({ data }: NodeProps): JSX.Element {
         borderLeft: `4px solid ${KIND_TINT[view.kind]}`,
         borderRadius: 6,
         padding: "8px 10px",
-        width: 380,
+        width: d.compact ? 320 : 380,
       }}
       data-testid="c4system-v2-stmt"
       data-stmt-kind={view.kind}

@@ -15,6 +15,7 @@ import type {
   Model,
   Module,
   Operation,
+  Repository,
   Statement,
   System,
   SystemMember,
@@ -30,12 +31,14 @@ export type ViewKind =
   | "aggregate"
   | "operation"
   | "workflow"
+  | "repository"
   // statement-flow node (the leaf of an operation / workflow view)
   | "stmt"
-  // leaves (Phase 1: shown but not drillable)
+  // a single repository find — the leaf of a repository view
+  | "find"
+  // leaves (still no drill below)
   | "valueobject"
   | "event"
-  | "repository"
   | "view"
   | "function"
   | "field"
@@ -83,6 +86,7 @@ const DRILLABLE: ReadonlySet<ViewKind> = new Set([
   "aggregate",
   "operation",
   "workflow",
+  "repository",
 ]);
 
 const COL_W = 220;
@@ -381,6 +385,42 @@ function workflowView(ast: Model, name: string): ViewGraph {
   return stmtFlow(`workflow ${name}()`, wf.body);
 }
 
+function findRepository(ast: Model, name: string): Repository | undefined {
+  const visit = (members: ContextMember[]): Repository | undefined => {
+    for (const cm of members) {
+      if (cm.$type === "Repository" && (cm as Repository).name === name) return cm as Repository;
+    }
+    return undefined;
+  };
+  for (const m of ast.members) {
+    if (m.$type === "BoundedContext") {
+      const r = visit((m as BoundedContext).members);
+      if (r) return r;
+    } else if (m.$type === "System") {
+      for (const sm of (m as System).members) {
+        if (sm.$type === "BoundedContext") {
+          const r = visit((sm as BoundedContext).members);
+          if (r) return r;
+        }
+        if (sm.$type === "Module") {
+          for (const c of (sm as Module).contexts) {
+            const r = visit(c.members);
+            if (r) return r;
+          }
+        }
+      }
+    }
+  }
+  return undefined;
+}
+
+function repositoryView(ast: Model, name: string): ViewGraph {
+  const repo = findRepository(ast, name);
+  if (!repo) return { title: `repository ${name}`, nodes: [], edges: [] };
+  const items = repo.finds.map((f) => ({ id: nid("find", f.name), kind: "find" as const, name: f.name }));
+  return { title: `repository ${name}`, nodes: layout(items, ["find"]), edges: [] };
+}
+
 /** Dispatch on the last step of `path` to the per-level builder; empty path
  *  is the root view. Operation and workflow leaves render as a statement
  *  flow (the leaf node type the pane knows how to render). */
@@ -404,6 +444,8 @@ export function buildViewGraph(ast: Model, path: ViewPath): ViewGraph {
     }
     case "workflow":
       return workflowView(ast, last.name);
+    case "repository":
+      return repositoryView(ast, last.name);
     default:
       // Other leaves (value object / event / repository / view / function / …)
       // still have no children to show — opt-in node-detail comes later.
