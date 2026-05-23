@@ -59,7 +59,13 @@ export type MobileTab =
 /** Sub-view of the consolidated mobile "Code" tab: the source editor,
  *  the visual page Builder, the structural Model, or the generated-file
  *  browser. Persisted by App.tsx; mirrors the desktop center-pane switch. */
-export type MobileCodeView = "source" | "builder" | "model" | "model-v2" | "generated";
+export type MobileCodeView =
+  | "source"
+  | "builder"
+  | "model"
+  | "model-v2"
+  | "requirements"
+  | "generated";
 
 export interface LayoutCtx {
   isDesktop: boolean;
