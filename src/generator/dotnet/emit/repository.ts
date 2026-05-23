@@ -2,9 +2,7 @@ import type { AggregateIR, ParamIR, RepositoryIR } from "../../../ir/loom-ir.js"
 import { findUsesCurrentUser } from "../../../ir/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
-import {
-  renderDotnetLogCall,
-} from "../../_obs/render-dotnet.js";
+import { renderDotnetLogCall } from "../../_obs/render-dotnet.js";
 import { renderCsType } from "../render-expr.js";
 
 // Repository interface (Domain layer) + EF-backed implementation
@@ -23,7 +21,7 @@ export function renderRepositoryInterface(
   const anyFindUsesUser = finds.some(findUsesCurrentUser);
   const findLines = finds.map((f) => {
     const usesUser = findUsesCurrentUser(f);
-    return `    System.Threading.Tasks.Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParamsWithCt(f.params, usesUser)});`;
+    return `    Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParamsWithCt(f.params, usesUser)});`;
   });
   return (
     lines(
@@ -35,9 +33,9 @@ export function renderRepositoryInterface(
       "",
       `public interface I${agg.name}Repository`,
       "{",
-      `    System.Threading.Tasks.Task<${agg.name}?> GetByIdAsync(${agg.name}Id id, System.Threading.CancellationToken ct = default);`,
-      `    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<${agg.name}>> FindManyByIdsAsync(System.Collections.Generic.IReadOnlyList<${agg.name}Id> ids, System.Threading.CancellationToken ct = default);`,
-      `    System.Threading.Tasks.Task SaveAsync(${agg.name} aggregate, System.Threading.CancellationToken ct = default);`,
+      `    Task<${agg.name}?> GetByIdAsync(${agg.name}Id id, CancellationToken ct = default);`,
+      `    Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${agg.name}Id> ids, CancellationToken ct = default);`,
+      `    Task SaveAsync(${agg.name} aggregate, CancellationToken ct = default);`,
       ...findLines,
       "}",
     ) + "\n"
@@ -53,8 +51,17 @@ export function renderRepositoryImpl(
     filterClause: string;
     projectionClause: string;
   }>,
-  emitTrace = false,
+  options?: {
+    /** Extra namespaces find-filter expressions reach into (e.g.
+     *  `System.Text.RegularExpressions` when a filter uses
+     *  `.matches(...)`).  Spliced into the file's using block. */
+    extraUsings?: readonly string[];
+    /** True when --trace is in effect — brackets the EF
+     *  SaveChangesAsync with tx_begin / tx_commit / tx_rollback. */
+    emitTrace?: boolean;
+  },
 ): string {
+  const emitTrace = !!options?.emitTrace;
   const finds = repo?.finds ?? [];
   const anyFindUsesUser = finds.some(findUsesCurrentUser);
   const setName = plural(upperFirst(agg.name));
@@ -86,12 +93,14 @@ export function renderRepositoryImpl(
       "    }",
     ];
   });
+  const extraUsings = (options?.extraUsings ?? []).map((n) => `using ${n};`);
   return (
     lines(
       "// Auto-generated.",
       "using System.Linq;",
       "using System.Threading;",
       "using System.Threading.Tasks;",
+      ...extraUsings,
       "using Microsoft.EntityFrameworkCore;",
       "using Microsoft.Extensions.Logging;",
       `using ${ns}.Domain.${plural(agg.name)};`,
@@ -134,9 +143,9 @@ export function renderRepositoryImpl(
       "        return found;",
       "    }",
       "",
-      `    public async Task<System.Collections.Generic.IReadOnlyList<${agg.name}>> FindManyByIdsAsync(System.Collections.Generic.IReadOnlyList<${agg.name}Id> ids, CancellationToken ct = default)`,
+      `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${agg.name}Id> ids, CancellationToken ct = default)`,
       "    {",
-      "        if (ids.Count == 0) return System.Array.Empty<" + agg.name + ">();",
+      "        if (ids.Count == 0) return Array.Empty<" + agg.name + ">();",
       `        return await _db.${setName}.Where(x => ids.Contains(x.Id)).ToListAsync(ct);`,
       "    }",
       "",
@@ -172,7 +181,7 @@ export function renderRepositoryImpl(
               { name: "id", valueExpr: "aggregate.Id.Value" },
             ])}`,
             "        }",
-            "        catch (System.Exception __txErr)",
+            "        catch (Exception __txErr)",
             "        {",
             `            ${renderDotnetLogCall("txRollback", [
               { name: "aggregate", valueExpr: `"${agg.name}"` },
@@ -219,6 +228,6 @@ function renderParamsWithCt(params: ParamIR[], usesUser: boolean = false): strin
     .filter(Boolean)
     .join(", ");
   return head.length > 0
-    ? `${head}, System.Threading.CancellationToken ct = default`
-    : "System.Threading.CancellationToken ct = default";
+    ? `${head}, CancellationToken ct = default`
+    : "CancellationToken ct = default";
 }

@@ -1,5 +1,6 @@
 // Auto-generated.
 using FluentValidation;
+using System.Text.RegularExpressions;
 using Api.Domain.Ids;
 using Api.Domain.ValueObjects;
 using Api.Domain.Enums;
@@ -15,7 +16,7 @@ public sealed class CreateCustomerCommandValidator : AbstractValidator<CreateCus
         RuleFor(x => x).Must(x => x.Username != x.Email)
             .WithName("Username")
             .WithMessage("Invariant violated: username != email");
-        RuleFor(x => x).Must(x => System.Text.RegularExpressions.Regex.IsMatch(x.Email, "^[^@]+@[^@]+\\.[^@]+$") && x.Email.Length <= 120)
+        RuleFor(x => x).Must(x => Regex.IsMatch(x.Email, "^[^@]+@[^@]+\\.[^@]+$") && x.Email.Length <= 120)
             .WithName("Email")
             .WithMessage("Invariant violated: email check email.matches(\"^[^@]+@[^@]+\\\\.[^@]+$\") && email.length <= 120");
     }

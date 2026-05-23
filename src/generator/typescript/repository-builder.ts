@@ -347,11 +347,7 @@ function findByIdMethod(agg: AggregateIR, ctx: BoundedContextIR, emitTrace = fal
           `      throw __txErr;`,
           `    }`,
         ]
-      : [
-          `    return await this.db.transaction(async (tx) => {`,
-          ...body,
-          `    });`,
-        ],
+      : [`    return await this.db.transaction(async (tx) => {`, ...body, `    });`],
     `  }`,
   );
 }
@@ -586,11 +582,7 @@ function saveMethod(agg: AggregateIR, ctx: BoundedContextIR, emitTrace = false):
           `      throw __txErr;`,
           `    }`,
         ]
-      : [
-          `    await this.db.transaction(async (tx) => {`,
-          ...body,
-          `    });`,
-        ],
+      : [`    await this.db.transaction(async (tx) => {`, ...body, `    });`],
     `    ${renderHonoStoreLogCall("repositorySave", `aggregate: "${agg.name}", id: aggregate.id as string`)}`,
     "",
     `    for (const event of aggregate.pullEvents()) {`,

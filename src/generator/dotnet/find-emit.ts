@@ -19,18 +19,19 @@ import { renderCsExpr } from "./render-expr.js";
 export function buildFindBodies(
   agg: AggregateIR,
   repo: RepositoryIR | undefined,
+  usings?: Set<string>,
 ): Array<{ name: string; filterClause: string; projectionClause: string }> {
   if (!repo) return [];
   return repo.finds.map((find) => ({
     name: find.name,
-    filterClause: filterClauseFor(find, agg),
+    filterClause: filterClauseFor(find, agg, usings),
     projectionClause: projectionClauseFor(find.returnType),
   }));
 }
 
-function filterClauseFor(find: FindIR, agg: AggregateIR): string {
+function filterClauseFor(find: FindIR, agg: AggregateIR, usings?: Set<string>): string {
   if (find.filter) {
-    return `.Where(x => ${renderCsExpr(find.filter, { thisName: "x" })})`;
+    return `.Where(x => ${renderCsExpr(find.filter, { thisName: "x", usings })})`;
   }
   if (find.params.length === 0) return "";
   const conditions: string[] = [];

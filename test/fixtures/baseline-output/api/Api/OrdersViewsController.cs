@@ -15,14 +15,14 @@ public sealed class OrdersViewsController : ControllerBase
     public OrdersViewsController(IMediator mediator) => _mediator = mediator;
 
     [HttpGet("active_orders")]
-    public async Task<ActionResult<System.Collections.Generic.IReadOnlyList<OrderResponse>>> ActiveOrders()
+    public async Task<ActionResult<IReadOnlyList<OrderResponse>>> ActiveOrders()
     {
         var result = await _mediator.Send(new ActiveOrdersQuery());
         return Ok(result);
     }
 
     [HttpGet("order_summary")]
-    public async Task<ActionResult<System.Collections.Generic.IReadOnlyList<OrderSummaryRow>>> OrderSummary()
+    public async Task<ActionResult<IReadOnlyList<OrderSummaryRow>>> OrderSummary()
     {
         var result = await _mediator.Send(new OrderSummaryQuery());
         return Ok(result);

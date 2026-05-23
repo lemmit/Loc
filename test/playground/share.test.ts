@@ -8,9 +8,9 @@ import {
   encodeSource,
   readHash,
   readHashSource,
+  type SharedProject,
   writeHashProject,
   writeHashSource,
-  type SharedProject,
 } from "../../web/src/util/share.js";
 
 const MAIN = "/workspace/main.ddd";

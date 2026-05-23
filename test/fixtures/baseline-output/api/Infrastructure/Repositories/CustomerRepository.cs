@@ -33,9 +33,9 @@ public sealed class CustomerRepository : ICustomerRepository
         return found;
     }
 
-    public async Task<System.Collections.Generic.IReadOnlyList<Customer>> FindManyByIdsAsync(System.Collections.Generic.IReadOnlyList<CustomerId> ids, CancellationToken ct = default)
+    public async Task<IReadOnlyList<Customer>> FindManyByIdsAsync(IReadOnlyList<CustomerId> ids, CancellationToken ct = default)
     {
-        if (ids.Count == 0) return System.Array.Empty<Customer>();
+        if (ids.Count == 0) return Array.Empty<Customer>();
         return await _db.Customers.Where(x => ids.Contains(x.Id)).ToListAsync(ct);
     }
 
@@ -54,13 +54,13 @@ public sealed class CustomerRepository : ICustomerRepository
             await _events.DispatchAsync(ev, ct);
         }
     }
-    public async Task<List<Customer>> All(System.Threading.CancellationToken ct = default)
+    public async Task<List<Customer>> All(CancellationToken ct = default)
     {
         var result = await _db.Customers.ToListAsync(ct);
         _log.LogDebug("{Event} aggregate={Aggregate} find={Find} rows={Rows}", "find_executed", "Customer", "all", result.Count);
         return result;
     }
-    public async Task<Customer?> ByEmail(string email, System.Threading.CancellationToken ct = default)
+    public async Task<Customer?> ByEmail(string email, CancellationToken ct = default)
     {
         var result = await _db.Customers.Where(x => x.Email == email).FirstOrDefaultAsync(ct);
         _log.LogDebug("{Event} aggregate={Aggregate} find={Find} rows={Rows}", "find_executed", "Customer", "byEmail", result == null ? 0 : 1);
