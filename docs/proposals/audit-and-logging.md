@@ -40,7 +40,7 @@ context Admissions {
   // Aggregate-level: audit propagates to this aggregate's commands and
   // views unless a member overrides it.
   audited aggregate Patient {
-    id: Id<Patient>
+    id: Patient id
     firstName: string
     lastName: string
 

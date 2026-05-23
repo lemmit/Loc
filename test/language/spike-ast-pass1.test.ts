@@ -56,8 +56,7 @@ describe("spike — AST-to-AST scaffold expansion", () => {
             repository Orders for Order { }
           }
         }
-        ui WebApp {
-          scaffold aggregates: Order
+        ui WebApp with scaffold(aggregates: [Order]) {
         }
       }
     `);
@@ -84,8 +83,7 @@ describe("spike — AST-to-AST scaffold expansion", () => {
             repository Customers for Customer { }
           }
         }
-        ui WebApp {
-          scaffold modules: M
+        ui WebApp with scaffold(modules: [M]) {
         }
       }
     `);
@@ -119,9 +117,7 @@ describe("spike — AST-to-AST scaffold expansion", () => {
             view ActiveOrders = Order where x > 0
           }
         }
-        ui WebApp {
-          scaffold workflows: placeOrder
-          scaffold views: ActiveOrders
+        ui WebApp with scaffold(workflows: [placeOrder], views: [ActiveOrders]) {
         }
       }
     `);
@@ -142,8 +138,7 @@ describe("spike — AST-to-AST scaffold expansion", () => {
             repository Orders for Order { }
           }
         }
-        ui WebApp {
-          scaffold aggregates: Order
+        ui WebApp with scaffold(aggregates: [Order]) {
           page OrderList {
             route: "/custom"
             body: f()
@@ -183,8 +178,7 @@ describe("spike — AST-to-AST scaffold expansion", () => {
             repository Orders for Order { }
           }
         }
-        ui WebApp {
-          scaffold aggregates: Order
+        ui WebApp with scaffold(aggregates: [Order]) {
         }
       }
     `);

@@ -124,14 +124,14 @@ describe("react generator", () => {
     expect(files.get("web_app/e2e/pages/_helpers.ts")).toBeFalsy();
   });
 
-  it("page object clicks the testid'd option for Id<X> params", async () => {
+  it("page object clicks the testid'd option for X id params", async () => {
     const model = await buildModel("examples/acme.ddd");
     const { files } = generateSystems(model);
     const orderPo = files.get("web_app/e2e/pages/order.ts")!;
     expect(orderPo).toMatch(
       /getByTestId\(`orders-op-addLine-input-productId-option-\$\{input\.productId!\}`\)/,
     );
-    // Old `.fill()` against the input is gone for Id<X> fields.
+    // Old `.fill()` against the input is gone for X id fields.
     expect(orderPo).not.toMatch(/getByTestId\("orders-op-addLine-input-productId"\)\.fill/);
   });
 
@@ -492,12 +492,12 @@ describe("react generator", () => {
       expect(page).toMatch(/import \{ Controller, useForm \} from "react-hook-form"/);
       expect(page).toMatch(/zodResolver\(PlaceOrderRequest\)/);
       expect(page).toMatch(/usePlaceOrderWorkflow/);
-      // String param → TextInput; Id<X> → Select with target's display field;
+      // String param → TextInput; X id → Select with target's display field;
       // int → NumberInput with allowDecimal={false}.
       expect(page).toMatch(/<TextInput label="Customer Id"/);
       expect(page).toMatch(/<Select label="Product Id"[\s\S]+?__products\.data/);
       expect(page).toMatch(/<NumberInput label="Quantity"[\s\S]+?allowDecimal=\{false\}/);
-      // useAllProducts pulled in for the Id<Product> Select.
+      // useAllProducts pulled in for the Product id Select.
       expect(page).toMatch(/import \{ useAllProducts \} from "\.\.\/\.\.\/api\/product"/);
       // Submit button + success/error toast.
       expect(page).toMatch(/data-testid="workflow-place_order-submit"/);

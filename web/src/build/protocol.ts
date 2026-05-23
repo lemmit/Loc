@@ -57,12 +57,14 @@ export interface SnapshotFail {
 
 export type SnapshotResult = SnapshotOk | SnapshotFail;
 
-/** A single VFS entry shipped over the wire — the worker writes
- *  `content` at `path` into its local MemoryVfs. */
-export interface VfsEntry {
-  path: string;
-  content: string;
-}
+/** A single VFS entry shipped over the wire — file entries carry
+ *  `content`, directory entries carry only their `path`.  Re-exports
+ *  the in-process VFS tagged union so the protocol and the
+ *  underlying store can't drift.  Directory entries cross the
+ *  worker boundary in this shape so an empty folder created on the
+ *  main thread survives a worker respawn. */
+import type { VfsEntry } from "../vfs/types.js";
+export type { VfsEntry };
 
 export interface VfsWriteOk {
   ok: true;

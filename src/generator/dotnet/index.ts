@@ -6,8 +6,10 @@ import { plural } from "../../util/naming.js";
 import { generateReactForContexts } from "../react/index.js";
 import { emitAuthFiles } from "./auth-emit.js";
 import { emitCqrs } from "./cqrs-emit.js";
-import { buildFindBodies } from "./find-emit.js";
+import { renderDomainLog, renderDomainLogBehavior } from "./emit/domain-log.js";
+import { renderRequestLoggingMiddleware } from "./emit/request-logging.js";
 import {
+  renderAuditableInterceptor,
   renderCommon,
   renderConfiguration,
   renderCsproj,
@@ -27,7 +29,8 @@ import {
   renderTestCsproj,
   renderTestsFile,
   renderValueObject,
-} from "./templates.js";
+} from "./emit.js";
+import { buildFindBodies } from "./find-emit.js";
 import { hasAnyWireValidator, renderValidationBehavior } from "./validator-emit.js";
 import { emitViews } from "./view-emit.js";
 import { emitWorkflows } from "./workflow-emit.js";
@@ -61,11 +64,14 @@ import { emitWorkflows } from "./workflow-emit.js";
  * Legacy entry: lowers the whole model and emits one project from each
  * top-level bounded context (used by `ddd generate dotnet <file>`).
  */
-export function generateDotnet(model: Model): Map<string, string> {
+export function generateDotnet(
+  model: Model,
+  options: { emitTrace?: boolean } = {},
+): Map<string, string> {
   // See generator/typescript/index.ts:generateTypeScript for the
   // lowering + enrichment two-step.
   const loom = enrichLoomModel(lowerModel(model));
-  return generateDotnetForContexts(loom.contexts);
+  return generateDotnetForContexts(loom.contexts, undefined, undefined, options);
 }
 
 /**
@@ -83,14 +89,16 @@ export function generateDotnetForContexts(
   contexts: BoundedContextIR[],
   namespace?: string,
   system?: { deployable: DeployableIR; sys: SystemIR },
+  options: { emitTrace?: boolean } = {},
 ): Map<string, string> {
   const out = new Map<string, string>();
+  const emitTrace = !!options.emitTrace;
   if (namespace !== undefined) {
     // Single project containing all the given contexts under one namespace.
-    emitProjectFromContexts(contexts, namespace, out, system);
+    emitProjectFromContexts(contexts, namespace, out, system, emitTrace);
   } else {
     for (const ctx of contexts) {
-      emitContext(ctx, ctx.name, out);
+      emitContext(ctx, ctx.name, out, emitTrace);
     }
   }
   return out;
@@ -101,6 +109,7 @@ function emitProjectFromContexts(
   ns: string,
   out: Map<string, string>,
   system?: { deployable: DeployableIR; sys: SystemIR },
+  emitTrace = false,
 ): void {
   // Fullstack-dotnet branch — when the deployable declares a `ui:`
   // mount, the .NET project hosts an embedded React SPA from
@@ -126,7 +135,7 @@ function emitProjectFromContexts(
       out.set(`Domain/Events/${ev.name}.cs`, renderEvent(ev, ns));
     }
     for (const agg of ctx.aggregates) {
-      emitAggregate(agg, ctx, ns, out, routePrefix);
+      emitAggregate(agg, ctx, ns, out, routePrefix, emitTrace);
     }
     emitWorkflows(ctx, ns, out, { routePrefix });
     emitViews(ctx, ns, out, { routePrefix });
@@ -143,6 +152,22 @@ function emitProjectFromContexts(
     workflows: contexts.flatMap((c) => c.workflows),
     views: contexts.flatMap((c) => c.views),
   };
+  // Auth files — emitted only when the deployable opts in
+  // via `auth: required` AND the system declares a user block (the
+  // validator already rejects the half-state).  Computed first
+  // because the capability-interface emitter needs to know whether
+  // the auditable interceptor can rely on ICurrentUserAccessor.
+  const authRequired = !!(system?.deployable.auth?.required && system.sys.user);
+  if (authRequired && system?.sys) {
+    emitAuthFiles(system.sys, ns, out);
+  }
+  // SaveChangesInterceptor — emitted only when at least one
+  // aggregate has stamping rules contributed by macros.  Driven by
+  // a per-entity-type switch built from each aggregate's
+  // `contextStamps` IR (no marker interface, no per-aggregate
+  // hand-written stamping logic).
+  emitStampingInterceptor(merged, ns, out);
+  const usesStamping = merged.aggregates.some((a) => (a.contextStamps?.length ?? 0) > 0);
   out.set("Infrastructure/Persistence/AppDbContext.cs", renderDbContext(merged, ns));
   // FluentValidation pipeline — emit the generic
   // ValidationBehavior + the csproj package ref + the
@@ -152,21 +177,15 @@ function emitProjectFromContexts(
   // arm is gated on the same flag.
   const usesValidators = merged.aggregates.some(hasAnyWireValidator);
   out.set("Api/DomainExceptionFilter.cs", renderExceptionFilter(ns, { usesValidators }));
-  // Auth files — emitted only when the deployable opts in
-  // via `auth: required` AND the system declares a user block (the
-  // validator already rejects the half-state).  When emitted, the
-  // Program.cs adopts the middleware mount + DI registrations.
-  const authRequired = !!(system?.deployable.auth?.required && system.sys.user);
-  if (authRequired && system?.sys) {
-    emitAuthFiles(system.sys, ns, out);
-  }
   if (usesValidators) {
     out.set("Application/Common/ValidationBehavior.cs", renderValidationBehavior(ns));
   }
   emitProject(merged, ns, out, {
     authRequired,
     usesValidators,
+    usesStamping,
     hasEmbeddedSpa,
+    emitTrace,
   });
   emitTestProject(merged, ns, out);
   // Fullstack mode — generate the React project under ClientApp/.
@@ -202,7 +221,12 @@ function emitProjectFromContexts(
   }
 }
 
-function emitContext(ctx: BoundedContextIR, ns: string, out: Map<string, string>): void {
+function emitContext(
+  ctx: BoundedContextIR,
+  ns: string,
+  out: Map<string, string>,
+  emitTrace = false,
+): void {
   emitIds(ctx, ns, out);
   emitEnums(ctx, ns, out);
   emitValueObjects(ctx, ns, out);
@@ -210,10 +234,12 @@ function emitContext(ctx: BoundedContextIR, ns: string, out: Map<string, string>
   emitCommon(ns, out);
   emitDispatcher(ns, out);
   for (const agg of ctx.aggregates) {
-    emitAggregate(agg, ctx, ns, out);
+    emitAggregate(agg, ctx, ns, out, undefined, emitTrace);
   }
   emitWorkflows(ctx, ns, out);
   emitViews(ctx, ns, out);
+  // Stamping interceptor — same gating as the system path.
+  emitStampingInterceptor(ctx, ns, out);
   // Same FluentValidation gate as the system path — drives the
   // pipeline behavior emit + csproj + Program.cs registration +
   // the DomainExceptionFilter arm.
@@ -222,13 +248,35 @@ function emitContext(ctx: BoundedContextIR, ns: string, out: Map<string, string>
   if (usesValidators) {
     out.set("Application/Common/ValidationBehavior.cs", renderValidationBehavior(ns));
   }
-  emitProject(ctx, ns, out, { usesValidators });
+  const usesStamping = ctx.aggregates.some((a) => (a.contextStamps?.length ?? 0) > 0);
+  emitProject(ctx, ns, out, { usesValidators, usesStamping, emitTrace });
   emitTestProject(ctx, ns, out);
 }
 
 // ---------------------------------------------------------------------------
 // Shared / per-context emission helpers
 // ---------------------------------------------------------------------------
+
+/** Emit the SaveChangesInterceptor when at least one aggregate
+ * contributes stamping rules.  The interceptor is registry-driven
+ * — its body is a switch on `entry.Entity.GetType()` built from
+ * every aggregate's `contextStamps`.  Adding a new stamping macro
+ * (e.g. `lastModifiedBy`, `versionBump`) requires no compiler
+ * changes: the new macro contributes more entries to one
+ * aggregate's stamps, which become more assignments in that
+ * aggregate's switch arm. */
+function emitStampingInterceptor(
+  merged: BoundedContextIR,
+  ns: string,
+  out: Map<string, string>,
+): void {
+  const anyStamping = merged.aggregates.some((a) => (a.contextStamps?.length ?? 0) > 0);
+  if (!anyStamping) return;
+  out.set(
+    "Infrastructure/Persistence/AuditableInterceptor.cs",
+    renderAuditableInterceptor(ns, merged.aggregates),
+  );
+}
 
 function emitIds(ctx: BoundedContextIR, ns: string, out: Map<string, string>): void {
   for (const agg of ctx.aggregates) {
@@ -287,14 +335,18 @@ function emitAggregate(
   ns: string,
   out: Map<string, string>,
   routePrefix?: string,
+  emitTrace = false,
 ): void {
   const aggFolder = plural(agg.name);
   const repo = findRepoFor(ctx, agg.name);
 
   for (const part of agg.parts) {
-    out.set(`Domain/${aggFolder}/${part.name}.cs`, renderEntity(part, false, ns, agg.name));
+    out.set(
+      `Domain/${aggFolder}/${part.name}.cs`,
+      renderEntity(part, false, ns, agg.name, emitTrace),
+    );
   }
-  out.set(`Domain/${aggFolder}/${agg.name}.cs`, renderEntity(agg, true, ns, agg.name));
+  out.set(`Domain/${aggFolder}/${agg.name}.cs`, renderEntity(agg, true, ns, agg.name, emitTrace));
   // Views whose source is this aggregate become parameterless,
   // filtered, list-returning finds on the repository.  Synthesised
   // here so all the existing find emission paths (interface,
@@ -304,15 +356,23 @@ function emitAggregate(
     `Domain/${aggFolder}/I${agg.name}Repository.cs`,
     renderRepositoryInterface(agg, repoWithViews, ns),
   );
+  // Threaded into buildFindBodies so a find with a `where` expression
+  // that lowers to `Regex.IsMatch` declares its System.Text.RegularExpressions
+  // dependency; the repository impl emitter then adds the using.
+  const repoImplUsings = new Set<string>();
+  const findBodies = buildFindBodies(agg, repoWithViews, repoImplUsings);
   out.set(
     `Infrastructure/Repositories/${agg.name}Repository.cs`,
-    renderRepositoryImpl(agg, repoWithViews, ns, buildFindBodies(agg, repoWithViews)),
+    renderRepositoryImpl(agg, repoWithViews, ns, findBodies, {
+      extraUsings: [...repoImplUsings].sort(),
+      emitTrace,
+    }),
   );
   out.set(
     `Infrastructure/Persistence/Configurations/${agg.name}Configuration.cs`,
     renderConfiguration(agg, ns, ctx),
   );
-  emitCqrs(agg, repo, ctx, ns, out, { routePrefix });
+  emitCqrs(agg, repo, ctx, ns, out, { routePrefix, emitTrace });
   const testsFile = renderTestsFile(agg, ctx, ns);
   if (testsFile) {
     out.set(`Tests/${ns}.Tests/${aggFolder}/${agg.name}Tests.cs`, testsFile);
@@ -340,24 +400,40 @@ function emitProject(
   options?: {
     authRequired?: boolean;
     usesValidators?: boolean;
+    usesStamping?: boolean;
     hasEmbeddedSpa?: boolean;
+    emitTrace?: boolean;
   },
 ): void {
   const hasExtern = ctx.aggregates.some((a) => a.operations.some((o) => o.extern));
   const usesValidators = !!options?.usesValidators;
+  const usesStamping = !!options?.usesStamping;
   const hasEmbeddedSpa = !!options?.hasEmbeddedSpa;
+  const emitTrace = !!options?.emitTrace;
   out.set(
     "Program.cs",
     renderProgram(ctx, ns, {
       authRequired: !!options?.authRequired,
       usesValidators,
+      usesStamping,
       hasEmbeddedSpa,
+      emitTrace,
     }),
   );
   out.set(`${ns}.csproj`, renderCsproj(ns, hasExtern, usesValidators));
   out.set("Dockerfile", renderDockerfile(ns, { hasEmbeddedSpa }));
   out.set(".dockerignore", renderDockerignore());
   out.set("certs/.gitkeep", "");
+  // Catalog-identity request log — always-on.  Cross-backend parity
+  // with Phoenix's <App>.Telemetry and Hono's pino access log.
+  out.set("Middleware/RequestLoggingMiddleware.cs", renderRequestLoggingMiddleware(ns));
+  if (emitTrace) {
+    // Domain-layer logger plumbing — emitted only on --trace so the
+    // default artefact stays free of an AsyncLocal accessor + the
+    // pipeline behavior that sets it.
+    out.set("Domain/Common/DomainLog.cs", renderDomainLog(ns));
+    out.set("Application/Common/DomainLogBehavior.cs", renderDomainLogBehavior(ns));
+  }
 }
 
 function emitTestProject(ctx: BoundedContextIR, ns: string, out: Map<string, string>): void {

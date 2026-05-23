@@ -17,7 +17,6 @@ import {
   wireToCommandArgument,
   wireType,
 } from "./dto-mapping.js";
-import { renderCsType } from "./render-expr.js";
 import {
   renderCommand,
   renderCommandHandler,
@@ -26,7 +25,8 @@ import {
   renderQueryHandler,
   renderRequestDtos,
   renderResponseDtos,
-} from "./templates.js";
+} from "./emit.js";
+import { renderCsType } from "./render-expr.js";
 import { renderCreateValidator, renderOperationValidator } from "./validator-emit.js";
 
 // ---------------------------------------------------------------------------
@@ -51,7 +51,7 @@ export function emitCqrs(
   ctx: BoundedContextIR,
   ns: string,
   out: Map<string, string>,
-  options?: { routePrefix?: string },
+  options?: { routePrefix?: string; emitTrace?: boolean },
 ): void {
   const aggFolder = plural(agg.name);
   const requiredFields = agg.fields.filter((f) => !f.optional);
@@ -62,7 +62,7 @@ export function emitCqrs(
   emitOperationCommandsAndHandlers(agg, ctx, ns, aggFolder, out);
   emitGetByIdQueryAndHandler(agg, ctx, ns, aggFolder, out);
   emitFindQueriesAndHandlers(agg, repo, ctx, ns, aggFolder, out);
-  emitController(agg, repo, ctx, requiredFields, ns, out, options?.routePrefix);
+  emitController(agg, repo, ctx, requiredFields, ns, out, options?.routePrefix, options?.emitTrace);
 }
 
 // ---------------------------------------------------------------------------
@@ -249,7 +249,7 @@ function emitOperationCommandsAndHandlers(
       // auto Mediator handler, then dispatch through it.
       const ifaceName = `I${upperFirst(op.name)}${agg.name}Handler`;
       const reqName = `${upperFirst(op.name)}Request`;
-      // Request record is wire-typed (Id<X> → Guid, enum → string,
+      // Request record is wire-typed (X id → Guid, enum → string,
       // datetime → string, value-object → <VO>Request) but `cmd.X`
       // is domain-typed.  Convert each param via
       // `domainToRequestExpr` so the constructor types line up.
@@ -294,8 +294,8 @@ function emitOperationCommandsAndHandlers(
             `        catch (DomainException) { throw; }\n` +
             `        catch (ForbiddenException) { throw; }\n` +
             `        catch (AggregateNotFoundException) { throw; }\n` +
-            `        catch (System.OperationCanceledException) { throw; }\n` +
-            `        catch (System.Exception ex)\n` +
+            `        catch (OperationCanceledException) { throw; }\n` +
+            `        catch (Exception ex)\n` +
             `        {\n` +
             `            throw new ExternHandlerException("${op.name}", "${agg.name}", ex);\n` +
             `        }\n` +
@@ -472,7 +472,7 @@ function buildFindHandlerBody(
 
 function renderResponseReturnType(t: TypeIR, agg: AggregateIR): string {
   if (t.kind === "array") {
-    return `System.Collections.Generic.IReadOnlyList<${agg.name}Response>`;
+    return `IReadOnlyList<${agg.name}Response>`;
   }
   if (t.kind === "optional") {
     return `${agg.name}Response?`;
@@ -492,21 +492,32 @@ function emitController(
   ns: string,
   out: Map<string, string>,
   routePrefix?: string,
+  emitTrace?: boolean,
 ): void {
+  // Threaded through every wireToCommandArgument call below.  When a
+  // datetime field is on the wire, the helper lowers to
+  // `DateTime.Parse(..., CultureInfo.InvariantCulture, …)` and adds
+  // `System.Globalization` to this set; the controller file imports
+  // it once, only when actually needed.
+  const usings = new Set<string>();
   out.set(
     `Api/${upperFirst(plural(agg.name))}Controller.cs`,
     renderController(agg, repo, ns, {
       idClrType: csIdValueClrType(agg.idValueType),
       createCmdArgs: requiredFields.map((f) =>
-        wireToCommandArgument(`request.${upperFirst(f.name)}`, f.type, ctx),
+        wireToCommandArgument(`request.${upperFirst(f.name)}`, f.type, ctx, usings),
       ),
       publicOps: agg.operations
         .filter((o) => o.visibility === "public")
         .map((op) => ({
           name: op.name,
           cmdArgs: op.params.map((p) =>
-            wireToCommandArgument(`request.${upperFirst(p.name)}`, p.type, ctx),
+            wireToCommandArgument(`request.${upperFirst(p.name)}`, p.type, ctx, usings),
           ),
+          // Wire-shape key set for --trace's wire_in line.  Param names
+          // are lowerCamel in the IR — same form the JSON wire uses
+          // (default ASP.NET JsonNamingPolicy.CamelCase).
+          paramNames: op.params.map((p) => p.name),
         })),
       finds: (repo?.finds ?? []).map((find) => ({
         name: find.name,
@@ -515,7 +526,7 @@ function emitController(
           .map((p) => `[FromQuery] ${wireType(p.type, ctx, "request")} ${p.name}`)
           .join(", "),
         queryConstructorArgs: find.params
-          .map((p) => wireToCommandArgument(p.name, p.type, ctx))
+          .map((p) => wireToCommandArgument(p.name, p.type, ctx, usings))
           .join(", "),
         returnShape: (find.returnType.kind === "array"
           ? "list"
@@ -523,7 +534,9 @@ function emitController(
             ? "optional"
             : "single") as "list" | "optional" | "single",
       })),
+      extraUsings: [...usings].sort(),
       routePrefix,
+      emitTrace,
     }),
   );
 }

@@ -55,8 +55,7 @@ system OrderingSystem {
     }
   }
 
-  ui WebApp {
-    scaffold modules: Ordering
+  ui WebApp with scaffold(modules: [Ordering]) {
   }
 
   deployable api { platform: hono, modules: Ordering, port: 3000 }

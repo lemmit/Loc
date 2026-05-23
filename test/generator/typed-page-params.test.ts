@@ -55,7 +55,7 @@ describe("typed page parameters in walker-rendered pages", () => {
           }
         }
         ui WebApp {
-          page Greet(name: string, customerId: Id<Customer>) {
+          page Greet(name: string, customerId: Customer id) {
             route: "/greet/:name/:customerId"
             body:  Stack(Heading(name), Text("Welcome."))
           }

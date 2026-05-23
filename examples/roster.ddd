@@ -1,5 +1,5 @@
 // Roster bounded context — minimal test fixture exercising
-// reference-collection join tables (`Id<X>[]` fields).
+// reference-collection join tables (`X id[]` fields).
 //
 // Two aggregates with a many-to-many relationship from Trainer to
 // Pokemon:
@@ -21,23 +21,23 @@ context Roster {
 
   aggregate Trainer {
     name: string display
-    party: Id<Pokemon>[]
-    caught: Id<Pokemon>[]
+    party: Pokemon id[]
+    caught: Pokemon id[]
     invariant party.count <= 6
     derived partyIsFull: bool = party.count == 6
-    operation addToParty(pokemon: Id<Pokemon>) {
+    operation addToParty(pokemon: Pokemon id) {
       precondition party.count < 6
       party += pokemon
       caught += pokemon
     }
-    operation removeFromParty(pokemon: Id<Pokemon>) {
+    operation removeFromParty(pokemon: Pokemon id) {
       precondition party.count > 0
       party -= pokemon
     }
   }
 
   repository Trainers for Trainer {
-    find holdingInParty(pokemon: Id<Pokemon>): Trainer[]
+    find holdingInParty(pokemon: Pokemon id): Trainer[]
         where this.party.contains(pokemon)
   }
 }

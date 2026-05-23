@@ -102,7 +102,7 @@ export function aggregatesWithExtern(ctx: BoundedContextIR): AggregateIR[] {
 }
 
 // Wire-side TS type for an extern operation parameter.  Mirrors how the
-// route's Zod schema parses each kind: `Id<X>` and `string`/`guid` come
+// route's Zod schema parses each kind: `X id` and `string`/`guid` come
 // off the wire as `string`; `int`/`long`/`decimal` as `number`;
 // `datetime` as `Date` (Zod `z.coerce.date()`); enums as their union;
 // value objects as the runtime class instance type.

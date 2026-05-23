@@ -138,7 +138,7 @@ function buildFullFormBody(
     lines.push(`    |> Ash.Query.filter(${filterExpr})`);
   }
 
-  // Emit Ash.Query.load for auxiliary association paths (Id<X> follows).
+  // Emit Ash.Query.load for auxiliary association paths (X id follows).
   // Each auxiliary has a path like ["lines"] or ["customerId"] whose
   // first segment is an association to pre-load on the source aggregate.
   // Collect unique top-level association names from auxiliaries.
@@ -183,7 +183,7 @@ function collectLoadKeys(view: ViewIR): string[] {
   const keys: string[] = [];
 
   // Also scan bind expressions for member accesses that are collection ops
-  // (e.g. lines.count) — those are direct associations, not Id<X> follows,
+  // (e.g. lines.count) — those are direct associations, not X id follows,
   // and don't appear in auxiliaries.  Collect them from the bind exprs.
   if (view.output) {
     for (const bind of view.output.binds) {
@@ -193,7 +193,7 @@ function collectLoadKeys(view: ViewIR): string[] {
         keys.push(topField);
       }
     }
-    // Auxiliary paths (Id<X> follows) also need loading
+    // Auxiliary paths (X id follows) also need loading
     for (const aux of view.output.auxiliaries) {
       const field = aux.path[0];
       if (field && !seen.has(field)) {
@@ -231,12 +231,12 @@ function topLevelAssociation(expr: ExprIR): string | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// Render a bind expression with `Id<X>` follow rewriting for Elixir.
+// Render a bind expression with `X id` follow rewriting for Elixir.
 // For non-follow shapes, delegates to renderExpr.
 // ---------------------------------------------------------------------------
 
 function renderBindExpr(expr: ExprIR, ctx: RenderCtx): string {
-  // Id<X> follow: member access on an Id-typed receiver becomes a map lookup.
+  // X id follow: member access on an Id-typed receiver becomes a map lookup.
   // In the Elixir/Ash world we pre-load the association via Ash.Query.load,
   // so `customerId.name` is just `record.customer.name` (the association is
   // already hydrated).  For now we fall back to standard renderExpr, which

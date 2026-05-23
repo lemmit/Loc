@@ -38,6 +38,10 @@ interface RenderCtx {
   contexts: BoundedContextIR[];
   /** Locals introduced by `let`. */
   locals: Set<string>;
+  /** `let` names that are actually referenced later in the test body.
+   *  A `let` whose binding is unused emits as a bare expression so the
+   *  generated test doesn't carry a dead `const` (Biome's noUnusedVariables). */
+  usedLetNames: Set<string>;
   /**
    * URL path prefix for API calls.  Phoenix routes everything under
    * `scope "/api"`, so aggregate / workflow / view calls must be
@@ -86,6 +90,7 @@ export function renderE2EFile(sys: SystemIR, modulesByName: Map<string, ModuleIR
       deployable: d,
       contexts,
       locals: new Set(),
+      usedLetNames: collectUsedLetNames(t.statements),
       apiBasePath: apiBasePath(d.platform),
     };
     lines.push(...renderTest(t, ctx).map((l) => `  ${l}`));
@@ -119,6 +124,44 @@ function renderTest(t: TestE2EIR, ctx: RenderCtx): string[] {
   return out;
 }
 
+/** Walk every ExprIR reachable from a test statement, collecting `ref`
+ *  names. The set is later consulted to decide whether a `let` binding
+ *  is dead. (A let's own RHS contributes its refs; the binding name is
+ *  not a ref, so unused lets fall out naturally.) */
+function collectUsedLetNames(statements: readonly TestStmtIR[]): Set<string> {
+  const used = new Set<string>();
+  const visit = (e: ExprIR): void => {
+    if (e.kind === "ref") used.add(e.name);
+    else if (e.kind === "member") visit(e.receiver);
+    else if (e.kind === "method-call") {
+      visit(e.receiver);
+      for (const a of e.args) visit(a);
+    } else if (e.kind === "call") {
+      for (const a of e.args) visit(a);
+    } else if (e.kind === "lambda") {
+      if (e.body) visit(e.body);
+    } else if (e.kind === "new" || e.kind === "object") {
+      for (const f of e.fields) visit(f.value);
+    } else if (e.kind === "paren") visit(e.inner);
+    else if (e.kind === "unary") visit(e.operand);
+    else if (e.kind === "binary") {
+      visit(e.left);
+      visit(e.right);
+    } else if (e.kind === "ternary") {
+      visit(e.cond);
+      visit(e.then);
+      visit(e.otherwise);
+    }
+  };
+  for (const s of statements) {
+    if (s.kind === "expect" || s.kind === "expect-throws") visit(s.expr);
+    else if (s.kind === "let") visit(s.expr);
+    else if (s.kind === "expression") visit(s.expr);
+    else if (s.kind === "call") for (const a of s.args) visit(a);
+  }
+  return used;
+}
+
 // ---------------------------------------------------------------------------
 // Statements
 // ---------------------------------------------------------------------------
@@ -132,6 +175,12 @@ function renderE2EStmt(s: TestStmtIR, ctx: RenderCtx): string {
   }
   if (s.kind === "let") {
     ctx.locals.add(s.name);
+    // Drop the `const <name> =` binding when nothing in the test body
+    // references it — `Sales.Order.create({...})` as a bare seed line
+    // shouldn't leave a dead local in the emitted test.
+    if (!ctx.usedLetNames.has(s.name)) {
+      return `${renderE2EExpr(s.expr, ctx)};`;
+    }
     return `const ${s.name} = ${renderE2EExpr(s.expr, ctx)};`;
   }
   if (s.kind === "expression") {

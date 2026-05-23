@@ -8,7 +8,7 @@
 //     and render(assigns) — HEEx body emitted by the heex-walker.
 //
 // All pages (scaffold and custom) route through the HEEx walker.
-// Scaffold pages have their `body` rewritten by `expandScaffoldPages()`
+// Scaffold pages have their `body` rewritten by `expandWalkerPrimitives()`
 // (src/ir/lower.ts) before the emitter runs, so `page.body` is always
 // a walker-stdlib `ExprIR` tree.  The walker (heex-walker.ts::walkBodyToHeex)
 // emits HEEx directly — no pack templates for full pages.
@@ -226,7 +226,7 @@ function renderLiveView(a: RenderArgs): string {
   const webModule = `${appModule}Web`;
 
   // All pages — scaffold and custom — route through the HEEx walker.
-  // Scaffold pages have their bodies rewritten by expandScaffoldPages()
+  // Scaffold pages have their bodies rewritten by expandWalkerPrimitives()
   // (src/ir/lower.ts) before the emitter runs, so page.body is always
   // populated with a walker-stdlib ExprIR tree.  The walker produces
   // handle_event clauses and alias lines from helper imports the body

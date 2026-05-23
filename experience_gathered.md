@@ -207,7 +207,7 @@ generated output is the real test.
 
 ## 7. DDD-specific design decisions
 
-- **Implicit identity (`Id<X>`)**: declaring `aggregate Order` is enough;
+- **Implicit identity (`X id`)**: declaring `aggregate Order` is enough;
   no `id OrderId` line. Massively cuts boilerplate at the cost of one
   more thing (the implicit `id` field) the user must remember.
 - **Entities only as parts**: bakes the DDD invariant into the grammar.
@@ -263,7 +263,7 @@ source-generated): same `IRequest<T>` + handlers, plus semantic
 
 ### Request / Response DTOs at the controller boundary
 Controllers shouldn't bind to internal Command records — that leaks
-`Id<X>` record-structs and value-object types into the wire format and
+`X id` record-structs and value-object types into the wire format and
 forces consumers to know domain shape.  Generate **flat primitive DTOs**
 (`CreateOrderRequest`, `OrderResponse`) and have controllers map them
 to commands and queries before dispatching via Mediator.  Query
@@ -531,7 +531,7 @@ or not.
   a small change — needs the IR walker, the validator, and the
   Drizzle lowerer all to agree on which queryable shapes are
   legal.  *Partially landed:* the membership form
-  `this.<refColl>.contains(param)` over an `Id<T>[]` reference
+  `this.<refColl>.contains(param)` over an `T id[]` reference
   collection is now queryable (see the join-table note below) —
   it lowers to `inArray(root.id, SELECT ownerFk FROM joinTable
   WHERE targetFk = param)`.  The general containment-count case
@@ -597,11 +597,11 @@ or not.
   a runtime `undefined`.  Repro lives in `test/generator-ts.test.ts`
   ("lowers collection `.count` on a let-bound aggregate to `.length`").
 
-## Reference-collection join tables (`field: Id<T>[]`)
+## Reference-collection join tables (`field: T id[]`)
 
 - **A collection of references is a different beast from a containment.**
   `contains lines: OrderLine[]` is parts that live and die with the parent
-  (child table, `parent_id` FK).  `party: Id<Pokemon>[]` is a set of
+  (child table, `parent_id` FK).  `party: Pokemon id[]` is a set of
   references to *another aggregate* that outlives any one parent — so it
   lowers to a **many-to-many join table**, not a child table.  The
   distinction is already in the IR: containments are `ContainmentIR`,
@@ -614,7 +614,7 @@ or not.
   lowering — so nothing re-derives FK names.  `joinTable =
   snake(owner)_snake(field)` (not `_target`) so two fields pointing at the
   same aggregate (`party` + `caught` → `trainer_party`, `trainer_caught`)
-  don't collide.  Self-reference (`Id<Self>[]`) collapses both FKs to one
+  don't collide.  Self-reference (`Self id[]`) collapses both FKs to one
   name — disambiguate to `owner_id`/`target_id`.
 - **Persistence mirrors the containment diff-sync exactly.**  Save selects
   existing target ids for the owner, deletes the removed pairs, then

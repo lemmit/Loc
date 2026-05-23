@@ -145,6 +145,12 @@ function renderHandler(
   void ctx;
   const cmdName = `${upperFirst(wf.name)}Command`;
   const handlerName = `${upperFirst(wf.name)}Handler`;
+  // Workflow handler emits domain-logic statements via renderCsExpr and
+  // (when transactional with an explicit isolation level) an
+  // IsolationLevel.X enum literal.  Both surfaces may reach namespaces
+  // outside the SDK's implicit-usings set — collect them per file.
+  const usings = new Set<string>();
+  if (wf.transactional && wf.isolation) usings.add("System.Data");
   // Field declarations for injected dependencies.
   const repoEntries = [...usage.repos.entries()];
   const fields: string[] = [];
@@ -180,9 +186,7 @@ function renderHandler(
   // Statement rendering.
   const stmtLines: string[] = [];
   if (usage.hasEmit) {
-    stmtLines.push(
-      "        var _workflowEvents = new System.Collections.Generic.List<IDomainEvent>();",
-    );
+    stmtLines.push("        var _workflowEvents = new List<IDomainEvent>();");
   }
   // Workflow params resolve to bare-identifier `name` refs in the ExprIR, but
   // in a command handler they must print as `cmd.<PascalName>`.
@@ -190,7 +194,7 @@ function renderHandler(
   // workflow's param-name set.
   const paramNames = new Set(wf.params.map((p) => p.name));
   const renderArg = (e: import("../../ir/loom-ir.js").ExprIR): string => {
-    return renderExprWithCmdParams(e, paramNames);
+    return renderExprWithCmdParams(e, paramNames, usings);
   };
 
   for (const st of wf.statements) {
@@ -205,7 +209,7 @@ function renderHandler(
   let body: string;
   if (wf.transactional) {
     const beginCall = wf.isolation
-      ? `_db.Database.BeginTransactionAsync(System.Data.IsolationLevel.${csIsolationLevel(wf.isolation)}, ct)`
+      ? `_db.Database.BeginTransactionAsync(IsolationLevel.${csIsolationLevel(wf.isolation)}, ct)`
       : `_db.Database.BeginTransactionAsync(ct)`;
     body =
       `        await using var tx = await ${beginCall};\n` +
@@ -253,9 +257,10 @@ function renderHandler(
       ]),
     ),
   ];
+  const extraUsings = [...usings].sort().map((n) => `using ${n};`);
   return `// Auto-generated.
 using System.Threading;
-using System.Threading.Tasks;
+using System.Threading.Tasks;${extraUsings.length > 0 ? "\n" + extraUsings.join("\n") : ""}
 using Mediator;
 using ${ns}.Domain.Common;
 using ${ns}.Domain.Events;
@@ -345,7 +350,7 @@ function renderStatement(
         // Construct the wire-typed request from the workflow's
         // domain-typed args.  Each arg renders via the regular
         // expression renderer (with cmd-param substitution), then
-        // wraps in `domainToRequestExpr` so Id<X>.Value, enum
+        // wraps in `domainToRequestExpr` so X id.Value, enum
         // .ToString(), VO → <VO>Request etc. all line up.
         const requestArgs = op.params
           .map((p, i) => domainToRequestExpr(renderArg(st.args[i]!), p.type, ctx))
@@ -370,6 +375,7 @@ function renderStatement(
 function renderExprWithCmdParams(
   e: import("../../ir/loom-ir.js").ExprIR,
   paramNames: Set<string>,
+  usings?: Set<string>,
 ): string {
   // Substitute by rewriting the IR before renderCsExpr.
   const rewrite = (
@@ -426,7 +432,7 @@ function renderExprWithCmdParams(
     }
     return e;
   };
-  return renderCsExpr(rewrite(e));
+  return renderCsExpr(rewrite(e), { thisName: "this", usings });
 }
 
 // ---------------------------------------------------------------------------
@@ -436,10 +442,14 @@ function renderExprWithCmdParams(
 function renderController(ctx: BoundedContextIR, ns: string, routePrefix?: string): string {
   const className = `${ctx.name}WorkflowsController`;
   const route = `${routePrefix ?? ""}workflows`;
+  // Tracks namespaces the wire→domain coercion reaches into beyond the
+  // SDK's implicit-usings set (e.g. System.Globalization when a
+  // workflow has a datetime param).
+  const usings = new Set<string>();
   const blocks: string[] = [];
   for (const wf of ctx.workflows) {
     const cmdArgs = wf.params
-      .map((p) => wireToCommandArgument(`request.${upperFirst(p.name)}`, p.type, ctx))
+      .map((p) => wireToCommandArgument(`request.${upperFirst(p.name)}`, p.type, ctx, usings))
       .join(",\n            ");
     blocks.push(
       `    [HttpPost("${snake(wf.name)}")]\n` +
@@ -452,8 +462,9 @@ function renderController(ctx: BoundedContextIR, ns: string, routePrefix?: strin
     );
   }
   void csIdValueClrType;
+  const extraUsings = [...usings].sort().map((n) => `using ${n};`);
   return `// Auto-generated.
-using System.Threading.Tasks;
+using System.Threading.Tasks;${extraUsings.length > 0 ? "\n" + extraUsings.join("\n") : ""}
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
 using ${ns}.Application.Workflows;

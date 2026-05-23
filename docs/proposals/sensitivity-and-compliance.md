@@ -52,7 +52,7 @@ A trailing property modifier, in the slot between `provenanced` and
 
 ```ddd
 aggregate Patient {
-  id:        Id<Patient>
+  id:        Patient id
   firstName: string sensitive(pii)
   lastName:  string sensitive(pii)
   pesel:     string sensitive(pii)

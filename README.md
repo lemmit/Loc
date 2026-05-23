@@ -119,7 +119,7 @@ system Acme {
         invariant currency.length == 3
       }
 
-      event OrderConfirmed { order: Id<Order>, at: datetime }
+      event OrderConfirmed { order: Order id, at: datetime }
 
       aggregate Order {
         customerId: string
@@ -134,7 +134,7 @@ system Acme {
 
         function isMutable(): bool = status == Draft
 
-        operation addLine(productId: Id<Product>, qty: int, price: Money) {
+        operation addLine(productId: Product id, qty: int, price: Money) {
           precondition isMutable()
           precondition qty > 0
           lines += new OrderLine { productId: productId, quantity: qty, unitPrice: price }
@@ -148,7 +148,7 @@ system Acme {
         }
 
         entity OrderLine {
-          productId: Id<Product>
+          productId: Product id
           quantity: int
           unitPrice: Money
           derived subtotal: Money =
@@ -204,7 +204,7 @@ the language at increasing complexity:
 | Example | Highlights |
 | --- | --- |
 | [`sales.ddd`](examples/sales.ddd) | Single-context DDD basics — `Order` aggregate with `OrderLine` parts, `Money` value object, `OrderStatus` enum, `OrderConfirmed` event, repository with `byCustomer` find, test blocks. |
-| [`banking.ddd`](examples/banking.ddd) | Optional fields, multiple aggregates with cross-references via `Id<X>`, richer `where`-filter on a repository find. |
+| [`banking.ddd`](examples/banking.ddd) | Optional fields, multiple aggregates with cross-references via `X id`, richer `where`-filter on a repository find. |
 | [`inventory.ddd`](examples/inventory.ddd) | Nested parts, explicit `ids guid` override on an aggregate. |
 | [`acme.ddd`](examples/acme.ddd) | Full system mode — modules, four deployables (.NET API, Hono catalog, .NET catalog, React frontend), cross-platform OpenAPI parity, DSL-level e2e tests.  See the [annotated walkthrough](examples/acme.md) for a five-minute tour. |
 

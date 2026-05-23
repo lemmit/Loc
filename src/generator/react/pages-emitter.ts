@@ -2,7 +2,7 @@
 //
 // Walks `ui.pages` (after scaffold expansion: explicit pages + scaffold
 // rewrites + shared Home / WorkflowsIndex / ViewsIndex) and emits one
-// TSX file per page, dispatching by `scaffoldOrigin.kind` to the
+// TSX file per page, dispatching by `archetype.kind` to the
 // existing per-archetype builders.  This is the byte-equivalence
 // layer for the bulk-scaffold case — every legacy direct-walk
 // invocation routes through here.
@@ -54,10 +54,10 @@ export interface PageEmitContext {
   sys: SystemIR;
   deployable: DeployableIR;
   /** Pre-walked aggregates from the deployable's reachable contexts.
-   *  Used by the per-aggregate builders to resolve `Id<X>` cross-
+   *  Used by the per-aggregate builders to resolve `X id` cross-
    *  references to display fields. */
   aggregatesByName: Map<string, AggregateIR>;
-  /** Map context name → `BoundedContextIR` for fast `scaffoldOrigin`
+  /** Map context name → `BoundedContextIR` for fast `archetype`
    *  → ctx lookup. */
   contextsByName: Map<string, BoundedContextIR>;
   /** Loaded design pack.  Used by the list-page renderer; other
@@ -152,7 +152,7 @@ export function deriveExtraRoutesFromUi(
     // AppShell loop sees both and keeps the conventional route
     // active; the explicit page's body simply replaces the
     // default rendering.
-    if (page.scaffoldOrigin) continue;
+    if (page.archetype) continue;
     if (isWalkableLayoutBody(page.body, userComponents, helperNames)) {
       out.push({
         componentName: page.name,
@@ -203,9 +203,9 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
     // Every page (scaffold OR explicit) routes through
     // Every page (scaffold OR explicit) routes through
     // the walker.  Scaffold-synthesised pages had their bodies
-    // rewritten in `lowerSystem`'s `expandScaffoldPages` pass, so
+    // rewritten in `lowerSystem`'s `expandWalkerPrimitives` pass, so
     // by the time we're here the body is always walker-eligible.
-    // `scaffoldOrigin` is preserved on rewritten pages so the
+    // `archetype` is preserved on rewritten pages so the
     // per-aggregate page-object emitter (later in this file) still
     // fires the rich `e2e/pages/<agg>.ts` helper classes.
     if (isWalkableLayoutBody(page.body, userComponents, helperNames)) {
@@ -281,9 +281,9 @@ export function emitPageObjectsForUi(ui: UiIR, ctx: PageEmitContext): Map<string
   for (const page of ui.pages) {
     // Only scaffold-origin pages dispatch to the
     // per-aggregate / per-workflow / per-view page-object
-    // builders.  Explicit pages (no `scaffoldOrigin`) get the
+    // builders.  Explicit pages (no `archetype`) get the
     // walker-side per-page page-object emitted later.
-    const origin = page.scaffoldOrigin;
+    const origin = page.archetype;
     if (!origin) continue;
     switch (origin.kind) {
       case "aggregate-list":
@@ -375,7 +375,7 @@ export function emitPageObjectsForUi(ui: UiIR, ctx: PageEmitContext): Map<string
   for (const page of ui.pages) {
     // Skip scaffold-origin pages; per-aggregate page-objects above
     // covered them (with their richer fill/submit/expectRow surface).
-    if (page.scaffoldOrigin) continue;
+    if (page.archetype) continue;
     if (!isWalkableLayoutBody(page.body, userComponents, helperNames)) continue;
     if (!page.body) continue;
     const paramNames = new Set(page.params.map((p) => p.name));

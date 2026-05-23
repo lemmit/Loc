@@ -13,7 +13,7 @@ context Sales {
   enum OrderStatus { Draft, Confirmed, Shipped, Cancelled }
 
   aggregate Order {
-    customerId: Id<Customer>
+    customerId: Customer id
     status: OrderStatus
     placedAt: datetime
     contains lines: OrderLine[]
@@ -26,7 +26,7 @@ context Sales {
 
   // Full form: declared output record, bind-projected per row.
   view OrderSummary {
-    orderId: Id<Order>
+    orderId: Order id
     status: OrderStatus
     lineCount: int
 
@@ -74,7 +74,7 @@ shorthand form is a strict subset of the full form's surface.
   bind <field>=<expr>, ... }` — `where` is optional.
 - **Output shape** is the declared `<Property>*` field set.  Each
   field's type follows the standard Loom type grammar
-  (`Id<X>` / primitives / enums / value-objects / arrays / `T?`).
+  (`X id` / primitives / enums / value-objects / arrays / `T?`).
 - **Bind exhaustiveness** — every declared field must have exactly
   one matching `bind <name> = <expr>`; stray binds (no matching
   field) are rejected; duplicate binds on the same field are
@@ -92,15 +92,15 @@ shorthand form is a strict subset of the full form's surface.
 
 ## Joined views (snowflake style)
 
-Slice 3 lets bind expressions **follow** `Id<X>` references into
+Slice 3 lets bind expressions **follow** `X id` references into
 other aggregates without an explicit join clause.  The type
-system already knows that `customerId: Id<Customer>` points at
+system already knows that `customerId: Customer id` points at
 `Customer`, so `customerId.name` resolves to a typed access on
 that aggregate's `name` field.
 
 ```ddd
 view CustomerOrders {
-  orderId: Id<Order>
+  orderId: Order id
   customerName: string
   customerEmail: string
   status: OrderStatus
@@ -116,7 +116,7 @@ view CustomerOrders {
 How it lowers:
 
 - The validator + lowering walk every bind expression for
-  `member` accesses whose receiver is `Id<X>` typed.  Each unique
+  `member` accesses whose receiver is `X id` typed.  Each unique
   `(sourceField, targetAgg)` pair is collected into the view's
   `auxiliaries`.
 - Each aggregate's repository gains a canonical `findManyByIds`
@@ -131,7 +131,7 @@ How it lowers:
 - During projection, each `r.customerId.name` rewrites to
   `customerById.get(r.customerId)!.name` (TS) /
   `customerById[d.CustomerId].Name` (.NET).  The non-null
-  assertion is correct because the source's `Id<X>` reference
+  assertion is correct because the source's `X id` reference
   is non-nullable — if no Customer exists for that id, the
   request errors loudly (which is the right answer; a
   dangling foreign reference is a data-integrity problem).
@@ -139,7 +139,7 @@ How it lowers:
 ### Multi-hop snowflakes
 
 Chains work too: `customerId.regionId.name` follows
-`Id<Customer>` then `Id<Region>` to project `Region.name`.  At
+`Customer id` then `Region id` to project `Region.name`.  At
 emission time:
 
 - Auxiliaries arrive in dependency order (shortest path first).
@@ -157,13 +157,13 @@ the Customer load).
 
 ### Remaining limits
 
-- **Non-nullable Id only**.  `Id<X>?` follows aren't supported;
+- **Non-nullable Id only**.  `X id?` follows aren't supported;
   emit hardcodes a non-null assertion that throws at runtime if a
   reference dangles.
 - **No 1:N joins**.  Cardinality stays 1:1 per follow — each
   source row produces exactly one output row.
 - **No `join … on …` syntax**.  If you need a join key that
-  isn't an `Id<X>`, you're stuck with two views or a
+  isn't an `X id`, you're stuck with two views or a
   hand-written endpoint until slice 5.
 
 ## What's NOT yet supported
@@ -172,7 +172,7 @@ the Customer load).
   `find` already covers this case; views earn parameters when
   they need to join.
 - Pagination / sorting / limit clauses.
-- Multi-hop snowflakes (chain `Id<X>.<Id<Y>>.field`).
+- Multi-hop snowflakes (chain `X id.<Y id>.field`).
 - Aggregations (`count`, `sum`, `avg` over groups).
 
 ## What it generates
@@ -250,7 +250,7 @@ public sealed class ActiveOrdersHandler : IQueryHandler<ActiveOrdersQuery, IRead
 }
 ```
 
-Full-form views emit a fresh `<View>Row` record (wire-typed: `Id<X>
+Full-form views emit a fresh `<View>Row` record (wire-typed: `X id
 → Guid`, `enum → string`, `datetime → string`) and project per
 row using the C# expression renderer with `thisName: "d"`, then
 the canonical `projectToResponse` wire helper:

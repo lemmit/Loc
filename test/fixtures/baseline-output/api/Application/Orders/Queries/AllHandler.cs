@@ -11,7 +11,7 @@ using Api.Application.Orders.Responses;
 
 namespace Api.Application.Orders.Queries;
 
-public sealed class AllHandler : IQueryHandler<AllQuery, System.Collections.Generic.IReadOnlyList<OrderResponse>>
+public sealed class AllHandler : IQueryHandler<AllQuery, IReadOnlyList<OrderResponse>>
 {
     private readonly IOrderRepository _repo;
     public AllHandler(IOrderRepository repo)
@@ -19,7 +19,7 @@ public sealed class AllHandler : IQueryHandler<AllQuery, System.Collections.Gene
         _repo = repo;
     }
 
-    public async ValueTask<System.Collections.Generic.IReadOnlyList<OrderResponse>> Handle(AllQuery q, CancellationToken ct)
+    public async ValueTask<IReadOnlyList<OrderResponse>> Handle(AllQuery q, CancellationToken ct)
     {
         var domain = await _repo.All(ct);
         return domain.Select(d => new OrderResponse(d.Id.Value, d.CustomerId, d.Status.ToString(), d.PlacedAt.ToUniversalTime().ToString("o"), d.Lines.Select(__e => new OrderLineResponse(__e.Id.Value, __e.ProductId.Value, __e.Quantity)).ToList())).ToList();

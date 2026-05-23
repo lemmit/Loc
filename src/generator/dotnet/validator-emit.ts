@@ -113,10 +113,16 @@ function renderValidatorFile(args: {
     for (const p of patterns) line += chainSingleFieldFluent(p);
     ruleLines.push(`${line};`);
   }
+  // Tracks namespaces this validator's `.Must(x => …)` predicates
+  // reach into beyond the SDK's implicit-usings set (e.g.
+  // System.Text.RegularExpressions for Regex.IsMatch).  The single-
+  // field shapes use FluentValidation's own `.Matches(...)` so no
+  // tracking is needed for those.
+  const usings = new Set<string>();
   for (const inv of remaining) {
-    const predicate = renderFluentPredicate(inv.expr);
+    const predicate = renderFluentPredicate(inv.expr, usings);
     const guarded = inv.guard
-      ? `!(${renderFluentPredicate(inv.guard)}) || (${predicate})`
+      ? `!(${renderFluentPredicate(inv.guard, usings)}) || (${predicate})`
       : predicate;
     const path = pickErrorPath(inv);
     const message = csStringLiteral(`Invariant violated: ${inv.source}`);
@@ -130,8 +136,12 @@ function renderValidatorFile(args: {
     return { content: null, nonEmpty: false };
   }
 
+  const extraUsings = [...usings]
+    .sort()
+    .map((n) => `using ${n};`)
+    .join("\n");
   const content = `// Auto-generated.
-using FluentValidation;
+using FluentValidation;${extraUsings ? "\n" + extraUsings : ""}
 using ${ns}.Domain.Ids;
 using ${ns}.Domain.ValueObjects;
 using ${ns}.Domain.Enums;
@@ -189,33 +199,33 @@ function chainSingleFieldFluent(p: SingleFieldPattern): string {
 // for in-domain operation bodies, wrong for command properties).
 // ---------------------------------------------------------------------------
 
-function renderFluentPredicate(e: ExprIR): string {
+function renderFluentPredicate(e: ExprIR, usings?: Set<string>): string {
   switch (e.kind) {
     case "literal":
       return renderLit(e.lit, e.value);
     case "ref":
       return renderRef(e);
     case "member":
-      return renderMember(e);
+      return renderMember(e, usings);
     case "method-call":
-      return renderMethodCall(e);
+      return renderMethodCall(e, usings);
     case "paren":
-      return `(${renderFluentPredicate(e.inner)})`;
+      return `(${renderFluentPredicate(e.inner, usings)})`;
     case "unary":
-      return `${e.op}${renderFluentPredicate(e.operand)}`;
+      return `${e.op}${renderFluentPredicate(e.operand, usings)}`;
     case "binary":
-      return `${renderFluentPredicate(e.left)} ${e.op} ${renderFluentPredicate(e.right)}`;
+      return `${renderFluentPredicate(e.left, usings)} ${e.op} ${renderFluentPredicate(e.right, usings)}`;
     case "ternary":
-      return `${renderFluentPredicate(e.cond)} ? ${renderFluentPredicate(e.then)} : ${renderFluentPredicate(e.otherwise)}`;
+      return `${renderFluentPredicate(e.cond, usings)} ? ${renderFluentPredicate(e.then, usings)} : ${renderFluentPredicate(e.otherwise, usings)}`;
     case "lambda":
       // Lambda body is now optional.  Wire-boundary refines
       // never see block-body lambdas (`classifyForWire` only admits
       // single-expression predicates), so falling back to the
       // unrenderable placeholder is correct.
-      if (e.body) return `${e.param} => ${renderFluentPredicate(e.body)}`;
+      if (e.body) return `${e.param} => ${renderFluentPredicate(e.body, usings)}`;
       return `false /* UNRENDERABLE:lambda-block */`;
     case "object":
-      return `new { ${e.fields.map((f) => `${upperFirst(f.name)} = ${renderFluentPredicate(f.value)}`).join(", ")} }`;
+      return `new { ${e.fields.map((f) => `${upperFirst(f.name)} = ${renderFluentPredicate(f.value, usings)}`).join(", ")} }`;
     case "this":
     case "id":
     case "call":
@@ -254,8 +264,8 @@ function renderRef(e: Extract<ExprIR, { kind: "ref" }>): string {
   }
 }
 
-function renderMember(e: Extract<ExprIR, { kind: "member" }>): string {
-  const recv = renderFluentPredicate(e.receiver);
+function renderMember(e: Extract<ExprIR, { kind: "member" }>, usings?: Set<string>): string {
+  const recv = renderFluentPredicate(e.receiver, usings);
   if (e.receiverType.kind === "array" && e.member === "count") {
     return `${recv}.Count`;
   }
@@ -269,9 +279,12 @@ function renderMember(e: Extract<ExprIR, { kind: "member" }>): string {
   return `${recv}.${upperFirst(e.member)}`;
 }
 
-function renderMethodCall(e: Extract<ExprIR, { kind: "method-call" }>): string {
-  const recv = renderFluentPredicate(e.receiver);
-  const args = e.args.map(renderFluentPredicate);
+function renderMethodCall(
+  e: Extract<ExprIR, { kind: "method-call" }>,
+  usings?: Set<string>,
+): string {
+  const recv = renderFluentPredicate(e.receiver, usings);
+  const args = e.args.map((a) => renderFluentPredicate(a, usings));
   // `string.matches(literal)` — when it falls through to a
   // `.Must(x => ...)` predicate (e.g. inside a cross-field rule),
   // render as the same Regex.IsMatch call the domain layer uses.
@@ -281,7 +294,8 @@ function renderMethodCall(e: Extract<ExprIR, { kind: "method-call" }>): string {
     e.receiverType.name === "string" &&
     args.length === 1
   ) {
-    return `System.Text.RegularExpressions.Regex.IsMatch(${recv}, ${args[0]})`;
+    usings?.add("System.Text.RegularExpressions");
+    return `Regex.IsMatch(${recv}, ${args[0]})`;
   }
   if (e.isCollectionOp) {
     switch (e.member) {

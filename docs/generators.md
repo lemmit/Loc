@@ -32,7 +32,7 @@ fastest way to read this matrix concretely.
 | `aggregate` | Class with private state, factory, ops, derived getters, `pullEvents()` | Sealed class with private state, factory, ops, derived getters, `PullEvents()` | List + Detail + New page; api hooks |
 | `entity` part | Same as aggregate but with `_parentId` | Same as aggregate; mapped via `OwnsMany` | Sub-table on detail page, master-detail row testids |
 | `contains` (collection) | Drizzle table with `parent_id` FK; auto-loaded in repo | EF owned-collection; auto-loaded by tracker | Sub-table on detail; not editable in the create form |
-| `Id<X>[]` (reference collection) | Auto-derived many-to-many **join table** with composite PK + `ordinal` column; save diff-syncs join rows, load orders by `ordinal`. `this.<field>.contains(param)` is queryable (subquery against the join table). | (not yet supported — emitter falls through to a text column) | `Id<X>[]` appears in the wire shape as `string[]`; populated/displayed via the response, but no first-class editor yet |
+| `X id[]` (reference collection) | Auto-derived many-to-many **join table** with composite PK + `ordinal` column; save diff-syncs join rows, load orders by `ordinal`. `this.<field>.contains(param)` is queryable (subquery against the join table). | (not yet supported — emitter falls through to a text column) | `X id[]` appears in the wire shape as `string[]`; populated/displayed via the response, but no first-class editor yet |
 | `derived` | Getter that calls into the expression | Computed property that calls into the expression | Read-only field on detail; included in the response Zod schema |
 | `invariant` | Private `_assertInvariants()` called at the end of every mutator | Private `AssertInvariants()` called at the end of every mutator | (enforced server-side; surfaces as 400 in the UI) |
 | `provenanced` property | `domain/provenance.ts` SDK + `recordTrace(...)` after each write; `ddd snapshot` captures rule snapshots to `.loom/snapshots/*.loomsnap.json` | (keyword parsed; no trace code emitted) | (n/a — wire shape unaffected) |
@@ -144,7 +144,7 @@ contained part (parts get a `parent_id` FK), `pgEnum` per enum,
 value-object fields flattened into prefix-named columns
 (`price_amount`, `price_currency`).
 
-Every `Id<X>[]` reference-collection field on an aggregate also gets
+Every `X id[]` reference-collection field on an aggregate also gets
 its own join table, `snake(owner)_snake(field)` (e.g. `trainer_party`,
 `trainer_caught`) — two FK columns (`<owner>_id` text not null,
 `<target>_id` text not null), an `ordinal integer not null` carrying
@@ -642,10 +642,10 @@ Out of scope for v1 (intentional):
   is a future syntax extension (`find all(skip: int, take: int)`).
 - **Multi-target frontends**: a `react` deployable has exactly one
   `targets:`.  Hosting against several APIs is deferred.
-- **Typeahead lookups for `Id<X>` form fields**: rendered as plain
-  text inputs.  A future enhancement could resolve `Id<Customer>`
+- **Typeahead lookups for `X id` form fields**: rendered as plain
+  text inputs.  A future enhancement could resolve `Customer id`
   to a `<Select>` populated from `useAllCustomers()`.
-- **Reference collections on `.NET` / Phoenix**: `Id<X>[]` is fully
+- **Reference collections on `.NET` / Phoenix**: `X id[]` is fully
   persisted and queryable on the TypeScript backend (join table with
   ordinal + `.contains(...)` subquery); the .NET (EF) and Phoenix
   (Ash) emitters still drop the field into a text column.  Adoption

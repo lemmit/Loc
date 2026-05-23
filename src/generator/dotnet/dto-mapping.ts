@@ -13,7 +13,7 @@ import { renderCsType } from "./render-expr.js";
 // ---------------------------------------------------------------------------
 // Wire-shape DTO mapping helpers.
 //
-// These functions translate between the IR's domain types (with `Id<X>`,
+// These functions translate between the IR's domain types (with `X id`,
 // value objects, enums) and the wire-shape primitive types used in
 // Request / Response DTOs.  Two directions:
 //
@@ -52,41 +52,50 @@ export function wireType(t: TypeIR, ctx: BoundedContextIR, dir: "request" | "res
     case "entity":
       return `${t.name}Response`;
     case "array":
-      return `System.Collections.Generic.IReadOnlyList<${wireType(t.element, ctx, dir)}>`;
+      return `IReadOnlyList<${wireType(t.element, ctx, dir)}>`;
     case "optional":
       return `${wireType(t.inner, ctx, dir)}?`;
   }
 }
 
 /** Map a wire-shaped expression to a domain-typed argument for a command. */
-export function wireToCommandArgument(expr: string, t: TypeIR, ctx: BoundedContextIR): string {
+export function wireToCommandArgument(
+  expr: string,
+  t: TypeIR,
+  ctx: BoundedContextIR,
+  usings?: Set<string>,
+): string {
   switch (t.kind) {
     case "primitive":
       if (t.name === "datetime") {
         // Wire is a string; coerce to UTC DateTime regardless of whether
         // the caller sent a Z-suffixed value (most clients) or a naive
         // datetime-local string (browser <input type="datetime-local">).
-        return `System.DateTime.Parse(${expr}, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal)`;
+        // CultureInfo + DateTimeStyles live in System.Globalization,
+        // outside the SDK's implicit-usings set — record the dependency
+        // so the file emitter adds the directive.
+        usings?.add("System.Globalization");
+        return `DateTime.Parse(${expr}, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal)`;
       }
       return expr;
     case "id":
       return `new ${t.targetName}Id(${expr})`;
     case "enum":
-      return `System.Enum.Parse<${t.name}>(${expr})`;
+      return `Enum.Parse<${t.name}>(${expr})`;
     case "valueobject": {
       const vo = ctx.valueObjects.find((v) => v.name === t.name);
       if (!vo) return expr;
       const args = vo.fields
-        .map((f) => wireToCommandArgument(`${expr}.${upperFirst(f.name)}`, f.type, ctx))
+        .map((f) => wireToCommandArgument(`${expr}.${upperFirst(f.name)}`, f.type, ctx, usings))
         .join(", ");
       return `new ${t.name}(${args})`;
     }
     case "entity":
       return expr;
     case "array":
-      return `${expr}.Select(__e => ${wireToCommandArgument("__e", t.element, ctx)}).ToList()`;
+      return `${expr}.Select(__e => ${wireToCommandArgument("__e", t.element, ctx, usings)}).ToList()`;
     case "optional":
-      return `(${expr} is null ? null : ${wireToCommandArgument(`${expr}!`, t.inner, ctx)})`;
+      return `(${expr} is null ? null : ${wireToCommandArgument(`${expr}!`, t.inner, ctx, usings)})`;
   }
 }
 

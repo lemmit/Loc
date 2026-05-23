@@ -129,7 +129,7 @@ describe("DddCompletionProvider — cross-reference enrichment", () => {
             customerId: string
           }
           aggregate Customer {
-            primaryOrder: Id<<|>>
+            primaryOrder: <|> id
           }
         }`,
       index: 0,

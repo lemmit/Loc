@@ -1,4 +1,5 @@
 // Auto-generated.
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using FluentValidation;
 using CatalogApi.Api;
@@ -16,7 +17,7 @@ var builder = WebApplication.CreateBuilder(args);
     var connectionString = builder.Configuration.GetConnectionString("Default");
     if (string.IsNullOrWhiteSpace(connectionString))
     {
-        throw new System.InvalidOperationException(
+        throw new InvalidOperationException(
             "Missing connection string 'Default'. Set ConnectionStrings__Default " +
             "in the environment or appsettings.Development.json.");
     }
@@ -30,7 +31,7 @@ builder.Logging.ClearProviders();
 builder.Logging.AddJsonConsole(opts =>
 {
     opts.IncludeScopes = true;
-    opts.JsonWriterOptions = new System.Text.Json.JsonWriterOptions
+    opts.JsonWriterOptions = new JsonWriterOptions
     {
         Indented = false,
     };
@@ -82,9 +83,9 @@ builder.Services.AddControllers(opts =>
     // camelCase property names match the Hono backend's wire shape;
     // the cross-platform OpenAPI cross-check would diff otherwise.
     opts.JsonSerializerOptions.PropertyNamingPolicy =
-        System.Text.Json.JsonNamingPolicy.CamelCase;
+        JsonNamingPolicy.CamelCase;
     opts.JsonSerializerOptions.DictionaryKeyPolicy =
-        System.Text.Json.JsonNamingPolicy.CamelCase;
+        JsonNamingPolicy.CamelCase;
 });
 
 // Permissive CORS so a generated React frontend on a different port
@@ -106,6 +107,28 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 var app = builder.Build();
+
+// Catalog server-lifecycle events.  Same event names + level Hono and
+// Phoenix emit so a cross-backend dashboard pivots on one identity.
+// A separate logger keeps these lines distinct from per-request
+// middleware lines in the structured stream.
+var lifecycleLog = app.Services.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>()
+    .CreateLogger("Lifecycle");
+var loomPort = builder.Configuration["PORT"]
+    ?? System.Environment.GetEnvironmentVariable("PORT")
+    ?? "8080";
+var loomEnv = app.Environment.EnvironmentName ?? "Production";
+lifecycleLog.LogInformation("{Event} port={Port} env={Env}", "server_starting", loomPort, loomEnv);
+{
+    var lifetime = app.Services.GetRequiredService<Microsoft.Extensions.Hosting.IHostApplicationLifetime>();
+    lifetime.ApplicationStarted.Register(() =>
+        lifecycleLog.LogInformation("{Event} port={Port}", "server_listening", loomPort));
+    lifetime.ApplicationStopping.Register(() =>
+        lifecycleLog.LogInformation("{Event} signal={Signal}", "server_shutdown", "SIGTERM"));
+    lifetime.ApplicationStopped.Register(() =>
+        lifecycleLog.LogInformation("{Event}", "server_drained"));
+}
+
 // Liveness probe — cheap, no I/O.  K8s livenessProbe / docker-compose
 // healthcheck use this to decide "is the process alive?".  A DB blip
 // must NOT mark the pod not-alive (that restarts the container and
@@ -127,16 +150,24 @@ app.MapGet("/ready", async (AppDbContext db, CancellationToken ct) =>
                 new { status = "not_ready", error = "database unreachable" },
                 statusCode: 503);
     }
-    catch (System.Exception ex)
+    catch (Exception ex)
     {
         return Results.Json(
             new { status = "not_ready", error = ex.Message },
             statusCode: 503);
     }
 });
+// Catalog-identity request log — emits the cross-backend
+// request_start / request_end events (same envelope shape Hono
+// and Phoenix produce).  Mounted FIRST so its Stopwatch covers the
+// full pipeline (auth, routing, controller body, serialization).
+// See Middleware/RequestLoggingMiddleware.cs.
+app.UseMiddleware<CatalogApi.Middleware.RequestLoggingMiddleware>();
 // HTTP logging middleware — pairs with AddHttpLogging above.
 // Mounted before the auth + business pipelines so every request is
-// logged regardless of whether it reached a controller.
+// logged regardless of whether it reached a controller.  Coexists
+// with the catalog middleware above (the framework line and the
+// catalog line are both useful; dashboards filter on the catalog).
 app.UseHttpLogging();
 app.UseCors();
 app.UseSwagger();
@@ -153,16 +184,4 @@ using (var scope = app.Services.CreateScope())
     db.Database.EnsureCreated();
 }
 
-// Graceful shutdown — log the intent so operators see "shutting down"
-// in container logs instead of an abrupt SIGKILL trace.  ASP.NET
-// Core's host already drains in-flight requests + disposes scoped
-// services (including AppDbContext) automatically; this hook is just
-// the visible breadcrumb.
-{
-    var lifetime = app.Services.GetRequiredService<Microsoft.Extensions.Hosting.IHostApplicationLifetime>();
-    var logger = app.Services.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>()
-        .CreateLogger("Shutdown");
-    lifetime.ApplicationStopping.Register(() =>
-        logger.LogInformation("Shutting down — draining in-flight requests."));
-}
 app.Run();

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Box, Text } from "@mantine/core";
 import type { TreeFolder, TreeNode } from "./file-tree";
 
@@ -6,6 +6,24 @@ interface FileTreeProps {
   root: TreeFolder;
   selectedPath: string | null;
   onSelect: (path: string) => void;
+  /** Optional per-file inline action slot — typically a delete `×`
+   *  button.  Renders to the right of the file name; not called for
+   *  folder rows.  Used by the source-files tree to attach a
+   *  delete affordance without forking the renderer; defaults to
+   *  nothing for the generated-output use case. */
+  rowActions?: (filePath: string) => ReactNode;
+  /** Initial open state for folders.  Defaults to `true` —
+   *  generated-output uses want every level visible at a glance.
+   *  Source-files use sometimes wants nested folders expanded by
+   *  default too; pass `false` for "all folders start collapsed". */
+  defaultFolderOpen?: boolean;
+  /** Optional filter — return `false` to hide a file from the
+   *  rendered tree (the folder it lives in still renders, but the
+   *  file row doesn't).  Used by the source-files tree to hide
+   *  the in-memory `.empty-folder` shim entries that exist only to
+   *  make `buildTree` materialise an empty folder node.  Not
+   *  consulted for folder rows. */
+  shouldRenderFile?: (filePath: string) => boolean;
 }
 
 // Visual constants tuned by hand against a 240 px pane width:
@@ -45,7 +63,14 @@ const baseRowStyle: React.CSSProperties = {
   WebkitTapHighlightColor: "transparent",
 };
 
-export function FileTree({ root, selectedPath, onSelect }: FileTreeProps): JSX.Element {
+export function FileTree({
+  root,
+  selectedPath,
+  onSelect,
+  rowActions,
+  defaultFolderOpen = true,
+  shouldRenderFile,
+}: FileTreeProps): JSX.Element {
   if (root.children.length === 0) {
     return (
       <Text size="sm" c="dimmed" p="sm">
@@ -62,6 +87,9 @@ export function FileTree({ root, selectedPath, onSelect }: FileTreeProps): JSX.E
           depth={0}
           selectedPath={selectedPath}
           onSelect={onSelect}
+          rowActions={rowActions}
+          defaultFolderOpen={defaultFolderOpen}
+          shouldRenderFile={shouldRenderFile}
         />
       ))}
     </Box>
@@ -73,12 +101,28 @@ interface NodeRowProps {
   depth: number;
   selectedPath: string | null;
   onSelect: (path: string) => void;
+  rowActions?: (filePath: string) => ReactNode;
+  defaultFolderOpen: boolean;
+  shouldRenderFile?: (filePath: string) => boolean;
 }
 
-function NodeRow({ node, depth, selectedPath, onSelect }: NodeRowProps): JSX.Element {
-  // Folders default to expanded — users want the whole layout
-  // visible so they can spot which file they care about quickly.
-  const [open, setOpen] = useState(true);
+function NodeRow({
+  node,
+  depth,
+  selectedPath,
+  onSelect,
+  rowActions,
+  defaultFolderOpen,
+  shouldRenderFile,
+}: NodeRowProps): JSX.Element | null {
+  // File-row filter — used by the source-files tree to hide the
+  // in-memory empty-folder shim entries while still letting their
+  // parent folder render.
+  if (node.kind === "file" && shouldRenderFile && !shouldRenderFile(node.path)) {
+    return null;
+  }
+  // Folders default to the parent-chosen state — usually expanded.
+  const [open, setOpen] = useState(defaultFolderOpen);
   // Hover covers mouse; pressed covers touch (where hover is meaningless).
   // Together they give every input modality some feedback before the
   // tap is committed.
@@ -135,16 +179,38 @@ function NodeRow({ node, depth, selectedPath, onSelect }: NodeRowProps): JSX.Ele
               depth={depth + 1}
               selectedPath={selectedPath}
               onSelect={onSelect}
+              rowActions={rowActions}
+              defaultFolderOpen={defaultFolderOpen}
+              shouldRenderFile={shouldRenderFile}
             />
           ))}
       </Box>
     );
   }
   const selected = selectedPath === node.path;
+  const action = rowActions?.(node.path);
+  // Use a div instead of a button when actions are present so the
+  // inner action button has unambiguous click handling (a button
+  // inside a button is non-conforming HTML and triggers both
+  // handlers on touch).  Click events still drive `onSelect`; the
+  // action slot stops propagation for its own clicks.
+  const Wrapper = action ? "div" : "button";
   return (
-    <button
-      type="button"
+    <Wrapper
+      type={action ? undefined : "button"}
+      role={action ? "button" : undefined}
+      tabIndex={action ? 0 : undefined}
       onClick={() => onSelect(node.path)}
+      onKeyDown={
+        action
+          ? (e: React.KeyboardEvent) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onSelect(node.path);
+              }
+            }
+          : undefined
+      }
       {...rowEvents}
       style={{
         ...baseRowStyle,
@@ -171,9 +237,26 @@ function NodeRow({ node, depth, selectedPath, onSelect }: NodeRowProps): JSX.Ele
       >
         ·
       </span>
-      <span style={{ fontSize: 14, fontFamily: "var(--mantine-font-family-monospace)" }}>
+      <span
+        style={{
+          fontSize: 14,
+          fontFamily: "var(--mantine-font-family-monospace)",
+          flex: 1,
+          minWidth: 0,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}
+      >
         {node.name}
       </span>
-    </button>
+      {action && (
+        <span
+          style={{ flex: "0 0 auto", marginLeft: 4 }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {action}
+        </span>
+      )}
+    </Wrapper>
   );
 }

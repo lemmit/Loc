@@ -66,9 +66,9 @@ system StorefrontSystem {
         invariant currency.length == 3
       }
 
-      event OrderConfirmed { order: Id<Order>, at: datetime }
-      event WalletToppedUp { wallet: Id<Wallet>, amount: Money, at: datetime }
-      event WalletDebited { wallet: Id<Wallet>, amount: Money, at: datetime }
+      event OrderConfirmed { order: Order id, at: datetime }
+      event WalletToppedUp { wallet: Wallet id, amount: Money, at: datetime }
+      event WalletDebited { wallet: Wallet id, amount: Money, at: datetime }
 
       aggregate Customer {
         name: string display
@@ -85,7 +85,7 @@ system StorefrontSystem {
       // Banking-style aggregate: a balance with a non-negative
       // invariant and deposit/withdraw-shaped operations.
       aggregate Wallet {
-        ownerId: Id<Customer>
+        ownerId: Customer id
         status: WalletStatus
         balance: Money
         openedAt: datetime
@@ -118,7 +118,7 @@ system StorefrontSystem {
 
       // Sales-style aggregate tree: an Order contains OrderLine parts.
       aggregate Order {
-        customerId: Id<Customer>
+        customerId: Customer id
         status: OrderStatus
         placedAt: datetime
         contains lines: OrderLine[]
@@ -129,7 +129,7 @@ system StorefrontSystem {
 
         function isMutable(): bool = status == Draft
 
-        operation addLine(productId: Id<Product>, unitPrice: Money, qty: int) {
+        operation addLine(productId: Product id, unitPrice: Money, qty: int) {
           precondition isMutable()
           precondition qty > 0
           lines += new OrderLine {
@@ -147,7 +147,7 @@ system StorefrontSystem {
         }
 
         entity OrderLine {
-          productId: Id<Product>
+          productId: Product id
           unitPrice: Money
           quantity: int
           invariant quantity > 0
@@ -182,8 +182,8 @@ system StorefrontSystem {
       }
       repository Products for Product { }
       repository Wallets for Wallet {
-        find byOwner(owner: Id<Customer>): Wallet[] where this.ownerId == owner
-        find openByOwner(owner: Id<Customer>): Wallet[]
+        find byOwner(owner: Customer id): Wallet[] where this.ownerId == owner
+        find openByOwner(owner: Customer id): Wallet[]
           where this.ownerId == owner && this.status == Open
       }
       repository Orders for Order { }
@@ -194,9 +194,9 @@ system StorefrontSystem {
       // Invoke via POST /workflows/checkout with body
       //   { customerId, walletId, productId, unitPrice: { amount, currency }, qty }
       workflow checkout(
-        customerId: Id<Customer>,
-        walletId: Id<Wallet>,
-        productId: Id<Product>,
+        customerId: Customer id,
+        walletId: Wallet id,
+        productId: Product id,
         unitPrice: Money,
         qty: int
       ) transactional {
@@ -214,8 +214,7 @@ system StorefrontSystem {
     }
   }
 
-  ui WebApp {
-    scaffold modules: Storefront
+  ui WebApp with scaffold(modules: [Storefront]) {
   }
 
   deployable api { platform: hono, modules: Storefront, port: 3000 }

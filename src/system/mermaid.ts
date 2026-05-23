@@ -26,7 +26,7 @@ import { lines } from "../util/code-builder.js";
 //                          repositories, enums and views, each with
 //                          their attributes + operations, plus the
 //                          relationships between them (containment,
-//                          Id<X> references, value-object use,
+//                          X id references, value-object use,
 //                          repository/view backing).
 //
 //   .loom/workflows.mmd  — a flowchart per workflow built from its call
@@ -46,7 +46,7 @@ import { lines } from "../util/code-builder.js";
 const label = (s: string): string => s.replace(/"/g, "&quot;");
 
 // Render a TypeIR to a compact Mermaid-friendly string.  Generics use
-// Mermaid's tilde notation (`Id~Order~` renders as `Id<Order>`) so the
+// Mermaid's tilde notation (`Id~Order~` renders as `Order id`) so the
 // raw angle brackets don't trip the parser.
 function typeName(t: TypeIR): string {
   switch (t.kind) {
@@ -108,7 +108,7 @@ export function buildDomainDiagram(sys: SystemIR): string {
       for (const v of c.valueObjects) classes.push(...valueObjectClass(v));
       for (const ev of c.events) {
         classes.push(...simpleClass(ev.name, "event", ev.fields));
-        // Events carry Id<X> fields — wire those as data references.
+        // Events carry X id fields — wire those as data references.
         collectFieldEdges(ev.name, ev.fields, c, rel);
       }
       for (const a of c.aggregates) {
@@ -325,7 +325,7 @@ function unwrapType(t: TypeIR): TypeIR {
 }
 
 // ER attribute types must be single identifier tokens — no angle
-// brackets / `[]` / `?`.  Id<X> becomes `Id_X`; collections/optionals
+// brackets / `[]` / `?`.  X id becomes `Id_X`; collections/optionals
 // collapse to their base type.
 function erType(t: TypeIR): string {
   const u = unwrapType(t);

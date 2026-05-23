@@ -37,8 +37,8 @@ module Sales {
     repository Customers for Customer {
       find byEmail(email: string): Customer?
     }
-    aggregate Order { customerId: Id<Customer>; total: decimal }
-    workflow checkout { input: { customerId: Id<Customer>, items: int[] } }
+    aggregate Order { customerId: Customer id; total: decimal }
+    workflow checkout { input: { customerId: Customer id, items: int[] } }
   }
 }
 ```

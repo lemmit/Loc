@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using Api.Application.Products.Commands;
 using Api.Application.Products.Queries;
 using Api.Application.Products.Requests;
@@ -19,7 +20,8 @@ namespace Api.Api;
 public sealed class ProductsController : ControllerBase
 {
     private readonly IMediator _mediator;
-    public ProductsController(IMediator mediator) => _mediator = mediator;
+    private readonly ILogger<ProductsController> _log;
+    public ProductsController(IMediator mediator, ILogger<ProductsController> log) { _mediator = mediator; _log = log; }
 
     [HttpPost]
     public async Task<ActionResult<CreateProductResponse>> Create([FromBody] CreateProductRequest request)
@@ -29,6 +31,7 @@ public sealed class ProductsController : ControllerBase
             new Money(request.Price.Amount, request.Price.Currency)
         );
         var id = await _mediator.Send(cmd);
+        _log.LogInformation("{Event} aggregate={Aggregate} id={Id}", "aggregate_created", "Product", id.Value);
         return CreatedAtAction(nameof(GetById), new { id = id.Value }, new CreateProductResponse(id.Value));
     }
 
@@ -40,7 +43,7 @@ public sealed class ProductsController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<System.Collections.Generic.IReadOnlyList<ProductResponse>>> All()
+    public async Task<ActionResult<IReadOnlyList<ProductResponse>>> All()
     {
         var result = await _mediator.Send(new AllQuery());
         return Ok(result);

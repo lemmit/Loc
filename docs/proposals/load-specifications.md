@@ -28,7 +28,7 @@ document intent. It reuses Loom's existing path/containment vocabulary:
 ```ddd
 aggregate Order {
   contains lines: OrderLine[]
-  customerId: Id<Customer>
+  customerId: Customer id
 
   // Explicit form — declares the shape this operation needs loaded.
   // `[]` denotes "across the collection", mirroring containment syntax.

@@ -27,8 +27,8 @@ const phoenixLiveViewPlatform: PlatformSurface = {
   // of these would collide with the auto-generated CRUD action of
   // the same name on the resource module.
   reservedRepositoryFindNames: new Set(["get", "read", "create", "update", "destroy"]),
-  emitProject({ contexts, deployable, sys }): Map<string, string> {
-    return generatePhoenixLiveViewProject({ contexts, deployable, sys });
+  emitProject({ contexts, deployable, sys, emitTrace }): Map<string, string> {
+    return generatePhoenixLiveViewProject({ contexts, deployable, sys, emitTrace });
   },
   composeService({ slug }): ComposeServiceShape {
     return {

@@ -77,7 +77,7 @@ system Acme {
 
             enum OrderStatus { Draft, Confirmed, Shipped, Cancelled }
 
-            event OrderConfirmed { order: Id<Order>, at: datetime }
+            event OrderConfirmed { order: Order id, at: datetime }
 
             aggregate Order {
                 customerId: string
@@ -89,7 +89,7 @@ system Acme {
 
                 function isMutable(): bool = status == Draft
 
-                operation addLine(productId: Id<Product>, qty: int) {
+                operation addLine(productId: Product id, qty: int) {
                     precondition isMutable()
                     precondition qty > 0
                     lines += new OrderLine {
@@ -105,7 +105,7 @@ system Acme {
                 }
 
                 entity OrderLine {
-                    productId: Id<Product>
+                    productId: Product id
                     quantity: int
                     invariant quantity > 0
                 }
@@ -135,7 +135,7 @@ system Acme {
             // emits a /workflows/place_order page from this; the
             // backend (api / catalogApi) emits the matching
             // POST /workflows/place_order route.
-            workflow placeOrder(customerId: string, productId: Id<Product>, quantity: int) {
+            workflow placeOrder(customerId: string, productId: Product id, quantity: int) {
                 precondition quantity > 0
                 let order = Order.create({
                     customerId: customerId,
@@ -151,7 +151,7 @@ system Acme {
             view ActiveOrders = Order where status == Confirmed
 
             view OrderSummary {
-                orderId: Id<Order>
+                orderId: Order id
                 status: OrderStatus
                 lineCount: int
 
@@ -310,11 +310,10 @@ system Acme {
     // through the legacy path and don't reference these params yet;
     // future explicit `page` declarations on the same UI can use
     // them directly (e.g. `body: Sales.Customer.all.data`).
-    ui WebApp {
+    ui WebApp with scaffold(modules: [Catalog, Sales, CustomerMgmt]) {
         api Catalog:      CatalogApi
         api Sales:        SalesApi
         api CustomerMgmt: CustomerMgmtApi
-        scaffold modules: Catalog, Sales, CustomerMgmt
     }
 
     // React + React Query + Zod + Mantine frontend.  References the

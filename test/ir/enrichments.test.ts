@@ -70,20 +70,20 @@ describe("enrichment — auto findAll", () => {
   });
 });
 
-describe("enrichment — associations (Id<T>[] join tables)", () => {
+describe("enrichment — associations (T id[] join tables)", () => {
   const ASSOC_SRC = `
     context Roster {
       aggregate Pokemon { species: string }
       aggregate Trainer {
         name: string
-        party: Id<Pokemon>[]
-        caught: Id<Pokemon>[]
+        party: Pokemon id[]
+        caught: Pokemon id[]
       }
       repository Trainers for Trainer { }
     }
   `;
 
-  it("derives one association per Id<T>[] field with snake-cased join metadata", async () => {
+  it("derives one association per T id[] field with snake-cased join metadata", async () => {
     const loom = await buildLoomModel(ASSOC_SRC);
     const trainer = allAggregates(loom).find((a) => a.name === "Trainer")!;
     expect(trainer.associations?.map((a) => a.joinTable)).toEqual([

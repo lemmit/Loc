@@ -6,8 +6,8 @@
 // TS so the per-pack templates stay flat.
 //
 // Mirrors the legacy formInput in form-helpers.ts.  Same testid
-// shape, same option-label resolution (Id<X>'s display field),
-// same placeholder fallback when an Id<X>'s target lacks a display.
+// shape, same option-label resolution (X id's display field),
+// same placeholder fallback when an X id's target lacks a display.
 // ---------------------------------------------------------------------------
 
 import type { AggregateIR, BoundedContextIR, TypeIR } from "../../../../ir/loom-ir.js";
@@ -50,8 +50,8 @@ export function prepareFormFieldVM(
     const display = target?.fields.find((f) => f.display);
     if (!target || !display) {
       const reason = !target
-        ? `Id<${inner.targetName}>: target aggregate not found`
-        : `Aggregate '${inner.targetName}' has no 'display' field — declare one (e.g. 'sku: string display') to enable a Select picker for Id<${inner.targetName}>.`;
+        ? `${inner.targetName} id: target aggregate not found`
+        : `Aggregate '${inner.targetName}' has no 'display' field — declare one (e.g. 'sku: string display') to enable a Select picker for ${inner.targetName} id.`;
       return {
         template: "field-input-id-text",
         path,

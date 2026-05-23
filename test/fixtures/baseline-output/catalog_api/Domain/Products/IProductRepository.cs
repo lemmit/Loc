@@ -5,9 +5,9 @@ namespace CatalogApi.Domain.Products;
 
 public interface IProductRepository
 {
-    System.Threading.Tasks.Task<Product?> GetByIdAsync(ProductId id, System.Threading.CancellationToken ct = default);
-    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Product>> FindManyByIdsAsync(System.Collections.Generic.IReadOnlyList<ProductId> ids, System.Threading.CancellationToken ct = default);
-    System.Threading.Tasks.Task SaveAsync(Product aggregate, System.Threading.CancellationToken ct = default);
-    System.Threading.Tasks.Task<List<Product>> All(System.Threading.CancellationToken ct = default);
-    System.Threading.Tasks.Task<Product?> BySku(string sku, System.Threading.CancellationToken ct = default);
+    Task<Product?> GetByIdAsync(ProductId id, CancellationToken ct = default);
+    Task<IReadOnlyList<Product>> FindManyByIdsAsync(IReadOnlyList<ProductId> ids, CancellationToken ct = default);
+    Task SaveAsync(Product aggregate, CancellationToken ct = default);
+    Task<List<Product>> All(CancellationToken ct = default);
+    Task<Product?> BySku(string sku, CancellationToken ct = default);
 }

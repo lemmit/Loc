@@ -96,7 +96,7 @@ function typeName(t: TypeIR): string {
     case "primitive":
       return t.name;
     case "id":
-      return `Id<${t.targetName}>`;
+      return `${t.targetName} id`;
     case "enum":
     case "valueobject":
     case "entity":

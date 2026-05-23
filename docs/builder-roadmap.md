@@ -175,7 +175,7 @@ Done:
   event / workflow, and repository / view — gated on an aggregate) into the first
   context, and system-level infra (storage / ui / deployable, and api — gated on a
   module) into the system. e2e: `web/e2e/system-builder.spec.ts`.
-- **Rename** a construct *and every reference to it* (repo `for`, `Id<X>` part
+- **Rename** a construct *and every reference to it* (repo `for`, `X id` part
   types, `from`, deployable bindings). The main-thread parse isn't linked, so
   rename spins up a throwaway fully-built Langium document and uses
   `References.findReferences` for the exact CST span of each reference
@@ -267,7 +267,7 @@ Done:
 - **Type-directed member-name completion** — `receiver.‹member›` inputs are
   autocompletes fed the receiver's *type's* members (properties / containments /
   derived / helpers, collection ops on arrays, enum values, `string.length`,
-  `Id<X>`/optional unwrapped). The single source of truth is `membersOfType` in
+  `X id`/optional unwrapped). The single source of truth is `membersOfType` in
   `src/language/type-system.ts`, **shared with the VS Code LSP completion**
   (`ddd-completion.ts` delegates to it). Receiver types come from the AST type
   system (`typeOf` + `envForNode`), which also gained collection-op lambda-param
@@ -579,6 +579,15 @@ Phasing:
   its own label + border tint instead of the uniform `STMT`. Gated by the
   v2 e2e (banking invariants render; Order.confirm's precondition shows
   `data-stmt-subkind="precondition"`).
+- ~~**Phase 7 (inline expression editor for invariants + find filters).**~~
+  Done: a shared `buildExprToggle` in the v2 pane builds an `ExprSlotEditor`
+  + toggle for any slot; `ConstructNode` exposes an optional `ƒx` button +
+  expanded editor section. Wired for **invariants** (`{kind:"invariant",
+  owner, index}`) and **repository find filters** (`{kind:"findFilter",
+  owner, name}`) — same scope-aware completion as v1's Expression picker
+  for these slots. Node widens to 320/360px while the editor is open. Gated
+  by the v2 e2e (Banking invariant `ƒx` opens an editor; Acme repository
+  find filter `ƒx` opens an editor).
 - **Phase 5** — polish: per-view positions, search / coverage / grouped layout
   adapted per zoom level, transitions on drill, mobile passes.
 

@@ -11,7 +11,7 @@ using CatalogApi.Application.Customers.Responses;
 
 namespace CatalogApi.Application.Customers.Queries;
 
-public sealed class AllHandler : IQueryHandler<AllQuery, System.Collections.Generic.IReadOnlyList<CustomerResponse>>
+public sealed class AllHandler : IQueryHandler<AllQuery, IReadOnlyList<CustomerResponse>>
 {
     private readonly ICustomerRepository _repo;
     public AllHandler(ICustomerRepository repo)
@@ -19,7 +19,7 @@ public sealed class AllHandler : IQueryHandler<AllQuery, System.Collections.Gene
         _repo = repo;
     }
 
-    public async ValueTask<System.Collections.Generic.IReadOnlyList<CustomerResponse>> Handle(AllQuery q, CancellationToken ct)
+    public async ValueTask<IReadOnlyList<CustomerResponse>> Handle(AllQuery q, CancellationToken ct)
     {
         var domain = await _repo.All(ct);
         return domain.Select(d => new CustomerResponse(d.Id.Value, d.Username, d.Email, d.Age)).ToList();

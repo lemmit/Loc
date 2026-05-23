@@ -6,7 +6,7 @@ import { LoomLspClient } from "./lsp/client";
 import type { Diagnostic } from "./lsp/protocol";
 import { examples, defaultExample, type LoomExample } from "./examples";
 import { LoomBuildClient } from "./build/client";
-import type { GenerateOk, GenerateResult, VirtualFile } from "./build/protocol";
+import type { GenerateOk, GenerateResult, VfsEntry, VirtualFile } from "./build/protocol";
 import type { BundleOk } from "./bundle/protocol";
 import { engineRegistry, selectedEngineId, type RuntimeEngine } from "./engine";
 import { emptyDependencySet } from "./engine";
@@ -22,7 +22,14 @@ import {
 import { buildTree } from "./preview/file-tree";
 import { useWorkspace } from "./workspace/use-workspace";
 import { useWorkspaceSources } from "./workspace/use-workspace-sources";
-import { buildShareUrl, readHashSource, writeHashSource } from "./util/share";
+import {
+  buildShareUrl,
+  readHash,
+  readHashSource,
+  writeHashProject,
+  writeHashSource,
+  type HashLoad,
+} from "./util/share";
 import { fnv1a32 } from "./util/hash";
 import { usePersistedState } from "./util/usePersistedState";
 import { initialPipelineState, pipelineReducer } from "./pipeline/reducer";
@@ -100,23 +107,67 @@ function analyzeDeployables(files: VirtualFile[]): DeployableAnalysis {
   return { hono, react, unsupported };
 }
 
+/** Convert a workspace-absolute `files` map from a SharedProject
+ *  into the workspace-relative shape `LoomExample.files` expects.
+ *  `/workspace/shared/money.ddd` → `shared/money.ddd`.  The active
+ *  file is dropped — it lives on `LoomExample.source` instead. */
+function workspacePathsToRelative(
+  files: Record<string, string>,
+  activePath: string,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [abs, content] of Object.entries(files)) {
+    if (abs === activePath) continue;
+    if (abs.startsWith("/workspace/")) {
+      const rel = abs.slice("/workspace/".length);
+      if (rel) out[rel] = content;
+    }
+  }
+  return out;
+}
+
 export default function App(): JSX.Element {
-  // Read once on mount.  If the URL hash has a `s=` payload we
-  // synthesise a "Shared link" entry at the top of the dropdown.
-  const hashSourceOnMount = useMemo(() => readHashSource(), []);
+  // Read once on mount.  When the URL hash carries a shareable
+  // payload — single-file `s=` (legacy) or multi-file `p=` (Stage
+  // 3) — we synthesise a "Shared link" entry at the top of the
+  // dropdown so a recipient lands on the shared project even before
+  // they touch the picker.
+  const hashLoadOnMount = useMemo<HashLoad | null>(() => readHash(), []);
+  // Legacy single-file snapshot — `null` when the URL hash isn't a source / is
+  // empty. Callers that need the project state use `hashLoadOnMount` instead.
+  const hashSourceOnMount = useMemo<string | null>(() => readHashSource(), []);
+  // Convenience accessor: the source the "Shared link" entry's
+  // editor should open with — i.e. the active file's content for a
+  // project payload, or the raw text for a single-file payload.
+  const hashEntrySource = useMemo<string | null>(() => {
+    if (!hashLoadOnMount) return null;
+    if (hashLoadOnMount.kind === "single") return hashLoadOnMount.text;
+    const { files, active } = hashLoadOnMount.project;
+    return files[active] ?? files["/workspace/main.ddd"] ?? null;
+  }, [hashLoadOnMount]);
   const examplesList = useMemo<LoomExample[]>(() => {
-    if (hashSourceOnMount === null) return examples;
-    return [
-      {
-        id: "shared",
-        label: "Shared link (from URL)",
-        source: hashSourceOnMount,
-        blurb:
-          "Loaded from the URL hash — your edits update the URL so it stays shareable.",
-      },
-      ...examples,
-    ];
-  }, [hashSourceOnMount]);
+    if (hashEntrySource === null) return examples;
+    // For a multi-file hash we hand the example its full `files`
+    // record (workspace-relative paths) so the example-pick effect
+    // below writes every file into the VFS.  The legacy single-
+    // file form stays single-file (no `files` key).
+    const shared: LoomExample = {
+      id: "shared",
+      label: "Shared link (from URL)",
+      source: hashEntrySource,
+      blurb:
+        "Loaded from the URL hash — your edits update the URL so it stays shareable.",
+      ...(hashLoadOnMount?.kind === "project"
+        ? {
+            files: workspacePathsToRelative(
+              hashLoadOnMount.project.files,
+              hashLoadOnMount.project.active,
+            ),
+          }
+        : {}),
+    };
+    return [shared, ...examples];
+  }, [hashEntrySource, hashLoadOnMount]);
 
   // Responsive layout switch.  Below the Mantine `sm` breakpoint
   // (768 px) we render `MobileShell` (bottom-tab nav, fullscreen
@@ -175,12 +226,30 @@ export default function App(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace.persistedSource]);
 
-  const initialSource = useMemo(
+  // Content of the currently-picked example.  Drives the editor's
+  // initial value for `/workspace/main.ddd`; non-main files take
+  // their content from `sources.files` (Phase 2b2).
+  const exampleSource = useMemo(
     () =>
       augmentedExamplesList.find((e) => e.id === exampleId)?.source ??
       defaultExample.source,
     [exampleId, augmentedExamplesList],
   );
+
+  // Editor's seed value for the active file.  Precedence:
+  //   1. Persisted VFS content for this path (multi-file files
+  //      survive tab switches and reloads via IDB).
+  //   2. Chosen example (main.ddd only — examples are single-file).
+  //   3. Empty body with a stub comment (newly-created non-main
+  //      file before the user types anything).
+  // The editor remounts via `key={…activePath}` when the active
+  // path changes, picking up this freshly-computed value each time.
+  const initialSource = useMemo(() => {
+    const persisted = sources.files.get(sources.activePath);
+    if (persisted !== undefined) return persisted;
+    if (sources.activePath === "/workspace/main.ddd") return exampleSource;
+    return "// New file — declare a context, valueobject, or enum here.\n";
+  }, [sources.files, sources.activePath, exampleSource]);
 
   const [pipeline, dispatch] = useReducer(pipelineReducer, initialPipelineState);
 
@@ -274,10 +343,17 @@ export default function App(): JSX.Element {
       seedWorkspace: () => {
         const vfs = workspaceForSeedRef.current.vfs;
         if (!vfs) return [];
-        return vfs.list("/workspace/").flatMap((path) => {
-          const content = vfs.read(path);
-          return content != null ? [{ path, content }] : [];
-        });
+        // Snapshot the workspace as tagged entries so directory
+        // entries (created via `mkdir`, empty by design) survive
+        // the worker respawn — the previous `list().flatMap(read)`
+        // shape silently dropped them by filtering out
+        // `read() === undefined`.
+        const out = [];
+        for (const [path, entry] of vfs.snapshot()) {
+          if (!path.startsWith("/workspace/")) continue;
+          out.push(entry);
+        }
+        return out;
       },
     });
     // The runtime engine encapsulates the bundle + runtime workers
@@ -371,31 +447,72 @@ export default function App(): JSX.Element {
     if (!vfs || !client) return;
     const designPaths = vfs.list("/workspace/design/");
     if (designPaths.length === 0) return;
-    const entries = designPaths.flatMap((path) => {
+    // Use tagged VfsEntry shape — `list` is files-only so every
+    // path here is a file, but the wire protocol expects the
+    // discriminated union.
+    const entries: VfsEntry[] = [];
+    for (const path of designPaths) {
       const content = vfs.read(path);
-      return content != null ? [{ path, content }] : [];
-    });
+      if (content != null) entries.push({ kind: "file", path, content });
+    }
     void client.vfsWrite(entries);
   }, [workspace.loaded, workspace.vfs, buildClientReady]);
 
+  // Sync `sourceRef` whenever the active file's initial content
+  // changes — happens both on example switch AND on multi-file tab
+  // switch (Phase 2b2).  Handlers reading `sourceRef.current` see
+  // the active file's content.  Keep this effect cheap; the heavy
+  // "new project" reset below is gated on exampleId only.
   useEffect(() => {
     sourceRef.current = initialSource;
-    writeHashSource(initialSource);
-    dispatch({ type: "RESET" });
-    setDiagnostics([]);
-    setSelectedPath(null);
-    // Drop the retained preview so the iframe remounts for the new
-    // example instead of hot-swapping the previous app's bundle.
-    setPreviewBundle(null);
-    setPreviewBooted(false);
-    // The live log streams belong to the previous example's runtime —
-    // clear them so stale backend/app output doesn't bleed across.
-    setBackendLog([]);
-    setAppLog([]);
-    void engineRef.current?.reset();
     scheduleAutoGenerate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSource]);
+
+  // Heavy reset — pipeline state, diagnostics, preview, logs,
+  // runtime engine — fires only on a genuine "new project" picker
+  // change (the example dropdown).  A multi-file tab switch is NOT
+  // a new project: the user is still working on the same workspace,
+  // so we preserve all of these.
+  //
+  // Multi-file (Stage 3): the picked example may carry companion
+  // `files` (workspace-relative paths).  Seed each into the VFS at
+  // `/workspace/<rel>` so the tabs strip shows them and the
+  // project loader's import-graph walk resolves them.  We also
+  // write `example.source` to `/workspace/main.ddd` and flip the
+  // active path so the user lands on main.ddd regardless of what
+  // they had open before — a multi-file example with no obvious
+  // entry would otherwise leave the editor on a stale file.
+  //
+  // URL hash always tracks main.ddd content (per-keystroke sync
+  // stays single-file by design; explicit Share button generates
+  // the multi-file URL via `copyShareLink`), so we use
+  // `writeHashSource` here with the example's main.ddd content.
+  useEffect(() => {
+    const picked = augmentedExamplesList.find((e) => e.id === exampleId);
+    const mainContent = picked?.source ?? exampleSource;
+    // Phase-3 seeding: write the example's files to the VFS so the
+    // workspace immediately reflects the picked example.
+    const s = sourcesRef.current;
+    s.write("/workspace/main.ddd", mainContent);
+    if (picked?.files) {
+      for (const [rel, content] of Object.entries(picked.files)) {
+        const abs = `/workspace/${rel.replace(/^\/+/, "")}`;
+        if (abs.endsWith(".ddd")) s.write(abs, content);
+      }
+    }
+    s.setActivePath("/workspace/main.ddd");
+    writeHashSource(mainContent);
+    dispatch({ type: "RESET" });
+    setDiagnostics([]);
+    setSelectedPath(null);
+    setPreviewBundle(null);
+    setPreviewBooted(false);
+    setBackendLog([]);
+    setAppLog([]);
+    void engineRef.current?.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exampleId]);
 
   const hashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scheduleHashSync = (text: string): void => {
@@ -429,7 +546,20 @@ export default function App(): JSX.Element {
 
   async function copyShareLink(): Promise<void> {
     try {
-      const url = buildShareUrl(sourceRef.current);
+      // Build the smallest legal URL for the current workspace:
+      // single-file (`s=`, byte-compatible with pre-Stage-3 shared
+      // links) when only main.ddd is present, multi-file (`p=`) when
+      // the user has added other `.ddd` files via the tabs strip.
+      const s = sourcesRef.current;
+      const onlyMain =
+        s.files.size === 0 ||
+        (s.files.size === 1 && s.files.has("/workspace/main.ddd"));
+      const url = onlyMain
+        ? buildShareUrl(sourceRef.current)
+        : buildShareUrl({
+            files: Object.fromEntries(s.files),
+            active: s.activePath,
+          });
       await navigator.clipboard.writeText(url);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
@@ -497,7 +627,7 @@ export default function App(): JSX.Element {
     if (!client) return null;
     dispatch({ type: "GENERATE_START" });
     const entryPath = sourcesRef.current.activePath;
-    await client.vfsWrite([{ path: entryPath, content: sourceRef.current }]);
+    await client.vfsWrite([{ kind: "file", path: entryPath, content: sourceRef.current }]);
     const result = await client.generateFromPath(entryPath);
     dispatch({ type: "GENERATE_DONE", result });
     if (result.ok && result.files.length > 0) {
@@ -782,21 +912,39 @@ export default function App(): JSX.Element {
     getSource: () => sourceRef.current,
     workspace,
     activeSourcePath: sources.activePath,
+    sourceFiles: sources.files,
+    setActiveSourcePath: sources.setActivePath,
+    // New-file: seed VFS with a stub body so the editor has
+    // something non-empty to mount against, then flip the active
+    // path.  The Files tab strip validates the basename before
+    // calling, so we trust `path` here.
+    createSourceFile: (path: string) => {
+      const s = sourcesRef.current;
+      const seed = "// New file — declare a context, valueobject, or enum here.\n";
+      s.write(path, seed);
+      s.setActivePath(path);
+    },
+    deleteSourceFile: sources.delete,
+    emptySourceFolders: sources.emptyFolders,
+    createEmptySourceFolder: sources.createEmptyFolder,
+    deleteEmptySourceFolder: sources.deleteEmptyFolder,
     lspClient: lspClientRef.current,
     buildClient: buildClientRef.current,
     engine: engineRef.current,
     onSourceChange: (text, origin) => {
       sourceRef.current = text;
-      scheduleHashSync(text);
+      const s = sourcesRef.current;
+      // URL hash is single-file by design (Stage 3 would generalise
+      // it).  Only sync when editing main.ddd so the hash doesn't
+      // silently flip to a non-main file's content on a tab edit.
+      if (s.activePath === "/workspace/main.ddd") {
+        scheduleHashSync(text);
+      }
       scheduleAutoGenerate();
       // Route the persisted write through the multi-file controller
-      // so the workspace-sources state stays in sync.  Today the
-      // active path is `/workspace/main.ddd` (Phase 2b1 keeps it
-      // constant); the controller's `write` is a thin wrapper over
-      // `vfs.write` plus a `files` map refresh.  Read through the
-      // ref so the active path reflects the latest hook snapshot if
-      // a Phase-2b2 tab switch lands mid-typing.
-      const s = sourcesRef.current;
+      // so the workspace-sources state stays in sync.  Read through
+      // the ref so the active path reflects the latest hook snapshot
+      // if a Phase-2b2 tab switch lands mid-typing.
       s.write(s.activePath, text);
       // Builder (and any non-editor) edits don't flow through Monaco's own
       // change path, so push them into the live model — which also re-runs the

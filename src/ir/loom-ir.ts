@@ -56,7 +56,7 @@ export interface FieldIR {
   /** True iff the source declared this property with the `display`
    * modifier.  At most one such field per aggregate (enforced by the
    * validator).  Used by the React generator to pick the option label
-   * for `Id<X>` Selects pointing at this aggregate. */
+   * for `X id` Selects pointing at this aggregate. */
   display?: boolean;
   /** True iff the source declared this property with the `provenanced`
    * modifier.  Every assignment statement (`:=`/`+=`/`-=`) targeting such
@@ -74,11 +74,16 @@ export interface ContainmentIR {
   name: string;
   partName: string;
   collection: boolean;
+  /** Singular containments only — when true, the part may be absent at
+   *  runtime; backends serialise it as a nullable wire field.  Validators
+   *  reject the combination `collection && optional` (an empty list already
+   *  encodes absence). */
+  optional?: boolean;
 }
 
 /** A many-to-many association derived from an aggregate field whose
  * type is a collection of references to another aggregate
- * (`field: Id<Target>[]`).  Populated by `enrichLoomModel`; backends
+ * (`field: Target id[]`).  Populated by `enrichLoomModel`; backends
  * that persist relationally emit a join table from this rather than
  * re-deriving it.  See `src/ir/enrichments.ts`. */
 export interface AssociationIR {
@@ -194,10 +199,61 @@ export interface AggregateIR {
   /** Canonical JSON-on-the-wire field list.  Populated by
    * `enrichLoomModel`. */
   wireShape?: WireField[];
-  /** Many-to-many associations derived from `Id<Target>[]` fields.
+  /** Many-to-many associations derived from `Target id[]` fields.
    * Populated by `enrichLoomModel`; one entry per reference-collection
    * field.  Empty array when the aggregate has none. */
   associations?: AssociationIR[];
+  /** Filter predicates contributed by `filter <expr>` declarations
+   * (hand-written or macro-emitted) on the aggregate, plus any
+   * propagated from the enclosing context.  Each entry is a lowered
+   * Loom expression evaluated against a lambda-bound row in the
+   * query layer.  Backends install them via their query-filter API
+   * (.NET: per-capability `HasQueryFilter` loops in OnModelCreating;
+   * Drizzle: query wrapper; Ecto: base query helper).
+   *
+   * Composes additively — N filters become N conjunctively-applied
+   * predicates at the storage layer. */
+  contextFilters?: ExprIR[];
+  /** Lifecycle stamping rules contributed by `stamp onCreate { ... }`
+   * / `stamp onUpdate { ... }` declarations (hand-written or
+   * macro-emitted) on the aggregate, plus any propagated from the
+   * enclosing context.  Each rule lists field/value pairs to assign
+   * at the matching lifecycle event.  Backends iterate this in their
+   * per-entity stamping path (.NET: registry-driven
+   * SaveChangesInterceptor; Drizzle: insert/update middleware;
+   * Ecto: changeset functions).
+   *
+   * Composes additively — N stamping declarations yield N rule sets
+   * concatenated per event. */
+  contextStamps?: ContextStampIR[];
+  /** Capability names this aggregate opts into via
+   * `implements "<name>"`.  Backends translate by convention to a
+   * marker interface / type alias / behaviour, and group runtime
+   * infrastructure by capability name (.NET: one `OnModelCreating`
+   * filter loop per capability, scoped by `Entries<I<Cap>>()`).
+   * Sorted + deduped at lowering time.  Undefined when the
+   * aggregate names no capabilities. */
+  implementsCapabilities?: readonly string[];
+}
+
+/** A single stamping rule attached to an aggregate.  Backends
+ * dispatch on `event` and emit assignments for the matching
+ * lifecycle moment.  Values are arbitrary lowered Loom
+ * expressions — `currentUser`, `now()`, constants, derived
+ * expressions, etc. — translated by the backend's normal
+ * expression renderer. */
+export interface ContextStampIR {
+  event: "create" | "update";
+  assignments: ContextStampAssignmentIR[];
+}
+
+export interface ContextStampAssignmentIR {
+  /** Field name on the aggregate that gets stamped.  Must match a
+   * declared field (validated when the IR is consumed; an unknown
+   * field is a generator-side error). */
+  field: string;
+  /** Lowered expression whose result is assigned to `field`. */
+  value: ExprIR;
 }
 
 export interface TestIR {
@@ -291,7 +347,7 @@ export interface ViewIR {
     fields: FieldIR[];
     binds: { name: string; expr: ExprIR; type: TypeIR }[];
     /** Foreign aggregates referenced by bind expressions via
-     *  `Id<X>` follow.  Multi-hop supported: `path` is the chain of
+     *  `X id` follow.  Multi-hop supported: `path` is the chain of
      *  Id-typed field accesses from the source aggregate outward —
      *  `["customerId"]` for `customerId.name`,
      *  `["customerId", "regionId"]` for
@@ -646,7 +702,7 @@ export interface ThemeIR {
 }
 
 /** System-level `user { ... }` block.  Each field carries an
- *  ordinary TypeIR — primitives, `Id<X>`, enums, value-objects,
+ *  ordinary TypeIR — primitives, `X id`, enums, value-objects,
  *  optional `T?` — and contributes to the emitted User type plus
  *  the `currentUser` magic identifier's member-access surface. */
 export interface UserIR {
@@ -681,13 +737,14 @@ export interface TestE2EIR {
 // is the per-target generator's concern.
 // ---------------------------------------------------------------------------
 
-/** A `ui` SystemMember: pages, components, scaffold directives, and
- *  an optional sidebar menu block. */
+/** A `ui` SystemMember: pages, components, and an optional sidebar
+ *  menu block.  Scaffold synthesis happens at the AST level via
+ *  the `scaffold` stdlib macro; by the time we lower to IR, every
+ *  page is a first-class PageIR with no special-cased provenance. */
 export interface UiIR {
   name: string;
   pages: PageIR[];
   components: ComponentIR[];
-  scaffolds: ScaffoldIR[];
   /** Optional ui-level menu block.  When undefined the sidebar is
    *  derived from each page's `menuMeta` (see spec §11). */
   menu?: MenuBlockIR;
@@ -764,11 +821,11 @@ export interface PageIR {
    *  re-parsing the body expression.  Same source context the legacy
    *  generator's per-aggregate / per-workflow / per-view loop
    *  received. */
-  scaffoldOrigin?: ScaffoldOriginIR;
+  archetype?: PageArchetypeIR;
   /** Explicit emit path override for walker-rendered
    *  pages.  When set, the page-emitter writes the rendered TSX to
    *  this path instead of the default `src/pages/<page-snake>.tsx`.
-   *  Populated by `expandScaffoldToExplicitBody` so a scaffold-
+   *  Populated by `expandWalkerPrimitive` so a scaffold-
    *  expanded page lands at the conventional archetype path
    *  (`src/pages/<plural>/list.tsx` for `aggregate-list`, etc.) —
    *  preserves URL/file shape when scaffold expansion becomes the
@@ -776,7 +833,7 @@ export interface PageIR {
   emitPath?: string;
   /** True when the scaffold expander rewrote `body`
    *  from the original archetype call (e.g. `List(of: …)`) to a
-   *  walker-stdlib composition.  `scaffoldOrigin` is intentionally
+   *  walker-stdlib composition.  `archetype` is intentionally
    *  preserved on these pages so the per-aggregate page-object
    *  emitter still fires; `expandedFromScaffold` tells the
    *  page-emitter to dispatch the rewritten body through the
@@ -787,7 +844,7 @@ export interface PageIR {
 /** Provenance for a scaffold-synthesised page.  Each kind names the
  *  domain-IR target plus the page archetype within that target's
  *  generated set. */
-export type ScaffoldOriginIR =
+export type PageArchetypeIR =
   | { kind: "aggregate-list"; aggregateName: string; contextName: string }
   | { kind: "aggregate-new"; aggregateName: string; contextName: string }
   | { kind: "aggregate-detail"; aggregateName: string; contextName: string }
@@ -817,16 +874,11 @@ export interface StateFieldIR {
   init?: ExprIR;
 }
 
-/** A `scaffold <selector>: <targets>` directive — single fixed multi-
- *  page rewrite over a domain selector.  The scaffold expander turns
- *  this into literal `PageIR` nodes; this IR carries only the
- *  source-level intent. */
-export interface ScaffoldIR {
-  selector: ScaffoldSelector;
-  targets: string[];
-}
-
-export type ScaffoldSelector = "modules" | "contexts" | "aggregates" | "workflows" | "views";
+// `ScaffoldIR` / `ScaffoldSelector` were removed when `scaffold`
+// migrated from a hardcoded language directive to the `scaffold`
+// stdlib macro.  Page synthesis now goes through the macro
+// expander → AST splice → standard page lowering path; no IR-
+// level scaffold representation is required.
 
 /** Per-page sidebar metadata.  Bare entries — validator
  *  enforces the allowed key names (`section` / `label` / `order` /

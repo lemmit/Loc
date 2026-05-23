@@ -64,7 +64,7 @@ export function generateReactForContexts(
     for (const agg of ctx.aggregates) aggregates.push({ agg, ctx });
   }
 
-  // Workspace-wide aggregate registry — used by `Id<X>` form-input
+  // Workspace-wide aggregate registry — used by `X id` form-input
   // emission to resolve the target's display field across bounded
   // contexts.  Built once and threaded through every per-aggregate
   // builder to avoid recomputing per-call.
@@ -82,7 +82,7 @@ export function generateReactForContexts(
   // Page metamodel routing.  When the deployable declares
   // a `ui:` binding, the React generator walks `ui.pages` (after
   // scaffold expansion) via `emitPagesForUi`, which dispatches per
-  // `scaffoldOrigin` to the SAME `renderXxx` functions invoked
+  // `archetype` to the SAME `renderXxx` functions invoked
   // below for the legacy direct walk.  Byte-for-byte equivalent in
   // the bulk-scaffold case.
   //

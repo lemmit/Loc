@@ -49,15 +49,15 @@ system BankingSystem {
       }
 
       event AccountOpened {
-        account: Id<Account>,
-        holder: Id<Customer>,
+        account: Account id,
+        holder: Customer id,
         at: datetime
       }
 
-      event AccountFrozen { account: Id<Account>, reason: string, at: datetime }
+      event AccountFrozen { account: Account id, reason: string, at: datetime }
 
-      event MoneyDeposited { account: Id<Account>, amount: Money, at: datetime }
-      event MoneyWithdrawn { account: Id<Account>, amount: Money, at: datetime }
+      event MoneyDeposited { account: Account id, amount: Money, at: datetime }
+      event MoneyWithdrawn { account: Account id, amount: Money, at: datetime }
 
       aggregate Customer {
         name: string display
@@ -67,7 +67,7 @@ system BankingSystem {
       }
 
       aggregate Account {
-        holder: Id<Customer>
+        holder: Customer id
         status: AccountStatus
         balance: Money
         openedAt: datetime
@@ -152,8 +152,8 @@ system BankingSystem {
       }
 
       repository Accounts for Account {
-        find byHolder(holder: Id<Customer>): Account[] where this.holder == holder
-        find openByHolder(holder: Id<Customer>): Account[]
+        find byHolder(holder: Customer id): Account[] where this.holder == holder
+        find openByHolder(holder: Customer id): Account[]
           where this.holder == holder && this.status == Open
       }
 
@@ -164,8 +164,8 @@ system BankingSystem {
       // Invoke via POST /workflows/transfer_funds with body
       //   { fromAccount, toAccount, amount: { amount, currency } }
       workflow transferFunds(
-        fromAccount: Id<Account>,
-        toAccount: Id<Account>,
+        fromAccount: Account id,
+        toAccount: Account id,
         amount: Money
       ) transactional {
         precondition amount.amount > 0
@@ -177,8 +177,7 @@ system BankingSystem {
     }
   }
 
-  ui WebApp {
-    scaffold modules: Banking
+  ui WebApp with scaffold(modules: [Banking]) {
   }
 
   deployable api { platform: hono, modules: Banking, port: 3000 }
