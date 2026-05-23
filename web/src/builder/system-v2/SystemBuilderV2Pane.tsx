@@ -42,12 +42,20 @@ import {
   type ExprSlot,
 } from "../system/expr-slots";
 import { ExprSlotEditor, type ExprMode } from "../system/ExpressionEditor";
-import { AstUtils } from "langium";
+import { AstUtils, type AstNode } from "langium";
 import { spliceNode } from "../edit-engine";
 import { IDENTIFIER, renameMember } from "../system/rename";
 import AddPalette from "./AddPalette";
 import ConstructNode, { type ConstructNodeData } from "./ConstructNode";
 import { renameByAstType } from "./rename-extra";
+import {
+  apiNames,
+  deployableModules,
+  deployableServes,
+  moduleNames,
+  setDeployableModules,
+  setDeployableServes,
+} from "../system/deployable-bindings";
 import {
   isRebindableDeployableEdge,
   rebindDeployableEdgeTarget,
@@ -416,6 +424,46 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
               }
             }
           : undefined;
+
+      // For deployable nodes, inline multi-selects for the multi-valued
+      // bindings (modules / serves). Single-valued targets / ui are handled by
+      // drag-rebind on the edges (Phase 4d).
+      let multiSelects: ConstructNodeData["multiSelects"];
+      if (n.kind === "deployable") {
+        let dep: AstNode | undefined;
+        for (const node of AstUtils.streamAst(parsed.ast)) {
+          if (node.$type === "Deployable" && (node as { name?: string }).name === n.name) {
+            dep = node;
+            break;
+          }
+        }
+        if (dep) {
+          const depName = n.name;
+          multiSelects = [
+            {
+              label: "modules",
+              data: moduleNames(parsed.ast),
+              value: deployableModules(dep),
+              onChange: (v) => {
+                const next = setDeployableModules(ctx.getSource(), depName, v);
+                if (next != null) apply(next);
+              },
+              testid: "c4system-v2-deployable-modules",
+            },
+            {
+              label: "serves",
+              data: apiNames(parsed.ast),
+              value: deployableServes(dep),
+              onChange: (v) => {
+                const next = setDeployableServes(ctx.getSource(), depName, v);
+                if (next != null) apply(next);
+              },
+              testid: "c4system-v2-deployable-serves",
+            },
+          ];
+        }
+      }
+
       m.set(n.id, {
         kind: n.kind,
         name: n.name,
@@ -423,6 +471,7 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         drillable: n.drillable,
         onRename,
         onDelete,
+        multiSelects,
       });
     }
     return m;

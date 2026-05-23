@@ -550,9 +550,16 @@ Phasing:
   `test/system-v2/deployable-edge-rebind.test.ts` (5 cases). The drag gesture
   itself isn't e2e-covered for the same reason v1's drag-rebind isn't —
   React Flow reconnect-anchor drags are fragile in Playwright.
-- **Phase 4e** — multi-valued bindings (`modules` / `serves`) editable via a
-  small per-deployable multi-select, and repository finds (filter + params)
-  as a per-find inline editor. With those, v1 can be deprecated.
+- ~~**Phase 4e (multi-valued deployable bindings inline).**~~ Done: deployable
+  nodes now embed a `modules` and a `serves` Mantine `MultiSelect` (when its
+  bindings panel data is provided), backed by v1's `setDeployableModules` /
+  `setDeployableServes`. `ConstructNode` widens to ~240 when multi-selects
+  are present so the chip pills fit. With this, every binding on a deployable
+  is editable on the canvas — targets / ui by drag (Phase 4d), modules /
+  serves by multi-select. Gated by the v2 e2e (the api deployable in Banking
+  System exposes both multi-selects on its node).
+- **Phase 4f** — repository finds (filter + params) as a per-find inline
+  editor. With that landed, v1 can be deprecated.
 - **Phase 5** — polish: per-view positions, search / coverage / grouped layout
   adapted per zoom level, transitions on drill, mobile passes.
 

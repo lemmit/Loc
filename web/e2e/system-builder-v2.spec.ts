@@ -258,6 +258,22 @@ test("Model v2 renames and deletes an aggregate field (renameMember + deleteFiel
   );
 });
 
+test("Model v2 shows inline modules / serves multi-selects on a deployable", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  // Banking System has a `deployable api { modules: Banking }` plus `webApp`.
+  await selectExample(page, /Banking System/);
+  await page.getByTestId("doc-tab-model-v2").click();
+  await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
+  await page.locator('.react-flow__node[data-id^="system:"]').first().click();
+
+  // The `api` deployable node renders both multi-selects.
+  const dep = page.locator('[data-construct-kind="deployable"][data-construct-name="api"]');
+  await expect(dep).toBeVisible();
+  await expect(dep.getByTestId("c4system-v2-deployable-modules")).toBeVisible();
+  await expect(dep.getByTestId("c4system-v2-deployable-serves")).toBeVisible();
+});
+
 test("Model v2 repoints an emit statement's event inline", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);
