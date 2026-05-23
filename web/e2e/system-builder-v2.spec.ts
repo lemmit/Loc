@@ -257,3 +257,28 @@ test("Model v2 renames and deletes an aggregate field (renameMember + deleteFiel
     fieldsBefore - 1,
   );
 });
+
+test("Model v2 repoints an emit statement's event inline", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  // Banking System declares four sibling events — Account.deposit emits
+  // MoneyDeposited; we repoint it to MoneyWithdrawn.
+  await selectExample(page, /Banking System/);
+  await page.getByTestId("doc-tab-model-v2").click();
+  await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
+
+  await page.locator('.react-flow__node[data-id^="system:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="module:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="context:"]').first().click();
+  await page.locator('.react-flow__node[data-id="aggregate:Account"]').click();
+  await page.locator('.react-flow__node[data-id="operation:deposit"]').click();
+
+  const emit = page.locator('[data-testid="c4system-v2-stmt"][data-stmt-kind="emit"]').first();
+  await expect(emit).toBeVisible();
+  const eventSelect = emit.getByTestId("c4system-emit-event");
+  await expect(eventSelect).toHaveValue("MoneyDeposited");
+
+  await eventSelect.click();
+  await page.getByRole("option", { name: "MoneyWithdrawn", exact: true }).click();
+  await expect(eventSelect).toHaveValue("MoneyWithdrawn");
+});

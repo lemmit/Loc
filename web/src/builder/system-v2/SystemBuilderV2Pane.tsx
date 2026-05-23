@@ -30,6 +30,7 @@ import {
   type BodyLocator,
   type StmtView,
 } from "../system/body";
+import { setEmitEvent } from "../system/emit-event";
 import { deleteField, listFields } from "../system/fields";
 import { seedExpr } from "../system/expr-model";
 import {
@@ -295,6 +296,12 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
       setStructuredKey((cur) => (cur === k ? null : k));
     };
 
+    // All declared events in the model — candidates for the emit-row Select.
+    const events: string[] = [];
+    for (const n of AstUtils.streamAst(parsed.ast)) {
+      if (n.$type === "EventDecl") events.push((n as unknown as { name: string }).name);
+    }
+
     views.forEach((view, i) => {
       const data: StmtNodeData = {
         view,
@@ -312,6 +319,21 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         onToggleArg: (a) => toggle(i, a),
         renderFieldEditor: (f) => renderEditor(i, f),
         onToggleField: (f) => toggle(i, f),
+        events,
+        onRepointEvent:
+          view.kind === "emit"
+            ? (eventName: string) => {
+                const next = setEmitEvent(
+                  ctx.getSource(),
+                  leafLoc.kind === "operation" ? "aggregate" : "workflow",
+                  leafLoc.kind === "operation" ? leafLoc.aggregate : leafLoc.name,
+                  leafLoc.kind === "operation" ? leafLoc.op : undefined,
+                  i,
+                  eventName,
+                );
+                if (next != null) apply(next);
+              }
+            : undefined,
       };
       m.set(`stmt:${i}`, data as unknown as Record<string, unknown>);
     });
