@@ -1,9 +1,15 @@
-import type { AggregateIR, EntityPartIR } from "../../../ir/loom-ir.js";
+import type { AggregateIR, EntityPartIR, TypeIR } from "../../../ir/loom-ir.js";
 import { operationUsesCurrentUser } from "../../../ir/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import { csNewIdValue, renderCsExpr, renderCsType } from "../render-expr.js";
 import { renderCsStatements } from "../render-stmt.js";
+
+/** True for a field type that is a collection of references
+ * (`Id<T>[]`) — persisted via a join table, not a column. */
+function isRefCollection(t: TypeIR): boolean {
+  return t.kind === "array" && t.element.kind === "id";
+}
 
 // ---------------------------------------------------------------------------
 // Aggregate root + entity-part class emission for .NET.  The shape is a
@@ -68,8 +74,16 @@ export function renderEntity(
   }
   for (const f of entity.fields) {
     const def = f.optional ? " = default;" : " = default!;";
+    // Reference-collection (`Id<T>[]`) fields are persisted via a
+    // separate join table; the repository (in the Infrastructure
+    // assembly) needs to write the `List<TargetId>` after loading
+    // join rows post-`FirstOrDefaultAsync`.  Widening the setter from
+    // `private` to `internal` keeps the field unwritable from
+    // user/application code but lets the same-assembly hydration
+    // succeed without reflection.
+    const fieldSetter = isRefCollection(f.type) ? "internal" : setterVisibility;
     propLines.push(
-      `    public ${renderCsType(f.type)} ${upperFirst(f.name)} { get; ${setterVisibility} set; }${def}`,
+      `    public ${renderCsType(f.type)} ${upperFirst(f.name)} { get; ${fieldSetter} set; }${def}`,
     );
   }
   for (const c of entity.contains) {

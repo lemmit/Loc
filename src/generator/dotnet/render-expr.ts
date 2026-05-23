@@ -1,5 +1,6 @@
-import type { BinOp, ExprIR, TypeIR } from "../../ir/loom-ir.js";
+import type { AggregateIR, BinOp, ExprIR, TypeIR } from "../../ir/loom-ir.js";
 import { upperFirst } from "../../util/naming.js";
+import { joinDbSetName, joinFkPropName } from "./emit/join-entities.js";
 
 // ---------------------------------------------------------------------------
 // Expression renderer for the .NET / C# backend.
@@ -28,6 +29,15 @@ export interface CsRenderContext {
    * (one-shot snippet rendering in tests etc.) can omit it.
    */
   usings?: Set<string>;
+  /** Aggregate whose finds/derived bodies we're lowering.  Required
+   * for `this.<refColl>.contains(param)` membership predicates, which
+   * lower to a subquery against the field's join entity DbSet
+   * (`_db.<JoinDbSet>.Any(...)`).  When unset, the contains
+   * predicate falls back to the in-memory `Contains(value)` shape —
+   * the validator only admits the membership form inside repository
+   * `where` clauses, so other emission contexts (derived, invariant)
+   * shouldn't reach it. */
+  agg?: AggregateIR;
 }
 
 const DEFAULT: CsRenderContext = { thisName: "this" };
@@ -88,6 +98,16 @@ export function renderCsExpr(e: ExprIR, ctx: CsRenderContext = DEFAULT): string 
   }
 }
 
+/** Field name behind a `this.<field>` receiver (used to look up the
+ * AssociationIR when lowering `.contains(...)`), or null if the
+ * receiver isn't a `this`-rooted single member access. */
+function refCollectionFieldName(e: ExprIR): string | null {
+  if (e.kind === "paren") return refCollectionFieldName(e.inner);
+  if (e.kind === "member" && e.receiver.kind === "this") return e.member;
+  if (e.kind === "ref" && e.refKind === "this-prop") return e.name;
+  return null;
+}
+
 function renderLiteral(lit: string, value: string): string {
   if (lit === "string") return JSON.stringify(value);
   if (lit === "now") return "DateTime.UtcNow";
@@ -141,6 +161,31 @@ function renderMethodCall(
 ): string {
   const recv = renderCsExpr(e.receiver, ctx);
   const args = e.args.map((a) => renderCsExpr(a, ctx));
+  // `this.<refColl>.contains(x)` — membership over a reference
+  // collection.  Lowers to a join-table subquery, mirroring TS's
+  // `inArray(roots.id, ...)` shape.  Detection is structural: the
+  // method-call's receiverType is `array<id>`, the receiver chains
+  // through `this.<field>`, and we can resolve the field's
+  // AssociationIR on `ctx.agg`.  All-in-context conditions guard
+  // against firing on regular collection `.contains(x)` calls.
+  if (
+    e.member === "contains" &&
+    e.receiverType.kind === "array" &&
+    e.receiverType.element.kind === "id" &&
+    e.args.length === 1 &&
+    ctx.agg
+  ) {
+    const fieldName = refCollectionFieldName(e.receiver);
+    if (fieldName) {
+      const assoc = (ctx.agg.associations ?? []).find((a) => a.fieldName === fieldName);
+      if (assoc) {
+        const dbSet = joinDbSetName(assoc);
+        const owner = joinFkPropName(assoc.ownerFk);
+        const target = joinFkPropName(assoc.targetFk);
+        return `_db.${dbSet}.Any(__j => __j.${owner} == ${ctx.thisName}.Id && __j.${target} == ${args[0]})`;
+      }
+    }
+  }
   if (e.isCollectionOp) {
     return renderCollectionOp(`(${recv})`, e.member, args);
   }
