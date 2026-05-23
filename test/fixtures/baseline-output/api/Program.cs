@@ -157,9 +157,17 @@ app.MapGet("/ready", async (AppDbContext db, CancellationToken ct) =>
             statusCode: 503);
     }
 });
+// Catalog-identity request log — emits the cross-backend
+// request_start / request_end events (same envelope shape Hono
+// and Phoenix produce).  Mounted FIRST so its Stopwatch covers the
+// full pipeline (auth, routing, controller body, serialization).
+// See Middleware/RequestLoggingMiddleware.cs.
+app.UseMiddleware<Api.Middleware.RequestLoggingMiddleware>();
 // HTTP logging middleware — pairs with AddHttpLogging above.
 // Mounted before the auth + business pipelines so every request is
-// logged regardless of whether it reached a controller.
+// logged regardless of whether it reached a controller.  Coexists
+// with the catalog middleware above (the framework line and the
+// catalog line are both useful; dashboards filter on the catalog).
 app.UseHttpLogging();
 app.UseCors();
 app.UseSwagger();
