@@ -11,6 +11,7 @@ import type {
   AggregateMember,
   BoundedContext,
   ContextMember,
+  Deployable,
   Model,
   Module,
   Operation,
@@ -19,6 +20,7 @@ import type {
   SystemMember,
   Workflow,
 } from "../../../../src/language/generated/ast.js";
+import { deployableModules, deployableServes, deployableTargets, deployableUi } from "../system/deployable-bindings";
 
 export type ViewKind =
   // containers (drillable)
@@ -141,6 +143,7 @@ function systemView(ast: Model, name: string): ViewGraph {
   const sys = ast.members.find((m): m is System => m.$type === "System" && (m as System).name === name);
   if (!sys) return { title: name, nodes: [], edges: [] };
   const items: { id: string; kind: ViewKind; name: string }[] = [];
+  const deployables: Deployable[] = [];
   for (const m of sys.members as SystemMember[]) {
     const childName = (m as { name?: string }).name;
     if (!childName) continue;
@@ -162,10 +165,26 @@ function systemView(ast: Model, name: string): ViewGraph {
         break;
       case "Deployable":
         items.push({ id: nid("deployable", childName), kind: "deployable", name: childName });
+        deployables.push(m as Deployable);
         break;
     }
   }
-  return { title: `system ${name}`, nodes: layout(items, SYSTEM_ORDER), edges: [] };
+  // Surface each deployable's bindings as edges into its bound module(s) /
+  // api(s) / ui / target deployable. Pure reflection of the AST refs — Phase
+  // 4c2 makes them editable.
+  const edges: VEdge[] = [];
+  for (const d of deployables) {
+    const src = nid("deployable", d.name);
+    for (const mod of deployableModules(d))
+      edges.push({ id: `bind:${src}->module:${mod}`, source: src, target: nid("module", mod), label: "modules" });
+    for (const api of deployableServes(d))
+      edges.push({ id: `bind:${src}->api:${api}`, source: src, target: nid("api", api), label: "serves" });
+    const ui = deployableUi(d);
+    if (ui) edges.push({ id: `bind:${src}->ui:${ui}`, source: src, target: nid("ui", ui), label: "ui" });
+    const tgt = deployableTargets(d);
+    if (tgt) edges.push({ id: `bind:${src}->deployable:${tgt}`, source: src, target: nid("deployable", tgt), label: "targets" });
+  }
+  return { title: `system ${name}`, nodes: layout(items, SYSTEM_ORDER), edges };
 }
 
 function moduleView(ast: Model, name: string): ViewGraph {

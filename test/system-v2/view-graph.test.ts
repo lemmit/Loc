@@ -116,4 +116,29 @@ describe("Model v2 — view-graph per level", () => {
       ["stmt:1", "stmt:2"],
     ]);
   });
+
+  it("system view surfaces deployable bindings as edges", () => {
+    const SRC_D = `system S {
+  module Sales {
+    context Orders {
+      aggregate Order {
+      }
+    }
+  }
+  ui Web {
+  }
+  deployable api { platform: hono, modules: Sales, port: 3000 }
+  deployable webApp { platform: react, targets: api, ui: Web, port: 3001 }
+}`;
+    const g = buildViewGraph(parse(SRC_D), [{ kind: "system", name: "S" }]);
+    const labels = g.edges.map((e) => `${e.source} -${e.label}-> ${e.target}`);
+    // api includes module Sales; webApp targets api and mounts Web.
+    expect(labels).toEqual(
+      expect.arrayContaining([
+        "deployable:api -modules-> module:Sales",
+        "deployable:webApp -targets-> deployable:api",
+        "deployable:webApp -ui-> ui:Web",
+      ]),
+    );
+  });
 });
