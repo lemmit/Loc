@@ -15,6 +15,7 @@ import {
   useNodesInitialized,
   useNodesState,
   useReactFlow,
+  type Connection,
   type Edge,
   type Node,
 } from "@xyflow/react";
@@ -47,6 +48,10 @@ import { IDENTIFIER, renameMember } from "../system/rename";
 import AddPalette from "./AddPalette";
 import ConstructNode, { type ConstructNodeData } from "./ConstructNode";
 import { renameByAstType } from "./rename-extra";
+import {
+  isRebindableDeployableEdge,
+  rebindDeployableEdgeTarget,
+} from "./deployable-edge-rebind";
 import StmtNode, { type StmtNodeData } from "./StmtNode";
 import { buildViewGraph, findAggregate, type ViewGraph, type ViewKind, type ViewPath } from "./view-graph";
 
@@ -161,14 +166,18 @@ function leafBodyLocator(path: ViewPath): BodyLocator | null {
 }
 
 function toRfEdges(g: ViewGraph): Edge[] {
-  return g.edges.map((e) => ({
-    id: e.id,
-    source: e.source,
-    target: e.target,
-    label: e.label,
-    labelStyle: { fontSize: 9, fill: "var(--mantine-color-dimmed)" },
-    style: { stroke: "var(--mantine-color-dark-2)" },
-  }));
+  return g.edges.map((e) => {
+    const reconnectable: "target" | false = isRebindableDeployableEdge(e.label ?? "") ? "target" : false;
+    return {
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      label: e.label,
+      reconnectable,
+      labelStyle: { fontSize: 9, fill: "var(--mantine-color-dimmed)" },
+      style: { stroke: "var(--mantine-color-dark-2)" },
+    };
+  });
 }
 
 function Breadcrumb({ path, onJump }: { path: ViewPath; onJump: (depth: number) => void }): JSX.Element {
@@ -439,6 +448,16 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     setPath((p) => [...p, { kind: v.kind, name: v.name }]);
   };
 
+  /** Repoint a deployable's `targets` / `ui` binding by dragging the edge's
+   *  target endpoint to another node. Owner stays fixed; an incompatible drop
+   *  or unparseable rewrite leaves the source untouched. */
+  const onReconnect = (oldEdge: Edge, conn: Connection): void => {
+    if (!conn.target || conn.source !== oldEdge.source) return;
+    const label = typeof oldEdge.label === "string" ? oldEdge.label : "";
+    const next = rebindDeployableEdgeTarget(ctx.getSource(), label, oldEdge.source, conn.target);
+    if (next != null) apply(next);
+  };
+
   return (
     <Box style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
       <Breadcrumb path={path} onJump={(d) => setPath((p) => p.slice(0, d))} />
@@ -450,6 +469,7 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
           nodeTypes={NODE_TYPES}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
+          onReconnect={onReconnect}
           onNodeClick={(_, n) => drill(n.id)}
           fitView
           minZoom={0.1}

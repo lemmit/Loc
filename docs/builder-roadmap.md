@@ -540,10 +540,19 @@ Phasing:
   bindings inline is Phase 4d. Gated by `test/system-v2/view-graph.test.ts`
   (a system with `api` + `webApp` produces the expected modules / serves /
   targets / ui edges).
-- **Phase 4d** — editable deployable bindings (drag the `targets` / `ui` edge
-  to a different deployable / ui; add / remove `modules` / `serves` via a
-  small node-level multi-select), and repository finds (filter + params) as
-  per-find inline editors. Once landed, v1 can be deprecated.
+- ~~**Phase 4d (drag-rebind `targets` / `ui`).**~~ Done: the system view's
+  `targets` and `ui` edges are now `reconnectable: "target"` and the v2 pane
+  has an `onReconnect` handler that dispatches through a new pure helper
+  `rebindDeployableEdgeTarget` (wraps v1's `setDeployableTargets` /
+  `setDeployableUi`, rejects wrong target kinds, self-targets, and the
+  multi-valued labels). The multi-valued bindings (`modules` / `serves`)
+  intentionally stay non-drag — they need a multi-select UI. Gated by
+  `test/system-v2/deployable-edge-rebind.test.ts` (5 cases). The drag gesture
+  itself isn't e2e-covered for the same reason v1's drag-rebind isn't —
+  React Flow reconnect-anchor drags are fragile in Playwright.
+- **Phase 4e** — multi-valued bindings (`modules` / `serves`) editable via a
+  small per-deployable multi-select, and repository finds (filter + params)
+  as a per-find inline editor. With those, v1 can be deprecated.
 - **Phase 5** — polish: per-view positions, search / coverage / grouped layout
   adapted per zoom level, transitions on drill, mobile passes.
 
