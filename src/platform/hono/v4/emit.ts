@@ -194,7 +194,7 @@ export function generateTypeScriptForContexts(
       );
       out.set(
         `http/${lowerFirst(agg.name)}.routes.ts`,
-        buildRoutesFile(agg, repo, ctx, emitAudit, emitProvenance),
+        buildRoutesFile(agg, repo, ctx, emitAudit, emitProvenance, emitTrace),
       );
       if (agg.operations.some((o) => o.extern)) {
         out.set(`domain/${lowerFirst(agg.name)}-extern.ts`, buildExternHandlersFile(agg, ctx));
