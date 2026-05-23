@@ -7,8 +7,6 @@
 // only the framework-neutral helpers (render-expr/stmt, templates,
 // zod-refine) in core.
 
-import { buildExternHandlersFile } from "../../../generator/typescript/extern-builder.js";
-import { buildRepositoryFile } from "../../../generator/typescript/repository-builder.js";
 import {
   renderAggregate,
   renderEnumsAndValueObjects,
@@ -18,6 +16,8 @@ import {
   renderSchema,
   renderTestsFile,
 } from "../../../generator/typescript/emit.js";
+import { buildExternHandlersFile } from "../../../generator/typescript/extern-builder.js";
+import { buildRepositoryFile } from "../../../generator/typescript/repository-builder.js";
 import { enrichLoomModel } from "../../../ir/enrichments.js";
 import type {
   BoundedContextIR,

@@ -19,7 +19,7 @@
 // api.tpl.ts.  Calls render against that field by name.
 // ---------------------------------------------------------------------------
 
-import { LogEvents, type LogEventKey } from "./log-events.js";
+import { type LogEventKey, LogEvents } from "./log-events.js";
 
 const METHOD: Record<string, string> = {
   trace: "LogTrace",
