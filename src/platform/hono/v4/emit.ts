@@ -96,13 +96,17 @@ export interface ProvLineage {
  * Legacy entry: lowers the whole model and emits one project from all
  * top-level bounded contexts.  Used by `ddd generate ts <file> -o <dir>`.
  */
-export function generateTypeScript(model: Model, pins: BackendPins): Map<string, string> {
+export function generateTypeScript(
+  model: Model,
+  pins: BackendPins,
+  options: { emitTrace?: boolean } = {},
+): Map<string, string> {
   // Lowering produces a faithful AST projection; enrichment populates
   // wireShape, the implicit `findAll` find, and react `moduleNames`
   // inheritance.  Every backend consumes the enriched IR, never the
   // raw lowered output.
   const loom = enrichLoomModel(lowerModel(model));
-  return generateTypeScriptForContexts(loom.contexts, pins);
+  return generateTypeScriptForContexts(loom.contexts, pins, undefined, options);
 }
 
 /**
@@ -121,7 +125,9 @@ export function generateTypeScriptForContexts(
   contexts: BoundedContextIR[],
   pins: BackendPins,
   system?: { deployable: DeployableIR; sys: SystemIR },
+  options: { emitTrace?: boolean } = {},
 ): Map<string, string> {
+  const emitTrace = !!options.emitTrace;
   const out = new Map<string, string>();
   const authRequired = !!(system?.deployable.auth?.required && system.sys.user);
   // Emission is forced by presence: any written `provenanced` field turns
@@ -178,14 +184,17 @@ export function generateTypeScriptForContexts(
   for (const ctx of contexts) {
     for (const agg of ctx.aggregates) {
       const repo = findRepoFor(ctx, agg.name);
-      out.set(`domain/${lowerFirst(agg.name)}.ts`, renderAggregate(agg, ctx, emitProvenance));
+      out.set(
+        `domain/${lowerFirst(agg.name)}.ts`,
+        renderAggregate(agg, ctx, emitProvenance, emitTrace),
+      );
       out.set(
         `db/repositories/${lowerFirst(agg.name)}-repository.ts`,
-        buildRepositoryFile(agg, repo, ctx),
+        buildRepositoryFile(agg, repo, ctx, emitTrace),
       );
       out.set(
         `http/${lowerFirst(agg.name)}.routes.ts`,
-        buildRoutesFile(agg, repo, ctx, emitAudit, emitProvenance),
+        buildRoutesFile(agg, repo, ctx, emitAudit, emitProvenance, emitTrace),
       );
       if (agg.operations.some((o) => o.extern)) {
         out.set(`domain/${lowerFirst(agg.name)}-extern.ts`, buildExternHandlersFile(agg, ctx));

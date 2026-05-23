@@ -3,17 +3,43 @@ import { renderTsExpr } from "./render-expr.js";
 
 const INDENT = "    ";
 
-/** When `emitProvenance` is true, instrumented write-sites (statements
- *  carrying a `prov` snapshot) build a `ProvLineage` and route it to the
- *  co-located backing field + the `__provTraces` history buffer. */
-export function renderTsStatements(stmts: StmtIR[], emitProvenance = false): string {
-  return stmts.map((s, i) => renderTsStatement(s, emitProvenance, i)).join("\n");
+/** Compile-time `--trace` context — the catalog's `value_computed` /
+ *  `precondition_evaluated` lines need the enclosing aggregate + op
+ *  names, neither of which are on the per-statement IR.  Threaded
+ *  through the renderer rather than re-discovered at every emission
+ *  site.  When `emitTrace` is false the renderer behaves byte-identically
+ *  to its pre-trace output. */
+export interface TraceCtx {
+  emitTrace: boolean;
+  aggregate: string;
+  op: string;
 }
 
-function renderTsStatement(s: StmtIR, emitProvenance: boolean, index = 0): string {
+const NO_TRACE: TraceCtx = { emitTrace: false, aggregate: "", op: "" };
+
+/** When `emitProvenance` is true, instrumented write-sites (statements
+ *  carrying a `prov` snapshot) build a `ProvLineage` and route it to the
+ *  co-located backing field + the `__provTraces` history buffer.  When
+ *  `traceCtx.emitTrace` is true (`--trace` switch), additionally inject
+ *  `value_computed` after every scalar assign and `precondition_evaluated`
+ *  before every precondition's throw. */
+export function renderTsStatements(
+  stmts: StmtIR[],
+  emitProvenance = false,
+  traceCtx: TraceCtx = NO_TRACE,
+): string {
+  return stmts.map((s, i) => renderTsStatement(s, emitProvenance, i, traceCtx)).join("\n");
+}
+
+function renderTsStatement(
+  s: StmtIR,
+  emitProvenance: boolean,
+  index: number,
+  traceCtx: TraceCtx,
+): string {
   switch (s.kind) {
     case "precondition":
-      return `${INDENT}if (!(${renderTsExpr(s.expr)})) throw new DomainError(${JSON.stringify(`Precondition failed: ${s.source}`)});`;
+      return precondition(s.expr, s.source, index, traceCtx);
     case "requires":
       // Authorization gate — surfaces as 403 via the route-level
       // ForbiddenError catch in the per-aggregate routes file.
@@ -22,7 +48,8 @@ function renderTsStatement(s: StmtIR, emitProvenance: boolean, index = 0): strin
       return `${INDENT}const ${s.name} = ${renderTsExpr(s.expr)};`;
     case "assign": {
       const base = `${INDENT}${renderPath(s.target)} = ${renderTsExpr(s.value)};`;
-      return withTrace(base, s.prov, s.target, s.value, emitProvenance, index);
+      const wrapped = withTrace(base, s.prov, s.target, s.value, emitProvenance, index);
+      return withValueComputed(wrapped, s.target, traceCtx);
     }
     case "add": {
       const base = `${INDENT}${renderPath(s.target)}.push(${renderTsExpr(s.value)});`;
@@ -45,6 +72,36 @@ function renderTsStatement(s: StmtIR, emitProvenance: boolean, index = 0): strin
     case "expression":
       return `${INDENT}${renderTsExpr(s.expr)};`;
   }
+}
+
+/** Render a precondition — plain throw when trace is off; under
+ *  `--trace`, bind the boolean to a temp first so the result can be
+ *  logged (both pass and fail) before the conditional throw. */
+function precondition(expr: ExprIR, source: string, index: number, traceCtx: TraceCtx): string {
+  const thrown = `throw new DomainError(${JSON.stringify(`Precondition failed: ${source}`)})`;
+  if (!traceCtx.emitTrace) {
+    return `${INDENT}if (!(${renderTsExpr(expr)})) ${thrown};`;
+  }
+  const ok = `__pre_${index}_ok`;
+  return [
+    `${INDENT}const ${ok} = (${renderTsExpr(expr)});`,
+    `${INDENT}requestLog().trace({ event: "precondition_evaluated", aggregate: "${traceCtx.aggregate}", op: "${traceCtx.op}", expr: ${JSON.stringify(source)}, passed: ${ok} });`,
+    `${INDENT}if (!${ok}) ${thrown};`,
+  ].join("\n");
+}
+
+/** When `--trace` is on, append a `value_computed` trace line after a
+ *  scalar assign so the post-write value is observable.  Skipped for
+ *  paths into containments (length > 1) — those are write-through paths
+ *  to a sub-object, not a top-level field of the aggregate. */
+function withValueComputed(base: string, target: PathIR, traceCtx: TraceCtx): string {
+  if (!traceCtx.emitTrace) return base;
+  if (target.segments.length !== 1) return base;
+  const field = target.segments[0];
+  return [
+    base,
+    `${INDENT}requestLog().trace({ event: "value_computed", aggregate: "${traceCtx.aggregate}", field: "${field}", value: ${renderPath(target)} });`,
+  ].join("\n");
 }
 
 /** Wrap a provenanced write with trace capture: snapshot the leaf inputs

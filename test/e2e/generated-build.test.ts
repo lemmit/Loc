@@ -29,6 +29,7 @@ describe.skipIf(!ENABLED)(
       "examples/sales.ddd",
       "examples/banking.ddd",
       "examples/inventory.ddd",
+      "examples/roster.ddd",
     ])("%s — `ddd generate ts` output type-checks + tsup-bundles", (example) => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-"));
       try {

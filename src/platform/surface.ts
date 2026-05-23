@@ -61,6 +61,11 @@ export interface PlatformSurface {
     contexts: BoundedContextIR[];
     deployable: DeployableIR;
     sys: SystemIR;
+    /** Generate-time observability switch — when true, the platform
+     * emits trace-level domain instrumentation (domain-injected
+     * `value_computed`, `precondition_evaluated`, etc.).  Off keeps the
+     * artefact lean and the domain layer pure. */
+    emitTrace?: boolean;
   }): Map<string, string>;
   /** Inputs for the deployable's docker-compose service stanza. */
   composeService(args: {

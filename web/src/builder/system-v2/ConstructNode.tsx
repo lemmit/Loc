@@ -1,0 +1,159 @@
+// Custom React Flow node for non-statement constructs (system / module /
+// context / aggregate / operation / value object / event / repository / view /
+// workflow / api / storage / ui / deployable). Replaces the default node so we
+// can put a pencil affordance for **inline rename** and an `×` for **delete**
+// right on the node — same parse-guarded paths v1 already uses.
+
+import { Box, Button, Group, MultiSelect, Stack, Text, TextInput } from "@mantine/core";
+import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { useEffect, useState } from "react";
+import type { ViewKind } from "./view-graph";
+
+/** A small inline multi-select on the node — used for multi-valued bindings
+ *  (a deployable's modules / serves) that can't be expressed as a single
+ *  drag-rebindable edge. */
+export interface NodeMultiSelect {
+  label: string;
+  data: string[];
+  value: string[];
+  onChange: (v: string[]) => void;
+  testid: string;
+}
+
+export interface ConstructNodeData {
+  kind: ViewKind;
+  name: string;
+  color: string;
+  drillable: boolean;
+  /** Provide to enable a pencil + inline rename input. */
+  onRename?: (newName: string) => void;
+  /** Provide to enable an `×` delete button. */
+  onDelete?: () => void;
+  /** Optional inline multi-selects (stacked below the name). */
+  multiSelects?: NodeMultiSelect[];
+}
+
+export default function ConstructNode({ data }: NodeProps): JSX.Element {
+  const d = data as unknown as ConstructNodeData;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(d.name);
+  // Re-seed the draft + collapse the editor when the source-derived name
+  // changes (after a successful rename the parent re-builds this node).
+  useEffect(() => {
+    setDraft(d.name);
+    setEditing(false);
+  }, [d.name]);
+
+  const commit = (): void => {
+    setEditing(false);
+    const next = draft.trim();
+    if (!next || next === d.name || !d.onRename) {
+      setDraft(d.name);
+      return;
+    }
+    d.onRename(next);
+  };
+
+  return (
+    <Box
+      className="nodrag"
+      style={{
+        background: d.color,
+        color: "white",
+        border: "1px solid rgba(255,255,255,0.25)",
+        borderRadius: 6,
+        padding: "6px 8px",
+        // Widen when there are multi-selects so the pill chips fit.
+        width: d.multiSelects && d.multiSelects.length > 0 ? 240 : 170,
+        position: "relative",
+        cursor: d.drillable ? "pointer" : "default",
+      }}
+      data-testid="c4system-v2-construct"
+      data-construct-kind={d.kind}
+      data-construct-name={d.name}
+    >
+      <Handle type="target" position={Position.Top} style={{ background: "var(--mantine-color-dark-3)" }} />
+      <Text size="xs" tt="uppercase" style={{ opacity: 0.65, fontSize: 9 }}>
+        {d.kind}{d.drillable ? "  ↳" : ""}
+      </Text>
+      {editing ? (
+        <TextInput
+          size="xs"
+          autoFocus
+          value={draft}
+          data-testid="c4system-v2-rename-input"
+          onChange={(e) => setDraft(e.currentTarget.value)}
+          onBlur={commit}
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+            else if (e.key === "Escape") {
+              setDraft(d.name);
+              setEditing(false);
+            }
+          }}
+          styles={{ input: { fontSize: 12, padding: "2px 4px", minHeight: 22 } }}
+        />
+      ) : (
+        <Text size="sm" style={{ fontWeight: 500 }}>{d.name}</Text>
+      )}
+      {(d.onRename || d.onDelete) && !editing && (
+        <Group
+          gap={2}
+          style={{ position: "absolute", top: 2, right: 2 }}
+        >
+          {d.onRename && (
+            <Button
+              size="compact-xs"
+              variant="subtle"
+              color="gray"
+              data-testid="c4system-v2-rename"
+              styles={{ root: { paddingInline: 4, height: 18, minHeight: 18, color: "white" } }}
+              onClick={(e) => {
+                e.stopPropagation();
+                setEditing(true);
+              }}
+            >
+              ✎
+            </Button>
+          )}
+          {d.onDelete && (
+            <Button
+              size="compact-xs"
+              variant="subtle"
+              color="red"
+              data-testid="c4system-v2-delete"
+              styles={{ root: { paddingInline: 4, height: 18, minHeight: 18, color: "white" } }}
+              onClick={(e) => {
+                e.stopPropagation();
+                d.onDelete!();
+              }}
+            >
+              ×
+            </Button>
+          )}
+        </Group>
+      )}
+      {d.multiSelects && d.multiSelects.length > 0 && (
+        <Stack gap={4} mt={6}>
+          {d.multiSelects.map((sel) => (
+            <MultiSelect
+              key={sel.label}
+              size="xs"
+              label={sel.label}
+              data={sel.data}
+              value={sel.value}
+              data-testid={sel.testid}
+              onChange={sel.onChange}
+              styles={{
+                label: { fontSize: 9, color: "rgba(255,255,255,0.7)", marginBottom: 2 },
+                input: { fontSize: 11, minHeight: 24 },
+              }}
+            />
+          ))}
+        </Stack>
+      )}
+      <Handle type="source" position={Position.Bottom} style={{ background: "var(--mantine-color-dark-3)" }} />
+    </Box>
+  );
+}

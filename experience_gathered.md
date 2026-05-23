@@ -641,3 +641,62 @@ or not.
   type the param.  Reinforces the "always type-check the generated
   output" rule — and that `as never`-style placeholders are debt that
   bites the moment a new shape reaches them.
+
+## Multi-file `.ddd` source (Stage A)
+
+- **File splitting and the visibility model are orthogonal.**  The
+  ergonomic ask was "split the file into many"; that's pure plumbing
+  (workspace loader, transitive `import`, langium's global index does
+  the rest).  The *interesting* design conversation — what crosses a
+  context boundary, how DDD context-mapping maps onto syntax — is a
+  separate axis we deliberately deferred to Stage B+ to avoid
+  conflating them.  The biggest design lesson before code: name the
+  axes and ship them separately.
+- **`packaging-split.md` already existed — for a different "packaging".**
+  That doc is about distributing the toolchain as npm packages
+  (`@loom/core` + per-backend packages); the new feature is about
+  source-file packaging.  Used `docs/multi-file-source.md` to avoid
+  collision; first thing anyone touching either should do is grep both
+  files so the topics don't bleed into each other.
+- **The export-side scope was already half-wired.**
+  `DddScopeComputation.computeExports` already exports every named
+  declaration (aggregates / VOs / enums / entity parts) via
+  `streamAllContents` — the only reason cross-document refs didn't
+  resolve before is that the CLI only loaded *one* document.  Once
+  the project loader registers every reachable document, Langium's
+  default global scope provider resolves cross-doc refs for free.  No
+  scope code had to change for Stage A.
+- **Per-document lower + merge beats synthesizing a fake Model.**
+  Considered concatenating every loaded document's `Model.members`
+  into a synthetic top-level `Model`; rejected because every member's
+  `$container` would still point at its original document, and
+  anything walking upward to find "its Model" would see a different
+  node than the one being passed around.  Per-document `lowerModel`
+  + a trivial `mergeLoomModels` keeps each IR node anchored to a real
+  source document and the merge is just an in-order union of the
+  top-level slices.  Single-document callers stay on the same path,
+  unchanged.
+- **Inject root VOs / enums in `enrichLoomModel`, not at emit time.**
+  Picked the enrichment layer for the root-level shared-kernel
+  injection because it's already the "compute derived fields" pass
+  (`wireShape`, auto-`findAll`, react `moduleNames`).  Folding root
+  VOs / enums into every context's effective list at enrichment time
+  means backends are completely untouched — they keep iterating
+  `ctx.valueObjects` and `ctx.enums` as before.  Output duplicates
+  root types across contexts inside a deployable (Money in both
+  `products/value-objects.ts` and `orders/value-objects.ts`); a
+  future stage may centralise emission per deployable when the
+  duplication actually starts hurting.
+- **Acceptance test: byte-identical regression on a real example.**
+  The gating test for Stage A wraps `examples/acme.ddd` and
+  `examples/provenance.ddd` in a trivial `main.ddd` that just
+  imports the original file, then diffs the file map against the
+  single-file path.  If the multi-file path adds, drops, or perturbs
+  even one byte for a project that has zero root-level types, the
+  test fails — which is exactly the regression we want gated.
+- **CLI: only `generate system` does the workspace walk.**  Legacy
+  `generate ts` / `generate dotnet` stay on `parseFile` for one
+  reason: they don't compose multi-file output (they emit a single
+  project from a single context), so the workspace mechanics would
+  add error surface without buying anything.  Keep the seam at the
+  one subcommand whose output model is "many things composed."

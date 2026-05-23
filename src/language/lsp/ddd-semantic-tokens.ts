@@ -34,11 +34,11 @@ import { envForNode, stepIntoNode, typeOf } from "../type-system.js";
 // ---------------------------------------------------------------------------
 
 export class DddSemanticTokenProvider extends AbstractSemanticTokenProvider {
-  // biome-ignore lint/suspicious/noConfusingVoidType: must match the
-  // overridden AbstractSemanticTokenProvider.highlightElement signature.
   protected override highlightElement(
     node: AstNode,
     acceptor: SemanticTokenAcceptor,
+    // biome-ignore lint/suspicious/noConfusingVoidType: must match the
+    // overridden AbstractSemanticTokenProvider.highlightElement signature.
   ): void | "prune" {
     if (isAggregate(node) || isEntityPart(node)) {
       acceptor({ node, property: "name", type: SemanticTokenTypes.class });

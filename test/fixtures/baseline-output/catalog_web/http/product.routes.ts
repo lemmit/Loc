@@ -52,6 +52,7 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
       const body = c.req.valid("json");
       const created = Product.create({ sku: body.sku, price: new Money(body.price.amount, body.price.currency) });
       await repo.save(created);
+      (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").info({ event: "aggregate_created", aggregate: "Product", id: created.id as string });
       return c.json({ id: created.id as string }, 201);
     },
   );
@@ -114,11 +115,23 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
 
   app.onError((err, c) => {
     const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";
-    if (err instanceof ForbiddenError) return c.json({ error: err.message, trace_id }, 403);
-    if (err instanceof DomainError) return c.json({ error: err.message, trace_id }, 400);
-    if (err instanceof AggregateNotFoundError) return c.json({ error: err.message, trace_id }, 404);
-    if (err instanceof ExternHandlerError) { console.error(err); return c.json({ error: err.message, trace_id }, 500); }
-    console.error(err);
+    if (err instanceof ForbiddenError) {
+      (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "forbidden", aggregate: "Product", message: err.message, status: 403 });
+      return c.json({ error: err.message, trace_id }, 403);
+    }
+    if (err instanceof DomainError) {
+      (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "domain_error", aggregate: "Product", message: err.message, status: 400 });
+      return c.json({ error: err.message, trace_id }, 400);
+    }
+    if (err instanceof AggregateNotFoundError) {
+      (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").warn({ event: "not_found", aggregate: "Product", status: 404 });
+      return c.json({ error: err.message, trace_id }, 404);
+    }
+    if (err instanceof ExternHandlerError) {
+      (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").error({ event: "extern_handler_threw", aggregate: err.aggName, op: err.opName, error: err.message });
+      return c.json({ error: err.message, trace_id }, 500);
+    }
+    (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").error({ event: "internal_error", error: err instanceof Error ? err.message : String(err), status: 500 });
     return c.json({ error: "internal", trace_id }, 500);
   });
 

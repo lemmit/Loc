@@ -26,7 +26,8 @@ requirements-tracing one.
 | [`provenance.md`](./provenance.md) | Value provenance | `derived … provenanced` + compiler-inferred lineage + snapshot/trace split |
 | [`execution-context.md`](./execution-context.md) | Call-context backbone | Compiler-emitted scope frames (`correlationId`/`scopeId`/`parentId`/…) shared by provenance, audit, and logging |
 | [`audit-and-logging.md`](./audit-and-logging.md) | Audit & logging markers | `audited` / `logged` modifiers, append-only audit records, aggregate→command/view propagation |
-| [`sensitivity-and-compliance.md`](./sensitivity-and-compliance.md) | Sensitivity tagging + compliance lint | `sensitive(...)` field modifier, event-driven change audit, "sensitive-without-policy" compile warning |
+| [`sensitivity-and-compliance.md`](./sensitivity-and-compliance.md) | Sensitivity tagging | `sensitive(<tag>)` as a type-system property; sensitivity propagates through expressions; `authorized(...)` declassification; sinks (log/error/trace/metric) reject sensitive values |
+| [`encrypted-at-rest.md`](./encrypted-at-rest.md) | Column-level encryption | Reserved sibling of `sensitive` — governs *persistence*, not flow; deferred (see doc) |
 | [`load-specifications.md`](./load-specifications.md) | Aggregate load specs | `loads` clause + compiler-inferred load plans + shape (loadedness) typing |
 | [`optional-and-partial-update.md`](./optional-and-partial-update.md) | Optional / partial update | `Optional<T>` to distinguish "field absent" from "field null" |
 

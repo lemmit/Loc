@@ -439,6 +439,130 @@ Open:
   are inherently not single-drag rebindable — they stay inspector / statement
   editors.
 
+## Model builder v2 (drill-down React Flow)
+
+v1 is the existing "Model" tab; v2 is being built in `web/src/builder/system-v2/`
+behind a separate "Model v2" tab in both shells. v1 stays untouched and
+shippable until v2 reaches parity (Phase 4); they coexist meanwhile.
+
+The shape: the canvas is the navigator. You drill down through Loom's hierarchy
+(system → module → context → aggregate → operation) via double-click / a "↳"
+handle, and back up via a breadcrumb. The leaf — an operation or workflow — is
+a vertical React Flow of statement nodes, each embedding the existing inline
+`ƒx` editors from v1. Expression-as-flow stays deferred (wait-and-see; the
+architecture accommodates it later without rework).
+
+Phasing:
+
+- ~~**Phase 0** — skeleton tab + wiring.~~ Done: lazy-loaded
+  `SystemBuilderV2Pane` mounts under "Model v2" in DesktopShell + MobileShell;
+  reads `ctx.getSource()` and shows top-level construct counts as proof of
+  flow. Gated by `web/e2e/system-builder-v2.spec.ts`.
+- ~~**Phase 1** — drill-down backbone (read-only).~~ Done: a pure per-level
+  `buildViewGraph(ast, path)` in `system-v2/view-graph.ts` walks the AST for
+  each level (root / system / module / context / aggregate); the pane wraps it
+  with a clickable breadcrumb and a React Flow whose nodes drill on click for
+  drillable kinds (system / module / context / aggregate / operation /
+  workflow). Empty path = root, clicking the Model crumb pops back. Operation
+  and workflow leaves render as empty placeholders — Phase 2 fills them in.
+  Gated by `test/system-v2/view-graph.test.ts` (per-level unit snapshots) +
+  `web/e2e/system-builder-v2.spec.ts` (drill system → module → context →
+  aggregate, then pop home).
+- ~~**Phase 2a** — operation / workflow flow view (read-only).~~ Done: an
+  operation / workflow leaf renders as a vertical column of `stmt` nodes
+  connected by implicit "next" edges; each node uses a custom `StmtNode`
+  React Flow type, kind-tinted (assign / call / emit / other) with monospace
+  text. Reuses `body.ts`'s `listStatementViews`. Gated by
+  `test/system-v2/view-graph.test.ts` (operation / workflow snapshots) +
+  `web/e2e/system-builder-v2.spec.ts` (drill into `Order.confirm`, see stmt
+  nodes incl. the `emit`).
+- ~~**Phase 2b** — editable stmt nodes (inline rows).~~ Done: v1's
+  `AssignRow` / `CallRow` / `EmitRow` / `OtherRow` are now exported and
+  embedded inside `StmtNode`, with the inline `ƒx` editor wired through the
+  same `slotExpr` / `slotCandidates` / `editExprSlot` / `exprHints` helpers
+  as v1. The pane carries a `rev` counter so each commit re-parses, re-builds
+  the view-graph, and re-binds the per-stmt handlers; switching to a
+  different leaf collapses any open `ƒx`. `.nodrag .nopan` on the node lets
+  inputs / dropdowns work inside the React Flow node. Gated by the v2 e2e
+  (asserts each stmt kind's editor controls are present inside the node).
+- ~~**Phase 3a** — per-view add palette.~~ Done: a small toolbar above the
+  canvas exposes the adds appropriate to the current drill level — `+ Module
+  / + API / + Storage / + UI / + Deployable` in the system view, and `+
+  Aggregate / + Value object / + Event / + Workflow / + Repository / + View`
+  in the context view (target context auto-derived from the path). Reuses
+  v1's parse-guarded `addConstructSource` / `addModuleSource`. Gated by the
+  v2 e2e (system + context palette add bumps the relevant node count).
+- ~~**Phase 3b** — rename + delete on the node.~~ Done: a new `ConstructNode`
+  custom React Flow type replaces the default node for non-stmt constructs,
+  with an on-node pencil (inline rename input, commits via v1's
+  `renameConstruct`) and an `×` (delete via `spliceNode` on the construct's
+  AST node). Wired for every ViewKind that v1's NodeKind already covers —
+  module / aggregate / valueobject / event / repository / view / workflow /
+  api / storage / ui / deployable. System / context / operation / field /
+  containment still render without action buttons in this phase. Gated by the
+  v2 e2e (rename Order → OrderX on the canvas, then delete it; counts +
+  data-construct-name reflect the changes).
+- ~~**Phase 3c (palette additions)** — module / aggregate / operation
+  palettes.~~ Done: new pure helpers `addContextSource` (insert a context
+  into a module) and `addOperationSource` (insert an operation into an
+  aggregate) in `system-v2/add-extra.ts`; the palette gains `+ Context` in
+  the module view, `+ Operation` + `+ Field` (reusing v1's `addField`) in
+  the aggregate view, and `+ Stmt` (a `precondition true` via v1's
+  `addStatement`) in the operation / workflow flow view. Gated by
+  `test/system-v2/add-extra.test.ts` + the v2 e2e (each palette adds bumps
+  the relevant node count by one).
+- ~~**Phase 3d — rename / delete for the remaining ViewKinds.**~~ Done: a new
+  `renameByAstType` helper (mirrors `renameConstruct` but keyed directly on
+  `$type`, not v1's NodeKind union) lets v2 rename `System` / `BoundedContext`
+  / `Operation` / `FunctionDecl` too, with the same NameProvider + References
+  rewrite as v1. Delete already worked by `$type`. Now every named construct
+  except `field` and `containment` (which need `renameMember`'s text-token
+  resolver — left for Phase 4) gets the pencil + `×` affordance on its node.
+  Gated by the v2 e2e (rename a context and delete an operation through the
+  on-node controls).
+- ~~**Phase 4a — field rename + delete on the node.**~~ Done: routes through
+  v1's `renameMember` (text-token resolver, handles `this.field` / `x.field`
+  usages via the shared `member-refs` resolver) and `deleteField` (preserves
+  surrounding layout); containment also gets rename. Gated by the v2 e2e
+  (rename + delete a field on the canvas).
+- ~~**Phase 4b (emit-event repointing).**~~ Done: an emit stmt node's event
+  is a `Select` over every `EventDecl` in the model; on change v2 calls v1's
+  `setEmitEvent` (rewrites just the event reference token, parse-guarded).
+  `EmitRow` gained two additive props (`events` + `onRepointEvent`) — when
+  unset it renders the old dimmed label, so v1 is unaffected. Gated by the
+  v2 e2e (repoint `Order.confirm`'s emit from `OrderConfirmed` to
+  `LineAdded`).
+- ~~**Phase 4c (deployable bindings as edges).**~~ Done: the system view now
+  draws an edge per deployable binding — `deployable -modules-> module`,
+  `deployable -serves-> api`, `deployable -ui-> ui`, `deployable -targets->
+  deployable` — pulled from v1's `deployableModules` / `deployableServes` /
+  `deployableUi` / `deployableTargets`. Read-only visualisation; editing the
+  bindings inline is Phase 4d. Gated by `test/system-v2/view-graph.test.ts`
+  (a system with `api` + `webApp` produces the expected modules / serves /
+  targets / ui edges).
+- ~~**Phase 4d (drag-rebind `targets` / `ui`).**~~ Done: the system view's
+  `targets` and `ui` edges are now `reconnectable: "target"` and the v2 pane
+  has an `onReconnect` handler that dispatches through a new pure helper
+  `rebindDeployableEdgeTarget` (wraps v1's `setDeployableTargets` /
+  `setDeployableUi`, rejects wrong target kinds, self-targets, and the
+  multi-valued labels). The multi-valued bindings (`modules` / `serves`)
+  intentionally stay non-drag — they need a multi-select UI. Gated by
+  `test/system-v2/deployable-edge-rebind.test.ts` (5 cases). The drag gesture
+  itself isn't e2e-covered for the same reason v1's drag-rebind isn't —
+  React Flow reconnect-anchor drags are fragile in Playwright.
+- ~~**Phase 4e (multi-valued deployable bindings inline).**~~ Done: deployable
+  nodes now embed a `modules` and a `serves` Mantine `MultiSelect` (when its
+  bindings panel data is provided), backed by v1's `setDeployableModules` /
+  `setDeployableServes`. `ConstructNode` widens to ~240 when multi-selects
+  are present so the chip pills fit. With this, every binding on a deployable
+  is editable on the canvas — targets / ui by drag (Phase 4d), modules /
+  serves by multi-select. Gated by the v2 e2e (the api deployable in Banking
+  System exposes both multi-selects on its node).
+- **Phase 4f** — repository finds (filter + params) as a per-find inline
+  editor. With that landed, v1 can be deprecated.
+- **Phase 5** — polish: per-view positions, search / coverage / grouped layout
+  adapted per zoom level, transitions on drill, mobile passes.
+
 Planned — recommended order:
 
 1. ~~**Finish expression/statement structuring**~~ — done: block-body lambdas,

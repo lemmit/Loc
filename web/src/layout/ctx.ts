@@ -59,7 +59,13 @@ export type MobileTab =
 /** Sub-view of the consolidated mobile "Code" tab: the source editor,
  *  the visual page Builder, the structural Model, or the generated-file
  *  browser. Persisted by App.tsx; mirrors the desktop center-pane switch. */
-export type MobileCodeView = "source" | "builder" | "model" | "generated";
+export type MobileCodeView =
+  | "source"
+  | "builder"
+  | "model"
+  | "model-v2"
+  | "requirements"
+  | "generated";
 
 export interface LayoutCtx {
   isDesktop: boolean;
@@ -146,6 +152,10 @@ export interface LayoutCtx {
   appLog: LogLine[];
   /** Append one preview-app log line (handed to <Preview onAppLog>). */
   appendAppLog: (line: LogLine) => void;
+  /** Live snapshot of the current appLog buffer — read by the UI-test
+   *  runner to slice each test's app output (state is stale in its
+   *  async closure). */
+  getAppLog: () => LogLine[];
   clearBackendLog: () => void;
   clearAppLog: () => void;
 

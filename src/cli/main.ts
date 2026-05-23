@@ -7,18 +7,19 @@ import { URI } from "langium";
 import { NodeFileSystem } from "langium/node";
 import { generateDotnet } from "../generator/dotnet/index.js";
 import { enrichLoomModel } from "../ir/enrichments.js";
-import type { TestOutcome } from "../ir/loom-ir.js";
-import { lowerModel } from "../ir/lower.js";
+import type { LoomModel, TestOutcome } from "../ir/loom-ir.js";
+import { lowerModel, mergeLoomModels } from "../ir/lower.js";
 import { validateLoomModel } from "../ir/validate.js";
 import { createDddServices } from "../language/ddd-module.js";
 import type { Model } from "../language/generated/ast.js";
+import { loadProject } from "../language/project-loader.js";
 import { installFsBackendSource } from "../platform/fs-discovery.js";
 import { generateTypeScript } from "../platform/hono/v4/emit.js";
 // Legacy single-context `generate ts` targets the default Hono
 // backend; the CLI (an entrypoint) supplies that package's pins to
 // the version-agnostic shared emitter.
 import { BACKEND_PINS as HONO_V4_PINS } from "../platform/hono/v4/pins.js";
-import { generateSystems } from "../system/index.js";
+import { generateSystemsFromLoom } from "../system/index.js";
 import { captureSnapshots } from "../system/loomsnap.js";
 import {
   renderVerdictGraph,
@@ -61,6 +62,54 @@ async function parseFile(file: string): Promise<ParseResult> {
     errorCount,
     warningCount,
   };
+}
+
+interface ProjectParseResult {
+  /** Pre-enriched LoomModel, merged from every reachable document. */
+  loom: LoomModel;
+  diagnostics: string[];
+  errorCount: number;
+  warningCount: number;
+}
+
+/**
+ * Multi-file entry — load the project rooted at `entryFile`, walk
+ * its `import` graph, and return a single enriched `LoomModel` built
+ * by lowering each document independently and merging the results.
+ * Used by `generate system`.  Single-document legacy commands stay
+ * on `parseFile`.
+ */
+async function parseProject(entryFile: string): Promise<ProjectParseResult> {
+  const services = createDddServices(NodeFileSystem);
+  const absolute = path.resolve(entryFile);
+  if (!fs.existsSync(absolute)) {
+    throw new Error(`File not found: ${absolute}`);
+  }
+  const { all } = await loadProject(URI.file(absolute), services.shared);
+
+  const diagnostics: string[] = [];
+  let errorCount = 0;
+  let warningCount = 0;
+  for (const doc of all) {
+    const docPath = doc.uri.fsPath;
+    for (const d of doc.diagnostics ?? []) {
+      const severity = d.severity === 1 ? "error" : d.severity === 2 ? "warning" : "info";
+      if (severity === "error") errorCount++;
+      if (severity === "warning") warningCount++;
+      const line = d.range.start.line + 1;
+      const col = d.range.start.character + 1;
+      diagnostics.push(`${docPath}:${line}:${col} ${severity}: ${d.message}`);
+    }
+  }
+
+  // Lower each document independently; references between documents
+  // were resolved by the linker during DocumentBuilder.build so each
+  // IR node carries fully-resolved cross-doc refs.  The merge is then
+  // an in-order concatenation of the top-level slices.
+  const lowered = all.map((doc) => lowerModel(doc.parseResult.value as Model));
+  const merged = mergeLoomModels(lowered);
+  const loom = enrichLoomModel(merged);
+  return { loom, diagnostics, errorCount, warningCount };
 }
 
 function printDiagnostics(result: ParseResult) {
@@ -141,6 +190,12 @@ interface RunOptions {
    * of calling `process.exit`.  Used by watch mode so a typo in the
    * `.ddd` source doesn't tear down the watcher. */
   continueOnError?: boolean;
+  /** Compile-time `--trace` switch — when true, the TS generators inject
+   * trace-level domain instrumentation (`value_computed`,
+   * `precondition_evaluated`, etc., via `requestLog().trace(...)`).  Off
+   * by default keeps the artefact lean and the domain layer pure; on
+   * regenerate to diagnose.  See docs/proposals/observability.md. */
+  emitTrace?: boolean;
 }
 
 interface RunResult {
@@ -163,17 +218,44 @@ async function runGenerate(
   outDir: string,
   options: RunOptions = {},
 ): Promise<RunResult> {
-  const result = await parseFile(file);
-  if (result.errorCount > 0) {
-    printDiagnostics(result);
-    if (!options.continueOnError) process.exit(1);
-    return { hadError: true };
+  // `generate system` is multi-file aware: load the entry's import
+  // graph, lower per document, merge.  Legacy single-deployable
+  // `generate ts` / `generate dotnet` stay on the single-file path.
+  let loom: LoomModel;
+  let legacyModel: Model | undefined; // non-system targets only
+  if (target === "system") {
+    let projectResult: ProjectParseResult;
+    try {
+      projectResult = await parseProject(file);
+    } catch (err) {
+      console.error(`${file}: ${err instanceof Error ? err.message : String(err)}`);
+      if (!options.continueOnError) process.exit(1);
+      return { hadError: true };
+    }
+    if (projectResult.errorCount > 0) {
+      for (const d of projectResult.diagnostics) console.error(d);
+      console.error(
+        `${projectResult.errorCount} error(s), ${projectResult.warningCount} warning(s).`,
+      );
+      if (!options.continueOnError) process.exit(1);
+      return { hadError: true };
+    }
+    loom = projectResult.loom;
+  } else {
+    const result = await parseFile(file);
+    if (result.errorCount > 0) {
+      printDiagnostics(result);
+      if (!options.continueOnError) process.exit(1);
+      return { hadError: true };
+    }
+    legacyModel = result.model;
+    loom = enrichLoomModel(lowerModel(result.model));
   }
+
   // Loom-IR-level validation: catches `api.<unknown>.<verb>` and
   // `ui.<unknown>.<verb>` references in `test e2e` bodies before
   // generators are called.  Everything caught here used to throw
   // mid-generation with a slightly less helpful trace.
-  const loom = enrichLoomModel(lowerModel(result.model));
   const loomDiags = validateLoomModel(loom);
   const loomErrors = loomDiags.filter((d) => d.severity === "error");
   if (loomErrors.length > 0) {
@@ -190,7 +272,7 @@ async function runGenerate(
 
   let files: Map<string, string>;
   if (target === "system") {
-    files = generateSystems(result.model).files;
+    files = generateSystemsFromLoom(loom, { emitTrace: options.emitTrace }).files;
     if (files.size === 0) {
       console.error(
         `No \`system\` block declared in ${file}.  Use \`generate ts\` or \`generate dotnet\` for legacy single-deployable sources.`,
@@ -199,9 +281,9 @@ async function runGenerate(
       return { hadError: true };
     }
   } else if (target === "ts") {
-    files = generateTypeScript(result.model, HONO_V4_PINS);
+    files = generateTypeScript(legacyModel!, HONO_V4_PINS, { emitTrace: options.emitTrace });
   } else {
-    files = generateDotnet(result.model);
+    files = generateDotnet(legacyModel!);
   }
 
   if (!files.has("LICENSE")) {
@@ -436,10 +518,23 @@ generate
   .requiredOption("-o, --out <dir>", "output directory")
   .option("-w, --watch", "re-run on changes to <file>")
   .option("--dry-run", "list paths that would be written / skipped, write nothing")
-  .action(async (file: string, options: { out: string; watch?: boolean; dryRun?: boolean }) => {
-    await runGenerate("ts", file, options.out, { dryRun: options.dryRun });
-    if (options.watch) await watchAndRegenerate("ts", file, options.out);
-  });
+  .option(
+    "--trace",
+    "emit trace-level domain instrumentation (value_computed, precondition_evaluated, …) — off by default; see docs/proposals/observability.md",
+  )
+  .action(
+    async (
+      file: string,
+      options: { out: string; watch?: boolean; dryRun?: boolean; trace?: boolean },
+    ) => {
+      await runGenerate("ts", file, options.out, {
+        dryRun: options.dryRun,
+        emitTrace: !!options.trace,
+      });
+      if (options.watch)
+        await watchAndRegenerate("ts", file, options.out, { emitTrace: !!options.trace });
+    },
+  );
 generate
   .command("dotnet <file>")
   .description("Generate .NET (ASP.NET Core + EF Core + Mediator)")
@@ -458,10 +553,23 @@ generate
   .requiredOption("-o, --out <dir>", "output directory")
   .option("-w, --watch", "re-run on changes to <file>")
   .option("--dry-run", "list paths that would be written / skipped, write nothing")
-  .action(async (file: string, options: { out: string; watch?: boolean; dryRun?: boolean }) => {
-    await runGenerate("system", file, options.out, { dryRun: options.dryRun });
-    if (options.watch) await watchAndRegenerate("system", file, options.out);
-  });
+  .option(
+    "--trace",
+    "emit trace-level domain instrumentation (value_computed, precondition_evaluated, …) — off by default; see docs/proposals/observability.md",
+  )
+  .action(
+    async (
+      file: string,
+      options: { out: string; watch?: boolean; dryRun?: boolean; trace?: boolean },
+    ) => {
+      await runGenerate("system", file, options.out, {
+        dryRun: options.dryRun,
+        emitTrace: !!options.trace,
+      });
+      if (options.watch)
+        await watchAndRegenerate("system", file, options.out, { emitTrace: !!options.trace });
+    },
+  );
 
 program
   .command("verify <file>")
@@ -488,7 +596,12 @@ program
     await runSnapshot(file, options.out, { dryRun: options.dryRun });
   });
 
-async function watchAndRegenerate(target: GenerateTarget, file: string, outDir: string) {
+async function watchAndRegenerate(
+  target: GenerateTarget,
+  file: string,
+  outDir: string,
+  options: { emitTrace?: boolean } = {},
+) {
   console.log(`Watching ${file} for changes…`);
   let timer: NodeJS.Timeout | null = null;
   let inFlight = false;
@@ -503,7 +616,10 @@ async function watchAndRegenerate(target: GenerateTarget, file: string, outDir: 
     }
     inFlight = true;
     try {
-      await runGenerate(target, file, outDir, { continueOnError: true });
+      await runGenerate(target, file, outDir, {
+        continueOnError: true,
+        emitTrace: options.emitTrace,
+      });
     } catch (err) {
       // Defensive — runGenerate is supposed to capture its own
       // errors when continueOnError is set, but a renderer throwing
