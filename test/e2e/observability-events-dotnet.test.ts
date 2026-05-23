@@ -181,7 +181,9 @@ describe.skipIf(!ENABLED || !hasDocker() || !hasDotnet())(
             } else if (Date.now() > deadline) {
               clearInterval(tick);
               reject(
-                new Error(`server didn't reach server_listening; stdout:\n${stdout.slice(0, 8192)}`),
+                new Error(
+                  `server didn't reach server_listening; stdout:\n${stdout.slice(0, 8192)}`,
+                ),
               );
             }
           }, 200);

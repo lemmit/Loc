@@ -2,9 +2,7 @@ import type { AggregateIR, ParamIR, RepositoryIR } from "../../../ir/loom-ir.js"
 import { findUsesCurrentUser } from "../../../ir/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
-import {
-  renderDotnetLogCall,
-} from "../../_obs/render-dotnet.js";
+import { renderDotnetLogCall } from "../../_obs/render-dotnet.js";
 import { renderCsType } from "../render-expr.js";
 
 // Repository interface (Domain layer) + EF-backed implementation

@@ -275,15 +275,11 @@ ${asLifecycleStmt(
     var lifetime = app.Services.GetRequiredService<Microsoft.Extensions.Hosting.IHostApplicationLifetime>();
     lifetime.ApplicationStarted.Register(() =>
         ${asLifecycleExpr(
-          renderDotnetLogCall("serverListening", [
-            { name: "port", valueExpr: "loomPort" },
-          ]),
+          renderDotnetLogCall("serverListening", [{ name: "port", valueExpr: "loomPort" }]),
         )});
     lifetime.ApplicationStopping.Register(() =>
         ${asLifecycleExpr(
-          renderDotnetLogCall("serverShutdown", [
-            { name: "signal", valueExpr: '"SIGTERM"' },
-          ]),
+          renderDotnetLogCall("serverShutdown", [{ name: "signal", valueExpr: '"SIGTERM"' }]),
         )});
     lifetime.ApplicationStopped.Register(() =>
         ${asLifecycleExpr(renderDotnetLogCall("serverDrained"))});
