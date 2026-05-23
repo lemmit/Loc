@@ -1,10 +1,4 @@
-import {
-  contextFilter,
-  defineMacro,
-  memberAccess,
-  not,
-  thisRef,
-} from "../macro-api/index.js";
+import { contextFilter, defineMacro, memberAccess, not, thisRef } from "../macro-api/index.js";
 
 /** Context-level companion to `softDeletable`.
  *
@@ -41,7 +35,7 @@ export default defineMacro({
   description:
     "Context-level capability filter for the `softDeletable` group.  " +
     "Hides rows whose `isDeleted` field is true from default reads, " +
-    "but only for aggregates that opt in via `implements \"softDeletable\"`.",
+    'but only for aggregates that opt in via `implements "softDeletable"`.',
   expand() {
     return [
       contextFilter(not(memberAccess(thisRef(), "isDeleted")), {

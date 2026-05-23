@@ -279,7 +279,10 @@ function printTestE2E(node: TestE2E): string {
 // ---------------------------------------------------------------------------
 
 function printUi(node: Ui): string {
-  return block(`ui ${node.name}${printWithClause(node.withClause)}`, node.members.map(printStructural));
+  return block(
+    `ui ${node.name}${printWithClause(node.withClause)}`,
+    node.members.map(printStructural),
+  );
 }
 
 function printUiApiParam(node: UiApiParam): string {

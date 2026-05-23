@@ -130,7 +130,10 @@ export interface OriginToken {
 /** A macro registered with the compiler.  Stdlib ships these
  * pre-built; project-local `.loom/macros/*.ts` modules export
  * them via `export default defineMacro({ ... })`. */
-export interface MacroDefinition<P extends ParamSpec = ParamSpec, T extends MacroTarget = MacroTarget> {
+export interface MacroDefinition<
+  P extends ParamSpec = ParamSpec,
+  T extends MacroTarget = MacroTarget,
+> {
   /** Identifier the user writes in `with <name>(...)`. */
   name: string;
   /** Host kind this macro attaches to. */

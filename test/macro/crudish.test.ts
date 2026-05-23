@@ -6,13 +6,13 @@
 // reference them by name?  These tests confirm it can.
 
 import { describe, expect, it } from "vitest";
+import type { Aggregate, Model } from "../../src/language/generated/ast.js";
 import {
   isAggregate,
   isAssignOrCallStmt,
   isOperation,
   isProperty,
 } from "../../src/language/generated/ast.js";
-import type { Aggregate, Model } from "../../src/language/generated/ast.js";
 import { parseString } from "../_helpers/parse.js";
 
 const wrap = (body: string) => `system Demo { ${body} }`;

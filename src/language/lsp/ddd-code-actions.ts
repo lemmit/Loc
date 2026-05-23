@@ -68,9 +68,7 @@ export class DddCodeActionProvider implements CodeActionProvider {
     if (!rootCst) return undefined;
     const offset = document.textDocument.offsetAt(params.range.start);
     const leaf = CstUtils.findLeafNodeAtOffset(rootCst, offset);
-    const call = AstUtils.getContainerOfType(leaf?.astNode, isMacroCall) as
-      | MacroCall
-      | undefined;
+    const call = AstUtils.getContainerOfType(leaf?.astNode, isMacroCall) as MacroCall | undefined;
     if (!call) return undefined;
     const result = unfoldMacro(document, call);
     if (!result) return undefined;

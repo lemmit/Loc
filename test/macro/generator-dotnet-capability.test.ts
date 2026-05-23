@@ -100,18 +100,14 @@ describe(".NET generator: HasQueryFilter installs per-EntityConfiguration", () =
   it("emits one `b.HasQueryFilter(...)` per propagated filter on the matching config", async () => {
     const model = await modelFrom(trioed("softDelete", "softDeletable"));
     const files = generateDotnet(model);
-    const cfg = files.get(
-      "Infrastructure/Persistence/Configurations/OrderConfiguration.cs",
-    )!;
+    const cfg = files.get("Infrastructure/Persistence/Configurations/OrderConfiguration.cs")!;
     expect(cfg).toMatch(/b\.HasQueryFilter\(x => !x\.IsDeleted\)/);
   });
 
   it("does NOT install HasQueryFilter for non-softDeletable aggregates", async () => {
     const model = await modelFrom(aggregateOnly(""));
     const files = generateDotnet(model);
-    const cfg = files.get(
-      "Infrastructure/Persistence/Configurations/OrderConfiguration.cs",
-    )!;
+    const cfg = files.get("Infrastructure/Persistence/Configurations/OrderConfiguration.cs")!;
     expect(cfg).not.toMatch(/HasQueryFilter/);
   });
 
@@ -127,9 +123,7 @@ describe(".NET generator: HasQueryFilter installs per-EntityConfiguration", () =
       }
     `);
     const files = generateDotnet(model);
-    const cfg = files.get(
-      "Infrastructure/Persistence/Configurations/OrderConfiguration.cs",
-    )!;
+    const cfg = files.get("Infrastructure/Persistence/Configurations/OrderConfiguration.cs")!;
     expect(cfg).toMatch(/b\.HasQueryFilter\(x => !x\.Archived\)/);
   });
 });
@@ -155,17 +149,13 @@ describe(".NET generator: registry-driven SaveChangesInterceptor", () => {
     const model = await modelFrom(trioed("audit", "auditable"));
     const files = generateDotnet(model);
     const program = files.get("Program.cs")!;
-    expect(program).toMatch(
-      /AddScoped<Sales\.Infrastructure\.Persistence\.AuditableInterceptor>/,
-    );
+    expect(program).toMatch(/AddScoped<Sales\.Infrastructure\.Persistence\.AuditableInterceptor>/);
   });
 
   it("softDeletable alone does NOT trigger interceptor emission", async () => {
     const model = await modelFrom(trioed("softDelete", "softDeletable"));
     const files = generateDotnet(model);
-    expect([...files.keys()]).not.toContain(
-      "Infrastructure/Persistence/AuditableInterceptor.cs",
-    );
+    expect([...files.keys()]).not.toContain("Infrastructure/Persistence/AuditableInterceptor.cs");
   });
 });
 
@@ -187,9 +177,9 @@ describe(".NET generator: context-level propagation reaches per-config emission"
       }
     `);
     const files = generateDotnet(model);
-    expect(
-      files.get("Infrastructure/Persistence/Configurations/OrderConfiguration.cs")!,
-    ).toMatch(/b\.HasQueryFilter\(x => !x\.IsDeleted\)/);
+    expect(files.get("Infrastructure/Persistence/Configurations/OrderConfiguration.cs")!).toMatch(
+      /b\.HasQueryFilter\(x => !x\.IsDeleted\)/,
+    );
     expect(
       files.get("Infrastructure/Persistence/Configurations/CustomerConfiguration.cs")!,
     ).toMatch(/b\.HasQueryFilter\(x => !x\.IsDeleted\)/);

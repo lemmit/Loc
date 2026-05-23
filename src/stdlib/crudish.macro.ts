@@ -78,7 +78,9 @@ export default defineMacro({
  * duplicate.  We instead rebuild the small TypeRef tree manually.
  * This is intentionally limited to the shapes the stdlib emits;
  * extend when a new shape is needed. */
-function cloneType(t: import("../language/generated/ast.js").TypeRef): import("../language/generated/ast.js").TypeRef {
+function cloneType(
+  t: import("../language/generated/ast.js").TypeRef,
+): import("../language/generated/ast.js").TypeRef {
   const base = t.base;
   const cloned: import("../language/generated/ast.js").TypeRef = {
     $type: "TypeRef",
@@ -92,9 +94,14 @@ function cloneType(t: import("../language/generated/ast.js").TypeRef): import(".
   return cloned;
 }
 
-function cloneBase(b: import("../language/generated/ast.js").BaseType): import("../language/generated/ast.js").BaseType {
+function cloneBase(
+  b: import("../language/generated/ast.js").BaseType,
+): import("../language/generated/ast.js").BaseType {
   if (b.$type === "PrimitiveType") {
-    return { $type: "PrimitiveType", name: b.name } as unknown as import("../language/generated/ast.js").BaseType;
+    return {
+      $type: "PrimitiveType",
+      name: b.name,
+    } as unknown as import("../language/generated/ast.js").BaseType;
   }
   if (b.$type === "IdType") {
     return {

@@ -67,7 +67,7 @@ describe("source-level capabilities (hand-written, no macro)", () => {
     expect(rule.assignments[0]!.field).toBe("createdAt");
   });
 
-  it("`implements \"X\"` populates implementsCapabilities", async () => {
+  it('`implements "X"` populates implementsCapabilities', async () => {
     const ir = await buildLoomModel(`
       system Demo {
         module M { context C {
@@ -200,7 +200,7 @@ describe("context-level propagation", () => {
   });
 });
 
-describe("capability-scoped context filters: `filter for \"<name>\"`", () => {
+describe('capability-scoped context filters: `filter for "<name>"`', () => {
   it("propagates only to aggregates with matching `implements`", async () => {
     const ir = await buildLoomModel(`
       system Demo {
@@ -285,8 +285,8 @@ describe("capability-scoped context filters: `filter for \"<name>\"`", () => {
   });
 });
 
-describe("capability-scoped context stamps: `stamp for \"<name>\"`", () => {
-  it("`stamp for \"auditable\" onCreate { ... }` propagates only to opt-ins", async () => {
+describe('capability-scoped context stamps: `stamp for "<name>"`', () => {
+  it('`stamp for "auditable" onCreate { ... }` propagates only to opt-ins', async () => {
     const ir = await buildLoomModel(`
       system Demo {
         user { id: string  role: string }

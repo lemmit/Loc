@@ -7,7 +7,6 @@ import { generateReactForContexts } from "../react/index.js";
 import { emitAuthFiles } from "./auth-emit.js";
 import { emitCqrs } from "./cqrs-emit.js";
 import { renderDomainLog, renderDomainLogBehavior } from "./emit/domain-log.js";
-import { buildFindBodies } from "./find-emit.js";
 import {
   renderAuditableInterceptor,
   renderCommon,
@@ -30,6 +29,7 @@ import {
   renderTestsFile,
   renderValueObject,
 } from "./emit.js";
+import { buildFindBodies } from "./find-emit.js";
 import { hasAnyWireValidator, renderValidationBehavior } from "./validator-emit.js";
 import { emitViews } from "./view-emit.js";
 import { emitWorkflows } from "./workflow-emit.js";
@@ -166,9 +166,7 @@ function emitProjectFromContexts(
   // `contextStamps` IR (no marker interface, no per-aggregate
   // hand-written stamping logic).
   emitStampingInterceptor(merged, ns, out);
-  const usesStamping = merged.aggregates.some(
-    (a) => (a.contextStamps?.length ?? 0) > 0,
-  );
+  const usesStamping = merged.aggregates.some((a) => (a.contextStamps?.length ?? 0) > 0);
   out.set("Infrastructure/Persistence/AppDbContext.cs", renderDbContext(merged, ns));
   // FluentValidation pipeline — emit the generic
   // ValidationBehavior + the csproj package ref + the
@@ -249,9 +247,7 @@ function emitContext(
   if (usesValidators) {
     out.set("Application/Common/ValidationBehavior.cs", renderValidationBehavior(ns));
   }
-  const usesStamping = ctx.aggregates.some(
-    (a) => (a.contextStamps?.length ?? 0) > 0,
-  );
+  const usesStamping = ctx.aggregates.some((a) => (a.contextStamps?.length ?? 0) > 0);
   emitProject(ctx, ns, out, { usesValidators, usesStamping, emitTrace });
   emitTestProject(ctx, ns, out);
 }
@@ -273,16 +269,13 @@ function emitStampingInterceptor(
   ns: string,
   out: Map<string, string>,
 ): void {
-  const anyStamping = merged.aggregates.some(
-    (a) => (a.contextStamps?.length ?? 0) > 0,
-  );
+  const anyStamping = merged.aggregates.some((a) => (a.contextStamps?.length ?? 0) > 0);
   if (!anyStamping) return;
   out.set(
     "Infrastructure/Persistence/AuditableInterceptor.cs",
     renderAuditableInterceptor(ns, merged.aggregates),
   );
 }
-
 
 function emitIds(ctx: BoundedContextIR, ns: string, out: Map<string, string>): void {
   for (const agg of ctx.aggregates) {
@@ -352,10 +345,7 @@ function emitAggregate(
       renderEntity(part, false, ns, agg.name, emitTrace),
     );
   }
-  out.set(
-    `Domain/${aggFolder}/${agg.name}.cs`,
-    renderEntity(agg, true, ns, agg.name, emitTrace),
-  );
+  out.set(`Domain/${aggFolder}/${agg.name}.cs`, renderEntity(agg, true, ns, agg.name, emitTrace));
   // Views whose source is this aggregate become parameterless,
   // filtered, list-returning finds on the repository.  Synthesised
   // here so all the existing find emission paths (interface,

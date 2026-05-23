@@ -1,5 +1,4 @@
 import { type AstNode, AstUtils, type ValidationAcceptor, type ValidationChecks } from "langium";
-import { drainMacroDiagnostics } from "./ddd-macro-expander.js";
 import {
   BUILTIN_PACK_LATEST,
   builtinVersionsForFamily,
@@ -13,6 +12,7 @@ import {
   parseBuiltinPlatformRef,
   platformFor,
 } from "../platform/registry.js";
+import { drainMacroDiagnostics } from "./ddd-macro-expander.js";
 import type { DddServices } from "./ddd-module.js";
 import {
   type Aggregate,

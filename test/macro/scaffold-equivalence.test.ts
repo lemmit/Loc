@@ -6,8 +6,8 @@
 // surfaces immediately.
 
 import { describe, expect, it } from "vitest";
-import { isPage } from "../../src/language/generated/ast.js";
 import type { Model, Page, Ui } from "../../src/language/generated/ast.js";
+import { isPage } from "../../src/language/generated/ast.js";
 import { parseString } from "../_helpers/parse.js";
 
 const wrapWith = (uiArgs: string) => `
@@ -71,9 +71,7 @@ function pageBodyCallee(model: Model, name: string): string | undefined {
 
 describe("scaffold macro: aggregate selector", () => {
   it("emits List/New/Detail per aggregate, plus Home and the indexes that apply", async () => {
-    const { model, errors } = await parseString(
-      wrapWith("aggregates: [Order, Customer]"),
-    );
+    const { model, errors } = await parseString(wrapWith("aggregates: [Order, Customer]"));
     expect(errors).toEqual([]);
     expect(pageNames(model)).toEqual([
       "CustomerDetail",

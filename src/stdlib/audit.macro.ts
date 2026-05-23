@@ -44,7 +44,7 @@ export default defineMacro({
   description:
     "Context-level capability stamps for the `auditable` group.  Stamps " +
     "createdAt/createdBy on create and updatedAt/updatedBy on update for " +
-    "aggregates that opt in via `implements \"auditable\"`.",
+    'aggregates that opt in via `implements "auditable"`.',
   expand() {
     return contextStamp({
       capability: "auditable",

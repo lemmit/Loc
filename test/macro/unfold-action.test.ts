@@ -28,8 +28,7 @@ function applyEdits(text: string, edits: TextEdit[]): string {
   // Sort edits descending by start offset so we don't shift earlier
   // ranges when applying later ones.
   const sorted = [...edits].sort((a, b) => {
-    if (a.range.start.line !== b.range.start.line)
-      return b.range.start.line - a.range.start.line;
+    if (a.range.start.line !== b.range.start.line) return b.range.start.line - a.range.start.line;
     return b.range.start.character - a.range.start.character;
   });
   let out = text;
@@ -63,9 +62,7 @@ async function unfold(source: string, macroNameInSource: string): Promise<string
   })) as CodeAction[];
   const action = actions.find((a) => a.title.startsWith("Unfold macro"));
   if (!action) {
-    throw new Error(
-      `no unfold action; got: ${actions.map((a) => a.title).join(", ")}`,
-    );
+    throw new Error(`no unfold action; got: ${actions.map((a) => a.title).join(", ")}`);
   }
   const edits = action.edit?.changes?.[document.textDocument.uri] ?? [];
   return applyEdits(source, edits);

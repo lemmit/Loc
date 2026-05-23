@@ -17,10 +17,7 @@ import { renderCsExpr } from "../render-expr.js";
 // normal IR lowering, so the interceptor body reads like any other
 // generated C# expression.
 
-export function renderAuditableInterceptor(
-  ns: string,
-  aggregates: readonly AggregateIR[],
-): string {
+export function renderAuditableInterceptor(ns: string, aggregates: readonly AggregateIR[]): string {
   // Each aggregate contributes zero or more stamping rules; group
   // by aggregate so we can emit one switch arm per type.  Skip
   // aggregates with no stamps so the switch stays tight.
@@ -103,9 +100,7 @@ function renderArm(ns: string, agg: AggregateIR, rules: readonly ContextStampIR[
       `                        ${argName}.${upperFirst(a.field)} = ${renderCsExpr(a.value, { thisName: argName })};`,
   );
 
-  const arm = [
-    `                case ${agg.name} ${argName}:`,
-  ];
+  const arm = [`                case ${agg.name} ${argName}:`];
   if (createAssigns.length) {
     arm.push("                    if (entry.State == EntityState.Added)");
     arm.push("                    {");

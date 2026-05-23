@@ -30,13 +30,14 @@
 import type { AstNode, LangiumDocument } from "langium";
 import { AstUtils, DocumentState } from "langium";
 import type { LangiumSharedServices } from "langium/lsp";
-import { _withOrigin } from "../macro-api/factories.js";
 import type {
   MacroDefinition,
+  NamedDeclKind,
   OriginToken,
   ParamSpec,
   ParamType,
 } from "../macro-api/define.js";
+import { _withOrigin } from "../macro-api/factories.js";
 import { loadStdlibMacros } from "../stdlib/index.js";
 import {
   type Aggregate,
@@ -54,7 +55,6 @@ import {
   type Ui,
   type UiMember,
 } from "./generated/ast.js";
-import type { NamedDeclKind } from "../macro-api/define.js";
 import { allMacros, lookupMacro } from "./macro-registry.js";
 
 // Side-table mechanism removed: capabilities are now first-class
@@ -209,8 +209,7 @@ function expandOneCall(
   if (macro.target !== hostKind) {
     recordDiagnostic(doc, {
       severity: "error",
-      message:
-        `Macro '${name}' targets '${macro.target}' but was invoked on a '${hostKind}'.`,
+      message: `Macro '${name}' targets '${macro.target}' but was invoked on a '${hostKind}'.`,
       node: call,
       property: "name",
     });
@@ -258,8 +257,7 @@ function expandOneCall(
     } catch (err) {
       recordDiagnostic(doc, {
         severity: "error",
-        message:
-          `Macro '${childName}' (invoked from '${name}') threw: ${(err as Error).message}`,
+        message: `Macro '${childName}' (invoked from '${name}') threw: ${(err as Error).message}`,
         node: call,
         property: "name",
       });
@@ -527,8 +525,7 @@ function coerceArg(
         if (!resolved) {
           recordDiagnostic(doc, {
             severity: "error",
-            message:
-              `Argument '${argName}' to macro '${macroName}' references unknown ${spec.of} '${refText}'.`,
+            message: `Argument '${argName}' to macro '${macroName}' references unknown ${spec.of} '${refText}'.`,
             node: arg,
             property: "value",
           });
@@ -548,8 +545,7 @@ function coerceArg(
           if (!node) {
             recordDiagnostic(doc, {
               severity: "error",
-              message:
-                `Argument '${argName}' to macro '${macroName}' references unknown ${spec.of} '${refText}'.`,
+              message: `Argument '${argName}' to macro '${macroName}' references unknown ${spec.of} '${refText}'.`,
               node: arg,
               property: "value",
             });

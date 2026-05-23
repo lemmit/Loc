@@ -18,17 +18,11 @@
 
 import type { LangiumDocument } from "langium";
 import type { TextEdit } from "vscode-languageserver";
-import {
-  type Aggregate,
-  type BoundedContext,
-  type MacroCall,
-  type Ui,
-  type WithClause,
-} from "../generated/ast.js";
-import { printStructural } from "../print/index.js";
-import { lookupMacro } from "../macro-registry.js";
-import { _withOrigin } from "../../macro-api/factories.js";
 import type { OriginToken } from "../../macro-api/define.js";
+import { _withOrigin } from "../../macro-api/factories.js";
+import type { Aggregate, BoundedContext, MacroCall, Ui, WithClause } from "../generated/ast.js";
+import { lookupMacro } from "../macro-registry.js";
+import { printStructural } from "../print/index.js";
 
 const DEST_PROP = "$destination" as const;
 
@@ -45,10 +39,7 @@ export interface UnfoldResult {
  * unfolded (unknown name, target-kind mismatch, throwing expand,
  * etc.) — the caller should fall back to no action rather than
  * surfacing a broken refactor. */
-export function unfoldMacro(
-  document: LangiumDocument,
-  call: MacroCall,
-): UnfoldResult | undefined {
+export function unfoldMacro(document: LangiumDocument, call: MacroCall): UnfoldResult | undefined {
   const host = findCallHost(call);
   if (!host) return undefined;
   const hostKind = hostKindOf(host);
@@ -116,15 +107,9 @@ export function unfoldMacro(
 // Helpers
 // ---------------------------------------------------------------------------
 
-function findCallHost(
-  call: MacroCall,
-): Aggregate | Ui | BoundedContext | undefined {
+function findCallHost(call: MacroCall): Aggregate | Ui | BoundedContext | undefined {
   const withClause = call.$container as WithClause | undefined;
-  const host = withClause?.$container as
-    | Aggregate
-    | Ui
-    | BoundedContext
-    | undefined;
+  const host = withClause?.$container as Aggregate | Ui | BoundedContext | undefined;
   return host;
 }
 
@@ -142,10 +127,7 @@ function hostKindOf(
  * (returns empty args rather than refusing the action).  Users
  * rarely unfold a macro whose args don't parse; if they do, the
  * unfold runs with defaults, which is usually still useful. */
-function bindArgsBestEffort(
-  _macro: unknown,
-  _call: MacroCall,
-): Record<string, unknown> {
+function bindArgsBestEffort(_macro: unknown, _call: MacroCall): Record<string, unknown> {
   // TODO: thread through the full arg coercion logic from
   // ddd-macro-expander.ts.  For the v1 unfold action we accept that
   // arg-bearing macro invocations may unfold with defaults — the
@@ -200,8 +182,9 @@ function buildInsertEdit(
   target: object,
   nodes: unknown[],
 ): TextEdit | undefined {
-  const cst = (target as { $cstNode?: { range: { start: unknown; end: { line: number; character: number } } } })
-    .$cstNode;
+  const cst = (
+    target as { $cstNode?: { range: { start: unknown; end: { line: number; character: number } } } }
+  ).$cstNode;
   if (!cst) return undefined;
   // Find the closing `}` position.  Langium gives us the range of
   // the whole block; the `}` is at `range.end` (exclusive), so
@@ -234,9 +217,7 @@ function buildInsertEdit(
     baseCol++;
   }
   const memberIndent = " ".repeat(baseCol + 2);
-  const printed = nodes
-    .map((n) => indent(printStructural(n as never), memberIndent))
-    .join("\n");
+  const printed = nodes.map((n) => indent(printStructural(n as never), memberIndent)).join("\n");
   // Insert at the start of the brace's line — this avoids the
   // first printed line inheriting the brace's leading whitespace.
   // The closing brace's own indent is preserved automatically (it

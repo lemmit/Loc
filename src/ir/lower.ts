@@ -86,6 +86,7 @@ import type {
   CodeRefKind,
   ComponentIR,
   ContainmentIR,
+  ContextStampIR,
   DeployableIR,
   DerivedIR,
   EntityPartIR,
@@ -104,6 +105,7 @@ import type {
   ModuleIR,
   ModuleStorageRole,
   OperationIR,
+  PageArchetypeIR,
   PageIR,
   ParamIR,
   PermissionDeclIR,
@@ -112,7 +114,6 @@ import type {
   RequirementIR,
   RequirementStatus,
   RequirementType,
-  PageArchetypeIR,
   SolutionIR,
   StateFieldIR,
   StmtIR,
@@ -153,7 +154,6 @@ import {
   expandWalkerPrimitive,
   type WalkerExpandContext,
 } from "./walker-primitive-expander.js";
-import type { ContextStampIR } from "./loom-ir.js";
 
 /** Fold a bareword built-in family or pinned `family@version`
  *  reference (or `undefined`) into the fully-qualified form the rest
@@ -558,10 +558,7 @@ function expandWalkerPrimitives(sys: SystemIR): void {
       // the walker has no way to resolve `id` as a typed route
       // param.  Synthesise it here so the walker emits
       // `useParams<{id: string}>()` correctly.
-      if (
-        page.archetype.kind === "aggregate-detail" &&
-        !page.params.some((p) => p.name === "id")
-      ) {
+      if (page.archetype.kind === "aggregate-detail" && !page.params.some((p) => p.name === "id")) {
         page.params.push({
           name: "id",
           type: { kind: "primitive", name: "string" },
@@ -1210,10 +1207,7 @@ const EMPTY_CONTEXT_CAPABILITIES: ContextLevelCapabilities = Object.freeze({
  * partition by qualifier.  Unqualified context-level decls apply to
  * every aggregate inside; qualified (`for "<name>"`) decls apply
  * only to aggregates whose `implements` matches. */
-function collectContextLevelCapabilities(
-  ctx: BoundedContext,
-  env: Env,
-): ContextLevelCapabilities {
+function collectContextLevelCapabilities(ctx: BoundedContext, env: Env): ContextLevelCapabilities {
   const unqualifiedFilters: ExprIR[] = [];
   const qualifiedFilters: Array<{ capability: string; predicate: ExprIR }> = [];
   const unqualifiedStamps: ContextStampIR[] = [];

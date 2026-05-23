@@ -7,11 +7,8 @@
 // from the user's intent or fails to re-parse.
 
 import { describe, expect, it } from "vitest";
-import {
-  isAggregate,
-  isBoundedContext,
-} from "../../src/language/generated/ast.js";
 import type { Model } from "../../src/language/generated/ast.js";
+import { isAggregate, isBoundedContext } from "../../src/language/generated/ast.js";
 import { printStructural } from "../../src/language/print/index.js";
 import { parseString } from "../_helpers/parse.js";
 
@@ -21,7 +18,9 @@ async function parse(source: string): Promise<Model> {
   return model;
 }
 
-function topLevelContext(model: Model): import("../../src/language/generated/ast.js").BoundedContext {
+function topLevelContext(
+  model: Model,
+): import("../../src/language/generated/ast.js").BoundedContext {
   for (const m of model.members ?? []) {
     if (isBoundedContext(m)) return m;
     if ((m as { $type?: string }).$type === "System") {
@@ -68,7 +67,7 @@ describe("capability source surface roundtrips through structural printer", () =
     expect(printed).toMatch(/filter !this\.isDeleted/);
   });
 
-  it("`filter for \"softDeletable\" !this.isDeleted` at context level", async () => {
+  it('`filter for "softDeletable" !this.isDeleted` at context level', async () => {
     const { printed } = await roundtripContext(`
       context Sales {
         filter for "softDeletable" !this.isDeleted
@@ -101,7 +100,7 @@ describe("capability source surface roundtrips through structural printer", () =
     expect(printed).toMatch(/createdAt := now\(\)/);
   });
 
-  it("`stamp for \"auditable\" onUpdate { ... }` at context level", async () => {
+  it('`stamp for "auditable" onUpdate { ... }` at context level', async () => {
     const { printed } = await roundtripContext(`
       context Sales {
         stamp for "auditable" onUpdate {

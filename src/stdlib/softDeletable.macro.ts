@@ -46,19 +46,21 @@ export default defineMacro({
     "Adds soft-delete state (fields + operations) to an aggregate and " +
     "opts it into the `softDeletable` capability group.  The filter " +
     "predicate comes from a sibling context-level `softDelete` macro " +
-    "or hand-written `filter for \"softDeletable\" ...`.",
+    'or hand-written `filter for "softDeletable" ...`.',
   expand() {
     return [
       field("isDeleted", primType("bool")),
       field("deletedAt", primType("datetime", { optional: true })),
-      operation("softDelete", [], [
-        assignStmt("isDeleted", boolLit(true)),
-        assignStmt("deletedAt", callExpr("now", [])),
-      ]),
-      operation("restore", [], [
-        assignStmt("isDeleted", boolLit(false)),
-        assignStmt("deletedAt", nullLit()),
-      ]),
+      operation(
+        "softDelete",
+        [],
+        [assignStmt("isDeleted", boolLit(true)), assignStmt("deletedAt", callExpr("now", []))],
+      ),
+      operation(
+        "restore",
+        [],
+        [assignStmt("isDeleted", boolLit(false)), assignStmt("deletedAt", nullLit())],
+      ),
       implementsCapability("softDeletable"),
     ];
   },

@@ -70,8 +70,7 @@ export function renderConfiguration(agg: AggregateIR, ns: string, ctx: BoundedCo
   // at aggregate), every filter just lands here regardless of
   // whether the aggregate names a capability via `implements`.
   const filterLines = (agg.contextFilters ?? []).map(
-    (predicate) =>
-      `        b.HasQueryFilter(x => ${renderCsExpr(predicate, { thisName: "x" })});`,
+    (predicate) => `        b.HasQueryFilter(x => ${renderCsExpr(predicate, { thisName: "x" })});`,
   );
   return (
     lines(

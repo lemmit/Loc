@@ -48,7 +48,6 @@ async function migrateFile(file) {
       if (m) {
         cur = { headLineIdx: i, indent: m[1], openCount: 1, scaffolds: [] };
         depth = 1;
-        continue;
       }
     } else {
       // Count braces to track when this ui block ends.
@@ -69,7 +68,10 @@ async function migrateFile(file) {
           cur.scaffolds.push({
             lineIdx: i,
             selector: m[2],
-            names: m[3].split(/\s*,\s*/).map((s) => s.trim()).filter(Boolean),
+            names: m[3]
+              .split(/\s*,\s*/)
+              .map((s) => s.trim())
+              .filter(Boolean),
           });
         }
       }

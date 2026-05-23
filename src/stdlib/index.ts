@@ -7,8 +7,8 @@ import auditable from "./auditable.macro.js";
 import auditedByDefault from "./auditedByDefault.macro.js";
 import crudish from "./crudish.macro.js";
 import scaffold from "./scaffold.macro.js";
-import softDelete from "./softDelete.macro.js";
 import softDeletable from "./softDeletable.macro.js";
+import softDelete from "./softDelete.macro.js";
 import softDeleteByDefault from "./softDeleteByDefault.macro.js";
 
 let _loaded = false;

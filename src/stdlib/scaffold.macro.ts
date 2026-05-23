@@ -1,3 +1,4 @@
+import type { Aggregate, Page, UiMember, View, Workflow } from "../macro-api/index.js";
 import {
   aggregatesIn,
   boolLit,
@@ -8,13 +9,6 @@ import {
   stringLit,
   viewsIn,
   workflowsIn,
-} from "../macro-api/index.js";
-import type {
-  Aggregate,
-  Page,
-  UiMember,
-  View,
-  Workflow,
 } from "../macro-api/index.js";
 
 /** Mass-page synthesis: take a list of aggregates, workflows,
@@ -87,7 +81,10 @@ export default defineMacro({
     if (out.length > 0) {
       out.push(homePage());
     }
-    if ((args.workflows as readonly Workflow[]).length > 0 || hasAnyWorkflow(args.modules as readonly Mod[])) {
+    if (
+      (args.workflows as readonly Workflow[]).length > 0 ||
+      hasAnyWorkflow(args.modules as readonly Mod[])
+    ) {
       out.push(workflowsIndexPage());
     }
     if ((args.views as readonly View[]).length > 0 || hasAnyView(args.modules as readonly Mod[])) {

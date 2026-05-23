@@ -1,10 +1,4 @@
-import {
-  defineMacro,
-  field,
-  idRef,
-  implementsCapability,
-  primType,
-} from "../macro-api/index.js";
+import { defineMacro, field, idRef, implementsCapability, primType } from "../macro-api/index.js";
 
 /** Aggregate-level state for the audit capability.
  *
@@ -43,7 +37,7 @@ export default defineMacro({
     "Adds audit fields (createdAt/updatedAt/createdBy/updatedBy) and opts " +
     "the aggregate into the `auditable` capability group.  The stamping " +
     "behavior comes from a sibling context-level `audit` macro or " +
-    "hand-written `stamp for \"auditable\" ...`.",
+    'hand-written `stamp for "auditable" ...`.',
   expand() {
     return [
       field("createdAt", primType("datetime")),

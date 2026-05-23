@@ -5,8 +5,7 @@ import { parseString } from "../_helpers/parse.js";
 
 // `auditable` references Id<User> and currentUser, so test sources
 // always carry a minimal user block so the linker can resolve those.
-const wrap = (body: string) =>
-  `system Demo { user { id: string  role: string } ${body} }`;
+const wrap = (body: string) => `system Demo { user { id: string  role: string } ${body} }`;
 
 function findAggregate(model: Model, name: string): Aggregate {
   for (const sm of model.members ?? []) {

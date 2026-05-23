@@ -40,10 +40,7 @@ export function stringLit(value: string): StringLit {
  * the parser doesn't coerce; we pass it through as-is. */
 export function boolLit(value: boolean): BoolLit {
   const origin = _currentOrigin();
-  return _tag(
-    { $type: "BoolLit", value: String(value) } as unknown as BoolLit,
-    origin,
-  );
+  return _tag({ $type: "BoolLit", value: String(value) } as unknown as BoolLit, origin);
 }
 
 /** A bare name reference, suitable for use in expression positions
@@ -70,10 +67,7 @@ export function callExpr(
   const origin = _currentOrigin();
   const callee = nameRefExpr(head);
   const callArgs: CallArg[] = args.map(({ name, value }) => {
-    const a = _tag(
-      { $type: "CallArg", name, value } as unknown as CallArg,
-      origin,
-    );
+    const a = _tag({ $type: "CallArg", name, value } as unknown as CallArg, origin);
     _setContainer(value, a, "value");
     return a;
   });
@@ -99,10 +93,7 @@ export function routeProp(value: string): RouteProp {
 /** The `body: <expr>` prop on a page.  Wraps any Expression. */
 export function bodyProp(expr: Expression): BodyProp {
   const origin = _currentOrigin();
-  const bp: BodyProp = _tag(
-    { $type: "BodyProp", expr } as unknown as BodyProp,
-    origin,
-  );
+  const bp: BodyProp = _tag({ $type: "BodyProp", expr } as unknown as BodyProp, origin);
   _setContainer(expr, bp, "expr");
   return bp;
 }

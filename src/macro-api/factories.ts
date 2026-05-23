@@ -21,9 +21,9 @@ import type {
   IdType,
   LValue,
   MemberAccess,
-  NameRef,
   NamedDecl,
   NamedType,
+  NameRef,
   Operation,
   Parameter,
   PrimitiveType,
@@ -167,10 +167,7 @@ export function field(
 /** A parameter on an operation. */
 export function param(name: string, type: TypeRef): Parameter {
   const origin = currentOrigin();
-  const p: Parameter = tag(
-    { $type: "Parameter", name, type } as unknown as Parameter,
-    origin,
-  );
+  const p: Parameter = tag({ $type: "Parameter", name, type } as unknown as Parameter, origin);
   setContainer(type, p, "type");
   return p;
 }
@@ -333,12 +330,14 @@ export function writableUserFields(target: Aggregate): readonly Property[] {
 /** Aggregates declared inside a Module (across all its
  * BoundedContexts) or directly inside a BoundedContext. */
 export function aggregatesIn(
-  parent: import("../language/generated/ast.js").Module | import("../language/generated/ast.js").BoundedContext,
+  parent:
+    | import("../language/generated/ast.js").Module
+    | import("../language/generated/ast.js").BoundedContext,
 ): readonly Aggregate[] {
   if ((parent as any).$type === "Module") {
     const m = parent as import("../language/generated/ast.js").Module;
-    return (m.contexts ?? []).flatMap((c) =>
-      (c.members ?? []).filter((cm) => cm.$type === "Aggregate") as Aggregate[],
+    return (m.contexts ?? []).flatMap(
+      (c) => (c.members ?? []).filter((cm) => cm.$type === "Aggregate") as Aggregate[],
     );
   }
   const ctx = parent as import("../language/generated/ast.js").BoundedContext;
@@ -347,13 +346,15 @@ export function aggregatesIn(
 
 /** Workflows declared inside a Module / BoundedContext. */
 export function workflowsIn(
-  parent: import("../language/generated/ast.js").Module | import("../language/generated/ast.js").BoundedContext,
+  parent:
+    | import("../language/generated/ast.js").Module
+    | import("../language/generated/ast.js").BoundedContext,
 ): readonly import("../language/generated/ast.js").Workflow[] {
   type W = import("../language/generated/ast.js").Workflow;
   if ((parent as any).$type === "Module") {
     const m = parent as import("../language/generated/ast.js").Module;
-    return (m.contexts ?? []).flatMap((c) =>
-      (c.members ?? []).filter((cm) => cm.$type === "Workflow") as W[],
+    return (m.contexts ?? []).flatMap(
+      (c) => (c.members ?? []).filter((cm) => cm.$type === "Workflow") as W[],
     );
   }
   const ctx = parent as import("../language/generated/ast.js").BoundedContext;
@@ -362,13 +363,15 @@ export function workflowsIn(
 
 /** Views declared inside a Module / BoundedContext. */
 export function viewsIn(
-  parent: import("../language/generated/ast.js").Module | import("../language/generated/ast.js").BoundedContext,
+  parent:
+    | import("../language/generated/ast.js").Module
+    | import("../language/generated/ast.js").BoundedContext,
 ): readonly import("../language/generated/ast.js").View[] {
   type V = import("../language/generated/ast.js").View;
   if ((parent as any).$type === "Module") {
     const m = parent as import("../language/generated/ast.js").Module;
-    return (m.contexts ?? []).flatMap((c) =>
-      (c.members ?? []).filter((cm) => cm.$type === "View") as V[],
+    return (m.contexts ?? []).flatMap(
+      (c) => (c.members ?? []).filter((cm) => cm.$type === "View") as V[],
     );
   }
   const ctx = parent as import("../language/generated/ast.js").BoundedContext;
@@ -415,7 +418,10 @@ export function thisRef(): import("../language/generated/ast.js").ThisRef {
 export function nullLit(): import("../language/generated/ast.js").NullLit {
   const origin = currentOrigin();
   return tag(
-    { $type: "NullLit", value: "null" } as unknown as import("../language/generated/ast.js").NullLit,
+    {
+      $type: "NullLit",
+      value: "null",
+    } as unknown as import("../language/generated/ast.js").NullLit,
     origin,
   );
 }
