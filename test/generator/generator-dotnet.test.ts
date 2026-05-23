@@ -299,8 +299,45 @@ describe(".NET generator", () => {
       expect(filter).toMatch(/context\.Exception is ExternHandlerException xh/);
       expect(filter).toMatch(/error = xh\.Message/);
       expect(filter).toMatch(/StatusCode = 500/);
-      // Logs the inner cause server-side with the structured fields.
-      expect(filter).toMatch(/_log\.LogError\(xh, "Extern handler \{Op\} on \{Agg\} threw"/);
+      // Logs the inner cause server-side via the neutral log-event
+      // catalog (Phase 8 .NET).  Template uses `{Event}` head + per-field
+      // `{Pascal}` placeholders so a Serilog/structured sink can filter
+      // on `Event = "extern_handler_threw"` — same identity the Hono
+      // pino payload's `event` key carries.
+      expect(filter).toMatch(
+        /_log\.LogError\(xh, "\{Event\} aggregate=\{Aggregate\} op=\{Op\} error=\{Error\}", "extern_handler_threw", xh\.AggName, xh\.OpName, xh\.Message\);/,
+      );
+      // Fallback 500 — same catalog idiom, internal_error event.
+      expect(filter).toMatch(
+        /_log\.LogError\(context\.Exception, "\{Event\} error=\{Error\} status=\{Status\}", "internal_error", context\.Exception\.Message, 500\);/,
+      );
+    });
+
+    it("controller wires ILogger + emits operation_invoked / aggregate_created from the catalog", async () => {
+      // Phase 8 .NET — every per-aggregate controller gets an
+      // `ILogger<TController> _log` field (matching the
+      // DomainExceptionFilter idiom), Create logs `aggregate_created`
+      // after Mediator.Send returns, and each public op handler logs
+      // `operation_invoked` before dispatching its command.  Same event
+      // identity the Hono backend emits; structured fields use Pascal
+      // placeholders so Serilog / ASP.NET sinks pick them up.
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      const controller = files.get("Api/OrdersController.cs")!;
+      expect(controller).toMatch(/using Microsoft\.Extensions\.Logging;/);
+      expect(controller).toMatch(/private readonly ILogger<OrdersController> _log;/);
+      expect(controller).toMatch(
+        /public OrdersController\(IMediator mediator, ILogger<OrdersController> log\) \{ _mediator = mediator; _log = log; \}/,
+      );
+      expect(controller).toMatch(
+        /_log\.LogInformation\("\{Event\} aggregate=\{Aggregate\} id=\{Id\}", "aggregate_created", "Order", id\.Value\);/,
+      );
+      // sales.ddd's Order has multiple public ops; any op-handler line
+      // satisfies — the assertion captures the catalog shape, not the
+      // specific op name.
+      expect(controller).toMatch(
+        /_log\.LogInformation\("\{Event\} aggregate=\{Aggregate\} op=\{Op\} id=\{Id\}", "operation_invoked", "Order", "[a-zA-Z]+", id\);/,
+      );
     });
 
     it("does NOT touch ValidationProblemDetails (RFC 7807 stays the contract)", async () => {

@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using CatalogApi.Application.Customers.Commands;
 using CatalogApi.Application.Customers.Queries;
 using CatalogApi.Application.Customers.Requests;
@@ -19,7 +20,8 @@ namespace CatalogApi.Api;
 public sealed class CustomersController : ControllerBase
 {
     private readonly IMediator _mediator;
-    public CustomersController(IMediator mediator) => _mediator = mediator;
+    private readonly ILogger<CustomersController> _log;
+    public CustomersController(IMediator mediator, ILogger<CustomersController> log) { _mediator = mediator; _log = log; }
 
     [HttpPost]
     public async Task<ActionResult<CreateCustomerResponse>> Create([FromBody] CreateCustomerRequest request)
@@ -30,6 +32,7 @@ public sealed class CustomersController : ControllerBase
             request.Age
         );
         var id = await _mediator.Send(cmd);
+        _log.LogInformation("{Event} aggregate={Aggregate} id={Id}", "aggregate_created", "Customer", id.Value);
         return CreatedAtAction(nameof(GetById), new { id = id.Value }, new CreateCustomerResponse(id.Value));
     }
 

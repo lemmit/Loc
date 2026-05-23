@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { type LogEvent, LogEvents, type LogLevel } from "../../src/generator/_obs/log-events.js";
+import {
+  renderDotnetLogCall,
+  renderDotnetLogCallWithException,
+} from "../../src/generator/_obs/render-dotnet.js";
 import { renderHonoBaseLogCall, renderHonoLogCall } from "../../src/generator/_obs/render-hono.js";
 
 // ---------------------------------------------------------------------------
@@ -89,5 +93,66 @@ describe("log-event catalog — Hono renderer", () => {
     // renderer must not leave a dangling comma or empty object literal.
     const line = renderHonoBaseLogCall("serverDrained");
     expect(line).toBe(`baseLogger.info({ event: "server_drained" });`);
+  });
+});
+
+describe("log-event catalog — .NET renderer", () => {
+  it("renders an ILogger.Log<Level> call with snake_case keys and Pascal placeholders", () => {
+    // Two-field call site (no exception): `{Event}` head, `key={Pascal}`
+    // for each field passed.  Args positional in catalog order, the
+    // event-name string literal coming first to bind the head.
+    const line = renderDotnetLogCall("operationInvoked", [
+      { name: "aggregate", valueExpr: `"Cart"` },
+      { name: "op", valueExpr: `"applyTotal"` },
+      { name: "id", valueExpr: "id" },
+    ]);
+    expect(line).toBe(
+      `_log.LogInformation("{Event} aggregate={Aggregate} op={Op} id={Id}", "operation_invoked", "Cart", "applyTotal", id);`,
+    );
+  });
+
+  it("routes the catalog level to the matching ILogger method", () => {
+    // Same guard as the Hono renderer: every level lands on its own
+    // ILogger method, not a hardcoded one.
+    expect(renderDotnetLogCall("domainError")).toMatch(/^_log\.LogWarning\(/);
+    expect(renderDotnetLogCall("internalError")).toMatch(/^_log\.LogError\(/);
+    expect(renderDotnetLogCall("repositorySave")).toMatch(/^_log\.LogDebug\(/);
+    expect(renderDotnetLogCall("invariantEvaluated")).toMatch(/^_log\.LogTrace\(/);
+    expect(renderDotnetLogCall("aggregateCreated")).toMatch(/^_log\.LogInformation\(/);
+  });
+
+  it("the exception overload puts Exception first, then template, then structured args", () => {
+    // ILogger.Log<Level>(Exception, string template, params object[] args)
+    // — the order matters; reversing it puts the stack trace in the
+    // wrong slot and breaks Serilog's structured capture.
+    const line = renderDotnetLogCallWithException("externHandlerThrew", "xh", [
+      { name: "aggregate", valueExpr: `"Order"` },
+      { name: "op", valueExpr: `"confirm"` },
+      { name: "error", valueExpr: "xh.Message" },
+    ]);
+    expect(line).toBe(
+      `_log.LogError(xh, "{Event} aggregate={Aggregate} op={Op} error={Error}", "extern_handler_threw", "Order", "confirm", xh.Message);`,
+    );
+  });
+
+  it("handles snake_case → PascalCase for compound field names like request_id / event_type", () => {
+    // The catalog uses snake_case keys for cross-backend portability;
+    // .NET conventions are PascalCase placeholders.  Compound keys
+    // (`request_id` → `RequestId`, `event_type` → `EventType`) must
+    // join the words correctly, not just upper-case the first letter.
+    const line = renderDotnetLogCall("eventDispatched", [
+      { name: "event_type", valueExpr: `evt.GetType().Name` },
+      { name: "aggregate", valueExpr: `"Order"` },
+      { name: "id", valueExpr: "agg.Id" },
+    ]);
+    expect(line).toMatch(/event_type=\{EventType\}/);
+    expect(line).toMatch(/aggregate=\{Aggregate\}/);
+  });
+
+  it("emits a bare `{Event}` template when the call site has no extra fields", () => {
+    // `server_drained` — no per-event fields; the .NET line stays a
+    // valid ILogger call with just the event-name binding.
+    const line = renderDotnetLogCall("serverDrained");
+    expect(line).toBe(`_log.LogInformation("{Event}", "server_drained");`);
   });
 });
