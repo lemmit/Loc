@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using Api.Application.Orders.Commands;
 using Api.Application.Orders.Queries;
 using Api.Application.Orders.Requests;
@@ -19,7 +20,8 @@ namespace Api.Api;
 public sealed class OrdersController : ControllerBase
 {
     private readonly IMediator _mediator;
-    public OrdersController(IMediator mediator) => _mediator = mediator;
+    private readonly ILogger<OrdersController> _log;
+    public OrdersController(IMediator mediator, ILogger<OrdersController> log) { _mediator = mediator; _log = log; }
 
     [HttpPost]
     public async Task<ActionResult<CreateOrderResponse>> Create([FromBody] CreateOrderRequest request)
@@ -30,6 +32,7 @@ public sealed class OrdersController : ControllerBase
             System.DateTime.Parse(request.PlacedAt, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal)
         );
         var id = await _mediator.Send(cmd);
+        _log.LogInformation("{Event} aggregate={Aggregate} id={Id}", "aggregate_created", "Order", id.Value);
         return CreatedAtAction(nameof(GetById), new { id = id.Value }, new CreateOrderResponse(id.Value));
     }
 
@@ -43,6 +46,7 @@ public sealed class OrdersController : ControllerBase
     [HttpPost("{id}/add_line")]
     public async Task<IActionResult> AddLine([FromRoute] Guid id, [FromBody] AddLineRequest request)
     {
+        _log.LogInformation("{Event} aggregate={Aggregate} op={Op} id={Id}", "operation_invoked", "Order", "addLine", id);
         var cmd = new AddLineCommand(
             new OrderId(id),
             new ProductId(request.ProductId),
@@ -55,6 +59,7 @@ public sealed class OrdersController : ControllerBase
     [HttpPost("{id}/confirm")]
     public async Task<IActionResult> Confirm([FromRoute] Guid id, [FromBody] ConfirmRequest request)
     {
+        _log.LogInformation("{Event} aggregate={Aggregate} op={Op} id={Id}", "operation_invoked", "Order", "confirm", id);
         var cmd = new ConfirmCommand(
             new OrderId(id)
         );

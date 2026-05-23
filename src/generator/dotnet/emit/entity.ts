@@ -28,6 +28,7 @@ export function renderEntity(
   isRoot: boolean,
   ns: string,
   rootName: string,
+  emitTrace = false,
 ): string {
   const isAgg = "operations" in entity;
   const idValueType = isAgg ? (entity as AggregateIR).idValueType : "guid";
@@ -105,7 +106,11 @@ export function renderEntity(
       // business decision.
       opLines.push(`    public void Check${upperFirst(op.name)}(${params})`);
       opLines.push("    {");
-      const body = renderCsStatements(op.statements);
+      const body = renderCsStatements(op.statements, {
+        emitTrace,
+        aggregate: entity.name,
+        op: op.name,
+      });
       if (body.length > 0) opLines.push(body);
       opLines.push("    }");
       opLines.push("");
@@ -114,9 +119,17 @@ export function renderEntity(
     const visibility = op.visibility === "public" ? "public" : "private";
     opLines.push(`    ${visibility} void ${upperFirst(op.name)}(${params})`);
     opLines.push("    {");
-    const body = renderCsStatements(op.statements);
+    const body = renderCsStatements(op.statements, {
+      emitTrace,
+      aggregate: entity.name,
+      op: op.name,
+    });
     if (body.length > 0) opLines.push(body);
-    opLines.push("        AssertInvariants();");
+    opLines.push(
+      emitTrace
+        ? `        AssertInvariants("${op.name}");`
+        : "        AssertInvariants();",
+    );
     opLines.push("    }");
     opLines.push("");
   }
@@ -146,11 +159,39 @@ export function renderEntity(
       ]
     : [];
 
-  const invariantLines = entity.invariants.map((inv) => {
-    const check = inv.guard
-      ? `if ((${renderCsExpr(inv.guard)}) && !(${renderCsExpr(inv.expr)}))`
-      : `if (!(${renderCsExpr(inv.expr)}))`;
-    return `        ${check} throw new DomainException(${JSON.stringify(`Invariant violated: ${inv.source}`)});`;
+  // Per-invariant body.  Trace-off: the one-liner if-throw.  Trace-on:
+  // bind the boolean to `__inv_<i>_ok` so BOTH pass and fail outcomes
+  // log (invariant_evaluated) before the conditional throw fires off
+  // the same temp.  A GUARDED invariant logs ONLY when its guard
+  // applies — the wrap sits inside `if (guard) { … }` so an
+  // inapplicable invariant doesn't pollute the stream.  Op context
+  // comes from the `__op` parameter on the trace-on AssertInvariants
+  // signature.
+  const invariantLines = entity.invariants.flatMap((inv, i) => {
+    const thrown = `throw new DomainException(${JSON.stringify(`Invariant violated: ${inv.source}`)})`;
+    if (!emitTrace) {
+      const check = inv.guard
+        ? `if ((${renderCsExpr(inv.guard)}) && !(${renderCsExpr(inv.expr)}))`
+        : `if (!(${renderCsExpr(inv.expr)}))`;
+      return [`        ${check} ${thrown};`];
+    }
+    const ok = `__inv_${i}_ok`;
+    const traceCall = `DomainLog.LogTrace("{Event} aggregate={Aggregate} op={Op} expr={Expr} passed={Passed}", "invariant_evaluated", "${entity.name}", __op, ${JSON.stringify(inv.source)}, ${ok});`;
+    if (inv.guard) {
+      return [
+        `        if (${renderCsExpr(inv.guard)})`,
+        "        {",
+        `            var ${ok} = (${renderCsExpr(inv.expr)});`,
+        `            ${traceCall}`,
+        `            if (!${ok}) ${thrown};`,
+        "        }",
+      ];
+    }
+    return [
+      `        var ${ok} = (${renderCsExpr(inv.expr)});`,
+      `        ${traceCall}`,
+      `        if (!${ok}) ${thrown};`,
+    ];
   });
 
   const stateLines: string[] = [];
@@ -176,7 +217,12 @@ export function renderEntity(
   for (const f of entity.fields) {
     createInternalLines.push(`        e.${upperFirst(f.name)} = s.${upperFirst(f.name)};`);
   }
-  createInternalLines.push("        e.AssertInvariants();");
+  // Hydration path — repository's _Create.  Under --trace, label as
+  // `"<init>"` so the invariant_evaluated lines for ctor / hydration
+  // runs are distinguishable from in-operation evaluations.
+  createInternalLines.push(
+    emitTrace ? `        e.AssertInvariants("<init>");` : "        e.AssertInvariants();",
+  );
   createInternalLines.push("        return e;");
   createInternalLines.push("    }");
 
@@ -189,7 +235,8 @@ export function renderEntity(
         `        var e = new ${entity.name}();`,
         `        e.Id = new ${entity.name}Id(${csNewIdValue(idValueType)});`,
         ...requiredFields.map((f) => `        e.${upperFirst(f.name)} = ${f.name};`),
-        "        e.AssertInvariants();",
+        // Public Create factory — same "<init>" label as the hydration path.
+        emitTrace ? `        e.AssertInvariants("<init>");` : "        e.AssertInvariants();",
         "        return e;",
         "    }",
       ]
@@ -223,7 +270,7 @@ export function renderEntity(
       ...externHookLines,
       "",
       ...pullEventsLines,
-      `    ${hasExtern ? "internal" : "private"} void AssertInvariants()`,
+      `    ${hasExtern ? "internal" : "private"} void AssertInvariants(${emitTrace ? "string __op = \"<init>\"" : ""})`,
       "    {",
       ...invariantLines,
       "    }",

@@ -1,0 +1,51 @@
+name: Langium generated files in sync
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/language/ddd.langium'
+      - 'src/language/generated/**'
+      - 'langium-config.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/langium-generated.yml'
+  pull_request:
+    paths:
+      - 'src/language/ddd.langium'
+      - 'src/language/generated/**'
+      - 'langium-config.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/langium-generated.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      # Install without running the `prepare` lifecycle so we can re-run
+      # langium:generate against the checked-in files and diff the result.
+      - name: Install deps (skip prepare)
+        run: npm ci --ignore-scripts
+
+      - name: Regenerate Langium artifacts
+        run: npm run langium:generate
+
+      - name: Fail if generated files drifted
+        run: |
+          if ! git diff --quiet -- src/language/generated; then
+            echo "::error::src/language/generated/ is out of date — run 'npm run langium:generate' and commit the result."
+            git diff -- src/language/generated
+            exit 1
+          fi

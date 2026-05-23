@@ -374,6 +374,46 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const constructData = useMemo(() => {
     const m = new Map<string, ConstructNodeData>();
     const aggOwner = path[path.length - 1];
+
+    // Inline structured editor + toggle for an expression slot — shared by
+    // invariant (`{kind:"invariant", owner, index}`) and find filter
+    // (`{kind:"findFilter", owner, name}`). The pane's `structuredKey` is a
+    // single string identifying which expression is open (any view); toggling
+    // the same key collapses it. Renders the v1 `ExprSlotEditor` keyed by
+    // `rev` so it re-seeds on commit.
+    const buildExprToggle = (slot: ExprSlot, key: string): {
+      expressionEditor: ReactNode;
+      onToggleExpression: () => void;
+    } => {
+      let expressionEditor: ReactNode = null;
+      if (structuredKey === key) {
+        const expr = slotExpr(parsed.ast, slot);
+        if (expr) {
+          expressionEditor = (
+            <ExprSlotEditor
+              key={`${key}:${rev}`}
+              seed={seedExpr(expr)}
+              seedText={expr.$cstNode?.text ?? ""}
+              candidates={slotCandidates(parsed.ast, slot)}
+              loadHints={() => exprHints(ctx.getSource(), slot)}
+              mode={exprMode}
+              onMode={setExprMode}
+              onCommit={(text) => {
+                const next = editExprSlot(ctx.getSource(), slot, text);
+                if (next == null) return false;
+                apply(next);
+                return true;
+              }}
+            />
+          );
+        }
+      }
+      const onToggleExpression = (): void => {
+        setStructuredKey((cur) => (cur === key ? null : key));
+      };
+      return { expressionEditor, onToggleExpression };
+    };
+
     for (const n of graph.nodes) {
       if (n.kind === "stmt") continue;
 
@@ -396,12 +436,18 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
             }
           }
         };
+        const { expressionEditor, onToggleExpression } = buildExprToggle(
+          { kind: "invariant", owner: aggName, index: idx },
+          `inv:${aggName}:${idx}`,
+        );
         m.set(n.id, {
           kind: n.kind,
           name: n.name,
           color: KIND_COLOR[n.kind],
           drillable: n.drillable,
           onDelete,
+          expressionEditor,
+          onToggleExpression,
           compact,
         });
         continue;
@@ -503,6 +549,20 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         }
       }
 
+      // Inline filter editor on a find node (only meaningful inside a
+      // repository view, where the parent path step is the repo).
+      let expressionEditor: ReactNode | undefined;
+      let onToggleExpression: (() => void) | undefined;
+      if (n.kind === "find" && aggOwner?.kind === "repository") {
+        const repoName = aggOwner.name;
+        const t = buildExprToggle(
+          { kind: "findFilter", owner: repoName, name: n.name },
+          `find:${repoName}:${n.name}`,
+        );
+        expressionEditor = t.expressionEditor;
+        onToggleExpression = t.onToggleExpression;
+      }
+
       m.set(n.id, {
         kind: n.kind,
         name: n.name,
@@ -511,6 +571,8 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         onRename,
         onDelete,
         multiSelects,
+        expressionEditor,
+        onToggleExpression,
         compact,
       });
     }

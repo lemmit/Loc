@@ -21,11 +21,25 @@ import storybookChakraV3Source from "./storybook-chakra-v3.ddd?raw";
 import storybookComponentsSource from "./storybook-components.ddd?raw";
 import dotnetBackendSource from "./dotnet-backend.ddd?raw";
 import actionShowcaseSource from "./action-showcase.ddd?raw";
+import multifileMainSource from "./multifile-main.ddd?raw";
+import multifileSharedMoneySource from "./multifile-shared-money.ddd?raw";
+import multifileSharedCurrencySource from "./multifile-shared-currency.ddd?raw";
 
 export interface LoomExample {
   id: string;
   label: string;
+  /** Main `.ddd` body — the content placed at `/workspace/main.ddd`
+   *  when the user picks this example.  Required for every example
+   *  so single-file consumers (legacy URL-hash sharing, the
+   *  Workspace-autosave preview) always have something to show. */
   source: string;
+  /** Optional companion files placed under `/workspace/` alongside
+   *  `main.ddd`.  Keys are workspace-relative (no leading slash,
+   *  e.g. `shared/money.ddd`) so the example author doesn't have to
+   *  type the prefix at every entry.  The picker writes these to
+   *  the workspace VFS when the example is chosen.  See
+   *  `docs/multi-file-source.md`. */
+  files?: Record<string, string>;
   /** Optional one-liner shown under the dropdown — what the
    *  example demonstrates and whether it supports the Preview
    *  iframe (system mode with a Hono + React deployable pair). */
@@ -38,6 +52,21 @@ export interface LoomExample {
 // generator-level showcase that doesn't preview cleanly (its React
 // frontend targets a .NET deployable we don't run in the browser).
 export const examples: LoomExample[] = [
+  // Multi-file example — picks up the workspace tabs strip and the
+  // project loader's `import`-graph walk.  The companion `.ddd`
+  // files are placed under `/workspace/shared/` when the user picks
+  // this entry; the editor switches to main.ddd.
+  {
+    id: "multifile-store",
+    label: "Multi-file project (root-level shared types)",
+    source: multifileMainSource,
+    files: {
+      "shared/money.ddd": multifileSharedMoneySource,
+      "shared/currency.ddd": multifileSharedCurrencySource,
+    },
+    blurb:
+      "Tiny Hono backend that imports a root-level Money valueobject and Currency enum from sibling files — exercises the multi-file workspace + tabs strip.",
+  },
   // Storybook entries lead with the discriminator (pack name or
   // "components") so the eye lands on what makes each one different,
   // not on a five-word identical prefix.  The previous

@@ -1,0 +1,4 @@
+// Root-level enum — ambient across every context in the project.
+// See main.ddd / shared/money.ddd for the wider picture.
+
+enum Currency { USD, EUR, GBP, JPY }

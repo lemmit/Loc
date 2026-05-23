@@ -6,6 +6,7 @@ import { plural } from "../../util/naming.js";
 import { generateReactForContexts } from "../react/index.js";
 import { emitAuthFiles } from "./auth-emit.js";
 import { emitCqrs } from "./cqrs-emit.js";
+import { renderDomainLog, renderDomainLogBehavior } from "./emit/domain-log.js";
 import { buildFindBodies } from "./find-emit.js";
 import {
   renderCommon,
@@ -27,7 +28,7 @@ import {
   renderTestCsproj,
   renderTestsFile,
   renderValueObject,
-} from "./templates.js";
+} from "./emit.js";
 import { hasAnyWireValidator, renderValidationBehavior } from "./validator-emit.js";
 import { emitViews } from "./view-emit.js";
 import { emitWorkflows } from "./workflow-emit.js";
@@ -61,11 +62,14 @@ import { emitWorkflows } from "./workflow-emit.js";
  * Legacy entry: lowers the whole model and emits one project from each
  * top-level bounded context (used by `ddd generate dotnet <file>`).
  */
-export function generateDotnet(model: Model): Map<string, string> {
+export function generateDotnet(
+  model: Model,
+  options: { emitTrace?: boolean } = {},
+): Map<string, string> {
   // See generator/typescript/index.ts:generateTypeScript for the
   // lowering + enrichment two-step.
   const loom = enrichLoomModel(lowerModel(model));
-  return generateDotnetForContexts(loom.contexts);
+  return generateDotnetForContexts(loom.contexts, undefined, undefined, options);
 }
 
 /**
@@ -83,14 +87,16 @@ export function generateDotnetForContexts(
   contexts: BoundedContextIR[],
   namespace?: string,
   system?: { deployable: DeployableIR; sys: SystemIR },
+  options: { emitTrace?: boolean } = {},
 ): Map<string, string> {
   const out = new Map<string, string>();
+  const emitTrace = !!options.emitTrace;
   if (namespace !== undefined) {
     // Single project containing all the given contexts under one namespace.
-    emitProjectFromContexts(contexts, namespace, out, system);
+    emitProjectFromContexts(contexts, namespace, out, system, emitTrace);
   } else {
     for (const ctx of contexts) {
-      emitContext(ctx, ctx.name, out);
+      emitContext(ctx, ctx.name, out, emitTrace);
     }
   }
   return out;
@@ -101,6 +107,7 @@ function emitProjectFromContexts(
   ns: string,
   out: Map<string, string>,
   system?: { deployable: DeployableIR; sys: SystemIR },
+  emitTrace = false,
 ): void {
   // Fullstack-dotnet branch — when the deployable declares a `ui:`
   // mount, the .NET project hosts an embedded React SPA from
@@ -126,7 +133,7 @@ function emitProjectFromContexts(
       out.set(`Domain/Events/${ev.name}.cs`, renderEvent(ev, ns));
     }
     for (const agg of ctx.aggregates) {
-      emitAggregate(agg, ctx, ns, out, routePrefix);
+      emitAggregate(agg, ctx, ns, out, routePrefix, emitTrace);
     }
     emitWorkflows(ctx, ns, out, { routePrefix });
     emitViews(ctx, ns, out, { routePrefix });
@@ -167,6 +174,7 @@ function emitProjectFromContexts(
     authRequired,
     usesValidators,
     hasEmbeddedSpa,
+    emitTrace,
   });
   emitTestProject(merged, ns, out);
   // Fullstack mode — generate the React project under ClientApp/.
@@ -202,7 +210,12 @@ function emitProjectFromContexts(
   }
 }
 
-function emitContext(ctx: BoundedContextIR, ns: string, out: Map<string, string>): void {
+function emitContext(
+  ctx: BoundedContextIR,
+  ns: string,
+  out: Map<string, string>,
+  emitTrace = false,
+): void {
   emitIds(ctx, ns, out);
   emitEnums(ctx, ns, out);
   emitValueObjects(ctx, ns, out);
@@ -210,7 +223,7 @@ function emitContext(ctx: BoundedContextIR, ns: string, out: Map<string, string>
   emitCommon(ns, out);
   emitDispatcher(ns, out);
   for (const agg of ctx.aggregates) {
-    emitAggregate(agg, ctx, ns, out);
+    emitAggregate(agg, ctx, ns, out, undefined, emitTrace);
   }
   emitWorkflows(ctx, ns, out);
   emitViews(ctx, ns, out);
@@ -222,7 +235,7 @@ function emitContext(ctx: BoundedContextIR, ns: string, out: Map<string, string>
   if (usesValidators) {
     out.set("Application/Common/ValidationBehavior.cs", renderValidationBehavior(ns));
   }
-  emitProject(ctx, ns, out, { usesValidators });
+  emitProject(ctx, ns, out, { usesValidators, emitTrace });
   emitTestProject(ctx, ns, out);
 }
 
@@ -287,14 +300,21 @@ function emitAggregate(
   ns: string,
   out: Map<string, string>,
   routePrefix?: string,
+  emitTrace = false,
 ): void {
   const aggFolder = plural(agg.name);
   const repo = findRepoFor(ctx, agg.name);
 
   for (const part of agg.parts) {
-    out.set(`Domain/${aggFolder}/${part.name}.cs`, renderEntity(part, false, ns, agg.name));
+    out.set(
+      `Domain/${aggFolder}/${part.name}.cs`,
+      renderEntity(part, false, ns, agg.name, emitTrace),
+    );
   }
-  out.set(`Domain/${aggFolder}/${agg.name}.cs`, renderEntity(agg, true, ns, agg.name));
+  out.set(
+    `Domain/${aggFolder}/${agg.name}.cs`,
+    renderEntity(agg, true, ns, agg.name, emitTrace),
+  );
   // Views whose source is this aggregate become parameterless,
   // filtered, list-returning finds on the repository.  Synthesised
   // here so all the existing find emission paths (interface,
@@ -306,13 +326,13 @@ function emitAggregate(
   );
   out.set(
     `Infrastructure/Repositories/${agg.name}Repository.cs`,
-    renderRepositoryImpl(agg, repoWithViews, ns, buildFindBodies(agg, repoWithViews)),
+    renderRepositoryImpl(agg, repoWithViews, ns, buildFindBodies(agg, repoWithViews), emitTrace),
   );
   out.set(
     `Infrastructure/Persistence/Configurations/${agg.name}Configuration.cs`,
     renderConfiguration(agg, ns, ctx),
   );
-  emitCqrs(agg, repo, ctx, ns, out, { routePrefix });
+  emitCqrs(agg, repo, ctx, ns, out, { routePrefix, emitTrace });
   const testsFile = renderTestsFile(agg, ctx, ns);
   if (testsFile) {
     out.set(`Tests/${ns}.Tests/${aggFolder}/${agg.name}Tests.cs`, testsFile);
@@ -341,23 +361,33 @@ function emitProject(
     authRequired?: boolean;
     usesValidators?: boolean;
     hasEmbeddedSpa?: boolean;
+    emitTrace?: boolean;
   },
 ): void {
   const hasExtern = ctx.aggregates.some((a) => a.operations.some((o) => o.extern));
   const usesValidators = !!options?.usesValidators;
   const hasEmbeddedSpa = !!options?.hasEmbeddedSpa;
+  const emitTrace = !!options?.emitTrace;
   out.set(
     "Program.cs",
     renderProgram(ctx, ns, {
       authRequired: !!options?.authRequired,
       usesValidators,
       hasEmbeddedSpa,
+      emitTrace,
     }),
   );
   out.set(`${ns}.csproj`, renderCsproj(ns, hasExtern, usesValidators));
   out.set("Dockerfile", renderDockerfile(ns, { hasEmbeddedSpa }));
   out.set(".dockerignore", renderDockerignore());
   out.set("certs/.gitkeep", "");
+  if (emitTrace) {
+    // Domain-layer logger plumbing — emitted only on --trace so the
+    // default artefact stays free of an AsyncLocal accessor + the
+    // pipeline behavior that sets it.
+    out.set("Domain/Common/DomainLog.cs", renderDomainLog(ns));
+    out.set("Application/Common/DomainLogBehavior.cs", renderDomainLogBehavior(ns));
+  }
 }
 
 function emitTestProject(ctx: BoundedContextIR, ns: string, out: Map<string, string>): void {

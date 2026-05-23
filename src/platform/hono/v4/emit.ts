@@ -17,7 +17,7 @@ import {
   renderIds,
   renderSchema,
   renderTestsFile,
-} from "../../../generator/typescript/templates.js";
+} from "../../../generator/typescript/emit.js";
 import { enrichLoomModel } from "../../../ir/enrichments.js";
 import type {
   BoundedContextIR,
@@ -345,6 +345,17 @@ const port = Number(process.env.PORT ?? 3000);
 baseLogger.info({ event: "server_starting", port, env: process.env.NODE_ENV ?? "development" });
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+// Surface pool-level connection errors on the structured stream — a
+// dropped backend connection (DB restart, network blip) emits 'error'
+// on the pool, not per-query.  Without this hook the failure surfaces
+// only as the NEXT request's 503 from /ready or a 500 from an
+// aggregate route; logging here gives ops the heads-up + the cause.
+pool.on("error", (err) => {
+  baseLogger.warn({
+    event: "db_disconnected",
+    reason: err instanceof Error ? err.message : String(err),
+  });
+});
 const db = drizzle(pool, { schema });
 const app = createApp(db);
 const server = serve({ fetch: app.fetch, port });

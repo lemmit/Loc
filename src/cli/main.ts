@@ -283,7 +283,7 @@ async function runGenerate(
   } else if (target === "ts") {
     files = generateTypeScript(legacyModel!, HONO_V4_PINS, { emitTrace: options.emitTrace });
   } else {
-    files = generateDotnet(legacyModel!);
+    files = generateDotnet(legacyModel!, { emitTrace: options.emitTrace });
   }
 
   if (!files.has("LICENSE")) {
@@ -541,10 +541,23 @@ generate
   .requiredOption("-o, --out <dir>", "output directory")
   .option("-w, --watch", "re-run on changes to <file>")
   .option("--dry-run", "list paths that would be written / skipped, write nothing")
-  .action(async (file: string, options: { out: string; watch?: boolean; dryRun?: boolean }) => {
-    await runGenerate("dotnet", file, options.out, { dryRun: options.dryRun });
-    if (options.watch) await watchAndRegenerate("dotnet", file, options.out);
-  });
+  .option(
+    "--trace",
+    "emit trace-level seam instrumentation (tx_begin/commit/rollback around SaveChangesAsync) — off by default; see docs/proposals/observability.md",
+  )
+  .action(
+    async (
+      file: string,
+      options: { out: string; watch?: boolean; dryRun?: boolean; trace?: boolean },
+    ) => {
+      await runGenerate("dotnet", file, options.out, {
+        dryRun: options.dryRun,
+        emitTrace: !!options.trace,
+      });
+      if (options.watch)
+        await watchAndRegenerate("dotnet", file, options.out, { emitTrace: !!options.trace });
+    },
+  );
 generate
   .command("system <file>")
   .description(

@@ -579,6 +579,15 @@ Phasing:
   its own label + border tint instead of the uniform `STMT`. Gated by the
   v2 e2e (banking invariants render; Order.confirm's precondition shows
   `data-stmt-subkind="precondition"`).
+- ~~**Phase 7 (inline expression editor for invariants + find filters).**~~
+  Done: a shared `buildExprToggle` in the v2 pane builds an `ExprSlotEditor`
+  + toggle for any slot; `ConstructNode` exposes an optional `ƒx` button +
+  expanded editor section. Wired for **invariants** (`{kind:"invariant",
+  owner, index}`) and **repository find filters** (`{kind:"findFilter",
+  owner, name}`) — same scope-aware completion as v1's Expression picker
+  for these slots. Node widens to 320/360px while the editor is open. Gated
+  by the v2 e2e (Banking invariant `ƒx` opens an editor; Acme repository
+  find filter `ƒx` opens an editor).
 - **Phase 5** — polish: per-view positions, search / coverage / grouped layout
   adapted per zoom level, transitions on drill, mobile passes.
 
