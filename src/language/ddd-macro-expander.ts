@@ -41,7 +41,6 @@ import { _withOrigin } from "../macro-api/factories.js";
 import { loadStdlibMacros } from "../stdlib/index.js";
 import {
   type Aggregate,
-  type AggregateMember,
   isAggregate,
   isBoundedContext,
   isModule,
@@ -53,7 +52,6 @@ import {
   type MacroCall,
   type Model,
   type Ui,
-  type UiMember,
 } from "./generated/ast.js";
 import { allMacros, lookupMacro } from "./macro-registry.js";
 
