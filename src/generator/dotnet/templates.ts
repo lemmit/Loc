@@ -4,10 +4,6 @@
 
 export { renderController, renderExceptionFilter } from "./templates/api.tpl.js";
 export { renderAuditableInterceptor } from "./templates/auditable-interceptor.tpl.js";
-export {
-  renderIAuditable,
-  renderISoftDeletable,
-} from "./templates/capabilities.tpl.js";
 export { renderCommon, renderNoopDispatcher } from "./templates/common.tpl.js";
 export {
   renderCommand,

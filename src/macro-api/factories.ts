@@ -30,6 +30,7 @@ import type {
   Property,
   Statement,
   TypeRef,
+  UnaryExpr,
 } from "../language/generated/ast.js";
 import { isProperty } from "../language/generated/ast.js";
 import type { OriginToken } from "./define.js";
@@ -375,40 +376,134 @@ export function viewsIn(
 }
 
 // ---------------------------------------------------------------------------
-// Capability flags
+// Small expression-tree helpers used by capability predicates.
+// ---------------------------------------------------------------------------
+//
+// Capability factories (`contextFilter`, `contextStamp`) embed
+// Loom AST expressions.  Authors build those via the existing
+// factories (`memberAccess`, `nameRef`, `callExpr` from
+// ui-factories) plus the helpers here.  All produce real Langium
+// AST nodes (`UnaryExpr`, `NameRef`, etc.) that the IR layer
+// lowers through `lowerExpr` after the linker runs.
+
+/** Boolean negation: `!operand`.  Builds a `UnaryExpr` matching
+ * the grammar's `(op='!' | op='-') operand=Expression` shape. */
+export function not(operand: Expression): UnaryExpr {
+  const origin = currentOrigin();
+  const u: UnaryExpr = tag(
+    { $type: "UnaryExpr", op: "!", operand } as unknown as UnaryExpr,
+    origin,
+  );
+  setContainer(operand, u, "operand");
+  return u;
+}
+
+/** Bare `this` reference.  Returns a real `ThisRef` AST node (not a
+ * `NameRef("this")`) so it lowers to `{ kind: "this" }` via the
+ * `isThisRef(expr)` branch in `lower-expr.ts:377`. */
+export function thisRef(): import("../language/generated/ast.js").ThisRef {
+  const origin = currentOrigin();
+  return tag(
+    { $type: "ThisRef" } as unknown as import("../language/generated/ast.js").ThisRef,
+    origin,
+  );
+}
+
+/** `null` literal.  Loom's grammar models this as a `NullLit` with
+ * `value: 'null'` (`src/language/ddd.langium:897`); the lowerer
+ * recognises it and emits `{ kind: "literal", lit: "null", value: "null" }`. */
+export function nullLit(): import("../language/generated/ast.js").NullLit {
+  const origin = currentOrigin();
+  return tag(
+    { $type: "NullLit", value: "null" } as unknown as import("../language/generated/ast.js").NullLit,
+    origin,
+  );
+}
+
+// String / boolean literals live in `ui-factories.ts` (they were
+// added there first, for page menu metadata).  Re-export from
+// `index.ts` keeps the public surface single-file.  Aggregate-side
+// authors that need them just import from the macro-api index.
+
+// ---------------------------------------------------------------------------
+// Capability nodes — typed contributions returned from `expand()` that
+// the expander routes into per-host capability bags instead of
+// splicing into the host's `members` array.
+//
+// Capabilities carry AST expressions that the IR layer lowers
+// through `lowerExpr` / `lowerStatement` after the linker resolves
+// references.  Generators receive the lowered IR and translate it
+// through their normal expression/statement rendering paths.  No
+// backend knows what "auditable" or "softDelete" means — they just
+// see "N filter predicates" and "M stamping assignments per event".
 // ---------------------------------------------------------------------------
 
-/** A capability flag set on the host node.  Not a real AST member
- * — the expander collects these out-of-band and propagates them
- * through lowering as `AggregateIR.flags`.  Generators dedupe
- * cross-cutting infrastructure by flag (e.g. one EF Core
- * interceptor for all `isAuditable` aggregates).
- *
- * Returned from `expand()` as a member to keep the API uniform.
- * The expander filters marks out before splicing the real members. */
-export interface MarkNode {
-  readonly $type: "Mark";
-  readonly name: string;
-  readonly data?: Record<string, unknown>;
+/** "Hide rows matching this predicate from default reads."  Used
+ * by softDeletable to install a query filter; tenantOwned and
+ * similar capabilities use the same mechanism with different
+ * predicates.  The predicate is a Loom Expression — `this` resolves
+ * to the row being filtered.  Backends translate to their query
+ * layer's filter API (.NET: `HasQueryFilter`; Drizzle: a wrapper
+ * around `where`; Ecto: a base query helper). */
+export interface ContextFilterNode {
+  readonly $type: "ContextFilter";
+  readonly predicate: Expression;
   readonly $origin?: OriginToken;
 }
 
-export function mark(name: string, data?: Record<string, unknown>): MarkNode & AggregateMember {
+export function contextFilter(
+  predicate: Expression,
+): ContextFilterNode & AggregateMember {
   const origin = currentOrigin();
-  const m: MarkNode = {
-    $type: "Mark",
-    name,
-    data,
+  const n: ContextFilterNode = {
+    $type: "ContextFilter",
+    predicate,
     ...(origin ? { $origin: origin } : {}),
   };
-  // Mark is not actually an AggregateMember in the AST, but at the
-  // macro API surface we present it as one so authors can return
-  // a flat list.  The expander discriminates on `$type === "Mark"`.
-  return m as unknown as MarkNode & AggregateMember;
+  // We don't `setContainer` on `predicate` — it has its own subtree
+  // ownership.  The expander rebuilds containers when it lowers.
+  return n as unknown as ContextFilterNode & AggregateMember;
 }
 
-export function isMarkNode(node: unknown): node is MarkNode {
-  return !!node && typeof node === "object" && (node as any).$type === "Mark";
+/** "On these lifecycle events, assign these field/value pairs."
+ * Used by auditable to stamp createdAt/updatedAt etc.; future
+ * macros (lastModifiedBy, versionBump) plug into the same shape.
+ * Each event maps to a list of (field, value-expression) pairs;
+ * backends translate via their per-entity stamping path
+ * (.NET: SaveChangesInterceptor + per-type registry;
+ * Drizzle: insert/update middleware; Ecto: changeset). */
+export interface ContextStampAssignment {
+  readonly field: string;
+  readonly value: Expression;
+}
+
+export interface ContextStampNode {
+  readonly $type: "ContextStamp";
+  readonly onCreate?: ReadonlyArray<ContextStampAssignment>;
+  readonly onUpdate?: ReadonlyArray<ContextStampAssignment>;
+  readonly $origin?: OriginToken;
+}
+
+export function contextStamp(spec: {
+  onCreate?: ContextStampAssignment[];
+  onUpdate?: ContextStampAssignment[];
+}): ContextStampNode & AggregateMember {
+  const origin = currentOrigin();
+  const n: ContextStampNode = {
+    $type: "ContextStamp",
+    onCreate: spec.onCreate,
+    onUpdate: spec.onUpdate,
+    ...(origin ? { $origin: origin } : {}),
+  };
+  return n as unknown as ContextStampNode & AggregateMember;
+}
+
+export function isContextFilter(node: unknown): node is ContextFilterNode {
+  return !!node && typeof node === "object" && (node as any).$type === "ContextFilter";
+}
+
+export function isContextStamp(node: unknown): node is ContextStampNode {
+  return !!node && typeof node === "object" && (node as any).$type === "ContextStamp";
 }
 
 // ---------------------------------------------------------------------------

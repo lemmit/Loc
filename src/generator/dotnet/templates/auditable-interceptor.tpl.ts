@@ -1,30 +1,50 @@
+import type { AggregateIR, ContextStampIR } from "../../../ir/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
+import { plural, upperFirst } from "../../../util/naming.js";
+import { renderCsExpr } from "../render-expr.js";
 
-// EF Core SaveChangesInterceptor that stamps audit fields on every
-// IAuditable entity tracked by the change tracker.  One interceptor
-// per DbContext, not per aggregate — adding `with auditable` to N
-// aggregates emits the same interceptor regardless of N.
+// EF Core SaveChangesInterceptor that stamps fields on lifecycle
+// events.  Driven by a per-entity-type stamp registry generated
+// from each aggregate's `contextStamps` IR.  No marker interface,
+// no per-aggregate handler logic — adding a new stamping macro
+// just adds a switch arm here.
 //
-// Current-user resolution: the interceptor optionally pulls
-// ICurrentUserAccessor from the service provider when the deployable
-// opts into auth.  Without it, audit columns get Guid.Empty as the
-// system-user sentinel.  Wrapped in try/catch so a missing accessor
-// never breaks SaveChanges.
+// The generator emits one switch on entry.Entity.GetType(), one
+// arm per aggregate that has any stamping rules.  Inside each arm,
+// the onCreate / onUpdate assignments are rendered using the same
+// expression machinery operation bodies use; `currentUser`,
+// `now()`, and other magic identifiers resolve through their
+// normal IR lowering, so the interceptor body reads like any other
+// generated C# expression.
 
-export function renderAuditableInterceptor(ns: string, hasAuth: boolean): string {
-  const accessorImport = hasAuth ? `using ${ns}.Auth;` : null;
-  const userExpr = hasAuth
-    ? "GetCurrentUserId(eventData.Context)"
-    : "new UserId(Guid.Empty)";
+export function renderAuditableInterceptor(
+  ns: string,
+  aggregates: readonly AggregateIR[],
+): string {
+  // Each aggregate contributes zero or more stamping rules; group
+  // by aggregate so we can emit one switch arm per type.  Skip
+  // aggregates with no stamps so the switch stays tight.
+  const stamping = aggregates
+    .map((a) => ({ agg: a, rules: a.contextStamps ?? [] }))
+    .filter((x) => x.rules.length > 0);
+
+  // Build the switch body: for each aggregate, an arm that casts
+  // entry.Entity to the concrete type and applies the relevant
+  // assignments based on entry.State.
+  const switchArms = stamping.map(({ agg, rules }) => renderArm(ns, agg, rules));
+
+  // Per-aggregate using directives so the cast in each arm can name
+  // the type unqualified.
+  const usings = stamping.map(({ agg }) => `using ${ns}.Domain.${plural(agg.name)};`);
+
   return (
     lines(
       "// Auto-generated.",
       "using Microsoft.EntityFrameworkCore;",
       "using Microsoft.EntityFrameworkCore.Diagnostics;",
-      hasAuth ? "using Microsoft.EntityFrameworkCore.Infrastructure;" : null,
-      `using ${ns}.Domain.Common;`,
+      "using Microsoft.EntityFrameworkCore.Infrastructure;",
       `using ${ns}.Domain.Ids;`,
-      accessorImport,
+      ...usings,
       "",
       `namespace ${ns}.Infrastructure.Persistence;`,
       "",
@@ -51,51 +71,56 @@ export function renderAuditableInterceptor(ns: string, hasAuth: boolean): string
       "    {",
       "        var ctx = eventData.Context;",
       "        if (ctx is null) return;",
-      "        var now = DateTime.UtcNow;",
-      `        var who = ${userExpr};`,
-      "        foreach (var entry in ctx.ChangeTracker.Entries<IAuditable>())",
+      "        foreach (var entry in ctx.ChangeTracker.Entries())",
       "        {",
-      "            if (entry.State == EntityState.Added)",
+      "            if (entry.State != EntityState.Added && entry.State != EntityState.Modified) continue;",
+      "            switch (entry.Entity)",
       "            {",
-      "                entry.Entity.CreatedAt = now;",
-      "                entry.Entity.CreatedBy = who;",
-      "            }",
-      "            if (entry.State == EntityState.Added || entry.State == EntityState.Modified)",
-      "            {",
-      "                entry.Entity.UpdatedAt = now;",
-      "                entry.Entity.UpdatedBy = who;",
+      ...switchArms,
+      "                default: break;",
       "            }",
       "        }",
       "    }",
-      hasAuth ? renderUserResolutionHelper(ns) : null,
       "}",
     ) + "\n"
   );
 }
 
-function renderUserResolutionHelper(ns: string): string {
-  // Reach into the active DI scope via the DbContext's GetService
-  // extension.  If ICurrentUserAccessor isn't resolvable (background
-  // job, migration, anonymous request), fall back to the sentinel
-  // empty UserId — better than throwing inside SaveChanges.
-  return lines(
-    "",
-    "    private static UserId GetCurrentUserId(DbContext? ctx)",
-    "    {",
-    "        if (ctx is null) return new UserId(Guid.Empty);",
-    "        try",
-    "        {",
-    "            var accessor = ctx.GetService<ICurrentUserAccessor>();",
-    "            var rawId = accessor?.User?.Id;",
-    "            if (rawId is null) return new UserId(Guid.Empty);",
-    "            return Guid.TryParse(rawId.ToString(), out var g)",
-    "                ? new UserId(g)",
-    "                : new UserId(Guid.Empty);",
-    "        }",
-    "        catch",
-    "        {",
-    "            return new UserId(Guid.Empty);",
-    "        }",
-    "    }",
+/** Switch arm for one aggregate's stamping rules.  Body assigns
+ * per-event fields on the casted entity using the macro-supplied
+ * value expressions, rendered with `entity` as the `this` binder. */
+function renderArm(ns: string, agg: AggregateIR, rules: readonly ContextStampIR[]): string {
+  const argName = "e"; // local for the casted entity inside the arm
+  const onCreate = rules.find((r) => r.event === "create")?.assignments ?? [];
+  const onUpdate = rules.find((r) => r.event === "update")?.assignments ?? [];
+
+  const createAssigns = onCreate.map(
+    (a) =>
+      `                        ${argName}.${upperFirst(a.field)} = ${renderCsExpr(a.value, { thisName: argName })};`,
   );
+  const updateAssigns = onUpdate.map(
+    (a) =>
+      `                        ${argName}.${upperFirst(a.field)} = ${renderCsExpr(a.value, { thisName: argName })};`,
+  );
+
+  const arm = [
+    `                case ${agg.name} ${argName}:`,
+  ];
+  if (createAssigns.length) {
+    arm.push("                    if (entry.State == EntityState.Added)");
+    arm.push("                    {");
+    arm.push(...createAssigns);
+    arm.push("                    }");
+  }
+  if (updateAssigns.length) {
+    arm.push(
+      "                    if (entry.State == EntityState.Added || entry.State == EntityState.Modified)",
+    );
+    arm.push("                    {");
+    arm.push(...updateAssigns);
+    arm.push("                    }");
+  }
+  arm.push("                    break;");
+  void ns;
+  return arm.join("\n");
 }

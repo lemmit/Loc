@@ -153,8 +153,8 @@ import {
   expandScaffoldToExplicitBody,
   type ScaffoldExpandContext,
 } from "./scaffold-expander.js";
-import { flagsFor } from "../language/ddd-macro-expander.js";
-import type { AggregateCapabilityFlags } from "./loom-ir.js";
+import { capabilitiesFor } from "../language/ddd-macro-expander.js";
+import type { ContextStampIR } from "./loom-ir.js";
 
 /** Fold a bareword built-in family or pinned `family@version`
  *  reference (or `undefined`) into the fully-qualified form the rest
@@ -1110,26 +1110,35 @@ function lowerAggregate(agg: Aggregate, env: Env): AggregateIR {
     operations,
     parts,
     tests,
-    flags: collectMacroFlags(agg),
+    contextFilters: lowerContextFilters(agg, inner),
+    contextStamps: lowerContextStamps(agg, inner),
   };
 }
 
-/** Pull macro-contributed capability flags off the side table the
- * macro expander populates during AST expansion.  Returns undefined
- * when no macros ran on this aggregate so IR output stays compact
- * for the common case. */
-function collectMacroFlags(agg: Aggregate): AggregateCapabilityFlags | undefined {
-  const bag = flagsFor(agg);
-  if (bag.flags.size === 0) return undefined;
-  const out: AggregateCapabilityFlags = {};
-  for (const [name, data] of bag.flags) {
-    if (data === undefined) {
-      (out as Record<string, unknown>)[name] = true;
-    } else {
-      (out as Record<string, unknown>)[name] = data;
-    }
-  }
-  return out;
+/** Lower context-filter predicates contributed by macros.  The
+ * expander stores raw Expression AST on a side table; here we
+ * lower each with the aggregate-scoped Env so refs like `this`
+ * resolve correctly.  Returns undefined when none were
+ * contributed — keeps IR compact for non-macro aggregates. */
+function lowerContextFilters(agg: Aggregate, env: Env): ExprIR[] | undefined {
+  const bag = capabilitiesFor(agg);
+  if (bag.filters.length === 0) return undefined;
+  return bag.filters.map((predicate) => lowerExpr(predicate, env));
+}
+
+/** Lower stamping rules contributed by macros.  Each (field,
+ * value) pair gets its value expression lowered with the
+ * aggregate-scoped Env. */
+function lowerContextStamps(agg: Aggregate, env: Env): ContextStampIR[] | undefined {
+  const bag = capabilitiesFor(agg);
+  if (bag.stamps.length === 0) return undefined;
+  return bag.stamps.map((s) => ({
+    event: s.event,
+    assignments: s.assignments.map((a) => ({
+      field: a.field,
+      value: lowerExpr(a.value, env),
+    })),
+  }));
 }
 
 function lowerTest(block: TestBlock, env: Env): TestIR {

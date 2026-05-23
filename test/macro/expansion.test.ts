@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { flagsFor } from "../../src/language/ddd-macro-expander.js";
+import { capabilitiesFor } from "../../src/language/ddd-macro-expander.js";
 import type { Aggregate, Model } from "../../src/language/generated/ast.js";
 import { isAggregate, isOperation, isProperty } from "../../src/language/generated/ast.js";
 import { parseString } from "../_helpers/parse.js";
 
-const wrap = (body: string) => `system Demo { ${body} }`;
+// `auditable` references Id<User> and currentUser, so test sources
+// always carry a minimal user block so the linker can resolve those.
+const wrap = (body: string) =>
+  `system Demo { user { id: string  role: string } ${body} }`;
 
 function findAggregate(model: Model, name: string): Aggregate {
   for (const sm of model.members ?? []) {
@@ -42,7 +45,7 @@ describe("auditable stdlib macro", () => {
     );
   });
 
-  it("sets the isAuditable capability flag", async () => {
+  it("contributes contextStamps for both create and update events", async () => {
     const { model } = await parseString(
       wrap(`
         module Sales {
@@ -55,8 +58,9 @@ describe("auditable stdlib macro", () => {
       `),
     );
     const agg = findAggregate(model, "Order");
-    const bag = flagsFor(agg);
-    expect(bag.flags.has("isAuditable")).toBe(true);
+    const bag = capabilitiesFor(agg);
+    expect(bag.stamps.length).toBe(2);
+    expect(bag.stamps.map((s) => s.event).sort()).toEqual(["create", "update"]);
   });
 
   it("composes with softDeletable — no field collisions", async () => {
@@ -87,14 +91,16 @@ describe("auditable stdlib macro", () => {
     );
     const opNames = (agg.members ?? []).filter(isOperation).map((o) => o.name);
     expect(opNames).toEqual(expect.arrayContaining(["softDelete", "restore"]));
-    const bag = flagsFor(agg);
-    expect(bag.flags.has("isAuditable")).toBe(true);
-    expect(bag.flags.has("softDelete")).toBe(true);
+    // Both capabilities accumulate on the same host: stamps from
+    // auditable + one filter from softDeletable.
+    const bag = capabilitiesFor(agg);
+    expect(bag.stamps.length).toBe(2);
+    expect(bag.filters.length).toBe(1);
   });
 });
 
-describe("softDeletable arg defaults", () => {
-  it("uses default field names without args", async () => {
+describe("softDeletable — fixed field names", () => {
+  it("uses isDeleted / deletedAt", async () => {
     const { model } = await parseString(
       wrap(`
         module M { context C {
@@ -108,28 +114,6 @@ describe("softDeletable arg defaults", () => {
     const names = (agg.members ?? []).filter(isProperty).map((p) => p.name);
     expect(names).toContain("isDeleted");
     expect(names).toContain("deletedAt");
-  });
-
-  it("honors custom field names via args", async () => {
-    const { model } = await parseString(
-      wrap(`
-        module M { context C {
-          aggregate Doc with softDeletable(field: "archived", timestamp: "archivedOn") {
-            subject: string
-          }
-        }}
-      `),
-    );
-    const agg = findAggregate(model, "Doc");
-    const names = (agg.members ?? []).filter(isProperty).map((p) => p.name);
-    expect(names).toContain("archived");
-    expect(names).toContain("archivedOn");
-    expect(names).not.toContain("isDeleted");
-    const bag = flagsFor(agg);
-    expect(bag.flags.get("softDelete")).toEqual({
-      field: "archived",
-      timestamp: "archivedOn",
-    });
   });
 });
 
@@ -160,31 +144,13 @@ describe("macro expander diagnostics", () => {
     );
   });
 
-  it("reports bad arg type", async () => {
-    const { errors } = await parseString(
-      wrap(`
-        module M { context C {
-          aggregate Doc with softDeletable(field: 42) {
-            subject: string
-          }
-        }}
-      `),
-    );
-    expect(errors.join("\n")).toMatch(/expected kind 'string'/);
-  });
-
-  it("reports unknown arg name", async () => {
-    const { errors } = await parseString(
-      wrap(`
-        module M { context C {
-          aggregate Doc with softDeletable(bogus: "x") {
-            subject: string
-          }
-        }}
-      `),
-    );
-    expect(errors.join("\n")).toMatch(/Unknown argument 'bogus'/);
-  });
+  // Arg-validation diagnostics (bad-kind, unknown-arg, etc.) are
+  // covered against the scaffold stdlib macro in
+  // `test/macro/scaffold-equivalence.test.ts`, which has typed
+  // refList/ref params and exercises the same validator code path.
+  // The trait macros here intentionally take no args (no surface to
+  // mis-fill), so equivalent tests would only assert via a macro
+  // that doesn't currently exist in the trait family.
 });
 
 describe("override-by-name", () => {

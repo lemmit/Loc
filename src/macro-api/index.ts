@@ -19,23 +19,32 @@ export {
   aggregatesIn,
   assignStmt,
   assignStmtPath,
+  contextFilter,
+  contextStamp,
   field,
   idRef,
-  isMarkNode,
-  mark,
+  isContextFilter,
+  isContextStamp,
   memberAccess,
   nameRef,
   namedType,
+  not,
+  nullLit,
   operation,
   originOf,
   param,
   primType,
   targetFields,
+  thisRef,
   viewsIn,
   workflowsIn,
   writableUserFields,
 } from "./factories.js";
-export type { MarkNode } from "./factories.js";
+export type {
+  ContextFilterNode,
+  ContextStampAssignment,
+  ContextStampNode,
+} from "./factories.js";
 
 // UI-side factories — separate file because the surfaces don't
 // overlap and bundling everything into one file makes both harder

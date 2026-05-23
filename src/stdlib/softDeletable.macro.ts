@@ -1,38 +1,46 @@
-import { defineMacro, field, mark, operation, primType } from "../macro-api/index.js";
+import {
+  assignStmt,
+  contextFilter,
+  defineMacro,
+  field,
+  memberAccess,
+  not,
+  nullLit,
+  operation,
+  primType,
+  thisRef,
+} from "../macro-api/index.js";
+import { boolLit, callExpr } from "../macro-api/ui-factories.js";
 
-/** Marks an aggregate as soft-deletable: a boolean flag and an
- * optional deletion timestamp, with `softDelete()` and `restore()`
- * operations that flip them.
+/** Marks an aggregate as soft-deletable.  Two fields, two
+ * operations, and a `contextFilter` capability that hides
+ * soft-deleted rows from default reads.
  *
- * The `softDelete` capability flag carries the chosen field names
- * so generators can emit query filters (`where !isDeleted`) without
- * hardcoding the convention.
- *
- * Note on composition: combining `softDeletable` with `crudish` will
- * collide on `delete()` — use `crudish(updateOnly: true)` to opt
- * out of the hard-delete operation. */
+ * The filter predicate is built as a Loom expression
+ * (`!this.isDeleted`); backends translate via their normal
+ * expression renderer (.NET: `HasQueryFilter`; Drizzle: query
+ * wrapper; Ecto: base query).  The compiler does not know what
+ * "soft delete" means — it just sees a filter predicate. */
 export default defineMacro({
   name: "softDeletable",
   target: "aggregate",
   apiVersion: 1,
   description:
-    "Adds isDeleted/deletedAt fields plus softDelete()/restore() " +
-    "operations.  Generators apply query filters to hide soft-deleted " +
-    "rows from default reads.",
-  params: {
-    field: { kind: "string", default: "isDeleted" },
-    timestamp: { kind: "string", default: "deletedAt" },
-  },
-  expand({ args }) {
+    "Adds isDeleted/deletedAt fields, softDelete()/restore() operations, " +
+    "and a query filter that hides soft-deleted rows from default reads.",
+  expand() {
     return [
-      field(args.field, primType("bool")),
-      field(args.timestamp, primType("datetime", { optional: true })),
-      mark("softDelete", { field: args.field, timestamp: args.timestamp }),
-      // Bodies are intentionally empty for the foundation phase.
-      // Once statement factories land (Phase 3 — crudish), these
-      // will carry `assign` / `precondition` statements.
-      operation("softDelete", [], []),
-      operation("restore", [], []),
+      field("isDeleted", primType("bool")),
+      field("deletedAt", primType("datetime", { optional: true })),
+      operation("softDelete", [], [
+        assignStmt("isDeleted", boolLit(true)),
+        assignStmt("deletedAt", callExpr("now", [])),
+      ]),
+      operation("restore", [], [
+        assignStmt("isDeleted", boolLit(false)),
+        assignStmt("deletedAt", nullLit()),
+      ]),
+      contextFilter(not(memberAccess(thisRef(), "isDeleted"))),
     ];
   },
 });

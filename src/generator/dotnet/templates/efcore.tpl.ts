@@ -7,6 +7,7 @@ import type {
 } from "../../../ir/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
+import { renderCsExpr } from "../render-expr.js";
 
 // AppDbContext + per-aggregate IEntityTypeConfiguration<T>.  The
 // configuration walks each aggregate's fields/contains and emits the
@@ -52,19 +53,17 @@ export function renderConfiguration(agg: AggregateIR, ns: string, ctx: BoundedCo
   const indexLines = [...indexed].map(
     (col) => `        b.HasIndex(x => x.${pascalCol(col, agg)});`,
   );
-  // Soft-delete: when the macro flag is present, install a global
-  // query filter that excludes rows where the chosen flag column
-  // is true.  The macro carries the user's field name (default
-  // "isDeleted"), so backends honour the project's chosen schema
-  // convention.  Together with the macro-emitted ISoftDeletable
-  // marker interface and the `softDelete()` / `restore()`
-  // operations, this gives "soft delete" full runtime semantics
-  // without any per-aggregate boilerplate.
-  const softDeleteLines = agg.flags?.softDelete
-    ? [
-        `        b.HasQueryFilter(x => !x.${pascalCol(agg.flags.softDelete.field, agg)});`,
-      ]
-    : [];
+  // Context filters: per-aggregate predicates contributed by
+  // macros via `contextFilter(...)`.  Each predicate is a lowered
+  // Loom expression rendered into a lambda body with `x` bound to
+  // the row.  No special-case for soft-delete here — the predicate
+  // `!this.isDeleted` translates the same way any other predicate
+  // would, via `renderCsExpr({ thisName: "x" })`.  N filters
+  // compose conjunctively by emission order; EF Core ANDs them.
+  const filterLines = (agg.contextFilters ?? []).map(
+    (predicate) =>
+      `        b.HasQueryFilter(x => ${renderCsExpr(predicate, { thisName: "x" })});`,
+  );
   return (
     lines(
       "// Auto-generated.",
@@ -87,7 +86,7 @@ export function renderConfiguration(agg: AggregateIR, ns: string, ctx: BoundedCo
       ...fieldConfigs,
       ...containmentLines,
       ...indexLines,
-      ...softDeleteLines,
+      ...filterLines,
       "        b.Ignore(x => x.DomainEvents);",
       "    }",
       "}",

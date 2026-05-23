@@ -12,11 +12,11 @@ export function renderProgram(
     authRequired?: boolean;
     usesValidators?: boolean;
     /** When true, at least one aggregate carries `flags.isAuditable`
-     *  (set by the `auditable` macro).  Program.cs registers the
-     *  `AuditableInterceptor` and attaches it to DbContextOptions
-     *  so audit columns get stamped at SaveChanges time without
-     *  per-aggregate handler code. */
-    usesAuditable?: boolean;
+     *  (any aggregate has contextStamps from one or more macros).
+     *  Program.cs registers the `AuditableInterceptor` and attaches
+     *  it to DbContextOptions so stamping happens at SaveChanges
+     *  time without per-aggregate handler code. */
+    usesStamping?: boolean;
     /** Fullstack-dotnet flag: when true, the deployable hosts an
      *  embedded React SPA from `wwwroot/`.  Adds `UseDefaultFiles` +
      *  `UseStaticFiles` middleware and a `MapFallbackToFile` so SPA
@@ -28,7 +28,7 @@ export function renderProgram(
 ): string {
   const authRequired = !!options?.authRequired;
   const usesValidators = !!options?.usesValidators;
-  const usesAuditable = !!options?.usesAuditable;
+  const usesStamping = !!options?.usesStamping;
   const hasEmbeddedSpa = !!options?.hasEmbeddedSpa;
   const repoRegistrations = ctx.aggregates
     .map(
@@ -168,7 +168,7 @@ builder.Services.AddHttpLogging(opts =>
 });
 
 ${
-  usesAuditable
+  usesStamping
     ? `builder.Services.AddScoped<${ns}.Infrastructure.Persistence.AuditableInterceptor>();
 builder.Services.AddDbContext<AppDbContext>((sp, opts) =>
 {

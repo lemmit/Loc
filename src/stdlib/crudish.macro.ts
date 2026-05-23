@@ -1,7 +1,6 @@
 import {
   assignStmt,
   defineMacro,
-  mark,
   memberAccess,
   nameRef,
   operation,
@@ -64,14 +63,7 @@ export default defineMacro({
       // accepts `this` as a magic identifier (see render-expr.ts).
       assignStmt(f.name, nameRef(f.name)),
     );
-    return [
-      operation("update", params, body),
-      // Flag the aggregate for downstream input-type synthesis.
-      // Generator hookup is the next commit; for now this is purely
-      // informational and excluded carries the names that should
-      // NOT appear on the input contract.
-      mark("needsCrudInput", { exclude: macroAddedFieldNames(target) }),
-    ];
+    return [operation("update", params, body)];
   },
 });
 
@@ -115,21 +107,6 @@ function cloneBase(b: import("../language/generated/ast.js").BaseType): import("
     $type: "NamedType",
     target: { $refText: (b as { target: { $refText: string } }).target.$refText },
   } as unknown as import("../language/generated/ast.js").BaseType;
-}
-
-/** Names of fields that were contributed by other macros.  Becomes
- * the `exclude` list on the needsCrudInput flag so the input type
- * (when synthesised) omits these bookkeeping fields. */
-function macroAddedFieldNames(target: import("../language/generated/ast.js").Aggregate): string[] {
-  const ORIGIN = "$origin";
-  const out: string[] = [];
-  for (const m of target.members ?? []) {
-    if (m.$type !== "Property") continue;
-    if ((m as unknown as Record<string, unknown>)[ORIGIN] !== undefined) {
-      out.push((m as { name: string }).name);
-    }
-  }
-  return out;
 }
 
 // Silence the unused-import warning until we wire memberAccess into

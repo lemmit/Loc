@@ -13,7 +13,6 @@ import {
   isProperty,
 } from "../../src/language/generated/ast.js";
 import type { Aggregate, Model } from "../../src/language/generated/ast.js";
-import { flagsFor } from "../../src/language/ddd-macro-expander.js";
 import { parseString } from "../_helpers/parse.js";
 
 const wrap = (body: string) => `system Demo { ${body} }`;
@@ -75,21 +74,6 @@ describe("crudish stdlib macro", () => {
     expect(stmts[1]!.target.head).toBe("amount");
   });
 
-  it("sets the needsCrudInput flag with an empty exclude list when no other macros ran", async () => {
-    const { model } = await parseString(
-      wrap(`
-        module M { context C {
-          aggregate Order with crudish {
-            subject: string
-          }
-        }}
-      `),
-    );
-    const agg = findAggregate(model, "Order");
-    const flag = flagsFor(agg).flags.get("needsCrudInput");
-    expect(flag).toEqual({ exclude: [] });
-  });
-
   it("composes with auditable — audit fields are excluded from update surface", async () => {
     const { model, errors } = await parseString(
       wrap(`
@@ -115,12 +99,6 @@ describe("crudish stdlib macro", () => {
     const fieldNames = (agg.members ?? []).filter(isProperty).map((p) => p.name);
     expect(fieldNames).toEqual(
       expect.arrayContaining(["subject", "amount", "createdAt", "updatedAt"]),
-    );
-    // And the needsCrudInput flag's exclude list reflects the
-    // macro-added fields so any future input-type synthesis omits them.
-    const flag = flagsFor(agg).flags.get("needsCrudInput") as { exclude: string[] };
-    expect(flag.exclude).toEqual(
-      expect.arrayContaining(["createdAt", "updatedAt", "createdBy", "updatedBy"]),
     );
   });
 
@@ -162,7 +140,6 @@ describe("crudish via IR lowering", () => {
             const op = a.operations.find((o) => o.name === "update");
             expect(op).toBeDefined();
             expect(op!.params.map((p) => p.name)).toEqual(["subject", "amount"]);
-            expect(a.flags?.needsCrudInput).toEqual({ exclude: [] });
           }
         }
       }

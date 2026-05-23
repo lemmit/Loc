@@ -185,38 +185,45 @@ export interface AggregateIR {
    * Populated by `enrichLoomModel`; one entry per reference-collection
    * field.  Empty array when the aggregate has none. */
   associations?: AssociationIR[];
-  /** Capability flags contributed by macros via `mark(name, data)`.
-   * Keyed by flag name; value is the (optional) data the macro passed.
-   * Generators iterate aggregates and dedupe shared infrastructure
-   * by flag — e.g. one EF Core SaveChangesInterceptor per DbContext
-   * for all `isAuditable` aggregates rather than per-aggregate logic.
-   * Populated by `lowerAggregate` reading `flagsFor(agg)` from the
-   * macro expander's side table. */
-  flags?: AggregateCapabilityFlags;
+  /** Filter predicates contributed by macros via `contextFilter(...)`.
+   * Each entry is a lowered Loom expression evaluated against a
+   * lambda-bound row in the query layer.  Generators install them
+   * via their query-filter API (.NET: `HasQueryFilter`; Drizzle:
+   * `where(not(...))` wrappers; Ecto: a base query helper).
+   *
+   * Composes additively — N filters from N macros become N
+   * conjunctively-applied predicates at the storage layer. */
+  contextFilters?: ExprIR[];
+  /** Lifecycle stamping rules contributed by macros via
+   * `contextStamp({ onCreate, onUpdate })`.  Each rule lists
+   * field/value pairs to assign at the matching lifecycle event.
+   * Generators iterate this in their per-entity stamping path
+   * (.NET: registry-driven SaveChangesInterceptor; Drizzle:
+   * insert/update middleware; Ecto: changeset functions).
+   *
+   * Composes additively — N stamping macros yield N rule sets
+   * concatenated per event. */
+  contextStamps?: ContextStampIR[];
 }
 
-/** Capability flags an aggregate may carry.  Each entry is set
- * declaratively by a `mark(name, data)` call in a macro body.
- * Extend this interface as new stdlib macros land — the open-
- * ended `Record` form below is the underlying carrier but the
- * named members give generators typed access without casts. */
-export interface AggregateCapabilityFlags {
-  /** Aggregate participates in `IAuditable` audit-field stamping.
-   * Set by the `auditable` stdlib macro.  Generators emit one
-   * shared persistence hook keyed by this flag. */
-  isAuditable?: true;
-  /** Aggregate is soft-deletable.  Field names are configurable
-   * via macro args so a project's naming convention is honored.
-   * Generators apply query filters to hide soft-deleted rows. */
-  softDelete?: { field: string; timestamp: string };
-  /** Aggregate needs CRUD-style input value-object types
-   * synthesised by the generator.  Set by the `crudish` macro
-   * (Phase 3).  `exclude` lists field names that must not appear
-   * on the input shape (typically macro-added bookkeeping fields). */
-  needsCrudInput?: { exclude: string[] };
-  /** Open extension: arbitrary additional flags set by user-
-   * authored macros.  Keyed by flag name. */
-  [extra: string]: undefined | true | Record<string, unknown>;
+/** A single stamping rule attached to an aggregate.  Backends
+ * dispatch on `event` and emit assignments for the matching
+ * lifecycle moment.  Values are arbitrary lowered Loom
+ * expressions — `currentUser`, `now()`, constants, derived
+ * expressions, etc. — translated by the backend's normal
+ * expression renderer. */
+export interface ContextStampIR {
+  event: "create" | "update";
+  assignments: ContextStampAssignmentIR[];
+}
+
+export interface ContextStampAssignmentIR {
+  /** Field name on the aggregate that gets stamped.  Must match a
+   * declared field (validated when the IR is consumed; an unknown
+   * field is a generator-side error). */
+  field: string;
+  /** Lowered expression whose result is assigned to `field`. */
+  value: ExprIR;
 }
 
 export interface TestIR {

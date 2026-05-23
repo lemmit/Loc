@@ -19,10 +19,8 @@ import {
   renderEnum,
   renderEvent,
   renderExceptionFilter,
-  renderIAuditable,
   renderIDomainEvent,
   renderId,
-  renderISoftDeletable,
   renderNoopDispatcher,
   renderProgram,
   renderRepositoryImpl,
@@ -155,15 +153,15 @@ function emitProjectFromContexts(
   if (authRequired && system?.sys) {
     emitAuthFiles(system.sys, ns, out);
   }
-  // Capability interfaces (+ the auditable SaveChangesInterceptor) —
-  // emitted into Domain/Common/ + Infrastructure/Persistence/ only
-  // when at least one aggregate carries the corresponding flag.
-  // Keeps the file tree free of unused marker types and dead
-  // infrastructure in projects that don't use the auditable /
-  // softDeletable macros.  See `src/stdlib/auditable.macro.ts` and
-  // the macro plan in experience_gathered.md for the design.
-  emitCapabilityInterfaces(merged, ns, out, { authRequired });
-  const usesAuditable = merged.aggregates.some((a) => a.flags?.isAuditable);
+  // SaveChangesInterceptor — emitted only when at least one
+  // aggregate has stamping rules contributed by macros.  Driven by
+  // a per-entity-type switch built from each aggregate's
+  // `contextStamps` IR (no marker interface, no per-aggregate
+  // hand-written stamping logic).
+  emitStampingInterceptor(merged, ns, out);
+  const usesStamping = merged.aggregates.some(
+    (a) => (a.contextStamps?.length ?? 0) > 0,
+  );
   out.set("Infrastructure/Persistence/AppDbContext.cs", renderDbContext(merged, ns));
   // FluentValidation pipeline — emit the generic
   // ValidationBehavior + the csproj package ref + the
@@ -179,7 +177,7 @@ function emitProjectFromContexts(
   emitProject(merged, ns, out, {
     authRequired,
     usesValidators,
-    usesAuditable,
+    usesStamping,
     hasEmbeddedSpa,
   });
   emitTestProject(merged, ns, out);
@@ -228,9 +226,8 @@ function emitContext(ctx: BoundedContextIR, ns: string, out: Map<string, string>
   }
   emitWorkflows(ctx, ns, out);
   emitViews(ctx, ns, out);
-  // Capability interfaces — same gating as the system path; see
-  // emitCapabilityInterfaces above.
-  emitCapabilityInterfaces(ctx, ns, out);
+  // Stamping interceptor — same gating as the system path.
+  emitStampingInterceptor(ctx, ns, out);
   // Same FluentValidation gate as the system path — drives the
   // pipeline behavior emit + csproj + Program.cs registration +
   // the DomainExceptionFilter arm.
@@ -239,8 +236,10 @@ function emitContext(ctx: BoundedContextIR, ns: string, out: Map<string, string>
   if (usesValidators) {
     out.set("Application/Common/ValidationBehavior.cs", renderValidationBehavior(ns));
   }
-  const usesAuditable = ctx.aggregates.some((a) => a.flags?.isAuditable);
-  emitProject(ctx, ns, out, { usesValidators, usesAuditable });
+  const usesStamping = ctx.aggregates.some(
+    (a) => (a.contextStamps?.length ?? 0) > 0,
+  );
+  emitProject(ctx, ns, out, { usesValidators, usesStamping });
   emitTestProject(ctx, ns, out);
 }
 
@@ -248,29 +247,27 @@ function emitContext(ctx: BoundedContextIR, ns: string, out: Map<string, string>
 // Shared / per-context emission helpers
 // ---------------------------------------------------------------------------
 
-function emitCapabilityInterfaces(
+/** Emit the SaveChangesInterceptor when at least one aggregate
+ * contributes stamping rules.  The interceptor is registry-driven
+ * — its body is a switch on `entry.Entity.GetType()` built from
+ * every aggregate's `contextStamps`.  Adding a new stamping macro
+ * (e.g. `lastModifiedBy`, `versionBump`) requires no compiler
+ * changes: the new macro contributes more entries to one
+ * aggregate's stamps, which become more assignments in that
+ * aggregate's switch arm. */
+function emitStampingInterceptor(
   merged: BoundedContextIR,
   ns: string,
   out: Map<string, string>,
-  opts: { authRequired?: boolean } = {},
 ): void {
-  const anyAuditable = merged.aggregates.some((a) => a.flags?.isAuditable);
-  const anySoftDelete = merged.aggregates.find((a) => a.flags?.softDelete);
-  if (anyAuditable) {
-    out.set("Domain/Common/IAuditable.cs", renderIAuditable(ns));
-    // SaveChangesInterceptor that stamps audit fields on every
-    // IAuditable entity at SaveChanges time.  Registered in
-    // Program.cs against the DbContextOptions builder when
-    // `usesAuditable` is true (set below).
-    out.set(
-      "Infrastructure/Persistence/AuditableInterceptor.cs",
-      renderAuditableInterceptor(ns, !!opts.authRequired),
-    );
-  }
-  if (anySoftDelete) {
-    const sd = anySoftDelete.flags!.softDelete!;
-    out.set("Domain/Common/ISoftDeletable.cs", renderISoftDeletable(ns, sd.field, sd.timestamp));
-  }
+  const anyStamping = merged.aggregates.some(
+    (a) => (a.contextStamps?.length ?? 0) > 0,
+  );
+  if (!anyStamping) return;
+  out.set(
+    "Infrastructure/Persistence/AuditableInterceptor.cs",
+    renderAuditableInterceptor(ns, merged.aggregates),
+  );
 }
 
 function emitIds(ctx: BoundedContextIR, ns: string, out: Map<string, string>): void {
@@ -383,20 +380,20 @@ function emitProject(
   options?: {
     authRequired?: boolean;
     usesValidators?: boolean;
-    usesAuditable?: boolean;
+    usesStamping?: boolean;
     hasEmbeddedSpa?: boolean;
   },
 ): void {
   const hasExtern = ctx.aggregates.some((a) => a.operations.some((o) => o.extern));
   const usesValidators = !!options?.usesValidators;
-  const usesAuditable = !!options?.usesAuditable;
+  const usesStamping = !!options?.usesStamping;
   const hasEmbeddedSpa = !!options?.hasEmbeddedSpa;
   out.set(
     "Program.cs",
     renderProgram(ctx, ns, {
       authRequired: !!options?.authRequired,
       usesValidators,
-      usesAuditable,
+      usesStamping,
       hasEmbeddedSpa,
     }),
   );
