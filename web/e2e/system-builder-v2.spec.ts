@@ -63,7 +63,16 @@ test("Model v2 renders an operation body as a statement flow (read-only)", async
   // The confirm body renders as one stmt node per statement, all visible.
   const stmts = page.getByTestId("c4system-v2-stmt");
   await expect.poll(async () => stmts.count(), { timeout: 5_000 }).toBeGreaterThan(0);
-  // Order.confirm in sales-system.ddd has at least one assign and an emit.
-  await expect(page.locator('[data-testid="c4system-v2-stmt"][data-stmt-kind="emit"]')).toBeVisible();
-  await expect(page.locator('[data-testid="c4system-v2-stmt"][data-stmt-kind="assign"]')).toBeVisible();
+
+  // Order.confirm has at least one assign and one emit; each renders its v1
+  // editor row inside the node (target Autocomplete for assign, field name +
+  // value for emit).
+  const assign = page.locator('[data-testid="c4system-v2-stmt"][data-stmt-kind="assign"]').first();
+  await expect(assign).toBeVisible();
+  await expect(assign.getByTestId("c4system-stmt-target")).toBeVisible();
+  await expect(assign.getByTestId("c4system-stmt-value")).toBeVisible();
+
+  const emit = page.locator('[data-testid="c4system-v2-stmt"][data-stmt-kind="emit"]').first();
+  await expect(emit).toBeVisible();
+  await expect(emit.getByTestId("c4system-emit-field-name").first()).toBeVisible();
 });

@@ -4,7 +4,7 @@
 // node; a breadcrumb up top tracks the path; clicking a drillable node pushes
 // a step. v1 is unchanged and still ships in the "Model" tab.
 
-import { useEffect, useMemo, useState, Fragment } from "react";
+import { useEffect, useMemo, useState, Fragment, type ReactNode } from "react";
 import { Box, Button, Group, Text } from "@mantine/core";
 import {
   Background,
@@ -21,8 +21,27 @@ import {
 import "@xyflow/react/dist/style.css";
 import type { LayoutCtx } from "../../layout/ctx";
 import { parseDdd } from "../parse";
-import { listStatementViews, type BodyLocator } from "../system/body";
-import StmtNode from "./StmtNode";
+import {
+  addStatement,
+  deleteStatement,
+  editStatement,
+  listStatementViews,
+  moveStatement,
+  type BodyLocator,
+  type StmtView,
+} from "../system/body";
+import { listFields } from "../system/fields";
+import { findAggregate } from "./view-graph";
+import { seedExpr } from "../system/expr-model";
+import {
+  editExprSlot,
+  exprHints,
+  slotCandidates,
+  slotExpr,
+  type ExprSlot,
+} from "../system/expr-slots";
+import { ExprSlotEditor, type ExprMode } from "../system/ExpressionEditor";
+import StmtNode, { type StmtNodeData } from "./StmtNode";
 import { buildViewGraph, type ViewGraph, type ViewKind, type ViewPath } from "./view-graph";
 
 const KIND_COLOR: Record<ViewKind, string> = {
@@ -147,20 +166,116 @@ function Breadcrumb({ path, onJump }: { path: ViewPath; onJump: (depth: number) 
 
 function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const [path, setPath] = useState<ViewPath>([]);
-  const parsed = useMemo(() => parseDdd(ctx.getSource()), [ctx]);
+  const [rev, setRev] = useState(0);
+  // Inline-structured-editor open row, scoped per body locator + statement
+  // index (+ optional field index for emit fields / call args). Mirrors v1.
+  const [structuredKey, setStructuredKey] = useState<string | null>(null);
+  const [exprMode, setExprMode] = useState<ExprMode>("structured");
+  // Re-parse after every commit by depending on `rev` (`apply` bumps it).
+  const parsed = useMemo(() => parseDdd(ctx.getSource()), [ctx, rev]);
   const graph = useMemo(() => buildViewGraph(parsed.ast, path), [parsed, path]);
 
+  /** Single choke-point for source edits — bump `rev` so the next render
+   *  re-parses, re-builds the view-graph and re-binds the per-stmt data. */
+  const apply = (next: string): void => {
+    ctx.onSourceChange(next, "builder");
+    setRev((r) => r + 1);
+  };
+
   // When the path's leaf is an operation / workflow, materialise its statement
-  // views once per render; the custom `stmt` React Flow node reads each one
-  // off its node's data.
+  // views + per-statement editor handlers and pass them through the stmt node's
+  // `data`. The pure view-graph already laid out the column; here we layer in
+  // editing.
   const leafLoc = useMemo(() => leafBodyLocator(path), [path]);
+  useEffect(() => {
+    // Switching to a different operation / workflow / non-leaf collapses any
+    // inline `ƒx` editor that was open in the previous body.
+    setStructuredKey(null);
+  }, [leafLoc]);
+
   const stmtData = useMemo(() => {
     const m = new Map<string, Record<string, unknown>>();
     if (!leafLoc) return m;
     const views = listStatementViews(parsed.ast, leafLoc) ?? [];
-    views.forEach((view, i) => m.set(`stmt:${i}`, { view }));
+    // Aggregate field names for the assignment-target Autocomplete; only
+    // meaningful in an operation body, empty for workflows.
+    const targets: string[] =
+      leafLoc.kind === "operation"
+        ? ((): string[] => {
+            const agg = findAggregate(parsed.ast, leafLoc.aggregate);
+            return agg ? listFields(agg).map((f) => f.name) : [];
+          })()
+        : [];
+
+    const base = leafLoc.kind === "operation" ? `${leafLoc.aggregate}.${leafLoc.op}` : leafLoc.name;
+    const keyFor = (index: number, field?: number): string => `${base}:${index}:${field ?? ""}`;
+    const slotFor = (index: number, field?: number): ExprSlot =>
+      leafLoc.kind === "operation"
+        ? {
+            kind: "stmtExpr",
+            owner: leafLoc.aggregate,
+            op: leafLoc.op,
+            index,
+            ...(field !== undefined ? { field } : {}),
+          }
+        : {
+            kind: "wfStmt",
+            owner: leafLoc.name,
+            index,
+            ...(field !== undefined ? { field } : {}),
+          };
+    const renderEditor = (index: number, field?: number): ReactNode => {
+      if (structuredKey !== keyFor(index, field)) return null;
+      const slot = slotFor(index, field);
+      const expr = slotExpr(parsed.ast, slot);
+      if (!expr) return null;
+      return (
+        <ExprSlotEditor
+          key={`${keyFor(index, field)}:${rev}`}
+          seed={seedExpr(expr)}
+          seedText={expr.$cstNode?.text ?? ""}
+          candidates={slotCandidates(parsed.ast, slot)}
+          loadHints={() => exprHints(ctx.getSource(), slot)}
+          mode={exprMode}
+          onMode={setExprMode}
+          onCommit={(text) => {
+            const next = editExprSlot(ctx.getSource(), slot, text);
+            if (next == null) return false;
+            apply(next);
+            return true;
+          }}
+        />
+      );
+    };
+    const toggle = (index: number, field?: number): void => {
+      const k = keyFor(index, field);
+      setStructuredKey((cur) => (cur === k ? null : k));
+    };
+
+    views.forEach((view, i) => {
+      const data: StmtNodeData = {
+        view,
+        targets,
+        headCandidates: slotCandidates(parsed.ast, slotFor(i)),
+        onCommit: (text) => {
+          const next = editStatement(ctx.getSource(), leafLoc, i, text);
+          if (next == null) return false;
+          apply(next);
+          return true;
+        },
+        valueEditor: renderEditor(i),
+        onToggleEditor: () => toggle(i),
+        renderArgEditor: (a) => renderEditor(i, a),
+        onToggleArg: (a) => toggle(i, a),
+        renderFieldEditor: (f) => renderEditor(i, f),
+        onToggleField: (f) => toggle(i, f),
+      };
+      m.set(`stmt:${i}`, data as unknown as Record<string, unknown>);
+    });
     return m;
-  }, [parsed, leafLoc]);
+    // `ctx` covers getSource changes (parent re-renders create a fresh ctx).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [parsed, leafLoc, structuredKey, exprMode, rev]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(toRfNodes(graph, stmtData));
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(toRfEdges(graph));
