@@ -2,7 +2,7 @@
 import { synthDDL } from "./ddl";
 import { pgliteAssetUrl } from "../bundle/plugin.js";
 import { fnv1a32 } from "../util/hash.js";
-import { formatLogArg, LOG_LEVELS, type LogLine } from "../util/log-line.js";
+import { asStructuredPayload, formatLogArg, LOG_LEVELS, type LogLine } from "../util/log-line.js";
 import type {
   BootResult,
   DispatchResult,
@@ -20,12 +20,29 @@ declare const self: DedicatedWorkerGlobalScope;
 // generated Hono handlers' logs — which run inside this worker via
 // `app.fetch` — reach the playground's "Backend" log stream.  Returns a
 // restore fn the caller invokes in a `finally`.
+//
+// Structured pino lines (emitted by every generated Hono backend; see
+// docs/proposals/observability.md) flow in as a single object argument:
+// `console.info({ level, event, ts, request_id, … })`.  We detect that
+// shape on the way through and:
+//   - attach the parsed payload as `structured` so the Output panel can
+//     render event / request_id / fields without re-parsing,
+//   - override the LogLine `level` from `payload.level`.  pino in
+//     browser maps `logger.trace(...)` to `console.debug(...)`, so the
+//     console method's name UNDER-represents the semantic level —
+//     reading it off the payload restores `trace` as a first-class
+//     filter target in the UI.
 function captureConsole(sink: LogLine[]): () => void {
   const original: Partial<Record<LogLine["level"], (...a: unknown[]) => void>> = {};
   for (const level of LOG_LEVELS) {
     original[level] = console[level] as (...a: unknown[]) => void;
     console[level] = (...args: unknown[]): void => {
-      sink.push({ level, text: args.map(formatLogArg).join(" ") });
+      const structured = args.length === 1 ? asStructuredPayload(args[0]) : undefined;
+      sink.push({
+        level: structured?.level ?? level,
+        text: args.map(formatLogArg).join(" "),
+        ...(structured ? { structured } : {}),
+      });
       original[level]!(...args);
     };
   }

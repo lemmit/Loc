@@ -11,14 +11,17 @@ import type {
   AggregateMember,
   BoundedContext,
   ContextMember,
+  Deployable,
   Model,
   Module,
   Operation,
+  Repository,
   Statement,
   System,
   SystemMember,
   Workflow,
 } from "../../../../src/language/generated/ast.js";
+import { deployableModules, deployableServes, deployableTargets, deployableUi } from "../system/deployable-bindings";
 
 export type ViewKind =
   // containers (drillable)
@@ -28,12 +31,17 @@ export type ViewKind =
   | "aggregate"
   | "operation"
   | "workflow"
+  | "repository"
   // statement-flow node (the leaf of an operation / workflow view)
   | "stmt"
-  // leaves (Phase 1: shown but not drillable)
+  // a single repository find — the leaf of a repository view
+  | "find"
+  // aggregate-level invariant — a synthetic node (Invariant has no name; the
+  // node carries a preview of its expression as `name`)
+  | "invariant"
+  // leaves (still no drill below)
   | "valueobject"
   | "event"
-  | "repository"
   | "view"
   | "function"
   | "field"
@@ -81,6 +89,7 @@ const DRILLABLE: ReadonlySet<ViewKind> = new Set([
   "aggregate",
   "operation",
   "workflow",
+  "repository",
 ]);
 
 const COL_W = 220;
@@ -141,6 +150,7 @@ function systemView(ast: Model, name: string): ViewGraph {
   const sys = ast.members.find((m): m is System => m.$type === "System" && (m as System).name === name);
   if (!sys) return { title: name, nodes: [], edges: [] };
   const items: { id: string; kind: ViewKind; name: string }[] = [];
+  const deployables: Deployable[] = [];
   for (const m of sys.members as SystemMember[]) {
     const childName = (m as { name?: string }).name;
     if (!childName) continue;
@@ -162,10 +172,26 @@ function systemView(ast: Model, name: string): ViewGraph {
         break;
       case "Deployable":
         items.push({ id: nid("deployable", childName), kind: "deployable", name: childName });
+        deployables.push(m as Deployable);
         break;
     }
   }
-  return { title: `system ${name}`, nodes: layout(items, SYSTEM_ORDER), edges: [] };
+  // Surface each deployable's bindings as edges into its bound module(s) /
+  // api(s) / ui / target deployable. Pure reflection of the AST refs — Phase
+  // 4c2 makes them editable.
+  const edges: VEdge[] = [];
+  for (const d of deployables) {
+    const src = nid("deployable", d.name);
+    for (const mod of deployableModules(d))
+      edges.push({ id: `bind:${src}->module:${mod}`, source: src, target: nid("module", mod), label: "modules" });
+    for (const api of deployableServes(d))
+      edges.push({ id: `bind:${src}->api:${api}`, source: src, target: nid("api", api), label: "serves" });
+    const ui = deployableUi(d);
+    if (ui) edges.push({ id: `bind:${src}->ui:${ui}`, source: src, target: nid("ui", ui), label: "ui" });
+    const tgt = deployableTargets(d);
+    if (tgt) edges.push({ id: `bind:${src}->deployable:${tgt}`, source: src, target: nid("deployable", tgt), label: "targets" });
+  }
+  return { title: `system ${name}`, nodes: layout(items, SYSTEM_ORDER), edges };
 }
 
 function moduleView(ast: Model, name: string): ViewGraph {
@@ -226,7 +252,7 @@ function contextView(ast: Model, name: string): ViewGraph {
   return { title: `context ${name}`, nodes: layout(items, CONTEXT_ORDER), edges: [] };
 }
 
-const AGGREGATE_ORDER: readonly ViewKind[] = ["operation", "function", "field", "containment"];
+const AGGREGATE_ORDER: readonly ViewKind[] = ["operation", "function", "invariant", "field", "containment"];
 
 function aggregateView(ast: Model, name: string): ViewGraph {
   let agg: Aggregate | undefined;
@@ -267,6 +293,17 @@ function aggregateView(ast: Model, name: string): ViewGraph {
       case "Containment":
         items.push({ id: nid("containment", childName), kind: "containment", name: childName });
         break;
+    }
+  }
+  // Invariants are unnamed (`invariant <expr>`); synthesise nodes carrying a
+  // preview of the expression. The id encodes the index so the pane can
+  // splice the right one out on delete.
+  let invariantIndex = 0;
+  for (const m of agg.members as AggregateMember[]) {
+    if (m.$type === "Invariant") {
+      const preview = m.$cstNode?.text?.replace(/^invariant\s+/, "").trim() ?? `inv ${invariantIndex + 1}`;
+      items.push({ id: `invariant:${invariantIndex}`, kind: "invariant", name: preview });
+      invariantIndex++;
     }
   }
   return { title: `aggregate ${name}`, nodes: layout(items, AGGREGATE_ORDER), edges: [] };
@@ -362,6 +399,42 @@ function workflowView(ast: Model, name: string): ViewGraph {
   return stmtFlow(`workflow ${name}()`, wf.body);
 }
 
+function findRepository(ast: Model, name: string): Repository | undefined {
+  const visit = (members: ContextMember[]): Repository | undefined => {
+    for (const cm of members) {
+      if (cm.$type === "Repository" && (cm as Repository).name === name) return cm as Repository;
+    }
+    return undefined;
+  };
+  for (const m of ast.members) {
+    if (m.$type === "BoundedContext") {
+      const r = visit((m as BoundedContext).members);
+      if (r) return r;
+    } else if (m.$type === "System") {
+      for (const sm of (m as System).members) {
+        if (sm.$type === "BoundedContext") {
+          const r = visit((sm as BoundedContext).members);
+          if (r) return r;
+        }
+        if (sm.$type === "Module") {
+          for (const c of (sm as Module).contexts) {
+            const r = visit(c.members);
+            if (r) return r;
+          }
+        }
+      }
+    }
+  }
+  return undefined;
+}
+
+function repositoryView(ast: Model, name: string): ViewGraph {
+  const repo = findRepository(ast, name);
+  if (!repo) return { title: `repository ${name}`, nodes: [], edges: [] };
+  const items = repo.finds.map((f) => ({ id: nid("find", f.name), kind: "find" as const, name: f.name }));
+  return { title: `repository ${name}`, nodes: layout(items, ["find"]), edges: [] };
+}
+
 /** Dispatch on the last step of `path` to the per-level builder; empty path
  *  is the root view. Operation and workflow leaves render as a statement
  *  flow (the leaf node type the pane knows how to render). */
@@ -385,6 +458,8 @@ export function buildViewGraph(ast: Model, path: ViewPath): ViewGraph {
     }
     case "workflow":
       return workflowView(ast, last.name);
+    case "repository":
+      return repositoryView(ast, last.name);
     default:
       // Other leaves (value object / event / repository / view / function / …)
       // still have no children to show — opt-in node-detail comes later.

@@ -1398,13 +1398,30 @@ function idFollowPath(e: ExprIR): string[] | undefined {
 // ---------------------------------------------------------------------------
 
 function lowerField(p: Property): FieldIR {
+  const sensitivity = fieldSensitivity(p);
+  const baseType = lowerType(p.type);
   return {
     name: p.name,
-    type: lowerType(p.type),
+    // The field's `TypeIR` carries the same tag set as the field's
+    // `sensitivity` — keeps a single source of truth so downstream
+    // consumers (wire shape, future expression-typing in lower-expr,
+    // generators) can read sensitivity off the type uniformly.
+    type: sensitivity ? { ...baseType, sensitivity } : baseType,
     optional: !!p.type?.optional,
     display: !!p.display,
     provenanced: !!p.provenanced,
+    ...(sensitivity ? { sensitivity } : {}),
   };
+}
+
+/** Pull sensitivity tags from a Property AST node — sorted, deduped,
+ * undefined when the property declared no `sensitive(...)` clause.
+ * Mirror of `propertySensitivity` in `type-system.ts`, but produces an
+ * `IR` `SensitivityTags` (plain `readonly string[]`). */
+function fieldSensitivity(p: Property): readonly string[] | undefined {
+  const tags = p.sensitivity?.tags;
+  if (!tags || tags.length === 0) return undefined;
+  return Object.freeze([...new Set(tags)].sort());
 }
 
 function lowerContainment(c: Containment): ContainmentIR {

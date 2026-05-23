@@ -1,9 +1,6 @@
 import { AstUtils } from "langium";
 import { describe, expect, it } from "vitest";
-import {
-  addContextSource,
-  addOperationSource,
-} from "../../web/src/builder/system-v2/add-extra.js";
+import { addContextSource, addOperationSource } from "../../web/src/builder/system-v2/add-extra.js";
 import { parseRaw as parse } from "../_helpers/index.js";
 
 const SRC = `system S {

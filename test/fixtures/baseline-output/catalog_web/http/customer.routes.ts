@@ -1,7 +1,7 @@
 // Auto-generated.  Do not edit by hand.
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { Customer } from "../domain/customer";
-import { CustomerRepository } from "../db/repositories/customer-repository";
+import type { CustomerRepository } from "../db/repositories/customer-repository";
 import * as Ids from "../domain/ids";
 import { DomainError, AggregateNotFoundError, ForbiddenError, ExternHandlerError } from "../domain/errors";
 
@@ -14,8 +14,6 @@ const CreateCustomerRequest = z.object({
 const CreateCustomerResponse = z.object({ id: z.string() }).openapi("CreateCustomerResponse");
 
 
-const AllQuery = z.object({
-}).openapi("AllQuery");
 const ByEmailQuery = z.object({
   email: z.string(),
 }).openapi("ByEmailQuery");

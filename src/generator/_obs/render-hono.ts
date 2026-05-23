@@ -23,7 +23,7 @@
 // proper method completion + signature help.
 // ---------------------------------------------------------------------------
 
-import { LogEvents, type LogEventKey } from "./log-events.js";
+import { type LogEventKey, LogEvents } from "./log-events.js";
 
 const LOG_GET = `(c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log")`;
 

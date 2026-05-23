@@ -27,9 +27,7 @@ describe("validation", () => {
         }
       }
     `);
-    expect(
-      errors.some((e) => /matcher/i.test(e) && /argument/i.test(e)),
-    ).toBe(true);
+    expect(errors.some((e) => /matcher/i.test(e) && /argument/i.test(e))).toBe(true);
   });
 
   it("flags non-bool preconditions", async () => {

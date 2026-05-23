@@ -63,6 +63,9 @@ test("Model v2 renders an operation body as a statement flow (read-only)", async
   // The confirm body renders as one stmt node per statement, all visible.
   const stmts = page.getByTestId("c4system-v2-stmt");
   await expect.poll(async () => stmts.count(), { timeout: 5_000 }).toBeGreaterThan(0);
+  // Substatement subkinds get their own labels + tint — preconditions read
+  // distinctly from a generic "stmt".
+  await expect(page.locator('[data-testid="c4system-v2-stmt"][data-stmt-subkind="precondition"]').first()).toBeVisible();
 
   // Order.confirm has at least one assign and one emit; each renders its v1
   // editor row inside the node (target Autocomplete for assign, field name +
@@ -218,4 +221,100 @@ test("Model v2 renames a context and deletes an operation (v2-only kinds)", asyn
   await expect
     .poll(async () => page.locator('.react-flow__node[data-id^="operation:"]').count(), { timeout: 5_000 })
     .toBe(opsBefore - 1);
+});
+
+test("Model v2 renames and deletes an aggregate field (renameMember + deleteField)", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+  await page.getByTestId("doc-tab-model-v2").click();
+  await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
+
+  // Drill into Order's aggregate view to see its fields.
+  await page.locator('.react-flow__node[data-id^="system:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="module:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="context:"]').first().click();
+  await page.locator('.react-flow__node[data-id="aggregate:Order"]').click();
+
+  // Pick any field node, rename it, and assert the renamed node appears.
+  const field = page.locator('[data-construct-kind="field"]').first();
+  await expect(field).toBeVisible();
+  const oldName = await field.getAttribute("data-construct-name");
+  expect(oldName).toBeTruthy();
+  await field.getByTestId("c4system-v2-rename").click();
+  await page.getByTestId("c4system-v2-rename-input").fill("fieldRenamed");
+  await page.getByTestId("c4system-v2-rename-input").press("Enter");
+  await expect(
+    page.locator('[data-construct-kind="field"][data-construct-name="fieldRenamed"]'),
+  ).toBeVisible({ timeout: 5_000 });
+
+  // Delete it via the on-node × → field count drops.
+  const fieldsBefore = await page.locator('[data-construct-kind="field"]').count();
+  await page
+    .locator('[data-construct-kind="field"][data-construct-name="fieldRenamed"]')
+    .getByTestId("c4system-v2-delete")
+    .click();
+  await expect.poll(async () => page.locator('[data-construct-kind="field"]').count(), { timeout: 5_000 }).toBe(
+    fieldsBefore - 1,
+  );
+});
+
+test("Model v2 shows inline modules / serves multi-selects on a deployable", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  // Banking System has a `deployable api { modules: Banking }` plus `webApp`.
+  await selectExample(page, /Banking System/);
+  await page.getByTestId("doc-tab-model-v2").click();
+  await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
+  await page.locator('.react-flow__node[data-id^="system:"]').first().click();
+
+  // The `api` deployable node renders both multi-selects.
+  const dep = page.locator('[data-construct-kind="deployable"][data-construct-name="api"]');
+  await expect(dep).toBeVisible();
+  await expect(dep.getByTestId("c4system-v2-deployable-modules")).toBeVisible();
+  await expect(dep.getByTestId("c4system-v2-deployable-serves")).toBeVisible();
+});
+
+test("Model v2 surfaces invariants as nodes in the aggregate view", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Banking System/);
+  await page.getByTestId("doc-tab-model-v2").click();
+  await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
+
+  // Banking System's Account aggregate declares two invariants.
+  await page.locator('.react-flow__node[data-id^="system:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="module:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="context:"]').first().click();
+  await page.locator('.react-flow__node[data-id="aggregate:Account"]').click();
+
+  const invariants = page.locator('[data-construct-kind="invariant"]');
+  await expect.poll(async () => invariants.count(), { timeout: 5_000 }).toBeGreaterThan(0);
+});
+
+test("Model v2 repoints an emit statement's event inline", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  // Banking System declares four sibling events — Account.deposit emits
+  // MoneyDeposited; we repoint it to MoneyWithdrawn.
+  await selectExample(page, /Banking System/);
+  await page.getByTestId("doc-tab-model-v2").click();
+  await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
+
+  await page.locator('.react-flow__node[data-id^="system:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="module:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="context:"]').first().click();
+  await page.locator('.react-flow__node[data-id="aggregate:Account"]').click();
+  await page.locator('.react-flow__node[data-id="operation:deposit"]').click();
+
+  const emit = page.locator('[data-testid="c4system-v2-stmt"][data-stmt-kind="emit"]').first();
+  await expect(emit).toBeVisible();
+  const eventSelect = emit.getByTestId("c4system-emit-event");
+  await expect(eventSelect).toHaveValue("MoneyDeposited");
+
+  await eventSelect.click();
+  await page.getByRole("option", { name: "MoneyWithdrawn", exact: true }).click();
+  await expect(eventSelect).toHaveValue("MoneyWithdrawn");
 });

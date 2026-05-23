@@ -18,7 +18,9 @@ function writeProject(rootDir: string, files: Record<string, string>): void {
   }
 }
 
-function collectErrors(docs: { uri: URI; diagnostics?: { severity?: number; message: string }[] }[]): string[] {
+function collectErrors(
+  docs: { uri: URI; diagnostics?: { severity?: number; message: string }[] }[],
+): string[] {
   const out: string[] = [];
   for (const doc of docs) {
     for (const d of doc.diagnostics ?? []) {
@@ -152,9 +154,9 @@ describe("multi-file project loader", () => {
     });
 
     const services = createDddServices(NodeFileSystem);
-    await expect(
-      loadProject(URI.file(path.join(tmp, "a.ddd")), services.shared),
-    ).rejects.toThrow(/circular .ddd import/);
+    await expect(loadProject(URI.file(path.join(tmp, "a.ddd")), services.shared)).rejects.toThrow(
+      /circular .ddd import/,
+    );
   });
 
   it("errors on a missing import", async () => {

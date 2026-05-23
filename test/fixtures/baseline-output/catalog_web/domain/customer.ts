@@ -1,7 +1,7 @@
 // Auto-generated.
 import * as Ids from "./ids";
 import type * as Events from "./events";
-import { DomainError, ForbiddenError } from "./errors";
+import { DomainError } from "./errors";
 
 
 export class Customer {

@@ -520,9 +520,65 @@ Phasing:
   resolver — left for Phase 4) gets the pencil + `×` affordance on its node.
   Gated by the v2 e2e (rename a context and delete an operation through the
   on-node controls).
-- **Phase 4** — long-tail parity with v1 (fields / finds / deployable bindings
-  / emit repointing as per-node interactions). Once landed, v1 can be
-  deprecated.
+- ~~**Phase 4a — field rename + delete on the node.**~~ Done: routes through
+  v1's `renameMember` (text-token resolver, handles `this.field` / `x.field`
+  usages via the shared `member-refs` resolver) and `deleteField` (preserves
+  surrounding layout); containment also gets rename. Gated by the v2 e2e
+  (rename + delete a field on the canvas).
+- ~~**Phase 4b (emit-event repointing).**~~ Done: an emit stmt node's event
+  is a `Select` over every `EventDecl` in the model; on change v2 calls v1's
+  `setEmitEvent` (rewrites just the event reference token, parse-guarded).
+  `EmitRow` gained two additive props (`events` + `onRepointEvent`) — when
+  unset it renders the old dimmed label, so v1 is unaffected. Gated by the
+  v2 e2e (repoint `Order.confirm`'s emit from `OrderConfirmed` to
+  `LineAdded`).
+- ~~**Phase 4c (deployable bindings as edges).**~~ Done: the system view now
+  draws an edge per deployable binding — `deployable -modules-> module`,
+  `deployable -serves-> api`, `deployable -ui-> ui`, `deployable -targets->
+  deployable` — pulled from v1's `deployableModules` / `deployableServes` /
+  `deployableUi` / `deployableTargets`. Read-only visualisation; editing the
+  bindings inline is Phase 4d. Gated by `test/system-v2/view-graph.test.ts`
+  (a system with `api` + `webApp` produces the expected modules / serves /
+  targets / ui edges).
+- ~~**Phase 4d (drag-rebind `targets` / `ui`).**~~ Done: the system view's
+  `targets` and `ui` edges are now `reconnectable: "target"` and the v2 pane
+  has an `onReconnect` handler that dispatches through a new pure helper
+  `rebindDeployableEdgeTarget` (wraps v1's `setDeployableTargets` /
+  `setDeployableUi`, rejects wrong target kinds, self-targets, and the
+  multi-valued labels). The multi-valued bindings (`modules` / `serves`)
+  intentionally stay non-drag — they need a multi-select UI. Gated by
+  `test/system-v2/deployable-edge-rebind.test.ts` (5 cases). The drag gesture
+  itself isn't e2e-covered for the same reason v1's drag-rebind isn't —
+  React Flow reconnect-anchor drags are fragile in Playwright.
+- ~~**Phase 4e (multi-valued deployable bindings inline).**~~ Done: deployable
+  nodes now embed a `modules` and a `serves` Mantine `MultiSelect` (when its
+  bindings panel data is provided), backed by v1's `setDeployableModules` /
+  `setDeployableServes`. `ConstructNode` widens to ~240 when multi-selects
+  are present so the chip pills fit. With this, every binding on a deployable
+  is editable on the canvas — targets / ui by drag (Phase 4d), modules /
+  serves by multi-select. Gated by the v2 e2e (the api deployable in Banking
+  System exposes both multi-selects on its node).
+- ~~**Phase 4f (repository finds as drillable nodes).**~~ Done: repository
+  becomes drillable; the new repository view lists each `FindDecl` as a
+  `find` ViewKind node — same on-node rename / delete (via
+  `renameByAstType("FindDecl")` + spliceNode). Inline filter editing is a
+  follow-up (`findFilter` slot already exists). Gated by
+  `test/system-v2/view-graph.test.ts`.
+- ~~**Phase 5a (mobile pass).**~~ Done: `compact` (= `!ctx.isDesktop`) is
+  threaded into the v2 node data; `StmtNode` shrinks to 320px and the
+  `ConstructNode` multi-select panel to 210px on a phone-width canvas so
+  nothing overflows. Gated by a new
+  `web/e2e/system-builder-v2-mobile.spec.ts` (390×844 viewport drills
+  Sales System → Order → confirm and confirms the statement flow renders).
+- ~~**Phase 6 (visual kick — invariants + substatement subkinds).**~~ Done:
+  aggregate view now surfaces each `Invariant` as a node (id keyed by index,
+  name = a preview of the expression) — delete works through the parent
+  aggregate by index. And in the statement flow, "other" stmt rows are
+  discriminated by their leading keyword: `precondition` (yellow),
+  `requires` (orange), `let` (cyan), or generic `stmt` (gray) — each with
+  its own label + border tint instead of the uniform `STMT`. Gated by the
+  v2 e2e (banking invariants render; Order.confirm's precondition shows
+  `data-stmt-subkind="precondition"`).
 - **Phase 5** — polish: per-view positions, search / coverage / grouped layout
   adapted per zoom level, transitions on drill, mobile passes.
 

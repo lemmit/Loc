@@ -1,7 +1,8 @@
-import { Badge, Box, Button, Code, Group, ScrollArea, Select, Stack, Text } from "@mantine/core";
+import { Badge, Box, Button, Chip, Code, Group, ScrollArea, Select, Stack, Text } from "@mantine/core";
+import { useMemo, useState } from "react";
 import { ProblemsPanel } from "./ProblemsPanel";
 import { formatBytes, modeLabel, type LayoutCtx } from "./ctx";
-import type { LogLine } from "../util/log-line";
+import { LOG_LEVELS, type LogLine } from "../util/log-line";
 
 // The playground used to scatter read-only status across sibling dock
 // tabs — LSP diagnostics, generator output, bundle errors — so a red dot
@@ -134,7 +135,7 @@ export function OutputPanel({ ctx, stream, setStream }: Props): JSX.Element {
         {stream === "generator" && <GeneratorBody ctx={ctx} />}
         {stream === "bundler" && <BundlerBody ctx={ctx} />}
         {stream === "backend" && (
-          <LogView
+          <FilterableLogView
             lines={ctx.backendLog}
             empty="No backend logs yet — boot the backend and hit an endpoint."
             testid="output-backend-log"
@@ -151,6 +152,91 @@ export function OutputPanel({ ctx, stream, setStream }: Props): JSX.Element {
       </Box>
     </Box>
   );
+}
+
+// Backend log view with a per-level filter chip-row.  Generated Hono
+// backends emit structured pino lines that the worker's captureConsole
+// parses + tags with the embedded catalog level (see log-line.ts +
+// runtime.worker.ts), so filtering here matches the SEMANTIC stratum —
+// hiding `trace` works even though pino in browser routes trace through
+// console.debug.  Defaults to "all visible" so the existing experience
+// is unchanged unless the user explicitly narrows.
+function FilterableLogView({
+  lines,
+  empty,
+  testid,
+}: {
+  lines: LogLine[];
+  empty: string;
+  testid: string;
+}): JSX.Element {
+  const [selected, setSelected] = useState<Set<LogLine["level"]>>(() => new Set(LOG_LEVELS));
+  // Always show every level chip — including levels the current stream
+  // doesn't (yet) carry — so the filter UI is stable across boots and
+  // the chip layout doesn't jump when a new level arrives.  Counts
+  // surface what's actually present.
+  const counts = useMemo(() => {
+    const acc: Record<LogLine["level"], number> = {
+      log: 0,
+      trace: 0,
+      debug: 0,
+      info: 0,
+      warn: 0,
+      error: 0,
+    };
+    for (const l of lines) acc[l.level]++;
+    return acc;
+  }, [lines]);
+  const filtered = useMemo(() => lines.filter((l) => selected.has(l.level)), [lines, selected]);
+  const toggle = (level: LogLine["level"]): void => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(level)) next.delete(level);
+      else next.add(level);
+      return next;
+    });
+  };
+
+  return (
+    <Box style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+      <Group
+        gap={6}
+        px="sm"
+        py={4}
+        wrap="nowrap"
+        style={{ flexShrink: 0, borderBottom: "1px solid var(--mantine-color-dark-4)" }}
+        data-testid={`${testid}-filter`}
+      >
+        <Text size="xs" c="dimmed">
+          Levels:
+        </Text>
+        {LOG_LEVELS.map((level) => (
+          <Chip
+            key={level}
+            size="xs"
+            checked={selected.has(level)}
+            onChange={() => toggle(level)}
+            color={levelColour(level) ?? "gray"}
+            variant="light"
+            data-testid={`${testid}-filter-${level}`}
+          >
+            {level} {counts[level] > 0 ? `(${counts[level]})` : ""}
+          </Chip>
+        ))}
+      </Group>
+      <LogView lines={filtered} empty={empty} testid={testid} />
+    </Box>
+  );
+}
+
+/** Per-level tint shared between the filter chips and the per-line text
+ *  rendering, so a user reading a debug-tinted line and clicking the
+ *  debug chip sees the same colour identity in both places. */
+function levelColour(level: LogLine["level"]): "red" | "yellow" | "gray" | undefined {
+  if (level === "error") return "red";
+  if (level === "warn") return "yellow";
+  if (level === "debug" || level === "trace") return "gray";
+  return undefined;
 }
 
 // Shared monospace log renderer for the live console streams (backend
@@ -181,7 +267,15 @@ function LogView({
             key={i}
             size="xs"
             ff="monospace"
-            c={l.level === "error" ? "red" : l.level === "warn" ? "yellow" : l.level === "debug" ? "dimmed" : undefined}
+            c={
+              l.level === "error"
+                ? "red"
+                : l.level === "warn"
+                  ? "yellow"
+                  : l.level === "debug" || l.level === "trace"
+                    ? "dimmed"
+                    : undefined
+            }
             style={{ whiteSpace: "pre-wrap" }}
           >
             {l.level === "log" || l.level === "info" ? l.text : `[${l.level}] ${l.text}`}

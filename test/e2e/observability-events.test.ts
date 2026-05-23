@@ -1,5 +1,4 @@
-import { spawn } from "node:child_process";
-import { execSync } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
@@ -99,21 +98,17 @@ describe.skipIf(!ENABLED)(
         // wrapped node process otherwise — without this the catalog's
         // server_shutdown / server_drained lines never get a chance to
         // fire because only the wrapper dies.
-        const child = spawn(
-          "npx",
-          ["tsx", "index.ts"],
-          {
-            cwd: outDir,
-            env: {
-              ...process.env,
-              DATABASE_URL: "postgres://nope:nope@127.0.0.1:1/nope",
-              PORT: String(port),
-              LOG_LEVEL: "debug", // pull in the /health probe's debug line
-            },
-            stdio: ["ignore", "pipe", "pipe"],
-            detached: true,
+        const child = spawn("npx", ["tsx", "index.ts"], {
+          cwd: outDir,
+          env: {
+            ...process.env,
+            DATABASE_URL: "postgres://nope:nope@127.0.0.1:1/nope",
+            PORT: String(port),
+            LOG_LEVEL: "debug", // pull in the /health probe's debug line
           },
-        );
+          stdio: ["ignore", "pipe", "pipe"],
+          detached: true,
+        });
 
         let stdout = "";
         child.stdout.on("data", (c: Buffer) => {

@@ -5,8 +5,8 @@ import { URI } from "langium";
 import { NodeFileSystem } from "langium/node";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrichments.js";
-import type { LoomDiagnostic } from "../../src/ir/validate.js";
 import { lowerModel, mergeLoomModels } from "../../src/ir/lower.js";
+import type { LoomDiagnostic } from "../../src/ir/validate.js";
 import { validateLoomModel } from "../../src/ir/validate.js";
 import { createDddServices } from "../../src/language/ddd-module.js";
 import type { Model } from "../../src/language/generated/ast.js";
@@ -49,7 +49,9 @@ describe("workspace-uniqueness validation (multi-file)", () => {
     });
     const diags = await validateProject(path.join(tmp, "main.ddd"));
     const errors = diags.filter((d) => d.severity === "error");
-    expect(errors.some((e) => e.message.includes("duplicate root-level value object 'Money'"))).toBe(true);
+    expect(
+      errors.some((e) => e.message.includes("duplicate root-level value object 'Money'")),
+    ).toBe(true);
   });
 
   it("rejects duplicate root-level enums across files", async () => {
@@ -65,8 +67,7 @@ describe("workspace-uniqueness validation (multi-file)", () => {
     const diags = await validateProject(path.join(tmp, "main.ddd"));
     expect(
       diags.some(
-        (d) =>
-          d.severity === "error" && d.message.includes("duplicate root-level enum 'Currency'"),
+        (d) => d.severity === "error" && d.message.includes("duplicate root-level enum 'Currency'"),
       ),
     ).toBe(true);
   });
@@ -82,9 +83,7 @@ describe("workspace-uniqueness validation (multi-file)", () => {
     });
     const diags = await validateProject(path.join(tmp, "main.ddd"));
     expect(
-      diags.some(
-        (d) => d.severity === "error" && d.message.includes("duplicate context 'Sales'"),
-      ),
+      diags.some((d) => d.severity === "error" && d.message.includes("duplicate context 'Sales'")),
     ).toBe(true);
   });
 
@@ -105,9 +104,7 @@ describe("workspace-uniqueness validation (multi-file)", () => {
     });
     const diags = await validateProject(path.join(tmp, "main.ddd"));
     expect(
-      diags.some(
-        (d) => d.severity === "error" && d.message.includes("duplicate system 'Shop'"),
-      ),
+      diags.some((d) => d.severity === "error" && d.message.includes("duplicate system 'Shop'")),
     ).toBe(true);
   });
 

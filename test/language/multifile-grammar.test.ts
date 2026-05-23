@@ -2,12 +2,7 @@ import { NodeFileSystem } from "langium/node";
 import { parseHelper } from "langium/test";
 import { describe, expect, it } from "vitest";
 import { createDddServices } from "../../src/language/ddd-module.js";
-import type {
-  EnumDecl,
-  ImportStmt,
-  Model,
-  ValueObject,
-} from "../../src/language/generated/ast.js";
+import type { EnumDecl, ImportStmt, Model, ValueObject } from "../../src/language/generated/ast.js";
 
 async function parse(src: string): Promise<{ model: Model; errors: string[] }> {
   const services = createDddServices(NodeFileSystem);

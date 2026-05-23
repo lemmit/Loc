@@ -68,16 +68,19 @@ import {
   type Env,
   findFunction,
   findOperation,
+  intrinsicMatcherSig,
   isAssignable,
   lookupRootMember,
-  intrinsicMatcherSig,
   makeEnv,
   paramType,
+  propertySensitivity,
   resolveTypeRef,
+  sensitivityNarrows,
   stepInto,
   T,
   typeOf,
   typeToString,
+  withTags,
 } from "./type-system.js";
 
 export class DddValidator {
@@ -1127,6 +1130,26 @@ export class DddValidator {
         { node: d, property: "expr" },
       );
     }
+    this.warnSensitivityDrop(actual, declared, accept, { node: d, property: "expr" });
+  }
+
+  /** Emit a warning when a value's sensitivity tags would be silently
+   * dropped flowing into a less-sensitive target.  Implicit conversion
+   * is permitted by `isAssignable`; this surfaces it. */
+  private warnSensitivityDrop(
+    actual: DddType,
+    expected: DddType,
+    accept: ValidationAcceptor,
+    info: { node: AstNode; property?: string },
+  ): void {
+    if (actual.kind === "unknown" || expected.kind === "unknown") return;
+    const dropped = sensitivityNarrows(actual, expected);
+    if (!dropped) return;
+    accept(
+      "warning",
+      `Implicit conversion drops sensitivity tag(s) {${dropped.join(", ")}}: '${typeToString(actual)}' flows into '${typeToString(expected)}'.`,
+      info,
+    );
   }
 
   private checkFunction(
@@ -1149,6 +1172,7 @@ export class DddValidator {
         { node: fn, property: "body" },
       );
     }
+    this.warnSensitivityDrop(actual, declared, accept, { node: fn, property: "body" });
   }
 
   private checkOperation(op: Operation, agg: Aggregate, accept: ValidationAcceptor) {
@@ -1251,6 +1275,7 @@ export class DddValidator {
           { node: stmt, property: "value" },
         );
       }
+      this.warnSensitivityDrop(valueType, targetType, accept, { node: stmt, property: "value" });
     } else {
       // '+=' or '-='
       if (targetType.kind !== "array") {
@@ -1273,13 +1298,25 @@ export class DddValidator {
           { node: stmt, property: "value" },
         );
       }
+      this.warnSensitivityDrop(valueType, targetType.element, accept, {
+        node: stmt,
+        property: "value",
+      });
     }
   }
 
   private checkEmit(stmt: EmitStmt, env: Env, accept: ValidationAcceptor) {
     const ev = stmt.event?.ref;
     if (!ev) return;
-    const declared = new Map(ev.fields.map((f) => [f.name, resolveTypeRef(f.type)] as const));
+    // Capture the event-field's declared sensitivity so PII flowing
+    // into a clean event-field surfaces as a narrowing warning — events
+    // fan out across consumers, so this is the highest-leverage place
+    // to flag PII fan-out.
+    const declared = new Map(
+      ev.fields.map(
+        (f) => [f.name, withTags(resolveTypeRef(f.type), propertySensitivity(f))] as const,
+      ),
+    );
     const seen = new Set<string>();
     for (const f of stmt.fields) {
       seen.add(f.name);
@@ -1299,6 +1336,7 @@ export class DddValidator {
           { node: f, property: "value" },
         );
       }
+      this.warnSensitivityDrop(actual, expected, accept, { node: f, property: "value" });
     }
     for (const [name] of declared) {
       if (!seen.has(name)) {
@@ -1367,9 +1405,15 @@ export class DddValidator {
   private envForAggregate(agg: Aggregate, fn?: FunctionDecl): Env {
     const bindings = new Map<string, { type: DddType; origin: AstNode }>();
     // Aggregate properties / derived / contains are in scope as bare
-    // identifiers — same as if we accessed them via `this`.
+    // identifiers — same as if we accessed them via `this`.  Property
+    // bindings attach the declared sensitivity tags so propagation
+    // inside operation bodies sees them.
     for (const m of agg.members) {
-      if (isProperty(m)) bindings.set(m.name, { type: resolveTypeRef(m.type), origin: m });
+      if (isProperty(m))
+        bindings.set(m.name, {
+          type: withTags(resolveTypeRef(m.type), propertySensitivity(m)),
+          origin: m,
+        });
       else if (isDerivedProp(m)) bindings.set(m.name, { type: resolveTypeRef(m.type), origin: m });
       else if (isContainment(m)) {
         const part = m.partType?.ref;
@@ -1386,7 +1430,11 @@ export class DddValidator {
   private envForPart(agg: Aggregate, part: EntityPart, fn?: FunctionDecl): Env {
     const bindings = new Map<string, { type: DddType; origin: AstNode }>();
     for (const m of part.members) {
-      if (isProperty(m)) bindings.set(m.name, { type: resolveTypeRef(m.type), origin: m });
+      if (isProperty(m))
+        bindings.set(m.name, {
+          type: withTags(resolveTypeRef(m.type), propertySensitivity(m)),
+          origin: m,
+        });
       else if (isDerivedProp(m)) bindings.set(m.name, { type: resolveTypeRef(m.type), origin: m });
       else if (isContainment(m)) {
         const partType = m.partType?.ref;

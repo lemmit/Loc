@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { LogEvents, type LogEvent, type LogLevel } from "../../src/generator/_obs/log-events.js";
-import {
-  renderHonoBaseLogCall,
-  renderHonoLogCall,
-} from "../../src/generator/_obs/render-hono.js";
+import { type LogEvent, LogEvents, type LogLevel } from "../../src/generator/_obs/log-events.js";
+import { renderHonoBaseLogCall, renderHonoLogCall } from "../../src/generator/_obs/render-hono.js";
 
 // ---------------------------------------------------------------------------
 // Neutral log-event catalog — the single source of truth for every log
@@ -15,9 +12,9 @@ import {
 const VALID_LEVELS: ReadonlySet<LogLevel> = new Set(["trace", "debug", "info", "warn", "error"]);
 const ENVELOPE_KEYS: ReadonlySet<string> = new Set(["ts", "level", "event", "request_id"]);
 
-const entries: ReadonlyArray<readonly [string, LogEvent]> = Object.entries(LogEvents) as ReadonlyArray<
-  readonly [string, LogEvent]
->;
+const entries: ReadonlyArray<readonly [string, LogEvent]> = Object.entries(
+  LogEvents,
+) as ReadonlyArray<readonly [string, LogEvent]>;
 
 describe("log-event catalog — integrity", () => {
   it("every entry has a non-empty `event` and a valid level", () => {
