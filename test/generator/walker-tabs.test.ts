@@ -126,7 +126,7 @@ describe("Tabs in walker stdlib", () => {
     expect(content).toMatch(/<Title order=\{2\}>Inner B<\/Title>/);
   });
 
-  it("non-Tab child in Tabs(...) lands as a placeholder, no crash", async () => {
+  it("non-Tab child in Tabs(...) renders directly as the panel body with an auto label", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M { context C { } }
@@ -151,8 +151,10 @@ describe("Tabs in walker stdlib", () => {
     const content = files.get("web/src/pages/mixed.tsx")!;
     // First (real) tab still renders.
     expect(content).toMatch(/<Tabs\.Tab value="real">Real<\/Tabs\.Tab>/);
-    // Second positional wasn't a Tab() call → fallback indexed slug + placeholder body.
+    // Second positional wasn't a Tab() call → fallback indexed slug + walked body.
+    // The Heading expression renders directly inside the auto-labelled panel.
     expect(content).toMatch(/<Tabs\.Tab value="tab-2">Tab 2<\/Tabs\.Tab>/);
-    expect(content).toMatch(/missing tab body/);
+    expect(content).toMatch(/Stray heading/);
+    expect(content).not.toMatch(/missing tab body/);
   });
 });

@@ -178,16 +178,55 @@ export function generateReactForContexts(
   // `prepareAppShellVM`.
   const extraRoutes = ui ? deriveExtraRoutesFromUi(ui) : undefined;
 
+  // App.tsx's per-aggregate / -workflow / -view route block emits
+  // imports for scaffold-archetype page files (`./pages/<plural>/list`,
+  // etc.).  Those files exist only when the ui declared `scaffold:`
+  // covering the target — explicit-page-only uis (no scaffold) would
+  // otherwise produce dangling imports and duplicate identifiers
+  // alongside the explicit-page extraRoutes.  Filter the lists down to
+  // the targets that the ui actually scaffolded.  When ui is absent
+  // (legacy non-ui deployable) fall through to the full inventory.
+  const scaffoldedAggregates = ui
+    ? aggregates.filter(({ agg }) =>
+        ui.pages.some(
+          (p) =>
+            p.scaffoldOrigin?.kind === "aggregate-list" &&
+            p.scaffoldOrigin.aggregateName === agg.name,
+        ),
+      )
+    : aggregates;
+  const scaffoldedWorkflows = ui
+    ? workflows.filter(({ wf }) =>
+        ui.pages.some(
+          (p) =>
+            p.scaffoldOrigin?.kind === "workflow-form" && p.scaffoldOrigin.workflowName === wf.name,
+        ),
+      )
+    : workflows;
+  const scaffoldedViews = ui
+    ? views.filter(({ view }) =>
+        ui.pages.some(
+          (p) => p.scaffoldOrigin?.kind === "view-list" && p.scaffoldOrigin.viewName === view.name,
+        ),
+      )
+    : views;
+
+  // Whether the scaffold expander synthesised a `Home` page (only
+  // happens when the ui declared at least one scaffold).  Default true
+  // when no ui (legacy non-page-IR path always emits Home).
+  const hasScaffoldHome = ui ? ui.pages.some((p) => p.scaffoldOrigin?.kind === "home") : true;
+
   out.set(
     "src/App.tsx",
     renderAppShell(
-      aggregates.map((a) => a.agg),
-      workflows.map((w) => w.wf),
-      views.map((v) => v.view),
+      scaffoldedAggregates.map((a) => a.agg),
+      scaffoldedWorkflows.map((w) => w.wf),
+      scaffoldedViews.map((v) => v.view),
       sys.name,
       sidebarOverride,
       extraRoutes,
       pack,
+      hasScaffoldHome,
     ),
   );
   // Home is always synthesised by the scaffold expander

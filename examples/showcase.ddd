@@ -373,7 +373,6 @@ system DevPlatform {
                                 NumberField("Level", value: level),
                                 PasswordField("Token"),
                                 Toggle("Editing", value: editing),
-                                Slot("extra"),
                                 Anchor("Docs", to: "/docs"),
                                 Button("Save", to: "/projects")
                             )
@@ -390,11 +389,14 @@ system DevPlatform {
         }
 
         // A reusable component (covers Component + its state block).
+        // `Slot()` belongs in a component body (it emits `{children}`
+        // and marks the Props interface with `children?`), so the
+        // showcase exercises it here rather than in a page.
         component StatusPill(label: string) {
             state {
                 hovered: bool = false
             }
-            body: Badge(label)
+            body: Stack(Badge(label), Slot("extra"))
         }
 
         // UI-level sidebar menu — internal link + external link.
