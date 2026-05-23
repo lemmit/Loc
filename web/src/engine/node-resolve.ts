@@ -178,9 +178,18 @@ export function resolveBare(
   }
 
   // 2. legacy (no exports): "." → module/main; subpath → file under
-  // the package.
+  // the package.  When `browser` is in the conditions list AND the
+  // package declares a top-level `browser: "./x.js"` (pino, ws,
+  // node-fetch, …), prefer that — bypasses Node-only dependency trees
+  // (sonic-boom for pino, http/https for node-fetch) the browser
+  // build is explicitly designed to avoid.  The object-form
+  // `browser: { ... }` field (per-file overrides) is out of scope —
+  // most packages that ship it also ship `exports`, which already
+  // resolved above.
   if (sub === ".") {
-    for (const field of ["module", "main"]) {
+    const browserPreferred = conditions.includes("browser");
+    const fields = browserPreferred ? ["browser", "module", "main"] : ["module", "main"];
+    for (const field of fields) {
       const v = pkg[field];
       if (typeof v === "string") {
         const r = probeFile(joinPosix(pkgDir, v), src);
