@@ -30,14 +30,13 @@ test("Model v2 drills system → context → aggregate via clicks, and the bread
   await moduleNode.click();
   await expect(page.getByTestId("c4system-v2-crumb-1")).toBeVisible();
 
-  // Module → context → aggregate.
+  // Module → context → Order (the aggregate with operations).
   await page.locator('.react-flow__node[data-id^="context:"]').first().click();
   await expect(page.getByTestId("c4system-v2-crumb-2")).toBeVisible();
-  await page.locator('.react-flow__node[data-id^="aggregate:"]').first().click();
+  await page.locator('.react-flow__node[data-id="aggregate:Order"]').click();
   await expect(page.getByTestId("c4system-v2-crumb-3")).toBeVisible();
 
-  // Aggregate view shows its members (at least one operation in the Sales
-  // example).
+  // Order's aggregate view shows its operations.
   await expect(page.locator('.react-flow__node[data-id^="operation:"]').first()).toBeVisible();
 
   // Breadcrumb home pops all the way back; the system node is selectable again.
