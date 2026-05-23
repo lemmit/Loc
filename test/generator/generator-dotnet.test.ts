@@ -376,6 +376,59 @@ describe(".NET generator", () => {
       expect(order).not.toMatch(/value_computed/);
     });
 
+    it("--trace on: AssertInvariants gains an __op param + emits invariant_evaluated per check", async () => {
+      // Phase 8 .NET invariants v1 — mirrors Hono Phase 6b.  Invariants
+      // run from a shared helper (`AssertInvariants`) that otherwise
+      // has no view of the calling op; under --trace the helper takes
+      // a `string __op` parameter threaded by every call site (ctor /
+      // hydration → "<init>", each public op → its own name), and
+      // each invariant body becomes a bound-temp + LogTrace +
+      // conditional throw triple.
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model, { emitTrace: true });
+      const order = files.get("Domain/Orders/Order.cs")!;
+
+      // Signature carries the __op param with the "<init>" default so
+      // any external caller (extern handlers) can still invoke
+      // AssertInvariants() without args.
+      expect(order).toMatch(/void AssertInvariants\(string __op = "<init>"\)/);
+      // Hydration + Create factory pass "<init>"; each op passes its
+      // own name.
+      expect(order).toMatch(/e\.AssertInvariants\("<init>"\);/);
+      expect(order).toMatch(/AssertInvariants\("confirm"\);/);
+
+      // GUARDED invariant on Order — `lines.count > 0 when status ==
+      // Confirmed`.  Under trace, the const+log+throw triple wraps
+      // INSIDE the guard's if-body so an inapplicable invariant
+      // doesn't pollute the stream.
+      expect(order).toMatch(
+        /if \(this\.Status == OrderStatus\.Confirmed\)[\s\S]+?var __inv_\d+_ok = \(this\.Lines\.Count > 0\);[\s\S]+?DomainLog\.LogTrace\([^)]+"invariant_evaluated", "Order", __op,/,
+      );
+
+      // OrderLine's unguarded invariant `quantity > 0` — straight
+      // triple, no guard wrap.
+      const orderLine = files.get("Domain/Orders/OrderLine.cs")!;
+      expect(orderLine).toMatch(/var __inv_\d+_ok = \(this\.Quantity > 0\);/);
+      expect(orderLine).toMatch(
+        /DomainLog\.LogTrace\([^)]+"invariant_evaluated", "OrderLine", __op, "quantity > 0", __inv_\d+_ok\);/,
+      );
+    });
+
+    it("--trace off: AssertInvariants stays parameterless + emits the original if-throw shape", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model); // no emitTrace
+      const order = files.get("Domain/Orders/Order.cs")!;
+      // No __op, no temp binding, no LogTrace.
+      expect(order).toMatch(/void AssertInvariants\(\)/);
+      expect(order).not.toMatch(/__inv_\d+_ok/);
+      expect(order).not.toMatch(/invariant_evaluated/);
+      expect(order).not.toMatch(/string __op/);
+      // Original guarded-and-throw shape preserved.
+      expect(order).toMatch(
+        /if \(\(this\.Status == OrderStatus\.Confirmed\) && !\(this\.Lines\.Count > 0\)\) throw new DomainException/,
+      );
+    });
+
     it("--trace on: SaveAsync wraps SaveChangesAsync in tx_begin/commit/rollback", async () => {
       // Phase 8 .NET trace v1 — mirrors Hono Phase 6c.  Trace-off keeps
       // the original one-liner shape; trace-on wraps SaveChangesAsync
