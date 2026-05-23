@@ -17,7 +17,7 @@ namespace CatalogApi.Application.Common;
 /// </summary>
 public sealed class ValidationBehavior<TRequest, TResponse>
     : IPipelineBehavior<TRequest, TResponse>
-    where TRequest : notnull
+    where TRequest : notnull, IMessage
 {
     private readonly IEnumerable<IValidator<TRequest>> _validators;
 
