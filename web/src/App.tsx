@@ -914,6 +914,9 @@ export default function App(): JSX.Element {
       s.setActivePath(path);
     },
     deleteSourceFile: sources.delete,
+    emptySourceFolders: sources.emptyFolders,
+    createEmptySourceFolder: sources.createEmptyFolder,
+    deleteEmptySourceFolder: sources.deleteEmptyFolder,
     lspClient: lspClientRef.current,
     buildClient: buildClientRef.current,
     engine: engineRef.current,

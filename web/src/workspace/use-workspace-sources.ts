@@ -35,6 +35,13 @@ export interface WorkspaceSourcesApi extends WorkspaceSourcesState {
    *  the hook re-points `activePath` to a fallback so the editor
    *  always has a valid target. */
   delete(path: string): void;
+  /** Create an empty folder by dropping a `.gitkeep` sentinel
+   *  inside.  `folder` is workspace-relative (no leading slash,
+   *  e.g. `shared`). */
+  createEmptyFolder(folder: string): void;
+  /** Delete an empty folder's `.gitkeep` sentinel.  No-op when the
+   *  folder still has `.ddd` files inside. */
+  deleteEmptyFolder(folder: string): void;
 }
 
 export function useWorkspaceSources(vfs: Vfs | null): WorkspaceSourcesApi {
@@ -62,15 +69,26 @@ export function useWorkspaceSources(vfs: Vfs | null): WorkspaceSourcesApi {
     [controller],
   );
   const del = useCallback((path: string) => controller.delete(path), [controller]);
+  const createEmptyFolder = useCallback(
+    (folder: string) => controller.createEmptyFolder(folder),
+    [controller],
+  );
+  const deleteEmptyFolder = useCallback(
+    (folder: string) => controller.deleteEmptyFolder(folder),
+    [controller],
+  );
 
   return useMemo(
     () => ({
       files: snapshot.files,
+      emptyFolders: snapshot.emptyFolders,
       activePath: snapshot.activePath,
       setActivePath,
       write,
       delete: del,
+      createEmptyFolder,
+      deleteEmptyFolder,
     }),
-    [snapshot, setActivePath, write, del],
+    [snapshot, setActivePath, write, del, createEmptyFolder, deleteEmptyFolder],
   );
 }

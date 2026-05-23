@@ -62,14 +62,26 @@ export interface SourceFilesTreeProps {
   /** Delete a file from the VFS.  Tree never calls this for
    *  `main.ddd` (the delete button isn't rendered there). */
   onDelete: (path: string) => void;
+  /** Workspace-relative folder paths that exist as empty folders
+   *  (sentinel-only).  The tree merges these with file-derived
+   *  folders so a freshly-created empty folder is visible. */
+  emptyFolders?: ReadonlySet<string>;
+  /** Create an empty folder by dropping a `.gitkeep` sentinel
+   *  inside.  Workspace-relative folder name. */
+  onCreateFolder?: (folder: string) => void;
+  /** Delete an empty folder's sentinel.  Workspace-relative form. */
+  onDeleteFolder?: (folder: string) => void;
 }
 
 /** Build a tree of workspace-relative paths suitable for `FileTree`.
  *  Reuses `buildTree`; the path scheme is identical (POSIX, `/`-
- *  separated). */
+ *  separated).  Empty folders are folded in via a hidden
+ *  `.gitkeep` entry per folder — the renderer skips sentinel rows
+ *  so the user sees the folder but not the marker. */
 function workspaceTree(
   files: ReadonlyMap<string, string>,
   activePath: string,
+  emptyFolders: ReadonlySet<string>,
 ): TreeFolder {
   // Drop the `/workspace/` prefix so the top level reads `main.ddd`
   // / `shared/...` instead of a useless `workspace` root folder.
@@ -89,13 +101,20 @@ function workspaceTree(
   if (!virtual.some((v) => v.path === activeRel)) {
     virtual.push({ path: activeRel, content: "", size: 0 });
   }
+  // Empty-folder placeholders: append a sentinel entry per empty
+  // folder so `buildTree` creates the folder node.  The renderer
+  // filters `.gitkeep` rows out so the user never sees the marker.
+  for (const folder of emptyFolders) {
+    virtual.push({ path: `${folder}/.gitkeep`, content: "", size: 0 });
+  }
   return buildTree(virtual);
 }
 
 export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
+  const emptyFolders = props.emptyFolders ?? new Set<string>();
   const root = useMemo(
-    () => workspaceTree(props.files, props.activePath),
-    [props.files, props.activePath],
+    () => workspaceTree(props.files, props.activePath, emptyFolders),
+    [props.files, props.activePath, emptyFolders],
   );
   const detailsRef = useRef<HTMLDetailsElement | null>(null);
 
@@ -131,11 +150,15 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
     if (creating === "file") {
       props.onCreate(normaliseNewFilePath(draft));
     } else if (creating === "folder") {
-      // Seed the new folder with a `<folder>/untitled.ddd`
-      // placeholder so it shows up in the tree — VFS has no concept
-      // of empty directories.  The user can rename / delete the
-      // placeholder afterwards.
-      props.onCreate(newFolderSeedPath(draft, existingPaths));
+      // True empty folder via the controller's `.gitkeep`-sentinel
+      // path.  Falls back to the placeholder-file approach when the
+      // host didn't wire `onCreateFolder` (older callers).
+      if (props.onCreateFolder) {
+        const folder = draft.trim().replace(/^\/+/, "").replace(/\/+$/, "");
+        props.onCreateFolder(folder);
+      } else {
+        props.onCreate(newFolderSeedPath(draft, existingPaths));
+      }
     }
     setCreating(null);
     setDraft("");
@@ -282,12 +305,17 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
           root={root}
           selectedPath={activeRelPath}
           onSelect={(rel) => {
+            // Sentinel rows never reach onSelect because they're
+            // filtered via `shouldRenderFile`, but defend just in
+            // case — clicking the marker would be confusing.
+            if (rel.endsWith("/.gitkeep")) return;
             props.onSelect(`${WORKSPACE_PREFIX}${rel}`);
             // Auto-close after a pick so the editor reclaims the
             // viewport, matching the FilesPane mobile pattern.
             if (detailsRef.current) detailsRef.current.open = false;
           }}
           rowActions={rowActions}
+          shouldRenderFile={(rel) => !rel.endsWith("/.gitkeep")}
         />
       </Box>
     </Box>

@@ -194,6 +194,68 @@ describe("WorkspaceSourcesController", () => {
     c.dispose();
   });
 
+  describe("empty folders (via `.gitkeep` sentinel)", () => {
+    it("createEmptyFolder drops a sentinel that surfaces in `emptyFolders`", () => {
+      const vfs = makeVfs({ "/workspace/main.ddd": "m" });
+      const c = new WorkspaceSourcesController(vfs);
+      c.createEmptyFolder("shared");
+      const snap = c.snapshot();
+      expect(vfs.read("/workspace/shared/.gitkeep")).toBe("");
+      expect([...snap.emptyFolders]).toEqual(["shared"]);
+      // The `.gitkeep` doesn't leak into the .ddd files map.
+      expect([...snap.files.keys()]).toEqual(["/workspace/main.ddd"]);
+      c.dispose();
+    });
+
+    it("nested folder names round-trip", () => {
+      const vfs = makeVfs();
+      const c = new WorkspaceSourcesController(vfs);
+      c.createEmptyFolder("audit/log");
+      const snap = c.snapshot();
+      expect(vfs.read("/workspace/audit/log/.gitkeep")).toBe("");
+      expect([...snap.emptyFolders]).toEqual(["audit/log"]);
+      c.dispose();
+    });
+
+    it("a sentinel folder that has .ddd content is NOT in `emptyFolders`", () => {
+      const vfs = makeVfs({
+        "/workspace/main.ddd": "m",
+        "/workspace/shared/.gitkeep": "",
+        "/workspace/shared/money.ddd": "valueobject Money { v: int }",
+      });
+      const c = new WorkspaceSourcesController(vfs);
+      const snap = c.snapshot();
+      expect([...snap.emptyFolders]).toEqual([]);
+      // shared/money.ddd still shows up normally.
+      expect([...snap.files.keys()].sort()).toEqual([
+        "/workspace/main.ddd",
+        "/workspace/shared/money.ddd",
+      ]);
+      c.dispose();
+    });
+
+    it("deleteEmptyFolder removes the sentinel", () => {
+      const vfs = makeVfs({
+        "/workspace/main.ddd": "m",
+        "/workspace/shared/.gitkeep": "",
+      });
+      const c = new WorkspaceSourcesController(vfs);
+      expect([...c.snapshot().emptyFolders]).toEqual(["shared"]);
+      c.deleteEmptyFolder("shared");
+      expect(vfs.exists("/workspace/shared/.gitkeep")).toBe(false);
+      expect([...c.snapshot().emptyFolders]).toEqual([]);
+      c.dispose();
+    });
+
+    it("rejects an empty folder name", () => {
+      const vfs = makeVfs();
+      const c = new WorkspaceSourcesController(vfs);
+      expect(() => c.createEmptyFolder("")).toThrow(/folder name is required/);
+      expect(() => c.createEmptyFolder("/")).toThrow(/folder name is required/);
+      c.dispose();
+    });
+  });
+
   it("dispose unsubscribes from the VFS and stops emitting", () => {
     const vfs = makeVfs({ "/workspace/main.ddd": "m" });
     const c = new WorkspaceSourcesController(vfs);

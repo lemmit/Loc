@@ -102,6 +102,16 @@ export interface LayoutCtx {
   /** Delete a `.ddd` source file from the VFS.  The tab strip
    *  never offers this for `/workspace/main.ddd`. */
   deleteSourceFile: (path: string) => void;
+  /** Workspace-relative folder paths that exist as empty folders
+   *  (`.gitkeep` sentinel only, no `.ddd` content).  Tree picker
+   *  unions these with the file-derived folder set. */
+  emptySourceFolders: ReadonlySet<string>;
+  /** Create an empty folder via a sentinel marker.  `folder` is
+   *  workspace-relative (no leading slash). */
+  createEmptySourceFolder: (folder: string) => void;
+  /** Delete an empty folder's sentinel.  No-op once the folder has
+   *  `.ddd` content. */
+  deleteEmptySourceFolder: (folder: string) => void;
 
   // Worker clients
   lspClient: LoomLspClient | null;

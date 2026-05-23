@@ -63,6 +63,13 @@ export interface SourceFileTabsProps {
   /** Delete a file from the VFS.  Strip never calls this for
    *  `main.ddd` (the delete button isn't rendered there). */
   onDelete: (path: string) => void;
+  /** Optional empty-folder creator.  On desktop the tabs strip is
+   *  a flat file list — an empty folder has no natural tab
+   *  representation, so when this is supplied we still default to
+   *  the placeholder-file approach (`<folder>/untitled.ddd`) so
+   *  the new folder is visible as a tab.  Provided for symmetry
+   *  with the mobile tree's `onCreateFolder`; unused today. */
+  onCreateFolder?: (folder: string) => void;
   /** Bumps the strip's touch-target sizes (× / + actions) and font
    *  size so the tabs are thumb-friendly on the mobile shell.
    *  Default = false (desktop densities).  EditorPane wires this
