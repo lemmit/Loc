@@ -53,6 +53,7 @@ export function renderRepositoryImpl(
     filterClause: string;
     projectionClause: string;
   }>,
+  emitTrace = false,
 ): string {
   const finds = repo?.finds ?? [];
   const anyFindUsesUser = finds.some(findUsesCurrentUser);
@@ -146,14 +147,51 @@ export function renderRepositoryImpl(
       "        {",
       `            _db.${setName}.Add(aggregate);`,
       "        }",
-      "        await _db.SaveChangesAsync(ct);",
-      // repository_save (debug) after SaveChangesAsync — the EF
-      // transaction has committed at this point.  Field set mirrors
-      // the Hono emission's (aggregate, id) prefix.
-      `        ${renderDotnetLogCall("repositorySave", [
-        { name: "aggregate", valueExpr: `"${agg.name}"` },
-        { name: "id", valueExpr: "aggregate.Id.Value" },
-      ])}`,
+      // tx_* (trace) — emitted ONLY under --trace.  EF's SaveChangesAsync
+      // runs an implicit transaction; the trio (begin/commit/rollback)
+      // brackets it so an operator can correlate a failed save with
+      // the catch-throw at the seam.  Trace-off keeps the original
+      // one-liner shape.
+      ...(emitTrace
+        ? [
+            `        ${renderDotnetLogCall("txBegin", [
+              { name: "aggregate", valueExpr: `"${agg.name}"` },
+              { name: "id", valueExpr: "aggregate.Id.Value" },
+            ])}`,
+            "        try",
+            "        {",
+            "            await _db.SaveChangesAsync(ct);",
+            `            ${renderDotnetLogCall("txCommit", [
+              { name: "aggregate", valueExpr: `"${agg.name}"` },
+              { name: "id", valueExpr: "aggregate.Id.Value" },
+            ])}`,
+            // repository_save (debug) AFTER tx_commit so the line fires
+            // only when the underlying save actually committed.
+            `            ${renderDotnetLogCall("repositorySave", [
+              { name: "aggregate", valueExpr: `"${agg.name}"` },
+              { name: "id", valueExpr: "aggregate.Id.Value" },
+            ])}`,
+            "        }",
+            "        catch (System.Exception __txErr)",
+            "        {",
+            `            ${renderDotnetLogCall("txRollback", [
+              { name: "aggregate", valueExpr: `"${agg.name}"` },
+              { name: "id", valueExpr: "aggregate.Id.Value" },
+              { name: "error", valueExpr: "__txErr.Message" },
+            ])}`,
+            "            throw;",
+            "        }",
+          ]
+        : [
+            "        await _db.SaveChangesAsync(ct);",
+            // repository_save (debug) after SaveChangesAsync — the EF
+            // transaction has committed at this point.  Field set mirrors
+            // the Hono emission's (aggregate, id) prefix.
+            `        ${renderDotnetLogCall("repositorySave", [
+              { name: "aggregate", valueExpr: `"${agg.name}"` },
+              { name: "id", valueExpr: "aggregate.Id.Value" },
+            ])}`,
+          ]),
       "        foreach (var ev in aggregate.PullEvents())",
       "        {",
       // event_dispatched (info) per drained event.  `ev.GetType().Name`

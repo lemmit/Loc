@@ -313,6 +313,45 @@ describe(".NET generator", () => {
       );
     });
 
+    it("--trace on: SaveAsync wraps SaveChangesAsync in tx_begin/commit/rollback", async () => {
+      // Phase 8 .NET trace v1 — mirrors Hono Phase 6c.  Trace-off keeps
+      // the original one-liner shape; trace-on wraps SaveChangesAsync
+      // in try/catch with the catalog's tx_* triple at LogTrace level.
+      // repository_save fires AFTER tx_commit (inside the try) so the
+      // existing post-save debug line only emits when the underlying
+      // commit actually succeeded.
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model, { emitTrace: true });
+      const repo = files.get("Infrastructure/Repositories/OrderRepository.cs")!;
+      expect(repo).toMatch(
+        /_log\.LogTrace\("\{Event\} aggregate=\{Aggregate\} id=\{Id\}", "tx_begin", "Order", aggregate\.Id\.Value\);/,
+      );
+      expect(repo).toMatch(
+        /_log\.LogTrace\("\{Event\} aggregate=\{Aggregate\} id=\{Id\}", "tx_commit", "Order", aggregate\.Id\.Value\);/,
+      );
+      expect(repo).toMatch(
+        /_log\.LogTrace\("\{Event\} aggregate=\{Aggregate\} id=\{Id\} error=\{Error\}", "tx_rollback", "Order", aggregate\.Id\.Value, __txErr\.Message\);/,
+      );
+      // try/catch shape — rollback path re-throws so the seam's call
+      // sites still see the original exception.
+      expect(repo).toMatch(/try\s*\n\s*\{[\s\S]+?catch \(System\.Exception __txErr\)/);
+      expect(repo).toMatch(/__txErr\.Message[\s\S]+?throw;/);
+    });
+
+    it("--trace off: SaveAsync stays at the original one-liner SaveChangesAsync shape", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model); // no emitTrace
+      const repo = files.get("Infrastructure/Repositories/OrderRepository.cs")!;
+      expect(repo).not.toMatch(/tx_begin/);
+      expect(repo).not.toMatch(/tx_commit/);
+      expect(repo).not.toMatch(/tx_rollback/);
+      expect(repo).not.toMatch(/__txErr/);
+      // The bare SaveChangesAsync + LogDebug stays exactly as before.
+      expect(repo).toMatch(
+        /await _db\.SaveChangesAsync\(ct\);\n\s+_log\.LogDebug\("\{Event\} aggregate=\{Aggregate\} id=\{Id\}", "repository_save", "Order", aggregate\.Id\.Value\);/,
+      );
+    });
+
     it("repository wires ILogger + emits aggregate_loaded / repository_save / event_dispatched / find_executed", async () => {
       // Phase 8 .NET (repo seams) — every per-aggregate EF repository
       // gets an `ILogger<TRepository> _log` field, GetByIdAsync emits
