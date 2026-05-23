@@ -118,27 +118,10 @@ export function buildRepositoryFile(
       filter: view.filter,
     }));
 
-  return lines(
-    "// Auto-generated.  Do not edit by hand.",
-    `import type { NodePgDatabase } from "drizzle-orm/node-postgres";`,
-    `import { ${[...drizzleOps].sort().join(", ")} } from "drizzle-orm";`,
-    `import * as schema from "../schema";`,
-    repoUsesUser && `import type { User } from "../../auth/user-types";`,
-    `import { ${domainImports} } from "../../domain/${lowerFirst(agg.name)}";`,
-    voOrEnumImports.length > 0 &&
-      `import { ${voOrEnumImports.join(", ")} } from "../../domain/value-objects";`,
-    `import * as Ids from "../../domain/ids";`,
-    `import { AggregateNotFoundError } from "../../domain/errors";`,
-    `import type { DomainEventDispatcher } from "../../domain/events";`,
-    // requestLog() resolves the request-scoped pino child logger via
-    // AsyncLocalStorage (see obs/als.ts) — repository methods don't have
-    // the Hono context in scope, so this is the seam they use to emit
-    // structured lines that still auto-carry `request_id`.
-    `import { requestLog } from "../../obs/als";`,
-    "",
-    `type Db = NodePgDatabase<typeof schema>;`,
-    `type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];`,
-    "",
+  // Render the class body first so the file's imports + `type Tx` can be
+  // narrowed to what's actually referenced — keeps the generated header
+  // free of dead names (Biome generated-code gate).
+  const bodyStr = lines(
     `export class ${agg.name}Repository {`,
     `  constructor(`,
     `    private readonly db: Db,`,
@@ -168,6 +151,44 @@ export function buildRepositoryFile(
     toWireMethod(agg, ctx),
     "",
     `}`,
+  );
+
+  // Narrow `drizzle-orm` ops to those actually called in the body, drop
+  // `type Tx` when no method declares a `(tx: Tx)` parameter.
+  const usedDrizzleOps = [...drizzleOps]
+    .filter((op) => new RegExp(`\\b${op}\\(`).test(bodyStr))
+    .sort();
+  const usesTx = /:\s*Tx\b/.test(bodyStr);
+  // VO/enum imports go in as `import type` when the body never
+  // constructs them (`new Money(...)`); enums never have a runtime form
+  // here, so the helper trivially picks type-only for them.
+  const voOrEnumConstructed = voOrEnumImports.some((n) =>
+    new RegExp(`new\\s+${n}\\(`).test(bodyStr),
+  );
+  const voOrEnumImportLine =
+    voOrEnumImports.length === 0
+      ? false
+      : voOrEnumConstructed
+        ? `import { ${voOrEnumImports.join(", ")} } from "../../domain/value-objects";`
+        : `import type { ${voOrEnumImports.join(", ")} } from "../../domain/value-objects";`;
+
+  return lines(
+    "// Auto-generated.  Do not edit by hand.",
+    `import type { NodePgDatabase } from "drizzle-orm/node-postgres";`,
+    usedDrizzleOps.length > 0 && `import { ${usedDrizzleOps.join(", ")} } from "drizzle-orm";`,
+    `import * as schema from "../schema";`,
+    repoUsesUser && `import type { User } from "../../auth/user-types";`,
+    `import { ${domainImports} } from "../../domain/${lowerFirst(agg.name)}";`,
+    voOrEnumImportLine,
+    `import * as Ids from "../../domain/ids";`,
+    `import { AggregateNotFoundError } from "../../domain/errors";`,
+    `import type { DomainEventDispatcher } from "../../domain/events";`,
+    `import { requestLog } from "../../obs/als";`,
+    "",
+    `type Db = NodePgDatabase<typeof schema>;`,
+    usesTx && `type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];`,
+    "",
+    bodyStr,
     "",
   );
 }

@@ -1675,7 +1675,7 @@ describe("typescript generator", () => {
       );
     });
 
-    it("renders `matches` in domain code as `new RegExp(...).test(...)`", async () => {
+    it("renders `matches` in domain code as a `/pattern/.test(...)` regex literal", async () => {
       const { parseHelper } = await import("langium/test");
       const services = createDddServices(NodeFileSystem);
       const helper = parseHelper(services.Ddd);
@@ -1693,7 +1693,7 @@ describe("typescript generator", () => {
       );
       const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
       const userClass = files.get("domain/user.ts")!;
-      expect(userClass).toMatch(/new RegExp\("\^\[\^@\]\+@\.\+\$"\)\.test\(this\._email\)/);
+      expect(userClass).toMatch(/\/\^\[\^@\]\+@\.\+\$\/\.test\(this\._email\)/);
     });
 
     it("emits cross-field invariants as `.refine()` with field-path attribution", async () => {

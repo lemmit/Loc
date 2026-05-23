@@ -115,7 +115,7 @@ function collectContextsFor(
 function renderTest(t: TestE2EIR, ctx: RenderCtx): string[] {
   const out: string[] = [];
   out.push(`it(${JSON.stringify(t.name)}, async () => {`);
-  out.push(`  const base = ENDPOINTS["${serviceSlug(ctx.deployable.name)}"];`);
+  out.push(`  const base = ENDPOINTS.${serviceSlug(ctx.deployable.name)};`);
   for (const s of t.statements) {
     const rendered = renderE2EStmt(s, ctx);
     if (rendered) out.push(...rendered.split("\n").map((l) => `  ${l}`));
@@ -403,7 +403,7 @@ function serviceSlug(name: string): string {
 }
 
 const E2E_HELPERS = `
-async function __post(url: string, body: unknown): Promise<any> {
+async function __post(url: string, body: unknown): Promise<unknown> {
   const r = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -421,7 +421,7 @@ async function __post(url: string, body: unknown): Promise<any> {
   }
 }
 
-async function __get(url: string): Promise<any> {
+async function __get(url: string): Promise<unknown> {
   const r = await fetch(url);
   const text = await r.text();
   if (!r.ok) throw new Error(\`GET \${url} → \${r.status} \${r.statusText}\${text ? ": " + text : ""}\`);
@@ -432,7 +432,7 @@ async function __get(url: string): Promise<any> {
   }
 }
 
-async function __getQuery(url: string, params: Record<string, unknown>): Promise<any> {
+async function __getQuery(url: string, params: Record<string, unknown>): Promise<unknown> {
   const qs = new URLSearchParams();
   for (const [k, v] of Object.entries(params ?? {})) {
     if (v != null) qs.set(k, String(v));

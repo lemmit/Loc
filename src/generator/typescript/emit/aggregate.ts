@@ -81,13 +81,24 @@ export function renderAggregate(
     .filter(Boolean)
     .join(", ");
 
+  // Render the body up front so the value-object import can be narrowed
+  // to `import type` when no operation constructs a VO (`new Money(...)`),
+  // and dropped entirely when no VO appears in any type position either.
+  const body =
+    (partsRendered.length > 0 ? partsRendered.map((p) => p + "\n").join("\n") : "") + rootRendered;
+  const usedVOs = valueObjectAliases.filter((n) => new RegExp(`\\b${n}\\b`).test(body));
+  const voConstructed = usedVOs.some((n) => new RegExp(`new\\s+${n}\\(`).test(body));
+  const voImport =
+    usedVOs.length === 0
+      ? null
+      : voConstructed
+        ? `import { ${usedVOs.join(", ")} } from "./value-objects";`
+        : `import type { ${usedVOs.join(", ")} } from "./value-objects";`;
   return (
     lines(
       "// Auto-generated.",
       'import * as Ids from "./ids";',
-      valueObjectAliases.length > 0
-        ? `import { ${valueObjectAliases.join(", ")} } from "./value-objects";`
-        : null,
+      voImport,
       enumAliases.length > 0
         ? `import { ${enumAliases.join(", ")} } from "./value-objects";`
         : null,
@@ -97,8 +108,7 @@ export function renderAggregate(
       hasDomainTrace ? 'import { requestLog } from "../obs/als";' : null,
       usesUser ? 'import type { User } from "../auth/user-types";' : null,
       "",
-      partsRendered.length > 0 ? partsRendered.map((p) => p + "\n").join("\n") : "",
-      rootRendered,
+      body,
     ) + "\n\n"
   );
 }

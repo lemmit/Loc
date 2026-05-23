@@ -146,6 +146,13 @@ function renderMethodCall(
     e.receiverType.name === "string" &&
     args.length === 1
   ) {
+    // Emit a `/pattern/.test(...)` literal when the regex source is a
+    // compile-time string — keeps the generated code free of the
+    // `new RegExp(...)` indirection (and useRegexLiterals warning).
+    const arg0 = e.args[0];
+    if (arg0?.kind === "literal" && arg0.lit === "string") {
+      return `${asRegexLiteral(arg0.value)}.test(${recv})`;
+    }
     return `new RegExp(${args[0]}).test(${recv})`;
   }
   return `${recv}.${e.member}(${args.join(", ")})`;
@@ -244,4 +251,12 @@ export function renderTsType(t: TypeIR): string {
     case "optional":
       return `${renderTsType(t.inner)} | null`;
   }
+}
+
+/** Convert a regex source string into a `/pattern/` literal.  Escapes
+ *  the only character that's special inside a literal (the closing
+ *  slash); the value's other backslashes are part of the regex source
+ *  and pass through unchanged. */
+function asRegexLiteral(source: string): string {
+  return `/${source.replace(/\//g, "\\/")}/`;
 }
