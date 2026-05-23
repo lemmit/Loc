@@ -1,6 +1,4 @@
-// Requirements tab — Phase 1 (read-only browse).  Asserts the tab is
-// wired (next to Source / Builder / Model / Model v2) and that picking a
-// requirement on the left brings up its detail on the right.
+// Requirements tab — read-only browse + form-driven edit flow.
 
 import { expect, test } from "@playwright/test";
 import { waitForPlaygroundReady } from "./_helpers";
@@ -24,4 +22,22 @@ test("Requirements tab renders the requirement tree and shows detail on selectio
   // Selecting a requirement opens its detail pane on the right.
   await us001.click();
   await expect(page.getByTestId("req-detail-US-001")).toBeVisible();
+});
+
+test("editing a requirement title saves it back to the source", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+
+  await page.getByTestId("doc-tab-requirements").click();
+  await page.getByTestId("req-row-US-001").click();
+  const titleInput = page.getByTestId("req-form-title").locator("input");
+  await expect(titleInput).toBeVisible();
+  await titleInput.fill("User can log in (updated by form)");
+  await page.getByTestId("req-form-save").click();
+
+  // Round-trip: switch to Source and confirm the new title landed.
+  await page.getByTestId("doc-tab-source").click();
+  await expect(page.getByText('"User can log in (updated by form)"')).toBeVisible({
+    timeout: 5_000,
+  });
 });
