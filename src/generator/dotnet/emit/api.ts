@@ -11,10 +11,15 @@ import {
 // controller never sees the domain class — only the request/response
 // DTOs and the matching command/query records.
 
+/** Compile-time --trace context — when `emitTrace` is true, the
+ *  controller's operation routes get a `_log.LogTrace(...)` line for
+ *  the catalog's `wire_in` event after binding `[FromBody]`.  Op
+ *  param names (lowerCamel — matching the wire JSON key set the
+ *  request was de-serialised from) flow through `publicOps[i].paramNames`. */
 interface ControllerShape {
   idClrType: string;
   createCmdArgs: string[];
-  publicOps: Array<{ name: string; cmdArgs: string[] }>;
+  publicOps: Array<{ name: string; cmdArgs: string[]; paramNames: string[] }>;
   finds: Array<{
     name: string;
     isRoot: boolean;
@@ -33,6 +38,11 @@ interface ControllerShape {
    *  under `/api/orders/*`).  Empty for standalone .NET (controllers
    *  stay at root, matching the v0 behaviour). */
   routePrefix?: string;
+  /** When true, controllers emit a `wire_in` trace line right after
+   *  `[FromBody]` binding so the parsed request's key set is observable
+   *  on the structured stream.  Off keeps the operation handler at its
+   *  pre-trace shape exactly. */
+  emitTrace?: boolean;
 }
 
 export function renderController(
@@ -49,10 +59,34 @@ export function renderController(
   const opBlocks = shape.publicOps.flatMap((op) => {
     const cmdArgs = [`new ${agg.name}Id(id)`, ...op.cmdArgs];
     const cmdBody = renderCmdConstructorBody(cmdArgs, "            ");
+    // wire_in (trace) — the structural shape (keys only, no values) of
+    // the parsed request, emitted right after `[FromBody]` binding so
+    // a downstream filter pivoting on wire_in sees the same field set
+    // Hono emits via `Object.keys(body)`.  Keys are lowerCamel
+    // (matching the JSON wire under ASP.NET's default
+    // JsonNamingPolicy.CamelCase).  Skipped entirely when --trace is off.
+    const wireInLine = shape.emitTrace
+      ? [
+          `        ${renderDotnetLogCall("wireIn", [
+            {
+              name: "keys",
+              // Empty arrays need an explicit element type so C# can
+              // infer the `params object[]` overload of LogTrace —
+              // `new[] { }` is a compile error.  Common case (op with
+              // params) uses the implicit array literal.
+              valueExpr:
+                op.paramNames.length === 0
+                  ? "System.Array.Empty<string>()"
+                  : `new[] { ${op.paramNames.map((n) => `"${n}"`).join(", ")} }`,
+            },
+          ])}`,
+        ]
+      : [];
     return [
       `    [HttpPost("{id}/${snake(op.name)}")]`,
       `    public async Task<IActionResult> ${upperFirst(op.name)}([FromRoute] ${shape.idClrType} id, [FromBody] ${upperFirst(op.name)}Request request)`,
       "    {",
+      ...wireInLine,
       // Business-narrative line — what the controller was asked to do,
       // before Mediator dispatches the command.  Mirrors the
       // operation_invoked emission on the Hono side so a cross-backend

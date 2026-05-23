@@ -332,7 +332,7 @@ function emitAggregate(
     `Infrastructure/Persistence/Configurations/${agg.name}Configuration.cs`,
     renderConfiguration(agg, ns, ctx),
   );
-  emitCqrs(agg, repo, ctx, ns, out, { routePrefix });
+  emitCqrs(agg, repo, ctx, ns, out, { routePrefix, emitTrace });
   const testsFile = renderTestsFile(agg, ctx, ns);
   if (testsFile) {
     out.set(`Tests/${ns}.Tests/${aggFolder}/${agg.name}Tests.cs`, testsFile);
