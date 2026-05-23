@@ -376,6 +376,44 @@ describe(".NET generator", () => {
       expect(order).not.toMatch(/value_computed/);
     });
 
+    it("--trace on: operation routes emit wire_in after [FromBody] binding (lowerCamel param names)", async () => {
+      // Phase 8 .NET wire_in v1 — mirrors Hono Phase 6d.  The catalog's
+      // wire_in event surfaces the parsed request's structural shape
+      // (keys only, no values) right before operation_invoked.  Keys
+      // are the IR field names (lowerCamel), matching the JSON wire
+      // under ASP.NET's default JsonNamingPolicy.CamelCase — so the
+      // SAME `wire_in` event from Hono and .NET joins seamlessly on
+      // the wire-shape key set.
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model, { emitTrace: true });
+      const controller = files.get("Api/OrdersController.cs")!;
+      // sales.ddd's Order has `addLine(productId: Id<Product>, qty:
+      // int, price: Money)` — three lowerCamel param names.
+      expect(controller).toMatch(
+        /_log\.LogTrace\("\{Event\} keys=\{Keys\}", "wire_in", new\[\] \{ "productId", "qty", "price" \}\);/,
+      );
+      // And `confirm()` has zero params — Array.Empty<string>() is
+      // the safe empty form (the implicit `new[] { }` is a compile
+      // error: no element type to infer).
+      expect(controller).toMatch(
+        /_log\.LogTrace\("\{Event\} keys=\{Keys\}", "wire_in", System\.Array\.Empty<string>\(\)\);/,
+      );
+      // wire_in fires BEFORE operation_invoked at every op-route entry —
+      // mirroring the Hono order (shape first, narrative next).
+      const wireInAt = controller.search(/"wire_in"/);
+      const opInvokedAt = controller.search(/"operation_invoked"/);
+      expect(wireInAt).toBeGreaterThan(-1);
+      expect(wireInAt).toBeLessThan(opInvokedAt);
+    });
+
+    it("--trace off: controllers stay free of wire_in lines", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model); // no emitTrace
+      const controller = files.get("Api/OrdersController.cs")!;
+      expect(controller).not.toMatch(/wire_in/);
+      expect(controller).not.toMatch(/System\.Array\.Empty<string>/);
+    });
+
     it("--trace on: AssertInvariants gains an __op param + emits invariant_evaluated per check", async () => {
       // Phase 8 .NET invariants v1 — mirrors Hono Phase 6b.  Invariants
       // run from a shared helper (`AssertInvariants`) that otherwise
