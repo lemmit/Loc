@@ -6,7 +6,7 @@
 
 import { Box, Button, Group, MultiSelect, Stack, Text, TextInput } from "@mantine/core";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { ViewKind } from "./view-graph";
 
 /** A small inline multi-select on the node — used for multi-valued bindings
@@ -31,6 +31,12 @@ export interface ConstructNodeData {
   onDelete?: () => void;
   /** Optional inline multi-selects (stacked below the name). */
   multiSelects?: NodeMultiSelect[];
+  /** Inline structured editor for the construct's expression (find filter,
+   *  invariant condition, …) — rendered below the name while expanded. */
+  expressionEditor?: ReactNode;
+  /** Toggle the inline structured editor. Provide together with
+   *  `expressionEditor` to expose a `ƒx` button on the node. */
+  onToggleExpression?: () => void;
   /** Narrow the node for a phone-width canvas (~390px viewport). */
   compact?: boolean;
 }
@@ -65,9 +71,19 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
         border: "1px solid rgba(255,255,255,0.25)",
         borderRadius: 6,
         padding: "6px 8px",
-        // Widen when there are multi-selects so the pill chips fit, narrower
-        // on a phone-width canvas.
-        width: d.multiSelects && d.multiSelects.length > 0 ? (d.compact ? 210 : 240) : d.compact ? 150 : 170,
+        // Widen when there are multi-selects (chip pills) or an inline
+        // expression editor (the structured tree); narrower on a phone canvas.
+        width: d.expressionEditor
+          ? d.compact
+            ? 320
+            : 360
+          : d.multiSelects && d.multiSelects.length > 0
+            ? d.compact
+              ? 210
+              : 240
+            : d.compact
+              ? 150
+              : 170,
         position: "relative",
         cursor: d.drillable ? "pointer" : "default",
       }}
@@ -100,11 +116,27 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
       ) : (
         <Text size="sm" style={{ fontWeight: 500 }}>{d.name}</Text>
       )}
-      {(d.onRename || d.onDelete) && !editing && (
+      {(d.onRename || d.onDelete || d.onToggleExpression) && !editing && (
         <Group
           gap={2}
           style={{ position: "absolute", top: 2, right: 2 }}
         >
+          {d.onToggleExpression && (
+            <Button
+              size="compact-xs"
+              variant={d.expressionEditor ? "filled" : "subtle"}
+              color="gray"
+              data-testid="c4system-v2-expr-toggle"
+              title="edit the expression structurally"
+              styles={{ root: { paddingInline: 4, height: 18, minHeight: 18, color: "white" } }}
+              onClick={(e) => {
+                e.stopPropagation();
+                d.onToggleExpression!();
+              }}
+            >
+              ƒx
+            </Button>
+          )}
           {d.onRename && (
             <Button
               size="compact-xs"
@@ -136,6 +168,11 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
             </Button>
           )}
         </Group>
+      )}
+      {d.expressionEditor && (
+        <Box mt={6} data-testid="c4system-v2-expression-editor">
+          {d.expressionEditor}
+        </Box>
       )}
       {d.multiSelects && d.multiSelects.length > 0 && (
         <Stack gap={4} mt={6}>
