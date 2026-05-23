@@ -177,6 +177,28 @@ describe("typescript generator", () => {
       expect(reqId).toMatch(/await requestLogStore\.run\(\{ log \}, async \(\) => \{/);
     });
 
+    it("health + ready probes emit health_ok / db_error / health_degraded via the request logger", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS);
+      const httpIndex = files.get("http/index.ts")!;
+      // /health → liveness probe — debug line so probe traffic only
+      // surfaces under LOG_LEVEL=debug, not the default info stream.
+      expect(httpIndex).toMatch(
+        /\.get\("log"\)\.debug\(\{ event: "health_ok", checks: \["liveness"\] \}\)/,
+      );
+      // /ready → success path logs health_ok (readiness, db).
+      expect(httpIndex).toMatch(
+        /\.get\("log"\)\.debug\(\{ event: "health_ok", checks: \["readiness", "db"\] \}\)/,
+      );
+      // /ready → failure path logs BOTH db_error (the underlying cause,
+      // error level so it lands in any sane prod stream) AND
+      // health_degraded (debug, the cumulative probe outcome).
+      expect(httpIndex).toMatch(/\.get\("log"\)\.error\(\{ event: "db_error", error: message \}\)/);
+      expect(httpIndex).toMatch(
+        /\.get\("log"\)\.debug\(\{ event: "health_degraded", checks: \["db"\] \}\)/,
+      );
+    });
+
     it("repository emits aggregate_loaded / repository_save / find_executed / event_dispatched via requestLog()", async () => {
       const model = await buildModel("examples/sales.ddd");
       const files = generateTypeScript(model, HONO_V4_PINS);
@@ -484,9 +506,16 @@ describe("typescript generator", () => {
     expect(routes).toMatch(/aggregate\.assertInvariants\(\)/);
     expect(routes).not.toMatch(/aggregate\.confirm\(\)/);
 
-    // 5. http/index.ts wires the verify gate at startup.
+    // 5. http/index.ts wires the verify gate at startup AND emits a
+    // structured `extern_handlers_registered` (debug) line per aggregate
+    // — so an operator confirming a deploy can read the catalog of
+    // wired handlers off the startup log instead of grepping source.
     const httpIndex = files.get("http/index.ts")!;
     expect(httpIndex).toMatch(/verifyOrderExternHandlersRegistered/);
+    expect(httpIndex).toMatch(/import \{ baseLogger \} from "\.\.\/obs\/log"/);
+    expect(httpIndex).toMatch(
+      /baseLogger\.debug\(\{ event: "extern_handlers_registered", aggregate: "Order", count: 1, ops: \["confirm"\] \}\)/,
+    );
   });
 
   describe("extern handler exception envelope", () => {
@@ -1231,6 +1260,13 @@ describe("typescript generator", () => {
       const auth = httpIndex.indexOf('app.use("*", authMiddleware)');
       expect(cors).toBeGreaterThan(0);
       expect(auth).toBeGreaterThan(cors);
+      // auth_enabled (info) emitted at boot whenever the verifier
+      // assert clears, so every boot log advertises whether this
+      // deployable expects authenticated requests.
+      expect(httpIndex).toMatch(/import \{ baseLogger \} from "\.\.\/obs\/log"/);
+      expect(httpIndex).toMatch(
+        /baseLogger\.info\(\{ event: "auth_enabled", required: true \}\)/,
+      );
     });
 
     it("middleware bypasses /health, /openapi.json, /swagger", async () => {
