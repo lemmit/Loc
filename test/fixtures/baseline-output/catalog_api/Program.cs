@@ -1,6 +1,7 @@
 // Auto-generated.
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using FluentValidation;
 using CatalogApi.Api;
 using CatalogApi.Domain.Common;
 using CatalogApi.Infrastructure.Persistence;

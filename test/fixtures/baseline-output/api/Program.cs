@@ -1,6 +1,7 @@
 // Auto-generated.
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using FluentValidation;
 using Api.Api;
 using Api.Domain.Common;
 using Api.Infrastructure.Persistence;

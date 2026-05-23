@@ -322,10 +322,13 @@ function renderStatement(
       return [`${INDENT}_workflowEvents.Add(new ${st.eventName}(${args}));`];
     }
     case "factory-let": {
-      const args = st.fields.map((f) => `${upperFirst(f.name)}: ${renderArg(f.value)}`).join(", ");
-      // Use the aggregate's named-arg Create(...) factory.  C# doesn't
-      // support reordering positional args; using named args lets the
-      // user write fields in any order in the .ddd source.
+      // The Create(...) factory's parameters are emitted in camelCase
+      // (matching the source field name), so the named-arg call site
+      // must use the same casing — PascalCase here would fail with
+      // CS1739 "best overload does not have a parameter named X".
+      const args = st.fields.map((f) => `${f.name}: ${renderArg(f.value)}`).join(", ");
+      // C# doesn't support reordering positional args; using named
+      // args lets the user write fields in any order in the .ddd source.
       return [`${INDENT}var ${st.name} = ${st.aggName}.Create(${args});`];
     }
     case "repo-let": {

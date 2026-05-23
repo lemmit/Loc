@@ -139,6 +139,7 @@ using (var scope = app.Services.CreateScope())
   return `// Auto-generated.
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using FluentValidation;
 using ${ns}.Api;
 using ${ns}.Domain.Common;
 using ${ns}.Infrastructure.Persistence;
