@@ -68,7 +68,7 @@ describe("Acme e2e", () => {
 
   it("by_customer query returns matching orders", async () => {
     const base = ENDPOINTS["api"];
-    const ord = await __post(`${base}/orders`, ({ customerId: "cust-002", status: "Draft", placedAt: "2024-01-02T00:00:00Z" }));
+    await __post(`${base}/orders`, ({ customerId: "cust-002", status: "Draft", placedAt: "2024-01-02T00:00:00Z" }));
     const list = await __getQuery(`${base}/orders/by_customer`, ({ customerId: "cust-002" }));
     expect(list.length).toBeGreaterThanOrEqual(1);
   });

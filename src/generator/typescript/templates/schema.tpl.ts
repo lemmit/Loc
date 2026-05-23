@@ -42,13 +42,12 @@ export function renderSchema(
     (e) =>
       `export const ${lowerFirst(e.name)}Enum = pgEnum("${snake(e.name)}", [${e.values.map((v) => `"${v}"`).join(", ")}]);`,
   );
-  // `primaryKey` is only needed when the context has at least one
-  // reference-collection join table; `jsonb` only when audit/provenance
-  // tables are emitted.  Keeping each out otherwise leaves every
-  // unaffected schema's import line byte-identical.
-  const hasJoinTables = ctx.aggregates.some((a) => (a.associations ?? []).length > 0);
-  const needsJsonb = opts.audit || opts.provenance;
-  const imports = [
+  // Derive the drizzle-pg-core import list from what the body actually
+  // calls — every helper here is invoked as a function (`text(...)`,
+  // `pgEnum(...)`, etc.), so a `\b<name>\(` scan is exact and keeps the
+  // import line free of dead names per the generated-code Biome gate.
+  const body = [...enumLines, "", tables.join("\n\n")].join("\n");
+  const candidates = [
     "pgTable",
     "text",
     "integer",
@@ -59,9 +58,12 @@ export function renderSchema(
     "pgEnum",
     "uuid",
     "index",
-    ...(hasJoinTables ? ["primaryKey"] : []),
-    ...(needsJsonb ? ["jsonb"] : []),
-  ].join(", ");
+    "primaryKey",
+    "jsonb",
+  ];
+  // `(?<!\.)` excludes method calls like `text("id").primaryKey()` so we
+  // only import a helper when it's invoked as a top-level function call.
+  const imports = candidates.filter((c) => new RegExp(`(?<!\\.)\\b${c}\\(`).test(body)).join(", ");
   return (
     joinLines(
       "// Auto-generated.",

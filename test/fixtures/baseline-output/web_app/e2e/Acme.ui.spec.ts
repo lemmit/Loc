@@ -1,6 +1,6 @@
 // Auto-generated.  Do not edit by hand.
 import { test, expect } from "./fixtures";
-import { ProductListPage, ProductDetailPage } from "./pages/product";
+import { ProductListPage } from "./pages/product";
 import { OrderListPage, OrderDetailPage } from "./pages/order";
 import { PlaceOrderWorkflowPage } from "./pages/workflows/place_order";
 import { ActiveOrdersViewPage } from "./pages/views/active_orders";
