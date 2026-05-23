@@ -40,9 +40,7 @@ describe("Model v2 — view-graph per level", () => {
   it("system view lists modules and infra (storage in this fixture)", () => {
     const g = buildViewGraph(parse(SRC), [{ kind: "system", name: "Sales" }]);
     expect(g.title).toBe("system Sales");
-    expect(ids(g).sort()).toEqual(
-      ["module:Billing", "module:SalesMod", "storage:Db"].sort(),
-    );
+    expect(ids(g).sort()).toEqual(["module:Billing", "module:SalesMod", "storage:Db"].sort());
     // Modules drill in; storage is a leaf at this phase.
     const mod = g.nodes.find((n) => n.id === "module:SalesMod")!;
     const stg = g.nodes.find((n) => n.id === "storage:Db")!;

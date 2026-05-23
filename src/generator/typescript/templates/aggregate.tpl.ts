@@ -65,6 +65,21 @@ export function renderAggregate(
   // without `auth: required` don't import this — and operations
   // can't reference currentUser there because the validator gates it.
   const usesUser = agg.operations.some(operationUsesCurrentUser);
+  // The errors-module imports are conditional on what the body emits
+  // (see render-stmt.ts and the invariant renderer below):
+  //   DomainError    — invariants (root + parts) and `precondition` statements
+  //   ForbiddenError — `requires` statements (RBAC preconditions)
+  // Keeps the import line free of dead names per Loom's "ok generated code" gate.
+  const usesDomain =
+    agg.invariants.length > 0 ||
+    agg.parts.some((p) => p.invariants.length > 0) ||
+    agg.operations.some((op) => op.statements.some((s) => s.kind === "precondition"));
+  const usesForbidden = agg.operations.some((op) =>
+    op.statements.some((s) => s.kind === "requires"),
+  );
+  const errorsImportList = [usesDomain && "DomainError", usesForbidden && "ForbiddenError"]
+    .filter(Boolean)
+    .join(", ");
 
   return (
     lines(
@@ -77,7 +92,7 @@ export function renderAggregate(
         ? `import { ${enumAliases.join(", ")} } from "./value-objects";`
         : null,
       'import type * as Events from "./events";',
-      'import { DomainError, ForbiddenError } from "./errors";',
+      errorsImportList ? `import { ${errorsImportList} } from "./errors";` : null,
       hasProv ? 'import { type ProvLineage } from "./provenance";' : null,
       hasDomainTrace ? 'import { requestLog } from "../obs/als";' : null,
       usesUser ? 'import type { User } from "../auth/user-types";' : null,
@@ -189,9 +204,7 @@ function renderEntity(e: EntityShape, emitProvenance = false, emitTrace = false)
   // "<init>" so the invariant_evaluated lines for ctor runs are
   // distinguishable from in-operation evaluations.
   ctorAssignments.push(
-    emitTrace
-      ? `    this._assertInvariants("<init>");`
-      : "    this._assertInvariants();",
+    emitTrace ? `    this._assertInvariants("<init>");` : "    this._assertInvariants();",
   );
 
   const getters: string[] = [];
@@ -258,10 +271,10 @@ function renderEntity(e: EntityShape, emitProvenance = false, emitTrace = false)
       const checkName = `check${op.name[0]!.toUpperCase()}${op.name.slice(1)}`;
       ops.push(`  ${checkName}(${params}): void {`);
       const body = renderTsStatements(op.statements, emitProvenance, {
-      emitTrace,
-      aggregate: e.name,
-      op: op.name,
-    });
+        emitTrace,
+        aggregate: e.name,
+        op: op.name,
+      });
       if (body.length > 0) ops.push(body);
       ops.push("  }");
       ops.push("");
@@ -275,9 +288,7 @@ function renderEntity(e: EntityShape, emitProvenance = false, emitTrace = false)
     });
     if (body.length > 0) ops.push(body);
     ops.push(
-      emitTrace
-        ? `    this._assertInvariants("${op.name}");`
-        : "    this._assertInvariants();",
+      emitTrace ? `    this._assertInvariants("${op.name}");` : "    this._assertInvariants();",
     );
     ops.push("  }");
     ops.push("");

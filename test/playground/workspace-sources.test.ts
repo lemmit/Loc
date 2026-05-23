@@ -33,10 +33,7 @@ describe("workspace sources — pure helpers", () => {
       "/elsewhere/other.ddd": "ignored",
     });
     const snap = snapshotSources(vfs);
-    expect([...snap.keys()].sort()).toEqual([
-      "/workspace/main.ddd",
-      "/workspace/sub/orders.ddd",
-    ]);
+    expect([...snap.keys()].sort()).toEqual(["/workspace/main.ddd", "/workspace/sub/orders.ddd"]);
   });
 
   it("pickFallbackActivePath prefers main.ddd, else lexicographically-first", () => {

@@ -1,9 +1,9 @@
+import { renderHonoLogCall } from "../../../generator/_obs/render-hono.js";
 import {
   chainSingleFieldNative,
   refineClauseFor,
   takeSingleFieldChain,
 } from "../../../generator/typescript/zod-refine.js";
-import { renderHonoLogCall } from "../../../generator/_obs/render-hono.js";
 import { wireShapeFor } from "../../../ir/enrichments.js";
 import type { ClassifyContext, SingleFieldPattern } from "../../../ir/invariant-classify.js";
 import type {
@@ -77,7 +77,7 @@ export function buildRoutesFile(
   lines.push(`import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";`);
   lines.push(`import { ${agg.name} } from "../domain/${lowerFirst(agg.name)}";`);
   lines.push(
-    `import { ${agg.name}Repository } from "../db/repositories/${lowerFirst(agg.name)}-repository";`,
+    `import type { ${agg.name}Repository } from "../db/repositories/${lowerFirst(agg.name)}-repository";`,
   );
   lines.push(`import * as Ids from "../domain/ids";`);
   lines.push(
@@ -165,6 +165,10 @@ export function buildRoutesFile(
 
   if (repo) {
     for (const find of repo.finds) {
+      // Only emit a Query schema when the find takes parameters — the route
+      // (route emitter, ~line 475) is gated the same way, so an empty
+      // `<Find>Query = z.object({})` would be dead code.
+      if (find.params.length === 0) continue;
       lines.push(`const ${upperFirst(find.name)}Query = z.object({`);
       for (const p of find.params) {
         lines.push(`  ${p.name}: ${zodFor(p.type)},`);
@@ -286,9 +290,7 @@ export function buildRoutesFile(
         auditOps.includes(op),
         provOps.includes(op),
         emitTrace,
-      ).map(
-        (l) => `  ${l}`,
-      ),
+      ).map((l) => `  ${l}`),
     );
     lines.push("");
   }
@@ -337,9 +339,7 @@ export function buildRoutesFile(
   lines.push(`      return c.json({ error: err.message, trace_id }, 400);`);
   lines.push(`    }`);
   lines.push(`    if (err instanceof AggregateNotFoundError) {`);
-  lines.push(
-    `      ${renderHonoLogCall("notFound", `aggregate: "${agg.name}", status: 404`)}`,
-  );
+  lines.push(`      ${renderHonoLogCall("notFound", `aggregate: "${agg.name}", status: 404`)}`);
   lines.push(`      return c.json({ error: err.message, trace_id }, 404);`);
   lines.push(`    }`);
   lines.push(`    if (err instanceof ExternHandlerError) {`);

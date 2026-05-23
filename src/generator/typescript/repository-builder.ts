@@ -1,4 +1,3 @@
-import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
 import { wireShapeFor } from "../../ir/enrichments.js";
 import type {
   AggregateIR,
@@ -12,6 +11,7 @@ import type {
 } from "../../ir/loom-ir.js";
 import { findUsesCurrentUser, viewUsesCurrentUser } from "../../ir/loom-ir.js";
 import { lowerFirst, plural, upperFirst } from "../../util/naming.js";
+import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
 import { joinColumnName, joinTableConstName, valueObjectColumnNames } from "./templates.js";
 
 /** Associations (`Id<T>[]` reference collections) declared on an
@@ -352,13 +352,9 @@ function findManyByIdsMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] 
   return lines;
 }
 
-function findByIdMethod(
-  agg: AggregateIR,
-  ctx: BoundedContextIR,
-  emitTrace = false,
-): string[] {
+function findByIdMethod(agg: AggregateIR, ctx: BoundedContextIR, emitTrace = false): string[] {
   const lines: string[] = [];
-  const tableName = lowerFirst(plural(agg.name));
+  const _tableName = lowerFirst(plural(agg.name));
   lines.push(`  async findById(id: Ids.${agg.name}Id): Promise<${agg.name} | null> {`);
   // Inner body of the `db.transaction(async (tx) => { … })` callback.
   // Built at 6-space indent first so we can wrap it differently for

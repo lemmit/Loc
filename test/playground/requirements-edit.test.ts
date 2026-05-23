@@ -3,10 +3,10 @@
 // back into the same requirement/solution/testCase, and splicing that text
 // over the original node's CST range must yield a valid `.ddd` source.
 
-import { describe, expect, it } from "vitest";
 import { AstUtils } from "langium";
-import { parseDdd } from "../../web/src/builder/parse.js";
+import { describe, expect, it } from "vitest";
 import { spliceNode } from "../../web/src/builder/edit-engine.js";
+import { parseDdd } from "../../web/src/builder/parse.js";
 import {
   printRequirementText,
   printSolutionText,

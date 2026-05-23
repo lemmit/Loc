@@ -29,7 +29,12 @@ describe("v2 deployable edge drag-rebind", () => {
   });
 
   it("repoints a deployable's `targets` edge to another deployable", () => {
-    const next = rebindDeployableEdgeTarget(SRC, "targets", "deployable:webApp", "deployable:other")!;
+    const next = rebindDeployableEdgeTarget(
+      SRC,
+      "targets",
+      "deployable:webApp",
+      "deployable:other",
+    )!;
     expect(next).toContain("targets: other");
   });
 
@@ -39,13 +44,19 @@ describe("v2 deployable edge drag-rebind", () => {
   });
 
   it("rejects a wrong target kind / self-target / non-deployable owner", () => {
-    expect(rebindDeployableEdgeTarget(SRC, "targets", "deployable:webApp", "module:Sales")).toBeNull();
-    expect(rebindDeployableEdgeTarget(SRC, "targets", "deployable:webApp", "deployable:webApp")).toBeNull();
+    expect(
+      rebindDeployableEdgeTarget(SRC, "targets", "deployable:webApp", "module:Sales"),
+    ).toBeNull();
+    expect(
+      rebindDeployableEdgeTarget(SRC, "targets", "deployable:webApp", "deployable:webApp"),
+    ).toBeNull();
     expect(rebindDeployableEdgeTarget(SRC, "ui", "module:Sales", "ui:Web")).toBeNull();
   });
 
   it("rejects a non-rebindable edge label", () => {
-    expect(rebindDeployableEdgeTarget(SRC, "modules", "deployable:webApp", "module:Sales")).toBeNull();
+    expect(
+      rebindDeployableEdgeTarget(SRC, "modules", "deployable:webApp", "module:Sales"),
+    ).toBeNull();
     expect(rebindDeployableEdgeTarget(SRC, "serves", "deployable:webApp", "api:any")).toBeNull();
   });
 });

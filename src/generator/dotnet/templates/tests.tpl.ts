@@ -84,11 +84,7 @@ function renderExplicitMatcherToAwesome(expr: ExprIR): string | null {
   if (!sig || sig.on !== "value") return null;
   let receiver = expr.receiver;
   let negate = false;
-  if (
-    receiver.kind === "member" &&
-    receiver.member === "not" &&
-    sig.negatable
-  ) {
+  if (receiver.kind === "member" && receiver.member === "not" && sig.negatable) {
     negate = true;
     receiver = receiver.receiver;
   }

@@ -25,11 +25,7 @@ describe("playground project loader (VFS-backed)", () => {
         }
       `,
     });
-    const { entry, all } = await loadProjectFromVfs(
-      "/workspace/main.ddd",
-      services.shared,
-      vfs,
-    );
+    const { entry, all } = await loadProjectFromVfs("/workspace/main.ddd", services.shared, vfs);
     expect(all).toHaveLength(1);
     // Langium's URI normalises `inmemory:///x` → `inmemory:/x`; the
     // exact form isn't important, just that it's stable and ends with
@@ -66,11 +62,7 @@ describe("playground project loader (VFS-backed)", () => {
       `,
     });
 
-    const { all } = await loadProjectFromVfs(
-      "/workspace/main.ddd",
-      services.shared,
-      vfs,
-    );
+    const { all } = await loadProjectFromVfs("/workspace/main.ddd", services.shared, vfs);
     // main, money, orders.
     expect(all).toHaveLength(3);
     // No parse / resolution errors — root-level Money resolves
@@ -79,9 +71,7 @@ describe("playground project loader (VFS-backed)", () => {
     expect(errors.map((e) => e.message)).toEqual([]);
 
     // Merge + enrich → root Money present, Order references it.
-    const merged = mergeLoomModels(
-      all.map((d) => lowerModel(d.parseResult?.value as Model)),
-    );
+    const merged = mergeLoomModels(all.map((d) => lowerModel(d.parseResult?.value as Model)));
     const loom = enrichLoomModel(merged);
     expect(loom.rootValueObjects.map((v) => v.name)).toEqual(["Money"]);
     const allCtxs = [
@@ -99,9 +89,9 @@ describe("playground project loader (VFS-backed)", () => {
         context X { }
       `,
     });
-    await expect(
-      loadProjectFromVfs("/workspace/main.ddd", services.shared, vfs),
-    ).rejects.toThrow(/import not found in VFS:.*missing\.ddd.*\/workspace\/missing\.ddd/);
+    await expect(loadProjectFromVfs("/workspace/main.ddd", services.shared, vfs)).rejects.toThrow(
+      /import not found in VFS:.*missing\.ddd.*\/workspace\/missing\.ddd/,
+    );
   });
 
   it("detects circular imports", async () => {
@@ -116,9 +106,9 @@ describe("playground project loader (VFS-backed)", () => {
         context B { }
       `,
     });
-    await expect(
-      loadProjectFromVfs("/workspace/a.ddd", services.shared, vfs),
-    ).rejects.toThrow(/circular \.ddd import/);
+    await expect(loadProjectFromVfs("/workspace/a.ddd", services.shared, vfs)).rejects.toThrow(
+      /circular \.ddd import/,
+    );
   });
 
   it("deduplicates a file imported by two paths", async () => {
@@ -141,15 +131,9 @@ describe("playground project loader (VFS-backed)", () => {
         valueobject Shared { v: int }
       `,
     });
-    const { all } = await loadProjectFromVfs(
-      "/workspace/main.ddd",
-      services.shared,
-      vfs,
-    );
+    const { all } = await loadProjectFromVfs("/workspace/main.ddd", services.shared, vfs);
     expect(all).toHaveLength(4); // not 5 — shared dedup'd
-    const merged = mergeLoomModels(
-      all.map((d) => lowerModel(d.parseResult?.value as Model)),
-    );
+    const merged = mergeLoomModels(all.map((d) => lowerModel(d.parseResult?.value as Model)));
     expect(merged.rootValueObjects.map((v) => v.name)).toEqual(["Shared"]);
   });
 
@@ -164,11 +148,7 @@ describe("playground project loader (VFS-backed)", () => {
         valueobject Money { amount: decimal }
       `,
     });
-    const { all } = await loadProjectFromVfs(
-      "/workspace/sub/main.ddd",
-      services.shared,
-      vfs,
-    );
+    const { all } = await loadProjectFromVfs("/workspace/sub/main.ddd", services.shared, vfs);
     expect(all).toHaveLength(2);
     expect(all.some((d) => d.uri.toString().endsWith("/workspace/shared.ddd"))).toBe(true);
 
@@ -213,17 +193,11 @@ describe("playground project loader (VFS-backed)", () => {
         }
       `,
     });
-    const { all } = await loadProjectFromVfs(
-      "/workspace/main.ddd",
-      services.shared,
-      vfs,
-    );
+    const { all } = await loadProjectFromVfs("/workspace/main.ddd", services.shared, vfs);
     const errors = all.flatMap((d) => (d.diagnostics ?? []).filter((x) => x.severity === 1));
     expect(errors.map((e) => e.message)).toEqual([]);
 
-    const merged = mergeLoomModels(
-      all.map((d) => lowerModel(d.parseResult?.value as Model)),
-    );
+    const merged = mergeLoomModels(all.map((d) => lowerModel(d.parseResult?.value as Model)));
     const loom = enrichLoomModel(merged);
     const { generateSystemsFromLoom } = await import("../../src/system/index.js");
     const files = generateSystemsFromLoom(loom).files;
@@ -243,31 +217,22 @@ describe("playground project loader (VFS-backed)", () => {
         context S { aggregate A { x: int } }
       `,
     });
-    const first = await loadProjectFromVfs(
-      "/workspace/main.ddd",
-      services.shared,
-      vfs,
-    );
+    const first = await loadProjectFromVfs("/workspace/main.ddd", services.shared, vfs);
     // Mutate via VFS — simulates the editor saving an edit.
-    vfs.write(
-      "/workspace/main.ddd",
-      `context S { aggregate A { x: int, y: int } }`,
-    );
-    const second = await loadProjectFromVfs(
-      "/workspace/main.ddd",
-      services.shared,
-      vfs,
-    );
+    vfs.write("/workspace/main.ddd", `context S { aggregate A { x: int, y: int } }`);
+    const second = await loadProjectFromVfs("/workspace/main.ddd", services.shared, vfs);
     // Same URI, but fresh document.
     expect(second.entry.uri.toString()).toBe(first.entry.uri.toString());
     const firstCtx = (first.entry.parseResult?.value as Model)
       .members[0] as import("../../src/language/generated/ast.js").BoundedContext;
     const secondCtx = (second.entry.parseResult?.value as Model)
       .members[0] as import("../../src/language/generated/ast.js").BoundedContext;
-    const firstAggMembers = (firstCtx.members[0] as import("../../src/language/generated/ast.js").Aggregate)
-      .members.length;
-    const secondAggMembers = (secondCtx.members[0] as import("../../src/language/generated/ast.js").Aggregate)
-      .members.length;
+    const firstAggMembers = (
+      firstCtx.members[0] as import("../../src/language/generated/ast.js").Aggregate
+    ).members.length;
+    const secondAggMembers = (
+      secondCtx.members[0] as import("../../src/language/generated/ast.js").Aggregate
+    ).members.length;
     expect(secondAggMembers).toBeGreaterThan(firstAggMembers);
   });
 });

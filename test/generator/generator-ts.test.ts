@@ -252,9 +252,7 @@ describe("typescript generator", () => {
       expect(repo.match(/event: "tx_begin"/g)?.length).toBe(2);
       expect(repo.match(/event: "tx_commit"/g)?.length).toBe(2);
       expect(repo.match(/event: "tx_rollback"/g)?.length).toBe(2);
-      expect(repo).toMatch(
-        /requestLog\(\)\.trace\(\{ event: "tx_begin", aggregate: "Order", id:/,
-      );
+      expect(repo).toMatch(/requestLog\(\)\.trace\(\{ event: "tx_begin", aggregate: "Order", id:/);
       expect(repo).toMatch(
         /requestLog\(\)\.trace\(\{ event: "tx_rollback", .*error: __txErr instanceof Error \? __txErr\.message : String\(__txErr\) \}\)/,
       );
@@ -1408,9 +1406,7 @@ describe("typescript generator", () => {
       // assert clears, so every boot log advertises whether this
       // deployable expects authenticated requests.
       expect(httpIndex).toMatch(/import \{ baseLogger \} from "\.\.\/obs\/log"/);
-      expect(httpIndex).toMatch(
-        /baseLogger\.info\(\{ event: "auth_enabled", required: true \}\)/,
-      );
+      expect(httpIndex).toMatch(/baseLogger\.info\(\{ event: "auth_enabled", required: true \}\)/);
     });
 
     it("middleware bypasses /health, /openapi.json, /swagger", async () => {
@@ -1518,7 +1514,10 @@ describe("typescript generator", () => {
       const files = await emitForAuthSystem(SRC_REQUIRES);
       const order = files.get("domain/order.ts")!;
       expect(order).toMatch(/throw new ForbiddenError\(/);
-      expect(order).toMatch(/import \{ DomainError, ForbiddenError \} from "\.\/errors";/);
+      // The errors-module import is now narrowed to what the body actually
+      // emits — this fixture has a `requires` (ForbiddenError) but no
+      // invariants/preconditions, so DomainError isn't imported.
+      expect(order).toMatch(/import \{ ForbiddenError \} from "\.\/errors";/);
     });
 
     it("errors.ts exports ForbiddenError", async () => {

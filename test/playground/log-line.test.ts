@@ -42,9 +42,7 @@ describe("asStructuredPayload — catalog payload detection", () => {
     expect(asStructuredPayload({ event: "operation_invoked", aggregate: "X" })).toBeUndefined();
     // Unknown level label → reject (defensive against drift between
     // pino's level set and our catalog).
-    expect(
-      asStructuredPayload({ level: "verbose", event: "operation_invoked" }),
-    ).toBeUndefined();
+    expect(asStructuredPayload({ level: "verbose", event: "operation_invoked" })).toBeUndefined();
     // Wrong type for event → reject.
     expect(asStructuredPayload({ level: "info", event: 42 })).toBeUndefined();
   });
