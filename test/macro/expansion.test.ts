@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { capabilitiesFor } from "../../src/language/ddd-macro-expander.js";
 import type { Aggregate, Model } from "../../src/language/generated/ast.js";
 import { isAggregate, isOperation, isProperty } from "../../src/language/generated/ast.js";
 import { parseString } from "../_helpers/parse.js";
@@ -58,9 +57,11 @@ describe("auditable stdlib macro", () => {
       `),
     );
     const agg = findAggregate(model, "Order");
-    const bag = capabilitiesFor(agg);
-    expect(bag.stamps.length).toBe(2);
-    expect(bag.stamps.map((s) => s.event).sort()).toEqual(["create", "update"]);
+    // Capabilities are first-class AST members now — count StampDecl
+    // nodes directly on the aggregate's members.
+    const stamps = (agg.members ?? []).filter((m) => m.$type === "StampDecl");
+    expect(stamps.length).toBe(2);
+    expect(stamps.map((m) => (m as any).event).sort()).toEqual(["onCreate", "onUpdate"]);
   });
 
   it("composes with softDeletable — no field collisions", async () => {
@@ -91,11 +92,12 @@ describe("auditable stdlib macro", () => {
     );
     const opNames = (agg.members ?? []).filter(isOperation).map((o) => o.name);
     expect(opNames).toEqual(expect.arrayContaining(["softDelete", "restore"]));
-    // Both capabilities accumulate on the same host: stamps from
-    // auditable + one filter from softDeletable.
-    const bag = capabilitiesFor(agg);
-    expect(bag.stamps.length).toBe(2);
-    expect(bag.filters.length).toBe(1);
+    // Both capabilities accumulate as AST members: 2 StampDecl from
+    // auditable + 1 FilterDecl from softDeletable.
+    const stamps = (agg.members ?? []).filter((m) => m.$type === "StampDecl");
+    const filters = (agg.members ?? []).filter((m) => m.$type === "FilterDecl");
+    expect(stamps.length).toBe(2);
+    expect(filters.length).toBe(1);
   });
 });
 

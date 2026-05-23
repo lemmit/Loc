@@ -3,39 +3,40 @@ import {
   defineMacro,
   field,
   idRef,
+  implementsCapability,
   nameRef,
   primType,
 } from "../macro-api/index.js";
 import { callExpr } from "../macro-api/ui-factories.js";
 
-/** Stamps createdAt/updatedAt and createdBy/updatedBy on every
- * mutation.  The fields are declared structurally; the stamping
- * behaviour is expressed declaratively via `contextStamp(...)` —
- * a capability that says "on these lifecycle events, assign these
- * field/value pairs."  Backends translate the AST through their
- * own expression renderer into the right hook (.NET:
- * SaveChangesInterceptor with a per-entity-type stamp registry;
- * Drizzle: insert/update middleware; Ecto: changeset).
+/** Stamps createdAt/updatedAt/createdBy/updatedBy on every mutation.
+ * The fields are declared structurally; the stamping behaviour is
+ * declared via `stamp onCreate { ... }` / `stamp onUpdate { ... }`
+ * — pure sugar over what the user could hand-write inside the
+ * aggregate.  Backends translate the stamping AST via their per-
+ * entity stamping path (.NET: SaveChangesInterceptor scoped by
+ * `IAuditable`; Drizzle: insert/update middleware; Ecto: changeset).
  *
- * No marker interface is emitted — the runtime's per-entity-type
- * registry indexes by aggregate type directly, so the IAuditable
- * tag isn't needed.  If a project wants C# code to type-check
- * against an interface, that's a project-level extension. */
+ * `implements "auditable"` opts the aggregate into the auditable
+ * capability group; .NET emits a marker `IAuditable` interface and
+ * one OnModelCreating loop scoped by it, grouping all auditable
+ * aggregates into one infrastructure block. */
 export default defineMacro({
   name: "auditable",
   target: "aggregate",
   apiVersion: 1,
   description:
-    "Stamps createdAt/updatedAt/createdBy/updatedBy on every mutation. " +
-    "Generators emit one shared stamping hook per application keyed " +
-    "by entity type.",
+    "Stamps createdAt/updatedAt/createdBy/updatedBy on every mutation, " +
+    "and opts the aggregate into the `auditable` capability group so " +
+    "generators emit one shared stamping hook per application.",
   expand() {
     return [
       field("createdAt", primType("datetime")),
       field("updatedAt", primType("datetime")),
       field("createdBy", idRef("User")),
       field("updatedBy", idRef("User")),
-      contextStamp({
+      implementsCapability("auditable"),
+      ...contextStamp({
         onCreate: [
           { field: "createdAt", value: callExpr("now", []) },
           { field: "createdBy", value: nameRef("currentUser") },

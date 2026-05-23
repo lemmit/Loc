@@ -351,7 +351,16 @@ StateBlock:
     '}';
 
 StateField:
-    name=ID ':' type=TypeRef ('=' init=Expression)?;
+    name=StateFieldName ':' type=TypeRef ('=' init=Expression)?;
+
+// State-field names accept the soft keywords introduced by the
+// capability source surface (`filter`, `stamp`, `implements`) so
+// existing pages with state fields named `filter`/`stamp`/etc.
+// still parse.  The keywords only have structural meaning inside
+// aggregate / context member positions; everywhere else they remain
+// admissible identifiers.
+StateFieldName returns string:
+    ID | 'filter' | 'stamp' | 'implements';
 
 // ---- menu ---------------------------------------------------------------
 
@@ -477,7 +486,8 @@ BoundedContext:
     '}';
 
 ContextMember:
-    EnumDecl | ValueObject | Aggregate | EventDecl | Repository | Workflow | View;
+    EnumDecl | ValueObject | Aggregate | EventDecl | Repository | Workflow | View
+    | FilterDecl | StampDecl | ImplementsDecl;
 
 EnumDecl:
     'enum' name=ID '{'
@@ -544,7 +554,39 @@ MacroArgValue:
     | {infer MacroArgRefList} '[' (refs+=ID (',' refs+=ID)*)? ']';
 
 AggregateMember:
-    Containment | DerivedProp | Invariant | FunctionDecl | Operation | EntityPart | TestBlock | Property;
+    Containment | DerivedProp | Invariant | FunctionDecl | Operation | EntityPart | TestBlock | Property
+    | FilterDecl | StampDecl | ImplementsDecl;
+
+// ---- capability source surface ----------------------------------
+//
+// Capabilities (`filter`, `stamp`, `implements`) are first-class
+// aggregate/context members.  They produce the same IR shape macros
+// did (`AggregateIR.contextFilters` / `.contextStamps` /
+// `.implementsCapabilities`); the macro factories are sugar that
+// emit these node types into the host's members[] array.  Anything
+// a macro can contribute, a user can hand-write.
+//
+// At ContextMember position these propagate to every aggregate
+// inside the context at lowering time (see `lowerContext`).
+
+FilterDecl:
+    'filter' expr=Expression;
+
+StampDecl:
+    'stamp' event=StampEvent '{'
+        assignments+=AssignOrCallStmt*
+    '}';
+
+StampEvent returns string:
+    'onCreate' | 'onUpdate';
+
+// `implements "name"` opts the host into a capability group with the
+// given name.  Backends translate the name by convention (.NET adds
+// an `I` prefix → `IAuditable`; TS may emit a type alias; etc.) and
+// emit one shared infrastructure block per name (e.g. one
+// HasQueryFilter loop per capability in OnModelCreating).
+ImplementsDecl:
+    'implements' name=STRING;
 
 TestBlock:
     'test' name=STRING ('verifies' verifies=[TestCase:TraceId])? '{'
@@ -845,7 +887,8 @@ CallArg:
 // (lower-expr.ts + type-system.ts) rather than the grammar.
 MemberName returns string:
     ID | 'id' | 'permissions' | 'contains' | 'ui' | 'api'
-       | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views';
+       | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
+       | 'filter' | 'stamp' | 'implements';
 
 // Lambdas accept either a single expression body (the only form
 // in v22) or a brace-wrapped block of statements.  Block bodies

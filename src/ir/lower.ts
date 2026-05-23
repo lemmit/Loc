@@ -153,7 +153,6 @@ import {
   expandWalkerPrimitive,
   type WalkerExpandContext,
 } from "./walker-primitive-expander.js";
-import { capabilitiesFor } from "../language/ddd-macro-expander.js";
 import type { ContextStampIR } from "./loom-ir.js";
 
 /** Fold a bareword built-in family or pinned `family@version`
@@ -1030,11 +1029,17 @@ function lowerContext(
   const repositories: RepositoryIR[] = [];
   const workflows: WorkflowIR[] = [];
   const views: ViewIR[] = [];
+  // Context-level capabilities propagate to every aggregate inside.
+  // Lower them here in the context env (no `this` binding); each
+  // aggregate's lowering re-uses the lowered IR directly.  The `this`
+  // references inside a context-level filter resolve later when the
+  // expression is rendered with a per-aggregate lambda binder.
+  const ctxCaps = collectContextLevelCapabilities(ctx, env);
   for (const m of ctx.members) {
     if (isEnumDecl(m)) enums.push(lowerEnum(m));
     else if (isValueObject(m)) valueObjects.push(lowerValueObject(m, env));
     else if (isEventDecl(m)) events.push(lowerEvent(m));
-    else if (isAggregate(m)) aggregates.push(lowerAggregate(m, env));
+    else if (isAggregate(m)) aggregates.push(lowerAggregate(m, env, ctxCaps));
     else if (isRepository(m)) repositories.push(lowerRepository(m, user, modulePermissions));
     else if (isWorkflow(m)) workflows.push(lowerWorkflow(m, env, ctx));
     else if (isView(m)) views.push(lowerView(m, env));
@@ -1077,7 +1082,11 @@ function lowerEvent(e: EventDecl): EventIR {
   };
 }
 
-function lowerAggregate(agg: Aggregate, env: Env): AggregateIR {
+function lowerAggregate(
+  agg: Aggregate,
+  env: Env,
+  contextLevelCaps: ContextLevelCapabilities = EMPTY_CONTEXT_CAPABILITIES,
+): AggregateIR {
   const idValueType = (agg.idKind ?? "guid") as IdValueType;
   const inner = inAggregate(env, agg);
   const props = agg.members.filter(isProperty) as Property[];
@@ -1099,6 +1108,14 @@ function lowerAggregate(agg: Aggregate, env: Env): AggregateIR {
   for (const m of agg.members) {
     if (isTestBlock(m)) tests.push(lowerTest(m, inner));
   }
+  // Capability source nodes — read structurally from agg.members,
+  // concatenated with anything propagated from the enclosing context.
+  // Context-level capabilities lower in the context's env (which
+  // doesn't bind `this` to any aggregate), then re-bind here.  Both
+  // routes converge to the same AggregateIR fields.
+  const filters = collectFilters(agg, inner, contextLevelCaps.filters);
+  const stamps = collectStamps(agg, inner, contextLevelCaps.stamps);
+  const implementsCaps = collectImplements(agg, contextLevelCaps.implementsCaps);
   return {
     name: agg.name,
     idValueType,
@@ -1110,35 +1127,108 @@ function lowerAggregate(agg: Aggregate, env: Env): AggregateIR {
     operations,
     parts,
     tests,
-    contextFilters: lowerContextFilters(agg, inner),
-    contextStamps: lowerContextStamps(agg, inner),
+    contextFilters: filters.length > 0 ? filters : undefined,
+    contextStamps: stamps.length > 0 ? stamps : undefined,
+    implementsCapabilities: implementsCaps.length > 0 ? implementsCaps : undefined,
   };
 }
 
-/** Lower context-filter predicates contributed by macros.  The
- * expander stores raw Expression AST on a side table; here we
- * lower each with the aggregate-scoped Env so refs like `this`
- * resolve correctly.  Returns undefined when none were
- * contributed — keeps IR compact for non-macro aggregates. */
-function lowerContextFilters(agg: Aggregate, env: Env): ExprIR[] | undefined {
-  const bag = capabilitiesFor(agg);
-  if (bag.filters.length === 0) return undefined;
-  return bag.filters.map((predicate) => lowerExpr(predicate, env));
+// ---------------------------------------------------------------------------
+// Capability collection — reads structurally from `members[]` (no side
+// tables).  Context-level capabilities, when present, are appended
+// first so per-aggregate ones can override at the validator layer
+// later (today's lowering is pure concatenation).
+// ---------------------------------------------------------------------------
+
+interface ContextLevelCapabilities {
+  filters: ExprIR[];
+  stamps: ContextStampIR[];
+  implementsCaps: string[];
 }
 
-/** Lower stamping rules contributed by macros.  Each (field,
- * value) pair gets its value expression lowered with the
- * aggregate-scoped Env. */
-function lowerContextStamps(agg: Aggregate, env: Env): ContextStampIR[] | undefined {
-  const bag = capabilitiesFor(agg);
-  if (bag.stamps.length === 0) return undefined;
-  return bag.stamps.map((s) => ({
-    event: s.event,
+const EMPTY_CONTEXT_CAPABILITIES: ContextLevelCapabilities = Object.freeze({
+  filters: [],
+  stamps: [],
+  implementsCaps: [],
+}) as ContextLevelCapabilities;
+
+/** Scan a BoundedContext's members for FilterDecl/StampDecl/
+ * ImplementsDecl nodes, lower them in the context's env, and return
+ * them as a bundle for propagation to every aggregate inside.  This
+ * is the source-level mechanism behind "context Sales { filter ... }"
+ * — the capability lowers once at the context layer and applies to
+ * each aggregate as if the user had written it per-aggregate. */
+function collectContextLevelCapabilities(
+  ctx: BoundedContext,
+  env: Env,
+): ContextLevelCapabilities {
+  const filters: ExprIR[] = [];
+  const stamps: ContextStampIR[] = [];
+  const implementsCaps: string[] = [];
+  for (const m of ctx.members ?? []) {
+    if (m.$type === "FilterDecl") {
+      filters.push(lowerExpr((m as { expr: Expression }).expr, env));
+    } else if (m.$type === "StampDecl") {
+      stamps.push(lowerStampDecl(m as unknown as StampDeclLike, env));
+    } else if (m.$type === "ImplementsDecl") {
+      implementsCaps.push((m as { name: string }).name);
+    }
+  }
+  return { filters, stamps, implementsCaps };
+}
+
+function collectFilters(
+  agg: Aggregate,
+  env: Env,
+  propagated: readonly ExprIR[],
+): ExprIR[] {
+  const own = (agg.members ?? [])
+    .filter((m) => m.$type === "FilterDecl")
+    .map((m) => lowerExpr((m as { expr: Expression }).expr, env));
+  return [...propagated, ...own];
+}
+
+function collectStamps(
+  agg: Aggregate,
+  env: Env,
+  propagated: readonly ContextStampIR[],
+): ContextStampIR[] {
+  const own = (agg.members ?? [])
+    .filter((m) => m.$type === "StampDecl")
+    .map((m) => lowerStampDecl(m as unknown as StampDeclLike, env));
+  return [...propagated, ...own];
+}
+
+function collectImplements(agg: Aggregate, propagated: readonly string[]): string[] {
+  const own = (agg.members ?? [])
+    .filter((m) => m.$type === "ImplementsDecl")
+    .map((m) => (m as { name: string }).name);
+  // Dedupe + sort so generators get a deterministic order regardless
+  // of declaration source (context vs aggregate vs macro emission).
+  return [...new Set([...propagated, ...own])].sort();
+}
+
+/** Shape we rely on from a `StampDecl` AST node.  Local alias so the
+ * import surface stays narrow. */
+interface StampDeclLike {
+  event: "onCreate" | "onUpdate";
+  assignments: Array<{ target: { head: string }; value?: Expression }>;
+}
+
+function lowerStampDecl(s: StampDeclLike, env: Env): ContextStampIR {
+  // The grammar's `stamp <event> { <assign>* }` produces a sequence
+  // of `AssignOrCallStmt` nodes whose LValue is a single-segment
+  // path (the target field name) and whose value is the assigned
+  // expression.  Both sides are lowered through the existing
+  // operation-body pipeline.  Stamps with chained / multi-segment
+  // targets (`this.foo.bar`) are flagged by the validator.
+  return {
+    event: s.event === "onCreate" ? "create" : "update",
     assignments: s.assignments.map((a) => ({
-      field: a.field,
-      value: lowerExpr(a.value, env),
+      field: a.target.head,
+      value: a.value ? lowerExpr(a.value, env) : (lowerExpr(undefined, env) as never),
     })),
-  }));
+  };
 }
 
 function lowerTest(block: TestBlock, env: Env): TestIR {

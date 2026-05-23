@@ -23,8 +23,7 @@ export {
   contextStamp,
   field,
   idRef,
-  isContextFilter,
-  isContextStamp,
+  implementsCapability,
   memberAccess,
   nameRef,
   namedType,
@@ -40,11 +39,7 @@ export {
   workflowsIn,
   writableUserFields,
 } from "./factories.js";
-export type {
-  ContextFilterNode,
-  ContextStampAssignment,
-  ContextStampNode,
-} from "./factories.js";
+export type { ContextStampAssignment } from "./factories.js";
 
 // UI-side factories — separate file because the surfaces don't
 // overlap and bundling everything into one file makes both harder

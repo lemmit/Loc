@@ -426,84 +426,89 @@ export function nullLit(): import("../language/generated/ast.js").NullLit {
 // authors that need them just import from the macro-api index.
 
 // ---------------------------------------------------------------------------
-// Capability nodes — typed contributions returned from `expand()` that
-// the expander routes into per-host capability bags instead of
-// splicing into the host's `members` array.
-//
-// Capabilities carry AST expressions that the IR layer lowers
-// through `lowerExpr` / `lowerStatement` after the linker resolves
-// references.  Generators receive the lowered IR and translate it
-// through their normal expression/statement rendering paths.  No
-// backend knows what "auditable" or "softDelete" means — they just
-// see "N filter predicates" and "M stamping assignments per event".
+// Capability factories — produce real `FilterDecl` / `StampDecl` /
+// `ImplementsDecl` AST nodes that the expander splices into the
+// host's `members` array, exactly like Property / Operation.  No
+// side table, no special bag mechanism — capabilities are first-
+// class source members.  These factories are sugar over the same
+// AST a user could hand-write inside an aggregate or context block.
 // ---------------------------------------------------------------------------
 
-/** "Hide rows matching this predicate from default reads."  Used
- * by softDeletable to install a query filter; tenantOwned and
- * similar capabilities use the same mechanism with different
- * predicates.  The predicate is a Loom Expression — `this` resolves
- * to the row being filtered.  Backends translate to their query
- * layer's filter API (.NET: `HasQueryFilter`; Drizzle: a wrapper
- * around `where`; Ecto: a base query helper). */
-export interface ContextFilterNode {
-  readonly $type: "ContextFilter";
-  readonly predicate: Expression;
-  readonly $origin?: OriginToken;
-}
+type FilterDeclAst = import("../language/generated/ast.js").FilterDecl;
+type StampDeclAst = import("../language/generated/ast.js").StampDecl;
+type ImplementsDeclAst = import("../language/generated/ast.js").ImplementsDecl;
 
-export function contextFilter(
-  predicate: Expression,
-): ContextFilterNode & AggregateMember {
+/** Construct a `filter <expr>` aggregate / context member.
+ * Equivalent to writing `filter <expr>` directly in source. */
+export function contextFilter(predicate: Expression): FilterDeclAst & AggregateMember {
   const origin = currentOrigin();
-  const n: ContextFilterNode = {
-    $type: "ContextFilter",
-    predicate,
-    ...(origin ? { $origin: origin } : {}),
-  };
-  // We don't `setContainer` on `predicate` — it has its own subtree
-  // ownership.  The expander rebuilds containers when it lowers.
-  return n as unknown as ContextFilterNode & AggregateMember;
+  const node: FilterDeclAst = tag(
+    { $type: "FilterDecl", expr: predicate } as unknown as FilterDeclAst,
+    origin,
+  );
+  setContainer(predicate, node, "expr");
+  return node as unknown as FilterDeclAst & AggregateMember;
 }
 
-/** "On these lifecycle events, assign these field/value pairs."
- * Used by auditable to stamp createdAt/updatedAt etc.; future
- * macros (lastModifiedBy, versionBump) plug into the same shape.
- * Each event maps to a list of (field, value-expression) pairs;
- * backends translate via their per-entity stamping path
- * (.NET: SaveChangesInterceptor + per-type registry;
- * Drizzle: insert/update middleware; Ecto: changeset). */
+/** One field/value pair inside a `stamp onCreate { ... }` /
+ * `stamp onUpdate { ... }` body. */
 export interface ContextStampAssignment {
   readonly field: string;
   readonly value: Expression;
 }
 
-export interface ContextStampNode {
-  readonly $type: "ContextStamp";
-  readonly onCreate?: ReadonlyArray<ContextStampAssignment>;
-  readonly onUpdate?: ReadonlyArray<ContextStampAssignment>;
-  readonly $origin?: OriginToken;
-}
-
+/** Construct one or two `stamp <event> { ... }` aggregate / context
+ * members from the spec.  Each event with at least one assignment
+ * yields a StampDecl AST node; the expander splices each separately.
+ * Returns a single node when only one event is set; tuple-array
+ * otherwise — the macro author returns it via spread (`...stamps(...)`)
+ * if they want one helper for both events, or constructs two stamp
+ * nodes manually.  The single-array signature keeps macro source
+ * concise for the common auditable shape. */
 export function contextStamp(spec: {
   onCreate?: ContextStampAssignment[];
   onUpdate?: ContextStampAssignment[];
-}): ContextStampNode & AggregateMember {
+}): Array<StampDeclAst & AggregateMember> {
+  const out: Array<StampDeclAst & AggregateMember> = [];
+  if (spec.onCreate?.length) out.push(buildStamp("onCreate", spec.onCreate));
+  if (spec.onUpdate?.length) out.push(buildStamp("onUpdate", spec.onUpdate));
+  return out;
+}
+
+function buildStamp(
+  event: "onCreate" | "onUpdate",
+  assignments: ContextStampAssignment[],
+): StampDeclAst & AggregateMember {
   const origin = currentOrigin();
-  const n: ContextStampNode = {
-    $type: "ContextStamp",
-    onCreate: spec.onCreate,
-    onUpdate: spec.onUpdate,
-    ...(origin ? { $origin: origin } : {}),
-  };
-  return n as unknown as ContextStampNode & AggregateMember;
+  // Each ContextStampAssignment becomes an AssignOrCallStmt:
+  // `<field> := <value>`.  Reuses the same factory operation bodies
+  // use, so the resulting AssignOrCallStmt lowers through the
+  // existing `lowerStatement` path.
+  const stmts = assignments.map((a) => assignStmt(a.field, a.value));
+  const node: StampDeclAst = tag(
+    {
+      $type: "StampDecl",
+      event,
+      assignments: stmts,
+    } as unknown as StampDeclAst,
+    origin,
+  );
+  stmts.forEach((s, i) => setContainer(s, node, "assignments", i));
+  return node as unknown as StampDeclAst & AggregateMember;
 }
 
-export function isContextFilter(node: unknown): node is ContextFilterNode {
-  return !!node && typeof node === "object" && (node as any).$type === "ContextFilter";
-}
-
-export function isContextStamp(node: unknown): node is ContextStampNode {
-  return !!node && typeof node === "object" && (node as any).$type === "ContextStamp";
+/** Construct an `implements "<name>"` aggregate / context member —
+ * opts the host into a capability group with the given name.
+ * Generators translate the name by convention (.NET adds an
+ * `I` prefix → `IAuditable`) and emit one shared infrastructure
+ * block per name (e.g. one HasQueryFilter loop in OnModelCreating). */
+export function implementsCapability(name: string): ImplementsDeclAst & AggregateMember {
+  const origin = currentOrigin();
+  const node: ImplementsDeclAst = tag(
+    { $type: "ImplementsDecl", name } as unknown as ImplementsDeclAst,
+    origin,
+  );
+  return node as unknown as ImplementsDeclAst & AggregateMember;
 }
 
 // ---------------------------------------------------------------------------

@@ -3,6 +3,7 @@ import {
   contextFilter,
   defineMacro,
   field,
+  implementsCapability,
   memberAccess,
   not,
   nullLit,
@@ -13,14 +14,12 @@ import {
 import { boolLit, callExpr } from "../macro-api/ui-factories.js";
 
 /** Marks an aggregate as soft-deletable.  Two fields, two
- * operations, and a `contextFilter` capability that hides
- * soft-deleted rows from default reads.
- *
- * The filter predicate is built as a Loom expression
- * (`!this.isDeleted`); backends translate via their normal
- * expression renderer (.NET: `HasQueryFilter`; Drizzle: query
- * wrapper; Ecto: base query).  The compiler does not know what
- * "soft delete" means — it just sees a filter predicate. */
+ * operations, a `filter !this.isDeleted` capability that hides
+ * soft-deleted rows, and an `implements "softDeletable"` tag so
+ * generators group runtime infrastructure (.NET emits one
+ * OnModelCreating filter loop scoped by `ISoftDeletable`).  The
+ * macro is sugar over hand-written `filter` / `implements` source —
+ * a user can write the same aggregate without using the macro. */
 export default defineMacro({
   name: "softDeletable",
   target: "aggregate",
@@ -40,6 +39,7 @@ export default defineMacro({
         assignStmt("isDeleted", boolLit(false)),
         assignStmt("deletedAt", nullLit()),
       ]),
+      implementsCapability("softDeletable"),
       contextFilter(not(memberAccess(thisRef(), "isDeleted"))),
     ];
   },

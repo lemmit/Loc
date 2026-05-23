@@ -185,25 +185,37 @@ export interface AggregateIR {
    * Populated by `enrichLoomModel`; one entry per reference-collection
    * field.  Empty array when the aggregate has none. */
   associations?: AssociationIR[];
-  /** Filter predicates contributed by macros via `contextFilter(...)`.
-   * Each entry is a lowered Loom expression evaluated against a
-   * lambda-bound row in the query layer.  Generators install them
-   * via their query-filter API (.NET: `HasQueryFilter`; Drizzle:
-   * `where(not(...))` wrappers; Ecto: a base query helper).
+  /** Filter predicates contributed by `filter <expr>` declarations
+   * (hand-written or macro-emitted) on the aggregate, plus any
+   * propagated from the enclosing context.  Each entry is a lowered
+   * Loom expression evaluated against a lambda-bound row in the
+   * query layer.  Backends install them via their query-filter API
+   * (.NET: per-capability `HasQueryFilter` loops in OnModelCreating;
+   * Drizzle: query wrapper; Ecto: base query helper).
    *
-   * Composes additively — N filters from N macros become N
-   * conjunctively-applied predicates at the storage layer. */
+   * Composes additively — N filters become N conjunctively-applied
+   * predicates at the storage layer. */
   contextFilters?: ExprIR[];
-  /** Lifecycle stamping rules contributed by macros via
-   * `contextStamp({ onCreate, onUpdate })`.  Each rule lists
-   * field/value pairs to assign at the matching lifecycle event.
-   * Generators iterate this in their per-entity stamping path
-   * (.NET: registry-driven SaveChangesInterceptor; Drizzle:
-   * insert/update middleware; Ecto: changeset functions).
+  /** Lifecycle stamping rules contributed by `stamp onCreate { ... }`
+   * / `stamp onUpdate { ... }` declarations (hand-written or
+   * macro-emitted) on the aggregate, plus any propagated from the
+   * enclosing context.  Each rule lists field/value pairs to assign
+   * at the matching lifecycle event.  Backends iterate this in their
+   * per-entity stamping path (.NET: registry-driven
+   * SaveChangesInterceptor; Drizzle: insert/update middleware;
+   * Ecto: changeset functions).
    *
-   * Composes additively — N stamping macros yield N rule sets
+   * Composes additively — N stamping declarations yield N rule sets
    * concatenated per event. */
   contextStamps?: ContextStampIR[];
+  /** Capability names this aggregate opts into via
+   * `implements "<name>"`.  Backends translate by convention to a
+   * marker interface / type alias / behaviour, and group runtime
+   * infrastructure by capability name (.NET: one `OnModelCreating`
+   * filter loop per capability, scoped by `Entries<I<Cap>>()`).
+   * Sorted + deduped at lowering time.  Undefined when the
+   * aggregate names no capabilities. */
+  implementsCapabilities?: readonly string[];
 }
 
 /** A single stamping rule attached to an aggregate.  Backends

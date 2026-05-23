@@ -30,7 +30,7 @@
 import type { AstNode, LangiumDocument } from "langium";
 import { AstUtils, DocumentState } from "langium";
 import type { LangiumSharedServices } from "langium/lsp";
-import { isContextFilter, isContextStamp, _withOrigin } from "../macro-api/factories.js";
+import { _withOrigin } from "../macro-api/factories.js";
 import type {
   MacroDefinition,
   OriginToken,
@@ -57,40 +57,11 @@ import {
 import type { NamedDeclKind } from "../macro-api/define.js";
 import { allMacros, lookupMacro } from "./macro-registry.js";
 
-// ---------------------------------------------------------------------------
-// Side-table — capabilities per host node, populated by
-// contextFilter() / contextStamp() factories.  Lowered into
-// AggregateIR.contextFilters / .contextStamps by lower.ts using the
-// aggregate-scoped Env, after the linker resolves references.
-// ---------------------------------------------------------------------------
-
-const _capabilitiesByHost = new WeakMap<object, CapabilityBag>();
-
-/** Per-host capability bag.  Stores raw Expression AST so the IR
- * layer can lower with a proper Env (lambdas, this-prop resolution,
- * currentUser binding) instead of the expander building a synthetic
- * one before the linker has run. */
-export interface CapabilityBag {
-  readonly filters: import("./generated/ast.js").Expression[];
-  readonly stamps: Array<{
-    event: "create" | "update";
-    assignments: Array<{
-      field: string;
-      value: import("./generated/ast.js").Expression;
-    }>;
-  }>;
-}
-
-/** Lower-side hook: read capability contributions for a given host
- * AST node.  Returns an empty bag if no macros have run on it. */
-export function capabilitiesFor(host: object): CapabilityBag {
-  let bag = _capabilitiesByHost.get(host);
-  if (!bag) {
-    bag = { filters: [], stamps: [] };
-    _capabilitiesByHost.set(host, bag);
-  }
-  return bag;
-}
+// Side-table mechanism removed: capabilities are now first-class
+// AST members (FilterDecl / StampDecl / ImplementsDecl) spliced into
+// the host's `members[]` array, indistinguishable from user-written
+// ones.  Lowering reads structurally — see `lowerAggregate` and
+// `lowerContext` in `src/ir/lower.ts`.
 
 // ---------------------------------------------------------------------------
 // Diagnostic accumulation — surfaced through document parseResult.
@@ -270,36 +241,19 @@ function expandOneCall(
     return;
   }
 
-  // Partition the macro's return value into:
-  //   - capability contributions (contextFilter / contextStamp) →
-  //     stashed on the per-host CapabilityBag for the lowerer to
-  //     pull through lowerExpr with a proper Env
-  //   - regular AST members → spliced into the host's `members[]`
-  // The split is by $type discriminator, set by each factory.
-  const realMembers: unknown[] = [];
-  const capBag = capabilitiesFor(host);
+  // Every item returned from `expand()` is now a regular AST
+  // member — including capability nodes (FilterDecl / StampDecl /
+  // ImplementsDecl), which the factories produce as real members
+  // rather than tagged pseudo-members.  Flatten one level so
+  // helper factories that return arrays (e.g. `contextStamp` emits
+  // one node per event, returned as a tuple) can be spread or
+  // returned directly.
+  const flat: unknown[] = [];
   for (const item of produced) {
-    if (isContextFilter(item)) {
-      capBag.filters.push(item.predicate);
-    } else if (isContextStamp(item)) {
-      if (item.onCreate?.length) {
-        capBag.stamps.push({
-          event: "create",
-          assignments: item.onCreate.map((a) => ({ field: a.field, value: a.value })),
-        });
-      }
-      if (item.onUpdate?.length) {
-        capBag.stamps.push({
-          event: "update",
-          assignments: item.onUpdate.map((a) => ({ field: a.field, value: a.value })),
-        });
-      }
-    } else {
-      realMembers.push(item);
-    }
+    if (Array.isArray(item)) flat.push(...item);
+    else flat.push(item);
   }
-
-  spliceMembers(host, hostKind, realMembers, call, doc);
+  spliceMembers(host, hostKind, flat, call, doc);
 }
 
 function spliceMembers(
