@@ -275,7 +275,11 @@ function emitOperationCommandsAndHandlers(
           handlerName: `${upperFirst(op.name)}Handler`,
           commandName: `${upperFirst(op.name)}Command`,
           extraDeps: [{ type: ifaceName, field: "_user" }, ...userExtraDeps],
-          extraUsings: [`${ns}.Application.${plural(agg.name)}.Handlers`, ...userExtraUsings],
+          extraUsings: [
+            `${ns}.Application.${plural(agg.name)}.Handlers`,
+            `${ns}.Application.${plural(agg.name)}.Requests`,
+            ...userExtraUsings,
+          ],
           // Wrap the user's HandleAsync in try/catch so any
           // non-domain exception rethrows as ExternHandlerException
           // (mapped by DomainExceptionFilter to a descriptive 500).
