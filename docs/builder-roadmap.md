@@ -439,6 +439,39 @@ Open:
   are inherently not single-drag rebindable — they stay inspector / statement
   editors.
 
+## Model builder v2 (drill-down React Flow)
+
+v1 is the existing "Model" tab; v2 is being built in `web/src/builder/system-v2/`
+behind a separate "Model v2" tab in both shells. v1 stays untouched and
+shippable until v2 reaches parity (Phase 4); they coexist meanwhile.
+
+The shape: the canvas is the navigator. You drill down through Loom's hierarchy
+(system → module → context → aggregate → operation) via double-click / a "↳"
+handle, and back up via a breadcrumb. The leaf — an operation or workflow — is
+a vertical React Flow of statement nodes, each embedding the existing inline
+`ƒx` editors from v1. Expression-as-flow stays deferred (wait-and-see; the
+architecture accommodates it later without rework).
+
+Phasing:
+
+- ~~**Phase 0** — skeleton tab + wiring.~~ Done: lazy-loaded
+  `SystemBuilderV2Pane` mounts under "Model v2" in DesktopShell + MobileShell;
+  reads `ctx.getSource()` and shows top-level construct counts as proof of
+  flow. Gated by `web/e2e/system-builder-v2.spec.ts`.
+- **Phase 1** — drill-down backbone (read-only): system → context → aggregate
+  views with breadcrumb. Aggregate view shows operations + properties + events
+  as nodes. Reuses `model.ts` walks + naming helpers.
+- **Phase 2** — operation / workflow flow view (the statement flow); custom
+  React Flow node containing the inline `ƒx` editor. Reuses `body.ts` +
+  `ExpressionEditor.tsx`.
+- **Phase 3** — in-canvas edits at higher levels (rename, add, delete,
+  drag-rebind per view).
+- **Phase 4** — long-tail parity with v1 (fields / finds / deployable bindings
+  / emit repointing as per-node interactions). Once landed, v1 can be
+  deprecated.
+- **Phase 5** — polish: per-view positions, search / coverage / grouped layout
+  adapted per zoom level, transitions on drill, mobile passes.
+
 Planned — recommended order:
 
 1. ~~**Finish expression/statement structuring**~~ — done: block-body lambdas,

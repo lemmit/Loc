@@ -6,6 +6,7 @@ import { lazy, Suspense, useMemo, useState, type ReactNode } from "react";
 const BuilderPane = lazy(() => import("../builder/BuilderPane"));
 // React Flow + the structural graph land only when the Model tab is opened.
 const SystemBuilderPane = lazy(() => import("../builder/system/SystemBuilderPane"));
+const SystemBuilderV2Pane = lazy(() => import("../builder/system-v2/SystemBuilderV2Pane"));
 import {
   Group,
   Panel,
@@ -62,7 +63,7 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
   // Center area shows either the editable source (main.ddd) or a
   // read-only view of a file opened from the Explorer.  The editor
   // stays mounted underneath so Monaco keeps its model + undo history.
-  const [centerView, setCenterView] = useState<"source" | "secondary" | "builder" | "model">("source");
+  const [centerView, setCenterView] = useState<"source" | "secondary" | "builder" | "model" | "model-v2">("source");
   const [secondaryDoc, setSecondaryDoc] = useState<SecondaryDoc | null>(null);
   const [explorerMode, setExplorerMode] = usePersistedState<ExplorerMode>(
     "loom.desktop.explorerMode",
@@ -235,11 +236,12 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
                     <SegmentedControl
                       size="xs"
                       value={centerView === "secondary" ? "" : centerView}
-                      onChange={(v) => setCenterView(v as "source" | "builder" | "model")}
+                      onChange={(v) => setCenterView(v as "source" | "builder" | "model" | "model-v2")}
                       data={[
                         { value: "source", label: <span data-testid="doc-tab-source">Source</span> },
                         { value: "builder", label: <span data-testid="doc-tab-builder">Builder</span> },
                         { value: "model", label: <span data-testid="doc-tab-model">Model</span> },
+                        { value: "model-v2", label: <span data-testid="doc-tab-model-v2">Model v2</span> },
                       ]}
                     />
                     {secondaryDoc && (
@@ -267,6 +269,13 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
                     <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
                       <Suspense fallback={<Box p="md"><Text size="sm" c="dimmed">Loading model…</Text></Box>}>
                         <SystemBuilderPane ctx={ctx} />
+                      </Suspense>
+                    </Box>
+                  )}
+                  {centerView === "model-v2" && (
+                    <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
+                      <Suspense fallback={<Box p="md"><Text size="sm" c="dimmed">Loading model v2…</Text></Box>}>
+                        <SystemBuilderV2Pane ctx={ctx} />
                       </Suspense>
                     </Box>
                   )}
