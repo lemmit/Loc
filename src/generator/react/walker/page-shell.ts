@@ -225,7 +225,7 @@ export function renderCustomLayoutPage(
     .join("");
   // RHF wiring when the body included `Form(of:)` /
   // `Form(runs:)` / `Form(of:, op:)` primitives.  Emits the
-  // mutation-hook import, per-Id<X> target `useAllX()` hooks, the
+  // mutation-hook import, per-X id target `useAllX()` hooks, the
   // `useForm` declaration, and the `react-hook-form` import.  A
   // detail page can host several forms (one per operation modal)
   // plus its QueryView, so wiring is concatenated across every
@@ -702,7 +702,7 @@ function zeroValueForType(type: TypeIR): string {
 /** Render a `ParamIR` (route param) as the TS type the
  *  `useParams<{...}>()` generic should declare for it.  Every route
  *  param is `string` at the React-Router level; the original Loom
- *  type intent (e.g. `Id<Order>`) is preserved in the IR but doesn't
+ *  type intent (e.g. `Order id`) is preserved in the IR but doesn't
  *  affect the typed-useParams shape today.
  *  A future change can layer `z.coerce` or similar at the page-
  *  shell to convert to the declared types. */

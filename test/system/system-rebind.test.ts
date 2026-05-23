@@ -35,9 +35,9 @@ describe("System builder — rebind a construct's reference", () => {
   it("rebinds a repository's target aggregate", () => {
     const out = rebindReference(sales, "repository", "Orders", "Customer");
     expect(out).toMatch(/repository Orders for Customer\b/);
-    // The find params inside the body (Id<Customer>) are untouched — only the
+    // The find params inside the body (Customer id) are untouched — only the
     // `for` reference token moved.
-    expect(out).toMatch(/find byCustomer\(customerId: Id<Customer>\)/);
+    expect(out).toMatch(/find byCustomer\(customerId: Customer id\)/);
   });
 
   it("rebinds a view's source aggregate", () => {

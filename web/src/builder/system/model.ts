@@ -208,14 +208,14 @@ export function nodeDiagnostics<D extends LineRanged>(graph: SystemGraph, diagno
 
 // --- wire-shape (DTO) preview ----------------------------------------------
 
-/** A compact, source-faithful label for an IR type (`Id<Order>`, `Money[]`,
+/** A compact, source-faithful label for an IR type (`Order id`, `Money[]`,
  *  `string?`), for showing a construct's wire shape in the inspector. */
 export function typeLabel(t: TypeIR): string {
   switch (t.kind) {
     case "primitive":
       return t.name;
     case "id":
-      return `Id<${t.targetName}>`;
+      return `${t.targetName} id`;
     case "enum":
     case "valueobject":
     case "entity":

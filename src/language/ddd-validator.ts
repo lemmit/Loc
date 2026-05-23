@@ -110,6 +110,9 @@ export class DddValidator {
     // semantic constraints (allowed keys / enum values / required
     // props / parent acyclicity) are enforced here.
     this.checkTraceability(model, accept);
+    // Type-position references: bare aggregate name (must be `X id`),
+    // and cross-aggregate entity-part name (must go through the root).
+    this.checkTypeReferences(model, accept);
     for (const m of model.members) {
       if (m.$type === "BoundedContext") {
         this.checkContext(m, accept);
@@ -971,6 +974,15 @@ export class DddValidator {
   }
 
   private checkContainment(c: Containment, agg: Aggregate, accept: ValidationAcceptor) {
+    // An empty collection already encodes absence, so `[]?` is redundant
+    // and almost certainly a mistake — reject it with a fixit pointer.
+    if (c.collection && c.optional) {
+      accept(
+        "error",
+        `Containment '${c.name}' is both a collection and optional — an empty collection already encodes absence; drop the '?'.`,
+        { node: c, property: "optional" },
+      );
+    }
     const part = c.partType?.ref;
     if (!part) return;
     // Scope provider already restricts to local parts; this is a friendly
@@ -979,9 +991,70 @@ export class DddValidator {
     if (owner !== agg) {
       accept(
         "error",
-        `Cannot 'contain' part '${part.name}' — it belongs to aggregate '${owner?.name ?? "?"}'. Use Id<${part.name}> for cross-aggregate links.`,
+        `Cannot 'contain' part '${part.name}' — it belongs to aggregate '${owner?.name ?? "?"}'. Use '${owner?.name ?? "?"} id' for a cross-aggregate link.`,
         { node: c, property: "partType" },
       );
+    }
+  }
+
+  private checkTypeReferences(model: Model, accept: ValidationAcceptor): void {
+    for (const node of AstUtils.streamAllContents(model)) {
+      if (node.$type !== "NamedType") continue;
+      // Only fire on storage/wire-data positions — Property fields,
+      // event/storage UserFields, and operation/function/page Parameters.
+      // Find/Function return types and Derived/View/State projections may
+      // legitimately reference an aggregate as a domain object.
+      const typeRef = node.$container;
+      const holder = typeRef?.$container;
+      if (!holder) continue;
+      // Storage / wire-data slots: aggregate Property fields, event
+      // UserFields, and Operation/Function/Find/Workflow Parameters
+      // (domain-side signatures).  UI Parameters (Page/Component) and
+      // Find/Function return types may legitimately reference an
+      // aggregate as a domain object reference.
+      let isStoragePos: boolean;
+      switch (holder.$type) {
+        case "Property":
+        case "UserField":
+          isStoragePos = true;
+          break;
+        case "Parameter": {
+          const owner = holder.$container?.$type;
+          isStoragePos =
+            owner === "Operation" ||
+            owner === "FunctionDecl" ||
+            owner === "Find" ||
+            owner === "Workflow";
+          break;
+        }
+        default:
+          isStoragePos = false;
+      }
+      if (!isStoragePos) continue;
+      const target = (node as { target?: { ref?: AstNode } }).target?.ref;
+      if (!target) continue;
+      // Bare aggregate name in type position: must be spelt `X id`.
+      if (isAggregate(target)) {
+        const aggName = target.name;
+        accept(
+          "error",
+          `References across aggregate boundaries need an id link — write '${aggName} id' (or '${aggName} id[]' for many-to-many).`,
+          { node, property: "target" },
+        );
+        continue;
+      }
+      // Entity-part from a different aggregate: must go through the root.
+      if (isEntityPart(target)) {
+        const enclosing = AstUtils.getContainerOfType(node, isAggregate);
+        const owner = AstUtils.getContainerOfType(target, isAggregate);
+        if (enclosing && owner && enclosing !== owner) {
+          accept(
+            "error",
+            `Entity part '${target.name}' belongs to aggregate '${owner.name}'; cross-aggregate references must go through the root: use '${owner.name} id'.`,
+            { node, property: "target" },
+          );
+        }
+      }
     }
   }
 

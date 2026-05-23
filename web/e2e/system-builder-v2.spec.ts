@@ -277,7 +277,7 @@ test("Model v2 shows inline modules / serves multi-selects on a deployable", asy
   await expect(dep.getByTestId("c4system-v2-deployable-serves")).toBeVisible();
 });
 
-test("Model v2 surfaces invariants as nodes in the aggregate view", async ({ page }) => {
+test("Model v2 surfaces invariants as nodes and edits the condition inline", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);
   await selectExample(page, /Banking System/);
@@ -292,6 +292,34 @@ test("Model v2 surfaces invariants as nodes in the aggregate view", async ({ pag
 
   const invariants = page.locator('[data-construct-kind="invariant"]');
   await expect.poll(async () => invariants.count(), { timeout: 5_000 }).toBeGreaterThan(0);
+
+  // The first invariant exposes the ƒx toggle → opens the structured editor.
+  const first = invariants.first();
+  await first.getByTestId("c4system-v2-expr-toggle").click();
+  await expect(first.getByTestId("c4system-v2-expression-editor")).toBeVisible({ timeout: 10_000 });
+});
+
+test("Model v2 edits a repository find's filter inline", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  // Acme has repositories with finds and filters; storefront-dotnet also.
+  await selectExample(page, /Acme/);
+  await page.getByTestId("doc-tab-model-v2").click();
+  await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
+
+  // Drill to the first repository node (acme has `repository Products` /
+  // `repository Orders`) and into its find list.
+  await page.locator('.react-flow__node[data-id^="system:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="module:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="context:"]').first().click();
+  const repo = page.locator('[data-construct-kind="repository"]').first();
+  await expect(repo).toBeVisible();
+  await repo.click();
+
+  const find = page.locator('[data-construct-kind="find"]').first();
+  await expect(find).toBeVisible();
+  await find.getByTestId("c4system-v2-expr-toggle").click();
+  await expect(find.getByTestId("c4system-v2-expression-editor")).toBeVisible({ timeout: 10_000 });
 });
 
 test("Model v2 repoints an emit statement's event inline", async ({ page }) => {

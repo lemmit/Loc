@@ -45,13 +45,13 @@ ui SalesAdmin {
   // ── 3. Master-detail page ───────────────────────────────────────
   // Mixes a repo find + selection state + a custom detail panel.
   // Replaces the auto-scaffolded OrderDetail by name.
-  page OrderConsole(customerId: Id<Customer>) {
+  page OrderConsole(customerId: Customer id) {
     route:    "/customers/:customerId/orders"
     title:    "Orders for " + customer.name
     requires  currentUser.permissions.contains(sales.viewOrders)
 
     state {
-      selectedId: Id<Order>?
+      selectedId: Order id?
     }
 
     body: MasterDetail(
@@ -74,7 +74,7 @@ ui SalesAdmin {
     menu   { section: "Sales", label: "All orders" }
   }
 
-  page OrderDetail(id: Id<Order>) {
+  page OrderDetail(id: Order id) {
     route: "/orders/:id"
     body:  Detail(of: Order, by: id)
     menu   { hidden: true }                      // reached via row-click only
@@ -189,7 +189,7 @@ ui SalesAdmin {
 //                               body:  List(of: Product) }
 //   page CatalogProductNew    { route: "/catalog/products/new",
 //                               body:  Form(creates: Product) }
-//   page CatalogProductDetail(id: Id<Product>) {
+//   page CatalogProductDetail(id: Product id) {
 //                               route: "/catalog/products/:id",
 //                               body:  Detail(of: Product, by: id) }
 //

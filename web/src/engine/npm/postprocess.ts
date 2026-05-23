@@ -22,6 +22,22 @@ import { pgliteImportMetaUrl } from "../../bundle/plugin.js";
 const NPM_PGLITE_NODE_DETECTION =
   /typeof process\.versions\.node\s*==\s*"string"/g;
 
+// Tiny `process` shim prepended to every bundle.  GUARDED: in real
+// Node (the smoke script's host) `process` already exists, so the
+// guard is false and the shim is a no-op — Node's real process /
+// stdio / cwd / fs handles stay intact.  In a browser worker the
+// guard fires and installs an `env: {}` placeholder so generated
+// code's `process.env.LOG_LEVEL ?? "info"` (and any other future
+// `process.env.X` read pino's browser entry or our own emitters
+// might make) resolves to undefined instead of throwing
+// "Can't find variable: process" at module init.
+const PROCESS_SHIM = [
+  "if (typeof process === 'undefined') {",
+  "  globalThis.process = { env: {}, browser: true, versions: {} };",
+  "}",
+  "",
+].join("\n");
+
 export function postProcessNpmBundle(code: string): string {
   const urlHits = (code.match(/import\.meta\.url/g) ?? []).length;
   if (urlHits === 0) {
@@ -39,7 +55,10 @@ export function postProcessNpmBundle(code: string): string {
         "and update NPM_PGLITE_NODE_DETECTION before trusting boot.",
     );
   }
-  return code
-    .replace(NPM_PGLITE_NODE_DETECTION, "false")
-    .replaceAll("import.meta.url", JSON.stringify(pgliteImportMetaUrl()));
+  return (
+    PROCESS_SHIM +
+    code
+      .replace(NPM_PGLITE_NODE_DETECTION, "false")
+      .replaceAll("import.meta.url", JSON.stringify(pgliteImportMetaUrl()))
+  );
 }

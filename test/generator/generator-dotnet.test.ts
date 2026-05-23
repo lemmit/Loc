@@ -299,8 +299,275 @@ describe(".NET generator", () => {
       expect(filter).toMatch(/context\.Exception is ExternHandlerException xh/);
       expect(filter).toMatch(/error = xh\.Message/);
       expect(filter).toMatch(/StatusCode = 500/);
-      // Logs the inner cause server-side with the structured fields.
-      expect(filter).toMatch(/_log\.LogError\(xh, "Extern handler \{Op\} on \{Agg\} threw"/);
+      // Logs the inner cause server-side via the neutral log-event
+      // catalog (Phase 8 .NET).  Template uses `{Event}` head + per-field
+      // `{Pascal}` placeholders so a Serilog/structured sink can filter
+      // on `Event = "extern_handler_threw"` — same identity the Hono
+      // pino payload's `event` key carries.
+      expect(filter).toMatch(
+        /_log\.LogError\(xh, "\{Event\} aggregate=\{Aggregate\} op=\{Op\} error=\{Error\}", "extern_handler_threw", xh\.AggName, xh\.OpName, xh\.Message\);/,
+      );
+      // Fallback 500 — same catalog idiom, internal_error event.
+      expect(filter).toMatch(
+        /_log\.LogError\(context\.Exception, "\{Event\} error=\{Error\} status=\{Status\}", "internal_error", context\.Exception\.Message, 500\);/,
+      );
+    });
+
+    it("--trace on: emits DomainLog accessor + DomainLogBehavior + domain trace injections", async () => {
+      // Phase 8 .NET domain-trace v1 — mirrors Hono Phase 6.  Aggregate
+      // methods can't take ILogger via constructor (they're POCO
+      // entities, not DI-managed), so the compile-time --trace
+      // switch emits a Domain/Common/DomainLog.cs static accessor
+      // backed by AsyncLocal<ILogger?>, a Mediator pipeline behavior
+      // that sets it per command/query from the request-scoped
+      // logger, and renders trace lines through DomainLog.LogTrace
+      // at the catalog's domain seams (value_computed after every
+      // scalar assign; precondition_evaluated as a bound-temp wrap).
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model, { emitTrace: true });
+
+      // 1. Accessor + behavior emitted.
+      const log = files.get("Domain/Common/DomainLog.cs")!;
+      expect(log).toMatch(/public static class DomainLog/);
+      expect(log).toMatch(/AsyncLocal<ILogger\?>/);
+      expect(log).toMatch(/public static void LogTrace\(string template, params object\[\] args\)/);
+
+      const behavior = files.get("Application/Common/DomainLogBehavior.cs")!;
+      expect(behavior).toMatch(/IPipelineBehavior<TMessage, TResponse>/);
+      expect(behavior).toMatch(/DomainLog\.Current = _log;/);
+      // Restores the previous value on exit so reentrant Send calls
+      // stack cleanly.
+      expect(behavior).toMatch(/var prev = DomainLog\.Current;/);
+      expect(behavior).toMatch(/DomainLog\.Current = prev;/);
+
+      // 2. Program.cs registers the pipeline behavior.
+      const program = files.get("Program.cs")!;
+      expect(program).toMatch(/typeof\(.+\.Application\.Common\.DomainLogBehavior<,>\)/);
+
+      // 3. Aggregate ops get value_computed + precondition_evaluated.
+      const order = files.get("Domain/Orders/Order.cs")!;
+      // precondition_evaluated — bound temp + trace + conditional throw.
+      expect(order).toMatch(/var __pre_\d+_ok = \(/);
+      expect(order).toMatch(
+        /DomainLog\.LogTrace\("\{Event\} aggregate=\{Aggregate\} op=\{Op\} expr=\{Expr\} passed=\{Passed\}", "precondition_evaluated", "Order", "[a-zA-Z]+", "[^"]+", __pre_\d+_ok\);/,
+      );
+      expect(order).toMatch(/if \(!__pre_\d+_ok\) throw new DomainException\(/);
+      // value_computed — appended after each scalar assign (the
+      // Confirm op assigns Status = OrderStatus.Confirmed).
+      expect(order).toMatch(
+        /DomainLog\.LogTrace\("\{Event\} aggregate=\{Aggregate\} field=\{Field\} value=\{Value\}", "value_computed", "Order", "status", Status\);/,
+      );
+    });
+
+    it("--trace off: domain layer stays free of DomainLog accessor + behavior + injections", async () => {
+      // The whole point of the compile-time switch — off path emits
+      // NOTHING domain-trace-related.  No DomainLog.cs, no behavior,
+      // no Program.cs registration, no LogTrace calls in entities.
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model); // no emitTrace
+      expect(files.has("Domain/Common/DomainLog.cs")).toBe(false);
+      expect(files.has("Application/Common/DomainLogBehavior.cs")).toBe(false);
+      const program = files.get("Program.cs")!;
+      expect(program).not.toMatch(/DomainLogBehavior/);
+      const order = files.get("Domain/Orders/Order.cs")!;
+      expect(order).not.toMatch(/DomainLog\./);
+      expect(order).not.toMatch(/__pre_\d+_ok/);
+      expect(order).not.toMatch(/precondition_evaluated/);
+      expect(order).not.toMatch(/value_computed/);
+    });
+
+    it("--trace on: operation routes emit wire_in after [FromBody] binding (lowerCamel param names)", async () => {
+      // Phase 8 .NET wire_in v1 — mirrors Hono Phase 6d.  The catalog's
+      // wire_in event surfaces the parsed request's structural shape
+      // (keys only, no values) right before operation_invoked.  Keys
+      // are the IR field names (lowerCamel), matching the JSON wire
+      // under ASP.NET's default JsonNamingPolicy.CamelCase — so the
+      // SAME `wire_in` event from Hono and .NET joins seamlessly on
+      // the wire-shape key set.
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model, { emitTrace: true });
+      const controller = files.get("Api/OrdersController.cs")!;
+      // sales.ddd's Order has `addLine(productId: Id<Product>, qty:
+      // int, price: Money)` — three lowerCamel param names.
+      expect(controller).toMatch(
+        /_log\.LogTrace\("\{Event\} keys=\{Keys\}", "wire_in", new\[\] \{ "productId", "qty", "price" \}\);/,
+      );
+      // And `confirm()` has zero params — Array.Empty<string>() is
+      // the safe empty form (the implicit `new[] { }` is a compile
+      // error: no element type to infer).
+      expect(controller).toMatch(
+        /_log\.LogTrace\("\{Event\} keys=\{Keys\}", "wire_in", System\.Array\.Empty<string>\(\)\);/,
+      );
+      // wire_in fires BEFORE operation_invoked at every op-route entry —
+      // mirroring the Hono order (shape first, narrative next).
+      const wireInAt = controller.search(/"wire_in"/);
+      const opInvokedAt = controller.search(/"operation_invoked"/);
+      expect(wireInAt).toBeGreaterThan(-1);
+      expect(wireInAt).toBeLessThan(opInvokedAt);
+    });
+
+    it("--trace off: controllers stay free of wire_in lines", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model); // no emitTrace
+      const controller = files.get("Api/OrdersController.cs")!;
+      expect(controller).not.toMatch(/wire_in/);
+      expect(controller).not.toMatch(/System\.Array\.Empty<string>/);
+    });
+
+    it("--trace on: AssertInvariants gains an __op param + emits invariant_evaluated per check", async () => {
+      // Phase 8 .NET invariants v1 — mirrors Hono Phase 6b.  Invariants
+      // run from a shared helper (`AssertInvariants`) that otherwise
+      // has no view of the calling op; under --trace the helper takes
+      // a `string __op` parameter threaded by every call site (ctor /
+      // hydration → "<init>", each public op → its own name), and
+      // each invariant body becomes a bound-temp + LogTrace +
+      // conditional throw triple.
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model, { emitTrace: true });
+      const order = files.get("Domain/Orders/Order.cs")!;
+
+      // Signature carries the __op param with the "<init>" default so
+      // any external caller (extern handlers) can still invoke
+      // AssertInvariants() without args.
+      expect(order).toMatch(/void AssertInvariants\(string __op = "<init>"\)/);
+      // Hydration + Create factory pass "<init>"; each op passes its
+      // own name.
+      expect(order).toMatch(/e\.AssertInvariants\("<init>"\);/);
+      expect(order).toMatch(/AssertInvariants\("confirm"\);/);
+
+      // GUARDED invariant on Order — `lines.count > 0 when status ==
+      // Confirmed`.  Under trace, the const+log+throw triple wraps
+      // INSIDE the guard's if-body so an inapplicable invariant
+      // doesn't pollute the stream.
+      expect(order).toMatch(
+        /if \(this\.Status == OrderStatus\.Confirmed\)[\s\S]+?var __inv_\d+_ok = \(this\.Lines\.Count > 0\);[\s\S]+?DomainLog\.LogTrace\([^)]+"invariant_evaluated", "Order", __op,/,
+      );
+
+      // OrderLine's unguarded invariant `quantity > 0` — straight
+      // triple, no guard wrap.
+      const orderLine = files.get("Domain/Orders/OrderLine.cs")!;
+      expect(orderLine).toMatch(/var __inv_\d+_ok = \(this\.Quantity > 0\);/);
+      expect(orderLine).toMatch(
+        /DomainLog\.LogTrace\([^)]+"invariant_evaluated", "OrderLine", __op, "quantity > 0", __inv_\d+_ok\);/,
+      );
+    });
+
+    it("--trace off: AssertInvariants stays parameterless + emits the original if-throw shape", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model); // no emitTrace
+      const order = files.get("Domain/Orders/Order.cs")!;
+      // No __op, no temp binding, no LogTrace.
+      expect(order).toMatch(/void AssertInvariants\(\)/);
+      expect(order).not.toMatch(/__inv_\d+_ok/);
+      expect(order).not.toMatch(/invariant_evaluated/);
+      expect(order).not.toMatch(/string __op/);
+      // Original guarded-and-throw shape preserved.
+      expect(order).toMatch(
+        /if \(\(this\.Status == OrderStatus\.Confirmed\) && !\(this\.Lines\.Count > 0\)\) throw new DomainException/,
+      );
+    });
+
+    it("--trace on: SaveAsync wraps SaveChangesAsync in tx_begin/commit/rollback", async () => {
+      // Phase 8 .NET trace v1 — mirrors Hono Phase 6c.  Trace-off keeps
+      // the original one-liner shape; trace-on wraps SaveChangesAsync
+      // in try/catch with the catalog's tx_* triple at LogTrace level.
+      // repository_save fires AFTER tx_commit (inside the try) so the
+      // existing post-save debug line only emits when the underlying
+      // commit actually succeeded.
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model, { emitTrace: true });
+      const repo = files.get("Infrastructure/Repositories/OrderRepository.cs")!;
+      expect(repo).toMatch(
+        /_log\.LogTrace\("\{Event\} aggregate=\{Aggregate\} id=\{Id\}", "tx_begin", "Order", aggregate\.Id\.Value\);/,
+      );
+      expect(repo).toMatch(
+        /_log\.LogTrace\("\{Event\} aggregate=\{Aggregate\} id=\{Id\}", "tx_commit", "Order", aggregate\.Id\.Value\);/,
+      );
+      expect(repo).toMatch(
+        /_log\.LogTrace\("\{Event\} aggregate=\{Aggregate\} id=\{Id\} error=\{Error\}", "tx_rollback", "Order", aggregate\.Id\.Value, __txErr\.Message\);/,
+      );
+      // try/catch shape — rollback path re-throws so the seam's call
+      // sites still see the original exception.
+      expect(repo).toMatch(/try\s*\n\s*\{[\s\S]+?catch \(System\.Exception __txErr\)/);
+      expect(repo).toMatch(/__txErr\.Message[\s\S]+?throw;/);
+    });
+
+    it("--trace off: SaveAsync stays at the original one-liner SaveChangesAsync shape", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model); // no emitTrace
+      const repo = files.get("Infrastructure/Repositories/OrderRepository.cs")!;
+      expect(repo).not.toMatch(/tx_begin/);
+      expect(repo).not.toMatch(/tx_commit/);
+      expect(repo).not.toMatch(/tx_rollback/);
+      expect(repo).not.toMatch(/__txErr/);
+      // The bare SaveChangesAsync + LogDebug stays exactly as before.
+      expect(repo).toMatch(
+        /await _db\.SaveChangesAsync\(ct\);\n\s+_log\.LogDebug\("\{Event\} aggregate=\{Aggregate\} id=\{Id\}", "repository_save", "Order", aggregate\.Id\.Value\);/,
+      );
+    });
+
+    it("repository wires ILogger + emits aggregate_loaded / repository_save / event_dispatched / find_executed", async () => {
+      // Phase 8 .NET (repo seams) — every per-aggregate EF repository
+      // gets an `ILogger<TRepository> _log` field, GetByIdAsync emits
+      // aggregate_loaded (debug, with found:bool), SaveAsync emits
+      // repository_save (debug) after SaveChangesAsync + event_dispatched
+      // (info) per drained event, and each find method emits find_executed
+      // (debug) with rows count.  Same event identities the Hono Phase 4
+      // wiring emits — a single dashboard query joins both backends.
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      const repo = files.get("Infrastructure/Repositories/OrderRepository.cs")!;
+      expect(repo).toMatch(/using Microsoft\.Extensions\.Logging;/);
+      expect(repo).toMatch(/private readonly ILogger<OrderRepository> _log;/);
+      expect(repo).toMatch(
+        /OrderRepository\(AppDbContext db, IDomainEventDispatcher events, ILogger<OrderRepository> log\)/,
+      );
+      // aggregate_loaded — both paths covered by the `found != null` bool.
+      expect(repo).toMatch(
+        /_log\.LogDebug\("\{Event\} aggregate=\{Aggregate\} id=\{Id\} found=\{Found\}", "aggregate_loaded", "Order", id\.Value, found != null\);/,
+      );
+      // repository_save fires after the EF transaction commits.
+      expect(repo).toMatch(
+        /_log\.LogDebug\("\{Event\} aggregate=\{Aggregate\} id=\{Id\}", "repository_save", "Order", aggregate\.Id\.Value\);/,
+      );
+      // event_dispatched per drained event — `ev.GetType().Name` is the
+      // concrete subclass name (same shape as Hono's
+      // (event as object).constructor.name).
+      expect(repo).toMatch(
+        /_log\.LogInformation\("\{Event\} event_type=\{EventType\} aggregate=\{Aggregate\} id=\{Id\}", "event_dispatched", ev\.GetType\(\)\.Name, "Order", aggregate\.Id\.Value\);/,
+      );
+      // find_executed — array find uses result.Count; the assertion
+      // anchors on the catalog shape, not a specific find name.
+      expect(repo).toMatch(
+        /_log\.LogDebug\("\{Event\} aggregate=\{Aggregate\} find=\{Find\} rows=\{Rows\}", "find_executed", "Order", "[a-zA-Z]+", result\.Count\);/,
+      );
+    });
+
+    it("controller wires ILogger + emits operation_invoked / aggregate_created from the catalog", async () => {
+      // Phase 8 .NET — every per-aggregate controller gets an
+      // `ILogger<TController> _log` field (matching the
+      // DomainExceptionFilter idiom), Create logs `aggregate_created`
+      // after Mediator.Send returns, and each public op handler logs
+      // `operation_invoked` before dispatching its command.  Same event
+      // identity the Hono backend emits; structured fields use Pascal
+      // placeholders so Serilog / ASP.NET sinks pick them up.
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      const controller = files.get("Api/OrdersController.cs")!;
+      expect(controller).toMatch(/using Microsoft\.Extensions\.Logging;/);
+      expect(controller).toMatch(/private readonly ILogger<OrdersController> _log;/);
+      expect(controller).toMatch(
+        /public OrdersController\(IMediator mediator, ILogger<OrdersController> log\) \{ _mediator = mediator; _log = log; \}/,
+      );
+      expect(controller).toMatch(
+        /_log\.LogInformation\("\{Event\} aggregate=\{Aggregate\} id=\{Id\}", "aggregate_created", "Order", id\.Value\);/,
+      );
+      // sales.ddd's Order has multiple public ops; any op-handler line
+      // satisfies — the assertion captures the catalog shape, not the
+      // specific op name.
+      expect(controller).toMatch(
+        /_log\.LogInformation\("\{Event\} aggregate=\{Aggregate\} op=\{Op\} id=\{Id\}", "operation_invoked", "Order", "[a-zA-Z]+", id\);/,
+      );
     });
 
     it("does NOT touch ValidationProblemDetails (RFC 7807 stays the contract)", async () => {
@@ -375,14 +642,14 @@ describe(".NET generator", () => {
           }
         }
         aggregate Order {
-          customerId: Id<Customer>
+          customerId: Customer id
           status: OrderStatus
           placedAt: datetime
         }
         repository Customers for Customer { }
         repository Orders for Order { }
-        event OrderPlaced { order: Id<Order>, at: datetime }
-        workflow placeOrder(customerId: Id<Customer>, amount: decimal, placedAt: datetime) {
+        event OrderPlaced { order: Order id, at: datetime }
+        workflow placeOrder(customerId: Customer id, amount: decimal, placedAt: datetime) {
           precondition amount > 0
           let customer = Customers.getById(customerId)
           customer.deductCredit(amount)
@@ -399,7 +666,7 @@ describe(".NET generator", () => {
     );
     const files = generateDotnet(doc.parseResult.value as Model);
 
-    // Request DTO uses wire types (Guid for Id<X>, string for datetime).
+    // Request DTO uses wire types (Guid for X id, string for datetime).
     const req = files.get("Application/Workflows/PlaceOrderRequest.cs")!;
     expect(req).toMatch(
       /public sealed record PlaceOrderRequest\(Guid CustomerId, decimal Amount, string PlacedAt\)/,
@@ -463,7 +730,7 @@ describe(".NET generator", () => {
           }
         }
         repository Customers for Customer { }
-        workflow topUp(customerId: Id<Customer>, amount: decimal) transactional {
+        workflow topUp(customerId: Customer id, amount: decimal) transactional {
           precondition amount > 0
           let c = Customers.getById(customerId)
           c.addCredit(amount)
@@ -554,7 +821,7 @@ describe(".NET generator", () => {
         }
         repository Orders for Order { }
         view OrderSummary {
-          orderId: Id<Order>
+          orderId: Order id
           status: OrderStatus
           lineCount: int
           from Order where status == Confirmed
@@ -566,7 +833,7 @@ describe(".NET generator", () => {
     );
     const files = generateDotnet(doc.parseResult.value as Model);
 
-    // Wire-typed Row record (Id<Order> → Guid, enum → string, int → int).
+    // Wire-typed Row record (Order id → Guid, enum → string, int → int).
     const row = files.get("Application/Views/OrderSummaryRow.cs")!;
     expect(row).toMatch(
       /public sealed record OrderSummaryRow\(Guid OrderId, string Status, int LineCount\);/,
@@ -584,7 +851,7 @@ describe(".NET generator", () => {
     );
   });
 
-  it("rewrites Id<X> follow refs to FindManyByIdsAsync + dictionary lookups", async () => {
+  it("rewrites X id follow refs to FindManyByIdsAsync + dictionary lookups", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
@@ -594,13 +861,13 @@ describe(".NET generator", () => {
         enum OrderStatus { Draft, Confirmed }
         aggregate Customer { name: string display, email: string }
         aggregate Order {
-          customerId: Id<Customer>
+          customerId: Customer id
           status: OrderStatus
         }
         repository Customers for Customer { }
         repository Orders for Order { }
         view CustomerOrders {
-          orderId: Id<Order>
+          orderId: Order id
           customerName: string
           customerEmail: string
           status: OrderStatus
@@ -650,7 +917,7 @@ describe(".NET generator", () => {
           operation confirm() extern { precondition isMutable() }
         }
         repository Orders for Order { }
-        workflow placeAndConfirm(orderId: Id<Order>) {
+        workflow placeAndConfirm(orderId: Order id) {
           let order = Orders.getById(orderId)
           order.confirm()
         }
@@ -693,7 +960,7 @@ describe(".NET generator", () => {
           customerId: string
           status: string
           function isMutable(): bool = status == "Draft"
-          operation addLine(productId: Id<Order>, qty: int, price: Money) extern {
+          operation addLine(productId: Order id, qty: int, price: Money) extern {
             precondition isMutable()
             precondition qty > 0
           }
@@ -727,7 +994,7 @@ describe(".NET generator", () => {
           }
         }
         repository Orders for Order { }
-        workflow chargeOrder(orderId: Id<Order>, amount: decimal) {
+        workflow chargeOrder(orderId: Order id, amount: decimal) {
           let order = Orders.getById(orderId)
           order.deduct(amount)
         }
@@ -744,7 +1011,7 @@ describe(".NET generator", () => {
     );
   });
 
-  it("multi-hop Id<X>.Id<Y>.field follow loads aggregates in dependency order", async () => {
+  it("multi-hop X id.Y id.field follow loads aggregates in dependency order", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
@@ -753,13 +1020,13 @@ describe(".NET generator", () => {
       context Sales {
         enum OrderStatus { Draft, Confirmed }
         aggregate Region { name: string display, countryCode: string }
-        aggregate Customer { name: string display, regionId: Id<Region> }
-        aggregate Order { customerId: Id<Customer>, status: OrderStatus }
+        aggregate Customer { name: string display, regionId: Region id }
+        aggregate Order { customerId: Customer id, status: OrderStatus }
         repository Regions for Region { }
         repository Customers for Customer { }
         repository Orders for Order { }
         view OrdersWithRegion {
-          orderId: Id<Order>
+          orderId: Order id
           regionName: string
           from Order where status == Confirmed
           bind orderId = id,
@@ -804,23 +1071,23 @@ describe(".NET generator", () => {
           }
         }
         repository Customers for Customer { }
-        workflow ser(customerId: Id<Customer>, amount: decimal) transactional(serializable) {
+        workflow ser(customerId: Customer id, amount: decimal) transactional(serializable) {
           let c = Customers.getById(customerId)
           c.addCredit(amount)
         }
-        workflow rr(customerId: Id<Customer>, amount: decimal) transactional(repeatableRead) {
+        workflow rr(customerId: Customer id, amount: decimal) transactional(repeatableRead) {
           let c = Customers.getById(customerId)
           c.addCredit(amount)
         }
-        workflow ru(customerId: Id<Customer>, amount: decimal) transactional(readUncommitted) {
+        workflow ru(customerId: Customer id, amount: decimal) transactional(readUncommitted) {
           let c = Customers.getById(customerId)
           c.addCredit(amount)
         }
-        workflow rc(customerId: Id<Customer>, amount: decimal) transactional(readCommitted) {
+        workflow rc(customerId: Customer id, amount: decimal) transactional(readCommitted) {
           let c = Customers.getById(customerId)
           c.addCredit(amount)
         }
-        workflow plain(customerId: Id<Customer>, amount: decimal) transactional {
+        workflow plain(customerId: Customer id, amount: decimal) transactional {
           let c = Customers.getById(customerId)
           c.addCredit(amount)
         }

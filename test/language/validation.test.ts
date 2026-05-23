@@ -644,6 +644,104 @@ describe("validation", () => {
       ).toBe(true);
     });
   });
+
+  describe("type-position references (X id vs bare name)", () => {
+    it("rejects a bare aggregate name in property position with a fixit pointing at 'X id'", async () => {
+      const { errors } = await parse(`
+        context T {
+          aggregate Customer { name: string display }
+          aggregate Order { customer: Customer }
+        }
+      `);
+      expect(
+        errors.some((e) =>
+          /References across aggregate boundaries need an id link.*'Customer id'/.test(e),
+        ),
+        errors.join("\n"),
+      ).toBe(true);
+    });
+
+    it("rejects a bare aggregate name in operation-parameter position", async () => {
+      const { errors } = await parse(`
+        context T {
+          aggregate Customer { name: string display }
+          aggregate Order {
+            customerId: string
+            operation assignTo(c: Customer) { customerId := "x" }
+          }
+        }
+      `);
+      expect(
+        errors.some((e) => /'Customer id'/.test(e)),
+        errors.join("\n"),
+      ).toBe(true);
+    });
+
+    it("rejects a cross-aggregate entity-part reference (scope keeps it out of resolution)", async () => {
+      // The scope provider restricts NamedType.target to same-aggregate
+      // entity-parts; a cross-aggregate use surfaces as a "Could not
+      // resolve reference" diagnostic.  The user's fixit is to spell
+      // out the owner aggregate's id (`Order id`) — same as the message
+      // emitted by the storage-position validator for any aggregate
+      // ref that resolves.
+      const { errors } = await parse(`
+        context T {
+          aggregate Order {
+            entity OrderLine { qty: int }
+            contains lines: OrderLine[]
+          }
+          aggregate Invoice {
+            line: OrderLine
+          }
+        }
+      `);
+      expect(
+        errors.some((e) => /OrderLine/.test(e)),
+        errors.join("\n"),
+      ).toBe(true);
+    });
+
+    it("rejects an optional collection containment ('[]?' is redundant)", async () => {
+      const { errors } = await parse(`
+        context T {
+          aggregate Order {
+            entity OrderLine { qty: int }
+            contains lines: OrderLine[]?
+          }
+        }
+      `);
+      expect(
+        errors.some((e) =>
+          /Containment 'lines' is both a collection and optional.*drop the '\?'/.test(e),
+        ),
+        errors.join("\n"),
+      ).toBe(true);
+    });
+
+    it("accepts a singular optional containment ('X?')", async () => {
+      const { errors } = await parse(`
+        context T {
+          aggregate Order {
+            entity Shipping { addr: string }
+            contains shipping: Shipping?
+          }
+        }
+      `);
+      expect(errors, errors.join("\n")).toEqual([]);
+    });
+
+    it("accepts a bare aggregate name in a find return type (queries return domain objects)", async () => {
+      const { errors } = await parse(`
+        context T {
+          aggregate Customer { name: string display }
+          repository Customers for Customer {
+            find byName(n: string): Customer? where this.name == n
+          }
+        }
+      `);
+      expect(errors, errors.join("\n")).toEqual([]);
+    });
+  });
 });
 
 describe("Loom IR validation (post-lowering)", async () => {
@@ -942,14 +1040,14 @@ describe("Loom IR validation (post-lowering)", async () => {
     ).toBe(true);
   });
 
-  it("rejects Id<X> referencing a non-mounted aggregate (react deployable)", async () => {
+  it("rejects X id referencing a non-mounted aggregate (react deployable)", async () => {
     const loom = await loomFrom(`
       system S {
         module Customers { context C { aggregate Customer { name: string display } } }
         module Sales {
           context T {
             aggregate Order {
-              customerId: Id<Customer>
+              customerId: Customer id
             }
           }
         }
@@ -962,19 +1060,19 @@ describe("Loom IR validation (post-lowering)", async () => {
       diags.some(
         (d) =>
           d.severity === "error" &&
-          /references Id<Customer>, but 'Customer' is not mounted/.test(d.message),
+          /references Customer id, but 'Customer' is not mounted/.test(d.message),
       ),
       JSON.stringify(diags),
     ).toBe(true);
   });
 
-  it("rejects Id<X> targeting an aggregate without a 'display' field (react deployable)", async () => {
+  it("rejects X id targeting an aggregate without a 'display' field (react deployable)", async () => {
     const loom = await loomFrom(`
       system S {
         module M {
           context T {
             aggregate Customer { email: string }
-            aggregate Order { customerId: Id<Customer> }
+            aggregate Order { customerId: Customer id }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -986,7 +1084,7 @@ describe("Loom IR validation (post-lowering)", async () => {
       diags.some(
         (d) =>
           d.severity === "error" &&
-          /references Id<Customer>, but 'Customer' has no 'display' field/.test(d.message),
+          /references Customer id, but 'Customer' has no 'display' field/.test(d.message),
       ),
       JSON.stringify(diags),
     ).toBe(true);
@@ -1031,13 +1129,13 @@ describe("Loom IR validation (post-lowering)", async () => {
     ).toBe(true);
   });
 
-  it("accepts Id<X> when the target is mounted AND has a display field", async () => {
+  it("accepts X id when the target is mounted AND has a display field", async () => {
     const loom = await loomFrom(`
       system S {
         module M {
           context T {
             aggregate Customer { name: string display }
-            aggregate Order { customerId: Id<Customer> }
+            aggregate Order { customerId: Customer id }
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
@@ -1060,7 +1158,7 @@ describe("Loom IR validation (post-lowering)", async () => {
         }
         repository Orders for Order { }
         view OrderSummary {
-          orderId: Id<Order>
+          orderId: Order id
           status: OrderStatus
           lineCount: int
           from Order where status == Confirmed
@@ -1154,14 +1252,14 @@ describe("Loom IR validation (post-lowering)", async () => {
           }
         }
         aggregate Order {
-          customerId: Id<Customer>
+          customerId: Customer id
           status: OrderStatus
           placedAt: datetime
         }
         repository Customers for Customer { }
         repository Orders for Order { }
-        event OrderPlaced { order: Id<Order>, at: datetime }
-        workflow placeOrder(customerId: Id<Customer>, amount: decimal, placedAt: datetime) {
+        event OrderPlaced { order: Order id, at: datetime }
+        workflow placeOrder(customerId: Customer id, amount: decimal, placedAt: datetime) {
           precondition amount > 0
           let customer = Customers.getById(customerId)
           customer.deductCredit(amount)
@@ -1190,7 +1288,7 @@ describe("Loom IR validation (post-lowering)", async () => {
           }
         }
         repository Customers for Customer { }
-        workflow topUp(customerId: Id<Customer>, amount: decimal) transactional {
+        workflow topUp(customerId: Customer id, amount: decimal) transactional {
           precondition amount > 0
           let c = Customers.getById(customerId)
           c.addCredit(amount)
@@ -1209,7 +1307,7 @@ describe("Loom IR validation (post-lowering)", async () => {
           private operation secret() { }
         }
         repository Customers for Customer { }
-        workflow w(customerId: Id<Customer>) {
+        workflow w(customerId: Customer id) {
           let c = Customers.getById(id)
           c.secret()
         }
@@ -1230,7 +1328,7 @@ describe("Loom IR validation (post-lowering)", async () => {
           operation confirm() extern { precondition name.length > 0 }
         }
         repository Customers for Customer { }
-        workflow w(customerId: Id<Customer>) {
+        workflow w(customerId: Customer id) {
           let c = Customers.getById(customerId)
           c.confirm()
         }
@@ -1249,7 +1347,7 @@ describe("Loom IR validation (post-lowering)", async () => {
           operation deduct(amount: decimal) extern { precondition amount > 0 }
         }
         repository Customers for Customer { }
-        workflow w(customerId: Id<Customer>, amount: decimal) {
+        workflow w(customerId: Customer id, amount: decimal) {
           let c = Customers.getById(customerId)
           c.deduct(amount)
         }
@@ -1264,7 +1362,7 @@ describe("Loom IR validation (post-lowering)", async () => {
       context T {
         aggregate Customer { name: string display }
         repository Customers for Customer { }
-        workflow w(customerId: Id<Customer>) {
+        workflow w(customerId: Customer id) {
           let c = Customers.byMagic(id)
         }
       }
@@ -1331,7 +1429,7 @@ describe("Loom IR validation (post-lowering)", async () => {
       context T {
         aggregate Customer { name: string display }
         repository Customers for Customer { }
-        workflow w(customerId: Id<Customer>) {
+        workflow w(customerId: Customer id) {
           emit Nope { x: id }
         }
       }
@@ -1451,7 +1549,7 @@ describe("Loom IR validation (post-lowering)", async () => {
             }
           }
           repository Customers for Customer { }
-          workflow w(customerId: Id<Customer>, amount: decimal) transactional(${level}) {
+          workflow w(customerId: Customer id, amount: decimal) transactional(${level}) {
             let c = Customers.getById(customerId)
             c.addCredit(amount)
           }
@@ -1471,7 +1569,7 @@ describe("Loom IR validation (post-lowering)", async () => {
           name: string display
         }
         repository Customers for Customer { }
-        workflow w(customerId: Id<Customer>) {
+        workflow w(customerId: Customer id) {
           let c = Customers.getById(id)
           c.name := "X"
         }

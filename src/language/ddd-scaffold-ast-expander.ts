@@ -36,7 +36,7 @@
 //
 // `params`, `state`, `requires`, `title` are not synthesised today —
 // the page emitter does its own type-driven inference (e.g. detail
-// pages take `id: Id<T>` from the aggregate, not from a synthesised
+// pages take `id: T id` from the aggregate, not from a synthesised
 // `Parameter` node).  Adding them is mechanical when needed.
 
 import type { LangiumDocument } from "langium";

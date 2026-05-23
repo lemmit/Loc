@@ -44,7 +44,7 @@ system Acme {
 
             enum OrderStatus { Draft, Confirmed, Shipped, Cancelled }
 
-            event OrderConfirmed { order: Id<Order>, at: datetime }
+            event OrderConfirmed { order: Order id, at: datetime }
 
             aggregate Order {
                 customerId: string
@@ -56,7 +56,7 @@ system Acme {
 
                 function isMutable(): bool = status == Draft
 
-                operation addLine(productId: Id<Product>, qty: int) {
+                operation addLine(productId: Product id, qty: int) {
                     precondition isMutable()
                     precondition qty > 0
                     lines += new OrderLine {
@@ -72,7 +72,7 @@ system Acme {
                 }
 
                 entity OrderLine {
-                    productId: Id<Product>
+                    productId: Product id
                     quantity: int
                     invariant quantity > 0
                 }

@@ -79,9 +79,9 @@ describe("DddHoverProvider", () => {
     });
   });
 
-  it("hovers a cross-reference target via Id<X>", async () => {
+  it("hovers a cross-reference target via X id", async () => {
     // The cursor sits on the cross-reference target identifier `Order`
-    // inside `Id<Order>`.  AstNodeHoverProvider resolves the ref to the
+    // inside `Order id`.  AstNodeHoverProvider resolves the ref to the
     // Aggregate declaration, so we get the aggregate hover content.
     await expectHoverFor({
       text: `
@@ -90,7 +90,7 @@ describe("DddHoverProvider", () => {
             customerId: string
           }
           aggregate Customer {
-            primaryOrder: Id<<|>Order>
+            primaryOrder: <|>Order id
           }
         }`,
       index: 0,

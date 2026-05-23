@@ -9,7 +9,7 @@ context Inventory {
   }
 
   event ItemReserved {
-    warehouse: Id<Warehouse>,
+    warehouse: Warehouse id,
     sku: string,
     qty: int
   }

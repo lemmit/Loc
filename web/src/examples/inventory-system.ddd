@@ -22,7 +22,7 @@ system InventorySystem {
       }
 
       event ItemReserved {
-        warehouse: Id<Warehouse>,
+        warehouse: Warehouse id,
         sku: string,
         qty: int
       }
@@ -58,7 +58,7 @@ system InventorySystem {
       // Invoke via POST /workflows/record_reservation with body
       //   { warehouseId, sku, qty }
       workflow recordReservation(
-        warehouseId: Id<Warehouse>,
+        warehouseId: Warehouse id,
         sku: string,
         qty: int
       ) {

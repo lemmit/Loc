@@ -2,7 +2,7 @@ import { Badge, Box, Button, Chip, Code, Group, ScrollArea, Select, Stack, Text 
 import { useMemo, useState } from "react";
 import { ProblemsPanel } from "./ProblemsPanel";
 import { formatBytes, modeLabel, type LayoutCtx } from "./ctx";
-import { LOG_LEVELS, type LogLine } from "../util/log-line";
+import { LOG_LEVELS, type LogLine, type StructuredLogPayload } from "../util/log-line";
 
 // The playground used to scatter read-only status across sibling dock
 // tabs — LSP diagnostics, generator output, bundle errors — so a red dot
@@ -239,10 +239,61 @@ function levelColour(level: LogLine["level"]): "red" | "yellow" | "gray" | undef
   return undefined;
 }
 
+/** Plain `console.*` lines — keep the existing `[level] text` form so
+ *  user `console.log("foo")` calls render exactly as they used to.  info
+ *  + log skip the `[level]` prefix (the default level is implicit). */
+function renderUnstructuredLine(l: LogLine): string {
+  return l.level === "log" || l.level === "info" ? l.text : `[${l.level}] ${l.text}`;
+}
+
+/** Structured pino lines parsed by the worker's captureConsole (see
+ *  log-line.ts → asStructuredPayload) render as a compact, scannable
+ *  shape instead of the raw JSON blob the unstructured fallback would
+ *  show:
+ *
+ *      [debug] health_ok checks=["liveness"] req=7d8bedc1
+ *      [info]  request_end method="GET" path="/health" status=200 duration_ms=4 req=7d8bedc1
+ *
+ *  The envelope keys (ts / level / event / request_id) are stripped
+ *  from the body — `ts` is implicit in the log's ordering, `level`
+ *  drives the tint, `event` becomes the head identifier, and
+ *  `request_id` is shortened to a UUID prefix + dropped to the end so
+ *  the eye lands on what's NEW first.  Per-event fields are JSON-
+ *  formatted so a value like `["readiness","db"]` survives intact and
+ *  doesn't get smashed to `[object Object]`. */
+function renderStructuredLine(p: StructuredLogPayload): string {
+  const head = `[${p.level}] ${p.event}`;
+  const { ts: _ts, level: _level, event: _event, request_id, ...rest } = p;
+  const parts: string[] = [head];
+  for (const [k, v] of Object.entries(rest)) {
+    parts.push(`${k}=${formatStructuredFieldValue(v)}`);
+  }
+  if (typeof request_id === "string" && request_id.length > 0) {
+    // First UUID segment — enough to spot-correlate across lines
+    // without consuming most of the row.
+    parts.push(`req=${request_id.split("-")[0] ?? request_id.slice(0, 8)}`);
+  }
+  return parts.join(" ");
+}
+
+/** JSON-format a field value so arrays / objects survive intact and
+ *  strings carry quotes (`path="/health"`).  Primitives skip JSON so
+ *  numbers / booleans appear as themselves (`status=200`, not
+ *  `status="200"`). */
+function formatStructuredFieldValue(v: unknown): string {
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return String(v);
+  }
+}
+
 // Shared monospace log renderer for the live console streams (backend
 // runtime + preview app).  One line per captured `console.*` call, tinted
-// by level; errors carry their stack in `text`, so `pre-wrap` keeps it
-// readable.
+// by level.  Structured pino lines render as a compact key=value shape
+// (see `renderStructuredLine`); plain `console.*` calls keep the existing
+// `[level] text` rendering with `pre-wrap` for multi-line errors / stacks.
 function LogView({
   lines,
   empty,
@@ -277,8 +328,9 @@ function LogView({
                     : undefined
             }
             style={{ whiteSpace: "pre-wrap" }}
+            data-testid={l.structured ? `${testid}-structured` : undefined}
           >
-            {l.level === "log" || l.level === "info" ? l.text : `[${l.level}] ${l.text}`}
+            {l.structured ? renderStructuredLine(l.structured) : renderUnstructuredLine(l)}
           </Text>
         ))}
       </Stack>

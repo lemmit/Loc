@@ -31,7 +31,7 @@ export function renderSchema(
     for (const part of agg.parts) {
       tables.push(emitTable(part.name, part.fields, agg.name, ctx, new Set()));
     }
-    // Many-to-many join tables for `Id<T>[]` reference collections.
+    // Many-to-many join tables for `T id[]` reference collections.
     for (const assoc of agg.associations ?? []) {
       tables.push(emitJoinTable(assoc));
     }
@@ -74,7 +74,7 @@ export function renderSchema(
   );
 }
 
-/** A many-to-many join table for an `Id<T>[]` reference collection.
+/** A many-to-many join table for an `T id[]` reference collection.
  * Two FK columns + an `ordinal` position so the collection's order
  * survives a round-trip, a composite primary key over (owner, target)
  * (so each pair is unique and the save upsert is idempotent), and an
@@ -331,7 +331,7 @@ function drizzleColumnLinesForName(
     case "entity":
       return [`${fieldName}: text("${colName}")${not},`];
     case "array":
-      // Collections of references (`Id<T>[]`) are persisted as a
+      // Collections of references (`T id[]`) are persisted as a
       // many-to-many join table (emitted separately in renderSchema),
       // so they contribute no column on the owning table.
       if (inner.element.kind === "id") return [];

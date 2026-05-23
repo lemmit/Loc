@@ -525,13 +525,13 @@ export type FormOfState = AggregateFormState | WorkflowFormState | OperationForm
 
 interface FormStateBase {
   bc: BoundedContextIR;
-  /** Id<X> targets needing `useAllX()` injection at function top
+  /** X id targets needing `useAllX()` injection at function top
    *  (resolved through `idTargetsInFields`).  One hook decl per
-   *  target — collapsed across multiple `Id<X>` fields on the same
+   *  target — collapsed across multiple `X id` fields on the same
    *  target aggregate. */
   idTargets: readonly AggregateIR[];
   /** True when any field needs RHF's `Controller` for binding
-   *  (currently the case for enums + Id<X>-as-select + bool +
+   *  (currently the case for enums + X id-as-select + bool +
    *  datetime + value-objects). */
   useController: boolean;
   /** Default-values literal for `useForm({ defaultValues: ... })`. */
@@ -866,7 +866,7 @@ export function extendLambdaParams(
  *  What the shell (`renderCustomLayoutPage`) emits on top:
  *   - `useForm` import + declaration with zodResolver wiring
  *   - `useCreate<Agg>` mutation hook
- *   - One `useAll<Target>()` hook per `Id<X>` target needing a
+ *   - One `useAll<Target>()` hook per `X id` target needing a
  *     select picker
  *   - The submit handler — default scaffold behaviour
  *     (`create.mutateAsync` + notify + navigate) when no explicit

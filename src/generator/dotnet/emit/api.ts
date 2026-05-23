@@ -1,16 +1,25 @@
 import type { AggregateIR, RepositoryIR } from "../../../ir/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
+import {
+  renderDotnetLogCall,
+  renderDotnetLogCallWithException,
+} from "../../_obs/render-dotnet.js";
 
 // ASP.NET Core controller emission.  One controller per aggregate root,
 // dispatching every endpoint through Mediator (`ISender`).  The
 // controller never sees the domain class — only the request/response
 // DTOs and the matching command/query records.
 
+/** Compile-time --trace context — when `emitTrace` is true, the
+ *  controller's operation routes get a `_log.LogTrace(...)` line for
+ *  the catalog's `wire_in` event after binding `[FromBody]`.  Op
+ *  param names (lowerCamel — matching the wire JSON key set the
+ *  request was de-serialised from) flow through `publicOps[i].paramNames`. */
 interface ControllerShape {
   idClrType: string;
   createCmdArgs: string[];
-  publicOps: Array<{ name: string; cmdArgs: string[] }>;
+  publicOps: Array<{ name: string; cmdArgs: string[]; paramNames: string[] }>;
   finds: Array<{
     name: string;
     isRoot: boolean;
@@ -29,6 +38,11 @@ interface ControllerShape {
    *  under `/api/orders/*`).  Empty for standalone .NET (controllers
    *  stay at root, matching the v0 behaviour). */
   routePrefix?: string;
+  /** When true, controllers emit a `wire_in` trace line right after
+   *  `[FromBody]` binding so the parsed request's key set is observable
+   *  on the structured stream.  Off keeps the operation handler at its
+   *  pre-trace shape exactly. */
+  emitTrace?: boolean;
 }
 
 export function renderController(
@@ -45,10 +59,43 @@ export function renderController(
   const opBlocks = shape.publicOps.flatMap((op) => {
     const cmdArgs = [`new ${agg.name}Id(id)`, ...op.cmdArgs];
     const cmdBody = renderCmdConstructorBody(cmdArgs, "            ");
+    // wire_in (trace) — the structural shape (keys only, no values) of
+    // the parsed request, emitted right after `[FromBody]` binding so
+    // a downstream filter pivoting on wire_in sees the same field set
+    // Hono emits via `Object.keys(body)`.  Keys are lowerCamel
+    // (matching the JSON wire under ASP.NET's default
+    // JsonNamingPolicy.CamelCase).  Skipped entirely when --trace is off.
+    const wireInLine = shape.emitTrace
+      ? [
+          `        ${renderDotnetLogCall("wireIn", [
+            {
+              name: "keys",
+              // Empty arrays need an explicit element type so C# can
+              // infer the `params object[]` overload of LogTrace —
+              // `new[] { }` is a compile error.  Common case (op with
+              // params) uses the implicit array literal.
+              valueExpr:
+                op.paramNames.length === 0
+                  ? "System.Array.Empty<string>()"
+                  : `new[] { ${op.paramNames.map((n) => `"${n}"`).join(", ")} }`,
+            },
+          ])}`,
+        ]
+      : [];
     return [
       `    [HttpPost("{id}/${snake(op.name)}")]`,
       `    public async Task<IActionResult> ${upperFirst(op.name)}([FromRoute] ${shape.idClrType} id, [FromBody] ${upperFirst(op.name)}Request request)`,
       "    {",
+      ...wireInLine,
+      // Business-narrative line — what the controller was asked to do,
+      // before Mediator dispatches the command.  Mirrors the
+      // operation_invoked emission on the Hono side so a cross-backend
+      // log consumer sees the same event with the same field set.
+      `        ${renderDotnetLogCall("operationInvoked", [
+        { name: "aggregate", valueExpr: `"${agg.name}"` },
+        { name: "op", valueExpr: `"${op.name}"` },
+        { name: "id", valueExpr: "id" },
+      ])}`,
       `        var cmd = new ${upperFirst(op.name)}Command(`,
       ...cmdBody,
       "        );",
@@ -91,6 +138,7 @@ export function renderController(
       "using System.Threading.Tasks;",
       "using Mediator;",
       "using Microsoft.AspNetCore.Mvc;",
+      "using Microsoft.Extensions.Logging;",
       `using ${ns}.Application.${plural(agg.name)}.Commands;`,
       `using ${ns}.Application.${plural(agg.name)}.Queries;`,
       `using ${ns}.Application.${plural(agg.name)}.Requests;`,
@@ -106,7 +154,11 @@ export function renderController(
       `public sealed class ${className} : ControllerBase`,
       "{",
       "    private readonly IMediator _mediator;",
-      `    public ${className}(IMediator mediator) => _mediator = mediator;`,
+      // ILogger field — drives the catalog-event emission below.  Same
+      // per-class injection idiom DomainExceptionFilter uses, so the
+      // pattern stays consistent across the generated codebase.
+      `    private readonly ILogger<${className}> _log;`,
+      `    public ${className}(IMediator mediator, ILogger<${className}> log) { _mediator = mediator; _log = log; }`,
       "",
       "    [HttpPost]",
       `    public async Task<ActionResult<Create${agg.name}Response>> Create([FromBody] Create${agg.name}Request request)`,
@@ -115,6 +167,14 @@ export function renderController(
       ...createBody,
       "        );",
       "        var id = await _mediator.Send(cmd);",
+      // aggregate_created — business narrative, after the Mediator
+      // command's Send resolves with the new id.  Mirrors the Hono
+      // emission so cross-backend log consumers see the same event +
+      // fields ({Aggregate}, {Id}).
+      `        ${renderDotnetLogCall("aggregateCreated", [
+        { name: "aggregate", valueExpr: `"${agg.name}"` },
+        { name: "id", valueExpr: "id.Value" },
+      ])}`,
       `        return CreatedAtAction(nameof(GetById), new { id = id.Value }, new Create${agg.name}Response(id.Value));`,
       "    }",
       "",
@@ -221,9 +281,13 @@ public sealed class DomainExceptionFilter : IExceptionFilter
             // names the offending op + aggregate so operators don't
             // have to grep logs to find the cause.  The original
             // exception (xh.InnerException) is logged in full
-            // server-side.
-            _log.LogError(xh, "Extern handler {Op} on {Agg} threw",
-                xh.OpName, xh.AggName);
+            // server-side via the catalog's extern_handler_threw
+            // event — same shape the Hono onError arm emits.
+            ${renderDotnetLogCallWithException("externHandlerThrew", "xh", [
+              { name: "aggregate", valueExpr: "xh.AggName" },
+              { name: "op", valueExpr: "xh.OpName" },
+              { name: "error", valueExpr: "xh.Message" },
+            ])}
             context.Result = new ObjectResult(new { error = xh.Message, trace_id })
             {
                 StatusCode = 500,
@@ -231,10 +295,13 @@ public sealed class DomainExceptionFilter : IExceptionFilter
             context.ExceptionHandled = true;
             return;
         }
-        // Generic 500.  Log the full exception server-side; return a
-        // sanitized payload to the client.
-        _log.LogError(context.Exception, "Unhandled exception in {Action}",
-            context.ActionDescriptor.DisplayName);
+        // Generic 500.  Log the full exception server-side via the
+        // catalog's internal_error event; return a sanitized payload
+        // to the client.  Matching the Hono fallback envelope.
+        ${renderDotnetLogCallWithException("internalError", "context.Exception", [
+          { name: "error", valueExpr: "context.Exception.Message" },
+          { name: "status", valueExpr: "500" },
+        ])}
         context.Result = new ObjectResult(new { error = "internal", trace_id })
         {
             StatusCode = 500,

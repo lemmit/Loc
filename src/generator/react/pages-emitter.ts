@@ -54,7 +54,7 @@ export interface PageEmitContext {
   sys: SystemIR;
   deployable: DeployableIR;
   /** Pre-walked aggregates from the deployable's reachable contexts.
-   *  Used by the per-aggregate builders to resolve `Id<X>` cross-
+   *  Used by the per-aggregate builders to resolve `X id` cross-
    *  references to display fields. */
   aggregatesByName: Map<string, AggregateIR>;
   /** Map context name → `BoundedContextIR` for fast `scaffoldOrigin`

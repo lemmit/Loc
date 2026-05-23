@@ -923,7 +923,7 @@ function findPascalArg(
 
 /** Emit a `<.input>` for a single aggregate field.  Picks the HTML
  *  input type from the IR type and labels it from a humanized name.
- *  Id<T> references fall through to a text input for now — a proper
+ *  T id references fall through to a text input for now — a proper
  *  select-with-options requires loading T's list at mount time and
  *  is out of scope here (see follow-up plan §Form-of-Id). */
 function renderFieldInputForField(f: { name: string; type: TypeIR }, formAssign = "form"): string {
@@ -937,7 +937,7 @@ function renderFieldInputForField(f: { name: string; type: TypeIR }, formAssign 
 
 /** Map a TypeIR to the HTML `<input type="…">` attribute Ash forms
  *  use.  Defaults to "text" for anything not specifically mapped —
- *  including Id<T>, enum (until the select variant lands), and
+ *  including T id, enum (until the select variant lands), and
  *  value-object embeds (which would be split into per-leaf inputs
  *  in a deeper pass — out of scope here). */
 function htmlInputTypeForIRType(t: TypeIR): string {

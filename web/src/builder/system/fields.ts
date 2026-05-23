@@ -107,7 +107,7 @@ export function baseLabel(base: BaseSpec): string {
     case "primitive":
       return base.name;
     case "id":
-      return `Id<${base.target}>`;
+      return `${base.target} id`;
     case "named":
       return base.target;
   }
@@ -161,7 +161,7 @@ export function listFields(node: AstNode): FieldInfo[] {
   });
 }
 
-/** Type options for the Select: the primitives, plus `Id<Agg>` for each
+/** Type options for the Select: the primitives, plus `Agg id` for each
  *  aggregate and a named type for each value object / enum. */
 export function availableTypes(ast: Model): TypeOption[] {
   const out: TypeOption[] = PRIMITIVES.map((name) => ({ label: name, base: { kind: "primitive", name } }));
@@ -175,7 +175,7 @@ export function availableTypes(ast: Model): TypeOption[] {
   for (const n of AstUtils.streamAst(ast)) {
     if (n.$type === "Aggregate") {
       const name = (n as Aggregate).name;
-      add({ label: `Id<${name}>`, base: { kind: "id", target: name } });
+      add({ label: `${name} id`, base: { kind: "id", target: name } });
     } else if (n.$type === "ValueObject") {
       const name = (n as ValueObject).name;
       add({ label: name, base: { kind: "named", target: name } });

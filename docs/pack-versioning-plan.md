@@ -215,7 +215,7 @@ Inline string bumps:
 | target | files | change |
 | --- | --- | --- |
 | Hono | `src/generator/typescript/index.ts:204-216` | hono ^4.6→^4.12; drizzle-orm ^0.36→^0.45; drizzle-kit latest; @hono/zod-openapi same-major; pg latest; zod ^4 |
-| .NET | `src/generator/dotnet/templates/program.tpl.ts:325-360` | Defer past 2026-11 (.NET 8 LTS). Then 8.0.10→10.0.x with FluentValidation 11.10→12.1, MediatR 2.1.7→14.1 |
+| .NET | `src/generator/dotnet/emit/program.ts:325-360` | Defer past 2026-11 (.NET 8 LTS). Then 8.0.10→10.0.x with FluentValidation 11.10→12.1, MediatR 2.1.7→14.1 |
 | Phoenix | `src/generator/phoenix-live-view/index.ts:609` | ✅ **done in Phase 1.5** — phoenix `~> 1.7`→`~> 1.8`; postgrex `">= 0.0.0"`→`~> 0.20`; ash `~> 3.0`→`~> 3.24` |
 
 Wire each into a centralised `BACKEND_PINS` const per generator so deps management is one diff in one place.

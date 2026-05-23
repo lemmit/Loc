@@ -26,7 +26,7 @@ import {
   renderQueryHandler,
   renderRequestDtos,
   renderResponseDtos,
-} from "./templates.js";
+} from "./emit.js";
 import { renderCreateValidator, renderOperationValidator } from "./validator-emit.js";
 
 // ---------------------------------------------------------------------------
@@ -51,7 +51,7 @@ export function emitCqrs(
   ctx: BoundedContextIR,
   ns: string,
   out: Map<string, string>,
-  options?: { routePrefix?: string },
+  options?: { routePrefix?: string; emitTrace?: boolean },
 ): void {
   const aggFolder = plural(agg.name);
   const requiredFields = agg.fields.filter((f) => !f.optional);
@@ -62,7 +62,7 @@ export function emitCqrs(
   emitOperationCommandsAndHandlers(agg, ctx, ns, aggFolder, out);
   emitGetByIdQueryAndHandler(agg, ctx, ns, aggFolder, out);
   emitFindQueriesAndHandlers(agg, repo, ctx, ns, aggFolder, out);
-  emitController(agg, repo, ctx, requiredFields, ns, out, options?.routePrefix);
+  emitController(agg, repo, ctx, requiredFields, ns, out, options?.routePrefix, options?.emitTrace);
 }
 
 // ---------------------------------------------------------------------------
@@ -249,7 +249,7 @@ function emitOperationCommandsAndHandlers(
       // auto Mediator handler, then dispatch through it.
       const ifaceName = `I${upperFirst(op.name)}${agg.name}Handler`;
       const reqName = `${upperFirst(op.name)}Request`;
-      // Request record is wire-typed (Id<X> → Guid, enum → string,
+      // Request record is wire-typed (X id → Guid, enum → string,
       // datetime → string, value-object → <VO>Request) but `cmd.X`
       // is domain-typed.  Convert each param via
       // `domainToRequestExpr` so the constructor types line up.
@@ -492,6 +492,7 @@ function emitController(
   ns: string,
   out: Map<string, string>,
   routePrefix?: string,
+  emitTrace?: boolean,
 ): void {
   out.set(
     `Api/${upperFirst(plural(agg.name))}Controller.cs`,
@@ -507,6 +508,10 @@ function emitController(
           cmdArgs: op.params.map((p) =>
             wireToCommandArgument(`request.${upperFirst(p.name)}`, p.type, ctx),
           ),
+          // Wire-shape key set for --trace's wire_in line.  Param names
+          // are lowerCamel in the IR — same form the JSON wire uses
+          // (default ASP.NET JsonNamingPolicy.CamelCase).
+          paramNames: op.params.map((p) => p.name),
         })),
       finds: (repo?.finds ?? []).map((find) => ({
         name: find.name,
@@ -524,6 +529,7 @@ function emitController(
             : "single") as "list" | "optional" | "single",
       })),
       routePrefix,
+      emitTrace,
     }),
   );
 }

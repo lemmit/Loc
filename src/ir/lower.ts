@@ -1258,7 +1258,7 @@ function lowerView(view: View, env: Env): ViewIR {
       expr: lowerExpr(b.expr, inner),
       type: inferExprType(b.expr, inner),
     }));
-    // Walk every bind expression for `Id<X>` follow patterns;
+    // Walk every bind expression for `X id` follow patterns;
     // each unique path becomes one bulk-load + map at emission
     // time.  Order by path length (shortest first) so each
     // hop's prerequisites are guaranteed to load before it.
@@ -1285,7 +1285,7 @@ function lowerView(view: View, env: Env): ViewIR {
   };
 }
 
-/** Walk a bind expression's IR tree and capture every `Id<X>`
+/** Walk a bind expression's IR tree and capture every `X id`
  *  follow as an auxiliary path entry.  Single-hop
  *  (`customerId.name`) yields path `["customerId"]` with target
  *  Customer; two-hop (`customerId.regionId.name`) yields paths
@@ -1425,11 +1425,13 @@ function fieldSensitivity(p: Property): readonly string[] | undefined {
 }
 
 function lowerContainment(c: Containment): ContainmentIR {
-  return {
+  const ir: ContainmentIR = {
     name: c.name,
     partName: c.partType?.ref?.name ?? "Unknown",
     collection: !!c.collection,
   };
+  if (c.optional) ir.optional = true;
+  return ir;
 }
 
 function lowerDerived(d: DerivedProp, env: Env): DerivedIR {

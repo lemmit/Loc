@@ -27,7 +27,7 @@ context  enum  valueobject  aggregate  entity  contains  ids
 event  repository  for  find  where
 derived  invariant  when  function  operation  private
 precondition  emit  let  expect  expectThrows  test  new
-true  false  null  this  id  Id
+true  false  null  this  id
 int  long  decimal  string  bool  datetime  guid
 ```
 
@@ -109,7 +109,7 @@ Rules:
 - Aggregates, events, repositories, workflows, and views stay inside
   a context, as before.
 - Cross-context aggregate references are **not** changed by this
-  feature.  Today's rule applies: `Id<X>` only resolves to an
+  feature.  Today's rule applies: `X id` only resolves to an
   aggregate in the same context.
 - Workspace-level uniqueness: root-level VO / enum names, system
   names, and context names must each be unique across the whole
@@ -138,7 +138,7 @@ A module may appear in any number of deployables — its code is inlined
 into each.  For v1 there is no shared-library / npm-workspace shape;
 duplication is the trade-off for simplicity.
 
-Cross-module type references (`Id<X>`, value-object usage, enum values)
+Cross-module type references (`X id`, value-object usage, enum values)
 work freely as long as both types are reachable from the same
 deployable's module set.  The Langium scope provider exports all
 named declarations — aggregates, entity parts, value objects, enums —
@@ -175,21 +175,21 @@ order:
 | --- | --- |
 | `enum Name { A, B, C }` | Closed enumeration; values are referenced bare. |
 | `valueobject Name { … }` | Immutable record with optional invariants and derived members. |
-| `aggregate Name [ids guid\|int\|long\|string] { … }` | Aggregate root with implicit `Id<Name>` field. |
+| `aggregate Name [ids guid\|int\|long\|string] { … }` | Aggregate root with implicit `Name id` field. |
 | `event Name { field: Type, … }` | Flat record raised via `emit`. |
 | `repository Name for Aggregate { find … }` | Repository declaration with optional find queries. |
 
-### Identity and `Id<X>`
+### Identity and `X id`
 
 `aggregate Order { … }` implicitly declares an identity field `id` of
-type `Id<Order>`.  Likewise each `entity Foo { … }` declared inside an
-aggregate implicitly has an `id: Id<Foo>` plus an implicit parent
+type `Order id`.  Likewise each `entity Foo { … }` declared inside an
+aggregate implicitly has an `id: Foo id` plus an implicit parent
 reference.
 
-Cross-aggregate references are written as `Id<Other>`:
+Cross-aggregate references are written as `Other id`:
 
 ```
-customerId: Id<Customer>
+customerId: Customer id
 ```
 
 The underlying value type defaults to `guid`; override per-aggregate:
@@ -198,27 +198,27 @@ The underlying value type defaults to `guid`; override per-aggregate:
 aggregate Order ids int { … }
 ```
 
-#### Reference collections — `Id<X>[]`
+#### Reference collections — `X id[]`
 
 A field typed as a collection of references to another aggregate is a
 **many-to-many** relation:
 
 ```
 aggregate Trainer {
-  party:  Id<Pokemon>[]
-  caught: Id<Pokemon>[]
+  party:  Pokemon id[]
+  caught: Pokemon id[]
 }
 ```
 
 No grammar keyword switches it on — any aggregate field whose type is
-`Id<X>[]` is a reference collection.  Semantically it is an ordered set
+`X id[]` is a reference collection.  Semantically it is an ordered set
 of references: the same target appears at most once per owner, and the
 collection's order is preserved across a persistence round-trip.
 
 Mutate the collection from operations with `+=` / `-=`:
 
 ```
-operation addToParty(pokemon: Id<Pokemon>) {
+operation addToParty(pokemon: Pokemon id) {
   precondition party.count < 6
   party += pokemon
 }
@@ -229,7 +229,7 @@ Membership is queryable from a repository `find ... where` (see
 
 Reference collections are **not** the same as containment.
 `contains lines: OrderLine[]` declares entity parts that live and die
-with the parent — a child table joined on `parent_id`.  `Id<X>[]` is a
+with the parent — a child table joined on `parent_id`.  `X id[]` is a
 list of references to a *different* aggregate that outlives any one
 owner — persisted as a separate join table when the backend supports
 it (see [`docs/generators.md`](generators.md)).
@@ -242,7 +242,8 @@ Inside an aggregate or an `entity` part:
 | --- | --- |
 | `name: TypeRef [display] [provenanced] [check Expr]` | Property, with optional modifiers (in this order). `display` marks the human-readable label field; `provenanced` records assignment lineage (below); `check Expr` is a per-field validation predicate. |
 | `contains name: PartName[]` | Containment of a part declared within the same aggregate; collection. |
-| `contains name: PartName` | Containment, single. |
+| `contains name: PartName` | Containment, single (required). |
+| `contains name: PartName?` | Containment, single (optional) — the part may be absent at runtime; serialised as a nullable wire field.  `[]?` is rejected: an empty collection already encodes absence. |
 | `derived name: TypeRef = Expression` | Computed read-only property. |
 | `invariant Expression [when Expression]` | `bool` predicate; checked after every mutation. Optional `when` is a guard. |
 | `function name(params): TypeRef = Expression` | Pure helper; callable from any expression in the same aggregate. |
@@ -297,18 +298,40 @@ system.
 ### Type references
 
 ```
-TypeRef = BaseType ('[]')? ('?')?
-BaseType = PrimitiveType | 'Id' '<' Identifier '>' | NamedType
+TypeRef    = BaseType ('[]')? ('?')?
+BaseType   = PrimitiveType | IdType | NamedType
+IdType     = Identifier 'id'                  // cross-aggregate FK
+NamedType  = Identifier                       // bare name
 PrimitiveType = 'int' | 'long' | 'decimal' | 'string' | 'bool' | 'datetime' | 'guid'
-NamedType = Identifier      // resolves to enum / valueobject (only)
 ```
 
-`Id<X>` resolves to either an aggregate or an entity-part declared in
-scope.  `NamedType` resolves to enums and value objects; aggregates are
-*never* referenced by their bare name in cross-aggregate properties —
-use `Id<X>` instead.
+A bare `Identifier` in type position must resolve to one of:
 
-`T[]` denotes a collection; `T?` denotes an optional value.
+| Resolves to | Meaning |
+| --- | --- |
+| Enum (any context) | An `enum` value. |
+| Value object (any context) | An embedded value object — copied by value into the wire shape. |
+| Entity part of the *same* aggregate | An addressable child of this aggregate, by-reference at runtime (the engine has the loaded object). |
+
+Cross-aggregate references must use **`X id`** — an explicit foreign
+key.  The validator rejects a bare aggregate name in storage / wire
+positions (aggregate fields, event fields, operation / function /
+find / workflow parameters) with a fixit pointing at `'X id'`; it
+also rejects an entity-part from a different aggregate the same way,
+pointing at the owning aggregate's id.
+
+The result is a legible three-keyword surface — `id` shows up exactly
+when you cross an aggregate boundary; everything else is a bare name,
+and the type system tells you what it means.
+
+`T[]` denotes a collection; `T?` denotes an optional value.  Both
+suffixes apply to the same `TypeRef`, in either order
+(`Customer id?`, `Pokemon id[]`, `Address?`).
+
+> Query results and projections are exempt — `find byEmail(e: string): Customer?`
+> and `derived owner: Customer = ...` may legitimately reference an
+> aggregate as a domain object.  The check only fires in storage /
+> wire-data positions.
 
 ---
 
@@ -365,7 +388,7 @@ When the receiver type is `T[]`:
 | `xs.where(x => expr)` | `T[]` | Filter. |
 | `xs.first` | `T` | First element (assumes non-empty). |
 | `xs.firstOrNull` | `T?` | First or `null`. |
-| `xs.contains(x)` | `bool` | Membership.  Renders to `Array.includes` (TS) / `Enumerable.Contains` (.NET).  Also admitted in repository `where` clauses when `xs` is a `this`-rooted `Id<X>[]` reference collection — see [Repositories](#repositories). |
+| `xs.contains(x)` | `bool` | Membership.  Renders to `Array.includes` (TS) / `Enumerable.Contains` (.NET).  Also admitted in repository `where` clauses when `xs` is a `this`-rooted `X id[]` reference collection — see [Repositories](#repositories). |
 
 ### Numeric widening
 
@@ -497,10 +520,10 @@ Playwright config in that directory (`npx playwright test` from
 ```ddd
 repository Orders for Order {
     // convention-based: parameter names match aggregate properties.
-    find byCustomer(customerId: Id<Customer>): Order[]
+    find byCustomer(customerId: Customer id): Order[]
 
     // explicit predicate; `this` refers to the aggregate root.
-    find activeForCustomer(forCustomer: Id<Customer>): Order[]
+    find activeForCustomer(forCustomer: Customer id): Order[]
         where this.customerId == forCustomer && this.status == Draft
 }
 ```
@@ -514,15 +537,15 @@ plus a Mediator query in the .NET backend.
   lowered to Drizzle operators (`eq`/`ne`/`lt`/`lte`/`gt`/`gte`/
   `and`/`or`/`not`/`inArray`) over `this.<col>` and
   `this.<vo>.<sub>` references, including the membership form
-  `this.<refColl>.contains(param)` against an `Id<X>[]` join table.
+  `this.<refColl>.contains(param)` against an `X id[]` join table.
   The queryable-subset validator rejects shapes that don't fit (e.g.
   `.count`, `.any`, lambdas) with a clear diagnostic.
 - **.NET**: both forms lower to a LINQ `.Where(x => …)` predicate and
   pass through EF Core to SQL.
 
 A repository `where` clause may use `this.<refColl>.contains(param)` to
-query membership over an `Id<X>[]` reference collection — for example,
-`find holdingInParty(pokemon: Id<Pokemon>): Trainer[] where
+query membership over an `X id[]` reference collection — for example,
+`find holdingInParty(pokemon: Pokemon id): Trainer[] where
 this.party.contains(pokemon)`.  The TypeScript backend lowers this to
 an `inArray(...subquery...)` against the field's join table; other
 collection operations (`.count`, `.any`, `.where`, …) remain rejected
@@ -545,7 +568,7 @@ The validator runs after parsing and reports errors for:
 - Field / parameter / call / member-access type mismatches.
 - Assignment to a derived property.
 - `emit` payloads that don't match the event's declared shape.
-- Unknown / out-of-scope `Id<X>` targets.
+- Unknown / out-of-scope `X id` targets.
 - `contains` referencing a part that belongs to a different aggregate.
 - Operations or `test` blocks declared outside an aggregate root.
 - A `platform: react` deployable without a `targets:` field, or
@@ -573,13 +596,13 @@ context Sales {
         invariant currency.length == 3
     }
 
-    event OrderConfirmed { order: Id<Order>, at: datetime }
+    event OrderConfirmed { order: Order id, at: datetime }
 
     aggregate Customer { name: string, email: string }
     aggregate Product  { sku: string, price: Money }
 
     aggregate Order {
-        customerId: Id<Customer>
+        customerId: Customer id
         status: OrderStatus
         placedAt: datetime
         contains lines: OrderLine[]
@@ -591,7 +614,7 @@ context Sales {
 
         function isMutable(): bool = status == Draft
 
-        operation addLine(productId: Id<Product>, qty: int, price: Money) {
+        operation addLine(productId: Product id, qty: int, price: Money) {
             precondition isMutable()
             precondition qty > 0
             lines += new OrderLine {
@@ -607,7 +630,7 @@ context Sales {
         }
 
         entity OrderLine {
-            productId: Id<Product>
+            productId: Product id
             quantity: int
             unitPrice: Money
             derived subtotal: Money =
@@ -623,7 +646,7 @@ context Sales {
     }
 
     repository Orders for Order {
-        find byCustomer(customerId: Id<Customer>): Order[]
+        find byCustomer(customerId: Customer id): Order[]
     }
 }
 ```

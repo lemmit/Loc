@@ -48,11 +48,27 @@ export const LogEvents = {
   serverListening: { event: "server_listening", level: "info", fields: ["port"] },
   serverShutdown: { event: "server_shutdown", level: "info", fields: ["signal"] },
   serverDrained: { event: "server_drained", level: "info", fields: [] },
+  // `dbConnecting` / `dbConnected` are reserved for a future eager-connect
+  // path.  Today's emitted backend uses pg's lazy pool (no connect until
+  // the first query), so a one-shot "connected" event would either lie
+  // or block boot.  Kept in the catalog so a future emitter can light
+  // them up without breaking the additive contract.
   dbConnecting: { event: "db_connecting", level: "debug", fields: ["host"] },
   dbConnected: { event: "db_connected", level: "info", fields: ["host", "pool_size"] },
   dbDisconnected: { event: "db_disconnected", level: "warn", fields: ["reason"] },
+  // `dbPoolExhausted` is reserved.  pg.Pool doesn't expose an exhaustion
+  // event directly; detecting it reliably means polling
+  // `pool.waitingCount` vs `pool.options.max` with debouncing, which is
+  // out of scope for v1.  The catalog entry stays so a future pool
+  // wrapper can fire it without a schema change.
   dbPoolExhausted: { event: "db_pool_exhausted", level: "warn", fields: ["waiters"] },
   dbError: { event: "db_error", level: "error", fields: ["error", "query"] },
+  // Migration-runner events are reserved for when the generated backend
+  // gains an in-process runner (drizzle-orm's `migrate(db, …)`).  Today's
+  // emitted project ships migrations via the drizzle-kit CLI as a build
+  // step (`npm run db:migrate`), so there's no in-process seam to emit
+  // them from — the catalog entries stay so the future runner can light
+  // them up without breaking the additive contract.
   migrationsStarting: { event: "migrations_starting", level: "info", fields: ["count"] },
   migrationApplied: {
     event: "migration_applied",

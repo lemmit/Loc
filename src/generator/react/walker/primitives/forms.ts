@@ -75,7 +75,7 @@ interface PreparedForm {
 }
 
 /** Shared field preparation for all three Form variants.  Resolves the
- *  `Id<X>` targets / `Controller` need / RHF default-values literal,
+ *  `X id` targets / `Controller` need / RHF default-values literal,
  *  prepares each field's view-model (driving its `field-input-*`
  *  template), and registers the universal RHF imports, the per-idTarget
  *  `useAll<X>` imports, the per-field template imports, and the per-field

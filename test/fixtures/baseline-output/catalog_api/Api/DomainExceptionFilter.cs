@@ -78,9 +78,9 @@ public sealed class DomainExceptionFilter : IExceptionFilter
             // names the offending op + aggregate so operators don't
             // have to grep logs to find the cause.  The original
             // exception (xh.InnerException) is logged in full
-            // server-side.
-            _log.LogError(xh, "Extern handler {Op} on {Agg} threw",
-                xh.OpName, xh.AggName);
+            // server-side via the catalog's extern_handler_threw
+            // event — same shape the Hono onError arm emits.
+            _log.LogError(xh, "{Event} aggregate={Aggregate} op={Op} error={Error}", "extern_handler_threw", xh.AggName, xh.OpName, xh.Message);
             context.Result = new ObjectResult(new { error = xh.Message, trace_id })
             {
                 StatusCode = 500,
@@ -88,10 +88,10 @@ public sealed class DomainExceptionFilter : IExceptionFilter
             context.ExceptionHandled = true;
             return;
         }
-        // Generic 500.  Log the full exception server-side; return a
-        // sanitized payload to the client.
-        _log.LogError(context.Exception, "Unhandled exception in {Action}",
-            context.ActionDescriptor.DisplayName);
+        // Generic 500.  Log the full exception server-side via the
+        // catalog's internal_error event; return a sanitized payload
+        // to the client.  Matching the Hono fallback envelope.
+        _log.LogError(context.Exception, "{Event} error={Error} status={Status}", "internal_error", context.Exception.Message, 500);
         context.Result = new ObjectResult(new { error = "internal", trace_id })
         {
             StatusCode = 500,

@@ -1,5 +1,6 @@
 import type { BoundedContextIR, DeployableIR, SystemIR } from "../../ir/loom-ir.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
+import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
 
 // ---------------------------------------------------------------------------
 // API controller emission for Phoenix LiveView / Ash.
@@ -42,6 +43,11 @@ export interface ApiEmitArgs {
   appName: string;
   /** PascalCase module prefix, e.g. "PhoenixApp" */
   appModule: string;
+  /** Compile-time --trace switch.  When true, each AggregatesController
+   *  CRUD action emits a `wire_in` Logger.debug right after `params`
+   *  binding so the parsed key set surfaces on the structured stream.
+   *  Off keeps the action bodies byte-identical to the pre-trace shape. */
+  emitTrace?: boolean;
 }
 
 export interface ApiRoute {
@@ -140,7 +146,10 @@ export function emitApiControllers(args: ApiEmitArgs): ApiEmitResult {
 
   if (hasServes && allAggregates.length > 0) {
     const controllerPath = `lib/${appName}_web/controllers/aggregates_controller.ex`;
-    files.set(controllerPath, renderAggregatesController(allAggregates, appModule));
+    files.set(
+      controllerPath,
+      renderAggregatesController(allAggregates, appModule, !!args.emitTrace),
+    );
 
     for (const { agg } of allAggregates) {
       const aggSnake = snake(agg.name);
@@ -356,16 +365,23 @@ function renderViewAction(
 function renderAggregatesController(
   aggregates: Array<{ ctx: BoundedContextIR; agg: import("../../ir/loom-ir.js").AggregateIR }>,
   appModule: string,
+  emitTrace: boolean,
 ): string {
   const webModule = `${appModule}Web`;
 
   const actions = aggregates
-    .map(({ ctx, agg }) => renderAggregateActions(ctx, agg, appModule))
+    .map(({ ctx, agg }) => renderAggregateActions(ctx, agg, appModule, emitTrace))
     .join("\n\n");
 
   return `# Auto-generated.
 defmodule ${webModule}.AggregatesController do
   use ${webModule}, :controller
+  # Catalog log events (aggregate_created on Create; see
+  # docs/proposals/observability.md) reach Elixir's Logger via the
+  # renderer in src/generator/_obs/render-phoenix.ts.  Required at
+  # module top so the macro-expanded Logger.<level>(...) calls below
+  # compile without further per-action imports.
+  require Logger
 
   @moduledoc """
   HTTP entry points for all aggregate CRUD code-interface functions.
@@ -381,10 +397,24 @@ function renderAggregateActions(
   ctx: BoundedContextIR,
   agg: import("../../ir/loom-ir.js").AggregateIR,
   appModule: string,
+  emitTrace: boolean,
 ): string {
   const aggSnake = snake(agg.name);
   const aggPlural = snake(plural(agg.name));
   const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
+
+  // wire_in (debug, since Elixir's Logger has no `trace` — catalog's
+  // trace level maps to Logger.debug per render-phoenix.ts) — emitted
+  // only on --trace.  Keys = `Map.keys(params)` (runtime introspection
+  // of the parsed `conn` params); GET-by-id includes the `id`
+  // path-binding too.  Mirrors Hono Phase 6d + .NET v6's wire_in
+  // identity so a cross-backend filter on `event="wire_in"` joins.
+  const wireInCreate = emitTrace
+    ? `    ${renderPhoenixLogCall("wireIn", [{ name: "keys", valueExpr: "Map.keys(params)" }])}\n`
+    : "";
+  const wireInUpdate = emitTrace
+    ? `    ${renderPhoenixLogCall("wireIn", [{ name: "keys", valueExpr: "Map.keys(params)" }])}\n`
+    : "";
 
   return `  @doc "GET /api/aggregates/${aggPlural}"
   def list_${aggPlural}(conn, _params) do
@@ -400,7 +430,11 @@ function renderAggregateActions(
 
   @doc "POST /api/aggregates/${aggPlural}"
   def create_${aggSnake}(conn, params) do
-    record = ${contextModule}.create_${aggSnake}!(params)
+${wireInCreate}    record = ${contextModule}.create_${aggSnake}!(params)
+    ${renderPhoenixLogCall("aggregateCreated", [
+      { name: "aggregate", valueExpr: `"${agg.name}"` },
+      { name: "id", valueExpr: "record.id" },
+    ])}
     conn
     |> put_status(:created)
     |> json(record)
@@ -408,7 +442,7 @@ function renderAggregateActions(
 
   @doc "PATCH /api/aggregates/${aggPlural}/:id"
   def update_${aggSnake}(conn, %{"id" => id} = params) do
-    attrs = Map.drop(params, ["id"])
+${wireInUpdate}    attrs = Map.drop(params, ["id"])
     record = ${contextModule}.update_${aggSnake}!(id, attrs)
     json(conn, record)
   end
@@ -430,6 +464,10 @@ function renderHealthController(appModule: string): string {
   return `# Auto-generated.
 defmodule ${webModule}.HealthController do
   use ${webModule}, :controller
+  # Catalog log events (health_ok / db_error / health_degraded — see
+  # docs/proposals/observability.md) — same identity the Hono /ready
+  # arm emits, so cross-backend dashboards filter on one event name.
+  require Logger
 
   @moduledoc """
   Liveness and readiness probes.
@@ -440,6 +478,7 @@ defmodule ${webModule}.HealthController do
 
   @doc "GET /health — liveness probe (no DB dependency)."
   def liveness(conn, _params) do
+    ${renderPhoenixLogCall("healthOk", [{ name: "checks", valueExpr: `["liveness"]` }])}
     json(conn, %{status: "ok"})
   end
 
@@ -447,9 +486,12 @@ defmodule ${webModule}.HealthController do
   def readiness(conn, _params) do
     try do
       Ecto.Adapters.SQL.query!(${appModule}.Repo, "SELECT 1", [])
+      ${renderPhoenixLogCall("healthOk", [{ name: "checks", valueExpr: `["readiness", "db"]` }])}
       json(conn, %{status: "ready"})
     rescue
-      _e ->
+      e ->
+        ${renderPhoenixLogCall("dbError", [{ name: "error", valueExpr: "Exception.message(e)" }])}
+        ${renderPhoenixLogCall("healthDegraded", [{ name: "checks", valueExpr: `["db"]` }])}
         conn
         |> put_status(:service_unavailable)
         |> json(%{status: "not_ready"})

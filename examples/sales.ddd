@@ -11,13 +11,13 @@ context Sales {
   }
 
   event OrderConfirmed {
-    order: Id<Order>,
+    order: Order id,
     at: datetime
   }
 
   event LineAdded {
-    order: Id<Order>,
-    productId: Id<Product>,
+    order: Order id,
+    productId: Product id,
     quantity: int
   }
 
@@ -33,7 +33,7 @@ context Sales {
   }
 
   aggregate Order {
-    customerId: Id<Customer>
+    customerId: Customer id
     status: OrderStatus
     placedAt: datetime
     contains lines: OrderLine[]
@@ -49,7 +49,7 @@ context Sales {
       precondition isMutable()
     }
 
-    operation addLine(productId: Id<Product>, qty: int, price: Money) {
+    operation addLine(productId: Product id, qty: int, price: Money) {
       precondition isMutable()
       precondition qty > 0
       lines += new OrderLine {
@@ -66,7 +66,7 @@ context Sales {
     }
 
     entity OrderLine {
-      productId: Id<Product>
+      productId: Product id
       quantity: int
       unitPrice: Money
 
@@ -94,10 +94,10 @@ context Sales {
   repository Orders for Order {
     // Convention: when no `where` is given, parameters are matched to
     // aggregate properties of the same name (here `customerId`).
-    find byCustomer(customerId: Id<Customer>): Order[]
+    find byCustomer(customerId: Customer id): Order[]
     // Explicit predicate over the aggregate root — `this` refers to the
     // root, parameters are bare identifiers.
-    find activeForCustomer(forCustomer: Id<Customer>): Order[]
+    find activeForCustomer(forCustomer: Customer id): Order[]
       where this.customerId == forCustomer && this.status == Draft
   }
 
@@ -105,7 +105,7 @@ context Sales {
   // fresh draft order from the request, persist it.  Non-transactional
   // — the customer load is read-only, the order save is independent.
   // See docs/workflow.md for the full surface.
-  workflow placeOrder(customerId: Id<Customer>, placedAt: datetime) {
+  workflow placeOrder(customerId: Customer id, placedAt: datetime) {
     let customer = Customers.getById(customerId)
     let order = Order.create({
       customerId: customerId,
@@ -127,7 +127,7 @@ context Sales {
   // expression projects from the hydrated source aggregate after
   // the where-clause SQL filter runs.
   view OrderSummary {
-    orderId: Id<Order>
+    orderId: Order id
     status: OrderStatus
     lineCount: int
 
@@ -137,14 +137,14 @@ context Sales {
          lineCount = lines.count
   }
 
-  // Snowflake-style view: bind expressions follow `Id<X>` typed
+  // Snowflake-style view: bind expressions follow `X id` typed
   // refs into other aggregates.  `customerId.name` and
   // `customerId.email` resolve via the type system (Customer is
-  // the target of `customerId: Id<Customer>`); the route handler
+  // the target of `customerId: Customer id`); the route handler
   // bulk-loads matching Customers via `findManyByIds` and
   // dictionary-rewrites the projection.  Slice 3.
   view CustomerOrders {
-    orderId: Id<Order>
+    orderId: Order id
     customerName: string
     customerEmail: string
     status: OrderStatus

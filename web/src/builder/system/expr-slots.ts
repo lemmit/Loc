@@ -330,7 +330,7 @@ function findAgg(ast: Model, name: string | undefined): Aggregate | null {
 // (`inScopeNames`) are reused so scope knowledge stays in one place.
 function withParamsAndLets(env: Env, params: Parameter[], lets: string[]): Env {
   // Only the names matter for enumeration; skip `lowerType` (it would deref
-  // `Id<X>` targets, which the main-thread parse can't link).
+  // `X id` targets, which the main-thread parse can't link).
   let next = env;
   for (const p of params) next = withLocal(next, p.name, "param", { kind: "primitive", name: "string" });
   for (const name of lets) next = withLocal(next, name, "let", { kind: "primitive", name: "string" });

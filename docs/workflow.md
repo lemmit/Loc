@@ -23,7 +23,7 @@ context Sales {
   }
 
   aggregate Order {
-    customerId: Id<Customer>
+    customerId: Customer id
     status: OrderStatus
     placedAt: datetime
   }
@@ -31,10 +31,10 @@ context Sales {
   repository Customers for Customer { }
   repository Orders for Order { }
 
-  event OrderPlaced { order: Id<Order>, at: datetime }
+  event OrderPlaced { order: Order id, at: datetime }
 
   // Non-transactional: each save commits independently.
-  workflow placeOrder(customerId: Id<Customer>, placedAt: datetime) {
+  workflow placeOrder(customerId: Customer id, placedAt: datetime) {
     let customer = Customers.getById(customerId)
     let order = Order.create({
       customerId: customerId,
@@ -45,7 +45,7 @@ context Sales {
   }
 
   // Transactional: all-or-nothing within one DB transaction.
-  workflow transferCredit(from: Id<Customer>, to: Id<Customer>, amount: decimal) transactional {
+  workflow transferCredit(from: Customer id, to: Customer id, amount: decimal) transactional {
     precondition amount > 0
     let src = Customers.getById(from)
     let dst = Customers.getById(to)
@@ -135,7 +135,7 @@ connection-default behaviour is preserved.
 
 ```
 Application/Workflows/
-  PlaceOrderRequest.cs        — wire-shape DTO (Id<X> → Guid, datetime → string)
+  PlaceOrderRequest.cs        — wire-shape DTO (X id → Guid, datetime → string)
   PlaceOrderCommand.cs        — domain-typed Mediator command
   PlaceOrderHandler.cs        — handler that orchestrates the body
 Api/

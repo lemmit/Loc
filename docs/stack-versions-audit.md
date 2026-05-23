@@ -101,7 +101,7 @@ Per-pack legacy table (kept for the per-dep latest-stable column):
 | `bandit` | `~> 1.5` | latest | safe |
 | `postgrex` | **`">= 0.0.0"`** | 0.20.x | **TIGHTEN to `~> 0.20`** — current range is the same loose-peer trap that bit Chakra |
 
-### .NET — `src/generator/dotnet/templates/program.tpl.ts:325–360`
+### .NET — `src/generator/dotnet/emit/program.ts:325–360`
 
 | package | pinned | latest | notes |
 | --- | --- | --- | --- |

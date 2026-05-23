@@ -345,6 +345,133 @@ describe("emitApiControllers (api-emit unit)", () => {
     expect(health).toMatch(/"ok"/);
     expect(health).toMatch(/service_unavailable/);
     expect(health).toMatch(/PhoenixApp\.Repo/);
+    // Phase 8 Phoenix: liveness + readiness emit the catalog's
+    // health_ok line; the rescue branch emits db_error (error) + the
+    // cumulative health_degraded (debug) — same event identities the
+    // Hono /ready arm emits.  `require Logger` once at module top.
+    expect(health).toMatch(/require Logger/);
+    expect(health).toMatch(
+      /Logger\.debug\("health_ok", event: "health_ok", checks: \["liveness"\]\)/,
+    );
+    expect(health).toMatch(
+      /Logger\.debug\("health_ok", event: "health_ok", checks: \["readiness", "db"\]\)/,
+    );
+    expect(health).toMatch(
+      /Logger\.error\("db_error", event: "db_error", error: Exception\.message\(e\)\)/,
+    );
+    expect(health).toMatch(
+      /Logger\.debug\("health_degraded", event: "health_degraded", checks: \["db"\]\)/,
+    );
+  });
+
+  it("aggregates_controller.ex emits wire_in (debug) on Create + Update when --trace is on", () => {
+    // Phase 8 Phoenix --trace v1 — mirrors Hono Phase 6d / .NET v6.
+    // Only seam available in Phoenix today is the controller's CRUD
+    // actions; Ash resources are declarative so domain trace events
+    // (value_computed / precondition_evaluated / invariant_evaluated)
+    // don't have an imperative seam to thread.  wire_in lands AFTER
+    // params binding using `Map.keys(params)` for runtime
+    // introspection — same identity Hono + .NET emit.  Logger.debug
+    // (Elixir has no `trace`; render-phoenix.ts maps trace → debug).
+    const aggCtx: BoundedContextIR = {
+      ...workflowCtx,
+      aggregates: [
+        {
+          name: "Order",
+          fields: [],
+          parts: [],
+          contains: [],
+          derived: [],
+          invariants: [],
+          functions: [],
+          operations: [],
+          identity: { kind: "guid" },
+        } as unknown as BoundedContextIR["aggregates"][number],
+      ],
+    };
+    const { files } = emitApiControllers({
+      contexts: [aggCtx],
+      deployable: stubDeployable,
+      sys: stubSys,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+      emitTrace: true,
+    });
+    const aggCtrl = files.get("lib/phoenix_app_web/controllers/aggregates_controller.ex")!;
+    // create_order + update_order both emit wire_in immediately
+    // after the `do` line.
+    const wireIns = aggCtrl.match(/Logger\.debug\("wire_in"/g) ?? [];
+    expect(wireIns.length).toBeGreaterThanOrEqual(2);
+    expect(aggCtrl).toMatch(
+      /Logger\.debug\("wire_in", event: "wire_in", keys: Map\.keys\(params\)\)/,
+    );
+  });
+
+  it("aggregates_controller.ex stays free of wire_in when --trace is off", () => {
+    const aggCtx: BoundedContextIR = {
+      ...workflowCtx,
+      aggregates: [
+        {
+          name: "Order",
+          fields: [],
+          parts: [],
+          contains: [],
+          derived: [],
+          invariants: [],
+          functions: [],
+          operations: [],
+          identity: { kind: "guid" },
+        } as unknown as BoundedContextIR["aggregates"][number],
+      ],
+    };
+    const { files } = emitApiControllers({
+      contexts: [aggCtx],
+      deployable: stubDeployable,
+      sys: stubSys,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+      // no emitTrace
+    });
+    const aggCtrl = files.get("lib/phoenix_app_web/controllers/aggregates_controller.ex")!;
+    expect(aggCtrl).not.toMatch(/wire_in/);
+    expect(aggCtrl).not.toMatch(/Map\.keys\(params\)/);
+  });
+
+  it("aggregates_controller.ex emits aggregate_created on each Create action via Logger", () => {
+    // Phase 8 Phoenix — every per-aggregate Create action emits the
+    // catalog's aggregate_created (info) line via Elixir's Logger.
+    // Same event identity the Hono + .NET Create handlers emit.
+    // (Local context inline: workflowCtx has aggregates:[] so
+    // aggregates_controller.ex wouldn't emit; for this assertion we
+    // need at least one aggregate.)
+    const aggCtx: BoundedContextIR = {
+      ...workflowCtx,
+      aggregates: [
+        {
+          name: "Order",
+          fields: [],
+          parts: [],
+          contains: [],
+          derived: [],
+          invariants: [],
+          functions: [],
+          operations: [],
+          identity: { kind: "guid" },
+        } as unknown as BoundedContextIR["aggregates"][number],
+      ],
+    };
+    const { files } = emitApiControllers({
+      contexts: [aggCtx],
+      deployable: stubDeployable,
+      sys: stubSys,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    const aggCtrl = files.get("lib/phoenix_app_web/controllers/aggregates_controller.ex")!;
+    expect(aggCtrl).toMatch(/require Logger/);
+    expect(aggCtrl).toMatch(
+      /Logger\.info\("aggregate_created", event: "aggregate_created", aggregate: "Order", id: record\.id\)/,
+    );
   });
 
   it("emits workflows_controller.ex when deployable serves an api and workflows exist", () => {
@@ -861,18 +988,18 @@ const ACME_LIVEVIEW_SOURCE = `system AcmeLV {
         currency: string
         invariant amount >= 0
       }
-      event OrderConfirmed { order: Id<Order>, at: datetime }
+      event OrderConfirmed { order: Order id, at: datetime }
       aggregate Customer {
         name: string display
         email: string
         invariant email.length > 0
       }
       aggregate Order {
-        customerId: Id<Customer>
+        customerId: Customer id
         status: OrderStatus
         contains lines: OrderLine[]
         entity OrderLine {
-          productId: Id<Customer>
+          productId: Customer id
           quantity: int
           invariant quantity > 0
         }
@@ -884,7 +1011,7 @@ const ACME_LIVEVIEW_SOURCE = `system AcmeLV {
       }
       repository Customers for Customer { }
       repository Orders for Order { }
-      workflow placeOrder(customerId: Id<Customer>) {
+      workflow placeOrder(customerId: Customer id) {
         let order = Order.create({ customerId: customerId, status: Draft })
       }
       view ActiveOrders = Order where status == Confirmed
@@ -1465,7 +1592,7 @@ const FORM_FIXTURE = `system AcmeForm {
       }
       repository Customers for Customer { }
       aggregate Order {
-        customerId: Id<Customer>
+        customerId: Customer id
         total: decimal
       }
       repository Orders for Order { }

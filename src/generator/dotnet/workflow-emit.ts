@@ -342,7 +342,7 @@ function renderStatement(
         // Construct the wire-typed request from the workflow's
         // domain-typed args.  Each arg renders via the regular
         // expression renderer (with cmd-param substitution), then
-        // wraps in `domainToRequestExpr` so Id<X>.Value, enum
+        // wraps in `domainToRequestExpr` so X id.Value, enum
         // .ToString(), VO → <VO>Request etc. all line up.
         const requestArgs = op.params
           .map((p, i) => domainToRequestExpr(renderArg(st.args[i]!), p.type, ctx))

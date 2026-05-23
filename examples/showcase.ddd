@@ -70,7 +70,7 @@ system DevPlatform {
                 derived label: string = value + " (slug)"
             }
 
-            event ProjectArchived { project: Id<Project>, at: datetime }
+            event ProjectArchived { project: Project id, at: datetime }
 
             aggregate Project ids guid {
                 name: string display
@@ -180,7 +180,7 @@ system DevPlatform {
 
             // View — full form with bind expressions.
             view ProjectSummary {
-                projectId: Id<Project>
+                projectId: Project id
                 name: string
                 pipelines: int
 
@@ -206,7 +206,7 @@ system DevPlatform {
                 derived human: string = seconds + "s"
             }
 
-            event BuildPromoted { build: Id<Build>, env: string, at: datetime }
+            event BuildPromoted { build: Build id, env: string, at: datetime }
 
             aggregate Build {
                 commitSha: string display
@@ -231,7 +231,7 @@ system DevPlatform {
             }
 
             // Transactional workflow with explicit isolation level.
-            workflow promoteToProduction(buildId: Id<Build>) transactional(serializable) {
+            workflow promoteToProduction(buildId: Build id) transactional(serializable) {
                 requires currentUser.role == "admin"
                 let b = Builds.getById(buildId)
                 b.promote("production")
@@ -341,7 +341,7 @@ system DevPlatform {
         // Group / Grid / Container / Tabs / Field / NumberField /
         // PasswordField / Toggle / Loader / Image / Avatar / Slot / Card /
         // Stat / Badge / Divider / Money / KeyValueRow / Modal.
-        page ProjectDetail(id: Id<Project>) {
+        page ProjectDetail(id: Project id) {
             route: "/projects/:id"
             title: "Project"
             state {

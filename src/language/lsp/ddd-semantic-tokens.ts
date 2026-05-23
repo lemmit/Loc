@@ -28,7 +28,7 @@ import { envForNode, stepIntoNode, typeOf } from "../type-system.js";
 // DddSemanticTokenProvider — layers resolved-meaning colour over the
 // TextMate grammar.  Declarations get their kind (type / enum / property /
 // method / parameter); type references and member accesses are coloured by
-// what they resolve to via the type system, so an `Id<X>` target reads as a
+// what they resolve to via the type system, so an `X id` target reads as a
 // type and `order.total` reads as a property even though both are plain ID
 // tokens TextMate can't classify.
 // ---------------------------------------------------------------------------

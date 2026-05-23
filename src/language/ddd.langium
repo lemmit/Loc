@@ -630,7 +630,7 @@ SensitivityClause:
     'sensitive' '(' tags+=ID (',' tags+=ID)* ')';
 
 Containment:
-    'contains' name=ID ':' partType=[EntityPart:ID] (collection?='[]')?;
+    'contains' name=ID ':' partType=[EntityPart:ID] (collection?='[]')? (optional?='?')?;
 
 DerivedProp:
     'derived' name=ID ':' type=TypeRef '=' expr=Expression;
@@ -690,7 +690,7 @@ PrimitiveType:
     name=('int' | 'long' | 'decimal' | 'string' | 'bool' | 'datetime' | 'guid');
 
 IdType:
-    'Id' '<' target=[NamedDecl:ID] '>';
+    target=[NamedDecl:ID] 'id';
 
 NamedType:
     target=[NamedDecl:ID];
