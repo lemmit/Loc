@@ -25,6 +25,7 @@ import { useWorkspaceSources } from "./workspace/use-workspace-sources";
 import {
   buildShareUrl,
   readHash,
+  readHashSource,
   writeHashProject,
   writeHashSource,
   type HashLoad,
@@ -132,6 +133,9 @@ export default function App(): JSX.Element {
   // dropdown so a recipient lands on the shared project even before
   // they touch the picker.
   const hashLoadOnMount = useMemo<HashLoad | null>(() => readHash(), []);
+  // Legacy single-file snapshot — `null` when the URL hash isn't a source / is
+  // empty. Callers that need the project state use `hashLoadOnMount` instead.
+  const hashSourceOnMount = useMemo<string | null>(() => readHashSource(), []);
   // Convenience accessor: the source the "Shared link" entry's
   // editor should open with — i.e. the active file's content for a
   // project payload, or the raw text for a single-file payload.
