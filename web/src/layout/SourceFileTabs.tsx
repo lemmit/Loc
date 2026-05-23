@@ -52,6 +52,11 @@ export interface SourceFileTabsProps {
   /** Delete a file from the VFS.  Strip never calls this for
    *  `main.ddd` (the delete button isn't rendered there). */
   onDelete: (path: string) => void;
+  /** Bumps the strip's touch-target sizes (× / + actions) and font
+   *  size so the tabs are thumb-friendly on the mobile shell.
+   *  Default = false (desktop densities).  EditorPane wires this
+   *  to `!ctx.isDesktop`. */
+  compact?: boolean;
 }
 
 /** Sort filenames `main.ddd` first, then lexicographically.  Stable
@@ -75,6 +80,17 @@ function displayName(path: string): string {
 }
 
 export function SourceFileTabs(props: SourceFileTabsProps): JSX.Element {
+  const compact = props.compact ?? false;
+  // Density knobs.  Mobile pads bigger touch targets (`sm` action
+  // icons are ~26 px, "xs" are ~18 px) and bumps the font so file
+  // names are scannable with a thumb without zooming.  Numbers
+  // chosen to roughly match the existing mobile SegmentedControl
+  // density elsewhere in the shell.
+  const fontSize = compact ? 13 : 12;
+  const tabPaddingV = compact ? 6 : 4;
+  const tabPaddingH = compact ? 10 : 8;
+  const actionIconSize: "xs" | "sm" = compact ? "sm" : "xs";
+
   const tabs = orderTabs(props.files.keys());
   // Ensure the active path always has a tab even when it doesn't
   // exist in the VFS yet (e.g. the first edit on main.ddd hasn't
@@ -133,9 +149,9 @@ export function SourceFileTabs(props: SourceFileTabsProps): JSX.Element {
             style={{
               display: "flex",
               alignItems: "center",
-              padding: "4px 8px 4px 10px",
+              padding: `${tabPaddingV}px ${tabPaddingH}px ${tabPaddingV}px ${tabPaddingH + 2}px`,
               marginRight: 2,
-              gap: 4,
+              gap: compact ? 6 : 4,
               cursor: isActive ? "default" : "pointer",
               background: isActive
                 ? "var(--mantine-color-dark-7)"
@@ -146,17 +162,17 @@ export function SourceFileTabs(props: SourceFileTabsProps): JSX.Element {
                 ? "var(--mantine-color-dark-3)"
                 : "transparent",
               fontFamily: "var(--mantine-font-family-monospace)",
-              fontSize: 12,
+              fontSize,
               whiteSpace: "nowrap",
             }}
           >
-            <Text size="xs" c={isActive ? undefined : "dimmed"}>
+            <Text size={compact ? "sm" : "xs"} c={isActive ? undefined : "dimmed"}>
               {displayName(path)}
             </Text>
             {isDeletable && (
               <Tooltip label="Delete file" withArrow openDelay={400}>
                 <ActionIcon
-                  size="xs"
+                  size={actionIconSize}
                   variant="subtle"
                   color="gray"
                   aria-label={`Delete ${displayName(path)}`}
@@ -173,31 +189,68 @@ export function SourceFileTabs(props: SourceFileTabsProps): JSX.Element {
         );
       })}
       {creating ? (
-        <Group gap={4} ml={4} wrap="nowrap" align="center">
-          <TextInput
-            size="xs"
-            autoFocus
-            placeholder="new-file or sub/dir/name"
-            value={draft}
-            error={draftError}
-            onChange={(e) => setDraft(e.currentTarget.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") submitCreate();
-              else if (e.key === "Escape") cancelCreate();
+        // Mobile: stack vertically so the TextInput gets full width
+        // and the Add/Cancel buttons don't overflow off-screen.
+        // Desktop: classic inline row.
+        compact ? (
+          <Box
+            ml={4}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+              padding: "4px 0",
+              minWidth: 240,
             }}
-            styles={{ input: { minWidth: 220 } }}
-          />
-          <Button size="xs" variant="default" onClick={submitCreate} disabled={!!draftError}>
-            Add
-          </Button>
-          <Button size="xs" variant="subtle" color="gray" onClick={cancelCreate}>
-            Cancel
-          </Button>
-        </Group>
+          >
+            <TextInput
+              size="sm"
+              autoFocus
+              placeholder="new-file or sub/dir/name"
+              value={draft}
+              error={draftError}
+              onChange={(e) => setDraft(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submitCreate();
+                else if (e.key === "Escape") cancelCreate();
+              }}
+            />
+            <Group gap={6} wrap="nowrap">
+              <Button size="xs" variant="default" onClick={submitCreate} disabled={!!draftError}>
+                Add
+              </Button>
+              <Button size="xs" variant="subtle" color="gray" onClick={cancelCreate}>
+                Cancel
+              </Button>
+            </Group>
+          </Box>
+        ) : (
+          <Group gap={4} ml={4} wrap="nowrap" align="center">
+            <TextInput
+              size="xs"
+              autoFocus
+              placeholder="new-file or sub/dir/name"
+              value={draft}
+              error={draftError}
+              onChange={(e) => setDraft(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submitCreate();
+                else if (e.key === "Escape") cancelCreate();
+              }}
+              styles={{ input: { minWidth: 220 } }}
+            />
+            <Button size="xs" variant="default" onClick={submitCreate} disabled={!!draftError}>
+              Add
+            </Button>
+            <Button size="xs" variant="subtle" color="gray" onClick={cancelCreate}>
+              Cancel
+            </Button>
+          </Group>
+        )
       ) : (
         <Tooltip label="Add a new .ddd file" withArrow openDelay={400}>
           <ActionIcon
-            size="sm"
+            size={compact ? "md" : "sm"}
             variant="subtle"
             color="gray"
             aria-label="Add a new .ddd file"
