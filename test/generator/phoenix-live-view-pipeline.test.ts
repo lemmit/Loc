@@ -345,6 +345,60 @@ describe("emitApiControllers (api-emit unit)", () => {
     expect(health).toMatch(/"ok"/);
     expect(health).toMatch(/service_unavailable/);
     expect(health).toMatch(/PhoenixApp\.Repo/);
+    // Phase 8 Phoenix: liveness + readiness emit the catalog's
+    // health_ok line; the rescue branch emits db_error (error) + the
+    // cumulative health_degraded (debug) — same event identities the
+    // Hono /ready arm emits.  `require Logger` once at module top.
+    expect(health).toMatch(/require Logger/);
+    expect(health).toMatch(
+      /Logger\.debug\("health_ok", event: "health_ok", checks: \["liveness"\]\)/,
+    );
+    expect(health).toMatch(
+      /Logger\.debug\("health_ok", event: "health_ok", checks: \["readiness", "db"\]\)/,
+    );
+    expect(health).toMatch(
+      /Logger\.error\("db_error", event: "db_error", error: Exception\.message\(e\)\)/,
+    );
+    expect(health).toMatch(
+      /Logger\.debug\("health_degraded", event: "health_degraded", checks: \["db"\]\)/,
+    );
+  });
+
+  it("aggregates_controller.ex emits aggregate_created on each Create action via Logger", () => {
+    // Phase 8 Phoenix — every per-aggregate Create action emits the
+    // catalog's aggregate_created (info) line via Elixir's Logger.
+    // Same event identity the Hono + .NET Create handlers emit.
+    // (Local context inline: workflowCtx has aggregates:[] so
+    // aggregates_controller.ex wouldn't emit; for this assertion we
+    // need at least one aggregate.)
+    const aggCtx: BoundedContextIR = {
+      ...workflowCtx,
+      aggregates: [
+        {
+          name: "Order",
+          fields: [],
+          parts: [],
+          contains: [],
+          derived: [],
+          invariants: [],
+          functions: [],
+          operations: [],
+          identity: { kind: "guid" },
+        } as unknown as BoundedContextIR["aggregates"][number],
+      ],
+    };
+    const { files } = emitApiControllers({
+      contexts: [aggCtx],
+      deployable: stubDeployable,
+      sys: stubSys,
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+    });
+    const aggCtrl = files.get("lib/phoenix_app_web/controllers/aggregates_controller.ex")!;
+    expect(aggCtrl).toMatch(/require Logger/);
+    expect(aggCtrl).toMatch(
+      /Logger\.info\("aggregate_created", event: "aggregate_created", aggregate: "Order", id: record\.id\)/,
+    );
   });
 
   it("emits workflows_controller.ex when deployable serves an api and workflows exist", () => {
