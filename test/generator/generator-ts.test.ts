@@ -177,6 +177,43 @@ describe("typescript generator", () => {
       expect(reqId).toMatch(/await requestLogStore\.run\(\{ log \}, async \(\) => \{/);
     });
 
+    it("--trace off: domain file imports no infra and statements stay byte-identical", async () => {
+      // The whole point of the compile-time switch: when --trace is OFF
+      // (the default) the generated domain file MUST be free of any
+      // observability infra import or instrumentation.  Domain purity by
+      // construction.
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS); // no emitTrace
+      const orderDomain = files.get("domain/order.ts")!;
+      expect(orderDomain).not.toMatch(/from "\.\.\/obs\/als"/);
+      expect(orderDomain).not.toMatch(/requestLog\(\)/);
+      expect(orderDomain).not.toMatch(/event: "value_computed"/);
+      expect(orderDomain).not.toMatch(/event: "precondition_evaluated"/);
+    });
+
+    it("--trace on: domain file injects requestLog import + value_computed + precondition_evaluated", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      // Mirror what the CLI does for `generate ts <ddd> --trace`.
+      const files = generateTypeScript(model, HONO_V4_PINS, { emitTrace: true });
+      const orderDomain = files.get("domain/order.ts")!;
+      // requestLog import — only when --trace is on, so the default
+      // artefact's domain layer never touches an infra import.
+      expect(orderDomain).toMatch(/import \{ requestLog \} from "\.\.\/obs\/als"/);
+      // value_computed after a scalar assign — carries the post-write
+      // value via `this._<field>`, the same path the assignment uses.
+      expect(orderDomain).toMatch(
+        /requestLog\(\)\.trace\(\{ event: "value_computed", aggregate: "Order", field: "[a-z]+", value: this\._[a-z]+ \}\)/,
+      );
+      // precondition_evaluated — boolean bound to a temp so BOTH pass
+      // and fail outcomes log, then the conditional throw fires off the
+      // same temp.
+      expect(orderDomain).toMatch(/const __pre_\d+_ok = \(/);
+      expect(orderDomain).toMatch(
+        /requestLog\(\)\.trace\(\{ event: "precondition_evaluated", aggregate: "Order", op: "[a-zA-Z]+", expr: "[^"]+", passed: __pre_\d+_ok \}\)/,
+      );
+      expect(orderDomain).toMatch(/if \(!__pre_\d+_ok\) throw new DomainError\(/);
+    });
+
     it("health + ready probes emit health_ok / db_error / health_degraded via the request logger", async () => {
       const model = await buildModel("examples/sales.ddd");
       const files = generateTypeScript(model, HONO_V4_PINS);
