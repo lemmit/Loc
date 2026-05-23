@@ -78,9 +78,42 @@ describe("Model v2 — view-graph per level", () => {
     expect(buildViewGraph(parse(SRC), [{ kind: "context", name: "Nope" }]).nodes).toEqual([]);
   });
 
-  it("operation / workflow / value-object leaves return empty (Phase 2 fills)", () => {
+  it("value-object / event / other non-operation leaves return empty", () => {
+    const g = buildViewGraph(parse(SRC), [{ kind: "event", name: "Placed" }]);
+    expect(g.nodes).toEqual([]);
+  });
+
+  it("operation view returns one stmt node per body statement + next edges", () => {
+    const g = buildViewGraph(parse(SRC), [
+      { kind: "aggregate", name: "Order" },
+      { kind: "operation", name: "confirm" },
+    ]);
+    expect(g.title).toBe("Order.confirm()");
+    // `confirm` body: `status := "Confirmed"` — one statement.
+    expect(g.nodes).toHaveLength(1);
+    expect(g.nodes[0]).toMatchObject({ id: "stmt:0", kind: "stmt" });
+    expect(g.edges).toEqual([]);
+  });
+
+  it("operation view without an aggregate step above returns empty", () => {
     const g = buildViewGraph(parse(SRC), [{ kind: "operation", name: "confirm" }]);
     expect(g.nodes).toEqual([]);
-    expect(g.title).toBe("operation confirm");
+  });
+
+  const WF_SRC = `context C {
+  workflow place(x: int) {
+    let a = x
+    a := x
+    let b = 0
+  }
+}`;
+  it("workflow view returns one stmt node per statement and chains them with next edges", () => {
+    const g = buildViewGraph(parse(WF_SRC), [{ kind: "workflow", name: "place" }]);
+    expect(g.title).toBe("workflow place()");
+    expect(g.nodes.map((n) => n.id)).toEqual(["stmt:0", "stmt:1", "stmt:2"]);
+    expect(g.edges.map((e) => [e.source, e.target])).toEqual([
+      ["stmt:0", "stmt:1"],
+      ["stmt:1", "stmt:2"],
+    ]);
   });
 });
