@@ -8,6 +8,7 @@ import { emitAuthFiles } from "./auth-emit.js";
 import { emitCqrs } from "./cqrs-emit.js";
 import { buildFindBodies } from "./find-emit.js";
 import {
+  renderAuditableInterceptor,
   renderCommon,
   renderConfiguration,
   renderCsproj,
@@ -145,13 +146,24 @@ function emitProjectFromContexts(
     workflows: contexts.flatMap((c) => c.workflows),
     views: contexts.flatMap((c) => c.views),
   };
-  // Capability interfaces — emitted into Domain/Common/ only when
-  // at least one aggregate carries the corresponding flag.  This
-  // keeps the file tree free of unused marker types in projects
-  // that don't use the auditable / softDeletable macros.  See
-  // `src/stdlib/auditable.macro.ts` and the macro plan in
-  // experience_gathered.md for the design.
-  emitCapabilityInterfaces(merged, ns, out);
+  // Auth files — emitted only when the deployable opts in
+  // via `auth: required` AND the system declares a user block (the
+  // validator already rejects the half-state).  Computed first
+  // because the capability-interface emitter needs to know whether
+  // the auditable interceptor can rely on ICurrentUserAccessor.
+  const authRequired = !!(system?.deployable.auth?.required && system.sys.user);
+  if (authRequired && system?.sys) {
+    emitAuthFiles(system.sys, ns, out);
+  }
+  // Capability interfaces (+ the auditable SaveChangesInterceptor) —
+  // emitted into Domain/Common/ + Infrastructure/Persistence/ only
+  // when at least one aggregate carries the corresponding flag.
+  // Keeps the file tree free of unused marker types and dead
+  // infrastructure in projects that don't use the auditable /
+  // softDeletable macros.  See `src/stdlib/auditable.macro.ts` and
+  // the macro plan in experience_gathered.md for the design.
+  emitCapabilityInterfaces(merged, ns, out, { authRequired });
+  const usesAuditable = merged.aggregates.some((a) => a.flags?.isAuditable);
   out.set("Infrastructure/Persistence/AppDbContext.cs", renderDbContext(merged, ns));
   // FluentValidation pipeline — emit the generic
   // ValidationBehavior + the csproj package ref + the
@@ -161,20 +173,13 @@ function emitProjectFromContexts(
   // arm is gated on the same flag.
   const usesValidators = merged.aggregates.some(hasAnyWireValidator);
   out.set("Api/DomainExceptionFilter.cs", renderExceptionFilter(ns, { usesValidators }));
-  // Auth files — emitted only when the deployable opts in
-  // via `auth: required` AND the system declares a user block (the
-  // validator already rejects the half-state).  When emitted, the
-  // Program.cs adopts the middleware mount + DI registrations.
-  const authRequired = !!(system?.deployable.auth?.required && system.sys.user);
-  if (authRequired && system?.sys) {
-    emitAuthFiles(system.sys, ns, out);
-  }
   if (usesValidators) {
     out.set("Application/Common/ValidationBehavior.cs", renderValidationBehavior(ns));
   }
   emitProject(merged, ns, out, {
     authRequired,
     usesValidators,
+    usesAuditable,
     hasEmbeddedSpa,
   });
   emitTestProject(merged, ns, out);
@@ -234,7 +239,8 @@ function emitContext(ctx: BoundedContextIR, ns: string, out: Map<string, string>
   if (usesValidators) {
     out.set("Application/Common/ValidationBehavior.cs", renderValidationBehavior(ns));
   }
-  emitProject(ctx, ns, out, { usesValidators });
+  const usesAuditable = ctx.aggregates.some((a) => a.flags?.isAuditable);
+  emitProject(ctx, ns, out, { usesValidators, usesAuditable });
   emitTestProject(ctx, ns, out);
 }
 
@@ -246,11 +252,20 @@ function emitCapabilityInterfaces(
   merged: BoundedContextIR,
   ns: string,
   out: Map<string, string>,
+  opts: { authRequired?: boolean } = {},
 ): void {
   const anyAuditable = merged.aggregates.some((a) => a.flags?.isAuditable);
   const anySoftDelete = merged.aggregates.find((a) => a.flags?.softDelete);
   if (anyAuditable) {
     out.set("Domain/Common/IAuditable.cs", renderIAuditable(ns));
+    // SaveChangesInterceptor that stamps audit fields on every
+    // IAuditable entity at SaveChanges time.  Registered in
+    // Program.cs against the DbContextOptions builder when
+    // `usesAuditable` is true (set below).
+    out.set(
+      "Infrastructure/Persistence/AuditableInterceptor.cs",
+      renderAuditableInterceptor(ns, !!opts.authRequired),
+    );
   }
   if (anySoftDelete) {
     const sd = anySoftDelete.flags!.softDelete!;
@@ -368,17 +383,20 @@ function emitProject(
   options?: {
     authRequired?: boolean;
     usesValidators?: boolean;
+    usesAuditable?: boolean;
     hasEmbeddedSpa?: boolean;
   },
 ): void {
   const hasExtern = ctx.aggregates.some((a) => a.operations.some((o) => o.extern));
   const usesValidators = !!options?.usesValidators;
+  const usesAuditable = !!options?.usesAuditable;
   const hasEmbeddedSpa = !!options?.hasEmbeddedSpa;
   out.set(
     "Program.cs",
     renderProgram(ctx, ns, {
       authRequired: !!options?.authRequired,
       usesValidators,
+      usesAuditable,
       hasEmbeddedSpa,
     }),
   );

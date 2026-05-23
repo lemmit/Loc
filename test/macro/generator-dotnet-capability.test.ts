@@ -96,3 +96,61 @@ describe(".NET generator honors auditable / softDeletable flags", () => {
     expect(orderCs).toMatch(/public DateTime\? DeletedAt/);
   });
 });
+
+describe(".NET runtime infrastructure for capability flags", () => {
+  it("auditable: emits SaveChangesInterceptor scanning IAuditable entries", async () => {
+    const model = await modelFrom(aggregateOnly("with auditable"));
+    const files = generateDotnet(model);
+    const interceptorPath = "Infrastructure/Persistence/AuditableInterceptor.cs";
+    expect([...files.keys()]).toContain(interceptorPath);
+    const src = files.get(interceptorPath)!;
+    // The interceptor scans the change tracker for IAuditable, sets
+    // CreatedAt/CreatedBy on Added, UpdatedAt/UpdatedBy on Added or
+    // Modified.  One interceptor per DbContext, not per aggregate.
+    expect(src).toMatch(/SaveChangesInterceptor/);
+    expect(src).toMatch(/ChangeTracker\.Entries<IAuditable>/);
+    expect(src).toMatch(/entry\.Entity\.CreatedAt = now/);
+    expect(src).toMatch(/entry\.Entity\.UpdatedAt = now/);
+  });
+
+  it("auditable: Program.cs registers the interceptor against DbContextOptions", async () => {
+    const model = await modelFrom(aggregateOnly("with auditable"));
+    const files = generateDotnet(model);
+    const program = files.get("Program.cs")!;
+    expect(program).toMatch(/AddScoped<Sales\.Infrastructure\.Persistence\.AuditableInterceptor>/);
+    expect(program).toMatch(/AddInterceptors\(sp\.GetRequiredService/);
+  });
+
+  it("does NOT emit the interceptor or wire it up for non-auditable projects", async () => {
+    const model = await modelFrom(aggregateOnly(""));
+    const files = generateDotnet(model);
+    expect([...files.keys()]).not.toContain(
+      "Infrastructure/Persistence/AuditableInterceptor.cs",
+    );
+    const program = files.get("Program.cs")!;
+    expect(program).not.toMatch(/AuditableInterceptor/);
+  });
+
+  it("softDeletable: entity configuration installs HasQueryFilter", async () => {
+    const model = await modelFrom(aggregateOnly("with softDeletable"));
+    const files = generateDotnet(model);
+    const cfg = files.get("Infrastructure/Persistence/Configurations/OrderConfiguration.cs")!;
+    expect(cfg).toMatch(/b\.HasQueryFilter\(x => !x\.IsDeleted\)/);
+  });
+
+  it("softDeletable with custom field name: query filter honors the chosen column", async () => {
+    const model = await modelFrom(
+      aggregateOnly(`with softDeletable(field: "archived")`),
+    );
+    const files = generateDotnet(model);
+    const cfg = files.get("Infrastructure/Persistence/Configurations/OrderConfiguration.cs")!;
+    expect(cfg).toMatch(/b\.HasQueryFilter\(x => !x\.Archived\)/);
+  });
+
+  it("does NOT install query filter for non-softDeletable aggregates", async () => {
+    const model = await modelFrom(aggregateOnly(""));
+    const files = generateDotnet(model);
+    const cfg = files.get("Infrastructure/Persistence/Configurations/OrderConfiguration.cs")!;
+    expect(cfg).not.toMatch(/HasQueryFilter/);
+  });
+});

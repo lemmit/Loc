@@ -52,6 +52,19 @@ export function renderConfiguration(agg: AggregateIR, ns: string, ctx: BoundedCo
   const indexLines = [...indexed].map(
     (col) => `        b.HasIndex(x => x.${pascalCol(col, agg)});`,
   );
+  // Soft-delete: when the macro flag is present, install a global
+  // query filter that excludes rows where the chosen flag column
+  // is true.  The macro carries the user's field name (default
+  // "isDeleted"), so backends honour the project's chosen schema
+  // convention.  Together with the macro-emitted ISoftDeletable
+  // marker interface and the `softDelete()` / `restore()`
+  // operations, this gives "soft delete" full runtime semantics
+  // without any per-aggregate boilerplate.
+  const softDeleteLines = agg.flags?.softDelete
+    ? [
+        `        b.HasQueryFilter(x => !x.${pascalCol(agg.flags.softDelete.field, agg)});`,
+      ]
+    : [];
   return (
     lines(
       "// Auto-generated.",
@@ -74,6 +87,7 @@ export function renderConfiguration(agg: AggregateIR, ns: string, ctx: BoundedCo
       ...fieldConfigs,
       ...containmentLines,
       ...indexLines,
+      ...softDeleteLines,
       "        b.Ignore(x => x.DomainEvents);",
       "    }",
       "}",
