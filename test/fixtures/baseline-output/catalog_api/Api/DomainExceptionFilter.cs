@@ -1,5 +1,6 @@
 // Auto-generated.
 using System.Linq;
+using System.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.Extensions.Logging;
@@ -30,7 +31,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         // the structured log line without scraping headers.  Empty
         // string when no Activity is active (e.g. middleware errors
         // before the pipeline starts).
-        var trace_id = System.Diagnostics.Activity.Current?.TraceId.ToString() ?? "";
+        var trace_id = Activity.Current?.TraceId.ToString() ?? "";
         // FluentValidation arm — runs FIRST because
         // validation failures are the most common 400 cause.  The
         // envelope extends the existing { error, trace_id } shape

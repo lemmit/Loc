@@ -1,10 +1,10 @@
 // Scaffold expander (dark-launched behind env flag).
 //
-// Pure function from `(ScaffoldOriginIR, system context) → ExprIR`
+// Pure function from `(PageArchetypeIR, system context) → ExprIR`
 // that synthesises a walker-stdlib body equivalent to what the
 // scaffold archetype renderer would emit.  When
 // `LOOM_SCAFFOLD_EXPAND=1` is set, `lowerSystem` post-processes
-// every page whose `scaffoldOrigin` is recognised, replacing the
+// every page whose `archetype` is recognised, replacing the
 // page's `body: List(of: …)` (or similar) with the expanded form.
 // The React emitter then routes through the walker instead of through
 // the legacy archetype path.
@@ -32,7 +32,7 @@ import type {
   AggregateIR,
   BoundedContextIR,
   ExprIR,
-  ScaffoldOriginIR,
+  PageArchetypeIR,
   SystemIR,
   UiIR,
 } from "./loom-ir.js";
@@ -40,7 +40,7 @@ import type {
 /** Inputs for the expander.  Carried as a struct so callers don't
  *  have to thread through the same handful of derived maps every
  *  call — `lowerSystem` builds these once at top-level. */
-export interface ScaffoldExpandContext {
+export interface WalkerExpandContext {
   ui: UiIR;
   /** Aggregate by name — pulled from every reachable bounded
    *  context across the system's modules.  Lets the expander look
@@ -60,7 +60,7 @@ export interface ScaffoldExpandContext {
 
 /** Build the expander context from the system + a specific UI.
  *  Used by `lowerSystem`'s post-processing pass and by tests. */
-export function buildExpandContext(sys: SystemIR, ui: UiIR): ScaffoldExpandContext {
+export function buildExpandContext(sys: SystemIR, ui: UiIR): WalkerExpandContext {
   const aggregatesByName = new Map<string, AggregateIR>();
   const bcByAggregate = new Map<string, BoundedContextIR>();
   const workflowsByName = new Map<string, import("./loom-ir.js").WorkflowIR>();
@@ -91,9 +91,9 @@ export function buildExpandContext(sys: SystemIR, ui: UiIR): ScaffoldExpandConte
 /** Public entry point.  Returns the expanded body `ExprIR` for an
  *  origin we know how to handle, or `null` to fall back to the
  *  legacy archetype path. */
-export function expandScaffoldToExplicitBody(
-  origin: ScaffoldOriginIR,
-  ctx: ScaffoldExpandContext,
+export function expandWalkerPrimitive(
+  origin: PageArchetypeIR,
+  ctx: WalkerExpandContext,
 ): ExprIR | null {
   switch (origin.kind) {
     case "aggregate-list":
@@ -119,7 +119,7 @@ export function expandScaffoldToExplicitBody(
 // Aggregate-list expansion
 // ---------------------------------------------------------------------------
 
-function expandAggregateList(aggregateName: string, ctx: ScaffoldExpandContext): ExprIR | null {
+function expandAggregateList(aggregateName: string, ctx: WalkerExpandContext): ExprIR | null {
   const agg = ctx.aggregatesByName.get(aggregateName);
   if (!agg) return null;
   // When the UI has an api parameter, route hook
@@ -228,7 +228,7 @@ function expandAggregateList(aggregateName: string, ctx: ScaffoldExpandContext):
 // Aggregate-detail expansion
 // ---------------------------------------------------------------------------
 
-function expandAggregateDetail(aggregateName: string, ctx: ScaffoldExpandContext): ExprIR | null {
+function expandAggregateDetail(aggregateName: string, ctx: WalkerExpandContext): ExprIR | null {
   const agg = ctx.aggregatesByName.get(aggregateName);
   if (!agg) return null;
   // See expandAggregateList for the no-api-handle
@@ -475,7 +475,7 @@ function valueObjectRows(
   receiver: ExprIR,
   labelPrefix: string,
   voName: string,
-  ctx: ScaffoldExpandContext,
+  ctx: WalkerExpandContext,
   aggregateName: string,
 ): ExprIR[] {
   const bc = ctx.bcByAggregate.get(aggregateName);
@@ -516,7 +516,7 @@ function methodCall(receiver: ExprIR, member: string, args: ExprIR[]): ExprIR {
 // Aggregate-new expansion
 // ---------------------------------------------------------------------------
 
-function expandAggregateNew(aggregateName: string, ctx: ScaffoldExpandContext): ExprIR | null {
+function expandAggregateNew(aggregateName: string, ctx: WalkerExpandContext): ExprIR | null {
   const agg = ctx.aggregatesByName.get(aggregateName);
   if (!agg) return null;
   const slug = snake(plural(agg.name));
@@ -550,7 +550,7 @@ function expandAggregateNew(aggregateName: string, ctx: ScaffoldExpandContext): 
 // Workflow-form expansion
 // ---------------------------------------------------------------------------
 
-function expandWorkflowForm(workflowName: string, ctx: ScaffoldExpandContext): ExprIR | null {
+function expandWorkflowForm(workflowName: string, ctx: WalkerExpandContext): ExprIR | null {
   const wf = ctx.workflowsByName.get(workflowName);
   if (!wf) return null;
   const wfSlug = snake(wf.name);
@@ -583,7 +583,7 @@ function expandWorkflowForm(workflowName: string, ctx: ScaffoldExpandContext): E
 // View-list expansion
 // ---------------------------------------------------------------------------
 
-function expandViewList(viewName: string, ctx: ScaffoldExpandContext): ExprIR | null {
+function expandViewList(viewName: string, ctx: WalkerExpandContext): ExprIR | null {
   const view = ctx.viewsByName.get(viewName);
   if (!view) return null;
   const humanView = humanize(view.name);
@@ -662,7 +662,7 @@ function expandViewList(viewName: string, ctx: ScaffoldExpandContext): ExprIR | 
 // Home + index expansions
 // ---------------------------------------------------------------------------
 
-function expandHome(ctx: ScaffoldExpandContext): ExprIR {
+function expandHome(ctx: WalkerExpandContext): ExprIR {
   // Walker stdlib doesn't ship `SimpleGrid` (Mantine-specific
   // responsive grid) yet; use a plain Stack of summary cards.
   // Counts come from the expander's reachable-context maps.
@@ -709,7 +709,7 @@ function expandHome(ctx: ScaffoldExpandContext): ExprIR {
   );
 }
 
-function expandWorkflowsIndex(ctx: ScaffoldExpandContext): ExprIR {
+function expandWorkflowsIndex(ctx: WalkerExpandContext): ExprIR {
   const cards: ExprIR[] = [];
   for (const wf of ctx.workflowsByName.values()) {
     const slug = snake(wf.name);
@@ -746,7 +746,7 @@ function expandWorkflowsIndex(ctx: ScaffoldExpandContext): ExprIR {
   );
 }
 
-function expandViewsIndex(ctx: ScaffoldExpandContext): ExprIR {
+function expandViewsIndex(ctx: WalkerExpandContext): ExprIR {
   const cards: ExprIR[] = [];
   for (const view of ctx.viewsByName.values()) {
     const slug = snake(view.name);
@@ -884,7 +884,7 @@ function columnAccessorFor(
  *  aggregate's owning module.  Returns the handle name (used as
  *  the receiver in `<handle>.<Agg>.all` body refs) or `null` when
  *  no matching api param exists. */
-function findApiHandleFor(agg: AggregateIR, ctx: ScaffoldExpandContext): string | null {
+function findApiHandleFor(agg: AggregateIR, ctx: WalkerExpandContext): string | null {
   const bc = ctx.bcByAggregate.get(agg.name);
   if (!bc) return null;
   // The bcByAggregate map is keyed by aggregate, but the BC

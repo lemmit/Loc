@@ -1,5 +1,17 @@
 import type { BoundedContextIR } from "../../../ir/loom-ir.js";
 import { plural, upperFirst } from "../../../util/naming.js";
+import { renderDotnetLogCall } from "../../_obs/render-dotnet.js";
+
+// Program.cs is top-level statements, not a class — so the renderer's
+// `_log.` prefix becomes `lifecycleLog.`.  When the call sits inside a
+// `Register(() => ...)` lambda body the trailing `;` would close the
+// lambda too early; `asLifecycleExpr` strips it.
+function asLifecycleStmt(rendered: string): string {
+  return rendered.replace("_log.", "lifecycleLog.");
+}
+function asLifecycleExpr(rendered: string): string {
+  return asLifecycleStmt(rendered).replace(/;\s*$/, "");
+}
 
 // Program.cs hosting + DI registration, plus the project + Dockerfile +
 // .dockerignore boilerplate.  Pure substitution templates — no
@@ -11,6 +23,12 @@ export function renderProgram(
   options?: {
     authRequired?: boolean;
     usesValidators?: boolean;
+    /** When true, at least one aggregate carries `flags.isAuditable`
+     *  (any aggregate has contextStamps from one or more macros).
+     *  Program.cs registers the `AuditableInterceptor` and attaches
+     *  it to DbContextOptions so stamping happens at SaveChanges
+     *  time without per-aggregate handler code. */
+    usesStamping?: boolean;
     /** Fullstack-dotnet flag: when true, the deployable hosts an
      *  embedded React SPA from `wwwroot/`.  Adds `UseDefaultFiles` +
      *  `UseStaticFiles` middleware and a `MapFallbackToFile` so SPA
@@ -28,6 +46,7 @@ export function renderProgram(
 ): string {
   const authRequired = !!options?.authRequired;
   const usesValidators = !!options?.usesValidators;
+  const usesStamping = !!options?.usesStamping;
   const hasEmbeddedSpa = !!options?.hasEmbeddedSpa;
   const emitTrace = !!options?.emitTrace;
   const repoRegistrations = ctx.aggregates
@@ -77,7 +96,7 @@ ${externHandlers
   .map(
     (h) =>
       `    if (scope.ServiceProvider.GetService<${h.ifaceFqn}>() is null)\n` +
-      `        throw new System.InvalidOperationException(\n` +
+      `        throw new InvalidOperationException(\n` +
       `            "Missing [ExternHandler] for ${h.ifaceFqn} (operation '${h.opName}' on aggregate '${h.aggName}'). " +\n` +
       `            "Add a class decorated with [ExternHandler] that implements this interface.");`,
   )
@@ -106,7 +125,7 @@ builder.Services.AddScoped<ICurrentUserAccessor, HttpContextCurrentUserAccessor>
 using (var scope = app.Services.CreateScope())
 {
     if (scope.ServiceProvider.GetService<IUserVerifier>() is null)
-        throw new System.InvalidOperationException(
+        throw new InvalidOperationException(
             "Missing IUserVerifier registration. Register an implementation that " +
             "decodes inbound JWTs into the generated User record (e.g. " +
             "builder.Services.AddScoped<IUserVerifier, MyJwtVerifier>()).");
@@ -118,7 +137,9 @@ using (var scope = app.Services.CreateScope())
 `
     : "";
   return `// Auto-generated.
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using FluentValidation;
 using ${ns}.Api;
 using ${ns}.Domain.Common;
 using ${ns}.Infrastructure.Persistence;
@@ -134,7 +155,7 @@ var builder = WebApplication.CreateBuilder(args);
     var connectionString = builder.Configuration.GetConnectionString("Default");
     if (string.IsNullOrWhiteSpace(connectionString))
     {
-        throw new System.InvalidOperationException(
+        throw new InvalidOperationException(
             "Missing connection string 'Default'. Set ConnectionStrings__Default " +
             "in the environment or appsettings.Development.json.");
     }
@@ -148,7 +169,7 @@ builder.Logging.ClearProviders();
 builder.Logging.AddJsonConsole(opts =>
 {
     opts.IncludeScopes = true;
-    opts.JsonWriterOptions = new System.Text.Json.JsonWriterOptions
+    opts.JsonWriterOptions = new JsonWriterOptions
     {
         Indented = false,
     };
@@ -167,8 +188,17 @@ builder.Services.AddHttpLogging(opts =>
         Microsoft.AspNetCore.HttpLogging.HttpLoggingFields.Duration;
 });
 
-builder.Services.AddDbContext<AppDbContext>(opts =>
-    opts.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
+${
+  usesStamping
+    ? `builder.Services.AddScoped<${ns}.Infrastructure.Persistence.AuditableInterceptor>();
+builder.Services.AddDbContext<AppDbContext>((sp, opts) =>
+{
+    opts.UseNpgsql(builder.Configuration.GetConnectionString("Default"));
+    opts.AddInterceptors(sp.GetRequiredService<${ns}.Infrastructure.Persistence.AuditableInterceptor>());
+});`
+    : `builder.Services.AddDbContext<AppDbContext>(opts =>
+    opts.UseNpgsql(builder.Configuration.GetConnectionString("Default")));`
+}
 
 // Mediator (martinothamar/Mediator) — source-generated, free to use.
 builder.Services.AddMediator(opts => opts.ServiceLifetime = ServiceLifetime.Scoped);
@@ -218,9 +248,9 @@ builder.Services.AddControllers(opts =>
     // camelCase property names match the Hono backend's wire shape;
     // the cross-platform OpenAPI cross-check would diff otherwise.
     opts.JsonSerializerOptions.PropertyNamingPolicy =
-        System.Text.Json.JsonNamingPolicy.CamelCase;
+        JsonNamingPolicy.CamelCase;
     opts.JsonSerializerOptions.DictionaryKeyPolicy =
-        System.Text.Json.JsonNamingPolicy.CamelCase;
+        JsonNamingPolicy.CamelCase;
 });
 
 // Permissive CORS so a generated React frontend on a different port
@@ -242,6 +272,37 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 var app = builder.Build();
+
+// Catalog server-lifecycle events.  Same event names + level Hono and
+// Phoenix emit so a cross-backend dashboard pivots on one identity.
+// A separate logger keeps these lines distinct from per-request
+// middleware lines in the structured stream.
+var lifecycleLog = app.Services.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>()
+    .CreateLogger("Lifecycle");
+var loomPort = builder.Configuration["PORT"]
+    ?? System.Environment.GetEnvironmentVariable("PORT")
+    ?? "8080";
+var loomEnv = app.Environment.EnvironmentName ?? "Production";
+${asLifecycleStmt(
+  renderDotnetLogCall("serverStarting", [
+    { name: "port", valueExpr: "loomPort" },
+    { name: "env", valueExpr: "loomEnv" },
+  ]),
+)}
+{
+    var lifetime = app.Services.GetRequiredService<Microsoft.Extensions.Hosting.IHostApplicationLifetime>();
+    lifetime.ApplicationStarted.Register(() =>
+        ${asLifecycleExpr(
+          renderDotnetLogCall("serverListening", [{ name: "port", valueExpr: "loomPort" }]),
+        )});
+    lifetime.ApplicationStopping.Register(() =>
+        ${asLifecycleExpr(
+          renderDotnetLogCall("serverShutdown", [{ name: "signal", valueExpr: '"SIGTERM"' }]),
+        )});
+    lifetime.ApplicationStopped.Register(() =>
+        ${asLifecycleExpr(renderDotnetLogCall("serverDrained"))});
+}
+
 // Liveness probe — cheap, no I/O.  K8s livenessProbe / docker-compose
 // healthcheck use this to decide "is the process alive?".  A DB blip
 // must NOT mark the pod not-alive (that restarts the container and
@@ -263,16 +324,24 @@ app.MapGet("/ready", async (AppDbContext db, CancellationToken ct) =>
                 new { status = "not_ready", error = "database unreachable" },
                 statusCode: 503);
     }
-    catch (System.Exception ex)
+    catch (Exception ex)
     {
         return Results.Json(
             new { status = "not_ready", error = ex.Message },
             statusCode: 503);
     }
 });
+// Catalog-identity request log — emits the cross-backend
+// request_start / request_end events (same envelope shape Hono
+// and Phoenix produce).  Mounted FIRST so its Stopwatch covers the
+// full pipeline (auth, routing, controller body, serialization).
+// See Middleware/RequestLoggingMiddleware.cs.
+app.UseMiddleware<${ns}.Middleware.RequestLoggingMiddleware>();
 // HTTP logging middleware — pairs with AddHttpLogging above.
 // Mounted before the auth + business pipelines so every request is
-// logged regardless of whether it reached a controller.
+// logged regardless of whether it reached a controller.  Coexists
+// with the catalog middleware above (the framework line and the
+// catalog line are both useful; dashboards filter on the catalog).
 app.UseHttpLogging();
 app.UseCors();
 app.UseSwagger();
@@ -304,18 +373,6 @@ using (var scope = app.Services.CreateScope())
     db.Database.EnsureCreated();
 }
 ${authVerify}${externVerify}
-// Graceful shutdown — log the intent so operators see "shutting down"
-// in container logs instead of an abrupt SIGKILL trace.  ASP.NET
-// Core's host already drains in-flight requests + disposes scoped
-// services (including AppDbContext) automatically; this hook is just
-// the visible breadcrumb.
-{
-    var lifetime = app.Services.GetRequiredService<Microsoft.Extensions.Hosting.IHostApplicationLifetime>();
-    var logger = app.Services.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>()
-        .CreateLogger("Shutdown");
-    lifetime.ApplicationStopping.Register(() =>
-        logger.LogInformation("Shutting down — draining in-flight requests."));
-}
 app.Run();
 `;
 }

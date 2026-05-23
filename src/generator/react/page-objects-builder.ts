@@ -23,17 +23,14 @@ export function buildPageObjectModule(agg: AggregateIR, ctx: BoundedContextIR): 
   const ops = agg.operations.filter((o) => o.visibility === "public");
   const required = agg.fields.filter((f) => !f.optional);
 
+  // Collect the candidate api/* type imports, then narrow them once the
+  // body is assembled — page-object classes rarely use every Request/Response,
+  // and dead `import type {}` lines fail the generated-code Biome gate.
+  const candidateApiTypes: string[] = [`Create${agg.name}Request`];
+  for (const op of ops) candidateApiTypes.push(`${upperFirst(op.name)}Request`);
+  candidateApiTypes.push(`${agg.name}Response`);
+
   const lines: string[] = [];
-  lines.push("// Auto-generated.  Do not edit by hand.");
-  lines.push(`import type { Page, Locator } from "@playwright/test";`);
-  lines.push(`import { expect } from "@playwright/test";`);
-  const reqTypes: string[] = [`Create${agg.name}Request`];
-  for (const op of ops) reqTypes.push(`${upperFirst(op.name)}Request`);
-  reqTypes.push(`${agg.name}Response`);
-  lines.push(
-    `import type { ${reqTypes.join(", ")} } from "../../src/api/${lowerFirst(agg.name)}";`,
-  );
-  lines.push("");
 
   // ---------------------------------------------------------------------
   // List page
@@ -182,7 +179,20 @@ export function buildPageObjectModule(agg: AggregateIR, ctx: BoundedContextIR): 
   lines.push(`}`);
   lines.push("");
 
-  return lines.join("\n");
+  const body = lines.join("\n");
+  const usedApiTypes = candidateApiTypes.filter((t) => new RegExp(`\\b${t}\\b`).test(body));
+  const header: string[] = [
+    "// Auto-generated.  Do not edit by hand.",
+    `import type { Page, Locator } from "@playwright/test";`,
+    `import { expect } from "@playwright/test";`,
+  ];
+  if (usedApiTypes.length > 0) {
+    header.push(
+      `import type { ${usedApiTypes.join(", ")} } from "../../src/api/${lowerFirst(agg.name)}";`,
+    );
+  }
+  header.push("");
+  return [...header, body].join("\n");
 }
 
 // ---------------------------------------------------------------------------

@@ -50,9 +50,9 @@ export function buildViewsApiModule(contexts: BoundedContextIR[]): string {
     if (!view.output) shorthandSources.add(view.aggregateName);
   }
   for (const aggName of [...shorthandSources].sort()) {
-    lines.push(
-      `import { ${aggName}Response, ${aggName}ListResponse } from "./${lowerFirst(aggName)}";`,
-    );
+    // Shorthand views re-export `<Agg>ListResponse` only; the singular
+    // `<Agg>Response` is never referenced here.
+    lines.push(`import { ${aggName}ListResponse } from "./${lowerFirst(aggName)}";`);
   }
   // Full-form views may reference enum / VO schemas on their fields.
   const enumDeps = collectEnumDeps(views);

@@ -117,6 +117,23 @@ export function TestsBody({
   const [discovering, setDiscovering] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { testResults: results, setTestResults: setResults } = ctx;
+
+  // Drop stale results when the generated output actually changes (a
+  // re-Generate likely renames or removes tests).  Crucially this does
+  // NOT fire when the panel merely remounts after a dock-tab switch —
+  // the lifted `ctx.testResults` would otherwise be wiped on every
+  // round trip.  `prevGen` starts unset so the very first run after
+  // mount doesn't clear what's already there.
+  const prevGenRef = useRef<typeof generateSuccess | undefined>(undefined);
+  useEffect(() => {
+    if (prevGenRef.current !== undefined && prevGenRef.current !== generateSuccess) {
+      setResults({});
+    }
+    prevGenRef.current = generateSuccess;
+    // setResults is referentially stable in the App; tracking only
+    // generateSuccess keeps the clear gate tight.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [generateSuccess]);
   const [running, setRunning] = useState<string | null>(null);
 
   const hasAny = unitFiles.length > 0 || !!apiFile || !!uiFile;
@@ -149,7 +166,6 @@ export function TestsBody({
     let cancelled = false;
     setDiscovering(true);
     setError(null);
-    setResults({});
     void (async () => {
       try {
         const c = client();

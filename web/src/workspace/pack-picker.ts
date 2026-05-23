@@ -23,6 +23,8 @@
  *  pack root (so `pack.json`, `page-list.hbs`, `cells/cell-id.hbs`).
  *  Content is text — Phase 4 packs are all `.json` and `.hbs`,
  *  both UTF-8.  Binary assets (images, fonts) come later. */
+import type { VfsFileEntry } from "../vfs/types.js";
+
 export interface PickedPack {
   /** Pack name — derived from the chosen directory's basename.
    *  Used to namespace files under `/workspace/design/<name>/...`
@@ -152,8 +154,9 @@ export function validatePickedPack(pack: PickedPack): void {
  *  Namespaces under `/workspace/design/<packname>/` so the loader's
  *  default reference dir (`/workspace`) resolves
  *  `design: "./design/<packname>"` correctly. */
-export function packToVfsEntries(pack: PickedPack): Array<{ path: string; content: string }> {
+export function packToVfsEntries(pack: PickedPack): Array<VfsFileEntry> {
   return pack.files.map(([rel, content]) => ({
+    kind: "file" as const,
     path: `/workspace/design/${pack.name}/${rel}`,
     content,
   }));

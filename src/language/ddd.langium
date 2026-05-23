@@ -221,12 +221,12 @@ AuthMode returns string:
 // ---------------------------------------------------------------------------
 
 Ui:
-    'ui' name=ID '{'
+    'ui' name=ID withClause=WithClause? '{'
         members+=UiMember*
     '}';
 
 UiMember:
-    UiApiParam | UiHelperImport | Page | Component | Scaffold | MenuBlock;
+    UiApiParam | UiHelperImport | Page | Component | MenuBlock;
 
 // ---- helper import (UI-level) ----------------------------------
 //
@@ -362,18 +362,16 @@ StateBlock:
     '}';
 
 StateField:
-    name=ID ':' type=TypeRef ('=' init=Expression)?;
+    name=StateFieldName ':' type=TypeRef ('=' init=Expression)?;
 
-// ---- scaffold -----------------------------------------------------------
-
-// Single fixed multi-page rewrite from a domain selector to pages.
-// Not user-extensible.  See spec §10 for the granularity hierarchy
-// (modules → contexts → aggregates ∪ workflows ∪ views).
-Scaffold:
-    'scaffold' selector=ScaffoldSelector ':' targets+=ID (',' targets+=ID)* ','?;
-
-ScaffoldSelector returns string:
-    'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views';
+// State-field names accept the soft keywords introduced by the
+// capability source surface (`filter`, `stamp`, `implements`) so
+// existing pages with state fields named `filter`/`stamp`/etc.
+// still parse.  The keywords only have structural meaning inside
+// aggregate / context member positions; everywhere else they remain
+// admissible identifiers.
+StateFieldName returns string:
+    ID | 'filter' | 'stamp' | 'implements';
 
 // ---- menu ---------------------------------------------------------------
 
@@ -494,12 +492,13 @@ type Targetable =
 // ---------------------------------------------------------------------------
 
 BoundedContext:
-    'context' name=ID '{'
+    'context' name=ID withClause=WithClause? '{'
         members+=ContextMember*
     '}';
 
 ContextMember:
-    EnumDecl | ValueObject | Aggregate | EventDecl | Repository | Workflow | View;
+    EnumDecl | ValueObject | Aggregate | EventDecl | Repository | Workflow | View
+    | FilterDecl | StampDecl | ImplementsDecl;
 
 EnumDecl:
     'enum' name=ID '{'
@@ -518,15 +517,100 @@ ValueObjectMember:
     Property | DerivedProp | Invariant | FunctionDecl;
 
 Aggregate:
-    'aggregate' name=ID ('ids' idKind=IdKind)? '{'
+    'aggregate' name=ID ('ids' idKind=IdKind)? withClause=WithClause? '{'
         members+=AggregateMember*
     '}';
 
 IdKind returns string:
     'guid' | 'int' | 'long' | 'string';
 
+// ---- macro `with` clause ----------------------------------------
+//
+// Attaches one or more macro invocations to an aggregate (later: ui,
+// property).  Macro names resolve against a TS-side registry loaded
+// from the toolchain stdlib and from project-local `.loom/macros/*.ts`
+// modules.  Expansion runs at the AST level (see
+// `ddd-macro-expander.ts`) before linking, so synthesised members
+// participate in scope resolution and validation as if user-written.
+WithClause:
+    'with' calls+=MacroCall (',' calls+=MacroCall)*;
+
+MacroCall:
+    name=ID ('(' (args+=MacroArg (',' args+=MacroArg)*)? ')')?;
+
+// Arg names accept the same soft-keyword set as LooseName so
+// macros may use `modules:`, `aggregates:`, etc. as parameter
+// names — same identifier surface the legacy `scaffold` directive
+// uses, which scaffold-replacement macros need to mirror.
+MacroArg:
+    name=LooseName ':' value=MacroArgValue;
+
+// Macro arg ref-list elements are bare IDs, not Langium cross-
+// references.  We don't use the [Target:ID] form because:
+//   - Macros accept refs to declaration kinds outside the global
+//     scope (Workflow, View, Module), which the default scope
+//     provider doesn't expose;
+//   - The macro expander does its own name lookup against a
+//     per-document inventory, with diagnostics that point at the
+//     macro call rather than the linker's generic "could not
+//     resolve" message.
+// IDE go-to-definition on macro args is a Phase 5 concern; will
+// be implemented via a custom DefinitionProvider rather than by
+// routing through Langium's linker.
+MacroArgValue:
+    {infer MacroArgString} string=STRING
+    | {infer MacroArgBool} bool=('true' | 'false')
+    | {infer MacroArgInt} int=INT
+    | {infer MacroArgRef} ref=ID
+    | {infer MacroArgRefList} '[' (refs+=ID (',' refs+=ID)*)? ']';
+
 AggregateMember:
-    Containment | DerivedProp | Invariant | FunctionDecl | Operation | EntityPart | TestBlock | Property;
+    Containment | DerivedProp | Invariant | FunctionDecl | Operation | EntityPart | TestBlock | Property
+    | FilterDecl | StampDecl | ImplementsDecl;
+
+// ---- capability source surface ----------------------------------
+//
+// Capabilities (`filter`, `stamp`, `implements`) are first-class
+// aggregate/context members.  They produce the same IR shape macros
+// did (`AggregateIR.contextFilters` / `.contextStamps` /
+// `.implementsCapabilities`); the macro factories are sugar that
+// emit these node types into the host's members[] array.  Anything
+// a macro can contribute, a user can hand-write.
+//
+// At ContextMember position these propagate to every aggregate
+// inside the context at lowering time (see `lowerContext`).
+
+// `filter <expr>` declares a query-filter predicate.  At aggregate
+// scope it applies to that aggregate only.  At context scope it
+// applies to every aggregate inside (propagated at lowering time).
+//
+// `filter for "<name>" <expr>` is a capability-scoped variant: it
+// only applies to aggregates whose `implements "<name>"` matches.
+// Aggregates without the matching opt-in ignore the declaration.
+// Useful for "context Sales { filter for 'softDeletable' !this.isDeleted }"
+// where some aggregates participate and some don't.
+FilterDecl:
+    'filter' ('for' capability=STRING)? expr=Expression;
+
+// `stamp <event> { ... }` declares lifecycle-stamping assignments.
+// Same scoping rules as FilterDecl: at aggregate scope applies to
+// that aggregate; at context scope propagates to every aggregate;
+// `for "<name>"` qualifier restricts propagation to opt-ins.
+StampDecl:
+    'stamp' ('for' capability=STRING)? event=StampEvent '{'
+        assignments+=AssignOrCallStmt*
+    '}';
+
+StampEvent returns string:
+    'onCreate' | 'onUpdate';
+
+// `implements "name"` opts the host into a capability group with the
+// given name.  Backends translate the name by convention (.NET adds
+// an `I` prefix → `IAuditable`; TS may emit a type alias; etc.) and
+// emit one shared infrastructure block per name (e.g. one
+// HasQueryFilter loop per capability in OnModelCreating).
+ImplementsDecl:
+    'implements' name=STRING;
 
 TestBlock:
     'test' name=STRING ('verifies' verifies=[TestCase:TraceId])? '{'
@@ -669,7 +753,7 @@ Parameter:
 LooseName returns string:
     ID
     | 'id' | 'permissions' | 'contains'
-    | 'ui' | 'page' | 'component' | 'scaffold' | 'state' | 'menu'
+    | 'ui' | 'page' | 'component' | 'state' | 'menu'
     | 'section' | 'link' | 'route' | 'title' | 'body' | 'framework' | 'static'
     | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
     | 'design' | 'targets'
@@ -835,7 +919,8 @@ CallArg:
 // (lower-expr.ts + type-system.ts) rather than the grammar.
 MemberName returns string:
     ID | 'id' | 'permissions' | 'contains' | 'ui' | 'api'
-       | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views';
+       | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
+       | 'filter' | 'stamp' | 'implements';
 
 // Lambdas accept either a single expression body (the only form
 // in v22) or a brace-wrapped block of statements.  Block bodies

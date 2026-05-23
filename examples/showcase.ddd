@@ -425,8 +425,7 @@ system DevPlatform {
     }
 
     // ----- UI 3: scaffold-only (sugar binding target, no api params) -----
-    ui Admin {
-        scaffold modules: Accounts
+    ui Admin with scaffold(modules: [Accounts]) {
     }
 
     // ----- Backend deployables (same modules for OpenAPI parity) -----

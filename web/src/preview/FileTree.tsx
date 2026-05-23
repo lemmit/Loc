@@ -17,6 +17,13 @@ interface FileTreeProps {
    *  Source-files use sometimes wants nested folders expanded by
    *  default too; pass `false` for "all folders start collapsed". */
   defaultFolderOpen?: boolean;
+  /** Optional filter — return `false` to hide a file from the
+   *  rendered tree (the folder it lives in still renders, but the
+   *  file row doesn't).  Used by the source-files tree to hide
+   *  the in-memory `.empty-folder` shim entries that exist only to
+   *  make `buildTree` materialise an empty folder node.  Not
+   *  consulted for folder rows. */
+  shouldRenderFile?: (filePath: string) => boolean;
 }
 
 // Visual constants tuned by hand against a 240 px pane width:
@@ -62,6 +69,7 @@ export function FileTree({
   onSelect,
   rowActions,
   defaultFolderOpen = true,
+  shouldRenderFile,
 }: FileTreeProps): JSX.Element {
   if (root.children.length === 0) {
     return (
@@ -81,6 +89,7 @@ export function FileTree({
           onSelect={onSelect}
           rowActions={rowActions}
           defaultFolderOpen={defaultFolderOpen}
+          shouldRenderFile={shouldRenderFile}
         />
       ))}
     </Box>
@@ -94,6 +103,7 @@ interface NodeRowProps {
   onSelect: (path: string) => void;
   rowActions?: (filePath: string) => ReactNode;
   defaultFolderOpen: boolean;
+  shouldRenderFile?: (filePath: string) => boolean;
 }
 
 function NodeRow({
@@ -103,7 +113,14 @@ function NodeRow({
   onSelect,
   rowActions,
   defaultFolderOpen,
-}: NodeRowProps): JSX.Element {
+  shouldRenderFile,
+}: NodeRowProps): JSX.Element | null {
+  // File-row filter — used by the source-files tree to hide the
+  // in-memory empty-folder shim entries while still letting their
+  // parent folder render.
+  if (node.kind === "file" && shouldRenderFile && !shouldRenderFile(node.path)) {
+    return null;
+  }
   // Folders default to the parent-chosen state — usually expanded.
   const [open, setOpen] = useState(defaultFolderOpen);
   // Hover covers mouse; pressed covers touch (where hover is meaningless).
@@ -164,6 +181,7 @@ function NodeRow({
               onSelect={onSelect}
               rowActions={rowActions}
               defaultFolderOpen={defaultFolderOpen}
+              shouldRenderFile={shouldRenderFile}
             />
           ))}
       </Box>

@@ -24,7 +24,6 @@ import type {
   Property,
   Repository,
   Requirement,
-  Scaffold,
   Solution,
   StateField,
   Statement,
@@ -87,6 +86,7 @@ import type {
   CodeRefKind,
   ComponentIR,
   ContainmentIR,
+  ContextStampIR,
   DeployableIR,
   DerivedIR,
   EntityPartIR,
@@ -105,6 +105,7 @@ import type {
   ModuleIR,
   ModuleStorageRole,
   OperationIR,
+  PageArchetypeIR,
   PageIR,
   ParamIR,
   PermissionDeclIR,
@@ -113,9 +114,6 @@ import type {
   RequirementIR,
   RequirementStatus,
   RequirementType,
-  ScaffoldIR,
-  ScaffoldOriginIR,
-  ScaffoldSelector,
   SolutionIR,
   StateFieldIR,
   StmtIR,
@@ -153,9 +151,9 @@ import {
 } from "./lower-expr.js";
 import {
   buildExpandContext,
-  expandScaffoldToExplicitBody,
-  type ScaffoldExpandContext,
-} from "./scaffold-expander.js";
+  expandWalkerPrimitive,
+  type WalkerExpandContext,
+} from "./walker-primitive-expander.js";
 
 /** Fold a bareword built-in family or pinned `family@version`
  *  reference (or `undefined`) into the fully-qualified form the rest
@@ -522,36 +520,36 @@ function lowerSystem(sys: System): SystemIR {
     storages,
   };
   // Scaffold expander always runs.  Every page with a
-  // recognised `scaffoldOrigin` gets `body` rewritten to a
+  // recognised `archetype` gets `body` rewritten to a
   // walker-stdlib composition; the React emitter then routes
   // through the walker.  The legacy archetype path
   // (renderers/preparers/templates) has been deleted — this
-  // branch is the only generator path now.  `scaffoldOrigin` is
+  // branch is the only generator path now.  `archetype` is
   // intentionally preserved on each rewritten page so the
   // per-aggregate page-object emitter still produces the rich
   // `e2e/pages/<agg>.ts` helper classes (rich domain methods:
   // fill, submit, expectRow).
-  expandScaffoldPages(built);
+  expandWalkerPrimitives(built);
   return built;
 }
 
 /** In-place rewrite of every UI's pages.  When the
- *  expander handles a page's `scaffoldOrigin`, swap `body` with
+ *  expander handles a page's `archetype`, swap `body` with
  *  the synthesised walker-stdlib expression and clear the
- *  `scaffoldOrigin` discriminator so the React emitter dispatches
+ *  `archetype` discriminator so the React emitter dispatches
  *  through the walker path instead of the archetype path. */
-function expandScaffoldPages(sys: SystemIR): void {
+function expandWalkerPrimitives(sys: SystemIR): void {
   for (const ui of sys.uis) {
     const ctx = buildExpandContext(sys, ui);
     for (const page of ui.pages) {
-      if (!page.scaffoldOrigin) continue;
-      const expanded = expandScaffoldToExplicitBody(page.scaffoldOrigin, ctx);
+      if (!page.archetype) continue;
+      const expanded = expandWalkerPrimitive(page.archetype, ctx);
       if (!expanded) continue;
       // Compute the conventional emit path so the rewritten page
       // lands at `src/pages/<plural>/<arch>.tsx` (matches what the
       // scaffold renderer would have used).  Preserves URL/file
       // shape when scaffold expansion becomes the default.
-      page.emitPath = conventionalEmitPath(page.scaffoldOrigin, ctx);
+      page.emitPath = conventionalEmitPath(page.archetype, ctx);
       page.body = expanded;
       // Detail-page expansion references `id` as a
       // route param (`Sales.Order.byId(id)`).  The scaffold AST
@@ -560,16 +558,13 @@ function expandScaffoldPages(sys: SystemIR): void {
       // the walker has no way to resolve `id` as a typed route
       // param.  Synthesise it here so the walker emits
       // `useParams<{id: string}>()` correctly.
-      if (
-        page.scaffoldOrigin.kind === "aggregate-detail" &&
-        !page.params.some((p) => p.name === "id")
-      ) {
+      if (page.archetype.kind === "aggregate-detail" && !page.params.some((p) => p.name === "id")) {
         page.params.push({
           name: "id",
           type: { kind: "primitive", name: "string" },
         });
       }
-      // INTENTIONALLY leave `page.scaffoldOrigin` set — the page-
+      // INTENTIONALLY leave `page.archetype` set — the page-
       // object emitter dispatches on it to keep producing the
       // per-aggregate `e2e/pages/<agg>.ts` classes (with their
       // rich domain methods: fill, submit, expectRow…) while the
@@ -583,8 +578,8 @@ function expandScaffoldPages(sys: SystemIR): void {
 }
 
 function conventionalEmitPath(
-  origin: ScaffoldOriginIR,
-  ctx: ScaffoldExpandContext,
+  origin: PageArchetypeIR,
+  ctx: WalkerExpandContext,
 ): string | undefined {
   if (
     origin.kind === "aggregate-list" ||
@@ -813,14 +808,12 @@ function defaultPort(platform: Platform | undefined): number {
 function lowerUi(ui: Ui): UiIR {
   const pages: PageIR[] = [];
   const components: ComponentIR[] = [];
-  const scaffolds: ScaffoldIR[] = [];
   const apiParams: UiApiParamIR[] = [];
   const helperImports: UiHelperImportIR[] = [];
   let menu: MenuBlockIR | undefined;
   for (const m of ui.members) {
     if (m.$type === "Page") pages.push(lowerPage(m));
     else if (m.$type === "Component") components.push(lowerComponent(m));
-    else if (m.$type === "Scaffold") scaffolds.push(lowerScaffold(m));
     else if (m.$type === "UiApiParam") {
       apiParams.push({
         name: m.name,
@@ -838,7 +831,6 @@ function lowerUi(ui: Ui): UiIR {
     name: ui.name,
     pages,
     components,
-    scaffolds,
     menu,
     apiParams,
     helperImports,
@@ -884,10 +876,10 @@ function lowerPage(p: Page): PageIR {
   // Pass-1 AST-to-AST scaffold expansion populates
   // synthesised pages with body expressions like
   // `List(of: Order)` / `Form(creates: T)` / etc.  We infer the
-  // page's `scaffoldOrigin` discriminator and `source` from the
+  // page's `archetype` discriminator and `source` from the
   // body shape so the React emitter dispatches identically
   // whether the page came from source or from the AST expander.
-  const inferred = inferScaffoldOrigin(p, body);
+  const inferred = inferPageArchetype(p, body);
   return {
     name: p.name,
     params,
@@ -898,19 +890,19 @@ function lowerPage(p: Page): PageIR {
     body,
     menuMeta,
     source: inferred ? "scaffold" : "explicit",
-    scaffoldOrigin: inferred,
+    archetype: inferred,
   };
 }
 
 /** Inspect a synthesised page's body to recover the
- *  `scaffoldOrigin` discriminator the legacy IR-level expander
+ *  `archetype` discriminator the legacy IR-level expander
  *  used to set.  When the body matches the synthesiser's
  *  characteristic shape (`List(of: <Agg>)`, `Form(creates: <Agg>)`,
  *  `Detail(of: <Agg>, by: id)`, `Form(runs: <wf>)`, `List(of: view
  *  <View>)`, the standalone Home / WorkflowsIndex / ViewsIndex
  *  sentinels), returns the matching origin.  Otherwise returns
  *  `undefined` — the page is treated as user-explicit. */
-function inferScaffoldOrigin(page: Page, body: ExprIR | undefined): ScaffoldOriginIR | undefined {
+function inferPageArchetype(page: Page, body: ExprIR | undefined): PageArchetypeIR | undefined {
   if (!body || body.kind !== "call") return undefined;
   const callName = body.name;
   const argNames = body.argNames ?? [];
@@ -1001,13 +993,6 @@ function lowerStateField(f: StateField, env: Env): StateFieldIR {
   };
 }
 
-function lowerScaffold(s: Scaffold): ScaffoldIR {
-  return {
-    selector: s.selector as ScaffoldSelector,
-    targets: s.targets.map((t) => t).filter(Boolean),
-  };
-}
-
 function lowerMenuBlock(m: MenuBlock): MenuBlockIR {
   const env: Env = { locals: new Map(), user: undefined };
   return {
@@ -1078,11 +1063,17 @@ function lowerContext(
   const repositories: RepositoryIR[] = [];
   const workflows: WorkflowIR[] = [];
   const views: ViewIR[] = [];
+  // Context-level capabilities propagate to every aggregate inside.
+  // Lower them here in the context env (no `this` binding); each
+  // aggregate's lowering re-uses the lowered IR directly.  The `this`
+  // references inside a context-level filter resolve later when the
+  // expression is rendered with a per-aggregate lambda binder.
+  const ctxCaps = collectContextLevelCapabilities(ctx, env);
   for (const m of ctx.members) {
     if (isEnumDecl(m)) enums.push(lowerEnum(m));
     else if (isValueObject(m)) valueObjects.push(lowerValueObject(m, env));
     else if (isEventDecl(m)) events.push(lowerEvent(m));
-    else if (isAggregate(m)) aggregates.push(lowerAggregate(m, env));
+    else if (isAggregate(m)) aggregates.push(lowerAggregate(m, env, ctxCaps));
     else if (isRepository(m)) repositories.push(lowerRepository(m, user, modulePermissions));
     else if (isWorkflow(m)) workflows.push(lowerWorkflow(m, env, ctx));
     else if (isView(m)) views.push(lowerView(m, env));
@@ -1125,7 +1116,11 @@ function lowerEvent(e: EventDecl): EventIR {
   };
 }
 
-function lowerAggregate(agg: Aggregate, env: Env): AggregateIR {
+function lowerAggregate(
+  agg: Aggregate,
+  env: Env,
+  contextLevelCaps: ContextLevelCapabilities = EMPTY_CONTEXT_CAPABILITIES,
+): AggregateIR {
   const idValueType = (agg.idKind ?? "guid") as IdValueType;
   const inner = inAggregate(env, agg);
   const props = agg.members.filter(isProperty) as Property[];
@@ -1147,6 +1142,16 @@ function lowerAggregate(agg: Aggregate, env: Env): AggregateIR {
   for (const m of agg.members) {
     if (isTestBlock(m)) tests.push(lowerTest(m, inner));
   }
+  // Capability source nodes — read structurally from agg.members,
+  // concatenated with anything propagated from the enclosing context.
+  // Context-level capabilities lower in the context's env (which
+  // doesn't bind `this` to any aggregate), then re-bind here.
+  // ImplementsCaps is computed FIRST because qualified
+  // (`filter for "X"`) context-level decls only propagate to
+  // aggregates whose implements set includes the qualifier name.
+  const implementsCaps = collectImplements(agg, contextLevelCaps.implementsCaps);
+  const filters = collectFilters(agg, inner, contextLevelCaps, implementsCaps);
+  const stamps = collectStamps(agg, inner, contextLevelCaps, implementsCaps);
   return {
     name: agg.name,
     idValueType,
@@ -1158,6 +1163,147 @@ function lowerAggregate(agg: Aggregate, env: Env): AggregateIR {
     operations,
     parts,
     tests,
+    contextFilters: filters.length > 0 ? filters : undefined,
+    contextStamps: stamps.length > 0 ? stamps : undefined,
+    implementsCapabilities: implementsCaps.length > 0 ? implementsCaps : undefined,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Capability collection — reads structurally from `members[]` (no side
+// tables).  Context-level capabilities, when present, are appended
+// first so per-aggregate ones can override at the validator layer
+// later (today's lowering is pure concatenation).
+// ---------------------------------------------------------------------------
+
+interface ContextLevelCapabilities {
+  /** Unqualified filters — propagate to every aggregate in the
+   * context, regardless of `implements`. */
+  unqualifiedFilters: ExprIR[];
+  /** Capability-qualified filters — propagate only to aggregates
+   * whose `implementsCapabilities` includes the matching name. */
+  qualifiedFilters: Array<{ capability: string; predicate: ExprIR }>;
+  /** Unqualified stamps — propagate to every aggregate. */
+  unqualifiedStamps: ContextStampIR[];
+  /** Capability-qualified stamps — propagate only to opt-ins. */
+  qualifiedStamps: Array<{ capability: string; stamp: ContextStampIR }>;
+  /** `implements` declarations at context level propagate to every
+   * aggregate's `implementsCapabilities` (today; "for" qualifier on
+   * implements is intentionally not supported — implements IS the
+   * opt-in mechanism, qualifying it would be redundant). */
+  implementsCaps: string[];
+}
+
+const EMPTY_CONTEXT_CAPABILITIES: ContextLevelCapabilities = Object.freeze({
+  unqualifiedFilters: [],
+  qualifiedFilters: [],
+  unqualifiedStamps: [],
+  qualifiedStamps: [],
+  implementsCaps: [],
+}) as ContextLevelCapabilities;
+
+/** Scan a BoundedContext's members for FilterDecl/StampDecl/
+ * ImplementsDecl nodes, lower them in the context's env, and
+ * partition by qualifier.  Unqualified context-level decls apply to
+ * every aggregate inside; qualified (`for "<name>"`) decls apply
+ * only to aggregates whose `implements` matches. */
+function collectContextLevelCapabilities(ctx: BoundedContext, env: Env): ContextLevelCapabilities {
+  const unqualifiedFilters: ExprIR[] = [];
+  const qualifiedFilters: Array<{ capability: string; predicate: ExprIR }> = [];
+  const unqualifiedStamps: ContextStampIR[] = [];
+  const qualifiedStamps: Array<{ capability: string; stamp: ContextStampIR }> = [];
+  const implementsCaps: string[] = [];
+  for (const m of ctx.members ?? []) {
+    if (m.$type === "FilterDecl") {
+      const f = m as { expr: Expression; capability?: string };
+      const predicate = lowerExpr(f.expr, env);
+      if (f.capability) {
+        qualifiedFilters.push({ capability: f.capability, predicate });
+      } else {
+        unqualifiedFilters.push(predicate);
+      }
+    } else if (m.$type === "StampDecl") {
+      const s = m as unknown as StampDeclLike & { capability?: string };
+      const lowered = lowerStampDecl(s, env);
+      if (s.capability) {
+        qualifiedStamps.push({ capability: s.capability, stamp: lowered });
+      } else {
+        unqualifiedStamps.push(lowered);
+      }
+    } else if (m.$type === "ImplementsDecl") {
+      implementsCaps.push((m as { name: string }).name);
+    }
+  }
+  return {
+    unqualifiedFilters,
+    qualifiedFilters,
+    unqualifiedStamps,
+    qualifiedStamps,
+    implementsCaps,
+  };
+}
+
+function collectFilters(
+  agg: Aggregate,
+  env: Env,
+  ctxCaps: ContextLevelCapabilities,
+  aggImplementsCaps: readonly string[],
+): ExprIR[] {
+  const own = (agg.members ?? [])
+    .filter((m) => m.$type === "FilterDecl")
+    .map((m) => lowerExpr((m as { expr: Expression }).expr, env));
+  // Qualified context filters propagate only to aggregates whose
+  // implements set includes the qualifier name.
+  const matchingQualified = ctxCaps.qualifiedFilters
+    .filter((q) => aggImplementsCaps.includes(q.capability))
+    .map((q) => q.predicate);
+  return [...ctxCaps.unqualifiedFilters, ...matchingQualified, ...own];
+}
+
+function collectStamps(
+  agg: Aggregate,
+  env: Env,
+  ctxCaps: ContextLevelCapabilities,
+  aggImplementsCaps: readonly string[],
+): ContextStampIR[] {
+  const own = (agg.members ?? [])
+    .filter((m) => m.$type === "StampDecl")
+    .map((m) => lowerStampDecl(m as unknown as StampDeclLike, env));
+  const matchingQualified = ctxCaps.qualifiedStamps
+    .filter((q) => aggImplementsCaps.includes(q.capability))
+    .map((q) => q.stamp);
+  return [...ctxCaps.unqualifiedStamps, ...matchingQualified, ...own];
+}
+
+function collectImplements(agg: Aggregate, propagated: readonly string[]): string[] {
+  const own = (agg.members ?? [])
+    .filter((m) => m.$type === "ImplementsDecl")
+    .map((m) => (m as { name: string }).name);
+  // Dedupe + sort so generators get a deterministic order regardless
+  // of declaration source (context vs aggregate vs macro emission).
+  return [...new Set([...propagated, ...own])].sort();
+}
+
+/** Shape we rely on from a `StampDecl` AST node.  Local alias so the
+ * import surface stays narrow. */
+interface StampDeclLike {
+  event: "onCreate" | "onUpdate";
+  assignments: Array<{ target: { head: string }; value?: Expression }>;
+}
+
+function lowerStampDecl(s: StampDeclLike, env: Env): ContextStampIR {
+  // The grammar's `stamp <event> { <assign>* }` produces a sequence
+  // of `AssignOrCallStmt` nodes whose LValue is a single-segment
+  // path (the target field name) and whose value is the assigned
+  // expression.  Both sides are lowered through the existing
+  // operation-body pipeline.  Stamps with chained / multi-segment
+  // targets (`this.foo.bar`) are flagged by the validator.
+  return {
+    event: s.event === "onCreate" ? "create" : "update",
+    assignments: s.assignments.map((a) => ({
+      field: a.target.head,
+      value: a.value ? lowerExpr(a.value, env) : (lowerExpr(undefined, env) as never),
+    })),
   };
 }
 

@@ -6,12 +6,12 @@ using Api.Domain.Events;
 
 namespace Api.Domain.Common;
 
-public sealed class DomainException : System.Exception
+public sealed class DomainException : Exception
 {
     public DomainException(string message) : base(message) { }
 }
 
-public sealed class AggregateNotFoundException : System.Exception
+public sealed class AggregateNotFoundException : Exception
 {
     public AggregateNotFoundException(string message) : base(message) { }
 }
@@ -23,7 +23,7 @@ public sealed class AggregateNotFoundException : System.Exception
 /// to HTTP 403 (Forbidden), distinct from DomainException's 400
 /// (Bad Request).
 /// </summary>
-public sealed class ForbiddenException : System.Exception
+public sealed class ForbiddenException : Exception
 {
     public ForbiddenException(string message) : base(message) { }
 }
@@ -40,11 +40,11 @@ public sealed class ForbiddenException : System.Exception
 /// user handler are NOT wrapped — they bubble through and the
 /// filter maps them to their usual status codes.
 /// </summary>
-public sealed class ExternHandlerException : System.Exception
+public sealed class ExternHandlerException : Exception
 {
     public string OpName { get; }
     public string AggName { get; }
-    public ExternHandlerException(string opName, string aggName, System.Exception inner)
+    public ExternHandlerException(string opName, string aggName, Exception inner)
         : base($"Extern handler '{opName}' on '{aggName}' threw: {inner.Message}", inner)
     {
         OpName = opName;

@@ -80,7 +80,7 @@ function renderQuery(view: ViewIR, agg: AggregateIR, ns: string): string {
 using Mediator;
 ${usingResponse}namespace ${ns}.Application.Views;
 
-public sealed record ${upperFirst(view.name)}Query() : IQuery<System.Collections.Generic.IReadOnlyList<${responseRecord}>>;
+public sealed record ${upperFirst(view.name)}Query() : IQuery<IReadOnlyList<${responseRecord}>>;
 `;
 }
 
@@ -88,6 +88,11 @@ function renderHandler(view: ViewIR, agg: AggregateIR, ctx: BoundedContextIR, ns
   const queryName = `${upperFirst(view.name)}Query`;
   const handlerName = `${upperFirst(view.name)}Handler`;
   const responseRecord = responseRecordName(view, agg);
+  // Accumulator for non-implicit namespaces touched by bind
+  // expressions (e.g. System.Text.RegularExpressions when a bind
+  // calls `field.matches(...)`).  Each handler file imports only the
+  // namespaces its own binds reach into.
+  const usings = new Set<string>();
   // Auxiliaries — sourceField → mapVarName (`customerId` →
   // `customerById`) — drives DI of foreign repos + bulk loads at
   // handler entry, and rewrites `X id` follow refs in the
@@ -139,7 +144,7 @@ function renderHandler(view: ViewIR, agg: AggregateIR, ctx: BoundedContextIR, ns
     pathToMap.set(aux.path.join("."), { mapVar, aggName: aux.aggName });
   }
   const projection = view.output
-    ? projectFullForm(view, ctx, pathToMap)
+    ? projectFullForm(view, ctx, pathToMap, usings)
     : projectEntityExpr("d", agg, ctx);
   // Imports.  Shorthand needs the aggregate's Responses namespace;
   // full form needs only the local Views namespace (its row record
@@ -152,10 +157,14 @@ function renderHandler(view: ViewIR, agg: AggregateIR, ctx: BoundedContextIR, ns
     ...new Set(auxiliaries.map((a) => `using ${ns}.Domain.${plural(a.aggName)};`)),
   ].join("\n");
   const authUsing = usesUser ? `using ${ns}.Auth;\n` : "";
+  const extraUsings = [...usings]
+    .sort()
+    .map((n) => `using ${n};`)
+    .join("\n");
   return `// Auto-generated.
 using System.Linq;
 using System.Threading;
-using System.Threading.Tasks;
+using System.Threading.Tasks;${extraUsings ? "\n" + extraUsings : ""}
 using Mediator;
 using ${ns}.Domain.${plural(agg.name)};
 using ${ns}.Domain.Ids;
@@ -164,12 +173,12 @@ using ${ns}.Domain.Enums;
 ${auxUsings ? auxUsings + "\n" : ""}${authUsing}${usingResponse}
 namespace ${ns}.Application.Views;
 
-public sealed class ${handlerName} : IQueryHandler<${queryName}, System.Collections.Generic.IReadOnlyList<${responseRecord}>>
+public sealed class ${handlerName} : IQueryHandler<${queryName}, IReadOnlyList<${responseRecord}>>
 {
 ${fields.join("\n")}
 ${ctor}
 
-    public async ValueTask<System.Collections.Generic.IReadOnlyList<${responseRecord}>> Handle(${queryName} q, CancellationToken ct)
+    public async ValueTask<IReadOnlyList<${responseRecord}>> Handle(${queryName} q, CancellationToken ct)
     {
         var domain = await _repo.${upperFirst(view.name)}(${repoCallArgs});
 ${auxLines.join("\n")}${auxLines.length > 0 ? "\n" : ""}        return domain.Select(d => ${projection}).ToList();
@@ -182,10 +191,11 @@ function projectFullForm(
   view: ViewIR,
   ctx: BoundedContextIR,
   pathToMap: Map<string, { mapVar: string; aggName: string }>,
+  usings: Set<string>,
 ): string {
   const args = view.output!.fields.map((f) => {
     const bind = view.output!.binds.find((b) => b.name === f.name)!;
-    const rendered = renderBindWithFollowsCs(bind.expr, "d", pathToMap);
+    const rendered = renderBindWithFollowsCs(bind.expr, "d", pathToMap, usings);
     return projectToResponse(rendered, f.type, ctx);
   });
   return `new ${upperFirst(view.name)}Row(${args.join(", ")})`;
@@ -200,24 +210,26 @@ function renderBindWithFollowsCs(
   expr: ExprIR,
   thisName: string,
   pathToMap: Map<string, { mapVar: string; aggName: string }>,
+  usings: Set<string>,
 ): string {
   if (expr.kind === "member" && expr.receiverType.kind === "id") {
     const path = idFollowPathCs(expr.receiver);
     if (path) {
       const map = pathToMap.get(path.join("."));
       if (map) {
-        const inner = renderIdReceiverCs(expr.receiver, thisName, pathToMap);
+        const inner = renderIdReceiverCs(expr.receiver, thisName, pathToMap, usings);
         return `${map.mapVar}[${inner}].${upperFirst(expr.member)}`;
       }
     }
   }
-  return renderCsExpr(expr, { thisName });
+  return renderCsExpr(expr, { thisName, usings });
 }
 
 function renderIdReceiverCs(
   expr: ExprIR,
   thisName: string,
   pathToMap: Map<string, { mapVar: string; aggName: string }>,
+  usings: Set<string>,
 ): string {
   if (expr.kind === "ref") {
     return `${thisName}.${upperFirst(expr.name)}`;
@@ -227,12 +239,12 @@ function renderIdReceiverCs(
     if (path) {
       const map = pathToMap.get(path.join("."));
       if (map) {
-        const inner = renderIdReceiverCs(expr.receiver, thisName, pathToMap);
+        const inner = renderIdReceiverCs(expr.receiver, thisName, pathToMap, usings);
         return `${map.mapVar}[${inner}].${upperFirst(expr.member)}`;
       }
     }
   }
-  return renderCsExpr(expr, { thisName });
+  return renderCsExpr(expr, { thisName, usings });
 }
 
 function idFollowPathCs(e: ExprIR): string[] | undefined {
@@ -257,7 +269,7 @@ function csIdsSourceForAux(
   }
   const prevPath = aux.path.slice(0, -1).join(".");
   const prev = pathToMap.get(prevPath);
-  if (!prev) return `new System.Collections.Generic.List<object>()`;
+  if (!prev) return `new List<object>()`;
   const finalField = aux.path[aux.path.length - 1]!;
   return `${prev.mapVar}.Values.Select(__a => __a.${upperFirst(finalField)}).ToList()`;
 }
@@ -271,7 +283,7 @@ function renderController(ctx: BoundedContextIR, ns: string, routePrefix?: strin
     const agg = aggsByName.get(view.aggregateName);
     if (!agg) continue;
     const recordName = responseRecordName(view, agg);
-    const responseType = `System.Collections.Generic.IReadOnlyList<${recordName}>`;
+    const responseType = `IReadOnlyList<${recordName}>`;
     blocks.push(
       `    [HttpGet("${snake(view.name)}")]\n` +
         `    public async Task<ActionResult<${responseType}>> ${upperFirst(view.name)}()\n` +

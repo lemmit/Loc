@@ -128,7 +128,7 @@ function navEntryForLink(
   const overrideLabel = stringPropOf(link.props, "label");
   const metaLabel = readMenuMetaString(page, "label");
   const label = overrideLabel ?? metaLabel ?? page.name;
-  // Identify well-known page kinds via `scaffoldOrigin` so testid
+  // Identify well-known page kinds via `archetype` so testid
   // and active-route semantics match main's hardcoded conventions.
   const tIdAndActive = testIdAndActive(page);
   return {
@@ -144,9 +144,9 @@ function testIdAndActive(page: PageIR): {
   activeArgs: string;
 } {
   const route = page.route ?? "";
-  switch (page.scaffoldOrigin?.kind) {
+  switch (page.archetype?.kind) {
     case "aggregate-list": {
-      const slug = snake(plural(page.scaffoldOrigin.aggregateName));
+      const slug = snake(plural(page.archetype.aggregateName));
       return {
         testId: `nav-${slug}`,
         activeArgs: JSON.stringify(`/${slug}`),
@@ -154,21 +154,21 @@ function testIdAndActive(page: PageIR): {
     }
     case "aggregate-new":
     case "aggregate-detail": {
-      const slug = snake(plural(page.scaffoldOrigin.aggregateName));
+      const slug = snake(plural(page.archetype.aggregateName));
       return {
-        testId: `nav-${slug}-${page.scaffoldOrigin.kind === "aggregate-new" ? "new" : "detail"}`,
+        testId: `nav-${slug}-${page.archetype.kind === "aggregate-new" ? "new" : "detail"}`,
         activeArgs: JSON.stringify(route),
       };
     }
     case "workflow-form": {
-      const slug = snake(page.scaffoldOrigin.workflowName);
+      const slug = snake(page.archetype.workflowName);
       return {
         testId: `nav-workflow-${slug}`,
         activeArgs: JSON.stringify(`/workflows/${slug}`),
       };
     }
     case "view-list": {
-      const slug = snake(page.scaffoldOrigin.viewName);
+      const slug = snake(page.archetype.viewName);
       return {
         testId: `nav-view-${slug}`,
         activeArgs: JSON.stringify(`/views/${slug}`),
@@ -187,7 +187,7 @@ function testIdAndActive(page: PageIR): {
     case "home":
       return { testId: "nav-home", activeArgs: `"/", { exact: true }` };
     default: {
-      // Explicit page (no scaffoldOrigin) — use the page name as
+      // Explicit page (no archetype) — use the page name as
       // the testid suffix and exact-match the route.
       return {
         testId: `nav-${snake(page.name)}`,

@@ -74,6 +74,20 @@ export async function loadProjectFromVfs(
         if (!rawPath) continue;
         const importedAbs = posixResolve(dir, rawPath);
         if (vfs.read(importedAbs) == null) {
+          // Distinguish "path is a directory" from "path is just
+          // missing" — both make `read` return undefined, but the
+          // user-facing fix is very different.  Only check when
+          // the VFS surfaces directory entries (back-compat with
+          // the file-only Vfs interface).
+          const isDir =
+            "isDirectory" in vfs && typeof vfs.isDirectory === "function"
+              ? vfs.isDirectory(importedAbs)
+              : false;
+          if (isDir) {
+            throw new Error(
+              `.ddd import "${rawPath}" (resolved to ${importedAbs}) is a directory — imported by ${absPath}.  Imports must point at a .ddd source file.`,
+            );
+          }
           throw new Error(
             `.ddd import not found in VFS: "${rawPath}" (resolved to ${importedAbs}) imported by ${absPath}`,
           );

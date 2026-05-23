@@ -163,8 +163,7 @@ system SalesSystem {
 
   // Hono backend — runs in the playground's runtime worker
   // (PGlite under the hood).
-  ui WebApp {
-    scaffold modules: Sales
+  ui WebApp with scaffold(modules: [Sales]) {
   }
 
   deployable api {

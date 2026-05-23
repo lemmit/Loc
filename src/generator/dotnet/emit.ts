@@ -3,6 +3,7 @@
 // the AST node it serves.  Keep imports stable for callers of this module.
 
 export { renderController, renderExceptionFilter } from "./emit/api.js";
+export { renderAuditableInterceptor } from "./emit/auditable-interceptor.tpl.js";
 export { renderCommon, renderNoopDispatcher } from "./emit/common.js";
 export {
   renderCommand,

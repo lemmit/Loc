@@ -5,4 +5,4 @@ using CatalogApi.Application.Products.Responses;
 
 namespace CatalogApi.Application.Products.Queries;
 
-public sealed record AllQuery() : IQuery<System.Collections.Generic.IReadOnlyList<ProductResponse>>;
+public sealed record AllQuery() : IQuery<IReadOnlyList<ProductResponse>>;

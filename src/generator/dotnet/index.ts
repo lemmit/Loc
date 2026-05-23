@@ -7,7 +7,9 @@ import { generateReactForContexts } from "../react/index.js";
 import { emitAuthFiles } from "./auth-emit.js";
 import { emitCqrs } from "./cqrs-emit.js";
 import { renderDomainLog, renderDomainLogBehavior } from "./emit/domain-log.js";
+import { renderRequestLoggingMiddleware } from "./emit/request-logging.js";
 import {
+  renderAuditableInterceptor,
   renderCommon,
   renderConfiguration,
   renderCsproj,
@@ -150,6 +152,22 @@ function emitProjectFromContexts(
     workflows: contexts.flatMap((c) => c.workflows),
     views: contexts.flatMap((c) => c.views),
   };
+  // Auth files — emitted only when the deployable opts in
+  // via `auth: required` AND the system declares a user block (the
+  // validator already rejects the half-state).  Computed first
+  // because the capability-interface emitter needs to know whether
+  // the auditable interceptor can rely on ICurrentUserAccessor.
+  const authRequired = !!(system?.deployable.auth?.required && system.sys.user);
+  if (authRequired && system?.sys) {
+    emitAuthFiles(system.sys, ns, out);
+  }
+  // SaveChangesInterceptor — emitted only when at least one
+  // aggregate has stamping rules contributed by macros.  Driven by
+  // a per-entity-type switch built from each aggregate's
+  // `contextStamps` IR (no marker interface, no per-aggregate
+  // hand-written stamping logic).
+  emitStampingInterceptor(merged, ns, out);
+  const usesStamping = merged.aggregates.some((a) => (a.contextStamps?.length ?? 0) > 0);
   out.set("Infrastructure/Persistence/AppDbContext.cs", renderDbContext(merged, ns));
   // FluentValidation pipeline — emit the generic
   // ValidationBehavior + the csproj package ref + the
@@ -159,20 +177,13 @@ function emitProjectFromContexts(
   // arm is gated on the same flag.
   const usesValidators = merged.aggregates.some(hasAnyWireValidator);
   out.set("Api/DomainExceptionFilter.cs", renderExceptionFilter(ns, { usesValidators }));
-  // Auth files — emitted only when the deployable opts in
-  // via `auth: required` AND the system declares a user block (the
-  // validator already rejects the half-state).  When emitted, the
-  // Program.cs adopts the middleware mount + DI registrations.
-  const authRequired = !!(system?.deployable.auth?.required && system.sys.user);
-  if (authRequired && system?.sys) {
-    emitAuthFiles(system.sys, ns, out);
-  }
   if (usesValidators) {
     out.set("Application/Common/ValidationBehavior.cs", renderValidationBehavior(ns));
   }
   emitProject(merged, ns, out, {
     authRequired,
     usesValidators,
+    usesStamping,
     hasEmbeddedSpa,
     emitTrace,
   });
@@ -227,6 +238,8 @@ function emitContext(
   }
   emitWorkflows(ctx, ns, out);
   emitViews(ctx, ns, out);
+  // Stamping interceptor — same gating as the system path.
+  emitStampingInterceptor(ctx, ns, out);
   // Same FluentValidation gate as the system path — drives the
   // pipeline behavior emit + csproj + Program.cs registration +
   // the DomainExceptionFilter arm.
@@ -235,13 +248,35 @@ function emitContext(
   if (usesValidators) {
     out.set("Application/Common/ValidationBehavior.cs", renderValidationBehavior(ns));
   }
-  emitProject(ctx, ns, out, { usesValidators, emitTrace });
+  const usesStamping = ctx.aggregates.some((a) => (a.contextStamps?.length ?? 0) > 0);
+  emitProject(ctx, ns, out, { usesValidators, usesStamping, emitTrace });
   emitTestProject(ctx, ns, out);
 }
 
 // ---------------------------------------------------------------------------
 // Shared / per-context emission helpers
 // ---------------------------------------------------------------------------
+
+/** Emit the SaveChangesInterceptor when at least one aggregate
+ * contributes stamping rules.  The interceptor is registry-driven
+ * — its body is a switch on `entry.Entity.GetType()` built from
+ * every aggregate's `contextStamps`.  Adding a new stamping macro
+ * (e.g. `lastModifiedBy`, `versionBump`) requires no compiler
+ * changes: the new macro contributes more entries to one
+ * aggregate's stamps, which become more assignments in that
+ * aggregate's switch arm. */
+function emitStampingInterceptor(
+  merged: BoundedContextIR,
+  ns: string,
+  out: Map<string, string>,
+): void {
+  const anyStamping = merged.aggregates.some((a) => (a.contextStamps?.length ?? 0) > 0);
+  if (!anyStamping) return;
+  out.set(
+    "Infrastructure/Persistence/AuditableInterceptor.cs",
+    renderAuditableInterceptor(ns, merged.aggregates),
+  );
+}
 
 function emitIds(ctx: BoundedContextIR, ns: string, out: Map<string, string>): void {
   for (const agg of ctx.aggregates) {
@@ -321,9 +356,17 @@ function emitAggregate(
     `Domain/${aggFolder}/I${agg.name}Repository.cs`,
     renderRepositoryInterface(agg, repoWithViews, ns),
   );
+  // Threaded into buildFindBodies so a find with a `where` expression
+  // that lowers to `Regex.IsMatch` declares its System.Text.RegularExpressions
+  // dependency; the repository impl emitter then adds the using.
+  const repoImplUsings = new Set<string>();
+  const findBodies = buildFindBodies(agg, repoWithViews, repoImplUsings);
   out.set(
     `Infrastructure/Repositories/${agg.name}Repository.cs`,
-    renderRepositoryImpl(agg, repoWithViews, ns, buildFindBodies(agg, repoWithViews), emitTrace),
+    renderRepositoryImpl(agg, repoWithViews, ns, findBodies, {
+      extraUsings: [...repoImplUsings].sort(),
+      emitTrace,
+    }),
   );
   out.set(
     `Infrastructure/Persistence/Configurations/${agg.name}Configuration.cs`,
@@ -357,12 +400,14 @@ function emitProject(
   options?: {
     authRequired?: boolean;
     usesValidators?: boolean;
+    usesStamping?: boolean;
     hasEmbeddedSpa?: boolean;
     emitTrace?: boolean;
   },
 ): void {
   const hasExtern = ctx.aggregates.some((a) => a.operations.some((o) => o.extern));
   const usesValidators = !!options?.usesValidators;
+  const usesStamping = !!options?.usesStamping;
   const hasEmbeddedSpa = !!options?.hasEmbeddedSpa;
   const emitTrace = !!options?.emitTrace;
   out.set(
@@ -370,6 +415,7 @@ function emitProject(
     renderProgram(ctx, ns, {
       authRequired: !!options?.authRequired,
       usesValidators,
+      usesStamping,
       hasEmbeddedSpa,
       emitTrace,
     }),
@@ -378,6 +424,9 @@ function emitProject(
   out.set("Dockerfile", renderDockerfile(ns, { hasEmbeddedSpa }));
   out.set(".dockerignore", renderDockerignore());
   out.set("certs/.gitkeep", "");
+  // Catalog-identity request log — always-on.  Cross-backend parity
+  // with Phoenix's <App>.Telemetry and Hono's pino access log.
+  out.set("Middleware/RequestLoggingMiddleware.cs", renderRequestLoggingMiddleware(ns));
   if (emitTrace) {
     // Domain-layer logger plumbing — emitted only on --trace so the
     // default artefact stays free of an AsyncLocal accessor + the

@@ -42,6 +42,25 @@ describe(".NET generator", () => {
     expect(keys).toContain("Sales.csproj");
   });
 
+  it("adds per-file `using` directives only where the namespace is actually used", async () => {
+    const model = await buildModel("examples/sales.ddd");
+    const files = generateDotnet(model);
+    // DomainExceptionFilter uses Activity.Current; needs System.Diagnostics.
+    const filter = files.get("Api/DomainExceptionFilter.cs")!;
+    expect(filter).toMatch(/^using System\.Diagnostics;/m);
+    // No file that doesn't reference Activity / Match / IsolationLevel
+    // should drag those namespaces in — they expose common names
+    // (Activity, Match, Group) that would shadow user domain types if
+    // imported globally.
+    const order = files.get("Domain/Orders/Order.cs")!;
+    expect(order).not.toMatch(/^using System\.Diagnostics;/m);
+    expect(order).not.toMatch(/^using System\.Text\.RegularExpressions;/m);
+    // No project-wide GlobalUsings.cs — every namespace import is
+    // per-file so a user's `Activity` / `Match` aggregate doesn't
+    // collide with framework types.
+    expect([...files.keys()]).not.toContain("GlobalUsings.cs");
+  });
+
   it("renders Order with idiomatic C#", async () => {
     const model = await buildModel("examples/sales.ddd");
     const files = generateDotnet(model);
@@ -125,13 +144,30 @@ describe(".NET generator", () => {
       expect(program).toMatch(/statusCode: 503/);
     });
 
-    it("Program.cs registers ApplicationStopping for graceful shutdown logging", async () => {
+    it("Program.cs wires server-lifecycle catalog events via IHostApplicationLifetime", async () => {
+      // Bite 5a: the bare "Shutting down" log was superseded by catalog
+      // identity — server_starting / server_listening / server_shutdown
+      // / server_drained land on the structured stream with the same
+      // event names Hono and Phoenix emit.
       const model = await buildModel("examples/sales.ddd");
       const files = generateDotnet(model);
       const program = files.get("Program.cs")!;
       expect(program).toMatch(/IHostApplicationLifetime/);
+      expect(program).toMatch(/ApplicationStarted\.Register/);
       expect(program).toMatch(/ApplicationStopping\.Register/);
-      expect(program).toMatch(/Shutting down/);
+      expect(program).toMatch(/ApplicationStopped\.Register/);
+      // Catalog identity via renderDotnetLogCall — same template +
+      // placeholder shape every other .NET emit site uses.
+      expect(program).toMatch(
+        /lifecycleLog\.LogInformation\("\{Event\} port=\{Port\} env=\{Env\}", "server_starting"/,
+      );
+      expect(program).toMatch(
+        /lifecycleLog\.LogInformation\("\{Event\} port=\{Port\}", "server_listening"/,
+      );
+      expect(program).toMatch(
+        /lifecycleLog\.LogInformation\("\{Event\} signal=\{Signal\}", "server_shutdown", "SIGTERM"\)/,
+      );
+      expect(program).toMatch(/lifecycleLog\.LogInformation\("\{Event\}", "server_drained"\)/);
     });
   });
 
@@ -152,15 +188,55 @@ describe(".NET generator", () => {
       expect(program).toMatch(/Duration/);
     });
 
+    // Bite 4: catalog-identity request log via a custom middleware.
+    // Mirrors Phoenix's <App>.Telemetry and Hono's pino access log so the
+    // same `request_start` / `request_end` events surface on every
+    // backend.  Coexists with UseHttpLogging (the framework's stream is
+    // structurally different — both can run, the catalog stream is the
+    // one cross-backend tooling pivots on).
+    it("emits Middleware/RequestLoggingMiddleware.cs with catalog-identity start/end events", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      const mw = files.get("Middleware/RequestLoggingMiddleware.cs");
+      expect(mw, "RequestLoggingMiddleware.cs is emitted").toBeDefined();
+      // Namespaced under <ns>.Middleware (parallel to <ns>.Auth).
+      expect(mw!).toMatch(/namespace \w+\.Middleware;/);
+      expect(mw!).toMatch(/public sealed class RequestLoggingMiddleware/);
+      // Catalog identity preserved by renderDotnetLogCall — same shape
+      // every .NET backend emit site uses.
+      expect(mw!).toMatch(
+        /_log\.LogInformation\("\{Event\} method=\{Method\} path=\{Path\}", "request_start", ctx\.Request\.Method, ctx\.Request\.Path\.Value \?\? "\/"\);/,
+      );
+      expect(mw!).toMatch(
+        /_log\.LogInformation\("\{Event\} method=\{Method\} path=\{Path\} status=\{Status\} duration_ms=\{DurationMs\}", "request_end", ctx\.Request\.Method, ctx\.Request\.Path\.Value \?\? "\/", ctx\.Response\.StatusCode, sw\.ElapsedMilliseconds\);/,
+      );
+      // Stopwatch + try/finally so request_end fires even when a
+      // downstream middleware/controller throws.
+      expect(mw!).toMatch(/Stopwatch\.StartNew/);
+      expect(mw!).toMatch(/try[\s\S]*?await _next\(ctx\);[\s\S]*?finally/);
+    });
+
+    it("Program.cs registers RequestLoggingMiddleware before MapControllers + UseHttpLogging", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      const program = files.get("Program.cs")!;
+      // Stopwatch must cover the full pipeline — mount BEFORE routing.
+      expect(program).toMatch(/app\.UseMiddleware<\w+\.Middleware\.RequestLoggingMiddleware>\(\);/);
+      const ourPos = program.search(/UseMiddleware<\w+\.Middleware\.RequestLoggingMiddleware>/);
+      const httpPos = program.indexOf("app.UseHttpLogging()");
+      const mapPos = program.indexOf("app.MapControllers()");
+      expect(ourPos).toBeGreaterThan(0);
+      expect(httpPos).toBeGreaterThan(ourPos);
+      expect(mapPos).toBeGreaterThan(ourPos);
+    });
+
     it("DomainExceptionFilter threads Activity.TraceId into every error envelope", async () => {
       const model = await buildModel("examples/sales.ddd");
       const files = generateDotnet(model);
       const filter = files.get("Api/DomainExceptionFilter.cs")!;
       // trace_id pulled off the ambient Activity (set by ASP.NET on
       // every request).  Empty string when no Activity is active.
-      expect(filter).toMatch(
-        /var trace_id = System\.Diagnostics\.Activity\.Current\?\.TraceId\.ToString\(\) \?\? "";/,
-      );
+      expect(filter).toMatch(/var trace_id = Activity\.Current\?\.TraceId\.ToString\(\) \?\? "";/);
       // Every arm of the filter includes trace_id in its envelope.
       expect(filter).toMatch(/error = fe\.Message, trace_id/);
       expect(filter).toMatch(/error = de\.Message, trace_id/);
@@ -282,7 +358,7 @@ describe(".NET generator", () => {
       const model = await buildModel("examples/sales.ddd");
       const files = generateDotnet(model);
       const common = files.get("Domain/Common/DomainException.cs")!;
-      expect(common).toMatch(/public sealed class ExternHandlerException : System\.Exception/);
+      expect(common).toMatch(/public sealed class ExternHandlerException : Exception/);
       expect(common).toMatch(/public string OpName \{ get; \}/);
       expect(common).toMatch(/public string AggName \{ get; \}/);
       // Message embeds both names + the inner exception's message.
@@ -394,9 +470,11 @@ describe(".NET generator", () => {
       );
       // And `confirm()` has zero params — Array.Empty<string>() is
       // the safe empty form (the implicit `new[] { }` is a compile
-      // error: no element type to infer).
+      // error: no element type to infer).  `System.` prefix dropped
+      // since the file already imports `using System;` via the SDK's
+      // ImplicitUsings — see the per-file using derivation PR.
       expect(controller).toMatch(
-        /_log\.LogTrace\("\{Event\} keys=\{Keys\}", "wire_in", System\.Array\.Empty<string>\(\)\);/,
+        /_log\.LogTrace\("\{Event\} keys=\{Keys\}", "wire_in", Array\.Empty<string>\(\)\);/,
       );
       // wire_in fires BEFORE operation_invoked at every op-route entry —
       // mirroring the Hono order (shape first, narrative next).
@@ -488,7 +566,7 @@ describe(".NET generator", () => {
       );
       // try/catch shape — rollback path re-throws so the seam's call
       // sites still see the original exception.
-      expect(repo).toMatch(/try\s*\n\s*\{[\s\S]+?catch \(System\.Exception __txErr\)/);
+      expect(repo).toMatch(/try\s*\n\s*\{[\s\S]+?catch \(Exception __txErr\)/);
       expect(repo).toMatch(/__txErr\.Message[\s\S]+?throw;/);
     });
 
@@ -618,7 +696,7 @@ describe(".NET generator", () => {
       expect(handler).toMatch(/catch \(AggregateNotFoundException\) \{ throw; \}/);
       // Cancellation also re-throws so request cancellation isn't
       // misattributed as a handler failure.
-      expect(handler).toMatch(/catch \(System\.OperationCanceledException\) \{ throw; \}/);
+      expect(handler).toMatch(/catch \(OperationCanceledException\) \{ throw; \}/);
       // Any other exception wraps as ExternHandlerException with
       // the op + agg names baked in.
       expect(handler).toMatch(/throw new ExternHandlerException\("confirm", "Order", ex\);/);
@@ -690,7 +768,7 @@ describe(".NET generator", () => {
     );
     expect(handler).toMatch(/customer\.DeductCredit\(cmd\.Amount\);/);
     expect(handler).toMatch(
-      /var order = Order\.Create\(CustomerId: cmd\.CustomerId, Status: OrderStatus\.Draft/,
+      /var order = Order\.Create\(customerId: cmd\.CustomerId, status: OrderStatus\.Draft/,
     );
     expect(handler).toMatch(/_workflowEvents\.Add\(new OrderPlaced\(/);
     // Saves ordered: customer first (declared first), then order.
@@ -777,7 +855,7 @@ describe(".NET generator", () => {
     // 1. Query record (parameterless, returns IReadOnlyList<OrderResponse>).
     const query = files.get("Application/Views/ActiveOrdersQuery.cs")!;
     expect(query).toMatch(
-      /public sealed record ActiveOrdersQuery\(\) : IQuery<System\.Collections\.Generic\.IReadOnlyList<OrderResponse>>/,
+      /public sealed record ActiveOrdersQuery\(\) : IQuery<IReadOnlyList<OrderResponse>>/,
     );
 
     // 2. Handler injects IOrderRepository, calls _repo.ActiveOrders(ct),
@@ -841,7 +919,7 @@ describe(".NET generator", () => {
 
     // Query returns IReadOnlyList<OrderSummaryRow>, not <Agg>Response.
     const query = files.get("Application/Views/OrderSummaryQuery.cs")!;
-    expect(query).toMatch(/IQuery<System\.Collections\.Generic\.IReadOnlyList<OrderSummaryRow>>/);
+    expect(query).toMatch(/IQuery<IReadOnlyList<OrderSummaryRow>>/);
 
     // Handler projects through projectToResponse (Id.Value, enum.ToString,
     // collection .Count via the bind renderer).
@@ -895,9 +973,7 @@ describe(".NET generator", () => {
 
     // Repo interface + impl gained FindManyByIdsAsync.
     const iface = files.get("Domain/Customers/ICustomerRepository.cs")!;
-    expect(iface).toMatch(
-      /Task<System\.Collections\.Generic\.IReadOnlyList<Customer>> FindManyByIdsAsync/,
-    );
+    expect(iface).toMatch(/Task<IReadOnlyList<Customer>> FindManyByIdsAsync/);
     const impl = files.get("Infrastructure/Repositories/CustomerRepository.cs")!;
     expect(impl).toMatch(/_db\.Customers\.Where\(x => ids\.Contains\(x\.Id\)\)\.ToListAsync\(ct\)/);
   });
@@ -1097,16 +1173,16 @@ describe(".NET generator", () => {
     );
     const files = generateDotnet(doc.parseResult.value as Model);
     expect(files.get("Application/Workflows/SerHandler.cs")!).toMatch(
-      /BeginTransactionAsync\(System\.Data\.IsolationLevel\.Serializable, ct\)/,
+      /BeginTransactionAsync\(IsolationLevel\.Serializable, ct\)/,
     );
     expect(files.get("Application/Workflows/RrHandler.cs")!).toMatch(
-      /BeginTransactionAsync\(System\.Data\.IsolationLevel\.RepeatableRead, ct\)/,
+      /BeginTransactionAsync\(IsolationLevel\.RepeatableRead, ct\)/,
     );
     expect(files.get("Application/Workflows/RuHandler.cs")!).toMatch(
-      /BeginTransactionAsync\(System\.Data\.IsolationLevel\.ReadUncommitted, ct\)/,
+      /BeginTransactionAsync\(IsolationLevel\.ReadUncommitted, ct\)/,
     );
     expect(files.get("Application/Workflows/RcHandler.cs")!).toMatch(
-      /BeginTransactionAsync\(System\.Data\.IsolationLevel\.ReadCommitted, ct\)/,
+      /BeginTransactionAsync\(IsolationLevel\.ReadCommitted, ct\)/,
     );
     // Bare `transactional` doesn't pass an explicit level.
     const plain = files.get("Application/Workflows/PlainHandler.cs")!;
@@ -1524,9 +1600,7 @@ describe(".NET generator", () => {
       const files = generateDotnet(doc.parseResult.value as Model);
       const userClass = files.get("Domain/Users/User.cs")!;
       // The same predicate appears in AssertInvariants (the floor).
-      expect(userClass).toMatch(
-        /System\.Text\.RegularExpressions\.Regex\.IsMatch\(this\.Email, "\^\[\^@\]\+@\.\+\$"\)/,
-      );
+      expect(userClass).toMatch(/Regex\.IsMatch\(this\.Email, "\^\[\^@\]\+@\.\+\$"\)/);
     });
 
     it("`private invariant` is skipped from FluentValidation but stays in domain", async () => {

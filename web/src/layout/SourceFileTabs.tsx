@@ -21,11 +21,22 @@
 // ---------------------------------------------------------------------------
 
 import { useCallback, useState } from "react";
-import { ActionIcon, Box, Button, Group, Text, TextInput, Tooltip } from "@mantine/core";
+import {
+  ActionIcon,
+  Box,
+  Button,
+  Group,
+  Menu,
+  Text,
+  TextInput,
+  Tooltip,
+} from "@mantine/core";
 import { DEFAULT_PATH } from "../workspace/workspace-sources";
 import {
+  newFolderSeedPath,
   normaliseNewFilePath,
   validateNewFileBasename,
+  validateNewFolderName,
 } from "./source-file-tabs-validation";
 
 const WORKSPACE_PREFIX = "/workspace/";
@@ -52,6 +63,13 @@ export interface SourceFileTabsProps {
   /** Delete a file from the VFS.  Strip never calls this for
    *  `main.ddd` (the delete button isn't rendered there). */
   onDelete: (path: string) => void;
+  /** Optional empty-folder creator.  On desktop the tabs strip is
+   *  a flat file list — an empty folder has no natural tab
+   *  representation, so when this is supplied we still default to
+   *  the placeholder-file approach (`<folder>/untitled.ddd`) so
+   *  the new folder is visible as a tab.  Provided for symmetry
+   *  with the mobile tree's `onCreateFolder`; unused today. */
+  onCreateFolder?: (folder: string) => void;
   /** Bumps the strip's touch-target sizes (× / + actions) and font
    *  size so the tabs are thumb-friendly on the mobile shell.
    *  Default = false (desktop densities).  EditorPane wires this
@@ -100,26 +118,41 @@ export function SourceFileTabs(props: SourceFileTabsProps): JSX.Element {
     tabs.unshift(props.activePath);
   }
 
-  const [creating, setCreating] = useState(false);
+  // Create-form mode: `null` = closed, `"file"` = file form,
+  // `"folder"` = folder form.  Explicit modes — the previous single
+  // input made typing `shared` produce `shared.ddd` when the user
+  // wanted a `shared/` folder.
+  const [creating, setCreating] = useState<"file" | "folder" | null>(null);
   const [draft, setDraft] = useState("");
   const existingPaths = new Set(props.files.keys());
-  const draftError = creating ? validateNewFileBasename(draft, existingPaths) : undefined;
+  const draftError =
+    creating === "file"
+      ? validateNewFileBasename(draft, existingPaths)
+      : creating === "folder"
+        ? validateNewFolderName(draft, existingPaths)
+        : undefined;
 
-  const startCreate = useCallback(() => {
+  const startCreate = useCallback((mode: "file" | "folder") => {
     setDraft("");
-    setCreating(true);
+    setCreating(mode);
   }, []);
   const cancelCreate = useCallback(() => {
-    setCreating(false);
+    setCreating(null);
     setDraft("");
   }, []);
   const submitCreate = useCallback(() => {
     if (draftError || draft.trim() === "") return;
-    const fullPath = normaliseNewFilePath(draft);
-    props.onCreate(fullPath);
-    setCreating(false);
+    if (creating === "file") {
+      props.onCreate(normaliseNewFilePath(draft));
+    } else if (creating === "folder") {
+      // Seed the new folder with `<folder>/untitled.ddd` so it
+      // appears in the strip — the VFS can't represent an empty
+      // directory.
+      props.onCreate(newFolderSeedPath(draft, existingPaths));
+    }
+    setCreating(null);
     setDraft("");
-  }, [draft, draftError, props]);
+  }, [creating, draft, draftError, existingPaths, props]);
 
   return (
     <Box
@@ -188,34 +221,69 @@ export function SourceFileTabs(props: SourceFileTabsProps): JSX.Element {
           </Box>
         );
       })}
-      {creating ? (
+      {creating !== null ? (
         // Mobile: stack vertically so the TextInput gets full width
         // and the Add/Cancel buttons don't overflow off-screen.
         // Desktop: classic inline row.
-        compact ? (
-          <Box
-            ml={4}
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 4,
-              padding: "4px 0",
-              minWidth: 240,
-            }}
-          >
-            <TextInput
-              size="sm"
-              autoFocus
-              placeholder="new-file or sub/dir/name"
-              value={draft}
-              error={draftError}
-              onChange={(e) => setDraft(e.currentTarget.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") submitCreate();
-                else if (e.key === "Escape") cancelCreate();
+        (() => {
+          const placeholder =
+            creating === "file"
+              ? "filename or sub/dir/filename"
+              : "folder name (creates folder/untitled.ddd)";
+          const label = creating === "file" ? "New file" : "New folder";
+          return compact ? (
+            <Box
+              ml={4}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 4,
+                padding: "4px 0",
+                minWidth: 240,
               }}
-            />
-            <Group gap={6} wrap="nowrap">
+            >
+              <Text size="xs" c="dimmed" fw={600} tt="uppercase">
+                {label}
+              </Text>
+              <TextInput
+                size="sm"
+                autoFocus
+                placeholder={placeholder}
+                value={draft}
+                error={draftError}
+                onChange={(e) => setDraft(e.currentTarget.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") submitCreate();
+                  else if (e.key === "Escape") cancelCreate();
+                }}
+              />
+              <Group gap={6} wrap="nowrap">
+                <Button size="xs" variant="default" onClick={submitCreate} disabled={!!draftError}>
+                  Add
+                </Button>
+                <Button size="xs" variant="subtle" color="gray" onClick={cancelCreate}>
+                  Cancel
+                </Button>
+              </Group>
+            </Box>
+          ) : (
+            <Group gap={4} ml={4} wrap="nowrap" align="center">
+              <Text size="xs" c="dimmed" fw={500}>
+                {label}:
+              </Text>
+              <TextInput
+                size="xs"
+                autoFocus
+                placeholder={placeholder}
+                value={draft}
+                error={draftError}
+                onChange={(e) => setDraft(e.currentTarget.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") submitCreate();
+                  else if (e.key === "Escape") cancelCreate();
+                }}
+                styles={{ input: { minWidth: 220 } }}
+              />
               <Button size="xs" variant="default" onClick={submitCreate} disabled={!!draftError}>
                 Add
               </Button>
@@ -223,43 +291,28 @@ export function SourceFileTabs(props: SourceFileTabsProps): JSX.Element {
                 Cancel
               </Button>
             </Group>
-          </Box>
-        ) : (
-          <Group gap={4} ml={4} wrap="nowrap" align="center">
-            <TextInput
-              size="xs"
-              autoFocus
-              placeholder="new-file or sub/dir/name"
-              value={draft}
-              error={draftError}
-              onChange={(e) => setDraft(e.currentTarget.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") submitCreate();
-                else if (e.key === "Escape") cancelCreate();
-              }}
-              styles={{ input: { minWidth: 220 } }}
-            />
-            <Button size="xs" variant="default" onClick={submitCreate} disabled={!!draftError}>
-              Add
-            </Button>
-            <Button size="xs" variant="subtle" color="gray" onClick={cancelCreate}>
-              Cancel
-            </Button>
-          </Group>
-        )
+          );
+        })()
       ) : (
-        <Tooltip label="Add a new .ddd file" withArrow openDelay={400}>
-          <ActionIcon
-            size={compact ? "md" : "sm"}
-            variant="subtle"
-            color="gray"
-            aria-label="Add a new .ddd file"
-            onClick={startCreate}
-            ml={4}
-          >
-            +
-          </ActionIcon>
-        </Tooltip>
+        <Menu position="bottom-end" shadow="sm" withinPortal>
+          <Menu.Target>
+            <Tooltip label="Add a new .ddd file or folder" withArrow openDelay={400}>
+              <ActionIcon
+                size={compact ? "md" : "sm"}
+                variant="subtle"
+                color="gray"
+                aria-label="Add a new .ddd file or folder"
+                ml={4}
+              >
+                +
+              </ActionIcon>
+            </Tooltip>
+          </Menu.Target>
+          <Menu.Dropdown>
+            <Menu.Item onClick={() => startCreate("file")}>New file</Menu.Item>
+            <Menu.Item onClick={() => startCreate("folder")}>New folder</Menu.Item>
+          </Menu.Dropdown>
+        </Menu>
       )}
     </Box>
   );

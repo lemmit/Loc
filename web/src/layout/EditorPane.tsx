@@ -40,6 +40,9 @@ export function EditorPane({ ctx, border = "none" }: Props): JSX.Element | null 
     setActiveSourcePath,
     createSourceFile,
     deleteSourceFile,
+    emptySourceFolders,
+    createEmptySourceFolder,
+    deleteEmptySourceFolder,
   } = ctx;
   if (!lspClient) return null;
   const picker = isDesktop ? (
@@ -49,6 +52,7 @@ export function EditorPane({ ctx, border = "none" }: Props): JSX.Element | null 
       onSelect={setActiveSourcePath}
       onCreate={createSourceFile}
       onDelete={deleteSourceFile}
+      onCreateFolder={createEmptySourceFolder}
     />
   ) : (
     <SourceFilesTree
@@ -57,6 +61,9 @@ export function EditorPane({ ctx, border = "none" }: Props): JSX.Element | null 
       onSelect={setActiveSourcePath}
       onCreate={createSourceFile}
       onDelete={deleteSourceFile}
+      emptyFolders={emptySourceFolders}
+      onCreateFolder={createEmptySourceFolder}
+      onDeleteFolder={deleteEmptySourceFolder}
     />
   );
   return (

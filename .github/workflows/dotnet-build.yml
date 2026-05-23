@@ -1,0 +1,96 @@
+name: .NET build verification
+
+# Compiles a .NET project generated from each test-fixture .ddd by
+# `ddd generate dotnet`, then runs `dotnet restore` + `dotnet build
+# /warnaserror`.  Catches emission bugs in the .NET generator that
+# the string-match unit tests cannot see (missing usings, EF Core
+# configuration that fails at model build, Mediator handler signature
+# drift, FluentValidation analyzer warnings, etc.).
+#
+# Mirrors `phoenix-build.yml` (Phoenix → Ash 3.x) and `test:tsc`
+# (TS → tsc + tsup).  Until this lands, the .NET emitter has no
+# real compile gate — it ships TODO-styled C# that the test suite
+# happily green-lights but that breaks at first run.
+#
+# Triggers:
+#   - PRs that touch the .NET generator, the dotnet platform module,
+#     or the shared `examples/` fixtures.
+#   - Pushes to main (full regression check).
+#   - Manual dispatch.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/generator/dotnet/**'
+      - 'src/platform/dotnet.ts'
+      - 'src/platform/dotnet/**'
+      - 'examples/**'
+      - 'package.json'
+      - '.github/workflows/dotnet-build.yml'
+      - 'test/e2e/generated-dotnet-build.test.ts'
+  pull_request:
+    paths:
+      - 'src/generator/dotnet/**'
+      - 'src/platform/dotnet.ts'
+      - 'src/platform/dotnet/**'
+      - 'examples/**'
+      - 'package.json'
+      - '.github/workflows/dotnet-build.yml'
+      - 'test/e2e/generated-dotnet-build.test.ts'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-generated-dotnet:
+    runs-on: ubuntu-latest
+    # First-run cold restore is ~2min (NuGet pulls EF Core, Mediator,
+    # Swashbuckle, FluentValidation).  Warm runs with the NuGet cache
+    # below are ~30s.  15min cap leaves headroom for three fixtures.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # Cache the NuGet package tree across runs so only the first
+      # cold run pays the restore cost.  Signed on the toolchain's
+      # package versions (encoded in `templates/program.tpl.ts`)
+      # rather than every emitter source change — the dep set only
+      # moves when those pinned versions move.
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('src/generator/dotnet/templates/program.tpl.ts') }}
+          restore-keys: |
+            nuget-
+
+      # Build the Loom toolchain.  `prepare` lifecycle runs
+      # `langium:generate` which populates src/language/generated/.
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Type-check
+        run: npm run build
+
+      - name: dotnet build /warnaserror against each fixture
+        run: npm run test:dotnet
+
+      # Surface generator output + dotnet compile diagnostics in the
+      # run summary on failure so the cause is visible without
+      # clicking through to the raw step log.
+      - name: Surface dotnet output on failure
+        if: failure()
+        run: |
+          echo '## Tail of test:dotnet output' >> $GITHUB_STEP_SUMMARY
+          echo 'See the previous step log for full `dotnet build` diagnostics — the test inherits stdio so per-file errors appear there as `error CSxxxx:` lines.' >> $GITHUB_STEP_SUMMARY

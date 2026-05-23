@@ -157,12 +157,16 @@ describe("system / module / deployable", () => {
       expect(program).toMatch(/ConnectionStrings__Default/);
     });
 
-    it(".NET Program.cs registers an ApplicationStopping log breadcrumb", async () => {
+    it(".NET Program.cs emits the catalog server-shutdown event on SIGTERM", async () => {
+      // The bare "Shutting down" breadcrumb was superseded by catalog
+      // identity (see Bite 5a) — server_shutdown / server_drained now
+      // land on the structured stream with the cross-backend event
+      // names Hono and Phoenix also use.
       const model = await buildModel("examples/acme.ddd");
       const { files } = generateSystems(model);
       const program = files.get("api/Program.cs")!;
       expect(program).toMatch(/ApplicationStopping\.Register/);
-      expect(program).toMatch(/Shutting down/);
+      expect(program).toMatch(/"server_shutdown", "SIGTERM"/);
     });
   });
 

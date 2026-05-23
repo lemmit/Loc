@@ -102,6 +102,16 @@ export interface LayoutCtx {
   /** Delete a `.ddd` source file from the VFS.  The tab strip
    *  never offers this for `/workspace/main.ddd`. */
   deleteSourceFile: (path: string) => void;
+  /** Workspace-relative folder paths that exist as empty folders
+   *  — real VFS dir entries with no `.ddd` descendants.  Tree
+   *  picker merges these into its tree as folder-only rows. */
+  emptySourceFolders: ReadonlySet<string>;
+  /** Create an empty folder via the VFS's first-class `mkdir`.
+   *  `folder` is workspace-relative (no leading slash). */
+  createEmptySourceFolder: (folder: string) => void;
+  /** Delete an empty folder via the VFS's `rmdir`.  Throws if the
+   *  folder still has `.ddd` content inside. */
+  deleteEmptySourceFolder: (folder: string) => void;
 
   // Worker clients
   lspClient: LoomLspClient | null;

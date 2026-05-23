@@ -2,7 +2,7 @@
 import { z } from "zod";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "./client";
-import { OrderResponse, OrderListResponse } from "./order";
+import { OrderListResponse } from "./order";
 import { OrderStatusSchema } from "./order";
 
 export const ActiveOrdersResponse = OrderListResponse;

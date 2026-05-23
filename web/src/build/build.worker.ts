@@ -347,8 +347,11 @@ self.onmessage = async (ev: MessageEvent<BuildRpcRequest>) => {
         // workspace push (e.g. dropping a custom pack folder in
         // Phase 4).  Single-file writes go through the same path —
         // hydrate's notification batch is a no-op when there's only
-        // one path.
-        workerVfs.hydrate(req.params.entries.map((e) => [e.path, e.content]));
+        // one path.  Entries are tagged (`VfsEntry`) — mixed file
+        // and directory entries land in the same call so an empty
+        // folder created on the main thread surfaces in the
+        // worker's VFS on respawn.
+        workerVfs.hydrate(req.params.entries);
         response.result = {
           ok: true,
           paths: req.params.entries.map((e) => e.path).sort(),
@@ -376,11 +379,11 @@ self.onmessage = async (ev: MessageEvent<BuildRpcRequest>) => {
       }
       case "vfs.snapshot": {
         const snap = workerVfs.snapshot();
-        const entries = Array.from(snap.entries(), ([path, content]) => ({
-          path,
-          content,
-        }));
-        entries.sort((a, b) => a.path.localeCompare(b.path));
+        // Tagged-entry projection — both file and dir entries
+        // cross the wire so a respawn restores empty folders too.
+        const entries = [...snap.values()].sort((a, b) =>
+          a.path.localeCompare(b.path),
+        );
         response.result = { ok: true, entries };
         break;
       }

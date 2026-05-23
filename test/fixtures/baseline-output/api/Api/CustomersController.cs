@@ -44,7 +44,7 @@ public sealed class CustomersController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<System.Collections.Generic.IReadOnlyList<CustomerResponse>>> All()
+    public async Task<ActionResult<IReadOnlyList<CustomerResponse>>> All()
     {
         var result = await _mediator.Send(new AllQuery());
         return Ok(result);

@@ -1,5 +1,6 @@
 import type { BoundedContextIR, DeployableIR, SystemIR } from "../../ir/loom-ir.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
+import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
 import { type ApiRoute, emitApiControllers } from "./api-emit.js";
 import { emitAuth } from "./auth-emit.js";
 import { emitAggregateResources } from "./domain-emit.js";
@@ -9,6 +10,7 @@ import { emitOpenApiSpec } from "./openapi-emit.js";
 import { renderAshType } from "./render-expr.js";
 import { buildFindActions, findRepoFor, mergeViewFindsForAgg } from "./repository-emit.js";
 import { renderSidebarComponent } from "./sidebar-emit.js";
+import { renderTelemetry } from "./telemetry-emit.js";
 import { renderThemeCss } from "./theme-emit.js";
 import { emitViews } from "./view-emit.js";
 import { emitWorkflows } from "./workflow-emit.js";
@@ -160,6 +162,7 @@ export function generatePhoenixLiveViewProject(
     liveRoutes,
     apiRoutes,
     authEnabled,
+    emitTrace,
     out,
   );
 
@@ -392,6 +395,7 @@ function emitShellFiles(
   liveRoutes: LiveRoute[],
   apiRoutes: ApiRoute[],
   authEnabled: boolean,
+  emitTrace: boolean | undefined,
   out: Map<string, string>,
 ): void {
   const port = deployable.port ?? 4000;
@@ -407,6 +411,17 @@ function emitShellFiles(
 
   // lib/<app>/repo.ex
   out.set(`lib/${appName}/repo.ex`, renderRepo(appName, appModule));
+
+  // lib/<app>/telemetry.ex — :telemetry handlers that translate Phoenix
+  // endpoint events into the neutral log-event catalog identity.
+  out.set(`lib/${appName}/telemetry.ex`, renderTelemetry({ appName, appModule, emitTrace }));
+
+  // lib/<app>/log_formatter.ex — JSON-per-line Logger formatter that
+  // preserves structured metadata (event, request_id, method, path,
+  // status, duration_ms, etc.) so the cross-backend log envelope is
+  // parseable upstream the same way Hono's pino and .NET's
+  // AddJsonConsole emit.
+  out.set(`lib/${appName}/log_formatter.ex`, renderLogFormatter(appModule));
 
   // lib/<app>/application.ex
   out.set(`lib/${appName}/application.ex`, renderApplication(appName, appModule));
@@ -617,27 +632,143 @@ end
 `;
 }
 
-function renderApplication(_appName: string, appModule: string): string {
+function renderApplication(appName: string, appModule: string): string {
+  // Catalog server-lifecycle events.  Same identities Hono + .NET
+  // emit so a cross-backend dashboard pivots on one event name.
+  //
+  //   server_starting — top of Application.start/2 (children not yet
+  //                     supervised; emit before so a Repo crash that
+  //                     prevents start_link still surfaces the intent)
+  //   server_listening — right after Supervisor.start_link succeeds
+  //   server_shutdown — top of Application.stop/1 (BEAM shutting down)
+  //   server_drained  — bottom of Application.stop/1 (children
+  //                     already terminated by application controller)
+  const startingCall = renderPhoenixLogCall("serverStarting", [
+    { name: "port", valueExpr: "to_string(port)" },
+    { name: "env", valueExpr: "to_string(env)" },
+  ]);
+  const listeningCall = renderPhoenixLogCall("serverListening", [
+    { name: "port", valueExpr: "to_string(port)" },
+  ]);
+  const shutdownCall = renderPhoenixLogCall("serverShutdown", [
+    { name: "signal", valueExpr: '"SIGTERM"' },
+  ]);
+  const drainedCall = renderPhoenixLogCall("serverDrained");
+  void appName;
+
   return `# Auto-generated.
 defmodule ${appModule}.Application do
   use Application
+  require Logger
 
   @impl true
   def start(_type, _args) do
+    port = Application.get_env(:${appName}, ${appModule}Web.Endpoint, [])[:http][:port] || System.get_env("PORT") || "4000"
+    env = System.get_env("MIX_ENV") || "prod"
+    ${startingCall}
+
     children = [
       ${appModule}.Repo,
       {Phoenix.PubSub, name: ${appModule}.PubSub},
+      ${appModule}.Telemetry,
       ${appModule}Web.Endpoint
     ]
 
     opts = [strategy: :one_for_one, name: ${appModule}.Supervisor]
-    Supervisor.start_link(children, opts)
+    case Supervisor.start_link(children, opts) do
+      {:ok, _pid} = ok ->
+        ${listeningCall}
+        ok
+      other ->
+        other
+    end
+  end
+
+  @impl true
+  def stop(_state) do
+    ${shutdownCall}
+    ${drainedCall}
+    :ok
   end
 
   @impl true
   def config_change(changed, _new, removed) do
     ${appModule}Web.Endpoint.config_change(changed, removed)
     :ok
+  end
+end
+`;
+}
+
+// ---------------------------------------------------------------------------
+// JSON Logger formatter — sister to Hono's pino default and .NET's
+// AddJsonConsole.  Renders one JSON line per log entry preserving:
+//
+//   - the envelope: ts, level, message
+//   - the message string (the catalog `event_name` we pass as the
+//     Logger.<level>(message, meta) first arg)
+//   - all metadata keys (event, request_id, method, path, status,
+//     duration_ms, workflow, aggregate, …) — drawn from the
+//     `metadata: :all` config so the catalog identity always rides
+//     the structured stream regardless of which call site emits it
+//
+// Defensive: catches its own exceptions + falls back to inspect/2
+// so a misshapen log call never silently drops a line nor crashes
+// the Logger handler.
+// ---------------------------------------------------------------------------
+function renderLogFormatter(appModule: string): string {
+  return `# Auto-generated.
+defmodule ${appModule}.LogFormatter do
+  @moduledoc false
+  # Custom Logger formatter — one JSON object per line.  Wired up
+  # from config/config.exs (config :logger, :default_formatter, ...).
+
+  @doc """
+  Render a Logger event as a single-line JSON object terminated by \\n.
+
+  Called by Elixir's Logger backend with arity 4 per the
+  Logger.Formatter protocol.
+  """
+  def format(level, message, timestamp, metadata) do
+    base = %{
+      ts: ts_to_iso(timestamp),
+      level: to_string(level),
+      message: IO.iodata_to_binary(message)
+    }
+
+    meta_map =
+      metadata
+      |> Enum.into(%{}, fn {k, v} -> {k, encode_val(v)} end)
+
+    # Metadata takes precedence over the envelope so a user-set
+    # \`event:\` overrides any incidental key clash.
+    json = Jason.encode!(Map.merge(base, meta_map))
+    [json, ?\\n]
+  rescue
+    _ ->
+      [inspect({level, message, timestamp, metadata}), ?\\n]
+  end
+
+  defp ts_to_iso({{year, month, day}, {hour, minute, second, milli}}) do
+    "#{pad(year, 4)}-#{pad(month)}-#{pad(day)}T#{pad(hour)}:#{pad(minute)}:#{pad(second)}.#{pad(milli, 3)}Z"
+  end
+
+  defp ts_to_iso(_), do: ""
+
+  defp pad(n, width \\\\ 2), do: n |> to_string() |> String.pad_leading(width, "0")
+
+  defp encode_val(v) when is_binary(v), do: v
+  defp encode_val(v) when is_number(v), do: v
+  defp encode_val(v) when is_boolean(v), do: v
+  defp encode_val(v) when is_atom(v), do: to_string(v)
+  defp encode_val(v) when is_list(v) or is_map(v), do: try_jsonable(v)
+  defp encode_val(v), do: inspect(v)
+
+  defp try_jsonable(v) do
+    case Jason.encode(v) do
+      {:ok, _} -> v
+      _ -> inspect(v)
+    end
   end
 end
 `;
@@ -1367,6 +1498,15 @@ config :${appName},
 
 config :phoenix, :json_library, Jason
 
+# JSON Logger formatter — emits one structured JSON object per line so
+# the cross-backend observability catalog envelope (event, request_id,
+# method, path, status, duration_ms, …) is parseable upstream the same
+# way Hono's pino and .NET's AddJsonConsole emit.  See
+# lib/${appName}/log_formatter.ex.
+config :logger, :default_formatter,
+  format: {${appModule}.LogFormatter, :format},
+  metadata: :all
+
 import_config "#{config_env()}.exs"
 `;
 }
@@ -1392,7 +1532,6 @@ config :${appName}, ${appModule}Web.Endpoint,
   secret_key_base: "dev-secret-key-base-replace-in-production-with-mix-phx-gen-secret",
   watchers: []
 
-config :logger, :console, format: "[$level] $message\\n"
 config :phoenix, :stacktrace_depth, 20
 config :phoenix, :plug_init_mode, :runtime
 config :phoenix_live_view, :debug_heex_annotations, true

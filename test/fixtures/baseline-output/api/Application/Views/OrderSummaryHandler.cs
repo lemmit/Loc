@@ -10,12 +10,12 @@ using Api.Domain.Enums;
 
 namespace Api.Application.Views;
 
-public sealed class OrderSummaryHandler : IQueryHandler<OrderSummaryQuery, System.Collections.Generic.IReadOnlyList<OrderSummaryRow>>
+public sealed class OrderSummaryHandler : IQueryHandler<OrderSummaryQuery, IReadOnlyList<OrderSummaryRow>>
 {
     private readonly IOrderRepository _repo;
     public OrderSummaryHandler(IOrderRepository repo) => _repo = repo;
 
-    public async ValueTask<System.Collections.Generic.IReadOnlyList<OrderSummaryRow>> Handle(OrderSummaryQuery q, CancellationToken ct)
+    public async ValueTask<IReadOnlyList<OrderSummaryRow>> Handle(OrderSummaryQuery q, CancellationToken ct)
     {
         var domain = await _repo.OrderSummary(ct);
         return domain.Select(d => new OrderSummaryRow(d.Id.Value, d.Status.ToString(), d.Lines.Count)).ToList();

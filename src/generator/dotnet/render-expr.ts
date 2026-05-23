@@ -17,6 +17,17 @@ import { upperFirst } from "../../util/naming.js";
 export interface CsRenderContext {
   /** Rendered name for the implicit receiver (`this` by default). */
   thisName: string;
+  /**
+   * Mutable accumulator for namespaces this rendering reaches into
+   * that aren't covered by the SDK's `<ImplicitUsings>` set
+   * (e.g. `System.Text.RegularExpressions` when `string.matches(...)`
+   * lowers to `Regex.IsMatch`).  The file-level emitter creates the
+   * Set, threads this ctx through every render call inside the file,
+   * and emits one `using <ns>;` per entry into the file header.
+   * Optional so callers that don't care about tracking
+   * (one-shot snippet rendering in tests etc.) can omit it.
+   */
+  usings?: Set<string>;
 }
 
 const DEFAULT: CsRenderContext = { thisName: "this" };
@@ -133,8 +144,8 @@ function renderMethodCall(
   if (e.isCollectionOp) {
     return renderCollectionOp(`(${recv})`, e.member, args);
   }
-  // `string.matches(literal)` — domain rendering uses
-  // System.Text.RegularExpressions.Regex.IsMatch.  Wire-boundary
+  // `string.matches(literal)` — domain rendering lowers to
+  // Regex.IsMatch from System.Text.RegularExpressions.  Wire-boundary
   // FluentValidation rendering is handled separately via the
   // `regex` SingleFieldPattern.
   if (
@@ -143,7 +154,8 @@ function renderMethodCall(
     e.receiverType.name === "string" &&
     args.length === 1
   ) {
-    return `System.Text.RegularExpressions.Regex.IsMatch(${recv}, ${args[0]})`;
+    ctx.usings?.add("System.Text.RegularExpressions");
+    return `Regex.IsMatch(${recv}, ${args[0]})`;
   }
   return `${recv}.${upperFirst(e.member)}(${args.join(", ")})`;
 }

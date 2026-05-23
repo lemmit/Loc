@@ -50,8 +50,7 @@ describe("menu emitter", () => {
             repository Orders for Order { }
           }
         }
-        ui WebApp {
-          scaffold aggregates: Order
+        ui WebApp with scaffold(aggregates: [Order]) {
           menu {
             section "Sales" {
               link OrderList,
@@ -84,8 +83,7 @@ describe("menu emitter", () => {
         module M {
           context C { aggregate Order { x: int } repository Orders for Order { } }
         }
-        ui WebApp {
-          scaffold aggregates: Order
+        ui WebApp with scaffold(aggregates: [Order]) {
           menu {
             section "Sales" {
               link OrderList { label: "All Orders" }
@@ -118,7 +116,7 @@ describe("menu emitter", () => {
     expect(link.testId).toBe("nav-ext-docs");
   });
 
-  it("derives correct testIds + activeArgs per scaffoldOrigin kind", async () => {
+  it("derives correct testIds + activeArgs per archetype kind", async () => {
     const loom = await buildLoom(`
       system S {
         module Sales {
@@ -129,8 +127,7 @@ describe("menu emitter", () => {
             view ActiveOrders = Order where x > 0
           }
         }
-        ui WebApp {
-          scaffold modules: Sales
+        ui WebApp with scaffold(modules: [Sales]) {
           menu {
             section "Mixed" {
               link OrderList,

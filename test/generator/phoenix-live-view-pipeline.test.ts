@@ -49,8 +49,7 @@ const FIXTURE_SOURCE = `system MiniLiveView {
 
   api SalesApi from Sales
 
-  ui SalesAdmin {
-    scaffold modules: Sales
+  ui SalesAdmin with scaffold(modules: [Sales]) {
   }
 
   deployable phoenixApp {
@@ -120,6 +119,95 @@ describe("phoenixLiveView pipeline", () => {
     const { files } = generateSystems(model);
     const init = files.get("db-init/00-create-databases.sql")!;
     expect(init).toMatch(/CREATE DATABASE phoenix_app;/);
+  });
+
+  it("emits lib/<app>/telemetry.ex that attaches to phoenix endpoint events", async () => {
+    // Bite 1: idiomatic Phoenix observability via `:telemetry`.  The
+    // Endpoint already mounts `plug Plug.Telemetry,
+    // event_prefix: [:phoenix, :endpoint]` so `[:phoenix, :endpoint,
+    // :start/:stop]` fires on every request; the emitted Telemetry
+    // module attaches handlers and translates them to the neutral
+    // catalog identity (request_start / request_end).
+    const model = await buildFixture();
+    const { files } = generateSystems(model);
+
+    const tel = files.get("phoenix_app/lib/phoenix_app/telemetry.ex");
+    expect(tel, "telemetry.ex is emitted").toBeDefined();
+    expect(tel!).toMatch(/defmodule PhoenixApp\.Telemetry do/);
+    expect(tel!).toMatch(/use Supervisor/);
+    expect(tel!).toMatch(/require Logger/);
+    // Handlers attach in init/1 after a detach-first idempotency guard.
+    expect(tel!).toMatch(/:telemetry\.detach\(@handler_id\)/);
+    expect(tel!).toMatch(/:telemetry\.attach_many\(@handler_id, events,/);
+    // Both endpoint events are subscribed.
+    expect(tel!).toMatch(/\[:phoenix, :endpoint, :start\]/);
+    expect(tel!).toMatch(/\[:phoenix, :endpoint, :stop\]/);
+    // Catalog identity is preserved on the rendered log line for both
+    // events — the renderer in src/generator/_obs/render-phoenix.ts
+    // stamps `event: "request_start"` / `event: "request_end"`.
+    expect(tel!).toMatch(
+      /Logger\.info\("request_start", event: "request_start", method: conn\.method, path: conn\.request_path\)/,
+    );
+    expect(tel!).toMatch(
+      /Logger\.info\("request_end", event: "request_end", method: conn\.method, path: conn\.request_path, status: conn\.status, duration_ms: duration_ms\)/,
+    );
+    // Duration measurement converted from :native to :millisecond so
+    // the structured field is a sensible cross-backend integer.
+    expect(tel!).toMatch(
+      /System\.convert_time_unit\(measurements\.duration, :native, :millisecond\)/,
+    );
+
+    // application.ex lists PhoenixApp.Telemetry between PubSub and
+    // Endpoint so handlers attach before the first request is served.
+    const app = files.get("phoenix_app/lib/phoenix_app/application.ex")!;
+    expect(app).toMatch(
+      /\{Phoenix\.PubSub, name: PhoenixApp\.PubSub\},\s*\n\s*PhoenixApp\.Telemetry,\s*\n\s*PhoenixAppWeb\.Endpoint/,
+    );
+  });
+
+  it("emits server lifecycle catalog events from Application.start/2 + stop/1", async () => {
+    // Bite 5b: server_starting / server_listening / server_shutdown /
+    // server_drained share catalog identity with Hono + .NET so a
+    // cross-backend dashboard pivots on one event name.
+    const model = await buildFixture();
+    const { files } = generateSystems(model);
+    const app = files.get("phoenix_app/lib/phoenix_app/application.ex")!;
+    expect(app).toBeDefined();
+    expect(app).toMatch(/require Logger/);
+    // server_starting fires before Supervisor.start_link so a Repo
+    // crash that prevents start_link still surfaces the intent.
+    expect(app).toMatch(
+      /Logger\.info\("server_starting", event: "server_starting", port: to_string\(port\), env: to_string\(env\)\)/,
+    );
+    // server_listening only fires on the {:ok, _} branch of start_link.
+    expect(app).toMatch(
+      /case Supervisor\.start_link\(children, opts\) do\s*\n\s*\{:ok, _pid\} = ok ->\s*\n\s*Logger\.info\("server_listening"/,
+    );
+    // stop/1 emits shutdown + drained.
+    expect(app).toMatch(/def stop\(_state\) do/);
+    expect(app).toMatch(
+      /Logger\.info\("server_shutdown", event: "server_shutdown", signal: "SIGTERM"\)/,
+    );
+    expect(app).toMatch(/Logger\.info\("server_drained", event: "server_drained"\)/);
+  });
+
+  it("emits lib/<app>/log_formatter.ex (JSON-per-line) + wires it in config.exs", async () => {
+    const model = await buildFixture();
+    const { files } = generateSystems(model);
+    const fmt = files.get("phoenix_app/lib/phoenix_app/log_formatter.ex");
+    expect(fmt, "log_formatter.ex is emitted").toBeDefined();
+    expect(fmt!).toMatch(/defmodule PhoenixApp\.LogFormatter do/);
+    expect(fmt!).toMatch(/def format\(level, message, timestamp, metadata\) do/);
+    expect(fmt!).toMatch(/Jason\.encode!/);
+    // config/config.exs wires the formatter via :default_formatter,
+    // with `:all` metadata so every catalog field survives the bridge.
+    const cfg = files.get("phoenix_app/config/config.exs")!;
+    expect(cfg).toMatch(
+      /config :logger, :default_formatter,\s*\n\s*format: \{PhoenixApp\.LogFormatter, :format\},\s*\n\s*metadata: :all/,
+    );
+    // dev.exs no longer overrides with the bracketed text format.
+    const dev = files.get("phoenix_app/config/dev.exs")!;
+    expect(dev).not.toMatch(/config :logger, :console, format:/);
   });
 
   it("emits one LiveView module per scaffolded page + router lines", async () => {
@@ -218,7 +306,7 @@ describe("phoenixLiveView pipeline", () => {
     }
   }
   api SalesApi from Sales
-  ui SalesAdmin { scaffold modules: Sales }
+  ui SalesAdmin with scaffold(modules: [Sales]) {}
 
   deployable peer {
     platform: hono,
@@ -796,8 +884,7 @@ describe("router wiring (orchestrator integration)", () => {
     }
   }
   api SalesApi from Sales
-  ui SalesAdmin {
-    scaffold modules: Sales
+  ui SalesAdmin with scaffold(modules: [Sales]) {
   }
   user {
     id: guid
@@ -944,7 +1031,7 @@ describe.skip("integration (parent wires emitters)", () => {
       params: [],
       state: [],
       source: "scaffold" as const,
-      scaffoldOrigin: { kind: "home" as const },
+      archetype: { kind: "home" as const },
     };
     const ts = buildPlaywrightPageObject({
       page,
@@ -1018,7 +1105,7 @@ const ACME_LIVEVIEW_SOURCE = `system AcmeLV {
     }
   }
   api SalesApi from Sales
-  ui SalesAdmin { scaffold modules: Sales }
+  ui SalesAdmin with scaffold(modules: [Sales]) {}
   deployable phoenixApp {
     platform: phoenixLiveView
     modules: Sales
@@ -1484,6 +1571,58 @@ describe("Ash.transaction/2 domain-list form (workflow-emit unit)", () => {
     expect(wfEx).toMatch(/isolation_level: :serializable/);
     expect(wfEx).not.toMatch(/PhoenixApp\.Repo/);
   });
+
+  // Bite 2: workflow narrative events (workflow_started / workflow_completed)
+  // share catalog identity with Hono / .NET so dashboards pivot on one key.
+  // `workflow_started` fires unconditionally at the run/1 entry; `workflow_
+  // completed` fires only on the success branch — failures (precondition,
+  // with-mismatch, Ash error) propagate untouched.
+  it("transactional workflow logs workflow_started at entry and workflow_completed on success", () => {
+    const out = new Map<string, string>();
+    emitWorkflows("phoenix_app", transactionalCtx, "PhoenixApp", out);
+    const wfEx = out.get("lib/phoenix_app/sales/workflows/place_order.ex")!;
+    expect(wfEx).toBeDefined();
+
+    // `require Logger` is in the module preamble.
+    expect(wfEx).toMatch(/require Logger/);
+
+    // `workflow_started` is the first statement inside run/1 (right after
+    // the `_ = current_user` discard).
+    expect(wfEx).toMatch(
+      /_ = current_user\s*\n\s*Logger\.info\("workflow_started", event: "workflow_started", workflow: "placeOrder"\)/,
+    );
+
+    // Transactional shape: success branch logs workflow_completed.
+    expect(wfEx).toMatch(
+      /case result do\s*\n\s*\{:ok, _\} ->\s*\n\s*Logger\.info\("workflow_completed", event: "workflow_completed", workflow: "placeOrder"\)\s*\n\s*result\s*\n\s*_ ->\s*\n\s*result\s*\n\s*end/,
+    );
+  });
+
+  it("sequential workflow logs workflow_completed inside the with-chain do-branch", () => {
+    const sequentialCtx: BoundedContextIR = {
+      ...transactionalCtx,
+      workflows: [
+        {
+          ...transactionalCtx.workflows[0]!,
+          transactional: false,
+        },
+      ],
+    };
+    const out = new Map<string, string>();
+    emitWorkflows("phoenix_app", sequentialCtx, "PhoenixApp", out);
+    const wfEx = out.get("lib/phoenix_app/sales/workflows/place_order.ex")!;
+    expect(wfEx).toBeDefined();
+    expect(wfEx).toMatch(/require Logger/);
+    // Started at entry.
+    expect(wfEx).toMatch(
+      /Logger\.info\("workflow_started", event: "workflow_started", workflow: "placeOrder"\)/,
+    );
+    // Completed lives inside the do-branch of the with-chain so a
+    // failing `{:ok, …} <-` short-circuits before it fires.
+    expect(wfEx).toMatch(
+      /do\s*\n\s*Logger\.info\("workflow_completed", event: "workflow_completed", workflow: "placeOrder"\)\s*\n\s*\{:ok, /,
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1507,7 +1646,7 @@ const ACME_UI_E2E_SOURCE = `system AcmeUI {
     }
   }
   api SalesApi from Sales
-  ui SalesAdmin { scaffold modules: Sales }
+  ui SalesAdmin with scaffold(modules: [Sales]) {}
   deployable phoenixApp {
     platform: phoenixLiveView
     modules: Sales
@@ -1599,7 +1738,7 @@ const FORM_FIXTURE = `system AcmeForm {
     }
   }
   api SalesApi from Sales
-  ui SalesAdmin { scaffold modules: Sales }
+  ui SalesAdmin with scaffold(modules: [Sales]) {}
   deployable phoenixApp {
     platform: phoenixLiveView
     modules: Sales
@@ -2027,5 +2166,148 @@ describe("Ash 3.x compile-correctness regressions", () => {
     expect(customer).not.toMatch(/read :all do/);
     expect(domain).not.toMatch(/define :all_customer/);
     expect(domain).not.toMatch(/action: :all\b/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bite 3: Phoenix domain trace via Ash :telemetry.  Ash 3.x emits
+//   [:ash, :validation, :start/:stop/:exception]
+//   [:ash, :change, :start/:stop]
+// (https://hexdocs.pm/ash/monitoring.html).  Under --trace, the
+// <App>.Telemetry module additionally attaches to those and translates
+// them to catalog identity (invariant_evaluated / value_computed).  Off
+// path, the module body is byte-identical to the Bite 1 shape — no Ash
+// handlers, no Ash event subscriptions.
+// ---------------------------------------------------------------------------
+
+import { renderTelemetry } from "../../src/generator/phoenix-live-view/telemetry-emit.js";
+
+describe("renderTelemetry --trace (telemetry-emit unit)", () => {
+  it("off path: byte-identical to the Bite 1 shape — no Ash handlers", () => {
+    const off = renderTelemetry({ appName: "phoenix_app", appModule: "PhoenixApp" });
+    // No Ash event subscriptions or handlers leak when --trace is off.
+    expect(off).not.toMatch(/:ash,/);
+    expect(off).not.toMatch(/invariant_evaluated/);
+    expect(off).not.toMatch(/value_computed/);
+    // The base endpoint handlers are still present (Bite 1 contract).
+    expect(off).toMatch(/\[:phoenix, :endpoint, :start\]/);
+    expect(off).toMatch(/\[:phoenix, :endpoint, :stop\]/);
+  });
+
+  it("on path: subscribes to Ash validation/change events", () => {
+    const on = renderTelemetry({
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+      emitTrace: true,
+    });
+    // Ash subscriptions land inside the same events list that the base
+    // endpoint events live in, so a single attach_many call covers
+    // both — no parallel attachment cost on boot.
+    expect(on).toMatch(/\[:ash, :validation, :stop\]/);
+    expect(on).toMatch(/\[:ash, :validation, :exception\]/);
+    expect(on).toMatch(/\[:ash, :change, :stop\]/);
+  });
+
+  it("on path: validation :stop renders invariant_evaluated with passed: true", () => {
+    const on = renderTelemetry({
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+      emitTrace: true,
+    });
+    expect(on).toMatch(
+      /def handle_event\(\[:ash, :validation, :stop\], _measurements, metadata, _config\) do/,
+    );
+    // Catalog identity preserved by renderPhoenixLogCall + passed: true
+    // is the literal that distinguishes the success branch from the
+    // exception handler below.
+    expect(on).toMatch(
+      /Logger\.debug\("invariant_evaluated", event: "invariant_evaluated", aggregate: aggregate, op: nil, expr: expr, passed: true\)/,
+    );
+  });
+
+  it("on path: validation :exception renders invariant_evaluated with passed: false", () => {
+    const on = renderTelemetry({
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+      emitTrace: true,
+    });
+    expect(on).toMatch(
+      /def handle_event\(\[:ash, :validation, :exception\], _measurements, metadata, _config\) do/,
+    );
+    expect(on).toMatch(
+      /Logger\.debug\("invariant_evaluated", event: "invariant_evaluated", aggregate: aggregate, op: nil, expr: expr, passed: false\)/,
+    );
+  });
+
+  it("on path: change :stop renders value_computed (value: nil, field: inspect(change))", () => {
+    const on = renderTelemetry({
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+      emitTrace: true,
+    });
+    expect(on).toMatch(
+      /def handle_event\(\[:ash, :change, :stop\], _measurements, metadata, _config\) do/,
+    );
+    // `field` is best-effort via inspect(change); `value` is nil because
+    // Ash's change :stop event doesn't surface the computed value.
+    expect(on).toMatch(/field = inspect\(Map\.get\(metadata, :change\)\)/);
+    expect(on).toMatch(
+      /Logger\.debug\("value_computed", event: "value_computed", aggregate: aggregate, field: field, value: nil\)/,
+    );
+  });
+
+  it("orchestrator threads --trace into the emitted telemetry.ex", async () => {
+    // Generating the full project with emitTrace via the orchestrator
+    // surfaces the Ash handlers in the emitted file (integration check
+    // for the args plumbing through emitShellFiles → renderTelemetry).
+    const { generatePhoenixLiveViewProject } = await import(
+      "../../src/generator/phoenix-live-view/index.js"
+    );
+    const ctx: BoundedContextIR = {
+      name: "Sales",
+      enums: [],
+      valueObjects: [],
+      events: [],
+      aggregates: [],
+      repositories: [],
+      workflows: [],
+      views: [],
+    };
+    const deployable: DeployableIR = {
+      name: "phoenix_app",
+      platform: "phoenixLiveView",
+      moduleNames: ["Sales"],
+      port: 4000,
+      serves: [],
+      uiBindings: [],
+      moduleBindings: [],
+    };
+    const baseSys: SystemIR = {
+      name: "Mini",
+      modules: [],
+      deployables: [deployable],
+      e2eTests: [],
+      uis: [],
+      apis: [],
+      storages: [],
+    };
+
+    const offFiles = generatePhoenixLiveViewProject({
+      contexts: [ctx],
+      deployable,
+      sys: baseSys,
+    });
+    const offTel = offFiles.get("lib/phoenix_app/telemetry.ex")!;
+    expect(offTel).not.toMatch(/:ash,/);
+
+    const onFiles = generatePhoenixLiveViewProject({
+      contexts: [ctx],
+      deployable,
+      sys: baseSys,
+      emitTrace: true,
+    });
+    const onTel = onFiles.get("lib/phoenix_app/telemetry.ex")!;
+    expect(onTel).toMatch(/\[:ash, :validation, :stop\]/);
+    expect(onTel).toMatch(/\[:ash, :change, :stop\]/);
   });
 });

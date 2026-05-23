@@ -82,7 +82,7 @@ export function generateReactForContexts(
   // Page metamodel routing.  When the deployable declares
   // a `ui:` binding, the React generator walks `ui.pages` (after
   // scaffold expansion) via `emitPagesForUi`, which dispatches per
-  // `scaffoldOrigin` to the SAME `renderXxx` functions invoked
+  // `archetype` to the SAME `renderXxx` functions invoked
   // below for the legacy direct walk.  Byte-for-byte equivalent in
   // the bulk-scaffold case.
   //
@@ -189,24 +189,21 @@ export function generateReactForContexts(
   const scaffoldedAggregates = ui
     ? aggregates.filter(({ agg }) =>
         ui.pages.some(
-          (p) =>
-            p.scaffoldOrigin?.kind === "aggregate-list" &&
-            p.scaffoldOrigin.aggregateName === agg.name,
+          (p) => p.archetype?.kind === "aggregate-list" && p.archetype.aggregateName === agg.name,
         ),
       )
     : aggregates;
   const scaffoldedWorkflows = ui
     ? workflows.filter(({ wf }) =>
         ui.pages.some(
-          (p) =>
-            p.scaffoldOrigin?.kind === "workflow-form" && p.scaffoldOrigin.workflowName === wf.name,
+          (p) => p.archetype?.kind === "workflow-form" && p.archetype.workflowName === wf.name,
         ),
       )
     : workflows;
   const scaffoldedViews = ui
     ? views.filter(({ view }) =>
         ui.pages.some(
-          (p) => p.scaffoldOrigin?.kind === "view-list" && p.scaffoldOrigin.viewName === view.name,
+          (p) => p.archetype?.kind === "view-list" && p.archetype.viewName === view.name,
         ),
       )
     : views;
@@ -214,7 +211,7 @@ export function generateReactForContexts(
   // Whether the scaffold expander synthesised a `Home` page (only
   // happens when the ui declared at least one scaffold).  Default true
   // when no ui (legacy non-page-IR path always emits Home).
-  const hasScaffoldHome = ui ? ui.pages.some((p) => p.scaffoldOrigin?.kind === "home") : true;
+  const hasScaffoldHome = ui ? ui.pages.some((p) => p.archetype?.kind === "home") : true;
 
   out.set(
     "src/App.tsx",

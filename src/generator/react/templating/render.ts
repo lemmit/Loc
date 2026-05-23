@@ -6,7 +6,7 @@
 // renderWorkflowForm, renderWorkflowsIndex, renderViewsIndex,
 // renderOperationModal, renderPartTable) were deleted.  All page
 // emission now routes through `body-walker.ts` driven by the
-// scaffold expander in `src/ir/scaffold-expander.ts`.
+// walker-primitive expander in `src/ir/walker-primitive-expander.ts`.
 //
 // What remains:
 //   - `renderShellFile`  — pack helper for project-shell files

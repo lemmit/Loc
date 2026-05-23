@@ -27,7 +27,7 @@
 //     primitive name so the gap is visible in generated output.
 //   - Field input mapping beyond the basics — page-new / page-detail
 //     templates handle the heavy lifting; this walker only renders
-//     custom-page bodies (PageIR.body without scaffoldOrigin).
+//     custom-page bodies (PageIR.body without archetype).
 //
 // State seam:
 //   - Template position: `state.step`  → `@step`

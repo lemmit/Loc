@@ -248,10 +248,9 @@ system PokemonWorld {
         port: 8080
     }
 
-    ui Trainerdex {
+    ui Trainerdex with scaffold(modules: [Roster, Combat]) {
         api Roster: RosterApi
         api Combat: CombatApi
-        scaffold modules: Roster, Combat
     }
 
     deployable web {

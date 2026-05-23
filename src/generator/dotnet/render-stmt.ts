@@ -1,8 +1,10 @@
 import type { ExprIR, PathIR, StmtIR } from "../../ir/loom-ir.js";
 import { upperFirst } from "../../util/naming.js";
+import type { CsRenderContext } from "./render-expr.js";
 import { renderCsExpr } from "./render-expr.js";
 
 const INDENT = "        ";
+const DEFAULT_CTX: CsRenderContext = { thisName: "this" };
 
 /** Compile-time --trace context — mirrors render-stmt.ts on the Hono
  *  side.  The catalog's `value_computed` and `precondition_evaluated`
@@ -18,40 +20,49 @@ export interface TraceCtx {
 
 const NO_TRACE: TraceCtx = { emitTrace: false, aggregate: "", op: "" };
 
-export function renderCsStatements(stmts: StmtIR[], traceCtx: TraceCtx = NO_TRACE): string {
-  return stmts.map((s, i) => renderCsStatement(s, i, traceCtx)).join("\n");
+export function renderCsStatements(
+  stmts: StmtIR[],
+  ctx: CsRenderContext = DEFAULT_CTX,
+  traceCtx: TraceCtx = NO_TRACE,
+): string {
+  return stmts.map((s, i) => renderCsStatement(s, i, ctx, traceCtx)).join("\n");
 }
 
-function renderCsStatement(s: StmtIR, index: number, traceCtx: TraceCtx): string {
+function renderCsStatement(
+  s: StmtIR,
+  index: number,
+  ctx: CsRenderContext,
+  traceCtx: TraceCtx,
+): string {
   switch (s.kind) {
     case "precondition":
-      return precondition(s.expr, s.source, index, traceCtx);
+      return precondition(s.expr, s.source, index, ctx, traceCtx);
     case "requires":
       // Authorization gate — surfaces as 403 (handled by
       // DomainExceptionFilter mapping ForbiddenException → 403).
-      return `${INDENT}if (!(${renderCsExpr(s.expr)})) throw new ForbiddenException(${JSON.stringify(`Forbidden: ${s.source}`)});`;
+      return `${INDENT}if (!(${renderCsExpr(s.expr, ctx)})) throw new ForbiddenException(${JSON.stringify(`Forbidden: ${s.source}`)});`;
     case "let":
-      return `${INDENT}var ${s.name} = ${renderCsExpr(s.expr)};`;
+      return `${INDENT}var ${s.name} = ${renderCsExpr(s.expr, ctx)};`;
     case "assign": {
-      const base = `${INDENT}${renderPath(s.target)} = ${renderCsExpr(s.value)};`;
+      const base = `${INDENT}${renderPath(s.target)} = ${renderCsExpr(s.value, ctx)};`;
       return withValueComputed(base, s.target, traceCtx);
     }
     case "add":
-      return `${INDENT}${renderPrivatePath(s.target)}.Add(${renderCsExpr(s.value)});`;
+      return `${INDENT}${renderPrivatePath(s.target)}.Add(${renderCsExpr(s.value, ctx)});`;
     case "remove":
-      return `${INDENT}${renderPrivatePath(s.target)}.Remove(${renderCsExpr(s.value)});`;
+      return `${INDENT}${renderPrivatePath(s.target)}.Remove(${renderCsExpr(s.value, ctx)});`;
     case "emit": {
       const args = s.fields
-        .map((f) => `${upperFirst(f.name)}: ${renderCsExpr(f.value)}`)
+        .map((f) => `${upperFirst(f.name)}: ${renderCsExpr(f.value, ctx)}`)
         .join(", ");
       return `${INDENT}_domainEvents.Add(new ${s.eventName}(${args}));`;
     }
     case "call": {
-      const args = s.args.map((a) => renderCsExpr(a)).join(", ");
+      const args = s.args.map((a) => renderCsExpr(a, ctx)).join(", ");
       return `${INDENT}this.${upperFirst(s.name)}(${args});`;
     }
     case "expression":
-      return `${INDENT}${renderCsExpr(s.expr)};`;
+      return `${INDENT}${renderCsExpr(s.expr, ctx)};`;
   }
 }
 
@@ -59,14 +70,20 @@ function renderCsStatement(s: StmtIR, index: number, traceCtx: TraceCtx): string
  *  bind the boolean to a temp so BOTH pass and fail outcomes log
  *  (precondition_evaluated) before the conditional throw fires off the
  *  same temp.  Pattern matches the Hono render-stmt.ts shape exactly. */
-function precondition(expr: ExprIR, source: string, index: number, traceCtx: TraceCtx): string {
+function precondition(
+  expr: ExprIR,
+  source: string,
+  index: number,
+  ctx: CsRenderContext,
+  traceCtx: TraceCtx,
+): string {
   const thrown = `throw new DomainException(${JSON.stringify(`Precondition failed: ${source}`)})`;
   if (!traceCtx.emitTrace) {
-    return `${INDENT}if (!(${renderCsExpr(expr)})) ${thrown};`;
+    return `${INDENT}if (!(${renderCsExpr(expr, ctx)})) ${thrown};`;
   }
   const ok = `__pre_${index}_ok`;
   return [
-    `${INDENT}var ${ok} = (${renderCsExpr(expr)});`,
+    `${INDENT}var ${ok} = (${renderCsExpr(expr, ctx)});`,
     `${INDENT}${ns_DomainLog}.LogTrace("{Event} aggregate={Aggregate} op={Op} expr={Expr} passed={Passed}", "precondition_evaluated", "${traceCtx.aggregate}", "${traceCtx.op}", ${JSON.stringify(source)}, ${ok});`,
     `${INDENT}if (!${ok}) ${thrown};`,
   ].join("\n");
