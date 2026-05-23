@@ -313,6 +313,43 @@ describe(".NET generator", () => {
       );
     });
 
+    it("repository wires ILogger + emits aggregate_loaded / repository_save / event_dispatched / find_executed", async () => {
+      // Phase 8 .NET (repo seams) — every per-aggregate EF repository
+      // gets an `ILogger<TRepository> _log` field, GetByIdAsync emits
+      // aggregate_loaded (debug, with found:bool), SaveAsync emits
+      // repository_save (debug) after SaveChangesAsync + event_dispatched
+      // (info) per drained event, and each find method emits find_executed
+      // (debug) with rows count.  Same event identities the Hono Phase 4
+      // wiring emits — a single dashboard query joins both backends.
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      const repo = files.get("Infrastructure/Repositories/OrderRepository.cs")!;
+      expect(repo).toMatch(/using Microsoft\.Extensions\.Logging;/);
+      expect(repo).toMatch(/private readonly ILogger<OrderRepository> _log;/);
+      expect(repo).toMatch(
+        /OrderRepository\(AppDbContext db, IDomainEventDispatcher events, ILogger<OrderRepository> log\)/,
+      );
+      // aggregate_loaded — both paths covered by the `found != null` bool.
+      expect(repo).toMatch(
+        /_log\.LogDebug\("\{Event\} aggregate=\{Aggregate\} id=\{Id\} found=\{Found\}", "aggregate_loaded", "Order", id\.Value, found != null\);/,
+      );
+      // repository_save fires after the EF transaction commits.
+      expect(repo).toMatch(
+        /_log\.LogDebug\("\{Event\} aggregate=\{Aggregate\} id=\{Id\}", "repository_save", "Order", aggregate\.Id\.Value\);/,
+      );
+      // event_dispatched per drained event — `ev.GetType().Name` is the
+      // concrete subclass name (same shape as Hono's
+      // (event as object).constructor.name).
+      expect(repo).toMatch(
+        /_log\.LogInformation\("\{Event\} event_type=\{EventType\} aggregate=\{Aggregate\} id=\{Id\}", "event_dispatched", ev\.GetType\(\)\.Name, "Order", aggregate\.Id\.Value\);/,
+      );
+      // find_executed — array find uses result.Count; the assertion
+      // anchors on the catalog shape, not a specific find name.
+      expect(repo).toMatch(
+        /_log\.LogDebug\("\{Event\} aggregate=\{Aggregate\} find=\{Find\} rows=\{Rows\}", "find_executed", "Order", "[a-zA-Z]+", result\.Count\);/,
+      );
+    });
+
     it("controller wires ILogger + emits operation_invoked / aggregate_created from the catalog", async () => {
       // Phase 8 .NET — every per-aggregate controller gets an
       // `ILogger<TController> _log` field (matching the
