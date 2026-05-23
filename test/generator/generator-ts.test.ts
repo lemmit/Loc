@@ -253,6 +253,38 @@ describe("typescript generator", () => {
       expect(routes).toMatch(/error: err\.message, trace_id \}, 404/);
       expect(routes).toMatch(/error: "internal", trace_id \}, 500/);
     });
+
+    it("routes emit catalog log events at the right levels via the bound child logger", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS);
+      const routes = files.get("http/order.routes.ts")!;
+      // Business-narrative info lines from the create + operation seams.
+      // The renderer bridges `c.get("log")` through an untyped cast
+      // (zod-openapi's Env constraint rejects custom Variables) — the
+      // same shape the trace_id read uses.
+      expect(routes).toMatch(
+        /\.get\("log"\)\.info\(\{ event: "aggregate_created", aggregate: "Order", id: created\.id as string \}\)/,
+      );
+      expect(routes).toMatch(
+        /\.get\("log"\)\.info\(\{ event: "operation_invoked", aggregate: "Order", op: "[^"]+", id \}\)/,
+      );
+      // onError: client/domain faults → warn; system faults → error.
+      expect(routes).toMatch(
+        /\.get\("log"\)\.warn\(\{ event: "forbidden", aggregate: "Order", message: err\.message, status: 403 \}\)/,
+      );
+      expect(routes).toMatch(
+        /\.get\("log"\)\.warn\(\{ event: "domain_error", aggregate: "Order", message: err\.message, status: 400 \}\)/,
+      );
+      expect(routes).toMatch(
+        /\.get\("log"\)\.warn\(\{ event: "not_found", aggregate: "Order", status: 404 \}\)/,
+      );
+      expect(routes).toMatch(
+        /\.get\("log"\)\.error\(\{ event: "extern_handler_threw", aggregate: err\.aggName, op: err\.opName, error: err\.message \}\)/,
+      );
+      expect(routes).toMatch(/\.get\("log"\)\.error\(\{ event: "internal_error",/);
+      // Bare console.error retired — pino does the serialization.
+      expect(routes).not.toMatch(/console\.error/);
+    });
   });
 
   it("Hono routes use @hono/zod-openapi and expose /openapi.json", async () => {
@@ -1260,11 +1292,12 @@ describe("typescript generator", () => {
     it("http/<aggregate>.routes.ts maps ForbiddenError to 403 in app.onError", async () => {
       const files = await emitForAuthSystem(SRC_REQUIRES);
       const route = files.get("http/order.routes.ts")!;
-      // trace_id is threaded alongside the existing error
-      // field, so the envelope shape is `{ error, trace_id }`.
-      expect(route).toMatch(
-        /if \(err instanceof ForbiddenError\) return c\.json\(\{ error: err\.message, trace_id \}, 403\);/,
-      );
+      // trace_id is threaded alongside the existing error field, so the
+      // envelope shape is `{ error, trace_id }`.  The onError arm now
+      // logs the catalog event before returning, so the test matches the
+      // 403 response line independently of the surrounding `{ ... }` arm.
+      expect(route).toMatch(/if \(err instanceof ForbiddenError\) \{/);
+      expect(route).toMatch(/return c\.json\(\{ error: err\.message, trace_id \}, 403\);/);
     });
   });
 

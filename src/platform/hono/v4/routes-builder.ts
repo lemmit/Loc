@@ -3,6 +3,7 @@ import {
   refineClauseFor,
   takeSingleFieldChain,
 } from "../../../generator/typescript/zod-refine.js";
+import { renderHonoLogCall } from "../../../generator/_obs/render-hono.js";
 import { wireShapeFor } from "../../../ir/enrichments.js";
 import type { ClassifyContext, SingleFieldPattern } from "../../../ir/invariant-classify.js";
 import type {
@@ -238,6 +239,9 @@ export function buildRoutesFile(
     .join(", ");
   lines.push(`      const created = ${agg.name}.create({ ${createArgs} });`);
   lines.push(`      await repo.save(created);`);
+  lines.push(
+    `      ${renderHonoLogCall("aggregateCreated", `aggregate: "${agg.name}", id: created.id as string`)}`,
+  );
   lines.push(`      return c.json({ id: created.id as string }, 201);`);
   lines.push(`    },`);
   lines.push(`  );`);
@@ -299,25 +303,46 @@ export function buildRoutesFile(
   lines.push(`  app.onError((err, c) => {`);
   // The requestIdMiddleware mounts on the parent app (http/index.ts)
   // and stashes the id on the request scope.  This sub-router's
-  // OpenAPIHono is constructed without a typed Variables block so
-  // strict tsc can't see the key directly; the cast bridges the
-  // gap without leaking `any` into the user's surface.
+  // OpenAPIHono is constructed without a typed Variables block
+  // (zod-openapi's internal Env constraint rejects a custom one), so
+  // the cast bridges the untyped get to a strongly-typed read without
+  // leaking `any` into the user's surface.  Same pattern bridges the
+  // bound child logger at every log call site below — see render-hono.
   lines.push(
     `    const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";`,
   );
+  // Each error class lands a structured log line at the catalog-defined
+  // level (warn for client/domain faults; error for system faults) on
+  // the per-request child logger, so the line auto-carries request_id.
+  // No more bare console.error — pino handles serialization, redaction,
+  // and level filtering.
+  lines.push(`    if (err instanceof ForbiddenError) {`);
   lines.push(
-    `    if (err instanceof ForbiddenError) return c.json({ error: err.message, trace_id }, 403);`,
+    `      ${renderHonoLogCall("forbidden", `aggregate: "${agg.name}", message: err.message, status: 403`)}`,
   );
+  lines.push(`      return c.json({ error: err.message, trace_id }, 403);`);
+  lines.push(`    }`);
+  lines.push(`    if (err instanceof DomainError) {`);
   lines.push(
-    `    if (err instanceof DomainError) return c.json({ error: err.message, trace_id }, 400);`,
+    `      ${renderHonoLogCall("domainError", `aggregate: "${agg.name}", message: err.message, status: 400`)}`,
   );
+  lines.push(`      return c.json({ error: err.message, trace_id }, 400);`);
+  lines.push(`    }`);
+  lines.push(`    if (err instanceof AggregateNotFoundError) {`);
   lines.push(
-    `    if (err instanceof AggregateNotFoundError) return c.json({ error: err.message, trace_id }, 404);`,
+    `      ${renderHonoLogCall("notFound", `aggregate: "${agg.name}", status: 404`)}`,
   );
+  lines.push(`      return c.json({ error: err.message, trace_id }, 404);`);
+  lines.push(`    }`);
+  lines.push(`    if (err instanceof ExternHandlerError) {`);
   lines.push(
-    `    if (err instanceof ExternHandlerError) { console.error(err); return c.json({ error: err.message, trace_id }, 500); }`,
+    `      ${renderHonoLogCall("externHandlerThrew", "aggregate: err.aggName, op: err.opName, error: err.message")}`,
   );
-  lines.push(`    console.error(err);`);
+  lines.push(`      return c.json({ error: err.message, trace_id }, 500);`);
+  lines.push(`    }`);
+  lines.push(
+    `    ${renderHonoLogCall("internalError", "error: err instanceof Error ? err.message : String(err), status: 500")}`,
+  );
   lines.push(`    return c.json({ error: "internal", trace_id }, 500);`);
   lines.push(`  });`);
   lines.push("");
@@ -355,6 +380,12 @@ function emitOperationRoute(
   out.push(`  async (c) => {`);
   out.push(`    const { id } = c.req.valid("param");`);
   out.push(`    const body = c.req.valid("json");`);
+  // Business-narrative line — what the system was asked to do, before
+  // any mutation runs.  Pairs with the audit row / provenance flush
+  // emitted later when the op is audited / provenanced.
+  out.push(
+    `    ${renderHonoLogCall("operationInvoked", `aggregate: "${agg.name}", op: "${op.name}", id`)}`,
+  );
   // When the operation body references `currentUser`, the aggregate
   // method's signature picks up a trailing `currentUser: User`
   // parameter (see operationUsesCurrentUser).  The route reads the

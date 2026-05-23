@@ -58,10 +58,15 @@ describe("log-event catalog — integrity", () => {
 });
 
 describe("log-event catalog — Hono renderer", () => {
-  it("per-request renderer uses the bound child logger via `c.get(\"log\")`", () => {
+  it("per-request renderer bridges to the bound child logger via an untyped cast", () => {
+    // The sub-router's OpenAPIHono can't carry custom Variables typing
+    // (zod-openapi's Env rejects it), so c.get("log") is reached via the
+    // same untyped-cast pattern the shipped trace_id read uses — typed
+    // through an inline `import("../obs/log").RequestLogger` so the
+    // emitted method call still resolves strict-tsc.
     const line = renderHonoLogCall("operationInvoked", 'aggregate: "Cart", op: "applyTotal", id');
     expect(line).toBe(
-      `c.get("log").info({ event: "operation_invoked", aggregate: "Cart", op: "applyTotal", id });`,
+      `(c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").info({ event: "operation_invoked", aggregate: "Cart", op: "applyTotal", id });`,
     );
   });
 
@@ -76,10 +81,10 @@ describe("log-event catalog — Hono renderer", () => {
     // The renderer must NOT hardcode `.info` — every level in the
     // taxonomy must reach its matching pino method.  This guards against
     // the obvious "always log info" bug.
-    expect(renderHonoLogCall("domainError", "")).toMatch(/^c\.get\("log"\)\.warn\(/);
-    expect(renderHonoLogCall("internalError", "")).toMatch(/^c\.get\("log"\)\.error\(/);
-    expect(renderHonoLogCall("repositorySave", "")).toMatch(/^c\.get\("log"\)\.debug\(/);
-    expect(renderHonoLogCall("invariantEvaluated", "")).toMatch(/^c\.get\("log"\)\.trace\(/);
+    expect(renderHonoLogCall("domainError", "")).toMatch(/\.get\("log"\)\.warn\(/);
+    expect(renderHonoLogCall("internalError", "")).toMatch(/\.get\("log"\)\.error\(/);
+    expect(renderHonoLogCall("repositorySave", "")).toMatch(/\.get\("log"\)\.debug\(/);
+    expect(renderHonoLogCall("invariantEvaluated", "")).toMatch(/\.get\("log"\)\.trace\(/);
   });
 
   it("emits a bare `{ event }` literal when the call site has no extra fields", () => {
