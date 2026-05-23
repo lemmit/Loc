@@ -1,6 +1,7 @@
 // Auto-generated.  Do not edit by hand.
 using System;
 using Xunit;
+using AwesomeAssertions;
 using Api.Domain.Orders;
 using Api.Domain.Common;
 using Api.Domain.ValueObjects;

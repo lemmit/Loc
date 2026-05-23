@@ -17,6 +17,7 @@ import "@mantine/core/styles.css";
 import "@mantine/notifications/styles.css";
 import "@mantine/dates/styles.css";
 import App from "./App";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { theme } from "./theme";
 
 const queryClient = new QueryClient({
@@ -36,6 +37,7 @@ const basename =
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
+    <ErrorBoundary>
     <QueryClientProvider client={queryClient}>
       <MantineProvider theme={theme} defaultColorScheme="light">
         <ModalsProvider>
@@ -46,5 +48,6 @@ createRoot(document.getElementById("root")!).render(
         </ModalsProvider>
       </MantineProvider>
     </QueryClientProvider>
+    </ErrorBoundary>
   </React.StrictMode>,
 );

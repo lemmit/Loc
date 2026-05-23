@@ -146,6 +146,10 @@ export interface LayoutCtx {
   appLog: LogLine[];
   /** Append one preview-app log line (handed to <Preview onAppLog>). */
   appendAppLog: (line: LogLine) => void;
+  /** Live snapshot of the current appLog buffer — read by the UI-test
+   *  runner to slice each test's app output (state is stale in its
+   *  async closure). */
+  getAppLog: () => LogLine[];
   clearBackendLog: () => void;
   clearAppLog: () => void;
 

@@ -198,7 +198,10 @@ describe("system / module / deployable", () => {
     // UI specs land inside the targeted react deployable's e2e/
     // folder, next to the auto-generated page objects.
     const ui = files.get("web_app/e2e/Acme.ui.spec.ts")!;
-    expect(ui).toMatch(/from "@playwright\/test"/);
+    // Specs import test/expect from the generated `./fixtures` (which
+    // re-exports Playwright's, adding auto console-capture on failure).
+    expect(ui).toMatch(/from "\.\/fixtures"/);
+    expect(files.has("web_app/e2e/fixtures.ts")).toBe(true);
     expect(ui).toMatch(/from "\.\/pages\/product"/);
     expect(ui).toMatch(/from "\.\/pages\/order"/);
     // `ui.products.create({...})` lowers via ProductListPage.

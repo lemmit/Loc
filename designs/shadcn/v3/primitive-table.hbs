@@ -5,7 +5,7 @@
 {{/each}}{{headIndent}}</TableRow>
 {{indent}}</TableHeader>
 {{indent}}<TableBody>
-{{headIndent}}{ {{{rowsExpr}}}.map(({{rowVar}}, idx) => (
+{{headIndent}}{ {{{rowsExpr}}}.map(({{rowVar}}{{#if usesIdx}}, idx{{/if}}) => (
 {{rowIndent}}<TableRow key={ {{{keyExpr}}} }{{#if hasRowTestid}} data-testid={ {{{rowTestid}}} }{{/if}}{{#if hasOnRowClick}} onClick={() => {{{onRowClick}}} }{{/if}}>
 {{#each columns}}{{../cellIndent}}<TableCell>{{{this.cellJsx}}}</TableCell>
 {{/each}}{{rowIndent}}</TableRow>

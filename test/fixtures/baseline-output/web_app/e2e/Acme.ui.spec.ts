@@ -1,5 +1,5 @@
 // Auto-generated.  Do not edit by hand.
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { ProductListPage, ProductDetailPage } from "./pages/product";
 import { OrderListPage, OrderDetailPage } from "./pages/order";
 import { PlaceOrderWorkflowPage } from "./pages/workflows/place_order";

@@ -99,7 +99,7 @@ describe("QueryView macro", () => {
     const tsx = files.get("web/src/pages/orders_list.tsx")!;
     // `rows` in `Table(rows: rows, ...)` resolves to `orderAll.data`.
     expect(tsx).toMatch(
-      /orderAll\.data && orderAll\.data\.length > 0 && \([\s\S]*orderAll\.data\.map\(\(row, idx\) => \(/,
+      /orderAll\.data && orderAll\.data\.length > 0 && \([\s\S]*orderAll\.data\.map\(\(row\) => \(/,
     );
     // Inner Column accessors still work — `o.status` resolves to
     // `row.status` (the lambda-param scope).
