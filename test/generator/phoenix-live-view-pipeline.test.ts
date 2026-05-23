@@ -2123,3 +2123,146 @@ describe("Ash 3.x compile-correctness regressions", () => {
     expect(domain).not.toMatch(/action: :all\b/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Bite 3: Phoenix domain trace via Ash :telemetry.  Ash 3.x emits
+//   [:ash, :validation, :start/:stop/:exception]
+//   [:ash, :change, :start/:stop]
+// (https://hexdocs.pm/ash/monitoring.html).  Under --trace, the
+// <App>.Telemetry module additionally attaches to those and translates
+// them to catalog identity (invariant_evaluated / value_computed).  Off
+// path, the module body is byte-identical to the Bite 1 shape — no Ash
+// handlers, no Ash event subscriptions.
+// ---------------------------------------------------------------------------
+
+import { renderTelemetry } from "../../src/generator/phoenix-live-view/telemetry-emit.js";
+
+describe("renderTelemetry --trace (telemetry-emit unit)", () => {
+  it("off path: byte-identical to the Bite 1 shape — no Ash handlers", () => {
+    const off = renderTelemetry({ appName: "phoenix_app", appModule: "PhoenixApp" });
+    // No Ash event subscriptions or handlers leak when --trace is off.
+    expect(off).not.toMatch(/:ash,/);
+    expect(off).not.toMatch(/invariant_evaluated/);
+    expect(off).not.toMatch(/value_computed/);
+    // The base endpoint handlers are still present (Bite 1 contract).
+    expect(off).toMatch(/\[:phoenix, :endpoint, :start\]/);
+    expect(off).toMatch(/\[:phoenix, :endpoint, :stop\]/);
+  });
+
+  it("on path: subscribes to Ash validation/change events", () => {
+    const on = renderTelemetry({
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+      emitTrace: true,
+    });
+    // Ash subscriptions land inside the same events list that the base
+    // endpoint events live in, so a single attach_many call covers
+    // both — no parallel attachment cost on boot.
+    expect(on).toMatch(/\[:ash, :validation, :stop\]/);
+    expect(on).toMatch(/\[:ash, :validation, :exception\]/);
+    expect(on).toMatch(/\[:ash, :change, :stop\]/);
+  });
+
+  it("on path: validation :stop renders invariant_evaluated with passed: true", () => {
+    const on = renderTelemetry({
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+      emitTrace: true,
+    });
+    expect(on).toMatch(
+      /def handle_event\(\[:ash, :validation, :stop\], _measurements, metadata, _config\) do/,
+    );
+    // Catalog identity preserved by renderPhoenixLogCall + passed: true
+    // is the literal that distinguishes the success branch from the
+    // exception handler below.
+    expect(on).toMatch(
+      /Logger\.debug\("invariant_evaluated", event: "invariant_evaluated", aggregate: aggregate, op: nil, expr: expr, passed: true\)/,
+    );
+  });
+
+  it("on path: validation :exception renders invariant_evaluated with passed: false", () => {
+    const on = renderTelemetry({
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+      emitTrace: true,
+    });
+    expect(on).toMatch(
+      /def handle_event\(\[:ash, :validation, :exception\], _measurements, metadata, _config\) do/,
+    );
+    expect(on).toMatch(
+      /Logger\.debug\("invariant_evaluated", event: "invariant_evaluated", aggregate: aggregate, op: nil, expr: expr, passed: false\)/,
+    );
+  });
+
+  it("on path: change :stop renders value_computed (value: nil, field: inspect(change))", () => {
+    const on = renderTelemetry({
+      appName: "phoenix_app",
+      appModule: "PhoenixApp",
+      emitTrace: true,
+    });
+    expect(on).toMatch(
+      /def handle_event\(\[:ash, :change, :stop\], _measurements, metadata, _config\) do/,
+    );
+    // `field` is best-effort via inspect(change); `value` is nil because
+    // Ash's change :stop event doesn't surface the computed value.
+    expect(on).toMatch(/field = inspect\(Map\.get\(metadata, :change\)\)/);
+    expect(on).toMatch(
+      /Logger\.debug\("value_computed", event: "value_computed", aggregate: aggregate, field: field, value: nil\)/,
+    );
+  });
+
+  it("orchestrator threads --trace into the emitted telemetry.ex", async () => {
+    // Generating the full project with emitTrace via the orchestrator
+    // surfaces the Ash handlers in the emitted file (integration check
+    // for the args plumbing through emitShellFiles → renderTelemetry).
+    const { generatePhoenixLiveViewProject } = await import(
+      "../../src/generator/phoenix-live-view/index.js"
+    );
+    const ctx: BoundedContextIR = {
+      name: "Sales",
+      enums: [],
+      valueObjects: [],
+      events: [],
+      aggregates: [],
+      repositories: [],
+      workflows: [],
+      views: [],
+    };
+    const deployable: DeployableIR = {
+      name: "phoenix_app",
+      platform: "phoenixLiveView",
+      moduleNames: ["Sales"],
+      port: 4000,
+      serves: [],
+      uiBindings: [],
+      moduleBindings: [],
+    };
+    const baseSys: SystemIR = {
+      name: "Mini",
+      modules: [],
+      deployables: [deployable],
+      e2eTests: [],
+      uis: [],
+      apis: [],
+      storages: [],
+    };
+
+    const offFiles = generatePhoenixLiveViewProject({
+      contexts: [ctx],
+      deployable,
+      sys: baseSys,
+    });
+    const offTel = offFiles.get("lib/phoenix_app/telemetry.ex")!;
+    expect(offTel).not.toMatch(/:ash,/);
+
+    const onFiles = generatePhoenixLiveViewProject({
+      contexts: [ctx],
+      deployable,
+      sys: baseSys,
+      emitTrace: true,
+    });
+    const onTel = onFiles.get("lib/phoenix_app/telemetry.ex")!;
+    expect(onTel).toMatch(/\[:ash, :validation, :stop\]/);
+    expect(onTel).toMatch(/\[:ash, :change, :stop\]/);
+  });
+});

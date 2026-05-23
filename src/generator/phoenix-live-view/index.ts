@@ -161,6 +161,7 @@ export function generatePhoenixLiveViewProject(
     liveRoutes,
     apiRoutes,
     authEnabled,
+    emitTrace,
     out,
   );
 
@@ -393,6 +394,7 @@ function emitShellFiles(
   liveRoutes: LiveRoute[],
   apiRoutes: ApiRoute[],
   authEnabled: boolean,
+  emitTrace: boolean | undefined,
   out: Map<string, string>,
 ): void {
   const port = deployable.port ?? 4000;
@@ -411,7 +413,7 @@ function emitShellFiles(
 
   // lib/<app>/telemetry.ex — :telemetry handlers that translate Phoenix
   // endpoint events into the neutral log-event catalog identity.
-  out.set(`lib/${appName}/telemetry.ex`, renderTelemetry({ appName, appModule }));
+  out.set(`lib/${appName}/telemetry.ex`, renderTelemetry({ appName, appModule, emitTrace }));
 
   // lib/<app>/application.ex
   out.set(`lib/${appName}/application.ex`, renderApplication(appName, appModule));
