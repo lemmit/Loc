@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using CatalogApi.Domain.Products;
 using CatalogApi.Domain.Common;
 using CatalogApi.Domain.Ids;
@@ -16,16 +17,20 @@ public sealed class ProductRepository : IProductRepository
 {
     private readonly AppDbContext _db;
     private readonly IDomainEventDispatcher _events;
+    private readonly ILogger<ProductRepository> _log;
 
-    public ProductRepository(AppDbContext db, IDomainEventDispatcher events)
+    public ProductRepository(AppDbContext db, IDomainEventDispatcher events, ILogger<ProductRepository> log)
     {
         _db = db;
         _events = events;
+        _log = log;
     }
 
     public async Task<Product?> GetByIdAsync(ProductId id, CancellationToken ct = default)
     {
-        return await _db.Products.FirstOrDefaultAsync(x => x.Id == id, ct);
+        var found = await _db.Products.FirstOrDefaultAsync(x => x.Id == id, ct);
+        _log.LogDebug("{Event} aggregate={Aggregate} id={Id} found={Found}", "aggregate_loaded", "Product", id.Value, found != null);
+        return found;
     }
 
     public async Task<System.Collections.Generic.IReadOnlyList<Product>> FindManyByIdsAsync(System.Collections.Generic.IReadOnlyList<ProductId> ids, CancellationToken ct = default)
@@ -42,17 +47,23 @@ public sealed class ProductRepository : IProductRepository
             _db.Products.Add(aggregate);
         }
         await _db.SaveChangesAsync(ct);
+        _log.LogDebug("{Event} aggregate={Aggregate} id={Id}", "repository_save", "Product", aggregate.Id.Value);
         foreach (var ev in aggregate.PullEvents())
         {
+            _log.LogInformation("{Event} event_type={EventType} aggregate={Aggregate} id={Id}", "event_dispatched", ev.GetType().Name, "Product", aggregate.Id.Value);
             await _events.DispatchAsync(ev, ct);
         }
     }
     public async Task<List<Product>> All(System.Threading.CancellationToken ct = default)
     {
-        return await _db.Products.ToListAsync(ct);
+        var result = await _db.Products.ToListAsync(ct);
+        _log.LogDebug("{Event} aggregate={Aggregate} find={Find} rows={Rows}", "find_executed", "Product", "all", result.Count);
+        return result;
     }
     public async Task<Product?> BySku(string sku, System.Threading.CancellationToken ct = default)
     {
-        return await _db.Products.Where(x => x.Sku == sku).FirstOrDefaultAsync(ct);
+        var result = await _db.Products.Where(x => x.Sku == sku).FirstOrDefaultAsync(ct);
+        _log.LogDebug("{Event} aggregate={Aggregate} find={Find} rows={Rows}", "find_executed", "Product", "bySku", result == null ? 0 : 1);
+        return result;
     }
 }
