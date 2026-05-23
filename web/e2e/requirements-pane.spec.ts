@@ -24,6 +24,29 @@ test("Requirements tab renders the requirement tree and shows detail on selectio
   await expect(page.getByTestId("req-detail-US-001")).toBeVisible();
 });
 
+test("New Requirement wizard creates a fresh block and selects it", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+
+  await page.getByTestId("doc-tab-requirements").click();
+  await page.getByTestId("req-new-requirement").click();
+  await expect(page.getByTestId("req-wizard-requirement")).toBeVisible();
+
+  // The ID is required + must validate (letter / ticket form).
+  await page.getByTestId("req-wizard-id").locator("input").fill("US-999");
+  await page.getByTestId("req-wizard-title").locator("input").fill("New story via wizard");
+  await page.getByTestId("req-wizard-requirement-create").click();
+
+  // The new requirement shows up in the tree and is auto-selected, with
+  // its detail form on the right.
+  await expect(page.getByTestId("req-row-US-999")).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByTestId("req-detail-US-999")).toBeVisible();
+
+  // And the underlying source carries the new block.
+  await page.getByTestId("doc-tab-source").click();
+  await expect(page.getByText("requirement US-999 {")).toBeVisible({ timeout: 5_000 });
+});
+
 test("editing a requirement title saves it back to the source", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);
