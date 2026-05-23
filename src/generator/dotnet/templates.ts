@@ -3,6 +3,10 @@
 // the AST node it serves.  Keep imports stable for callers of this module.
 
 export { renderController, renderExceptionFilter } from "./templates/api.tpl.js";
+export {
+  renderIAuditable,
+  renderISoftDeletable,
+} from "./templates/capabilities.tpl.js";
 export { renderCommon, renderNoopDispatcher } from "./templates/common.tpl.js";
 export {
   renderCommand,

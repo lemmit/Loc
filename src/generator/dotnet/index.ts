@@ -18,8 +18,10 @@ import {
   renderEnum,
   renderEvent,
   renderExceptionFilter,
+  renderIAuditable,
   renderIDomainEvent,
   renderId,
+  renderISoftDeletable,
   renderNoopDispatcher,
   renderProgram,
   renderRepositoryImpl,
@@ -143,6 +145,13 @@ function emitProjectFromContexts(
     workflows: contexts.flatMap((c) => c.workflows),
     views: contexts.flatMap((c) => c.views),
   };
+  // Capability interfaces — emitted into Domain/Common/ only when
+  // at least one aggregate carries the corresponding flag.  This
+  // keeps the file tree free of unused marker types in projects
+  // that don't use the auditable / softDeletable macros.  See
+  // `src/stdlib/auditable.macro.ts` and the macro plan in
+  // experience_gathered.md for the design.
+  emitCapabilityInterfaces(merged, ns, out);
   out.set("Infrastructure/Persistence/AppDbContext.cs", renderDbContext(merged, ns));
   // FluentValidation pipeline — emit the generic
   // ValidationBehavior + the csproj package ref + the
@@ -214,6 +223,9 @@ function emitContext(ctx: BoundedContextIR, ns: string, out: Map<string, string>
   }
   emitWorkflows(ctx, ns, out);
   emitViews(ctx, ns, out);
+  // Capability interfaces — same gating as the system path; see
+  // emitCapabilityInterfaces above.
+  emitCapabilityInterfaces(ctx, ns, out);
   // Same FluentValidation gate as the system path — drives the
   // pipeline behavior emit + csproj + Program.cs registration +
   // the DomainExceptionFilter arm.
@@ -229,6 +241,22 @@ function emitContext(ctx: BoundedContextIR, ns: string, out: Map<string, string>
 // ---------------------------------------------------------------------------
 // Shared / per-context emission helpers
 // ---------------------------------------------------------------------------
+
+function emitCapabilityInterfaces(
+  merged: BoundedContextIR,
+  ns: string,
+  out: Map<string, string>,
+): void {
+  const anyAuditable = merged.aggregates.some((a) => a.flags?.isAuditable);
+  const anySoftDelete = merged.aggregates.find((a) => a.flags?.softDelete);
+  if (anyAuditable) {
+    out.set("Domain/Common/IAuditable.cs", renderIAuditable(ns));
+  }
+  if (anySoftDelete) {
+    const sd = anySoftDelete.flags!.softDelete!;
+    out.set("Domain/Common/ISoftDeletable.cs", renderISoftDeletable(ns, sd.field, sd.timestamp));
+  }
+}
 
 function emitIds(ctx: BoundedContextIR, ns: string, out: Map<string, string>): void {
   for (const agg of ctx.aggregates) {

@@ -23,6 +23,19 @@ import { renderCsStatements } from "../render-stmt.js";
 // project's assembly (handlers ship in the same csproj).
 // ---------------------------------------------------------------------------
 
+/** Build the `: IAuditable, ISoftDeletable` clause appended after
+ * the class name for aggregates carrying capability flags.  Returns
+ * the empty string when no capability interfaces apply.  Generators
+ * pick up the corresponding shared persistence hooks
+ * (SaveChangesInterceptor / query filter) by iterating IR aggregates
+ * with these flags. */
+function capabilityInterfaceClause(agg: AggregateIR): string {
+  const ifs: string[] = [];
+  if (agg.flags?.isAuditable) ifs.push("IAuditable");
+  if (agg.flags?.softDelete) ifs.push("ISoftDeletable");
+  return ifs.length === 0 ? "" : ` : ${ifs.join(", ")}`;
+}
+
 export function renderEntity(
   entity: AggregateIR | EntityPartIR,
   isRoot: boolean,
@@ -210,7 +223,7 @@ export function renderEntity(
       "",
       `namespace ${ns}.Domain.${plural(rootName)};`,
       "",
-      `public sealed class ${entity.name}`,
+      `public sealed class ${entity.name}${isAgg ? capabilityInterfaceClause(entity as AggregateIR) : ""}`,
       "{",
       ...propLines,
       ...eventBlock,
