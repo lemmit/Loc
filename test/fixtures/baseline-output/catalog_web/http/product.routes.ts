@@ -1,7 +1,7 @@
 // Auto-generated.  Do not edit by hand.
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { Product } from "../domain/product";
-import { ProductRepository } from "../db/repositories/product-repository";
+import type { ProductRepository } from "../db/repositories/product-repository";
 import * as Ids from "../domain/ids";
 import { DomainError, AggregateNotFoundError, ForbiddenError, ExternHandlerError } from "../domain/errors";
 import { Money } from "../domain/value-objects";
@@ -18,8 +18,6 @@ const CreateProductRequest = z.object({
 const CreateProductResponse = z.object({ id: z.string() }).openapi("CreateProductResponse");
 
 
-const AllQuery = z.object({
-}).openapi("AllQuery");
 const BySkuQuery = z.object({
   sku: z.string(),
 }).openapi("BySkuQuery");

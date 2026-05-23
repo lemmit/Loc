@@ -57,6 +57,21 @@ export function renderAggregate(
   // without `auth: required` don't import this — and operations
   // can't reference currentUser there because the validator gates it.
   const usesUser = agg.operations.some(operationUsesCurrentUser);
+  // The errors-module imports are conditional on what the body emits
+  // (see render-stmt.ts and the invariant renderer below):
+  //   DomainError    — invariants (root + parts) and `precondition` statements
+  //   ForbiddenError — `requires` statements (RBAC preconditions)
+  // Keeps the import line free of dead names per Loom's "ok generated code" gate.
+  const usesDomain =
+    agg.invariants.length > 0 ||
+    agg.parts.some((p) => p.invariants.length > 0) ||
+    agg.operations.some((op) => op.statements.some((s) => s.kind === "precondition"));
+  const usesForbidden = agg.operations.some((op) =>
+    op.statements.some((s) => s.kind === "requires"),
+  );
+  const errorsImportList = [usesDomain && "DomainError", usesForbidden && "ForbiddenError"]
+    .filter(Boolean)
+    .join(", ");
 
   return (
     lines(
@@ -69,7 +84,7 @@ export function renderAggregate(
         ? `import { ${enumAliases.join(", ")} } from "./value-objects";`
         : null,
       'import type * as Events from "./events";',
-      'import { DomainError, ForbiddenError } from "./errors";',
+      errorsImportList ? `import { ${errorsImportList} } from "./errors";` : null,
       hasProv ? 'import { type ProvLineage } from "./provenance";' : null,
       usesUser ? 'import type { User } from "../auth/user-types";' : null,
       "",

@@ -1248,7 +1248,10 @@ describe("typescript generator", () => {
       const files = await emitForAuthSystem(SRC_REQUIRES);
       const order = files.get("domain/order.ts")!;
       expect(order).toMatch(/throw new ForbiddenError\(/);
-      expect(order).toMatch(/import \{ DomainError, ForbiddenError \} from "\.\/errors";/);
+      // The errors-module import is now narrowed to what the body actually
+      // emits — this fixture has a `requires` (ForbiddenError) but no
+      // invariants/preconditions, so DomainError isn't imported.
+      expect(order).toMatch(/import \{ ForbiddenError \} from "\.\/errors";/);
     });
 
     it("errors.ts exports ForbiddenError", async () => {

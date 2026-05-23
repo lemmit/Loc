@@ -75,7 +75,7 @@ export function buildRoutesFile(
   lines.push(`import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";`);
   lines.push(`import { ${agg.name} } from "../domain/${lowerFirst(agg.name)}";`);
   lines.push(
-    `import { ${agg.name}Repository } from "../db/repositories/${lowerFirst(agg.name)}-repository";`,
+    `import type { ${agg.name}Repository } from "../db/repositories/${lowerFirst(agg.name)}-repository";`,
   );
   lines.push(`import * as Ids from "../domain/ids";`);
   lines.push(
@@ -163,6 +163,10 @@ export function buildRoutesFile(
 
   if (repo) {
     for (const find of repo.finds) {
+      // Only emit a Query schema when the find takes parameters — the route
+      // (route emitter, ~line 475) is gated the same way, so an empty
+      // `<Find>Query = z.object({})` would be dead code.
+      if (find.params.length === 0) continue;
       lines.push(`const ${upperFirst(find.name)}Query = z.object({`);
       for (const p of find.params) {
         lines.push(`  ${p.name}: ${zodFor(p.type)},`);
