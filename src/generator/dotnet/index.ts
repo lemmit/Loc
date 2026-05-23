@@ -61,11 +61,14 @@ import { emitWorkflows } from "./workflow-emit.js";
  * Legacy entry: lowers the whole model and emits one project from each
  * top-level bounded context (used by `ddd generate dotnet <file>`).
  */
-export function generateDotnet(model: Model): Map<string, string> {
+export function generateDotnet(
+  model: Model,
+  options: { emitTrace?: boolean } = {},
+): Map<string, string> {
   // See generator/typescript/index.ts:generateTypeScript for the
   // lowering + enrichment two-step.
   const loom = enrichLoomModel(lowerModel(model));
-  return generateDotnetForContexts(loom.contexts);
+  return generateDotnetForContexts(loom.contexts, undefined, undefined, options);
 }
 
 /**
@@ -83,14 +86,16 @@ export function generateDotnetForContexts(
   contexts: BoundedContextIR[],
   namespace?: string,
   system?: { deployable: DeployableIR; sys: SystemIR },
+  options: { emitTrace?: boolean } = {},
 ): Map<string, string> {
   const out = new Map<string, string>();
+  const emitTrace = !!options.emitTrace;
   if (namespace !== undefined) {
     // Single project containing all the given contexts under one namespace.
-    emitProjectFromContexts(contexts, namespace, out, system);
+    emitProjectFromContexts(contexts, namespace, out, system, emitTrace);
   } else {
     for (const ctx of contexts) {
-      emitContext(ctx, ctx.name, out);
+      emitContext(ctx, ctx.name, out, emitTrace);
     }
   }
   return out;
@@ -101,6 +106,7 @@ function emitProjectFromContexts(
   ns: string,
   out: Map<string, string>,
   system?: { deployable: DeployableIR; sys: SystemIR },
+  emitTrace = false,
 ): void {
   // Fullstack-dotnet branch — when the deployable declares a `ui:`
   // mount, the .NET project hosts an embedded React SPA from
@@ -126,7 +132,7 @@ function emitProjectFromContexts(
       out.set(`Domain/Events/${ev.name}.cs`, renderEvent(ev, ns));
     }
     for (const agg of ctx.aggregates) {
-      emitAggregate(agg, ctx, ns, out, routePrefix);
+      emitAggregate(agg, ctx, ns, out, routePrefix, emitTrace);
     }
     emitWorkflows(ctx, ns, out, { routePrefix });
     emitViews(ctx, ns, out, { routePrefix });
@@ -202,7 +208,12 @@ function emitProjectFromContexts(
   }
 }
 
-function emitContext(ctx: BoundedContextIR, ns: string, out: Map<string, string>): void {
+function emitContext(
+  ctx: BoundedContextIR,
+  ns: string,
+  out: Map<string, string>,
+  emitTrace = false,
+): void {
   emitIds(ctx, ns, out);
   emitEnums(ctx, ns, out);
   emitValueObjects(ctx, ns, out);
@@ -210,7 +221,7 @@ function emitContext(ctx: BoundedContextIR, ns: string, out: Map<string, string>
   emitCommon(ns, out);
   emitDispatcher(ns, out);
   for (const agg of ctx.aggregates) {
-    emitAggregate(agg, ctx, ns, out);
+    emitAggregate(agg, ctx, ns, out, undefined, emitTrace);
   }
   emitWorkflows(ctx, ns, out);
   emitViews(ctx, ns, out);
@@ -287,6 +298,7 @@ function emitAggregate(
   ns: string,
   out: Map<string, string>,
   routePrefix?: string,
+  emitTrace = false,
 ): void {
   const aggFolder = plural(agg.name);
   const repo = findRepoFor(ctx, agg.name);
@@ -306,7 +318,7 @@ function emitAggregate(
   );
   out.set(
     `Infrastructure/Repositories/${agg.name}Repository.cs`,
-    renderRepositoryImpl(agg, repoWithViews, ns, buildFindBodies(agg, repoWithViews)),
+    renderRepositoryImpl(agg, repoWithViews, ns, buildFindBodies(agg, repoWithViews), emitTrace),
   );
   out.set(
     `Infrastructure/Persistence/Configurations/${agg.name}Configuration.cs`,
