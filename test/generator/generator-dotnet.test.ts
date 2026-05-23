@@ -423,7 +423,7 @@ describe(".NET generator", () => {
     );
     expect(handler).toMatch(/customer\.DeductCredit\(cmd\.Amount\);/);
     expect(handler).toMatch(
-      /var order = Order\.Create\(CustomerId: cmd\.CustomerId, Status: OrderStatus\.Draft/,
+      /var order = Order\.Create\(customerId: cmd\.CustomerId, status: OrderStatus\.Draft/,
     );
     expect(handler).toMatch(/_workflowEvents\.Add\(new OrderPlaced\(/);
     // Saves ordered: customer first (declared first), then order.

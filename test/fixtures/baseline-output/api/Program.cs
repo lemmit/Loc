@@ -1,5 +1,6 @@
 // Auto-generated.
 using Microsoft.EntityFrameworkCore;
+using FluentValidation;
 using Api.Api;
 using Api.Domain.Common;
 using Api.Infrastructure.Persistence;

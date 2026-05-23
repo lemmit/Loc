@@ -22,7 +22,7 @@ public sealed class PlaceOrderHandler : ICommandHandler<PlaceOrderCommand, Unit>
     public async ValueTask<Unit> Handle(PlaceOrderCommand cmd, CancellationToken ct)
     {
         if (!(cmd.Quantity > 0)) throw new DomainException("Precondition failed: quantity > 0");
-        var order = Order.Create(CustomerId: cmd.CustomerId, Status: OrderStatus.Draft, PlacedAt: DateTime.UtcNow);
+        var order = Order.Create(customerId: cmd.CustomerId, status: OrderStatus.Draft, placedAt: DateTime.UtcNow);
         order.AddLine(cmd.ProductId, cmd.Quantity);
         await _orders.SaveAsync(order, ct);
         return Unit.Value;
