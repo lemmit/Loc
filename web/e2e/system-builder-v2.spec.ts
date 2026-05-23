@@ -44,3 +44,25 @@ test("Model v2 drills system → context → aggregate via clicks, and the bread
   await expect(page.getByTestId("c4system-v2-crumb-0")).toHaveCount(0);
   await expect(page.locator('.react-flow__node[data-id^="system:"]').first()).toBeVisible();
 });
+
+test("Model v2 renders an operation body as a statement flow (read-only)", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+  await page.getByTestId("doc-tab-model-v2").click();
+  await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
+
+  // Drill all the way into Order.confirm — system → module → context → Order →
+  // confirm. Use ids so it works regardless of which aggregate sorts first.
+  await page.locator('.react-flow__node[data-id^="system:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="module:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="context:"]').first().click();
+  await page.locator('.react-flow__node[data-id="aggregate:Order"]').click();
+  await page.locator('.react-flow__node[data-id="operation:confirm"]').click();
+
+  // The confirm body renders as one stmt node per statement, all visible.
+  const stmts = page.getByTestId("c4system-v2-stmt");
+  await expect.poll(async () => stmts.count(), { timeout: 5_000 }).toBeGreaterThan(0);
+  // Order.confirm in sales-system.ddd has at least one assign and an emit.
+  await expect(stmts.filter({ has: page.locator('[data-stmt-kind="emit"]') }).first()).toBeVisible();
+});

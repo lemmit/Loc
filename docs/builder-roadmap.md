@@ -468,9 +468,16 @@ Phasing:
   Gated by `test/system-v2/view-graph.test.ts` (per-level unit snapshots) +
   `web/e2e/system-builder-v2.spec.ts` (drill system → module → context →
   aggregate, then pop home).
-- **Phase 2** — operation / workflow flow view (the statement flow); custom
-  React Flow node containing the inline `ƒx` editor. Reuses `body.ts` +
-  `ExpressionEditor.tsx`.
+- ~~**Phase 2a** — operation / workflow flow view (read-only).~~ Done: an
+  operation / workflow leaf renders as a vertical column of `stmt` nodes
+  connected by implicit "next" edges; each node uses a custom `StmtNode`
+  React Flow type, kind-tinted (assign / call / emit / other) with monospace
+  text. Reuses `body.ts`'s `listStatementViews`. Gated by
+  `test/system-v2/view-graph.test.ts` (operation / workflow snapshots) +
+  `web/e2e/system-builder-v2.spec.ts` (drill into `Order.confirm`, see stmt
+  nodes incl. the `emit`).
+- **Phase 2b** — make the stmt nodes editable inline by embedding the v1 row
+  components (AssignRow / CallRow / EmitRow / OtherRow with the `ƒx` editor).
 - **Phase 3** — in-canvas edits at higher levels (rename, add, delete,
   drag-rebind per view).
 - **Phase 4** — long-tail parity with v1 (fields / finds / deployable bindings

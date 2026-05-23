@@ -13,8 +13,11 @@ import type {
   ContextMember,
   Model,
   Module,
+  Operation,
+  Statement,
   System,
   SystemMember,
+  Workflow,
 } from "../../../../src/language/generated/ast.js";
 
 export type ViewKind =
@@ -25,6 +28,8 @@ export type ViewKind =
   | "aggregate"
   | "operation"
   | "workflow"
+  // statement-flow node (the leaf of an operation / workflow view)
+  | "stmt"
   // leaves (Phase 1: shown but not drillable)
   | "valueobject"
   | "event"
@@ -267,10 +272,99 @@ function aggregateView(ast: Model, name: string): ViewGraph {
   return { title: `aggregate ${name}`, nodes: layout(items, AGGREGATE_ORDER), edges: [] };
 }
 
+const STMT_ROW_H = 130;
+
+function findAggregate(ast: Model, name: string): Aggregate | undefined {
+  for (const m of ast.members) {
+    if (m.$type === "BoundedContext") {
+      for (const cm of (m as BoundedContext).members)
+        if (cm.$type === "Aggregate" && (cm as Aggregate).name === name) return cm as Aggregate;
+    } else if (m.$type === "System") {
+      for (const sm of (m as System).members) {
+        if (sm.$type === "BoundedContext") {
+          for (const cm of (sm as BoundedContext).members)
+            if (cm.$type === "Aggregate" && (cm as Aggregate).name === name) return cm as Aggregate;
+        }
+        if (sm.$type === "Module") {
+          for (const c of (sm as Module).contexts) {
+            for (const cm of c.members)
+              if (cm.$type === "Aggregate" && (cm as Aggregate).name === name) return cm as Aggregate;
+          }
+        }
+      }
+    }
+  }
+  return undefined;
+}
+
+function findWorkflow(ast: Model, name: string): Workflow | undefined {
+  // Workflows are context members; search every reachable context.
+  const visit = (members: ContextMember[]): Workflow | undefined => {
+    for (const cm of members) {
+      if (cm.$type === "Workflow" && (cm as Workflow).name === name) return cm as Workflow;
+    }
+    return undefined;
+  };
+  for (const m of ast.members) {
+    if (m.$type === "BoundedContext") {
+      const wf = visit((m as BoundedContext).members);
+      if (wf) return wf;
+    } else if (m.$type === "System") {
+      for (const sm of (m as System).members) {
+        if (sm.$type === "BoundedContext") {
+          const wf = visit((sm as BoundedContext).members);
+          if (wf) return wf;
+        }
+        if (sm.$type === "Module") {
+          for (const c of (sm as Module).contexts) {
+            const wf = visit(c.members);
+            if (wf) return wf;
+          }
+        }
+      }
+    }
+  }
+  return undefined;
+}
+
+/** Lay out a statement body as a vertical column of `stmt` nodes connected by
+ *  implicit "next" edges. The custom React Flow `stmt` node type (in the pane)
+ *  renders each node's content; the view-graph just owns positions + topology. */
+function stmtFlow(title: string, body: Statement[]): ViewGraph {
+  const nodes: VNode[] = body.map((_, i) => ({
+    id: `stmt:${i}`,
+    kind: "stmt",
+    name: String(i),
+    x: 0,
+    y: i * STMT_ROW_H,
+    drillable: false,
+  }));
+  const edges: VEdge[] = body.slice(0, -1).map((_, i) => ({
+    id: `next:${i}`,
+    source: `stmt:${i}`,
+    target: `stmt:${i + 1}`,
+  }));
+  return { title, nodes, edges };
+}
+
+function operationView(ast: Model, aggName: string, opName: string): ViewGraph {
+  const agg = findAggregate(ast, aggName);
+  const op = agg?.members.find(
+    (m): m is Operation => m.$type === "Operation" && (m as Operation).name === opName,
+  );
+  if (!op) return { title: `${aggName}.${opName}`, nodes: [], edges: [] };
+  return stmtFlow(`${aggName}.${opName}()`, op.body);
+}
+
+function workflowView(ast: Model, name: string): ViewGraph {
+  const wf = findWorkflow(ast, name);
+  if (!wf) return { title: `workflow ${name}`, nodes: [], edges: [] };
+  return stmtFlow(`workflow ${name}()`, wf.body);
+}
+
 /** Dispatch on the last step of `path` to the per-level builder; empty path
- *  is the root view. Leaf kinds (operation / workflow / value object / …) get
- *  a placeholder graph in Phase 1; Phase 2 replaces operation/workflow with
- *  the statement-flow view. */
+ *  is the root view. Operation and workflow leaves render as a statement
+ *  flow (the leaf node type the pane knows how to render). */
 export function buildViewGraph(ast: Model, path: ViewPath): ViewGraph {
   const last = path[path.length - 1];
   if (!last) return rootView(ast);
@@ -283,9 +377,17 @@ export function buildViewGraph(ast: Model, path: ViewPath): ViewGraph {
       return contextView(ast, last.name);
     case "aggregate":
       return aggregateView(ast, last.name);
+    case "operation": {
+      // An operation only resolves below an aggregate step.
+      const agg = path[path.length - 2];
+      if (agg?.kind !== "aggregate") return { title: last.name, nodes: [], edges: [] };
+      return operationView(ast, agg.name, last.name);
+    }
+    case "workflow":
+      return workflowView(ast, last.name);
     default:
-      // Leaves (Phase 1): no children to show yet. Phase 2 fills in operation/
-      // workflow with the statement flow.
+      // Other leaves (value object / event / repository / view / function / …)
+      // still have no children to show — opt-in node-detail comes later.
       return { title: `${last.kind} ${last.name}`, nodes: [], edges: [] };
   }
 }
