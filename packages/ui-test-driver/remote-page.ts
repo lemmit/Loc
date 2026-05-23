@@ -73,7 +73,9 @@ export class RemoteLocator {
     return this.extend({ k: "nth", index });
   }
 
-  private async run(op: DriverOp): Promise<string | number | undefined> {
+  private async run(
+    op: DriverOp,
+  ): Promise<string | number | boolean | undefined> {
     const r = await this.transport.send(op);
     if (!r.ok) throw new Error(r.message);
     return r.value;
@@ -108,6 +110,41 @@ export class RemoteLocator {
   }
   async count(): Promise<number> {
     return Number((await this.run({ kind: "locator", op: "count", chain: this.chain })) ?? 0);
+  }
+  async inputValue(opts?: { timeout?: number }): Promise<string> {
+    return String(
+      (await this.run({
+        kind: "locator",
+        op: "inputValue",
+        chain: this.chain,
+        timeout: opts?.timeout,
+      })) ?? "",
+    );
+  }
+  async isVisible(): Promise<boolean> {
+    return Boolean(
+      await this.run({ kind: "locator", op: "isVisible", chain: this.chain }),
+    );
+  }
+  async isChecked(opts?: { timeout?: number }): Promise<boolean> {
+    return Boolean(
+      await this.run({
+        kind: "locator",
+        op: "isChecked",
+        chain: this.chain,
+        timeout: opts?.timeout,
+      }),
+    );
+  }
+  async isEnabled(opts?: { timeout?: number }): Promise<boolean> {
+    return Boolean(
+      await this.run({
+        kind: "locator",
+        op: "isEnabled",
+        chain: this.chain,
+        timeout: opts?.timeout,
+      }),
+    );
   }
   async waitFor(opts?: {
     state?: "visible" | "attached" | "hidden";

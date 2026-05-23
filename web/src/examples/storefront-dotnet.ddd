@@ -1,0 +1,172 @@
+// Storefront on fullstack .NET — the same domain as
+// `storefront-system.ddd` (Hono + React) and `storefront-phoenix.ddd`
+// (Elixir/Ash), deployed as a single .NET service that hosts the
+// React SPA from wwwroot/.
+//
+// Three-way diff target: pick this, `storefront-system`, and
+// `storefront-phoenix` from the dropdown to compare how the identical
+// aggregate tree (Order → OrderLine), Money value-object and
+// transactional `checkout` saga lower across Drizzle + Hono, EF Core +
+// Mediator (.NET), and Ash + Reactor (Elixir).
+//
+// Files-only in the playground (.NET doesn't boot in-browser).
+
+system StorefrontDotnet {
+
+  theme {
+    primary: "#7c3aed"
+    neutral: "#64748b"
+    radius: "md"
+    fontFamily: "Inter, system-ui, sans-serif"
+  }
+
+  module Storefront {
+    context Storefront {
+
+      enum OrderStatus { Draft, Confirmed, Shipped, Cancelled }
+      enum WalletStatus { Open, Frozen, Closed }
+
+      valueobject Money {
+        amount: decimal
+        currency: string
+        invariant amount >= 0
+        invariant currency.length == 3
+      }
+
+      event OrderConfirmed { order: Id<Order>, at: datetime }
+      event WalletToppedUp { wallet: Id<Wallet>, amount: Money, at: datetime }
+      event WalletDebited { wallet: Id<Wallet>, amount: Money, at: datetime }
+
+      aggregate Customer {
+        name: string display
+        email: string
+        invariant email.length > 0
+      }
+
+      aggregate Product {
+        sku: string display
+        price: Money
+        invariant sku.length > 0
+      }
+
+      aggregate Wallet {
+        ownerId: Id<Customer>
+        status: WalletStatus
+        balance: Money
+        openedAt: datetime
+        closedAt: datetime?
+
+        function isMutable(): bool = status == Open
+
+        invariant balance.amount >= 0
+
+        operation topUp(amount: Money) {
+          precondition isMutable()
+          precondition amount.amount > 0
+          balance := Money(balance.amount + amount.amount, balance.currency)
+          emit WalletToppedUp { wallet: id, amount: amount, at: now() }
+        }
+
+        operation debit(amount: Money) {
+          precondition isMutable()
+          precondition amount.amount > 0
+          precondition balance.amount >= amount.amount
+          balance := Money(balance.amount - amount.amount, balance.currency)
+          emit WalletDebited { wallet: id, amount: amount, at: now() }
+        }
+
+        operation freeze(reason: string) {
+          precondition status == Open
+          status := Frozen
+        }
+      }
+
+      aggregate Order {
+        customerId: Id<Customer>
+        status: OrderStatus
+        placedAt: datetime
+        contains lines: OrderLine[]
+
+        derived lineCount: int = lines.count
+
+        invariant lines.count > 0 when status == Confirmed
+
+        function isMutable(): bool = status == Draft
+
+        operation addLine(productId: Id<Product>, unitPrice: Money, qty: int) {
+          precondition isMutable()
+          precondition qty > 0
+          lines += new OrderLine {
+            productId: productId,
+            unitPrice: unitPrice,
+            quantity: qty
+          }
+        }
+
+        operation confirm() {
+          precondition isMutable()
+          precondition lines.count > 0
+          status := Confirmed
+          emit OrderConfirmed { order: id, at: now() }
+        }
+
+        entity OrderLine {
+          productId: Id<Product>
+          unitPrice: Money
+          quantity: int
+          invariant quantity > 0
+        }
+      }
+
+      repository Customers for Customer {
+        find byEmail(email: string): Customer? where this.email == email
+      }
+      repository Products for Product { }
+      repository Wallets for Wallet {
+        find byOwner(owner: Id<Customer>): Wallet[] where this.ownerId == owner
+        find openByOwner(owner: Id<Customer>): Wallet[]
+          where this.ownerId == owner && this.status == Open
+      }
+      repository Orders for Order { }
+
+      // EF Core's pipeline keeps the order creation + wallet debit in
+      // one DB transaction; a failing precondition throws
+      // DomainException → 400 with the violated rule, and the
+      // transaction rolls back.
+      workflow checkout(
+        customerId: Id<Customer>,
+        walletId: Id<Wallet>,
+        productId: Id<Product>,
+        unitPrice: Money,
+        qty: int
+      ) transactional {
+        precondition qty > 0
+        let wallet = Wallets.getById(walletId)
+        let order = Order.create({
+          customerId: customerId,
+          status: Draft,
+          placedAt: now()
+        })
+        order.addLine(productId, unitPrice, qty)
+        order.confirm()
+        wallet.debit(unitPrice)
+      }
+
+      view ConfirmedOrders = Order where status == Confirmed
+    }
+  }
+
+  ui WebApp {
+    scaffold modules: Storefront
+  }
+
+  // Single fullstack .NET deployable — backend on /api/*, SPA
+  // (shadcn pack for variety) served from wwwroot/ at /.
+  deployable app {
+    platform: dotnet
+    modules: Storefront
+    ui: WebApp
+    port: 8080
+    design: shadcn
+  }
+}

@@ -12,6 +12,14 @@ For language syntax see [`language.md`](language.md); for architecture
 see [`technical.md`](technical.md); for CLI / Docker / Playwright
 workflow see [`tools.md`](tools.md).
 
+To see one identical domain lowered onto every backend, pick the
+**Storefront** trio from the playground dropdown — `storefront-system`
+(Hono + React), `storefront-dotnet` (.NET + embedded SPA), and
+`storefront-phoenix` (Elixir/Ash + LiveView). All three share the same
+aggregate tree (`Order` → `OrderLine` + `Money`), `Wallet` aggregate,
+and transactional `checkout` saga, so diffing their output is the
+fastest way to read this matrix concretely.
+
 ---
 
 ## Cross-platform feature matrix
@@ -24,6 +32,7 @@ workflow see [`tools.md`](tools.md).
 | `aggregate` | Class with private state, factory, ops, derived getters, `pullEvents()` | Sealed class with private state, factory, ops, derived getters, `PullEvents()` | List + Detail + New page; api hooks |
 | `entity` part | Same as aggregate but with `_parentId` | Same as aggregate; mapped via `OwnsMany` | Sub-table on detail page, master-detail row testids |
 | `contains` (collection) | Drizzle table with `parent_id` FK; auto-loaded in repo | EF owned-collection; auto-loaded by tracker | Sub-table on detail; not editable in the create form |
+| `Id<X>[]` (reference collection) | Auto-derived many-to-many **join table** with composite PK + `ordinal` column; save diff-syncs join rows, load orders by `ordinal`. `this.<field>.contains(param)` is queryable (subquery against the join table). | (not yet supported — emitter falls through to a text column) | `Id<X>[]` appears in the wire shape as `string[]`; populated/displayed via the response, but no first-class editor yet |
 | `derived` | Getter that calls into the expression | Computed property that calls into the expression | Read-only field on detail; included in the response Zod schema |
 | `invariant` | Private `_assertInvariants()` called at the end of every mutator | Private `AssertInvariants()` called at the end of every mutator | (enforced server-side; surfaces as 400 in the UI) |
 | `provenanced` property | `domain/provenance.ts` SDK + `recordTrace(...)` after each write; `ddd snapshot` captures rule snapshots to `.loom/snapshots/*.loomsnap.json` | (keyword parsed; no trace code emitted) | (n/a — wire shape unaffected) |
@@ -119,8 +128,10 @@ objects.  Decimals are JSON numbers; datetimes are ISO strings.
   transaction, hydrate aggregate
 - `getById(id)` — same but throws `AggregateNotFoundError` on missing
 - `save(aggregate)` — upsert root, diff-sync each contained collection
-  (insert new + update existing + delete removed) in a transaction,
-  drain events via `dispatcher.dispatch`
+  (insert new + update existing + delete removed) **and each
+  reference-collection join table** (delete removed pairs; upsert
+  current pairs carrying their `ordinal` position so reorders persist)
+  in a transaction, drain events via `dispatcher.dispatch`
 - `all()` — auto-included; loads all rows and hydrates with parts
 - `<find>(...)` — one method per user-declared `find`; convention-
   based predicate or a TODO comment for `where` clauses (Drizzle has
@@ -132,6 +143,15 @@ objects.  Decimals are JSON numbers; datetimes are ISO strings.
 contained part (parts get a `parent_id` FK), `pgEnum` per enum,
 value-object fields flattened into prefix-named columns
 (`price_amount`, `price_currency`).
+
+Every `Id<X>[]` reference-collection field on an aggregate also gets
+its own join table, `snake(owner)_snake(field)` (e.g. `trainer_party`,
+`trainer_caught`) — two FK columns (`<owner>_id` text not null,
+`<target>_id` text not null), an `ordinal integer not null` carrying
+the collection's position, a composite primary key `(owner_fk,
+target_fk)`, and an index on the target FK so the reverse membership
+subquery (`this.party.contains(pokemon)`) stays index-backed.  The
+field is **not** persisted as a column on the owner table.
 
 **`http/index.ts`** — composer:
 
@@ -625,6 +645,14 @@ Out of scope for v1 (intentional):
 - **Typeahead lookups for `Id<X>` form fields**: rendered as plain
   text inputs.  A future enhancement could resolve `Id<Customer>`
   to a `<Select>` populated from `useAllCustomers()`.
+- **Reference collections on `.NET` / Phoenix**: `Id<X>[]` is fully
+  persisted and queryable on the TypeScript backend (join table with
+  ordinal + `.contains(...)` subquery); the .NET (EF) and Phoenix
+  (Ash) emitters still drop the field into a text column.  Adoption
+  on those backends is mechanical — the platform-neutral
+  `AssociationIR` is already derived during enrichment, so each
+  emitter only needs its own join-table mapping and load/save
+  passes.
 - **Server-side rendering**: client-only Vite.  Next.js variant
   would be a separate platform.
 - **Generated CI / k8s manifests**: project-init concerns, not

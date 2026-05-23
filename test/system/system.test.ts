@@ -208,8 +208,11 @@ describe("system / module / deployable", () => {
     expect(ui).toMatch(/new OrderDetailPage\(page, ord\.id\)\.goto\(\).+addLine/);
     // `ui.orders.confirm(ord)` (no body) calls confirm().
     expect(ui).toMatch(/new OrderDetailPage\(page, ord\.id\)\.goto\(\).+confirm/);
-    // getById binds the detail handle; equality assertions lower to
-    // Playwright's web-first matchers (auto-retrying against the DOM).
+    // getById binds the detail handle; explicit, typed matchers
+    // (`expect(read.status).toHaveText(...)`, resolved in the IR as
+    // intrinsic matchers) lower to Playwright's web-first matchers
+    // (auto-retrying against the DOM) — driven by the author's matcher
+    // choice, not inferred from the expression's shape.
     expect(ui).toMatch(/await expect\(read\.field\("status"\)\)\.toHaveText\("Confirmed"\)/);
     expect(ui).toMatch(/await expect\(read\.linesRows\(\)\)\.toHaveCount\(1\)/);
 

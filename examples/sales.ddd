@@ -80,8 +80,8 @@ context Sales {
 
     test "money literal builds" {
       let m = Money(10.5, "USD")
-      expect m.amount == 10.5
-      expect m.currency == "USD"
+      expect(m.amount).toBe(10.5)
+      expect(m.currency).toBe("USD")
     }
 
     test "negative money rejected" {

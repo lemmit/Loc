@@ -411,6 +411,11 @@ test("structures a bare-call workflow statement into head + args", async ({ page
   await expect(head).toBeVisible();
   await expect(head).toHaveValue("order.addLine");
   await expect(page.getByTestId("c4system-call-arg")).not.toHaveCount(0);
+
+  // The head is an Autocomplete over in-scope names: clearing it offers the
+  // receiver `order` (a let-bound earlier in the workflow) as a suggestion.
+  await head.fill("");
+  await expect(page.getByRole("option", { name: "order", exact: true })).toBeVisible({ timeout: 5_000 });
 });
 
 test("edits an operation body via the aggregate inspector", async ({ page }) => {
@@ -711,6 +716,27 @@ test("expands a bare-call argument into the inline structured editor (ƒx)", asy
   await expect(argFx).toBeVisible();
   await expect(page.getByTestId("c4system-call-arg").first()).toBeVisible();
   await argFx.click();
+  await expect(page.getByTestId("c4expr")).toBeVisible({ timeout: 10_000 });
+});
+
+test("expands an emit field value into the inline structured editor (ƒx)", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+
+  await page.getByTestId("doc-tab-model").click();
+  await expect(page.getByTestId("c4system-canvas")).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => page.locator(".react-flow__node").count(), { timeout: 10_000 }).toBeGreaterThan(3);
+
+  // Order.confirm ends with `emit OrderConfirmed { order: id, at: now() }` — each
+  // field is name + value (text) with a ƒx toggle to the structured editor.
+  await page.locator('[data-testid="rf__node-aggregate:Order"]').click();
+  await page.getByTestId("c4system-op-pick").click();
+  await page.getByRole("option", { name: "confirm", exact: true }).click();
+  await expect(page.getByTestId("c4system-body")).toBeVisible();
+  await expect(page.getByTestId("c4system-emit-field-name").first()).toBeVisible();
+  await expect(page.getByTestId("c4system-emit-field-value").first()).toBeVisible();
+  await page.getByTestId("c4system-emit-field-structured").first().click();
   await expect(page.getByTestId("c4expr")).toBeVisible({ timeout: 10_000 });
 });
 

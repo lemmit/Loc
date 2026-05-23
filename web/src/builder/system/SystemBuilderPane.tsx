@@ -679,6 +679,9 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         ? { kind: "stmtExpr", owner: loc.aggregate, op: loc.op, index, ...(field !== undefined ? { field } : {}) }
         : { kind: "wfStmt", owner: loc.name, index, ...(field !== undefined ? { field } : {}) };
     return {
+      // In-scope names at a statement position (params + earlier lets + this-
+      // props / context) — receiver suggestions for a bare call's head.
+      headCandidates: (index: number): string[] => slotCandidates(parsed.ast, slotFor(index)),
       hasValueEditor: (index: number, field?: number): boolean =>
         slotExpr(parsed.ast, slotFor(index, field)) != null,
       onToggleValueEditor: (index: number, field?: number): void => {
@@ -817,10 +820,10 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         {compact && (
           <Button
             size="xs"
-            variant="default"
+            variant="filled"
             data-testid="c4system-open-inspector"
             onClick={() => setInspectorOpen(true)}
-            style={{ position: "absolute", top: 8, right: 8, zIndex: 5 }}
+            style={{ position: "absolute", bottom: 12, right: 12, zIndex: 6, boxShadow: "0 2px 6px rgba(0,0,0,0.3)" }}
           >
             Inspect / +
           </Button>

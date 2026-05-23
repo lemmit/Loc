@@ -3,13 +3,13 @@
 //
 // Fills NpmInstallBundleEngine's `EsbuildRun` seam in the browser:
 // runs esbuild-wasm with makeVfsNpmPlugin over the install-populated
-// VFS (no esm.sh).  The build options + plugin are byte-identical to
-// what the B3b/B4 node spikes verified — only the host (esbuild-wasm
-// in a Worker vs. node esbuild) differs.
+// VFS — no CDN fetches at bundle time.  The build options + plugin are
+// byte-identical to what the B3b/B4 node spikes verified — only the
+// host (esbuild-wasm in a Worker vs. node esbuild) differs.
 //
-// Init mirrors bundler.worker.ts exactly (pre-fetch + compile the
-// wasm ourselves to dodge CDN content-encoding / streaming-API
-// pitfalls), so behaviour matches the proven esm.sh worker.
+// We pre-fetch + compile the wasm ourselves to dodge CDN
+// content-encoding / streaming-API pitfalls, so the init is robust
+// across browsers.
 
 import * as esbuild from "esbuild-wasm";
 import wasmURL from "esbuild-wasm/esbuild.wasm?url";
@@ -185,7 +185,7 @@ const BUILD_COMMON = {
   // Generated components use the automatic JSX runtime (no
   // `import React`).  Without this esbuild defaults to the classic
   // transform (React.createElement) → "React is not defined" at
-  // runtime once React is bundled.  Mirrors the esm.sh bundler.worker.
+  // runtime once React is bundled.
   jsx: "automatic" as const,
   // outdir gives JS-imported CSS (Mantine `*.css`) an output path so
   // esbuild bundles it into a sibling .css output file instead of

@@ -4,9 +4,9 @@
 // PRs in this thread chased symptoms via static analysis (Chakra
 // icons, RDC shim, importmap URL form) and missed the duplicate-
 // React class of bug because we had no automated runtime gate.
-// This spec is that gate — esm.sh-dependent, so self-skips when the
-// browser sandbox can't reach the CDN (same idiom as
-// `runtime.spec.ts`).
+// This spec is that gate — the in-browser npm-install bundler needs the
+// npm registry, so it self-skips when the browser sandbox can't reach it
+// (same idiom as `runtime.spec.ts`).
 //
 // What it gates specifically:
 // - `dispatcher.getOwner is not a function` (PR #151-#152 hunt)
@@ -49,12 +49,12 @@ test("mantine@v9 preview boots without runtime errors", async ({ page }) => {
   if (!(await browserCanReachNetwork(page))) {
     test.skip(
       true,
-      "Browser cannot reach esm.sh — Bundle + Preview need network access.  This spec is intended to run on the deployed playground CI step.",
+      "Browser cannot reach the npm registry — Bundle + Preview need network access.  This spec is intended to run on the deployed playground CI step.",
     );
   }
 
-  // Bundle the React frontend.  esm.sh fetches the React 19 runtime
-  // and Mantine 9 — ~140 modules; the first cold run takes ~30 s.
+  // Bundle the React frontend.  The in-browser npm install fetches the
+  // React 19 runtime and Mantine 9 — ~140 modules; first cold run ~30 s.
   await page.getByTestId("btn-bundle").click();
   await expect(
     page.getByText(/bundled .*KB in \d+ ms \(\d+ deps fetched\)/),
@@ -88,7 +88,7 @@ test("mantine@v9 preview boots without runtime errors", async ({ page }) => {
   // steady state on a happy-path mount.
   const fatal = errors.filter((m) => {
     // Suppress the well-known noise that's not related to our bundle:
-    //   - 503/504 transients from esm.sh under load
+    //   - 503/504 transients from the npm registry under load
     //   - "Using direct eval" warnings from esbuild-wasm
     //   - cross-origin postMessage chatter from the SW handshake
     return (

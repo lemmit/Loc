@@ -336,11 +336,17 @@ Done:
     Expression picker uses, bound to that statement's slot (`stmtExpr` / `wfStmt`,
     with an optional `field`). It covers every editable body expression — the
     **assignment value**, the single-expression statements (`precondition` /
-    `requires` / `let`), and each **bare-call argument** (`field` = arg index) —
-    editing just that expression and leaving the keyword (and a `let` binding's
-    name) in source. Keyed by `rev` so it re-seeds on commit; the open row is
-    held in the pane so it survives. A `hasValueEditor` predicate decides which
-    rows / args get the toggle. Gated by `test/system-body.test.ts` + e2e.
+    `requires` / `let`), each **bare-call argument** (`field` = arg index), and
+    each **emit field** value (`field` = field index) — editing just that
+    expression and leaving the keyword (and a `let` binding's name) in source.
+    `emit` also splits into its event (a label — repoint via the Emits picker)
+    plus add/delete `name: value` fields. A bare call's **head** is an
+    `Autocomplete` over in-scope receiver names (`slotCandidates` — params,
+    earlier lets, this-props / context); still free text, so the `.method` part
+    and any path are unrestricted. Keyed by `rev` so it re-seeds on commit; the
+    open row is held in the pane so it survives. A `hasValueEditor` predicate
+    decides which rows / args / fields get the toggle. Gated by
+    `test/system-body.test.ts` + e2e.
 - **Diagnostics on graph nodes** — LSP diagnostics (`ctx.diagnostics`) are
   attributed to the construct whose source most tightly contains each (so a
   problem inside an aggregate marks the aggregate, not its module), and that node
@@ -416,6 +422,13 @@ Done:
   React Flow `onReconnect` (`reconnectable: "target"` on those edges, off in
   grouped mode). Gated by `test/system/system-edge-rebind.test.ts`. (The drag
   *gesture* isn't e2e-covered — hard to script reliably; the rebind logic is.)
+- **Mobile layout pass** — on a compact viewport the inspector is a bottom
+  drawer opened via the "Inspect / +" button, which used to sit top-right and
+  collide with the canvas overlay toolbar (search / toggles wrap full-width on a
+  phone). Moved it to a bottom-right floating button (filled + shadow), clear of
+  the overlay and thumb-reachable. Gated by `web/e2e/mobile-model-builder.spec.ts`
+  (a 390×844 viewport asserting the FAB sits below the overlay and opens the
+  drawer) — the first phone-viewport e2e for the builder.
 
 Open:
 

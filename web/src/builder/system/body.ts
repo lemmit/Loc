@@ -1,6 +1,7 @@
 import { AstUtils, type AstNode } from "langium";
 import type {
   Aggregate,
+  EmitStmt,
   FunctionDecl,
   Model,
   Operation,
@@ -73,11 +74,13 @@ export function listStatements(ast: Model, loc: BodyLocator): string[] | null {
 
 // A statement structured for the body editor: an assignment splits into a
 // dedicated target / op / value; a bare call (`recv.method(args)`) splits into a
-// head (`recv.method`) + editable args; everything else (precondition / requires
-// / let / emit) keeps its verbatim source for a single text row.
+// head (`recv.method`) + editable args; an emit splits into its event + named
+// fields; everything else (precondition / requires / let) keeps its verbatim
+// source for a single text row.
 export type StmtView =
   | { kind: "assign"; target: string; op: string; value: string }
   | { kind: "call"; head: string; args: string[] }
+  | { kind: "emit"; event: string; fields: { name: string; value: string }[] }
   | { kind: "other"; src: string };
 
 function stmtView(s: Statement): StmtView {
@@ -96,6 +99,16 @@ function stmtView(s: Statement): StmtView {
       kind: "call",
       head: [s.target.head, ...s.target.tail].join("."),
       args: s.target.args.map((a) => a.$cstNode?.text?.trim() ?? ""),
+    };
+  }
+  if (s.$type === "EmitStmt") {
+    const e = s as EmitStmt;
+    return {
+      kind: "emit",
+      // `$refText` is the event name without triggering a linker deref (the
+      // playground parse is unlinked).
+      event: e.event?.$refText ?? "",
+      fields: e.fields.map((f) => ({ name: f.name, value: f.value.$cstNode?.text?.trim() ?? "" })),
     };
   }
   return { kind: "other", src: s.$cstNode?.text ?? "" };

@@ -234,9 +234,8 @@ const RELOAD_CONTROLLER = `
 // This is the egress lock the cross-origin sandbox needs once
 // untrusted user expressions run in the preview: it can't phone home.
 // It's harmless (pure hardening) while same-origin, so we always emit
-// it.  After esm.sh was removed the document loads nothing third-party
-// except the Tailwind compiler (shadcn packs only), so the allowlist
-// is small:
+// it.  The document loads nothing third-party except the Tailwind
+// compiler (shadcn packs only), so the allowlist is small:
 //
 //   - script-src 'self'        vendor chunks + dynamic-import splits
 //                              (served same-origin from deployBase/vendor;

@@ -176,8 +176,8 @@ test e2e "create then confirm an order with one line" against api {
     api.orders.addLine(ord, { productId: prod.id, qty: 3 })
     api.orders.confirm(ord)
     let read = api.orders.getById(ord)
-    expect read.status == "Confirmed"
-    expect read.lines.length == 1
+    expect(read.status).toBe("Confirmed")
+    expect(read.lines.length).toBe(1)
 }
 ```
 
@@ -197,8 +197,8 @@ test e2e "create then confirm an order via UI" against webApp {
     ui.orders.addLine(ord, { productId: prod.id, qty: 3 })
     ui.orders.confirm(ord)
     let read = ui.orders.getById(ord)
-    expect read.status == "Confirmed"
-    expect read.lines.length == 1
+    expect(read.status).toBe("Confirmed")
+    expect(read.lines.length).toBe(1)
 }
 ```
 

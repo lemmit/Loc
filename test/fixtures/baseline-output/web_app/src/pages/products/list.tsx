@@ -41,7 +41,7 @@ export default function ProductList() {
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                { productAll.data.map((row, idx) => (
+                { productAll.data.map((row) => (
                   <Table.Tr key={ row.id } data-testid={ ("products-row-" + row.id) }>
                     <Table.Td><RouterLink to={`/products/${ row.id }`}><IdValue id={ row.id } /></RouterLink></Table.Td>
                     <Table.Td><Text>{row.sku}</Text></Table.Td>

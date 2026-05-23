@@ -28,9 +28,7 @@ describe("reference-collection join tables (TS/Hono)", () => {
     const schema = generateHono(model).get("db/schema.ts")!;
     expect(schema).toMatch(/pgTable\("trainer_party"/);
     expect(schema).toMatch(/pgTable\("trainer_caught"/);
-    expect(schema).toMatch(
-      /primaryKey\(\{ columns: \[table\.trainerId, table\.pokemonId\] \}\)/,
-    );
+    expect(schema).toMatch(/primaryKey\(\{ columns: \[table\.trainerId, table\.pokemonId\] \}\)/);
     // ordinal column carries the collection's order across a round-trip
     expect(schema).toMatch(/ordinal: integer\("ordinal"\)\.notNull\(\)/);
     // The owner table must NOT carry the reference-collection columns.
@@ -92,9 +90,7 @@ describe("reference-collection join tables (TS/Hono)", () => {
     `;
     const bad = toLoomModel((await parseString(badSrc)).model);
     expect(
-      validateLoomModel(bad).some(
-        (d) => d.severity === "error" && /not queryable/.test(d.message),
-      ),
+      validateLoomModel(bad).some((d) => d.severity === "error" && /not queryable/.test(d.message)),
     ).toBe(true);
   });
 });

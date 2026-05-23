@@ -1,4 +1,11 @@
-import type { AggregateIR, BoundedContextIR, TestIR, TestStmtIR } from "../../../ir/loom-ir.js";
+import type {
+  AggregateIR,
+  BoundedContextIR,
+  ExprIR,
+  TestIR,
+  TestStmtIR,
+} from "../../../ir/loom-ir.js";
+import { intrinsicMatcherSig } from "../../../language/type-system.js";
 import { upperFirst } from "../../../util/naming.js";
 import { renderCsExpr } from "../render-expr.js";
 
@@ -64,11 +71,61 @@ function renderTest(t: TestIR): string[] {
   return out;
 }
 
+/** Lower an explicit intrinsic value-matcher (`expect(x).toBe(y)`,
+ *  optionally `.not.`) to the equivalent xUnit assertion. Returns null
+ *  when the expression isn't an explicit matcher so the caller falls back
+ *  to the operand-hiding `Assert.True`. */
+function renderExplicitMatcherToXUnit(expr: ExprIR): string | null {
+  if (expr.kind !== "method-call" || !expr.isIntrinsicMatcher) return null;
+  const sig = intrinsicMatcherSig(expr.member);
+  if (!sig || sig.on !== "value") return null;
+  let receiver = expr.receiver;
+  let negate = false;
+  if (
+    receiver.kind === "member" &&
+    receiver.member === "not" &&
+    sig.negatable
+  ) {
+    negate = true;
+    receiver = receiver.receiver;
+  }
+  const inner = receiver.kind === "paren" ? receiver.inner : receiver;
+  const actual = renderCsExpr(inner);
+  const arg = expr.args[0] !== undefined ? renderCsExpr(expr.args[0]) : "";
+  switch (expr.member) {
+    case "toBe":
+      // xUnit: `Assert.Equal(expected, actual)` / `Assert.NotEqual(...)`.
+      return negate
+        ? `Assert.NotEqual(${arg}, ${actual});`
+        : `Assert.Equal(${arg}, ${actual});`;
+    case "toBeGreaterThan":
+      return negate
+        ? `Assert.False(${actual} > ${arg});`
+        : `Assert.True(${actual} > ${arg});`;
+    case "toBeGreaterThanOrEqual":
+      return negate
+        ? `Assert.False(${actual} >= ${arg});`
+        : `Assert.True(${actual} >= ${arg});`;
+    case "toBeLessThan":
+      return negate
+        ? `Assert.False(${actual} < ${arg});`
+        : `Assert.True(${actual} < ${arg});`;
+    case "toBeLessThanOrEqual":
+      return negate
+        ? `Assert.False(${actual} <= ${arg});`
+        : `Assert.True(${actual} <= ${arg});`;
+    default:
+      return null;
+  }
+}
+
 function renderTestStmt(s: TestStmtIR): string {
   // See `validateAggregateTestBodies` in src/ir/validate.ts — by the
   // time we reach the generator, only `expect` / `expect-throws` /
   // `let` / `expression` / pure-function `call` survive.
   if (s.kind === "expect") {
+    const explicit = renderExplicitMatcherToXUnit(s.expr);
+    if (explicit) return `    ${explicit}`;
     return `    Assert.True(${renderCsExpr(s.expr)});`;
   }
   if (s.kind === "expect-throws") {

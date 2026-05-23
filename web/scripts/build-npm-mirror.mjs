@@ -34,6 +34,7 @@ const outDir = path.resolve(here, "../public/npm-mirror");
 const EXAMPLES = [
   "examples/acme.ddd",
   "examples/sales.ddd",
+  "web/src/examples/storefront-system.ddd",
   "web/src/examples/sales-system.ddd",
   "web/src/examples/banking-system.ddd",
   "web/src/examples/inventory-system.ddd",

@@ -106,7 +106,7 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
     npmInstall: true,
     database: "pglite",
     // Real node_modules → the whole public-package long tail works,
-    // not just the esm.sh 80%.
+    // not just the common-package subset a CDN resolver would cover.
     customPackages: "full",
   };
 

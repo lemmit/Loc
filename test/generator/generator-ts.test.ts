@@ -154,7 +154,27 @@ describe("typescript generator", () => {
   });
 
   describe("request observability", () => {
-    it("emits obs/request-id.ts with the correlation-id middleware", async () => {
+    it("emits obs/log.ts with a configured pino base logger", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS);
+      const log = files.get("obs/log.ts")!;
+      // Standard structured logger — pino, not hand-rolled console.log.
+      expect(log).toMatch(/from "pino"/);
+      expect(log).toMatch(/export const baseLogger/);
+      // Level is a runtime knob via LOG_LEVEL env (default info).
+      expect(log).toMatch(/process\.env\.LOG_LEVEL \?\? "info"/);
+      // pino's default { pid, hostname } base fields are dropped.
+      expect(log).toMatch(/base: undefined/);
+      // Envelope aligned with docs/proposals/observability.md:
+      //   level emitted as label ("info") not pino's numeric severity,
+      //   timestamp as `ts` ISO string not pino's default `time` epoch ms.
+      expect(log).toMatch(/level: \(label\) => \(\{ level: label \}\)/);
+      expect(log).toMatch(/new Date\(\)\.toISOString\(\)/);
+      // Exposes the per-request child-logger type for downstream typing.
+      expect(log).toMatch(/export type RequestLogger/);
+    });
+
+    it("emits obs/request-id.ts with the correlation-id middleware + bound child logger", async () => {
       const model = await buildModel("examples/sales.ddd");
       const files = generateTypeScript(model, HONO_V4_PINS);
       const reqId = files.get("obs/request-id.ts")!;
@@ -167,12 +187,40 @@ describe("typescript generator", () => {
       // via direct headers mutation to avoid Hono's null-body
       // (204/304) Response-construction trap.
       expect(reqId).toMatch(/c\.res\.headers\.set\(REQUEST_ID_HEADER, requestId\)/);
-      // Stashes the id on the Hono context for downstream onError.
+      // Stashes the bare id on the Hono context for downstream onError.
       expect(reqId).toMatch(/c\.set\("requestId", requestId\)/);
-      // Structured request_start + request_end JSON log lines.
-      expect(reqId).toMatch(/event: "request_start"/);
+      // Binds a per-request child logger with the request_id field, so
+      // every downstream `c.get("log").info(...)` call is correlated
+      // without the seam having to re-pass the id.
+      expect(reqId).toMatch(/baseLogger\.child\(\{ request_id: requestId \}\)/);
+      expect(reqId).toMatch(/c\.set\("log", log\)/);
+      // Structured request_start + request_end log lines via pino.
+      expect(reqId).toMatch(/log\.info\(\{ event: "request_start"/);
       expect(reqId).toMatch(/event: "request_end"/);
       expect(reqId).toMatch(/duration_ms:/);
+    });
+
+    it("boot script emits structured server lifecycle events via pino", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS);
+      const index = files.get("index.ts")!;
+      expect(index).toMatch(/import \{ baseLogger \} from "\.\/obs\/log"/);
+      // server_starting (before listen) + server_listening (after) +
+      // server_shutdown / server_drained on the signal path replace the
+      // previous bare console.logs.
+      expect(index).toMatch(/event: "server_starting"/);
+      expect(index).toMatch(/event: "server_listening"/);
+      expect(index).toMatch(/event: "server_shutdown"/);
+      expect(index).toMatch(/event: "server_drained"/);
+      expect(index).not.toMatch(/console\.log/);
+    });
+
+    it("generated package.json pins pino + pino-pretty", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS);
+      const pkg = JSON.parse(files.get("package.json")!);
+      expect(pkg.dependencies.pino).toMatch(/^\^?\d/);
+      expect(pkg.devDependencies["pino-pretty"]).toMatch(/^\^?\d/);
     });
 
     it("http/index.ts mounts requestIdMiddleware before cors and any business route", async () => {

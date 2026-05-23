@@ -7,10 +7,10 @@ export { renderEvents } from "./templates/events.tpl.js";
 export { renderIds } from "./templates/ids.tpl.js";
 export { renderHttpIndex } from "./templates/routes.tpl.js";
 export {
+  joinColumnName,
+  joinTableConstName,
   renderSchema,
   valueObjectColumnNames,
-  joinTableConstName,
-  joinColumnName,
 } from "./templates/schema.tpl.js";
 export { renderTestsFile } from "./templates/tests.tpl.js";
 export { renderEnumsAndValueObjects } from "./templates/value-objects.tpl.js";

@@ -133,6 +133,42 @@ The underlying value type defaults to `guid`; override per-aggregate:
 aggregate Order ids int { … }
 ```
 
+#### Reference collections — `Id<X>[]`
+
+A field typed as a collection of references to another aggregate is a
+**many-to-many** relation:
+
+```
+aggregate Trainer {
+  party:  Id<Pokemon>[]
+  caught: Id<Pokemon>[]
+}
+```
+
+No grammar keyword switches it on — any aggregate field whose type is
+`Id<X>[]` is a reference collection.  Semantically it is an ordered set
+of references: the same target appears at most once per owner, and the
+collection's order is preserved across a persistence round-trip.
+
+Mutate the collection from operations with `+=` / `-=`:
+
+```
+operation addToParty(pokemon: Id<Pokemon>) {
+  precondition party.count < 6
+  party += pokemon
+}
+```
+
+Membership is queryable from a repository `find ... where` (see
+[Repositories](#repositories) below).
+
+Reference collections are **not** the same as containment.
+`contains lines: OrderLine[]` declares entity parts that live and die
+with the parent — a child table joined on `parent_id`.  `Id<X>[]` is a
+list of references to a *different* aggregate that outlives any one
+owner — persisted as a separate join table when the backend supports
+it (see [`docs/generators.md`](generators.md)).
+
 ### Aggregate / entity-part members
 
 Inside an aggregate or an `entity` part:
@@ -264,7 +300,7 @@ When the receiver type is `T[]`:
 | `xs.where(x => expr)` | `T[]` | Filter. |
 | `xs.first` | `T` | First element (assumes non-empty). |
 | `xs.firstOrNull` | `T?` | First or `null`. |
-| `xs.contains(x)` | `bool` | Membership.  Renders to `Array.includes` (TS) / `Enumerable.Contains` (.NET). |
+| `xs.contains(x)` | `bool` | Membership.  Renders to `Array.includes` (TS) / `Enumerable.Contains` (.NET).  Also admitted in repository `where` clauses when `xs` is a `this`-rooted `Id<X>[]` reference collection — see [Repositories](#repositories). |
 
 ### Numeric widening
 
@@ -414,6 +450,14 @@ plus a Mediator query in the .NET backend.
   manually (Drizzle has no general lambda → SQL translator).
 - **.NET**: both forms lower to a LINQ `.Where(x => …)` predicate and
   pass through EF Core to SQL.
+
+A repository `where` clause may use `this.<refColl>.contains(param)` to
+query membership over an `Id<X>[]` reference collection — for example,
+`find holdingInParty(pokemon: Id<Pokemon>): Trainer[] where
+this.party.contains(pokemon)`.  The TypeScript backend lowers this to
+an `inArray(...subquery...)` against the field's join table; other
+collection operations (`.count`, `.any`, `.where`, …) remain rejected
+by the queryable-subset validator.
 
 `findById` and `getById` are auto-generated for every aggregate
 (no need to declare them in the repository).  An auto-included
