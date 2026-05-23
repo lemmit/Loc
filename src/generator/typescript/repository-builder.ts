@@ -1,3 +1,4 @@
+import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
 import { wireShapeFor } from "../../ir/enrichments.js";
 import type {
   AggregateIR,
@@ -123,6 +124,11 @@ export function buildRepositoryFile(
   lines.push(`import * as Ids from "../../domain/ids";`);
   lines.push(`import { AggregateNotFoundError } from "../../domain/errors";`);
   lines.push(`import type { DomainEventDispatcher } from "../../domain/events";`);
+  // requestLog() resolves the request-scoped pino child logger via
+  // AsyncLocalStorage (see obs/als.ts) — repository methods don't have
+  // the Hono context in scope, so this is the seam they use to emit
+  // structured lines that still auto-carry `request_id`.
+  lines.push(`import { requestLog } from "../../obs/als";`);
   lines.push("");
   lines.push(`type Db = NodePgDatabase<typeof schema>;`);
   lines.push(`type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];`);
@@ -353,7 +359,12 @@ function findByIdMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
   lines.push(
     `      const rootRows = await tx.select().from(schema.${tableName}).where(eq(schema.${tableName}.id, id));`,
   );
-  lines.push(`      if (rootRows.length === 0) return null;`);
+  lines.push(`      if (rootRows.length === 0) {`);
+  lines.push(
+    `        ${renderHonoStoreLogCall("aggregateLoaded", `aggregate: "${agg.name}", id: id as string, found: false`)}`,
+  );
+  lines.push(`        return null;`);
+  lines.push(`      }`);
   lines.push(`      const root = rootRows[0]!;`);
 
   // Load child collections (only for `contains` on the root)
@@ -391,8 +402,13 @@ function findByIdMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
     );
   }
 
-  // Hydrate root
-  lines.push(`      return ${hydrateRootExpr(agg, "root", ctx)};`);
+  // Hydrate root.  Bind to a local so the load-success log line can fire
+  // BEFORE returning — keeping the debug record adjacent to the row read.
+  lines.push(`      const __loaded = ${hydrateRootExpr(agg, "root", ctx)};`);
+  lines.push(
+    `      ${renderHonoStoreLogCall("aggregateLoaded", `aggregate: "${agg.name}", id: id as string, found: true`)}`,
+  );
+  lines.push(`      return __loaded;`);
   lines.push(`    });`);
   lines.push(`  }`);
   return lines;
@@ -564,8 +580,21 @@ function saveMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
     lines.push(`      }`);
   }
   lines.push(`    });`);
+  lines.push(
+    `    ${renderHonoStoreLogCall("repositorySave", `aggregate: "${agg.name}", id: aggregate.id as string`)}`,
+  );
   lines.push("");
   lines.push(`    for (const event of aggregate.pullEvents()) {`);
+  // `(event as object).constructor.name` is the emitted DomainEvent
+  // subclass name — reliable in TypeScript without depending on a
+  // per-event `type` discriminator field.  The `as object` cast handles
+  // the corner case where the aggregate declares no events: pullEvents
+  // returns `DomainEvent[]` typed as `never[]`, so `event.constructor`
+  // would fail tsc.  Field name is `event_type` (not `event`) so it
+  // doesn't collide with the envelope's `event` key.
+  lines.push(
+    `      ${renderHonoStoreLogCall("eventDispatched", `event_type: (event as object).constructor.name, aggregate: "${agg.name}", id: aggregate.id as string`)}`,
+  );
   lines.push(`      await this.events.dispatch(event);`);
   lines.push(`    }`);
   lines.push(`  }`);
@@ -711,7 +740,12 @@ function findQueryMethod(agg: AggregateIR, find: FindIR, ctx: BoundedContextIR):
     lines.push(
       `    const rootRows = await this.db.select().from(schema.${tableName})${whereClause};`,
     );
-    lines.push(`    if (rootRows.length === 0) return [];`);
+    lines.push(`    if (rootRows.length === 0) {`);
+    lines.push(
+      `      ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${find.name}", rows: 0`)}`,
+    );
+    lines.push(`      return [];`);
+    lines.push(`    }`);
     // Bulk-load every containment (collections + singulars).  Earlier
     // versions of this code only handled a SINGLE collection
     // containment per find — anything else was silently dropped, so a
@@ -755,8 +789,12 @@ function findQueryMethod(agg: AggregateIR, find: FindIR, ctx: BoundedContextIR):
     }
     lines.push(...associationMapLines(agg, "this.db", "    "));
     lines.push(
-      `    return rootRows.map((root) => ${hydrateRootForFindAllExpr(agg, "root", ctx)});`,
+      `    const __result = rootRows.map((root) => ${hydrateRootForFindAllExpr(agg, "root", ctx)});`,
     );
+    lines.push(
+      `    ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${find.name}", rows: __result.length`)}`,
+    );
+    lines.push(`    return __result;`);
     lines.push(`  }`);
     return lines;
   }
@@ -771,13 +809,25 @@ function findQueryMethod(agg: AggregateIR, find: FindIR, ctx: BoundedContextIR):
     `    const rootRows = await this.db.select().from(schema.${tableName})${whereClause}.limit(1);`,
   );
   if (find.returnType.kind === "optional") {
-    lines.push(`    if (rootRows.length === 0) return null;`);
+    lines.push(`    if (rootRows.length === 0) {`);
+    lines.push(
+      `      ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${find.name}", rows: 0`)}`,
+    );
+    lines.push(`      return null;`);
+    lines.push(`    }`);
   } else {
+    // Throws → no `find_executed` log on this branch.  The thrown
+    // AggregateNotFoundError is logged at the route's onError seam
+    // (`not_found` warn) so we don't double-log the same fact.
     lines.push(`    if (rootRows.length === 0) throw new AggregateNotFoundError("not found");`);
   }
   lines.push(
-    `    return await this.findById(rootRows[0]!.id as Ids.${agg.name}Id) as ${agg.name}${find.returnType.kind === "optional" ? " | null" : ""};`,
+    `    const __result = await this.findById(rootRows[0]!.id as Ids.${agg.name}Id) as ${agg.name}${find.returnType.kind === "optional" ? " | null" : ""};`,
   );
+  lines.push(
+    `    ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${find.name}", rows: __result == null ? 0 : 1`)}`,
+  );
+  lines.push(`    return __result;`);
   lines.push(`  }`);
   return lines;
 }
