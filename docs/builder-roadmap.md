@@ -458,9 +458,16 @@ Phasing:
   `SystemBuilderV2Pane` mounts under "Model v2" in DesktopShell + MobileShell;
   reads `ctx.getSource()` and shows top-level construct counts as proof of
   flow. Gated by `web/e2e/system-builder-v2.spec.ts`.
-- **Phase 1** — drill-down backbone (read-only): system → context → aggregate
-  views with breadcrumb. Aggregate view shows operations + properties + events
-  as nodes. Reuses `model.ts` walks + naming helpers.
+- ~~**Phase 1** — drill-down backbone (read-only).~~ Done: a pure per-level
+  `buildViewGraph(ast, path)` in `system-v2/view-graph.ts` walks the AST for
+  each level (root / system / module / context / aggregate); the pane wraps it
+  with a clickable breadcrumb and a React Flow whose nodes drill on click for
+  drillable kinds (system / module / context / aggregate / operation /
+  workflow). Empty path = root, clicking the Model crumb pops back. Operation
+  and workflow leaves render as empty placeholders — Phase 2 fills them in.
+  Gated by `test/system-v2/view-graph.test.ts` (per-level unit snapshots) +
+  `web/e2e/system-builder-v2.spec.ts` (drill system → module → context →
+  aggregate, then pop home).
 - **Phase 2** — operation / workflow flow view (the statement flow); custom
   React Flow node containing the inline `ƒx` editor. Reuses `body.ts` +
   `ExpressionEditor.tsx`.
