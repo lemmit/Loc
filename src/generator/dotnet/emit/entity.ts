@@ -28,6 +28,7 @@ export function renderEntity(
   isRoot: boolean,
   ns: string,
   rootName: string,
+  emitTrace = false,
 ): string {
   const isAgg = "operations" in entity;
   const idValueType = isAgg ? (entity as AggregateIR).idValueType : "guid";
@@ -105,7 +106,11 @@ export function renderEntity(
       // business decision.
       opLines.push(`    public void Check${upperFirst(op.name)}(${params})`);
       opLines.push("    {");
-      const body = renderCsStatements(op.statements);
+      const body = renderCsStatements(op.statements, {
+        emitTrace,
+        aggregate: entity.name,
+        op: op.name,
+      });
       if (body.length > 0) opLines.push(body);
       opLines.push("    }");
       opLines.push("");
@@ -114,7 +119,11 @@ export function renderEntity(
     const visibility = op.visibility === "public" ? "public" : "private";
     opLines.push(`    ${visibility} void ${upperFirst(op.name)}(${params})`);
     opLines.push("    {");
-    const body = renderCsStatements(op.statements);
+    const body = renderCsStatements(op.statements, {
+      emitTrace,
+      aggregate: entity.name,
+      op: op.name,
+    });
     if (body.length > 0) opLines.push(body);
     opLines.push("        AssertInvariants();");
     opLines.push("    }");
