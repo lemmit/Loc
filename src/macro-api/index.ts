@@ -16,15 +16,21 @@ export type {
 } from "./define.js";
 
 export {
+  assignStmt,
+  assignStmtPath,
   field,
   idRef,
   isMarkNode,
   mark,
+  memberAccess,
+  nameRef,
   namedType,
   operation,
   originOf,
   param,
   primType,
+  targetFields,
+  writableUserFields,
 } from "./factories.js";
 export type { MarkNode } from "./factories.js";
 

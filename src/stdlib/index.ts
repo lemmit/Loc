@@ -3,6 +3,7 @@
 
 import { registerMacro } from "../language/macro-registry.js";
 import auditable from "./auditable.macro.js";
+import crudish from "./crudish.macro.js";
 import softDeletable from "./softDeletable.macro.js";
 
 let _loaded = false;
@@ -15,6 +16,7 @@ export function loadStdlibMacros(): void {
   _loaded = true;
   registerMacro(auditable);
   registerMacro(softDeletable);
+  registerMacro(crudish);
 }
 
 /** Test/harness hook: allow tests that reset the registry to

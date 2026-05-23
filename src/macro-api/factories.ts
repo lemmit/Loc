@@ -16,7 +16,12 @@
 import type {
   Aggregate,
   AggregateMember,
+  AssignOrCallStmt,
+  Expression,
   IdType,
+  LValue,
+  MemberAccess,
+  NameRef,
   NamedDecl,
   NamedType,
   Operation,
@@ -26,6 +31,7 @@ import type {
   Statement,
   TypeRef,
 } from "../language/generated/ast.js";
+import { isProperty } from "../language/generated/ast.js";
 import type { OriginToken } from "./define.js";
 
 // ---------------------------------------------------------------------------
@@ -230,6 +236,124 @@ export function operation(
   params.forEach((p, i) => setContainer(p, op, "params", i));
   body.forEach((s, i) => setContainer(s, op, "body", i));
   return op;
+}
+
+// ---------------------------------------------------------------------------
+// Expression + statement factories
+// ---------------------------------------------------------------------------
+//
+// Macro authors construct operation bodies as arrays of Statement
+// AST nodes.  The factory set is intentionally narrow: only the
+// shapes the stdlib macros (crudish first) actually need.  When a
+// new macro needs a new statement/expression kind, add a focused
+// factory here rather than letting authors construct nodes by hand
+// — that's the only way origin metadata stays consistent across
+// the synthesised subtree.
+
+/** A bare `name` reference in an expression position.  Lowering
+ * resolves it against the host's scope (params, fields, etc.)
+ * just like a user-typed identifier. */
+export function nameRef(name: string): NameRef {
+  const origin = currentOrigin();
+  return tag({ $type: "NameRef", name } as unknown as NameRef, origin);
+}
+
+/** A dotted member-access expression: `receiver.member`.  Used by
+ * crudish to build `input.subject` from `input` + "subject".  `args`
+ * is the empty array (no call) for property access; pass `call: true`
+ * + args to construct a method invocation. */
+export function memberAccess(
+  receiver: Expression,
+  member: string,
+  opts: { call?: boolean; args?: Expression[] } = {},
+): MemberAccess {
+  const origin = currentOrigin();
+  const args = opts.args ?? [];
+  // CallArg wraps each call argument with an optional name; for a
+  // simple positional call this is just an envelope.
+  const callArgs = args.map((a) => {
+    const node = { $type: "CallArg", value: a } as unknown as { $type: string; value: Expression };
+    setContainer(a, node, "value");
+    return node;
+  });
+  const ma: MemberAccess = tag(
+    {
+      $type: "MemberAccess",
+      receiver,
+      member,
+      call: opts.call ?? false,
+      args: callArgs,
+    } as unknown as MemberAccess,
+    origin,
+  );
+  setContainer(receiver, ma, "receiver");
+  callArgs.forEach((c, i) => setContainer(c, ma, "args", i));
+  return ma;
+}
+
+/** An assignment statement: `target := value`.  `target` is a flat
+ * dotted lvalue head (e.g. `subject` or `this.subject`); pass tail
+ * segments via `parts` when the assignment is to a nested member.
+ * `value` may be any Expression. */
+export function assignStmt(targetName: string, value: Expression): AssignOrCallStmt {
+  return assignStmtPath([targetName], value);
+}
+
+/** An assignment to a dotted path: `head.tail1.tail2 := value`. */
+export function assignStmtPath(path: string[], value: Expression): AssignOrCallStmt {
+  if (path.length === 0) throw new Error("assignStmtPath requires at least one segment");
+  const origin = currentOrigin();
+  const lv: LValue = tag(
+    {
+      $type: "LValue",
+      head: path[0]!,
+      tail: path.slice(1),
+      call: false,
+      args: [],
+    } as unknown as LValue,
+    origin,
+  );
+  const stmt: AssignOrCallStmt = tag(
+    {
+      $type: "AssignOrCallStmt",
+      target: lv,
+      op: ":=",
+      value,
+    } as unknown as AssignOrCallStmt,
+    origin,
+  );
+  setContainer(lv, stmt, "target");
+  setContainer(value, stmt, "value");
+  return stmt;
+}
+
+// ---------------------------------------------------------------------------
+// Host introspection helpers
+// ---------------------------------------------------------------------------
+//
+// Macros that need to inspect the host's existing members (crudish
+// reads `target.fields` to know what to assign) go through these
+// helpers rather than reaching into the raw AST.  Keeps the API
+// surface focused and lets us evolve the host representation
+// without breaking macro authors.
+
+/** Plain Property declarations on the aggregate (excludes
+ * containments, derived props, operations, entity parts, tests).
+ * Lists user-declared fields plus any fields contributed by other
+ * macros that ran before this one — call order is the `with`
+ * clause's left-to-right order. */
+export function targetFields(target: Aggregate): readonly Property[] {
+  return (target.members ?? []).filter(isProperty);
+}
+
+/** Subset of `targetFields` excluding fields contributed by other
+ * macros.  Useful for crudish-style macros that want to expose only
+ * the user's own writable surface, ignoring macro-added bookkeeping
+ * fields like createdAt/updatedAt/isDeleted.  Detection is by
+ * presence of the macro-origin tag — fields without one are
+ * user-written. */
+export function writableUserFields(target: Aggregate): readonly Property[] {
+  return targetFields(target).filter((f) => (f as any)[ORIGIN_PROP] === undefined);
 }
 
 // ---------------------------------------------------------------------------
