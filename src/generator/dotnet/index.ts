@@ -7,7 +7,6 @@ import { generateReactForContexts } from "../react/index.js";
 import { emitAuthFiles } from "./auth-emit.js";
 import { emitCqrs } from "./cqrs-emit.js";
 import { renderDomainLog, renderDomainLogBehavior } from "./emit/domain-log.js";
-import { buildFindBodies } from "./find-emit.js";
 import {
   renderCommon,
   renderConfiguration,
@@ -29,6 +28,7 @@ import {
   renderTestsFile,
   renderValueObject,
 } from "./emit.js";
+import { buildFindBodies } from "./find-emit.js";
 import { hasAnyWireValidator, renderValidationBehavior } from "./validator-emit.js";
 import { emitViews } from "./view-emit.js";
 import { emitWorkflows } from "./workflow-emit.js";
@@ -311,10 +311,7 @@ function emitAggregate(
       renderEntity(part, false, ns, agg.name, emitTrace),
     );
   }
-  out.set(
-    `Domain/${aggFolder}/${agg.name}.cs`,
-    renderEntity(agg, true, ns, agg.name, emitTrace),
-  );
+  out.set(`Domain/${aggFolder}/${agg.name}.cs`, renderEntity(agg, true, ns, agg.name, emitTrace));
   // Views whose source is this aggregate become parameterless,
   // filtered, list-returning finds on the repository.  Synthesised
   // here so all the existing find emission paths (interface,
@@ -324,9 +321,17 @@ function emitAggregate(
     `Domain/${aggFolder}/I${agg.name}Repository.cs`,
     renderRepositoryInterface(agg, repoWithViews, ns),
   );
+  // Threaded into buildFindBodies so a find with a `where` expression
+  // that lowers to `Regex.IsMatch` declares its System.Text.RegularExpressions
+  // dependency; the repository impl emitter then adds the using.
+  const repoImplUsings = new Set<string>();
+  const findBodies = buildFindBodies(agg, repoWithViews, repoImplUsings);
   out.set(
     `Infrastructure/Repositories/${agg.name}Repository.cs`,
-    renderRepositoryImpl(agg, repoWithViews, ns, buildFindBodies(agg, repoWithViews), emitTrace),
+    renderRepositoryImpl(agg, repoWithViews, ns, findBodies, {
+      extraUsings: [...repoImplUsings].sort(),
+      emitTrace,
+    }),
   );
   out.set(
     `Infrastructure/Persistence/Configurations/${agg.name}Configuration.cs`,

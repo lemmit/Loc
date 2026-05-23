@@ -36,6 +36,13 @@ export function renderEntity(
   const requiredFields = entity.fields.filter((f) => !f.optional);
   const hasExtern = operations.some((o) => o.extern);
   const setterVisibility = hasExtern ? "internal" : "private";
+  // Threaded through every render call below.  Renderers add the
+  // non-implicit namespaces they reach into (`System.Text.RegularExpressions`
+  // when an invariant uses `email.matches(...)`); on file assembly the
+  // accumulated set becomes one `using <ns>;` per entry, so the file
+  // imports only what its own expressions actually use.
+  const usings = new Set<string>();
+  const renderCtx = { thisName: "this", usings };
 
   const propLines: string[] = [];
   propLines.push(`    public ${entity.name}Id Id { get; ${setterVisibility} set; }`);
@@ -80,11 +87,12 @@ export function renderEntity(
   ctorLines.push("    }");
 
   const derivedLines = entity.derived.map(
-    (d) => `    public ${renderCsType(d.type)} ${upperFirst(d.name)} => ${renderCsExpr(d.expr)};`,
+    (d) =>
+      `    public ${renderCsType(d.type)} ${upperFirst(d.name)} => ${renderCsExpr(d.expr, renderCtx)};`,
   );
   const fnLines = entity.functions.map((fn) => {
     const params = fn.params.map((p) => `${renderCsType(p.type)} ${p.name}`).join(", ");
-    return `    private ${renderCsType(fn.returnType)} ${upperFirst(fn.name)}(${params}) => ${renderCsExpr(fn.body)};`;
+    return `    private ${renderCsType(fn.returnType)} ${upperFirst(fn.name)}(${params}) => ${renderCsExpr(fn.body, renderCtx)};`;
   });
 
   const opLines: string[] = [];
@@ -106,7 +114,7 @@ export function renderEntity(
       // business decision.
       opLines.push(`    public void Check${upperFirst(op.name)}(${params})`);
       opLines.push("    {");
-      const body = renderCsStatements(op.statements, {
+      const body = renderCsStatements(op.statements, renderCtx, {
         emitTrace,
         aggregate: entity.name,
         op: op.name,
@@ -119,16 +127,14 @@ export function renderEntity(
     const visibility = op.visibility === "public" ? "public" : "private";
     opLines.push(`    ${visibility} void ${upperFirst(op.name)}(${params})`);
     opLines.push("    {");
-    const body = renderCsStatements(op.statements, {
+    const body = renderCsStatements(op.statements, renderCtx, {
       emitTrace,
       aggregate: entity.name,
       op: op.name,
     });
     if (body.length > 0) opLines.push(body);
     opLines.push(
-      emitTrace
-        ? `        AssertInvariants("${op.name}");`
-        : "        AssertInvariants();",
+      emitTrace ? `        AssertInvariants("${op.name}");` : "        AssertInvariants();",
     );
     opLines.push("    }");
     opLines.push("");
@@ -171,24 +177,24 @@ export function renderEntity(
     const thrown = `throw new DomainException(${JSON.stringify(`Invariant violated: ${inv.source}`)})`;
     if (!emitTrace) {
       const check = inv.guard
-        ? `if ((${renderCsExpr(inv.guard)}) && !(${renderCsExpr(inv.expr)}))`
-        : `if (!(${renderCsExpr(inv.expr)}))`;
+        ? `if ((${renderCsExpr(inv.guard, renderCtx)}) && !(${renderCsExpr(inv.expr, renderCtx)}))`
+        : `if (!(${renderCsExpr(inv.expr, renderCtx)}))`;
       return [`        ${check} ${thrown};`];
     }
     const ok = `__inv_${i}_ok`;
     const traceCall = `DomainLog.LogTrace("{Event} aggregate={Aggregate} op={Op} expr={Expr} passed={Passed}", "invariant_evaluated", "${entity.name}", __op, ${JSON.stringify(inv.source)}, ${ok});`;
     if (inv.guard) {
       return [
-        `        if (${renderCsExpr(inv.guard)})`,
+        `        if (${renderCsExpr(inv.guard, renderCtx)})`,
         "        {",
-        `            var ${ok} = (${renderCsExpr(inv.expr)});`,
+        `            var ${ok} = (${renderCsExpr(inv.expr, renderCtx)});`,
         `            ${traceCall}`,
         `            if (!${ok}) ${thrown};`,
         "        }",
       ];
     }
     return [
-      `        var ${ok} = (${renderCsExpr(inv.expr)});`,
+      `        var ${ok} = (${renderCsExpr(inv.expr, renderCtx)});`,
       `        ${traceCall}`,
       `        if (!${ok}) ${thrown};`,
     ];
@@ -242,12 +248,14 @@ export function renderEntity(
       ]
     : [];
 
+  const extraUsings = [...usings].sort().map((n) => `using ${n};`);
   return (
     lines(
       "// Auto-generated.",
       "using System;",
       "using System.Collections.Generic;",
       "using System.Linq;",
+      ...extraUsings,
       `using ${ns}.Domain.Ids;`,
       `using ${ns}.Domain.Events;`,
       `using ${ns}.Domain.ValueObjects;`,
@@ -270,7 +278,7 @@ export function renderEntity(
       ...externHookLines,
       "",
       ...pullEventsLines,
-      `    ${hasExtern ? "internal" : "private"} void AssertInvariants(${emitTrace ? "string __op = \"<init>\"" : ""})`,
+      `    ${hasExtern ? "internal" : "private"} void AssertInvariants(${emitTrace ? 'string __op = "<init>"' : ""})`,
       "    {",
       ...invariantLines,
       "    }",

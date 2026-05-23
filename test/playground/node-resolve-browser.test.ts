@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveBare, type FileSource } from "../../web/src/engine/node-resolve.js";
+import { type FileSource, resolveBare } from "../../web/src/engine/node-resolve.js";
 
 // ---------------------------------------------------------------------------
 // Browser-condition resolution in the legacy `main` / `browser` package

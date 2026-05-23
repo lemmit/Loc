@@ -11,7 +11,7 @@ using Api.Application.Products.Responses;
 
 namespace Api.Application.Products.Queries;
 
-public sealed class AllHandler : IQueryHandler<AllQuery, System.Collections.Generic.IReadOnlyList<ProductResponse>>
+public sealed class AllHandler : IQueryHandler<AllQuery, IReadOnlyList<ProductResponse>>
 {
     private readonly IProductRepository _repo;
     public AllHandler(IProductRepository repo)
@@ -19,7 +19,7 @@ public sealed class AllHandler : IQueryHandler<AllQuery, System.Collections.Gene
         _repo = repo;
     }
 
-    public async ValueTask<System.Collections.Generic.IReadOnlyList<ProductResponse>> Handle(AllQuery q, CancellationToken ct)
+    public async ValueTask<IReadOnlyList<ProductResponse>> Handle(AllQuery q, CancellationToken ct)
     {
         var domain = await _repo.All(ct);
         return domain.Select(d => new ProductResponse(d.Id.Value, d.Sku, new MoneyResponse(d.Price.Amount, d.Price.Currency))).ToList();

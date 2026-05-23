@@ -113,10 +113,10 @@ public sealed class HttpContextCurrentUserAccessor : ICurrentUserAccessor
         get
         {
             var ctx = _http.HttpContext
-                ?? throw new System.InvalidOperationException(
+                ?? throw new InvalidOperationException(
                     "ICurrentUserAccessor requires an active HttpContext.");
             if (ctx.Items["currentUser"] is User u) return u;
-            throw new System.InvalidOperationException(
+            throw new InvalidOperationException(
                 "currentUser was not populated for this request — verify that " +
                 "UserMiddleware is mounted before MapControllers and that the " +
                 "request was authenticated.");
@@ -158,7 +158,7 @@ public sealed class UserMiddleware
         var path = ctx.Request.Path.HasValue ? ctx.Request.Path.Value : "/";
         foreach (var prefix in BypassPrefixes)
         {
-            if (path.StartsWith(prefix, System.StringComparison.OrdinalIgnoreCase))
+            if (path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
             {
                 await _next(ctx);
                 return;

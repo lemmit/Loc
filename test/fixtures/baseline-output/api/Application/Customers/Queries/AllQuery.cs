@@ -5,4 +5,4 @@ using Api.Application.Customers.Responses;
 
 namespace Api.Application.Customers.Queries;
 
-public sealed record AllQuery() : IQuery<System.Collections.Generic.IReadOnlyList<CustomerResponse>>;
+public sealed record AllQuery() : IQuery<IReadOnlyList<CustomerResponse>>;

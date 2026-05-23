@@ -1,10 +1,7 @@
 import type { AggregateIR, RepositoryIR } from "../../../ir/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
-import {
-  renderDotnetLogCall,
-  renderDotnetLogCallWithException,
-} from "../../_obs/render-dotnet.js";
+import { renderDotnetLogCall, renderDotnetLogCallWithException } from "../../_obs/render-dotnet.js";
 
 // ASP.NET Core controller emission.  One controller per aggregate root,
 // dispatching every endpoint through Mediator (`ISender`).  The
@@ -43,6 +40,12 @@ interface ControllerShape {
    *  on the structured stream.  Off keeps the operation handler at its
    *  pre-trace shape exactly. */
   emitTrace?: boolean;
+  /** Extra namespaces accumulated by the upstream
+   *  `wireToCommandArgument` calls (e.g. `System.Globalization` when
+   *  a datetime field needs `DateTime.Parse(..., CultureInfo, …)`).
+   *  Spliced into the using block so each controller imports only
+   *  the namespaces its own argument lowering touched. */
+  extraUsings?: readonly string[];
 }
 
 export function renderController(
@@ -76,7 +79,7 @@ export function renderController(
               // params) uses the implicit array literal.
               valueExpr:
                 op.paramNames.length === 0
-                  ? "System.Array.Empty<string>()"
+                  ? "Array.Empty<string>()"
                   : `new[] { ${op.paramNames.map((n) => `"${n}"`).join(", ")} }`,
             },
           ])}`,
@@ -109,7 +112,7 @@ export function renderController(
   const findBlocks = shape.finds.flatMap((f) => {
     const responseType =
       f.returnShape === "list"
-        ? `System.Collections.Generic.IReadOnlyList<${agg.name}Response>`
+        ? `IReadOnlyList<${agg.name}Response>`
         : f.returnShape === "optional"
           ? `${agg.name}Response?`
           : `${agg.name}Response`;
@@ -130,12 +133,14 @@ export function renderController(
     ];
   });
 
+  const extraUsingsLines = (shape.extraUsings ?? []).map((n) => `using ${n};`);
   return (
     lines(
       "// Auto-generated.",
       "using System;",
       "using System.Linq;",
       "using System.Threading.Tasks;",
+      ...extraUsingsLines,
       "using Mediator;",
       "using Microsoft.AspNetCore.Mvc;",
       "using Microsoft.Extensions.Logging;",
@@ -198,7 +203,14 @@ function renderCmdConstructorBody(args: string[], indent: string): string[] {
 
 export function renderExceptionFilter(ns: string, options?: { usesValidators?: boolean }): string {
   const usesValidators = !!options?.usesValidators;
+  // `Activity.Current` is referenced unconditionally below; the
+  // `using System.Diagnostics;` is therefore part of the file's
+  // baseline imports rather than something we'd derive from the body.
+  // Confined to this file — adding `System.Diagnostics` project-wide
+  // would expose `Activity` (a common DDD entity name) to every
+  // generated source file.
   return `// Auto-generated.${usesValidators ? "\nusing System.Linq;" : ""}
+using System.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.Extensions.Logging;
@@ -229,7 +241,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         // the structured log line without scraping headers.  Empty
         // string when no Activity is active (e.g. middleware errors
         // before the pipeline starts).
-        var trace_id = System.Diagnostics.Activity.Current?.TraceId.ToString() ?? "";${
+        var trace_id = Activity.Current?.TraceId.ToString() ?? "";${
           usesValidators
             ? `
         // FluentValidation arm — runs FIRST because

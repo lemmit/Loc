@@ -19,7 +19,7 @@
 // production.  `warn` → `warning` (Elixir's spelling).
 // ---------------------------------------------------------------------------
 
-import { LogEvents, type LogEventKey } from "./log-events.js";
+import { type LogEventKey, LogEvents } from "./log-events.js";
 
 const LEVEL_TO_METHOD: Record<string, string> = {
   trace: "debug",

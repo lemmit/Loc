@@ -2,6 +2,7 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Globalization;
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -28,8 +29,8 @@ public sealed class OrdersController : ControllerBase
     {
         var cmd = new CreateOrderCommand(
             request.CustomerId,
-            System.Enum.Parse<OrderStatus>(request.Status),
-            System.DateTime.Parse(request.PlacedAt, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal)
+            Enum.Parse<OrderStatus>(request.Status),
+            DateTime.Parse(request.PlacedAt, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal)
         );
         var id = await _mediator.Send(cmd);
         _log.LogInformation("{Event} aggregate={Aggregate} id={Id}", "aggregate_created", "Order", id.Value);
@@ -68,14 +69,14 @@ public sealed class OrdersController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<System.Collections.Generic.IReadOnlyList<OrderResponse>>> All()
+    public async Task<ActionResult<IReadOnlyList<OrderResponse>>> All()
     {
         var result = await _mediator.Send(new AllQuery());
         return Ok(result);
     }
 
     [HttpGet("by_customer")]
-    public async Task<ActionResult<System.Collections.Generic.IReadOnlyList<OrderResponse>>> ByCustomer([FromQuery] string customerId)
+    public async Task<ActionResult<IReadOnlyList<OrderResponse>>> ByCustomer([FromQuery] string customerId)
     {
         var result = await _mediator.Send(new ByCustomerQuery(customerId));
         return Ok(result);

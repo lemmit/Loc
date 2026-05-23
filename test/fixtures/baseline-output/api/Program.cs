@@ -1,4 +1,5 @@
 // Auto-generated.
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Api.Api;
 using Api.Domain.Common;
@@ -15,7 +16,7 @@ var builder = WebApplication.CreateBuilder(args);
     var connectionString = builder.Configuration.GetConnectionString("Default");
     if (string.IsNullOrWhiteSpace(connectionString))
     {
-        throw new System.InvalidOperationException(
+        throw new InvalidOperationException(
             "Missing connection string 'Default'. Set ConnectionStrings__Default " +
             "in the environment or appsettings.Development.json.");
     }
@@ -29,7 +30,7 @@ builder.Logging.ClearProviders();
 builder.Logging.AddJsonConsole(opts =>
 {
     opts.IncludeScopes = true;
-    opts.JsonWriterOptions = new System.Text.Json.JsonWriterOptions
+    opts.JsonWriterOptions = new JsonWriterOptions
     {
         Indented = false,
     };
@@ -82,9 +83,9 @@ builder.Services.AddControllers(opts =>
     // camelCase property names match the Hono backend's wire shape;
     // the cross-platform OpenAPI cross-check would diff otherwise.
     opts.JsonSerializerOptions.PropertyNamingPolicy =
-        System.Text.Json.JsonNamingPolicy.CamelCase;
+        JsonNamingPolicy.CamelCase;
     opts.JsonSerializerOptions.DictionaryKeyPolicy =
-        System.Text.Json.JsonNamingPolicy.CamelCase;
+        JsonNamingPolicy.CamelCase;
 });
 
 // Permissive CORS so a generated React frontend on a different port
@@ -127,7 +128,7 @@ app.MapGet("/ready", async (AppDbContext db, CancellationToken ct) =>
                 new { status = "not_ready", error = "database unreachable" },
                 statusCode: 503);
     }
-    catch (System.Exception ex)
+    catch (Exception ex)
     {
         return Results.Json(
             new { status = "not_ready", error = ex.Message },

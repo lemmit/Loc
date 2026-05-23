@@ -33,9 +33,9 @@ public sealed class ProductRepository : IProductRepository
         return found;
     }
 
-    public async Task<System.Collections.Generic.IReadOnlyList<Product>> FindManyByIdsAsync(System.Collections.Generic.IReadOnlyList<ProductId> ids, CancellationToken ct = default)
+    public async Task<IReadOnlyList<Product>> FindManyByIdsAsync(IReadOnlyList<ProductId> ids, CancellationToken ct = default)
     {
-        if (ids.Count == 0) return System.Array.Empty<Product>();
+        if (ids.Count == 0) return Array.Empty<Product>();
         return await _db.Products.Where(x => ids.Contains(x.Id)).ToListAsync(ct);
     }
 
@@ -54,13 +54,13 @@ public sealed class ProductRepository : IProductRepository
             await _events.DispatchAsync(ev, ct);
         }
     }
-    public async Task<List<Product>> All(System.Threading.CancellationToken ct = default)
+    public async Task<List<Product>> All(CancellationToken ct = default)
     {
         var result = await _db.Products.ToListAsync(ct);
         _log.LogDebug("{Event} aggregate={Aggregate} find={Find} rows={Rows}", "find_executed", "Product", "all", result.Count);
         return result;
     }
-    public async Task<Product?> BySku(string sku, System.Threading.CancellationToken ct = default)
+    public async Task<Product?> BySku(string sku, CancellationToken ct = default)
     {
         var result = await _db.Products.Where(x => x.Sku == sku).FirstOrDefaultAsync(ct);
         _log.LogDebug("{Event} aggregate={Aggregate} find={Find} rows={Rows}", "find_executed", "Product", "bySku", result == null ? 0 : 1);

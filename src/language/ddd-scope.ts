@@ -59,8 +59,9 @@ export class DddScopeProvider extends DefaultScopeProvider {
       // Outside an aggregate (operation-param-on-page, event field, etc.):
       // restrict to enums + value-objects + aggregates from the default
       // scope.  Entity parts are not addressable from there.
-      return this.filterScope(defaultScope, (d) =>
-        d.type === "EnumDecl" || d.type === "ValueObject" || d.type === "Aggregate",
+      return this.filterScope(
+        defaultScope,
+        (d) => d.type === "EnumDecl" || d.type === "ValueObject" || d.type === "Aggregate",
       );
     }
     // Inside an aggregate: filter out entity-parts owned by *other*

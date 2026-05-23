@@ -5,11 +5,11 @@ namespace Api.Domain.Orders;
 
 public interface IOrderRepository
 {
-    System.Threading.Tasks.Task<Order?> GetByIdAsync(OrderId id, System.Threading.CancellationToken ct = default);
-    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Order>> FindManyByIdsAsync(System.Collections.Generic.IReadOnlyList<OrderId> ids, System.Threading.CancellationToken ct = default);
-    System.Threading.Tasks.Task SaveAsync(Order aggregate, System.Threading.CancellationToken ct = default);
-    System.Threading.Tasks.Task<List<Order>> All(System.Threading.CancellationToken ct = default);
-    System.Threading.Tasks.Task<List<Order>> ByCustomer(string customerId, System.Threading.CancellationToken ct = default);
-    System.Threading.Tasks.Task<List<Order>> ActiveOrders(System.Threading.CancellationToken ct = default);
-    System.Threading.Tasks.Task<List<Order>> OrderSummary(System.Threading.CancellationToken ct = default);
+    Task<Order?> GetByIdAsync(OrderId id, CancellationToken ct = default);
+    Task<IReadOnlyList<Order>> FindManyByIdsAsync(IReadOnlyList<OrderId> ids, CancellationToken ct = default);
+    Task SaveAsync(Order aggregate, CancellationToken ct = default);
+    Task<List<Order>> All(CancellationToken ct = default);
+    Task<List<Order>> ByCustomer(string customerId, CancellationToken ct = default);
+    Task<List<Order>> ActiveOrders(CancellationToken ct = default);
+    Task<List<Order>> OrderSummary(CancellationToken ct = default);
 }

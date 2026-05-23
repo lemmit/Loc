@@ -43,7 +43,7 @@ public sealed class ProductsController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<System.Collections.Generic.IReadOnlyList<ProductResponse>>> All()
+    public async Task<ActionResult<IReadOnlyList<ProductResponse>>> All()
     {
         var result = await _mediator.Send(new AllQuery());
         return Ok(result);
