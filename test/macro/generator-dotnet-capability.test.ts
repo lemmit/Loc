@@ -189,3 +189,78 @@ describe(".NET generator: hand-written equivalents work without macro", () => {
     expect(docCs).toMatch(/public sealed class Doc : ISoftDeletable/);
   });
 });
+
+describe(".NET generator: context-level capability propagation", () => {
+  it("context-level `filter` propagates to per-EntityConfiguration on every aggregate (no `implements` -> fallback path)", async () => {
+    // Context-level filter without `implements` — every aggregate
+    // inherits the filter; the generator emits it per-config since
+    // there's no marker interface to scope a DbContext-level loop.
+    const model = await modelFrom(`
+      context Sales {
+        filter !this.isDeleted
+        aggregate Order {
+          subject: string
+          isDeleted: bool
+        }
+        aggregate Customer {
+          name: string
+          isDeleted: bool
+        }
+        repository Orders for Order { }
+        repository Customers for Customer { }
+      }
+    `);
+    const files = generateDotnet(model);
+    expect(files.get("Infrastructure/Persistence/Configurations/OrderConfiguration.cs")!)
+      .toMatch(/b\.HasQueryFilter\(x => !x\.IsDeleted\)/);
+    expect(files.get("Infrastructure/Persistence/Configurations/CustomerConfiguration.cs")!)
+      .toMatch(/b\.HasQueryFilter\(x => !x\.IsDeleted\)/);
+    // No DbContext-level loop — nothing to group by.
+    const ctx = files.get("Infrastructure/Persistence/AppDbContext.cs")!;
+    expect(ctx).not.toMatch(/foreach \(var entityType/);
+  });
+
+  it("context-level `implements` + `filter` propagates to ALL aggregates via the DbContext-level pass", async () => {
+    // This is the idiomatic shape: declare the capability once at
+    // the context boundary; every aggregate inside gets the marker
+    // interface, the filter helper, and the OnModelCreating dispatch.
+    const model = await modelFrom(`
+      context Sales {
+        implements "softDeletable"
+        filter !this.isDeleted
+        aggregate Order {
+          subject: string
+          isDeleted: bool
+        }
+        aggregate Customer {
+          name: string
+          isDeleted: bool
+        }
+        repository Orders for Order { }
+        repository Customers for Customer { }
+      }
+    `);
+    const files = generateDotnet(model);
+    // Marker interface (one) — every aggregate carries it.
+    expect([...files.keys()]).toContain("Domain/Common/ISoftDeletable.cs");
+    expect(files.get("Domain/Orders/Order.cs")!).toMatch(
+      /public sealed class Order : ISoftDeletable/,
+    );
+    expect(files.get("Domain/Customers/Customer.cs")!).toMatch(
+      /public sealed class Customer : ISoftDeletable/,
+    );
+    // Per-capability filter helper has ApplyTo* methods for both.
+    const helper = files.get("Infrastructure/Persistence/SoftDeletableFilters.cs")!;
+    expect(helper).toMatch(/ApplyToOrder\(ModelBuilder mb\)/);
+    expect(helper).toMatch(/ApplyToCustomer\(ModelBuilder mb\)/);
+    // DbContext-level loop installed.
+    const ctx = files.get("Infrastructure/Persistence/AppDbContext.cs")!;
+    expect(ctx).toMatch(/typeof\(ISoftDeletable\)/);
+    expect(ctx).toMatch(/SoftDeletableFilters\.Apply\(modelBuilder, entityType\.ClrType\)/);
+    // Per-config emission skipped to avoid double-application.
+    expect(files.get("Infrastructure/Persistence/Configurations/OrderConfiguration.cs")!)
+      .not.toMatch(/HasQueryFilter/);
+    expect(files.get("Infrastructure/Persistence/Configurations/CustomerConfiguration.cs")!)
+      .not.toMatch(/HasQueryFilter/);
+  });
+});
