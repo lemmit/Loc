@@ -1,0 +1,99 @@
+name: Phoenix observability events (runtime e2e)
+
+# Boots the generated Phoenix backend against a real postgres sidecar,
+# hits /health, then asserts the JSON-per-line stdout from the custom
+# <App>.LogFormatter carries the catalog envelope:
+#   server_starting → server_listening → request_start → request_end →
+#   server_shutdown → server_drained
+#
+# Catches drift the unit tests miss — e.g. the JSON formatter dropping
+# a metadata key, Application.stop/1 not firing on SIGTERM, the
+# :telemetry handler from Bite 1 not bridging endpoint events to the
+# catalog identity.
+#
+# Triggers narrowly: only when the Phoenix generator, the catalog, the
+# shared renderer, or this workflow itself changes.  Other PRs don't
+# pay the hex deps + Ash compile cost (~5-8min cold, ~90s warm).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/generator/phoenix-live-view/**'
+      - 'src/generator/_obs/**'
+      - 'src/platform/phoenix-live-view.ts'
+      - 'designs/ashPhoenix/**'
+      - 'test/e2e/observability-events-phoenix.test.ts'
+      - 'package.json'
+      - '.github/workflows/phoenix-obs-e2e.yml'
+  pull_request:
+    paths:
+      - 'src/generator/phoenix-live-view/**'
+      - 'src/generator/_obs/**'
+      - 'src/platform/phoenix-live-view.ts'
+      - 'designs/ashPhoenix/**'
+      - 'test/e2e/observability-events-phoenix.test.ts'
+      - 'package.json'
+      - '.github/workflows/phoenix-obs-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  phoenix-obs-e2e:
+    runs-on: ubuntu-latest
+    # Cold path: hex deps + Ash compile + postgres pull is ~5-8min.
+    # Warm path (with the deps cache below): ~90s.  15min is a tight
+    # cap that protects CI minutes while leaving headroom for a slow
+    # hex.pm fetch.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # erlef/setup-beam is the canonical action for Elixir/OTP on CI —
+      # version pinning here matches the hexpm/elixir docker tag used
+      # by phoenix-build.yml so the dep set resolves identically.
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27.0'
+          elixir-version: '1.17.2'
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      # Cache the hex dep tree + _build outputs across runs.  The key
+      # tracks the generator file that emits mix.exs so a dep change
+      # mints a fresh entry, but unrelated emitter tweaks reuse the
+      # warm cache (~5min → ~30s on the heavy steps).
+      - name: Cache hex deps + _build
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.hex
+            ~/.mix
+          # The fixture project is generated into a tmpdir per test
+          # run, so we can't cache deps/ + _build/ at a stable path;
+          # caching the global hex + mix dirs is the next best thing
+          # and still saves the http fetch.
+          key: hex-mix-${{ hashFiles('src/generator/phoenix-live-view/index.ts') }}
+          restore-keys: |
+            hex-mix-
+
+      - name: Run Phoenix observability runtime e2e
+        env:
+          LOOM_OBS_E2E_PHOENIX: '1'
+          DOCKER_BUILDKIT: '1'
+        run: npx vitest run test/e2e/observability-events-phoenix.test.ts --reporter=verbose
+
+      - name: Surface failure context
+        if: failure()
+        run: |
+          echo '## Phoenix runtime e2e failed' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo 'See the "Run Phoenix observability runtime e2e" step above for the captured server stdout.' >> $GITHUB_STEP_SUMMARY
+          echo 'The test asserts the <App>.LogFormatter stream carries the catalog envelope (server_starting → server_listening → request_start → request_end → server_shutdown → server_drained).' >> $GITHUB_STEP_SUMMARY
