@@ -29,18 +29,27 @@ export function createApp(
   // Liveness probe — cheap, no I/O.  K8s livenessProbe / docker-compose
   // healthcheck use this to decide "is the process alive?".  A DB blip
   // must NOT mark the pod not-alive (that restarts the container);
-  // DB-touching checks live on /ready instead.
-  app.get("/health", (c) => c.json({ status: "ok" }));
+  // DB-touching checks live on /ready instead.  Emits health_ok
+  // (debug) so probe traffic shows up under LOG_LEVEL=debug — useful
+  // when diagnosing why a load balancer considers the pod down.
+  app.get("/health", (c) => {
+    (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").debug({ event: "health_ok", checks: ["liveness"] });
+    return c.json({ status: "ok" });
+  });
   // Readiness probe — pings the DB.  K8s readinessProbe uses this to
-  // decide "should I send traffic to this pod?".  Returns 503 with a
-  // one-line cause when the DB is unreachable so operators see the
-  // reason in the probe log instead of having to exec into the pod.
+  // decide "should I send traffic to this pod?".  On failure, emits
+  // db_error (error) + health_degraded (debug) so an operator can
+  // pin the cause without exec'ing into the pod; the 503 envelope
+  // still carries the message for the probe log.
   app.get("/ready", async (c) => {
     try {
       await db.execute(sql`select 1`);
+      (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").debug({ event: "health_ok", checks: ["readiness", "db"] });
       return c.json({ status: "ready" });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").error({ event: "db_error", error: message });
+      (c as unknown as { get(k: "log"): import("../obs/log").RequestLogger }).get("log").debug({ event: "health_degraded", checks: ["db"] });
       return c.json({ status: "not_ready", error: message }, 503);
     }
   });
