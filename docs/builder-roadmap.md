@@ -525,9 +525,16 @@ Phasing:
   usages via the shared `member-refs` resolver) and `deleteField` (preserves
   surrounding layout); containment also gets rename. Gated by the v2 e2e
   (rename + delete a field on the canvas).
-- **Phase 4b** — remaining v1 parity: deployable bindings (modules / serves /
-  ui / targets), repository finds (filter + params), emit-event repointing on
-  the canvas. Once landed, v1 can be deprecated.
+- ~~**Phase 4b (emit-event repointing).**~~ Done: an emit stmt node's event
+  is a `Select` over every `EventDecl` in the model; on change v2 calls v1's
+  `setEmitEvent` (rewrites just the event reference token, parse-guarded).
+  `EmitRow` gained two additive props (`events` + `onRepointEvent`) — when
+  unset it renders the old dimmed label, so v1 is unaffected. Gated by the
+  v2 e2e (repoint `Order.confirm`'s emit from `OrderConfirmed` to
+  `LineAdded`).
+- **Phase 4c** — remaining v1 parity: deployable bindings (modules / serves /
+  ui / targets) and repository finds (filter + params) on the canvas. Once
+  landed, v1 can be deprecated.
 - **Phase 5** — polish: per-view positions, search / coverage / grouped layout
   adapted per zoom level, transitions on drill, mobile passes.
 

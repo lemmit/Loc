@@ -214,13 +214,18 @@ export function AssignRow({ view, targets, valueEditor, onToggleEditor, error, o
 // one `name: value` row per field, with add / delete. Each field value is a text
 // input with a `ƒx` toggle to the inline structured editor (which edits just
 // that field's value expression). Reconstructs `emit Event { a: x, b: y }`.
-export function EmitRow({ view, error, onCommit, onClearError, renderFieldEditor, onToggleField }: {
+export function EmitRow({ view, error, onCommit, onClearError, renderFieldEditor, onToggleField, events, onRepointEvent }: {
   view: { event: string; fields: { name: string; value: string }[] };
   error: boolean;
   onCommit: (text: string) => void;
   onClearError: () => void;
   renderFieldEditor?: (fieldIndex: number) => ReactNode;
   onToggleField?: (fieldIndex: number) => void;
+  /** Candidates for the event-name Select (the playground's event declarations).
+   *  Provide together with `onRepointEvent` to make the event re-pointable
+   *  inline; without these the event renders as a dimmed label. */
+  events?: string[];
+  onRepointEvent?: (eventName: string) => void;
 }): JSX.Element {
   const [fields, setFields] = useState(view.fields);
   const reconstruct = (fs: { name: string; value: string }[]): string => {
@@ -235,7 +240,23 @@ export function EmitRow({ view, error, onCommit, onClearError, renderFieldEditor
   return (
     <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
       <Group gap={4} wrap="nowrap" align="center">
-        <Text size="xs" c="dimmed" style={{ fontFamily: "monospace" }}>emit {view.event}</Text>
+        {events && onRepointEvent ? (
+          <Group gap={4} wrap="nowrap" align="center">
+            <Text size="xs" c="dimmed" style={{ fontFamily: "monospace" }}>emit</Text>
+            <Select
+              size="xs"
+              w={170}
+              data={events}
+              value={view.event}
+              allowDeselect={false}
+              data-testid="c4system-emit-event"
+              styles={MONO}
+              onChange={(v) => { if (v) onRepointEvent(v); }}
+            />
+          </Group>
+        ) : (
+          <Text size="xs" c="dimmed" style={{ fontFamily: "monospace" }}>emit {view.event}</Text>
+        )}
         <Button size="compact-xs" variant="subtle" data-testid="c4system-emit-field-add" onClick={() => setFields((p) => [...p, { name: "", value: "" }])}>
           + field
         </Button>

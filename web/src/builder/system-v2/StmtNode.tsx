@@ -26,6 +26,10 @@ export interface StmtNodeData {
   onToggleArg?: (argIndex: number) => void;
   renderFieldEditor?: (fieldIndex: number) => ReactNode;
   onToggleField?: (fieldIndex: number) => void;
+  /** Candidates for an emit row's event Select; provide together with
+   *  `onRepointEvent` to make the event re-pointable inline. */
+  events?: string[];
+  onRepointEvent?: (eventName: string) => void;
 }
 
 const KIND_LABEL: Record<StmtView["kind"], string> = {
@@ -87,6 +91,8 @@ export default function StmtNode({ data }: NodeProps): JSX.Element {
         onClearError={clear}
         renderFieldEditor={d.renderFieldEditor}
         onToggleField={d.onToggleField}
+        events={d.events}
+        onRepointEvent={d.onRepointEvent}
       />
     );
   } else {
