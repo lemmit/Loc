@@ -200,3 +200,115 @@ describe("context-level propagation", () => {
     expect(order.implementsCapabilities).toEqual(["auditable"]);
   });
 });
+
+describe("capability-scoped context filters: `filter for \"<name>\"`", () => {
+  it("propagates only to aggregates with matching `implements`", async () => {
+    const ir = await buildLoomModel(`
+      system Demo {
+        module M {
+          context C {
+            filter for "softDeletable" !this.isDeleted
+            aggregate Order {
+              subject: string
+              isDeleted: bool
+              implements "softDeletable"
+            }
+            aggregate Public {
+              name: string
+            }
+          }
+        }
+      }
+    `);
+    const order = findAgg(ir, "Order");
+    const pub = findAgg(ir, "Public");
+    expect(order.contextFilters?.length).toBe(1);
+    expect(pub.contextFilters).toBeUndefined();
+  });
+
+  it("unqualified context filter still propagates to every aggregate", async () => {
+    const ir = await buildLoomModel(`
+      system Demo {
+        module M {
+          context C {
+            filter !this.isDeleted
+            aggregate Order {
+              subject: string
+              isDeleted: bool
+            }
+            aggregate Customer {
+              name: string
+              isDeleted: bool
+            }
+          }
+        }
+      }
+    `);
+    expect(findAgg(ir, "Order").contextFilters?.length).toBe(1);
+    expect(findAgg(ir, "Customer").contextFilters?.length).toBe(1);
+  });
+
+  it("multiple capability-scoped filters route to the right aggregates", async () => {
+    const ir = await buildLoomModel(`
+      system Demo {
+        module M {
+          context C {
+            filter for "softDeletable" !this.isDeleted
+            filter for "drafted" !this.isDraft
+            aggregate Soft {
+              subject: string
+              isDeleted: bool
+              implements "softDeletable"
+            }
+            aggregate Draft {
+              subject: string
+              isDraft: bool
+              implements "drafted"
+            }
+            aggregate Both {
+              subject: string
+              isDeleted: bool
+              isDraft: bool
+              implements "softDeletable"
+              implements "drafted"
+            }
+            aggregate Neither {
+              subject: string
+            }
+          }
+        }
+      }
+    `);
+    expect(findAgg(ir, "Soft").contextFilters?.length).toBe(1);
+    expect(findAgg(ir, "Draft").contextFilters?.length).toBe(1);
+    expect(findAgg(ir, "Both").contextFilters?.length).toBe(2);
+    expect(findAgg(ir, "Neither").contextFilters).toBeUndefined();
+  });
+});
+
+describe("capability-scoped context stamps: `stamp for \"<name>\"`", () => {
+  it("`stamp for \"auditable\" onCreate { ... }` propagates only to opt-ins", async () => {
+    const ir = await buildLoomModel(`
+      system Demo {
+        user { id: string  role: string }
+        module M {
+          context C {
+            stamp for "auditable" onCreate {
+              createdAt := now()
+            }
+            aggregate Order {
+              subject: string
+              createdAt: datetime
+              implements "auditable"
+            }
+            aggregate Plain {
+              subject: string
+            }
+          }
+        }
+      }
+    `);
+    expect(findAgg(ir, "Order").contextStamps?.length).toBe(1);
+    expect(findAgg(ir, "Plain").contextStamps).toBeUndefined();
+  });
+});

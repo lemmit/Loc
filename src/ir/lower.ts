@@ -1111,11 +1111,13 @@ function lowerAggregate(
   // Capability source nodes — read structurally from agg.members,
   // concatenated with anything propagated from the enclosing context.
   // Context-level capabilities lower in the context's env (which
-  // doesn't bind `this` to any aggregate), then re-bind here.  Both
-  // routes converge to the same AggregateIR fields.
-  const filters = collectFilters(agg, inner, contextLevelCaps.filters);
-  const stamps = collectStamps(agg, inner, contextLevelCaps.stamps);
+  // doesn't bind `this` to any aggregate), then re-bind here.
+  // ImplementsCaps is computed FIRST because qualified
+  // (`filter for "X"`) context-level decls only propagate to
+  // aggregates whose implements set includes the qualifier name.
   const implementsCaps = collectImplements(agg, contextLevelCaps.implementsCaps);
+  const filters = collectFilters(agg, inner, contextLevelCaps, implementsCaps);
+  const stamps = collectStamps(agg, inner, contextLevelCaps, implementsCaps);
   return {
     name: agg.name,
     idValueType,
@@ -1141,62 +1143,105 @@ function lowerAggregate(
 // ---------------------------------------------------------------------------
 
 interface ContextLevelCapabilities {
-  filters: ExprIR[];
-  stamps: ContextStampIR[];
+  /** Unqualified filters — propagate to every aggregate in the
+   * context, regardless of `implements`. */
+  unqualifiedFilters: ExprIR[];
+  /** Capability-qualified filters — propagate only to aggregates
+   * whose `implementsCapabilities` includes the matching name. */
+  qualifiedFilters: Array<{ capability: string; predicate: ExprIR }>;
+  /** Unqualified stamps — propagate to every aggregate. */
+  unqualifiedStamps: ContextStampIR[];
+  /** Capability-qualified stamps — propagate only to opt-ins. */
+  qualifiedStamps: Array<{ capability: string; stamp: ContextStampIR }>;
+  /** `implements` declarations at context level propagate to every
+   * aggregate's `implementsCapabilities` (today; "for" qualifier on
+   * implements is intentionally not supported — implements IS the
+   * opt-in mechanism, qualifying it would be redundant). */
   implementsCaps: string[];
 }
 
 const EMPTY_CONTEXT_CAPABILITIES: ContextLevelCapabilities = Object.freeze({
-  filters: [],
-  stamps: [],
+  unqualifiedFilters: [],
+  qualifiedFilters: [],
+  unqualifiedStamps: [],
+  qualifiedStamps: [],
   implementsCaps: [],
 }) as ContextLevelCapabilities;
 
 /** Scan a BoundedContext's members for FilterDecl/StampDecl/
- * ImplementsDecl nodes, lower them in the context's env, and return
- * them as a bundle for propagation to every aggregate inside.  This
- * is the source-level mechanism behind "context Sales { filter ... }"
- * — the capability lowers once at the context layer and applies to
- * each aggregate as if the user had written it per-aggregate. */
+ * ImplementsDecl nodes, lower them in the context's env, and
+ * partition by qualifier.  Unqualified context-level decls apply to
+ * every aggregate inside; qualified (`for "<name>"`) decls apply
+ * only to aggregates whose `implements` matches. */
 function collectContextLevelCapabilities(
   ctx: BoundedContext,
   env: Env,
 ): ContextLevelCapabilities {
-  const filters: ExprIR[] = [];
-  const stamps: ContextStampIR[] = [];
+  const unqualifiedFilters: ExprIR[] = [];
+  const qualifiedFilters: Array<{ capability: string; predicate: ExprIR }> = [];
+  const unqualifiedStamps: ContextStampIR[] = [];
+  const qualifiedStamps: Array<{ capability: string; stamp: ContextStampIR }> = [];
   const implementsCaps: string[] = [];
   for (const m of ctx.members ?? []) {
     if (m.$type === "FilterDecl") {
-      filters.push(lowerExpr((m as { expr: Expression }).expr, env));
+      const f = m as { expr: Expression; capability?: string };
+      const predicate = lowerExpr(f.expr, env);
+      if (f.capability) {
+        qualifiedFilters.push({ capability: f.capability, predicate });
+      } else {
+        unqualifiedFilters.push(predicate);
+      }
     } else if (m.$type === "StampDecl") {
-      stamps.push(lowerStampDecl(m as unknown as StampDeclLike, env));
+      const s = m as unknown as StampDeclLike & { capability?: string };
+      const lowered = lowerStampDecl(s, env);
+      if (s.capability) {
+        qualifiedStamps.push({ capability: s.capability, stamp: lowered });
+      } else {
+        unqualifiedStamps.push(lowered);
+      }
     } else if (m.$type === "ImplementsDecl") {
       implementsCaps.push((m as { name: string }).name);
     }
   }
-  return { filters, stamps, implementsCaps };
+  return {
+    unqualifiedFilters,
+    qualifiedFilters,
+    unqualifiedStamps,
+    qualifiedStamps,
+    implementsCaps,
+  };
 }
 
 function collectFilters(
   agg: Aggregate,
   env: Env,
-  propagated: readonly ExprIR[],
+  ctxCaps: ContextLevelCapabilities,
+  aggImplementsCaps: readonly string[],
 ): ExprIR[] {
   const own = (agg.members ?? [])
     .filter((m) => m.$type === "FilterDecl")
     .map((m) => lowerExpr((m as { expr: Expression }).expr, env));
-  return [...propagated, ...own];
+  // Qualified context filters propagate only to aggregates whose
+  // implements set includes the qualifier name.
+  const matchingQualified = ctxCaps.qualifiedFilters
+    .filter((q) => aggImplementsCaps.includes(q.capability))
+    .map((q) => q.predicate);
+  return [...ctxCaps.unqualifiedFilters, ...matchingQualified, ...own];
 }
 
 function collectStamps(
   agg: Aggregate,
   env: Env,
-  propagated: readonly ContextStampIR[],
+  ctxCaps: ContextLevelCapabilities,
+  aggImplementsCaps: readonly string[],
 ): ContextStampIR[] {
   const own = (agg.members ?? [])
     .filter((m) => m.$type === "StampDecl")
     .map((m) => lowerStampDecl(m as unknown as StampDeclLike, env));
-  return [...propagated, ...own];
+  const matchingQualified = ctxCaps.qualifiedStamps
+    .filter((q) => aggImplementsCaps.includes(q.capability))
+    .map((q) => q.stamp);
+  return [...ctxCaps.unqualifiedStamps, ...matchingQualified, ...own];
 }
 
 function collectImplements(agg: Aggregate, propagated: readonly string[]): string[] {

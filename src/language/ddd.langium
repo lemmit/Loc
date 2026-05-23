@@ -569,11 +569,24 @@ AggregateMember:
 // At ContextMember position these propagate to every aggregate
 // inside the context at lowering time (see `lowerContext`).
 
+// `filter <expr>` declares a query-filter predicate.  At aggregate
+// scope it applies to that aggregate only.  At context scope it
+// applies to every aggregate inside (propagated at lowering time).
+//
+// `filter for "<name>" <expr>` is a capability-scoped variant: it
+// only applies to aggregates whose `implements "<name>"` matches.
+// Aggregates without the matching opt-in ignore the declaration.
+// Useful for "context Sales { filter for 'softDeletable' !this.isDeleted }"
+// where some aggregates participate and some don't.
 FilterDecl:
-    'filter' expr=Expression;
+    'filter' ('for' capability=STRING)? expr=Expression;
 
+// `stamp <event> { ... }` declares lifecycle-stamping assignments.
+// Same scoping rules as FilterDecl: at aggregate scope applies to
+// that aggregate; at context scope propagates to every aggregate;
+// `for "<name>"` qualifier restricts propagation to opt-ins.
 StampDecl:
-    'stamp' event=StampEvent '{'
+    'stamp' ('for' capability=STRING)? event=StampEvent '{'
         assignments+=AssignOrCallStmt*
     '}';
 
