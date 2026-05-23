@@ -154,6 +154,64 @@ describe("typescript generator", () => {
   });
 
   describe("request observability", () => {
+    it("emits obs/als.ts wiring the bound child logger into AsyncLocalStorage", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS);
+      const als = files.get("obs/als.ts")!;
+      // Non-HTTP code (repository, dispatcher, domain on --trace) resolves
+      // the request-scoped logger through `requestLog()` which reads from
+      // Node's AsyncLocalStorage — wired by the request-id middleware.
+      expect(als).toMatch(/from "node:async_hooks"/);
+      expect(als).toMatch(
+        /export const requestLogStore = new AsyncLocalStorage<\{ log: RequestLogger \}>/,
+      );
+      // Outside-request fallback to baseLogger so the helper never throws.
+      expect(als).toMatch(/export function requestLog\(\): RequestLogger \{[\s\S]+baseLogger/);
+    });
+
+    it("request-id middleware wraps next() in requestLogStore.run so non-HTTP code resolves the same logger", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS);
+      const reqId = files.get("obs/request-id.ts")!;
+      expect(reqId).toMatch(/import \{ requestLogStore \} from "\.\/als"/);
+      expect(reqId).toMatch(/await requestLogStore\.run\(\{ log \}, async \(\) => \{/);
+    });
+
+    it("repository emits aggregate_loaded / repository_save / find_executed / event_dispatched via requestLog()", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS);
+      const repo = files.get("db/repositories/order-repository.ts")!;
+      // ALS-backed logger import — repository methods have no `c` in scope.
+      expect(repo).toMatch(/import \{ requestLog \} from "\.\.\/\.\.\/obs\/als"/);
+      // findById: both not-found and found paths carry the aggregate_loaded
+      // debug line — `found:false` on the empty branch, `found:true` on the
+      // hydrated branch.
+      expect(repo).toMatch(
+        /requestLog\(\)\.debug\(\{ event: "aggregate_loaded", aggregate: "Order", id: id as string, found: false \}\)/,
+      );
+      expect(repo).toMatch(
+        /requestLog\(\)\.debug\(\{ event: "aggregate_loaded", aggregate: "Order", id: id as string, found: true \}\)/,
+      );
+      // save: one repository_save debug after the transaction commits.
+      expect(repo).toMatch(
+        /requestLog\(\)\.debug\(\{ event: "repository_save", aggregate: "Order", id: aggregate\.id as string \}\)/,
+      );
+      // dispatcher: one event_dispatched info per pulled event.  The
+      // `(event as object).constructor.name` cast handles the corner case
+      // where the aggregate declares no events (pullEvents returns never[]).
+      expect(repo).toMatch(
+        /requestLog\(\)\.info\(\{ event: "event_dispatched", event_type: \(event as object\)\.constructor\.name, aggregate: "Order", id: aggregate\.id as string \}\)/,
+      );
+      // find_executed debug at every find return — including the empty-rows
+      // branch so a no-result query is still observable.
+      expect(repo).toMatch(
+        /requestLog\(\)\.debug\(\{ event: "find_executed", aggregate: "Order", find: "[^"]+", rows: 0 \}\)/,
+      );
+      expect(repo).toMatch(
+        /requestLog\(\)\.debug\(\{ event: "find_executed", aggregate: "Order", find: "[^"]+", rows: __result\.length \}\)/,
+      );
+    });
+
     it("emits obs/log.ts with a configured pino base logger", async () => {
       const model = await buildModel("examples/sales.ddd");
       const files = generateTypeScript(model, HONO_V4_PINS);
