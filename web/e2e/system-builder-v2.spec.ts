@@ -219,3 +219,41 @@ test("Model v2 renames a context and deletes an operation (v2-only kinds)", asyn
     .poll(async () => page.locator('.react-flow__node[data-id^="operation:"]').count(), { timeout: 5_000 })
     .toBe(opsBefore - 1);
 });
+
+test("Model v2 renames and deletes an aggregate field (renameMember + deleteField)", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+  await page.getByTestId("doc-tab-model-v2").click();
+  await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
+
+  // Drill into Order's aggregate view to see its fields.
+  await page.locator('.react-flow__node[data-id^="system:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="module:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="context:"]').first().click();
+  await page.locator('.react-flow__node[data-id="aggregate:Order"]').click();
+
+  // Pick any field node, rename it, and assert the renamed node appears.
+  const field = page.locator('[data-construct-kind="field"]').first();
+  await expect(field).toBeVisible();
+  const oldName = await field.getAttribute("data-construct-name");
+  expect(oldName).toBeTruthy();
+  await field.getByTestId("c4system-v2-rename").click();
+  await page.getByTestId("c4system-v2-rename-input").fill("fieldRenamed");
+  await page.getByTestId("c4system-v2-rename-input").press("Enter");
+  await expect(
+    page.locator('[data-construct-kind="field"][data-construct-name="fieldRenamed"]'),
+  ).toBeVisible({ timeout: 5_000 });
+
+  // Delete it via the on-node × → field count drops.
+  const fieldsBefore = await page.locator('[data-construct-kind="field"]').count();
+  await page
+    .locator('[data-construct-kind="field"][data-construct-name="fieldRenamed"]')
+    .getByTestId("c4system-v2-delete")
+    .click();
+  await expect.poll(async () => page.locator('[data-construct-kind="field"]').count(), { timeout: 5_000 }).toBe(
+    fieldsBefore - 1,
+  );
+});
