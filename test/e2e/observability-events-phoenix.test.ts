@@ -116,10 +116,28 @@ const FIXTURE_DDD = `system PhxObs {
 }
 `;
 
-describe.skipIf(!ENABLED || !hasDocker() || !hasElixir())(
+describe.skipIf(!ENABLED)(
   "generated Phoenix backend emits the observability catalog on stdout (LOOM_OBS_E2E_PHOENIX=1)",
   () => {
     it("boot + /health round-trip emits the catalog lifecycle + request bracket", async () => {
+      // Prerequisite check INSIDE the test (not in skipIf) so that
+      // LOOM_OBS_E2E_PHOENIX=1 with missing docker / mix fails loudly
+      // rather than passing silently — silent-skip would hide CI
+      // environment drift.
+      if (!hasDocker()) {
+        throw new Error(
+          "LOOM_OBS_E2E_PHOENIX=1 set but docker daemon is unreachable. " +
+            "The suite needs docker for the postgres sidecar. " +
+            "Check the runner has docker enabled (GitHub-hosted ubuntu runners do by default).",
+        );
+      }
+      if (!hasElixir()) {
+        throw new Error(
+          "LOOM_OBS_E2E_PHOENIX=1 set but `mix` is not on PATH. " +
+            "The suite needs Erlang/OTP + Elixir. " +
+            "Add `erlef/setup-beam@v1` with `otp-version: '27.0'` and `elixir-version: '1.17.2'` to the workflow.",
+        );
+      }
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-obs-px-"));
       const dddPath = path.join(outDir, "phx-obs.ddd");
       fs.writeFileSync(dddPath, FIXTURE_DDD);

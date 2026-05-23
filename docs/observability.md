@@ -133,15 +133,22 @@ Each suite:
 6. `SIGTERM`s the process group; waits for exit.
 7. Parses the JSON stream and asserts the catalog envelope + lifecycle order.
 
-`.github/workflows/dotnet-obs-e2e.yml` and `phoenix-obs-e2e.yml` run
-the .NET and Phoenix suites on every PR that touches their generator
-or the catalog. The Hono suite runs locally on demand.
+`.github/workflows/{hono,dotnet,phoenix}-obs-e2e.yml` run their
+respective suites on every PR that touches the matching generator,
+the shared catalog, or the renderer. Each opts in via the
+backend-specific env var (`LOOM_OBS_E2E*`) and skips locally when
+not enabled.
 
-Local prerequisites: docker (for the postgres sidecar) and the
-backend's native toolchain — `dotnet` SDK 8+ for the .NET suite,
-`mix` + Erlang/OTP for the Phoenix suite. Each suite skips cleanly
-when prerequisites aren't available so a misconfigured environment
-surfaces as SKIP, not a noisy fail.
+Prerequisites:
+- **Hono**: Node only — runs in pure Node, no sidecar required (the
+  generated pg pool is lazy).
+- **.NET**: docker (for the postgres sidecar) + `dotnet` SDK 8+.
+- **Phoenix**: docker + `mix` + Erlang/OTP.
+
+When the env var is set but a prereq is missing, the suite **fails
+loudly with an actionable message** rather than skipping silently —
+so a misconfigured CI surfaces as a real failure pointing at what to
+add to the workflow.
 
 ## Extending the catalog
 
