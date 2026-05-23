@@ -175,12 +175,30 @@ export default function App(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace.persistedSource]);
 
-  const initialSource = useMemo(
+  // Content of the currently-picked example.  Drives the editor's
+  // initial value for `/workspace/main.ddd`; non-main files take
+  // their content from `sources.files` (Phase 2b2).
+  const exampleSource = useMemo(
     () =>
       augmentedExamplesList.find((e) => e.id === exampleId)?.source ??
       defaultExample.source,
     [exampleId, augmentedExamplesList],
   );
+
+  // Editor's seed value for the active file.  Precedence:
+  //   1. Persisted VFS content for this path (multi-file files
+  //      survive tab switches and reloads via IDB).
+  //   2. Chosen example (main.ddd only — examples are single-file).
+  //   3. Empty body with a stub comment (newly-created non-main
+  //      file before the user types anything).
+  // The editor remounts via `key={…activePath}` when the active
+  // path changes, picking up this freshly-computed value each time.
+  const initialSource = useMemo(() => {
+    const persisted = sources.files.get(sources.activePath);
+    if (persisted !== undefined) return persisted;
+    if (sources.activePath === "/workspace/main.ddd") return exampleSource;
+    return "// New file — declare a context, valueobject, or enum here.\n";
+  }, [sources.files, sources.activePath, exampleSource]);
 
   const [pipeline, dispatch] = useReducer(pipelineReducer, initialPipelineState);
 
@@ -378,24 +396,41 @@ export default function App(): JSX.Element {
     void client.vfsWrite(entries);
   }, [workspace.loaded, workspace.vfs, buildClientReady]);
 
+  // Sync `sourceRef` whenever the active file's initial content
+  // changes — happens both on example switch AND on multi-file tab
+  // switch (Phase 2b2).  Handlers reading `sourceRef.current` see
+  // the active file's content.  Keep this effect cheap; the heavy
+  // "new project" reset below is gated on exampleId only.
   useEffect(() => {
     sourceRef.current = initialSource;
-    writeHashSource(initialSource);
-    dispatch({ type: "RESET" });
-    setDiagnostics([]);
-    setSelectedPath(null);
-    // Drop the retained preview so the iframe remounts for the new
-    // example instead of hot-swapping the previous app's bundle.
-    setPreviewBundle(null);
-    setPreviewBooted(false);
-    // The live log streams belong to the previous example's runtime —
-    // clear them so stale backend/app output doesn't bleed across.
-    setBackendLog([]);
-    setAppLog([]);
-    void engineRef.current?.reset();
     scheduleAutoGenerate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSource]);
+
+  // Heavy reset — pipeline state, diagnostics, preview, logs,
+  // runtime engine — fires only on a genuine "new project" picker
+  // change (the example dropdown).  A multi-file tab switch is NOT
+  // a new project: the user is still working on the same workspace,
+  // so we preserve all of these.
+  //
+  // URL hash always tracks main.ddd content (single-file sharing
+  // is a Stage-3 limitation, see docs/multi-file-source.md), so we
+  // sync it here from `sources.files.get(main.ddd)` rather than
+  // from the active file.
+  useEffect(() => {
+    const mainContent =
+      sourcesRef.current.files.get("/workspace/main.ddd") ?? exampleSource;
+    writeHashSource(mainContent);
+    dispatch({ type: "RESET" });
+    setDiagnostics([]);
+    setSelectedPath(null);
+    setPreviewBundle(null);
+    setPreviewBooted(false);
+    setBackendLog([]);
+    setAppLog([]);
+    void engineRef.current?.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exampleId]);
 
   const hashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scheduleHashSync = (text: string): void => {
@@ -782,21 +817,36 @@ export default function App(): JSX.Element {
     getSource: () => sourceRef.current,
     workspace,
     activeSourcePath: sources.activePath,
+    sourceFiles: sources.files,
+    setActiveSourcePath: sources.setActivePath,
+    // New-file: seed VFS with a stub body so the editor has
+    // something non-empty to mount against, then flip the active
+    // path.  The Files tab strip validates the basename before
+    // calling, so we trust `path` here.
+    createSourceFile: (path: string) => {
+      const s = sourcesRef.current;
+      const seed = "// New file — declare a context, valueobject, or enum here.\n";
+      s.write(path, seed);
+      s.setActivePath(path);
+    },
+    deleteSourceFile: sources.delete,
     lspClient: lspClientRef.current,
     buildClient: buildClientRef.current,
     engine: engineRef.current,
     onSourceChange: (text, origin) => {
       sourceRef.current = text;
-      scheduleHashSync(text);
+      const s = sourcesRef.current;
+      // URL hash is single-file by design (Stage 3 would generalise
+      // it).  Only sync when editing main.ddd so the hash doesn't
+      // silently flip to a non-main file's content on a tab edit.
+      if (s.activePath === "/workspace/main.ddd") {
+        scheduleHashSync(text);
+      }
       scheduleAutoGenerate();
       // Route the persisted write through the multi-file controller
-      // so the workspace-sources state stays in sync.  Today the
-      // active path is `/workspace/main.ddd` (Phase 2b1 keeps it
-      // constant); the controller's `write` is a thin wrapper over
-      // `vfs.write` plus a `files` map refresh.  Read through the
-      // ref so the active path reflects the latest hook snapshot if
-      // a Phase-2b2 tab switch lands mid-typing.
-      const s = sourcesRef.current;
+      // so the workspace-sources state stays in sync.  Read through
+      // the ref so the active path reflects the latest hook snapshot
+      // if a Phase-2b2 tab switch lands mid-typing.
       s.write(s.activePath, text);
       // Builder (and any non-editor) edits don't flow through Monaco's own
       // change path, so push them into the live model — which also re-runs the
