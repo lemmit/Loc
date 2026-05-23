@@ -510,8 +510,16 @@ Phasing:
   the aggregate view, and `+ Stmt` (a `precondition true` via v1's
   `addStatement`) in the operation / workflow flow view. Gated by
   `test/system-v2/add-extra.test.ts` + the v2 e2e (each palette adds bumps
-  the relevant node count by one). Rename / delete for the system / context
-  / operation kinds still pends.
+  the relevant node count by one).
+- ~~**Phase 3d — rename / delete for the remaining ViewKinds.**~~ Done: a new
+  `renameByAstType` helper (mirrors `renameConstruct` but keyed directly on
+  `$type`, not v1's NodeKind union) lets v2 rename `System` / `BoundedContext`
+  / `Operation` / `FunctionDecl` too, with the same NameProvider + References
+  rewrite as v1. Delete already worked by `$type`. Now every named construct
+  except `field` and `containment` (which need `renameMember`'s text-token
+  resolver — left for Phase 4) gets the pencil + `×` affordance on its node.
+  Gated by the v2 e2e (rename a context and delete an operation through the
+  on-node controls).
 - **Phase 4** — long-tail parity with v1 (fields / finds / deployable bindings
   / emit repointing as per-node interactions). Once landed, v1 can be
   deprecated.

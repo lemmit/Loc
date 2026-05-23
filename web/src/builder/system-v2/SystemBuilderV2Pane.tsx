@@ -42,10 +42,10 @@ import {
 import { ExprSlotEditor, type ExprMode } from "../system/ExpressionEditor";
 import { AstUtils } from "langium";
 import { spliceNode } from "../edit-engine";
-import { IDENTIFIER, renameConstruct } from "../system/rename";
-import type { NodeKind } from "../system/model";
+import { IDENTIFIER } from "../system/rename";
 import AddPalette from "./AddPalette";
 import ConstructNode, { type ConstructNodeData } from "./ConstructNode";
+import { renameByAstType } from "./rename-extra";
 import StmtNode, { type StmtNodeData } from "./StmtNode";
 import { buildViewGraph, findAggregate, type ViewGraph, type ViewKind, type ViewPath } from "./view-graph";
 
@@ -121,38 +121,27 @@ function toRfNodes(
 
 const NODE_TYPES = { stmt: StmtNode, construct: ConstructNode } as const;
 
-// ViewKinds that map directly to v1's NodeKind — `renameConstruct` and the
-// AST $type mapping cover these. Other v2-only kinds (system / context /
-// operation / function / field / containment) get no rename/delete in this
-// phase.
-const NODE_KIND_BY_VIEW: Partial<Record<ViewKind, NodeKind>> = {
-  module: "module",
-  aggregate: "aggregate",
-  valueobject: "valueobject",
-  event: "event",
-  repository: "repository",
-  view: "view",
-  workflow: "workflow",
-  deployable: "deployable",
-  api: "api",
-  storage: "storage",
-  ui: "ui",
-};
-
-// `AstNode.$type` we look up for a given v2 ViewKind, when we need to find
-// the construct's CST in source for a delete splice.
+// ViewKind → AST `$type`. Drives both the on-node delete (splice the matching
+// AST node out of source) and the on-node rename (rewrite the declared name +
+// every reference via Langium's NameProvider). Field and containment aren't
+// here yet — they need v1's `renameMember` (text-token resolver, not a
+// cross-ref). Stmt / root aren't constructs.
 const AST_TYPE_BY_VIEW: Partial<Record<ViewKind, string>> = {
+  system: "System",
   module: "Module",
+  context: "BoundedContext",
   aggregate: "Aggregate",
+  operation: "Operation",
+  function: "FunctionDecl",
+  workflow: "Workflow",
   valueobject: "ValueObject",
   event: "EventDecl",
   repository: "Repository",
   view: "View",
-  workflow: "Workflow",
-  deployable: "Deployable",
   api: "Api",
   storage: "Storage",
   ui: "Ui",
+  deployable: "Deployable",
 };
 
 /** Derive the `BodyLocator` for the operation / workflow currently in focus
@@ -339,13 +328,12 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     const m = new Map<string, ConstructNodeData>();
     for (const n of graph.nodes) {
       if (n.kind === "stmt") continue;
-      const nodeKind = NODE_KIND_BY_VIEW[n.kind];
       const astType = AST_TYPE_BY_VIEW[n.kind];
       const onRename =
-        nodeKind != null
+        astType != null
           ? (next: string) => {
               if (!IDENTIFIER.test(next) || next === n.name) return;
-              void renameConstruct(ctx.getSource(), nodeKind, n.name, next).then((result) => {
+              void renameByAstType(ctx.getSource(), astType, n.name, next).then((result) => {
                 if (result != null) apply(result);
               });
             }

@@ -184,3 +184,38 @@ test("Model v2 — module / aggregate / operation palettes (context / operation 
     .poll(async () => page.getByTestId("c4system-v2-stmt").count(), { timeout: 5_000 })
     .toBe(stmtsBefore + 1);
 });
+
+test("Model v2 renames a context and deletes an operation (v2-only kinds)", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+  await page.getByTestId("doc-tab-model-v2").click();
+  await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
+
+  // Drill in to the module so contexts show as nodes.
+  await page.locator('.react-flow__node[data-id^="system:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="module:"]').first().click();
+  const ctxNode = page.locator('[data-construct-kind="context"]').first();
+  const ctxName = (await ctxNode.getAttribute("data-construct-name"))!;
+  expect(ctxName).toBeTruthy();
+  // Rename the context to Ctx2024 — v2-only because v1's NodeKind doesn't
+  // cover BoundedContext rename.
+  await ctxNode.getByTestId("c4system-v2-rename").click();
+  await page.getByTestId("c4system-v2-rename-input").fill("Ctx2024");
+  await page.getByTestId("c4system-v2-rename-input").press("Enter");
+  await expect(
+    page.locator('[data-construct-kind="context"][data-construct-name="Ctx2024"]'),
+  ).toBeVisible({ timeout: 5_000 });
+
+  // Drill in → Order → delete confirm operation.
+  await page.locator('[data-construct-kind="context"][data-construct-name="Ctx2024"]').click();
+  await page.locator('.react-flow__node[data-id="aggregate:Order"]').click();
+  const opsBefore = await page.locator('.react-flow__node[data-id^="operation:"]').count();
+  await page
+    .locator('[data-construct-kind="operation"][data-construct-name="confirm"]')
+    .getByTestId("c4system-v2-delete")
+    .click();
+  await expect
+    .poll(async () => page.locator('.react-flow__node[data-id^="operation:"]').count(), { timeout: 5_000 })
+    .toBe(opsBefore - 1);
+});
