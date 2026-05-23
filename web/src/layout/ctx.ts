@@ -87,6 +87,21 @@ export interface LayoutCtx {
    *  Threading it through the ctx now means Phase 2b2 doesn't have
    *  to touch every shell to pick it up. */
   activeSourcePath: string;
+  /** Every `.ddd` source under `/workspace/`, snapshotted from the
+   *  workspace-sources controller (Phase 2a).  Drives the Files
+   *  tab strip above the editor. */
+  sourceFiles: ReadonlyMap<string, string>;
+  /** Switch which file the editor shows.  Wired to the controller's
+   *  `setActivePath` in Phase 2b2; a no-op when the platform isn't
+   *  multi-file (e.g. tests passing a stub ctx). */
+  setActiveSourcePath: (path: string) => void;
+  /** Create a new `/workspace/<basename>.ddd` with empty body and
+   *  immediately switch the active path to it.  The tab strip
+   *  validates the basename before calling. */
+  createSourceFile: (path: string) => void;
+  /** Delete a `.ddd` source file from the VFS.  The tab strip
+   *  never offers this for `/workspace/main.ddd`. */
+  deleteSourceFile: (path: string) => void;
 
   // Worker clients
   lspClient: LoomLspClient | null;
