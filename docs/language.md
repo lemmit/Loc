@@ -27,7 +27,7 @@ context  enum  valueobject  aggregate  entity  contains  ids
 event  repository  for  find  where
 derived  invariant  when  function  operation  private
 precondition  emit  let  expect  expectThrows  test  new
-true  false  null  this  id  Id
+true  false  null  this  id
 int  long  decimal  string  bool  datetime  guid
 ```
 
@@ -242,7 +242,8 @@ Inside an aggregate or an `entity` part:
 | --- | --- |
 | `name: TypeRef [display] [provenanced] [check Expr]` | Property, with optional modifiers (in this order). `display` marks the human-readable label field; `provenanced` records assignment lineage (below); `check Expr` is a per-field validation predicate. |
 | `contains name: PartName[]` | Containment of a part declared within the same aggregate; collection. |
-| `contains name: PartName` | Containment, single. |
+| `contains name: PartName` | Containment, single (required). |
+| `contains name: PartName?` | Containment, single (optional) — the part may be absent at runtime; serialised as a nullable wire field.  `[]?` is rejected: an empty collection already encodes absence. |
 | `derived name: TypeRef = Expression` | Computed read-only property. |
 | `invariant Expression [when Expression]` | `bool` predicate; checked after every mutation. Optional `when` is a guard. |
 | `function name(params): TypeRef = Expression` | Pure helper; callable from any expression in the same aggregate. |
@@ -297,18 +298,40 @@ system.
 ### Type references
 
 ```
-TypeRef = BaseType ('[]')? ('?')?
-BaseType = PrimitiveType | 'Id' '<' Identifier '>' | NamedType
+TypeRef    = BaseType ('[]')? ('?')?
+BaseType   = PrimitiveType | IdType | NamedType
+IdType     = Identifier 'id'                  // cross-aggregate FK
+NamedType  = Identifier                       // bare name
 PrimitiveType = 'int' | 'long' | 'decimal' | 'string' | 'bool' | 'datetime' | 'guid'
-NamedType = Identifier      // resolves to enum / valueobject (only)
 ```
 
-`X id` resolves to either an aggregate or an entity-part declared in
-scope.  `NamedType` resolves to enums and value objects; aggregates are
-*never* referenced by their bare name in cross-aggregate properties —
-use `X id` instead.
+A bare `Identifier` in type position must resolve to one of:
 
-`T[]` denotes a collection; `T?` denotes an optional value.
+| Resolves to | Meaning |
+| --- | --- |
+| Enum (any context) | An `enum` value. |
+| Value object (any context) | An embedded value object — copied by value into the wire shape. |
+| Entity part of the *same* aggregate | An addressable child of this aggregate, by-reference at runtime (the engine has the loaded object). |
+
+Cross-aggregate references must use **`X id`** — an explicit foreign
+key.  The validator rejects a bare aggregate name in storage / wire
+positions (aggregate fields, event fields, operation / function /
+find / workflow parameters) with a fixit pointing at `'X id'`; it
+also rejects an entity-part from a different aggregate the same way,
+pointing at the owning aggregate's id.
+
+The result is a legible three-keyword surface — `id` shows up exactly
+when you cross an aggregate boundary; everything else is a bare name,
+and the type system tells you what it means.
+
+`T[]` denotes a collection; `T?` denotes an optional value.  Both
+suffixes apply to the same `TypeRef`, in either order
+(`Customer id?`, `Pokemon id[]`, `Address?`).
+
+> Query results and projections are exempt — `find byEmail(e: string): Customer?`
+> and `derived owner: Customer = ...` may legitimately reference an
+> aggregate as a domain object.  The check only fires in storage /
+> wire-data positions.
 
 ---
 
