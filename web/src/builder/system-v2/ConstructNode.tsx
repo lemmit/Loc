@@ -4,10 +4,21 @@
 // can put a pencil affordance for **inline rename** and an `×` for **delete**
 // right on the node — same parse-guarded paths v1 already uses.
 
-import { Box, Button, Group, Text, TextInput } from "@mantine/core";
+import { Box, Button, Group, MultiSelect, Stack, Text, TextInput } from "@mantine/core";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { useEffect, useState } from "react";
 import type { ViewKind } from "./view-graph";
+
+/** A small inline multi-select on the node — used for multi-valued bindings
+ *  (a deployable's modules / serves) that can't be expressed as a single
+ *  drag-rebindable edge. */
+export interface NodeMultiSelect {
+  label: string;
+  data: string[];
+  value: string[];
+  onChange: (v: string[]) => void;
+  testid: string;
+}
 
 export interface ConstructNodeData {
   kind: ViewKind;
@@ -18,6 +29,8 @@ export interface ConstructNodeData {
   onRename?: (newName: string) => void;
   /** Provide to enable an `×` delete button. */
   onDelete?: () => void;
+  /** Optional inline multi-selects (stacked below the name). */
+  multiSelects?: NodeMultiSelect[];
 }
 
 export default function ConstructNode({ data }: NodeProps): JSX.Element {
@@ -50,7 +63,8 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
         border: "1px solid rgba(255,255,255,0.25)",
         borderRadius: 6,
         padding: "6px 8px",
-        width: 170,
+        // Widen when there are multi-selects so the pill chips fit.
+        width: d.multiSelects && d.multiSelects.length > 0 ? 240 : 170,
         position: "relative",
         cursor: d.drillable ? "pointer" : "default",
       }}
@@ -119,6 +133,25 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
             </Button>
           )}
         </Group>
+      )}
+      {d.multiSelects && d.multiSelects.length > 0 && (
+        <Stack gap={4} mt={6}>
+          {d.multiSelects.map((sel) => (
+            <MultiSelect
+              key={sel.label}
+              size="xs"
+              label={sel.label}
+              data={sel.data}
+              value={sel.value}
+              data-testid={sel.testid}
+              onChange={sel.onChange}
+              styles={{
+                label: { fontSize: 9, color: "rgba(255,255,255,0.7)", marginBottom: 2 },
+                input: { fontSize: 11, minHeight: 24 },
+              }}
+            />
+          ))}
+        </Stack>
       )}
       <Handle type="source" position={Position.Bottom} style={{ background: "var(--mantine-color-dark-3)" }} />
     </Box>
