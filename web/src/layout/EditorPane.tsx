@@ -1,5 +1,6 @@
 import { Box } from "@mantine/core";
 import { LoomEditor } from "../editor/LoomEditor";
+import { SourceFilesTree } from "./SourceFilesTree";
 import { SourceFileTabs } from "./SourceFileTabs";
 import type { LayoutCtx } from "./ctx";
 
@@ -16,13 +17,15 @@ interface Props {
 // ResizeObserver needs a parent with definite size on first paint —
 // flex + minHeight: 0 satisfies that on every shell).
 //
-// Multi-file (Phase 2b2): a thin Files tab strip sits above the
-// editor showing every `.ddd` source in `/workspace/`.  When there
-// is only main.ddd the strip still renders (single tab + "+"
-// button) — keeps the layout stable and the affordance discoverable.
-// Tab switches remount Monaco via `key={activeSourcePath}`; the
-// existing example-switch `key={exampleId}` pattern is the
-// precedent.
+// Multi-file picker:
+//   - Desktop: horizontal tab strip above the editor — fast switch
+//     for 2-5 files, but starts to scroll horizontally past that.
+//   - Mobile: vertical tree below a small "Files" header — thumb-
+//     scannable, makes nested paths (`shared/money.ddd`) obvious in
+//     a way the tabs strip's truncated names didn't.
+// Both pickers source identical state from the workspace-sources
+// hook (Phase 2a) and drive the same ctx callbacks; switching
+// between them is purely a layout choice.
 export function EditorPane({ ctx, border = "none" }: Props): JSX.Element | null {
   const {
     lspClient,
@@ -39,6 +42,23 @@ export function EditorPane({ ctx, border = "none" }: Props): JSX.Element | null 
     deleteSourceFile,
   } = ctx;
   if (!lspClient) return null;
+  const picker = isDesktop ? (
+    <SourceFileTabs
+      files={sourceFiles}
+      activePath={activeSourcePath}
+      onSelect={setActiveSourcePath}
+      onCreate={createSourceFile}
+      onDelete={deleteSourceFile}
+    />
+  ) : (
+    <SourceFilesTree
+      files={sourceFiles}
+      activePath={activeSourcePath}
+      onSelect={setActiveSourcePath}
+      onCreate={createSourceFile}
+      onDelete={deleteSourceFile}
+    />
+  );
   return (
     <Box
       style={{
@@ -51,14 +71,7 @@ export function EditorPane({ ctx, border = "none" }: Props): JSX.Element | null 
         borderBottom: border === "bottom" ? "1px solid var(--mantine-color-dark-4)" : undefined,
       }}
     >
-      <SourceFileTabs
-        files={sourceFiles}
-        activePath={activeSourcePath}
-        onSelect={setActiveSourcePath}
-        onCreate={createSourceFile}
-        onDelete={deleteSourceFile}
-        compact={!isDesktop}
-      />
+      {picker}
       <Box style={{ flex: 1, minHeight: 0 }}>
         <LoomEditor
           key={`${exampleId}::${activeSourcePath}`}
