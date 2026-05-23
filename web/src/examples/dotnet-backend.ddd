@@ -4,10 +4,9 @@
 // per-aggregate controllers, EF Core configurations, repositories,
 // FluentValidation pipeline, domain exceptions → HTTP responses.
 //
-// Same Sales domain as `sales-system.ddd` (Hono) and
-// `dotnet-fullstack.ddd` (.NET + embedded SPA), so the three are
-// easy to diff against each other to see what each backend
-// generator emits for identical input.
+// Same Sales domain as `sales-system.ddd` (Hono); diff it against
+// `storefront-dotnet.ddd` (.NET + embedded SPA) to see what the .NET
+// generator adds when the system also hosts a React frontend.
 //
 // Files-only in the playground (.NET doesn't boot in-browser).
 
@@ -106,8 +105,8 @@ system SalesBackend {
 
   // Backend only — no `ui:` binding, no React project.  Pair with
   // a separate frontend deployable in your own .ddd source if you
-  // want a split-deployment topology; or use `dotnet-fullstack.ddd`
-  // for the single-container shape.
+  // want a split-deployment topology; or use `storefront-dotnet.ddd`
+  // for the single-container fullstack shape.
   deployable api {
     platform: dotnet
     modules: Sales

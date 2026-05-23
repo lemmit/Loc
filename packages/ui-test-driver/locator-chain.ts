@@ -13,9 +13,16 @@ import { DomLocator, DomPage } from "./dom-page.js";
 export type ChainNode =
   | { k: "getByTestId"; id: string }
   | { k: "getByRole"; role: string; name?: string; exact?: boolean }
+  | { k: "getByText"; text: string; exact?: boolean }
+  | { k: "getByLabel"; text: string; exact?: boolean }
+  | { k: "getByPlaceholder"; text: string; exact?: boolean }
+  | { k: "getByTitle"; text: string; exact?: boolean }
+  | { k: "getByAltText"; text: string; exact?: boolean }
   | { k: "locator"; selector: string }
   | { k: "filter"; has: ChainNode[] }
-  | { k: "first" };
+  | { k: "first" }
+  | { k: "last" }
+  | { k: "nth"; index: number };
 
 /** Rebuild a live `DomLocator` from a serialised chain (sandbox side). */
 export function resolveChain(
@@ -34,6 +41,21 @@ export function resolveChain(
       case "getByRole":
         loc = loc.getByRole(node.role, { name: node.name, exact: node.exact });
         break;
+      case "getByText":
+        loc = loc.getByText(node.text, { exact: node.exact });
+        break;
+      case "getByLabel":
+        loc = loc.getByLabel(node.text, { exact: node.exact });
+        break;
+      case "getByPlaceholder":
+        loc = loc.getByPlaceholder(node.text, { exact: node.exact });
+        break;
+      case "getByTitle":
+        loc = loc.getByTitle(node.text, { exact: node.exact });
+        break;
+      case "getByAltText":
+        loc = loc.getByAltText(node.text, { exact: node.exact });
+        break;
       case "locator":
         loc = loc.locator(node.selector);
         break;
@@ -42,6 +64,12 @@ export function resolveChain(
         break;
       case "first":
         loc = loc.first();
+        break;
+      case "last":
+        loc = loc.last();
+        break;
+      case "nth":
+        loc = loc.nth(node.index);
         break;
     }
   }
@@ -54,15 +82,36 @@ export function resolveChain(
 export type DriverOp =
   | {
       kind: "locator";
-      op: "click" | "innerText" | "count";
+      op:
+        | "click"
+        | "innerText"
+        | "count"
+        | "hover"
+        | "dblclick"
+        | "clear"
+        | "check"
+        | "uncheck"
+        | "focus"
+        | "blur"
+        | "inputValue"
+        | "isVisible"
+        | "isChecked"
+        | "isEnabled";
       chain: ChainNode[];
       timeout?: number;
     }
   | {
       kind: "locator";
-      op: "fill";
+      op: "fill" | "selectOption";
       chain: ChainNode[];
       value: string;
+      timeout?: number;
+    }
+  | {
+      kind: "locator";
+      op: "press";
+      chain: ChainNode[];
+      key: string;
       timeout?: number;
     }
   | {
@@ -93,7 +142,7 @@ export interface NetState {
 }
 
 export type DriverReply =
-  | { ok: true; value?: string | number }
+  | { ok: true; value?: string | number | boolean }
   | { ok: false; message: string };
 
 export interface ExecuteOptions {
@@ -163,10 +212,45 @@ export async function executeDriverOp(
       case "fill":
         await loc.fill(msg.value, { timeout: msg.timeout });
         return { ok: true };
+      case "selectOption":
+        await loc.selectOption(msg.value, { timeout: msg.timeout });
+        return { ok: true };
+      case "press":
+        await loc.press(msg.key, { timeout: msg.timeout });
+        return { ok: true };
       case "innerText":
         return { ok: true, value: await loc.innerText({ timeout: msg.timeout }) };
       case "count":
         return { ok: true, value: await loc.count() };
+      case "inputValue":
+        return { ok: true, value: await loc.inputValue({ timeout: msg.timeout }) };
+      case "isVisible":
+        return { ok: true, value: await loc.isVisible() };
+      case "isChecked":
+        return { ok: true, value: await loc.isChecked({ timeout: msg.timeout }) };
+      case "isEnabled":
+        return { ok: true, value: await loc.isEnabled({ timeout: msg.timeout }) };
+      case "hover":
+        await loc.hover({ timeout: msg.timeout });
+        return { ok: true };
+      case "dblclick":
+        await loc.dblclick({ timeout: msg.timeout });
+        return { ok: true };
+      case "clear":
+        await loc.clear({ timeout: msg.timeout });
+        return { ok: true };
+      case "check":
+        await loc.check({ timeout: msg.timeout });
+        return { ok: true };
+      case "uncheck":
+        await loc.uncheck({ timeout: msg.timeout });
+        return { ok: true };
+      case "focus":
+        await loc.focus({ timeout: msg.timeout });
+        return { ok: true };
+      case "blur":
+        await loc.blur({ timeout: msg.timeout });
+        return { ok: true };
       case "waitFor":
         await loc.waitFor({ state: msg.state, timeout: msg.timeout });
         return { ok: true };

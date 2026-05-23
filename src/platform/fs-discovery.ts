@@ -1,6 +1,5 @@
 // ---------------------------------------------------------------------------
-// fs-backed `discoverBackends()` source (packaging-split P3 slice 3,
-// see docs/packaging-split.md + the plan file).
+// fs-backed `discoverBackends()` source (see docs/packaging-split.md).
 //
 // Node-only.  Walks the consuming project's `node_modules` shallowly
 // for `package.json` entries whose `loom.kind === "backend"`, and
@@ -9,15 +8,15 @@
 // — same fs/node_modules shape, but for *backend-package
 // discovery* rather than dep resolution.
 //
-// Slice 3 is intentionally narrow: the discovered manifest is paired
+// This is intentionally narrow: the discovered manifest is paired
 // with the surface from the *in-tree* default set (looked up by
 // family@version).  The byte-identical guarantee falls out: a
 // workspace where `@loom/backend-hono-v4` is symlinked under
 // `node_modules/@loom/backend-hono-v4` resolves `hono@v4` through
 // the fs source to the *same* `honoPlatform` instance the in-tree
-// source returned pre-slice-3 — so `===` identity holds and every
-// downstream resolver is unaffected.  Slice 5 replaces the in-tree
-// lookup with `await import(pkg.main)`'s default export, at which
+// source returns — so `===` identity holds and every
+// downstream resolver is unaffected.  A later step would replace the
+// in-tree lookup with `await import(pkg.main)`'s default export, at which
 // point the workspace symlink becomes the true source of code, not
 // just the source of the manifest.
 //
@@ -110,7 +109,7 @@ async function* walkInstalledPackages(nodeModules: string): AsyncGenerator<strin
 /** Read every installed package under `<rootDir>/node_modules` and
  *  emit a `DiscoveredBackend` for each one declaring
  *  `loom.kind === "backend"` in its `package.json`.  See module
- *  header for slice 3 surface-resolution policy. */
+ *  header for the surface-resolution policy. */
 export async function discoverBackendsFs(rootDir: string): Promise<DiscoveredBackend[]> {
   const inTree = defaultBuiltInBackends();
   const out: DiscoveredBackend[] = [];
@@ -125,10 +124,9 @@ export async function discoverBackendsFs(rootDir: string): Promise<DiscoveredBac
         b.manifest.family === manifest.family && b.manifest.loomVersion === manifest.loomVersion,
     );
     if (!match) {
-      // Discovered manifest with no matching in-tree code yet.
-      // Slice 5 will resolve this via dynamic `import(pkg)`; slice
-      // 3 silently skips so unknown installed packages don't break
-      // resolution.
+      // Discovered manifest with no matching in-tree code: silently
+      // skip so unknown installed packages don't break resolution.
+      // (A later step could resolve these via dynamic `import(pkg)`.)
       continue;
     }
     out.push({ manifest, surface: match.surface });

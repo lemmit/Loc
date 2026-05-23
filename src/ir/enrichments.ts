@@ -1,5 +1,7 @@
+import { snake } from "../util/naming.js";
 import type {
   AggregateIR,
+  AssociationIR,
   BoundedContextIR,
   CodeRefKind,
   DeployableIR,
@@ -78,7 +80,7 @@ function enrichSystem(sys: SystemIR): SystemIR {
   // Done after module enrichment so frontends see the same enriched
   // contexts every other consumer sees.
   const deployables = enrichDeployables(sys.deployables);
-  // Pass 1 (Slice 10) — scaffold expansion now runs at the AST
+  // Scaffold expansion now runs at the AST
   // level via `src/language/ddd-scaffold-ast-expander.ts` (a
   // `DocumentState.IndexedContent` hook on the shared
   // DocumentBuilder).  By the time lowering runs, every page is
@@ -88,8 +90,7 @@ function enrichSystem(sys: SystemIR): SystemIR {
   // any caller that constructs a `LoomModel` outside the standard
   // `parseHelper` / `DocumentBuilder` pipeline (it just returns
   // the existing pages unchanged).
-  const enrichedSys: SystemIR = { ...sys, modules, deployables };
-  return { ...enrichedSys };
+  return { ...sys, modules, deployables };
 }
 
 function enrichContext(ctx: BoundedContextIR): BoundedContextIR {
@@ -105,7 +106,38 @@ function enrichAggregate(agg: AggregateIR): AggregateIR {
     ...agg,
     parts,
     wireShape: wireFieldsForAggregate(agg),
+    associations: associationsForAggregate(agg),
   };
+}
+
+/** Derive a join-table association for every field whose type is a
+ * collection of references to another aggregate (`field: Id<T>[]`).
+ * Containment collections never reach here — they are `ContainmentIR`,
+ * not `FieldIR`. */
+function associationsForAggregate(agg: AggregateIR): AssociationIR[] {
+  const out: AssociationIR[] = [];
+  for (const f of agg.fields) {
+    if (f.type.kind !== "array" || f.type.element.kind !== "id") continue;
+    const target = f.type.element;
+    let ownerFk = `${snake(agg.name)}_id`;
+    let targetFk = `${snake(target.targetName)}_id`;
+    // Self-referential collection (`Id<Self>[]`): both FKs would
+    // collapse to the same column name.  Disambiguate generically.
+    if (ownerFk === targetFk) {
+      ownerFk = "owner_id";
+      targetFk = "target_id";
+    }
+    out.push({
+      fieldName: f.name,
+      ownerAgg: agg.name,
+      targetAgg: target.targetName,
+      valueType: target.valueType,
+      joinTable: `${snake(agg.name)}_${snake(f.name)}`,
+      ownerFk,
+      targetFk,
+    });
+  }
+  return out;
 }
 
 function enrichPart(part: EntityPartIR): EntityPartIR {
@@ -145,7 +177,7 @@ function ensureFindAll(aggregates: AggregateIR[], existing: RepositoryIR[]): Rep
  * rejects that case). */
 function enrichDeployables(deployables: DeployableIR[]): DeployableIR[] {
   return deployables.map((d) => {
-    // Slice 8: `static` deployables share the legacy `react` module-
+    // `static` deployables share the legacy `react` module-
     // inheritance behaviour — they're frontend deployables that
     // serve a built bundle and need to know about every context the
     // target backend exposes (so the page-IR emitter has every
@@ -228,7 +260,7 @@ function wireFieldsForValueObject(vo: ValueObjectIR): WireField[] {
 }
 
 // ---------------------------------------------------------------------------
-// Traceability index (Slice 12) — derived in one pure pass, exactly
+// Traceability index — derived in one pure pass, exactly
 // like wireShape.  Every report generator reads these maps rather than
 // recomputing coverage.
 // ---------------------------------------------------------------------------

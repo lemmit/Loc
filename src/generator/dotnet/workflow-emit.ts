@@ -4,7 +4,7 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../../ir/loom-ir.js";
-import { pascal, snake } from "../../util/naming.js";
+import { plural, snake, upperFirst } from "../../util/naming.js";
 import {
   csIdValueClrType,
   domainToRequestExpr,
@@ -44,10 +44,13 @@ export function emitWorkflows(
 
   for (const wf of ctx.workflows) {
     const usage = analyseWorkflow(wf, aggsByName);
-    out.set(`Application/Workflows/${pascal(wf.name)}Request.cs`, renderRequestDto(wf, ctx, ns));
-    out.set(`Application/Workflows/${pascal(wf.name)}Command.cs`, renderCommand(wf, ns));
     out.set(
-      `Application/Workflows/${pascal(wf.name)}Handler.cs`,
+      `Application/Workflows/${upperFirst(wf.name)}Request.cs`,
+      renderRequestDto(wf, ctx, ns),
+    );
+    out.set(`Application/Workflows/${upperFirst(wf.name)}Command.cs`, renderCommand(wf, ns));
+    out.set(
+      `Application/Workflows/${upperFirst(wf.name)}Handler.cs`,
       renderHandler(wf, usage, ns, ctx),
     );
   }
@@ -99,7 +102,7 @@ function analyseWorkflow(wf: WorkflowIR, aggsByName: Map<string, AggregateIR>): 
 
 function renderRequestDto(wf: WorkflowIR, ctx: BoundedContextIR, ns: string): string {
   const params = wf.params
-    .map((p) => `${wireType(p.type, ctx, "request")} ${pascal(p.name)}`)
+    .map((p) => `${wireType(p.type, ctx, "request")} ${upperFirst(p.name)}`)
     .join(", ");
   return `// Auto-generated.
 using ${ns}.Domain.ValueObjects;
@@ -107,7 +110,7 @@ using ${ns}.Domain.Enums;
 
 namespace ${ns}.Application.Workflows;
 
-public sealed record ${pascal(wf.name)}Request(${params});
+public sealed record ${upperFirst(wf.name)}Request(${params});
 `;
 }
 
@@ -116,7 +119,7 @@ public sealed record ${pascal(wf.name)}Request(${params});
 // ---------------------------------------------------------------------------
 
 function renderCommand(wf: WorkflowIR, ns: string): string {
-  const params = wf.params.map((p) => `${renderCsType(p.type)} ${pascal(p.name)}`).join(", ");
+  const params = wf.params.map((p) => `${renderCsType(p.type)} ${upperFirst(p.name)}`).join(", ");
   return `// Auto-generated.
 using Mediator;
 using ${ns}.Domain.Ids;
@@ -125,7 +128,7 @@ using ${ns}.Domain.Enums;
 
 namespace ${ns}.Application.Workflows;
 
-public sealed record ${pascal(wf.name)}Command(${params}) : ICommand;
+public sealed record ${upperFirst(wf.name)}Command(${params}) : ICommand;
 `;
 }
 
@@ -140,8 +143,8 @@ function renderHandler(
   ctx: BoundedContextIR,
 ): string {
   void ctx;
-  const cmdName = `${pascal(wf.name)}Command`;
-  const handlerName = `${pascal(wf.name)}Handler`;
+  const cmdName = `${upperFirst(wf.name)}Command`;
+  const handlerName = `${upperFirst(wf.name)}Handler`;
   // Field declarations for injected dependencies.
   const repoEntries = [...usage.repos.entries()];
   const fields: string[] = [];
@@ -167,7 +170,7 @@ function renderHandler(
   // user-supplied IXAggHandler injected.  Field name follows the
   // op+agg convention (`_confirmOrderHandler`).
   for (const ext of usage.externs.values()) {
-    const ifaceName = `I${pascal(ext.opName)}${ext.aggName}Handler`;
+    const ifaceName = `I${upperFirst(ext.opName)}${ext.aggName}Handler`;
     const fieldName = `_${ext.opName}${ext.aggName}Handler`;
     fields.push(`    private readonly ${ifaceName} ${fieldName};`);
     ctorParamPairs.push(`${ifaceName} ${fieldName.replace(/^_/, "")}`);
@@ -181,10 +184,10 @@ function renderHandler(
       "        var _workflowEvents = new System.Collections.Generic.List<IDomainEvent>();",
     );
   }
-  // Substitute parameter references: cmd.<PascalName>.  Inside lowerExpr-produced ExprIR,
-  // params resolve as `name` refs which renderCsExpr would render as bare identifiers.
-  // We need them to print as `cmd.PascalName`.  Easiest: pre-rename via expression walk.
-  // The simpler path is renaming at render time using a name-set + a tiny custom env.
+  // Workflow params resolve to bare-identifier `name` refs in the ExprIR, but
+  // in a command handler they must print as `cmd.<PascalName>`.
+  // renderExprWithCmdParams rewrites those refs at render time, keyed by the
+  // workflow's param-name set.
   const paramNames = new Set(wf.params.map((p) => p.name));
   const renderArg = (e: import("../../ir/loom-ir.js").ExprIR): string => {
     return renderExprWithCmdParams(e, paramNames);
@@ -240,13 +243,13 @@ function renderHandler(
     ...[...usage.externs.values()].map((e) => e.aggName),
   ]);
   const aggUsings = [
-    ...new Set([...aggsTouched].map((agg) => `using ${ns}.Domain.${pascalPlural(agg)};`)),
+    ...new Set([...aggsTouched].map((agg) => `using ${ns}.Domain.${plural(agg)};`)),
   ];
   const externUsings = [
     ...new Set(
       [...usage.externs.values()].flatMap((e) => [
-        `using ${ns}.Application.${pascalPlural(e.aggName)}.Handlers;`,
-        `using ${ns}.Application.${pascalPlural(e.aggName)}.Requests;`,
+        `using ${ns}.Application.${plural(e.aggName)}.Handlers;`,
+        `using ${ns}.Application.${plural(e.aggName)}.Requests;`,
       ]),
     ),
   ];
@@ -289,12 +292,6 @@ function csIsolationLevel(level: import("../../ir/loom-ir.js").IsolationLevel): 
   }
 }
 
-function pascalPlural(s: string): string {
-  if (s.endsWith("y") && !/[aeiou]y$/.test(s)) return s.slice(0, -1) + "ies";
-  if (/(s|x|z|ch|sh)$/.test(s)) return s + "es";
-  return s + "s";
-}
-
 function renderStatement(
   st: WorkflowStmtIR,
   renderArg: (e: import("../../ir/loom-ir.js").ExprIR) => string,
@@ -316,11 +313,11 @@ function renderStatement(
       ];
     }
     case "emit": {
-      const args = st.fields.map((f) => `${pascal(f.name)}: ${renderArg(f.value)}`).join(", ");
+      const args = st.fields.map((f) => `${upperFirst(f.name)}: ${renderArg(f.value)}`).join(", ");
       return [`${INDENT}_workflowEvents.Add(new ${st.eventName}(${args}));`];
     }
     case "factory-let": {
-      const args = st.fields.map((f) => `${pascal(f.name)}: ${renderArg(f.value)}`).join(", ");
+      const args = st.fields.map((f) => `${upperFirst(f.name)}: ${renderArg(f.value)}`).join(", ");
       // Use the aggregate's named-arg Create(...) factory.  C# doesn't
       // support reordering positional args; using named args lets the
       // user write fields in any order in the .ddd source.
@@ -331,7 +328,7 @@ function renderStatement(
       const argList = st.args.map(renderArg).join(", ");
       const callArgs = argList.length > 0 ? `${argList}, ct` : `ct`;
       return [
-        `${INDENT}var ${st.name} = await ${fieldName}.${pascal(st.method)}Async(${callArgs});`,
+        `${INDENT}var ${st.name} = await ${fieldName}.${upperFirst(st.method)}Async(${callArgs});`,
       ];
     }
     case "op-call": {
@@ -340,7 +337,7 @@ function renderStatement(
         .find((a) => a.name === st.aggName)
         ?.operations.find((o) => o.name === st.op);
       if (op?.extern) {
-        const reqName = `${pascal(st.op)}Request`;
+        const reqName = `${upperFirst(st.op)}Request`;
         const handlerField = `_${st.op}${st.aggName}Handler`;
         // Construct the wire-typed request from the workflow's
         // domain-typed args.  Each arg renders via the regular
@@ -351,13 +348,13 @@ function renderStatement(
           .map((p, i) => domainToRequestExpr(renderArg(st.args[i]!), p.type, ctx))
           .join(", ");
         return [
-          `${INDENT}${st.target}.Check${pascal(st.op)}(${argList});`,
+          `${INDENT}${st.target}.Check${upperFirst(st.op)}(${argList});`,
           `${INDENT}var __${st.op}Request = new ${reqName}(${requestArgs});`,
           `${INDENT}await ${handlerField}.HandleAsync(${st.target}, __${st.op}Request, ct);`,
           `${INDENT}${st.target}.AssertInvariants();`,
         ];
       }
-      return [`${INDENT}${st.target}.${pascal(st.op)}(${argList});`];
+      return [`${INDENT}${st.target}.${upperFirst(st.op)}(${argList});`];
     }
     case "expr-let": {
       const exprText = renderArg(st.expr);
@@ -376,7 +373,7 @@ function renderExprWithCmdParams(
     e: import("../../ir/loom-ir.js").ExprIR,
   ): import("../../ir/loom-ir.js").ExprIR => {
     if (e.kind === "ref" && e.refKind === "param" && paramNames.has(e.name)) {
-      return { ...e, name: `cmd.${pascal(e.name)}`, refKind: "let" };
+      return { ...e, name: `cmd.${upperFirst(e.name)}`, refKind: "let" };
     }
     if (e.kind === "member") {
       return { ...e, receiver: rewrite(e.receiver) };
@@ -392,7 +389,7 @@ function renderExprWithCmdParams(
       return { ...e, args: e.args.map(rewrite) };
     }
     if (e.kind === "lambda") {
-      // Slice 2: lambda body is optional (block-body lambdas land for
+      // Lambda body is optional (block-body lambdas land for
       // page event handlers).  .NET workflow lowering doesn't see
       // block bodies — those are React-emitter territory — but stay
       // total: pass through unchanged when block is set.
@@ -439,13 +436,13 @@ function renderController(ctx: BoundedContextIR, ns: string, routePrefix?: strin
   const blocks: string[] = [];
   for (const wf of ctx.workflows) {
     const cmdArgs = wf.params
-      .map((p) => wireToCommandArgument(`request.${pascal(p.name)}`, p.type, ctx))
+      .map((p) => wireToCommandArgument(`request.${upperFirst(p.name)}`, p.type, ctx))
       .join(",\n            ");
     blocks.push(
       `    [HttpPost("${snake(wf.name)}")]\n` +
-        `    public async Task<IActionResult> ${pascal(wf.name)}([FromBody] ${pascal(wf.name)}Request request)\n` +
+        `    public async Task<IActionResult> ${upperFirst(wf.name)}([FromBody] ${upperFirst(wf.name)}Request request)\n` +
         `    {\n` +
-        `        var cmd = new ${pascal(wf.name)}Command(\n            ${cmdArgs});\n` +
+        `        var cmd = new ${upperFirst(wf.name)}Command(\n            ${cmdArgs});\n` +
         `        await _mediator.Send(cmd);\n` +
         `        return NoContent();\n` +
         `    }\n`,

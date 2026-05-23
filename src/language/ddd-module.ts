@@ -45,7 +45,7 @@ export const DddModule: Module<DddServices, PartialLangiumServices & DddAddedSer
     ReferencesProvider: (services: LangiumServices) => new DddReferencesProvider(services),
     RenameProvider: (services: LangiumServices) => new DddRenameProvider(services),
     SemanticTokenProvider: (services: LangiumServices) => new DddSemanticTokenProvider(services),
-    SignatureHelp: (services: LangiumServices) => new DddSignatureHelpProvider(services),
+    SignatureHelp: () => new DddSignatureHelpProvider(),
     CodeActionProvider: () => new DddCodeActionProvider(),
   },
 };
@@ -72,10 +72,10 @@ export function createDddServices(context: DefaultSharedModuleContext): {
   const Ddd = inject(createDefaultModule({ shared }), DddGeneratedModule, DddModule);
   shared.ServiceRegistry.register(Ddd);
   registerValidationChecks(Ddd);
-  // Spike: AST-to-AST scaffold expansion.  Registers a
-  // DocumentState.Parsed hook that synthesises Page AST nodes for
-  // every Scaffold directive — runs BEFORE the linker resolves
-  // cross-references, so a `[Page:ID]` ref to a scaffold-derived
+  // AST-to-AST scaffold expansion.  Registers a
+  // DocumentState.IndexedContent hook that synthesises Page AST nodes
+  // for every Scaffold directive — it runs after indexing but before
+  // ComputedScopes/Linked, so a `[Page:ID]` ref to a scaffold-derived
   // name resolves through Langium's standard machinery.
   registerScaffoldAstExpander(shared);
   return { shared, Ddd };

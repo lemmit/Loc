@@ -43,7 +43,7 @@ export default function OrderList() {
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                { orderAll.data.map((row, idx) => (
+                { orderAll.data.map((row) => (
                   <Table.Tr key={ row.id } data-testid={ ("orders-row-" + row.id) }>
                     <Table.Td><RouterLink to={`/orders/${ row.id }`}><IdValue id={ row.id } /></RouterLink></Table.Td>
                     <Table.Td><Text>{row.customerId}</Text></Table.Td>

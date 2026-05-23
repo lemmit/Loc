@@ -1,5 +1,5 @@
 import type { AggregateIR, BoundedContextIR, ExprIR, ViewIR } from "../../ir/loom-ir.js";
-import { pascal, snake } from "../../util/naming.js";
+import { snake, upperFirst } from "../../util/naming.js";
 import { type RenderCtx, renderExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -29,7 +29,7 @@ export function emitViews(
   if (ctx.views.length === 0) return;
   const ctxSnake = snake(ctx.name);
   const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
-  const contextModule = `${appModule}.${pascal(ctx.name)}`;
+  const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
 
   for (const view of ctx.views) {
     const agg = aggsByName.get(view.aggregateName);
@@ -50,13 +50,13 @@ function renderView(
 ): string {
   void ctx;
   void appModule;
-  const moduleName = `${contextModule}.Views.${pascal(view.name)}`;
+  const moduleName = `${contextModule}.Views.${upperFirst(view.name)}`;
   const renderCtx: RenderCtx = { thisName: "record", contextModule };
 
   const isShorthand = !view.output;
 
   const returnTypeDoc = isShorthand
-    ? `list of ${pascal(agg.name)} records`
+    ? `list of ${upperFirst(agg.name)} records`
     : `list of maps with fields: ${view.output!.fields.map((f) => snake(f.name)).join(", ")}`;
 
   // Build the query function body
@@ -67,18 +67,18 @@ function renderView(
   return `# Auto-generated.
 defmodule ${moduleName} do
   @moduledoc """
-  View: ${pascal(view.name)}
+  View: ${upperFirst(view.name)}
 
   Returns ${returnTypeDoc}.
-  Source aggregate: ${pascal(agg.name)}
+  Source aggregate: ${upperFirst(agg.name)}
   Form: ${isShorthand ? "shorthand" : "full (bind projection)"}
   """
 
-  alias ${contextModule}.${pascal(agg.name)}
+  alias ${contextModule}.${upperFirst(agg.name)}
   require Ash.Query
 
   @doc "Execute the view query and return results."
-  # E5 — currentUser threading.  Controllers pass
+  # currentUser threading.  Controllers pass
   # \`conn.assigns.current_user\` here; views that don't reference
   # currentUser ignore it (default = nil).
   def run(current_user \\\\ nil) do
@@ -99,7 +99,7 @@ function buildShorthandBody(
   renderCtx: RenderCtx,
   contextModule: string,
 ): string {
-  const aggModule = `${contextModule}.${pascal(agg.name)}`;
+  const aggModule = `${contextModule}.${upperFirst(agg.name)}`;
   const lines: string[] = [];
 
   if (!view.filter) {
@@ -126,7 +126,7 @@ function buildFullFormBody(
   contextModule: string,
 ): string {
   const output = view.output!;
-  const aggModule = `${contextModule}.${pascal(agg.name)}`;
+  const aggModule = `${contextModule}.${upperFirst(agg.name)}`;
   const lines: string[] = [];
 
   // Build the query pipeline: start with the aggregate module

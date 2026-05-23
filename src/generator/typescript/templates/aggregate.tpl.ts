@@ -12,7 +12,7 @@ import type {
 import { operationUsesCurrentUser } from "../../../ir/loom-ir.js";
 import { stmtHasProv } from "../../../ir/prov-id.js";
 import { lines } from "../../../util/code-builder.js";
-import { camel } from "../../../util/naming.js";
+import { lowerFirst } from "../../../util/naming.js";
 import { renderTsExpr, renderTsType } from "../render-expr.js";
 import { renderTsStatements } from "../render-stmt.js";
 
@@ -41,12 +41,24 @@ export function renderAggregate(
   agg: AggregateIR,
   ctx: BoundedContextIR,
   emitProvenance = false,
+  emitTrace = false,
 ): string {
   const valueObjectAliases = ctx.valueObjects.map((v) => v.name);
   const enumAliases = ctx.enums.map((e) => e.name);
-  const hasProv = emitProvenance && agg.operations.some((op) => op.statements.some(stmtHasProv));
-  const partsRendered = agg.parts.map((p) => renderEntity(partShape(p, agg), emitProvenance));
-  const rootRendered = renderEntity(rootShape(agg), emitProvenance);
+  const hasProv =
+    emitProvenance &&
+    (agg.operations.some((op) => op.statements.some(stmtHasProv)) ||
+      agg.fields.some((f) => f.provenanced) ||
+      agg.parts.some((p) => p.fields.some((f) => f.provenanced)));
+  // Domain-injected trace lines (`value_computed`, `precondition_evaluated`)
+  // resolve the request-scoped logger via `requestLog()` from obs/als —
+  // imported here only when --trace is on, so the default artefact keeps
+  // the domain layer free of any infra import.
+  const hasDomainTrace = emitTrace;
+  const partsRendered = agg.parts.map((p) =>
+    renderEntity(partShape(p, agg), emitProvenance, emitTrace),
+  );
+  const rootRendered = renderEntity(rootShape(agg), emitProvenance, emitTrace);
   // When any aggregate op references `currentUser` we pull the User
   // type from the auth/ package so the operation's `currentUser:
   // User` parameter typechecks.  Files emitted under deployables
@@ -66,7 +78,8 @@ export function renderAggregate(
         : null,
       'import type * as Events from "./events";',
       'import { DomainError, ForbiddenError } from "./errors";',
-      hasProv ? 'import { recordTrace } from "./provenance";' : null,
+      hasProv ? 'import { type ProvLineage } from "./provenance";' : null,
+      hasDomainTrace ? 'import { requestLog } from "../obs/als";' : null,
       usesUser ? 'import type { User } from "../auth/user-types";' : null,
       "",
       partsRendered.length > 0 ? partsRendered.map((p) => p + "\n").join("\n") : "",
@@ -102,7 +115,7 @@ function partShape(p: EntityPartIR, root: AggregateIR): EntityShape {
   };
 }
 
-function renderEntity(e: EntityShape, emitProvenance = false): string {
+function renderEntity(e: EntityShape, emitProvenance = false, emitTrace = false): string {
   const containsType = (c: ContainmentIR): string =>
     `${c.partName}${c.collection ? "[]" : " | null"}`;
   const containsGetterType = (c: ContainmentIR): string =>
@@ -118,10 +131,20 @@ function renderEntity(e: EntityShape, emitProvenance = false): string {
   // every field, then every containment.  Used in three places: the
   // private ctor signature, the static `_create` signature, and (for
   // the root) the static `create` factory body.
+  // Provenanced fields carry a co-located `_<field>_provenance` backing
+  // field (current lineage, persisted on the row) threaded through the
+  // ctor state so repository hydration can restore it.  `__provTraces`
+  // (the append-only history buffer drained by the route handler) is
+  // emitted only where domain logic actually writes a provenanced field.
+  const provFields = emitProvenance ? e.fields.filter((f) => f.provenanced) : [];
+  const hasOwnProvWrite =
+    emitProvenance && e.operations.some((op) => op.statements.some(stmtHasProv));
+
   const stateFields = [
     `id: Ids.${e.name}Id`,
     !e.isRoot ? `parentId: Ids.${e.rootName}Id` : null,
     ...e.fields.map((f) => `${f.name}: ${renderTsType(f.type)}`),
+    ...provFields.map((f) => `${f.name}_provenance: ProvLineage | null`),
     ...e.contains.map((c) => `${c.name}: ${containsType(c)}`),
   ].filter((s): s is string => s != null);
   const stateLiteral = `{ ${stateFields.join("; ")} }`;
@@ -137,8 +160,14 @@ function renderEntity(e: EntityShape, emitProvenance = false): string {
   for (const f of e.fields) {
     fieldDecls.push(`  private _${f.name}: ${renderTsType(f.type)};`);
   }
+  for (const f of provFields) {
+    fieldDecls.push(`  private _${f.name}_provenance: ProvLineage | null;`);
+  }
   for (const c of e.contains) {
     fieldDecls.push(`  private _${c.name}: ${containsType(c)};`);
+  }
+  if (hasOwnProvWrite) {
+    fieldDecls.push("  private __provTraces: ProvLineage[] = [];");
   }
 
   const ctorAssignments: string[] = [];
@@ -148,6 +177,9 @@ function renderEntity(e: EntityShape, emitProvenance = false): string {
   }
   for (const f of e.fields) {
     ctorAssignments.push(`    this._${f.name} = state.${f.name};`);
+  }
+  for (const f of provFields) {
+    ctorAssignments.push(`    this._${f.name}_provenance = state.${f.name}_provenance;`);
   }
   for (const c of e.contains) {
     ctorAssignments.push(`    this._${c.name} = state.${c.name};`);
@@ -162,6 +194,11 @@ function renderEntity(e: EntityShape, emitProvenance = false): string {
   for (const f of e.fields) {
     getters.push(`  get ${f.name}(): ${renderTsType(f.type)} { return this._${f.name}; }`);
   }
+  for (const f of provFields) {
+    getters.push(
+      `  get ${f.name}_provenance(): ProvLineage | null { return this._${f.name}_provenance; }`,
+    );
+  }
   for (const c of e.contains) {
     getters.push(`  get ${c.name}(): ${containsGetterType(c)} { return this._${c.name}; }`);
   }
@@ -171,7 +208,7 @@ function renderEntity(e: EntityShape, emitProvenance = false): string {
 
   const fns = e.functions.map((fn) => {
     const params = fn.params.map((p) => `${p.name}: ${renderTsType(p.type)}`).join(", ");
-    return `  private ${camel(fn.name)}(${params}): ${renderTsType(fn.returnType)} { return ${renderTsExpr(fn.body)}; }`;
+    return `  private ${lowerFirst(fn.name)}(${params}): ${renderTsType(fn.returnType)} { return ${renderTsExpr(fn.body)}; }`;
   });
 
   // For extern: setters per declared property, plus `raiseEvent` on the
@@ -193,7 +230,7 @@ function renderEntity(e: EntityShape, emitProvenance = false): string {
   // file imports the User type from auth/.  Per-op signatures still
   // get the parameter conditionally so a non-auth op stays
   // un-burdened with a User param.
-  const anyOpUsesCurrentUser = e.operations.some(operationUsesCurrentUser);
+  const _anyOpUsesCurrentUser = e.operations.some(operationUsesCurrentUser);
   for (const op of e.operations) {
     const visibility = op.visibility === "public" ? "public" : "private";
     const usesUser = operationUsesCurrentUser(op);
@@ -208,14 +245,22 @@ function renderEntity(e: EntityShape, emitProvenance = false): string {
       // business decision.
       const checkName = `check${op.name[0]!.toUpperCase()}${op.name.slice(1)}`;
       ops.push(`  ${checkName}(${params}): void {`);
-      const body = renderTsStatements(op.statements, emitProvenance);
+      const body = renderTsStatements(op.statements, emitProvenance, {
+      emitTrace,
+      aggregate: e.name,
+      op: op.name,
+    });
       if (body.length > 0) ops.push(body);
       ops.push("  }");
       ops.push("");
       continue;
     }
-    ops.push(`  ${visibility} ${camel(op.name)}(${params}): void {`);
-    const body = renderTsStatements(op.statements, emitProvenance);
+    ops.push(`  ${visibility} ${lowerFirst(op.name)}(${params}): void {`);
+    const body = renderTsStatements(op.statements, emitProvenance, {
+      emitTrace,
+      aggregate: e.name,
+      op: op.name,
+    });
     if (body.length > 0) ops.push(body);
     ops.push("    this._assertInvariants();");
     ops.push("  }");
@@ -238,9 +283,23 @@ function renderEntity(e: EntityShape, emitProvenance = false): string {
         `    return new ${e.name}({`,
         `      id: Ids.new${e.name}Id(),`,
         ...e.fields.map((f) => `      ${f.name}: ${f.optional ? "null" : `input.${f.name}`},`),
+        ...provFields.map((f) => `      ${f.name}_provenance: null,`),
         ...e.contains.map((c) => `      ${c.name}: ${c.collection ? "[]" : "null"},`),
         "    });",
         "  }",
+      ]
+    : [];
+
+  // History drain — the route handler calls this inside the save
+  // transaction and inserts one `provenance_records` row per lineage.
+  const provDrain = hasOwnProvWrite
+    ? [
+        "  __drainProv(): ProvLineage[] {",
+        "    const out = this.__provTraces;",
+        "    this.__provTraces = [];",
+        "    return out;",
+        "  }",
+        "",
       ]
     : [];
 
@@ -266,6 +325,7 @@ function renderEntity(e: EntityShape, emitProvenance = false): string {
     ...externMutators,
     ...fns,
     ...ops,
+    ...provDrain,
     ...pullEvents,
     "  private _assertInvariants(): void {",
     ...invariants,

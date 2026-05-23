@@ -1,19 +1,13 @@
 import type { AggregateIR, BoundedContextIR, DeployableIR, SystemIR } from "../../ir/loom-ir.js";
-import { camel, plural, snake } from "../../util/naming.js";
+import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import { buildApiModule } from "./api-builder.js";
 import { deriveSidebarFromUi } from "./menu-emitter.js";
-import { buildPageObjectModule } from "./page-objects-builder.js";
 import { deriveExtraRoutesFromUi, emitPageObjectsForUi, emitPagesForUi } from "./pages-emitter.js";
 import { renderAppShell, renderMain, renderShellFile, renderTheme } from "./templating/render.js";
-import { allViews, buildViewPageObject, buildViewsApiModule, hasAnyView } from "./view-builder.js";
-import {
-  allWorkflows,
-  buildWorkflowPageObject,
-  buildWorkflowsApiModule,
-  hasAnyWorkflow,
-} from "./workflow-builder.js";
+import { allViews, buildViewsApiModule, hasAnyView } from "./view-builder.js";
+import { allWorkflows, buildWorkflowsApiModule, hasAnyWorkflow } from "./workflow-builder.js";
 
 // ---------------------------------------------------------------------------
 // React + React Query + Zod + Mantine generator.
@@ -34,7 +28,7 @@ import {
 // ---------------------------------------------------------------------------
 
 /** Options for the React generator's secondary entry point — used by
- *  the .NET orchestrator's fullstack branch (Part B) where the React
+ *  the .NET orchestrator's fullstack branch where the React
  *  project becomes a sub-tree of the .NET project and the SPA calls
  *  its host's API on the same origin.
  *    - `apiBaseUrl`: overrides the computed `http://localhost:<port>`
@@ -77,7 +71,7 @@ export function generateReactForContexts(
   const aggregatesByName = new Map<string, AggregateIR>();
   for (const { agg } of aggregates) aggregatesByName.set(agg.name, agg);
 
-  // Phase 0: route list-page emission through the new template-pack
+  // Route list-page emission through the new template-pack
   // layer.  `deployable.design` is fully qualified by the lowering
   // pass (e.g. "mantine@v7"); the `??` default is defensive against
   // programmatic IR construction that bypasses lowering and matches
@@ -85,33 +79,33 @@ export function generateReactForContexts(
   const design = deployable.design ?? "mantine@v7";
   const pack = loadPack(resolvePackDir(design));
 
-  // Slice 5 — page metamodel routing.  When the deployable declares
-  // a `ui:` binding, the React generator walks `ui.pages` (post-
-  // Slice-4 expansion) via `emitPagesForUi`, which dispatches per
+  // Page metamodel routing.  When the deployable declares
+  // a `ui:` binding, the React generator walks `ui.pages` (after
+  // scaffold expansion) via `emitPagesForUi`, which dispatches per
   // `scaffoldOrigin` to the SAME `renderXxx` functions invoked
   // below for the legacy direct walk.  Byte-for-byte equivalent in
-  // the bulk-scaffold case (the acceptance gate of Slice 5).
+  // the bulk-scaffold case.
   //
   // Without a `ui:` binding (legacy/back-compat), fall through to
   // the per-aggregate / per-workflow / per-view loops directly.
-  // Slices 8/9 finalise the migration and delete the fallback.
+  // A later change finalises the migration and deletes the fallback.
   const ui = deployable.uiName ? sys.uis.find((u) => u.name === deployable.uiName) : undefined;
 
   // Per-aggregate api modules — always emitted; 1:1 with the
   // aggregate inventory.  The Playwright page object emission moves
-  // into the `if (ui)` branch below (Slice 7) so page-IR-routed
+  // into the `if (ui)` branch below so page-IR-routed
   // deployables walk the same source for both pages and page
   // objects.
   for (const { agg, ctx } of aggregates) {
     const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
-    out.set(`src/api/${camel(agg.name)}.ts`, buildApiModule(agg, repo, ctx));
+    out.set(`src/api/${lowerFirst(agg.name)}.ts`, buildApiModule(agg, repo, ctx));
   }
 
   const workflows = allWorkflows(contexts);
   const views = allViews(contexts);
 
   if (ui) {
-    // Slice D1 — single codegen path: every `src/pages/...` file
+    // Single codegen path: every `src/pages/...` file
     // (scaffold-derived OR explicit) routes through `emitPagesForUi`
     // → walker.  The legacy archetype renderers (`renderListPage`,
     // `renderNewPage`, `renderDetailPage`, etc.) are deleted.
@@ -145,12 +139,20 @@ export function generateReactForContexts(
   }
 
   out.set("e2e/smoke.spec.ts", smokeSpec(aggregates.map((a) => a.agg)));
+  out.set("e2e/fixtures.ts", E2E_FIXTURES_TS);
   out.set("e2e/playwright.config.ts", PLAYWRIGHT_CONFIG_TS);
   out.set("e2e/package.json", E2E_PACKAGE_JSON);
   out.set("e2e/tsconfig.json", E2E_TSCONFIG_JSON);
 
   out.set("src/api/client.ts", renderShellFile("api-client", {}, pack));
   out.set("src/api/config.ts", renderShellFile("api-config", { apiBaseUrl }, pack));
+  // Frontend observability: a namespaced loglevel logger + a top-level
+  // error boundary.  Both are pack-agnostic shared shell files; main.tsx
+  // (per pack) mounts the boundary and the api client logs through the
+  // logger.  Output flows through console.* so the playground App-log
+  // stream and Playwright console capture pick it up.
+  out.set("src/logger.ts", renderShellFile("logger", {}, pack));
+  out.set("src/ErrorBoundary.tsx", renderShellFile("error-boundary", {}, pack));
   out.set("src/lib/format.tsx", renderShellFile("format-helpers", {}, pack));
   // Theme — every generated app gets a tasteful baseline (indigo
   // primary, medium radius, Inter font) so the bare-Mantine
@@ -160,15 +162,15 @@ export function generateReactForContexts(
   // main.tsx always wires `<MantineProvider theme={theme}>`.
   out.set("src/theme.ts", renderTheme(sys.theme, pack));
   out.set("src/main.tsx", renderMain(pack));
-  // Slice 6: when the ui block declares an explicit `menu { … }`,
+  // When the ui block declares an explicit `menu { … }`,
   // its derived sidebar overrides the hardcoded Aggregates /
   // Workflows / Views grouping below.  When the ui has no menu
   // block (or no ui binding at all), `sidebarOverride` is
   // `undefined` and the AppShell preparer falls back to its legacy
-  // hardcoded shape — byte-identical to main's pre-Slice-6 output.
+  // hardcoded shape — byte-identical to the original sidebar output.
   const sidebarOverride = ui ? deriveSidebarFromUi(ui) : undefined;
 
-  // Slice 11.1 — explicit pages with non-conventional names need
+  // Explicit pages with non-conventional names need
   // to register their import + route in App.tsx so React Router
   // can mount them.  Pages that override a scaffolded shape at the
   // conventional name keep the conventional path and are routed
@@ -188,11 +190,11 @@ export function generateReactForContexts(
       pack,
     ),
   );
-  // Slice D1 — Home is always synthesised by the scaffold expander
+  // Home is always synthesised by the scaffold expander
   // when a `ui:` binding is present.  Deployables without `ui:`
   // emit no Home page (no scaffold archetype renderer left to fall
-  // back to); D2 will tighten the validator to require a `ui:`
-  // binding for any react deployable.
+  // back to); a future change tightens the validator to require a
+  // `ui:` binding for any react deployable.
 
   out.set("package.json", renderShellFile("package-json", {}, pack));
   out.set("tsconfig.json", renderShellFile("tsconfig", {}, pack));
@@ -276,21 +278,52 @@ function smokeSpec(aggregates: AggregateIR[]): string {
   // page loads.  Users add per-aggregate scenarios using the page
   // objects under e2e/pages/.
   const imports = aggregates
-    .map((a) => `import { ${upper(a.name)}ListPage } from "./pages/${camel(a.name)}";`)
+    .map((a) => `import { ${upperFirst(a.name)}ListPage } from "./pages/${lowerFirst(a.name)}";`)
     .join("\n");
   const cases = aggregates
     .map(
       (a) =>
-        `test("${snake(plural(a.name))} list loads", async ({ page }) => {\n  const p = await new ${upper(a.name)}ListPage(page).goto();\n  await expect(p.page).toHaveURL(/${snake(plural(a.name))}$/);\n});`,
+        `test("${snake(plural(a.name))} list loads", async ({ page }) => {\n  const p = await new ${upperFirst(a.name)}ListPage(page).goto();\n  await expect(p.page).toHaveURL(/${snake(plural(a.name))}$/);\n});`,
     )
     .join("\n\n");
   return `// Auto-generated smoke spec.
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 ${imports}
 
 ${cases}
 `;
 }
+
+// Playwright fixture: auto-capture the browser console + uncaught page
+// errors and, when a test does not pass, attach them to the report so a
+// failure carries the app's own output (not just a screenshot).  Generated
+// specs import { test, expect } from "./fixtures" instead of from
+// "@playwright/test" so every test gets this for free.
+export const E2E_FIXTURES_TS = `// Auto-generated.
+import { test as base, expect } from "@playwright/test";
+
+export const test = base.extend<{ _consoleCapture: void }>({
+  _consoleCapture: [
+    async ({ page }, use, testInfo) => {
+      const lines: string[] = [];
+      page.on("console", (msg) => lines.push(\`[\${msg.type()}] \${msg.text()}\`));
+      page.on("pageerror", (err) =>
+        lines.push(\`[pageerror] \${err.stack ?? err.message}\`),
+      );
+      await use();
+      if (testInfo.status !== testInfo.expectedStatus && lines.length > 0) {
+        await testInfo.attach("console-logs", {
+          body: lines.join("\\n"),
+          contentType: "text/plain",
+        });
+      }
+    },
+    { auto: true },
+  ],
+});
+
+export { expect };
+`;
 
 const PLAYWRIGHT_CONFIG_TS = `// Auto-generated.
 import { defineConfig, devices } from "@playwright/test";
@@ -304,7 +337,11 @@ export default defineConfig({
   reporter: [["list"]],
   use: {
     baseURL: process.env.E2E_BASE_URL ?? "http://localhost:3001",
-    trace: "on-first-retry",
+    // Keep the full trace (console + network + DOM snapshots) and a
+    // screenshot on every failure so a red test is debuggable from the
+    // report alone, alongside the console-logs attachment from fixtures.ts.
+    trace: "retain-on-failure",
+    screenshot: "only-on-failure",
   },
   projects: [
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
@@ -353,7 +390,3 @@ const E2E_TSCONFIG_JSON =
     null,
     2,
   ) + "\n";
-
-function upper(s: string): string {
-  return s[0]!.toUpperCase() + s.slice(1);
-}

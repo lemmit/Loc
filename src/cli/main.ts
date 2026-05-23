@@ -16,7 +16,7 @@ import { installFsBackendSource } from "../platform/fs-discovery.js";
 import { generateTypeScript } from "../platform/hono/v4/emit.js";
 // Legacy single-context `generate ts` targets the default Hono
 // backend; the CLI (an entrypoint) supplies that package's pins to
-// the version-agnostic shared emitter (B2.1).
+// the version-agnostic shared emitter.
 import { BACKEND_PINS as HONO_V4_PINS } from "../platform/hono/v4/pins.js";
 import { generateSystems } from "../system/index.js";
 import { captureSnapshots } from "../system/loomsnap.js";
@@ -145,6 +145,12 @@ interface RunOptions {
    * in the CLI (opt-in via `--wire-spec`); nothing reads the file at
    * runtime, it's a diffable wire-contract review aid. */
   wireSpec?: boolean;
+  /** Compile-time `--trace` switch — when true, the TS generators inject
+   * trace-level domain instrumentation (`value_computed`,
+   * `precondition_evaluated`, etc., via `requestLog().trace(...)`).  Off
+   * by default keeps the artefact lean and the domain layer pure; on
+   * regenerate to diagnose.  See docs/proposals/observability.md. */
+  emitTrace?: boolean;
 }
 
 interface RunResult {
@@ -194,7 +200,10 @@ async function runGenerate(
 
   let files: Map<string, string>;
   if (target === "system") {
-    files = generateSystems(result.model, { emitWireSpec: options.wireSpec === true }).files;
+    files = generateSystems(result.model, {
+      emitWireSpec: options.wireSpec === true,
+      emitTrace: options.emitTrace,
+    }).files;
     if (files.size === 0) {
       console.error(
         `No \`system\` block declared in ${file}.  Use \`generate ts\` or \`generate dotnet\` for legacy single-deployable sources.`,
@@ -203,7 +212,7 @@ async function runGenerate(
       return { hadError: true };
     }
   } else if (target === "ts") {
-    files = generateTypeScript(result.model, HONO_V4_PINS);
+    files = generateTypeScript(result.model, HONO_V4_PINS, { emitTrace: options.emitTrace });
   } else {
     files = generateDotnet(result.model);
   }
@@ -440,10 +449,23 @@ generate
   .requiredOption("-o, --out <dir>", "output directory")
   .option("-w, --watch", "re-run on changes to <file>")
   .option("--dry-run", "list paths that would be written / skipped, write nothing")
-  .action(async (file: string, options: { out: string; watch?: boolean; dryRun?: boolean }) => {
-    await runGenerate("ts", file, options.out, { dryRun: options.dryRun });
-    if (options.watch) await watchAndRegenerate("ts", file, options.out);
-  });
+  .option(
+    "--trace",
+    "emit trace-level domain instrumentation (value_computed, precondition_evaluated, …) — off by default; see docs/proposals/observability.md",
+  )
+  .action(
+    async (
+      file: string,
+      options: { out: string; watch?: boolean; dryRun?: boolean; trace?: boolean },
+    ) => {
+      await runGenerate("ts", file, options.out, {
+        dryRun: options.dryRun,
+        emitTrace: !!options.trace,
+      });
+      if (options.watch)
+        await watchAndRegenerate("ts", file, options.out, { emitTrace: !!options.trace });
+    },
+  );
 generate
   .command("dotnet <file>")
   .description("Generate .NET (ASP.NET Core + EF Core + Mediator)")
@@ -466,17 +488,29 @@ generate
     "--wire-spec",
     "also emit .loom/wire-spec.json (diffable wire-contract artifact; off by default)",
   )
+  .option(
+    "--trace",
+    "emit trace-level domain instrumentation (value_computed, precondition_evaluated, …) — off by default; see docs/proposals/observability.md",
+  )
   .action(
     async (
       file: string,
-      options: { out: string; watch?: boolean; dryRun?: boolean; wireSpec?: boolean },
+      options: {
+        out: string;
+        watch?: boolean;
+        dryRun?: boolean;
+        wireSpec?: boolean;
+        trace?: boolean;
+      },
     ) => {
-      await runGenerate("system", file, options.out, {
+      const runOpts = {
         dryRun: options.dryRun,
         wireSpec: options.wireSpec,
-      });
+        emitTrace: !!options.trace,
+      };
+      await runGenerate("system", file, options.out, runOpts);
       if (options.watch) {
-        await watchAndRegenerate("system", file, options.out, { wireSpec: options.wireSpec });
+        await watchAndRegenerate("system", file, options.out, runOpts);
       }
     },
   );
@@ -548,14 +582,13 @@ async function watchAndRegenerate(
   await new Promise(() => {});
 }
 
-// packaging-split P3 slice 3 — install the fs-backed
-// `discoverBackends()` source before any platform resolution.
-// Composes the in-tree default with whatever `@loom/*` backend
-// packages are installed in the project's `node_modules`.  Today
-// (slice 3) this is a no-op for emitted output because the fs
-// source returns the same surface instances as the in-tree
-// default; slice 5 makes the workspace package the true source of
-// code, and this call becomes load-bearing.  Errors during fs walk
+// Install the fs-backed `discoverBackends()` source before any
+// platform resolution.  Composes the in-tree default with whatever
+// `@loom/*` backend packages are installed in the project's
+// `node_modules`.  Today this is a no-op for emitted output because
+// the fs source returns the same surface instances as the in-tree
+// default; once the workspace package becomes the true source of
+// code, this call becomes load-bearing.  Errors during fs walk
 // (missing `node_modules`, permission, malformed manifest) are
 // non-fatal — the function returns whatever it could read, and the
 // composition falls back to the in-tree set.

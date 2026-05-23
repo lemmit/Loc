@@ -7,18 +7,14 @@ import type {
   EntityPart,
   EnumDecl,
   Expression,
-  FindDecl,
   FunctionDecl,
   Lambda,
   MemberAccess,
   Operation,
   Parameter,
   Repository,
-  Statement,
   TypeRef,
   ValueObject,
-  View,
-  Workflow,
 } from "./generated/ast.js";
 import {
   isAggregate,
@@ -45,7 +41,6 @@ import {
   isNowExpr,
   isNullLit,
   isOperation,
-  isParameter,
   isParenExpr,
   isPrimitiveType,
   isProperty,
@@ -158,7 +153,7 @@ export function isAssignable(value: DddType, target: DddType): boolean {
 // ---------------------------------------------------------------------------
 
 export function resolveTypeRef(ref: TypeRef | undefined): DddType {
-  if (!ref || !ref.base) return T.unknown;
+  if (!ref?.base) return T.unknown;
   let resolved = resolveBase(ref.base);
   if (ref.array) resolved = T.array(resolved);
   if (ref.optional) resolved = T.opt(resolved);
@@ -288,7 +283,7 @@ function typeOfMemberAccess(expr: import("./generated/ast.js").MemberAccess, env
   if (recvType.kind === "array") {
     if (expr.call) {
       for (const arg of expr.args) {
-        // Slice 1.5: call args wrap an Expression in a `CallArg`
+        // Call args wrap an Expression in a `CallArg`
         // node carrying an optional `name:` prefix.  Look at the
         // wrapped value, not the wrapper itself, when checking for
         // Lambda shape.
@@ -314,7 +309,7 @@ function typeOfMemberAccess(expr: import("./generated/ast.js").MemberAccess, env
   }
   if (recvType.kind === "primitive" && recvType.name === "string") {
     if (memberName === "length") return T.prim("int");
-    // `string.matches(regex)` — slice 21.C operator.  Returns bool;
+    // `string.matches(regex)` operator.  Returns bool;
     // argument is a string literal (the validator enforces that
     // separately so a non-literal arg becomes a clear diagnostic
     // rather than `unknown`).
@@ -378,8 +373,8 @@ function collectionOpType(
       return T.prim("int");
     case "sum": {
       // sum returns the lambda's body type when one is given;
-      // otherwise the element type itself.  Slice 1.5: args are
-      // CallArg wrappers — peek through `.value`.
+      // otherwise the element type itself.  Args are CallArg
+      // wrappers — peek through `.value`.
       const callArg = expr.args[0];
       const lambdaArg = callArg?.value;
       if (lambdaArg && isLambda(lambdaArg) && lambdaArg.body) {
@@ -466,6 +461,42 @@ function lookupValueObjectByName(name: string, env: Env): ValueObject | undefine
 
 export function isCollectionOp(name: string): boolean {
   return COLLECTION_OPS.has(name);
+}
+
+// Canonical test-assertion matcher catalogue — a built-in "intrinsic"
+// library the compiler knows by name (resolved into the IR, then lowered
+// per-backend to Playwright / vitest / xUnit / ExUnit).  `on` records
+// whether the matcher reads a DOM locator (web-first, auto-retrying) or a
+// plain value; `arity` is the fixed positional-argument count for
+// validation. This is the surface declared as DATA — adding a matcher is
+// a table entry plus a per-backend lowering, not a renderer special-case.
+export interface MatcherSig {
+  name: string;
+  arity: number;
+  on: "locator" | "value";
+  /** When this matcher reads a locator, the negated form is `not.<name>`. */
+  negatable: boolean;
+}
+const INTRINSIC_MATCHER_SIGNATURES: ReadonlyArray<MatcherSig> = [
+  { name: "toBe", arity: 1, on: "value", negatable: true },
+  { name: "toBeGreaterThan", arity: 1, on: "value", negatable: true },
+  { name: "toBeGreaterThanOrEqual", arity: 1, on: "value", negatable: true },
+  { name: "toBeLessThan", arity: 1, on: "value", negatable: true },
+  { name: "toBeLessThanOrEqual", arity: 1, on: "value", negatable: true },
+  { name: "toHaveText", arity: 1, on: "locator", negatable: true },
+  { name: "toHaveCount", arity: 1, on: "locator", negatable: true },
+  { name: "toBeVisible", arity: 0, on: "locator", negatable: true },
+];
+const INTRINSIC_MATCHERS = new Map(
+  INTRINSIC_MATCHER_SIGNATURES.map((m) => [m.name, m]),
+);
+
+export function isIntrinsicMatcher(name: string): boolean {
+  return INTRINSIC_MATCHERS.has(name);
+}
+
+export function intrinsicMatcherSig(name: string): MatcherSig | undefined {
+  return INTRINSIC_MATCHERS.get(name);
 }
 
 export function lambdaTakesElementOf(t: DddType): DddType {

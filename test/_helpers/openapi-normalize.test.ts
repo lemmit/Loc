@@ -60,6 +60,19 @@ describe("openapi-normalize", () => {
       expect(fieldSet(spec, "Nope").size).toBe(0);
       expect(fieldSet(spec, "Empty").size).toBe(0);
     });
+    it("excludes `<field>_provenance` keys (TS/Hono-only wire extension)", () => {
+      const provSpec: OpenApiSpec = {
+        components: {
+          schemas: {
+            OrderResponse: {
+              type: "object",
+              properties: { id: {}, total: {}, total_provenance: {} },
+            },
+          },
+        },
+      };
+      expect(fieldSet(provSpec, "OrderResponse")).toEqual(new Set(["id", "total"]));
+    });
   });
 
   describe("classifyShape", () => {

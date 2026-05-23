@@ -119,7 +119,7 @@ describe("typescript generator", () => {
     expect(dockerignore).toMatch(/node_modules/);
   });
 
-  describe("slice 16.A — container basics", () => {
+  describe("container basics", () => {
     it("http/index.ts mounts /ready that pings the DB and returns 503 on failure", async () => {
       const model = await buildModel("examples/sales.ddd");
       const files = generateTypeScript(model, HONO_V4_PINS);
@@ -153,8 +153,145 @@ describe("typescript generator", () => {
     });
   });
 
-  describe("slice 16.C — request observability", () => {
-    it("emits obs/request-id.ts with the correlation-id middleware", async () => {
+  describe("request observability", () => {
+    it("emits obs/als.ts wiring the bound child logger into AsyncLocalStorage", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS);
+      const als = files.get("obs/als.ts")!;
+      // Non-HTTP code (repository, dispatcher, domain on --trace) resolves
+      // the request-scoped logger through `requestLog()` which reads from
+      // Node's AsyncLocalStorage — wired by the request-id middleware.
+      expect(als).toMatch(/from "node:async_hooks"/);
+      expect(als).toMatch(
+        /export const requestLogStore = new AsyncLocalStorage<\{ log: RequestLogger \}>/,
+      );
+      // Outside-request fallback to baseLogger so the helper never throws.
+      expect(als).toMatch(/export function requestLog\(\): RequestLogger \{[\s\S]+baseLogger/);
+    });
+
+    it("request-id middleware wraps next() in requestLogStore.run so non-HTTP code resolves the same logger", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS);
+      const reqId = files.get("obs/request-id.ts")!;
+      expect(reqId).toMatch(/import \{ requestLogStore \} from "\.\/als"/);
+      expect(reqId).toMatch(/await requestLogStore\.run\(\{ log \}, async \(\) => \{/);
+    });
+
+    it("--trace off: domain file imports no infra and statements stay byte-identical", async () => {
+      // The whole point of the compile-time switch: when --trace is OFF
+      // (the default) the generated domain file MUST be free of any
+      // observability infra import or instrumentation.  Domain purity by
+      // construction.
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS); // no emitTrace
+      const orderDomain = files.get("domain/order.ts")!;
+      expect(orderDomain).not.toMatch(/from "\.\.\/obs\/als"/);
+      expect(orderDomain).not.toMatch(/requestLog\(\)/);
+      expect(orderDomain).not.toMatch(/event: "value_computed"/);
+      expect(orderDomain).not.toMatch(/event: "precondition_evaluated"/);
+    });
+
+    it("--trace on: domain file injects requestLog import + value_computed + precondition_evaluated", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      // Mirror what the CLI does for `generate ts <ddd> --trace`.
+      const files = generateTypeScript(model, HONO_V4_PINS, { emitTrace: true });
+      const orderDomain = files.get("domain/order.ts")!;
+      // requestLog import — only when --trace is on, so the default
+      // artefact's domain layer never touches an infra import.
+      expect(orderDomain).toMatch(/import \{ requestLog \} from "\.\.\/obs\/als"/);
+      // value_computed after a scalar assign — carries the post-write
+      // value via `this._<field>`, the same path the assignment uses.
+      expect(orderDomain).toMatch(
+        /requestLog\(\)\.trace\(\{ event: "value_computed", aggregate: "Order", field: "[a-z]+", value: this\._[a-z]+ \}\)/,
+      );
+      // precondition_evaluated — boolean bound to a temp so BOTH pass
+      // and fail outcomes log, then the conditional throw fires off the
+      // same temp.
+      expect(orderDomain).toMatch(/const __pre_\d+_ok = \(/);
+      expect(orderDomain).toMatch(
+        /requestLog\(\)\.trace\(\{ event: "precondition_evaluated", aggregate: "Order", op: "[a-zA-Z]+", expr: "[^"]+", passed: __pre_\d+_ok \}\)/,
+      );
+      expect(orderDomain).toMatch(/if \(!__pre_\d+_ok\) throw new DomainError\(/);
+    });
+
+    it("health + ready probes emit health_ok / db_error / health_degraded via the request logger", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS);
+      const httpIndex = files.get("http/index.ts")!;
+      // /health → liveness probe — debug line so probe traffic only
+      // surfaces under LOG_LEVEL=debug, not the default info stream.
+      expect(httpIndex).toMatch(
+        /\.get\("log"\)\.debug\(\{ event: "health_ok", checks: \["liveness"\] \}\)/,
+      );
+      // /ready → success path logs health_ok (readiness, db).
+      expect(httpIndex).toMatch(
+        /\.get\("log"\)\.debug\(\{ event: "health_ok", checks: \["readiness", "db"\] \}\)/,
+      );
+      // /ready → failure path logs BOTH db_error (the underlying cause,
+      // error level so it lands in any sane prod stream) AND
+      // health_degraded (debug, the cumulative probe outcome).
+      expect(httpIndex).toMatch(/\.get\("log"\)\.error\(\{ event: "db_error", error: message \}\)/);
+      expect(httpIndex).toMatch(
+        /\.get\("log"\)\.debug\(\{ event: "health_degraded", checks: \["db"\] \}\)/,
+      );
+    });
+
+    it("repository emits aggregate_loaded / repository_save / find_executed / event_dispatched via requestLog()", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS);
+      const repo = files.get("db/repositories/order-repository.ts")!;
+      // ALS-backed logger import — repository methods have no `c` in scope.
+      expect(repo).toMatch(/import \{ requestLog \} from "\.\.\/\.\.\/obs\/als"/);
+      // findById: both not-found and found paths carry the aggregate_loaded
+      // debug line — `found:false` on the empty branch, `found:true` on the
+      // hydrated branch.
+      expect(repo).toMatch(
+        /requestLog\(\)\.debug\(\{ event: "aggregate_loaded", aggregate: "Order", id: id as string, found: false \}\)/,
+      );
+      expect(repo).toMatch(
+        /requestLog\(\)\.debug\(\{ event: "aggregate_loaded", aggregate: "Order", id: id as string, found: true \}\)/,
+      );
+      // save: one repository_save debug after the transaction commits.
+      expect(repo).toMatch(
+        /requestLog\(\)\.debug\(\{ event: "repository_save", aggregate: "Order", id: aggregate\.id as string \}\)/,
+      );
+      // dispatcher: one event_dispatched info per pulled event.  The
+      // `(event as object).constructor.name` cast handles the corner case
+      // where the aggregate declares no events (pullEvents returns never[]).
+      expect(repo).toMatch(
+        /requestLog\(\)\.info\(\{ event: "event_dispatched", event_type: \(event as object\)\.constructor\.name, aggregate: "Order", id: aggregate\.id as string \}\)/,
+      );
+      // find_executed debug at every find return — including the empty-rows
+      // branch so a no-result query is still observable.
+      expect(repo).toMatch(
+        /requestLog\(\)\.debug\(\{ event: "find_executed", aggregate: "Order", find: "[^"]+", rows: 0 \}\)/,
+      );
+      expect(repo).toMatch(
+        /requestLog\(\)\.debug\(\{ event: "find_executed", aggregate: "Order", find: "[^"]+", rows: __result\.length \}\)/,
+      );
+    });
+
+    it("emits obs/log.ts with a configured pino base logger", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS);
+      const log = files.get("obs/log.ts")!;
+      // Standard structured logger — pino, not hand-rolled console.log.
+      expect(log).toMatch(/from "pino"/);
+      expect(log).toMatch(/export const baseLogger/);
+      // Level is a runtime knob via LOG_LEVEL env (default info).
+      expect(log).toMatch(/process\.env\.LOG_LEVEL \?\? "info"/);
+      // pino's default { pid, hostname } base fields are dropped.
+      expect(log).toMatch(/base: undefined/);
+      // Envelope aligned with docs/proposals/observability.md:
+      //   level emitted as label ("info") not pino's numeric severity,
+      //   timestamp as `ts` ISO string not pino's default `time` epoch ms.
+      expect(log).toMatch(/level: \(label\) => \(\{ level: label \}\)/);
+      expect(log).toMatch(/new Date\(\)\.toISOString\(\)/);
+      // Exposes the per-request child-logger type for downstream typing.
+      expect(log).toMatch(/export type RequestLogger/);
+    });
+
+    it("emits obs/request-id.ts with the correlation-id middleware + bound child logger", async () => {
       const model = await buildModel("examples/sales.ddd");
       const files = generateTypeScript(model, HONO_V4_PINS);
       const reqId = files.get("obs/request-id.ts")!;
@@ -167,12 +304,40 @@ describe("typescript generator", () => {
       // via direct headers mutation to avoid Hono's null-body
       // (204/304) Response-construction trap.
       expect(reqId).toMatch(/c\.res\.headers\.set\(REQUEST_ID_HEADER, requestId\)/);
-      // Stashes the id on the Hono context for downstream onError.
+      // Stashes the bare id on the Hono context for downstream onError.
       expect(reqId).toMatch(/c\.set\("requestId", requestId\)/);
-      // Structured request_start + request_end JSON log lines.
-      expect(reqId).toMatch(/event: "request_start"/);
+      // Binds a per-request child logger with the request_id field, so
+      // every downstream `c.get("log").info(...)` call is correlated
+      // without the seam having to re-pass the id.
+      expect(reqId).toMatch(/baseLogger\.child\(\{ request_id: requestId \}\)/);
+      expect(reqId).toMatch(/c\.set\("log", log\)/);
+      // Structured request_start + request_end log lines via pino.
+      expect(reqId).toMatch(/log\.info\(\{ event: "request_start"/);
       expect(reqId).toMatch(/event: "request_end"/);
       expect(reqId).toMatch(/duration_ms:/);
+    });
+
+    it("boot script emits structured server lifecycle events via pino", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS);
+      const index = files.get("index.ts")!;
+      expect(index).toMatch(/import \{ baseLogger \} from "\.\/obs\/log"/);
+      // server_starting (before listen) + server_listening (after) +
+      // server_shutdown / server_drained on the signal path replace the
+      // previous bare console.logs.
+      expect(index).toMatch(/event: "server_starting"/);
+      expect(index).toMatch(/event: "server_listening"/);
+      expect(index).toMatch(/event: "server_shutdown"/);
+      expect(index).toMatch(/event: "server_drained"/);
+      expect(index).not.toMatch(/console\.log/);
+    });
+
+    it("generated package.json pins pino + pino-pretty", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS);
+      const pkg = JSON.parse(files.get("package.json")!);
+      expect(pkg.dependencies.pino).toMatch(/^\^?\d/);
+      expect(pkg.devDependencies["pino-pretty"]).toMatch(/^\^?\d/);
     });
 
     it("http/index.ts mounts requestIdMiddleware before cors and any business route", async () => {
@@ -204,6 +369,38 @@ describe("typescript generator", () => {
       expect(routes).toMatch(/error: err\.message, trace_id \}, 400/);
       expect(routes).toMatch(/error: err\.message, trace_id \}, 404/);
       expect(routes).toMatch(/error: "internal", trace_id \}, 500/);
+    });
+
+    it("routes emit catalog log events at the right levels via the bound child logger", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS);
+      const routes = files.get("http/order.routes.ts")!;
+      // Business-narrative info lines from the create + operation seams.
+      // The renderer bridges `c.get("log")` through an untyped cast
+      // (zod-openapi's Env constraint rejects custom Variables) — the
+      // same shape the trace_id read uses.
+      expect(routes).toMatch(
+        /\.get\("log"\)\.info\(\{ event: "aggregate_created", aggregate: "Order", id: created\.id as string \}\)/,
+      );
+      expect(routes).toMatch(
+        /\.get\("log"\)\.info\(\{ event: "operation_invoked", aggregate: "Order", op: "[^"]+", id \}\)/,
+      );
+      // onError: client/domain faults → warn; system faults → error.
+      expect(routes).toMatch(
+        /\.get\("log"\)\.warn\(\{ event: "forbidden", aggregate: "Order", message: err\.message, status: 403 \}\)/,
+      );
+      expect(routes).toMatch(
+        /\.get\("log"\)\.warn\(\{ event: "domain_error", aggregate: "Order", message: err\.message, status: 400 \}\)/,
+      );
+      expect(routes).toMatch(
+        /\.get\("log"\)\.warn\(\{ event: "not_found", aggregate: "Order", status: 404 \}\)/,
+      );
+      expect(routes).toMatch(
+        /\.get\("log"\)\.error\(\{ event: "extern_handler_threw", aggregate: err\.aggName, op: err\.opName, error: err\.message \}\)/,
+      );
+      expect(routes).toMatch(/\.get\("log"\)\.error\(\{ event: "internal_error",/);
+      // Bare console.error retired — pino does the serialization.
+      expect(routes).not.toMatch(/console\.error/);
     });
   });
 
@@ -251,7 +448,7 @@ describe("typescript generator", () => {
     expect(repo).toMatch(
       /\.where\(and\(eq\(schema\.orders\.customerId, forCustomer\), eq\(schema\.orders\.status, "Draft"\)\)\)/,
     );
-    // Slice B: `as never` casts are gone from generated finds.
+    // `as never` casts are gone from generated finds.
     expect(repo).not.toMatch(/as never/);
     // No TODO fallback for this find.
     expect(repo).not.toMatch(/TODO: translate where-clause[\s\S]*activeForCustomer/);
@@ -346,12 +543,19 @@ describe("typescript generator", () => {
     expect(routes).toMatch(/aggregate\.assertInvariants\(\)/);
     expect(routes).not.toMatch(/aggregate\.confirm\(\)/);
 
-    // 5. http/index.ts wires the verify gate at startup.
+    // 5. http/index.ts wires the verify gate at startup AND emits a
+    // structured `extern_handlers_registered` (debug) line per aggregate
+    // — so an operator confirming a deploy can read the catalog of
+    // wired handlers off the startup log instead of grepping source.
     const httpIndex = files.get("http/index.ts")!;
     expect(httpIndex).toMatch(/verifyOrderExternHandlersRegistered/);
+    expect(httpIndex).toMatch(/import \{ baseLogger \} from "\.\.\/obs\/log"/);
+    expect(httpIndex).toMatch(
+      /baseLogger\.debug\(\{ event: "extern_handlers_registered", aggregate: "Order", count: 1, ops: \["confirm"\] \}\)/,
+    );
   });
 
-  describe("slice 16.B — extern handler exception envelope", () => {
+  describe("extern handler exception envelope", () => {
     it("domain/errors.ts exports ExternHandlerError", async () => {
       const model = await buildModel("examples/sales.ddd");
       const files = generateTypeScript(model, HONO_V4_PINS);
@@ -403,7 +607,7 @@ describe("typescript generator", () => {
       // onError checks ExternHandlerError before the generic 500.
       expect(routes).toMatch(/if \(err instanceof ExternHandlerError\)/);
       // Generic 500 fallback survives unchanged for unknown errors.
-      // Slice 16.C threads trace_id alongside the existing error
+      // trace_id is threaded alongside the existing error
       // field, so the envelope shape is `{ error, trace_id }`.
       expect(routes).toMatch(/return c\.json\(\{ error: "internal", trace_id \}, 500\)/);
     });
@@ -689,7 +893,7 @@ describe("typescript generator", () => {
     expect(views).toMatch(/projected as z\.infer<typeof OrderSummaryResponse>/);
   });
 
-  it("rewrites Id<X> follow refs to bulk-load + map lookups (slice 3)", async () => {
+  it("rewrites Id<X> follow refs to bulk-load + map lookups", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
@@ -1005,10 +1209,10 @@ describe("typescript generator", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Slice 1A — auth scaffolding
+  // auth scaffolding
   // -------------------------------------------------------------------------
 
-  describe("auth scaffolding (slice 1A)", () => {
+  describe("auth scaffolding", () => {
     async function emitForAuthSystem(src: string): Promise<Map<string, string>> {
       const { parseHelper } = await import("langium/test");
       const services = createDddServices(NodeFileSystem);
@@ -1093,6 +1297,13 @@ describe("typescript generator", () => {
       const auth = httpIndex.indexOf('app.use("*", authMiddleware)');
       expect(cors).toBeGreaterThan(0);
       expect(auth).toBeGreaterThan(cors);
+      // auth_enabled (info) emitted at boot whenever the verifier
+      // assert clears, so every boot log advertises whether this
+      // deployable expects authenticated requests.
+      expect(httpIndex).toMatch(/import \{ baseLogger \} from "\.\.\/obs\/log"/);
+      expect(httpIndex).toMatch(
+        /baseLogger\.info\(\{ event: "auth_enabled", required: true \}\)/,
+      );
     });
 
     it("middleware bypasses /health, /openapi.json, /swagger", async () => {
@@ -1114,7 +1325,7 @@ describe("typescript generator", () => {
     });
 
     // -----------------------------------------------------------------------
-    // Slice 1C — currentUser inside find / view filters
+    // currentUser inside find / view filters
     // -----------------------------------------------------------------------
 
     const SRC_FILTER_AUTH = `
@@ -1166,7 +1377,7 @@ describe("typescript generator", () => {
     });
 
     // -----------------------------------------------------------------------
-    // Slice 2 — `requires` clauses
+    // `requires` clauses
     // -----------------------------------------------------------------------
 
     const SRC_REQUIRES = `
@@ -1212,18 +1423,19 @@ describe("typescript generator", () => {
     it("http/<aggregate>.routes.ts maps ForbiddenError to 403 in app.onError", async () => {
       const files = await emitForAuthSystem(SRC_REQUIRES);
       const route = files.get("http/order.routes.ts")!;
-      // Slice 16.C threads trace_id alongside the existing error
-      // field, so the envelope shape is `{ error, trace_id }`.
-      expect(route).toMatch(
-        /if \(err instanceof ForbiddenError\) return c\.json\(\{ error: err\.message, trace_id \}, 403\);/,
-      );
+      // trace_id is threaded alongside the existing error field, so the
+      // envelope shape is `{ error, trace_id }`.  The onError arm now
+      // logs the catalog event before returning, so the test matches the
+      // 403 response line independently of the surrounding `{ ... }` arm.
+      expect(route).toMatch(/if \(err instanceof ForbiddenError\) \{/);
+      expect(route).toMatch(/return c\.json\(\{ error: err\.message, trace_id \}, 403\);/);
     });
   });
 
   // -------------------------------------------------------------------
-  // Slice 21.A — wire-boundary validation on Hono routes.
+  // wire-boundary validation on Hono routes.
   // -------------------------------------------------------------------
-  describe("invariants on the wire (slice 21.A — Hono Zod refines)", () => {
+  describe("invariants on the wire (Hono Zod refines)", () => {
     it("absorbs single-field invariants on a value-object schema into idiomatic native chains", async () => {
       const model = await buildModel("examples/sales.ddd");
       const files = generateTypeScript(model, HONO_V4_PINS);
@@ -1288,7 +1500,7 @@ describe("typescript generator", () => {
       );
     });
 
-    it("absorbs `string.matches(literal)` as `z.string().regex(/.../)` on Hono routes (slice 21.C)", async () => {
+    it("absorbs `string.matches(literal)` as `z.string().regex(/.../)` on Hono routes", async () => {
       const { parseHelper } = await import("langium/test");
       const services = createDddServices(NodeFileSystem);
       const helper = parseHelper(services.Ddd);
@@ -1311,7 +1523,7 @@ describe("typescript generator", () => {
       );
     });
 
-    it("renders `matches` in domain code as `new RegExp(...).test(...)` (slice 21.C)", async () => {
+    it("renders `matches` in domain code as `new RegExp(...).test(...)`", async () => {
       const { parseHelper } = await import("langium/test");
       const services = createDddServices(NodeFileSystem);
       const helper = parseHelper(services.Ddd);

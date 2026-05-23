@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import type { Model } from "../../src/language/generated/ast.js";
 import { eventNames, listEmits, setEmitEvent } from "../../web/src/builder/system/emit-event.js";
 import { parseRaw as parse } from "../_helpers/index.js";
 

@@ -6,7 +6,7 @@
 // node's own `ownerDocument.defaultView`, so iframe-local CSS/fonts are
 // honoured.
 //
-// Capture is ALWAYS best-effort: a cross-origin asset (e.g. an esm.sh
+// Capture is ALWAYS best-effort: a cross-origin asset (e.g. a remote
 // image) can taint the canvas and make rasterization throw.  We resolve
 // `undefined` on any failure so a screenshot can never flip a test's
 // pass/fail.

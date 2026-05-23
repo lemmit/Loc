@@ -1,12 +1,11 @@
-// packaging-split P2 — this orchestrator (project assembly: which
-// files, framework wiring, package.json/Dockerfile) is
-// backend-specific, so it lives in the hono@v4 *package* and drives
-// the shared neutral emitter library under
-// `src/generator/typescript/` by ordinary import (package → shared,
-// the B2.1 invariant).  Subsequent P2 slices move the remaining
-// Hono-framework builders (routes/workflow/view/auth/observability)
-// in here too, leaving only the framework-neutral helpers
-// (render-expr/stmt, templates, zod-refine) in core.
+// This orchestrator (project assembly: which files, framework wiring,
+// package.json/Dockerfile) is backend-specific, so it lives in the
+// hono@v4 *package* and drives the shared neutral emitter library
+// under `src/generator/typescript/` by ordinary import (package →
+// shared).  Over time the remaining Hono-framework builders
+// (routes/workflow/view/auth/observability) move in here too, leaving
+// only the framework-neutral helpers (render-expr/stmt, templates,
+// zod-refine) in core.
 
 import { buildExternHandlersFile } from "../../../generator/typescript/extern-builder.js";
 import { buildRepositoryFile } from "../../../generator/typescript/repository-builder.js";
@@ -27,9 +26,9 @@ import type {
   SystemIR,
 } from "../../../ir/loom-ir.js";
 import { lowerModel } from "../../../ir/lower.js";
-import { contextsHaveProvSite } from "../../../ir/prov-id.js";
+import { contextsHaveProvenancedField } from "../../../ir/prov-id.js";
 import type { Model } from "../../../language/generated/ast.js";
-import { camel } from "../../../util/naming.js";
+import { lowerFirst } from "../../../util/naming.js";
 // Hono-framework builders now live in this package (P2b) — siblings.
 import { emitAuthFiles } from "./auth-emit.js";
 import { emitObservabilityFiles } from "./observability-builder.js";
@@ -74,46 +73,22 @@ export class ExternHandlerError extends Error {
 }
 `;
 
-/** Runtime provenance SDK — emitted only when the model declares at least
- *  one `provenanced` field that is actually written.  v1 is an append-only
- *  in-memory trace sink; each provenanced write calls `recordTrace(...)`
- *  referencing the compile-time rule snapshot in `.loom/loomsnap.json`. */
+/** Provenance lineage types — emitted only when the model declares at
+ *  least one `provenanced` field that is actually written.  Each
+ *  provenanced write builds a `ProvLineage` referencing the compile-time
+ *  rule snapshot in `.loom/loomsnap.json`; it is stored co-located on the
+ *  aggregate row (the `<field>_provenance` jsonb column) and appended to
+ *  the `provenance_records` history table inside the operation's save
+ *  transaction (see routes-builder). */
 const PROVENANCE_TS = `// Auto-generated.
-import { randomUUID } from "node:crypto";
-
 export interface ProvInput { path: string; value: unknown; }
 
-export interface TraceRecord {
-  traceId: string;
+export interface ProvLineage {
   /** Points at the per-write-site rule snapshot in \`.loom/loomsnap.json\`. */
   snapshotId: string;
   target: { type: string; field: string };
   inputs: ProvInput[];
   computedValue: unknown;
-  at: string;
-}
-
-const __traces: TraceRecord[] = [];
-
-export function recordTrace(
-  snapshotId: string,
-  target: { type: string; field: string },
-  inputs: ProvInput[],
-  computedValue: unknown,
-): void {
-  __traces.push({
-    traceId: randomUUID(),
-    snapshotId,
-    target,
-    inputs,
-    computedValue,
-    at: new Date().toISOString(),
-  });
-}
-
-/** Drains the in-memory trace buffer (test/inspection hook). */
-export function __drainTraces(): TraceRecord[] {
-  return __traces.splice(0);
 }
 `;
 
@@ -121,13 +96,17 @@ export function __drainTraces(): TraceRecord[] {
  * Legacy entry: lowers the whole model and emits one project from all
  * top-level bounded contexts.  Used by `ddd generate ts <file> -o <dir>`.
  */
-export function generateTypeScript(model: Model, pins: BackendPins): Map<string, string> {
+export function generateTypeScript(
+  model: Model,
+  pins: BackendPins,
+  options: { emitTrace?: boolean } = {},
+): Map<string, string> {
   // Lowering produces a faithful AST projection; enrichment populates
   // wireShape, the implicit `findAll` find, and react `moduleNames`
   // inheritance.  Every backend consumes the enriched IR, never the
   // raw lowered output.
   const loom = enrichLoomModel(lowerModel(model));
-  return generateTypeScriptForContexts(loom.contexts, pins);
+  return generateTypeScriptForContexts(loom.contexts, pins, undefined, options);
 }
 
 /**
@@ -146,14 +125,23 @@ export function generateTypeScriptForContexts(
   contexts: BoundedContextIR[],
   pins: BackendPins,
   system?: { deployable: DeployableIR; sys: SystemIR },
+  options: { emitTrace?: boolean } = {},
 ): Map<string, string> {
+  const emitTrace = !!options.emitTrace;
   const out = new Map<string, string>();
   const authRequired = !!(system?.deployable.auth?.required && system.sys.user);
   // Emission is forced by presence: any written `provenanced` field turns
-  // on the trace SDK + per-site `recordTrace` calls.  Threaded as a flag
-  // (rather than read off presence at each call site) so a future
-  // build-level switch can force emission for other consumers.
-  const emitProvenance = contextsHaveProvSite(contexts);
+  // on the lineage types + co-located `<field>_provenance` columns + the
+  // `provenance_records` history table.  Threaded as a flag (rather than
+  // read off presence at each call site) so a future build-level switch
+  // can force emission for other consumers.
+  const emitProvenance = contextsHaveProvenancedField(contexts);
+  // Emission is forced by presence: any `audited` operation turns on the
+  // audit SDK + per-route `recordAudit` calls.  Threaded as a flag (like
+  // emitProvenance) so a future build-level switch can force emission.
+  const emitAudit = contexts.some((c) =>
+    c.aggregates.some((a) => a.operations.some((o) => o.audited)),
+  );
 
   // Multi-context Hono deployables (e.g. acme's catalogWeb spanning
   // Catalog + CustomerMgmt) need the shared domain files to UNION
@@ -179,7 +167,7 @@ export function generateTypeScriptForContexts(
   out.set("domain/events.ts", renderEvents(merged));
   out.set("domain/errors.ts", ERRORS_TS);
   if (emitProvenance) out.set("domain/provenance.ts", PROVENANCE_TS);
-  out.set("db/schema.ts", renderSchema(merged));
+  out.set("db/schema.ts", renderSchema(merged, { audit: emitAudit, provenance: emitProvenance }));
   if (merged.workflows.length > 0) {
     const aggsByName = new Map(merged.aggregates.map((a) => [a.name, a] as const));
     out.set("http/workflows.ts", buildWorkflowsFile(merged, aggsByName));
@@ -196,18 +184,24 @@ export function generateTypeScriptForContexts(
   for (const ctx of contexts) {
     for (const agg of ctx.aggregates) {
       const repo = findRepoFor(ctx, agg.name);
-      out.set(`domain/${camel(agg.name)}.ts`, renderAggregate(agg, ctx, emitProvenance));
       out.set(
-        `db/repositories/${camel(agg.name)}-repository.ts`,
+        `domain/${lowerFirst(agg.name)}.ts`,
+        renderAggregate(agg, ctx, emitProvenance, emitTrace),
+      );
+      out.set(
+        `db/repositories/${lowerFirst(agg.name)}-repository.ts`,
         buildRepositoryFile(agg, repo, ctx),
       );
-      out.set(`http/${camel(agg.name)}.routes.ts`, buildRoutesFile(agg, repo, ctx));
+      out.set(
+        `http/${lowerFirst(agg.name)}.routes.ts`,
+        buildRoutesFile(agg, repo, ctx, emitAudit, emitProvenance),
+      );
       if (agg.operations.some((o) => o.extern)) {
-        out.set(`domain/${camel(agg.name)}-extern.ts`, buildExternHandlersFile(agg, ctx));
+        out.set(`domain/${lowerFirst(agg.name)}-extern.ts`, buildExternHandlersFile(agg, ctx));
       }
       const testsFile = renderTestsFile(agg, ctx);
       if (testsFile) {
-        out.set(`domain/${camel(agg.name)}.test.ts`, testsFile);
+        out.set(`domain/${lowerFirst(agg.name)}.test.ts`, testsFile);
       }
     }
   }
@@ -231,8 +225,8 @@ function findRepoFor(ctx: BoundedContextIR, name: string): RepositoryIR | undefi
   return ctx.repositories.find((r) => r.aggregateName === name);
 }
 
-// Backend-packages B2.1 — the shared TypeScript/Hono emitter is
-// version-agnostic.  Dep pins are owned by the active backend
+// The shared TypeScript/Hono emitter is version-agnostic.  Dep pins
+// are owned by the active backend
 // *package* (`src/platform/hono/<vN>/pins.ts`) and threaded in as a
 // parameter; the emitter never imports a package (no shared→package
 // edge), so it stays usable by any backend version and a future
@@ -335,6 +329,7 @@ import pg from "pg";
 import { serve } from "@hono/node-server";
 import * as schema from "./db/schema";
 import { createApp } from "./http/index";
+import { baseLogger } from "./obs/log";
 
 // Fail fast on a missing DATABASE_URL.  Without this an unset value
 // surfaces as a confusing pg connection refusal mid-request; we'd
@@ -346,19 +341,23 @@ if (!process.env.DATABASE_URL) {
   );
 }
 
+const port = Number(process.env.PORT ?? 3000);
+baseLogger.info({ event: "server_starting", port, env: process.env.NODE_ENV ?? "development" });
+
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 const db = drizzle(pool, { schema });
 const app = createApp(db);
-const server = serve({ fetch: app.fetch, port: Number(process.env.PORT ?? 3000) });
-console.log("listening on", process.env.PORT ?? 3000);
+const server = serve({ fetch: app.fetch, port });
+baseLogger.info({ event: "server_listening", port });
 
 // Graceful shutdown — close the HTTP server (stops accepting,
 // drains in-flight), then close the pg pool.  Without this SIGTERM
 // drops in-flight work and leaves pg connections lingering.  Both
 // SIGTERM (orchestrator) and SIGINT (Ctrl-C) are handled.
 async function shutdown(signal: string): Promise<void> {
-  console.log(\`shutting down (\${signal}) — draining in-flight requests\`);
+  baseLogger.info({ event: "server_shutdown", signal });
   await new Promise<void>((resolve) => server.close(() => resolve()));
+  baseLogger.info({ event: "server_drained" });
   await pool.end();
   process.exit(0);
 }

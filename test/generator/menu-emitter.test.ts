@@ -1,4 +1,4 @@
-// Slice 6 — menu emitter.
+// menu emitter.
 //
 // Tests the explicit-menu-block path: when a `ui` declares
 // `menu { section "S" { link Page, link "L" -> "url" } }`, the
@@ -24,7 +24,7 @@ function uiOf(loom: LoomModel, name: string): UiIR {
   return ui;
 }
 
-describe("menu emitter (Slice 6)", () => {
+describe("menu emitter", () => {
   it("returns undefined when the ui has no explicit menu block", async () => {
     const loom = await buildLoom(`
       system S {
@@ -161,7 +161,7 @@ describe("menu emitter (Slice 6)", () => {
   });
 
   it("silently drops links to pages that aren't in the ui", async () => {
-    // Validator (Slice 3) already errors on this with "resolves to a
+    // Validator already errors on this with "resolves to a
     // page declared outside ui 'X'"; the menu emitter is defensive
     // — it returns no entry rather than crashing if a stale/unknown
     // ref makes it through.
@@ -182,7 +182,7 @@ describe("menu emitter (Slice 6)", () => {
     // for the bulk-scaffold default, `deriveSidebarFromUi` returns
     // undefined, the AppShell preparer falls back to its hardcoded
     // Aggregates / Workflows / Views grouping, and the sidebar
-    // matches main's pre-Slice-6 output.  The `test/page-emitter-
+    // matches the original sidebar output.  The `test/page-emitter-
     // equivalence.test.ts` file pins the actual file content match
     // for `examples/acme.ddd`; this assertion just locks the menu
     // emitter's contract so a future refactor can't accidentally

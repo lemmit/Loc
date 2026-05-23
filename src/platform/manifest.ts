@@ -1,16 +1,15 @@
 // ---------------------------------------------------------------------------
-// Backend package manifest (packaging-split P0, see
-// docs/packaging-split.md).
+// Backend package manifest (see docs/packaging-split.md).
 //
 // The small, declarative descriptor a backend package ships so the
 // core can resolve `platform: hono` / `platform: "hono@v4"`
 // *automagically* without statically importing every backend.
 //
-// P0 introduces the type + an in-tree discovery seam (backends are
+// Today this is paired with an in-tree discovery seam (backends are
 // still bundled; the static registry is the fallback — byte-identical).
-// P3 promotes this object to a real `loom` key in each backend
-// package's `package.json` and the resolver reads the consuming
-// project's dependency closure instead of the in-tree set.
+// The end goal promotes this object to a real `loom` key in each
+// backend package's `package.json`, with the resolver reading the
+// consuming project's dependency closure instead of the in-tree set.
 //
 // `family` + `loomVersion` are exactly the two halves
 // `parseBuiltinPlatformRef` splits a `hono@v4` ref into.  Keep this

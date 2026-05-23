@@ -1,5 +1,5 @@
-import type { BinOp, ExprIR, TypeIR } from "../../ir/loom-ir.js";
-import { camel } from "../../util/naming.js";
+import type { BinOp, ExprIR, LiteralKind, TypeIR } from "../../ir/loom-ir.js";
+import { lowerFirst } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Expression renderer for the TypeScript backend.
@@ -46,7 +46,7 @@ export function renderTsExpr(e: ExprIR, ctx: TsRenderContext = DEFAULT): string 
       // rendered with the outer `this` still pointing at the same
       // receiver (lambdas in DSL are pure expressions).
       //
-      // Slice 2: lambda body is now optional (block-body lambdas land
+      // Lambda body is now optional (block-body lambdas land
       // for page event handlers).  TS render contexts shouldn't see
       // block bodies — those are React-emitter territory — but stay
       // total to keep the build happy.
@@ -65,7 +65,7 @@ export function renderTsExpr(e: ExprIR, ctx: TsRenderContext = DEFAULT): string 
     case "ternary":
       return `${renderTsExpr(e.cond, ctx)} ? ${renderTsExpr(e.then, ctx)} : ${renderTsExpr(e.otherwise, ctx)}`;
     case "match": {
-      // Slice 2: lower a match expression to a chained ternary so it
+      // Lower a match expression to a chained ternary so it
       // can appear inside `derived` bodies, view binds, and other
       // TS-rendered expression positions.  Right-fold: each arm
       // wraps the previous tail.
@@ -80,10 +80,7 @@ export function renderTsExpr(e: ExprIR, ctx: TsRenderContext = DEFAULT): string 
   }
 }
 
-function renderLiteral(
-  lit: (ExprIR & { kind: "literal" }["lit" extends never ? never : never]) | string,
-  value: string,
-): string {
+function renderLiteral(lit: LiteralKind, value: string): string {
   if (lit === "string") return JSON.stringify(value);
   if (lit === "now") return "new Date()";
   if (lit === "null") return "null";
@@ -108,7 +105,7 @@ function renderRef(e: Extract<ExprIR, { kind: "ref" }>, ctx: TsRenderContext): s
     case "this-derived":
       return fromOutside ? `${ctx.thisName}.${e.name}` : `this.${e.name}`;
     case "helper-fn":
-      return fromOutside ? `${ctx.thisName}.${camel(e.name)}` : `this.${camel(e.name)}`;
+      return fromOutside ? `${ctx.thisName}.${lowerFirst(e.name)}` : `this.${lowerFirst(e.name)}`;
     case "enum-value":
       return `${e.enumName}.${e.name}`;
     case "current-user":
@@ -190,8 +187,8 @@ function renderCall(e: Extract<ExprIR, { kind: "call" }>, ctx: TsRenderContext):
     case "function":
     case "private-operation":
       return fromOutside
-        ? `${ctx.thisName}.${camel(e.name)}(${args})`
-        : `this.${camel(e.name)}(${args})`;
+        ? `${ctx.thisName}.${lowerFirst(e.name)}(${args})`
+        : `this.${lowerFirst(e.name)}(${args})`;
     case "free":
       return `${e.name}(${args})`;
   }

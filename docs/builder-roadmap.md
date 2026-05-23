@@ -328,9 +328,25 @@ Done:
 - **Structured assignment target** — in the top-level BodyEditor (operation /
   workflow bodies) an assignment row splits into a dedicated target / op / value
   (`StmtView` in `body.ts`, `AssignRow` in `BodyEditor.tsx`); other statement
-  kinds keep their single text row. The op is a `:=` / `+=` / `-=` dropdown; the
-  value re-uses the structured Expression picker. Gated by
-  `test/system-body.test.ts` + e2e.
+  kinds keep their single text row. The op is a `:=` / `+=` / `-=` dropdown.
+  - **Typed target + inline structured expressions** — the target is now an
+    `Autocomplete` over the owning aggregate's assignable property names (still
+    accepts a dotted path, so it's non-lossy); and a per-row `ƒx` toggle expands
+    a statement's expression into the same structured `ExprSlotEditor` the
+    Expression picker uses, bound to that statement's slot (`stmtExpr` / `wfStmt`,
+    with an optional `field`). It covers every editable body expression — the
+    **assignment value**, the single-expression statements (`precondition` /
+    `requires` / `let`), each **bare-call argument** (`field` = arg index), and
+    each **emit field** value (`field` = field index) — editing just that
+    expression and leaving the keyword (and a `let` binding's name) in source.
+    `emit` also splits into its event (a label — repoint via the Emits picker)
+    plus add/delete `name: value` fields. A bare call's **head** is an
+    `Autocomplete` over in-scope receiver names (`slotCandidates` — params,
+    earlier lets, this-props / context); still free text, so the `.method` part
+    and any path are unrestricted. Keyed by `rev` so it re-seeds on commit; the
+    open row is held in the pane so it survives. A `hasValueEditor` predicate
+    decides which rows / args / fields get the toggle. Gated by
+    `test/system-body.test.ts` + e2e.
 - **Diagnostics on graph nodes** — LSP diagnostics (`ctx.diagnostics`) are
   attributed to the construct whose source most tightly contains each (so a
   problem inside an aggregate marks the aggregate, not its module), and that node
@@ -388,15 +404,73 @@ Done:
   `add.ts` (`addConstructSource` / `addModuleSource` / `listContextNames` /
   `listModuleNames`), extracted out of the pane. Gated by
   `test/system/system-add.test.ts` + e2e.
+- **Nested grouping + layout** — an opt-in **Group** toggle renders modules and
+  bounded contexts as React Flow parent ("group") nodes, with member constructs
+  laid out in a grid inside their context (modules become containers, so the flat
+  module node is dropped and its edges remap to the group); infra / orphan
+  constructs sit in a row beneath. The layout is a pure, deterministic
+  `groupedLayout` in `grouped-layout.ts` (group boxes + parent-relative
+  placements); flat column layout remains the default, and search / coverage /
+  diagnostics still apply per leaf. Gated by
+  `test/system/system-grouped-layout.test.ts` + e2e.
+- **Edge rebinding by dragging** — dragging a (reconnectable) edge's target
+  endpoint onto another node repoints its reference, reusing `rebindReference`.
+  Scoped to the three single, unambiguous cross-ref edges: a repository's `for`
+  aggregate and a `from` source (view→aggregate, api→module); the owner (edge
+  source) is fixed and an incompatible drop / unparseable rewrite is rejected.
+  Pure `isRebindableEdge` / `rebindEdgeTarget` in `edge-rebind.ts`; wired via
+  React Flow `onReconnect` (`reconnectable: "target"` on those edges, off in
+  grouped mode). Gated by `test/system/system-edge-rebind.test.ts`. (The drag
+  *gesture* isn't e2e-covered — hard to script reliably; the rebind logic is.)
+- **Mobile layout pass** — on a compact viewport the inspector is a bottom
+  drawer opened via the "Inspect / +" button, which used to sit top-right and
+  collide with the canvas overlay toolbar (search / toggles wrap full-width on a
+  phone). Moved it to a bottom-right floating button (filled + shadow), clear of
+  the overlay and thumb-reachable. Gated by `web/e2e/mobile-model-builder.spec.ts`
+  (a 390×844 viewport asserting the FAB sits below the overlay and opens the
+  drawer) — the first phone-viewport e2e for the builder.
 
 Open:
 
-- **Edge rebinding by dragging** connections on the canvas — the drag gesture
-  itself. Rebinding by inspector Select already exists for both single-reference
-  constructs (`rebind.ts`) and multi-valued deployable references — modules /
-  `serves` / ui (`deployable-bindings.ts`).
-- **Nested grouping** (module → context → members as React Flow parent nodes)
-  and auto-layout; today it's a deterministic column-per-kind layout.
+- **Drag-rebind for deployable `targets` / `ui`** — these are single refs too,
+  but `ui` is form-sensitive (`setDeployableUi` would convert a compose/block
+  form to sugar), so they stay inspector-only for now.
+- **Multi-valued / derived edges** (`deployable` modules / `serves`, `emits`)
+  are inherently not single-drag rebindable — they stay inspector / statement
+  editors.
+
+## Model builder v2 (drill-down React Flow)
+
+v1 is the existing "Model" tab; v2 is being built in `web/src/builder/system-v2/`
+behind a separate "Model v2" tab in both shells. v1 stays untouched and
+shippable until v2 reaches parity (Phase 4); they coexist meanwhile.
+
+The shape: the canvas is the navigator. You drill down through Loom's hierarchy
+(system → module → context → aggregate → operation) via double-click / a "↳"
+handle, and back up via a breadcrumb. The leaf — an operation or workflow — is
+a vertical React Flow of statement nodes, each embedding the existing inline
+`ƒx` editors from v1. Expression-as-flow stays deferred (wait-and-see; the
+architecture accommodates it later without rework).
+
+Phasing:
+
+- ~~**Phase 0** — skeleton tab + wiring.~~ Done: lazy-loaded
+  `SystemBuilderV2Pane` mounts under "Model v2" in DesktopShell + MobileShell;
+  reads `ctx.getSource()` and shows top-level construct counts as proof of
+  flow. Gated by `web/e2e/system-builder-v2.spec.ts`.
+- **Phase 1** — drill-down backbone (read-only): system → context → aggregate
+  views with breadcrumb. Aggregate view shows operations + properties + events
+  as nodes. Reuses `model.ts` walks + naming helpers.
+- **Phase 2** — operation / workflow flow view (the statement flow); custom
+  React Flow node containing the inline `ƒx` editor. Reuses `body.ts` +
+  `ExpressionEditor.tsx`.
+- **Phase 3** — in-canvas edits at higher levels (rename, add, delete,
+  drag-rebind per view).
+- **Phase 4** — long-tail parity with v1 (fields / finds / deployable bindings
+  / emit repointing as per-node interactions). Once landed, v1 can be
+  deprecated.
+- **Phase 5** — polish: per-view positions, search / coverage / grouped layout
+  adapted per zoom level, transitions on drill, mobile passes.
 
 Planned — recommended order:
 

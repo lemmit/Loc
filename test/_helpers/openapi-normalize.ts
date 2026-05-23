@@ -43,11 +43,16 @@ function isInfraPath(p: string): boolean {
  * Field-name set for a named component schema.  Both backends produce
  * `<Agg>Response`, so we line up `properties`'s keys.  Doesn't recurse into
  * nested schemas (`price` shows up once).
+ *
+ * Co-located provenance (`<field>_provenance`) is a TS/Hono-only wire
+ * extension — only the TS backend persists lineage — so it's excluded
+ * here; otherwise it would read as a Hono-only field and trip cross-
+ * backend diffs.
  */
 export function fieldSet(spec: OpenApiSpec, schemaName: string): Set<string> {
   const schema = spec.components?.schemas?.[schemaName];
   if (!schema?.properties) return new Set();
-  return new Set(Object.keys(schema.properties));
+  return new Set(Object.keys(schema.properties).filter((k) => !k.endsWith("_provenance")));
 }
 
 /** Build a `Set<"METHOD path">` from an OpenAPI spec's `paths`. */

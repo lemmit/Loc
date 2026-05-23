@@ -11,7 +11,7 @@ import type {
   TypeIR,
   ValueObjectIR,
 } from "../../ir/loom-ir.js";
-import { plural, snake } from "../../util/naming.js";
+import { plural, snake, upperFirst } from "../../util/naming.js";
 import {
   chainSingleFieldNative,
   refineClauseFor,
@@ -64,13 +64,15 @@ export function buildApiModule(
     const opInvariants = preconditionsAsInvariants(op);
     lines.push(
       ...emitObjectWithRefines(
-        `${cap(op.name)}Request`,
+        `${upperFirst(op.name)}Request`,
         op.params.map((p) => ({ name: p.name, base: zodForRequest(p.type) })),
         opInvariants,
         new Set(op.params.map((p) => p.name)),
       ),
     );
-    lines.push(`export type ${cap(op.name)}Request = z.infer<typeof ${cap(op.name)}Request>;`);
+    lines.push(
+      `export type ${upperFirst(op.name)}Request = z.infer<typeof ${upperFirst(op.name)}Request>;`,
+    );
   }
   lines.push("");
 
@@ -78,12 +80,14 @@ export function buildApiModule(
   if (repo) {
     for (const find of repo.finds) {
       if (find.name === "all") continue;
-      lines.push(`export const ${cap(find.name)}Query = z.object({`);
+      lines.push(`export const ${upperFirst(find.name)}Query = z.object({`);
       for (const p of find.params) {
         lines.push(`  ${p.name}: ${zodForRequest(p.type)},`);
       }
       lines.push(`});`);
-      lines.push(`export type ${cap(find.name)}Query = z.infer<typeof ${cap(find.name)}Query>;`);
+      lines.push(
+        `export type ${upperFirst(find.name)}Query = z.infer<typeof ${upperFirst(find.name)}Query>;`,
+      );
     }
   }
   lines.push("");
@@ -146,10 +150,10 @@ export function buildApiModule(
   // use<Op><Agg> — one per public operation.
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
     const opSnake = snake(op.name);
-    lines.push(`export function use${cap(op.name)}${agg.name}(id: string) {`);
+    lines.push(`export function use${upperFirst(op.name)}${agg.name}(id: string) {`);
     lines.push(`  const qc = useQueryClient();`);
     lines.push(`  return useMutation({`);
-    lines.push(`    mutationFn: async (input: ${cap(op.name)}Request) => {`);
+    lines.push(`    mutationFn: async (input: ${upperFirst(op.name)}Request) => {`);
     lines.push(`      await api.post(\`/${tag}/\${id}/${opSnake}\`, input);`);
     lines.push(`    },`);
     lines.push(`    onSuccess: () => {`);
@@ -173,7 +177,7 @@ export function buildApiModule(
           ? `${agg.name}Response.nullable()`
           : `${agg.name}Response`;
       lines.push(
-        `export function use${cap(find.name)}${agg.name}(query: ${cap(find.name)}Query) {`,
+        `export function use${upperFirst(find.name)}${agg.name}(query: ${upperFirst(find.name)}Query) {`,
       );
       lines.push(`  return useQuery({`);
       lines.push(`    queryKey: ["${tag}", "find", "${findSnake}", query],`);
@@ -427,8 +431,4 @@ function collectEnums(
     for (const d of part.derived) visit(d.type);
   }
   return ctx.enums.filter((e) => used.has(e.name));
-}
-
-function cap(s: string): string {
-  return s[0]!.toUpperCase() + s.slice(1);
 }

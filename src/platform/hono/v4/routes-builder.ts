@@ -3,6 +3,7 @@ import {
   refineClauseFor,
   takeSingleFieldChain,
 } from "../../../generator/typescript/zod-refine.js";
+import { renderHonoLogCall } from "../../../generator/_obs/render-hono.js";
 import { wireShapeFor } from "../../../ir/enrichments.js";
 import type { ClassifyContext, SingleFieldPattern } from "../../../ir/invariant-classify.js";
 import type {
@@ -18,7 +19,8 @@ import type {
   ValueObjectIR,
 } from "../../../ir/loom-ir.js";
 import { findUsesCurrentUser, operationUsesCurrentUser } from "../../../ir/loom-ir.js";
-import { camel, plural, snake } from "../../../util/naming.js";
+import { opHasProvSite } from "../../../ir/prov-id.js";
+import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Hono routes file with OpenAPI annotations.
@@ -38,13 +40,43 @@ export function buildRoutesFile(
   agg: AggregateIR,
   repo: RepositoryIR | undefined,
   ctx: BoundedContextIR,
+  emitAudit = false,
+  emitProvenance = false,
 ): string {
+  // An audited public operation instruments its route handler with a
+  // `recordAudit(...)` call; the SDK file (`domain/audit.ts`) is only
+  // emitted when some operation is audited, so the import is gated on the
+  // same presence to keep "auditing off pays nothing".
+  const auditOps = emitAudit
+    ? agg.operations.filter((o) => o.audited && o.visibility === "public")
+    : [];
+  const fileHasAudit = auditOps.length > 0;
+  // A provenanced write needs the same save+flush transaction: the
+  // operation's `provenance_records` history rows must commit atomically
+  // with the state change.  Detected by presence of a write-site (mirrors
+  // emitProvenance), so an op that's neither audited nor provenanced keeps
+  // the plain non-transactional handler.
+  const provOps = emitProvenance
+    ? agg.operations.filter((o) => o.visibility === "public" && opHasProvSite(o))
+    : [];
+  const fileHasProv = provOps.length > 0;
+  // The co-located lineage surface (response DTO field + the shared
+  // `ProvenanceLineage` schema) follows the field's existence, not whether
+  // it is ever written — so a never-written provenanced field still emits
+  // a (perpetually null) column and DTO key.
+  const fileHasProvField =
+    emitProvenance &&
+    (agg.fields.some((f) => f.provenanced) ||
+      agg.parts.some((p) => p.fields.some((f) => f.provenanced)));
+  // Either feature pulls in the transactional handler + its db/events/
+  // schema/randomUUID imports.
+  const needsTx = fileHasAudit || fileHasProv;
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";`);
-  lines.push(`import { ${agg.name} } from "../domain/${camel(agg.name)}";`);
+  lines.push(`import { ${agg.name} } from "../domain/${lowerFirst(agg.name)}";`);
   lines.push(
-    `import { ${agg.name}Repository } from "../db/repositories/${camel(agg.name)}-repository";`,
+    `import { ${agg.name}Repository } from "../db/repositories/${lowerFirst(agg.name)}-repository";`,
   );
   lines.push(`import * as Ids from "../domain/ids";`);
   lines.push(
@@ -55,7 +87,17 @@ export function buildRoutesFile(
   // it has none.  Type-only import keeps the route file fine when
   // there are no extern ops; the runtime ref is gated below.
   if (agg.operations.some((o) => o.extern)) {
-    lines.push(`import { externHandlers } from "../domain/${camel(agg.name)}-extern";`);
+    lines.push(`import { externHandlers } from "../domain/${lowerFirst(agg.name)}-extern";`);
+  }
+  if (needsTx) {
+    // Audited / provenanced operations write extra rows per successful
+    // invocation, inside the same transaction as the aggregate save.
+    // Needs the schema tables (runtime value), a UUID, and the db/events
+    // types for the transactional repo (mirrors the workflow routes' imports).
+    lines.push(`import { randomUUID } from "node:crypto";`);
+    lines.push(`import * as schema from "../db/schema";`);
+    lines.push(`import { type DomainEventDispatcher } from "../domain/events";`);
+    lines.push(`import type { NodePgDatabase } from "drizzle-orm/node-postgres";`);
   }
 
   // Schemas — value objects, enums, then per-DTO request / response
@@ -110,8 +152,8 @@ export function buildRoutesFile(
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
     lines.push(
       ...emitWireSchema(
-        `const ${cap(op.name)}Request`,
-        `${cap(op.name)}Request`,
+        `const ${upperFirst(op.name)}Request`,
+        `${upperFirst(op.name)}Request`,
         op.params.map((p) => ({ name: p.name, base: zodFor(p.type) })),
         preconditionsAsInvariants(op),
         new Set(op.params.map((p) => p.name)),
@@ -122,12 +164,23 @@ export function buildRoutesFile(
 
   if (repo) {
     for (const find of repo.finds) {
-      lines.push(`const ${cap(find.name)}Query = z.object({`);
+      lines.push(`const ${upperFirst(find.name)}Query = z.object({`);
       for (const p of find.params) {
         lines.push(`  ${p.name}: ${zodFor(p.type)},`);
       }
-      lines.push(`}).openapi("${cap(find.name)}Query");`);
+      lines.push(`}).openapi("${upperFirst(find.name)}Query");`);
     }
+  }
+
+  // Co-located provenance lineage schema, referenced (nullable) by every
+  // provenanced field's `<field>_provenance` key.  A concrete object
+  // schema rather than `z.unknown()` — the latter collapses zod-openapi's
+  // response `_data` type to `never`.
+  if (fileHasProvField) {
+    lines.push(
+      `const ProvenanceLineage = z.object({ snapshotId: z.string(), target: z.object({ type: z.string(), field: z.string() }), inputs: z.array(z.object({ path: z.string(), value: z.unknown() })), computedValue: z.unknown() }).openapi("ProvenanceLineage");`,
+    );
+    lines.push("");
   }
 
   // Response DTOs — parts first (inner), value-object response variants
@@ -147,10 +200,13 @@ export function buildRoutesFile(
   lines.push(`const ErrorResponse = z.object({ error: z.string() }).openapi("ErrorResponse");`);
   lines.push("");
 
-  // The router.
-  lines.push(
-    `export function ${camel(agg.name)}Routes(repo: ${agg.name}Repository): OpenAPIHono {`,
-  );
+  // The router.  Audited / provenanced aggregates also receive `db` +
+  // `events` so the operation can run its save + audit insert + provenance
+  // flush in one transaction.
+  const routerParams = needsTx
+    ? `repo: ${agg.name}Repository, db: NodePgDatabase<typeof schema>, events: DomainEventDispatcher`
+    : `repo: ${agg.name}Repository`;
+  lines.push(`export function ${lowerFirst(agg.name)}Routes(${routerParams}): OpenAPIHono {`);
   lines.push(`  const app = new OpenAPIHono();`);
   lines.push("");
 
@@ -183,6 +239,9 @@ export function buildRoutesFile(
     .join(", ");
   lines.push(`      const created = ${agg.name}.create({ ${createArgs} });`);
   lines.push(`      await repo.save(created);`);
+  lines.push(
+    `      ${renderHonoLogCall("aggregateCreated", `aggregate: "${agg.name}", id: created.id as string`)}`,
+  );
   lines.push(`      return c.json({ id: created.id as string }, 201);`);
   lines.push(`    },`);
   lines.push(`  );`);
@@ -218,7 +277,11 @@ export function buildRoutesFile(
 
   // Operations.
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
-    lines.push(...emitOperationRoute(agg, op, ctx).map((l) => `  ${l}`));
+    lines.push(
+      ...emitOperationRoute(agg, op, ctx, auditOps.includes(op), provOps.includes(op)).map(
+        (l) => `  ${l}`,
+      ),
+    );
     lines.push("");
   }
 
@@ -240,25 +303,46 @@ export function buildRoutesFile(
   lines.push(`  app.onError((err, c) => {`);
   // The requestIdMiddleware mounts on the parent app (http/index.ts)
   // and stashes the id on the request scope.  This sub-router's
-  // OpenAPIHono is constructed without a typed Variables block so
-  // strict tsc can't see the key directly; the cast bridges the
-  // gap without leaking `any` into the user's surface.
+  // OpenAPIHono is constructed without a typed Variables block
+  // (zod-openapi's internal Env constraint rejects a custom one), so
+  // the cast bridges the untyped get to a strongly-typed read without
+  // leaking `any` into the user's surface.  Same pattern bridges the
+  // bound child logger at every log call site below — see render-hono.
   lines.push(
     `    const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";`,
   );
+  // Each error class lands a structured log line at the catalog-defined
+  // level (warn for client/domain faults; error for system faults) on
+  // the per-request child logger, so the line auto-carries request_id.
+  // No more bare console.error — pino handles serialization, redaction,
+  // and level filtering.
+  lines.push(`    if (err instanceof ForbiddenError) {`);
   lines.push(
-    `    if (err instanceof ForbiddenError) return c.json({ error: err.message, trace_id }, 403);`,
+    `      ${renderHonoLogCall("forbidden", `aggregate: "${agg.name}", message: err.message, status: 403`)}`,
   );
+  lines.push(`      return c.json({ error: err.message, trace_id }, 403);`);
+  lines.push(`    }`);
+  lines.push(`    if (err instanceof DomainError) {`);
   lines.push(
-    `    if (err instanceof DomainError) return c.json({ error: err.message, trace_id }, 400);`,
+    `      ${renderHonoLogCall("domainError", `aggregate: "${agg.name}", message: err.message, status: 400`)}`,
   );
+  lines.push(`      return c.json({ error: err.message, trace_id }, 400);`);
+  lines.push(`    }`);
+  lines.push(`    if (err instanceof AggregateNotFoundError) {`);
   lines.push(
-    `    if (err instanceof AggregateNotFoundError) return c.json({ error: err.message, trace_id }, 404);`,
+    `      ${renderHonoLogCall("notFound", `aggregate: "${agg.name}", status: 404`)}`,
   );
+  lines.push(`      return c.json({ error: err.message, trace_id }, 404);`);
+  lines.push(`    }`);
+  lines.push(`    if (err instanceof ExternHandlerError) {`);
   lines.push(
-    `    if (err instanceof ExternHandlerError) { console.error(err); return c.json({ error: err.message, trace_id }, 500); }`,
+    `      ${renderHonoLogCall("externHandlerThrew", "aggregate: err.aggName, op: err.opName, error: err.message")}`,
   );
-  lines.push(`    console.error(err);`);
+  lines.push(`      return c.json({ error: err.message, trace_id }, 500);`);
+  lines.push(`    }`);
+  lines.push(
+    `    ${renderHonoLogCall("internalError", "error: err instanceof Error ? err.message : String(err), status: 500")}`,
+  );
   lines.push(`    return c.json({ error: "internal", trace_id }, 500);`);
   lines.push(`  });`);
   lines.push("");
@@ -267,7 +351,13 @@ export function buildRoutesFile(
   return lines.join("\n") + "\n";
 }
 
-function emitOperationRoute(agg: AggregateIR, op: OperationIR, ctx: BoundedContextIR): string[] {
+function emitOperationRoute(
+  agg: AggregateIR,
+  op: OperationIR,
+  ctx: BoundedContextIR,
+  audit: boolean,
+  prov: boolean,
+): string[] {
   const aggSlug = snake(plural(agg.name));
   const opSnake = snake(op.name);
   const out: string[] = [];
@@ -276,10 +366,12 @@ function emitOperationRoute(agg: AggregateIR, op: OperationIR, ctx: BoundedConte
   out.push(`    method: "post",`);
   out.push(`    path: "/{id}/${opSnake}",`);
   out.push(`    tags: ["${aggSlug}"],`);
-  out.push(`    operationId: "${camel(op.name)}${agg.name}",`);
+  out.push(`    operationId: "${lowerFirst(op.name)}${agg.name}",`);
   out.push(`    request: {`);
   out.push(`      params: z.object({ id: z.string() }),`);
-  out.push(`      body: { content: { "application/json": { schema: ${cap(op.name)}Request } } },`);
+  out.push(
+    `      body: { content: { "application/json": { schema: ${upperFirst(op.name)}Request } } },`,
+  );
   out.push(`    },`);
   out.push(`    responses: {`);
   out.push(`      204: { description: "No content" },`);
@@ -288,6 +380,12 @@ function emitOperationRoute(agg: AggregateIR, op: OperationIR, ctx: BoundedConte
   out.push(`  async (c) => {`);
   out.push(`    const { id } = c.req.valid("param");`);
   out.push(`    const body = c.req.valid("json");`);
+  // Business-narrative line — what the system was asked to do, before
+  // any mutation runs.  Pairs with the audit row / provenance flush
+  // emitted later when the op is audited / provenanced.
+  out.push(
+    `    ${renderHonoLogCall("operationInvoked", `aggregate: "${agg.name}", op: "${op.name}", id`)}`,
+  );
   // When the operation body references `currentUser`, the aggregate
   // method's signature picks up a trailing `currentUser: User`
   // parameter (see operationUsesCurrentUser).  The route reads the
@@ -299,37 +397,93 @@ function emitOperationRoute(agg: AggregateIR, op: OperationIR, ctx: BoundedConte
   if (usesUser) {
     out.push(`    const currentUser = c.get("currentUser") as import("../auth/user-types").User;`);
   }
-  out.push(`    const aggregate = await repo.getById(Ids.${agg.name}Id(id));`);
   const baseCallArgs = op.params.map((p) => wireToDomainExpr(`body.${p.name}`, p.type, ctx));
   const callArgs = (usesUser ? [...baseCallArgs, "currentUser"] : baseCallArgs).join(", ");
-  if (op.extern) {
-    // Extern: run preconditions on the aggregate, dispatch to the
-    // user-registered handler, then run invariants and save.  The
-    // handler call is wrapped so any non-domain throw becomes an
-    // ExternHandlerError naming the op + aggregate (see
-    // app.onError below for the 500 mapping).  Domain-layer errors
-    // (DomainError, ForbiddenError, AggregateNotFoundError) re-throw
-    // unchanged so 400 / 403 / 404 still apply when a user handler
-    // raises one deliberately.
-    const handlerKey = `${camel(op.name)}${agg.name}`;
-    out.push(`    aggregate.check${cap(op.name)}(${callArgs});`);
-    out.push(`    const handler = externHandlers.${handlerKey};`);
-    out.push(
-      `    if (!handler) throw new Error("Missing extern handler for ${handlerKey}. Register one via register${cap(op.name)}${agg.name}Handler(...) before app.listen().");`,
-    );
-    out.push(`    try {`);
-    out.push(`      await handler(aggregate, body);`);
-    out.push(`    } catch (err) {`);
-    out.push(`      if (err instanceof DomainError) throw err;`);
-    out.push(`      if (err instanceof ForbiddenError) throw err;`);
-    out.push(`      if (err instanceof AggregateNotFoundError) throw err;`);
-    out.push(`      throw new ExternHandlerError("${op.name}", "${agg.name}", err);`);
-    out.push(`    }`);
-    out.push(`    aggregate.assertInvariants();`);
+
+  // The mutation block — extern dispatch or the direct method call —
+  // operates on `aggregate` and is independent of which repo loaded it,
+  // so it's shared verbatim between the plain and transactional paths.
+  const mutation = (pad: string): string[] => {
+    if (op.extern) {
+      // Extern: run preconditions, dispatch to the user-registered
+      // handler, then run invariants.  The handler call is wrapped so any
+      // non-domain throw becomes an ExternHandlerError naming the op +
+      // aggregate (see app.onError below for the 500 mapping).  Domain
+      // errors re-throw unchanged so 400 / 403 / 404 still apply.
+      const handlerKey = `${lowerFirst(op.name)}${agg.name}`;
+      return [
+        `${pad}aggregate.check${upperFirst(op.name)}(${callArgs});`,
+        `${pad}const handler = externHandlers.${handlerKey};`,
+        `${pad}if (!handler) throw new Error("Missing extern handler for ${handlerKey}. Register one via register${upperFirst(op.name)}${agg.name}Handler(...) before app.listen().");`,
+        `${pad}try {`,
+        `${pad}  await handler(aggregate, body);`,
+        `${pad}} catch (err) {`,
+        `${pad}  if (err instanceof DomainError) throw err;`,
+        `${pad}  if (err instanceof ForbiddenError) throw err;`,
+        `${pad}  if (err instanceof AggregateNotFoundError) throw err;`,
+        `${pad}  throw new ExternHandlerError("${op.name}", "${agg.name}", err);`,
+        `${pad}}`,
+        `${pad}aggregate.assertInvariants();`,
+      ];
+    }
+    return [`${pad}aggregate.${lowerFirst(op.name)}(${callArgs});`];
+  };
+
+  if (!audit && !prov) {
+    out.push(`    const aggregate = await repo.getById(Ids.${agg.name}Id(id));`);
+    out.push(...mutation("    "));
+    out.push(`    await repo.save(aggregate);`);
   } else {
-    out.push(`    aggregate.${camel(op.name)}(${callArgs});`);
+    // Audited / provenanced: load, mutate, save, then write the audit row
+    // and/or flush the provenance history in ONE transaction (built on
+    // `db`, mirroring the workflow routes) so the state change and its
+    // derived records commit or roll back atomically.
+    if (audit) {
+      // Actor = the typed currentUser if the body already reads it, else
+      // the inbound claim via the untyped-key bridge (null when no auth).
+      const actorExpr = usesUser
+        ? "currentUser"
+        : `(c as unknown as { get(k: "currentUser"): unknown }).get("currentUser") ?? null`;
+      out.push(`    const __actor = ${actorExpr};`);
+    }
+    out.push(`    await db.transaction(async (tx) => {`);
+    out.push(`      const repoTx = new ${agg.name}Repository(tx, events);`);
+    out.push(`      const aggregate = await repoTx.getById(Ids.${agg.name}Id(id));`);
+    if (audit) out.push(`      const __before = repoTx.toWire(aggregate);`);
+    out.push(...mutation("      "));
+    out.push(`      await repoTx.save(aggregate);`);
+    if (audit) {
+      out.push(`      const __after = repoTx.toWire(aggregate);`);
+      out.push(`      await tx.insert(schema.auditRecords).values({`);
+      out.push(`        auditId: randomUUID(),`);
+      out.push(`        operationId: "${lowerFirst(op.name)}${agg.name}",`);
+      out.push(`        action: "${op.name}",`);
+      out.push(`        targetType: "${agg.name}",`);
+      out.push(`        targetId: id,`);
+      out.push(`        actor: __actor,`);
+      out.push(`        before: __before,`);
+      out.push(`        after: __after,`);
+      out.push(`        at: new Date(),`);
+      out.push(`        status: "ok",`);
+      out.push(`      });`);
+    }
+    if (prov) {
+      // One history row per provenanced write captured during the mutation;
+      // traceId + at are stamped here so the domain layer stays pure.
+      out.push(`      for (const __t of aggregate.__drainProv()) {`);
+      out.push(`        await tx.insert(schema.provenanceRecords).values({`);
+      out.push(`          traceId: randomUUID(),`);
+      out.push(`          snapshotId: __t.snapshotId,`);
+      out.push(`          targetType: __t.target.type,`);
+      out.push(`          field: __t.target.field,`);
+      out.push(`          inputs: __t.inputs,`);
+      out.push(`          computedValue: __t.computedValue,`);
+      out.push(`          at: new Date(),`);
+      out.push(`        });`);
+      out.push(`      }`);
+    }
+    out.push(`    });`);
   }
-  out.push(`    await repo.save(aggregate);`);
   out.push(`    return c.body(null, 204);`);
   out.push(`  },`);
   out.push(`);`);
@@ -348,9 +502,9 @@ function emitFindRoute(agg: AggregateIR, find: FindIR, ctx: BoundedContextIR): s
   out.push(`    method: "get",`);
   out.push(`    path: "${path}",`);
   out.push(`    tags: ["${aggSlug}"],`);
-  out.push(`    operationId: "${camel(find.name)}${agg.name}",`);
+  out.push(`    operationId: "${lowerFirst(find.name)}${agg.name}",`);
   if (find.params.length > 0) {
-    out.push(`    request: { query: ${cap(find.name)}Query },`);
+    out.push(`    request: { query: ${upperFirst(find.name)}Query },`);
   }
   out.push(`    responses: {`);
   out.push(
@@ -367,7 +521,7 @@ function emitFindRoute(agg: AggregateIR, find: FindIR, ctx: BoundedContextIR): s
   if (find.params.length > 0) {
     out.push(`    const params = c.req.valid("query");`);
   }
-  // Slice 1C: when the find's where clause references currentUser,
+  // When the find's where clause references currentUser,
   // the repository method gains a trailing `currentUser: User`
   // parameter.  Read it from the request scope where the auth
   // middleware stashed it earlier in the pipeline.
@@ -417,6 +571,11 @@ function emitResponseDtoSchema(
     } else {
       lines.push(`  ${wf.name}: ${zodForResponse(wf.type, wf.optional)},`);
     }
+  }
+  // Co-located provenance rides the wire DTO (see repo.toWire); the
+  // lineage object is nullable when the field was never written.
+  for (const f of ent.fields.filter((f) => f.provenanced)) {
+    lines.push(`  ${f.name}_provenance: ProvenanceLineage.nullable(),`);
   }
   lines.push(`}).openapi("${name}");`);
   return lines;
@@ -544,10 +703,6 @@ function collectUsedEnums(
     for (const d of part.derived) visit(d.type);
   }
   return ctx.enums.filter((e) => used.has(e.name));
-}
-
-function cap(s: string): string {
-  return s[0]!.toUpperCase() + s.slice(1);
 }
 
 // ---------------------------------------------------------------------------

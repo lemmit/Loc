@@ -13,95 +13,29 @@
 
 import { makeExpect, runTests, type TestResult } from "./harness.js";
 import {
+  createLocatorMatchers,
   RemoteLocator,
+  type LocatorAssertions,
   type RemotePage,
 } from "../../../packages/ui-test-driver/index";
+import type { LogLine } from "../util/log-line";
 
 export interface UiTestCase {
   name: string;
   fn: (args: { page: RemotePage }) => void | Promise<void>;
 }
 
-const LOCATOR_TIMEOUT_MS = 5_000;
-const LOCATOR_POLL_MS = 50;
-const sleep = (ms: number): Promise<void> =>
-  new Promise((r) => setTimeout(r, ms));
-
-const show = (v: unknown): string =>
-  typeof v === "string" ? JSON.stringify(v) : String(v);
-
-interface LocatorExpectation {
-  toHaveText(expected: string): Promise<void>;
-  toHaveCount(expected: number): Promise<void>;
-  toBeVisible(): Promise<void>;
-  readonly not: {
-    toHaveText(expected: string): Promise<void>;
-    toHaveCount(expected: number): Promise<void>;
-  };
-}
-
-/** Poll `check` until it reports `ok`, then resolve; on timeout reject
- *  with the last failure message — Playwright's web-first retry. */
-async function pollUntil(
-  check: () => Promise<{ ok: boolean; message: string }>,
-): Promise<void> {
-  const deadline = Date.now() + LOCATOR_TIMEOUT_MS;
-  let last = { ok: false, message: "assertion never evaluated" };
-  for (;;) {
-    try {
-      last = await check();
-    } catch (e) {
-      last = { ok: false, message: e instanceof Error ? e.message : String(e) };
-    }
-    if (last.ok) return;
-    if (Date.now() >= deadline) throw new Error(last.message);
-    await sleep(LOCATOR_POLL_MS);
-  }
-}
-
-function makeLocatorExpect(loc: RemoteLocator): LocatorExpectation {
-  const textCheck = (expected: string, negate: boolean) => async () => {
-    const actual = (await loc.innerText()).trim();
-    const eq = actual === expected;
-    return {
-      ok: negate ? !eq : eq,
-      message: negate
-        ? `expected element not to have text ${show(expected)}`
-        : `expected element to have text ${show(expected)}, but got ${show(actual)}`,
-    };
-  };
-  const countCheck = (expected: number, negate: boolean) => async () => {
-    const actual = await loc.count();
-    const eq = actual === expected;
-    return {
-      ok: negate ? !eq : eq,
-      message: negate
-        ? `expected not to have ${expected} element(s)`
-        : `expected ${expected} element(s), but found ${actual}`,
-    };
-  };
-  return {
-    toHaveText: (e) => pollUntil(textCheck(e, false)),
-    toHaveCount: (e) => pollUntil(countCheck(e, false)),
-    async toBeVisible() {
-      await loc.waitFor({ state: "visible" });
-    },
-    get not() {
-      return {
-        toHaveText: (e: string) => pollUntil(textCheck(e, true)),
-        toHaveCount: (e: number) => pollUntil(countCheck(e, true)),
-      };
-    },
-  };
-}
-
 type UiExpect = (
   received: unknown,
-) => ReturnType<typeof makeExpect> | LocatorExpectation;
+) => ReturnType<typeof makeExpect> | LocatorAssertions;
 
+// Handed a RemoteLocator, return Playwright's web-first matchers (which
+// auto-retry against the live DOM); handed a plain value, the one-shot
+// matchers. The locator matchers live in the driver package so the
+// capability ships with it.
 const uiExpect: UiExpect = (received) =>
   received instanceof RemoteLocator
-    ? makeLocatorExpect(received)
+    ? createLocatorMatchers(received)
     : makeExpect(received);
 
 export interface UiHarness {
@@ -130,17 +64,30 @@ export function runUiTests(
   /** Suite name to report — must match the UI `ExecTestRef.suite`
    *  (`"<System> e2e"`) so results join the verification rollup. */
   suite = "",
+  /** Live accessor for the preview app's captured console/error stream.
+   *  When provided, each test's slice (the lines emitted while it ran)
+   *  is attached to its `TestResult.logs` — so a failing UI test reports
+   *  the generated app's own output, not just a screenshot. */
+  getAppLog?: () => LogLine[],
 ): Promise<TestResult[]> {
   // Reuse the API harness's sequential runner (timing + pass/fail +
   // console capture) by binding `page` into each case, and capture a
   // best-effort final-state screenshot after each test (proof on pass,
-  // evidence on fail).
+  // evidence on fail).  Tests run sequentially, so a moving cursor into
+  // the (append-only) app-log buffer slices each test's own output.
+  let cursor = getAppLog ? getAppLog().length : 0;
   return runTests(
     tests.map((t) => ({ suite, name: t.name, fn: () => t.fn({ page }) })),
     {
       afterEach: async (r) => {
         const shot = await page.screenshot();
         if (shot) r.screenshot = shot;
+        if (getAppLog) {
+          const all = getAppLog();
+          const slice = all.slice(cursor);
+          cursor = all.length;
+          if (slice.length > 0) r.logs = [...(r.logs ?? []), ...slice];
+        }
       },
     },
   );

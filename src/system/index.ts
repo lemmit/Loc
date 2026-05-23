@@ -1,10 +1,10 @@
+import { E2E_FIXTURES_TS } from "../generator/react/index.js";
 import { enrichLoomModel } from "../ir/enrichments.js";
 import type {
   BoundedContextIR,
   DeployableIR,
   LoomModel,
   ModuleIR,
-  Platform,
   SystemIR,
 } from "../ir/loom-ir.js";
 import { lowerModel } from "../ir/lower.js";
@@ -56,22 +56,21 @@ export interface SystemGenerateOptions {
    * aid, kept opt-in until per-backend offline OpenAPI emission can
    * supersede it as the cross-generator contract check. */
   emitWireSpec?: boolean;
+  /** Emit observability trace events (Observability Phase 6).  Threaded
+   * through to per-backend emitters via `emitDeployable`. */
+  emitTrace?: boolean;
 }
 
-export function generateSystems(
-  model: Model,
-  options: SystemGenerateOptions = {},
-): SystemEmission {
-  const emitWireSpec = options.emitWireSpec ?? true;
+export function generateSystems(model: Model, options: SystemGenerateOptions = {}): SystemEmission {
   // Lowering produces a faithful AST projection; enrichment populates
   // wireShape, the implicit `findAll` find, and react `moduleNames`
   // inheritance.  See src/ir/enrichments.ts.
   const loom = enrichLoomModel(lowerModel(model));
   const out = new Map<string, string>();
   for (const sys of loom.systems) {
-    emitSystem(sys, loom, out, emitWireSpec);
+    emitSystem(sys, loom, out, options);
   }
-  // Traceability artifacts (Slice 12) — model-global (requirements may
+  // Traceability artifacts — model-global (requirements may
   // reference code across systems), so emitted once at the output root
   // rather than per system.  No-op when the source declares no
   // requirement / solution / testCase.
@@ -85,7 +84,7 @@ function emitSystem(
   sys: SystemIR,
   _loom: LoomModel,
   out: Map<string, string>,
-  emitWireSpec: boolean,
+  options: SystemGenerateOptions,
 ): void {
   // Pre-compute a module-name → contexts lookup so a deployable can
   // collect its slice quickly.
@@ -94,7 +93,7 @@ function emitSystem(
 
   for (const d of sys.deployables) {
     const contexts = collectContextsFor(d, modulesByName);
-    emitDeployable(sys, d, contexts, out);
+    emitDeployable(sys, d, contexts, out, options);
   }
 
   out.set("docker-compose.yml", renderDockerCompose(sys));
@@ -103,7 +102,7 @@ function emitSystem(
   // value object's canonical wire shape.  See `wire-spec.ts`.  Opt-in:
   // nothing consumes the emitted file at runtime, so the CLI gates it
   // behind `--wire-spec`.
-  if (emitWireSpec) {
+  if (options.emitWireSpec ?? true) {
     out.set(".loom/wire-spec.json", renderWireSpec(sys));
   }
   // Mermaid views of the IR — a domain class diagram and a per-workflow
@@ -150,6 +149,11 @@ function emitSystem(
     if (uiSpec) {
       const slug = serviceSlug(d.name);
       out.set(`${slug}/e2e/${sys.name}.ui.spec.ts`, uiSpec);
+      // Co-locate the console-capture fixture the spec imports
+      // (`./fixtures`).  The React generator already emits this for
+      // react deployables; emitting it here covers non-react UI mounts
+      // (e.g. phoenixLiveView) so the import resolves everywhere.
+      out.set(`${slug}/e2e/fixtures.ts`, E2E_FIXTURES_TS);
     }
   }
 }
@@ -207,7 +211,9 @@ function emitDeployable(
   d: DeployableIR,
   contexts: BoundedContextIR[],
   out: Map<string, string>,
+  options: { emitTrace?: boolean } = {},
 ): void {
+  const emitTrace = !!options.emitTrace;
   // Per-deployable folder uses a lowercase slug (Docker requires
   // lowercase image names; compose derives images from
   // `<project>-<service>`).  The platform's `emitProject` decides
@@ -216,7 +222,7 @@ function emitDeployable(
   // dictates).
   const sub = serviceSlug(d.name);
   const platform = platformFor(d.platform);
-  const files = platform.emitProject({ contexts, deployable: d, sys });
+  const files = platform.emitProject({ contexts, deployable: d, sys, emitTrace });
   for (const [relPath, content] of files) {
     out.set(`${sub}/${relPath}`, content);
   }

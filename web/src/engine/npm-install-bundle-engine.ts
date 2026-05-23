@@ -14,9 +14,11 @@ import { LoomRuntimeClient } from "../runtime/client.js";
 import type {
   BootResult,
   DispatchResult,
+  QueryResult,
   SerializedRequest,
   WipeResult,
 } from "../runtime/protocol.js";
+import type { LogLine } from "../util/log-line.js";
 import type { BundleResult } from "../bundle/protocol.js";
 import {
   RUNTIME_VERSIONS,
@@ -104,12 +106,13 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
     npmInstall: true,
     database: "pglite",
     // Real node_modules → the whole public-package long tail works,
-    // not just the esm.sh 80%.
+    // not just the common-package subset a CDN resolver would cover.
     customPackages: "full",
   };
 
   private runtime: LoomRuntimeClient | null = null;
   private readonly onLost?: () => void;
+  private readonly onLog?: (lines: LogLine[]) => void;
   private readonly injectedRun?: EsbuildRun;
   private vfsBundler: VfsBundlerClient | null = null;
   private lastBoot:
@@ -120,6 +123,7 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
     opts: RuntimeEngineOptions & { esbuildRun?: EsbuildRun } = {},
   ) {
     this.onLost = opts.onLost;
+    this.onLog = opts.onLog;
     this.injectedRun = opts.esbuildRun;
   }
 
@@ -137,7 +141,10 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
    *  (install + bundle) needs no worker, which also keeps the class
    *  unit-testable outside a Worker host. */
   private rt(): LoomRuntimeClient {
-    return (this.runtime ??= new LoomRuntimeClient({ onRespawn: this.onLost }));
+    return (this.runtime ??= new LoomRuntimeClient({
+      onRespawn: this.onLost,
+      onLog: this.onLog,
+    }));
   }
 
   async prepare(input: PrepareInput): Promise<PreparedBuild> {
@@ -231,13 +238,20 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
 
   // boot/dispatch/wipe/reset/respawn delegate to the shared
   // PGlite+Hono runtime client.
-  async boot(bundleCode: string, dataDir?: string): Promise<BootResult> {
-    const res = await this.rt().boot({ bundleCode, dataDir });
+  async boot(
+    bundleCode: string,
+    dataDir?: string,
+    opts?: { fresh?: boolean },
+  ): Promise<BootResult> {
+    const res = await this.rt().boot({ bundleCode, dataDir, fresh: opts?.fresh });
     if (res.ok) this.lastBoot = { bundleCode, dataDir, persistent: res.persistent };
     return res;
   }
   dispatch(req: SerializedRequest): Promise<DispatchResult> {
     return this.rt().dispatch(req);
+  }
+  query(sql: string): Promise<QueryResult> {
+    return this.rt().query(sql);
   }
   wipe(): Promise<WipeResult> {
     return this.rt().wipe();

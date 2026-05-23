@@ -1,20 +1,41 @@
+import type { Reference } from "langium";
 import {
   type BuiltinPackFamily,
   parseBuiltinDesignRef,
 } from "../generator/_packs/builtin-formats.js";
 import type {
   Aggregate,
+  Api,
   BoundedContext,
+  Component,
+  Containment,
+  Deployable,
+  DerivedProp,
   EntityPart,
   EnumDecl,
   EventDecl,
   Expression,
   FunctionDecl,
+  Invariant,
+  MenuBlock,
   Model,
   Operation,
+  Page,
   Property,
   Repository,
+  Requirement,
+  Scaffold,
+  Solution,
+  StateField,
   Statement,
+  Storage,
+  System,
+  Targetable,
+  TestBlock,
+  TestCase,
+  TestE2E,
+  ThemeBlock,
+  Ui,
   ValueObject,
   View,
   Workflow,
@@ -80,7 +101,9 @@ import type {
   MenuBlockIR,
   MenuLinkIR,
   MenuMetaIR,
+  ModuleBindingIR,
   ModuleIR,
+  ModuleStorageRole,
   OperationIR,
   PageIR,
   ParamIR,
@@ -96,12 +119,19 @@ import type {
   SolutionIR,
   StateFieldIR,
   StmtIR,
+  StorageIR,
+  StorageKind,
   SystemIR,
   TestCaseIR,
+  TestE2EIR,
   TestIR,
   TestStmtIR,
+  ThemeIR,
   TypeIR,
+  UiApiParamIR,
+  UiHelperImportIR,
   UiIR,
+  UiParamBindingIR,
   UserIR,
   ValueObjectIR,
   ViewIR,
@@ -121,12 +151,16 @@ import {
   newEnv,
   withLocal,
 } from "./lower-expr.js";
-import { buildExpandContext, expandScaffoldToExplicitBody } from "./scaffold-expander.js";
+import {
+  buildExpandContext,
+  expandScaffoldToExplicitBody,
+  type ScaffoldExpandContext,
+} from "./scaffold-expander.js";
 
 /** Fold a bareword built-in family or pinned `family@version`
  *  reference (or `undefined`) into the fully-qualified form the rest
- *  of the toolchain stores.  Phase 0 of pack versioning: lowering
- *  resolves the toolchain default for bareword built-ins so that
+ *  of the toolchain stores.  Lowering resolves the toolchain default
+ *  for bareword built-ins so that
  *  every downstream consumer (generator dispatch, build matrix,
  *  snapshot tests) sees an unambiguous `family@version` string and
  *  doesn't need its own copy of the resolution logic.  Custom paths
@@ -141,16 +175,15 @@ function qualifyDesign(raw: string | undefined, fallback: BuiltinPackFamily): st
   return parsed ? parsed.qualified : value;
 }
 
-/** Backend-packages B1 — split a `platform:` value into the family
- *  (the closed `Platform` union every consumer branches on) and the
- *  fully-qualified ref (`family@version`, mirrors `qualifyDesign`).
- *  Bareword backend → family + `family@latest`.  Backend pin
- *  (`hono@v4`) → family + the pin verbatim.  Frontend / unknown
- *  (`react`, `static`) → value for both (no version axis here).
- *  Byte-identical for every existing source: `family` equals the
- *  pre-B1 bareword, so all `platform === "…"` logic is unchanged;
- *  `platformRef` is additive (dispatch still keys on `platform`
- *  until B3). */
+/** Split a `platform:` value into the family (the closed `Platform`
+ *  union every consumer branches on) and the fully-qualified ref
+ *  (`family@version`, mirrors `qualifyDesign`).  Bareword backend →
+ *  family + `family@latest`.  Backend pin (`hono@v4`) → family + the
+ *  pin verbatim.  Frontend / unknown (`react`, `static`) → value for
+ *  both (no version axis here).  Byte-identical for every existing
+ *  source: `family` equals the bareword, so all `platform === "…"`
+ *  logic is unchanged; `platformRef` is additive (dispatch still keys
+ *  on `platform` for now). */
 function qualifyPlatform(raw: string | undefined): {
   family: Platform;
   ref: string;
@@ -192,7 +225,7 @@ export function lowerModel(model: Model): LoomModel {
 }
 
 // ---------------------------------------------------------------------------
-// Traceability lowering (Slice 12)
+// Traceability lowering
 // ---------------------------------------------------------------------------
 
 const REQUIREMENT_TYPES: ReadonlySet<string> = new Set<RequirementType>([
@@ -213,9 +246,7 @@ const REQUIREMENT_STATUSES: ReadonlySet<string> = new Set<RequirementStatus>([
  *  quoted titles to a StringLit; priorities to an IntLit.  Returns the
  *  raw string / number, or undefined for shapes we don't recognise
  *  (the validator reports those). */
-function requirementPropValue(
-  expr: import("../language/generated/ast.js").Expression | undefined,
-): string | number | undefined {
+function requirementPropValue(expr: Expression | undefined): string | number | undefined {
   if (!expr) return undefined;
   switch (expr.$type) {
     case "NameRef":
@@ -229,7 +260,7 @@ function requirementPropValue(
   }
 }
 
-function lowerRequirement(r: import("../language/generated/ast.js").Requirement): RequirementIR {
+function lowerRequirement(r: Requirement): RequirementIR {
   let type: RequirementType = "UserStory";
   let title = "";
   let status: RequirementStatus | undefined;
@@ -254,7 +285,7 @@ function lowerRequirement(r: import("../language/generated/ast.js").Requirement)
   return { id: r.name, type, title, status, priority, parentId: r.parent?.ref?.name };
 }
 
-function lowerSolution(s: import("../language/generated/ast.js").Solution): SolutionIR {
+function lowerSolution(s: Solution): SolutionIR {
   return {
     id: s.name,
     forRequirement: s.requirement?.ref?.name ?? "",
@@ -263,7 +294,7 @@ function lowerSolution(s: import("../language/generated/ast.js").Solution): Solu
   };
 }
 
-function lowerTestCase(t: import("../language/generated/ast.js").TestCase): TestCaseIR {
+function lowerTestCase(t: TestCase): TestCaseIR {
   return {
     id: t.name,
     verifies: t.requirement?.ref?.name ?? "",
@@ -272,9 +303,7 @@ function lowerTestCase(t: import("../language/generated/ast.js").TestCase): Test
   };
 }
 
-function lowerCodeRefs(
-  refs: readonly import("langium").Reference<import("../language/generated/ast.js").Targetable>[],
-): CodeRefIR[] {
+function lowerCodeRefs(refs: readonly Reference<Targetable>[]): CodeRefIR[] {
   const out: CodeRefIR[] = [];
   for (const ref of refs) {
     const node = ref.ref;
@@ -284,7 +313,7 @@ function lowerCodeRefs(
   return out;
 }
 
-function codeRefKindOf(node: import("../language/generated/ast.js").Targetable): CodeRefKind {
+function codeRefKindOf(node: Targetable): CodeRefKind {
   switch (node.$type) {
     case "Module":
       return "module";
@@ -311,7 +340,7 @@ function codeRefKindOf(node: import("../language/generated/ast.js").Targetable):
   }
 }
 
-function lowerSystem(sys: import("../language/generated/ast.js").System): SystemIR {
+function lowerSystem(sys: System): SystemIR {
   // Pre-pass over members: pull the user block out first so every
   // context lowering downstream sees the same shape.  At most one
   // block per system (validator enforces; we take the last one if
@@ -319,7 +348,7 @@ function lowerSystem(sys: import("../language/generated/ast.js").System): System
   // grammar rule (`UserField`) so the canonical JWT claim name `id`
   // (otherwise reserved for aggregate identity) is admissible.
   let user: UserIR | undefined;
-  let theme: import("./loom-ir.js").ThemeIR | undefined;
+  let theme: ThemeIR | undefined;
   for (const m of sys.members) {
     if (isUserBlock(m)) {
       user = {
@@ -341,7 +370,7 @@ function lowerSystem(sys: import("../language/generated/ast.js").System): System
   }
   const modules: ModuleIR[] = [];
   const deployables: DeployableIR[] = [];
-  const e2eBlocks: import("../language/generated/ast.js").TestE2E[] = [];
+  const e2eBlocks: TestE2E[] = [];
   // Bare `context` declarations directly under a `system` block live in
   // an implicit anonymous module so we can index them like any other.
   const looseContexts: BoundedContextIR[] = [];
@@ -389,7 +418,7 @@ function lowerSystem(sys: import("../language/generated/ast.js").System): System
   // would mostly be `unknown` anyway because e2e tests don't sit
   // inside a bounded context.  The `user` field carries the system's
   // user block down so that e2e bodies could reference `currentUser`
-  // if we extend slice 1A in the future; the slice 1A validator
+  // if auth handling is extended in the future; the auth validator
   // doesn't surface diagnostics from e2e because tests aren't user
   // input received by the system at runtime.
   const e2eEnv: Env = { locals: new Map(), user };
@@ -397,12 +426,12 @@ function lowerSystem(sys: import("../language/generated/ast.js").System): System
   // UI test (Playwright spec via page objects), anything else →
   // api test (vitest+fetch).  This avoids reserving a `'ui'` keyword
   // that would shadow the body's `ui.X.Y(...)` identifiers.
-  const e2eTests: import("./loom-ir.js").TestE2EIR[] = [];
+  const e2eTests: TestE2EIR[] = [];
   for (const b of e2eBlocks) {
     const targetName = b.deployable?.ref?.name ?? "";
     const target = deployables.find((d) => d.name === targetName);
     const targetPlatform = target?.platform;
-    // Slice 8 + F3: kind dispatch.
+    // Test-kind dispatch.
     //   - `react` / `static` are frontend-only → only `ui` (Playwright).
     //   - `dotnet` / `hono` are backend-only → only `api` (vitest+fetch).
     //   - `phoenixLiveView` is fullstack — emit BOTH a UI spec (driven
@@ -419,19 +448,17 @@ function lowerSystem(sys: import("../language/generated/ast.js").System): System
       e2eTests.push(lowerE2E(b, e2eEnv, "api"));
     }
   }
-  // Slice 2 — page metamodel.  `ui { ... }` blocks are SystemMembers;
+  // Page metamodel.  `ui { ... }` blocks are SystemMembers;
   // lower each into a UiIR and attach to the system.  Order
-  // preserves source order so Slice 4's scaffold expander emits
-  // pages in a stable sequence.  Lowering is shallow at this layer:
-  // pages, components, scaffolds, and the optional menu block are
-  // each turned into their literal IR shape (no scaffold expansion,
-  // no body type inference yet — those come in later slices).
-  const uis = sys.members
-    .filter((m): m is import("../language/generated/ast.js").Ui => m.$type === "Ui")
-    .map((u) => lowerUi(u));
+  // preserves source order so the scaffold expander emits pages in a
+  // stable sequence.  Lowering is shallow at this layer: pages,
+  // components, scaffolds, and the optional menu block are each turned
+  // into their literal IR shape (no scaffold expansion, no body type
+  // inference yet — those come later in the pipeline).
+  const uis = sys.members.filter((m): m is Ui => m.$type === "Ui").map((u) => lowerUi(u));
   // Api declarations — system-level peers to module / ui / deployable.
   const apis = sys.members
-    .filter((m): m is import("../language/generated/ast.js").Api => m.$type === "Api")
+    .filter((m): m is Api => m.$type === "Api")
     .map(
       (a): ApiIR => ({
         name: a.name,
@@ -439,11 +466,13 @@ function lowerSystem(sys: import("../language/generated/ast.js").System): System
       }),
     );
   const storages = sys.members
-    .filter((m): m is import("../language/generated/ast.js").Storage => m.$type === "Storage")
-    .map((s): import("./loom-ir.js").StorageIR => ({
-      name: s.name,
-      type: s.type as import("./loom-ir.js").StorageKind,
-    }));
+    .filter((m): m is Storage => m.$type === "Storage")
+    .map(
+      (s): StorageIR => ({
+        name: s.name,
+        type: s.type as StorageKind,
+      }),
+    );
   const built: SystemIR = {
     name: sys.name,
     modules,
@@ -455,11 +484,11 @@ function lowerSystem(sys: import("../language/generated/ast.js").System): System
     apis,
     storages,
   };
-  // Slice D1 — scaffold expander always runs.  Every page with a
+  // Scaffold expander always runs.  Every page with a
   // recognised `scaffoldOrigin` gets `body` rewritten to a
   // walker-stdlib composition; the React emitter then routes
-  // through the walker (Phase A primitives).  The legacy archetype
-  // path (renderers/preparers/templates) was deleted in D1 — this
+  // through the walker.  The legacy archetype path
+  // (renderers/preparers/templates) has been deleted — this
   // branch is the only generator path now.  `scaffoldOrigin` is
   // intentionally preserved on each rewritten page so the
   // per-aggregate page-object emitter still produces the rich
@@ -469,7 +498,7 @@ function lowerSystem(sys: import("../language/generated/ast.js").System): System
   return built;
 }
 
-/** Slice C1 — in-place rewrite of every UI's pages.  When the
+/** In-place rewrite of every UI's pages.  When the
  *  expander handles a page's `scaffoldOrigin`, swap `body` with
  *  the synthesised walker-stdlib expression and clear the
  *  `scaffoldOrigin` discriminator so the React emitter dispatches
@@ -484,10 +513,10 @@ function expandScaffoldPages(sys: SystemIR): void {
       // Compute the conventional emit path so the rewritten page
       // lands at `src/pages/<plural>/<arch>.tsx` (matches what the
       // scaffold renderer would have used).  Preserves URL/file
-      // shape across the C2 default flip.
+      // shape when scaffold expansion becomes the default.
       page.emitPath = conventionalEmitPath(page.scaffoldOrigin, ctx);
       page.body = expanded;
-      // Slice A11 — detail-page expansion references `id` as a
+      // Detail-page expansion references `id` as a
       // route param (`Sales.Order.byId(id)`).  The scaffold AST
       // expander synthesises detail pages with `route:
       // "/<plural>/:id"` but no declarative `params` block, so
@@ -509,7 +538,7 @@ function expandScaffoldPages(sys: SystemIR): void {
       // rich domain methods: fill, submit, expectRow…) while the
       // page-emitter detects `expandedFromScaffold` and routes
       // through the walker instead of the archetype renderer.
-      // Without this, the C2 flip would lose ~80 lines of e2e
+      // Without this, the default flip would lose ~80 lines of e2e
       // helper code per aggregate.
       page.expandedFromScaffold = true;
     }
@@ -517,8 +546,8 @@ function expandScaffoldPages(sys: SystemIR): void {
 }
 
 function conventionalEmitPath(
-  origin: import("./loom-ir.js").ScaffoldOriginIR,
-  ctx: import("./scaffold-expander.js").ScaffoldExpandContext,
+  origin: ScaffoldOriginIR,
+  ctx: ScaffoldExpandContext,
 ): string | undefined {
   if (
     origin.kind === "aggregate-list" ||
@@ -571,10 +600,8 @@ function pluralSnake(s: string): string {
   return snake + "s";
 }
 
-function lowerTheme(
-  block: import("../language/generated/ast.js").ThemeBlock,
-): import("./loom-ir.js").ThemeIR {
-  const out: import("./loom-ir.js").ThemeIR = {};
+function lowerTheme(block: ThemeBlock): ThemeIR {
+  const out: ThemeIR = {};
   for (const p of block.props) {
     const value = p.value;
     switch (p.name) {
@@ -605,11 +632,7 @@ function lowerTheme(
   return out;
 }
 
-function lowerE2E(
-  block: import("../language/generated/ast.js").TestE2E,
-  env: Env,
-  kind: "api" | "ui",
-): import("./loom-ir.js").TestE2EIR {
+function lowerE2E(block: TestE2E, env: Env, kind: "api" | "ui"): TestE2EIR {
   const inner = block.body;
   let curEnv = env;
   const statements: TestStmtIR[] = [];
@@ -643,9 +666,9 @@ function lowerE2E(
   };
 }
 
-function lowerDeployable(d: import("../language/generated/ast.js").Deployable): DeployableIR {
+function lowerDeployable(d: Deployable): DeployableIR {
   const { family: platform, ref: platformRef } = qualifyPlatform(d.platform);
-  // `auth: required` is the only AuthMode in slice 1A.  Future modes
+  // `auth: required` is currently the only AuthMode.  Future modes
   // (`optional` / `forbidden`) would extend this branch.
   const auth = d.auth === "required" ? { required: true } : undefined;
   // `design` defaults only on platforms that actually render UI in
@@ -669,12 +692,12 @@ function lowerDeployable(d: import("../language/generated/ast.js").Deployable): 
         : platform === "dotnet" && uiName
           ? qualifyDesign(d.design, "mantine")
           : undefined;
-  // Slice 2: page-metamodel UI binding.  The grammar accepts two
+  // Page-metamodel UI binding.  The grammar accepts two
   // surface forms — `ui: WebApp` (sugar) and `ui WebApp { framework: react }`
   // (full block).  Both lower to the same `uiName` + optional
   // `uiFramework` here.  `uiName` is computed above so the `design`
   // default can branch on it for dual-mode platforms (fullstack
-  // dotnet).  Validator (Slice 3) enforces that the referenced ui
+  // dotnet).  Validator enforces that the referenced ui
   // exists, the platform supports a UI mount, and the framework value
   // is one of the v0-allowed alternatives.
   // Explicit `framework: …` in the full block wins; otherwise default
@@ -690,20 +713,20 @@ function lowerDeployable(d: import("../language/generated/ast.js").Deployable): 
           ? "react"
           : undefined
       : undefined);
-  // Slice 11.26 — explicit api composition.
+  // Explicit api composition.
   const serves = (d.serves ?? []).map((r) => r.ref?.name ?? "").filter(Boolean);
   const uiBindings = (d.uiCompose?.bindings ?? []).map(
-    (b): import("./loom-ir.js").UiParamBindingIR => ({
+    (b): UiParamBindingIR => ({
       paramName: b.name,
       sourceDeployableName: b.source?.ref?.name ?? "",
     }),
   );
-  // Slice 11.27 — per-module storage bindings.
+  // Per-module storage bindings.
   const moduleBindings = (d.moduleBindings ?? []).map(
-    (b): import("./loom-ir.js").ModuleBindingIR => ({
+    (b): ModuleBindingIR => ({
       moduleName: b.name?.ref?.name ?? "",
       storages: (b.storages ?? []).map((sb) => ({
-        role: sb.role as import("./loom-ir.js").ModuleStorageRole,
+        role: sb.role as ModuleStorageRole,
         storageName: sb.storage?.ref?.name ?? "",
       })),
     }),
@@ -734,7 +757,7 @@ function defaultPort(platform: Platform | undefined): number {
 }
 
 // ---------------------------------------------------------------------------
-// Page metamodel — Slice 2 lowering.
+// Page metamodel lowering.
 //
 // Each `ui { ... }` SystemMember lowers to a `UiIR` carrying its
 // pages, components, scaffold directives, and an optional menu block
@@ -743,19 +766,19 @@ function defaultPort(platform: Platform | undefined): number {
 //     through the existing expression engine (`lowerExpr`); type
 //     resolution falls out from the same `Env`.
 //   - Scaffold directives stay as literal `ScaffoldIR` carrying their
-//     selector + targets.  The expander (Slice 4) walks the system's
+//     selector + targets.  The expander walks the system's
 //     domain IR to synthesise concrete pages from each directive.
-//   - Validator obligations (Slice 3) catch the rest: ui-name
+//   - Validator obligations catch the rest: ui-name
 //     uniqueness, deployable-references-existing-ui, scaffold target
 //     resolution, etc.
 // ---------------------------------------------------------------------------
 
-function lowerUi(ui: import("../language/generated/ast.js").Ui): UiIR {
+function lowerUi(ui: Ui): UiIR {
   const pages: PageIR[] = [];
   const components: ComponentIR[] = [];
   const scaffolds: ScaffoldIR[] = [];
-  const apiParams: import("./loom-ir.js").UiApiParamIR[] = [];
-  const helperImports: import("./loom-ir.js").UiHelperImportIR[] = [];
+  const apiParams: UiApiParamIR[] = [];
+  const helperImports: UiHelperImportIR[] = [];
   let menu: MenuBlockIR | undefined;
   for (const m of ui.members) {
     if (m.$type === "Page") pages.push(lowerPage(m));
@@ -769,7 +792,7 @@ function lowerUi(ui: import("../language/generated/ast.js").Ui): UiIR {
     } else if (m.$type === "UiHelperImport") {
       helperImports.push({ name: m.name, path: m.path });
     } else if (m.$type === "MenuBlock") {
-      // First menu block wins.  Validator (Slice 3) flags a duplicate
+      // First menu block wins.  Validator flags a duplicate
       // `menu { ... }` block at ui scope as an error.
       if (!menu) menu = lowerMenuBlock(m);
     }
@@ -785,7 +808,7 @@ function lowerUi(ui: import("../language/generated/ast.js").Ui): UiIR {
   };
 }
 
-function lowerPage(p: import("../language/generated/ast.js").Page): PageIR {
+function lowerPage(p: Page): PageIR {
   const params = (p.params ?? []).map((param) => ({
     name: param.name,
     type: lowerType(param.type),
@@ -799,8 +822,8 @@ function lowerPage(p: import("../language/generated/ast.js").Page): PageIR {
   let body: ExprIR | undefined;
   let menuMeta: MenuMetaIR | undefined;
   const state: StateFieldIR[] = [];
-  // A neutral env is fine for Slice 2 — the page-IR expression nodes
-  // will get richer when the validator (Slice 3) and emitter (Slice 5)
+  // A neutral env is fine here — the page-IR expression nodes
+  // will get richer when the validator and emitter
   // wire in the page-scoped scope.
   const env: Env = { locals: new Map(), user: undefined };
   for (const prop of p.props) {
@@ -811,7 +834,7 @@ function lowerPage(p: import("../language/generated/ast.js").Page): PageIR {
     else if (prop.$type === "StateBlock") {
       for (const f of prop.fields) state.push(lowerStateField(f, env));
     } else if (prop.$type === "PageMenuMeta") {
-      // Last block wins — validator (Slice 3) flags repeated menu
+      // Last block wins — validator flags repeated menu
       // metadata blocks on a single page.
       menuMeta = {
         entries: prop.entries.map((e) => ({
@@ -821,7 +844,7 @@ function lowerPage(p: import("../language/generated/ast.js").Page): PageIR {
       };
     }
   }
-  // Slice 10 — Pass-1 AST-to-AST scaffold expansion populates
+  // Pass-1 AST-to-AST scaffold expansion populates
   // synthesised pages with body expressions like
   // `List(of: Order)` / `Form(creates: T)` / etc.  We infer the
   // page's `scaffoldOrigin` discriminator and `source` from the
@@ -850,10 +873,7 @@ function lowerPage(p: import("../language/generated/ast.js").Page): PageIR {
  *  <View>)`, the standalone Home / WorkflowsIndex / ViewsIndex
  *  sentinels), returns the matching origin.  Otherwise returns
  *  `undefined` — the page is treated as user-explicit. */
-function inferScaffoldOrigin(
-  page: import("../language/generated/ast.js").Page,
-  body: ExprIR | undefined,
-): ScaffoldOriginIR | undefined {
+function inferScaffoldOrigin(page: Page, body: ExprIR | undefined): ScaffoldOriginIR | undefined {
   if (!body || body.kind !== "call") return undefined;
   const callName = body.name;
   const argNames = body.argNames ?? [];
@@ -920,7 +940,7 @@ function inferScaffoldOrigin(
   return undefined;
 }
 
-function lowerComponent(c: import("../language/generated/ast.js").Component): ComponentIR {
+function lowerComponent(c: Component): ComponentIR {
   const params = c.params.map((param) => ({
     name: param.name,
     type: lowerType(param.type),
@@ -936,10 +956,7 @@ function lowerComponent(c: import("../language/generated/ast.js").Component): Co
   return { name: c.name, params, state, body };
 }
 
-function lowerStateField(
-  f: import("../language/generated/ast.js").StateField,
-  env: Env,
-): StateFieldIR {
+function lowerStateField(f: StateField, env: Env): StateFieldIR {
   return {
     name: f.name,
     type: lowerType(f.type),
@@ -947,20 +964,20 @@ function lowerStateField(
   };
 }
 
-function lowerScaffold(s: import("../language/generated/ast.js").Scaffold): ScaffoldIR {
+function lowerScaffold(s: Scaffold): ScaffoldIR {
   return {
     selector: s.selector as ScaffoldSelector,
     targets: s.targets.map((t) => t).filter(Boolean),
   };
 }
 
-function lowerMenuBlock(m: import("../language/generated/ast.js").MenuBlock): MenuBlockIR {
+function lowerMenuBlock(m: MenuBlock): MenuBlockIR {
   const env: Env = { locals: new Map(), user: undefined };
   return {
     sections: m.sections.map((sec) => ({
       label: sec.label,
       links: sec.links.map((l): MenuLinkIR => {
-        // Slice 10: page links use a real Langium cross-reference.
+        // Page links use a real Langium cross-reference.
         // Scaffold-synthesised pages are first-class AST nodes by
         // link time, so `[Page:LooseName]` resolves through the
         // standard linker.  We carry the resolved page's name into
@@ -1107,7 +1124,7 @@ function lowerAggregate(agg: Aggregate, env: Env): AggregateIR {
   };
 }
 
-function lowerTest(block: import("../language/generated/ast.js").TestBlock, env: Env): TestIR {
+function lowerTest(block: TestBlock, env: Env): TestIR {
   let inner = env;
   const statements: TestStmtIR[] = [];
   for (const s of block.body) {
@@ -1164,8 +1181,8 @@ function lowerRepository(
       // `this`-rooted refs so the filter can reference them by name.
       // `user` is threaded so `currentUser` resolves to a typed ref —
       // the validator (`validateAuth`) then rejects any current-user
-      // reference inside a where filter, since slice 1A doesn't
-      // support row-level filtering by user (slice 1C).
+      // reference inside a where filter, since row-level filtering by
+      // user is not supported there.
       let env = newEnv(repo.$container as BoundedContext, user, modulePermissions);
       if (aggRoot) env = inAggregate(env, aggRoot);
       for (const p of f.params) {
@@ -1266,7 +1283,7 @@ function collectIdFollows(
       for (const a of expr.args) collectIdFollows(a, out);
       return;
     case "lambda":
-      // Slice 2: lambda body is now optional — single-expression form
+      // Lambda body is now optional — single-expression form
       // sets `body`, block-body form sets `block`.  Block bodies don't
       // contribute Id-follow paths in v0 (they only appear in event
       // handlers, not in `bind`/`derived`/filter expressions where this
@@ -1274,7 +1291,7 @@ function collectIdFollows(
       if (expr.body) collectIdFollows(expr.body, out);
       return;
     case "match":
-      // Slice 2: recurse through every arm condition + value plus the
+      // Recurse through every arm condition + value plus the
       // `else` branch.  Match expressions can appear inside view
       // `bind` exprs and `derived` bodies; their Id-follow members
       // must still surface for the bulk-load auxiliary planner.
@@ -1353,7 +1370,7 @@ function lowerField(p: Property): FieldIR {
   };
 }
 
-function lowerContainment(c: import("../language/generated/ast.js").Containment): ContainmentIR {
+function lowerContainment(c: Containment): ContainmentIR {
   return {
     name: c.name,
     partName: c.partType?.ref?.name ?? "Unknown",
@@ -1361,7 +1378,7 @@ function lowerContainment(c: import("../language/generated/ast.js").Containment)
   };
 }
 
-function lowerDerived(d: import("../language/generated/ast.js").DerivedProp, env: Env): DerivedIR {
+function lowerDerived(d: DerivedProp, env: Env): DerivedIR {
   return {
     name: d.name,
     type: lowerType(d.type),
@@ -1369,15 +1386,12 @@ function lowerDerived(d: import("../language/generated/ast.js").DerivedProp, env
   };
 }
 
-function lowerInvariant(
-  i: import("../language/generated/ast.js").Invariant,
-  env: Env,
-): InvariantIR {
+function lowerInvariant(i: Invariant, env: Env): InvariantIR {
   return {
     expr: lowerExpr(i.expr, env),
     guard: i.guard ? lowerExpr(i.guard, env) : undefined,
     source: cstText(i.expr),
-    // Slice 21.C — `private invariant ...` opts out of the wire
+    // `private invariant ...` opts out of the wire
     // layers (frontend Zod, Hono routes, FluentValidation).  The
     // domain-layer `AssertInvariants()` floor still enforces it.
     scope: i.serverOnly ? "server-only" : undefined,
@@ -1385,13 +1399,10 @@ function lowerInvariant(
 }
 
 /** Synthesise an InvariantIR from an inline `field: T check <expr>`
- *  clause on a Property.  Slice 21.C sugar — the synthesised invariant
- *  appears in the parent's `invariants` list so the existing wire-
- *  validator + domain-floor pipelines pick it up uniformly. */
-function lowerPropertyChecks(
-  props: import("../language/generated/ast.js").Property[],
-  env: Env,
-): InvariantIR[] {
+ *  clause on a Property.  Inline-check sugar — the synthesised
+ *  invariant appears in the parent's `invariants` list so the existing
+ *  wire-validator + domain-floor pipelines pick it up uniformly. */
+function lowerPropertyChecks(props: Property[], env: Env): InvariantIR[] {
   const out: InvariantIR[] = [];
   for (const p of props) {
     if (!p.check) continue;
@@ -1441,6 +1452,7 @@ function lowerOperation(op: Operation, env: Env): OperationIR {
     params,
     statements: stmts,
     extern: !!op.extern,
+    audited: !!op.audited,
   };
 }
 
@@ -1614,7 +1626,7 @@ function lowerWorkflowStatement(
       // The let binding's local type is the unwrapped aggregate
       // (validator rejects array/optional repo-lets).  Use the
       // declared return type so the validator can flag misuse.
-      const localType: TypeIR = returnType.kind === "entity" ? returnType : returnType;
+      const localType: TypeIR = returnType;
       return {
         stmt: {
           kind: "repo-let",
@@ -1710,7 +1722,7 @@ function matchFactoryCall(
   if (!aggsByName.has(recv.name)) return undefined;
   if (expr.args.length !== 1) return undefined;
   const argWrap = expr.args[0];
-  // Slice 1.5: factory calls take a single object literal positional
+  // Factory calls take a single object literal positional
   // arg.  Reject the named-arg form here; the caller falls through
   // to a generic call lowering rather than the factory shape.
   if (!argWrap || argWrap.name) return undefined;
@@ -1737,7 +1749,7 @@ function matchRepoCall(
   if (!isNameRef(recv)) return undefined;
   const repo = reposByName.get(recv.name);
   if (!repo) return undefined;
-  // Slice 1.5: peel CallArg wrappers — repo finds are positional.
+  // Peel CallArg wrappers — repo finds are positional.
   return {
     repo,
     method: expr.member,

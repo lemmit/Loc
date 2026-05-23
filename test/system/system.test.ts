@@ -105,7 +105,7 @@ describe("system / module / deployable", () => {
     expect(dotnetProgram).toMatch(/app\.MapGet\("\/health"/);
   });
 
-  describe("slice 16.A — container basics (/ready, SIGTERM, fail-fast)", () => {
+  describe("container basics (/ready, SIGTERM, fail-fast)", () => {
     it("Hono backend gets a /ready route that pings the DB", async () => {
       const model = await buildModel("examples/acme.ddd");
       const { files } = generateSystems(model);
@@ -198,7 +198,10 @@ describe("system / module / deployable", () => {
     // UI specs land inside the targeted react deployable's e2e/
     // folder, next to the auto-generated page objects.
     const ui = files.get("web_app/e2e/Acme.ui.spec.ts")!;
-    expect(ui).toMatch(/from "@playwright\/test"/);
+    // Specs import test/expect from the generated `./fixtures` (which
+    // re-exports Playwright's, adding auto console-capture on failure).
+    expect(ui).toMatch(/from "\.\/fixtures"/);
+    expect(files.has("web_app/e2e/fixtures.ts")).toBe(true);
     expect(ui).toMatch(/from "\.\/pages\/product"/);
     expect(ui).toMatch(/from "\.\/pages\/order"/);
     // `ui.products.create({...})` lowers via ProductListPage.
@@ -208,8 +211,11 @@ describe("system / module / deployable", () => {
     expect(ui).toMatch(/new OrderDetailPage\(page, ord\.id\)\.goto\(\).+addLine/);
     // `ui.orders.confirm(ord)` (no body) calls confirm().
     expect(ui).toMatch(/new OrderDetailPage\(page, ord\.id\)\.goto\(\).+confirm/);
-    // getById binds the detail handle; equality assertions lower to
-    // Playwright's web-first matchers (auto-retrying against the DOM).
+    // getById binds the detail handle; explicit, typed matchers
+    // (`expect(read.status).toHaveText(...)`, resolved in the IR as
+    // intrinsic matchers) lower to Playwright's web-first matchers
+    // (auto-retrying against the DOM) — driven by the author's matcher
+    // choice, not inferred from the expression's shape.
     expect(ui).toMatch(/await expect\(read\.field\("status"\)\)\.toHaveText\("Confirmed"\)/);
     expect(ui).toMatch(/await expect\(read\.linesRows\(\)\)\.toHaveCount\(1\)/);
 

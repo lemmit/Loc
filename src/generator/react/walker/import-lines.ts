@@ -13,8 +13,8 @@ const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0
 /** Render `import { … } from "<path>";` lines from a path→names map.
  *  Names are sorted within each line; sources are sorted by
  *  `comparePaths`.  When `srcImportPrefix` is non-default, paths
- *  written with the default `../` shape are rewritten to it (Slice C2 —
- *  scaffold-expanded pages live deeper under `src/`).  An empty map
+ *  written with the default `../` shape are rewritten to it
+ *  (scaffold-expanded pages live deeper under `src/`).  An empty map
  *  renders as `""` so callers can splice without a guard. */
 function groupedImportLines(
   byPath: Map<string, ReadonlySet<string>>,
@@ -37,7 +37,7 @@ function groupedImportLines(
  *  result without a guard. */
 export function renderImportLines(
   imports: ImportMap,
-  /** Slice C2 — page-relative prefix for paths the pack writes
+  /** Page-relative prefix for paths the pack writes
    *  with the default `../` shape (which assumes pages live one
    *  hop under `src/`).  Scaffold-expanded pages live two hops
    *  under `src/`, so they pass `"../../"` and we rewrite each
@@ -54,7 +54,7 @@ export function renderImportLines(
  *  hooks). */
 export function renderApiHookImports(
   usedApiHooks: Map<string, ApiHookUse>,
-  /** Slice C2 — see `renderImportLines` for prefix semantics. */
+  /** See `renderImportLines` for prefix semantics. */
   srcImportPrefix: string = "../",
 ): string {
   const byPath = new Map<string, Set<string>>();
@@ -69,7 +69,7 @@ export function renderApiHookImports(
   return groupedImportLines(byPath, byCodeUnit, srcImportPrefix);
 }
 
-/** Slice A6 — render `import { … } from "…"` lines for every
+/** Render `import { … } from "…"` lines for every
  *  UI-declared helper actually used in the body.  Helpers
  *  sharing an import path collapse into one line; paths are
  *  sorted for deterministic output. */

@@ -1,4 +1,4 @@
-// Slice 6 — menu emitter.
+// Menu emitter.
 //
 // Builds the App.tsx sidebar's `navSections` array from a `ui` block.
 // Two surface forms (per spec §11):
@@ -11,24 +11,24 @@
 //   2. No explicit menu block → returns `undefined`.  Caller falls
 //      back to the hardcoded sidebar in
 //      `prepareAppShellVM(aggregates, workflows, views, …)` —
-//      byte-equivalent to main's pre-Slice-6 output for the bulk-
+//      byte-equivalent to the original sidebar output for the bulk-
 //      scaffold case (the byte-equivalence acceptance gate).
 //
-// What this slice covers:
+// What this emitter covers:
 // - Explicit `ui.menu` overrides emit the user's exact section
 //   layout, with per-link `label:` / `order:` metadata honoured.
 // - External links render as anchor tags so `link "Docs" -> "url"`
 //   produces a clickable navigation entry (no React Router).
 // - Per-link auth — when the underlying page has a `requires`
 //   clause, the rendered link wraps in a permission gate (deferred
-//   to Slice 6.1 with the `useAuth` plumbing; v0 emits the link
+//   to future `useAuth` plumbing; currently emits the link
 //   unconditionally).
 //
-// What this slice intentionally doesn't yet handle:
+// What this emitter intentionally doesn't yet handle:
 // - Per-page `menuMeta` as the *default* sidebar driver.  The
 //   default still goes through main's hardcoded grouping so that
 //   the bulk-scaffold byte-equivalence holds without churning the
-//   expander or the AppShell preparer.  Slice 6.1 unifies the
+//   expander or the AppShell preparer.  A future change unifies the
 //   default path on the page-IR.
 
 import type { PageIR, UiIR } from "../../ir/loom-ir.js";
@@ -50,7 +50,7 @@ export function deriveSidebarFromUi(ui: UiIR): NavSectionVM[] | undefined {
       }),
     );
   }
-  // Slice 11.21 — fallback driver: per-page `menuMeta` blocks on
+  // Fallback driver: per-page `menuMeta` blocks on
   // EXPLICIT pages.  When no `ui.menu` is declared, walker-rendered
   // pages (and any other source-declared pages) with `menu {
   // section: "X" }` metadata group by section into a sidebar.
@@ -111,8 +111,8 @@ function navEntryForLink(
     // plain anchor.  We inject a sentinel `__external:<url>` token
     // into `to` so the AppShell template can recognise the form
     // (the existing template only renders `<NavLink to=...>` —
-    // external rendering lands with the template-pack work in
-    // Slice 6.1 if it's needed by a real example).
+    // external rendering can land with the template-pack work if it's
+    // needed by a real example).
     return {
       to: `__external:${link.url}`,
       label: link.label,

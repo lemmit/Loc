@@ -1,4 +1,4 @@
-// Slice 11.12 — page-level `title:` declaration wires into a
+// page-level `title:` declaration wires into a
 // `useEffect` that sets `document.title` on mount and re-runs
 // whenever any referenced param / state field changes.  Deps array
 // is auto-derived from the title expression's refs so React's
@@ -9,7 +9,7 @@ import { generateSystemFiles } from "../_helpers/index.js";
 
 const buildAndGenerate = generateSystemFiles;
 
-describe("Slice 11.12 — page title via useEffect(document.title)", () => {
+describe("page title via useEffect(document.title)", () => {
   it('static title: "..." emits a useEffect with empty deps', async () => {
     const files = await buildAndGenerate(`
       system S {

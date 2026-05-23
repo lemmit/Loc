@@ -3,13 +3,12 @@ import type { ExprIR, InvariantIR } from "./loom-ir.js";
 // ---------------------------------------------------------------------------
 // Invariant classification + single-field pattern detection.
 //
-// Slice 21.A introduces wire-boundary validation: invariants declared on
-// aggregates / value-objects / operation preconditions flow down to the
-// frontend (Zod refines on RHF schemas) and the Hono routes (Zod refines
-// on per-route schemas) so users see field-level errors without a
-// server round-trip.  Slice 21.B will reuse the same classification on
-// the .NET side to emit `AbstractValidator<TRequest>` rules for
-// FluentValidation.
+// Wire-boundary validation: invariants declared on aggregates /
+// value-objects / operation preconditions flow down to the frontend
+// (Zod refines on RHF schemas) and the Hono routes (Zod refines on
+// per-route schemas) so users see field-level errors without a
+// server round-trip.  The same classification drives the .NET side,
+// emitting `AbstractValidator<TRequest>` rules for FluentValidation.
 //
 // Two pure functions live here:
 //
@@ -98,12 +97,9 @@ function exprIsTranslatable(
       return exprIsTranslatable(e.receiver, ctx, scope);
     case "method-call": {
       if (!exprIsTranslatable(e.receiver, ctx, scope)) return false;
-      // `String.matches(literal)` / `String.startsWith(literal)` etc.
-      // are fine when the receiver is.  Collection ops introduce a
-      // lambda parameter we track in `scope`.
-      if (e.isCollectionOp) {
-        return e.args.every((a) => exprIsTranslatable(a, ctx, scope));
-      }
+      // `String.matches(literal)` etc. and collection ops (`all`/`any`/…)
+      // are translatable when every arg is. A collection op's predicate is
+      // a lambda — the "lambda" case below adds its parameter to `scope`.
       return e.args.every((a) => exprIsTranslatable(a, ctx, scope));
     }
     case "call":
@@ -118,7 +114,7 @@ function exprIsTranslatable(
     case "lambda": {
       const inner = new Set(scope);
       inner.add(e.param);
-      // Slice 2: lambda body is now optional (block-body lambdas land
+      // Lambda body is now optional (block-body lambdas land
       // for page event handlers).  Block bodies are always
       // server-side (mutate state, navigate, call mutations) — never
       // wire-translatable.  Single-expression lambdas keep their
@@ -360,7 +356,7 @@ function firstFieldRef(e: ExprIR): string | null {
     case "call":
       return e.args.reduce<string | null>((acc, a) => acc ?? firstFieldRef(a), null);
     case "lambda":
-      // Slice 2: lambda body is now optional.  Block-body lambdas
+      // Lambda body is now optional.  Block-body lambdas
       // appear only in event handlers (page metamodel), never in
       // wire-validating predicate bodies — fall through to null.
       if (e.body) return firstFieldRef(e.body);

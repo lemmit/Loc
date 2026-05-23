@@ -1,4 +1,4 @@
-// Slice 11.5 — `Button("label", to: "/path")` wires the rendered
+// `Button("label", to: "/path")` wires the rendered
 // Mantine button to a React-Router navigate call.  The page shell
 // pulls `useNavigate` from `react-router` and declares
 // `const navigate = useNavigate()` so the generated onClick lambda
@@ -9,7 +9,7 @@ import { generateSystemFiles } from "../_helpers/index.js";
 
 const buildAndGenerate = generateSystemFiles;
 
-describe("Slice 11.5 — Button(to:) navigation in walker-rendered pages", () => {
+describe("Button(to:) navigation in walker-rendered pages", () => {
   it("emits useNavigate hook + onClick when to: is a string literal", async () => {
     const files = await buildAndGenerate(`
       system S {

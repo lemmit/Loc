@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// hono@v4 — the versioned backend package (backend-packages B2, see
+// hono@v4 — the versioned backend package (see
 // docs/backend-packages.md).  Owns its dep pins (`./pins.ts`) and
 // the `PlatformSurface` wiring; drives the shared TypeScript/Hono
 // emitter under `src/generator/typescript/`.  A future `hono@v5`
@@ -14,9 +14,9 @@ import type { ComposeServiceShape, PlatformSurface } from "../../surface.js";
 import { generateTypeScriptForContexts } from "./emit.js";
 import { BACKEND_PINS } from "./pins.js";
 
-/** packaging-split P0 — the descriptor the resolver discovers this
- *  package by.  In-tree today; becomes the `loom` key in this
- *  package's package.json when it is extracted (P3). */
+/** The descriptor the resolver discovers this package by.  In-tree
+ *  today; becomes the `loom` key in this package's package.json when
+ *  it is extracted. */
 export const loomManifest: LoomBackendManifest = {
   kind: "backend",
   family: "hono",
@@ -35,13 +35,15 @@ const honoPlatform: PlatformSurface = {
   // one of these names would compile-error with TS2393 "Duplicate
   // function implementation".
   reservedRepositoryFindNames: new Set(["save", "findById", "getById"]),
-  emitProject({ contexts, deployable, sys }): Map<string, string> {
+  emitProject({ contexts, deployable, sys, emitTrace }): Map<string, string> {
     // The package supplies its own pins to the shared emitter —
-    // edge points package → shared, never the reverse (B2.1).
-    return generateTypeScriptForContexts(contexts, BACKEND_PINS, {
-      deployable,
-      sys,
-    });
+    // edge points package → shared, never the reverse.
+    return generateTypeScriptForContexts(
+      contexts,
+      BACKEND_PINS,
+      { deployable, sys },
+      { emitTrace },
+    );
   },
   composeService({ slug }): ComposeServiceShape {
     return {

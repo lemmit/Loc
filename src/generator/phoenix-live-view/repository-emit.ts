@@ -1,5 +1,5 @@
 import type { AggregateIR, BoundedContextIR, FindIR, RepositoryIR } from "../../ir/loom-ir.js";
-import { pascal, plural, snake } from "../../util/naming.js";
+import { snake, upperFirst } from "../../util/naming.js";
 import { type RenderCtx, renderExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -105,21 +105,21 @@ export function emitFindsSideFile(
 ): { path: string; content: string } {
   const ctxSnake = snake(ctx.name);
   const aggSnake = snake(agg.name);
-  const aggModule = `${appModule}.${pascal(ctx.name)}.${pascal(agg.name)}`;
-  const contextModule = `${appModule}.${pascal(ctx.name)}`;
+  const aggModule = `${appModule}.${upperFirst(ctx.name)}.${upperFirst(agg.name)}`;
+  const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
   const findsCtx: RenderCtx = { thisName: "record", contextModule };
 
   const actionBlocks = repo.finds.map((find) => renderFindAction(find, agg, findsCtx));
 
   // This file documents the custom finds but is not used in the primary
   // emission path (domain-emit splices find actions inline).
-  const content = `# Auto-generated — custom Ash read actions for ${pascal(agg.name)}.
+  const content = `# Auto-generated — custom Ash read actions for ${upperFirst(agg.name)}.
 # These are spliced inline into lib/${appName}/${ctxSnake}/${aggSnake}.ex by the generator.
 # This file is provided for reference only.
 
 defmodule ${aggModule}.Finds do
   @moduledoc """
-  Custom read actions for ${pascal(agg.name)}.
+  Custom read actions for ${upperFirst(agg.name)}.
 
   Standard CRUD (get / read / create / update / destroy) are auto-emitted
   via \`defaults\` in the resource module.  Only the user-declared finds
@@ -185,4 +185,3 @@ export function mergeViewFindsForAgg(
 
 // Re-export for convenience
 export type { FindIR, RepositoryIR };
-export { pascal, plural, snake };

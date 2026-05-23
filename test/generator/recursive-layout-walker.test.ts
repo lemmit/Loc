@@ -1,4 +1,4 @@
-// Slice 11.3 — recursive body walker for custom layouts.
+// recursive body walker for custom layouts.
 //
 // Pages whose body is composed of layout primitives (Stack /
 // Heading / Text / Button / Card) instead of scaffold archetypes
@@ -22,7 +22,7 @@ import { generateSystemFiles } from "../_helpers/index.js";
 
 const buildAndGenerate = generateSystemFiles;
 
-describe("Slice 11.3 — recursive layout walker", () => {
+describe("recursive layout walker", () => {
   it("emits Stack(Heading, Text) into a TSX file with Mantine imports", async () => {
     const files = await buildAndGenerate(`
       system S {

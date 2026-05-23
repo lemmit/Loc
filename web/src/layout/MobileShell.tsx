@@ -3,9 +3,9 @@ import { Box, Button, Group, Indicator, SegmentedControl, Tabs, Text } from "@ma
 import { EditorPane } from "./EditorPane";
 import { FilesPane } from "./FilesPane";
 import { PreviewPane } from "./PreviewPane";
-import { ProblemsPanelScrollable } from "./ProblemsPanel";
 import { BackendBody, BackendHeader } from "./BackendPanel";
 import { TestsBody } from "./TestsPanel";
+import { OutputPanel, outputAggregateDot } from "./OutputPanel";
 import type { LayoutCtx, MobileCodeView, MobileTab } from "./ctx";
 
 // The visual Builder (craft.js + a main-thread Langium parse) and the
@@ -13,12 +13,14 @@ import type { LayoutCtx, MobileCodeView, MobileTab } from "./ctx";
 // the main mobile chunk until its sub-view is opened, mirroring DesktopShell.
 const BuilderPane = lazy(() => import("../builder/BuilderPane"));
 const SystemBuilderPane = lazy(() => import("../builder/system/SystemBuilderPane"));
+const SystemBuilderV2Pane = lazy(() => import("../builder/system-v2/SystemBuilderV2Pane"));
+const RequirementsPane = lazy(() => import("../builder/requirements/RequirementsPane"));
 
 interface Props {
   ctx: LayoutCtx;
 }
 
-const TAB_VALUES: readonly MobileTab[] = ["code", "preview", "problems", "backend", "tests"] as const;
+const TAB_VALUES: readonly MobileTab[] = ["code", "preview", "output", "backend", "tests"] as const;
 
 function isMobileTab(v: string | null): v is MobileTab {
   return v !== null && (TAB_VALUES as readonly string[]).includes(v);
@@ -35,7 +37,8 @@ function isMobileTab(v: string | null): v is MobileTab {
 // cascade can navigate to Preview/Backend on a clean boot.  We just
 // read it off the ctx here.
 export function MobileShell({ ctx }: Props): JSX.Element {
-  const { activeTab, setActiveTab, codeView, setCodeView, errorCount, diagnostics } = ctx;
+  const { activeTab, setActiveTab, codeView, setCodeView } = ctx;
+  const outputDot = outputAggregateDot(ctx);
 
   return (
     <Tabs
@@ -71,6 +74,8 @@ export function MobileShell({ ctx }: Props): JSX.Element {
               { value: "source", label: <span data-testid="mobile-doc-tab-source">Source</span> },
               { value: "builder", label: <span data-testid="mobile-doc-tab-builder">Builder</span> },
               { value: "model", label: <span data-testid="mobile-doc-tab-model">Model</span> },
+              { value: "model-v2", label: <span data-testid="mobile-doc-tab-model-v2">Model v2</span> },
+              { value: "requirements", label: <span data-testid="mobile-doc-tab-requirements">Reqs</span> },
             ]}
           />
           <Button
@@ -102,6 +107,20 @@ export function MobileShell({ ctx }: Props): JSX.Element {
             </Suspense>
           </Box>
         )}
+        {codeView === "model-v2" && (
+          <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
+            <Suspense fallback={<Box p="md"><Text size="sm" c="dimmed">Loading model v2…</Text></Box>}>
+              <SystemBuilderV2Pane ctx={ctx} />
+            </Suspense>
+          </Box>
+        )}
+        {codeView === "requirements" && (
+          <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
+            <Suspense fallback={<Box p="md"><Text size="sm" c="dimmed">Loading requirements…</Text></Box>}>
+              <RequirementsPane ctx={ctx} />
+            </Suspense>
+          </Box>
+        )}
         {codeView === "generated" && (
           <Box style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
             <FilesPane ctx={ctx} />
@@ -111,8 +130,8 @@ export function MobileShell({ ctx }: Props): JSX.Element {
       <Tabs.Panel value="preview">
         <PreviewPane ctx={ctx} />
       </Tabs.Panel>
-      <Tabs.Panel value="problems">
-        <ProblemsPanelScrollable items={diagnostics} />
+      <Tabs.Panel value="output">
+        <OutputPanel ctx={ctx} stream={ctx.outputStream} setStream={ctx.setOutputStream} />
       </Tabs.Panel>
       <Tabs.Panel value="backend">
         {/* Status badges + Boot/Reset move into a header banner above
@@ -130,14 +149,20 @@ export function MobileShell({ ctx }: Props): JSX.Element {
       <Tabs.List grow>
         <Tabs.Tab value="code" data-testid="mobile-tab-code">Code</Tabs.Tab>
         <Tabs.Tab value="preview" data-testid="mobile-tab-preview">Preview</Tabs.Tab>
-        <Tabs.Tab value="problems" data-testid="mobile-tab-problems">
-          {/* Red dot when there are errors — the user shouldn't need
-              to switch panels to discover the source has problems. */}
-          <Indicator size={6} color="red" disabled={errorCount === 0} offset={-2}>
-            <Box>Problems</Box>
+        <Tabs.Tab value="output" data-testid="mobile-tab-output">
+          {/* Dot when any stream (problems / generator / bundler / tests)
+              is flagged — the user shouldn't need to open the panel to
+              discover something went red. */}
+          <Indicator
+            size={6}
+            color={outputDot ?? "red"}
+            disabled={outputDot === null}
+            offset={-2}
+          >
+            <Box>Output</Box>
           </Indicator>
         </Tabs.Tab>
-        <Tabs.Tab value="backend" data-testid="mobile-tab-backend">Backend</Tabs.Tab>
+        <Tabs.Tab value="backend" data-testid="mobile-tab-backend">Runtime</Tabs.Tab>
         <Tabs.Tab value="tests" data-testid="mobile-tab-tests">Tests</Tabs.Tab>
       </Tabs.List>
     </Tabs>

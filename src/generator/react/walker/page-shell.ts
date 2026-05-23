@@ -16,10 +16,11 @@ import type {
   UiHelperImportIR,
   WorkflowIR,
 } from "../../../ir/loom-ir.js";
-import { camel, humanize, pascal, plural, snake } from "../../../util/naming.js";
+import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import type { LoadedPack } from "../../_packs/loader.js";
 import { routerPackageForStack } from "../../_packs/stack-runtime.js";
 import type {
+  ActionMutationState,
   FormOfState,
   OperationFormState,
   WalkContext,
@@ -30,11 +31,47 @@ import { idTargetHookVar } from "../form-helpers.js";
 import { renderApiHookImports, renderHelperImports, renderImportLines } from "./import-lines.js";
 import { indentJsx } from "./shared/args.js";
 
+/** Map each aggregate-typed param to its aggregate name, so the
+ *  walker can resolve `Action(<param>.<op>)` (the lowering env is
+ *  neutral, so the IR's receiverType is unresolved for page bodies). */
+function aggregateParamTypes(
+  params: readonly ParamIR[],
+  aggregatesByName: ReadonlyMap<string, AggregateIR>,
+): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const p of params) {
+    if (p.type.kind === "entity" && aggregatesByName.has(p.type.name)) {
+      m.set(p.name, p.type.name);
+    }
+  }
+  return m;
+}
+
+/** Function-top mutation-hook declarations + api imports for the
+ *  `Action(<instance>.<op>)` primitives recorded during the walk. */
+function renderActionMutations(
+  actionMutations: readonly ActionMutationState[],
+  srcImportPrefix: string,
+): { imports: string; decls: string } {
+  const importsByModule = new Map<string, Set<string>>();
+  for (const m of actionMutations) {
+    const mod = `${srcImportPrefix}api/${m.aggCamel}`;
+    (importsByModule.get(mod) ?? importsByModule.set(mod, new Set()).get(mod)!).add(m.hookName);
+  }
+  const imports = [...importsByModule.entries()]
+    .map(([mod, names]) => `import { ${[...names].sort().join(", ")} } from "${mod}";\n`)
+    .join("");
+  const decls = actionMutations
+    .map((m) => `  const ${m.localVar} = ${m.hookName}(${m.idExpr});\n`)
+    .join("");
+  return { imports, decls };
+}
+
 /** Render the page-file shell around a walked body — imports +
  *  function component + return.
  *
- *  Slice 11.4 — when the page has typed route params, the walker
- *  is given their names.  If the body referenced any of them
+ *  When the page has typed route params, the walker is given their
+ *  names.  If the body referenced any of them
  *  (`Heading(name)`, `Text(customerId)`), the shell adds a
  *  `useParams<{ name: string, customerId: string }>()` hook and
  *  destructures the names so the JSX expressions resolve at
@@ -48,43 +85,45 @@ export function renderCustomLayoutPage(
   pack: LoadedPack,
   params: ParamIR[] = [],
   state: StateFieldIR[] = [],
-  /** Slice 11.12 — page-level `title:` expression.  Renders into a
+  /** Page-level `title:` expression.  Renders into a
    *  `useEffect` that sets `document.title` on mount and whenever
    *  any referenced param/state changes (deps array auto-derived
    *  from the title expression's refs). */
   title: ExprIR | undefined = undefined,
-  /** Slice 11.18 — user-defined components in scope, so calls to
+  /** User-defined components in scope, so calls to
    *  them in the body emit as `<Name prop={…} />` instead of
    *  unknown-component placeholders. */
   userComponents: ReadonlyMap<string, readonly ParamIR[]> = new Map(),
-  /** Slice 11.24 — UI api parameters.  Body refs of the form
+  /** UI api parameters.  Body refs of the form
    *  `<paramName>.<aggregate>.<op>` become hook calls injected at
    *  page-top by the walker. */
   apiParams: ReadonlyArray<UiApiParamIR> = [],
-  /** Slice A4 — aggregates reachable from this UI's deployable.
+  /** Aggregates reachable from this UI's deployable.
    *  Required for `Form(of: <Agg>)` field dispatch and
    *  `IdLink(of: <Agg>)` display-field resolution. */
   aggregatesByName: ReadonlyMap<string, AggregateIR> = new Map(),
-  /** Slice A4 — owning bounded context per aggregate (drives
+  /** Owning bounded context per aggregate (drives
    *  enum / value-object resolution inside the form-field
    *  preparer). */
   bcByAggregate: ReadonlyMap<string, BoundedContextIR> = new Map(),
-  /** Slice A6 — user-authored helper imports.  Body refs whose
+  /** User-authored helper imports.  Body refs whose
    *  call name matches a helper emit as plain JS calls; the shell
    *  adds `import { <name> } from "<path>"` for each USED helper. */
   helperImports: ReadonlyArray<UiHelperImportIR> = [],
-  /** Slice C2 — relative-path prefix from the emitted page TSX
+  /** Relative-path prefix from the emitted page TSX
    *  back to the `src/` root.  Defaults to `"../"` for pages at
    *  `src/pages/<name>.tsx` (1 hop).  Scaffold-expanded pages live
    *  at `src/pages/<plural>/<arch>.tsx` (2 hops) so the caller
    *  passes `"../../"`.  Used to resolve api-hook + format-helper
    *  imports the shell emits at function-top. */
   srcImportPrefix: string = "../",
-  /** Slice A12 — workflows reachable from this UI's deployable.
+  /** Workflows reachable from this UI's deployable.
    *  Required for `Form(runs: <wf>)` field dispatch. */
   workflowsByName: ReadonlyMap<string, WorkflowIR> = new Map(),
-  /** Slice A12 — owning bounded context per workflow. */
+  /** Owning bounded context per workflow. */
   bcByWorkflow: ReadonlyMap<string, BoundedContextIR> = new Map(),
+  /** Page name → route path, for `Action`'s `then: navigate(<Page>)`. */
+  pageRoutes: ReadonlyMap<string, string> = new Map(),
 ): string {
   const paramNames = new Set(params.map((p) => p.name));
   const stateNames = new Set(state.map((s) => s.name));
@@ -98,6 +137,7 @@ export function renderCustomLayoutPage(
     usedUserComponents,
     usedApiHooks,
     formOfs,
+    actionMutations,
     usedHelpers,
   } = walkBodyToTsx(
     body,
@@ -111,8 +151,10 @@ export function renderCustomLayoutPage(
     helperImports,
     workflowsByName,
     bcByWorkflow,
+    aggregateParamTypes(params, aggregatesByName),
+    pageRoutes,
   );
-  // Slice 11.12 — render the title expression through emitExpr
+  // Render the title expression through emitExpr
   // (sharing the body's tracking state so the shell destructures
   // any param/state the title references).  Compute the deps
   // array from the title's referenced names so the effect re-runs
@@ -142,6 +184,7 @@ export function renderCustomLayoutPage(
       workflowsByName: new Map(),
       bcByWorkflow: new Map(),
       formOfs: [],
+      actionMutations: [],
       collectedTestids: new Set(),
       helperImports: new Map(),
       usedHelpers: new Set(),
@@ -159,28 +202,28 @@ export function renderCustomLayoutPage(
   const effectiveUsesState = usesState || usesStateForTitle;
 
   const mantineImport = renderImportLines(imports, srcImportPrefix);
-  // Slice 11.18 — one default-import line per user component
+  // One default-import line per user component
   // referenced in the body, sorted alphabetically.
   const userComponentImports = [...usedUserComponents]
     .sort()
     .map((name) => `import ${name} from "${srcImportPrefix}components/${name}";\n`)
     .join("");
-  // Slice 11.24 — api hook imports, grouped per `from` path so
+  // Api hook imports, grouped per `from` path so
   // multiple ops on the same aggregate dedupe to one import line
   // (matching the existing scaffold output's per-aggregate api file).
   const apiHookImports = renderApiHookImports(usedApiHooks, srcImportPrefix);
-  // Slice A6 — `import { <name> } from "<path>"` per UI-declared
+  // `import { <name> } from "<path>"` per UI-declared
   // helper actually referenced in the body.  Lines grouped per
   // path so two helpers from the same module dedupe to one
   // import line; paths sorted for deterministic output.
   const helperImportLines = renderHelperImports(usedHelpers, helperImports);
-  // Slice 11.24 — api hook declarations, emitted at page-top right
+  // Api hook declarations, emitted at page-top right
   // before the JSX return.  Each unique `<param>.<aggregate>.<op>`
   // becomes one `const <var> = use<Op><Aggregate>(args?);` line.
   const apiHookDecls = [...usedApiHooks.values()]
     .map((h) => `  const ${h.varName} = ${h.hookName}(${h.argsRendered.join(", ")});\n`)
     .join("");
-  // Slice A4 — RHF wiring when the body included `Form(of:)` /
+  // RHF wiring when the body included `Form(of:)` /
   // `Form(runs:)` / `Form(of:, op:)` primitives.  Emits the
   // mutation-hook import, per-Id<X> target `useAllX()` hooks, the
   // `useForm` declaration, and the `react-hook-form` import.  A
@@ -207,6 +250,7 @@ export function renderCustomLayoutPage(
     },
     { decls: "", moduleScope: "", usesNavigate: false },
   );
+  const actionWiring = renderActionMutations(actionMutations, srcImportPrefix);
   const hasParams = params.length > 0;
   const routerSpecifiers: string[] = [];
   if (hasParams) routerSpecifiers.push("useParams");
@@ -216,12 +260,12 @@ export function renderCustomLayoutPage(
     routerSpecifiers.length > 0
       ? `import { ${routerSpecifiers.join(", ")} } from "${routerPackageForStack(pack.manifest.stack)}";\n`
       : "";
-  // Slice 11.7 — emit the `useState` hook + per-field declaration
+  // Emit the `useState` hook + per-field declaration
   // when any state ref or `:=` mutation surfaced during the walk.
   // Pages that DECLARE state but never reference it from the body
   // skip the import so unused-var warnings stay quiet (parallel to
   // how `usedParams` shapes the useParams destructure).
-  // Slice 11.12 — `useEffect` joins the same React import line.
+  // `useEffect` joins the same React import line.
   const reactSpecifiers: string[] = [];
   if (effectiveUsesState) reactSpecifiers.push("useState");
   if (usesEffect) reactSpecifiers.push("useEffect");
@@ -243,16 +287,16 @@ export function renderCustomLayoutPage(
   const navigateLine =
     usesNavigate || form.usesNavigate ? `  const navigate = useNavigate();\n` : "";
   return `// Auto-generated.  Do not edit by hand.
-${reactImport}${reactRouterImport}${mantineImport}${apiHookImports}${helperImportLines}${userComponentImports}${form.moduleScope}
+${reactImport}${reactRouterImport}${mantineImport}${apiHookImports}${actionWiring.imports}${helperImportLines}${userComponentImports}${form.moduleScope}
 export default function ${pageName}() {
-${paramsLine}${navigateLine}${stateLines}${apiHookDecls}${form.decls}${titleEffect}  return (
+${paramsLine}${navigateLine}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${titleEffect}  return (
     ${indentJsx(tsx, "    ")}
   );
 }
 `;
 }
 
-/** Slice A4 — assemble the RHF + create-mutation wiring around a
+/** Assemble the RHF + create-mutation wiring around a
  *  `Form(of: <Agg>)` body emission.  Rendered through per-pack
  *  templates (`form-of-imports.hbs` + `form-of-decls.hbs`) so the
  *  pack controls exactly which packages it imports and how it
@@ -283,7 +327,7 @@ type FormWiring = {
 function renderFormOfWiring(
   state: FormOfState,
   pack: LoadedPack,
-  /** Slice C2 — see `renderImportLines` for prefix semantics. */
+  /** See `renderImportLines` for prefix semantics. */
   srcImportPrefix: string = "../",
 ): FormWiring {
   if (state.kind === "workflow") {
@@ -295,7 +339,7 @@ function renderFormOfWiring(
   const { agg, idTargets, useController, defaultValuesTs, onSubmitJs } = state;
   const tplCtx = {
     aggregateName: agg.name,
-    aggregateNameCamel: camel(agg.name),
+    aggregateNameCamel: lowerFirst(agg.name),
     pluralAggregateName: plural(agg.name),
     snakePluralAggregate: snake(plural(agg.name)),
     humanAgg: humanize(agg.name),
@@ -303,7 +347,7 @@ function renderFormOfWiring(
     srcImportPrefix,
     idTargets: idTargets.map((t) => ({
       name: t.name,
-      nameCamel: camel(t.name),
+      nameCamel: lowerFirst(t.name),
       namePlural: plural(t.name),
       hookVar: idTargetHookVar(t),
     })),
@@ -332,20 +376,21 @@ function renderFormOpWiring(
   pack: LoadedPack,
   srcImportPrefix: string,
 ): FormWiring {
-  const { agg, op, idTargets, useController, defaultValuesTs, fieldHtmls } = state;
-  const opPascal = pascal(op.name);
+  const { agg, op, idTargets, useController, defaultValuesTs, fieldHtmls, idExpr } = state;
+  const opPascal = upperFirst(op.name);
   const tplCtx = {
     aggregateName: agg.name,
-    aggregateNameCamel: camel(agg.name),
+    aggregateNameCamel: lowerFirst(agg.name),
     opName: op.name,
     opPascal,
-    opCamel: camel(op.name),
+    opCamel: lowerFirst(op.name),
+    idExpr,
     humanOp: humanize(op.name),
     slug: snake(plural(agg.name)),
     srcImportPrefix,
     idTargets: idTargets.map((t) => ({
       name: t.name,
-      nameCamel: camel(t.name),
+      nameCamel: lowerFirst(t.name),
       namePlural: plural(t.name),
       hookVar: idTargetHookVar(t),
     })),
@@ -368,7 +413,7 @@ function renderFormOpWiring(
   };
 }
 
-/** Slice A12 — workflow-form variant of renderFormOfWiring.  Same
+/** Workflow-form variant of renderFormOfWiring.  Same
  *  RHF wiring, but the request type / mutation hook / import
  *  source come from the workflow surface (`<Wf>Request`,
  *  `use<Wf>Workflow`, `../api/workflows`) instead of the
@@ -379,7 +424,7 @@ function renderFormRunsWiring(
   srcImportPrefix: string,
 ): FormWiring {
   const { workflow, idTargets, useController, defaultValuesTs, onSubmitJs } = state;
-  const wfPascal = pascal(workflow.name);
+  const wfPascal = upperFirst(workflow.name);
   const tplCtx = {
     workflowName: workflow.name,
     workflowPascal: wfPascal,
@@ -387,7 +432,7 @@ function renderFormRunsWiring(
     srcImportPrefix,
     idTargets: idTargets.map((t) => ({
       name: t.name,
-      nameCamel: camel(t.name),
+      nameCamel: lowerFirst(t.name),
       namePlural: plural(t.name),
       hookVar: idTargetHookVar(t),
     })),
@@ -403,7 +448,7 @@ function renderFormRunsWiring(
   };
 }
 
-/** Slice 11.18 — render one ComponentIR as a `.tsx` file: typed
+/** Render one ComponentIR as a `.tsx` file: typed
  *  Props interface, default-export function component, useState
  *  declarations from the component's own state, body walked
  *  through the same machinery as page bodies.  Components don't
@@ -417,6 +462,12 @@ export function renderUserComponentFile(
   body: ExprIR,
   pack: LoadedPack,
   userComponents: ReadonlyMap<string, readonly ParamIR[]>,
+  /** Aggregates / owning BCs reachable from this UI — needed for
+   *  `Action(<instance>.<op>)` operation + mutation-hook resolution. */
+  aggregatesByName: ReadonlyMap<string, AggregateIR> = new Map(),
+  bcByAggregate: ReadonlyMap<string, BoundedContextIR> = new Map(),
+  /** Page name → route path, for `Action`'s `then: navigate(<Page>)`. */
+  pageRoutes: ReadonlyMap<string, string> = new Map(),
 ): string {
   const paramNames = new Set(params.map((p) => p.name));
   const stateNames = new Set(state.map((s) => s.name));
@@ -429,19 +480,57 @@ export function renderUserComponentFile(
     usesNavigate,
     usedUserComponents,
     usesChildren,
-  } = walkBodyToTsx(body, pack, paramNames, stateNames, userComponents);
+    actionMutations,
+    formOfs,
+  } = walkBodyToTsx(
+    body,
+    pack,
+    paramNames,
+    stateNames,
+    userComponents,
+    [],
+    aggregatesByName,
+    bcByAggregate,
+    [],
+    new Map(),
+    new Map(),
+    aggregateParamTypes(params, aggregatesByName),
+    pageRoutes,
+  );
+  // Components live at `src/components/<Name>.tsx` (one hop to `src/`),
+  // so api imports for Action mutation hooks resolve via `../api/<agg>`.
+  const actionWiring = renderActionMutations(actionMutations, "../");
+  // Form wiring (create / workflow / operation forms) — same as the
+  // page shell: module-scope `<Op>Form` components + function-top hook
+  // decls.  Component files sit one hop from `src/`, so the api/format
+  // imports the wiring emits resolve via `../`.
+  const form = formOfs.reduce<{
+    decls: string;
+    moduleScope: string;
+    usesNavigate: boolean;
+  }>(
+    (acc, state) => {
+      const w = renderFormOfWiring(state, pack, "../");
+      return {
+        decls: acc.decls + w.decls,
+        moduleScope: acc.moduleScope + w.moduleScope,
+        usesNavigate: acc.usesNavigate || w.usesNavigate,
+      };
+    },
+    { decls: "", moduleScope: "", usesNavigate: false },
+  );
   const mantineImport = renderImportLines(imports);
   // Components don't have routes — useNavigate/Link still legal in
   // a component subtree (e.g. Button(to:) inside).
   const routerSpecifiers: string[] = [];
-  if (usesNavigate) routerSpecifiers.push("useNavigate");
+  if (usesNavigate || form.usesNavigate) routerSpecifiers.push("useNavigate");
   if (usesRouterLink) routerSpecifiers.push("Link as RouterLink");
   const reactRouterImport =
     routerSpecifiers.length > 0
       ? `import { ${routerSpecifiers.join(", ")} } from "${routerPackageForStack(pack.manifest.stack)}";\n`
       : "";
   const reactImport = usesState ? `import { useState } from "react";\n` : "";
-  // Slice 11.19 — components that reference Slot() get a
+  // Components that reference Slot() get a
   // `children` prop on top of their declared params.  React's
   // type is imported lazily.
   const reactTypesImport = usesChildren ? `import type { ReactNode } from "react";\n` : "";
@@ -450,16 +539,32 @@ export function renderUserComponentFile(
     .map((n) => `import ${n} from "./${n}";\n`)
     .join("");
   // Props interface — every declared param becomes a typed field;
-  // Slot()-using components also get a `children` field.
-  const propLines = params.map((p) => `  ${p.name}: ${typeRefAsTsString(p)};`);
+  // Slot()-using components also get a `children` field.  An
+  // aggregate-typed param (`order: Order`) gets the aggregate's wire
+  // DTO type (`OrderResponse`, imported from its api module) so member
+  // accesses like `order.id` / `order.customerId` typecheck; other
+  // params fall back to the route-param `string` shape.
+  const dtoImports = new Map<string, string>(); // DTO type → api module
+  const propType = (p: ParamIR): string => {
+    if (p.type.kind === "entity" && aggregatesByName.has(p.type.name)) {
+      dtoImports.set(`${p.type.name}Response`, `../api/${lowerFirst(p.type.name)}`);
+      return `${p.type.name}Response`;
+    }
+    return typeRefAsTsString(p);
+  };
+  const propLines = params.map((p) => `  ${p.name}: ${propType(p)};`);
   if (usesChildren) propLines.push(`  children?: ReactNode;`);
+  const dtoImportLines = [...dtoImports.entries()]
+    .map(([type, mod]) => `import type { ${type} } from "${mod}";\n`)
+    .join("");
   const propsType =
     propLines.length > 0 ? `\nexport interface ${name}Props {\n${propLines.join("\n")}\n}\n` : "";
   const destructureNames = params.map((p) => p.name);
   if (usesChildren) destructureNames.push("children");
   const propDestructure =
     destructureNames.length > 0 ? `{ ${destructureNames.join(", ")} }: ${name}Props` : "";
-  const navigateLine = usesNavigate ? `  const navigate = useNavigate();\n` : "";
+  const navigateLine =
+    usesNavigate || form.usesNavigate ? `  const navigate = useNavigate();\n` : "";
   const stateLines = usesState ? state.map((f) => `  ${renderUseState(f, pack)}\n`).join("") : "";
   // Suppress used-prop warnings — params declared but unused at
   // walker-emit time (e.g. typed pass-through to a child component
@@ -467,16 +572,16 @@ export function renderUserComponentFile(
   // them with a `void` block when none made it into `tsx`.
   void usedParams;
   return `// Auto-generated.  Do not edit by hand.
-${reactImport}${reactTypesImport}${reactRouterImport}${mantineImport}${userComponentImports}${propsType}
+${reactImport}${reactTypesImport}${reactRouterImport}${mantineImport}${dtoImportLines}${actionWiring.imports}${userComponentImports}${propsType}${form.moduleScope}
 export default function ${name}(${propDestructure}) {
-${navigateLine}${stateLines}  return (
+${navigateLine}${actionWiring.decls}${form.decls}${stateLines}  return (
     ${indentJsx(tsx, "    ")}
   );
 }
 `;
 }
 
-/** Slice 11.12 — collect every name referenced in an expression
+/** Collect every name referenced in an expression
  *  (via `ref` nodes), used to derive the deps array for the
  *  title's `useEffect`.  Walks binary / unary / call subtrees. */
 function collectExprRefs(expr: ExprIR, out: Set<string>): void {
@@ -499,7 +604,7 @@ function collectExprRefs(expr: ExprIR, out: Set<string>): void {
   }
 }
 
-/** Slice 11.7 — render one `state {}` field as a React `useState`
+/** Render one `state {}` field as a React `useState`
  *  declaration: `const [name, setName] = useState<T>(init);`.  Init
  *  comes from the field's optional `=` initializer; absent
  *  initializers fall back to the type's zero value. */
@@ -539,6 +644,7 @@ function renderInitExpr(expr: ExprIR, pack: LoadedPack): string {
     workflowsByName: new Map(),
     bcByWorkflow: new Map(),
     formOfs: [],
+    actionMutations: [],
     collectedTestids: new Set(),
     helperImports: new Map(),
     usedHelpers: new Set(),
@@ -594,11 +700,11 @@ function zeroValueForType(type: TypeIR): string {
 }
 
 /** Render a `ParamIR` (route param) as the TS type the
- *  `useParams<{...}>()` generic should declare for it.  Slice 11.4
- *  v0 — every route param is `string` at the React-Router level;
- *  the original Loom type intent (e.g. `Id<Order>`) is preserved
- *  in the IR but doesn't affect the typed-useParams shape today.
- *  A future slice can layer `z.coerce` or similar at the page-
+ *  `useParams<{...}>()` generic should declare for it.  Every route
+ *  param is `string` at the React-Router level; the original Loom
+ *  type intent (e.g. `Id<Order>`) is preserved in the IR but doesn't
+ *  affect the typed-useParams shape today.
+ *  A future change can layer `z.coerce` or similar at the page-
  *  shell to convert to the declared types. */
 function typeRefAsTsString(p: ParamIR): string {
   void p;

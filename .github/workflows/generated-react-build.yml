@@ -64,9 +64,11 @@ jobs:
           - web/src/examples/inventory-system.ddd
           - web/src/examples/provenance-system.ddd
           - web/src/examples/sales-system.ddd
+          - web/src/examples/storefront-system.ddd
           - web/src/examples/storybook-mantine.ddd
           - web/src/examples/storybook-shadcn.ddd
           - web/src/examples/storybook-components.ddd
+          - web/src/examples/action-showcase.ddd
         # Phase 0 of pack versioning: shard keys carry the explicit
         # `family@version` so each cell tests a specific pack version,
         # not "whatever BUILTIN_PACK_LATEST resolves to today".  Phase

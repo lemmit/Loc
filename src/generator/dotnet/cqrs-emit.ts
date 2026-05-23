@@ -6,7 +6,7 @@ import type {
   TypeIR,
 } from "../../ir/loom-ir.js";
 import { findUsesCurrentUser, operationUsesCurrentUser } from "../../ir/loom-ir.js";
-import { pascal, plural } from "../../util/naming.js";
+import { plural, upperFirst } from "../../util/naming.js";
 import {
   aggregateResponseParams,
   csIdValueClrType,
@@ -82,7 +82,7 @@ function emitResponseDtos(
     records.push({
       name: `${vo.name}Response`,
       params: vo.fields
-        .map((f) => `${wireType(f.type, ctx, "response")} ${pascal(f.name)}`)
+        .map((f) => `${wireType(f.type, ctx, "response")} ${upperFirst(f.name)}`)
         .join(", "),
     });
   }
@@ -122,7 +122,7 @@ function emitRequestDtos(
     records.push({
       name: `${vo.name}Request`,
       params: vo.fields
-        .map((f) => `${wireType(f.type, ctx, "request")} ${pascal(f.name)}`)
+        .map((f) => `${wireType(f.type, ctx, "request")} ${upperFirst(f.name)}`)
         .join(", "),
     });
   }
@@ -130,14 +130,14 @@ function emitRequestDtos(
   records.push({
     name: `Create${agg.name}Request`,
     params: requiredFields
-      .map((f) => `${wireType(f.type, ctx, "request")} ${pascal(f.name)}`)
+      .map((f) => `${wireType(f.type, ctx, "request")} ${upperFirst(f.name)}`)
       .join(", "),
   });
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
     records.push({
-      name: `${pascal(op.name)}Request`,
+      name: `${upperFirst(op.name)}Request`,
       params: op.params
-        .map((p) => `${wireType(p.type, ctx, "request")} ${pascal(p.name)}`)
+        .map((p) => `${wireType(p.type, ctx, "request")} ${upperFirst(p.name)}`)
         .join(", "),
     });
   }
@@ -165,7 +165,7 @@ function emitCreateCommandAndHandler(
       aggName: agg.name,
       commandName: `Create${agg.name}Command`,
       commandParams: requiredFields
-        .map((f) => `${renderCsType(f.type)} ${pascal(f.name)}`)
+        .map((f) => `${renderCsType(f.type)} ${upperFirst(f.name)}`)
         .join(", "),
       returnType: `${agg.name}Id`,
     }),
@@ -180,7 +180,7 @@ function emitCreateCommandAndHandler(
       returnType: `${agg.name}Id`,
       body:
         `        var aggregate = ${agg.name}.Create(${requiredFields
-          .map((f) => `cmd.${pascal(f.name)}`)
+          .map((f) => `cmd.${upperFirst(f.name)}`)
           .join(", ")});\n` +
         `        await _repo.SaveAsync(aggregate, ct);\n` +
         `        return aggregate.Id;\n`,
@@ -212,14 +212,14 @@ function emitOperationCommandsAndHandlers(
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
     const params = [
       `${agg.name}Id Id`,
-      ...op.params.map((p) => `${renderCsType(p.type)} ${pascal(p.name)}`),
+      ...op.params.map((p) => `${renderCsType(p.type)} ${upperFirst(p.name)}`),
     ].join(", ");
     out.set(
-      `Application/${aggFolder}/Commands/${pascal(op.name)}Command.cs`,
+      `Application/${aggFolder}/Commands/${upperFirst(op.name)}Command.cs`,
       renderCommand({
         ns,
         aggName: agg.name,
-        commandName: `${pascal(op.name)}Command`,
+        commandName: `${upperFirst(op.name)}Command`,
         commandParams: params,
       }),
     );
@@ -230,7 +230,7 @@ function emitOperationCommandsAndHandlers(
     const opValidator = renderOperationValidator(agg, op, ns);
     if (opValidator.content) {
       out.set(
-        `Application/${aggFolder}/Commands/${pascal(op.name)}CommandValidator.cs`,
+        `Application/${aggFolder}/Commands/${upperFirst(op.name)}CommandValidator.cs`,
         opValidator.content,
       );
     }
@@ -240,15 +240,15 @@ function emitOperationCommandsAndHandlers(
     // its `User` into the call.  Any non-auth-aware op stays
     // untouched — no DI changes, no handler-ctor surface widening.
     const usesUser = operationUsesCurrentUser(op);
-    const baseCallArgs = op.params.map((p) => `cmd.${pascal(p.name)}`);
+    const baseCallArgs = op.params.map((p) => `cmd.${upperFirst(p.name)}`);
     const callArgs = (usesUser ? [...baseCallArgs, "_currentUser.User"] : baseCallArgs).join(", ");
     const userExtraDeps = usesUser ? [{ type: "ICurrentUserAccessor", field: "_currentUser" }] : [];
     const userExtraUsings = usesUser ? [`${ns}.Auth`] : [];
     if (op.extern) {
       // Emit the user-implementable handler interface alongside the
       // auto Mediator handler, then dispatch through it.
-      const ifaceName = `I${pascal(op.name)}${agg.name}Handler`;
-      const reqName = `${pascal(op.name)}Request`;
+      const ifaceName = `I${upperFirst(op.name)}${agg.name}Handler`;
+      const reqName = `${upperFirst(op.name)}Request`;
       // Request record is wire-typed (Id<X> → Guid, enum → string,
       // datetime → string, value-object → <VO>Request) but `cmd.X`
       // is domain-typed.  Convert each param via
@@ -256,7 +256,7 @@ function emitOperationCommandsAndHandlers(
       // Without this, a parameterized extern auto handler fails to
       // compile (Cannot convert from <Domain> to <Wire>).
       const reqArgs = op.params
-        .map((p) => domainToRequestExpr(`cmd.${pascal(p.name)}`, p.type, ctx))
+        .map((p) => domainToRequestExpr(`cmd.${upperFirst(p.name)}`, p.type, ctx))
         .join(", ");
       out.set(
         `Application/${aggFolder}/Handlers/${ifaceName}.cs`,
@@ -268,12 +268,12 @@ function emitOperationCommandsAndHandlers(
         }),
       );
       out.set(
-        `Application/${aggFolder}/Commands/${pascal(op.name)}Handler.cs`,
+        `Application/${aggFolder}/Commands/${upperFirst(op.name)}Handler.cs`,
         renderCommandHandler({
           ns,
           aggName: agg.name,
-          handlerName: `${pascal(op.name)}Handler`,
-          commandName: `${pascal(op.name)}Command`,
+          handlerName: `${upperFirst(op.name)}Handler`,
+          commandName: `${upperFirst(op.name)}Command`,
           extraDeps: [{ type: ifaceName, field: "_user" }, ...userExtraDeps],
           extraUsings: [`${ns}.Application.${plural(agg.name)}.Handlers`, ...userExtraUsings],
           // Wrap the user's HandleAsync in try/catch so any
@@ -285,7 +285,7 @@ function emitOperationCommandsAndHandlers(
           body:
             `        var aggregate = await _repo.GetByIdAsync(cmd.Id, ct)\n` +
             `            ?? throw new AggregateNotFoundException($"${agg.name} {cmd.Id} not found");\n` +
-            `        aggregate.Check${pascal(op.name)}(${callArgs});\n` +
+            `        aggregate.Check${upperFirst(op.name)}(${callArgs});\n` +
             `        var request = new ${reqName}(${reqArgs});\n` +
             `        try\n` +
             `        {\n` +
@@ -307,18 +307,18 @@ function emitOperationCommandsAndHandlers(
       continue;
     }
     out.set(
-      `Application/${aggFolder}/Commands/${pascal(op.name)}Handler.cs`,
+      `Application/${aggFolder}/Commands/${upperFirst(op.name)}Handler.cs`,
       renderCommandHandler({
         ns,
         aggName: agg.name,
-        handlerName: `${pascal(op.name)}Handler`,
-        commandName: `${pascal(op.name)}Command`,
+        handlerName: `${upperFirst(op.name)}Handler`,
+        commandName: `${upperFirst(op.name)}Command`,
         extraDeps: userExtraDeps,
         extraUsings: userExtraUsings,
         body:
           `        var aggregate = await _repo.GetByIdAsync(cmd.Id, ct)\n` +
           `            ?? throw new AggregateNotFoundException($"${agg.name} {cmd.Id} not found");\n` +
-          `        aggregate.${pascal(op.name)}(${callArgs});\n` +
+          `        aggregate.${upperFirst(op.name)}(${callArgs});\n` +
           `        await _repo.SaveAsync(aggregate, ct);\n` +
           `        return Unit.Value;\n`,
       }),
@@ -412,22 +412,24 @@ function emitFindQueriesAndHandlers(
     const queryReturn = renderResponseReturnType(find.returnType, agg);
     const usesUser = findUsesCurrentUser(find);
     out.set(
-      `Application/${aggFolder}/Queries/${pascal(find.name)}Query.cs`,
+      `Application/${aggFolder}/Queries/${upperFirst(find.name)}Query.cs`,
       renderQuery({
         ns,
         aggName: agg.name,
-        queryName: `${pascal(find.name)}Query`,
-        queryParams: find.params.map((p) => `${renderCsType(p.type)} ${pascal(p.name)}`).join(", "),
+        queryName: `${upperFirst(find.name)}Query`,
+        queryParams: find.params
+          .map((p) => `${renderCsType(p.type)} ${upperFirst(p.name)}`)
+          .join(", "),
         returnType: queryReturn,
       }),
     );
     out.set(
-      `Application/${aggFolder}/Queries/${pascal(find.name)}Handler.cs`,
+      `Application/${aggFolder}/Queries/${upperFirst(find.name)}Handler.cs`,
       renderQueryHandler({
         ns,
         aggName: agg.name,
-        handlerName: `${pascal(find.name)}Handler`,
-        queryName: `${pascal(find.name)}Query`,
+        handlerName: `${upperFirst(find.name)}Handler`,
+        queryName: `${upperFirst(find.name)}Query`,
         returnType: queryReturn,
         body: buildFindHandlerBody(find, agg, ctx, usesUser),
         extraDeps: usesUser ? [{ type: "ICurrentUserAccessor", field: "_currentUser" }] : [],
@@ -443,7 +445,7 @@ function buildFindHandlerBody(
   ctx: BoundedContextIR,
   usesUser: boolean = false,
 ): string {
-  const baseArgs = find.params.map((p) => `q.${pascal(p.name)}`);
+  const baseArgs = find.params.map((p) => `q.${upperFirst(p.name)}`);
   const allArgs = usesUser ? [...baseArgs, "_currentUser.User"] : baseArgs;
   // The repository signature ends with `CancellationToken ct`; drop the
   // separator when there are no domain params, so the auto-included
@@ -452,18 +454,18 @@ function buildFindHandlerBody(
   const callArgs = argList.length > 0 ? `${argList}, ct` : `ct`;
   if (find.returnType.kind === "array") {
     return (
-      `        var domain = await _repo.${pascal(find.name)}(${callArgs});\n` +
+      `        var domain = await _repo.${upperFirst(find.name)}(${callArgs});\n` +
       `        return domain.Select(d => ${projectEntityExpr("d", agg, ctx)}).ToList();\n`
     );
   }
   if (find.returnType.kind === "optional") {
     return (
-      `        var domain = await _repo.${pascal(find.name)}(${callArgs});\n` +
+      `        var domain = await _repo.${upperFirst(find.name)}(${callArgs});\n` +
       `        return domain is null ? null : ${projectEntityExpr("domain", agg, ctx)};\n`
     );
   }
   return (
-    `        var domain = await _repo.${pascal(find.name)}(${callArgs});\n` +
+    `        var domain = await _repo.${upperFirst(find.name)}(${callArgs});\n` +
     `        return ${projectEntityExpr("domain", agg, ctx)};\n`
   );
 }
@@ -492,18 +494,18 @@ function emitController(
   routePrefix?: string,
 ): void {
   out.set(
-    `Api/${pascal(plural(agg.name))}Controller.cs`,
+    `Api/${upperFirst(plural(agg.name))}Controller.cs`,
     renderController(agg, repo, ns, {
       idClrType: csIdValueClrType(agg.idValueType),
       createCmdArgs: requiredFields.map((f) =>
-        wireToCommandArgument(`request.${pascal(f.name)}`, f.type, ctx),
+        wireToCommandArgument(`request.${upperFirst(f.name)}`, f.type, ctx),
       ),
       publicOps: agg.operations
         .filter((o) => o.visibility === "public")
         .map((op) => ({
           name: op.name,
           cmdArgs: op.params.map((p) =>
-            wireToCommandArgument(`request.${pascal(p.name)}`, p.type, ctx),
+            wireToCommandArgument(`request.${upperFirst(p.name)}`, p.type, ctx),
           ),
         })),
       finds: (repo?.finds ?? []).map((find) => ({

@@ -10,15 +10,15 @@ import type { PlatformSurface } from "./surface.js";
 // Single source of truth for which platforms exist + how the system
 // orchestrator dispatches over them.
 //
-// Backend-packages B0 (see docs/backend-packages.md): the registry
-// now resolves a backend by `family@version`, with a defaults map
+// Backend packages (see docs/backend-packages.md): the registry
+// resolves a backend by `family@version`, with a defaults map
 // so a bareword `platform: hono` keeps resolving to a concrete
 // version.  Today every backend family has exactly ONE registered
 // version, aliased to the same surface object that the bareword
 // returned before — so this is byte-identical: every resolution
-// path yields the identical `PlatformSurface` instance it did
-// pre-B0.  B1 wires the grammar/lowering so `platform: "hono@v4"`
-// can be pinned; B3+ introduce a second version per family.
+// path yields the identical `PlatformSurface` instance it always
+// has.  The grammar/lowering already wires `platform: "hono@v4"`
+// pins; a second version per family can be added later.
 //
 // Adding a new platform: write the surface implementation, register
 // it in `platforms` (+ `versionedPlatforms` if it's a backend
@@ -29,11 +29,10 @@ const platforms: Record<Platform, PlatformSurface> = {
   dotnet: dotnetPlatform,
   hono: honoPlatform,
   react: reactPlatform,
-  // `static` is the page-metamodel's UI-only deployable kind (Slice 1
-  // grammar / Slice 2 IR).  In v0 it shares the React surface — the
-  // page-emitter (Slice 5) hasn't landed yet, so any deployable
-  // declared as `platform: static` lowers through the same code path
-  // a `platform: react` deployable does.  Slice 8 finishes the swap.
+  // `static` is the page-metamodel's UI-only deployable kind.  It
+  // shares the React surface — a deployable declared as
+  // `platform: static` lowers through the same code path a
+  // `platform: react` deployable does.
   static: reactPlatform,
   // Fullstack Elixir/Ash + Phoenix LiveView platform.  Owns its own
   // database, mounts a `ui:`, and (when populated) `serves:` an
@@ -58,12 +57,12 @@ export const BUILTIN_PLATFORM_LATEST = {
 export type BackendFamily = keyof typeof BUILTIN_PLATFORM_LATEST;
 
 // ---------------------------------------------------------------------------
-// packaging-split P0 (docs/packaging-split.md) — backends are
+// Backend discovery (docs/packaging-split.md) — backends are
 // resolved through a *discovery* seam keyed by their manifest, not a
-// hardcoded map.  P0 keeps everything in-tree and returns the exact
-// same surfaces, so `versionedPlatforms` is now *derived* from the
+// hardcoded map.  Everything currently stays in-tree and returns the
+// exact same surfaces, so `versionedPlatforms` is *derived* from the
 // discovered set: byte-identical.  The source is injectable so the
-// playground (P1) can back it with a VFS impl instead of fs /
+// playground can back it with a VFS impl instead of fs /
 // node_modules, exactly as it swaps `loader-fs`→`loader-vfs`.
 // ---------------------------------------------------------------------------
 
@@ -75,7 +74,7 @@ export interface DiscoveredBackend {
 // hono@v4 ships a real co-located manifest (it is the only backend
 // already restructured into a versioned package dir).  dotnet@v8 /
 // phoenixLiveView@v1 are still flat `src/platform/<name>.ts`; their
-// manifests are synthesised here until they are packaged (P2), so
+// manifests are synthesised here until they are packaged, so
 // the discovered set — and thus every resolution — is unchanged.
 const inTreeBackends: DiscoveredBackend[] = [
   { manifest: honoV4Manifest, surface: honoPlatform },
@@ -102,7 +101,7 @@ const inTreeBackends: DiscoveredBackend[] = [
 let backendSource: () => DiscoveredBackend[] = () => inTreeBackends;
 
 /** Swap the backend discovery source.  The playground injects a
- *  VFS-backed implementation here (P1); tests use it to assert the
+ *  VFS-backed implementation here; tests use it to assert the
  *  resolver is source-agnostic. */
 export function setBackendSource(src: () => DiscoveredBackend[]): void {
   backendSource = src;
@@ -115,7 +114,7 @@ export function resetBackendSource(): void {
 
 /** The in-tree backend set the registry was bootstrapped with —
  *  i.e. the entries `versionedPlatforms` originally aliased.  fs-
- *  backed discovery (P3, see `fs-discovery.ts`) composes against
+ *  backed discovery (see `fs-discovery.ts`) composes against
  *  this so families/versions not yet packaged as npm workspace
  *  modules still resolve from in-tree code.  Returned as
  *  `readonly` so callers can't mutate the source-of-truth array. */
@@ -146,14 +145,14 @@ export interface ParsedBuiltinPlatformRef {
   family: BackendFamily;
   version: string;
   /** `${family}@${version}` — the key into `versionedPlatforms`
-   *  and the value lowering qualifies a bareword to in B1. */
+   *  and the value lowering qualifies a bareword to. */
   qualified: string;
 }
 
 /** Parse a `platform:` value.  Mirrors `parseBuiltinDesignRef`
  *  (builtin-formats.ts): bareword backend → default version;
  *  `family@version` → that pin; frontend / unknown → `null`.
- *  Pure; exported so B1's validator + lowering share one
+ *  Pure; exported so the validator + lowering share one
  *  resolution authority. */
 export function parseBuiltinPlatformRef(s: string): ParsedBuiltinPlatformRef | null {
   const at = s.indexOf("@");
@@ -167,7 +166,7 @@ export function parseBuiltinPlatformRef(s: string): ParsedBuiltinPlatformRef | n
  *  pinned (`hono@v4`) — to its surface.  Backend barewords route
  *  through `BUILTIN_PLATFORM_LATEST`; everything else (frontend,
  *  unknown) reads `platforms` directly.  Every path returns the
- *  same surface instance pre-B0 callers got. */
+ *  same surface instance callers have always got. */
 function resolvePlatformRef(ref: string): PlatformSurface {
   const parsed = parseBuiltinPlatformRef(ref);
   if (parsed) {

@@ -116,7 +116,7 @@ export function TestsBody({
   const [uiCases, setUiCases] = useState<UiTestCase[] | null>(null);
   const [discovering, setDiscovering] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [results, setResults] = useState<Record<string, TestResult>>({});
+  const { testResults: results, setTestResults: setResults } = ctx;
   const [running, setRunning] = useState<string | null>(null);
 
   const hasAny = unitFiles.length > 0 || !!apiFile || !!uiFile;
@@ -236,7 +236,7 @@ export function TestsBody({
       // (UI ExecTestRefs carry `suite: "<System> e2e"`).
       const uiSuite =
         traceability?.index.execTests.find((t) => t.kind === "ui")?.suite ?? "";
-      merge("ui", await runUiTests(cases, page, uiSuite));
+      merge("ui", await runUiTests(cases, page, uiSuite, ctx.getAppLog));
     });
   };
 
@@ -621,12 +621,17 @@ function downloadProofReport(
           .join("")
       : "";
 
+  const logText = (r: TestResult): string =>
+    (r.logs ?? [])
+      .map((l) => (l.level === "log" ? l.text : `[${l.level}] ${l.text}`))
+      .join("\n");
+
   const uiResults = Object.values(results).filter((r) => r.screenshot);
   const testRows = uiResults
-    .map(
-      (r) =>
-        `<section class="test"><h4>${escHtml(r.name)} <span class="v ${r.status === "pass" ? "VERIFIED" : "FAILING"}">${r.status}</span></h4>${r.error ? `<pre>${escHtml(r.error)}</pre>` : ""}<img src="${r.screenshot}" alt="${escHtml(r.name)}"/></section>`,
-    )
+    .map((r) => {
+      const logs = logText(r);
+      return `<section class="test"><h4>${escHtml(r.name)} <span class="v ${r.status === "pass" ? "VERIFIED" : "FAILING"}">${r.status}</span></h4>${r.error ? `<pre>${escHtml(r.error)}</pre>` : ""}${logs ? `<pre class="logs">${escHtml(logs)}</pre>` : ""}<img src="${r.screenshot}" alt="${escHtml(r.name)}"/></section>`;
+    })
     .join("");
 
   const manifest = {
@@ -644,7 +649,12 @@ function downloadProofReport(
             })),
           }))
         : [],
-    tests: uiResults.map((r) => ({ suite: r.suite, name: r.name, status: r.status })),
+    tests: uiResults.map((r) => ({
+      suite: r.suite,
+      name: r.name,
+      status: r.status,
+      logs: r.logs ?? [],
+    })),
   };
 
   const html = `<!doctype html>

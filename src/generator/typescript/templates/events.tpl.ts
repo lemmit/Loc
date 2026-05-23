@@ -10,9 +10,11 @@ import { renderTsType } from "../render-expr.js";
 export function renderEvents(ctx: BoundedContextIR): string {
   const voImports = new Set<string>();
   const enumImports = new Set<string>();
+  let usesIds = false;
   const visit = (t: TypeIR): void => {
     if (t.kind === "valueobject") voImports.add(t.name);
     if (t.kind === "enum") enumImports.add(t.name);
+    if (t.kind === "id") usesIds = true;
     if (t.kind === "array") visit(t.element);
     if (t.kind === "optional") visit(t.inner);
   };
@@ -24,7 +26,7 @@ export function renderEvents(ctx: BoundedContextIR): string {
   return (
     lines(
       "// Auto-generated.",
-      'import type * as Ids from "./ids";',
+      usesIds ? 'import type * as Ids from "./ids";' : null,
       voList.length > 0 ? `import type { ${voList.join(", ")} } from "./value-objects";` : null,
       enumList.length > 0 ? `import type { ${enumList.join(", ")} } from "./value-objects";` : null,
       ...ctx.events.flatMap(renderEvent),

@@ -1,7 +1,7 @@
 import type { AggregateIR, EntityPartIR } from "../../../ir/loom-ir.js";
 import { operationUsesCurrentUser } from "../../../ir/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
-import { pascal, plural } from "../../../util/naming.js";
+import { plural, upperFirst } from "../../../util/naming.js";
 import { csNewIdValue, renderCsExpr, renderCsType } from "../render-expr.js";
 import { renderCsStatements } from "../render-stmt.js";
 
@@ -44,18 +44,18 @@ export function renderEntity(
   for (const f of entity.fields) {
     const def = f.optional ? " = default;" : " = default!;";
     propLines.push(
-      `    public ${renderCsType(f.type)} ${pascal(f.name)} { get; ${setterVisibility} set; }${def}`,
+      `    public ${renderCsType(f.type)} ${upperFirst(f.name)} { get; ${setterVisibility} set; }${def}`,
     );
   }
   for (const c of entity.contains) {
     if (c.collection) {
       propLines.push(`    private readonly List<${c.partName}> _${c.name} = new();`);
       propLines.push(
-        `    public IReadOnlyList<${c.partName}> ${pascal(c.name)} => _${c.name}.AsReadOnly();`,
+        `    public IReadOnlyList<${c.partName}> ${upperFirst(c.name)} => _${c.name}.AsReadOnly();`,
       );
     } else {
       propLines.push(
-        `    public ${c.partName} ${pascal(c.name)} { get; private set; } = default!;`,
+        `    public ${c.partName} ${upperFirst(c.name)} { get; private set; } = default!;`,
       );
     }
   }
@@ -74,16 +74,16 @@ export function renderEntity(
   ctorLines.push("        Id = default!;");
   if (!isRoot) ctorLines.push("        ParentId = default!;");
   for (const f of entity.fields) {
-    ctorLines.push(`        ${pascal(f.name)} = default!;`);
+    ctorLines.push(`        ${upperFirst(f.name)} = default!;`);
   }
   ctorLines.push("    }");
 
   const derivedLines = entity.derived.map(
-    (d) => `    public ${renderCsType(d.type)} ${pascal(d.name)} => ${renderCsExpr(d.expr)};`,
+    (d) => `    public ${renderCsType(d.type)} ${upperFirst(d.name)} => ${renderCsExpr(d.expr)};`,
   );
   const fnLines = entity.functions.map((fn) => {
     const params = fn.params.map((p) => `${renderCsType(p.type)} ${p.name}`).join(", ");
-    return `    private ${renderCsType(fn.returnType)} ${pascal(fn.name)}(${params}) => ${renderCsExpr(fn.body)};`;
+    return `    private ${renderCsType(fn.returnType)} ${upperFirst(fn.name)}(${params}) => ${renderCsExpr(fn.body)};`;
   });
 
   const opLines: string[] = [];
@@ -103,7 +103,7 @@ export function renderEntity(
       // to the user-supplied handler, then runs AssertInvariants.  No
       // `<Pascal>` method exists on the aggregate; the user owns the
       // business decision.
-      opLines.push(`    public void Check${pascal(op.name)}(${params})`);
+      opLines.push(`    public void Check${upperFirst(op.name)}(${params})`);
       opLines.push("    {");
       const body = renderCsStatements(op.statements);
       if (body.length > 0) opLines.push(body);
@@ -112,7 +112,7 @@ export function renderEntity(
       continue;
     }
     const visibility = op.visibility === "public" ? "public" : "private";
-    opLines.push(`    ${visibility} void ${pascal(op.name)}(${params})`);
+    opLines.push(`    ${visibility} void ${upperFirst(op.name)}(${params})`);
     opLines.push("    {");
     const body = renderCsStatements(op.statements);
     if (body.length > 0) opLines.push(body);
@@ -162,7 +162,7 @@ export function renderEntity(
   }
   for (const f of entity.fields) {
     stateLines.push(
-      `        public ${renderCsType(f.type)} ${pascal(f.name)} { get; init; } = default!;`,
+      `        public ${renderCsType(f.type)} ${upperFirst(f.name)} { get; init; } = default!;`,
     );
   }
   stateLines.push("    }");
@@ -174,7 +174,7 @@ export function renderEntity(
   createInternalLines.push("        e.Id = s.Id;");
   if (!isRoot) createInternalLines.push("        e.ParentId = s.ParentId;");
   for (const f of entity.fields) {
-    createInternalLines.push(`        e.${pascal(f.name)} = s.${pascal(f.name)};`);
+    createInternalLines.push(`        e.${upperFirst(f.name)} = s.${upperFirst(f.name)};`);
   }
   createInternalLines.push("        e.AssertInvariants();");
   createInternalLines.push("        return e;");
@@ -188,7 +188,7 @@ export function renderEntity(
         "    {",
         `        var e = new ${entity.name}();`,
         `        e.Id = new ${entity.name}Id(${csNewIdValue(idValueType)});`,
-        ...requiredFields.map((f) => `        e.${pascal(f.name)} = ${f.name};`),
+        ...requiredFields.map((f) => `        e.${upperFirst(f.name)} = ${f.name};`),
         "        e.AssertInvariants();",
         "        return e;",
         "    }",

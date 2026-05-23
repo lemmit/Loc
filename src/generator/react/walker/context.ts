@@ -30,8 +30,8 @@ export function addMantineImport(ctx: WalkContext, ...names: string[]): void {
   addImport(ctx, "@mantine/core", ...names);
 }
 
-/** Slice post-D2 — register the imports a non-rendered primitive
- *  needs.  Used by `Form(of:)` / `Form(runs:)` emission: the form-
+/** Register the imports a non-rendered primitive needs.  Used by
+ *  `Form(of:)` / `Form(runs:)` emission: the form-
  *  shell JSX uses `<Stack>` / `<Button>` / `<Group>` (Mantine) /
  *  `<div className="...">` / `<Button>` (shadcn) etc., but the
  *  walker emits them as literal JSX (not via `renderPrimitive`),
@@ -42,7 +42,7 @@ export function addImportsForPrimitive(ctx: WalkContext, name: string): void {
   for (const spec of specs) addImport(ctx, spec.from, ...spec.named);
 }
 
-/** Slice post-D2 — walk a `FormFieldVM` tree and register each
+/** Walk a `FormFieldVM` tree and register each
  *  child template's imports via `imports.field-input-*` on the
  *  pack manifest.  This replaces the previous Mantine-component-
  *  name → primitive mapping: each field-input-* template is its

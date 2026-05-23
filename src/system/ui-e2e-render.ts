@@ -11,7 +11,8 @@ import type {
   ViewIR,
   WorkflowIR,
 } from "../ir/loom-ir.js";
-import { camel, plural, snake } from "../util/naming.js";
+import { lowerFirst, plural, snake, upperFirst } from "../util/naming.js";
+import { intrinsicMatcherSig } from "../language/type-system.js";
 import { renderExpectStmt } from "./expect-stmt.js";
 
 // ---------------------------------------------------------------------------
@@ -72,17 +73,20 @@ export function renderUIE2EFile(
 
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
-  lines.push(`import { test, expect } from "@playwright/test";`);
+  // `./fixtures` re-exports Playwright's `test`/`expect` with an auto
+  // console-capture fixture that attaches the browser console + page
+  // errors to the report on failure.
+  lines.push(`import { test, expect } from "./fixtures";`);
   for (const a of aggregates) {
-    const cap = upper(a.name);
-    lines.push(`import { ${cap}ListPage, ${cap}DetailPage } from "./pages/${camel(a.name)}";`);
+    const cap = upperFirst(a.name);
+    lines.push(`import { ${cap}ListPage, ${cap}DetailPage } from "./pages/${lowerFirst(a.name)}";`);
   }
   for (const wf of workflows) {
-    const cap = upper(wf.name);
+    const cap = upperFirst(wf.name);
     lines.push(`import { ${cap}WorkflowPage } from "./pages/workflows/${snake(wf.name)}";`);
   }
   for (const v of views) {
-    const cap = upper(v.name);
+    const cap = upperFirst(v.name);
     lines.push(`import { ${cap}ViewPage } from "./pages/views/${snake(v.name)}";`);
   }
   lines.push("");
@@ -242,7 +246,7 @@ function walkAllExprs(tests: TestE2EIR[], visit: (e: ExprIR) => void): void {
 function findWorkflowByName(name: string, contexts: BoundedContextIR[]): WorkflowIR | undefined {
   for (const c of contexts) {
     for (const w of c.workflows) {
-      if (camel(w.name) === name) return w;
+      if (lowerFirst(w.name) === name) return w;
       if (snake(w.name) === name) return w;
     }
   }
@@ -252,7 +256,7 @@ function findWorkflowByName(name: string, contexts: BoundedContextIR[]): Workflo
 function findViewByName(name: string, contexts: BoundedContextIR[]): ViewIR | undefined {
   for (const c of contexts) {
     for (const v of c.views) {
-      if (camel(v.name) === name) return v;
+      if (lowerFirst(v.name) === name) return v;
       if (snake(v.name) === name) return v;
     }
   }
@@ -276,12 +280,12 @@ function renderTest(t: TestE2EIR, ctx: RenderCtx): string[] {
 
 function renderUIStmt(s: TestStmtIR, ctx: RenderCtx): string {
   if (s.kind === "expect") {
-    // Prefer Playwright's native, auto-retrying web-first matchers when
-    // the assertion is an equality on a detail-handle read — they poll
-    // the live DOM, so they're immune to the post-mutation refetch lag
-    // that a one-shot read snapshot would lose to.
-    const webFirst = renderWebFirstExpect(s.expr, ctx);
-    if (webFirst) return webFirst;
+    // Explicit, typed matchers — `expect(<x>).toHaveText("…")` — are
+    // resolved in the IR (isIntrinsicMatcher) and rendered directly to the
+    // native Playwright matcher. Anything else (bare bool expr) falls
+    // through to the shared `expect(<x>).toBe(true)` form.
+    const explicit = renderExplicitMatcher(s.expr, ctx);
+    if (explicit) return explicit;
     return renderExpectStmt(s.expr, (e) => renderUIExpr(e, ctx));
   }
   if (s.kind === "expect-throws") {
@@ -312,7 +316,36 @@ function renderUIStmt(s: TestStmtIR, ctx: RenderCtx): string {
   );
 }
 
-type LiteralIR = Extract<ExprIR, { kind: "literal" }>;
+
+/** Render an explicit, typed matcher call — `expect(<x>).toHaveText("…")`
+ *  — straight to its Playwright form. The matcher (resolved into the IR as
+ *  `isIntrinsicMatcher`) drives the locator kind: `toHaveCount` reads a
+ *  collection (`…Rows()`), the other web-first matchers read a field
+ *  locator (`field("…")`), and `toBe` compares a one-shot value. Returns
+ *  null when the receiver isn't a recognised detail-handle read, so the
+ *  caller can fall back. */
+function renderExplicitMatcher(expr: ExprIR, ctx: RenderCtx): string | null {
+  if (expr.kind !== "method-call" || !expr.isIntrinsicMatcher) return null;
+  const sig = intrinsicMatcherSig(expr.member);
+  if (!sig) return null;
+  const args = expr.args.map((a) => renderUIExpr(a, ctx));
+  // In source `expect(<inner>).toHaveText(…)`, the matcher's receiver is the
+  // parenthesised asserted expression.
+  const inner = expr.receiver.kind === "paren" ? expr.receiver.inner : expr.receiver;
+
+  if (sig.on === "value") {
+    return `expect(${renderUIExpr(inner, ctx)}).${expr.member}(${args.join(", ")});`;
+  }
+
+  // Locator matcher: the inner must be `<detailHandle>.<member>`.
+  const dm = matchDetailField(inner, ctx);
+  if (!dm) return null;
+  const locator =
+    expr.member === "toHaveCount"
+      ? `${dm.handle}.${dm.field}Rows()`
+      : `${dm.handle}.field("${dm.field}")`;
+  return `await expect(${locator}).${expr.member}(${args.join(", ")});`;
+}
 
 /** `<handle>.<field>` where `<handle>` is a detail-handle local — and the
  *  member is a real field, not the page object's own `id` property. */
@@ -334,37 +367,6 @@ function matchDetailCollectionLength(
   if (inner.kind !== "member" || inner.receiver.kind !== "ref") return null;
   if (!ctx.detailHandles.has(inner.receiver.name)) return null;
   return { handle: inner.receiver.name, collection: inner.member };
-}
-
-function literalSide(a: ExprIR, b: ExprIR): { readSide: ExprIR; lit: LiteralIR } | null {
-  if (b.kind === "literal") return { readSide: a, lit: b };
-  if (a.kind === "literal") return { readSide: b, lit: a };
-  return null;
-}
-
-/** Lower an equality assertion on a detail-handle read to a native
- *  web-first matcher (`toHaveText` / `toHaveCount`, retrying), or null
- *  when the assertion isn't of that shape (caller falls back to the
- *  one-shot generic form). */
-function renderWebFirstExpect(expr: ExprIR, ctx: RenderCtx): string | null {
-  const e = expr.kind === "paren" ? expr.inner : expr;
-  if (e.kind !== "binary" || (e.op !== "==" && e.op !== "!=")) return null;
-  const sides = literalSide(e.left, e.right);
-  if (!sides) return null;
-  const not = e.op === "!=";
-
-  const coll = matchDetailCollectionLength(sides.readSide, ctx);
-  if (coll && sides.lit.lit === "int") {
-    const matcher = not ? "not.toHaveCount" : "toHaveCount";
-    return `await expect(${coll.handle}.${coll.collection}Rows()).${matcher}(${sides.lit.value});`;
-  }
-
-  const fld = matchDetailField(sides.readSide, ctx);
-  if (fld && sides.lit.lit === "string") {
-    const matcher = not ? "not.toHaveText" : "toHaveText";
-    return `await expect(${fld.handle}.field("${fld.field}")).${matcher}(${JSON.stringify(sides.lit.value)});`;
-  }
-  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -396,7 +398,7 @@ function renderUIExpr(e: ExprIR, ctx: RenderCtx): string {
     case "ternary":
       return `${renderUIExpr(e.cond, ctx)} ? ${renderUIExpr(e.then, ctx)} : ${renderUIExpr(e.otherwise, ctx)}`;
     case "lambda":
-      // Slice 2: lambda body is now optional (block-body lambdas were
+      // Lambda body is now optional (block-body lambdas were
       // added for page event handlers).  UI E2E tests don't currently
       // use block-body lambdas — fall back to a stub for the future
       // case.
@@ -425,7 +427,7 @@ function renderUIExpr(e: ExprIR, ctx: RenderCtx): string {
     case "object":
       return `({ ${e.fields.map((f) => `${f.name}: ${renderUIExpr(f.value, ctx)}`).join(", ")} })`;
     case "match": {
-      // Slice 2: lower match to chained ternary.  Same approach as
+      // Lower match to chained ternary.  Same approach as
       // e2e-render.ts; UI tests are unlikely to evaluate match
       // expressions in v0 but staying total avoids a ts-exhaustive
       // gap.
@@ -459,8 +461,8 @@ function renderLiteral(lit: string, value: string): string {
 //
 // The first two reserve `workflows` and `views` as the slug names;
 // the validator should already reject an aggregate declared with
-// either of those names (reservation list extension is part of this
-// slice if it isn't there already).
+// either of those names (the reservation list should be extended to
+// cover them if it doesn't already).
 // ---------------------------------------------------------------------------
 
 type UiCallShape =
@@ -502,7 +504,7 @@ function renderWorkflowCall(
   const wf = findWorkflowByName(call.workflowName, ctx.contexts);
   if (!wf) {
     const known = ctx.contexts
-      .flatMap((c) => c.workflows.map((w) => camel(w.name)))
+      .flatMap((c) => c.workflows.map((w) => lowerFirst(w.name)))
       .sort()
       .join(", ");
     throw new Error(
@@ -510,7 +512,7 @@ function renderWorkflowCall(
         `Available workflows: ${known || "(none)"}.`,
     );
   }
-  const cap = upper(wf.name);
+  const cap = upperFirst(wf.name);
   const body = call.args[0] ? renderUIExpr(call.args[0], ctx) : "{}";
   return `await new ${cap}WorkflowPage(page).run(${body})`;
 }
@@ -520,7 +522,7 @@ function renderViewCall(call: { viewName: string; args: ExprIR[] }, ctx: RenderC
   const view = findViewByName(call.viewName, ctx.contexts);
   if (!view) {
     const known = ctx.contexts
-      .flatMap((c) => c.views.map((v) => camel(v.name)))
+      .flatMap((c) => c.views.map((v) => lowerFirst(v.name)))
       .sort()
       .join(", ");
     throw new Error(
@@ -528,7 +530,7 @@ function renderViewCall(call: { viewName: string; args: ExprIR[] }, ctx: RenderC
         `Available views: ${known || "(none)"}.`,
     );
   }
-  const cap = upper(view.name);
+  const cap = upperFirst(view.name);
   // Returns the row list — wrap so the binding (`let rows = ...`)
   // resolves to the array, not the Promise.
   return [
@@ -554,7 +556,7 @@ function renderAggregateCall(
         `Available aggregates: ${known || "(none)"}.`,
     );
   }
-  const cap = upper(agg.name);
+  const cap = upperFirst(agg.name);
 
   if (call.method === "create") {
     // ListPage.goto → create → fill → submit.  Returns
@@ -608,13 +610,13 @@ function renderOperationCall(
       `ui e2e: ui.${snake(plural(agg.name))}.${op.name}(target, body?) requires a target argument`,
     );
   }
-  const cap = upper(agg.name);
+  const cap = upperFirst(agg.name);
   const idExpr = renderIdArg(args[0], ctx);
   const body = args.length >= 2 ? renderUIExpr(args[1], ctx) : "{}";
   if (op.params.length === 0) {
-    return `await new ${cap}DetailPage(page, ${idExpr}).goto().then((__d) => __d.${camel(op.name)}())`;
+    return `await new ${cap}DetailPage(page, ${idExpr}).goto().then((__d) => __d.${lowerFirst(op.name)}())`;
   }
-  return `await new ${cap}DetailPage(page, ${idExpr}).goto().then((__d) => __d.${camel(op.name)}(${body}))`;
+  return `await new ${cap}DetailPage(page, ${idExpr}).goto().then((__d) => __d.${lowerFirst(op.name)}(${body}))`;
 }
 
 function renderIdArg(arg: ExprIR, ctx: RenderCtx): string {
@@ -630,14 +632,10 @@ function renderIdArg(arg: ExprIR, ctx: RenderCtx): string {
 function findAggregateBySlug(slug: string, contexts: BoundedContextIR[]): AggregateIR | undefined {
   for (const c of contexts) {
     for (const a of c.aggregates) {
-      if (camel(a.name) === slug) return a;
+      if (lowerFirst(a.name) === slug) return a;
       if (snake(plural(a.name)) === slug) return a;
-      if (camel(plural(a.name)) === slug) return a;
+      if (lowerFirst(plural(a.name)) === slug) return a;
     }
   }
   return undefined;
-}
-
-function upper(s: string): string {
-  return s[0]!.toUpperCase() + s.slice(1);
 }

@@ -4,9 +4,9 @@
 // is the Tailwind 4 migration (CSS-first config, `@tailwindcss/vite`,
 // `tw-animate-css`) on stack v2 (React 19) — a static `tsc` pass
 // can't prove the CSS pipeline resolves or the tree mounts, so this
-// is the runtime gate.  esm.sh-dependent; self-skips when the
-// browser sandbox can't reach the CDN (same idiom as
-// `runtime.spec.ts`).
+// is the runtime gate.  The in-browser npm-install bundler needs the
+// npm registry, so it self-skips when the browser sandbox can't reach
+// it (same idiom as `runtime.spec.ts`).
 
 import { expect, test } from "@playwright/test";
 import { browserCanReachNetwork, waitForPlaygroundReady } from "./_helpers";
@@ -38,7 +38,7 @@ test("shadcn@v4 preview boots without runtime errors", async ({ page }) => {
   if (!(await browserCanReachNetwork(page))) {
     test.skip(
       true,
-      "Browser cannot reach esm.sh — Bundle + Preview need network access.  This spec is intended to run on the deployed playground CI step.",
+      "Browser cannot reach the npm registry — Bundle + Preview need network access.  This spec is intended to run on the deployed playground CI step.",
     );
   }
 

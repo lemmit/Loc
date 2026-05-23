@@ -9,7 +9,7 @@
 // resolves fine; the type imports below are erased.
 
 import type { ExprIR } from "../../../ir/loom-ir.js";
-import { camel, pascal, plural } from "../../../util/naming.js";
+import { lowerFirst, plural, upperFirst } from "../../../util/naming.js";
 import type { ApiHookUse, WalkContext } from "../body-walker.js";
 import { emitExpr } from "../body-walker.js";
 
@@ -28,12 +28,12 @@ export function tryDetectApiHook(expr: ExprIR, ctx: WalkContext): ApiHookUse | n
       return buildHookUse(inner.member, expr.member, expr.args, ctx);
     }
   }
-  // Slice A13 — Pattern C: member(ref:"Views", viewName) lifts to
+  // Pattern C: member(ref:"Views", viewName) lifts to
   // `useXxxView()` from `../api/views`.
   if (expr.kind === "member" && expr.receiver.kind === "ref" && expr.receiver.name === "Views") {
     return buildViewHookUse(expr.member);
   }
-  // Slice D1 — Pattern D: member(ref:<Aggregate>, op) without an
+  // Pattern D: member(ref:<Aggregate>, op) without an
   // api param prefix lifts to the same hook Pattern A produces.
   // Lets UIs without a `api X: Y` binding still get auto-injected
   // hooks (e.g. legacy `scaffold modules: M` deployables that
@@ -45,7 +45,7 @@ export function tryDetectApiHook(expr: ExprIR, ctx: WalkContext): ApiHookUse | n
   ) {
     return buildHookUse(expr.receiver.name, expr.member, [], ctx);
   }
-  // Slice D1 — Pattern E: same as D but with method-call args
+  // Pattern E: same as D but with method-call args
   // (parameterised forms like `Account.byId(id)`).
   if (
     expr.kind === "method-call" &&
@@ -57,13 +57,13 @@ export function tryDetectApiHook(expr: ExprIR, ctx: WalkContext): ApiHookUse | n
   return null;
 }
 
-/** Slice A13 — `useXxxView()` hook injection.  View hooks live in
+/** `useXxxView()` hook injection.  View hooks live in
  *  the shared `../api/views.ts` module; the local var name is
  *  `<viewCamel>View` (e.g. `activeOrdersView`). */
 function buildViewHookUse(viewName: string): ApiHookUse {
-  const viewPascal = pascal(viewName);
+  const viewPascal = upperFirst(viewName);
   return {
-    varName: `${camel(viewName)}View`,
+    varName: `${lowerFirst(viewName)}View`,
     hookName: `use${viewPascal}View`,
     importFrom: "../api/views",
     argsRendered: [],
@@ -83,7 +83,7 @@ function buildViewHookUse(viewName: string): ApiHookUse {
  *  The local var name is `<aggCamel><OpPascal>` — deterministic,
  *  visible in the generated file, never invented by the user. */
 function buildHookUse(aggregate: string, op: string, args: ExprIR[], ctx: WalkContext): ApiHookUse {
-  const aggSingle = pascal(aggregate);
+  const aggSingle = upperFirst(aggregate);
   const aggPlural = plural(aggSingle);
   let hookName: string;
   if (op === "all") hookName = `useAll${aggPlural}`;
@@ -91,9 +91,9 @@ function buildHookUse(aggregate: string, op: string, args: ExprIR[], ctx: WalkCo
   else if (op === "create") hookName = `useCreate${aggSingle}`;
   else if (op === "update") hookName = `useUpdate${aggSingle}`;
   else if (op === "delete") hookName = `useDelete${aggSingle}`;
-  else hookName = `use${pascal(op)}${aggSingle}`;
-  const varName = `${camel(aggSingle)}${pascal(op)}`;
-  const importFrom = `../api/${camel(aggSingle)}`;
+  else hookName = `use${upperFirst(op)}${aggSingle}`;
+  const varName = `${lowerFirst(aggSingle)}${upperFirst(op)}`;
+  const importFrom = `../api/${lowerFirst(aggSingle)}`;
   // Render args via the main ctx so refs to params/state propagate
   // (param refs add to `usedParams` → the shell destructures them
   // from `useParams`; state refs are an error since the hook lives

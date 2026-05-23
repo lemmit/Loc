@@ -10,7 +10,7 @@ import type {
   TestE2EIR,
   TestStmtIR,
 } from "../ir/loom-ir.js";
-import { camel, plural, snake } from "../util/naming.js";
+import { lowerFirst, plural, snake } from "../util/naming.js";
 import { renderExpectStmt } from "./expect-stmt.js";
 
 // ---------------------------------------------------------------------------
@@ -179,7 +179,7 @@ function renderE2EExpr(e: ExprIR, ctx: RenderCtx): string {
     case "ternary":
       return `${renderE2EExpr(e.cond, ctx)} ? ${renderE2EExpr(e.then, ctx)} : ${renderE2EExpr(e.otherwise, ctx)}`;
     case "lambda":
-      // Slice 2: lambda body is now optional (block-body lambdas were
+      // Lambda body is now optional (block-body lambdas were
       // added for page event handlers).  E2E tests don't currently
       // emit block-body lambdas — only the existing single-expression
       // form — so assert and render.  If a future change introduces a
@@ -201,7 +201,7 @@ function renderE2EExpr(e: ExprIR, ctx: RenderCtx): string {
     case "object":
       return `({ ${e.fields.map((f) => `${f.name}: ${renderE2EExpr(f.value, ctx)}`).join(", ")} })`;
     case "match": {
-      // Slice 2: lower a match expression to a chained ternary.  E2E
+      // Lower a match expression to a chained ternary.  E2E
       // test bodies are unlikely to use match in v0, but the IR can
       // carry it (e.g. a `derived` body referenced from a test
       // assertion via `read.label`).  Falling back to a chain keeps
@@ -331,9 +331,9 @@ function renderIdArg(arg: ExprIR, ctx: RenderCtx): string {
 function findAggregateBySlug(slug: string, contexts: BoundedContextIR[]): AggregateIR | undefined {
   for (const c of contexts) {
     for (const a of c.aggregates) {
-      if (camel(a.name) === slug) return a;
+      if (lowerFirst(a.name) === slug) return a;
       if (snake(plural(a.name)) === slug) return a;
-      if (camel(plural(a.name)) === slug) return a;
+      if (lowerFirst(plural(a.name)) === slug) return a;
     }
   }
   return undefined;

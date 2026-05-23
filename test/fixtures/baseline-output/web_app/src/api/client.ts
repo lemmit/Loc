@@ -1,5 +1,8 @@
 // Auto-generated.
 import { API_BASE_URL } from "./config";
+import { getLogger } from "../logger";
+
+const log = getLogger("api");
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -9,6 +12,10 @@ export class ApiError extends Error {
 }
 
 async function rawFetch(path: string, init?: RequestInit): Promise<unknown> {
+  const method = init?.method ?? "GET";
+  const startedAt =
+    typeof performance !== "undefined" ? performance.now() : Date.now();
+  log.debug(`-> ${method} ${path}`);
   const r = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     headers: {
@@ -18,13 +25,19 @@ async function rawFetch(path: string, init?: RequestInit): Promise<unknown> {
   });
   const text = await r.text();
   const body: unknown = text ? JSON.parse(text) : null;
+  const ms = Math.round(
+    (typeof performance !== "undefined" ? performance.now() : Date.now()) -
+      startedAt,
+  );
   if (!r.ok) {
     const message =
       body && typeof body === "object" && "error" in body
         ? String((body as { error: unknown }).error)
         : r.statusText;
+    log.warn(`<- ${r.status} ${method} ${path} (${ms}ms): ${message}`);
     throw new ApiError(r.status, message);
   }
+  log.debug(`<- ${r.status} ${method} ${path} (${ms}ms)`);
   return body;
 }
 

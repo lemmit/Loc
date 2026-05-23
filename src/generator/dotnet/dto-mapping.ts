@@ -7,7 +7,7 @@ import type {
   TypeIR,
   ValueObjectIR,
 } from "../../ir/loom-ir.js";
-import { pascal } from "../../util/naming.js";
+import { upperFirst } from "../../util/naming.js";
 import { renderCsType } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -77,7 +77,7 @@ export function wireToCommandArgument(expr: string, t: TypeIR, ctx: BoundedConte
       const vo = ctx.valueObjects.find((v) => v.name === t.name);
       if (!vo) return expr;
       const args = vo.fields
-        .map((f) => wireToCommandArgument(`${expr}.${pascal(f.name)}`, f.type, ctx))
+        .map((f) => wireToCommandArgument(`${expr}.${upperFirst(f.name)}`, f.type, ctx))
         .join(", ");
       return `new ${t.name}(${args})`;
     }
@@ -108,7 +108,7 @@ export function projectToResponse(domainExpr: string, t: TypeIR, ctx: BoundedCon
       const vo = ctx.valueObjects.find((v) => v.name === t.name);
       if (!vo) return domainExpr;
       const args = vo.fields
-        .map((f) => projectToResponse(`${domainExpr}.${pascal(f.name)}`, f.type, ctx))
+        .map((f) => projectToResponse(`${domainExpr}.${upperFirst(f.name)}`, f.type, ctx))
         .join(", ");
       return `new ${t.name}Response(${args})`;
     }
@@ -150,7 +150,7 @@ export function domainToRequestExpr(domainExpr: string, t: TypeIR, ctx: BoundedC
       const vo = ctx.valueObjects.find((v) => v.name === t.name);
       if (!vo) return domainExpr;
       const args = vo.fields
-        .map((f) => domainToRequestExpr(`${domainExpr}.${pascal(f.name)}`, f.type, ctx))
+        .map((f) => domainToRequestExpr(`${domainExpr}.${upperFirst(f.name)}`, f.type, ctx))
         .join(", ");
       return `new ${t.name}Request(${args})`;
     }
@@ -183,14 +183,14 @@ export function projectEntityExpr(
         .flatMap((a) => a.parts)
         .find((p) => p.name === containmentPartName(wf.type));
       if (!part) continue;
-      const accessor = `${domainExpr}.${pascal(wf.name)}`;
+      const accessor = `${domainExpr}.${upperFirst(wf.name)}`;
       args.push(
         wf.type.kind === "array"
           ? `${accessor}.Select(__e => ${projectEntityExpr("__e", part, ctx)}).ToList()`
           : projectEntityExpr(accessor, part, ctx),
       );
     } else {
-      args.push(projectToResponse(`${domainExpr}.${pascal(wf.name)}`, wf.type, ctx));
+      args.push(projectToResponse(`${domainExpr}.${upperFirst(wf.name)}`, wf.type, ctx));
     }
   }
   return `new ${entity.name}Response(${args.join(", ")})`;
@@ -212,7 +212,7 @@ function responseRecordParams(ent: AggregateIR | EntityPartIR, ctx: BoundedConte
     if (wf.source === "id") {
       parts.push(`${csIdValueClrType(idValueType)} Id`);
     } else {
-      parts.push(`${wireType(wf.type, ctx, "response")} ${pascal(wf.name)}`);
+      parts.push(`${wireType(wf.type, ctx, "response")} ${upperFirst(wf.name)}`);
     }
   }
   return parts.join(", ");

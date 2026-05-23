@@ -1,4 +1,4 @@
-// Slice A5 — walker-side Playwright page-object emitter.
+// Walker-side Playwright page-object emitter.
 //
 // Parallel to `page-objects-builder.ts` (which emits the scaffold
 // archetype trio: `<Agg>ListPage` / `<Agg>NewPage` / `<Agg>DetailPage`).
@@ -174,8 +174,8 @@ function escapeTemplateText(s: string): string {
 }
 
 /** v0 — render a route param's TS type.  Pages only carry string
- *  params today (every route param is a path segment); a future
- *  slice can broaden when typed query params arrive. */
+ *  params today (every route param is a path segment); this can
+ *  broaden when typed query params arrive. */
 function typeRefAsTsString(_p: ParamIR): string {
   return "string";
 }

@@ -1,4 +1,4 @@
-// Slice 11.25 — validator coverage for api declarations, UI api
+// validator coverage for api declarations, UI api
 // parameters, and body-ref chains.
 //
 // Three categories of checks:
@@ -25,7 +25,7 @@ async function parse(source: string) {
   };
 }
 
-describe("Slice 11.25 — api binding validator", () => {
+describe("api binding validator", () => {
   describe("api declaration", () => {
     it("flags duplicate api names", async () => {
       const { errors } = await parse(`

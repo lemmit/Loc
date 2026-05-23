@@ -1,5 +1,5 @@
 import type { AggregateIR, BoundedContextIR, TypeIR } from "../../ir/loom-ir.js";
-import { camel, plural, snake } from "../../util/naming.js";
+import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { unwrapOpt } from "./form-helpers.js";
 
 // ---------------------------------------------------------------------------
@@ -19,7 +19,7 @@ import { unwrapOpt } from "./form-helpers.js";
 
 export function buildPageObjectModule(agg: AggregateIR, ctx: BoundedContextIR): string {
   const slug = snake(plural(agg.name));
-  const aggCap = upper(agg.name);
+  const aggCap = upperFirst(agg.name);
   const ops = agg.operations.filter((o) => o.visibility === "public");
   const required = agg.fields.filter((f) => !f.optional);
 
@@ -28,9 +28,11 @@ export function buildPageObjectModule(agg: AggregateIR, ctx: BoundedContextIR): 
   lines.push(`import type { Page, Locator } from "@playwright/test";`);
   lines.push(`import { expect } from "@playwright/test";`);
   const reqTypes: string[] = [`Create${agg.name}Request`];
-  for (const op of ops) reqTypes.push(`${upper(op.name)}Request`);
+  for (const op of ops) reqTypes.push(`${upperFirst(op.name)}Request`);
   reqTypes.push(`${agg.name}Response`);
-  lines.push(`import type { ${reqTypes.join(", ")} } from "../../src/api/${camel(agg.name)}";`);
+  lines.push(
+    `import type { ${reqTypes.join(", ")} } from "../../src/api/${lowerFirst(agg.name)}";`,
+  );
   lines.push("");
 
   // ---------------------------------------------------------------------
@@ -142,10 +144,10 @@ export function buildPageObjectModule(agg: AggregateIR, ctx: BoundedContextIR): 
   }
   // Per-operation method.
   for (const op of ops) {
-    const opCap = upper(op.name);
+    const opCap = upperFirst(op.name);
     if (op.params.length === 0) {
       lines.push(`  /** ${op.name} (no parameters). */`);
-      lines.push(`  async ${camel(op.name)}(): Promise<this> {`);
+      lines.push(`  async ${lowerFirst(op.name)}(): Promise<this> {`);
       lines.push(`    await this.page.getByTestId("${slug}-op-${op.name}").click();`);
       lines.push(`    await this.page.getByTestId("${slug}-op-${op.name}-submit").click();`);
       lines.push(
@@ -157,7 +159,7 @@ export function buildPageObjectModule(agg: AggregateIR, ctx: BoundedContextIR): 
       lines.push("");
     } else {
       lines.push(`  /** ${op.name} — opens the modal, fills the form, submits. */`);
-      lines.push(`  async ${camel(op.name)}(input: ${opCap}Request): Promise<this> {`);
+      lines.push(`  async ${lowerFirst(op.name)}(input: ${opCap}Request): Promise<this> {`);
       lines.push(`    await this.page.getByTestId("${slug}-op-${op.name}").click();`);
       lines.push(`    await this.page.getByTestId("${slug}-op-${op.name}-form").waitFor();`);
       for (const p of op.params) {
@@ -187,8 +189,8 @@ export function buildPageObjectModule(agg: AggregateIR, ctx: BoundedContextIR): 
 // fillBlock — emit the lines that fill one input from `input.<path>`,
 // branching on type so dates, numbers, selects, switches each take the
 // right Playwright action.  Exported so the workflow + view page
-// objects (slice 18.C) drive their own forms with the same per-type
-// interaction conventions instead of forking the logic.
+// objects drive their own forms with the same per-type interaction
+// conventions instead of forking the logic.
 // ---------------------------------------------------------------------------
 
 export function fillBlock(
@@ -236,7 +238,7 @@ export function fillBlock(
       lines.push(`  await this.page.getByTestId("${testId}").fill(${accessor}!);`);
     }
   } else if (inner.kind === "id") {
-    // Phase 3: `Id<X>` renders as a Mantine `<Select>` populated by
+    // `Id<X>` renders as a Mantine `<Select>` populated by
     // `useAll<X>()`.  Each option carries a `data-testid` of the form
     // `<input-tid>-option-<id>`, set by the form's `renderOption`.
     // Click the input to open the listbox, wait for the options to
@@ -269,8 +271,4 @@ export function fillBlock(
   }
   lines.push(`}`);
   return lines;
-}
-
-function upper(s: string): string {
-  return s[0]!.toUpperCase() + s.slice(1);
 }

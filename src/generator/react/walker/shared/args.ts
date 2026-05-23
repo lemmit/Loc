@@ -24,7 +24,7 @@ export function boolNamed(call: ExprIR & { kind: "call" }, name: string): boolea
   return false;
 }
 
-/** Slice A2 — return the value-expression of a named arg (e.g.
+/** Return the value-expression of a named arg (e.g.
  *  the `<expr>` in `rows: <expr>`).  Undefined when the named arg
  *  is missing.  Distinct from `stringNamed` (string literals only)
  *  and `numericNamed` (number literals only): this keeps any
@@ -37,7 +37,7 @@ export function namedArgValue(call: ExprIR & { kind: "call" }, name: string): Ex
   return undefined;
 }
 
-/** Slice 11.7 — extract a lambda-shaped named arg from a call.
+/** Extract a lambda-shaped named arg from a call.
  *  Returns the lambda IR sub-node (its `param`/`body`/`block`
  *  fields) so callers can emit the handler.  Returns undefined
  *  when the named arg is missing or isn't a lambda. */
@@ -54,7 +54,7 @@ export function lambdaArg(
   return undefined;
 }
 
-/** Slice 11.14 — render a renderTextContent() result as a JSX
+/** Render a renderTextContent() result as a JSX
  *  attribute value.  Quoted strings stay quoted; JSX-expression
  *  values (already brace-wrapped) stay brace-wrapped. */
 export function unwrapAsAttr(s: string): string {
@@ -85,8 +85,8 @@ export function firstPositionalText(call: ExprIR & { kind: "call" }): string | u
   return undefined;
 }
 
-/** Slice 11.4 helper — `firstPositionalContent` returns either a
- *  `"quoted string"` or a `{paramRef}` JSX expression.  Components
+/** `firstPositionalContent` returns either a `"quoted string"` or a
+ *  `{paramRef}` JSX expression.  Components
  *  embedding the result in JSX text need quoted strings unwrapped
  *  to bare text; JSX expressions stay verbatim. */
 export function unwrapTextLiteral(s: string): string {

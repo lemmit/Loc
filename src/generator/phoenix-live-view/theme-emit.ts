@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Batch C — Phoenix theme CSS emitter.
+// Phoenix theme CSS emitter.
 //
 // Exports `renderThemeCss(theme: ThemeIR | undefined): string` — produces a
 // CSS file content string with custom properties derived from the system's

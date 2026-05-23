@@ -9,11 +9,11 @@ import {
 } from "../../src/platform/registry.js";
 
 // ---------------------------------------------------------------------------
-// packaging-split P3 slice 3 — fs-backed `discoverBackends()` source.
+// fs-backed `discoverBackends()` source.
 //
 // The contract under test: a workspace where
 // `@loom/backend-hono-v4` is symlinked under
-// `node_modules/@loom/backend-hono-v4` (which slice 1 set up) yields
+// `node_modules/@loom/backend-hono-v4` (set up earlier in the test) yields
 // a `DiscoveredBackend` whose `surface` is *the same instance* as
 // the in-tree `hono@v4` surface.  That `===` identity is the
 // byte-identical bridge: the same code is delivered through the
@@ -21,7 +21,7 @@ import {
 // changes which `package.json` the manifest was *read* from but not
 // which `PlatformSurface` is *resolved*.  Output stays unchanged.
 //
-// Slice 5 will replace the in-tree surface lookup in
+// A later change will replace the in-tree surface lookup in
 // `fs-discovery.ts` with a dynamic `import(pkg)`; at that point
 // the identity invariant relaxes to "structural equivalence", and
 // these tests update to assert behaviour (`emitProject(...)`
@@ -46,7 +46,7 @@ describe("fs-discovery — workspace symlink discovery", () => {
   });
 
   it("fs-discovered hono surface is the SAME INSTANCE as in-tree", async () => {
-    // The slice-3 byte-identical bridge — both delivery paths yield
+    // The byte-identical bridge — both delivery paths yield
     // the identical PlatformSurface, so every downstream resolver
     // is unaffected by the source swap.
     const fs = await discoverBackendsFs(repoRoot);

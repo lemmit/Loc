@@ -1,6 +1,8 @@
+import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
 import { wireShapeFor } from "../../ir/enrichments.js";
 import type {
   AggregateIR,
+  AssociationIR,
   BoundedContextIR,
   EntityPartIR,
   FieldIR,
@@ -9,9 +11,46 @@ import type {
   TypeIR,
 } from "../../ir/loom-ir.js";
 import { findUsesCurrentUser, viewUsesCurrentUser } from "../../ir/loom-ir.js";
-import { camel, plural } from "../../util/naming.js";
-import { renderTsExpr } from "./render-expr.js";
-import { valueObjectColumnNames } from "./templates.js";
+import { lowerFirst, plural, upperFirst } from "../../util/naming.js";
+import { joinColumnName, joinTableConstName, valueObjectColumnNames } from "./templates.js";
+
+/** Associations (`Id<T>[]` reference collections) declared on an
+ * aggregate, persisted as many-to-many join tables.  Empty when none. */
+function associationsOf(agg: AggregateIR): AssociationIR[] {
+  return agg.associations ?? [];
+}
+
+/** True for a field type that is a collection of references
+ * (`Id<T>[]`) — persisted via a join table, not a column. */
+function isRefCollection(t: TypeIR): boolean {
+  return t.kind === "array" && t.element.kind === "id";
+}
+
+/** Bulk-load lines for every association into `<field>ByOwner`
+ * maps keyed by the owner id.  Assumes a `__ids: string[]` of owner
+ * ids is in scope.  Used by the array-returning load paths
+ * (`findManyByIds`, array `find`s); `findById` loads singular lists
+ * inline instead. */
+function associationMapLines(agg: AggregateIR, dbExpr: string, indent: string): string[] {
+  const out: string[] = [];
+  for (const assoc of associationsOf(agg)) {
+    const joinConst = joinTableConstName(assoc);
+    const ownerCol = joinColumnName(assoc.ownerFk);
+    const targetCol = joinColumnName(assoc.targetFk);
+    const rows = `${assoc.fieldName}JoinRows`;
+    const map = `${assoc.fieldName}ByOwner`;
+    out.push(
+      `${indent}const ${rows} = await ${dbExpr}.select({ o: schema.${joinConst}.${ownerCol}, t: schema.${joinConst}.${targetCol} }).from(schema.${joinConst}).where(inArray(schema.${joinConst}.${ownerCol}, __ids)).orderBy(schema.${joinConst}.${ownerCol}, schema.${joinConst}.ordinal);`,
+    );
+    out.push(`${indent}const ${map} = new Map<string, Ids.${assoc.targetAgg}Id[]>();`);
+    out.push(`${indent}for (const r of ${rows}) {`);
+    out.push(`${indent}  const list = ${map}.get(r.o) ?? [];`);
+    out.push(`${indent}  list.push(Ids.${assoc.targetAgg}Id(r.t));`);
+    out.push(`${indent}  ${map}.set(r.o, list);`);
+    out.push(`${indent}}`);
+  }
+  return out;
+}
 
 // ---------------------------------------------------------------------------
 // Generates the TypeScript repository file for an aggregate.
@@ -56,12 +95,12 @@ export function buildRepositoryFile(
     ...viewFilters,
   ];
   for (const f of allFilters) {
-    const lowered = lowerToDrizzle(f, camel(plural(agg.name)), ctx);
+    const lowered = lowerToDrizzle(f, lowerFirst(plural(agg.name)), ctx);
     if (lowered) for (const op of lowered.ops) drizzleOps.add(op);
   }
   lines.push(`import { ${[...drizzleOps].sort().join(", ")} } from "drizzle-orm";`);
   lines.push(`import * as schema from "../schema";`);
-  // Slice 1C: if any find or matching view filter references
+  // If any find or matching view filter references
   // currentUser, the per-method signature gains a `currentUser: User`
   // parameter that the closure-captured Drizzle predicate reads.
   // Pull the User type in as a type-only import so the file
@@ -75,7 +114,7 @@ export function buildRepositoryFile(
   // Imports for domain types
   const partNames = agg.parts.map((p) => p.name);
   const domainImports = [agg.name, ...partNames].join(", ");
-  lines.push(`import { ${domainImports} } from "../../domain/${camel(agg.name)}";`);
+  lines.push(`import { ${domainImports} } from "../../domain/${lowerFirst(agg.name)}";`);
   const valueObjectsUsed = collectValueObjects(agg, ctx);
   const enumsUsed = collectEnums(agg, ctx);
   const voOrEnumImports = [...valueObjectsUsed, ...enumsUsed];
@@ -85,6 +124,11 @@ export function buildRepositoryFile(
   lines.push(`import * as Ids from "../../domain/ids";`);
   lines.push(`import { AggregateNotFoundError } from "../../domain/errors";`);
   lines.push(`import type { DomainEventDispatcher } from "../../domain/events";`);
+  // requestLog() resolves the request-scoped pino child logger via
+  // AsyncLocalStorage (see obs/als.ts) — repository methods don't have
+  // the Hono context in scope, so this is the seam they use to emit
+  // structured lines that still auto-carry `request_id`.
+  lines.push(`import { requestLog } from "../../obs/als";`);
   lines.push("");
   lines.push(`type Db = NodePgDatabase<typeof schema>;`);
   lines.push(`type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];`);
@@ -110,8 +154,8 @@ export function buildRepositoryFile(
   lines.push("");
 
   // findManyByIds — bulk loader used by views that follow `Id<X>`
-  // references in bind expressions (slice 3).  Same hydration path
-  // as the array-return finds; filter is a single `inArray`.
+  // references in bind expressions.  Same hydration path as the
+  // array-return finds; filter is a single `inArray`.
   lines.push(...findManyByIdsMethod(agg, ctx));
   lines.push("");
 
@@ -133,7 +177,7 @@ export function buildRepositoryFile(
   // checks + the existing bulk hydration all work for free.
   for (const view of ctx.views.filter((v) => v.aggregateName === agg.name)) {
     const synthesised: FindIR = {
-      name: camel(view.name),
+      name: lowerFirst(view.name),
       params: [],
       returnType: { kind: "array", element: { kind: "entity", name: agg.name } },
       filter: view.filter,
@@ -207,6 +251,11 @@ function wireProjectionEntity(
       `${wf.name}: ${wireProjectionValue(`${varExpr}.${wf.name}`, wf.type, ctx, wf.optional)}`,
     );
   }
+  // Co-located provenance rides the wire DTO so any GET surfaces the
+  // current lineage inline (the field's own value still emits above).
+  for (const f of ent.fields.filter((f) => f.provenanced)) {
+    parts.push(`${f.name}_provenance: ${varExpr}.${f.name}_provenance`);
+  }
   return `{ ${parts.join(", ")} }`;
 }
 
@@ -242,7 +291,10 @@ function wireProjectionValue(
     return `{ ${fields} }`;
   }
   if (t.kind === "array") {
-    return `${expr}.map((__a: never) => (${wireProjectionValue("__a", t.element, ctx, false)}))`;
+    // `__a` is contextually typed by `.map` over the element type;
+    // an explicit annotation would fight strict-mode inference for
+    // branded `Id<T>` element arrays.
+    return `${expr}.map((__a) => (${wireProjectionValue("__a", t.element, ctx, false)}))`;
   }
   if (t.kind === "entity") return expr;
   return expr;
@@ -254,7 +306,7 @@ function wireProjectionValue(
 
 function findManyByIdsMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
   const lines: string[] = [];
-  const tableName = camel(plural(agg.name));
+  const tableName = lowerFirst(plural(agg.name));
   lines.push(`  async findManyByIds(ids: Ids.${agg.name}Id[]): Promise<${agg.name}[]> {`);
   lines.push(`    if (ids.length === 0) return [];`);
   lines.push(
@@ -266,10 +318,12 @@ function findManyByIdsMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] 
   const eagerContains = agg.contains
     .map((c) => ({ c, part: agg.parts.find((p) => p.name === c.partName) }))
     .filter((x): x is { c: typeof x.c; part: EntityPartIR } => !!x.part);
-  if (eagerContains.length > 0) {
+  if (eagerContains.length > 0 || associationsOf(agg).length > 0) {
     lines.push(`    const __ids = rootRows.map((r) => r.id);`);
+  }
+  if (eagerContains.length > 0) {
     for (const { c, part } of eagerContains) {
-      const childTable = camel(plural(part.name));
+      const childTable = lowerFirst(plural(part.name));
       lines.push(
         `    const ${c.name}Rows = await this.db.select().from(schema.${childTable}).where(inArray(schema.${childTable}.parentId, __ids));`,
       );
@@ -291,6 +345,7 @@ function findManyByIdsMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] 
       }
     }
   }
+  lines.push(...associationMapLines(agg, "this.db", "    "));
   lines.push(`    return rootRows.map((root) => ${hydrateRootForFindAllExpr(agg, "root", ctx)});`);
   lines.push(`  }`);
   return lines;
@@ -298,20 +353,25 @@ function findManyByIdsMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] 
 
 function findByIdMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
   const lines: string[] = [];
-  const tableName = camel(plural(agg.name));
+  const tableName = lowerFirst(plural(agg.name));
   lines.push(`  async findById(id: Ids.${agg.name}Id): Promise<${agg.name} | null> {`);
   lines.push(`    return await this.db.transaction(async (tx) => {`);
   lines.push(
     `      const rootRows = await tx.select().from(schema.${tableName}).where(eq(schema.${tableName}.id, id));`,
   );
-  lines.push(`      if (rootRows.length === 0) return null;`);
+  lines.push(`      if (rootRows.length === 0) {`);
+  lines.push(
+    `        ${renderHonoStoreLogCall("aggregateLoaded", `aggregate: "${agg.name}", id: id as string, found: false`)}`,
+  );
+  lines.push(`        return null;`);
+  lines.push(`      }`);
   lines.push(`      const root = rootRows[0]!;`);
 
   // Load child collections (only for `contains` on the root)
   for (const c of agg.contains) {
     const part = agg.parts.find((p) => p.name === c.partName);
     if (!part) continue;
-    const childTable = camel(plural(part.name));
+    const childTable = lowerFirst(plural(part.name));
     if (c.collection) {
       lines.push(
         `      const ${c.name}Rows = await tx.select().from(schema.${childTable}).where(eq(schema.${childTable}.parentId, id));`,
@@ -329,8 +389,26 @@ function findByIdMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
     }
   }
 
-  // Hydrate root
-  lines.push(`      return ${hydrateRootExpr(agg, "root", ctx)};`);
+  // Load reference collections (`Id<T>[]`) from their join tables.
+  for (const assoc of associationsOf(agg)) {
+    const joinConst = joinTableConstName(assoc);
+    const ownerCol = joinColumnName(assoc.ownerFk);
+    const targetCol = joinColumnName(assoc.targetFk);
+    lines.push(
+      `      const ${assoc.fieldName}Rows = await tx.select({ t: schema.${joinConst}.${targetCol} }).from(schema.${joinConst}).where(eq(schema.${joinConst}.${ownerCol}, id)).orderBy(schema.${joinConst}.ordinal);`,
+    );
+    lines.push(
+      `      const ${assoc.fieldName} = ${assoc.fieldName}Rows.map((r) => Ids.${assoc.targetAgg}Id(r.t));`,
+    );
+  }
+
+  // Hydrate root.  Bind to a local so the load-success log line can fire
+  // BEFORE returning — keeping the debug record adjacent to the row read.
+  lines.push(`      const __loaded = ${hydrateRootExpr(agg, "root", ctx)};`);
+  lines.push(
+    `      ${renderHonoStoreLogCall("aggregateLoaded", `aggregate: "${agg.name}", id: id as string, found: true`)}`,
+  );
+  lines.push(`      return __loaded;`);
   lines.push(`    });`);
   lines.push(`  }`);
   return lines;
@@ -340,12 +418,27 @@ function hydrateRootExpr(agg: AggregateIR, rowVar: string, ctx: BoundedContextIR
   const fields: string[] = [];
   fields.push(`id: Ids.${agg.name}Id(${rowVar}.id)`);
   for (const f of agg.fields) {
-    fields.push(`${f.name}: ${hydrateFieldExpr(f, rowVar, ctx)}`);
+    if (isRefCollection(f.type)) {
+      // Loaded into a local const from the join table (see findByIdMethod).
+      fields.push(`${f.name}`);
+    } else {
+      fields.push(`${f.name}: ${hydrateFieldExpr(f, rowVar, ctx)}`);
+    }
   }
+  fields.push(...provHydrateEntries(agg.fields, rowVar));
   for (const c of agg.contains) {
     fields.push(`${c.name}`);
   }
   return `${agg.name}._create({ ${fields.join(", ")} })`;
+}
+
+// Restore the co-located lineage so a fresh load (and any subsequent GET)
+// surfaces it — without this the lineage would vanish after the request
+// that wrote it.  The column is `$type`d ProvLineage, so no cast needed.
+function provHydrateEntries(fields: FieldIR[], rowVar: string): string[] {
+  return fields
+    .filter((f) => f.provenanced)
+    .map((f) => `${f.name}_provenance: ${rowVar}.${f.name}_provenance ?? null`);
 }
 
 function hydrateEntityExpr(
@@ -360,6 +453,7 @@ function hydrateEntityExpr(
   for (const f of part.fields) {
     fields.push(`${f.name}: ${hydrateFieldExpr(f, rowVar, ctx)}`);
   }
+  fields.push(...provHydrateEntries(part.fields, rowVar));
   return `${part.name}._create({ ${fields.join(", ")} })`;
 }
 
@@ -412,7 +506,7 @@ function primitiveColumnRead(expr: string, t: TypeIR): string {
 
 function saveMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
   const lines: string[] = [];
-  const tableName = camel(plural(agg.name));
+  const tableName = lowerFirst(plural(agg.name));
   lines.push(`  async save(aggregate: ${agg.name}): Promise<void> {`);
   lines.push(`    await this.db.transaction(async (tx) => {`);
   lines.push(`      const rootRow = ${rootProjection(agg, "aggregate", ctx)};`);
@@ -423,23 +517,23 @@ function saveMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
     if (!c.collection) continue;
     const part = agg.parts.find((p) => p.name === c.partName);
     if (!part) continue;
-    const childTable = camel(plural(part.name));
+    const childTable = lowerFirst(plural(part.name));
     lines.push("");
     lines.push(
-      `      const __existing${cap(c.name)} = await tx.select({ id: schema.${childTable}.id }).from(schema.${childTable}).where(eq(schema.${childTable}.parentId, aggregate.id));`,
+      `      const __existing${upperFirst(c.name)} = await tx.select({ id: schema.${childTable}.id }).from(schema.${childTable}).where(eq(schema.${childTable}.parentId, aggregate.id));`,
     );
     lines.push(
-      `      const __existingIds${cap(c.name)} = new Set(__existing${cap(c.name)}.map((r) => r.id));`,
+      `      const __existingIds${upperFirst(c.name)} = new Set(__existing${upperFirst(c.name)}.map((r) => r.id));`,
     );
     lines.push(
-      `      const __currentIds${cap(c.name)} = new Set(aggregate.${c.name}.map((e) => e.id as string));`,
+      `      const __currentIds${upperFirst(c.name)} = new Set(aggregate.${c.name}.map((e) => e.id as string));`,
     );
     lines.push(
-      `      const __toDelete${cap(c.name)} = [...__existingIds${cap(c.name)}].filter((id) => !__currentIds${cap(c.name)}.has(id));`,
+      `      const __toDelete${upperFirst(c.name)} = [...__existingIds${upperFirst(c.name)}].filter((id) => !__currentIds${upperFirst(c.name)}.has(id));`,
     );
-    lines.push(`      if (__toDelete${cap(c.name)}.length > 0) {`);
+    lines.push(`      if (__toDelete${upperFirst(c.name)}.length > 0) {`);
     lines.push(
-      `        await tx.delete(schema.${childTable}).where(and(eq(schema.${childTable}.parentId, aggregate.id), inArray(schema.${childTable}.id, __toDelete${cap(c.name)})));`,
+      `        await tx.delete(schema.${childTable}).where(and(eq(schema.${childTable}.parentId, aggregate.id), inArray(schema.${childTable}.id, __toDelete${upperFirst(c.name)})));`,
     );
     lines.push(`      }`);
     lines.push(`      for (const child of aggregate.${c.name}) {`);
@@ -449,9 +543,58 @@ function saveMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
     );
     lines.push(`      }`);
   }
+  // Diff-sync each reference collection's join table: delete pairs the
+  // aggregate no longer holds, insert the new ones (idempotent via the
+  // composite PK).
+  for (const assoc of associationsOf(agg)) {
+    const joinConst = joinTableConstName(assoc);
+    const ownerCol = joinColumnName(assoc.ownerFk);
+    const targetCol = joinColumnName(assoc.targetFk);
+    const cap = upperFirst(assoc.fieldName);
+    lines.push("");
+    lines.push(
+      `      const __existing${cap} = await tx.select({ t: schema.${joinConst}.${targetCol} }).from(schema.${joinConst}).where(eq(schema.${joinConst}.${ownerCol}, aggregate.id));`,
+    );
+    lines.push(`      const __existingIds${cap} = new Set(__existing${cap}.map((r) => r.t));`);
+    // Ordered: keep the field's array order so the round-trip is stable;
+    // the ordinal column carries the position and is updated on reorder.
+    lines.push(
+      `      const __current${cap} = aggregate.${assoc.fieldName}.map((x) => x as string);`,
+    );
+    lines.push(`      const __currentIds${cap} = new Set(__current${cap});`);
+    lines.push(
+      `      const __toDelete${cap} = [...__existingIds${cap}].filter((t) => !__currentIds${cap}.has(t));`,
+    );
+    lines.push(`      if (__toDelete${cap}.length > 0) {`);
+    lines.push(
+      `        await tx.delete(schema.${joinConst}).where(and(eq(schema.${joinConst}.${ownerCol}, aggregate.id), inArray(schema.${joinConst}.${targetCol}, __toDelete${cap})));`,
+    );
+    lines.push(`      }`);
+    lines.push(`      for (let __i = 0; __i < __current${cap}.length; __i++) {`);
+    lines.push(
+      `        const __row = { ${ownerCol}: aggregate.id as string, ${targetCol}: __current${cap}[__i]!, ordinal: __i };`,
+    );
+    lines.push(
+      `        await tx.insert(schema.${joinConst}).values(__row).onConflictDoUpdate({ target: [schema.${joinConst}.${ownerCol}, schema.${joinConst}.${targetCol}], set: { ordinal: __i } });`,
+    );
+    lines.push(`      }`);
+  }
   lines.push(`    });`);
+  lines.push(
+    `    ${renderHonoStoreLogCall("repositorySave", `aggregate: "${agg.name}", id: aggregate.id as string`)}`,
+  );
   lines.push("");
   lines.push(`    for (const event of aggregate.pullEvents()) {`);
+  // `(event as object).constructor.name` is the emitted DomainEvent
+  // subclass name — reliable in TypeScript without depending on a
+  // per-event `type` discriminator field.  The `as object` cast handles
+  // the corner case where the aggregate declares no events: pullEvents
+  // returns `DomainEvent[]` typed as `never[]`, so `event.constructor`
+  // would fail tsc.  Field name is `event_type` (not `event`) so it
+  // doesn't collide with the envelope's `event` key.
+  lines.push(
+    `      ${renderHonoStoreLogCall("eventDispatched", `event_type: (event as object).constructor.name, aggregate: "${agg.name}", id: aggregate.id as string`)}`,
+  );
   lines.push(`      await this.events.dispatch(event);`);
   lines.push(`    }`);
   lines.push(`  }`);
@@ -461,7 +604,11 @@ function saveMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
 function rootProjection(agg: AggregateIR, varExpr: string, ctx: BoundedContextIR): string {
   return projectionObject(varExpr, [
     { fieldName: "id", expr: `${varExpr}.id as string` },
-    ...agg.fields.flatMap((f) => projectFieldEntries(f, varExpr, ctx)),
+    // Reference collections live in join tables, not on the root row.
+    ...agg.fields
+      .filter((f) => !isRefCollection(f.type))
+      .flatMap((f) => projectFieldEntries(f, varExpr, ctx)),
+    ...provColumnEntries(agg.fields, varExpr),
   ]);
 }
 
@@ -470,7 +617,20 @@ function entityProjection(part: EntityPartIR, varExpr: string, ctx: BoundedConte
     { fieldName: "id", expr: `${varExpr}.id as string` },
     { fieldName: "parentId", expr: `${varExpr}.parentId as string` },
     ...part.fields.flatMap((f) => projectFieldEntries(f, varExpr, ctx)),
+    ...provColumnEntries(part.fields, varExpr),
   ]);
+}
+
+// Co-located provenance sidecar: the `<field>_provenance` column reads
+// straight off the domain getter (typed `ProvLineage | null`), so save
+// and the `$type`d jsonb column line up without a cast.
+function provColumnEntries(
+  fields: FieldIR[],
+  varExpr: string,
+): { fieldName: string; expr: string }[] {
+  return fields
+    .filter((f) => f.provenanced)
+    .map((f) => ({ fieldName: `${f.name}_provenance`, expr: `${varExpr}.${f.name}_provenance` }));
 }
 
 function projectFieldEntries(
@@ -521,18 +681,14 @@ function projectionObject(
   return `{ ${entries.map((e) => `${e.fieldName}: ${e.expr}`).join(", ")} }`;
 }
 
-function cap(s: string): string {
-  return s[0]!.toUpperCase() + s.slice(1);
-}
-
 // ---------------------------------------------------------------------------
 // Find queries — convention-based equality predicates
 // ---------------------------------------------------------------------------
 
 function findQueryMethod(agg: AggregateIR, find: FindIR, ctx: BoundedContextIR): string[] {
   const lines: string[] = [];
-  const tableName = camel(plural(agg.name));
-  // Slice 1C: when the find's `where` references currentUser, the
+  const tableName = lowerFirst(plural(agg.name));
+  // When the find's `where` references currentUser, the
   // method gains a trailing `currentUser: User` parameter that the
   // closure-captured Drizzle predicate reads from.  Hono routes /
   // workflow handlers thread the user from `c.get("currentUser")`
@@ -584,7 +740,12 @@ function findQueryMethod(agg: AggregateIR, find: FindIR, ctx: BoundedContextIR):
     lines.push(
       `    const rootRows = await this.db.select().from(schema.${tableName})${whereClause};`,
     );
-    lines.push(`    if (rootRows.length === 0) return [];`);
+    lines.push(`    if (rootRows.length === 0) {`);
+    lines.push(
+      `      ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${find.name}", rows: 0`)}`,
+    );
+    lines.push(`      return [];`);
+    lines.push(`    }`);
     // Bulk-load every containment (collections + singulars).  Earlier
     // versions of this code only handled a SINGLE collection
     // containment per find — anything else was silently dropped, so a
@@ -596,10 +757,12 @@ function findQueryMethod(agg: AggregateIR, find: FindIR, ctx: BoundedContextIR):
     const eagerContains = agg.contains
       .map((c) => ({ c, part: agg.parts.find((p) => p.name === c.partName) }))
       .filter((x): x is { c: typeof x.c; part: EntityPartIR } => !!x.part);
-    if (eagerContains.length > 0) {
+    if (eagerContains.length > 0 || associationsOf(agg).length > 0) {
       lines.push(`    const __ids = rootRows.map((r) => r.id);`);
+    }
+    if (eagerContains.length > 0) {
       for (const { c, part } of eagerContains) {
-        const childTable = camel(plural(part.name));
+        const childTable = lowerFirst(plural(part.name));
         lines.push(
           `    const ${c.name}Rows = await this.db.select().from(schema.${childTable}).where(inArray(schema.${childTable}.parentId, __ids));`,
         );
@@ -624,9 +787,14 @@ function findQueryMethod(agg: AggregateIR, find: FindIR, ctx: BoundedContextIR):
         }
       }
     }
+    lines.push(...associationMapLines(agg, "this.db", "    "));
     lines.push(
-      `    return rootRows.map((root) => ${hydrateRootForFindAllExpr(agg, "root", ctx)});`,
+      `    const __result = rootRows.map((root) => ${hydrateRootForFindAllExpr(agg, "root", ctx)});`,
     );
+    lines.push(
+      `    ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${find.name}", rows: __result.length`)}`,
+    );
+    lines.push(`    return __result;`);
     lines.push(`  }`);
     return lines;
   }
@@ -641,13 +809,25 @@ function findQueryMethod(agg: AggregateIR, find: FindIR, ctx: BoundedContextIR):
     `    const rootRows = await this.db.select().from(schema.${tableName})${whereClause}.limit(1);`,
   );
   if (find.returnType.kind === "optional") {
-    lines.push(`    if (rootRows.length === 0) return null;`);
+    lines.push(`    if (rootRows.length === 0) {`);
+    lines.push(
+      `      ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${find.name}", rows: 0`)}`,
+    );
+    lines.push(`      return null;`);
+    lines.push(`    }`);
   } else {
+    // Throws → no `find_executed` log on this branch.  The thrown
+    // AggregateNotFoundError is logged at the route's onError seam
+    // (`not_found` warn) so we don't double-log the same fact.
     lines.push(`    if (rootRows.length === 0) throw new AggregateNotFoundError("not found");`);
   }
   lines.push(
-    `    return await this.findById(rootRows[0]!.id as Ids.${agg.name}Id) as ${agg.name}${find.returnType.kind === "optional" ? " | null" : ""};`,
+    `    const __result = await this.findById(rootRows[0]!.id as Ids.${agg.name}Id) as ${agg.name}${find.returnType.kind === "optional" ? " | null" : ""};`,
   );
+  lines.push(
+    `    ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${find.name}", rows: __result == null ? 0 : 1`)}`,
+  );
+  lines.push(`    return __result;`);
   lines.push(`  }`);
   return lines;
 }
@@ -665,8 +845,13 @@ function hydrateRootForFindAllExpr(
   const fields: string[] = [];
   fields.push(`id: Ids.${agg.name}Id(${rowVar}.id)`);
   for (const f of agg.fields) {
-    fields.push(`${f.name}: ${hydrateFieldExpr(f, rowVar, ctx)}`);
+    if (isRefCollection(f.type)) {
+      fields.push(`${f.name}: ${f.name}ByOwner.get(${rowVar}.id) ?? []`);
+    } else {
+      fields.push(`${f.name}: ${hydrateFieldExpr(f, rowVar, ctx)}`);
+    }
   }
+  fields.push(...provHydrateEntries(agg.fields, rowVar));
   for (const c of agg.contains) {
     if (c.collection) {
       fields.push(`${c.name}: ${c.name}ByParent.get(${rowVar}.id) ?? []`);
@@ -791,6 +976,38 @@ function lowerToDrizzle(
       ops.add("not");
       return `not(${inner})`;
     }
+    // `this.<refColl>.contains(x)` — membership over a reference
+    // collection.  Lowers to a subquery over the field's join table:
+    // the owner row is matched iff a (owner, target=x) pair exists.
+    if (
+      e.kind === "method-call" &&
+      e.member === "contains" &&
+      e.receiverType.kind === "array" &&
+      e.receiverType.element.kind === "id" &&
+      e.args.length === 1
+    ) {
+      const fieldName = refCollectionFieldName(e.receiver);
+      const owner = ctx.aggregates.find((a) => lowerFirst(plural(a.name)) === tableName);
+      const assoc = owner
+        ? associationsOf(owner).find((x) => x.fieldName === fieldName)
+        : undefined;
+      const arg = renderValue(e.args[0]!);
+      if (!assoc || arg === null) return null;
+      const joinConst = joinTableConstName(assoc);
+      const ownerCol = joinColumnName(assoc.ownerFk);
+      const targetCol = joinColumnName(assoc.targetFk);
+      ops.add("inArray");
+      ops.add("eq");
+      return `inArray(schema.${tableName}.id, this.db.select({ id: schema.${joinConst}.${ownerCol} }).from(schema.${joinConst}).where(eq(schema.${joinConst}.${targetCol}, ${arg})))`;
+    }
+    return null;
+  }
+
+  /** Field name behind a `this.<field>` receiver, or null. */
+  function refCollectionFieldName(e: import("../../ir/loom-ir.js").ExprIR): string | null {
+    if (e.kind === "paren") return refCollectionFieldName(e.inner);
+    if (e.kind === "member" && e.receiver.kind === "this") return e.member;
+    if (e.kind === "ref" && e.refKind === "this-prop") return e.name;
     return null;
   }
 
@@ -853,7 +1070,7 @@ function lowerToDrizzle(
         return JSON.stringify(e.name);
       }
     }
-    // `currentUser.<field>` — slice 1C row-level filter.  The repo
+    // `currentUser.<field>` — row-level filter.  The repo
     // method receives a `currentUser: User` parameter; the renderer
     // emits a plain JS member access against it.  Drizzle infers
     // the column-side branded type and the User field's plain type

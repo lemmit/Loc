@@ -131,7 +131,7 @@ describe("enrichLoomModel — auto-includes findAll", () => {
 
 describe("enrichLoomModel — frontend `targets:` module inheritance", () => {
   it("frontend deployable's moduleNames matches its target's", async () => {
-    // Slice 8: `static` deployables share the legacy `react` module-
+    // `static` deployables share the legacy `react` module-
     // inheritance behaviour.  Match either tag to keep this test
     // resilient through the platform rename.
     const loom = await buildEnrichedModel("examples/acme.ddd");

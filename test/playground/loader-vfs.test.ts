@@ -32,7 +32,7 @@ const stacksDir = path.join(repoRoot, "stacks");
 
 /** Seed a MemoryVfs from the on-disk `designs/` tree, mirroring what
  *  `seedBuiltinPacks` does in the worker via `import.meta.glob`.
- *  Phase 0 of pack versioning: packs live two levels deep at
+ *  Packs live two levels deep at
  *  `designs/<family>/<version>/...`, so the walk now nests one more
  *  level than it did pre-versioning. */
 function hydrateBuiltinDesigns(vfs: MemoryVfs): void {
@@ -128,7 +128,7 @@ describe("loadPack: built-in pack loading", () => {
   it("loads the mantine pack and exposes its templates", () => {
     const pack = loadPack("/designs/mantine/v7");
     expect(pack.manifest.name).toBe("mantine");
-    // Slice D1 — page-list / page-detail / page-new etc. were
+    // page-list / page-detail / page-new etc. were
     // deleted; pack now exposes the walker stdlib primitives.
     expect(pack.templates.has("primitive-stack")).toBe(true);
     expect(pack.templates.has("primitive-form-of")).toBe(true);

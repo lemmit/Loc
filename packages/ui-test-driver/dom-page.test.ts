@@ -306,4 +306,132 @@ describe("DomPage / DomLocator", () => {
       /locator\(getByTestId\("dup"\)\): resolved to 2 elements/,
     );
   });
+
+  // ── Scope B: locator getters ──────────────────────────────────────────
+
+  it("getByText matches the innermost element (not its ancestors)", async () => {
+    setBody(`<div><button><span>Save</span></button></div>`);
+    const page = new DomPage(document, { timeout: 100 });
+    // Both the div, button and span contain "Save"; only the innermost wins.
+    expect(await page.getByText("Save").count()).toBe(1);
+    const tag = (
+      await page.getByText("Save").innerText()
+    ).trim();
+    expect(tag).toBe("Save");
+  });
+
+  it("getByText honours exact vs substring", async () => {
+    setBody(`<p>Order confirmed</p>`);
+    const page = new DomPage(document, { timeout: 100 });
+    expect(await page.getByText("confirmed").count()).toBe(1);
+    expect(await page.getByText("confirmed", { exact: true }).count()).toBe(0);
+    expect(await page.getByText("Order confirmed", { exact: true }).count()).toBe(1);
+  });
+
+  it("getByLabel resolves the labelled control (for= and wrapping)", async () => {
+    setBody(`
+      <label for="email">Email</label><input id="email" type="text" />
+      <label>Phone <input type="tel" data-testid="phone" /></label>
+    `);
+    const page = new DomPage(document, { timeout: 100 });
+    await page.getByLabel("Email").fill("a@b.com");
+    expect((document.getElementById("email") as HTMLInputElement).value).toBe("a@b.com");
+    expect(await page.getByLabel("Phone").count()).toBe(1);
+  });
+
+  it("getByPlaceholder / getByTitle / getByAltText match their attributes", async () => {
+    setBody(`
+      <input placeholder="Search orders" />
+      <span title="Help text">?</span>
+      <img alt="Company logo" />
+    `);
+    const page = new DomPage(document, { timeout: 100 });
+    expect(await page.getByPlaceholder("Search orders").count()).toBe(1);
+    expect(await page.getByTitle("Help").count()).toBe(1);
+    expect(await page.getByAltText("Company logo", { exact: true }).count()).toBe(1);
+  });
+
+  it("nth / last select within a matched set", async () => {
+    setBody(`
+      <ul><li>one</li><li>two</li><li>three</li></ul>
+    `);
+    const page = new DomPage(document, { timeout: 100 });
+    expect((await page.locator("li").nth(1).innerText()).trim()).toBe("two");
+    expect((await page.locator("li").last().innerText()).trim()).toBe("three");
+    expect((await page.locator("li").nth(-1).innerText()).trim()).toBe("three");
+  });
+
+  // ── Scope B: actions ──────────────────────────────────────────────────
+
+  it("hover fires the pointer/mouse enter sequence", async () => {
+    setBody(`<div data-testid="t">x</div>`);
+    const el = document.querySelector('[data-testid="t"]')!;
+    const seen: string[] = [];
+    for (const t of ["pointerover", "mouseover", "mousemove"]) {
+      el.addEventListener(t, () => seen.push(t));
+    }
+    await new DomPage(document, { timeout: 100 }).getByTestId("t").hover();
+    expect(seen).toContain("mouseover");
+    expect(seen).toContain("mousemove");
+  });
+
+  it("dblclick fires a dblclick event", async () => {
+    setBody(`<button data-testid="b">go</button>`);
+    let dbl = 0;
+    document
+      .querySelector('[data-testid="b"]')!
+      .addEventListener("dblclick", () => (dbl += 1));
+    await new DomPage(document, { timeout: 100 }).getByTestId("b").dblclick();
+    expect(dbl).toBe(1);
+  });
+
+  it("press dispatches keydown with the key", async () => {
+    setBody(`<input data-testid="i" />`);
+    let key = "";
+    document
+      .querySelector('[data-testid="i"]')!
+      .addEventListener("keydown", (e) => (key = (e as KeyboardEvent).key));
+    await new DomPage(document, { timeout: 100 }).getByTestId("i").press("Enter");
+    expect(key).toBe("Enter");
+  });
+
+  it("check / uncheck flip the checkbox and fire change", async () => {
+    setBody(`<input type="checkbox" data-testid="c" />`);
+    const el = document.querySelector('[data-testid="c"]') as HTMLInputElement;
+    let changes = 0;
+    el.addEventListener("change", () => (changes += 1));
+    const cb = new DomPage(document, { timeout: 100 }).getByTestId("c");
+    await cb.check();
+    expect(el.checked).toBe(true);
+    await cb.uncheck();
+    expect(el.checked).toBe(false);
+    expect(changes).toBe(2);
+  });
+
+  it("selectOption sets the value and fires change", async () => {
+    setBody(`
+      <select data-testid="s">
+        <option value="draft">Draft</option>
+        <option value="done">Done</option>
+      </select>
+    `);
+    const el = document.querySelector('[data-testid="s"]') as HTMLSelectElement;
+    let changed = false;
+    el.addEventListener("change", () => (changed = true));
+    await new DomPage(document, { timeout: 100 }).getByTestId("s").selectOption("done");
+    expect(el.value).toBe("done");
+    expect(changed).toBe(true);
+  });
+
+  it("clear empties an input; focus/blur move activeElement", async () => {
+    setBody(`<input data-testid="i" value="x" />`);
+    const el = document.querySelector('[data-testid="i"]') as HTMLInputElement;
+    const loc = new DomPage(document, { timeout: 100 }).getByTestId("i");
+    await loc.clear();
+    expect(el.value).toBe("");
+    await loc.focus();
+    expect(document.activeElement).toBe(el);
+    await loc.blur();
+    expect(document.activeElement).not.toBe(el);
+  });
 });

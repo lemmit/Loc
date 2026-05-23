@@ -1,10 +1,9 @@
 // ---------------------------------------------------------------------------
 // Single source of truth for the built-in design packs that ship under
-// `<repo>/designs/<family>/<version>/`.  Phase 0 of the pack-versioning
-// rollout: every built-in pack is identified by a `family@version` pair
-// (e.g. "mantine@v7"), with the `family` half corresponding to a
-// directory under `designs/` and the `version` half corresponding to
-// a subdirectory inside it.
+// `<repo>/designs/<family>/<version>/`.  Every built-in pack is
+// identified by a `family@version` pair (e.g. "mantine@v7"), with the
+// `family` half corresponding to a directory under `designs/` and the
+// `version` half corresponding to a subdirectory inside it.
 //
 // Two consumers read this map:
 //   1. The Node + browser pack loaders (`loader-fs.ts`, `loader-vfs.ts`)
@@ -40,9 +39,8 @@ export const BUILTIN_PACK_FORMATS = {
  *  flip the entry here and every bareword consumer rolls forward
  *  automatically — explicit pins (`design: "mantine@v7"`) are the
  *  opt-out for projects that want determinism across toolchain
- *  upgrades.  Phase 0 keeps every default pointing at today's
- *  behaviour so the existing examples generate byte-identical
- *  output. */
+ *  upgrades.  Every default currently points at today's behaviour so
+ *  the existing examples generate byte-identical output. */
 export const BUILTIN_PACK_LATEST = {
   // mantine promoted to v9 (Mantine 9 / React 19, stack v2) once the
   // pinned v9 pack proved out live in the playground.  Bareword

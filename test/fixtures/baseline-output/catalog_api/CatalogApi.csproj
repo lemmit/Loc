@@ -30,7 +30,7 @@
     <PackageReference Include="Mediator.Abstractions" Version="2.1.7" />
     <!-- OpenAPI spec emitted at /swagger/v1/swagger.json -->
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.9.0" />
-    <!-- FluentValidation — slice 21.B wire-boundary validators (Mediator pipeline) -->
+    <!-- FluentValidation — wire-boundary validators (Mediator pipeline) -->
     <PackageReference Include="FluentValidation" Version="11.10.0" />
     <PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="11.10.0" />
   </ItemGroup>

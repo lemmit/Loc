@@ -1,0 +1,85 @@
+name: Tests + coverage
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'test/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'langium-config.json'
+      - 'vitest.config.ts'
+      - 'biome.json'
+      - 'biome.generated.json'
+      - 'designs/**'
+      - '.github/workflows/test.yml'
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'test/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'langium-config.json'
+      - 'vitest.config.ts'
+      - 'biome.json'
+      - 'biome.generated.json'
+      - 'designs/**'
+      - '.github/workflows/test.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      # `npm ci` runs the `prepare` lifecycle (langium:generate + build),
+      # which produces src/language/generated/ — required before vitest
+      # transforms any file that imports the generated AST.
+      - name: Install (runs langium:generate + build)
+        run: npm ci
+
+      - name: Lint (Biome)
+        run: npm run lint
+
+      - name: Test with coverage
+        run: npm run test:coverage
+
+      - name: Generated-code Biome gate
+        run: npm run test:biome-gen
+
+      - name: Coverage summary
+        if: always()
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const p = "coverage/coverage-summary.json";
+            if (!fs.existsSync(p)) { console.log("no coverage summary"); process.exit(0); }
+            const t = JSON.parse(fs.readFileSync(p, "utf8")).total;
+            const row = (k) => `| ${k} | ${t[k].pct}% | ${t[k].covered}/${t[k].total} |`;
+            const md = [
+              "## Coverage",
+              "",
+              "| Metric | % | Covered/Total |",
+              "| --- | --- | --- |",
+              row("statements"), row("branches"), row("functions"), row("lines"),
+            ].join("\n");
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, md + "\n");
+          '
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-html
+          path: coverage/
+          retention-days: 14

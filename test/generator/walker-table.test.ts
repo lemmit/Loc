@@ -1,4 +1,4 @@
-// Slice A2 — Table primitive in walker stdlib.
+// Table primitive in walker stdlib.
 //
 // Surface:
 //
@@ -31,7 +31,7 @@ import { generateSystemFiles } from "../_helpers/index.js";
 
 const buildAndGenerate = generateSystemFiles;
 
-describe("Slice A2 — Table primitive", () => {
+describe("Table primitive", () => {
   it("emits a Mantine table with headers, body map and member-access cells", async () => {
     const files = await buildAndGenerate(`
       system S {
@@ -72,10 +72,40 @@ describe("Slice A2 — Table primitive", () => {
     // The auto-injected hook for `Sales.Order.all` becomes a local
     // `orderAll` (or similar); we just check that some hook variable
     // is being .map'd over.
-    expect(tsx).toMatch(/\.map\(\(row, idx\) => \(/);
+    expect(tsx).toMatch(/\.map\(\(row\) => \(/);
     expect(tsx).toMatch(/<Table\.Tr key=\{ row\.id \}>/);
     expect(tsx).toMatch(/<Table\.Td>\{row\.id\}<\/Table\.Td>/);
     expect(tsx).toMatch(/<Table\.Td>\{row\.customerId\}<\/Table\.Td>/);
+  });
+
+  it("declares the `idx` lambda param only when keyExpr references it", async () => {
+    const files = await buildAndGenerate(`
+      system S {
+        api SalesApi from Sales
+        module Sales {
+          context C {
+            aggregate Order { customerId: string }
+            repository Orders for Order { }
+          }
+        }
+        ui WebApp {
+          api Sales: SalesApi
+          page Orders {
+            route: "/orders"
+            body:  Table(
+              rows:  Sales.Order.all,
+              keyExpr: "idx",
+              Column("Customer", o => o.customerId)
+            )
+          }
+        }
+        deployable api { platform: hono, modules: Sales, serves: SalesApi, port: 3000 }
+        deployable web { platform: static, targets: api, ui: WebApp { Sales: api }, port: 3001 }
+      }
+    `);
+    const tsx = files.get("web/src/pages/orders.tsx")!;
+    expect(tsx).toMatch(/\.map\(\(row, idx\) => \(/);
+    expect(tsx).toMatch(/<Table\.Tr key=\{ idx \}>/);
   });
 
   it("primitive-call accessor body (Badge) emits JSX in the cell", async () => {

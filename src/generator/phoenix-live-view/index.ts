@@ -1,12 +1,12 @@
 import type { BoundedContextIR, DeployableIR, SystemIR } from "../../ir/loom-ir.js";
-import { pascal, plural, snake } from "../../util/naming.js";
+import { plural, snake, upperFirst } from "../../util/naming.js";
 import { type ApiRoute, emitApiControllers } from "./api-emit.js";
 import { emitAuth } from "./auth-emit.js";
 import { emitAggregateResources } from "./domain-emit.js";
 import { emitLiveViewPages, type LiveRoute } from "./liveview-emit.js";
 import { emitMigrations } from "./migrations-emit.js";
 import { emitOpenApiSpec } from "./openapi-emit.js";
-import { renderAshType, renderExpr } from "./render-expr.js";
+import { renderAshType } from "./render-expr.js";
 import { buildFindActions, findRepoFor, mergeViewFindsForAgg } from "./repository-emit.js";
 import { renderSidebarComponent } from "./sidebar-emit.js";
 import { renderThemeCss } from "./theme-emit.js";
@@ -72,7 +72,7 @@ export function generatePhoenixLiveViewProject(
   // --- Migrations -----------------------------------------------------------
   emitMigrations(appName, contexts, appModule, out);
 
-  // --- LiveView pages (Phase 7) --------------------------------------------
+  // --- LiveView pages --------------------------------------------
   // Per PageIR in the deployable's `ui:` block: one
   // lib/<app>_web/live/<page>_live.ex module + a router entry the
   // shell renderer splices into router.ex.
@@ -85,7 +85,7 @@ export function generatePhoenixLiveViewProject(
   });
   for (const [path, content] of liveFiles) out.set(path, content);
 
-  // --- API controllers (Batch A) -------------------------------------------
+  // --- API controllers -------------------------------------------
   // Workflows / Views / Health controllers + their router entries.
   // Workflows / Views are only emitted when `serves:` is populated;
   // Health is always emitted (router references it unconditionally).
@@ -98,7 +98,7 @@ export function generatePhoenixLiveViewProject(
   });
   for (const [path, content] of apiFiles) out.set(path, content);
 
-  // --- OpenAPI spec (Batch D2) ----------------------------------------------
+  // --- OpenAPI spec ----------------------------------------------
   // Emits <Api>Spec module, per-aggregate/workflow/view schema modules,
   // OpenapiController, and a GET /api/openapi.json route entry.
   const { files: openApiFiles, routes: openApiRoutes } = emitOpenApiSpec({
@@ -111,7 +111,7 @@ export function generatePhoenixLiveViewProject(
   for (const [path, content] of openApiFiles) out.set(path, content);
   const apiRoutes = [...baseApiRoutes, ...openApiRoutes];
 
-  // --- Auth modules (Batch E4) ----------------------------------------------
+  // --- Auth modules ----------------------------------------------
   // Emits Auth plug + LiveAuth on_mount when deployable.auth?.required.
   const { files: authFiles, enabled: authEnabled } = emitAuth({
     sys,
@@ -121,7 +121,7 @@ export function generatePhoenixLiveViewProject(
   });
   for (const [path, content] of authFiles) out.set(path, content);
 
-  // --- Sidebar component (Batch C) -----------------------------------------
+  // --- Sidebar component -----------------------------------------
   // Emitted when the deployable mounts a `ui:` — derived from
   // MenuBlockIR or per-page menuMeta, identical structure to the
   // React generator's sidebar.
@@ -135,7 +135,7 @@ export function generatePhoenixLiveViewProject(
     }
   }
 
-  // --- Theme CSS (Batch C) -------------------------------------------------
+  // --- Theme CSS -------------------------------------------------
   // System-level `theme { primary: ..., neutral: ..., radius: ... }`
   // tokens lower to CSS custom properties consumable from any
   // generated layout.  Always emit (empty theme produces a stub).
@@ -168,7 +168,7 @@ function emitContext(
   out: Map<string, string>,
 ): void {
   const ctxSnake = snake(ctx.name);
-  const contextModule = `${appModule}.${pascal(ctx.name)}`;
+  const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
 
   // Enums — Ash enum types
   for (const en of ctx.enums) {
@@ -188,17 +188,16 @@ function emitContext(
     out.set(path, renderEventModule(ev, contextModule));
   }
 
-  // Aggregates — Ash.Resource modules (D1: validations from operation
-  // preconditions / aggregate invariants lower through emitAggregateResources
-  // which has the validate-clause emission; this replaces the orchestrator's
-  // older renderAggregateModule path).
+  // Aggregates — Ash.Resource modules. Validations (operation preconditions
+  // / aggregate invariants) and validate-clause emission are produced by
+  // emitAggregateResources.
   const allResources: string[] = [];
   const aggFiles = emitAggregateResources(ctx, appModule, appName);
   for (const [path, content] of aggFiles) out.set(path, content);
   for (const agg of ctx.aggregates) {
-    allResources.push(`${contextModule}.${pascal(agg.name)}`);
+    allResources.push(`${contextModule}.${upperFirst(agg.name)}`);
     for (const part of agg.parts) {
-      allResources.push(`${contextModule}.${pascal(part.name)}`);
+      allResources.push(`${contextModule}.${upperFirst(part.name)}`);
     }
   }
   // Custom find actions (repository finds + view-derived finds) are
@@ -232,133 +231,11 @@ function emitContext(
 }
 
 // ---------------------------------------------------------------------------
-// Ash.Resource rendering (aggregate)
-// ---------------------------------------------------------------------------
-
-function renderAggregateModule(
-  agg: import("../../ir/loom-ir.js").AggregateIR,
-  _ctx: BoundedContextIR,
-  contextModule: string,
-  customFinds: string[],
-): string {
-  const moduleName = `${contextModule}.${pascal(agg.name)}`;
-  const tableName = plural(snake(agg.name));
-  const idType = idAshType(agg.idValueType);
-
-  // Attributes
-  const attrLines = agg.fields.map((f) => {
-    const ashType = renderAshType(f.type, contextModule);
-    const opts = f.optional ? "allow_nil?: true" : "allow_nil?: false";
-    return `    attribute :${snake(f.name)}, ${ashType}, ${opts}`;
-  });
-
-  // Relationships (containments)
-  const relLines = agg.contains.map((c) => {
-    const partModule = `${contextModule}.${pascal(c.partName)}`;
-    if (c.collection) {
-      return `    has_many :${snake(c.name)}, ${partModule}`;
-    }
-    return `    has_one :${snake(c.name)}, ${partModule}`;
-  });
-
-  // Calculations (derived fields)
-  const calcLines = agg.derived.map((d) => {
-    const ashType = renderAshType(d.type, contextModule);
-    return `    calculate :${snake(d.name)}, ${ashType}, expr(${renderAshExprInline(d.expr, contextModule)})`;
-  });
-
-  // Validations (invariants)
-  const validationLines = agg.invariants.map((inv) => {
-    const exprStr = renderAshExprInline(inv.expr, contextModule);
-    if (inv.guard) {
-      const guardStr = renderAshExprInline(inv.guard, contextModule);
-      return `    validate attribute_does_not_equal(:_placeholder, nil) do\n      where [${exprStr}]\n      message "Invariant: ${inv.source.replace(/"/g, "'")}"\n    end`;
-    }
-    void exprStr;
-    return `    # invariant: ${inv.source}`;
-  });
-
-  // Actions — defaults + custom finds
-  const defaultActions = `    defaults [:read, :create, :update, :destroy]`;
-  const customActionBlock = customFinds.length > 0 ? "\n" + customFinds.join("\n\n") : "";
-
-  return `# Auto-generated.
-defmodule ${moduleName} do
-  use Ash.Resource,
-    otp_app: :${snake(contextModule.split(".")[0] ?? "app")},
-    domain: ${contextModule},
-    data_layer: AshPostgres.DataLayer
-
-  postgres do
-    table "${tableName}"
-    repo ${contextModule.split(".")[0]}.Repo
-  end
-
-  attributes do
-    uuid_primary_key :id
-${attrLines.join("\n")}
-  end
-${relLines.length > 0 ? "\n  relationships do\n" + relLines.join("\n") + "\n  end\n" : ""}${calcLines.length > 0 ? "\n  calculations do\n" + calcLines.join("\n") + "\n  end\n" : ""}${validationLines.length > 0 ? "\n  validations do\n" + validationLines.join("\n") + "\n  end\n" : ""}
-  actions do
-${defaultActions}${customActionBlock}
-  end
-end
-`;
-}
-
-// ---------------------------------------------------------------------------
-// Ash.Resource rendering (entity part / child)
-// ---------------------------------------------------------------------------
-
-function renderPartModule(
-  part: import("../../ir/loom-ir.js").EntityPartIR,
-  parentAgg: import("../../ir/loom-ir.js").AggregateIR,
-  contextModule: string,
-): string {
-  const moduleName = `${contextModule}.${pascal(part.name)}`;
-  const tableName = plural(snake(part.name));
-  const parentModule = `${contextModule}.${pascal(parentAgg.name)}`;
-
-  const attrLines = part.fields.map((f) => {
-    const ashType = renderAshType(f.type, contextModule);
-    const opts = f.optional ? "allow_nil?: true" : "allow_nil?: false";
-    return `    attribute :${snake(f.name)}, ${ashType}, ${opts}`;
-  });
-
-  return `# Auto-generated.
-defmodule ${moduleName} do
-  use Ash.Resource,
-    otp_app: :${snake(contextModule.split(".")[0] ?? "app")},
-    domain: ${contextModule},
-    data_layer: AshPostgres.DataLayer
-
-  postgres do
-    table "${tableName}"
-    repo ${contextModule.split(".")[0]}.Repo
-  end
-
-  attributes do
-    uuid_primary_key :id
-${attrLines.join("\n")}
-  end
-
-  relationships do
-    belongs_to :${snake(parentAgg.name)}, ${parentModule}, allow_nil?: false
-  end
-
-  actions do
-    defaults [:read, :create, :update, :destroy]
-  end
-end
-`;
-}
-
-// ---------------------------------------------------------------------------
 // Enum module
 // ---------------------------------------------------------------------------
 
 function renderEnumModule(en: import("../../ir/loom-ir.js").EnumIR, contextModule: string): string {
-  const moduleName = `${contextModule}.${pascal(en.name)}`;
+  const moduleName = `${contextModule}.${upperFirst(en.name)}`;
   const values = en.values.map((v) => `  :${snake(v)}`).join(",\n");
   return `# Auto-generated.
 defmodule ${moduleName} do
@@ -377,7 +254,7 @@ function renderValueObjectModule(
   vo: import("../../ir/loom-ir.js").ValueObjectIR,
   contextModule: string,
 ): string {
-  const moduleName = `${contextModule}.${pascal(vo.name)}`;
+  const moduleName = `${contextModule}.${upperFirst(vo.name)}`;
   const attrLines = vo.fields.map((f) => {
     const ashType = renderAshType(f.type, contextModule);
     const opts = f.optional ? "allow_nil?: true" : "allow_nil?: false";
@@ -403,11 +280,11 @@ function renderEventModule(
   ev: import("../../ir/loom-ir.js").EventIR,
   contextModule: string,
 ): string {
-  const moduleName = `${contextModule}.Events.${pascal(ev.name)}`;
+  const moduleName = `${contextModule}.Events.${upperFirst(ev.name)}`;
   void renderAshType; // used in sibling fns
   return `# Auto-generated.
 defmodule ${moduleName} do
-  @moduledoc "Domain event: ${pascal(ev.name)}"
+  @moduledoc "Domain event: ${upperFirst(ev.name)}"
 
   defstruct ${ev.fields.map((f) => `:${snake(f.name)}`).join(", ")}
   @type t :: %__MODULE__{
@@ -426,20 +303,20 @@ function renderDomainModule(
   contextModule: string,
   resources: string[],
 ): string {
-  // E2 — Ash 3.x: `define` calls live INSIDE the `resource ... do`
+  // Ash 3.x: `define` calls live INSIDE the `resource ... do`
   // block, NOT in a separate top-level `code_interface do` block
   // (that was Ash 2.x; removed in 3.0).
   const resourceBlocks: string[] = [];
   const partResources = new Set<string>();
   for (const agg of ctx.aggregates) {
     for (const part of agg.parts) {
-      partResources.add(`${contextModule}.${pascal(part.name)}`);
+      partResources.add(`${contextModule}.${upperFirst(part.name)}`);
     }
   }
   for (const r of resources) {
     const aggName = r.split(".").pop()!;
     // Locate the IR aggregate to enumerate its custom finds.
-    const agg = ctx.aggregates.find((a) => pascal(a.name) === aggName);
+    const agg = ctx.aggregates.find((a) => upperFirst(a.name) === aggName);
     if (!agg) {
       // Entity-part resource (child table) — registered with no
       // code-interface defines; Ash 3.x's `resource X` shorthand.
@@ -469,6 +346,16 @@ function renderDomainModule(
         );
       }
     }
+    // Operation actions (`update :<op>`) get a code-interface define so a
+    // one-click `Action(<instance>.<op>)` can invoke them directly
+    // (`<Ctx>.<op>_<agg>!(record)`).  Op params become positional args.
+    for (const op of agg.operations.filter((o) => o.visibility === "public")) {
+      const argsList = op.params.map((p) => `:${snake(p.name)}`).join(", ");
+      const argsClause = argsList ? `, args: [${argsList}]` : "";
+      defines.push(
+        `      define :${snake(op.name)}_${snake(agg.name)}, action: :${snake(op.name)}${argsClause}`,
+      );
+    }
     resourceBlocks.push(`    resource ${r} do\n${defines.join("\n")}\n    end`);
   }
 
@@ -481,18 +368,6 @@ ${resourceBlocks.join("\n")}
   end
 end
 `;
-}
-
-// ---------------------------------------------------------------------------
-// Inline Elixir expression rendering (for Ash expr/filter contexts)
-// Delegates to the Phase 3A render-expr module.
-// ---------------------------------------------------------------------------
-
-function renderAshExprInline(
-  expr: import("../../ir/loom-ir.js").ExprIR,
-  contextModule: string,
-): string {
-  return renderExpr(expr, { thisName: "record", contextModule });
 }
 
 // ---------------------------------------------------------------------------
@@ -733,7 +608,7 @@ end
 `;
 }
 
-function renderApplication(appName: string, appModule: string): string {
+function renderApplication(_appName: string, appModule: string): string {
   return `# Auto-generated.
 defmodule ${appModule}.Application do
   use Application
@@ -759,7 +634,7 @@ end
 `;
 }
 
-function renderWebModule(appName: string, appModule: string): string {
+function renderWebModule(_appName: string, appModule: string): string {
   const webModule = `${appModule}Web`;
   return `# Auto-generated.
 defmodule ${webModule} do
@@ -947,7 +822,7 @@ ${inner}
     liveScopeBody = `\n${flatLines}`;
   }
 
-  // API routes — Batch A's emitApiControllers returns:
+  // API routes — emitApiControllers returns:
   //   - paths prefixed with `!root:` → outside `/api` scope (health / ready)
   //   - bare paths → inside `scope "/api"`
   const rootApiRoutes = apiRoutes.filter((r) => r.path.startsWith("!root:"));
@@ -1414,7 +1289,7 @@ end
 `;
 }
 
-function renderLayouts(appName: string, appModule: string): string {
+function renderLayouts(_appName: string, appModule: string): string {
   const webModule = `${appModule}Web`;
   return `# Auto-generated.
 defmodule ${webModule}.Layouts do
@@ -1471,7 +1346,7 @@ function renderConfigExs(appName: string, appModule: string, contexts: BoundedCo
   // "Domain <Mod> is not present in :ash_domains".  Domains are
   // \`<appModule>.<PascalContextName>\` (matching what
   // emitAggregateResources emits as the resource's :domain).
-  const ashDomains = contexts.map((ctx) => `${appModule}.${pascal(ctx.name)}`).join(", ");
+  const ashDomains = contexts.map((ctx) => `${appModule}.${upperFirst(ctx.name)}`).join(", ");
   return `# Auto-generated.
 import Config
 
@@ -1592,20 +1467,3 @@ function toModulePrefix(snakeName: string): string {
     .map((s) => s[0]!.toUpperCase() + s.slice(1))
     .join("");
 }
-
-function idAshType(idValueType: string): string {
-  switch (idValueType) {
-    case "int":
-      return ":integer";
-    case "long":
-      return ":integer";
-    case "string":
-      return ":string";
-    default:
-      return ":uuid";
-  }
-}
-
-// suppress unused warning — used in inline require above
-void plural;
-void idAshType;

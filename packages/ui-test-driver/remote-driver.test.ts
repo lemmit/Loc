@@ -107,4 +107,39 @@ describe("message-driven UI driver (parent shim → wire → sandbox executor)",
       /no element matched/,
     );
   });
+
+  it("Scope B getters serialise across the wire (getByLabel + nth)", async () => {
+    document.body.innerHTML = `
+      <label for="email">Email</label><input id="email" />
+      <ul><li>one</li><li>two</li></ul>
+    `;
+    const page = harness();
+    await page.getByLabel("Email").fill("hi@x.com");
+    expect((document.getElementById("email") as HTMLInputElement).value).toBe(
+      "hi@x.com",
+    );
+    expect((await page.locator("li").nth(1).innerText()).trim()).toBe("two");
+  });
+
+  it("Scope B actions cross the wire (check + selectOption + press)", async () => {
+    document.body.innerHTML = `
+      <input type="checkbox" data-testid="agree" />
+      <select data-testid="status"><option value="a">A</option><option value="b">B</option></select>
+      <input data-testid="field" />
+    `;
+    const cb = document.querySelector('[data-testid="agree"]') as HTMLInputElement;
+    const sel = document.querySelector('[data-testid="status"]') as HTMLSelectElement;
+    let pressed = "";
+    document
+      .querySelector('[data-testid="field"]')!
+      .addEventListener("keydown", (e) => (pressed = (e as KeyboardEvent).key));
+
+    const page = harness();
+    await page.getByTestId("agree").check();
+    expect(cb.checked).toBe(true);
+    await page.getByTestId("status").selectOption("b");
+    expect(sel.value).toBe("b");
+    await page.getByTestId("field").press("Escape");
+    expect(pressed).toBe("Escape");
+  });
 });
