@@ -121,6 +121,50 @@ describe("phoenixLiveView pipeline", () => {
     expect(init).toMatch(/CREATE DATABASE phoenix_app;/);
   });
 
+  it("emits lib/<app>/telemetry.ex that attaches to phoenix endpoint events", async () => {
+    // Bite 1: idiomatic Phoenix observability via `:telemetry`.  The
+    // Endpoint already mounts `plug Plug.Telemetry,
+    // event_prefix: [:phoenix, :endpoint]` so `[:phoenix, :endpoint,
+    // :start/:stop]` fires on every request; the emitted Telemetry
+    // module attaches handlers and translates them to the neutral
+    // catalog identity (request_start / request_end).
+    const model = await buildFixture();
+    const { files } = generateSystems(model);
+
+    const tel = files.get("phoenix_app/lib/phoenix_app/telemetry.ex");
+    expect(tel, "telemetry.ex is emitted").toBeDefined();
+    expect(tel!).toMatch(/defmodule PhoenixApp\.Telemetry do/);
+    expect(tel!).toMatch(/use Supervisor/);
+    expect(tel!).toMatch(/require Logger/);
+    // Handlers attach in init/1 after a detach-first idempotency guard.
+    expect(tel!).toMatch(/:telemetry\.detach\(@handler_id\)/);
+    expect(tel!).toMatch(/:telemetry\.attach_many\(@handler_id, events,/);
+    // Both endpoint events are subscribed.
+    expect(tel!).toMatch(/\[:phoenix, :endpoint, :start\]/);
+    expect(tel!).toMatch(/\[:phoenix, :endpoint, :stop\]/);
+    // Catalog identity is preserved on the rendered log line for both
+    // events — the renderer in src/generator/_obs/render-phoenix.ts
+    // stamps `event: "request_start"` / `event: "request_end"`.
+    expect(tel!).toMatch(
+      /Logger\.info\("request_start", event: "request_start", method: conn\.method, path: conn\.request_path\)/,
+    );
+    expect(tel!).toMatch(
+      /Logger\.info\("request_end", event: "request_end", method: conn\.method, path: conn\.request_path, status: conn\.status, duration_ms: duration_ms\)/,
+    );
+    // Duration measurement converted from :native to :millisecond so
+    // the structured field is a sensible cross-backend integer.
+    expect(tel!).toMatch(
+      /System\.convert_time_unit\(measurements\.duration, :native, :millisecond\)/,
+    );
+
+    // application.ex lists PhoenixApp.Telemetry between PubSub and
+    // Endpoint so handlers attach before the first request is served.
+    const app = files.get("phoenix_app/lib/phoenix_app/application.ex")!;
+    expect(app).toMatch(
+      /\{Phoenix\.PubSub, name: PhoenixApp\.PubSub\},\s*\n\s*PhoenixApp\.Telemetry,\s*\n\s*PhoenixAppWeb\.Endpoint/,
+    );
+  });
+
   it("emits one LiveView module per scaffolded page + router lines", async () => {
     // The fixture's `scaffold modules: Sales` synthesises three pages
     // for the Customer aggregate (list / new / detail).  Each lands
