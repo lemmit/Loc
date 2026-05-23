@@ -211,9 +211,17 @@ function lowerBase(t: TypeRef): TypeIR {
       const owner = ancestorAggregate(target);
       valueType = (owner?.idKind ?? "guid") as IdValueType;
     }
+    // Macro-emitted references can lack a `$refNode`, which causes
+    // Langium's default Linker to skip resolution silently — `ref`
+    // stays undefined even when the target exists in scope.  Fall
+    // back to the reference text so the IR still names the target;
+    // downstream generators pick up the right `<Name>Id` symbol.
+    // Tracked separately from the "genuinely unresolved" case
+    // because the text is authoritative for synthesised refs.
+    const targetName = target?.name ?? base.target?.$refText ?? "Unknown";
     return {
       kind: "id",
-      targetName: target?.name ?? "Unknown",
+      targetName,
       valueType,
     };
   }

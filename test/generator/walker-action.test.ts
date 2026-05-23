@@ -24,7 +24,7 @@ const SRC = `
       }
     }
     api SalesApi from Sales
-    ui WebApp {
+    ui WebApp with scaffold(aggregates: [Order]) {
       api Sales: SalesApi
       component OrderPanel(order: Order) {
         body: Toolbar(
@@ -33,7 +33,6 @@ const SRC = `
         )
       }
       page OrderHome { route: "/order-home" body: Text("home") }
-      scaffold aggregates: Order
     }
     deployable api {
       platform: hono

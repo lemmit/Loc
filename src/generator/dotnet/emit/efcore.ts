@@ -7,6 +7,7 @@ import type {
 } from "../../../ir/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
+import { renderCsExpr } from "../render-expr.js";
 
 // AppDbContext + per-aggregate IEntityTypeConfiguration<T>.  The
 // configuration walks each aggregate's fields/contains and emits the
@@ -20,6 +21,14 @@ export function renderDbContext(ctx: BoundedContextIR, ns: string): string {
   const applyConfigs = ctx.aggregates.map(
     (a) => `        modelBuilder.ApplyConfiguration(new Configurations.${a.name}Configuration());`,
   );
+  // Capability filter installation is per-EntityConfiguration —
+  // see `renderConfiguration` below, which emits one
+  // `b.HasQueryFilter(...)` per `agg.contextFilters` entry.  No
+  // DbContext-level loop, no marker interfaces, no per-capability
+  // helper class.  Pre-Phase-3-refactor shape; the grouping
+  // infrastructure was removed when stdlib macros were split into
+  // level-correct trios (capability behaviour declared at context;
+  // state declared at aggregate).
   return (
     lines(
       "// Auto-generated.",
@@ -52,6 +61,18 @@ export function renderConfiguration(agg: AggregateIR, ns: string, ctx: BoundedCo
   const indexLines = [...indexed].map(
     (col) => `        b.HasIndex(x => x.${pascalCol(col, agg)});`,
   );
+  // Context filters install per-EntityConfiguration: one
+  // `b.HasQueryFilter(...)` per propagated predicate.  EF Core's
+  // HasQueryFilter is per-entity-type by design — the
+  // DbContext-level grouping mechanism Phase 3 introduced was a
+  // workaround for a misplaced abstraction.  After splitting stdlib
+  // macros into level-correct trios (capability at context, state
+  // at aggregate), every filter just lands here regardless of
+  // whether the aggregate names a capability via `implements`.
+  const filterLines = (agg.contextFilters ?? []).map(
+    (predicate) =>
+      `        b.HasQueryFilter(x => ${renderCsExpr(predicate, { thisName: "x" })});`,
+  );
   return (
     lines(
       "// Auto-generated.",
@@ -74,6 +95,7 @@ export function renderConfiguration(agg: AggregateIR, ns: string, ctx: BoundedCo
       ...fieldConfigs,
       ...containmentLines,
       ...indexLines,
+      ...filterLines,
       "        b.Ignore(x => x.DomainEvents);",
       "    }",
       "}",

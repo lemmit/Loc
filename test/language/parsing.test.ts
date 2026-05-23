@@ -337,8 +337,7 @@ describe("page metamodel — grammar smoke tests", () => {
     const { errors } = await parseSnippet(`
       system Acme {
         module Sales { context S { } }
-        ui WebApp {
-          scaffold modules: Sales
+        ui WebApp with scaffold(modules: [Sales]) {
         }
       }
     `);
@@ -348,12 +347,7 @@ describe("page metamodel — grammar smoke tests", () => {
   it("parses every scaffold selector kind", async () => {
     const { errors } = await parseSnippet(`
       system Acme {
-        ui A {
-          scaffold modules: M
-          scaffold contexts: C
-          scaffold aggregates: Order, Customer
-          scaffold workflows: placeOrder
-          scaffold views: ActiveOrders
+        ui A with scaffold(modules: [M], contexts: [C], aggregates: [Order, Customer], workflows: [placeOrder], views: [ActiveOrders]) {
         }
       }
     `);

@@ -23,6 +23,23 @@ import { renderCsStatements } from "../render-stmt.js";
 // project's assembly (handlers ship in the same csproj).
 // ---------------------------------------------------------------------------
 
+/** Build the `: IAuditable, ISoftDeletable, ...` clause appended
+ * after the class name for aggregates that opt into one or more
+ * capability groups via `implements "<name>"`.  Backend convention:
+ * `<name>` → `I<PascalCase>`.  No marker interface emitted for
+ * capability names with no `implements` declarations; this clause
+ * is empty for those aggregates.
+ *
+ * **Currently a no-op.**  Marker interfaces were the Phase 3
+ * over-build that the refactor reverted; this stub stays in place
+ * so a future "users opt into emitting marker interfaces for their
+ * own type-checking" feature can re-enable emission per capability.
+ * Until then, every aggregate gets an empty clause and the call
+ * site below collapses to `public sealed class <Name>`. */
+function capabilityInterfaceClause(_agg: AggregateIR): string {
+  return "";
+}
+
 export function renderEntity(
   entity: AggregateIR | EntityPartIR,
   isRoot: boolean,
@@ -257,7 +274,7 @@ export function renderEntity(
       "",
       `namespace ${ns}.Domain.${plural(rootName)};`,
       "",
-      `public sealed class ${entity.name}`,
+      `public sealed class ${entity.name}${isAgg ? capabilityInterfaceClause(entity as AggregateIR) : ""}`,
       "{",
       ...propLines,
       ...eventBlock,

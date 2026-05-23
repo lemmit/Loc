@@ -310,11 +310,10 @@ system Acme {
     // through the legacy path and don't reference these params yet;
     // future explicit `page` declarations on the same UI can use
     // them directly (e.g. `body: Sales.Customer.all.data`).
-    ui WebApp {
+    ui WebApp with scaffold(modules: [Catalog, Sales, CustomerMgmt]) {
         api Catalog:      CatalogApi
         api Sales:        SalesApi
         api CustomerMgmt: CustomerMgmtApi
-        scaffold modules: Catalog, Sales, CustomerMgmt
     }
 
     // React + React Query + Zod + Mantine frontend.  References the

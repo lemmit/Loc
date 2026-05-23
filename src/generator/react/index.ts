@@ -82,7 +82,7 @@ export function generateReactForContexts(
   // Page metamodel routing.  When the deployable declares
   // a `ui:` binding, the React generator walks `ui.pages` (after
   // scaffold expansion) via `emitPagesForUi`, which dispatches per
-  // `scaffoldOrigin` to the SAME `renderXxx` functions invoked
+  // `archetype` to the SAME `renderXxx` functions invoked
   // below for the legacy direct walk.  Byte-for-byte equivalent in
   // the bulk-scaffold case.
   //
