@@ -238,7 +238,7 @@ export function fillBlock(
       lines.push(`  await this.page.getByTestId("${testId}").fill(${accessor}!);`);
     }
   } else if (inner.kind === "id") {
-    // `Id<X>` renders as a Mantine `<Select>` populated by
+    // `X id` renders as a Mantine `<Select>` populated by
     // `useAll<X>()`.  Each option carries a `data-testid` of the form
     // `<input-tid>-option-<id>`, set by the form's `renderOption`.
     // Click the input to open the listbox, wait for the options to

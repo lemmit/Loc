@@ -5,7 +5,7 @@ import { collectMemberUsages, memberDeclAt } from "./member-refs.js";
 
 // ---------------------------------------------------------------------------
 // DddReferencesProvider — extends the default with member-access find-all.
-// Cross-reference usages (aggregates, Id<X>, named types, repository-for,
+// Cross-reference usages (aggregates, X id, named types, repository-for,
 // emit, modules/targets) come free from Langium's index.  Member accesses
 // (`order.lines`, bare `customerId`) are string tokens the index can't see,
 // so we add them via the shared `member-refs` resolver.  Purely additive.

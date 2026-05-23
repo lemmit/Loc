@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { validateLoomModel } from "../../src/ir/validate.js";
 import { generateHono, parseString, parseValid, toLoomModel } from "../_helpers/index.js";
 
-// Reference collections (`field: Id<Target>[]`) persist as many-to-many
+// Reference collections (`field: Target id[]`) persist as many-to-many
 // join tables (zero new grammar — any aggregate field whose type is a
 // collection of references gets one).  These tests pin the three seams:
 // schema emission, repository load/save diff-sync, and the membership
@@ -13,17 +13,17 @@ const SRC = `
     aggregate Pokemon { species: string }
     aggregate Trainer {
       name: string
-      party: Id<Pokemon>[]
-      caught: Id<Pokemon>[]
+      party: Pokemon id[]
+      caught: Pokemon id[]
     }
     repository Trainers for Trainer {
-      find holdingInParty(pokemon: Id<Pokemon>): Trainer[] where this.party.contains(pokemon)
+      find holdingInParty(pokemon: Pokemon id): Trainer[] where this.party.contains(pokemon)
     }
   }
 `;
 
 describe("reference-collection join tables (TS/Hono)", () => {
-  it("emits a join table per Id<T>[] field with a composite PK + ordinal, off the owner row", async () => {
+  it("emits a join table per T id[] field with a composite PK + ordinal, off the owner row", async () => {
     const model = await parseValid(SRC);
     const schema = generateHono(model).get("db/schema.ts")!;
     expect(schema).toMatch(/pgTable\("trainer_party"/);
@@ -70,9 +70,9 @@ describe("reference-collection join tables (TS/Hono)", () => {
     const okSrc = `
       context Roster {
         aggregate Pokemon { species: string }
-        aggregate Trainer { name: string  party: Id<Pokemon>[] }
+        aggregate Trainer { name: string  party: Pokemon id[] }
         repository Trainers for Trainer {
-          find holding(pokemon: Id<Pokemon>): Trainer[] where this.party.contains(pokemon)
+          find holding(pokemon: Pokemon id): Trainer[] where this.party.contains(pokemon)
         }
       }
     `;
@@ -82,7 +82,7 @@ describe("reference-collection join tables (TS/Hono)", () => {
     const badSrc = `
       context Roster {
         aggregate Pokemon { species: string }
-        aggregate Trainer { name: string  party: Id<Pokemon>[] }
+        aggregate Trainer { name: string  party: Pokemon id[] }
         repository Trainers for Trainer {
           find big(): Trainer[] where this.party.count > 0
         }

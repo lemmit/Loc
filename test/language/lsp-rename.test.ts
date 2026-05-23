@@ -42,22 +42,22 @@ function applyEdits(
 }
 
 describe("RenameProvider — cross references", () => {
-  it("renames an aggregate and its Id<X> usages", async () => {
+  it("renames an aggregate and its X id usages", async () => {
     const result = await renameAt(
       `context Sales {
   aggregate <|>Order {
     customerId: string
   }
   aggregate Customer {
-    primaryOrder: Id<Order>
+    primaryOrder: Order id
   }
 }`,
       "Sale",
     );
     expect(result).toContain("aggregate Sale {");
-    expect(result).toContain("Id<Sale>");
+    expect(result).toContain("Sale id");
     expect(result).not.toContain("aggregate Order");
-    expect(result).not.toContain("Id<Order>");
+    expect(result).not.toContain("Order id");
   });
 });
 

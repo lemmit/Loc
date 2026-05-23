@@ -7,7 +7,7 @@ import { envForNode, stepIntoNode, typeOf } from "../type-system.js";
 // ---------------------------------------------------------------------------
 // DddDefinitionProvider — extends the default with member-access
 // resolution.  Langium's default handles every grammar `[X:ID]`
-// cross-reference, so for `Id<Order>` / `contains lines: OrderLine` /
+// cross-reference, so for `Order id` / `contains lines: OrderLine` /
 // named-type / repository-for / emit / system module + targets we just
 // delegate.  But `MemberAccess.member` is a plain string token — the
 // default has no way to resolve `order.lines` to the `Containment`

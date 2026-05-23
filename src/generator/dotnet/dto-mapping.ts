@@ -13,7 +13,7 @@ import { renderCsType } from "./render-expr.js";
 // ---------------------------------------------------------------------------
 // Wire-shape DTO mapping helpers.
 //
-// These functions translate between the IR's domain types (with `Id<X>`,
+// These functions translate between the IR's domain types (with `X id`,
 // value objects, enums) and the wire-shape primitive types used in
 // Request / Response DTOs.  Two directions:
 //

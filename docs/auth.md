@@ -39,7 +39,7 @@ system Acme {
     id: string
     role: string
     permissions: string[]          // populated by the verifier hook from JWT claims
-    customerId: Id<Customer>?
+    customerId: Customer id?
     tenantId: string
   }
 
@@ -54,7 +54,7 @@ system Acme {
       enum OrderStatus { Draft, Confirmed, Cancelled }
 
       aggregate Order {
-        customerId: Id<Customer>
+        customerId: Customer id
         status: OrderStatus
 
         // currentUser is in scope inside operation bodies.  The

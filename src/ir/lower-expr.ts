@@ -811,7 +811,7 @@ function memberType(t: TypeIR, name: string, env: Env): TypeIR {
     if (vo) return memberOnValueObject(vo, name);
   }
   if (t.kind === "id") {
-    // `Id<X>.member` — follow the typed reference into X's schema.
+    // `X id.member` — follow the typed reference into X's schema.
     // Mirrors the same case in `stepInto`; both `inferExprType` and
     // `lowerExpr` need it for view bind expressions to multi-hop.
     const target = findEntityByName(env, t.targetName);
@@ -979,9 +979,9 @@ function stepInto(t: TypeIR, name: string, env: Env): TypeIR {
     if (vo) return memberOnValueObject(vo, name);
   }
   if (t.kind === "id") {
-    // `customerId.name` where `customerId: Id<Customer>` — follow the
+    // `customerId.name` where `customerId: Customer id` — follow the
     // typed reference into the target aggregate's schema.  Used by
-    // view bind expressions to project across `Id<X>` references
+    // view bind expressions to project across `X id` references
     // without an explicit join clause.  Single-hop only; the
     // resulting member type comes from the target aggregate's
     // declared shape (property / containment / derived).

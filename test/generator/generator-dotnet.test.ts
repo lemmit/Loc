@@ -642,14 +642,14 @@ describe(".NET generator", () => {
           }
         }
         aggregate Order {
-          customerId: Id<Customer>
+          customerId: Customer id
           status: OrderStatus
           placedAt: datetime
         }
         repository Customers for Customer { }
         repository Orders for Order { }
-        event OrderPlaced { order: Id<Order>, at: datetime }
-        workflow placeOrder(customerId: Id<Customer>, amount: decimal, placedAt: datetime) {
+        event OrderPlaced { order: Order id, at: datetime }
+        workflow placeOrder(customerId: Customer id, amount: decimal, placedAt: datetime) {
           precondition amount > 0
           let customer = Customers.getById(customerId)
           customer.deductCredit(amount)
@@ -666,7 +666,7 @@ describe(".NET generator", () => {
     );
     const files = generateDotnet(doc.parseResult.value as Model);
 
-    // Request DTO uses wire types (Guid for Id<X>, string for datetime).
+    // Request DTO uses wire types (Guid for X id, string for datetime).
     const req = files.get("Application/Workflows/PlaceOrderRequest.cs")!;
     expect(req).toMatch(
       /public sealed record PlaceOrderRequest\(Guid CustomerId, decimal Amount, string PlacedAt\)/,
@@ -730,7 +730,7 @@ describe(".NET generator", () => {
           }
         }
         repository Customers for Customer { }
-        workflow topUp(customerId: Id<Customer>, amount: decimal) transactional {
+        workflow topUp(customerId: Customer id, amount: decimal) transactional {
           precondition amount > 0
           let c = Customers.getById(customerId)
           c.addCredit(amount)
@@ -821,7 +821,7 @@ describe(".NET generator", () => {
         }
         repository Orders for Order { }
         view OrderSummary {
-          orderId: Id<Order>
+          orderId: Order id
           status: OrderStatus
           lineCount: int
           from Order where status == Confirmed
@@ -833,7 +833,7 @@ describe(".NET generator", () => {
     );
     const files = generateDotnet(doc.parseResult.value as Model);
 
-    // Wire-typed Row record (Id<Order> → Guid, enum → string, int → int).
+    // Wire-typed Row record (Order id → Guid, enum → string, int → int).
     const row = files.get("Application/Views/OrderSummaryRow.cs")!;
     expect(row).toMatch(
       /public sealed record OrderSummaryRow\(Guid OrderId, string Status, int LineCount\);/,
@@ -851,7 +851,7 @@ describe(".NET generator", () => {
     );
   });
 
-  it("rewrites Id<X> follow refs to FindManyByIdsAsync + dictionary lookups", async () => {
+  it("rewrites X id follow refs to FindManyByIdsAsync + dictionary lookups", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
@@ -861,13 +861,13 @@ describe(".NET generator", () => {
         enum OrderStatus { Draft, Confirmed }
         aggregate Customer { name: string display, email: string }
         aggregate Order {
-          customerId: Id<Customer>
+          customerId: Customer id
           status: OrderStatus
         }
         repository Customers for Customer { }
         repository Orders for Order { }
         view CustomerOrders {
-          orderId: Id<Order>
+          orderId: Order id
           customerName: string
           customerEmail: string
           status: OrderStatus
@@ -917,7 +917,7 @@ describe(".NET generator", () => {
           operation confirm() extern { precondition isMutable() }
         }
         repository Orders for Order { }
-        workflow placeAndConfirm(orderId: Id<Order>) {
+        workflow placeAndConfirm(orderId: Order id) {
           let order = Orders.getById(orderId)
           order.confirm()
         }
@@ -960,7 +960,7 @@ describe(".NET generator", () => {
           customerId: string
           status: string
           function isMutable(): bool = status == "Draft"
-          operation addLine(productId: Id<Order>, qty: int, price: Money) extern {
+          operation addLine(productId: Order id, qty: int, price: Money) extern {
             precondition isMutable()
             precondition qty > 0
           }
@@ -994,7 +994,7 @@ describe(".NET generator", () => {
           }
         }
         repository Orders for Order { }
-        workflow chargeOrder(orderId: Id<Order>, amount: decimal) {
+        workflow chargeOrder(orderId: Order id, amount: decimal) {
           let order = Orders.getById(orderId)
           order.deduct(amount)
         }
@@ -1011,7 +1011,7 @@ describe(".NET generator", () => {
     );
   });
 
-  it("multi-hop Id<X>.Id<Y>.field follow loads aggregates in dependency order", async () => {
+  it("multi-hop X id.Y id.field follow loads aggregates in dependency order", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
@@ -1020,13 +1020,13 @@ describe(".NET generator", () => {
       context Sales {
         enum OrderStatus { Draft, Confirmed }
         aggregate Region { name: string display, countryCode: string }
-        aggregate Customer { name: string display, regionId: Id<Region> }
-        aggregate Order { customerId: Id<Customer>, status: OrderStatus }
+        aggregate Customer { name: string display, regionId: Region id }
+        aggregate Order { customerId: Customer id, status: OrderStatus }
         repository Regions for Region { }
         repository Customers for Customer { }
         repository Orders for Order { }
         view OrdersWithRegion {
-          orderId: Id<Order>
+          orderId: Order id
           regionName: string
           from Order where status == Confirmed
           bind orderId = id,
@@ -1071,23 +1071,23 @@ describe(".NET generator", () => {
           }
         }
         repository Customers for Customer { }
-        workflow ser(customerId: Id<Customer>, amount: decimal) transactional(serializable) {
+        workflow ser(customerId: Customer id, amount: decimal) transactional(serializable) {
           let c = Customers.getById(customerId)
           c.addCredit(amount)
         }
-        workflow rr(customerId: Id<Customer>, amount: decimal) transactional(repeatableRead) {
+        workflow rr(customerId: Customer id, amount: decimal) transactional(repeatableRead) {
           let c = Customers.getById(customerId)
           c.addCredit(amount)
         }
-        workflow ru(customerId: Id<Customer>, amount: decimal) transactional(readUncommitted) {
+        workflow ru(customerId: Customer id, amount: decimal) transactional(readUncommitted) {
           let c = Customers.getById(customerId)
           c.addCredit(amount)
         }
-        workflow rc(customerId: Id<Customer>, amount: decimal) transactional(readCommitted) {
+        workflow rc(customerId: Customer id, amount: decimal) transactional(readCommitted) {
           let c = Customers.getById(customerId)
           c.addCredit(amount)
         }
-        workflow plain(customerId: Id<Customer>, amount: decimal) transactional {
+        workflow plain(customerId: Customer id, amount: decimal) transactional {
           let c = Customers.getById(customerId)
           c.addCredit(amount)
         }

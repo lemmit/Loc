@@ -988,18 +988,18 @@ const ACME_LIVEVIEW_SOURCE = `system AcmeLV {
         currency: string
         invariant amount >= 0
       }
-      event OrderConfirmed { order: Id<Order>, at: datetime }
+      event OrderConfirmed { order: Order id, at: datetime }
       aggregate Customer {
         name: string display
         email: string
         invariant email.length > 0
       }
       aggregate Order {
-        customerId: Id<Customer>
+        customerId: Customer id
         status: OrderStatus
         contains lines: OrderLine[]
         entity OrderLine {
-          productId: Id<Customer>
+          productId: Customer id
           quantity: int
           invariant quantity > 0
         }
@@ -1011,7 +1011,7 @@ const ACME_LIVEVIEW_SOURCE = `system AcmeLV {
       }
       repository Customers for Customer { }
       repository Orders for Order { }
-      workflow placeOrder(customerId: Id<Customer>) {
+      workflow placeOrder(customerId: Customer id) {
         let order = Order.create({ customerId: customerId, status: Draft })
       }
       view ActiveOrders = Order where status == Confirmed
@@ -1592,7 +1592,7 @@ const FORM_FIXTURE = `system AcmeForm {
       }
       repository Customers for Customer { }
       aggregate Order {
-        customerId: Id<Customer>
+        customerId: Customer id
         total: decimal
       }
       repository Orders for Order { }

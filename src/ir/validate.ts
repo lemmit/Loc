@@ -346,9 +346,9 @@ function validateExternOperations(ctx: BoundedContextIR, diags: LoomDiagnostic[]
 }
 
 // ---------------------------------------------------------------------------
-// `Id<X>` validation for React deployables.
+// `X id` validation for React deployables.
 //
-// The React form generator renders an `Id<X>` form field as a `<Select>`
+// The React form generator renders an `X id` form field as a `<Select>`
 // populated by `useAll<X>()` with the target aggregate's `display`-marked
 // field as the option label.  Two preconditions must hold for the form
 // to be usable:
@@ -362,7 +362,7 @@ function validateExternOperations(ctx: BoundedContextIR, diags: LoomDiagnostic[]
 //      can't fetch the list).
 //
 // We check both up-front per react deployable.  Backends-only
-// deployables don't trigger these checks — `Id<X>` on the wire is
+// deployables don't trigger these checks — `X id` on the wire is
 // just a string/uuid and doesn't depend on a display label.
 // ---------------------------------------------------------------------------
 
@@ -378,7 +378,7 @@ function validateReactIdReferences(sys: SystemIR, diags: LoomDiagnostic[]): void
   }
 
   for (const d of sys.deployables) {
-    // UI-mounting deployables emit per-aggregate forms whose `Id<X>`
+    // UI-mounting deployables emit per-aggregate forms whose `X id`
     // inputs need the target aggregate to be reachable from the
     // deployable's mounted set.  Backend-only deployables (hono)
     // skip — no UI.  `dotnet` is dual-mode now (`mountsUi: true` to
@@ -399,7 +399,7 @@ function validateReactIdReferences(sys: SystemIR, diags: LoomDiagnostic[]): void
     }
 
     // Walk every operation param + every aggregate field that lowers to
-    // an `Id<X>` and check both invariants against the system-wide
+    // an `X id` and check both invariants against the system-wide
     // registry + this deployable's mounted set.
     for (const aggName of mounted) {
       const agg = allAggregates.get(aggName);
@@ -422,7 +422,7 @@ function validateReactIdReferences(sys: SystemIR, diags: LoomDiagnostic[]): void
         }
       }
       // Part fields too — entity-parts on the wire surface as nested
-      // shapes, but their `Id<X>` properties show up as foreign
+      // shapes, but their `X id` properties show up as foreign
       // references in the part's row.  Forms for parts go through
       // the same Select picker pattern.
       for (const part of agg.parts) {
@@ -462,7 +462,7 @@ function checkIdReference(
   if (!agg) {
     diags.push({
       severity: "error",
-      message: `UI-mounting deployable '${deployableName}': '${source}' references Id<${target}>, but no aggregate '${target}' is declared in the system.`,
+      message: `UI-mounting deployable '${deployableName}': '${source}' references ${target} id, but no aggregate '${target}' is declared in the system.`,
       source: `${deployableName}/${source}`,
     });
     return;
@@ -474,7 +474,7 @@ function checkIdReference(
     diags.push({
       severity: "error",
       message:
-        `UI-mounting deployable '${deployableName}': '${source}' references Id<${target}>, but '${target}' is not mounted on this deployable's modules.  ` +
+        `UI-mounting deployable '${deployableName}': '${source}' references ${target} id, but '${target}' is not mounted on this deployable's modules.  ` +
         `Mount the module containing '${target}' on the deployable's targeted backend, or remove the reference.`,
       source: `${deployableName}/${source}`,
     });
@@ -486,7 +486,7 @@ function checkIdReference(
     diags.push({
       severity: "error",
       message:
-        `UI-mounting deployable '${deployableName}': '${source}' references Id<${target}>, but '${target}' has no 'display' field.  ` +
+        `UI-mounting deployable '${deployableName}': '${source}' references ${target} id, but '${target}' has no 'display' field.  ` +
         `Add 'string display' to one of '${target}''s string fields (e.g. 'name: string display') so the form's <Select> picker can label options.`,
       source: `${deployableName}/${source}`,
     });

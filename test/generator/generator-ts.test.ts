@@ -791,7 +791,7 @@ describe("typescript generator", () => {
             operation confirm() extern { precondition isMutable() }
           }
           repository Orders for Order { }
-          workflow confirmOne(orderId: Id<Order>) {
+          workflow confirmOne(orderId: Order id) {
             let order = Orders.getById(orderId)
             order.confirm()
           }
@@ -857,14 +857,14 @@ describe("typescript generator", () => {
           }
         }
         aggregate Order {
-          customerId: Id<Customer>
+          customerId: Customer id
           status: OrderStatus
           placedAt: datetime
         }
         repository Customers for Customer { }
         repository Orders for Order { }
-        event OrderPlaced { order: Id<Order>, at: datetime }
-        workflow placeOrder(customerId: Id<Customer>, amount: decimal, placedAt: datetime) {
+        event OrderPlaced { order: Order id, at: datetime }
+        workflow placeOrder(customerId: Customer id, amount: decimal, placedAt: datetime) {
           precondition amount > 0
           let customer = Customers.getById(customerId)
           customer.deductCredit(amount)
@@ -930,7 +930,7 @@ describe("typescript generator", () => {
           }
         }
         repository Customers for Customer { }
-        workflow topUp(customerId: Id<Customer>, amount: decimal) transactional {
+        workflow topUp(customerId: Customer id, amount: decimal) transactional {
           precondition amount > 0
           let target = Customers.getById(customerId)
           target.addCredit(amount)
@@ -1015,7 +1015,7 @@ describe("typescript generator", () => {
         }
         repository Orders for Order { }
         view OrderSummary {
-          orderId: Id<Order>
+          orderId: Order id
           status: OrderStatus
           lineCount: int
           from Order where status == Confirmed
@@ -1044,7 +1044,7 @@ describe("typescript generator", () => {
     expect(views).toMatch(/projected as z\.infer<typeof OrderSummaryResponse>/);
   });
 
-  it("rewrites Id<X> follow refs to bulk-load + map lookups", async () => {
+  it("rewrites X id follow refs to bulk-load + map lookups", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
@@ -1054,13 +1054,13 @@ describe("typescript generator", () => {
         enum OrderStatus { Draft, Confirmed }
         aggregate Customer { name: string display, email: string }
         aggregate Order {
-          customerId: Id<Customer>
+          customerId: Customer id
           status: OrderStatus
         }
         repository Customers for Customer { }
         repository Orders for Order { }
         view CustomerOrders {
-          orderId: Id<Order>
+          orderId: Order id
           customerName: string
           customerEmail: string
           status: OrderStatus
@@ -1110,7 +1110,7 @@ describe("typescript generator", () => {
           operation confirm() extern { precondition isMutable() }
         }
         repository Orders for Order { }
-        workflow placeAndConfirm(orderId: Id<Order>) {
+        workflow placeAndConfirm(orderId: Order id) {
           let order = Orders.getById(orderId)
           order.confirm()
         }
@@ -1151,7 +1151,7 @@ describe("typescript generator", () => {
           }
         }
         repository Orders for Order { }
-        workflow chargeOrder(orderId: Id<Order>, amount: decimal) {
+        workflow chargeOrder(orderId: Order id, amount: decimal) {
           let order = Orders.getById(orderId)
           order.deduct(amount)
         }
@@ -1166,7 +1166,7 @@ describe("typescript generator", () => {
     expect(wf).toMatch(/await __handler\(order, \{ amount: amount \}\);/);
   });
 
-  it("multi-hop Id<X>.Id<Y>.field follow loads aggregates in dependency order", async () => {
+  it("multi-hop X id.Y id.field follow loads aggregates in dependency order", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
@@ -1175,13 +1175,13 @@ describe("typescript generator", () => {
       context Sales {
         enum OrderStatus { Draft, Confirmed }
         aggregate Region { name: string display, countryCode: string }
-        aggregate Customer { name: string display, regionId: Id<Region> }
-        aggregate Order { customerId: Id<Customer>, status: OrderStatus }
+        aggregate Customer { name: string display, regionId: Region id }
+        aggregate Order { customerId: Customer id, status: OrderStatus }
         repository Regions for Region { }
         repository Customers for Customer { }
         repository Orders for Order { }
         view OrdersWithRegion {
-          orderId: Id<Order>
+          orderId: Order id
           regionName: string
           countryCode: string
           from Order where status == Confirmed
@@ -1251,8 +1251,8 @@ describe("typescript generator", () => {
         }
         repository Accounts for Account { }
         workflow transferFunds(
-          fromAccount: Id<Account>,
-          toAccount: Id<Account>,
+          fromAccount: Account id,
+          toAccount: Account id,
           amount: Money,
         ) transactional {
           let from = Accounts.getById(fromAccount)
@@ -1302,23 +1302,23 @@ describe("typescript generator", () => {
           }
         }
         repository Customers for Customer { }
-        workflow ser(customerId: Id<Customer>, amount: decimal) transactional(serializable) {
+        workflow ser(customerId: Customer id, amount: decimal) transactional(serializable) {
           let c = Customers.getById(customerId)
           c.addCredit(amount)
         }
-        workflow rr(customerId: Id<Customer>, amount: decimal) transactional(repeatableRead) {
+        workflow rr(customerId: Customer id, amount: decimal) transactional(repeatableRead) {
           let c = Customers.getById(customerId)
           c.addCredit(amount)
         }
-        workflow ru(customerId: Id<Customer>, amount: decimal) transactional(readUncommitted) {
+        workflow ru(customerId: Customer id, amount: decimal) transactional(readUncommitted) {
           let c = Customers.getById(customerId)
           c.addCredit(amount)
         }
-        workflow rc(customerId: Id<Customer>, amount: decimal) transactional(readCommitted) {
+        workflow rc(customerId: Customer id, amount: decimal) transactional(readCommitted) {
           let c = Customers.getById(customerId)
           c.addCredit(amount)
         }
-        workflow plain(customerId: Id<Customer>, amount: decimal) transactional {
+        workflow plain(customerId: Customer id, amount: decimal) transactional {
           let c = Customers.getById(customerId)
           c.addCredit(amount)
         }

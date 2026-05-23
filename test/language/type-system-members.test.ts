@@ -93,7 +93,7 @@ describe("type-system — membersOfType (single source for member completion)", 
     ]);
   });
 
-  it("Id<X> → unwraps to the target's members (closes the LSP gap)", () => {
+  it("X id → unwraps to the target's members (closes the LSP gap)", () => {
     const customer = find<Aggregate>("Aggregate", "Customer");
     expect(names({ kind: "id", target: customer })).toEqual(
       expect.arrayContaining(["id", "name", "email"]),

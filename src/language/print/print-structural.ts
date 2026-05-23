@@ -441,7 +441,7 @@ function printProperty(node: Property): string {
 }
 
 function printContainment(node: Containment): string {
-  return `contains ${node.name}: ${node.partType.$refText}${node.collection ? "[]" : ""}`;
+  return `contains ${node.name}: ${node.partType.$refText}${node.collection ? "[]" : ""}${node.optional ? "?" : ""}`;
 }
 
 function printDerivedProp(node: DerivedProp): string {
@@ -528,7 +528,7 @@ function printTypeRef(node: TypeRef): string {
       s = base.name;
       break;
     case "IdType":
-      s = `Id<${base.target.$refText}>`;
+      s = `${base.target.$refText} id`;
       break;
     case "NamedType":
       s = base.target.$refText;

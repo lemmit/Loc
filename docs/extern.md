@@ -138,7 +138,7 @@ A workflow can invoke a parameterless extern op as if it were any
 other public operation:
 
 ```ddd
-workflow placeAndConfirm(orderId: Id<Order>) {
+workflow placeAndConfirm(orderId: Order id) {
   let order = Orders.getById(orderId)
   order.confirm()   // confirm() is extern — workflow runs the dance
 }

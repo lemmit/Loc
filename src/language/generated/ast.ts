@@ -47,7 +47,6 @@ export type DddKeywordNames =
     | ">"
     | ">="
     | "?"
-    | "Id"
     | "["
     | "[]"
     | "]"
@@ -563,6 +562,7 @@ export interface Containment extends AstNode {
     readonly $type: 'Containment';
     collection: boolean;
     name: string;
+    optional: boolean;
     partType: Reference<EntityPart>;
 }
 
@@ -2121,6 +2121,7 @@ export class DddAstReflection extends AbstractAstReflection {
                     properties: [
                         { name: 'collection', defaultValue: false },
                         { name: 'name' },
+                        { name: 'optional', defaultValue: false },
                         { name: 'partType' }
                     ]
                 };

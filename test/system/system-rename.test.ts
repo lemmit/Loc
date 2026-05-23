@@ -21,15 +21,15 @@ describe("System builder — rename with reference updates", () => {
     // merely starts with "Customer", is left alone).
     expect(src).toMatch(/repository Customers for Client\b/);
 
-    // `Id<Customer>` part-type references followed; the field decl + find
+    // `Customer id` part-type references followed; the field decl + find
     // params now point at the renamed aggregate.
-    expect(src).toMatch(/customerId: Id<Client>/);
-    expect(src).toMatch(/find byCustomer\(customerId: Id<Client>\)/);
+    expect(src).toMatch(/customerId: Client id/);
+    expect(src).toMatch(/find byCustomer\(customerId: Client id\)/);
 
     // No real reference to the old name survives in code (comments, which can
     // mirror the field syntax verbatim, are not references and stay intact).
     const code = src.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
-    expect(code).not.toMatch(/Id<Customer>/);
+    expect(code).not.toMatch(/Customer id/);
     expect(code).not.toMatch(/aggregate Customer\b/);
   });
 
@@ -38,9 +38,9 @@ describe("System builder — rename with reference updates", () => {
     expect(out).not.toBeNull();
     const src = out!;
     expect(src).toMatch(/aggregate Item\b/);
-    expect(src).toMatch(/Id<Item>/);
+    expect(src).toMatch(/Item id/);
     // The `productId:` field name is not the reference and must be preserved.
-    expect(src).toMatch(/productId: Id<Item>/);
+    expect(src).toMatch(/productId: Item id/);
   });
 
   it("returns null for a construct that does not exist", async () => {
@@ -63,7 +63,7 @@ describe("System builder — field (member) rename", () => {
     expect(out).toMatch(/status = orderStatus/);
   });
 
-  it("renames a derived prop used through Id<X> follow paths", async () => {
+  it("renames a derived prop used through X id follow paths", async () => {
     const out = (await renameMember(sales, "aggregate", "Order", "total", "grandTotal"))!;
     expect(out).toMatch(/derived grandTotal: Money/);
   });

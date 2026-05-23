@@ -140,7 +140,7 @@ describe("page metamodel — IR shape", () => {
       system Acme {
         module M { context C { aggregate Customer { name: string } repository Customers for Customer { } } }
         ui WebApp {
-          page CustomerDetail(id: Id<Customer>) {
+          page CustomerDetail(id: Customer id) {
             route: "/customers/:id"
             body: Detail(of: Customer, by: id)
           }
@@ -154,9 +154,9 @@ describe("page metamodel — IR shape", () => {
     // bodies into walker-stdlib compositions.  The page now carries
     // the expanded `Stack(Breadcrumbs, Heading, QueryView, …)` body
     // instead of the original `Detail(of:, by:)`.  Params survive
-    // intact — including `id: Id<Customer>` (and the expander
+    // intact — including `id: Customer id` (and the expander
     // appends an `id: string` synthetic if missing; here the user
-    // declared it as `Id<Customer>` so no synthetic append).
+    // declared it as `Customer id` so no synthetic append).
     expect(page.params.length).toBeGreaterThanOrEqual(1);
     const idParam = page.params.find((p) => p.name === "id")!;
     expect(idParam.name).toBe("id");

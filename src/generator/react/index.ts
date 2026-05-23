@@ -64,7 +64,7 @@ export function generateReactForContexts(
     for (const agg of ctx.aggregates) aggregates.push({ agg, ctx });
   }
 
-  // Workspace-wide aggregate registry — used by `Id<X>` form-input
+  // Workspace-wide aggregate registry — used by `X id` form-input
   // emission to resolve the target's display field across bounded
   // contexts.  Built once and threaded through every per-aggregate
   // builder to avoid recomputing per-call.
