@@ -144,13 +144,30 @@ describe(".NET generator", () => {
       expect(program).toMatch(/statusCode: 503/);
     });
 
-    it("Program.cs registers ApplicationStopping for graceful shutdown logging", async () => {
+    it("Program.cs wires server-lifecycle catalog events via IHostApplicationLifetime", async () => {
+      // Bite 5a: the bare "Shutting down" log was superseded by catalog
+      // identity — server_starting / server_listening / server_shutdown
+      // / server_drained land on the structured stream with the same
+      // event names Hono and Phoenix emit.
       const model = await buildModel("examples/sales.ddd");
       const files = generateDotnet(model);
       const program = files.get("Program.cs")!;
       expect(program).toMatch(/IHostApplicationLifetime/);
+      expect(program).toMatch(/ApplicationStarted\.Register/);
       expect(program).toMatch(/ApplicationStopping\.Register/);
-      expect(program).toMatch(/Shutting down/);
+      expect(program).toMatch(/ApplicationStopped\.Register/);
+      // Catalog identity via renderDotnetLogCall — same template +
+      // placeholder shape every other .NET emit site uses.
+      expect(program).toMatch(
+        /lifecycleLog\.LogInformation\("\{Event\} port=\{Port\} env=\{Env\}", "server_starting"/,
+      );
+      expect(program).toMatch(
+        /lifecycleLog\.LogInformation\("\{Event\} port=\{Port\}", "server_listening"/,
+      );
+      expect(program).toMatch(
+        /lifecycleLog\.LogInformation\("\{Event\} signal=\{Signal\}", "server_shutdown", "SIGTERM"\)/,
+      );
+      expect(program).toMatch(/lifecycleLog\.LogInformation\("\{Event\}", "server_drained"\)/);
     });
   });
 

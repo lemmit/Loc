@@ -1,5 +1,17 @@
 import type { BoundedContextIR } from "../../../ir/loom-ir.js";
 import { plural, upperFirst } from "../../../util/naming.js";
+import { renderDotnetLogCall } from "../../_obs/render-dotnet.js";
+
+// Program.cs is top-level statements, not a class — so the renderer's
+// `_log.` prefix becomes `lifecycleLog.`.  When the call sits inside a
+// `Register(() => ...)` lambda body the trailing `;` would close the
+// lambda too early; `asLifecycleExpr` strips it.
+function asLifecycleStmt(rendered: string): string {
+  return rendered.replace("_log.", "lifecycleLog.");
+}
+function asLifecycleExpr(rendered: string): string {
+  return asLifecycleStmt(rendered).replace(/;\s*$/, "");
+}
 
 // Program.cs hosting + DI registration, plus the project + Dockerfile +
 // .dockerignore boilerplate.  Pure substitution templates — no
@@ -259,6 +271,37 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 var app = builder.Build();
+
+// Catalog server-lifecycle events.  Same event names + level Hono and
+// Phoenix emit so a cross-backend dashboard pivots on one identity.
+// A separate logger keeps these lines distinct from per-request
+// middleware lines in the structured stream.
+var lifecycleLog = app.Services.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>()
+    .CreateLogger("Lifecycle");
+var loomPort = builder.Configuration["PORT"]
+    ?? System.Environment.GetEnvironmentVariable("PORT")
+    ?? "8080";
+var loomEnv = app.Environment.EnvironmentName ?? "Production";
+${asLifecycleStmt(
+  renderDotnetLogCall("serverStarting", [
+    { name: "port", valueExpr: "loomPort" },
+    { name: "env", valueExpr: "loomEnv" },
+  ]),
+)}
+{
+    var lifetime = app.Services.GetRequiredService<Microsoft.Extensions.Hosting.IHostApplicationLifetime>();
+    lifetime.ApplicationStarted.Register(() =>
+        ${asLifecycleExpr(
+          renderDotnetLogCall("serverListening", [{ name: "port", valueExpr: "loomPort" }]),
+        )});
+    lifetime.ApplicationStopping.Register(() =>
+        ${asLifecycleExpr(
+          renderDotnetLogCall("serverShutdown", [{ name: "signal", valueExpr: '"SIGTERM"' }]),
+        )});
+    lifetime.ApplicationStopped.Register(() =>
+        ${asLifecycleExpr(renderDotnetLogCall("serverDrained"))});
+}
+
 // Liveness probe — cheap, no I/O.  K8s livenessProbe / docker-compose
 // healthcheck use this to decide "is the process alive?".  A DB blip
 // must NOT mark the pod not-alive (that restarts the container and
@@ -321,18 +364,6 @@ using (var scope = app.Services.CreateScope())
     db.Database.EnsureCreated();
 }
 ${authVerify}${externVerify}
-// Graceful shutdown — log the intent so operators see "shutting down"
-// in container logs instead of an abrupt SIGKILL trace.  ASP.NET
-// Core's host already drains in-flight requests + disposes scoped
-// services (including AppDbContext) automatically; this hook is just
-// the visible breadcrumb.
-{
-    var lifetime = app.Services.GetRequiredService<Microsoft.Extensions.Hosting.IHostApplicationLifetime>();
-    var logger = app.Services.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>()
-        .CreateLogger("Shutdown");
-    lifetime.ApplicationStopping.Register(() =>
-        logger.LogInformation("Shutting down — draining in-flight requests."));
-}
 app.Run();
 `;
 }
