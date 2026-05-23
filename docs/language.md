@@ -58,6 +58,71 @@ system Acme {
 The two forms can coexist in one file but typically you'd use one or
 the other.
 
+### Multi-file projects: `import` and root-level shared types
+
+A project may be split across multiple `.ddd` files.  An entry file
+(conventionally `main.ddd`) declares per-file path-based imports; the
+project loader walks the import graph transitively from the entry
+file and treats every reachable document as one project.
+
+```ddd
+// main.ddd
+import "./shared/money.ddd"
+import "./orders.ddd"
+
+system Shop {
+    module Sales { context Orders { … } }
+    deployable api { platform: hono, modules: Sales }
+}
+```
+
+```ddd
+// shared/money.ddd — declared at model root, ambient across files.
+valueobject Money {
+    amount: decimal
+    currency: string
+}
+
+enum Currency { USD, EUR, GBP }
+```
+
+```ddd
+// orders.ddd
+context Orders {
+    aggregate Order {
+        total: Money            // root-level Money resolves here
+        currency: Currency
+    }
+}
+```
+
+Rules:
+
+- Imports are relative to the importing file (`"./other.ddd"` is
+  resolved against the directory containing the file with the
+  `import`).
+- The import graph defines the project.  Files nobody imports are not
+  part of the project (no autodiscovery).
+- **Only `valueobject` and `enum` may appear at the model root.**
+  They form an implicit shared kernel — visible from every context as
+  a type, regardless of which file defines them.
+- Aggregates, events, repositories, workflows, and views stay inside
+  a context, as before.
+- Cross-context aggregate references are **not** changed by this
+  feature.  Today's rule applies: `Id<X>` only resolves to an
+  aggregate in the same context.
+- Workspace-level uniqueness: root-level VO / enum names, system
+  names, and context names must each be unique across the whole
+  project.  A context-local VO / enum that shadows a root-level one
+  is a hard error.
+- `generate system <main.ddd>` is the multi-file-aware entry point.
+  Legacy `generate ts` / `generate dotnet` keep their single-file
+  semantics.
+
+See [`tools.md`](tools.md) for the CLI side and
+[`multi-file-source.md`](multi-file-source.md) for the design
+rationale.
+
 ### Inside a `system`
 
 | Form | Purpose |
