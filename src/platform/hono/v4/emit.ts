@@ -190,7 +190,7 @@ export function generateTypeScriptForContexts(
       );
       out.set(
         `db/repositories/${lowerFirst(agg.name)}-repository.ts`,
-        buildRepositoryFile(agg, repo, ctx),
+        buildRepositoryFile(agg, repo, ctx, emitTrace),
       );
       out.set(
         `http/${lowerFirst(agg.name)}.routes.ts`,

@@ -221,6 +221,48 @@ describe("typescript generator", () => {
       );
     });
 
+    it("--trace on: repository wraps findById + save in tx_begin/tx_commit/tx_rollback + child_synced per upsert", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS, { emitTrace: true });
+      const repo = files.get("db/repositories/order-repository.ts")!;
+      // Each of the two transactional methods (findById + save) opens
+      // with tx_begin, wraps the inner body in try { … }, emits tx_commit
+      // on success, and tx_rollback (with the error message) on the
+      // catch path.  Two of each event in the file (one per method).
+      expect(repo.match(/event: "tx_begin"/g)?.length).toBe(2);
+      expect(repo.match(/event: "tx_commit"/g)?.length).toBe(2);
+      expect(repo.match(/event: "tx_rollback"/g)?.length).toBe(2);
+      expect(repo).toMatch(
+        /requestLog\(\)\.trace\(\{ event: "tx_begin", aggregate: "Order", id:/,
+      );
+      expect(repo).toMatch(
+        /requestLog\(\)\.trace\(\{ event: "tx_rollback", .*error: __txErr instanceof Error \? __txErr\.message : String\(__txErr\) \}\)/,
+      );
+      // child_synced per upsert in the save's child loop — action read
+      // from `__existingIds<Cap>` (set before the upsert) so it tags
+      // insert vs update without a second round-trip.
+      expect(repo).toMatch(
+        /const __childAction = __existingIdsLines\.has\(child\.id as string\) \? "update" : "insert";/,
+      );
+      expect(repo).toMatch(
+        /requestLog\(\)\.trace\(\{ event: "child_synced", parent: "Order", part: "OrderLine", id: child\.id as string, action: __childAction \}\)/,
+      );
+    });
+
+    it("--trace off: repository stays free of tx_* + child_synced (no try/catch wrap)", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS); // no emitTrace
+      const repo = files.get("db/repositories/order-repository.ts")!;
+      // No tx_* logs, no try/catch wrapper, no child_synced — body
+      // stays at the original 6-space indent and the existing
+      // `await this.db.transaction(...)` form is unchanged.
+      expect(repo).not.toMatch(/event: "tx_begin"/);
+      expect(repo).not.toMatch(/event: "tx_commit"/);
+      expect(repo).not.toMatch(/event: "tx_rollback"/);
+      expect(repo).not.toMatch(/event: "child_synced"/);
+      expect(repo).not.toMatch(/catch \(__txErr\)/);
+    });
+
     it("--trace off: invariant emission stays byte-identical to no-trace output", async () => {
       const model = await buildModel("examples/sales.ddd");
       const files = generateTypeScript(model, HONO_V4_PINS); // no emitTrace

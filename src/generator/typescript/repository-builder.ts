@@ -73,6 +73,7 @@ export function buildRepositoryFile(
   agg: AggregateIR,
   repo: RepositoryIR | undefined,
   ctx: BoundedContextIR,
+  emitTrace = false,
 ): string {
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
@@ -142,7 +143,7 @@ export function buildRepositoryFile(
   lines.push("");
 
   // findById
-  lines.push(...findByIdMethod(agg, ctx));
+  lines.push(...findByIdMethod(agg, ctx, emitTrace));
   lines.push("");
 
   // getById
@@ -160,7 +161,7 @@ export function buildRepositoryFile(
   lines.push("");
 
   // save
-  lines.push(...saveMethod(agg, ctx));
+  lines.push(...saveMethod(agg, ctx, emitTrace));
   lines.push("");
 
   // Find queries
@@ -351,11 +352,146 @@ function findManyByIdsMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] 
   return lines;
 }
 
-function findByIdMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
+function findByIdMethod(
+  agg: AggregateIR,
+  ctx: BoundedContextIR,
+  emitTrace = false,
+): string[] {
   const lines: string[] = [];
   const tableName = lowerFirst(plural(agg.name));
   lines.push(`  async findById(id: Ids.${agg.name}Id): Promise<${agg.name} | null> {`);
-  lines.push(`    return await this.db.transaction(async (tx) => {`);
+  // Inner body of the `db.transaction(async (tx) => { … })` callback.
+  // Built at 6-space indent first so we can wrap it differently for
+  // --trace (which needs an outer try/catch + tx_begin/commit/rollback
+  // logs) without duplicating the body across both variants.
+  const body: string[] = [];
+  body.push(...txCallbackBody(agg, ctx));
+  if (emitTrace) {
+    // Trace-on: wrap the existing call in try/catch + the three tx_*
+    // logs.  Body re-indented +2 so it sits inside the new wrapper.
+    lines.push(
+      `    ${renderHonoStoreLogCall("txBegin", `aggregate: "${agg.name}", id: id as string`)}`,
+    );
+    lines.push(`    try {`);
+    lines.push(`      const __result = await this.db.transaction(async (tx) => {`);
+    lines.push(...body.map((l) => `  ${l}`));
+    lines.push(`      });`);
+    lines.push(
+      `      ${renderHonoStoreLogCall("txCommit", `aggregate: "${agg.name}", id: id as string`)}`,
+    );
+    lines.push(`      return __result;`);
+    lines.push(`    } catch (__txErr) {`);
+    lines.push(
+      `      ${renderHonoStoreLogCall("txRollback", `aggregate: "${agg.name}", id: id as string, error: __txErr instanceof Error ? __txErr.message : String(__txErr)`)}`,
+    );
+    lines.push(`      throw __txErr;`);
+    lines.push(`    }`);
+  } else {
+    lines.push(`    return await this.db.transaction(async (tx) => {`);
+    lines.push(...body);
+    lines.push(`    });`);
+  }
+  lines.push(`  }`);
+  return lines;
+}
+
+/** Inner body of the save db.transaction callback at 6-space indent.
+ *  Extracted so the trace-on variant can re-indent and wrap it with the
+ *  outer try/catch + tx_* logs.  Also the seam where `child_synced`
+ *  trace lines (--trace) are injected per child upsert. */
+function saveTxBody(agg: AggregateIR, ctx: BoundedContextIR, emitTrace: boolean): string[] {
+  const lines: string[] = [];
+  const tableName = lowerFirst(plural(agg.name));
+  lines.push(`      const rootRow = ${rootProjection(agg, "aggregate", ctx)};`);
+  lines.push(
+    `      await tx.insert(schema.${tableName}).values(rootRow).onConflictDoUpdate({ target: schema.${tableName}.id, set: rootRow });`,
+  );
+  for (const c of agg.contains) {
+    if (!c.collection) continue;
+    const part = agg.parts.find((p) => p.name === c.partName);
+    if (!part) continue;
+    const childTable = lowerFirst(plural(part.name));
+    const cap = upperFirst(c.name);
+    lines.push("");
+    lines.push(
+      `      const __existing${cap} = await tx.select({ id: schema.${childTable}.id }).from(schema.${childTable}).where(eq(schema.${childTable}.parentId, aggregate.id));`,
+    );
+    lines.push(`      const __existingIds${cap} = new Set(__existing${cap}.map((r) => r.id));`);
+    lines.push(
+      `      const __currentIds${cap} = new Set(aggregate.${c.name}.map((e) => e.id as string));`,
+    );
+    lines.push(
+      `      const __toDelete${cap} = [...__existingIds${cap}].filter((id) => !__currentIds${cap}.has(id));`,
+    );
+    lines.push(`      if (__toDelete${cap}.length > 0) {`);
+    lines.push(
+      `        await tx.delete(schema.${childTable}).where(and(eq(schema.${childTable}.parentId, aggregate.id), inArray(schema.${childTable}.id, __toDelete${cap})));`,
+    );
+    lines.push(`      }`);
+    lines.push(`      for (const child of aggregate.${c.name}) {`);
+    lines.push(`        const childRow = ${entityProjection(part, "child", ctx)};`);
+    lines.push(
+      `        await tx.insert(schema.${childTable}).values(childRow).onConflictDoUpdate({ target: schema.${childTable}.id, set: childRow });`,
+    );
+    if (emitTrace) {
+      // Classify against existingIds BEFORE the upsert tells us insert vs
+      // update with no second DB round-trip; ordering matters for the
+      // semantic (current existingIds reflects what was on disk, the
+      // upsert is happening now).
+      lines.push(
+        `        const __childAction = __existingIds${cap}.has(child.id as string) ? "update" : "insert";`,
+      );
+      lines.push(
+        `        ${renderHonoStoreLogCall("childSynced", `parent: "${agg.name}", part: "${part.name}", id: child.id as string, action: __childAction`)}`,
+      );
+    }
+    lines.push(`      }`);
+  }
+  // Diff-sync each reference collection's join table: delete pairs the
+  // aggregate no longer holds, insert the new ones (idempotent via the
+  // composite PK).
+  for (const assoc of associationsOf(agg)) {
+    const joinConst = joinTableConstName(assoc);
+    const ownerCol = joinColumnName(assoc.ownerFk);
+    const targetCol = joinColumnName(assoc.targetFk);
+    const cap = upperFirst(assoc.fieldName);
+    lines.push("");
+    lines.push(
+      `      const __existing${cap} = await tx.select({ t: schema.${joinConst}.${targetCol} }).from(schema.${joinConst}).where(eq(schema.${joinConst}.${ownerCol}, aggregate.id));`,
+    );
+    lines.push(`      const __existingIds${cap} = new Set(__existing${cap}.map((r) => r.t));`);
+    // Ordered: keep the field's array order so the round-trip is stable;
+    // the ordinal column carries the position and is updated on reorder.
+    lines.push(
+      `      const __current${cap} = aggregate.${assoc.fieldName}.map((x) => x as string);`,
+    );
+    lines.push(`      const __currentIds${cap} = new Set(__current${cap});`);
+    lines.push(
+      `      const __toDelete${cap} = [...__existingIds${cap}].filter((t) => !__currentIds${cap}.has(t));`,
+    );
+    lines.push(`      if (__toDelete${cap}.length > 0) {`);
+    lines.push(
+      `        await tx.delete(schema.${joinConst}).where(and(eq(schema.${joinConst}.${ownerCol}, aggregate.id), inArray(schema.${joinConst}.${targetCol}, __toDelete${cap})));`,
+    );
+    lines.push(`      }`);
+    lines.push(`      for (let __i = 0; __i < __current${cap}.length; __i++) {`);
+    lines.push(
+      `        const __row = { ${ownerCol}: aggregate.id as string, ${targetCol}: __current${cap}[__i]!, ordinal: __i };`,
+    );
+    lines.push(
+      `        await tx.insert(schema.${joinConst}).values(__row).onConflictDoUpdate({ target: [schema.${joinConst}.${ownerCol}, schema.${joinConst}.${targetCol}], set: { ordinal: __i } });`,
+    );
+    lines.push(`      }`);
+  }
+  return lines;
+}
+
+/** Inner body of the findById db.transaction callback at 6-space indent.
+ *  Extracted so the trace-on variant can re-indent and wrap it with the
+ *  outer try/catch + tx_* logs. */
+function txCallbackBody(agg: AggregateIR, ctx: BoundedContextIR): string[] {
+  const lines: string[] = [];
+  const tableName = lowerFirst(plural(agg.name));
   lines.push(
     `      const rootRows = await tx.select().from(schema.${tableName}).where(eq(schema.${tableName}.id, id));`,
   );
@@ -409,8 +545,6 @@ function findByIdMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
     `      ${renderHonoStoreLogCall("aggregateLoaded", `aggregate: "${agg.name}", id: id as string, found: true`)}`,
   );
   lines.push(`      return __loaded;`);
-  lines.push(`    });`);
-  lines.push(`  }`);
   return lines;
 }
 
@@ -504,82 +638,35 @@ function primitiveColumnRead(expr: string, t: TypeIR): string {
 // save — upsert root + diff-sync children + dispatch events
 // ---------------------------------------------------------------------------
 
-function saveMethod(agg: AggregateIR, ctx: BoundedContextIR): string[] {
+function saveMethod(agg: AggregateIR, ctx: BoundedContextIR, emitTrace = false): string[] {
   const lines: string[] = [];
-  const tableName = lowerFirst(plural(agg.name));
   lines.push(`  async save(aggregate: ${agg.name}): Promise<void> {`);
-  lines.push(`    await this.db.transaction(async (tx) => {`);
-  lines.push(`      const rootRow = ${rootProjection(agg, "aggregate", ctx)};`);
-  lines.push(
-    `      await tx.insert(schema.${tableName}).values(rootRow).onConflictDoUpdate({ target: schema.${tableName}.id, set: rootRow });`,
-  );
-  for (const c of agg.contains) {
-    if (!c.collection) continue;
-    const part = agg.parts.find((p) => p.name === c.partName);
-    if (!part) continue;
-    const childTable = lowerFirst(plural(part.name));
-    lines.push("");
+  // Inner body of the save transaction at 6-space indent.  Built into a
+  // local array so the trace-on variant can wrap it with try/catch +
+  // tx_* logs without duplicating the body.
+  const body = saveTxBody(agg, ctx, emitTrace);
+  if (emitTrace) {
     lines.push(
-      `      const __existing${upperFirst(c.name)} = await tx.select({ id: schema.${childTable}.id }).from(schema.${childTable}).where(eq(schema.${childTable}.parentId, aggregate.id));`,
+      `    ${renderHonoStoreLogCall("txBegin", `aggregate: "${agg.name}", id: aggregate.id as string`)}`,
     );
+    lines.push(`    try {`);
+    lines.push(`      await this.db.transaction(async (tx) => {`);
+    lines.push(...body.map((l) => `  ${l}`));
+    lines.push(`      });`);
     lines.push(
-      `      const __existingIds${upperFirst(c.name)} = new Set(__existing${upperFirst(c.name)}.map((r) => r.id));`,
+      `      ${renderHonoStoreLogCall("txCommit", `aggregate: "${agg.name}", id: aggregate.id as string`)}`,
     );
+    lines.push(`    } catch (__txErr) {`);
     lines.push(
-      `      const __currentIds${upperFirst(c.name)} = new Set(aggregate.${c.name}.map((e) => e.id as string));`,
+      `      ${renderHonoStoreLogCall("txRollback", `aggregate: "${agg.name}", id: aggregate.id as string, error: __txErr instanceof Error ? __txErr.message : String(__txErr)`)}`,
     );
-    lines.push(
-      `      const __toDelete${upperFirst(c.name)} = [...__existingIds${upperFirst(c.name)}].filter((id) => !__currentIds${upperFirst(c.name)}.has(id));`,
-    );
-    lines.push(`      if (__toDelete${upperFirst(c.name)}.length > 0) {`);
-    lines.push(
-      `        await tx.delete(schema.${childTable}).where(and(eq(schema.${childTable}.parentId, aggregate.id), inArray(schema.${childTable}.id, __toDelete${upperFirst(c.name)})));`,
-    );
-    lines.push(`      }`);
-    lines.push(`      for (const child of aggregate.${c.name}) {`);
-    lines.push(`        const childRow = ${entityProjection(part, "child", ctx)};`);
-    lines.push(
-      `        await tx.insert(schema.${childTable}).values(childRow).onConflictDoUpdate({ target: schema.${childTable}.id, set: childRow });`,
-    );
-    lines.push(`      }`);
+    lines.push(`      throw __txErr;`);
+    lines.push(`    }`);
+  } else {
+    lines.push(`    await this.db.transaction(async (tx) => {`);
+    lines.push(...body);
+    lines.push(`    });`);
   }
-  // Diff-sync each reference collection's join table: delete pairs the
-  // aggregate no longer holds, insert the new ones (idempotent via the
-  // composite PK).
-  for (const assoc of associationsOf(agg)) {
-    const joinConst = joinTableConstName(assoc);
-    const ownerCol = joinColumnName(assoc.ownerFk);
-    const targetCol = joinColumnName(assoc.targetFk);
-    const cap = upperFirst(assoc.fieldName);
-    lines.push("");
-    lines.push(
-      `      const __existing${cap} = await tx.select({ t: schema.${joinConst}.${targetCol} }).from(schema.${joinConst}).where(eq(schema.${joinConst}.${ownerCol}, aggregate.id));`,
-    );
-    lines.push(`      const __existingIds${cap} = new Set(__existing${cap}.map((r) => r.t));`);
-    // Ordered: keep the field's array order so the round-trip is stable;
-    // the ordinal column carries the position and is updated on reorder.
-    lines.push(
-      `      const __current${cap} = aggregate.${assoc.fieldName}.map((x) => x as string);`,
-    );
-    lines.push(`      const __currentIds${cap} = new Set(__current${cap});`);
-    lines.push(
-      `      const __toDelete${cap} = [...__existingIds${cap}].filter((t) => !__currentIds${cap}.has(t));`,
-    );
-    lines.push(`      if (__toDelete${cap}.length > 0) {`);
-    lines.push(
-      `        await tx.delete(schema.${joinConst}).where(and(eq(schema.${joinConst}.${ownerCol}, aggregate.id), inArray(schema.${joinConst}.${targetCol}, __toDelete${cap})));`,
-    );
-    lines.push(`      }`);
-    lines.push(`      for (let __i = 0; __i < __current${cap}.length; __i++) {`);
-    lines.push(
-      `        const __row = { ${ownerCol}: aggregate.id as string, ${targetCol}: __current${cap}[__i]!, ordinal: __i };`,
-    );
-    lines.push(
-      `        await tx.insert(schema.${joinConst}).values(__row).onConflictDoUpdate({ target: [schema.${joinConst}.${ownerCol}, schema.${joinConst}.${targetCol}], set: { ordinal: __i } });`,
-    );
-    lines.push(`      }`);
-  }
-  lines.push(`    });`);
   lines.push(
     `    ${renderHonoStoreLogCall("repositorySave", `aggregate: "${agg.name}", id: aggregate.id as string`)}`,
   );
