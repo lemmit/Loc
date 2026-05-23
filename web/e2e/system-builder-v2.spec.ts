@@ -64,5 +64,6 @@ test("Model v2 renders an operation body as a statement flow (read-only)", async
   const stmts = page.getByTestId("c4system-v2-stmt");
   await expect.poll(async () => stmts.count(), { timeout: 5_000 }).toBeGreaterThan(0);
   // Order.confirm in sales-system.ddd has at least one assign and an emit.
-  await expect(stmts.filter({ has: page.locator('[data-stmt-kind="emit"]') }).first()).toBeVisible();
+  await expect(page.locator('[data-testid="c4system-v2-stmt"][data-stmt-kind="emit"]')).toBeVisible();
+  await expect(page.locator('[data-testid="c4system-v2-stmt"][data-stmt-kind="assign"]')).toBeVisible();
 });
