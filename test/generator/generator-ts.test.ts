@@ -221,6 +221,26 @@ describe("typescript generator", () => {
       );
     });
 
+    it("--trace on: operation route emits wire_in after body parse, off keeps no wire_in", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const filesOn = generateTypeScript(model, HONO_V4_PINS, { emitTrace: true });
+      const routesOn = filesOn.get("http/order.routes.ts")!;
+      // wire_in fires AFTER `const body = c.req.valid("json");` so the
+      // validated shape is what's logged.  `keys: Object.keys(body as
+      // Record<string, unknown>)` is the safe runtime read (Zod always
+      // returns a plain object).
+      expect(routesOn).toMatch(/const body = c\.req\.valid\("json"\);[\s\S]+?wire_in/);
+      expect(routesOn).toMatch(
+        /\.get\("log"\)\.trace\(\{ event: "wire_in", keys: Object\.keys\(body as Record<string, unknown>\) \}\)/,
+      );
+
+      // Off: no wire_in lines, no keys-of-body — operation route stays
+      // byte-identical to the pre-Phase-6d shape at the body-parse seam.
+      const filesOff = generateTypeScript(model, HONO_V4_PINS); // no emitTrace
+      const routesOff = filesOff.get("http/order.routes.ts")!;
+      expect(routesOff).not.toMatch(/event: "wire_in"/);
+    });
+
     it("--trace on: repository wraps findById + save in tx_begin/tx_commit/tx_rollback + child_synced per upsert", async () => {
       const model = await buildModel("examples/sales.ddd");
       const files = generateTypeScript(model, HONO_V4_PINS, { emitTrace: true });
