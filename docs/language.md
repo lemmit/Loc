@@ -446,8 +446,12 @@ plus a Mediator query in the .NET backend.
 - **TypeScript**: when no `where` is given, parameters are equality-
   matched against aggregate columns and lowered to a Drizzle
   `where(eq(...))`.  When `where` is given, the IR expression is
-  rendered into a TODO-comment and the user implements the predicate
-  manually (Drizzle has no general lambda → SQL translator).
+  lowered to Drizzle operators (`eq`/`ne`/`lt`/`lte`/`gt`/`gte`/
+  `and`/`or`/`not`/`inArray`) over `this.<col>` and
+  `this.<vo>.<sub>` references, including the membership form
+  `this.<refColl>.contains(param)` against an `Id<X>[]` join table.
+  The queryable-subset validator rejects shapes that don't fit (e.g.
+  `.count`, `.any`, lambdas) with a clear diagnostic.
 - **.NET**: both forms lower to a LINQ `.Where(x => …)` predicate and
   pass through EF Core to SQL.
 

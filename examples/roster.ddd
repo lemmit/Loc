@@ -1,0 +1,43 @@
+// Roster bounded context — minimal test fixture exercising
+// reference-collection join tables (`Id<X>[]` fields).
+//
+// Two aggregates with a many-to-many relationship from Trainer to
+// Pokemon:
+//   - `party`  — references to up to six Pokemon a trainer carries
+//   - `caught` — every Pokemon they've ever caught
+//
+// Both lower to join tables (`trainer_party`, `trainer_caught`) with
+// composite PK + ordinal position.  The `holdingInParty` find
+// demonstrates `this.<refColl>.contains(...)` lowered to a subquery
+// against the join table.
+context Roster {
+
+  aggregate Pokemon {
+    species: string display
+    level: int
+    invariant level >= 1
+    invariant level <= 100
+  }
+
+  aggregate Trainer {
+    name: string display
+    party: Id<Pokemon>[]
+    caught: Id<Pokemon>[]
+    invariant party.count <= 6
+    derived partyIsFull: bool = party.count == 6
+    operation addToParty(pokemon: Id<Pokemon>) {
+      precondition party.count < 6
+      party += pokemon
+      caught += pokemon
+    }
+    operation removeFromParty(pokemon: Id<Pokemon>) {
+      precondition party.count > 0
+      party -= pokemon
+    }
+  }
+
+  repository Trainers for Trainer {
+    find holdingInParty(pokemon: Id<Pokemon>): Trainer[]
+        where this.party.contains(pokemon)
+  }
+}
