@@ -210,7 +210,7 @@ AuthMode returns string:
 // ---------------------------------------------------------------------------
 
 Ui:
-    'ui' name=ID '{'
+    'ui' name=ID withClause=WithClause? '{'
         members+=UiMember*
     '}';
 
@@ -507,12 +507,36 @@ ValueObjectMember:
     Property | DerivedProp | Invariant | FunctionDecl;
 
 Aggregate:
-    'aggregate' name=ID ('ids' idKind=IdKind)? '{'
+    'aggregate' name=ID ('ids' idKind=IdKind)? withClause=WithClause? '{'
         members+=AggregateMember*
     '}';
 
 IdKind returns string:
     'guid' | 'int' | 'long' | 'string';
+
+// ---- macro `with` clause ----------------------------------------
+//
+// Attaches one or more macro invocations to an aggregate (later: ui,
+// property).  Macro names resolve against a TS-side registry loaded
+// from the toolchain stdlib and from project-local `.loom/macros/*.ts`
+// modules.  Expansion runs at the AST level (see
+// `ddd-macro-expander.ts`) before linking, so synthesised members
+// participate in scope resolution and validation as if user-written.
+WithClause:
+    'with' calls+=MacroCall (',' calls+=MacroCall)*;
+
+MacroCall:
+    name=ID ('(' (args+=MacroArg (',' args+=MacroArg)*)? ')')?;
+
+MacroArg:
+    name=ID ':' value=MacroArgValue;
+
+MacroArgValue:
+    {infer MacroArgString} string=STRING
+    | {infer MacroArgBool} bool=('true' | 'false')
+    | {infer MacroArgInt} int=INT
+    | {infer MacroArgRef} ref=[NamedDecl:ID]
+    | {infer MacroArgRefList} '[' (refs+=[NamedDecl:ID] (',' refs+=[NamedDecl:ID])*)? ']';
 
 AggregateMember:
     Containment | DerivedProp | Invariant | FunctionDecl | Operation | EntityPart | TestBlock | Property;

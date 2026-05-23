@@ -8,6 +8,7 @@ import {
   type PartialLangiumServices,
   type PartialLangiumSharedServices,
 } from "langium/lsp";
+import { registerMacroExpander } from "./ddd-macro-expander.js";
 import { registerScaffoldAstExpander } from "./ddd-scaffold-ast-expander.js";
 import { DddScopeComputation, DddScopeProvider } from "./ddd-scope.js";
 import { DddValidator, registerValidationChecks } from "./ddd-validator.js";
@@ -78,5 +79,10 @@ export function createDddServices(context: DefaultSharedModuleContext): {
   // ComputedScopes/Linked, so a `[Page:ID]` ref to a scaffold-derived
   // name resolves through Langium's standard machinery.
   registerScaffoldAstExpander(shared);
+  // Macro expander — registry-driven `with X(...)` expansion.
+  // Runs at the same phase as scaffold expansion; the two are
+  // independent and will be unified once scaffold migrates to a
+  // stdlib macro (Phase 4 of the macro plan).
+  registerMacroExpander(shared);
   return { shared, Ddd };
 }

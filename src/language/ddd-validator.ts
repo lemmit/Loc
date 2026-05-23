@@ -1,4 +1,5 @@
 import { type AstNode, AstUtils, type ValidationAcceptor, type ValidationChecks } from "langium";
+import { drainMacroDiagnostics } from "./ddd-macro-expander.js";
 import {
   BUILTIN_PACK_LATEST,
   builtinVersionsForFamily,
@@ -83,6 +84,12 @@ import {
 export class DddValidator {
   // Entry: full model walk
   check(model: Model, accept: ValidationAcceptor): void {
+    // Macro-expansion diagnostics — drained from the side channel
+    // populated by `ddd-macro-expander.ts` during the pre-link
+    // pass.  Surfaced here so unknown macros, bad args, and
+    // composition collisions show up alongside other validator
+    // diagnostics rather than in a separate diagnostic pipeline.
+    this.checkMacroExpansion(model, accept);
     // Validate every `string.matches(regex)` call's
     // argument is a string literal that compiles as a RegExp.
     // Walks the entire AST so the rule applies in invariants,
@@ -1026,6 +1033,14 @@ export class DddValidator {
           { node: ma, property: "args" },
         );
       }
+    }
+  }
+
+  private checkMacroExpansion(model: Model, accept: ValidationAcceptor): void {
+    const doc = AstUtils.getDocument(model);
+    const diagnostics = drainMacroDiagnostics(doc);
+    for (const d of diagnostics) {
+      accept(d.severity, d.message, { node: d.node as AstNode, property: d.property });
     }
   }
 
