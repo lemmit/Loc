@@ -1,9 +1,9 @@
+import { renderHonoLogCall } from "../../../generator/_obs/render-hono.js";
 import {
   chainSingleFieldNative,
   refineClauseFor,
   takeSingleFieldChain,
 } from "../../../generator/typescript/zod-refine.js";
-import { renderHonoLogCall } from "../../../generator/_obs/render-hono.js";
 import { wireShapeFor } from "../../../ir/enrichments.js";
 import type { ClassifyContext, SingleFieldPattern } from "../../../ir/invariant-classify.js";
 import type {
@@ -329,9 +329,7 @@ export function buildRoutesFile(
   lines.push(`      return c.json({ error: err.message, trace_id }, 400);`);
   lines.push(`    }`);
   lines.push(`    if (err instanceof AggregateNotFoundError) {`);
-  lines.push(
-    `      ${renderHonoLogCall("notFound", `aggregate: "${agg.name}", status: 404`)}`,
-  );
+  lines.push(`      ${renderHonoLogCall("notFound", `aggregate: "${agg.name}", status: 404`)}`);
   lines.push(`      return c.json({ error: err.message, trace_id }, 404);`);
   lines.push(`    }`);
   lines.push(`    if (err instanceof ExternHandlerError) {`);

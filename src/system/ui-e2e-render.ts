@@ -11,8 +11,8 @@ import type {
   ViewIR,
   WorkflowIR,
 } from "../ir/loom-ir.js";
-import { lowerFirst, plural, snake, upperFirst } from "../util/naming.js";
 import { intrinsicMatcherSig } from "../language/type-system.js";
+import { lowerFirst, plural, snake, upperFirst } from "../util/naming.js";
 import { renderExpectStmt } from "./expect-stmt.js";
 
 // ---------------------------------------------------------------------------
@@ -315,7 +315,6 @@ function renderUIStmt(s: TestStmtIR, ctx: RenderCtx): string {
       `only expect, expect-throws, let, expression, and call are supported.`,
   );
 }
-
 
 /** Render an explicit, typed matcher call — `expect(<x>).toHaveText("…")`
  *  — straight to its Playwright form. The matcher (resolved into the IR as

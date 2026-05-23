@@ -1301,9 +1301,7 @@ describe("typescript generator", () => {
       // assert clears, so every boot log advertises whether this
       // deployable expects authenticated requests.
       expect(httpIndex).toMatch(/import \{ baseLogger \} from "\.\.\/obs\/log"/);
-      expect(httpIndex).toMatch(
-        /baseLogger\.info\(\{ event: "auth_enabled", required: true \}\)/,
-      );
+      expect(httpIndex).toMatch(/baseLogger\.info\(\{ event: "auth_enabled", required: true \}\)/);
     });
 
     it("middleware bypasses /health, /openapi.json, /swagger", async () => {

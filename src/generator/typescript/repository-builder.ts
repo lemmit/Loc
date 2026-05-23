@@ -1,4 +1,3 @@
-import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
 import { wireShapeFor } from "../../ir/enrichments.js";
 import type {
   AggregateIR,
@@ -12,6 +11,7 @@ import type {
 } from "../../ir/loom-ir.js";
 import { findUsesCurrentUser, viewUsesCurrentUser } from "../../ir/loom-ir.js";
 import { lowerFirst, plural, upperFirst } from "../../util/naming.js";
+import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
 import { joinColumnName, joinTableConstName, valueObjectColumnNames } from "./templates.js";
 
 /** Associations (`Id<T>[]` reference collections) declared on an

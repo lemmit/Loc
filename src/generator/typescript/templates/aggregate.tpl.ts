@@ -246,10 +246,10 @@ function renderEntity(e: EntityShape, emitProvenance = false, emitTrace = false)
       const checkName = `check${op.name[0]!.toUpperCase()}${op.name.slice(1)}`;
       ops.push(`  ${checkName}(${params}): void {`);
       const body = renderTsStatements(op.statements, emitProvenance, {
-      emitTrace,
-      aggregate: e.name,
-      op: op.name,
-    });
+        emitTrace,
+        aggregate: e.name,
+        op: op.name,
+      });
       if (body.length > 0) ops.push(body);
       ops.push("  }");
       ops.push("");
