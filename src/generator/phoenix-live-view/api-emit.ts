@@ -43,6 +43,11 @@ export interface ApiEmitArgs {
   appName: string;
   /** PascalCase module prefix, e.g. "PhoenixApp" */
   appModule: string;
+  /** Compile-time --trace switch.  When true, each AggregatesController
+   *  CRUD action emits a `wire_in` Logger.debug right after `params`
+   *  binding so the parsed key set surfaces on the structured stream.
+   *  Off keeps the action bodies byte-identical to the pre-trace shape. */
+  emitTrace?: boolean;
 }
 
 export interface ApiRoute {
@@ -141,7 +146,10 @@ export function emitApiControllers(args: ApiEmitArgs): ApiEmitResult {
 
   if (hasServes && allAggregates.length > 0) {
     const controllerPath = `lib/${appName}_web/controllers/aggregates_controller.ex`;
-    files.set(controllerPath, renderAggregatesController(allAggregates, appModule));
+    files.set(
+      controllerPath,
+      renderAggregatesController(allAggregates, appModule, !!args.emitTrace),
+    );
 
     for (const { agg } of allAggregates) {
       const aggSnake = snake(agg.name);
@@ -357,11 +365,12 @@ function renderViewAction(
 function renderAggregatesController(
   aggregates: Array<{ ctx: BoundedContextIR; agg: import("../../ir/loom-ir.js").AggregateIR }>,
   appModule: string,
+  emitTrace: boolean,
 ): string {
   const webModule = `${appModule}Web`;
 
   const actions = aggregates
-    .map(({ ctx, agg }) => renderAggregateActions(ctx, agg, appModule))
+    .map(({ ctx, agg }) => renderAggregateActions(ctx, agg, appModule, emitTrace))
     .join("\n\n");
 
   return `# Auto-generated.
@@ -388,10 +397,24 @@ function renderAggregateActions(
   ctx: BoundedContextIR,
   agg: import("../../ir/loom-ir.js").AggregateIR,
   appModule: string,
+  emitTrace: boolean,
 ): string {
   const aggSnake = snake(agg.name);
   const aggPlural = snake(plural(agg.name));
   const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
+
+  // wire_in (debug, since Elixir's Logger has no `trace` — catalog's
+  // trace level maps to Logger.debug per render-phoenix.ts) — emitted
+  // only on --trace.  Keys = `Map.keys(params)` (runtime introspection
+  // of the parsed `conn` params); GET-by-id includes the `id`
+  // path-binding too.  Mirrors Hono Phase 6d + .NET v6's wire_in
+  // identity so a cross-backend filter on `event="wire_in"` joins.
+  const wireInCreate = emitTrace
+    ? `    ${renderPhoenixLogCall("wireIn", [{ name: "keys", valueExpr: "Map.keys(params)" }])}\n`
+    : "";
+  const wireInUpdate = emitTrace
+    ? `    ${renderPhoenixLogCall("wireIn", [{ name: "keys", valueExpr: "Map.keys(params)" }])}\n`
+    : "";
 
   return `  @doc "GET /api/aggregates/${aggPlural}"
   def list_${aggPlural}(conn, _params) do
@@ -407,7 +430,7 @@ function renderAggregateActions(
 
   @doc "POST /api/aggregates/${aggPlural}"
   def create_${aggSnake}(conn, params) do
-    record = ${contextModule}.create_${aggSnake}!(params)
+${wireInCreate}    record = ${contextModule}.create_${aggSnake}!(params)
     ${renderPhoenixLogCall("aggregateCreated", [
       { name: "aggregate", valueExpr: `"${agg.name}"` },
       { name: "id", valueExpr: "record.id" },
@@ -419,7 +442,7 @@ function renderAggregateActions(
 
   @doc "PATCH /api/aggregates/${aggPlural}/:id"
   def update_${aggSnake}(conn, %{"id" => id} = params) do
-    attrs = Map.drop(params, ["id"])
+${wireInUpdate}    attrs = Map.drop(params, ["id"])
     record = ${contextModule}.update_${aggSnake}!(id, attrs)
     json(conn, record)
   end

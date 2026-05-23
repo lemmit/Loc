@@ -47,12 +47,20 @@ export interface GeneratePhoenixLiveViewArgs {
   contexts: BoundedContextIR[];
   deployable: DeployableIR;
   sys: SystemIR;
+  /** Compile-time --trace switch.  When true, the AggregatesController
+   *  emits a `wire_in` Logger.debug line at each CRUD action entry so
+   *  the parsed `params` key set surfaces on the structured stream —
+   *  mirroring Hono Phase 6d / .NET v6 wire_in's intent.  Domain-level
+   *  trace events (value_computed / precondition_evaluated /
+   *  invariant_evaluated) don't have a clean Phoenix seam (Ash
+   *  resources are declarative), so they stay deferred. */
+  emitTrace?: boolean;
 }
 
 export function generatePhoenixLiveViewProject(
   args: GeneratePhoenixLiveViewArgs,
 ): Map<string, string> {
-  const { contexts, deployable, sys } = args;
+  const { contexts, deployable, sys, emitTrace } = args;
   const out = new Map<string, string>();
 
   const appName = toSnakeApp(deployable.name);
@@ -95,6 +103,7 @@ export function generatePhoenixLiveViewProject(
     sys,
     appName,
     appModule,
+    emitTrace,
   });
   for (const [path, content] of apiFiles) out.set(path, content);
 
