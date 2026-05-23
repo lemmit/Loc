@@ -8,6 +8,7 @@ import type {
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { renderCsExpr } from "../render-expr.js";
+import { capabilityGroups, renderCapabilityPass } from "./capability-pass.tpl.js";
 
 // AppDbContext + per-aggregate IEntityTypeConfiguration<T>.  The
 // configuration walks each aggregate's fields/contains and emits the
@@ -21,11 +22,18 @@ export function renderDbContext(ctx: BoundedContextIR, ns: string): string {
   const applyConfigs = ctx.aggregates.map(
     (a) => `        modelBuilder.ApplyConfiguration(new Configurations.${a.name}Configuration());`,
   );
+  // Capability filter passes — one loop per declared capability
+  // group with at least one filter-emitting aggregate.  Empty when
+  // no aggregate uses `implements`; the DbContext stays minimal in
+  // those projects.
+  const capPass = renderCapabilityPass(ns, capabilityGroups(ctx.aggregates));
+  const needsCommonUsing = capPass.length > 0;
   return (
     lines(
       "// Auto-generated.",
       "using Microsoft.EntityFrameworkCore;",
       ...aggUsings,
+      needsCommonUsing ? `using ${ns}.Domain.Common;` : null,
       `namespace ${ns}.Infrastructure.Persistence;`,
       "",
       "public sealed class AppDbContext : DbContext",
@@ -36,6 +44,7 @@ export function renderDbContext(ctx: BoundedContextIR, ns: string): string {
       "    protected override void OnModelCreating(ModelBuilder modelBuilder)",
       "    {",
       ...applyConfigs,
+      ...capPass,
       "    }",
       "}",
     ) + "\n"
@@ -53,17 +62,24 @@ export function renderConfiguration(agg: AggregateIR, ns: string, ctx: BoundedCo
   const indexLines = [...indexed].map(
     (col) => `        b.HasIndex(x => x.${pascalCol(col, agg)});`,
   );
-  // Context filters: per-aggregate predicates contributed by
-  // macros via `contextFilter(...)`.  Each predicate is a lowered
-  // Loom expression rendered into a lambda body with `x` bound to
-  // the row.  No special-case for soft-delete here — the predicate
-  // `!this.isDeleted` translates the same way any other predicate
-  // would, via `renderCsExpr({ thisName: "x" })`.  N filters
-  // compose conjunctively by emission order; EF Core ANDs them.
-  const filterLines = (agg.contextFilters ?? []).map(
-    (predicate) =>
-      `        b.HasQueryFilter(x => ${renderCsExpr(predicate, { thisName: "x" })});`,
-  );
+  // Context filters fall through to per-config emission ONLY when
+  // the aggregate has no `implements` declarations — in that case
+  // there's no marker interface to scope a DbContext-level loop, so
+  // the filter has to be installed where the entity is configured.
+  // Aggregates with at least one `implements` get their filters
+  // installed via the DbContext-level capability pass instead
+  // (see `renderCapabilityPass`); we skip emission here to avoid
+  // double-application.  EF Core has no `OnModelCreating` API that
+  // applies a filter "to everything matching IFoo" — it's per-entity
+  // either way — but DbContext-level emission keeps filter wiring
+  // co-located, which is the idiomatic place to put it.
+  const usesCapabilityGrouping = (agg.implementsCapabilities?.length ?? 0) > 0;
+  const filterLines = usesCapabilityGrouping
+    ? []
+    : (agg.contextFilters ?? []).map(
+        (predicate) =>
+          `        b.HasQueryFilter(x => ${renderCsExpr(predicate, { thisName: "x" })});`,
+      );
   return (
     lines(
       "// Auto-generated.",
