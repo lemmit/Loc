@@ -11,6 +11,12 @@ export function renderProgram(
   options?: {
     authRequired?: boolean;
     usesValidators?: boolean;
+    /** When true, at least one aggregate carries `flags.isAuditable`
+     *  (any aggregate has contextStamps from one or more macros).
+     *  Program.cs registers the `AuditableInterceptor` and attaches
+     *  it to DbContextOptions so stamping happens at SaveChanges
+     *  time without per-aggregate handler code. */
+    usesStamping?: boolean;
     /** Fullstack-dotnet flag: when true, the deployable hosts an
      *  embedded React SPA from `wwwroot/`.  Adds `UseDefaultFiles` +
      *  `UseStaticFiles` middleware and a `MapFallbackToFile` so SPA
@@ -28,6 +34,7 @@ export function renderProgram(
 ): string {
   const authRequired = !!options?.authRequired;
   const usesValidators = !!options?.usesValidators;
+  const usesStamping = !!options?.usesStamping;
   const hasEmbeddedSpa = !!options?.hasEmbeddedSpa;
   const emitTrace = !!options?.emitTrace;
   const repoRegistrations = ctx.aggregates
@@ -168,8 +175,17 @@ builder.Services.AddHttpLogging(opts =>
         Microsoft.AspNetCore.HttpLogging.HttpLoggingFields.Duration;
 });
 
-builder.Services.AddDbContext<AppDbContext>(opts =>
-    opts.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
+${
+  usesStamping
+    ? `builder.Services.AddScoped<${ns}.Infrastructure.Persistence.AuditableInterceptor>();
+builder.Services.AddDbContext<AppDbContext>((sp, opts) =>
+{
+    opts.UseNpgsql(builder.Configuration.GetConnectionString("Default"));
+    opts.AddInterceptors(sp.GetRequiredService<${ns}.Infrastructure.Persistence.AuditableInterceptor>());
+});`
+    : `builder.Services.AddDbContext<AppDbContext>(opts =>
+    opts.UseNpgsql(builder.Configuration.GetConnectionString("Default")));`
+}
 
 // Mediator (martinothamar/Mediator) — source-generated, free to use.
 builder.Services.AddMediator(opts => opts.ServiceLifetime = ServiceLifetime.Scoped);

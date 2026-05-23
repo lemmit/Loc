@@ -28,9 +28,8 @@ const SRC = `
       }
     }
     api SalesApi from Sales
-    ui WebApp {
+    ui WebApp with scaffold(aggregates: [Order]) {
       api Sales: SalesApi
-      scaffold aggregates: Order
     }
     deployable api {
       platform: hono

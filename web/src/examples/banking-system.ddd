@@ -177,8 +177,7 @@ system BankingSystem {
     }
   }
 
-  ui WebApp {
-    scaffold modules: Banking
+  ui WebApp with scaffold(modules: [Banking]) {
   }
 
   deployable api { platform: hono, modules: Banking, port: 3000 }

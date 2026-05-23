@@ -40,7 +40,7 @@ export interface BuildPlaywrightPageObjectArgs {
  *  page.  Caller writes the result to `e2e/pages/<page-snake>.ts`. */
 export function buildPlaywrightPageObject(args: BuildPlaywrightPageObjectArgs): string {
   const { page, aggregatesByName, contextByAggName } = args;
-  const origin = page.scaffoldOrigin;
+  const origin = page.archetype;
 
   if (!origin) {
     // Explicit (walker-emitted) page — generic param/route pattern.

@@ -49,8 +49,7 @@ const FIXTURE_SOURCE = `system MiniLiveView {
 
   api SalesApi from Sales
 
-  ui SalesAdmin {
-    scaffold modules: Sales
+  ui SalesAdmin with scaffold(modules: [Sales]) {
   }
 
   deployable phoenixApp {
@@ -218,7 +217,7 @@ describe("phoenixLiveView pipeline", () => {
     }
   }
   api SalesApi from Sales
-  ui SalesAdmin { scaffold modules: Sales }
+  ui SalesAdmin with scaffold(modules: [Sales]) {}
 
   deployable peer {
     platform: hono,
@@ -796,8 +795,7 @@ describe("router wiring (orchestrator integration)", () => {
     }
   }
   api SalesApi from Sales
-  ui SalesAdmin {
-    scaffold modules: Sales
+  ui SalesAdmin with scaffold(modules: [Sales]) {
   }
   user {
     id: guid
@@ -944,7 +942,7 @@ describe.skip("integration (parent wires emitters)", () => {
       params: [],
       state: [],
       source: "scaffold" as const,
-      scaffoldOrigin: { kind: "home" as const },
+      archetype: { kind: "home" as const },
     };
     const ts = buildPlaywrightPageObject({
       page,
@@ -1018,7 +1016,7 @@ const ACME_LIVEVIEW_SOURCE = `system AcmeLV {
     }
   }
   api SalesApi from Sales
-  ui SalesAdmin { scaffold modules: Sales }
+  ui SalesAdmin with scaffold(modules: [Sales]) {}
   deployable phoenixApp {
     platform: phoenixLiveView
     modules: Sales
@@ -1507,7 +1505,7 @@ const ACME_UI_E2E_SOURCE = `system AcmeUI {
     }
   }
   api SalesApi from Sales
-  ui SalesAdmin { scaffold modules: Sales }
+  ui SalesAdmin with scaffold(modules: [Sales]) {}
   deployable phoenixApp {
     platform: phoenixLiveView
     modules: Sales
@@ -1599,7 +1597,7 @@ const FORM_FIXTURE = `system AcmeForm {
     }
   }
   api SalesApi from Sales
-  ui SalesAdmin { scaffold modules: Sales }
+  ui SalesAdmin with scaffold(modules: [Sales]) {}
   deployable phoenixApp {
     platform: phoenixLiveView
     modules: Sales

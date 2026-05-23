@@ -1,10 +1,10 @@
 // scaffold expander unit tests.
 //
-// `expandScaffoldToExplicitBody(origin, ctx)` is the pure function
+// `expandWalkerPrimitive(origin, ctx)` is the pure function
 // the IR-level post-processor uses (when `LOOM_SCAFFOLD_EXPAND=1`)
 // to swap each scaffold-origin page's body for an equivalent
 // walker-stdlib composition.  Tests parametrise across all six
-// `ScaffoldOriginIR` kinds and pin two invariants:
+// `PageArchetypeIR` kinds and pin two invariants:
 //
 //   1. Origin kinds we expand today (`aggregate-list`,
 //      `aggregate-new`) return a non-null `ExprIR` whose top-level
@@ -24,14 +24,14 @@ import type {
   AggregateIR,
   BoundedContextIR,
   ExprIR,
-  ScaffoldOriginIR,
+  PageArchetypeIR,
   SystemIR,
   UiIR,
 } from "../../src/ir/loom-ir.js";
 import {
   buildExpandContext,
-  expandScaffoldToExplicitBody,
-} from "../../src/ir/scaffold-expander.js";
+  expandWalkerPrimitive,
+} from "../../src/ir/walker-primitive-expander.js";
 
 function makeOrderAggregate(): AggregateIR {
   return {
@@ -125,12 +125,12 @@ describe("scaffold expander dispatch", () => {
   const ctx = buildExpandContext(makeSystem(), makeUi());
 
   it("aggregate-list expands to Stack(Breadcrumbs, Toolbar, QueryView, …)", async () => {
-    const origin: ScaffoldOriginIR = {
+    const origin: PageArchetypeIR = {
       kind: "aggregate-list",
       aggregateName: "Order",
       contextName: "Orders",
     };
-    const body = expandScaffoldToExplicitBody(origin, ctx);
+    const body = expandWalkerPrimitive(origin, ctx);
     expect(body).not.toBeNull();
     expect(body!.kind).toBe("call");
     expect((body as { name: string }).name).toBe("Stack");
@@ -146,12 +146,12 @@ describe("scaffold expander dispatch", () => {
   });
 
   it("aggregate-list drops collection columns; uses IdLink for the id col", async () => {
-    const origin: ScaffoldOriginIR = {
+    const origin: PageArchetypeIR = {
       kind: "aggregate-list",
       aggregateName: "Order",
       contextName: "Orders",
     };
-    const body = expandScaffoldToExplicitBody(origin, ctx);
+    const body = expandWalkerPrimitive(origin, ctx);
     // First column is always the id link.
     expect(findCall(body!, "IdLink")).not.toBeNull();
     // Status enum field gets EnumBadge.
@@ -161,12 +161,12 @@ describe("scaffold expander dispatch", () => {
   });
 
   it("aggregate-new expands to Stack(Breadcrumbs, Heading, Card(Form(of: …)))", async () => {
-    const origin: ScaffoldOriginIR = {
+    const origin: PageArchetypeIR = {
       kind: "aggregate-new",
       aggregateName: "Order",
       contextName: "Orders",
     };
-    const body = expandScaffoldToExplicitBody(origin, ctx);
+    const body = expandWalkerPrimitive(origin, ctx);
     expect(body).not.toBeNull();
     expect((body as { name: string }).name).toBe("Stack");
     expect(findCall(body!, "Breadcrumbs")).not.toBeNull();
@@ -176,12 +176,12 @@ describe("scaffold expander dispatch", () => {
   });
 
   it("aggregate-new's Form references the aggregate via `of: Order`", async () => {
-    const origin: ScaffoldOriginIR = {
+    const origin: PageArchetypeIR = {
       kind: "aggregate-new",
       aggregateName: "Order",
       contextName: "Orders",
     };
-    const body = expandScaffoldToExplicitBody(origin, ctx);
+    const body = expandWalkerPrimitive(origin, ctx);
     const form = findCall(body!, "Form")!;
     expect(form.kind).toBe("call");
     if (form.kind !== "call") return;
@@ -194,12 +194,12 @@ describe("scaffold expander dispatch", () => {
   });
 
   it("aggregate-detail expands to Stack(Breadcrumbs, Heading, QueryView(single: true))", () => {
-    const origin: ScaffoldOriginIR = {
+    const origin: PageArchetypeIR = {
       kind: "aggregate-detail",
       aggregateName: "Order",
       contextName: "Orders",
     };
-    const body = expandScaffoldToExplicitBody(origin, ctx);
+    const body = expandWalkerPrimitive(origin, ctx);
     expect(body).not.toBeNull();
     expect((body as { name: string }).name).toBe("Stack");
     // KeyValueRow per non-collection field; QueryView wraps the data.
@@ -248,7 +248,7 @@ describe("scaffold expander dispatch", () => {
       },
     ];
     const ctxOps = buildExpandContext(sysWithOps, makeUi());
-    const body = expandScaffoldToExplicitBody(
+    const body = expandWalkerPrimitive(
       { kind: "aggregate-detail", aggregateName: "Order", contextName: "Orders" },
       ctxOps,
     );
@@ -293,12 +293,12 @@ describe("scaffold expander dispatch", () => {
       savesAtExit: [],
     } as never);
     const ctxWithWf = buildExpandContext(sysWithWf, makeUi());
-    const origin: ScaffoldOriginIR = {
+    const origin: PageArchetypeIR = {
       kind: "workflow-form",
       workflowName: "placeOrder",
       contextName: "Orders",
     };
-    const body = expandScaffoldToExplicitBody(origin, ctxWithWf);
+    const body = expandWalkerPrimitive(origin, ctxWithWf);
     expect(body).not.toBeNull();
     expect((body as { name: string }).name).toBe("Stack");
     expect(findCall(body!, "Breadcrumbs")).not.toBeNull();
@@ -319,12 +319,12 @@ describe("scaffold expander dispatch", () => {
       aggregateName: "Order",
     } as never);
     const ctxWithView = buildExpandContext(sysWithView, makeUi());
-    const origin: ScaffoldOriginIR = {
+    const origin: PageArchetypeIR = {
       kind: "view-list",
       viewName: "ActiveOrders",
       contextName: "Orders",
     };
-    const body = expandScaffoldToExplicitBody(origin, ctxWithView);
+    const body = expandWalkerPrimitive(origin, ctxWithView);
     expect(body).not.toBeNull();
     expect((body as { name: string }).name).toBe("Stack");
     expect(findCall(body!, "Heading")).not.toBeNull();
@@ -342,18 +342,18 @@ describe("scaffold expander dispatch", () => {
   });
 
   it("workflows-index / views-index / home all expand to Stack(...) bodies", () => {
-    expect(expandScaffoldToExplicitBody({ kind: "workflows-index" }, ctx)?.kind).toBe("call");
-    expect(expandScaffoldToExplicitBody({ kind: "views-index" }, ctx)?.kind).toBe("call");
-    expect(expandScaffoldToExplicitBody({ kind: "home" }, ctx)?.kind).toBe("call");
+    expect(expandWalkerPrimitive({ kind: "workflows-index" }, ctx)?.kind).toBe("call");
+    expect(expandWalkerPrimitive({ kind: "views-index" }, ctx)?.kind).toBe("call");
+    expect(expandWalkerPrimitive({ kind: "home" }, ctx)?.kind).toBe("call");
   });
 
   it("returns null when the aggregate isn't in the context map", () => {
-    const origin: ScaffoldOriginIR = {
+    const origin: PageArchetypeIR = {
       kind: "aggregate-list",
       aggregateName: "Unknown",
       contextName: "Orders",
     };
-    expect(expandScaffoldToExplicitBody(origin, ctx)).toBeNull();
+    expect(expandWalkerPrimitive(origin, ctx)).toBeNull();
   });
 
   it("expands with no-handle fallback when the UI has no api params", () => {
@@ -365,12 +365,12 @@ describe("scaffold expander dispatch", () => {
       ...makeUi(),
       apiParams: [],
     });
-    const origin: ScaffoldOriginIR = {
+    const origin: PageArchetypeIR = {
       kind: "aggregate-list",
       aggregateName: "Order",
       contextName: "Orders",
     };
-    const body = expandScaffoldToExplicitBody(origin, ctxNoApi);
+    const body = expandWalkerPrimitive(origin, ctxNoApi);
     expect(body).not.toBeNull();
     const qv = findCall(body!, "QueryView")!;
     if (qv.kind !== "call") return;

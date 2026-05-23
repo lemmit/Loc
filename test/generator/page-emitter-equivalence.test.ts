@@ -93,7 +93,7 @@ describe("byte-equivalence — page emitter vs legacy direct walk", () => {
     // pass (same builder, same content, same paths).  This test
     // confirms the path itself by checking that `e2e/pages/*.ts`
     // files are emitted at all (they require both `ui.pages` to
-    // contain the right scaffoldOrigin entries AND the per-archetype
+    // contain the right archetype entries AND the per-archetype
     // dispatch in `emitPageObjectsForUi` to route them).
     const model = await buildAcme();
     const { files } = generateSystems(model);
