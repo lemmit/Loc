@@ -23,6 +23,13 @@
 //   - **String contents only in Phase 1.**  Templates, manifests, and
 //     `.ddd` source are all text.  Phase 3 may add `Uint8Array` for
 //     binary assets if/when packs ship images or fonts.
+//
+// Directories are explicit entries — created via `mkdir`, removed
+// via `rmdir`.  Writing a file at `/a/b/c` does NOT create dir
+// entries for `/a` or `/a/b`; intermediate folders are inferred by
+// tree-rendering consumers from path strings.  The dir-entry
+// concept exists only so an *empty* folder can be represented;
+// populated folders need no dir entry.  See `mkdir` below.
 // ---------------------------------------------------------------------------
 
 /** Absolute POSIX path inside the VFS.  Leading `/`, no trailing
@@ -30,40 +37,117 @@
  *  prefix and treat it as a directory boundary. */
 export type VfsPath = string;
 
+/** Discriminator for VFS entries — files carry content, directories
+ *  exist purely to make an empty folder representable.  See the
+ *  top-of-file doc paragraph on intermediate folders. */
+export type VfsEntryKind = "file" | "dir";
+
+/** Tagged file entry.  The string content is read/written verbatim;
+ *  binary blobs are out of scope until Phase 3. */
+export interface VfsFileEntry {
+  kind: "file";
+  path: VfsPath;
+  content: string;
+}
+
+/** Tagged directory entry.  No content field — a dir is just an
+ *  existence record so the workspace UI can show empty folders. */
+export interface VfsDirEntry {
+  kind: "dir";
+  path: VfsPath;
+}
+
+/** Either kind of VFS entry.  Used by `hydrate`, `snapshot`,
+ *  `restore`, and the build-worker RPC wire shape. */
+export type VfsEntry = VfsFileEntry | VfsDirEntry;
+
 /** Listener fired whenever a write or delete touches a path under
  *  the subscribed prefix.  `changed` lists the affected absolute
- *  paths in sorted order so consumers can diff cheaply. */
+ *  paths in sorted order so consumers can diff cheaply.  Listeners
+ *  re-read kind via `Vfs.kindOf` if they care — the path-only
+ *  signature stays so existing subscribers don't have to thread
+ *  per-event metadata they don't use. */
 export type VfsListener = (changed: ReadonlyArray<VfsPath>) => void;
 
 export interface Vfs {
-  /** Read a path's contents.  Returns `undefined` when the path
-   *  isn't present — callers that need a hard guarantee should use
-   *  `readRequired` instead so the missing-path error fires at the
-   *  read site, not later when an `undefined` content blows up
+  /** Read a file's contents.  Returns `undefined` when the path
+   *  isn't present OR is a directory — directories have no content
+   *  to return.  Callers that need a hard guarantee should use
+   *  `readRequired` so the missing-path error fires at the read
+   *  site, not later when an `undefined` content blows up
    *  downstream. */
   read(path: VfsPath): string | undefined;
 
   /** Like `read`, but throws a clear "no entry at <path>" error when
-   *  the path is missing.  Used by the loader where every entry
-   *  named in `pack.json`'s `emits` map must exist. */
+   *  the path is missing or is a directory.  Used by the loader
+   *  where every entry named in `pack.json`'s `emits` map must exist
+   *  as a file. */
   readRequired(path: VfsPath): string;
 
-  /** Write a single path, creating or replacing.  Notifies every
-   *  subscriber whose prefix is a parent of `path` (or equal). */
+  /** Write a single file path, creating or replacing.  Throws when
+   *  the path is already a directory (use `rmdir` first if you want
+   *  to repurpose).  Notifies every subscriber whose prefix is a
+   *  parent of `path` (or equal). */
   write(path: VfsPath, content: string): void;
 
-  /** Delete a single path.  No-op when the path is absent.  Notifies
-   *  subscribers the same way `write` does. */
+  /** Delete a single file path.  No-op when the path is absent or
+   *  is a directory — callers want `rmdir` for directories; the
+   *  asymmetry keeps "delete a file" call sites from accidentally
+   *  taking down a folder under enumeration. */
   delete(path: VfsPath): void;
 
-  /** True iff the path has been written and not subsequently deleted. */
+  /** Create a directory entry at `path`, idempotent — no-op when
+   *  the path is already a directory.  Throws when the path is
+   *  already a file (incompatible kind).  Auto-creates missing
+   *  parent directories (mkdirp semantics): `mkdir("/a/b/c")` when
+   *  `/a` doesn't exist creates `/a`, `/a/b`, and `/a/b/c`. */
+  mkdir(path: VfsPath): void;
+
+  /** Remove an empty directory entry at `path`.  Throws when the
+   *  directory still has children (use a manual delete loop or
+   *  per-entry sweep if you want recursive behaviour).  No-op when
+   *  the path is absent or is a file. */
+  rmdir(path: VfsPath): void;
+
+  /** True iff the path has been written and not subsequently
+   *  deleted — for either kind. */
   exists(path: VfsPath): boolean;
 
-  /** List every path that starts with `prefix`, sorted lexicographically.
-   *  A prefix without a trailing `/` matches paths starting with the
-   *  literal string; a trailing `/` enforces a directory boundary
-   *  (so `/designs/m` vs `/designs/m/`).  Returns absolute paths. */
+  /** True iff `path` exists AND is a file. */
+  isFile(path: VfsPath): boolean;
+
+  /** True iff `path` exists AND is a directory. */
+  isDirectory(path: VfsPath): boolean;
+
+  /** Discriminator accessor — `"file"`, `"dir"`, or `undefined`
+   *  when the path doesn't exist.  Lets a subscriber inspect a
+   *  notified path without two separate `isFile` / `isDirectory`
+   *  calls. */
+  kindOf(path: VfsPath): VfsEntryKind | undefined;
+
+  /** List every **file** path that starts with `prefix`, sorted
+   *  lexicographically.  Files-only is the load-bearing back-compat
+   *  decision: every existing consumer does
+   *  `for (const p of list(prefix)) { content = read(p); … }`,
+   *  which would silently drop dir entries if `list` returned both
+   *  kinds.  New code that needs dir entries uses `listDirs` or
+   *  `listAll`.
+   *
+   *  A prefix without a trailing `/` matches paths starting with
+   *  the literal string; a trailing `/` enforces a directory
+   *  boundary (so `/designs/m` vs `/designs/m/`).  Returns absolute
+   *  paths. */
   list(prefix: VfsPath): ReadonlyArray<VfsPath>;
+
+  /** Like `list` but returns directory paths only.  Used by the
+   *  workspace-sources controller to derive the set of empty
+   *  folders. */
+  listDirs(prefix: VfsPath): ReadonlyArray<VfsPath>;
+
+  /** Like `list` but returns both file and directory paths.  Used
+   *  where the caller wants the full picture (e.g. the build
+   *  worker's `vfs.snapshot` RPC handler). */
+  listAll(prefix: VfsPath): ReadonlyArray<VfsPath>;
 
   /** Subscribe to writes/deletes touching paths under `prefix`.
    *  Returns an unsubscribe function.  Used by the build worker to
@@ -72,14 +156,21 @@ export interface Vfs {
 
   /** Bulk-seed entries — used by `seedBuiltinPacks` at worker init.
    *  Equivalent to a write-loop but skips per-write listener fan-out;
-   *  fires a single notification per affected prefix at the end. */
-  hydrate(entries: Iterable<readonly [VfsPath, string]>): void;
+   *  fires a single notification per affected prefix at the end.
+   *  Accepts a mix of file and directory entries; a `VfsFileEntry`
+   *  carries content, a `VfsDirEntry` only its path.  Backwards-
+   *  compatible legacy form `[path, content]` tuples is accepted
+   *  by the implementations for ease-of-migration; new callers
+   *  should pass `VfsEntry[]`. */
+  hydrate(entries: Iterable<VfsEntry | readonly [VfsPath, string]>): void;
 
   /** Read-only snapshot of the entire VFS, primarily for tests and
    *  for the worker-rehydrate flow (Phase 2: when a worker restarts,
    *  main-thread takes a snapshot of the workspace VFS and replays
-   *  it into the fresh worker). */
-  snapshot(): ReadonlyMap<VfsPath, string>;
+   *  it into the fresh worker).  Returns a Map so callers preserve
+   *  O(1) lookup; the worker handler projects to a `VfsEntry[]`
+   *  for the wire shape. */
+  snapshot(): ReadonlyMap<VfsPath, VfsEntry>;
 }
 
 /** Vfs that can atomically replace its entire contents from a prior
@@ -88,7 +179,8 @@ export interface Vfs {
  *  instead of cold-rebooting.  Unlike `hydrate` (additive merge),
  *  `restore` removes entries not present in the snapshot and fires a
  *  single notification covering every affected path (added, changed,
- *  AND removed) so subscribers re-sync exactly. */
+ *  AND removed) so subscribers re-sync exactly.  Accepts the same
+ *  mixed entry-or-tuple iterable shape as `hydrate`. */
 export interface RestorableVfs extends Vfs {
-  restore(entries: Iterable<readonly [VfsPath, string]>): void;
+  restore(entries: Iterable<VfsEntry | readonly [VfsPath, string]>): void;
 }
