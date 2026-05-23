@@ -65,7 +65,16 @@ export function renderEntity(
   // accumulated set becomes one `using <ns>;` per entry, so the file
   // imports only what its own expressions actually use.
   const usings = new Set<string>();
-  const renderCtx = { thisName: "this", usings };
+  const renderCtx = {
+    thisName: "this",
+    usings,
+    // Threaded through so render-stmt's collection-mutation path can
+    // distinguish ref-collection fields (writable public `Party`)
+    // from containment fields (private `_lines` backing).  Entity
+    // parts don't have associations, but typing as the union keeps
+    // the ctx shape stable across the two callers.
+    agg: isAgg ? (entity as AggregateIR) : undefined,
+  };
 
   const propLines: string[] = [];
   propLines.push(`    public ${entity.name}Id Id { get; ${setterVisibility} set; }`);
