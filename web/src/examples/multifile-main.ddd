@@ -1,0 +1,32 @@
+// Multi-file Loom project — main.ddd imports shared/money.ddd and
+// shared/currency.ddd.  The root-level `valueobject` and `enum` in
+// those files are visible from every context as an ambient shared
+// kernel (see docs/multi-file-source.md).
+//
+// To browse the imported files: use the tabs above the editor.
+
+import "./shared/money.ddd"
+import "./shared/currency.ddd"
+
+system MultiFileStore {
+
+  module Catalog {
+    context Products {
+      aggregate Product {
+        sku: string display
+        price: Money
+        currency: Currency
+        invariant sku.length > 0
+      }
+      repository Products for Product {
+        find bySku(sku: string): Product? where this.sku == sku
+      }
+    }
+  }
+
+  deployable api {
+    platform: hono
+    modules: Catalog
+    port: 8080
+  }
+}
