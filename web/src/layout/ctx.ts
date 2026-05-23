@@ -81,6 +81,13 @@ export interface LayoutCtx {
   // Workspace (IDB-backed VFS)
   workspace: WorkspaceState;
 
+  /** Workspace path of the file the editor is currently showing.
+   *  Phase 2b1 of the multi-file work locks this to
+   *  `/workspace/main.ddd`; Phase 2b2 lifts it to the Files panel.
+   *  Threading it through the ctx now means Phase 2b2 doesn't have
+   *  to touch every shell to pick it up. */
+  activeSourcePath: string;
+
   // Worker clients
   lspClient: LoomLspClient | null;
   buildClient: LoomBuildClient | null;

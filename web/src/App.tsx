@@ -21,6 +21,7 @@ import {
 } from "./backend/openapi";
 import { buildTree } from "./preview/file-tree";
 import { useWorkspace } from "./workspace/use-workspace";
+import { useWorkspaceSources } from "./workspace/use-workspace-sources";
 import { buildShareUrl, readHashSource, writeHashSource } from "./util/share";
 import { fnv1a32 } from "./util/hash";
 import { usePersistedState } from "./util/usePersistedState";
@@ -124,6 +125,15 @@ export default function App(): JSX.Element {
   const isDesktop = useMediaQuery("(min-width: 768px)", true) ?? true;
 
   const workspace = useWorkspace();
+  // Phase 2b1 of the multi-file work — the controller / hook landed
+  // in Phase 2a; this is the wire-through.  `sources.activePath` is
+  // locked to `/workspace/main.ddd` for now (no UI to change it
+  // yet), so the VFS / generate / write call sites get the exact
+  // same path string they did before.  Phase 2b2 adds the Files
+  // panel that flips the active path.
+  const sources = useWorkspaceSources(workspace.vfs);
+  const sourcesRef = useRef(sources);
+  sourcesRef.current = sources;
   const [buildClientReady, setBuildClientReady] = useState(false);
   const userPickedExampleRef = useRef(false);
 
@@ -486,10 +496,9 @@ export default function App(): JSX.Element {
     const client = buildClientRef.current;
     if (!client) return null;
     dispatch({ type: "GENERATE_START" });
-    await client.vfsWrite([
-      { path: "/workspace/main.ddd", content: sourceRef.current },
-    ]);
-    const result = await client.generateFromPath("/workspace/main.ddd");
+    const entryPath = sourcesRef.current.activePath;
+    await client.vfsWrite([{ path: entryPath, content: sourceRef.current }]);
+    const result = await client.generateFromPath(entryPath);
     dispatch({ type: "GENERATE_DONE", result });
     if (result.ok && result.files.length > 0) {
       setSelectedPath((prev) => prev ?? result.files[0].path);
@@ -772,6 +781,7 @@ export default function App(): JSX.Element {
     initialSource,
     getSource: () => sourceRef.current,
     workspace,
+    activeSourcePath: sources.activePath,
     lspClient: lspClientRef.current,
     buildClient: buildClientRef.current,
     engine: engineRef.current,
@@ -779,7 +789,15 @@ export default function App(): JSX.Element {
       sourceRef.current = text;
       scheduleHashSync(text);
       scheduleAutoGenerate();
-      workspace.vfs?.write("/workspace/main.ddd", text);
+      // Route the persisted write through the multi-file controller
+      // so the workspace-sources state stays in sync.  Today the
+      // active path is `/workspace/main.ddd` (Phase 2b1 keeps it
+      // constant); the controller's `write` is a thin wrapper over
+      // `vfs.write` plus a `files` map refresh.  Read through the
+      // ref so the active path reflects the latest hook snapshot if
+      // a Phase-2b2 tab switch lands mid-typing.
+      const s = sourcesRef.current;
+      s.write(s.activePath, text);
       // Builder (and any non-editor) edits don't flow through Monaco's own
       // change path, so push them into the live model — which also re-runs the
       // LSP — keeping the source tab and Problems panel in sync.

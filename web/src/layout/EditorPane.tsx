@@ -15,7 +15,16 @@ interface Props {
 // ResizeObserver needs a parent with definite size on first paint —
 // flex + minHeight: 0 satisfies that on every shell).
 export function EditorPane({ ctx, border = "none" }: Props): JSX.Element | null {
-  const { lspClient, initialSource, exampleId, onSourceChange, onDiagnosticsChange, isDesktop, editorHandleRef } = ctx;
+  const {
+    lspClient,
+    initialSource,
+    exampleId,
+    onSourceChange,
+    onDiagnosticsChange,
+    isDesktop,
+    editorHandleRef,
+    activeSourcePath,
+  } = ctx;
   if (!lspClient) return null;
   return (
     <Box
@@ -35,6 +44,7 @@ export function EditorPane({ ctx, border = "none" }: Props): JSX.Element | null 
         handleRef={editorHandleRef}
         onChange={(v) => onSourceChange(v, "editor")}
         onDiagnosticsChange={onDiagnosticsChange}
+        activePath={activeSourcePath}
       />
     </Box>
   );
