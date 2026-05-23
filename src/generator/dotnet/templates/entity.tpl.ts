@@ -28,12 +28,16 @@ import { renderCsStatements } from "../render-stmt.js";
  * capability groups via `implements "<name>"`.  Backend convention:
  * `<name>` → `I<PascalCase>`.  No marker interface emitted for
  * capability names with no `implements` declarations; this clause
- * is empty for those aggregates. */
-function capabilityInterfaceClause(agg: AggregateIR): string {
-  const names = agg.implementsCapabilities ?? [];
-  if (names.length === 0) return "";
-  const ifaces = names.map((n) => `I${n[0]!.toUpperCase()}${n.slice(1)}`);
-  return ` : ${ifaces.join(", ")}`;
+ * is empty for those aggregates.
+ *
+ * **Currently a no-op.**  Marker interfaces were the Phase 3
+ * over-build that the refactor reverted; this stub stays in place
+ * so a future "users opt into emitting marker interfaces for their
+ * own type-checking" feature can re-enable emission per capability.
+ * Until then, every aggregate gets an empty clause and the call
+ * site below collapses to `public sealed class <Name>`. */
+function capabilityInterfaceClause(_agg: AggregateIR): string {
+  return "";
 }
 
 export function renderEntity(

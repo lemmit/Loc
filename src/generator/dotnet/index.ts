@@ -8,12 +8,6 @@ import { emitAuthFiles } from "./auth-emit.js";
 import { emitCqrs } from "./cqrs-emit.js";
 import { buildFindBodies } from "./find-emit.js";
 import {
-  capabilityGroups,
-  capabilityInterfaceName,
-  renderCapabilityFilters,
-  renderCapabilityInterface,
-} from "./templates/capability-pass.tpl.js";
-import {
   renderAuditableInterceptor,
   renderCommon,
   renderConfiguration,
@@ -165,10 +159,6 @@ function emitProjectFromContexts(
   // `contextStamps` IR (no marker interface, no per-aggregate
   // hand-written stamping logic).
   emitStampingInterceptor(merged, ns, out);
-  // Capability artefacts: one marker interface per declared name,
-  // plus per-capability filter helpers consumed by the DbContext-
-  // level filter loops.  See `capability-pass.tpl.ts` for the layout.
-  emitCapabilityArtefacts(merged, ns, out);
   const usesStamping = merged.aggregates.some(
     (a) => (a.contextStamps?.length ?? 0) > 0,
   );
@@ -238,7 +228,6 @@ function emitContext(ctx: BoundedContextIR, ns: string, out: Map<string, string>
   emitViews(ctx, ns, out);
   // Stamping interceptor — same gating as the system path.
   emitStampingInterceptor(ctx, ns, out);
-  emitCapabilityArtefacts(ctx, ns, out);
   // Same FluentValidation gate as the system path — drives the
   // pipeline behavior emit + csproj + Program.cs registration +
   // the DomainExceptionFilter arm.
@@ -281,37 +270,6 @@ function emitStampingInterceptor(
   );
 }
 
-/** Emit one marker-interface file per distinct capability name
- * declared on any aggregate (via `implements`), plus the
- * corresponding `<Name>Filters` static-helper class that the
- * DbContext-level filter loop dispatches to.  No artefact is
- * emitted for a capability that no aggregate names, even if it
- * appears via `contextFilters` alone — those are handled by the
- * per-EntityConfiguration fallback. */
-function emitCapabilityArtefacts(
-  merged: BoundedContextIR,
-  ns: string,
-  out: Map<string, string>,
-): void {
-  const groups = capabilityGroups(merged.aggregates);
-  for (const cap of groups) {
-    // Marker interface — always emit when the name is declared,
-    // even without filters.  User code wanting `if (x is IAuditable)`
-    // gets the type even if no filter applies.
-    out.set(
-      `Domain/Common/${capabilityInterfaceName(cap.name)}.cs`,
-      renderCapabilityInterface(ns, cap.name),
-    );
-    // Filter helper — only when at least one participant aggregate
-    // declares any `filter`.  Implementation detail of the DbContext
-    // pass; not user-facing.
-    const filtersFile = renderCapabilityFilters(ns, cap);
-    if (filtersFile) {
-      const helperName = `${cap.name[0]!.toUpperCase()}${cap.name.slice(1)}Filters`;
-      out.set(`Infrastructure/Persistence/${helperName}.cs`, filtersFile);
-    }
-  }
-}
 
 function emitIds(ctx: BoundedContextIR, ns: string, out: Map<string, string>): void {
   for (const agg of ctx.aggregates) {

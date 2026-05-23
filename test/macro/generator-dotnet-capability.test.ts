@@ -1,23 +1,23 @@
-// .NET runtime capability translation, end-to-end.
+// .NET capability translation, post-Phase-3-revert.
 //
-// Capability AST (contributed by `with auditable` / `with
-// softDeletable` or hand-written `filter` / `stamp` / `implements`)
-// must reach the generated .cs output via the existing expression
-// renderer.  No hardcoded field names — just AST translation plus
-// per-capability grouping by `implementsCapabilities`.
+// After splitting stdlib macros into level-correct trios
+// (capability behavior at context; state at aggregate), the
+// generator has no capability-grouping infrastructure.  Filters
+// install per-EntityConfiguration; stamps go through the
+// registry-driven SaveChangesInterceptor.  No marker interfaces,
+// no DbContext-level loops, no `<Cap>Filters.cs` helpers.
 //
 // What the tests verify:
-//   - One marker interface file per declared capability name
-//     (`Domain/Common/IAuditable.cs`, `Domain/Common/ISoftDeletable.cs`).
-//     The interfaces are empty — they only tag entities for the
-//     OnModelCreating filter pass.
-//   - Entity class declarations carry `: IAuditable, ISoftDeletable`
-//     iff the aggregate has matching `implements` declarations.
-//   - HasQueryFilter is installed via DbContext-level loops, not
-//     per-EntityConfiguration.  The lambda predicate translates the
-//     macro-supplied AST: `!this.isDeleted` → `!x.IsDeleted`.
-//   - SaveChangesInterceptor is registry-driven: a switch on
-//     entity type with per-aggregate stamping bodies.
+//   - Entity classes are plain `public sealed class Order` with
+//     no `: I<Capability>` clause regardless of `implements` decls.
+//   - No `Domain/Common/I*.cs` marker interfaces emitted.
+//   - No `<Cap>Filters.cs` static helpers emitted.
+//   - `b.HasQueryFilter(...)` lives in `<Aggregate>Configuration.cs`
+//     for any aggregate whose propagated IR carries `contextFilters`.
+//   - `AppDbContext.OnModelCreating` stays minimal — just
+//     `ApplyConfiguration` calls, no `foreach` loop.
+//   - `AuditableInterceptor.cs` still emitted when any aggregate
+//     has stamping rules.  Body is the registry-driven switch.
 
 import { NodeFileSystem } from "langium/node";
 import { parseHelper } from "langium/test";
@@ -46,77 +46,61 @@ const aggregateOnly = (extras: string) => `
   }
 `;
 
-describe(".NET generator: marker interfaces, driven by `implements`", () => {
-  it("emits Domain/Common/IAuditable.cs when any aggregate implements auditable", async () => {
-    const model = await modelFrom(aggregateOnly("with auditable"));
-    const files = generateDotnet(model);
-    expect([...files.keys()]).toContain("Domain/Common/IAuditable.cs");
-    const src = files.get("Domain/Common/IAuditable.cs")!;
-    // Empty marker interface — type tag only, no declared members.
-    expect(src).toMatch(/public interface IAuditable \{ \}/);
-  });
-
-  it("emits Domain/Common/ISoftDeletable.cs when any aggregate implements softDeletable", async () => {
-    const model = await modelFrom(aggregateOnly("with softDeletable"));
-    const files = generateDotnet(model);
-    expect([...files.keys()]).toContain("Domain/Common/ISoftDeletable.cs");
-  });
-
-  it("does NOT emit marker interfaces for projects with no `implements` decls", async () => {
-    const model = await modelFrom(aggregateOnly(""));
-    const files = generateDotnet(model);
-    const keys = [...files.keys()];
-    expect(keys.filter((k) => k.startsWith("Domain/Common/I") && k.endsWith(".cs"))).toEqual([]);
-  });
-
-  it("entity class declaration carries `: I<Cap>` for each declared capability", async () => {
+describe(".NET generator: no capability artefacts emitted", () => {
+  it("no Domain/Common/I*.cs marker interfaces", async () => {
     const model = await modelFrom(aggregateOnly("with auditable, softDeletable"));
     const files = generateDotnet(model);
-    const orderCs = files.get("Domain/Orders/Order.cs")!;
-    expect(orderCs).toMatch(/public sealed class Order : IAuditable, ISoftDeletable/);
+    const markers = [...files.keys()].filter(
+      (k) => k.startsWith("Domain/Common/I") && k.endsWith(".cs"),
+    );
+    expect(markers).toEqual([]);
   });
 
-  it("entity class declaration is plain when no `implements` was declared", async () => {
-    const model = await modelFrom(aggregateOnly(""));
+  it("no <Capability>Filters.cs helper", async () => {
+    const model = await modelFrom(aggregateOnly("with softDeletable"));
+    const files = generateDotnet(model);
+    const helpers = [...files.keys()].filter(
+      (k) => k.startsWith("Infrastructure/Persistence/") && k.endsWith("Filters.cs"),
+    );
+    expect(helpers).toEqual([]);
+  });
+
+  it("entity class declaration has no `: I<Cap>` clause", async () => {
+    const model = await modelFrom(aggregateOnly("with auditable, softDeletable"));
     const files = generateDotnet(model);
     const orderCs = files.get("Domain/Orders/Order.cs")!;
     expect(orderCs).toMatch(/public sealed class Order\n/);
     expect(orderCs).not.toMatch(/: I/);
   });
-});
 
-describe(".NET generator: DbContext-level HasQueryFilter pass", () => {
-  it("AppDbContext.OnModelCreating runs one loop per capability that has filters", async () => {
+  it("OnModelCreating has no `foreach (var entityType ...)` loop", async () => {
     const model = await modelFrom(aggregateOnly("with softDeletable"));
     const files = generateDotnet(model);
     const ctx = files.get("Infrastructure/Persistence/AppDbContext.cs")!;
-    expect(ctx).toMatch(/foreach \(var entityType in modelBuilder\.Model\.GetEntityTypes/);
-    expect(ctx).toMatch(/typeof\(ISoftDeletable\)\.IsAssignableFrom\(entityType\.ClrType\)/);
-    expect(ctx).toMatch(/SoftDeletableFilters\.Apply\(modelBuilder, entityType\.ClrType\)/);
+    expect(ctx).not.toMatch(/foreach \(var entityType/);
   });
+});
 
-  it("emits Infrastructure/Persistence/<Cap>Filters.cs with per-aggregate Apply methods", async () => {
+describe(".NET generator: HasQueryFilter installs per-EntityConfiguration", () => {
+  it("emits one `b.HasQueryFilter(...)` per propagated filter on the matching config", async () => {
     const model = await modelFrom(aggregateOnly("with softDeletable"));
     const files = generateDotnet(model);
-    const path = "Infrastructure/Persistence/SoftDeletableFilters.cs";
-    expect([...files.keys()]).toContain(path);
-    const src = files.get(path)!;
-    expect(src).toMatch(/public static class SoftDeletableFilters/);
-    expect(src).toMatch(/public static void ApplyToOrder\(ModelBuilder mb\)/);
-    expect(src).toMatch(/mb\.Entity<Order>\(\)\.HasQueryFilter\(x => !x\.IsDeleted\);/);
+    const cfg = files.get(
+      "Infrastructure/Persistence/Configurations/OrderConfiguration.cs",
+    )!;
+    expect(cfg).toMatch(/b\.HasQueryFilter\(x => !x\.IsDeleted\)/);
   });
 
-  it("per-EntityConfiguration HasQueryFilter is NOT emitted when the aggregate uses `implements`", async () => {
-    const model = await modelFrom(aggregateOnly("with softDeletable"));
+  it("does NOT install HasQueryFilter for non-softDeletable aggregates", async () => {
+    const model = await modelFrom(aggregateOnly(""));
     const files = generateDotnet(model);
-    const cfg = files.get("Infrastructure/Persistence/Configurations/OrderConfiguration.cs")!;
-    // Filter lives in the DbContext pass + helper, not here.
+    const cfg = files.get(
+      "Infrastructure/Persistence/Configurations/OrderConfiguration.cs",
+    )!;
     expect(cfg).not.toMatch(/HasQueryFilter/);
   });
 
-  it("anonymous filter (no `implements`) falls back to per-EntityConfiguration emission", async () => {
-    // Hand-written `filter` with no `implements` — generator can't
-    // group, so it installs the filter in the entity config.
+  it("hand-written `filter` declaration installs the same way as macro-emitted", async () => {
     const model = await modelFrom(`
       context Sales {
         aggregate Order {
@@ -128,7 +112,9 @@ describe(".NET generator: DbContext-level HasQueryFilter pass", () => {
       }
     `);
     const files = generateDotnet(model);
-    const cfg = files.get("Infrastructure/Persistence/Configurations/OrderConfiguration.cs")!;
+    const cfg = files.get(
+      "Infrastructure/Persistence/Configurations/OrderConfiguration.cs",
+    )!;
     expect(cfg).toMatch(/b\.HasQueryFilter\(x => !x\.Archived\)/);
   });
 });
@@ -154,7 +140,9 @@ describe(".NET generator: registry-driven SaveChangesInterceptor", () => {
     const model = await modelFrom(aggregateOnly("with auditable"));
     const files = generateDotnet(model);
     const program = files.get("Program.cs")!;
-    expect(program).toMatch(/AddScoped<Sales\.Infrastructure\.Persistence\.AuditableInterceptor>/);
+    expect(program).toMatch(
+      /AddScoped<Sales\.Infrastructure\.Persistence\.AuditableInterceptor>/,
+    );
   });
 
   it("softDeletable alone does NOT trigger interceptor emission", async () => {
@@ -166,35 +154,8 @@ describe(".NET generator: registry-driven SaveChangesInterceptor", () => {
   });
 });
 
-describe(".NET generator: hand-written equivalents work without macro", () => {
-  it("`implements \"softDeletable\"` + `filter ...` produces full DbContext pass", async () => {
-    // No macros at all — pure hand-written capability surface.
-    const model = await modelFrom(`
-      context Sales {
-        aggregate Doc {
-          subject: string
-          isDeleted: bool
-          implements "softDeletable"
-          filter !this.isDeleted
-        }
-        repository Docs for Doc { }
-      }
-    `);
-    const files = generateDotnet(model);
-    expect([...files.keys()]).toContain("Domain/Common/ISoftDeletable.cs");
-    expect([...files.keys()]).toContain("Infrastructure/Persistence/SoftDeletableFilters.cs");
-    const ctx = files.get("Infrastructure/Persistence/AppDbContext.cs")!;
-    expect(ctx).toMatch(/typeof\(ISoftDeletable\)/);
-    const docCs = files.get("Domain/Docs/Doc.cs")!;
-    expect(docCs).toMatch(/public sealed class Doc : ISoftDeletable/);
-  });
-});
-
-describe(".NET generator: context-level capability propagation", () => {
-  it("context-level `filter` propagates to per-EntityConfiguration on every aggregate (no `implements` -> fallback path)", async () => {
-    // Context-level filter without `implements` — every aggregate
-    // inherits the filter; the generator emits it per-config since
-    // there's no marker interface to scope a DbContext-level loop.
+describe(".NET generator: context-level propagation reaches per-config emission", () => {
+  it("unqualified context-level filter propagates to every aggregate", async () => {
     const model = await modelFrom(`
       context Sales {
         filter !this.isDeleted
@@ -211,56 +172,13 @@ describe(".NET generator: context-level capability propagation", () => {
       }
     `);
     const files = generateDotnet(model);
-    expect(files.get("Infrastructure/Persistence/Configurations/OrderConfiguration.cs")!)
-      .toMatch(/b\.HasQueryFilter\(x => !x\.IsDeleted\)/);
-    expect(files.get("Infrastructure/Persistence/Configurations/CustomerConfiguration.cs")!)
-      .toMatch(/b\.HasQueryFilter\(x => !x\.IsDeleted\)/);
-    // No DbContext-level loop — nothing to group by.
+    expect(
+      files.get("Infrastructure/Persistence/Configurations/OrderConfiguration.cs")!,
+    ).toMatch(/b\.HasQueryFilter\(x => !x\.IsDeleted\)/);
+    expect(
+      files.get("Infrastructure/Persistence/Configurations/CustomerConfiguration.cs")!,
+    ).toMatch(/b\.HasQueryFilter\(x => !x\.IsDeleted\)/);
     const ctx = files.get("Infrastructure/Persistence/AppDbContext.cs")!;
     expect(ctx).not.toMatch(/foreach \(var entityType/);
-  });
-
-  it("context-level `implements` + `filter` propagates to ALL aggregates via the DbContext-level pass", async () => {
-    // This is the idiomatic shape: declare the capability once at
-    // the context boundary; every aggregate inside gets the marker
-    // interface, the filter helper, and the OnModelCreating dispatch.
-    const model = await modelFrom(`
-      context Sales {
-        implements "softDeletable"
-        filter !this.isDeleted
-        aggregate Order {
-          subject: string
-          isDeleted: bool
-        }
-        aggregate Customer {
-          name: string
-          isDeleted: bool
-        }
-        repository Orders for Order { }
-        repository Customers for Customer { }
-      }
-    `);
-    const files = generateDotnet(model);
-    // Marker interface (one) — every aggregate carries it.
-    expect([...files.keys()]).toContain("Domain/Common/ISoftDeletable.cs");
-    expect(files.get("Domain/Orders/Order.cs")!).toMatch(
-      /public sealed class Order : ISoftDeletable/,
-    );
-    expect(files.get("Domain/Customers/Customer.cs")!).toMatch(
-      /public sealed class Customer : ISoftDeletable/,
-    );
-    // Per-capability filter helper has ApplyTo* methods for both.
-    const helper = files.get("Infrastructure/Persistence/SoftDeletableFilters.cs")!;
-    expect(helper).toMatch(/ApplyToOrder\(ModelBuilder mb\)/);
-    expect(helper).toMatch(/ApplyToCustomer\(ModelBuilder mb\)/);
-    // DbContext-level loop installed.
-    const ctx = files.get("Infrastructure/Persistence/AppDbContext.cs")!;
-    expect(ctx).toMatch(/typeof\(ISoftDeletable\)/);
-    expect(ctx).toMatch(/SoftDeletableFilters\.Apply\(modelBuilder, entityType\.ClrType\)/);
-    // Per-config emission skipped to avoid double-application.
-    expect(files.get("Infrastructure/Persistence/Configurations/OrderConfiguration.cs")!)
-      .not.toMatch(/HasQueryFilter/);
-    expect(files.get("Infrastructure/Persistence/Configurations/CustomerConfiguration.cs")!)
-      .not.toMatch(/HasQueryFilter/);
   });
 });
