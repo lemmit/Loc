@@ -24,6 +24,7 @@ import {
   NumberInput,
   ScrollArea,
   Select,
+  SimpleGrid,
   Stack,
   Text,
   TextInput,
@@ -312,18 +313,35 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
   const solById = new Map(trace.solutions.map((s) => [s.name, s]));
   const roots = trace.requirements.filter((r) => !r.parent?.ref);
 
+  // Master-detail layout: side-by-side on desktop; on mobile the tree
+  // and the detail occupy the full pane and swap based on selection,
+  // with a "Back to list" affordance to clear the selection.
+  const isDesktop = ctx.isDesktop;
+  const showTree = isDesktop || selected === null;
+  const showDetail = isDesktop || selected !== null;
+
   return (
-    <Box style={{ flex: 1, display: "flex", minHeight: 0, minWidth: 0 }} data-testid="requirements-pane">
-      {/* Tree (left) */}
-      <Box
-        style={{
-          width: 320,
-          borderRight: "1px solid var(--mantine-color-dark-4)",
-          minHeight: 0,
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
+    <Box
+      style={{
+        flex: 1,
+        display: "flex",
+        flexDirection: isDesktop ? "row" : "column",
+        minHeight: 0,
+        minWidth: 0,
+      }}
+      data-testid="requirements-pane"
+    >
+      {/* Tree (left on desktop, full-width on mobile) */}
+      {showTree && (
+        <Box
+          style={{
+            width: isDesktop ? 320 : "100%",
+            borderRight: isDesktop ? "1px solid var(--mantine-color-dark-4)" : undefined,
+            minHeight: 0,
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
         <ScrollArea style={{ flex: 1 }}>
           <Box p="sm">
             <SectionHeader
@@ -395,11 +413,34 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
             )}
           </Box>
         </ScrollArea>
-      </Box>
+        </Box>
+      )}
 
-      {/* Detail (right) */}
-      <Box style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
-        <ScrollArea style={{ flex: 1 }}>
+      {/* Detail (right on desktop, full-width on mobile when selected) */}
+      {showDetail && (
+        <Box style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
+          {!isDesktop && selected !== null && (
+            <Group
+              gap={6}
+              px="sm"
+              py={6}
+              wrap="nowrap"
+              style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}
+            >
+              <Button
+                size="xs"
+                variant="subtle"
+                onClick={() => setSelected(null)}
+                data-testid="req-back-to-list"
+              >
+                ← Back
+              </Button>
+              <Text size="sm" c="dimmed" truncate>
+                {selected.id}
+              </Text>
+            </Group>
+          )}
+          <ScrollArea style={{ flex: 1 }}>
           <Box p="md">
             {selected === null && (
               <Text size="sm" c="dimmed">
@@ -439,8 +480,9 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
               />
             )}
           </Box>
-        </ScrollArea>
-      </Box>
+          </ScrollArea>
+        </Box>
+      )}
 
       {/* "New …" wizards.  After Create we auto-select the new item so
           the user lands in the existing edit form to fill in extras. */}
@@ -760,7 +802,7 @@ function RequirementForm({
         onChange={(e) => setForm({ ...form, title: e.currentTarget.value })}
         data-testid="req-form-title"
       />
-      <Group grow>
+      <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }} spacing="sm">
         <Select
           label="Type"
           data={REQUIREMENT_TYPES}
@@ -798,7 +840,7 @@ function RequirementForm({
           searchable
           data-testid="req-form-parent"
         />
-      </Group>
+      </SimpleGrid>
 
       <Divider my={4} label="Solutions" labelPosition="left" />
       {solIds.length === 0 ? (
