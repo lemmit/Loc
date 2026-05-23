@@ -33,66 +33,30 @@ import type {
 } from "../language/generated/ast.js";
 import { isProperty } from "../language/generated/ast.js";
 import type { OriginToken } from "./define.js";
+import {
+  _currentOrigin,
+  _setContainer,
+  _tag,
+  _withOrigin as _withOriginInternal,
+  ORIGIN_PROP as ORIGIN_PROP_INTERNAL,
+  originOf as originOfInternal,
+} from "./factories-internals.js";
 
 // ---------------------------------------------------------------------------
-// Origin tagging
+// Origin tagging — implementation lives in `factories-internals.ts`
+// so the active-origin slot is a single shared cell across both this
+// file and `ui-factories.ts`.  These re-exports keep the old import
+// paths working (`originOf`, `ORIGIN_PROP`, `_withOrigin` are all
+// already-public surface).
 // ---------------------------------------------------------------------------
 
-/** Hidden property on every macro-emitted AST node — the expander
- * uses it when splicing, and the validator/diagnostics layer reads
- * it to redirect errors at the call site.  Not part of the public
- * Langium AST contract. */
-export const ORIGIN_PROP = "$origin" as const;
+export const ORIGIN_PROP = ORIGIN_PROP_INTERNAL;
+export const originOf = originOfInternal;
+export const _withOrigin = _withOriginInternal;
 
-/** Read the origin token off a node, if any.  Walks `$container`
- * chain so a property buried inside a synthesised operation body
- * still reports its origin. */
-export function originOf(node: unknown): OriginToken | undefined {
-  let cur: any = node;
-  while (cur) {
-    if (cur[ORIGIN_PROP] !== undefined) return cur[ORIGIN_PROP] as OriginToken;
-    cur = cur.$container;
-  }
-  return undefined;
-}
-
-function tag<T>(node: T, origin: OriginToken | undefined): T {
-  if (origin) (node as any)[ORIGIN_PROP] = origin;
-  return node;
-}
-
-function setContainer(child: unknown, parent: object, property: string, index?: number): void {
-  const c = child as Record<string, unknown>;
-  c.$container = parent;
-  c.$containerProperty = property;
-  if (index !== undefined) c.$containerIndex = index;
-}
-
-// ---------------------------------------------------------------------------
-// Factory context — bound by the expander before invoking `expand()`.
-// ---------------------------------------------------------------------------
-
-/** Factories read this thread-local context to find the active
- * macro's origin token.  Set by the expander immediately before
- * each `expand()` call; cleared after.  Single-threaded JS makes
- * this safe; if we ever move expansion into workers, replace with
- * AsyncLocalStorage or explicit context-passing. */
-let _activeOrigin: OriginToken | undefined;
-
-/** Internal API used by the expander.  Not for macro authors. */
-export function _withOrigin<T>(origin: OriginToken, fn: () => T): T {
-  const prev = _activeOrigin;
-  _activeOrigin = origin;
-  try {
-    return fn();
-  } finally {
-    _activeOrigin = prev;
-  }
-}
-
-function currentOrigin(): OriginToken | undefined {
-  return _activeOrigin;
-}
+const currentOrigin = _currentOrigin;
+const tag = _tag;
+const setContainer = _setContainer;
 
 // ---------------------------------------------------------------------------
 // Type-reference factories
@@ -354,6 +318,60 @@ export function targetFields(target: Aggregate): readonly Property[] {
  * user-written. */
 export function writableUserFields(target: Aggregate): readonly Property[] {
   return targetFields(target).filter((f) => (f as any)[ORIGIN_PROP] === undefined);
+}
+
+// ---------------------------------------------------------------------------
+// Cross-decl accessors — typed views over Module / BoundedContext
+// members, computed on the fly.  Used by ui-targeted macros like
+// `scaffold` to walk `mod.aggregates`, `ctx.workflows`, etc.  The
+// raw AST has heterogeneous `members` arrays; these helpers do the
+// per-type filtering once so macro authors don't reach into
+// `$type` discriminators.
+// ---------------------------------------------------------------------------
+
+/** Aggregates declared inside a Module (across all its
+ * BoundedContexts) or directly inside a BoundedContext. */
+export function aggregatesIn(
+  parent: import("../language/generated/ast.js").Module | import("../language/generated/ast.js").BoundedContext,
+): readonly Aggregate[] {
+  if ((parent as any).$type === "Module") {
+    const m = parent as import("../language/generated/ast.js").Module;
+    return (m.contexts ?? []).flatMap((c) =>
+      (c.members ?? []).filter((cm) => cm.$type === "Aggregate") as Aggregate[],
+    );
+  }
+  const ctx = parent as import("../language/generated/ast.js").BoundedContext;
+  return (ctx.members ?? []).filter((m) => m.$type === "Aggregate") as Aggregate[];
+}
+
+/** Workflows declared inside a Module / BoundedContext. */
+export function workflowsIn(
+  parent: import("../language/generated/ast.js").Module | import("../language/generated/ast.js").BoundedContext,
+): readonly import("../language/generated/ast.js").Workflow[] {
+  type W = import("../language/generated/ast.js").Workflow;
+  if ((parent as any).$type === "Module") {
+    const m = parent as import("../language/generated/ast.js").Module;
+    return (m.contexts ?? []).flatMap((c) =>
+      (c.members ?? []).filter((cm) => cm.$type === "Workflow") as W[],
+    );
+  }
+  const ctx = parent as import("../language/generated/ast.js").BoundedContext;
+  return (ctx.members ?? []).filter((m) => m.$type === "Workflow") as W[];
+}
+
+/** Views declared inside a Module / BoundedContext. */
+export function viewsIn(
+  parent: import("../language/generated/ast.js").Module | import("../language/generated/ast.js").BoundedContext,
+): readonly import("../language/generated/ast.js").View[] {
+  type V = import("../language/generated/ast.js").View;
+  if ((parent as any).$type === "Module") {
+    const m = parent as import("../language/generated/ast.js").Module;
+    return (m.contexts ?? []).flatMap((c) =>
+      (c.members ?? []).filter((cm) => cm.$type === "View") as V[],
+    );
+  }
+  const ctx = parent as import("../language/generated/ast.js").BoundedContext;
+  return (ctx.members ?? []).filter((m) => m.$type === "View") as V[];
 }
 
 // ---------------------------------------------------------------------------

@@ -528,15 +528,31 @@ WithClause:
 MacroCall:
     name=ID ('(' (args+=MacroArg (',' args+=MacroArg)*)? ')')?;
 
+// Arg names accept the same soft-keyword set as LooseName so
+// macros may use `modules:`, `aggregates:`, etc. as parameter
+// names — same identifier surface the legacy `scaffold` directive
+// uses, which scaffold-replacement macros need to mirror.
 MacroArg:
-    name=ID ':' value=MacroArgValue;
+    name=LooseName ':' value=MacroArgValue;
 
+// Macro arg ref-list elements are bare IDs, not Langium cross-
+// references.  We don't use the [Target:ID] form because:
+//   - Macros accept refs to declaration kinds outside the global
+//     scope (Workflow, View, Module), which the default scope
+//     provider doesn't expose;
+//   - The macro expander does its own name lookup against a
+//     per-document inventory, with diagnostics that point at the
+//     macro call rather than the linker's generic "could not
+//     resolve" message.
+// IDE go-to-definition on macro args is a Phase 5 concern; will
+// be implemented via a custom DefinitionProvider rather than by
+// routing through Langium's linker.
 MacroArgValue:
     {infer MacroArgString} string=STRING
     | {infer MacroArgBool} bool=('true' | 'false')
     | {infer MacroArgInt} int=INT
-    | {infer MacroArgRef} ref=[NamedDecl:ID]
-    | {infer MacroArgRefList} '[' (refs+=[NamedDecl:ID] (',' refs+=[NamedDecl:ID])*)? ']';
+    | {infer MacroArgRef} ref=ID
+    | {infer MacroArgRefList} '[' (refs+=ID (',' refs+=ID)*)? ']';
 
 AggregateMember:
     Containment | DerivedProp | Invariant | FunctionDecl | Operation | EntityPart | TestBlock | Property;

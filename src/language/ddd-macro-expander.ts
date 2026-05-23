@@ -27,7 +27,7 @@
 //                          members resolve through standard machinery
 //   Validated     (=6)
 
-import type { LangiumDocument } from "langium";
+import type { AstNode, LangiumDocument } from "langium";
 import { AstUtils, DocumentState } from "langium";
 import type { LangiumSharedServices } from "langium/lsp";
 import { isMarkNode, type MarkNode, _withOrigin } from "../macro-api/factories.js";
@@ -42,14 +42,19 @@ import {
   type Aggregate,
   type AggregateMember,
   isAggregate,
+  isBoundedContext,
+  isModule,
   isSystem,
   isUi,
+  isView,
+  isWorkflow,
   type MacroArg,
   type MacroCall,
   type Model,
   type Ui,
   type UiMember,
 } from "./generated/ast.js";
+import type { NamedDeclKind } from "../macro-api/define.js";
 import { allMacros, lookupMacro } from "./macro-registry.js";
 
 // ---------------------------------------------------------------------------
@@ -134,24 +139,80 @@ export function registerMacroExpander(shared: LangiumSharedServices): void {
 }
 
 // ---------------------------------------------------------------------------
+// Per-document named-declaration inventory.
+//
+// Macro args of kind `ref` / `refList` reference declarations by
+// name (`with scaffold(aggregates: [Order, Customer])`).  By the
+// IndexedContent phase — where the expander runs — Langium's
+// linker hasn't resolved cross-references yet, so `ref.ref` is
+// undefined.  We do our own lookup against this inventory built
+// from a single AST walk.
+//
+// Built lazily per document and per expansion pass (not cached
+// across builds) so that re-expansion after a user edit sees the
+// fresh AST.
+
+interface Inventory {
+  Aggregate: Map<string, AstNode>;
+  Module: Map<string, AstNode>;
+  BoundedContext: Map<string, AstNode>;
+  Workflow: Map<string, AstNode>;
+  View: Map<string, AstNode>;
+  ValueObject: Map<string, AstNode>;
+  EnumDecl: Map<string, AstNode>;
+}
+
+function buildInventory(model: Model): Inventory {
+  const inv: Inventory = {
+    Aggregate: new Map(),
+    Module: new Map(),
+    BoundedContext: new Map(),
+    Workflow: new Map(),
+    View: new Map(),
+    ValueObject: new Map(),
+    EnumDecl: new Map(),
+  };
+  for (const node of AstUtils.streamAllContents(model)) {
+    const named = node as AstNode & { name?: string };
+    if (typeof named.name !== "string") continue;
+    if (isAggregate(node)) inv.Aggregate.set(named.name, node);
+    else if (isModule(node)) inv.Module.set(named.name, node);
+    else if (isBoundedContext(node)) inv.BoundedContext.set(named.name, node);
+    else if (isWorkflow(node)) inv.Workflow.set(named.name, node);
+    else if (isView(node)) inv.View.set(named.name, node);
+    else if (node.$type === "ValueObject") inv.ValueObject.set(named.name, node);
+    else if (node.$type === "EnumDecl") inv.EnumDecl.set(named.name, node);
+  }
+  return inv;
+}
+
+// ---------------------------------------------------------------------------
 // Walk + expand
 // ---------------------------------------------------------------------------
 
 function expandModel(model: Model, doc: LangiumDocument): void {
+  // Inventory shared across all macro expansions in this pass —
+  // O(N) AST walk once, instead of once per ref-list arg.
+  const inv = buildInventory(model);
   // streamAllContents walks the AST via `$container`-respecting
   // traversal — safe from cycle-via-parent-pointer recursion.
   for (const node of AstUtils.streamAllContents(model)) {
-    if (isAggregate(node)) expandHost(node, "aggregate", doc);
-    else if (isUi(node)) expandHost(node, "ui", doc);
+    if (isAggregate(node)) expandHost(node, "aggregate", doc, inv);
+    else if (isUi(node)) expandHost(node, "ui", doc, inv);
   }
   void isSystem; // imported for symmetry with future system-level macros
 }
 
-function expandHost(host: Aggregate | Ui, kind: "aggregate" | "ui", doc: LangiumDocument): void {
+function expandHost(
+  host: Aggregate | Ui,
+  kind: "aggregate" | "ui",
+  doc: LangiumDocument,
+  inv: Inventory,
+): void {
   const wc = host.withClause;
   if (!wc) return;
   for (const call of wc.calls ?? []) {
-    expandOneCall(call, host, kind, doc);
+    expandOneCall(call, host, kind, doc, inv);
   }
 }
 
@@ -160,6 +221,7 @@ function expandOneCall(
   host: Aggregate | Ui,
   hostKind: "aggregate" | "ui",
   doc: LangiumDocument,
+  inv: Inventory,
 ): void {
   const name = call.name;
   if (!name) return;
@@ -183,7 +245,7 @@ function expandOneCall(
     });
     return;
   }
-  const argResult = bindArgs(macro, call, doc);
+  const argResult = bindArgs(macro, call, doc, inv);
   if (!argResult.ok) return;
   const origin: OriginToken = {
     _kind: "macro-origin",
@@ -291,6 +353,7 @@ function bindArgs(
   macro: MacroDefinition,
   call: MacroCall,
   doc: LangiumDocument,
+  inv: Inventory,
 ): BindResult | BindFailure {
   const spec: ParamSpec = macro.params ?? {};
   const provided = new Map<string, MacroArg>();
@@ -326,7 +389,7 @@ function bindArgs(
       failed = true;
       continue;
     }
-    const v = coerceArg(macro.name, name, arg, ps, doc);
+    const v = coerceArg(macro.name, name, arg, ps, doc, inv);
     if (v.ok) out[name] = v.value;
     else failed = true;
   }
@@ -359,6 +422,7 @@ function coerceArg(
   arg: MacroArg,
   spec: ParamType,
   doc: LangiumDocument,
+  inv: Inventory,
 ): { ok: true; value: unknown } | { ok: false } {
   const v = arg.value;
   switch (spec.kind) {
@@ -373,22 +437,48 @@ function coerceArg(
       break;
     case "ref":
       if (v.$type === "MacroArgRef") {
-        const target = (v as any).ref?.ref;
-        if (!target) {
-          // Unresolved at this phase is normal — pass the textual
-          // reference through; backends iterate the resolved node
-          // post-link.  Macro authors that need the resolved node
-          // must access it through call-time inspection (future).
-          return { ok: true, value: (v as any).ref };
+        // After the grammar change, MacroArgRef.ref is a plain
+        // string (not a Langium Reference) — the expander does
+        // its own lookup against the per-document inventory.
+        const refText = (v as any).ref as string | undefined;
+        if (!refText) return { ok: false };
+        const resolved = resolveRef(inv, spec.of, refText);
+        if (!resolved) {
+          recordDiagnostic(doc, {
+            severity: "error",
+            message:
+              `Argument '${argName}' to macro '${macroName}' references unknown ${spec.of} '${refText}'.`,
+            node: arg,
+            property: "value",
+          });
+          return { ok: false };
         }
-        return { ok: true, value: target };
+        return { ok: true, value: resolved };
       }
       break;
     case "refList":
       if (v.$type === "MacroArgRefList") {
-        const refs = (v as any).refs ?? [];
-        const values = refs.map((r: any) => (r.ref as object) ?? r);
-        return { ok: true, value: values };
+        const refs = ((v as any).refs ?? []) as string[];
+        const resolved: AstNode[] = [];
+        let anyBad = false;
+        for (const refText of refs) {
+          if (!refText) continue;
+          const node = resolveRef(inv, spec.of, refText);
+          if (!node) {
+            recordDiagnostic(doc, {
+              severity: "error",
+              message:
+                `Argument '${argName}' to macro '${macroName}' references unknown ${spec.of} '${refText}'.`,
+              node: arg,
+              property: "value",
+            });
+            anyBad = true;
+            continue;
+          }
+          resolved.push(node);
+        }
+        if (anyBad) return { ok: false };
+        return { ok: true, value: resolved };
       }
       break;
   }
@@ -399,6 +489,10 @@ function coerceArg(
     property: "value",
   });
   return { ok: false };
+}
+
+function resolveRef(inv: Inventory, kind: NamedDeclKind, name: string): AstNode | undefined {
+  return inv[kind].get(name);
 }
 
 function listMacroNames(): string {
