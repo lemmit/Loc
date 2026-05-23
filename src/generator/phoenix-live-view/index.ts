@@ -9,6 +9,7 @@ import { emitOpenApiSpec } from "./openapi-emit.js";
 import { renderAshType } from "./render-expr.js";
 import { buildFindActions, findRepoFor, mergeViewFindsForAgg } from "./repository-emit.js";
 import { renderSidebarComponent } from "./sidebar-emit.js";
+import { renderTelemetry } from "./telemetry-emit.js";
 import { renderThemeCss } from "./theme-emit.js";
 import { emitViews } from "./view-emit.js";
 import { emitWorkflows } from "./workflow-emit.js";
@@ -408,6 +409,10 @@ function emitShellFiles(
   // lib/<app>/repo.ex
   out.set(`lib/${appName}/repo.ex`, renderRepo(appName, appModule));
 
+  // lib/<app>/telemetry.ex — :telemetry handlers that translate Phoenix
+  // endpoint events into the neutral log-event catalog identity.
+  out.set(`lib/${appName}/telemetry.ex`, renderTelemetry({ appName, appModule }));
+
   // lib/<app>/application.ex
   out.set(`lib/${appName}/application.ex`, renderApplication(appName, appModule));
 
@@ -625,6 +630,7 @@ defmodule ${appModule}.Application do
     children = [
       ${appModule}.Repo,
       {Phoenix.PubSub, name: ${appModule}.PubSub},
+      ${appModule}.Telemetry,
       ${appModule}Web.Endpoint
     ]
 
