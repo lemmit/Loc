@@ -373,6 +373,15 @@ export interface LoomModel {
    * picked by the user.
    */
   contexts: BoundedContextIR[];
+  /** Root-level value objects, declared at the top of any `.ddd` file
+   *  outside any context.  Form the implicit shared kernel: visible
+   *  as a type from every context in the workspace.  Backends emit
+   *  them once into a shared module/namespace each deployable can
+   *  reach.  See `docs/multi-file-source.md`. */
+  rootValueObjects: ValueObjectIR[];
+  /** Root-level enums.  Same visibility / emission rules as
+   *  `rootValueObjects`. */
+  rootEnums: EnumIR[];
   /** Traceability artifacts — model-wide, since a Solution
    *  or TestCase may reference code across modules and systems. */
   requirements: RequirementIR[];

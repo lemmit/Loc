@@ -208,20 +208,57 @@ function qualifyPlatform(raw: string | undefined): {
 export function lowerModel(model: Model): LoomModel {
   const systems: SystemIR[] = [];
   const looseContexts: BoundedContextIR[] = [];
+  const rootValueObjects: ValueObjectIR[] = [];
+  const rootEnums: EnumIR[] = [];
   const requirements: RequirementIR[] = [];
   const solutions: SolutionIR[] = [];
   const testCases: TestCaseIR[] = [];
+  // Root-level VOs / enums have no enclosing context — pass an empty
+  // env so `lowerValueObject`'s `inValueObject(env, vo)` still works.
+  const rootEnv: Env = { locals: new Map() };
   for (const m of model.members) {
     if (isSystem(m)) systems.push(lowerSystem(m));
     // Top-level loose contexts (legacy single-deployable mode) have
     // no enclosing system, so no user block ever applies — the env's
     // `currentUser` resolution falls through to ordinary lookup.
     else if (isBoundedContext(m)) looseContexts.push(lowerContext(m));
+    else if (isValueObject(m)) rootValueObjects.push(lowerValueObject(m, rootEnv));
+    else if (isEnumDecl(m)) rootEnums.push(lowerEnum(m));
     else if (isRequirement(m)) requirements.push(lowerRequirement(m));
     else if (isSolution(m)) solutions.push(lowerSolution(m));
     else if (isTestCase(m)) testCases.push(lowerTestCase(m));
   }
-  return { systems, contexts: looseContexts, requirements, solutions, testCases };
+  return {
+    systems,
+    contexts: looseContexts,
+    rootValueObjects,
+    rootEnums,
+    requirements,
+    solutions,
+    testCases,
+  };
+}
+
+/** Merge several lowered models — one per `.ddd` document in a
+ *  multi-file project — into a single `LoomModel` that the rest of
+ *  the pipeline (enrichments, validator, generators) consumes
+ *  unchanged.  Used by the CLI's project loader after lowering each
+ *  reachable document independently.  Concatenation is structurally
+ *  safe because every nested IR node references its source AST and
+ *  carries its own resolved cross-references; the merge is just an
+ *  in-order union of the top-level slices.  Duplicate-name detection
+ *  is left to the validator. */
+export function mergeLoomModels(models: LoomModel[]): LoomModel {
+  if (models.length === 1) return models[0]!;
+  return {
+    systems: models.flatMap((m) => m.systems),
+    contexts: models.flatMap((m) => m.contexts),
+    rootValueObjects: models.flatMap((m) => m.rootValueObjects),
+    rootEnums: models.flatMap((m) => m.rootEnums),
+    requirements: models.flatMap((m) => m.requirements),
+    solutions: models.flatMap((m) => m.solutions),
+    testCases: models.flatMap((m) => m.testCases),
+  };
 }
 
 // ---------------------------------------------------------------------------
