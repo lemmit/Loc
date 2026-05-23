@@ -165,6 +165,51 @@ describe("phoenixLiveView pipeline", () => {
     );
   });
 
+  it("emits server lifecycle catalog events from Application.start/2 + stop/1", async () => {
+    // Bite 5b: server_starting / server_listening / server_shutdown /
+    // server_drained share catalog identity with Hono + .NET so a
+    // cross-backend dashboard pivots on one event name.
+    const model = await buildFixture();
+    const { files } = generateSystems(model);
+    const app = files.get("phoenix_app/lib/phoenix_app/application.ex")!;
+    expect(app).toBeDefined();
+    expect(app).toMatch(/require Logger/);
+    // server_starting fires before Supervisor.start_link so a Repo
+    // crash that prevents start_link still surfaces the intent.
+    expect(app).toMatch(
+      /Logger\.info\("server_starting", event: "server_starting", port: to_string\(port\), env: to_string\(env\)\)/,
+    );
+    // server_listening only fires on the {:ok, _} branch of start_link.
+    expect(app).toMatch(
+      /case Supervisor\.start_link\(children, opts\) do\s*\n\s*\{:ok, _pid\} = ok ->\s*\n\s*Logger\.info\("server_listening"/,
+    );
+    // stop/1 emits shutdown + drained.
+    expect(app).toMatch(/def stop\(_state\) do/);
+    expect(app).toMatch(
+      /Logger\.info\("server_shutdown", event: "server_shutdown", signal: "SIGTERM"\)/,
+    );
+    expect(app).toMatch(/Logger\.info\("server_drained", event: "server_drained"\)/);
+  });
+
+  it("emits lib/<app>/log_formatter.ex (JSON-per-line) + wires it in config.exs", async () => {
+    const model = await buildFixture();
+    const { files } = generateSystems(model);
+    const fmt = files.get("phoenix_app/lib/phoenix_app/log_formatter.ex");
+    expect(fmt, "log_formatter.ex is emitted").toBeDefined();
+    expect(fmt!).toMatch(/defmodule PhoenixApp\.LogFormatter do/);
+    expect(fmt!).toMatch(/def format\(level, message, timestamp, metadata\) do/);
+    expect(fmt!).toMatch(/Jason\.encode!/);
+    // config/config.exs wires the formatter via :default_formatter,
+    // with `:all` metadata so every catalog field survives the bridge.
+    const cfg = files.get("phoenix_app/config/config.exs")!;
+    expect(cfg).toMatch(
+      /config :logger, :default_formatter,\s*\n\s*format: \{PhoenixApp\.LogFormatter, :format\},\s*\n\s*metadata: :all/,
+    );
+    // dev.exs no longer overrides with the bracketed text format.
+    const dev = files.get("phoenix_app/config/dev.exs")!;
+    expect(dev).not.toMatch(/config :logger, :console, format:/);
+  });
+
   it("emits one LiveView module per scaffolded page + router lines", async () => {
     // The fixture's `scaffold modules: Sales` synthesises three pages
     // for the Customer aggregate (list / new / detail).  Each lands
