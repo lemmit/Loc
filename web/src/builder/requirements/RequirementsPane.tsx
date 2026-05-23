@@ -51,6 +51,15 @@ import {
   type Solution,
   type TestCase,
 } from "../../../../src/language/generated/ast.js";
+import { lowerModel } from "../../../../src/ir/lower.js";
+import { enrichLoomModel } from "../../../../src/ir/enrichments.js";
+import { computeVerification } from "../../../../src/verify/verification.js";
+import type {
+  RequirementVerdict,
+  TestCaseStatus,
+  TestOutcome,
+  VerificationIR,
+} from "../../../../src/ir/loom-ir.js";
 
 // ---------------------------------------------------------------------------
 // Parse + collect
@@ -186,6 +195,18 @@ const STATUS_COLOR: Record<string, string> = {
   Done: "green",
 };
 
+const VERDICT_COLOR: Record<RequirementVerdict, string> = {
+  VERIFIED: "green",
+  FAILING: "red",
+  UNTESTED: "gray",
+  UNVERIFIED: "yellow",
+};
+const TESTCASE_STATUS_COLOR: Record<TestCaseStatus, string> = {
+  VERIFIED: "green",
+  FAILING: "red",
+  UNVERIFIED: "yellow",
+};
+
 function reqProp(r: Requirement, key: string): string | number | undefined {
   for (const p of r.props) {
     if (p.name !== key) continue;
@@ -215,6 +236,31 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
   const parsed = useMemo(() => parseDdd(ctx.getSource()), [ctx, rev]);
   const trace = useMemo(() => collect(parsed.ast), [parsed]);
   const [selected, setSelected] = useState<Selection | null>(null);
+
+  // Live verification overlay: lower + enrich the parsed model to get the
+  // traceability index, then join the shared `testResults` (lifted into
+  // ctx so the Tests panel and this pane see the same outcomes).  Wrapped
+  // in try/catch because lowering can throw on a model that the parser
+  // accepts but the IR doesn't (extremely rare during normal editing).
+  const verification = useMemo<VerificationIR | null>(() => {
+    if (trace.requirements.length === 0) return null;
+    try {
+      const loom = enrichLoomModel(lowerModel(parsed.ast));
+      if (!loom.traceability) return null;
+      const outcomes: TestOutcome[] = Object.values(ctx.testResults).map((r) => ({
+        name: r.name,
+        suite: r.suite,
+        status: r.status,
+      }));
+      return computeVerification(
+        loom.traceability,
+        loom.requirements.map((r) => r.id),
+        outcomes,
+      );
+    } catch {
+      return null;
+    }
+  }, [parsed, ctx.testResults, trace.requirements.length]);
 
   const apply = (originalNode: AstNode, newText: string): void => {
     const source = ctx.getSource();
@@ -288,7 +334,7 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
             />
             <Stack gap={2}>
               {roots.flatMap((r) =>
-                renderReqRow(r.name, 0, reqById, trace, selected, setSelected),
+                renderReqRow(r.name, 0, reqById, trace, verification, selected, setSelected),
               )}
             </Stack>
             <Divider my="sm" />
@@ -368,6 +414,7 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
                 key={`req-${selected.id}-${rev}`}
                 req={reqById.get(selected.id)!}
                 trace={trace}
+                verification={verification}
                 onApply={apply}
                 onSelect={setSelected}
               />
@@ -377,6 +424,7 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
                 key={`tc-${selected.id}-${rev}`}
                 tc={tcById.get(selected.id)!}
                 trace={trace}
+                verification={verification}
                 onApply={apply}
                 onSelect={setSelected}
               />
@@ -453,6 +501,7 @@ function renderReqRow(
   depth: number,
   reqById: Map<string, Requirement>,
   trace: CollectedTrace,
+  verification: VerificationIR | null,
   selected: Selection | null,
   setSelected: (s: Selection) => void,
 ): JSX.Element[] {
@@ -463,6 +512,7 @@ function renderReqRow(
   const status = reqProp(r, "status") as string | undefined;
   const tcCount = (trace.testCasesByRequirement[id] ?? []).length;
   const hasSolution = (trace.solutionsFor[id] ?? []).length > 0;
+  const verdict = verification?.requirements[id]?.verdict;
   const here = (
     <Row
       key={r.name}
@@ -485,6 +535,16 @@ function renderReqRow(
             {status}
           </Badge>
         )}
+        {verdict && (
+          <Badge
+            size="xs"
+            color={VERDICT_COLOR[verdict]}
+            variant="filled"
+            data-testid={`req-verdict-${r.name}`}
+          >
+            {verdict}
+          </Badge>
+        )}
         <Badge
           size="xs"
           color={tcCount > 0 ? "green" : "gray"}
@@ -502,7 +562,7 @@ function renderReqRow(
     </Row>
   );
   const kids = (trace.childrenOf[id] ?? []).flatMap((c) =>
-    renderReqRow(c, depth + 1, reqById, trace, selected, setSelected),
+    renderReqRow(c, depth + 1, reqById, trace, verification, selected, setSelected),
   );
   return [here, ...kids];
 }
@@ -622,11 +682,13 @@ function FormToolbar({
 function RequirementForm({
   req,
   trace,
+  verification,
   onApply,
   onSelect,
 }: {
   req: Requirement;
   trace: CollectedTrace;
+  verification: VerificationIR | null;
   onApply: (node: AstNode, newText: string) => void;
   onSelect: (s: Selection) => void;
 }): JSX.Element {
@@ -674,6 +736,15 @@ function RequirementForm({
             {form.status && (
               <Badge color={STATUS_COLOR[form.status] ?? "gray"} variant="outline">
                 {form.status}
+              </Badge>
+            )}
+            {verification?.requirements[req.name]?.verdict && (
+              <Badge
+                color={VERDICT_COLOR[verification.requirements[req.name]!.verdict]}
+                variant="filled"
+                data-testid={`req-verdict-detail-${req.name}`}
+              >
+                {verification.requirements[req.name]!.verdict}
               </Badge>
             )}
           </>
@@ -754,10 +825,20 @@ function RequirementForm({
             const tc = trace.testCases.find((t) => t.name === id);
             const verifies = tc?.requirement?.ref?.name;
             const inherited = verifies && verifies !== req.name;
+            const status = verification?.testCases[id]?.status;
             return (
               <Group key={id} gap={6}>
                 <Link onClick={() => onSelect({ kind: "testCase", id })}>{id}</Link>
                 <Text size="sm" c="dimmed">{tc?.title ?? ""}</Text>
+                {status && (
+                  <Badge
+                    size="xs"
+                    color={TESTCASE_STATUS_COLOR[status]}
+                    variant="light"
+                  >
+                    {status}
+                  </Badge>
+                )}
                 {inherited && (
                   <Badge size="xs" color="gray" variant="light" title={`via ${verifies}`}>
                     via {verifies}
@@ -871,11 +952,13 @@ function SolutionForm({
 function TestCaseForm({
   tc,
   trace,
+  verification,
   onApply,
   onSelect,
 }: {
   tc: TestCase;
   trace: CollectedTrace;
+  verification: VerificationIR | null;
   onApply: (node: AstNode, newText: string) => void;
   onSelect: (s: Selection) => void;
 }): JSX.Element {
@@ -902,7 +985,20 @@ function TestCaseForm({
   return (
     <Stack gap="sm" data-testid={`tc-detail-${tc.name}`}>
       <FormToolbar
-        title={<Title order={4}>{tc.name}</Title>}
+        title={
+          <>
+            <Title order={4}>{tc.name}</Title>
+            {verification?.testCases[tc.name]?.status && (
+              <Badge
+                color={TESTCASE_STATUS_COLOR[verification.testCases[tc.name]!.status]}
+                variant="filled"
+                data-testid={`tc-verdict-detail-${tc.name}`}
+              >
+                {verification.testCases[tc.name]!.status}
+              </Badge>
+            )}
+          </>
+        }
         dirty={dirty}
         onSave={save}
         onReset={() => setForm(initial)}
