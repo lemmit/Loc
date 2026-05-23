@@ -191,6 +191,51 @@ describe("typescript generator", () => {
       expect(orderDomain).not.toMatch(/event: "precondition_evaluated"/);
     });
 
+    it("--trace on: _assertInvariants gains an __op param threaded by every call site", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS, { emitTrace: true });
+      const orderDomain = files.get("domain/order.ts")!;
+      // The trace-on signature picks up an __op string param so
+      // invariant_evaluated lines can carry op context — invariants run
+      // from a shared helper that has no direct view of the caller.
+      expect(orderDomain).toMatch(/private _assertInvariants\(__op: string\): void \{/);
+      // Every call site threads its op label.  Ctor → "<init>" sentinel
+      // so the line is distinguishable from in-operation invariants.
+      expect(orderDomain).toMatch(/this\._assertInvariants\("<init>"\);/);
+      // Each public operation passes its own name.  At least the model's
+      // first op should appear (defensive: the example may rename
+      // operations, but at minimum one literal label must be threaded).
+      expect(orderDomain).toMatch(/this\._assertInvariants\("[a-zA-Z][a-zA-Z0-9]*"\);/);
+      // Invariant body: boolean bound, traced, then conditional throw.
+      expect(orderDomain).toMatch(/const __inv_\d+_ok = \(/);
+      expect(orderDomain).toMatch(
+        /requestLog\(\)\.trace\(\{ event: "invariant_evaluated", aggregate: "Order(Line)?", op: __op, expr: "[^"]+", passed: __inv_\d+_ok \}\)/,
+      );
+      expect(orderDomain).toMatch(/if \(!__inv_\d+_ok\) throw new DomainError\(/);
+      // A GUARDED invariant logs ONLY when the guard applies — the
+      // `if (this._status === …) {` body wraps the const+trace+throw
+      // (so an inapplicable invariant doesn't pollute the stream).
+      // sales.ddd's Order has `invariant lines.count > 0 when status == Confirmed`.
+      expect(orderDomain).toMatch(
+        /if \(this\._status === OrderStatus\.Confirmed\) \{\n\s+const __inv_\d+_ok =/,
+      );
+    });
+
+    it("--trace off: invariant emission stays byte-identical to no-trace output", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS); // no emitTrace
+      const orderDomain = files.get("domain/order.ts")!;
+      // No __op param, no invariant_evaluated lines, no __inv_<i>_ok
+      // temps — the trace-off path must produce identical source to
+      // before Phase 6b shipped.
+      expect(orderDomain).toMatch(/private _assertInvariants\(\): void \{/);
+      expect(orderDomain).not.toMatch(/__inv_\d+_ok/);
+      expect(orderDomain).not.toMatch(/event: "invariant_evaluated"/);
+      // Call sites stay no-arg.
+      expect(orderDomain).toMatch(/this\._assertInvariants\(\);/);
+      expect(orderDomain).not.toMatch(/this\._assertInvariants\("/);
+    });
+
     it("--trace on: domain file injects requestLog import + value_computed + precondition_evaluated", async () => {
       const model = await buildModel("examples/sales.ddd");
       // Mirror what the CLI does for `generate ts <ddd> --trace`.
