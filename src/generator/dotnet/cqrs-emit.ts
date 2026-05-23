@@ -17,7 +17,6 @@ import {
   wireToCommandArgument,
   wireType,
 } from "./dto-mapping.js";
-import { renderCsType } from "./render-expr.js";
 import {
   renderCommand,
   renderCommandHandler,
@@ -27,6 +26,7 @@ import {
   renderRequestDtos,
   renderResponseDtos,
 } from "./emit.js";
+import { renderCsType } from "./render-expr.js";
 import { renderCreateValidator, renderOperationValidator } from "./validator-emit.js";
 
 // ---------------------------------------------------------------------------

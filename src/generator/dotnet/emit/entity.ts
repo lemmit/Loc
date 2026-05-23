@@ -126,9 +126,7 @@ export function renderEntity(
     });
     if (body.length > 0) opLines.push(body);
     opLines.push(
-      emitTrace
-        ? `        AssertInvariants("${op.name}");`
-        : "        AssertInvariants();",
+      emitTrace ? `        AssertInvariants("${op.name}");` : "        AssertInvariants();",
     );
     opLines.push("    }");
     opLines.push("");
@@ -270,7 +268,7 @@ export function renderEntity(
       ...externHookLines,
       "",
       ...pullEventsLines,
-      `    ${hasExtern ? "internal" : "private"} void AssertInvariants(${emitTrace ? "string __op = \"<init>\"" : ""})`,
+      `    ${hasExtern ? "internal" : "private"} void AssertInvariants(${emitTrace ? 'string __op = "<init>"' : ""})`,
       "    {",
       ...invariantLines,
       "    }",
