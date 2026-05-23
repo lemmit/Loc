@@ -148,6 +148,26 @@ describe("Requirements edit round-trip via spliceNode", () => {
     expect(reparsed.parserErrors).toEqual([]);
   });
 
+  it("appending a fresh new-requirement block parses and lands as a top-level Requirement", () => {
+    // Phase 4 — the wizard's create path is "print + append".  This
+    // verifies that appending the printed text to the end of the file
+    // produces a valid source containing the new requirement.
+    const sep = SRC.endsWith("\n\n") ? "" : SRC.endsWith("\n") ? "\n" : "\n\n";
+    const newText = printRequirementText({
+      name: "AC-009",
+      parent: "US-001",
+      type: "AcceptanceCriteria",
+      title: "Locked-out accounts cannot log in",
+    });
+    const updated = SRC + sep + newText + "\n";
+    const reparsed = parseDdd(updated);
+    expect(reparsed.parserErrors).toEqual([]);
+    const found = [...AstUtils.streamAst(reparsed.ast)].find(
+      (n) => n.$type === "Requirement" && (n as { name: string }).name === "AC-009",
+    ) as { parent?: { $refText: string } } | undefined;
+    expect(found?.parent?.$refText).toBe("US-001");
+  });
+
   it("re-parenting AC-001 to a new user story round-trips", () => {
     // Add a second user story we can re-parent under.
     const SRC2 = SRC.replace(

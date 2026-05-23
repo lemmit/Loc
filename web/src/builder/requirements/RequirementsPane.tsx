@@ -19,6 +19,7 @@ import {
   Code,
   Divider,
   Group,
+  Modal,
   MultiSelect,
   NumberInput,
   ScrollArea,
@@ -222,6 +223,19 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
     setRev((r) => r + 1);
   };
 
+  /** Append a fresh top-level block to the end of the source.  We don't
+   *  try to position it cleverly — the parser is order-agnostic; users
+   *  who want a specific layout can re-arrange in the Source view. */
+  const append = (newText: string): void => {
+    const source = ctx.getSource();
+    const sep = source.endsWith("\n\n") ? "" : source.endsWith("\n") ? "\n" : "\n\n";
+    ctx.onSourceChange(source + sep + newText + "\n", "builder");
+    setRev((r) => r + 1);
+  };
+
+  // Wizard state — which "new …" modal is open, if any.
+  const [wizard, setWizard] = useState<null | "requirement" | "testCase" | "solution">(null);
+
   if (parsed.parserErrors.length > 0) {
     return (
       <Box p="md">
@@ -266,14 +280,29 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
       >
         <ScrollArea style={{ flex: 1 }}>
           <Box p="sm">
-            <SectionHeader label="Requirements" count={trace.requirements.length} />
+            <SectionHeader
+              label="Requirements"
+              count={trace.requirements.length}
+              onNew={() => setWizard("requirement")}
+              newTestid="req-new-requirement"
+            />
             <Stack gap={2}>
               {roots.flatMap((r) =>
                 renderReqRow(r.name, 0, reqById, trace, selected, setSelected),
               )}
             </Stack>
             <Divider my="sm" />
-            <SectionHeader label="Test cases" count={trace.testCases.length} />
+            <SectionHeader
+              label="Test cases"
+              count={trace.testCases.length}
+              onNew={trace.requirements.length > 0 ? () => setWizard("testCase") : undefined}
+              newTestid="req-new-testcase"
+              newDisabledReason={
+                trace.requirements.length === 0
+                  ? "Add a requirement first — a test case must verify one."
+                  : undefined
+              }
+            />
             <Stack gap={2}>
               {trace.testCases.map((t) => (
                 <Row
@@ -289,26 +318,34 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
                 </Row>
               ))}
             </Stack>
+            <Divider my="sm" />
+            <SectionHeader
+              label="Solutions"
+              count={trace.solutions.length}
+              onNew={trace.requirements.length > 0 ? () => setWizard("solution") : undefined}
+              newTestid="req-new-solution"
+              newDisabledReason={
+                trace.requirements.length === 0
+                  ? "Add a requirement first — a solution must justify one."
+                  : undefined
+              }
+            />
             {trace.solutions.length > 0 && (
-              <>
-                <Divider my="sm" />
-                <SectionHeader label="Solutions" count={trace.solutions.length} />
-                <Stack gap={2}>
-                  {trace.solutions.map((s) => (
-                    <Row
-                      key={s.name}
-                      testid={`req-row-sol-${s.name}`}
-                      active={selected?.kind === "solution" && selected.id === s.name}
-                      onClick={() => setSelected({ kind: "solution", id: s.name })}
-                    >
-                      <Group gap={6} wrap="nowrap">
-                        <Text size="sm" fw={500}>{s.name}</Text>
-                        <Text size="sm" c="dimmed" truncate>{s.title ?? ""}</Text>
-                      </Group>
-                    </Row>
-                  ))}
-                </Stack>
-              </>
+              <Stack gap={2}>
+                {trace.solutions.map((s) => (
+                  <Row
+                    key={s.name}
+                    testid={`req-row-sol-${s.name}`}
+                    active={selected?.kind === "solution" && selected.id === s.name}
+                    onClick={() => setSelected({ kind: "solution", id: s.name })}
+                  >
+                    <Group gap={6} wrap="nowrap">
+                      <Text size="sm" fw={500}>{s.name}</Text>
+                      <Text size="sm" c="dimmed" truncate>{s.title ?? ""}</Text>
+                    </Group>
+                  </Row>
+                ))}
+              </Stack>
             )}
           </Box>
         </ScrollArea>
@@ -356,8 +393,55 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
           </Box>
         </ScrollArea>
       </Box>
+
+      {/* "New …" wizards.  After Create we auto-select the new item so
+          the user lands in the existing edit form to fill in extras. */}
+      {wizard === "requirement" && (
+        <NewRequirementWizard
+          existingIds={collectIds(trace)}
+          requirements={trace.requirements.map((r) => r.name)}
+          onCancel={() => setWizard(null)}
+          onCreate={(text, newId) => {
+            append(text);
+            setWizard(null);
+            setSelected({ kind: "requirement", id: newId });
+          }}
+        />
+      )}
+      {wizard === "testCase" && (
+        <NewTestCaseWizard
+          existingIds={collectIds(trace)}
+          requirements={trace.requirements.map((r) => r.name)}
+          onCancel={() => setWizard(null)}
+          onCreate={(text, newId) => {
+            append(text);
+            setWizard(null);
+            setSelected({ kind: "testCase", id: newId });
+          }}
+        />
+      )}
+      {wizard === "solution" && (
+        <NewSolutionWizard
+          existingIds={collectIds(trace)}
+          requirements={trace.requirements.map((r) => r.name)}
+          onCancel={() => setWizard(null)}
+          onCreate={(text, newId) => {
+            append(text);
+            setWizard(null);
+            setSelected({ kind: "solution", id: newId });
+          }}
+        />
+      )}
     </Box>
   );
+}
+
+function collectIds(trace: CollectedTrace): Set<string> {
+  const ids = new Set<string>();
+  for (const r of trace.requirements) ids.add(r.name);
+  for (const t of trace.testCases) ids.add(t.name);
+  for (const s of trace.solutions) ids.add(s.name);
+  return ids;
 }
 
 // ---------------------------------------------------------------------------
@@ -423,13 +507,46 @@ function renderReqRow(
   return [here, ...kids];
 }
 
-function SectionHeader({ label, count }: { label: string; count: number }): JSX.Element {
+function SectionHeader({
+  label,
+  count,
+  onNew,
+  newTestid,
+  newDisabledReason,
+}: {
+  label: string;
+  count: number;
+  onNew?: () => void;
+  newTestid?: string;
+  newDisabledReason?: string;
+}): JSX.Element {
+  const newButton = (
+    <Tooltip
+      label={newDisabledReason ?? `New ${label.toLowerCase().replace(/s$/, "")}`}
+      disabled={!newDisabledReason && !onNew}
+    >
+      <ActionIcon
+        size="xs"
+        variant="subtle"
+        color="gray"
+        onClick={onNew}
+        disabled={!onNew}
+        data-testid={newTestid}
+        aria-label={`New ${label}`}
+      >
+        +
+      </ActionIcon>
+    </Tooltip>
+  );
   return (
     <Group justify="space-between" mb={6}>
-      <Text size="xs" fw={600} c="dimmed" tt="uppercase">
-        {label}
-      </Text>
-      <Text size="xs" c="dimmed">{count}</Text>
+      <Group gap={6}>
+        <Text size="xs" fw={600} c="dimmed" tt="uppercase">
+          {label}
+        </Text>
+        <Text size="xs" c="dimmed">{count}</Text>
+      </Group>
+      {newButton}
     </Group>
   );
 }
@@ -928,5 +1045,269 @@ function Link({
     >
       {children}
     </Text>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// "New …" wizards (Phase 4)
+//
+// Minimal forms — id + the fields the parser requires.  Additional fields
+// (entitles / covers, status, priority) are filled in via the regular edit
+// form after Create.  IDs validate against the TraceId surface (a plain
+// identifier OR `prefix-digits`, possibly with extra alnum segments) and
+// must be unique across requirements / solutions / test cases.
+// ---------------------------------------------------------------------------
+
+// Matches both the `ID` terminal (`[_a-zA-Z][\w_]*`) and the ticket-style
+// `TRACE_ID` (`[A-Za-z][A-Za-z0-9]*(-[A-Za-z0-9]+)*-[0-9]+`).
+const ID_PATTERN = /^([A-Za-z][A-Za-z0-9]*(-[A-Za-z0-9]+)*-[0-9]+|[_a-zA-Z][\w_]*)$/;
+
+function validateId(id: string, existing: Set<string>): string | null {
+  const trimmed = id.trim();
+  if (!trimmed) return "Required";
+  if (!ID_PATTERN.test(trimmed)) {
+    return "Must be an identifier like `Login` or a ticket id like `US-001`";
+  }
+  if (existing.has(trimmed)) return `'${trimmed}' is already in use`;
+  return null;
+}
+
+function WizardShell({
+  title,
+  testid,
+  canCreate,
+  onCreate,
+  onCancel,
+  children,
+}: {
+  title: string;
+  testid: string;
+  canCreate: boolean;
+  onCreate: () => void;
+  onCancel: () => void;
+  children: React.ReactNode;
+}): JSX.Element {
+  return (
+    <Modal opened onClose={onCancel} title={title} size="md" data-testid={testid}>
+      <Stack gap="sm">
+        {children}
+        <Group justify="flex-end" gap={6} mt="sm">
+          <Button variant="default" onClick={onCancel}>Cancel</Button>
+          <Button onClick={onCreate} disabled={!canCreate} data-testid={`${testid}-create`}>
+            Create
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
+function NewRequirementWizard({
+  existingIds,
+  requirements,
+  onCreate,
+  onCancel,
+}: {
+  existingIds: Set<string>;
+  requirements: readonly string[];
+  onCreate: (text: string, id: string) => void;
+  onCancel: () => void;
+}): JSX.Element {
+  const [id, setId] = useState("");
+  const [type, setType] = useState<RequirementType>("UserStory");
+  const [title, setTitle] = useState("");
+  const [parent, setParent] = useState<string>("");
+  const idErr = id ? validateId(id, existingIds) : null;
+  const canCreate = !!id && !idErr && title.length > 0;
+
+  const submit = (): void => {
+    if (!canCreate) return;
+    const text = printRequirementText({
+      name: id.trim(),
+      parent: parent || undefined,
+      type,
+      title,
+    });
+    onCreate(text, id.trim());
+  };
+
+  return (
+    <WizardShell
+      title="New requirement"
+      testid="req-wizard-requirement"
+      canCreate={canCreate}
+      onCreate={submit}
+      onCancel={onCancel}
+    >
+      <TextInput
+        label="ID"
+        description="e.g. US-001, AC-001, Login"
+        value={id}
+        onChange={(e) => setId(e.currentTarget.value)}
+        error={idErr ?? undefined}
+        autoFocus
+        data-testid="req-wizard-id"
+      />
+      <Select
+        label="Type"
+        data={REQUIREMENT_TYPES}
+        value={type}
+        onChange={(v) => v && setType(v as RequirementType)}
+        allowDeselect={false}
+        data-testid="req-wizard-type"
+      />
+      <TextInput
+        label="Title"
+        value={title}
+        onChange={(e) => setTitle(e.currentTarget.value)}
+        data-testid="req-wizard-title"
+      />
+      <Select
+        label="Parent (optional)"
+        data={requirements}
+        value={parent || null}
+        onChange={(v) => setParent(v ?? "")}
+        clearable
+        searchable
+        placeholder="(no parent)"
+        data-testid="req-wizard-parent"
+      />
+    </WizardShell>
+  );
+}
+
+function NewTestCaseWizard({
+  existingIds,
+  requirements,
+  onCreate,
+  onCancel,
+}: {
+  existingIds: Set<string>;
+  requirements: readonly string[];
+  onCreate: (text: string, id: string) => void;
+  onCancel: () => void;
+}): JSX.Element {
+  const [id, setId] = useState("");
+  const [title, setTitle] = useState("");
+  const [verifies, setVerifies] = useState<string>(requirements[0] ?? "");
+  const idErr = id ? validateId(id, existingIds) : null;
+  const canCreate = !!id && !idErr && !!verifies;
+
+  const submit = (): void => {
+    if (!canCreate) return;
+    const text = printTestCaseText({
+      name: id.trim(),
+      verifies,
+      title: title || undefined,
+      covers: [],
+    });
+    onCreate(text, id.trim());
+  };
+
+  return (
+    <WizardShell
+      title="New test case"
+      testid="req-wizard-testcase"
+      canCreate={canCreate}
+      onCreate={submit}
+      onCancel={onCancel}
+    >
+      <TextInput
+        label="ID"
+        description="e.g. TC-001"
+        value={id}
+        onChange={(e) => setId(e.currentTarget.value)}
+        error={idErr ?? undefined}
+        autoFocus
+        data-testid="req-wizard-id"
+      />
+      <Select
+        label="Verifies (requirement)"
+        data={requirements}
+        value={verifies || null}
+        onChange={(v) => v && setVerifies(v)}
+        allowDeselect={false}
+        searchable
+        data-testid="req-wizard-verifies"
+      />
+      <TextInput
+        label="Title (optional)"
+        value={title}
+        onChange={(e) => setTitle(e.currentTarget.value)}
+        data-testid="req-wizard-title"
+      />
+      <Text size="xs" c="dimmed">
+        Add covered code symbols in the next step (after Create, the test case opens in
+        the edit form).
+      </Text>
+    </WizardShell>
+  );
+}
+
+function NewSolutionWizard({
+  existingIds,
+  requirements,
+  onCreate,
+  onCancel,
+}: {
+  existingIds: Set<string>;
+  requirements: readonly string[];
+  onCreate: (text: string, id: string) => void;
+  onCancel: () => void;
+}): JSX.Element {
+  const [id, setId] = useState("");
+  const [title, setTitle] = useState("");
+  const [forReq, setForReq] = useState<string>(requirements[0] ?? "");
+  const idErr = id ? validateId(id, existingIds) : null;
+  const canCreate = !!id && !idErr && !!forReq;
+
+  const submit = (): void => {
+    if (!canCreate) return;
+    const text = printSolutionText({
+      name: id.trim(),
+      forRequirement: forReq,
+      title: title || undefined,
+      entitles: [],
+    });
+    onCreate(text, id.trim());
+  };
+
+  return (
+    <WizardShell
+      title="New solution"
+      testid="req-wizard-solution"
+      canCreate={canCreate}
+      onCreate={submit}
+      onCancel={onCancel}
+    >
+      <TextInput
+        label="ID"
+        description="e.g. SOL-001"
+        value={id}
+        onChange={(e) => setId(e.currentTarget.value)}
+        error={idErr ?? undefined}
+        autoFocus
+        data-testid="req-wizard-id"
+      />
+      <Select
+        label="For (requirement)"
+        data={requirements}
+        value={forReq || null}
+        onChange={(v) => v && setForReq(v)}
+        allowDeselect={false}
+        searchable
+        data-testid="req-wizard-for"
+      />
+      <TextInput
+        label="Title (optional)"
+        value={title}
+        onChange={(e) => setTitle(e.currentTarget.value)}
+        data-testid="req-wizard-title"
+      />
+      <Text size="xs" c="dimmed">
+        Add entitled code symbols in the next step (after Create, the solution opens in
+        the edit form).
+      </Text>
+    </WizardShell>
   );
 }
