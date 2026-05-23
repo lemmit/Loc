@@ -47,6 +47,22 @@ test("New Requirement wizard creates a fresh block and selects it", async ({ pag
   await expect(page.getByText("requirement US-999 {")).toBeVisible({ timeout: 5_000 });
 });
 
+test("requirement rows show a live verdict pill from the shared test-results state", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+
+  await page.getByTestId("doc-tab-requirements").click();
+  await expect(page.getByTestId("requirements-pane")).toBeVisible({ timeout: 10_000 });
+
+  // With no tests run yet, US-001 has a verifying TC-001 but no result,
+  // so the live overlay tags it UNVERIFIED (distinct from UNTESTED).
+  const verdict = page.getByTestId("req-verdict-US-001");
+  await expect(verdict).toBeVisible({ timeout: 5_000 });
+  await expect(verdict).toHaveText(/UNVERIFIED|FAILING|VERIFIED|UNTESTED/);
+});
+
 test("editing a requirement title saves it back to the source", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);

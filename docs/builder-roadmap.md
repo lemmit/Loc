@@ -485,8 +485,41 @@ Phasing:
   different leaf collapses any open `ƒx`. `.nodrag .nopan` on the node lets
   inputs / dropdowns work inside the React Flow node. Gated by the v2 e2e
   (asserts each stmt kind's editor controls are present inside the node).
-- **Phase 3** — in-canvas edits at higher levels (rename, add, delete,
-  drag-rebind per view).
+- ~~**Phase 3a** — per-view add palette.~~ Done: a small toolbar above the
+  canvas exposes the adds appropriate to the current drill level — `+ Module
+  / + API / + Storage / + UI / + Deployable` in the system view, and `+
+  Aggregate / + Value object / + Event / + Workflow / + Repository / + View`
+  in the context view (target context auto-derived from the path). Reuses
+  v1's parse-guarded `addConstructSource` / `addModuleSource`. Gated by the
+  v2 e2e (system + context palette add bumps the relevant node count).
+- ~~**Phase 3b** — rename + delete on the node.~~ Done: a new `ConstructNode`
+  custom React Flow type replaces the default node for non-stmt constructs,
+  with an on-node pencil (inline rename input, commits via v1's
+  `renameConstruct`) and an `×` (delete via `spliceNode` on the construct's
+  AST node). Wired for every ViewKind that v1's NodeKind already covers —
+  module / aggregate / valueobject / event / repository / view / workflow /
+  api / storage / ui / deployable. System / context / operation / field /
+  containment still render without action buttons in this phase. Gated by the
+  v2 e2e (rename Order → OrderX on the canvas, then delete it; counts +
+  data-construct-name reflect the changes).
+- ~~**Phase 3c (palette additions)** — module / aggregate / operation
+  palettes.~~ Done: new pure helpers `addContextSource` (insert a context
+  into a module) and `addOperationSource` (insert an operation into an
+  aggregate) in `system-v2/add-extra.ts`; the palette gains `+ Context` in
+  the module view, `+ Operation` + `+ Field` (reusing v1's `addField`) in
+  the aggregate view, and `+ Stmt` (a `precondition true` via v1's
+  `addStatement`) in the operation / workflow flow view. Gated by
+  `test/system-v2/add-extra.test.ts` + the v2 e2e (each palette adds bumps
+  the relevant node count by one).
+- ~~**Phase 3d — rename / delete for the remaining ViewKinds.**~~ Done: a new
+  `renameByAstType` helper (mirrors `renameConstruct` but keyed directly on
+  `$type`, not v1's NodeKind union) lets v2 rename `System` / `BoundedContext`
+  / `Operation` / `FunctionDecl` too, with the same NameProvider + References
+  rewrite as v1. Delete already worked by `$type`. Now every named construct
+  except `field` and `containment` (which need `renameMember`'s text-token
+  resolver — left for Phase 4) gets the pencil + `×` affordance on its node.
+  Gated by the v2 e2e (rename a context and delete an operation through the
+  on-node controls).
 - **Phase 4** — long-tail parity with v1 (fields / finds / deployable bindings
   / emit repointing as per-node interactions). Once landed, v1 can be
   deprecated.

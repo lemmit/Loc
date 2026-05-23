@@ -55,6 +55,19 @@ export function generateSystems(
   // wireShape, the implicit `findAll` find, and react `moduleNames`
   // inheritance.  See src/ir/enrichments.ts.
   const loom = enrichLoomModel(lowerModel(model));
+  return generateSystemsFromLoom(loom, options);
+}
+
+/** Multi-file entry point.  Callers that have already lowered + merged
+ *  the per-document `LoomModel`s (the project loader path — one model
+ *  per `.ddd` document, then `mergeLoomModels` to fold them) feed the
+ *  pre-enriched result here so we don't re-lower.  `generateSystems`
+ *  above is the single-document shorthand that still does its own
+ *  lower + enrich. */
+export function generateSystemsFromLoom(
+  loom: LoomModel,
+  options: { emitTrace?: boolean } = {},
+): SystemEmission {
   const out = new Map<string, string>();
   for (const sys of loom.systems) {
     emitSystem(sys, loom, out, options);

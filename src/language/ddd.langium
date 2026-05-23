@@ -1,10 +1,21 @@
 grammar Ddd
 
 entry Model:
+    imports+=ImportStmt*
     members+=ModelMember*;
 
+// Multi-file source — import another .ddd file relative to the file
+// containing this statement.  The CLI's project loader walks the
+// import graph transitively from the entry file (main.ddd) and
+// registers every reachable document with Langium's workspace; the
+// rest of the pipeline sees the merged model.  Imports are about
+// file loading, not visibility: every reachable document's symbols
+// share the same global scope.  See docs/multi-file-source.md.
+ImportStmt:
+    'import' path=STRING ';'?;
+
 ModelMember:
-    System | BoundedContext | Requirement | Solution | TestCase;
+    System | BoundedContext | ValueObject | EnumDecl | Requirement | Solution | TestCase;
 
 // ---------------------------------------------------------------------------
 // System / Module / Deployable — the deployment shape.
