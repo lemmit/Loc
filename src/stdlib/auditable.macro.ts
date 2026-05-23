@@ -1,34 +1,49 @@
 import {
-  contextStamp,
   defineMacro,
   field,
   idRef,
   implementsCapability,
-  nameRef,
   primType,
 } from "../macro-api/index.js";
-import { callExpr } from "../macro-api/ui-factories.js";
 
-/** Stamps createdAt/updatedAt/createdBy/updatedBy on every mutation.
- * The fields are declared structurally; the stamping behaviour is
- * declared via `stamp onCreate { ... }` / `stamp onUpdate { ... }`
- * — pure sugar over what the user could hand-write inside the
- * aggregate.  Backends translate the stamping AST via their per-
- * entity stamping path (.NET: SaveChangesInterceptor scoped by
- * `IAuditable`; Drizzle: insert/update middleware; Ecto: changeset).
+/** Aggregate-level state for the audit capability.
  *
- * `implements "auditable"` opts the aggregate into the auditable
- * capability group; .NET emits a marker `IAuditable` interface and
- * one OnModelCreating loop scoped by it, grouping all auditable
- * aggregates into one infrastructure block. */
+ * Adds the four canonical audit fields (createdAt, updatedAt,
+ * createdBy, updatedBy) and opts the aggregate into the `auditable`
+ * capability group via `implements`.  This macro carries **no
+ * stamping rules** — the per-event field assignments are the
+ * capability's responsibility; declare them via `with audit` on the
+ * enclosing context (or hand-write `stamp for "auditable" onCreate
+ * { ... }` there).
+ *
+ * Source-equivalent:
+ *
+ *   aggregate Order with auditable {
+ *     subject: string
+ *   }
+ *
+ *   ↓
+ *
+ *   aggregate Order {
+ *     subject: string
+ *     createdAt: datetime
+ *     updatedAt: datetime
+ *     createdBy: Id<User>
+ *     updatedBy: Id<User>
+ *     implements "auditable"
+ *   }
+ *
+ * Compose with `audit` at context level for the runtime stamping,
+ * or use `auditedByDefault` to apply both in one go. */
 export default defineMacro({
   name: "auditable",
   target: "aggregate",
   apiVersion: 1,
   description:
-    "Stamps createdAt/updatedAt/createdBy/updatedBy on every mutation, " +
-    "and opts the aggregate into the `auditable` capability group so " +
-    "generators emit one shared stamping hook per application.",
+    "Adds audit fields (createdAt/updatedAt/createdBy/updatedBy) and opts " +
+    "the aggregate into the `auditable` capability group.  The stamping " +
+    "behavior comes from a sibling context-level `audit` macro or " +
+    "hand-written `stamp for \"auditable\" ...`.",
   expand() {
     return [
       field("createdAt", primType("datetime")),
@@ -36,16 +51,6 @@ export default defineMacro({
       field("createdBy", idRef("User")),
       field("updatedBy", idRef("User")),
       implementsCapability("auditable"),
-      ...contextStamp({
-        onCreate: [
-          { field: "createdAt", value: callExpr("now", []) },
-          { field: "createdBy", value: nameRef("currentUser") },
-        ],
-        onUpdate: [
-          { field: "updatedAt", value: callExpr("now", []) },
-          { field: "updatedBy", value: nameRef("currentUser") },
-        ],
-      }),
     ];
   },
 });

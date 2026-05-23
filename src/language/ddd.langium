@@ -481,7 +481,7 @@ type Targetable =
 // ---------------------------------------------------------------------------
 
 BoundedContext:
-    'context' name=ID '{'
+    'context' name=ID withClause=WithClause? '{'
         members+=ContextMember*
     '}';
 

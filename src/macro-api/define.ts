@@ -13,24 +13,33 @@
 // diagnostics on synthesised members resolve to the user's source
 // instead of an unhelpful "no source location" stub.
 
-import type { Aggregate, AggregateMember, Ui, UiMember } from "../language/generated/ast.js";
+import type {
+  Aggregate,
+  AggregateMember,
+  BoundedContext,
+  ContextMember,
+  Ui,
+  UiMember,
+} from "../language/generated/ast.js";
 
 /** Macros attach to one of a fixed set of host kinds.  Each kind
  * determines (a) the AST type of `target` in `ExpandContext`,
  * (b) the member type the macro is required to return, (c) which
  * `with` clause positions can invoke it (validator-enforced). */
-export type MacroTarget = "aggregate" | "ui";
+export type MacroTarget = "aggregate" | "ui" | "context";
 
 /** Maps a target kind to the AST type of the host node. */
 export interface TargetNodeOf {
   aggregate: Aggregate;
   ui: Ui;
+  context: BoundedContext;
 }
 
 /** Maps a target kind to the member type the macro must return. */
 export interface MemberTypeOf {
   aggregate: AggregateMember;
   ui: UiMember;
+  context: ContextMember;
 }
 
 /** Declares a typed parameter on a macro.  The validator parses
@@ -83,11 +92,24 @@ type ParamValue<T extends ParamType> = T extends { kind: "string" }
  * host AST node (an `Aggregate` for trait macros, `Ui` for
  * scaffold-style macros).  `args` is the parsed, type-checked,
  * default-filled argument bag.  `origin` is an opaque token that
- * the factories use to tag synthesised nodes for diagnostics. */
+ * the factories use to tag synthesised nodes for diagnostics.
+ * `invokeMacro` lets a context-level macro programmatically run an
+ * aggregate-level macro against a child aggregate — the outside-in
+ * composition pattern used by `softDeleteByDefault` to fan
+ * `softDeletable` across every aggregate in a context.  Returned
+ * AST nodes are tagged with the passed target so the expander
+ * splices them into that target's `members[]` rather than the
+ * caller's host.  Inside-out invocation (aggregate macro calling
+ * a context macro) is forbidden by the expander's splice-time
+ * descendant check. */
 export interface ExpandContext<P extends ParamSpec, T extends MacroTarget> {
   target: TargetNodeOf[T];
   args: ParamValues<P>;
   origin: OriginToken;
+  invokeMacro: (
+    name: string,
+    opts: { target: object; args?: Record<string, unknown> },
+  ) => unknown[];
 }
 
 /** Opaque origin tag attached to every synthesised AST node by the

@@ -169,13 +169,14 @@ function expandModel(model: Model, doc: LangiumDocument): void {
   for (const node of AstUtils.streamAllContents(model)) {
     if (isAggregate(node)) expandHost(node, "aggregate", doc, inv);
     else if (isUi(node)) expandHost(node, "ui", doc, inv);
+    else if (isBoundedContext(node)) expandHost(node, "context", doc, inv);
   }
   void isSystem; // imported for symmetry with future system-level macros
 }
 
 function expandHost(
-  host: Aggregate | Ui,
-  kind: "aggregate" | "ui",
+  host: Aggregate | Ui | import("./generated/ast.js").BoundedContext,
+  kind: "aggregate" | "ui" | "context",
   doc: LangiumDocument,
   inv: Inventory,
 ): void {
@@ -188,8 +189,8 @@ function expandHost(
 
 function expandOneCall(
   call: MacroCall,
-  host: Aggregate | Ui,
-  hostKind: "aggregate" | "ui",
+  host: Aggregate | Ui | import("./generated/ast.js").BoundedContext,
+  hostKind: "aggregate" | "ui" | "context",
   doc: LangiumDocument,
   inv: Inventory,
 ): void {
@@ -222,6 +223,61 @@ function expandOneCall(
     macroName: name,
     callNode: call,
   };
+  // `invokeMacro` lets a context-level macro programmatically run
+  // an aggregate-level macro against a child aggregate.  Returned
+  // AST nodes are tagged with $destination so spliceMembers below
+  // routes them into the right host.  Inside-out invocation (e.g.
+  // aggregate calling a context macro on its parent) is rejected
+  // at splice time by the descendant check.
+  const invokeMacro = (
+    childName: string,
+    opts: { target: object; args?: Record<string, unknown> },
+  ): unknown[] => {
+    const child = lookupMacro(childName);
+    if (!child) {
+      recordDiagnostic(doc, {
+        severity: "error",
+        message:
+          `Macro '${name}' invoked unknown macro '${childName}'.  ` +
+          `Available: ${listMacroNames()}.`,
+        node: call,
+        property: "name",
+      });
+      return [];
+    }
+    let childProduced: ReadonlyArray<unknown> = [];
+    try {
+      childProduced = _withOrigin(origin, () =>
+        child.expand({
+          target: opts.target as any,
+          args: (opts.args ?? {}) as any,
+          origin,
+          invokeMacro,
+        }),
+      );
+    } catch (err) {
+      recordDiagnostic(doc, {
+        severity: "error",
+        message:
+          `Macro '${childName}' (invoked from '${name}') threw: ${(err as Error).message}`,
+        node: call,
+        property: "name",
+      });
+      return [];
+    }
+    // Flatten + tag each node with its intended destination (the
+    // child macro's target), so spliceMembers below routes them
+    // into that target's members[] rather than the outer host.
+    const flatChild: unknown[] = [];
+    for (const item of childProduced) {
+      if (Array.isArray(item)) {
+        for (const inner of item) flatChild.push(tagDestination(inner, opts.target));
+      } else {
+        flatChild.push(tagDestination(item, opts.target));
+      }
+    }
+    return flatChild;
+  };
   let produced: ReadonlyArray<unknown>;
   try {
     produced = _withOrigin(origin, () =>
@@ -229,6 +285,7 @@ function expandOneCall(
         target: host as any,
         args: argResult.values,
         origin,
+        invokeMacro,
       }),
     );
   } catch (err) {
@@ -256,43 +313,108 @@ function expandOneCall(
   spliceMembers(host, hostKind, flat, call, doc);
 }
 
+/** Hidden property used by `invokeMacro` to redirect a returned
+ * node's splice destination from "the calling macro's host" to "the
+ * node that the called macro was applied to."  Read by
+ * `spliceMembers` below; never observed by macro authors. */
+const DEST_PROP = "$destination" as const;
+
+/** Tag a node so spliceMembers routes it into `dest.members` rather
+ * than the calling macro's host.  Used internally by `invokeMacro`. */
+function tagDestination(node: unknown, dest: object): unknown {
+  if (node && typeof node === "object") {
+    (node as Record<string, unknown>)[DEST_PROP] = dest;
+  }
+  return node;
+}
+
+/** True iff `candidate` is `host` or a transitive descendant of
+ * `host` in the AST.  Used to validate that `invokeMacro`'s target
+ * sits inside the calling macro's host — context macro CAN invoke
+ * against a child aggregate; aggregate macro CANNOT invoke against
+ * its parent context (would be "calling external from internal,"
+ * which the design disallows). */
+function isHostOrDescendant(host: object, candidate: object): boolean {
+  let cur: unknown = candidate;
+  while (cur && typeof cur === "object") {
+    if (cur === host) return true;
+    cur = (cur as Record<string, unknown>).$container;
+  }
+  return false;
+}
+
 function spliceMembers(
-  host: Aggregate | Ui,
-  hostKind: "aggregate" | "ui",
+  host: Aggregate | Ui | import("./generated/ast.js").BoundedContext,
+  hostKind: "aggregate" | "ui" | "context",
   members: unknown[],
   call: MacroCall,
   doc: LangiumDocument,
 ): void {
   if (members.length === 0) return;
-  const targetList = (host as unknown as { members: unknown[] }).members;
-  const existingNames = new Set<string>();
-  for (const m of targetList) {
-    const n = (m as any).name;
-    if (typeof n === "string") existingNames.add(n);
-  }
+  // Group nodes by their destination — most go to `host`; nodes
+  // tagged via `invokeMacro` go to their explicit destination.
+  const byDest = new Map<object, unknown[]>();
   for (const m of members) {
     if (!m || typeof m !== "object") {
       recordDiagnostic(doc, {
         severity: "error",
-        message: `Macro returned a non-AST value (${typeof m}); expected an AST member or mark.`,
+        message: `Macro returned a non-AST value (${typeof m}); expected an AST member or capability node.`,
         node: call,
       });
       continue;
     }
-    const name = (m as any).name;
-    // Override-by-name: if the user explicitly declared a member
-    // with the same name, the explicit declaration wins and the
-    // macro's contribution is silently skipped.  Required for
-    // scaffold-style overrides; harmless for trait macros (they
-    // shouldn't add duplicates in the first place).
+    const tagged = (m as Record<string, unknown>)[DEST_PROP] as object | undefined;
+    const dest = tagged ?? host;
+    // Inside-out guard: the destination must be the host OR a
+    // descendant of the host in the AST.  Catches accidental
+    // attempts to splice into a sibling / ancestor / unrelated node.
+    if (!isHostOrDescendant(host, dest)) {
+      recordDiagnostic(doc, {
+        severity: "error",
+        message:
+          "Macro emitted a node targeting a destination outside the host's subtree.  " +
+          "Macros may only modify their host or its descendants (e.g. a context-level macro " +
+          "may invoke an aggregate-level macro against an aggregate inside the context).",
+        node: call,
+        property: "name",
+      });
+      continue;
+    }
+    // Strip the tag before splicing — the destination is captured.
+    delete (m as Record<string, unknown>)[DEST_PROP];
+    let bucket = byDest.get(dest);
+    if (!bucket) {
+      bucket = [];
+      byDest.set(dest, bucket);
+    }
+    bucket.push(m);
+  }
+  for (const [dest, bucket] of byDest) {
+    spliceIntoTarget(dest, bucket);
+  }
+  void hostKind; // reserved for future per-kind validation
+}
+
+/** Append `members` into `target.members[]`, wiring `$container`
+ * triples and honouring override-by-name (an explicit member with
+ * the same name as one of the synthesised members wins; the
+ * synthesised member is silently dropped). */
+function spliceIntoTarget(target: object, members: unknown[]): void {
+  const targetList = (target as { members: unknown[] }).members;
+  if (!Array.isArray(targetList)) return;
+  const existingNames = new Set<string>();
+  for (const m of targetList) {
+    const n = (m as { name?: unknown }).name;
+    if (typeof n === "string") existingNames.add(n);
+  }
+  for (const m of members) {
+    const name = (m as { name?: unknown }).name;
     if (typeof name === "string" && existingNames.has(name)) continue;
-    // Wire $container and append.
-    (m as any).$container = host;
-    (m as any).$containerProperty = "members";
-    (m as any).$containerIndex = targetList.length;
+    (m as Record<string, unknown>).$container = target;
+    (m as Record<string, unknown>).$containerProperty = "members";
+    (m as Record<string, unknown>).$containerIndex = targetList.length;
     targetList.push(m);
     if (typeof name === "string") existingNames.add(name);
-    void hostKind; // reserved for future per-kind validation
   }
 }
 

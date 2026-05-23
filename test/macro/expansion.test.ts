@@ -23,6 +23,19 @@ function findAggregate(model: Model, name: string): Aggregate {
   throw new Error(`aggregate ${name} not found`);
 }
 
+function findContext(model: Model, name: string): any {
+  for (const sm of model.members ?? []) {
+    if ((sm as any).$type !== "System") continue;
+    for (const m of (sm as any).members ?? []) {
+      if (m.$type !== "Module") continue;
+      for (const ctx of m.contexts ?? []) {
+        if (ctx.name === name) return ctx;
+      }
+    }
+  }
+  throw new Error(`context ${name} not found`);
+}
+
 describe("auditable stdlib macro", () => {
   it("adds 4 audit fields to the aggregate", async () => {
     const { model, errors } = await parseString(
@@ -44,11 +57,14 @@ describe("auditable stdlib macro", () => {
     );
   });
 
-  it("contributes contextStamps for both create and update events", async () => {
+  it("paired with `with audit` at context, contributes both create + update stamps", async () => {
+    // Post-split: `with auditable` adds state (fields + implements);
+    // `with audit` at context adds the stamping rules.  Together they
+    // produce the full audit capability.
     const { model } = await parseString(
       wrap(`
         module Sales {
-          context Orders {
+          context Orders with audit {
             aggregate Order with auditable {
               subject: string
             }
@@ -56,19 +72,19 @@ describe("auditable stdlib macro", () => {
         }
       `),
     );
-    const agg = findAggregate(model, "Order");
-    // Capabilities are first-class AST members now — count StampDecl
-    // nodes directly on the aggregate's members.
-    const stamps = (agg.members ?? []).filter((m) => m.$type === "StampDecl");
+    const ctx = findContext(model, "Orders");
+    // Two capability-scoped StampDecls live on the context.
+    const stamps = (ctx.members ?? []).filter((m) => m.$type === "StampDecl");
     expect(stamps.length).toBe(2);
     expect(stamps.map((m) => (m as any).event).sort()).toEqual(["onCreate", "onUpdate"]);
+    expect(stamps.every((m) => (m as any).capability === "auditable")).toBe(true);
   });
 
-  it("composes with softDeletable — no field collisions", async () => {
+  it("composes with softDeletable — no field collisions, all four trio pieces present", async () => {
     const { model, errors } = await parseString(
       wrap(`
         module Sales {
-          context Orders {
+          context Orders with audit, softDelete {
             aggregate Order with auditable, softDeletable {
               subject: string
             }
@@ -92,12 +108,14 @@ describe("auditable stdlib macro", () => {
     );
     const opNames = (agg.members ?? []).filter(isOperation).map((o) => o.name);
     expect(opNames).toEqual(expect.arrayContaining(["softDelete", "restore"]));
-    // Both capabilities accumulate as AST members: 2 StampDecl from
-    // auditable + 1 FilterDecl from softDeletable.
-    const stamps = (agg.members ?? []).filter((m) => m.$type === "StampDecl");
-    const filters = (agg.members ?? []).filter((m) => m.$type === "FilterDecl");
-    expect(stamps.length).toBe(2);
-    expect(filters.length).toBe(1);
+    // Capability behavior lives on the context, not the aggregate:
+    // - 2 StampDecls (from `with audit`) on the context
+    // - 1 FilterDecl (from `with softDelete`) on the context
+    const ctx = findContext(model, "Orders");
+    const ctxStamps = (ctx.members ?? []).filter((m) => m.$type === "StampDecl");
+    const ctxFilters = (ctx.members ?? []).filter((m) => m.$type === "FilterDecl");
+    expect(ctxStamps.length).toBe(2);
+    expect(ctxFilters.length).toBe(1);
   });
 });
 

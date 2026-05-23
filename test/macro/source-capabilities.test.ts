@@ -84,27 +84,26 @@ describe("source-level capabilities (hand-written, no macro)", () => {
     expect(agg.implementsCapabilities).toEqual(["auditable", "softDeletable"]);
   });
 
-  it("hand-written equivalent of `with softDeletable` produces matching IR", async () => {
-    // softDeletable expands to: 2 fields, 2 operations, 1 filter,
-    // 1 implements.  Writing the same thing by hand should yield
-    // an aggregate whose IR matches the macro-produced one
-    // structurally for the capability surface.
+  it("hand-written equivalent of trio (softDelete + softDeletable) produces matching IR", async () => {
+    // Trio shape: context-level capability filter + aggregate-level
+    // state + opt-in via `implements`.  Writing the equivalent by
+    // hand should yield identical IR for the capability surface.
     const handIR = await buildLoomModel(`
       system Demo {
         module M { context C {
+          filter for "softDeletable" !this.isDeleted
           aggregate Hand {
             subject: string
             isDeleted: bool
             deletedAt: datetime?
             implements "softDeletable"
-            filter !this.isDeleted
           }
         }}
       }
     `);
     const macroIR = await buildLoomModel(`
       system Demo {
-        module M { context C {
+        module M { context C with softDelete {
           aggregate Macro with softDeletable {
             subject: string
           }
@@ -310,5 +309,63 @@ describe("capability-scoped context stamps: `stamp for \"<name>\"`", () => {
     `);
     expect(findAgg(ir, "Order").contextStamps?.length).toBe(1);
     expect(findAgg(ir, "Plain").contextStamps).toBeUndefined();
+  });
+});
+
+describe("macro-call composition: `*ByDefault` context macros", () => {
+  it("`with softDeleteByDefault` on a context fans softDeletable across every aggregate", async () => {
+    const ir = await buildLoomModel(`
+      system Demo {
+        module M { context C with softDeleteByDefault {
+          aggregate Order { subject: string }
+          aggregate Customer { name: string }
+        }}
+      }
+    `);
+    // Both aggregates received: implements + filter propagated.
+    const order = findAgg(ir, "Order");
+    const customer = findAgg(ir, "Customer");
+    expect(order.implementsCapabilities).toContain("softDeletable");
+    expect(customer.implementsCapabilities).toContain("softDeletable");
+    expect(order.contextFilters?.length).toBe(1);
+    expect(customer.contextFilters?.length).toBe(1);
+  });
+
+  it("`softDeleteByDefault` matches explicit composition of softDelete + softDeletable", async () => {
+    const byDefault = await buildLoomModel(`
+      system Demo {
+        module M { context C with softDeleteByDefault {
+          aggregate Order { subject: string }
+        }}
+      }
+    `);
+    const explicit = await buildLoomModel(`
+      system Demo {
+        module M { context C with softDelete {
+          aggregate Order with softDeletable { subject: string }
+        }}
+      }
+    `);
+    const orderD = findAgg(byDefault, "Order");
+    const orderE = findAgg(explicit, "Order");
+    expect(orderD.implementsCapabilities).toEqual(orderE.implementsCapabilities);
+    expect(orderD.contextFilters?.length).toBe(orderE.contextFilters?.length);
+  });
+
+  it("`with auditedByDefault` fans auditable state + audit stamps", async () => {
+    const ir = await buildLoomModel(`
+      system Demo {
+        user { id: string  role: string }
+        module M { context C with auditedByDefault {
+          aggregate Order { subject: string }
+          aggregate Customer { name: string }
+        }}
+      }
+    `);
+    for (const name of ["Order", "Customer"]) {
+      const agg = findAgg(ir, name);
+      expect(agg.implementsCapabilities).toContain("auditable");
+      expect(agg.contextStamps?.length).toBe(2);
+    }
   });
 });

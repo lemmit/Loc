@@ -439,11 +439,21 @@ type StampDeclAst = import("../language/generated/ast.js").StampDecl;
 type ImplementsDeclAst = import("../language/generated/ast.js").ImplementsDecl;
 
 /** Construct a `filter <expr>` aggregate / context member.
- * Equivalent to writing `filter <expr>` directly in source. */
-export function contextFilter(predicate: Expression): FilterDeclAst & AggregateMember {
+ * Equivalent to writing `filter <expr>` directly in source.  Pass
+ * `{ capability: "<name>" }` to emit the capability-scoped variant
+ * (`filter for "<name>" <expr>`) — only applies to aggregates whose
+ * `implements "<name>"` matches. */
+export function contextFilter(
+  predicate: Expression,
+  opts: { capability?: string } = {},
+): FilterDeclAst & AggregateMember {
   const origin = currentOrigin();
   const node: FilterDeclAst = tag(
-    { $type: "FilterDecl", expr: predicate } as unknown as FilterDeclAst,
+    {
+      $type: "FilterDecl",
+      expr: predicate,
+      ...(opts.capability !== undefined ? { capability: opts.capability } : {}),
+    } as unknown as FilterDeclAst,
     origin,
   );
   setContainer(predicate, node, "expr");
@@ -460,36 +470,36 @@ export interface ContextStampAssignment {
 /** Construct one or two `stamp <event> { ... }` aggregate / context
  * members from the spec.  Each event with at least one assignment
  * yields a StampDecl AST node; the expander splices each separately.
- * Returns a single node when only one event is set; tuple-array
- * otherwise — the macro author returns it via spread (`...stamps(...)`)
- * if they want one helper for both events, or constructs two stamp
- * nodes manually.  The single-array signature keeps macro source
- * concise for the common auditable shape. */
+ * Pass `{ capability: "<name>" }` to emit the capability-scoped
+ * variant (`stamp for "<name>" <event>` — applies only to opt-ins). */
 export function contextStamp(spec: {
   onCreate?: ContextStampAssignment[];
   onUpdate?: ContextStampAssignment[];
+  capability?: string;
 }): Array<StampDeclAst & AggregateMember> {
   const out: Array<StampDeclAst & AggregateMember> = [];
-  if (spec.onCreate?.length) out.push(buildStamp("onCreate", spec.onCreate));
-  if (spec.onUpdate?.length) out.push(buildStamp("onUpdate", spec.onUpdate));
+  if (spec.onCreate?.length) {
+    out.push(buildStamp("onCreate", spec.onCreate, spec.capability));
+  }
+  if (spec.onUpdate?.length) {
+    out.push(buildStamp("onUpdate", spec.onUpdate, spec.capability));
+  }
   return out;
 }
 
 function buildStamp(
   event: "onCreate" | "onUpdate",
   assignments: ContextStampAssignment[],
+  capability?: string,
 ): StampDeclAst & AggregateMember {
   const origin = currentOrigin();
-  // Each ContextStampAssignment becomes an AssignOrCallStmt:
-  // `<field> := <value>`.  Reuses the same factory operation bodies
-  // use, so the resulting AssignOrCallStmt lowers through the
-  // existing `lowerStatement` path.
   const stmts = assignments.map((a) => assignStmt(a.field, a.value));
   const node: StampDeclAst = tag(
     {
       $type: "StampDecl",
       event,
       assignments: stmts,
+      ...(capability !== undefined ? { capability } : {}),
     } as unknown as StampDeclAst,
     origin,
   );

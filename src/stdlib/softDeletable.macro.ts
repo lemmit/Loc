@@ -1,32 +1,52 @@
 import {
   assignStmt,
-  contextFilter,
   defineMacro,
   field,
   implementsCapability,
-  memberAccess,
-  not,
   nullLit,
   operation,
   primType,
-  thisRef,
 } from "../macro-api/index.js";
 import { boolLit, callExpr } from "../macro-api/ui-factories.js";
 
-/** Marks an aggregate as soft-deletable.  Two fields, two
- * operations, a `filter !this.isDeleted` capability that hides
- * soft-deleted rows, and an `implements "softDeletable"` tag so
- * generators group runtime infrastructure (.NET emits one
- * OnModelCreating filter loop scoped by `ISoftDeletable`).  The
- * macro is sugar over hand-written `filter` / `implements` source —
- * a user can write the same aggregate without using the macro. */
+/** Aggregate-level state for the soft-delete capability.
+ *
+ * Adds the storage (`isDeleted`, `deletedAt`), the mutations
+ * (`softDelete()`, `restore()`), and opts the aggregate into the
+ * `softDeletable` capability group via `implements`.  This macro
+ * carries **no filter** — the predicate that hides soft-deleted
+ * rows is the capability's responsibility, not the aggregate's;
+ * declare it via `with softDelete` on the enclosing context (or
+ * hand-write `filter for "softDeletable" !this.isDeleted` there).
+ *
+ * Source-equivalent:
+ *
+ *   aggregate Order with softDeletable {
+ *     subject: string
+ *   }
+ *
+ *   ↓
+ *
+ *   aggregate Order {
+ *     subject: string
+ *     isDeleted: bool
+ *     deletedAt: datetime?
+ *     operation softDelete() { isDeleted := true; deletedAt := now() }
+ *     operation restore()    { isDeleted := false; deletedAt := null }
+ *     implements "softDeletable"
+ *   }
+ *
+ * Compose with `softDelete` at context level for the runtime filter,
+ * or use `softDeleteByDefault` to apply both in one go. */
 export default defineMacro({
   name: "softDeletable",
   target: "aggregate",
   apiVersion: 1,
   description:
-    "Adds isDeleted/deletedAt fields, softDelete()/restore() operations, " +
-    "and a query filter that hides soft-deleted rows from default reads.",
+    "Adds soft-delete state (fields + operations) to an aggregate and " +
+    "opts it into the `softDeletable` capability group.  The filter " +
+    "predicate comes from a sibling context-level `softDelete` macro " +
+    "or hand-written `filter for \"softDeletable\" ...`.",
   expand() {
     return [
       field("isDeleted", primType("bool")),
@@ -40,7 +60,6 @@ export default defineMacro({
         assignStmt("deletedAt", nullLit()),
       ]),
       implementsCapability("softDeletable"),
-      contextFilter(not(memberAccess(thisRef(), "isDeleted"))),
     ];
   },
 });

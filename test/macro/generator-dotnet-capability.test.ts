@@ -46,9 +46,24 @@ const aggregateOnly = (extras: string) => `
   }
 `;
 
+// Trio-form: capability behavior at context, state at aggregate.
+// The aggregate-only macros (`with softDeletable` / `with auditable`)
+// now contribute only state; behavior comes from a context-level
+// macro (`with softDelete` / `with audit`).
+const trioed = (ctxMacro: string, aggMacro: string) => `
+  context Sales with ${ctxMacro} {
+    aggregate User { name: string }
+    aggregate Order with ${aggMacro} {
+      subject: string
+    }
+    repository Orders for Order { }
+    repository Users for User { }
+  }
+`;
+
 describe(".NET generator: no capability artefacts emitted", () => {
   it("no Domain/Common/I*.cs marker interfaces", async () => {
-    const model = await modelFrom(aggregateOnly("with auditable, softDeletable"));
+    const model = await modelFrom(trioed("audit, softDelete", "auditable, softDeletable"));
     const files = generateDotnet(model);
     const markers = [...files.keys()].filter(
       (k) => k.startsWith("Domain/Common/I") && k.endsWith(".cs"),
@@ -57,7 +72,7 @@ describe(".NET generator: no capability artefacts emitted", () => {
   });
 
   it("no <Capability>Filters.cs helper", async () => {
-    const model = await modelFrom(aggregateOnly("with softDeletable"));
+    const model = await modelFrom(trioed("softDelete", "softDeletable"));
     const files = generateDotnet(model);
     const helpers = [...files.keys()].filter(
       (k) => k.startsWith("Infrastructure/Persistence/") && k.endsWith("Filters.cs"),
@@ -66,7 +81,7 @@ describe(".NET generator: no capability artefacts emitted", () => {
   });
 
   it("entity class declaration has no `: I<Cap>` clause", async () => {
-    const model = await modelFrom(aggregateOnly("with auditable, softDeletable"));
+    const model = await modelFrom(trioed("audit, softDelete", "auditable, softDeletable"));
     const files = generateDotnet(model);
     const orderCs = files.get("Domain/Orders/Order.cs")!;
     expect(orderCs).toMatch(/public sealed class Order\n/);
@@ -74,7 +89,7 @@ describe(".NET generator: no capability artefacts emitted", () => {
   });
 
   it("OnModelCreating has no `foreach (var entityType ...)` loop", async () => {
-    const model = await modelFrom(aggregateOnly("with softDeletable"));
+    const model = await modelFrom(trioed("softDelete", "softDeletable"));
     const files = generateDotnet(model);
     const ctx = files.get("Infrastructure/Persistence/AppDbContext.cs")!;
     expect(ctx).not.toMatch(/foreach \(var entityType/);
@@ -83,7 +98,7 @@ describe(".NET generator: no capability artefacts emitted", () => {
 
 describe(".NET generator: HasQueryFilter installs per-EntityConfiguration", () => {
   it("emits one `b.HasQueryFilter(...)` per propagated filter on the matching config", async () => {
-    const model = await modelFrom(aggregateOnly("with softDeletable"));
+    const model = await modelFrom(trioed("softDelete", "softDeletable"));
     const files = generateDotnet(model);
     const cfg = files.get(
       "Infrastructure/Persistence/Configurations/OrderConfiguration.cs",
@@ -121,7 +136,7 @@ describe(".NET generator: HasQueryFilter installs per-EntityConfiguration", () =
 
 describe(".NET generator: registry-driven SaveChangesInterceptor", () => {
   it("emits AuditableInterceptor.cs when any aggregate has contextStamps", async () => {
-    const model = await modelFrom(aggregateOnly("with auditable"));
+    const model = await modelFrom(trioed("audit", "auditable"));
     const files = generateDotnet(model);
     const src = files.get("Infrastructure/Persistence/AuditableInterceptor.cs")!;
     expect(src).toMatch(/switch \(entry\.Entity\)/);
@@ -129,7 +144,7 @@ describe(".NET generator: registry-driven SaveChangesInterceptor", () => {
   });
 
   it("interceptor body assigns the macro-supplied fields", async () => {
-    const model = await modelFrom(aggregateOnly("with auditable"));
+    const model = await modelFrom(trioed("audit", "auditable"));
     const files = generateDotnet(model);
     const src = files.get("Infrastructure/Persistence/AuditableInterceptor.cs")!;
     expect(src).toMatch(/e\.CreatedAt =/);
@@ -137,7 +152,7 @@ describe(".NET generator: registry-driven SaveChangesInterceptor", () => {
   });
 
   it("Program.cs registers the interceptor when stamping is used", async () => {
-    const model = await modelFrom(aggregateOnly("with auditable"));
+    const model = await modelFrom(trioed("audit", "auditable"));
     const files = generateDotnet(model);
     const program = files.get("Program.cs")!;
     expect(program).toMatch(
@@ -146,7 +161,7 @@ describe(".NET generator: registry-driven SaveChangesInterceptor", () => {
   });
 
   it("softDeletable alone does NOT trigger interceptor emission", async () => {
-    const model = await modelFrom(aggregateOnly("with softDeletable"));
+    const model = await modelFrom(trioed("softDelete", "softDeletable"));
     const files = generateDotnet(model);
     expect([...files.keys()]).not.toContain(
       "Infrastructure/Persistence/AuditableInterceptor.cs",

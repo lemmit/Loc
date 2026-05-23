@@ -22,11 +22,14 @@ function findAgg(
 }
 
 describe("macro capabilities propagate to AggregateIR", () => {
-  it("auditable populates contextStamps with onCreate + onUpdate rules", async () => {
+  it("audit + auditable trio populates contextStamps with onCreate + onUpdate rules", async () => {
+    // Post-trio-split: capability behavior (stamps) lives at context;
+    // aggregate-level state opts in via `implements "auditable"`.
+    // Both pieces compose to populate the propagated IR.
     const ir = await buildLoomModel(`
       system Demo {
         user { id: string  role: string }
-        module M { context C {
+        module M { context C with audit {
           aggregate Order with auditable {
             subject: string
           }
@@ -37,20 +40,18 @@ describe("macro capabilities propagate to AggregateIR", () => {
     expect(agg.contextStamps).toBeDefined();
     const events = (agg.contextStamps ?? []).map((s) => s.event).sort();
     expect(events).toEqual(["create", "update"]);
-    // Create rule stamps createdAt + createdBy.
     const createRule = agg.contextStamps!.find((s) => s.event === "create")!;
     const createFields = createRule.assignments.map((a) => a.field).sort();
     expect(createFields).toEqual(["createdAt", "createdBy"]);
-    // Update rule stamps updatedAt + updatedBy.
     const updateRule = agg.contextStamps!.find((s) => s.event === "update")!;
     const updateFields = updateRule.assignments.map((a) => a.field).sort();
     expect(updateFields).toEqual(["updatedAt", "updatedBy"]);
   });
 
-  it("softDeletable populates contextFilters with one predicate", async () => {
+  it("softDelete + softDeletable trio populates contextFilters with one predicate", async () => {
     const ir = await buildLoomModel(`
       system Demo {
-        module M { context C {
+        module M { context C with softDelete {
           aggregate Doc with softDeletable {
             subject: string
           }
@@ -60,8 +61,6 @@ describe("macro capabilities propagate to AggregateIR", () => {
     const agg = findAgg(ir, "Doc");
     expect(agg.contextFilters).toBeDefined();
     expect(agg.contextFilters!.length).toBe(1);
-    // The predicate is `!this.isDeleted`: a unary `!` over a member
-    // access whose receiver lowers to `{ kind: "this" }`.
     const pred = agg.contextFilters![0]!;
     expect(pred.kind).toBe("unary");
     if (pred.kind === "unary") {
@@ -74,11 +73,11 @@ describe("macro capabilities propagate to AggregateIR", () => {
     }
   });
 
-  it("composed macros yield both capability kinds, independently", async () => {
+  it("composed trios yield both capability kinds, independently", async () => {
     const ir = await buildLoomModel(`
       system Demo {
         user { id: string  role: string }
-        module M { context C {
+        module M { context C with audit, softDelete {
           aggregate Order with auditable, softDeletable {
             subject: string
           }
@@ -88,6 +87,25 @@ describe("macro capabilities propagate to AggregateIR", () => {
     const agg = findAgg(ir, "Order");
     expect(agg.contextStamps?.length).toBe(2);
     expect(agg.contextFilters?.length).toBe(1);
+  });
+
+  it("auditable without `audit` at context contributes ONLY state, no stamps", async () => {
+    // Demonstrates that macros are level-correct: `auditable` alone
+    // adds fields + implements but no behavior.  Behavior is the
+    // capability's responsibility (context-level `audit` macro).
+    const ir = await buildLoomModel(`
+      system Demo {
+        user { id: string  role: string }
+        module M { context C {
+          aggregate Order with auditable {
+            subject: string
+          }
+        }}
+      }
+    `);
+    const agg = findAgg(ir, "Order");
+    expect(agg.contextStamps).toBeUndefined();
+    expect(agg.implementsCapabilities).toContain("auditable");
   });
 
   it("aggregates without macros have undefined capabilities", async () => {
