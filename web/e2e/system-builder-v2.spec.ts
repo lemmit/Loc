@@ -63,6 +63,9 @@ test("Model v2 renders an operation body as a statement flow (read-only)", async
   // The confirm body renders as one stmt node per statement, all visible.
   const stmts = page.getByTestId("c4system-v2-stmt");
   await expect.poll(async () => stmts.count(), { timeout: 5_000 }).toBeGreaterThan(0);
+  // Substatement subkinds get their own labels + tint — preconditions read
+  // distinctly from a generic "stmt".
+  await expect(page.locator('[data-testid="c4system-v2-stmt"][data-stmt-subkind="precondition"]').first()).toBeVisible();
 
   // Order.confirm has at least one assign and one emit; each renders its v1
   // editor row inside the node (target Autocomplete for assign, field name +
@@ -272,6 +275,23 @@ test("Model v2 shows inline modules / serves multi-selects on a deployable", asy
   await expect(dep).toBeVisible();
   await expect(dep.getByTestId("c4system-v2-deployable-modules")).toBeVisible();
   await expect(dep.getByTestId("c4system-v2-deployable-serves")).toBeVisible();
+});
+
+test("Model v2 surfaces invariants as nodes in the aggregate view", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Banking System/);
+  await page.getByTestId("doc-tab-model-v2").click();
+  await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
+
+  // Banking System's Account aggregate declares two invariants.
+  await page.locator('.react-flow__node[data-id^="system:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="module:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="context:"]').first().click();
+  await page.locator('.react-flow__node[data-id="aggregate:Account"]').click();
+
+  const invariants = page.locator('[data-construct-kind="invariant"]');
+  await expect.poll(async () => invariants.count(), { timeout: 5_000 }).toBeGreaterThan(0);
 });
 
 test("Model v2 repoints an emit statement's event inline", async ({ page }) => {
