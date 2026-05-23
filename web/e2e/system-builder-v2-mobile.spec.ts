@@ -4,14 +4,24 @@
 // desktop. Compact node widths keep StmtNode + the deployable multi-select
 // panel from overflowing the small canvas.
 
-import { expect, test } from "@playwright/test";
+import { type Page, expect, test } from "@playwright/test";
 
 test.use({ viewport: { width: 390, height: 844 } });
 
+// Lightweight mobile example-switcher: the desktop `selectExample` helper
+// waits for a "0 errors" badge that the mobile shell doesn't surface in its
+// header. We just pick the option and let the next `c4system-v2-pane`
+// assertion verify the source parsed.
+async function pickExample(page: Page, label: RegExp): Promise<void> {
+  await page.getByRole("textbox", { name: "Choose example" }).click({ timeout: 30_000 });
+  await page.getByRole("option", { name: label }).first().click();
+  // Brief settle while the source switches + the LSP re-parses.
+  await page.waitForTimeout(1500);
+}
+
 test("Model v2 on mobile: drill into Sales System → context → aggregate", async ({ page }) => {
   await page.goto("/");
-  // The desktop `waitForPlaygroundReady` helper looks for a heading hidden on
-  // mobile; instead wait for the mobile model-v2 segment to be clickable.
+  await pickExample(page, /Sales System/);
   await page.getByTestId("mobile-doc-tab-model-v2").click({ timeout: 30_000 });
   await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 20_000 });
   await expect(page.getByTestId("c4system-v2-crumb-home")).toBeVisible();
@@ -32,6 +42,7 @@ test("Model v2 on mobile: drill into Sales System → context → aggregate", as
 
 test("Model v2 on mobile: operation body renders as a statement flow", async ({ page }) => {
   await page.goto("/");
+  await pickExample(page, /Sales System/);
   await page.getByTestId("mobile-doc-tab-model-v2").click({ timeout: 30_000 });
   await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 20_000 });
   await page.locator('.react-flow__node[data-id^="system:"]').first().click();
