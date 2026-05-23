@@ -14,6 +14,7 @@ import type { LayoutCtx, MobileCodeView, MobileTab } from "./ctx";
 const BuilderPane = lazy(() => import("../builder/BuilderPane"));
 const SystemBuilderPane = lazy(() => import("../builder/system/SystemBuilderPane"));
 const SystemBuilderV2Pane = lazy(() => import("../builder/system-v2/SystemBuilderV2Pane"));
+const RequirementsPane = lazy(() => import("../builder/requirements/RequirementsPane"));
 
 interface Props {
   ctx: LayoutCtx;
@@ -74,6 +75,7 @@ export function MobileShell({ ctx }: Props): JSX.Element {
               { value: "builder", label: <span data-testid="mobile-doc-tab-builder">Builder</span> },
               { value: "model", label: <span data-testid="mobile-doc-tab-model">Model</span> },
               { value: "model-v2", label: <span data-testid="mobile-doc-tab-model-v2">Model v2</span> },
+              { value: "requirements", label: <span data-testid="mobile-doc-tab-requirements">Reqs</span> },
             ]}
           />
           <Button
@@ -109,6 +111,13 @@ export function MobileShell({ ctx }: Props): JSX.Element {
           <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
             <Suspense fallback={<Box p="md"><Text size="sm" c="dimmed">Loading model v2…</Text></Box>}>
               <SystemBuilderV2Pane ctx={ctx} />
+            </Suspense>
+          </Box>
+        )}
+        {codeView === "requirements" && (
+          <Box style={{ flex: 1, minHeight: 0, display: "flex" }}>
+            <Suspense fallback={<Box p="md"><Text size="sm" c="dimmed">Loading requirements…</Text></Box>}>
+              <RequirementsPane ctx={ctx} />
             </Suspense>
           </Box>
         )}
