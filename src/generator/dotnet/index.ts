@@ -27,7 +27,7 @@ import {
   renderTestCsproj,
   renderTestsFile,
   renderValueObject,
-} from "./templates.js";
+} from "./emit.js";
 import { hasAnyWireValidator, renderValidationBehavior } from "./validator-emit.js";
 import { emitViews } from "./view-emit.js";
 import { emitWorkflows } from "./workflow-emit.js";

@@ -63,7 +63,7 @@ backend package owns is the per-platform slice *after* Loom IR:
 | --- | --- | --- |
 | **Target IR shaping** | Implicit: `reservedRepositoryFindNames` on the surface, ad-hoc per-platform reads of `wireShape`/derived data, DTO-mapping helpers (`dotnet/dto-mapping.ts`) | An explicit per-package step that derives the platform-specific view from Loom IR (reserved names, wire/DTO shaping, platform capability flags). Pure; Loom IR in, target-IR out. |
 | **Final lowering** | `src/generator/<plat>/render-expr.ts` + `render-stmt.ts` — Loom `ExprIR`/`StmtIR` → target-language syntax | Owned by the package. This is the part that *actually differs* between a backend's majors (e.g. C# minimal-API vs controllers). |
-| **Templating** | `index.ts` orchestrator + `*-emit.ts`/`*-builder.ts` + `templates/` + `composeService` | Owned by the package: project structure, framework wiring, Dockerfile, dep pins (`BACKEND_PINS`). |
+| **Templating** | `index.ts` orchestrator + `*-emit.ts`/`*-builder.ts` + `emit/` + `composeService` | Owned by the package: project structure, framework wiring, Dockerfile, dep pins (`BACKEND_PINS`). |
 
 `PlatformSurface` (`src/platform/surface.ts`) is already the right
 seam — `emitProject` / `composeService` / capability flags. A

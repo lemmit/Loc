@@ -26,7 +26,7 @@ import {
   renderQueryHandler,
   renderRequestDtos,
   renderResponseDtos,
-} from "./templates.js";
+} from "./emit.js";
 import { renderCreateValidator, renderOperationValidator } from "./validator-emit.js";
 
 // ---------------------------------------------------------------------------

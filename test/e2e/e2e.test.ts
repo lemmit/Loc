@@ -206,7 +206,7 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
     // response is `ProductResponse` or `ProductResponse[]`.
     // Originally found by the audit: .NET emitted
     // `IReadOnlyList<ProductResponse>` for finds that returned
-    // `Product?`.  Fixed in api.tpl.ts; this test guards the fix.
+    // `Product?`.  Fixed in dotnet emit/api.ts; this test guards the fix.
     const dotnetSpec = await fetchSpec("http://localhost:8081/swagger/v1/swagger.json");
     const honoSpec = await fetchSpec("http://localhost:3000/openapi.json");
 
