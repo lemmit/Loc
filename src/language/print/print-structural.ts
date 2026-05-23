@@ -166,6 +166,12 @@ export function printStructural(node: AstNode): string {
       return printProperty(node as Property);
     case "TestBlock":
       return printTestBlock(node as TestBlock);
+    case "FilterDecl":
+      return printFilterDecl(node as import("../generated/ast.js").FilterDecl);
+    case "StampDecl":
+      return printStampDecl(node as import("../generated/ast.js").StampDecl);
+    case "ImplementsDecl":
+      return printImplementsDecl(node as import("../generated/ast.js").ImplementsDecl);
     case "Page":
       return printPage(node as Page);
     case "Component":
@@ -354,9 +360,32 @@ function printMenuLink(node: MenuLink): string {
 
 function printBoundedContext(node: BoundedContext): string {
   return block(
-    `context ${node.name}`,
+    `context ${node.name}${printWithClause(node.withClause)}`,
     node.members.map((m) => printContextMember(m)),
   );
+}
+
+/** `filter [for "<name>"] <expr>` — capability-scoped variant when
+ * `for` is set, otherwise applies to every aggregate at scope. */
+function printFilterDecl(node: import("../generated/ast.js").FilterDecl): string {
+  const cap = (node as { capability?: string }).capability;
+  const forClause = cap ? ` for ${quote(cap)}` : "";
+  return `filter${forClause} ${printExpr(node.expr)}`;
+}
+
+/** `stamp [for "<name>"] <event> { ... }` */
+function printStampDecl(node: import("../generated/ast.js").StampDecl): string {
+  const cap = (node as { capability?: string }).capability;
+  const forClause = cap ? ` for ${quote(cap)}` : "";
+  return block(
+    `stamp${forClause} ${node.event}`,
+    (node.assignments ?? []).map((a) => printStmt(a as never)),
+  );
+}
+
+/** `implements "<name>"` */
+function printImplementsDecl(node: import("../generated/ast.js").ImplementsDecl): string {
+  return `implements ${quote(node.name)}`;
 }
 
 function printContextMember(node: ContextMember): string {
