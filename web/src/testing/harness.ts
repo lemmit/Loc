@@ -15,9 +15,14 @@ export interface TestCase {
   fn: () => void | Promise<void>;
 }
 
-/** One line captured from `console.*` while a test ran. */
+/** One line captured from `console.*` while a test ran.  Keep the
+ *  level set ALIGNED with `LogLine` in `../util/log-line.ts` so log
+ *  streams can flow between the two without a lossy cast — the runtime
+ *  Output panel's `LogLine` carries a `trace` level (lifted from pino's
+ *  structured payload; see log-line.ts), and tests that capture backend
+ *  console output need to admit the same set. */
 export interface ConsoleLine {
-  level: "log" | "info" | "warn" | "error" | "debug";
+  level: "log" | "info" | "warn" | "error" | "debug" | "trace";
   text: string;
 }
 
