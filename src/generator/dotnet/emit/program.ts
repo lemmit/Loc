@@ -18,11 +18,18 @@ export function renderProgram(
      *  (now under `/api/*`, see `routePrefix` in the api template)
      *  match first.  Off for backend-only .NET. */
     hasEmbeddedSpa?: boolean;
+    /** When true, register `DomainLogBehavior` (a Mediator pipeline
+     *  behavior) so the request-scoped ILogger reaches the domain
+     *  layer via `DomainLog.Current` — used by --trace-injected
+     *  trace calls in aggregate methods.  Off keeps Program.cs
+     *  free of the registration entirely. */
+    emitTrace?: boolean;
   },
 ): string {
   const authRequired = !!options?.authRequired;
   const usesValidators = !!options?.usesValidators;
   const hasEmbeddedSpa = !!options?.hasEmbeddedSpa;
+  const emitTrace = !!options?.emitTrace;
   const repoRegistrations = ctx.aggregates
     .map(
       (a) =>
@@ -178,6 +185,21 @@ builder.Services.AddValidatorsFromAssembly(typeof(Program).Assembly);
 builder.Services.AddScoped(
     typeof(Mediator.IPipelineBehavior<,>),
     typeof(${ns}.Application.Common.ValidationBehavior<,>));
+`
+    : ""
+}${
+  emitTrace
+    ? `
+// DomainLogBehavior — Mediator pipeline behavior that surfaces the
+// request-scoped ILogger to the domain layer via DomainLog.Current
+// (AsyncLocal).  --trace-injected log calls in aggregate methods
+// resolve through that accessor, so the per-request correlation
+// reaches domain code without a constructor-injection refactor.
+// Emitted only when --trace is on; off path keeps Program.cs free
+// of the registration entirely.
+builder.Services.AddScoped(
+    typeof(Mediator.IPipelineBehavior<,>),
+    typeof(${ns}.Application.Common.DomainLogBehavior<,>));
 `
     : ""
 }
