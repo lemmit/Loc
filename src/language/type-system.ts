@@ -12,6 +12,7 @@ import type {
   MemberAccess,
   Operation,
   Parameter,
+  Property,
   Repository,
   TypeRef,
   ValueObject,
@@ -57,18 +58,26 @@ import {
 // Type representation
 // ---------------------------------------------------------------------------
 
+/** Information-flow sensitivity labels carried by a value's type.  An
+ * empty / absent tag set means "clean".  Tags are opaque identifiers
+ * declared at field sites via `sensitive(<tag>, ...)`; the type system
+ * propagates them through expression composition (concat, ternary,
+ * call returns) so a value can't be laundered clean by reshaping the
+ * expression.  See `docs/proposals/sensitivity-and-compliance.md`. */
+export type SensitivityTags = readonly string[];
+
 export type DddType =
-  | { kind: "primitive"; name: PrimitiveName }
-  | { kind: "id"; target: Aggregate | EntityPart }
-  | { kind: "enum"; ref: EnumDecl }
-  | { kind: "valueobject"; ref: ValueObject }
-  | { kind: "aggregate"; ref: Aggregate }
-  | { kind: "entity"; ref: EntityPart }
-  | { kind: "array"; element: DddType }
-  | { kind: "optional"; inner: DddType }
-  | { kind: "any" }
-  | { kind: "never" }
-  | { kind: "unknown" };
+  | { kind: "primitive"; name: PrimitiveName; sensitivity?: SensitivityTags }
+  | { kind: "id"; target: Aggregate | EntityPart; sensitivity?: SensitivityTags }
+  | { kind: "enum"; ref: EnumDecl; sensitivity?: SensitivityTags }
+  | { kind: "valueobject"; ref: ValueObject; sensitivity?: SensitivityTags }
+  | { kind: "aggregate"; ref: Aggregate; sensitivity?: SensitivityTags }
+  | { kind: "entity"; ref: EntityPart; sensitivity?: SensitivityTags }
+  | { kind: "array"; element: DddType; sensitivity?: SensitivityTags }
+  | { kind: "optional"; inner: DddType; sensitivity?: SensitivityTags }
+  | { kind: "any"; sensitivity?: SensitivityTags }
+  | { kind: "never"; sensitivity?: SensitivityTags }
+  | { kind: "unknown"; sensitivity?: SensitivityTags };
 
 export type PrimitiveName = "int" | "long" | "decimal" | "string" | "bool" | "datetime" | "guid";
 
@@ -81,36 +90,97 @@ export const T = {
   unknown: { kind: "unknown" } as DddType,
 };
 
-export function typeToString(t: DddType): string {
-  switch (t.kind) {
-    case "primitive":
-      return t.name;
-    case "id":
-      return `Id<${t.target.name}>`;
-    case "enum":
-      return t.ref.name;
-    case "valueobject":
-      return t.ref.name;
-    case "aggregate":
-      return t.ref.name;
-    case "entity":
-      return t.ref.name;
-    case "array":
-      return `${typeToString(t.element)}[]`;
-    case "optional":
-      return `${typeToString(t.inner)}?`;
-    case "any":
-      return "any";
-    case "never":
-      return "never";
-    case "unknown":
-      return "unknown";
+// ---------------------------------------------------------------------------
+// Sensitivity helpers — union, subset, attach.  Tag sets are stored as
+// sorted, deduplicated readonly arrays so equality is cheap and the IR
+// (which mirrors `SensitivityTags`) stays JSON-serializable.
+// ---------------------------------------------------------------------------
+
+/** Merge any number of tag sets into a single canonical (sorted, unique)
+ * tag set.  Returns undefined when every input is empty so the "clean"
+ * case stays represented as the absent field rather than an empty array
+ * — keeps existing equality / JSON output unchanged for non-sensitive types. */
+export function mergeTags(
+  ...sets: ReadonlyArray<SensitivityTags | undefined>
+): SensitivityTags | undefined {
+  const seen = new Set<string>();
+  for (const s of sets) {
+    if (!s) continue;
+    for (const t of s) seen.add(t);
   }
+  if (seen.size === 0) return undefined;
+  return Object.freeze([...seen].sort()) as SensitivityTags;
+}
+
+/** True iff every tag in `sub` is present in `sup` (treating undefined /
+ * empty as the empty set).  The narrowing direction we forbid in
+ * `isAssignable`: a value with tags can't flow into a slot with fewer
+ * tags. */
+export function tagsSubset(
+  sub: SensitivityTags | undefined,
+  sup: SensitivityTags | undefined,
+): boolean {
+  if (!sub || sub.length === 0) return true;
+  if (!sup || sup.length === 0) return false;
+  for (const t of sub) if (!sup.includes(t)) return false;
+  return true;
+}
+
+/** Attach (union) tags to a type.  Returns the input unchanged when the
+ * tag set is empty — keeps the common "clean" path allocation-free. */
+export function withTags(t: DddType, tags: SensitivityTags | undefined): DddType {
+  if (!tags || tags.length === 0) return t;
+  const merged = mergeTags(t.sensitivity, tags);
+  return { ...t, sensitivity: merged };
+}
+
+/** Pull the tags declared at a Property's declaration site (if any). */
+export function propertySensitivity(p: Property | undefined): SensitivityTags | undefined {
+  const tags = p?.sensitivity?.tags;
+  if (!tags || tags.length === 0) return undefined;
+  return Object.freeze([...new Set(tags)].sort()) as SensitivityTags;
+}
+
+export function typeToString(t: DddType): string {
+  const base = (() => {
+    switch (t.kind) {
+      case "primitive":
+        return t.name;
+      case "id":
+        return `Id<${t.target.name}>`;
+      case "enum":
+        return t.ref.name;
+      case "valueobject":
+        return t.ref.name;
+      case "aggregate":
+        return t.ref.name;
+      case "entity":
+        return t.ref.name;
+      case "array":
+        return `${typeToString(t.element)}[]`;
+      case "optional":
+        return `${typeToString(t.inner)}?`;
+      case "any":
+        return "any";
+      case "never":
+        return "never";
+      case "unknown":
+        return "unknown";
+    }
+  })();
+  if (t.sensitivity && t.sensitivity.length > 0) {
+    return `${base}!{${t.sensitivity.join(",")}}`;
+  }
+  return base;
 }
 
 export function typesEqual(a: DddType, b: DddType): boolean {
   if (a.kind === "any" || b.kind === "any") return true;
   if (a.kind !== b.kind) return false;
+  // Structural equality only — sensitivity is a *flow* property layered
+  // by `isAssignable`, not part of structural identity.  Keeping this
+  // function tag-agnostic preserves the semantics every existing caller
+  // (validator, LSP) relies on.
   switch (a.kind) {
     case "primitive":
       return a.name === (b as typeof a).name;
@@ -134,7 +204,11 @@ export function typesEqual(a: DddType, b: DddType): boolean {
 }
 
 // `null` literal is assignable to any optional type; numeric widening
-// (int → long, int → decimal) is permitted.
+// (int → long, int → decimal) is permitted.  Sensitivity narrowing
+// (`string!{pii}` → `string!{}`) is allowed structurally but flagged by
+// `sensitivityNarrows`; the validator emits a warning at the call site
+// so an implicit conversion that drops tags is visible without
+// breaking the build.
 export function isAssignable(value: DddType, target: DddType): boolean {
   if (typesEqual(value, target)) return true;
   if (value.kind === "any" || target.kind === "any") return true;
@@ -146,6 +220,25 @@ export function isAssignable(value: DddType, target: DddType): boolean {
     if (value.name === "long" && target.name === "decimal") return true;
   }
   return false;
+}
+
+/** True iff `value` carries sensitivity tags that `target` does not.
+ * The validator uses this to emit a warning at flow boundaries
+ * (assignments, emits, derived expressions, function returns) where
+ * a sensitive value silently flows into a non-sensitive — or
+ * less-sensitive — target.  Implicit conversion is *permitted* at the
+ * type level; the warning makes the conversion visible.
+ *
+ * Returns the dropped tag set when narrowing occurs, undefined when
+ * it does not — callers can include the dropped tags in the diagnostic. */
+export function sensitivityNarrows(value: DddType, target: DddType): SensitivityTags | undefined {
+  if (tagsSubset(value.sensitivity, target.sensitivity)) return undefined;
+  const dropped: string[] = [];
+  for (const t of value.sensitivity ?? []) {
+    if (!target.sensitivity?.includes(t)) dropped.push(t);
+  }
+  if (dropped.length === 0) return undefined;
+  return Object.freeze(dropped.sort()) as SensitivityTags;
 }
 
 // ---------------------------------------------------------------------------
@@ -225,11 +318,14 @@ export function typeOf(expr: Expression | undefined, env: Env): DddType {
   if (isParenExpr(expr)) return typeOf(expr.inner, env);
   if (isUnaryExpr(expr)) {
     const t = typeOf(expr.operand, env);
+    // `!x` is a fresh bool — comparison-class result, no propagation.
     if (expr.op === "!") return T.prim("bool");
     return t;
   }
   if (isBinaryExpr(expr)) {
     const op = expr.op;
+    // Logical / comparison ops produce a fresh bool — by convention low
+    // bandwidth implicit flows aren't tracked, so no propagation.
     if (op === "&&" || op === "||") return T.prim("bool");
     if (op === "==" || op === "!=" || op === "<" || op === "<=" || op === ">" || op === ">=") {
       return T.prim("bool");
@@ -239,7 +335,11 @@ export function typeOf(expr: Expression | undefined, env: Env): DddType {
     return arithmeticResult(lt, rt);
   }
   if (isTernaryExpr(expr)) {
-    return typeOf(expr.thenExpr, env);
+    // Union the branches' sensitivity — the chosen value could come from
+    // either, so the resulting value is as tainted as either branch is.
+    const thenT = typeOf(expr.thenExpr, env);
+    const elseT = typeOf(expr.elseExpr, env);
+    return withTags(thenT, elseT.sensitivity);
   }
   if (isLambda(expr)) {
     // Lambda type is contextual; without a target type it's unknown.
@@ -264,14 +364,18 @@ export function typeOf(expr: Expression | undefined, env: Env): DddType {
 }
 
 function arithmeticResult(a: DddType, b: DddType): DddType {
+  // Sensitivity flows through any arithmetic or string concatenation.
+  // `"Hello " + email` ⇒ string!{pii}; `(price + tax)` inherits whatever
+  // tags either operand carries.
+  const tags = mergeTags(a.sensitivity, b.sensitivity);
   if (a.kind === "primitive" && b.kind === "primitive") {
     const order = ["int", "long", "decimal"] as const;
     const ai = (order as readonly string[]).indexOf(a.name);
     const bi = (order as readonly string[]).indexOf(b.name);
-    if (ai >= 0 && bi >= 0) return T.prim(order[Math.max(ai, bi)]!);
-    if (a.name === "string" && b.name === "string") return T.prim("string");
+    if (ai >= 0 && bi >= 0) return withTags(T.prim(order[Math.max(ai, bi)]!), tags);
+    if (a.name === "string" && b.name === "string") return withTags(T.prim("string"), tags);
   }
-  return T.unknown;
+  return withTags(T.unknown, tags);
 }
 
 function typeOfMemberAccess(expr: import("./generated/ast.js").MemberAccess, env: Env): DddType {
@@ -323,7 +427,8 @@ function lookupEntityMember(target: Aggregate | EntityPart, name: string): DddTy
     return { kind: "id", target };
   }
   for (const m of target.members) {
-    if (isProperty(m) && m.name === name) return resolveTypeRef(m.type);
+    if (isProperty(m) && m.name === name)
+      return withTags(resolveTypeRef(m.type), propertySensitivity(m));
     if (isContainment(m) && m.name === name) {
       const part = m.partType?.ref;
       if (!part) return T.unknown;
@@ -342,7 +447,8 @@ function lookupEntityMember(target: Aggregate | EntityPart, name: string): DddTy
 
 function lookupValueObjectMember(target: ValueObject, name: string): DddType {
   for (const m of target.members) {
-    if (isProperty(m) && m.name === name) return resolveTypeRef(m.type);
+    if (isProperty(m) && m.name === name)
+      return withTags(resolveTypeRef(m.type), propertySensitivity(m));
     if (isDerivedProp(m) && m.name === name) return resolveTypeRef(m.type);
   }
   return T.unknown;
@@ -487,9 +593,7 @@ const INTRINSIC_MATCHER_SIGNATURES: ReadonlyArray<MatcherSig> = [
   { name: "toHaveCount", arity: 1, on: "locator", negatable: true },
   { name: "toBeVisible", arity: 0, on: "locator", negatable: true },
 ];
-const INTRINSIC_MATCHERS = new Map(
-  INTRINSIC_MATCHER_SIGNATURES.map((m) => [m.name, m]),
-);
+const INTRINSIC_MATCHERS = new Map(INTRINSIC_MATCHER_SIGNATURES.map((m) => [m.name, m]));
 
 export function isIntrinsicMatcher(name: string): boolean {
   return INTRINSIC_MATCHERS.has(name);
@@ -575,7 +679,8 @@ export function collectLetBindings(
 export function lookupRootMember(agg: Aggregate, name: string): DddType {
   if (name === "id") return { kind: "id", target: agg };
   for (const m of agg.members) {
-    if (isProperty(m) && m.name === name) return resolveTypeRef(m.type);
+    if (isProperty(m) && m.name === name)
+      return withTags(resolveTypeRef(m.type), propertySensitivity(m));
     if (isContainment(m) && m.name === name) {
       const part = m.partType?.ref;
       if (!part) return T.unknown;
@@ -592,7 +697,8 @@ export function stepInto(t: DddType, name: string): DddType {
   if (t.kind === "entity" || t.kind === "aggregate") {
     if (name === "id") return { kind: "id", target: t.ref };
     for (const m of t.ref.members) {
-      if (isProperty(m) && m.name === name) return resolveTypeRef(m.type);
+      if (isProperty(m) && m.name === name)
+        return withTags(resolveTypeRef(m.type), propertySensitivity(m));
       if (isContainment(m) && m.name === name) {
         const part = m.partType?.ref;
         if (!part) return T.unknown;
@@ -604,7 +710,8 @@ export function stepInto(t: DddType, name: string): DddType {
   }
   if (t.kind === "valueobject") {
     for (const m of t.ref.members) {
-      if (isProperty(m) && m.name === name) return resolveTypeRef(m.type);
+      if (isProperty(m) && m.name === name)
+        return withTags(resolveTypeRef(m.type), propertySensitivity(m));
       if (isDerivedProp(m) && m.name === name) return resolveTypeRef(m.type);
     }
   }
@@ -669,7 +776,11 @@ export function envForNode(node: AstNode): Env {
   if (part) addEntityMembers(part.members, bindings);
   if (vo) {
     for (const m of vo.members) {
-      if (isProperty(m)) bindings.set(m.name, { type: resolveTypeRef(m.type), origin: m });
+      if (isProperty(m))
+        bindings.set(m.name, {
+          type: withTags(resolveTypeRef(m.type), propertySensitivity(m)),
+          origin: m,
+        });
       else if (isDerivedProp(m)) bindings.set(m.name, { type: resolveTypeRef(m.type), origin: m });
     }
   }
@@ -720,7 +831,11 @@ function addEntityMembers(
   bindings: Map<string, { type: DddType; origin: AstNode }>,
 ): void {
   for (const m of members) {
-    if (isProperty(m)) bindings.set(m.name, { type: resolveTypeRef(m.type), origin: m });
+    if (isProperty(m))
+      bindings.set(m.name, {
+        type: withTags(resolveTypeRef(m.type), propertySensitivity(m)),
+        origin: m,
+      });
     else if (isDerivedProp(m)) bindings.set(m.name, { type: resolveTypeRef(m.type), origin: m });
     else if (isContainment(m)) {
       const partRef = m.partType?.ref;
@@ -751,7 +866,12 @@ export function iterateEntityMembers(
   const out: EntityMemberInfo[] = [];
   for (const m of target.members) {
     if (isProperty(m)) {
-      out.push({ name: m.name, kind: "property", type: resolveTypeRef(m.type), node: m });
+      out.push({
+        name: m.name,
+        kind: "property",
+        type: withTags(resolveTypeRef(m.type), propertySensitivity(m)),
+        node: m,
+      });
     } else if (isDerivedProp(m)) {
       out.push({ name: m.name, kind: "derived", type: resolveTypeRef(m.type), node: m });
     } else if (isContainment(m)) {

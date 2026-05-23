@@ -619,7 +619,15 @@ BindEntry:
 // ---------------------------------------------------------------------------
 
 Property:
-    name=ID ':' type=TypeRef (display?='display')? (provenanced?='provenanced')? ('check' check=Expression)?;
+    name=ID ':' type=TypeRef (display?='display')? (provenanced?='provenanced')? sensitivity=SensitivityClause? ('check' check=Expression)?;
+
+// Information-flow sensitivity tag(s) on a property.  Tags are bare
+// identifiers, opaque to the compiler — `pii`, `phi`, `cred` are
+// conventional choices but any identifier is accepted.  Multiple tags
+// (`sensitive(pii, audited)`) declare the value carries every listed
+// classification simultaneously.  See `docs/proposals/sensitivity-and-compliance.md`.
+SensitivityClause:
+    'sensitive' '(' tags+=ID (',' tags+=ID)* ')';
 
 Containment:
     'contains' name=ID ':' partType=[EntityPart:ID] (collection?='[]')?;
