@@ -2,10 +2,11 @@
 import { EmptyFileSystem, URI } from "langium";
 import { createDddServices } from "../../../src/language/ddd-module.js";
 import type { Model } from "../../../src/language/generated/ast.js";
-import { lowerModel } from "../../../src/ir/lower.js";
+import { lowerModel, mergeLoomModels } from "../../../src/ir/lower.js";
 import { enrichLoomModel } from "../../../src/ir/enrichments.js";
+import type { LoomModel } from "../../../src/ir/loom-ir.js";
 import { validateLoomModel } from "../../../src/ir/validate.js";
-import { generateSystems } from "../../../src/system/index.js";
+import { generateSystems, generateSystemsFromLoom } from "../../../src/system/index.js";
 import { captureSnapshots } from "../../../src/system/loomsnap.js";
 // P2a moved the TS orchestrator into the hono@v4 package; the
 // playground legacy single-context build targets the default Hono
@@ -13,6 +14,7 @@ import { captureSnapshots } from "../../../src/system/loomsnap.js";
 import { generateTypeScript } from "../../../src/platform/hono/v4/emit.js";
 import { BACKEND_PINS as HONO_V4_PINS } from "../../../src/platform/hono/v4/pins.js";
 import { MemoryVfs } from "../vfs/memory-vfs.js";
+import { loadProjectFromVfs } from "./project-loader.js";
 import { seedBuiltinPacks } from "./template-bundled.js";
 import { setWorkerVfs } from "./worker-vfs.js";
 import type {
@@ -45,16 +47,58 @@ async function parse(text: string): Promise<{ model?: Model; diagnostics: BuildD
   if (existing) documents.deleteDocument(existing.uri);
   const doc = documents.createDocument(DOC_URI, text);
   await builder.build([doc], { validation: true });
-  const diagnostics: BuildDiagnostic[] = (doc.diagnostics ?? []).map((d) => ({
-    severity: d.severity === 1 ? "error" : "warning",
-    message: d.message,
-    line: d.range.start.line + 1,
-    column: d.range.start.character + 1,
-    source: typeof d.source === "string" ? d.source : "loom",
-  }));
+  const diagnostics = collectDiagnostics([doc]);
   const errorCount = diagnostics.filter((d) => d.severity === "error").length;
   if (errorCount > 0) return { diagnostics };
   return { model: doc.parseResult?.value as Model, diagnostics };
+}
+
+/** Project-loader path — used when generate is called with an
+ *  `entryPath` instead of inline text.  Walks transitive `import`s
+ *  through the worker's VFS, registers every reachable document, and
+ *  returns a single merged `LoomModel` ready for the rest of the
+ *  pipeline.  Lowering happens here (per-document then
+ *  `mergeLoomModels`) so we don't double-lower in `handleGenerate`. */
+async function parseProject(
+  entryPath: string,
+): Promise<{ loom?: LoomModel; diagnostics: BuildDiagnostic[] }> {
+  try {
+    const { all } = await loadProjectFromVfs(entryPath, services.shared, workerVfs);
+    const diagnostics = collectDiagnostics(all);
+    if (diagnostics.some((d) => d.severity === "error")) {
+      return { diagnostics };
+    }
+    const merged = mergeLoomModels(
+      all.map((d) => lowerModel(d.parseResult?.value as Model)),
+    );
+    return { loom: merged, diagnostics };
+  } catch (err) {
+    return {
+      diagnostics: [
+        {
+          severity: "error",
+          message: err instanceof Error ? err.message : String(err),
+          source: "loom-project",
+        },
+      ],
+    };
+  }
+}
+
+function collectDiagnostics(docs: { uri: { toString(): string }; diagnostics?: { severity?: number; message: string; range?: { start: { line: number; character: number } }; source?: string }[] }[]): BuildDiagnostic[] {
+  const out: BuildDiagnostic[] = [];
+  for (const doc of docs) {
+    for (const d of doc.diagnostics ?? []) {
+      out.push({
+        severity: d.severity === 1 ? "error" : "warning",
+        message: d.message,
+        line: d.range ? d.range.start.line + 1 : undefined,
+        column: d.range ? d.range.start.character + 1 : undefined,
+        source: typeof d.source === "string" ? d.source : "loom",
+      });
+    }
+  }
+  return out;
 }
 
 function filesFromMap(map: Map<string, string>): VirtualFile[] {
@@ -70,96 +114,141 @@ function filesFromMap(map: Map<string, string>): VirtualFile[] {
   return out;
 }
 
-async function handleGenerate(text: string): Promise<GenerateResult> {
+async function handleGenerateFromText(text: string): Promise<GenerateResult> {
   const parsed = await parse(text);
   if (!parsed.model) return { ok: false, diagnostics: parsed.diagnostics };
+  return generateFromAst({ model: parsed.model, diagnostics: parsed.diagnostics });
+}
 
-  // IR-level validation: catches issues that survive Langium's
-  // checks (e.g. `api.<unknown>.<verb>` references in `test e2e`
-  // bodies).  See `src/ir/validate.ts`.
-  let loom;
+async function handleGenerateFromPath(entryPath: string): Promise<GenerateResult> {
+  const parsed = await parseProject(entryPath);
+  if (!parsed.loom) return { ok: false, diagnostics: parsed.diagnostics };
+  return generateFromLoom({ loom: parsed.loom, diagnostics: parsed.diagnostics });
+}
+
+/** Single-document generation path.  Keeps the legacy single-file
+ *  shape — `generateSystems(model)` does its own lower+enrich
+ *  internally, matching pre-multi-file behaviour exactly. */
+function generateFromAst(input: {
+  model: Model;
+  diagnostics: BuildDiagnostic[];
+}): GenerateResult {
+  let loom: LoomModel;
   try {
-    loom = enrichLoomModel(lowerModel(parsed.model));
+    loom = enrichLoomModel(lowerModel(input.model));
   } catch (err) {
-    return {
-      ok: false,
-      diagnostics: [
-        ...parsed.diagnostics,
-        {
-          severity: "error",
-          message: `Lowering failed: ${err instanceof Error ? err.message : String(err)}`,
-          source: "loom-ir",
-        },
-      ],
-    };
+    return loweringError(input.diagnostics, err);
   }
-  const irDiags = validateLoomModel(loom).map((d) => ({
+  const irDiags = irValidate(loom);
+  if (hasError(irDiags)) return { ok: false, diagnostics: [...input.diagnostics, ...irDiags] };
+
+  if (loom.systems.length > 0) {
+    return wrapGenerate("system", input.diagnostics, irDiags, () =>
+      generateSystems(input.model).files,
+    );
+  }
+  if (loom.contexts.length > 0) {
+    return wrapGenerate("ts", input.diagnostics, irDiags, () =>
+      generateTypeScript(input.model, HONO_V4_PINS),
+    );
+  }
+  return emptyResult(input.diagnostics, irDiags);
+}
+
+/** Multi-file generation path.  The merged `LoomModel` is already
+ *  built by `parseProject`; we only need enrichment + the
+ *  system-mode generator.  Legacy single-context `generate ts` /
+ *  `generate dotnet` aren't reachable here — those callers stay on
+ *  the text path because they don't compose multi-file output
+ *  anyway (mirrors the CLI's split). */
+function generateFromLoom(input: {
+  loom: LoomModel;
+  diagnostics: BuildDiagnostic[];
+}): GenerateResult {
+  let loom: LoomModel;
+  try {
+    loom = enrichLoomModel(input.loom);
+  } catch (err) {
+    return loweringError(input.diagnostics, err);
+  }
+  const irDiags = irValidate(loom);
+  if (hasError(irDiags)) return { ok: false, diagnostics: [...input.diagnostics, ...irDiags] };
+
+  if (loom.systems.length > 0) {
+    return wrapGenerate("system", input.diagnostics, irDiags, () =>
+      generateSystemsFromLoom(loom).files,
+    );
+  }
+  // Multi-file project with only loose contexts (no `system` block)
+  // isn't a thing the CLI's `generate system` supports either — it's
+  // exclusively a single-file legacy mode.  Fall through to the
+  // empty result so the user gets the same diagnostic they'd see in
+  // the CLI.
+  return emptyResult(input.diagnostics, irDiags);
+}
+
+function loweringError(prior: BuildDiagnostic[], err: unknown): GenerateResult {
+  return {
+    ok: false,
+    diagnostics: [
+      ...prior,
+      {
+        severity: "error",
+        message: `Lowering failed: ${err instanceof Error ? err.message : String(err)}`,
+        source: "loom-ir",
+      },
+    ],
+  };
+}
+
+function irValidate(loom: LoomModel): BuildDiagnostic[] {
+  return validateLoomModel(loom).map((d) => ({
     severity: d.severity === "error" ? ("error" as const) : ("warning" as const),
     message: d.message,
     source: typeof d.source === "string" ? d.source : "loom-ir",
   }));
-  const irErrors = irDiags.filter((d) => d.severity === "error");
-  if (irErrors.length > 0) {
-    return { ok: false, diagnostics: [...parsed.diagnostics, ...irDiags] };
-  }
+}
 
-  // System mode wins when the source declares any `system { ... }`
-  // block; otherwise fall back to the legacy single-Hono-project
-  // generator so bare-context examples still produce something useful.
-  if (loom.systems.length > 0) {
-    try {
-      const out = generateSystems(parsed.model).files;
-      return {
-        ok: true,
-        mode: "system",
-        files: filesFromMap(out),
-        diagnostics: [...parsed.diagnostics, ...irDiags],
-      };
-    } catch (err) {
-      return {
-        ok: false,
-        diagnostics: [
-          ...parsed.diagnostics,
-          ...irDiags,
-          {
-            severity: "error",
-            message: `generateSystems failed: ${err instanceof Error ? err.message : String(err)}`,
-            source: "loom-gen",
-          },
-        ],
-      };
-    }
+function hasError(diags: BuildDiagnostic[]): boolean {
+  return diags.some((d) => d.severity === "error");
+}
+
+function wrapGenerate(
+  mode: "system" | "ts",
+  parseDiags: BuildDiagnostic[],
+  irDiags: BuildDiagnostic[],
+  emit: () => Map<string, string>,
+): GenerateResult {
+  try {
+    return {
+      ok: true,
+      mode,
+      files: filesFromMap(emit()),
+      diagnostics: [...parseDiags, ...irDiags],
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      diagnostics: [
+        ...parseDiags,
+        ...irDiags,
+        {
+          severity: "error",
+          message: `${mode === "system" ? "generateSystems" : "generateTypeScript"} failed: ${err instanceof Error ? err.message : String(err)}`,
+          source: "loom-gen",
+        },
+      ],
+    };
   }
-  if (loom.contexts.length > 0) {
-    try {
-      const out = generateTypeScript(parsed.model, HONO_V4_PINS);
-      return {
-        ok: true,
-        mode: "ts",
-        files: filesFromMap(out),
-        diagnostics: [...parsed.diagnostics, ...irDiags],
-      };
-    } catch (err) {
-      return {
-        ok: false,
-        diagnostics: [
-          ...parsed.diagnostics,
-          ...irDiags,
-          {
-            severity: "error",
-            message: `generateTypeScript failed: ${err instanceof Error ? err.message : String(err)}`,
-            source: "loom-gen",
-          },
-        ],
-      };
-    }
-  }
+}
+
+function emptyResult(parseDiags: BuildDiagnostic[], irDiags: BuildDiagnostic[]): GenerateResult {
   return {
     ok: true,
     mode: "none",
     files: [],
     diagnostics: [
-      ...parsed.diagnostics,
+      ...parseDiags,
       ...irDiags,
       {
         severity: "warning",
@@ -173,17 +262,30 @@ async function handleGenerate(text: string): Promise<GenerateResult> {
 /** Provenance-snapshot capture — the playground's equivalent of the CLI
  *  `ddd snapshot` prebuild step.  Returns the immutable timestamped+GUID
  *  snapshot files; empty `files` when no written `provenanced` field. */
-async function handleSnapshot(text: string): Promise<SnapshotResult> {
+async function handleSnapshotFromText(text: string): Promise<SnapshotResult> {
   const parsed = await parse(text);
   if (!parsed.model) return { ok: false, diagnostics: parsed.diagnostics };
-  let loom;
+  return snapshotFromLoom(lowerModel(parsed.model), parsed.diagnostics);
+}
+
+async function handleSnapshotFromPath(entryPath: string): Promise<SnapshotResult> {
+  const parsed = await parseProject(entryPath);
+  if (!parsed.loom) return { ok: false, diagnostics: parsed.diagnostics };
+  return snapshotFromLoom(parsed.loom, parsed.diagnostics);
+}
+
+function snapshotFromLoom(
+  rawLoom: LoomModel,
+  parseDiags: BuildDiagnostic[],
+): SnapshotResult {
+  let loom: LoomModel;
   try {
-    loom = enrichLoomModel(lowerModel(parsed.model));
+    loom = enrichLoomModel(rawLoom);
   } catch (err) {
     return {
       ok: false,
       diagnostics: [
-        ...parsed.diagnostics,
+        ...parseDiags,
         {
           severity: "error",
           message: `Lowering failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -195,30 +297,26 @@ async function handleSnapshot(text: string): Promise<SnapshotResult> {
   return {
     ok: true,
     files: filesFromMap(captureSnapshots(loom)),
-    diagnostics: parsed.diagnostics,
+    diagnostics: parseDiags,
   };
 }
 
-/** Resolve `generate`'s source: inline `text` (legacy) or VFS-read
- *  via `entryPath` (Phase 2+).  Exactly one form must be set. */
-function resolveGenerateSource(params: { text?: string; entryPath?: string }): string {
+/** Disambiguate `generate` / `snapshot` callers' two input forms.
+ *  Exactly one of `text` or `entryPath` must be set.  Returning the
+ *  shape lets the worker dispatch to the multi-file project loader
+ *  (entryPath) or the legacy single-doc parse (text) without an
+ *  intermediate "read entry to a string and forget the path" step,
+ *  which would have prevented import-walking. */
+function classifySource(
+  params: { text?: string; entryPath?: string },
+): { kind: "text"; text: string } | { kind: "path"; entryPath: string } {
   const hasText = typeof params.text === "string";
   const hasPath = typeof params.entryPath === "string";
   if (hasText && hasPath) {
-    throw new Error(
-      "build.generate: pass either `text` or `entryPath`, not both.",
-    );
+    throw new Error("build.generate: pass either `text` or `entryPath`, not both.");
   }
-  if (hasText) return params.text!;
-  if (hasPath) {
-    const src = workerVfs.read(params.entryPath!);
-    if (src == null) {
-      throw new Error(
-        `build.generate: entryPath "${params.entryPath}" not found in VFS.`,
-      );
-    }
-    return src;
-  }
+  if (hasText) return { kind: "text", text: params.text! };
+  if (hasPath) return { kind: "path", entryPath: params.entryPath! };
   throw new Error("build.generate: missing `text` or `entryPath`.");
 }
 
@@ -228,13 +326,19 @@ self.onmessage = async (ev: MessageEvent<BuildRpcRequest>) => {
   try {
     switch (req.method) {
       case "generate": {
-        const text = resolveGenerateSource(req.params);
-        response.result = await handleGenerate(text);
+        const src = classifySource(req.params);
+        response.result =
+          src.kind === "text"
+            ? await handleGenerateFromText(src.text)
+            : await handleGenerateFromPath(src.entryPath);
         break;
       }
       case "snapshot": {
-        const text = resolveGenerateSource(req.params);
-        response.result = await handleSnapshot(text);
+        const src = classifySource(req.params);
+        response.result =
+          src.kind === "text"
+            ? await handleSnapshotFromText(src.text)
+            : await handleSnapshotFromPath(src.entryPath);
         break;
       }
       case "vfs.write": {
