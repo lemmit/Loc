@@ -4,13 +4,14 @@
 // root vitest can import it directly without dragging in React's
 // JSX runtime.
 //
-// The VFS has no concept of an empty directory — folders exist only
-// implicitly via path segments.  "Create folder" therefore means
-// "create a file inside a new folder"; we seed an `untitled.ddd`
-// placeholder so the folder shows up immediately and the user has
-// something to start editing.  Disambiguation against existing
-// paths (`untitled.ddd` → `untitled-2.ddd` → …) is handled here so
-// both pickers share the same naming rule.
+// `newFolderSeedPath` is the legacy placeholder-file approach —
+// kept for the desktop tabs strip where a flat tab list has no
+// natural way to surface an empty folder.  The mobile tree uses
+// the VFS's first-class `mkdir` instead (see
+// `WorkspaceSourcesController.createEmptyFolder`).
+// Disambiguation against existing paths (`untitled.ddd` →
+// `untitled-2.ddd` → …) is handled here so both pickers share the
+// same naming rule when they need a placeholder file.
 // ---------------------------------------------------------------------------
 
 const WORKSPACE_PREFIX = "/workspace/";

@@ -76,8 +76,8 @@ describe("LoomBuildClient.spawn (constructor)", () => {
     const { LoomBuildClient } = await load();
     new LoomBuildClient({
       seedWorkspace: () => [
-        { path: "/workspace/main.ddd", content: "x" },
-        { path: "/workspace/design/foo/pack.json", content: "{}" },
+        { kind: "file", path: "/workspace/main.ddd", content: "x" },
+        { kind: "file", path: "/workspace/design/foo/pack.json", content: "{}" },
       ],
     });
     expect(FakeWorker.messages).toHaveLength(1);
@@ -89,6 +89,34 @@ describe("LoomBuildClient.spawn (constructor)", () => {
     expect(msg.params.entries.map((e) => e.path)).toEqual([
       "/workspace/main.ddd",
       "/workspace/design/foo/pack.json",
+    ]);
+  });
+
+  it("ships dir entries from seedWorkspace across the worker boundary — empty folders survive a respawn", async () => {
+    // Regression for the seedWorkspace-loses-dirs trap the Plan
+    // agent flagged: prior to commit 2, seedWorkspace did
+    // `list().flatMap(read)` which silently dropped dir entries.
+    // Now we hand the worker tagged entries (file + dir) directly,
+    // so an empty folder created on the main thread survives the
+    // worker's vfs.write on respawn.
+    const { LoomBuildClient } = await load();
+    new LoomBuildClient({
+      seedWorkspace: () => [
+        { kind: "file", path: "/workspace/main.ddd", content: "x" },
+        { kind: "dir", path: "/workspace/audit" },
+      ],
+    });
+    expect(FakeWorker.messages).toHaveLength(1);
+    const msg = FakeWorker.messages[0].message as {
+      method: string;
+      params: {
+        entries: Array<{ kind: "file" | "dir"; path: string; content?: string }>;
+      };
+    };
+    expect(msg.method).toBe("vfs.write");
+    expect(msg.params.entries).toEqual([
+      { kind: "file", path: "/workspace/main.ddd", content: "x" },
+      { kind: "dir", path: "/workspace/audit" },
     ]);
   });
 

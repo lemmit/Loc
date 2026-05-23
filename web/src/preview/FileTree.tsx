@@ -19,8 +19,10 @@ interface FileTreeProps {
   defaultFolderOpen?: boolean;
   /** Optional filter — return `false` to hide a file from the
    *  rendered tree (the folder it lives in still renders, but the
-   *  file row doesn't).  Used by the source-files tree to hide the
-   *  `.gitkeep` empty-folder sentinels.  Not consulted for folders. */
+   *  file row doesn't).  Used by the source-files tree to hide
+   *  the in-memory `.empty-folder` shim entries that exist only to
+   *  make `buildTree` materialise an empty folder node.  Not
+   *  consulted for folder rows. */
   shouldRenderFile?: (filePath: string) => boolean;
 }
 
@@ -113,9 +115,9 @@ function NodeRow({
   defaultFolderOpen,
   shouldRenderFile,
 }: NodeRowProps): JSX.Element | null {
-  // File-row filter — used by the source-files tree to hide
-  // empty-folder `.gitkeep` sentinels from view while still letting
-  // their parent folder render.
+  // File-row filter — used by the source-files tree to hide the
+  // in-memory empty-folder shim entries while still letting their
+  // parent folder render.
   if (node.kind === "file" && shouldRenderFile && !shouldRenderFile(node.path)) {
     return null;
   }
