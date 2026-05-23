@@ -205,13 +205,11 @@ export function typesEqual(a: DddType, b: DddType): boolean {
 
 // `null` literal is assignable to any optional type; numeric widening
 // (int → long, int → decimal) is permitted.  Sensitivity narrowing
-// (`string!{pii}` → `string!{}`) is *not* — see proposal.
+// (`string!{pii}` → `string!{}`) is allowed structurally but flagged by
+// `sensitivityNarrows`; the validator emits a warning at the call site
+// so an implicit conversion that drops tags is visible without
+// breaking the build.
 export function isAssignable(value: DddType, target: DddType): boolean {
-  // Sensitivity rule applies before any structural equivalence: the
-  // value's tag set must be a subset of the target's.  This is what
-  // turns "log(user.email)" into a compile error once log's argument
-  // typing carries no tags.
-  if (!tagsSubset(value.sensitivity, target.sensitivity)) return false;
   if (typesEqual(value, target)) return true;
   if (value.kind === "any" || target.kind === "any") return true;
   if (target.kind === "optional") {
@@ -222,6 +220,25 @@ export function isAssignable(value: DddType, target: DddType): boolean {
     if (value.name === "long" && target.name === "decimal") return true;
   }
   return false;
+}
+
+/** True iff `value` carries sensitivity tags that `target` does not.
+ * The validator uses this to emit a warning at flow boundaries
+ * (assignments, emits, derived expressions, function returns) where
+ * a sensitive value silently flows into a non-sensitive — or
+ * less-sensitive — target.  Implicit conversion is *permitted* at the
+ * type level; the warning makes the conversion visible.
+ *
+ * Returns the dropped tag set when narrowing occurs, undefined when
+ * it does not — callers can include the dropped tags in the diagnostic. */
+export function sensitivityNarrows(value: DddType, target: DddType): SensitivityTags | undefined {
+  if (tagsSubset(value.sensitivity, target.sensitivity)) return undefined;
+  const dropped: string[] = [];
+  for (const t of value.sensitivity ?? []) {
+    if (!target.sensitivity?.includes(t)) dropped.push(t);
+  }
+  if (dropped.length === 0) return undefined;
+  return Object.freeze(dropped.sort()) as SensitivityTags;
 }
 
 // ---------------------------------------------------------------------------

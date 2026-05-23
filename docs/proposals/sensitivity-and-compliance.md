@@ -1,13 +1,22 @@
 # Sensitivity tagging — `sensitive` as a type-system property
 
-> Status: proposal. Phase 1 (type-system foundation) is the first
-> chunk being implemented in `ddd.langium` and the IR. Phases 2–4
-> (`authorized` declassification, sink call kinds, backend generators)
-> remain proposals. Touches the authorization model at the seams —
-> see [`policies-supplementary-note.md`](./policies-supplementary-note.md).
+> Status: phases 1 and 2-lite are implemented in `ddd.langium`, the
+> IR, and the validator. Phase 2 (`authorized` declassification),
+> phase 3 (backend masking + DTO emitters + `mask:` strategies), and
+> phase 4 (sink call kinds) remain proposals. Touches the
+> authorization model at the seams — see
+> [`policies-supplementary-note.md`](./policies-supplementary-note.md).
 >
 > Supersedes an earlier metadata-only draft; the strengthened design
 > lives below.
+>
+> **2-lite decision.** Rather than ship `authorized(...)` immediately,
+> the first enforcement step is *visibility-only*: implicit conversion
+> across a sensitivity boundary is permitted at the type level so
+> existing code keeps working, and the validator emits a warning at
+> each narrowing site. When `authorized(...)` lands, the same warning
+> sites can graduate to errors with `authorized(...)` as the escape
+> hatch — no source rewrite required.
 
 ## Problem
 
@@ -192,12 +201,13 @@ sensitivity tags.
 
 ## Phasing (what's actually being built)
 
-| Phase | Adds |
-|---|---|
-| **1** (this round) | `sensitive(<tag>)` grammar slot on `Property`; sensitivity component on `DddType` and `TypeIR`; propagation in `typeOf`; `isAssignable` narrowing rule; `FieldIR` carries declared tags. No backend changes. |
-| **2** | `authorized(<tag>, …)` modifier on `operation` / `find` / `view` / `api`. Declassification in type checker. Validator rules: sensitive value in sink position, sensitive field in URL/path/query parameter. |
-| **3** | `mask: <strategy>` field modifier. DTO emitters (TS/Hono, .NET) emit two forms; React walker emits `<Masked>`; Phoenix maps to Ash `sensitive? true`. Wire-spec carries the sensitivity bit through to `.loom/wire-spec.json`. |
-| **4** | Sink call-kind classification (`log` / `error` / `trace` / `metric`) in lowering and `render-expr.ts`. Audit-on-declassification event emission via the existing `audited` infrastructure. |
+| Phase | Adds | Status |
+|---|---|---|
+| **1** | `sensitive(<tag>)` grammar slot on `Property`; sensitivity component on `DddType` and `TypeIR`; propagation in `typeOf` (concat / ternary / member access); `FieldIR` carries declared tags. No backend changes. | ✅ implemented |
+| **2-lite** | `isAssignable` stays tag-agnostic (implicit conversion permitted). `sensitivityNarrows(value, target)` predicate detects dropped tags. Validator emits warnings at five flow boundaries: assignment statements (`:=`, `+=`, `-=`), derived properties, function returns, and emit field values. | ✅ implemented |
+| **2** | `authorized(<tag>, …)` modifier on `operation` / `find` / `view` / `api`. Declassification in type checker. Warnings at the same sites graduate to errors. Sensitive field in URL/path/query parameter blocked. | proposed |
+| **3** | `mask: <strategy>` field modifier. DTO emitters (TS/Hono, .NET) emit two forms; React walker emits `<Masked>`; Phoenix maps to Ash `sensitive? true`. Wire-spec carries the sensitivity bit through to `.loom/wire-spec.json`. | proposed |
+| **4** | Sink call-kind classification (`log` / `error` / `trace` / `metric`) in lowering and `render-expr.ts`. Audit-on-declassification event emission via the existing `audited` infrastructure. | proposed |
 
 ## Open questions
 

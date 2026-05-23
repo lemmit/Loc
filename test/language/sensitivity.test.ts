@@ -12,6 +12,7 @@ import {
   isAssignable,
   mergeTags,
   propertySensitivity,
+  sensitivityNarrows,
   T,
   tagsSubset,
   typeOf,
@@ -160,35 +161,65 @@ describe("sensitivity — type-system propagation", () => {
   });
 });
 
-describe("sensitivity — isAssignable narrowing rule", () => {
-  it("clean → sensitive: allowed (broadening)", () => {
-    const value = T.prim("string");
-    const target = withTags(T.prim("string"), ["pii"]);
-    expect(isAssignable(value, target)).toBe(true);
+describe("sensitivity — isAssignable is tag-agnostic", () => {
+  // Implicit conversion is permitted at the type level so existing
+  // code keeps working; narrowing is surfaced by the validator as a
+  // warning, not by `isAssignable` as an error.
+  it("clean → sensitive: allowed", () => {
+    expect(isAssignable(T.prim("string"), withTags(T.prim("string"), ["pii"]))).toBe(true);
   });
 
-  it("sensitive → clean: rejected (narrowing — the log-safety rule)", () => {
-    const value = withTags(T.prim("string"), ["pii"]);
-    const target = T.prim("string");
-    expect(isAssignable(value, target)).toBe(false);
+  it("sensitive → clean: allowed (warning lives in the validator)", () => {
+    expect(isAssignable(withTags(T.prim("string"), ["pii"]), T.prim("string"))).toBe(true);
   });
 
-  it("sensitive → same tags: allowed", () => {
-    const value = withTags(T.prim("string"), ["pii"]);
-    const target = withTags(T.prim("string"), ["pii"]);
-    expect(isAssignable(value, target)).toBe(true);
+  it("disjoint tag sets: allowed structurally", () => {
+    expect(
+      isAssignable(withTags(T.prim("string"), ["phi"]), withTags(T.prim("string"), ["pii"])),
+    ).toBe(true);
   });
 
-  it("sensitive (subset) → wider sensitive: allowed", () => {
-    const value = withTags(T.prim("string"), ["pii"]);
-    const target = withTags(T.prim("string"), ["pii", "phi"]);
-    expect(isAssignable(value, target)).toBe(true);
+  it("structural mismatch still rejected (tags don't paper over kind)", () => {
+    expect(isAssignable(T.prim("string"), T.prim("int"))).toBe(false);
+  });
+});
+
+describe("sensitivity — sensitivityNarrows detects dropped tags", () => {
+  it("no tags at all → undefined", () => {
+    expect(sensitivityNarrows(T.prim("string"), T.prim("string"))).toBeUndefined();
   });
 
-  it("disjoint tag sets: rejected", () => {
-    const value = withTags(T.prim("string"), ["phi"]);
-    const target = withTags(T.prim("string"), ["pii"]);
-    expect(isAssignable(value, target)).toBe(false);
+  it("clean → sensitive: undefined (broadening, not narrowing)", () => {
+    expect(
+      sensitivityNarrows(T.prim("string"), withTags(T.prim("string"), ["pii"])),
+    ).toBeUndefined();
+  });
+
+  it("sensitive → clean: returns the dropped tags", () => {
+    expect(sensitivityNarrows(withTags(T.prim("string"), ["pii"]), T.prim("string"))).toEqual([
+      "pii",
+    ]);
+  });
+
+  it("multi-tag → partial coverage: returns only the dropped subset", () => {
+    expect(
+      sensitivityNarrows(
+        withTags(T.prim("string"), ["pii", "phi"]),
+        withTags(T.prim("string"), ["pii"]),
+      ),
+    ).toEqual(["phi"]);
+  });
+
+  it("equal tag sets: undefined", () => {
+    expect(
+      sensitivityNarrows(withTags(T.prim("string"), ["pii"]), withTags(T.prim("string"), ["pii"])),
+    ).toBeUndefined();
+  });
+
+  it("disjoint tag sets: returns the value-side tags as dropped", () => {
+    expect(
+      sensitivityNarrows(withTags(T.prim("string"), ["phi"]), withTags(T.prim("string"), ["pii"])),
+    ).toEqual(["phi"]);
   });
 });
 
