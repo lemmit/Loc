@@ -11,6 +11,15 @@ import { resolveBare, type FileSource } from "../node-resolve.js";
 import type { TsconfigAliasEntry } from "../../bundle/plugin.js";
 import { aliasCandidates } from "../../bundle/plugin.js";
 
+// Conditions threaded through node-resolve.  `browser` is prepended so
+// `exports` maps that distinguish `browser` vs `node` (pino, ws,
+// node-fetch, …) pick the browser entry — pino's browser.js bypasses
+// sonic-boom entirely (no `util.inherits`, no fs writes), so the
+// playground bundle doesn't try to load a Node-only transport.
+// Without this, pino lands on `pino.js` and crashes at module init in
+// the worker.  `default` always closes the list per Node's resolver.
+const PLAYGROUND_CONDITIONS = ["browser", "import", "module", "default"] as const;
+
 const NS = "vfs";
 const EMPTY = "vfs-empty";
 const EMPTY_CSS = "vfs-empty-css";
@@ -150,7 +159,7 @@ export function makeVfsNpmPlugin(
             if (hit) return { path: hit, namespace: NS };
           }
         }
-        const r = resolveBare(spec, src, nmRoot);
+        const r = resolveBare(spec, src, nmRoot, PLAYGROUND_CONDITIONS);
         if (r) return { path: r, namespace: NS };
         // Vendor-externalise: a bare specifier with no app-side
         // resolution is vendor — externalise it (JS) or stub it
@@ -184,6 +193,73 @@ export function makeVfsNpmPlugin(
               "const getRandomValues = (a) => c.getRandomValues(a);",
               "const randomBytes = (n) => c.getRandomValues(new Uint8Array(n));",
               "module.exports = { randomUUID, getRandomValues, randomBytes, webcrypto: c, default: c };",
+            ].join("\n"),
+            loader: "js",
+          };
+        }
+        // async_hooks — generated obs/als.ts constructs
+        // `new AsyncLocalStorage()`.  The empty stub makes the
+        // constructor undefined → crash at module init.  Synchronous
+        // polyfill: keeps the same surface (run/getStore/enterWith)
+        // working in a single async context — sufficient for the
+        // playground worker where request flow is one chain.
+        if (name === "async_hooks") {
+          return {
+            contents: [
+              "class AsyncLocalStorage {",
+              "  constructor() { this._store = undefined; }",
+              "  run(store, fn, ...a) {",
+              "    const prev = this._store;",
+              "    this._store = store;",
+              "    try { return fn(...a); } finally { this._store = prev; }",
+              "  }",
+              "  getStore() { return this._store; }",
+              "  enterWith(store) { this._store = store; }",
+              "  exit(fn) { return fn(); }",
+              "  disable() {}",
+              "}",
+              "class AsyncResource { constructor() {} runInAsyncScope(fn, that, ...a) { return fn.apply(that, a); } emitDestroy() {} bind(fn) { return fn; } }",
+              "module.exports = { AsyncLocalStorage, AsyncResource, default: { AsyncLocalStorage, AsyncResource } };",
+            ].join("\n"),
+            loader: "js",
+          };
+        }
+        // util — pino/sonic-boom depend on `util.inherits` (and
+        // `util.format`).  The empty stub returns undefined for both,
+        // which makes the generated backend crash at boot in the
+        // playground with `inherits is not a function`.  Polyfill just
+        // enough so common older Node patterns work; everything else
+        // stays undefined-but-safe.
+        if (name === "util") {
+          return {
+            contents: [
+              "function inherits(ctor, sup) {",
+              "  if (sup) {",
+              "    ctor.super_ = sup;",
+              "    Object.setPrototypeOf(ctor.prototype, sup.prototype);",
+              "  }",
+              "}",
+              // Best-effort format: `%s`/`%d`/`%j` placeholders.  Falls
+              // back to space-joined String() for unsupported tokens —
+              // pino/sonic-boom only use it for very simple messages
+              // along the error path, so a coarse impl is fine.
+              "function format(f) {",
+              "  if (typeof f !== 'string') return Array.from(arguments).map(String).join(' ');",
+              "  const args = Array.prototype.slice.call(arguments, 1);",
+              "  let i = 0;",
+              "  return f.replace(/%[sdj%]/g, (m) => {",
+              "    if (m === '%%') return '%';",
+              "    if (i >= args.length) return m;",
+              "    const a = args[i++];",
+              "    if (m === '%s') return String(a);",
+              "    if (m === '%d') return Number(a).toString();",
+              "    try { return JSON.stringify(a); } catch { return String(a); }",
+              "  });",
+              "}",
+              "function promisify(fn) { return (...a) => new Promise((res, rej) => fn(...a, (e, v) => e ? rej(e) : res(v))); }",
+              "function inspect(v) { try { return JSON.stringify(v); } catch { return String(v); } }",
+              "const types = { isPromise: (v) => v && typeof v.then === 'function' };",
+              "module.exports = { inherits, format, promisify, inspect, types, default: { inherits, format, promisify, inspect, types } };",
             ].join("\n"),
             loader: "js",
           };
