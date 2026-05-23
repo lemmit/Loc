@@ -42,6 +42,11 @@ export interface LoomDiagnostic {
 
 export function validateLoomModel(loom: LoomModel): LoomDiagnostic[] {
   const diags: LoomDiagnostic[] = [];
+  // Workspace-scope uniqueness checks — only meaningful once a
+  // project may span multiple `.ddd` files (Stage A multi-file).
+  // Harmless for single-file projects: every collection is small
+  // and the checks short-circuit when there are no duplicates.
+  validateWorkspaceUniqueness(loom, diags);
   for (const sys of loom.systems) {
     validateSystem(sys, diags);
     validateReactIdReferences(sys, diags);
@@ -72,6 +77,106 @@ export function validateLoomModel(loom: LoomModel): LoomDiagnostic[] {
     validatePermissionRefs(c, diags);
   }
   return diags;
+}
+
+// ---------------------------------------------------------------------------
+// Workspace uniqueness — multi-file (Stage A) makes it easy to declare
+// two `valueobject Money` in different files, two `context Sales`, or
+// shadow a context-local VO with a root-level one of the same name.
+// Each of those would silently merge / collide in IR; surface them as
+// errors here so the user sees a clear message instead of a confused
+// downstream failure (duplicate import in the emitted TS, duplicate
+// class in .NET, etc.).
+// ---------------------------------------------------------------------------
+
+function validateWorkspaceUniqueness(loom: LoomModel, diags: LoomDiagnostic[]): void {
+  // Duplicate root-level value object names.
+  const rootVoSeen = new Set<string>();
+  for (const vo of loom.rootValueObjects) {
+    if (rootVoSeen.has(vo.name)) {
+      diags.push({
+        severity: "error",
+        source: `valueobject ${vo.name}`,
+        message: `duplicate root-level value object '${vo.name}' — declare it once in the workspace.`,
+      });
+    } else {
+      rootVoSeen.add(vo.name);
+    }
+  }
+  // Duplicate root-level enum names.
+  const rootEnumSeen = new Set<string>();
+  for (const e of loom.rootEnums) {
+    if (rootEnumSeen.has(e.name)) {
+      diags.push({
+        severity: "error",
+        source: `enum ${e.name}`,
+        message: `duplicate root-level enum '${e.name}' — declare it once in the workspace.`,
+      });
+    } else {
+      rootEnumSeen.add(e.name);
+    }
+  }
+  // Duplicate system names.
+  const sysSeen = new Set<string>();
+  for (const s of loom.systems) {
+    if (sysSeen.has(s.name)) {
+      diags.push({
+        severity: "error",
+        source: `system ${s.name}`,
+        message: `duplicate system '${s.name}' — declare each system once across the workspace.`,
+      });
+    } else {
+      sysSeen.add(s.name);
+    }
+  }
+  // Duplicate context names across the workspace (any combination
+  // of loose contexts + module-nested ones).  A context name is the
+  // unit of governance and emission; duplicates would silently merge
+  // in the file map.
+  const ctxSeen = new Set<string>();
+  for (const c of allContexts(loom)) {
+    if (ctxSeen.has(c.name)) {
+      diags.push({
+        severity: "error",
+        source: `context ${c.name}`,
+        message: `duplicate context '${c.name}' — context names must be unique across the workspace.`,
+      });
+    } else {
+      ctxSeen.add(c.name);
+    }
+  }
+  // Root-level VO / enum names that collide with a context-local
+  // declaration of the same name.  The enrichment pass keeps the
+  // context-local version (the root one is dropped for that context)
+  // — surface this as an error so the user can rename instead of
+  // silently shadowing.
+  for (const c of allContexts(loom)) {
+    for (const vo of c.valueObjects) {
+      if (rootVoSeen.has(vo.name)) {
+        // `c.valueObjects` already includes injected root VOs after
+        // enrichment; skip the injected copy (same instance as in
+        // `loom.rootValueObjects`).
+        const injected = loom.rootValueObjects.find((r) => r.name === vo.name);
+        if (injected && injected === vo) continue;
+        diags.push({
+          severity: "error",
+          source: `${c.name}.${vo.name}`,
+          message: `context '${c.name}' declares value object '${vo.name}' that shadows the root-level declaration; rename one of them.`,
+        });
+      }
+    }
+    for (const e of c.enums) {
+      if (rootEnumSeen.has(e.name)) {
+        const injected = loom.rootEnums.find((r) => r.name === e.name);
+        if (injected && injected === e) continue;
+        diags.push({
+          severity: "error",
+          source: `${c.name}.${e.name}`,
+          message: `context '${c.name}' declares enum '${e.name}' that shadows the root-level declaration; rename one of them.`,
+        });
+      }
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

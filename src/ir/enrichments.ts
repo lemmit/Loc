@@ -6,6 +6,7 @@ import type {
   CodeRefKind,
   DeployableIR,
   EntityPartIR,
+  EnumIR,
   FindIR,
   LoomModel,
   RepositoryIR,
@@ -39,9 +40,21 @@ import type {
 // ---------------------------------------------------------------------------
 
 export function enrichLoomModel(loom: LoomModel): LoomModel {
+  // Root-level VOs / enums are visible from every context as an
+  // implicit shared kernel (see docs/multi-file-source.md).  We fold
+  // them into each context's effective VO / enum list so every
+  // downstream consumer (backends, wire-spec, validators) sees them
+  // uniformly through the existing per-context surface.  Output
+  // duplicates root types across contexts inside a single deployable
+  // — acceptable for Stage A; a future stage may centralise emission
+  // into a shared module per deployable.
+  const enrichedRootVOs = loom.rootValueObjects.map(enrichValueObject);
+  const rootEnums = loom.rootEnums;
   return {
-    systems: loom.systems.map(enrichSystem),
-    contexts: loom.contexts.map(enrichContext),
+    systems: loom.systems.map((s) => enrichSystem(s, enrichedRootVOs, rootEnums)),
+    contexts: loom.contexts.map((c) => enrichContext(c, enrichedRootVOs, rootEnums)),
+    rootValueObjects: enrichedRootVOs,
+    rootEnums,
     requirements: loom.requirements,
     solutions: loom.solutions,
     testCases: loom.testCases,
@@ -70,11 +83,15 @@ export function wireShapeFor(entity: AggregateIR | EntityPartIR | ValueObjectIR)
   return entity.wireShape;
 }
 
-function enrichSystem(sys: SystemIR): SystemIR {
+function enrichSystem(
+  sys: SystemIR,
+  rootValueObjects: ValueObjectIR[],
+  rootEnums: EnumIR[],
+): SystemIR {
   // First enrich each module's contexts (auto-findAll, wire-shape).
   const modules = sys.modules.map((m) => ({
     ...m,
-    contexts: m.contexts.map(enrichContext),
+    contexts: m.contexts.map((c) => enrichContext(c, rootValueObjects, rootEnums)),
   }));
   // Then propagate react deployables' module sets from their targets.
   // Done after module enrichment so frontends see the same enriched
@@ -93,11 +110,26 @@ function enrichSystem(sys: SystemIR): SystemIR {
   return { ...sys, modules, deployables };
 }
 
-function enrichContext(ctx: BoundedContextIR): BoundedContextIR {
-  const valueObjects = ctx.valueObjects.map(enrichValueObject);
+function enrichContext(
+  ctx: BoundedContextIR,
+  rootValueObjects: ValueObjectIR[],
+  rootEnums: EnumIR[],
+): BoundedContextIR {
+  // Fold the ambient root-level VOs / enums into the context's
+  // effective set so every per-context emitter sees them as if they
+  // were declared locally.  A root-level VO / enum with the same
+  // name as a context-local one would shadow; the validator should
+  // reject collisions before we get here (Stage A check).
+  const ownVoNames = new Set(ctx.valueObjects.map((v) => v.name));
+  const ownEnumNames = new Set(ctx.enums.map((e) => e.name));
+  const valueObjects = [
+    ...ctx.valueObjects.map(enrichValueObject),
+    ...rootValueObjects.filter((v) => !ownVoNames.has(v.name)),
+  ];
+  const enums = [...ctx.enums, ...rootEnums.filter((e) => !ownEnumNames.has(e.name))];
   const aggregates = ctx.aggregates.map(enrichAggregate);
   const repositories = ensureFindAll(aggregates, ctx.repositories);
-  return { ...ctx, valueObjects, aggregates, repositories };
+  return { ...ctx, valueObjects, enums, aggregates, repositories };
 }
 
 function enrichAggregate(agg: AggregateIR): AggregateIR {
