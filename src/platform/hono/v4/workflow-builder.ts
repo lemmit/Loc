@@ -299,10 +299,10 @@ function renderStmt(
         return [
           `${indent}${st.target}.${checkName}(${args});`,
           `${indent}{`,
-          `${indent}  const __handler = ${externAlias}.${handlerKey};`,
-          `${indent}  if (!__handler) throw new Error("Missing extern handler for ${handlerKey}.  Register one before app.listen().");`,
+          `${indent}  const handler = ${externAlias}.${handlerKey};`,
+          `${indent}  if (!handler) throw new Error("Missing extern handler for ${handlerKey}.  Register one before app.listen().");`,
           `${indent}  try {`,
-          `${indent}    await __handler(${st.target}, ${reqLiteral});`,
+          `${indent}    await handler(${st.target}, ${reqLiteral});`,
           `${indent}  } catch (err) {`,
           `${indent}    if (err instanceof DomainError) throw err;`,
           `${indent}    if (err instanceof ForbiddenError) throw err;`,

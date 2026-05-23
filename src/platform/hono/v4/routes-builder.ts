@@ -251,11 +251,11 @@ export function buildRoutesFile(
     // wire_out — outbound payload shape (keys only).  Bound to a const
     // so `c.json` doesn't re-evaluate the payload expression alongside
     // Object.keys.  See docs/proposals/observability.md.
-    lines.push(`      const __out = { id: created.id as string };`);
+    lines.push(`      const out = { id: created.id as string };`);
     lines.push(
-      `      ${renderHonoLogCall("wireOut", "keys: Object.keys(__out as Record<string, unknown>)")}`,
+      `      ${renderHonoLogCall("wireOut", "keys: Object.keys(out as Record<string, unknown>)")}`,
     );
-    lines.push(`      return c.json(__out, 201);`);
+    lines.push(`      return c.json(out, 201);`);
   } else {
     lines.push(`      return c.json({ id: created.id as string }, 201);`);
   }
@@ -287,11 +287,11 @@ export function buildRoutesFile(
   if (emitTrace) {
     // toWire isn't trivial — bind once so it's not run twice between
     // Object.keys and c.json.
-    lines.push(`      const __out = repo.toWire(found);`);
+    lines.push(`      const out = repo.toWire(found);`);
     lines.push(
-      `      ${renderHonoLogCall("wireOut", "keys: Object.keys(__out as Record<string, unknown>)")}`,
+      `      ${renderHonoLogCall("wireOut", "keys: Object.keys(out as Record<string, unknown>)")}`,
     );
-    lines.push(`      return c.json(__out as z.infer<typeof ${agg.name}Response>, 200);`);
+    lines.push(`      return c.json(out as z.infer<typeof ${agg.name}Response>, 200);`);
   } else {
     lines.push(
       `      return c.json(repo.toWire(found) as z.infer<typeof ${agg.name}Response>, 200);`,
@@ -482,25 +482,25 @@ function emitOperationRoute(
       const actorExpr = usesUser
         ? "currentUser"
         : `(c as unknown as { get(k: "currentUser"): unknown }).get("currentUser") ?? null`;
-      out.push(`    const __actor = ${actorExpr};`);
+      out.push(`    const actor = ${actorExpr};`);
     }
     out.push(`    await db.transaction(async (tx) => {`);
     out.push(`      const repoTx = new ${agg.name}Repository(tx, events);`);
     out.push(`      const aggregate = await repoTx.getById(Ids.${agg.name}Id(id));`);
-    if (audit) out.push(`      const __before = repoTx.toWire(aggregate);`);
+    if (audit) out.push(`      const before = repoTx.toWire(aggregate);`);
     out.push(...mutation("      "));
     out.push(`      await repoTx.save(aggregate);`);
     if (audit) {
-      out.push(`      const __after = repoTx.toWire(aggregate);`);
+      out.push(`      const after = repoTx.toWire(aggregate);`);
       out.push(`      await tx.insert(schema.auditRecords).values({`);
       out.push(`        auditId: randomUUID(),`);
       out.push(`        operationId: "${lowerFirst(op.name)}${agg.name}",`);
       out.push(`        action: "${op.name}",`);
       out.push(`        targetType: "${agg.name}",`);
       out.push(`        targetId: id,`);
-      out.push(`        actor: __actor,`);
-      out.push(`        before: __before,`);
-      out.push(`        after: __after,`);
+      out.push(`        actor,`);
+      out.push(`        before,`);
+      out.push(`        after,`);
       out.push(`        at: new Date(),`);
       out.push(`        status: "ok",`);
       out.push(`      });`);
@@ -508,14 +508,14 @@ function emitOperationRoute(
     if (prov) {
       // One history row per provenanced write captured during the mutation;
       // traceId + at are stamped here so the domain layer stays pure.
-      out.push(`      for (const __t of aggregate.__drainProv()) {`);
+      out.push(`      for (const t of aggregate.drainProv()) {`);
       out.push(`        await tx.insert(schema.provenanceRecords).values({`);
       out.push(`          traceId: randomUUID(),`);
-      out.push(`          snapshotId: __t.snapshotId,`);
-      out.push(`          targetType: __t.target.type,`);
-      out.push(`          field: __t.target.field,`);
-      out.push(`          inputs: __t.inputs,`);
-      out.push(`          computedValue: __t.computedValue,`);
+      out.push(`          snapshotId: t.snapshotId,`);
+      out.push(`          targetType: t.target.type,`);
+      out.push(`          field: t.target.field,`);
+      out.push(`          inputs: t.inputs,`);
+      out.push(`          computedValue: t.computedValue,`);
       out.push(`          at: new Date(),`);
       out.push(`        });`);
       out.push(`      }`);
@@ -585,11 +585,11 @@ function emitFindRoute(
   } else if (find.returnType.kind === "optional") {
     out.push(`    if (result == null) return c.json({ error: "not_found" }, 404);`);
     if (emitTrace) {
-      out.push(`    const __out = repo.toWire(result);`);
+      out.push(`    const wire = repo.toWire(result);`);
       out.push(
-        `    ${renderHonoLogCall("wireOut", "keys: Object.keys(__out as Record<string, unknown>)")}`,
+        `    ${renderHonoLogCall("wireOut", "keys: Object.keys(wire as Record<string, unknown>)")}`,
       );
-      out.push(`    return c.json(__out as z.infer<typeof ${agg.name}Response>, 200);`);
+      out.push(`    return c.json(wire as z.infer<typeof ${agg.name}Response>, 200);`);
     } else {
       out.push(
         `    return c.json(repo.toWire(result) as z.infer<typeof ${agg.name}Response>, 200);`,
@@ -597,11 +597,11 @@ function emitFindRoute(
     }
   } else {
     if (emitTrace) {
-      out.push(`    const __out = repo.toWire(result);`);
+      out.push(`    const wire = repo.toWire(result);`);
       out.push(
-        `    ${renderHonoLogCall("wireOut", "keys: Object.keys(__out as Record<string, unknown>)")}`,
+        `    ${renderHonoLogCall("wireOut", "keys: Object.keys(wire as Record<string, unknown>)")}`,
       );
-      out.push(`    return c.json(__out as z.infer<typeof ${agg.name}Response>, 200);`);
+      out.push(`    return c.json(wire as z.infer<typeof ${agg.name}Response>, 200);`);
     } else {
       out.push(
         `    return c.json(repo.toWire(result) as z.infer<typeof ${agg.name}Response>, 200);`,
@@ -866,7 +866,7 @@ export function wireToDomainExpr(expr: string, t: TypeIR, ctx?: BoundedContextIR
     case "entity":
       return expr;
     case "array":
-      return `${expr}.map((__e) => ${wireToDomainExpr("__e", t.element, ctx)})`;
+      return `${expr}.map((e) => ${wireToDomainExpr("e", t.element, ctx)})`;
     case "optional":
       return `(${expr} == null ? null : ${wireToDomainExpr(expr, t.inner, ctx)})`;
   }

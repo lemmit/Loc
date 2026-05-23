@@ -175,7 +175,7 @@ function emitViewRoute(
       out.push(`    const ${repoVar} = new ${aux.aggName}Repository(db, events);`);
       const idsSource = idsSourceForAux(aux, pathToMap);
       out.push(
-        `    const ${mapVar} = new Map((await ${repoVar}.findManyByIds(${idsSource})).map((__a) => [__a.id as string, __a]));`,
+        `    const ${mapVar} = new Map((await ${repoVar}.findManyByIds(${idsSource})).map((a) => [a.id as string, a]));`,
       );
       pathToMap.set(aux.path.join("."), { mapVar, aggName: aux.aggName });
     }
@@ -211,7 +211,7 @@ function idsSourceForAux(
   const prev = pathToMap.get(prevPath);
   if (!prev) return `[]`;
   const finalField = aux.path[aux.path.length - 1]!;
-  return `[...${prev.mapVar}.values()].map((__a) => __a.${finalField})`;
+  return `[...${prev.mapVar}.values()].map((a) => a.${finalField})`;
 }
 
 /** Render a view bind expression with chained `X id` follow

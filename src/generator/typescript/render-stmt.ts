@@ -19,7 +19,7 @@ const NO_TRACE: TraceCtx = { emitTrace: false, aggregate: "", op: "" };
 
 /** When `emitProvenance` is true, instrumented write-sites (statements
  *  carrying a `prov` snapshot) build a `ProvLineage` and route it to the
- *  co-located backing field + the `__provTraces` history buffer.  When
+ *  co-located backing field + the `_provTraces` history buffer.  When
  *  `traceCtx.emitTrace` is true (`--trace` switch), additionally inject
  *  `value_computed` after every scalar assign and `precondition_evaluated`
  *  before every precondition's throw. */
@@ -58,7 +58,7 @@ function renderTsStatement(
     case "remove": {
       const path = renderPath(s.target);
       const value = renderTsExpr(s.value);
-      const base = `${INDENT}{ const __idx = ${path}.findIndex((__e) => __e === (${value})); if (__idx >= 0) ${path}.splice(__idx, 1); }`;
+      const base = `${INDENT}{ const idx = ${path}.findIndex((e) => e === (${value})); if (idx >= 0) ${path}.splice(idx, 1); }`;
       return withTrace(base, s.prov, s.target, s.value, emitProvenance, index);
     }
     case "emit": {
@@ -110,7 +110,7 @@ function withValueComputed(base: string, target: PathIR, traceCtx: TraceCtx): st
  *  (rule snapshot + leaf inputs + post-write computed value) and route it
  *  to both sinks — the co-located `_<field>_provenance` backing field
  *  (current lineage, persisted on the row) and the per-instance
- *  `__provTraces` buffer (drained into the history table by the route
+ *  `_provTraces` buffer (drained into the history table by the route
  *  handler inside the save transaction). */
 function withTrace(
   base: string,
@@ -134,7 +134,7 @@ function withTrace(
     base,
     `${INDENT}const ${lin}: ProvLineage = { snapshotId: ${JSON.stringify(prov.snapshotId)}, target: ${targetLit}, inputs: ${tmp}, computedValue: ${computed} };`,
     `${INDENT}this._${field}_provenance = ${lin};`,
-    `${INDENT}this.__provTraces.push(${lin});`,
+    `${INDENT}this._provTraces.push(${lin});`,
   ].join("\n");
 }
 

@@ -26,9 +26,9 @@ export class ProductRepository {
         return null;
       }
       const root = rootRows[0]!;
-      const __loaded = Product._create({ id: Ids.ProductId(root.id), sku: root.sku, price: new Money(Number(root.price_amount), root.price_currency) });
+      const loaded = Product._create({ id: Ids.ProductId(root.id), sku: root.sku, price: new Money(Number(root.price_amount), root.price_currency) });
       requestLog().debug({ event: "aggregate_loaded", aggregate: "Product", id: id as string, found: true });
-      return __loaded;
+      return loaded;
     });
   }
 
@@ -64,9 +64,9 @@ export class ProductRepository {
       requestLog().debug({ event: "find_executed", aggregate: "Product", find: "all", rows: 0 });
       return [];
     }
-    const __result = rootRows.map((root) => Product._create({ id: Ids.ProductId(root.id), sku: root.sku, price: new Money(Number(root.price_amount), root.price_currency) }));
-    requestLog().debug({ event: "find_executed", aggregate: "Product", find: "all", rows: __result.length });
-    return __result;
+    const result = rootRows.map((root) => Product._create({ id: Ids.ProductId(root.id), sku: root.sku, price: new Money(Number(root.price_amount), root.price_currency) }));
+    requestLog().debug({ event: "find_executed", aggregate: "Product", find: "all", rows: result.length });
+    return result;
   }
 
   async bySku(sku: string): Promise<Product | null> {
@@ -75,9 +75,9 @@ export class ProductRepository {
       requestLog().debug({ event: "find_executed", aggregate: "Product", find: "bySku", rows: 0 });
       return null;
     }
-    const __result = await this.findById(rootRows[0]!.id as Ids.ProductId) as Product | null;
-    requestLog().debug({ event: "find_executed", aggregate: "Product", find: "bySku", rows: __result == null ? 0 : 1 });
-    return __result;
+    const result = await this.findById(rootRows[0]!.id as Ids.ProductId) as Product | null;
+    requestLog().debug({ event: "find_executed", aggregate: "Product", find: "bySku", rows: result == null ? 0 : 1 });
+    return result;
   }
 
   toWire(root: Product): unknown {

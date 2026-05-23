@@ -28,7 +28,7 @@ function isRefCollection(t: TypeIR): boolean {
 }
 
 /** Bulk-load lines for every association into `<field>ByOwner`
- * maps keyed by the owner id.  Assumes a `__ids: string[]` of owner
+ * maps keyed by the owner id.  Assumes a `rootIds: string[]` of owner
  * ids is in scope.  Used by the array-returning load paths
  * (`findManyByIds`, array `find`s); `findById` loads singular lists
  * inline instead. */
@@ -40,7 +40,7 @@ function associationMapLines(agg: AggregateIR, dbExpr: string, indent: string): 
     const rows = `${assoc.fieldName}JoinRows`;
     const map = `${assoc.fieldName}ByOwner`;
     return [
-      `${indent}const ${rows} = await ${dbExpr}.select({ o: schema.${joinConst}.${ownerCol}, t: schema.${joinConst}.${targetCol} }).from(schema.${joinConst}).where(inArray(schema.${joinConst}.${ownerCol}, __ids)).orderBy(schema.${joinConst}.${ownerCol}, schema.${joinConst}.ordinal);`,
+      `${indent}const ${rows} = await ${dbExpr}.select({ o: schema.${joinConst}.${ownerCol}, t: schema.${joinConst}.${targetCol} }).from(schema.${joinConst}).where(inArray(schema.${joinConst}.${ownerCol}, rootIds)).orderBy(schema.${joinConst}.${ownerCol}, schema.${joinConst}.ordinal);`,
       `${indent}const ${map} = new Map<string, Ids.${assoc.targetAgg}Id[]>();`,
       `${indent}for (const r of ${rows}) {`,
       `${indent}  const list = ${map}.get(r.o) ?? [];`,
@@ -213,7 +213,7 @@ function wireProjectionEntity(
       if (!partIR) continue;
       if (wf.type.kind === "array") {
         parts.push(
-          `${wf.name}: ${varExpr}.${wf.name}.map((__e: ${partIR.name}) => (${wireProjectionEntity(partIR, "__e", ctx)}))`,
+          `${wf.name}: ${varExpr}.${wf.name}.map((e: ${partIR.name}) => (${wireProjectionEntity(partIR, "e", ctx)}))`,
         );
       } else {
         parts.push(`${wf.name}: ${wireProjectionEntity(partIR, `${varExpr}.${wf.name}`, ctx)}`);
@@ -266,10 +266,10 @@ function wireProjectionValue(
     return `{ ${fields} }`;
   }
   if (t.kind === "array") {
-    // `__a` is contextually typed by `.map` over the element type;
-    // an explicit annotation would fight strict-mode inference for
-    // branded `T id` element arrays.
-    return `${expr}.map((__a) => (${wireProjectionValue("__a", t.element, ctx, false)}))`;
+    // Lambda param is contextually typed by `.map` over the element
+    // type; an explicit annotation would fight strict-mode inference
+    // for branded `T id` element arrays.
+    return `${expr}.map((a) => (${wireProjectionValue("a", t.element, ctx, false)}))`;
   }
   if (t.kind === "entity") return expr;
   return expr;
@@ -292,10 +292,10 @@ function findManyByIdsMethod(agg: AggregateIR, ctx: BoundedContextIR): string {
     `    if (ids.length === 0) return [];`,
     `    const rootRows = await this.db.select().from(schema.${tableName}).where(inArray(schema.${tableName}.id, ids));`,
     `    if (rootRows.length === 0) return [];`,
-    needsIdsLocal && `    const __ids = rootRows.map((r) => r.id);`,
+    needsIdsLocal && `    const rootIds = rootRows.map((r) => r.id);`,
     ...eagerContains.flatMap(({ c, part }) => {
       const childTable = lowerFirst(plural(part.name));
-      const head = `    const ${c.name}Rows = await this.db.select().from(schema.${childTable}).where(inArray(schema.${childTable}.parentId, __ids));`;
+      const head = `    const ${c.name}Rows = await this.db.select().from(schema.${childTable}).where(inArray(schema.${childTable}.parentId, rootIds));`;
       if (c.collection) {
         return [
           head,
@@ -337,14 +337,14 @@ function findByIdMethod(agg: AggregateIR, ctx: BoundedContextIR, emitTrace = fal
           // wrapper.
           `    ${renderHonoStoreLogCall("txBegin", `aggregate: "${agg.name}", id: id as string`)}`,
           `    try {`,
-          `      const __result = await this.db.transaction(async (tx) => {`,
+          `      const result = await this.db.transaction(async (tx) => {`,
           ...body.map((l) => `  ${l}`),
           `      });`,
           `      ${renderHonoStoreLogCall("txCommit", `aggregate: "${agg.name}", id: id as string`)}`,
-          `      return __result;`,
-          `    } catch (__txErr) {`,
-          `      ${renderHonoStoreLogCall("txRollback", `aggregate: "${agg.name}", id: id as string, error: __txErr instanceof Error ? __txErr.message : String(__txErr)`)}`,
-          `      throw __txErr;`,
+          `      return result;`,
+          `    } catch (txErr) {`,
+          `      ${renderHonoStoreLogCall("txRollback", `aggregate: "${agg.name}", id: id as string, error: txErr instanceof Error ? txErr.message : String(txErr)`)}`,
+          `      throw txErr;`,
           `    }`,
         ]
       : [`    return await this.db.transaction(async (tx) => {`, ...body, `    });`],
@@ -366,12 +366,12 @@ function saveTxBody(agg: AggregateIR, ctx: BoundedContextIR, emitTrace: boolean)
     const cap = upperFirst(c.name);
     return [
       "",
-      `      const __existing${cap} = await tx.select({ id: schema.${childTable}.id }).from(schema.${childTable}).where(eq(schema.${childTable}.parentId, aggregate.id));`,
-      `      const __existingIds${cap} = new Set(__existing${cap}.map((r) => r.id));`,
-      `      const __currentIds${cap} = new Set(aggregate.${c.name}.map((e) => e.id as string));`,
-      `      const __toDelete${cap} = [...__existingIds${cap}].filter((id) => !__currentIds${cap}.has(id));`,
-      `      if (__toDelete${cap}.length > 0) {`,
-      `        await tx.delete(schema.${childTable}).where(and(eq(schema.${childTable}.parentId, aggregate.id), inArray(schema.${childTable}.id, __toDelete${cap})));`,
+      `      const existing${cap} = await tx.select({ id: schema.${childTable}.id }).from(schema.${childTable}).where(eq(schema.${childTable}.parentId, aggregate.id));`,
+      `      const existingIds${cap} = new Set(existing${cap}.map((r) => r.id));`,
+      `      const currentIds${cap} = new Set(aggregate.${c.name}.map((e) => e.id as string));`,
+      `      const toDelete${cap} = [...existingIds${cap}].filter((id) => !currentIds${cap}.has(id));`,
+      `      if (toDelete${cap}.length > 0) {`,
+      `        await tx.delete(schema.${childTable}).where(and(eq(schema.${childTable}.parentId, aggregate.id), inArray(schema.${childTable}.id, toDelete${cap})));`,
       `      }`,
       `      for (const child of aggregate.${c.name}) {`,
       `        const childRow = ${entityProjection(part, "child", ctx)};`,
@@ -382,8 +382,8 @@ function saveTxBody(agg: AggregateIR, ctx: BoundedContextIR, emitTrace: boolean)
       // upsert is happening now).
       ...(emitTrace
         ? [
-            `        const __childAction = __existingIds${cap}.has(child.id as string) ? "update" : "insert";`,
-            `        ${renderHonoStoreLogCall("childSynced", `parent: "${agg.name}", part: "${part.name}", id: child.id as string, action: __childAction`)}`,
+            `        const childAction = existingIds${cap}.has(child.id as string) ? "update" : "insert";`,
+            `        ${renderHonoStoreLogCall("childSynced", `parent: "${agg.name}", part: "${part.name}", id: child.id as string, action: childAction`)}`,
           ]
         : []),
       `      }`,
@@ -401,17 +401,17 @@ function saveTxBody(agg: AggregateIR, ctx: BoundedContextIR, emitTrace: boolean)
     const cap = upperFirst(assoc.fieldName);
     return [
       "",
-      `      const __existing${cap} = await tx.select({ t: schema.${joinConst}.${targetCol} }).from(schema.${joinConst}).where(eq(schema.${joinConst}.${ownerCol}, aggregate.id));`,
-      `      const __existingIds${cap} = new Set(__existing${cap}.map((r) => r.t));`,
-      `      const __current${cap} = aggregate.${assoc.fieldName}.map((x) => x as string);`,
-      `      const __currentIds${cap} = new Set(__current${cap});`,
-      `      const __toDelete${cap} = [...__existingIds${cap}].filter((t) => !__currentIds${cap}.has(t));`,
-      `      if (__toDelete${cap}.length > 0) {`,
-      `        await tx.delete(schema.${joinConst}).where(and(eq(schema.${joinConst}.${ownerCol}, aggregate.id), inArray(schema.${joinConst}.${targetCol}, __toDelete${cap})));`,
+      `      const existing${cap} = await tx.select({ t: schema.${joinConst}.${targetCol} }).from(schema.${joinConst}).where(eq(schema.${joinConst}.${ownerCol}, aggregate.id));`,
+      `      const existingIds${cap} = new Set(existing${cap}.map((r) => r.t));`,
+      `      const current${cap} = aggregate.${assoc.fieldName}.map((x) => x as string);`,
+      `      const currentIds${cap} = new Set(current${cap});`,
+      `      const toDelete${cap} = [...existingIds${cap}].filter((t) => !currentIds${cap}.has(t));`,
+      `      if (toDelete${cap}.length > 0) {`,
+      `        await tx.delete(schema.${joinConst}).where(and(eq(schema.${joinConst}.${ownerCol}, aggregate.id), inArray(schema.${joinConst}.${targetCol}, toDelete${cap})));`,
       `      }`,
-      `      for (let __i = 0; __i < __current${cap}.length; __i++) {`,
-      `        const __row = { ${ownerCol}: aggregate.id as string, ${targetCol}: __current${cap}[__i]!, ordinal: __i };`,
-      `        await tx.insert(schema.${joinConst}).values(__row).onConflictDoUpdate({ target: [schema.${joinConst}.${ownerCol}, schema.${joinConst}.${targetCol}], set: { ordinal: __i } });`,
+      `      for (let i = 0; i < current${cap}.length; i++) {`,
+      `        const row = { ${ownerCol}: aggregate.id as string, ${targetCol}: current${cap}[i]!, ordinal: i };`,
+      `        await tx.insert(schema.${joinConst}).values(row).onConflictDoUpdate({ target: [schema.${joinConst}.${ownerCol}, schema.${joinConst}.${targetCol}], set: { ordinal: i } });`,
       `      }`,
     ];
   });
@@ -466,9 +466,9 @@ function txCallbackBody(agg: AggregateIR, ctx: BoundedContextIR): string[] {
     // Hydrate root.  Bind to a local so the load-success log line can
     // fire BEFORE returning — keeping the debug record adjacent to the
     // row read.
-    `      const __loaded = ${hydrateRootExpr(agg, "root", ctx)};`,
+    `      const loaded = ${hydrateRootExpr(agg, "root", ctx)};`,
     `      ${renderHonoStoreLogCall("aggregateLoaded", `aggregate: "${agg.name}", id: id as string, found: true`)}`,
-    `      return __loaded;`,
+    `      return loaded;`,
   ];
 }
 
@@ -577,9 +577,9 @@ function saveMethod(agg: AggregateIR, ctx: BoundedContextIR, emitTrace = false):
           ...body.map((l) => `  ${l}`),
           `      });`,
           `      ${renderHonoStoreLogCall("txCommit", `aggregate: "${agg.name}", id: aggregate.id as string`)}`,
-          `    } catch (__txErr) {`,
-          `      ${renderHonoStoreLogCall("txRollback", `aggregate: "${agg.name}", id: aggregate.id as string, error: __txErr instanceof Error ? __txErr.message : String(__txErr)`)}`,
-          `      throw __txErr;`,
+          `    } catch (txErr) {`,
+          `      ${renderHonoStoreLogCall("txRollback", `aggregate: "${agg.name}", id: aggregate.id as string, error: txErr instanceof Error ? txErr.message : String(txErr)`)}`,
+          `      throw txErr;`,
           `    }`,
         ]
       : [`    await this.db.transaction(async (tx) => {`, ...body, `    });`],
@@ -715,10 +715,10 @@ function findQueryMethod(agg: AggregateIR, find: FindIR, ctx: BoundedContextIR):
       `      ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${find.name}", rows: 0`)}`,
       `      return [];`,
       `    }`,
-      needsIdsLocal && `    const __ids = rootRows.map((r) => r.id);`,
+      needsIdsLocal && `    const rootIds = rootRows.map((r) => r.id);`,
       ...eagerContains.flatMap(({ c, part }) => {
         const childTable = lowerFirst(plural(part.name));
-        const head = `    const ${c.name}Rows = await this.db.select().from(schema.${childTable}).where(inArray(schema.${childTable}.parentId, __ids));`;
+        const head = `    const ${c.name}Rows = await this.db.select().from(schema.${childTable}).where(inArray(schema.${childTable}.parentId, rootIds));`;
         if (c.collection) {
           return [
             head,
@@ -743,9 +743,9 @@ function findQueryMethod(agg: AggregateIR, find: FindIR, ctx: BoundedContextIR):
         ];
       }),
       associationMapLines(agg, "this.db", "    "),
-      `    const __result = rootRows.map((root) => ${hydrateRootForFindAllExpr(agg, "root", ctx)});`,
-      `    ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${find.name}", rows: __result.length`)}`,
-      `    return __result;`,
+      `    const result = rootRows.map((root) => ${hydrateRootForFindAllExpr(agg, "root", ctx)});`,
+      `    ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${find.name}", rows: result.length`)}`,
+      `    return result;`,
       `  }`,
     );
   }
@@ -768,9 +768,9 @@ function findQueryMethod(agg: AggregateIR, find: FindIR, ctx: BoundedContextIR):
         // AggregateNotFoundError is logged at the route's onError seam
         // (`not_found` warn) so we don't double-log the same fact.
         `    if (rootRows.length === 0) throw new AggregateNotFoundError("not found");`,
-    `    const __result = await this.findById(rootRows[0]!.id as Ids.${agg.name}Id) as ${agg.name}${optional ? " | null" : ""};`,
-    `    ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${find.name}", rows: __result == null ? 0 : 1`)}`,
-    `    return __result;`,
+    `    const result = await this.findById(rootRows[0]!.id as Ids.${agg.name}Id) as ${agg.name}${optional ? " | null" : ""};`,
+    `    ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${find.name}", rows: result == null ? 0 : 1`)}`,
+    `    return result;`,
     `  }`,
   );
 }

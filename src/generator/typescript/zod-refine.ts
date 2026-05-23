@@ -199,8 +199,8 @@ function renderCollectionOp(recv: string, name: string, args: string[]): string 
       return `${recv}.length`;
     case "sum":
       return args.length === 1
-        ? `${recv}.reduce((__a, __x) => __a + (${args[0]})(__x), 0)`
-        : `${recv}.reduce((__a, __x) => __a + __x, 0)`;
+        ? `${recv}.reduce((acc, x) => acc + (${args[0]})(x), 0)`
+        : `${recv}.reduce((acc, x) => acc + x, 0)`;
     case "all":
       return `${recv}.every(${args[0] ?? "() => true"})`;
     case "any":
