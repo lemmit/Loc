@@ -144,6 +144,160 @@ describe("MemoryVfs: snapshot", () => {
     vfs.write("/x", "1");
     const snap = vfs.snapshot();
     vfs.write("/x", "2");
-    expect(snap.get("/x")).toBe("1");
+    // Snapshot values are tagged `VfsEntry`s now (commit 1 of the
+    // first-class-directories refactor) — reach into `.content`
+    // for a file entry.
+    const e = snap.get("/x");
+    expect(e?.kind).toBe("file");
+    if (e?.kind === "file") expect(e.content).toBe("1");
+  });
+
+  it("preserves both file and directory entries", () => {
+    const vfs = new MemoryVfs();
+    vfs.write("/a/b.ddd", "body");
+    vfs.mkdir("/audit");
+    const snap = vfs.snapshot();
+    expect(snap.get("/audit")?.kind).toBe("dir");
+    expect(snap.get("/a/b.ddd")?.kind).toBe("file");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// First-class directories — `mkdir` / `rmdir` / `isDirectory` /
+// `kindOf` / `listDirs` / `listFiles` / `listAll`.  Replaces the
+// `.gitkeep` sentinel workaround that previously simulated empty
+// folders.  Files-only `list()` stays as-is for back-compat with
+// every existing `for (const p of list(prefix)) { content = read(p) … }`
+// loop.
+// ---------------------------------------------------------------------------
+describe("MemoryVfs: first-class directories", () => {
+  it("mkdir creates a dir entry surfaced by isDirectory + kindOf", () => {
+    const vfs = new MemoryVfs();
+    vfs.mkdir("/shared");
+    expect(vfs.isDirectory("/shared")).toBe(true);
+    expect(vfs.isFile("/shared")).toBe(false);
+    expect(vfs.exists("/shared")).toBe(true);
+    expect(vfs.kindOf("/shared")).toBe("dir");
+  });
+
+  it("mkdir is idempotent on an existing directory", () => {
+    const vfs = new MemoryVfs();
+    vfs.mkdir("/shared");
+    expect(() => vfs.mkdir("/shared")).not.toThrow();
+    expect(vfs.kindOf("/shared")).toBe("dir");
+  });
+
+  it("mkdir throws when the path is already a file", () => {
+    const vfs = new MemoryVfs();
+    vfs.write("/shared", "i am a file");
+    expect(() => vfs.mkdir("/shared")).toThrow(/is a file/);
+  });
+
+  it("mkdir auto-creates missing ancestor directories (mkdirp)", () => {
+    const vfs = new MemoryVfs();
+    vfs.mkdir("/a/b/c");
+    expect(vfs.isDirectory("/a")).toBe(true);
+    expect(vfs.isDirectory("/a/b")).toBe(true);
+    expect(vfs.isDirectory("/a/b/c")).toBe(true);
+  });
+
+  it("mkdir refuses when an ancestor is a file", () => {
+    const vfs = new MemoryVfs();
+    vfs.write("/a", "file");
+    expect(() => vfs.mkdir("/a/b")).toThrow(/ancestor/);
+  });
+
+  it("write throws when the path is already a directory", () => {
+    const vfs = new MemoryVfs();
+    vfs.mkdir("/shared");
+    expect(() => vfs.write("/shared", "x")).toThrow(/directory/);
+  });
+
+  it("delete on a directory is a no-op (use rmdir instead)", () => {
+    const vfs = new MemoryVfs();
+    vfs.mkdir("/shared");
+    vfs.delete("/shared");
+    expect(vfs.isDirectory("/shared")).toBe(true);
+  });
+
+  it("rmdir removes an empty directory", () => {
+    const vfs = new MemoryVfs();
+    vfs.mkdir("/shared");
+    vfs.rmdir("/shared");
+    expect(vfs.exists("/shared")).toBe(false);
+  });
+
+  it("rmdir throws on a non-empty directory", () => {
+    const vfs = new MemoryVfs();
+    vfs.mkdir("/shared");
+    vfs.write("/shared/money.ddd", "vo");
+    expect(() => vfs.rmdir("/shared")).toThrow(/not empty/);
+  });
+
+  it("rmdir is a no-op on a missing path or on a file path", () => {
+    const vfs = new MemoryVfs();
+    vfs.write("/file", "x");
+    expect(() => vfs.rmdir("/file")).not.toThrow();
+    expect(() => vfs.rmdir("/missing")).not.toThrow();
+    expect(vfs.isFile("/file")).toBe(true);
+  });
+
+  it("list is files-only (back-compat for every legacy consumer)", () => {
+    const vfs = new MemoryVfs();
+    vfs.write("/main.ddd", "m");
+    vfs.mkdir("/shared");
+    vfs.write("/shared/money.ddd", "vo");
+    expect(vfs.list("/")).toEqual(["/main.ddd", "/shared/money.ddd"]);
+  });
+
+  it("listDirs returns directory paths only", () => {
+    const vfs = new MemoryVfs();
+    vfs.write("/main.ddd", "m");
+    vfs.mkdir("/shared");
+    vfs.mkdir("/audit/log");
+    expect(vfs.listDirs("/")).toEqual(["/audit", "/audit/log", "/shared"]);
+  });
+
+  it("listAll returns both kinds", () => {
+    const vfs = new MemoryVfs();
+    vfs.write("/main.ddd", "m");
+    vfs.mkdir("/shared");
+    expect(vfs.listAll("/")).toEqual(["/main.ddd", "/shared"]);
+  });
+
+  it("subscribers see dir-creation + dir-removal events", () => {
+    const vfs = new MemoryVfs();
+    const fn = vi.fn();
+    vfs.subscribe("/", fn);
+    vfs.mkdir("/shared");
+    expect(fn).toHaveBeenLastCalledWith(["/shared"]);
+    vfs.rmdir("/shared");
+    expect(fn).toHaveBeenLastCalledWith(["/shared"]);
+  });
+
+  it("hydrate accepts mixed file and directory entries", () => {
+    const vfs = new MemoryVfs();
+    vfs.hydrate([
+      { kind: "file", path: "/main.ddd", content: "m" },
+      { kind: "dir", path: "/shared" },
+      ["/legacy.ddd", "compat"], // tuple form still works
+    ]);
+    expect(vfs.isFile("/main.ddd")).toBe(true);
+    expect(vfs.isDirectory("/shared")).toBe(true);
+    expect(vfs.read("/legacy.ddd")).toBe("compat");
+  });
+
+  it("restore replaces every entry — dirs included", () => {
+    const vfs = new MemoryVfs();
+    vfs.write("/old.ddd", "x");
+    vfs.mkdir("/old-dir");
+    vfs.restore([
+      { kind: "file", path: "/new.ddd", content: "y" },
+      { kind: "dir", path: "/new-dir" },
+    ]);
+    expect(vfs.exists("/old.ddd")).toBe(false);
+    expect(vfs.exists("/old-dir")).toBe(false);
+    expect(vfs.isFile("/new.ddd")).toBe(true);
+    expect(vfs.isDirectory("/new-dir")).toBe(true);
   });
 });

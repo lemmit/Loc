@@ -19,10 +19,25 @@
 // in-memory only and logs a one-shot warning.  Reads/writes still
 // work; persistence just doesn't happen.  Callers that need to
 // distinguish persistent vs ephemeral check `vfs.persistent`.
+//
+// Schema note: the store carries `{kind, content?}` objects per
+// path now (directories are first-class).  Pre-this-PR builds wrote
+// bare strings.  On `open()` we defensive-read both shapes — v1
+// strings become `{kind:"file", content}` in memory; subsequent
+// writes flush in the new shape, so the DB drifts to v2 organically.
+// We deliberately do NOT bump `DB_VERSION` — a rollback to an
+// older build must still be able to open the DB (a bump would
+// raise `VersionError`).
 // ---------------------------------------------------------------------------
 
 import { MemoryVfs } from "./memory-vfs.js";
-import type { RestorableVfs, VfsListener, VfsPath } from "./types.js";
+import type {
+  RestorableVfs,
+  VfsEntry,
+  VfsEntryKind,
+  VfsListener,
+  VfsPath,
+} from "./types.js";
 
 /** Default DB name — namespaced under `loom-` so multiple Loom
  *  apps on the same origin don't collide.  Test code passes a
@@ -36,6 +51,14 @@ const DB_VERSION = 1;
  *  into one IDB write per natural pause. */
 const FLUSH_DEBOUNCE_MS = 250;
 
+/** Stored shape in the IDB object store going forward — a tagged
+ *  union mirroring `VfsEntry` minus the `path` field (the IDB key
+ *  carries it).  The dir variant has no content. */
+type IdbValue =
+  | { kind: "file"; content: string }
+  | { kind: "dir" }
+  | string; // legacy v1 — bare-string content, implies file
+
 export class IdbVfs implements RestorableVfs {
   /** True iff the underlying IDB connection succeeded.  When false,
    *  the VFS still works but writes don't survive reload. */
@@ -43,7 +66,13 @@ export class IdbVfs implements RestorableVfs {
 
   private readonly mem: MemoryVfs;
   private readonly db: IDBDatabase | null;
-  private writeQueue = new Map<VfsPath, string | null>();
+  /** Per-path queued write.  Value semantics:
+   *    - `IdbValue` (file or dir):  upsert
+   *    - `null`:                    delete
+   *  Reset on each flush; merging multiple mutations on the same
+   *  path before flush collapses to the last write (correct for
+   *  IDB, which is last-writer-wins anyway). */
+  private writeQueue = new Map<VfsPath, IdbValue | null>();
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private inflightFlush: Promise<void> | null = null;
 
@@ -56,7 +85,10 @@ export class IdbVfs implements RestorableVfs {
   /** Open (or create) the IDB-backed VFS, hydrating the in-memory
    *  cache from any persisted entries.  Returns an instance that
    *  works identically to `MemoryVfs` from the caller's POV — the
-   *  IDB persistence is invisible at the read/write API. */
+   *  IDB persistence is invisible at the read/write API.  Defensive
+   *  read tolerates both v1 (bare string) and v2 (`{kind, ...}`)
+   *  stored values so a rollback-then-reopen sequence keeps
+   *  working. */
   static async open(dbName: string = DEFAULT_DB_NAME): Promise<IdbVfs> {
     const mem = new MemoryVfs();
     let db: IDBDatabase | null = null;
@@ -91,15 +123,35 @@ export class IdbVfs implements RestorableVfs {
     return this.mem.exists(path);
   }
 
+  isFile(path: VfsPath): boolean {
+    return this.mem.isFile(path);
+  }
+
+  isDirectory(path: VfsPath): boolean {
+    return this.mem.isDirectory(path);
+  }
+
+  kindOf(path: VfsPath): VfsEntryKind | undefined {
+    return this.mem.kindOf(path);
+  }
+
   list(prefix: VfsPath): ReadonlyArray<VfsPath> {
     return this.mem.list(prefix);
+  }
+
+  listDirs(prefix: VfsPath): ReadonlyArray<VfsPath> {
+    return this.mem.listDirs(prefix);
+  }
+
+  listAll(prefix: VfsPath): ReadonlyArray<VfsPath> {
+    return this.mem.listAll(prefix);
   }
 
   subscribe(prefix: VfsPath, listener: VfsListener): () => void {
     return this.mem.subscribe(prefix, listener);
   }
 
-  snapshot(): ReadonlyMap<VfsPath, string> {
+  snapshot(): ReadonlyMap<VfsPath, VfsEntry> {
     return this.mem.snapshot();
   }
 
@@ -107,30 +159,77 @@ export class IdbVfs implements RestorableVfs {
 
   write(path: VfsPath, content: string): void {
     this.mem.write(path, content);
-    this.queueFlush(path, content);
+    this.queueFlush(path, { kind: "file", content });
   }
 
   delete(path: VfsPath): void {
+    // Memory layer enforces file-only delete (no-op on dirs).  Only
+    // queue an IDB delete when the mem layer actually removed
+    // something — otherwise we'd flush a stray delete for a path
+    // the user never touched.
+    const before = this.mem.exists(path);
+    if (!before) return;
     this.mem.delete(path);
-    this.queueFlush(path, null);
+    if (!this.mem.exists(path)) this.queueFlush(path, null);
   }
 
-  hydrate(entries: Iterable<readonly [VfsPath, string]>): void {
-    const list = [...entries];
-    this.mem.hydrate(list);
-    for (const [path, content] of list) {
-      this.queueFlush(path, content);
+  mkdir(path: VfsPath): void {
+    this.mem.mkdir(path);
+    // mkdir is mkdirp: queue a flush for every dir along the path
+    // that the mem layer just created.  Simplest correct approach
+    // is to walk the path, query mem for kind=="dir", and queue
+    // each — duplicates collapse in the writeQueue map.
+    const segments = normalisePathLike(path).split("/").filter((s) => s.length > 0);
+    let cur = "";
+    for (const seg of segments) {
+      cur = `${cur}/${seg}`;
+      if (this.mem.isDirectory(cur)) {
+        this.queueFlush(cur, { kind: "dir" });
+      }
     }
   }
 
-  restore(entries: Iterable<readonly [VfsPath, string]>): void {
+  rmdir(path: VfsPath): void {
+    const before = this.mem.isDirectory(path);
+    if (!before) return;
+    this.mem.rmdir(path); // throws if non-empty — propagate
+    this.queueFlush(path, null);
+  }
+
+  hydrate(entries: Iterable<VfsEntry | readonly [VfsPath, string]>): void {
+    const list = [...entries];
+    this.mem.hydrate(list);
+    for (const item of list) {
+      if (Array.isArray(item)) {
+        this.queueFlush(item[0] as VfsPath, {
+          kind: "file",
+          content: item[1] as string,
+        });
+      } else {
+        const entry = item as VfsEntry;
+        const val: IdbValue =
+          entry.kind === "file"
+            ? { kind: "file", content: entry.content }
+            : { kind: "dir" };
+        this.queueFlush(entry.path, val);
+      }
+    }
+  }
+
+  restore(entries: Iterable<VfsEntry | readonly [VfsPath, string]>): void {
     const before = new Set(this.mem.snapshot().keys());
     this.mem.restore(entries);
     // Work off the post-restore snapshot so paths are normalised
     // consistently with `before`: write everything kept, delete
     // whatever the snapshot dropped.
     const after = this.mem.snapshot();
-    for (const [path, content] of after) this.queueFlush(path, content);
+    for (const [path, entry] of after) {
+      const val: IdbValue =
+        entry.kind === "file"
+          ? { kind: "file", content: entry.content }
+          : { kind: "dir" };
+      this.queueFlush(path, val);
+    }
     for (const path of before) {
       if (!after.has(path)) this.queueFlush(path, null);
     }
@@ -148,8 +247,8 @@ export class IdbVfs implements RestorableVfs {
     return this.doFlush();
   }
 
-  private queueFlush(path: VfsPath, contentOrNull: string | null): void {
-    this.writeQueue.set(path, contentOrNull);
+  private queueFlush(path: VfsPath, value: IdbValue | null): void {
+    this.writeQueue.set(path, value);
     if (this.flushTimer || !this.db) return;
     this.flushTimer = setTimeout(() => {
       this.flushTimer = null;
@@ -178,6 +277,16 @@ export class IdbVfs implements RestorableVfs {
   }
 }
 
+/** Quick normalisation for `mkdir`'s path-walk loop without
+ *  importing the private `normalize` from memory-vfs.  Matches
+ *  MemoryVfs.normalize for the leading-slash + collapse case;
+ *  doesn't need the full root-escape protection because the path
+ *  has already been validated by `mem.mkdir` above. */
+function normalisePathLike(path: VfsPath): VfsPath {
+  if (path.startsWith("/")) return path;
+  return "/" + path.replace(/^\/+/, "");
+}
+
 // -- Raw IDB helpers (kept private, no `idb` package dependency). --
 
 function openDb(name: string): Promise<IDBDatabase> {
@@ -198,16 +307,23 @@ function openDb(name: string): Promise<IDBDatabase> {
   });
 }
 
-function readAllEntries(db: IDBDatabase): Promise<Array<[VfsPath, string]>> {
+/** Read every entry out of the store, coercing v1 bare strings to
+ *  `{kind:"file", content}` so the in-memory layer always sees the
+ *  tagged shape.  Returns the entries in the shape `MemoryVfs.hydrate`
+ *  accepts (mixed). */
+function readAllEntries(db: IDBDatabase): Promise<Array<VfsEntry>> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, "readonly");
     const store = tx.objectStore(STORE);
     const cursorReq = store.openCursor();
-    const out: Array<[VfsPath, string]> = [];
+    const out: Array<VfsEntry> = [];
     cursorReq.onsuccess = () => {
       const cursor = cursorReq.result;
       if (cursor) {
-        out.push([cursor.key as VfsPath, cursor.value as string]);
+        const path = cursor.key as VfsPath;
+        const value = cursor.value as IdbValue;
+        const entry = coerceStoredValue(path, value);
+        if (entry) out.push(entry);
         cursor.continue();
       } else {
         resolve(out);
@@ -217,16 +333,33 @@ function readAllEntries(db: IDBDatabase): Promise<Array<[VfsPath, string]>> {
   });
 }
 
+function coerceStoredValue(path: VfsPath, value: IdbValue): VfsEntry | null {
+  // v1: bare string content.  Wrap to a file entry.
+  if (typeof value === "string") {
+    return { kind: "file", path, content: value };
+  }
+  if (value && typeof value === "object") {
+    if (value.kind === "file") {
+      return { kind: "file", path, content: value.content };
+    }
+    if (value.kind === "dir") {
+      return { kind: "dir", path };
+    }
+  }
+  // Unrecognised — skip rather than crashing the whole hydrate.
+  return null;
+}
+
 function writeQueueToDb(
   db: IDBDatabase,
-  queue: Map<VfsPath, string | null>,
+  queue: Map<VfsPath, IdbValue | null>,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, "readwrite");
     const store = tx.objectStore(STORE);
-    for (const [path, content] of queue) {
-      if (content === null) store.delete(path);
-      else store.put(content, path);
+    for (const [path, value] of queue) {
+      if (value === null) store.delete(path);
+      else store.put(value, path);
     }
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error ?? new Error("idb tx failed"));

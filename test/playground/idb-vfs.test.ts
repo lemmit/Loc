@@ -97,6 +97,106 @@ describe("IdbVfs: persistence round-trip", () => {
   });
 });
 
+describe("IdbVfs: directories survive persistence", () => {
+  it("mkdir + reopen round-trips the dir entry", async () => {
+    const name = uniqueDbName();
+    const a = await IdbVfs.open(name);
+    a.mkdir("/workspace/shared");
+    await a.flush();
+
+    const b = await IdbVfs.open(name);
+    expect(b.isDirectory("/workspace/shared")).toBe(true);
+    // mkdirp materialises both `/workspace` and `/workspace/shared`;
+    // both survive the reopen.
+    expect(b.listDirs("/workspace/")).toEqual(["/workspace", "/workspace/shared"]);
+  });
+
+  it("rmdir + reopen confirms the dir entry is gone", async () => {
+    const name = uniqueDbName();
+    const a = await IdbVfs.open(name);
+    a.mkdir("/workspace/temp");
+    await a.flush();
+    a.rmdir("/workspace/temp");
+    await a.flush();
+
+    const b = await IdbVfs.open(name);
+    expect(b.exists("/workspace/temp")).toBe(false);
+  });
+
+  it("mkdirp persists every created ancestor", async () => {
+    const name = uniqueDbName();
+    const a = await IdbVfs.open(name);
+    a.mkdir("/workspace/audit/log");
+    await a.flush();
+
+    const b = await IdbVfs.open(name);
+    expect(b.isDirectory("/workspace/audit")).toBe(true);
+    expect(b.isDirectory("/workspace/audit/log")).toBe(true);
+  });
+});
+
+describe("IdbVfs: legacy v1 → v2 migration", () => {
+  // Pre-this-PR IdbVfs wrote bare strings as the IDB value;
+  // this-PR writes `{kind, content?}` objects.  Defensive read on
+  // `open()` coerces v1 strings into file entries so a fresh build
+  // can open a DB seeded by an old build.  No `DB_VERSION` bump —
+  // a rollback to an older build must also be able to open the DB.
+  function seedRawV1Store(name: string, entries: Array<[string, string]>): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(name, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains("entries")) {
+          db.createObjectStore("entries");
+        }
+      };
+      req.onsuccess = () => {
+        const db = req.result;
+        const tx = db.transaction("entries", "readwrite");
+        const store = tx.objectStore("entries");
+        for (const [path, content] of entries) {
+          // Critical: bare string value, no `{kind, content}` wrapper.
+          store.put(content, path);
+        }
+        tx.oncomplete = () => {
+          db.close();
+          resolve();
+        };
+        tx.onerror = () => reject(tx.error);
+      };
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  it("opens a DB seeded with v1 (bare string) values and coerces them to file entries", async () => {
+    const name = uniqueDbName();
+    await seedRawV1Store(name, [
+      ["/workspace/main.ddd", "old content"],
+      ["/workspace/shared.ddd", "more old content"],
+    ]);
+
+    const vfs = await IdbVfs.open(name);
+    expect(vfs.read("/workspace/main.ddd")).toBe("old content");
+    expect(vfs.kindOf("/workspace/main.ddd")).toBe("file");
+    expect(vfs.isFile("/workspace/shared.ddd")).toBe(true);
+  });
+
+  it("v1 entries survive a subsequent write of an unrelated path", async () => {
+    const name = uniqueDbName();
+    await seedRawV1Store(name, [["/workspace/main.ddd", "old"]]);
+
+    const a = await IdbVfs.open(name);
+    a.write("/workspace/orders.ddd", "new");
+    await a.flush();
+
+    // Reopen — v1 entry untouched (still string in IDB), v2 entry
+    // is the new shape.  Both readable.
+    const b = await IdbVfs.open(name);
+    expect(b.read("/workspace/main.ddd")).toBe("old");
+    expect(b.read("/workspace/orders.ddd")).toBe("new");
+  });
+});
+
 describe("IdbVfs: flush behavior", () => {
   it("explicit flush drains the queue immediately", async () => {
     const name = uniqueDbName();

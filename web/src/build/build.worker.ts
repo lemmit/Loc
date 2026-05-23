@@ -376,10 +376,16 @@ self.onmessage = async (ev: MessageEvent<BuildRpcRequest>) => {
       }
       case "vfs.snapshot": {
         const snap = workerVfs.snapshot();
-        const entries = Array.from(snap.entries(), ([path, content]) => ({
-          path,
-          content,
-        }));
+        // Commit 1 keeps the wire shape files-only; directories in
+        // the VFS aren't exposed across the worker boundary yet
+        // (commit 2 reshapes the protocol).  File entries projected
+        // back to `{path, content}` for the existing protocol.
+        const entries: { path: string; content: string }[] = [];
+        for (const [path, entry] of snap) {
+          if (entry.kind === "file") {
+            entries.push({ path, content: entry.content });
+          }
+        }
         entries.sort((a, b) => a.path.localeCompare(b.path));
         response.result = { ok: true, entries };
         break;
