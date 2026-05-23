@@ -141,6 +141,10 @@ function typeToEctoColumn(t: TypeIR): ColType {
           return { colType: ":bigint", opts: "" };
         case "decimal":
           return { colType: ":decimal", opts: "" };
+        case "money":
+          throw new Error(
+            "Phoenix migrations-emit: 'money' primitive emission pending Phase 3 (:decimal column with precision/scale).",
+          );
         case "string":
           return { colType: ":text", opts: "" };
         case "bool":

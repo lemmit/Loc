@@ -349,6 +349,10 @@ function openApiType(t: TypeIR): string {
           return "%OpenApiSpex.Schema{type: :integer}";
         case "decimal":
           return "%OpenApiSpex.Schema{type: :number, format: :float}";
+        case "money":
+          throw new Error(
+            "Phoenix openapi-emit: 'money' primitive emission pending Phase 3 (%OpenApiSpex.Schema{type: :string, format: :decimal}).",
+          );
         case "string":
           return "%OpenApiSpex.Schema{type: :string}";
         case "guid":

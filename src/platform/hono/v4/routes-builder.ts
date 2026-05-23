@@ -660,6 +660,10 @@ export function zodFor(t: TypeIR): string {
           return "z.coerce.number().int()";
         case "decimal":
           return "z.coerce.number()";
+        case "money":
+          throw new Error(
+            "Hono zodFor: 'money' primitive emission pending Phase 1 (z.string().transform → Decimal).",
+          );
         case "string":
         case "guid":
           return "z.string()";
@@ -703,6 +707,10 @@ function zodForResponseInner(t: TypeIR): string {
           return "z.number().int()";
         case "decimal":
           return "z.number()";
+        case "money":
+          throw new Error(
+            "Hono zodForResponse: 'money' primitive emission pending Phase 1 (z.string() — Decimal serialises via .toString()).",
+          );
         case "string":
         case "guid":
           return "z.string()";

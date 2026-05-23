@@ -225,6 +225,10 @@ export function renderCsType(t: TypeIR): string {
           return "long";
         case "decimal":
           return "decimal";
+        case "money":
+          throw new Error(
+            ".NET renderCsType: 'money' primitive emission pending Phase 2 (decimal + per-property JsonNumberHandling).",
+          );
         case "string":
           return "string";
         case "bool":

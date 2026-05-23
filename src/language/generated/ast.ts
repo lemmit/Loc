@@ -117,6 +117,7 @@ export type DddKeywordNames =
     | "menu"
     | "module"
     | "modules"
+    | "money"
     | "mui"
     | "mysql"
     | "new"
@@ -1337,7 +1338,7 @@ export function isPreconditionStmt(item: unknown): item is PreconditionStmt {
 export interface PrimitiveType extends AstNode {
     readonly $container: TypeRef;
     readonly $type: 'PrimitiveType';
-    name: 'bool' | 'datetime' | 'decimal' | 'guid' | 'int' | 'long' | 'string';
+    name: 'bool' | 'datetime' | 'decimal' | 'guid' | 'int' | 'long' | 'money' | 'string';
 }
 
 export const PrimitiveType = 'PrimitiveType';

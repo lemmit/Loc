@@ -221,6 +221,10 @@ function zodForRequest(t: TypeIR): string {
           return "z.number().int()";
         case "decimal":
           return "z.number()";
+        case "money":
+          throw new Error(
+            "React workflow zodForRequest: 'money' primitive emission pending Phase 4 (z.string().transform → Decimal).",
+          );
         case "string":
         case "guid":
           return "z.string()";

@@ -299,6 +299,10 @@ export function renderAshType(t: TypeIR, contextModule: string): string {
           return ":integer";
         case "decimal":
           return ":decimal";
+        case "money":
+          throw new Error(
+            "Phoenix renderAshType: 'money' primitive emission pending Phase 3 (Ash :decimal + Decimal.add/2 arithmetic).",
+          );
         case "string":
           return ":string";
         case "bool":

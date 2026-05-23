@@ -26,7 +26,15 @@
 
 export type IdValueType = "guid" | "int" | "long" | "string";
 
-export type PrimitiveName = "int" | "long" | "decimal" | "string" | "bool" | "datetime" | "guid";
+export type PrimitiveName =
+  | "int"
+  | "long"
+  | "decimal"
+  | "money"
+  | "string"
+  | "bool"
+  | "datetime"
+  | "guid";
 
 /** Information-flow sensitivity tags carried by a value's type.  See
  * `docs/proposals/sensitivity-and-compliance.md`.  Mirror of

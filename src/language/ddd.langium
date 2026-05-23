@@ -771,7 +771,7 @@ BaseType:
     PrimitiveType | IdType | NamedType;
 
 PrimitiveType:
-    name=('int' | 'long' | 'decimal' | 'string' | 'bool' | 'datetime' | 'guid');
+    name=('int' | 'long' | 'decimal' | 'money' | 'string' | 'bool' | 'datetime' | 'guid');
 
 IdType:
     target=[NamedDecl:ID] 'id';

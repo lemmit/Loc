@@ -305,6 +305,10 @@ function drizzleColumnLinesForName(
           return [`${fieldName}: bigint("${colName}", { mode: "number" })${not},`];
         case "decimal":
           return [`${fieldName}: numeric("${colName}")${not},`];
+        case "money":
+          throw new Error(
+            "Drizzle schema emit: 'money' primitive emission pending Phase 1 (numeric(precision: 19, scale: 4)).",
+          );
         case "string":
           return [`${fieldName}: text("${colName}")${not},`];
         case "bool":

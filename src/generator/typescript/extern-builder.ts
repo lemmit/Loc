@@ -114,6 +114,10 @@ function wireTsType(t: TypeIR): string {
         case "long":
         case "decimal":
           return "number";
+        case "money":
+          throw new Error(
+            "TS extern wireTsType: 'money' primitive emission pending Phase 1 (decimal.js mapping).",
+          );
         case "string":
         case "guid":
           return "string";

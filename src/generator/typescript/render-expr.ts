@@ -222,6 +222,10 @@ export function renderTsType(t: TypeIR): string {
         case "long":
         case "decimal":
           return "number";
+        case "money":
+          throw new Error(
+            "TS renderTsType: 'money' primitive emission pending Phase 1 (decimal.js mapping).",
+          );
         case "string":
         case "guid":
           return "string";
