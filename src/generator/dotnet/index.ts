@@ -7,6 +7,7 @@ import { generateReactForContexts } from "../react/index.js";
 import { emitAuthFiles } from "./auth-emit.js";
 import { emitCqrs } from "./cqrs-emit.js";
 import { renderDomainLog, renderDomainLogBehavior } from "./emit/domain-log.js";
+import { renderRequestLoggingMiddleware } from "./emit/request-logging.js";
 import {
   renderAuditableInterceptor,
   renderCommon,
@@ -423,6 +424,9 @@ function emitProject(
   out.set("Dockerfile", renderDockerfile(ns, { hasEmbeddedSpa }));
   out.set(".dockerignore", renderDockerignore());
   out.set("certs/.gitkeep", "");
+  // Catalog-identity request log — always-on.  Cross-backend parity
+  // with Phoenix's <App>.Telemetry and Hono's pino access log.
+  out.set("Middleware/RequestLoggingMiddleware.cs", renderRequestLoggingMiddleware(ns));
   if (emitTrace) {
     // Domain-layer logger plumbing — emitted only on --trace so the
     // default artefact stays free of an AsyncLocal accessor + the

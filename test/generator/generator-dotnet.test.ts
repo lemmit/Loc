@@ -188,6 +188,48 @@ describe(".NET generator", () => {
       expect(program).toMatch(/Duration/);
     });
 
+    // Bite 4: catalog-identity request log via a custom middleware.
+    // Mirrors Phoenix's <App>.Telemetry and Hono's pino access log so the
+    // same `request_start` / `request_end` events surface on every
+    // backend.  Coexists with UseHttpLogging (the framework's stream is
+    // structurally different — both can run, the catalog stream is the
+    // one cross-backend tooling pivots on).
+    it("emits Middleware/RequestLoggingMiddleware.cs with catalog-identity start/end events", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      const mw = files.get("Middleware/RequestLoggingMiddleware.cs");
+      expect(mw, "RequestLoggingMiddleware.cs is emitted").toBeDefined();
+      // Namespaced under <ns>.Middleware (parallel to <ns>.Auth).
+      expect(mw!).toMatch(/namespace \w+\.Middleware;/);
+      expect(mw!).toMatch(/public sealed class RequestLoggingMiddleware/);
+      // Catalog identity preserved by renderDotnetLogCall — same shape
+      // every .NET backend emit site uses.
+      expect(mw!).toMatch(
+        /_log\.LogInformation\("\{Event\} method=\{Method\} path=\{Path\}", "request_start", ctx\.Request\.Method, ctx\.Request\.Path\.Value \?\? "\/"\);/,
+      );
+      expect(mw!).toMatch(
+        /_log\.LogInformation\("\{Event\} method=\{Method\} path=\{Path\} status=\{Status\} duration_ms=\{DurationMs\}", "request_end", ctx\.Request\.Method, ctx\.Request\.Path\.Value \?\? "\/", ctx\.Response\.StatusCode, sw\.ElapsedMilliseconds\);/,
+      );
+      // Stopwatch + try/finally so request_end fires even when a
+      // downstream middleware/controller throws.
+      expect(mw!).toMatch(/Stopwatch\.StartNew/);
+      expect(mw!).toMatch(/try[\s\S]*?await _next\(ctx\);[\s\S]*?finally/);
+    });
+
+    it("Program.cs registers RequestLoggingMiddleware before MapControllers + UseHttpLogging", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateDotnet(model);
+      const program = files.get("Program.cs")!;
+      // Stopwatch must cover the full pipeline — mount BEFORE routing.
+      expect(program).toMatch(/app\.UseMiddleware<\w+\.Middleware\.RequestLoggingMiddleware>\(\);/);
+      const ourPos = program.search(/UseMiddleware<\w+\.Middleware\.RequestLoggingMiddleware>/);
+      const httpPos = program.indexOf("app.UseHttpLogging()");
+      const mapPos = program.indexOf("app.MapControllers()");
+      expect(ourPos).toBeGreaterThan(0);
+      expect(httpPos).toBeGreaterThan(ourPos);
+      expect(mapPos).toBeGreaterThan(ourPos);
+    });
+
     it("DomainExceptionFilter threads Activity.TraceId into every error envelope", async () => {
       const model = await buildModel("examples/sales.ddd");
       const files = generateDotnet(model);
