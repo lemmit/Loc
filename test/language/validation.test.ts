@@ -1325,18 +1325,18 @@ describe("Loom IR validation (post-lowering)", async () => {
         aggregate Customer {
           name: string
           derived display: string = name
-          private operation secret() { }
+          private operation hush() { }
         }
         repository Customers for Customer { }
         workflow w(customerId: Customer id) {
           let c = Customers.getById(id)
-          c.secret()
+          c.hush()
         }
       }
     `);
     const diags = validateLoomModel(loom);
     expect(
-      diags.some((d) => d.severity === "error" && /'Customer\.secret' is private/.test(d.message)),
+      diags.some((d) => d.severity === "error" && /'Customer\.hush' is private/.test(d.message)),
       JSON.stringify(diags),
     ).toBe(true);
   });

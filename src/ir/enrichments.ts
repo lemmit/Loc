@@ -9,6 +9,7 @@ import type {
   EntityPartIR,
   EnumIR,
   ExprIR,
+  FieldIR,
   FindIR,
   LoomModel,
   ModuleIR,
@@ -177,6 +178,7 @@ function enrichContext(
 
 function enrichAggregate(agg: AggregateIR): AggregateIR {
   const parts = agg.parts.map(enrichPart);
+  const fields = agg.fields.map(resolveFieldAccess);
   // Synthesize a `derived inspect: string = <structural>` when the user
   // didn't declare one.  Always-present after enrichment so backends
   // can emit a `ToString()` / `Inspect` / `util.inspect.custom` hook
@@ -185,15 +187,16 @@ function enrichAggregate(agg: AggregateIR): AggregateIR {
   const userInspect = agg.derived.find((d) => d.name === "inspect");
   const inspectDerived = userInspect ?? synthesizeInspect(agg);
   const derived = userInspect ? agg.derived : [...agg.derived, inspectDerived];
-  // Compute wireShape on the post-synthesis agg so the wire spec is
-  // idempotent (second enrichment finds the synthesized inspect
-  // already in `derived` and doesn't double-add).
-  const aggWithDerived: AggregateIR = { ...agg, derived };
+  // Compute wireShape on the post-synthesis, post-access-resolution
+  // agg so the wire spec is idempotent (second enrichment finds the
+  // synthesized inspect already in `derived` and doesn't double-add,
+  // and `resolveFieldAccess` skips fields that already carry access).
+  const resolved: AggregateIR = { ...agg, derived, fields };
   return {
-    ...aggWithDerived,
+    ...resolved,
     parts,
-    wireShape: wireFieldsForAggregate(aggWithDerived),
-    associations: associationsForAggregate(aggWithDerived),
+    wireShape: wireFieldsForAggregate(resolved),
+    associations: associationsForAggregate(resolved),
     displayDerived: derived.find((d) => d.name === "display"),
     inspectDerived,
   };
@@ -375,11 +378,32 @@ function associationsForAggregate(agg: AggregateIR): AssociationIR[] {
 }
 
 function enrichPart(part: EntityPartIR): EntityPartIR {
-  return { ...part, wireShape: wireFieldsForPart(part) };
+  const fields = part.fields.map(resolveFieldAccess);
+  const resolved: EntityPartIR = { ...part, fields };
+  return { ...resolved, wireShape: wireFieldsForPart(resolved) };
 }
 
 function enrichValueObject(vo: ValueObjectIR): ValueObjectIR {
-  return { ...vo, wireShape: wireFieldsForValueObject(vo) };
+  const fields = vo.fields.map(resolveFieldAccess);
+  const resolved: ValueObjectIR = { ...vo, fields };
+  return { ...resolved, wireShape: wireFieldsForValueObject(resolved) };
+}
+
+/** Resolve a field's access role.  Precedence:
+ *   1. Declared modifier in the source (`lowerField` carried it through).
+ *   2. Type-driven inference — `Id<X>` is always a `token` because it
+ *      identifies an aggregate; clients echo it on update but never
+ *      assign it directly.
+ *   3. Default — `editable`.
+ *
+ * Idempotent: a field that already carries `access` (set on a previous
+ * enrichment pass or by a declared modifier) is returned unchanged. */
+function resolveFieldAccess(f: FieldIR): FieldIR {
+  if (f.access) return f;
+  if (f.type.kind === "id") {
+    return { ...f, access: "token", accessSource: "inferred-type" };
+  }
+  return { ...f, access: "editable", accessSource: "default" };
 }
 
 /** Every aggregate gets a repository with an implicit `find all():
@@ -442,10 +466,16 @@ function enrichDeployables(deployables: DeployableIR[]): DeployableIR[] {
 
 function wireFieldsForAggregate(agg: AggregateIR): WireField[] {
   const out: WireField[] = [
-    { name: "id", type: idTypeFor(agg.name), optional: false, source: "id" },
+    { name: "id", type: idTypeFor(agg.name), optional: false, source: "id", access: "token" },
   ];
   for (const f of agg.fields) {
-    out.push({ name: f.name, type: f.type, optional: f.optional, source: "property" });
+    out.push({
+      name: f.name,
+      type: f.type,
+      optional: f.optional,
+      source: "property",
+      access: f.access ?? "editable",
+    });
   }
   for (const c of agg.contains) {
     out.push({
@@ -453,6 +483,7 @@ function wireFieldsForAggregate(agg: AggregateIR): WireField[] {
       type: containmentTypeFor(c.partName, c.collection),
       optional: !!c.optional && !c.collection,
       source: "containment",
+      access: "editable",
     });
   }
   for (const d of agg.derived) {
@@ -462,17 +493,29 @@ function wireFieldsForAggregate(agg: AggregateIR): WireField[] {
     // structural form on the wire would leak internal field layout to
     // every API client.
     if (d.name === "inspect") continue;
-    out.push({ name: d.name, type: d.type, optional: false, source: "derived" });
+    out.push({
+      name: d.name,
+      type: d.type,
+      optional: false,
+      source: "derived",
+      access: "editable",
+    });
   }
   return out;
 }
 
 function wireFieldsForPart(part: EntityPartIR): WireField[] {
   const out: WireField[] = [
-    { name: "id", type: idTypeFor(part.name), optional: false, source: "id" },
+    { name: "id", type: idTypeFor(part.name), optional: false, source: "id", access: "token" },
   ];
   for (const f of part.fields) {
-    out.push({ name: f.name, type: f.type, optional: f.optional, source: "property" });
+    out.push({
+      name: f.name,
+      type: f.type,
+      optional: f.optional,
+      source: "property",
+      access: f.access ?? "editable",
+    });
   }
   for (const c of part.contains) {
     out.push({
@@ -480,10 +523,17 @@ function wireFieldsForPart(part: EntityPartIR): WireField[] {
       type: containmentTypeFor(c.partName, c.collection),
       optional: !!c.optional && !c.collection,
       source: "containment",
+      access: "editable",
     });
   }
   for (const d of part.derived) {
-    out.push({ name: d.name, type: d.type, optional: false, source: "derived" });
+    out.push({
+      name: d.name,
+      type: d.type,
+      optional: false,
+      source: "derived",
+      access: "editable",
+    });
   }
   return out;
 }
@@ -491,10 +541,22 @@ function wireFieldsForPart(part: EntityPartIR): WireField[] {
 function wireFieldsForValueObject(vo: ValueObjectIR): WireField[] {
   const out: WireField[] = [];
   for (const f of vo.fields) {
-    out.push({ name: f.name, type: f.type, optional: f.optional, source: "property" });
+    out.push({
+      name: f.name,
+      type: f.type,
+      optional: f.optional,
+      source: "property",
+      access: f.access ?? "editable",
+    });
   }
   for (const d of vo.derived) {
-    out.push({ name: d.name, type: d.type, optional: false, source: "derived" });
+    out.push({
+      name: d.name,
+      type: d.type,
+      optional: false,
+      source: "derived",
+      access: "editable",
+    });
   }
   return out;
 }
