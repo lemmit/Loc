@@ -33,11 +33,11 @@ import { renderDotnetLogCall } from "../../_obs/render-dotnet.js";
 export function renderRequestLoggingMiddleware(ns: string): string {
   const startCall = renderDotnetLogCall("requestStart", [
     { name: "method", valueExpr: "ctx.Request.Method" },
-    { name: "path", valueExpr: "ctx.Request.Path.Value ?? \"/\"" },
+    { name: "path", valueExpr: 'ctx.Request.Path.Value ?? "/"' },
   ]);
   const endCall = renderDotnetLogCall("requestEnd", [
     { name: "method", valueExpr: "ctx.Request.Method" },
-    { name: "path", valueExpr: "ctx.Request.Path.Value ?? \"/\"" },
+    { name: "path", valueExpr: 'ctx.Request.Path.Value ?? "/"' },
     { name: "status", valueExpr: "ctx.Response.StatusCode" },
     { name: "duration_ms", valueExpr: "sw.ElapsedMilliseconds" },
   ]);
