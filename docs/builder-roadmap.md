@@ -502,9 +502,16 @@ Phasing:
   containment still render without action buttons in this phase. Gated by the
   v2 e2e (rename Order → OrderX on the canvas, then delete it; counts +
   data-construct-name reflect the changes).
-- **Phase 3c** — module-level `+ Context`, aggregate-level `+ Operation` /
-  `+ Field`, and rename/delete for the system / context / operation kinds
-  (needs small extensions to v1's helpers).
+- ~~**Phase 3c (palette additions)** — module / aggregate / operation
+  palettes.~~ Done: new pure helpers `addContextSource` (insert a context
+  into a module) and `addOperationSource` (insert an operation into an
+  aggregate) in `system-v2/add-extra.ts`; the palette gains `+ Context` in
+  the module view, `+ Operation` + `+ Field` (reusing v1's `addField`) in
+  the aggregate view, and `+ Stmt` (a `precondition true` via v1's
+  `addStatement`) in the operation / workflow flow view. Gated by
+  `test/system-v2/add-extra.test.ts` + the v2 e2e (each palette adds bumps
+  the relevant node count by one). Rename / delete for the system / context
+  / operation kinds still pends.
 - **Phase 4** — long-tail parity with v1 (fields / finds / deployable bindings
   / emit repointing as per-node interactions). Once landed, v1 can be
   deprecated.
