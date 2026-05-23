@@ -532,9 +532,18 @@ Phasing:
   unset it renders the old dimmed label, so v1 is unaffected. Gated by the
   v2 e2e (repoint `Order.confirm`'s emit from `OrderConfirmed` to
   `LineAdded`).
-- **Phase 4c** — remaining v1 parity: deployable bindings (modules / serves /
-  ui / targets) and repository finds (filter + params) on the canvas. Once
-  landed, v1 can be deprecated.
+- ~~**Phase 4c (deployable bindings as edges).**~~ Done: the system view now
+  draws an edge per deployable binding — `deployable -modules-> module`,
+  `deployable -serves-> api`, `deployable -ui-> ui`, `deployable -targets->
+  deployable` — pulled from v1's `deployableModules` / `deployableServes` /
+  `deployableUi` / `deployableTargets`. Read-only visualisation; editing the
+  bindings inline is Phase 4d. Gated by `test/system-v2/view-graph.test.ts`
+  (a system with `api` + `webApp` produces the expected modules / serves /
+  targets / ui edges).
+- **Phase 4d** — editable deployable bindings (drag the `targets` / `ui` edge
+  to a different deployable / ui; add / remove `modules` / `serves` via a
+  small node-level multi-select), and repository finds (filter + params) as
+  per-find inline editors. Once landed, v1 can be deprecated.
 - **Phase 5** — polish: per-view positions, search / coverage / grouped layout
   adapted per zoom level, transitions on drill, mobile passes.
 
