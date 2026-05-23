@@ -55,7 +55,7 @@ const FIXTURE_DDD = `system AcmeLV {
     }
   }
   api SalesApi from Sales
-  ui SalesAdmin { scaffold modules: Sales }
+  ui SalesAdmin with scaffold(modules: [Sales]) { }
   deployable phoenixApp {
     platform: phoenixLiveView
     modules: Sales

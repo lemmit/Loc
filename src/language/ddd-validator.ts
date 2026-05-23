@@ -53,7 +53,6 @@ import {
   type Page,
   type Property,
   type Requirement,
-  type Scaffold,
   type Statement,
   type Storage,
   type StringLit,
@@ -1528,79 +1527,14 @@ export class DddValidator {
       }
     }
 
-    // Per-member walks.
+    // Per-member walks.  `Scaffold` is gone — its arg-resolution
+    // diagnostics now live in the macro expander, which surfaces
+    // them through the same accept() pipeline.
     for (const m of ui.members) {
-      if (m.$type === "Scaffold") this.checkScaffold(m, sys, accept);
-      else if (m.$type === "Page") this.checkPage(m, ui, accept);
+      if (m.$type === "Page") this.checkPage(m, ui, accept);
       else if (m.$type === "MenuBlock") this.checkMenuBlock(m, ui, accept);
     }
-  }
-
-  private checkScaffold(s: Scaffold, sys: System, accept: ValidationAcceptor): void {
-    // Rule 5 — selector targets must resolve to declarations of the
-    // matching kind anywhere in the system.  The deployable-targets-
-    // chain reachability check is left to the scaffold expander where
-    // we already need to walk reachability for page generation.
-
-    // Build per-kind name sets from the system's domain IR.
-    const moduleNames = new Set<string>();
-    const contextNames = new Set<string>();
-    const aggregateNames = new Set<string>();
-    const workflowNames = new Set<string>();
-    const viewNames = new Set<string>();
-    for (const sm of sys.members) {
-      if (sm.$type === "Module") {
-        moduleNames.add(sm.name);
-        for (const ctx of sm.contexts) {
-          contextNames.add(ctx.name);
-          for (const cm of ctx.members) {
-            if (cm.$type === "Aggregate") aggregateNames.add(cm.name);
-            else if (cm.$type === "Workflow") workflowNames.add(cm.name);
-            else if (cm.$type === "View") viewNames.add(cm.name);
-          }
-        }
-      } else if (sm.$type === "BoundedContext") {
-        contextNames.add(sm.name);
-        for (const cm of sm.members) {
-          if (cm.$type === "Aggregate") aggregateNames.add(cm.name);
-          else if (cm.$type === "Workflow") workflowNames.add(cm.name);
-          else if (cm.$type === "View") viewNames.add(cm.name);
-        }
-      }
-    }
-
-    const expected =
-      s.selector === "modules"
-        ? moduleNames
-        : s.selector === "contexts"
-          ? contextNames
-          : s.selector === "aggregates"
-            ? aggregateNames
-            : s.selector === "workflows"
-              ? workflowNames
-              : viewNames;
-
-    const seenWithinDirective = new Set<string>();
-    for (const t of s.targets) {
-      if (!expected.has(t)) {
-        accept(
-          "error",
-          `'scaffold ${s.selector}: ${t}' — no ${singular(s.selector)} '${t}' is declared in this system.`,
-          { node: s, property: "targets" },
-        );
-      }
-      // Rule 6 (light) — same name listed twice in one directive.
-      // Cross-directive double-scaffolding (same module, different
-      // granularity) is detected by the scaffold expander when it
-      // collapses scaffold output to a page-name map.
-      if (seenWithinDirective.has(t)) {
-        accept("error", `'scaffold ${s.selector}: ...' lists '${t}' more than once.`, {
-          node: s,
-          property: "targets",
-        });
-      }
-      seenWithinDirective.add(t);
-    }
+    void sys;
   }
 
   private checkPage(p: Page, ui: Ui, accept: ValidationAcceptor): void {

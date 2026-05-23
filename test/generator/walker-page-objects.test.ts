@@ -172,8 +172,7 @@ describe("walker-side e2e page-object emitter", () => {
             repository Orders for Order { }
           }
         }
-        ui WebApp {
-          scaffold aggregates: Order
+        ui WebApp with scaffold(aggregates: [Order]) {
         }
         deployable api { platform: hono, modules: M, port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }

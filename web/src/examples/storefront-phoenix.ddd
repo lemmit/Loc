@@ -155,8 +155,7 @@ system StorefrontPhoenix {
 
   api StorefrontApi from Storefront
 
-  ui WebApp {
-    scaffold modules: Storefront
+  ui WebApp with scaffold(modules: [Storefront]) {
   }
 
   deployable phoenixApp {

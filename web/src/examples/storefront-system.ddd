@@ -214,8 +214,7 @@ system StorefrontSystem {
     }
   }
 
-  ui WebApp {
-    scaffold modules: Storefront
+  ui WebApp with scaffold(modules: [Storefront]) {
   }
 
   deployable api { platform: hono, modules: Storefront, port: 3000 }

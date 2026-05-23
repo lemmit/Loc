@@ -262,12 +262,13 @@ describe("validation", () => {
       const { errors } = await parse(`
         system S {
           module M { context T { } }
-          ui WebApp {
-            scaffold modules: NotAModule
+          ui WebApp with scaffold(modules: [NotAModule]) {
           }
         }
       `);
-      expect(errors.some((e) => /no module 'NotAModule' is declared/.test(e))).toBe(true);
+      // Phase 4: error originates from the macro expander, which
+      // uses the registered macro's arg kind ('Module') in the message.
+      expect(errors.some((e) => /unknown Module 'NotAModule'/.test(e))).toBe(true);
     });
 
     it("rejects a scaffold target of the wrong kind (aggregate listed as module)", async () => {
@@ -279,24 +280,36 @@ describe("validation", () => {
               repository Orders for Order { }
             }
           }
-          ui WebApp {
-            scaffold modules: Order
+          ui WebApp with scaffold(modules: [Order]) {
           }
         }
       `);
-      expect(errors.some((e) => /no module 'Order' is declared/.test(e))).toBe(true);
+      // Order is an Aggregate, not a Module — the lookup against
+      // the Module inventory misses, surfacing as 'unknown Module'.
+      expect(errors.some((e) => /unknown Module 'Order'/.test(e))).toBe(true);
     });
 
-    it("rejects the same target listed twice within one scaffold directive", async () => {
-      const { errors } = await parse(`
+    it("silently dedupes the same target listed twice within one scaffold call", async () => {
+      // The legacy directive raised an error here.  The macro
+      // version treats duplicate ref-list elements as benign:
+      // the second occurrence emits pages with names that already
+      // exist, which the expander's override-by-name rule drops
+      // silently.  Outcome is the same number of pages either way.
+      const { errors, model } = await parse(`
         system S {
           module Sales { context Orders { aggregate Order { x: int } repository Orders for Order { } } }
-          ui WebApp {
-            scaffold aggregates: Order, Order
+          ui WebApp with scaffold(aggregates: [Order, Order]) {
           }
         }
       `);
-      expect(errors.some((e) => /lists 'Order' more than once/.test(e))).toBe(true);
+      expect(errors).toEqual([]);
+      // Sanity check: one OrderList page (deduped), not two.
+      const sys = (model.members ?? []).find((m: any) => m.$type === "System") as any;
+      const ui = (sys.members ?? []).find((m: any) => m.$type === "Ui");
+      const orderListPages = (ui.members ?? []).filter(
+        (m: any) => m.$type === "Page" && m.name === "OrderList",
+      );
+      expect(orderListPages.length).toBe(1);
     });
 
     it("accepts well-formed scaffold directives (modules / aggregates / views)", async () => {
@@ -309,10 +322,7 @@ describe("validation", () => {
               view ActiveOrders = Order where status == "open"
             }
           }
-          ui WebApp {
-            scaffold modules: Sales
-            scaffold aggregates: Order
-            scaffold views: ActiveOrders
+          ui WebApp with scaffold(modules: [Sales], aggregates: [Order], views: [ActiveOrders]) {
           }
         }
       `);

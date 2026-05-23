@@ -691,13 +691,14 @@ export interface TestE2EIR {
 // is the per-target generator's concern.
 // ---------------------------------------------------------------------------
 
-/** A `ui` SystemMember: pages, components, scaffold directives, and
- *  an optional sidebar menu block. */
+/** A `ui` SystemMember: pages, components, and an optional sidebar
+ *  menu block.  Scaffold synthesis happens at the AST level via
+ *  the `scaffold` stdlib macro; by the time we lower to IR, every
+ *  page is a first-class PageIR with no special-cased provenance. */
 export interface UiIR {
   name: string;
   pages: PageIR[];
   components: ComponentIR[];
-  scaffolds: ScaffoldIR[];
   /** Optional ui-level menu block.  When undefined the sidebar is
    *  derived from each page's `menuMeta` (see spec §11). */
   menu?: MenuBlockIR;
@@ -827,16 +828,11 @@ export interface StateFieldIR {
   init?: ExprIR;
 }
 
-/** A `scaffold <selector>: <targets>` directive — single fixed multi-
- *  page rewrite over a domain selector.  The scaffold expander turns
- *  this into literal `PageIR` nodes; this IR carries only the
- *  source-level intent. */
-export interface ScaffoldIR {
-  selector: ScaffoldSelector;
-  targets: string[];
-}
-
-export type ScaffoldSelector = "modules" | "contexts" | "aggregates" | "workflows" | "views";
+// `ScaffoldIR` / `ScaffoldSelector` were removed when `scaffold`
+// migrated from a hardcoded language directive to the `scaffold`
+// stdlib macro.  Page synthesis now goes through the macro
+// expander → AST splice → standard page lowering path; no IR-
+// level scaffold representation is required.
 
 /** Per-page sidebar metadata.  Bare entries — validator
  *  enforces the allowed key names (`section` / `label` / `order` /

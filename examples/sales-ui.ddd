@@ -14,16 +14,12 @@
 // This file does NOT parse with the current Langium grammar; it is
 // the target syntax driving the discussion.
 
-ui SalesAdmin {
+ui SalesAdmin with scaffold(modules: [Catalog], aggregates: [Customer, Product], workflows: [placeOrder], views: [ActiveOrders, OrderSummary, CustomerOrders]) {
 
   // ── 1. Mixed-granularity scaffolding ────────────────────────────
   // Catalog: take the whole module.  Sales: cherry-pick — Customer +
   // Product auto-scaffolded, Order custom below.  Workflows + views
   // listed individually.  No `except` clause: list what you want.
-  scaffold modules:    Catalog
-  scaffold aggregates: Customer, Product
-  scaffold workflows:  placeOrder
-  scaffold views:      ActiveOrders, OrderSummary, CustomerOrders
 
 
   // ── 2. Reusable component ───────────────────────────────────────

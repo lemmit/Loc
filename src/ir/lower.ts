@@ -24,7 +24,6 @@ import type {
   Property,
   Repository,
   Requirement,
-  Scaffold,
   Solution,
   StateField,
   Statement,
@@ -113,9 +112,7 @@ import type {
   RequirementIR,
   RequirementStatus,
   RequirementType,
-  ScaffoldIR,
   ScaffoldOriginIR,
-  ScaffoldSelector,
   SolutionIR,
   StateFieldIR,
   StmtIR,
@@ -778,14 +775,12 @@ function defaultPort(platform: Platform | undefined): number {
 function lowerUi(ui: Ui): UiIR {
   const pages: PageIR[] = [];
   const components: ComponentIR[] = [];
-  const scaffolds: ScaffoldIR[] = [];
   const apiParams: UiApiParamIR[] = [];
   const helperImports: UiHelperImportIR[] = [];
   let menu: MenuBlockIR | undefined;
   for (const m of ui.members) {
     if (m.$type === "Page") pages.push(lowerPage(m));
     else if (m.$type === "Component") components.push(lowerComponent(m));
-    else if (m.$type === "Scaffold") scaffolds.push(lowerScaffold(m));
     else if (m.$type === "UiApiParam") {
       apiParams.push({
         name: m.name,
@@ -803,7 +798,6 @@ function lowerUi(ui: Ui): UiIR {
     name: ui.name,
     pages,
     components,
-    scaffolds,
     menu,
     apiParams,
     helperImports,
@@ -963,13 +957,6 @@ function lowerStateField(f: StateField, env: Env): StateFieldIR {
     name: f.name,
     type: lowerType(f.type),
     init: f.init ? lowerExpr(f.init, env) : undefined,
-  };
-}
-
-function lowerScaffold(s: Scaffold): ScaffoldIR {
-  return {
-    selector: s.selector as ScaffoldSelector,
-    targets: s.targets.map((t) => t).filter(Boolean),
   };
 }
 

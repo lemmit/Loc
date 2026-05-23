@@ -44,24 +44,15 @@ import type {
  * — that conditional logic doesn't fit the macro shape without
  * adding inter-call coordination.  Override-by-name still lets
  * the user write `page Home { ... }` to replace the default. */
-// NOTE on the name `pages` vs `scaffold`: the legacy grammar
-// reserves `scaffold` as a hard keyword (`UiMember = ... | Scaffold`),
-// so MacroCall.name=ID can't match it.  Until the legacy directive
-// + grammar rule is removed (next Phase 4 commit), this macro is
-// registered as `pages`.  The follow-up migration commit will:
-//   1. Delete the legacy Scaffold grammar rule and AST expander
-//   2. Rename this macro back to `scaffold`
-//   3. Port examples from `scaffold X: Foo` to `with scaffold(X: [Foo])`
-// — done atomically so there's no in-between state.
 export default defineMacro({
-  name: "pages",
+  name: "scaffold",
   target: "ui",
   apiVersion: 1,
   description:
     "Synthesises default List/Detail/New pages for the listed aggregates, " +
-    "form pages for workflows, and list pages for views.  Replacement for " +
-    "the legacy `scaffold` directive (renamed back to `scaffold` once the " +
-    "legacy grammar rule is removed).",
+    "form pages for workflows, and list pages for views.  Replaces the " +
+    "legacy `scaffold` keyword directive (deleted in the Phase 4 macro " +
+    "migration).",
   params: {
     aggregates: { kind: "refList", of: "Aggregate" },
     workflows: { kind: "refList", of: "Workflow" },

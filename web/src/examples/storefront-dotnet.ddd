@@ -156,8 +156,7 @@ system StorefrontDotnet {
     }
   }
 
-  ui WebApp {
-    scaffold modules: Storefront
+  ui WebApp with scaffold(modules: [Storefront]) {
   }
 
   // Single fullstack .NET deployable — backend on /api/*, SPA

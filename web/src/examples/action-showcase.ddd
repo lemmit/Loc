@@ -25,7 +25,7 @@ system ActionShowcase {
 
   api SalesApi from Sales
 
-  ui WebApp {
+  ui WebApp with scaffold(aggregates: [Order]) {
     api Sales: SalesApi
 
     // Hand-authored panel: instance-qualified Action buttons bound to
@@ -40,7 +40,6 @@ system ActionShowcase {
 
     // Scaffold gives List / New / Detail.  The Detail page hosts the
     // instance-qualified operation forms (`Form(data.<op>)`).
-    scaffold aggregates: Order
 
     // Explicit console page: load one order, mount the action panel.
     page OrderConsole {

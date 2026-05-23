@@ -55,7 +55,9 @@ describe("page metamodel — IR shape", () => {
     const ui = uiByName(loom, "WebApp");
     expect(ui.pages).toEqual([]);
     expect(ui.components).toEqual([]);
-    expect(ui.scaffolds).toEqual([]);
+    // `ui.scaffolds` was removed when `scaffold` migrated to a
+    // stdlib macro — see Phase 4 of the macro plan.  Pages and
+    // components are the only first-class UI members now.
     expect(ui.menu).toBeUndefined();
   });
 
@@ -70,25 +72,21 @@ describe("page metamodel — IR shape", () => {
     expect(firstSystem(loom).uis.map((u) => u.name)).toEqual(["A", "B", "C"]);
   });
 
-  it("lowers `scaffold modules: …` as a literal directive (also kept on UiIR)", async () => {
-    // scaffold expansion now happens at the AST layer.
-    // The lowering still records the original scaffold directives
-    // on `ui.scaffolds` for tooling that wants to inspect what the
-    // user wrote (debugging, codegen heuristics).  The synthesised
-    // pages also show up on `ui.pages` because the AST expander
-    // injected them as real `Page` AST nodes.
+  it("`with scaffold(modules: [...])` synthesises pages by AST time", async () => {
+    // The `scaffold` macro splices Page AST nodes into the ui's
+    // members at the IndexedContent phase; by the time we lower
+    // to IR, every page is a regular PageIR with no special
+    // provenance flag.  The original macro call has no IR-level
+    // residue (was previously kept on `ui.scaffolds`, removed in
+    // the Phase 4 finalisation commit).
     const loom = await buildLoom(`
       system Acme {
         module M { context A { aggregate Order { x: int } repository Orders for Order { } } }
-        ui WebApp {
-          scaffold modules: M
+        ui WebApp with scaffold(modules: [M]) {
         }
       }
     `);
     const ui = uiByName(loom, "WebApp");
-    expect(ui.scaffolds).toEqual([{ selector: "modules", targets: ["M"] }]);
-    // Pages were synthesised at AST time — by the time lowering
-    // runs, they're already on the ui's members.
     const pageNames = ui.pages.map((p) => p.name).sort();
     expect(pageNames).toContain("OrderList");
     expect(pageNames).toContain("OrderNew");

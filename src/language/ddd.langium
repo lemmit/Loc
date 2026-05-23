@@ -215,7 +215,7 @@ Ui:
     '}';
 
 UiMember:
-    UiApiParam | UiHelperImport | Page | Component | Scaffold | MenuBlock;
+    UiApiParam | UiHelperImport | Page | Component | MenuBlock;
 
 // ---- helper import (UI-level) ----------------------------------
 //
@@ -352,17 +352,6 @@ StateBlock:
 
 StateField:
     name=ID ':' type=TypeRef ('=' init=Expression)?;
-
-// ---- scaffold -----------------------------------------------------------
-
-// Single fixed multi-page rewrite from a domain selector to pages.
-// Not user-extensible.  See spec §10 for the granularity hierarchy
-// (modules → contexts → aggregates ∪ workflows ∪ views).
-Scaffold:
-    'scaffold' selector=ScaffoldSelector ':' targets+=ID (',' targets+=ID)* ','?;
-
-ScaffoldSelector returns string:
-    'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views';
 
 // ---- menu ---------------------------------------------------------------
 
@@ -690,7 +679,7 @@ Parameter:
 LooseName returns string:
     ID
     | 'id' | 'permissions' | 'contains'
-    | 'ui' | 'page' | 'component' | 'scaffold' | 'state' | 'menu'
+    | 'ui' | 'page' | 'component' | 'state' | 'menu'
     | 'section' | 'link' | 'route' | 'title' | 'body' | 'framework' | 'static'
     | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
     | 'design' | 'targets'

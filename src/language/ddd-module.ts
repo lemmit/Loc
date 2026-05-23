@@ -9,7 +9,6 @@ import {
   type PartialLangiumSharedServices,
 } from "langium/lsp";
 import { registerMacroExpander } from "./ddd-macro-expander.js";
-import { registerScaffoldAstExpander } from "./ddd-scaffold-ast-expander.js";
 import { DddScopeComputation, DddScopeProvider } from "./ddd-scope.js";
 import { DddValidator, registerValidationChecks } from "./ddd-validator.js";
 import { DddGeneratedModule, DddGeneratedSharedModule } from "./generated/module.js";
@@ -73,16 +72,12 @@ export function createDddServices(context: DefaultSharedModuleContext): {
   const Ddd = inject(createDefaultModule({ shared }), DddGeneratedModule, DddModule);
   shared.ServiceRegistry.register(Ddd);
   registerValidationChecks(Ddd);
-  // AST-to-AST scaffold expansion.  Registers a
-  // DocumentState.IndexedContent hook that synthesises Page AST nodes
-  // for every Scaffold directive — it runs after indexing but before
-  // ComputedScopes/Linked, so a `[Page:ID]` ref to a scaffold-derived
-  // name resolves through Langium's standard machinery.
-  registerScaffoldAstExpander(shared);
   // Macro expander — registry-driven `with X(...)` expansion.
-  // Runs at the same phase as scaffold expansion; the two are
-  // independent and will be unified once scaffold migrates to a
-  // stdlib macro (Phase 4 of the macro plan).
+  // Runs as a DocumentState.IndexedContent hook (after indexing,
+  // before ComputedScopes/Linked) so synthesised members
+  // participate in scope resolution and validation as if user-
+  // written.  Replaces the legacy scaffold AST expander, which
+  // was deleted when `scaffold` migrated to a stdlib macro.
   registerMacroExpander(shared);
   return { shared, Ddd };
 }

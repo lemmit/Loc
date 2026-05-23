@@ -47,7 +47,7 @@ system FullstackDemo {
     }
     repository Orders for Order { }
   } }
-  ui WebApp { scaffold modules: Sales }
+  ui WebApp with scaffold(modules: [Sales]) { }
   deployable app { platform: dotnet, modules: Sales, ui: WebApp, port: 8080 }
 }
 `;

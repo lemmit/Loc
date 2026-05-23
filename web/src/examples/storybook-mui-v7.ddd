@@ -189,8 +189,7 @@ system Storybook {
   }
 
   // Hono backend — runs in the playground's runtime worker.
-  ui WebApp {
-    scaffold modules: Stories
+  ui WebApp with scaffold(modules: [Stories]) {
   }
 
   deployable api {

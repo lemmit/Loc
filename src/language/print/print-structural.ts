@@ -28,7 +28,6 @@ import type {
   Property,
   Repository,
   Requirement,
-  Scaffold,
   Solution,
   StateBlock,
   Statement,
@@ -173,8 +172,6 @@ export function printStructural(node: AstNode): string {
       return printComponent(node as Component);
     case "StateBlock":
       return printStateBlock(node as StateBlock);
-    case "Scaffold":
-      return printScaffold(node as Scaffold);
     case "MenuBlock":
       return printMenuBlock(node as MenuBlock);
     case "PermissionsBlock":
@@ -276,7 +273,7 @@ function printTestE2E(node: TestE2E): string {
 // ---------------------------------------------------------------------------
 
 function printUi(node: Ui): string {
-  return block(`ui ${node.name}`, node.members.map(printStructural));
+  return block(`ui ${node.name}${printWithClause(node.withClause)}`, node.members.map(printStructural));
 }
 
 function printUiApiParam(node: UiApiParam): string {
@@ -332,10 +329,6 @@ function printStateBlock(node: StateBlock): string {
   );
 }
 
-function printScaffold(node: Scaffold): string {
-  return `scaffold ${node.selector}: ${node.targets.join(", ")}`;
-}
-
 function printMenuBlock(node: MenuBlock): string {
   return block("menu", node.sections.map(printMenuSection));
 }
@@ -383,7 +376,43 @@ function printValueObject(node: ValueObject): string {
 
 function printAggregate(node: Aggregate): string {
   const ids = node.idKind ? ` ids ${node.idKind}` : "";
-  return block(`aggregate ${node.name}${ids}`, node.members.map(printStructural));
+  return block(
+    `aggregate ${node.name}${ids}${printWithClause(node.withClause)}`,
+    node.members.map(printStructural),
+  );
+}
+
+function printWithClause(wc: import("../generated/ast.js").WithClause | undefined): string {
+  if (!wc || (wc.calls ?? []).length === 0) return "";
+  const parts = (wc.calls ?? []).map((c) => printMacroCall(c));
+  return ` with ${parts.join(", ")}`;
+}
+
+function printMacroCall(c: import("../generated/ast.js").MacroCall): string {
+  const args = (c.args ?? []).map(printMacroArg);
+  if (args.length === 0 && (c as any).$cstNode?.text?.endsWith("()")) {
+    return `${c.name}()`;
+  }
+  return args.length === 0 ? c.name : `${c.name}(${args.join(", ")})`;
+}
+
+function printMacroArg(a: import("../generated/ast.js").MacroArg): string {
+  return `${a.name}: ${printMacroArgValue(a.value)}`;
+}
+
+function printMacroArgValue(v: import("../generated/ast.js").MacroArgValue): string {
+  switch (v.$type) {
+    case "MacroArgString":
+      return quote((v as any).string);
+    case "MacroArgBool":
+      return String((v as any).bool);
+    case "MacroArgInt":
+      return String((v as any).int);
+    case "MacroArgRef":
+      return (v as any).ref;
+    case "MacroArgRefList":
+      return `[${((v as any).refs ?? []).join(", ")}]`;
+  }
 }
 
 function printEntityPart(node: EntityPart): string {
