@@ -31,6 +31,8 @@ export interface ConstructNodeData {
   onDelete?: () => void;
   /** Optional inline multi-selects (stacked below the name). */
   multiSelects?: NodeMultiSelect[];
+  /** Narrow the node for a phone-width canvas (~390px viewport). */
+  compact?: boolean;
 }
 
 export default function ConstructNode({ data }: NodeProps): JSX.Element {
@@ -63,8 +65,9 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
         border: "1px solid rgba(255,255,255,0.25)",
         borderRadius: 6,
         padding: "6px 8px",
-        // Widen when there are multi-selects so the pill chips fit.
-        width: d.multiSelects && d.multiSelects.length > 0 ? 240 : 170,
+        // Widen when there are multi-selects so the pill chips fit, narrower
+        // on a phone-width canvas.
+        width: d.multiSelects && d.multiSelects.length > 0 ? (d.compact ? 210 : 240) : d.compact ? 150 : 170,
         position: "relative",
         cursor: d.drillable ? "pointer" : "default",
       }}

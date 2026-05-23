@@ -117,6 +117,22 @@ describe("Model v2 — view-graph per level", () => {
     ]);
   });
 
+  it("repository view returns one node per find (drillable repository)", () => {
+    const REPO_SRC = `context C {
+  aggregate Order {
+    sku: string
+  }
+  repository Orders for Order {
+    find bySku(sku: string): Order? where this.sku == sku
+    find allActive(): Order[] where true
+  }
+}`;
+    const g = buildViewGraph(parse(REPO_SRC), [{ kind: "repository", name: "Orders" }]);
+    expect(g.title).toBe("repository Orders");
+    expect(g.nodes.map((n) => n.id)).toEqual(["find:bySku", "find:allActive"]);
+    expect(g.nodes.every((n) => n.kind === "find")).toBe(true);
+  });
+
   it("system view surfaces deployable bindings as edges", () => {
     const SRC_D = `system S {
   module Sales {

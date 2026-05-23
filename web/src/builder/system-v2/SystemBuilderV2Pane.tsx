@@ -73,6 +73,7 @@ const KIND_COLOR: Record<ViewKind, string> = {
   valueobject: "var(--mantine-color-cyan-7)",
   event: "var(--mantine-color-grape-7)",
   repository: "var(--mantine-color-indigo-7)",
+  find: "var(--mantine-color-indigo-8)",
   view: "var(--mantine-color-lime-8)",
   function: "var(--mantine-color-yellow-8)",
   field: "var(--mantine-color-gray-7)",
@@ -151,6 +152,7 @@ const AST_TYPE_BY_VIEW: Partial<Record<ViewKind, string>> = {
   valueobject: "ValueObject",
   event: "EventDecl",
   repository: "Repository",
+  find: "FindDecl",
   view: "View",
   api: "Api",
   storage: "Storage",
@@ -228,6 +230,10 @@ function Breadcrumb({ path, onJump }: { path: ViewPath; onJump: (depth: number) 
 function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const [path, setPath] = useState<ViewPath>([]);
   const [rev, setRev] = useState(0);
+  // Narrow the per-node widths on a phone-width canvas (< 768px → compact),
+  // so StmtNode + the deployable's multi-select panel don't blow past the
+  // edge of the small canvas.
+  const compact = !ctx.isDesktop;
   // Inline-structured-editor open row, scoped per body locator + statement
   // index (+ optional field index for emit fields / call args). Mirrors v1.
   const [structuredKey, setStructuredKey] = useState<string | null>(null);
@@ -322,6 +328,7 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     views.forEach((view, i) => {
       const data: StmtNodeData = {
         view,
+        compact,
         targets,
         headCandidates: slotCandidates(parsed.ast, slotFor(i)),
         onCommit: (text) => {
@@ -357,7 +364,7 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     return m;
     // `ctx` covers getSource changes (parent re-renders create a fresh ctx).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [parsed, leafLoc, structuredKey, exprMode, rev]);
+  }, [parsed, leafLoc, structuredKey, exprMode, rev, compact]);
 
   /** Per-construct rename + delete handlers, keyed by the node id. Only
    *  populated for ViewKinds that map to v1's NodeKind (the ones
@@ -399,6 +406,7 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
           drillable: n.drillable,
           onRename,
           onDelete,
+          compact,
         });
         continue;
       }
@@ -472,11 +480,12 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         onRename,
         onDelete,
         multiSelects,
+        compact,
       });
     }
     return m;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graph, parsed, path, rev]);
+  }, [graph, parsed, path, rev, compact]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(toRfNodes(graph, stmtData, constructData));
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(toRfEdges(graph));
