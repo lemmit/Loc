@@ -1484,6 +1484,58 @@ describe("Ash.transaction/2 domain-list form (workflow-emit unit)", () => {
     expect(wfEx).toMatch(/isolation_level: :serializable/);
     expect(wfEx).not.toMatch(/PhoenixApp\.Repo/);
   });
+
+  // Bite 2: workflow narrative events (workflow_started / workflow_completed)
+  // share catalog identity with Hono / .NET so dashboards pivot on one key.
+  // `workflow_started` fires unconditionally at the run/1 entry; `workflow_
+  // completed` fires only on the success branch — failures (precondition,
+  // with-mismatch, Ash error) propagate untouched.
+  it("transactional workflow logs workflow_started at entry and workflow_completed on success", () => {
+    const out = new Map<string, string>();
+    emitWorkflows("phoenix_app", transactionalCtx, "PhoenixApp", out);
+    const wfEx = out.get("lib/phoenix_app/sales/workflows/place_order.ex")!;
+    expect(wfEx).toBeDefined();
+
+    // `require Logger` is in the module preamble.
+    expect(wfEx).toMatch(/require Logger/);
+
+    // `workflow_started` is the first statement inside run/1 (right after
+    // the `_ = current_user` discard).
+    expect(wfEx).toMatch(
+      /_ = current_user\s*\n\s*Logger\.info\("workflow_started", event: "workflow_started", workflow: "placeOrder"\)/,
+    );
+
+    // Transactional shape: success branch logs workflow_completed.
+    expect(wfEx).toMatch(
+      /case result do\s*\n\s*\{:ok, _\} ->\s*\n\s*Logger\.info\("workflow_completed", event: "workflow_completed", workflow: "placeOrder"\)\s*\n\s*result\s*\n\s*_ ->\s*\n\s*result\s*\n\s*end/,
+    );
+  });
+
+  it("sequential workflow logs workflow_completed inside the with-chain do-branch", () => {
+    const sequentialCtx: BoundedContextIR = {
+      ...transactionalCtx,
+      workflows: [
+        {
+          ...transactionalCtx.workflows[0]!,
+          transactional: false,
+        },
+      ],
+    };
+    const out = new Map<string, string>();
+    emitWorkflows("phoenix_app", sequentialCtx, "PhoenixApp", out);
+    const wfEx = out.get("lib/phoenix_app/sales/workflows/place_order.ex")!;
+    expect(wfEx).toBeDefined();
+    expect(wfEx).toMatch(/require Logger/);
+    // Started at entry.
+    expect(wfEx).toMatch(
+      /Logger\.info\("workflow_started", event: "workflow_started", workflow: "placeOrder"\)/,
+    );
+    // Completed lives inside the do-branch of the with-chain so a
+    // failing `{:ok, …} <-` short-circuits before it fires.
+    expect(wfEx).toMatch(
+      /do\s*\n\s*Logger\.info\("workflow_completed", event: "workflow_completed", workflow: "placeOrder"\)\s*\n\s*\{:ok, /,
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------

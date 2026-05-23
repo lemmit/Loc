@@ -1,5 +1,6 @@
 import type { BoundedContextIR, ParamIR, WorkflowIR, WorkflowStmtIR } from "../../ir/loom-ir.js";
 import { snake, upperFirst } from "../../util/naming.js";
+import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
 import { type RenderCtx, renderExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -77,13 +78,22 @@ function renderWorkflow(
   // are woven into the with-chain by renderWorkflowBody).
   const body = wf.transactional
     ? renderTransactionalBody(bodyLines, appModule, wf, contextModule)
-    : renderSequentialBody(bodyLines);
+    : renderSequentialBody(bodyLines, wf);
+
+  // Workflow narrative — `workflow_started` at the run/1 entry,
+  // `workflow_completed` at the success tail (woven into the body
+  // renderers).  Always-on info-level events; the catalog identity is
+  // shared with Hono / .NET so dashboards pivot on one event name.
+  const startedCall = renderPhoenixLogCall("workflowStarted", [
+    { name: "workflow", valueExpr: JSON.stringify(wf.name) },
+  ]);
 
   return `# Auto-generated.
 defmodule ${moduleName} do
   @moduledoc "Workflow: ${upperFirst(wf.name)}"
 
   alias ${contextModule}
+  require Logger
 
   # currentUser threading.  Controllers pass
   # \`conn.assigns.current_user\` as the second positional arg; LiveView
@@ -91,6 +101,7 @@ defmodule ${moduleName} do
   # reference currentUser ignore the param (default = nil).
   def run(${paramPattern}, current_user \\\\ nil) do
     _ = current_user
+    ${startedCall}
 ${body}
   end
 ${validateArgsSection}end
@@ -358,6 +369,12 @@ function renderTransactionalBody(
     ? `,\n      isolation_level: :${elixirIsolationLevel(wf.isolation)}`
     : "";
 
+  // `workflow_completed` fires only on the {:ok, _} branch — failures
+  // (precondition / with-mismatch / DB error) propagate untouched.
+  const completedCall = renderPhoenixLogCall("workflowCompleted", [
+    { name: "workflow", valueExpr: JSON.stringify(wf.name) },
+  ]);
+
   // Ash 3.x: first arg is the domain (or list of domains/resources).
   // The context module IS the Ash.Domain — wrapping it in a list satisfies
   // both the single-domain and multi-domain overloads.
@@ -368,11 +385,24 @@ ${txBody}
       end${isolationOptLine}
     )
 ${emitSection}
-    result`;
+    case result do
+      {:ok, _} ->
+        ${completedCall}
+        result
+      _ ->
+        result
+    end`;
 }
 
-function renderSequentialBody(lines: WorkflowBodyLine[]): string {
-  if (lines.length === 0) return "    :ok";
+function renderSequentialBody(lines: WorkflowBodyLine[], wf: WorkflowIR): string {
+  // `workflow_completed` fires inside the with-chain's do-branch (so
+  // failures short-circuit untouched) or just before the bare `:ok`
+  // when the workflow body is empty.
+  const completedCall = renderPhoenixLogCall("workflowCompleted", [
+    { name: "workflow", valueExpr: JSON.stringify(wf.name) },
+  ]);
+
+  if (lines.length === 0) return `    ${completedCall}\n    :ok`;
 
   const preconds = lines.filter((l) => l.kind === "precondition" || l.kind === "requires");
   const body = lines.filter((l) => l.kind !== "precondition" && l.kind !== "requires");
@@ -388,11 +418,11 @@ function renderSequentialBody(lines: WorkflowBodyLine[]): string {
 
   let bodySection: string;
   if (withClauses.length === 0 && exprLines.length === 0) {
-    bodySection = "    :ok";
+    bodySection = `    ${completedCall}\n    :ok`;
   } else {
     const allLines = [...exprLines, ...withClauses];
     const withBody = allLines.map((l) => l.text).join(",\n");
-    bodySection = `    with\n${withBody} do\n      {:ok, ${returnVal}}\n    end`;
+    bodySection = `    with\n${withBody} do\n      ${completedCall}\n      {:ok, ${returnVal}}\n    end`;
   }
 
   const emitSection =
