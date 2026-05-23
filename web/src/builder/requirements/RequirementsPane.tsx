@@ -1,57 +1,99 @@
-// Requirements pane — read-only browse of the file's traceability artifacts.
+// Requirements pane — a view of the file's traceability artifacts that
+// reads + edits the same `.ddd` source.  Layout: tree of requirements +
+// test cases + solutions on the left, detail/edit form on the right.
 //
-// A view of the same `.ddd` source as Source / Builder / Model: parses the
-// AST and shows the requirement hierarchy + per-requirement detail (its
-// solutions, test cases, and the code symbols they touch).  Useful for
-// reviewing the traceability graph without scrolling through text — and the
-// first step toward inline editing (Phase 2 will splice scalar edits via the
-// CST edit engine; Phase 3 adds an autocomplete picker for entitles/covers).
+// Edits go through the existing CST edit engine (see
+// `web/src/builder/edit-engine.ts`): we generate fresh text for the
+// changed construct via the printers in `./printers.ts` and splice it
+// over the original node's CST range, so everything outside is preserved
+// byte-for-byte.  The autocomplete `entitles` / `covers` picker is fed
+// from the Targetable symbol index we already compute in the language
+// scope provider, so qualified names stay in sync with the model.
 
 import { useMemo, useState } from "react";
 import {
+  ActionIcon,
   Badge,
   Box,
+  Button,
   Code,
   Divider,
   Group,
+  MultiSelect,
+  NumberInput,
   ScrollArea,
+  Select,
   Stack,
   Text,
+  TextInput,
   Title,
+  Tooltip,
 } from "@mantine/core";
-import { AstUtils } from "langium";
+import { AstUtils, type AstNode } from "langium";
 import type { LayoutCtx } from "../../layout/ctx";
 import { parseDdd } from "../parse";
+import { spliceNode } from "../edit-engine";
+import {
+  printRequirementText,
+  printSolutionText,
+  printTestCaseText,
+  type RequirementSpec,
+  type RequirementStatus,
+  type RequirementType,
+} from "./printers";
 import {
   isRequirement,
   isSolution,
+  isTargetable,
   isTestCase,
   type Requirement,
   type Solution,
   type TestCase,
 } from "../../../../src/language/generated/ast.js";
 
+// ---------------------------------------------------------------------------
+// Parse + collect
+// ---------------------------------------------------------------------------
+
+interface TargetableSymbol {
+  qn: string;
+  kind: string;
+}
+
 interface CollectedTrace {
   requirements: Requirement[];
   solutions: Solution[];
   testCases: TestCase[];
-  /** Requirement id → child ids (direct only). */
   childrenOf: Record<string, string[]>;
-  /** Requirement id → ids of solutions whose `for` points at it. */
   solutionsFor: Record<string, string[]>;
-  /** Requirement id → ids of testCases whose `verifies` points at it
-   *  OR points at one of its (transitive) children. */
   testCasesByRequirement: Record<string, string[]>;
+  targetables: TargetableSymbol[];
+}
+
+function qnOf(node: AstNode): string {
+  const segments: string[] = [];
+  let cur: AstNode | undefined = node;
+  while (cur && cur.$type !== "System" && cur.$type !== "Model") {
+    const name = (cur as { name?: unknown }).name;
+    if (typeof name === "string" && name.length > 0) segments.unshift(name);
+    cur = cur.$container;
+  }
+  return segments.join(".");
 }
 
 function collect(ast: unknown): CollectedTrace {
   const requirements: Requirement[] = [];
   const solutions: Solution[] = [];
   const testCases: TestCase[] = [];
+  const targetables: TargetableSymbol[] = [];
   for (const node of AstUtils.streamAst(ast as Parameters<typeof AstUtils.streamAst>[0])) {
     if (isRequirement(node)) requirements.push(node);
     else if (isSolution(node)) solutions.push(node);
     else if (isTestCase(node)) testCases.push(node);
+    if (isTargetable(node)) {
+      const qn = qnOf(node);
+      if (qn) targetables.push({ qn, kind: node.$type });
+    }
   }
 
   const childrenOf: Record<string, string[]> = {};
@@ -67,7 +109,6 @@ function collect(ast: unknown): CollectedTrace {
     if (target) (solutionsFor[target] ??= []).push(s.name);
   }
 
-  // testCases verifying a requirement OR one of its transitive children.
   const directTests: Record<string, string[]> = {};
   for (const tc of testCases) {
     const target = tc.requirement?.ref?.name;
@@ -93,8 +134,43 @@ function collect(ast: unknown): CollectedTrace {
     testCasesByRequirement[r.name] = [...ids];
   }
 
-  return { requirements, solutions, testCases, childrenOf, solutionsFor, testCasesByRequirement };
+  // De-dupe targetables: every qn is unique (the scope provider already
+  // requires it), but sort for stable picker option order.
+  const seenQns = new Set<string>();
+  const uniqueTargetables = targetables.filter((t) => {
+    if (seenQns.has(t.qn)) return false;
+    seenQns.add(t.qn);
+    return true;
+  });
+  uniqueTargetables.sort((a, b) => a.qn.localeCompare(b.qn));
+
+  return {
+    requirements,
+    solutions,
+    testCases,
+    childrenOf,
+    solutionsFor,
+    testCasesByRequirement,
+    targetables: uniqueTargetables,
+  };
 }
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const REQUIREMENT_TYPES: RequirementType[] = [
+  "UserStory",
+  "UseCase",
+  "AcceptanceCriteria",
+  "BusinessReq",
+];
+const REQUIREMENT_STATUSES: RequirementStatus[] = [
+  "Draft",
+  "Approved",
+  "InProgress",
+  "Done",
+];
 
 const REQUIREMENT_TYPE_COLOR: Record<string, string> = {
   UserStory: "blue",
@@ -122,15 +198,29 @@ function reqProp(r: Requirement, key: string): string | number | undefined {
   return undefined;
 }
 
+// ---------------------------------------------------------------------------
+// Pane
+// ---------------------------------------------------------------------------
+
 type Selection =
   | { kind: "requirement"; id: string }
   | { kind: "testCase"; id: string }
   | { kind: "solution"; id: string };
 
 export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
-  const parsed = useMemo(() => parseDdd(ctx.getSource()), [ctx]);
+  // `rev` bumps on save so we re-parse the (mutated) source and re-render
+  // forms with the canonical text.  Mirrors `BuilderPane`'s `rev` pattern.
+  const [rev, setRev] = useState(0);
+  const parsed = useMemo(() => parseDdd(ctx.getSource()), [ctx, rev]);
   const trace = useMemo(() => collect(parsed.ast), [parsed]);
   const [selected, setSelected] = useState<Selection | null>(null);
+
+  const apply = (originalNode: AstNode, newText: string): void => {
+    const source = ctx.getSource();
+    const next = spliceNode(source, originalNode, newText);
+    ctx.onSourceChange(next, "builder");
+    setRev((r) => r + 1);
+  };
 
   if (parsed.parserErrors.length > 0) {
     return (
@@ -230,27 +320,38 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
           <Box p="md">
             {selected === null && (
               <Text size="sm" c="dimmed">
-                Pick a requirement, test case, or solution on the left to see its details.
+                Pick a requirement, test case, or solution on the left to see and edit
+                its details.
               </Text>
             )}
-            {selected?.kind === "requirement" && (
-              <RequirementDetail
-                req={reqById.get(selected.id)}
+            {selected?.kind === "requirement" && reqById.get(selected.id) && (
+              <RequirementForm
+                // Bump the key on rev so a saved edit re-seeds local state from
+                // the canonical re-parsed source.
+                key={`req-${selected.id}-${rev}`}
+                req={reqById.get(selected.id)!}
                 trace={trace}
-                reqById={reqById}
-                tcById={tcById}
-                solById={solById}
+                onApply={apply}
                 onSelect={setSelected}
               />
             )}
-            {selected?.kind === "testCase" && (
-              <TestCaseDetail
-                tc={tcById.get(selected.id)}
+            {selected?.kind === "testCase" && tcById.get(selected.id) && (
+              <TestCaseForm
+                key={`tc-${selected.id}-${rev}`}
+                tc={tcById.get(selected.id)!}
+                trace={trace}
+                onApply={apply}
                 onSelect={setSelected}
               />
             )}
-            {selected?.kind === "solution" && (
-              <SolutionDetail sol={solById.get(selected.id)} onSelect={setSelected} />
+            {selected?.kind === "solution" && solById.get(selected.id) && (
+              <SolutionForm
+                key={`sol-${selected.id}-${rev}`}
+                sol={solById.get(selected.id)!}
+                trace={trace}
+                onApply={apply}
+                onSelect={setSelected}
+              />
             )}
           </Box>
         </ScrollArea>
@@ -258,6 +359,10 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
     </Box>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Tree (read-only)
+// ---------------------------------------------------------------------------
 
 function renderReqRow(
   id: string,
@@ -356,60 +461,155 @@ function Row({
   );
 }
 
-function RequirementDetail({
+// ---------------------------------------------------------------------------
+// Forms
+// ---------------------------------------------------------------------------
+
+function dirtyBadge(): JSX.Element {
+  return (
+    <Badge size="xs" color="yellow" variant="light" title="Unsaved changes">
+      modified
+    </Badge>
+  );
+}
+
+function FormToolbar({
+  title,
+  dirty,
+  onSave,
+  onReset,
+}: {
+  title: React.ReactNode;
+  dirty: boolean;
+  onSave: () => void;
+  onReset: () => void;
+}): JSX.Element {
+  return (
+    <Group justify="space-between" wrap="nowrap">
+      <Group gap={8} wrap="nowrap">{title}</Group>
+      <Group gap={6} wrap="nowrap">
+        {dirty && dirtyBadge()}
+        <Tooltip label="Revert to the source as written">
+          <Button size="xs" variant="default" disabled={!dirty} onClick={onReset}>
+            Reset
+          </Button>
+        </Tooltip>
+        <Button size="xs" disabled={!dirty} onClick={onSave} data-testid="req-form-save">
+          Save
+        </Button>
+      </Group>
+    </Group>
+  );
+}
+
+function RequirementForm({
   req,
   trace,
-  reqById,
-  tcById,
-  solById,
+  onApply,
   onSelect,
 }: {
-  req: Requirement | undefined;
+  req: Requirement;
   trace: CollectedTrace;
-  reqById: Map<string, Requirement>;
-  tcById: Map<string, TestCase>;
-  solById: Map<string, Solution>;
+  onApply: (node: AstNode, newText: string) => void;
   onSelect: (s: Selection) => void;
-}): JSX.Element | null {
-  if (!req) return null;
-  const type = reqProp(req, "type") as string | undefined;
-  const title = reqProp(req, "title") as string | undefined;
-  const status = reqProp(req, "status") as string | undefined;
-  const priority = reqProp(req, "priority") as number | undefined;
-  const parentId = req.parent?.ref?.name;
+}): JSX.Element {
+  const initial: Required<Pick<RequirementSpec, "type" | "title">> & {
+    status: RequirementStatus | "";
+    priority: number | "";
+    parent: string;
+  } = {
+    type: (reqProp(req, "type") as RequirementType | undefined) ?? "UserStory",
+    title: (reqProp(req, "title") as string | undefined) ?? "",
+    status: ((reqProp(req, "status") as RequirementStatus | undefined) ?? ""),
+    priority: ((reqProp(req, "priority") as number | undefined) ?? ""),
+    parent: req.parent?.ref?.name ?? "",
+  };
+  const [form, setForm] = useState(initial);
+  const dirty = JSON.stringify(form) !== JSON.stringify(initial);
   const solIds = trace.solutionsFor[req.name] ?? [];
   const tcIds = trace.testCasesByRequirement[req.name] ?? [];
 
+  const save = (): void => {
+    const spec: RequirementSpec = {
+      name: req.name,
+      parent: form.parent || undefined,
+      type: form.type,
+      title: form.title,
+      status: form.status === "" ? undefined : (form.status as RequirementStatus),
+      priority: form.priority === "" ? undefined : (form.priority as number),
+    };
+    onApply(req, printRequirementText(spec));
+  };
+
+  const parentOptions = trace.requirements
+    .map((r) => r.name)
+    .filter((id) => id !== req.name);
+
   return (
     <Stack gap="sm" data-testid={`req-detail-${req.name}`}>
-      <Group gap={8} wrap="nowrap">
-        <Title order={4}>{req.name}</Title>
-        {type && (
-          <Badge color={REQUIREMENT_TYPE_COLOR[type] ?? "gray"} variant="light">
-            {type}
-          </Badge>
-        )}
-        {status && (
-          <Badge color={STATUS_COLOR[status] ?? "gray"} variant="outline">
-            {status}
-          </Badge>
-        )}
-      </Group>
-      {title && <Text size="md">{title}</Text>}
-      <Group gap="lg">
-        {priority !== undefined && (
-          <Field label="Priority" value={String(priority)} />
-        )}
-        {parentId && (
-          <Field
-            label="Parent"
-            value={
-              <Link onClick={() => onSelect({ kind: "requirement", id: parentId })}>
-                {parentId}
-              </Link>
-            }
-          />
-        )}
+      <FormToolbar
+        title={
+          <>
+            <Title order={4}>{req.name}</Title>
+            <Badge color={REQUIREMENT_TYPE_COLOR[form.type] ?? "gray"} variant="light">
+              {form.type}
+            </Badge>
+            {form.status && (
+              <Badge color={STATUS_COLOR[form.status] ?? "gray"} variant="outline">
+                {form.status}
+              </Badge>
+            )}
+          </>
+        }
+        dirty={dirty}
+        onSave={save}
+        onReset={() => setForm(initial)}
+      />
+
+      <TextInput
+        label="Title"
+        value={form.title}
+        onChange={(e) => setForm({ ...form, title: e.currentTarget.value })}
+        data-testid="req-form-title"
+      />
+      <Group grow>
+        <Select
+          label="Type"
+          data={REQUIREMENT_TYPES}
+          value={form.type}
+          onChange={(v) => v && setForm({ ...form, type: v as RequirementType })}
+          allowDeselect={false}
+          data-testid="req-form-type"
+        />
+        <Select
+          label="Status"
+          data={REQUIREMENT_STATUSES}
+          value={form.status || null}
+          onChange={(v) => setForm({ ...form, status: (v as RequirementStatus | null) ?? "" })}
+          clearable
+          placeholder="(unset)"
+          data-testid="req-form-status"
+        />
+        <NumberInput
+          label="Priority"
+          value={form.priority === "" ? "" : form.priority}
+          onChange={(v) =>
+            setForm({ ...form, priority: typeof v === "number" ? v : "" })
+          }
+          min={0}
+          placeholder="(unset)"
+          data-testid="req-form-priority"
+        />
+        <Select
+          label="Parent"
+          data={parentOptions}
+          value={form.parent || null}
+          onChange={(v) => setForm({ ...form, parent: v ?? "" })}
+          clearable
+          placeholder="(no parent)"
+          searchable
+          data-testid="req-form-parent"
+        />
       </Group>
 
       <Divider my={4} label="Solutions" labelPosition="left" />
@@ -417,15 +617,14 @@ function RequirementDetail({
         <Text size="sm" c="dimmed">No solution declared for this requirement.</Text>
       ) : (
         <Stack gap={4}>
-          {solIds.map((id) => {
-            const s = solById.get(id);
-            return (
-              <Group key={id} gap={6}>
-                <Link onClick={() => onSelect({ kind: "solution", id })}>{id}</Link>
-                <Text size="sm" c="dimmed">{s?.title ?? ""}</Text>
-              </Group>
-            );
-          })}
+          {solIds.map((id) => (
+            <Group key={id} gap={6}>
+              <Link onClick={() => onSelect({ kind: "solution", id })}>{id}</Link>
+              <Text size="sm" c="dimmed">
+                {trace.solutions.find((s) => s.name === id)?.title ?? ""}
+              </Text>
+            </Group>
+          ))}
         </Stack>
       )}
 
@@ -435,7 +634,7 @@ function RequirementDetail({
       ) : (
         <Stack gap={4}>
           {tcIds.map((id) => {
-            const tc = tcById.get(id);
+            const tc = trace.testCases.find((t) => t.name === id);
             const verifies = tc?.requirement?.ref?.name;
             const inherited = verifies && verifies !== req.name;
             return (
@@ -458,7 +657,7 @@ function RequirementDetail({
           <Divider my={4} label="Children" labelPosition="left" />
           <Stack gap={4}>
             {trace.childrenOf[req.name]!.map((id) => {
-              const child = reqById.get(id);
+              const child = trace.requirements.find((r) => r.name === id);
               const childTitle = child ? (reqProp(child, "title") as string | undefined) : undefined;
               return (
                 <Group key={id} gap={6}>
@@ -474,82 +673,244 @@ function RequirementDetail({
   );
 }
 
-function TestCaseDetail({
-  tc,
-  onSelect,
-}: {
-  tc: TestCase | undefined;
-  onSelect: (s: Selection) => void;
-}): JSX.Element | null {
-  if (!tc) return null;
-  const covers = tc.covers.map((r) => r.$refText);
-  const verifies = tc.requirement?.ref?.name;
-  return (
-    <Stack gap="sm" data-testid={`tc-detail-${tc.name}`}>
-      <Title order={4}>{tc.name}</Title>
-      {tc.title && <Text size="md">{tc.title}</Text>}
-      {verifies && (
-        <Field
-          label="Verifies"
-          value={<Link onClick={() => onSelect({ kind: "requirement", id: verifies })}>{verifies}</Link>}
-        />
-      )}
-      <Divider my={4} label="Covers" labelPosition="left" />
-      {covers.length === 0 ? (
-        <Text size="sm" c="dimmed">No code symbols covered.</Text>
-      ) : (
-        <Stack gap={2}>
-          {covers.map((qn) => (
-            <Code key={qn}>{qn}</Code>
-          ))}
-        </Stack>
-      )}
-    </Stack>
-  );
-}
-
-function SolutionDetail({
+function SolutionForm({
   sol,
+  trace,
+  onApply,
   onSelect,
 }: {
-  sol: Solution | undefined;
+  sol: Solution;
+  trace: CollectedTrace;
+  onApply: (node: AstNode, newText: string) => void;
   onSelect: (s: Selection) => void;
-}): JSX.Element | null {
-  if (!sol) return null;
-  const entitles = sol.entitles.map((r) => r.$refText);
-  const target = sol.requirement?.ref?.name;
+}): JSX.Element {
+  const initial = {
+    title: sol.title ?? "",
+    forRequirement: sol.requirement?.ref?.name ?? sol.requirement?.$refText ?? "",
+    entitles: sol.entitles.map((e) => e.$refText),
+  };
+  const [form, setForm] = useState(initial);
+  const dirty = JSON.stringify(form) !== JSON.stringify(initial);
+
+  const save = (): void => {
+    onApply(
+      sol,
+      printSolutionText({
+        name: sol.name,
+        forRequirement: form.forRequirement,
+        title: form.title || undefined,
+        entitles: form.entitles,
+      }),
+    );
+  };
+
   return (
     <Stack gap="sm" data-testid={`sol-detail-${sol.name}`}>
-      <Title order={4}>{sol.name}</Title>
-      {sol.title && <Text size="md">{sol.title}</Text>}
-      {target && (
-        <Field
-          label="For"
-          value={<Link onClick={() => onSelect({ kind: "requirement", id: target })}>{target}</Link>}
+      <FormToolbar
+        title={<Title order={4}>{sol.name}</Title>}
+        dirty={dirty}
+        onSave={save}
+        onReset={() => setForm(initial)}
+      />
+      <TextInput
+        label="Title"
+        value={form.title}
+        onChange={(e) => setForm({ ...form, title: e.currentTarget.value })}
+        data-testid="sol-form-title"
+      />
+      <Group grow align="end">
+        <Select
+          label="For requirement"
+          data={trace.requirements.map((r) => r.name)}
+          value={form.forRequirement || null}
+          onChange={(v) => v && setForm({ ...form, forRequirement: v })}
+          allowDeselect={false}
+          searchable
+          data-testid="sol-form-for"
         />
-      )}
-      <Divider my={4} label="Entitles" labelPosition="left" />
-      {entitles.length === 0 ? (
-        <Text size="sm" c="dimmed">No code symbols entitled.</Text>
-      ) : (
-        <Stack gap={2}>
-          {entitles.map((qn) => (
-            <Code key={qn}>{qn}</Code>
-          ))}
-        </Stack>
-      )}
+        <Tooltip label="Open the requirement this solution is for">
+          <ActionIcon
+            variant="default"
+            disabled={!form.forRequirement}
+            onClick={() => onSelect({ kind: "requirement", id: form.forRequirement })}
+          >
+            →
+          </ActionIcon>
+        </Tooltip>
+      </Group>
+
+      <CodeRefPicker
+        label="Entitles"
+        description="Code symbols this solution legitimises (Module.Context.Aggregate.operation, deployables, apis, …)."
+        value={form.entitles}
+        onChange={(v) => setForm({ ...form, entitles: v })}
+        targetables={trace.targetables}
+        testid="sol-form-entitles"
+      />
     </Stack>
   );
 }
 
-function Field({ label, value }: { label: string; value: React.ReactNode }): JSX.Element {
+function TestCaseForm({
+  tc,
+  trace,
+  onApply,
+  onSelect,
+}: {
+  tc: TestCase;
+  trace: CollectedTrace;
+  onApply: (node: AstNode, newText: string) => void;
+  onSelect: (s: Selection) => void;
+}): JSX.Element {
+  const initial = {
+    title: tc.title ?? "",
+    verifies: tc.requirement?.ref?.name ?? tc.requirement?.$refText ?? "",
+    covers: tc.covers.map((c) => c.$refText),
+  };
+  const [form, setForm] = useState(initial);
+  const dirty = JSON.stringify(form) !== JSON.stringify(initial);
+
+  const save = (): void => {
+    onApply(
+      tc,
+      printTestCaseText({
+        name: tc.name,
+        verifies: form.verifies,
+        title: form.title || undefined,
+        covers: form.covers,
+      }),
+    );
+  };
+
   return (
-    <Group gap={6}>
-      <Text size="sm" c="dimmed">{label}:</Text>
-      {typeof value === "string" ? <Text size="sm">{value}</Text> : value}
-    </Group>
+    <Stack gap="sm" data-testid={`tc-detail-${tc.name}`}>
+      <FormToolbar
+        title={<Title order={4}>{tc.name}</Title>}
+        dirty={dirty}
+        onSave={save}
+        onReset={() => setForm(initial)}
+      />
+      <TextInput
+        label="Title"
+        value={form.title}
+        onChange={(e) => setForm({ ...form, title: e.currentTarget.value })}
+        data-testid="tc-form-title"
+      />
+      <Group grow align="end">
+        <Select
+          label="Verifies"
+          data={trace.requirements.map((r) => r.name)}
+          value={form.verifies || null}
+          onChange={(v) => v && setForm({ ...form, verifies: v })}
+          allowDeselect={false}
+          searchable
+          data-testid="tc-form-verifies"
+        />
+        <Tooltip label="Open the requirement this test case verifies">
+          <ActionIcon
+            variant="default"
+            disabled={!form.verifies}
+            onClick={() => onSelect({ kind: "requirement", id: form.verifies })}
+          >
+            →
+          </ActionIcon>
+        </Tooltip>
+      </Group>
+
+      <CodeRefPicker
+        label="Covers"
+        description="Code symbols this test case exercises."
+        value={form.covers}
+        onChange={(v) => setForm({ ...form, covers: v })}
+        targetables={trace.targetables}
+        testid="tc-form-covers"
+      />
+    </Stack>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Code-ref picker (Phase 3) — autocomplete chip input typed against the
+// Targetable symbols indexed from the live source.
+// ---------------------------------------------------------------------------
+
+const KIND_BADGE_COLOR: Record<string, string> = {
+  Module: "violet",
+  BoundedContext: "violet",
+  Aggregate: "blue",
+  Operation: "cyan",
+  ValueObject: "teal",
+  EventDecl: "orange",
+  Repository: "grape",
+  Workflow: "indigo",
+  View: "lime",
+  Deployable: "pink",
+  Api: "yellow",
+};
+
+function CodeRefPicker({
+  label,
+  description,
+  value,
+  onChange,
+  targetables,
+  testid,
+}: {
+  label: string;
+  description?: string;
+  value: string[];
+  onChange: (next: string[]) => void;
+  targetables: TargetableSymbol[];
+  testid?: string;
+}): JSX.Element {
+  // Mantine MultiSelect requires every selected value to be in `data`.
+  // Add any currently-selected values that aren't in the symbol index
+  // (renamed/missing code) so we don't silently drop them.
+  const knownQns = new Set(targetables.map((t) => t.qn));
+  const extras = value.filter((v) => !knownQns.has(v)).map((qn) => ({ value: qn, label: `${qn} (unknown)` }));
+  const data = [
+    ...targetables.map((t) => ({ value: t.qn, label: t.qn })),
+    ...extras,
+  ];
+  return (
+    <Box>
+      <MultiSelect
+        label={label}
+        description={description}
+        data={data}
+        value={value}
+        onChange={onChange}
+        searchable
+        clearable
+        nothingFoundMessage="No matching code symbol"
+        data-testid={testid}
+      />
+      {value.length > 0 && (
+        <Group gap={6} mt={6} wrap="wrap">
+          {value.map((qn) => {
+            const sym = targetables.find((t) => t.qn === qn);
+            const kind = sym?.kind ?? "unknown";
+            return (
+              <Badge
+                key={qn}
+                size="xs"
+                color={KIND_BADGE_COLOR[kind] ?? "gray"}
+                variant="light"
+                title={kind}
+              >
+                {kind.replace("EventDecl", "Event").replace("BoundedContext", "Context")}
+              </Badge>
+            );
+          })}
+        </Group>
+      )}
+    </Box>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Misc
+// ---------------------------------------------------------------------------
 
 function Link({
   onClick,
