@@ -221,6 +221,52 @@ describe("typescript generator", () => {
       );
     });
 
+    it("--trace on: success responses bind the payload + emit wire_out before c.json", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS, { emitTrace: true });
+      const routes = files.get("http/order.routes.ts")!;
+      // create: payload bound to __out so c.json doesn't re-evaluate, +
+      // wire_out fires immediately before the return.
+      expect(routes).toMatch(
+        /const __out = \{ id: created\.id as string \};\n\s+.*\.get\("log"\)\.trace\(\{ event: "wire_out", keys: Object\.keys\(__out as Record<string, unknown>\) \}\);\n\s+return c\.json\(__out, 201\);/,
+      );
+      // get-by-id success: same pattern, with the existing z.infer cast
+      // kept at the c.json site so the response shape still typechecks.
+      expect(routes).toMatch(
+        /const __out = repo\.toWire\(found\);\n\s+.*"wire_out"[^\n]+\n\s+return c\.json\(__out as z\.infer<typeof OrderResponse>, 200\);/,
+      );
+      // Array finds skip wire_out — `Object.keys` over an array returns
+      // positional indices, not a useful key set.
+      const wireOuts = routes.match(/event: "wire_out"/g) ?? [];
+      expect(wireOuts.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it("--trace off: success responses keep the original one-line c.json (no binding, no wire_out)", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS); // no emitTrace
+      const routes = files.get("http/order.routes.ts")!;
+      expect(routes).not.toMatch(/event: "wire_out"/);
+      expect(routes).not.toMatch(/const __out =/);
+      // Original one-line returns unchanged.
+      expect(routes).toMatch(/return c\.json\(\{ id: created\.id as string \}, 201\);/);
+      expect(routes).toMatch(
+        /return c\.json\(repo\.toWire\(found\) as z\.infer<typeof OrderResponse>, 200\);/,
+      );
+    });
+
+    it("boot script wires pool.on('error') to a db_disconnected warn line", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS);
+      const index = files.get("index.ts")!;
+      // pool 'error' fires on a dropped backend connection (DB restart,
+      // network blip) — operators see the cause at boot/diagnostic time
+      // instead of waiting for the next request to 503 / 500.  Always
+      // emitted (not gated on --trace).
+      expect(index).toMatch(/pool\.on\("error", \(err\) => \{/);
+      expect(index).toMatch(/event: "db_disconnected"/);
+      expect(index).toMatch(/reason: err instanceof Error \? err\.message : String\(err\)/);
+    });
+
     it("--trace on: operation route emits wire_in after body parse, off keeps no wire_in", async () => {
       const model = await buildModel("examples/sales.ddd");
       const filesOn = generateTypeScript(model, HONO_V4_PINS, { emitTrace: true });

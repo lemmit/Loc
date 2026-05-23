@@ -247,7 +247,18 @@ export function buildRoutesFile(
   lines.push(
     `      ${renderHonoLogCall("aggregateCreated", `aggregate: "${agg.name}", id: created.id as string`)}`,
   );
-  lines.push(`      return c.json({ id: created.id as string }, 201);`);
+  if (emitTrace) {
+    // wire_out — outbound payload shape (keys only).  Bound to a const
+    // so `c.json` doesn't re-evaluate the payload expression alongside
+    // Object.keys.  See docs/proposals/observability.md.
+    lines.push(`      const __out = { id: created.id as string };`);
+    lines.push(
+      `      ${renderHonoLogCall("wireOut", "keys: Object.keys(__out as Record<string, unknown>)")}`,
+    );
+    lines.push(`      return c.json(__out, 201);`);
+  } else {
+    lines.push(`      return c.json({ id: created.id as string }, 201);`);
+  }
   lines.push(`    },`);
   lines.push(`  );`);
   lines.push("");
@@ -273,9 +284,19 @@ export function buildRoutesFile(
   lines.push(`      const { id } = c.req.valid("param");`);
   lines.push(`      const found = await repo.findById(Ids.${agg.name}Id(id));`);
   lines.push(`      if (!found) return c.json({ error: "not_found" }, 404);`);
-  lines.push(
-    `      return c.json(repo.toWire(found) as z.infer<typeof ${agg.name}Response>, 200);`,
-  );
+  if (emitTrace) {
+    // toWire isn't trivial — bind once so it's not run twice between
+    // Object.keys and c.json.
+    lines.push(`      const __out = repo.toWire(found);`);
+    lines.push(
+      `      ${renderHonoLogCall("wireOut", "keys: Object.keys(__out as Record<string, unknown>)")}`,
+    );
+    lines.push(`      return c.json(__out as z.infer<typeof ${agg.name}Response>, 200);`);
+  } else {
+    lines.push(
+      `      return c.json(repo.toWire(found) as z.infer<typeof ${agg.name}Response>, 200);`,
+    );
+  }
   lines.push(`    },`);
   lines.push(`  );`);
   lines.push("");
@@ -298,7 +319,7 @@ export function buildRoutesFile(
   // Find queries (including the auto-included `all`).
   if (repo) {
     for (const find of repo.finds) {
-      lines.push(...emitFindRoute(agg, find, ctx).map((l) => `  ${l}`));
+      lines.push(...emitFindRoute(agg, find, ctx, emitTrace).map((l) => `  ${l}`));
       lines.push("");
     }
   }
@@ -507,7 +528,12 @@ function emitOperationRoute(
   return out;
 }
 
-function emitFindRoute(agg: AggregateIR, find: FindIR, ctx: BoundedContextIR): string[] {
+function emitFindRoute(
+  agg: AggregateIR,
+  find: FindIR,
+  ctx: BoundedContextIR,
+  emitTrace: boolean,
+): string[] {
   const aggSlug = snake(plural(agg.name));
   const findSnake = snake(find.name);
   const isList = find.returnType.kind === "array";
@@ -550,14 +576,37 @@ function emitFindRoute(agg: AggregateIR, find: FindIR, ctx: BoundedContextIR): s
   const argList = (usesUser ? [...baseArgs, "currentUser"] : baseArgs).join(", ");
   out.push(`    const result = await repo.${find.name}(${argList});`);
   if (isList) {
+    // Array responses skip wire_out — `Object.keys` over an array
+    // returns positional indices, which aren't a useful shape signal.
+    // (The catalog's `wire_out` is a key-set marker, not a length one.)
     out.push(
       `    return c.json(result.map((r) => repo.toWire(r)) as z.infer<typeof ${agg.name}Response>[], 200);`,
     );
   } else if (find.returnType.kind === "optional") {
     out.push(`    if (result == null) return c.json({ error: "not_found" }, 404);`);
-    out.push(`    return c.json(repo.toWire(result) as z.infer<typeof ${agg.name}Response>, 200);`);
+    if (emitTrace) {
+      out.push(`    const __out = repo.toWire(result);`);
+      out.push(
+        `    ${renderHonoLogCall("wireOut", "keys: Object.keys(__out as Record<string, unknown>)")}`,
+      );
+      out.push(`    return c.json(__out as z.infer<typeof ${agg.name}Response>, 200);`);
+    } else {
+      out.push(
+        `    return c.json(repo.toWire(result) as z.infer<typeof ${agg.name}Response>, 200);`,
+      );
+    }
   } else {
-    out.push(`    return c.json(repo.toWire(result) as z.infer<typeof ${agg.name}Response>, 200);`);
+    if (emitTrace) {
+      out.push(`    const __out = repo.toWire(result);`);
+      out.push(
+        `    ${renderHonoLogCall("wireOut", "keys: Object.keys(__out as Record<string, unknown>)")}`,
+      );
+      out.push(`    return c.json(__out as z.infer<typeof ${agg.name}Response>, 200);`);
+    } else {
+      out.push(
+        `    return c.json(repo.toWire(result) as z.infer<typeof ${agg.name}Response>, 200);`,
+      );
+    }
   }
   out.push(`  },`);
   out.push(`);`);
