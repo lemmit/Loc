@@ -520,9 +520,14 @@ Phasing:
   resolver — left for Phase 4) gets the pencil + `×` affordance on its node.
   Gated by the v2 e2e (rename a context and delete an operation through the
   on-node controls).
-- **Phase 4** — long-tail parity with v1 (fields / finds / deployable bindings
-  / emit repointing as per-node interactions). Once landed, v1 can be
-  deprecated.
+- ~~**Phase 4a — field rename + delete on the node.**~~ Done: routes through
+  v1's `renameMember` (text-token resolver, handles `this.field` / `x.field`
+  usages via the shared `member-refs` resolver) and `deleteField` (preserves
+  surrounding layout); containment also gets rename. Gated by the v2 e2e
+  (rename + delete a field on the canvas).
+- **Phase 4b** — remaining v1 parity: deployable bindings (modules / serves /
+  ui / targets), repository finds (filter + params), emit-event repointing on
+  the canvas. Once landed, v1 can be deprecated.
 - **Phase 5** — polish: per-view positions, search / coverage / grouped layout
   adapted per zoom level, transitions on drill, mobile passes.
 

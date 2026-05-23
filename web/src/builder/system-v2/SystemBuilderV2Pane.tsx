@@ -30,7 +30,7 @@ import {
   type BodyLocator,
   type StmtView,
 } from "../system/body";
-import { listFields } from "../system/fields";
+import { deleteField, listFields } from "../system/fields";
 import { seedExpr } from "../system/expr-model";
 import {
   editExprSlot,
@@ -42,7 +42,7 @@ import {
 import { ExprSlotEditor, type ExprMode } from "../system/ExpressionEditor";
 import { AstUtils } from "langium";
 import { spliceNode } from "../edit-engine";
-import { IDENTIFIER } from "../system/rename";
+import { IDENTIFIER, renameMember } from "../system/rename";
 import AddPalette from "./AddPalette";
 import ConstructNode, { type ConstructNodeData } from "./ConstructNode";
 import { renameByAstType } from "./rename-extra";
@@ -326,8 +326,44 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
    *  read-only constructs without action buttons. */
   const constructData = useMemo(() => {
     const m = new Map<string, ConstructNodeData>();
+    const aggOwner = path[path.length - 1];
     for (const n of graph.nodes) {
       if (n.kind === "stmt") continue;
+
+      // Aggregate field / containment names are plain text tokens in
+      // expressions (`this.field`, `x.field`, view binds, find filters), not
+      // Langium cross-refs — so they need v1's `renameMember` resolver.
+      // Delete uses `deleteField` (preserves comma / whitespace layout).
+      if ((n.kind === "field" || n.kind === "containment") && aggOwner?.kind === "aggregate") {
+        const aggName = aggOwner.name;
+        const onRename = (next: string): void => {
+          if (!IDENTIFIER.test(next) || next === n.name) return;
+          void renameMember(ctx.getSource(), "aggregate", aggName, n.name, next).then((result) => {
+            if (result != null) apply(result);
+          });
+        };
+        const onDelete =
+          n.kind === "field"
+            ? () => {
+                const agg = findAggregate(parsed.ast, aggName);
+                if (!agg) return;
+                const idx = listFields(agg).findIndex((f) => f.name === n.name);
+                if (idx < 0) return;
+                const next = deleteField(ctx.getSource(), "aggregate", aggName, idx);
+                if (next != null) apply(next);
+              }
+            : undefined;
+        m.set(n.id, {
+          kind: n.kind,
+          name: n.name,
+          color: KIND_COLOR[n.kind],
+          drillable: n.drillable,
+          onRename,
+          onDelete,
+        });
+        continue;
+      }
+
       const astType = AST_TYPE_BY_VIEW[n.kind];
       const onRename =
         astType != null
@@ -360,7 +396,7 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     }
     return m;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graph, parsed, rev]);
+  }, [graph, parsed, path, rev]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(toRfNodes(graph, stmtData, constructData));
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(toRfEdges(graph));
