@@ -570,6 +570,15 @@ Phasing:
   nothing overflows. Gated by a new
   `web/e2e/system-builder-v2-mobile.spec.ts` (390×844 viewport drills
   Sales System → Order → confirm and confirms the statement flow renders).
+- ~~**Phase 6 (visual kick — invariants + substatement subkinds).**~~ Done:
+  aggregate view now surfaces each `Invariant` as a node (id keyed by index,
+  name = a preview of the expression) — delete works through the parent
+  aggregate by index. And in the statement flow, "other" stmt rows are
+  discriminated by their leading keyword: `precondition` (yellow),
+  `requires` (orange), `let` (cyan), or generic `stmt` (gray) — each with
+  its own label + border tint instead of the uniform `STMT`. Gated by the
+  v2 e2e (banking invariants render; Order.confirm's precondition shows
+  `data-stmt-subkind="precondition"`).
 - **Phase 5** — polish: per-view positions, search / coverage / grouped layout
   adapted per zoom level, transitions on drill, mobile passes.
 

@@ -36,6 +36,9 @@ export type ViewKind =
   | "stmt"
   // a single repository find — the leaf of a repository view
   | "find"
+  // aggregate-level invariant — a synthetic node (Invariant has no name; the
+  // node carries a preview of its expression as `name`)
+  | "invariant"
   // leaves (still no drill below)
   | "valueobject"
   | "event"
@@ -249,7 +252,7 @@ function contextView(ast: Model, name: string): ViewGraph {
   return { title: `context ${name}`, nodes: layout(items, CONTEXT_ORDER), edges: [] };
 }
 
-const AGGREGATE_ORDER: readonly ViewKind[] = ["operation", "function", "field", "containment"];
+const AGGREGATE_ORDER: readonly ViewKind[] = ["operation", "function", "invariant", "field", "containment"];
 
 function aggregateView(ast: Model, name: string): ViewGraph {
   let agg: Aggregate | undefined;
@@ -290,6 +293,17 @@ function aggregateView(ast: Model, name: string): ViewGraph {
       case "Containment":
         items.push({ id: nid("containment", childName), kind: "containment", name: childName });
         break;
+    }
+  }
+  // Invariants are unnamed (`invariant <expr>`); synthesise nodes carrying a
+  // preview of the expression. The id encodes the index so the pane can
+  // splice the right one out on delete.
+  let invariantIndex = 0;
+  for (const m of agg.members as AggregateMember[]) {
+    if (m.$type === "Invariant") {
+      const preview = m.$cstNode?.text?.replace(/^invariant\s+/, "").trim() ?? `inv ${invariantIndex + 1}`;
+      items.push({ id: `invariant:${invariantIndex}`, kind: "invariant", name: preview });
+      invariantIndex++;
     }
   }
   return { title: `aggregate ${name}`, nodes: layout(items, AGGREGATE_ORDER), edges: [] };

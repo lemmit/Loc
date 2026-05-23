@@ -73,6 +73,23 @@ describe("Model v2 — view-graph per level", () => {
     expect(g.nodes.find((n) => n.id === "field:status")?.drillable).toBe(false);
   });
 
+  it("aggregate view surfaces invariants as indexed nodes carrying a preview", () => {
+    const INV = `context C {
+  aggregate Money {
+    amount: decimal
+    currency: string
+    invariant amount >= 0
+    invariant currency.length == 3
+  }
+}`;
+    const g = buildViewGraph(parse(INV), [{ kind: "aggregate", name: "Money" }]);
+    const invariants = g.nodes.filter((n) => n.kind === "invariant");
+    expect(invariants.map((n) => n.id)).toEqual(["invariant:0", "invariant:1"]);
+    expect(invariants[0]?.name).toBe("amount >= 0");
+    expect(invariants[1]?.name).toBe("currency.length == 3");
+    expect(invariants.every((n) => !n.drillable)).toBe(true);
+  });
+
   it("unknown name on a level yields an empty graph (graceful)", () => {
     expect(buildViewGraph(parse(SRC), [{ kind: "system", name: "Nope" }]).nodes).toEqual([]);
     expect(buildViewGraph(parse(SRC), [{ kind: "context", name: "Nope" }]).nodes).toEqual([]);

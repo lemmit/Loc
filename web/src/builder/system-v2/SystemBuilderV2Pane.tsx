@@ -74,6 +74,7 @@ const KIND_COLOR: Record<ViewKind, string> = {
   event: "var(--mantine-color-grape-7)",
   repository: "var(--mantine-color-indigo-7)",
   find: "var(--mantine-color-indigo-8)",
+  invariant: "var(--mantine-color-yellow-8)",
   view: "var(--mantine-color-lime-8)",
   function: "var(--mantine-color-yellow-8)",
   field: "var(--mantine-color-gray-7)",
@@ -375,6 +376,36 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     const aggOwner = path[path.length - 1];
     for (const n of graph.nodes) {
       if (n.kind === "stmt") continue;
+
+      // Invariants are unnamed, so view-graph keys them by index. Delete
+      // requires finding the right Invariant member by index in the aggregate.
+      if (n.kind === "invariant" && aggOwner?.kind === "aggregate") {
+        const aggName = aggOwner.name;
+        const idx = Number(n.id.slice("invariant:".length));
+        const onDelete = (): void => {
+          const agg = findAggregate(parsed.ast, aggName);
+          if (!agg) return;
+          let i = 0;
+          for (const member of agg.members) {
+            if (member.$type === "Invariant") {
+              if (i === idx) {
+                apply(spliceNode(ctx.getSource(), member, ""));
+                return;
+              }
+              i++;
+            }
+          }
+        };
+        m.set(n.id, {
+          kind: n.kind,
+          name: n.name,
+          color: KIND_COLOR[n.kind],
+          drillable: n.drillable,
+          onDelete,
+          compact,
+        });
+        continue;
+      }
 
       // Aggregate field / containment names are plain text tokens in
       // expressions (`this.field`, `x.field`, view binds, find filters), not
