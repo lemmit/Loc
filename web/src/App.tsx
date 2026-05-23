@@ -6,7 +6,7 @@ import { LoomLspClient } from "./lsp/client";
 import type { Diagnostic } from "./lsp/protocol";
 import { examples, defaultExample, type LoomExample } from "./examples";
 import { LoomBuildClient } from "./build/client";
-import type { GenerateOk, GenerateResult, VirtualFile } from "./build/protocol";
+import type { GenerateOk, GenerateResult, VfsEntry, VirtualFile } from "./build/protocol";
 import type { BundleOk } from "./bundle/protocol";
 import { engineRegistry, selectedEngineId, type RuntimeEngine } from "./engine";
 import { emptyDependencySet } from "./engine";
@@ -343,10 +343,17 @@ export default function App(): JSX.Element {
       seedWorkspace: () => {
         const vfs = workspaceForSeedRef.current.vfs;
         if (!vfs) return [];
-        return vfs.list("/workspace/").flatMap((path) => {
-          const content = vfs.read(path);
-          return content != null ? [{ path, content }] : [];
-        });
+        // Snapshot the workspace as tagged entries so directory
+        // entries (created via `mkdir`, empty by design) survive
+        // the worker respawn — the previous `list().flatMap(read)`
+        // shape silently dropped them by filtering out
+        // `read() === undefined`.
+        const out = [];
+        for (const [path, entry] of vfs.snapshot()) {
+          if (!path.startsWith("/workspace/")) continue;
+          out.push(entry);
+        }
+        return out;
       },
     });
     // The runtime engine encapsulates the bundle + runtime workers
@@ -440,10 +447,14 @@ export default function App(): JSX.Element {
     if (!vfs || !client) return;
     const designPaths = vfs.list("/workspace/design/");
     if (designPaths.length === 0) return;
-    const entries = designPaths.flatMap((path) => {
+    // Use tagged VfsEntry shape — `list` is files-only so every
+    // path here is a file, but the wire protocol expects the
+    // discriminated union.
+    const entries: VfsEntry[] = [];
+    for (const path of designPaths) {
       const content = vfs.read(path);
-      return content != null ? [{ path, content }] : [];
-    });
+      if (content != null) entries.push({ kind: "file", path, content });
+    }
     void client.vfsWrite(entries);
   }, [workspace.loaded, workspace.vfs, buildClientReady]);
 
@@ -616,7 +627,7 @@ export default function App(): JSX.Element {
     if (!client) return null;
     dispatch({ type: "GENERATE_START" });
     const entryPath = sourcesRef.current.activePath;
-    await client.vfsWrite([{ path: entryPath, content: sourceRef.current }]);
+    await client.vfsWrite([{ kind: "file", path: entryPath, content: sourceRef.current }]);
     const result = await client.generateFromPath(entryPath);
     dispatch({ type: "GENERATE_DONE", result });
     if (result.ok && result.files.length > 0) {

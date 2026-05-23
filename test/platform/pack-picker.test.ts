@@ -115,9 +115,9 @@ describe("packToVfsEntries", () => {
       ],
     });
     expect(entries).toEqual([
-      { path: "/workspace/design/foo/pack.json", content: "{}" },
-      { path: "/workspace/design/foo/page-list.hbs", content: "X" },
-      { path: "/workspace/design/foo/cells/cell-id.hbs", content: "Y" },
+      { kind: "file", path: "/workspace/design/foo/pack.json", content: "{}" },
+      { kind: "file", path: "/workspace/design/foo/page-list.hbs", content: "X" },
+      { kind: "file", path: "/workspace/design/foo/cells/cell-id.hbs", content: "Y" },
     ]);
   });
 });
