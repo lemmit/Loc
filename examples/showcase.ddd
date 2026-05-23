@@ -438,6 +438,7 @@ system DevPlatform {
             Accounts { primary: primarySql }
         serves: ProjectsApi, DeliveryApi, AccountsApi
         port: 8080
+        auth: required
     }
 
     deployable honoApi {
@@ -448,6 +449,7 @@ system DevPlatform {
             Accounts { primary: primarySql }
         serves: ProjectsApi, DeliveryApi, AccountsApi
         port: 3000
+        auth: required
     }
 
     deployable phoenixApi {
@@ -458,6 +460,7 @@ system DevPlatform {
             Accounts { primary: primarySql }
         serves: ProjectsApi, DeliveryApi, AccountsApi
         port: 4000
+        auth: required
     }
 
     // ----- Frontend deployables: all three ui-binding forms -----
