@@ -215,7 +215,7 @@ function expandOneCall(
     });
     return;
   }
-  const argResult = bindArgs(macro, call, doc, inv);
+  const argResult = bindArgs(macro, call, inv, (d) => recordDiagnostic(doc, d));
   if (!argResult.ok) return;
   const origin: OriginToken = {
     _kind: "macro-origin",
@@ -428,18 +428,20 @@ interface BindFailure {
   ok: false;
 }
 
+type DiagnosticRecorder = (d: ExpansionDiagnostic) => void;
+
 function bindArgs(
   macro: MacroDefinition,
   call: MacroCall,
-  doc: LangiumDocument,
   inv: Inventory,
+  record: DiagnosticRecorder,
 ): BindResult | BindFailure {
   const spec: ParamSpec = macro.params ?? {};
   const provided = new Map<string, MacroArg>();
   for (const a of call.args ?? []) {
     if (!a.name) continue;
     if (provided.has(a.name)) {
-      recordDiagnostic(doc, {
+      record({
         severity: "error",
         message: `Duplicate argument '${a.name}' in call to macro '${macro.name}'.`,
         node: a,
@@ -457,7 +459,7 @@ function bindArgs(
   for (const [name, arg] of provided) {
     const ps = spec[name];
     if (!ps) {
-      recordDiagnostic(doc, {
+      record({
         severity: "error",
         message:
           `Unknown argument '${name}' for macro '${macro.name}'.  ` +
@@ -468,7 +470,7 @@ function bindArgs(
       failed = true;
       continue;
     }
-    const v = coerceArg(macro.name, name, arg, ps, doc, inv);
+    const v = coerceArg(macro.name, name, arg, ps, inv, record);
     if (v.ok) out[name] = v.value;
     else failed = true;
   }
@@ -483,7 +485,7 @@ function bindArgs(
     } else if (ps.kind === "ref" && ps.optional) {
       out[name] = undefined;
     } else {
-      recordDiagnostic(doc, {
+      record({
         severity: "error",
         message: `Macro '${macro.name}' requires argument '${name}' (kind=${ps.kind}).`,
         node: call,
@@ -500,8 +502,8 @@ function coerceArg(
   argName: string,
   arg: MacroArg,
   spec: ParamType,
-  doc: LangiumDocument,
   inv: Inventory,
+  record: DiagnosticRecorder,
 ): { ok: true; value: unknown } | { ok: false } {
   const v = arg.value;
   switch (spec.kind) {
@@ -523,7 +525,7 @@ function coerceArg(
         if (!refText) return { ok: false };
         const resolved = resolveRef(inv, spec.of, refText);
         if (!resolved) {
-          recordDiagnostic(doc, {
+          record({
             severity: "error",
             message: `Argument '${argName}' to macro '${macroName}' references unknown ${spec.of} '${refText}'.`,
             node: arg,
@@ -543,7 +545,7 @@ function coerceArg(
           if (!refText) continue;
           const node = resolveRef(inv, spec.of, refText);
           if (!node) {
-            recordDiagnostic(doc, {
+            record({
               severity: "error",
               message: `Argument '${argName}' to macro '${macroName}' references unknown ${spec.of} '${refText}'.`,
               node: arg,
@@ -559,13 +561,30 @@ function coerceArg(
       }
       break;
   }
-  recordDiagnostic(doc, {
+  record({
     severity: "error",
     message: `Argument '${argName}' to macro '${macroName}' expected kind '${spec.kind}'.`,
     node: arg,
     property: "value",
   });
   return { ok: false };
+}
+
+/** Resolve a macro call's arguments against the document model the
+ * way the runtime expander does, but without recording any
+ * diagnostics.  Returns the bound `args` record on success, or
+ * `undefined` if the call's args don't bind (unknown name, type
+ * mismatch, missing required, unresolvable ref).  Used by the
+ * unfold code action so it expands with the user's actual args
+ * rather than empty defaults. */
+export function resolveMacroArgs(
+  macro: MacroDefinition,
+  call: MacroCall,
+  model: Model,
+): Record<string, unknown> | undefined {
+  const inv = buildInventory(model);
+  const result = bindArgs(macro, call, inv, () => {});
+  return result.ok ? result.values : undefined;
 }
 
 function resolveRef(inv: Inventory, kind: NamedDeclKind, name: string): AstNode | undefined {
