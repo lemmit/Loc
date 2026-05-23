@@ -23,10 +23,7 @@ export function renderExpectStmt(expr: ExprIR, render: (e: ExprIR) => string): s
  *  with optional `.not.`), render it directly. Returns null for anything
  *  else — including locator matchers, which are rendered by the backend's
  *  own helper since they need locator-specific receiver lowering. */
-function renderExplicitValueMatcher(
-  expr: ExprIR,
-  render: (e: ExprIR) => string,
-): string | null {
+function renderExplicitValueMatcher(expr: ExprIR, render: (e: ExprIR) => string): string | null {
   if (expr.kind !== "method-call" || !expr.isIntrinsicMatcher) return null;
   const sig = intrinsicMatcherSig(expr.member);
   if (!sig || sig.on !== "value") return null;
@@ -36,11 +33,7 @@ function renderExplicitValueMatcher(
   // by `.not` for negation.
   let receiver = expr.receiver;
   let negate = false;
-  if (
-    receiver.kind === "member" &&
-    receiver.member === "not" &&
-    sig.negatable
-  ) {
+  if (receiver.kind === "member" && receiver.member === "not" && sig.negatable) {
     negate = true;
     receiver = receiver.receiver;
   }

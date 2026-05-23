@@ -81,11 +81,7 @@ function renderExplicitMatcherToXUnit(expr: ExprIR): string | null {
   if (!sig || sig.on !== "value") return null;
   let receiver = expr.receiver;
   let negate = false;
-  if (
-    receiver.kind === "member" &&
-    receiver.member === "not" &&
-    sig.negatable
-  ) {
+  if (receiver.kind === "member" && receiver.member === "not" && sig.negatable) {
     negate = true;
     receiver = receiver.receiver;
   }
@@ -95,25 +91,15 @@ function renderExplicitMatcherToXUnit(expr: ExprIR): string | null {
   switch (expr.member) {
     case "toBe":
       // xUnit: `Assert.Equal(expected, actual)` / `Assert.NotEqual(...)`.
-      return negate
-        ? `Assert.NotEqual(${arg}, ${actual});`
-        : `Assert.Equal(${arg}, ${actual});`;
+      return negate ? `Assert.NotEqual(${arg}, ${actual});` : `Assert.Equal(${arg}, ${actual});`;
     case "toBeGreaterThan":
-      return negate
-        ? `Assert.False(${actual} > ${arg});`
-        : `Assert.True(${actual} > ${arg});`;
+      return negate ? `Assert.False(${actual} > ${arg});` : `Assert.True(${actual} > ${arg});`;
     case "toBeGreaterThanOrEqual":
-      return negate
-        ? `Assert.False(${actual} >= ${arg});`
-        : `Assert.True(${actual} >= ${arg});`;
+      return negate ? `Assert.False(${actual} >= ${arg});` : `Assert.True(${actual} >= ${arg});`;
     case "toBeLessThan":
-      return negate
-        ? `Assert.False(${actual} < ${arg});`
-        : `Assert.True(${actual} < ${arg});`;
+      return negate ? `Assert.False(${actual} < ${arg});` : `Assert.True(${actual} < ${arg});`;
     case "toBeLessThanOrEqual":
-      return negate
-        ? `Assert.False(${actual} <= ${arg});`
-        : `Assert.True(${actual} <= ${arg});`;
+      return negate ? `Assert.False(${actual} <= ${arg});` : `Assert.True(${actual} <= ${arg});`;
     default:
       return null;
   }

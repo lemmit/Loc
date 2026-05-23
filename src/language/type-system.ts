@@ -487,9 +487,7 @@ const INTRINSIC_MATCHER_SIGNATURES: ReadonlyArray<MatcherSig> = [
   { name: "toHaveCount", arity: 1, on: "locator", negatable: true },
   { name: "toBeVisible", arity: 0, on: "locator", negatable: true },
 ];
-const INTRINSIC_MATCHERS = new Map(
-  INTRINSIC_MATCHER_SIGNATURES.map((m) => [m.name, m]),
-);
+const INTRINSIC_MATCHERS = new Map(INTRINSIC_MATCHER_SIGNATURES.map((m) => [m.name, m]));
 
 export function isIntrinsicMatcher(name: string): boolean {
   return INTRINSIC_MATCHERS.has(name);
