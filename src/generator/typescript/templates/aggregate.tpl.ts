@@ -41,6 +41,7 @@ export function renderAggregate(
   agg: AggregateIR,
   ctx: BoundedContextIR,
   emitProvenance = false,
+  emitTrace = false,
 ): string {
   const valueObjectAliases = ctx.valueObjects.map((v) => v.name);
   const enumAliases = ctx.enums.map((e) => e.name);
@@ -49,8 +50,15 @@ export function renderAggregate(
     (agg.operations.some((op) => op.statements.some(stmtHasProv)) ||
       agg.fields.some((f) => f.provenanced) ||
       agg.parts.some((p) => p.fields.some((f) => f.provenanced)));
-  const partsRendered = agg.parts.map((p) => renderEntity(partShape(p, agg), emitProvenance));
-  const rootRendered = renderEntity(rootShape(agg), emitProvenance);
+  // Domain-injected trace lines (`value_computed`, `precondition_evaluated`)
+  // resolve the request-scoped logger via `requestLog()` from obs/als —
+  // imported here only when --trace is on, so the default artefact keeps
+  // the domain layer free of any infra import.
+  const hasDomainTrace = emitTrace;
+  const partsRendered = agg.parts.map((p) =>
+    renderEntity(partShape(p, agg), emitProvenance, emitTrace),
+  );
+  const rootRendered = renderEntity(rootShape(agg), emitProvenance, emitTrace);
   // When any aggregate op references `currentUser` we pull the User
   // type from the auth/ package so the operation's `currentUser:
   // User` parameter typechecks.  Files emitted under deployables
@@ -71,6 +79,7 @@ export function renderAggregate(
       'import type * as Events from "./events";',
       'import { DomainError, ForbiddenError } from "./errors";',
       hasProv ? 'import { type ProvLineage } from "./provenance";' : null,
+      hasDomainTrace ? 'import { requestLog } from "../obs/als";' : null,
       usesUser ? 'import type { User } from "../auth/user-types";' : null,
       "",
       partsRendered.length > 0 ? partsRendered.map((p) => p + "\n").join("\n") : "",
@@ -106,7 +115,7 @@ function partShape(p: EntityPartIR, root: AggregateIR): EntityShape {
   };
 }
 
-function renderEntity(e: EntityShape, emitProvenance = false): string {
+function renderEntity(e: EntityShape, emitProvenance = false, emitTrace = false): string {
   const containsType = (c: ContainmentIR): string =>
     `${c.partName}${c.collection ? "[]" : " | null"}`;
   const containsGetterType = (c: ContainmentIR): string =>
@@ -236,14 +245,22 @@ function renderEntity(e: EntityShape, emitProvenance = false): string {
       // business decision.
       const checkName = `check${op.name[0]!.toUpperCase()}${op.name.slice(1)}`;
       ops.push(`  ${checkName}(${params}): void {`);
-      const body = renderTsStatements(op.statements, emitProvenance);
+      const body = renderTsStatements(op.statements, emitProvenance, {
+      emitTrace,
+      aggregate: e.name,
+      op: op.name,
+    });
       if (body.length > 0) ops.push(body);
       ops.push("  }");
       ops.push("");
       continue;
     }
     ops.push(`  ${visibility} ${lowerFirst(op.name)}(${params}): void {`);
-    const body = renderTsStatements(op.statements, emitProvenance);
+    const body = renderTsStatements(op.statements, emitProvenance, {
+      emitTrace,
+      aggregate: e.name,
+      op: op.name,
+    });
     if (body.length > 0) ops.push(body);
     ops.push("    this._assertInvariants();");
     ops.push("  }");
