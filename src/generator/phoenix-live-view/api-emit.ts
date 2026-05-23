@@ -1,5 +1,6 @@
 import type { BoundedContextIR, DeployableIR, SystemIR } from "../../ir/loom-ir.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
+import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
 
 // ---------------------------------------------------------------------------
 // API controller emission for Phoenix LiveView / Ash.
@@ -366,6 +367,12 @@ function renderAggregatesController(
   return `# Auto-generated.
 defmodule ${webModule}.AggregatesController do
   use ${webModule}, :controller
+  # Catalog log events (aggregate_created on Create; see
+  # docs/proposals/observability.md) reach Elixir's Logger via the
+  # renderer in src/generator/_obs/render-phoenix.ts.  Required at
+  # module top so the macro-expanded Logger.<level>(...) calls below
+  # compile without further per-action imports.
+  require Logger
 
   @moduledoc """
   HTTP entry points for all aggregate CRUD code-interface functions.
@@ -401,6 +408,10 @@ function renderAggregateActions(
   @doc "POST /api/aggregates/${aggPlural}"
   def create_${aggSnake}(conn, params) do
     record = ${contextModule}.create_${aggSnake}!(params)
+    ${renderPhoenixLogCall("aggregateCreated", [
+      { name: "aggregate", valueExpr: `"${agg.name}"` },
+      { name: "id", valueExpr: "record.id" },
+    ])}
     conn
     |> put_status(:created)
     |> json(record)
@@ -430,6 +441,10 @@ function renderHealthController(appModule: string): string {
   return `# Auto-generated.
 defmodule ${webModule}.HealthController do
   use ${webModule}, :controller
+  # Catalog log events (health_ok / db_error / health_degraded — see
+  # docs/proposals/observability.md) — same identity the Hono /ready
+  # arm emits, so cross-backend dashboards filter on one event name.
+  require Logger
 
   @moduledoc """
   Liveness and readiness probes.
@@ -440,6 +455,7 @@ defmodule ${webModule}.HealthController do
 
   @doc "GET /health — liveness probe (no DB dependency)."
   def liveness(conn, _params) do
+    ${renderPhoenixLogCall("healthOk", [{ name: "checks", valueExpr: `["liveness"]` }])}
     json(conn, %{status: "ok"})
   end
 
@@ -447,9 +463,12 @@ defmodule ${webModule}.HealthController do
   def readiness(conn, _params) do
     try do
       Ecto.Adapters.SQL.query!(${appModule}.Repo, "SELECT 1", [])
+      ${renderPhoenixLogCall("healthOk", [{ name: "checks", valueExpr: `["readiness", "db"]` }])}
       json(conn, %{status: "ready"})
     rescue
-      _e ->
+      e ->
+        ${renderPhoenixLogCall("dbError", [{ name: "error", valueExpr: "Exception.message(e)" }])}
+        ${renderPhoenixLogCall("healthDegraded", [{ name: "checks", valueExpr: `["db"]` }])}
         conn
         |> put_status(:service_unavailable)
         |> json(%{status: "not_ready"})

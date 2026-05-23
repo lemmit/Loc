@@ -5,6 +5,7 @@ import {
   renderDotnetLogCallWithException,
 } from "../../src/generator/_obs/render-dotnet.js";
 import { renderHonoBaseLogCall, renderHonoLogCall } from "../../src/generator/_obs/render-hono.js";
+import { renderPhoenixLogCall } from "../../src/generator/_obs/render-phoenix.js";
 
 // ---------------------------------------------------------------------------
 // Neutral log-event catalog — the single source of truth for every log
@@ -154,5 +155,40 @@ describe("log-event catalog — .NET renderer", () => {
     // valid ILogger call with just the event-name binding.
     const line = renderDotnetLogCall("serverDrained");
     expect(line).toBe(`_log.LogInformation("{Event}", "server_drained");`);
+  });
+});
+
+describe("log-event catalog — Phoenix renderer", () => {
+  it("renders a typical info event with snake_case metadata keys", () => {
+    // Message = event name (grep-target); metadata carries the structured
+    // fields PLUS a re-stamped `event:` so cross-backend pipelines pivot
+    // on one key regardless of source.
+    const line = renderPhoenixLogCall("aggregateCreated", [
+      { name: "aggregate", valueExpr: `"Order"` },
+      { name: "id", valueExpr: "record.id" },
+    ]);
+    expect(line).toBe(
+      `Logger.info("aggregate_created", event: "aggregate_created", aggregate: "Order", id: record.id)`,
+    );
+  });
+
+  it("maps catalog levels to Elixir Logger method names (warn → warning, trace → debug)", () => {
+    // Elixir's Logger has no `trace`; both `trace` and `debug` from the
+    // catalog land on Logger.debug.  The event-name keeps them
+    // distinguishable.  And Elixir spells the level `warning`, not `warn`.
+    expect(renderPhoenixLogCall("domainError")).toMatch(/^Logger\.warning\(/);
+    expect(renderPhoenixLogCall("internalError")).toMatch(/^Logger\.error\(/);
+    expect(renderPhoenixLogCall("repositorySave")).toMatch(/^Logger\.debug\(/);
+    // trace-level entry: still Logger.debug — distinguished by event name.
+    expect(renderPhoenixLogCall("invariantEvaluated")).toMatch(/^Logger\.debug\(/);
+    expect(renderPhoenixLogCall("invariantEvaluated")).toContain(`event: "invariant_evaluated"`);
+    expect(renderPhoenixLogCall("aggregateCreated")).toMatch(/^Logger\.info\(/);
+  });
+
+  it("emits the bare `event:` metadata when the call site has no extra fields", () => {
+    // `server_drained` carries nothing beyond the catalog envelope —
+    // metadata is just the re-stamped event key, no dangling comma.
+    const line = renderPhoenixLogCall("serverDrained");
+    expect(line).toBe(`Logger.info("server_drained", event: "server_drained")`);
   });
 });
