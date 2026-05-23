@@ -138,3 +138,49 @@ test("Model v2 renames and deletes a construct from the node itself", async ({ p
     .poll(async () => page.locator('.react-flow__node[data-id^="aggregate:"]').count(), { timeout: 5_000 })
     .toBe(before - 1);
 });
+
+test("Model v2 — module / aggregate / operation palettes (context / operation / field / stmt)", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+  await page.getByTestId("doc-tab-model-v2").click();
+  await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
+
+  // System → module: + Context bumps the context node count by one.
+  await page.locator('.react-flow__node[data-id^="system:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="module:"]').first().click();
+  await expect(page.getByTestId("c4system-v2-add-context")).toBeVisible();
+  const ctxBefore = await page.locator('.react-flow__node[data-id^="context:"]').count();
+  await page.getByTestId("c4system-v2-add-context").click();
+  await expect
+    .poll(async () => page.locator('.react-flow__node[data-id^="context:"]').count(), { timeout: 5_000 })
+    .toBe(ctxBefore + 1);
+
+  // Drill into the first context → Order: aggregate view shows + Operation +
+  // Field. Each bumps the corresponding node count.
+  await page.locator('.react-flow__node[data-id^="context:"]').first().click();
+  await page.locator('.react-flow__node[data-id="aggregate:Order"]').click();
+  await expect(page.getByTestId("c4system-v2-add-operation")).toBeVisible();
+  const opsBefore = await page.locator('.react-flow__node[data-id^="operation:"]').count();
+  await page.getByTestId("c4system-v2-add-operation").click();
+  await expect
+    .poll(async () => page.locator('.react-flow__node[data-id^="operation:"]').count(), { timeout: 5_000 })
+    .toBe(opsBefore + 1);
+
+  const fieldsBefore = await page.locator('.react-flow__node[data-id^="field:"]').count();
+  await page.getByTestId("c4system-v2-add-field").click();
+  await expect
+    .poll(async () => page.locator('.react-flow__node[data-id^="field:"]').count(), { timeout: 5_000 })
+    .toBe(fieldsBefore + 1);
+
+  // Drill into Order.confirm → operation flow: + Stmt adds a precondition node.
+  await page.locator('.react-flow__node[data-id="operation:confirm"]').click();
+  await expect(page.getByTestId("c4system-v2-add-stmt")).toBeVisible();
+  const stmtsBefore = await page.getByTestId("c4system-v2-stmt").count();
+  await page.getByTestId("c4system-v2-add-stmt").click();
+  await expect
+    .poll(async () => page.getByTestId("c4system-v2-stmt").count(), { timeout: 5_000 })
+    .toBe(stmtsBefore + 1);
+});
