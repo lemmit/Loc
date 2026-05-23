@@ -22,7 +22,13 @@ import {
 import { buildTree } from "./preview/file-tree";
 import { useWorkspace } from "./workspace/use-workspace";
 import { useWorkspaceSources } from "./workspace/use-workspace-sources";
-import { buildShareUrl, readHashSource, writeHashSource } from "./util/share";
+import {
+  buildShareUrl,
+  readHash,
+  writeHashProject,
+  writeHashSource,
+  type HashLoad,
+} from "./util/share";
 import { fnv1a32 } from "./util/hash";
 import { usePersistedState } from "./util/usePersistedState";
 import { initialPipelineState, pipelineReducer } from "./pipeline/reducer";
@@ -100,23 +106,64 @@ function analyzeDeployables(files: VirtualFile[]): DeployableAnalysis {
   return { hono, react, unsupported };
 }
 
+/** Convert a workspace-absolute `files` map from a SharedProject
+ *  into the workspace-relative shape `LoomExample.files` expects.
+ *  `/workspace/shared/money.ddd` → `shared/money.ddd`.  The active
+ *  file is dropped — it lives on `LoomExample.source` instead. */
+function workspacePathsToRelative(
+  files: Record<string, string>,
+  activePath: string,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [abs, content] of Object.entries(files)) {
+    if (abs === activePath) continue;
+    if (abs.startsWith("/workspace/")) {
+      const rel = abs.slice("/workspace/".length);
+      if (rel) out[rel] = content;
+    }
+  }
+  return out;
+}
+
 export default function App(): JSX.Element {
-  // Read once on mount.  If the URL hash has a `s=` payload we
-  // synthesise a "Shared link" entry at the top of the dropdown.
-  const hashSourceOnMount = useMemo(() => readHashSource(), []);
+  // Read once on mount.  When the URL hash carries a shareable
+  // payload — single-file `s=` (legacy) or multi-file `p=` (Stage
+  // 3) — we synthesise a "Shared link" entry at the top of the
+  // dropdown so a recipient lands on the shared project even before
+  // they touch the picker.
+  const hashLoadOnMount = useMemo<HashLoad | null>(() => readHash(), []);
+  // Convenience accessor: the source the "Shared link" entry's
+  // editor should open with — i.e. the active file's content for a
+  // project payload, or the raw text for a single-file payload.
+  const hashEntrySource = useMemo<string | null>(() => {
+    if (!hashLoadOnMount) return null;
+    if (hashLoadOnMount.kind === "single") return hashLoadOnMount.text;
+    const { files, active } = hashLoadOnMount.project;
+    return files[active] ?? files["/workspace/main.ddd"] ?? null;
+  }, [hashLoadOnMount]);
   const examplesList = useMemo<LoomExample[]>(() => {
-    if (hashSourceOnMount === null) return examples;
-    return [
-      {
-        id: "shared",
-        label: "Shared link (from URL)",
-        source: hashSourceOnMount,
-        blurb:
-          "Loaded from the URL hash — your edits update the URL so it stays shareable.",
-      },
-      ...examples,
-    ];
-  }, [hashSourceOnMount]);
+    if (hashEntrySource === null) return examples;
+    // For a multi-file hash we hand the example its full `files`
+    // record (workspace-relative paths) so the example-pick effect
+    // below writes every file into the VFS.  The legacy single-
+    // file form stays single-file (no `files` key).
+    const shared: LoomExample = {
+      id: "shared",
+      label: "Shared link (from URL)",
+      source: hashEntrySource,
+      blurb:
+        "Loaded from the URL hash — your edits update the URL so it stays shareable.",
+      ...(hashLoadOnMount?.kind === "project"
+        ? {
+            files: workspacePathsToRelative(
+              hashLoadOnMount.project.files,
+              hashLoadOnMount.project.active,
+            ),
+          }
+        : {}),
+    };
+    return [shared, ...examples];
+  }, [hashEntrySource, hashLoadOnMount]);
 
   // Responsive layout switch.  Below the Mantine `sm` breakpoint
   // (768 px) we render `MobileShell` (bottom-tab nav, fullscreen
@@ -413,13 +460,33 @@ export default function App(): JSX.Element {
   // a new project: the user is still working on the same workspace,
   // so we preserve all of these.
   //
-  // URL hash always tracks main.ddd content (single-file sharing
-  // is a Stage-3 limitation, see docs/multi-file-source.md), so we
-  // sync it here from `sources.files.get(main.ddd)` rather than
-  // from the active file.
+  // Multi-file (Stage 3): the picked example may carry companion
+  // `files` (workspace-relative paths).  Seed each into the VFS at
+  // `/workspace/<rel>` so the tabs strip shows them and the
+  // project loader's import-graph walk resolves them.  We also
+  // write `example.source` to `/workspace/main.ddd` and flip the
+  // active path so the user lands on main.ddd regardless of what
+  // they had open before — a multi-file example with no obvious
+  // entry would otherwise leave the editor on a stale file.
+  //
+  // URL hash always tracks main.ddd content (per-keystroke sync
+  // stays single-file by design; explicit Share button generates
+  // the multi-file URL via `copyShareLink`), so we use
+  // `writeHashSource` here with the example's main.ddd content.
   useEffect(() => {
-    const mainContent =
-      sourcesRef.current.files.get("/workspace/main.ddd") ?? exampleSource;
+    const picked = augmentedExamplesList.find((e) => e.id === exampleId);
+    const mainContent = picked?.source ?? exampleSource;
+    // Phase-3 seeding: write the example's files to the VFS so the
+    // workspace immediately reflects the picked example.
+    const s = sourcesRef.current;
+    s.write("/workspace/main.ddd", mainContent);
+    if (picked?.files) {
+      for (const [rel, content] of Object.entries(picked.files)) {
+        const abs = `/workspace/${rel.replace(/^\/+/, "")}`;
+        if (abs.endsWith(".ddd")) s.write(abs, content);
+      }
+    }
+    s.setActivePath("/workspace/main.ddd");
     writeHashSource(mainContent);
     dispatch({ type: "RESET" });
     setDiagnostics([]);
@@ -464,7 +531,20 @@ export default function App(): JSX.Element {
 
   async function copyShareLink(): Promise<void> {
     try {
-      const url = buildShareUrl(sourceRef.current);
+      // Build the smallest legal URL for the current workspace:
+      // single-file (`s=`, byte-compatible with pre-Stage-3 shared
+      // links) when only main.ddd is present, multi-file (`p=`) when
+      // the user has added other `.ddd` files via the tabs strip.
+      const s = sourcesRef.current;
+      const onlyMain =
+        s.files.size === 0 ||
+        (s.files.size === 1 && s.files.has("/workspace/main.ddd"));
+      const url = onlyMain
+        ? buildShareUrl(sourceRef.current)
+        : buildShareUrl({
+            files: Object.fromEntries(s.files),
+            active: s.activePath,
+          });
       await navigator.clipboard.writeText(url);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);

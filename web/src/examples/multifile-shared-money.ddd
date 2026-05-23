@@ -1,0 +1,10 @@
+// Root-level value object — ambient across every context in the
+// project.  Lives in its own file so multiple bounded contexts can
+// share the same Money shape without copying it.
+
+valueobject Money {
+  amount: decimal
+  currency: string
+  invariant amount >= 0
+  invariant currency.length == 3
+}
