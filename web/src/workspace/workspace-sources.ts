@@ -8,26 +8,32 @@
 // hook's body to "wire controller events to setState".  The contract
 // is identical either way — see `use-workspace-sources.ts` for the
 // consumer-facing documentation.
+//
+// Empty folders are tracked through the VFS's first-class `mkdir` /
+// `rmdir` / `listDirs` surface (introduced in the VFS-directories
+// refactor) — no sentinel files leak into the workspace.  A folder
+// that contains a `.ddd` file is implicit (no dir entry needed; the
+// file's path carries the folder structure); a folder explicitly
+// created via the "New folder" UI lives as a real `kind:"dir"` entry
+// in the VFS until either the user removes it or a real `.ddd` child
+// appears inside it (in which case the explicit dir entry becomes
+// redundant — the controller silently drops the "empty" flag on the
+// next snapshot).
 // ---------------------------------------------------------------------------
 
 import type { Vfs } from "../vfs/types.js";
 
 const WORKSPACE_PREFIX = "/workspace/";
 export const DEFAULT_PATH = "/workspace/main.ddd";
-/** Sentinel filename for empty-folder tracking.  Convention borrowed
- *  from Git — a zero-byte `.gitkeep` keeps a folder visible even
- *  when it has no real content.  The tree renderer hides this from
- *  the user; it's purely a placeholder so a "New folder" action
- *  can produce a folder that contains no `.ddd` files yet. */
-export const FOLDER_SENTINEL = ".gitkeep";
 
 export interface WorkspaceSourcesSnapshot {
   files: ReadonlyMap<string, string>;
   /** Workspace-relative folder paths that exist as empty folders
-   *  (i.e. contain a `.gitkeep` sentinel but no `.ddd` source).
-   *  Folders that contain at least one `.ddd` file are NOT listed
-   *  here — they're already visible via `files`.  Workspace-
-   *  relative form, no leading slash: `shared`, `audit/log`, … */
+   *  — folders that have a real VFS dir entry but no `.ddd`
+   *  descendants.  Folders that contain at least one `.ddd` file
+   *  are NOT listed here — they're already visible via `files`.
+   *  Workspace-relative form, no leading slash: `shared`,
+   *  `audit/log`, … */
   emptyFolders: ReadonlySet<string>;
   activePath: string;
 }
@@ -36,19 +42,6 @@ export interface WorkspaceSourcesSnapshot {
  *  a design-pack template under `/workspace/design/...`). */
 export function isDddSource(path: string): boolean {
   return path.startsWith(WORKSPACE_PREFIX) && path.endsWith(".ddd");
-}
-
-/** True iff `path` is the folder-sentinel marker (a `.gitkeep`
- *  directly under `/workspace/<folder>/`). */
-export function isFolderSentinel(path: string): boolean {
-  if (!path.startsWith(WORKSPACE_PREFIX)) return false;
-  const rest = path.slice(WORKSPACE_PREFIX.length);
-  // Top-level `.gitkeep` (no nested folder) doesn't represent a
-  // folder — exclude.  Sentinel must live inside at least one
-  // folder segment.
-  const lastSlash = rest.lastIndexOf("/");
-  if (lastSlash <= 0) return false;
-  return rest.slice(lastSlash + 1) === FOLDER_SENTINEL;
 }
 
 /** Re-derive the `.ddd` source map from the VFS.  Pure projection —
@@ -64,36 +57,35 @@ export function snapshotSources(vfs: Vfs): Map<string, string> {
   return out;
 }
 
-/** Re-derive the empty-folder set: every folder whose only content
- *  is the sentinel file and which has no `.ddd` siblings.  Returns
- *  workspace-relative folder paths (no leading slash). */
+/** Re-derive the empty-folder set: every workspace dir entry that
+ *  has no `.ddd` descendants.  A folder gains a `.ddd` child →
+ *  silently drops out of the set on the next snapshot (the
+ *  explicit dir entry stays in the VFS but is no longer "empty"
+ *  from the workspace UI's POV). */
 export function snapshotEmptyFolders(vfs: Vfs): Set<string> {
-  const sentinelFolders = new Set<string>();
-  const folderHasFile = new Set<string>();
+  const dirs = vfs.listDirs(WORKSPACE_PREFIX);
+  if (dirs.length === 0) return new Set();
+  // Mark every folder that has a `.ddd` descendant — those are not
+  // empty for our purposes even though they have a real dir entry.
+  const populatedFolders = new Set<string>();
   for (const path of vfs.list(WORKSPACE_PREFIX)) {
-    if (isFolderSentinel(path)) {
-      const folder = path
-        .slice(WORKSPACE_PREFIX.length)
-        .slice(0, -(`/${FOLDER_SENTINEL}`.length));
-      if (folder) sentinelFolders.add(folder);
-    } else if (isDddSource(path)) {
-      // Every folder that this `.ddd` lives inside has at least one
-      // real file — strip it from the empty set when we see it.
-      // `shared/sub/orders.ddd` marks both `shared` and `shared/sub`
-      // as non-empty.
-      const rel = path.slice(WORKSPACE_PREFIX.length);
-      let parent = rel;
-      while (true) {
-        const slash = parent.lastIndexOf("/");
-        if (slash < 0) break;
-        parent = parent.slice(0, slash);
-        folderHasFile.add(parent);
-      }
+    if (!isDddSource(path)) continue;
+    const rel = path.slice(WORKSPACE_PREFIX.length);
+    let parent = rel;
+    while (true) {
+      const slash = parent.lastIndexOf("/");
+      if (slash < 0) break;
+      parent = parent.slice(0, slash);
+      populatedFolders.add(parent);
     }
   }
   const out = new Set<string>();
-  for (const folder of sentinelFolders) {
-    if (!folderHasFile.has(folder)) out.add(folder);
+  for (const dirPath of dirs) {
+    const rel = dirPath.slice(WORKSPACE_PREFIX.length);
+    // Exclude the bare `/workspace` ancestor that mkdirp materialises
+    // implicitly — it's not a user-created empty folder.
+    if (rel === "") continue;
+    if (!populatedFolders.has(rel)) out.add(rel);
   }
   return out;
 }
@@ -189,12 +181,11 @@ export class WorkspaceSourcesController {
     // batched into the same notification.
   }
 
-  /** Create an empty folder by dropping a sentinel `.gitkeep`
-   *  marker inside.  `folder` is workspace-relative (no leading
-   *  slash, e.g. `shared` or `audit/log`).  No-op when the folder
-   *  already contains a `.ddd` file (it isn't empty anymore so
-   *  marking it would be redundant) — the controller will simply
-   *  surface the existing folder via `files`. */
+  /** Create an empty folder via the VFS's first-class `mkdir`.
+   *  `folder` is workspace-relative (no leading slash, e.g.
+   *  `shared` or `audit/log`).  `mkdir` is mkdirp + idempotent —
+   *  intermediate folders are auto-created, and a folder that
+   *  already exists is a no-op. */
   createEmptyFolder(folder: string): void {
     if (!this.vfs) return;
     const cleaned = folder.replace(/^\/+/, "").replace(/\/+$/, "");
@@ -203,7 +194,7 @@ export class WorkspaceSourcesController {
         `WorkspaceSourcesController.createEmptyFolder: folder name is required`,
       );
     }
-    this.vfs.write(`${WORKSPACE_PREFIX}${cleaned}/${FOLDER_SENTINEL}`, "");
+    this.vfs.mkdir(`${WORKSPACE_PREFIX}${cleaned}`);
   }
 
   /** Delete a file from the VFS.  If the active file was deleted,
@@ -224,15 +215,15 @@ export class WorkspaceSourcesController {
     }
   }
 
-  /** Delete an empty folder by removing its sentinel.  No-op when
-   *  the folder isn't actually empty (it has `.ddd` files), or when
-   *  the sentinel never existed.  Workspace-relative form
-   *  (`shared`, `audit/log`). */
+  /** Delete an empty folder via the VFS's `rmdir`.  Throws if the
+   *  folder still has `.ddd` content inside (the VFS layer enforces
+   *  this).  No-op when the folder doesn't exist or is a file path.
+   *  Workspace-relative form (`shared`, `audit/log`). */
   deleteEmptyFolder(folder: string): void {
     if (!this.vfs) return;
     const cleaned = folder.replace(/^\/+/, "").replace(/\/+$/, "");
     if (cleaned === "") return;
-    this.vfs.delete(`${WORKSPACE_PREFIX}${cleaned}/${FOLDER_SENTINEL}`);
+    this.vfs.rmdir(`${WORKSPACE_PREFIX}${cleaned}`);
   }
 
   private emit(): void {

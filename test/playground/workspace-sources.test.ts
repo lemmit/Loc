@@ -194,15 +194,17 @@ describe("WorkspaceSourcesController", () => {
     c.dispose();
   });
 
-  describe("empty folders (via `.gitkeep` sentinel)", () => {
-    it("createEmptyFolder drops a sentinel that surfaces in `emptyFolders`", () => {
+  describe("empty folders (via first-class VFS dir entries)", () => {
+    it("createEmptyFolder calls vfs.mkdir and surfaces in `emptyFolders`", () => {
       const vfs = makeVfs({ "/workspace/main.ddd": "m" });
       const c = new WorkspaceSourcesController(vfs);
       c.createEmptyFolder("shared");
       const snap = c.snapshot();
-      expect(vfs.read("/workspace/shared/.gitkeep")).toBe("");
+      // Real dir entry in the VFS — no `.gitkeep` sentinel.
+      expect(vfs.isDirectory("/workspace/shared")).toBe(true);
+      expect(vfs.exists("/workspace/shared/.gitkeep")).toBe(false);
       expect([...snap.emptyFolders]).toEqual(["shared"]);
-      // The `.gitkeep` doesn't leak into the .ddd files map.
+      // The dir entry doesn't leak into the .ddd files map.
       expect([...snap.files.keys()]).toEqual(["/workspace/main.ddd"]);
       c.dispose();
     });
@@ -212,17 +214,23 @@ describe("WorkspaceSourcesController", () => {
       const c = new WorkspaceSourcesController(vfs);
       c.createEmptyFolder("audit/log");
       const snap = c.snapshot();
-      expect(vfs.read("/workspace/audit/log/.gitkeep")).toBe("");
-      expect([...snap.emptyFolders]).toEqual(["audit/log"]);
+      expect(vfs.isDirectory("/workspace/audit")).toBe(true);
+      expect(vfs.isDirectory("/workspace/audit/log")).toBe(true);
+      // `audit` is also empty (has only the nested `audit/log` dir,
+      // no .ddd descendants); both surface in the empty set.
+      expect([...snap.emptyFolders].sort()).toEqual(["audit", "audit/log"]);
       c.dispose();
     });
 
-    it("a sentinel folder that has .ddd content is NOT in `emptyFolders`", () => {
+    it("a folder that has .ddd content is NOT in `emptyFolders`", () => {
       const vfs = makeVfs({
         "/workspace/main.ddd": "m",
-        "/workspace/shared/.gitkeep": "",
         "/workspace/shared/money.ddd": "valueobject Money { v: int }",
       });
+      // Pre-create a dir entry to simulate a folder that USED to be
+      // empty but has since gained a real file.  The "promotion-out"
+      // rule should silently drop it from the empty set.
+      vfs.mkdir("/workspace/shared");
       const c = new WorkspaceSourcesController(vfs);
       const snap = c.snapshot();
       expect([...snap.emptyFolders]).toEqual([]);
@@ -234,15 +242,13 @@ describe("WorkspaceSourcesController", () => {
       c.dispose();
     });
 
-    it("deleteEmptyFolder removes the sentinel", () => {
-      const vfs = makeVfs({
-        "/workspace/main.ddd": "m",
-        "/workspace/shared/.gitkeep": "",
-      });
+    it("deleteEmptyFolder calls vfs.rmdir", () => {
+      const vfs = makeVfs({ "/workspace/main.ddd": "m" });
+      vfs.mkdir("/workspace/shared");
       const c = new WorkspaceSourcesController(vfs);
       expect([...c.snapshot().emptyFolders]).toEqual(["shared"]);
       c.deleteEmptyFolder("shared");
-      expect(vfs.exists("/workspace/shared/.gitkeep")).toBe(false);
+      expect(vfs.exists("/workspace/shared")).toBe(false);
       expect([...c.snapshot().emptyFolders]).toEqual([]);
       c.dispose();
     });

@@ -103,14 +103,14 @@ export interface LayoutCtx {
    *  never offers this for `/workspace/main.ddd`. */
   deleteSourceFile: (path: string) => void;
   /** Workspace-relative folder paths that exist as empty folders
-   *  (`.gitkeep` sentinel only, no `.ddd` content).  Tree picker
-   *  unions these with the file-derived folder set. */
+   *  — real VFS dir entries with no `.ddd` descendants.  Tree
+   *  picker merges these into its tree as folder-only rows. */
   emptySourceFolders: ReadonlySet<string>;
-  /** Create an empty folder via a sentinel marker.  `folder` is
-   *  workspace-relative (no leading slash). */
+  /** Create an empty folder via the VFS's first-class `mkdir`.
+   *  `folder` is workspace-relative (no leading slash). */
   createEmptySourceFolder: (folder: string) => void;
-  /** Delete an empty folder's sentinel.  No-op once the folder has
-   *  `.ddd` content. */
+  /** Delete an empty folder via the VFS's `rmdir`.  Throws if the
+   *  folder still has `.ddd` content inside. */
   deleteEmptySourceFolder: (folder: string) => void;
 
   // Worker clients

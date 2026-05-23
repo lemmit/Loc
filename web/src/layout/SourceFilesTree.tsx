@@ -63,21 +63,30 @@ export interface SourceFilesTreeProps {
    *  `main.ddd` (the delete button isn't rendered there). */
   onDelete: (path: string) => void;
   /** Workspace-relative folder paths that exist as empty folders
-   *  (sentinel-only).  The tree merges these with file-derived
-   *  folders so a freshly-created empty folder is visible. */
+   *  (real VFS dir entries with no `.ddd` descendants).  Merged
+   *  into the tree as folder-only rows so a freshly-created empty
+   *  folder is visible. */
   emptyFolders?: ReadonlySet<string>;
-  /** Create an empty folder by dropping a `.gitkeep` sentinel
-   *  inside.  Workspace-relative folder name. */
+  /** Create an empty folder via the VFS's first-class `mkdir`.
+   *  Workspace-relative folder name (no leading slash). */
   onCreateFolder?: (folder: string) => void;
-  /** Delete an empty folder's sentinel.  Workspace-relative form. */
+  /** Delete an empty folder via the VFS's `rmdir`.  Workspace-
+   *  relative form. */
   onDeleteFolder?: (folder: string) => void;
 }
 
 /** Build a tree of workspace-relative paths suitable for `FileTree`.
  *  Reuses `buildTree`; the path scheme is identical (POSIX, `/`-
- *  separated).  Empty folders are folded in via a hidden
- *  `.gitkeep` entry per folder — the renderer skips sentinel rows
- *  so the user sees the folder but not the marker. */
+ *  separated).  Empty folders are folded in via a hidden-from-the-
+ *  user marker entry per folder (`.empty-folder`) so `buildTree`
+ *  creates the folder node; the renderer filters the marker out via
+ *  `shouldRenderFile`. */
+const EMPTY_FOLDER_MARKER = ".empty-folder";
+
+function isEmptyFolderMarker(relPath: string): boolean {
+  return relPath.endsWith(`/${EMPTY_FOLDER_MARKER}`);
+}
+
 function workspaceTree(
   files: ReadonlyMap<string, string>,
   activePath: string,
@@ -101,11 +110,11 @@ function workspaceTree(
   if (!virtual.some((v) => v.path === activeRel)) {
     virtual.push({ path: activeRel, content: "", size: 0 });
   }
-  // Empty-folder placeholders: append a sentinel entry per empty
+  // Empty-folder rows: append a hidden marker entry per empty
   // folder so `buildTree` creates the folder node.  The renderer
-  // filters `.gitkeep` rows out so the user never sees the marker.
+  // filters the marker out via `shouldRenderFile`.
   for (const folder of emptyFolders) {
-    virtual.push({ path: `${folder}/.gitkeep`, content: "", size: 0 });
+    virtual.push({ path: `${folder}/${EMPTY_FOLDER_MARKER}`, content: "", size: 0 });
   }
   return buildTree(virtual);
 }
@@ -120,9 +129,8 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
 
   // Create-form mode: `null` = closed, `"file"` = file-create
   // form, `"folder"` = folder-create form.  Separate modes because
-  // the validator + the path the create button produces are
-  // different (a folder needs a placeholder file dropped into it,
-  // since the VFS can't represent an empty directory).
+  // each calls a different controller method (write vs mkdir) and
+  // takes a different shape of name (file basename vs folder path).
   const [creating, setCreating] = useState<"file" | "folder" | null>(null);
   const [draft, setDraft] = useState("");
   const existingPaths = new Set(props.files.keys());
@@ -150,9 +158,9 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
     if (creating === "file") {
       props.onCreate(normaliseNewFilePath(draft));
     } else if (creating === "folder") {
-      // True empty folder via the controller's `.gitkeep`-sentinel
-      // path.  Falls back to the placeholder-file approach when the
-      // host didn't wire `onCreateFolder` (older callers).
+      // True empty folder via the controller's VFS-`mkdir` path.
+      // Falls back to the placeholder-file approach for hosts that
+      // didn't wire `onCreateFolder` (older callers / desktop tabs).
       if (props.onCreateFolder) {
         const folder = draft.trim().replace(/^\/+/, "").replace(/\/+$/, "");
         props.onCreateFolder(folder);
@@ -305,17 +313,18 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
           root={root}
           selectedPath={activeRelPath}
           onSelect={(rel) => {
-            // Sentinel rows never reach onSelect because they're
-            // filtered via `shouldRenderFile`, but defend just in
-            // case — clicking the marker would be confusing.
-            if (rel.endsWith("/.gitkeep")) return;
+            // Empty-folder marker rows never reach onSelect because
+            // they're filtered via `shouldRenderFile`, but defend
+            // just in case — clicking the marker would be
+            // confusing.
+            if (isEmptyFolderMarker(rel)) return;
             props.onSelect(`${WORKSPACE_PREFIX}${rel}`);
             // Auto-close after a pick so the editor reclaims the
             // viewport, matching the FilesPane mobile pattern.
             if (detailsRef.current) detailsRef.current.open = false;
           }}
           rowActions={rowActions}
-          shouldRenderFile={(rel) => !rel.endsWith("/.gitkeep")}
+          shouldRenderFile={(rel) => !isEmptyFolderMarker(rel)}
         />
       </Box>
     </Box>

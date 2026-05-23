@@ -35,12 +35,13 @@ export interface WorkspaceSourcesApi extends WorkspaceSourcesState {
    *  the hook re-points `activePath` to a fallback so the editor
    *  always has a valid target. */
   delete(path: string): void;
-  /** Create an empty folder by dropping a `.gitkeep` sentinel
-   *  inside.  `folder` is workspace-relative (no leading slash,
-   *  e.g. `shared`). */
+  /** Create an empty folder via the VFS's first-class `mkdir`.
+   *  `folder` is workspace-relative (no leading slash, e.g.
+   *  `shared`).  `mkdir` is mkdirp + idempotent. */
   createEmptyFolder(folder: string): void;
-  /** Delete an empty folder's `.gitkeep` sentinel.  No-op when the
-   *  folder still has `.ddd` files inside. */
+  /** Delete an empty folder via the VFS's `rmdir`.  Throws if the
+   *  folder still has `.ddd` content inside (VFS enforces non-empty
+   *  protection); no-op when the folder doesn't exist. */
   deleteEmptyFolder(folder: string): void;
 }
 
