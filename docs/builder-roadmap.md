@@ -492,9 +492,19 @@ Phasing:
   in the context view (target context auto-derived from the path). Reuses
   v1's parse-guarded `addConstructSource` / `addModuleSource`. Gated by the
   v2 e2e (system + context palette add bumps the relevant node count).
-- **Phase 3b** — rename in place, delete on the node, module-level "+ Context"
-  and aggregate-level "+ Operation" / "+ Field"; drag-rebind for cross-ref
-  edges once those edges show up in the higher-level views.
+- ~~**Phase 3b** — rename + delete on the node.~~ Done: a new `ConstructNode`
+  custom React Flow type replaces the default node for non-stmt constructs,
+  with an on-node pencil (inline rename input, commits via v1's
+  `renameConstruct`) and an `×` (delete via `spliceNode` on the construct's
+  AST node). Wired for every ViewKind that v1's NodeKind already covers —
+  module / aggregate / valueobject / event / repository / view / workflow /
+  api / storage / ui / deployable. System / context / operation / field /
+  containment still render without action buttons in this phase. Gated by the
+  v2 e2e (rename Order → OrderX on the canvas, then delete it; counts +
+  data-construct-name reflect the changes).
+- **Phase 3c** — module-level `+ Context`, aggregate-level `+ Operation` /
+  `+ Field`, and rename/delete for the system / context / operation kinds
+  (needs small extensions to v1's helpers).
 - **Phase 4** — long-tail parity with v1 (fields / finds / deployable bindings
   / emit repointing as per-node interactions). Once landed, v1 can be
   deprecated.

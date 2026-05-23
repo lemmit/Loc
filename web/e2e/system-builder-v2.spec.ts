@@ -104,3 +104,37 @@ test("Model v2 adds a construct via the per-view palette (system + context)", as
     .poll(async () => page.locator('.react-flow__node[data-id^="aggregate:"]').count(), { timeout: 5_000 })
     .toBe(aggsBefore + 1);
 });
+
+test("Model v2 renames and deletes a construct from the node itself", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+  await page.getByTestId("doc-tab-model-v2").click();
+  await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
+  await page.locator('.react-flow__node[data-id^="system:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="module:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="context:"]').first().click();
+
+  // Rename the Order aggregate to OrderX via the on-node pencil → input.
+  const order = page.locator('[data-construct-kind="aggregate"][data-construct-name="Order"]');
+  await expect(order).toBeVisible();
+  await order.getByTestId("c4system-v2-rename").click();
+  const input = page.getByTestId("c4system-v2-rename-input");
+  await expect(input).toBeVisible();
+  await input.fill("OrderX");
+  await input.press("Enter");
+  await expect(
+    page.locator('[data-construct-kind="aggregate"][data-construct-name="OrderX"]'),
+  ).toBeVisible({ timeout: 5_000 });
+  await expect(
+    page.locator('[data-construct-kind="aggregate"][data-construct-name="Order"]'),
+  ).toHaveCount(0);
+
+  // Delete OrderX via the `×`; aggregate node count drops by one.
+  const renamed = page.locator('[data-construct-kind="aggregate"][data-construct-name="OrderX"]');
+  const before = await page.locator('.react-flow__node[data-id^="aggregate:"]').count();
+  await renamed.getByTestId("c4system-v2-delete").click();
+  await expect
+    .poll(async () => page.locator('.react-flow__node[data-id^="aggregate:"]').count(), { timeout: 5_000 })
+    .toBe(before - 1);
+});
