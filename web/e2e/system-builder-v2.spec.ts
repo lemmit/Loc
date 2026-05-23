@@ -76,3 +76,31 @@ test("Model v2 renders an operation body as a statement flow (read-only)", async
   await expect(emit).toBeVisible();
   await expect(emit.getByTestId("c4system-emit-field-name").first()).toBeVisible();
 });
+
+test("Model v2 adds a construct via the per-view palette (system + context)", async ({ page }) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+  await selectExample(page, /Sales System/);
+  await page.getByTestId("doc-tab-model-v2").click();
+  await expect(page.getByTestId("c4system-v2-pane")).toBeVisible({ timeout: 10_000 });
+
+  // System view exposes +Module / +Storage / etc; adding a storage bumps the
+  // storage node count by one.
+  await page.locator('.react-flow__node[data-id^="system:"]').first().click();
+  await expect(page.getByTestId("c4system-v2-add-storage")).toBeVisible();
+  const storagesBefore = await page.locator('.react-flow__node[data-id^="storage:"]').count();
+  await page.getByTestId("c4system-v2-add-storage").click();
+  await expect
+    .poll(async () => page.locator('.react-flow__node[data-id^="storage:"]').count(), { timeout: 5_000 })
+    .toBe(storagesBefore + 1);
+
+  // Drill into module → context; the context palette adds an aggregate.
+  await page.locator('.react-flow__node[data-id^="module:"]').first().click();
+  await page.locator('.react-flow__node[data-id^="context:"]').first().click();
+  await expect(page.getByTestId("c4system-v2-add-aggregate")).toBeVisible();
+  const aggsBefore = await page.locator('.react-flow__node[data-id^="aggregate:"]').count();
+  await page.getByTestId("c4system-v2-add-aggregate").click();
+  await expect
+    .poll(async () => page.locator('.react-flow__node[data-id^="aggregate:"]').count(), { timeout: 5_000 })
+    .toBe(aggsBefore + 1);
+});

@@ -485,8 +485,16 @@ Phasing:
   different leaf collapses any open `ƒx`. `.nodrag .nopan` on the node lets
   inputs / dropdowns work inside the React Flow node. Gated by the v2 e2e
   (asserts each stmt kind's editor controls are present inside the node).
-- **Phase 3** — in-canvas edits at higher levels (rename, add, delete,
-  drag-rebind per view).
+- ~~**Phase 3a** — per-view add palette.~~ Done: a small toolbar above the
+  canvas exposes the adds appropriate to the current drill level — `+ Module
+  / + API / + Storage / + UI / + Deployable` in the system view, and `+
+  Aggregate / + Value object / + Event / + Workflow / + Repository / + View`
+  in the context view (target context auto-derived from the path). Reuses
+  v1's parse-guarded `addConstructSource` / `addModuleSource`. Gated by the
+  v2 e2e (system + context palette add bumps the relevant node count).
+- **Phase 3b** — rename in place, delete on the node, module-level "+ Context"
+  and aggregate-level "+ Operation" / "+ Field"; drag-rebind for cross-ref
+  edges once those edges show up in the higher-level views.
 - **Phase 4** — long-tail parity with v1 (fields / finds / deployable bindings
   / emit repointing as per-node interactions). Once landed, v1 can be
   deprecated.

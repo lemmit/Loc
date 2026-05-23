@@ -31,7 +31,6 @@ import {
   type StmtView,
 } from "../system/body";
 import { listFields } from "../system/fields";
-import { findAggregate } from "./view-graph";
 import { seedExpr } from "../system/expr-model";
 import {
   editExprSlot,
@@ -41,8 +40,9 @@ import {
   type ExprSlot,
 } from "../system/expr-slots";
 import { ExprSlotEditor, type ExprMode } from "../system/ExpressionEditor";
+import AddPalette from "./AddPalette";
 import StmtNode, { type StmtNodeData } from "./StmtNode";
-import { buildViewGraph, type ViewGraph, type ViewKind, type ViewPath } from "./view-graph";
+import { buildViewGraph, findAggregate, type ViewGraph, type ViewKind, type ViewPath } from "./view-graph";
 
 const KIND_COLOR: Record<ViewKind, string> = {
   system: "var(--mantine-color-indigo-8)",
@@ -299,6 +299,7 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   return (
     <Box style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
       <Breadcrumb path={path} onJump={(d) => setPath((p) => p.slice(0, d))} />
+      <AddPalette path={path} source={ctx.getSource()} onChange={apply} />
       <Box style={{ flex: 1, position: "relative", minHeight: 0 }} data-testid="c4system-v2-pane">
         <ReactFlow
           nodes={nodes}
