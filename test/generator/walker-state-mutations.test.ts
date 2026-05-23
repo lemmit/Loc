@@ -155,7 +155,10 @@ describe("state + onClick mutations in walker pages", () => {
               a: int = 0
               b: int = 0
             }
-            body:  Button("Bump", onClick: e => { a := a + 1; b := b + 2 })
+            body:  Button("Bump", onClick: e => {
+              a := a + 1
+              b := b + 2
+            })
           }
         }
         deployable api { platform: hono, modules: M, port: 3000 }
