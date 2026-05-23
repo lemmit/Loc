@@ -57,6 +57,7 @@ export function EditorPane({ ctx, border = "none" }: Props): JSX.Element | null 
         onSelect={setActiveSourcePath}
         onCreate={createSourceFile}
         onDelete={deleteSourceFile}
+        compact={!isDesktop}
       />
       <Box style={{ flex: 1, minHeight: 0 }}>
         <LoomEditor
