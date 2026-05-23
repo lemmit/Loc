@@ -159,7 +159,7 @@ describe("System graph — wire shape (DTO) preview", () => {
     expect(typeLabel({ kind: "optional", inner: { kind: "enum", name: "Status" } })).toBe(
       "Status?",
     );
-    expect(typeLabel({ kind: "id", targetName: "Order", valueType: "uuid" })).toBe("Id<Order>");
+    expect(typeLabel({ kind: "id", targetName: "Order", valueType: "uuid" })).toBe("Order id");
   });
 
   it("exposes an aggregate's enrichment-computed wire shape, id first", async () => {

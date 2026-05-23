@@ -837,7 +837,7 @@ function preconditionsAsInvariants(op: OperationIR): InvariantIR[] {
 // wire → domain conversion
 //
 // Wraps each Zod-validated wire value into the typed argument the
-// domain factory / operation expects: brand `Id<X>` strings via
+// domain factory / operation expects: brand `X id` strings via
 // `Ids.<X>Id(...)`, instantiate value objects via `new <Vo>(...)`,
 // recurse into arrays / optionals.  Mirrors the .NET path's
 // `wireToCommandArgument` (see dotnet/dto-mapping.ts) so request

@@ -56,7 +56,7 @@ export interface FieldIR {
   /** True iff the source declared this property with the `display`
    * modifier.  At most one such field per aggregate (enforced by the
    * validator).  Used by the React generator to pick the option label
-   * for `Id<X>` Selects pointing at this aggregate. */
+   * for `X id` Selects pointing at this aggregate. */
   display?: boolean;
   /** True iff the source declared this property with the `provenanced`
    * modifier.  Every assignment statement (`:=`/`+=`/`-=`) targeting such
@@ -74,11 +74,16 @@ export interface ContainmentIR {
   name: string;
   partName: string;
   collection: boolean;
+  /** Singular containments only — when true, the part may be absent at
+   *  runtime; backends serialise it as a nullable wire field.  Validators
+   *  reject the combination `collection && optional` (an empty list already
+   *  encodes absence). */
+  optional?: boolean;
 }
 
 /** A many-to-many association derived from an aggregate field whose
  * type is a collection of references to another aggregate
- * (`field: Id<Target>[]`).  Populated by `enrichLoomModel`; backends
+ * (`field: Target id[]`).  Populated by `enrichLoomModel`; backends
  * that persist relationally emit a join table from this rather than
  * re-deriving it.  See `src/ir/enrichments.ts`. */
 export interface AssociationIR {
@@ -194,7 +199,7 @@ export interface AggregateIR {
   /** Canonical JSON-on-the-wire field list.  Populated by
    * `enrichLoomModel`. */
   wireShape?: WireField[];
-  /** Many-to-many associations derived from `Id<Target>[]` fields.
+  /** Many-to-many associations derived from `Target id[]` fields.
    * Populated by `enrichLoomModel`; one entry per reference-collection
    * field.  Empty array when the aggregate has none. */
   associations?: AssociationIR[];
@@ -291,7 +296,7 @@ export interface ViewIR {
     fields: FieldIR[];
     binds: { name: string; expr: ExprIR; type: TypeIR }[];
     /** Foreign aggregates referenced by bind expressions via
-     *  `Id<X>` follow.  Multi-hop supported: `path` is the chain of
+     *  `X id` follow.  Multi-hop supported: `path` is the chain of
      *  Id-typed field accesses from the source aggregate outward —
      *  `["customerId"]` for `customerId.name`,
      *  `["customerId", "regionId"]` for
@@ -646,7 +651,7 @@ export interface ThemeIR {
 }
 
 /** System-level `user { ... }` block.  Each field carries an
- *  ordinary TypeIR — primitives, `Id<X>`, enums, value-objects,
+ *  ordinary TypeIR — primitives, `X id`, enums, value-objects,
  *  optional `T?` — and contributes to the emitted User type plus
  *  the `currentUser` magic identifier's member-access surface. */
 export interface UserIR {

@@ -16,7 +16,7 @@ const services = createDddServices(NodeFileSystem).Ddd;
 const expectRefs = expectFindReferences(services);
 
 describe("ReferencesProvider — cross references", () => {
-  it("finds Id<X> usages of an aggregate from its declaration", async () => {
+  it("finds X id usages of an aggregate from its declaration", async () => {
     await expectRefs({
       text: `
         context Sales {
@@ -24,7 +24,7 @@ describe("ReferencesProvider — cross references", () => {
             customerId: string
           }
           aggregate Customer {
-            primaryOrder: Id<<|Order|>>
+            primaryOrder: <|Order|> id
           }
         }`,
       includeDeclaration: true,

@@ -63,7 +63,7 @@ system SalesSystem {
         invariant currency.length == 3
       }
 
-      event OrderConfirmed { order: Id<Order>, at: datetime }
+      event OrderConfirmed { order: Order id, at: datetime }
 
       aggregate Customer {
         name: string display
@@ -78,7 +78,7 @@ system SalesSystem {
       }
 
       aggregate Order {
-        customerId: Id<Customer>
+        customerId: Customer id
         status: OrderStatus
         placedAt: datetime
         contains lines: OrderLine[]
@@ -87,7 +87,7 @@ system SalesSystem {
 
         function isMutable(): bool = status == Draft
 
-        operation addLine(productId: Id<Product>, qty: int) {
+        operation addLine(productId: Product id, qty: int) {
           precondition isMutable()
           precondition qty > 0
           lines += new OrderLine { productId: productId, quantity: qty }
@@ -101,7 +101,7 @@ system SalesSystem {
         }
 
         entity OrderLine {
-          productId: Id<Product>
+          productId: Product id
           quantity: int
           invariant quantity > 0
         }
@@ -143,8 +143,8 @@ system SalesSystem {
       // Invoke via POST /workflows/place_order with body
       //   { customerId, productId, qty }
       workflow placeOrder(
-        customerId: Id<Customer>,
-        productId: Id<Product>,
+        customerId: Customer id,
+        productId: Product id,
         qty: int
       ) transactional {
         precondition qty > 0

@@ -69,7 +69,7 @@ system Acme {
 
   ui SalesAdmin {
     scaffold modules: Sales
-    page OrderConsole(customerId: Id<Customer>) { ... }
+    page OrderConsole(customerId: Customer id) { ... }
     menu { ... }
   }
 
@@ -105,18 +105,18 @@ page OrderList {
   body:  List(of: Order)
 }
 
-page OrderDetail(id: Id<Order>) {
+page OrderDetail(id: Order id) {
   route: "/orders/:id"
   body:  Detail(of: Order, by: id)
 }
 
-page OrderConsole(customerId: Id<Customer>) {
+page OrderConsole(customerId: Customer id) {
   route:    "/customers/:customerId/orders"
   title:    "Orders for " + customer.name
   requires  currentUser.permissions.contains(sales.viewOrders)
 
   state {
-    selectedId: Id<Order>?
+    selectedId: Order id?
   }
 
   body: MasterDetail(
@@ -161,7 +161,7 @@ component OrderPanel(order: Order) {
 
 The compiler enforces parameter relationships at every call site:
 `MasterDetail(of: Order, scope: …)` requires `scope` to produce `Order[]`;
-`Detail(of: Order, by: x)` requires `x: Id<Order>`; `actions:` items must
+`Detail(of: Order, by: x)` requires `x: Order id`; `actions:` items must
 be operations on the `of:` aggregate; `Form(creates: Order)` binds form
 fields to `wireShape(Order.create)`.
 
@@ -252,7 +252,7 @@ Reuses the existing `Statement` rule (covers `let`, `:=`, calls, `emit`).
 | Component | Purpose |
 |---|---|
 | `List(of: T, source?)` | Table over `T[]`; row click navigates to `T`'s detail. |
-| `Detail(of: T, by: Id<T>)` | Single-record view; fields, embeds `contains`, exposes operations as actions. |
+| `Detail(of: T, by: T id)` | Single-record view; fields, embeds `contains`, exposes operations as actions. |
 | `Form(creates: T \| runs: workflow \| into: state, fields, onSubmit, then?)` | Input form bound to a typed request slice. |
 | `MasterDetail(of: T, scope, actions?, detail?)` | Split-pane: list + selection state + detail panel. |
 | `Dashboard(items: […])` | Composite read-only page; grid layout. |
@@ -421,13 +421,13 @@ page CustomerStep {
   body:  Form(fields: [customerId],
               onSubmit: c => navigate(ItemsStep, { customerId: c.customerId }))
 }
-page ItemsStep(customerId: Id<Customer>) {
+page ItemsStep(customerId: Customer id) {
   route: "/orders/new/items"
   body:  Form(fields: [items],
               onSubmit: i => navigate(ReviewStep,
                                        { customerId, items: i.items }))
 }
-page ReviewStep(customerId: Id<Customer>, items: OrderLine[]) {
+page ReviewStep(customerId: Customer id, items: OrderLine[]) {
   route: "/orders/new/review"
   body:  Review(of: { customerId, placedAt: now(), items },
                 onSubmit: () => {

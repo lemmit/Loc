@@ -147,7 +147,7 @@ export function typeToString(t: DddType): string {
       case "primitive":
         return t.name;
       case "id":
-        return `Id<${t.target.name}>`;
+        return `${t.target.name} id`;
       case "enum":
         return t.ref.name;
       case "valueobject":
@@ -290,7 +290,7 @@ export interface Env {
   // and lookup nested parts/functions/operations.
   aggregate?: Aggregate;
   // The entity part currently in scope, if any (a part declares its own
-  // `id` of type Id<PartName>).
+  // `id` of type PartName id).
   part?: EntityPart;
   // The value object currently in scope, if any.
   valueObject?: ValueObject;
@@ -924,7 +924,7 @@ function entityMemberCompletions(
 ): MemberCompletion[] {
   const out: MemberCompletion[] = [];
   // Aggregates / entity parts expose the magic `id` accessor; value objects don't.
-  if (withId) out.push({ name: "id", kind: "field", detail: `Id<${ref.name}>` });
+  if (withId) out.push({ name: "id", kind: "field", detail: `${ref.name} id` });
   for (const m of iterateEntityMembers(ref)) {
     out.push({
       name: m.name,
@@ -949,7 +949,7 @@ export function membersOfType(t: DddType): MemberCompletion[] {
     case "valueobject":
       return entityMemberCompletions(t.ref, false);
     case "id":
-      // `Id<X>.member` follows the typed reference into X's schema.
+      // `X id.member` follows the typed reference into X's schema.
       return entityMemberCompletions(t.target, true);
     case "optional":
       // Member access transparently unwraps an optional (the validator

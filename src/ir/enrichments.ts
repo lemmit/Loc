@@ -143,7 +143,7 @@ function enrichAggregate(agg: AggregateIR): AggregateIR {
 }
 
 /** Derive a join-table association for every field whose type is a
- * collection of references to another aggregate (`field: Id<T>[]`).
+ * collection of references to another aggregate (`field: T id[]`).
  * Containment collections never reach here — they are `ContainmentIR`,
  * not `FieldIR`. */
 function associationsForAggregate(agg: AggregateIR): AssociationIR[] {
@@ -153,7 +153,7 @@ function associationsForAggregate(agg: AggregateIR): AssociationIR[] {
     const target = f.type.element;
     let ownerFk = `${snake(agg.name)}_id`;
     let targetFk = `${snake(target.targetName)}_id`;
-    // Self-referential collection (`Id<Self>[]`): both FKs would
+    // Self-referential collection (`Self id[]`): both FKs would
     // collapse to the same column name.  Disambiguate generically.
     if (ownerFk === targetFk) {
       ownerFk = "owner_id";
@@ -249,7 +249,7 @@ function wireFieldsForAggregate(agg: AggregateIR): WireField[] {
     out.push({
       name: c.name,
       type: containmentTypeFor(c.partName, c.collection),
-      optional: false,
+      optional: !!c.optional && !c.collection,
       source: "containment",
     });
   }
@@ -270,7 +270,7 @@ function wireFieldsForPart(part: EntityPartIR): WireField[] {
     out.push({
       name: c.name,
       type: containmentTypeFor(c.partName, c.collection),
-      optional: false,
+      optional: !!c.optional && !c.collection,
       source: "containment",
     });
   }

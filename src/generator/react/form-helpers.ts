@@ -27,7 +27,7 @@ import { lowerFirst, plural } from "../../util/naming.js";
 /** Whether the given field set requires `Controller` (anything that's
  * not a plain TextInput).  Drives the import line for `react-hook-form`.
  *
- * Id<X> dispatches on the target's display field:
+ * X id dispatches on the target's display field:
  *  - target with a `display`-marked field → field-input-id-select.hbs
  *    (renders inside a `<Controller>`).
  *  - target without one → field-input-id-text.hbs (plain TextInput via
@@ -66,7 +66,7 @@ export function needsController(
   return fields.some((f) => probe(f.type));
 }
 
-/** Collect every aggregate referenced by an `Id<X>` field anywhere in
+/** Collect every aggregate referenced by an `X id` field anywhere in
  * the field set (recursing into value objects and arrays).  Drives
  * `useAll<X>()` hook calls + imports in the form component, plus
  * the option-label resolution (each target's `display`-marked field). */

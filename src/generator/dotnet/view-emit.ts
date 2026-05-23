@@ -90,7 +90,7 @@ function renderHandler(view: ViewIR, agg: AggregateIR, ctx: BoundedContextIR, ns
   const responseRecord = responseRecordName(view, agg);
   // Auxiliaries — sourceField → mapVarName (`customerId` →
   // `customerById`) — drives DI of foreign repos + bulk loads at
-  // handler entry, and rewrites `Id<X>` follow refs in the
+  // handler entry, and rewrites `X id` follow refs in the
   // projection.
   const auxiliaries = view.output?.auxiliaries ?? [];
   // When the view's filter / binds reference currentUser,
@@ -191,8 +191,8 @@ function projectFullForm(
   return `new ${upperFirst(view.name)}Row(${args.join(", ")})`;
 }
 
-/** Render a bind expression with chained `Id<X>` follow rewriting
- *  for .NET.  At each `member` whose receiverType is `Id<X>`, the
+/** Render a bind expression with chained `X id` follow rewriting
+ *  for .NET.  At each `member` whose receiverType is `X id`, the
  *  access becomes `<map>[<receiverRendered>].<Member>`; receiver
  *  recursively follows the same walk for multi-hop chains.  Other
  *  shapes delegate to renderCsExpr with the same thisName. */

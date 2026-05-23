@@ -24,7 +24,7 @@ system SalesBackend {
         invariant currency.length == 3
       }
 
-      event OrderConfirmed { order: Id<Order>, at: datetime }
+      event OrderConfirmed { order: Order id, at: datetime }
 
       aggregate Customer {
         name: string display
@@ -39,13 +39,13 @@ system SalesBackend {
       }
 
       aggregate Order {
-        customerId: Id<Customer>
+        customerId: Customer id
         status: OrderStatus
         placedAt: datetime
         contains lines: OrderLine[]
 
         entity OrderLine {
-          productId: Id<Product>
+          productId: Product id
           quantity: int
           invariant quantity > 0
         }
@@ -54,7 +54,7 @@ system SalesBackend {
 
         function isMutable(): bool = status == Draft
 
-        operation addLine(productId: Id<Product>, qty: int) {
+        operation addLine(productId: Product id, qty: int) {
           precondition isMutable()
           precondition qty > 0
           lines += new OrderLine { productId: productId, quantity: qty }
@@ -75,7 +75,7 @@ system SalesBackend {
       repository Products for Product { }
 
       repository Orders for Order {
-        find byCustomer(customerId: Id<Customer>): Order[]
+        find byCustomer(customerId: Customer id): Order[]
           where this.customerId == customerId
       }
 
@@ -83,8 +83,8 @@ system SalesBackend {
       // one DB transaction.  Mediator runs the FluentValidation
       // pipeline at the boundary; DomainException maps to 400.
       workflow placeOrder(
-        customerId: Id<Customer>,
-        productId: Id<Product>,
+        customerId: Customer id,
+        productId: Product id,
         quantity: int
       ) transactional {
         precondition quantity > 0

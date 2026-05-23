@@ -40,7 +40,7 @@ describe("System builder — repository find params", () => {
       {
         name: "forCustomer",
         base: { kind: "id", target: "Customer" },
-        baseLabel: "Id<Customer>",
+        baseLabel: "Customer id",
         array: false,
         optional: false,
       },
@@ -62,7 +62,7 @@ describe("System builder — repository find params", () => {
         array: false,
         optional: false,
       }),
-    ).toMatch(/find byCustomer\(customerId: Id<Customer>, since: datetime\)/);
+    ).toMatch(/find byCustomer\(customerId: Customer id, since: datetime\)/);
     expect(
       retypeFindParam(sales, "Orders", "byCustomer", 0, {
         base: { kind: "primitive", name: "string" },
@@ -75,7 +75,7 @@ describe("System builder — repository find params", () => {
 
   it("renames a param and updates its filter usages", () => {
     const out = renameFindParam(sales, "Orders", "activeForCustomer", 0, "cust")!;
-    expect(out).toMatch(/find activeForCustomer\(cust: Id<Customer>\)/);
+    expect(out).toMatch(/find activeForCustomer\(cust: Customer id\)/);
     expect(out).toMatch(/this\.customerId == cust && this\.status == Draft/);
   });
 
@@ -86,7 +86,7 @@ describe("System builder — repository find params", () => {
         array: false,
         optional: false,
       }),
-    ).toMatch(/find byCustomer\(customerId: Id<Customer>\): Order\b/);
+    ).toMatch(/find byCustomer\(customerId: Customer id\): Order\b/);
   });
 
   it("returns null for unknown repo / find / index", () => {

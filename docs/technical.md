@@ -73,7 +73,7 @@ about other platforms, and `system/` composes everything from above.
 - Raw `.ddd` text via Langium's `LangiumDocuments` service.
 
 **Outputs**
-- A linked `Model` AST node — every cross-reference (`Id<X>`,
+- A linked `Model` AST node — every cross-reference (`X id`,
   `partType`, `aggregate`, etc.) has its `.ref` populated.
 - Parse / lex diagnostics on `doc.diagnostics` (severity-tagged).
 
@@ -85,7 +85,7 @@ about other platforms, and `system/` composes everything from above.
   which names are visible at each `[Foo:ID]` site.
 - For containment partTypes, the custom scope provider restricts
   the candidate set to entity parts declared in the same aggregate
-  (cross-aggregate part references must use `Id<X>`).
+  (cross-aggregate part references must use `X id`).
 
 **Non-responsibilities** (deliberate)
 - No type checking — that's Layer ②.
@@ -141,7 +141,7 @@ about other platforms, and `system/` composes everything from above.
   reachable from the root; `+= / -=` requires a collection LHS.
 - **Structural**: operations and `test` blocks only on aggregate
   roots, not parts; `contains` only inside aggregates.
-- **Reference scoping**: `Id<X>` resolves to a known target; a
+- **Reference scoping**: `X id` resolves to a known target; a
   `react` deployable's `targets:` resolves to a non-react
   deployable in the same system; non-react deployables can't have
   a `targets:` field.
@@ -241,7 +241,7 @@ expression / statement construction:
 | `memberType` / `memberOnEntity` / `memberOnValueObject` | `T.member` typing — handles primitives, entities, value objects, collection ops, and the `string.length` shortcut. |
 | `findEntityByName` / `findValueObjectByName` / `findFunctionInEnv` / `findOperationInEnv` | Look-ups that run against the env (parts → aggregate → ctx). |
 | `pathType` / `stepInto` | Type a multi-segment LValue path (for assign / add / remove). |
-| `ancestorAggregate` | AST → enclosing aggregate (used for cross-cutting `Id<X>` value-type resolution). |
+| `ancestorAggregate` | AST → enclosing aggregate (used for cross-cutting `X id` value-type resolution). |
 | `cstText` | AST → original source text, for diagnostics + invariant `source` fields. |
 
 **Env**: a single immutable record carries the lowering scope:
@@ -367,7 +367,7 @@ the IR consumers need.  Four derivations, in order:
    defensive checks.
 
 3. **Associations on every aggregate.**  One `AssociationIR` per
-   field whose type is a reference collection (`Id<X>[]`), carrying
+   field whose type is a reference collection (`X id[]`), carrying
    the platform-neutral join-table metadata that relational backends
    consume:
 
@@ -484,7 +484,7 @@ checker validates every data flow from the IR to the rendered string.
 | `index.ts` | Project shell (Vite, package.json, tsconfig, index.html, Dockerfile, certs/ dir, App.tsx with router, main.tsx with providers, e2e/ suite shell). |
 | `api-builder.ts` | Per-aggregate API module: Zod schemas (request + response, walked via `wireFieldsForAggregate`) + React Query hooks (one per route, plus one `use<Op><Agg>` mutation hook per public operation). |
 | `body-walker.ts` | The **single** page-codegen path.  Walks a page's `body:` `ExprIR` and emits TSX by dispatching every walker-stdlib primitive (`Stack`/`Table`/`QueryView`/`Form`/`Modal`/`KeyValueRow`/…) through the active design pack's `primitive-*` templates.  No archetype renderers — `page <Name> { body: … }` and scaffolded pages share this one walker. |
-| `form-helpers.ts` | Per-type form-input dispatch (`prepareFormFieldVM`/`renderFormField`): text/number/switch/select/fieldset/datetime, RHF `register` vs `Controller`, initial-value generation, `Id<X>` → `useAll<Target>()` picker injection.  Shared by `Form(of:)`, `Form(runs:)`, and operation-modal forms. |
+| `form-helpers.ts` | Per-type form-input dispatch (`prepareFormFieldVM`/`renderFormField`): text/number/switch/select/fieldset/datetime, RHF `register` vs `Controller`, initial-value generation, `X id` → `useAll<Target>()` picker injection.  Shared by `Form(of:)`, `Form(runs:)`, and operation-modal forms. |
 | `pages-emitter.ts` | Page shell: wraps the walker's body TSX with `useForm`/mutation-hook/`useParams`/import declarations the body recorded on the walk context. |
 | `page-objects-builder.ts` / `walker-page-objects.ts` | Per-aggregate Playwright page-object class — keyed off the `data-testid` strings every primitive threads through (`testid:` named arg). |
 

@@ -61,7 +61,7 @@ describe("sensitivity narrowing warnings", () => {
   it("warns when emitting an event field with a sensitive value into a non-sensitive field", async () => {
     const { errors, warnings } = await parse(`
       context T {
-        event PatientRenamed { patientId: Id<Patient>, newName: string }
+        event PatientRenamed { patientId: Patient id, newName: string }
         aggregate Patient {
           name:  string
           email: string sensitive(pii)

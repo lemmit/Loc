@@ -37,7 +37,7 @@ A trailing property modifier alongside `sensitive`:
 
 ```ddd
 aggregate Patient {
-  id:        Id<Patient>
+  id:        Patient id
   email:     string sensitive(pii)
   ssn:       string sensitive(pii) encryptedAtRest
   diagnosis: string sensitive(phi) encryptedAtRest

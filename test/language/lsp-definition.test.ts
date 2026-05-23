@@ -16,7 +16,7 @@ const services = createDddServices(NodeFileSystem).Ddd;
 const expectDef = expectGoToDefinition(services);
 
 describe("DefinitionProvider — built-in cross references", () => {
-  it("Id<X> jumps to the Aggregate", async () => {
+  it("X id jumps to the Aggregate", async () => {
     await expectDef({
       text: `
         context Sales {
@@ -24,7 +24,7 @@ describe("DefinitionProvider — built-in cross references", () => {
             customerId: string
           }
           aggregate Customer {
-            primaryOrder: Id<<|>Order>
+            primaryOrder: <|>Order id
           }
         }`,
       index: 0,
@@ -98,7 +98,7 @@ describe("DefinitionProvider — built-in cross references", () => {
       text: `
         context Sales {
           event <|OrderConfirmed|> {
-            order: Id<Order>
+            order: Order id
           }
           aggregate Order {
             customerId: string

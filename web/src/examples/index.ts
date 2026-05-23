@@ -160,7 +160,7 @@ export const examples: LoomExample[] = [
     label: "Pokémon World (Hono + React)",
     source: pokemonWorldSource,
     blurb:
-      "Four aggregates across two modules — levels/evolution, party management with a 6-slot limit, and a battle lifecycle with rounds. Ternary HP-clamp, Id<X> party lists, e2e tests.",
+      "Four aggregates across two modules — levels/evolution, party management with a 6-slot limit, and a battle lifecycle with rounds. Ternary HP-clamp, X id party lists, e2e tests.",
   },
   {
     id: "sales-system",
@@ -174,7 +174,7 @@ export const examples: LoomExample[] = [
     label: "Banking System (Hono + React)",
     source: bankingSystemSource,
     blurb:
-      "Optional fields, Id<X> refs, where-filters, transactional `transferFunds` workflow.",
+      "Optional fields, X id refs, where-filters, transactional `transferFunds` workflow.",
   },
   {
     id: "inventory-system",

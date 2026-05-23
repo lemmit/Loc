@@ -23,6 +23,55 @@ async function parseExample(filename: string): Promise<{
   return { model: doc.parseResult.value as Model, errors };
 }
 
+describe("id-link & optional-containment syntax", () => {
+  it("parses 'X id', 'X id[]', 'X id?', and 'contains x: Y?'", async () => {
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(
+      `
+      context T {
+        aggregate Customer { name: string display }
+        aggregate Order {
+          customerId: Customer id
+          relatedIds: Customer id[]
+          referrerId: Customer id?
+          entity Shipping { addr: string }
+          contains shipping: Shipping?
+        }
+      }
+      `,
+      { validation: true },
+    );
+    const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1).map((d) => d.message);
+    expect(errors).toEqual([]);
+    const ctx = (doc.parseResult.value as Model).members[0] as
+      | import("../../src/language/generated/ast.js").BoundedContext
+      | undefined;
+    const order = ctx!.members.find((m) => m.name === "Order") as
+      | import("../../src/language/generated/ast.js").Aggregate
+      | undefined;
+    const props = order!.members.filter(
+      (m): m is import("../../src/language/generated/ast.js").Property => m.$type === "Property",
+    );
+    const customerId = props.find((p) => p.name === "customerId");
+    expect(customerId?.type.base.$type).toBe("IdType");
+    const relatedIds = props.find((p) => p.name === "relatedIds");
+    expect(relatedIds?.type.base.$type).toBe("IdType");
+    expect(relatedIds?.type.array).toBe(true);
+    const referrerId = props.find((p) => p.name === "referrerId");
+    expect(referrerId?.type.base.$type).toBe("IdType");
+    expect(referrerId?.type.optional).toBe(true);
+    const containments = order!.members.filter(
+      (m): m is import("../../src/language/generated/ast.js").Containment =>
+        m.$type === "Containment",
+    );
+    const shipping = containments.find((c) => c.name === "shipping");
+    expect(shipping?.optional).toBe(true);
+    expect(shipping?.collection).toBeFalsy();
+  });
+});
+
 describe("parsing & validation of examples", () => {
   it("parses sales.ddd without errors", async () => {
     const { model, errors } = await parseExample("examples/sales.ddd");
@@ -81,15 +130,15 @@ describe("parsing & validation of examples", () => {
         enum OrderStatus { Draft, Confirmed }
         aggregate Customer { name: string display }
         aggregate Order {
-          customerId: Id<Customer>
+          customerId: Customer id
           status: OrderStatus
           placedAt: datetime
         }
         repository Customers for Customer { }
         repository Orders for Order { }
-        event OrderPlaced { order: Id<Order>, at: datetime }
+        event OrderPlaced { order: Order id, at: datetime }
 
-        workflow placeOrder(customerId: Id<Customer>, placedAt: datetime) {
+        workflow placeOrder(customerId: Customer id, placedAt: datetime) {
           let customer = Customers.getById(customerId)
           let order = Order.create({
             customerId: customerId,

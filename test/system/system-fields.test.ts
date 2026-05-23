@@ -85,7 +85,7 @@ describe("System builder — inline field editing", () => {
 
     const id: TypeSpec = { base: { kind: "id", target: "Product" }, array: false, optional: false };
     let src = retypeField(sales, "aggregate", "Order", idx, id)!;
-    expect(src).toMatch(/customerId: Id<Product>/);
+    expect(src).toMatch(/customerId: Product id/);
 
     const vo: TypeSpec = { base: { kind: "named", target: "Money" }, array: true, optional: false };
     src = retypeField(sales, "aggregate", "Order", idx, vo)!;
@@ -122,7 +122,7 @@ describe("System builder — inline field editing", () => {
     const opts = availableTypes(parse(sales));
     const labels = opts.map((o) => o.label);
     expect(labels).toContain("string");
-    expect(labels).toContain("Id<Order>");
+    expect(labels).toContain("Order id");
     expect(labels).toContain("Money");
   });
 

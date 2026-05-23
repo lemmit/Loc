@@ -15,14 +15,14 @@ import { lowerFirst, plural, upperFirst } from "../../util/naming.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
 import { joinColumnName, joinTableConstName, valueObjectColumnNames } from "./emit.js";
 
-/** Associations (`Id<T>[]` reference collections) declared on an
+/** Associations (`T id[]` reference collections) declared on an
  * aggregate, persisted as many-to-many join tables.  Empty when none. */
 function associationsOf(agg: AggregateIR): AssociationIR[] {
   return agg.associations ?? [];
 }
 
 /** True for a field type that is a collection of references
- * (`Id<T>[]`) — persisted via a join table, not a column. */
+ * (`T id[]`) — persisted via a join table, not a column. */
 function isRefCollection(t: TypeIR): boolean {
   return t.kind === "array" && t.element.kind === "id";
 }
@@ -153,7 +153,7 @@ export function buildRepositoryFile(
     `    return found;`,
     `  }`,
     "",
-    // Bulk loader used by views that follow `Id<X>` references in bind
+    // Bulk loader used by views that follow `X id` references in bind
     // expressions.  Same hydration path as the array-return finds;
     // filter is a single `inArray`.
     findManyByIdsMethod(agg, ctx),
@@ -268,7 +268,7 @@ function wireProjectionValue(
   if (t.kind === "array") {
     // `__a` is contextually typed by `.map` over the element type;
     // an explicit annotation would fight strict-mode inference for
-    // branded `Id<T>` element arrays.
+    // branded `T id` element arrays.
     return `${expr}.map((__a) => (${wireProjectionValue("__a", t.element, ctx, false)}))`;
   }
   if (t.kind === "entity") return expr;
@@ -448,7 +448,7 @@ function txCallbackBody(agg: AggregateIR, ctx: BoundedContextIR): string[] {
       `      const ${c.name} = ${c.name}Rows.length > 0 ? ${hydrateEntityExpr(part, `${c.name}Rows[0]!`, agg, ctx)} : null;`,
     ];
   });
-  // Load reference collections (`Id<T>[]`) from their join tables.
+  // Load reference collections (`T id[]`) from their join tables.
   const assocLoads = associationsOf(agg).flatMap((assoc) => {
     const joinConst = joinTableConstName(assoc);
     const ownerCol = joinColumnName(assoc.ownerFk);

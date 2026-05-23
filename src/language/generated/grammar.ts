@@ -5395,6 +5395,16 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
               "value": "[]"
             },
             "cardinality": "?"
+          },
+          {
+            "$type": "Assignment",
+            "feature": "optional",
+            "operator": "?=",
+            "terminal": {
+              "$type": "Keyword",
+              "value": "?"
+            },
+            "cardinality": "?"
           }
         ]
       },
@@ -6096,14 +6106,6 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
         "$type": "Group",
         "elements": [
           {
-            "$type": "Keyword",
-            "value": "Id"
-          },
-          {
-            "$type": "Keyword",
-            "value": "<"
-          },
-          {
             "$type": "Assignment",
             "feature": "target",
             "operator": "=",
@@ -6124,7 +6126,7 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           },
           {
             "$type": "Keyword",
-            "value": ">"
+            "value": "id"
           }
         ]
       },

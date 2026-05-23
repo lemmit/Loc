@@ -35,7 +35,7 @@ export function buildViewsRoutesFile(
   lines.push(`import type { NodePgDatabase } from "drizzle-orm/node-postgres";`);
   lines.push(`import type * as schema from "../db/schema";`);
   // Source aggregates + repo imports per view, plus any foreign
-  // aggregates referenced via `Id<X>` follow auxiliaries.
+  // aggregates referenced via `X id` follow auxiliaries.
   const aggsTouched = new Set<string>();
   for (const v of ctx.views) {
     aggsTouched.add(v.aggregateName);
@@ -162,7 +162,7 @@ function emitViewRoute(
   const repoCallArgs = usesUser ? "currentUser" : "";
   out.push(`    const rows = await repo.${lowerFirst(view.name)}(${repoCallArgs});`);
   if (view.output) {
-    // Bulk-load every foreign aggregate referenced by `Id<X>`
+    // Bulk-load every foreign aggregate referenced by `X id`
     // follows in the bind expressions.  Auxiliaries arrive in
     // dependency order (shortest path first); each one's id source
     // is either the source rows (length-1 paths) or the map of a
@@ -214,8 +214,8 @@ function idsSourceForAux(
   return `[...${prev.mapVar}.values()].map((__a) => __a.${finalField})`;
 }
 
-/** Render a view bind expression with chained `Id<X>` follow
- *  rewriting.  At each `member` whose receiverType is `Id<X>`,
+/** Render a view bind expression with chained `X id` follow
+ *  rewriting.  At each `member` whose receiverType is `X id`,
  *  the access becomes `<map>.get(<receiverRendered> as string)!.<member>`
  *  where `<receiverRendered>` is recursively the same walker.
  *  Falls back to standard `renderTsExpr` for non-follow shapes. */

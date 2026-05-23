@@ -4,7 +4,7 @@
 // RHF-bound input per non-optional field, dispatching by type
 // (string→TextInput, int/decimal→NumberInput, bool→Switch via
 // Controller, datetime→TextInput[type=datetime-local], enum→Select,
-// `Id<X>`→Select with auto-injected `useAllX()` picker, value-
+// `X id`→Select with auto-injected `useAllX()` picker, value-
 // object→nested Fieldset).  Required-field metadata becomes RHF
 // rules through Zod (zodResolver(Create<Agg>Request)).
 //
@@ -12,7 +12,7 @@
 //   1. The page TSX emits with `useForm` + `zodResolver` + a
 //      `useCreate<Agg>()` mutation hook.
 //   2. Each non-optional aggregate field surfaces in the form.
-//   3. `Id<X>` targets auto-inject `useAll<TargetPlural>()` hooks at
+//   3. `X id` targets auto-inject `useAll<TargetPlural>()` hooks at
 //      page-top.
 //   4. The default submit handler matches scaffold parity
 //      (`create.mutateAsync` + notify + navigate to `/<plural>/{id}`).
@@ -102,7 +102,7 @@ describe("Form(of: <Aggregate>) auto-dispatch", () => {
     expect(tsx).not.toMatch(/note:/);
   });
 
-  it("Id<X> targets auto-inject useAll<TargetPlural>() at page-top", async () => {
+  it("X id targets auto-inject useAll<TargetPlural>() at page-top", async () => {
     const files = await buildAndGenerate(`
       system S {
         module M {
@@ -112,7 +112,7 @@ describe("Form(of: <Aggregate>) auto-dispatch", () => {
             }
             repository Customers for Customer { }
             aggregate Order {
-              customerId: Id<Customer>
+              customerId: Customer id
               quantity:   int
             }
             repository Orders for Order { }

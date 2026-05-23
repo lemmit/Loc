@@ -25,8 +25,8 @@ system PokemonWorld {
 
             enum PokemonType { Normal, Fire, Water, Grass, Electric, Psychic, Dragon }
 
-            event PokemonLeveledUp { pokemon: Id<Pokemon>, level: int }
-            event PokemonEvolved   { pokemon: Id<Pokemon>, fromSpecies: string, into: string }
+            event PokemonLeveledUp { pokemon: Pokemon id, level: int }
+            event PokemonEvolved   { pokemon: Pokemon id, fromSpecies: string, into: string }
 
             aggregate Pokemon {
                 species: string display
@@ -93,8 +93,8 @@ system PokemonWorld {
 
             enum TrainerRank { Novice, Ace, Veteran, Champion }
 
-            event PokemonCaught { trainer: Id<Trainer>, pokemon: Id<Pokemon> }
-            event BadgeEarned   { trainer: Id<Trainer>, badge: string }
+            event PokemonCaught { trainer: Trainer id, pokemon: Pokemon id }
+            event BadgeEarned   { trainer: Trainer id, badge: string }
 
             aggregate Trainer {
                 name: string display
@@ -102,8 +102,8 @@ system PokemonWorld {
                 rank: TrainerRank
                 money: int
                 badges: int
-                party: Id<Pokemon>[]
-                caught: Id<Pokemon>[]
+                party: Pokemon id[]
+                caught: Pokemon id[]
 
                 invariant money >= 0
                 invariant badges >= 0
@@ -112,17 +112,17 @@ system PokemonWorld {
                 derived partyIsFull: bool = party.count == 6
                 derived pokedexCount: int = caught.count
 
-                operation catchPokemon(pokemon: Id<Pokemon>) {
+                operation catchPokemon(pokemon: Pokemon id) {
                     caught += pokemon
                     emit PokemonCaught { trainer: id, pokemon: pokemon }
                 }
 
-                operation addToParty(pokemon: Id<Pokemon>) {
+                operation addToParty(pokemon: Pokemon id) {
                     precondition party.count < 6
                     party += pokemon
                 }
 
-                operation removeFromParty(pokemon: Id<Pokemon>) {
+                operation removeFromParty(pokemon: Pokemon id) {
                     precondition party.count > 0
                     party -= pokemon
                 }
@@ -142,7 +142,7 @@ system PokemonWorld {
             repository Trainers for Trainer {
                 find byName(name: string): Trainer? where this.name == name
                 find byRank(rank: TrainerRank): Trainer[] where this.rank == rank
-                find holdingInParty(pokemon: Id<Pokemon>): Trainer[]
+                find holdingInParty(pokemon: Pokemon id): Trainer[]
                     where this.party.contains(pokemon)
             }
         }
@@ -157,13 +157,13 @@ system PokemonWorld {
 
             enum BattleStatus { Ongoing, ChallengerWon, OpponentWon }
 
-            event BattleConcluded { battle: Id<Battle>, winner: Id<Trainer> }
+            event BattleConcluded { battle: Battle id, winner: Trainer id }
 
             aggregate Battle {
-                challenger: Id<Trainer>
-                opponent: Id<Trainer>
-                challengerPokemon: Id<Pokemon>
-                opponentPokemon: Id<Pokemon>
+                challenger: Trainer id
+                opponent: Trainer id
+                challengerPokemon: Pokemon id
+                opponentPokemon: Pokemon id
                 status: BattleStatus
                 contains rounds: BattleRound[]
 
@@ -172,7 +172,7 @@ system PokemonWorld {
 
                 function isOngoing(): bool = status == Ongoing
 
-                operation recordRound(attacker: Id<Pokemon>, damage: int) {
+                operation recordRound(attacker: Pokemon id, damage: int) {
                     precondition isOngoing()
                     precondition damage > 0
                     rounds += new BattleRound { attacker: attacker, damage: damage }
@@ -191,7 +191,7 @@ system PokemonWorld {
                 }
 
                 entity BattleRound {
-                    attacker: Id<Pokemon>
+                    attacker: Pokemon id
                     damage: int
                     invariant damage > 0
                 }
@@ -199,14 +199,14 @@ system PokemonWorld {
 
             repository Battles for Battle {
                 find ongoing(): Battle[] where this.status == Ongoing
-                find forChallenger(challenger: Id<Trainer>): Battle[]
+                find forChallenger(challenger: Trainer id): Battle[]
                     where this.challenger == challenger
             }
         }
 
         context Arenas {
 
-            event GymBadgeAwarded { gym: Id<Gym>, trainer: Id<Trainer>, badge: string }
+            event GymBadgeAwarded { gym: Gym id, trainer: Trainer id, badge: string }
 
             aggregate Gym {
                 name: string display
@@ -218,7 +218,7 @@ system PokemonWorld {
 
                 invariant victories >= 0
 
-                operation recordChallengeWin(trainer: Id<Trainer>) {
+                operation recordChallengeWin(trainer: Trainer id) {
                     victories := victories + 1
                     emit GymBadgeAwarded { gym: id, trainer: trainer, badge: badge }
                 }

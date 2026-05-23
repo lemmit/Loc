@@ -12,15 +12,15 @@ context Banking {
   }
 
   event AccountOpened {
-    account: Id<Account>,
-    holder: Id<Customer>,
+    account: Account id,
+    holder: Customer id,
     at: datetime
   }
 
-  event AccountFrozen { account: Id<Account>, reason: string, at: datetime }
+  event AccountFrozen { account: Account id, reason: string, at: datetime }
 
-  event MoneyDeposited { account: Id<Account>, amount: Money, at: datetime }
-  event MoneyWithdrawn { account: Id<Account>, amount: Money, at: datetime }
+  event MoneyDeposited { account: Account id, amount: Money, at: datetime }
+  event MoneyWithdrawn { account: Account id, amount: Money, at: datetime }
 
   aggregate Customer {
     name: string
@@ -30,7 +30,7 @@ context Banking {
   }
 
   aggregate Account {
-    holder: Id<Customer>
+    holder: Customer id
     status: AccountStatus
     balance: Money
     openedAt: datetime
@@ -89,8 +89,8 @@ context Banking {
   }
 
   repository Accounts for Account {
-    find byHolder(holder: Id<Customer>): Account[] where this.holder == holder
-    find openByHolder(holder: Id<Customer>): Account[]
+    find byHolder(holder: Customer id): Account[] where this.holder == holder
+    find openByHolder(holder: Customer id): Account[]
       where this.holder == holder && this.status == Open
   }
 }

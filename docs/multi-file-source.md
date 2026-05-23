@@ -32,7 +32,7 @@ Pure mechanical.  Zero new domain capabilities.  Just `import`,
 multi-file workspace, and root-level value-objects / enums (the only
 new visibility).
 
-### Stage B — cross-context `Id<X>` (deferred)
+### Stage B — cross-context `X id` (deferred)
 
 Identity-only references across contexts via `uses` + `export`.  No
 behaviour crosses the boundary (no commands, no events, no
@@ -196,19 +196,19 @@ Rough budget: ~4–5 focused days for Stage A.
 ### Validator
 - Unknown context in `uses`.
 - Reference to a non-exported aggregate.
-- Cross-context `Id<X>` without matching `uses`.
+- Cross-context `X id` without matching `uses`.
 
 ### IR / lowering
 - Extend `findEntityByName` in `lower-expr.ts`: fall back to
   cross-context lookup via the `uses` allowlist.
-- No IR shape changes — `Id<X>` is already a typed reference;
+- No IR shape changes — `X id` is already a typed reference;
   resolution just spans contexts now.
 
 ### Generators
-- No runtime change (Stage B is identity only; an `Id<X>` is just a
+- No runtime change (Stage B is identity only; an `X id` is just a
   guid / int either way).
 - Wire-spec & DTO emission: a field of type `Id<OtherCtx.Order>`
-  serialises identically to `Id<LocalOrder>`.
+  serialises identically to `LocalOrder id`.
 
 ### Tests
 - Validator coverage of all four error cases.

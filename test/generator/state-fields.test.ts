@@ -63,7 +63,7 @@ describe("Page builder — state field editing", () => {
   it("retypes a state field to an Id<> reference", () => {
     const spec: TypeSpec = { base: { kind: "id", target: "Order" }, array: false, optional: false };
     const src = retypeStateField(WITH_STATE, "P", 0, spec)!;
-    expect(src).toMatch(/step: Id<Order>/);
+    expect(src).toMatch(/step: Order id/);
   });
 
   it("sets and clears a default initializer; rejects an invalid expression", () => {

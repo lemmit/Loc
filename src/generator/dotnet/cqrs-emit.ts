@@ -249,7 +249,7 @@ function emitOperationCommandsAndHandlers(
       // auto Mediator handler, then dispatch through it.
       const ifaceName = `I${upperFirst(op.name)}${agg.name}Handler`;
       const reqName = `${upperFirst(op.name)}Request`;
-      // Request record is wire-typed (Id<X> → Guid, enum → string,
+      // Request record is wire-typed (X id → Guid, enum → string,
       // datetime → string, value-object → <VO>Request) but `cmd.X`
       // is domain-typed.  Convert each param via
       // `domainToRequestExpr` so the constructor types line up.

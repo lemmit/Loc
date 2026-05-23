@@ -28,7 +28,7 @@ import {
  * Custom scope provider that enforces aggregate-local visibility for
  * entity parts: a `Containment.partType` reference can only resolve to a
  * part declared in the same aggregate.  All other cross-references fall
- * back to the default global-scope behavior (which lets `Id<X>`,
+ * back to the default global-scope behavior (which lets `X id`,
  * repository.aggregate, named types, etc. resolve across the bounded
  * context — and across modules / systems via the custom export below).
  */
@@ -39,14 +39,55 @@ export class DddScopeProvider extends DefaultScopeProvider {
       if (!aggregate) return EMPTY_SCOPE;
       return this.createScopeForNodes(localParts(aggregate));
     }
+    // `NamedType.target` is the bare-name slot in a type position.  Cross-
+    // aggregate links must spell `X id` (handled by IdType, which scopes
+    // globally via the default scope provider).  Bare names may only resolve
+    // to: enums + value-objects (always global), entity-parts of the same
+    // enclosing aggregate, and aggregates (so the validator below can give
+    // a friendly "use 'X id'" diagnostic instead of "could not resolve").
+    if (context.container.$type === "NamedType" && context.property === "target") {
+      const localScope = this.localTypeScope(context);
+      if (localScope) return localScope;
+    }
     return super.getScope(context);
+  }
+
+  private localTypeScope(context: ReferenceInfo): Scope | undefined {
+    const aggregate = enclosingAggregate(context.container);
+    const defaultScope = super.getScope(context);
+    if (!aggregate) {
+      // Outside an aggregate (operation-param-on-page, event field, etc.):
+      // restrict to enums + value-objects + aggregates from the default
+      // scope.  Entity parts are not addressable from there.
+      return this.filterScope(defaultScope, (d) =>
+        d.type === "EnumDecl" || d.type === "ValueObject" || d.type === "Aggregate",
+      );
+    }
+    // Inside an aggregate: filter out entity-parts owned by *other*
+    // aggregates.  Same-aggregate parts and all enums/VOs/aggregates pass.
+    return this.filterScope(defaultScope, (d) => {
+      if (d.type === "EnumDecl" || d.type === "ValueObject" || d.type === "Aggregate") {
+        return true;
+      }
+      if (d.type === "EntityPart") {
+        const node = d.node;
+        return !!node && AstUtils.getContainerOfType(node, isAggregate) === aggregate;
+      }
+      return false;
+    });
+  }
+
+  private filterScope(scope: Scope, keep: (d: AstNodeDescription) => boolean): Scope {
+    const elems = Array.from(scope.getAllElements());
+    const kept = elems.filter(keep);
+    return this.createScope(kept);
   }
 }
 
 /**
  * Exports every named, top-level-ish declaration to the document's
  * global scope, no matter how deeply it sits inside system / module
- * / context wrappers.  Without this, `Id<Product>` inside one module
+ * / context wrappers.  Without this, `Product id` inside one module
  * cannot reach an `aggregate Product` declared in another module —
  * Langium's default only exports direct children of the document root.
  *
@@ -78,7 +119,7 @@ export class DddScopeComputation extends DefaultScopeComputation {
       // (operations, workflows, deployables, …) are not exported by
       // the default computation at all, so there is no duplication;
       // aggregates / value-objects also keep their bare-name export
-      // above for `Id<X>` / named-type resolution.
+      // above for `X id` / named-type resolution.
       if (isTargetable(node)) {
         const qn = qualifiedNameOf(node);
         if (qn) {
