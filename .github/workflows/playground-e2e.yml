@@ -61,10 +61,13 @@ jobs:
     # fetches got heavier and the 10-minute cap began swallowing
     # otherwise-healthy runs (two consecutive `cancelled` verdicts
     # at the exact 10-min mark on the post-backend-packages CI),
-    # giving us no signal.  30 leaves ample headroom for cold
-    # cache + a deliberate safety margin without making a genuinely
-    # stuck pipeline expensive.
-    timeout-minutes: 30
+    # giving us no signal.  Bumped again 30 → 45 once the same-origin
+    # mirror landed: the mirror+vendor build adds ~5min and pushed
+    # the previous ~25min Playwright run past the 30-min cap → another
+    # `cancelled` verdict that obscured whether specs were passing
+    # slowly or still failing.  45 leaves headroom while keeping a
+    # genuinely stuck pipeline from running forever.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
 
