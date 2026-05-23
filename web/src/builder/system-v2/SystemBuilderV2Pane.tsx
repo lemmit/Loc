@@ -40,7 +40,12 @@ import {
   type ExprSlot,
 } from "../system/expr-slots";
 import { ExprSlotEditor, type ExprMode } from "../system/ExpressionEditor";
+import { AstUtils } from "langium";
+import { spliceNode } from "../edit-engine";
+import { IDENTIFIER, renameConstruct } from "../system/rename";
+import type { NodeKind } from "../system/model";
 import AddPalette from "./AddPalette";
+import ConstructNode, { type ConstructNodeData } from "./ConstructNode";
 import StmtNode, { type StmtNodeData } from "./StmtNode";
 import { buildViewGraph, findAggregate, type ViewGraph, type ViewKind, type ViewPath } from "./view-graph";
 
@@ -67,7 +72,11 @@ const KIND_COLOR: Record<ViewKind, string> = {
   stmt: "transparent",
 };
 
-function toRfNodes(g: ViewGraph, stmtData: Map<string, Record<string, unknown>>): Node[] {
+function toRfNodes(
+  g: ViewGraph,
+  stmtData: Map<string, Record<string, unknown>>,
+  constructData: Map<string, ConstructNodeData>,
+): Node[] {
   return g.nodes.map((n) => {
     if (n.kind === "stmt") {
       return {
@@ -75,15 +84,27 @@ function toRfNodes(g: ViewGraph, stmtData: Map<string, Record<string, unknown>>)
         type: "stmt",
         position: { x: n.x, y: n.y },
         data: stmtData.get(n.id) ?? ({} as Record<string, unknown>),
-        // Custom node owns its own dimensions / borders; no React Flow styling.
         draggable: false,
         selectable: false,
       } satisfies Node;
     }
+    const cdata = constructData.get(n.id);
+    if (cdata) {
+      return {
+        id: n.id,
+        type: "construct",
+        position: { x: n.x, y: n.y },
+        data: cdata as unknown as Record<string, unknown>,
+        draggable: false,
+        selectable: false,
+      } satisfies Node;
+    }
+    // Fallback (shouldn't fire — every non-stmt node should get construct data
+    // — kept for safety).
     return {
       id: n.id,
       position: { x: n.x, y: n.y },
-      data: { label: `${n.kind}${n.drillable ? "  ↳" : ""}\n${n.name}` },
+      data: { label: `${n.kind}\n${n.name}` },
       style: {
         background: KIND_COLOR[n.kind],
         color: "white",
@@ -93,13 +114,46 @@ function toRfNodes(g: ViewGraph, stmtData: Map<string, Record<string, unknown>>)
         width: 160,
         whiteSpace: "pre-line" as const,
         textAlign: "center" as const,
-        cursor: n.drillable ? "pointer" : "default",
       },
     };
   });
 }
 
-const NODE_TYPES = { stmt: StmtNode } as const;
+const NODE_TYPES = { stmt: StmtNode, construct: ConstructNode } as const;
+
+// ViewKinds that map directly to v1's NodeKind — `renameConstruct` and the
+// AST $type mapping cover these. Other v2-only kinds (system / context /
+// operation / function / field / containment) get no rename/delete in this
+// phase.
+const NODE_KIND_BY_VIEW: Partial<Record<ViewKind, NodeKind>> = {
+  module: "module",
+  aggregate: "aggregate",
+  valueobject: "valueobject",
+  event: "event",
+  repository: "repository",
+  view: "view",
+  workflow: "workflow",
+  deployable: "deployable",
+  api: "api",
+  storage: "storage",
+  ui: "ui",
+};
+
+// `AstNode.$type` we look up for a given v2 ViewKind, when we need to find
+// the construct's CST in source for a delete splice.
+const AST_TYPE_BY_VIEW: Partial<Record<ViewKind, string>> = {
+  module: "Module",
+  aggregate: "Aggregate",
+  valueobject: "ValueObject",
+  event: "EventDecl",
+  repository: "Repository",
+  view: "View",
+  workflow: "Workflow",
+  deployable: "Deployable",
+  api: "Api",
+  storage: "Storage",
+  ui: "Ui",
+};
 
 /** Derive the `BodyLocator` for the operation / workflow currently in focus
  *  (the last step of the path), or null otherwise. Operation needs the
@@ -277,12 +331,55 @@ function Inner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [parsed, leafLoc, structuredKey, exprMode, rev]);
 
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(toRfNodes(graph, stmtData));
+  /** Per-construct rename + delete handlers, keyed by the node id. Only
+   *  populated for ViewKinds that map to v1's NodeKind (the ones
+   *  `renameConstruct` and `spliceNode` cover); other nodes render as
+   *  read-only constructs without action buttons. */
+  const constructData = useMemo(() => {
+    const m = new Map<string, ConstructNodeData>();
+    for (const n of graph.nodes) {
+      if (n.kind === "stmt") continue;
+      const nodeKind = NODE_KIND_BY_VIEW[n.kind];
+      const astType = AST_TYPE_BY_VIEW[n.kind];
+      const onRename =
+        nodeKind != null
+          ? (next: string) => {
+              if (!IDENTIFIER.test(next) || next === n.name) return;
+              void renameConstruct(ctx.getSource(), nodeKind, n.name, next).then((result) => {
+                if (result != null) apply(result);
+              });
+            }
+          : undefined;
+      const onDelete =
+        astType != null
+          ? () => {
+              for (const ast of AstUtils.streamAst(parsed.ast)) {
+                if (ast.$type === astType && (ast as { name?: string }).name === n.name) {
+                  apply(spliceNode(ctx.getSource(), ast, ""));
+                  return;
+                }
+              }
+            }
+          : undefined;
+      m.set(n.id, {
+        kind: n.kind,
+        name: n.name,
+        color: KIND_COLOR[n.kind],
+        drillable: n.drillable,
+        onRename,
+        onDelete,
+      });
+    }
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graph, parsed, rev]);
+
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(toRfNodes(graph, stmtData, constructData));
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(toRfEdges(graph));
   useEffect(() => {
-    setNodes(toRfNodes(graph, stmtData));
+    setNodes(toRfNodes(graph, stmtData, constructData));
     setEdges(toRfEdges(graph));
-  }, [graph, stmtData, setNodes, setEdges]);
+  }, [graph, stmtData, constructData, setNodes, setEdges]);
 
   const rf = useReactFlow();
   const nodesInitialized = useNodesInitialized();
