@@ -1,7 +1,7 @@
 // Auto-generated.  Do not edit by hand.
 import type { Page, Locator } from "@playwright/test";
 import { expect } from "@playwright/test";
-import type { CreateOrderRequest, AddLineRequest, ConfirmRequest, OrderResponse } from "../../src/api/order";
+import type { CreateOrderRequest, AddLineRequest, OrderResponse } from "../../src/api/order";
 
 export class OrderListPage {
   static readonly url = "/orders";

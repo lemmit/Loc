@@ -71,6 +71,24 @@ export function renderUIE2EFile(
   const workflows = collectReferencedWorkflows(uiTests, contexts);
   const views = collectReferencedViews(uiTests, contexts);
 
+  // Render every test body first, then derive imports from what actually
+  // appears — keeps `<Agg>ListPage` / `<Agg>DetailPage` out of the import
+  // line when the test never references that page-object (per the
+  // generated-code Biome gate).
+  const bodyLines: string[] = [];
+  for (const t of uiTests) {
+    const ctx: RenderCtx = {
+      deployable: reactDeployable,
+      contexts,
+      locals: new Set(),
+      detailHandles: new Set(),
+    };
+    bodyLines.push(...renderTest(t, ctx));
+    bodyLines.push("");
+  }
+  const body = bodyLines.join("\n");
+  const refs = (name: string): boolean => new RegExp(`\\b${name}\\b`).test(body);
+
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   // `./fixtures` re-exports Playwright's `test`/`expect` with an auto
@@ -79,27 +97,25 @@ export function renderUIE2EFile(
   lines.push(`import { test, expect } from "./fixtures";`);
   for (const a of aggregates) {
     const cap = upperFirst(a.name);
-    lines.push(`import { ${cap}ListPage, ${cap}DetailPage } from "./pages/${lowerFirst(a.name)}";`);
+    const used = [`${cap}ListPage`, `${cap}DetailPage`].filter(refs);
+    if (used.length > 0) {
+      lines.push(`import { ${used.join(", ")} } from "./pages/${lowerFirst(a.name)}";`);
+    }
   }
   for (const wf of workflows) {
     const cap = upperFirst(wf.name);
-    lines.push(`import { ${cap}WorkflowPage } from "./pages/workflows/${snake(wf.name)}";`);
+    if (refs(`${cap}WorkflowPage`)) {
+      lines.push(`import { ${cap}WorkflowPage } from "./pages/workflows/${snake(wf.name)}";`);
+    }
   }
   for (const v of views) {
     const cap = upperFirst(v.name);
-    lines.push(`import { ${cap}ViewPage } from "./pages/views/${snake(v.name)}";`);
+    if (refs(`${cap}ViewPage`)) {
+      lines.push(`import { ${cap}ViewPage } from "./pages/views/${snake(v.name)}";`);
+    }
   }
   lines.push("");
-  for (const t of uiTests) {
-    const ctx: RenderCtx = {
-      deployable: reactDeployable,
-      contexts,
-      locals: new Set(),
-      detailHandles: new Set(),
-    };
-    lines.push(...renderTest(t, ctx));
-    lines.push("");
-  }
+  lines.push(...bodyLines);
   return lines.join("\n") + "\n";
 }
 

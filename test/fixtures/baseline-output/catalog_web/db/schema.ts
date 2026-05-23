@@ -1,5 +1,5 @@
 // Auto-generated.
-import { pgTable, text, integer, bigint, numeric, boolean, timestamp, pgEnum, uuid, index } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, numeric, index } from "drizzle-orm/pg-core";
 
 
 export const products = pgTable("products", {
