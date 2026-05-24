@@ -57,8 +57,13 @@ function exprIsTranslatable(
 ): boolean {
   switch (e.kind) {
     case "literal":
-      // `now()` is server-side — every other literal is fine.
-      return e.lit !== "now";
+      // `now()` is server-side — every other literal is fine,
+      // EXCEPT money literals: client-side JS can't faithfully compare
+      // Decimals via host operators, and the wire's string-of-decimal
+      // doesn't survive being shoved into `.min(N)` / `.refine(...)`
+      // chains.  Money invariants enforce server-side only, where
+      // `_assertInvariants` renders them through `.gte()` etc.
+      return e.lit !== "now" && e.lit !== "money";
     case "this":
       // A bare `this` reference is always server-side state.
       return false;
@@ -130,6 +135,17 @@ function exprIsTranslatable(
     case "unary":
       return exprIsTranslatable(e.operand, ctx, scope);
     case "binary":
+      // Money operands in a binary expression cannot be validated on
+      // the wire: the JS-side schema would compare Decimal instances
+      // with reference equality, not value equality.  Catches the
+      // case where neither operand is a literal but at least one is
+      // money-typed (e.g. `subtotal >= unit`).
+      if (
+        (e.leftType?.kind === "primitive" && e.leftType.name === "money") ||
+        (e.resultType?.kind === "primitive" && e.resultType.name === "money")
+      ) {
+        return false;
+      }
       return exprIsTranslatable(e.left, ctx, scope) && exprIsTranslatable(e.right, ctx, scope);
     case "ternary":
       return (
