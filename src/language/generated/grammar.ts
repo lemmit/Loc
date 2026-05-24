@@ -5728,11 +5728,20 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "feature": "name",
             "operator": "=",
             "terminal": {
-              "$type": "RuleCall",
-              "rule": {
-                "$ref": "#/rules@144"
-              },
-              "arguments": []
+              "$type": "Alternatives",
+              "elements": [
+                {
+                  "$type": "RuleCall",
+                  "rule": {
+                    "$ref": "#/rules@144"
+                  },
+                  "arguments": []
+                },
+                {
+                  "$type": "Keyword",
+                  "value": "money"
+                }
+              ]
             }
           },
           {
@@ -6489,6 +6498,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "Keyword",
             "value": "bi"
+          },
+          {
+            "$type": "Keyword",
+            "value": "money"
           }
         ]
       },
@@ -9037,6 +9050,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "Keyword",
             "value": "api"
+          },
+          {
+            "$type": "Keyword",
+            "value": "money"
           }
         ]
       },

@@ -218,6 +218,13 @@ export function generateTypeScriptForContexts(
   // strings.
   const projectUsesMoney = contexts.some(contextUsesMoney);
   out.set("package.json", projectPackageJson(pins, { withMoney: projectUsesMoney }));
+  // Shared primitive-schema helpers — one home for non-trivial wire
+  // shapes (today: `moneySchema`).  Emitted only when something in
+  // the project uses money so non-money projects' tsc surface stays
+  // identical.
+  if (projectUsesMoney) {
+    out.set("lib/schemas.ts", LIB_SCHEMAS_MONEY_TS);
+  }
   out.set("tsconfig.json", PROJECT_TSCONFIG_JSON);
   out.set("tsup.config.ts", TSUP_CONFIG);
   out.set("index.ts", PROJECT_INDEX_TS);
@@ -283,6 +290,45 @@ export default defineConfig({
   dbCredentials: {
     url: process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/postgres",
   },
+});
+`;
+
+// Shared primitive-schema helpers — emitted to `lib/schemas.ts` when
+// the project uses money.  Single canonical wire-shape for the
+// money primitive: parses a decimal-formatted string, surfaces parse
+// failures as typed Zod issues (so bad input becomes a typed 400, not
+// an uncaught throw → 500), and exposes the parsed `Decimal`
+// instance to route handlers.  Routes reference `moneySchema` rather
+// than redeclaring the chain at every field site.
+const LIB_SCHEMAS_MONEY_TS = `// Auto-generated.  Do not edit by hand.
+import Decimal from "decimal.js";
+import { z } from "@hono/zod-openapi";
+
+/**
+ * Wire schema for the \`money\` primitive.
+ *
+ * Inbound JSON: a decimal-formatted string (\`"123.4500"\`).  Parses
+ * to a \`decimal.js\` Decimal instance.  Format violations and parse
+ * failures both surface as typed Zod issues — invalid input becomes
+ * a 400 with the field name attached, not an uncaught throw.
+ */
+export const moneySchema = z.string().transform((s, ctx) => {
+  if (!/^-?\\d+(\\.\\d+)?$/.test(s)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: \`Invalid decimal: \${JSON.stringify(s)}\`,
+    });
+    return z.NEVER;
+  }
+  try {
+    return new Decimal(s);
+  } catch {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: \`Invalid decimal: \${JSON.stringify(s)}\`,
+    });
+    return z.NEVER;
+  }
 });
 `;
 
