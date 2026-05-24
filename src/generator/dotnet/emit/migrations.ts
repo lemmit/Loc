@@ -13,13 +13,13 @@ import { upperFirst } from "../../../util/naming.js";
 // the `[Migration("<version>")]` attribute for ordering and writes to
 // `__EFMigrationsHistory` as usual.
 //
-// Two artefacts beyond the per-migration .cs file:
-//   - `Migrations/AppDbContextModelSnapshot.cs` — empty model snapshot
-//     stub.  EF requires its presence to reconcile state at runtime;
-//     keeping it empty (no model entries) means EF can't compute a diff
-//     against the current DbContext and would emit
-//     `PendingModelChangesWarning` on every startup.  That warning is
-//     suppressed in Program.cs's `AddDbContext` configuration.
+// No `ModelSnapshot` is emitted.  The snapshot is only used by
+// `dotnet ef migrations add` to compute diffs against the DbContext —
+// since Loom owns migration generation end-to-end, that tooling path
+// is never taken, and skipping the snapshot avoids a perpetually
+// stale stub.  `Program.cs` still suppresses
+// `PendingModelChangesWarning` defensively in case EF widens the
+// check to "no snapshot found".
 // ---------------------------------------------------------------------------
 
 export function emitDotnetMigrations(
@@ -27,7 +27,6 @@ export function emitDotnetMigrations(
   ns: string,
   out: Map<string, string>,
 ): void {
-  let anyEmitted = false;
   for (const m of migrations) {
     if (m.steps.length === 0) continue;
     const className = `M${m.version}_${upperFirst(m.name)}`;
@@ -37,10 +36,6 @@ export function emitDotnetMigrations(
       `Migrations/${m.version}_${upperFirst(m.name)}.cs`,
       renderMigrationClass(ns, className, migrationId, sql),
     );
-    anyEmitted = true;
-  }
-  if (anyEmitted) {
-    out.set("Migrations/AppDbContextModelSnapshot.cs", renderModelSnapshot(ns));
   }
 }
 
@@ -72,29 +67,6 @@ namespace ${ns}.Migrations
         {
             // No-op.  Down migrations are best-effort and out of scope
             // for v1 — operators roll forward, not back.
-        }
-    }
-}
-`;
-}
-
-function renderModelSnapshot(ns: string): string {
-  return `// Auto-generated.  Empty ModelSnapshot stub — EF requires the file's
-// presence to construct a migrator at runtime, but every entry is
-// intentionally omitted so the generator owns the schema source of
-// truth.  Program.cs suppresses the resulting PendingModelChangesWarning
-// in its DbContextOptionsBuilder.
-using Microsoft.EntityFrameworkCore.Infrastructure;
-using ${ns}.Infrastructure.Persistence;
-
-namespace ${ns}.Migrations
-{
-    [Microsoft.EntityFrameworkCore.Infrastructure.DbContextAttribute(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
-    {
-        protected override void BuildModel(Microsoft.EntityFrameworkCore.ModelBuilder modelBuilder)
-        {
-            // intentionally empty
         }
     }
 }

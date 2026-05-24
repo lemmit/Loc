@@ -27,7 +27,7 @@ function ir(steps: MigrationsIR["steps"], opts: { version?: string; name?: strin
 }
 
 describe("dotnet migrations emitter", () => {
-  it("emits one Migration class per non-empty MigrationsIR + an empty ModelSnapshot stub", () => {
+  it("emits one Migration class per non-empty MigrationsIR (no ModelSnapshot — Loom owns migrations)", () => {
     const out = new Map<string, string>();
     emitDotnetMigrations(
       [
@@ -52,7 +52,10 @@ describe("dotnet migrations emitter", () => {
       out,
     );
     expect(out.has("Migrations/20260101000000_Initial.cs")).toBe(true);
-    expect(out.has("Migrations/AppDbContextModelSnapshot.cs")).toBe(true);
+    // ModelSnapshot is intentionally absent — `dotnet ef migrations add` is
+    // never invoked against this project, and `Database.Migrate()` only
+    // consults the [Migration] classes + __EFMigrationsHistory at runtime.
+    expect(out.has("Migrations/AppDbContextModelSnapshot.cs")).toBe(false);
 
     const mig = out.get("Migrations/20260101000000_Initial.cs")!;
     expect(mig).toMatch(/namespace Api\.Migrations/);
@@ -62,20 +65,10 @@ describe("dotnet migrations emitter", () => {
     expect(mig).toMatch(/protected override void Down\(MigrationBuilder migrationBuilder\)/);
   });
 
-  it("skips empty-step migrations entirely (no .cs, no snapshot)", () => {
+  it("skips empty-step migrations entirely", () => {
     const out = new Map<string, string>();
     emitDotnetMigrations([ir([], { name: "NoOp" })], "Api", out);
     expect(out.size).toBe(0);
-  });
-
-  it("renders the ModelSnapshot stub keyed to AppDbContext", () => {
-    const out = new Map<string, string>();
-    emitDotnetMigrations([ir([{ op: "dropTable", name: "x" }])], "MyApp", out);
-    const snap = out.get("Migrations/AppDbContextModelSnapshot.cs")!;
-    expect(snap).toMatch(/namespace MyApp\.Migrations/);
-    expect(snap).toMatch(/DbContextAttribute\(typeof\(AppDbContext\)\)/);
-    expect(snap).toMatch(/partial class AppDbContextModelSnapshot : ModelSnapshot/);
-    expect(snap).toMatch(/intentionally empty/);
   });
 
   it("escapes embedded double-quotes in SQL for the verbatim string literal", () => {
