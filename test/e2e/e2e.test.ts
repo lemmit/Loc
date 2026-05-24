@@ -102,22 +102,26 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
       // `afterAll` immediately tears the stack down via `down -v`, taking
       // the containers' stdout/stderr with them.  Dump state + tail before
       // we re-throw so the failed run leaves a forensic trail.
-      console.error("\n=== compose ps -a (post-failure) ===");
-      try {
-        execSync(`docker compose -f ${outDir}/docker-compose.yml ps -a`, {
-          stdio: "inherit",
-        });
-      } catch {
-        /* ignore */
-      }
-      console.error("\n=== compose logs --tail=300 (post-failure) ===");
-      try {
-        execSync(`docker compose -f ${outDir}/docker-compose.yml logs --tail=300`, {
-          stdio: "inherit",
-        });
-      } catch {
-        /* ignore */
-      }
+      // Use `pipe` and explicit console.error: vitest captures console output
+      // per-test reliably, whereas inherited stdio can be silently dropped
+      // by the worker.
+      const capture = (cmd: string): string => {
+        try {
+          return execSync(cmd, {
+            stdio: ["ignore", "pipe", "pipe"],
+            encoding: "utf8",
+            timeout: 30_000,
+          });
+        } catch (e: unknown) {
+          const ex = e as { stdout?: string; stderr?: string; message?: string };
+          return `[capture failed] ${ex.message ?? "unknown"}\nstdout: ${ex.stdout ?? ""}\nstderr: ${ex.stderr ?? ""}`;
+        }
+      };
+      console.error("\n===== compose ps -a (post-failure) =====");
+      console.error(capture(`docker compose -f ${outDir}/docker-compose.yml ps -a`));
+      console.error("\n===== compose logs --tail=400 (post-failure) =====");
+      console.error(capture(`docker compose -f ${outDir}/docker-compose.yml logs --tail=400`));
+      console.error("===== end compose diagnostics =====\n");
       throw err;
     }
 
