@@ -10,10 +10,13 @@
       "src/**/*.ts",
       "test/**/*.ts",
       "scripts/**/*.mjs",
-      "!src/language/generated",
-      "!test/fixtures",
-      "!**/__snapshots__",
-      "!**/*.d.ts"
+      "!src/language/generated/**",
+      "!test/fixtures/**",
+      "!**/__snapshots__/**",
+      "!**/*.d.ts",
+      "!out/**",
+      "!coverage/**",
+      "!node_modules/**"
     ]
   },
   "formatter": {
