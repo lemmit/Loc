@@ -118,7 +118,11 @@ function emitSystem(
 
   for (const d of sys.deployables) {
     const contexts = collectContextsFor(d, modulesByName);
-    const ownedMigrations = migrationsForDeployable(d, migrations);
+    const ownedMigrations = migrationsForDeployable(
+      d,
+      migrations,
+      platformFor(d.platform).needsDb,
+    );
     emitDeployable(sys, d, contexts, out, {
       emitTrace: options.emitTrace,
       migrations: ownedMigrations,
@@ -259,15 +263,26 @@ function emitDeployable(
   }
 }
 
-/** Filter system-level migrations to just those owned by this deployable.
- *  Matches `MigrationsIR.ownerDeployable` set by the builder from
- *  `module.migrationsOwner` — a non-owner deployable that happens to
- *  also include the module gets nothing. */
+/** Filter system-level migrations to just those this deployable runs.
+ *
+ *  Every needsDb deployable that includes a module receives that
+ *  module's migrations — under the current docker-compose setup each
+ *  deployable owns its own Postgres database keyed by deployable
+ *  slug, so two backends sharing a module need duplicate migration
+ *  emission (one set of .sql files per deployable, applied against
+ *  each deployable's DB).  The `migrationsOwner` field on ModuleIR
+ *  retains the source-declared "primary owner" hint for future
+ *  shared-DB compose modes, but isn't consulted here.  Frontend
+ *  platforms (no DB) get nothing — gated upstream by the platform's
+ *  `needsDb` flag plus this filter that requires the module to
+ *  appear in `d.moduleNames`. */
 function migrationsForDeployable(
   d: DeployableIR,
   all: MigrationsIR[],
+  needsDb: boolean,
 ): MigrationsIR[] {
-  return all.filter((m) => m.ownerDeployable === d.name);
+  if (!needsDb) return [];
+  return all.filter((m) => d.moduleNames.includes(m.module));
 }
 
 /** A docker-compose-safe slug: lowercase, no characters outside the

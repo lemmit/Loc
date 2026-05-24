@@ -16,6 +16,7 @@ import {
   renderSchema,
   renderTestsFile,
 } from "../../../generator/typescript/emit.js";
+import { emitTypescriptMigrations } from "../../../generator/typescript/emit/migrations.js";
 import { buildExternHandlersFile } from "../../../generator/typescript/extern-builder.js";
 import { buildRepositoryFile } from "../../../generator/typescript/repository-builder.js";
 import { enrichLoomModel } from "../../../ir/enrichments.js";
@@ -26,6 +27,7 @@ import type {
   SystemIR,
 } from "../../../ir/loom-ir.js";
 import { lowerModel } from "../../../ir/lower.js";
+import type { MigrationsIR } from "../../../ir/migrations-ir.js";
 import { contextsHaveProvenancedField } from "../../../ir/prov-id.js";
 import type { Model } from "../../../language/generated/ast.js";
 import { lowerFirst } from "../../../util/naming.js";
@@ -124,7 +126,7 @@ export function generateTypeScript(
 export function generateTypeScriptForContexts(
   contexts: BoundedContextIR[],
   pins: BackendPins,
-  system?: { deployable: DeployableIR; sys: SystemIR },
+  system?: { deployable: DeployableIR; sys: SystemIR; migrations?: MigrationsIR[] },
   options: { emitTrace?: boolean } = {},
 ): Map<string, string> {
   const emitTrace = !!options.emitTrace;
@@ -210,10 +212,16 @@ export function generateTypeScriptForContexts(
     emitAuthFiles(system.sys, out);
   }
   emitObservabilityFiles(out);
-  out.set("package.json", projectPackageJson(pins));
+  // Per-module Postgres migrations + co-emitted db/migrate.ts script.
+  // Empty `migrations` (legacy callers / non-system mode) → no-op.
+  const hasMigrations = !!(system?.migrations && system.migrations.length > 0);
+  if (hasMigrations) {
+    emitTypescriptMigrations(system!.migrations!, out);
+  }
+  out.set("package.json", projectPackageJson(pins, hasMigrations));
   out.set("tsconfig.json", PROJECT_TSCONFIG_JSON);
   out.set("tsup.config.ts", TSUP_CONFIG);
-  out.set("index.ts", PROJECT_INDEX_TS);
+  out.set("index.ts", renderProjectIndexTs(hasMigrations));
   out.set("drizzle.config.ts", DRIZZLE_CONFIG);
   out.set("Dockerfile", DOCKERFILE_TS);
   out.set(".dockerignore", DOCKERIGNORE_TS);
@@ -236,7 +244,7 @@ export interface BackendPins {
   devDependencies: Record<string, string>;
 }
 
-function projectPackageJson(pins: BackendPins): string {
+function projectPackageJson(pins: BackendPins, hasMigrations: boolean): string {
   return (
     JSON.stringify(
       {
@@ -249,8 +257,14 @@ function projectPackageJson(pins: BackendPins): string {
           build: "tsup",
           typecheck: "tsc --noEmit",
           test: "vitest run",
+          // Custom migrator (db/migrate.ts) — tracks state in
+          // `loom_migrations` and applies generator-emitted .sql files
+          // in lexicographic order.  Replaces the previous
+          // `drizzle-kit migrate` wiring when migrations are present;
+          // drizzle-kit's generate/push remain available for
+          // inspection workflows.
           "db:generate": "drizzle-kit generate",
-          "db:migrate": "drizzle-kit migrate",
+          "db:migrate": hasMigrations ? "tsx db/migrate.ts" : "drizzle-kit migrate",
           "db:push": "drizzle-kit push",
           "db:studio": "drizzle-kit studio",
         },
@@ -323,13 +337,20 @@ export default defineConfig({
 });
 `;
 
-const PROJECT_INDEX_TS = `// Auto-generated.
+function renderProjectIndexTs(runMigrationsAtBoot: boolean): string {
+  const migImport = runMigrationsAtBoot
+    ? `import { runMigrations } from "./db/migrate";\n`
+    : "";
+  const migCall = runMigrationsAtBoot
+    ? `\n// Apply pending schema migrations before serving traffic.  Idempotent —\n// the migrator's tracking table skips already-applied versions.\nawait runMigrations(process.env.DATABASE_URL);\n`
+    : "";
+  return `// Auto-generated.
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import { serve } from "@hono/node-server";
 import * as schema from "./db/schema";
 import { createApp } from "./http/index";
-import { baseLogger } from "./obs/log";
+${migImport}import { baseLogger } from "./obs/log";
 
 // Fail fast on a missing DATABASE_URL.  Without this an unset value
 // surfaces as a confusing pg connection refusal mid-request; we'd
@@ -343,7 +364,7 @@ if (!process.env.DATABASE_URL) {
 
 const port = Number(process.env.PORT ?? 3000);
 baseLogger.info({ event: "server_starting", port, env: process.env.NODE_ENV ?? "development" });
-
+${migCall}
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 // Surface pool-level connection errors on the structured stream — a
 // dropped backend connection (DB restart, network blip) emits 'error'
@@ -375,6 +396,7 @@ async function shutdown(signal: string): Promise<void> {
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("SIGINT", () => void shutdown("SIGINT"));
 `;
+}
 
 // Multi-stage Dockerfile: build stage installs all deps and compiles
 // TypeScript; runtime stage uses a smaller production-only image.

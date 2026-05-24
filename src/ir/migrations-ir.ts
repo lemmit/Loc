@@ -76,12 +76,10 @@ export type MigrationStep =
 
 export interface MigrationsIR {
   /** Owning module name — `.loom/snapshots/<module>.snapshot.json` is keyed
-   *  here and the per-deployable emitter gates on `module.migrationsOwner`. */
+   *  here.  System orchestrator distributes one MigrationsIR to every
+   *  needsDb deployable that includes the module (per-deployable
+   *  compose databases ⇒ each owns its own migration files). */
   module: string;
-  /** Name of the deployable that owns the migration emission, taken from
-   *  `module.migrationsOwner` at build time.  The system orchestrator
-   *  filters by this when slicing migrations per deployable. */
-  ownerDeployable: string;
   /** Optional storage binding name (`pg`, `analyticsDb`).  Empty string when
    *  the deployable used the bare `modules: Sales` form. */
   storageName: string;
