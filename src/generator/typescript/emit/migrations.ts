@@ -1,25 +1,32 @@
-import type { MigrationsIR } from "../../../ir/migrations-ir.js";
+import type { MigrationsIR, SchemaSnapshot } from "../../../ir/migrations-ir.js";
 import { renderPgStep } from "../../../system/sql-pg.js";
 import { snake } from "../../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Hono / Drizzle migration emitter.
 //
-// One .sql file per `MigrationsIR`, each carrying every step's rendered
-// Postgres DDL.  Files are sequenced by `<version>_<snake(name)>.sql`
-// so a directory listing sort matches application order.
+// One .sql file per `MigrationsIR.steps`, with statements separated by
+// the `--> statement-breakpoint` sentinel Drizzle's runtime migrator
+// (`drizzle-orm/node-postgres/migrator`) splits on.  A
+// `meta/_journal.json` index lists every migration ever emitted so
+// `drizzle-kit migrate` / runtime `migrate()` can apply them in order.
 //
-// Migration application is driven by a small co-emitted `db/migrate.ts`
-// script — it tracks state in a `loom_migrations` table (one row per
-// `version`) so subsequent regens skip already-applied files without
-// relying on Drizzle-kit's journal format.  index.ts calls this script
-// during boot before serving traffic; the docker container exec path
-// hits the same code.
+// Application:
+//   - `npm run db:migrate` → `drizzle-kit migrate` (reads the journal,
+//     applies pending migrations against the `__drizzle_migrations`
+//     tracking table the runtime creates on first run).
+//   - The generated `index.ts` calls `migrate(...)` from
+//     `drizzle-orm/node-postgres/migrator` at boot so deployments
+//     (`node dist/index.js`) self-heal without a separate pre-start
+//     command.
 //
-// Empty-step migrations are dropped — `buildMigrations` doesn't elide
-// them at the IR level (they still carry a snapshot to persist), but
-// no .sql file should land for them.
+// The migration history (which migrations have ever existed) is
+// persisted in `SchemaSnapshot.migrationHistory` — the builder
+// appends an entry per non-empty regen so the journal can be rebuilt
+// without reading the previous one off disk.
 // ---------------------------------------------------------------------------
+
+const STATEMENT_BREAKPOINT = "--> statement-breakpoint";
 
 export function emitTypescriptMigrations(
   migrations: MigrationsIR[],
@@ -28,86 +35,79 @@ export function emitTypescriptMigrations(
   let anyEmitted = false;
   for (const m of migrations) {
     if (m.steps.length === 0) continue;
-    const name = `${m.version}_${snake(m.name)}`;
-    const sql = m.steps.map(renderPgStep).join("\n\n");
-    out.set(`db/migrations/${name}.sql`, sql + "\n");
+    const tag = `${m.version}_${snake(m.name)}`;
+    const sql = m.steps.map(renderPgStep).join(`\n${STATEMENT_BREAKPOINT}\n`);
+    out.set(`db/migrations/${tag}.sql`, sql + "\n");
     anyEmitted = true;
   }
-  if (anyEmitted) {
-    out.set("db/migrate.ts", MIGRATE_TS);
-  }
+  if (!anyEmitted) return;
+
+  // Build the journal from each migration's `next.migrationHistory` —
+  // the builder already merged the previous history with any newly
+  // appended entry, so this list is complete.  Multiple modules per
+  // deployable contribute one combined journal; their entries
+  // interleave by version, which is the lexicographic sort order
+  // anyway since versions are monotonically increasing.
+  const journal = renderJournal(migrations);
+  out.set("db/migrations/meta/_journal.json", journal);
 }
 
-// ---------------------------------------------------------------------------
-// Migrator script — one row per applied version in `loom_migrations`.
-// Imported by index.ts via `await runMigrations()` at boot so the
-// schema is current before the server accepts traffic.
-// ---------------------------------------------------------------------------
-
-const MIGRATE_TS = `// Auto-generated.  Runs every .sql file in this directory in
-// lexicographic order, recording which have been applied in a
-// \`loom_migrations\` tracking table.  Idempotent — running twice
-// applies nothing on the second invocation.
-import * as fs from "node:fs";
-import * as path from "node:path";
-import { fileURLToPath } from "node:url";
-import pg from "pg";
-
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const MIGRATIONS_DIR = path.join(HERE, "migrations");
-
-export async function runMigrations(databaseUrl: string): Promise<void> {
-  const client = new pg.Client({ connectionString: databaseUrl });
-  await client.connect();
-  try {
-    await client.query(\`
-      CREATE TABLE IF NOT EXISTS loom_migrations (
-        version TEXT PRIMARY KEY,
-        applied_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
-      );
-    \`);
-    const existing = await client.query<{ version: string }>(
-      "SELECT version FROM loom_migrations",
-    );
-    const applied = new Set(existing.rows.map((r) => r.version));
-
-    const files = fs
-      .readdirSync(MIGRATIONS_DIR)
-      .filter((f) => f.endsWith(".sql"))
-      .sort();
-
-    for (const file of files) {
-      const version = file.split("_")[0]!;
-      if (applied.has(version)) continue;
-      const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), "utf8");
-      await client.query("BEGIN");
-      try {
-        await client.query(sql);
-        await client.query("INSERT INTO loom_migrations (version) VALUES ($1)", [version]);
-        await client.query("COMMIT");
-      } catch (err) {
-        await client.query("ROLLBACK");
-        throw new Error(\`migration \${file} failed: \${(err as Error).message}\`);
-      }
-    }
-  } finally {
-    await client.end();
+function renderJournal(migrations: MigrationsIR[]): string {
+  const entries: { idx: number; version: string; when: number; tag: string; breakpoints: boolean }[] = [];
+  let idx = 0;
+  // De-duplicate by version: when two modules in this deployable both
+  // produce entries (unlikely in v1 but defensive), the version is the
+  // sort key.  Within the same version, name order is stable.
+  const merged = mergeHistories(migrations.map((m) => m.next));
+  for (const entry of merged) {
+    entries.push({
+      idx,
+      version: "7",
+      when: versionToEpochMillis(entry.version),
+      tag: `${entry.version}_${snake(entry.name)}`,
+      breakpoints: true,
+    });
+    idx++;
   }
-}
-
-// Allow direct invocation: \`npm run db:migrate\` invokes \`tsx db/migrate.ts\`.
-if (import.meta.url === \`file://\${process.argv[1]}\`) {
-  const url = process.env.DATABASE_URL;
-  if (!url) {
-    console.error("DATABASE_URL is required");
-    process.exit(1);
-  }
-  runMigrations(url).then(
-    () => process.exit(0),
-    (err) => {
-      console.error(err);
-      process.exit(1);
-    },
+  // Drizzle journal envelope.  Version "7" matches what drizzle-kit
+  // 0.30.x emits for the postgresql dialect; if a future drizzle-kit
+  // bumps this, the runtime migrator stays compatible (it doesn't read
+  // the envelope version) but `drizzle-kit migrate` warns.
+  return (
+    JSON.stringify(
+      {
+        version: "7",
+        dialect: "postgresql",
+        entries,
+      },
+      null,
+      2,
+    ) + "\n"
   );
 }
-`;
+
+function mergeHistories(snapshots: SchemaSnapshot[]): { version: string; name: string }[] {
+  const all: { version: string; name: string }[] = [];
+  const seen = new Set<string>();
+  for (const s of snapshots) {
+    for (const entry of s.migrationHistory ?? []) {
+      if (seen.has(entry.version)) continue;
+      seen.add(entry.version);
+      all.push(entry);
+    }
+  }
+  return all.sort((a, b) => (a.version < b.version ? -1 : a.version > b.version ? 1 : 0));
+}
+
+/** Map a `YYYYMMDDHHMMSS` version slug to epoch millis.  Deterministic;
+ *  Drizzle uses `when` only for ordering within a single journal load. */
+function versionToEpochMillis(version: string): number {
+  if (version.length !== 14) return 0;
+  const year = Number(version.slice(0, 4));
+  const month = Number(version.slice(4, 6)) - 1;
+  const day = Number(version.slice(6, 8));
+  const hour = Number(version.slice(8, 10));
+  const min = Number(version.slice(10, 12));
+  const sec = Number(version.slice(12, 14));
+  return Date.UTC(year, month, day, hour, min, sec);
+}

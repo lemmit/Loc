@@ -61,7 +61,19 @@ export interface SchemaSnapshot {
    *  ones without consulting the filesystem.  Absent on a freshly-init
    *  snapshot — the builder starts at the canonical base timestamp. */
   lastVersion?: string;
+  /** Ordered history of every migration emitted against this snapshot.
+   *  The TS/Hono emitter rebuilds Drizzle's `meta/_journal.json` from
+   *  this list so Drizzle's runtime migrator (and `drizzle-kit migrate`)
+   *  can apply them.  Phoenix + .NET ignore the field — their own
+   *  framework migration tables (`schema_migrations`, `__EFMigrationsHistory`)
+   *  track runtime state.  Empty / absent on a fresh snapshot. */
+  migrationHistory?: MigrationHistoryEntry[];
   tables: TableShape[];
+}
+
+export interface MigrationHistoryEntry {
+  version: string;
+  name: string;
 }
 
 export type MigrationStep =

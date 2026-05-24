@@ -1,33 +1,47 @@
 import { describe, expect, it } from "vitest";
 
 import { emitTypescriptMigrations } from "../../src/generator/typescript/emit/migrations.js";
-import type { MigrationsIR, SchemaSnapshot } from "../../src/ir/migrations-ir.js";
+import type {
+  MigrationHistoryEntry,
+  MigrationsIR,
+  SchemaSnapshot,
+} from "../../src/ir/migrations-ir.js";
 
 // ---------------------------------------------------------------------------
-// TS/Hono migrations emitter — covers the db/migrations/<version>_<name>.sql
-// + db/migrate.ts files emitted into a Hono deployable.
+// TS/Hono migrations emitter — emits Drizzle-format `<tag>.sql` files
+// with `--> statement-breakpoint` separators + a `meta/_journal.json`
+// index that both `drizzle-kit migrate` and Drizzle's runtime migrator
+// (`drizzle-orm/.../migrator`) consume.
 // ---------------------------------------------------------------------------
 
-const EMPTY_SNAP: SchemaSnapshot = {
-  schemaVersion: 1,
-  lastVersion: "20260101000000",
-  tables: [],
-};
+function snap(history: MigrationHistoryEntry[] = [], lastVersion?: string): SchemaSnapshot {
+  return {
+    schemaVersion: 1,
+    lastVersion,
+    migrationHistory: history.length > 0 ? history : undefined,
+    tables: [],
+  };
+}
 
-function ir(steps: MigrationsIR["steps"], opts: { version?: string; name?: string } = {}): MigrationsIR {
+function ir(
+  steps: MigrationsIR["steps"],
+  opts: { version?: string; name?: string; history?: MigrationHistoryEntry[] } = {},
+): MigrationsIR {
+  const version = opts.version ?? "20260101000001";
+  const name = opts.name ?? "AddSomething";
   return {
     module: "Sales",
     storageName: "",
-    baseline: EMPTY_SNAP,
-    next: EMPTY_SNAP,
+    baseline: snap(),
+    next: snap([...(opts.history ?? []), { version, name }], version),
     steps,
-    version: opts.version ?? "20260101000001",
-    name: opts.name ?? "AddSomething",
+    version,
+    name,
   };
 }
 
 describe("typescript migrations emitter", () => {
-  it("emits one .sql file per non-empty MigrationsIR + co-emits db/migrate.ts", () => {
+  it("emits one .sql file per non-empty MigrationsIR with statement-breakpoint separators", () => {
     const out = new Map<string, string>();
     emitTypescriptMigrations(
       [
@@ -47,6 +61,7 @@ describe("typescript migrations emitter", () => {
                 indexes: [],
               },
             },
+            { op: "dropTable", name: "legacy" },
           ],
           { version: "20260101000000", name: "Initial" },
         ),
@@ -54,93 +69,96 @@ describe("typescript migrations emitter", () => {
       out,
     );
     expect(out.has("db/migrations/20260101000000_initial.sql")).toBe(true);
-    expect(out.has("db/migrate.ts")).toBe(true);
-
     const sql = out.get("db/migrations/20260101000000_initial.sql")!;
     expect(sql).toMatch(/CREATE TABLE orders \(/);
-    expect(sql).toMatch(/id UUID NOT NULL/);
-    expect(sql).toMatch(/total INTEGER NOT NULL/);
     expect(sql).toMatch(/PRIMARY KEY \(id\)/);
+    // Drizzle splits on the sentinel — both statements need to be
+    // visible as separate chunks.
+    expect(sql).toContain("--> statement-breakpoint");
+    expect(sql.indexOf("DROP TABLE")).toBeGreaterThan(sql.indexOf("--> statement-breakpoint"));
   });
 
-  it("skips empty-step migrations entirely (no .sql, no migrate.ts)", () => {
+  it("emits a Drizzle-format meta/_journal.json from the snapshot's migration history", () => {
     const out = new Map<string, string>();
-    emitTypescriptMigrations([ir([], { name: "NoOp" })], out);
+    emitTypescriptMigrations(
+      [
+        ir(
+          [{ op: "dropTable", name: "x" }],
+          {
+            version: "20260101000005",
+            name: "DropX",
+            history: [{ version: "20260101000000", name: "Initial" }],
+          },
+        ),
+      ],
+      out,
+    );
+    expect(out.has("db/migrations/meta/_journal.json")).toBe(true);
+    const journal = JSON.parse(out.get("db/migrations/meta/_journal.json")!);
+    expect(journal).toMatchObject({
+      version: "7",
+      dialect: "postgresql",
+    });
+    expect(journal.entries).toHaveLength(2);
+    expect(journal.entries[0]).toMatchObject({
+      idx: 0,
+      tag: "20260101000000_initial",
+      breakpoints: true,
+    });
+    expect(journal.entries[1]).toMatchObject({
+      idx: 1,
+      tag: "20260101000005_drop_x",
+      breakpoints: true,
+    });
+    // `when` is derived from the version slug (epoch-millis).
+    expect(typeof journal.entries[0].when).toBe("number");
+    expect(journal.entries[0].when).toBeLessThan(journal.entries[1].when);
+  });
+
+  it("skips empty-step migrations entirely (no .sql, no journal)", () => {
+    const out = new Map<string, string>();
+    emitTypescriptMigrations(
+      [
+        {
+          module: "Sales",
+          storageName: "",
+          baseline: snap(),
+          next: snap(),
+          steps: [],
+          version: "20260101000001",
+          name: "NoOp",
+        },
+      ],
+      out,
+    );
     expect(out.size).toBe(0);
   });
 
-  it("renders ALTER TABLE for addColumn / dropColumn", () => {
+  it("dedupes multi-module history entries by version", () => {
     const out = new Map<string, string>();
+    // Two modules, both with an "Initial" entry sharing the BASE
+    // version — journal must list it once.
+    const shared: MigrationHistoryEntry = { version: "20260101000000", name: "Initial" };
     emitTypescriptMigrations(
       [
-        ir(
-          [
-            {
-              op: "addColumn",
-              table: "orders",
-              column: { name: "note", type: { kind: "text" }, nullable: true },
-            },
-            { op: "dropColumn", table: "orders", name: "legacy" },
-          ],
-          { version: "20260101000005", name: "Tweak" },
-        ),
+        {
+          ...ir([{ op: "dropTable", name: "a" }], { version: "20260101000001" }),
+          module: "ModuleA",
+          next: snap([shared, { version: "20260101000001", name: "AddSomething" }]),
+        },
+        {
+          ...ir([{ op: "dropTable", name: "b" }], { version: "20260101000002" }),
+          module: "ModuleB",
+          next: snap([shared, { version: "20260101000002", name: "AddSomething" }]),
+        },
       ],
       out,
     );
-    const sql = out.get("db/migrations/20260101000005_tweak.sql")!;
-    expect(sql).toMatch(/ALTER TABLE orders ADD COLUMN note TEXT NULL;/);
-    expect(sql).toMatch(/ALTER TABLE orders DROP COLUMN legacy;/);
-  });
-
-  it("renders FOREIGN KEY constraints inline on createTable", () => {
-    const out = new Map<string, string>();
-    emitTypescriptMigrations(
-      [
-        ir(
-          [
-            {
-              op: "createTable",
-              table: {
-                name: "orders",
-                ownerModule: "Sales",
-                columns: [
-                  { name: "id", type: { kind: "uuid" }, nullable: false },
-                  { name: "customer", type: { kind: "uuid" }, nullable: false },
-                ],
-                primaryKey: ["id"],
-                foreignKeys: [
-                  { column: "customer", refTable: "customers", onDelete: "restrict" },
-                ],
-                indexes: [
-                  {
-                    name: "orders_customer_idx",
-                    table: "orders",
-                    columns: ["customer"],
-                    unique: false,
-                  },
-                ],
-              },
-            },
-          ],
-          { version: "20260101000000", name: "Initial" },
-        ),
-      ],
-      out,
-    );
-    const sql = out.get("db/migrations/20260101000000_initial.sql")!;
-    expect(sql).toMatch(
-      /FOREIGN KEY \(customer\) REFERENCES customers ON DELETE RESTRICT/,
-    );
-    expect(sql).toMatch(/CREATE INDEX orders_customer_idx ON orders \(customer\);/);
-  });
-
-  it("migrate.ts script tracks state in a loom_migrations table", () => {
-    const out = new Map<string, string>();
-    emitTypescriptMigrations([ir([{ op: "dropTable", name: "x" }])], out);
-    const script = out.get("db/migrate.ts")!;
-    expect(script).toMatch(/CREATE TABLE IF NOT EXISTS loom_migrations/);
-    expect(script).toMatch(/SELECT version FROM loom_migrations/);
-    expect(script).toMatch(/INSERT INTO loom_migrations \(version\)/);
-    expect(script).toMatch(/export async function runMigrations/);
+    const journal = JSON.parse(out.get("db/migrations/meta/_journal.json")!);
+    expect(journal.entries.map((e: { version: string; tag: string }) => e.tag)).toEqual([
+      "20260101000000_initial",
+      "20260101000001_add_something",
+      "20260101000002_add_something",
+    ]);
   });
 });

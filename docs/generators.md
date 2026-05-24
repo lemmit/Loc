@@ -621,7 +621,7 @@ pipeline; the per-backend artefacts are:
 | Backend | Emits | Applied by |
 | --- | --- | --- |
 | Phoenix | `priv/repo/migrations/<ts>_<name>.exs` (Ecto DSL) | `mix ash.migrate` at boot via the existing release config |
-| Hono | `db/migrations/<version>_<name>.sql` + `db/migrate.ts` | `await runMigrations(...)` in `index.ts` before `serve()` — a `loom_migrations` tracking table keeps the apply step idempotent |
+| Hono | `db/migrations/<version>_<name>.sql` + `db/migrations/meta/_journal.json` | Drizzle's runtime migrator: `await migrate(db, { migrationsFolder })` in `index.ts` reads the journal + .sql files, tracks state in `__drizzle_migrations`.  `npm run db:migrate` (drizzle-kit migrate) works out of band |
 | .NET | `Migrations/<Version>_<Name>.cs` (`migrationBuilder.Sql(@"...")`) + `Migrations/AppDbContextModelSnapshot.cs` | `db.Database.Migrate()` in `Program.cs` after `builder.Build()`; `PendingModelChangesWarning` is suppressed because the snapshot stub is empty by design |
 
 Phoenix stays in Ecto DSL because its output is Elixir.  Hono and

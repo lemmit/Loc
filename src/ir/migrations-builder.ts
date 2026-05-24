@@ -165,11 +165,23 @@ export function buildMigrations(
         : String(BigInt(baseline.lastVersion ?? BASE_TIMESTAMP) + 1n);
     const name = baseline === null ? "Initial" : describeMigration(steps);
     // Stamp the next snapshot with the version we're about to emit so
-    // the FOLLOWING regen starts from `version + 1`.
+    // the FOLLOWING regen starts from `version + 1`.  Append to
+    // migrationHistory when steps are non-empty — the TS emitter
+    // rebuilds Drizzle's _journal.json from this list each regen so
+    // Drizzle's runtime migrator can see every past migration.
+    const prevHistory = baseline?.migrationHistory ?? [];
     const stamped: SchemaSnapshot =
       steps.length === 0
-        ? { ...next, lastVersion: baseline?.lastVersion ?? next.lastVersion }
-        : { ...next, lastVersion: version };
+        ? {
+            ...next,
+            lastVersion: baseline?.lastVersion ?? next.lastVersion,
+            migrationHistory: prevHistory.length > 0 ? prevHistory : undefined,
+          }
+        : {
+            ...next,
+            lastVersion: version,
+            migrationHistory: [...prevHistory, { version, name }],
+          };
     out.push({
       module: m.name,
       storageName,

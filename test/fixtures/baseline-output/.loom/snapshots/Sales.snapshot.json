@@ -108,5 +108,11 @@
       "indexes": []
     }
   ],
-  "lastVersion": "20260101000000"
+  "lastVersion": "20260101000000",
+  "migrationHistory": [
+    {
+      "version": "20260101000000",
+      "name": "Initial"
+    }
+  ]
 }

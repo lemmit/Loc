@@ -218,7 +218,7 @@ export function generateTypeScriptForContexts(
   if (hasMigrations) {
     emitTypescriptMigrations(system!.migrations!, out);
   }
-  out.set("package.json", projectPackageJson(pins, hasMigrations));
+  out.set("package.json", projectPackageJson(pins));
   out.set("tsconfig.json", PROJECT_TSCONFIG_JSON);
   out.set("tsup.config.ts", TSUP_CONFIG);
   out.set("index.ts", renderProjectIndexTs(hasMigrations));
@@ -244,7 +244,7 @@ export interface BackendPins {
   devDependencies: Record<string, string>;
 }
 
-function projectPackageJson(pins: BackendPins, hasMigrations: boolean): string {
+function projectPackageJson(pins: BackendPins): string {
   return (
     JSON.stringify(
       {
@@ -257,14 +257,14 @@ function projectPackageJson(pins: BackendPins, hasMigrations: boolean): string {
           build: "tsup",
           typecheck: "tsc --noEmit",
           test: "vitest run",
-          // Custom migrator (db/migrate.ts) — tracks state in
-          // `loom_migrations` and applies generator-emitted .sql files
-          // in lexicographic order.  Replaces the previous
-          // `drizzle-kit migrate` wiring when migrations are present;
-          // drizzle-kit's generate/push remain available for
-          // inspection workflows.
+          // We emit Drizzle-format `meta/_journal.json` + .sql files so
+          // both `drizzle-kit migrate` (the CLI) and
+          // `drizzle-orm/.../migrator` (called from index.ts at boot)
+          // can apply them.  `drizzle-kit generate` is left available
+          // for users who want to introspect the schema, but Loom owns
+          // the SQL generation end-to-end.
           "db:generate": "drizzle-kit generate",
-          "db:migrate": hasMigrations ? "tsx db/migrate.ts" : "drizzle-kit migrate",
+          "db:migrate": "drizzle-kit migrate",
           "db:push": "drizzle-kit push",
           "db:studio": "drizzle-kit studio",
         },
@@ -339,10 +339,10 @@ export default defineConfig({
 
 function renderProjectIndexTs(runMigrationsAtBoot: boolean): string {
   const migImport = runMigrationsAtBoot
-    ? `import { runMigrations } from "./db/migrate";\n`
+    ? `import { migrate } from "drizzle-orm/node-postgres/migrator";\n`
     : "";
   const migCall = runMigrationsAtBoot
-    ? `\n// Apply pending schema migrations before serving traffic.  Idempotent —\n// the migrator's tracking table skips already-applied versions.\nawait runMigrations(process.env.DATABASE_URL);\n`
+    ? `\n// Apply pending schema migrations before serving traffic.  Drizzle's\n// runtime migrator reads db/migrations/meta/_journal.json + each\n// referenced .sql file, tracking state in \`__drizzle_migrations\`;\n// idempotent across boots.\nawait migrate(db, { migrationsFolder: "./db/migrations" });\n`
     : "";
   return `// Auto-generated.
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -364,7 +364,7 @@ if (!process.env.DATABASE_URL) {
 
 const port = Number(process.env.PORT ?? 3000);
 baseLogger.info({ event: "server_starting", port, env: process.env.NODE_ENV ?? "development" });
-${migCall}
+
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 // Surface pool-level connection errors on the structured stream — a
 // dropped backend connection (DB restart, network blip) emits 'error'
@@ -378,7 +378,7 @@ pool.on("error", (err) => {
   });
 });
 const db = drizzle(pool, { schema });
-const app = createApp(db);
+${migCall}const app = createApp(db);
 const server = serve({ fetch: app.fetch, port });
 baseLogger.info({ event: "server_listening", port });
 

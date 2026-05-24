@@ -4,7 +4,7 @@ import pg from "pg";
 import { serve } from "@hono/node-server";
 import * as schema from "./db/schema";
 import { createApp } from "./http/index";
-import { runMigrations } from "./db/migrate";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { baseLogger } from "./obs/log";
 
 // Fail fast on a missing DATABASE_URL.  Without this an unset value
@@ -20,10 +20,6 @@ if (!process.env.DATABASE_URL) {
 const port = Number(process.env.PORT ?? 3000);
 baseLogger.info({ event: "server_starting", port, env: process.env.NODE_ENV ?? "development" });
 
-// Apply pending schema migrations before serving traffic.  Idempotent —
-// the migrator's tracking table skips already-applied versions.
-await runMigrations(process.env.DATABASE_URL);
-
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 // Surface pool-level connection errors on the structured stream — a
 // dropped backend connection (DB restart, network blip) emits 'error'
@@ -37,6 +33,12 @@ pool.on("error", (err) => {
   });
 });
 const db = drizzle(pool, { schema });
+
+// Apply pending schema migrations before serving traffic.  Drizzle's
+// runtime migrator reads db/migrations/meta/_journal.json + each
+// referenced .sql file, tracking state in `__drizzle_migrations`;
+// idempotent across boots.
+await migrate(db, { migrationsFolder: "./db/migrations" });
 const app = createApp(db);
 const server = serve({ fetch: app.fetch, port });
 baseLogger.info({ event: "server_listening", port });
