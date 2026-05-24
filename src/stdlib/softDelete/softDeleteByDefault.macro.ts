@@ -1,4 +1,4 @@
-import { defineMacro } from "../macro-api/index.js";
+import { defineMacro } from "../../macro-api/index.js";
 
 /** Apply soft-delete to every aggregate in a context.
  *
