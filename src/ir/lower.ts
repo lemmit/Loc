@@ -151,6 +151,7 @@ import {
 } from "./lower-expr.js";
 import {
   buildExpandContext,
+  expandInlineScaffoldPrimitives,
   expandWalkerPrimitive,
   type WalkerExpandContext,
 } from "./walker-primitive-expander.js";
@@ -530,7 +531,25 @@ function lowerSystem(sys: System): SystemIR {
   // `e2e/pages/<agg>.ts` helper classes (rich domain methods:
   // fill, submit, expectRow).
   expandWalkerPrimitives(built);
+  expandInlineScaffoldPrimitiveCalls(built);
   return built;
+}
+
+/** Rewrite the inline body primitives `scaffoldDetails(of:)` and
+ *  `scaffoldOperations(of:)` into their expanded ExprIR forms.
+ *  Runs against EVERY page's body (not just archetype-tagged ones)
+ *  because the scaffold detail page emits an explicit body that
+ *  doesn't trigger archetype detection.  Pages whose body never
+ *  uses these primitives are no-ops — the rewriter walks each tree
+ *  once and returns the same reference when nothing changed. */
+function expandInlineScaffoldPrimitiveCalls(sys: SystemIR): void {
+  for (const ui of sys.uis) {
+    const ctx = buildExpandContext(sys, ui);
+    for (const page of ui.pages) {
+      if (!page.body) continue;
+      page.body = expandInlineScaffoldPrimitives(page.body, ctx);
+    }
+  }
 }
 
 /** In-place rewrite of every UI's pages.  When the
