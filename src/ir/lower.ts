@@ -144,6 +144,7 @@ import {
   inPart,
   inValueObject,
   lowerExpr,
+  lowerExprInContext,
   lowerStatement,
   lowerType,
   newEnv,
@@ -1581,10 +1582,15 @@ function lowerContainment(c: Containment): ContainmentIR {
 }
 
 function lowerDerived(d: DerivedProp, env: Env): DerivedIR {
+  // Contextual lowering: a numeric literal RHS of a money-typed
+  // derivation lowers as a money IR literal (so backends see
+  // `new Decimal("373.34")`, not the raw decimal literal).  See
+  // `lowerExprInContext`.
+  const declared = lowerType(d.type);
   return {
     name: d.name,
-    type: lowerType(d.type),
-    expr: lowerExpr(d.expr, env),
+    type: declared,
+    expr: lowerExprInContext(d.expr, declared, env),
   };
 }
 

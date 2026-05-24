@@ -3,6 +3,11 @@
 // Exercises every shape money should appear in:
 //   * field on an aggregate root              (wire round-trip)
 //   * `money("…")` constructor literal        (precise-decimal source form)
+//   * literal promotion in money context      (bare `0` / `0.00` in
+//                                              a money-typed position
+//                                              elaborates to money —
+//                                              see invariant + preconditions
+//                                              below)
 //   * `money × decimal = money`               (closed scaling)
 //   * `money + money = money`                 (closed addition)
 //   * `money <op> money` comparison           (Phoenix `Decimal.compare/2`,
@@ -33,15 +38,18 @@ context Billing {
     derived tax:   money = subtotal * taxRate
     derived total: money = subtotal + tax
 
-    // Money comparison + assignment.
+    // Money comparison + assignment.  Numeric literals (`0`, `0.00`)
+    // in money-typed positions elaborate to money via the lowering's
+    // contextual promotion — no `money("...")` wrapper needed when
+    // the surrounding context disambiguates.
     operation applyDiscount(amount: money) {
-      precondition amount > money("0.00")
+      precondition amount > 0
       precondition amount <= subtotal
       subtotal := subtotal - amount
     }
 
     // Money invariant — every backend emits a comparable check.
-    invariant subtotal >= money("0.00")
+    invariant subtotal >= 0
   }
 
   repository Invoices for Invoice { }
