@@ -48,9 +48,9 @@ function renderCsStatement(
       return withValueComputed(base, s.target, traceCtx);
     }
     case "add":
-      return `${INDENT}${renderPrivatePath(s.target)}.Add(${renderCsExpr(s.value, ctx)});`;
+      return `${INDENT}${renderPrivatePath(s.target, ctx)}.Add(${renderCsExpr(s.value, ctx)});`;
     case "remove":
-      return `${INDENT}${renderPrivatePath(s.target)}.Remove(${renderCsExpr(s.value, ctx)});`;
+      return `${INDENT}${renderPrivatePath(s.target, ctx)}.Remove(${renderCsExpr(s.value, ctx)});`;
     case "emit": {
       const args = s.fields
         .map((f) => `${upperFirst(f.name)}: ${renderCsExpr(f.value, ctx)}`)
@@ -116,9 +116,16 @@ function renderPath(p: PathIR): string {
   return p.segments.map((s) => upperFirst(s)).join(".");
 }
 
-// For collection mutation we go via the private backing field.
-function renderPrivatePath(p: PathIR): string {
+// For collection mutation we go via the private backing field —
+// EXCEPT for `Id<T>[]` reference collections, which the entity
+// emitter exposes as a writable `List<TargetId>` property (no `_`
+// backing field; the public surface IS the mutable list).  Identifies
+// ref-collections via `ctx.agg.associations`; falls back to the
+// containment convention when there's no aggregate context.
+function renderPrivatePath(p: PathIR, ctx?: CsRenderContext): string {
   if (p.segments.length === 0) return "this";
   const [head, ...tail] = p.segments;
-  return `_${head}${tail.map((t) => `.${upperFirst(t)}`).join("")}`;
+  const isRefColl = (ctx?.agg?.associations ?? []).some((a) => a.fieldName === head);
+  const headPath = isRefColl ? upperFirst(head!) : `_${head}`;
+  return `${headPath}${tail.map((t) => `.${upperFirst(t)}`).join("")}`;
 }

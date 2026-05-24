@@ -1,5 +1,6 @@
 import type {
   AggregateIR,
+  AssociationIR,
   BoundedContextIR,
   ContainmentIR,
   ExprIR,
@@ -8,10 +9,22 @@ import type {
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { renderCsExpr } from "../render-expr.js";
+import { joinDbSetName, joinEntityName } from "./join-entities.js";
 
 // AppDbContext + per-aggregate IEntityTypeConfiguration<T>.  The
 // configuration walks each aggregate's fields/contains and emits the
-// matching `HasConversion` / `OwnsOne` / `OwnsMany` calls.
+// matching `HasConversion` / `OwnsOne` / `OwnsMany` calls.  Reference
+// collections (`Id<T>[]` aggregate fields, populated by enrichment as
+// `agg.associations`) get their own per-join-table entity + DbSet +
+// IEntityTypeConfiguration; the aggregate config additionally calls
+// `b.Ignore(...)` on each reference-collection property so EF doesn't
+// try to map the `List<TargetId>` to a column on the root.
+
+/** Every association declared across an entire context's aggregates,
+ *  in stable order (matches Drizzle schema emission). */
+function contextAssociations(ctx: BoundedContextIR): AssociationIR[] {
+  return ctx.aggregates.flatMap((a) => a.associations ?? []);
+}
 
 export function renderDbContext(ctx: BoundedContextIR, ns: string): string {
   const aggUsings = ctx.aggregates.map((a) => `using ${ns}.Domain.${plural(a.name)};`);
@@ -20,6 +33,21 @@ export function renderDbContext(ctx: BoundedContextIR, ns: string): string {
   );
   const applyConfigs = ctx.aggregates.map(
     (a) => `        modelBuilder.ApplyConfiguration(new Configurations.${a.name}Configuration());`,
+  );
+  // Join-entity DbSets + their ApplyConfiguration entries.  Each
+  // reference-collection field on an aggregate produces one join
+  // entity (the join table lives outside any single aggregate's
+  // configuration so it can serve queries against either side).
+  const joinAssocs = contextAssociations(ctx);
+  const joinUsings =
+    joinAssocs.length > 0 ? [`using ${ns}.Infrastructure.Persistence.JoinTables;`] : [];
+  const joinDbSets = joinAssocs.map((a) => {
+    const cls = joinEntityName(a);
+    return `    public DbSet<${cls}> ${joinDbSetName(a)} => Set<${cls}>();`;
+  });
+  const joinApplyConfigs = joinAssocs.map(
+    (a) =>
+      `        modelBuilder.ApplyConfiguration(new Configurations.${joinEntityName(a)}Configuration());`,
   );
   // Capability filter installation is per-EntityConfiguration —
   // see `renderConfiguration` below, which emits one
@@ -34,6 +62,7 @@ export function renderDbContext(ctx: BoundedContextIR, ns: string): string {
       "// Auto-generated.",
       "using Microsoft.EntityFrameworkCore;",
       ...aggUsings,
+      ...joinUsings,
       `namespace ${ns}.Infrastructure.Persistence;`,
       "",
       "public sealed class AppDbContext : DbContext",
@@ -41,9 +70,11 @@ export function renderDbContext(ctx: BoundedContextIR, ns: string): string {
       "    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }",
       "",
       ...dbSets,
+      ...joinDbSets,
       "    protected override void OnModelCreating(ModelBuilder modelBuilder)",
       "    {",
       ...applyConfigs,
+      ...joinApplyConfigs,
       "    }",
       "}",
     ) + "\n"
@@ -53,6 +84,14 @@ export function renderDbContext(ctx: BoundedContextIR, ns: string): string {
 export function renderConfiguration(agg: AggregateIR, ns: string, ctx: BoundedContextIR): string {
   const fieldConfigs = agg.fields.flatMap((f) => fieldConfigLines(f, "        ", "b"));
   const containmentLines = agg.contains.flatMap((c) => containmentConfigLines(c, agg));
+  // Reference-collection (`Id<T>[]`) fields are persisted via a
+  // separate join entity (see `join-entities.ts`), so the public
+  // `List<TargetId>` accessor on the root must be unmapped — without
+  // `b.Ignore(...)` EF Core 8's primitive-collection support pins it
+  // as a JSON column on the root row, defeating the relational join.
+  const refCollectionIgnores = (agg.associations ?? []).map(
+    (a) => `        b.Ignore(x => x.${upperFirst(a.fieldName)});`,
+  );
   // Emit HasIndex for every aggregate-root column referenced by a
   // repository find — same set the Drizzle schema indexes.  Without
   // these, `find byEmail` / `byCustomer` etc. run sequential scans
@@ -93,6 +132,7 @@ export function renderConfiguration(agg: AggregateIR, ns: string, ctx: BoundedCo
       `        b.Property(x => x.Id).HasConversion(v => v.Value, v => new ${agg.name}Id(v));`,
       ...fieldConfigs,
       ...containmentLines,
+      ...refCollectionIgnores,
       ...indexLines,
       ...filterLines,
       "        b.Ignore(x => x.DomainEvents);",

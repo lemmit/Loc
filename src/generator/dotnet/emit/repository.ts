@@ -1,9 +1,10 @@
-import type { AggregateIR, ParamIR, RepositoryIR } from "../../../ir/loom-ir.js";
+import type { AggregateIR, AssociationIR, ParamIR, RepositoryIR } from "../../../ir/loom-ir.js";
 import { findUsesCurrentUser } from "../../../ir/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import { renderDotnetLogCall } from "../../_obs/render-dotnet.js";
 import { renderCsType } from "../render-expr.js";
+import { joinDbSetName, joinEntityName, joinFkPropName } from "./join-entities.js";
 
 // Repository interface (Domain layer) + EF-backed implementation
 // (Infrastructure layer).  Both surfaces own a `GetByIdAsync` /
@@ -65,6 +66,16 @@ export function renderRepositoryImpl(
   const finds = repo?.finds ?? [];
   const anyFindUsesUser = finds.some(findUsesCurrentUser);
   const setName = plural(upperFirst(agg.name));
+  const associations = agg.associations ?? [];
+  // Reference-collection (`Id<T>[]`) load + save lines.  Each
+  // association is a separate `_db.<JoinDbSet>` whose rows are
+  // explicitly queried/inserted/deleted by the repository — we don't
+  // model the join as an EF navigation, so the patterns mirror the
+  // TS/Hono Drizzle implementation line-for-line (see
+  // src/generator/typescript/repository-builder.ts).
+  const loadByIdLines = buildLoadByIdLines(associations);
+  const loadManyByIdsLines = buildLoadManyByIdsLines(agg.name, setName, associations);
+  const saveDiffSyncLines = buildSaveDiffSyncLines(associations);
   // Per-find catalog log: `find_executed` (debug) at every method's
   // return.  Mirrors the Hono repo emission so cross-backend log
   // consumers see the same event identity + field set.  Array finds
@@ -109,6 +120,7 @@ export function renderRepositoryImpl(
       `using ${ns}.Domain.ValueObjects;`,
       `using ${ns}.Domain.Enums;`,
       `using ${ns}.Infrastructure.Persistence;`,
+      associations.length > 0 ? `using ${ns}.Infrastructure.Persistence.JoinTables;` : null,
       anyFindUsesUser ? `using ${ns}.Auth;` : null,
       "",
       `namespace ${ns}.Infrastructure.Repositories;`,
@@ -140,13 +152,14 @@ export function renderRepositoryImpl(
         { name: "id", valueExpr: "id.Value" },
         { name: "found", valueExpr: "found != null" },
       ])}`,
+      ...loadByIdLines,
       "        return found;",
       "    }",
       "",
       `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${agg.name}Id> ids, CancellationToken ct = default)`,
       "    {",
       "        if (ids.Count == 0) return Array.Empty<" + agg.name + ">();",
-      `        return await _db.${setName}.Where(x => ids.Contains(x.Id)).ToListAsync(ct);`,
+      ...loadManyByIdsLines,
       "    }",
       "",
       `    public async Task SaveAsync(${agg.name} aggregate, CancellationToken ct = default)`,
@@ -156,6 +169,7 @@ export function renderRepositoryImpl(
       "        {",
       `            _db.${setName}.Add(aggregate);`,
       "        }",
+      ...saveDiffSyncLines,
       // tx_* (trace) — emitted ONLY under --trace.  EF's SaveChangesAsync
       // runs an implicit transaction; the trio (begin/commit/rollback)
       // brackets it so an operator can correlate a failed save with
@@ -218,6 +232,113 @@ export function renderRepositoryImpl(
       "}",
     ) + "\n"
   );
+}
+
+/** Inline per-association load inside `GetByIdAsync`, executed after
+ * the root row materialises but before `return found`.  Skipped when
+ * the aggregate has no reference collections (the `if` block stays
+ * empty, no lines emitted). */
+function buildLoadByIdLines(associations: AssociationIR[]): string[] {
+  if (associations.length === 0) return [];
+  const out: string[] = [];
+  out.push("        if (found != null)");
+  out.push("        {");
+  for (const a of associations) {
+    const dbSet = joinDbSetName(a);
+    const owner = joinFkPropName(a.ownerFk);
+    const target = joinFkPropName(a.targetFk);
+    const prop = upperFirst(a.fieldName);
+    out.push(`            found.${prop} = await _db.${dbSet}`);
+    out.push(`                .Where(j => j.${owner} == id)`);
+    out.push(`                .OrderBy(j => j.Ordinal)`);
+    out.push(`                .Select(j => j.${target})`);
+    out.push(`                .ToListAsync(ct);`);
+  }
+  out.push("        }");
+  return out;
+}
+
+/** `FindManyByIdsAsync` body — when no associations, falls back to the
+ * single-line `return await ...` shape.  When associations exist,
+ * loads roots into a list, bulk-loads each join table grouped by
+ * owner, and hydrates each root's reference collections. */
+function buildLoadManyByIdsLines(
+  aggName: string,
+  setName: string,
+  associations: AssociationIR[],
+): string[] {
+  if (associations.length === 0) {
+    return [`        return await _db.${setName}.Where(x => ids.Contains(x.Id)).ToListAsync(ct);`];
+  }
+  const out: string[] = [];
+  out.push(
+    `        var roots = await _db.${setName}.Where(x => ids.Contains(x.Id)).ToListAsync(ct);`,
+  );
+  out.push("        if (roots.Count == 0) return roots;");
+  for (const a of associations) {
+    const cap = upperFirst(a.fieldName);
+    const dbSet = joinDbSetName(a);
+    const owner = joinFkPropName(a.ownerFk);
+    const target = joinFkPropName(a.targetFk);
+    const ownerType = `${a.ownerAgg}Id`;
+    const targetType = `${a.targetAgg}Id`;
+    out.push(`        var __${a.fieldName}Rows = await _db.${dbSet}`);
+    out.push(`            .Where(j => ids.Contains(j.${owner}))`);
+    out.push(`            .OrderBy(j => j.${owner}).ThenBy(j => j.Ordinal)`);
+    out.push(`            .Select(j => new { Owner = j.${owner}, Target = j.${target} })`);
+    out.push(`            .ToListAsync(ct);`);
+    out.push(`        var __${a.fieldName}ByOwner = __${a.fieldName}Rows`);
+    out.push(`            .GroupBy(r => r.Owner)`);
+    out.push(`            .ToDictionary(g => g.Key, g => g.Select(r => r.Target).ToList());`);
+    out.push("        foreach (var __root in roots)");
+    out.push("        {");
+    out.push(
+      `            __root.${cap} = __${a.fieldName}ByOwner.TryGetValue(__root.Id, out var __${a.fieldName}List) ? __${a.fieldName}List : new List<${targetType}>();`,
+    );
+    out.push("        }");
+    void ownerType;
+    void aggName;
+  }
+  out.push("        return roots;");
+  return out;
+}
+
+/** Diff-sync block inside `SaveAsync`, emitted after the
+ * detached-check Add and before `SaveChangesAsync`.  For every
+ * reference collection on the aggregate: load existing join rows,
+ * compare against the current `aggregate.<Prop>` set, delete pairs
+ * that are no longer present, and insert / update-ordinal the
+ * pairs that are.  Mirrors the TS Drizzle save diff-sync. */
+function buildSaveDiffSyncLines(associations: AssociationIR[]): string[] {
+  if (associations.length === 0) return [];
+  const out: string[] = [];
+  for (const a of associations) {
+    const cap = upperFirst(a.fieldName);
+    const dbSet = joinDbSetName(a);
+    const cls = joinEntityName(a);
+    const owner = joinFkPropName(a.ownerFk);
+    const target = joinFkPropName(a.targetFk);
+    const targetType = `${a.targetAgg}Id`;
+    out.push("");
+    out.push(`        var __existing${cap} = await _db.${dbSet}`);
+    out.push(`            .Where(x => x.${owner} == aggregate.Id).ToListAsync(ct);`);
+    out.push(`        var __current${cap} = aggregate.${cap}.ToList();`);
+    out.push(`        var __currentIds${cap} = new HashSet<${targetType}>(__current${cap});`);
+    out.push(
+      `        foreach (var __stale in __existing${cap}.Where(x => !__currentIds${cap}.Contains(x.${target})).ToList())`,
+    );
+    out.push("        {");
+    out.push(`            _db.${dbSet}.Remove(__stale);`);
+    out.push("        }");
+    out.push(`        for (int __i = 0; __i < __current${cap}.Count; __i++)`);
+    out.push("        {");
+    out.push(`            var __tid = __current${cap}[__i];`);
+    out.push(`            var __row = __existing${cap}.FirstOrDefault(x => x.${target} == __tid);`);
+    out.push("            if (__row != null) { __row.Ordinal = __i; }");
+    out.push(`            else { _db.${dbSet}.Add(new ${cls}(aggregate.Id, __tid, __i)); }`);
+    out.push("        }");
+  }
+  return out;
 }
 
 function renderParamsWithCt(params: ParamIR[], usesUser: boolean = false): string {
