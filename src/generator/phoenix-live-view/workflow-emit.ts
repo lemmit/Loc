@@ -174,7 +174,9 @@ function renderWorkflowStmt(
       // code-interface, which is just `get_<resource>/1` — `get_by_id_<res>`
       // would name a separate `:by_id` read action that doesn't exist.
       const action =
-        st.method === "getById" ? `get_${snake(st.aggName)}` : `${snake(st.method)}_${snake(st.aggName)}`;
+        st.method === "getById"
+          ? `get_${snake(st.aggName)}`
+          : `${snake(st.method)}_${snake(st.aggName)}`;
       const call = argList
         ? `${contextModule}.${action}(${argList})`
         : `${contextModule}.${action}()`;
