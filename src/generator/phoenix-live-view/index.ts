@@ -4,6 +4,7 @@ import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
 import { type ApiRoute, emitApiControllers } from "./api-emit.js";
 import { emitAuth } from "./auth-emit.js";
 import { emitAggregateResources } from "./domain-emit.js";
+import { joinEntityName, renderJoinResource } from "./join-resource-emit.js";
 import { emitLiveViewPages, type LiveRoute } from "./liveview-emit.js";
 import { emitMigrations } from "./migrations-emit.js";
 import { emitOpenApiSpec } from "./openapi-emit.js";
@@ -210,6 +211,16 @@ function emitContext(
     allResources.push(`${contextModule}.${upperFirst(agg.name)}`);
     for (const part of agg.parts) {
       allResources.push(`${contextModule}.${upperFirst(part.name)}`);
+    }
+    // Reference-collection (`Id<T>[]`) join resources — one Ash.Resource
+    // module per association, owning the join table.  Registered on the
+    // context's Ash.Domain like any other resource so the auto-discovery
+    // sees it.  Naming flows through `joinEntityName(assoc)` so all four
+    // emitters (resource, configuration, domain, migration) stay in sync.
+    for (const assoc of agg.associations ?? []) {
+      const joinPath = `lib/${appName}/${ctxSnake}/${assoc.joinTable}.ex`;
+      out.set(joinPath, renderJoinResource(assoc, contextModule, appModule));
+      allResources.push(`${contextModule}.${joinEntityName(assoc)}`);
     }
   }
   // Custom find actions (repository finds + view-derived finds) are
@@ -1525,7 +1536,9 @@ config :${appName}, ${appModule}.Repo,
   pool_size: 10
 
 config :${appName}, ${appModule}Web.Endpoint,
-  http: [ip: {127, 0, 0, 1}, port: ${port}],
+  # PORT env var overrides the dev default so test harnesses + parallel
+  # dev workflows can avoid port collisions without editing this file.
+  http: [ip: {127, 0, 0, 1}, port: String.to_integer(System.get_env("PORT") || "${port}")],
   check_origin: false,
   code_reloader: true,
   debug_errors: true,

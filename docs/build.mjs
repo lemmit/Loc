@@ -12,10 +12,11 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT  = join(HERE, '_site');
 
 const NAV = [
-  { label: 'Language',     href: 'language.html' },
-  { label: 'Generators',   href: 'generators.html' },
-  { label: 'Architecture', href: 'technical.html' },
-  { label: 'Tools',        href: 'tools.html' },
+  { label: 'Language',       href: 'language.html' },
+  { label: 'Generators',     href: 'generators.html' },
+  { label: 'Architecture',   href: 'technical.html' },
+  { label: 'Observability',  href: 'observability.html' },
+  { label: 'Tools',          href: 'tools.html' },
 ];
 
 // rewrite ./foo.md or foo.md (with optional #anchor) → foo.html
