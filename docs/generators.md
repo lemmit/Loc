@@ -609,6 +609,36 @@ backends sharing one DB silently leave the loser-of-the-race's
 tables uncreated.  React deployables don't connect to a DB and don't
 appear in the init script.
 
+### Migrations
+
+Schema changes flow through a platform-neutral **MigrationsIR**
+([`src/ir/migrations-ir.ts`](../src/ir/migrations-ir.ts)) built by
+diffing the current source against a checked-in snapshot at
+`.loom/snapshots/<module>.snapshot.json`.  See
+[`docs/migrations-design.md`](migrations-design.md) for the full
+pipeline; the per-backend artefacts are:
+
+| Backend | Emits | Applied by |
+| --- | --- | --- |
+| Phoenix | `priv/repo/migrations/<ts>_<name>.exs` (Ecto DSL) | `mix ash.migrate` at boot via the existing release config |
+| Hono | `db/migrations/<version>_<name>.sql` + `db/migrate.ts` | `await runMigrations(...)` in `index.ts` before `serve()` — a `loom_migrations` tracking table keeps the apply step idempotent |
+| .NET | `Migrations/<Version>_<Name>.cs` (`migrationBuilder.Sql(@"...")`) + `Migrations/AppDbContextModelSnapshot.cs` | `db.Database.Migrate()` in `Program.cs` after `builder.Build()`; `PendingModelChangesWarning` is suppressed because the snapshot stub is empty by design |
+
+Phoenix stays in Ecto DSL because its output is Elixir.  Hono and
+.NET share `src/system/sql-pg.ts` for bit-identical Postgres DDL.
+
+Initial regen of an output tree emits one "Initial" migration per
+module per backend.  Subsequent regens diff against the snapshot and
+emit one new dated file per backend covering just the delta — adding
+a property produces a single `ALTER TABLE … ADD COLUMN …` per
+backend, with the snapshot's `lastVersion` bumped so the next run's
+filename sorts after.
+
+Regenerating against an unchanged tree is a no-op: the diff is empty
+and the emitters skip.  Column renames are not detected (drop+add);
+operators wanting a real rename use `.loomignore` to hand-edit the
+emitted file or fold the rename into the next migration.
+
 ### `test e2e` lowering
 
 A `test e2e "name" against <deployable> { … }` block lowers via
@@ -632,10 +662,6 @@ A `test e2e "name" against <deployable> { … }` block lowers via
 
 Out of scope for v1 (intentional):
 
-- **Migrations**: deferred to the native tools (Drizzle Kit, EF Core
-  migrations).  The dev compose uses `EnsureCreated` /
-  `db:push`-style flow; production projects swap to migration-driven
-  workflow via `.loomignore` (see [`tools.md`](tools.md)).
 - **Authentication / authorization**: no opinion.  Add via
   `.loomignore` on `Program.cs` (.NET) or `http/index.ts` (Hono).
 - **Pagination on `findAll`**: returns every row.  Adding pagination

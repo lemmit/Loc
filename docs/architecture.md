@@ -365,11 +365,11 @@ shape end-to-end.
 |---|---|
 | `module`, `context`, aggregate fields | Drizzle schema, Hono routes, .NET commands (existing) |
 | `api X from M` | Per-aggregate `api/<name>.ts` with React Query hooks (existing scaffold output) |
-| `storage X { type: postgres }` | Drizzle config + migrations (existing) |
+| `storage X { type: postgres }` | Drizzle config + Phoenix/Hono/.NET Postgres migrations (see [`migrations-design.md`](migrations-design.md)) |
 | `storage X { type: <other> }` | Parses + validates; no generator output yet |
 | UI `api X: Y` parameter + body refs | Walker hook injection (slices 11.24–11.25) |
 | Deployable `serves:` / `ui: X { ... }` | Validator + composition checks (slice 11.26) |
-| Deployable `modules: X { primary: Y }` | Validator + IR (slice 11.27); generator still uses default Drizzle path |
+| Deployable `modules: X { primary: Y }` | Validator + IR (slice 11.27); the `primary` binding hints at the migration owner (`ModuleIR.migrationsOwner`), though each needsDb deployable currently still emits its own migration files against its own per-slug compose DB |
 
 
 ## Slice trail
