@@ -368,7 +368,7 @@ function zodForResponseInner(t: TypeIR): string {
         case "decimal":
           return "z.number()";
         case "money":
-          return 'z.string().transform((s) => new Decimal(s))';
+          return "z.string().transform((s) => new Decimal(s))";
         case "string":
         case "guid":
           return "z.string()";

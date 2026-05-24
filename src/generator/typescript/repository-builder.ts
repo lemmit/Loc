@@ -9,11 +9,7 @@ import type {
   RepositoryIR,
   TypeIR,
 } from "../../ir/loom-ir.js";
-import {
-  aggregateUsesMoney,
-  findUsesCurrentUser,
-  viewUsesCurrentUser,
-} from "../../ir/loom-ir.js";
+import { aggregateUsesMoney, findUsesCurrentUser, viewUsesCurrentUser } from "../../ir/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural, upperFirst } from "../../util/naming.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";

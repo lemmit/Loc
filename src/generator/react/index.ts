@@ -1,7 +1,7 @@
 import {
-  contextUsesMoney,
   type AggregateIR,
   type BoundedContextIR,
+  contextUsesMoney,
   type DeployableIR,
   type SystemIR,
 } from "../../ir/loom-ir.js";

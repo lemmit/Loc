@@ -20,8 +20,8 @@ import { buildExternHandlersFile } from "../../../generator/typescript/extern-bu
 import { buildRepositoryFile } from "../../../generator/typescript/repository-builder.js";
 import { enrichLoomModel } from "../../../ir/enrichments.js";
 import {
-  contextUsesMoney,
   type BoundedContextIR,
+  contextUsesMoney,
   type DeployableIR,
   type RepositoryIR,
   type SystemIR,

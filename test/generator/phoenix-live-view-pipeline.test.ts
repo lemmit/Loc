@@ -2311,3 +2311,147 @@ describe("renderTelemetry --trace (telemetry-emit unit)", () => {
     expect(onTel).toMatch(/\[:ash, :change, :stop\]/);
   });
 });
+
+// Reference-collection (`Id<T>[]`) join tables — Phoenix/Ash.  Mirrors
+// the TS `test/generator/join-table.test.ts` and the .NET
+// "reference-collection join tables (.NET)" block in
+// `test/generator/generator-dotnet.test.ts`.  Pins the four seams of
+// Phoenix m2m emission: join resource + m2m relationship +
+// calculation that re-exposes the wire shape + repository find
+// lowering + op `manage_relationship` mutations.
+describe("reference-collection join tables (Phoenix/Ash)", () => {
+  const ROSTER_SOURCE = `system Roster {
+  module Roster {
+    context Roster {
+      aggregate Pokemon { species: string display  level: int }
+      aggregate Trainer {
+        name: string display
+        party: Pokemon id[]
+        caught: Pokemon id[]
+        operation addToParty(pokemon: Pokemon id) {
+          precondition party.count < 6
+          party += pokemon
+        }
+        operation removeFromParty(pokemon: Pokemon id) {
+          precondition party.count > 0
+          party -= pokemon
+        }
+      }
+      repository Trainers for Trainer {
+        find holdingInParty(pokemon: Pokemon id): Trainer[]
+            where this.party.contains(pokemon)
+      }
+    }
+  }
+  api RosterApi from Roster
+  ui RosterAdmin with scaffold(modules: [Roster]) { }
+  deployable phoenixApp { platform: phoenixLiveView  modules: Roster  serves: RosterApi  ui: RosterAdmin  port: 4000 }
+}
+`;
+
+  async function generateRoster(): Promise<Map<string, string>> {
+    const services = createDddServices(NodeFileSystem);
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "phx-roster-"));
+    const dddPath = path.join(tmpRoot, "roster-system.ddd");
+    try {
+      fs.writeFileSync(dddPath, ROSTER_SOURCE);
+      const doc = await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
+        URI.file(dddPath),
+      );
+      await services.shared.workspace.DocumentBuilder.build([doc], { validation: true });
+      const model = doc.parseResult.value as Model;
+      return generateSystems(model).files;
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  }
+
+  it("emits a join resource per Id<T>[] field with composite PK + ordinal", async () => {
+    const files = await generateRoster();
+    const tp = files.get("phoenix_app/lib/phoenix_app/roster/trainer_party.ex");
+    expect(tp, "trainer_party.ex").toBeDefined();
+    expect(tp!).toMatch(/defmodule PhoenixApp\.Roster\.TrainerParty do/);
+    expect(tp!).toMatch(/attribute :trainer_id, :uuid, primary_key\?: true, allow_nil\?: false/);
+    expect(tp!).toMatch(/attribute :pokemon_id, :uuid, primary_key\?: true, allow_nil\?: false/);
+    expect(tp!).toMatch(/attribute :ordinal, :integer, allow_nil\?: false/);
+    expect(files.has("phoenix_app/lib/phoenix_app/roster/trainer_caught.ex")).toBe(true);
+  });
+
+  it("declares many_to_many on the owner with through-relationship suffix", async () => {
+    const files = await generateRoster();
+    const tr = files.get("phoenix_app/lib/phoenix_app/roster/trainer.ex")!;
+    // `:party_through` name is deliberately distinct from the `:party`
+    // calculation below; sharing names would collide in Ash.
+    expect(tr).toMatch(
+      /many_to_many :party_through, PhoenixApp\.Roster\.Pokemon do\s+through PhoenixApp\.Roster\.TrainerParty\s+source_attribute_on_join_resource :trainer_id\s+destination_attribute_on_join_resource :pokemon_id/,
+    );
+    expect(tr).toMatch(/many_to_many :caught_through, PhoenixApp\.Roster\.Pokemon do/);
+  });
+
+  it("re-exposes the wire shape as a calculation list of uuids", async () => {
+    const files = await generateRoster();
+    const tr = files.get("phoenix_app/lib/phoenix_app/roster/trainer.ex")!;
+    expect(tr).toMatch(/calculate :party, \{:array, :uuid\}, expr\(party_through\.id\)/);
+    expect(tr).toMatch(/calculate :caught, \{:array, :uuid\}, expr\(caught_through\.id\)/);
+  });
+
+  it("suppresses the array-of-id attribute, derive list, accept list, and PG column", async () => {
+    const files = await generateRoster();
+    const tr = files.get("phoenix_app/lib/phoenix_app/roster/trainer.ex")!;
+    // No `attribute :party, {:array, :uuid}` line on the resource.
+    expect(tr).not.toMatch(/attribute :party,/);
+    expect(tr).not.toMatch(/attribute :caught,/);
+    // Jason `only:` list excludes party/caught (calculations aren't
+    // attribute-serialised by @derive).
+    expect(tr).toMatch(
+      /@derive \{Jason\.Encoder, only: \[:id, :name, :inserted_at, :updated_at\]\}/,
+    );
+    // create action's accept[...] drops the ref-collections.
+    expect(tr).toMatch(/accept \[:name\]/);
+    expect(tr).not.toMatch(/accept \[[^\]]*:party/);
+    // Owner migration has no `party` column.
+    const ownerMig = [...files.entries()].find(([p]) => /create_trainers\.exs$/.test(p))?.[1];
+    expect(ownerMig, "owner migration").toBeDefined();
+    expect(ownerMig!).not.toMatch(/add :party/);
+  });
+
+  it("emits a join-table migration with composite PK + ordinal + target index", async () => {
+    const files = await generateRoster();
+    const partyMig = [...files.entries()].find(([p]) => /create_trainer_party\.exs$/.test(p))?.[1];
+    expect(partyMig, "trainer_party migration").toBeDefined();
+    expect(partyMig!).toMatch(
+      /add :trainer_id, references\(:trainers, type: :uuid, on_delete: :delete_all\), null: false, primary_key: true/,
+    );
+    expect(partyMig!).toMatch(
+      /add :pokemon_id, references\(:pokemons, type: :uuid, on_delete: :delete_all\), null: false, primary_key: true/,
+    );
+    expect(partyMig!).toMatch(/add :ordinal, :integer, null: false/);
+    expect(partyMig!).toMatch(/create index\(:trainer_party, \[:pokemon_id\]\)/);
+  });
+
+  it("lowers this.<refColl>.contains(param) to an Ash exists() filter", async () => {
+    const files = await generateRoster();
+    const tr = files.get("phoenix_app/lib/phoenix_app/roster/trainer.ex")!;
+    expect(tr).toMatch(
+      /read :holding_in_party do[\s\S]+?filter expr\(exists\(party_through, id == \^arg\(:pokemon\)\)\)/,
+    );
+  });
+
+  it("lowers += / -= on ref-collections to manage_relationship with use_identities", async () => {
+    const files = await generateRoster();
+    const tr = files.get("phoenix_app/lib/phoenix_app/roster/trainer.ex")!;
+    expect(tr).toMatch(
+      /Ash\.Changeset\.manage_relationship\(changeset, :party_through, \[pokemon\], type: :append, use_identities: \[:id\]\)/,
+    );
+    expect(tr).toMatch(
+      /Ash\.Changeset\.manage_relationship\(changeset, :party_through, \[pokemon\], type: :remove, use_identities: \[:id\]\)/,
+    );
+  });
+
+  it("registers the join resource on the context's Ash.Domain", async () => {
+    const files = await generateRoster();
+    const dom = files.get("phoenix_app/lib/phoenix_app/roster.ex")!;
+    expect(dom).toMatch(/resource PhoenixApp\.Roster\.TrainerParty/);
+    expect(dom).toMatch(/resource PhoenixApp\.Roster\.TrainerCaught/);
+  });
+});

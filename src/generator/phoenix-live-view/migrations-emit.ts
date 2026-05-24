@@ -1,5 +1,17 @@
-import type { AggregateIR, BoundedContextIR, FieldIR, TypeIR } from "../../ir/loom-ir.js";
+import type {
+  AggregateIR,
+  AssociationIR,
+  BoundedContextIR,
+  FieldIR,
+  TypeIR,
+} from "../../ir/loom-ir.js";
 import { plural, snake } from "../../util/naming.js";
+
+/** True for `Id<T>[]` reference-collection fields — they persist via a
+ * separate join table (emitted below), not a column on this row. */
+function isRefCollection(t: TypeIR): boolean {
+  return t.kind === "array" && t.element.kind === "id";
+}
 
 // ---------------------------------------------------------------------------
 // Migration emission for Phoenix LiveView / Ash.
@@ -57,6 +69,29 @@ export function emitMigrations(
       out.set(partPath, partContent);
     }
   }
+
+  // Join-table migrations come AFTER every aggregate / part has been
+  // created so the `references(:owner, …)` and `references(:target, …)`
+  // FK targets resolve.  Offset base is well above the part block.
+  const joinBase = BASE_TIMESTAMP + allAggregates.length * 100;
+  let joinIdx = 0;
+  for (const { agg } of allAggregates) {
+    for (const assoc of agg.associations ?? []) {
+      const ts = joinBase + joinIdx;
+      joinIdx += 1;
+      const migrationName = `Create${pascalSnake(assoc.joinTable)}`;
+      const path = `priv/repo/migrations/${ts}_create_${assoc.joinTable}.exs`;
+      out.set(path, renderJoinMigration(assoc, migrationName, appModule));
+    }
+  }
+}
+
+/** "trainer_party" → "TrainerParty" — for migration module names. */
+function pascalSnake(s: string): string {
+  return s
+    .split("_")
+    .map((w) => (w.length === 0 ? "" : w[0]!.toUpperCase() + w.slice(1)))
+    .join("");
 }
 
 function renderMigration(
@@ -107,12 +142,39 @@ end
 }
 
 function buildColumns(fields: FieldIR[], idValueType: string): string {
-  return fields
-    .map((f) => {
-      const col = fieldToColumn(f, idValueType);
-      return `      add :${snake(f.name)}, ${col.type}${col.opts}`;
-    })
-    .join("\n");
+  return (
+    fields
+      // Reference collections live in their own join table — no column on
+      // the owner row.  Same suppression as in the Ash resource emitter.
+      .filter((f) => !isRefCollection(f.type))
+      .map((f) => {
+        const col = fieldToColumn(f, idValueType);
+        return `      add :${snake(f.name)}, ${col.type}${col.opts}`;
+      })
+      .join("\n")
+  );
+}
+
+function renderJoinMigration(
+  assoc: AssociationIR,
+  migrationName: string,
+  appModule: string,
+): string {
+  const ownerTable = plural(snake(assoc.ownerAgg));
+  const targetTable = plural(snake(assoc.targetAgg));
+  return `defmodule ${appModule}.Repo.Migrations.${migrationName} do
+  use Ecto.Migration
+
+  def change do
+    create table(:${assoc.joinTable}, primary_key: false) do
+      add :${snake(assoc.ownerFk)}, references(:${ownerTable}, type: :uuid, on_delete: :delete_all), null: false, primary_key: true
+      add :${snake(assoc.targetFk)}, references(:${targetTable}, type: :uuid, on_delete: :delete_all), null: false, primary_key: true
+      add :ordinal, :integer, null: false
+    end
+    create index(:${assoc.joinTable}, [:${snake(assoc.targetFk)}])
+  end
+end
+`;
 }
 
 interface ColumnSpec {

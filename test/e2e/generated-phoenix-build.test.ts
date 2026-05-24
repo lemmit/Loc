@@ -66,14 +66,64 @@ const FIXTURE_DDD = `system AcmeLV {
 }
 `;
 
+// Reference-collection (`Id<T>[]`) fixture — exercises the m2m join
+// entity + many_to_many relationship + `manage_relationship` mutations
+// + `exists(...)` filter that Phoenix join-table emission produces.
+// Roster's `examples/roster.ddd` is a bare context; wrap it in a
+// phoenixLiveView system the same way `FIXTURE_DDD` does for acme.
+const ROSTER_FIXTURE_DDD = `system Roster {
+  module Roster {
+    context Roster {
+      aggregate Pokemon {
+        species: string display
+        level: int
+        invariant level >= 1
+        invariant level <= 100
+      }
+      aggregate Trainer {
+        name: string display
+        party: Pokemon id[]
+        caught: Pokemon id[]
+        invariant party.count <= 6
+        operation addToParty(pokemon: Pokemon id) {
+          precondition party.count < 6
+          party += pokemon
+          caught += pokemon
+        }
+        operation removeFromParty(pokemon: Pokemon id) {
+          precondition party.count > 0
+          party -= pokemon
+        }
+      }
+      repository Trainers for Trainer {
+        find holdingInParty(pokemon: Pokemon id): Trainer[]
+            where this.party.contains(pokemon)
+      }
+    }
+  }
+  api RosterApi from Roster
+  ui RosterAdmin with scaffold(modules: [Roster]) { }
+  deployable phoenixApp {
+    platform: phoenixLiveView
+    modules: Roster
+    serves: RosterApi
+    ui: RosterAdmin
+    port: 4000
+  }
+}
+`;
+
 describe.skipIf(!ENABLED)(
   "generated Phoenix project compiles against real Ash 3.x (LOOM_PHOENIX_BUILD=1)",
   () => {
-    it("examples/acme-lv.ddd → mix compile --warnings-as-errors", () => {
+    it.each([
+      { name: "acme-lv.ddd", ddd: FIXTURE_DDD },
+      { name: "roster.ddd", ddd: ROSTER_FIXTURE_DDD },
+    ])("$name → mix compile --warnings-as-errors", ({ name, ddd }) => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-phoenix-"));
-      const dddPath = path.join(outDir, "acme-lv.ddd");
+      const dddPath = path.join(outDir, name);
       try {
-        fs.writeFileSync(dddPath, FIXTURE_DDD);
+        fs.writeFileSync(dddPath, ddd);
         // 1. Generate the project.
         execSync(`node ${cli} generate system ${dddPath} -o ${outDir}/out`, {
           stdio: "inherit",
