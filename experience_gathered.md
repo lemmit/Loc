@@ -733,3 +733,39 @@ or not.
     literal or money-typed binary operand, leaving the aggregate's
     server-side `_assertInvariants` (which renders via `.gte()` /
     `.lte()`) as the sole enforcement.
+- **Adding a new primitive type — the checklist.**  `PrimitiveName`
+  + `PRIMITIVES` live in **one place**: `src/ir/loom-ir.ts`.  Every
+  other layer (the type-system at `src/language/type-system.ts`, the
+  playground field-builder at `web/src/builder/system/fields.ts`)
+  re-exports / imports from there — adding the primitive in the IR
+  surfaces it in every consumer automatically.  Then in order:
+  1. `src/language/ddd.langium` — add the literal to the
+     `PrimitiveType` rule's union.
+  2. `src/ir/loom-ir.ts` — append to `PrimitiveName` AND to
+     `PRIMITIVES` (the array's order is the playground type-picker's
+     display order; keep related primitives adjacent).
+  3. `npm run langium:generate` — the AST regenerates with the new
+     literal in `PrimitiveType.name`'s union.
+  4. `tsc -b` from the repo root — every non-exhaustive switch over
+     `PrimitiveName` errors with "Fallthrough case in switch" or "Type
+     'X' is not assignable to type 'PrimitiveName'."  Those errors
+     are the checklist: wire spec (`src/system/wire-spec.ts`'s
+     `jsonPropertyForType`), each backend's render-expr /
+     dto-mapping / column-type emitter, the Drizzle schema, every
+     Zod-for-type switch in routes/views/workflows builders, the
+     React form-fields preparer, the macro-api factories union.
+  5. Per-backend literal + arithmetic rendering — `render-expr.ts`'s
+     `renderLiteral` / `renderBinary` / `renderTsType` (or the
+     `.NET` / Phoenix equivalents).  If the new primitive needs
+     operator dispatch beyond what native operators give the host
+     language (the way `money` needed `Decimal.compare/2` on
+     Phoenix), the binary-IR's `leftType` stash is the channel — see
+     the `money` entry above.
+  6. Tests — parsing + IR lowering coverage under `test/language/` and
+     `test/ir/`; per-backend snapshot under `test/generator/`.
+  The trap that bit us first time: when a primitive was added but its
+  union wasn't synced to the playground's local copy, CI broke at
+  `playground-e2e.yml`'s `tsc -b` step (see #499).  Sourcing both
+  from `src/ir/loom-ir.ts` removes the failure mode entirely — the
+  playground's type picker now picks up new primitives without an
+  additional code change.
