@@ -118,16 +118,17 @@ export function expandWalkerPrimitive(
 /** Recursively walk a page body and rewrite the two scaffold-family
  * inline body primitives into their expanded forms:
  *
- *   `scaffoldDetails(of: <Agg>)`    → Stack(Card(rows), ...related-cards)
+ *   `scaffoldDetails(of: <Agg>)`    → Stack(Breadcrumbs, Heading,
+ *                                     QueryView(of: api.X.byId(id),
+ *                                       data: data => Card+related))
  *   `scaffoldOperations(of: <Agg>)` → Group(Modal × N)
  *
- * Both primitives expect to be emitted inside a `QueryView`'s data
- * lambda so the operation forms can resolve `data.<op>` — which is
- * exactly the shape `scaffoldDetailPage` produces.  Stand-alone use
- * outside a data lambda will still expand but the resulting modals
- * will reference an unbound `data` — the body walker surfaces this
- * as a comment marker (same handling it gives other unresolved
- * instance refs).
+ * `scaffoldDetails` is self-contained — the QueryView wrapper is
+ * inside, so the loading/error/empty lifecycle stays with the read
+ * side.  `scaffoldOperations` lives at top level (sibling, no
+ * `data` binding); each modal's Form uses the new
+ * `Form(of: <Agg>, op: <name>)` shape which resolves the aggregate
+ * id from the route — no loaded record required.
  *
  * Returns the rewritten ExprIR (new tree if anything changed; the
  * input reference otherwise).  Pure, no in-place mutation — the
@@ -145,9 +146,9 @@ export function expandInlineScaffoldPrimitives(
       const agg = aggRef ? ctx.aggregatesByName.get(aggRef) : undefined;
       if (!agg) return body;
       if (body.name === "scaffoldDetails") {
-        return buildDataCardSection(agg, ctx, "data");
+        return expandScaffoldDetails(agg, ctx);
       }
-      return buildOperationsSection(agg, "data") ?? call("Group", []);
+      return expandScaffoldOperations(agg);
     }
     // Recurse into args — they may themselves contain the primitives.
     const newArgs = body.args.map((arg) => expandInlineScaffoldPrimitives(arg, ctx));
@@ -347,13 +348,104 @@ function expandAggregateDetail(aggregateName: string, ctx: WalkerExpandContext):
   );
 }
 
+/** Expand `scaffoldDetails(of: <Agg>)`: the full read-side detail
+ * section — Breadcrumbs, Heading, QueryView wrapping the field
+ * Card and related-entity Cards.  Self-contained (the QueryView is
+ * inside) so the loading/error/empty lifecycle stays here; the
+ * sibling `scaffoldOperations(of: <Agg>)` doesn't need the loaded
+ * record. */
+function expandScaffoldDetails(agg: AggregateIR, ctx: WalkerExpandContext): ExprIR {
+  const apiHandle = findApiHandleFor(agg, ctx);
+  const queryRoot = apiHandle ? member(ref(apiHandle), agg.name) : ref(agg.name);
+  const slug = snake(plural(agg.name));
+  const humanPlural = humanize(plural(agg.name));
+  const humanAgg = humanize(agg.name);
+  const cellVar = "data";
+  const { card, related } = buildDataCardParts(agg, ctx, cellVar);
+  const dataBody =
+    related.length === 0 ? card : call("Stack", [card, ...related]);
+  return call("Stack", [
+    call("Breadcrumbs", [
+      call("Anchor", [lit("Home")], [["to", lit("/")]]),
+      call("Anchor", [lit(humanPlural)], [["to", lit(`/${slug}`)]]),
+      call("Text", [lit("Detail")]),
+    ]),
+    call("Heading", [lit(`${humanAgg} detail`)], [["level", intLit(2)]]),
+    call(
+      "QueryView",
+      [],
+      [
+        ["of", methodCall(queryRoot, "byId", [ref("id")])],
+        ["single", boolLit(true)],
+        ["loading", call("Skeleton", [], [["count", intLit(3)]])],
+        ["error", call("Alert", [lit(`Couldn't load ${humanAgg.toLowerCase()}`)])],
+        [
+          "empty",
+          call(
+            "Alert",
+            [lit(`No ${humanAgg.toLowerCase()} matches that id.`)],
+            [["color", lit("yellow")]],
+          ),
+        ],
+        ["data", lambda(cellVar, dataBody)],
+      ],
+    ),
+  ]);
+}
+
+/** Expand `scaffoldOperations(of: <Agg>)`: one Modal per public
+ * operation, each holding a `Form(of: <Agg>, op: <opName>)`.  The
+ * new flat Form shape avoids needing a loaded-record reference —
+ * the mutation hook resolves the aggregate id from the route, so
+ * the modals can live at top level rather than inside a QueryView
+ * lambda. */
+function expandScaffoldOperations(agg: AggregateIR): ExprIR {
+  const slug = snake(plural(agg.name));
+  const publicOps = agg.operations.filter((o) => o.visibility === "public");
+  if (publicOps.length === 0) return call("Group", []);
+  const opModals: ExprIR[] = publicOps.map((op, i) =>
+    call(
+      "Modal",
+      [
+        call(
+          "Form",
+          [],
+          [
+            ["of", ref(agg.name)],
+            ["op", ref(op.name)],
+            ["testid", lit(`${slug}-op-${op.name}`)],
+          ],
+        ),
+      ],
+      [
+        ["title", lit(humanize(op.name))],
+        [
+          "trigger",
+          call(
+            "Button",
+            [lit(humanize(op.name))],
+            [
+              ["emphasis", lit(i === 0 ? "primary" : "secondary")],
+              ["testid", lit(`${slug}-op-${op.name}`)],
+            ],
+          ),
+        ],
+      ],
+    ),
+  );
+  return call("Group", opModals);
+}
+
 /** Bundled form of the read-side data section: the main field
  * card folded together with all related-entity cards in a single
  * nested Stack.  Returns a bare Card when there are no relations.
  *
- * This is the shape the `scaffoldDetails(of:)` inline body
- * primitive expands to — one Stack slot the user can replace
- * wholesale.  Internally composes `buildDataCardParts`. */
+ * Kept for the archetype-driven `expandAggregateDetail` path (which
+ * interleaves the operations Group between card and related cards
+ * — see `buildDataCardParts`).  The new
+ * `scaffoldDetails(of:)` / `scaffoldOperations(of:)` primitives go
+ * through their own dedicated `expandScaffoldDetails` /
+ * `expandScaffoldOperations` helpers above. */
 export function buildDataCardSection(
   agg: AggregateIR,
   ctx: WalkerExpandContext,
