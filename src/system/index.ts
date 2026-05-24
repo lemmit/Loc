@@ -8,6 +8,8 @@ import type {
   SystemIR,
 } from "../ir/loom-ir.js";
 import { lowerModel } from "../ir/lower.js";
+import { buildMigrations } from "../ir/migrations-builder.js";
+import type { MigrationsIR } from "../ir/migrations-ir.js";
 import type { Model } from "../language/generated/ast.js";
 import { platformFor } from "../platform/registry.js";
 import { renderE2EFile } from "./e2e-render.js";
@@ -19,6 +21,7 @@ import {
   renderSequenceDiagram,
   renderWorkflowDiagram,
 } from "./mermaid.js";
+import { memorySnapshotStore, serializeSnapshot, type SnapshotStore } from "./snapshot.js";
 import { renderTraceabilityArtifacts } from "./traceability.js";
 import { renderUIE2EFile } from "./ui-e2e-render.js";
 import { renderWireSpec } from "./wire-spec.js";
@@ -47,9 +50,18 @@ export interface SystemEmission {
   files: Map<string, string>;
 }
 
+export interface GenerateSystemOptions {
+  emitTrace?: boolean;
+  /** Source for `.loom/snapshots/<module>.snapshot.json` baselines.  When
+   *  omitted, an empty in-memory store is used — every owning module
+   *  emits an "Initial" migration.  CLI wires `fsSnapshotStore(outDir)`;
+   *  web playground wires its VFS-backed store. */
+  snapshots?: SnapshotStore;
+}
+
 export function generateSystems(
   model: Model,
-  options: { emitTrace?: boolean } = {},
+  options: GenerateSystemOptions = {},
 ): SystemEmission {
   // Lowering produces a faithful AST projection; enrichment populates
   // wireShape, the implicit `findAll` find, and react `moduleNames`
@@ -66,11 +78,12 @@ export function generateSystems(
  *  lower + enrich. */
 export function generateSystemsFromLoom(
   loom: LoomModel,
-  options: { emitTrace?: boolean } = {},
+  options: GenerateSystemOptions = {},
 ): SystemEmission {
   const out = new Map<string, string>();
+  const snapshots = options.snapshots ?? memorySnapshotStore();
   for (const sys of loom.systems) {
-    emitSystem(sys, loom, out, options);
+    emitSystem(sys, loom, out, { emitTrace: options.emitTrace, snapshots });
   }
   // Traceability artifacts — model-global (requirements may
   // reference code across systems), so emitted once at the output root
@@ -86,16 +99,30 @@ function emitSystem(
   sys: SystemIR,
   _loom: LoomModel,
   out: Map<string, string>,
-  options: { emitTrace?: boolean } = {},
+  options: { emitTrace?: boolean; snapshots: SnapshotStore },
 ): void {
   // Pre-compute a module-name → contexts lookup so a deployable can
   // collect its slice quickly.
   const modulesByName = new Map<string, ModuleIR>();
   for (const m of sys.modules) modulesByName.set(m.name, m);
 
+  // Build platform-neutral migration deltas once per system, then write
+  // the updated snapshot for every owning module so the next regen has
+  // a baseline to diff against.  Modules without an owner are skipped
+  // by `buildMigrations` — `migrations` only carries entries for
+  // modules where `module.migrationsOwner` is set.
+  const migrations = buildMigrations(sys, options.snapshots);
+  for (const m of migrations) {
+    out.set(`.loom/snapshots/${m.module}.snapshot.json`, serializeSnapshot(m.next));
+  }
+
   for (const d of sys.deployables) {
     const contexts = collectContextsFor(d, modulesByName);
-    emitDeployable(sys, d, contexts, out, options);
+    const ownedMigrations = migrationsForDeployable(d, migrations);
+    emitDeployable(sys, d, contexts, out, {
+      emitTrace: options.emitTrace,
+      migrations: ownedMigrations,
+    });
   }
 
   out.set("docker-compose.yml", renderDockerCompose(sys));
@@ -209,7 +236,7 @@ function emitDeployable(
   d: DeployableIR,
   contexts: BoundedContextIR[],
   out: Map<string, string>,
-  options: { emitTrace?: boolean } = {},
+  options: { emitTrace?: boolean; migrations?: MigrationsIR[] } = {},
 ): void {
   const emitTrace = !!options.emitTrace;
   // Per-deployable folder uses a lowercase slug (Docker requires
@@ -220,10 +247,27 @@ function emitDeployable(
   // dictates).
   const sub = serviceSlug(d.name);
   const platform = platformFor(d.platform);
-  const files = platform.emitProject({ contexts, deployable: d, sys, emitTrace });
+  const files = platform.emitProject({
+    contexts,
+    deployable: d,
+    sys,
+    migrations: options.migrations,
+    emitTrace,
+  });
   for (const [relPath, content] of files) {
     out.set(`${sub}/${relPath}`, content);
   }
+}
+
+/** Filter system-level migrations to just those owned by this deployable.
+ *  Matches `MigrationsIR.ownerDeployable` set by the builder from
+ *  `module.migrationsOwner` — a non-owner deployable that happens to
+ *  also include the module gets nothing. */
+function migrationsForDeployable(
+  d: DeployableIR,
+  all: MigrationsIR[],
+): MigrationsIR[] {
+  return all.filter((m) => m.ownerDeployable === d.name);
 }
 
 /** A docker-compose-safe slug: lowercase, no characters outside the

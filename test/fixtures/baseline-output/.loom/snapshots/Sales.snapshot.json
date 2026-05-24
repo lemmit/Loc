@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 1,
+  "tables": [
+    {
+      "name": "order_lines",
+      "ownerModule": "Sales",
+      "columns": [
+        {
+          "name": "id",
+          "type": {
+            "kind": "uuid"
+          },
+          "nullable": false
+        },
+        {
+          "name": "order_id",
+          "type": {
+            "kind": "uuid"
+          },
+          "nullable": false
+        },
+        {
+          "name": "product_id",
+          "type": {
+            "kind": "uuid"
+          },
+          "nullable": false
+        },
+        {
+          "name": "quantity",
+          "type": {
+            "kind": "int"
+          },
+          "nullable": false
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "foreignKeys": [
+        {
+          "column": "order_id",
+          "refTable": "orders",
+          "onDelete": "cascade"
+        },
+        {
+          "column": "product_id",
+          "refTable": "products",
+          "onDelete": "restrict"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "order_lines_order_id_idx",
+          "table": "order_lines",
+          "columns": [
+            "order_id"
+          ],
+          "unique": false
+        },
+        {
+          "name": "order_lines_product_id_idx",
+          "table": "order_lines",
+          "columns": [
+            "product_id"
+          ],
+          "unique": false
+        }
+      ]
+    },
+    {
+      "name": "orders",
+      "ownerModule": "Sales",
+      "columns": [
+        {
+          "name": "id",
+          "type": {
+            "kind": "uuid"
+          },
+          "nullable": false
+        },
+        {
+          "name": "customer_id",
+          "type": {
+            "kind": "text"
+          },
+          "nullable": false
+        },
+        {
+          "name": "status",
+          "type": {
+            "kind": "text"
+          },
+          "nullable": false
+        },
+        {
+          "name": "placed_at",
+          "type": {
+            "kind": "datetime"
+          },
+          "nullable": false
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "foreignKeys": [],
+      "indexes": []
+    }
+  ],
+  "lastVersion": "20260101000000"
+}

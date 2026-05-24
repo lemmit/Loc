@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "tables": [
+    {
+      "name": "products",
+      "ownerModule": "Catalog",
+      "columns": [
+        {
+          "name": "id",
+          "type": {
+            "kind": "uuid"
+          },
+          "nullable": false
+        },
+        {
+          "name": "sku",
+          "type": {
+            "kind": "text"
+          },
+          "nullable": false
+        },
+        {
+          "name": "price",
+          "type": {
+            "kind": "json"
+          },
+          "nullable": false
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "foreignKeys": [],
+      "indexes": []
+    }
+  ],
+  "lastVersion": "20260101000000"
+}

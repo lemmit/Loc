@@ -172,6 +172,7 @@ export function buildMigrations(
         : { ...next, lastVersion: version };
     out.push({
       module: m.name,
+      ownerDeployable: m.migrationsOwner,
       storageName,
       baseline,
       next: stamped,

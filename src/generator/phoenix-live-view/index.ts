@@ -1,4 +1,5 @@
 import type { BoundedContextIR, DeployableIR, SystemIR } from "../../ir/loom-ir.js";
+import type { MigrationsIR } from "../../ir/migrations-ir.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
 import { type ApiRoute, emitApiControllers } from "./api-emit.js";
@@ -49,6 +50,12 @@ export interface GeneratePhoenixLiveViewArgs {
   contexts: BoundedContextIR[];
   deployable: DeployableIR;
   sys: SystemIR;
+  /** Per-deployable slice of `buildMigrations(sys, snapshots)` — only the
+   *  modules this deployable owns (via `module.migrationsOwner ===
+   *  deployable.name`).  Empty array when this deployable owns no
+   *  migrations or the system orchestrator was invoked without a
+   *  snapshot store; in either case the emitter is a no-op. */
+  migrations?: MigrationsIR[];
   /** Compile-time --trace switch.  When true, the AggregatesController
    *  emits a `wire_in` Logger.debug line at each CRUD action entry so
    *  the parsed `params` key set surfaces on the structured stream —
@@ -62,7 +69,7 @@ export interface GeneratePhoenixLiveViewArgs {
 export function generatePhoenixLiveViewProject(
   args: GeneratePhoenixLiveViewArgs,
 ): Map<string, string> {
-  const { contexts, deployable, sys, emitTrace } = args;
+  const { contexts, deployable, sys, migrations, emitTrace } = args;
   const out = new Map<string, string>();
 
   const appName = toSnakeApp(deployable.name);
@@ -80,7 +87,12 @@ export function generatePhoenixLiveViewProject(
   }
 
   // --- Migrations -----------------------------------------------------------
-  emitMigrations(appName, contexts, appModule, out);
+  // Consumes `migrations: MigrationsIR[]` from the system orchestrator
+  // (one entry per module this deployable owns).  When the orchestrator
+  // invoked us without a snapshot store, `migrations` is undefined —
+  // emit no migration files in that case (the legacy ".loom-less"
+  // entry point used by some integration tests).
+  emitMigrations(appName, migrations ?? [], appModule, out);
 
   // --- LiveView pages --------------------------------------------
   // Per PageIR in the deployable's `ui:` block: one

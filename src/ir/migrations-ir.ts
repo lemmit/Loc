@@ -78,6 +78,10 @@ export interface MigrationsIR {
   /** Owning module name — `.loom/snapshots/<module>.snapshot.json` is keyed
    *  here and the per-deployable emitter gates on `module.migrationsOwner`. */
   module: string;
+  /** Name of the deployable that owns the migration emission, taken from
+   *  `module.migrationsOwner` at build time.  The system orchestrator
+   *  filters by this when slicing migrations per deployable. */
+  ownerDeployable: string;
   /** Optional storage binding name (`pg`, `analyticsDb`).  Empty string when
    *  the deployable used the bare `modules: Sales` form. */
   storageName: string;
