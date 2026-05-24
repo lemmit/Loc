@@ -488,12 +488,20 @@ export function emitModal(
   // Walk the form child first — records the OperationFormState
   // (and returns "" — the form has no inline JSX).
   walk(formChild, ctx, depth);
-  // The op-form references the operation through an instance
-  // (`Form(data.confirm)`); the operation name is the member.
+  // The op-form names its operation either through an instance-
+  // member shape (`Form(data.confirm)`) or through the new
+  // `Form(of: <Agg>, op: <opName>)` flat shape (used by
+  // `scaffoldOperations(of:)` so modals can live outside a
+  // QueryView data lambda).  Recover the op name from whichever
+  // shape the child carries.
   const opRef = positionalArgs(formChild)[0];
-  const opName = opRef && opRef.kind === "member" ? opRef.member : undefined;
+  const opNameNamed = (() => {
+    const opArg = namedArgValue(formChild, "op");
+    return opArg && opArg.kind === "ref" ? opArg.name : undefined;
+  })();
+  const opName = opRef && opRef.kind === "member" ? opRef.member : opNameNamed;
   if (!opName) {
-    return `{/* Modal: child Form must be Form(<instance>.<operation>) */}`;
+    return `{/* Modal: child Form must be Form(<instance>.<op>) or Form(of:, op:) */}`;
   }
   const label = unwrapTextLiteral(firstPositionalContent(triggerArg, ctx) ?? '"Action"');
   // Platform-neutral emphasis token from the scaffold-expander

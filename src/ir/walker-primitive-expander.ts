@@ -133,10 +133,7 @@ export function expandWalkerPrimitive(
  * Returns the rewritten ExprIR (new tree if anything changed; the
  * input reference otherwise).  Pure, no in-place mutation — the
  * caller assigns the result back. */
-export function expandInlineScaffoldPrimitives(
-  body: ExprIR,
-  ctx: WalkerExpandContext,
-): ExprIR {
+export function expandInlineScaffoldPrimitives(body: ExprIR, ctx: WalkerExpandContext): ExprIR {
   if (body.kind === "call") {
     if (body.name === "scaffoldDetails" || body.name === "scaffoldOperations") {
       const argNames = body.argNames ?? [];
@@ -151,9 +148,49 @@ export function expandInlineScaffoldPrimitives(
       return expandScaffoldOperations(agg);
     }
     // Recurse into args — they may themselves contain the primitives.
-    const newArgs = body.args.map((arg) => expandInlineScaffoldPrimitives(arg, ctx));
-    const changed = newArgs.some((a, i) => a !== body.args[i]);
-    return changed ? { ...body, args: newArgs } : body;
+    // Flatten Stack-returning scaffold expansions when their parent
+    // is itself a Stack (the only place scaffoldDetails currently
+    // lives).  Avoids `<Stack><Stack>…</Stack>…</Stack>` nesting
+    // around the read view: the inner Stack's children become
+    // direct siblings of scaffoldOperations.
+    //
+    // Stays in lockstep with `argNames`: every push to `newArgs`
+    // pushes a matching slot to `newArgNames` so the named-arg
+    // resolver (e.g. `testid:` on the parent Stack) keeps its
+    // index alignment after the splice.
+    const flattenIntoParent = body.name === "Stack";
+    const oldArgNames = body.argNames ?? [];
+    const newArgs: ExprIR[] = [];
+    const newArgNames: (string | undefined)[] = [];
+    let changed = false;
+    body.args.forEach((arg, i) => {
+      const expanded = expandInlineScaffoldPrimitives(arg, ctx);
+      if (expanded !== arg) changed = true;
+      const isScaffoldCall =
+        arg.kind === "call" &&
+        (arg.name === "scaffoldDetails" || arg.name === "scaffoldOperations");
+      if (
+        flattenIntoParent &&
+        isScaffoldCall &&
+        expanded.kind === "call" &&
+        expanded.name === "Stack" &&
+        (expanded.argNames ?? []).every((n) => !n)
+      ) {
+        for (const inner of expanded.args) {
+          newArgs.push(inner);
+          newArgNames.push(undefined);
+        }
+        changed = true;
+      } else {
+        newArgs.push(expanded);
+        newArgNames.push(oldArgNames[i]);
+      }
+    });
+    if (!changed) return body;
+    const hasNamed = newArgNames.some((n) => n !== undefined);
+    return hasNamed
+      ? { ...body, args: newArgs, argNames: newArgNames }
+      : { ...body, args: newArgs };
   }
   if (body.kind === "lambda") {
     if (body.body) {
@@ -171,9 +208,7 @@ export function expandInlineScaffoldPrimitives(
     const newArgs = body.args.map((a) => expandInlineScaffoldPrimitives(a, ctx));
     const recvChanged = newReceiver !== body.receiver;
     const argsChanged = newArgs.some((a, i) => a !== body.args[i]);
-    return recvChanged || argsChanged
-      ? { ...body, receiver: newReceiver, args: newArgs }
-      : body;
+    return recvChanged || argsChanged ? { ...body, receiver: newReceiver, args: newArgs } : body;
   }
   return body;
 }
@@ -362,8 +397,7 @@ function expandScaffoldDetails(agg: AggregateIR, ctx: WalkerExpandContext): Expr
   const humanAgg = humanize(agg.name);
   const cellVar = "data";
   const { card, related } = buildDataCardParts(agg, ctx, cellVar);
-  const dataBody =
-    related.length === 0 ? card : call("Stack", [card, ...related]);
+  const dataBody = related.length === 0 ? card : call("Stack", [card, ...related]);
   return call("Stack", [
     call("Breadcrumbs", [
       call("Anchor", [lit("Home")], [["to", lit("/")]]),
@@ -576,9 +610,7 @@ export function buildOperationsSection(agg: AggregateIR, cellVar: string): ExprI
   const opModals: ExprIR[] = publicOps.map((op, i) =>
     call(
       "Modal",
-      [
-        call("Form", [member(ref(cellVar), op.name)], [["testid", lit(`${slug}-op-${op.name}`)]]),
-      ],
+      [call("Form", [member(ref(cellVar), op.name)], [["testid", lit(`${slug}-op-${op.name}`)]])],
       [
         ["title", lit(humanize(op.name))],
         [

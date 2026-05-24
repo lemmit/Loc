@@ -1,7 +1,7 @@
 // Auto-generated.  Do not edit by hand.
 import { useParams, Link as RouterLink } from "react-router";
 import { KeyValueRow } from "../../lib/format";
-import { Alert, Anchor, Breadcrumbs, Card, Skeleton, Stack, Text, Title } from "@mantine/core";
+import { Alert, Anchor, Breadcrumbs, Card, Group, Skeleton, Stack, Text, Title } from "@mantine/core";
 import { useProductById } from "../../api/product";
 
 export default function ProductDetail() {
@@ -39,6 +39,7 @@ export default function ProductDetail() {
           </Card>
         ) }
       </>
+      <Group />
     </Stack>
   );
 }
