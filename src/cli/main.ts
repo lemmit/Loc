@@ -21,6 +21,7 @@ import { generateTypeScript } from "../platform/hono/v4/emit.js";
 import { BACKEND_PINS as HONO_V4_PINS } from "../platform/hono/v4/pins.js";
 import { generateSystemsFromLoom } from "../system/index.js";
 import { captureSnapshots } from "../system/loomsnap.js";
+import { fsSnapshotStore } from "../system/snapshot.js";
 import {
   renderVerdictGraph,
   renderVerificationJson,
@@ -190,10 +191,6 @@ interface RunOptions {
    * of calling `process.exit`.  Used by watch mode so a typo in the
    * `.ddd` source doesn't tear down the watcher. */
   continueOnError?: boolean;
-  /** `system` target only: emit `.loom/wire-spec.json`.  Off by default
-   * in the CLI (opt-in via `--wire-spec`); nothing reads the file at
-   * runtime, it's a diffable wire-contract review aid. */
-  wireSpec?: boolean;
   /** Compile-time `--trace` switch — when true, the TS generators inject
    * trace-level domain instrumentation (`value_computed`,
    * `precondition_evaluated`, etc., via `requestLog().trace(...)`).  Off
@@ -276,9 +273,14 @@ async function runGenerate(
 
   let files: Map<string, string>;
   if (target === "system") {
+    // Diff each module's current schema against the snapshot the LAST
+    // regen wrote into `.loom/snapshots/` (under `outDir`).  Fresh
+    // output dirs ⇒ `fsSnapshotStore.read` returns null ⇒ initial
+    // migration; existing snapshots ⇒ delta migration when the source
+    // moves.  See `docs/migrations-design.md`.
     files = generateSystemsFromLoom(loom, {
-      emitWireSpec: options.wireSpec === true,
       emitTrace: options.emitTrace,
+      snapshots: fsSnapshotStore(outDir),
     }).files;
     if (files.size === 0) {
       console.error(
@@ -574,10 +576,6 @@ generate
   .option("-w, --watch", "re-run on changes to <file>")
   .option("--dry-run", "list paths that would be written / skipped, write nothing")
   .option(
-    "--wire-spec",
-    "also emit .loom/wire-spec.json (diffable wire-contract artifact; off by default)",
-  )
-  .option(
     "--trace",
     "emit trace-level domain instrumentation (value_computed, precondition_evaluated, …) — off by default; see docs/proposals/observability.md",
   )
@@ -588,13 +586,11 @@ generate
         out: string;
         watch?: boolean;
         dryRun?: boolean;
-        wireSpec?: boolean;
         trace?: boolean;
       },
     ) => {
       const runOpts = {
         dryRun: options.dryRun,
-        wireSpec: options.wireSpec,
         emitTrace: !!options.trace,
       };
       await runGenerate("system", file, options.out, runOpts);

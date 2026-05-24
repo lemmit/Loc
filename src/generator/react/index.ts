@@ -242,6 +242,14 @@ export function generateReactForContexts(
   // pulled in when at least one served context uses a money field /
   // expression.  Mirrors the Hono backend's conditional dep gate.
   const usesMoney = contexts.some(contextUsesMoney);
+  // Shared `moneySchema` helper — single home for the precise-
+  // decimal wire shape; every api/view/workflow module references
+  // it rather than redeclaring the string-to-Decimal transform per
+  // field.  Surfaces parse failures as typed Zod issues.  Emitted
+  // only when something in the project uses money.
+  if (usesMoney) {
+    out.set("src/lib/schemas.ts", REACT_LIB_SCHEMAS_MONEY_TS);
+  }
   out.set("package.json", renderShellFile("package-json", { usesMoney }, pack));
   out.set("tsconfig.json", renderShellFile("tsconfig", {}, pack));
   out.set("tsconfig.node.json", renderShellFile("tsconfig-node", {}, pack));
@@ -345,6 +353,45 @@ ${cases}
 // failure carries the app's own output (not just a screenshot).  Generated
 // specs import { test, expect } from "./fixtures" instead of from
 // "@playwright/test" so every test gets this for free.
+// Shared `moneySchema` helper for React projects — emitted to
+// `src/lib/schemas.ts` whenever the served deployable touches money.
+// Single canonical wire-shape transform: parses a decimal-formatted
+// string to a `decimal.js` Decimal instance and surfaces format /
+// parse failures as typed Zod issues so client-side form validation
+// reports a structured error rather than throwing an uncaught
+// DecimalError.
+const REACT_LIB_SCHEMAS_MONEY_TS = `// Auto-generated.  Do not edit by hand.
+import Decimal from "decimal.js";
+import { z } from "zod";
+
+/**
+ * Wire schema for the \`money\` primitive.
+ *
+ * Inbound JSON: a decimal-formatted string (\`"123.4500"\`).  Parses
+ * to a \`decimal.js\` Decimal instance.  Format violations and parse
+ * failures both surface as typed Zod issues — invalid input becomes
+ * a form-level error attached to the field, not an uncaught throw.
+ */
+export const moneySchema = z.string().transform((s, ctx) => {
+  if (!/^-?\\d+(\\.\\d+)?$/.test(s)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: \`Invalid decimal: \${JSON.stringify(s)}\`,
+    });
+    return z.NEVER;
+  }
+  try {
+    return new Decimal(s);
+  } catch {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: \`Invalid decimal: \${JSON.stringify(s)}\`,
+    });
+    return z.NEVER;
+  }
+});
+`;
+
 export const E2E_FIXTURES_TS = `// Auto-generated.
 import { test as base, expect } from "@playwright/test";
 

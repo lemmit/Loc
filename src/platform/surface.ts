@@ -1,4 +1,5 @@
 import type { BoundedContextIR, DeployableIR, Platform, SystemIR } from "../ir/loom-ir.js";
+import type { MigrationsIR } from "../ir/migrations-ir.js";
 
 // ---------------------------------------------------------------------------
 // Platform surface contract.
@@ -61,6 +62,11 @@ export interface PlatformSurface {
     contexts: BoundedContextIR[];
     deployable: DeployableIR;
     sys: SystemIR;
+    /** Per-deployable slice of `buildMigrations(sys, snapshots)` — only
+     *  the modules where `module.migrationsOwner === deployable.name`.
+     *  When absent / empty, the platform emits no migration files.
+     *  Frontend platforms (react / static) ignore this arg. */
+    migrations?: MigrationsIR[];
     /** Generate-time observability switch — when true, the platform
      * emits trace-level domain instrumentation (domain-injected
      * `value_computed`, `precondition_evaluated`, etc.).  Off keeps the

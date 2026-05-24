@@ -1,4 +1,9 @@
-import type { BoundedContextIR, TypeIR, ViewIR } from "../../ir/loom-ir.js";
+import {
+  type BoundedContextIR,
+  contextUsesMoney,
+  type TypeIR,
+  type ViewIR,
+} from "../../ir/loom-ir.js";
 import { lowerFirst, snake, upperFirst } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
@@ -43,6 +48,9 @@ export function buildViewsApiModule(contexts: BoundedContextIR[]): string {
   lines.push(`import { z } from "zod";`);
   lines.push(`import { useQuery } from "@tanstack/react-query";`);
   lines.push(`import { api } from "./client";`);
+  if (contexts.some(contextUsesMoney)) {
+    lines.push(`import { moneySchema } from "../lib/schemas";`);
+  }
   // Shorthand views reference the source aggregate's response
   // schema from the per-aggregate api module.
   const shorthandSources = new Set<string>();
@@ -270,7 +278,7 @@ function zodForResponseInner(t: TypeIR): string {
         case "decimal":
           return "z.number()";
         case "money":
-          return "z.string().transform((s) => new Decimal(s))";
+          return "moneySchema";
         case "string":
         case "guid":
           return "z.string()";

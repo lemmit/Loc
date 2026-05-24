@@ -229,6 +229,43 @@ export function isAssignable(value: DddType, target: DddType): boolean {
   return false;
 }
 
+/**
+ * True iff `a` and `b` are pairwise comparable with the relational /
+ * equality operators (`== != < <= > >=`).  Comparable pairs:
+ *
+ *   - same primitive (`string == string`, `bool != bool`)
+ *   - both numeric in the `int / long / decimal` widening chain
+ *     (`int < decimal`) — money is intentionally NOT mixed in here;
+ *     it's a closed type, only comparable with money
+ *   - both money
+ *   - same enum (different enums have no shared values; rejected)
+ *   - same `X id` target (different aggregate ids reject)
+ *   - same value object (different VOs reject)
+ *   - `T?` compared with `T` (optional unwrap), `null` against any
+ *     `T?` (null literal narrows to `never`-typed optional)
+ *
+ * Mixing across these categories yields meaningless comparisons:
+ * `string == int` is always false in JS / always-error in C# /
+ * runtime-crash in Elixir; the validator should reject up front
+ * rather than waiting for backends to surface it inconsistently.
+ *
+ * Used by the binary-operand validator and by future LSP code
+ * actions (e.g. "did you mean `<other>.id == X` instead of
+ * `<other> == X`?").
+ */
+export function comparable(a: DddType, b: DddType): boolean {
+  if (a.kind === "any" || b.kind === "any") return true;
+  if (a.kind === "never" || b.kind === "never") return true; // null literal
+  if (typesEqual(a, b)) return true;
+  if (a.kind === "primitive" && b.kind === "primitive") {
+    const numeric = (n: PrimitiveName) => n === "int" || n === "long" || n === "decimal";
+    if (numeric(a.name) && numeric(b.name)) return true;
+  }
+  if (a.kind === "optional") return comparable(a.inner, b);
+  if (b.kind === "optional") return comparable(a, b.inner);
+  return false;
+}
+
 /** True iff `value` carries sensitivity tags that `target` does not.
  * The validator uses this to emit a warning at flow boundaries
  * (assignments, emits, derived expressions, function returns) where

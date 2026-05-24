@@ -79,12 +79,13 @@ describe("money emission — IR binary nodes carry the type stash", () => {
 });
 
 describe("money emission — Hono Zod schemas", () => {
-  it("request zodFor(money) parses string → Decimal via transform", async () => {
+  it("request zodFor(money) references the shared `moneySchema` helper", async () => {
     const { zodFor } = await import("../../src/platform/hono/v4/routes-builder.js");
+    // The string-to-Decimal transform + format check is factored out
+    // to `lib/schemas.ts`; per-route schemas reference it by name
+    // rather than redeclaring the chain at every field site.
     const z = zodFor({ kind: "primitive", name: "money" });
-    expect(z).toContain("z.string()");
-    expect(z).toContain("new Decimal(s)");
-    expect(z).toContain(".transform");
+    expect(z).toBe("moneySchema");
   });
 });
 
@@ -96,6 +97,98 @@ describe("money emission — Drizzle schema column", () => {
     expect(out).toContain("numeric");
     expect(out).toContain("precision: 19");
     expect(out).toContain("scale: 4");
+  });
+});
+
+describe("money emission — Hono lib/schemas.ts helper", () => {
+  // The string-to-Decimal Zod transform is factored to one place;
+  // routes import `moneySchema` rather than redeclaring the chain.
+
+  async function generateHonoFiles(): Promise<Map<string, string>> {
+    const { generateSystems } = await import("../../src/system/index.js");
+    const { parseValid } = await import("../_helpers/parse.js");
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const src = fs.readFileSync(
+      path.resolve(__dirname, "../..", "examples/money-primitive.ddd"),
+      "utf8",
+    );
+    void (await parseValid(src));
+    // money-primitive.ddd is a bare-context source (no `system { … }`
+    // block) — `generateSystems` is the multi-system orchestrator; for
+    // bare contexts the single-deployable `generate ts` path is the
+    // closer match.  Use the lower-level Hono emit for an inline
+    // single-context generation.
+    const { buildLoomModel } = await import("../_helpers/index.js");
+    const { generateTypeScriptForContexts } = await import("../../src/platform/hono/v4/emit.js");
+    const { BACKEND_PINS } = await import("../../src/platform/hono/v4/pins.js");
+    const loom = await buildLoomModel(src);
+    return generateTypeScriptForContexts(loom.contexts, BACKEND_PINS);
+  }
+
+  it("emits `lib/schemas.ts` exporting `moneySchema` when a context uses money", async () => {
+    const files = await generateHonoFiles();
+    const schemas = files.get("lib/schemas.ts");
+    expect(schemas).toBeDefined();
+    expect(schemas!).toContain("export const moneySchema");
+    expect(schemas!).toContain("z.string().transform");
+    // Defensive parse: failures are typed Zod issues, not uncaught
+    // throws.  The shared helper is the seam every route inherits.
+    expect(schemas!).toContain("ctx.addIssue");
+    expect(schemas!).toContain("z.NEVER");
+  });
+
+  it("omits `lib/schemas.ts` for projects without any money usage", async () => {
+    const { buildLoomModel } = await import("../_helpers/index.js");
+    const { generateTypeScriptForContexts } = await import("../../src/platform/hono/v4/emit.js");
+    const { BACKEND_PINS } = await import("../../src/platform/hono/v4/pins.js");
+    const loom = await buildLoomModel(`
+      context Foo {
+        aggregate Bar { name: string }
+        repository Bars for Bar { }
+      }
+    `);
+    const files = generateTypeScriptForContexts(loom.contexts, BACKEND_PINS);
+    expect(files.get("lib/schemas.ts")).toBeUndefined();
+  });
+
+  it("a money-bearing route file imports `moneySchema` from `../lib/schemas`", async () => {
+    const files = await generateHonoFiles();
+    const route = files.get("http/invoice.routes.ts");
+    expect(route).toBeDefined();
+    expect(route!).toContain(`import { moneySchema } from "../lib/schemas";`);
+    // The route file no longer imports `Decimal` directly — the
+    // shared helper owns the decimal.js dep; route handlers receive
+    // `Decimal` instances by Zod inference.
+    expect(route!).not.toContain(`import Decimal from "decimal.js"`);
+    // No more inline `z.string().regex(...).transform(...)` chain at
+    // money-field sites.
+    expect(route!).toContain("subtotal: moneySchema");
+  });
+});
+
+describe("money emission — repository persist drops redundant parens", () => {
+  it("emits `aggregate.subtotal.toString()` (no wrapping parens)", async () => {
+    const { generateSystems } = await import("../../src/system/index.js");
+    void generateSystems; // unused; kept for parallel import shape with above
+    const { buildLoomModel } = await import("../_helpers/index.js");
+    const { generateTypeScriptForContexts } = await import("../../src/platform/hono/v4/emit.js");
+    const { BACKEND_PINS } = await import("../../src/platform/hono/v4/pins.js");
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const src = fs.readFileSync(
+      path.resolve(__dirname, "../..", "examples/money-primitive.ddd"),
+      "utf8",
+    );
+    const loom = await buildLoomModel(src);
+    const files = generateTypeScriptForContexts(loom.contexts, BACKEND_PINS);
+    const repo = files.get("db/repositories/invoice-repository.ts");
+    expect(repo).toBeDefined();
+    // Defensive (value).toString() is gone — money persists as plain
+    // <expr>.toString().  Method-call already binds tightly enough
+    // for the receiver shape repository-builder constructs.
+    expect(repo!).toContain("aggregate.subtotal.toString()");
+    expect(repo!).not.toContain("(aggregate.subtotal).toString()");
   });
 });
 

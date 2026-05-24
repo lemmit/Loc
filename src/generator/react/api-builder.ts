@@ -1,15 +1,16 @@
 import { wireShapeFor } from "../../ir/enrichments.js";
 import type { ClassifyContext, SingleFieldPattern } from "../../ir/invariant-classify.js";
-import type {
-  AggregateIR,
-  BoundedContextIR,
-  EntityPartIR,
-  EnumIR,
-  InvariantIR,
-  OperationIR,
-  RepositoryIR,
-  TypeIR,
-  ValueObjectIR,
+import {
+  type AggregateIR,
+  aggregateUsesMoney,
+  type BoundedContextIR,
+  type EntityPartIR,
+  type EnumIR,
+  type InvariantIR,
+  type OperationIR,
+  type RepositoryIR,
+  type TypeIR,
+  type ValueObjectIR,
 } from "../../ir/loom-ir.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import {
@@ -37,6 +38,14 @@ export function buildApiModule(
   lines.push(`import { z } from "zod";`);
   lines.push(`import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";`);
   lines.push(`import { api } from "./client";`);
+  if (aggregateUsesMoney(agg)) {
+    // Shared `moneySchema` — single home for the precise-decimal
+    // wire shape; emitted to `src/lib/schemas.ts` whenever any
+    // context uses money.  Both request and response sides of every
+    // route reference this helper rather than redeclaring the
+    // string-to-Decimal transform per field.
+    lines.push(`import { moneySchema } from "../lib/schemas";`);
+  }
   lines.push("");
 
   // Schemas — enums + value-objects + per-route DTOs.
@@ -328,7 +337,7 @@ function zodForRequest(t: TypeIR): string {
         case "decimal":
           return "z.number()";
         case "money":
-          return 'z.string().regex(/^-?\\d+(\\.\\d+)?$/, "must be a decimal-formatted string").transform((s) => new Decimal(s))';
+          return "moneySchema";
         case "string":
         case "guid":
           return "z.string()";
@@ -368,7 +377,7 @@ function zodForResponseInner(t: TypeIR): string {
         case "decimal":
           return "z.number()";
         case "money":
-          return "z.string().transform((s) => new Decimal(s))";
+          return "moneySchema";
         case "string":
         case "guid":
           return "z.string()";

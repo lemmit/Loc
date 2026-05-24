@@ -951,6 +951,15 @@ export interface ModuleIR {
    *  (`name`) is what `permissions.<name>` references resolve to in
    *  expression bodies. */
   permissions: PermissionDeclIR[];
+  /** Name of the deployable that owns migrations for this module's
+   *  primary persistent storage.  Populated by `enrichLoomModel` — the
+   *  first deployable (in declaration order) whose `moduleBindings`
+   *  entry for this module declares a `primary` storage role wins;
+   *  failing that, the first deployable that includes the module and
+   *  whose platform `needsDb`.  Undefined when no deployable matches
+   *  (frontend-only modules, etc.) — backends MUST emit migrations
+   *  only when `module.migrationsOwner === deployable.name`. */
+  migrationsOwner?: string;
 }
 
 /** One permission declared in a module's `permissions { }` block. */

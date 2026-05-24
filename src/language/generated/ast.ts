@@ -273,10 +273,10 @@ export function isLiteralExpr(item: unknown): item is LiteralExpr {
     return reflection.isInstance(item, LiteralExpr);
 }
 
-export type LooseName = 'aggregates' | 'api' | 'bi' | 'bind' | 'body' | 'cache' | 'component' | 'contains' | 'contexts' | 'design' | 'events' | 'framework' | 'id' | 'link' | 'menu' | 'modules' | 'page' | 'permissions' | 'primary' | 'route' | 'search' | 'section' | 'state' | 'static' | 'targets' | 'title' | 'ui' | 'views' | 'workflows' | string;
+export type LooseName = 'aggregates' | 'api' | 'bi' | 'bind' | 'body' | 'cache' | 'component' | 'contains' | 'contexts' | 'design' | 'events' | 'framework' | 'id' | 'link' | 'menu' | 'modules' | 'money' | 'page' | 'permissions' | 'primary' | 'route' | 'search' | 'section' | 'state' | 'static' | 'targets' | 'title' | 'ui' | 'views' | 'workflows' | string;
 
 export function isLooseName(item: unknown): item is LooseName {
-    return item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'api' || item === 'primary' || item === 'cache' || item === 'search' || item === 'events' || item === 'bi' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'api' || item === 'primary' || item === 'cache' || item === 'search' || item === 'events' || item === 'bi' || item === 'money' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export type LValueIdent = 'aggregates' | 'api' | 'contains' | 'contexts' | 'id' | 'modules' | 'permissions' | 'ui' | 'views' | 'workflows' | string;
@@ -321,10 +321,10 @@ export function isNamedDecl(item: unknown): item is NamedDecl {
     return reflection.isInstance(item, NamedDecl);
 }
 
-export type NameRefIdent = 'api' | 'permissions' | 'ui' | string;
+export type NameRefIdent = 'api' | 'money' | 'permissions' | 'ui' | string;
 
 export function isNameRefIdent(item: unknown): item is NameRefIdent {
-    return item === 'permissions' || item === 'ui' || item === 'api' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'permissions' || item === 'ui' || item === 'api' || item === 'money' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export type PageProp = BodyProp | PageMenuMeta | RequiresProp | RouteProp | StateBlock | TitleProp;
@@ -1364,7 +1364,7 @@ export interface Property extends AstNode {
     readonly $type: 'Property';
     check?: Expression;
     display: boolean;
-    name: string;
+    name: 'money' | string;
     provenanced: boolean;
     sensitivity?: SensitivityClause;
     type: TypeRef;

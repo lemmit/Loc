@@ -201,7 +201,6 @@ system DevPlatform {
             valueobject Duration {
                 seconds: int
                 invariant seconds >= 0
-                derived human: string = seconds + "s"
             }
 
             event BuildPromoted { build: Build id, env: string, at: datetime }

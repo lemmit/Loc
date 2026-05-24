@@ -7,6 +7,7 @@
 // only the framework-neutral helpers (render-expr/stmt, templates,
 // zod-refine) in core.
 
+import { emitTypescriptMigrations } from "../../../generator/typescript/emit/migrations.js";
 import {
   renderAggregate,
   renderEnumsAndValueObjects,
@@ -27,6 +28,7 @@ import {
   type SystemIR,
 } from "../../../ir/loom-ir.js";
 import { lowerModel } from "../../../ir/lower.js";
+import type { MigrationsIR } from "../../../ir/migrations-ir.js";
 import { contextsHaveProvenancedField } from "../../../ir/prov-id.js";
 import type { Model } from "../../../language/generated/ast.js";
 import { lowerFirst } from "../../../util/naming.js";
@@ -125,7 +127,7 @@ export function generateTypeScript(
 export function generateTypeScriptForContexts(
   contexts: BoundedContextIR[],
   pins: BackendPins,
-  system?: { deployable: DeployableIR; sys: SystemIR },
+  system?: { deployable: DeployableIR; sys: SystemIR; migrations?: MigrationsIR[] },
   options: { emitTrace?: boolean } = {},
 ): Map<string, string> {
   const emitTrace = !!options.emitTrace;
@@ -211,6 +213,13 @@ export function generateTypeScriptForContexts(
     emitAuthFiles(system.sys, out);
   }
   emitObservabilityFiles(out);
+  // Per-module Postgres migrations + Drizzle journal — emitted whenever
+  // the system orchestrator hands us a migrations slice.  Empty slice
+  // (legacy / non-system entry) → no-op.
+  const hasMigrations = !!(system?.migrations && system.migrations.length > 0);
+  if (hasMigrations) {
+    emitTypescriptMigrations(system!.migrations!, out);
+  }
   // decimal.js is conditional: only depended on when at least one
   // aggregate in any of the served contexts uses a `money` field.
   // Server bundle size matters; client-side React always ships the
@@ -218,9 +227,16 @@ export function generateTypeScriptForContexts(
   // strings.
   const projectUsesMoney = contexts.some(contextUsesMoney);
   out.set("package.json", projectPackageJson(pins, { withMoney: projectUsesMoney }));
+  // Shared primitive-schema helpers — one home for non-trivial wire
+  // shapes (today: `moneySchema`).  Emitted only when something in
+  // the project uses money so non-money projects' tsc surface stays
+  // identical.
+  if (projectUsesMoney) {
+    out.set("lib/schemas.ts", LIB_SCHEMAS_MONEY_TS);
+  }
   out.set("tsconfig.json", PROJECT_TSCONFIG_JSON);
   out.set("tsup.config.ts", TSUP_CONFIG);
-  out.set("index.ts", PROJECT_INDEX_TS);
+  out.set("index.ts", renderProjectIndexTs(hasMigrations));
   out.set("drizzle.config.ts", DRIZZLE_CONFIG);
   out.set("Dockerfile", DOCKERFILE_TS);
   out.set(".dockerignore", DOCKERIGNORE_TS);
@@ -256,6 +272,12 @@ function projectPackageJson(pins: BackendPins, opts: { withMoney: boolean }): st
           build: "tsup",
           typecheck: "tsc --noEmit",
           test: "vitest run",
+          // We emit Drizzle-format `meta/_journal.json` + .sql files so
+          // both `drizzle-kit migrate` (the CLI) and
+          // `drizzle-orm/.../migrator` (called from index.ts at boot)
+          // can apply them.  `drizzle-kit generate` is left available
+          // for users who want to introspect the schema, but Loom owns
+          // the SQL generation end-to-end.
           "db:generate": "drizzle-kit generate",
           "db:migrate": "drizzle-kit migrate",
           "db:push": "drizzle-kit push",
@@ -283,6 +305,45 @@ export default defineConfig({
   dbCredentials: {
     url: process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/postgres",
   },
+});
+`;
+
+// Shared primitive-schema helpers — emitted to `lib/schemas.ts` when
+// the project uses money.  Single canonical wire-shape for the
+// money primitive: parses a decimal-formatted string, surfaces parse
+// failures as typed Zod issues (so bad input becomes a typed 400, not
+// an uncaught throw → 500), and exposes the parsed `Decimal`
+// instance to route handlers.  Routes reference `moneySchema` rather
+// than redeclaring the chain at every field site.
+const LIB_SCHEMAS_MONEY_TS = `// Auto-generated.  Do not edit by hand.
+import Decimal from "decimal.js";
+import { z } from "@hono/zod-openapi";
+
+/**
+ * Wire schema for the \`money\` primitive.
+ *
+ * Inbound JSON: a decimal-formatted string (\`"123.4500"\`).  Parses
+ * to a \`decimal.js\` Decimal instance.  Format violations and parse
+ * failures both surface as typed Zod issues — invalid input becomes
+ * a 400 with the field name attached, not an uncaught throw.
+ */
+export const moneySchema = z.string().transform((s, ctx) => {
+  if (!/^-?\\d+(\\.\\d+)?$/.test(s)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: \`Invalid decimal: \${JSON.stringify(s)}\`,
+    });
+    return z.NEVER;
+  }
+  try {
+    return new Decimal(s);
+  } catch {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: \`Invalid decimal: \${JSON.stringify(s)}\`,
+    });
+    return z.NEVER;
+  }
 });
 `;
 
@@ -333,13 +394,20 @@ export default defineConfig({
 });
 `;
 
-const PROJECT_INDEX_TS = `// Auto-generated.
+function renderProjectIndexTs(runMigrationsAtBoot: boolean): string {
+  const migImport = runMigrationsAtBoot
+    ? `import { migrate } from "drizzle-orm/node-postgres/migrator";\n`
+    : "";
+  const migCall = runMigrationsAtBoot
+    ? `\n// Apply pending schema migrations before serving traffic.  Drizzle's\n// runtime migrator reads db/migrations/meta/_journal.json + each\n// referenced .sql file, tracking state in \`__drizzle_migrations\`;\n// idempotent across boots.\nawait migrate(db, { migrationsFolder: "./db/migrations" });\n`
+    : "";
+  return `// Auto-generated.
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import { serve } from "@hono/node-server";
 import * as schema from "./db/schema";
 import { createApp } from "./http/index";
-import { baseLogger } from "./obs/log";
+${migImport}import { baseLogger } from "./obs/log";
 
 // Fail fast on a missing DATABASE_URL.  Without this an unset value
 // surfaces as a confusing pg connection refusal mid-request; we'd
@@ -367,7 +435,7 @@ pool.on("error", (err) => {
   });
 });
 const db = drizzle(pool, { schema });
-const app = createApp(db);
+${migCall}const app = createApp(db);
 const server = serve({ fetch: app.fetch, port });
 baseLogger.info({ event: "server_listening", port });
 
@@ -385,6 +453,7 @@ async function shutdown(signal: string): Promise<void> {
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("SIGINT", () => void shutdown("SIGINT"));
 `;
+}
 
 // Multi-stage Dockerfile: build stage installs all deps and compiles
 // TypeScript; runtime stage uses a smaller production-only image.

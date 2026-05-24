@@ -9,6 +9,8 @@ import type {
   EnumIR,
   FindIR,
   LoomModel,
+  ModuleIR,
+  Platform,
   RepositoryIR,
   SystemIR,
   TraceabilityIR,
@@ -97,6 +99,10 @@ function enrichSystem(
   // Done after module enrichment so frontends see the same enriched
   // contexts every other consumer sees.
   const deployables = enrichDeployables(sys.deployables);
+  // Derive `migrationsOwner` per module — the deployable responsible
+  // for emitting schema migrations.  Runs last because it consults
+  // the (now enriched) deployable list.  See `assignMigrationsOwner`.
+  const modulesWithOwner = modules.map((m) => assignMigrationsOwner(m, deployables));
   // Scaffold expansion now runs at the AST
   // level via `src/language/ddd-scaffold-ast-expander.ts` (a
   // `DocumentState.IndexedContent` hook on the shared
@@ -107,7 +113,42 @@ function enrichSystem(
   // any caller that constructs a `LoomModel` outside the standard
   // `parseHelper` / `DocumentBuilder` pipeline (it just returns
   // the existing pages unchanged).
-  return { ...sys, modules, deployables };
+  return { ...sys, modules: modulesWithOwner, deployables };
+}
+
+// ---------------------------------------------------------------------------
+// Migrations ownership — which deployable is responsible for emitting
+// schema migrations against a given module.
+//
+// Rule (walk `sys.deployables` in declaration order):
+//   1. First deployable with an explicit `primary` storage binding for
+//      this module wins (`moduleBindings[].storages[].role === "primary"`).
+//   2. Failing that, first deployable that includes the module in
+//      `moduleNames` AND whose platform owns a database.
+//   3. Failing both, leave `migrationsOwner` undefined — no backend
+//      emits migrations for the module (frontend-only modules, etc.).
+//
+// Hardcoded `platformNeedsDb` list mirrors the `PlatformSurface.needsDb`
+// flags in `src/platform/registry.ts` — kept in sync manually because
+// `enrichments.ts` is platform-agnostic and can't import from registry.
+// ---------------------------------------------------------------------------
+
+function assignMigrationsOwner(m: ModuleIR, deployables: DeployableIR[]): ModuleIR {
+  const explicit = deployables.find((d) =>
+    d.moduleBindings.some(
+      (mb) => mb.moduleName === m.name && mb.storages.some((s) => s.role === "primary"),
+    ),
+  );
+  if (explicit) return { ...m, migrationsOwner: explicit.name };
+  const implicit = deployables.find(
+    (d) => d.moduleNames.includes(m.name) && platformNeedsDb(d.platform),
+  );
+  if (implicit) return { ...m, migrationsOwner: implicit.name };
+  return m;
+}
+
+function platformNeedsDb(p: Platform): boolean {
+  return p === "dotnet" || p === "hono" || p === "phoenixLiveView";
 }
 
 function enrichContext(

@@ -772,19 +772,41 @@ function renderModal(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext):
   const formChild = positional.find(
     (c): c is Extract<ExprIR, { kind: "call" }> => c.kind === "call" && c.name === "Form",
   );
-  // The op-form references the operation through an in-scope instance
-  // (`Form(data.confirm)`); the receiver names the instance (whose
-  // aggregate is resolved via `instanceTypes`) and the member is the
-  // operation.
-  const opRefNode = formChild ? formChild.args.find((_, i) => !formChild.argNames?.[i]) : undefined;
-  const instanceName =
-    opRefNode?.kind === "member" && opRefNode.receiver.kind === "ref"
-      ? opRefNode.receiver.name
-      : undefined;
-  const opName = opRefNode?.kind === "member" ? opRefNode.member : undefined;
-  const ofName = instanceName ? ctx.instanceTypes?.get(instanceName) : undefined;
+  // The op-form names its operation via one of two shapes:
+  //
+  //   * `Form(<instance>.<operation>)` — receiver is the in-scope
+  //     aggregate instance (resolved via `instanceTypes`), member
+  //     is the op name.  The classic Detail-page form inside a
+  //     QueryView lambda binding.
+  //   * `Form(of: <Agg>, op: <opName>)` — flat named args; aggregate
+  //     resolved directly by name, id falls back to route.  The
+  //     shape `scaffoldOperations(of:)` emits so modals can live
+  //     outside a QueryView lambda.
+  let opName: string | undefined;
+  let ofName: string | undefined;
+  if (formChild) {
+    const argNames = formChild.argNames ?? [];
+    const ofIdx = argNames.findIndex((n) => n === "of");
+    const opIdx = argNames.findIndex((n) => n === "op");
+    if (ofIdx >= 0 && opIdx >= 0) {
+      const ofArg = formChild.args[ofIdx];
+      const opArg = formChild.args[opIdx];
+      if (ofArg?.kind === "ref" && opArg?.kind === "ref") {
+        ofName = ofArg.name;
+        opName = opArg.name;
+      }
+    }
+    if (!opName) {
+      const opRefNode = formChild.args.find((_, i) => !formChild.argNames?.[i]);
+      if (opRefNode?.kind === "member" && opRefNode.receiver.kind === "ref") {
+        const instanceName = opRefNode.receiver.name;
+        opName = opRefNode.member;
+        ofName = ctx.instanceTypes?.get(instanceName);
+      }
+    }
+  }
   if (!formChild || !ofName || !opName) {
-    return `<!-- malformed Modal: expected trigger: Button + Form(<instance>.<operation>) -->`;
+    return `<!-- malformed Modal: expected trigger: Button + Form(<instance>.<op>) or Form(of:, op:) -->`;
   }
   const aggSnake = snake(ofName);
   const opSnake = snake(opName);
