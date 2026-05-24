@@ -1691,7 +1691,9 @@ describe(".NET generator", () => {
       const ctx = files.get("Infrastructure/Persistence/AppDbContext.cs")!;
       expect(ctx).toMatch(/public DbSet<TrainerParty> TrainerParties => Set<TrainerParty>\(\);/);
       expect(ctx).toMatch(/public DbSet<TrainerCaught> TrainerCaughts => Set<TrainerCaught>\(\);/);
-      expect(ctx).toMatch(/ApplyConfiguration\(new Configurations\.TrainerPartyConfiguration\(\)\)/);
+      expect(ctx).toMatch(
+        /ApplyConfiguration\(new Configurations\.TrainerPartyConfiguration\(\)\)/,
+      );
     });
 
     it("ignores ref-collection properties on the owning aggregate's configuration", async () => {

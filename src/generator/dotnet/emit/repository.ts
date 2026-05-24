@@ -271,7 +271,9 @@ function buildLoadManyByIdsLines(
     return [`        return await _db.${setName}.Where(x => ids.Contains(x.Id)).ToListAsync(ct);`];
   }
   const out: string[] = [];
-  out.push(`        var roots = await _db.${setName}.Where(x => ids.Contains(x.Id)).ToListAsync(ct);`);
+  out.push(
+    `        var roots = await _db.${setName}.Where(x => ids.Contains(x.Id)).ToListAsync(ct);`,
+  );
   out.push("        if (roots.Count == 0) return roots;");
   for (const a of associations) {
     const cap = upperFirst(a.fieldName);
@@ -331,9 +333,7 @@ function buildSaveDiffSyncLines(associations: AssociationIR[]): string[] {
     out.push(`        for (int __i = 0; __i < __current${cap}.Count; __i++)`);
     out.push("        {");
     out.push(`            var __tid = __current${cap}[__i];`);
-    out.push(
-      `            var __row = __existing${cap}.FirstOrDefault(x => x.${target} == __tid);`,
-    );
+    out.push(`            var __row = __existing${cap}.FirstOrDefault(x => x.${target} == __tid);`);
     out.push("            if (__row != null) { __row.Ordinal = __i; }");
     out.push(`            else { _db.${dbSet}.Add(new ${cls}(aggregate.Id, __tid, __i)); }`);
     out.push("        }");

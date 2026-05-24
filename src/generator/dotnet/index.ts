@@ -9,6 +9,7 @@ import { emitCqrs } from "./cqrs-emit.js";
 import { renderDomainLog, renderDomainLogBehavior } from "./emit/domain-log.js";
 import { renderRequestLoggingMiddleware } from "./emit/request-logging.js";
 import {
+  joinEntityName,
   renderAuditableInterceptor,
   renderCommon,
   renderConfiguration,
@@ -22,7 +23,6 @@ import {
   renderExceptionFilter,
   renderIDomainEvent,
   renderId,
-  joinEntityName,
   renderJoinEntity,
   renderJoinEntityConfiguration,
   renderNoopDispatcher,
