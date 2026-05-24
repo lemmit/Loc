@@ -5,10 +5,14 @@ import type {
   ContainmentIR,
   DerivedIR,
   EntityPartIR,
+  ExprIR,
   FieldIR,
+  FunctionIR,
   InvariantIR,
   OperationIR,
+  StmtIR,
 } from "../../ir/loom-ir.js";
+import { exprUsesCurrentUser } from "../../ir/loom-ir.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { type RenderCtx, renderAshType, renderExpr } from "./render-expr.js";
 import { renderElixirStatements } from "./render-stmt.js";
@@ -82,7 +86,7 @@ function renderAggregateResource(
     ${agg.fields.map((f) => renderAttribute(f, ctxModule)).join("\n    ")}
     timestamps()
   end
-${renderRelationships(agg.contains, ctxModule)}${renderCalculations(agg.derived, renderCtx)}${renderValidations(agg.invariants, renderCtx, new Set(agg.fields.map((f) => f.name)))}${renderActions(agg, ctx, renderCtx, ctxModule)}
+${renderRelationships(agg.contains, ctxModule)}${renderAggregates(agg.derived, agg.contains)}${renderCalculations(agg.derived, renderCtx, agg.contains)}${renderValidations(agg.invariants, renderCtx, new Set(agg.fields.map((f) => f.name)))}${renderActions(agg, ctx, renderCtx, ctxModule)}${renderHelperFunctions(agg.functions, renderCtx)}
 end
 `;
 }
@@ -134,7 +138,7 @@ ${renderValidations(part.invariants, renderCtx, new Set(part.fields.map((f) => f
       accept [${part.fields.map((f) => `:${snake(f.name)}`).join(", ")}]
     end
   end
-end
+${renderHelperFunctions(part.functions, renderCtx)}end
 `;
 }
 
@@ -184,15 +188,45 @@ function renderRelationships(contains: ContainmentIR[], ctxModule: string): stri
 
 // ---------------------------------------------------------------------------
 // Calculations (derived properties)
+//
+// Derives whose body is a bare `<relationship>.count` are lifted out of
+// the `calculations` block into an Ash `aggregates` block — `Enum.count`
+// isn't a primitive in Ash's expression DSL, but `count :<rel>` is.
 // ---------------------------------------------------------------------------
 
-function renderCalculations(derived: DerivedIR[], ctx: RenderCtx): string {
-  if (derived.length === 0) return "";
-  const lines = derived.map((d) => {
+function isRelationshipCountDerive(d: DerivedIR, contains: ContainmentIR[]): string | null {
+  const e = d.expr;
+  if (e.kind !== "member" || e.member !== "count") return null;
+  if (e.receiver.kind !== "ref") return null;
+  if (e.receiver.refKind !== "this-prop") return null;
+  const name = e.receiver.name;
+  if (!contains.some((c) => c.name === name && c.collection)) return null;
+  return name;
+}
+
+function renderAggregates(derived: DerivedIR[], contains: ContainmentIR[]): string {
+  const lines: string[] = [];
+  for (const d of derived) {
+    const rel = isRelationshipCountDerive(d, contains);
+    if (rel) lines.push(`    count :${snake(d.name)}, :${snake(rel)}`);
+  }
+  if (lines.length === 0) return "";
+  return `\n  aggregates do\n${lines.join("\n")}\n  end\n`;
+}
+
+function renderCalculations(
+  derived: DerivedIR[],
+  ctx: RenderCtx,
+  contains: ContainmentIR[],
+): string {
+  const lines: string[] = [];
+  for (const d of derived) {
+    if (isRelationshipCountDerive(d, contains)) continue;
     const ashType = renderAshType(d.type, ctx.contextModule);
     const exprStr = renderExpr(d.expr, ctx);
-    return `    calculate :${snake(d.name)}, ${ashType}, expr(${exprStr})`;
-  });
+    lines.push(`    calculate :${snake(d.name)}, ${ashType}, expr(${exprStr})`);
+  }
+  if (lines.length === 0) return "";
   return `\n  calculations do\n${lines.join("\n")}\n  end\n`;
 }
 
@@ -225,14 +259,19 @@ function renderValidations(
     // classifier doesn't reduce to a single-field pattern.
     const condStr = renderExpr(inv.expr, ctx);
     const msg = JSON.stringify(`Invariant violated: ${inv.source}`);
+    // `record` isn't a callback param of `validate fn changeset, _opts ->`,
+    // so bind it from the changeset's loaded data when the predicate uses
+    // any `this`-family reference.
+    const needsRecord = exprUsesThis(inv.expr) || (inv.guard ? exprUsesThis(inv.guard) : false);
+    const recordLine = needsRecord ? "      record = changeset.data\n" : "";
     if (inv.guard) {
       const guardStr = renderExpr(inv.guard, ctx);
       // Guard-first: when the guard is false the invariant doesn't apply
       // (not an error).  Emit as `not guard or cond` — matches the
       // logical-implication semantics of the source `guard => cond`.
-      return `    validate fn changeset, _opts ->\n      if not (${guardStr}) or (${condStr}), do: :ok, else: {:error, ${msg}}\n    end`;
+      return `    validate fn changeset, _opts ->\n${recordLine}      if not (${guardStr}) or (${condStr}), do: :ok, else: {:error, ${msg}}\n    end`;
     }
-    return `    validate fn changeset, _opts ->\n      if ${condStr}, do: :ok, else: {:error, ${msg}}\n    end`;
+    return `    validate fn changeset, _opts ->\n${recordLine}      if ${condStr}, do: :ok, else: {:error, ${msg}}\n    end`;
   });
   return `\n  validations do\n${lines.join("\n")}\n  end\n`;
 }
@@ -265,6 +304,24 @@ ${opActions.join("\n")}
   end\n`;
 }
 
+// ---------------------------------------------------------------------------
+// Helper functions (`function` decls) — emitted as `defp` on the resource
+// module so validate / change bodies can call them as `<name>(record, ...)`.
+// ---------------------------------------------------------------------------
+
+function renderHelperFunctions(functions: FunctionIR[], ctx: RenderCtx): string {
+  if (functions.length === 0) return "";
+  const blocks = functions.map((fn) => {
+    const params = ["record", ...fn.params.map((p) => snake(p.name))];
+    const body = renderExpr(fn.body, ctx);
+    const recordPrefix = exprUsesThis(fn.body) ? "" : "    _ = record\n";
+    return `  defp ${snake(fn.name)}(${params.join(", ")}) do
+${recordPrefix}    ${body}
+  end`;
+  });
+  return `\n${blocks.join("\n\n")}\n`;
+}
+
 function renderOperationAction(op: OperationIR, ctx: RenderCtx, _ctxModule: string): string {
   const args = op.params
     .map((p) => `      argument :${snake(p.name)}, ${renderAshType(p.type, ctx.contextModule)}`)
@@ -279,15 +336,138 @@ function renderOperationAction(op: OperationIR, ctx: RenderCtx, _ctxModule: stri
   const nonPrecondStmts = op.statements.filter((s) => s.kind !== "precondition");
   const stmts = renderElixirStatements(nonPrecondStmts, ctx, "changeset");
 
+  // Bind the domain-style identifiers (`record`, `current_user`, each param)
+  // that the rendered body refers to but Ash's `change fn changeset, ctx ->`
+  // callback doesn't supply natively.  Detect which are actually used so the
+  // block stays free of dead bindings.
+  const usesRecord = nonPrecondStmts.some(stmtUsesThis);
+  const usesCurrentUser = nonPrecondStmts.some((s) => stmtUsesCurrentUser(s));
+  const usedParams = op.params.filter((p) => nonPrecondStmts.some((s) => stmtUsesParam(s, p.name)));
+  const contextBinding = usesCurrentUser ? "context" : "_context";
+  const bindings: string[] = [];
+  if (usesRecord) bindings.push("        record = changeset.data");
+  if (usesCurrentUser) bindings.push("        current_user = context.actor");
+  for (const p of usedParams) {
+    bindings.push(
+      `        ${snake(p.name)} = Ash.Changeset.get_argument(changeset, :${snake(p.name)})`,
+    );
+  }
+  const bindingBlock = bindings.length > 0 ? `${bindings.join("\n")}\n` : "";
+
   const argsBlock = op.params.length > 0 ? `\n${args}` : "";
   const validateBlock = validateLines.length > 0 ? `\n${validateLines.join("\n")}` : "";
   const changeBlock =
     nonPrecondStmts.length > 0
-      ? `\n      change fn changeset, _context ->\n${stmts}\n        changeset\n      end`
+      ? `\n      change fn changeset, ${contextBinding} ->\n${bindingBlock}${stmts}\n        changeset\n      end`
       : "";
 
   return `    update :${snake(op.name)} do${argsBlock}${validateBlock}${changeBlock}
     end`;
+}
+
+/** True when `e` references `this` (or the bare `id` keyword, which renders
+ *  as `<thisName>.id`) or any `this-prop`-family field. */
+function exprUsesThis(e: ExprIR | undefined): boolean {
+  if (!e) return false;
+  if (e.kind === "this" || e.kind === "id") return true;
+  if (
+    e.kind === "ref" &&
+    (e.refKind === "this-prop" || e.refKind === "this-vo-prop" || e.refKind === "this-derived")
+  ) {
+    return true;
+  }
+  if (e.kind === "call" && (e.callKind === "function" || e.callKind === "private-operation")) {
+    // Receiver-prefixed function call passes `this` as first arg.
+    return true;
+  }
+  return walkExpr(e, exprUsesThis);
+}
+
+function stmtUsesThis(s: StmtIR): boolean {
+  switch (s.kind) {
+    case "precondition":
+    case "requires":
+    case "let":
+    case "expression":
+      return exprUsesThis(s.expr);
+    case "assign":
+    case "add":
+    case "remove":
+      return exprUsesThis(s.value);
+    case "emit":
+      return s.fields.some((f) => exprUsesThis(f.value));
+    case "call":
+      // Receiver-prefixed call passes `this` as first arg.
+      return true;
+  }
+}
+
+function stmtUsesCurrentUser(s: StmtIR): boolean {
+  switch (s.kind) {
+    case "precondition":
+    case "requires":
+    case "let":
+    case "expression":
+      return exprUsesCurrentUser(s.expr);
+    case "assign":
+    case "add":
+    case "remove":
+      return exprUsesCurrentUser(s.value);
+    case "emit":
+      return s.fields.some((f) => exprUsesCurrentUser(f.value));
+    case "call":
+      return s.args.some(exprUsesCurrentUser);
+  }
+}
+
+function exprUsesParam(e: ExprIR | undefined, name: string): boolean {
+  if (!e) return false;
+  if (e.kind === "ref" && e.refKind === "param" && e.name === name) return true;
+  return walkExpr(e, (sub) => exprUsesParam(sub, name));
+}
+
+function stmtUsesParam(s: StmtIR, name: string): boolean {
+  switch (s.kind) {
+    case "precondition":
+    case "requires":
+    case "let":
+    case "expression":
+      return exprUsesParam(s.expr, name);
+    case "assign":
+    case "add":
+    case "remove":
+      return exprUsesParam(s.value, name);
+    case "emit":
+      return s.fields.some((f) => exprUsesParam(f.value, name));
+    case "call":
+      return s.args.some((a) => exprUsesParam(a, name));
+  }
+}
+
+/** Walk one level into `e` and return true if `pred` matches any child. */
+function walkExpr(e: ExprIR, pred: (sub: ExprIR | undefined) => boolean): boolean {
+  switch (e.kind) {
+    case "method-call":
+      return pred(e.receiver) || e.args.some((a) => pred(a));
+    case "member":
+      return pred(e.receiver);
+    case "binary":
+      return pred(e.left) || pred(e.right);
+    case "ternary":
+      return pred(e.cond) || pred(e.then) || pred(e.otherwise);
+    case "unary":
+      return pred(e.operand);
+    case "paren":
+      return pred(e.inner);
+    case "call":
+      return e.args.some((a) => pred(a));
+    case "lambda":
+      return pred(e.body);
+    case "new":
+    case "object":
+      return e.fields.some((f) => pred(f.value));
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -313,8 +493,6 @@ function renderOperationValidates(
     if (stmt.kind !== "precondition") continue;
 
     const inv = { expr: stmt.expr, source: stmt.source };
-    // Use a changeset-oriented renderCtx for the predicate expression.
-    const valCtx: RenderCtx = { thisName: "changeset", contextModule: ctx.contextModule };
 
     // Check if this is a single-field shape we can lower idiomatically.
     if (classifyForWire(inv, { available })) {
@@ -330,10 +508,13 @@ function renderOperationValidates(
       }
     }
 
-    // Fall back to the function form.
-    const exprStr = renderExpr(stmt.expr, valCtx);
+    // Fall back to the function form.  Render against `record` (= changeset.data)
+    // when the predicate touches `this` so the rendered output's `record.X`
+    // resolves; emit the local binding only when actually used.
+    const exprStr = renderExpr(stmt.expr, ctx);
+    const recordLine = exprUsesThis(stmt.expr) ? "        record = changeset.data\n" : "";
     lines.push(
-      `      validate fn changeset, _opts ->\n        if ${exprStr}, do: :ok, else: {:error, ${JSON.stringify(`Precondition failed: ${stmt.source}`)}}\n      end`,
+      `      validate fn changeset, _opts ->\n${recordLine}        if ${exprStr}, do: :ok, else: {:error, ${JSON.stringify(`Precondition failed: ${stmt.source}`)}}\n      end`,
     );
   }
 
