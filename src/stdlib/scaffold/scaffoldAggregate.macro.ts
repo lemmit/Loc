@@ -1,6 +1,6 @@
-import type { Aggregate } from "../macro-api/index.js";
-import { defineMacro } from "../macro-api/index.js";
-import { pagesForAggregate } from "./_scaffold-pages.js";
+import type { Aggregate } from "../../macro-api/index.js";
+import { defineMacro } from "../../macro-api/index.js";
+import { pagesForAggregate } from "./_pages.js";
 
 /** Synthesise the three default pages for one aggregate: List,
  * New, Detail.  Same body/route/menu shape as the legacy scaffold

@@ -1,6 +1,6 @@
-import type { View } from "../macro-api/index.js";
-import { defineMacro } from "../macro-api/index.js";
-import { pageForView } from "./_scaffold-pages.js";
+import type { View } from "../../macro-api/index.js";
+import { defineMacro } from "../../macro-api/index.js";
+import { pageForView } from "./_pages.js";
 
 /** Synthesise the default list page for one view.  Same shape as
  * `scaffold views: <Name>` in the legacy expander.  Leaf of the

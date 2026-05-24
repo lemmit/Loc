@@ -1,5 +1,5 @@
-import type { Module } from "../macro-api/index.js";
-import { defineMacro } from "../macro-api/index.js";
+import type { Module } from "../../macro-api/index.js";
+import { defineMacro } from "../../macro-api/index.js";
 
 /** Composer: invokes `scaffoldContext` for each bounded context in
  * the named module.  Top of the per-element scaffold composer

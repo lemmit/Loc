@@ -6,8 +6,8 @@
 // them in one place means the per-archetype leaf macros and the
 // top-level composer all stay byte-equivalent.
 
-import type { Aggregate, Page, View, Workflow } from "../macro-api/index.js";
-import { boolLit, callExpr, nameRefExpr, page, stringLit } from "../macro-api/index.js";
+import type { Aggregate, Page, View, Workflow } from "../../macro-api/index.js";
+import { boolLit, callExpr, nameRefExpr, page, stringLit } from "../../macro-api/index.js";
 
 export function pagesForAggregate(agg: Aggregate): Page[] {
   const pluralSnake = snake(plural(agg.name));

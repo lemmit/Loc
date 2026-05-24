@@ -4,9 +4,9 @@ import type {
   Module,
   View,
   Workflow,
-} from "../macro-api/index.js";
-import { defineMacro, viewsIn, workflowsIn } from "../macro-api/index.js";
-import { homePage, viewsIndexPage, workflowsIndexPage } from "./_scaffold-pages.js";
+} from "../../macro-api/index.js";
+import { defineMacro, viewsIn, workflowsIn } from "../../macro-api/index.js";
+import { homePage, viewsIndexPage, workflowsIndexPage } from "./_pages.js";
 
 /** Top of the scaffold-macro family: takes any combination of
  * modules / contexts / aggregates / workflows / views, then fans
