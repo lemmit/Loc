@@ -85,3 +85,20 @@ jobs:
           LOOM_E2E: '1'
           LOOM_E2E_PARITY_ONLY: '1'
         run: npx vitest run test/e2e/e2e.test.ts
+
+      # On any failure above, dump container state + logs so the next
+      # diagnosis doesn't depend on guessing — `up -d` failures
+      # otherwise just say "Command failed" with no docker context.
+      - name: Capture compose state on failure
+        if: failure()
+        run: |
+          set +e
+          OUTDIR=$(ls -td /tmp/loom-e2e-* 2>/dev/null | head -n1)
+          if [ -z "$OUTDIR" ]; then
+            echo "No /tmp/loom-e2e-* directory found"
+            exit 0
+          fi
+          echo "=== compose ps ==="
+          docker compose -f "$OUTDIR/docker-compose.yml" ps -a
+          echo "=== compose logs (tail 200) ==="
+          docker compose -f "$OUTDIR/docker-compose.yml" logs --tail=200

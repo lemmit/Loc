@@ -1582,9 +1582,14 @@ if config_env() == :prod do
     http: [ip: {0, 0, 0, 0, 0, 0, 0, 0}, port: port],
     secret_key_base: secret_key_base
 
-  config :${appName}, ${appModule}.Repo,
-    ssl: true,
-    ssl_opts: [verify: :verify_none]
+  # SSL to the database is opt-in.  Managed Postgres (RDS, Cloud SQL, etc.)
+  # usually requires it; local docker-compose Postgres doesn't support it
+  # out of the box, so default off and let deployments flip DATABASE_SSL=1.
+  if System.get_env("DATABASE_SSL") in ["1", "true"] do
+    config :${appName}, ${appModule}.Repo,
+      ssl: true,
+      ssl_opts: [verify: :verify_none]
+  end
 end
 `;
 }

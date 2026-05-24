@@ -34,7 +34,10 @@ const phoenixLiveViewPlatform: PlatformSurface = {
     return {
       env: [
         ["DATABASE_URL", `ecto://postgres:postgres@db:5432/${slug}`],
-        ["SECRET_KEY_BASE", "loom-dev-secret-replace-in-production-with-mix-phx-gen-secret"],
+        // Phoenix requires ≥64 bytes for secret_key_base; the previous
+        // value was 61 chars and tripped a `Plug.Session.assert_secret/2`
+        // raise at boot.  Generate via `mix phx.gen.secret` for prod.
+        ["SECRET_KEY_BASE", "loom-dev-secret-replace-in-production-with-mix-phx-gen-secret-aaaa"],
         ["PHX_HOST", "localhost"],
         ["PHX_SERVER", "true"],
         ["PORT", "4000"],
