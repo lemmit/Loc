@@ -151,12 +151,12 @@ describe("provenanced — TypeScript emission", () => {
     // co-located backing field + getter + history buffer + drain
     expect(cart).toContain("private _total_provenance: ProvLineage | null;");
     expect(cart).toContain("get total_provenance(): ProvLineage | null");
-    expect(cart).toContain("private __provTraces: ProvLineage[] = [];");
-    expect(cart).toContain("__drainProv(): ProvLineage[]");
+    expect(cart).toContain("private _provTraces: ProvLineage[] = [];");
+    expect(cart).toContain("drainProv(): ProvLineage[]");
     // inputs captured before the mutation, then both sinks fed
     expect(cart).toMatch(/const __prov_\d+ = \[.*\];\n\s*this\._total =/);
     expect(cart).toMatch(/this\._total_provenance = __lin_\d+;/);
-    expect(cart).toMatch(/this\.__provTraces\.push\(__lin_\d+\);/);
+    expect(cart).toMatch(/this\._provTraces\.push\(__lin_\d+\);/);
   });
 
   it("persists the co-located column and the history table in the schema", async () => {
@@ -173,7 +173,7 @@ describe("provenanced — TypeScript emission", () => {
     const files = generateSystems(model).files;
     const routes = files.get("api/http/cart.routes.ts")!;
     expect(routes).toContain("await db.transaction(async (tx) => {");
-    expect(routes).toContain("for (const __t of aggregate.__drainProv())");
+    expect(routes).toContain("for (const t of aggregate.drainProv())");
     expect(routes).toContain("tx.insert(schema.provenanceRecords).values({");
     // co-located lineage is part of the response DTO, via the shared schema
     expect(routes).toContain("const ProvenanceLineage = z.object({");
@@ -191,7 +191,7 @@ describe("provenanced — TypeScript emission", () => {
     expect(files.has("api/domain/provenance.ts")).toBe(false);
     expect(files.get("api/domain/cart.ts")).not.toContain("ProvLineage");
     expect(files.get("api/db/schema.ts")).not.toContain("provenance_records");
-    expect(files.get("api/http/cart.routes.ts")).not.toContain("__drainProv");
+    expect(files.get("api/http/cart.routes.ts")).not.toContain("drainProv");
   });
 
   it("does not auto-emit a snapshot artefact on generate", async () => {

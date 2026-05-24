@@ -225,15 +225,15 @@ describe("typescript generator", () => {
       const model = await buildModel("examples/sales.ddd");
       const files = generateTypeScript(model, HONO_V4_PINS, { emitTrace: true });
       const routes = files.get("http/order.routes.ts")!;
-      // create: payload bound to __out so c.json doesn't re-evaluate, +
+      // create: payload bound to `out` so c.json doesn't re-evaluate, +
       // wire_out fires immediately before the return.
       expect(routes).toMatch(
-        /const __out = \{ id: created\.id as string \};\n\s+.*\.get\("log"\)\.trace\(\{ event: "wire_out", keys: Object\.keys\(__out as Record<string, unknown>\) \}\);\n\s+return c\.json\(__out, 201\);/,
+        /const out = \{ id: created\.id as string \};\n\s+.*\.get\("log"\)\.trace\(\{ event: "wire_out", keys: Object\.keys\(out as Record<string, unknown>\) \}\);\n\s+return c\.json\(out, 201\);/,
       );
       // get-by-id success: same pattern, with the existing z.infer cast
       // kept at the c.json site so the response shape still typechecks.
       expect(routes).toMatch(
-        /const __out = repo\.toWire\(found\);\n\s+.*"wire_out"[^\n]+\n\s+return c\.json\(__out as z\.infer<typeof OrderResponse>, 200\);/,
+        /const out = repo\.toWire\(found\);\n\s+.*"wire_out"[^\n]+\n\s+return c\.json\(out as z\.infer<typeof OrderResponse>, 200\);/,
       );
       // Array finds skip wire_out — `Object.keys` over an array returns
       // positional indices, not a useful key set.
@@ -246,7 +246,7 @@ describe("typescript generator", () => {
       const files = generateTypeScript(model, HONO_V4_PINS); // no emitTrace
       const routes = files.get("http/order.routes.ts")!;
       expect(routes).not.toMatch(/event: "wire_out"/);
-      expect(routes).not.toMatch(/const __out =/);
+      expect(routes).not.toMatch(/const out =/);
       // Original one-line returns unchanged.
       expect(routes).toMatch(/return c\.json\(\{ id: created\.id as string \}, 201\);/);
       expect(routes).toMatch(
@@ -300,16 +300,16 @@ describe("typescript generator", () => {
       expect(repo.match(/event: "tx_rollback"/g)?.length).toBe(2);
       expect(repo).toMatch(/requestLog\(\)\.trace\(\{ event: "tx_begin", aggregate: "Order", id:/);
       expect(repo).toMatch(
-        /requestLog\(\)\.trace\(\{ event: "tx_rollback", .*error: __txErr instanceof Error \? __txErr\.message : String\(__txErr\) \}\)/,
+        /requestLog\(\)\.trace\(\{ event: "tx_rollback", .*error: txErr instanceof Error \? txErr\.message : String\(txErr\) \}\)/,
       );
       // child_synced per upsert in the save's child loop — action read
-      // from `__existingIds<Cap>` (set before the upsert) so it tags
+      // from `existingIds<Cap>` (set before the upsert) so it tags
       // insert vs update without a second round-trip.
       expect(repo).toMatch(
-        /const __childAction = __existingIdsLines\.has\(child\.id as string\) \? "update" : "insert";/,
+        /const childAction = existingIdsLines\.has\(child\.id as string\) \? "update" : "insert";/,
       );
       expect(repo).toMatch(
-        /requestLog\(\)\.trace\(\{ event: "child_synced", parent: "Order", part: "OrderLine", id: child\.id as string, action: __childAction \}\)/,
+        /requestLog\(\)\.trace\(\{ event: "child_synced", parent: "Order", part: "OrderLine", id: child\.id as string, action: childAction \}\)/,
       );
     });
 
@@ -324,7 +324,7 @@ describe("typescript generator", () => {
       expect(repo).not.toMatch(/event: "tx_commit"/);
       expect(repo).not.toMatch(/event: "tx_rollback"/);
       expect(repo).not.toMatch(/event: "child_synced"/);
-      expect(repo).not.toMatch(/catch \(__txErr\)/);
+      expect(repo).not.toMatch(/catch \(txErr\)/);
     });
 
     it("--trace off: invariant emission stays byte-identical to no-trace output", async () => {
@@ -418,7 +418,7 @@ describe("typescript generator", () => {
         /requestLog\(\)\.debug\(\{ event: "find_executed", aggregate: "Order", find: "[^"]+", rows: 0 \}\)/,
       );
       expect(repo).toMatch(
-        /requestLog\(\)\.debug\(\{ event: "find_executed", aggregate: "Order", find: "[^"]+", rows: __result\.length \}\)/,
+        /requestLog\(\)\.debug\(\{ event: "find_executed", aggregate: "Order", find: "[^"]+", rows: result\.length \}\)/,
       );
     });
 
@@ -637,7 +637,7 @@ describe("typescript generator", () => {
     // the singular row with `?? null`.
     expect(repo).toMatch(/async all\(\): Promise<Order\[\]>/);
     expect(repo).toMatch(
-      /const shippingRows = await this\.db\.select\(\)\.from\(schema\.addresses\)\.where\(inArray\(schema\.addresses\.parentId, __ids\)\)/,
+      /const shippingRows = await this\.db\.select\(\)\.from\(schema\.addresses\)\.where\(inArray\(schema\.addresses\.parentId, rootIds\)\)/,
     );
     expect(repo).toMatch(/const shippingByParent = new Map<string, Address>\(\);/);
     expect(repo).toMatch(/shipping: shippingByParent\.get\(root\.id\) \?\? null/);
@@ -806,7 +806,7 @@ describe("typescript generator", () => {
         /import \{ DomainError, AggregateNotFoundError, ForbiddenError, ExternHandlerError \} from "\.\.\/domain\/errors"/,
       );
       // Try/catch around the workflow's handler invocation.
-      expect(wf).toMatch(/try \{\s+await __handler\(order/);
+      expect(wf).toMatch(/try \{\s+await handler\(order/);
       expect(wf).toMatch(/throw new ExternHandlerError\("confirm", "Order", err\);/);
       // onError chain knows about ExternHandlerError.
       expect(wf).toMatch(/if \(err instanceof ExternHandlerError\)/);
@@ -1081,7 +1081,7 @@ describe("typescript generator", () => {
     expect(views).toMatch(/const customerRepo = new CustomerRepository\(db, events\)/);
     // Bulk load + map by id.
     expect(views).toMatch(
-      /const customerById = new Map\(\(await customerRepo\.findManyByIds\(rows\.map\(\(r\) => r\.customerId\)\)\)\.map\(\(__a\) => \[__a\.id as string, __a\]\)\)/,
+      /const customerById = new Map\(\(await customerRepo\.findManyByIds\(rows\.map\(\(r\) => r\.customerId\)\)\)\.map\(\(a\) => \[a\.id as string, a\]\)\)/,
     );
     // Projection rewrites the Id-follow refs.
     expect(views).toMatch(/customerName: customerById\.get\(r\.customerId as string\)!\.name/);
@@ -1127,8 +1127,8 @@ describe("typescript generator", () => {
     );
     // Body: order.checkConfirm → handler lookup + invocation → assertInvariants.
     expect(wf).toMatch(/order\.checkConfirm\(\);/);
-    expect(wf).toMatch(/const __handler = orderExternHandlers\.confirmOrder;/);
-    expect(wf).toMatch(/await __handler\(order, \{\} as Record<string, never>\);/);
+    expect(wf).toMatch(/const handler = orderExternHandlers\.confirmOrder;/);
+    expect(wf).toMatch(/await handler\(order, \{\} as Record<string, never>\);/);
     expect(wf).toMatch(/order\.assertInvariants\(\);/);
     // Save still happens at workflow exit.
     expect(wf).toMatch(/await orders\.save\(order\);/);
@@ -1163,7 +1163,7 @@ describe("typescript generator", () => {
       "http/workflows.ts",
     )!;
     expect(wf).toMatch(/order\.checkDeduct\(amount\);/);
-    expect(wf).toMatch(/await __handler\(order, \{ amount: amount \}\);/);
+    expect(wf).toMatch(/await handler\(order, \{ amount: amount \}\);/);
   });
 
   it("multi-hop X id.Y id.field follow loads aggregates in dependency order", async () => {
@@ -1203,7 +1203,7 @@ describe("typescript generator", () => {
       /const customerById = new Map\(\(await customerRepo\.findManyByIds\(rows\.map\(\(r\) => r\.customerId\)\)\)/,
     );
     expect(wf).toMatch(
-      /const regionByCustomerId = new Map\(\(await regionRepo\.findManyByIds\(\[\.\.\.customerById\.values\(\)\]\.map\(\(__a\) => __a\.regionId\)\)\)/,
+      /const regionByCustomerId = new Map\(\(await regionRepo\.findManyByIds\(\[\.\.\.customerById\.values\(\)\]\.map\(\(a\) => a\.regionId\)\)\)/,
     );
     // Chained projection.
     expect(wf).toMatch(
