@@ -244,12 +244,7 @@ const MONEY_METHOD: Record<string, string | undefined> = {
   ">=": "gte",
 };
 
-function renderMoneyBinary(
-  op: BinOp,
-  left: ExprIR,
-  right: ExprIR,
-  ctx: TsRenderContext,
-): string {
+function renderMoneyBinary(op: BinOp, left: ExprIR, right: ExprIR, ctx: TsRenderContext): string {
   const method = MONEY_METHOD[op];
   if (!method) {
     // Unknown operator for money — fall through to native rendering

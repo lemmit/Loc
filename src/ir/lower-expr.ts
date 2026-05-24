@@ -805,8 +805,7 @@ function binaryResultType(op: string, a: TypeIR, b: TypeIR): TypeIR {
     }
     const other = aIsMoney ? b : a;
     if (other.kind !== "primitive") return a;
-    const isScalar =
-      other.name === "int" || other.name === "long" || other.name === "decimal";
+    const isScalar = other.name === "int" || other.name === "long" || other.name === "decimal";
     if (!isScalar) return a;
     if (op === "*") return { kind: "primitive", name: "money" };
     if (op === "/" && aIsMoney) return { kind: "primitive", name: "money" };

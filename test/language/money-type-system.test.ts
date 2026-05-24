@@ -92,13 +92,13 @@ context Billing {
 }
 `;
 
-describe("money — literal form `money(\"...\")`", () => {
+describe('money — literal form `money("...")`', () => {
   // `money(...)` is a primary expression form for a precise-decimal
   // literal — analogous to `now()` for datetime.  The string argument
   // is what every backend's host-language Decimal type parses from
   // without precision loss.
 
-  it("`money(\"10.50\")` parses as a primary expression", async () => {
+  it('`money("10.50")` parses as a primary expression', async () => {
     const m = await linkedModel(`
       context Billing {
         aggregate Invoice {
@@ -114,7 +114,7 @@ describe("money — literal form `money(\"...\")`", () => {
     expect((t as { name: string }).name).toBe("money");
   });
 
-  it("`money(\"…\")` lowers to a `literal` IR node with kind=money", async () => {
+  it('`money("…")` lowers to a `literal` IR node with kind=money', async () => {
     const { buildLoomModel } = await import("../_helpers/index.js");
     const loom = await buildLoomModel(`
       context Billing {
@@ -134,7 +134,7 @@ describe("money — literal form `money(\"...\")`", () => {
     });
   });
 
-  it("`money(\"…\")` participates in money arithmetic", async () => {
+  it('`money("…")` participates in money arithmetic', async () => {
     const { buildLoomModel } = await import("../_helpers/index.js");
     const loom = await buildLoomModel(`
       context Billing {

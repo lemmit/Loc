@@ -1,6 +1,16 @@
 import type { PathIR, StmtIR } from "../../ir/loom-ir.js";
 import { snake, upperFirst } from "../../util/naming.js";
-import { type RenderCtx, renderExpr } from "./render-expr.js";
+import { type RenderCtx, relationshipNameFor, renderExpr } from "./render-expr.js";
+
+/** True when the head segment of a mutation path identifies a
+ * reference-collection field on the threaded aggregate (vs a regular
+ * containment, which keeps the existing entity-instance manage_rel
+ * shape). */
+function isRefCollPath(p: PathIR, ctx: RenderCtx): boolean {
+  if (p.segments.length === 0 || !ctx.agg) return false;
+  const head = p.segments[0]!;
+  return (ctx.agg.associations ?? []).some((a) => a.fieldName === head);
+}
 
 // ---------------------------------------------------------------------------
 // Statement renderer for Phoenix LiveView / Ash operation bodies.
@@ -43,15 +53,32 @@ function renderElixirStatement(s: StmtIR, ctx: RenderCtx, changesetVar: string):
     }
 
     case "add": {
-      // `collection += new EntityPart{...}` → manage_relationship append.
-      const rel = renderPath(s.target);
       const val = renderExpr(s.value, ctx);
+      // Ref-collection (`Id<T>[]`) write — append a target id via the
+      // m2m relationship.  `use_identities: [:id]` tells Ash the input
+      // is a raw id to look up the target, not a full entity attrs map.
+      // `type: :append` (not `:create`) — we're not creating Pokémon
+      // records, just attaching existing ones to the trainer.
+      if (isRefCollPath(s.target, ctx)) {
+        const rel = relationshipNameFor(ctx.agg!, s.target.segments[0]!);
+        return `${INDENT}${changesetVar} = Ash.Changeset.manage_relationship(${changesetVar}, :${rel}, [${val}], type: :append, use_identities: [:id])`;
+      }
+      // Containment collection (`contains lines: OrderLine[]`) — the
+      // value is a new entity-part instance, persisted alongside the
+      // parent via the owned `:create` semantics.
+      const rel = renderPath(s.target);
       return `${INDENT}${changesetVar} = Ash.Changeset.manage_relationship(${changesetVar}, :${rel}, [${val}], type: :create)`;
     }
 
     case "remove": {
-      const rel = renderPath(s.target);
       const val = renderExpr(s.value, ctx);
+      // Ref-collection: detach via `:remove` (NOT `:destroy`, which
+      // would delete the target Pokémon record itself).
+      if (isRefCollPath(s.target, ctx)) {
+        const rel = relationshipNameFor(ctx.agg!, s.target.segments[0]!);
+        return `${INDENT}${changesetVar} = Ash.Changeset.manage_relationship(${changesetVar}, :${rel}, [${val}], type: :remove, use_identities: [:id])`;
+      }
+      const rel = renderPath(s.target);
       return `${INDENT}${changesetVar} = Ash.Changeset.manage_relationship(${changesetVar}, :${rel}, [${val}], type: :destroy)`;
     }
 

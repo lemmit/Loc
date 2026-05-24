@@ -67,8 +67,8 @@ import {
 import {
   arithmeticResult,
   type DddType,
-  envForNode,
   type Env,
+  envForNode,
   findFunction,
   findOperation,
   intrinsicMatcherSig,

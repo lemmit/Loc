@@ -1,5 +1,6 @@
 import type { AstNode } from "langium";
 import { AstUtils } from "langium";
+import type { PrimitiveName } from "../ir/loom-ir.js";
 import type {
   Aggregate,
   BaseType,
@@ -54,7 +55,6 @@ import {
   isView,
   isWorkflow,
 } from "./generated/ast.js";
-import type { PrimitiveName } from "../ir/loom-ir.js";
 
 // ---------------------------------------------------------------------------
 // Type representation
@@ -416,8 +416,7 @@ function moneyArithmetic(
   // (int / long / decimal) for scaling; anything else is rejected.
   const other = aIsMoney ? b : a;
   if (other.kind !== "primitive") return T.unknown;
-  const isScalar =
-    other.name === "int" || other.name === "long" || other.name === "decimal";
+  const isScalar = other.name === "int" || other.name === "long" || other.name === "decimal";
   if (!isScalar) return T.unknown;
   // money × scalar (commutative) = money;
   // money ÷ scalar = money (but scalar ÷ money is rejected).

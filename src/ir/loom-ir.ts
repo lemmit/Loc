@@ -1442,16 +1442,14 @@ export function exprUsesMoney(e: ExprIR | undefined): boolean {
     return exprUsesMoney(e.left) || exprUsesMoney(e.right);
   }
   if (e.kind === "member") return exprUsesMoney(e.receiver);
-  if (e.kind === "method-call")
-    return exprUsesMoney(e.receiver) || e.args.some(exprUsesMoney);
+  if (e.kind === "method-call") return exprUsesMoney(e.receiver) || e.args.some(exprUsesMoney);
   if (e.kind === "ternary")
     return exprUsesMoney(e.cond) || exprUsesMoney(e.then) || exprUsesMoney(e.otherwise);
   if (e.kind === "unary") return exprUsesMoney(e.operand);
   if (e.kind === "paren") return exprUsesMoney(e.inner);
   if (e.kind === "call") return e.args.some(exprUsesMoney);
   if (e.kind === "lambda") return exprUsesMoney(e.body);
-  if (e.kind === "new" || e.kind === "object")
-    return e.fields.some((f) => exprUsesMoney(f.value));
+  if (e.kind === "new" || e.kind === "object") return e.fields.some((f) => exprUsesMoney(f.value));
   if (e.kind === "match")
     return (
       e.arms.some((a) => exprUsesMoney(a.cond) || exprUsesMoney(a.value)) ||
@@ -1482,8 +1480,7 @@ function partUsesMoney(p: EntityPartIR): boolean {
   if (p.fields.some((f) => typeUsesMoney(f.type))) return true;
   if (p.derived.some((d) => typeUsesMoney(d.type) || exprUsesMoney(d.expr))) return true;
   if (p.invariants.some((iv) => exprUsesMoney(iv.expr))) return true;
-  if (p.functions.some((fn) => typeUsesMoney(fn.returnType) || exprUsesMoney(fn.body)))
-    return true;
+  if (p.functions.some((fn) => typeUsesMoney(fn.returnType) || exprUsesMoney(fn.body))) return true;
   return false;
 }
 
@@ -1495,14 +1492,11 @@ export function aggregateUsesMoney(a: AggregateIR): boolean {
   if (a.invariants.some((iv) => exprUsesMoney(iv.expr))) return true;
   if (
     a.operations.some(
-      (op) =>
-        op.params.some((p) => typeUsesMoney(p.type)) ||
-        op.statements.some(stmtUsesMoney),
+      (op) => op.params.some((p) => typeUsesMoney(p.type)) || op.statements.some(stmtUsesMoney),
     )
   )
     return true;
-  if (a.functions.some((fn) => typeUsesMoney(fn.returnType) || exprUsesMoney(fn.body)))
-    return true;
+  if (a.functions.some((fn) => typeUsesMoney(fn.returnType) || exprUsesMoney(fn.body))) return true;
   if (a.parts.some(partUsesMoney)) return true;
   return false;
 }
@@ -1510,8 +1504,7 @@ export function aggregateUsesMoney(a: AggregateIR): boolean {
 /** True when the value object's wire shape carries any money field. */
 export function valueObjectUsesMoney(vo: ValueObjectIR): boolean {
   if (vo.fields.some((f) => typeUsesMoney(f.type))) return true;
-  if (vo.derived.some((d) => typeUsesMoney(d.type) || exprUsesMoney(d.expr)))
-    return true;
+  if (vo.derived.some((d) => typeUsesMoney(d.type) || exprUsesMoney(d.expr))) return true;
   if (vo.invariants.some((iv) => exprUsesMoney(iv.expr))) return true;
   if (vo.functions.some((fn) => typeUsesMoney(fn.returnType) || exprUsesMoney(fn.body)))
     return true;

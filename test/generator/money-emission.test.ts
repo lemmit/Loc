@@ -9,18 +9,18 @@
 // `test/e2e/e2e.test.ts` automatically verifies cross-backend
 // agreement on the wire shape under `LOOM_E2E=1`.
 
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { describe, expect, it } from "vitest";
+import { renderCsType } from "../../src/generator/dotnet/render-expr.js";
+import { renderAshType } from "../../src/generator/phoenix-live-view/render-expr.js";
+import { renderTsType } from "../../src/generator/typescript/render-expr.js";
 import {
   buildExternHandlersFile as _externStub,
   type AggregateIR,
   type BoundedContextIR,
 } from "../../src/ir/loom-ir.js";
-import { renderTsType } from "../../src/generator/typescript/render-expr.js";
-import { renderCsType } from "../../src/generator/dotnet/render-expr.js";
-import { renderAshType } from "../../src/generator/phoenix-live-view/render-expr.js";
 import { buildLoomModel } from "../_helpers/index.js";
-import * as fs from "node:fs";
-import * as path from "node:path";
 
 void _externStub; // re-export anchor; not invoked here
 
@@ -69,7 +69,7 @@ describe("money emission — IR binary nodes carry the type stash", () => {
     expect(bin.resultType).toEqual({ kind: "primitive", name: "money" });
   });
 
-  it("`subtotal >= money(\"0.00\")` invariant: leftType=money, resultType=bool", async () => {
+  it('`subtotal >= money("0.00")` invariant: leftType=money, resultType=bool', async () => {
     const { inv } = await billingFixture();
     const iv = inv.invariants[0]!;
     const bin = iv.expr as Extract<typeof iv.expr, { kind: "binary" }>;
