@@ -93,10 +93,33 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
       stdio: "inherit",
       timeout: 600_000,
     });
-    execSync(`docker compose -f ${outDir}/docker-compose.yml up -d${services}`, {
-      stdio: "inherit",
-      timeout: 120_000,
-    });
+    try {
+      execSync(`docker compose -f ${outDir}/docker-compose.yml up -d${services}`, {
+        stdio: "inherit",
+        timeout: 120_000,
+      });
+    } catch (err) {
+      // `afterAll` immediately tears the stack down via `down -v`, taking
+      // the containers' stdout/stderr with them.  Dump state + tail before
+      // we re-throw so the failed run leaves a forensic trail.
+      console.error("\n=== compose ps -a (post-failure) ===");
+      try {
+        execSync(`docker compose -f ${outDir}/docker-compose.yml ps -a`, {
+          stdio: "inherit",
+        });
+      } catch {
+        /* ignore */
+      }
+      console.error("\n=== compose logs --tail=300 (post-failure) ===");
+      try {
+        execSync(`docker compose -f ${outDir}/docker-compose.yml logs --tail=300`, {
+          stdio: "inherit",
+        });
+      } catch {
+        /* ignore */
+      }
+      throw err;
+    }
 
     // showcase.ddd ships one backend per platform, all serving the same
     // modules so their OpenAPI specs are comparable.  Hono boots in
