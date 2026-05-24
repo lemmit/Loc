@@ -1,10 +1,4 @@
-import type {
-  Aggregate,
-  BoundedContext,
-  Module,
-  View,
-  Workflow,
-} from "../../macro-api/index.js";
+import type { Aggregate, BoundedContext, Module, View, Workflow } from "../../macro-api/index.js";
 import { defineMacro, viewsIn, workflowsIn } from "../../macro-api/index.js";
 import { homePage, viewsIndexPage, workflowsIndexPage } from "./_pages.js";
 

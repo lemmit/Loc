@@ -1,4 +1,10 @@
-import type { AggregateIR, BoundedContextIR, ExprIR, TestIR, TestStmtIR } from "../../../ir/loom-ir.js";
+import type {
+  AggregateIR,
+  BoundedContextIR,
+  ExprIR,
+  TestIR,
+  TestStmtIR,
+} from "../../../ir/loom-ir.js";
 import { lowerFirst } from "../../../util/naming.js";
 import { renderTsExpr } from "../render-expr.js";
 
