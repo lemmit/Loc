@@ -56,7 +56,14 @@ export function renderJoinResource(
   attributes do
     attribute :${snake(assoc.ownerFk)}, :uuid, primary_key?: true, allow_nil?: false
     attribute :${snake(assoc.targetFk)}, :uuid, primary_key?: true, allow_nil?: false
-    attribute :ordinal, :integer, allow_nil?: false
+    # Ordinal records insertion order for cross-backend wire-shape
+    # parity with the TS Drizzle (\`onConflictDoUpdate set: ordinal\`)
+    # and .NET EF (\`__row.Ordinal = __i\`) emitters.  Nullable + default
+    # so plain \`Ash.Changeset.manage_relationship\` writes succeed
+    # without per-row ordinal injection; preserving ordering across a
+    # round-trip is a known Phoenix-side follow-up — write-path stays
+    # functional in the meantime.
+    attribute :ordinal, :integer, allow_nil?: true, default: 0
   end
 
   relationships do

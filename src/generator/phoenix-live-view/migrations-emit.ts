@@ -169,7 +169,10 @@ function renderJoinMigration(
     create table(:${assoc.joinTable}, primary_key: false) do
       add :${snake(assoc.ownerFk)}, references(:${ownerTable}, type: :uuid, on_delete: :delete_all), null: false, primary_key: true
       add :${snake(assoc.targetFk)}, references(:${targetTable}, type: :uuid, on_delete: :delete_all), null: false, primary_key: true
-      add :ordinal, :integer, null: false
+      # Ordinal is nullable + defaulted (0) so plain
+      # manage_relationship writes succeed without per-row ordinal
+      # injection.  See join-resource-emit.ts for the parity note.
+      add :ordinal, :integer, null: true, default: 0
     end
     create index(:${assoc.joinTable}, [:${snake(assoc.targetFk)}])
   end
