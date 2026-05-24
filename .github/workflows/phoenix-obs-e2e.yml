@@ -47,6 +47,27 @@ jobs:
     # cap that protects CI minutes while leaving headroom for a slow
     # hex.pm fetch.
     timeout-minutes: 15
+    # Service container — pre-starts postgres on the host network with a
+    # built-in healthcheck before any step runs.  Replaces the in-test
+    # `docker run` approach which surfaced an OOM-under-load failure
+    # mode on the runner: mix's parallel compile + AshPostgres'
+    # ResourceGenerator + the docker-published postgres process pushed
+    # past the runner's memory ceiling and got the CREATE DATABASE
+    # connection killed mid-transaction.  Host-network service avoids
+    # the indirection and the duplicate process overhead.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: phoenix_app
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v6
 
@@ -87,7 +108,10 @@ jobs:
       - name: Run Phoenix observability runtime e2e
         env:
           LOOM_OBS_E2E_PHOENIX: '1'
-          DOCKER_BUILDKIT: '1'
+          # The test reads LOOM_OBS_PG_URL and skips its in-test
+          # `docker run postgres` step when the URL is supplied.
+          LOOM_OBS_PG_URL: 'postgres://postgres:postgres@127.0.0.1:5432'
+          LOOM_OBS_PG_DB: 'phoenix_app'
         run: npx vitest run test/e2e/observability-events-phoenix.test.ts --reporter=verbose
 
       - name: Surface failure context
