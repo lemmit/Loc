@@ -79,7 +79,12 @@ export function buildRoutesFile(
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   if (aggregateUsesMoney(agg)) {
-    lines.push(`import Decimal from "decimal.js";`);
+    // Money-bearing routes consume the parsed `Decimal` via Zod's
+    // type inference through `moneySchema`; the route file itself
+    // never names `Decimal` directly, so a `moneySchema` import is
+    // sufficient (the underlying `decimal.js` dep is pulled in by
+    // the shared helpers file).
+    lines.push(`import { moneySchema } from "../lib/schemas";`);
   }
   lines.push(`import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";`);
   lines.push(`import { ${agg.name} } from "../domain/${lowerFirst(agg.name)}";`);
@@ -697,12 +702,14 @@ export function zodFor(t: TypeIR): string {
         case "decimal":
           return "z.coerce.number()";
         case "money":
-          // Inbound: JSON string → `new Decimal(...)` after a regex
-          // sanity check.  Refuses raw JS numbers (per OpenAPI finance
-          // convention; matches the canonical wire shape declared in
-          // `.loom/wire-spec.json` as `{type: "string", format:
-          // "decimal"}`).
-          return 'z.string().regex(/^-?\\d+(\\.\\d+)?$/, "must be a decimal-formatted string").transform((s) => new Decimal(s))';
+          // Inbound: references the shared `moneySchema` helper
+          // emitted to `lib/schemas.ts` (one validation + parse
+          // chain for every money field across every route file).
+          // Outputs a `decimal.js` Decimal instance — refuses raw
+          // JS numbers per the OpenAPI finance convention declared
+          // in `.loom/wire-spec.json` as `{type: "string", format:
+          // "decimal"}`.
+          return "moneySchema";
         case "string":
         case "guid":
           return "z.string()";

@@ -698,7 +698,7 @@ function projectValueEntries(
     if (t.name === "money") {
       // Persist as a precise-decimal string — decimal.js's `.toString()`
       // returns the canonical form `numeric(19, 4)` accepts.
-      return [{ fieldName, expr: `(${valueExpr}).toString()` }];
+      return [{ fieldName, expr: `${valueExpr}.toString()` }];
     }
     return [{ fieldName, expr: valueExpr }];
   }

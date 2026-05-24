@@ -1,4 +1,9 @@
-import type { BoundedContextIR, TypeIR, WorkflowIR } from "../../ir/loom-ir.js";
+import {
+  contextUsesMoney,
+  type BoundedContextIR,
+  type TypeIR,
+  type WorkflowIR,
+} from "../../ir/loom-ir.js";
 import { lowerFirst, snake, upperFirst } from "../../util/naming.js";
 import { fillBlock } from "./page-objects-builder.js";
 
@@ -47,6 +52,9 @@ export function buildWorkflowsApiModule(contexts: BoundedContextIR[]): string {
   lines.push(`import { z } from "zod";`);
   lines.push(`import { useMutation } from "@tanstack/react-query";`);
   lines.push(`import { api } from "./client";`);
+  if (contexts.some(contextUsesMoney)) {
+    lines.push(`import { moneySchema } from "../lib/schemas";`);
+  }
   const enumDeps = collectEnumDeps(workflows);
   const voDeps = collectValueObjectDeps(workflows);
   for (const dep of [...enumDeps, ...voDeps]) {
@@ -222,7 +230,7 @@ function zodForRequest(t: TypeIR): string {
         case "decimal":
           return "z.number()";
         case "money":
-          return 'z.string().regex(/^-?\\d+(\\.\\d+)?$/, "must be a decimal-formatted string").transform((s) => new Decimal(s))';
+          return "moneySchema";
         case "string":
         case "guid":
           return "z.string()";
