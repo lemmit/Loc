@@ -32,7 +32,7 @@
     "test:obs-phoenix": "LOOM_OBS_E2E_PHOENIX=1 vitest run test/e2e/observability-events-phoenix.test.ts",
     "test:biome-gen": "LOOM_BIOME=1 vitest run test/e2e/generated-biome.test.ts",
     "prepare": "npm run langium:generate && npm run build",
-    "lint": "biome check .",
+    "lint": "biome ci .",
     "format": "biome format --write .",
     "cli": "node bin/cli.js"
   },
