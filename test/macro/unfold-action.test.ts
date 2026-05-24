@@ -166,6 +166,64 @@ context Sales with audit, softDelete {
     expect(unfolded).toMatch(/filter for "softDeletable" !this\.isDeleted/);
   });
 
+  it("threads ref-list args through unfold (scaffold with modules: [Sales])", async () => {
+    // Regression: pre-fix, unfold ran the macro with empty `{}`
+    // args, so `scaffold(modules: [Sales])` produced nothing.  After
+    // the resolveMacroArgs wiring, the macro sees the resolved
+    // Module and emits per-aggregate pages.
+    const source = `
+system Demo {
+  module Sales {
+    context S {
+      aggregate Order {
+        subject: string
+      }
+      repository Orders for Order { }
+    }
+  }
+  ui Admin with scaffold(modules: [Sales]) { }
+}
+`;
+    const unfolded = await unfold(source, "scaffold");
+    // `with scaffold(...)` is gone:
+    expect(unfolded).not.toMatch(/with scaffold/);
+    // Per-aggregate pages were synthesised (proves args resolved).
+    expect(unfolded).toMatch(/page OrderList/);
+    expect(unfolded).toMatch(/page OrderDetail/);
+  });
+
+  it("unfolds `with softDeleteByDefault` into per-aggregate state + context filter", async () => {
+    // `*ByDefault` macros fan an aggregate-level macro across each
+    // child via invokeMacro.  Unfold must route those nodes into
+    // the right aggregates (not all into the context body).
+    const source = `
+context Sales with softDeleteByDefault {
+  aggregate Order {
+    subject: string
+  }
+  aggregate Customer {
+    name: string
+  }
+  repository Orders for Order { }
+  repository Customers for Customer { }
+}
+`;
+    const unfolded = await unfold(source, "softDeleteByDefault");
+    // The composer call is gone:
+    expect(unfolded).not.toMatch(/with softDeleteByDefault/);
+    // Context-level filter landed at context level:
+    expect(unfolded).toMatch(/filter for "softDeletable" !this\.isDeleted/);
+    // Each aggregate received `implements "softDeletable"` + the
+    // softDelete state fields.  We assert on the count of `implements`
+    // (one per aggregate) to prove fan-out.
+    const implementsCount = (unfolded.match(/implements "softDeletable"/g) ?? []).length;
+    expect(implementsCount).toBe(2);
+    expect(unfolded).toMatch(/isDeleted: bool/);
+    // Re-parses cleanly:
+    const reparse = await validate(unfolded);
+    expect(reparse.diagnostics.filter((d) => d.severity === 1)).toEqual([]);
+  });
+
   it("does not offer unfold when cursor isn't on a macro call", async () => {
     const source = `
 context Sales {

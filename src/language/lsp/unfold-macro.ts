@@ -18,9 +18,17 @@
 
 import type { LangiumDocument } from "langium";
 import type { TextEdit } from "vscode-languageserver";
-import type { OriginToken } from "../../macro-api/define.js";
+import type { MacroDefinition, OriginToken } from "../../macro-api/define.js";
 import { _withOrigin } from "../../macro-api/factories.js";
-import type { Aggregate, BoundedContext, MacroCall, Ui, WithClause } from "../generated/ast.js";
+import { resolveMacroArgs } from "../ddd-macro-expander.js";
+import type {
+  Aggregate,
+  BoundedContext,
+  MacroCall,
+  Model,
+  Ui,
+  WithClause,
+} from "../generated/ast.js";
 import { lookupMacro } from "../macro-registry.js";
 import { printStructural } from "../print/index.js";
 
@@ -48,7 +56,7 @@ export function unfoldMacro(document: LangiumDocument, call: MacroCall): UnfoldR
   const macro = lookupMacro(call.name);
   if (!macro || macro.target !== hostKind) return undefined;
 
-  const args = bindArgsBestEffort(macro, call);
+  const args = bindArgsForUnfold(document, macro, call);
   const origin: OriginToken = {
     _kind: "macro-origin",
     macroName: call.name,
@@ -122,17 +130,19 @@ function hostKindOf(
   return undefined;
 }
 
-/** Best-effort arg binding for unfold purposes — uses the same
- * shape as the runtime expander but tolerates missing/broken args
- * (returns empty args rather than refusing the action).  Users
- * rarely unfold a macro whose args don't parse; if they do, the
- * unfold runs with defaults, which is usually still useful. */
-function bindArgsBestEffort(_macro: unknown, _call: MacroCall): Record<string, unknown> {
-  // TODO: thread through the full arg coercion logic from
-  // ddd-macro-expander.ts.  For the v1 unfold action we accept that
-  // arg-bearing macro invocations may unfold with defaults — the
-  // resulting source will roundtrip even if the args were unusual.
-  return {};
+/** Resolve the macro call's args against the document model, using
+ * the same coercion logic the runtime expander uses but silently
+ * (no diagnostics recorded).  Falls back to an empty args record if
+ * the call's args don't bind — unfold then runs with macro defaults,
+ * which is still useful for the common no-arg case. */
+function bindArgsForUnfold(
+  document: LangiumDocument,
+  macro: MacroDefinition,
+  call: MacroCall,
+): Record<string, unknown> {
+  const model = document.parseResult?.value as Model | undefined;
+  if (!model) return {};
+  return resolveMacroArgs(macro, call, model) ?? {};
 }
 
 /** Mirrors the expander's invokeMacro: looks up the named macro,
