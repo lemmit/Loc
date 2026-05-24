@@ -21,7 +21,7 @@ import {
   renderSequenceDiagram,
   renderWorkflowDiagram,
 } from "./mermaid.js";
-import { memorySnapshotStore, serializeSnapshot, type SnapshotStore } from "./snapshot.js";
+import { memorySnapshotStore, type SnapshotStore, serializeSnapshot } from "./snapshot.js";
 import { renderTraceabilityArtifacts } from "./traceability.js";
 import { renderUIE2EFile } from "./ui-e2e-render.js";
 import { renderWireSpec } from "./wire-spec.js";
@@ -59,10 +59,7 @@ export interface GenerateSystemOptions {
   snapshots?: SnapshotStore;
 }
 
-export function generateSystems(
-  model: Model,
-  options: GenerateSystemOptions = {},
-): SystemEmission {
+export function generateSystems(model: Model, options: GenerateSystemOptions = {}): SystemEmission {
   // Lowering produces a faithful AST projection; enrichment populates
   // wireShape, the implicit `findAll` find, and react `moduleNames`
   // inheritance.  See src/ir/enrichments.ts.
@@ -118,11 +115,7 @@ function emitSystem(
 
   for (const d of sys.deployables) {
     const contexts = collectContextsFor(d, modulesByName);
-    const ownedMigrations = migrationsForDeployable(
-      d,
-      migrations,
-      platformFor(d.platform).needsDb,
-    );
+    const ownedMigrations = migrationsForDeployable(d, migrations, platformFor(d.platform).needsDb);
     emitDeployable(sys, d, contexts, out, {
       emitTrace: options.emitTrace,
       migrations: ownedMigrations,

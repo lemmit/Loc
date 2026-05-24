@@ -82,14 +82,11 @@ describe("typescript migrations emitter", () => {
     const out = new Map<string, string>();
     emitTypescriptMigrations(
       [
-        ir(
-          [{ op: "dropTable", name: "x" }],
-          {
-            version: "20260101000005",
-            name: "DropX",
-            history: [{ version: "20260101000000", name: "Initial" }],
-          },
-        ),
+        ir([{ op: "dropTable", name: "x" }], {
+          version: "20260101000005",
+          name: "DropX",
+          history: [{ version: "20260101000000", name: "Initial" }],
+        }),
       ],
       out,
     );

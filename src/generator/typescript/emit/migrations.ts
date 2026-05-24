@@ -53,7 +53,13 @@ export function emitTypescriptMigrations(
 }
 
 function renderJournal(migrations: MigrationsIR[]): string {
-  const entries: { idx: number; version: string; when: number; tag: string; breakpoints: boolean }[] = [];
+  const entries: {
+    idx: number;
+    version: string;
+    when: number;
+    tag: string;
+    breakpoints: boolean;
+  }[] = [];
   let idx = 0;
   // De-duplicate by version: when two modules in this deployable both
   // produce entries (unlikely in v1 but defensive), the version is the

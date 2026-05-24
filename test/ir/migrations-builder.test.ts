@@ -154,10 +154,7 @@ describe("diffSchema", () => {
     const next = schemaFromModule(module);
     const prev = withModifiedTable(next, "orders", (t) => ({
       ...t,
-      columns: [
-        ...t.columns,
-        { name: "legacy_note", type: { kind: "text" }, nullable: true },
-      ],
+      columns: [...t.columns, { name: "legacy_note", type: { kind: "text" }, nullable: true }],
     }));
     const steps = diffSchema(prev, next);
     expect(steps).toEqual([{ op: "dropColumn", table: "orders", name: "legacy_note" }]);

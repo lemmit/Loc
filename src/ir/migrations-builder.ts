@@ -1,5 +1,5 @@
-import { plural, snake, upperFirst } from "../util/naming.js";
 import type { SnapshotStore } from "../system/snapshot.js";
+import { plural, snake, upperFirst } from "../util/naming.js";
 
 import type {
   AggregateIR,
@@ -61,10 +61,7 @@ export function schemaFromModule(module: ModuleIR): SchemaSnapshot {
   return { schemaVersion: 1, tables };
 }
 
-export function diffSchema(
-  prev: SchemaSnapshot | null,
-  next: SchemaSnapshot,
-): MigrationStep[] {
+export function diffSchema(prev: SchemaSnapshot | null, next: SchemaSnapshot): MigrationStep[] {
   const steps: MigrationStep[] = [];
   const prevByName = new Map<string, TableShape>();
   if (prev) for (const t of prev.tables) prevByName.set(t.name, t);
@@ -157,10 +154,7 @@ function diffTable(prev: TableShape, next: TableShape, steps: MigrationStep[]): 
   }
 }
 
-export function buildMigrations(
-  sys: SystemIR,
-  snapshots: SnapshotStore,
-): MigrationsIR[] {
+export function buildMigrations(sys: SystemIR, snapshots: SnapshotStore): MigrationsIR[] {
   const out: MigrationsIR[] = [];
   for (const m of sys.modules) {
     if (!m.migrationsOwner) continue;
@@ -257,11 +251,7 @@ function tableForAggregate(agg: AggregateIR, ownerModule: string): TableShape {
   };
 }
 
-function tableForPart(
-  part: EntityPartIR,
-  parent: AggregateIR,
-  ownerModule: string,
-): TableShape {
+function tableForPart(part: EntityPartIR, parent: AggregateIR, ownerModule: string): TableShape {
   const tableName = plural(snake(part.name));
   const parentTable = plural(snake(parent.name));
   const parentFk = `${snake(parent.name)}_id`;
@@ -269,9 +259,7 @@ function tableForPart(
     { name: "id", type: idColumnType(parent.idValueType), nullable: false },
     { name: parentFk, type: idColumnType(parent.idValueType), nullable: false },
   ];
-  const foreignKeys: FKShape[] = [
-    { column: parentFk, refTable: parentTable, onDelete: "cascade" },
-  ];
+  const foreignKeys: FKShape[] = [{ column: parentFk, refTable: parentTable, onDelete: "cascade" }];
   const indexes: IndexShape[] = [
     {
       name: `${tableName}_${parentFk}_idx`,
@@ -310,10 +298,7 @@ function tableForPart(
   };
 }
 
-function tableForAssociation(
-  assoc: AssociationIR,
-  ownerModule: string,
-): TableShape {
+function tableForAssociation(assoc: AssociationIR, ownerModule: string): TableShape {
   const ownerTable = plural(snake(assoc.ownerAgg));
   const targetTable = plural(snake(assoc.targetAgg));
   const idType = idColumnType(assoc.valueType);
@@ -431,11 +416,7 @@ function columnTypeEqual(a: ColumnType, b: ColumnType): boolean {
   return true;
 }
 
-function findPrimaryStorageBinding(
-  sys: SystemIR,
-  m: ModuleIR,
-  ownerName: string,
-): string | null {
+function findPrimaryStorageBinding(sys: SystemIR, m: ModuleIR, ownerName: string): string | null {
   const d = sys.deployables.find((x) => x.name === ownerName);
   if (!d) return null;
   const b = d.moduleBindings.find((mb) => mb.moduleName === m.name);
@@ -469,10 +450,7 @@ function describeMigration(steps: MigrationStep[]): string {
 }
 
 function tableToPascal(name: string): string {
-  return name
-    .split("_")
-    .map(upperFirst)
-    .join("");
+  return name.split("_").map(upperFirst).join("");
 }
 
 function columnToPascal(name: string): string {

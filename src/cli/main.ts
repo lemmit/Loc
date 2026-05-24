@@ -20,8 +20,8 @@ import { generateTypeScript } from "../platform/hono/v4/emit.js";
 // the version-agnostic shared emitter.
 import { BACKEND_PINS as HONO_V4_PINS } from "../platform/hono/v4/pins.js";
 import { generateSystemsFromLoom } from "../system/index.js";
-import { fsSnapshotStore } from "../system/snapshot.js";
 import { captureSnapshots } from "../system/loomsnap.js";
+import { fsSnapshotStore } from "../system/snapshot.js";
 import {
   renderVerdictGraph,
   renderVerificationJson,

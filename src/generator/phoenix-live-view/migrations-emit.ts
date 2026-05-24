@@ -45,11 +45,7 @@ export function emitMigrations(
   }
 }
 
-function emitInitial(
-  m: MigrationsIR,
-  appModule: string,
-  out: Map<string, string>,
-): void {
+function emitInitial(m: MigrationsIR, appModule: string, out: Map<string, string>): void {
   // Three classes of table, separated so timestamps preserve the
   // create-order required by FK targets:
   //   - aggregate (no cascade FK) → BASE + i
@@ -59,8 +55,8 @@ function emitInitial(
   //     → BASE + N*100 + joinIdx
   // Matches the pre-refactor Phoenix scheme byte-for-byte, including
   // the gap between parent and part blocks.
-  const createSteps = m.steps.filter((s): s is Extract<MigrationStep, { op: "createTable" }> =>
-    s.op === "createTable",
+  const createSteps = m.steps.filter(
+    (s): s is Extract<MigrationStep, { op: "createTable" }> => s.op === "createTable",
   );
   const allTables = createSteps.map((s) => s.table);
   const joinTables = allTables.filter(isJoinTable);
@@ -110,11 +106,7 @@ function writeInitialFile(
   out.set(path, body);
 }
 
-function renderInitialFile(
-  table: TableShape,
-  migrationName: string,
-  appModule: string,
-): string {
+function renderInitialFile(table: TableShape, migrationName: string, appModule: string): string {
   const idCol = table.columns.find((c) => c.name === "id");
   const pkType = idCol ? ectoPrimaryKeyType(idCol.type) : ":uuid";
   const otherCols = table.columns.filter((c) => c.name !== "id");
@@ -178,11 +170,7 @@ end
 `;
 }
 
-function emitDelta(
-  m: MigrationsIR,
-  appModule: string,
-  out: Map<string, string>,
-): void {
+function emitDelta(m: MigrationsIR, appModule: string, out: Map<string, string>): void {
   const path = `priv/repo/migrations/${m.version}_${snake(m.name)}.exs`;
   out.set(path, renderDeltaFile(m, appModule));
 }

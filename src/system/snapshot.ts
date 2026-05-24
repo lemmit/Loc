@@ -34,9 +34,7 @@ export function fsSnapshotStore(root: string): SnapshotStore {
   };
 }
 
-export function memorySnapshotStore(
-  initial: Record<string, SchemaSnapshot> = {},
-): SnapshotStore {
+export function memorySnapshotStore(initial: Record<string, SchemaSnapshot> = {}): SnapshotStore {
   return {
     read(module: string): SchemaSnapshot | null {
       return initial[module] ?? null;

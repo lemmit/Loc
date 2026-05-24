@@ -136,9 +136,7 @@ function enrichSystem(
 function assignMigrationsOwner(m: ModuleIR, deployables: DeployableIR[]): ModuleIR {
   const explicit = deployables.find((d) =>
     d.moduleBindings.some(
-      (mb) =>
-        mb.moduleName === m.name &&
-        mb.storages.some((s) => s.role === "primary"),
+      (mb) => mb.moduleName === m.name && mb.storages.some((s) => s.role === "primary"),
     ),
   );
   if (explicit) return { ...m, migrationsOwner: explicit.name };

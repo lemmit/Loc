@@ -14,7 +14,10 @@ const EMPTY_SNAP: SchemaSnapshot = {
   tables: [],
 };
 
-function ir(steps: MigrationsIR["steps"], opts: { version?: string; name?: string } = {}): MigrationsIR {
+function ir(
+  steps: MigrationsIR["steps"],
+  opts: { version?: string; name?: string } = {},
+): MigrationsIR {
   return {
     module: "Sales",
     storageName: "",
