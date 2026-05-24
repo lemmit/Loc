@@ -702,8 +702,14 @@ BindEntry:
 // Members
 // ---------------------------------------------------------------------------
 
+// `money` admitted as a property name so pre-existing files that
+// named a field `money` (e.g. `pokemon-world.ddd`) keep parsing —
+// adding `money` to the grammar in #498 made it a hard keyword
+// which `name=ID` couldn't admit.  Treat it as a soft keyword in
+// identifier positions everywhere; the only hard-keyword positions
+// remain `PrimitiveType` and `MoneyLit`.
 Property:
-    name=ID ':' type=TypeRef (display?='display')? (provenanced?='provenanced')? sensitivity=SensitivityClause? ('check' check=Expression)?;
+    name=(ID | 'money') ':' type=TypeRef (display?='display')? (provenanced?='provenanced')? sensitivity=SensitivityClause? ('check' check=Expression)?;
 
 // Information-flow sensitivity tag(s) on a property.  Tags are bare
 // identifiers, opaque to the compiler — `pii`, `phi`, `cred` are
@@ -758,7 +764,15 @@ LooseName returns string:
     | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
     | 'design' | 'targets'
     | 'bind' | 'api'
-    | 'primary' | 'cache' | 'search' | 'events' | 'bi';
+    | 'primary' | 'cache' | 'search' | 'events' | 'bi'
+    // `money` is a soft keyword — the only places it acts as a
+    // hard keyword are `PrimitiveType` (`amount: money`) and
+    // `MoneyLit` (`money("10.50")`).  Admitting it here lets
+    // pre-existing .ddd files keep using `money` as an ordinary
+    // identifier in field / parameter / property positions; without
+    // this, adding `money` to the grammar (#498) silently broke any
+    // file that named a field `money` (e.g. `pokemon-world.ddd`).
+    | 'money';
 
 // ---------------------------------------------------------------------------
 // Type references
@@ -1009,7 +1023,13 @@ NameRefIdent returns string:
     // `api` is admissible so e2e test bodies can use the existing
     // `api.<aggregate>.<verb>(...)` magic-identifier form even
     // though `api` is now a system-level keyword (Api declaration).
-    ID | 'permissions' | 'ui' | 'api';
+    // `money` admitted so pre-existing field names like `money:
+    // int` (pokemon-world.ddd) can still be referenced in expression
+    // position without colliding with the `MoneyLit` `money("...")`
+    // form.  MoneyLit comes before NameRef in PrimaryExpr, so the
+    // parser picks the literal form whenever `(` follows and falls
+    // back to NameRef otherwise.
+    ID | 'permissions' | 'ui' | 'api' | 'money';
 
 // ---------------------------------------------------------------------------
 // Terminals

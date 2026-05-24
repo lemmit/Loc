@@ -92,6 +92,66 @@ context Billing {
 }
 `;
 
+describe("money — soft keyword (backward-compat with pre-#498 .ddd)", () => {
+  // `money` is a hard keyword only in `PrimitiveType` (`amount:
+  // money`) and `MoneyLit` (`money("…")`).  Everywhere else —
+  // field / parameter / property names, expression NameRefs — it
+  // must remain admissible as an identifier so pre-existing files
+  // that named a field `money` (like web/src/examples/pokemon-
+  // world.ddd) keep parsing cleanly.  Without this, adding the
+  // `money` primitive in #498 silently broke any file using
+  // `money` as an identifier.
+
+  it("`money` may name a field of any type", async () => {
+    const { parseValid } = await import("../_helpers/parse.js");
+    await parseValid(`
+      context Game {
+        aggregate Trainer {
+          money: int
+          badges: int
+          invariant money >= 0
+          invariant badges <= money
+        }
+        repository Trainers for Trainer { }
+      }
+    `);
+  });
+
+  it("`money` may name an operation parameter", async () => {
+    const { parseValid } = await import("../_helpers/parse.js");
+    await parseValid(`
+      context Game {
+        aggregate Trainer {
+          balance: int
+          operation deposit(money: int) {
+            balance := balance + money
+          }
+        }
+        repository Trainers for Trainer { }
+      }
+    `);
+  });
+
+  it("`money` in expression position resolves through the env (not as a money literal)", async () => {
+    const m = await linkedModel(`
+      context Game {
+        aggregate Trainer {
+          money: int
+          derived doubled: int = money + money
+        }
+        repository Trainers for Trainer { }
+      }
+    `);
+    const trainer = findAgg(m, "Trainer");
+    const doubled = derivedExpr(trainer, "doubled");
+    const t = typeOf(doubled, envForNode(doubled));
+    expect(t.kind).toBe("primitive");
+    // The field's declared type wins — `money` references resolve
+    // to the `int` field, not to the `money` primitive constructor.
+    expect((t as { name: string }).name).toBe("int");
+  });
+});
+
 describe('money — literal form `money("...")`', () => {
   // `money(...)` is a primary expression form for a precise-decimal
   // literal — analogous to `now()` for datetime.  The string argument
