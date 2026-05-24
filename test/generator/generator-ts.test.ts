@@ -882,8 +882,9 @@ describe("typescript generator", () => {
     const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
     const wf = files.get("http/workflows.ts")!;
 
-    // Imports + Zod schema for params.
-    expect(wf).toMatch(/import \{ Customer \} from "..\/domain\/customer"/);
+    // Imports + Zod schema for params. The Customer class itself isn't
+    // imported here — the workflow only references `Customer id`
+    // (lowered to a brand) and uses the CustomerRepository value.
     expect(wf).toMatch(
       /import \{ CustomerRepository \} from "..\/db\/repositories\/customer-repository"/,
     );
