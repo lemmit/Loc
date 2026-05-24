@@ -170,7 +170,11 @@ function renderWorkflowStmt(
 
     case "repo-let": {
       const argList = st.args.map((a) => renderExpr(a, renderCtx)).join(", ");
-      const action = `${snake(st.method)}_${snake(st.aggName)}`;
+      // The auto-generated `getById` finder maps to Ash's primary-key read
+      // code-interface, which is just `get_<resource>/1` — `get_by_id_<res>`
+      // would name a separate `:by_id` read action that doesn't exist.
+      const action =
+        st.method === "getById" ? `get_${snake(st.aggName)}` : `${snake(st.method)}_${snake(st.aggName)}`;
       const call = argList
         ? `${contextModule}.${action}(${argList})`
         : `${contextModule}.${action}()`;
