@@ -292,7 +292,7 @@ function numericLiteral(e: ExprIR): number | null {
   // (`0`, `0.01`, `1000000`) the JS-number round-trip is exact; for
   // truly money-grade magnitudes the classification will silently
   // skip via the `Number.isFinite` gate below.
-  if (e.lit !== "int" && e.lit !== "decimal" && e.lit !== "money") return null;
+  if (e.lit !== "int" && e.lit !== "long" && e.lit !== "decimal" && e.lit !== "money") return null;
   const n = Number(e.value);
   return Number.isFinite(n) ? n : null;
 }

@@ -32,7 +32,7 @@ fastest way to read this matrix concretely.
 | `aggregate` | Class with private state, factory, ops, derived getters, `pullEvents()` | Sealed class with private state, factory, ops, derived getters, `PullEvents()` | List + Detail + New page; api hooks |
 | `entity` part | Same as aggregate but with `_parentId` | Same as aggregate; mapped via `OwnsMany` | Sub-table on detail page, master-detail row testids |
 | `contains` (collection) | Drizzle table with `parent_id` FK; auto-loaded in repo | EF owned-collection; auto-loaded by tracker | Sub-table on detail; not editable in the create form |
-| `X id[]` (reference collection) | Auto-derived many-to-many **join table** with composite PK + `ordinal` column; save diff-syncs join rows, load orders by `ordinal`. `this.<field>.contains(param)` is queryable (subquery against the join table). | (not yet supported — emitter falls through to a text column) | `X id[]` appears in the wire shape as `string[]`; populated/displayed via the response, but no first-class editor yet |
+| `X id[]` (reference collection) | Auto-derived many-to-many **join table** with composite PK + `ordinal` column; save diff-syncs join rows, load orders by `ordinal`. `this.<field>.contains(param)` is queryable (subquery against the join table). | EF Core join entity + `DbSet<JoinEntity>` (composite PK + `Ordinal`); `GetByIdAsync` loads via the join entity, `SaveAsync` diff-syncs (delete removed / upsert with ordinal); `.contains(param)` lowers to `_db.<JoinDbSet>.Any(...)`. (Phoenix/Ash backend: `many_to_many ... through <JoinResource>` + a `calculate :<field>, {:array, :uuid}, expr(<rel>.id)` to keep the wire shape; `.contains` lowers to `exists(<rel>, id == ^arg(:<param>))`. Ordinal column present but not yet populated per-row — set semantics for now.) | `X id[]` appears in the wire shape as `string[]`; populated/displayed via the response, but no first-class editor yet |
 | `derived` | Getter that calls into the expression | Computed property that calls into the expression | Read-only field on detail; included in the response Zod schema |
 | `invariant` | Private `_assertInvariants()` called at the end of every mutator | Private `AssertInvariants()` called at the end of every mutator | (enforced server-side; surfaces as 400 in the UI) |
 | `provenanced` property | `domain/provenance.ts` SDK + `recordTrace(...)` after each write; `ddd snapshot` captures rule snapshots to `.loom/snapshots/*.loomsnap.json` | (keyword parsed; no trace code emitted) | (n/a — wire shape unaffected) |
@@ -672,14 +672,16 @@ Out of scope for v1 (intentional):
 - **Typeahead lookups for `X id` form fields**: rendered as plain
   text inputs.  A future enhancement could resolve `Customer id`
   to a `<Select>` populated from `useAllCustomers()`.
-- **Reference collections on `.NET` / Phoenix**: `X id[]` is fully
-  persisted and queryable on the TypeScript backend (join table with
-  ordinal + `.contains(...)` subquery); the .NET (EF) and Phoenix
-  (Ash) emitters still drop the field into a text column.  Adoption
-  on those backends is mechanical — the platform-neutral
-  `AssociationIR` is already derived during enrichment, so each
-  emitter only needs its own join-table mapping and load/save
-  passes.
+- **Per-row ordinal preservation on Phoenix `X id[]`**: TypeScript and
+  .NET write `ordinal: i` on every `+=` (TS: `onConflictDoUpdate set
+  ordinal`, .NET: `__row.Ordinal = __i`), so the round-trip preserves
+  order.  Phoenix's `Ash.Changeset.manage_relationship` doesn't yet
+  inject ordinal per row, so the join column is nullable + defaulted
+  to `0` and order is not preserved.  Compiles cleanly, no runtime
+  failure — but cross-backend order parity is a follow-up.  Fix path
+  is a custom `change fn changeset, _ctx -> …` block that resolves the
+  current count + writes ordinal alongside the `manage_relationship`
+  call.
 - **Server-side rendering**: client-only Vite.  Next.js variant
   would be a separate platform.
 - **Generated CI / k8s manifests**: project-init concerns, not

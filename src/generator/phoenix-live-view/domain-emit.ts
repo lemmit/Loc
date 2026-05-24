@@ -105,7 +105,7 @@ function renderAggregateResource(
     ${persistedFields.map((f) => renderAttribute(f, ctxModule)).join("\n    ")}
     timestamps()
   end
-${renderRelationships(agg.contains, associations, ctxModule, agg)}${renderAggregates(agg.derived, agg.contains)}${renderCalculations(agg.derived, associations, renderCtx, agg)}${renderValidations(agg.invariants, renderCtx, new Set(agg.fields.map((f) => f.name)))}${renderActions(agg, ctx, renderCtx, ctxModule)}${renderHelperFunctions(agg.functions, renderCtx)}
+${renderRelationships(agg.contains, associations, ctxModule, agg)}${renderAggregates(agg.derived, agg.contains)}${renderCalculations(agg.derived, associations, renderCtx, agg)}${renderPreparations(associations, agg)}${renderValidations(agg.invariants, renderCtx, new Set(agg.fields.map((f) => f.name)))}${renderActions(agg, ctx, renderCtx, ctxModule)}${renderHelperFunctions(agg.functions, renderCtx)}
 end
 `;
 }
@@ -249,6 +249,22 @@ function renderAggregates(derived: DerivedIR[], contains: ContainmentIR[]): stri
   }
   if (lines.length === 0) return "";
   return `\n  aggregates do\n${lines.join("\n")}\n  end\n`;
+}
+
+// ---------------------------------------------------------------------------
+// Preparations (global read preparations)
+// ---------------------------------------------------------------------------
+
+/** When the aggregate has reference-collection fields, the calculations
+ *  that re-expose them as `{:array, :uuid}` (see renderCalculations) need
+ *  to be loaded on every read for the wire shape to materialise — Ash
+ *  calculations are opt-in by default.  Emit a `preparations do prepare
+ *  build(load: […]) end` block that applies to every read action on the
+ *  resource (default `:read` + each custom `find`). */
+function renderPreparations(associations: AssociationIR[], _agg: AggregateIR): string {
+  if (associations.length === 0) return "";
+  const fieldNames = associations.map((a) => `:${snake(a.fieldName)}`).join(", ");
+  return `\n  preparations do\n    prepare build(load: [${fieldNames}])\n  end\n`;
 }
 
 function renderCalculations(
