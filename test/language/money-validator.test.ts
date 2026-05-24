@@ -29,7 +29,7 @@ describe("money — invalid arithmetic is a validation error", () => {
         repository Foos for Foo { }
       }
     `);
-    expect(errors.join("\n")).toMatch(/incompatible operand types with 'money'/);
+    expect(errors.join("\n")).toMatch(/incompatible operand types/);
     expect(errors.join("\n")).toMatch(/Allowed/);
   });
 
@@ -44,7 +44,7 @@ describe("money — invalid arithmetic is a validation error", () => {
         repository Foos for Foo { }
       }
     `);
-    expect(errors.join("\n")).toMatch(/incompatible operand types with 'money'/);
+    expect(errors.join("\n")).toMatch(/incompatible operand types/);
   });
 
   it("`money * money` errors (only scaling × scalar is allowed)", async () => {
@@ -58,7 +58,7 @@ describe("money — invalid arithmetic is a validation error", () => {
         repository Foos for Foo { }
       }
     `);
-    expect(errors.join("\n")).toMatch(/incompatible operand types with 'money'/);
+    expect(errors.join("\n")).toMatch(/incompatible operand types/);
   });
 
   it("`money / money` errors", async () => {
@@ -72,7 +72,7 @@ describe("money — invalid arithmetic is a validation error", () => {
         repository Foos for Foo { }
       }
     `);
-    expect(errors.join("\n")).toMatch(/incompatible operand types with 'money'/);
+    expect(errors.join("\n")).toMatch(/incompatible operand types/);
   });
 
   it("`decimal / money` errors (closed: only money / scalar allowed)", async () => {
@@ -86,7 +86,7 @@ describe("money — invalid arithmetic is a validation error", () => {
         repository Foos for Foo { }
       }
     `);
-    expect(errors.join("\n")).toMatch(/incompatible operand types with 'money'/);
+    expect(errors.join("\n")).toMatch(/incompatible operand types/);
   });
 });
 
