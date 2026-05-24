@@ -288,6 +288,8 @@ function zodForRow(t: TypeIR, enumValues: Map<string, string[]>): string {
           return "z.number().int()";
         case "decimal":
           return "z.number()";
+        case "money":
+          return "z.string()";
         case "string":
         case "guid":
           return "z.string()";

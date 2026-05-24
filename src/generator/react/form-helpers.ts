@@ -48,6 +48,7 @@ export function needsController(
         inner.name === "int" ||
         inner.name === "long" ||
         inner.name === "decimal" ||
+        inner.name === "money" ||
         inner.name === "bool"
       );
     }
@@ -128,6 +129,8 @@ function initialValueTs(t: TypeIR, ctx: BoundedContextIR, optional: boolean): st
       case "long":
       case "decimal":
         return "0";
+      case "money":
+        return `new Decimal("0")`;
       case "bool":
         return "false";
       case "datetime":

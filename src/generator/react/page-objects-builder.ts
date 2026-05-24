@@ -244,6 +244,11 @@ export function fillBlock(
       lines.push(`  await this.page.getByTestId("${testId}").fill(${accessor}!.slice(0, 19));`);
     } else if (inner.name === "int" || inner.name === "long" || inner.name === "decimal") {
       lines.push(`  await this.page.getByTestId("${testId}").fill(String(${accessor}));`);
+    } else if (inner.name === "money") {
+      // Money form fields render as text inputs; the test passes a
+      // Decimal instance (or string) and we fill its .toString()
+      // value so the precise wire-shape is what hits the form.
+      lines.push(`  await this.page.getByTestId("${testId}").fill(String(${accessor}));`);
     } else {
       lines.push(`  await this.page.getByTestId("${testId}").fill(${accessor}!);`);
     }

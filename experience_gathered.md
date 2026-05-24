@@ -700,3 +700,36 @@ or not.
   project from a single context), so the workspace mechanics would
   add error surface without buying anything.  Keep the seam at the
   one subcommand whose output model is "many things composed."
+- **`money` is additive to `decimal`, not a migration.**  `decimal`'s
+  JSON-number wire was a JS-friendly compromise that all original
+  backends (TS/Hono, .NET, Phoenix, React) silently tolerated.  Adding
+  a precise-decimal backend (Rust) forced the wire decision; rather
+  than migrating `decimal` to string-on-wire (which would have cost
+  an arithmetic-site rewrite in every TS/React generated project), a
+  new `money` primitive was introduced — string-on-wire (OpenAPI
+  `{type: string, format: decimal}`, the PayPal/Coinbase/ISO 20022
+  convention), closed arithmetic (`money ± money = money`, scaling
+  by int/long/decimal preserves money, anything else rejected), and
+  a constructor literal `money("…")` (Rust-friendly: every host
+  Decimal parses from string).  Existing `.ddd` source files don't
+  change.  Three design decisions worth their own bullet:
+  * **Binary IR carries `leftType` / `resultType`.**  Backends today
+    re-derive operand types from operator heuristics; money
+    arithmetic (TS `.plus()`, Phoenix `Decimal.add/2`) can't be
+    emitted without operand-type information.  Threading the types
+    through the binary node at lowering time lets every backend —
+    current and future — emit money-aware code without re-running
+    inference.
+  * **Phoenix `Decimal.compare/2` isn't a token swap.**  Elixir's
+    Decimal comparison returns `:lt | :eq | :gt`, not a boolean — so
+    `${l} ${op} ${r}` doesn't fit and the renderer needs an
+    expression-shape branch for money operands (`Decimal.compare(a,
+    b) == :gt` for `>`, `in [:lt, :eq]` for `<=`).
+  * **Money invariants run server-side only.**  Client-side JS can't
+    compare `Decimal` instances faithfully via host operators; both
+    the single-field-chain absorption (`.min(N)`) and the `.refine`
+    fallback would emit broken predicates.  The
+    `classifyForWire` gate rejects any expression with a money
+    literal or money-typed binary operand, leaving the aggregate's
+    server-side `_assertInvariants` (which renders via `.gte()` /
+    `.lte()`) as the sole enforcement.

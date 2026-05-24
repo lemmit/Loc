@@ -42,7 +42,7 @@ interface JsonSchemaObject {
 }
 
 type JsonSchemaProperty =
-  | { type: "string"; format?: "date-time" | "uuid" }
+  | { type: "string"; format?: "date-time" | "uuid" | "decimal" }
   | { type: "number" }
   | { type: "integer" }
   | { type: "boolean" }
@@ -102,7 +102,7 @@ function objectSchemaFromWireShape(fields: WireField[]): JsonSchemaObject {
   };
 }
 
-function jsonPropertyForType(t: TypeIR): JsonSchemaProperty {
+export function jsonPropertyForType(t: TypeIR): JsonSchemaProperty {
   switch (t.kind) {
     case "primitive":
       switch (t.name) {
@@ -111,6 +111,12 @@ function jsonPropertyForType(t: TypeIR): JsonSchemaProperty {
           return { type: "integer" };
         case "decimal":
           return { type: "number" };
+        case "money":
+          // Precise decimal — string-on-wire per OpenAPI finance
+          // convention.  Every backend's host-language precise-decimal
+          // type (decimal.js, System.Decimal, Elixir Decimal, rust_decimal)
+          // round-trips through a JSON string without precision loss.
+          return { type: "string", format: "decimal" };
         case "string":
           return { type: "string" };
         case "bool":

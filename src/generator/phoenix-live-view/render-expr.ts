@@ -56,7 +56,7 @@ export function renderExpr(e: ExprIR, ctx: RenderCtx = DEFAULT): string {
     case "unary":
       return renderUnary(e.op, e.operand, ctx);
     case "binary":
-      return renderBinary(e.op, e.left, e.right, ctx);
+      return renderBinary(e.op, e.left, e.right, e.leftType, ctx);
     case "ternary":
       // Lower to `if … do … else … end`
       return `if ${renderExpr(e.cond, ctx)}, do: ${renderExpr(e.then, ctx)}, else: ${renderExpr(e.otherwise, ctx)}`;
@@ -75,6 +75,7 @@ function renderLiteral(lit: string, value: string): string {
   if (lit === "bool") return value === "true" ? "true" : "false";
   if (lit === "now") return "DateTime.utc_now()";
   if (lit === "decimal") return value; // Elixir decimals are plain numbers
+  if (lit === "money") return `Decimal.new(${JSON.stringify(value)})`;
   // int
   return value;
 }
@@ -258,15 +259,58 @@ function isStringType(e: ExprIR): boolean {
   return false;
 }
 
-function renderBinary(op: BinOp, left: ExprIR, right: ExprIR, ctx: RenderCtx): string {
+function renderBinary(
+  op: BinOp,
+  left: ExprIR,
+  right: ExprIR,
+  leftType: TypeIR | undefined,
+  ctx: RenderCtx,
+): string {
   const l = renderExpr(left, ctx);
   const r = renderExpr(right, ctx);
+  // Money operands cannot use the native `+`/`*`/`>` operators in
+  // Elixir — `Decimal` is a struct.  Arithmetic dispatches through
+  // `Decimal.add/2` / `mult/2` / `div/2`; comparisons go through
+  // `Decimal.compare/2` (returns `:lt | :eq | :gt` — three tokens,
+  // not a single operator, so the result shape isn't `${l} ${op}
+  // ${r}` like the primitive path).
+  if (leftType?.kind === "primitive" && leftType.name === "money") {
+    return renderMoneyBinary(op, l, r);
+  }
   const elOp = elixirOp(op, isStringType(left));
   if (op === "%") {
     // `rem` is a function in Elixir.
     return `rem(${l}, ${r})`;
   }
   return `${l} ${elOp} ${r}`;
+}
+
+const MONEY_ARITH: Record<string, string | undefined> = {
+  "+": "Decimal.add",
+  "-": "Decimal.sub",
+  "*": "Decimal.mult",
+  "/": "Decimal.div",
+};
+
+const MONEY_COMPARE: Record<string, string | undefined> = {
+  "==": ":eq",
+  "<": ":lt",
+  "<=": ":lt_or_eq",
+  ">": ":gt",
+  ">=": ":gt_or_eq",
+};
+
+function renderMoneyBinary(op: BinOp, l: string, r: string): string {
+  const arithFn = MONEY_ARITH[op];
+  if (arithFn) return `${arithFn}(${l}, ${r})`;
+  if (op === "==") return `Decimal.compare(${l}, ${r}) == :eq`;
+  if (op === "!=") return `Decimal.compare(${l}, ${r}) != :eq`;
+  if (op === "<") return `Decimal.compare(${l}, ${r}) == :lt`;
+  if (op === "<=") return `Decimal.compare(${l}, ${r}) in [:lt, :eq]`;
+  if (op === ">") return `Decimal.compare(${l}, ${r}) == :gt`;
+  if (op === ">=") return `Decimal.compare(${l}, ${r}) in [:gt, :eq]`;
+  // Fall through for unsupported ops — surfaces in generated Elixir.
+  return `${l} ${op} ${r}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -298,6 +342,12 @@ export function renderAshType(t: TypeIR, contextModule: string): string {
         case "long":
           return ":integer";
         case "decimal":
+          return ":decimal";
+        case "money":
+          // Ash + Ecto :decimal is the canonical precise type;
+          // Decimal serialises as string via Jason by default — matches
+          // the wire-spec without extra config.  Arithmetic on these
+          // values dispatches through `Decimal.add/2` in `renderBinary`.
           return ":decimal";
         case "string":
           return ":string";

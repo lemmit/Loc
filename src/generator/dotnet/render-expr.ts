@@ -93,6 +93,12 @@ function renderLiteral(lit: string, value: string): string {
   if (lit === "now") return "DateTime.UtcNow";
   if (lit === "null") return "null";
   if (lit === "decimal") return `${value}m`;
+  // money literals carry a precise-decimal source string.  C#'s
+  // `decimal` parses precision-preserving from the same source form
+  // — `10.50m` — so the suffix is identical to `decimal`'s.  The
+  // wire serialiser (per-property `JsonNumberHandling`) is what makes
+  // money distinct on the JSON boundary.
+  if (lit === "money") return `${value}m`;
   return value;
 }
 
@@ -224,6 +230,12 @@ export function renderCsType(t: TypeIR): string {
         case "long":
           return "long";
         case "decimal":
+          return "decimal";
+        case "money":
+          // C# `decimal` is already precise — money differs from
+          // decimal only at the JSON wire boundary, where the per-
+          // property `[JsonNumberHandling]` attribute (emitted by
+          // dto-mapping.ts) forces a string encoding.
           return "decimal";
         case "string":
           return "string";

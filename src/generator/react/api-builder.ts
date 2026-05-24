@@ -327,6 +327,8 @@ function zodForRequest(t: TypeIR): string {
           return "z.number().int()";
         case "decimal":
           return "z.number()";
+        case "money":
+          return 'z.string().regex(/^-?\\d+(\\.\\d+)?$/, "must be a decimal-formatted string").transform((s) => new Decimal(s))';
         case "string":
         case "guid":
           return "z.string()";
@@ -365,6 +367,8 @@ function zodForResponseInner(t: TypeIR): string {
           return "z.number().int()";
         case "decimal":
           return "z.number()";
+        case "money":
+          return 'z.string().transform((s) => new Decimal(s))';
         case "string":
         case "guid":
           return "z.string()";

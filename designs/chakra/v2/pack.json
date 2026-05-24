@@ -13,6 +13,7 @@
     "field-input-string": "field-input-string.hbs",
     "field-input-int": "field-input-int.hbs",
     "field-input-decimal": "field-input-decimal.hbs",
+    "field-input-money": "field-input-money.hbs",
     "field-input-bool": "field-input-bool.hbs",
     "field-input-datetime": "field-input-datetime.hbs",
     "field-input-id-select": "field-input-id-select.hbs",
@@ -400,6 +401,23 @@
           "FormLabel",
           "NumberInput",
           "NumberInputField"
+        ]
+      }
+    ],
+    "field-input-money": [
+      {
+        "from": "@chakra-ui/react",
+        "named": [
+          "FormControl",
+          "FormErrorMessage",
+          "FormLabel",
+          "Input"
+        ]
+      },
+      {
+        "from": "decimal.js",
+        "named": [
+          "Decimal"
         ]
       }
     ],

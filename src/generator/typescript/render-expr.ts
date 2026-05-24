@@ -61,7 +61,7 @@ export function renderTsExpr(e: ExprIR, ctx: TsRenderContext = DEFAULT): string 
     case "unary":
       return `${e.op}${renderTsExpr(e.operand, ctx)}`;
     case "binary":
-      return renderBinary(e.op, e.left, e.right, ctx);
+      return renderBinary(e.op, e.left, e.right, e.leftType, ctx);
     case "ternary":
       return `${renderTsExpr(e.cond, ctx)} ? ${renderTsExpr(e.then, ctx)} : ${renderTsExpr(e.otherwise, ctx)}`;
     case "match": {
@@ -84,6 +84,7 @@ function renderLiteral(lit: LiteralKind, value: string): string {
   if (lit === "string") return JSON.stringify(value);
   if (lit === "now") return "new Date()";
   if (lit === "null") return "null";
+  if (lit === "money") return `new Decimal(${JSON.stringify(value)})`;
   // int, decimal, bool — value stored as source-compatible string
   return value;
 }
@@ -211,10 +212,52 @@ function renderNew(e: Extract<ExprIR, { kind: "new" }>, ctx: TsRenderContext): s
   return `${e.partName}._create({ ${inits.join(", ")} })`;
 }
 
-function renderBinary(op: BinOp, left: ExprIR, right: ExprIR, ctx: TsRenderContext): string {
+function renderBinary(
+  op: BinOp,
+  left: ExprIR,
+  right: ExprIR,
+  leftType: TypeIR | undefined,
+  ctx: TsRenderContext,
+): string {
+  // Money operands carry through as decimal.js `Decimal` instances —
+  // their JS operators don't do precise math, so dispatch through the
+  // class's method API.  Other primitives use native operators.
+  if (leftType?.kind === "primitive" && leftType.name === "money") {
+    return renderMoneyBinary(op, left, right, ctx);
+  }
   // Equality comparisons in TS: prefer === / !==
   const opPrint = op === "==" ? "===" : op === "!=" ? "!==" : op;
   return `${renderTsExpr(left, ctx)} ${opPrint} ${renderTsExpr(right, ctx)}`;
+}
+
+const MONEY_METHOD: Record<string, string | undefined> = {
+  "+": "plus",
+  "-": "minus",
+  "*": "times",
+  "/": "div",
+  "%": "mod",
+  "==": "eq",
+  "!=": "eq", // negated below
+  "<": "lt",
+  "<=": "lte",
+  ">": "gt",
+  ">=": "gte",
+};
+
+function renderMoneyBinary(
+  op: BinOp,
+  left: ExprIR,
+  right: ExprIR,
+  ctx: TsRenderContext,
+): string {
+  const method = MONEY_METHOD[op];
+  if (!method) {
+    // Unknown operator for money — fall through to native rendering
+    // so the failure surfaces in the generated source, not silently.
+    return `${renderTsExpr(left, ctx)} ${op} ${renderTsExpr(right, ctx)}`;
+  }
+  const call = `${renderTsExpr(left, ctx)}.${method}(${renderTsExpr(right, ctx)})`;
+  return op === "!=" ? `!(${call})` : call;
 }
 
 // ---------------------------------------------------------------------------
@@ -229,6 +272,12 @@ export function renderTsType(t: TypeIR): string {
         case "long":
         case "decimal":
           return "number";
+        case "money":
+          // Precise decimal — mapped to `decimal.js`'s Decimal class
+          // (default-import: `import Decimal from "decimal.js"`).
+          // Backwards-incompatible with the lossy `number` mapping
+          // `decimal` keeps; users opt in per field.
+          return "Decimal";
         case "string":
         case "guid":
           return "string";

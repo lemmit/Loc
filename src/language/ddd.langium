@@ -771,7 +771,7 @@ BaseType:
     PrimitiveType | IdType | NamedType;
 
 PrimitiveType:
-    name=('int' | 'long' | 'decimal' | 'string' | 'bool' | 'datetime' | 'guid');
+    name=('int' | 'long' | 'decimal' | 'money' | 'string' | 'bool' | 'datetime' | 'guid');
 
 IdType:
     target=[NamedDecl:ID] 'id';
@@ -940,6 +940,7 @@ PrimaryExpr infers Expression:
     | ObjectLit
     | ParenExpr
     | LiteralExpr
+    | MoneyLit
     | NowExpr
     | ThisRef
     | IdRef
@@ -970,6 +971,14 @@ LiteralExpr:
     | {infer DecLit}    value=DECIMAL
     | {infer BoolLit}   value=('true'|'false')
     | {infer NullLit}   value='null';
+
+// `money("10.50")` constructor — the source-level form for a money
+// literal.  The string argument carries the precise decimal value;
+// every backend's host-language precise-decimal type (decimal.js,
+// System.Decimal, Elixir Decimal, rust_decimal) parses from this
+// string without loss.
+MoneyLit:
+    {infer MoneyLit} 'money' '(' value=STRING ')';
 
 NowExpr:
     {infer NowExpr} 'now' '(' ')';

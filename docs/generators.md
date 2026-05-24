@@ -392,6 +392,7 @@ Form-input emission walks the field type:
 | --- | --- | --- |
 | `int` / `long` | `<NumberInput allowDecimal={false}>` | |
 | `decimal` | `<NumberInput decimalScale={2} fixedDecimalScale>` | |
+| `money` | `<TextInput inputMode="decimal">` | Precise-decimal field — value is a `Decimal` from `decimal.js`; number-mode inputs lose precision via `1e10` notation. |
 | `string` / `guid` | `<TextInput>` | |
 | `bool` | `<Switch>` | Manual `checked` / `onChange` since Mantine `<Switch>` accepts event-based onChange. |
 | `datetime` | `<TextInput type="datetime-local">` | Native datetime input — Mantine's `<DateTimePicker>` is harder to drive from Playwright; users can swap via `.loomignore` for richer UX. |

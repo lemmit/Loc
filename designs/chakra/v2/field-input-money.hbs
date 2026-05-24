@@ -1,0 +1,11 @@
+<Controller
+          control={control}
+          name="{{path}}"
+          render={({ field, fieldState }) => (
+            <FormControl isInvalid={!!fieldState.error}>
+              <FormLabel>{{label}}</FormLabel>
+              <Input type="text" inputMode="decimal" pattern="^-?\d+(\.\d+)?$" value={field.value instanceof Decimal ? field.value.toString() : String(field.value ?? "0")} onChange={(e) => { try { field.onChange(new Decimal(e.target.value || "0")); } catch { field.onChange(new Decimal("0")); } }} data-testid="{{testId}}" />
+              <FormErrorMessage>{fieldState.error?.message}</FormErrorMessage>
+            </FormControl>
+          )}
+        />

@@ -11,7 +11,8 @@
   "dependencies": {
 {{> stack-package-deps}},
     "@chakra-ui/react": "^3.2.0",
-    "@emotion/react": "^11.13.0"
+    "@emotion/react": "^11.13.0"{{#if usesMoney}},
+    "decimal.js": "^10.4.3"{{/if}}
   },
   "devDependencies": {
 {{> stack-package-devdeps}}
