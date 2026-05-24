@@ -373,7 +373,7 @@ export function typeOf(expr: Expression | undefined, env: Env): DddType {
   return T.unknown;
 }
 
-function arithmeticResult(a: DddType, b: DddType, op: string): DddType {
+export function arithmeticResult(a: DddType, b: DddType, op: string): DddType {
   // Sensitivity flows through any arithmetic or string concatenation.
   // `"Hello " + email` ⇒ string!{pii}; `(price + tax)` inherits whatever
   // tags either operand carries.
