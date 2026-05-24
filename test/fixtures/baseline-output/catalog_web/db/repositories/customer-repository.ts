@@ -1,6 +1,6 @@
 // Auto-generated.  Do not edit by hand.
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
-import { and, eq, inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import * as schema from "../schema";
 import { Customer } from "../../domain/customer";
 import * as Ids from "../../domain/ids";
@@ -9,7 +9,6 @@ import type { DomainEventDispatcher } from "../../domain/events";
 import { requestLog } from "../../obs/als";
 
 type Db = NodePgDatabase<typeof schema>;
-type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
 export class CustomerRepository {
   constructor(
@@ -25,9 +24,9 @@ export class CustomerRepository {
         return null;
       }
       const root = rootRows[0]!;
-      const __loaded = Customer._create({ id: Ids.CustomerId(root.id), username: root.username, email: root.email, age: root.age });
+      const loaded = Customer._create({ id: Ids.CustomerId(root.id), username: root.username, email: root.email, age: root.age });
       requestLog().debug({ event: "aggregate_loaded", aggregate: "Customer", id: id as string, found: true });
-      return __loaded;
+      return loaded;
     });
   }
 
@@ -63,9 +62,9 @@ export class CustomerRepository {
       requestLog().debug({ event: "find_executed", aggregate: "Customer", find: "all", rows: 0 });
       return [];
     }
-    const __result = rootRows.map((root) => Customer._create({ id: Ids.CustomerId(root.id), username: root.username, email: root.email, age: root.age }));
-    requestLog().debug({ event: "find_executed", aggregate: "Customer", find: "all", rows: __result.length });
-    return __result;
+    const result = rootRows.map((root) => Customer._create({ id: Ids.CustomerId(root.id), username: root.username, email: root.email, age: root.age }));
+    requestLog().debug({ event: "find_executed", aggregate: "Customer", find: "all", rows: result.length });
+    return result;
   }
 
   async byEmail(email: string): Promise<Customer | null> {
@@ -74,9 +73,9 @@ export class CustomerRepository {
       requestLog().debug({ event: "find_executed", aggregate: "Customer", find: "byEmail", rows: 0 });
       return null;
     }
-    const __result = await this.findById(rootRows[0]!.id as Ids.CustomerId) as Customer | null;
-    requestLog().debug({ event: "find_executed", aggregate: "Customer", find: "byEmail", rows: __result == null ? 0 : 1 });
-    return __result;
+    const result = await this.findById(rootRows[0]!.id as Ids.CustomerId) as Customer | null;
+    requestLog().debug({ event: "find_executed", aggregate: "Customer", find: "byEmail", rows: result == null ? 0 : 1 });
+    return result;
   }
 
   toWire(root: Customer): unknown {

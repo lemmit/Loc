@@ -42,6 +42,13 @@ export function wireType(t: TypeIR, ctx: BoundedContextIR, dir: "request" | "res
       // don't have to care which platform served the response.  The
       // command-argument helpers below parse / format around this.
       if (t.name === "datetime") return "string";
+      // money crosses as a precise-decimal string (OpenAPI
+      // `{type: string, format: decimal}`).  The DTO property is
+      // typed `string`; `wireToCommandArgument` parses it to
+      // `System.Decimal`, `projectToResponse` re-formats with
+      // `ToString(CultureInfo.InvariantCulture)`.  Per-field
+      // serialisation contract — non-money decimals stay JSON numbers.
+      if (t.name === "money") return "string";
       return renderCsType(t);
     case "id":
       return csIdValueClrType("guid");
@@ -77,6 +84,12 @@ export function wireToCommandArgument(
         usings?.add("System.Globalization");
         return `DateTime.Parse(${expr}, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal)`;
       }
+      if (t.name === "money") {
+        // Wire string → System.Decimal.  InvariantCulture so a comma
+        // vs. dot locale on the server doesn't flip the parse.
+        usings?.add("System.Globalization");
+        return `decimal.Parse(${expr}, CultureInfo.InvariantCulture)`;
+      }
       return expr;
     case "id":
       return `new ${t.targetName}Id(${expr})`;
@@ -108,6 +121,12 @@ export function projectToResponse(domainExpr: string, t: TypeIR, ctx: BoundedCon
         // clients see one shape regardless of which backend served them.
         return `${domainExpr}.ToUniversalTime().ToString("o")`;
       }
+      if (t.name === "money") {
+        // System.Decimal → wire string.  InvariantCulture so a comma
+        // vs. dot locale doesn't drift across servers.  Cross-backend
+        // parity with Hono's `Decimal.toString()` shape.
+        return `${domainExpr}.ToString(System.Globalization.CultureInfo.InvariantCulture)`;
+      }
       return domainExpr;
     case "id":
       return `${domainExpr}.Value`;
@@ -132,12 +151,15 @@ export function projectToResponse(domainExpr: string, t: TypeIR, ctx: BoundedCon
     }
     case "array":
       return `${domainExpr}.Select(__e => ${projectToResponse("__e", t.element, ctx)}).ToList()`;
-    case "optional":
-      // `is { } __v` pattern works for both nullable value types
-      // (Nullable<T>, requires .Value to unwrap) and nullable reference
-      // types — binds the unwrapped value so the inner recursion's
-      // `.ToUniversalTime()` / `.Value` etc. type-check correctly.
-      return `(${domainExpr} is { } __v ? ${projectToResponse("__v", t.inner, ctx)} : null)`;
+    case "optional": {
+      // After `is null ? null : …` C# doesn't narrow `T?` to `T`,
+      // so calls like `dt.ToUniversalTime()` on `DateTime?` fail
+      // with CS1061.  Unwrap explicitly per inner type: value types
+      // use `.Value`; reference types use `!` to suppress the
+      // nullable warning while keeping the same expression text.
+      const unwrap = csIsValueType(t.inner) ? `${domainExpr}.Value` : `${domainExpr}!`;
+      return `(${domainExpr} is null ? null : ${projectToResponse(unwrap, t.inner, ctx)})`;
+    }
   }
 }
 
@@ -171,10 +193,32 @@ export function domainToRequestExpr(domainExpr: string, t: TypeIR, ctx: BoundedC
       return domainExpr;
     case "array":
       return `${domainExpr}.Select(__e => ${domainToRequestExpr("__e", t.element, ctx)}).ToList()`;
+    case "optional": {
+      // See projectToResponse's optional case — same CS1061 trap
+      // when the inner is a value type (e.g. `DateTime?`).
+      const unwrap = csIsValueType(t.inner) ? `${domainExpr}.Value` : `${domainExpr}!`;
+      return `(${domainExpr} is null ? null : ${domainToRequestExpr(unwrap, t.inner, ctx)})`;
+    }
+  }
+}
+
+/** True when `t` lowers to a C# value type (`struct` / `record
+ *  struct` / primitive enum), so a `T?` field is `Nullable<T>` and
+ *  must be unwrapped with `.Value` before any method call.  Reference
+ *  types (record classes for VOs, sealed classes for entities, `List`
+ *  for arrays) can use the null-forgiving `!` operator instead. */
+function csIsValueType(t: TypeIR): boolean {
+  switch (t.kind) {
+    case "primitive":
+    case "id":
+    case "enum":
+      return true;
+    case "valueobject":
+    case "entity":
+    case "array":
+      return false;
     case "optional":
-      // See projectToResponse — same pattern unwraps Nullable<T> for both
-      // value and reference inner types.
-      return `(${domainExpr} is { } __v ? ${domainToRequestExpr("__v", t.inner, ctx)} : null)`;
+      return csIsValueType(t.inner);
   }
 }
 

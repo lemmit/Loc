@@ -13,7 +13,10 @@
       "!src/language/generated",
       "!test/fixtures",
       "!**/__snapshots__",
-      "!**/*.d.ts"
+      "!**/*.d.ts",
+      "!out",
+      "!coverage",
+      "!node_modules"
     ]
   },
   "formatter": {

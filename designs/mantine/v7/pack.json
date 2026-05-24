@@ -13,6 +13,7 @@
     "field-input-string": "field-input-string.hbs",
     "field-input-int": "field-input-int.hbs",
     "field-input-decimal": "field-input-decimal.hbs",
+    "field-input-money": "field-input-money.hbs",
     "field-input-bool": "field-input-bool.hbs",
     "field-input-datetime": "field-input-datetime.hbs",
     "field-input-id-select": "field-input-id-select.hbs",
@@ -353,6 +354,20 @@
         "from": "@mantine/core",
         "named": [
           "NumberInput"
+        ]
+      }
+    ],
+    "field-input-money": [
+      {
+        "from": "@mantine/core",
+        "named": [
+          "TextInput"
+        ]
+      },
+      {
+        "from": "decimal.js",
+        "named": [
+          "Decimal"
         ]
       }
     ],

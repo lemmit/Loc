@@ -28,7 +28,7 @@ event  repository  for  find  where
 derived  invariant  when  function  operation  private
 precondition  emit  let  expect  expectThrows  test  new
 true  false  null  this  id
-int  long  decimal  string  bool  datetime  guid
+int  long  decimal  money  string  bool  datetime  guid
 ```
 
 ---
@@ -302,7 +302,8 @@ TypeRef    = BaseType ('[]')? ('?')?
 BaseType   = PrimitiveType | IdType | NamedType
 IdType     = Identifier 'id'                  // cross-aggregate FK
 NamedType  = Identifier                       // bare name
-PrimitiveType = 'int' | 'long' | 'decimal' | 'string' | 'bool' | 'datetime' | 'guid'
+PrimitiveType = 'int' | 'long' | 'decimal' | 'money' | 'string' | 'bool' | 'datetime' | 'guid'
+MoneyLit      = 'money' '(' STRING ')'         // precise-decimal literal
 ```
 
 A bare `Identifier` in type position must resolve to one of:
@@ -394,6 +395,48 @@ When the receiver type is `T[]`:
 
 Within arithmetic, `int < long < decimal`.  An `int` is assignable to
 `long` or `decimal`; a `long` to `decimal`.
+
+### `money` — precise decimal, distinct from `decimal`
+
+`money` is a primitive type for precise-decimal values that must
+survive the JSON wire round-trip without precision loss.  Distinct
+from `decimal` (which serialises as a JSON number and is lossy
+for high-magnitude / high-precision values).
+
+| Aspect | `decimal` | `money` |
+|---|---|---|
+| JSON wire | `number` (lossy) | `string` with `format: decimal` |
+| TS host type | `number` | `decimal.js` `Decimal` |
+| .NET host type | `System.Decimal` (lossy through JSON-number boundary) | `System.Decimal` (precise, string-on-wire) |
+| Phoenix/Ash host type | Elixir `Decimal` (lossy through Jason float) | Elixir `Decimal` (precise — Jason's default) |
+| OpenAPI | `{ type: number }` | `{ type: string, format: decimal }` (PayPal/Coinbase/ISO 20022 convention) |
+| Source-level literal | `10.50` | `money("10.50")` |
+| Arithmetic | participates in `int < long < decimal` widening | **closed**: see below |
+
+**Closed arithmetic.**  `money` does NOT participate in the
+`int → long → decimal` widening chain.  Permitted:
+* `money ± money → money`
+* `money × {int|long|decimal} → money` (commutative)
+* `money ÷ {int|long|decimal} → money`
+
+Everything else involving `money` (e.g. `money + decimal`, `money ×
+money`, `decimal ÷ money`) is **rejected** at the type-system layer.
+The only bridge between `decimal` and `money` is the `money("…")`
+constructor — which accepts a precise-decimal source string.
+
+**Invariants and preconditions** on money are enforced
+server-side only (the aggregate's `_assertInvariants` runs the
+`.gte()` / `.lte()` / `.eq()` checks at the precise-decimal type);
+they're NOT propagated into the wire-layer Zod / FluentValidation
+schemas, because client-side JS can't faithfully compare `Decimal`
+instances using host operators.
+
+**Best practice.**  Use `money` for fields where precision matters
+(prices, balances, tax amounts).  Use `decimal` for rates,
+percentages, and other multiplicands where JS-number precision is
+acceptable.  The two types compose naturally in scaling: `taxAmount:
+money = subtotal * taxRate` where `subtotal: money`, `taxRate:
+decimal`.
 
 ---
 

@@ -18,7 +18,11 @@ import type {
   TypeIR,
   ValueObjectIR,
 } from "../../../ir/loom-ir.js";
-import { findUsesCurrentUser, operationUsesCurrentUser } from "../../../ir/loom-ir.js";
+import {
+  aggregateUsesMoney,
+  findUsesCurrentUser,
+  operationUsesCurrentUser,
+} from "../../../ir/loom-ir.js";
 import { opHasProvSite } from "../../../ir/prov-id.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 
@@ -74,6 +78,9 @@ export function buildRoutesFile(
   const needsTx = fileHasAudit || fileHasProv;
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
+  if (aggregateUsesMoney(agg)) {
+    lines.push(`import Decimal from "decimal.js";`);
+  }
   lines.push(`import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";`);
   lines.push(`import { ${agg.name} } from "../domain/${lowerFirst(agg.name)}";`);
   lines.push(
@@ -110,11 +117,12 @@ export function buildRoutesFile(
   // (`new Money(...)` from the validated body), so the runtime classes
   // must be in scope.  Enums travel as strings on the wire — no
   // import needed.
-  if (usedVOs.length > 0) {
-    lines.push(
-      `import { ${usedVOs.map((v) => v.name).join(", ")} } from "../domain/value-objects";`,
-    );
-  }
+  // Defer the value-objects import line: emit a placeholder so the actual
+  // names + per-symbol `type` qualifiers can be derived from the assembled
+  // body below (a VO needs a runtime value only when the body constructs
+  // it with `new <Vo>(`; otherwise inline `type` keeps the import green).
+  const VO_IMPORT_PLACEHOLDER = "/* __LOOM_VO_IMPORT__ */";
+  if (usedVOs.length > 0) lines.push(VO_IMPORT_PLACEHOLDER);
   lines.push("");
 
   for (const e of usedEnums) {
@@ -251,11 +259,11 @@ export function buildRoutesFile(
     // wire_out — outbound payload shape (keys only).  Bound to a const
     // so `c.json` doesn't re-evaluate the payload expression alongside
     // Object.keys.  See docs/proposals/observability.md.
-    lines.push(`      const __out = { id: created.id as string };`);
+    lines.push(`      const out = { id: created.id as string };`);
     lines.push(
-      `      ${renderHonoLogCall("wireOut", "keys: Object.keys(__out as Record<string, unknown>)")}`,
+      `      ${renderHonoLogCall("wireOut", "keys: Object.keys(out as Record<string, unknown>)")}`,
     );
-    lines.push(`      return c.json(__out, 201);`);
+    lines.push(`      return c.json(out, 201);`);
   } else {
     lines.push(`      return c.json({ id: created.id as string }, 201);`);
   }
@@ -287,11 +295,11 @@ export function buildRoutesFile(
   if (emitTrace) {
     // toWire isn't trivial — bind once so it's not run twice between
     // Object.keys and c.json.
-    lines.push(`      const __out = repo.toWire(found);`);
+    lines.push(`      const out = repo.toWire(found);`);
     lines.push(
-      `      ${renderHonoLogCall("wireOut", "keys: Object.keys(__out as Record<string, unknown>)")}`,
+      `      ${renderHonoLogCall("wireOut", "keys: Object.keys(out as Record<string, unknown>)")}`,
     );
-    lines.push(`      return c.json(__out as z.infer<typeof ${agg.name}Response>, 200);`);
+    lines.push(`      return c.json(out as z.infer<typeof ${agg.name}Response>, 200);`);
   } else {
     lines.push(
       `      return c.json(repo.toWire(found) as z.infer<typeof ${agg.name}Response>, 200);`,
@@ -377,7 +385,35 @@ export function buildRoutesFile(
   lines.push("");
   lines.push(`  return app;`);
   lines.push(`}`);
-  return lines.join("\n") + "\n";
+  // Patch the deferred VO import: keep only names the body actually
+  // references; tag each as `type` unless the body constructs it via
+  // `new <Vo>(`.
+  const assembled = lines.join("\n");
+  if (usedVOs.length > 0) {
+    const usedNames = usedVOs.map((v) => v.name);
+    // Strip string-literal contents before scanning so `.openapi("Quantity")`
+    // doesn't count as a reference to the `Quantity` symbol.
+    const rawAfterImport = assembled.slice(assembled.indexOf(VO_IMPORT_PLACEHOLDER));
+    const bodyAfterImport = rawAfterImport
+      .replace(/"(?:\\.|[^"\\])*"/g, '""')
+      .replace(/'(?:\\.|[^'\\])*'/g, "''")
+      .replace(/`(?:\\.|[^`\\])*`/g, "``");
+    const referenced = usedNames.filter((n) => new RegExp(`\\b${n}\\b`).test(bodyAfterImport));
+    const isValue = (n: string): boolean => new RegExp(`new\\s+${n}\\(`).test(bodyAfterImport);
+    const anyValue = referenced.some(isValue);
+    // When every referenced VO is type-only, emit the whole-import form
+    // `import type { … }` (Biome's useImportType prefers it over inline
+    // `type` qualifiers when all named imports are type-only).
+    let replacement = "";
+    if (referenced.length > 0 && !anyValue) {
+      replacement = `import type { ${referenced.join(", ")} } from "../domain/value-objects";`;
+    } else if (referenced.length > 0) {
+      const symbols = referenced.map((n) => (isValue(n) ? n : `type ${n}`));
+      replacement = `import { ${symbols.join(", ")} } from "../domain/value-objects";`;
+    }
+    return assembled.replace(VO_IMPORT_PLACEHOLDER, replacement) + "\n";
+  }
+  return assembled + "\n";
 }
 
 function emitOperationRoute(
@@ -482,25 +518,25 @@ function emitOperationRoute(
       const actorExpr = usesUser
         ? "currentUser"
         : `(c as unknown as { get(k: "currentUser"): unknown }).get("currentUser") ?? null`;
-      out.push(`    const __actor = ${actorExpr};`);
+      out.push(`    const actor = ${actorExpr};`);
     }
     out.push(`    await db.transaction(async (tx) => {`);
     out.push(`      const repoTx = new ${agg.name}Repository(tx, events);`);
     out.push(`      const aggregate = await repoTx.getById(Ids.${agg.name}Id(id));`);
-    if (audit) out.push(`      const __before = repoTx.toWire(aggregate);`);
+    if (audit) out.push(`      const before = repoTx.toWire(aggregate);`);
     out.push(...mutation("      "));
     out.push(`      await repoTx.save(aggregate);`);
     if (audit) {
-      out.push(`      const __after = repoTx.toWire(aggregate);`);
+      out.push(`      const after = repoTx.toWire(aggregate);`);
       out.push(`      await tx.insert(schema.auditRecords).values({`);
       out.push(`        auditId: randomUUID(),`);
       out.push(`        operationId: "${lowerFirst(op.name)}${agg.name}",`);
       out.push(`        action: "${op.name}",`);
       out.push(`        targetType: "${agg.name}",`);
       out.push(`        targetId: id,`);
-      out.push(`        actor: __actor,`);
-      out.push(`        before: __before,`);
-      out.push(`        after: __after,`);
+      out.push(`        actor,`);
+      out.push(`        before,`);
+      out.push(`        after,`);
       out.push(`        at: new Date(),`);
       out.push(`        status: "ok",`);
       out.push(`      });`);
@@ -508,14 +544,14 @@ function emitOperationRoute(
     if (prov) {
       // One history row per provenanced write captured during the mutation;
       // traceId + at are stamped here so the domain layer stays pure.
-      out.push(`      for (const __t of aggregate.__drainProv()) {`);
+      out.push(`      for (const t of aggregate.drainProv()) {`);
       out.push(`        await tx.insert(schema.provenanceRecords).values({`);
       out.push(`          traceId: randomUUID(),`);
-      out.push(`          snapshotId: __t.snapshotId,`);
-      out.push(`          targetType: __t.target.type,`);
-      out.push(`          field: __t.target.field,`);
-      out.push(`          inputs: __t.inputs,`);
-      out.push(`          computedValue: __t.computedValue,`);
+      out.push(`          snapshotId: t.snapshotId,`);
+      out.push(`          targetType: t.target.type,`);
+      out.push(`          field: t.target.field,`);
+      out.push(`          inputs: t.inputs,`);
+      out.push(`          computedValue: t.computedValue,`);
       out.push(`          at: new Date(),`);
       out.push(`        });`);
       out.push(`      }`);
@@ -585,11 +621,11 @@ function emitFindRoute(
   } else if (find.returnType.kind === "optional") {
     out.push(`    if (result == null) return c.json({ error: "not_found" }, 404);`);
     if (emitTrace) {
-      out.push(`    const __out = repo.toWire(result);`);
+      out.push(`    const wire = repo.toWire(result);`);
       out.push(
-        `    ${renderHonoLogCall("wireOut", "keys: Object.keys(__out as Record<string, unknown>)")}`,
+        `    ${renderHonoLogCall("wireOut", "keys: Object.keys(wire as Record<string, unknown>)")}`,
       );
-      out.push(`    return c.json(__out as z.infer<typeof ${agg.name}Response>, 200);`);
+      out.push(`    return c.json(wire as z.infer<typeof ${agg.name}Response>, 200);`);
     } else {
       out.push(
         `    return c.json(repo.toWire(result) as z.infer<typeof ${agg.name}Response>, 200);`,
@@ -597,11 +633,11 @@ function emitFindRoute(
     }
   } else {
     if (emitTrace) {
-      out.push(`    const __out = repo.toWire(result);`);
+      out.push(`    const wire = repo.toWire(result);`);
       out.push(
-        `    ${renderHonoLogCall("wireOut", "keys: Object.keys(__out as Record<string, unknown>)")}`,
+        `    ${renderHonoLogCall("wireOut", "keys: Object.keys(wire as Record<string, unknown>)")}`,
       );
-      out.push(`    return c.json(__out as z.infer<typeof ${agg.name}Response>, 200);`);
+      out.push(`    return c.json(wire as z.infer<typeof ${agg.name}Response>, 200);`);
     } else {
       out.push(
         `    return c.json(repo.toWire(result) as z.infer<typeof ${agg.name}Response>, 200);`,
@@ -660,6 +696,13 @@ export function zodFor(t: TypeIR): string {
           return "z.coerce.number().int()";
         case "decimal":
           return "z.coerce.number()";
+        case "money":
+          // Inbound: JSON string → `new Decimal(...)` after a regex
+          // sanity check.  Refuses raw JS numbers (per OpenAPI finance
+          // convention; matches the canonical wire shape declared in
+          // `.loom/wire-spec.json` as `{type: "string", format:
+          // "decimal"}`).
+          return 'z.string().regex(/^-?\\d+(\\.\\d+)?$/, "must be a decimal-formatted string").transform((s) => new Decimal(s))';
         case "string":
         case "guid":
           return "z.string()";
@@ -703,6 +746,14 @@ function zodForResponseInner(t: TypeIR): string {
           return "z.number().int()";
         case "decimal":
           return "z.number()";
+        case "money":
+          // Outbound: every Decimal instance turns into a decimal-
+          // formatted string.  decimal.js already exposes `toJSON`
+          // returning the canonical string form, so JSON.stringify of
+          // a response containing Decimals produces strings without
+          // any helper.  We still declare the schema as z.string() so
+          // OpenAPI mirrors the wire shape.
+          return "z.string()";
         case "string":
         case "guid":
           return "z.string()";
@@ -866,7 +917,7 @@ export function wireToDomainExpr(expr: string, t: TypeIR, ctx?: BoundedContextIR
     case "entity":
       return expr;
     case "array":
-      return `${expr}.map((__e) => ${wireToDomainExpr("__e", t.element, ctx)})`;
+      return `${expr}.map((e) => ${wireToDomainExpr("e", t.element, ctx)})`;
     case "optional":
       return `(${expr} == null ? null : ${wireToDomainExpr(expr, t.inner, ctx)})`;
   }

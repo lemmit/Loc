@@ -136,8 +136,8 @@ describe("audited — TypeScript emission", () => {
     expect(routes).toContain('action: "cancel",');
     expect(routes).toContain('targetType: "Cart",');
     expect(routes).toContain("targetId: id,");
-    expect(routes).toContain("const __before = repoTx.toWire(aggregate);");
-    expect(routes).toContain("const __after = repoTx.toWire(aggregate);");
+    expect(routes).toContain("const before = repoTx.toWire(aggregate);");
+    expect(routes).toContain("const after = repoTx.toWire(aggregate);");
   });
 
   it("instruments only the audited operation, not the plain one", async () => {

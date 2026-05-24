@@ -29,6 +29,7 @@ import {
   type Invariant,
   isAggregate,
   isAssignOrCallStmt,
+  isBinaryExpr,
   isContainment,
   isDerivedProp,
   isEmitStmt,
@@ -64,8 +65,10 @@ import {
   type ValueObject,
 } from "./generated/ast.js";
 import {
+  arithmeticResult,
   type DddType,
   type Env,
+  envForNode,
   findFunction,
   findOperation,
   intrinsicMatcherSig,
@@ -119,6 +122,12 @@ export class DddValidator {
     // Type-position references: bare aggregate name (must be `X id`),
     // and cross-aggregate entity-part name (must go through the root).
     this.checkTypeReferences(model, accept);
+    // Binary expressions with `money` operands: a closed type that
+    // can't silently mix with `decimal`/`int`/`long`/etc. — see
+    // type-system.ts's arithmeticResult.  Walks every binary in the
+    // model so derivations, invariants, preconditions, assignments,
+    // and emit fields all get the same scrutiny.
+    this.checkBinaryMoneyOperands(model, accept);
     for (const m of model.members) {
       if (m.$type === "BoundedContext") {
         this.checkContext(m, accept);
@@ -1003,6 +1012,88 @@ export class DddValidator {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // money operand-compatibility check.
+  //
+  // The type-system layer's `arithmeticResult` already returns
+  // `T.unknown` when money is mixed with a non-money primitive in
+  // arithmetic, but downstream consumers (`checkDerived`,
+  // `checkAssignOrCall`, etc.) suppress error emission when an
+  // operand's type is unknown to avoid cascading from upstream
+  // resolution failures.  That suppression is correct in general,
+  // but it silently swallows the very money/decimal mismatch the
+  // primitive exists to flag.
+  //
+  // This pass walks every binary node in the model and runs the
+  // `arithmeticResult` rule (for `+ - * / %`) and an explicit
+  // same-money-ness check (for `< <= > >= == !=`) so a fixture like
+  // `derived total: money = subtotal + taxRate` (where `taxRate`
+  // is `decimal`) errors clearly instead of typechecking to `unknown`
+  // and slipping past.
+  // ---------------------------------------------------------------------------
+  private checkBinaryMoneyOperands(model: Model, accept: ValidationAcceptor): void {
+    for (const node of AstUtils.streamAllContents(model)) {
+      if (!isBinaryExpr(node)) continue;
+      this.checkSingleBinaryMoneyOperands(node, accept);
+    }
+  }
+
+  private checkSingleBinaryMoneyOperands(
+    bin: import("./generated/ast.js").BinaryExpr,
+    accept: ValidationAcceptor,
+  ): void {
+    const env = envForNode(bin);
+    const lt = typeOf(bin.left, env);
+    const rt = typeOf(bin.right, env);
+    // Cascade suppression — if either operand's type is unknown for
+    // an upstream reason (unresolved ref, broken member, etc.), the
+    // existing checkers will already report it; piling on here would
+    // duplicate the noise.
+    if (lt.kind === "unknown" || rt.kind === "unknown") return;
+
+    const lIsMoney = lt.kind === "primitive" && lt.name === "money";
+    const rIsMoney = rt.kind === "primitive" && rt.name === "money";
+    // Only fire on money-touching expressions; broader operand
+    // checks (string + int, etc.) are out of scope for this gate.
+    if (!lIsMoney && !rIsMoney) return;
+
+    const op = bin.op;
+    // Comparisons must have BOTH sides money or NEITHER side money —
+    // mixing produces meaningless `Decimal.compare(d, decimal)` /
+    // `m.eq(numeric)` calls on emit.
+    if (op === "==" || op === "!=" || op === "<" || op === "<=" || op === ">" || op === ">=") {
+      if (lIsMoney !== rIsMoney) {
+        const other = lIsMoney ? rt : lt;
+        accept(
+          "error",
+          `Operator '${op}' cannot compare 'money' with '${typeToString(other)}'. ` +
+            `money is a closed type — convert the other operand via money("...") if it is decimal-shaped.`,
+          { node: bin },
+        );
+      }
+      return;
+    }
+
+    // Logical ops on money don't make sense — but typeOf will already
+    // have flagged the operand as non-bool via the invariant /
+    // derived shape check.  Skip to avoid duplicate errors.
+    if (op === "&&" || op === "||") return;
+
+    // Arithmetic: arithmeticResult returns unknown for any money
+    // mixing outside the closed rules.  Surfacing that as a
+    // validator error is the whole point of this pass.
+    const result = arithmeticResult(lt, rt, op);
+    if (result.kind === "unknown") {
+      accept(
+        "error",
+        `Operator '${op}' has incompatible operand types with 'money': ` +
+          `left is '${typeToString(lt)}', right is '${typeToString(rt)}'. ` +
+          `Allowed: money ± money, money × {int|long|decimal}, money ÷ {int|long|decimal}.`,
+        { node: bin },
+      );
+    }
+  }
+
   private checkTypeReferences(model: Model, accept: ValidationAcceptor): void {
     for (const node of AstUtils.streamAllContents(model)) {
       if (node.$type !== "NamedType") continue;
@@ -1856,7 +1947,7 @@ function pagePropDisplayName(typeName: string): string {
   }
 }
 
-function singular(selector: string): string {
+function _singular(selector: string): string {
   switch (selector) {
     case "modules":
       return "module";

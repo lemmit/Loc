@@ -1,4 +1,4 @@
-import { defineMacro } from "../macro-api/index.js";
+import { defineMacro } from "../../macro-api/index.js";
 
 /** Apply audit fields + capability to every aggregate in a context.
  *

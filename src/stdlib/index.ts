@@ -2,14 +2,19 @@
 // register every shipped macro into the global registry.
 
 import { registerMacro } from "../language/macro-registry.js";
-import audit from "./audit.macro.js";
-import auditable from "./auditable.macro.js";
-import auditedByDefault from "./auditedByDefault.macro.js";
+import audit from "./audit/audit.macro.js";
+import auditable from "./audit/auditable.macro.js";
+import auditedByDefault from "./audit/auditedByDefault.macro.js";
 import crudish from "./crudish.macro.js";
-import scaffold from "./scaffold.macro.js";
-import softDeletable from "./softDeletable.macro.js";
-import softDelete from "./softDelete.macro.js";
-import softDeleteByDefault from "./softDeleteByDefault.macro.js";
+import scaffold from "./scaffold/scaffold.macro.js";
+import scaffoldAggregate from "./scaffold/scaffoldAggregate.macro.js";
+import scaffoldContext from "./scaffold/scaffoldContext.macro.js";
+import scaffoldModule from "./scaffold/scaffoldModule.macro.js";
+import scaffoldView from "./scaffold/scaffoldView.macro.js";
+import scaffoldWorkflow from "./scaffold/scaffoldWorkflow.macro.js";
+import softDeletable from "./softDelete/softDeletable.macro.js";
+import softDelete from "./softDelete/softDelete.macro.js";
+import softDeleteByDefault from "./softDelete/softDeleteByDefault.macro.js";
 
 let _loaded = false;
 
@@ -37,6 +42,14 @@ export function loadStdlibMacros(): void {
   registerMacro(softDeleteByDefault);
   // Other capabilities
   registerMacro(crudish);
+  // Scaffold family: leaves + composers + top-level dispatcher.
+  // Composability all the way: scaffold → scaffoldModule →
+  // scaffoldContext → scaffoldAggregate / Workflow / View.
+  registerMacro(scaffoldAggregate);
+  registerMacro(scaffoldWorkflow);
+  registerMacro(scaffoldView);
+  registerMacro(scaffoldContext);
+  registerMacro(scaffoldModule);
   registerMacro(scaffold);
 }
 

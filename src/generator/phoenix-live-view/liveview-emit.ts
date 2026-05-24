@@ -517,6 +517,9 @@ function attrType(t: TypeIR): string {
     case "array":
       return ":list";
     case "primitive":
+      // money is :string for assign typing — Decimal serialises to
+      // string for Jason / LiveView assigns; arithmetic happens inside
+      // the LiveView event handler via Decimal.add/2 etc.
       return t.name === "int" || t.name === "decimal"
         ? ":integer"
         : t.name === "bool"

@@ -1,9 +1,15 @@
-import type { AggregateIR, EntityPartIR } from "../../../ir/loom-ir.js";
+import type { AggregateIR, EntityPartIR, TypeIR } from "../../../ir/loom-ir.js";
 import { operationUsesCurrentUser } from "../../../ir/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import { csNewIdValue, renderCsExpr, renderCsType } from "../render-expr.js";
 import { renderCsStatements } from "../render-stmt.js";
+
+/** True for a field type that is a collection of references
+ * (`Id<T>[]`) — persisted via a join table, not a column. */
+function isRefCollection(t: TypeIR): boolean {
+  return t.kind === "array" && t.element.kind === "id";
+}
 
 // ---------------------------------------------------------------------------
 // Aggregate root + entity-part class emission for .NET.  The shape is a
@@ -22,23 +28,6 @@ import { renderCsStatements } from "../render-stmt.js";
 // Internal access keeps mutation co-located with the generated
 // project's assembly (handlers ship in the same csproj).
 // ---------------------------------------------------------------------------
-
-/** Build the `: IAuditable, ISoftDeletable, ...` clause appended
- * after the class name for aggregates that opt into one or more
- * capability groups via `implements "<name>"`.  Backend convention:
- * `<name>` → `I<PascalCase>`.  No marker interface emitted for
- * capability names with no `implements` declarations; this clause
- * is empty for those aggregates.
- *
- * **Currently a no-op.**  Marker interfaces were the Phase 3
- * over-build that the refactor reverted; this stub stays in place
- * so a future "users opt into emitting marker interfaces for their
- * own type-checking" feature can re-enable emission per capability.
- * Until then, every aggregate gets an empty clause and the call
- * site below collapses to `public sealed class <Name>`. */
-function capabilityInterfaceClause(_agg: AggregateIR): string {
-  return "";
-}
 
 export function renderEntity(
   entity: AggregateIR | EntityPartIR,
@@ -59,7 +48,16 @@ export function renderEntity(
   // accumulated set becomes one `using <ns>;` per entry, so the file
   // imports only what its own expressions actually use.
   const usings = new Set<string>();
-  const renderCtx = { thisName: "this", usings };
+  const renderCtx = {
+    thisName: "this",
+    usings,
+    // Threaded through so render-stmt's collection-mutation path can
+    // distinguish ref-collection fields (writable public `Party`)
+    // from containment fields (private `_lines` backing).  Entity
+    // parts don't have associations, but typing as the union keeps
+    // the ctx shape stable across the two callers.
+    agg: isAgg ? (entity as AggregateIR) : undefined,
+  };
 
   const propLines: string[] = [];
   propLines.push(`    public ${entity.name}Id Id { get; ${setterVisibility} set; }`);
@@ -68,8 +66,16 @@ export function renderEntity(
   }
   for (const f of entity.fields) {
     const def = f.optional ? " = default;" : " = default!;";
+    // Reference-collection (`Id<T>[]`) fields are persisted via a
+    // separate join table; the repository (in the Infrastructure
+    // assembly) needs to write the `List<TargetId>` after loading
+    // join rows post-`FirstOrDefaultAsync`.  Widening the setter from
+    // `private` to `internal` keeps the field unwritable from
+    // user/application code but lets the same-assembly hydration
+    // succeed without reflection.
+    const fieldSetter = isRefCollection(f.type) ? "internal" : setterVisibility;
     propLines.push(
-      `    public ${renderCsType(f.type)} ${upperFirst(f.name)} { get; ${setterVisibility} set; }${def}`,
+      `    public ${renderCsType(f.type)} ${upperFirst(f.name)} { get; ${fieldSetter} set; }${def}`,
     );
   }
   for (const c of entity.contains) {
@@ -282,7 +288,7 @@ export function renderEntity(
       "",
       `namespace ${ns}.Domain.${plural(rootName)};`,
       "",
-      `public sealed class ${entity.name}${isAgg ? capabilityInterfaceClause(entity as AggregateIR) : ""}`,
+      `public sealed class ${entity.name}`,
       "{",
       ...propLines,
       ...eventBlock,

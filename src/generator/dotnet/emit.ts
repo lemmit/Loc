@@ -18,6 +18,13 @@ export { renderEnum, renderValueObject } from "./emit/enums-vos.js";
 export { renderEvent, renderIDomainEvent } from "./emit/events.js";
 export { renderId } from "./emit/ids.js";
 export {
+  joinDbSetName,
+  joinEntityName,
+  joinFkPropName,
+  renderJoinEntity,
+  renderJoinEntityConfiguration,
+} from "./emit/join-entities.js";
+export {
   renderCsproj,
   renderDockerfile,
   renderDockerignore,
