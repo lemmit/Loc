@@ -113,6 +113,13 @@ function renderLiteral(lit: string, value: string): string {
   if (lit === "now") return "DateTime.UtcNow";
   if (lit === "null") return "null";
   if (lit === "decimal") return `${value}m`;
+  // long literals emit with the `L` suffix.  Without it, large
+  // values (e.g. `9999999999`) parse as int in C# and overflow at
+  // compile time — `long big = 9999999999;` errors with CS1021.
+  // The `lowerExprInContext` seam elaborates a bare IntLit in a
+  // long context to `lit("long", ...)`; this is the matching emit
+  // side.
+  if (lit === "long") return `${value}L`;
   // money literals carry a precise-decimal source string.  C#'s
   // `decimal` parses precision-preserving from the same source form
   // — `10.50m` — so the suffix is identical to `decimal`'s.  The

@@ -245,6 +245,7 @@ function renderLit(lit: Lit["lit"], value: string): string {
   if (lit === "now") return "DateTime.UtcNow";
   if (lit === "null") return "null";
   if (lit === "decimal") return `${value}m`;
+  if (lit === "long") return `${value}L`;
   if (lit === "money") return `${value}m`;
   return value;
 }
