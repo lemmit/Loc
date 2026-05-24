@@ -35,6 +35,7 @@ export type PrimitiveName =
   | "guid"
   | "int"
   | "long"
+  | "money"
   | "string";
 
 export const PRIMITIVES: PrimitiveName[] = [
@@ -42,6 +43,7 @@ export const PRIMITIVES: PrimitiveName[] = [
   "int",
   "long",
   "decimal",
+  "money",
   "bool",
   "datetime",
   "guid",
