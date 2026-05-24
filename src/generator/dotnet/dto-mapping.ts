@@ -132,8 +132,15 @@ export function projectToResponse(domainExpr: string, t: TypeIR, ctx: BoundedCon
     }
     case "array":
       return `${domainExpr}.Select(__e => ${projectToResponse("__e", t.element, ctx)}).ToList()`;
-    case "optional":
-      return `(${domainExpr} is null ? null : ${projectToResponse(domainExpr, t.inner, ctx)})`;
+    case "optional": {
+      // After `is null ? null : …` C# doesn't narrow `T?` to `T`,
+      // so calls like `dt.ToUniversalTime()` on `DateTime?` fail
+      // with CS1061.  Unwrap explicitly per inner type: value types
+      // use `.Value`; reference types use `!` to suppress the
+      // nullable warning while keeping the same expression text.
+      const unwrap = csIsValueType(t.inner) ? `${domainExpr}.Value` : `${domainExpr}!`;
+      return `(${domainExpr} is null ? null : ${projectToResponse(unwrap, t.inner, ctx)})`;
+    }
   }
 }
 
@@ -167,8 +174,32 @@ export function domainToRequestExpr(domainExpr: string, t: TypeIR, ctx: BoundedC
       return domainExpr;
     case "array":
       return `${domainExpr}.Select(__e => ${domainToRequestExpr("__e", t.element, ctx)}).ToList()`;
+    case "optional": {
+      // See projectToResponse's optional case — same CS1061 trap
+      // when the inner is a value type (e.g. `DateTime?`).
+      const unwrap = csIsValueType(t.inner) ? `${domainExpr}.Value` : `${domainExpr}!`;
+      return `(${domainExpr} is null ? null : ${domainToRequestExpr(unwrap, t.inner, ctx)})`;
+    }
+  }
+}
+
+/** True when `t` lowers to a C# value type (`struct` / `record
+ *  struct` / primitive enum), so a `T?` field is `Nullable<T>` and
+ *  must be unwrapped with `.Value` before any method call.  Reference
+ *  types (record classes for VOs, sealed classes for entities, `List`
+ *  for arrays) can use the null-forgiving `!` operator instead. */
+function csIsValueType(t: TypeIR): boolean {
+  switch (t.kind) {
+    case "primitive":
+    case "id":
+    case "enum":
+      return true;
+    case "valueobject":
+    case "entity":
+    case "array":
+      return false;
     case "optional":
-      return `(${domainExpr} is null ? null : ${domainToRequestExpr(domainExpr, t.inner, ctx)})`;
+      return csIsValueType(t.inner);
   }
 }
 
