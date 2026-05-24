@@ -350,9 +350,10 @@ function openApiType(t: TypeIR): string {
         case "decimal":
           return "%OpenApiSpex.Schema{type: :number, format: :float}";
         case "money":
-          throw new Error(
-            "Phoenix openapi-emit: 'money' primitive emission pending Phase 3 (%OpenApiSpex.Schema{type: :string, format: :decimal}).",
-          );
+          // Cross-backend wire parity with Hono / .NET: `{type: string,
+          // format: decimal}` is the canonical money encoding declared
+          // in `.loom/wire-spec.json`.
+          return "%OpenApiSpex.Schema{type: :string, format: :decimal}";
         case "string":
           return "%OpenApiSpex.Schema{type: :string}";
         case "guid":

@@ -9,7 +9,11 @@ import type {
   RepositoryIR,
   TypeIR,
 } from "../../ir/loom-ir.js";
-import { findUsesCurrentUser, viewUsesCurrentUser } from "../../ir/loom-ir.js";
+import {
+  aggregateUsesMoney,
+  findUsesCurrentUser,
+  viewUsesCurrentUser,
+} from "../../ir/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural, upperFirst } from "../../util/naming.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
@@ -118,8 +122,11 @@ export function buildRepositoryFile(
       filter: view.filter,
     }));
 
+  const repoUsesMoney = aggregateUsesMoney(agg);
+
   return lines(
     "// Auto-generated.  Do not edit by hand.",
+    repoUsesMoney && `import Decimal from "decimal.js";`,
     `import type { NodePgDatabase } from "drizzle-orm/node-postgres";`,
     `import { ${[...drizzleOps].sort().join(", ")} } from "drizzle-orm";`,
     `import * as schema from "../schema";`,
@@ -531,7 +538,13 @@ function hydrateValueExpr(
     return `(${colExpr} == null ? null : ${hydrateValueExpr(fieldName, t.inner, rowVar, ctx, true)})`;
   }
   if (t.kind === "primitive") {
+    // decimal hydrates lossy through JS `number` — money does NOT
+    // (it would defeat the precision contract that justifies money's
+    // existence).  Drizzle's `numeric()` column returns a string at
+    // runtime, which `new Decimal(...)` consumes without precision
+    // loss.
     if (t.name === "decimal") return `Number(${colExpr})`;
+    if (t.name === "money") return `new Decimal(${colExpr})`;
     return colExpr;
   }
   if (t.kind === "id") {
@@ -555,6 +568,7 @@ function hydrateValueExpr(
 
 function primitiveColumnRead(expr: string, t: TypeIR): string {
   if (t.kind === "primitive" && t.name === "decimal") return `Number(${expr})`;
+  if (t.kind === "primitive" && t.name === "money") return `new Decimal(${expr})`;
   return expr;
 }
 
@@ -653,6 +667,11 @@ function projectValueEntries(
   if (t.kind === "primitive") {
     if (t.name === "decimal") {
       return [{ fieldName, expr: `String(${valueExpr})` }];
+    }
+    if (t.name === "money") {
+      // Persist as a precise-decimal string — decimal.js's `.toString()`
+      // returns the canonical form `numeric(19, 4)` accepts.
+      return [{ fieldName, expr: `(${valueExpr}).toString()` }];
     }
     return [{ fieldName, expr: valueExpr }];
   }
@@ -854,6 +873,8 @@ function tsTypeForReturn(t: TypeIR): string {
       case "long":
       case "decimal":
         return "number";
+      case "money":
+        return "Decimal";
       case "string":
       case "guid":
         return "string";
@@ -1028,6 +1049,11 @@ function lowerToDrizzle(
         case "int":
         case "decimal":
           return e.value;
+        case "money":
+          // Drizzle's `numeric()` column accepts a string parameter
+          // without precision loss — pass the literal's source value
+          // directly, quoted.
+          return JSON.stringify(e.value);
         case "bool":
           return e.value;
         case "null":

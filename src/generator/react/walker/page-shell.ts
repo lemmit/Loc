@@ -662,6 +662,8 @@ function stateTypeAsTsString(type: TypeIR): string {
       case "long":
       case "decimal":
         return "number";
+      case "money":
+        return "Decimal";
       case "bool":
         return "boolean";
       case "string":
@@ -686,6 +688,8 @@ function zeroValueForType(type: TypeIR): string {
       case "long":
       case "decimal":
         return "0";
+      case "money":
+        return 'new Decimal("0")';
       case "bool":
         return "false";
       case "string":

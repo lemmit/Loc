@@ -1,4 +1,10 @@
-import type { AggregateIR, BoundedContextIR, DeployableIR, SystemIR } from "../../ir/loom-ir.js";
+import {
+  contextUsesMoney,
+  type AggregateIR,
+  type BoundedContextIR,
+  type DeployableIR,
+  type SystemIR,
+} from "../../ir/loom-ir.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
@@ -196,7 +202,11 @@ export function generateReactForContexts(
   // back to); a future change tightens the validator to require a
   // `ui:` binding for any react deployable.
 
-  out.set("package.json", renderShellFile("package-json", {}, pack));
+  // `decimal.js` is conditional in the React package.json — only
+  // pulled in when at least one served context uses a money field /
+  // expression.  Mirrors the Hono backend's conditional dep gate.
+  const usesMoney = contexts.some(contextUsesMoney);
+  out.set("package.json", renderShellFile("package-json", { usesMoney }, pack));
   out.set("tsconfig.json", renderShellFile("tsconfig", {}, pack));
   out.set("tsconfig.node.json", renderShellFile("tsconfig-node", {}, pack));
   out.set("vite.config.ts", renderShellFile("vite-config", {}, pack));

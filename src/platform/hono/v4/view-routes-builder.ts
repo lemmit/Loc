@@ -289,9 +289,7 @@ function zodForRow(t: TypeIR, enumValues: Map<string, string[]>): string {
         case "decimal":
           return "z.number()";
         case "money":
-          throw new Error(
-            "Hono view zodForRow: 'money' primitive emission pending Phase 1 (z.string() row schema).",
-          );
+          return "z.string()";
         case "string":
         case "guid":
           return "z.string()";

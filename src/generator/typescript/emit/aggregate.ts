@@ -9,7 +9,7 @@ import type {
   InvariantIR,
   OperationIR,
 } from "../../../ir/loom-ir.js";
-import { operationUsesCurrentUser } from "../../../ir/loom-ir.js";
+import { aggregateUsesMoney, operationUsesCurrentUser } from "../../../ir/loom-ir.js";
 import { stmtHasProv } from "../../../ir/prov-id.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst } from "../../../util/naming.js";
@@ -65,6 +65,7 @@ export function renderAggregate(
   // without `auth: required` don't import this — and operations
   // can't reference currentUser there because the validator gates it.
   const usesUser = agg.operations.some(operationUsesCurrentUser);
+  const usesMoney = aggregateUsesMoney(agg);
   // The errors-module imports are conditional on what the body emits
   // (see render-stmt.ts and the invariant renderer below):
   //   DomainError    — invariants (root + parts) and `precondition` statements
@@ -84,6 +85,7 @@ export function renderAggregate(
   return (
     lines(
       "// Auto-generated.",
+      usesMoney ? 'import Decimal from "decimal.js";' : null,
       'import * as Ids from "./ids";',
       valueObjectAliases.length > 0
         ? `import { ${valueObjectAliases.join(", ")} } from "./value-objects";`

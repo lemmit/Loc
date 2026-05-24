@@ -1391,3 +1391,121 @@ function stmtUsesCurrentUser(s: StmtIR): boolean {
       return exprUsesCurrentUser(s.expr);
   }
 }
+
+// ---------------------------------------------------------------------------
+// Money usage detection
+//
+// Backends gate runtime-dep inclusion (decimal.js / rust_decimal / etc.)
+// and per-file import lines on whether the IR actually carries any
+// money-typed values.  Walk every type and every literal so an
+// aggregate that uses money via, say, a derived expression or an
+// operation parameter is detected even if no field is typed as money.
+// ---------------------------------------------------------------------------
+
+/** True when the type tree contains a `primitive money` anywhere. */
+export function typeUsesMoney(t: TypeIR | undefined): boolean {
+  if (!t) return false;
+  if (t.kind === "primitive") return t.name === "money";
+  if (t.kind === "array") return typeUsesMoney(t.element);
+  if (t.kind === "optional") return typeUsesMoney(t.inner);
+  return false;
+}
+
+/** True when the expression tree contains a money literal or a binary
+ *  node whose stashed type info is money.  Used to catch money
+ *  appearing in derived/invariant expressions without an explicit
+ *  field. */
+export function exprUsesMoney(e: ExprIR | undefined): boolean {
+  if (!e) return false;
+  if (e.kind === "literal" && e.lit === "money") return true;
+  if (e.kind === "binary") {
+    if (typeUsesMoney(e.leftType) || typeUsesMoney(e.resultType)) return true;
+    return exprUsesMoney(e.left) || exprUsesMoney(e.right);
+  }
+  if (e.kind === "member") return exprUsesMoney(e.receiver);
+  if (e.kind === "method-call")
+    return exprUsesMoney(e.receiver) || e.args.some(exprUsesMoney);
+  if (e.kind === "ternary")
+    return exprUsesMoney(e.cond) || exprUsesMoney(e.then) || exprUsesMoney(e.otherwise);
+  if (e.kind === "unary") return exprUsesMoney(e.operand);
+  if (e.kind === "paren") return exprUsesMoney(e.inner);
+  if (e.kind === "call") return e.args.some(exprUsesMoney);
+  if (e.kind === "lambda") return exprUsesMoney(e.body);
+  if (e.kind === "new" || e.kind === "object")
+    return e.fields.some((f) => exprUsesMoney(f.value));
+  if (e.kind === "match")
+    return (
+      e.arms.some((a) => exprUsesMoney(a.cond) || exprUsesMoney(a.value)) ||
+      exprUsesMoney(e.otherwise)
+    );
+  return false;
+}
+
+function stmtUsesMoney(s: StmtIR): boolean {
+  switch (s.kind) {
+    case "precondition":
+    case "requires":
+    case "let":
+    case "expression":
+      return exprUsesMoney(s.expr);
+    case "assign":
+    case "add":
+    case "remove":
+      return exprUsesMoney(s.value);
+    case "emit":
+      return s.fields.some((f) => exprUsesMoney(f.value));
+    case "call":
+      return s.args.some(exprUsesMoney);
+  }
+}
+
+function partUsesMoney(p: EntityPartIR): boolean {
+  if (p.fields.some((f) => typeUsesMoney(f.type))) return true;
+  if (p.derived.some((d) => typeUsesMoney(d.type) || exprUsesMoney(d.expr))) return true;
+  if (p.invariants.some((iv) => exprUsesMoney(iv.expr))) return true;
+  if (p.functions.some((fn) => typeUsesMoney(fn.returnType) || exprUsesMoney(fn.body)))
+    return true;
+  return false;
+}
+
+/** True when the aggregate touches money anywhere — fields, derived,
+ *  invariants, operations, functions, or nested parts. */
+export function aggregateUsesMoney(a: AggregateIR): boolean {
+  if (a.fields.some((f) => typeUsesMoney(f.type))) return true;
+  if (a.derived.some((d) => typeUsesMoney(d.type) || exprUsesMoney(d.expr))) return true;
+  if (a.invariants.some((iv) => exprUsesMoney(iv.expr))) return true;
+  if (
+    a.operations.some(
+      (op) =>
+        op.params.some((p) => typeUsesMoney(p.type)) ||
+        op.statements.some(stmtUsesMoney),
+    )
+  )
+    return true;
+  if (a.functions.some((fn) => typeUsesMoney(fn.returnType) || exprUsesMoney(fn.body)))
+    return true;
+  if (a.parts.some(partUsesMoney)) return true;
+  return false;
+}
+
+/** True when the value object's wire shape carries any money field. */
+export function valueObjectUsesMoney(vo: ValueObjectIR): boolean {
+  if (vo.fields.some((f) => typeUsesMoney(f.type))) return true;
+  if (vo.derived.some((d) => typeUsesMoney(d.type) || exprUsesMoney(d.expr)))
+    return true;
+  if (vo.invariants.some((iv) => exprUsesMoney(iv.expr))) return true;
+  if (vo.functions.some((fn) => typeUsesMoney(fn.returnType) || exprUsesMoney(fn.body)))
+    return true;
+  return false;
+}
+
+/** True when the bounded context contains any money usage across
+ *  aggregates / value objects.  Backends consume this when deciding
+ *  whether to inject a runtime decimal-library dep at the package /
+ *  project level (e.g. `decimal.js` for TS, `rust_decimal` for the
+ *  future Rust backend). */
+export function contextUsesMoney(ctx: BoundedContextIR): boolean {
+  if (ctx.aggregates.some(aggregateUsesMoney)) return true;
+  if (ctx.valueObjects.some(valueObjectUsesMoney)) return true;
+  return false;
+}

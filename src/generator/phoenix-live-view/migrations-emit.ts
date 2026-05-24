@@ -142,9 +142,10 @@ function typeToEctoColumn(t: TypeIR): ColType {
         case "decimal":
           return { colType: ":decimal", opts: "" };
         case "money":
-          throw new Error(
-            "Phoenix migrations-emit: 'money' primitive emission pending Phase 3 (:decimal column with precision/scale).",
-          );
+          // `precision: 19, scale: 4` is the finance default —
+          // matches Drizzle's money column shape so cross-backend
+          // schema migrations are structurally identical.
+          return { colType: ":decimal", opts: ", precision: 19, scale: 4" };
         case "string":
           return { colType: ":text", opts: "" };
         case "bool":

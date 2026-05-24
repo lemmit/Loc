@@ -328,9 +328,7 @@ function zodForRequest(t: TypeIR): string {
         case "decimal":
           return "z.number()";
         case "money":
-          throw new Error(
-            "React zodForRequest: 'money' primitive emission pending Phase 4 (z.string().transform → Decimal).",
-          );
+          return 'z.string().regex(/^-?\\d+(\\.\\d+)?$/, "must be a decimal-formatted string").transform((s) => new Decimal(s))';
         case "string":
         case "guid":
           return "z.string()";
@@ -370,9 +368,7 @@ function zodForResponseInner(t: TypeIR): string {
         case "decimal":
           return "z.number()";
         case "money":
-          throw new Error(
-            "React zodForResponse: 'money' primitive emission pending Phase 4 (z.string() — Decimal serialises via .toString()).",
-          );
+          return 'z.string().transform((s) => new Decimal(s))';
         case "string":
         case "guid":
           return "z.string()";

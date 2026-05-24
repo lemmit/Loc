@@ -18,7 +18,11 @@ import type {
   TypeIR,
   ValueObjectIR,
 } from "../../../ir/loom-ir.js";
-import { findUsesCurrentUser, operationUsesCurrentUser } from "../../../ir/loom-ir.js";
+import {
+  aggregateUsesMoney,
+  findUsesCurrentUser,
+  operationUsesCurrentUser,
+} from "../../../ir/loom-ir.js";
 import { opHasProvSite } from "../../../ir/prov-id.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 
@@ -74,6 +78,9 @@ export function buildRoutesFile(
   const needsTx = fileHasAudit || fileHasProv;
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
+  if (aggregateUsesMoney(agg)) {
+    lines.push(`import Decimal from "decimal.js";`);
+  }
   lines.push(`import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";`);
   lines.push(`import { ${agg.name} } from "../domain/${lowerFirst(agg.name)}";`);
   lines.push(
@@ -661,9 +668,12 @@ export function zodFor(t: TypeIR): string {
         case "decimal":
           return "z.coerce.number()";
         case "money":
-          throw new Error(
-            "Hono zodFor: 'money' primitive emission pending Phase 1 (z.string().transform → Decimal).",
-          );
+          // Inbound: JSON string → `new Decimal(...)` after a regex
+          // sanity check.  Refuses raw JS numbers (per OpenAPI finance
+          // convention; matches the canonical wire shape declared in
+          // `.loom/wire-spec.json` as `{type: "string", format:
+          // "decimal"}`).
+          return 'z.string().regex(/^-?\\d+(\\.\\d+)?$/, "must be a decimal-formatted string").transform((s) => new Decimal(s))';
         case "string":
         case "guid":
           return "z.string()";
@@ -708,9 +718,13 @@ function zodForResponseInner(t: TypeIR): string {
         case "decimal":
           return "z.number()";
         case "money":
-          throw new Error(
-            "Hono zodForResponse: 'money' primitive emission pending Phase 1 (z.string() — Decimal serialises via .toString()).",
-          );
+          // Outbound: every Decimal instance turns into a decimal-
+          // formatted string.  decimal.js already exposes `toJSON`
+          // returning the canonical string form, so JSON.stringify of
+          // a response containing Decimals produces strings without
+          // any helper.  We still declare the schema as z.string() so
+          // OpenAPI mirrors the wire shape.
+          return "z.string()";
         case "string":
         case "guid":
           return "z.string()";

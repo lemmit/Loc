@@ -270,9 +270,7 @@ function zodForResponseInner(t: TypeIR): string {
         case "decimal":
           return "z.number()";
         case "money":
-          throw new Error(
-            "React view zodForResponseInner: 'money' primitive emission pending Phase 4 (z.string() — Decimal serialises via .toString()).",
-          );
+          return 'z.string().transform((s) => new Decimal(s))';
         case "string":
         case "guid":
           return "z.string()";
